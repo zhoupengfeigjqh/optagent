@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
+
+# 运行期数据与密钥
+.env
+.env.*
+!.env.example
+config.yaml
+.opt-agent/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.swp
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.history/

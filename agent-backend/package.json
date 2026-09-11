@@ -1,0 +1,49 @@
+{
+  "name": "optagent-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "数字人 Agent 对话后端（Fastify 5 + pi-agent-core）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/server.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:all": "vitest run",
+    "smoke": "tsx scripts/smoke.ts",
+    "perf": "tsx scripts/perf.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/multipart": "^10.1.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "13.0.3",
+    "fastify": "^5.12.3",
+    "pdfjs-dist": "^6.3.289",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
+    "xlsx": "^0.18.5",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^5.0.0",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.0",
+    "@types/better-sqlite3": "9.6.0"
+  }
+}

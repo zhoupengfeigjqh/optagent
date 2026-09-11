@@ -1,0 +1,309 @@
+/**
+ * 后端契约类型
+ *
+ * 与 `specs/001-agent-chat-ui/contracts/backend-api.md` 一一对应，字段名与后端 JSON 保持一致
+ * （下划线命名，不做法语化重命名，降低契约映射成本）。
+ *
+ * ⚠️ `Message` **不得**包含思考内容与工具调用字段——从类型层面杜绝落历史（V-04、FR-023、SC-018）。
+ * 思考与工具调用仅存在于本轮 SSE 流中（见 `StreamEvent`），不随消息持久化。
+ */
+
+/* ============================================================
+ * 通用
+ * ============================================================ */
+
+/** 后端统一错误体：`{ error: { code, message, details? } }`。 */
+export interface ApiErrorBody {
+  error: {
+    code: string
+    message: string
+    details?: unknown
+  }
+}
+
+/** 前端展示用错误信息（错误码 + 后端原始文案，文案仅作兜底）。 */
+export interface ErrorInfo {
+  code: string
+  message: string
+}
+
+/* ============================================================
+ * §1 数字人与 MCP
+ * ============================================================ */
+
+/** `GET /api/agents` 元素：顶层数组。 */
+export interface AgentListItem {
+  agent_name: string
+  description: string
+}
+
+/** 数字人技能。 */
+export interface AgentSkill {
+  name: string
+  description: string
+}
+
+/** 数字人挂载的 MCP 服务（**不含** url/command 等连接细节）。 */
+export interface McpServerRef {
+  name: string
+  transport: string
+}
+
+/** `GET /api/agents/{agent_name}` 响应。 */
+export interface DigitalHuman {
+  agent_name: string
+  /** SOUL.md 全文，界面展示为"描述" */
+  soul: string
+  skills: AgentSkill[]
+  enabled_tools: string[]
+  mcp_servers: McpServerRef[]
+}
+
+/** MCP 连接状态：`connected` → 绿；`failed` → 红。 */
+export type McpConnectionStatus = 'connected' | 'failed'
+
+/** `GET /api/agents/current/mcp` 元素。 */
+export interface McpServiceStatus {
+  name: string
+  transport: string
+  status: McpConnectionStatus
+}
+
+/** `GET /api/agents/current` 响应。 */
+export interface CurrentAgentResponse {
+  agent_name: string | null
+}
+
+/** `GET /api/agents/current/mcp` 响应。 */
+export interface CurrentMcpResponse {
+  agent_name: string | null
+  mcp_servers: McpServiceStatus[]
+}
+
+/** `POST /api/agents/{agent_name}/select` 响应。 */
+export interface SelectAgentResponse {
+  agent_name: string
+  selected: boolean
+}
+
+/** `POST /api/agents/current/exit` 响应。 */
+export interface ExitAgentResponse {
+  exited: boolean
+}
+
+/* ============================================================
+ * §2 模型
+ * ============================================================ */
+
+/** `GET /api/models` 元素。 */
+export interface Model {
+  model: string
+  is_default: boolean
+}
+
+/** `GET /api/models` 响应。 */
+export interface ModelListResponse {
+  models: Model[]
+}
+
+/* ============================================================
+ * §3 会话
+ * ============================================================ */
+
+/** 用量。 */
+export interface Usage {
+  input_tokens: number
+  output_tokens: number
+}
+
+/** 反馈取值：点赞 / 点踩 / 无。 */
+export type FeedbackValue = 'up' | 'down' | null
+
+/** 文件引用（结构化 `{dir, filename}`，非字符串数组）。 */
+export interface FileReference {
+  dir: string
+  filename: string
+}
+
+/** 消息角色。 */
+export type MessageRole = 'user' | 'assistant'
+
+/** 消息状态：仅 assistant 完成轮返回，缺省视为 `completed`。 */
+export type MessageStatus = 'completed' | 'failed'
+
+/**
+ * 会话消息。
+ *
+ * 注意：**不含**思考内容与工具调用信息（V-04、SC-018）。
+ */
+export interface Message {
+  /** 消息标识（反馈接口使用；旧数据由服务端合成） */
+  id: string
+  role: MessageRole
+  /** 正文（不含 `@` 引用标注文本） */
+  content: string
+  /** ISO8601 */
+  ts: string
+  /** 仅 assistant 有；缺省视为 `completed` */
+  status?: MessageStatus
+  /** 仅 assistant 完成/失败轮 */
+  usage?: Usage
+  /** 整轮耗时（秒）；后端精度不固定（最多 3 位小数），前端统一格式化 1 位小数 */
+  duration_seconds?: number
+  /** 仅带 `@` 引用的 user 消息 */
+  attachments?: FileReference[]
+  /**
+   * 本轮对话使用的数字人（user 与 assistant 成对返回）。
+   * 一个会话可跨多个数字人（切换后在下一轮生效）；旧数据可能缺省。
+   */
+  agent_name?: string
+  /** 恒返回，默认 `null` */
+  feedback: FeedbackValue
+  /** 仅 `status === 'failed'` */
+  error?: ErrorInfo
+}
+
+/** `GET /api/threads` 元素与 `POST /api/threads` 的列表视图。 */
+export interface Conversation {
+  thread_id: string
+  agent_name: string
+  /** 后端回落为"首条用户消息前 20 字"；从未发过用户消息时为 `null` */
+  title: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** `GET /api/threads/{thread_id}` 响应。 */
+export interface ThreadDetail extends Conversation {
+  /** 消息全量条数 */
+  total: number
+  /** 按时间正序 */
+  messages: Message[]
+  /** 该会话当前是否有活跃 run */
+  running: boolean
+}
+
+/** `POST /api/threads` 响应（**不返回** `agent_name` 与 `updated_at`）。 */
+export interface ThreadCreateResponse {
+  thread_id: string
+  title: string | null
+  created_at: string
+}
+
+/** `PUT /api/threads/{thread_id}/messages/{message_id}/feedback` 响应。 */
+export interface FeedbackResponse {
+  message_id: string
+  feedback: FeedbackValue
+}
+
+/** `POST /api/threads/{thread_id}/stop` 响应。 */
+export interface StopResponse {
+  stopped: boolean
+}
+
+/* ============================================================
+ * §4 发消息（SSE 流式）
+ * ============================================================ */
+
+/** `POST /api/threads/{thread_id}/messages` 请求体（`additionalProperties: false`）。 */
+export interface SendMessageRequest {
+  /** 去掉 `@文件名` 引用文本后的正文（minLength: 1） */
+  content: string
+  /** 思考开关状态；后端缺省 `false` */
+  thinking?: boolean
+  /** 当前选中模型；未选择时**不传该字段** */
+  model?: string
+  /** 结构化引用（maxItems: 10） */
+  attachments?: FileReference[]
+}
+
+/** `done.finish_reason`：`completed` 正常落盘；`stop` 本轮被中断丢弃、不落盘。 */
+export type StreamFinishReason = 'completed' | 'stop'
+
+/** `thinking` 事件数据。 */
+export interface ThinkingEventData {
+  delta: string
+}
+
+/** `content` 事件数据。 */
+export interface ContentEventData {
+  delta: string
+}
+
+/** `tool_call` 事件数据（**仅名称**，无入参与结果）。 */
+export interface ToolCallEventData {
+  call_id: string
+  name: string
+  status: 'running'
+}
+
+/** `tool_call_end` 事件数据。 */
+export interface ToolCallEndEventData {
+  call_id: string
+  status: 'success' | 'error'
+}
+
+/** `done` 事件数据。 */
+export interface DoneEventData {
+  finish_reason: StreamFinishReason
+  usage: Usage
+  duration_seconds: number
+  /** 中断轮为 `null` */
+  message_id: string | null
+  /** 本轮回答的数字人（会话可跨数字人） */
+  agent_name: string
+}
+
+/** `error` 事件数据（`duration_seconds` / `usage` 可选）。 */
+export interface StreamErrorEventData {
+  error: ErrorInfo
+  duration_seconds?: number
+  usage?: Usage
+  /** 本轮回答的数字人（会话可跨数字人） */
+  agent_name: string
+}
+
+/** SSE 事件 → 类型化载荷的联合类型（仅本轮可见，不落历史）。 */
+export type StreamEvent =
+  | { type: 'thinking'; data: ThinkingEventData }
+  | { type: 'content'; data: ContentEventData }
+  | { type: 'tool_call'; data: ToolCallEventData }
+  | { type: 'tool_call_end'; data: ToolCallEndEventData }
+  | { type: 'done'; data: DoneEventData }
+  | { type: 'error'; data: StreamErrorEventData }
+
+/** SSE 解析器输出的原始事件（未类型化）。 */
+export interface RawSseEvent {
+  event: string
+  data: string
+}
+
+/* ============================================================
+ * §5 文件
+ * ============================================================ */
+
+/** `POST /api/files/upload` 响应（`filename` 为落盘名，前端 MUST 直接采用）。 */
+export interface UploadResponse {
+  dir: string
+  filename: string
+  size: number
+}
+
+/** 工作空间/目录列表中的文件项。 */
+export interface WorkspaceFile {
+  filename: string
+  size: number
+  updated_at: string
+}
+
+/** 工作空间目录分组。 */
+export interface WorkspaceDir {
+  dir: string
+  /** 空目录为 `[]` */
+  files: WorkspaceFile[]
+}
+
+/** `GET /api/files/workspace` 响应（后端固定返回全部 9 个白名单目录）。 */
+export interface WorkspaceResponse {
+  dirs: WorkspaceDir[]
+}

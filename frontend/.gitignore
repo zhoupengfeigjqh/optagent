@@ -1,0 +1,28 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist-ssr/
+
+# 测试覆盖率
+coverage/
+
+# 环境变量（.env.example 需纳入版本控制）
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统文件
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# 日志与缓存
+*.log
+npm-debug.log*
+.eslintcache
+*.tsbuildinfo

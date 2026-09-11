@@ -1,0 +1,10 @@
+# ===== 模型列表（config.yaml 示例）=====
+# 默认取第一项；条目 api_key 优先，缺省时用 .env 的 DEEPSEEK_API_KEY 兜底；
+# models 缺失或为空时服务拒绝启动。
+models:
+  - model: deepseek-v4-flash-vision-exp
+    api_key: $DEEPSEEK_API_KEY # 支持 $ENV_VAR 引用；也可直接填明文
+    base_url: https://api.deepseek.com # 可选，缺省用 provider 默认
+  # - model: deepseek-chat
+  #   api_key: sk-xxxx
+  #   base_url: https://api.deepseek.com

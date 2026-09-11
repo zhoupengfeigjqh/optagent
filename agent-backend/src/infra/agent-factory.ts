@@ -1,0 +1,157 @@
+/**
+ * Agent 实例装配工厂（infra 层）：domain 的 loadAgentConfig 配置包 +
+ * McpManager（异步并发建连不阻断就绪）+ LlmProvider，产出池化的 ChatAgent。
+ *
+ * run() 路径选择：
+ * - 无可用工具（本期内置工具 Phase 5 才落地）→ LlmProvider.streamChat 直聊
+ * - 有 MCP 工具 → pi 低层 runAgentLoop（仅当 LlmProvider 为 PiAiLlmProvider）
+ */
+import path from 'node:path';
+import type { Logger } from 'pino';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
+import { loadAgentConfig } from '../domain/agent-instance.js';
+import type { PooledInstance } from '../domain/agent-pool.js';
+import { FileAccess } from '../domain/file-access.js';
+import type { AgentRunRequest } from '../domain/run-manager.js';
+import { userAgentsDir } from '../domain/dirs.js';
+import type { AgentConfigBundle, LlmEvent, ModelSelection, PoolKey } from '../types.js';
+import { runAgentLoopEvents } from './agent-loop.js';
+import { buildBuiltinTools } from './builtin-tools.js';
+import type { LlmProvider } from './llm/llm-provider.js';
+import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
+import { McpManager } from './mcp/mcp-manager.js';
+import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
+
+export interface ChatAgent extends PooledInstance {
+  readonly config: AgentConfigBundle;
+  unavailableMcp(): string[];
+  run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
+}
+
+export interface AgentFactoryDeps {
+  /** .opt-agent 根目录 */
+  root: string;
+  /** LlmProvider 惰性获取（默认模型全局单例；测试注入 fake） */
+  llm: () => LlmProvider;
+  /** 请求级模型覆盖的 provider 构造（缺省 new PiAiLlmProvider；测试注入 fake 时统一返回 fake） */
+  providerFor?: (entry: ModelSelection) => LlmProvider;
+  logger: Logger;
+  mcpTimeoutMs: number;
+  /** read_file 截断上限（KB） */
+  truncateKb?: number;
+}
+
+export class AgentInstanceFactory {
+  constructor(private readonly deps: AgentFactoryDeps) {}
+
+  /** 创建实例：配置加载失败抛 AgentConfigError；MCP 异步并发建连，不等待 */
+  async create(key: PoolKey): Promise<ChatAgent> {
+    const { root, logger, mcpTimeoutMs } = this.deps;
+    const agentDir = path.join(userAgentsDir(root, key.userId), key.agentName);
+    const config = loadAgentConfig(agentDir, {
+      logger: {
+        warn: (msg: string) => logger.warn({ alert: true, agent_name: key.agentName }, msg),
+      },
+    });
+
+    const mcp = new McpManager({
+      timeoutMs: mcpTimeoutMs,
+      logger: {
+        warn: (msg: string) => logger.warn({ alert: true, agent_name: key.agentName }, msg),
+      },
+    });
+    // 异步并发建连：不 await，不阻断实例就绪（保首字延迟 SC-001）
+    void mcp.connectAll(config.mcpServers);
+
+    const instance: ChatAgent = {
+      key,
+      config,
+      activeThreads: 0,
+      lastActiveAt: Date.now(),
+      unavailableMcp: () => mcp.unavailable(),
+      dispose: () => mcp.closeAll(),
+      run: (req) => this.runWith(instance, mcp, req),
+    };
+    return instance;
+  }
+
+  private async *runWith(
+    inst: ChatAgent,
+    mcp: McpManager,
+    req: AgentRunRequest,
+  ): AsyncIterable<LlmEvent> {
+    const logger = this.deps.logger;
+    const tools: AgentTool[] = [];
+
+    // 内置工具（Phase 5）：按 TOOL.json 启用项装配，全部经 FileAccess 代理；
+    // 每次 run 重建以绑定当前 threadId（write_file 前缀）
+    if (inst.config.enabledTools.length > 0) {
+      const fa = new FileAccess({
+        optAgentRoot: this.deps.root,
+        userId: inst.key.userId,
+        logger,
+        truncateKb: this.deps.truncateKb,
+      });
+      tools.push(
+        ...buildBuiltinTools({
+          fileAccess: fa,
+          threadId: req.threadId,
+          enabled: inst.config.enabledTools,
+          logger,
+        }),
+      );
+    }
+    // MCP 工具：已建连的 server 收集工具表
+    for (const server of inst.config.mcpServers) {
+      if (!mcp.isAvailable(server.name)) continue;
+      try {
+        const toolInfos = await mcp.listTools(server.name);
+        tools.push(...mcpToolsAsAgentTools(mcp, server.name, toolInfos));
+      } catch (err) {
+        logger.warn(
+          { err, alert: true, agent_name: inst.key.agentName, event: 'mcp.listTools.failed' },
+          `MCP server ${server.name} 工具表获取失败，按不可用降级`,
+        );
+      }
+    }
+
+    // 请求级模型覆盖（FR-023）：指定模型时按该 entry 构造临时 provider，
+    // 不重建实例（实例共享 MCP/工具连接）；缺省用默认模型全局单例
+    const llm = req.model
+      ? this.deps.providerFor
+        ? this.deps.providerFor(req.model)
+        : new PiAiLlmProvider(req.model)
+      : this.deps.llm();
+    // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
+    const systemPrompt = req.systemExtra
+      ? `${inst.config.systemPrompt}\n\n${req.systemExtra}`
+      : inst.config.systemPrompt;
+    if (tools.length === 0 || !(llm instanceof PiAiLlmProvider)) {
+      if (tools.length > 0) {
+        logger.warn(
+          { agent_name: inst.key.agentName, event: 'tools.noLoopProvider' },
+          '非 pi provider，工具不可用，降级直聊',
+        );
+      }
+      yield* llm.streamChat({
+        systemPrompt,
+        messages: req.messages,
+        tools: [],
+        thinking: req.thinking,
+        signal: req.signal,
+      });
+      return;
+    }
+
+    const { model, streamFn } = llm.loopOptions();
+    yield* runAgentLoopEvents({
+      model,
+      streamFn,
+      systemPrompt,
+      messages: req.messages,
+      tools,
+      thinking: req.thinking,
+      signal: req.signal,
+    });
+  }
+}

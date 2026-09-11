@@ -1,0 +1,238 @@
+/**
+ * FileAccess 文件访问代理层（FR-022 核心安全策略）。
+ *
+ * 所有 Agent 侧文件读写必须经此层：
+ * - 路径规范化：拒绝绝对路径与 `..` 穿越；已存在路径做 realpath 校验防符号链接穿越
+ * - 目录白名单：7 业务目录 + shared + tmp（相对 user-data 根）
+ * - 权限矩阵：业务目录/shared 只读；tmp 可写但强制 `{thread_id}_` 前缀
+ * - 违规抛 PermissionError 并记日志（对话不中断由上层保证）
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Logger } from 'pino';
+import { BUSINESS_DIRS, SHARED_DIR, TMP_DIR, userDataDir } from './dirs.js';
+
+export class PermissionError extends Error {
+  readonly code = 'PERMISSION_DENIED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'PermissionError';
+  }
+}
+
+export interface FileEntry {
+  name: string;
+  size: number;
+  isDirectory: boolean;
+  modifiedAt: string;
+}
+
+export interface GrepMatch {
+  file: string;
+  line: number;
+  text: string;
+}
+
+export interface GrepResult {
+  matches: GrepMatch[];
+  /** 跳过的二进制文件数（.xlsx/.pdf 等不在文本检索范围） */
+  skippedBinary: number;
+}
+
+const READABLE_DIRS: readonly string[] = [...BUSINESS_DIRS, SHARED_DIR, TMP_DIR];
+const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
+
+export interface FileAccessOptions {
+  optAgentRoot: string;
+  userId: string;
+  logger?: Logger;
+  /** read 截断上限（KB），默认 32 */
+  truncateKb?: number | undefined;
+}
+
+export class FileAccess {
+  private readonly dataRoot: string;
+  private readonly logger?: Logger;
+  /** 读截断上限（字节），工具层做 xlsx/pdf 解析后文本截断时使用 */
+  get truncateBytes(): number {
+    return this.truncateBytesInternal;
+  }
+
+  private readonly truncateBytesInternal: number;
+  constructor(opts: FileAccessOptions) {
+    this.dataRoot = userDataDir(opts.optAgentRoot, opts.userId);
+    if (opts.logger) this.logger = opts.logger;
+    this.truncateBytesInternal = (opts.truncateKb ?? 32) * 1024;
+  }
+
+  /** 公开的路径白名单校验（工具层在任何格式分派前先过权限关） */
+  assertPathAllowed(relPath: string): void {
+    this.resolveSafe(relPath);
+  }
+
+  /** 路径规范化 + 白名单校验，返回绝对路径；越权抛 PermissionError */
+  private resolveSafe(relPath: string): string {
+    if (!relPath || path.isAbsolute(relPath) || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+      throw this.deny(`拒绝绝对路径: ${relPath}`);
+    }
+    const resolved = path.resolve(this.dataRoot, relPath);
+    const rel = path.relative(this.dataRoot, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw this.deny(`路径穿越被拒绝: ${relPath}`);
+    }
+    const top = rel.split(path.sep)[0] ?? '';
+    if (!(READABLE_DIRS as readonly string[]).includes(top)) {
+      throw this.deny(`目录不在白名单: ${top}`);
+    }
+    // 符号链接穿越校验：已存在路径必须 realpath 后仍在 dataRoot 内
+    if (fs.existsSync(resolved)) {
+      const real = fs.realpathSync(resolved);
+      const realRel = path.relative(fs.realpathSync(this.dataRoot), real);
+      if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+        throw this.deny(`符号链接穿越被拒绝: ${relPath}`);
+      }
+    } else {
+      // 新文件：校验父目录 realpath
+      const parent = path.dirname(resolved);
+      if (fs.existsSync(parent)) {
+        const realParentRel = path.relative(
+          fs.realpathSync(this.dataRoot),
+          fs.realpathSync(parent),
+        );
+        if (realParentRel.startsWith('..') || path.isAbsolute(realParentRel)) {
+          throw this.deny(`符号链接穿越被拒绝: ${relPath}`);
+        }
+      }
+    }
+    return resolved;
+  }
+
+  private deny(message: string): PermissionError {
+    this.logger?.warn({ alert: true, event: 'file.access.denied' }, message);
+    return new PermissionError(message);
+  }
+
+  /** 读文本文件（utf8），超 truncateBytes 截断；tmp 文件刷新访问时间（7 天清理依据） */
+  async read(
+    relPath: string,
+    opts?: { offset?: number | undefined; limit?: number | undefined },
+  ): Promise<{ content: string; truncated: boolean; totalSize: number }> {
+    const abs = this.resolveSafe(relPath);
+    let buf: Buffer;
+    try {
+      buf = await fs.promises.readFile(abs);
+    } catch {
+      throw new PermissionError(`文件不存在或不可读: ${relPath}`);
+    }
+    const totalSize = buf.length;
+    const offset = opts?.offset ?? 0;
+    const limit = Math.min(opts?.limit ?? this.truncateBytes, this.truncateBytes);
+    const slice = buf.subarray(offset, offset + limit);
+    if (relPath.split(path.sep)[0] === TMP_DIR || relPath.startsWith(`${TMP_DIR}/`)) {
+      const now = new Date();
+      await fs.promises.utimes(abs, now, now).catch(() => {});
+    }
+    return {
+      content: slice.toString('utf8'),
+      truncated: offset + slice.length < totalSize,
+      totalSize,
+    };
+  }
+
+  /** 读原始字节（供 read_file 工具做 xlsx/pdf 格式分派）；tmp 文件同样刷新访问时间 */
+  async readBuffer(relPath: string): Promise<Buffer> {
+    const abs = this.resolveSafe(relPath);
+    let buf: Buffer;
+    try {
+      buf = await fs.promises.readFile(abs);
+    } catch {
+      throw new PermissionError(`文件不存在或不可读: ${relPath}`);
+    }
+    if (relPath.split(path.sep)[0] === TMP_DIR || relPath.startsWith(`${TMP_DIR}/`)) {
+      const now = new Date();
+      await fs.promises.utimes(abs, now, now).catch(() => {});
+    }
+    return buf;
+  }
+
+  /** 写文件：仅允许 tmp/ 且文件名强制 `{threadId}_` 前缀；返回 user-data 相对路径 */
+  async write(threadId: string, filename: string, content: string): Promise<string> {
+    const base = path.basename(filename);
+    if (base !== filename || base.includes('..')) {
+      throw this.deny(`写入仅允许 tmp/ 下的扁平文件名: ${filename}`);
+    }
+    if (!base.startsWith(`${threadId}_`)) {
+      throw this.deny(`tmp/ 写入文件名必须以 "${threadId}_" 前缀开头: ${base}`);
+    }
+    const relPath = `${TMP_DIR}/${base}`;
+    const abs = this.resolveSafe(relPath);
+    await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+    await fs.promises.writeFile(abs, content, 'utf8');
+    return relPath;
+  }
+
+  /** 列目录（仅白名单顶层目录） */
+  async list(dir: string): Promise<FileEntry[]> {
+    const abs = this.resolveSafe(dir);
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(abs, { withFileTypes: true });
+    } catch {
+      throw new PermissionError(`目录不存在或不可读: ${dir}`);
+    }
+    const result: FileEntry[] = [];
+    for (const e of entries) {
+      const stat = await fs.promises.stat(path.join(abs, e.name)).catch(() => null);
+      if (!stat) continue;
+      result.push({
+        name: e.name,
+        size: stat.size,
+        isDirectory: e.isDirectory(),
+        modifiedAt: stat.mtime.toISOString(),
+      });
+    }
+    return result;
+  }
+
+  /** 文本检索：仅文本格式，跳过 .xlsx/.pdf 等二进制并计数 */
+  async grep(pattern: string, dir?: string): Promise<GrepResult> {
+    const targetDir = dir ?? '.';
+    const dirs = dir ? [dir] : [...READABLE_DIRS];
+    const matches: GrepMatch[] = [];
+    let skippedBinary = 0;
+    let re: RegExp;
+    try {
+      re = new RegExp(pattern, 'i');
+    } catch {
+      throw new PermissionError(`非法检索表达式: ${pattern}`);
+    }
+    void targetDir;
+    for (const d of dirs) {
+      let files: string[];
+      try {
+        files = await fs.promises.readdir(this.resolveSafe(d));
+      } catch {
+        continue; // 目录不存在不视为错误
+      }
+      for (const name of files) {
+        const rel = `${d}/${name}`;
+        const ext = path.extname(name).toLowerCase();
+        if (!TEXT_EXTENSIONS.has(ext)) {
+          if (ext) skippedBinary += 1;
+          continue;
+        }
+        const { content } = await this.read(rel, { limit: this.truncateBytes }).catch(() => ({
+          content: '',
+          truncated: false,
+          totalSize: 0,
+        }));
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]!;
+          if (re.test(line)) matches.push({ file: rel, line: i + 1, text: line.trim() });
+        }
+      }
+    }
+    return { matches, skippedBinary };
+  }
+}
