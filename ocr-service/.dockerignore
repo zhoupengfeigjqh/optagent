@@ -1,0 +1,5 @@
+# 服务镜像只需 server.py 与依赖清单
+*
+!server.py
+!requirements.txt
+!Dockerfile

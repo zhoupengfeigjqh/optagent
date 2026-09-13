@@ -1,0 +1,41 @@
+services:
+  # 统一入口网关：所有外部流量经此分发，新增平台只改 gateway/nginx.conf
+  gateway:
+    build: ./gateway
+    container_name: optagent-gateway
+    ports:
+      - "82:80"
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: optagent-frontend
+    restart: unless-stopped
+
+  # OCR MCP 服务：RapidOCR，streamable-http，仅内网（backend 经 MCP 调用）
+  # 无共享存储：经签名直链回源 backend 下载图片（远程部署形态预演）
+  ocr:
+    build: ./ocr-service
+    container_name: optagent-ocr
+    environment:
+      # SSRF 防护：只允许回源 backend
+      - OCR_URL_ALLOW_HOSTS=backend
+    restart: unless-stopped
+
+  backend:
+    build: ./agent-backend
+    container_name: optagent-backend
+    env_file:
+      - ./agent-backend/.env
+    environment:
+      # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件
+      - PUBLIC_BASE_URL=http://backend:3000
+    volumes:
+      # 模型配置（必需，缺省启动失败）
+      - ./agent-backend/config.yaml:/app/config.yaml:ro
+      # 运行期数据（用户数据、日志、usage.db）bind mount：本地 agent-backend/.opt-agent 实时双向同步
+      - ./agent-backend/.opt-agent:/app/.opt-agent
+    restart: unless-stopped

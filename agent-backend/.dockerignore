@@ -1,0 +1,28 @@
+# 依赖与构建产物（镜像内重新安装/编译）
+node_modules/
+dist/
+coverage/
+
+# 本地运行数据与密钥（由 compose 挂载/注入，不进镜像）
+.opt-agent/
+.env
+.env.*
+!.env.example
+config.yaml
+
+# 本地开发/测试资产，不进入镜像
+tests/
+scripts/
+specs/
+docs/
+integration-fixtures/
+.test-tmp/
+.claude/
+.specify/
+*.log
+*.tmp
+typecheck-report.txt
+vitest-report.txt
+req_final.md
+Dockerfile
+.dockerignore

@@ -1,0 +1,4 @@
+# 网关镜像只需要配置文件，排除一切本地资产
+*
+!nginx.conf
+!Dockerfile
