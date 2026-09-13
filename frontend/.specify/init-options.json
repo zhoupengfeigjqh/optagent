@@ -1,8 +1,0 @@
-{
-  "ai": "codebuddy",
-  "feature_numbering": "sequential",
-  "here": false,
-  "integration": "codebuddy",
-  "script": "ps",
-  "speckit_version": "0.16.4"
-}

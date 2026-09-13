@@ -88,22 +88,37 @@ describe('useChatPanel - 搜索与工作空间开关（US8）', () => {
     expect(session.search.isOpen.value).toBe(false)
   })
 
-  it('工作空间开关：打开时刷新清单，关闭时复位', async () => {
-    const { panel, router } = setupPanel()
+  it('工作空间开关：打开时刷新清单并停在列表态，再点收起', async () => {
+    const { panel, session, router } = setupPanel()
 
     panel.onToggleWorkspace()
     expect(panel.workspaceOpen.value).toBe(true)
+    expect(session.preview.view.value).toBe('list')
     await waitFor(() => router.countOf('GET', '/api/files/workspace') === 1, '未刷新工作空间')
 
-    panel.onCloseWorkspace()
+    // 再点一次即收起整个面板（列表态 → 关闭）
+    panel.onToggleWorkspace()
     expect(panel.workspaceOpen.value).toBe(false)
+    expect(session.preview.open.value).toBe(false)
   })
 
-  it('下载以直链触发（无大小上限）', () => {
-    const { panel } = setupPanel()
+  it('内容态下点工具栏按钮：退回列表态而非收起面板', async () => {
+    const { panel, session } = setupPanel()
+
+    // 面板可能被消息内的文件引用打开在内容态，此时工具栏按钮不高亮
+    await session.preview.openFile({ dir: 'tmp', filename: 'plan.csv' })
+    expect(panel.workspaceOpen.value).toBe(false)
+
+    panel.onToggleWorkspace()
+    expect(panel.workspaceOpen.value).toBe(true)
+    expect(session.preview.open.value).toBe(true)
+  })
+
+  it('下载以直链触发（无大小上限，由面板承担）', () => {
+    const { session } = setupPanel()
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
 
-    panel.onPreviewDownload({ dir: 'tmp', filename: 'plan.csv' })
+    session.preview.download({ dir: 'tmp', filename: 'plan.csv' })
 
     expect(click).toHaveBeenCalledTimes(1)
     click.mockRestore()

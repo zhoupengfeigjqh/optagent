@@ -21,3 +21,6 @@ Thumbs.db
 .vscode/
 .idea/
 .history/
+
+# 测试沙盒（tests/helpers/tmp.ts）
+.test-tmp/

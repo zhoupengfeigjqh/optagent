@@ -235,3 +235,105 @@ describe('usePreview - 空间目录文件（V-11）', () => {
     expect(store.content.value?.text).toBe('{"ok":true}')
   })
 })
+
+describe('usePreview - 面板开关与双视图（US8）', () => {
+  it('openList 展开面板并停在列表态，不持有预览内容', () => {
+    const { store } = makeStore({})
+
+    store.openList()
+
+    expect(store.open.value).toBe(true)
+    expect(store.view.value).toBe('list')
+    expect(store.target.value).toEqual({ kind: 'none' })
+    expect(store.content.value).toBeNull()
+  })
+
+  it('openList 从内容态调用即退回列表态（同一区域，不并存）', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.openList()
+
+    expect(store.view.value).toBe('list')
+    expect(store.content.value).toBeNull()
+  })
+
+  it('openFile 展开面板并切到内容态', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    expect(store.open.value).toBe(true)
+    expect(store.view.value).toBe('content')
+    expect(store.content.value?.text).toBe('x')
+  })
+
+  it('backToList 回到列表态并清空内容，但面板保持展开', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.backToList()
+
+    expect(store.view.value).toBe('list')
+    expect(store.open.value).toBe(true)
+    expect(store.target.value).toEqual({ kind: 'none' })
+    expect(store.content.value).toBeNull()
+  })
+
+  it('close 收起面板并复位到列表态', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.close()
+
+    expect(store.open.value).toBe(false)
+    expect(store.view.value).toBe('list')
+    expect(store.target.value).toEqual({ kind: 'none' })
+  })
+
+  it('onFileRemoved：删的正是当前文件 → 退回列表态', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.onFileRemoved({ dir: 'tmp', filename: 'a.txt' })
+
+    expect(store.view.value).toBe('list')
+    expect(store.open.value).toBe(true)
+    expect(store.content.value).toBeNull()
+  })
+
+  it('onFileRemoved：删的是别的文件 → 当前内容态不受影响', async () => {
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.onFileRemoved({ dir: 'tmp', filename: 'b.txt' })
+
+    expect(store.view.value).toBe('content')
+    expect(store.content.value?.text).toBe('x')
+  })
+
+  it('外链不改变面板开关与视图（V-10）', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    const { store } = makeStore({
+      'GET /api/files/preview': () => new Response('x', { status: 200 }),
+    })
+    await store.openFile({ dir: 'tmp', filename: 'a.txt' })
+
+    store.openLink('https://example.com')
+
+    expect(store.open.value).toBe(true)
+    expect(store.view.value).toBe('content')
+  })
+})

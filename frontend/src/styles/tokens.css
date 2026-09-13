@@ -91,5 +91,8 @@
 
   /* ---------- 布局 ---------- */
   --layout-sidebar-width: 260px;
+  /* 右栏默认宽度比例（尚未手动拖动时生效） */
   --layout-preview-ratio: 33.333%;
+  /* 右栏分隔条宽度；拖动后右栏宽度由运行时的 --layout-preview-width（px）覆盖 */
+  --layout-resizer-width: 6px;
 }

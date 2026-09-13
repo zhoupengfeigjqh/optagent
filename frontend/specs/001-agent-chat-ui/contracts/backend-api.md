@@ -57,12 +57,19 @@
 ### 1.6 `GET /api/agents/current/mcp` — MCP 服务状态
 
 - 响应：`200 { agent_name: string | null, mcp_servers: [{ name, transport, status }] }`，
-  `status ∈ 'connected' | 'failed'`
+  `status ∈ 'connected' | 'failed' | 'unknown'`
 - 未选中数字人 → `{ agent_name: null, mcp_servers: [] }`
 - 错误：`404 AGENT_NOT_FOUND` — 已选中但该数字人配置损坏
-- 前端映射：`connected` → 绿色 + "连接正常"；`failed` → 红色 + "连接失败"（FR-033、D14）。
-- **实例未创建时全部为 `failed`**（含"首次建连过程中"），前端**不做**弹窗或阻断（FR-034、FR-038）。
-- 刷新时机：进入会话时拉取一次；会话进行中按 ≤5s 间隔轮询（SC-010）；`done`/`error` 后刷新一次。
+- 前端映射：`connected` → 绿色 + "连接正常"；`failed` → 红色 + "连接失败"；`unknown` → 灰色 + "未连接"（FR-033、D14）。
+- **实例未创建或首次建连进行中时为 `unknown`，MUST NOT 呈现为 `failed`**（2026-09-11 修订：原契约规定为 `failed`，会把"尚未建连"误读为断线故障）；任何状态前端**不做**弹窗或阻断（FR-034、FR-038）。
+- 刷新时机：进入会话时拉取一次；此后经 SSE 订阅实时更新（见 §1.7，2026-09-12 修订：替代原 ≤5s 轮询）。
+
+### 1.7 `GET /api/agents/current/mcp/events` — MCP 状态推送（SSE）
+
+- 响应：`200 text/event-stream`；事件名 `mcp-status`，`data` 负载与 §1.6 响应体相同
+- 时序：连接建立即推送一次当前快照；之后每当后端状态变化（建连落定、连接断开、select/exit 切换选中）重算快照再推；25s 心跳注释行保活
+- 断线语义：`connected` 为真实活性——MCP 连接意外断开时后端立即标记 `failed` 并推送（2026-09-12 新增：修复绿灯假阳性）；后端自动有界重连，server 恢复后推送 `connected`（重连 5 次全败时于下次使用惰性自愈，前端无感知）
+- 前端映射：挂载聊天面板后订阅一次，卸载时关闭；EventSource 断线自动重连，**不再轮询** §1.6（SC-010 的 ≤5s 滞后由事件推送保证，实际近实时）
 
 ---
 
@@ -308,6 +315,19 @@
 - 响应：`{ dirs: [{ dir, files: [{ filename, size, updated_at }] }] }`
 - 后端**固定返回全部 9 个白名单目录**，空目录 `files` 为 `[]`（FR-031、FR-019）
 - 目录运行中被删除时按空目录容错，不报错
+
+### 5.6 `DELETE /api/files?dir=&filename=`
+
+- 语义：删除工作空间中的单个文件（FR-053 ~ FR-055）
+- 响应：`200 { dir, filename, deleted: true }`
+- 错误：
+  - `400 VALIDATION_FAILED`（缺参 / 非法文件名 / 含穿越）
+  - `403 UPLOAD_DIR_FORBIDDEN`（`dir` 不在白名单）
+  - `403 FILE_READONLY`（`dir=shared` —— 共享目录只读）
+  - `404 FILE_NOT_FOUND`（文件不存在或已被清理）
+- 前端实现：经 `files.remove()` 发起；成功后**就地移除**该条目（不重拉 `workspace`）并 toast 提示；
+  若面板正以内容态展示该文件，删除成功后 MUST 退回列表态（FR-055）。
+- 安全：后端走 `FileAccess.remove()` → `resolveSafe()`，与读取路径共用「穿越 / 符号链接 / 白名单」校验。
 
 ---
 

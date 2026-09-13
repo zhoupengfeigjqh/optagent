@@ -66,7 +66,7 @@
 
 ### McpServiceStatus
 
-`{name: string, transport: 'stdio'|'http', status: 'connected'|'failed'}` —— 池内实例存在时取实际连接结果，否则全部 failed。
+`{name: string, transport: 'stdio'|'http', status: 'connected'|'failed'|'unknown'}` —— 池内实例存在时取实际连接结果；实例未创建或首次建连进行中为 `unknown`（不得以 `failed` 兜底）。
 
 ### ModelInfo
 

@@ -17,6 +17,7 @@ import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
 import { ensureRootDirs, userDataDir, TMP_DIR } from './domain/dirs.js';
 import { HistoryStore } from './domain/history.js';
+import { McpStatusEvents } from './domain/mcp-events.js';
 import { RunManager } from './domain/run-manager.js';
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
@@ -80,6 +81,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const threadStore = new ThreadStore(root, history);
   const pool = new AgentPool({ maxSize: config.poolSize });
   const currentAgent = new CurrentAgentStore();
+  const mcpEvents = new McpStatusEvents();
 
   // LlmProvider 惰性单例：测试注入 fake 时不触碰 pi-ai/真 key
   let llmInstance: LlmProvider | undefined = options.llmProvider;
@@ -100,6 +102,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: loggers.logger,
     mcpTimeoutMs: config.mcpTimeoutMs,
     truncateKb: config.readTruncateKb,
+    publicBaseUrl: config.publicBaseUrl,
+    fileSignSecret: config.fileSignSecret,
+    // 建连落定 → 事件总线 → SSE 路由推送最新快照（替代前端轮询）
+    onMcpStatus: (key) => mcpEvents.emitChanged(key.userId),
   });
 
   // 后台调度（T040）：每小时清理 tmp/ 下 7 天未访问的临时产出
@@ -150,6 +156,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     summary,
     runManager,
     usage: usageDb,
+    mcpEvents,
     async getOrCreateAgent(key) {
       const existing = pool.get(key);
       if (existing) return existing as never;

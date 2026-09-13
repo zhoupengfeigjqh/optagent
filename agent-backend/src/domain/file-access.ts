@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
 import { BUSINESS_DIRS, SHARED_DIR, TMP_DIR, userDataDir } from './dirs.js';
+import { removeFileSafeAsync } from './fs-safe.js';
 
 export class PermissionError extends Error {
   readonly code = 'PERMISSION_DENIED';
@@ -68,6 +69,25 @@ export class FileAccess {
   /** 公开的路径白名单校验（工具层在任何格式分派前先过权限关） */
   assertPathAllowed(relPath: string): void {
     this.resolveSafe(relPath);
+  }
+
+  /**
+   * 校验 + 定位（MCP 文件参数转签名 URL 用）：
+   * 返回 posix 分隔的规范化相对路径与绝对路径；文件必须真实存在且为普通文件。
+   */
+  resolveVerified(relPath: string): { relPath: string; abs: string } {
+    const abs = this.resolveSafe(relPath);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(abs);
+    } catch {
+      throw new PermissionError(`文件不存在或不可读: ${relPath}`);
+    }
+    if (!stat.isFile()) {
+      throw new PermissionError(`仅支持文件: ${relPath}`);
+    }
+    const rel = path.relative(this.dataRoot, abs).split(path.sep).join('/');
+    return { relPath: rel, abs };
   }
 
   /** 路径规范化 + 白名单校验，返回绝对路径；越权抛 PermissionError */
@@ -169,6 +189,26 @@ export class FileAccess {
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content, 'utf8');
     return relPath;
+  }
+
+  /**
+   * 删除文件（**用户侧文件空间管理**专用，非 Agent 工具）。
+   *
+   * 仅允许白名单目录下的普通文件；目录本身不可删（抛 PermissionError）。
+   * 路径安全由 `resolveSafe` 统一兜住（穿越 / 符号链接 / 白名单）。
+   */
+  async remove(relPath: string): Promise<void> {
+    const abs = this.resolveSafe(relPath);
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(abs);
+    } catch {
+      throw new PermissionError(`文件不存在或不可读: ${relPath}`);
+    }
+    if (stat.isDirectory()) {
+      throw this.deny(`删除仅支持文件: ${relPath}`);
+    }
+    await removeFileSafeAsync(abs); // 不用 fs.promises.rm：Windows 非 ASCII 路径静默失效（见 fs-safe）
   }
 
   /** 列目录（仅白名单顶层目录） */

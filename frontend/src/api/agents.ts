@@ -27,8 +27,14 @@ export interface AgentsApi {
   exit(): Promise<ExitAgentResponse>
   /** `GET /api/agents/current` → 未选中时 `agent_name` 为 `null` */
   current(): Promise<CurrentAgentResponse>
-  /** `GET /api/agents/current/mcp` → 实例未创建时全部为 `failed` */
+  /** `GET /api/agents/current/mcp` → 实例未创建时全部为 `unknown`（尚无连接结果） */
   currentMcp(): Promise<CurrentMcpResponse>
+  /**
+   * 订阅 MCP 状态推送（SSE `GET /api/agents/current/mcp/events`）。
+   * 连接建立即收到一次快照，之后状态变化（建连落定 / 切换 / 退出）时推送；
+   * 返回退订函数。EventSource 自带断线重连。
+   */
+  subscribeMcp(onSnapshot: (data: CurrentMcpResponse) => void): () => void
 }
 
 /** 创建数字人 API。 */
@@ -42,5 +48,12 @@ export function createAgentsApi(client: HttpClient): AgentsApi {
     exit: () => client.post<ExitAgentResponse>('/api/agents/current/exit'),
     current: () => client.get<CurrentAgentResponse>('/api/agents/current'),
     currentMcp: () => client.get<CurrentMcpResponse>('/api/agents/current/mcp'),
+    subscribeMcp: (onSnapshot) => {
+      const source = new EventSource(`${client.baseUrl}/api/agents/current/mcp/events`)
+      source.addEventListener('mcp-status', (event) => {
+        onSnapshot(JSON.parse((event as MessageEvent).data) as CurrentMcpResponse)
+      })
+      return () => source.close()
+    },
   }
 }

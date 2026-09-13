@@ -3,7 +3,8 @@
  * 应用根组件（T033 / T042 / T062）
  *
  * 装配全局会话上下文（`useAppSession` 内部 `provide`）并渲染三栏骨架：
- * 左栏历史会话（US5）、中栏聊天区（US1）；右栏预览由 US7 接入。
+ * 左栏历史会话（US5）、中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8）——
+ * 文件空间列表与文件内容在该面板内互换，二者不并存，故只有一个右栏组件。
  */
 import { computed, onMounted, ref } from 'vue'
 
@@ -13,7 +14,7 @@ import ConfirmDialog from './components/common/ConfirmDialog.vue'
 import ToastHost from './components/common/ToastHost.vue'
 import AppShell from './components/layout/AppShell.vue'
 import HistorySidebar from './components/layout/HistorySidebar.vue'
-import PreviewPanel from './components/layout/PreviewPanel.vue'
+import WorkspacePanel from './components/layout/WorkspacePanel.vue'
 import { useAppSession } from './composables/useAppSession'
 import { RUN_PHASE } from './constants/events'
 
@@ -91,20 +92,44 @@ async function onConfirmRemove(): Promise<void> {
   }
 }
 
-/** 预览列仅在有预览目标时展位：无内容时右栏不占宽（FR-002）。 */
-const previewOpen = computed(() => session.preview.target.value.kind !== 'none')
+/* ---------- 右栏工作空间面板（US7 / US8） ---------- */
 
-function onClosePreview(): void {
+/** 面板展开即占位右侧 1/3（FR-001）；收起时中栏恢复满宽（FR-002）。 */
+const panelOpen = computed(() => session.preview.open.value)
+
+function onClosePanel(): void {
   session.preview.close()
 }
 
-function onPreviewDownload(reference: FileReference): void {
+/** 内容态 → 列表态（面板保持展开） */
+function onBackToList(): void {
+  session.preview.backToList()
+}
+
+function onToggleDir(dir: string): void {
+  session.workspace.toggleDir(dir)
+}
+
+/** 面板内点文件名、消息内点文件引用走**同一入口**：都进内容态（FR-046） */
+function onOpenFile(reference: FileReference): void {
+  void session.preview.openFile(reference)
+}
+
+function onPanelDownload(reference: FileReference): void {
   session.preview.download(reference)
+}
+
+/** 删除文件：成功后若正看着它则收敛回列表态；失败已由 toast 提示，界面保持现状 */
+async function onRemoveFile(reference: FileReference): Promise<void> {
+  const removed = await session.workspace.remove(reference)
+  if (removed) {
+    session.preview.onFileRemoved(reference)
+  }
 }
 </script>
 
 <template>
-  <AppShell :preview-open="previewOpen">
+  <AppShell :preview-open="panelOpen">
     <!-- 左栏：历史会话（US5） -->
     <template #history>
       <HistorySidebar
@@ -125,14 +150,22 @@ function onPreviewDownload(reference: FileReference): void {
       <ChatPanel :expanded="expanded" />
     </template>
 
-    <!-- 右栏：内容预览（US7） -->
+    <!-- 右栏：工作空间面板（列表态 / 内容态，US7 + US8） -->
     <template #preview>
-      <PreviewPanel
+      <WorkspacePanel
+        :view="session.preview.view.value"
+        :dirs="session.workspace.dirs.value"
+        :expanded-dirs="session.workspace.expandedDirs.value"
+        :list-loading="session.workspace.loading.value"
         :target="session.preview.target.value"
         :content="session.preview.content.value"
-        :loading="session.preview.loading.value"
-        @close="onClosePreview"
-        @download="onPreviewDownload"
+        :content-loading="session.preview.loading.value"
+        @close="onClosePanel"
+        @back="onBackToList"
+        @toggle-dir="onToggleDir"
+        @preview="onOpenFile"
+        @download="onPanelDownload"
+        @remove="onRemoveFile"
       />
     </template>
   </AppShell>

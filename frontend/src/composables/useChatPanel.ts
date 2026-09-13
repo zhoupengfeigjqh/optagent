@@ -41,23 +41,24 @@ export function useChatPanel() {
   const uploadOpen = ref(false)
   /** 数字人面板展开状态 */
   const agentPanelOpen = ref(false)
-  /** 工作空间抽屉开关 */
-  const workspaceOpen = ref(false)
+  /**
+   * 文件空间是否正停在列表态（用于工具栏按钮高亮与"再点一次收起"）。
+   * 面板可能被消息内的文件引用打开在内容态，此时按钮不高亮。
+   */
+  const workspaceOpen = computed(() => preview.open.value && preview.view.value === 'list')
 
   onMounted(async () => {
     // 工具栏需要模型清单：仅在本轮尚未取到时拉取（失败由 `useModels` 自行降级，不阻断聊天）
     if (models.models.value.length === 0) {
       void models.load()
     }
-    // 头部需要当前数字人与 MCP 状态；建连后再启动轮询（SC-010：滞后 ≤ 5s）
+    // 头部需要当前数字人与 MCP 状态；MCP 状态走后端 SSE 推送（建连落定/切换时主动下发）
     await agents.loadCurrent()
-    if (agents.currentAgent.value !== null) {
-      agents.startMcpPolling()
-    }
+    agents.startMcpSubscription()
   })
 
   onBeforeUnmount(() => {
-    agents.stopMcpPolling()
+    agents.stopMcpSubscription()
   })
 
   /**
@@ -177,25 +178,19 @@ export function useChatPanel() {
   }
 
   function onToggleWorkspace(): void {
-    workspaceOpen.value = !workspaceOpen.value
+    // 已停在列表态 → 再点即收起；否则展开并停在列表态（从内容态点也会退回列表）
     if (workspaceOpen.value) {
-      // 打开抽屉时刷新 9 个目录的文件清单（FR-031）
-      void workspace.load()
+      preview.close()
+      return
     }
-  }
-
-  function onCloseWorkspace(): void {
-    workspaceOpen.value = false
+    preview.openList()
+    // 打开时刷新 9 个目录的文件清单（FR-031）
+    void workspace.load()
   }
 
   /** 搜索关键词受控：高亮与定位由 `useSessionSearch` + 列表共同完成（FR-029/030） */
   function onSearchKeyword(value: string): void {
     search.keyword.value = value
-  }
-
-  /** 预览区 / 工作空间的下载：直链触发，无大小上限（FR-047） */
-  function onPreviewDownload(reference: FileReference): void {
-    preview.download(reference)
   }
 
   function onToggleAgent(): void {
@@ -340,9 +335,7 @@ export function useChatPanel() {
     onRetryUpload,
     onToggleSearch,
     onToggleWorkspace,
-    onCloseWorkspace,
     onSearchKeyword,
-    onPreviewDownload,
     onToggleAgent,
     onCloseAgentPanel,
     onSwitchAgent,

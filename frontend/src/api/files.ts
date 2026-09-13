@@ -6,6 +6,7 @@
  * - §5.1 落盘名以响应中的 `filename` 为准（后端已追加时间戳并在重名时追加 `-1`/`-2`），前端 MUST NOT 自行拼接
  * - §5.3 下载**无大小上限** → 以 `<a download>` 直链触发，不经 `fetch`
  * - §5.4 预览**有大小上限**（默认 10MB）→ 文本类按需 `fetch`（便于展示错误态），`.pdf` 用 `<iframe>`
+ * - §5.5 删除走 REST `DELETE /api/files`（`shared` 为共享只读目录，后端 403 `FILE_READONLY`）
  */
 
 import { parseErrorResponse, type HttpClient } from './http'
@@ -31,6 +32,13 @@ export interface FilesApi {
    * 因此在进入 iframe 前先探一次：非 2xx 时解析后端错误体并抛出结构化错误（含 `code`）。
    */
   probePreview(dir: string, filename: string, signal?: AbortSignal): Promise<void>
+  /**
+   * `DELETE /api/files?dir=&filename=` 删除文件。
+   *
+   * `shared` 为共享只读目录（后端 403 `FILE_READONLY`），其余 8 个目录可删。
+   * 文件不存在（404 `FILE_NOT_FOUND`）与目录越权（403 `UPLOAD_DIR_FORBIDDEN`）均抛结构化错误。
+   */
+  remove(dir: string, filename: string): Promise<void>
   /** `GET /api/files/workspace` → 固定 9 个目录 */
   workspace(): Promise<WorkspaceResponse>
 }
@@ -74,6 +82,11 @@ export function createFilesApi(client: HttpClient): FilesApi {
       } catch {
         /* 忽略：预检不需要响应体 */
       }
+    },
+
+    remove: async (dir, filename) => {
+      // `del()` 不支持查询参数；删除以资源定位（dir+filename）表达，故走通用 `request`
+      await client.request<void>('/api/files', { method: 'DELETE', query: { dir, filename } })
     },
 
     workspace: () => client.get<WorkspaceResponse>('/api/files/workspace'),

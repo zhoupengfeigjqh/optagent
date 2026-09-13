@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { removeFileSafeAsync } from './fs-safe.js';
 
 export const TMP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -40,7 +41,8 @@ export async function cleanupTmpDir(
       const abs = path.join(tmpDir, name);
       const stat = await fs.promises.stat(abs).catch(() => null);
       if (stat && now - stat.mtimeMs > 60 * 60 * 1000) {
-        await fs.promises.rm(abs, { force: true }).catch(() => {
+        // 删除走安全原语（Windows 非 ASCII 路径下 fs.rm 静默失效，见 fs-safe）
+        await removeFileSafeAsync(abs).catch(() => {
           result.failed += 1;
         });
       }
@@ -52,7 +54,7 @@ export async function cleanupTmpDir(
     const lastTouched = Math.max(stat.atimeMs, stat.mtimeMs);
     if (now - lastTouched < maxAgeMs) continue;
     try {
-      await fs.promises.rm(abs, { force: true });
+      await removeFileSafeAsync(abs);
       result.deleted += 1;
       opts.logger?.info?.(`tmp 清理：已删除 7 天未访问文件 ${name}`);
     } catch (err) {

@@ -204,8 +204,8 @@ description: "Task list for feature implementation"
 **Independent Test**: 点击外部地址直接跳转 → 点击空间目录文件右侧内联渲染 → 无跳转内容时占位
 
 - [X] T070 [P] [US7] 实现 `src/composables/usePreview.ts` + `usePreview.spec.ts`（外链**不改** `target` 直接跳转，V-10；`.xlsx` → `download` 回退，V-11；`413` → 文件过大并引导下载、`404` → 文件不存在；文本类按需 `fetch`）
-- [X] T071 [US7] 实现 `src/components/layout/PreviewPanel.vue` + `PreviewPanel.spec.ts`（内联渲染：`<pre>` 文本/CSV/JSON、`<iframe>` PDF、`.xlsx` 回退下载；占位/收起态；错误态含下载按钮，FR-046/047/048）
-- [X] T072 [US7] 在 `src/components/layout/AppShell.vue` 接入 `PreviewPanel`（经 `#preview` 插槽），并在 `src/components/chat/MessageContent.vue` 接入可点击跳转（外部地址 → 新窗口；空间目录文件 → 预览区）——插槽由 `App.vue` 填充并联动 `previewOpen`；`open-link` 经 `MessageBubble` → `MessageList` → `ChatPanel` 透传至 `usePreview`，`@文件名` 引用新增 `open-file` 入口
+- [X] T071 [US7] 实现 `src/components/layout/WorkspacePanel.vue` + `WorkspacePanel.spec.ts`（右栏唯一面板，列表态与内容态互换：内容态内联渲染 `<pre>` 文本/CSV/JSON、`<iframe>` PDF、`.xlsx` 回退下载；占位/收起态；错误态含下载按钮；删除二次确认；列表态内嵌 `WorkspaceFileTree`，FR-046/047/048）
+- [X] T072 [US7] 在 `src/components/layout/AppShell.vue` 接入 `WorkspacePanel`（经 `#preview` 插槽），并在 `src/components/chat/MessageContent.vue` 接入可点击跳转（外部地址 → 新窗口；空间目录文件 → 内容态）——插槽由 `App.vue` 填充并联动 `previewOpen`；`open-link` 经 `MessageBubble` → `MessageList` → `ChatPanel` 透传至 `usePreview`，`@文件名` 引用新增 `open-file` 入口
 
 **Checkpoint**: US7 可独立验证——跳转与预览闭环成立
 
@@ -220,8 +220,8 @@ description: "Task list for feature implementation"
 - [X] T073 [P] [US8] 实现 `src/composables/useSessionSearch.ts` + `useSessionSearch.spec.ts`（匹配集合与 `total`；`next()` 循环定位；空关键词；命中大量结果时的定位策略）
 - [X] T074 [P] [US8] 实现 `src/composables/useWorkspace.ts` + `useWorkspace.spec.ts`（拉取全部 **9 个**目录的文件清单，空目录为 `[]`，FR-031）
 - [X] T075 [US8] 实现 `src/components/chat/SessionSearch.vue` + `SessionSearch.spec.ts`（黄色高亮（经 `utils/segments.ts`）+ 逐次跳转按钮 + 无结果提示，FR-029/030 / SC-009）
-- [X] T076 [US8] 实现 `src/components/chat/WorkspaceDrawer.vue` + `WorkspaceDrawer.spec.ts`（基于 `BaseDialog`；按目录分组展示文件，空目录空态）
-- [X] T077 [US8] 在 `src/components/chat/ChatHeader.vue` 接入 `SessionSearch` 与 `WorkspaceDrawer`（完成 T067 预留的按钮位）——`ChatHeader` 仅保留按钮与开关状态，`SessionSearch` / `WorkspaceDrawer` 由装配层 `ChatPanel` 渲染并接入 `useSessionSearch` / `useWorkspace` / `usePreview`
+- [X] T076 [US8] 实现 `src/components/layout/WorkspaceFileTree.vue` + `WorkspaceFileTree.spec.ts`（按 `constants/directories.ts` 的 9 个目录分组展示文件、默认全部收起、展开空目录空态；`shared` 只读不渲染删除入口；纯展示，仅上报 `preview` / `download` / `remove` 意图）
+- [X] T077 [US8] 在 `src/components/chat/ChatHeader.vue` 接入 `SessionSearch` 与文件空间入口（完成 T067 预留的按钮位）——`ChatHeader` 仅保留按钮与开关状态，`SessionSearch` 由装配层 `ChatPanel` 渲染并接入 `useSessionSearch`；文件空间面板 `WorkspacePanel`（内嵌 `WorkspaceFileTree`）由 `App.vue` 经 `#preview` 插槽装配，接入 `useWorkspace` / `usePreview`
 
 **Checkpoint**: US8 可独立验证——搜索与工作空间可用
 

@@ -9,7 +9,7 @@
 import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from '../constants/limits'
 
 /** 预览渲染方式。 */
-export type PreviewKind = 'text' | 'pdf' | 'download' | 'unsupported'
+export type PreviewKind = 'text' | 'pdf' | 'image' | 'download' | 'unsupported'
 
 /** 可内联展示为文本的扩展名。 */
 const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json'])
@@ -17,8 +17,11 @@ const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json'])
 /** 可内联展示的 PDF 扩展名。 */
 const PDF_EXTENSION = '.pdf'
 
-/** 需回退下载的电子表格扩展名。 */
-const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx'])
+/** 可用 <img> 内联展示的图片扩展名（.tif/.tiff 浏览器普遍不支持，归 download）。 */
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif'])
+
+/** 需回退下载的扩展名。 */
+const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.tif', '.tiff'])
 
 /** 上传预校验结果。 */
 export interface UploadPrecheckResult {
@@ -50,6 +53,9 @@ export function resolvePreviewKind(filename: string): PreviewKind {
   }
   if (extension === PDF_EXTENSION) {
     return 'pdf'
+  }
+  if (IMAGE_EXTENSIONS.has(extension)) {
+    return 'image'
   }
   if (DOWNLOAD_EXTENSIONS.has(extension)) {
     return 'download'

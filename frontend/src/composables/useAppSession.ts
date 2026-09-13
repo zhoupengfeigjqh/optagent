@@ -117,7 +117,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   const activeThreadId = ref<string | null>(null)
 
   const preview = createPreviewStore({ files: filesApi })
-  const workspace = createWorkspaceStore({ files: filesApi })
+  // 删除动作需要提示成功/失败原因，故 workspace 依赖 toast
+  const workspace = createWorkspaceStore({ files: filesApi, toast })
   const models = createModelsStore({ models: modelsApi, storage })
   const uploads = createUploadsStore({ files: filesApi, toast })
   const mention = createFileMentionStore({ workspace, toast })

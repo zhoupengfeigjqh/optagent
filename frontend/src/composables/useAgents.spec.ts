@@ -1,10 +1,9 @@
 import { ref } from 'vue'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createAgentsApi } from '../api/agents'
+import { createAgentsApi, type AgentsApi } from '../api/agents'
 import { createHttpClient } from '../api/http'
-import type { DigitalHuman } from '../api/types'
-import { MCP_POLL_INTERVAL_MS } from '../constants/limits'
+import type { CurrentMcpResponse, DigitalHuman } from '../api/types'
 import type { RunPhase } from '../constants/events'
 import { createFetchRouter, errorResponse, jsonResponse } from '../../tests/helpers'
 import { createAgentsStore } from './useAgents'
@@ -216,47 +215,68 @@ describe('useAgents - 切换（FR-035~FR-037、V-14）', () => {
   })
 })
 
-describe('useAgents - MCP 状态轮询（SC-010：滞后 ≤5s）', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
+describe('useAgents - MCP 状态订阅（SSE 推送，替代轮询）', () => {
+  /** 捕获 subscribeMcp 回调的假 API，其余方法走 fetch 桩 */
+  function makeSubscribableStore(routes: Parameters<typeof createFetchRouter>[0]) {
+    const router = createFetchRouter(routes)
+    const real = createAgentsApi(createHttpClient({ baseUrl: '', fetchImpl: router.fetch }))
+    let onSnapshot: ((data: CurrentMcpResponse) => void) | null = null
+    const close = vi.fn()
+    const agentsApi: AgentsApi = {
+      ...real,
+      subscribeMcp: (cb) => {
+        onSnapshot = cb
+        return close
+      },
+    }
+    const store = createAgentsStore({ agents: agentsApi, getPhase: () => 'idle' })
+    return {
+      store,
+      close,
+      emit: (data: CurrentMcpResponse) => onSnapshot?.(data),
+      subscribed: () => onSnapshot !== null,
+    }
+  }
+
+  it('订阅后收到推送快照即更新 MCP 状态', async () => {
+    const { store, emit, subscribed } = makeSubscribableStore(baseRoutes())
+    await store.loadCurrent()
+
+    store.startMcpSubscription()
+    expect(subscribed()).toBe(true)
+
+    emit({
+      agent_name: 'ops',
+      mcp_servers: [{ name: 'solver', transport: 'stdio', status: 'failed' }],
+    })
+    expect(store.mcpServers.value).toEqual([
+      { name: 'solver', transport: 'stdio', status: 'failed' },
+    ])
+
+    store.stopMcpSubscription()
   })
 
-  it('按间隔轮询刷新 MCP 状态', async () => {
-    const { store, router } = makeStore(baseRoutes())
+  it('stopMcpSubscription 关闭订阅且幂等', () => {
+    const { store, close } = makeSubscribableStore(baseRoutes())
 
-    store.startMcpPolling()
-    await vi.advanceTimersByTimeAsync(MCP_POLL_INTERVAL_MS)
-    await vi.advanceTimersByTimeAsync(MCP_POLL_INTERVAL_MS)
+    store.startMcpSubscription()
+    store.stopMcpSubscription()
+    store.stopMcpSubscription()
 
-    expect(router.countOf('GET', '/api/agents/current/mcp')).toBe(2)
-
-    store.stopMcpPolling()
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
-  it('stopMcpPolling 后不再请求', async () => {
-    const { store, router } = makeStore(baseRoutes())
+  it('重复 start 不会叠加订阅', () => {
+    const { store, close } = makeSubscribableStore(baseRoutes())
 
-    store.startMcpPolling()
-    await vi.advanceTimersByTimeAsync(MCP_POLL_INTERVAL_MS)
-    store.stopMcpPolling()
-    await vi.advanceTimersByTimeAsync(MCP_POLL_INTERVAL_MS * 3)
+    store.startMcpSubscription()
+    store.startMcpSubscription()
+    store.stopMcpSubscription()
 
-    expect(router.countOf('GET', '/api/agents/current/mcp')).toBe(1)
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
-  it('重复 start 不会叠加定时器', async () => {
-    const { store, router } = makeStore(baseRoutes())
-
-    store.startMcpPolling()
-    store.startMcpPolling()
-    await vi.advanceTimersByTimeAsync(MCP_POLL_INTERVAL_MS)
-
-    expect(router.countOf('GET', '/api/agents/current/mcp')).toBe(1)
-
-    store.stopMcpPolling()
-  })
-
-  it('MCP 轮询失败不影响主流程（不抛错、不弹提示）', async () => {
+  it('MCP 刷新失败不影响主流程（不抛错、不弹提示）', async () => {
     const { store, toast } = makeStore({
       'GET /api/agents/current/mcp': () => errorResponse('INTERNAL_ERROR', 'x', 500),
     })

@@ -165,14 +165,16 @@ frontend/                              # 仓库根（本目录）
     │   ├── useFileMention.ts          # "@" 触发、目录/文件选择、引用增删与上限
     │   ├── useWorkspace.ts            # 工作空间文件（9 目录）
     │   ├── useSessionSearch.ts        # 关键词高亮与逐次跳转
-    │   ├── usePreview.ts              # 预览目标与内容加载（外部跳转 / 内联预览）
+    │   ├── usePreview.ts              # 工作空间面板状态（开关 / 双视图 / 内容加载）
+    │   ├── useResizablePanel.ts       # 右栏宽度拖动（分隔条 / 上下限收敛 / 键盘可达）
     │   └── useToast.ts                # 轻量提示（aria-live）
     ├── components/
     │   ├── layout/
-    │   │   ├── AppShell.vue           # 三栏布局容器
+    │   │   ├── AppShell.vue           # 三栏布局容器（右栏宽度可拖动）
     │   │   ├── HistorySidebar.vue     # 左栏：历史会话 + 更多 + 新建
     │   │   ├── HistoryItem.vue
-    │   │   └── PreviewPanel.vue       # 右栏：内联预览 / 占位
+    │   │   ├── WorkspacePanel.vue     # 右栏：文件空间列表 / 内容预览（双视图）
+    │   │   └── WorkspaceFileTree.vue  # 文件空间列表（9 目录，默认收起可折叠）
     │   ├── chat/
     │   │   ├── ChatPanel.vue          # 中栏：头部 + 消息列表 + 输入区
     │   │   ├── ChatHeader.vue         # 数字人名称 + MCP 状态 + 搜索/工作空间/数字人按钮
@@ -193,8 +195,7 @@ frontend/                              # 仓库根（本目录）
     │   │   ├── MentionPicker.vue      # "@" 目录与文件选择面板
     │   │   ├── ThinkingToggle.vue     # 思考 / 快速切换
     │   │   ├── ModelPicker.vue        # 模型列表（含默认标识）
-    │   │   ├── SessionSearch.vue      # 会话内搜索（高亮 + 逐次跳转）
-    │   │   └── WorkspaceDrawer.vue    # 工作空间文件（9 目录，原生 dialog）
+    │   │   └── SessionSearch.vue      # 会话内搜索（高亮 + 逐次跳转）
     │   └── common/
     │       ├── BaseButton.vue
     │       ├── BaseDialog.vue         # 原生 <dialog> 封装

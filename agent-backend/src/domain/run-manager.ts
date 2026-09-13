@@ -157,7 +157,8 @@ function genMessageId(now: number): string {
   return `m_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 引用段文本：提交给 LLM 时追加在 user content 末尾（历史行本体保持纯净） */
+/** 引用段文本：提交给 LLM 时追加在 user content 末尾（历史行本体保持纯净）。
+ *  统一只给 user-data 相对路径：内置工具与 MCP 工具（file_args 转换）同口径 */
 function refsText(attachments: FileReference[]): string {
   return `\n[引用文件] ${attachments.map((a) => `${a.dir}/${a.filename}`).join('；')}`;
 }

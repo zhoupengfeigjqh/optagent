@@ -59,8 +59,13 @@ export interface DigitalHuman {
   mcp_servers: McpServerRef[]
 }
 
-/** MCP 连接状态：`connected` → 绿；`failed` → 红。 */
-export type McpConnectionStatus = 'connected' | 'failed'
+/**
+ * MCP 连接状态：`connected` → 绿；`failed` → 红；`unknown` → 灰。
+ *
+ * `unknown` 表示**尚无连接结果**（实例未创建，或首次建连进行中），
+ * 属正常观测态，MUST NOT 渲染为故障（FR-033、FR-034）。
+ */
+export type McpConnectionStatus = 'connected' | 'failed' | 'unknown'
 
 /** `GET /api/agents/current/mcp` 元素。 */
 export interface McpServiceStatus {

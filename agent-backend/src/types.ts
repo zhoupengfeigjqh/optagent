@@ -136,4 +136,18 @@ export interface McpServerConfig {
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;
+  /**
+   * 文件参数声明：工具名 → { 参数名: 转换模式 }。
+   * 调用前由 backend 把 LLM 传入的相对路径（user-data 沙箱内）铸成签名直链，
+   * 原参数位置换后发给服务；未声明的参数原样透传。
+   */
+  fileArgs?: Record<string, Record<string, 'url'>>;
 }
+
+/**
+ * MCP 服务连接状态（HTTP 契约投影，002 FR-019）：
+ * - `connected`：已建连可用
+ * - `failed`：建连失败，实例已降级并标记该服务不可用
+ * - `unknown`：尚无连接结果（实例未创建，或首次建连进行中）——不得误报为断线
+ */
+export type McpConnectionStatus = 'connected' | 'failed' | 'unknown';

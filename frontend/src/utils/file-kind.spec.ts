@@ -22,23 +22,25 @@ describe('fileExtension', () => {
 })
 
 describe('resolvePreviewKind（D12：按扩展名分派）', () => {
-  it('5 种扩展名分派正确', () => {
+  it('6 种扩展名分派正确', () => {
     expect(resolvePreviewKind('a.txt')).toBe('text')
     expect(resolvePreviewKind('a.csv')).toBe('text')
     expect(resolvePreviewKind('a.json')).toBe('text')
     expect(resolvePreviewKind('a.pdf')).toBe('pdf')
+    expect(resolvePreviewKind('a.png')).toBe('image')
     expect(resolvePreviewKind('a.xlsx')).toBe('download')
   })
 
   it('大小写不敏感', () => {
     expect(resolvePreviewKind('A.TXT')).toBe('text')
     expect(resolvePreviewKind('A.PDF')).toBe('pdf')
+    expect(resolvePreviewKind('A.PNG')).toBe('image')
     expect(resolvePreviewKind('A.XLSX')).toBe('download')
   })
 
   it('未知扩展名 → unsupported', () => {
     expect(resolvePreviewKind('a.docx')).toBe('unsupported')
-    expect(resolvePreviewKind('a.png')).toBe('unsupported')
+    expect(resolvePreviewKind('a.exe')).toBe('unsupported')
     expect(resolvePreviewKind('noext')).toBe('unsupported')
   })
 

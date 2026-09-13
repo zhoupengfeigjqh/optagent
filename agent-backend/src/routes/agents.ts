@@ -22,6 +22,27 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     warn: (msg: string) => ctx.loggers.logger.warn({ alert: true, event: 'agent.config.invalid' }, msg),
   };
 
+  /** 当前选中数字人的 MCP 状态快照（GET 轮询端点与 SSE 推送共用同一计算） */
+  const mcpSnapshot = (userId: string) => {
+    const selected = ctx.currentAgent.current(userId);
+    if (!selected) return { agent_name: null, mcp_servers: [] as unknown[] };
+
+    const detail = getAgentDetail(ctx.config.optAgentRoot, userId, selected.agentName, catalogLogger);
+    if (!detail) throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${selected.agentName}`);
+
+    // 池内活跃实例 → 取实际连接结果（connected/failed，建连进行中为 unknown）；
+    // 实例未创建（首次建连前或空闲回收后）→ 尚无连接结果，一律 unknown，不误报为断线（FR-019/020）
+    const instance = ctx.pool.get(selected) as ChatAgent | undefined;
+    return {
+      agent_name: selected.agentName,
+      mcp_servers: detail.mcp_servers.map((s) => ({
+        name: s.name,
+        transport: s.transport,
+        status: instance ? instance.mcpStatusOf(s.name) : 'unknown',
+      })),
+    };
+  };
+
   app.get('/api/agents', async () => {
     const userId = getCurrentUser().userId;
     return listAgents(ctx.config.optAgentRoot, userId, catalogLogger);
@@ -48,6 +69,8 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
 
     // 覆盖式选中：无需先 exit；切换后新数字人在下一轮对话生效
     ctx.currentAgent.select(userId, name);
+    // 快照随选中变化 → 通知 SSE 订阅方推送新数字人的 MCP 状态
+    ctx.mcpEvents.emitChanged(userId);
     return { agent_name: name, selected: true };
   });
 
@@ -55,6 +78,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     const userId = getCurrentUser().userId;
     const had = ctx.currentAgent.current(userId) !== undefined;
     ctx.currentAgent.exit(userId);
+    ctx.mcpEvents.emitChanged(userId);
     return { exited: had };
   });
 
@@ -67,22 +91,48 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
   // 002 US4 / FR-019/020：当前数字人挂载的 MCP 服务清单与连接状态
   app.get('/api/agents/current/mcp', async () => {
     const userId = getCurrentUser().userId;
-    const selected = ctx.currentAgent.current(userId);
-    if (!selected) return { agent_name: null, mcp_servers: [] };
+    return mcpSnapshot(userId);
+  });
 
-    const detail = getAgentDetail(ctx.config.optAgentRoot, userId, selected.agentName, catalogLogger);
-    if (!detail) throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${selected.agentName}`);
+  /**
+   * MCP 状态推送（SSE）：替代前端轮询。
+   * - 连接建立即推送一次当前快照（事件名 mcp-status，负载同 GET .../mcp）
+   * - 之后每当 mcpEvents 发出 changed（建连落定 / select / exit）重算快照再推
+   * - 25s 心跳注释行保活；客户端断开时退订并停心跳
+   * 事件以"快照可能已变"为语义，推送时在回调时刻按当时选中重算，
+   * 因此建连事件与切换事件交错时也不会把旧数字人的状态推给前端。
+   */
+  app.get('/api/agents/current/mcp/events', (req, reply) => {
+    const userId = getCurrentUser().userId;
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
 
-    // 池内活跃实例 → 取实际连接结果；实例未创建（首次建连中或空闲回收后）→ 一律 failed
-    const instance = ctx.pool.get(selected) as ChatAgent | undefined;
-    const unavailable = new Set(instance ? instance.unavailableMcp() : []);
-    return {
-      agent_name: selected.agentName,
-      mcp_servers: detail.mcp_servers.map((s) => ({
-        name: s.name,
-        transport: s.transport,
-        status: instance && !unavailable.has(s.name) ? 'connected' : 'failed',
-      })),
+    const push = (): void => {
+      let snapshot: unknown;
+      try {
+        snapshot = mcpSnapshot(userId);
+      } catch {
+        // 选中数字人配置损坏等异常：推送空快照，不断开流（与 GET 端点的静默降级语义一致）
+        snapshot = { agent_name: null, mcp_servers: [] };
+      }
+      reply.raw.write(`event: mcp-status\ndata: ${JSON.stringify(snapshot)}\n\n`);
     };
+
+    push();
+    const unsubscribe = ctx.mcpEvents.onChanged((changedUserId) => {
+      if (changedUserId === userId) push();
+    });
+    const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
+
+    req.raw.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      reply.raw.end();
+    });
   });
 }

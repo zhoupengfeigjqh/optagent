@@ -70,9 +70,3 @@ export const FEEDBACK = {
   UP: 'up',
   DOWN: 'down',
 } as const
-
-/** MCP 连接状态。 */
-export const MCP_STATUS = {
-  CONNECTED: 'connected',
-  FAILED: 'failed',
-} as const

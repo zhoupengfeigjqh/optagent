@@ -1,9 +1,0 @@
-node_modules/
-dist/
-coverage/
-specs/
-.codebuddy/
-.specify/
-package-lock.json
-*.min.js
-*.log

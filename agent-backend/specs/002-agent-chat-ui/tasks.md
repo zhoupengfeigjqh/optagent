@@ -110,11 +110,11 @@ description: '002-agent-chat-ui 任务拆分'
 
 ### Tests for User Story 4
 
-- [ ] T018 [P] [US4] 编写当前数字人/MCP 状态集成测试（选中/未选中/实例未创建时全 failed、实际 connected/failed 映射、会话进行中可直接覆盖式切换且不影响进行中的 run）于 tests/integration/agents-current.test.ts
+- [ ] T018 [P] [US4] 编写当前数字人/MCP 状态集成测试（选中/未选中/实例未创建时 status=unknown（不误报断线）、实际 connected/failed 映射、会话进行中可直接覆盖式切换且不影响进行中的 run）于 tests/integration/agents-current.test.ts
 
 ### Implementation for User Story 4
 
-- [ ] T019 [US4] 修改 src/routes/agents.ts：新增 GET /api/agents/current（currentAgent.current(userId)，未选中返回 `{agent_name:null}`）；新增 GET /api/agents/current/mcp（池内实例存在→取 unavailable 名单映射 connected/failed；实例未创建→配置清单全列且 status='failed'；不外泄 url/command）
+- [ ] T019 [US4] 修改 src/routes/agents.ts：新增 GET /api/agents/current（currentAgent.current(userId)，未选中返回 `{agent_name:null}`）；新增 GET /api/agents/current/mcp（池内实例存在→按实际建连结果映射 connected/failed/unknown；实例未创建→配置清单全列且 status='unknown'；不外泄 url/command）
 
 **Checkpoint**: US4 独立可用——前端刷新可恢复数字人与 MCP 状态展示
 

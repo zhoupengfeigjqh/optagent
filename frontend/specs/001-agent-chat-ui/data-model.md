@@ -167,19 +167,19 @@
 
 ### 8. MCP 服务状态（McpServiceStatus）
 
-**来源**: `GET /api/agents/current/mcp`
+**来源**: `GET /api/agents/current/mcp`（进入会话时一次性拉取）+ `GET /api/agents/current/mcp/events`（SSE 持续推送）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | `string` | 服务名 |
 | `transport` | `string` | 传输方式 |
-| `status` | `'connected' \| 'failed'` | 连接状态 |
+| `status` | `'connected' \| 'failed' \| 'unknown'` | 连接状态 |
 
 **规则**:
 
-- `connected` → 绿色 + 文本"连接正常"；`failed` → 红色 + 文本"连接失败"（FR-033、D14）。
-- 实例未创建时全部为 `failed`，前端 MUST NOT 视为异常弹窗（FR-034、FR-038）。
-- 状态 MUST 在会话进行中与数字人建连后被刷新（轮询或事件触发，滞后 ≤ 5s，SC-010）。
+- `connected` → 绿色 + 文本"连接正常"；`failed` → 红色 + 文本"连接失败"；`unknown` → 灰色 + 文本"未连接"（FR-033、D14）。
+- 实例未创建或首次建连进行中时为 `unknown`，前端 MUST NOT 视为异常弹窗，也 MUST NOT 呈现为失败（FR-034、FR-038）。
+- 状态 MUST 在会话进行中与数字人建连后被刷新（2026-09-12 修订：SSE 事件推送，替代轮询；后端即时检测断线并推送，满足 SC-010 滞后 ≤ 5s，实际近实时）。
 
 ---
 
@@ -236,19 +236,33 @@ pending ──upload──▶ uploading ──201──▶ success
 | `dir` | `string` | 目录名 |
 | `files` | `{ filename, size, updated_at }[]` | 文件清单，空目录为 `[]` |
 
-**规则**: MUST 固定返回 9 个目录，空目录展示为空态（FR-031、FR-019）。
+**规则**:
+
+- MUST 固定返回 9 个目录，空目录展示为空态（FR-031、FR-019）。
+- 分组折叠状态（`expandedDirs: string[]`，默认 `[]` 即全部收起）由 `useWorkspace` 持有，**仅存活于本次会话内**；面板收起再展开、清单重拉均不重置（FR-031）。
+- 删除（`remove(reference): Promise<boolean>`）经 `DELETE /api/files` 完成，成功后就地移除条目并提示；`shared` 目录界面不提供删除入口，后端兜底返回 `FILE_READONLY`（FR-053、FR-054）。
 
 ---
 
-### 12. 预览内容（PreviewTarget / PreviewContent）
+### 12. 工作空间面板（PanelView / PreviewTarget / PreviewContent）
 
-**来源**: 前端状态 + `GET /api/files/preview` | **对应**: FR-002、FR-045~FR-048
+**来源**: 前端状态 + `GET /api/files/preview` | **对应**: FR-001、FR-002、FR-045~FR-048、FR-053~FR-055
 
-**PreviewTarget**（右侧预览区的当前目标）
+**面板外壳**（`usePreview` 持有，决定右侧 1/3 渲染哪一侧）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `kind` | `'none' \| 'file'` | `none` 表示占位/收起状态 |
+| `open` | `boolean` | 面板是否展开；`false` 时右栏不占宽（FR-002） |
+| `view` | `'list' \| 'content'` | 文件空间列表态 / 文件内容态，二者互斥不并存（FR-001、FR-046） |
+
+**规则**: `openList()` → `open=true, view='list'`；`openFile(ref)` → `open=true, view='content'`；
+`backToList()` 只切 `view` 并清空内容态（面板保持展开）；`close()` 收起并复位为列表态（FR-055）。
+
+**PreviewTarget**（内容态的当前目标；列表态恒为 `none`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `kind` | `'none' \| 'file'` | `none` 表示内容态无目标 |
 | `dir` | `string` | 空间目录 |
 | `filename` | `string` | 文件名 |
 
@@ -263,9 +277,9 @@ pending ──upload──▶ uploading ──201──▶ success
 
 **规则**:
 
-- 外部地址（`http(s)://`）MUST NOT 进入该模型，直接 `window.open` 跳转（FR-045）。
+- 外部地址（`http(s)://`）MUST NOT 进入该模型，直接 `window.open` 跳转，且 MUST NOT 改变 `open` / `view`（FR-045）。
 - `.xlsx` → `download` 模式（FR-047）；超限（`413`）与不存在（`404`）→ `error` 模式并引导下载（FR-048）。
-- `kind === 'none'` 时右栏占位，不影响聊天区宽度（FR-002）。
+- 内容态展示中的文件被删除 → 退回列表态（`view='list'`，面板保持 `open`）（FR-055）。
 
 ---
 
@@ -381,7 +395,7 @@ Message      1 ──0..1 Feedback
 Message(user) 1 ──n FileReference ──▶ SpaceDirectory（9 个白名单之一）
 SpaceDirectory 1 ──n UploadedDocument
 SpaceDirectory 1 ──n WorkspaceDir.files
-SpaceDirectory 1 ──n PreviewTarget ──▶ PreviewContent
+SpaceDirectory 1 ──n WorkspacePanel（open / view）──▶ PreviewTarget ──▶ PreviewContent
 Model 1 ──n RunState（请求级，每轮一个）
 Conversation 1 ──0..1 RunState
 ```

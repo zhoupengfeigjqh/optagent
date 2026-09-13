@@ -101,8 +101,32 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (typeof s.url === 'string') cfg.url = s.url;
     if (s.write === true) cfg.write = true;
     if (typeof s.permission_boundary === 'string') cfg.permissionBoundary = s.permission_boundary;
+    if (s.file_args !== undefined) cfg.fileArgs = parseFileArgs(s.file_args, bad);
     return cfg;
   });
+}
+
+/** 解析 file_args：{ 工具名: { 参数名: "url" } }，非法结构即配置错误 */
+function parseFileArgs(
+  raw: unknown,
+  bad: (why: string) => Error,
+): Record<string, Record<string, 'url'>> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw bad('file_args 须为 {工具名: {参数名: "url"}}');
+  }
+  const result: Record<string, Record<string, 'url'>> = {};
+  for (const [tool, params] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
+      throw bad(`file_args.${tool} 须为 {参数名: "url"}`);
+    }
+    const ps: Record<string, 'url'> = {};
+    for (const [param, mode] of Object.entries(params as Record<string, unknown>)) {
+      if (mode !== 'url') throw bad(`file_args.${tool}.${param} 仅支持 "url"`);
+      ps[param] = 'url';
+    }
+    result[tool] = ps;
+  }
+  return result;
 }
 
 function loadSkills(dir: string, agentName: string, logger?: LoadLogger): SkillMeta[] {

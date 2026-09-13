@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { HistoryMessage } from '../types.js';
 import { THREADS_DIR, TMP_DIR, threadDir, userDataDir } from './dirs.js';
+import { removeDirRecursive, removeFileSafe } from './fs-safe.js';
 import type { HistoryStore } from './history.js';
 
 /** 默认标题截取长度（首条 user 消息前 20 字） */
@@ -200,13 +201,13 @@ export class ThreadStore {
   delete(userId: string, threadId: string): void {
     this.get(userId, threadId); // 不存在抛 ThreadNotFoundError
     this.titleCache.delete(this.cacheKey(userId, threadId));
-    fs.rmSync(threadDir(this.root, userId, threadId), { recursive: true, force: true });
+    removeDirRecursive(threadDir(this.root, userId, threadId));
     const tmpDir = path.join(userDataDir(this.root, userId), TMP_DIR);
     if (!fs.existsSync(tmpDir)) return;
     for (const entry of fs.readdirSync(tmpDir)) {
-      // tmp 产出均为文件；用 unlinkSync（rmSync 带选项对中文文件名会静默失败）
+      // tmp 产出均为文件；统一走安全删除原语（见 fs-safe）
       if (entry.startsWith(`${threadId}_`)) {
-        fs.unlinkSync(path.join(tmpDir, entry));
+        removeFileSafe(path.join(tmpDir, entry));
       }
     }
   }

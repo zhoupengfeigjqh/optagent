@@ -20,7 +20,6 @@ import MentionPicker from './MentionPicker.vue'
 import MessageList from './MessageList.vue'
 import SessionSearch from './SessionSearch.vue'
 import UploadMenu from './UploadMenu.vue'
-import WorkspaceDrawer from './WorkspaceDrawer.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -60,9 +59,7 @@ const {
   onRetryUpload,
   onToggleSearch,
   onToggleWorkspace,
-  onCloseWorkspace,
   onSearchKeyword,
-  onPreviewDownload,
   onToggleAgent,
   onCloseAgentPanel,
   onSwitchAgent,
@@ -194,16 +191,6 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         />
       </template>
     </Composer>
-
-    <!-- 工作空间文件抽屉（US8）：点击文件进入右侧内联预览 -->
-    <WorkspaceDrawer
-      :open="workspaceOpen"
-      :dirs="workspace.dirs.value"
-      :loading="workspace.loading.value"
-      @close="onCloseWorkspace"
-      @preview="onOpenFile"
-      @download="onPreviewDownload"
-    />
 
     <AgentPanel
       :open="agentPanelOpen"

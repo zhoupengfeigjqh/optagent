@@ -7,7 +7,7 @@
  * 三处 UI MUST 引用本模块，不得各自硬编码（FR-009 / FR-014 / FR-031、SC-021）：
  * 1. 加号上传入口（`UploadMenu.vue`）
  * 2. `@` 引用面板（`MentionPicker.vue`）
- * 3. 工作空间文件（`WorkspaceDrawer.vue`）
+ * 3. 文件空间列表（`WorkspaceFileTree.vue`，右栏面板列表态）
  */
 
 /** 空间目录条目：`dir` 为提交给后端的值，`label` 为界面展示名。 */

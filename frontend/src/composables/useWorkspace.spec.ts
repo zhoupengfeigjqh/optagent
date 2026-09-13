@@ -4,12 +4,15 @@ import { createFilesApi } from '../api/files'
 import { createHttpClient } from '../api/http'
 import { SPACE_DIRECTORIES } from '../constants/directories'
 import { createFetchRouter, errorResponse, jsonResponse } from '../../tests/helpers'
+import { createToastStore } from './useToast'
 import { createWorkspaceStore, emptyWorkspace } from './useWorkspace'
 
 function makeStore(routes: Parameters<typeof createFetchRouter>[0]) {
   const router = createFetchRouter(routes)
   const files = createFilesApi(createHttpClient({ baseUrl: '', fetchImpl: router.fetch }))
-  return { store: createWorkspaceStore({ files }), router }
+  // 提示队列是删除结果的观察点；拉长存活时长，避免测试收尾时定时器仍在飞
+  const toast = createToastStore({ durationMs: 60_000 })
+  return { store: createWorkspaceStore({ files, toast }), router, toast }
 }
 
 describe('useWorkspace', () => {
@@ -107,5 +110,96 @@ describe('useWorkspace', () => {
     expect(first).not.toBe(second)
     expect(first[0]).not.toBe(second[0])
     expect(first).toHaveLength(9)
+  })
+
+  /* ---------- US8：折叠状态 ---------- */
+
+  it('分组折叠状态默认全收起，toggleDir 可往返且不影响清单', async () => {
+    const { store } = makeStore({})
+
+    expect(store.expandedDirs.value).toEqual([])
+
+    store.toggleDir('生产计划')
+    expect(store.expandedDirs.value).toEqual(['生产计划'])
+
+    store.toggleDir('tmp')
+    expect(store.expandedDirs.value).toEqual(['生产计划', 'tmp'])
+
+    store.toggleDir('生产计划')
+    expect(store.expandedDirs.value).toEqual(['tmp'])
+  })
+
+  it('重新加载清单不会重置折叠状态（本次会话内保持）', async () => {
+    let call = 0
+    const { store } = makeStore({
+      'GET /api/files/workspace': () => {
+        call += 1
+        return jsonResponse({ dirs: [{ dir: 'tmp', files: [] }] })
+      },
+    })
+
+    store.toggleDir('tmp')
+    await store.load()
+    await store.load()
+
+    expect(call).toBe(2)
+    expect(store.expandedDirs.value).toEqual(['tmp'])
+  })
+
+  /* ---------- US8：删除 ---------- */
+
+  it('删除成功后仅移除该条并提示成功', async () => {
+    const { store, router, toast } = makeStore({
+      'GET /api/files/workspace': () =>
+        jsonResponse({
+          dirs: [
+            {
+              dir: '生产计划',
+              files: [
+                { filename: 'a.csv', size: 1, updated_at: '2026-09-10T00:00:00Z' },
+                { filename: 'b.csv', size: 2, updated_at: '2026-09-10T00:00:00Z' },
+              ],
+            },
+            { dir: 'tmp', files: [{ filename: 'c.csv', size: 3, updated_at: '2026-09-10T00:00:00Z' }] },
+          ],
+        }),
+      'DELETE /api/files': () =>
+        jsonResponse({ dir: '生产计划', filename: 'a.csv', deleted: true }),
+    })
+
+    await store.load()
+    const removed = await store.remove({ dir: '生产计划', filename: 'a.csv' })
+
+    expect(removed).toBe(true)
+    expect(store.filesOf('生产计划').map((file) => file.filename)).toEqual(['b.csv'])
+    // 其他目录不受影响
+    expect(store.filesOf('tmp')).toHaveLength(1)
+    expect(router.countOf('DELETE', '/api/files')).toBe(1)
+    expect(toast.items.value.at(-1)?.level).toBe('success')
+    expect(toast.items.value.at(-1)?.text).toContain('a.csv')
+  })
+
+  it('删除失败时提示原因且清单不变（共享目录被后端拒绝）', async () => {
+    const { store, toast } = makeStore({
+      'GET /api/files/workspace': () =>
+        jsonResponse({
+          dirs: [
+            {
+              dir: 'shared',
+              files: [{ filename: 'ref.csv', size: 1, updated_at: '2026-09-10T00:00:00Z' }],
+            },
+          ],
+        }),
+      'DELETE /api/files': () =>
+        errorResponse('FILE_READONLY', '共享空间为只读目录，不支持删除', 403),
+    })
+
+    await store.load()
+    const removed = await store.remove({ dir: 'shared', filename: 'ref.csv' })
+
+    expect(removed).toBe(false)
+    expect(store.filesOf('shared')).toHaveLength(1)
+    expect(toast.items.value.at(-1)?.level).toBe('error')
+    expect(toast.items.value.at(-1)?.text).toContain('只读')
   })
 })

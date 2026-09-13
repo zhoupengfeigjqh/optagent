@@ -8,6 +8,7 @@
  * 合并规则：条目 api_key 优先（支持 `$ENV_VAR` 引用），未填时 DEEPSEEK_API_KEY 兜底；
  * models 缺失或为空即拒启动。全部经 zod 校验后导出冻结对象。
  */
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -24,6 +25,10 @@ const envSchema = z.object({
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(10),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(32),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),
+  /** MCP 签名直链的对外基址（MCP 服务回源下载用；缺省本机回环，容器部署须显式配置） */
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  /** 签名直链 HMAC 密钥（≥16 字符；缺省启动时随机生成——重启后未过期 URL 失效） */
+  FILE_SIGN_SECRET: z.string().min(16).optional(),
 });
 
 const modelEntrySchema = z.object({
@@ -54,6 +59,10 @@ export interface AppConfig {
   previewMaxMb: number;
   readTruncateKb: number;
   shutdownGraceMs: number;
+  /** MCP 签名直链对外基址 */
+  publicBaseUrl: string;
+  /** 签名直链 HMAC 密钥 */
+  fileSignSecret: string;
   models: readonly ModelEntry[];
   /** 默认模型 = models 第一项 */
   defaultModel: ModelEntry;
@@ -136,6 +145,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     previewMaxMb: e.PREVIEW_MAX_MB,
     readTruncateKb: e.READ_TRUNCATE_KB,
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
+    publicBaseUrl: e.PUBLIC_BASE_URL ?? `http://localhost:${e.PORT}`,
+    fileSignSecret: e.FILE_SIGN_SECRET ?? randomBytes(32).toString('hex'),
     models,
     defaultModel: models[0]!,
   };

@@ -15,7 +15,11 @@ export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 export const MAX_UPLOAD_MB = 50
 
 /** 允许上传的扩展名白名单（小写，含点）。 */
-export const ALLOWED_UPLOAD_EXTENSIONS = ['.csv', '.xlsx', '.txt', '.json', '.pdf'] as const
+export const ALLOWED_UPLOAD_EXTENSIONS = [
+  '.csv', '.xlsx', '.txt', '.json', '.pdf',
+  // 图片：供 OCR 识别与内联预览
+  '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff',
+] as const
 
 /* ---------- 文件引用（FR-017、SC-019） ---------- */
 
@@ -42,11 +46,6 @@ export const MESSAGE_PAGE_MAX = 200
 
 /** 内联预览大小上限（MB），超限引导下载。 */
 export const PREVIEW_MAX_MB = 10
-
-/* ---------- MCP 状态轮询（SC-010） ---------- */
-
-/** 会话进行中 MCP 状态轮询间隔（毫秒），滞后 ≤ 5s。 */
-export const MCP_POLL_INTERVAL_MS = 5000
 
 /* ---------- 提示（D14） ---------- */
 

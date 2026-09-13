@@ -39,6 +39,7 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   FILE_REF_NOT_FOUND: '引用的文件不存在，请重新选择',
   FILE_TOO_LARGE: '文件超过 50MB',
   FILE_NOT_FOUND: '文件不存在或已被清理',
+  FILE_READONLY: '共享空间为只读目录，不支持删除',
   UPLOAD_DIR_FORBIDDEN: '该目录不允许访问',
   TMP_WRITE_FAILED: '临时空间写入失败，请重试',
   VALIDATION_FAILED: '参数不合法',

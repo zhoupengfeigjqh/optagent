@@ -19,23 +19,30 @@
 
 ### `AppShell.vue`
 
-三栏骨架容器，负责栅格与右侧预览区宽度（约 1/3，可收起）。
+三栏骨架容器，负责栅格与右侧工作空间面板宽度（约 1/3，可收起）。
 
 | props | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `previewOpen` | `boolean` | `false` | 右侧预览区是否展开 |
+| `previewOpen` | `boolean` | `false` | 右侧工作空间面板是否展开（列表态与内容态都算展开） |
 
 | slots | 说明 |
 |---|---|
 | `sidebar` | 左栏内容；**别名** `history` 作为其默认内容 |
 | `main` | 中栏内容；**别名** `chat` 作为其默认内容 |
-| `preview` | 右栏内容（仅在 `previewOpen=true` 时渲染） |
+| `preview` | 右栏内容（仅在 `previewOpen=true` 时渲染；当前填充 `WorkspacePanel`） |
 
 **实现超集**: 为兼容 `tasks.md` 中按 `#history` / `#chat` / `#preview` 的接线口径，
 `sidebar` / `main` 各提供一个别名插槽作为默认内容，两套命名皆可用（`App.vue` 实际使用
 `history` / `chat` / `preview`）。详见 §六。
 
 **测试要点**: `previewOpen=false` 时右栏不占位（中栏铺满）；`true` 时中栏宽度收窄且不产生横向滚动。
+
+**可拖动宽度（2026-09-11 补）**: 右栏展开时，其左缘渲染分隔条（`.app-shell__resizer`，
+`role="separator"` + `aria-orientation="vertical"` + `aria-valuenow/min/max` + `tabindex="0"`），
+可**手动拖动**调整右栏宽度：指针左移变宽、右移变窄；键盘 `←` / `→` 步进 16px（按住 `Shift` 为 64px）。
+宽度收敛在 `[280px, min(960px, 容器宽 - 520px)]`，避免面板拖没或挤掉中栏。
+未拖动时沿用 `--layout-preview-ratio`（≈1/3）；一旦拖动即经 `--layout-preview-width` 固定为像素值
+（窗口后续缩放不再改变）。实现见 `src/composables/useResizablePanel.ts`。
 
 ### `HistorySidebar.vue`
 
@@ -77,21 +84,31 @@
 （`opacity` 不影响可聚焦与可点击，键盘用户仍可 Tab 到达）；`disabled` 时禁用且不派发。
 点击**不触发** `select`（两者是兄弟节点）。依据 `backend-api.md` §3.5。
 
-### `PreviewPanel.vue`
+### `WorkspacePanel.vue`
+
+右侧 1/3 的**唯一**面板：内部在「文件空间列表」与「文件内容」之间互换，两者不并存（FR-001、FR-046）。
 
 | props | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `target` | `PreviewTarget` | `{kind:'none'}` | 当前预览目标 |
-| `content` | `PreviewContent \| null` | `null` | 加载结果 |
-| `loading` | `boolean` | `false` | |
+| `view` | `'list' \| 'content'` | `'list'` | 当前视图 |
+| `dirs` | `WorkspaceDir[]` | `[]` | 列表态：9 个目录及文件 |
+| `expandedDirs` | `readonly string[]` | `[]` | 列表态：已展开的目录名 |
+| `listLoading` | `boolean` | `false` | 列表态加载中 |
+| `target` | `PreviewTarget` | `{kind:'none'}` | 内容态目标 |
+| `content` | `PreviewContent \| null` | `null` | 内容态加载结果 |
+| `contentLoading` | `boolean` | `false` | 内容态加载中 |
 
 | emits | 载荷 | 说明 |
 |---|---|---|
-| `close` | — | 收起预览区 |
-| `download` | `{dir, filename}` | 点击"下载完整文件" |
+| `close` | — | 收起面板 |
+| `back` | — | 内容态 → 列表态（面板保持展开） |
+| `toggle-dir` | `string` | 折叠 / 展开分组 |
+| `preview` | `FileReference` | 点击文件名 → 切到内容态 |
+| `download` | `FileReference` | 下载 |
+| `remove` | `FileReference` | **二次确认后**的删除（FR-054） |
 
-**边界**: `kind='none'` → 占位态；`renderMode='error'` → `ErrorNotice` + 下载引导；
-`renderMode='download'` → 展示"该类型不支持内联预览" + 下载按钮。
+**边界**: `renderMode='error'` → `ErrorNotice` + 下载引导；`renderMode='download'` → 展示
+"该类型不支持内联预览" + 下载按钮。
 
 ---
 
@@ -110,7 +127,8 @@
 **实现超集**: 消息列表的渲染条件为 `expanded || 已有历史消息 || 本轮已开始（streaming !== null）`
 ——首轮尚未落盘时也需下移入口（FR-004）。所有接线（事件编排、浮层开关、生命周期）集中在
 `composables/useChatPanel.ts`（T081 为满足单文件 ≤500 行而拆分），本组件只保留 props 与模板；
-`SessionSearch` / `UploadMenu` / `MentionPicker` / `WorkspaceDrawer` / `AgentPanel` 均由本组件渲染。
+`SessionSearch` / `UploadMenu` / `MentionPicker` / `AgentPanel` 均由本组件渲染；右栏工作空间面板
+（`WorkspacePanel`）不在此列，它由装配层 `App.vue` 填充 `#preview` 插槽。
 详见 §六。
 
 ### `ChatHeader.vue`
@@ -146,9 +164,9 @@
 |---|---|---|
 | `name` | `string` | 必填 |
 | `transport` | `string` | 必填 |
-| `status` | `'connected' \| 'failed'` | 必填 |
+| `status` | `'connected' \| 'failed' \| 'unknown'` | 必填 |
 
-**测试要点**: 颜色与文本双通道（"连接正常"/"连接失败"）；状态切换只改样式与文本，不重挂载。
+**测试要点**: 颜色与文本双通道（"连接正常"/"连接失败"/"未连接"）；`unknown` 为中性灰、MUST NOT 呈现为故障；状态切换只改样式与文本，不重挂载。
 
 ### `AgentPanel.vue`（基于 `BaseDialog`）
 
@@ -443,21 +461,26 @@
 **测试要点**: 展示"第 n / 共 m 项"；`total=0` 且关键词非空 → 无结果提示（US8 场景 3）；
 `Enter` 等价于 `next`。
 
-### `WorkspaceDrawer.vue`（基于 `BaseDialog`）
+### `WorkspaceFileTree.vue`
+
+文件空间列表（纯展示，不发起请求）：9 个固定目录分组，**默认全部收起**（FR-031）。
 
 | props | 类型 | 默认 |
 |---|---|---|
-| `open` | `boolean` | `false` |
 | `dirs` | `WorkspaceDir[]` | `[]` |
+| `expandedDirs` | `readonly string[]` | `[]` |
 | `loading` | `boolean` | `false` |
 
 | emits | 载荷 |
 |---|---|
-| `close` | — |
+| `toggle-dir` | `string` |
 | `preview` | `FileReference` |
 | `download` | `FileReference` |
+| `remove` | `FileReference` |
 
-**测试要点**: 固定渲染 9 个目录分组（含空目录空态）；点击文件 emit `preview` 并关闭面板。
+**边界**: `shared` 为共享只读目录，**不渲染删除入口**（FR-053）。
+**测试要点**: 固定渲染 9 个目录分组；默认全部收起（既不渲染文件行也不渲染空态）；展开空目录显示空态；
+点击文件名只 emit `preview`（**不**自行收起面板，收起由 `WorkspacePanel` 承担）。
 
 ---
 
@@ -646,7 +669,7 @@ interface AppSessionOptions {
 | `loadCurrent()` | `() => Promise<void>` | 拉当前数字人与 MCP 状态 |
 | `loadDetail(name)` | `(name: string) => Promise<void>` | 拉详情 |
 | `switchTo(name)` | `(name: string) => Promise<void>` | select（**覆盖式，无需 exit**）→ 重新 loadCurrent（FR-037 修订） |
-| `startMcpPolling()` / `stopMcpPolling()` | `() => void` | 会话进行中按 ≤5s 轮询（SC-010） |
+| `startMcpSubscription()` / `stopMcpSubscription()` | `() => void` | 订阅后端 MCP 状态 SSE 推送（2026-09-12 修订：替代 ≤5s 轮询，SC-010） |
 | `loading` | `Readonly<Ref<boolean>>` | 加载态（**实现超集**） |
 | `switching` | `Readonly<Ref<boolean>>` | 切换请求进行中，供 `AgentPanel.busy`（**实现超集**） |
 | `error` | `Readonly<Ref<ErrorInfo \| null>>` | 最近一次错误（**实现超集**） |
@@ -839,7 +862,7 @@ interface AppSessionOptions {
 | `uploadOpen` / `agentPanelOpen` / `workspaceOpen` | `Ref<boolean>` | 纯 UI 浮层开关（本层唯一自有状态） |
 | `streaming` | `ComputedRef<StreamingView \| null>` | 本轮瞬态；`completed` 由刷新后的历史消息承载，故仅 `streaming` / `failed` / `aborted` 下传 |
 | `isFailed` / `errorInfo` / `sending` / `hasMessages` | `ComputedRef<...>` | 派生态 |
-| `onSend` / `onStop` / `onLoadMore` / `onRecover` / `onFeedback` / `onToggleThinking` / `onSelectModel` / `onToggleUpload` / `onCloseUpload` / `onPickFiles` / `onRetryUpload` / `onToggleSearch` / `onToggleWorkspace` / `onCloseWorkspace` / `onSearchKeyword` / `onPreviewDownload` / `onToggleAgent` / `onCloseAgentPanel` / `onSwitchAgent` / `onOpenLink` / `onOpenFile` / `onUpdateDraft` / `onSendFromToolbar` / `onInputText` / `onPickDir` / `onPickFile` / `onMentionKey` / `onRemoveReference` | 事件处理器 | 覆盖发送、中断、加载更早、断连恢复、反馈、思考、模型、上传、搜索、工作空间、数字人、跳转/预览与 `@` 引用等全部意图 |
+| `onSend` / `onStop` / `onLoadMore` / `onRecover` / `onFeedback` / `onToggleThinking` / `onSelectModel` / `onToggleUpload` / `onCloseUpload` / `onPickFiles` / `onRetryUpload` / `onToggleSearch` / `onToggleWorkspace` / `onSearchKeyword` / `onToggleAgent` / `onCloseAgentPanel` / `onSwitchAgent` / `onOpenLink` / `onOpenFile` / `onUpdateDraft` / `onSendFromToolbar` / `onInputText` / `onPickDir` / `onPickFile` / `onMentionKey` / `onRemoveReference` | 事件处理器 | 覆盖发送、中断、加载更早、断连恢复、反馈、思考、模型、上传、搜索、工作空间、数字人、跳转/预览与 `@` 引用等全部意图 |
 
 **为什么不算组件契约**: 见 §六 6.4。
 

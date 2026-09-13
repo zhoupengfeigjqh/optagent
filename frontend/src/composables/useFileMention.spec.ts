@@ -25,12 +25,15 @@ function makeWorkspace(): WorkspaceStore {
     dirs: ref(dirs),
     loading: ref(false),
     error: ref(null),
+    expandedDirs: ref<readonly string[]>([]),
     load: vi.fn(async () => undefined),
     filesOf: (dir: string) => dirs.find((item) => item.dir === dir)?.files ?? [],
     exists: (reference: FileReference) =>
       (WORKSPACE_FILES[reference.dir] ?? []).some(
         (file) => file.filename === reference.filename,
       ),
+    toggleDir: vi.fn(),
+    remove: vi.fn(async () => true),
   }
 }
 

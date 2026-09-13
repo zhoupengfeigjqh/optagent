@@ -14,7 +14,6 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import type { AgentsApi } from '../api/agents'
 import type { DigitalHuman, ErrorInfo, McpServiceStatus } from '../api/types'
-import { MCP_POLL_INTERVAL_MS } from '../constants/limits'
 import { RUN_PHASE, type RunPhase } from '../constants/events'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
@@ -26,8 +25,6 @@ export interface AgentsDeps {
   /** 读取本轮运行阶段（决定是否禁用切换） */
   getPhase: () => RunPhase
   toast?: ToastStore
-  /** MCP 状态轮询间隔（默认 5s，SC-010 要求滞后 ≤5s） */
-  pollIntervalMs?: number
   /** 切换成功后的回调（用于刷新会话列表等） */
   onSwitched?: () => void | Promise<void>
 }
@@ -47,14 +44,12 @@ export interface AgentsStore {
   loadCandidates(): Promise<void>
   refreshMcp(): Promise<void>
   switchTo(name: string): Promise<void>
-  startMcpPolling(): void
-  stopMcpPolling(): void
+  startMcpSubscription(): void
+  stopMcpSubscription(): void
 }
 
 /** 创建数字人状态。 */
 export function createAgentsStore(deps: AgentsDeps): AgentsStore {
-  const pollIntervalMs = deps.pollIntervalMs ?? MCP_POLL_INTERVAL_MS
-
   const currentAgent = ref<DigitalHuman | null>(null)
   const mcpServers = ref<McpServiceStatus[]>([])
   const candidates = ref<DigitalHuman[]>([])
@@ -62,7 +57,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   const switching = ref(false)
   const error = ref<ErrorInfo | null>(null)
 
-  let timer: ReturnType<typeof setInterval> | null = null
+  let unsubscribe: (() => void) | null = null
 
   const switchingDisabled = computed(() => deps.getPhase() === RUN_PHASE.STREAMING)
 
@@ -78,7 +73,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   async function refreshMcp(): Promise<void> {
     try {
       const response = await deps.agents.currentMcp()
-      // 实例未创建时后端返回全 failed：属正常状态，不视为异常（FR-034、FR-038）
+      // 实例未创建或首次建连进行中时后端返回 unknown：属正常状态，不视为异常（FR-034、FR-038）
       mcpServers.value = response.mcp_servers ?? []
     } catch {
       // MCP 状态为观测信息，失败不阻断主流程、不弹窗
@@ -144,21 +139,31 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     }
   }
 
-  function startMcpPolling(): void {
-    if (timer !== null) {
+  /**
+   * 订阅后端 MCP 状态推送（SSE），替代原 5s 轮询：
+   * 建连落定 / 切换 / 退出时后端主动推送快照，时延更低且无空转请求。
+   * 推送快照以后端"当前选中"为准，直接采用；断线由 EventSource 自动重连。
+   */
+  function startMcpSubscription(): void {
+    if (unsubscribe !== null) {
       return
     }
-    timer = setInterval(() => {
-      void refreshMcp()
-    }, pollIntervalMs)
+    try {
+      unsubscribe = deps.agents.subscribeMcp((snapshot) => {
+        mcpServers.value = snapshot.mcp_servers ?? []
+      })
+    } catch {
+      // SSE 不可用（极端环境）：保持 loadCurrent 的一次性结果，不影响主流程
+      unsubscribe = null
+    }
   }
 
-  function stopMcpPolling(): void {
-    if (timer === null) {
+  function stopMcpSubscription(): void {
+    if (unsubscribe === null) {
       return
     }
-    clearInterval(timer)
-    timer = null
+    unsubscribe()
+    unsubscribe = null
   }
 
   return {
@@ -174,8 +179,8 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     loadCandidates,
     refreshMcp,
     switchTo,
-    startMcpPolling,
-    stopMcpPolling,
+    startMcpSubscription,
+    stopMcpSubscription,
   }
 }
 

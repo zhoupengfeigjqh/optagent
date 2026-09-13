@@ -31,6 +31,7 @@
 
 - `dir` 白名单扩展为 10 个：7 业务目录 + shared + tmp
 - tmp 目录校验规则与其他目录一致（扩展名 .csv/.xlsx/.txt/.json/.pdf，≤50MB）
+- **2026-09-13 修订**：扩展名白名单新增图片 `.jpg/.jpeg/.png/.bmp/.webp/.gif/.tif/.tiff`（供 OCR 识别与内联预览）
 - 其余行为（时间戳落盘名、413/400 错误）不变
 
 ## 新增接口
@@ -45,11 +46,35 @@
 
 ### GET /api/agents/current/mcp
 
-→ `200 {"agent_name": "xxx", "mcp_servers": [{"name": "erp", "transport": "http", "status": "connected|failed"}]}`
+→ `200 {"agent_name": "xxx", "mcp_servers": [{"name": "erp", "transport": "http", "status": "connected|failed|unknown"}]}`
 
 - 未选中数字人 → `200 {"agent_name": null, "mcp_servers": []}`
-- 状态来源：池内活跃实例的实际连接结果；实例未创建 → 配置清单全列、状态一律 `failed`
-- 滞后口径：已连接服务的状态变更由连接错误回调即时反映（≤5s，FR-019/SC-005）；例外：实例**首次建连过程中**的服务状态在建连结果产生前按 failed 返回，建连耗时上限为 MCP_TIMEOUT_MS（默认 30s）
+- 状态来源：池内活跃实例的实际连接结果，三态语义：
+  - `connected` — 已建连可用
+  - `failed` — 建连失败，实例已降级并标记该服务不可用
+  - `unknown` — **尚无连接结果**（实例未创建，或首次建连进行中）
+- 实例未创建时 MUST 返回配置清单全列、状态一律 `unknown`；MUST NOT 以 `failed` 兜底
+  （否则切换数字人后尚未发起对话时，前端会把"尚未建连"误呈现为"断线故障"）
+- 滞后口径：已连接服务的状态变更由连接错误回调即时反映（≤5s，FR-019/SC-005）；
+  建连为异步（不阻断实例就绪），建连耗时上限 MCP_TIMEOUT_MS（默认 30s），期间状态为 `unknown`
+- 断线检测（2026-09-12 新增）：建连成功后连接意外断开（server 进程退出 / 网络中断，
+  经 MCP SDK transport onclose 回调检测）→ 立即将该 server 标记为 `failed` 并触发推送；
+  主动 close（实例回收）不误标。`connected` 由此代表真实活性而非"建连那一刻的快照"
+- 自动重连（2026-09-12 新增）：断线/建连失败后按退避表 5s→15s→30s→60s→60s 最多重连 5 次
+  （约 3 分钟窗口，覆盖 server 重启/网络抖动）；成功即清零计数并推送 `connected`。
+  5 次全败后停止后台重试，之后 `callTool`/`listTools` 命中不可用 server 时惰性补试一次，
+  server 恢复后于下次使用时自愈，无永久后台重试
+
+### GET /api/agents/current/mcp/events（SSE，2026-09-12 新增）
+
+MCP 状态推送流，替代前端轮询。
+
+→ `200 text/event-stream`；事件 `mcp-status`，`data` 为与 GET .../mcp 相同的快照 JSON
+
+- 连接建立即推送一次当前快照；之后每当内部事件总线发出变更（建连落定、连接断开、
+  select/exit 选中变化）按**当时选中**重算快照再推（交错事件不会推错数字人）
+- 25s 心跳注释行保活；客户端断开即退订
+- 快照计算异常（如选中数字人配置损坏）时推送 `{agent_name:null, mcp_servers:[]}`，不断开流
 
 ### PUT /api/threads/:id/messages/:mid/feedback
 
@@ -73,6 +98,17 @@
 → `200 {"dirs": [{"dir": "生产计划", "files": [{"filename": "a.csv", "size": 123, "updated_at": "..."}]}, ...]}`
 
 固定返回全部 9 个白名单目录（7 业务 + shared + tmp），空目录 files 为 `[]`。
+
+### GET /api/files/raw（2026-09-13 新增，MCP 签名直链回源）
+
+无会话下载端点：**URL 即凭证**，供 MCP 服务（OCR 等，无磁盘访问权）凭 backend 签发的 URL 回源取文件。
+签名铸造与 file_args 机制详见 `specs/003-ocr-mcp-signed-url/spec.md`。
+
+- 参数：`u`（用户）、`p`（user-data 相对路径）、`exp`（过期 epoch ms）、`sig`（HMAC-SHA256 hex）
+- `200`：文件字节；Content-Type 按扩展名映射（未知 octet-stream）；`Cache-Control: no-store`
+- `403 FILE_SIGN_INVALID`：验签失败或已过期（时效 24h）
+- `404 FILE_NOT_FOUND`：文件不存在或越权（验签后仍过 FileAccess 沙箱）
+- `400`：缺参
 
 ## 不变接口（确认满足前端需求，无需变更）
 

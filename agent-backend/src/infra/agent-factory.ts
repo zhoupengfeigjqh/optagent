@@ -14,9 +14,16 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import { userAgentsDir } from '../domain/dirs.js';
-import type { AgentConfigBundle, LlmEvent, ModelSelection, PoolKey } from '../types.js';
+import type {
+  AgentConfigBundle,
+  LlmEvent,
+  McpConnectionStatus,
+  ModelSelection,
+  PoolKey,
+} from '../types.js';
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
+import { mintSignedUrl } from './file-sign.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
 import { McpManager } from './mcp/mcp-manager.js';
@@ -25,6 +32,8 @@ import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
 export interface ChatAgent extends PooledInstance {
   readonly config: AgentConfigBundle;
   unavailableMcp(): string[];
+  /** 单服务连接状态（FR-019）：建连结果未产生前为 `unknown`，不误报为 `failed` */
+  mcpStatusOf(server: string): McpConnectionStatus;
   run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
 }
 
@@ -39,6 +48,12 @@ export interface AgentFactoryDeps {
   mcpTimeoutMs: number;
   /** read_file 截断上限（KB） */
   truncateKb?: number;
+  /** 签名直链对外基址（file_args 转换用） */
+  publicBaseUrl: string;
+  /** 签名直链 HMAC 密钥（file_args 转换用） */
+  fileSignSecret: string;
+  /** 实例内 MCP 单 server 建连落定时回调（server.ts 接线到事件总线 → SSE 推送） */
+  onMcpStatus?: (key: PoolKey) => void;
 }
 
 export class AgentInstanceFactory {
@@ -59,6 +74,7 @@ export class AgentInstanceFactory {
       logger: {
         warn: (msg: string) => logger.warn({ alert: true, agent_name: key.agentName }, msg),
       },
+      ...(this.deps.onMcpStatus ? { onStatusChange: () => this.deps.onMcpStatus!(key) } : {}),
     });
     // 异步并发建连：不 await，不阻断实例就绪（保首字延迟 SC-001）
     void mcp.connectAll(config.mcpServers);
@@ -69,6 +85,7 @@ export class AgentInstanceFactory {
       activeThreads: 0,
       lastActiveAt: Date.now(),
       unavailableMcp: () => mcp.unavailable(),
+      mcpStatusOf: (server) => mcp.statusOf(server),
       dispose: () => mcp.closeAll(),
       run: (req) => this.runWith(instance, mcp, req),
     };
@@ -106,7 +123,20 @@ export class AgentInstanceFactory {
       if (!mcp.isAvailable(server.name)) continue;
       try {
         const toolInfos = await mcp.listTools(server.name);
-        tools.push(...mcpToolsAsAgentTools(mcp, server.name, toolInfos));
+        // file_args 声明：绑定当前用户的 FileAccess + 签名直链铸造（远程服务回源下载）
+        const fileCtx = server.fileArgs
+          ? {
+              fileAccess: new FileAccess({
+                optAgentRoot: this.deps.root,
+                userId: inst.key.userId,
+                logger,
+              }),
+              userId: inst.key.userId,
+              mintUrl: (userId: string, relPath: string) =>
+                mintSignedUrl(this.deps.publicBaseUrl, this.deps.fileSignSecret, userId, relPath),
+            }
+          : undefined;
+        tools.push(...mcpToolsAsAgentTools(mcp, server.name, toolInfos, server.fileArgs, fileCtx));
       } catch (err) {
         logger.warn(
           { err, alert: true, agent_name: inst.key.agentName, event: 'mcp.listTools.failed' },
