@@ -11,7 +11,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { ErrorInfo, FeedbackValue, FileReference } from '../api/types'
-import { SPACE_DIRECTORIES } from '../constants/directories'
 import { RUN_PHASE } from '../constants/events'
 import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
@@ -151,7 +150,13 @@ export function useChatPanel() {
   }
 
   function onToggleUpload(): void {
-    uploadOpen.value = !uploadOpen.value
+    const next = !uploadOpen.value
+    uploadOpen.value = next
+    // 上传入口的目录树取自 workspace 接口（三空间）：展开时若还没有目录就补一次加载，
+    // 否则"进页面直接点加号"时目录为空，只会看到兜底文案
+    if (next && workspace.spaces.value.length === 0 && !workspace.loading.value) {
+      void workspace.load()
+    }
   }
 
   function onCloseUpload(): void {
@@ -159,7 +164,8 @@ export function useChatPanel() {
   }
 
   function onPickFiles(payload: { dir: string; files: FileList }): void {
-    void uploads.upload(payload.dir, Array.from(payload.files))
+    // 扩展名白名单按目标空间下发（workspace 接口），数据准备仅 csv/xlsx
+    void uploads.upload(payload.dir, Array.from(payload.files), workspace.uploadExtensionsOf(payload.dir))
   }
 
   function onRetryUpload(localId: string): void {
@@ -245,6 +251,10 @@ export function useChatPanel() {
     mention.handleInput(payload.value, payload.caret)
   }
 
+  function onPickSpace(space: string): void {
+    mention.pickSpace(space)
+  }
+
   function onPickDir(dir: string): void {
     mention.pickDir(dir)
   }
@@ -257,18 +267,11 @@ export function useChatPanel() {
     mention.close()
   }
 
-  /** Enter 确认当前高亮项（与面板内回车行为一致）。 */
+  /** Enter/→ 确认当前高亮项：空间/目录列下钻，文件列完成引用。 */
   function onConfirmMention(): void {
-    if (mention.stage.value === 'dir') {
-      const dir = SPACE_DIRECTORIES[mention.activeIndex.value]?.dir
-      if (dir) {
-        onPickDir(dir)
-      }
-      return
-    }
-    const file = mention.files.value[mention.activeIndex.value]
-    if (file && mention.activeDir.value !== null) {
-      onPickFile({ dir: mention.activeDir.value, filename: file.filename })
+    const reference = mention.confirmActive()
+    if (reference) {
+      onPickFile(reference)
     }
   }
 
@@ -281,8 +284,12 @@ export function useChatPanel() {
       case 'ArrowUp':
         mention.move(-1)
         break
+      case 'ArrowRight':
       case 'Enter':
         onConfirmMention()
+        break
+      case 'ArrowLeft':
+        mention.back()
         break
       case 'Escape':
         // 关闭面板但不丢文本（US4 场景 8）
@@ -344,8 +351,10 @@ export function useChatPanel() {
     onUpdateDraft,
     onSendFromToolbar,
     onInputText,
+    onPickSpace,
     onPickDir,
     onPickFile,
+    onConfirmMention,
     onMentionKey,
     onRemoveReference,
   }

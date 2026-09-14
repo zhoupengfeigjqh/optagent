@@ -1,30 +1,32 @@
 <script setup lang="ts">
 /**
- * 上传入口面板（T052，FR-009 / SC-021）
+ * 上传入口面板（T052 + 003 三空间改造）
  *
- * 固定渲染 **9 个**空间目录入口，目录集合一律取自 `constants/directories.ts`
- * （禁止硬编码，三处引用同一常量）。
+ * 目录树一律来自 workspace 接口（空间 → 子目录），前端不保留目录常量：
+ * - 数据准备：列出 scenario 定义的子目录，仅可选 csv/xlsx
+ * - 共享空间 / 临时空间：空间自身即目标目录，支持 csv/xlsx/txt/json/pdf/图片
+ * 文件选择的 `accept` 按目标空间的 `upload_extensions` 动态设置。
  *
  * 只用一个隐藏 `<input type="file">`：点击目录时记录目标目录并触发文件选择，
  * `change` 时把 `{ dir, files }` 交给上层（多选由 `useUploads` 逐文件各发一次请求）。
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-import { directoryLabel, type SpaceDirectory } from '../../constants/directories'
+import type { WorkspaceSpace } from '../../api/types'
 import type { UploadedDocument } from '../../composables/useUploads'
 import BaseIcon from '../common/BaseIcon.vue'
 import UploadItem from './UploadItem.vue'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** 是否展开 */
     open?: boolean
-    /** 目录白名单（9 个） */
-    directories: readonly SpaceDirectory[]
+    /** 三空间树（workspace 接口下发） */
+    spaces?: WorkspaceSpace[]
     /** 上传项（含失败原因与重试） */
     uploads?: UploadedDocument[]
   }>(),
-  { open: false, uploads: () => [] },
+  { open: false, spaces: () => [], uploads: () => [] },
 )
 
 const emit = defineEmits<{
@@ -34,8 +36,16 @@ const emit = defineEmits<{
 }>()
 
 const inputRef = ref<HTMLInputElement | null>(null)
-/** 本次文件选择的目标目录 */
+/** 本次文件选择的目标目录（相对空间路径） */
 const activeDir = ref<string | null>(null)
+
+/** 当前目标空间允许的文件类型（input accept 用） */
+const activeAccept = computed(() => {
+  const dir = activeDir.value
+  if (!dir) return ''
+  const space = props.spaces.find((item) => item.dirs.some((d) => d.dir === dir))
+  return space?.upload_extensions.join(',') ?? ''
+})
 
 function chooseDir(dir: string): void {
   activeDir.value = dir
@@ -66,14 +76,22 @@ function onRetry(localId: string): void {
 
 <template>
   <div v-if="open" class="upload-menu">
-    <ul class="upload-menu__dirs">
-      <li v-for="directory in directories" :key="directory.dir" class="upload-menu__dir">
-        <button type="button" class="upload-menu__dir-button" @click="chooseDir(directory.dir)">
-          <BaseIcon name="folder" :size="14" />
-          <span class="upload-menu__dir-label">{{ directoryLabel(directory.dir) }}</span>
-        </button>
-      </li>
-    </ul>
+    <div v-for="space in spaces" :key="space.name" class="upload-menu__space">
+      <p class="upload-menu__space-title">
+        {{ space.name }}
+        <span class="upload-menu__space-exts">{{ space.upload_extensions.join(' ') }}</span>
+      </p>
+      <ul class="upload-menu__dirs">
+        <li v-for="directory in space.dirs" :key="directory.dir" class="upload-menu__dir">
+          <button type="button" class="upload-menu__dir-button" @click="chooseDir(directory.dir)">
+            <BaseIcon name="folder" :size="14" />
+            <span class="upload-menu__dir-label">{{ directory.label }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <p v-if="spaces.length === 0" class="upload-menu__empty">文件空间加载中或尚未配置场景</p>
 
     <input
       ref="inputRef"
@@ -81,6 +99,7 @@ function onRetry(localId: string): void {
       type="file"
       multiple
       hidden
+      :accept="activeAccept"
       @change="onFileChange"
     />
 
@@ -104,6 +123,23 @@ function onRetry(localId: string): void {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+}
+
+.upload-menu__space-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.upload-menu__space-exts {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
 }
 
 .upload-menu__dirs {
@@ -131,6 +167,12 @@ function onRetry(localId: string): void {
 .upload-menu__dir-button:hover {
   background: var(--color-bg-subtle);
   color: var(--color-text);
+}
+
+.upload-menu__empty {
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .upload-menu__uploads {

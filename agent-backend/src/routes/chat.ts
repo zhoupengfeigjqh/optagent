@@ -20,15 +20,18 @@ import type { AppContext } from '../context.js';
 import { AgentConfigError } from '../domain/agent-instance.js';
 import { PoolExhaustedError } from '../domain/agent-pool.js';
 import { getCurrentUser } from '../domain/current-user.js';
-import { BUSINESS_DIRS, SHARED_DIR, TMP_DIR, userDataDir } from '../domain/dirs.js';
+import {
+  DirValidationError,
+  ScenarioNotConfiguredError,
+  parseSpaceDir,
+  userDataDir,
+} from '../domain/dirs.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
 import { ApiError } from '../server.js';
 import type { FileReference } from '../types.js';
 
 const MAX_ACTIVE_THREADS_PER_USER = 3;
 const MAX_ATTACHMENTS = 10;
-/** @ 引用可选目录（与文件列表/预览一致：7 业务 + shared + tmp） */
-const ATTACHMENT_DIRS: readonly string[] = [...BUSINESS_DIRS, SHARED_DIR, TMP_DIR];
 
 const messageBodySchema = {
   type: 'object',
@@ -54,19 +57,29 @@ const messageBodySchema = {
   },
 } as const;
 
-/** 校验 @ 引用：目录白名单 + 路径穿越 + 文件存在性 */
+/** 校验 @ 引用：空间目录校验（数据准备须命中 scenario 清单）+ 文件存在性 */
 function validateAttachments(root: string, userId: string, attachments: FileReference[]): void {
   for (const att of attachments) {
-    if (att.dir.includes('..') || path.isAbsolute(att.dir) || /[/\\]/.test(att.dir)) {
-      throw new ApiError(400, 'VALIDATION_FAILED', `非法目录参数: ${att.dir}`);
-    }
-    if (!ATTACHMENT_DIRS.includes(att.dir)) {
-      throw new ApiError(403, 'UPLOAD_DIR_FORBIDDEN', `目录 ${att.dir} 不开放，允许：${ATTACHMENT_DIRS.join('、')}`);
+    let target;
+    try {
+      target = parseSpaceDir(root, userId, att.dir);
+    } catch (err) {
+      if (err instanceof DirValidationError) {
+        throw new ApiError(
+          err.statusCode,
+          err.statusCode === 400 ? 'VALIDATION_FAILED' : 'UPLOAD_DIR_FORBIDDEN',
+          err.message,
+        );
+      }
+      if (err instanceof ScenarioNotConfiguredError) {
+        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+      }
+      throw err;
     }
     if (att.filename !== path.basename(att.filename) || att.filename.includes('..')) {
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${att.filename}`);
     }
-    const abs = path.join(userDataDir(root, userId), att.dir, att.filename);
+    const abs = path.join(userDataDir(root, userId), target.relPath, att.filename);
     if (!fs.existsSync(abs)) {
       throw new ApiError(400, 'FILE_REF_NOT_FOUND', `引用的文件不存在: ${att.dir}/${att.filename}`);
     }

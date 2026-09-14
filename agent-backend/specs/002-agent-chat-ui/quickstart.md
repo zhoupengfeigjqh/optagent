@@ -37,15 +37,22 @@ npm run dev   # 或 node --env-file=.env --watch ...（按 package.json 脚本�
 1. `GET /api/models` → 列表含默认标识，且无 api_key 字段
 2. 发消息带 `"model": "<第二项>"` → 正常完成；带 `"model": "not-exist"` → 400 MODEL_NOT_FOUND 且未产生 run
 
-## 场景 6：tmp 上传 / 预览 / @ 引用（US6 / FR-025~030）
+## 场景 6：三空间上传 / 预览 / @ 引用（US6 / FR-025~030）
 
-1. `POST /api/files/upload`（dir=tmp，1.csv）→ 201
-2. `GET /api/files/preview?dir=tmp&filename=...` → 200 且 `Content-Disposition: inline`、Content-Type 为 text/csv；预览不存在文件 → 404
-3. 发消息带 `attachments: [{dir:"tmp", filename:"..."}]` → done 后 `GET /api/threads/:id`，该 user 消息含 attachments 且 content 中带引用段；引用不存在文件 → 400 FILE_REF_NOT_FOUND
+> **2026-09-13 修订**：`dir` 取值由 `tmp` 改为三空间相对路径。
+
+1. `POST /api/files/upload`（dir=临时空间，1.csv）→ 201；
+   dir=数据准备/生产计划 传 .xlsx → 201，传 .txt → 400（该空间仅 csv/xlsx）；
+   dir=数据准备（不带子目录）→ 400；dir=数据准备/不存在 → 403
+2. `GET /api/files/preview?dir=临时空间&filename=...` → 200 且 `Content-Disposition: inline`、Content-Type 为 text/csv；预览不存在文件 → 404
+3. 发消息带 `attachments: [{dir:"临时空间", filename:"..."}]` → done 后 `GET /api/threads/:id`，该 user 消息含 attachments 且 content 中带引用段；引用不存在文件 → 400 FILE_REF_NOT_FOUND
 
 ## 场景 7：工作空间汇总（US7 / FR-030）
 
-1. 在 2 个目录各放文件，`GET /api/files/workspace` → 9 个目录全返回，有文件的目录 files 非空，空目录 `[]`
+1. 在三个空间各放文件（数据准备放在某个 scenario 子目录下），`GET /api/files/workspace` →
+   **预期**：`scenario` 为场景名；`spaces` 三项；数据准备下 `dirs` 数量等于 `data_prep_dirs` 数量，
+   有文件的目录 `files` 非空、空目录 `[]`；共享空间的 `deletable` 为 `false`
+2. 隐藏 `scenario.json` 后再次调用 → **预期**：503 `SCENARIO_NOT_CONFIGURED`
 
 ## 回归
 

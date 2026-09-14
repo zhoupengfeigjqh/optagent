@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { HistoryMessage } from '../types.js';
-import { THREADS_DIR, TMP_DIR, threadDir, userDataDir } from './dirs.js';
+import { SPACE_TMP, THREADS_DIR, threadDir, userDataDir } from './dirs.js';
 import { removeDirRecursive, removeFileSafe } from './fs-safe.js';
 import type { HistoryStore } from './history.js';
 
@@ -202,7 +202,7 @@ export class ThreadStore {
     this.get(userId, threadId); // 不存在抛 ThreadNotFoundError
     this.titleCache.delete(this.cacheKey(userId, threadId));
     removeDirRecursive(threadDir(this.root, userId, threadId));
-    const tmpDir = path.join(userDataDir(this.root, userId), TMP_DIR);
+    const tmpDir = path.join(userDataDir(this.root, userId), SPACE_TMP);
     if (!fs.existsSync(tmpDir)) return;
     for (const entry of fs.readdirSync(tmpDir)) {
       // tmp 产出均为文件；统一走安全删除原语（见 fs-safe）

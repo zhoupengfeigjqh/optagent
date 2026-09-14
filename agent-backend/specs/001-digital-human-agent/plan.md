@@ -42,11 +42,12 @@ Agent 核心采用 **`@earendil-works/pi-agent-core@0.85.1`（架构方案 A：�
 首个 SSE 事件）
 
 **Constraints**: 单机最多 5 个 Agent 实例；1 用户 : 1 数字人 : 3 并发 thread；
-MCP 超时 30s 重试 1 次；写操作仅限 tmp/ 且强制 thread_id 前缀；不引入 Redis；
+MCP 超时 30s 重试 1 次；写操作仅限 `临时空间/` 且强制 thread_id 前缀；不引入 Redis；
 文件 ≤500 行（章程要求）
 
 **Scale/Scope**: 本期默认 admin 单用户（多用户隔离模型已就位）；6 个内置工具；
-7 业务目录 + tmp + shared；5 组 API（对话/对话管理/文件/数字人查询/监控与用量）
+三空间（数据准备 + 共享空间 + 临时空间，数据准备子目录由 scenario.json 定义）；
+5 组 API（对话/对话管理/文件/数字人查询/监控与用量）
 
 ## Constitution Check
 
@@ -137,7 +138,9 @@ docs/
 └── api.md                    # 手写接口文档（与 contracts/ 同步）
 
 .opt-agent/                   # 运行期数据根（gitignore）
-├── users/{user_id}/user-data/{7业务目录, tmp/, shared/, threads/{thread_id}/}
+├── users/{user_id}/scenario.json                 # 场景名 + 数据准备子目录（FR-007a）
+├── users/{user_id}/user-data/数据准备/{scenario 定义的子目录}/
+├── users/{user_id}/user-data/{共享空间, 临时空间, threads/{thread_id}/}
 ├── users/{user_id}/agents/{agent_name}/{SOUL.md, MCP.json, TOOL.json, skills/}
 ├── usage.db
 └── logs/

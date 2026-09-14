@@ -1,40 +1,49 @@
 <script setup lang="ts">
 /**
- * `@` 引用面板（T056，FR-014 / FR-019 / SC-016）
+ * `@` 引用面板（003 三空间级联）
  *
- * 两阶段：目录列表（固定 9 项，取自 `constants/directories.ts`）→ 该目录的文件列表。
- * 键盘可达：`↑`/`↓` 派发 `move`、`Enter` 选中当前项（目录 → `pick-dir`，文件 → `pick-file`）、
- * `Esc` 派发 `close`；空目录给出空态提示（FR-019）。
+ * 三级**点击**级联（悬停不展开，避免误触发）：
+ * - 一级：数据准备 / 共享空间 / 临时空间（数据来自 workspace 接口，无前端常量）
+ * - 点击「数据准备」→ 展开二级 scenario 子目录；点击子目录 → 三级文件
+ * - 点击「共享空间/临时空间」→ 直接出文件列
+ * 键盘：`↑`/`↓` 当前列内移动、`Enter` 下钻或选中文件、`→` 下钻、`←` 回退、`Esc` 关闭。
  *
  * 组件不持有业务状态：选项与高亮均由 props 驱动，选择意图上抛给装配层。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
-import type { FileReference } from '../../api/types'
-import { directoryLabel, type SpaceDirectory } from '../../constants/directories'
+import type { FileReference, WorkspaceDir, WorkspaceSpace } from '../../api/types'
 import BaseIcon from '../common/BaseIcon.vue'
+import type { MentionColumn } from '../../composables/useFileMention'
 
 const props = withDefaults(
   defineProps<{
     /** 是否展开 */
     open?: boolean
-    /** 当前阶段 */
-    stage?: 'dir' | 'file'
-    /** 目录白名单（9 个，唯一来源） */
-    directories: readonly SpaceDirectory[]
-    /** 文件阶段的目标目录 */
+    /** 三空间树 */
+    spaces?: WorkspaceSpace[]
+    /** 当前聚焦列 */
+    column?: MentionColumn
+    /** 已选空间名 */
+    activeSpace?: string | null
+    /** 已选目录（相对路径） */
     activeDir?: string | null
-    /** 当前目录的文件清单 */
+    /** 二级列目录（仅数据准备） */
+    dirs?: WorkspaceDir[]
+    /** 三级列文件清单 */
     files?: { filename: string }[]
-    /** 键盘高亮项索引 */
+    /** 当前列键盘高亮索引 */
     activeIndex?: number
     /** 文件清单加载中 */
     loading?: boolean
   }>(),
   {
     open: false,
-    stage: 'dir',
+    spaces: () => [],
+    column: 'space',
+    activeSpace: null,
     activeDir: null,
+    dirs: () => [],
     files: () => [],
     activeIndex: 0,
     loading: false,
@@ -42,29 +51,16 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
+  'pick-space': [space: string]
   'pick-dir': [dir: string]
   'pick-file': [reference: FileReference]
   close: []
   move: [delta: number]
+  confirm: []
+  back: []
 }>()
 
 const listRef = ref<HTMLElement | null>(null)
-
-const dirs = computed(() =>
-  props.directories.map((directory) => ({
-    key: directory.dir,
-    label: directoryLabel(directory.dir),
-  })),
-)
-
-const activeDirLabel = computed(() =>
-  props.activeDir === null ? '' : directoryLabel(props.activeDir),
-)
-
-/** 当前目录下无可选文件（且不在加载中）。 */
-const emptyDirs = computed(
-  () => props.stage === 'file' && !props.loading && props.files.length === 0,
-)
 
 function onKeydown(event: KeyboardEvent): void {
   if (!props.open) {
@@ -79,9 +75,17 @@ function onKeydown(event: KeyboardEvent): void {
       event.preventDefault()
       emit('move', -1)
       break
+    case 'ArrowRight':
+      event.preventDefault()
+      emit('confirm')
+      break
+    case 'ArrowLeft':
+      event.preventDefault()
+      emit('back')
+      break
     case 'Enter':
       event.preventDefault()
-      confirmActive()
+      emit('confirm')
       break
     case 'Escape':
       event.preventDefault()
@@ -92,19 +96,9 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-/** 回车确认当前高亮项（目录阶段选目录、文件阶段选文件）。 */
-function confirmActive(): void {
-  if (props.stage === 'dir') {
-    const dir = props.directories[props.activeIndex]
-    if (dir) {
-      emit('pick-dir', dir.dir)
-    }
-    return
-  }
-  const file = props.files[props.activeIndex]
-  if (file && props.activeDir !== null) {
-    emit('pick-file', { dir: props.activeDir, filename: file.filename })
-  }
+/** 当前列是否聚焦（键盘高亮仅作用于聚焦列） */
+function isActive(column: MentionColumn, index: number): boolean {
+  return props.column === column && props.activeIndex === index
 }
 
 // 高亮项滚动入视区（长列表键盘导航）
@@ -122,30 +116,55 @@ watch(
 
 <template>
   <div v-if="open" ref="listRef" class="mention-picker" role="listbox" @keydown="onKeydown">
-    <p v-if="stage === 'file'" class="mention-picker__title">{{ activeDirLabel }}</p>
-
-    <!-- 目录阶段：固定 9 项（SC-021） -->
-    <template v-if="stage === 'dir'">
+    <!-- 一级：三空间 -->
+    <div class="mention-picker__column">
       <button
-        v-for="(item, index) in dirs"
-        :key="item.key"
+        v-for="(space, index) in spaces"
+        :key="space.name"
         type="button"
         role="option"
         class="mention-picker__item"
-        :class="{ 'mention-picker__item--active': index === activeIndex }"
-        :aria-selected="index === activeIndex ? 'true' : 'false'"
-        :data-active="index === activeIndex ? 'true' : 'false'"
-        @click="emit('pick-dir', item.key)"
+        :class="{
+          'mention-picker__item--active': isActive('space', index),
+          'mention-picker__item--expanded': activeSpace === space.name,
+        }"
+        :aria-selected="isActive('space', index) ? 'true' : 'false'"
+        :data-active="isActive('space', index) ? 'true' : 'false'"
+        @click="emit('pick-space', space.name)"
+      >
+        <BaseIcon name="folder" :size="14" />
+        <span class="mention-picker__label">{{ space.name }}</span>
+        <BaseIcon name="chevron-right" :size="12" class="mention-picker__caret" />
+      </button>
+      <p v-if="spaces.length === 0 && !loading" class="mention-picker__empty">暂无可选空间</p>
+    </div>
+
+    <!-- 二级：数据准备子目录 -->
+    <div v-if="column !== 'space' && dirs.length > 0" class="mention-picker__column">
+      <button
+        v-for="(item, index) in dirs"
+        :key="item.dir"
+        type="button"
+        role="option"
+        class="mention-picker__item"
+        :class="{
+          'mention-picker__item--active': isActive('dir', index),
+          'mention-picker__item--expanded': activeDir === item.dir,
+        }"
+        :aria-selected="isActive('dir', index) ? 'true' : 'false'"
+        :data-active="isActive('dir', index) ? 'true' : 'false'"
+        @click="emit('pick-dir', item.dir)"
       >
         <BaseIcon name="folder" :size="14" />
         <span class="mention-picker__label">{{ item.label }}</span>
+        <BaseIcon name="chevron-right" :size="12" class="mention-picker__caret" />
       </button>
-    </template>
+    </div>
 
-    <!-- 文件阶段 -->
-    <template v-else>
+    <!-- 三级：文件 -->
+    <div v-if="column === 'file'" class="mention-picker__column">
       <p v-if="loading" class="mention-picker__hint">正在加载文件…</p>
-      <p v-else-if="emptyDirs" class="mention-picker__empty">该目录暂无文件</p>
+      <p v-else-if="files.length === 0" class="mention-picker__empty">该目录暂无文件</p>
       <template v-else>
         <button
           v-for="(item, index) in files"
@@ -153,34 +172,39 @@ watch(
           type="button"
           role="option"
           class="mention-picker__item"
-          :class="{ 'mention-picker__item--active': index === activeIndex }"
-          :aria-selected="index === activeIndex ? 'true' : 'false'"
-          :data-active="index === activeIndex ? 'true' : 'false'"
+          :class="{ 'mention-picker__item--active': isActive('file', index) }"
+          :aria-selected="isActive('file', index) ? 'true' : 'false'"
+          :data-active="isActive('file', index) ? 'true' : 'false'"
           @click="emit('pick-file', { dir: activeDir ?? '', filename: item.filename })"
         >
           <BaseIcon name="file" :size="14" />
           <span class="mention-picker__label">{{ item.filename }}</span>
         </button>
       </template>
-    </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .mention-picker {
+  display: flex;
+  align-items: flex-start;
   max-height: 240px;
-  overflow-y: auto;
-  padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
   box-shadow: 0 8px 24px rgb(15 20 30 / 14%);
 }
 
-.mention-picker__title {
-  padding: var(--space-1) var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
+.mention-picker__column {
+  min-width: 140px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.mention-picker__column + .mention-picker__column {
+  border-left: 1px solid var(--color-border);
 }
 
 .mention-picker__item {
@@ -199,9 +223,23 @@ watch(
   cursor: pointer;
 }
 
-.mention-picker__item--active {
+.mention-picker__item--active,
+.mention-picker__item--expanded {
   background: var(--color-bg-subtle);
   color: var(--color-text);
+}
+
+.mention-picker__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mention-picker__caret {
+  flex: none;
+  color: var(--color-text-muted);
 }
 
 .mention-picker__hint,
@@ -209,5 +247,6 @@ watch(
   padding: var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+  white-space: nowrap;
 }
 </style>

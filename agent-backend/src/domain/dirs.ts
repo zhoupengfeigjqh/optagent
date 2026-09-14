@@ -1,28 +1,45 @@
 /**
- * 目录初始化模块：`.opt-agent/` 运行期数据根。
+ * 目录初始化与场景（scenario）模块：`.opt-agent/` 运行期数据根。
  *
- * - users/{user_id}/user-data/ 下 7 业务目录 + tmp + shared + threads
- * - users/{user_id}/agents/（数字人配置目录）
- * - logs/ 惰性创建（由 logging 模块自行 mkdir）
+ * 文件空间固定 3 个一级目录（空间）：
+ * - `数据准备/`：Agent 只读；二级子目录由 users/{userId}/scenario.json 预定义
+ *   （用户随时更换场景 → 改文件即生效，运行期按 mtime 惰性重读）
+ * - `共享空间/`：Agent 只读
+ * - `临时空间/`：Agent 可读写（写产出强制 `{thread_id}_` 前缀，7 天未访问清理）
+ *
+ * scenario.json 缺失/损坏：空间骨架照常创建，业务接口报
+ * SCENARIO_NOT_CONFIGURED（"用户未设置场景信息，请联系管理员"），服务不中断。
+ *
  * 幂等：重复调用不产生副作用。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** 7 个固定业务目录（Agent 只读，用户可上传） */
-export const BUSINESS_DIRS = [
-  '生产计划',
-  '产线信息',
-  '切换时间',
-  '求解时间',
-  '产线电价',
-  '目标优先级',
-  '使用规则',
-] as const;
+/** 三个固定空间目录 */
+export const SPACE_PREP = '数据准备';
+export const SPACE_SHARED = '共享空间';
+export const SPACE_TMP = '临时空间';
+export const SPACES = [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const;
+export type SpaceName = (typeof SPACES)[number];
 
-export const SHARED_DIR = 'shared';
-export const TMP_DIR = 'tmp';
 export const THREADS_DIR = 'threads';
+
+/** 各空间允许上传的扩展名（小写含点） */
+const DOCUMENT_EXTS = ['.csv', '.xlsx', '.txt', '.json', '.pdf'] as const;
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff'] as const;
+
+export interface SpacePolicy {
+  /** Agent 是否可写（仅临时空间） */
+  agentWritable: boolean;
+  /** 该空间允许上传的扩展名 */
+  uploadExtensions: readonly string[];
+}
+
+export const SPACE_POLICIES: Record<SpaceName, SpacePolicy> = {
+  [SPACE_PREP]: { agentWritable: false, uploadExtensions: ['.csv', '.xlsx'] },
+  [SPACE_SHARED]: { agentWritable: false, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
+  [SPACE_TMP]: { agentWritable: true, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
+};
 
 /** 用户数据根：users/{userId}/user-data */
 export function userDataDir(optAgentRoot: string, userId: string): string {
@@ -33,14 +50,18 @@ export function userAgentsDir(optAgentRoot: string, userId: string): string {
   return path.join(optAgentRoot, 'users', userId, 'agents');
 }
 
+export function scenarioPath(optAgentRoot: string, userId: string): string {
+  return path.join(optAgentRoot, 'users', userId, 'scenario.json');
+}
+
 export function threadDir(optAgentRoot: string, userId: string, threadId: string): string {
   return path.join(userDataDir(optAgentRoot, userId), THREADS_DIR, threadId);
 }
 
-/** 初始化用户目录结构（幂等） */
+/** 初始化用户目录骨架（幂等）：3 空间 + threads + agents；场景子目录由 loadScenario 惰性创建 */
 export function ensureUserDirs(optAgentRoot: string, userId: string): void {
   const data = userDataDir(optAgentRoot, userId);
-  for (const dir of [...BUSINESS_DIRS, TMP_DIR, SHARED_DIR, THREADS_DIR]) {
+  for (const dir of [...SPACES, THREADS_DIR]) {
     fs.mkdirSync(path.join(data, dir), { recursive: true });
   }
   fs.mkdirSync(userAgentsDir(optAgentRoot, userId), { recursive: true });
@@ -50,4 +71,165 @@ export function ensureUserDirs(optAgentRoot: string, userId: string): void {
 export function ensureRootDirs(optAgentRoot: string, userIds: string[] = []): void {
   fs.mkdirSync(optAgentRoot, { recursive: true });
   for (const userId of userIds) ensureUserDirs(optAgentRoot, userId);
+}
+
+/* ---------- scenario.json ---------- */
+
+export class ScenarioNotConfiguredError extends Error {
+  readonly code = 'SCENARIO_NOT_CONFIGURED';
+  constructor(userId: string) {
+    super(`用户 ${userId} 未设置场景信息，请联系管理员（缺少 users/${userId}/scenario.json）`);
+    this.name = 'ScenarioNotConfiguredError';
+  }
+}
+
+export interface Scenario {
+  /** 场景名（展示用） */
+  name: string;
+  /** 数据准备空间的二级子目录清单 */
+  dataPrepDirs: string[];
+}
+
+interface ScenarioCacheEntry {
+  mtimeMs: number;
+  scenario: Scenario;
+}
+
+const scenarioCache = new Map<string, ScenarioCacheEntry>();
+
+const DIR_NAME_PATTERN = /^[^/\\..][^/\\]{0,63}$/;
+
+/**
+ * 读取场景配置（mtime 缓存 + 惰性建目录）。
+ *
+ * - 文件缺失/损坏/字段非法 → ScenarioNotConfiguredError（接口层映射 503）
+ * - 成功时确保数据准备下的子目录存在（惰性创建，支持用户运行期改配置即生效）
+ * - 单个非法目录名跳过并计入 `skipped`（不阻断其余目录）
+ */
+export function loadScenario(
+  optAgentRoot: string,
+  userId: string,
+  logger?: { warn(msg: string): void },
+): Scenario {
+  const file = scenarioPath(optAgentRoot, userId);
+  const key = `${optAgentRoot}::${userId}`;
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    scenarioCache.delete(key);
+    throw new ScenarioNotConfiguredError(userId);
+  }
+
+  const cached = scenarioCache.get(key);
+  if (cached && cached.mtimeMs === stat.mtimeMs) {
+    ensurePrepDirs(optAgentRoot, userId, cached.scenario.dataPrepDirs);
+    return cached.scenario;
+  }
+
+  let scenario: Scenario;
+  try {
+    const obj = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      scenario?: unknown;
+      data_prep_dirs?: unknown;
+    };
+    if (typeof obj.scenario !== 'string' || obj.scenario.trim() === '') {
+      throw new Error('scenario 字段缺失');
+    }
+    if (!Array.isArray(obj.data_prep_dirs)) {
+      throw new Error('data_prep_dirs 须为数组');
+    }
+    const dirs: string[] = [];
+    for (const item of obj.data_prep_dirs) {
+      if (typeof item !== 'string' || !DIR_NAME_PATTERN.test(item) || item.includes('..')) {
+        logger?.warn(`scenario.json 非法目录名已跳过: ${String(item)}`);
+        continue;
+      }
+      if (!dirs.includes(item)) dirs.push(item);
+    }
+    if (dirs.length === 0) {
+      throw new Error('data_prep_dirs 无有效目录');
+    }
+    scenario = { name: obj.scenario.trim(), dataPrepDirs: dirs };
+  } catch (err) {
+    if (err instanceof ScenarioNotConfiguredError) throw err;
+    logger?.warn(
+      `scenario.json 读取失败（${err instanceof Error ? err.message : String(err)}），按未配置处理`,
+    );
+    scenarioCache.delete(key);
+    throw new ScenarioNotConfiguredError(userId);
+  }
+
+  scenarioCache.set(key, { mtimeMs: stat.mtimeMs, scenario });
+  ensurePrepDirs(optAgentRoot, userId, scenario.dataPrepDirs);
+  return scenario;
+}
+
+/** 惰性创建数据准备子目录（幂等） */
+function ensurePrepDirs(optAgentRoot: string, userId: string, dirs: readonly string[]): void {
+  const prep = path.join(userDataDir(optAgentRoot, userId), SPACE_PREP);
+  for (const dir of dirs) {
+    fs.mkdirSync(path.join(prep, dir), { recursive: true });
+  }
+}
+
+/* ---------- 目录参数解析（上传/列表/引用共用） ---------- */
+
+export interface SpaceDirTarget {
+  /** 所属空间 */
+  space: SpaceName;
+  /** 数据准备的二级目录名（其余空间为 undefined） */
+  sub?: string;
+  /** 相对 user-data 的 posix 路径（如 数据准备/生产计划、共享空间） */
+  relPath: string;
+}
+
+export class DirValidationError extends Error {
+  readonly code = 'DIR_VALIDATION';
+  constructor(
+    readonly statusCode: 400 | 403,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DirValidationError';
+  }
+}
+
+/**
+ * 解析并校验目录参数（`dir` 为相对 user-data 的路径）：
+ * - 穿越/绝对路径/反斜杠 → DirValidationError(400)
+ * - 一级必须是三空间之一；仅数据准备允许（且必须）带二级目录，二级须在 scenario 清单内 → 403
+ * - scenario 未配置 → ScenarioNotConfiguredError（上层映射 503）
+ */
+export function parseSpaceDir(optAgentRoot: string, userId: string, dir: string): SpaceDirTarget {
+  if (!dir || path.isAbsolute(dir) || dir.includes('..') || dir.includes('\\')) {
+    throw new DirValidationError(400, `非法目录参数: ${dir}`);
+  }
+  const segments = dir.split('/').filter((s) => s.length > 0);
+  const space = segments[0] as SpaceName | undefined;
+  if (!space || !(SPACES as readonly string[]).includes(space)) {
+    throw new DirValidationError(
+      403,
+      `目录 ${dir} 不开放，允许的空间：${SPACES.join('、')}`,
+    );
+  }
+  if (space === SPACE_PREP) {
+    const sub = segments[1];
+    if (!sub || segments.length > 2) {
+      throw new DirValidationError(400, `数据准备需指定二级目录（如 数据准备/生产计划）: ${dir}`);
+    }
+    const scenario = loadScenario(optAgentRoot, userId);
+    if (!scenario.dataPrepDirs.includes(sub)) {
+      throw new DirValidationError(
+        403,
+        `目录 ${dir} 不在场景清单内，允许：${scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`).join('、')}`,
+      );
+    }
+    return { space, sub, relPath: `${SPACE_PREP}/${sub}` };
+  }
+  if (segments.length > 1) {
+    throw new DirValidationError(400, `${space} 不支持子目录: ${dir}`);
+  }
+  return { space, relPath: space };
 }

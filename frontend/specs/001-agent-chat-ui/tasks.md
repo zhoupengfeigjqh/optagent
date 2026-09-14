@@ -48,7 +48,7 @@ description: "Task list for feature implementation"
 
 ### 常量与契约类型
 
-- [X] T007 [P] 定义空间目录白名单唯一来源 `src/constants/directories.ts` 与其测试 `src/constants/directories.spec.ts`（恒为 9 个：7 业务 + `shared` + `tmp`；断言三处引用同一常量，V-01）
+- [X] T007 [P] 定义空间目录白名单唯一来源 `src/constants/directories.ts` 与其测试 `src/constants/directories.spec.ts`（恒为 9 个：7 业务 + `shared` + `tmp`；断言三处引用同一常量，V-01）（**2026-09-14 废止**：目录集合改为 `GET /api/files/workspace` 下发，该常量文件已删除，见 T085）
 - [X] T008 [P] 定义全局限制与事件常量 `src/constants/limits.ts`（50MB、单条引用 10、历史 10/100、详情 50/200、预览上限）、`src/constants/events.ts`（SSE 事件名与状态机常量）
 - [X] T009 [P] 定义后端契约类型 `src/api/types.ts`（与 `contracts/backend-api.md` 一一对应：请求/响应体、统一错误体、`Message`、`Usage`、`ErrorInfo`、`Feedback`、SSE 事件联合类型；**不得包含**思考内容与工具调用字段，V-04）
 
@@ -132,16 +132,16 @@ description: "Task list for feature implementation"
 
 ## Phase 5: User Story 3 - 输入区工具选项 (P2)
 
-**Goal**: 输入区最左侧加号（9 目录上传）、右二模型选择、最右侧思考/快速切换；上传失败提示原因并提醒重试
+**Goal**: 输入区最左侧加号（三空间上传：数据准备 / 共享空间 / 临时空间）、右二模型选择、最右侧思考/快速切换；上传失败提示原因并提醒重试
 
-**Independent Test**: 打开输入区 → 加号展开全部 9 个上传入口 → 上传失败提示与重试 → 切换思考/快速 → 选择模型并验证当前模型展示
+**Independent Test**: 打开输入区 → 加号展开三个空间入口（数据准备下为场景子目录）→ 上传失败提示与重试 → 切换思考/快速 → 选择模型并验证当前模型展示
 
 - [X] T047 [P] [US3] 实现 `src/composables/useModels.ts` + `useModels.spec.ts`（模型列表拉取、默认模型标识、当前选择存 `sessionStorage` 键 `optagent.model`、缓存值失效回退默认）
 - [X] T048 [P] [US3] 实现 `src/composables/useUploads.ts` + `useUploads.spec.ts`（扩展名与 50MB 预校验、不合规**不发请求**；多选时**逐文件各发一次请求**并各自独立状态与重试，V-13；失败项保留原因）
 - [X] T049 [P] [US3] 实现 `src/components/chat/ThinkingToggle.vue` + `ThinkingToggle.spec.ts`（"思考"/"快速"切换，当前模式清晰可见，FR-012）
 - [X] T050 [P] [US3] 实现 `src/components/chat/ModelPicker.vue` + `ModelPicker.spec.ts`（模型列表 + 默认标识，选中后按钮显示新模型，FR-013）
 - [X] T051 [P] [US3] 实现 `src/components/chat/UploadItem.vue` + `UploadItem.spec.ts`（单文件上传状态：进行中/成功/失败原因/重试，FR-011）
-- [X] T052 [US3] 实现 `src/components/chat/UploadMenu.vue` + `UploadMenu.spec.ts`（加号触发，展示全部 **9 个**空间目录入口，目录集合取自 `constants/directories.ts`，FR-009 / SC-021）
+- [X] T052 [US3] 实现 `src/components/chat/UploadMenu.vue` + `UploadMenu.spec.ts`（加号触发，展示全部 **9 个**空间目录入口，目录集合取自 `constants/directories.ts`，FR-009 / SC-021）（**2026-09-14 修订**：改为三空间 + 场景子目录，集合取自 `GET /api/files/workspace`，见 T085）
 - [X] T053 [US3] 实现 `src/components/chat/ComposerToolbar.vue` + `ComposerToolbar.spec.ts`（左侧加号、右二模型、右侧思考开关、发送/中断按钮的布局与事件聚合）
 - [X] T054 [US3] 在 `src/components/chat/Composer.vue` 接入 `ComposerToolbar`（经 T041 预留的 `toolbar` 插槽；实际由装配层 `ChatPanel` 填充该插槽，`Composer` 保持纯受控组件）
 
@@ -151,12 +151,12 @@ description: "Task list for feature implementation"
 
 ## Phase 6: User Story 4 - 输入 @ 引用空间文件 (P2)
 
-**Goal**: 输入"@"展示 9 个空间目录 → 选择文件 → 输入框插入"@文件名"，实际以 `{dir, filename}` 结构化提交（≤10）
+**Goal**: 输入"@"展示三空间（数据准备可下钻场景子目录）→ 选择文件 → 输入框插入"@文件名"，实际以 `{dir, filename}` 结构化提交（≤10）
 
-**Independent Test**: 上传文件 → 输入"@" → 展示 9 个文件夹 → 展开并选择文件 → 插入"@文件名" → 发送时携带真实目录 + 文件名
+**Independent Test**: 上传文件 → 输入"@" → 展示三个空间 → 下钻子目录并选择文件 → 插入"@文件名" → 发送时携带真实目录 + 文件名
 
 - [X] T055 [P] [US4] 实现 `src/composables/useFileMention.ts` + `useFileMention.spec.ts`（`@` 触发与删除触发符即关闭；目录/文件选择；10 个上限阻止并提示，V-02；引用移除；**发送前校验引用文件存在性，不存在则提示且不发送，V-15 / FR-018**；`buildAttachments()` 输出 `{dir, filename}[]`，FR-016）
-- [X] T056 [US4] 实现 `src/components/chat/MentionPicker.vue` + `MentionPicker.spec.ts`（9 个目录列表（同 `constants/directories.ts`）、展开显示文件、空目录空态提示、键盘可达，FR-014/019 / SC-016）
+- [X] T056 [US4] 实现 `src/components/chat/MentionPicker.vue` + `MentionPicker.spec.ts`（9 个目录列表（同 `constants/directories.ts`）、展开显示文件、空目录空态提示、键盘可达，FR-014/019 / SC-016）（**2026-09-14 修订**：改为"空间 → 数据准备子目录 → 文件"三级级联，集合取自接口，见 T085）
 - [X] T057 [US4] 在 `src/components/chat/Composer.vue` 接入 `@` 触发与 `MentionPicker`（经 T041 预留的 `mention` 插槽；插入"@文件名"文本，提交时替换为结构化引用）——插槽同样由装配层 `ChatPanel` 填充；`Composer` 仅新增 `input-text` / `mention-key` 事件出口与 `mentionOpen` 属性
 - [X] T058 [US4] 编写跨模块集成测试 `tests/integration/upload-and-mention.spec.ts`（上传 → `@` 引用 → 发送载荷断言：`content` 去引用正文 + `attachments` 结构正确）
 
@@ -199,12 +199,12 @@ description: "Task list for feature implementation"
 
 ## Phase 9: User Story 7 - 内容跳转与右侧预览 (P3)
 
-**Goal**: 外部地址直接跳转；空间目录（含 `tmp`）文件在右侧约 1/3 宽预览区内联展示
+**Goal**: 外部地址直接跳转；空间（数据准备 / 共享空间 / 临时空间）中的文件在右侧约 1/3 宽预览区内联展示
 
 **Independent Test**: 点击外部地址直接跳转 → 点击空间目录文件右侧内联渲染 → 无跳转内容时占位
 
 - [X] T070 [P] [US7] 实现 `src/composables/usePreview.ts` + `usePreview.spec.ts`（外链**不改** `target` 直接跳转，V-10；`.xlsx` → `download` 回退，V-11；`413` → 文件过大并引导下载、`404` → 文件不存在；文本类按需 `fetch`）
-- [X] T071 [US7] 实现 `src/components/layout/WorkspacePanel.vue` + `WorkspacePanel.spec.ts`（右栏唯一面板，列表态与内容态互换：内容态内联渲染 `<pre>` 文本/CSV/JSON、`<iframe>` PDF、`.xlsx` 回退下载；占位/收起态；错误态含下载按钮；删除二次确认；列表态内嵌 `WorkspaceFileTree`，FR-046/047/048）
+- [X] T071 [US7] 实现 `src/components/layout/WorkspacePanel.vue` + `WorkspacePanel.spec.ts`（右栏唯一面板，列表态与内容态互换：内容态内联渲染 `<pre>` 文本/CSV/JSON、`<iframe>` PDF、`.xlsx` 回退下载；占位/收起态；错误态含下载按钮；删除二次确认；列表态内嵌 `WorkspaceFileTree`，FR-046/047/048）（2026-09-14：列表态改内嵌 `WorkspaceSpaceTree`，见 T087）
 - [X] T072 [US7] 在 `src/components/layout/AppShell.vue` 接入 `WorkspacePanel`（经 `#preview` 插槽），并在 `src/components/chat/MessageContent.vue` 接入可点击跳转（外部地址 → 新窗口；空间目录文件 → 内容态）——插槽由 `App.vue` 填充并联动 `previewOpen`；`open-link` 经 `MessageBubble` → `MessageList` → `ChatPanel` 透传至 `usePreview`，`@文件名` 引用新增 `open-file` 入口
 
 **Checkpoint**: US7 可独立验证——跳转与预览闭环成立
@@ -218,10 +218,10 @@ description: "Task list for feature implementation"
 **Independent Test**: 输入关键词验证黄色高亮与首次定位 → 再次点击跳转下一个 → 到末尾循环回首项 → 打开工作空间验证文件列表
 
 - [X] T073 [P] [US8] 实现 `src/composables/useSessionSearch.ts` + `useSessionSearch.spec.ts`（匹配集合与 `total`；`next()` 循环定位；空关键词；命中大量结果时的定位策略）
-- [X] T074 [P] [US8] 实现 `src/composables/useWorkspace.ts` + `useWorkspace.spec.ts`（拉取全部 **9 个**目录的文件清单，空目录为 `[]`，FR-031）
+- [X] T074 [P] [US8] 实现 `src/composables/useWorkspace.ts` + `useWorkspace.spec.ts`（拉取全部 **9 个**目录的文件清单，空目录为 `[]`，FR-031）（**2026-09-14 修订**：改为三空间树 + 一级/二级展开态，见 T087）
 - [X] T075 [US8] 实现 `src/components/chat/SessionSearch.vue` + `SessionSearch.spec.ts`（黄色高亮（经 `utils/segments.ts`）+ 逐次跳转按钮 + 无结果提示，FR-029/030 / SC-009）
-- [X] T076 [US8] 实现 `src/components/layout/WorkspaceFileTree.vue` + `WorkspaceFileTree.spec.ts`（按 `constants/directories.ts` 的 9 个目录分组展示文件、默认全部收起、展开空目录空态；`shared` 只读不渲染删除入口；纯展示，仅上报 `preview` / `download` / `remove` 意图）
-- [X] T077 [US8] 在 `src/components/chat/ChatHeader.vue` 接入 `SessionSearch` 与文件空间入口（完成 T067 预留的按钮位）——`ChatHeader` 仅保留按钮与开关状态，`SessionSearch` 由装配层 `ChatPanel` 渲染并接入 `useSessionSearch`；文件空间面板 `WorkspacePanel`（内嵌 `WorkspaceFileTree`）由 `App.vue` 经 `#preview` 插槽装配，接入 `useWorkspace` / `usePreview`
+- [X] T076 [US8] 实现 `src/components/layout/WorkspaceFileTree.vue` + `WorkspaceFileTree.spec.ts`（按 `constants/directories.ts` 的 9 个目录分组展示文件、默认全部收起、展开空目录空态；`shared` 只读不渲染删除入口；纯展示，仅上报 `preview` / `download` / `remove` 意图）（**2026-09-14 废止**：由 `WorkspaceSpaceTree` + `WorkspaceFileList` 取代，见 T087）
+- [X] T077 [US8] 在 `src/components/chat/ChatHeader.vue` 接入 `SessionSearch` 与文件空间入口（完成 T067 预留的按钮位）——`ChatHeader` 仅保留按钮与开关状态，`SessionSearch` 由装配层 `ChatPanel` 渲染并接入 `useSessionSearch`；文件空间面板 `WorkspacePanel`（内嵌 `WorkspaceFileTree`）由 `App.vue` 经 `#preview` 插槽装配，接入 `useWorkspace` / `usePreview`（2026-09-14：内嵌组件改为 `WorkspaceSpaceTree`，见 T087）
 
 **Checkpoint**: US8 可独立验证——搜索与工作空间可用
 
@@ -238,6 +238,22 @@ description: "Task list for feature implementation"
 - [X] T082 执行 `specs/001-agent-chat-ui/quickstart.md` §四 的 S1–S14 端到端场景，逐项记录结果与偏差
 - [X] T083 执行 `specs/001-agent-chat-ui/quickstart.md` §六 的 13 项后端契约一致性核对清单，逐项勾选；出现不一致时同步修订 `specs/001-agent-chat-ui/contracts/backend-api.md`（注意 §7 差异 1–6 的既定口径）
 - [X] T084 全量门禁（`package.json` scripts）：`npm run lint`、`npm run typecheck`、`npm run test:coverage`、`npm run build` 全部通过
+
+---
+
+## Phase 12: 003 三空间改造对齐与缺陷修复（2026-09-14）
+
+**Purpose**: 后端 003 改造把文件空间从"前端 9 目录白名单"改为"三空间 + 场景子目录（`GET /api/files/workspace` 下发）"后，前端侧的适配、结构改造与入口空态缺陷修复。
+
+**Independent Test**: 刷新页面后**直接**点加号 → 目录即时加载并渲染（数据准备 / 共享空间 / 临时空间）→ 展开数据准备出场景子目录、再展开出文件 → 共享/临时空间展开直接出文件 → 三处（加号 / `@` / 文件空间）集合一致。
+
+- [X] T085 [US3][US4][US8] 目录集合改为**接口下发**：删除 `src/constants/directories.ts`，`UploadMenu` / `MentionPicker` / 文件空间树一律消费 `GET /api/files/workspace`；上传预校验白名单改取目标空间的 `upload_extensions`（FR-009、FR-010、FR-014、FR-031）
+- [X] T086 [P] 新增 `src/utils/space.ts`（`isFlatSpace` / `spaceSubDirs` / `spaceFileCount`）：扁平空间判定唯一来源，`@` 面板与文件空间树共用（V-01）
+- [X] T087 [US8] 文件空间列表改为**三层结构**：新增 `src/components/layout/WorkspaceSpaceTree.vue`（空间 → 数据准备子目录 → 文件）与 `WorkspaceFileList.vue`（文件行，两处层级复用），删除 `WorkspaceFileTree.vue`；`useWorkspace` 新增一级展开态 `expandedSpaces` / `toggleSpace`，一级与二级**默认全部收起**、本次会话内保持（FR-031）
+- [X] T088 [US3] 修复**上传入口空态误报**：点击加号展开时若 `spaces` 为空且未在加载中，即时触发 `workspace.load()`，避免"场景存在却显示'文件空间加载中或尚未配置场景'"（FR-009a / SC-022）
+- [X] T089 发版核对：`vue-tsc --build --force` 通过、`vite build` 产物含新组件，`docker compose up -d --build frontend` 后核对容器内静态产物（`grep workspace-tree__spaces`）
+
+**Checkpoint**: 三空间口径在上传入口、`@` 面板、文件空间三处完全一致；刷新后直接点加号可正常列出目录。
 
 ---
 
@@ -305,7 +321,7 @@ MessageBubble (T039) → MessageList (T040) → Composer (T041) → ChatPanel (T
 
 ```bash
 # 常量、类型、纯函数、通用组件可全部并行（不同文件、无相互依赖）：
-Task: "实现 src/constants/directories.ts + spec"
+Task: "实现 src/utils/space.ts + spec"
 Task: "实现 src/api/types.ts"
 Task: "实现 src/utils/sse-parser.ts + spec"
 Task: "实现 src/utils/segments.ts + spec"

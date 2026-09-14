@@ -14,12 +14,10 @@ export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 /** 单文件上传上限（用于文案）：50MB。 */
 export const MAX_UPLOAD_MB = 50
 
-/** 允许上传的扩展名白名单（小写，含点）。 */
-export const ALLOWED_UPLOAD_EXTENSIONS = [
-  '.csv', '.xlsx', '.txt', '.json', '.pdf',
-  // 图片：供 OCR 识别与内联预览
-  '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff',
-] as const
+/**
+ * 扩展名白名单按空间定义（数据准备仅 csv/xlsx；共享/临时空间加 txt/json/pdf/图片），
+ * 由 `GET /api/files/workspace` 的 `upload_extensions` 下发，前端不再保留全局常量。
+ */
 
 /* ---------- 文件引用（FR-017、SC-019） ---------- */
 

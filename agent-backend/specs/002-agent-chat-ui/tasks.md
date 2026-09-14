@@ -154,7 +154,7 @@ description: '002-agent-chat-ui 任务拆分'
 
 ### Implementation for User Story 6
 
-- [ ] T027 [US6] 修改 src/routes/files.ts：UPLOAD_DIRS 增加 TMP_DIR（注释更新）；新增 GET /api/files/preview（复用 checkDir 与 file-access，按扩展名映射 Content-Type：.txt/.csv→text/*+utf-8、.json→application/json、.pdf→application/pdf、.xlsx→octet-stream+attachment；inline 头；不存在 404 FILE_NOT_FOUND）
+- [ ] T027 [US6] 修改 src/routes/files.ts：UPLOAD_DIRS 增加 TMP_DIR（注释更新）；新增 GET /api/files/preview（复用 checkDir 与 file-access，按扩展名映射 Content-Type：.txt/.csv→text/*+utf-8、.json→application/json、.pdf→application/pdf、.xlsx→octet-stream+attachment；inline 头；不存在 404 FILE_NOT_FOUND）（**2026-09-13 变更**：`UPLOAD_DIRS`/`TMP_DIR` 常量已删除，改由三空间策略驱动，见文末「后续变更」）
 - [ ] T028 [US6] 修改 src/routes/chat.ts：messageBodySchema 增加可选 `attachments`（≤10，FileReference 数组）；checkDir 白名单校验 + 文件存在性校验（不存在 400 FILE_REF_NOT_FOUND）；传入选项
 - [ ] T029 [US6] 修改 src/domain/run-manager.ts：提交 LLM 的 user content 追加引用段 `[引用文件] {dir}/{filename}`；user 历史行持久化结构化 attachments
 
@@ -174,7 +174,7 @@ description: '002-agent-chat-ui 任务拆分'
 
 ### Implementation for User Story 7
 
-- [ ] T031 [US7] 修改 src/routes/files.ts：新增 GET /api/files/workspace，顺序 list 9 个白名单目录，返回 `{dirs:[{dir,files:[{filename,size,updated_at}]}]}`
+- [ ] T031 [US7] 修改 src/routes/files.ts：新增 GET /api/files/workspace，顺序 list 9 个白名单目录，返回 `{dirs:[{dir,files:[{filename,size,updated_at}]}]}`（**2026-09-13 变更**：响应结构已重构为 `{scenario, spaces:[...]}`，见文末「后续变更」）
 
 **Checkpoint**: US7 独立可用
 
@@ -251,3 +251,41 @@ P1（US1–US3）→ P2（US4 数字人/MCP → US6 文件能力 → US5 模型�
 - files.ts 被 US6/US7 修改：T027 → T031 顺序
 - 所有新接口错误体遵循 `{error:{code,message}}` 统一格式（server.ts 全局封装）
 - 每任务或逻辑组完成后提交；测试必须先失败再通过
+
+---
+
+## 后续变更（2026-09-13）
+
+上述任务记录为历史，**不回溯改写**；以下为在此之后落地的模型变更，涉及本特性多个任务：
+
+**1. 文件空间由"10 个白名单目录"改为三空间**
+
+- 物理目录（`users/{user_id}/user-data/` 下）为 `数据准备/`、`共享空间/`、`临时空间/`，
+  数据准备子目录由 `users/{user_id}/scenario.json` 的 `data_prep_dirs` 定义
+- 旧目录模型（含 `shared/`、`tmp/`）与其数据**已彻底删除，不提供兼容与回退**
+- 受影响任务：T026/T027/T029/T031（`dir` 取值与校验）、T028（预览）、T030/T031（workspace）
+
+**2. `dir` 参数语义**
+
+posix 相对路径：`数据准备/{业务子目录}`、`共享空间`、`临时空间`。
+数据准备 MUST 带子目录，另两个空间 MUST NOT 带子目录。
+错误映射：非法路径 400 `VALIDATION_FAILED`；未知空间/未知数据准备子目录 403 `UPLOAD_DIR_FORBIDDEN`；
+scenario 缺失或损坏 503 `SCENARIO_NOT_CONFIGURED`（"用户未设置场景信息，请联系管理员"）。
+
+**3. 上传扩展名按空间区分**
+
+数据准备仅 `.csv`/`.xlsx`；共享空间与临时空间为 `.csv/.xlsx/.txt/.json/.pdf` + 图片。
+（取代"所有目录同一份扩展名白名单"）
+
+**4. 删除权限**
+
+`数据准备/*` 与 `临时空间` 内文件可删；`共享空间` 内文件返回 403 `FILE_READONLY`。
+
+**5. workspace 响应重构**
+
+`{dirs:[...]}` → `{scenario, spaces:[{name, agent_writable, upload_extensions,
+dirs:[{dir, label, deletable, files}]}]}`；前端不再持有任何目录常量。
+
+**6. @ 引用面板改为三级级联**
+
+空间 → （数据准备）二级目录 → 文件；**点击**下钻（悬停不展开），键盘 ↑↓/Enter/→/←/Esc 导航。

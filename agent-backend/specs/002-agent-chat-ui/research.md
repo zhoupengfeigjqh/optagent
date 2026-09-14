@@ -42,21 +42,28 @@
 
 ## D7. 文件引用（attachments）提交与落盘
 
-- **Decision**: 发消息 body 增加可选 `attachments: [{dir, filename}]`（≤10 个）；chat 路由校验 dir 白名单（9 目录）与文件存在性（不存在 → 400 `FILE_REF_NOT_FOUND`）。提交给 LLM 的 user content 自动追加引用段：`[引用文件] {dir}/{filename}`（文件地址即 dir+filename，与文件接口契约一致）；历史行持久化结构化 `attachments` 数组，历史查询原样返回，前端据此渲染 "@文件名"。
+- **Decision**: 发消息 body 增加可选 `attachments: [{dir, filename}]`（≤10 个）；chat 路由校验 dir（**2026-09-13 修订**：经 `parseSpaceDir` 解析三空间相对路径，规则与文件接口一致）与文件存在性（不存在 → 400 `FILE_REF_NOT_FOUND`；未知空间/子目录 → 403；非法路径 → 400；scenario 缺失 → 503 `SCENARIO_NOT_CONFIGURED`）。提交给 LLM 的 user content 自动追加引用段：`[引用文件] {dir}/{filename}`（文件地址即 dir+filename，与文件接口契约一致）；历史行持久化结构化 `attachments` 数组，历史查询原样返回，前端据此渲染 "@文件名"。
 - **Rationale**: content 追加引用段使现有 agent 上下文构建零改动；结构化落盘满足 FR-010 还原要求。
 - **Alternatives considered**: 前端自行拼接进 content——历史无法结构化还原 @ 展示（只得到纯文本），否决。
 
-## D8. tmp 上传放开与内联预览
+## D8. 临时空间上传放开与内联预览
 
-- **Decision**: `UPLOAD_DIRS` 增加 `TMP_DIR`（沿用同一扩展名/50MB 校验）。新增 `GET /api/files/preview?dir=&filename=`：复用 file-access 读文件，按扩展名映射 Content-Type（.txt→text/plain; .json→application/json; .csv→text/csv; .pdf→application/pdf; .xlsx→回退下载头），`Content-Disposition: inline`；仅 LIST_DIRS 白名单；文件不存在 → 404 `FILE_NOT_FOUND`（tmp 清理后同此路径，前端展示错误提示）。
+- **Decision**: 三个空间均可上传（**2026-09-13 修订**：扩展名白名单按空间区分，
+  数据准备仅 `.csv`/`.xlsx`，共享空间/临时空间另含 txt/json/pdf 与图片）。新增 `GET /api/files/preview?dir=&filename=`：复用 file-access 读文件，按扩展名映射 Content-Type（.txt→text/plain; .json→application/json; .csv→text/csv; .pdf→application/pdf; 图片→image/*; .xlsx→回退下载头），`Content-Disposition: inline`；dir 经三空间沙箱校验；文件不存在 → 404 `FILE_NOT_FOUND`（临时空间清理后同此路径，前端展示错误提示）。
 - **Rationale**: 与 download 同构（白名单/穿越校验复用 checkDir），仅差别在响应头与类型映射；.xlsx 前端无法内联渲染，回退下载是最简正确解。
 - **Alternatives considered**: 服务端转换 xlsx→HTML——引入重型依赖（违反依赖治理），否决。
 
 ## D9. 工作空间文件汇总
 
-- **Decision**: 新增 `GET /api/files/workspace` → `{dirs:[{dir, files:[{filename,size,updated_at}]}]}`，对 9 个白名单目录顺序 list（有界常数次，非 N+1），空目录返回空数组。
-- **Rationale**: 避免前端 9 次往返；顺序执行对本地 FS 足够快（每目录 readdir 为 O(文件数)，总量受 50MB×数量约束）。
-- **Alternatives considered**: 前端并发 9 次 list——可用但多往返，汇总接口更简单且便于后续加缓存，选择汇总接口。
+- **Decision**: 新增 `GET /api/files/workspace`（**2026-09-13 重构**为
+  `{scenario, spaces:[{name, agent_writable, upload_extensions, dirs:[{dir,label,deletable,files}]}]}`），
+  按空间顺序 list 其下目录（数据准备为 scenario 各子目录；有界常数次，非 N+1），空目录返回空数组。
+  前端**不持有任何目录常量**，目录树、删除权限、上传扩展名白名单全部由本接口下发。
+- **Rationale**: 避免前端 N 次往返；顺序执行对本地 FS 足够快（每目录 readdir 为 O(文件数)，总量受 50MB×数量约束）。
+  把 `deletable`/`upload_extensions` 一并下发，使"共享空间不可删""数据准备仅 csv/xlsx"成为服务端单一事实源，
+  前端改规则时零改动。
+- **Alternatives considered**: 前端并发 N 次 list——可用但多往返，汇总接口更简单且便于后续加缓存，选择汇总接口；
+  目录常量放前端——scenario 由管理员改 `scenario.json` 即可生效（热加载），前端硬编码会立刻失真，否决。
 
 ## D10. SSE 兼容性
 

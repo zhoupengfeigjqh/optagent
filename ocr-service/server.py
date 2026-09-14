@@ -73,7 +73,7 @@ def _download(url: str) -> bytes | str:
 def ocr_image(image: str) -> str:
     """识别图片中的文字，返回按行拼接的文本。
 
-    image：传用户消息 [引用文件] 中的相对路径（如 tmp/a.png）即可，
+    image：传用户消息 [引用文件] 中的相对路径（如 临时空间/a.png）即可，
     backend 会自动铸成下载直链发过来。图片不超过 2MB，支持 jpg/png/bmp/webp/tif。
     """
     err = _check_url(image)

@@ -66,7 +66,7 @@
 
 ### `DELETE /api/threads/{thread_id}` — 删除
 
-- **行为**：连带删除 history/summary 及 tmp/ 下该 thread_id 前缀全部文件；
+- **行为**：连带删除 history/summary 及 `临时空间/` 下该 thread_id 前缀全部文件；
   有进行中 run 先 abort。
 - **Response**: `204`
 
@@ -74,14 +74,18 @@
 
 ### `POST /api/files/upload` — 上传（multipart）
 
-- **Form 字段**: `file`（文件）、`dir`（目标目录：7 业务目录之一或 `shared`）
-- **校验**：`dir` 白名单（`tmp` 拒绝，403）；≤50MB（413）；
-  扩展名 ∈ {.csv,.xlsx,.txt,.json,.pdf}（400）；落盘名自动追加 `_YYYYMMDD_HHMMSS`。
-- **Response**: `201 { "dir", "filename", "size" }`（filename 为追加时间戳后的实际名）
+- **Form 字段**: `file`（文件）、`dir`（目标目录，**2026-09-13 修订**为三空间相对路径：
+  `数据准备/{业务子目录}`、`共享空间`、`临时空间`）
+- **校验**：`dir` 非法（绝对路径 / `..` / 反斜杠）→ 400 `VALIDATION_FAILED`；
+  未知空间或未知数据准备子目录 → 403 `UPLOAD_DIR_FORBIDDEN`；
+  数据准备不带子目录 → 400；共享空间/临时空间带子目录 → 400；≤50MB（413）；
+  扩展名按目标空间策略校验（数据准备仅 `.csv`/`.xlsx`，另两个空间见 data-model §6）→ 400，
+  消息 MUST 指明该空间支持的格式；落盘名自动追加 `_YYYYMMDD_HHMMSS`。
+- **Response**: `201 { "dir", "filename", "size" }`（`dir` 为规范化后的相对路径；filename 为追加时间戳后的实际名）
 
 ### `GET /api/files/list` — 文件列表
 
-- **Query**: `dir`（含 `tmp`——用户可查看 Agent 产出）
+- **Query**: `dir`（三空间相对路径，含 `临时空间`——用户可查看 Agent 产出）
 - **Response**: `200 [{ "filename", "size", "updated_at" }]`
 
 ### `GET /api/files/download` — 下载/查看

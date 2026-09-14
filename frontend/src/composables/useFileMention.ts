@@ -1,9 +1,14 @@
 /**
- * `@` 引用空间文件（FR-014~FR-019）
+ * `@` 引用空间文件（FR-014~FR-019 + 003 三空间级联）
  *
  * 展示层与提交层分离：
  * - **展示层**：输入框文本中插入 `@文件名`（可读、可编辑）
  * - **提交层**：`references` 为结构化 `{dir, filename}[]`，发送时作为 `attachments` 提交（FR-016）
+ *
+ * 级联导航（三空间，**点击**下钻，悬停不展开）：
+ * - 一级：数据准备 / 共享空间 / 临时空间（来自 workspace 接口，前端无目录常量）
+ * - 点击数据准备 → 二级 scenario 子目录；点击子目录 → 三级文件
+ * - 点击共享/临时空间 → 直接出文件列
  *
  * 关键规则：
  * - 单条消息 ≤ 10 个引用，超限拒绝并提示（FR-017、V-02）
@@ -13,15 +18,15 @@
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
-import type { FileReference } from '../api/types'
-import { SPACE_DIRECTORIES, type SpaceDirectory } from '../constants/directories'
+import type { FileReference, WorkspaceDir, WorkspaceSpace } from '../api/types'
 import { MAX_REFERENCES_PER_MESSAGE } from '../constants/limits'
+import { isFlatSpace, spaceSubDirs } from '../utils/space'
 import { useSession } from './useAppSession'
 import type { WorkspaceStore } from './useWorkspace'
 import type { ToastStore } from './useToast'
 
-/** `@` 面板阶段。 */
-export type MentionStage = 'dir' | 'file'
+/** 级联面板当前聚焦的列。 */
+export type MentionColumn = 'space' | 'dir' | 'file'
 
 /** 构造参数。 */
 export interface MentionDeps {
@@ -32,24 +37,36 @@ export interface MentionDeps {
 /** `@` 引用 composable 契约。 */
 export interface FileMentionStore {
   open: Ref<boolean>
-  stage: Ref<MentionStage>
+  /** 三空间树（workspace 同源） */
+  spaces: ComputedRef<WorkspaceSpace[]>
+  /** 当前聚焦列 */
+  column: Ref<MentionColumn>
+  /** 已选空间名（数据准备展开二级后/扁平空间选中后有值） */
+  activeSpace: Ref<string | null>
+  /** 已选目录（相对路径，如 数据准备/生产计划、共享空间） */
   activeDir: Ref<string | null>
+  /** 当前列的键盘高亮索引 */
   activeIndex: Ref<number>
   references: Readonly<Ref<FileReference[]>>
-  /** 目录列表（与三处 UI 同源，SC-021） */
-  directories: readonly SpaceDirectory[]
-  /** 当前阶段的可选项列表 */
+  /** 二级列的可选目录（仅数据准备；其余空间为空） */
+  dirs: ComputedRef<WorkspaceDir[]>
+  /** 三级列的文件清单 */
   files: ComputedRef<{ filename: string }[]>
-  optionCount: ComputedRef<number>
   maxReached: ComputedRef<boolean>
   /** 文本/光标变化时检测 `@` 触发与引用同步 */
   handleInput(text: string, caret: number): void
-  /** 选择目录 → 进入文件阶段（FR-015） */
+  /** 点击空间：数据准备进二级目录列，其余直接出文件列 */
+  pickSpace(space: string): void
+  /** 点击二级目录 → 出文件列 */
   pickDir(dir: string): void
   /** 选择文件 → 加入引用；超限返回 `false` 并提示 */
   pickFile(reference: FileReference): boolean
-  /** 键盘上下移动 */
+  /** 键盘上下移动（当前列内循环） */
   move(delta: number): void
+  /** 回车确认当前高亮项：空间/目录列下钻，文件列选中；返回选中的引用（非文件列返回 null） */
+  confirmActive(): FileReference | null
+  /** 回退一列（文件 → 数据准备的目录列或空间列；目录 → 空间列） */
+  back(): void
   /** 收起面板（不清空引用） */
   close(): void
   /** 移除引用并同步文本 */
@@ -90,28 +107,38 @@ export function stripMentionTokens(
 /** 创建 `@` 引用状态。 */
 export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   const open = ref(false)
-  const stage = ref<MentionStage>('dir')
+  const column = ref<MentionColumn>('space')
+  const activeSpace = ref<string | null>(null)
   const activeDir = ref<string | null>(null)
   const activeIndex = ref(0)
   const references = ref<FileReference[]>([])
 
+  const spaces = computed<WorkspaceSpace[]>(() => deps.workspace.spaces.value)
+
+  // 二级列只列数据准备的子目录；扁平空间（共享/临时）不设二级列，直接出文件
+  const dirs = computed<WorkspaceDir[]>(() => {
+    const space = spaces.value.find((item) => item.name === activeSpace.value)
+    return space ? spaceSubDirs(space) : []
+  })
+
   const files = computed<{ filename: string }[]>(() => {
     const dir = activeDir.value
-    if (!dir) {
-      return []
-    }
+    if (!dir) return []
     return deps.workspace.filesOf(dir).map((file) => ({ filename: file.filename }))
   })
 
-  const optionCount = computed(() =>
-    stage.value === 'dir' ? SPACE_DIRECTORIES.length : files.value.length,
-  )
-
   const maxReached = computed(() => references.value.length >= MAX_REFERENCES_PER_MESSAGE)
+
+  function currentOptions(): unknown[] {
+    if (column.value === 'space') return spaces.value
+    if (column.value === 'dir') return dirs.value
+    return files.value
+  }
 
   function close(): void {
     open.value = false
-    stage.value = 'dir'
+    column.value = 'space'
+    activeSpace.value = null
     activeDir.value = null
     activeIndex.value = 0
   }
@@ -133,20 +160,35 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
 
     if (!open.value) {
       open.value = true
-      stage.value = 'dir'
+      column.value = 'space'
+      activeSpace.value = null
       activeDir.value = null
+      // 目录内文件可能刚上传，展开面板时刷新清单
+      if (!deps.workspace.loading.value) {
+        void deps.workspace.load()
+      }
+    }
+    activeIndex.value = 0
+  }
+
+  function pickSpace(space: string): void {
+    activeSpace.value = space
+    const target = deps.workspace.spaces.value.find((item) => item.name === space)
+    if (target && isFlatSpace(target)) {
+      // 共享/临时空间：直接出文件列
+      activeDir.value = space
+      column.value = 'file'
+    } else {
+      activeDir.value = null
+      column.value = 'dir'
     }
     activeIndex.value = 0
   }
 
   function pickDir(dir: string): void {
     activeDir.value = dir
-    stage.value = 'file'
+    column.value = 'file'
     activeIndex.value = 0
-    // 目录内文件可能刚上传，进入文件阶段时刷新清单
-    if (!deps.workspace.loading.value) {
-      void deps.workspace.load()
-    }
   }
 
   function pickFile(reference: FileReference): boolean {
@@ -165,12 +207,43 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   }
 
   function move(delta: number): void {
-    const count = optionCount.value
+    const count = currentOptions().length
     if (count <= 0) {
       activeIndex.value = 0
       return
     }
     activeIndex.value = (activeIndex.value + delta + count) % count
+  }
+
+  function confirmActive(): FileReference | null {
+    if (column.value === 'space') {
+      const space = spaces.value[activeIndex.value]
+      if (space) pickSpace(space.name)
+      return null
+    }
+    if (column.value === 'dir') {
+      const dir = dirs.value[activeIndex.value]
+      if (dir) pickDir(dir.dir)
+      return null
+    }
+    const file = files.value[activeIndex.value]
+    if (file && activeDir.value !== null) {
+      return { dir: activeDir.value, filename: file.filename }
+    }
+    return null
+  }
+
+  function back(): void {
+    if (column.value === 'file') {
+      // 扁平空间无目录列，直接回空间列
+      column.value = dirs.value.length > 0 ? 'dir' : 'space'
+      if (column.value === 'space') activeSpace.value = null
+      activeDir.value = null
+    } else if (column.value === 'dir') {
+      column.value = 'space'
+      activeSpace.value = null
+    }
+    activeIndex.value = 0
   }
 
   function remove(reference: FileReference): void {
@@ -194,18 +267,22 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
 
   return {
     open,
-    stage,
+    spaces,
+    column,
+    activeSpace,
     activeDir,
     activeIndex,
     references,
-    directories: SPACE_DIRECTORIES,
+    dirs,
     files,
-    optionCount,
     maxReached,
     handleInput,
+    pickSpace,
     pickDir,
     pickFile,
     move,
+    confirmActive,
+    back,
     close,
     remove,
     reset,

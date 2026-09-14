@@ -9,7 +9,6 @@
  */
 import { computed } from 'vue'
 
-import { SPACE_DIRECTORIES } from '../../constants/directories'
 import { useChatPanel } from '../../composables/useChatPanel'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import AgentPanel from './AgentPanel.vue'
@@ -68,8 +67,10 @@ const {
   onUpdateDraft,
   onSendFromToolbar,
   onInputText,
+  onPickSpace,
   onPickDir,
   onPickFile,
+  onConfirmMention,
   onMentionKey,
   onRemoveReference,
 } = useChatPanel()
@@ -133,11 +134,11 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       @retry="onRecover"
     />
 
-    <!-- 加号上传入口：9 个目录一律取自 constants/directories.ts（SC-021） -->
+    <!-- 加号上传入口：目录树一律取自 workspace 接口（三空间，scenario 定义子目录） -->
     <UploadMenu
       class="chat-panel__upload"
       :open="uploadOpen"
-      :directories="SPACE_DIRECTORIES"
+      :spaces="workspace.spaces.value"
       :uploads="uploads.items.value"
       @pick="onPickFiles"
       @retry="onRetryUpload"
@@ -149,7 +150,6 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       :sending="sending"
       :disabled="sending"
       :references="mention.references.value"
-      :workspace-files="workspace.dirs.value"
       :mention-open="mention.open.value"
       @update:model-value="onUpdateDraft"
       @input-text="onInputText"
@@ -162,16 +162,21 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         <MentionPicker
           class="chat-panel__mention"
           :open="mention.open.value"
-          :stage="mention.stage.value"
-          :directories="SPACE_DIRECTORIES"
+          :spaces="mention.spaces.value"
+          :column="mention.column.value"
+          :active-space="mention.activeSpace.value"
           :active-dir="mention.activeDir.value"
+          :dirs="mention.dirs.value"
           :files="mention.files.value"
           :active-index="mention.activeIndex.value"
           :loading="workspace.loading.value"
+          @pick-space="onPickSpace"
           @pick-dir="onPickDir"
           @pick-file="onPickFile"
           @close="mention.close"
           @move="mention.move"
+          @confirm="onConfirmMention"
+          @back="mention.back"
         />
       </template>
 

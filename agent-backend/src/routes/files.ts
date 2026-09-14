@@ -1,14 +1,16 @@
 /**
- * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7）：
- * - POST /api/files/upload：multipart 上传——dir 白名单（7 业务目录+shared+tmp，
- *   002 起 tmp 放开上传）、扩展名白名单（.csv/.xlsx/.txt/.json/.pdf + 图片 .jpg/.jpeg/.png/.bmp/.webp/.gif/.tif/.tiff）、≤50MB（413），
- *   落盘名自动追加 _YYYYMMDD_HHMMSS
+ * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7 + 003 三空间改造）：
+ * - POST /api/files/upload：multipart 上传——dir 为空间相对路径（数据准备需二级目录，
+ *   二级目录须命中 scenario.json 清单），扩展名按空间策略（数据准备仅 csv/xlsx，
+ *   共享/临时空间 csv/xlsx/txt/json/pdf + 图片），≤50MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
  * - GET /api/files/list?dir=：列目录
  * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
  *   按扩展名映射 Content-Type；.xlsx 回退附件下载；超过预览上限 → 413）
- * - GET /api/files/workspace：工作空间汇总（全部白名单目录的文件清单）
- * - DELETE /api/files?dir=&filename=：删除文件（shared 为共享只读目录 → 403 FILE_READONLY）
+ * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略）
+ * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
+ * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
+ * scenario.json 缺失时业务接口 → 503 SCENARIO_NOT_CONFIGURED
  */
 import { createWriteStream } from 'node:fs';
 import fs from 'node:fs';
@@ -17,19 +19,21 @@ import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { getCurrentUser } from '../domain/current-user.js';
-import { BUSINESS_DIRS, SHARED_DIR, TMP_DIR, userDataDir } from '../domain/dirs.js';
+import {
+  DirValidationError,
+  ScenarioNotConfiguredError,
+  SPACE_PREP,
+  SPACE_POLICIES,
+  SPACE_SHARED,
+  SPACE_TMP,
+  loadScenario,
+  parseSpaceDir,
+  userDataDir,
+} from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { removeFileSafe } from '../domain/fs-safe.js';
 import { ApiError } from '../server.js';
 import { verifyRef } from '../infra/file-sign.js';
-
-const ALLOWED_EXTENSIONS = new Set([
-  '.csv', '.xlsx', '.txt', '.json', '.pdf',
-  // 图片：供 OCR MCP 识别、前端内联预览
-  '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff',
-]);
-const UPLOAD_DIRS: readonly string[] = [...BUSINESS_DIRS, SHARED_DIR, TMP_DIR];
-const LIST_DIRS: readonly string[] = UPLOAD_DIRS;
 
 /** 内联预览 Content-Type 映射；.xlsx 前端无法内联渲染，回退附件下载 */
 const PREVIEW_CONTENT_TYPES: Record<string, string> = {
@@ -73,17 +77,22 @@ function fileAccessFor(ctx: AppContext, userId: string): FileAccess {
   });
 }
 
-/** dir/filename 含穿越特征 → 400；否则按白名单 → 403 */
-function checkDir(dir: string, allowed: readonly string[]): void {
-  if (dir.includes('..') || path.isAbsolute(dir) || /[/\\]/.test(dir)) {
-    throw new ApiError(400, 'VALIDATION_FAILED', `非法目录参数: ${dir}`);
-  }
-  if (!allowed.includes(dir)) {
-    throw new ApiError(
-      403,
-      'UPLOAD_DIR_FORBIDDEN',
-      `目录 ${dir} 不开放，允许：${allowed.join('、')}`,
-    );
+/** 目录参数统一校验：穿越 → 400；空间外/清单外 → 403；scenario 缺失 → 503 */
+function checkDir(ctx: AppContext, userId: string, dir: string) {
+  try {
+    return parseSpaceDir(ctx.config.optAgentRoot, userId, dir);
+  } catch (err) {
+    if (err instanceof DirValidationError) {
+      throw new ApiError(
+        err.statusCode,
+        err.statusCode === 400 ? 'VALIDATION_FAILED' : 'UPLOAD_DIR_FORBIDDEN',
+        err.message,
+      );
+    }
+    if (err instanceof ScenarioNotConfiguredError) {
+      throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+    }
+    throw err;
   }
 }
 
@@ -126,6 +135,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(400, 'VALIDATION_FAILED', '请求须为 multipart/form-data');
 
     // 逐 part 流式处理：dir 字段顺序无关；文件流直接落盘不占用内存
+    // 扩展名校验依赖目标空间的策略（dir 可能晚于 file 到达），故延至 dir 确认后统一校验
     let dir: string | undefined;
     let staging: string | undefined;
     let originalName = 'file';
@@ -134,21 +144,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     const parts = req.parts();
     for await (const part of parts) {
       if (part.type === 'file') {
-        const ext = path.extname(part.filename ?? '').toLowerCase();
-        if (!ALLOWED_EXTENSIONS.has(ext)) {
-          // 排空流避免连接悬挂，再拒绝
-          await new Promise<void>((res) => {
-            part.file.on('end', res);
-            part.file.resume();
-          });
-          throw new ApiError(
-            400,
-            'VALIDATION_FAILED',
-            `不支持的文件格式 "${ext}"，允许：${[...ALLOWED_EXTENSIONS].join(' ')}`,
-          );
-        }
-        // dir 可能还没解析到：先流式写入用户 tmp 暂存，待 dir 确认后移动
-        const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), TMP_DIR);
+        // dir 可能还没解析到：先流式写入用户临时空间暂存，待 dir 确认后移动
+        const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), SPACE_TMP);
         fs.mkdirSync(tmpAbs, { recursive: true });
         staging = path.join(tmpAbs, `.upload-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         try {
@@ -178,12 +175,22 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(400, 'VALIDATION_FAILED', '缺少目标目录字段 dir');
     }
     try {
-      checkDir(dir, UPLOAD_DIRS);
-      const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), dir);
+      const target = checkDir(ctx, userId, dir);
+      // 按目标空间策略校验扩展名
+      const ext = path.extname(originalName).toLowerCase();
+      const allowed = SPACE_POLICIES[target.space].uploadExtensions;
+      if (!allowed.includes(ext)) {
+        throw new ApiError(
+          400,
+          'VALIDATION_FAILED',
+          `${target.space} 不支持格式 "${ext}"，允许：${allowed.join(' ')}`,
+        );
+      }
+      const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), target.relPath);
       fs.mkdirSync(dirAbs, { recursive: true });
       const name = stampedName(dirAbs, originalName);
       fs.renameSync(staging, path.join(dirAbs, name));
-      return reply.status(201).send({ dir, filename: name, size: savedSize });
+      return reply.status(201).send({ dir: target.relPath, filename: name, size: savedSize });
     } catch (err) {
       removeFileSafe(staging);
       throw err;
@@ -193,8 +200,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get('/api/files/list', { schema: { querystring: listQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { dir } = req.query as { dir: string };
-    checkDir(dir, LIST_DIRS);
-    const entries = await fileAccessFor(ctx, userId).list(dir);
+    const target = checkDir(ctx, userId, dir);
+    const entries = await fileAccessFor(ctx, userId).list(target.relPath);
     return entries
       .filter((e) => !e.isDirectory)
       .map((e) => ({ filename: e.name, size: e.size, updated_at: e.modifiedAt }));
@@ -206,13 +213,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      checkDir(dir, LIST_DIRS);
+      const target = checkDir(ctx, userId, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       let buf: Buffer;
       try {
-        buf = await fileAccessFor(ctx, userId).readBuffer(`${dir}/${filename}`);
+        buf = await fileAccessFor(ctx, userId).readBuffer(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在: ${dir}/${filename}`);
@@ -235,13 +242,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      checkDir(dir, LIST_DIRS);
+      const target = checkDir(ctx, userId, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       let buf: Buffer;
       try {
-        buf = await fileAccessFor(ctx, userId).readBuffer(`${dir}/${filename}`);
+        buf = await fileAccessFor(ctx, userId).readBuffer(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
@@ -267,28 +274,28 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     },
   );
 
-  // 文件空间删除（002 US8 / FR-031）：shared 为共享只读目录，其余 8 个目录可删
+  // 文件空间删除（002 US8 / FR-031）：共享空间为只读，其余空间可删
   app.delete(
     '/api/files',
     { schema: { querystring: downloadQuerySchema } },
     async (req) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      checkDir(dir, LIST_DIRS);
-      if (dir === SHARED_DIR) {
+      const target = checkDir(ctx, userId, dir);
+      if (target.space === SPACE_SHARED) {
         throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
       }
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       try {
-        await fileAccessFor(ctx, userId).remove(`${dir}/${filename}`);
+        await fileAccessFor(ctx, userId).remove(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
         throw err;
       }
-      return { dir, filename, deleted: true };
+      return { dir: target.relPath, filename, deleted: true };
     },
   );
 
@@ -318,21 +325,51 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     },
   );
 
-  // 002 US7 / FR-030：工作空间汇总（全部白名单目录，空目录返回空数组）
+  // 三空间工作空间汇总（003 改造）：空间 → 子目录 → 文件，附每空间策略
   app.get('/api/files/workspace', async (_req) => {
     const userId = getCurrentUser().userId;
     const access = fileAccessFor(ctx, userId);
-    const dirs = [];
-    for (const dir of LIST_DIRS) {
-      // 目录启动时已预创建；运行中被删（如手动清理）按空目录容错
-      const entries = await access.list(dir).catch(() => []);
-      dirs.push({
-        dir,
-        files: entries
-          .filter((e) => !e.isDirectory)
-          .map((e) => ({ filename: e.name, size: e.size, updated_at: e.modifiedAt })),
+    const root = ctx.config.optAgentRoot;
+
+    let scenario;
+    try {
+      scenario = loadScenario(root, userId, ctx.loggers.logger);
+    } catch (err) {
+      if (err instanceof ScenarioNotConfiguredError) {
+        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+      }
+      throw err;
+    }
+
+    const listFiles = async (relPath: string) => {
+      // 目录初始化时已预创建；运行中被删（如手动清理）按空目录容错
+      const entries = await access.list(relPath).catch(() => []);
+      return entries
+        .filter((e) => !e.isDirectory)
+        .map((e) => ({ filename: e.name, size: e.size, updated_at: e.modifiedAt }));
+    };
+
+    const spaces = [];
+    for (const space of [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const) {
+      const policy = SPACE_POLICIES[space];
+      const subDirs =
+        space === SPACE_PREP ? scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`) : [space];
+      const dirs = [];
+      for (const relPath of subDirs) {
+        dirs.push({
+          dir: relPath,
+          label: relPath === space ? space : relPath.slice(space.length + 1),
+          deletable: space !== SPACE_SHARED,
+          files: await listFiles(relPath),
+        });
+      }
+      spaces.push({
+        name: space,
+        agent_writable: policy.agentWritable,
+        upload_extensions: policy.uploadExtensions,
+        dirs,
       });
     }
-    return { dirs };
+    return { scenario: scenario.name, spaces };
   });
 }

@@ -6,14 +6,14 @@
 
 - OCR 以独立 MCP 服务运行（RapidOCR，Python FastMCP，Streamable HTTP 传输），容器化部署
 - MCP 服务（本地容器或未来远程服务）**无磁盘访问权**，取文件一律走 backend 签发的签名直链回源
-- LLM 与前端只接触 **user-data 相对路径**（`tmp/a.png`），绝对路径不出 backend
+- LLM 与前端只接触 **user-data 相对路径**（**2026-09-13 修订**：示例为 `临时空间/a.png`，三空间中文目录名），绝对路径不出 backend
 - 基础设施与文件类型无关：未来任意 MCP 服务收文件（PDF/Excel/…）复用同一套机制
 
 ## 架构
 
 ```
-用户 @ 引用图片 → 引用段 "[引用文件] tmp/a.png"（统一相对路径）
-→ LLM 调 ocr__ocr_image(image="tmp/a.png")
+用户 @ 引用图片 → 引用段 "[引用文件] 临时空间/a.png"（统一相对路径）
+→ LLM 调 ocr__ocr_image(image="临时空间/a.png")
 → backend 适配层命中 file_args 声明：
     FileAccess.resolveVerified() 沙箱校验（拒绝对路径/防穿越/目录白名单/realpath/必须真实文件）
     → mintSignedUrl() 铸签名直链（HMAC-SHA256 绑定 u/p/exp，24h 时效）

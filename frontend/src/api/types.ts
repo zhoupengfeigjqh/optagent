@@ -301,14 +301,32 @@ export interface WorkspaceFile {
   updated_at: string
 }
 
-/** 工作空间目录分组。 */
+/** 工作空间目录分组（dir 为相对空间路径，如 数据准备/生产计划、共享空间）。 */
 export interface WorkspaceDir {
   dir: string
+  /** 展示名（数据准备子目录为子目录名，其余为空间名） */
+  label: string
+  /** 用户是否可删除其中文件（共享空间只读为 false） */
+  deletable: boolean
   /** 空目录为 `[]` */
   files: WorkspaceFile[]
 }
 
-/** `GET /api/files/workspace` 响应（后端固定返回全部 9 个白名单目录）。 */
-export interface WorkspaceResponse {
+/** 工作空间空间分组（一级：数据准备/共享空间/临时空间）。 */
+export interface WorkspaceSpace {
+  /** 空间名（即一级目录名） */
+  name: string
+  /** Agent 是否可写（仅临时空间） */
+  agent_writable: boolean
+  /** 该空间允许上传的扩展名（小写含点） */
+  upload_extensions: string[]
+  /** 数据准备为 scenario 定义的子目录清单，其余空间仅自身一项 */
   dirs: WorkspaceDir[]
+}
+
+/** `GET /api/files/workspace` 响应（三空间树；scenario 未配置 → 503）。 */
+export interface WorkspaceResponse {
+  /** 场景名（users/{userId}/scenario.json 定义） */
+  scenario: string
+  spaces: WorkspaceSpace[]
 }

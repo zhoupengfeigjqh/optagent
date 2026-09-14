@@ -22,6 +22,8 @@ export interface BuiltinToolsOptions {
   threadId: string;
   /** TOOL.json 启用的工具名 */
   enabled: string[];
+  /** 可供 list_dir 的目录清单（建 run 时按 scenario 动态生成，如 ['数据准备/生产计划', …, '共享空间', '临时空间']） */
+  availableDirs: string[];
   logger: Logger;
 }
 
@@ -61,8 +63,10 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
 }
 
 export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
-  const { fileAccess: fa, threadId, enabled } = opts;
+  const { fileAccess: fa, threadId, enabled, availableDirs } = opts;
   const on = (name: string) => enabled.includes(name);
+  const dirsText = availableDirs.join('、');
+  const examplePath = availableDirs[0] ? `${availableDirs[0]}/示例.csv` : '共享空间/示例.csv';
 
   const catalog: AgentTool[] = [];
 
@@ -71,14 +75,14 @@ export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
       name: 'read_file',
       label: '读取文件',
       description:
-        '读取用户业务目录或 tmp/ 下的文件内容。支持 .csv/.xlsx/.txt/.json/.pdf/.md/.log；' +
+        '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.txt/.json/.pdf/.md/.log；' +
         'xlsx 自动转 CSV，pdf 提取文本层。大文件返回截断内容，可用 offset 继续分段读取。' +
-        '参数 path 为相对目录的路径，如 "生产计划/xxx.csv"。',
+        `参数 path 为相对空间的路径，如 "${examplePath}"。`,
       parameters: {
         type: 'object',
         required: ['path'],
         properties: {
-          path: { type: 'string', description: '相对路径，如 "生产计划/计划.xlsx"' },
+          path: { type: 'string', description: `相对路径，如 "${examplePath}"` },
           offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
           limit: { type: 'number', description: '本次最多返回字节数' },
         },
@@ -102,8 +106,8 @@ export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
       name: 'write_file',
       label: '写入临时文件',
       description:
-        `把内容写入临时空间 tmp/，文件名会自动要求以 "${threadId}_" 开头。` +
-        '业务目录（生产计划等）为只读，写入会被拒绝。写成功后可用路径 tmp/{filename} 告知用户下载。',
+        `把内容写入临时空间，文件名会自动要求以 "${threadId}_" 开头。` +
+        '数据准备与共享空间为只读，写入会被拒绝。写成功后可用路径 临时空间/{filename} 告知用户下载。',
       parameters: {
         type: 'object',
         required: ['filename', 'content'],
@@ -123,12 +127,11 @@ export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
     catalog.push({
       name: 'list_dir',
       label: '列目录',
-      description:
-        '列出指定目录的文件（名称/大小/更新时间）。目录限：生产计划、产线信息、切换时间、求解时间、产线电价、目标优先级、使用规则、shared、tmp。',
+      description: `列出指定目录的文件（名称/大小/更新时间）。目录限：${dirsText}。`,
       parameters: {
         type: 'object',
         required: ['dir'],
-        properties: { dir: { type: 'string', description: '目录名，如 "生产计划"' } },
+        properties: { dir: { type: 'string', description: `目录路径，如 "${availableDirs[0] ?? '共享空间'}"` } },
       } as never,
       execute: wrap('list_dir', opts, (p) => listToolDir(fa, String(p.dir))),
     });

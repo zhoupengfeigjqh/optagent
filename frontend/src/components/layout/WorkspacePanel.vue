@@ -4,30 +4,31 @@
  *
  * **单区域双视图**：右侧 1/3 只有这一个面板，内部在「文件空间列表」与「文件内容」之间互换，
  * 两者不并存、不叠加——避免"文件空间"和"内容预览"各占一块互相挤宽。
- * - `view='list'` → `WorkspaceFileTree`（9 个分组，默认收起）
+ * - `view='list'` → `WorkspaceSpaceTree`（三空间分层，默认全部收起）
  * - `view='content'` → 内联预览（text / pdf / 回退下载 / 错误态，渲染口径与 US7 一致）
  *
  * 破坏性动作只有删除：本组件负责**二次确认**，确认后才向父级上报 `remove`（不自行发请求）。
  */
 import { computed, ref } from 'vue'
 
-import type { ErrorInfo, FileReference, WorkspaceDir } from '../../api/types'
+import type { ErrorInfo, FileReference, WorkspaceSpace } from '../../api/types'
 import type { PanelView, PreviewContent, PreviewTarget } from '../../composables/usePreview'
-import { directoryLabel } from '../../constants/directories'
 import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import LoadingDots from '../common/LoadingDots.vue'
-import WorkspaceFileTree from './WorkspaceFileTree.vue'
+import WorkspaceSpaceTree from './WorkspaceSpaceTree.vue'
 
 const props = withDefaults(
   defineProps<{
     /** 当前视图：文件空间列表 / 文件内容 */
     view?: PanelView
-    /** 列表态：9 个目录及其文件 */
-    dirs?: WorkspaceDir[]
-    /** 列表态：已展开的目录名 */
+    /** 列表态：三空间树（空间 → 数据准备子目录 → 文件） */
+    spaces?: WorkspaceSpace[]
+    /** 列表态：已展开的空间名 */
+    expandedSpaces?: readonly string[]
+    /** 列表态：已展开的二级目录 */
     expandedDirs?: readonly string[]
     /** 列表态：加载中 */
     listLoading?: boolean
@@ -40,7 +41,8 @@ const props = withDefaults(
   }>(),
   {
     view: 'list',
-    dirs: () => [],
+    spaces: () => [],
+    expandedSpaces: () => [],
     expandedDirs: () => [],
     listLoading: false,
     target: () => ({ kind: 'none' }),
@@ -54,6 +56,7 @@ const emit = defineEmits<{
   close: []
   /** 内容态 → 列表态（面板不收起） */
   back: []
+  'toggle-space': [name: string]
   'toggle-dir': [dir: string]
   preview: [reference: FileReference]
   download: [reference: FileReference]
@@ -68,6 +71,17 @@ const reference = computed<FileReference | null>(() => {
   const current = props.target
   return current.kind === 'file' ? { dir: current.dir, filename: current.filename } : null
 })
+
+/** 目录展示名：在空间树中按相对路径取 workspace 下发的 label，回退路径最后一段 */
+function dirLabel(dir: string): string {
+  for (const space of props.spaces) {
+    const hit = space.dirs.find((item) => item.dir === dir)
+    if (hit) {
+      return hit.label
+    }
+  }
+  return dir.split('/').pop() ?? dir
+}
 
 /** 头部主标题：内容态显示文件名，列表态显示面板名。 */
 const headerTitle = computed(() => reference.value?.filename ?? '文件空间')
@@ -125,7 +139,7 @@ function onDownload(): void {
             {{ headerTitle }}
           </span>
           <span v-if="reference" class="workspace-panel__dir">
-            {{ directoryLabel(reference.dir) }}
+            {{ dirLabel(reference.dir) }}
           </span>
         </div>
       </div>
@@ -147,12 +161,14 @@ function onDownload(): void {
       </div>
     </header>
 
-    <!-- 列表态：9 个固定分组（默认全部收起） -->
+    <!-- 列表态：三个空间（默认全部收起；数据准备下钻二级子目录） -->
     <div v-if="!isContent" class="workspace-panel__body workspace-panel__body--inset">
-      <WorkspaceFileTree
-        :dirs="dirs"
+      <WorkspaceSpaceTree
+        :spaces="spaces"
+        :expanded-spaces="expandedSpaces"
         :expanded-dirs="expandedDirs"
         :loading="listLoading"
+        @toggle-space="emit('toggle-space', $event)"
         @toggle-dir="emit('toggle-dir', $event)"
         @preview="emit('preview', $event)"
         @download="emit('download', $event)"

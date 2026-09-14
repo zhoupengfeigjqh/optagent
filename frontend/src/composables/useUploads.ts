@@ -47,8 +47,8 @@ export interface UploadsDeps {
 /** 上传 composable 契约。 */
 export interface UploadsStore {
   items: Readonly<Ref<UploadedDocument[]>>
-  /** 逐文件上传（FR-010） */
-  upload(dir: string, files: File[]): Promise<void>
+  /** 逐文件上传（FR-010）；`allowedExtensions` 为目标空间白名单（workspace 接口下发） */
+  upload(dir: string, files: File[], allowedExtensions?: readonly string[]): Promise<void>
   /** 重试失败项（FR-011） */
   retry(localId: string): Promise<void>
   /** 清空已完成项 */
@@ -60,7 +60,7 @@ export function createUploadsStore(deps: UploadsDeps): UploadsStore {
   const items = ref<UploadedDocument[]>([])
 
   /** 重试所需的原始文件与目录（不进入响应式状态，避免持有 File 造成额外开销）。 */
-  const sources = new Map<string, { file: File; dir: string }>()
+  const sources = new Map<string, { file: File; dir: string; exts?: readonly string[] }>()
   let sequence = 0
 
   function update(localId: string, patch: Partial<UploadedDocument>): void {
@@ -75,7 +75,7 @@ export function createUploadsStore(deps: UploadsDeps): UploadsStore {
       return
     }
 
-    const check = isUploadAllowed({ name: source.file.name, size: source.file.size })
+    const check = isUploadAllowed({ name: source.file.name, size: source.file.size }, source.exts)
     if (!check.ok) {
       update(localId, {
         status: 'failed',
@@ -111,14 +111,14 @@ export function createUploadsStore(deps: UploadsDeps): UploadsStore {
     }
   }
 
-  async function upload(dir: string, files: File[]): Promise<void> {
+  async function upload(dir: string, files: File[], allowedExtensions?: readonly string[]): Promise<void> {
     const tasks: Promise<void>[] = []
 
     for (const file of files) {
       const entry = createEntry(dir, file)
-      sources.set(entry.localId, { file, dir })
+      sources.set(entry.localId, { file, dir, exts: allowedExtensions })
 
-      const check = isUploadAllowed({ name: file.name, size: file.size })
+      const check = isUploadAllowed({ name: file.name, size: file.size }, allowedExtensions)
       if (!check.ok) {
         // 预校验失败：不发请求，直接给出原因
         entry.status = 'failed'

@@ -193,8 +193,10 @@
 
 - **Decision**: 前端不复制后端 OpenAPI/契约文件，而是将其**翻译**为 `contracts/backend-api.md`
   （含前端使用约定：错误码映射、SSE 状态机、分页语义），并在 `src/api/types.ts` 中落为 TS 类型；
-  目录白名单等常量集中在 `src/constants/directories.ts`，与后端 9 目录口径一致。
+  目录集合（三空间与数据准备场景子目录）**不落前端常量**，一律以 `GET /api/files/workspace` 下发为唯一来源，
+  仅保留无状态的结构判定纯函数 `src/utils/space.ts`（**2026-09-14 修订**：原为 `src/constants/directories.ts` 常量，该文件已删除）。
 - **Rationale**: 后端契约（`agent-backend/specs/002-agent-chat-ui/contracts/`、`docs/api.md`）是权威来源，
-  前端只需记录"我如何消费"；集中常量避免 9 目录在组件里散落（对应 SC-021）。
+  前端只需记录"我如何消费"；接口下发避免三处口径漂移，也免去前端随目录清单变更而改代码（对应 SC-021）。
 - **Alternatives considered**: ①代码生成（openapi-typescript）—— 后端未提供 OpenAPI 文档，且新增依赖，否决；
-  ②前端各组件内写死目录名 —— 三处口径易漂移，否决。
+  ②前端各组件内写死目录名 —— 三处口径易漂移，否决；
+  ③前端常量白名单（原方案）—— 场景子目录随配置而变，常量必然与后端漂移，2026-09-14 已废止。

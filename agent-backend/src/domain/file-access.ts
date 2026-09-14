@@ -3,14 +3,14 @@
  *
  * 所有 Agent 侧文件读写必须经此层：
  * - 路径规范化：拒绝绝对路径与 `..` 穿越；已存在路径做 realpath 校验防符号链接穿越
- * - 目录白名单：7 业务目录 + shared + tmp（相对 user-data 根）
- * - 权限矩阵：业务目录/shared 只读；tmp 可写但强制 `{thread_id}_` 前缀
+ * - 目录白名单：三空间（数据准备/共享空间/临时空间）；数据准备的二级目录须真实存在
+ * - 权限矩阵：数据准备/共享空间只读；临时空间可写但强制 `{thread_id}_` 前缀
  * - 违规抛 PermissionError 并记日志（对话不中断由上层保证）
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
-import { BUSINESS_DIRS, SHARED_DIR, TMP_DIR, userDataDir } from './dirs.js';
+import { SPACE_PREP, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
 
 export class PermissionError extends Error {
@@ -40,7 +40,7 @@ export interface GrepResult {
   skippedBinary: number;
 }
 
-const READABLE_DIRS: readonly string[] = [...BUSINESS_DIRS, SHARED_DIR, TMP_DIR];
+const READABLE_DIRS: readonly string[] = SPACES;
 const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
 
 export interface FileAccessOptions {
@@ -104,6 +104,17 @@ export class FileAccess {
     if (!(READABLE_DIRS as readonly string[]).includes(top)) {
       throw this.deny(`目录不在白名单: ${top}`);
     }
+    // 数据准备的二级目录必须是磁盘上真实存在的目录（scenario 定义的清单会惰性创建）
+    if (top === SPACE_PREP) {
+      const sub = rel.split(path.sep)[1];
+      if (!sub) {
+        throw this.deny(`数据准备需指定二级目录: ${relPath}`);
+      }
+      const subAbs = path.join(this.dataRoot, SPACE_PREP, sub);
+      if (!fs.existsSync(subAbs) || !fs.statSync(subAbs).isDirectory()) {
+        throw this.deny(`数据准备子目录不存在: ${SPACE_PREP}/${sub}`);
+      }
+    }
     // 符号链接穿越校验：已存在路径必须 realpath 后仍在 dataRoot 内
     if (fs.existsSync(resolved)) {
       const real = fs.realpathSync(resolved);
@@ -148,7 +159,7 @@ export class FileAccess {
     const offset = opts?.offset ?? 0;
     const limit = Math.min(opts?.limit ?? this.truncateBytes, this.truncateBytes);
     const slice = buf.subarray(offset, offset + limit);
-    if (relPath.split(path.sep)[0] === TMP_DIR || relPath.startsWith(`${TMP_DIR}/`)) {
+    if (relPath.split(path.sep)[0] === SPACE_TMP || relPath.startsWith(`${SPACE_TMP}/`)) {
       const now = new Date();
       await fs.promises.utimes(abs, now, now).catch(() => {});
     }
@@ -168,7 +179,7 @@ export class FileAccess {
     } catch {
       throw new PermissionError(`文件不存在或不可读: ${relPath}`);
     }
-    if (relPath.split(path.sep)[0] === TMP_DIR || relPath.startsWith(`${TMP_DIR}/`)) {
+    if (relPath.split(path.sep)[0] === SPACE_TMP || relPath.startsWith(`${SPACE_TMP}/`)) {
       const now = new Date();
       await fs.promises.utimes(abs, now, now).catch(() => {});
     }
@@ -179,12 +190,12 @@ export class FileAccess {
   async write(threadId: string, filename: string, content: string): Promise<string> {
     const base = path.basename(filename);
     if (base !== filename || base.includes('..')) {
-      throw this.deny(`写入仅允许 tmp/ 下的扁平文件名: ${filename}`);
+      throw this.deny(`写入仅允许 临时空间/ 下的扁平文件名: ${filename}`);
     }
     if (!base.startsWith(`${threadId}_`)) {
-      throw this.deny(`tmp/ 写入文件名必须以 "${threadId}_" 前缀开头: ${base}`);
+      throw this.deny(`临时空间写入文件名必须以 "${threadId}_" 前缀开头: ${base}`);
     }
-    const relPath = `${TMP_DIR}/${base}`;
+    const relPath = `${SPACE_TMP}/${base}`;
     const abs = this.resolveSafe(relPath);
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content, 'utf8');
@@ -236,8 +247,7 @@ export class FileAccess {
 
   /** 文本检索：仅文本格式，跳过 .xlsx/.pdf 等二进制并计数 */
   async grep(pattern: string, dir?: string): Promise<GrepResult> {
-    const targetDir = dir ?? '.';
-    const dirs = dir ? [dir] : [...READABLE_DIRS];
+    const dirs = dir ? [dir] : await this.expandSpaces();
     const matches: GrepMatch[] = [];
     let skippedBinary = 0;
     let re: RegExp;
@@ -246,7 +256,6 @@ export class FileAccess {
     } catch {
       throw new PermissionError(`非法检索表达式: ${pattern}`);
     }
-    void targetDir;
     for (const d of dirs) {
       let files: string[];
       try {
@@ -274,5 +283,24 @@ export class FileAccess {
       }
     }
     return { matches, skippedBinary };
+  }
+
+  /** 展开三空间为可检索目录清单：数据准备下钻到现存子目录，其余空间即自身 */
+  private async expandSpaces(): Promise<string[]> {
+    const dirs: string[] = [];
+    for (const space of READABLE_DIRS) {
+      if (space !== SPACE_PREP) {
+        dirs.push(space);
+        continue;
+      }
+      const prepAbs = path.join(this.dataRoot, SPACE_PREP);
+      const subs = await fs.promises
+        .readdir(prepAbs, { withFileTypes: true })
+        .catch(() => [] as fs.Dirent[]);
+      for (const sub of subs) {
+        if (sub.isDirectory()) dirs.push(`${SPACE_PREP}/${sub.name}`);
+      }
+    }
+    return dirs;
   }
 }

@@ -17,7 +17,7 @@
   "status": "completed|failed",
   "usage": {"input_tokens": 123, "output_tokens": 456},
   "duration_seconds": 4.2,
-  "attachments": [{"dir": "生产计划", "filename": "a.csv"}],
+  "attachments": [{"dir": "数据准备/生产计划", "filename": "a.csv"}],
   "feedback": "up|down|null",
   "error": {"code": "...", "message": "..."},
   "agent_name": "ops"
@@ -27,12 +27,20 @@
 `status/usage/duration_seconds/attachments/error/agent_name` 可缺省（旧数据/不适用）；`feedback` 恒返回（默认 null）。**任何消息不含思考内容与工具调用信息。**
 `agent_name` 为该轮回答的数字人（**2026-09-10 修订**：会话不绑定数字人，同一会话内可切换，user/assistant 成对返回）。
 
-### POST /api/files/upload（放开 tmp）
+### POST /api/files/upload
 
-- `dir` 白名单扩展为 10 个：7 业务目录 + shared + tmp
-- tmp 目录校验规则与其他目录一致（扩展名 .csv/.xlsx/.txt/.json/.pdf，≤50MB）
-- **2026-09-13 修订**：扩展名白名单新增图片 `.jpg/.jpeg/.png/.bmp/.webp/.gif/.tif/.tiff`（供 OCR 识别与内联预览）
+- **2026-09-13 修订**：`dir` 由"10 个白名单目录名"改为**三空间相对路径** ——
+  `数据准备/{业务子目录}`、`共享空间`、`临时空间`；三个空间均可上传
+- 扩展名按空间区分：数据准备仅 `.csv`/`.xlsx`；共享空间与临时空间为
+  `.csv/.xlsx/.txt/.json/.pdf` + 图片 `.jpg/.jpeg/.png/.bmp/.webp/.gif/.tif/.tiff`
+  （图片供 OCR 识别与内联预览）；不符 → 400，消息指明该空间支持的格式
+- `dir` 非法 → 400 `VALIDATION_FAILED`；未知空间/未知数据准备子目录 → 403 `UPLOAD_DIR_FORBIDDEN`
 - 其余行为（时间戳落盘名、413/400 错误）不变
+
+### DELETE /api/files（删除）
+
+- **2026-09-13 修订**：`数据准备/*` 与 `临时空间` 内文件可删（204）；
+  `共享空间` 内文件 **403 `FILE_READONLY`**（前端不渲染删除入口，后端兜底）
 
 ## 新增接口
 
@@ -90,14 +98,36 @@ MCP 状态推送流，替代前端轮询。
 
 - `200`：Content-Type 按扩展名映射（.txt→text/plain; charset=utf-8、.json→application/json、.csv→text/csv; charset=utf-8、.pdf→application/pdf、.xlsx→application/octet-stream + attachment 回退）；`Content-Disposition: inline`
 - 预览大小上限：10MB（`PREVIEW_MAX_MB` 可配，默认 10）；超限 → `413 FILE_TOO_LARGE`（预览仅供在线查看，完整文件走 download）
-- `404 FILE_NOT_FOUND`：文件不存在或已被 tmp 清理
-- `400 VALIDATION_FAILED`：非法 dir/filename；`403 UPLOAD_DIR_FORBIDDEN`：非白名单目录
+- `404 FILE_NOT_FOUND`：文件不存在或已被临时空间清理
+- `400 VALIDATION_FAILED`：非法 dir/filename；`403 UPLOAD_DIR_FORBIDDEN`：未知空间/未知数据准备子目录
 
-### GET /api/files/workspace
+### GET /api/files/workspace（**2026-09-13 重构**）
 
-→ `200 {"dirs": [{"dir": "生产计划", "files": [{"filename": "a.csv", "size": 123, "updated_at": "..."}]}, ...]}`
+```json
+200 {
+  "scenario": "生产调度",
+  "spaces": [
+    {
+      "name": "数据准备",
+      "agent_writable": false,
+      "upload_extensions": [".csv", ".xlsx"],
+      "dirs": [
+        {"dir": "数据准备/生产计划", "label": "生产计划", "deletable": true,
+         "files": [{"filename": "a.csv", "size": 123, "updated_at": "..."}]}
+      ]
+    },
+    {"name": "共享空间", "agent_writable": false, "upload_extensions": ["..."],
+     "dirs": [{"dir": "共享空间", "label": "共享空间", "deletable": false, "files": []}]},
+    {"name": "临时空间", "agent_writable": true, "upload_extensions": ["..."],
+     "dirs": [{"dir": "临时空间", "label": "临时空间", "deletable": true, "files": []}]}
+  ]
+}
+```
 
-固定返回全部 9 个白名单目录（7 业务 + shared + tmp），空目录 files 为 `[]`。
+- 固定返回三个空间；`数据准备` 的 `dirs` 逐项对应 `scenario.json` 的 `data_prep_dirs`，
+  扁平空间的 `dirs` 仅一项且 `label` 等于空间名；空目录 `files` 为 `[]`
+- `deletable` 表达该目录内文件是否可被用户删除（共享空间为 `false`）
+- **scenario.json 缺失或损坏 → `503 SCENARIO_NOT_CONFIGURED`**（"用户未设置场景信息，请联系管理员"）
 
 ### GET /api/files/raw（2026-09-13 新增，MCP 签名直链回源）
 

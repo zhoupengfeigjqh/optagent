@@ -12,20 +12,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { FileReference } from '../../api/types'
-import { SPACE_DIRECTORIES, type SpaceDirectory } from '../../constants/directories'
 import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
-
-interface WorkspaceFileView {
-  filename: string
-  size: number
-  updated_at: string
-}
-
-interface WorkspaceDirView {
-  dir: string
-  files: WorkspaceFileView[]
-}
 
 const props = withDefaults(
   defineProps<{
@@ -37,10 +25,6 @@ const props = withDefaults(
     sending?: boolean
     /** 已选引用 */
     references?: FileReference[]
-    /** 目录白名单（默认取唯一来源常量，V-01） */
-    directories?: readonly SpaceDirectory[]
-    /** 工作空间文件清单（供 `@` 面板） */
-    workspaceFiles?: WorkspaceDirView[]
     /** 占位文案 */
     placeholder?: string
     /** `@` 面板是否展开（展开时 Enter / 方向键 / Esc 交给上层处理，扩展属性） */
@@ -50,8 +34,6 @@ const props = withDefaults(
     disabled: false,
     sending: false,
     references: () => [],
-    directories: () => SPACE_DIRECTORIES,
-    workspaceFiles: () => [],
     placeholder: '输入消息，Enter 发送，Shift + Enter 换行',
     mentionOpen: false,
   },
@@ -71,7 +53,14 @@ const emit = defineEmits<{
 }>()
 
 /** `@` 面板展开时需要让位的按键。 */
-const MENTION_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Escape'])
+const MENTION_KEYS: ReadonlySet<string> = new Set([
+  'ArrowDown',
+  'ArrowUp',
+  'ArrowLeft',
+  'ArrowRight',
+  'Enter',
+  'Escape',
+])
 
 const canSend = computed(() => props.modelValue.trim() !== '' && !props.disabled && !props.sending)
 
@@ -139,12 +128,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="composer">
-    <slot
-      name="mention"
-      :directories="directories"
-      :workspace-files="workspaceFiles"
-      :references="references"
-    />
+    <slot name="mention" :references="references" />
 
     <ul v-if="references.length" class="composer__refs">
       <li

@@ -91,8 +91,9 @@
 | props | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `view` | `'list' \| 'content'` | `'list'` | 当前视图 |
-| `dirs` | `WorkspaceDir[]` | `[]` | 列表态：9 个目录及文件 |
-| `expandedDirs` | `readonly string[]` | `[]` | 列表态：已展开的目录名 |
+| `spaces` | `WorkspaceSpace[]` | `[]` | 列表态：三空间树（空间 → 数据准备场景子目录 → 文件） |
+| `expandedSpaces` | `readonly string[]` | `[]` | 列表态：已展开的空间名（一级） |
+| `expandedDirs` | `readonly string[]` | `[]` | 列表态：已展开的二级目录 |
 | `listLoading` | `boolean` | `false` | 列表态加载中 |
 | `target` | `PreviewTarget` | `{kind:'none'}` | 内容态目标 |
 | `content` | `PreviewContent \| null` | `null` | 内容态加载结果 |
@@ -102,7 +103,8 @@
 |---|---|---|
 | `close` | — | 收起面板 |
 | `back` | — | 内容态 → 列表态（面板保持展开） |
-| `toggle-dir` | `string` | 折叠 / 展开分组 |
+| `toggle-space` | `string` | 折叠 / 展开空间（一级） |
+| `toggle-dir` | `string` | 折叠 / 展开二级目录 |
 | `preview` | `FileReference` | 点击文件名 → 切到内容态 |
 | `download` | `FileReference` | 下载 |
 | `remove` | `FileReference` | **二次确认后**的删除（FR-054） |
@@ -320,8 +322,7 @@
 | `disabled` | `boolean` | `false` | 流式中禁用输入与发送 |
 | `sending` | `boolean` | `false` | 请求进行中 |
 | `references` | `FileReference[]` | `[]` | 已选引用 |
-| `directories` | `SpaceDirectory[]` | `SPACE_DIRECTORIES` | 9 目录（默认取唯一来源常量，V-01） |
-| `workspaceFiles` | `WorkspaceDir[]` | `[]` | 供 `@` 面板取文件 |
+| ~~`directories`~~ / ~~`workspaceFiles`~~ | — | — | **2026-09-14 删除**：目录集合改由 `GET /api/files/workspace` 下发，`Composer` 不再接收目录/文件清单，`@` 面板的数据由装配层（`ChatPanel`）经 `mention` 插槽注入 |
 | `placeholder` | `string` | 见实现 | 占位文案（**实现超集**） |
 | `mentionOpen` | `boolean` | `false` | `@` 面板是否展开（**实现超集**）；为 `true` 时 `↑`/`↓`/`Enter`/`Esc` 交给上层处理 |
 
@@ -338,7 +339,7 @@
 | slots | 说明 |
 |---|---|
 | `toolbar` | 工具栏插槽（由 `ComposerToolbar` 填充）；slot props：`canSend` / `sending` |
-| `mention` | `@` 引用面板插槽（由 `MentionPicker` 填充）；slot props：`directories` / `workspaceFiles` / `references` |
+| `mention` | `@` 引用面板插槽（由 `MentionPicker` 填充）；slot props：`references`（2026-09-14：`directories` / `workspaceFiles` 已随目录改为接口下发而移除） |
 
 **边界**: `disabled=true` → 发送按钮置灰、Enter 不发送（FR-006）；空白内容 → 发送按钮禁用；
 `@` 触发面板 → `Esc` 关闭且不丢文本；引用达 10 个 → emit `mention-limit` 且不插入。
@@ -370,7 +371,7 @@
 | props | 类型 | 默认 |
 |---|---|---|
 | `open` | `boolean` | `false` |
-| `directories` | `SpaceDirectory[]` | 必填 |
+| `spaces` | `WorkspaceSpace[]` | `[]` |
 | `uploads` | `UploadedDocument[]` | `[]` |
 
 | emits | 载荷 |
@@ -379,7 +380,8 @@
 | `pick` | `{ dir: string; files: FileList }` |
 | `retry` | `localId: string` |
 
-**测试要点**: 固定渲染 9 个目录项（SC-021）；每个目录可触发文件选择；
+**测试要点**: 渲染三个空间（数据准备下按场景子目录分组，SC-021）；每个目录可触发文件选择，
+`accept` 按目标空间的 `upload_extensions` 动态设置；`spaces` 为空时展示空态文案；
 上传失败项展示原因 + "重试"（FR-011）。
 
 ### `UploadItem.vue`
@@ -399,22 +401,27 @@
 | props | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `open` | `boolean` | `false` | |
-| `stage` | `'dir' \| 'file'` | `'dir'` | |
-| `directories` | `SpaceDirectory[]` | 必填 | |
-| `activeDir` | `string \| null` | `null` | |
-| `files` | `{ filename: string }[]` | `[]` | 当前目录文件 |
+| `spaces` | `WorkspaceSpace[]` | `[]` | 三空间树 |
+| `column` | `'space' \| 'dir' \| 'file'` | `'space'` | 当前聚焦列（**2026-09-14 修订**：原 `stage: 'dir' \| 'file'`） |
+| `activeSpace` | `string \| null` | `null` | 已选空间 |
+| `activeDir` | `string \| null` | `null` | 已选目录（相对空间路径） |
+| `dirs` | `WorkspaceDir[]` | `[]` | 二级列目录（仅数据准备） |
+| `files` | `{ filename: string }[]` | `[]` | 三级列文件 |
 | `activeIndex` | `number` | `0` | 键盘高亮项 |
 | `loading` | `boolean` | `false` | |
 
 | emits | 载荷 |
 |---|---|
+| `pick-space` | `space: string` |
 | `pick-dir` | `dir: string` |
 | `pick-file` | `FileReference` |
 | `close` | — |
 | `move` | `delta: number` |
+| `confirm` | — |
+| `back` | — |
 
-**测试要点**: 目录阶段渲染 9 项；文件阶段空目录 → 空态提示（FR-019）；
-`↑`/`↓` 触发 `move`、`Enter` 触发 `pick-*`、`Esc` 触发 `close`。
+**测试要点**: 空间列渲染三个空间；数据准备下钻为子目录列、再下钻为文件列；共享空间/临时空间直接列出文件；
+空目录 → 空态提示（FR-019）；`↑`/`↓` 触发 `move`、`Enter`/`→` 触发 `confirm`、`←` 触发 `back`、`Esc` 触发 `close`。
 
 ### `ThinkingToggle.vue`
 
@@ -461,26 +468,45 @@
 **测试要点**: 展示"第 n / 共 m 项"；`total=0` 且关键词非空 → 无结果提示（US8 场景 3）；
 `Enter` 等价于 `next`。
 
-### `WorkspaceFileTree.vue`
+### `WorkspaceSpaceTree.vue`
 
-文件空间列表（纯展示，不发起请求）：9 个固定目录分组，**默认全部收起**（FR-031）。
+文件空间树（纯展示，不发起请求）：**三层结构** —— 空间（一级）→ 数据准备场景子目录（二级）→ 文件，
+一级与二级**默认全部收起**（FR-031，**2026-09-14 修订**：原 `WorkspaceFileTree.vue` 为 9 个平铺分组）。
 
 | props | 类型 | 默认 |
 |---|---|---|
-| `dirs` | `WorkspaceDir[]` | `[]` |
+| `spaces` | `WorkspaceSpace[]` | `[]` |
+| `expandedSpaces` | `readonly string[]` | `[]` |
 | `expandedDirs` | `readonly string[]` | `[]` |
 | `loading` | `boolean` | `false` |
 
 | emits | 载荷 |
 |---|---|
+| `toggle-space` | `string` |
 | `toggle-dir` | `string` |
 | `preview` | `FileReference` |
 | `download` | `FileReference` |
 | `remove` | `FileReference` |
 
-**边界**: `shared` 为共享只读目录，**不渲染删除入口**（FR-053）。
-**测试要点**: 固定渲染 9 个目录分组；默认全部收起（既不渲染文件行也不渲染空态）；展开空目录显示空态；
-点击文件名只 emit `preview`（**不**自行收起面板，收起由 `WorkspacePanel` 承担）。
+**边界**: 共享空间为只读空间，其文件**不渲染删除入口**（FR-053）；空空间 / 空目录展开后展示空态文案。
+**测试要点**: 渲染三个空间；共享空间/临时空间展开即直接出文件行，数据准备需再展开子目录；
+默认全部收起（既不渲染文件行也不渲染空态）；点击文件名只 emit `preview`（**不**自行收起面板）。
+
+### `WorkspaceFileList.vue`
+
+文件行列表（纯展示）：查看 / 下载 / 删除三个入口，供 `WorkspaceSpaceTree` 在**两处层级**复用。
+
+| props | 类型 | 默认 |
+|---|---|---|
+| `dir` | `string` | 必填 |
+| `files` | `WorkspaceFile[]` | `[]` |
+| `deletable` | `boolean` | `false` |
+
+| emits | 载荷 |
+|---|---|
+| `preview` / `download` / `remove` | `FileReference` |
+
+**测试要点**: `deletable=false` 时不渲染删除入口；`files=[]` 时由调用方渲染空态（本组件渲染空列表）。
 
 ---
 
@@ -764,16 +790,19 @@ interface AppSessionOptions {
 
 | 成员 | 类型 | 说明 |
 |---|---|---|
-| `open` / `stage` / `activeDir` / `activeIndex` | `Ref` | 面板状态 |
+| `open` | `Ref<boolean>` | 面板是否展开 |
+| `spaces` | `ComputedRef<WorkspaceSpace[]>` | 三空间树（与文件空间面板、上传入口同源，SC-021） |
+| `column` / `activeSpace` / `activeDir` / `activeIndex` | `Ref` | 当前列（空间/数据准备子目录/文件）、聚焦空间、聚焦目录、键盘高亮项 |
 | `references` | `Readonly<Ref<FileReference[]>>` | 已选引用 |
-| `directories` | `readonly SpaceDirectory[]` | 目录白名单（与三处 UI 同源，SC-021）（**实现超集**） |
-| `files` | `ComputedRef<{filename:string}[]>` | **当前阶段可选项**：目录阶段为空数组，文件阶段为 `activeDir` 下文件（来自 `workspace`）（**实现超集**：语义比"当前目录文件"更广） |
-| `optionCount` | `ComputedRef<number>` | 当前阶段可选项数量（目录阶段恒为 9）（**实现超集**） |
-| `maxReached` | `ComputedRef<boolean>` | 引用数是否已达 10（**实现超集**） |
-| `handleInput(text, caret)` | `(text: string, caret: number) => void` | 检测 `@` 触发（US4 场景 1、8） |
-| `pickDir(dir)` | `(dir: string) => void` | 进入文件阶段（FR-015） |
+| `dirs` | `ComputedRef<WorkspaceDir[]>` | 二级列可选项：数据准备的场景子目录；扁平空间为空数组 |
+| `files` | `ComputedRef<{filename:string}[]>` | 三级列：当前目录下文件（来自 `workspace`） |
+| `maxReached` | `ComputedRef<boolean>` | 引用数是否已达 10 |
+| `handleInput(text, caret)` | `(text: string, caret: number) => void` | 检测 `@` 触发（US4 场景 1、8）；首次展开时刷新 `workspace` 清单 |
+| `pickSpace(space)` | `(space: string) => void` | 扁平空间 → 直接进文件列；数据准备 → 进子目录列（FR-014） |
+| `pickDir(dir)` | `(dir: string) => void` | 进入文件列（FR-015） |
 | `pickFile(ref)` | `(ref: FileReference) => boolean` | 加入引用；超限或重复返回 `false` 并提示（**实现超集**：带返回值） |
-| `move(delta)` / `close()` | `(delta: number) => void` / `() => void` | 键盘导航（环形）/ 收起面板（不清空引用） |
+| `move(delta)` / `back()` / `close()` | `(…) => void` | 当前列内环形移动 / 返回上一列 / 收起面板（不清空引用） |
+| `confirmActive()` | `() => FileReference \| null` | `Enter`/`→`：空间/目录列下钻，文件列返回选中的引用（非文件列返回 `null`） |
 | `remove(ref)` | `(ref: FileReference) => void` | 移除引用（正文标记的同步由装配层执行） |
 | `reset()` | `() => void` | 发送后清空 |
 | `buildAttachments()` | `() => FileReference[]` | 结构化提交载荷（FR-016） |
@@ -783,24 +812,27 @@ interface AppSessionOptions {
 与 `stripMentionTokens(text, references): string`（提交前移除正文中的展示标记，FR-016）。详见 §六。
 
 **测试要点**: 引用达 10 个 → `pickFile` 被拒绝并触发上限提示（FR-017）；
-删除文本中的 `@` → `open=false` 且引用同步移除；`buildAttachments()` 输出结构化数组（FR-016）。
+删除文本中的 `@` → `open=false` 且引用同步移除；`buildAttachments()` 输出结构化数组（FR-016）；
+`pickSpace` 对共享空间/临时空间直接进文件列（扁平空间判定与文件空间树共用 `utils/space.ts`）。
 
 ### `useWorkspace()`
 
 | 成员 | 类型 | 说明 |
 |---|---|---|
-| `dirs` | `Readonly<Ref<WorkspaceDir[]>>` | 9 个目录（含空目录） |
-| `loading` | `Readonly<Ref<boolean>>` | |
-| `error` | `Readonly<Ref<ErrorInfo \| null>>` | 拉取失败（失败时保持 9 个空目录，避免界面塌陷）（**实现超集**） |
-| `load()` | `() => Promise<void>` | 拉取（FR-031） |
-| `filesOf(dir)` | `(dir: string) => WorkspaceFile[]` | 取某目录文件（未知目录返回 `[]`） |
+| `spaces` | `Readonly<Ref<WorkspaceSpace[]>>` | 三空间树（原文照存，不做前端归一化）（**2026-09-14 修订**） |
+| `scenario` | `Readonly<Ref<string>>` | 场景名；未加载/未配置为空串 |
+| `dirs` | `ComputedRef<WorkspaceDir[]>` | 扁平化目录索引（内部查找用，界面按 `spaces` 分层渲染） |
+| `loading` / `error` | `Readonly<Ref<boolean>>` / `Readonly<Ref<ErrorInfo \| null>>` | 加载中 / 拉取失败（含 503 `SCENARIO_NOT_CONFIGURED`）（**实现超集**） |
+| `expandedSpaces` / `expandedDirs` | `Readonly<Ref<readonly string[]>>` | 一级空间 / 二级目录的展开态，默认 `[]` 全收起（FR-031） |
+| `load()` | `() => Promise<void>` | 拉取（FR-009a、FR-031） |
+| `filesOf(dir)` / `labelOf(dir)` / `deletableOf(dir)` | `(dir: string) => …` | 按相对路径取文件 / 展示名 / 可删除性 |
+| `uploadExtensionsOf(dir)` | `(dir: string) => readonly string[]` | 取所属空间的上传扩展名（空值表示未知，交后端兜底） |
 | `exists(ref)` | `(r: FileReference) => boolean` | 引用存在性校验（FR-018） |
+| `toggleSpace(name)` / `toggleDir(dir)` | `(…) => void` | 折叠 / 展开一级空间 / 二级目录 |
+| `remove(ref)` | `(r: FileReference) => Promise<boolean>` | 删除文件（成功后就地移除并提示，共享空间由后端 403 兜底） |
 
-**实现超集**: 同文件另导出 `emptyWorkspace(): WorkspaceDir[]`（生成 9 个空目录的占位）。
-`load()` 会按 `constants/directories.ts` 的**顺序与集合归一化**后端返回：缺失目录补空、未知目录丢弃，
-以保证三处 UI 口径一致（SC-021）。
-
-**测试要点**: 返回 9 个目录且顺序与常量一致；空目录 `files=[]`；
+**测试要点**: `spaces` 原样采用接口返回（一级恒 3 个、数据准备子目录与场景一致）；
+`expandedSpaces` / `expandedDirs` 默认 `[]` 且面板收起再展开不重置；
 `exists` 对不存在文件返回 `false`。
 
 ### `useSessionSearch()`
@@ -862,7 +894,7 @@ interface AppSessionOptions {
 | `uploadOpen` / `agentPanelOpen` / `workspaceOpen` | `Ref<boolean>` | 纯 UI 浮层开关（本层唯一自有状态） |
 | `streaming` | `ComputedRef<StreamingView \| null>` | 本轮瞬态；`completed` 由刷新后的历史消息承载，故仅 `streaming` / `failed` / `aborted` 下传 |
 | `isFailed` / `errorInfo` / `sending` / `hasMessages` | `ComputedRef<...>` | 派生态 |
-| `onSend` / `onStop` / `onLoadMore` / `onRecover` / `onFeedback` / `onToggleThinking` / `onSelectModel` / `onToggleUpload` / `onCloseUpload` / `onPickFiles` / `onRetryUpload` / `onToggleSearch` / `onToggleWorkspace` / `onSearchKeyword` / `onToggleAgent` / `onCloseAgentPanel` / `onSwitchAgent` / `onOpenLink` / `onOpenFile` / `onUpdateDraft` / `onSendFromToolbar` / `onInputText` / `onPickDir` / `onPickFile` / `onMentionKey` / `onRemoveReference` | 事件处理器 | 覆盖发送、中断、加载更早、断连恢复、反馈、思考、模型、上传、搜索、工作空间、数字人、跳转/预览与 `@` 引用等全部意图 |
+| `onSend` / `onStop` / `onLoadMore` / `onRecover` / `onFeedback` / `onToggleThinking` / `onSelectModel` / `onToggleUpload` / `onCloseUpload` / `onPickFiles` / `onRetryUpload` / `onToggleSearch` / `onToggleWorkspace` / `onSearchKeyword` / `onToggleAgent` / `onCloseAgentPanel` / `onSwitchAgent` / `onOpenLink` / `onOpenFile` / `onUpdateDraft` / `onSendFromToolbar` / `onInputText` / `onPickSpace` / `onPickDir` / `onPickFile` / `onConfirmMention` / `onMentionKey` / `onRemoveReference` | 事件处理器 | 覆盖发送、中断、加载更早、断连恢复、反馈、思考、模型、上传、搜索、工作空间、数字人、跳转/预览与 `@` 引用等全部意图 |
 
 **为什么不算组件契约**: 见 §六 6.4。
 
@@ -884,9 +916,12 @@ interface AppSessionOptions {
 | `toUserMessage` | `(error: ErrorInfo, context?: ErrorMessageContext) => string` | 错误码 → 中文文案，未知码兜底并保留原码（D13 / V-12）；`context` 默认 `'default'`（**偏差**：新增第二参数） |
 | `toErrorInfo` | `(error: unknown) => ErrorInfo` | 把任意抛出物归一化为 `ErrorInfo`（**实现超集**；网络层与各 composable 统一入口） |
 | `isUploadAllowed` | `(file: {name: string; size: number}) => UploadPrecheckResult` | 上传预校验（FR-010）；返回类型 `UploadPrecheckResult`（`{ ok, code? }`）一并导出 |
-| `SPACE_DIRECTORIES` | `readonly SpaceDirectory[]` | 9 目录唯一来源（SC-021）。**归属修正**：定义在 `src/constants/directories.ts`（非 `src/utils/`）；同文件另导出 `directoryLabel(dir: string): string`（目录展示名） |
+| `isFlatSpace` | `(space: WorkspaceSpace) => boolean` | 扁平空间判定（`dirs` 仅含空间自身：共享空间 / 临时空间），**2026-09-14 新增于 `src/utils/space.ts`** |
+| `spaceSubDirs` | `(space: WorkspaceSpace) => WorkspaceDir[]` | 空间下的二级子目录；扁平空间返回 `[]`（同一文件） |
+| `spaceFileCount` | `(space: WorkspaceSpace) => number` | 空间内文件总数（展开态计数展示用，同一文件） |
 
-**说明**: 上表除 `SPACE_DIRECTORIES` 外均位于 `src/utils/`；`ErrorMessageContext` 为
+**说明**: 上表均位于 `src/utils/`（目录常量 `src/constants/directories.ts` 已于 2026-09-14 删除，目录集合改为接口下发）；
+`ErrorMessageContext` 为
 `'default' \| 'create-thread' \| 'send-message' \| 'upload' \| 'preview'`（见 `src/utils/error-message.ts`）。
 
 ---
@@ -912,7 +947,7 @@ interface AppSessionOptions {
 |---|---|---|---|
 | `MessageList.streaming`、`MessageBubble.streaming` | `RunState \| null` | `StreamingView \| null`（`{ phase, text, thinking, toolCalls, error }`） | 表格列的是 `RunState`（`data-model.md` §13）的**渲染投影**，而非 store 内部结构：只保留渲染所需字段（`streamingText` → `text`、`streamingThinking` → `thinking`，省略 `startedAt` / `thinkingEnabled`），并补上 `RunState` 不含的 `error`。该类型在 `MessageList.vue` 与 `MessageBubble.vue` 内**各自本地声明**（结构性类型，非导出契约） |
 | `MessageList.messages`、`HistorySidebar.threads` | 必填 | 可选，默认 `[]` | 加载态与空态复用同一组件，避免父级传 `undefined` |
-| `Composer.directories` | 必填 | 可选，默认 `SPACE_DIRECTORIES` | 与 `UploadMenu` / `MentionPicker` 口径一致，默认取唯一来源常量（V-01） |
+| `Composer.directories` | 必填 | **已删除** | 2026-09-14：目录集合改由 `GET /api/files/workspace` 下发，`Composer` 不再接收目录常量 |
 | `BaseButton.type` | `'button' \| 'submit'` | 追加 `'reset'` | 原生按钮类型完整覆盖 |
 | `useThreads.showMore()` | `() => Promise<void>` | `() => void`（同步） | 纯前端切片，无异步工作 |
 | `useChatStream.thinkingEnabled` | `Readonly<Ref<boolean>>` | `Ref<boolean>`（可写） | 需持久化到 `sessionStorage`，并由 `setThinking()` 驱动 |
@@ -921,7 +956,7 @@ interface AppSessionOptions {
 | `useFileMention.pickFile` | `—` | `(ref) => boolean` | 超限/重复时需区分"已加入"与"被拒绝"，供装配层决定是否插入正文标记 |
 | `formatTokens` / `formatDuration` / `formatFileSize` / `formatTimestamp` | 非空入参 | 接受 `null \| undefined`，返回 `''` | 消息字段可缺省（进行中/中断轮无用量与耗时），避免调用方层层判空 |
 | `toUserMessage` | `(error) => string` | `(error, context?) => string` | 同一错误码在不同场景语义不同（`backend-api.md` §7 差异 6）；`context` 默认 `'default'` |
-| `SPACE_DIRECTORIES` 归属 | `src/utils/` | `src/constants/directories.ts` | 与 `limits` / `events` 同归常量层；`src/utils/` 只放纯函数 |
+| `SPACE_DIRECTORIES` 归属 | `src/utils/` | `src/constants/directories.ts` → **2026-09-14 删除**，改由接口下发 + `src/utils/space.ts` 结构判定 | 场景子目录随配置变化，前端常量必然与后端漂移 |
 
 ### 6.2 组件层超集一览
 
@@ -951,15 +986,15 @@ interface AppSessionOptions {
 | `useThreads` | `visible` / `total` / `loading` / `error` / `patchFeedback()` |
 | `useChatStream` | `draft` / `error` / `usage` / `durationSeconds` / `startedAt` / `hasThinking` / `submitFeedback()` / `setThinking()` |
 | `useModels` | `loading` / `error` / `isDefaultSelected` |
-| `useFileMention` | `directories` / `optionCount` / `maxReached` / `missingReferences()`；模块级 `mentionToken()` / `stripMentionTokens()` |
-| `useWorkspace` | `error`；模块级 `emptyWorkspace()` |
+| `useFileMention` | `spaces` / `column` / `activeSpace` / `dirs` / `files` / `maxReached` / `pickSpace()` / `confirmActive()` / `back()` / `missingReferences()`；模块级 `mentionToken()` / `stripMentionTokens()` |
+| `useWorkspace` | `scenario` / `expandedSpaces` / `expandedDirs` / `filesOf()` / `labelOf()` / `uploadExtensionsOf()` / `deletableOf()` / `toggleSpace()` / `toggleDir()` / `remove()` / `error` |
 | `useSessionSearch` | `baseOf` / `activeMessageId` / `open()` |
 | `usePreview` | `download()` |
 | `useToast` | `runAction()` / `clear()`；`push()` 返回 `id` |
 
 已导出但契约未列的类型：`UploadStatus` / `UploadedDocument`（`useUploads`）、
 `ToolCallState` / `ChatStreamStore`（`useChatStream`）、`PreviewTarget` / `PreviewContent`（`usePreview`）、
-`ToastLevel` / `ToastItem` / `ToastAction`（`useToast`）、`MentionStage`（`useFileMention`）、
+`ToastLevel` / `ToastItem` / `ToastAction`（`useToast`）、`MentionColumn`（`useFileMention`）、
 `SearchMatch`（`useSessionSearch`）、`AppSession`（`useAppSession`）、
 `SegmentType` / `ContentSegment`（`segments`）、`PreviewKind` / `UploadPrecheckResult`（`file-kind`）、
 `ErrorMessageContext`（`error-message`）。
@@ -969,7 +1004,7 @@ interface AppSessionOptions {
 | 模块 | 定位 | 为什么不算契约变更 |
 |---|---|---|
 | `composables/useChatPanel.ts` | `ChatPanel.vue` 的装配 view-model：跨 composable 的事件编排、纯 UI 开关（`uploadOpen` / `agentPanelOpen` / `workspaceOpen`）与生命周期（首轮 `models.load()`、`agents.loadCurrent()` + `startMcpPolling()`） | **不是组件对外契约**，而是 T081（单文件 ≤500 行）的拆分产物。状态来源不变——一律取自 `provide/inject` 的会话上下文，不新增字段来源、不持有业务数据。`ChatPanel` 的 props / 模板与各子组件的 props / emits 契约不受影响；其成员清单见 §四 末节 |
-| `constants/directories.ts` | `SPACE_DIRECTORIES` + `directoryLabel()` | 见 6.1 最后一行（归属修正）；三处 UI 同源（V-01 / SC-021） |
+| `utils/space.ts` | 三空间结构判定纯函数（`isFlatSpace` / `spaceSubDirs` / `spaceFileCount`） | 2026-09-14 新增：由"前端常量白名单"改为"接口下发 + 结构判定"，`@` 面板与文件空间树共用（V-01 / SC-021） |
 
 ### 6.5 复核结论
 

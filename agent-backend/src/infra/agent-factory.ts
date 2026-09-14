@@ -13,7 +13,14 @@ import { loadAgentConfig } from '../domain/agent-instance.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
-import { userAgentsDir } from '../domain/dirs.js';
+import {
+  SPACE_PREP,
+  SPACE_SHARED,
+  SPACE_TMP,
+  ScenarioNotConfiguredError,
+  loadScenario,
+  userAgentsDir,
+} from '../domain/dirs.js';
 import type {
   AgentConfigBundle,
   LlmEvent,
@@ -109,11 +116,14 @@ export class AgentInstanceFactory {
         logger,
         truncateKb: this.deps.truncateKb,
       });
+      // list_dir/read_file 的目录清单按 scenario 动态生成；未配置场景时退化为三空间根
+      const availableDirs = listAvailableDirs(this.deps.root, inst.key.userId);
       tools.push(
         ...buildBuiltinTools({
           fileAccess: fa,
           threadId: req.threadId,
           enabled: inst.config.enabledTools,
+          availableDirs,
           logger,
         }),
       );
@@ -183,5 +193,20 @@ export class AgentInstanceFactory {
       thinking: req.thinking,
       signal: req.signal,
     });
+  }
+}
+
+/** list_dir/read_file 可用的目录清单：数据准备子目录（scenario 定义）+ 共享空间 + 临时空间 */
+function listAvailableDirs(root: string, userId: string): string[] {
+  try {
+    const scenario = loadScenario(root, userId);
+    return [
+      ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
+      SPACE_SHARED,
+      SPACE_TMP,
+    ];
+  } catch (err) {
+    if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP];
+    throw err;
   }
 }

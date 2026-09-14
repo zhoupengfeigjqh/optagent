@@ -6,7 +6,7 @@
  * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.xlsx` → 回退下载；其余不支持。
  */
 
-import { ALLOWED_UPLOAD_EXTENSIONS, MAX_UPLOAD_BYTES } from '../constants/limits'
+import { MAX_UPLOAD_BYTES } from '../constants/limits'
 
 /** 预览渲染方式。 */
 export type PreviewKind = 'text' | 'pdf' | 'image' | 'download' | 'unsupported'
@@ -64,19 +64,25 @@ export function resolvePreviewKind(filename: string): PreviewKind {
 }
 
 /**
- * 上传前客户端预校验（FR-010）。
+ * 上传前客户端预校验（FR-010 + 003 按空间白名单）。
  *
+ * `allowedExtensions` 取目标空间的 `upload_extensions`（workspace 接口下发）；
+ * 未传（工作空间尚未加载）时只校验大小，扩展名交给后端兜底。
  * 不合规时调用方 MUST **不发请求**，直接把该项置为失败并展示原因。
  */
-export function isUploadAllowed(file: { name: string; size: number }): UploadPrecheckResult {
+export function isUploadAllowed(
+  file: { name: string; size: number },
+  allowedExtensions?: readonly string[],
+): UploadPrecheckResult {
   if (Number.isFinite(file.size) && file.size > MAX_UPLOAD_BYTES) {
     return { ok: false, code: 'FILE_TOO_LARGE' }
   }
 
-  const extension = fileExtension(file.name)
-  const allowed = (ALLOWED_UPLOAD_EXTENSIONS as readonly string[]).includes(extension)
-  if (!allowed) {
-    return { ok: false, code: 'VALIDATION_FAILED' }
+  if (allowedExtensions && allowedExtensions.length > 0) {
+    const extension = fileExtension(file.name)
+    if (!allowedExtensions.includes(extension)) {
+      return { ok: false, code: 'VALIDATION_FAILED' }
+    }
   }
 
   return { ok: true }

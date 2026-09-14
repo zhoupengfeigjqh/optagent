@@ -62,7 +62,8 @@
 
 ### FileReference
 
-`{dir: string, filename: string}` —— dir ∈ 9 个白名单目录；文件地址 = dir + "/" + filename。
+`{dir: string, filename: string}` —— **2026-09-13 修订**：dir 为三空间相对路径
+（`数据准备/{业务子目录}`、`共享空间`、`临时空间`）；文件地址 = dir + "/" + filename。
 
 ### McpServiceStatus
 

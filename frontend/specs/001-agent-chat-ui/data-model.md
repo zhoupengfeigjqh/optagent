@@ -11,22 +11,34 @@
 
 ## 一、领域实体
 
-### 1. 空间目录（SpaceDirectory）
+### 1. 空间（Space）与场景子目录（Scenario Sub-dir）
 
-**来源**: 前端常量，与后端白名单同口径 | **定义位置**: `src/constants/directories.ts`
+**来源**: `GET /api/files/workspace` 下发（**2026-09-14 修订**：原为前端常量 `src/constants/directories.ts`，该文件已删除；前端 MUST NOT 保留目录常量）
+
+**Space**（一级）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `dir` | `string` | 目录名（提交给后端的 `dir` 值） |
-| `label` | `string` | 界面展示名（与 `dir` 相同，保留供将来本地化） |
+| `name` | `string` | 空间名（一级目录）：`数据准备` / `共享空间` / `临时空间` |
+| `agent_writable` | `boolean` | Agent 是否可写（仅 `临时空间` 为 `true`） |
+| `upload_extensions` | `string[]` | 该空间允许上传的扩展名（小写含点），前端预校验的白名单来源 |
+| `dirs` | `WorkspaceDir[]` | 数据准备为场景子目录清单；共享空间 / 临时空间仅含空间自身一项 |
 
-**固定取值（9 个，顺序固定）**: `生产计划`、`产线信息`、`切换时间`、`求解时间`、`产线电价`、
-`目标优先级`、`使用规则`、`shared`、`tmp`
+**Scenario Sub-dir**（二级；扁平空间即空间自身，见 `WorkspaceDir`）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `dir` | `string` | 相对空间路径（如 `数据准备/生产计划`；扁平空间为 `共享空间` / `临时空间`） |
+| `label` | `string` | 展示名（数据准备子目录为子目录名，扁平空间为空间名） |
+| `deletable` | `boolean` | 用户是否可删除其中文件（共享空间为 `false`） |
+| `files` | `{ filename, size, updated_at }[]` | 文件清单，空目录为 `[]` |
 
 **规则**:
 
-- 上传入口、`@` 文件选择、工作空间文件三处 MUST 引用同一常量数组，不得各自硬编码（FR-009、FR-014、FR-031、SC-021）。
-- `tmp` 的展示名附注"（临时空间）"；`shared` 展示为"共享空间"。
+- 一级空间**固定三个**（数据准备 / 共享空间 / 临时空间）；数据准备下的二级子目录由场景配置（`users/{userId}/scenario.json` 的 `data_prep_dirs`，经接口下发，运行期热加载）定义，**前端 MUST NOT 硬编码**（FR-009、FR-014、FR-031、SC-021）。
+- **扁平空间判定**：`dirs.length === 1 && dirs[0].dir === name` 者为扁平空间（共享空间 / 临时空间），展开后直接出文件；该判定 MUST 由唯一纯函数提供（`src/utils/space.ts` 的 `isFlatSpace`），`@` 面板与文件空间树共用。
+- 上传入口、`@` 文件选择、工作空间文件三处 MUST 消费同一接口下发的同一份数据，不得各自维护不同口径（FR-009a、SC-021）。
+- 场景未配置或接口失败（503 `SCENARIO_NOT_CONFIGURED`）时，三处 MUST 展示明确原因与重试入口，MUST NOT 以空态静默替代（FR-009a）。
 
 ---
 
@@ -113,7 +125,7 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `dir` | `string` | 9 个白名单目录之一 |
+| `dir` | `string` | 三个空间之一（数据准备含场景子目录，如 `数据准备/生产计划`；共享空间 / 临时空间即空间名） |
 | `filename` | `string` | 目录内的文件名 |
 
 **规则**:
@@ -203,7 +215,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `localId` | `string` | 前端生成的唯一键（列表渲染用） |
-| `dir` | `string` | 目标目录（9 白名单之一） |
+| `dir` | `string` | 目标目录（三个空间之一，数据准备含场景子目录） |
 | `name` | `string` | 原始文件名 |
 | `size` | `number` | 字节数 |
 | `status` | `'pending' \| 'uploading' \| 'success' \| 'failed'` | 上传状态 |
@@ -219,7 +231,7 @@ pending ──upload──▶ uploading ──201──▶ success
 
 **规则**:
 
-- 客户端预校验：扩展名 ∉ `.csv .xlsx .txt .json .pdf` 或 单文件 > 50MB → 直接置 `failed` 并给出原因，不发请求（FR-010、FR-011）。
+- 客户端预校验：扩展名 ∉ **目标空间的 `upload_extensions`**（数据准备仅 `.csv`/`.xlsx`；共享空间与临时空间另含 `.txt`/`.json`/`.pdf` 与图片）或 单文件 > 50MB → 直接置 `failed` 并给出原因，不发请求（FR-010、FR-011）；空间策略尚未取得时只校验大小，扩展名交后端兜底。
 - **后端上传接口一次只接受一个文件**（多 `file` part 时仅最后一个生效）：多选时前端 MUST 为每个文件各发一次请求，各自独立状态与重试。
 - 落盘名以响应中的 `filename` 为准（后端已追加 `_YYYYMMDD_HHMMSS` 并在重名时追加 `-1`/`-2`），前端 MUST NOT 自行拼接。
 - `failed` 项 MUST 展示失败原因并提供"重试"（FR-011、SC-013）。
@@ -227,20 +239,31 @@ pending ──upload──▶ uploading ──201──▶ success
 
 ---
 
-### 11. 工作空间（Workspace / WorkspaceDir）
+### 11. 工作空间（Workspace / WorkspaceSpace）
 
 **来源**: `GET /api/files/workspace`
 
+**响应**
+
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `dir` | `string` | 目录名 |
-| `files` | `{ filename, size, updated_at }[]` | 文件清单，空目录为 `[]` |
+| `scenario` | `string` | 场景名（场景未配置 → 503 `SCENARIO_NOT_CONFIGURED`） |
+| `spaces` | `WorkspaceSpace[]` | 三空间树：空间 → 数据准备场景子目录 → 文件（字段见 §1） |
+
+**前端状态**（`useWorkspace` 持有）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `expandedSpaces` | `string[]` | 已展开的空间名，默认 `[]` 即全部收起（一级） |
+| `expandedDirs` | `string[]` | 已展开的二级目录，默认 `[]` 即全部收起（二级） |
 
 **规则**:
 
-- MUST 固定返回 9 个目录，空目录展示为空态（FR-031、FR-019）。
-- 分组折叠状态（`expandedDirs: string[]`，默认 `[]` 即全部收起）由 `useWorkspace` 持有，**仅存活于本次会话内**；面板收起再展开、清单重拉均不重置（FR-031）。
-- 删除（`remove(reference): Promise<boolean>`）经 `DELETE /api/files` 完成，成功后就地移除条目并提示；`shared` 目录界面不提供删除入口，后端兜底返回 `FILE_READONLY`（FR-053、FR-054）。
+- MUST 返回三个空间；数据准备下的子目录数量与场景配置一致，空空间/空目录展示为空态（FR-031、FR-019、SC-021）。
+- 界面结构 MUST 为**三层**：空间（一级）→ 数据准备场景子目录（二级）→ 文件；共享空间与临时空间为扁平空间，展开即直接列出文件（FR-031）。
+- 一级与二级折叠状态分别由 `expandedSpaces` / `expandedDirs` 持有，**仅存活于本次会话内**；面板收起再展开、清单重拉均不重置（FR-031）。
+- 打开加号上传入口或文件空间面板时若清单尚未取得，MUST 即时加载（FR-009a、FR-031）。
+- 删除（`remove(reference): Promise<boolean>`）经 `DELETE /api/files` 完成，成功后就地移除条目并提示；**共享空间**界面不提供删除入口，后端兜底返回 `FILE_READONLY`（FR-053、FR-054）。
 
 ---
 
@@ -263,7 +286,7 @@ pending ──upload──▶ uploading ──201──▶ success
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `kind` | `'none' \| 'file'` | `none` 表示内容态无目标 |
-| `dir` | `string` | 空间目录 |
+| `dir` | `string` | 文件所在目录（三个空间之一，数据准备含场景子目录） |
 | `filename` | `string` | 文件名 |
 
 **PreviewContent**（加载结果）
@@ -341,8 +364,9 @@ idle
 | `text` | `string` | textarea 文本（展示层，含 `@文件名`） |
 | `references` | `FileReference[]` | 已选引用（提交层，结构化） |
 | `mentionOpen` | `boolean` | `@` 面板是否展开 |
-| `mentionStage` | `'dir' \| 'file'` | 面板阶段（目录列表 / 文件列表） |
-| `mentionDir` | `string \| null` | 当前展开的目录 |
+| `mentionColumn` | `'space' \| 'dir' \| 'file'` | 面板当前列（空间 / 数据准备子目录 / 文件） |
+| `activeSpace` | `string \| null` | 当前聚焦的空间 |
+| `activeDir` | `string \| null` | 当前聚焦的目录（相对空间路径） |
 | `activeIndex` | `number` | 面板键盘高亮项 |
 
 **规则**:
@@ -392,10 +416,11 @@ Conversation 1 ──n Message
 Message      1 ──0..1 Usage
 Message      1 ──0..1 ErrorInfo
 Message      1 ──0..1 Feedback
-Message(user) 1 ──n FileReference ──▶ SpaceDirectory（9 个白名单之一）
-SpaceDirectory 1 ──n UploadedDocument
-SpaceDirectory 1 ──n WorkspaceDir.files
-SpaceDirectory 1 ──n WorkspacePanel（open / view）──▶ PreviewTarget ──▶ PreviewContent
+Message(user) 1 ──n FileReference ──▶ WorkspaceDir（三空间之一 / 数据准备场景子目录）
+Space        1 ──n WorkspaceDir          （数据准备为场景子目录；共享空间/临时空间仅自身）
+WorkspaceDir 1 ──n UploadedDocument
+WorkspaceDir 1 ──n WorkspaceFile[]
+Workspace    1 ──n WorkspaceSpace（固定 3）──▶ WorkspacePanel（open / view）──▶ PreviewTarget ──▶ PreviewContent
 Model 1 ──n RunState（请求级，每轮一个）
 Conversation 1 ──0..1 RunState
 ```
@@ -404,9 +429,9 @@ Conversation 1 ──0..1 RunState
 
 | 编号 | 规则 | 来源 |
 |---|---|---|
-| V-01 | 白名单恒为 9 个目录，三处引用同一常量 | FR-009/014/031、SC-021 |
+| V-01 | 一级空间恒为 3 个、数据准备子目录与场景配置一致；三处消费同一接口下发结果，前端无目录常量 | FR-009/009a/014/031、SC-021 |
 | V-02 | 单条消息引用 ≤ 10 个 | FR-017、SC-019 |
-| V-03 | 上传扩展名 ∈ 5 种，单文件 ≤ 50MB | FR-010 |
+| V-03 | 上传扩展名 ∈ 目标空间的 `upload_extensions`，单文件 ≤ 50MB | FR-010 |
 | V-04 | 思考内容与工具信息不出现在 `Message` 类型中 | FR-023、SC-018 |
 | V-05 | `toolCalls` 展示项在 `tool_call_end` 后移除 | FR-005、SC-011 |
 | V-06 | `phase === 'streaming'` ⇒ 发送按钮与数字人切换均禁用 | FR-006/036、SC-012 |

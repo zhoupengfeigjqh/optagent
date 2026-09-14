@@ -106,6 +106,10 @@ function onBackToList(): void {
   session.preview.backToList()
 }
 
+function onToggleSpace(name: string): void {
+  session.workspace.toggleSpace(name)
+}
+
 function onToggleDir(dir: string): void {
   session.workspace.toggleDir(dir)
 }
@@ -154,7 +158,8 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
     <template #preview>
       <WorkspacePanel
         :view="session.preview.view.value"
-        :dirs="session.workspace.dirs.value"
+        :spaces="session.workspace.spaces.value"
+        :expanded-spaces="session.workspace.expandedSpaces.value"
         :expanded-dirs="session.workspace.expandedDirs.value"
         :list-loading="session.workspace.loading.value"
         :target="session.preview.target.value"
@@ -162,6 +167,7 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
         :content-loading="session.preview.loading.value"
         @close="onClosePanel"
         @back="onBackToList"
+        @toggle-space="onToggleSpace"
         @toggle-dir="onToggleDir"
         @preview="onOpenFile"
         @download="onPanelDownload"

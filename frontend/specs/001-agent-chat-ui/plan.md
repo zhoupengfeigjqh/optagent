@@ -17,9 +17,9 @@
 构建一个三栏式 Agent 对话工作台（左：历史会话；中：聊天区；右：内容预览区），
 以 Vue 3 + TypeScript 单页应用实现，作为 `agent-backend`（Fastify + SSE）的纯前端消费方。
 核心能力：初始居中入口 → 发送后展开聊天区；流式回复（思考内容可折叠、工具调用仅展示名称且结束即消失）；
-消息级复制/点赞/点踩与 token、耗时展示；输入区文档上传（9 个空间目录）、思考/快速切换、LLM 模型选择；
-`@` 引用空间文件（结构化 `{dir, filename}` 提交）；数字人信息与 MCP 连接状态、进行中禁止切换；
-会话搜索（黄色高亮、逐次跳转）与工作空间文件查看；外部地址直接跳转、空间目录文件右侧内联预览。
+消息级复制/点赞/点踩与 token、耗时展示；输入区文档上传（三空间：数据准备 / 共享空间 / 临时空间）、思考/快速切换、LLM 模型选择；
+`@` 引用空间文件（三级级联，结构化 `{dir, filename}` 提交）；数字人信息与 MCP 连接状态、进行中禁止切换；
+会话搜索（黄色高亮、逐次跳转）与工作空间文件查看；外部地址直接跳转、空间中的文件右侧内联预览。
 
 技术路线：**零框架外依赖的"原生优先"方案** —— 不引入 vue-router、Pinia、UI 组件库、
 markdown 渲染库与 SSE 客户端库；状态用 Composition API composable 单例 + `provide/inject`，
@@ -76,12 +76,12 @@ markdown 渲染库与 SSE 客户端库；状态用 Composition API composable �
 
 - 单个 `.vue` / `.ts` 文件 MUST NOT 超过 500 行（宪章原则二）。
 - 工具调用的入参、过程输出、结果内容 0 透出（SC-011）；思考内容与工具调用信息 0 落历史（SC-018）。
-- 目录白名单固定为 9 个（7 业务 + `shared` + `tmp`），上传入口、`@` 引用、工作空间三处口径一致（SC-021）。
+- 文件空间为**后端下发**的三空间（数据准备 / 共享空间 / 临时空间；数据准备下含场景子目录），上传入口、`@` 引用、工作空间三处同源口径一致，前端 MUST NOT 保留目录常量（SC-021）。
 - 全部交互控件 MUST 支持键盘导航并遵循 WAI-ARIA（FR-051、SC-007）。
 - 新增任何依赖 MUST 记录选型理由（宪章原则六）；本计划已预先排除全部非必要依赖。
 
-**规模/范围**: 单用户工作台（后端内置用户 `admin`）；9 个空间目录；历史列表默认 10 条 / "更多"100 条；
-单会话按 50 条分页、上限 200 条；预计 11 个 composable、8 个 API 模块 + 1 个契约类型文件（`api/types.ts`）、33 个组件。
+**规模/范围**: 单用户工作台（后端内置用户 `admin`）；3 个空间（数据准备下含场景子目录）；历史列表默认 10 条 / "更多"100 条；
+单会话按 50 条分页、上限 200 条；预计 11 个 composable、8 个 API 模块 + 1 个契约类型文件（`api/types.ts`）、34 个组件。
 
 ## 宪章检查
 
@@ -163,7 +163,7 @@ frontend/                              # 仓库根（本目录）
     │   ├── useModels.ts               # 模型列表与当前选择
     │   ├── useUploads.ts              # 上传入口与上传状态
     │   ├── useFileMention.ts          # "@" 触发、目录/文件选择、引用增删与上限
-    │   ├── useWorkspace.ts            # 工作空间文件（9 目录）
+    │   ├── useWorkspace.ts            # 三空间树、一级/二级折叠状态、删除文件
     │   ├── useSessionSearch.ts        # 关键词高亮与逐次跳转
     │   ├── usePreview.ts              # 工作空间面板状态（开关 / 双视图 / 内容加载）
     │   ├── useResizablePanel.ts       # 右栏宽度拖动（分隔条 / 上下限收敛 / 键盘可达）
@@ -174,7 +174,8 @@ frontend/                              # 仓库根（本目录）
     │   │   ├── HistorySidebar.vue     # 左栏：历史会话 + 更多 + 新建
     │   │   ├── HistoryItem.vue
     │   │   ├── WorkspacePanel.vue     # 右栏：文件空间列表 / 内容预览（双视图）
-    │   │   └── WorkspaceFileTree.vue  # 文件空间列表（9 目录，默认收起可折叠）
+    │   │   ├── WorkspaceSpaceTree.vue # 文件空间树（空间 → 数据准备子目录 → 文件，默认收起可折叠）
+    │   │   └── WorkspaceFileList.vue  # 文件行列表（查看/下载/删除，两处层级复用）
     │   ├── chat/
     │   │   ├── ChatPanel.vue          # 中栏：头部 + 消息列表 + 输入区
     │   │   ├── ChatHeader.vue         # 数字人名称 + MCP 状态 + 搜索/工作空间/数字人按钮
@@ -190,9 +191,9 @@ frontend/                              # 仓库根（本目录）
     │   │   ├── TypingIndicator.vue    # "思考中" 旋转动效
     │   │   ├── Composer.vue           # 输入区（textarea + 工具栏 + @ 面板）
     │   │   ├── ComposerToolbar.vue    # 加号 / 思考开关 / 模型选择 / 发送 / 中断
-    │   │   ├── UploadMenu.vue         # 9 目录上传入口
+    │   │   ├── UploadMenu.vue         # 上传入口（三空间，目录来自 workspace 接口）
     │   │   ├── UploadItem.vue         # 单文件上传状态（成功/失败原因/重试）
-    │   │   ├── MentionPicker.vue      # "@" 目录与文件选择面板
+    │   │   ├── MentionPicker.vue      # "@" 面板（空间 → 数据准备子目录 → 文件，三级级联）
     │   │   ├── ThinkingToggle.vue     # 思考 / 快速切换
     │   │   ├── ModelPicker.vue        # 模型列表（含默认标识）
     │   │   └── SessionSearch.vue      # 会话内搜索（高亮 + 逐次跳转）
@@ -210,9 +211,9 @@ frontend/                              # 仓库根（本目录）
     │   ├── segments.ts                # 内容 → 分段（纯文本/链接/高亮），纯函数
     │   ├── format.ts                  # token、耗时、时间、文件大小格式化
     │   ├── file-kind.ts               # 扩展名 → 预览方式（inline-text / pdf / download）
+    │   ├── space.ts                   # 三空间结构判定（扁平空间 / 子目录 / 文件数，唯一来源）
     │   └── error-message.ts           # 后端错误码 → 中文文案映射
     ├── constants/
-    │   ├── directories.ts             # 9 个空间目录白名单（唯一来源）
     │   ├── limits.ts                  # 50MB、10 个引用、10/100 条、预览上限
     │   └── events.ts                  # SSE 事件名与状态机常量
     └── styles/

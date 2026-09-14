@@ -15,7 +15,7 @@ import type { AppContext } from './context.js';
 import { AgentPool } from './domain/agent-pool.js';
 import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
-import { ensureRootDirs, userDataDir, TMP_DIR } from './domain/dirs.js';
+import { ensureRootDirs, userDataDir, SPACE_TMP } from './domain/dirs.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
 import { RunManager } from './domain/run-manager.js';
@@ -115,7 +115,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   scheduler.every(
     60 * 60 * 1000,
     async () => {
-      await cleanupTmpDir(path.join(userDataDir(root, userId), TMP_DIR), {
+      await cleanupTmpDir(path.join(userDataDir(root, userId), SPACE_TMP), {
         logger: {
           warn: (msg) => loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed' }, msg),
           info: (msg) => loggers.logger.info({ event: 'tmp.cleanup' }, msg),

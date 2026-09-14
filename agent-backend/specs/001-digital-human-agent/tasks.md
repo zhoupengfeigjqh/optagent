@@ -228,3 +228,40 @@ US1（对话核心）→ US2（对话管理+摘要）→ US3（文件）→ US4/
 - 文件 ≤500 行（章程 II），超出按职责拆分
 - domain 层禁止 import Fastify/pi/better-sqlite3（依赖方向向内）
 - 每个任务或逻辑组完成后提交；测试先写先败后实现
+
+---
+
+## 后续变更（2026-09-13）
+
+上述任务记录为历史，**不回溯改写**；以下为在此之后落地的模型变更：
+
+**1. 三空间取代"7 业务目录 + shared/ + tmp/"（影响 T009/T010 及全部文件相关任务）**
+
+- `users/{user_id}/user-data/` 下为 `数据准备/`（Agent 只读，二级目录由 scenario 定义）、
+  `共享空间/`（Agent 只读，扁平）、`临时空间/`（Agent 唯一可写，须 `{thread_id}_` 前缀）
+- `ensureUserDirs` 只创建三个空间 + `threads/` + `agents/`；数据准备子目录由 scenario 加载时惰性创建
+- 旧目录与其数据已彻底删除，**不提供兼容与回退**
+- `FileAccess` 沙箱读白名单改为三个空间；数据准备首段之后 MUST 是磁盘上已存在的 scenario 二级目录；
+  `grep` 经 `expandSpaces()` 展开数据准备子目录
+
+**2. 新增场景配置 scenario.json（FR-007a）**
+
+- 位置 `users/{user_id}/scenario.json`（与 `user-data/`、`agents/` 平级），形如
+  `{"scenario": "生产调度", "data_prep_dirs": ["生产计划", ...]}`
+- 目录名校验（不允许 `/`、`\`、`..`，≤64 字符，去重）；按 mtime 缓存 + **热加载**（改文件无需重启）
+- 缺失或损坏：进程不退出，业务 API 返回 503 `SCENARIO_NOT_CONFIGURED`
+
+**3. 内置工具目录说明动态化**
+
+`read_file`/`list_dir` 的可用目录由 scenario 动态生成（数据准备各子目录 + 共享空间 + 临时空间）；
+scenario 缺失时降级为仅共享空间/临时空间；`write_file` 仅写临时空间。
+
+**4. 上传扩展名按空间区分**
+
+数据准备仅 `.csv`/`.xlsx`；共享空间与临时空间为 `.csv/.xlsx/.txt/.json/.pdf` + 图片
+（`.jpg/.jpeg/.png/.bmp/.webp/.gif/.tif/.tiff`）。
+
+**5. 错误码映射**
+
+非法 `dir` → 400 `VALIDATION_FAILED`；未知空间/未知数据准备子目录 → 403 `UPLOAD_DIR_FORBIDDEN`；
+删除共享空间文件 → 403 `FILE_READONLY`；scenario 缺失 → 503 `SCENARIO_NOT_CONFIGURED`。

@@ -52,9 +52,17 @@ interface FileAccess {
 ```
 
 - 内部统一做：**路径规范化 → 拒绝穿越（`..`/绝对路径）→ 目录白名单**；
-  写操作仅限 `tmp/` 且强制 `{thread_id}_` 前缀，违规抛 `PermissionError`。
+  写操作仅限 `临时空间/` 且强制 `{thread_id}_` 前缀，违规抛 `PermissionError`。
+  （**2026-09-13 修订**）读白名单为三个空间：`数据准备/`（首段之后 MUST 是 scenario 中
+  已存在于磁盘的二级目录）、`共享空间/`、`临时空间/`。
 - 6 个内置工具全部经此代理；`read` 内部按扩展名分派 xlsx/pdf 解析；
-  读 tmp 文件时用 `fs.utimes` 刷新访问时间（供 7 天清理判断）。
+  读临时空间文件时用 `fs.utimes` 刷新访问时间（供 7 天清理判断）。
+- `grep` 的可读目录经 `expandSpaces()` 展开（数据准备展开为其下已存在的各二级目录），
+  使数据准备子目录内文件同样可被检索。
+- **场景配置**：`loadScenario(root, userId)` 读 `users/{userId}/scenario.json`，
+  按 mtime 缓存并对缺失/损坏抛 `ScenarioNotConfiguredError`（业务侧映射为
+  503 `SCENARIO_NOT_CONFIGURED`）；`parseSpaceDir(root, userId, dir)` 负责把
+  `dir` 相对路径解析为 `{space, sub?, relPath}`，越权/不合法抛 `DirValidationError`（400/403）。
 - **`grep` 仅作用文本格式**（.csv/.txt/.json），跳过 .xlsx/.pdf 二进制
   并在结果中注明跳过数量。
 

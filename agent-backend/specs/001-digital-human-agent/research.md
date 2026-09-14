@@ -96,7 +96,7 @@
 
 ## R8. 后台调度
 
-- **Decision**: 进程内 `setInterval` 统一 `Scheduler`（tmp 清理每小时、实例空闲
+- **Decision**: 进程内 `setInterval` 统一 `Scheduler`（`临时空间/` 清理每小时、实例空闲
   回收每分钟）；摘要重写事件触发 + per-thread Promise 链串行。
 - **Rationale**: 单机部署、任务简单（分钟级精度足够），无需 node-cron；
   摘要由"窗口外攒满 20 条"事件驱动最直接，串行链防同 thread 并发重写。

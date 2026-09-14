@@ -158,7 +158,7 @@
 
 - `204` 无响应体
 - 服务端行为：**先 stop 进行中的 run**（丢弃本轮但已消耗 token 仍计入用量），
-  再删除会话目录，并连带清理 `tmp/` 下 `{thread_id}_` 前缀文件
+  再删除会话目录，并连带清理 `临时空间/` 下 `{thread_id}_` 前缀文件
 - 错误：`404 THREAD_NOT_FOUND`
 - 前端行为：删除前二次确认；成功后从列表移除并切换到相邻会话或空态。
 
@@ -201,7 +201,7 @@
 | 400 | `MODEL_NOT_FOUND` | `model` 未命中 `GET /api/models` | "所选模型不可用，请重新选择"；**保留用户输入**（US3 场景 7） |
 | 400 | `FILE_REF_NOT_FOUND` | 引用文件不存在 | "引用的文件不存在，请重新选择"；不发送（FR-018） |
 | 400 | `VALIDATION_FAILED` | 目录/文件名含穿越特征、`content` 为空等 | 提示参数非法 |
-| 403 | `UPLOAD_DIR_FORBIDDEN` | 引用目录不在 9 目录白名单 | "该目录不允许引用" |
+| 403 | `UPLOAD_DIR_FORBIDDEN` | 引用目录非三个空间之一，或数据准备子目录不在场景清单内 | "该目录不允许引用" |
 
 - **注意**：`THREAD_BUSY_LIMIT` **只由本接口产生**，判定是"该用户活跃 run 数 ≥ 3（跨数字人累计）且本会话无活跃 run"；创建会话接口不再返回该码（见 §3.1、§7 差异 6）。
 - **2026-09-10 修订**：本接口**不再**因"会话所属数字人 ≠ 当前选中"而拒绝——**会话不绑定数字人**，
@@ -250,8 +250,8 @@
 
 ### 5.1 `POST /api/files/upload`（multipart）
 
-- 字段：`file`（**单文件**）、`dir`（9 个白名单目录之一，见 §6）
-- 限制：≤50MB（`uploadMaxMb`）；扩展名 ∈ `.csv .xlsx .txt .json .pdf`
+- 字段：`file`（**单文件**）、`dir`（三个空间之一，见 §6；数据准备须带场景子目录，如 `数据准备/生产计划`）
+- 限制：≤50MB（`uploadMaxMb`）；扩展名**按空间**：数据准备 ∈ `.csv .xlsx`，共享空间与临时空间另含 `.txt .json .pdf` 与图片（策略由 `GET /api/files/workspace` 的 `upload_extensions` 下发）
 - 响应：`201 { dir, filename, size }`
   - `filename` 为落盘名：`{原文件名}_{YYYYMMDD_HHMMSS}{.ext}`；
     **同名碰撞时追加 `-1`、`-2`…**（前端 MUST 以响应中的 `filename` 为准，不得自行拼接）
@@ -259,12 +259,12 @@
 
 | 状态码 | code | 触发条件 | 前端提示 |
 |---|---|---|---|
-| 400 | `VALIDATION_FAILED` | 非 multipart；扩展名不在白名单；缺少 `file` 字段；缺少 `dir` 字段 | "文件格式不支持" / "参数缺失" |
-| 403 | `UPLOAD_DIR_FORBIDDEN` | `dir` 不在 9 目录白名单 | "该目录不允许上传" |
+| 400 | `VALIDATION_FAILED` | 非 multipart；扩展名不符合目标空间策略；缺少 `file` 字段；缺少 `dir` 字段 | "文件格式不支持" / "参数缺失" |
+| 403 | `UPLOAD_DIR_FORBIDDEN` | `dir` 非三个空间之一，或数据准备子目录不在场景清单内 | "该目录不允许上传" |
 | 413 | `FILE_TOO_LARGE` | 超过 50MB | "文件超过 50MB" |
 
 - 前端规则：
-  - 客户端预校验扩展名与大小，不合规**不发请求**（FR-010）。
+  - 客户端预校验扩展名（按目标空间的 `upload_extensions`）与大小，不合规**不发请求**（FR-010）；空间策略尚未取得时只校验大小，扩展名交后端兜底。
   - **该接口一次只接受一个文件**（后端逐 part 处理，多 `file` part 时仅最后一个生效）：
     前端多选时**必须为每个文件各发一次请求**，各自独立状态与重试（FR-010、FR-011）。
   - 失败项 MUST 展示原因并提醒重试（FR-011、SC-013）。
@@ -272,8 +272,8 @@
 ### 5.2 `GET /api/files/list?dir=`
 
 - 响应：**顶层数组** `[{ filename, size, updated_at }]`（后端已过滤目录项）
-- 错误：`400 VALIDATION_FAILED`（缺 `dir`/含穿越）、`403 UPLOAD_DIR_FORBIDDEN`（非白名单）
-- 前端用途：`@` 引用面板的文件列表、上传成功后的目录刷新；`dir` 含 `tmp`。
+- 错误：`400 VALIDATION_FAILED`（缺 `dir`/含穿越）、`403 UPLOAD_DIR_FORBIDDEN`（非三个空间之一或不在场景清单内）
+- 前端用途：`@` 引用面板的文件列表、上传成功后的目录刷新；`dir` 为三个空间之一（数据准备含场景子目录）。
 
 ### 5.3 `GET /api/files/download?dir=&filename=`
 
@@ -297,7 +297,7 @@
 - 预览大小上限：`previewMaxMb`（默认 10MB），超限 → `413 FILE_TOO_LARGE`
 - 错误映射：
   - `413 FILE_TOO_LARGE` → 预览区提示"文件过大，请下载查看"并给出下载按钮（FR-048）
-  - `404 FILE_NOT_FOUND` → "文件不存在或已被清理"（如 `tmp` 清理）
+  - `404 FILE_NOT_FOUND` → "文件不存在或已被清理"（如临时空间文件被定期清理）
   - `403 UPLOAD_DIR_FORBIDDEN` → "该目录不支持预览"
   - `400 VALIDATION_FAILED` → "参数非法"
 - 前端实现：文本类**按需 `fetch`**（不直接用 `<iframe>`，以便展示错误态与统一错误文案）；
@@ -312,9 +312,10 @@
 
 ### 5.5 `GET /api/files/workspace`
 
-- 响应：`{ dirs: [{ dir, files: [{ filename, size, updated_at }] }] }`
-- 后端**固定返回全部 9 个白名单目录**，空目录 `files` 为 `[]`（FR-031、FR-019）
-- 目录运行中被删除时按空目录容错，不报错
+- 响应（**2026-09-14 修订**）：`{ scenario, spaces: [{ name, agent_writable, upload_extensions, dirs: [{ dir, label, deletable, files }] }] }`
+- 后端**固定返回三个空间**（数据准备 / 共享空间 / 临时空间）；数据准备下的 `dirs` 逐项对应场景配置的 `data_prep_dirs`，共享空间与临时空间的 `dirs` 仅含空间自身一项
+- 空目录 `files` 为 `[]`（FR-031、FR-019）；目录运行中被删除时按空目录容错，不报错
+- 场景未配置 → `503 SCENARIO_NOT_CONFIGURED`（前端据此提示"用户未设置场景信息，请联系管理员"并提供重试）；前端 MUST 消费该接口作为上传入口、`@` 面板与文件空间三处的**唯一目录来源**（SC-021）
 
 ### 5.6 `DELETE /api/files?dir=&filename=`
 
@@ -322,8 +323,8 @@
 - 响应：`200 { dir, filename, deleted: true }`
 - 错误：
   - `400 VALIDATION_FAILED`（缺参 / 非法文件名 / 含穿越）
-  - `403 UPLOAD_DIR_FORBIDDEN`（`dir` 不在白名单）
-  - `403 FILE_READONLY`（`dir=shared` —— 共享目录只读）
+  - `403 UPLOAD_DIR_FORBIDDEN`（`dir` 非三个空间之一或不在场景清单内）
+  - `403 FILE_READONLY`（`dir=共享空间` —— 共享空间只读）
   - `404 FILE_NOT_FOUND`（文件不存在或已被清理）
 - 前端实现：经 `files.remove()` 发起；成功后**就地移除**该条目（不重拉 `workspace`）并 toast 提示；
   若面板正以内容态展示该文件，删除成功后 MUST 退回列表态（FR-055）。
@@ -331,16 +332,24 @@
 
 ---
 
-## 6. 空间目录白名单（9 个，与后端同源）
+## 6. 三空间与场景子目录（与后端同源）
 
-后端常量来源：`agent-backend/src/domain/dirs.ts`
+后端来源：`agent-backend/src/domain/dirs.ts`（空间与策略）+ `users/{userId}/scenario.json`（数据准备子目录），
+经 `GET /api/files/workspace` 统一下发（**2026-09-14 修订**：原为"9 目录前端常量白名单"）。
 
-- `BUSINESS_DIRS`（7 个，顺序固定）：`生产计划`、`产线信息`、`切换时间`、`求解时间`、`产线电价`、`目标优先级`、`使用规则`
-- `SHARED_DIR`：`shared`
-- `TMP_DIR`：`tmp`
+**一级空间（固定三个）**
 
-后端三处白名单均为此 9 个：上传（`UPLOAD_DIRS`）、列表/下载/预览（`LIST_DIRS`）、`@` 引用（`ATTACHMENT_DIRS`）。
-前端对应常量：`src/constants/directories.ts`（唯一来源，三处 UI 共用，对应 SC-021）。
+| 空间 | Agent 可写 | 允许上传扩展名 | 界面删除入口 |
+|---|---|---|---|
+| `数据准备` | 否 | `.csv`、`.xlsx` | 有（子目录内文件） |
+| `共享空间` | 否 | `.csv`、`.xlsx`、`.txt`、`.json`、`.pdf`、图片 | **无**（只读，后端 403 `FILE_READONLY`） |
+| `临时空间` | 是 | 同共享空间 | 有 |
+
+**二级（仅数据准备）**：**场景子目录**，由 `scenario.json` 的 `data_prep_dirs` 定义（目录名不允许 `/`、`\`、`..`，≤64 字符，去重）；
+后端按 **mtime 缓存 + 热加载**，加载成功时惰性创建对应子目录。
+
+**消费约定**：上传入口、`@` 引用面板、文件空间面板三处 MUST 消费同一接口的下发结果（前端**无目录常量**，
+`src/utils/space.ts` 仅提供扁平空间判定的纯函数），对应 SC-021；场景未配置时接口返回 503，三处同源提示并给出重试。
 
 > `user-data/` 下还存在 `threads` 目录，但它是会话存储目录，**不属于**用户可见的空间目录，前端不得展示。
 
@@ -355,7 +364,7 @@
 
 | # | 后端文档表述 | 源码实际行为 | 证据（文档 / 源码） | 前端应对 |
 |---|---|---|---|---|
-| 1 | `contracts/http-api.md:30`："`dir` 白名单扩展为 **10 个**：7 业务目录 + shared + tmp" | 实际为 **9 个**；同一文档 `http-api.md:73` 又写"固定返回全部 **9 个**白名单目录"，自相矛盾 | **文档**：`contracts/http-api.md:30`（10 个）vs `contracts/http-api.md:73`（9 个）<br>**源码**：`src/domain/dirs.ts:13-25`（`BUSINESS_DIRS` 7 个 + `SHARED_DIR` + `TMP_DIR`）、`src/routes/files.ts:24-25`（`UPLOAD_DIRS` = `LIST_DIRS` = 7+shared+tmp）、`src/routes/chat.ts:26`（`ATTACHMENT_DIRS`）——三处均 **9 个**；`src/routes/files.ts:3` 文件头注释亦写"7 业务目录+shared+tmp" | 前端按 **9 个**实现（已对齐）；建议后端修正文档笔误 |
+| 1 | `contracts/http-api.md:30`："`dir` 白名单扩展为 **10 个**：7 业务目录 + shared + tmp" | 实际为 **9 个**；同一文档 `http-api.md:73` 又写"固定返回全部 **9 个**白名单目录"，自相矛盾 | **文档**：`contracts/http-api.md:30`（10 个）vs `contracts/http-api.md:73`（9 个）<br>**源码**：`src/domain/dirs.ts:13-25`（`BUSINESS_DIRS` 7 个 + `SHARED_DIR` + `TMP_DIR`）、`src/routes/files.ts:24-25`（`UPLOAD_DIRS` = `LIST_DIRS` = 7+shared+tmp）、`src/routes/chat.ts:26`（`ATTACHMENT_DIRS`）——三处均 **9 个**；`src/routes/files.ts:3` 文件头注释亦写"7 业务目录+shared+tmp" | 前端按 **9 个**实现（已对齐）；建议后端修正文档笔误（**2026-09-14 已废止**：文件空间重构为三空间 + 场景子目录，见 §6） |
 | 2 | `contracts/http-api.md:77`："`POST /api/threads`、`GET /api/threads`（默认 10 条/更多 100 条**由前端 limit/offset 控制**）" | 该接口**不接受** `limit`/`offset`：传参会**被静默丢弃、不报错**（Fastify 默认 `removeAdditional: true`，`server.ts:168` 未覆写 ajv 配置）；列表返回全部并按 `updated_at` 倒序。<br>**2026-09-10 联调实测**：`GET /api/threads?limit=10` → `200` 且响应体与不带参**完全一致**（参数被丢弃）；`GET /api/threads/{id}?limit=999` → `400`（证明 schema 本身有效，只是未声明参数被丢弃而非拒绝） | **文档**：`contracts/http-api.md:77`<br>**源码**：`src/routes/threads.ts:26-30`（`listQuerySchema` 仅声明 `agent_name` + `additionalProperties: false`）、`src/routes/threads.ts:86-90`（`threadStore.list()` 直接返回全部）<br>**对照**：`src/routes/threads.ts:32-39`（只有**详情**接口 `detailQuerySchema` 才有 `limit` 1–200 / `offset`） | 前端**一次性拉全部**，在**前端切片** 10 / 100 条（FR-039、FR-040 仍可满足） |
 | 3 | `contracts/http-api.md:79`："`POST /api/agents/:name/select`（409 即"会话进行中禁止切换"）"；后端 spec `FR-021` 要求"存在进行中会话时切换数字人 MUST 被拒绝" | 409 `AGENT_SWITCH_REQUIRED` 的触发条件是"**已选中另一个数字人**"，与"会话是否进行中"**无关**；`exit` 也不检查进行中会话 | **文档**：`contracts/http-api.md:79`<br>**源码**：`src/routes/agents.ts:38-56`（整个 handler 仅捕获 `AgentSwitchRequiredError`，**全文无 `runManager` 引用**）、`src/routes/agents.ts:58-63`（`POST /api/agents/current/exit` 同样只清选中态） | FR-036（进行中禁止切换）由**前端 UX 约束**承担（置灰 + 不发请求）；后端无兜底。**2026-09-10 修订**：`select` 改为**覆盖式**（切换无需先 exit，`AGENT_SWITCH_REQUIRED` 已移除）；会话不绑定数字人，后端 FR-021"进行中拒绝切换"的旧要求已废止，本条差异消解 |
 | 4 | `contracts/sse-events.md:57`、`research.md:15`、`tasks.md:60`："`duration_seconds` 为整轮耗时，**1 位小数**" | 实现为 `Math.round(ms) / 1000` → 精度**最多 3 位小数** | **文档**：`contracts/sse-events.md:57`、`research.md:15`、`tasks.md:60`<br>**源码**：`src/domain/run-manager.ts:157-159`（`toSeconds()`）、`src/routes/threads.ts:115`（历史 `duration_ms` → `duration_seconds` 换算） | 前端统一经 `formatDuration()` **格式化为 1 位小数**展示；不依赖后端精度 |
