@@ -1,0 +1,7 @@
+# 仅测试用依赖（镜像见 Dockerfile.test）
+#
+# 为什么不复用 requirements.txt：ocr_core 是纯逻辑模块（只依赖 httpx），
+# 单测 MUST NOT 引入 rapidocr/opencv（体积数百 MB、需 libgl 等系统库、且导入即加载模型）。
+# pytest 属测试框架，为项目必需依赖（对应宪章"测试完备性"原则）。
+pytest>=8
+httpx>=0.27

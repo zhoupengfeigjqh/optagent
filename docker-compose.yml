@@ -39,3 +39,26 @@ services:
       # 运行期数据（用户数据、日志、usage.db）bind mount：本地 agent-backend/.opt-agent 实时双向同步
       - ./agent-backend/.opt-agent:/app/.opt-agent
     restart: unless-stopped
+
+  # ---- 容器内测试（不随 up 启动；按需显式运行）----
+  # 用法：
+  #   docker compose --profile test run --rm backend-test
+  #   docker compose --profile test run --rm ocr-test
+  # 测试自身是 hermetic 的：不读 .env（避免密钥进入测试进程），只注入配置必填项。
+  backend-test:
+    profiles: ["test"]
+    build:
+      context: ./agent-backend
+      dockerfile: Dockerfile.test
+    environment:
+      # 配置必填项（缺少即启动失败，单测正是覆盖这一点）
+      - PUBLIC_BASE_URL=http://backend:3000
+    restart: "no"
+
+  # OCR 纯逻辑单测：只装 httpx + pytest，不加载 rapidocr/opencv（镜像小、启动快）
+  ocr-test:
+    profiles: ["test"]
+    build:
+      context: ./ocr-service
+      dockerfile: Dockerfile.test
+    restart: "no"

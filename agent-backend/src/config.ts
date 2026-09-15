@@ -25,7 +25,7 @@ const envSchema = z.object({
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(10),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(32),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),
-  /** MCP 签名直链的对外基址（MCP 服务回源下载用；缺省本机回环，容器部署须显式配置） */
+  /** MCP 签名直链的对外基址（MCP 服务回源下载用；**必填**，由 loadConfig 显式校验并给出可读报错） */
   PUBLIC_BASE_URL: z.string().url().optional(),
   /** 签名直链 HMAC 密钥（≥16 字符；缺省启动时随机生成——重启后未过期 URL 失效） */
   FILE_SIGN_SECRET: z.string().min(16).optional(),
@@ -135,6 +135,24 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   });
 
   const e = envParsed.data;
+
+  // 签名直链的对外基址与部署形态强相关，必须显式声明：
+  // 兜底成 localhost 时容器间的 MCP 服务（如 OCR）会回源打到它自己，
+  // 且不会启动失败，只在运行期表现为"下载失败"，极难定位。
+  const publicBaseUrl = e.PUBLIC_BASE_URL;
+  if (!publicBaseUrl) {
+    throw new ConfigError(
+      '缺少必填环境变量 PUBLIC_BASE_URL（MCP 服务回源下载的对外基址，容器内应为 http://backend:3000）',
+    );
+  }
+  // 仅 url() 不够：`backend:3000` 之类的值在 WHATWG 解析下也算合法 URL（scheme=backend），
+  // 但铸出的直链不可用——MCP 服务是按 http(s) 回源的。
+  if (!/^https?:\/\//.test(publicBaseUrl)) {
+    throw new ConfigError(
+      `PUBLIC_BASE_URL 必须以 http:// 或 https:// 开头（当前 "${publicBaseUrl}"）`,
+    );
+  }
+
   const config: AppConfig = {
     port: e.PORT,
     optAgentRoot: path.resolve(process.cwd(), e.OPT_AGENT_ROOT),
@@ -145,7 +163,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     previewMaxMb: e.PREVIEW_MAX_MB,
     readTruncateKb: e.READ_TRUNCATE_KB,
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
-    publicBaseUrl: e.PUBLIC_BASE_URL ?? `http://localhost:${e.PORT}`,
+    publicBaseUrl,
     fileSignSecret: e.FILE_SIGN_SECRET ?? randomBytes(32).toString('hex'),
     models,
     defaultModel: models[0]!,

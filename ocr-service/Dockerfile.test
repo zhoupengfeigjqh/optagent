@@ -1,0 +1,15 @@
+# ===== 容器内测试镜像（仅测试用；运行镜像见 Dockerfile）=====
+# 只装 httpx + pytest：被测的 ocr_core 是纯逻辑模块，不含模型推理，
+# 因此本镜像很小、启动快（不装 rapidocr/opencv，也不需要 libgl 等系统库）。
+# 用法：docker compose --profile test run --rm ocr-test
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements-test.txt
+
+COPY ocr_core.py ./
+COPY tests ./tests
+
+CMD ["python", "-m", "pytest", "-q", "tests"]
