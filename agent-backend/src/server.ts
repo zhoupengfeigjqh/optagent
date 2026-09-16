@@ -15,7 +15,8 @@ import type { AppContext } from './context.js';
 import { AgentPool } from './domain/agent-pool.js';
 import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
-import { ensureRootDirs, userDataDir, SPACE_TMP } from './domain/dirs.js';
+import { computeConfigFingerprint } from './domain/config-fingerprint.js';
+import { ensureRootDirs, userAgentsDir, userDataDir, SPACE_TMP } from './domain/dirs.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
 import { RunManager } from './domain/run-manager.js';
@@ -23,16 +24,18 @@ import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
 import { cleanupTmpDir } from './domain/tmp-cleanup.js';
 import { gracefulShutdown } from './graceful-shutdown.js';
-import { AgentInstanceFactory } from './infra/agent-factory.js';
+import { AgentInstanceFactory, type ChatAgent } from './infra/agent-factory.js';
 import type { LlmProvider } from './infra/llm/llm-provider.js';
 import { PiAiLlmProvider } from './infra/llm/pi-ai-provider.js';
 import { IntervalScheduler } from './infra/scheduler.js';
 import { UsageDb } from './infra/usage-db.js';
 import { createLoggers } from './logging.js';
 import { registerAgentRoutes } from './routes/agents.js';
+import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerFileRoutes } from './routes/files.js';
+import { registerMcpCallStatsRoutes } from './routes/mcp-call-stats.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerThreadRoutes } from './routes/threads.js';
@@ -76,7 +79,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // ---- wiring：routes → domain → infra ----
   const usageDb = new UsageDb(path.join(root, 'usage.db'), loggers.logger);
   const history = new HistoryStore(root, {
-    warn: (msg) => loggers.logger.warn({ alert: true, event: 'history.recover' }, msg),
+    warn: (msg) => loggers.logger.warn({ alert: true, event: 'history.recover', scope: 'system' }, msg),
   });
   const threadStore = new ThreadStore(root, history);
   const pool = new AgentPool({ maxSize: config.poolSize });
@@ -90,7 +93,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const summary = new SummaryStore(root, history, {
     llm,
     logger: {
-      warn: (msg: string) => loggers.logger.warn({ alert: true, event: 'summary.failed' }, msg),
+      warn: (msg: string) => loggers.logger.warn({ alert: true, event: 'summary.failed', scope: 'system' }, msg),
     },
   });
 
@@ -106,19 +109,23 @@ export async function buildServer(options: BuildServerOptions = {}) {
     fileSignSecret: config.fileSignSecret,
     // 建连落定 → 事件总线 → SSE 路由推送最新快照（替代前端轮询）
     onMcpStatus: (key) => mcpEvents.emitChanged(key.userId),
+    // R4：工具调用完成即按服务名计数（成功/失败分列），供管理平台只读采集；
+    // userId 一并落事件明细，支撑按用户明细（2026-09-16 十四次调整）
+    onMcpCall: (serviceName, ok, userId) => usageDb.recordMcpCall(serviceName, ok, userId),
   });
 
   // 后台调度（T040）：每小时清理 tmp/ 下 7 天未访问的临时产出
   const scheduler = new IntervalScheduler({
-    warn: (msg) => loggers.logger.warn({ alert: true, event: 'scheduler.task.failed' }, msg),
+    warn: (msg) => loggers.logger.warn({ alert: true, event: 'scheduler.task.failed', scope: 'system' }, msg),
   });
   scheduler.every(
     60 * 60 * 1000,
     async () => {
       await cleanupTmpDir(path.join(userDataDir(root, userId), SPACE_TMP), {
         logger: {
-          warn: (msg) => loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed' }, msg),
-          info: (msg) => loggers.logger.info({ event: 'tmp.cleanup' }, msg),
+          warn: (msg) =>
+            loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed', scope: 'system' }, msg),
+          info: (msg) => loggers.logger.info({ event: 'tmp.cleanup', scope: 'system' }, msg),
         },
       });
     },
@@ -131,7 +138,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     async () => {
       const evicted = pool.evictIdle(config.idleTimeoutMs);
       if (evicted.length > 0) {
-        loggers.logger.info({ event: 'pool.idle.evict', evicted }, `回收空闲实例 ${evicted.length} 个`);
+        loggers.logger.info(
+          { event: 'pool.idle.evict', scope: 'system', evicted },
+          `回收空闲实例 ${evicted.length} 个`,
+        );
+      }
+      // R7：因配置变化换下、但当时仍有在途轮次的实例，等轮次结束后回收
+      const swept = pool.sweepRetired();
+      if (swept > 0) {
+        loggers.logger.info(
+          { event: 'pool.retired.sweep', scope: 'system', swept },
+          `回收退休实例 ${swept} 个`,
+        );
       }
     },
     'pool-idle-evict',
@@ -159,7 +177,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
     mcpEvents,
     async getOrCreateAgent(key) {
       const existing = pool.get(key);
-      if (existing) return existing as never;
+      if (existing) {
+        // R7 / FR-034：取用前比对配置指纹
+        // ① 配置未变 → 命中同一实例（池化收益不被破坏）
+        // ② 配置已变 → 换代：空闲实例立即销毁；仍有在途轮次的转入退休表，
+        //    既不中断进行中的回答，又让"其后的新对话"立刻用上新配置
+        const current = existing as unknown as ChatAgent;
+        const diskFingerprint = computeConfigFingerprint(
+          path.join(userAgentsDir(root, key.userId), key.agentName),
+        );
+        if (current.configFingerprint === diskFingerprint) return existing as never;
+        pool.retire(current);
+      }
       const instance = await agentFactory.create(key);
       try {
         pool.put(instance);
@@ -172,7 +201,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   };
 
   const app = Fastify({
-    loggerInstance: loggers.logger,
+    // 只保留关键行为（任务 2026-09-15）：给 Fastify 一个 warn 级别的 child logger，
+    // 逐请求的 info 访问日志被丢弃；warn/error（请求级错误）仍会输出。
+    // 关键业务事件由各 domain 用 loggers.logger（info）显式记录。
+    loggerInstance: loggers.logger.child({}, { level: 'warn' }),
     bodyLimit: config.uploadMaxMb * 1024 * 1024,
   });
   app.decorate('ctx', ctx);
@@ -220,11 +252,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerUsageRoutes(routeApp, ctx);
   registerFeedbackRoutes(routeApp, ctx);
   registerModelRoutes(routeApp, ctx);
+  // R2：内置工具目录（只读，供管理平台投影；FR-011）
+  registerBuiltinToolRoutes(routeApp, ctx);
+  // R4：MCP 调用统计（只读，供管理平台投影；FR-049/FR-050）
+  registerMcpCallStatsRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {
-    scheduler.stopAll();
-    usageDb.close();
-    loggers.close();
+    // 顺序要点（都是实测踩出来的）：
+    // ① `shutdown.closed` MUST **先**记：清理步骤抛错、或日志流已关闭，这行就永远看不到；
+    // ② 清理失败只告警不抛出，否则 `app.close()` 会 reject，连"服务已关闭"都无从谈起；
+    // ③ 关闭日志流要 await：否则 `process.exit` 会截断最后几条日志。
+    loggers.logger.info({ event: 'shutdown.closed', scope: 'system' }, 'HTTP 服务已关闭');
+    try {
+      scheduler.stopAll();
+      usageDb.close();
+    } catch (err) {
+      loggers.logger.warn(
+        { err, event: 'shutdown.cleanup.failed', scope: 'system' },
+        '关闭清理未完成（实例已退出，不影响下次启动）',
+      );
+    } finally {
+      await loggers.close();
+    }
   });
 
   return app;
@@ -239,10 +288,20 @@ async function main(): Promise<void> {
     process.once(sig, () => {
       const ctx = (app as unknown as { ctx: AppContext }).ctx;
       gracefulShutdown(app, ctx.runManager, config.shutdownGraceMs, ctx.loggers.logger)
-        .then(() => process.exit(0))
+        .then(async (outcome) => {
+          ctx.loggers.logger.info(
+            { event: 'shutdown.exit', scope: 'system', outcome },
+            `进程即将退出（${outcome === 'drained' ? '在途 run 已收尾' : '宽限到期，已中断残留 run'}）`,
+          );
+          // 退出前**必须**等日志落盘：`process.exit` 会截断未完成的写（实测丢过日志）。
+          // `close()` 幂等：钩子里已关过则立即返回。
+          await ctx.loggers.close();
+          process.exit(0);
+        })
         .catch((err) => {
-          console.error('优雅关闭失败，强制退出', err);
-          process.exit(1);
+          // 先在日志里留痕再退出：容器 stdout 是管道，`process.exit` 会把 console.error 截断
+          ctx.loggers.logger.error({ err, event: 'shutdown.failed', scope: 'system' }, '优雅关闭失败，强制退出');
+          void ctx.loggers.close().finally(() => process.exit(1));
         });
     });
   }

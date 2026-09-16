@@ -159,6 +159,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     toast,
     onSwitched: async () => {
       await threads.loadList()
+      // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
+      await workspace.load()
     },
   })
 

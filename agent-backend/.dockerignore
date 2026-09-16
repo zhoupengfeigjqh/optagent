@@ -11,8 +11,9 @@ coverage/
 config.yaml
 
 # 本地开发/测试资产，不进入镜像
-# 注意：tests/ MUST 保留在构建上下文中（Dockerfile.test 需要 COPY tests/ 才能跑单测）；
-# 运行镜像不 COPY 它，故不会进入交付镜像。
+# tests/ 亦排除：宪章「技术栈与工程约束」要求它排除在构建上下文之外；
+# 容器只做部署与运行，测试一律在宿主机本地执行（原则三）。
+tests/
 scripts/
 specs/
 docs/

@@ -9,6 +9,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpConnectionStatus, McpServerConfig } from '../../types.js';
 
 export class McpUnavailableError extends Error {
@@ -242,8 +243,13 @@ export class McpManager {
 
   async listTools(server: string): Promise<McpToolInfo[]> {
     const client = await this.requireClient(server);
-    const res = await this.withTimeout(client.listTools());
-    return res.tools;
+    try {
+      const res = await this.withTimeout(client.listTools());
+      return res.tools;
+    } catch (err) {
+      this.degradeOnTransportFailure(server, err, '工具清单获取失败');
+      throw err;
+    }
   }
 
   /** 调用工具：超时 + 重试 1 次；server 不可用（惰性补试亦失败）→ McpUnavailableError */
@@ -258,7 +264,29 @@ export class McpManager {
         this.logger?.warn(`MCP 调用失败（${server}/${tool}，第 ${attempt + 1} 次）：${String(err)}`);
       }
     }
+    // 两次均失败：连接级错误顺势降级（见 degradeOnTransportFailure）
+    this.degradeOnTransportFailure(server, lastErr, '调用失败');
     throw lastErr;
+  }
+
+  /**
+   * 连接级失败即降级（2026-09-16 十五次调整）。
+   *
+   * 背景：streamable-http 是无状态请求/响应，进程内不存在常驻连接——服务被关停/重启后
+   * `onClose` 不会触发，而调用/取工具清单失败的旧路径又只记日志不清理，结果是旧客户端
+   * （连同其已被服务端遗忘的 session id，重启后典型症状：404 "Session not found"）
+   * **永久占住 clients 表**：状态恒为 connected（绿灯），工具反复被剔除，直到实例换代。
+   *
+   * 处置：凡是真正发出过请求却以连接级错误失败（连接被拒/超时/StreamableHTTPError 等），
+   * 即调 markUnavailable——状态变红并推送，同时排上既有退避重连；重连做全新 initialize，
+   * 拿到合法 session 后自动恢复（无需重启 backend）。
+   *
+   * `McpError` 除外：服务端活着、应答了协议错误（参数/schema 类，如 -32602），
+   * 降级重连对活服务只会造成状态抖动。
+   */
+  private degradeOnTransportFailure(server: string, err: unknown, reason: string): void {
+    if (err instanceof McpError) return;
+    this.markUnavailable(server, reason);
   }
 
   async closeAll(): Promise<void> {

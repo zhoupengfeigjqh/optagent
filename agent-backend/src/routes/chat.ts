@@ -57,12 +57,20 @@ const messageBodySchema = {
   },
 } as const;
 
-/** 校验 @ 引用：空间目录校验（数据准备须命中 scenario 清单）+ 文件存在性 */
-function validateAttachments(root: string, userId: string, attachments: FileReference[]): void {
+/**
+ * 校验 @ 引用：空间目录校验（数据准备须命中**本轮数字人**的 scenario 清单）+ 文件存在性。
+ * 场景随数字人存放，故同一引用在不同数字人下可能合法/非法——按本轮数字人判定。
+ */
+function validateAttachments(
+  root: string,
+  userId: string,
+  agentName: string,
+  attachments: FileReference[],
+): void {
   for (const att of attachments) {
     let target;
     try {
-      target = parseSpaceDir(root, userId, att.dir);
+      target = parseSpaceDir(root, userId, agentName, att.dir);
     } catch (err) {
       if (err instanceof DirValidationError) {
         throw new ApiError(
@@ -72,7 +80,7 @@ function validateAttachments(root: string, userId: string, attachments: FileRefe
         );
       }
       if (err instanceof ScenarioNotConfiguredError) {
-        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
       }
       throw err;
     }
@@ -112,9 +120,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
     }
 
-    // @ 文件引用校验（FR-028/029）
+    // @ 文件引用校验（FR-028/029）：按本轮数字人的场景清单判定
     if (body.attachments && body.attachments.length > 0) {
-      validateAttachments(ctx.config.optAgentRoot, userId, body.attachments);
+      validateAttachments(ctx.config.optAgentRoot, userId, selected.agentName, body.attachments);
     }
 
     // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；

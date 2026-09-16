@@ -1,4 +1,4 @@
-# 仅测试用依赖（镜像见 Dockerfile.test）
+# 仅测试用依赖（宿主机本地运行 `python -m pytest -q tests` 所需；容器内测试已按宪章 2.0.0 移除）
 #
 # 为什么不复用 requirements.txt：ocr_core 是纯逻辑模块（只依赖 httpx），
 # 单测 MUST NOT 引入 rapidocr/opencv（体积数百 MB、需 libgl 等系统库、且导入即加载模型）。

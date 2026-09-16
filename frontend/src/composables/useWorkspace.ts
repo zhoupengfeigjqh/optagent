@@ -4,7 +4,10 @@
  * 后端 `GET /api/files/workspace` 返回三级树：空间 → 子目录 → 文件，
  * 附场景名与每空间策略（agent_writable / upload_extensions）。
  * 目录集合与展示名完全以后端为准（scenario.json 定义），前端不保留任何目录常量。
- * scenario 未配置时接口 503（SCENARIO_NOT_CONFIGURED），error 透出由界面提示。
+ *
+ * 文件空间视角＝**当前选中的数字人**：场景随数字人存放，故切换数字人后可见目录清单会变，
+ * `useAppSession` 的 `onSwitched` 会重新 `load()`。未选中数字人 → 409 AGENT_NOT_SELECTED；
+ * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED；两种错误都经 error 透出给界面。
  *
  * 另外承载文件空间的**列表侧状态与动作**：
  * - 两级折叠展开（空间 → 数据准备子目录；默认全部收起，本次会话内保持——面板收起再打开不重置）

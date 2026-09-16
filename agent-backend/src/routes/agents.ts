@@ -15,12 +15,12 @@ import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { userAgentsDir } from '../domain/dirs.js';
 import type { ChatAgent } from '../infra/agent-factory.js';
+import { createThrottledWarn } from '../logging.js';
 import { ApiError } from '../server.js';
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void {
-  const catalogLogger = {
-    warn: (msg: string) => ctx.loggers.logger.warn({ alert: true, event: 'agent.config.invalid' }, msg),
-  };
+  // 目录是"每次请求现扫现解析"，配置损坏时会**每个请求告警一次** → 同一消息按窗口合并
+  const catalogLogger = createThrottledWarn(ctx.loggers.logger, 'agent.config.invalid');
 
   /** 当前选中数字人的 MCP 状态快照（GET 轮询端点与 SSE 推送共用同一计算） */
   const mcpSnapshot = (userId: string) => {

@@ -12,7 +12,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py ./
-# 回源校验与受限下载的纯逻辑（server.py 依赖；可脱离模型单测，见 Dockerfile.test）
+# 回源校验与受限下载的纯逻辑（server.py 依赖；可脱离模型单测，见 tests/）
 COPY ocr_core.py ./
 
 EXPOSE 8000

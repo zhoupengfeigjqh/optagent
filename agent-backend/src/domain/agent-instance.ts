@@ -13,10 +13,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { builtinToolNames } from './builtin-tool-catalog.js';
+import { FILE_ARG_PATH_HINT, isValidFileArgPath } from './file-arg-path.js';
+import { MCP_TRANSPORT_HINT, normalizeTransport } from './mcp-transport.js';
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
-/** 6 个内置工具白名单（FR-023） */
-export const BUILTIN_TOOL_NAMES = ['read_file', 'write_file', 'list_dir', 'grep_files', 'calculator'] as const;
+/**
+ * 内置工具白名单（FR-023）。
+ *
+ * **R1 改造后从 `builtin-tool-catalog.ts` 派生**——此前这里与
+ * `infra/builtin-tools.ts` 各维护一份、无机制保证一致（改一处漏一处）。
+ */
+export const BUILTIN_TOOL_NAMES: readonly string[] = builtinToolNames();
 
 export class AgentConfigError extends Error {
   readonly code = 'AGENT_CONFIG_INVALID';
@@ -70,7 +78,7 @@ function loadEnabledTools(dir: string, agentName: string, logger?: LoadLogger): 
   if (!Array.isArray(data.enabled) || data.enabled.some((t) => typeof t !== 'string')) {
     throw new AgentConfigError(`数字人 ${agentName} 的 TOOL.json 须为 {"enabled": string[]}`);
   }
-  const known = new Set<string>(BUILTIN_TOOL_NAMES);
+  const known = new Set<string>([...BUILTIN_TOOL_NAMES]);
   const enabled: string[] = [];
   for (const tool of data.enabled as string[]) {
     if (known.has(tool)) enabled.push(tool);
@@ -88,14 +96,19 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     const s = raw as Record<string, unknown>;
     const bad = (why: string) => new AgentConfigError(`数字人 ${agentName} MCP.json servers[${i}] ${why}`);
     if (typeof s.name !== 'string' || !s.name) throw bad('缺少 name');
-    if (s.transport !== 'stdio' && s.transport !== 'http') throw bad('transport 须为 stdio|http');
-    if (s.transport === 'stdio' && typeof s.command !== 'string') throw bad('stdio 缺少 command');
-    if (s.transport === 'http' && typeof s.url !== 'string') throw bad('http 缺少 url');
+    // 传输方式**在入口归一**：`streamable-http` 是 `http` 的生态叫法，二者同义，
+    // 不接受会让手工按生态写法改过的 MCP.json 把整个数字人打成"配置损坏"（实测报错）
+    const transport = normalizeTransport(s.transport);
+    if (transport === null) {
+      throw bad(`transport 须为 ${MCP_TRANSPORT_HINT}（当前：${JSON.stringify(s.transport)}）`);
+    }
+    if (transport === 'stdio' && typeof s.command !== 'string') throw bad('stdio 缺少 command');
+    if (transport === 'http' && typeof s.url !== 'string') throw bad('http 缺少 url');
     // FR-024：写能力必须声明权限边界
     if (s.write === true && typeof s.permission_boundary !== 'string') {
       throw bad('声明写能力（write: true）必须提供 permission_boundary');
     }
-    const cfg: McpServerConfig = { name: s.name, transport: s.transport };
+    const cfg: McpServerConfig = { name: s.name, transport };
     if (typeof s.command === 'string') cfg.command = s.command;
     if (Array.isArray(s.args)) cfg.args = s.args.map(String);
     if (typeof s.url === 'string') cfg.url = s.url;
@@ -106,22 +119,32 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
   });
 }
 
-/** 解析 file_args：{ 工具名: { 参数名: "url" } }，非法结构即配置错误 */
+/**
+ * 解析 file_args：`{ 工具名: { 取值路径: "url" } }`，非法结构即配置错误。
+ *
+ * 取值路径（2026-09-16）：键可以是顶层参数名（`image`，与旧写法等价），
+ * 也可以是穿过数组的路径（`items[].excelFileUrl`、`files[]`）——
+ * 语法在 `file-arg-path.ts` 里定义，**与平台侧同一判据**，避免
+ * "平台保存得进去、运行环境加载不了"（或反过来）这类两边不一致。
+ */
 function parseFileArgs(
   raw: unknown,
   bad: (why: string) => Error,
 ): Record<string, Record<string, 'url'>> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw bad('file_args 须为 {工具名: {参数名: "url"}}');
+    throw bad(`file_args 须为 {工具名: {${FILE_ARG_PATH_HINT}: "url"}}`);
   }
   const result: Record<string, Record<string, 'url'>> = {};
   for (const [tool, params] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof params !== 'object' || params === null || Array.isArray(params)) {
-      throw bad(`file_args.${tool} 须为 {参数名: "url"}`);
+      throw bad(`file_args.${tool} 须为 {${FILE_ARG_PATH_HINT}: "url"}`);
     }
     const ps: Record<string, 'url'> = {};
     for (const [param, mode] of Object.entries(params as Record<string, unknown>)) {
       if (mode !== 'url') throw bad(`file_args.${tool}.${param} 仅支持 "url"`);
+      if (!isValidFileArgPath(param)) {
+        throw bad(`file_args.${tool} 的「${param}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`);
+      }
       ps[param] = 'url';
     }
     result[tool] = ps;

@@ -11,6 +11,7 @@ import type { Logger } from 'pino';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { loadAgentConfig } from '../domain/agent-instance.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
+import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import {
@@ -38,6 +39,11 @@ import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
 
 export interface ChatAgent extends PooledInstance {
   readonly config: AgentConfigBundle;
+  /**
+   * 实例创建时**固化的配置指纹**（R7 / `FR-034`）。
+   * `server.ts` 的 `getOrCreateAgent` 在池命中后用它与磁盘比对，不一致即换代。
+   */
+  readonly configFingerprint: string;
   unavailableMcp(): string[];
   /** 单服务连接状态（FR-019）：建连结果未产生前为 `unknown`，不误报为 `failed` */
   mcpStatusOf(server: string): McpConnectionStatus;
@@ -61,6 +67,8 @@ export interface AgentFactoryDeps {
   fileSignSecret: string;
   /** 实例内 MCP 单 server 建连落定时回调（server.ts 接线到事件总线 → SSE 推送） */
   onMcpStatus?: (key: PoolKey) => void;
+  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb。第三参为调用发起用户 */
+  onMcpCall?: (serviceName: string, ok: boolean, userId?: string) => void;
 }
 
 export class AgentInstanceFactory {
@@ -89,6 +97,8 @@ export class AgentInstanceFactory {
     const instance: ChatAgent = {
       key,
       config,
+      // 固化创建时的指纹：部署（目录级原子改名）会改变 mtime，从而改变指纹
+      configFingerprint: computeConfigFingerprint(agentDir),
       activeThreads: 0,
       lastActiveAt: Date.now(),
       unavailableMcp: () => mcp.unavailable(),
@@ -104,7 +114,12 @@ export class AgentInstanceFactory {
     mcp: McpManager,
     req: AgentRunRequest,
   ): AsyncIterable<LlmEvent> {
-    const logger = this.deps.logger;
+    // 每次运行的日志绑定用户/数字人/线程（任务 2026-09-15：日志必须可归属到用户）
+    const logger = this.deps.logger.child({
+      user_id: inst.key.userId,
+      agent_name: inst.key.agentName,
+      thread_id: req.threadId,
+    });
     const tools: AgentTool[] = [];
 
     // 内置工具（Phase 5）：按 TOOL.json 启用项装配，全部经 FileAccess 代理；
@@ -116,8 +131,13 @@ export class AgentInstanceFactory {
         logger,
         truncateKb: this.deps.truncateKb,
       });
-      // list_dir/read_file 的目录清单按 scenario 动态生成；未配置场景时退化为三空间根
-      const availableDirs = listAvailableDirs(this.deps.root, inst.key.userId);
+      // list_dir/read_file 的目录清单按**该数字人**的 scenario 动态生成；
+      // 未配置场景时退化为三空间根
+      const availableDirs = listAvailableDirs(
+        this.deps.root,
+        inst.key.userId,
+        inst.key.agentName,
+      );
       tools.push(
         ...buildBuiltinTools({
           fileAccess: fa,
@@ -146,7 +166,20 @@ export class AgentInstanceFactory {
                 mintSignedUrl(this.deps.publicBaseUrl, this.deps.fileSignSecret, userId, relPath),
             }
           : undefined;
-        tools.push(...mcpToolsAsAgentTools(mcp, server.name, toolInfos, server.fileArgs, fileCtx));
+        tools.push(
+          ...mcpToolsAsAgentTools(
+            mcp,
+            server.name,
+            toolInfos,
+            // 强制穿透的运行上下文（2026-09-16）：uid=当前用户、sid=当前会话；
+            // 工具 schema 里声明了才注入，没声明的不受影响
+            { uid: inst.key.userId, sid: req.threadId },
+            server.fileArgs,
+            fileCtx,
+            this.deps.onMcpCall,
+            logger,
+          ),
+        );
       } catch (err) {
         logger.warn(
           { err, alert: true, agent_name: inst.key.agentName, event: 'mcp.listTools.failed' },
@@ -196,10 +229,15 @@ export class AgentInstanceFactory {
   }
 }
 
-/** list_dir/read_file 可用的目录清单：数据准备子目录（scenario 定义）+ 共享空间 + 临时空间 */
-function listAvailableDirs(root: string, userId: string): string[] {
+/**
+ * list_dir/read_file 可用的目录清单：数据准备子目录（**该数字人** scenario 定义）
+ * + 共享空间 + 临时空间。
+ *
+ * 场景随数字人存放，故同一用户的不同数字人清单可以不同。
+ */
+function listAvailableDirs(root: string, userId: string, agentName: string): string[] {
   try {
-    const scenario = loadScenario(root, userId);
+    const scenario = loadScenario(root, userId, agentName);
     return [
       ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
       SPACE_SHARED,

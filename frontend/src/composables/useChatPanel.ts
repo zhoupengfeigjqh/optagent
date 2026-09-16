@@ -86,6 +86,12 @@ export function useChatPanel() {
   const sending = computed(() => chat.phase.value === RUN_PHASE.STREAMING)
   const hasMessages = computed(() => threads.messages.value.length > 0)
 
+  /**
+   * 本轮乐观用户气泡（十七次调整）：发送即出现，流终结时清除。
+   * 仅做 `Ref → 模板 prop` 的解包，语义与生命周期全部留在 `useChatStream`。
+   */
+  const pendingUserMessage = computed(() => chat.pendingUserMessage.value)
+
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
   async function onSend(payload: { content: string; attachments: FileReference[] }): Promise<void> {
@@ -329,6 +335,7 @@ export function useChatPanel() {
     errorInfo,
     sending,
     hasMessages,
+    pendingUserMessage,
     onSend,
     onStop,
     onLoadMore,

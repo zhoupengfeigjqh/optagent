@@ -1,3 +1,12 @@
+# 全部服务的容器日志轮转（任务 2026-09-15）：
+# json-file 驱动的轮转按**大小**而非按天（Docker 限制）——10MB × 3 个文件，
+# 滚动覆盖最旧的；管理界面读取时另有 tail 上限（≤500 行），两层都有界。
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # 统一入口网关：所有外部流量经此分发，新增平台只改 gateway/nginx.conf
   gateway:
@@ -8,12 +17,23 @@ services:
     depends_on:
       - frontend
       - backend
+      - admin-frontend
+      - admin-backend
     restart: unless-stopped
+    logging: *default-logging
 
   frontend:
     build: ./frontend
     container_name: optagent-frontend
     restart: unless-stopped
+    logging: *default-logging
+
+  # ---- 数字人管理平台：管理界面（Vue 3 静态资源 + SPA 回退）----
+  admin-frontend:
+    build: ./admin-frontend
+    container_name: optagent-admin-frontend
+    restart: unless-stopped
+    logging: *default-logging
 
   # OCR MCP 服务：RapidOCR，streamable-http，仅内网（backend 经 MCP 调用）
   # 无共享存储：经签名直链回源 backend 下载图片（远程部署形态预演）
@@ -24,41 +44,69 @@ services:
       # SSRF 防护：只允许回源 backend
       - OCR_URL_ALLOW_HOSTS=backend
     restart: unless-stopped
+    logging: *default-logging
 
   backend:
     build: ./agent-backend
     container_name: optagent-backend
+    # 固定 hostname：容器默认 hostname 是容器 ID（每次重建都变，日志里读不出是谁）。
+    # 日志的实例区分交给每行的 instance_id（hostname-pid-启动时刻），这里只求可读。
+    hostname: optagent-backend
+    # 优雅关闭宽限：应用内是 15s（等"进行中的回答"写完收尾），Docker 默认只等 10s
+    # → 应用还没来得及记 shutdown.closed 就被 SIGKILL，在途回答也被硬杀。
+    stop_grace_period: 25s
     env_file:
       - ./agent-backend/.env
     environment:
       # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件
       - PUBLIC_BASE_URL=http://backend:3000
+      # - PUBLIC_BASE_URL=http://192.168.0.120:82
     volumes:
       # 模型配置（必需，缺省启动失败）
       - ./agent-backend/config.yaml:/app/config.yaml:ro
       # 运行期数据（用户数据、日志、usage.db）bind mount：本地 agent-backend/.opt-agent 实时双向同步
       - ./agent-backend/.opt-agent:/app/.opt-agent
     restart: unless-stopped
+    logging: *default-logging
 
-  # ---- 容器内测试（不随 up 启动；按需显式运行）----
-  # 用法：
-  #   docker compose --profile test run --rm backend-test
-  #   docker compose --profile test run --rm ocr-test
-  # 测试自身是 hermetic 的：不读 .env（避免密钥进入测试进程），只注入配置必填项。
-  backend-test:
-    profiles: ["test"]
-    build:
-      context: ./agent-backend
-      dockerfile: Dockerfile.test
+  # ---- 数字人管理平台：管理服务 ----
+  # 风险登记（research.md D3）：挂载 docker.sock **等价于授予宿主机 root 权限**，
+  # 故本容器可访问的 Docker 操作限定为「容器状态/日志查询 + 白名单内 start/stop」，
+  # 收口在 infra/docker-host.ts 单一模块，**不暴露任意 API 透传**。
+  admin-backend:
+    build: ./admin-backend
+    container_name: optagent-admin-backend
+    # 同 backend：让日志里的 hostname 可读（实例区分靠 instance_id）
+    hostname: optagent-admin-backend
     environment:
-      # 配置必填项（缺少即启动失败，单测正是覆盖这一点）
-      - PUBLIC_BASE_URL=http://backend:3000
-    restart: "no"
+      - PORT=3000
+      - PLATFORM_DATA_DIR=/app/platform-data
+      - OPT_AGENT_ROOT=/app/.opt-agent
+      - COMPOSE_FILE_PATH=/app/docker-compose.yml
+      - DOCKER_SOCKET_PATH=/var/run/docker.sock
+      # 运行环境只读端点基址（内置工具目录 / 调用统计）。
+      # 缺省值是 127.0.0.1:3000（宿主机本地形态），容器内必须显式指向 backend 服务名，
+      # 否则会打到 admin-backend 自己身上，表现为内置工具目录 404 / 调用统计"未知"。
+      - RUNTIME_API_BASE_URL=http://backend:3000
+    volumes:
+      # 平台设计态（读写；不进镜像；随 admin-backend 源码目录走，与 .opt-agent 布局对称）
+      - ./admin-backend/.platform-data:/app/platform-data
+      # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
+      - ./agent-backend/.opt-agent:/app/.opt-agent
+      # 编排声明（只读投影，FR-043）
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+      # 容器状态/日志/启停（风险见上方注释）
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
 
-  # OCR 纯逻辑单测：只装 httpx + pytest，不加载 rapidocr/opencv（镜像小、启动快）
-  ocr-test:
-    profiles: ["test"]
-    build:
-      context: ./ocr-service
-      dockerfile: Dockerfile.test
-    restart: "no"
+  # ---- 容器内测试已移除（宪章 2.0.0）----
+  # 宪章原则三：测试环境＝仅本地（宿主机）；容器 MUST NOT 承担任何测试职责。
+  # 故原 `backend-test` / `ocr-test` 两个 test profile 及其 `Dockerfile.test` 已删除。
+  # 等价命令（MUST 在宿主机本地执行）：
+  #   agent-backend : cd agent-backend && npm run test:all && npm run test:coverage
+  #   admin-backend : cd admin-backend && npm run test && npm run test:coverage
+  #   ocr-service   : cd ocr-service && pip install -r requirements-test.txt && python -m pytest -q tests
+  # MUST NOT 重新引入容器测试 profile（见宪章「治理 § 修订程序」）。

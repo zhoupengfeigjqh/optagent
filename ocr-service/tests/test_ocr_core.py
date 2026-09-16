@@ -1,7 +1,7 @@
 """ocr_core 纯逻辑单测
 
-运行方式（容器内，MUST NOT 在宿主机直接跑）：
-    docker compose --profile test run --rm ocr-test
+运行方式（**宿主机本地**；宪章原则三：测试环境＝仅本地，容器 MUST NOT 承担测试职责）：
+    cd ocr-service && pip install -r requirements-test.txt && python -m pytest -q tests
 
 覆盖：白名单默认拒绝、命中放行、大小写与空白处理、scheme 校验，
 以及下载的 HTTP 状态与大小上限（经 ``httpx.MockTransport`` 注入，不发真实请求）。

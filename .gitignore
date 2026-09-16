@@ -12,6 +12,7 @@ coverage/
 # ===== 运行期数据与密钥 =====
 # 注意：.env.example / config.example.yaml 属于示例模板，需纳入版本控制
 .opt-agent/
+admin-backend/.platform-data/
 .env
 .env.*
 !.env.example

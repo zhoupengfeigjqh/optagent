@@ -1,7 +1,7 @@
 """OCR 服务的可测核心逻辑（不依赖 rapidocr / opencv）。
 
 分层目的：把"回源 URL 校验（SSRF 白名单）+ 受限下载"这类纯逻辑与模型推理分开，
-使容器内单测不必加载 ONNX 模型、不必安装 opencv（见 Dockerfile.test）。
+使单测不必加载 ONNX 模型、不必安装 opencv（在宿主机本地跑 `python -m pytest -q tests` 即可）。
 
 server.py 负责 MCP 工具装配与识别；本模块只回答"能不能下、下多少"。
 """

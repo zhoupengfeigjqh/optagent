@@ -2,13 +2,18 @@
  * 目录初始化与场景（scenario）模块：`.opt-agent/` 运行期数据根。
  *
  * 文件空间固定 3 个一级目录（空间）：
- * - `数据准备/`：Agent 只读；二级子目录由 users/{userId}/scenario.json 预定义
- *   （用户随时更换场景 → 改文件即生效，运行期按 mtime 惰性重读）
+ * - `数据准备/`：Agent 只读；二级子目录由**该数字人**的
+ *   `users/{userId}/agents/{agentName}/scenario.json` 预定义（改文件即生效，
+ *   运行期按 mtime 惰性重读）。场景属**数字人级**，故同一用户的不同数字人
+ *   可有各自的可见目录清单，互不干扰
  * - `共享空间/`：Agent 只读
  * - `临时空间/`：Agent 可读写（写产出强制 `{thread_id}_` 前缀，7 天未访问清理）
  *
+ * 注意：三个空间下的**文件数据**仍是用户级的（`users/{userId}/user-data/`，
+ * 同一用户的数字人共享一份）；只有场景配置随数字人分开存放。
+ *
  * scenario.json 缺失/损坏：空间骨架照常创建，业务接口报
- * SCENARIO_NOT_CONFIGURED（"用户未设置场景信息，请联系管理员"），服务不中断。
+ * SCENARIO_NOT_CONFIGURED（"数字人未设置文件空间场景"），服务不中断。
  *
  * 幂等：重复调用不产生副作用。
  */
@@ -50,8 +55,14 @@ export function userAgentsDir(optAgentRoot: string, userId: string): string {
   return path.join(optAgentRoot, 'users', userId, 'agents');
 }
 
-export function scenarioPath(optAgentRoot: string, userId: string): string {
-  return path.join(optAgentRoot, 'users', userId, 'scenario.json');
+/** 数字人配置目录：users/{userId}/agents/{agentName} */
+export function agentDir(optAgentRoot: string, userId: string, agentName: string): string {
+  return path.join(userAgentsDir(optAgentRoot, userId), agentName);
+}
+
+/** 场景配置随数字人存放：users/{userId}/agents/{agentName}/scenario.json */
+export function scenarioPath(optAgentRoot: string, userId: string, agentName: string): string {
+  return path.join(agentDir(optAgentRoot, userId, agentName), 'scenario.json');
 }
 
 export function threadDir(optAgentRoot: string, userId: string, threadId: string): string {
@@ -77,8 +88,11 @@ export function ensureRootDirs(optAgentRoot: string, userIds: string[] = []): vo
 
 export class ScenarioNotConfiguredError extends Error {
   readonly code = 'SCENARIO_NOT_CONFIGURED';
-  constructor(userId: string) {
-    super(`用户 ${userId} 未设置场景信息，请联系管理员（缺少 users/${userId}/scenario.json）`);
+  constructor(userId: string, agentName: string) {
+    super(
+      `数字人 ${agentName} 未设置文件空间场景，请联系管理员` +
+        `（缺少 users/${userId}/agents/${agentName}/scenario.json）`,
+    );
     this.name = 'ScenarioNotConfiguredError';
   }
 }
@@ -100,26 +114,28 @@ const scenarioCache = new Map<string, ScenarioCacheEntry>();
 const DIR_NAME_PATTERN = /^[^/\\..][^/\\]{0,63}$/;
 
 /**
- * 读取场景配置（mtime 缓存 + 惰性建目录）。
+ * 读取**该数字人**的场景配置（mtime 缓存 + 惰性建目录）。
  *
  * - 文件缺失/损坏/字段非法 → ScenarioNotConfiguredError（接口层映射 503）
- * - 成功时确保数据准备下的子目录存在（惰性创建，支持用户运行期改配置即生效）
+ * - 成功时确保数据准备下的子目录存在（惰性创建，支持运行期改配置即生效）
  * - 单个非法目录名跳过并计入 `skipped`（不阻断其余目录）
+ * - 缓存键含数字人名：同一用户的不同数字人各自缓存，互不串味
  */
 export function loadScenario(
   optAgentRoot: string,
   userId: string,
+  agentName: string,
   logger?: { warn(msg: string): void },
 ): Scenario {
-  const file = scenarioPath(optAgentRoot, userId);
-  const key = `${optAgentRoot}::${userId}`;
+  const file = scenarioPath(optAgentRoot, userId, agentName);
+  const key = `${optAgentRoot}::${userId}::${agentName}`;
 
   let stat: fs.Stats;
   try {
     stat = fs.statSync(file);
   } catch {
     scenarioCache.delete(key);
-    throw new ScenarioNotConfiguredError(userId);
+    throw new ScenarioNotConfiguredError(userId, agentName);
   }
 
   const cached = scenarioCache.get(key);
@@ -158,7 +174,7 @@ export function loadScenario(
       `scenario.json 读取失败（${err instanceof Error ? err.message : String(err)}），按未配置处理`,
     );
     scenarioCache.delete(key);
-    throw new ScenarioNotConfiguredError(userId);
+    throw new ScenarioNotConfiguredError(userId, agentName);
   }
 
   scenarioCache.set(key, { mtimeMs: stat.mtimeMs, scenario });
@@ -199,10 +215,16 @@ export class DirValidationError extends Error {
 /**
  * 解析并校验目录参数（`dir` 为相对 user-data 的路径）：
  * - 穿越/绝对路径/反斜杠 → DirValidationError(400)
- * - 一级必须是三空间之一；仅数据准备允许（且必须）带二级目录，二级须在 scenario 清单内 → 403
+ * - 一级必须是三空间之一；仅数据准备允许（且必须）带二级目录，二级须在**该数字人**的
+ *   scenario 清单内 → 403（清单随数字人不同而不同）
  * - scenario 未配置 → ScenarioNotConfiguredError（上层映射 503）
  */
-export function parseSpaceDir(optAgentRoot: string, userId: string, dir: string): SpaceDirTarget {
+export function parseSpaceDir(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  dir: string,
+): SpaceDirTarget {
   if (!dir || path.isAbsolute(dir) || dir.includes('..') || dir.includes('\\')) {
     throw new DirValidationError(400, `非法目录参数: ${dir}`);
   }
@@ -219,7 +241,7 @@ export function parseSpaceDir(optAgentRoot: string, userId: string, dir: string)
     if (!sub || segments.length > 2) {
       throw new DirValidationError(400, `数据准备需指定二级目录（如 数据准备/生产计划）: ${dir}`);
     }
-    const scenario = loadScenario(optAgentRoot, userId);
+    const scenario = loadScenario(optAgentRoot, userId, agentName);
     if (!scenario.dataPrepDirs.includes(sub)) {
       throw new DirValidationError(
         403,

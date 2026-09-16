@@ -9,6 +9,8 @@
  * - `done.message_id === null` ⇒ `aborted`（中断轮不落盘，不展示操作与用量）
  * - 读取异常 ⇒ `failed`，并通过 `recover()` 重新拉取最终结果（FR-050、SC-020）
  * - `phase === 'streaming'` ⇒ 发送按钮置灰（FR-006）、数字人切换置灰（FR-036）（V-06）
+ * - 发送即出现乐观用户气泡（`pendingUserMessage`，十七次调整）：历史刷新（`onTurnFinished`）
+ *   只在流**完成后**触发，若无乐观插入，用户消息要等整轮答完才显示
  *
  * 性能（D6）：增量文本用**单一 ref 累积**，不做逐字数组 push；Vue 的调度器在同一 tick 内合并刷新。
  */
@@ -29,6 +31,18 @@ export interface ToolCallState {
   call_id: string
   name: string
   status: ToolStatus
+}
+
+/**
+ * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除——
+ * 完成/失败/中断后由历史刷新（成功轮）或既有降级语义（失败还原草稿）接管，
+ * MUST NOT 在终结后残留（否则与历史里的真身重复渲染）。
+ */
+export interface PendingUserMessage {
+  /** 已去除 `@文件名` 引用文本的正文 */
+  content: string
+  /** 结构化引用（用户气泡用它还原文件引用区） */
+  attachments: FileReference[]
 }
 
 /** 构造参数。 */
@@ -75,6 +89,11 @@ export interface ChatStreamStore {
   durationSeconds: Readonly<Ref<number | null>>
   /** 本轮回答的数字人（会话可跨数字人；流式气泡据此标注） */
   streamingAgentName: Readonly<Ref<string | null>>
+  /**
+   * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除；`null` = 无进行中轮次。
+   * 与 `streaming*` 瞬态同生命周期，故同在 `reset()` / `finally` 收口。
+   */
+  pendingUserMessage: Readonly<Ref<PendingUserMessage | null>>
   /** 本轮本地计时起点（毫秒；仅用于兜底展示） */
   startedAt: Readonly<Ref<number | null>>
   canSend: ComputedRef<boolean>
@@ -103,6 +122,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const usage = ref<Usage | null>(null)
   const durationSeconds = ref<number | null>(null)
   const streamingAgentName = ref<string | null>(null)
+  const pendingUserMessage = ref<PendingUserMessage | null>(null)
   const startedAt = ref<number | null>(null)
 
   const now = deps.now ?? ((): number => Date.now())
@@ -134,6 +154,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     usage.value = null
     durationSeconds.value = null
     streamingAgentName.value = null
+    pendingUserMessage.value = null
     startedAt.value = null
   }
 
@@ -185,6 +206,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     startedAt.value = now()
     // 本轮数字人快照（会话可跨数字人：同一会话的相邻两轮可能由不同数字人回答）
     streamingAgentName.value = deps.getAgentName?.() ?? null
+    // 乐观用户气泡（十七次调整）：历史刷新只在完成后触发，发送即先本地呈现，
+    // 避免"AI 答完才看到自己的消息"
+    pendingUserMessage.value = { content: payload.content, attachments: payload.attachments }
     phase.value = RUN_PHASE.STREAMING
 
     const body = buildSendMessageBody({
@@ -250,6 +274,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       }
     } finally {
       toolCalls.value = []
+      // 乐观用户气泡收口：完成轮由历史真身接管，失败/中断轮维持既有降级语义（不残留、不重复）
+      pendingUserMessage.value = null
       controller = null
     }
   }
@@ -315,6 +341,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     usage,
     durationSeconds,
     streamingAgentName,
+    pendingUserMessage,
     startedAt,
     canSend,
     hasThinking,

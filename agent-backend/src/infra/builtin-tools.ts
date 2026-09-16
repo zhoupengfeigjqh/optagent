@@ -6,9 +6,20 @@
  * - PermissionError → 自然语言"没有权限"，写操作记日志 file.write.denied（alert）
  * - CalculatorError 等业务错误 → 错误说明文本
  * - 未知异常 → 通用失败文本（并记 error 日志）
+ *
+ * **R1 改造后**：元数据不再内联于本文件，改为**消费**
+ * `domain/builtin-tool-catalog.ts` 的单一来源目录；说明与入参模板在装配时
+ * 用当前 run 的运行期取值渲染。对模型可见的文本**逐字不变**
+ * （由 `tests/unit/builtin-tool-catalog.spec.ts` 守住）。
  */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Logger } from 'pino';
+import {
+  BUILTIN_TOOL_CATALOG,
+  renderDeep,
+  renderTemplate,
+  type TemplateValues,
+} from '../domain/builtin-tool-catalog.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { calcTool, CalculatorError } from '../domain/tools/calculator.js';
 import { grepToolFiles } from '../domain/tools/grep-files.js';
@@ -62,116 +73,54 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
   };
 }
 
-export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
-  const { fileAccess: fa, threadId, enabled, availableDirs } = opts;
-  const on = (name: string) => enabled.includes(name);
-  const dirsText = availableDirs.join('、');
-  const examplePath = availableDirs[0] ? `${availableDirs[0]}/示例.csv` : '共享空间/示例.csv';
-
-  const catalog: AgentTool[] = [];
-
-  if (on('read_file')) {
-    catalog.push({
-      name: 'read_file',
-      label: '读取文件',
-      description:
-        '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.txt/.json/.pdf/.md/.log；' +
-        'xlsx 自动转 CSV，pdf 提取文本层。大文件返回截断内容，可用 offset 继续分段读取。' +
-        `参数 path 为相对空间的路径，如 "${examplePath}"。`,
-      parameters: {
-        type: 'object',
-        required: ['path'],
-        properties: {
-          path: { type: 'string', description: `相对路径，如 "${examplePath}"` },
-          offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
-          limit: { type: 'number', description: '本次最多返回字节数' },
-        },
-      } as never,
-      execute: wrap(
-        'read_file',
-        opts,
-        async (p) =>
-          (
-            await readToolFile(fa, String(p.path), {
-              offset: typeof p.offset === 'number' ? p.offset : undefined,
-              limit: typeof p.limit === 'number' ? p.limit : undefined,
-            })
-          ).text,
-      ),
-    });
-  }
-
-  if (on('write_file')) {
-    catalog.push({
-      name: 'write_file',
-      label: '写入临时文件',
-      description:
-        `把内容写入临时空间，文件名会自动要求以 "${threadId}_" 开头。` +
-        '数据准备与共享空间为只读，写入会被拒绝。写成功后可用路径 临时空间/{filename} 告知用户下载。',
-      parameters: {
-        type: 'object',
-        required: ['filename', 'content'],
-        properties: {
-          filename: { type: 'string', description: `文件名，必须以 ${threadId}_ 开头` },
-          content: { type: 'string', description: '文件内容（utf8 文本）' },
-        },
-      } as never,
-      execute: wrap('write_file', opts, async (p) => {
-        const r = await writeToolFile(fa, threadId, String(p.filename), String(p.content));
+/** 各工具的领域实现（与元数据解耦，便于目录保持纯数据） */
+function domainExecute(
+  name: string,
+  opts: BuiltinToolsOptions,
+): (params: Record<string, unknown>) => Promise<string> | string {
+  const fa = opts.fileAccess;
+  switch (name) {
+    case 'read_file':
+      return async (p) =>
+        (
+          await readToolFile(fa, String(p.path), {
+            offset: typeof p.offset === 'number' ? p.offset : undefined,
+            limit: typeof p.limit === 'number' ? p.limit : undefined,
+          })
+        ).text;
+    case 'write_file':
+      return async (p) => {
+        const r = await writeToolFile(fa, opts.threadId, String(p.filename), String(p.content));
         return `已写入 ${r.path}（${r.bytes} 字节）`;
-      }),
-    });
+      };
+    case 'list_dir':
+      return (p) => listToolDir(fa, String(p.dir));
+    case 'grep_files':
+      return (p) => grepToolFiles(fa, String(p.pattern), typeof p.dir === 'string' ? p.dir : undefined);
+    case 'calculator':
+      return (p) => calcTool(String(p.expression));
+    default:
+      return async () => `未知内置工具：${name}`;
   }
+}
 
-  if (on('list_dir')) {
-    catalog.push({
-      name: 'list_dir',
-      label: '列目录',
-      description: `列出指定目录的文件（名称/大小/更新时间）。目录限：${dirsText}。`,
-      parameters: {
-        type: 'object',
-        required: ['dir'],
-        properties: { dir: { type: 'string', description: `目录路径，如 "${availableDirs[0] ?? '共享空间'}"` } },
-      } as never,
-      execute: wrap('list_dir', opts, (p) => listToolDir(fa, String(p.dir))),
-    });
-  }
+export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
+  const { enabled, availableDirs } = opts;
 
-  if (on('grep_files')) {
-    catalog.push({
-      name: 'grep_files',
-      label: '检索文件内容',
-      description:
-        '在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/pdf 会被跳过（请改用 read_file）。' +
-        '可指定目录，缺省检索全部开放目录。',
-      parameters: {
-        type: 'object',
-        required: ['pattern'],
-        properties: {
-          pattern: { type: 'string', description: '检索词或正则表达式' },
-          dir: { type: 'string', description: '限定目录（可选）' },
-        },
-      } as never,
-      execute: wrap('grep_files', opts, (p) =>
-        grepToolFiles(fa, String(p.pattern), typeof p.dir === 'string' ? p.dir : undefined),
-      ),
-    });
-  }
+  // 运行期取值：与改造前逐一对应（dirsText / examplePath / firstDir / threadId / 临时空间）
+  const values: Partial<TemplateValues> = {
+    可用目录: availableDirs.join('、'),
+    示例路径: availableDirs[0] ? `${availableDirs[0]}/示例.csv` : '共享空间/示例.csv',
+    首个目录: availableDirs[0] ?? '共享空间',
+    会话标识: opts.threadId,
+    临时空间: '临时空间',
+  };
 
-  if (on('calculator')) {
-    catalog.push({
-      name: 'calculator',
-      label: '计算器',
-      description:
-        '计算数学表达式。支持 + - * / % ^、括号、sqrt/abs/round/floor/ceil/min/max/pow 函数与常量 pi/e。',
-      parameters: {
-        type: 'object',
-        required: ['expression'],
-        properties: { expression: { type: 'string', description: '数学表达式，如 "(1+2)*3"' } },
-      } as never,
-      execute: wrap('calculator', opts, (p) => calcTool(String(p.expression))),
-    });
-  }
-
-  return catalog;
+  return BUILTIN_TOOL_CATALOG.filter((entry) => enabled.includes(entry.name)).map((entry) => ({
+    name: entry.name,
+    label: entry.label,
+    description: renderTemplate(entry.description_template, values),
+    parameters: renderDeep(entry.parameters, values) as never,
+    execute: wrap(entry.name, opts, domainExecute(entry.name, opts)),
+  }));
 }

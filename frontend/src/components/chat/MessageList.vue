@@ -4,7 +4,8 @@
  *
  * - 空消息且无流式 → 初始入口占位（`empty` 插槽可替换）
  * - 有消息 → 逐条渲染 `MessageBubble`，并用 `v-memo` 抑制无关重渲染
- * - 流式 → 追加一个"合成气泡"承载本轮思考/工具/正文
+ * - 流式 → 追加"合成气泡"承载本轮思考/工具/正文；其**上方**先渲染乐观用户气泡
+ *   （`pendingUser`，十七次调整：发送即出现，完成后由历史真身接管，不重复）
  * - 搜索 → 计算每条消息的全局匹配基准序号，并只对当前活跃序号滚动定位
  * - **自动置底**：切换会话、新消息落定、流式增量都跟随到最新；
  *   用户向上翻阅时暂停（回到近底部即恢复），"加载更早消息"只补偿高度、不跳到底部
@@ -13,6 +14,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { ErrorInfo, FileReference, Message } from '../../api/types'
 import { RUN_PHASE, type RunPhase } from '../../constants/events'
+import type { PendingUserMessage } from '../../composables/useChatStream'
 import { countMatches } from '../../utils/segments'
 import EmptyState from '../common/EmptyState.vue'
 import MessageBubble from './MessageBubble.vue'
@@ -40,6 +42,11 @@ const props = withDefaults(
     messages?: Message[]
     /** 本轮瞬态；`null` 表示无进行中的轮次 */
     streaming?: StreamingView | null
+    /**
+     * 本轮乐观用户消息（十七次调整）；`null` 表示无进行中轮次。
+     * 渲染在历史消息之后、流式气泡**之前**；流终结时由调用方清除。
+     */
+    pendingUser?: PendingUserMessage | null
     /** 搜索关键词 */
     searchKeyword?: string
     /** 当前定位的全局匹配序号 */
@@ -50,6 +57,7 @@ const props = withDefaults(
   {
     messages: () => [],
     streaming: null,
+    pendingUser: null,
     searchKeyword: '',
     activeMatchIndex: -1,
     hasMore: false,
@@ -68,7 +76,10 @@ const emit = defineEmits<{
 
 const listRef = ref<HTMLElement | null>(null)
 
-const isEmpty = computed(() => props.messages.length === 0 && props.streaming === null)
+const isEmpty = computed(
+  () =>
+    props.messages.length === 0 && props.streaming === null && props.pendingUser === null,
+)
 
 /** 每条消息内首个命中的全局序号（与 `useSessionSearch` 同口径）。 */
 const matchStats = computed(() => {
@@ -79,6 +90,24 @@ const matchStats = computed(() => {
     cursor += countMatches(message.content, props.searchKeyword)
   }
   return { bases, total: cursor }
+})
+
+/** 乐观用户气泡：合成一条 `Message` 交给 `MessageBubble`，引用经 `attachments` 还原。 */
+const pendingUserMessage = computed<Message | null>(() => {
+  const pending = props.pendingUser
+  if (!pending) {
+    return null
+  }
+  return {
+    // 瞬态消息无持久化 id：占位串仅作 `key`/内部标识，不触发任何按 id 的操作
+    //（用户气泡不渲染反馈按钮，与 `streamingMessage` 的空 id 同口径）
+    id: '',
+    role: 'user',
+    content: pending.content,
+    ts: '',
+    feedback: null,
+    attachments: pending.attachments,
+  }
 })
 
 /** 流式气泡：`content` 为本轮累积正文，瞬态经 `streaming` 传入。 */
@@ -249,6 +278,18 @@ function onOpenFile(reference: FileReference): void {
         :active-match-index="activeMatchIndex"
         :match-index-base="matchStats.bases[index]"
         @feedback="onFeedback"
+        @open-link="onOpenLink"
+        @open-file="onOpenFile"
+      />
+
+      <!-- 乐观用户气泡（十七次调整）：发送即出现；流终结时随 `pendingUser` 清除，由历史真身接管 -->
+      <MessageBubble
+        v-if="pendingUserMessage"
+        :key="'pending-user'"
+        :message="pendingUserMessage"
+        :search-keyword="searchKeyword"
+        :active-match-index="activeMatchIndex"
+        :match-index-base="matchStats.total"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
       />

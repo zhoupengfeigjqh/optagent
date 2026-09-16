@@ -34,6 +34,14 @@ export interface AgentPoolOptions {
 
 export class AgentPool {
   private readonly map = new Map<string, PooledInstance>();
+  /**
+   * **退休实例**：因配置变化被换下、但**仍有进行中的轮次**的实例。
+   *
+   * `FR-034` 要求"新对话立即生效"与"进行中的回答不中断"**同时成立**——
+   * 因此这类实例 MUST NOT 被立即销毁，而是等其轮次结束（`activeThreads` 归零）
+   * 后由 `sweepRetired()` 回收。若换代时它已空闲，则直接销毁，不入退休表。
+   */
+  private readonly retired: PooledInstance[] = [];
   private readonly maxSize: number;
   private readonly now: () => number;
 
@@ -105,6 +113,36 @@ export class AgentPool {
     this.map.delete(AgentPool.id(oldest.key));
     void oldest.dispose();
     return oldest.key;
+  }
+
+  /**
+   * 把被换下的实例转入退休表（不立即销毁）。
+   * 已空闲则直接销毁——没有需要保护的在途轮次。
+   */
+  retire(instance: PooledInstance): void {
+    if (instance.activeThreads === 0) {
+      void instance.dispose();
+      return;
+    }
+    this.retired.push(instance);
+  }
+
+  /** 回收已完成全部轮次的退休实例，返回回收数量 */
+  sweepRetired(): number {
+    let swept = 0;
+    for (let i = this.retired.length - 1; i >= 0; i -= 1) {
+      const instance = this.retired[i]!;
+      if (instance.activeThreads === 0) {
+        this.retired.splice(i, 1);
+        void instance.dispose();
+        swept += 1;
+      }
+    }
+    return swept;
+  }
+
+  retiredCount(): number {
+    return this.retired.length;
   }
 
   size(): number {

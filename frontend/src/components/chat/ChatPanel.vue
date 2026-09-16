@@ -45,6 +45,7 @@ const {
   errorInfo,
   sending,
   hasMessages,
+  pendingUserMessage,
   onSend,
   onStop,
   onLoadMore,
@@ -111,6 +112,7 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       <MessageList
         :messages="threads.messages.value"
         :streaming="streaming"
+        :pending-user="pendingUserMessage"
         :search-keyword="search.keyword.value"
         :active-match-index="search.activeIndex.value"
         :has-more="threads.hasMore.value"

@@ -286,6 +286,15 @@ export class RunManager {
     // FR-017：滚动摘要作为 System Prompt 一部分注入
     const { summary } = this.deps.summary?.read(userId, threadId) ?? { summary: '' };
     const systemExtra = summary ? `以下是对话早期内容的摘要：\n${summary}` : undefined;
+    /**
+     * 本轮结局：供收尾日志使用（任务 2026-09-16）。
+     *
+     * 为什么要有这一条：关闭逐请求访问日志后，agent 侧只剩"崩溃"能查到，
+     * **正常/失败的一轮在日志里没有任何痕迹**——"回答很慢""这轮失败了"
+     * 只能靠复现。`run.end` 每轮一行（含 ok / duration_ms / error_code），
+     * 既是排障入口，也是"业务是否正常"的最直接信号。
+     */
+    let outcome: { ok: boolean; error_code?: string } = { ok: false, error_code: 'INTERNAL_ERROR' };
     try {
       for await (const ev of agent.run({
         threadId,
@@ -311,18 +320,22 @@ export class RunManager {
             break;
           case 'done':
             await this.finalizeDone(run, opts, userMessage, ev.usage);
+            outcome = { ok: true };
             return;
           case 'error':
             if (ev.code === 'ABORTED') {
               this.finalizeAborted(run, opts, ev.usage);
+              outcome = { ok: false, error_code: 'ABORTED' };
               return;
             }
             await this.finalizeError(run, opts, userMessage, ev);
+            outcome = { ok: false, error_code: ev.code };
             return;
         }
       }
       // 流无终结事件而结束 → 视为错误
       run.state = 'error';
+      outcome = { ok: false, error_code: 'LLM_ERROR' };
       run.emit({
         type: 'error',
         data: {
@@ -334,6 +347,7 @@ export class RunManager {
     } catch (err) {
       // 未知异常：疑似实例崩溃 → 销毁实例（FR-030），下条消息自动重建
       run.state = 'error';
+      outcome = { ok: false, error_code: 'INTERNAL_ERROR' };
       this.deps.logger?.error(
         { err, alert: true, event: 'agent.crashed', user_id: userId, thread_id: threadId, agent_name: agent.key.agentName },
         'Agent 实例崩溃，已销毁',
@@ -349,6 +363,20 @@ export class RunManager {
       });
     } finally {
       this.active.delete(threadId);
+      const durationMs = this.now() - run.startedAt;
+      this.deps.logger?.[outcome.ok ? 'info' : 'warn'](
+        {
+          event: 'run.end',
+          scope: 'run',
+          ok: outcome.ok,
+          duration_ms: durationMs,
+          ...(outcome.error_code ? { error_code: outcome.error_code } : {}),
+          user_id: userId,
+          thread_id: threadId,
+          agent_name: run.agentName,
+        },
+        `对话轮次结束：${outcome.ok ? '成功' : `失败（${outcome.error_code ?? '未知'}）`}，耗时 ${durationMs}ms`,
+      );
     }
   }
 

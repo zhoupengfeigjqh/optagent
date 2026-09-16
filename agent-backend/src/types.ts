@@ -104,7 +104,53 @@ export interface UsageSummary {
 export interface UsageStore {
   record(entry: Omit<UsageRecord, 'id'>): void; // 失败记日志不抛出
   summary(filter: UsageFilter): UsageSummary;
+  /**
+   * MCP 工具调用计数（R4 / FR-049）：口径为**工具调用次数**，非 HTTP 请求数。
+   * `userId` 为调用发起用户（2026-09-16 十四次调整：支撑按用户明细）；
+   * 缺省/null 表示老数据未记录归属。
+   */
+  recordMcpCall(serviceName: string, ok: boolean, userId?: string | null): void;
+  /** 按服务名的调用统计；未出现过的服务不在此列 */
+  mcpCallStats(): McpCallStat[];
   close(): void;
+}
+
+/** MCP 服务调用统计（`contracts/runtime-api-delta.md` §4.3） */
+/** 单个时间窗的调用计数（任务 2026-09-15：24h / 7 天 / 30 天 / 1 年） */
+export interface McpCallWindow {
+  ok: number;
+  failed: number;
+  total: number;
+}
+
+/** 单用户调用统计（2026-09-16 十四次调整：由事件明细按 user_id 聚合） */
+export interface McpCallUserStat {
+  /** 调用发起用户；`null` = 升级前的历史事件未记录归属 */
+  user_id: string | null;
+  calls_total: number;
+  calls_ok: number;
+  calls_failed: number;
+  last_called_at: string | null;
+}
+
+export interface McpCallStat {
+  name: string;
+  calls_total: number;
+  calls_ok: number;
+  calls_failed: number;
+  last_called_at: string | null;
+  /** 按时间窗聚合（依赖每次调用的事件明细，事件只保留一年） */
+  windows: {
+    h24: McpCallWindow;
+    d7: McpCallWindow;
+    d30: McpCallWindow;
+    d365: McpCallWindow;
+  };
+  /**
+   * 按用户的调用明细（成功/失败分列）。数据来自事件明细表，故只覆盖
+   * **最近一年**（与 windows 同口径）；未开过库的统计行可能为空数组。
+   */
+  users: McpCallUserStat[];
 }
 
 /** 实例池 key */

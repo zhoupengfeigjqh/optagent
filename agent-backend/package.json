@@ -17,6 +17,7 @@
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:all": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "smoke": "tsx scripts/smoke.ts",
     "perf": "tsx scripts/perf.ts"
   },

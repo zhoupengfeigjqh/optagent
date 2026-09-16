@@ -10,7 +10,10 @@
  * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略）
  * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
  * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
- * scenario.json 缺失时业务接口 → 503 SCENARIO_NOT_CONFIGURED
+ *
+ * 文件空间视角＝**当前选中的数字人**：场景（scenario.json）随数字人存放，
+ * 故同一用户的不同数字人可见的目录清单不同。未选中数字人 → 409 AGENT_NOT_SELECTED；
+ * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED。
  */
 import { createWriteStream } from 'node:fs';
 import fs from 'node:fs';
@@ -77,10 +80,22 @@ function fileAccessFor(ctx: AppContext, userId: string): FileAccess {
   });
 }
 
+/**
+ * 文件空间视角所属的数字人＝当前选中数字人（场景随数字人存放）。
+ * 未选中时无法确定可见目录清单 → 409，与对话路由的判定口径保持一致。
+ */
+function currentAgentFor(ctx: AppContext, userId: string): string {
+  const selected = ctx.currentAgent.current(userId);
+  if (!selected) {
+    throw new ApiError(409, 'AGENT_NOT_SELECTED', '请先选定数字人后再操作文件空间');
+  }
+  return selected.agentName;
+}
+
 /** 目录参数统一校验：穿越 → 400；空间外/清单外 → 403；scenario 缺失 → 503 */
-function checkDir(ctx: AppContext, userId: string, dir: string) {
+function checkDir(ctx: AppContext, userId: string, agentName: string, dir: string) {
   try {
-    return parseSpaceDir(ctx.config.optAgentRoot, userId, dir);
+    return parseSpaceDir(ctx.config.optAgentRoot, userId, agentName, dir);
   } catch (err) {
     if (err instanceof DirValidationError) {
       throw new ApiError(
@@ -90,7 +105,7 @@ function checkDir(ctx: AppContext, userId: string, dir: string) {
       );
     }
     if (err instanceof ScenarioNotConfiguredError) {
-      throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+      throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
     }
     throw err;
   }
@@ -175,7 +190,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(400, 'VALIDATION_FAILED', '缺少目标目录字段 dir');
     }
     try {
-      const target = checkDir(ctx, userId, dir);
+      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
       // 按目标空间策略校验扩展名
       const ext = path.extname(originalName).toLowerCase();
       const allowed = SPACE_POLICIES[target.space].uploadExtensions;
@@ -200,7 +215,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get('/api/files/list', { schema: { querystring: listQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { dir } = req.query as { dir: string };
-    const target = checkDir(ctx, userId, dir);
+    const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
     const entries = await fileAccessFor(ctx, userId).list(target.relPath);
     return entries
       .filter((e) => !e.isDirectory)
@@ -213,7 +228,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, dir);
+      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
@@ -242,7 +257,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, dir);
+      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
@@ -281,7 +296,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, dir);
+      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
       if (target.space === SPACE_SHARED) {
         throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
       }
@@ -333,10 +348,10 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     let scenario;
     try {
-      scenario = loadScenario(root, userId, ctx.loggers.logger);
+      scenario = loadScenario(root, userId, currentAgentFor(ctx, userId), ctx.loggers.logger);
     } catch (err) {
       if (err instanceof ScenarioNotConfiguredError) {
-        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', '用户未设置场景信息，请联系管理员');
+        throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
       }
       throw err;
     }

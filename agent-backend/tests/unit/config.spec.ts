@@ -1,8 +1,9 @@
 /**
  * config 模块单测
  *
- * 运行方式（容器内，MUST NOT 在宿主机直接跑）：
- *   docker compose --profile test run --rm backend-test
+ * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
+ *   npm run test:all   # 全部测试
+ *   npm run test       # 仅本目录单测
  *
  * 覆盖本次变更的核心约束：`PUBLIC_BASE_URL` 必须显式声明（缺失即拒绝启动），
  * 且不再回落到 `http://localhost:PORT` 兜底——容器里该兜底会让 MCP 服务回源打到自己。

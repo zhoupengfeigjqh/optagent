@@ -1,11 +1,8 @@
-# 服务镜像只需运行期文件（server.py + ocr_core.py）与依赖清单；
-# 测试资产（Dockerfile.test / requirements-test.txt / tests/）必须保留在构建上下文中，
-# 由 Dockerfile.test 使用——运行镜像不 COPY 它们，因此不会进入交付镜像。
+# 服务镜像只需运行期文件（server.py + ocr_core.py）与依赖清单。
+# 测试资产（tests/、requirements-test.txt）**不保留**在构建上下文中：
+# 容器只做部署与运行，测试一律在宿主机本地执行（宪章原则三）。
 *
 !server.py
 !ocr_core.py
 !requirements.txt
-!requirements-test.txt
 !Dockerfile
-!Dockerfile.test
-!tests
