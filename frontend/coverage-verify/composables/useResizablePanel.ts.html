@@ -1,0 +1,523 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for composables/useResizablePanel.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../prettify.css" />
+    <link rel="stylesheet" href="../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">composables</a> useResizablePanel.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>0/50</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>0/22</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>0/11</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">0% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>0/50</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
+ * 右栏「文件空间」面板的可拖动宽度（FR-002）
+ *
+ * 拖动面板左缘的分隔条调整宽度：指针左移变宽、右移变窄。
+ * - 尚未手动调整时宽度为 `null`，沿用 CSS 默认比例（`--layout-preview-ratio` ≈ 1/3）
+ * - 一旦调整即固定为像素值，窗口后续缩放不再改变面板宽度（手动尺寸优先）
+ * - 宽度收敛在 `[PANEL_MIN_WIDTH, min(PANEL_MAX_WIDTH, 容器宽 - PANEL_RESERVED_WIDTH)]`，
+ *   避免面板被拖没或把中栏挤到不可用
+ * - 分隔条支持键盘（← 变宽 / → 变窄，Shift 加速），并具备 `separator` 语义
+ */
+&nbsp;
+import { computed, onBeforeUnmount, ref, type CSSProperties, type ComputedRef, type Ref } from 'vue'
+&nbsp;
+/** 面板宽度下限（px） */
+export const PANEL_MIN_WIDTH = <span class="cstat-no" title="statement not covered" >280</span>
+&nbsp;
+/** 面板宽度上限的绝对封顶（px） */
+export const PANEL_MAX_WIDTH = <span class="cstat-no" title="statement not covered" >960</span>
+&nbsp;
+/** 左栏 + 中栏需保留的最小宽度（px），用于推算上限 */
+export const PANEL_RESERVED_WIDTH = <span class="cstat-no" title="statement not covered" >520</span>
+&nbsp;
+/** 键盘调整步长（px） */
+export const PANEL_KEY_STEP = <span class="cstat-no" title="statement not covered" >16</span>
+&nbsp;
+/** 键盘调整大步长（px，按住 Shift） */
+export const PANEL_KEY_STEP_LARGE = <span class="cstat-no" title="statement not covered" >64</span>
+&nbsp;
+/** 注入到容器的宽度变量名 */
+export const PANEL_WIDTH_VAR = <span class="cstat-no" title="statement not covered" >'--layout-preview-width'</span>
+&nbsp;
+/**
+ * 宽度收敛：夹在 `[下限, 上限]` 之间。
+ * 上限取「绝对封顶」与「容器宽 - 保留宽」的较小值；容器宽未知（≤0）时按绝对封顶。
+ */
+export function <span class="fstat-no" title="function not covered" >clampPanelWidth(v</span>alue: number, containerWidth: number): number {
+  const available = <span class="cstat-no" title="statement not covered" >containerWidth &gt; 0 ? containerWidth - PANEL_RESERVED_WIDTH : PANEL_MAX_WIDTH</span>
+  const upper = <span class="cstat-no" title="statement not covered" >Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, available))</span>
+<span class="cstat-no" title="statement not covered" >  return Math.min(Math.max(value, PANEL_MIN_WIDTH), upper)</span>
+}
+&nbsp;
+/** 构造参数：以取值函数注入 DOM，便于测试替换。 */
+export interface ResizablePanelDeps {
+  /** 栅格容器元素（用于推算上限） */
+  container: () =&gt; HTMLElement | null
+  /** 被调整的面板元素 */
+  panel: () =&gt; HTMLElement | null
+}
+&nbsp;
+/** 可拖动面板契约。 */
+export interface ResizablePanelStore {
+  /** 手动宽度（px）；`null` = 尚未手动调整，沿用默认比例 */
+  width: Ref&lt;number | null&gt;
+  /** 是否正在拖动 */
+  resizing: Ref&lt;boolean&gt;
+  /** 绑定到容器的行内样式（注入宽度变量） */
+  style: ComputedRef&lt;CSSProperties&gt;
+  /** 分隔条 `pointerdown` */
+  onPointerDown(event: PointerEvent): void
+  /** 分隔条 `keydown`（← / → 调整） */
+  onKeydown(event: KeyboardEvent): void
+}
+&nbsp;
+/** 创建可拖动面板状态（需在组件 `setup` 内调用，卸载时自动清理监听）。 */
+export function <span class="fstat-no" title="function not covered" >useResizablePanel(d</span>eps: ResizablePanelDeps): ResizablePanelStore {
+  const width = <span class="cstat-no" title="statement not covered" >ref&lt;number | null&gt;(null)</span>
+  const resizing = <span class="cstat-no" title="statement not covered" >ref(false)</span>
+  /** 拖动中挂在 window 上的监听清理函数；未拖动时为 `null` */
+  let cleanup: (() =&gt; void) | null = <span class="cstat-no" title="statement not covered" >null</span>
+&nbsp;
+  const style = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >computed&lt;CSSProperties&gt;(() =&gt;</span></span>
+<span class="cstat-no" title="statement not covered" >    width.value === null ? {} : ({ [PANEL_WIDTH_VAR]: `${width.value}px` } as CSSProperties),</span>
+  )
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >containerWidth(): number {</span>
+<span class="cstat-no" title="statement not covered" >    return deps.container()?.getBoundingClientRect().width ?? 0</span>
+  }
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >panelWidth(): number {</span>
+<span class="cstat-no" title="statement not covered" >    return deps.panel()?.getBoundingClientRect().width ?? 0</span>
+  }
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >apply(v</span>alue: number): void {
+<span class="cstat-no" title="statement not covered" >    width.value = clampPanelWidth(value, containerWidth())</span>
+  }
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >stop(): void {</span>
+<span class="cstat-no" title="statement not covered" >    resizing.value = false</span>
+<span class="cstat-no" title="statement not covered" >    cleanup?.()</span>
+<span class="cstat-no" title="statement not covered" >    cleanup = null</span>
+  }
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >onPointerDown(e</span>vent: PointerEvent): void {
+<span class="cstat-no" title="statement not covered" >    if (event.button !== 0) {</span>
+<span class="cstat-no" title="statement not covered" >      return</span>
+    }
+    const startWidth = <span class="cstat-no" title="statement not covered" >panelWidth()</span>
+    // 面板尚未布局（宽度为 0）时不进入拖动，避免以错误基准计算
+<span class="cstat-no" title="statement not covered" >    if (startWidth &lt;= 0) {</span>
+<span class="cstat-no" title="statement not covered" >      return</span>
+    }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    event.preventDefault()</span>
+    const startX = <span class="cstat-no" title="statement not covered" >event.clientX</span>
+<span class="cstat-no" title="statement not covered" >    resizing.value = true</span>
+&nbsp;
+    const target = <span class="cstat-no" title="statement not covered" >event.currentTarget as HTMLElement | null</span>
+<span class="cstat-no" title="statement not covered" >    if (typeof target?.setPointerCapture === 'function') {</span>
+<span class="cstat-no" title="statement not covered" >      target.setPointerCapture(event.pointerId)</span>
+    }
+&nbsp;
+    const <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >onMove = (m</span>ove: PointerEvent): void =&gt; {</span>
+      // 面板在右侧：指针左移 → 面板变宽
+<span class="cstat-no" title="statement not covered" >      apply(startWidth - (move.clientX - startX))</span>
+    }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    window.addEventListener('pointermove', onMove)</span>
+<span class="cstat-no" title="statement not covered" >    window.addEventListener('pointerup', stop)</span>
+<span class="cstat-no" title="statement not covered" >    window.addEventListener('pointercancel', stop)</span>
+<span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >    cleanup = (): void =&gt; {</span></span>
+<span class="cstat-no" title="statement not covered" >      window.removeEventListener('pointermove', onMove)</span>
+<span class="cstat-no" title="statement not covered" >      window.removeEventListener('pointerup', stop)</span>
+<span class="cstat-no" title="statement not covered" >      window.removeEventListener('pointercancel', stop)</span>
+    }
+  }
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >onKeydown(e</span>vent: KeyboardEvent): void {
+    const step = <span class="cstat-no" title="statement not covered" >event.shiftKey ? PANEL_KEY_STEP_LARGE : PANEL_KEY_STEP</span>
+    let delta: number
+<span class="cstat-no" title="statement not covered" >    if (event.key === 'ArrowLeft') {</span>
+<span class="cstat-no" title="statement not covered" >      delta = step</span>
+    } else <span class="cstat-no" title="statement not covered" >if (event.key === 'ArrowRight') {</span>
+<span class="cstat-no" title="statement not covered" >      delta = -step</span>
+    } else {
+<span class="cstat-no" title="statement not covered" >      return</span>
+    }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    event.preventDefault()</span>
+    // 未手动调整过时，以默认比例下的实际宽度为基准
+<span class="cstat-no" title="statement not covered" >    apply((width.value ?? panelWidth()) + delta)</span>
+  }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  onBeforeUnmount(stop)</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return { width, resizing, style, onPointerDown, onKeydown }</span>
+}
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-09-15T07:28:07.451Z
+            </div>
+        <script src="../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../sorter.js"></script>
+        <script src="../block-navigation.js"></script>
+    </body>
+</html>
+    

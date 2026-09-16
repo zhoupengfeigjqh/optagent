@@ -1,0 +1,49 @@
+{
+  "name": "optagent-admin-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "数字人管理平台：管理服务（Fastify 5 + TypeScript）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/src/server.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "check:lines": "node scripts/check-lines.mjs",
+    "check:deps": "node scripts/check-deps.mjs",
+    "check:contract": "node scripts/check-error-codes.mjs"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/multipart": "^10.1.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "fastify": "^5.12.3",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
+    "yaml": "^2.9.0",
+    "yauzl": "^3.2.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.2",
+    "@types/yauzl": "^2.10.3",
+    "@vitest/coverage-v8": "^5.0.0",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.0"
+  }
+}
