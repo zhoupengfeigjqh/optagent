@@ -23,7 +23,7 @@ export const AGENT_DESIGN_TABS = [
 
 export type AgentDesignTab = (typeof AGENT_DESIGN_TABS)[number]['id']
 
-/** 空场景（新建时的初值） */
+/** 空场景（新建时的初值）：无目录、无字段约束 */
 export function emptyScenario(): AgentScenario {
-  return { scenario: '', data_prep_dirs: [] }
+  return { scenario: '', data_prep_dirs: [], data_prep_fields: {} }
 }

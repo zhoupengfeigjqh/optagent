@@ -25,7 +25,11 @@ const DESIGN = {
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
-  scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+  scenario: {
+    scenario: '生产',
+    data_prep_dirs: ['生产计划'],
+    data_prep_fields: { 生产计划: [{ name: '产线编号', type: 'string', required: true }] },
+  },
   abnormal: false,
   abnormal_reason: null,
   updated_at: '2026-09-15T00:00:00.000Z',
@@ -46,7 +50,7 @@ describe('emptyDraft', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: '', data_prep_dirs: [] },
+      scenario: { scenario: '', data_prep_dirs: [], data_prep_fields: {} },
     })
   })
 })
@@ -77,6 +81,26 @@ describe('useAgentDesign', () => {
 
     expect(editor.dirty.value).toBe(true)
     expect(editor.saved.value?.enabled_tools).toEqual(['read_file'])
+  })
+
+  it('字段约束是**深副本**：改草稿里的字段不污染已保存态', async () => {
+    const editor = useAgentDesign()
+    await editor.load('demo')
+    editor.draft.value.scenario.data_prep_fields.生产计划.push({
+      name: '计划量',
+      type: 'integer',
+      required: false,
+    })
+
+    expect(editor.dirty.value).toBe(true)
+    expect(editor.saved.value?.scenario.data_prep_fields.生产计划).toHaveLength(1)
+  })
+
+  it('字段约束的改动也触发 dirty（即便目录与场景名未变）', async () => {
+    const editor = useAgentDesign()
+    await editor.load('demo')
+    editor.draft.value.scenario.data_prep_fields.生产计划[0].required = false
+    expect(editor.dirty.value).toBe(true)
   })
 
   it('load 失败：错误可读且回到未加载状态', async () => {

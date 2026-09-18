@@ -13,6 +13,8 @@ import type {
   Conversation,
   FeedbackResponse,
   FeedbackValue,
+  InteractionSubmitRequest,
+  InteractionSubmitResponse,
   StopResponse,
   ThreadCreateResponse,
   ThreadDetail,
@@ -44,6 +46,14 @@ export interface ThreadsApi {
   ): Promise<FeedbackResponse>
   /** `POST /api/threads/{id}/stop` → 中断本轮（本轮不落盘） */
   stop(threadId: string): Promise<StopResponse>
+  /**
+   * `POST /api/threads/{id}/interaction` → HITL 人工确认提交/拒绝（202，幂等）。
+   * `submit` 的服务端终验失败返回 400 `SCHEMA_VALIDATION_FAILED`（interaction 保持挂起可重提）。
+   */
+  submitInteraction(
+    threadId: string,
+    body: InteractionSubmitRequest,
+  ): Promise<InteractionSubmitResponse>
 }
 
 /** 创建会话 API。 */
@@ -75,5 +85,8 @@ export function createThreadsApi(client: HttpClient): ThreadsApi {
       ),
 
     stop: (threadId) => client.post<StopResponse>(`${base(threadId)}/stop`),
+
+    submitInteraction: (threadId, body) =>
+      client.post<InteractionSubmitResponse>(`${base(threadId)}/interaction`, body),
   }
 }

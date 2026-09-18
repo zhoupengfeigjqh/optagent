@@ -25,6 +25,8 @@ export interface ApiErrorBody {
 export interface ErrorInfo {
   code: string
   message: string
+  /** 后端结构化问题清单（仅 `FILE_SCHEMA_INVALID` 使用；D13 例外，透传展示） */
+  details?: unknown
 }
 
 /* ============================================================
@@ -186,6 +188,8 @@ export interface ThreadDetail extends Conversation {
   messages: Message[]
   /** 该会话当前是否有活跃 run */
   running: boolean
+  /** HITL：当前等待用户确认的工具调用快照（无则 `null`，断连恢复弹窗用） */
+  pending_interaction: InteractionSnapshot | null
 }
 
 /** `POST /api/threads` 响应（**不返回** `agent_name` 与 `updated_at`）。 */
@@ -268,12 +272,47 @@ export interface StreamErrorEventData {
   agent_name: string
 }
 
+/**
+ * `interaction_request` 事件数据（HITL）：工具调用前的人工确认。
+ * schema 为工具入参 JSON Schema（可见形态），proposed_args 为模型提议值（预填可改）。
+ */
+export interface InteractionRequestData {
+  interaction_id: string
+  call_id: string
+  tool_name: string
+  title: string
+  schema: Record<string, unknown>
+  proposed_args: Record<string, unknown>
+  required: string[]
+  timeout_seconds: number
+}
+
+/** 断连恢复快照：interaction_request + 剩余等待秒数（线程详情接口下发）。 */
+export interface InteractionSnapshot extends InteractionRequestData {
+  remaining_seconds: number
+}
+
+/** `POST /api/threads/{id}/interaction` 请求体。 */
+export interface InteractionSubmitRequest {
+  interaction_id: string
+  action: 'submit' | 'reject'
+  /** action=submit 必填（服务端按挂起时的 inputSchema 终验） */
+  args?: Record<string, unknown>
+}
+
+/** `POST /api/threads/{id}/interaction` 响应（202；重复提交幂等返回首次结果）。 */
+export interface InteractionSubmitResponse {
+  accepted: boolean
+  result: 'settled' | 'already-resolved'
+}
+
 /** SSE 事件 → 类型化载荷的联合类型（仅本轮可见，不落历史）。 */
 export type StreamEvent =
   | { type: 'thinking'; data: ThinkingEventData }
   | { type: 'content'; data: ContentEventData }
   | { type: 'tool_call'; data: ToolCallEventData }
   | { type: 'tool_call_end'; data: ToolCallEndEventData }
+  | { type: 'interaction_request'; data: InteractionRequestData }
   | { type: 'done'; data: DoneEventData }
   | { type: 'error'; data: StreamErrorEventData }
 
@@ -301,6 +340,21 @@ export interface WorkspaceFile {
   updated_at: string
 }
 
+/**
+ * 数据准备目录的字段约束（`scenario.json` 的 `data_prep_fields` 随 workspace 接口下发）。
+ *
+ * 前端**只展示**（上传入口的表头要求提示）；权威校验在上传路由执行，
+ * 前端 MUST NOT 自行判定（契约 `runtime-api-delta.md` §3.1）。
+ */
+export interface ScenarioField {
+  /** 字段名（＝上传表的表头名） */
+  name: string
+  /** 取值类型（JSON Schema 基本类型子集） */
+  type: 'string' | 'integer' | 'number' | 'boolean' | 'object' | 'array'
+  /** 必填：表头 MUST 包含；`false` 为可选（出现则类型仍须匹配） */
+  required: boolean
+}
+
 /** 工作空间目录分组（dir 为相对空间路径，如 数据准备/生产计划、共享空间）。 */
 export interface WorkspaceDir {
   dir: string
@@ -310,6 +364,8 @@ export interface WorkspaceDir {
   deletable: boolean
   /** 空目录为 `[]` */
   files: WorkspaceFile[]
+  /** 字段约束（仅数据准备目录可能有值，其余空间恒为 `[]`） */
+  fields: ScenarioField[]
 }
 
 /** 工作空间空间分组（一级：数据准备/共享空间/临时空间）。 */

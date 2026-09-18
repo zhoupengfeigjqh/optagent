@@ -11,7 +11,7 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import type { ThreadsApi } from '../api/threads'
-import type { Conversation, ErrorInfo, FeedbackValue, Message } from '../api/types'
+import type { Conversation, ErrorInfo, FeedbackValue, InteractionSnapshot, Message } from '../api/types'
 import { HISTORY_DEFAULT_LIMIT, HISTORY_EXPANDED_LIMIT, MESSAGE_PAGE_SIZE } from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
@@ -41,6 +41,8 @@ export interface ThreadsStore {
   messages: Readonly<Ref<Message[]>>
   total: Readonly<Ref<number>>
   running: Readonly<Ref<boolean>>
+  /** HITL：当前等待用户确认的工具调用快照（详情接口下发；无则 `null`） */
+  pendingInteraction: Readonly<Ref<InteractionSnapshot | null>>
   limit: Readonly<Ref<HistoryLimit>>
   loading: Readonly<Ref<boolean>>
   error: Readonly<Ref<ErrorInfo | null>>
@@ -66,6 +68,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
   const messages = ref<Message[]>([])
   const total = ref(0)
   const running = ref(false)
+  const pendingInteraction = ref<InteractionSnapshot | null>(null)
   const limit = ref<HistoryLimit>(HISTORY_DEFAULT_LIMIT)
   const loading = ref(false)
   const error = ref<ErrorInfo | null>(null)
@@ -105,6 +108,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
       messages.value = []
       total.value = 0
       running.value = false
+      pendingInteraction.value = null
       await loadList()
     } catch (cause) {
       // 409/404 等按场景映射文案（FR-042）
@@ -118,6 +122,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
       messages.value = []
       total.value = 0
       running.value = false
+      pendingInteraction.value = null
       return
     }
 
@@ -128,6 +133,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
       messages.value = detail.messages
       total.value = detail.total
       running.value = detail.running
+      pendingInteraction.value = detail.pending_interaction
     } catch (cause) {
       error.value = toErrorInfo(cause)
     } finally {
@@ -178,6 +184,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
       messages.value = []
       total.value = 0
       running.value = false
+      pendingInteraction.value = null
     }
 
     try {
@@ -211,6 +218,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     messages,
     total,
     running,
+    pendingInteraction,
     limit,
     loading,
     error,

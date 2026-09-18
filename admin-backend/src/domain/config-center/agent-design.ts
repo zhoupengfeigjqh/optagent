@@ -9,7 +9,7 @@
  * 1. `soul` 非空（`FR-019`）；
  * 2. 三类引用**只能取统一清单内的对象**，清单外即拒（`FR-019`）；
  * 3. 名称合法且唯一（`FR-015`）；
- * 4. 场景目录清单拒绝空值 / 重复 / 含分隔符 / `..`（`FR-020`）；
+ * 4. 场景（场景名 / 目录清单 / 字段约束）由 `scenario.ts` 单独校验（`FR-020`）；
  * 5. 保存后 MUST **原样回显**（含换行、标点与条目顺序，`FR-017`）——故本模块
  *    对字符串一律不做 trim/规范化，只在**校验**时用 trim 判空。
  */
@@ -19,11 +19,8 @@ import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 import { anomalyReason, detectAnomalies, type AgentRefSource } from './references.js';
 import type { ReferenceIndex } from './reference-index.js';
-
-export interface AgentScenario {
-  scenario: string;
-  data_prep_dirs: string[];
-}
+import { isSafeName } from './naming.js';
+import { normalizeScenario, scenarioFields, type AgentScenario } from './scenario.js';
 
 /** 落盘形态（`.platform-data/agents/{name}.json`） */
 export interface AgentDesignDocument {
@@ -52,22 +49,6 @@ export interface AgentListItem {
 }
 
 const AGENTS_DIR = 'agents';
-
-/** 名称安全：非空、≤64 字符、不含分隔符 / `..` / 控制字符（`FR-015`、下沉到路径安全） */
-export function isSafeName(name: string): boolean {
-  if (typeof name !== 'string' || name.length === 0 || name.length > 64) return false;
-  if (name === '.' || name === '..') return false;
-  if (/[/\\]/.test(name)) return false;
-  if (name.includes('..')) return false;
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(name)) return false;
-  return true;
-}
-
-/** 场景二级目录名安全：同名称规则，且不允许为空 */
-export function isSafeDirName(name: string): boolean {
-  return typeof name === 'string' && name.trim() !== '' && isSafeName(name);
-}
 
 /**
  * 卡片"用途描述"（`FR-006` 要求卡片含名称与用途描述）。
@@ -180,44 +161,6 @@ function rejectUnknown(
   }
 }
 
-/** 场景：名称非空；目录清单拒绝空值 / 重复 / 含分隔符 / `..`（`FR-020`） */
-function normalizeScenario(raw: unknown): AgentScenario {
-  const obj = (raw ?? {}) as { scenario?: unknown; data_prep_dirs?: unknown };
-  const scenario = typeof obj.scenario === 'string' ? obj.scenario.trim() : '';
-  if (scenario === '') {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '文件空间场景名必填且不能为空（FR-020）');
-  }
-  if (!isSafeName(scenario)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `场景名非法：${scenario}（不得含路径分隔符或 ".."）`,
-    );
-  }
-  if (!Array.isArray(obj.data_prep_dirs)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      '数据准备二级目录清单须为数组（可为空数组，但 MUST NOT 缺字段）',
-    );
-  }
-  const dirs: string[] = [];
-  for (const item of obj.data_prep_dirs) {
-    if (typeof item !== 'string' || item.trim() === '') {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '数据准备二级目录清单含空值');
-    }
-    if (!isSafeDirName(item)) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `数据准备二级目录名非法：${item}（不得含路径分隔符或 ".."）`,
-      );
-    }
-    if (dirs.includes(item)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `数据准备二级目录重复：${item}`);
-    }
-    dirs.push(item);
-  }
-  return { scenario, data_prep_dirs: dirs };
-}
-
 export class AgentDesignService {
   constructor(private readonly store: PlatformStore) {}
 
@@ -255,7 +198,21 @@ export class AgentDesignService {
   }
 
   readOrNull(name: string): AgentDesignDocument | null {
-    return this.store.readJson<AgentDesignDocument>(AgentDesignService.relPath(name));
+    const doc = this.store.readJson<AgentDesignDocument>(AgentDesignService.relPath(name));
+    return doc ? AgentDesignService.withScenarioDefaults(doc) : null;
+  }
+
+  /**
+   * 读取归一化：历史设计态文档（`data_prep_fields` 引入前保存的）补齐为 `{}`。
+   *
+   * 目的是**对外契约恒有该键**——界面与部署物化因此都不必各自判空。
+   */
+  private static withScenarioDefaults(doc: AgentDesignDocument): AgentDesignDocument {
+    if (!doc.scenario || typeof doc.scenario !== 'object') return doc;
+    return {
+      ...doc,
+      scenario: { ...doc.scenario, data_prep_fields: scenarioFields(doc.scenario) },
+    };
   }
 
   read(name: string): AgentDesignDocument {

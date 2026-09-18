@@ -19,7 +19,9 @@
  */
 import { ERROR_CODES } from '../error-codes.js';
 import { detectAnomalies } from '../config-center/references.js';
-import { isSafeName, type AgentDesignDocument } from '../config-center/agent-design.js';
+import type { AgentDesignDocument } from '../config-center/agent-design.js';
+import { isSafeName } from '../config-center/naming.js';
+import { scenarioFieldIssues } from '../config-center/scenario.js';
 import type { ReferenceIndex } from '../config-center/reference-index.js';
 import type { RuntimeForm } from '../platform-settings.js';
 
@@ -144,6 +146,19 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
           code: ERROR_CODES.VALIDATION_FAILED,
           message: `数字人 ${agentName} 的文件空间场景配置不完整`,
         });
+      }
+      // 场景字段约束：手工改过设计态文件 / 旧文档的情况在这里兜底
+      // （不与上面的"整体不完整"重复判定：形状合法才逐项校验）
+      if (design.scenario && Array.isArray(design.scenario.data_prep_dirs)) {
+        for (const issue of scenarioFieldIssues(design.scenario)) {
+          errors.push({
+            user_id: user.user_id,
+            agent_name: agentName,
+            category: 'config_integrity',
+            code: ERROR_CODES.VALIDATION_FAILED,
+            message: `数字人 ${agentName} 的场景字段约束非法：${issue}`,
+          });
+        }
       }
 
       // ② 引用有效性（信息读取不到即按失败处理）

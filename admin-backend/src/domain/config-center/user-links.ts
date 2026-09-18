@@ -9,7 +9,7 @@ import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
-import { isSafeName } from './agent-design.js';
+import { isSafeName } from './naming.js';
 
 const USERS_DIR = 'users';
 

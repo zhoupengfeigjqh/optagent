@@ -146,6 +146,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     applyFeedback: (messageId, value) => threads.patchFeedback(messageId, value),
     sendFeedback: (threadId, messageId, value) =>
       threadsApi.feedback(threadId, messageId, value).then(() => undefined),
+    submitInteraction: (threadId, body) => threadsApi.submitInteraction(threadId, body),
     toast,
     storage,
     now,

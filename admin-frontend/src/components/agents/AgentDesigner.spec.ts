@@ -29,7 +29,11 @@ const DESIGN: AgentDesign = {
   enabled_tools: [],
   mcp_services: [],
   skills: [],
-  scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+  scenario: {
+    scenario: '生产',
+    data_prep_dirs: ['生产计划'],
+    data_prep_fields: { 生产计划: [{ name: '产线编号', type: 'string', required: true }] },
+  },
   abnormal: false,
   abnormal_reason: null,
   updated_at: '2026-09-15T00:00:00.000Z',

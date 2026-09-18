@@ -32,6 +32,8 @@ export interface McpServiceDetailView extends McpServiceView {
   command: string | null;
   args: string[] | null;
   file_args: Record<string, Record<string, string>>;
+  /** 调用确认策略（HITL；`never` 为默认/存量行为） */
+  confirmation: 'never' | 'always' | { tools: string[] };
   tools: McpToolDescriptor[];
   tools_truncated: boolean;
   tools_error: string | null;
@@ -127,6 +129,7 @@ export class McpServiceListService {
       command: config?.command ?? null,
       args: config?.args ?? null,
       file_args: config?.file_args ?? {},
+      confirmation: config?.confirmation ?? 'never',
       tools: tools.slice(0, TOOLS_LIMIT),
       tools_truncated: tools.length > TOOLS_LIMIT,
       tools_error: error,

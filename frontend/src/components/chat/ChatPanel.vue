@@ -16,6 +16,7 @@ import ChatHeader from './ChatHeader.vue'
 import Composer from './Composer.vue'
 import ComposerToolbar from './ComposerToolbar.vue'
 import MentionPicker from './MentionPicker.vue'
+import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
 import SessionSearch from './SessionSearch.vue'
 import UploadMenu from './UploadMenu.vue'
@@ -46,6 +47,10 @@ const {
   sending,
   hasMessages,
   pendingUserMessage,
+  pendingInteraction,
+  interactionError,
+  onSubmitInteraction,
+  onRejectInteraction,
   onSend,
   onStop,
   onLoadMore,
@@ -207,6 +212,15 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       :busy="agents.switching.value"
       @close="onCloseAgentPanel"
       @switch="onSwitchAgent"
+    />
+
+    <!-- HITL：工具调用人工确认（Schema 驱动通用表单，与服务解耦） -->
+    <InteractionDialog
+      v-if="pendingInteraction"
+      :request="pendingInteraction"
+      :server-error="interactionError"
+      @submit="onSubmitInteraction"
+      @reject="onRejectInteraction"
     />
   </section>
 </template>

@@ -26,7 +26,7 @@ const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.tif', '.tif
 /** 上传预校验结果。 */
 export interface UploadPrecheckResult {
   ok: boolean
-  /** 不合规原因：`FILE_TOO_LARGE` 超过 50MB；`VALIDATION_FAILED` 扩展名不在白名单 */
+  /** 不合规原因：`FILE_TOO_LARGE` 超过 5MB；`VALIDATION_FAILED` 扩展名不在白名单 */
   code?: 'FILE_TOO_LARGE' | 'VALIDATION_FAILED'
 }
 

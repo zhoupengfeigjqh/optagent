@@ -77,7 +77,7 @@ describe('api/agents', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: 's', data_prep_dirs: [] },
+      scenario: { scenario: 's', data_prep_dirs: [], data_prep_fields: {} },
     })
     expect(lastCall().init.method).toBe('POST')
 
@@ -87,7 +87,7 @@ describe('api/agents', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: 's', data_prep_dirs: [] },
+      scenario: { scenario: 's', data_prep_dirs: [], data_prep_fields: {} },
       revision: 3,
     })
     expect(lastCall().init.method).toBe('PUT')

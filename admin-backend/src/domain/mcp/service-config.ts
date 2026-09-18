@@ -37,8 +37,17 @@ export interface McpServiceConfig {
    * 语法见 `file-arg-path.ts`（2026-09-16：对象数组的入参曾"配了也不生效"）。
    */
   file_args: Record<string, Record<string, string>>;
+  /**
+   * 调用确认策略（HITL，人机交互门）：`never` 直跑（默认/存量行为）、
+   * `always` 该服务全部工具调用前弹参数确认窗、`{ tools: [...] }` 仅列出的
+   * 原始工具名需确认。经部署物化进运行环境 `MCP.json` 后由 agent-backend 装配生效。
+   */
+  confirmation: McpConfirmation;
   updated_at: string;
 }
+
+/** 调用确认策略（与运行环境 `McpConfirmation` 同一口径） */
+export type McpConfirmation = 'never' | 'always' | { tools: string[] };
 
 interface Document {
   items: Record<string, McpServiceConfig>;
@@ -53,6 +62,7 @@ export interface McpConfigInput {
   writable?: unknown;
   permission_scope?: unknown;
   file_args?: unknown;
+  confirmation?: unknown;
 }
 
 export class McpServiceConfigService {
@@ -151,6 +161,7 @@ export class McpServiceConfigService {
       command,
       args,
       file_args: normalizeFileArgs(input.file_args),
+      confirmation: normalizeConfirmation(input.confirmation),
       updated_at: new Date().toISOString(),
     };
   }
@@ -171,8 +182,22 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
     command: raw.command ?? null,
     args: Array.isArray(raw.args) ? raw.args : null,
     file_args: raw.file_args ?? {},
+    // 历史存档无该字段：读取时容错收敛为 never（存量行为不变）
+    confirmation: readConfirmation(raw.confirmation),
     updated_at: raw.updated_at,
   };
+}
+
+/** 读取路径的容错收敛：不认识/残缺的值一律回落 never（不阻断读取存量文档） */
+function readConfirmation(raw: unknown): McpConfirmation {
+  if (raw === 'always') return 'always';
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const tools = (raw as Record<string, unknown>).tools;
+    if (Array.isArray(tools) && tools.length > 0 && tools.every((t) => typeof t === 'string')) {
+      return { tools: tools as string[] };
+    }
+  }
+  return 'never';
 }
 
 function normalizeEndpoints(raw: unknown): Record<string, string> {
@@ -190,6 +215,25 @@ function normalizeEndpoints(raw: unknown): Record<string, string> {
     out[form] = value.trim();
   }
   return out;
+}
+
+/**
+ * 调用确认策略（HITL）：缺省/非法即 `never` 还是报错？
+ * ——报错。这是安全相关开关，把 typo 挡在保存期（"以为开了确认实际没开"比报错更糟）。
+ */
+function normalizeConfirmation(raw: unknown): McpConfirmation {
+  if (raw === undefined || raw === null || raw === 'never') return 'never';
+  if (raw === 'always') return 'always';
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const tools = (raw as Record<string, unknown>).tools;
+    if (Array.isArray(tools) && tools.length > 0 && tools.every((t) => typeof t === 'string')) {
+      return { tools: tools as string[] };
+    }
+  }
+  throw new ApiError(
+    ERROR_CODES.VALIDATION_FAILED,
+    'confirmation 须为 "never" | "always" | { "tools": string[] }（tools 非空）',
+  );
 }
 
 function normalizeFileArgs(raw: unknown): Record<string, Record<string, string>> {

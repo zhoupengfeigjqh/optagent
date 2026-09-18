@@ -18,6 +18,7 @@
  */
 import type { RuntimeForm } from '../platform-settings.js';
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
+import { scenarioFields, type AgentScenario } from '../config-center/scenario.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
@@ -47,7 +48,26 @@ export function buildMcpServerEntry(
     entry.url = url;
   }
   if (Object.keys(config.file_args).length > 0) entry.file_args = config.file_args;
+  // HITL 调用确认策略：never 是运行环境缺省语义，不写空壳（与 file_args 同一口径）
+  if (config.confirmation !== 'never') entry.confirmation = config.confirmation;
   return entry;
+}
+
+/**
+ * 构造 `scenario.json` 的落盘内容。
+ *
+ * `data_prep_fields` **仅在非空时写入**：运行环境（`agent-backend/src/domain/dirs.ts`）
+ * 对"缺失"与"空对象"的解读一致（该目录无字段约束），故不写空壳
+ * ——与"平台侧未搭配的内容不得残留"同一口径。
+ */
+export function buildScenarioDocument(scenario: AgentScenario): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    scenario: scenario.scenario,
+    data_prep_dirs: scenario.data_prep_dirs,
+  };
+  const fields = scenarioFields(scenario);
+  if (Object.keys(fields).length > 0) doc.data_prep_fields = fields;
+  return doc;
 }
 
 /** 构造单个数字人的完整产物清单 */
@@ -72,11 +92,7 @@ export function buildAgentArtifact(
     },
     {
       relPath: 'scenario.json',
-      content: `${JSON.stringify(
-        { scenario: design.scenario.scenario, data_prep_dirs: design.scenario.data_prep_dirs },
-        null,
-        2,
-      )}\n`,
+      content: `${JSON.stringify(buildScenarioDocument(design.scenario), null, 2)}\n`,
     },
   ];
 

@@ -21,7 +21,8 @@ const envSchema = z.object({
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
   IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(600_000),
   MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(30_000),
-  UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(50),
+  /** 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束） */
+  UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(10),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(32),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),

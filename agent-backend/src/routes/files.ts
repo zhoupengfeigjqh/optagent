@@ -2,7 +2,9 @@
  * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7 + 003 三空间改造）：
  * - POST /api/files/upload：multipart 上传——dir 为空间相对路径（数据准备需二级目录，
  *   二级目录须命中 scenario.json 清单），扩展名按空间策略（数据准备仅 csv/xlsx，
- *   共享/临时空间 csv/xlsx/txt/json/pdf + 图片），≤50MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
+ *   共享/临时空间 csv/xlsx/txt/json/pdf + 图片），≤5MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
+ * - 数据准备目录带字段约束（data_prep_fields）时：暂存后、落盘前校验上传表的
+ *   表头与取值类型（`domain/field-check.ts`），失败 400 FILE_SCHEMA_INVALID（不落盘）
  * - GET /api/files/list?dir=：列目录
  * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
@@ -34,6 +36,7 @@ import {
   userDataDir,
 } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
+import { checkUploadBuffer } from '../domain/field-check.js';
 import { removeFileSafe } from '../domain/fs-safe.js';
 import { ApiError } from '../server.js';
 import { verifyRef } from '../infra/file-sign.js';
@@ -200,6 +203,28 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           'VALIDATION_FAILED',
           `${target.space} 不支持格式 "${ext}"，允许：${allowed.join(' ')}`,
         );
+      }
+      // 字段约束校验（暂存后、落盘前）：仅数据准备目录且该目录声明了约束时触发。
+      // 运行环境是唯一权威（前端不做同款校验，契约 §3.1）；失败不落盘。
+      if (target.space === SPACE_PREP && target.sub) {
+        const scenario = loadScenario(
+          ctx.config.optAgentRoot,
+          userId,
+          currentAgentFor(ctx, userId),
+          ctx.loggers.logger,
+        );
+        const fields = scenario.dataPrepFields[target.sub] ?? [];
+        if (fields.length > 0) {
+          const issues = checkUploadBuffer(fields, ext, fs.readFileSync(staging));
+          if (issues.length > 0) {
+            throw new ApiError(
+              400,
+              'FILE_SCHEMA_INVALID',
+              '上传表不符合该目录的字段约束',
+              issues,
+            );
+          }
+        }
       }
       const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), target.relPath);
       fs.mkdirSync(dirAbs, { recursive: true });
@@ -376,6 +401,12 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           label: relPath === space ? space : relPath.slice(space.length + 1),
           deletable: space !== SPACE_SHARED,
           files: await listFiles(relPath),
+          // 字段约束随目录下发（无约束为 []）：前端据此在上传入口做只读提示；
+          // 权威校验在上传路由执行，前端 MUST NOT 自行判定（契约 §3.1）
+          fields:
+            space === SPACE_PREP
+              ? (scenario.dataPrepFields[relPath.slice(space.length + 1)] ?? [])
+              : [],
         });
       }
       spaces.push({

@@ -88,6 +88,8 @@ const failureText = computed(() =>
 .upload-item__error {
   flex: 1 1 100%;
   font-size: var(--font-size-xs);
+  /* FILE_SCHEMA_INVALID 的逐条问题清单以换行拼接（toUserMessage 透传 details） */
+  white-space: pre-line;
 }
 
 .upload-item__retry {

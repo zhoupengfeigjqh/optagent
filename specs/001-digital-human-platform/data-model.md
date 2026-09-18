@@ -198,14 +198,23 @@ platform-data/
 | `scenario` | object | ✅ | — | 文件空间搭配（`FR-020`） |
 | `scenario.scenario` | string | ✅ | 非空 | 场景名 |
 | `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..` | "数据准备"二级目录清单 |
+| `scenario.data_prep_fields` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为数组，每项 `{name, type, required}` | **上传表字段约束**（2026-09-17 新增）：目录名 → 字段清单。空清单的目录**不出现**（缺失即"无约束"）；缺省按 `{}` 处理（兼容本字段引入前的文档与请求） |
+| `scenario.data_prep_fields[dir][].name` | string | ✅ | 非空、≤64 字符、不含路径分隔符 / `..`、**同目录内唯一** | 字段名＝上传表的表头名 |
+| `scenario.data_prep_fields[dir][].type` | string | ✅ | ∈ `string` / `integer` / `number` / `boolean` / `object` / `array` | JSON Schema 基本类型的子集（与运行环境同一枚举） |
+| `scenario.data_prep_fields[dir][].required` | boolean | ✅ | MUST 显式为布尔 | `true` = 上传表的表头 MUST 含该字段；`false` = 可选（出现则类型仍须匹配）。不给隐式默认 |
 | `updated_at` | string | ✅ | ISO8601 | — |
+
+每个目录的字段数上限：**50**（`MAX_FIELDS_PER_DIR`，防滥用）。
 
 **校验规则**（保存时）：
 1. `soul` 非空（`FR-019`）。
 2. `enabled_tools` / `mcp_services` / `skills` 三类**只能从平台统一清单中选择**，MUST NOT 接受清单外的不存在引用（`FR-019`）。
 3. 引用的内置工具已下线 → 标记异常并指明失效工具名，**保存与部署均 MUT 被拒**（`FR-013`）。
 4. 名称冲突或非法 → 拒绝并说明原因（`FR-015`）。
-5. 保存后 MUST 能**原样回显**，含换行、标点与条目顺序（`FR-017`）。
+5. 场景：场景名非空且合法；目录清单拒绝空值 / 重复 / 含分隔符 / `..`；字段约束须满足上表约束（**孤儿键**——引用了目录清单外的目录——即拒，不是可忽略的冗余）。
+6. 保存后 MUST 能**原样回显**，含换行、标点与条目顺序（`FR-017`）。
+
+> **实现落点**：场景（含字段约束）的判据集中在 `admin-backend/src/domain/config-center/scenario.ts`，名称安全判据在 `naming.ts`（`agent-design.ts` 因 500 行门禁拆分）。保存路径抛首条错误，部署前校验（`deploy/precheck.ts`）经 `scenarioFieldIssues()` **收集全部**问题。
 
 **状态流转**：
 
@@ -303,7 +312,7 @@ platform-data/
 ├── SOUL.md          ← 数字人 soul 全文（纯 Markdown 文本）
 ├── TOOL.json        ← { "enabled": ["read_file", ...] }
 ├── MCP.json         ← { "servers": [ { name, transport, url|command, file_args } ] }
-├── scenario.json    ← { "scenario": "…", "data_prep_dirs": ["…"] }
+├── scenario.json    ← { "scenario": "…", "data_prep_dirs": ["…"], "data_prep_fields": { … } }
 └── skills/{name}/SKILL.md
 ```
 
@@ -315,7 +324,7 @@ platform-data/
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
 | `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `file_args` 取自**调用配置**（`FR-044`、`SC-011`），`url` 按**目标运行形态**取 `endpoints[target_runtime_form]`（`FR-056`） |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
-| `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 保持条目顺序 |
+| `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`） |
 
 **已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url = http://ocr:8000/mcp` 正是 `endpoints.container_network` 的取值）。
 

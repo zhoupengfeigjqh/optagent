@@ -399,6 +399,27 @@
 
 **响应 200**：`{ name, soul, enabled_tools, mcp_services, skills, scenario, abnormal, abnormal_reason, updated_at, revision }`
 
+**`scenario` 的结构**（`FR-020`；字段约束为 2026-09-17 新增）：
+
+```jsonc
+{
+  "scenario": "生产计划",
+  "data_prep_dirs": ["生产计划", "产线电价"],
+  "data_prep_fields": {
+    "生产计划": [
+      { "name": "产线编号", "type": "string",  "required": true },
+      { "name": "计划量",   "type": "integer", "required": false }
+    ]
+  }
+}
+```
+
+- `data_prep_fields` 的键 MUST 在 `data_prep_dirs` 内；**只出现有约束的目录**（空清单不出现）。
+- `type` ∈ `string` / `integer` / `number` / `boolean` / `object` / `array`（JSON Schema 基本类型子集，与运行环境同一枚举）。
+- `required` 为 `true` 时，上传表的表头 MUST 含该字段；`false` 表示可选（出现则类型仍须匹配）。
+- **该键恒出现在响应中**（历史文档缺该键时，服务端读取即补为 `{}`），客户端无需判空；请求体可省略（按无约束处理）。
+- 完整字段表与校验规则见 `data-model.md` §5；字段值的实际判定（上传表表头预检）在运行环境侧，见 `runtime-api-delta.md` §3.1。
+
 **错误码**：`ADM_AGENT_NOT_FOUND`（复用 `AGENT_NOT_FOUND` 语义，因属平台自有命名空间故加前缀；**同名不同义的情况在本契约中不存在**）
 
 ### 5.4 `PUT /api/admin/agents/{name}`

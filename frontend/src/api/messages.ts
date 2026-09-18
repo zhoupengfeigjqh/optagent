@@ -79,6 +79,25 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
         },
       }
 
+    case SSE_EVENT.INTERACTION_REQUEST: {
+      const schema = asRecord(payload.schema) ?? { type: 'object', properties: {} }
+      return {
+        type: 'interaction_request',
+        data: {
+          interaction_id: asString(payload.interaction_id),
+          call_id: asString(payload.call_id),
+          tool_name: asString(payload.tool_name),
+          title: asString(payload.title, '确认调用参数'),
+          schema,
+          proposed_args: asRecord(payload.proposed_args) ?? {},
+          required: Array.isArray(payload.required)
+            ? payload.required.filter((r): r is string => typeof r === 'string')
+            : [],
+          timeout_seconds: asNumber(payload.timeout_seconds, 300),
+        },
+      }
+    }
+
     case SSE_EVENT.DONE:
       return {
         type: 'done',

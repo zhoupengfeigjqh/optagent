@@ -97,11 +97,47 @@ export class ScenarioNotConfiguredError extends Error {
   }
 }
 
+/**
+ * 字段取值类型（JSON Schema 基本类型的子集）。
+ *
+ * 与平台设计态（`admin-backend` `SCENARIO_FIELD_TYPES`）、管理界面
+ * （`admin-frontend`）**同一枚举**，三处 MUST 同步（契约 `runtime-api-delta.md` §3.1）。
+ */
+export const SCENARIO_FIELD_TYPES = [
+  'string',
+  'integer',
+  'number',
+  'boolean',
+  'object',
+  'array',
+] as const;
+export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number];
+
+/**
+ * 单个字段约束（用于**上传预检**：上传表的表头必须包含必填字段，且取值类型匹配）。
+ *
+ * `string`/`object`/`array` 之外的判定规则见契约 §3.1；本模块只**承载**约束，
+ * 判定发生在未来的上传校验链路（本期不实现）。
+ */
+export interface ScenarioField {
+  name: string;
+  type: ScenarioFieldType;
+  /** 必填：表头 MUST 存在；`false` 表示可选（出现则类型仍须匹配） */
+  required: boolean;
+}
+
 export interface Scenario {
   /** 场景名（展示用） */
   name: string;
   /** 数据准备空间的二级子目录清单 */
   dataPrepDirs: string[];
+  /**
+   * 目录 → 字段约束（`scenario.json` 的 `data_prep_fields`）。
+   *
+   * 缺失即"该目录无字段约束"（含历史场景配置：本字段是后加的，旧文件没有）；
+   * 无约束的目录**不会**以空数组形式出现。
+   */
+  dataPrepFields: Record<string, ScenarioField[]>;
 }
 
 interface ScenarioCacheEntry {
@@ -149,6 +185,7 @@ export function loadScenario(
     const obj = JSON.parse(fs.readFileSync(file, 'utf8')) as {
       scenario?: unknown;
       data_prep_dirs?: unknown;
+      data_prep_fields?: unknown;
     };
     if (typeof obj.scenario !== 'string' || obj.scenario.trim() === '') {
       throw new Error('scenario 字段缺失');
@@ -167,7 +204,11 @@ export function loadScenario(
     if (dirs.length === 0) {
       throw new Error('data_prep_dirs 无有效目录');
     }
-    scenario = { name: obj.scenario.trim(), dataPrepDirs: dirs };
+    scenario = {
+      name: obj.scenario.trim(),
+      dataPrepDirs: dirs,
+      dataPrepFields: parseScenarioFields(obj.data_prep_fields, dirs, logger),
+    };
   } catch (err) {
     if (err instanceof ScenarioNotConfiguredError) throw err;
     logger?.warn(
@@ -180,6 +221,74 @@ export function loadScenario(
   scenarioCache.set(key, { mtimeMs: stat.mtimeMs, scenario });
   ensurePrepDirs(optAgentRoot, userId, scenario.dataPrepDirs);
   return scenario;
+}
+
+/**
+ * 解析 `data_prep_fields`（目录 → 字段约束）。
+ *
+ * 运行环境是**消费方**：非法内容一律**丢弃并告警**，MUST NOT 因此让整个场景不可用
+ * （与目录名的处理同一口径）。丢弃的判据：
+ * - 整体非对象 / 某目录的值非数组 / 项非对象；
+ * - 字段名非法（空、含路径分隔符或 `..`、超 64 字符）；
+ * - 取值类型不在枚举内；`required` 非布尔；
+ * - 同目录内字段名重复（保留首个）；
+ * - 目录不在**有效目录清单**内（孤儿约束）。
+ *
+ * 解析结果为空数组的目录不写入：**缺失即"该目录无约束"**，避免留下空壳键。
+ */
+function parseScenarioFields(
+  raw: unknown,
+  dirs: readonly string[],
+  logger?: { warn(msg: string): void },
+): Record<string, ScenarioField[]> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    logger?.warn('scenario.json 的 data_prep_fields 非对象，已忽略');
+    return {};
+  }
+
+  const out: Record<string, ScenarioField[]> = {};
+  for (const [dir, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!dirs.includes(dir)) {
+      logger?.warn(`scenario.json 字段约束引用了清单外的目录已忽略: ${dir}`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      logger?.warn(`scenario.json 目录 ${dir} 的字段清单非数组，已忽略`);
+      continue;
+    }
+
+    const list: ScenarioField[] = [];
+    for (const item of value) {
+      const field = (item ?? {}) as { name?: unknown; type?: unknown; required?: unknown };
+      const name = field.name;
+      if (
+        typeof name !== 'string' ||
+        name.trim() === '' ||
+        !DIR_NAME_PATTERN.test(name) ||
+        name.includes('..')
+      ) {
+        logger?.warn(`scenario.json 非法字段名已跳过: ${String(name)}`);
+        continue;
+      }
+      if (!SCENARIO_FIELD_TYPES.includes(field.type as ScenarioFieldType)) {
+        logger?.warn(`scenario.json 字段 ${name} 的取值类型非法已跳过: ${String(field.type)}`);
+        continue;
+      }
+      if (typeof field.required !== 'boolean') {
+        logger?.warn(`scenario.json 字段 ${name} 的 required 非布尔已跳过`);
+        continue;
+      }
+      if (list.some((f) => f.name === name)) {
+        logger?.warn(`scenario.json 目录 ${dir} 的字段名重复已跳过: ${name}`);
+        continue;
+      }
+      list.push({ name, type: field.type as ScenarioFieldType, required: field.required });
+    }
+
+    if (list.length > 0) out[dir] = list;
+  }
+  return out;
 }
 
 /** 惰性创建数据准备子目录（幂等） */

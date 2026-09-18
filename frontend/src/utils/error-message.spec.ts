@@ -5,8 +5,10 @@
  *
  * 覆盖两条硬约束：
  * 1. **前端不直接展示后端 message**（面向开发者且不稳定），一律按 `code` 分派（D13 / V-12）；
- * 2. **同码不同义**——`FILE_TOO_LARGE` 在上传时说"超过 50MB"、在预览时说"文件过大，请下载查看"
- *    （`contracts/backend-api.md` §7 差异 6），因此 `context` 分支必须逐个有用例。
+ * 2. **同码不同义**——`FILE_TOO_LARGE` 在上传时说"超过 5MB"、在预览时说"文件过大，请下载查看"
+ *    （`contracts/backend-api.md` §7 差异 6），因此 `context` 分支必须逐个有用例；
+ * 3. **D13 唯一例外**——`FILE_SCHEMA_INVALID`（上传表字段校验）透传后端 `details`
+ *    逐条问题清单，不套固定文案。
  */
 import { describe, expect, it } from 'vitest'
 
@@ -40,7 +42,7 @@ describe('toUserMessage - 基础映射', () => {
 
 describe('toUserMessage - 场景化文案（同码不同义）', () => {
   it('FILE_TOO_LARGE：上传场景说尺寸上限', () => {
-    expect(toUserMessage({ code: 'FILE_TOO_LARGE', message: '' }, 'upload')).toBe('文件超过 50MB')
+    expect(toUserMessage({ code: 'FILE_TOO_LARGE', message: '' }, 'upload')).toBe('文件超过 5MB')
   })
 
   it('FILE_TOO_LARGE：预览场景引导下载', () => {
@@ -77,7 +79,7 @@ describe('toUserMessage - 场景化文案（同码不同义）', () => {
   })
 
   it('未传 context 时等同 default（走基础映射）', () => {
-    expect(toUserMessage({ code: 'FILE_TOO_LARGE', message: '' })).toBe('文件超过 50MB')
+    expect(toUserMessage({ code: 'FILE_TOO_LARGE', message: '' })).toBe('文件超过 5MB')
   })
 
   it('create-thread 场景暂无覆盖项，回落到基础映射', () => {
@@ -87,12 +89,50 @@ describe('toUserMessage - 场景化文案（同码不同义）', () => {
   })
 })
 
+describe('toUserMessage - FILE_SCHEMA_INVALID（D13 例外，透传 details）', () => {
+  it('details 为非空字符串数组 → 换行拼接逐条问题', () => {
+    const message = toUserMessage(
+      {
+        code: 'FILE_SCHEMA_INVALID',
+        message: '上传表不符合该目录的字段约束',
+        details: ['缺少必填表头：「产线编号」', '第 2 行「计划量」取值 "abc" 类型不符（期望整数）'],
+      },
+      'upload',
+    )
+    expect(message).toBe(
+      '缺少必填表头：「产线编号」\n第 2 行「计划量」取值 "abc" 类型不符（期望整数）',
+    )
+  })
+
+  it('details 缺失 / 空数组 / 非字符串数组 → 固定文案兜底', () => {
+    expect(toUserMessage({ code: 'FILE_SCHEMA_INVALID', message: '' }, 'upload')).toBe(
+      '上传表不符合该目录的字段约束',
+    )
+    expect(
+      toUserMessage({ code: 'FILE_SCHEMA_INVALID', message: '', details: [] }, 'upload'),
+    ).toBe('上传表不符合该目录的字段约束')
+    expect(
+      toUserMessage({ code: 'FILE_SCHEMA_INVALID', message: '', details: [{ x: 1 }] }, 'upload'),
+    ).toBe('上传表不符合该目录的字段约束')
+  })
+})
+
 describe('toErrorInfo', () => {
   it('带 code 的对象 → 原样保留后端错误码与文案', () => {
     expect(toErrorInfo({ code: 'FILE_NOT_FOUND', message: 'not found' })).toEqual({
       code: 'FILE_NOT_FOUND',
       message: 'not found',
     })
+  })
+
+  it('带 code 的对象 → 透传 details（FILE_SCHEMA_INVALID 的逐条问题清单）', () => {
+    expect(
+      toErrorInfo({
+        code: 'FILE_SCHEMA_INVALID',
+        message: 'x',
+        details: ['缺少必填表头：「甲」'],
+      }),
+    ).toEqual({ code: 'FILE_SCHEMA_INVALID', message: 'x', details: ['缺少必填表头：「甲」'] })
   })
 
   it('带 code 但 message 非字符串 → message 归一为空串', () => {

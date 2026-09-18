@@ -18,7 +18,15 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { buildSendMessageBody, sendMessageStream } from '../api/messages'
-import type { ErrorInfo, FeedbackValue, FileReference, StreamEvent, Usage } from '../api/types'
+import type {
+  ErrorInfo,
+  FeedbackValue,
+  FileReference,
+  InteractionSnapshot,
+  InteractionSubmitResponse,
+  StreamEvent,
+  Usage,
+} from '../api/types'
 import { RUN_PHASE, type RunPhase, type ToolStatus } from '../constants/events'
 import { STORAGE_KEY_THINKING } from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
@@ -67,6 +75,11 @@ export interface ChatStreamDeps {
     messageId: string,
     value: FeedbackValue,
   ) => Promise<void>
+  /** HITL：提交/拒绝工具调用的人工确认（`POST /api/threads/{id}/interaction`） */
+  submitInteraction?: (
+    threadId: string,
+    body: { interaction_id: string; action: 'submit' | 'reject'; args?: Record<string, unknown> },
+  ) => Promise<InteractionSubmitResponse>
   toast?: ToastStore
   storage?: Storage | null
   /** 本地时钟（测试注入假时钟） */
@@ -99,6 +112,22 @@ export interface ChatStreamStore {
   canSend: ComputedRef<boolean>
   /** 本轮是否处于思考模式且已产生思考内容（决定是否渲染思考块） */
   hasThinking: ComputedRef<boolean>
+  /**
+   * HITL：当前等待用户确认的工具调用（弹窗渲染源）。随本轮终结/中断/切会话清除；
+   * 断连后由线程详情的 `pending_interaction` 快照经 `restoreInteraction` 重建。
+   */
+  pendingInteraction: Readonly<Ref<InteractionSnapshot | null>>
+  /** 断连恢复：后端仍有等待中的确认时重建弹窗（不覆盖已存在的） */
+  restoreInteraction(snapshot: InteractionSnapshot): void
+  /**
+   * 提交确认参数：`close=false` 表示服务端终验失败（message 含逐字段错误），
+   * 弹窗保持打开可修正重提；其余情况弹窗关闭。
+   */
+  submitInteraction(
+    args: Record<string, unknown>,
+  ): Promise<{ close: boolean; message?: string }>
+  /** 拒绝本次调用（弹窗始终关闭；后端把拒绝作为工具结果交给模型收尾） */
+  rejectInteraction(): Promise<void>
   send(payload: { content: string; attachments: FileReference[] }): Promise<void>
   /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */
   submitFeedback(messageId: string, value: FeedbackValue): Promise<void>
@@ -123,6 +152,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const durationSeconds = ref<number | null>(null)
   const streamingAgentName = ref<string | null>(null)
   const pendingUserMessage = ref<PendingUserMessage | null>(null)
+  const pendingInteraction = ref<InteractionSnapshot | null>(null)
   const startedAt = ref<number | null>(null)
 
   const now = deps.now ?? ((): number => Date.now())
@@ -155,6 +185,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     durationSeconds.value = null
     streamingAgentName.value = null
     pendingUserMessage.value = null
+    pendingInteraction.value = null
     startedAt.value = null
   }
 
@@ -163,6 +194,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   }
 
   function applyTerminal(event: StreamEvent): void {
+    // HITL：本轮终结即无等待中的确认（提交/拒绝后工具已执行完毕，或流被中断）
+    pendingInteraction.value = null
     if (event.type === 'done') {
       usage.value = event.data.usage
       durationSeconds.value = event.data.duration_seconds
@@ -248,6 +281,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
                 (item) => item.call_id !== event.data.call_id,
               )
               break
+            case 'interaction_request':
+              // HITL：模型发起需确认的工具调用 → 弹窗（倒计时从全量超时起算）
+              pendingInteraction.value = {
+                ...event.data,
+                remaining_seconds: event.data.timeout_seconds,
+              }
+              break
             default:
               applyTerminal(event)
               break
@@ -259,6 +299,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       if (phase.value === RUN_PHASE.STREAMING) {
         // 流结束但未收到终结事件：按连接中断处理
         error.value = { code: 'NETWORK_ERROR', message: '' }
+        pendingInteraction.value = null
         phase.value = RUN_PHASE.FAILED
       } else if (phase.value === RUN_PHASE.COMPLETED) {
         await deps.onTurnFinished?.(threadId)
@@ -313,9 +354,65 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     const pending = threadId ? deps.stopRun?.(threadId).catch(() => undefined) : undefined
     // 先断开本地流，避免继续渲染；后端本轮不落盘
     controller?.abort()
+    // HITL：中断后端的挂起点会按 reject 收尾，弹窗同步关闭
+    pendingInteraction.value = null
     // 本地立即进入中止态，不等待读取循环退出（幂等：后续 AbortError / done(stop) 结果一致）
     phase.value = RUN_PHASE.ABORTED
     await pending
+  }
+
+  /* ---------- HITL：工具调用人工确认 ---------- */
+
+  function restoreInteraction(snapshot: InteractionSnapshot): void {
+    if (!pendingInteraction.value) {
+      pendingInteraction.value = snapshot
+    }
+  }
+
+  async function submitInteraction(
+    args: Record<string, unknown>,
+  ): Promise<{ close: boolean; message?: string }> {
+    const pending = pendingInteraction.value
+    const threadId = deps.activeThreadId.value
+    if (!pending || !threadId || !deps.submitInteraction) {
+      return { close: true }
+    }
+    try {
+      await deps.submitInteraction(threadId, {
+        interaction_id: pending.interaction_id,
+        action: 'submit',
+        args,
+      })
+      pendingInteraction.value = null
+      return { close: true }
+    } catch (cause) {
+      const info = toErrorInfo(cause)
+      // 服务端终验失败：弹窗保持打开，逐字段错误交回表单展示，可修正重提
+      if (info.code === 'SCHEMA_VALIDATION_FAILED' || info.code === 'VALIDATION_FAILED') {
+        return { close: false, message: info.message !== '' ? info.message : toUserMessage(info) }
+      }
+      deps.toast?.push('error', toUserMessage(info))
+      pendingInteraction.value = null
+      return { close: true }
+    }
+  }
+
+  async function rejectInteraction(): Promise<void> {
+    const pending = pendingInteraction.value
+    const threadId = deps.activeThreadId.value
+    pendingInteraction.value = null
+    if (!pending || !threadId || !deps.submitInteraction) {
+      return
+    }
+    try {
+      await deps.submitInteraction(threadId, {
+        interaction_id: pending.interaction_id,
+        action: 'reject',
+      })
+    } catch (cause) {
+      // 拒绝失败（如已超时/已被处理）：不影响关闭，提示即可
+      deps.toast?.push('error', toUserMessage(toErrorInfo(cause)))
+    }
   }
 
   async function recover(): Promise<void> {
@@ -345,6 +442,10 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     startedAt,
     canSend,
     hasThinking,
+    pendingInteraction,
+    restoreInteraction,
+    submitInteraction,
+    rejectInteraction,
     send,
     submitFeedback,
     stop,

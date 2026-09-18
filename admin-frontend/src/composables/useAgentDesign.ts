@@ -7,8 +7,9 @@
  * - `soul` 等字符串字段**不做 trim**——`FR-017` 要求原样回显含换行与标点。
  */
 import { computed, ref, shallowRef } from 'vue'
-import type { AgentDesign, AgentDesignPayload } from '../api/types'
+import type { AgentDesign, AgentDesignPayload, AgentScenario, ScenarioField } from '../api/types'
 import { createAgent, getAgent, updateAgent } from '../api/agents'
+import { emptyScenario } from '../constants/agent-design'
 import { toErrorInfo } from '../utils/error-message'
 import type { ErrorInfo } from '../api/types'
 
@@ -18,7 +19,18 @@ export interface AgentDesignDraft {
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
-  scenario: { scenario: string; data_prep_dirs: string[] }
+  scenario: AgentScenario
+}
+
+/** 字段约束是"目录 → 字段数组"的两层结构，逐层复制（避免草稿改动污染已保存态） */
+function cloneFields(
+  fields: Record<string, ScenarioField[]> | undefined,
+): Record<string, ScenarioField[]> {
+  const out: Record<string, ScenarioField[]> = {}
+  for (const [dir, list] of Object.entries(fields ?? {})) {
+    out[dir] = list.map((field) => ({ ...field }))
+  }
+  return out
 }
 
 export function emptyDraft(): AgentDesignDraft {
@@ -28,7 +40,7 @@ export function emptyDraft(): AgentDesignDraft {
     enabled_tools: [],
     mcp_services: [],
     skills: [],
-    scenario: { scenario: '', data_prep_dirs: [] },
+    scenario: emptyScenario(),
   }
 }
 
@@ -42,6 +54,7 @@ function toDraft(design: AgentDesign): AgentDesignDraft {
     scenario: {
       scenario: design.scenario.scenario,
       data_prep_dirs: [...design.scenario.data_prep_dirs],
+      data_prep_fields: cloneFields(design.scenario.data_prep_fields),
     },
   }
 }
@@ -61,7 +74,8 @@ export function useAgentDesign() {
         draft.value.name !== '' ||
         draft.value.soul !== '' ||
         draft.value.scenario.scenario !== '' ||
-        draft.value.scenario.data_prep_dirs.length > 0
+        draft.value.scenario.data_prep_dirs.length > 0 ||
+        Object.keys(draft.value.scenario.data_prep_fields).length > 0
       )
     }
     const base = saved.value

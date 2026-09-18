@@ -101,6 +101,13 @@ export interface McpToolInfo {
   parameters: Record<string, unknown>
 }
 
+/**
+ * MCP 调用确认策略（HITL 人机交互门）：
+ * `never` 直跑（默认/存量行为）、`always` 全部工具调用前弹参数确认窗、
+ * `{ tools: [...] }` 仅列出的原始工具名需确认
+ */
+export type McpConfirmation = 'never' | 'always' | { tools: string[] }
+
 export interface ReferenceItem {
   user_id: string
   agent_name: string
@@ -117,6 +124,8 @@ export interface McpServiceDetail {
   command: string | null
   args: string[] | null
   file_args: Record<string, Record<string, string>>
+  /** 调用确认策略（HITL；缺省视为 never） */
+  confirmation?: McpConfirmation
   tools: McpToolInfo[]
   tools_truncated: boolean
   tools_error?: string | null
@@ -132,6 +141,8 @@ export interface McpServiceConfigPayload {
   command?: string
   args?: string[]
   file_args: Record<string, Record<string, string>>
+  /** 调用确认策略（HITL；缺省 never 直跑） */
+  confirmation?: McpConfirmation
   revision: number
 }
 
@@ -264,9 +275,39 @@ export interface SkillInstallResult {
 
 /* ---------- §5 数字人设计 ---------- */
 
+/**
+ * 字段取值类型（JSON Schema 基本类型的子集）。
+ *
+ * 与 `admin-backend` / `agent-backend` 的同一枚举**三处同步**（契约 §5.2）。
+ */
+export const SCENARIO_FIELD_TYPES = [
+  'string',
+  'integer',
+  'number',
+  'boolean',
+  'object',
+  'array',
+] as const
+export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number]
+
+/**
+ * 数据准备目录的上传表字段约束。
+ *
+ * 校验发生在**上传时**（由运行环境按表头预检，本期未实现）；此处只声明结构。
+ */
+export interface ScenarioField {
+  /** 字段名（＝上传表的表头名），同目录内唯一 */
+  name: string
+  type: ScenarioFieldType
+  /** 必填：表头 MUST 包含；`false` 为可选（出现则类型仍须匹配） */
+  required: boolean
+}
+
 export interface AgentScenario {
   scenario: string
   data_prep_dirs: string[]
+  /** 目录 → 字段约束；无约束的目录不出现（服务端保证总有该键） */
+  data_prep_fields: Record<string, ScenarioField[]>
 }
 
 export interface AgentListItem {

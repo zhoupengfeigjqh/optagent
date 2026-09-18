@@ -127,6 +127,81 @@ describe('loadScenario - 按数字人各自读取', () => {
   })
 })
 
+describe('loadScenario - 字段约束（data_prep_fields）', () => {
+  it('解析字段约束：按目录归置，保留类型与 required', () => {
+    writeScenario('agent-fields', {
+      scenario: '全量',
+      data_prep_dirs: ['生产计划', '产线电价'],
+      data_prep_fields: {
+        生产计划: [
+          { name: '产线编号', type: 'string', required: true },
+          { name: '计划量', type: 'integer', required: false },
+        ],
+        产线电价: [{ name: '电价', type: 'number', required: true }],
+      },
+    })
+
+    expect(loadScenario(root, userId, 'agent-fields').dataPrepFields).toEqual({
+      生产计划: [
+        { name: '产线编号', type: 'string', required: true },
+        { name: '计划量', type: 'integer', required: false },
+      ],
+      产线电价: [{ name: '电价', type: 'number', required: true }],
+    })
+  })
+
+  it('边界：历史配置（无 data_prep_fields）按"该目录无约束"处理', () => {
+    writeScenario('agent-legacy', { scenario: '生产调度', data_prep_dirs: ['生产计划'] })
+    expect(loadScenario(root, userId, 'agent-legacy').dataPrepFields).toEqual({})
+  })
+
+  it('非法内容一律丢弃，且**不影响场景可用**（运行环境是消费方）', () => {
+    writeScenario('agent-bad-fields', {
+      scenario: '全量',
+      data_prep_dirs: ['生产计划'],
+      data_prep_fields: {
+        生产计划: [
+          { name: '好字段', type: 'string', required: true },
+          { name: '坏类型', type: 'text', required: true },
+          { name: 'no-required', type: 'string' },
+          { name: '', type: 'string', required: true },
+          { name: 'a..b', type: 'string', required: true },
+          { name: '好字段', type: 'integer', required: false },
+          'not-an-object',
+        ],
+        不在清单的目录: [{ name: 'x', type: 'string', required: true }],
+        另一个非数组的目录: 'oops',
+      },
+    })
+
+    const scenario = loadScenario(root, userId, 'agent-bad-fields')
+    expect(scenario.dataPrepDirs).toEqual(['生产计划'])
+    expect(scenario.dataPrepFields).toEqual({
+      生产计划: [{ name: '好字段', type: 'string', required: true }],
+    })
+  })
+
+  it('边界：字段清单为空数组的目录**不产生键**（缺失即无约束）', () => {
+    writeScenario('agent-empty-fields', {
+      scenario: '全量',
+      data_prep_dirs: ['生产计划'],
+      data_prep_fields: { 生产计划: [] },
+    })
+    expect(loadScenario(root, userId, 'agent-empty-fields').dataPrepFields).toEqual({})
+  })
+
+  it('边界：data_prep_fields 整体非对象时忽略，不影响目录清单', () => {
+    writeScenario('agent-fields-not-object', {
+      scenario: '全量',
+      data_prep_dirs: ['生产计划'],
+      data_prep_fields: ['x'],
+    })
+    const scenario = loadScenario(root, userId, 'agent-fields-not-object')
+    expect(scenario.dataPrepDirs).toEqual(['生产计划'])
+    expect(scenario.dataPrepFields).toEqual({})
+  })
+})
+
 describe('parseSpaceDir - 目录清单按数字人判定', () => {
   it('同一目录在一个数字人下合法、在另一个数字人下被拒（403）', () => {
     writeScenario('agent-wide', { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价'] })

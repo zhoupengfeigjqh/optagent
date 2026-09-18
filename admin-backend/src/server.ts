@@ -84,7 +84,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const runtime =
     options.runtime ??
     new RuntimeClient({
-      baseUrl: config.runtimeApiBaseUrl,
+      baseUrl: config.optAgentBackendUrl,
       timeoutMs: config.runtimeTimeoutMs,
     });
 

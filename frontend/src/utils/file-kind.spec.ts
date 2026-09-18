@@ -67,11 +67,11 @@ describe('isUploadAllowed', () => {
     expect(isUploadAllowed({ name: 'a.csv', size: 1 }, ['.csv'])).toEqual({ ok: true })
   })
 
-  it('恰好等于 50MB 上限 → 通过（边界取闭区间）', () => {
+  it('恰好等于 5MB 上限 → 通过（边界取闭区间）', () => {
     expect(isUploadAllowed({ name: 'a.csv', size: MAX_UPLOAD_BYTES }, ['.csv'])).toEqual({ ok: true })
   })
 
-  it('超过 50MB → FILE_TOO_LARGE', () => {
+  it('超过 5MB → FILE_TOO_LARGE', () => {
     expect(isUploadAllowed({ name: 'a.csv', size: MAX_UPLOAD_BYTES + 1 }, ['.csv'])).toEqual({
       ok: false,
       code: 'FILE_TOO_LARGE',

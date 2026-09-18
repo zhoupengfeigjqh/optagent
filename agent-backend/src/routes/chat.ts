@@ -58,6 +58,21 @@ const messageBodySchema = {
 } as const;
 
 /**
+ * 人工确认提交/拒绝（HITL）：action=submit 必须带 args（服务端按挂起时的
+ * inputSchema 终验，失败不落定、可修正重提）；action=reject 忽略 args。
+ */
+const interactionBodySchema = {
+  type: 'object',
+  required: ['interaction_id', 'action'],
+  additionalProperties: false,
+  properties: {
+    interaction_id: { type: 'string', minLength: 1 },
+    action: { type: 'string', enum: ['submit', 'reject'] },
+    args: { type: 'object' },
+  },
+} as const;
+
+/**
  * 校验 @ 引用：空间目录校验（数据准备须命中**本轮数字人**的 scenario 清单）+ 文件存在性。
  * 场景随数字人存放，故同一引用在不同数字人下可能合法/非法——按本轮数字人判定。
  */
@@ -189,5 +204,32 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { id: threadId } = req.params as { id: string };
     ctx.threadStore.get(userId, threadId); // 404 校验
     return { stopped: ctx.runManager.stop(threadId) };
+  });
+
+  // 人工确认提交/拒绝（HITL）：幂等（重复提交返回首次结果）；
+  // submit 的服务端终验失败返回 400 + 逐字段错误，interaction 保持挂起可重提
+  app.post('/api/threads/:id/interaction', { schema: { body: interactionBodySchema } }, async (req, reply) => {
+    const userId = getCurrentUser().userId;
+    const { id: threadId } = req.params as { id: string };
+    ctx.threadStore.get(userId, threadId); // 404 校验
+    const body = req.body as {
+      interaction_id: string;
+      action: 'submit' | 'reject';
+      args?: Record<string, unknown>;
+    };
+    if (body.action === 'submit' && body.args === undefined) {
+      throw new ApiError(400, 'VALIDATION_FAILED', '提交确认时必须提供 args');
+    }
+    const result = ctx.runManager.resolveInteraction(threadId, body.interaction_id, body.action, body.args);
+    if (!result.ok) {
+      if (result.code === 'NOT_FOUND') {
+        throw new ApiError(404, 'INTERACTION_NOT_FOUND', result.message);
+      }
+      if (result.code === 'EXPIRED') {
+        throw new ApiError(409, 'INTERACTION_EXPIRED', result.message);
+      }
+      throw new ApiError(400, 'SCHEMA_VALIDATION_FAILED', result.message);
+    }
+    return reply.status(202).send({ accepted: true, result: result.result });
   });
 }

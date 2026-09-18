@@ -59,6 +59,7 @@ export function registerMcpRoutes(
       transport: config.transport,
       endpoints: config.endpoints,
       file_args: config.file_args,
+      confirmation: config.confirmation,
       revision,
       affected_agents: agentsReferencingService(ctx.agents.refSources(), name),
     };

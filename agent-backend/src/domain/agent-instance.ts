@@ -115,8 +115,27 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.write === true) cfg.write = true;
     if (typeof s.permission_boundary === 'string') cfg.permissionBoundary = s.permission_boundary;
     if (s.file_args !== undefined) cfg.fileArgs = parseFileArgs(s.file_args, bad);
+    if (s.confirmation !== undefined) cfg.confirmation = parseConfirmation(s.confirmation, bad);
     return cfg;
   });
+}
+
+/**
+ * 解析 confirmation（HITL 调用确认策略）：`never`/`always` 或 `{ tools: string[] }`。
+ * 非法即配置错误——把 typo 挡在加载期，避免"以为开了确认实际没开"。
+ */
+function parseConfirmation(
+  raw: unknown,
+  bad: (why: string) => Error,
+): 'never' | 'always' | { tools: string[] } {
+  if (raw === 'never' || raw === 'always') return raw;
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const tools = (raw as Record<string, unknown>).tools;
+    if (Array.isArray(tools) && tools.length > 0 && tools.every((t) => typeof t === 'string')) {
+      return { tools: tools as string[] };
+    }
+  }
+  throw bad('confirmation 须为 "never" | "always" | {"tools": string[]}');
 }
 
 /**

@@ -8,10 +8,10 @@
  *
  * 运行形态选项来自服务端（前端 MUST NOT 硬编码，原则七）。
  */
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { fetchRuntimeForms } from '../../api/platform'
 import { testMcpService, type McpProbePayload } from '../../api/mcp'
-import type { ErrorInfo, McpServiceConfigPayload, McpServiceDetail, McpTestResult, RuntimeFormOption } from '../../api/types'
+import type { ErrorInfo, McpConfirmation, McpServiceConfigPayload, McpServiceDetail, McpTestResult, RuntimeFormOption } from '../../api/types'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
@@ -32,7 +32,22 @@ const endpoints = ref<Record<string, string>>({})
 const command = ref('')
 const argsText = ref('')
 const fileArgsText = ref('{}')
+/** 确认策略模式：never 直跑 / always 全部工具 / custom 按工具清单 */
+const confirmationMode = ref<'never' | 'always' | 'custom'>('never')
+/** custom 模式下勾选的工具名（清单多选 + 清单外遗留项都在这个数组里） */
+const confirmationTools = ref<string[]>([])
+/** custom 且服务工具清单不可得时的手填文本（每行一个） */
+const confirmationManualText = ref('')
 const localError = ref<string | null>(null)
+
+/** 服务当前工具清单（来自平台对服务的最近一次探测） */
+const toolCatalog = computed(() => props.service.tools ?? [])
+/** 清单不可得 → 回退手填（服务未启动/探测失败时管理员仍要能改配置） */
+const manualFallback = computed(() => toolCatalog.value.length === 0)
+/** 已保存、但当前清单里已没有的工具：保留勾选展示（可能是清单截断或服务改版），不静默丢弃 */
+const orphanTools = computed(() =>
+  confirmationTools.value.filter((name) => !toolCatalog.value.some((t) => t.name === name)),
+)
 
 function loadFrom(service: McpServiceDetail | null): void {
   if (!service) return
@@ -42,6 +57,20 @@ function loadFrom(service: McpServiceDetail | null): void {
   command.value = service.command ?? ''
   argsText.value = (service.args ?? []).join('\n')
   fileArgsText.value = JSON.stringify(service.file_args ?? {}, null, 2)
+  const policy = service.confirmation ?? 'never'
+  if (policy === 'always') {
+    confirmationMode.value = 'always'
+    confirmationTools.value = []
+    confirmationManualText.value = ''
+  } else if (typeof policy === 'object' && Array.isArray(policy.tools)) {
+    confirmationMode.value = 'custom'
+    confirmationTools.value = [...(policy.tools as string[])]
+    confirmationManualText.value = (policy.tools as string[]).join('\n')
+  } else {
+    confirmationMode.value = 'never'
+    confirmationTools.value = []
+    confirmationManualText.value = ''
+  }
 }
 
 onMounted(async () => {
@@ -81,6 +110,25 @@ function submit(): void {
     return
   }
 
+  // 确认策略：custom 模式须至少勾选一个工具（保存期服务端会再校验形状）
+  let confirmation: McpConfirmation = 'never'
+  if (confirmationMode.value === 'always') {
+    confirmation = 'always'
+  } else if (confirmationMode.value === 'custom') {
+    const raw = manualFallback.value
+      ? confirmationManualText.value
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line !== '')
+      : confirmationTools.value
+    const tools = [...new Set(raw)]
+    if (tools.length === 0) {
+      localError.value = '按工具确认模式须至少勾选一个工具（清单为空时请在文本框填写工具名）'
+      return
+    }
+    confirmation = { tools }
+  }
+
   const payload: Omit<McpServiceConfigPayload, 'revision'> = {
     description: description.value,
     transport: transport.value,
@@ -95,6 +143,7 @@ function submit(): void {
         }
       : {}),
     file_args: fileArgs,
+    confirmation,
   }
   emit('save', payload)
 }
@@ -242,6 +291,59 @@ async function runTest(): Promise<void> {
       </span>
     </label>
 
+    <fieldset class="mcp-config-form__endpoints">
+      <legend class="field__label">调用人工确认（HITL）</legend>
+      <p class="field__hint">
+        开启后，用户侧触发被命中的工具调用时会弹出参数确认窗（由工具自身的参数
+        Schema 驱动，与具体服务解耦）；拒绝后工具不执行，数字人会说明未执行原因。
+      </p>
+      <label class="field" for="mcp-confirmation-mode">
+        <span class="field__label">确认范围</span>
+        <select id="mcp-confirmation-mode" v-model="confirmationMode">
+          <option value="never">无需确认（默认，直接执行）</option>
+          <option value="always">该服务全部工具都需确认</option>
+          <option value="custom">仅指定工具需确认</option>
+        </select>
+      </label>
+      <div v-if="confirmationMode === 'custom'" class="field">
+        <span class="field__label">需确认的工具</span>
+
+        <!-- 有工具清单：复选框多选，直接勾选 -->
+        <div v-if="!manualFallback" class="mcp-config-form__tools" role="group" aria-label="需确认的工具清单">
+          <label v-for="tool in toolCatalog" :key="tool.name" class="mcp-config-form__tool">
+            <input v-model="confirmationTools" type="checkbox" :value="tool.name" />
+            <span class="mcp-config-form__tool-name mono">{{ tool.name }}</span>
+            <span v-if="tool.description" class="mcp-config-form__tool-desc">{{ tool.description }}</span>
+          </label>
+          <!-- 已保存但当前清单未包含：保留展示，避免静默丢弃存量配置 -->
+          <label
+            v-for="name in orphanTools"
+            :key="`orphan:${name}`"
+            class="mcp-config-form__tool mcp-config-form__tool--orphan"
+          >
+            <input v-model="confirmationTools" type="checkbox" :value="name" />
+            <span class="mcp-config-form__tool-name mono">{{ name }}</span>
+            <span class="mcp-config-form__tool-desc">（已保存，当前服务清单中未包含；可能是清单截断或服务改版）</span>
+          </label>
+        </div>
+
+        <!-- 清单不可得（服务未启动/探测失败）：回退手填 -->
+        <template v-else>
+          <textarea
+            id="mcp-confirmation-tools"
+            v-model="confirmationManualText"
+            rows="3"
+            placeholder="工具名不含服务前缀，例如：&#10;query_price&#10;create_order"
+          />
+        </template>
+
+        <span class="field__hint">
+          勾选的工具被调用前会弹出参数确认窗。
+          <template v-if="props.service.tools_truncated">清单被截断显示，完整清单以服务端为准。</template>
+        </span>
+      </div>
+    </fieldset>
+
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
 
     <div class="mcp-config-form__actions">
@@ -328,6 +430,38 @@ async function runTest(): Promise<void> {
 
 .mcp-config-form__error {
   color: var(--color-status-error);
+}
+
+.mcp-config-form__tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.mcp-config-form__tool {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.mcp-config-form__tool-name {
+  flex-shrink: 0;
+}
+
+.mcp-config-form__tool-desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.mcp-config-form__tool--orphan .mcp-config-form__tool-desc {
+  color: var(--color-status-warning);
 }
 
 .mcp-config-form__actions {

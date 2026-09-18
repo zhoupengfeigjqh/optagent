@@ -13,8 +13,20 @@
 import type { Logger } from 'pino';
 import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, UsageInfo, UsageStore } from '../types.js';
 import type { HistoryStore } from './history.js';
+import type {
+  InteractionRequestPayload,
+  InteractionSink,
+  InteractionSnapshot,
+} from './interaction-gate.js';
+import { InteractionGate } from './interaction-gate.js';
+import { validateInteractionArgs } from './interaction-schema.js';
 
 export type RunState = 'running' | 'draining' | 'done' | 'aborted' | 'error';
+
+/** resolveInteraction 的结果（路由层映射 HTTP 状态码） */
+export type ResolveInteractionResult =
+  | { ok: true; result: 'settled' | 'already-resolved' }
+  | { ok: false; code: 'NOT_FOUND' | 'EXPIRED' | 'VALIDATION_FAILED'; message: string; errors?: string[] };
 
 /** 广播给订阅者的事件（与 SSE 契约同构） */
 export type SsePayload =
@@ -22,6 +34,8 @@ export type SsePayload =
   | { type: 'content'; data: { delta: string } }
   | { type: 'tool_call'; data: { call_id: string; name: string; status: 'running' } }
   | { type: 'tool_call_end'; data: { call_id: string; status: 'success' | 'error' } }
+  /** 工具调用前的人工确认请求（HITL）：仅含被声明为需确认的工具 */
+  | { type: 'interaction_request'; data: InteractionRequestPayload }
   | {
       type: 'done';
       data: {
@@ -54,6 +68,11 @@ export interface AgentRunRequest {
   /** 请求级模型覆盖（缺省用实例默认模型） */
   model?: ModelSelection;
   signal: AbortSignal;
+  /**
+   * 人工确认交互口（HITL）：agent-factory 据此给声明了 confirmation 策略的
+   * MCP 工具包交互门；缺省 undefined 时工具直跑（不挂起）
+   */
+  interactionSink?: InteractionSink;
 }
 
 /** run-manager 视角的 Agent 实例（PoolStore 的 PooledInstance 超集，由 infra 装配） */
@@ -124,13 +143,26 @@ class RunImpl implements Run {
   settled!: Promise<void>;
   /** run 开始时间（注入时钟），用于整轮耗时统计 */
   startedAt = 0;
+  /**
+   * 人工确认交互门（HITL）：挂起点建立时经 onCreated 广播 interaction_request；
+   * gate 本身即 InteractionSink，直接作为 interactionSink 传给 agent.run
+   */
+  readonly gate = new InteractionGate({
+    onCreated: (payload) => this.emit({ type: 'interaction_request', data: payload }),
+    onLog: (message) => this.logInteraction?.(message),
+  });
   private readonly subs = new Set<(e: SsePayload) => void>();
+  /** 交互审计日志（构造时注入；迟绑定读取，gate 字段初始化早于构造函数体赋值） */
+  private logInteraction: ((message: string) => void) | undefined;
 
   constructor(
     readonly threadId: string,
     readonly userId: string,
     readonly agentName: string,
-  ) {}
+    onLog?: (message: string) => void,
+  ) {
+    this.logInteraction = onLog;
+  }
 
   subscribe(cb: (e: SsePayload) => void): () => void {
     this.subs.add(cb);
@@ -149,6 +181,8 @@ class RunImpl implements Run {
 
   stop(): void {
     this.controller.abort();
+    // HITL：中断时全部挂起点按 reject 收尾，等待中的工具调用不会悬挂
+    this.gate.drain();
   }
 }
 
@@ -256,6 +290,49 @@ export class RunManager {
     return true;
   }
 
+  /**
+   * 用户提交/拒绝一个待确认的 interaction（HITL）。
+   * 校验 + 落定一体：submit 先按挂起时的 inputSchema 终验 args（防绕过），
+   * 失败不落定（用户可修正后重提）。幂等：重复提交返回首次结果。
+   */
+  resolveInteraction(
+    threadId: string,
+    interactionId: string,
+    action: 'submit' | 'reject',
+    args?: Record<string, unknown>,
+  ): ResolveInteractionResult {
+    const run = this.active.get(threadId);
+    if (!run) return { ok: false, code: 'NOT_FOUND', message: '该会话没有进行中的调用确认' };
+    const pending = run.gate.pendingOf(interactionId);
+    if (!pending) {
+      return { ok: false, code: 'NOT_FOUND', message: `interaction 不存在：${interactionId}` };
+    }
+    if (pending.state === 'expired') {
+      return { ok: false, code: 'EXPIRED', message: '该调用的确认等待已超时，请让数字人重新发起' };
+    }
+    if (action === 'submit') {
+      const errors = validateInteractionArgs(pending.payload.schema, args ?? {});
+      if (errors.length > 0) {
+        return { ok: false, code: 'VALIDATION_FAILED', message: errors.join('；'), errors };
+      }
+    }
+    const settled = run.gate.settle(interactionId, action, args);
+    if (settled.result === 'not-found') {
+      return { ok: false, code: 'NOT_FOUND', message: `interaction 不存在：${interactionId}` };
+    }
+    if (settled.result === 'expired') {
+      return { ok: false, code: 'EXPIRED', message: '该调用的确认等待已超时，请让数字人重新发起' };
+    }
+    return { ok: true, result: settled.result };
+  }
+
+  /** 当前等待用户确认的 interaction 快照（断连恢复用；无进行中 run 或无所待则为 null） */
+  pendingInteractionOf(threadId: string): InteractionSnapshot | null {
+    const run = this.active.get(threadId);
+    if (!run) return null;
+    return run.gate.snapshot();
+  }
+
   /** 宽限期到：中断全部进行中 run（尽力落盘交给各自 finalize） */
   stopAll(): void {
     for (const run of this.active.values()) run.stop();
@@ -264,7 +341,17 @@ export class RunManager {
   startRun(opts: StartRunOptions): Run {
     const existing = this.active.get(opts.threadId);
     if (existing) throw new ThreadRunActiveError(opts.threadId);
-    const run = new RunImpl(opts.threadId, opts.userId, opts.agent.key.agentName);
+    const run = new RunImpl(
+      opts.threadId,
+      opts.userId,
+      opts.agent.key.agentName,
+      // 交互审计：挂起/提交/拒绝/超时/中断收尾都落结构化日志（args 不落敏感值，键名在负载里）
+      (message) =>
+        this.deps.logger?.info(
+          { event: 'interaction', thread_id: opts.threadId, user_id: opts.userId },
+          message,
+        ),
+    );
     run.startedAt = this.now();
     this.reserving.delete(opts.threadId); // 额度占位转正为活跃 run
     this.active.set(opts.threadId, run);
@@ -303,6 +390,7 @@ export class RunManager {
         thinking,
         ...(opts.model ? { model: opts.model } : {}),
         signal: run.controller.signal,
+        interactionSink: run.gate,
       })) {
         switch (ev.type) {
           case 'thinking_delta':
@@ -363,6 +451,8 @@ export class RunManager {
       });
     } finally {
       this.active.delete(threadId);
+      // HITL：run 结束清理全部挂起状态（含 expired 留档与排队等待者）
+      run.gate.dispose();
       const durationMs = this.now() - run.startedAt;
       this.deps.logger?.[outcome.ok ? 'info' : 'warn'](
         {

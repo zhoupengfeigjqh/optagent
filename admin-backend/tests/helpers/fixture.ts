@@ -208,7 +208,7 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
       OPT_AGENT_ROOT: optAgentRoot,
       COMPOSE_FILE_PATH: composeFilePath,
       DOCKER_SOCKET_PATH: path.join(root, 'nonexistent-docker.sock'),
-      RUNTIME_API_BASE_URL: 'http://127.0.0.1:1',
+      OPT_AGENT_BACKEND_URL: 'http://127.0.0.1:1',
       RUNTIME_TIMEOUT_MS: '200',
     },
   });

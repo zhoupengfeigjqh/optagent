@@ -124,6 +124,8 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
       total,
       messages,
       running: ctx.runManager.hasActive(threadId),
+      // HITL 断连恢复：若当前有等待用户确认的工具调用，附快照让前端重建弹窗
+      pending_interaction: ctx.runManager.pendingInteractionOf(threadId),
     };
   });
 

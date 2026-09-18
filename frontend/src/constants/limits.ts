@@ -8,11 +8,11 @@
 
 /* ---------- 上传（FR-010、contracts §5.1） ---------- */
 
-/** 单文件上传上限（字节）：50MB。 */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+/** 单文件上传上限（字节）：5MB（全项目统一约束，与后端 UPLOAD_MAX_MB 对齐）。 */
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
-/** 单文件上传上限（用于文案）：50MB。 */
-export const MAX_UPLOAD_MB = 50
+/** 单文件上传上限（用于文案）：5MB。 */
+export const MAX_UPLOAD_MB = 5
 
 /**
  * 扩展名白名单按空间定义（数据准备仅 csv/xlsx；共享/临时空间加 txt/json/pdf/图片），

@@ -77,6 +77,47 @@ describe('runPrecheck', () => {
     expect(errors).toEqual([]);
   });
 
+  it('① 配置完整性：场景字段约束非法（手工改过设计态文件）→ 逐条列出', () => {
+    const errors = runPrecheck(
+      input({
+        readDesign: () =>
+          design({
+            scenario: {
+              scenario: '生产',
+              data_prep_dirs: ['生产计划'],
+              data_prep_fields: {
+                生产计划: [{ name: '产线编号', type: 'text' as never, required: true }],
+                不在清单: [{ name: 'x', type: 'string', required: true }],
+              },
+            },
+          }),
+      }),
+    );
+
+    const integrity = errors.filter((e) => e.category === 'config_integrity');
+    expect(integrity).toHaveLength(2);
+    expect(integrity.map((e) => e.message).join('；')).toContain('取值类型非法');
+    expect(integrity.map((e) => e.message).join('；')).toContain('不在清单');
+  });
+
+  it('① 边界：字段约束合法 / 缺省（历史文档）→ 不报错', () => {
+    const errors = runPrecheck(
+      input({
+        readDesign: () =>
+          design({
+            scenario: {
+              scenario: '生产',
+              data_prep_dirs: ['生产计划'],
+              data_prep_fields: {
+                生产计划: [{ name: '产线编号', type: 'string', required: true }],
+              },
+            },
+          }),
+      }),
+    );
+    expect(errors).toEqual([]);
+  });
+
   it('① 关联了不存在的数字人 → config_integrity（按失败处理）', () => {
     const errors = runPrecheck(input({ readDesign: () => null }));
     expect(errors[0]?.category).toBe('config_integrity');

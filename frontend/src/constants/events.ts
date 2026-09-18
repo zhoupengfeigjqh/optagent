@@ -11,6 +11,8 @@ export const SSE_EVENT = {
   CONTENT: 'content',
   TOOL_CALL: 'tool_call',
   TOOL_CALL_END: 'tool_call_end',
+  /** HITL：工具调用前的人工确认请求（非终结事件，交互完成后流继续） */
+  INTERACTION_REQUEST: 'interaction_request',
   DONE: 'done',
   ERROR: 'error',
 } as const

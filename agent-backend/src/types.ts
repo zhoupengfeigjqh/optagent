@@ -173,12 +173,22 @@ export interface SkillMeta {
   description: string;
 }
 
+/**
+ * MCP 服务调用确认策略（人机交互门 HITL）：
+ * - `never`：直接执行，不弹确认（默认，存量行为）
+ * - `always`：该服务下全部工具调用前都需用户确认参数
+ * - `{ tools: [...] }`：仅列出的工具名（**原始工具名**，不含 server 前缀）需确认
+ */
+export type McpConfirmation = 'never' | 'always' | { tools: string[] };
+
 export interface McpServerConfig {
   name: string;
   transport: 'stdio' | 'http';
   command?: string; // stdio
   args?: string[];
   url?: string; // http
+  /** 调用确认策略（缺省 `never`） */
+  confirmation?: McpConfirmation;
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;

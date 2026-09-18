@@ -25,6 +25,7 @@ import {
 import type {
   AgentConfigBundle,
   LlmEvent,
+  McpConfirmation,
   McpConnectionStatus,
   ModelSelection,
   PoolKey,
@@ -32,6 +33,7 @@ import type {
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
 import { mintSignedUrl } from './file-sign.js';
+import { wrapToolWithInteraction } from './tool-intercept.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
 import { McpManager } from './mcp/mcp-manager.js';
@@ -166,20 +168,35 @@ export class AgentInstanceFactory {
                 mintSignedUrl(this.deps.publicBaseUrl, this.deps.fileSignSecret, userId, relPath),
             }
           : undefined;
-        tools.push(
-          ...mcpToolsAsAgentTools(
-            mcp,
-            server.name,
-            toolInfos,
-            // 强制穿透的运行上下文（2026-09-16）：uid=当前用户、sid=当前会话；
-            // 工具 schema 里声明了才注入，没声明的不受影响
-            { uid: inst.key.userId, sid: req.threadId },
-            server.fileArgs,
-            fileCtx,
-            this.deps.onMcpCall,
-            logger,
-          ),
+        const agentTools = mcpToolsAsAgentTools(
+          mcp,
+          server.name,
+          toolInfos,
+          // 强制穿透的运行上下文（2026-09-16）：uid=当前用户、sid=当前会话；
+          // 工具 schema 里声明了才注入，没声明的不受影响
+          { uid: inst.key.userId, sid: req.threadId },
+          server.fileArgs,
+          fileCtx,
+          this.deps.onMcpCall,
+          logger,
         );
+        // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
+        // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
+        // 无 sink（理论防御：run-manager 恒传入）或未声明策略 → 原样直跑
+        if (req.interactionSink && needsConfirmation(server.confirmation)) {
+          for (const t of agentTools) {
+            const rawName = t.name.startsWith(`${server.name}__`)
+              ? t.name.slice(server.name.length + 2)
+              : t.name;
+            tools.push(
+              toolNeedsConfirmation(server.confirmation, rawName)
+                ? wrapToolWithInteraction(t, req.interactionSink)
+                : t,
+            );
+          }
+        } else {
+          tools.push(...agentTools);
+        }
       } catch (err) {
         logger.warn(
           { err, alert: true, agent_name: inst.key.agentName, event: 'mcp.listTools.failed' },
@@ -247,4 +264,20 @@ function listAvailableDirs(root: string, userId: string, agentName: string): str
     if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP];
     throw err;
   }
+}
+
+/** 该服务是否需要任何交互确认（never/缺省 = 否） */
+function needsConfirmation(policy: McpConfirmation | undefined): boolean {
+  if (policy === undefined || policy === 'never') return false;
+  if (policy === 'always') return true;
+  return policy.tools.length > 0;
+}
+
+/** 单个工具（原始工具名，不含 server 前缀）是否命中确认策略 */
+function toolNeedsConfirmation(policy: McpConfirmation | undefined, rawToolName: string): boolean {
+  if (policy === 'always') return true;
+  if (typeof policy === 'object' && Array.isArray(policy.tools)) {
+    return policy.tools.includes(rawToolName);
+  }
+  return false;
 }

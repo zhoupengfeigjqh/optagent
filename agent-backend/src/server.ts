@@ -41,12 +41,14 @@ import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
 
-/** 统一错误 envelope：{ error: { code, message } } */
+/** 统一错误 envelope：{ error: { code, message, details? } }（details 为可选的逐条问题清单） */
 export class ApiError extends Error {
   constructor(
     public readonly statusCode: number,
     public readonly code: string,
     message: string,
+    /** 结构化问题清单（如上传表校验的逐条问题）；仅 `FILE_SCHEMA_INVALID` 使用 */
+    public readonly details?: string[],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -220,7 +222,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof ApiError) {
-      return reply.status(err.statusCode).send({ error: { code: err.code, message: err.message } });
+      return reply.status(err.statusCode).send({
+        error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
+      });
     }
     // domain 错误（带 code 字段）按映射表转为语义化状态码
     const code = (err as { code?: string }).code;

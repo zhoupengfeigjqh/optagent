@@ -235,3 +235,41 @@ describe('校验', () => {
     expect(store.revision()).toBe(before);
   });
 });
+
+describe('调用确认策略（HITL confirmation）', () => {
+  it('缺省为 never（存量行为不变）', () => {
+    upsert();
+    expect(configs.read('ocr').confirmation).toBe('never');
+  });
+
+  it('保存 always 与 { tools } 后按原样读取', () => {
+    upsert({ confirmation: 'always' });
+    expect(configs.read('ocr').confirmation).toBe('always');
+
+    upsert({ confirmation: { tools: ['query_price', 'create_order'] } });
+    expect(configs.read('ocr').confirmation).toEqual({ tools: ['query_price', 'create_order'] });
+  });
+
+  it('非法形状（typo / tools 空 / 非字符串元素）→ VALIDATION_FAILED，不写入', () => {
+    expect(() => upsert({ confirmation: 'when_write' })).toThrow(ApiError);
+    expect(() => upsert({ confirmation: { tools: [] } })).toThrow(ApiError);
+    expect(() => upsert({ confirmation: { tools: ['ok', 42] } })).toThrow(ApiError);
+    expect(configs.readOrNull('ocr')).toBeNull();
+  });
+
+  it('历史存档无该字段：读取时容错收敛为 never（不阻断存量文档）', () => {
+    store.writeJson('mcp-services.json', {
+      items: { ocr: { ...BASE, updated_at: '2026-01-01T00:00:00.000Z' } },
+    });
+    expect(configs.read('ocr').confirmation).toBe('never');
+  });
+
+  it('历史存档里的残缺 confirmation：读取时收敛为 never（不抛错）', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: { ...BASE, confirmation: { tool_names: ['x'] }, updated_at: '2026-01-01T00:00:00.000Z' },
+      },
+    });
+    expect(configs.read('ocr').confirmation).toBe('never');
+  });
+});

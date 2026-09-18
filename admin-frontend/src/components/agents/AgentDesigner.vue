@@ -9,7 +9,14 @@
  * 以保证模板侧得到正确解包（嵌套在普通对象里的 ref 不会被模板自动解包）。
  */
 import { computed, ref, watch } from 'vue'
-import type { AgentDesign, BuiltinTool, ErrorInfo, McpServiceListItem, SkillListItem } from '../../api/types'
+import type {
+  AgentDesign,
+  AgentScenario,
+  BuiltinTool,
+  ErrorInfo,
+  McpServiceListItem,
+  SkillListItem,
+} from '../../api/types'
 import { deleteAgent } from '../../api/agents'
 import { AGENT_DESIGN_TABS, NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import { useAgentDesign } from '../../composables/useAgentDesign'
@@ -76,7 +83,7 @@ function setMcpServices(value: string[]): void {
 function setSkills(value: string[]): void {
   draft.value.skills = value
 }
-function setScenario(value: { scenario: string; data_prep_dirs: string[] }): void {
+function setScenario(value: AgentScenario): void {
   draft.value.scenario = value
 }
 

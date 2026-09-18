@@ -8,7 +8,7 @@
  * 状态来源不变：一律取自 `provide/inject` 的会话上下文，本模块不新增字段来源、不持有业务数据。
  */
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { ErrorInfo, FeedbackValue, FileReference } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
@@ -91,6 +91,36 @@ export function useChatPanel() {
    * 仅做 `Ref → 模板 prop` 的解包，语义与生命周期全部留在 `useChatStream`。
    */
   const pendingUserMessage = computed(() => chat.pendingUserMessage.value)
+
+  /* ---------- HITL：工具调用人工确认 ---------- */
+
+  /** 弹窗渲染源：等待确认的工具调用（SSE 事件或断连恢复快照） */
+  const pendingInteraction = computed(() => chat.pendingInteraction.value)
+  /** 服务端终验失败的逐字段错误（提交失败后回写弹窗） */
+  const interactionError = ref('')
+
+  // 断连恢复：线程详情带有等待中的确认快照（页面刷新/重连）→ 重建弹窗
+  watch(
+    () => threads.pendingInteraction.value,
+    (snapshot) => {
+      if (snapshot) {
+        chat.restoreInteraction(snapshot)
+      }
+    },
+  )
+
+  async function onSubmitInteraction(args: Record<string, unknown>): Promise<void> {
+    interactionError.value = ''
+    const result = await chat.submitInteraction(args)
+    if (!result.close && result.message) {
+      interactionError.value = result.message
+    }
+  }
+
+  function onRejectInteraction(): void {
+    interactionError.value = ''
+    void chat.rejectInteraction()
+  }
 
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
@@ -336,6 +366,10 @@ export function useChatPanel() {
     sending,
     hasMessages,
     pendingUserMessage,
+    pendingInteraction,
+    interactionError,
+    onSubmitInteraction,
+    onRejectInteraction,
     onSend,
     onStop,
     onLoadMore,

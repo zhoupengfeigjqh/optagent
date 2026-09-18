@@ -33,7 +33,10 @@ const SERVICE: McpServiceDetail = {
   command: null,
   args: null,
   file_args: { ocr_image: { image: 'url' } },
-  tools: [],
+  tools: [
+    { name: 'ocr_image', description: '识别图片中的文字', parameters: {} },
+    { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
+  ],
   tools_truncated: false,
   tools_error: null,
   compose_declaration: null,
@@ -167,5 +170,90 @@ describe('McpServiceConfigForm', () => {
     expect(wrapper.find('dialog').attributes('open')).toBeDefined()
     expect(wrapper.text()).toContain('实际测试：streamable-http → http://ocr:9999/mcp')
     expect(wrapper.text()).toContain('测试未通过')
+  })
+
+  it('调用人工确认：默认 never 直跑，保存 payload 带 confirmation', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toBe('never')
+  })
+
+  it('调用人工确认：选「全部工具」保存 always', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('always')
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toBe('always')
+  })
+
+  it('调用人工确认：按工具模式从清单勾选 → { tools }；一个都没勾不提交', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('custom')
+
+    // 一个都没勾：报错且不提交
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    expect(wrapper.emitted('save')).toBeUndefined()
+    expect(wrapper.text()).toContain('至少勾选一个工具')
+
+    // 勾选清单里的两个工具
+    const boxes = wrapper.findAll('.mcp-config-form__tools input[type="checkbox"]')
+    await boxes[0]?.setValue(true)
+    await boxes[1]?.setValue(true)
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toEqual({ tools: ['ocr_image', 'parse_excel'] })
+  })
+
+  it('调用人工确认：服务工具清单不可得时回退手填文本', async () => {
+    const wrapper = mountForm({ ...SERVICE, tools: [], tools_error: 'probe failed' })
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('custom')
+
+    await wrapper.find('#mcp-confirmation-tools').setValue('query_price\n\ncreate_order  ')
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toEqual({ tools: ['query_price', 'create_order'] })
+  })
+
+  it('调用人工确认：编辑已配置 { tools } 的服务时预填勾选状态', async () => {
+    const wrapper = mountForm({ ...SERVICE, confirmation: { tools: ['parse_excel'] } })
+    await flushPromises()
+
+    const mode = wrapper.find('#mcp-confirmation-mode')
+    expect((mode.element as HTMLSelectElement).value).toBe('custom')
+    const boxes = wrapper.findAll('.mcp-config-form__tools input[type="checkbox"]')
+    expect((boxes[0]?.element as HTMLInputElement).checked).toBe(false)
+    expect((boxes[1]?.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('调用人工确认：已保存但清单未包含的工具保留展示，可取消勾选', async () => {
+    // 存量的 legacy_tool 不在当前探测清单里：不得静默丢弃
+    const wrapper = mountForm({ ...SERVICE, confirmation: { tools: ['legacy_tool'] } })
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('custom')
+
+    const orphan = wrapper.find('.mcp-config-form__tool--orphan')
+    expect(orphan.exists()).toBe(true)
+    expect(orphan.text()).toContain('legacy_tool')
+
+    // 保持勾选 → 保存仍带上
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    let payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toEqual({ tools: ['legacy_tool'] })
+
+    // 取消勾选（并勾一个清单内工具，避免空清单校验拦截）→ 保存不再带
+    await wrapper.find('.mcp-config-form__tool--orphan input[type="checkbox"]').setValue(false)
+    await wrapper.findAll('.mcp-config-form__tools input[type="checkbox"]')[0]?.setValue(true)
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    payload = wrapper.emitted('save')?.[1]?.[0] as Record<string, unknown>
+    expect(payload.confirmation).toEqual({ tools: ['ocr_image'] })
   })
 })

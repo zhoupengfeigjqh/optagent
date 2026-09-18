@@ -11,13 +11,14 @@ import { ApiError } from '../../src/domain/api-error.js';
 import {
   AgentDesignService,
   deriveDescription,
-  isSafeDirName,
-  isSafeName,
   validateAgentInput,
 } from '../../src/domain/config-center/agent-design.js';
 import { createReferenceIndex } from '../../src/domain/config-center/reference-index.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
+
+// 名称与场景判据已按 500 行门禁拆到独立模块（`naming.ts` / `scenario.ts`），
+// 各自有对应单测（`naming.spec.ts` / `scenario.spec.ts`）。
 
 const index = createReferenceIndex({
   builtinTools: ['read_file', 'write_file', 'calculator'],
@@ -204,29 +205,6 @@ describe('validateAgentInput', () => {
   })
 });
 
-describe('isSafeName / isSafeDirName', () => {
-  it('接受常规名称（含中文与空格）', () => {
-    expect(isSafeName('demo')).toBe(true)
-    expect(isSafeName('生产计划助手')).toBe(true)
-    expect(isSafeName('a b')).toBe(true)
-  })
-
-  it('拒绝空、超长、分隔符、..、控制字符', () => {
-    expect(isSafeName('')).toBe(false)
-    expect(isSafeName('x'.repeat(65))).toBe(false)
-    expect(isSafeName('a/b')).toBe(false)
-    expect(isSafeName('a\\b')).toBe(false)
-    expect(isSafeName('..')).toBe(false)
-    expect(isSafeName('a..b')).toBe(false)
-    expect(isSafeName('a\u0000b')).toBe(false)
-  })
-
-  it('目录名额外拒绝纯空白', () => {
-    expect(isSafeDirName('  ')).toBe(false)
-    expect(isSafeDirName('正常目录')).toBe(true)
-  })
-})
-
 describe('deriveDescription', () => {
   it('取 SOUL 首个非空行并去掉 Markdown 井号', () => {
     expect(deriveDescription('\n# 生产计划助手\n正文')).toBe('生产计划助手')
@@ -316,6 +294,22 @@ describe('AgentDesignService', () => {
     expect(page1.total_pages).toBe(2)
     expect(service.list(2, index).items).toHaveLength(2)
   })
+
+  it('读取归一化：历史文档缺 data_prep_fields 时对外恒补为空对象', () => {
+    // 手工写入"本字段引入前"的文档形态，模拟线上既有数据
+    store.writeJson('agents/legacy.json', {
+      name: 'legacy',
+      soul: '你是助手',
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+      updated_at: '2026-09-15T00:00:00.000Z',
+    });
+
+    expect(service.read('legacy').scenario.data_prep_fields).toEqual({});
+    expect(service.view('legacy', index).scenario.data_prep_fields).toEqual({});
+  });
 
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision())

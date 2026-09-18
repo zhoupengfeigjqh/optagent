@@ -19,7 +19,7 @@ function makeFile(filename: string, size = 0): WorkspaceFile {
 }
 
 function makeDir(dir: string, files: WorkspaceFile[] = []): WorkspaceDir {
-  return { dir, label: dir, deletable: true, files }
+  return { dir, label: dir, deletable: true, files, fields: [] }
 }
 
 function makeSpace(name: string, dirs: WorkspaceDir[]): WorkspaceSpace {

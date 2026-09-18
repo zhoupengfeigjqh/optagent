@@ -22,16 +22,17 @@ const envSchema = z.object({
   /** Docker Engine socket（容器状态/日志/启停，`research.md` D3） */
   DOCKER_SOCKET_PATH: z.string().min(1).default('/var/run/docker.sock'),
   /**
-   * 运行环境只读端点基址（`GET /api/builtin-tools`、`GET /api/mcp-call-stats`）。
+   * 运行环境（agent-backend）只读端点基址（`GET /api/builtin-tools`、`GET /api/mcp-call-stats`）。
    * 平台是独立服务，故必须显式声明运行环境位置（`plan.md` R2/R4）。
+   * 仅用于运行观测的只读采集（`RuntimeClient`），不承载配置数据流。
    */
-  RUNTIME_API_BASE_URL: z.string().min(1).default('http://127.0.0.1:3000'),
-  /** 运行环境只读端点超时（毫秒） */
+  OPT_AGENT_BACKEND_URL: z.string().min(1).default('http://127.0.0.1:3000'),
+  /** 运行环境只读端点 / Docker socket 共用超时（毫秒） */
   RUNTIME_TIMEOUT_MS: z.coerce.number().int().min(100).default(5000),
   /** MCP 客户端超时（毫秒） */
   MCP_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
-  /** SKILL ZIP 上传大小上限（MB） */
-  UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(50),
+  /** SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束） */
+  UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   /** 平台容器是否可管理：缺省仅在容器内可用；测试可注入 */
   LOG_LEVEL: z.string().default('info'),
 });
@@ -42,7 +43,7 @@ export interface AppConfig {
   optAgentRoot: string;
   composeFilePath: string;
   dockerSocketPath: string;
-  runtimeApiBaseUrl: string;
+  optAgentBackendUrl: string;
   runtimeTimeoutMs: number;
   mcpTimeoutMs: number;
   uploadMaxMb: number;
@@ -85,7 +86,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     optAgentRoot: path.resolve(cwd, e.OPT_AGENT_ROOT),
     composeFilePath: path.resolve(cwd, e.COMPOSE_FILE_PATH),
     dockerSocketPath: e.DOCKER_SOCKET_PATH,
-    runtimeApiBaseUrl: e.RUNTIME_API_BASE_URL.replace(/\/+$/, ''),
+    optAgentBackendUrl: e.OPT_AGENT_BACKEND_URL.replace(/\/+$/, ''),
     runtimeTimeoutMs: e.RUNTIME_TIMEOUT_MS,
     mcpTimeoutMs: e.MCP_TIMEOUT_MS,
     uploadMaxMb: e.UPLOAD_MAX_MB,

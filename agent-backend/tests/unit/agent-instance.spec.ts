@@ -135,3 +135,38 @@ describe('MCP.json 的 file_args 取值路径', () => {
     expect(message).toContain('items[].excelFileUrl');
   });
 });
+
+describe('MCP.json 的 confirmation 调用确认策略（HITL）', () => {
+  const withConfirmation = (confirmation: unknown) => ({
+    name: 'svc',
+    transport: 'http',
+    url: 'http://svc:8000/mcp',
+    confirmation,
+  });
+
+  it('缺省字段：不显式写入 confirmation（运行环境按 never 语义）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [httpServer('http')]));
+    expect(bundle.mcpServers[0]?.confirmation).toBeUndefined();
+  });
+
+  it('always 与 { tools } 按原样解析', () => {
+    const a = loadAgentConfig(writeAgent('demo', [withConfirmation('always')]));
+    expect(a.mcpServers[0]?.confirmation).toBe('always');
+
+    const b = loadAgentConfig(writeAgent('demo', [withConfirmation({ tools: ['query_price'] })]));
+    expect(b.mcpServers[0]?.confirmation).toEqual({ tools: ['query_price'] });
+  });
+
+  it('never 显式写出也可解析（平台物化在 never 时不写该字段，手写防御）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [withConfirmation('never')]));
+    expect(bundle.mcpServers[0]?.confirmation).toBe('never');
+  });
+
+  it('非法形状（typo / tools 空 / 非字符串元素）→ AgentConfigError，挡在加载期', () => {
+    for (const bad of ['when_write', { tools: [] }, { tools: ['ok', 42] }]) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withConfirmation(bad)]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+});

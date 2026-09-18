@@ -134,6 +134,25 @@ describe('buildMcpServerEntry', () => {
       buildMcpServerEntry('parse', { form: 'container_network', mcpConfigs, skills })?.file_args,
     ).toEqual({ parse_excel_files: { 'items[].excelFileUrl': 'url' } });
   });
+
+  it('confirmation 为 never/缺省时不写该字段（运行环境缺省语义，产物精简）', () => {
+    configure('ocr');
+    expect(
+      buildMcpServerEntry('ocr', { form: 'container_network', mcpConfigs, skills }),
+    ).not.toHaveProperty('confirmation');
+  });
+
+  it('confirmation 为 always / { tools } 时原样物化到 MCP.json（HITL 下发）', () => {
+    configure('svc-a', { confirmation: 'always' });
+    configure('svc-b', { confirmation: { tools: ['query_price'] } });
+
+    expect(
+      buildMcpServerEntry('svc-a', { form: 'container_network', mcpConfigs, skills })?.confirmation,
+    ).toBe('always');
+    expect(
+      buildMcpServerEntry('svc-b', { form: 'container_network', mcpConfigs, skills })?.confirmation,
+    ).toEqual({ tools: ['query_price'] });
+  });
 });
 
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {
@@ -159,6 +178,39 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       scenario: '生产',
       data_prep_dirs: ['生产计划'],
     });
+  });
+
+  it('有字段约束时写入 data_prep_fields；无约束时**不写空壳键**', () => {
+    const withFields = buildAgentArtifact(
+      design({
+        scenario: {
+          scenario: '生产',
+          data_prep_dirs: ['生产计划', '产线电价'],
+          data_prep_fields: {
+            生产计划: [{ name: '产线编号', type: 'string', required: true }],
+          },
+        },
+      }),
+      { form: 'container_network', mcpConfigs, skills },
+    );
+    expect(
+      JSON.parse(String(withFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
+    ).toEqual({
+      scenario: '生产',
+      data_prep_dirs: ['生产计划', '产线电价'],
+      data_prep_fields: { 生产计划: [{ name: '产线编号', type: 'string', required: true }] },
+    });
+
+    // 空约束 ⇒ 与"字段缺失"等价，MUST NOT 在运行环境留下空壳键
+    const noFields = buildAgentArtifact(
+      design({
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划'], data_prep_fields: {} },
+      }),
+      { form: 'container_network', mcpConfigs, skills },
+    );
+    expect(
+      JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
+    ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划'] });
   });
 
   it('未配置任何 MCP 服务时写空 servers 数组（MUST NOT 缺字段）', () => {

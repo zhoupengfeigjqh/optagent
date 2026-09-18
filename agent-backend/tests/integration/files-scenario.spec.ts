@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import type { FastifyInstance } from 'fastify'
+import * as XLSX from 'xlsx'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { loadConfig } from '../../src/config'
@@ -27,11 +28,24 @@ import { buildServer } from '../../src/server'
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-files-'))
 const userId = 'admin'
 
-/** 数字人 fixture：alpha 可见两个目录，beta 只可见其中一个，gamma 完全没有场景 */
+/**
+ * 数字人 fixture：alpha 可见两个目录，beta 只可见其中一个，gamma 完全没有场景，
+ * delta 的「生产计划」声明了字段约束（上传表权威校验用）。
+ */
 const AGENT_SCENARIOS: Record<string, unknown | null> = {
   alpha: { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价'] },
   beta: { scenario: '精简', data_prep_dirs: ['产线电价'] },
   gamma: null,
+  delta: {
+    scenario: '带约束',
+    data_prep_dirs: ['生产计划'],
+    data_prep_fields: {
+      生产计划: [
+        { name: '产线编号', type: 'string', required: true },
+        { name: '计划量', type: 'integer', required: false },
+      ],
+    },
+  },
 }
 
 /** 写入一个可被 loadAgentConfig 接受的数字人目录；scenario 为 null 时不写场景文件 */
@@ -157,5 +171,134 @@ describe('文件空间视角＝当前选中数字人', () => {
     const body = res.json() as { error: { code: string; message: string } }
     expect(body.error.code).toBe('SCENARIO_NOT_CONFIGURED')
     expect(body.error.message).toContain('gamma')
+  })
+
+  it('workspace 的目录项随场景下发字段约束（无约束目录为 []）', async () => {
+    await select('delta')
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/workspace' })
+
+    expect(res.statusCode).toBe(200)
+    const spaces = (res.json() as {
+      spaces: Array<{ name: string; dirs: Array<{ dir: string; fields: unknown }> }>
+    }).spaces
+    const prep = spaces.find((s) => s.name === '数据准备')!
+    expect(prep.dirs[0]!.fields).toEqual([
+      { name: '产线编号', type: 'string', required: true },
+      { name: '计划量', type: 'integer', required: false },
+    ])
+    const tmp = spaces.find((s) => s.name === '临时空间')!
+    expect(tmp.dirs[0]!.fields).toEqual([])
+  })
+})
+
+describe('上传表字段约束（data_prep_fields 权威校验，契约 §3.1）', () => {
+  const PREP_DIR = '数据准备/生产计划'
+
+  /** 手工拼 multipart（无额外依赖）：dir 字段 + 单文件 */
+  function multipart(
+    dir: string,
+    filename: string,
+    content: string | Buffer,
+    contentType: string,
+  ) {
+    const boundary = '----vitest-boundary'
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="dir"\r\n\r\n${dir}\r\n`),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`,
+      ),
+      Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8'),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ])
+    return { body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } }
+  }
+
+  function toXlsxBuf(matrix: unknown[][]): Buffer {
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(matrix), 'Sheet1')
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+  }
+
+  it('缺少必填表头 → 400 FILE_SCHEMA_INVALID + details，且不落盘', async () => {
+    await select('delta')
+    const { body, headers } = multipart(PREP_DIR, 't.csv', '日期,计划量\n2026-01-01,100\n', 'text/csv')
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(400)
+    const err = (res.json() as { error: { code: string; details: string[] } }).error
+    expect(err.code).toBe('FILE_SCHEMA_INVALID')
+    expect(err.details[0]).toContain('缺少必填表头')
+    expect(err.details[0]).toContain('产线编号')
+
+    // 校验失败的文件 MUST NOT 落盘
+    const list = await app.inject({ method: 'GET', url: listUrl(PREP_DIR) })
+    expect(list.json()).toEqual([])
+  })
+
+  it('取值类型不符 → 400，行号按「表头为第 1 行」计', async () => {
+    await select('delta')
+    const { body, headers } = multipart(
+      PREP_DIR,
+      't.csv',
+      '产线编号,计划量\nA1,abc\n',
+      'text/csv',
+    )
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(400)
+    const err = (res.json() as { error: { code: string; details: string[] } }).error
+    expect(err.code).toBe('FILE_SCHEMA_INVALID')
+    expect(err.details[0]).toContain('第 2 行')
+    expect(err.details[0]).toContain('计划量')
+  })
+
+  it('xlsx 同样校验（第一个 sheet，数值单元格按显示文本判定）', async () => {
+    await select('delta')
+    const buf = toXlsxBuf([
+      ['产线编号', '计划量'],
+      ['A1', 'abc'],
+    ])
+    const { body, headers } = multipart(
+      PREP_DIR,
+      't.xlsx',
+      buf,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(400)
+    expect((res.json() as { error: { code: string } }).error.code).toBe('FILE_SCHEMA_INVALID')
+  })
+
+  it('合规文件 → 201 落盘（可选字段缺席、空单元格均合法）', async () => {
+    await select('delta')
+    const { body, headers } = multipart(PREP_DIR, 'ok.csv', '产线编号\nA1\nA2\n', 'text/csv')
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(201)
+    const list = await app.inject({ method: 'GET', url: listUrl(PREP_DIR) })
+    expect((list.json() as Array<{ filename: string }>)).toHaveLength(1)
+  })
+
+  it('无约束目录（alpha 的生产计划）与临时空间不触发校验', async () => {
+    await select('alpha')
+    const { body: b1, headers: h1 } = multipart(
+      PREP_DIR,
+      'free.csv',
+      '任意,内容\n1,2\n',
+      'text/csv',
+    )
+    const r1 = await app.inject({ method: 'POST', url: '/api/files/upload', payload: b1, headers: h1 })
+    expect(r1.statusCode).toBe(201)
+
+    await select('delta')
+    const { body: b2, headers: h2 } = multipart('临时空间', 'tmp.csv', '任意,内容\n1,2\n', 'text/csv')
+    const r2 = await app.inject({ method: 'POST', url: '/api/files/upload', payload: b2, headers: h2 })
+    expect(r2.statusCode).toBe(201)
   })
 })

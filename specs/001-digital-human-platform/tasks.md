@@ -424,6 +424,25 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 
 19. **（2026-09-16 十七次调整）对话工作台乐观用户气泡**：真实体验 bug——发送消息后，**要等到 AI 答完，自己的消息才显示**。原因：用户消息只在历史刷新（`onTurnFinished`，流**完成后**才触发）时出现，发送路径没有任何本地插入；流式瞬态气泡只承载 AI 回答。处置：①`useChatStream` 新增 `pendingUserMessage` 瞬态（`{content, attachments}`，`PendingUserMessage` 类型导出）——`send()` 提交即置位（与 `streaming*` 瞬态同生命周期），`finally` / `reset()` 收口清除，**MUST NOT 在终结后残留**（否则与历史真身重复渲染）；失败轮维持既有"还原草稿"语义、中断轮维持"不落盘不显示"语义，均不残留气泡；②`MessageList` 新增 `pendingUser` prop——合成 `Message`（空 id 占位，与流式气泡同口径）交给 `MessageBubble` 复用用户气泡样式（`attachments` 还原引用区），渲染在**历史之后、流式气泡之前**；`isEmpty` 口径同步纳入（首轮发送不再闪空态占位）；搜索基准序号沿用 `matchStats.total`；③装配层 `useChatPanel` 仅做 `Ref → prop` 解包（语义留在 `useChatStream`）。回归测试：新增 `useChatStream.spec.ts`（5 例：发送即置位且内容与引用原样、完成清除且 `onTurnFinished` 接管、网络失败清除、手动中断清除、切换会话清除不泄漏）、`MessageList.spec.ts`（3 例：渲染为用户气泡且顺序在历史后/流式前、null 不渲染乐观气泡、首轮无历史不落入空态）。
 
+20. **（2026-09-17 十八次调整）数据准备目录的「上传表字段约束」**：需求——在文件空间场景里每新增一个二级目录，确认后弹窗填写**字段名 + 取值类型**（JSON Schema 那套 6 种）+ **是否必填**，保存下来，为将来"上传文件时按上传表表头预检"做准备（**校验链路本期不实现**，只落配置）。处置：
+    ①**数据结构取"并列映射"而非目录对象化**：`scenario.data_prep_fields` 为 `{ 目录名: [{name, type, required}] }`，`data_prep_dirs` 保持 `string[]` 不变——旧设计态文档与已部署的 `scenario.json` **零迁移**（字段缺失 = 该目录无约束），运行环境侧"缺失即无约束"因此天然成立；目录名做键安全的前提是**界面无目录重命名**（只有增删），已作为约束登记。
+    ②**只存有字段的目录**：空清单的目录不写入键（"缺失"即无约束），物化时 `data_prep_fields` 为空则**整体不写**——运行环境对"缺失"与"空对象"同义，不留空壳（`FR-026`、`SC-018`）。
+    ③**保存严格 / 部署前校验收集全部**：字段名复用 `isSafeDirName`（非空、≤64、无分隔符 / `..`、同目录内唯一）、类型限 6 种枚举、`required` MUST 显式布尔（不给隐式默认）、每目录 ≤ 50 个字段、**孤儿键**（引用了目录清单外的目录）即拒。
+    ④**界面交互**：新增目录**先入列、再弹窗**（取消不丢目录名）；弹窗**空列表 = 不设约束**，点「保存」即等价于"暂不设置"，因此不额外加"跳过"按钮（避免用户为凑数填垃圾字段）；目录行新增「字段(n)」入口可随时回改；移除目录时**一并移除其字段约束**（键是目录名，不清理会留孤儿配置），但**只动配置、不动文件系统**（"收缩清单不删除已有文件"的既有语义不变）。
+    ⑤**读取归一化**：`AgentDesignService.readOrNull` 对历史文档补 `data_prep_fields: {}`，故**对外契约恒有该键**，界面与物化都不必判空。
+    ⑥**拆模块**（宪章原则二 500 行门禁）：`agent-design.ts` 加逻辑后达 535 行，按"一个文件一个职责"拆出 `config-center/naming.ts`（名称与路径安全判据）与 `config-center/scenario.ts`（场景名 / 目录清单 / 字段约束，含两个出口：保存抛错、部署前收集），单测同步拆为 `naming.spec.ts` / `scenario.spec.ts`。
+    ⑦**类型判定规则写入契约**（`runtime-api-delta.md` §3.1）：数据准备空间上传白名单本就是 `.csv` / `.xlsx`，故字段值取自**上传表表头、单元格按文本判定**——`integer` 为整数字面量、`number` 允许小数与指数、`boolean` 只认 `true` / `false`、`object` / `array` 仅做"可 `JSON.parse` 且顶层类型匹配"的**粗校验（不做嵌套）**；`required: false` = 表头可缺、出现则类型仍须匹配。CSV 中文表头的编码（GBK）与 xlsx 解析依赖属**后续任务**的成本点，已登记。
+    ⑧**测试**：admin-backend 450 用例（新增 `naming.spec.ts`、`scenario.spec.ts`、物化空壳不写、precheck 逐条列出、读取归一化）、agent-backend 113 用例（新增 5 例解析：归置 / 历史兼容 / 非法项丢弃且场景仍可用 / 空清单不建键 / 整体非对象忽略）、admin-frontend 334 用例（新增 `ScenarioFieldDialog.spec.ts` 与 `ScenarioEditor` 的 8 例：弹窗即开、保存写入、空列表不建键、非法即禁用保存、取消不改动、字段数回显、移除目录连带清约束）。
+
+21. **（2026-09-17 十九次调整）上传表字段校验落地（服务端权威）+ 全项目单文件上限 50MB→5MB**：
+    ①**校验架构取"运行环境唯一权威"**：分析过三案——前端同款预检（双实现必然漂移）、前端只验 CSV（主力 xlsx 体验断层）、全交服务端（规则只有一份实现）——按 LAN 部署"失败 round-trip 秒级 + 详细错误一次列全"的实际情况，**全交服务端**最优；前端只做**只读提示**（`workspace` 接口 dirs 新增 `fields`，`UploadMenu` 在目录按钮下展示"表头须含：A、B；可选：C(integer)"），MUST NOT 自行判定。
+    ②**新模块** `agent-backend/src/domain/field-check.ts`：6 类型文本判定（§3.1 判据）+ CSV 解析（逗号分隔、`"` 引用转义、UTF-8 去 BOM 优先 / 出现替换字符回退 GBK）+ xlsx 解析（**仅第一个 sheet**、单元格取**显示文本** `raw: false`、前置 **ZIP 魔数校验**——SheetJS 对非 zip 输入异常宽容不抛错，需确定性拦截）+ 统一 `checkUploadTable`（缺必填表头一次性列全、逐行类型判定、**空单元格跳过**——`required` 语义是表头必含不做行级必填、全空行丢弃且**行号按"表头为第 1 行"的非空数据行计**、重复表头取首个、超长取值截断、问题超 `MAX_ISSUES=30` 截断为"…等 N 处"）。
+    ③**上传路由钩子**（`routes/files.ts`）：仅"数据准备空间且该目录有约束"时，暂存后、落盘前校验；失败 `400 FILE_SCHEMA_INVALID` + `error.details: string[]` 逐条问题，**不落盘**（暂存清理）；共享/临时空间与无约束目录零开销。`ApiError` 增加可选 `details` 第四参，错误处理器随响应下发。
+    ④**前端错误链路**：`ErrorInfo.details` 透传（`parseErrorResponse` 本已解析 details 进 `ApiError`，只需 `toErrorInfo` 保留 + `toUserMessage` 消费）；`FILE_SCHEMA_INVALID` 是 D13（不直接展示后端 message）的**唯一例外**——问题清单按文件动态生成、按码分派无法承载，直接换行拼接 `details` 展示（`UploadItem` 错误行加 `pre-line`）。
+    ⑤**单文件上限 50MB→5MB，全项目统一**：`UPLOAD_MAX_MB` 默认值两侧后端 50→5（agent-backend 文件上传 / admin-backend SKILL ZIP 导入同一约束）；`gateway/nginx.conf` `client_max_body_size 60m→6m` **两处**（server 块 + `/api/admin/` location 块——后者 location 级覆盖 server 级，重建后以 `nginx -T` 实测确认，单改 server 块会让 SKILL ZIP 导入仍走 60m）；前端 `MAX_UPLOAD_BYTES/MAX_UPLOAD_MB` 与全部"50MB"文案/注释/测试期望同步。
+    ⑥**契约同步**：`runtime-api-delta.md` §3.1 由"判据表（本期不实现）"改写为"已实现"（解析/判定/错误响应/前端展示四段执行口径），§3 接口影响表新增上传校验与 workspace `fields` 两行。
+    ⑦**测试**：agent-backend 160 用例全绿（新增 `field-check.spec.ts` 22 例：类型边界 / CSV 引号与 GBK 回退（硬编码「中国」GBK 字节 D6D0 B9FA）/ xlsx 往返 / 问题清单与截断 / 分派与魔数拦截；集成 `files-scenario.spec.ts` +6 例：缺表头不落盘、行号口径、xlsx 校验、合规落盘、无约束不触发、workspace `fields` 下发）、frontend 132 用例全绿（新增 `UploadMenu.spec.ts` 4 例提示渲染、`error-message.spec.ts` +3 例 details 透传与 D13 例外）、admin-backend 450 用例全绿（默认值变更零回归）；两侧 `tsc --noEmit` 通过。
+
 ### 真实部署发现并修复的三个缺陷
 
 冒烟确认抓出了三个只有真部署才能暴露的问题（**已修复并补回归测试**，详情见 `quickstart.md` §10.3）：

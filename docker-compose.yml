@@ -80,17 +80,17 @@ services:
     hostname: optagent-admin-backend
     environment:
       - PORT=3000
-      - PLATFORM_DATA_DIR=/app/platform-data
+      - PLATFORM_DATA_DIR=/app/.platform-data
       - OPT_AGENT_ROOT=/app/.opt-agent
       - COMPOSE_FILE_PATH=/app/docker-compose.yml
       - DOCKER_SOCKET_PATH=/var/run/docker.sock
-      # 运行环境只读端点基址（内置工具目录 / 调用统计）。
+      # 运行环境（agent-backend）只读端点基址（内置工具目录 / 调用统计）。
       # 缺省值是 127.0.0.1:3000（宿主机本地形态），容器内必须显式指向 backend 服务名，
       # 否则会打到 admin-backend 自己身上，表现为内置工具目录 404 / 调用统计"未知"。
-      - RUNTIME_API_BASE_URL=http://backend:3000
+      - OPT_AGENT_BACKEND_URL=http://backend:3000
     volumes:
       # 平台设计态（读写；不进镜像；随 admin-backend 源码目录走，与 .opt-agent 布局对称）
-      - ./admin-backend/.platform-data:/app/platform-data
+      - ./admin-backend/.platform-data:/app/.platform-data
       # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
       - ./agent-backend/.opt-agent:/app/.opt-agent
       # 编排声明（只读投影，FR-043）

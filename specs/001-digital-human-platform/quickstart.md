@@ -266,7 +266,7 @@ chat-ui  200    # /（既有对话工作台未被误伤）
 `health` 的实际载荷（四类依赖一并可见）：
 
 ```json
-{"platform_data":{"writable":true,"path":"/app/platform-data"},
+{"platform_data":{"writable":true,"path":"/app/.platform-data"},
  "opt_agent":{"readable":true,"writable":true,"path":"/app/.opt-agent"},
  "compose_file":{"readable":true,"path":"/app/docker-compose.yml"},
  "docker":{"available":true},
