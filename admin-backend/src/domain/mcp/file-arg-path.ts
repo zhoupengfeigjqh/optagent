@@ -49,3 +49,35 @@ export function parseFileArgPath(raw: string): FileArgStep[] | null {
 export function isValidFileArgPath(raw: unknown): boolean {
   return typeof raw === 'string' && parseFileArgPath(raw) !== null;
 }
+
+/**
+ * `file_args` 声明的**转换模式**（2026-09-18，与运行环境侧同构）：
+ * `"url"`（模型填相对路径，原位铸造）或 `"url:from=<取值路径>"`（派生模式——
+ * 目标字段由运行环境从来源路径推导注入、覆盖模型填写，且对 LLM 隐藏，
+ * 用来根治模型对 http 地址字段的幻觉）。平台侧只做语法校验，原样存贮。
+ */
+export type FileArgMode = 'url' | `url:from=${string}`;
+
+export const FILE_ARG_FROM_PREFIX = 'url:from=';
+
+/** 解析转换模式；不合法返回 `null`（由调用方给出可读错误）。 `"url"` → `{ from: undefined }` */
+export function parseFileArgMode(raw: unknown): { from?: string } | null {
+  if (raw === 'url') return {};
+  if (typeof raw !== 'string' || !raw.startsWith(FILE_ARG_FROM_PREFIX)) return null;
+  return { from: raw.slice(FILE_ARG_FROM_PREFIX.length) };
+}
+
+/**
+ * 派生模式的来源路径与目标路径是否**形状相容**：
+ * 两段数相同，且除最后一段外逐段一致（键名与是否数组都相同）——
+ * 这是"来源值与目标字段逐元素一一对应"的必要条件。
+ */
+export function isCompatibleFromPath(targetPath: string, fromPath: string): boolean {
+  const target = parseFileArgPath(targetPath);
+  const from = parseFileArgPath(fromPath);
+  if (!target || !from || target.length !== from.length) return false;
+  for (let i = 0; i < target.length - 1; i += 1) {
+    if (target[i]!.key !== from[i]!.key || target[i]!.array !== from[i]!.array) return false;
+  }
+  return true;
+}

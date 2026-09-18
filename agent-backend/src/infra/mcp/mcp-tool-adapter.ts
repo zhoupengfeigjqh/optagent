@@ -7,12 +7,20 @@
  *   Agent 在 content 中说明"当前服务不可用，请稍后尝试"（FR-024，不走 SSE error）
  * - file_args 声明（可选）：LLM 传 user-data 相对路径，经 FileAccess 沙箱校验后
  *   **按声明的取值路径**（如 `image`，或对象数组里的 `items[].excelFileUrl`）
- *   原位替换为签名直链发给服务（远程/跨容器服务无磁盘访问权）
+ *   原位替换为签名直链发给服务（远程/跨容器服务无磁盘访问权）；
+ *   `"url:from=<来源路径>"` 派生模式的目标字段对 LLM 隐藏，值由引擎从来源路径
+ *   推导注入并覆盖模型填写（根治模型对 http 地址字段的幻觉）
  */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Logger } from 'pino';
 import type { FileAccess } from '../../domain/file-access.js';
-import { FILE_ARG_PATH_HINT, parseFileArgPath, type FileArgStep } from '../../domain/file-arg-path.js';
+import {
+  FILE_ARG_PATH_HINT,
+  parseFileArgMode,
+  parseFileArgPath,
+  type FileArgMode,
+  type FileArgStep,
+} from '../../domain/file-arg-path.js';
 import type { McpManager, McpToolInfo } from './mcp-manager.js';
 import { McpUnavailableError } from './mcp-manager.js';
 
@@ -50,7 +58,7 @@ export function mcpToolsAsAgentTools(
   tools: McpToolInfo[],
   /** 本次运行的上下文（`uid`/`sid`）：与 file_args 一样**由运行环境提供，不经 LLM** */
   runtime?: RuntimeContext,
-  fileArgs?: Record<string, Record<string, 'url'>>,
+  fileArgs?: Record<string, Record<string, FileArgMode>>,
   fileCtx?: FileArgContext,
   /**
    * 调用计数回调（`FR-049`/`FR-050`）：成功/失败各记一次，由 server 接线到 UsageDb。
@@ -63,13 +71,25 @@ export function mcpToolsAsAgentTools(
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
     const injected = declaredContextParams(t.inputSchema);
+    // 派生模式（"url:from="）的目标字段同样对 LLM 隐藏：值由运行环境注入，
+    // 模型无从填写，也就不可能幻觉出伪造的 http 地址（2026-09-18）
+    const decl = fileArgs?.[t.name];
+    const derivedPaths = decl
+      ? Object.entries(decl)
+          .map(([path, mode]) => ({
+            steps: parseFileArgPath(path),
+            from: parseFileArgMode(mode)?.from,
+          }))
+          .filter((e): e is { steps: FileArgStep[]; from: string } => e.steps !== null && e.from !== undefined)
+          .map((e) => e.steps)
+      : [];
     return {
       name: `${serverName}__${t.name}`,
       label: `${serverName}: ${t.name}`,
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
-      // 但**穿透参数对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
-      parameters: exposeSchema(t.inputSchema, injected) as never,
+      // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
+      parameters: exposeSchema(hideSchemaPaths(t.inputSchema, derivedPaths), injected) as never,
       execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
         let finalParams: unknown;
         try {
@@ -171,6 +191,87 @@ function exposeSchema(schema: unknown, injected: readonly string[]): unknown {
 }
 
 /**
+ * 从呈现给 LLM 的 JSON Schema 中**按取值路径剔除派生目标字段**（含嵌套）。
+ * 沿路径逐步下行：对象段进 `properties`，数组段进 `items`；沿途只复制走过的分支，
+ * 未触碰的部分保持原对象引用。路径上的某层在 schema 里不存在（如服务方没声明
+ * 该字段）时跳过——运行期注入仍会发生，服务端是否接受交由服务端校验。
+ * 没有可隐藏的字段时**原样返回**（不碰第三方给的 schema 对象）。
+ */
+function hideSchemaPaths(schema: unknown, paths: FileArgStep[][]): unknown {
+  if (paths.length === 0 || typeof schema !== 'object' || schema === null) return schema;
+  let out: unknown = schema;
+  for (const steps of paths) {
+    const result = hideSchemaStep(out, steps);
+    if (result.changed) out = result.node;
+  }
+  return out;
+}
+
+function hideSchemaStep(
+  node: unknown,
+  steps: FileArgStep[],
+): { node: unknown; changed: boolean } {
+  if (typeof node !== 'object' || node === null) return { node, changed: false };
+  const step = steps[0]!;
+  const obj = node as InputSchemaLike;
+  const childOf = (key: string): unknown =>
+    (obj.properties as Record<string, unknown> | undefined)?.[key];
+
+  if (step.array) {
+    if (steps.length === 1) {
+      // 目标本身就是数组属性（如 `files[]`）：整段属性从 schema 隐藏
+      const properties = { ...(obj.properties ?? {}) };
+      if (!(step.key in properties)) return { node, changed: false };
+      delete properties[step.key];
+      const next: InputSchemaLike = { ...obj, properties };
+      if (Array.isArray(obj.required)) {
+        const required = obj.required.filter(
+          (item): item is string => typeof item === 'string' && item !== step.key,
+        );
+        if (required.length > 0) next.required = required;
+        else delete next.required;
+      }
+      return { node: next, changed: true };
+    }
+    // 数组段：取该属性的数组 schema，下行到**元素 schema**（`items`）再继续
+    const arraySchema = childOf(step.key);
+    const inner = hideSchemaStep(
+      (arraySchema as { items?: unknown } | undefined)?.items,
+      steps.slice(1),
+    );
+    if (!inner.changed) return { node, changed: false };
+    const nextArray = { ...(arraySchema as object), items: inner.node };
+    return {
+      node: { ...obj, properties: { ...(obj.properties ?? {}), [step.key]: nextArray } },
+      changed: true,
+    };
+  }
+
+  if (steps.length === 1) {
+    const properties = { ...(obj.properties ?? {}) };
+    if (!(step.key in properties)) return { node, changed: false };
+    delete properties[step.key];
+    const next: InputSchemaLike = { ...obj, properties };
+    if (Array.isArray(obj.required)) {
+      const required = obj.required.filter(
+        (item): item is string => typeof item === 'string' && item !== step.key,
+      );
+      if (required.length > 0) next.required = required;
+      else delete next.required;
+    }
+    return { node: next, changed: true };
+  }
+
+  const child = (obj.properties as Record<string, unknown> | undefined)?.[step.key];
+  const inner = hideSchemaStep(child, steps.slice(1));
+  if (!inner.changed) return { node, changed: false };
+  return {
+    node: { ...obj, properties: { ...(obj.properties ?? {}), [step.key]: inner.node } },
+    changed: true,
+  };
+}
+
+/**
  * 调用前**强制注入** `uid`/`sid`：值一律以运行环境为准，覆盖 LLM 填的任何内容。
  *
  * 参数不是对象时原样返回（防御：MCP 入参本就应当是对象，异常形状交给服务端校验）。
@@ -220,6 +321,11 @@ interface PathContext {
  * 3. **值已是 `http(s)://` 直链** → 原样透传。对方要的就是"可下载地址"，这正是目标形态；
  *    且这类值**不能**进沙箱——它不是 user-data 相对路径，会被判"目录不在白名单"，
  *    从而**把整次调用误伤掉**（同一批里的合法文件也一起失败）。
+ * 4. **派生模式（`"url:from=<来源路径>"`）** → 目标字段的值**不取自模型的填写**：
+ *    引擎从来源路径读取（同一形状、逐元素对应）、过沙箱、铸造后**无条件覆盖写入**
+ *    目标字段（模型塞的伪造 http 地址一律作废）。来源缺失/为空 → **抛错**、调用不发出
+ *    （与规则 1 不同：普通声明缺失可能是"可选参数没填"，派生来源是管道命脉，缺了
+ *    就该让模型自我纠正），并记 `mcp.fileargs.derived` 日志保证注入可观测。
  *
  * 未声明 `file_args` 的工具、入参不是对象的调用，一律原样透传（不碰第三方给的形状）。
  */
@@ -227,14 +333,14 @@ function rewriteFileArgs(
   serverName: string,
   toolName: string,
   params: unknown,
-  fileArgs?: Record<string, Record<string, 'url'>>,
+  fileArgs?: Record<string, Record<string, FileArgMode>>,
   fileCtx?: FileArgContext,
   logger?: Logger,
 ): unknown {
   const decl = fileArgs?.[toolName];
   if (!decl || !fileCtx) return params;
-  const paths = Object.keys(decl);
-  if (paths.length === 0) return params;
+  const entries = Object.entries(decl);
+  if (entries.length === 0) return params;
   if (typeof params !== 'object' || params === null || Array.isArray(params)) return params;
 
   const base: PathContext = {
@@ -245,7 +351,19 @@ function rewriteFileArgs(
     ...(logger ? { logger } : {}),
   };
   let out = params as Record<string, unknown>;
-  for (const path of paths) {
+  for (const [path, modeRaw] of entries) {
+    const ctx = { ...base, path };
+    const mode = parseFileArgMode(modeRaw);
+    if (!mode) {
+      // 平台保存与 `MCP.json` 加载都已拦过非法模式，这里是最后一道兜底
+      throw new Error(
+        `file_args.${toolName} 的「${path}」转换模式不合法（须为 "url" 或 "url:from=<取值路径>"）`,
+      );
+    }
+    if (mode.from !== undefined) {
+      out = deriveFileArg(out, path, mode.from, ctx) as Record<string, unknown>;
+      continue;
+    }
     const steps = parseFileArgPath(path);
     if (!steps) {
       // 平台保存与 `MCP.json` 加载都已拦过非法路径，这里是最后一道兜底
@@ -253,9 +371,108 @@ function rewriteFileArgs(
         `file_args.${toolName} 的「${path}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
       );
     }
-    out = applyPath(out, steps, { ...base, path }, '') as Record<string, unknown>;
+    out = applyPath(out, steps, ctx, '') as Record<string, unknown>;
   }
   return out;
+}
+
+/**
+ * 派生模式（`"url:from="`）的执行体（2026-09-18）。
+ *
+ * 目标路径与来源路径**除最后一段外逐段一致**（配置加载已校验），因此前缀各层的
+ * 容器是同一个：沿前缀下行读取来源，最后在同一容器上「读来源键 → 铸造 → 写目标键」。
+ * 数组段按元素逐个对应（元素下标进错误信息）。全程重建容器、不改入参对象。
+ */
+function deriveFileArg(
+  params: Record<string, unknown>,
+  targetPath: string,
+  fromPath: string,
+  ctx: PathContext,
+): Record<string, unknown> {
+  const targetSteps = parseFileArgPath(targetPath)!; // 配置加载已校验
+  const fromSteps = parseFileArgPath(fromPath)!;
+  const shared = targetSteps.slice(0, -1); // 与 fromSteps 前缀相同（isCompatibleFromPath 保证）
+  const targetKey = targetSteps.at(-1)!.key;
+  const sourceKey = fromSteps.at(-1)!.key;
+
+  const walk = (container: unknown, steps: FileArgStep[], prefix: string): unknown => {
+    if (steps.length === 0) {
+      if (typeof container !== 'object' || container === null || Array.isArray(container)) {
+        throw new Error(
+          `file_args 声明「${ctx.path}」：${prefix || '入参'} 应为对象（实际是 ${shapeOf(container)}）`,
+        );
+      }
+      const obj = container as Record<string, unknown>;
+      const value = obj[sourceKey];
+      const loc = joinPath(prefix, sourceKey);
+      if (value === undefined || value === null) {
+        throw new Error(
+          `file_args 声明「${ctx.path}」：${prefix || '入参'} 缺少派生来源字段「${sourceKey}」，无法铸造「${targetKey}」`,
+        );
+      }
+      if (typeof value === 'string' && value.trim() === '') {
+        throw new Error(
+          `file_args 声明「${ctx.path}」：${loc} 为空串，无法铸造「${targetKey}」`,
+        );
+      }
+      // 沙箱校验 + 铸造（外部 http 直链照旧透传，见 convertLeaf）
+      const minted = convertLeaf(value, ctx, loc);
+      ctx.logger?.info(
+        {
+          event: 'mcp.fileargs.derived',
+          service: ctx.serverName,
+          tool: ctx.toolName,
+          path: ctx.path,
+          from: fromPath,
+        },
+        `MCP 文件参数派生注入：${ctx.serverName}.${ctx.toolName} 的「${targetPath}」取自「${fromPath}」（${loc}）`,
+      );
+      return { ...obj, [targetKey]: minted };
+    }
+
+    const step = steps[0]!;
+    const rest = steps.slice(1);
+    const current = requireProperty(container, step.key, prefix, ctx);
+    const loc = joinPath(prefix, step.key);
+    if (step.array) {
+      if (!Array.isArray(current)) {
+        throw new Error(
+          `file_args 声明「${ctx.path}」：${loc} 应为数组（实际是 ${shapeOf(current)}）`,
+        );
+      }
+      const mapped = current.map((item, index) => {
+        try {
+          return walk(item, rest, `${loc}[]`);
+        } catch (err) {
+          throw new Error(
+            `${err instanceof Error ? err.message : String(err)}（元素 ${loc}[${index}]）`,
+            { cause: err },
+          );
+        }
+      });
+      return { ...(container as Record<string, unknown>), [step.key]: mapped };
+    }
+    const next = walk(current, rest, loc);
+    return { ...(container as Record<string, unknown>), [step.key]: next };
+  };
+
+  return walk(params, shared, '') as Record<string, unknown>;
+}
+
+/** 派生读取用的取属性：与 `takeProperty` 的区别是**缺失即抛错**（派生来源是管道命脉） */
+function requireProperty(container: unknown, key: string, prefix: string, ctx: PathContext): unknown {
+  if (typeof container !== 'object' || container === null || Array.isArray(container)) {
+    throw new Error(
+      `file_args 声明「${ctx.path}」：${prefix || '入参'} 应为对象（实际是 ${shapeOf(container)}）`,
+    );
+  }
+  const value = (container as Record<string, unknown>)[key];
+  if (value === undefined || value === null) {
+    throw new Error(
+      `file_args 声明「${ctx.path}」：${prefix || '入参'} 缺少派生来源字段「${key}」，调用未发出`,
+    );
+  }
+  return value;
 }
 
 /**

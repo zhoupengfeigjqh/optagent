@@ -181,6 +181,10 @@ export interface SkillMeta {
  */
 export type McpConfirmation = 'never' | 'always' | { tools: string[] };
 
+/** 文件参数转换模式（语法定义在 domain/file-arg-path.ts，两侧同构） */
+import type { FileArgMode } from './domain/file-arg-path.js';
+export type { FileArgMode };
+
 export interface McpServerConfig {
   name: string;
   transport: 'stdio' | 'http';
@@ -193,11 +197,13 @@ export interface McpServerConfig {
   write?: boolean;
   permissionBoundary?: string;
   /**
-   * 文件参数声明：工具名 → { 参数名: 转换模式 }。
+   * 文件参数声明：工具名 → { 取值路径: 转换模式 }。
    * 调用前由 backend 把 LLM 传入的相对路径（user-data 沙箱内）铸成签名直链，
    * 原参数位置换后发给服务；未声明的参数原样透传。
+   * `"url:from=<路径>"` 为派生模式：目标字段由引擎从来源路径推导注入、
+   * 覆盖模型填写，且该字段对 LLM 隐藏（防 http 地址幻觉）。
    */
-  fileArgs?: Record<string, Record<string, 'url'>>;
+  fileArgs?: Record<string, Record<string, FileArgMode>>;
 }
 
 /**

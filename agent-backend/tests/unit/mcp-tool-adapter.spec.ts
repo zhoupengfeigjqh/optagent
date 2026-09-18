@@ -24,6 +24,7 @@ import {
   type FileArgContext,
   type RuntimeContext,
 } from '../../src/infra/mcp/mcp-tool-adapter.js';
+import type { FileArgMode } from '../../src/domain/file-arg-path.js';
 
 interface Call {
   server: string;
@@ -240,20 +241,27 @@ function sandbox(verified: string[] = []): FileArgContext {
   };
 }
 
-/** 收集告警：`file_args` 取不到值必须留下痕迹（这是"配了不生效"唯一可查的线索） */
-function captureLogger(): { logger: Logger; warns: Array<Record<string, unknown>> } {
+/** 收集日志：`file_args` 取不到值必须留下痕迹（这是"配了不生效"唯一可查的线索） */
+function captureLogger(): {
+  logger: Logger;
+  warns: Array<Record<string, unknown>>;
+  infos: Array<Record<string, unknown>>;
+} {
   const warns: Array<Record<string, unknown>> = [];
+  const infos: Array<Record<string, unknown>> = [];
   const logger = {
     warn: (fields: Record<string, unknown>) => {
       warns.push(fields);
     },
-    info: () => undefined,
+    info: (fields: Record<string, unknown>) => {
+      infos.push(fields);
+    },
   } as unknown as Logger;
-  return { logger, warns };
+  return { logger, warns, infos };
 }
 
 interface FileArgsBuildOptions {
-  decls?: Record<string, Record<string, 'url'>>;
+  decls?: Record<string, Record<string, FileArgMode>>;
   ctx?: FileArgContext;
   logger?: Logger;
 }
@@ -556,5 +564,256 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     await exec(tool!, 'not-an-object');
 
     expect(calls[0]?.args).toBe('not-an-object');
+  });
+});
+
+/* ------------------------------------------------------------------------------------ *
+ * 派生模式 "url:from="（2026-09-18）：目标字段由引擎注入、覆盖模型填写、对 LLM 隐藏
+ * 起因：hd_algorithm_input_parser 的 excelFileUrl 描述要求 http 地址，
+ * 模型据此幻觉伪造 URL；该字段本是"纯管道字段"，不该由模型决策。
+ * ------------------------------------------------------------------------------------ */
+
+/** 真实 schema（hd_algorithm_input_parser）：对象数组，来源字段与目标字段同层 */
+const HD_PARSER = {
+  name: 'hd_algorithm_input_parser',
+  description: '排产算法输入解析',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            businessType: { type: 'integer' },
+            excelFileUrl: { type: 'string', description: '可下载的 http/https 地址' },
+            realRelativePath: { type: 'string', description: '服务器真实相对路径' },
+          },
+          required: ['businessType', 'excelFileUrl', 'realRelativePath'],
+        },
+      },
+    },
+    required: ['items'],
+  },
+};
+
+const DERIVED_DECL = {
+  hd_algorithm_input_parser: {
+    'items[].excelFileUrl': 'url:from=items[].realRelativePath',
+  } as Record<string, FileArgMode>,
+};
+
+describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入）', () => {
+  it('模型只填来源字段：目标字段逐元素铸造注入，来源原样保留', async () => {
+    const calls: Call[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+    });
+
+    await exec(tool!, {
+      items: [
+        { businessType: 1, realRelativePath: '临时空间/产能.xlsx' },
+        { businessType: 4, realRelativePath: '数据准备/排产/计划.xlsx' },
+      ],
+    });
+
+    expect(sentArgs(calls)).toEqual({
+      items: [
+        {
+          businessType: 1,
+          realRelativePath: '临时空间/产能.xlsx',
+          excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+        },
+        {
+          businessType: 4,
+          realRelativePath: '数据准备/排产/计划.xlsx',
+          excelFileUrl: 'https://signed.example/users/admin/user-data/数据准备/排产/计划.xlsx',
+        },
+      ],
+    });
+  });
+
+  it('模型幻觉的伪造 http 地址被无条件覆盖（根治点）', async () => {
+    const calls: Call[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+    });
+
+    await exec(tool!, {
+      items: [
+        {
+          businessType: 1,
+          realRelativePath: '临时空间/产能.xlsx',
+          excelFileUrl: 'http://hallucinated.example/fake.xlsx', // 模型编造的地址
+        },
+      ],
+    });
+
+    const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
+    expect(items[0]?.excelFileUrl).toBe(
+      'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+    );
+  });
+
+  it('派生注入打 mcp.fileargs.derived 日志（注入可观测）', async () => {
+    const calls: Call[] = [];
+    const { logger, infos } = captureLogger();
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+      logger,
+    });
+
+    await exec(tool!, { items: [{ businessType: 1, realRelativePath: '临时空间/产能.xlsx' }] });
+
+    const derived = infos.filter((e) => e['event'] === 'mcp.fileargs.derived');
+    expect(derived).toHaveLength(1);
+    expect(derived[0]).toMatchObject({
+      event: 'mcp.fileargs.derived',
+      service: 'svc',
+      tool: 'hd_algorithm_input_parser',
+      path: 'items[].excelFileUrl',
+      from: 'items[].realRelativePath',
+    });
+  });
+
+  it('目标字段对 LLM 隐藏：嵌套 properties 与 required 里都剔除 excelFileUrl', () => {
+    const [tool] = buildWithFileArgs([], [HD_PARSER], { decls: DERIVED_DECL, ctx: sandbox() });
+    const schema = tool!.parameters as {
+      properties: { items: { items: { properties: Record<string, unknown>; required: string[] } } };
+      required: string[];
+    };
+
+    const itemSchema = schema.properties.items.items;
+    expect(Object.keys(itemSchema.properties)).toEqual(['businessType', 'realRelativePath']);
+    expect(itemSchema.required).toEqual(['businessType', 'realRelativePath']);
+    expect(schema.required).toEqual(['items']);
+  });
+
+  it('顶层平铺派生同样生效：excelFileUrl ← realRelativePath，顶层 schema 隐藏', async () => {
+    const calls: Call[] = [];
+    const flatTool = {
+      name: 'flat_parser',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          businessType: { type: 'integer' },
+          excelFileUrl: { type: 'string' },
+          realRelativePath: { type: 'string' },
+        },
+        required: ['businessType', 'excelFileUrl', 'realRelativePath'],
+      },
+    };
+    const [tool] = buildWithFileArgs(calls, [flatTool], {
+      decls: { flat_parser: { excelFileUrl: 'url:from=realRelativePath' } },
+      ctx: sandbox(),
+    });
+
+    await exec(tool!, { businessType: 2, realRelativePath: '临时空间/电价.xlsx' });
+
+    expect(sentArgs(calls)).toEqual({
+      businessType: 2,
+      realRelativePath: '临时空间/电价.xlsx',
+      excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/电价.xlsx',
+    });
+    const schema = tool!.parameters as { properties: Record<string, unknown>; required: string[] };
+    expect(Object.keys(schema.properties)).toEqual(['businessType', 'realRelativePath']);
+    expect(schema.required).toEqual(['businessType', 'realRelativePath']);
+  });
+
+  it('来源字段缺失 → 报错且调用不发出（让模型自我纠正，不静默透传）', async () => {
+    const calls: Call[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+    });
+
+    const result = await exec(tool!, { items: [{ businessType: 1 }] });
+
+    expect(calls).toHaveLength(0);
+    expect(result.content[0]?.text).toContain('缺少派生来源字段「realRelativePath」');
+  });
+
+  it('来源字段为空串 → 报错且调用不发出', async () => {
+    const calls: Call[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+    });
+
+    const result = await exec(tool!, {
+      items: [{ businessType: 1, realRelativePath: '  ' }],
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(result.content[0]?.text).toContain('为空串');
+  });
+
+  it('来源文件沙箱拒绝（不存在）→ 可读的工具结果，错误带元素下标', async () => {
+    const calls: Call[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(),
+    });
+
+    const result = await exec(tool!, {
+      items: [
+        { businessType: 1, realRelativePath: '临时空间/产能.xlsx' },
+        { businessType: 2, realRelativePath: '临时空间/不存在.xlsx' },
+      ],
+    });
+
+    expect(calls).toHaveLength(0);
+    const text = result.content[0]?.text ?? '';
+    expect(text).toContain('文件不存在或不可读');
+    expect(text).toContain('（元素 items[1]）');
+  });
+
+  it('来源已是 http(s) 直链：目标字段透传该直链（不进沙箱，与普通模式同一判据）', async () => {
+    const calls: Call[] = [];
+    const verified: string[] = [];
+    const [tool] = buildWithFileArgs(calls, [HD_PARSER], {
+      decls: DERIVED_DECL,
+      ctx: sandbox(verified),
+    });
+
+    await exec(tool!, {
+      items: [{ businessType: 1, realRelativePath: 'https://files.example.com/产线.xlsx' }],
+    });
+
+    const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
+    expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx');
+    expect(verified).toEqual([]); // 外部直链从未进沙箱
+  });
+
+  it('与普通 url 声明共存：先原位铸造、再派生注入，互不干扰', async () => {
+    const calls: Call[] = [];
+    const mixedTool = {
+      name: 'mixed',
+      inputSchema: {
+        type: 'object',
+        properties: { image: { type: 'string' }, excelFileUrl: { type: 'string' }, realRelativePath: { type: 'string' } },
+      },
+    };
+    const [tool] = buildWithFileArgs(calls, [mixedTool], {
+      decls: {
+        mixed: { image: 'url', excelFileUrl: 'url:from=realRelativePath' },
+      },
+      ctx: sandbox(),
+    });
+
+    await exec(tool!, {
+      image: '临时空间/a.png',
+      realRelativePath: '临时空间/产能.xlsx',
+      excelFileUrl: 'http://hallucinated/fake.xlsx',
+    });
+
+    expect(sentArgs(calls)).toEqual({
+      image: 'https://signed.example/users/admin/user-data/临时空间/a.png',
+      realRelativePath: '临时空间/产能.xlsx',
+      excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+    });
   });
 });

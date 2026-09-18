@@ -14,7 +14,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { builtinToolNames } from './builtin-tool-catalog.js';
-import { FILE_ARG_PATH_HINT, isValidFileArgPath } from './file-arg-path.js';
+import {
+  FILE_ARG_PATH_HINT,
+  isCompatibleFromPath,
+  isValidFileArgPath,
+  parseFileArgMode,
+  type FileArgMode,
+} from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport } from './mcp-transport.js';
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
@@ -139,32 +145,54 @@ function parseConfirmation(
 }
 
 /**
- * 解析 file_args：`{ 工具名: { 取值路径: "url" } }`，非法结构即配置错误。
+ * 解析 file_args：`{ 工具名: { 取值路径: "url" | "url:from=<来源路径>" } }`，
+ * 非法结构即配置错误。
  *
  * 取值路径（2026-09-16）：键可以是顶层参数名（`image`，与旧写法等价），
  * 也可以是穿过数组的路径（`items[].excelFileUrl`、`files[]`）——
  * 语法在 `file-arg-path.ts` 里定义，**与平台侧同一判据**，避免
  * "平台保存得进去、运行环境加载不了"（或反过来）这类两边不一致。
+ *
+ * 派生模式（2026-09-18）：`"url:from=<来源路径>"` 表示目标字段的值由引擎
+ * 从来源路径推导注入（覆盖模型填写、对 LLM 隐藏），用来根治模型对
+ * http 地址字段的幻觉。来源路径须合法且与目标路径形状相容
+ * （除最后一段外逐段一致，保证数组元素一一对应）。
  */
 function parseFileArgs(
   raw: unknown,
   bad: (why: string) => Error,
-): Record<string, Record<string, 'url'>> {
+): Record<string, Record<string, FileArgMode>> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad(`file_args 须为 {工具名: {${FILE_ARG_PATH_HINT}: "url"}}`);
   }
-  const result: Record<string, Record<string, 'url'>> = {};
+  const result: Record<string, Record<string, FileArgMode>> = {};
   for (const [tool, params] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof params !== 'object' || params === null || Array.isArray(params)) {
       throw bad(`file_args.${tool} 须为 {${FILE_ARG_PATH_HINT}: "url"}`);
     }
-    const ps: Record<string, 'url'> = {};
-    for (const [param, mode] of Object.entries(params as Record<string, unknown>)) {
-      if (mode !== 'url') throw bad(`file_args.${tool}.${param} 仅支持 "url"`);
+    const ps: Record<string, FileArgMode> = {};
+    for (const [param, modeRaw] of Object.entries(params as Record<string, unknown>)) {
+      const mode = parseFileArgMode(modeRaw);
+      if (!mode) {
+        throw bad(`file_args.${tool}.${param} 仅支持 "url" 或 "url:from=<取值路径>"`);
+      }
       if (!isValidFileArgPath(param)) {
         throw bad(`file_args.${tool} 的「${param}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`);
       }
-      ps[param] = 'url';
+      if (mode.from !== undefined) {
+        if (!isValidFileArgPath(mode.from)) {
+          throw bad(
+            `file_args.${tool}.${param} 的来源「${mode.from}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
+          );
+        }
+        if (!isCompatibleFromPath(param, mode.from)) {
+          throw bad(
+            `file_args.${tool}.${param} 的派生来源「${mode.from}」与目标形状不相容：` +
+              '两段数须相同，且除最后一段外逐段一致（如 items[].excelFileUrl ← items[].realRelativePath）',
+          );
+        }
+      }
+      ps[param] = modeRaw as FileArgMode;
     }
     result[tool] = ps;
   }

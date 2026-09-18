@@ -12,7 +12,12 @@
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { runtimeFormLabel, type RuntimeForm } from '../platform-settings.js';
-import { FILE_ARG_PATH_HINT, isValidFileArgPath } from './file-arg-path.js';
+import {
+  FILE_ARG_PATH_HINT,
+  isCompatibleFromPath,
+  isValidFileArgPath,
+  parseFileArgMode,
+} from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport, type McpTransport } from './transport.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 
@@ -31,10 +36,12 @@ export interface McpServiceConfig {
   command: string | null;
   args: string[] | null;
   /**
-   * 文件参数映射：`{ 工具名: { 取值路径: "url" } }`。
+   * 文件参数映射：`{ 工具名: { 取值路径: "url" | "url:from=<来源路径>" } }`。
    * 取值路径可以是顶层参数名（`{"ocr_image": {"image": "url"}}`），
    * 也可以穿过数组（`{"parse_excel_files": {"items[].excelFileUrl": "url"}}`）——
    * 语法见 `file-arg-path.ts`（2026-09-16：对象数组的入参曾"配了也不生效"）。
+   * `"url:from="` 派生模式（2026-09-18）：目标字段的值由运行环境从来源路径推导
+   * 注入、覆盖模型填写，且对 LLM 隐藏——根治模型对 http 地址字段的幻觉。
    */
   file_args: Record<string, Record<string, string>>;
   /**
@@ -247,11 +254,12 @@ function normalizeFileArgs(raw: unknown): Record<string, Record<string, string>>
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `file_args.${tool} 须为对象`);
     }
     const inner: Record<string, string> = {};
-    for (const [param, mode] of Object.entries(params as Record<string, unknown>)) {
-      if (mode !== 'url') {
+    for (const [param, modeRaw] of Object.entries(params as Record<string, unknown>)) {
+      const mode = parseFileArgMode(modeRaw);
+      if (!mode) {
         throw new ApiError(
           ERROR_CODES.VALIDATION_FAILED,
-          `file_args.${tool}.${param} 仅支持 "url"（与运行环境口径一致）`,
+          `file_args.${tool}.${param} 仅支持 "url" 或 "url:from=<取值路径>"（与运行环境口径一致）`,
         );
       }
       // 取值路径的语法与运行环境同一判据（`file-arg-path.ts` 两侧同构）：
@@ -262,7 +270,22 @@ function normalizeFileArgs(raw: unknown): Record<string, Record<string, string>>
           `file_args.${tool} 的「${param}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
         );
       }
-      inner[param] = 'url';
+      if (mode.from !== undefined) {
+        if (!isValidFileArgPath(mode.from)) {
+          throw new ApiError(
+            ERROR_CODES.VALIDATION_FAILED,
+            `file_args.${tool}.${param} 的来源「${mode.from}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
+          );
+        }
+        if (!isCompatibleFromPath(param, mode.from)) {
+          throw new ApiError(
+            ERROR_CODES.VALIDATION_FAILED,
+            `file_args.${tool}.${param} 的派生来源「${mode.from}」与目标形状不相容：` +
+              '两段数须相同，且除最后一段外逐段一致（如 items[].excelFileUrl ← items[].realRelativePath）',
+          );
+        }
+      }
+      inner[param] = modeRaw as string;
     }
     out[tool] = inner;
   }

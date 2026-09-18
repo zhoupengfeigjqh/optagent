@@ -210,6 +210,40 @@ describe('校验', () => {
     });
   });
 
+  it('file_args 支持派生模式 url:from=（原样存贮，与运行环境口径一致）', () => {
+    upsert({
+      file_args: {
+        hd_algorithm_input_parser: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+      },
+    });
+
+    expect(configs.read('ocr').file_args).toEqual({
+      hd_algorithm_input_parser: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+    });
+  });
+
+  it('file_args 派生模式：来源路径非法 / 形状不相容 → VALIDATION_FAILED', () => {
+    let caught: unknown;
+    try {
+      upsert({ file_args: { tool: { excelFileUrl: 'url:from=items[0].path' } } });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).message).toContain('不是合法取值路径');
+
+    caught = undefined;
+    try {
+      upsert({
+        file_args: { tool: { 'items[].excelFileUrl': 'url:from=files[].realRelativePath' } },
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).message).toContain('形状不相容');
+  });
+
   it('file_args 的路径写法非法 → VALIDATION_FAILED（不留"配了不生效"的声明）', () => {
     let caught: unknown;
     try {

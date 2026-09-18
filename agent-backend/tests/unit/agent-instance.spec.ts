@@ -119,6 +119,52 @@ describe('MCP.json 的 file_args 取值路径', () => {
     expect(bundle.mcpServers[0]?.fileArgs).toEqual({ ocr_image: { image: 'url' } });
   });
 
+  it('派生模式 url:from= 可加载（目标字段由引擎注入，覆盖模型填写）', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [
+        withFileArgs({
+          hd_algorithm_input_parser: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+        }),
+      ]),
+    );
+
+    expect(bundle.mcpServers[0]?.fileArgs).toEqual({
+      hd_algorithm_input_parser: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+    });
+  });
+
+  it('派生模式：来源路径非法 → AgentConfigError', () => {
+    let caught: unknown;
+    try {
+      loadAgentConfig(
+        writeAgent('demo', [
+          withFileArgs({ tool: { excelFileUrl: 'url:from=items[0].path' } }),
+        ]),
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(AgentConfigError);
+    expect((caught as Error).message).toContain('不是合法取值路径');
+  });
+
+  it('派生模式：来源与目标形状不相容（数组层不一致）→ AgentConfigError', () => {
+    let caught: unknown;
+    try {
+      loadAgentConfig(
+        writeAgent('demo', [
+          withFileArgs({ tool: { 'items[].excelFileUrl': 'url:from=files[].realRelativePath' } }),
+        ]),
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(AgentConfigError);
+    expect((caught as Error).message).toContain('形状不相容');
+  });
+
   it('非法路径：报错并回显正确写法（而不是留个永不生效的声明）', () => {
     let caught: unknown;
     try {
