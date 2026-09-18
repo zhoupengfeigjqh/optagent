@@ -78,6 +78,8 @@ export function useChatPanel() {
       error: chat.error.value,
       // 会话可跨数字人：本轮气泡标注"谁在回答"
       agentName: chat.streamingAgentName.value,
+      // 中断轮「重新生成」是否可用：有中断缓存且当前未在流式中
+      canRegenerate: phase === RUN_PHASE.ABORTED && chat.lastAbortedTurn.value !== null,
     }
   })
 
@@ -160,6 +162,19 @@ export function useChatPanel() {
 
   function onStop(): void {
     void chat.stop()
+  }
+
+  /**
+   * 中断轮「重新生成」：以缓存的上一条用户消息重发。
+   * 走 `onSend` 全链路（引用存在性校验、线程创建、失败还原草稿），
+   * 缓存内容发前已去除 `@` 标记，`stripMentionTokens` 为空操作。
+   */
+  async function onRegenerate(): Promise<void> {
+    const turn = chat.lastAbortedTurn.value
+    if (!turn) {
+      return
+    }
+    await onSend({ content: turn.content, attachments: turn.attachments })
   }
 
   function onLoadMore(): void {
@@ -372,6 +387,7 @@ export function useChatPanel() {
     onRejectInteraction,
     onSend,
     onStop,
+    onRegenerate,
     onLoadMore,
     onRecover,
     onFeedback,

@@ -69,15 +69,17 @@ function onSelectModel(model: string): void {
       <ModelPicker :model="model" :models="models" @select="onSelectModel" />
       <ThinkingToggle :thinking="thinking" @toggle="emit('toggle-thinking')" />
 
-      <BaseButton v-if="streaming" variant="secondary" size="sm" @click="emit('stop')">
-        中断本轮
-      </BaseButton>
+      <!-- 发送/中断同位互斥：流式中发送按钮原位变为红色方块（「终止」），避免双按钮并存 -->
       <BaseButton
-        variant="primary"
+        v-if="streaming"
+        variant="danger"
         size="sm"
-        :disabled="!canSend || streaming"
-        @click="emit('send')"
+        aria-label="中断本轮"
+        @click="emit('stop')"
       >
+        <BaseIcon name="stop" :size="14" />
+      </BaseButton>
+      <BaseButton v-else variant="primary" size="sm" :disabled="!canSend" @click="emit('send')">
         发送
       </BaseButton>
     </div>

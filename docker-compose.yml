@@ -60,7 +60,6 @@ services:
     environment:
       # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件
       - PUBLIC_BASE_URL=http://backend:3000
-      # - PUBLIC_BASE_URL=http://192.168.0.120:82
     volumes:
       # 模型配置（必需，缺省启动失败）
       - ./agent-backend/config.yaml:/app/config.yaml:ro

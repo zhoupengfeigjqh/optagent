@@ -38,6 +38,8 @@ interface StreamingView {
   error: ErrorInfo | null
   /** 本轮回答的数字人（会话可跨数字人） */
   agentName: string | null
+  /** ABORTED 态是否有可重发的中断轮缓存（「重新生成」按钮渲染条件） */
+  canRegenerate?: boolean
 }
 
 const props = withDefaults(
@@ -63,6 +65,8 @@ const emit = defineEmits<{
   copy: [message_id: string]
   /** 失败轮重试入口 */
   retry: []
+  /** 中断轮「重新生成」：以缓存的上一条用户消息重发一轮 */
+  regenerate: []
   /** 外部地址点击：由上层直跳新窗口，不进预览区（V-10） */
   'open-link': [href: string]
   /** 空间目录文件点击：由上层打开右侧内联预览（FR-046） */
@@ -87,6 +91,8 @@ const attachments = computed(() => props.message.attachments ?? [])
 const thinkingText = computed(() => props.streaming?.thinking ?? '')
 const toolCalls = computed(() => props.streaming?.toolCalls ?? [])
 const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMING)
+/** 中断轮：保留 partial 正文，但须明确标识"已停止"，与正常回答区分 */
+const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
 
 const showThinking = computed(() => thinkingText.value.trim() !== '')
 const showTyping = computed(() => isStreaming.value && props.message.content === '')
@@ -186,6 +192,19 @@ const containsActiveMatch = computed(() => {
 
     <ErrorNotice v-if="showError && errorInfo" :error="errorInfo" @retry="emit('retry')" />
 
+    <!-- 中断轮标识（流式气泡专属）：partial 内容非完整回答；可重发时给「重新生成」 -->
+    <div v-if="isAborted" class="message-bubble__aborted">
+      <span class="message-bubble__aborted-hint">已停止生成 · 内容未保存</span>
+      <button
+        v-if="streaming?.canRegenerate"
+        type="button"
+        class="message-bubble__regenerate"
+        @click="emit('regenerate')"
+      >
+        重新生成
+      </button>
+    </div>
+
     <!-- 仅 completed 且已落盘的消息展示操作与用量（V-07 / FR-028） -->
     <MessageActions
       v-if="isActionable"
@@ -258,5 +277,31 @@ const containsActiveMatch = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.message-bubble__aborted {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+.message-bubble__aborted-hint {
+  color: var(--color-text-muted);
+}
+
+.message-bubble__regenerate {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.message-bubble__regenerate:hover {
+  background: var(--color-primary-subtle);
 }
 </style>

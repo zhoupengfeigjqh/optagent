@@ -161,7 +161,10 @@ function onKeydown(event: KeyboardEvent): void {
 
     <div class="composer__toolbar">
       <slot name="toolbar" :can-send="canSend" :sending="sending">
-        <BaseButton v-if="sending" variant="secondary" @click="emit('stop')">中断本轮</BaseButton>
+        <!-- 与 ComposerToolbar 同口径：发送/中断同位互斥（流式中显示红色方块「终止」） -->
+        <BaseButton v-if="sending" variant="danger" aria-label="中断本轮" @click="emit('stop')">
+          <BaseIcon name="stop" :size="14" />
+        </BaseButton>
         <BaseButton v-else variant="primary" :disabled="!canSend" @click="onSend">发送</BaseButton>
       </slot>
     </div>

@@ -53,6 +53,7 @@ const {
   onRejectInteraction,
   onSend,
   onStop,
+  onRegenerate,
   onLoadMore,
   onRecover,
   onFeedback,
@@ -123,6 +124,7 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         :has-more="threads.hasMore.value"
         @load-more="onLoadMore"
         @feedback="onFeedback"
+        @regenerate="onRegenerate"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
       />

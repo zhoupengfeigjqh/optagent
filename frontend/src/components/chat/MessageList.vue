@@ -34,6 +34,8 @@ interface StreamingView {
   error: ErrorInfo | null
   /** 本轮回答的数字人（会话可跨数字人） */
   agentName: string | null
+  /** ABORTED 态是否有可重发的中断轮缓存（「重新生成」按钮渲染条件） */
+  canRegenerate?: boolean
 }
 
 const props = withDefaults(
@@ -68,6 +70,8 @@ const emit = defineEmits<{
   'load-more': []
   /** 消息反馈（契约未列该项，为向上透传的最小超集；`copy` 由 MessageActions 就地完成） */
   feedback: [payload: { message_id: string; value: 'up' | 'down' | null }]
+  /** 中断轮「重新生成」（由流式气泡触发，向上透传至装配层重发） */
+  regenerate: []
   /** 外部地址点击（契约未列，向上透传；V-10 直跳由装配层执行） */
   'open-link': [href: string]
   /** 空间目录文件点击（契约未列，向上透传；FR-046 预览由装配层执行） */
@@ -303,6 +307,7 @@ function onOpenFile(reference: FileReference): void {
         :active-match-index="activeMatchIndex"
         :match-index-base="matchStats.total"
         @feedback="onFeedback"
+        @regenerate="emit('regenerate')"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
       />

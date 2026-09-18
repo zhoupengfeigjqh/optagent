@@ -107,6 +107,12 @@ export interface ChatStreamStore {
    * 与 `streaming*` 瞬态同生命周期，故同在 `reset()` / `finally` 收口。
    */
   pendingUserMessage: Readonly<Ref<PendingUserMessage | null>>
+  /**
+   * 最近一个中断轮的用户消息缓存（`stop` 时从 `pendingUserMessage` 抢救）：
+   * 「重新生成」的数据源；新一轮发送或 `reset()` 时清除。中断轮不落盘，
+   * 用户消息本就消失，缓存仅为重试入口，不改变任何持久化语义。
+   */
+  lastAbortedTurn: Readonly<Ref<PendingUserMessage | null>>
   /** 本轮本地计时起点（毫秒；仅用于兜底展示） */
   startedAt: Readonly<Ref<number | null>>
   canSend: ComputedRef<boolean>
@@ -129,6 +135,8 @@ export interface ChatStreamStore {
   /** 拒绝本次调用（弹窗始终关闭；后端把拒绝作为工具结果交给模型收尾） */
   rejectInteraction(): Promise<void>
   send(payload: { content: string; attachments: FileReference[] }): Promise<void>
+  /** 用 `lastAbortedTurn` 重发上一轮（中断气泡的「重新生成」入口，复用 `send` 全链路） */
+  regenerate(): Promise<void>
   /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */
   submitFeedback(messageId: string, value: FeedbackValue): Promise<void>
   stop(): Promise<void>
@@ -152,6 +160,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const durationSeconds = ref<number | null>(null)
   const streamingAgentName = ref<string | null>(null)
   const pendingUserMessage = ref<PendingUserMessage | null>(null)
+  const lastAbortedTurn = ref<PendingUserMessage | null>(null)
   const pendingInteraction = ref<InteractionSnapshot | null>(null)
   const startedAt = ref<number | null>(null)
 
@@ -185,6 +194,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     durationSeconds.value = null
     streamingAgentName.value = null
     pendingUserMessage.value = null
+    lastAbortedTurn.value = null
     pendingInteraction.value = null
     startedAt.value = null
   }
@@ -236,6 +246,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     error.value = null
     usage.value = null
     durationSeconds.value = null
+    // 新一轮发送即取代旧的中断缓存（「重新生成」自身也走这里，随后 finally 会重新置位）
+    lastAbortedTurn.value = null
     startedAt.value = now()
     // 本轮数字人快照（会话可跨数字人：同一会话的相邻两轮可能由不同数字人回答）
     streamingAgentName.value = deps.getAgentName?.() ?? null
@@ -315,10 +327,28 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       }
     } finally {
       toolCalls.value = []
+      // 中断轮：用户消息在清除前抢救进 lastAbortedTurn，供「重新生成」复用（不落盘语义不变）
+      if (phase.value === RUN_PHASE.ABORTED && pendingUserMessage.value) {
+        lastAbortedTurn.value = pendingUserMessage.value
+      }
       // 乐观用户气泡收口：完成轮由历史真身接管，失败/中断轮维持既有降级语义（不残留、不重复）
       pendingUserMessage.value = null
       controller = null
     }
+  }
+
+  /**
+   * 「重新生成」：用 `lastAbortedTurn` 重发上一轮。
+   *
+   * 内容在缓存前已去除 `@文件名` 标记（发的就是净化后正文），原样重发即可；
+   * 全部复用 `send()`——乐观气泡、并发校验、终结事件收口等既有不变式天然成立。
+   */
+  async function regenerate(): Promise<void> {
+    const turn = lastAbortedTurn.value
+    if (!turn || phase.value === RUN_PHASE.STREAMING) {
+      return
+    }
+    await send({ content: turn.content, attachments: turn.attachments })
   }
 
   /**
@@ -351,7 +381,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       return
     }
     const threadId = deps.activeThreadId.value
-    const pending = threadId ? deps.stopRun?.(threadId).catch(() => undefined) : undefined
+    // `/stop` 失败（网络/5xx）≠ 本地未停：abort 时序不变，但须让用户可感知
+    // 后端可能仍在运行（降级可观测，宪章原则九）；后端返回 stopped=false 属正常，不提示
+    const pending = threadId
+      ? deps.stopRun?.(threadId).catch(() => {
+          deps.toast?.push('error', '本地已停止，远端运行状态未知，请稍后刷新会话确认')
+        })
+      : undefined
     // 先断开本地流，避免继续渲染；后端本轮不落盘
     controller?.abort()
     // HITL：中断后端的挂起点会按 reject 收尾，弹窗同步关闭
@@ -439,6 +475,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     durationSeconds,
     streamingAgentName,
     pendingUserMessage,
+    lastAbortedTurn,
     startedAt,
     canSend,
     hasThinking,
@@ -447,6 +484,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     submitInteraction,
     rejectInteraction,
     send,
+    regenerate,
     submitFeedback,
     stop,
     recover,
