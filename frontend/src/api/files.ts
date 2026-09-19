@@ -51,9 +51,12 @@ export function createFilesApi(client: HttpClient): FilesApi {
   return {
     upload: (dir, file, filename) => {
       const form = new FormData()
+      // 顺序契约：dir MUST 先于 file——后端解析到 dir 时即做目录校验（未选数字人 409、
+      // 清单外 403），非法目录在文件开始上传前就被拒绝，省带宽（file 先到的旧顺序
+      // 后端仍兼容，退回「先收后验」，结果一致仅时机不同）
+      form.append('dir', dir)
       // 后端按 part 名 `file` 读取；第三个参数保证原始文件名正确传递
       form.append('file', file, filename ?? (file instanceof File ? file.name : 'blob'))
-      form.append('dir', dir)
       return client.request<UploadResponse>('/api/files/upload', { method: 'POST', body: form })
     },
 

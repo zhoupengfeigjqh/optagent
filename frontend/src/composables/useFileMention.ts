@@ -79,8 +79,8 @@ export interface FileMentionStore {
   missingReferences(): FileReference[]
 }
 
-/** `@` 触发检测：光标前紧邻的 `@` 且其后无空白。 */
-const TRIGGER_PATTERN = /(?:^|\s)@[^\s@]*$/
+/** `@` 触发检测：光标前紧邻的 `@` 且其后无空白。HITL 弹窗的路径插入（usePathInsert）同款复用。 */
+export const TRIGGER_PATTERN = /(?:^|\s)@[^\s@]*$/
 
 /** 展示层引用标记。 */
 export function mentionToken(reference: FileReference): string {

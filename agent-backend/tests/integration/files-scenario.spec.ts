@@ -302,3 +302,75 @@ describe('上传表字段约束（data_prep_fields 权威校验，契约 §3.1�
     expect(r2.statusCode).toBe(201)
   })
 })
+
+describe('上传早验（dir 先到时目录校验前置，拒绝省带宽）', () => {
+  /** 手工 multipart，part 顺序可定制（早验/旧顺序两条路径都要覆盖） */
+  function multipartOrdered(
+    entries: Array<{ name: string; filename?: string; content: string; contentType?: string }>,
+  ) {
+    const boundary = '----vitest-early-check'
+    const bufs: Buffer[] = []
+    for (const e of entries) {
+      const disposition = e.filename
+        ? `Content-Disposition: form-data; name="${e.name}"; filename="${e.filename}"\r\nContent-Type: ${e.contentType ?? 'application/octet-stream'}`
+        : `Content-Disposition: form-data; name="${e.name}"`
+      bufs.push(Buffer.from(`--${boundary}\r\n${disposition}\r\n\r\n${e.content}\r\n`))
+    }
+    bufs.push(Buffer.from(`--${boundary}--\r\n`))
+    return {
+      body: Buffer.concat(bufs),
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+    }
+  }
+
+  const DIR_OUT_OF_LIST = { name: 'dir', content: '数据准备/清单外目录' }
+  const FILE_CSV = {
+    name: 'file',
+    filename: 'a.csv',
+    content: '任意\n1\n',
+    contentType: 'text/csv',
+  }
+
+  /** 临时空间里的上传暂存残留（`.upload-` 前缀） */
+  async function stagedResidue(): Promise<string[]> {
+    const res = await app.inject({ method: 'GET', url: listUrl('临时空间') })
+    return (res.json() as Array<{ filename: string }>)
+      .map((f) => f.filename)
+      .filter((n) => n.startsWith('.upload-'))
+  }
+
+  it('dir 先到 + 清单外目录 → 文件上传前即拒绝（403），且不留暂存', async () => {
+    await select('alpha')
+    const { body, headers } = multipartOrdered([DIR_OUT_OF_LIST, FILE_CSV])
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } })
+    expect(await stagedResidue()).toEqual([])
+  })
+
+  it('file 先到的旧顺序行为一致（先收后验：同 403，暂存已清）', async () => {
+    await select('alpha')
+    const { body, headers } = multipartOrdered([FILE_CSV, DIR_OUT_OF_LIST])
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(403)
+    expect(res.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } })
+    expect(await stagedResidue()).toEqual([])
+  })
+
+  it('dir 先到 + 未选中数字人 → 409 在文件上传前返回，不留暂存', async () => {
+    await deselect()
+    const { body, headers } = multipartOrdered([{ name: 'dir', content: '共享空间' }, FILE_CSV])
+
+    const res = await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ error: { code: 'AGENT_NOT_SELECTED' } })
+
+    await select('alpha') // list 需要选中态；恢复后再查残留
+    expect(await stagedResidue()).toEqual([])
+  })
+})

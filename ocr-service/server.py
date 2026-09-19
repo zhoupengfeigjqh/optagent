@@ -9,10 +9,12 @@
 本文件只做 MCP 工具装配与模型推理。
 """
 import sys
+from typing import Annotated
 
 import cv2
 import numpy as np
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from rapidocr_onnxruntime import RapidOCR
 
 from ocr_core import ALLOW_HOSTS, check_url, download
@@ -24,7 +26,12 @@ engine = RapidOCR()
 
 
 @mcp.tool()
-def ocr_image(image: str) -> str:
+def ocr_image(
+    image: Annotated[
+        str,
+        Field(description="要识别的图片：填文件空间相对路径（如 临时空间/a.png），backend 会自动铸成下载直链"),
+    ],
+) -> str:
     """识别图片中的文字，返回按行拼接的文本。
 
     image：传用户消息 [引用文件] 中的相对路径（如 临时空间/a.png）即可，

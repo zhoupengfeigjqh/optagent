@@ -32,6 +32,7 @@ export function wrapToolWithInteraction(tool: AgentTool, sink: InteractionSink):
       const outcome = await sink.request({
         callId: toolCallId,
         toolName: tool.name,
+        toolDescription: tool.description,
         schema,
         proposedArgs: proposed,
       });

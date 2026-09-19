@@ -24,6 +24,8 @@ export interface InteractionRequestInput {
   callId: string;
   /** AgentTool 全名（server__tool 形式） */
   toolName: string;
+  /** 工具级描述（schema 的 description；弹窗头部一句话说明用） */
+  toolDescription?: string;
   /** 工具入参 JSON Schema（经 exposeSchema 处理后的可见形态） */
   schema: Record<string, unknown>;
   /** 模型提议的参数值（预填，用户可改） */
@@ -37,6 +39,8 @@ export interface InteractionRequestPayload {
   interaction_id: string;
   call_id: string;
   tool_name: string;
+  /** 工具级描述（可空串：老调用方/无描述工具不阻断主流程） */
+  tool_description: string;
   title: string;
   schema: Record<string, unknown>;
   proposed_args: Record<string, unknown>;
@@ -123,6 +127,7 @@ export class InteractionGate {
       interaction_id: genInteractionId(createdAt),
       call_id: input.callId,
       tool_name: input.toolName,
+      tool_description: typeof input.toolDescription === 'string' ? input.toolDescription : '',
       title: `确认调用参数：${input.toolName}`,
       schema: input.schema,
       proposed_args: input.proposedArgs,

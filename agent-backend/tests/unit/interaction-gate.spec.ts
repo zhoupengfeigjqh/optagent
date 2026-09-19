@@ -87,6 +87,23 @@ describe('InteractionGate：挂起与恢复', () => {
     gate.settle(id, 'reject');
     await req;
   });
+
+  it('工具级描述进 payload（tool_description；缺省为空串）', async () => {
+    const created: InteractionRequestPayload[] = [];
+    const gate = new InteractionGate({ onCreated: (p) => created.push(p) });
+
+    const req = gate.request({ ...INPUT, toolDescription: '识别图片中的文字' });
+    const id = gate.snapshot()!.interaction_id;
+    expect(created[0]!.tool_description).toBe('识别图片中的文字');
+    gate.settle(id, 'reject');
+    await req;
+
+    const req2 = gate.request(INPUT);
+    const id2 = gate.snapshot()!.interaction_id;
+    expect(created[1]!.tool_description).toBe('');
+    gate.settle(id2, 'reject');
+    await req2;
+  });
 });
 
 describe('InteractionGate：超时', () => {

@@ -280,6 +280,8 @@ export interface InteractionRequestData {
   interaction_id: string
   call_id: string
   tool_name: string
+  /** 工具级描述（schema 的 description；弹窗头部一句话说明用；老快照可能缺省） */
+  tool_description?: string
   title: string
   schema: Record<string, unknown>
   proposed_args: Record<string, unknown>

@@ -58,6 +58,7 @@ describe('wrapToolWithInteraction', () => {
     expect(sink.requests).toHaveLength(1);
     expect(sink.requests[0]!.callId).toBe('call_1');
     expect(sink.requests[0]!.toolName).toBe('pricing__query_price');
+    expect(sink.requests[0]!.toolDescription).toBe('查询电价'); // 工具级描述透传给弹窗快照
     expect(sink.requests[0]!.schema).toEqual(SCHEMA);
     expect(sink.requests[0]!.proposedArgs).toEqual({ line: 'L01' }); // 预填模型提议值
     expect(tool.executeMock).toHaveBeenCalledTimes(1);

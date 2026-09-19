@@ -155,6 +155,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     // 逐 part 流式处理：dir 字段顺序无关；文件流直接落盘不占用内存
     // 扩展名校验依赖目标空间的策略（dir 可能晚于 file 到达），故延至 dir 确认后统一校验
     let dir: string | undefined;
+    /** dir 先到（或重复出现）时立即校验并缓存，循环后复用（早验一次，拒绝省带宽） */
+    let validatedTarget: ReturnType<typeof checkDir> | undefined;
+    /**
+     * 早验失败记录于此。刻意**不在 parts 迭代器内抛出**：中途抛错请求体没排完，
+     * Fastify 会把原始错误包成 500；改为排空后续文件段、循环外统一抛（状态码保真）。
+     */
+    let earlyError: unknown;
     let staging: string | undefined;
     let originalName = 'file';
     let savedSize = 0;
@@ -162,6 +169,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     const parts = req.parts();
     for await (const part of parts) {
       if (part.type === 'file') {
+        if (earlyError) {
+          // 已早验失败：排空文件段（不暂存），让请求体完整消费完，错误在循环外抛出
+          for await (const chunk of part.file) {
+            void chunk; // 丢弃
+          }
+          continue;
+        }
         // dir 可能还没解析到：先流式写入用户临时空间暂存，待 dir 确认后移动
         const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), SPACE_TMP);
         fs.mkdirSync(tmpAbs, { recursive: true });
@@ -182,7 +196,21 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         savedSize = fs.statSync(staging).size;
       } else if (part.fieldname === 'dir') {
         dir = String(part.value);
+        if (!earlyError) {
+          try {
+            // 早验：dir 先于 file 到达时，目录合法性/选中态在**文件上传之前**即拒绝，
+            // 省带宽与暂存 IO；file 先到的旧顺序退回「先收后验」（结果一致，仅时机不同）
+            validatedTarget = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+          } catch (err) {
+            earlyError = err;
+          }
+        }
       }
+    }
+
+    if (earlyError) {
+      if (staging) removeFileSafe(staging); // dir 先到时可能尚未暂存
+      throw earlyError;
     }
 
     if (truncated)
@@ -193,7 +221,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(400, 'VALIDATION_FAILED', '缺少目标目录字段 dir');
     }
     try {
-      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+      // 早验命中直接用缓存结果（同一 dir 值已校验过），否则按旧顺序补验
+      const target = validatedTarget ?? checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
       // 按目标空间策略校验扩展名
       const ext = path.extname(originalName).toLowerCase();
       const allowed = SPACE_POLICIES[target.space].uploadExtensions;
