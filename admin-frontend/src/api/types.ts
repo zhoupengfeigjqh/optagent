@@ -126,6 +126,8 @@ export interface McpServiceDetail {
   file_args: Record<string, Record<string, string>>
   /** 调用确认策略（HITL；缺省视为 never） */
   confirmation?: McpConfirmation
+  /** 算法规则参数设置（缺省/空对象 = 不启用「从算法规则选择」入口） */
+  rules_fields?: Record<string, string>
   tools: McpToolInfo[]
   tools_truncated: boolean
   tools_error?: string | null
@@ -143,6 +145,8 @@ export interface McpServiceConfigPayload {
   file_args: Record<string, Record<string, string>>
   /** 调用确认策略（HITL；缺省 never 直跑） */
   confirmation?: McpConfirmation
+  /** 算法规则参数设置（空对象 = 不启用） */
+  rules_fields?: Record<string, string>
   revision: number
 }
 

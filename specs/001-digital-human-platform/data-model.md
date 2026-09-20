@@ -120,6 +120,7 @@ platform-data/
 | `endpoints.host_local` | string | 可选 | 合法地址 | 宿主机本地地址 |
 | `command` / `args` | string / array | 可选 | `transport=stdio` 时必填 | 启动命令与参数 |
 | `file_args` | object | ✅ | 可为空对象 | 文件参数映射：`{工具名: {取值路径: "url"}}`。取值路径可为顶层参数名（`{"ocr_image":{"image":"url"}}`），也可**穿过数组**（`{"parse_excel_files":{"items[].excelFileUrl":"url"}}`，`[]` 表示"每个元素"，2026-09-16） |
+| `rules_fields` | object | ✅ | 形状 `{工具名: 字段名}`，键值均非空串；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（详见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非非空串即 `VALIDATION_FAILED`，历史存档的 string 版 `rules_field` 读取时收敛为 `{}`；物化进 `MCP.json` 的键同名，空对象不写 |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 已从本实体移除（产品决定）；读取历史存档时 MUST 收敛掉这两个字段。
 
@@ -197,7 +198,7 @@ platform-data/
 | `skills` | `{name}[]` | ✅ | 可为空数组；每项 MUST 在 SKILL 库中 | **以名称引用**，MUST NOT 内嵌技能正文（`FR-018`） |
 | `scenario` | object | ✅ | — | 文件空间搭配（`FR-020`） |
 | `scenario.scenario` | string | ✅ | 非空 | 场景名 |
-| `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..` | "数据准备"二级目录清单 |
+| `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..`；**MUST 完整包含预定义目录 `算法规则`**（2026-09-19 新增：平台硬编码、不可移除） | "数据准备"二级目录清单 |
 | `scenario.data_prep_fields` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为数组，每项 `{name, type, required}` | **上传表字段约束**（2026-09-17 新增）：目录名 → 字段清单。空清单的目录**不出现**（缺失即"无约束"）；缺省按 `{}` 处理（兼容本字段引入前的文档与请求） |
 | `scenario.data_prep_fields[dir][].name` | string | ✅ | 非空、≤64 字符、不含路径分隔符 / `..`、**同目录内唯一** | 字段名＝上传表的表头名 |
 | `scenario.data_prep_fields[dir][].type` | string | ✅ | ∈ `string` / `integer` / `number` / `boolean` / `object` / `array` | JSON Schema 基本类型的子集（与运行环境同一枚举） |

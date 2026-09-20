@@ -287,6 +287,20 @@ export interface InteractionRequestData {
   proposed_args: Record<string, unknown>
   required: string[]
   timeout_seconds: number
+  /** 算法规则参数字段名（仅服务声明且工具 schema 含该字段时存在）：该字段装配「从算法规则选择」入口 */
+  rules_field?: string
+}
+
+/** `GET /api/files/rules` 响应：「数据准备/算法规则」最新规则文件的结构化内容。 */
+export interface RuleFileResponse {
+  filename: string
+  updated_at: string
+  /** 表头列名（保持文件内顺序） */
+  columns: string[]
+  /** 数据行：键 = 表头列名，值 = 该行该列的值 */
+  rows: Array<Record<string, unknown>>
+  /** 优先级列名（表头里匹配 priority/优先级 的那一列；无则 null） */
+  priority_column: string | null
 }
 
 /** 断连恢复快照：interaction_request + 剩余等待秒数（线程详情接口下发）。 */

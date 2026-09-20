@@ -25,19 +25,19 @@ function expectCode(fn: () => unknown, code: string): void {
   expect((caught as ApiError).code).toBe(code);
 }
 
-const base = { scenario: '生产', data_prep_dirs: ['生产计划', '产线电价'] };
+const base = { scenario: '生产', data_prep_dirs: ['生产计划', '产线电价', '算法规则'] };
 
 describe('normalizeScenario —— 场景名与目录清单', () => {
   it('正向：归一化场景名并保留目录顺序', () => {
-    const out = normalizeScenario({ scenario: '  生产  ', data_prep_dirs: ['产线电价', '生产计划'] });
+    const out = normalizeScenario({ scenario: '  生产  ', data_prep_dirs: ['产线电价', '生产计划', '算法规则'] });
     expect(out.scenario).toBe('生产');
-    expect(out.data_prep_dirs).toEqual(['产线电价', '生产计划']);
+    expect(out.data_prep_dirs).toEqual(['产线电价', '生产计划', '算法规则']);
   });
 
   it('异常：场景名为空 / 含分隔符', () => {
     for (const scenario of ['', '  ', 'a/b', 'a\\b', '..', 'a..b']) {
       expectCode(
-        () => normalizeScenario({ scenario, data_prep_dirs: [] }),
+        () => normalizeScenario({ scenario, data_prep_dirs: ['算法规则'] }),
         ERROR_CODES.VALIDATION_FAILED,
       );
     }
@@ -53,8 +53,15 @@ describe('normalizeScenario —— 场景名与目录清单', () => {
     }
   });
 
-  it('边界：目录可为空数组（表示不开放任何数据准备子目录）', () => {
-    expect(normalizeScenario({ scenario: 'x', data_prep_dirs: [] }).data_prep_dirs).toEqual([]);
+  it('异常：缺少预定义二级目录（清单必须完整包含预定义目录）', () => {
+    expectCode(
+      () => normalizeScenario({ scenario: 'x', data_prep_dirs: [] }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+    expectCode(
+      () => normalizeScenario({ scenario: 'x', data_prep_dirs: ['生产计划'] }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
   });
 });
 
@@ -147,7 +154,7 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
   it('异常：一次性列出全部问题（类型非法 + 目录不在清单内 + 字段名重复）', () => {
     const issues = scenarioFieldIssues({
       scenario: '生产',
-      data_prep_dirs: ['生产计划'],
+      data_prep_dirs: ['生产计划', '算法规则'],
       data_prep_fields: {
         生产计划: [
           { name: '产线编号', type: 'text' as never, required: true },
@@ -169,16 +176,24 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
     expect(
       scenarioFieldIssues({
         scenario: '生产',
-        data_prep_dirs: ['生产计划'],
+        data_prep_dirs: ['生产计划', '算法规则'],
         data_prep_fields: { 生产计划: 'oops' as never },
       }),
     ).toEqual(['目录 生产计划 的字段清单须为数组']);
   });
 
   it('边界：data_prep_fields 非对象 / 场景缺失时给出可读结论且不抛错', () => {
-    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['a'], data_prep_fields: [] as never })).toEqual([
-      '字段约束（data_prep_fields）须为对象',
-    ]);
+    expect(
+      scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['a', '算法规则'], data_prep_fields: [] as never }),
+    ).toEqual(['字段约束（data_prep_fields）须为对象']);
     expect(scenarioFieldIssues(null)).toEqual([]);
+  });
+
+  it('异常：缺少预定义二级目录时列出缺失项（手工改过的文档兜底）', () => {
+    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['生产计划'] })).toEqual([
+      '缺少预定义二级目录：算法规则',
+    ]);
+    // 预定义目录本身不强制字段约束：存在即无问题
+    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['算法规则'] })).toEqual([]);
   });
 });

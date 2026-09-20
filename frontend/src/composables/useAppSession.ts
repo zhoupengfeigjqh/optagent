@@ -17,7 +17,7 @@
 import { computed, getCurrentInstance, inject, provide, ref, type InjectionKey } from 'vue'
 
 import { createAgentsApi } from '../api/agents'
-import { createFilesApi } from '../api/files'
+import { createFilesApi, type FilesApi } from '../api/files'
 import { createHttpClient } from '../api/http'
 import { createModelsApi } from '../api/models'
 import { createThreadsApi } from '../api/threads'
@@ -56,6 +56,8 @@ export interface AppSession {
   readonly search: SessionSearchStore
   readonly preview: PreviewStore
   readonly toast: ToastStore
+  /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
+  readonly files: FilesApi
   /** 注入的时钟（供需要本地计时的场景使用） */
   readonly now: () => number
 }
@@ -176,6 +178,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     search,
     preview,
     toast,
+    files: filesApi,
     now,
   }
 }

@@ -23,7 +23,15 @@ export const AGENT_DESIGN_TABS = [
 
 export type AgentDesignTab = (typeof AGENT_DESIGN_TABS)[number]['id']
 
-/** 空场景（新建时的初值）：无目录、无字段约束 */
+/**
+ * 「数据准备」预定义二级目录（平台硬编码）。
+ *
+ * 与 `admin-backend` `domain/config-center/scenario.ts` 的同名常量 MUST 同步。
+ * 场景清单必须完整包含这组目录；预定义目录不强制字段约束（0 条 = 无约束）。
+ */
+export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const
+
+/** 空场景（新建时的初值）：带预定义目录，无字段约束 */
 export function emptyScenario(): AgentScenario {
-  return { scenario: '', data_prep_dirs: [], data_prep_fields: {} }
+  return { scenario: '', data_prep_dirs: [...PREDEFINED_DATA_PREP_DIRS], data_prep_fields: {} }
 }

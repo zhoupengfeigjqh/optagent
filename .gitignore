@@ -13,9 +13,14 @@ coverage/
 # 注意：.env.example / config.example.yaml 属于示例模板，需纳入版本控制
 .opt-agent/
 admin-backend/.platform-data/
+# 2026-09-20 起分层（见 README 配置地图）：
+#   .env              形态配置（无密钥，随仓库入库）——放行在各目录自己的 .gitignore
+#   .env.local        本机私产（密钥/局域网 IP，gitignore，不入库）
+#   .env.example      模板（= .env.local 的创建样板）
 .env
 .env.*
 !.env.example
+!admin-backend/.env
 config.yaml
 
 # ===== 本地开发临时产物 =====

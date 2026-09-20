@@ -68,6 +68,7 @@ describe('InteractionGate：挂起与恢复', () => {
     expect(pending?.payload.tool_name).toBe('pricing__query_price');
     expect(pending?.payload.required).toEqual(['line']);
     expect(pending?.payload.proposed_args).toEqual({ line: 'L01' });
+    expect(pending?.payload.rules_field).toBeUndefined();
     expect(pending?.payload.title).toContain('确认调用参数');
 
     gate.settle(id, 'reject');
@@ -188,5 +189,22 @@ describe('InteractionGate：drain / dispose / 并发上限', () => {
     gate.settle(created[2]!, 'reject');
     await b;
     await c;
+  });
+});
+
+describe('InteractionGate：算法规则参数字段名（rules_field）', () => {
+  it('声明 rulesField 时进 payload 与快照；缺省不写该键', async () => {
+    const created: InteractionRequestPayload[] = [];
+    const gate = new InteractionGate({ onCreated: (p) => created.push(p) });
+
+    gate.request({ ...INPUT, rulesField: 'rules' });
+    expect(gate.snapshot()?.rules_field).toBe('rules');
+    expect(created[0]?.rules_field).toBe('rules');
+
+    gate.settle(gate.snapshot()!.interaction_id, 'reject');
+    await vi.waitFor(() => expect(gate.waitingCount()).toBe(0));
+
+    gate.request(INPUT);
+    expect(gate.snapshot()).not.toHaveProperty('rules_field');
   });
 });

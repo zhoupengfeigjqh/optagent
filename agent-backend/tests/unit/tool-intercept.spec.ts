@@ -111,4 +111,34 @@ describe('wrapToolWithInteraction', () => {
     await wrapped.execute('call_4', 'not-an-object');
     expect(sink.requests[0]!.proposedArgs).toEqual({});
   });
+
+  it('executionMode 强制 sequential：并行批次不会同时产生多个挂起点（前端单槽位会丢）', () => {
+    const wrapped = wrapToolWithInteraction(makeTool(), makeSink({ kind: 'reject' }));
+
+    // pi loop 对批次内任一 sequential 工具整批串行（agent-loop.js hasSequentialToolCall）
+    expect(wrapped.executionMode).toBe('sequential');
+  });
+
+  it('规则字段声明：schema 含该字段时传入 sink；schema 不含时不传（服务级配置，工具是多个之一）', async () => {
+    const withRules: AgentTool = {
+      ...makeTool(),
+      name: 'pricing__optimize',
+      parameters: {
+        type: 'object',
+        properties: { rules: { type: 'array', items: { type: 'object' } }, days: { type: 'integer' } },
+      } as never,
+    };
+
+    const hitSink = makeSink({ kind: 'reject' });
+    await wrapToolWithInteraction(withRules, hitSink, 'rules').execute('call_r1', {});
+    expect(hitSink.requests[0]!.rulesField).toBe('rules');
+
+    const missSink = makeSink({ kind: 'reject' });
+    await wrapToolWithInteraction(makeTool(), missSink, 'rules').execute('call_r2', {});
+    expect(missSink.requests[0]!.rulesField).toBeUndefined();
+
+    const unsetSink = makeSink({ kind: 'reject' });
+    await wrapToolWithInteraction(withRules, unsetSink).execute('call_r3', {});
+    expect(unsetSink.requests[0]!.rulesField).toBeUndefined();
+  });
 });

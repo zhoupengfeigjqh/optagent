@@ -44,6 +44,35 @@ const SERVICE: McpServiceDetail = {
   revision: 1,
 }
 
+/** 工具带参数 Schema 的夹具：字段下拉只列 array 入参 */
+const SERVICE_WITH_SCHEMA: McpServiceDetail = {
+  ...SERVICE,
+  tools: [
+    {
+      name: 'ocr_image',
+      description: '识别图片中的文字',
+      parameters: {
+        type: 'object',
+        properties: {
+          image: { type: 'string' },
+          rules: { type: 'array', items: { type: 'object' } },
+        },
+      },
+    },
+    {
+      name: 'parse_excel',
+      description: '解析 Excel 文件',
+      parameters: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { type: 'object' } },
+          note: { type: 'string' },
+        },
+      },
+    },
+  ],
+}
+
 function mountForm(service: McpServiceDetail = SERVICE) {
   return mount(McpCallConfigForm, { props: { service } })
 }
@@ -89,14 +118,19 @@ describe('McpServiceConfigForm', () => {
     expect(wrapper.text()).toContain('至少需要一个运行形态的连接地址')
   })
 
-  it('文件参数映射为非法 JSON 时报错且不提交', async () => {
-    const wrapper = mountForm({ ...SERVICE, file_args: {} })
+  it('文件参数映射经表格编辑视图提交，存储结构不变', async () => {
+    const wrapper = mountForm({
+      ...SERVICE,
+      file_args: { ocr_image: { image: 'url' }, parse_excel_files: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' } },
+    })
     await flushPromises()
-    await wrapper.find('#mcp-file-args').setValue('{不是 JSON')
     await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
 
-    expect(wrapper.emitted('save')).toBeUndefined()
-    expect(wrapper.text()).toContain('不是合法 JSON 对象')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.file_args).toEqual({
+      ocr_image: { image: 'url' },
+      parse_excel_files: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+    })
   })
 
   it('stdio 传输时展示启动命令与参数输入（且命令必填由后端判定）', async () => {
@@ -179,6 +213,86 @@ describe('McpServiceConfigForm', () => {
 
     const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
     expect(payload.confirmation).toBe('never')
+  })
+
+  it('算法规则参数设置：HITL 无需确认时禁用且清空，保存 {}', async () => {
+    const wrapper = mountForm({ ...SERVICE, rules_fields: { ocr_image: 'rules' } })
+    await flushPromises()
+
+    // 无需确认（默认）：表格禁用，添加按钮不可点；已保存值被清空
+    expect(wrapper.find('[data-test="add-rule"]').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.rules_fields).toEqual({})
+  })
+
+  it('算法规则参数设置：全部工具需确认时所有工具可选，按 工具-字段 提交', async () => {
+    const wrapper = mountForm(SERVICE_WITH_SCHEMA)
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('always')
+
+    await wrapper.find('[data-test="add-rule"]').trigger('click')
+    await wrapper.find('[data-test="rule-tool-0"]').setValue('ocr_image')
+    const fieldOptions = wrapper
+      .find('[data-test="rule-field-0"]')
+      .findAll('option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+    // 只列 array 入参：rules / items，不列 string 型的 image / note
+    expect(fieldOptions).toContain('rules')
+    expect(fieldOptions).not.toContain('image')
+    await wrapper.find('[data-test="rule-field-0"]').setValue('rules')
+
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
+
+    // 编辑已配置的服务时预填（行回填 + 字段下拉选中；开 HITL 声明才会保留）
+    const wrapper2 = mountForm({
+      ...SERVICE_WITH_SCHEMA,
+      confirmation: 'always',
+      rules_fields: { parse_excel: 'items' },
+    })
+    await flushPromises()
+    expect((wrapper2.find('[data-test="rule-tool-0"]').element as HTMLSelectElement).value).toBe(
+      'parse_excel',
+    )
+    expect((wrapper2.find('[data-test="rule-field-0"]').element as HTMLSelectElement).value).toBe(
+      'items',
+    )
+  })
+
+  it('算法规则参数设置：仅指定工具时工具列只列勾选工具，取消勾选则清掉对应声明', async () => {
+    const wrapper = mountForm({
+      ...SERVICE_WITH_SCHEMA,
+      confirmation: { tools: ['ocr_image', 'parse_excel'] },
+      rules_fields: { ocr_image: 'rules', parse_excel: 'items' },
+    })
+    await flushPromises()
+
+    // custom 模式：两个声明都在勾选清单内 → 均保留
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    let payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.rules_fields).toEqual({ ocr_image: 'rules', parse_excel: 'items' })
+
+    // 新增一行：工具下拉里只有勾选过的两个工具
+    await wrapper.find('[data-test="add-rule"]').trigger('click')
+    const toolOptions = wrapper
+      .find('[data-test="rule-tool-2"]')
+      .findAll('option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+      .filter((v) => v !== '')
+    expect(toolOptions).toEqual(['ocr_image', 'parse_excel'])
+
+    // 取消勾选 parse_excel → 其声明被级联清掉
+    const checkboxes = wrapper
+      .findAll('input[type="checkbox"]')
+    const parseExcelBox = checkboxes.find(
+      (c) => c.element.parentElement?.textContent?.includes('parse_excel'),
+    )
+    await parseExcelBox?.setValue(false)
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    payload = wrapper.emitted('save')?.[1]?.[0] as Record<string, unknown>
+    expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
   })
 
   it('调用人工确认：选「全部工具」保存 always', async () => {

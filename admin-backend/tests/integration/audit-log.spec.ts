@@ -75,7 +75,7 @@ function agentBody(overrides: Partial<AgentBody> = {}): AgentBody {
     enabled_tools: [],
     mcp_services: [],
     skills: [],
-    scenario: { scenario: '全量', data_prep_dirs: [] },
+    scenario: { scenario: '全量', data_prep_dirs: ['算法规则'] },
     ...overrides,
   };
 }

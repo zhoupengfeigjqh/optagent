@@ -307,3 +307,52 @@ describe('调用确认策略（HITL confirmation）', () => {
     expect(configs.read('ocr').confirmation).toBe('never');
   });
 });
+
+describe('算法规则参数设置（rules_fields，按工具映射）', () => {
+  it('缺省 → {}（不启用规则选择器，存量行为不变）', () => {
+    upsert();
+    expect(configs.read('ocr').rules_fields).toEqual({});
+  });
+
+  it('保存 { 工具名: 字段名 }：去空白后按原样读取', () => {
+    upsert({ rules_fields: { optimize: '  rules  ' } });
+    expect(configs.read('ocr').rules_fields).toEqual({ optimize: 'rules' });
+  });
+
+  it('非对象 / 值非非空字符串 → VALIDATION_FAILED（typo 挡在保存期）', () => {
+    expect(() => upsert({ rules_fields: 'rules' })).toThrow(ApiError);
+    expect(() => upsert({ rules_fields: 42 })).toThrow(ApiError);
+    expect(() => upsert({ rules_fields: { optimize: 42 } })).toThrow(ApiError);
+    expect(() => upsert({ rules_fields: { optimize: '  ' } })).toThrow(ApiError);
+    expect(configs.readOrNull('ocr')).toBeNull();
+  });
+
+  it('历史存档无该字段：读取时容错收敛为 {}（不阻断存量文档）', () => {
+    store.writeJson('mcp-services.json', {
+      items: { ocr: { ...BASE, updated_at: '2026-01-01T00:00:00.000Z' } },
+    });
+    expect(configs.read('ocr').rules_fields).toEqual({});
+  });
+
+  it('历史存档里的 string 版 rules_field（无工具名可归属）：读取时收敛为 {}', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: { ...BASE, rules_field: 'rules', updated_at: '2026-01-01T00:00:00.000Z' },
+      },
+    });
+    expect(configs.read('ocr').rules_fields).toEqual({});
+  });
+
+  it('历史存档里的残缺 rules_fields（含非串值）：读取时过滤收敛', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          rules_fields: { optimize: 'rules', stale: 42 },
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+    expect(configs.read('ocr').rules_fields).toEqual({ optimize: 'rules' });
+  });
+});

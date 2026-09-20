@@ -414,3 +414,93 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
     expect(wrapper.emitted('submit')).toEqual([[{ 备注: '使用文件 临时空间/note.txt' }]])
   })
 })
+
+describe('InteractionDialog —— 算法规则选择（rules_field 装配）', () => {
+  const RULES_RESPONSE = {
+    filename: 'rules_20260919.xlsx',
+    updated_at: '2026-09-19T08:00:00.000Z',
+    columns: ['规则编码', '规则名称', '优先级'],
+    rows: [
+      { 规则编码: 'R001', 规则名称: '峰谷平移', 优先级: 3 },
+      { 规则编码: 'R002', 规则名称: '需量控制', 优先级: 1 },
+    ],
+    priority_column: '优先级',
+  }
+
+  function makeRulesRequest(overrides: Partial<InteractionSnapshot> = {}): InteractionSnapshot {
+    return makeRequest({
+      schema: {
+        type: 'object',
+        properties: {
+          rules: { type: 'array', items: { type: 'object' }, description: '算法规则清单' },
+          days: { type: 'integer' },
+        },
+      },
+      proposed_args: { days: 7 },
+      required: [],
+      rules_field: 'rules',
+      ...overrides,
+    })
+  }
+
+  function mountRulesDialog(request: InteractionSnapshot = makeRulesRequest()) {
+    const files = {
+      workspace: vi.fn().mockResolvedValue(WORKSPACE_RESPONSE),
+      remove: vi.fn(),
+      rules: vi.fn().mockResolvedValue(RULES_RESPONSE),
+    }
+    const workspace = createWorkspaceStore({
+      files: files as unknown as FilesApi,
+      toast: { push: vi.fn() } as unknown as ToastStore,
+    })
+    const session = { workspace, files } as unknown as AppSession
+    const wrapper = mount(InteractionDialog, {
+      props: { request },
+      global: { provide: { [APP_SESSION_KEY as symbol]: session } },
+    })
+    return { wrapper, files }
+  }
+
+  it('snapshot 声明 rules_field：json 字段旁出现「从算法规则选择」入口；未声明不出现', () => {
+    const declared = mountRulesDialog()
+    expect(declared.wrapper.find('.interaction-dialog__rules-btn').exists()).toBe(true)
+
+    const plain = mountDialog(makeRequest())
+    expect(plain.find('.interaction-dialog__rules-btn').exists()).toBe(false)
+  })
+
+  it('勾选规则确认后：JSON 编辑框写回数组，提交携带该参数', async () => {
+    const { wrapper } = mountRulesDialog()
+    await flushPromises()
+
+    await wrapper.find('.interaction-dialog__rules-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.rule-picker__table').exists()).toBe(true)
+
+    await wrapper.findAll('tbody input[type="checkbox"]')[0]!.setValue(true)
+    await wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.trigger('click')
+
+    // JSON 编辑框被写回（可再手改），提交走原有 JSON 解析路径
+    const jsonText = (wrapper.findAll('textarea')[0]!.element as HTMLTextAreaElement).value
+    expect(JSON.parse(jsonText)).toEqual([{ 规则编码: 'R001', 规则名称: '峰谷平移', 优先级: 3 }])
+
+    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    const events = wrapper.emitted('submit')
+    expect(events).toHaveLength(1)
+    expect(events![0]!).toEqual([
+      { days: 7, rules: [{ 规则编码: 'R001', 规则名称: '峰谷平移', 优先级: 3 }] },
+    ])
+  })
+
+  it('弹窗取消不影响参数值', async () => {
+    const { wrapper } = mountRulesDialog()
+    await flushPromises()
+
+    await wrapper.find('.interaction-dialog__rules-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === '取消')!.trigger('click')
+
+    const jsonText = (wrapper.findAll('textarea')[0]!.element as HTMLTextAreaElement).value
+    expect(jsonText).toBe('')
+  })
+})

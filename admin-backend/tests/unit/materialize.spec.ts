@@ -47,7 +47,7 @@ function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocume
     enabled_tools: ['read_file'],
     mcp_services: [],
     skills: [],
-    scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+    scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     updated_at: '2026-09-15T00:00:00.000Z',
     ...overrides,
   };
@@ -153,6 +153,19 @@ describe('buildMcpServerEntry', () => {
       buildMcpServerEntry('svc-b', { form: 'container_network', mcpConfigs, skills })?.confirmation,
     ).toEqual({ tools: ['query_price'] });
   });
+
+  it('rules_fields 缺省为 {}：不写该字段（产物精简）；声明后按工具映射物化到 MCP.json', () => {
+    configure('ocr');
+    expect(
+      buildMcpServerEntry('ocr', { form: 'container_network', mcpConfigs, skills }),
+    ).not.toHaveProperty('rules_fields');
+
+    configure('svc-rules', { rules_fields: { optimize: 'rules' } });
+    expect(
+      buildMcpServerEntry('svc-rules', { form: 'container_network', mcpConfigs, skills })
+        ?.rules_fields,
+    ).toEqual({ optimize: 'rules' });
+  });
 });
 
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {
@@ -176,7 +189,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     });
     expect(JSON.parse(String(artifact.files.find((f) => f.relPath === 'scenario.json')?.content))).toEqual({
       scenario: '生产',
-      data_prep_dirs: ['生产计划'],
+      data_prep_dirs: ['生产计划', '算法规则'],
     });
   });
 
@@ -185,7 +198,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       design({
         scenario: {
           scenario: '生产',
-          data_prep_dirs: ['生产计划', '产线电价'],
+          data_prep_dirs: ['生产计划', '产线电价', '算法规则'],
           data_prep_fields: {
             生产计划: [{ name: '产线编号', type: 'string', required: true }],
           },
@@ -197,20 +210,20 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       JSON.parse(String(withFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
     ).toEqual({
       scenario: '生产',
-      data_prep_dirs: ['生产计划', '产线电价'],
+      data_prep_dirs: ['生产计划', '产线电价', '算法规则'],
       data_prep_fields: { 生产计划: [{ name: '产线编号', type: 'string', required: true }] },
     });
 
     // 空约束 ⇒ 与"字段缺失"等价，MUST NOT 在运行环境留下空壳键
     const noFields = buildAgentArtifact(
       design({
-        scenario: { scenario: '生产', data_prep_dirs: ['生产计划'], data_prep_fields: {} },
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'], data_prep_fields: {} },
       }),
       { form: 'container_network', mcpConfigs, skills },
     );
     expect(
       JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
-    ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划'] });
+    ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] });
   });
 
   it('未配置任何 MCP 服务时写空 servers 数组（MUST NOT 缺字段）', () => {

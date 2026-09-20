@@ -4,9 +4,13 @@ dist/
 coverage/
 
 # 运行期数据与密钥
+# 分层（2026-09-20，见根 README 配置地图）：
+#   .env        形态默认值（无密钥，随仓库入库——故此处 !.env 放行，覆盖根 .gitignore）
+#   .env.local  本机私产（密钥/LAN IP，忽略）；.env.example = 其创建样板
 .env
 .env.*
 !.env.example
+!.env
 config.yaml
 .opt-agent/
 

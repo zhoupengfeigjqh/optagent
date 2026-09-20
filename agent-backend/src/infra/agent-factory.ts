@@ -190,7 +190,9 @@ export class AgentInstanceFactory {
               : t.name;
             tools.push(
               toolNeedsConfirmation(server.confirmation, rawName)
-                ? wrapToolWithInteraction(t, req.interactionSink)
+                ? // 规则字段声明按**当前工具名**查服务级映射：不在确认范围内的工具
+                  // 根本不会被包装，映射对其天然不生效
+                  wrapToolWithInteraction(t, req.interactionSink, server.rulesFields?.[rawName])
                 : t,
             );
           }

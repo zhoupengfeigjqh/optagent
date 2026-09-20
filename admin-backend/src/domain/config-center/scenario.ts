@@ -35,6 +35,21 @@ export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number];
 /** 单个数据准备目录的字段约束上限（防滥用，与 `UPLOAD_MAX_MB` 同类的边界治理） */
 export const MAX_FIELDS_PER_DIR = 50;
 
+/**
+ * 「数据准备」预定义二级目录（平台硬编码）。
+ *
+ * 场景清单 MUST 包含该目录：保存时缺失即拒（`normalizeScenario`），部署前校验对
+ * **手工改过的设计态文档**兜底（`scenarioFieldIssues`）。界面渲染为锁定行
+ * （不可移除），见 `admin-frontend` `constants/agent-design.ts` 的同名常量
+ * （两处 MUST 同步）。预定义目录**不强制字段约束**——0 条字段 = 无约束。
+ */
+export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const;
+
+/** 清单缺失的预定义目录（两个校验出口共用同一判据） */
+export function missingPredefinedDirs(dirs: readonly string[]): string[] {
+  return PREDEFINED_DATA_PREP_DIRS.filter((dir) => !dirs.includes(dir));
+}
+
 /** 数据准备目录的上传表字段约束 */
 export interface ScenarioField {
   /** 字段名（＝上传表的表头名）；非空、≤64 字符、不含路径分隔符或 `..`、同目录内唯一 */
@@ -104,6 +119,13 @@ export function normalizeScenario(raw: unknown): AgentScenario {
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `数据准备二级目录重复：${item}`);
     }
     dirs.push(item);
+  }
+  const missing = missingPredefinedDirs(dirs);
+  if (missing.length > 0) {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      `缺少预定义二级目录：${missing.join('、')}（预定义目录不可移除）`,
+    );
   }
   return {
     scenario,
@@ -198,13 +220,14 @@ function normalizeScenarioFields(
 export function scenarioFieldIssues(scenario: AgentScenario | null | undefined): string[] {
   if (!scenario || !Array.isArray(scenario.data_prep_dirs)) return [];
   const dirs = scenario.data_prep_dirs;
+  // 预定义目录缺失是独立判据：fields 缺省的历史文档也必须报告（先于 fields 的缺省早退）
+  const issues: string[] = missingPredefinedDirs(dirs).map((dir) => `缺少预定义二级目录：${dir}`);
   const fields = scenario.data_prep_fields;
-  if (fields === undefined || fields === null) return [];
+  if (fields === undefined || fields === null) return issues;
   if (typeof fields !== 'object' || Array.isArray(fields)) {
-    return ['字段约束（data_prep_fields）须为对象'];
+    return [...issues, '字段约束（data_prep_fields）须为对象'];
   }
 
-  const issues: string[] = [];
   for (const [dir, value] of Object.entries(fields as Record<string, unknown>)) {
     if (!dirs.includes(dir)) {
       issues.push(`字段约束引用了目录清单外的目录：${dir}`);

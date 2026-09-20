@@ -50,6 +50,9 @@ export function buildMcpServerEntry(
   if (Object.keys(config.file_args).length > 0) entry.file_args = config.file_args;
   // HITL 调用确认策略：never 是运行环境缺省语义，不写空壳（与 file_args 同一口径）
   if (config.confirmation !== 'never') entry.confirmation = config.confirmation;
+  // 算法规则参数设置：空对象是缺省语义，不写空壳（同上）。
+  // 不改变是否走 HITL——不在确认范围内的工具的运行环境侧天然不生效（未被包装）。
+  if (Object.keys(config.rules_fields).length > 0) entry.rules_fields = config.rules_fields;
   return entry;
 }
 

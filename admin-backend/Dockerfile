@@ -20,7 +20,9 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-EXPOSE 3000
+# 与本地形态同一口径统一 3001（2026-09-20）；EXPOSE 仅为元数据声明，
+# 不绑定/发布端口，容器间互访走 compose 网络 + 服务名，实际监听以 PORT 环境变量为准
+EXPOSE 3001
 
-# 环境变量由 compose 注入（不使用 .env 文件）
+# 环境变量由 compose env_file 注入（容器形态配置 = 入库的 .env；不使用 .env.local）
 CMD ["node", "dist/src/server.js"]

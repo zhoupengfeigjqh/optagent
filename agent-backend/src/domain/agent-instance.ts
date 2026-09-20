@@ -122,6 +122,7 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (typeof s.permission_boundary === 'string') cfg.permissionBoundary = s.permission_boundary;
     if (s.file_args !== undefined) cfg.fileArgs = parseFileArgs(s.file_args, bad);
     if (s.confirmation !== undefined) cfg.confirmation = parseConfirmation(s.confirmation, bad);
+    if (s.rules_fields !== undefined) cfg.rulesFields = parseRulesFields(s.rules_fields, bad);
     return cfg;
   });
 }
@@ -142,6 +143,24 @@ function parseConfirmation(
     }
   }
   throw bad('confirmation 须为 "never" | "always" | {"tools": string[]}');
+}
+
+/**
+ * 解析 rules_fields：`{ 工具名: 字段名 }`，非法结构（非对象、值非非空字符串）
+ * 即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
+ */
+function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw bad('rules_fields 须为对象 { 工具名: 字段名 }');
+  }
+  const out: Record<string, string> = {};
+  for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof field !== 'string' || field.trim() === '') {
+      throw bad(`rules_fields.${tool} 须为非空字符串（字段名）`);
+    }
+    out[tool] = field.trim();
+  }
+  return out;
 }
 
 /**

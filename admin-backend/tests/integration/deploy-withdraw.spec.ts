@@ -34,7 +34,7 @@ const AGENT = {
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
-  scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+  scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
 };
 
 function revision(): number {

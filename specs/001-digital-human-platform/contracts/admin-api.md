@@ -12,7 +12,7 @@
 
 ### 0.1 基址与同源
 
-- 全部路径以 **`/api/admin/`** 开头，由 `gateway` 按最长前缀分发到 `admin-backend:3000`（`research.md` D10）。
+- 全部路径以 **`/api/admin/`** 开头，由 `gateway` 按最长前缀分发到 `admin-backend:3001`（容器内与本地形态统一口径，2026-09-20；`research.md` D10）。
 - 管理界面走**同源相对路径**，MUST NOT 直连后端容器端口（宪章「技术栈与工程约束」）。
 - 请求与响应体均为 `application/json`，除 `§4.4` 的 SKILL 上传为 `multipart/form-data`。
 - 字段命名一律**下划线**，与既有接口及 `.opt-agent` 文件格式保持同一口径。

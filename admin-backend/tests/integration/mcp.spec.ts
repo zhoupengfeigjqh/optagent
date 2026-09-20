@@ -47,7 +47,7 @@ async function createAgent(name: string, mcpServices: string[]): Promise<void> {
       enabled_tools: [],
       mcp_services: mcpServices,
       skills: [],
-      scenario: { scenario: 's', data_prep_dirs: [] },
+      scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
     },
   });
   if (res.statusCode !== 201) throw new Error(res.body);

@@ -443,6 +443,20 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
     ⑥**契约同步**：`runtime-api-delta.md` §3.1 由"判据表（本期不实现）"改写为"已实现"（解析/判定/错误响应/前端展示四段执行口径），§3 接口影响表新增上传校验与 workspace `fields` 两行。
     ⑦**测试**：agent-backend 160 用例全绿（新增 `field-check.spec.ts` 22 例：类型边界 / CSV 引号与 GBK 回退（硬编码「中国」GBK 字节 D6D0 B9FA）/ xlsx 往返 / 问题清单与截断 / 分派与魔数拦截；集成 `files-scenario.spec.ts` +6 例：缺表头不落盘、行号口径、xlsx 校验、合规落盘、无约束不触发、workspace `fields` 下发）、frontend 132 用例全绿（新增 `UploadMenu.spec.ts` 4 例提示渲染、`error-message.spec.ts` +3 例 details 透传与 D13 例外）、admin-backend 450 用例全绿（默认值变更零回归）；两侧 `tsc --noEmit` 通过。
 
+22. **（2026-09-19 二十次调整）「数据准备」预定义二级目录 `算法规则`**：需求——文件空间场景的二级目录中增加一个**平台硬编码**的预定义目录 `算法规则`，**必须存在、不可移除**，用户（管理员）可为其设计字段约束（字段数可为 0，0 条 = 无约束），不增加其他预定义目录，范围仅"数据准备"空间。处置：
+    ①**数据结构不变**：`data_prep_dirs` 保持 `string[]`，预定义目录与普通目录同列——已部署 `scenario.json` **零迁移**；新约束只是"清单 MUST 含 `算法规则`"。
+    ②**后端权威判据**（`config-center/scenario.ts`）：新增 `PREDEFINED_DATA_PREP_DIRS = ['算法规则']` 与 `missingPredefinedDirs()`，两个出口共用——`normalizeScenario` 保存路径缺失即抛（严格）；`scenarioFieldIssues` 部署前校验**先于 `data_prep_fields` 缺省早退**报告缺失（手工改过的文档兜底）；前端 `constants/agent-design.ts` 同名常量 MUST 同步。
+    ③**界面**：预定义行渲染「预定义」徽标、**无「移除」按钮**（`removeDir` 防御式拦截），字段(n) 入口照旧；新建场景初值由 `emptyScenario()` 带入预定义目录；`useAgentDesign` 的 dirty 判定排除预定义目录（初值自带不算"有输入"）。
+    ④**不强制字段**：预定义目录的存在性必填 ≠ 字段必填——`data_prep_fields` 对 `算法规则` 与其他目录同一口径（缺失即无约束）。
+    ⑤**测试**：admin-backend 32 文件全绿（`scenario.spec.ts` +2 例：缺失即拒 / 部署前兜底列出，夹具统一补入）、admin-frontend 33 文件全绿（`ScenarioEditor.spec.ts` +3 例：徽标且无移除按钮 / 仅预定义时无移除 / 0 字段不建键，`useAgentDesign.spec.ts` 初值同步）；两侧 `tsc --noEmit` 通过。
+
+23. **（2026-09-19 二十一次调整）MCP「文件参数映射」JSON 文本框 → 表格化编辑视图**：需求——`file_args` 直接填 JSON（`{工具: {路径: "url"|"url:from=…"}}`）对管理员不友好，改为"选工具、选字段"的行式表格（原型 `admin-frontend/prototype/file-args-mapping-prototype.html` 变体 A 定稿）。处置：
+    ①**存储契约零变化**：`file_args` 结构与 `MCP.json` 物化格式不动，新组件 `FileArgsMappingTable.vue` 只是编辑视图（行模型 ↔ 对象双向纯转换，提交/加载都经同一转换函数）。
+    ②**交互**：行 = 工具 / 目标字段 / 方式 / 来源字段 四列。**2026-09-19 产品决定：三列全部只能下拉选择，不允许手填**——目标字段下拉枚举自工具参数 JSON Schema 递归叶子路径（数组自动展开 `[]`，`$ref` 沿路径剪枝）；来源字段下拉**只列与目标形状相容的选项**（能选到的必然合法：段数相同、末段前逐段一致）；清单外工具与 schema 漂移的存量值作为**保留项**出现在下拉里（标「清单外」/行内报错），不回写丢失；无效行（空选项、形状不符的存量值、重复映射）行内报错且**不写入序列化结果**。
+    ③**路径判据同构**：`SEGMENT` 正则与派生相容判据镜像 `agent-backend/src/domain/file-arg-path.ts`（服务端仍是权威，前端只做编辑辅助）。
+    ④**顺路拆件**：`McpCallConfigForm.vue` 537 行超限——测试结果弹窗拆为 `McpTestResultDialog.vue`（探测逻辑留父件，弹窗自持开关与焦点归还），表单回落至 400 行内，97 文件全过 500 行门禁。
+    ⑤**测试**：admin-frontend 34 文件全绿（新增 `FileArgsMappingTable.spec.ts` 10 例：双模式回显 / Schema 枚举含数组嵌套 / 编辑与删除序列化 / 派生形状不符不写入 / 下标语法报错 / orphan 保留 / 重复告警 / 空态；`McpCallConfigForm.spec.ts` JSON 非法用例改为"表格视图提交结构不变"）；`vue-tsc` 通过。
+
 ### 真实部署发现并修复的三个缺陷
 
 冒烟确认抓出了三个只有真部署才能暴露的问题（**已修复并补回归测试**，详情见 `quickstart.md` §10.3）：

@@ -199,7 +199,7 @@
 ```nginx
 # 管理平台接口（最长前缀，优先于 /api/）
 location /api/admin/ {
-    proxy_pass http://admin-backend:3000;
+    proxy_pass http://admin-backend:3001;   # 容器内 admin-backend 监听 3001（2026-09-20 起与本地形态统一）
     ...
 }
 # 管理平台界面（静态资源）

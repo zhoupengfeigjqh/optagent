@@ -1,6 +1,11 @@
-# ===== 模型列表（config.yaml 示例）=====
-# 默认取第一项；条目 api_key 优先，缺省时用 .env 的 DEEPSEEK_API_KEY 兜底；
-# models 缺失或为空时服务拒绝启动。
+# ===== 模型列表（config.yaml 样例；本地与 Docker 形态共用同一份）=====
+#
+# 两种形态无环境差异：本地 dev 直读 cwd 下 config.yaml；容器由 compose 挂载
+#   ./agent-backend/config.yaml → /app/config.yaml:ro（见 docker-compose.yml backend 服务）。
+#
+# 规则：默认取第一项；条目 api_key 优先（支持 $ENV_VAR 引用，引用的是运行环境
+# 进程 env——本地来自 .env.local，容器来自 compose env_file 注入），
+# 缺省时用 DEEPSEEK_API_KEY 兜底；models 缺失或为空时服务拒绝启动。
 models:
   - model: deepseek-v4-flash-vision-exp
     api_key: $DEEPSEEK_API_KEY # 支持 $ENV_VAR 引用；也可直接填明文

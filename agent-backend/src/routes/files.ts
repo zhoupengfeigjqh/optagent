@@ -10,6 +10,8 @@
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
  *   按扩展名映射 Content-Type；.xlsx 回退附件下载；超过预览上限 → 413）
  * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略）
+ * - GET /api/files/rules：HITL「从算法规则选择」数据源——「数据准备/算法规则」最新
+ *   规则文件（updated_at 最大）解析成结构化行（columns/rows/priority_column）
  * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
  * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
  *
@@ -38,6 +40,7 @@ import {
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { checkUploadBuffer } from '../domain/field-check.js';
 import { removeFileSafe } from '../domain/fs-safe.js';
+import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { verifyRef } from '../infra/file-sign.js';
 
@@ -342,6 +345,58 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         .send(buf);
     },
   );
+
+  // HITL「从算法规则选择」数据源：取「数据准备/算法规则」中 updated_at 最新的
+  // 规则文件（.xlsx / .csv），解析成结构化行返回（解析在服务端，前端只渲染）。
+  app.get('/api/files/rules', async (_req) => {
+    const userId = getCurrentUser().userId;
+    const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), `${SPACE_PREP}/${RULES_SUBDIR}`);
+    const access = fileAccessFor(ctx, userId);
+
+    let entries;
+    try {
+      entries = await access.list(target.relPath);
+    } catch (err) {
+      if (err instanceof PermissionError) {
+        throw new ApiError(404, 'FILE_NOT_FOUND', `算法规则目录不可读：${target.relPath}`);
+      }
+      throw err;
+    }
+    const files = entries.filter((e) => !e.isDirectory);
+    if (files.length === 0) {
+      throw new ApiError(404, 'FILE_NOT_FOUND', `「${SPACE_PREP}/${RULES_SUBDIR}」目录暂无文件，请先上传规则文件`);
+    }
+    // 「最新」按 mtime 判定（与 list 接口的 updated_at 同一来源）
+    const latest = files.reduce((a, b) => (Date.parse(b.modifiedAt) > Date.parse(a.modifiedAt) ? b : a));
+
+    const maxBytes = ctx.config.previewMaxMb * 1024 * 1024;
+    let buf: Buffer;
+    try {
+      buf = await access.readBuffer(`${target.relPath}/${latest.name}`);
+    } catch (err) {
+      if (err instanceof PermissionError) {
+        throw new ApiError(404, 'FILE_NOT_FOUND', `规则文件不存在或已被清理: ${latest.name}`);
+      }
+      throw err;
+    }
+    if (buf.length > maxBytes) {
+      throw new ApiError(413, 'FILE_TOO_LARGE', `规则文件超过大小上限（${ctx.config.previewMaxMb}MB）`);
+    }
+
+    let parsed;
+    try {
+      parsed = parseRuleFile(latest.name, buf);
+    } catch (err) {
+      throw new ApiError(422, 'FILE_SCHEMA_INVALID', (err as Error).message);
+    }
+    return {
+      filename: latest.name,
+      updated_at: latest.modifiedAt,
+      columns: parsed.columns,
+      rows: parsed.rows,
+      priority_column: parsed.priority_column,
+    };
+  });
 
   // 文件空间删除（002 US8 / FR-031）：共享空间为只读，其余空间可删
   app.delete(

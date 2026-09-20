@@ -13,7 +13,8 @@ services:
     build: ./gateway
     container_name: optagent-gateway
     ports:
-      - "82:80"
+      # 宿主机对外端口可用根 .env 的 GATEWAY_HOST_PORT 覆盖（compose 插值，缺省 82）
+      - "${GATEWAY_HOST_PORT:-82}:80"
     depends_on:
       - frontend
       - backend
@@ -44,8 +45,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # SSRF 防护：backend（全 Docker 形态）+ 192.168.1.3（.env PUBLIC_BASE_URL 的主机，签名 URL 回源校验用）
-      - OCR_URL_ALLOW_HOSTS=backend,192.168.1.3
+      # SSRF 防护：backend（全 Docker 形态）+ 宿主机 LAN IP（签名 URL 回源校验用）。
+      # IP 可用根 .env 的 HOST_LAN_IP 覆盖（compose 插值，缺省 192.168.1.3），
+      # 必须与 agent-backend/.env 的 PUBLIC_BASE_URL 主机一致
+      - OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.1.3}
     restart: unless-stopped
     logging: *default-logging
 
@@ -59,9 +62,13 @@ services:
     # → 应用还没来得及记 shutdown.closed 就被 SIGKILL，在途回答也被硬杀。
     stop_grace_period: 25s
     env_file:
+      # .env（入库）= Docker 形态配置；.env.local（本机私产，gitignore）= 本地形态 + 密钥
+      # ——容器运行也需要密钥，故两个都注入（compose 多 env_file，后者补充/覆盖前者）
       - ./agent-backend/.env
+      - ./agent-backend/.env.local
     environment:
-      # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件
+      # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件。
+      # env_file 之后的显式覆盖，保证容器内一定是服务名口径（本机 LAN IP 只留在 .env.local）
       - PUBLIC_BASE_URL=http://backend:3000
     volumes:
       # 模型配置（必需，缺省启动失败）
@@ -80,16 +87,11 @@ services:
     container_name: optagent-admin-backend
     # 同 backend：让日志里的 hostname 可读（实例区分靠 instance_id）
     hostname: optagent-admin-backend
-    environment:
-      - PORT=3000
-      - PLATFORM_DATA_DIR=/app/.platform-data
-      - OPT_AGENT_ROOT=/app/.opt-agent
-      - COMPOSE_FILE_PATH=/app/docker-compose.yml
-      - DOCKER_SOCKET_PATH=/var/run/docker.sock
-      # 运行环境（agent-backend）只读端点基址（内置工具目录 / 调用统计）。
-      # 缺省值是 127.0.0.1:3000（宿主机本地形态），容器内必须显式指向 backend 服务名，
-      # 否则会打到 admin-backend 自己身上，表现为内置工具目录 404 / 调用统计"未知"。
-      - OPT_AGENT_BACKEND_URL=http://backend:3000
+    # 容器形态运行配置 = 入库的 .env（2026-09-20 起与 backend 段同模式）：
+    # compose 启动时注入容器，compose 文件本身不再逐行配置。
+    # 注意：变量插值（${VAR}）用的是**仓库根** .env，与 env_file 注入是两条独立通道。
+    env_file:
+      - ./admin-backend/.env
     volumes:
       # 平台设计态（读写；不进镜像；随 admin-backend 源码目录走，与 .opt-agent 布局对称）
       - ./admin-backend/.platform-data:/app/.platform-data

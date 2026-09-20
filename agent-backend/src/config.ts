@@ -21,7 +21,11 @@ const envSchema = z.object({
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
   IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(600_000),
   MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(30_000),
-  /** 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束） */
+  /**
+   * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。
+   * 改这里时 MUST 同步改：admin-backend/src/config.ts 的同名项、
+   * gateway/nginx.conf 的 client_max_body_size（= 上限 + 1MB multipart 余量）。
+   */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(10),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(32),

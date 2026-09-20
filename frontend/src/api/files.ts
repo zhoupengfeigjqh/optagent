@@ -10,7 +10,7 @@
  */
 
 import { parseErrorResponse, type HttpClient } from './http'
-import type { UploadResponse, WorkspaceFile, WorkspaceResponse } from './types'
+import type { RuleFileResponse, UploadResponse, WorkspaceFile, WorkspaceResponse } from './types'
 
 /** 文件 API 接口。 */
 export interface FilesApi {
@@ -41,6 +41,11 @@ export interface FilesApi {
   remove(dir: string, filename: string): Promise<void>
   /** `GET /api/files/workspace` → 固定 9 个目录 */
   workspace(): Promise<WorkspaceResponse>
+  /**
+   * `GET /api/files/rules` → 「数据准备/算法规则」最新规则文件的结构化行
+   * （HITL「从算法规则选择」数据源；目录为空 404、解析失败 422）
+   */
+  rules(): Promise<RuleFileResponse>
 }
 
 /** 创建文件 API。 */
@@ -93,5 +98,7 @@ export function createFilesApi(client: HttpClient): FilesApi {
     },
 
     workspace: () => client.get<WorkspaceResponse>('/api/files/workspace'),
+
+    rules: () => client.get<RuleFileResponse>('/api/files/rules'),
   }
 }

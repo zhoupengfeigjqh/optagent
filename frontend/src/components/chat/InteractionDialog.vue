@@ -23,6 +23,7 @@ import BaseButton from '../common/BaseButton.vue'
 import BaseDialog from '../common/BaseDialog.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 import MentionPicker from './MentionPicker.vue'
+import RulePickerDialog from './RulePickerDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -324,6 +325,32 @@ function onReject(): void {
   emit('reject')
 }
 
+/* ---------- 算法规则选择（服务声明 rules_field 且本工具 schema 含该字段时装配） ---------- */
+
+/** 规则选择弹窗：同一时刻只服务一个字段（弹窗单槽位，与 @ 面板同口径） */
+const rulePickerField = ref<string | null>(null)
+
+/** 该字段是否装配「从算法规则选择」入口：snapshot 声明了 rules_field 且字段本身是 json 控件 */
+function isRulesField(name: string, control: Field['control']): boolean {
+  return control === 'json' && props.request.rules_field === name
+}
+
+function openRulePicker(field: string): void {
+  rulePickerField.value = field
+}
+
+function loadRules() {
+  // session 缺失（单测/独立挂载）时按钮不渲染，这里仅为类型收敛兜底
+  return session!.files.rules()
+}
+
+/** 勾选结果写回 JSON 编辑框（可再手改，提交走原有 JSON 解析路径） */
+function onRulesPicked(field: string, value: Array<Record<string, unknown>>): void {
+  jsonTexts.value[field] = JSON.stringify(value, null, 2)
+  values.value[field] = value
+  rulePickerField.value = null
+}
+
 /* ---------- 倒计时：归零按拒绝关闭 ---------- */
 
 const remaining = ref(props.request.remaining_seconds)
@@ -437,6 +464,27 @@ onBeforeUnmount(() => {
           rows="4"
         />
 
+        <!-- 算法规则选择入口：仅 snapshot 声明 rules_field 且本会话可取文件接口时装配 -->
+        <button
+          v-if="isRulesField(field.name, field.control) && session"
+          type="button"
+          class="interaction-dialog__rules-btn"
+          :aria-label="`从算法规则选择 ${field.name}`"
+          @click="openRulePicker(field.name)"
+        >
+          从算法规则选择
+        </button>
+
+        <RulePickerDialog
+          v-if="isRulesField(field.name, field.control) && session"
+          :open="rulePickerField === field.name"
+          :field-name="field.name"
+          :initial-value="values[field.name]"
+          :load="loadRules"
+          @confirm="(value) => onRulesPicked(field.name, value)"
+          @close="rulePickerField = null"
+        />
+
         <input
           v-else
           v-model="textValues[field.name]"
@@ -480,6 +528,9 @@ onBeforeUnmount(() => {
         <p v-if="field.description" class="interaction-dialog__hint">{{ field.description }}</p>
         <p v-if="pathInsert && mentionable(field.control)" class="interaction-dialog__hint">
           输入 @ 可引用文件空间路径
+        </p>
+        <p v-if="isRulesField(field.name, field.control)" class="interaction-dialog__hint">
+          点击「从算法规则选择」读取「数据准备/算法规则」最新规则文件，勾选后生成数组填入
         </p>
       </div>
 
@@ -648,6 +699,22 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+}
+
+.interaction-dialog__rules-btn {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.interaction-dialog__rules-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
 }
 
 .interaction-dialog__error {

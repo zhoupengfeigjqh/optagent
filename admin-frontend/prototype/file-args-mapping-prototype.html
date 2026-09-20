@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<!--
+  原型（THROWAWAY）：MCP「文件参数映射」表格化编辑的界面样式对比。
+  问题：file_args 的 JSON 编辑对用户不友好，能否改为"选工具、选字段"的表格？
+  用法：双击本文件在浏览器打开；底部浮动条或 ← → 键切换变体；?variant=A|B|C 可直达。
+  注意：纯前端原型，数据为内置样例；每个变体底部的只读 JSON 预览 =
+        提交时序列化出的 file_args（存储契约不变）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型 · 文件参数映射表格化</title>
+<style>
+  :root {
+    --color-border: #d4d9e0;
+    --color-text: #1f2733;
+    --color-text-muted: #66707d;
+    --color-bg: #f5f7fa;
+    --color-panel: #ffffff;
+    --color-primary: #2f6fed;
+    --color-danger: #d5433b;
+    --color-warning: #b7791f;
+    --color-warning-bg: #fdf3e3;
+    --color-error-bg: #fdecea;
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+    --radius-sm: 4px; --radius-md: 8px;
+    --font-size-xs: 12px; --font-size-sm: 13px; --font-size-base: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--color-bg); color: var(--color-text);
+    font: var(--font-size-base)/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: var(--space-5) var(--space-4) 96px; }
+  .page h1 { font-size: 18px; margin: 0 0 var(--space-1); }
+  .page .sub { color: var(--color-text-muted); font-size: var(--font-size-sm); margin: 0 0 var(--space-4); }
+  .panel {
+    background: var(--color-panel); border: 1px solid var(--color-border);
+    border-radius: var(--radius-md); padding: var(--space-4);
+  }
+  .field__label { display: block; font-weight: 600; margin-bottom: var(--space-2); }
+  .field__hint { display: block; color: var(--color-text-muted); font-size: var(--font-size-xs); margin-top: var(--space-2); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: var(--font-size-sm); }
+  input[type="text"], select {
+    padding: 6px var(--space-2); border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm); font-size: var(--font-size-sm); width: 100%;
+  }
+  input.invalid, select.invalid { border-color: var(--color-danger); background: var(--color-error-bg); }
+  .btn {
+    padding: 6px var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+    background: #fff; cursor: pointer; font-size: var(--font-size-sm);
+  }
+  .btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+  .btn--danger { color: var(--color-danger); }
+  .btn--sm { padding: 2px var(--space-2); font-size: var(--font-size-xs); }
+  .row-error { color: var(--color-danger); font-size: var(--font-size-xs); margin-top: 2px; }
+  .badge {
+    display: inline-block; padding: 0 6px; border: 1px solid var(--color-warning);
+    color: var(--color-warning); background: var(--color-warning-bg);
+    border-radius: var(--radius-sm); font-size: var(--font-size-xs); margin-left: var(--space-2);
+  }
+  table.mapping { width: 100%; border-collapse: collapse; }
+  table.mapping th, table.mapping td {
+    text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--color-border);
+    vertical-align: top; font-size: var(--font-size-sm);
+  }
+  table.mapping th { color: var(--color-text-muted); font-weight: 600; font-size: var(--font-size-xs); }
+  .json-preview {
+    margin-top: var(--space-4); background: #0f1420; color: #b7e0c0;
+    padding: var(--space-3); border-radius: var(--radius-sm);
+    font-family: ui-monospace, Consolas, monospace; font-size: var(--font-size-xs);
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .json-preview .title { color: #7d8aa0; margin-bottom: var(--space-1); }
+  .tool-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3); }
+  .tool-card__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .tool-card__head .name { font-weight: 600; }
+  .tool-card__head .desc { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  .seg { display: inline-flex; align-items: center; gap: var(--space-1); }
+  .seg .dot { color: var(--color-text-muted); }
+  /* 浮动切换条 */
+  .switcher {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: var(--space-2);
+    background: #1f2733; color: #fff; border-radius: 999px;
+    padding: 8px var(--space-3); box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+    z-index: 99; font-size: var(--font-size-sm);
+  }
+  .switcher button {
+    background: transparent; border: 1px solid #4a5568; color: #fff;
+    border-radius: 999px; width: 28px; height: 28px; cursor: pointer;
+  }
+  .switcher button:hover { background: #374151; }
+  .switcher .label { white-space: nowrap; }
+  .switcher .label small { color: #9aa5b1; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>文件参数映射 —— 表格化编辑（原型）</h1>
+  <p class="sub">
+    三个结构不同的变体，底部浮动条切换。每步操作后看底部的只读 JSON 预览 —— 它就是提交时的
+    <span class="mono">file_args</span>（存储契约不变，表格只是编辑视图）。
+    预置样例含：单层字段、一层数组、两层数组嵌套、无 schema 工具（手填兜底）。
+  </p>
+
+  <!-- ============ 变体 A：行式表格 + 枚举下拉（方案 A） ============ -->
+  <section id="variant-A" class="panel">
+    <span class="field__label">文件参数映射</span>
+    <p class="field__hint" style="margin-top:0">
+      指明哪些入参要由运行环境铸造为签名直链。「目标字段」下拉来自该工具的参数 Schema（数组自动展开为每个元素），
+      也可手填；选「从其他字段派生」时该字段不让模型填，值从另一个字段读出后铸造。
+    </p>
+    <table class="mapping">
+      <thead>
+        <tr><th style="width:22%">工具</th><th style="width:26%">目标字段</th><th style="width:24%">方式</th><th style="width:22%">来源字段</th><th></th></tr>
+      </thead>
+      <tbody id="A-tbody"></tbody>
+    </table>
+    <div style="margin-top:var(--space-2)"><button class="btn" onclick="addRow('A')">+ 添加映射</button></div>
+    <div class="json-preview"><div class="title">file_args（序列化预览）</div><code id="A-json"></code></div>
+  </section>
+
+  <!-- ============ 变体 B：按工具分组的卡片 ============ -->
+  <section id="variant-B" class="panel hidden">
+    <span class="field__label">文件参数映射</span>
+    <p class="field__hint" style="margin-top:0">按工具分组：先选工具，再为这个工具的各个字段分别指定方式。</p>
+    <div id="B-cards"></div>
+    <div style="margin-top:var(--space-2); display:flex; gap:var(--space-2)">
+      <select id="B-newtool" style="width:auto"></select>
+      <button class="btn" onclick="addToolCard()">+ 添加工具</button>
+    </div>
+    <div class="json-preview"><div class="title">file_args（序列化预览）</div><code id="B-json"></code></div>
+  </section>
+
+  <!-- ============ 变体 C：逐段级联构建器 ============ -->
+  <section id="variant-C" class="panel hidden">
+    <span class="field__label">文件参数映射</span>
+    <p class="field__hint" style="margin-top:0">
+      一段一段构建路径：每一层从下拉选一个属性；是数组时勾选「这一层是数组」，再继续往里选。全程不出现
+      <span class="mono">[]</span> 语法。
+    </p>
+    <div id="C-rows"></div>
+    <div style="margin-top:var(--space-2)"><button class="btn" onclick="addCRow()">+ 添加映射</button></div>
+    <div class="json-preview"><div class="title">file_args（序列化预览）</div><code id="C-json"></code></div>
+  </section>
+</div>
+
+<div class="switcher">
+  <button onclick="cycle(-1)" aria-label="上一个变体">←</button>
+  <span class="label" id="switcher-label"></span>
+  <button onclick="cycle(1)" aria-label="下一个变体">→</button>
+</div>
+
+<script>
+/* ================= 样例数据（模拟 service.tools） ================= */
+const TOOLS = [
+  { name: 'ocr_image', description: '识别图片中的文字',
+    parameters: {
+      type: 'object',
+      properties: {
+        image: { type: 'string', description: '图片路径' },
+        lang: { type: 'string' },
+      },
+    } },
+  { name: 'parse_excel_files', description: '批量解析 Excel 并返回结构化结果',
+    parameters: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array', description: '文件清单',
+          items: {
+            type: 'object',
+            properties: {
+              businessType: { type: 'string' },
+              excelFileUrl: { type: 'string' },
+              attachments: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    url: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        deep: {
+          type: 'object',
+          properties: {
+            groups: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  files: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: { url: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    } },
+  { name: 'legacy_import', description: '老系统工具（schema 未声明字段）',
+    parameters: { type: 'object' } },
+];
+
+/* ================= 共用：路径枚举 + 校验 ================= */
+const SEGMENT = /^([^.[\]]+)(\[\])?$/;
+function parsePath(raw) {
+  if (typeof raw !== 'string' || raw === '') return null;
+  const steps = [];
+  for (const seg of raw.split('.')) {
+    const m = SEGMENT.exec(seg);
+    if (!m) return null;
+    steps.push({ key: m[1], array: m[2] === '[]' });
+  }
+  return steps;
+}
+/** 递归枚举 schema 下所有叶子路径；数组自动带 []，$ref 环剪枝 */
+function enumeratePaths(schema, guard) {
+  const out = [];
+  (function walk(node, prefix, seen) {
+    if (!node || typeof node !== 'object') return;
+    if (node.$ref) { if (seen.has(node.$ref)) return; seen.add(node.$ref); }
+    const type = node.type;
+    if (type === 'object' || node.properties) {
+      for (const [k, v] of Object.entries(node.properties || {})) walk(v, prefix ? prefix + '.' + k : k, new Set(seen));
+    } else if (type === 'array' || node.items) {
+      walk(node.items || {}, prefix + '[]', new Set(seen));
+    } else if (prefix) {
+      out.push(prefix); // 基本类型 = 叶子
+    }
+  })(schema, '', new Set());
+  return out;
+}
+function pathsOf(toolName) {
+  const t = TOOLS.find((x) => x.name === toolName);
+  return t ? enumeratePaths(t.parameters) : [];
+}
+/** 派生模式形状相容：段数相同，除末段外逐段一致 */
+function compatible(target, from) {
+  const a = parsePath(target), b = parsePath(from);
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length - 1; i++) if (a[i].key !== b[i].key || a[i].array !== b[i].array) return false;
+  return true;
+}
+
+/* ================= 行模型（三个变体共用一份数据） ================= */
+/** rows: [{ tool, path, mode:'url'|'derive', from, orphan? }] */
+let rows = [
+  { tool: 'ocr_image', path: 'image', mode: 'url', from: '' },
+  { tool: 'parse_excel_files', path: 'items[].excelFileUrl', mode: 'derive', from: 'items[].realRelativePath' },
+  { tool: 'legacy_import', path: 'rawPath', mode: 'url', from: '', orphan: true },
+];
+function rowError(r) {
+  if (!r.tool.trim()) return '工具名必填';
+  if (!parsePath(r.path)) return '路径非法：段不得为空、不支持下标（改用 [] 表示每个元素）';
+  if (r.mode === 'derive') {
+    if (!parsePath(r.from)) return '来源路径非法';
+    if (!compatible(r.path, r.from)) return '来源与目标结构须一一对应（数组层级一致，仅末段字段名可不同）';
+  }
+  return '';
+}
+function toFileArgs(list) {
+  const out = {};
+  for (const r of list) {
+    if (!r.tool.trim() || !r.path.trim()) continue;
+    (out[r.tool] ||= {})[r.path] = r.mode === 'derive' ? 'url:from=' + r.from : 'url';
+  }
+  return out;
+}
+function dupError(list) {
+  const seen = new Set();
+  for (const r of list) {
+    if (!r.tool.trim() || !r.path.trim()) continue;
+    const k = r.tool + '|' + r.path;
+    if (seen.has(k)) return `重复的映射：${r.tool} · ${r.path}`;
+    seen.add(k);
+  }
+  return '';
+}
+
+/* ================= 变体 A 渲染 ================= */
+function renderA() {
+  const tb = document.getElementById('A-tbody');
+  tb.innerHTML = '';
+  rows.forEach((r, i) => {
+    const err = rowError(r);
+    const paths = pathsOf(r.tool);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <input type="text" list="A-tools" value="${esc(r.tool)}" onchange="upd(${i},'tool',this.value)" class="${r.tool.trim()?'':'invalid'}">
+        ${r.orphan ? '<span class="badge">清单外工具</span>' : ''}
+      </td>
+      <td>
+        <input type="text" list="A-paths-${i}" value="${esc(r.path)}" placeholder="选字段或手填，如 items[].excelFileUrl"
+               oninput="upd(${i},'path',this.value)" class="${err && !parsePath(r.path) ? 'invalid' : ''}">
+        <datalist id="A-paths-${i}">${paths.map((p) => `<option value="${esc(p)}">`).join('')}</datalist>
+      </td>
+      <td>
+        <select onchange="upd(${i},'mode',this.value)">
+          <option value="url" ${r.mode === 'url' ? 'selected' : ''}>模型填写 → 铸造直链</option>
+          <option value="derive" ${r.mode === 'derive' ? 'selected' : ''}>从其他字段派生</option>
+        </select>
+      </td>
+      <td>
+        ${r.mode === 'derive' ? `
+          <input type="text" list="A-from-${i}" value="${esc(r.from)}" placeholder="来源字段路径"
+                 oninput="upd(${i},'from',this.value)"
+                 class="${err && r.mode==='derive' && parsePath(r.from) && !compatible(r.path,r.from) ? 'invalid' : ''}">
+          <datalist id="A-from-${i}">${paths.map((p) => `<option value="${esc(p)}">`).join('')}</datalist>`
+        : '<span style="color:var(--color-text-muted)">—</span>'}
+      </td>
+      <td><button class="btn btn--danger btn--sm" onclick="delRow(${i})">✕</button></td>`;
+    if (err) {
+      // 错误信息显示在行内最后一列（操作列）下方
+      const div = document.createElement('div');
+      div.className = 'row-error';
+      div.setAttribute('role', 'alert');
+      div.textContent = '⚠ ' + err;
+      tr.lastElementChild.appendChild(div);
+    }
+    tb.appendChild(tr);
+  });
+  const dup = dupError(rows);
+  if (dup) {
+    const p = document.createElement('p');
+    p.className = 'row-error'; p.setAttribute('role', 'alert');
+    p.textContent = '⚠ ' + dup;
+    tb.appendChild(Object.assign(document.createElement('tr'), {})).appendChild(Object.assign(document.createElement('td'), { colSpan: 5 })).appendChild(p);
+  }
+  document.getElementById('A-json').textContent = JSON.stringify(toFileArgs(rows), null, 2);
+  ensureDatalist('A-tools', TOOLS.map((t) => t.name));
+}
+function ensureDatalist(id, values) {
+  let dl = document.getElementById(id);
+  if (!dl) {
+    dl = document.createElement('datalist');
+    dl.id = id;
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = values.map((v) => `<option value="${esc(v)}">`).join('');
+}
+function upd(i, key, val) {
+  rows[i][key] = val;
+  if (key === 'tool') rows[i].orphan = !TOOLS.some((t) => t.name === val);
+  renderA(); renderB(); renderC();
+}
+function delRow(i) { rows.splice(i, 1); renderA(); renderB(); renderC(); }
+function addRow() { rows.push({ tool: '', path: '', mode: 'url', from: '' }); renderA(); renderB(); renderC(); }
+
+/* ================= 变体 B 渲染：按工具分组卡片 ================= */
+function renderB() {
+  const box = document.getElementById('B-cards');
+  box.innerHTML = '';
+  const byTool = {};
+  rows.forEach((r, i) => { (byTool[r.tool] ||= []).push({ r, i }); });
+  for (const [tool, items] of Object.entries(byTool)) {
+    const t = TOOLS.find((x) => x.name === tool);
+    const card = document.createElement('div');
+    card.className = 'tool-card';
+    const head = document.createElement('div');
+    head.className = 'tool-card__head';
+    head.innerHTML = `<span class="name mono">${esc(tool)}</span>
+      <span class="desc">${t ? esc(t.description) : '清单外工具'}</span>
+      ${t ? '' : '<span class="badge">清单外工具</span>'}`;
+    card.appendChild(head);
+    items.forEach(({ r, i }) => {
+      const line = document.createElement('div');
+      line.style.cssText = 'display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2);flex-wrap:wrap';
+      const err = rowError(r);
+      line.innerHTML = `
+        <span class="mono" style="min-width:180px">${esc(r.path) || '<span style="color:var(--color-text-muted)">（未填字段）</span>'}</span>
+        <select onchange="upd(${i},'mode',this.value)" style="width:auto">
+          <option value="url" ${r.mode==='url'?'selected':''}>模型填写 → 铸造直链</option>
+          <option value="derive" ${r.mode==='derive'?'selected':''}>派生</option>
+        </select>
+        ${r.mode==='derive' ? `<input type="text" value="${esc(r.from)}" placeholder="来源字段" style="width:200px"
+            oninput="upd(${i},'from',this.value)" class="${err?'invalid':''}">` : ''}
+        <button class="btn btn--danger btn--sm" onclick="delRow(${i})">✕</button>
+        ${err ? `<span class="row-error">⚠ ${err}</span>` : ''}`;
+      card.appendChild(line);
+    });
+    const add = document.createElement('button');
+    add.className = 'btn btn--sm';
+    add.textContent = '+ 为该工具添加字段';
+    add.onclick = () => { rows.push({ tool, path: '', mode: 'url', from: '' }); renderAll(); };
+    card.appendChild(add);
+    box.appendChild(card);
+  }
+  const sel = document.getElementById('B-newtool');
+  sel.innerHTML = TOOLS.map((t) => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  document.getElementById('B-json').textContent = JSON.stringify(toFileArgs(rows), null, 2);
+}
+function addToolCard() {
+  const name = document.getElementById('B-newtool').value;
+  if (!rows.some((r) => r.tool === name)) rows.push({ tool: name, path: '', mode: 'url', from: '' });
+  renderAll();
+}
+
+/* ================= 变体 C 渲染：逐段级联构建 ================= */
+/** cRows[i] = { tool, steps: [{key, array}], mode, fromSteps } —— 提交时拼成路径 */
+let cRows = [
+  { tool: 'ocr_image', steps: [{ key: 'image', array: false }], mode: 'url', fromSteps: null },
+  { tool: 'parse_excel_files', steps: [{ key: 'items', array: true }, { key: 'excelFileUrl', array: false }],
+    mode: 'derive', fromSteps: [{ key: 'items', array: true }, { key: 'realRelativePath', array: false }] },
+];
+function stepsToPath(steps) { return steps.map((s) => s.key + (s.array ? '[]' : '')).join('.'); }
+function schemaAt(toolName, steps) {
+  let node = TOOLS.find((x) => x.name === toolName)?.parameters;
+  for (const s of steps) {
+    if (!node) return null;
+    node = s.array ? (node.items || {}) : (node.properties || {})[s.key];
+  }
+  return node || null;
+}
+function optionsAt(toolName, steps) {
+  const node = schemaAt(toolName, steps);
+  if (!node) return { keys: [], isArrayItem: false };
+  if (node.type === 'array' || node.items) return { keys: [], isArrayItem: true, item: node.items || {} };
+  return { keys: Object.keys(node.properties || {}), isArrayItem: false };
+}
+function renderC() {
+  const box = document.getElementById('C-rows');
+  box.innerHTML = '';
+  cRows.forEach((cr, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tool-card';
+    const head = document.createElement('div');
+    head.className = 'tool-card__head';
+    head.innerHTML = `
+      <select style="width:auto" onchange="cUpd(${i},'tool',this.value)">
+        <option value="">（选工具）</option>
+        ${TOOLS.map((t) => `<option value="${esc(t.name)}" ${cr.tool===t.name?'selected':''}>${esc(t.name)}</option>`).join('')}
+      </select>
+      <button class="btn btn--danger btn--sm" onclick="cRows.splice(${i},1);renderAll()">✕</button>`;
+    wrap.appendChild(head);
+    if (cr.tool) {
+      wrap.appendChild(cascade(i, 'steps'));
+      const modeSel = document.createElement('select');
+      modeSel.style.width = 'auto';
+      modeSel.innerHTML = `<option value="url" ${cr.mode==='url'?'selected':''}>模型填写 → 铸造直链</option>
+        <option value="derive" ${cr.mode==='derive'?'selected':''}>从其他字段派生</option>`;
+      modeSel.onchange = () => { cUpd(i, 'mode', modeSel.value); };
+      wrap.appendChild(modeSel);
+      if (cr.mode === 'derive') wrap.appendChild(cascade(i, 'fromSteps'));
+      const err = rowError({ tool: cr.tool, path: stepsToPath(cr.steps), mode: cr.mode, from: stepsToPath(cr.fromSteps || []) });
+      if (err) {
+        const p = document.createElement('p');
+        p.className = 'row-error'; p.textContent = '⚠ ' + err;
+        wrap.appendChild(p);
+      }
+    }
+    box.appendChild(wrap);
+  });
+  const out = {};
+  for (const cr of cRows) {
+    if (!cr.tool) continue;
+    (out[cr.tool] ||= {})[stepsToPath(cr.steps)] = cr.mode === 'derive' ? 'url:from=' + stepsToPath(cr.fromSteps || []) : 'url';
+  }
+  document.getElementById('C-json').textContent = JSON.stringify(out, null, 2);
+}
+function cascade(rowIdx, field) {
+  const cr = cRows[rowIdx];
+  const frag = document.createElement('div');
+  frag.style.cssText = 'display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin:var(--space-2) 0';
+  frag.appendChild(Object.assign(document.createElement('span'), { className: 'field__hint', textContent: field === 'fromSteps' ? '来源：' : '目标：' }));
+  cr[field].forEach((s, si) => {
+    const seg = document.createElement('span');
+    seg.className = 'seg';
+    seg.innerHTML = `<span class="mono">${esc(s.key)}${s.array?'[]':''}</span>`;
+    if (si === cr[field].length - 1) {
+      const del = document.createElement('button');
+      del.className = 'btn btn--sm'; del.textContent = '↩ 退一层';
+      del.onclick = () => { cr[field].pop(); renderAll(); };
+      seg.appendChild(del);
+    }
+    frag.appendChild(seg);
+    if (si < cr[field].length - 1) frag.appendChild(Object.assign(document.createElement('span'), { className: 'dot', textContent: '→' }));
+  });
+  frag.appendChild(Object.assign(document.createElement('span'), { className: 'dot', textContent: cr[field].length ? '→' : '' }));
+  const opts = optionsAt(cr.tool, cr[field]);
+  if (opts.keys.length) {
+    const sel = document.createElement('select');
+    sel.style.width = 'auto';
+    sel.innerHTML = `<option value="">（选${cr[field].length?'下一层':'属性'}）</option>` +
+      opts.keys.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+    sel.onchange = () => {
+      if (sel.value) { cr[field].push({ key: sel.value, array: false }); renderAll(); }
+    };
+    frag.appendChild(sel);
+  } else if (opts.isArrayItem) {
+    frag.appendChild(Object.assign(document.createElement('span'), { className: 'field__hint', textContent: '（数组）' }));
+    const chk = document.createElement('label');
+    chk.style.cssText = 'font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center';
+    chk.innerHTML = `<input type="checkbox"> 这一层是数组 → 每个元素`;
+    chk.querySelector('input').onchange = (e) => {
+      if (cr[field].length === 0) return;
+      cr[field][cr[field].length - 1].array = e.target.checked;
+      renderAll();
+    };
+    frag.appendChild(chk);
+  } else {
+    frag.appendChild(Object.assign(document.createElement('span'), { className: 'field__hint', textContent: '(schema 未声明更深字段，可退层重选)' }));
+  }
+  return frag;
+}
+function cUpd(i, key, val) {
+  if (key === 'tool') cRows[i] = { tool: val, steps: [], mode: cRows[i].mode, fromSteps: [] };
+  renderAll();
+}
+function addCRow() { cRows.push({ tool: '', steps: [], mode: 'url', fromSteps: [] }); renderAll(); }
+
+/* ================= 工具函数与切换 ================= */
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function renderAll() { renderA(); renderB(); renderC(); }
+const VARIANTS = [
+  ['A', '行式表格 + 枚举下拉（方案 A）'],
+  ['B', '按工具分组卡片'],
+  ['C', '逐段级联构建器'],
+];
+function show(key) {
+  for (const [k] of VARIANTS) document.getElementById('variant-' + k).classList.toggle('hidden', k !== key);
+  const v = VARIANTS.find(([k]) => k === key);
+  document.getElementById('switcher-label').innerHTML = `${v[0]} — <small>${v[1]}</small>`;
+  history.replaceState(null, '', '?variant=' + key);
+}
+function cycle(dir) {
+  const cur = new URLSearchParams(location.search).get('variant') || 'A';
+  const i = VARIANTS.findIndex(([k]) => k === cur);
+  show(VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length][0]);
+}
+document.addEventListener('keydown', (e) => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+renderAll();
+show(new URLSearchParams(location.search).get('variant') || 'A');
+</script>
+</body>
+</html>

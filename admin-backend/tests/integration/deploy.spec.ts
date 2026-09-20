@@ -61,7 +61,7 @@ function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unkn
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
-    scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+    scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     ...overrides,
   };
 }
@@ -206,7 +206,7 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
       enabled_tools: ['ghost_tool'],
       mcp_services: ['ocr'],
       skills: [],
-      scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
       updated_at: '2026-09-15T00:00:00.000Z',
     });
     link('ops', ['broken']);

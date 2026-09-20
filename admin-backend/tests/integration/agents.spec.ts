@@ -32,7 +32,7 @@ const validBody = {
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
-  scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+  scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
 };
 
 beforeEach(async () => {
@@ -126,7 +126,7 @@ describe('GET /api/admin/agents/{name}', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.soul).toBe(validBody.soul);
-    expect(body.scenario.data_prep_dirs).toEqual(['生产计划']);
+    expect(body.scenario.data_prep_dirs).toEqual(['生产计划', '算法规则']);
   });
 
   it('不存在 → 404 ADM_AGENT_NOT_FOUND', async () => {

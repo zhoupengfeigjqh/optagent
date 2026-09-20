@@ -32,7 +32,7 @@ const validRaw = {
   enabled_tools: ['read_file', 'calculator'],
   mcp_services: ['ocr'],
   skills: ['pdf-parse'],
-  scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '产线电价'] },
+  scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '产线电价', '算法规则'] },
 };
 
 function expectCode(fn: () => unknown, code: string): void {
@@ -51,23 +51,23 @@ describe('validateAgentInput', () => {
     const out = validateAgentInput(validRaw, { index, takenNames: new Set() });
     expect(out.name).toBe('demo');
     expect(out.enabled_tools).toEqual(['read_file', 'calculator']);
-    expect(out.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价']);
+    expect(out.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价', '算法规则']);
   });
 
   it('边界：三类引用可为空数组，且 MUST NOT 缺字段', () => {
     const out = validateAgentInput(
-      { ...validRaw, enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: '空', data_prep_dirs: [] } },
+      { ...validRaw, enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: '空', data_prep_dirs: ['算法规则'] } },
       { index, takenNames: new Set() },
     );
     expect(out.enabled_tools).toEqual([]);
     expect(out.mcp_services).toEqual([]);
     expect(out.skills).toEqual([]);
-    expect(out.scenario.data_prep_dirs).toEqual([]);
+    expect(out.scenario.data_prep_dirs).toEqual(['算法规则']);
   });
 
   it('边界：省略三类引用字段时按空集合处理（不报错）', () => {
     const out = validateAgentInput(
-      { name: 'a', soul: 's', scenario: { scenario: 'x', data_prep_dirs: [] } },
+      { name: 'a', soul: 's', scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } },
       { index, takenNames: new Set() },
     );
     expect(out.enabled_tools).toEqual([]);
@@ -156,7 +156,7 @@ describe('validateAgentInput', () => {
       expectCode(
         () =>
           validateAgentInput(
-            { ...validRaw, scenario: { scenario, data_prep_dirs: [] } },
+            { ...validRaw, scenario: { scenario, data_prep_dirs: ['算法规则'] } },
             { index, takenNames: new Set() },
           ),
         ERROR_CODES.VALIDATION_FAILED,
@@ -185,10 +185,10 @@ describe('validateAgentInput', () => {
     }
   });
 
-  it('边界：场景目录可为空数组（合法，表示不开放任何数据准备子目录）', () => {
+  it('边界：清单仅含预定义目录（合法）；缺预定义目录即拒', () => {
     expect(() =>
       validateAgentInput(
-        { ...validRaw, scenario: { scenario: 'x', data_prep_dirs: [] } },
+        { ...validRaw, scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } },
         { index, takenNames: new Set() },
       ),
     ).not.toThrow();
@@ -245,7 +245,7 @@ describe('AgentDesignService', () => {
     expect(created.abnormal).toBe(false)
     const read = service.view('demo', index)
     expect(read.soul).toBe(validRaw.soul)
-    expect(read.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价'])
+    expect(read.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价', '算法规则'])
     expect(read.revision).toBe(created.revision)
   })
 
@@ -303,7 +303,7 @@ describe('AgentDesignService', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
       updated_at: '2026-09-15T00:00:00.000Z',
     });
 

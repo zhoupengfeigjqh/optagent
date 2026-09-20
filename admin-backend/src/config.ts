@@ -12,7 +12,9 @@ import path from 'node:path';
 import { z } from 'zod';
 
 const envSchema = z.object({
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  // 与本地形态/容器形态统一口径 3001（2026-09-20）：避开 agent-backend 的 3000；
+  // admin-frontend 的 vite proxy 与本服务两边都按 3001 约定
+  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   /** 平台设计态根目录（bind mount；不进镜像） */
   PLATFORM_DATA_DIR: z.string().min(1),
   /** 运行环境用户数据根（`.opt-agent`），与运行环境共享同一份（`FR-001`） */
@@ -31,7 +33,11 @@ const envSchema = z.object({
   RUNTIME_TIMEOUT_MS: z.coerce.number().int().min(100).default(5000),
   /** MCP 客户端超时（毫秒） */
   MCP_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
-  /** SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束） */
+  /**
+   * SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束）。
+   * 改这里时 MUST 同步改：agent-backend/src/config.ts 的同名项、
+   * gateway/nginx.conf 的 client_max_body_size（= 上限 + 1MB multipart 余量）。
+   */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   /** 平台容器是否可管理：缺省仅在容器内可用；测试可注入 */
   LOG_LEVEL: z.string().default('info'),

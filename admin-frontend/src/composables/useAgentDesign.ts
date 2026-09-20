@@ -9,6 +9,7 @@
 import { computed, ref, shallowRef } from 'vue'
 import type { AgentDesign, AgentDesignPayload, AgentScenario, ScenarioField } from '../api/types'
 import { createAgent, getAgent, updateAgent } from '../api/agents'
+import { PREDEFINED_DATA_PREP_DIRS } from '../constants/agent-design'
 import { emptyScenario } from '../constants/agent-design'
 import { toErrorInfo } from '../utils/error-message'
 import type { ErrorInfo } from '../api/types'
@@ -74,7 +75,10 @@ export function useAgentDesign() {
         draft.value.name !== '' ||
         draft.value.soul !== '' ||
         draft.value.scenario.scenario !== '' ||
-        draft.value.scenario.data_prep_dirs.length > 0 ||
+        // 预定义目录（算法规则）是新建初值自带的，不算"有输入"
+        draft.value.scenario.data_prep_dirs.some(
+          (dir) => !(PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir),
+        ) ||
         Object.keys(draft.value.scenario.data_prep_fields).length > 0
       )
     }

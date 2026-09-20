@@ -12,8 +12,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { fetchRuntimeForms } from '../../api/platform'
 import { testMcpService, type McpProbePayload } from '../../api/mcp'
 import type { ErrorInfo, McpConfirmation, McpServiceConfigPayload, McpServiceDetail, McpTestResult, RuntimeFormOption } from '../../api/types'
-import ErrorNotice from '../common/ErrorNotice.vue'
-import StatusBadge from '../common/StatusBadge.vue'
+import FileArgsMappingTable from './FileArgsMappingTable.vue'
+import RulesFieldMappingTable from './RulesFieldMappingTable.vue'
+import McpTestResultDialog from './McpTestResultDialog.vue'
 
 const props = defineProps<{
   service: McpServiceDetail
@@ -31,13 +32,16 @@ const transport = ref<'http' | 'stdio'>('http')
 const endpoints = ref<Record<string, string>>({})
 const command = ref('')
 const argsText = ref('')
-const fileArgsText = ref('{}')
+/** 文件参数映射（结构化对象；表格组件只是编辑视图，存储契约不变） */
+const fileArgs = ref<Record<string, Record<string, string>>>({})
 /** 确认策略模式：never 直跑 / always 全部工具 / custom 按工具清单 */
 const confirmationMode = ref<'never' | 'always' | 'custom'>('never')
 /** custom 模式下勾选的工具名（清单多选 + 清单外遗留项都在这个数组里） */
 const confirmationTools = ref<string[]>([])
 /** custom 且服务工具清单不可得时的手填文本（每行一个） */
 const confirmationManualText = ref('')
+/** 算法规则参数设置：`{ 工具名: 字段名 }`（空对象 = 不启用「从算法规则选择」入口） */
+const rulesFields = ref<Record<string, string>>({})
 const localError = ref<string | null>(null)
 
 /** 服务当前工具清单（来自平台对服务的最近一次探测） */
@@ -56,7 +60,9 @@ function loadFrom(service: McpServiceDetail | null): void {
   endpoints.value = { ...service.endpoints }
   command.value = service.command ?? ''
   argsText.value = (service.args ?? []).join('\n')
-  fileArgsText.value = JSON.stringify(service.file_args ?? {}, null, 2)
+  fileArgs.value = Object.fromEntries(
+    Object.entries(service.file_args ?? {}).map(([tool, mapping]) => [tool, { ...mapping }]),
+  )
   const policy = service.confirmation ?? 'never'
   if (policy === 'always') {
     confirmationMode.value = 'always'
@@ -71,7 +77,61 @@ function loadFrom(service: McpServiceDetail | null): void {
     confirmationTools.value = []
     confirmationManualText.value = ''
   }
+  rulesFields.value = { ...(service.rules_fields ?? {}) }
+  // 载入即按当前 HITL 模式收敛一次（watch 只在模式**变化**时触发）：
+  // 存量数据里"无需确认却配了规则参数"属于脏数据，与切换语义保持一致——清空
+  if (confirmationMode.value === 'never') {
+    rulesFields.value = {}
+  } else if (confirmationMode.value === 'custom') {
+    const allowed = new Set(confirmationTools.value)
+    rulesFields.value = Object.fromEntries(
+      Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
+    )
+  }
 }
+
+/**
+ * 当前 HITL 确认范围内的工具（算法规则参数设置「工具」下拉的选项源）：
+ * - never：空（表格同时被禁用并清空）；
+ * - always：清单内全部工具；
+ * - custom：勾选的工具（含清单外遗留项——与确认清单同一口径，不静默丢弃）。
+ */
+const hitlAllowedTools = computed<string[]>(() => {
+  if (confirmationMode.value === 'never') return []
+  if (confirmationMode.value === 'always') return toolCatalog.value.map((t) => t.name)
+  return [...new Set(confirmationTools.value)]
+})
+
+/** 无需确认 / 清单不可得：算法规则参数设置不可编辑（未开 HITL 时本就不生效） */
+const rulesDisabled = computed(
+  () => confirmationMode.value === 'never' || manualFallback.value,
+)
+
+/**
+ * HITL 模式切换的级联（2026-09-19 产品决定）：
+ * - 切到「无需确认」→ 清空所填（未开确认时规则入口本就不会出现，留着是脏数据）；
+ * - 切到「仅指定工具」→ 丢掉不在勾选清单里的声明；
+ * - 切到「全部工具」→ 保留全部声明。
+ */
+watch(confirmationMode, (mode) => {
+  if (mode === 'never') {
+    rulesFields.value = {}
+  } else if (mode === 'custom') {
+    const allowed = new Set(confirmationTools.value)
+    rulesFields.value = Object.fromEntries(
+      Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
+    )
+  }
+})
+
+/** 勾选清单变化：仅指定工具模式下，声明里落在清单外的行随之清掉 */
+watch(confirmationTools, (tools) => {
+  if (confirmationMode.value !== 'custom') return
+  const allowed = new Set(tools)
+  rulesFields.value = Object.fromEntries(
+    Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
+  )
+})
 
 onMounted(async () => {
   try {
@@ -84,25 +144,8 @@ onMounted(async () => {
 
 watch(() => props.service, (next) => loadFrom(next), { immediate: true })
 
-/** 解析文件参数映射：非对象或非法 JSON 一律返回 null（由调用方给出可读错误） */
-function parseFileArgs(text: string): Record<string, Record<string, string>> | null {
-  try {
-    const parsed = JSON.parse(text || '{}') as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
-    return parsed as Record<string, Record<string, string>>
-  } catch {
-    return null
-  }
-}
-
 function submit(): void {
   localError.value = null
-
-  const fileArgs = parseFileArgs(fileArgsText.value)
-  if (fileArgs === null) {
-    localError.value = '文件参数映射不是合法 JSON 对象（应为 { 工具名: { 参数名或取值路径: "url" } }）'
-    return
-  }
 
   const cleaned = cleanedEndpoints()
   if (Object.keys(cleaned).length === 0) {
@@ -142,8 +185,9 @@ function submit(): void {
             .filter((line) => line !== ''),
         }
       : {}),
-    file_args: fileArgs,
+    file_args: fileArgs.value,
     confirmation,
+    rules_fields: { ...rulesFields.value },
   }
   emit('save', payload)
 }
@@ -179,44 +223,12 @@ function probeTarget(): McpProbePayload {
 defineExpose({ probeTarget })
 
 /**
- * 连通性测试（按表单当前值探测，允许未保存）。
- *
- * 结果以**弹窗**呈现（原生 `<dialog>` + `showModal()`，与 `ConfirmDialog`
- * 同一套可访问性基线：Esc 关闭、焦点归还），不在原页面上挤占版面。
+ * 连通性测试（按表单当前值探测，允许未保存）。结果弹窗见 `McpTestResultDialog`。
  */
 const testResult = ref<McpTestResult | null>(null)
 const testBusy = ref(false)
 const testError = ref<ErrorInfo | null>(null)
-const testDialogEl = ref<HTMLDialogElement | null>(null)
-let restoreFocusTo: HTMLElement | null = null
-
-function openTestDialog(): void {
-  const el = testDialogEl.value
-  if (!el) return
-  restoreFocusTo = (document.activeElement as HTMLElement | null) ?? null
-  // jsdom 早期版本没有 showModal：降级为设置 open 属性，保证行为可测
-  if (typeof el.showModal === 'function') {
-    if (!el.open) el.showModal()
-  } else {
-    el.setAttribute('open', '')
-  }
-}
-
-function closeTestDialog(): void {
-  const el = testDialogEl.value
-  if (el) {
-    if (typeof el.close === 'function' && el.open) el.close()
-    else el.removeAttribute('open')
-  }
-  restoreFocusTo?.focus?.()
-  restoreFocusTo = null
-}
-
-function onTestDialogCancel(event: Event): void {
-  // Esc 触发：阻止浏览器默认关闭，统一走 closeTestDialog 的焦点归还流程
-  event.preventDefault()
-  closeTestDialog()
-}
+const testDialog = ref<InstanceType<typeof McpTestResultDialog> | null>(null)
 
 async function runTest(): Promise<void> {
   testBusy.value = true
@@ -232,7 +244,7 @@ async function runTest(): Promise<void> {
     emit('announce', '测试请求失败')
   } finally {
     testBusy.value = false
-    openTestDialog()
+    testDialog.value?.open()
   }
 }
 </script>
@@ -280,16 +292,7 @@ async function runTest(): Promise<void> {
       </label>
     </template>
 
-    <label class="field" for="mcp-file-args">
-      <span class="field__label">文件参数映射（JSON）</span>
-      <textarea id="mcp-file-args" v-model="fileArgsText" rows="4" />
-      <span class="field__hint">
-        形如 <code class="mono">{ "ocr_image": { "image": "url" } }</code>；入参在数组里的用
-        <code class="mono">[]</code> 表示「每个元素」，如
-        <code class="mono">{ "parse_excel_files": { "items[].excelFileUrl": "url" } }</code>。
-        运行环境会把沙箱校验后的签名直链填到该位置（值本身已是 http(s) 直链则原样透传）。
-      </span>
-    </label>
+    <FileArgsMappingTable v-model="fileArgs" :tools="toolCatalog" />
 
     <fieldset class="mcp-config-form__endpoints">
       <legend class="field__label">调用人工确认（HITL）</legend>
@@ -342,7 +345,15 @@ async function runTest(): Promise<void> {
           <template v-if="props.service.tools_truncated">清单被截断显示，完整清单以服务端为准。</template>
         </span>
       </div>
+
     </fieldset>
+
+    <RulesFieldMappingTable
+      v-model="rulesFields"
+      :tools="toolCatalog"
+      :allowed-tools="hitlAllowedTools"
+      :disabled="rulesDisabled"
+    />
 
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
 
@@ -364,60 +375,7 @@ async function runTest(): Promise<void> {
   </form>
 
   <!-- 测试结果弹窗：不在原页面上展示，避免挤占表单版面 -->
-  <dialog
-    ref="testDialogEl"
-    class="mcp-test-dialog"
-    aria-labelledby="mcp-test-dialog-title"
-    @cancel="onTestDialogCancel"
-  >
-    <div class="mcp-test-dialog__body">
-      <h2 id="mcp-test-dialog-title" class="mcp-test-dialog__title">连通性测试结果</h2>
-
-      <ErrorNotice :error="testError" title="测试请求失败" />
-
-      <div v-if="testResult" class="mcp-test-dialog__result">
-        <p class="mcp-test-dialog__summary">
-          <StatusBadge
-            :status="testResult.ok ? 'ok' : 'failed'"
-            :label="testResult.ok ? '测试通过' : '测试未通过'"
-          />
-          <span class="muted">检查时间 {{ testResult.checked_at }}</span>
-        </p>
-
-        <p v-if="testResult.target" class="mcp-test-dialog__target">
-          实际测试：<code class="mono">{{
-            testResult.target.transport === 'http' ? 'streamable-http' : 'stdio'
-          }} → {{ testResult.target.url ?? testResult.target.command ?? '（未填写地址）' }}</code>
-        </p>
-
-        <dl class="mcp-test-dialog__steps">
-          <dt>连通性</dt>
-          <dd>
-            <StatusBadge :status="testResult.connectivity.ok ? 'ok' : 'failed'" />
-            耗时 {{ testResult.connectivity.duration_ms }}ms
-            <span v-if="!testResult.connectivity.ok" class="mcp-test-dialog__reason">
-              {{ testResult.connectivity.error_code }}：{{ testResult.connectivity.message }}
-            </span>
-          </dd>
-
-          <dt>能力验证（{{ testResult.capability.method }}）</dt>
-          <dd>
-            <StatusBadge :status="testResult.capability.ok ? 'ok' : 'failed'" />
-            耗时 {{ testResult.capability.duration_ms }}ms
-            <span v-if="!testResult.capability.ok" class="mcp-test-dialog__reason">
-              {{ testResult.capability.error_code }}：{{ testResult.capability.message }}
-            </span>
-          </dd>
-        </dl>
-      </div>
-
-      <div class="mcp-test-dialog__actions">
-        <button type="button" class="btn btn--primary" data-test="close-test" @click="closeTestDialog">
-          关闭
-        </button>
-      </div>
-    </div>
-  </dialog>
+  <McpTestResultDialog ref="testDialog" :result="testResult" :error="testError" />
 </template>
 
 <style scoped>
@@ -470,67 +428,4 @@ async function runTest(): Promise<void> {
   gap: var(--space-2);
 }
 
-.mcp-test-dialog {
-  border: none;
-  border-radius: var(--radius-lg);
-  padding: 0;
-  max-width: 560px;
-  width: calc(100% - var(--space-6));
-  box-shadow: 0 12px 32px rgb(15 20 30 / 24%);
-  z-index: var(--z-index-dialog);
-}
-
-.mcp-test-dialog::backdrop {
-  background: var(--color-overlay);
-}
-
-.mcp-test-dialog__body {
-  padding: var(--space-5);
-}
-
-.mcp-test-dialog__title {
-  margin: 0;
-  font-size: var(--font-size-lg);
-}
-
-.mcp-test-dialog__summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: var(--space-3) 0 var(--space-2);
-}
-
-.mcp-test-dialog__target {
-  margin: 0 0 var(--space-2);
-  font-size: var(--font-size-sm);
-  overflow-wrap: anywhere;
-}
-
-.mcp-test-dialog__steps {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: var(--space-1) var(--space-3);
-  margin: 0;
-  font-size: var(--font-size-sm);
-}
-
-.mcp-test-dialog__steps dt {
-  color: var(--color-text-muted);
-}
-
-.mcp-test-dialog__steps dd {
-  margin: 0;
-}
-
-.mcp-test-dialog__reason {
-  display: block;
-  color: var(--color-status-error);
-  font-size: var(--font-size-xs);
-}
-
-.mcp-test-dialog__actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--space-5);
-}
 </style>

@@ -30,7 +30,7 @@
 | 既有对话工作台 | `frontend/` | `/` | 不随本特性改动 |
 | 既有对话后端 | `agent-backend/` | `/api/` → `3000` | 本特性**只新增**两个只读端点 |
 | **管理界面（新）** | `admin-frontend/` | `/admin/` | 本特性新增 |
-| **管理服务（新）** | `admin-backend/` | `/api/admin/` → `3000` | 本特性新增 |
+| **管理服务（新）** | `admin-backend/` | `/api/admin/` → `3001`（2026-09-20 起容器内与本地形态统一；经 gateway 分发，外部不可直连） | 本特性新增 |
 | OCR MCP 服务 | `ocr-service/` | 仅内网 | 本特性不改动 |
 | 平台设计态 | `admin-backend/.platform-data/` | — | bind mount；**不进镜像**（2026-09-15 由根目录 `platform-data/` 迁入 admin-backend 源码目录，与 `.opt-agent/` 布局对称） |
 

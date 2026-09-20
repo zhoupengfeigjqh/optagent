@@ -16,9 +16,23 @@ import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 
 import type { InteractionSink } from '../domain/interaction-gate.js';
 
-export function wrapToolWithInteraction(tool: AgentTool, sink: InteractionSink): AgentTool {
+export function wrapToolWithInteraction(
+  tool: AgentTool,
+  sink: InteractionSink,
+  rulesField?: string,
+): AgentTool {
   return {
     ...tool,
+    /**
+     * HITL 工具强制串行执行（pi 的 per-tool 覆盖；批次内任一 sequential 工具 ⇒ 整批串行）。
+     * 原因：并行批次里多个需确认调用会**同时**挂起（gate 支持并发，maxPending=3），
+     * 而前端交互弹窗是单槽位——后到的 interaction_request 覆盖先到的，被覆盖的挂起点
+     * 在 UI 不可达也不可操作，run 的 Promise.all 要等它超时（300s）才推进，
+     * 表现为「提交弹窗后界面卡死，刷新才看到下一个」（2026-09-19 实踩）。
+     * 串行化保证任意时刻最多一个挂起点；代价是同批工具不再并行——HITL 场景下
+     * 「一个接一个确认」本来就是更合理的交互语义。
+     */
+    executionMode: 'sequential',
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const schema =
         typeof tool.parameters === 'object' && tool.parameters !== null
@@ -29,12 +43,21 @@ export function wrapToolWithInteraction(tool: AgentTool, sink: InteractionSink):
           ? (params as Record<string, unknown>)
           : {};
 
+      // 规则字段声明仅在**本工具 schema 确实含该字段**时下发——避免给无关工具的快照
+      // 注入无意义声明（配置是服务级的，工具是服务内多个之一的常见形态）
+      const hasRulesField =
+        rulesField !== undefined &&
+        typeof schema.properties === 'object' &&
+        schema.properties !== null &&
+        rulesField in (schema.properties as Record<string, unknown>);
+
       const outcome = await sink.request({
         callId: toolCallId,
         toolName: tool.name,
         toolDescription: tool.description,
         schema,
         proposedArgs: proposed,
+        ...(hasRulesField ? { rulesField } : {}),
       });
 
       if (outcome.kind !== 'submit') {

@@ -14,6 +14,7 @@
  */
 import { computed, ref } from 'vue'
 import type { ScenarioField } from '../../api/types'
+import { PREDEFINED_DATA_PREP_DIRS } from '../../constants/agent-design'
 import ScenarioFieldDialog from './ScenarioFieldDialog.vue'
 
 export interface ScenarioValue {
@@ -41,6 +42,11 @@ const editingFields = ref<ScenarioField[]>([])
 /** 该目录当前的字段约束（缺失即"无约束"） */
 function fieldsOf(dir: string): ScenarioField[] {
   return props.modelValue.data_prep_fields?.[dir] ?? []
+}
+
+/** 预定义目录（平台硬编码）：始终存在、不可移除，但**不强制**字段约束 */
+function isPredefined(dir: string): boolean {
+  return (PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir)
 }
 
 function openFieldDialog(dir: string): void {
@@ -107,9 +113,11 @@ function addDir(): void {
  * 移除目录：**同时移除其字段约束**（键是目录名，不清理会留下孤儿约束）。
  *
  * 只动配置，**不动文件系统**——被移除目录下的既有文件仍保留在用户空间。
+ * 预定义目录不可移除（后端保存时同样拒绝缺失预定义目录的清单）。
  */
 function removeDir(index: number): void {
   const dir = props.modelValue.data_prep_dirs[index]
+  if (isPredefined(dir)) return
   const nextDirs = props.modelValue.data_prep_dirs.filter((_, i) => i !== index)
   const nextFields: Record<string, ScenarioField[]> = { ...(props.modelValue.data_prep_fields ?? {}) }
   delete nextFields[dir]
@@ -145,12 +153,16 @@ function removeDir(index: number): void {
     <fieldset class="scenario-editor__dirs">
       <legend class="field__label">「数据准备」二级目录清单</legend>
       <p class="field__hint">
-        仅这些子目录对数字人可见。**收缩清单不会删除已有文件**——被移除的目录及其内容仍保留在用户空间。
+        仅这些子目录对数字人可见。「算法规则」为平台预定义目录，始终存在、不可移除，但字段约束可自由配置（可为 0 条）。
+        **收缩清单不会删除已有文件**——被移除的目录及其内容仍保留在用户空间。
       </p>
 
       <ul v-if="modelValue.data_prep_dirs.length > 0" class="scenario-editor__list">
         <li v-for="(dir, index) in modelValue.data_prep_dirs" :key="`${dir}-${index}`">
           <span class="mono">{{ dir }}</span>
+          <span v-if="isPredefined(dir)" class="scenario-editor__badge" data-test="predefined-badge">
+            预定义
+          </span>
           <span class="scenario-editor__row-actions">
             <button
               type="button"
@@ -162,6 +174,7 @@ function removeDir(index: number): void {
               字段({{ fieldsOf(dir).length }})
             </button>
             <button
+              v-if="!isPredefined(dir)"
               type="button"
               class="btn"
               :aria-label="`移除目录 ${dir}`"
@@ -172,7 +185,9 @@ function removeDir(index: number): void {
           </span>
         </li>
       </ul>
-      <p v-else class="field__hint">当前未配置二级目录（合法：表示不开放任何数据准备子目录）。</p>
+      <p v-else class="field__hint">
+        当前清单为空——缺少预定义目录「算法规则」，保存时会被后端拒绝。
+      </p>
 
       <div class="scenario-editor__add">
         <label class="visually-hidden" for="scenario-new-dir">新增二级目录名</label>
@@ -232,6 +247,15 @@ function removeDir(index: number): void {
 .scenario-editor__row-actions {
   display: inline-flex;
   gap: var(--space-2);
+}
+
+.scenario-editor__badge {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 
 .scenario-editor__add {

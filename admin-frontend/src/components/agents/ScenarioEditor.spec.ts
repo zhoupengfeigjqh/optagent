@@ -92,10 +92,35 @@ describe('ScenarioEditor', () => {
     expect(wrapper.text()).toContain('存在重复目录名')
   })
 
-  it('边界：空清单合法，且提示"收缩清单不会删除已有文件"', () => {
+  it('边界：空清单提示缺少预定义目录（保存时会被后端拒绝）', () => {
     const wrapper = mountEditor('生产', [])
-    expect(wrapper.text()).toContain('未配置二级目录')
+    expect(wrapper.text()).toContain('缺少预定义目录「算法规则」')
     expect(wrapper.text()).toContain('不会删除已有文件')
+  })
+
+  it('预定义目录「算法规则」显示标识且**不可移除**（无「移除」按钮）', () => {
+    const wrapper = mountEditor('生产', ['算法规则', '生产计划'])
+    expect(wrapper.find('[data-test="predefined-badge"]').exists()).toBe(true)
+    // 预定义行没有「移除」按钮；自定义目录仍有
+    expect(wrapper.findAll('button').filter((b) => b.text() === '移除').length).toBe(1)
+  })
+
+  it('仅预定义目录在清单中时，整行无「移除」按钮（防御式拦截 removeDir）', async () => {
+    const wrapper = mountEditor('生产', ['算法规则'])
+    expect(wrapper.findAll('button').filter((b) => b.text() === '移除').length).toBe(0)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('预定义目录仍可配置字段，且 0 条字段 = 无约束（不强制字段）', async () => {
+    const wrapper = mountEditor('生产', ['算法规则'])
+    await wrapper.find('[data-test="field-算法规则"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-test="save"]').trigger('click')
+
+    const emitted = wrapper.emitted('update:modelValue')?.[0]?.[0] as {
+      data_prep_fields: Record<string, unknown>
+    }
+    expect(emitted.data_prep_fields).toEqual({})
   })
 
   it('新增目录后**立即弹出**字段约束窗口（标题含目录名）', async () => {

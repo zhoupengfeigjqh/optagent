@@ -140,7 +140,7 @@ describe('POST /api/admin/skills/install', () => {
         enabled_tools: [],
         mcp_services: [],
         skills: [],
-        scenario: { scenario: 's', data_prep_dirs: [] },
+        scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
       },
     });
     await install(zipFixture({ 'SKILL.md': SKILL_MD }));
@@ -312,7 +312,7 @@ describe('PUT /api/admin/skills/{name}/file（在线编辑，2026-09-16）', () 
         enabled_tools: [],
         mcp_services: [],
         skills: ['pdf-parse'],
-        scenario: { scenario: 's', data_prep_dirs: [] },
+        scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
       },
     });
 
@@ -351,7 +351,7 @@ describe('DELETE /api/admin/skills/{name}', () => {
         enabled_tools: [],
         mcp_services: [],
         skills: ['pdf-parse'],
-        scenario: { scenario: 's', data_prep_dirs: [] },
+        scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
       },
     });
     fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());

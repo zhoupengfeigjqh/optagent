@@ -50,7 +50,7 @@ describe('emptyDraft', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: '', data_prep_dirs: [], data_prep_fields: {} },
+      scenario: { scenario: '', data_prep_dirs: ['算法规则'], data_prep_fields: {} },
     })
   })
 })

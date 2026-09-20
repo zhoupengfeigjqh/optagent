@@ -20,6 +20,7 @@
 | R6 | `docker-compose.yml`：新增 2 个服务，清理 2 个过时 test profile | 编排 | 否 |
 | R7 | 数字人配置**"变化即失效"**：取用池中实例前比对配置指纹 | 行为变更 | 否（端点契约不变，但**实例复用时机改变**） |
 | R8 | MCP 工具调用**人工参数确认**（HITL）：`interaction_request` SSE 事件 + `POST /api/threads/{id}/interaction`，MCP 服务配置新增 `confirmation` 策略字段 | 新增事件/端点/配置字段 | 否（`confirmation` 缺省 `never`，存量行为零变化） |
+| R9 | HITL 参数确认窗**算法规则选择**：MCP 服务配置新增 `rules_fields`（`{ 工具名: 字段名 }`，当日由 string 版 `rules_field` 升级），`interaction_request`/快照新增可选 `rules_field`（单次交互粒度投影），新增 `GET /api/files/rules`（只读） | 新增端点 + 配置字段 + 可选事件字段 | 否（`rules_fields` 缺省 `{}` 不启用，存量快照不写该键；历史 string 版存档读取收敛为 `{}`） |
 
 **对既有前端（对话工作台）的影响：无。** R2/R4 的消费方是 `admin-backend`（服务端到服务端），既有 `frontend` 不调用它们，故其 `src/api/types.ts` 与 `src/utils/error-message.ts` **无需改动**。
 
@@ -253,7 +254,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 ```nginx
 # ---- 数字人管理平台：管理服务接口（最长前缀，优先于 /api/）----
 location /api/admin/ {
-    proxy_pass http://admin-backend:3000;
+    proxy_pass http://admin-backend:3001;   # 2026-09-20：容器内 admin-backend 统一改监听 3001（与本地形态同一口径）
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -276,6 +277,12 @@ location /admin/ {
 
 ## §6 R6 — `docker-compose.yml` 改动
 
+> 2026-09-20 更新（两轮）：① admin-backend 容器形态配置由 compose `environment` 逐行声明收敛为
+> `env_file` 注入（与 backend 段同模式）；② 当日稍后统一为分层约定——两个后端均为
+> `.env`（入库：agent=形态默认值 / admin=容器形态）+ `.env.local`（本机私产，gitignore）
+> + `.env.example`（= .env.local 的创建样板）；compose 形态差异项（`PUBLIC_BASE_URL`）
+> 仍由 `environment` 单点覆盖。下方为历史决策记录。
+
 新增两个服务（`research.md` D2/D3）：
 
 ```yaml
@@ -283,7 +290,7 @@ location /admin/ {
     build: ./admin-backend
     container_name: optagent-admin-backend
     environment:
-      - PUBLIC_BASE_URL=http://admin-backend:3000   # 若需要
+      - PUBLIC_BASE_URL=http://admin-backend:3001   # 若需要
     volumes:
       - ./admin-backend/.platform-data:/app/.platform-data  # 平台设计态（读写；与 .opt-agent 布局对称）
       - ./agent-backend/.opt-agent:/app/.opt-agent   # 物化目标（读写）
@@ -379,6 +386,13 @@ MCP 服务调用配置新增 `confirmation` 字段（缺省 `never`，**存量�
 
 经部署物化进运行环境 `MCP.json` 的 server 条目（`never` 时**不写该字段**）；运行环境 `agent-instance.ts` 在加载期校验形状，非法即 `AgentConfigError` 挡下该数字人（不把 typo 静默当 never）。
 
+**2026-09-19 新增 `rules_fields`**（HITL 规则选择器声明，配合 R9；当日由 string 版 `rules_field` 升级为按工具映射）：MCP 服务调用配置的可选字段，形状 `{ 工具名: 字段名 }`——声明该工具入参里承载 `array[object]` 规则清单的字段。语义边界：
+
+- **不改变是否走 HITL**——是否弹参数确认窗仍只由 `confirmation` 决定；`confirmation: never` 时参数由模型直接填写，`rules_fields` 不生效（无挂起点即无快照即无入口）；不在确认范围内的工具的映射同样不生效（工具未被包装）；
+- 装配时按**当前工具名**查映射，且该工具 schema 确实含此字段时，运行环境把字段名带进 interaction 快照（快照内仍叫 `rules_field`，单次交互粒度的投影）；
+- 物化口径与 `confirmation` 相同：空对象不写该字段；平台侧保存期校验（非对象/值非非空字符串即 `VALIDATION_FAILED`），运行环境加载期校验（非法即 `AgentConfigError`）；历史存档的 string 版 `rules_field` 读取时收敛为 `{}`；
+- 管理端表单联动（产品决定，2026-09-19）：该设置独立成栏、位于 HITL 栏之下并与「URL铸造参数设置」平级；HITL = 无需确认 → 栏禁用且所填清空；仅指定工具 → 工具列只列勾选工具、清单外声明级联清掉；全部工具 → 全部可选。「字段」下拉 = 该工具参数 Schema 中 `type: "array"` 的入参。
+
 ### 9.3 SSE 事件（非终结事件）
 
 `POST /api/threads/{id}/messages` 的流中新增：
@@ -393,8 +407,9 @@ data: {
   "schema": { … },              // 工具的 inputSchema（JSON Schema draft 子集）
   "proposed_args": { … },       // 模型提议值（预填，用户可改）
   "required": [ … ],
-  "timeout_seconds": 300        // 超时按拒绝收尾
-}
+  "timeout_seconds": 300,       // 超时按拒绝收尾
+  "rules_field": "rules"        // 可选（R9）：服务按工具声明（rules_fields 映射）且
+}                               //       工具 schema 含该字段时才有；快照内为单次交互投影
 ```
 
 ### 9.4 端点
@@ -431,3 +446,27 @@ data: {
 - `frontend` 新增通用组件 `InteractionDialog.vue`：props 仅 `{ request: InteractionRequest }`、emits 仅 `submit(args)`/`reject()`——**组件内禁止出现任何具体工具/MCP 服务名**；
 - 控件映射：`enum→下拉`、`boolean→开关`、`integer/number→数字输入`、`string→输入框`（description 含「多行」→ 多行文本）、`object/array→JSON 文本`；required 标星 + 本地校验；
 - 倒计时取 `timeout_seconds`，归零按拒绝关闭；终验失败展示后端逐字段错误并保持弹窗。
+
+### 9.7 算法规则选择（R9，2026-09-19）
+
+**交互**：HITL 参数确认窗中，快照声明了 `rules_field` 的 JSON 字段旁渲染「从算法规则选择」按钮（未声明不渲染）；点击弹结构化表格——列 = 最新规则文件表头，行首勾选，**优先级列（表头匹配 `priority`/`优先级`）就地编辑**（数字文本转数字，留空则不携带该键），其余列只读；确认后勾选行原样生成 `array[object]`（**键 = 表头列名，值 = 该行该列的值**）写回 JSON 编辑框（可再手改），提交仍走 §9.4 服务端终验。
+
+**数据源端点（新）**：`GET /api/files/rules` —— 取「数据准备/算法规则」中 `updated_at` 最新的规则文件（`.xlsx`/`.csv`），**服务端解析**（运行环境已带 `xlsx` 依赖；CSV 按 UTF-8 解码，xlsx 先验 ZIP 魔数防"改后缀文本"蒙混），返回：
+
+```jsonc
+{
+  "filename": "rules_20260919.xlsx",
+  "updated_at": "2026-09-19T08:00:00.000Z",
+  "columns": ["规则编码", "规则名称", "优先级"],   // 表头（保持文件内顺序）
+  "rows": [{ "规则编码": "R001", "…": "…" }],        // 数据行（键 = 表头列名）
+  "priority_column": "优先级"                        // 表头里匹配 priority/优先级 的列；无则 null
+}
+```
+
+| 错误码 | 状态 | 语义 |
+|---|---|---|
+| `FILE_NOT_FOUND` | 404 | 目录暂无文件 / 目录不可读 / 文件已被清理 |
+| `FILE_TOO_LARGE` | 413 | 超过预览上限（与预览同一上限） |
+| `FILE_SCHEMA_INVALID` | 422 | 解析失败：损坏、空表头/重复列名、行数超上限（1000） |
+
+**组件**：`RulePickerDialog.vue`——`load` 由父级注入（会话环境取 `session.files.rules()`），组件不直接发请求；`initialValue` 反勾选（当前参数值里与某行全等的元素预勾选）。**不加表头兜底列**：「数据准备」目录的字段约束已保证规则文件必有优先级列（预定义目录「算法规则」，2026-09-19）。

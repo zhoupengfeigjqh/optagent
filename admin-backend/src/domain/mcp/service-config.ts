@@ -50,6 +50,15 @@ export interface McpServiceConfig {
    * 原始工具名需确认。经部署物化进运行环境 `MCP.json` 后由 agent-backend 装配生效。
    */
   confirmation: McpConfirmation;
+  /**
+   * 算法规则参数设置（可选，空对象 = 不启用）：`{ 工具名: 字段名 }`——该工具
+   * 入参里承载 `array[object]` 规则清单的字段。声明后，用户侧 HITL 参数确认窗中
+   * 该字段出现「从算法规则选择」入口（读取「数据准备/算法规则」最新规则文件）；
+   * 运行环境据此把字段名带进 interaction 快照。**不改变是否走 HITL**
+   * （仍只由 `confirmation` 决定）：`confirmation: never` 时本映射不生效。
+   * 工具不在确认范围内时的映射同样不生效（工具未被包装即无挂起点）。
+   */
+  rules_fields: Record<string, string>;
   updated_at: string;
 }
 
@@ -70,6 +79,7 @@ export interface McpConfigInput {
   permission_scope?: unknown;
   file_args?: unknown;
   confirmation?: unknown;
+  rules_fields?: unknown;
 }
 
 export class McpServiceConfigService {
@@ -169,6 +179,7 @@ export class McpServiceConfigService {
       args,
       file_args: normalizeFileArgs(input.file_args),
       confirmation: normalizeConfirmation(input.confirmation),
+      rules_fields: normalizeRulesFields(input.rules_fields),
       updated_at: new Date().toISOString(),
     };
   }
@@ -191,8 +202,47 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
     file_args: raw.file_args ?? {},
     // 历史存档无该字段：读取时容错收敛为 never（存量行为不变）
     confirmation: readConfirmation(raw.confirmation),
+    // 历史存档无该字段（或 2026-09-19 早些时候的 string 版 `rules_field`，
+    // 工具名不可得）：一律收敛为 {}（不启用规则选择器）
+    rules_fields: readRulesFields(raw.rules_fields ?? (raw as { rules_field?: unknown }).rules_field),
     updated_at: raw.updated_at,
   };
+}
+
+/**
+ * 算法规则参数设置（保存期）：`{ 工具名: 字段名 }`。
+ * 缺省 → `{}`（不启用）；非对象/键或值非非空字符串 → 报错——typo 挡在保存期，
+ * 避免"以为开了选择器实际没开"。
+ */
+function normalizeRulesFields(raw: unknown): Record<string, string> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'rules_fields 须为对象 { 工具名: 字段名 }，可为 {}');
+  }
+  const out: Record<string, string> = {};
+  for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof field !== 'string' || field.trim() === '') {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `rules_fields.${tool} 须为非空字符串（字段名）`,
+      );
+    }
+    out[tool] = field.trim();
+  }
+  return out;
+}
+
+/**
+ * 读取路径的容错收敛：历史存档里的 string 版 `rules_field`（无工具名可归属）
+ * 与任何残缺值一律收敛为 `{}`（不阻断读取存量文档，存量行为 = 不启用）。
+ */
+function readRulesFields(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof field === 'string' && field.trim() !== '') out[tool] = field.trim();
+  }
+  return out;
 }
 
 /** 读取路径的容错收敛：不认识/残缺的值一律回落 never（不阻断读取存量文档） */

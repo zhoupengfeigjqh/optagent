@@ -75,8 +75,31 @@ optagent/
 │
 ├── gateway/                # 生产网关（nginx）
 ├── specs/                  # 需求/设计规格文档
-└── docker-compose.yml      # Docker 编排（OCR 等）
+├── .env.example            # 编排层变量样例（compose 插值专用，见下「配置地图」）
+└── docker-compose.yml      # Docker 编排（OCR 等；同时是容器形态运行配置的权威源）
 ```
+
+## 配置地图：env / config 归属一览
+
+两个后端统一为 **`.env`（入库 = Docker 形态）/ `.env.local`（本机私产 = 本地形态）** 严格分工（2026-09-20）：
+
+| 文件 | 归属 | 消费方 | 说明 |
+|---|---|---|---|
+| `agent-backend/.env` | 运行环境 | 仅 compose `env_file` 注入容器 | **Docker 形态**配置（端口/路径/超时，**无密钥**，随仓库入库） |
+| `agent-backend/.env.local` | 运行环境 | 本地 `--env-file`（仅本地）+ compose 注入（提供密钥） | **本地形态完整配置**（含密钥 + LAN IP），gitignore；样板 `.env.example` |
+| `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
+| `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
+| `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
+| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `HOST_LAN_IP` / `GATEWAY_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
+| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络/单点覆盖（`PUBLIC_BASE_URL`） |
+
+读取规则（2026-09-20 严格分工）：
+- **容器**：compose `env_file` 注入——admin 只读 `.env`；agent 读 `.env` + `.env.local`
+  （运行需要密钥），`PUBLIC_BASE_URL` 由 compose `environment` 单点覆盖为服务名口径；
+- **本地**：dev/start 只读 `.env.local`（`--env-file=.env.local`），不读 `.env`。
+  `.env.local` 是**完整的本地形态配置**（非增量覆盖），样板 `.env.example` 含两形态完整对照。
+换机器/换网络时通常只动两处：`agent-backend/.env.local` 的 `PUBLIC_BASE_URL` 和
+根 `.env` 的 `HOST_LAN_IP`（二者 MUST 一致，见下「本地配置要点」）。
 
 ## 功能模块说明
 
@@ -193,10 +216,10 @@ docker compose up -d ocr        # 首次构建镜像较慢；模型加载约 30 
 
 ```bash
 cd agent-backend
-cp .env.example .env            # 首次：复制环境变量，按下方「本地配置要点」修改
+cp .env.example .env.local      # 首次：本地形态完整配置（密钥 + LAN IP + 运行参数，gitignore 不入库）
 cp config.example.yaml config.yaml  # 首次：复制配置，填入模型 API Key
 npm install                     # 首次
-npm run dev                     # tsx watch + .env 热加载
+npm run dev                     # tsx watch，只读 .env.local
 ```
 
 ### 3. Agent 前端（端口 5173）
@@ -211,6 +234,7 @@ npm run dev
 
 ```bash
 cd admin-backend
+cp .env.example .env.local      # 首次：本机私产（宿主机路径口径，gitignore 不入库）
 npm install                     # 首次
 npm run dev
 ```
@@ -232,20 +256,21 @@ agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `
 | 配置项 | 位置 | 作用 |
 |---|---|---|
 | `PUBLIC_BASE_URL` | `agent-backend/.env` | 铸造签名 URL 时使用的对外基址 |
-| `OCR_URL_ALLOW_HOSTS` | `docker-compose.yml` → `ocr` 服务的 `environment` | OCR 回源 SSRF 白名单，对签名 URL 的 host 做**字符串精确匹配** |
+| `HOST_LAN_IP` | **根 `.env`**（compose 插值注入 `OCR_URL_ALLOW_HOSTS`） | 宿主机 LAN IP；不配则缺省 `192.168.1.3` |
 
 ```env
-# agent-backend/.env
+# agent-backend/.env.local
 PUBLIC_BASE_URL=http://192.168.1.3:3000
 ```
 
-```yaml
-# docker-compose.yml → ocr
-environment:
-  OCR_URL_ALLOW_HOSTS: backend,192.168.1.3
+```env
+# 根 .env（首次：cp .env.example .env）；只改这一处，不必动 docker-compose.yml
+HOST_LAN_IP=192.168.1.3
 ```
 
-> `backend` 保留给全 Docker 部署形态（容器内互访）；本地运行时 backend 跑在宿主机，OCR 容器需经宿主 IP 回源。
+> `docker-compose.yml` 里 `OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.1.3}`：
+> `backend` 保留给全 Docker 部署形态（容器内互访）；本地运行时 backend 跑在宿主机，
+> OCR 容器需经宿主 IP 回源，该 IP 即 `HOST_LAN_IP`。
 
 改完后需要重建 OCR 容器、重启 backend 才生效：
 

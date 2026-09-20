@@ -23,7 +23,7 @@ function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocume
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
-    scenario: { scenario: '生产', data_prep_dirs: ['生产计划'] },
+    scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     updated_at: '2026-09-15T00:00:00.000Z',
     ...overrides,
   };
@@ -61,7 +61,7 @@ describe('runPrecheck', () => {
   it('① 配置完整性：场景配置不完整 → config_integrity', () => {
     const errors = runPrecheck(
       input({
-        readDesign: () => design({ scenario: { scenario: '', data_prep_dirs: [] } }),
+        readDesign: () => design({ scenario: { scenario: '', data_prep_dirs: ['算法规则'] } }),
       }),
     );
     expect(errors.some((e) => e.category === 'config_integrity')).toBe(true);
@@ -71,7 +71,7 @@ describe('runPrecheck', () => {
     const errors = runPrecheck(
       input({
         readDesign: () =>
-          design({ enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: 'x', data_prep_dirs: [] } }),
+          design({ enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } }),
       }),
     );
     expect(errors).toEqual([]);
@@ -84,7 +84,7 @@ describe('runPrecheck', () => {
           design({
             scenario: {
               scenario: '生产',
-              data_prep_dirs: ['生产计划'],
+              data_prep_dirs: ['生产计划', '算法规则'],
               data_prep_fields: {
                 生产计划: [{ name: '产线编号', type: 'text' as never, required: true }],
                 不在清单: [{ name: 'x', type: 'string', required: true }],
@@ -107,7 +107,7 @@ describe('runPrecheck', () => {
           design({
             scenario: {
               scenario: '生产',
-              data_prep_dirs: ['生产计划'],
+              data_prep_dirs: ['生产计划', '算法规则'],
               data_prep_fields: {
                 生产计划: [{ name: '产线编号', type: 'string', required: true }],
               },

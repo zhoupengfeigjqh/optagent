@@ -216,3 +216,32 @@ describe('MCP.json 的 confirmation 调用确认策略（HITL）', () => {
     }
   });
 });
+
+describe('MCP.json 的 rules_fields 算法规则参数设置（按工具映射）', () => {
+  const withRulesFields = (rules_fields: unknown) => ({
+    name: 'svc',
+    transport: 'http',
+    url: 'http://svc:8000/mcp',
+    rules_fields,
+  });
+
+  it('缺省：不写入 rulesFields（不启用）', () => {
+    const a = loadAgentConfig(writeAgent('demo', [httpServer('http')]));
+    expect(a.mcpServers[0]?.rulesFields).toBeUndefined();
+  });
+
+  it('{ 工具名: 字段名 }：去空白后解析进 McpServerConfig.rulesFields', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withRulesFields({ optimize: '  rules  ' })]),
+    );
+    expect(bundle.mcpServers[0]?.rulesFields).toEqual({ optimize: 'rules' });
+  });
+
+  it('非法结构（非对象 / 值非非空字符串）→ AgentConfigError（typo 挡在加载期）', () => {
+    for (const bad of ['rules', 42, { optimize: 42 }, { optimize: '  ' }]) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withRulesFields(bad)]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+});

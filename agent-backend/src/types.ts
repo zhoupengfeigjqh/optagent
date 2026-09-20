@@ -193,6 +193,14 @@ export interface McpServerConfig {
   url?: string; // http
   /** 调用确认策略（缺省 `never`） */
   confirmation?: McpConfirmation;
+  /**
+   * 算法规则参数设置（可选）：`{ 工具名: 字段名 }`——该工具入参里承载
+   * `array[object]` 规则清单的字段。声明后 HITL 确认窗中该字段旁出现
+   * 「从算法规则选择」入口（读取「数据准备/算法规则」最新规则文件），
+   * 由包装层把字段名带进 interaction 快照。装配时按**当前工具名**查本映射；
+   * 空/缺省 = 不启用。不改变是否走 HITL（仍只由 confirmation 决定）。
+   */
+  rulesFields?: Record<string, string>;
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;

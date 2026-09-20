@@ -30,6 +30,11 @@ export interface InteractionRequestInput {
   schema: Record<string, unknown>;
   /** 模型提议的参数值（预填，用户可改） */
   proposedArgs: Record<string, unknown>;
+  /**
+   * 算法规则参数字段名（可选）：服务声明了 rules_field 且本工具 schema 含该字段时
+   * 由包装层传入，原样进快照——前端据此给该字段装配「从算法规则选择」入口。
+   */
+  rulesField?: string;
   /** 挂起超时（秒）；缺省 300 */
   timeoutSeconds?: number;
 }
@@ -46,6 +51,8 @@ export interface InteractionRequestPayload {
   proposed_args: Record<string, unknown>;
   required: string[];
   timeout_seconds: number;
+  /** 算法规则参数字段名（仅服务声明且工具 schema 含该字段时存在） */
+  rules_field?: string;
 }
 
 /** 断连恢复用的快照：payload + 剩余等待秒数 */
@@ -133,6 +140,8 @@ export class InteractionGate {
       proposed_args: input.proposedArgs,
       required: extractRequired(input.schema),
       timeout_seconds: timeoutSeconds,
+      // 仅当调用方声明了规则字段才下发（不写空壳，与 confirmation 同一口径）
+      ...(input.rulesField ? { rules_field: input.rulesField } : {}),
     };
 
     let resolveFn!: (outcome: InteractionOutcome) => void;
