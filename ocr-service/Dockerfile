@@ -4,6 +4,11 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # opencv-python 在 slim 镜像缺 X11/glib 运行库（headless 场景仍需 libgl/libglib）
+# RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
+#   && rm -rf /var/lib/apt/lists/*
+# 原第 7 行，改为：
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxcb1 \
   && rm -rf /var/lib/apt/lists/*
 

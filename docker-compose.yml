@@ -46,9 +46,9 @@ services:
       - "8000:8000"
     environment:
       # SSRF 防护：backend（全 Docker 形态）+ 宿主机 LAN IP（签名 URL 回源校验用）。
-      # IP 可用根 .env 的 HOST_LAN_IP 覆盖（compose 插值，缺省 192.168.1.3），
+      # IP 可用根 .env 的 HOST_LAN_IP 覆盖（compose 插值，缺省 192.168.0.145），
       # 必须与 agent-backend/.env 的 PUBLIC_BASE_URL 主机一致
-      - OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.1.3}
+      - OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.0.145}
     restart: unless-stopped
     logging: *default-logging
 
