@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "user_id": "admin",
+      "agent_names": [
+        "生产计划助手"
+      ],
+      "last_deployed_at": "2026-09-19T05:32:50.809Z"
+    },
+    {
+      "user_id": "zpf",
+      "agent_names": [
+        "生产计划助手"
+      ],
+      "last_deployed_at": "2026-09-16T08:38:11.884Z"
+    }
+  ]
+}

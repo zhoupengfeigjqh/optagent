@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "name": "调度算法",
+      "description": "提供调度算法选型与实现指引：覆盖先来先服务、优先级、最短作业优先、轮询、加权公平、贪心与启发式排程，含适用场景、复杂度与实现要点。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 2509
+        },
+        {
+          "path": "references/算法详解.md",
+          "size": 3264
+        },
+        {
+          "path": "references/选型决策树.md",
+          "size": 2189
+        }
+      ],
+      "source": "skill-1.zip",
+      "installed_at": "2026-09-15T15:23:58.671Z",
+      "updated_at": "2026-09-16T07:15:08.426Z"
+    }
+  ]
+}

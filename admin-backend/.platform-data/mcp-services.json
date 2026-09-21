@@ -1,0 +1,22 @@
+{
+  "items": {
+    "ocr": {
+      "name": "ocr",
+      "description": "图片文字识别（RapidOCR）：传用户消息中引用的图片，返回按行拼接的识别文本",
+      "transport": "http",
+      "endpoints": {
+        "container_network": "http://ocr:8000/mcp"
+      },
+      "command": null,
+      "args": null,
+      "file_args": {
+        "ocr_image": {
+          "image": "url"
+        }
+      },
+      "confirmation": "always",
+      "rules_fields": {},
+      "updated_at": "2026-09-19T08:14:27.091Z"
+    }
+  }
+}

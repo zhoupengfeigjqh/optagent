@@ -12,7 +12,8 @@ coverage/
 !.env.example
 !.env
 config.yaml
-.opt-agent/
+# .opt-agent/ 2026-09-21 起入库（数字人配置/场景/skills/示例数据，供他人开箱使用）；
+# SQLite WAL/SHM 伴生文件仍由根 .gitignore 忽略
 
 # 日志与临时文件
 *.log

@@ -1,0 +1,8 @@
+# 平台设计态根目录（bind mount 进 admin-backend，不进镜像）
+#
+# 运行期由 admin-backend 自行创建以下内容（见 data-model.md §1）：
+#   meta.json / settings.json / mcp-services.json
+#   skills/index.json + skills/{name}/
+#   agents/{name}.json
+#   users/{user-id}.json
+#   deploy/manifest.json + deploy/history.jsonl

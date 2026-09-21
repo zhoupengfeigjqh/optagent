@@ -11,8 +11,12 @@ coverage/
 
 # ===== 运行期数据与密钥 =====
 # 注意：.env.example / config.example.yaml 属于示例模板，需纳入版本控制
-.opt-agent/
-admin-backend/.platform-data/
+# 2026-09-21 决定：.opt-agent / .platform-data **入库**——内含数字人配置、场景定义、
+# skills、示例数据与 MCP 服务配置，是他人拿到可开箱可用环境的必要内容（用户确认不涉密）。
+# 唯二例外：SQLite 的 WAL/SHM 伴生文件（活动数据库的临时日志，随进程再生，且二进制
+# 无法 merge；写入仓库只会造成噪声，对使用者零价值）与 *.log（下方规则已覆盖）。
+*.db-wal
+*.db-shm
 # 2026-09-20 起分层（见 README 配置地图）：
 #   .env              形态配置（无密钥，随仓库入库）——放行在各目录自己的 .gitignore
 #   .env.local        本机私产（密钥/局域网 IP，gitignore，不入库）
