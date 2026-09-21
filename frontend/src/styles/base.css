@@ -1,3 +1,7 @@
+/* Tailwind v4 入口：theme / base(preflight) / utilities 分层注入；
+ * preflight 位于 @layer base，本文件未分层的基础样式优先级更高，不会互相覆盖。 */
+@import 'tailwindcss';
+
 /**
  * 基线样式：最小重置 + 全局排版 + 无障碍降级。
  * 组件级样式一律写在各自 SFC 的 <style scoped> 中，本文件不承载组件样式。

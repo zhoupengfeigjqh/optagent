@@ -2,7 +2,7 @@
  * 全局会话上下文（`provide/inject` 的注入键）
  *
  * 设计（`research.md` D4）：
- * - 本模块在 `App.vue` 调用**一次**，完成全部领域 composable 的装配并 `provide` 到组件树
+ * - 本模块在工作台视图 `views/WorkbenchView.vue` 调用**一次**，完成全部领域 composable 的装配并 `provide` 到组件树
  * - 其余 `useXxx()` 组件内访问器一律 `inject` 本上下文，**不各自新建状态**
  * - 测试通过 `createAppSession({ fetchImpl, now, storage })` 注入 `fetch` 桩、假时钟与内存存储
  *

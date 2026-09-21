@@ -34,7 +34,7 @@ const emit = defineEmits<{
   select: [threadId: string]
   more: []
   create: []
-  /** 请求删除某会话（二次确认与相邻会话切换由 `App.vue` 编排） */
+  /** 请求删除某会话（二次确认与相邻会话切换由 `views/WorkbenchView.vue` 编排） */
   remove: [threadId: string]
 }>()
 
