@@ -5,7 +5,7 @@
 - **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用、人工确认（HITL）、文件空间、多会话管理
 - **数字人管理平台**：面向运营/管理员的管理后台，管理数字人（Agent）、技能、MCP 服务与平台配置，并负责把配置下发部署到运行端
 
-OCR 表格识别作为 MCP 工具服务独立部署（Docker）。
+OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务独立部署（Docker）。
 
 ## 总体架构
 
@@ -21,6 +21,11 @@ OCR 表格识别作为 MCP 工具服务独立部署（Docker）。
 │  agent-backend  │─file───▶│  ocr-service (Docker)     │
 │ (Agent 运行时)   │ 签名直链  │  Excel/图片表格识别 MCP    │
 │  :3000          │ 回源下载  │  :8000                    │
+│                 │         └───────────────────────────┘
+│                 │         ┌───────────────────────────┐
+│                 │─MCP────▶│  jev-service (Docker)     │
+│                 │         │  Jev 决策（System One）MCP │
+│                 │         │  :8001 → :8000            │
 └─────────────────┘         └───────────────────────────┘
 ```
 
@@ -73,10 +78,15 @@ optagent/
 │   ├── ocr_core.py         # 表格识别核心（含回源 SSRF 白名单校验）
 │   └── tests/              # 服务端测试
 │
+├── jev-service/            # Jev 决策 MCP 服务（Docker，宿主机端口 8001）
+│   ├── server.py           # MCP 服务入口（FastMCP / StreamableHTTP）
+│   ├── jev_core.py         # 决策调用核心（state 合并、重试退避、错误映射、回源白名单）
+│   └── tests/              # 服务端测试
+│
 ├── gateway/                # 生产网关（nginx）
 ├── specs/                  # 需求/设计规格文档
 ├── .env.example            # 编排层变量样例（compose 插值专用，见下「配置地图」）
-└── docker-compose.yml      # Docker 编排（OCR 等；同时是容器形态运行配置的权威源）
+└── docker-compose.yml      # Docker 编排（OCR / Jev 等；同时是容器形态运行配置的权威源）
 ```
 
 ## 配置地图：env / config 归属一览
@@ -90,8 +100,9 @@ optagent/
 | `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
 | `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
-| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `HOST_LAN_IP` / `GATEWAY_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
-| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络/单点覆盖（`PUBLIC_BASE_URL`） |
+| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `HOST_LAN_IP` / `GATEWAY_HOST_PORT` / `JEV_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
+| `jev-service/.env.local` | Jev 服务 | compose `env_file` 注入 jev 容器 | `TYPESAFE_API_KEY` 等（含密钥，gitignore；样板 `.env.example`） |
+| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络/单点覆盖（`PUBLIC_BASE_URL`、`JEV_URL_ALLOW_HOSTS`） |
 
 读取规则（2026-09-20 严格分工）：
 - **容器**：compose `env_file` 注入——admin 只读 `.env`；agent 读 `.env` + `.env.local`
@@ -194,6 +205,28 @@ optagent/
 | `server.py` | MCP 服务入口，暴露 `ocr_image` 等工具 |
 | `ocr_core.py` | 表格识别核心：下载签名直链 → SSRF 白名单校验（`OCR_URL_ALLOW_HOSTS`）→ 识别 → 结构化输出 |
 
+### jev-service（Jev 决策 MCP 服务）
+
+TypeSafe System One 决策模型（Jev）的 MCP 封装：把「state + 类型化问题」求值成**结构化决策**
+（概率与置信度），供 Agent 直接分支/路由/门控。与 OCR 同为独立部署的内网 MCP 服务。
+
+| 模块 | 作用 |
+|---|---|
+| `server.py` | MCP 服务入口，暴露三个**原子工具**：`noul`（真假命题→0–1）、`choice`（择一→概率分布+置信度）、`score`（量表打分→加权分值+置信度）；运行时呈现为 `jev__noul` 等 |
+| `jev_core.py` | 调用核心：state 合并（LLM 文本 + 引用文件内容）、请求体构造与取值域校验、响应格式化、**有界指数退避**重试（429/529/5xx）、错误映射、回源 SSRF 白名单（`JEV_URL_ALLOW_HOSTS`） |
+
+工具入参中的 state 为**双通道合并**：`state`（LLM 生成的文本）+ `state_file`（可选，
+文件空间相对路径，经 `file_args` 铸成签名直链后由本服务回源下载）。两者以
+
+```text
+<LLM 文本>
+
+【引用文件：临时空间/订单.csv】
+<文件内容>
+```
+
+的形状合并后发送；至少提供其一。
+
 ### gateway（生产网关）
 
 nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口。
@@ -201,15 +234,17 @@ nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口
 ## 环境要求
 
 - Node.js >= 20
-- Docker Desktop（仅 OCR 服务需要）
+- Docker Desktop（OCR / Jev 两个 MCP 服务需要）
 - npm
 
 ## 本地启动
 
-### 1. OCR 服务（Docker）
+### 1. MCP 服务（Docker）
 
 ```bash
-docker compose up -d ocr        # 首次构建镜像较慢；模型加载约 30 秒
+docker compose up -d ocr                            # 首次构建镜像较慢；模型加载约 30 秒
+cp jev-service/.env.example jev-service/.env.local  # 首次：填入 TYPESAFE_API_KEY
+docker compose up -d jev                            # 无本地模型，构建后秒级启动
 ```
 
 ### 2. Agent 后端（端口 3000）
@@ -249,6 +284,27 @@ npm run dev
 
 启动后访问：Agent 端 http://localhost:5173 ，数字人平台 http://localhost:5174 。
 
+### 6. 把 MCP 服务接入数字人（数字人平台）
+
+MCP 服务**无需在平台侧登记**——`docker-compose.yml` 就是服务清单的权威源
+（非平台基础服务的容器一律视为候选 MCP 服务），新增即自动出现在 `/admin/mcp`：
+
+1. `/admin/mcp` 出现 `jev` 卡片后进详情保存**调用配置**（地址按目标运行形态填）：
+
+   | 运行形态 | `transport` | `url` |
+   |---|---|---|
+   | 容器编排内网 `container_network` | `http` | `http://jev:8000/mcp` |
+   | 宿主机本地 `host_local` | `http` | `http://<HOST_LAN_IP>:8001/mcp` |
+
+   `file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条 `state_file: url`，
+   否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
+   `confirmation` 建议 `never`（纯求值、无副作用），`rules_fields` 留空。
+
+2. 数字人设计态勾选 `mcp_services` 含 `jev` → 部署 → 平台物化 `MCP.json` → Agent 运行时加载。
+
+> MUST NOT 手工编辑 `.opt-agent/users/{uid}/agents/{agent}/MCP.json`：它是**部署产物**，
+> 下次部署按平台设计态整体覆盖，手改不会留存（数字人配置的权威源在平台侧）。
+
 ## 本地配置要点：文件回源链路必须使用本机 IP
 
 agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `http://<主机>:3000/api/files/raw?...&sig=...`），交给 MCP 服务（如 OCR）回源下载。这条链路要求两处配置使用同一个主机名——**本机局域网 IP**（用 `ipconfig` 查看实际 IPv4 地址，下文以 `192.168.1.3` 为例）：
@@ -256,7 +312,7 @@ agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `
 | 配置项 | 位置 | 作用 |
 |---|---|---|
 | `PUBLIC_BASE_URL` | `agent-backend/.env` | 铸造签名 URL 时使用的对外基址 |
-| `HOST_LAN_IP` | **根 `.env`**（compose 插值注入 `OCR_URL_ALLOW_HOSTS`） | 宿主机 LAN IP；不配则缺省 `192.168.1.3` |
+| `HOST_LAN_IP` | **根 `.env`**（compose 插值注入 `OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS`） | 宿主机 LAN IP；不配则缺省 `192.168.1.3` |
 
 ```env
 # agent-backend/.env.local
@@ -268,21 +324,22 @@ PUBLIC_BASE_URL=http://192.168.1.3:3000
 HOST_LAN_IP=192.168.1.3
 ```
 
-> `docker-compose.yml` 里 `OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.1.3}`：
-> `backend` 保留给全 Docker 部署形态（容器内互访）；本地运行时 backend 跑在宿主机，
-> OCR 容器需经宿主 IP 回源，该 IP 即 `HOST_LAN_IP`。
+> `docker-compose.yml` 里 `OCR_URL_ALLOW_HOSTS` 与 `JEV_URL_ALLOW_HOSTS` 取值相同，都是
+> `backend,${HOST_LAN_IP:-192.168.1.3}`：`backend` 保留给全 Docker 部署形态（容器内互访）；
+> 本地运行时 backend 跑在宿主机，容器需经宿主 IP 回源，该 IP 即 `HOST_LAN_IP`。
+> 该白名单只影响**引用文件回源下载**（OCR 的 `image`、Jev 的 `state_file`），纯文本调用不受影响。
 
-改完后需要重建 OCR 容器、重启 backend 才生效：
+改完后需要重建 MCP 容器、重启 backend 才生效：
 
 ```bash
-docker compose up -d ocr        # OCR 重建，加载新环境变量
+docker compose up -d ocr jev    # 重建并加载新环境变量
 # agent-backend 重启（Ctrl+C 后重新 npm run dev）
 ```
 
 **为什么不能写 `localhost`**——两个层面都会失败：
 
-1. **白名单是字符串精确匹配**：OCR 收到的 URL host 是 `192.168.1.3`，与 allowlist 里的 `localhost` 字面不匹配 → SSRF 拒绝。
-2. **容器内的 localhost 不是宿主机**：回源动作由 OCR 容器发起，容器内的 `localhost`/`127.0.0.1` 指向容器自己（其 3000 端口无服务），不是宿主机。容器访问宿主机必须用宿主在网络中的名字——局域网 IP 或 `host.docker.internal`。
+1. **白名单是字符串精确匹配**：容器收到的 URL host 是 `192.168.1.3`，与 allowlist 里的 `localhost` 字面不匹配 → SSRF 拒绝。
+2. **容器内的 localhost 不是宿主机**：回源动作由 OCR / Jev 容器发起，容器内的 `localhost`/`127.0.0.1` 指向容器自己（其 3000 端口无服务），不是宿主机。容器访问宿主机必须用宿主在网络中的名字——局域网 IP 或 `host.docker.internal`。
 
 ## 常用命令
 
@@ -293,4 +350,8 @@ npm run typecheck
 
 # 后端测试
 npm run test
+
+# MCP 服务测试（Python，**宿主机本地**；容器不承担测试职责——宪章原则三）
+cd ocr-service && pip install -r requirements-test.txt && python -m pytest -q tests
+cd jev-service && pip install -r requirements-test.txt && python -m pytest -q tests
 ```

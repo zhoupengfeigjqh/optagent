@@ -8,7 +8,8 @@
     "write_file"
   ],
   "mcp_services": [
-    "ocr"
+    "ocr",
+    "jev"
   ],
   "skills": [
     "调度算法"
@@ -218,5 +219,5 @@
       ]
     }
   },
-  "updated_at": "2026-09-19T04:20:49.493Z"
+  "updated_at": "2026-09-22T05:53:33.200Z"
 }

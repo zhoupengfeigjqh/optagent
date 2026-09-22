@@ -5,7 +5,8 @@
       "description": "图片文字识别（RapidOCR）：传用户消息中引用的图片，返回按行拼接的识别文本",
       "transport": "http",
       "endpoints": {
-        "container_network": "http://ocr:8000/mcp"
+        "container_network": "http://ocr:8000/mcp",
+        "host_local": "http://127.0.0.1:8000/mcp"
       },
       "command": null,
       "args": null,
@@ -16,7 +17,32 @@
       },
       "confirmation": "always",
       "rules_fields": {},
-      "updated_at": "2026-09-19T08:14:27.091Z"
+      "updated_at": "2026-09-22T05:48:43.853Z"
+    },
+    "jev": {
+      "name": "jev",
+      "description": "Jev 决策（TypeSafe System One）：noul 是非概率 / choice 择一 / score 打分，state 由 LLM 文本与引用文件内容合并",
+      "transport": "http",
+      "endpoints": {
+        "container_network": "http://jev:8000/mcp",
+        "host_local": "http://127.0.0.1:8001/mcp"
+      },
+      "command": null,
+      "args": null,
+      "file_args": {
+        "noul": {
+          "state_file": "url"
+        },
+        "choice": {
+          "state_file": "url"
+        },
+        "score": {
+          "state_file": "url"
+        }
+      },
+      "confirmation": "never",
+      "rules_fields": {},
+      "updated_at": "2026-09-22T05:48:46.591Z"
     }
   }
 }

@@ -3,29 +3,13 @@
     {
       "name": "ocr",
       "transport": "http",
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "http://ocr:8000/mcp",
       "file_args": {
         "ocr_image": {
           "image": "url"
         }
       },
       "confirmation": "always"
-    },
-    {
-      "name": "jev",
-      "transport": "http",
-      "url": "http://127.0.0.1:8001/mcp",
-      "file_args": {
-        "noul": {
-          "state_file": "url"
-        },
-        "choice": {
-          "state_file": "url"
-        },
-        "score": {
-          "state_file": "url"
-        }
-      }
     },
     {
       "name": "hd-algorithm",

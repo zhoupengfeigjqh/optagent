@@ -6,6 +6,12 @@ dist/
 dist-ssr/
 *.tsbuildinfo
 
+# Python 字节码与 pytest 缓存（ocr-service / jev-service：
+# 容器内不产生，只有本地跑单测/导入模块时才有；二进制且随环境变化，无入库价值）
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # ===== 测试覆盖率 =====
 coverage/
 
@@ -25,6 +31,10 @@ coverage/
 .env.*
 !.env.example
 !admin-backend/.env
+
+# 服务级密钥文件（如仓库根的 .env_jev）：与 `.env.*` 同一口径，
+# 避免"下划线命名"的密钥文件因不匹配点号规则而漏网入库
+.env_*
 config.yaml
 
 # ===== 本地开发临时产物 =====

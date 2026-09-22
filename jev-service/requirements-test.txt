@@ -1,0 +1,7 @@
+# 仅测试用依赖（宿主机本地运行 `python -m pytest -q tests` 所需；容器内测试已按宪章 2.0.0 移除）
+#
+# 为什么不复用 requirements.txt：jev_core 是纯逻辑模块（只依赖 httpx），
+# 单测 MUST NOT 引入 mcp（FastMCP 会拉起服务框架，与"只测纯逻辑"的目标无关）。
+# httpx 同时提供 MockTransport：所有"网络"都是注入的桩，测试不发真实请求、不产生 API 费用。
+pytest>=8
+httpx>=0.27

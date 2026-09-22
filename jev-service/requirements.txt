@@ -1,0 +1,4 @@
+# mcp 2.x 将 FastMCP 改名为 MCPServer 且 API 大改，先钉 v1 稳定 API（与 ocr-service 同一决策）
+mcp>=1.10,<2
+# 上游 Jev 端点调用（含重试）与引用文件回源下载共用同一客户端
+httpx>=0.27
