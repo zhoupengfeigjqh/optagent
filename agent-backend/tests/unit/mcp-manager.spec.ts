@@ -13,7 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
 import {
+  classifyMcpError,
+  isTransportFailure,
   McpManager,
+  McpUnavailableError,
   type McpClientLike,
   type McpToolInfo,
 } from '../../src/infra/mcp/mcp-manager.js';
@@ -165,5 +168,24 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
 
     expect(statuses.filter(([, s]) => s === 'failed')).toHaveLength(1);
     await manager.closeAll();
+  });
+});
+
+describe('MCP 调用错误分类（2026-09-23：供统计落库的粗粒度枚举）', () => {
+  it('isTransportFailure：连接级错误为真，McpError 为假（与降级判据同源）', () => {
+    expect(isTransportFailure(new Error('connect ECONNREFUSED'))).toBe(true);
+    expect(isTransportFailure(transportError())).toBe(true);
+    expect(isTransportFailure(new McpError(ErrorCode.InvalidParams, '参数不合法'))).toBe(false);
+  });
+
+  it('classifyMcpError：从具体到泛化（不可用 > 协议错误 > 传输/其它）', () => {
+    expect(classifyMcpError(new McpUnavailableError('ocr'))).toBe('unavailable');
+    expect(classifyMcpError(new McpError(ErrorCode.InvalidParams, '参数不合法'))).toBe('protocol');
+    expect(classifyMcpError(new Error('connect ECONNREFUSED'))).toBe('transport');
+  });
+
+  it('非 Error 值也能归类：不抛错，落到 transport（统计埋点不许反过来搞挂主链路）', () => {
+    expect(classifyMcpError('boom')).toBe('transport');
+    expect(classifyMcpError(undefined)).toBe('transport');
   });
 });

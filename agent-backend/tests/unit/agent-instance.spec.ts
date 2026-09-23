@@ -244,4 +244,20 @@ describe('MCP.json 的 rules_fields 算法规则参数设置（按工具映射�
       );
     }
   });
+
+  it('对象路径：支持嵌套字段（如 input.targetPriorities），去空白后原样保留', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withRulesFields({ submit: ' input.targetPriorities ' })]),
+    );
+
+    expect(bundle.mcpServers[0]?.rulesFields).toEqual({ submit: 'input.targetPriorities' });
+  });
+
+  it('非法路径（数组段 / 空段）→ AgentConfigError', () => {
+    for (const path of ['items[].rules', 'a..b', 'a.', '.a']) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withRulesFields({ t: path })]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
 });

@@ -355,4 +355,32 @@ describe('算法规则参数设置（rules_fields，按工具映射）', () => {
     });
     expect(configs.read('ocr').rules_fields).toEqual({ optimize: 'rules' });
   });
+
+  it('对象路径：支持嵌套字段（如 input.targetPriorities），去空白后原样读取', () => {
+    upsert({ rules_fields: { hd_scheduling_submit: ' input.targetPriorities ' } });
+
+    expect(configs.read('ocr').rules_fields).toEqual({
+      hd_scheduling_submit: 'input.targetPriorities',
+    });
+  });
+
+  it('非法路径（数组段 / 空段）→ VALIDATION_FAILED（typo 挡在保存期）', () => {
+    for (const path of ['items[].rules', 'a..b', 'a.', '.a']) {
+      expect(() => upsert({ rules_fields: { optimize: path } })).toThrow(ApiError);
+    }
+  });
+
+  it('历史存档里的非法路径：读取时丢弃，避免物化进运行环境让整只数字人加载失败', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          rules_fields: { good: 'input.targetPriorities', bad: 'items[].rules' },
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(configs.read('ocr').rules_fields).toEqual({ good: 'input.targetPriorities' });
+  });
 });

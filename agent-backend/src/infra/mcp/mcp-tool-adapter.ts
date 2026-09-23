@@ -21,8 +21,9 @@ import {
   type FileArgMode,
   type FileArgStep,
 } from '../../domain/file-arg-path.js';
+import type { McpCallEvent } from '../../types.js';
 import type { McpManager, McpToolInfo } from './mcp-manager.js';
-import { McpUnavailableError } from './mcp-manager.js';
+import { classifyMcpError, McpUnavailableError } from './mcp-manager.js';
 
 /** 文件参数转换依赖（按 server 声明启用；agent-factory 按当前用户注入） */
 export interface FileArgContext {
@@ -62,9 +63,12 @@ export function mcpToolsAsAgentTools(
   fileCtx?: FileArgContext,
   /**
    * 调用计数回调（`FR-049`/`FR-050`）：成功/失败各记一次，由 server 接线到 UsageDb。
-   * 第三个参数为调用发起用户（2026-09-16 十四次调整：支撑按用户明细），取自运行上下文 `uid`。
+   *
+   * 2026-09-23：改为回传**事件对象**——除服务名/成败外还带上**工具名**（MCP 服务自己的
+   * 工具名，如 `ocr` 下的 `ocr_image`，不含暴露给模型的 `{server}__` 前缀）、耗时与错误分类，
+   * 以及运行上下文里的 `uid`（发起用户）与 `sid`（会话 = `thread_id`），供统计下钻与接回对话。
    */
-  onCall?: (serviceName: string, ok: boolean, userId?: string) => void,
+  onCall?: (event: McpCallEvent) => void,
   /** 绑定了 user_id/agent_name/thread_id 的运行日志（任务 2026-09-15：MCP 调用可归属到用户） */
   logger?: Logger,
 ): AgentTool[] {
@@ -117,9 +121,19 @@ export function mcpToolsAsAgentTools(
             details: {},
           };
         }
+        // 计时口径：`callTool` 内部最多尝试 2 次（30s 超时 + 重试 1 次），故从调用前
+        // 开始计，得到的是**含重试的用户感知耗时**，不是单次尝试耗时。
+        const startedAt = Date.now();
         try {
           const result = await manager.callTool(serverName, t.name, finalParams);
-          onCall?.(serverName, true, runtime?.uid);
+          onCall?.({
+            service: serverName,
+            tool: t.name,
+            ok: true,
+            durationMs: Date.now() - startedAt,
+            userId: runtime?.uid ?? null,
+            threadId: runtime?.sid ?? null,
+          });
           logger?.info(
             { event: 'mcp.tool.call', scope: 'run', service: serverName, tool: t.name, ok: true },
             `MCP 工具调用成功：${serverName}.${t.name}`,
@@ -128,7 +142,15 @@ export function mcpToolsAsAgentTools(
           return { content: [{ type: 'text', text }], details: {} };
         } catch (err) {
           // 真的发起了调用但失败：计入失败次数（含"服务不可用"）
-          onCall?.(serverName, false, runtime?.uid);
+          onCall?.({
+            service: serverName,
+            tool: t.name,
+            ok: false,
+            durationMs: Date.now() - startedAt,
+            errorKind: classifyMcpError(err),
+            userId: runtime?.uid ?? null,
+            threadId: runtime?.sid ?? null,
+          });
           logger?.warn(
             { event: 'mcp.tool.call', scope: 'run', service: serverName, tool: t.name, ok: false },
             `MCP 工具调用失败：${serverName}.${t.name}`,

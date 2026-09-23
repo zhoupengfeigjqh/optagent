@@ -111,9 +111,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     fileSignSecret: config.fileSignSecret,
     // 建连落定 → 事件总线 → SSE 路由推送最新快照（替代前端轮询）
     onMcpStatus: (key) => mcpEvents.emitChanged(key.userId),
-    // R4：工具调用完成即按服务名计数（成功/失败分列），供管理平台只读采集；
-    // userId 一并落事件明细，支撑按用户明细（2026-09-16 十四次调整）
-    onMcpCall: (serviceName, ok, userId) => usageDb.recordMcpCall(serviceName, ok, userId),
+    // R4：工具调用完成即落一条事件明细（服务 / 工具 / 成败 / 耗时 / 错误分类 / 用户 / 会话），
+    // 供管理平台只读采集（FR-049/FR-050）
+    onMcpCall: (event) => usageDb.recordMcpCall(event),
   });
 
   // 后台调度（T040）：每小时清理 tmp/ 下 7 天未访问的临时产出

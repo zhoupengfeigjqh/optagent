@@ -19,6 +19,7 @@ import {
   parseFileArgMode,
 } from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport, type McpTransport } from './transport.js';
+import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 
 const REL = 'mcp-services.json';
@@ -51,12 +52,15 @@ export interface McpServiceConfig {
    */
   confirmation: McpConfirmation;
   /**
-   * 算法规则参数设置（可选，空对象 = 不启用）：`{ 工具名: 字段名 }`——该工具
+   * 算法规则参数设置（可选，空对象 = 不启用）：`{ 工具名: 字段名或对象路径 }`——该工具
    * 入参里承载 `array[object]` 规则清单的字段。声明后，用户侧 HITL 参数确认窗中
    * 该字段出现「从算法规则选择」入口（读取「数据准备/算法规则」最新规则文件）；
-   * 运行环境据此把字段名带进 interaction 快照。**不改变是否走 HITL**
+   * 运行环境据此把路径带进 interaction 快照。**不改变是否走 HITL**
    * （仍只由 `confirmation` 决定）：`confirmation: never` 时本映射不生效。
    * 工具不在确认范围内时的映射同样不生效（工具未被包装即无挂起点）。
+   *
+   * 取值支持**对象嵌套**（如 `input.targetPriorities`，2026-09-22）：规则数组常在入参
+   * 对象内部，只认顶层字段名会让这类声明静默失效。语法见 `rules-field-path.ts`。
    */
   rules_fields: Record<string, string>;
   updated_at: string;
@@ -210,9 +214,12 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
 }
 
 /**
- * 算法规则参数设置（保存期）：`{ 工具名: 字段名 }`。
- * 缺省 → `{}`（不启用）；非对象/键或值非非空字符串 → 报错——typo 挡在保存期，
+ * 算法规则参数设置（保存期）：`{ 工具名: 字段名或对象路径 }`。
+ * 缺省 → `{}`（不启用）；非对象/值不是合法字段路径 → 报错——typo 挡在保存期，
  * 避免"以为开了选择器实际没开"。
+ *
+ * 与 `file_args` 同口径：**只校验语法，不校验工具 schema**（工具清单是探测结果，
+ * 服务不可达时拿不到；拿不到就拒保存会把"服务抖动"变成"配置改不了"）。
  */
 function normalizeRulesFields(raw: unknown): Record<string, string> {
   if (raw === undefined || raw === null) return {};
@@ -221,13 +228,13 @@ function normalizeRulesFields(raw: unknown): Record<string, string> {
   }
   const out: Record<string, string> = {};
   for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof field !== 'string' || field.trim() === '') {
+    if (parseRulesFieldPath(field) === null) {
       throw new ApiError(
         ERROR_CODES.VALIDATION_FAILED,
-        `rules_fields.${tool} 须为非空字符串（字段名）`,
+        `rules_fields.${tool} 须为${RULES_FIELD_PATH_HINT}，当前：${JSON.stringify(field)}`,
       );
     }
-    out[tool] = field.trim();
+    out[tool] = (field as string).trim();
   }
   return out;
 }
@@ -235,12 +242,16 @@ function normalizeRulesFields(raw: unknown): Record<string, string> {
 /**
  * 读取路径的容错收敛：历史存档里的 string 版 `rules_field`（无工具名可归属）
  * 与任何残缺值一律收敛为 `{}`（不阻断读取存量文档，存量行为 = 不启用）。
+ *
+ * **非法路径同样在此丢弃**（2026-09-22）：运行环境在加载期把非法路径判为配置错误，
+ * 若把存量文档里的非法值原样物化进 `MCP.json`，一次部署就会让整个数字人加载失败——
+ * 读取期收敛掉，破坏面止于"该声明不生效"（与 `confirmation` 的收敛口径一致）。
  */
 function readRulesFields(raw: unknown): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
   for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof field === 'string' && field.trim() !== '') out[tool] = field.trim();
+    if (parseRulesFieldPath(field) !== null) out[tool] = (field as string).trim();
   }
   return out;
 }

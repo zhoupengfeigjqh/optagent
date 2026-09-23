@@ -15,6 +15,7 @@
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 
 import type { InteractionSink } from '../domain/interaction-gate.js';
+import { hasRulesFieldPath } from '../domain/rules-field-path.js';
 
 export function wrapToolWithInteraction(
   tool: AgentTool,
@@ -43,13 +44,11 @@ export function wrapToolWithInteraction(
           ? (params as Record<string, unknown>)
           : {};
 
-      // 规则字段声明仅在**本工具 schema 确实含该字段**时下发——避免给无关工具的快照
-      // 注入无意义声明（配置是服务级的，工具是服务内多个之一的常见形态）
-      const hasRulesField =
-        rulesField !== undefined &&
-        typeof schema.properties === 'object' &&
-        schema.properties !== null &&
-        rulesField in (schema.properties as Record<string, unknown>);
+      // 规则字段声明仅在**本工具 schema 里确实走得通**时下发——避免给无关工具的快照
+      // 注入无意义声明（配置是服务级的，工具是服务内多个之一的常见形态）。
+      // 取值可以是顶层字段名，也可以是**对象路径**（如 `input.targetPriorities`）：
+      // 规则数组常嵌在入参对象内部，旧实现只认顶层，导致这类声明静默失效（2026-09-22）。
+      const hasRulesField = rulesField !== undefined && hasRulesFieldPath(schema, rulesField);
 
       const outcome = await sink.request({
         callId: toolCallId,

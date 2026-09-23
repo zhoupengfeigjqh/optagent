@@ -14,6 +14,7 @@ import { computed, ref, watch } from 'vue'
 import type { RuleFileResponse } from '../../api/types'
 import BaseButton from '../common/BaseButton.vue'
 import BaseDialog from '../common/BaseDialog.vue'
+import HintTip from '../common/HintTip.vue'
 
 const props = defineProps<{
   /** 是否展开 */
@@ -119,6 +120,12 @@ function draftValue(draft: string): number | string | undefined {
   return Number.isFinite(numeric) && trimmed !== '' ? numeric : trimmed
 }
 
+/** 「?」提示文案：优先级列名来自服务端解析的规则文件表头。 */
+const hintText = computed(
+  () =>
+    `勾选需要的规则；「${data.value?.priority_column ?? '优先级'}」列可就地调整，留空则不携带该字段。`,
+)
+
 function onConfirm(): void {
   if (!data.value || !canConfirm.value) return
   const priorityColumn = data.value.priority_column
@@ -142,6 +149,8 @@ function onConfirm(): void {
       <p class="rule-picker__meta">
         参数 <code class="mono">{{ fieldName }}</code>
         <template v-if="data">· 来源：{{ data.filename }}</template>
+        <!-- 操作说明收进「?」：勾选/就地编辑的规则默认不常驻 -->
+        <HintTip :text="hintText" label="查看操作说明" />
       </p>
 
       <p v-if="loading" class="rule-picker__state">正在读取最新规则文件…</p>
@@ -183,9 +192,6 @@ function onConfirm(): void {
         </table>
       </div>
 
-      <p v-if="data" class="rule-picker__hint">
-        勾选需要的规则（已选 {{ checked.size }} 条）；「{{ data.priority_column ?? '优先级' }}」列可就地调整，留空则不携带该字段。
-      </p>
     </div>
 
     <template #footer>
@@ -263,9 +269,4 @@ function onConfirm(): void {
   font: inherit;
 }
 
-.rule-picker__hint {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
 </style>

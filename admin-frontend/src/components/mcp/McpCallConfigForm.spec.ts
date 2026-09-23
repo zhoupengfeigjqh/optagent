@@ -73,6 +73,30 @@ const SERVICE_WITH_SCHEMA: McpServiceDetail = {
   ],
 }
 
+/** 规则数组嵌在入参对象内部的服务（真实形态：hd_scheduling_submit 的 input.targetPriorities） */
+const SERVICE_WITH_NESTED_SCHEMA: McpServiceDetail = {
+  ...SERVICE,
+  tools: [
+    {
+      name: 'hd_scheduling_submit',
+      description: '提交单工序排产任务',
+      parameters: {
+        type: 'object',
+        properties: {
+          input: {
+            type: 'object',
+            properties: {
+              solvingTime: { type: 'integer' },
+              targetPriorities: { type: 'array', items: { type: 'object' } },
+            },
+          },
+        },
+        required: ['input'],
+      },
+    },
+  ],
+}
+
 function mountForm(service: McpServiceDetail = SERVICE) {
   return mount(McpCallConfigForm, { props: { service } })
 }
@@ -293,6 +317,31 @@ describe('McpServiceConfigForm', () => {
     await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
     payload = wrapper.emitted('save')?.[1]?.[0] as Record<string, unknown>
     expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
+  })
+
+  it('算法规则参数设置：嵌套 array 字段按对象路径列出并保存', async () => {
+    const wrapper = mountForm(SERVICE_WITH_NESTED_SCHEMA)
+    await flushPromises()
+    await wrapper.find('#mcp-confirmation-mode').setValue('always')
+
+    await wrapper.find('[data-test="add-rule"]').trigger('click')
+    await wrapper.find('[data-test="rule-tool-0"]').setValue('hd_scheduling_submit')
+
+    const fieldOptions = wrapper
+      .find('[data-test="rule-field-0"]')
+      .findAll('option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+    // 规则数组嵌在 input 里：必须按对象路径列出，否则这类目标永远选不出来（声明静默失效）
+    expect(fieldOptions).toContain('input.targetPriorities')
+    // 只列 array 字段：同级整数项与承载它的对象本身都不出现
+    expect(fieldOptions).not.toContain('input')
+    expect(fieldOptions).not.toContain('input.solvingTime')
+
+    await wrapper.find('[data-test="rule-field-0"]').setValue('input.targetPriorities')
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.rules_fields).toEqual({ hd_scheduling_submit: 'input.targetPriorities' })
   })
 
   it('调用人工确认：选「全部工具」保存 always', async () => {

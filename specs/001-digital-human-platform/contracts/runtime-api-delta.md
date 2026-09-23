@@ -20,7 +20,8 @@
 | R6 | `docker-compose.yml`：新增 2 个服务，清理 2 个过时 test profile | 编排 | 否 |
 | R7 | 数字人配置**"变化即失效"**：取用池中实例前比对配置指纹 | 行为变更 | 否（端点契约不变，但**实例复用时机改变**） |
 | R8 | MCP 工具调用**人工参数确认**（HITL）：`interaction_request` SSE 事件 + `POST /api/threads/{id}/interaction`，MCP 服务配置新增 `confirmation` 策略字段 | 新增事件/端点/配置字段 | 否（`confirmation` 缺省 `never`，存量行为零变化） |
-| R9 | HITL 参数确认窗**算法规则选择**：MCP 服务配置新增 `rules_fields`（`{ 工具名: 字段名 }`，当日由 string 版 `rules_field` 升级），`interaction_request`/快照新增可选 `rules_field`（单次交互粒度投影），新增 `GET /api/files/rules`（只读） | 新增端点 + 配置字段 + 可选事件字段 | 否（`rules_fields` 缺省 `{}` 不启用，存量快照不写该键；历史 string 版存档读取收敛为 `{}`） |
+| R9 | HITL 参数确认窗**算法规则选择**：MCP 服务配置新增 `rules_fields`（`{ 工具名: 字段名或对象路径 }`——2026-09-19 由 string 版 `rules_field` 升级、**2026-09-22 支持对象嵌套**），`interaction_request`/快照新增可选 `rules_field`（单次交互粒度投影），新增 `GET /api/files/rules`（只读） | 新增端点 + 配置字段 + 可选事件字段 | 否（`rules_fields` 缺省 `{}` 不启用，存量快照不写该键；历史 string 版存档读取收敛为 `{}`，存档里的**非法路径**读取时一并丢弃） |
+| R10 | 新增内置工具 **`read_skill`**：补齐 SKILL 正文与 `references/` 附件的读取通道（此前只有 frontmatter 摘要进 System Prompt），内置工具目录由 5 项增至 6 项 | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
 
 **对既有前端（对话工作台）的影响：无。** R2/R4 的消费方是 `admin-backend`（服务端到服务端），既有 `frontend` 不调用它们，故其 `src/api/types.ts` 与 `src/utils/error-message.ts` **无需改动**。
 
@@ -71,7 +72,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `{会话标识}` | 当前 run 的 thread_id | `threadId` |
 | `{临时空间}` | 临时空间显示名 | 字面量 `临时空间` |
 
-### 1.4 本期目录内容（共 5 项，行为 MUST 与现状等价）
+### 1.4 目录内容（2026-09-23 起共 6 项；**前 5 项**行为 MUST 与现状等价）
 
 | `name` | `label` | `writable` | `description_template` |
 |---|---|---|---|
@@ -80,8 +81,25 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `list_dir` | 列目录 | `false` | 列出指定目录的文件（名称/大小/更新时间）。目录限：{可用目录}。 |
 | `grep_files` | 检索文件内容 | `false` | 在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/pdf 会被跳过（请改用 read_file）。可指定目录，缺省检索全部开放目录。 |
 | `calculator` | 计算器 | `false` | 计算数学表达式。支持 + - * / % ^、括号、sqrt/abs/round/floor/ceil/min/max/pow 函数与常量 pi/e。 |
+| `read_skill` | 读取技能文件 | `false` | 读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），也可读 references/ 等其他文档（如 "references/算法详解.md"）；path 为目录时返回该目录下的文件清单。技能名取自系统提示中的「技能」小节。仅文本文件；内容过大时返回截断片段，可用 offset 继续读。 |
 
-**不变式（MUST 由单测守住）**：`renderTemplate` 用现状的运行期取值渲染后，结果 MUST 与改造前 `buildBuiltinTools` 产出的 `description` **逐字相等**。这是本重构的安全性保证——改造**只改变元数据的组织方式，不改变任何对模型可见的文本**。
+**不变式（MUST 由单测守住）**：`renderTemplate` 用现状的运行期取值渲染后，**前 5 项**的结果 MUST 与改造前 `buildBuiltinTools` 产出的 `description` **逐字相等**。这是本重构的安全性保证——改造**只改变元数据的组织方式，不改变任何对模型可见的文本**；`read_skill` 为 2026-09-23 新增，不在此不变式内（其 golden 文本单独断言）。
+
+#### 1.4.1 `read_skill`（2026-09-23 新增）
+
+**为什么加**：SKILL 此前**只把 frontmatter 的 `name`/`description` 注入 System Prompt**——正文与 `references/` 附件**没有任何读取通道**：内置文件的沙箱 `FileAccess` 只覆盖用户三空间（`users/{uid}/user-data/{数据准备|共享空间|临时空间}`），而技能物化在 `users/{uid}/agents/{agent}/skills/**`，是**另一个子树**，`read_file` 一律被拒（`目录不在白名单: skills`）。结果是配了 SKILL 的数字人只知道"我有这个技能"，拿不到怎么做的正文。
+
+**落点与安全口径**：领域实现 `agent-backend/src/domain/tools/read-skill.ts`（**只读**，不经 `FileAccess`，自带一套校验）：
+
+- 技能名限定为**单个目录名**（拒分隔符、`..`、控制字符），且必须真实存在于**本数字人**的技能根下；
+- 技能内相对路径：拒绝绝对路径与盘符、`..` 穿越、控制字符；`\` 按分隔符归一；缺省/空串为 `SKILL.md`；
+- 解析后的绝对路径 MUST 落在该技能目录内（`path.relative` 前缀校验）+ realpath 校验（防符号链接逃逸）；
+- 只读**真实存在的普通文件**；`path` 为目录时返回其文件清单（**路径一律相对技能根**，便于模型直接回填给 `path`）；符号链接一律拒绝；
+- **预期内的用法问题**（技能/文件不存在、二进制）以**可读文本**返回（含可用技能/文件清单，不静默留白）；
+- **越权**（非法技能名、路径越界、符号链接、非普通文件）上抛 `SkillAccessError` → 向模型返回拒绝文案，并记 `file.access.denied`（`alert: true`）——与文件越权同一审计口径。
+- 沙箱根由 `agent-factory` 在**每次 run 装配工具时**注入（`users/{uid}/agents/{agent}/skills`），故**天然隔离到当前数字人**，读不到别的数字人或别的用户的技能。
+
+**启用方式**：与其他内置工具一致，MUST 在 `TOOL.json` 的 `enabled` 里显式声明（`FR-023` 白名单）。**存量数字人**若要用，需在管理平台勾选「读取技能文件」并**重新部署**后生效——这是刻意的：技能读取与"配置了哪些技能"一样，属显式配置，MUST NOT 隐式开启。
 
 ### 1.5 入参说明
 
@@ -95,7 +113,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 **归属**：`agent-backend/src/routes/`，与既有路由同构注册（`registerBuiltinToolRoutes(app, ctx)`），前缀沿用 `/api`。
 
-**请求**：无参数（工具数固定为 5，无需分页；响应仍带 `total` 以保持形态一致）。
+**请求**：无参数（工具数固定为 6，无需分页；响应仍带 `total` 以保持形态一致）。
 
 **响应 200**
 
@@ -183,11 +201,28 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 ### 4.1 问题（`FR-049`、`FR-050`）
 
-平台需按服务统计 MCP 的累计调用次数、成功/失败次数与最近调用时间，且 MUST **在数字人实际调用后自动更新**。运行环境是**唯一确切知道工具调用发生的地方**；日志解析不可靠（各 MCP 服务日志格式自定，"HTTP 请求数"≠"工具调用次数"）——见 `research.md` D6。
+平台需按服务统计 MCP 的调用次数、成功/失败次数与最近调用时间，且 MUST **在数字人实际调用后自动更新**。运行环境是**唯一确切知道工具调用发生的地方**；日志解析不可靠（各 MCP 服务日志格式自定，"HTTP 请求数"≠"工具调用次数"）——见 `research.md` D6。
+
+（2026-09-23 追加）平台统计表要求**一行 = 一个「用户 × 服务 × 工具」组合**，并列出四个时间窗——见 §4.3 的 `groups`。按服务、按用户等更粗视角一律由它折叠得出，不再并列返回第二套明细。
 
 ### 4.2 计数点
 
-在 MCP 工具适配层（工具调用完成处）按**服务名**累计：成功一次 `calls_ok += 1`，失败一次 `calls_failed += 1`，并更新 `last_called_at`。事件明细（`mcp_call_events`，一次调用一行）同时记录**调用发起用户** `user_id`——取自强制穿透的运行上下文 `uid`（七次调整已保证运行环境侧必可得），供按用户明细聚合（十四次调整，2026-09-16）。计数持久化到既有 `UsageDb`（`better-sqlite3`）——**不引入新依赖、不新增数据库引擎**（原则六）；`user_id` 列对旧库**打开即自愈**（`PRAGMA table_info` 判定后 `ALTER TABLE ADD COLUMN`）。
+在 MCP 工具适配层（工具调用完成处）**每次调用落一行事件明细** `mcp_call_events`，各维度统计均由该表聚合。2026-09-23 起**只有这一张表**：原按服务名的独立累计表 `mcp_call_stats` 已删除（明细本就只保留一年，不存在"全历史累计"需求；一张停写后冻结在切换时刻的表比删掉更容易被误读）。
+
+口径为 **MCP 工具调用次数**：一次 `tools/call` 记一行；**调用未发出**（如 `file_args` 沙箱校验失败）不记。逐列记录：
+
+| 列 | 来源与口径 |
+|---|---|
+| `service_name` | MCP 服务名（适配器里的 `serverName`） |
+| `tool_name` | **MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），不含暴露给模型的 `{server}__` 前缀（2026-09-23：粒度由服务下钻到工具） |
+| `ok` | 调用成功/失败（失败含"服务不可用"） |
+| `called_at` | 调用时刻（ISO8601） |
+| `user_id` | 调用发起用户，取自强制穿透的运行上下文 `uid`（七次调整已保证运行环境侧必可得），供按用户明细聚合（十四次调整，2026-09-16） |
+| `thread_id` | 当前会话 id，取自同一上下文的 `sid`（2026-09-23：把事件接回具体对话） |
+| `duration_ms` | **含 `McpManager` 内部一次重试**的用户感知耗时，MUST NOT 当作单次尝试耗时（2026-09-23） |
+| `error_kind` | 仅失败有值：`unavailable` / `protocol` / `transport`；MUST NOT 存错误原文（长度与脱敏不可控，细节看运行日志），判定复用 `McpManager` 既有的连接级判据（2026-09-23） |
+
+计数持久化到既有 `UsageDb`（`better-sqlite3`）——**不引入新依赖、不新增数据库引擎**（原则六）。新增列对旧库**打开即自愈**（`PRAGMA table_info` 判定后 `ALTER TABLE ADD COLUMN`；建在这些列上的索引 MUST 在补列**之后**创建）；老行的新列为 `null`，界面按"未归属·升级前记录"呈现（不静默留白）。
 
 ### 4.3 端点
 
@@ -206,17 +241,39 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
       "calls_total": 42,
       "calls_ok": 40,
       "calls_failed": 2,
-      "last_called_at": "2026-09-15T06:12:33.000Z",
+      "last_called_at": "2026-09-23T06:12:33.000Z"
+    }
+  ],
+  "groups": [
+    {
+      "service": "ocr",
+      "tool_name": "ocr_image",
+      "user_id": "admin",
+      "calls_total": 30,
+      "calls_ok": 29,
+      "calls_failed": 1,
+      "last_called_at": "2026-09-23T06:12:33.000Z",
       "windows": {
-        "h24":  { "ok": 3, "failed": 1, "total": 4 },
+        "h24":  { "ok": 3,  "failed": 1, "total": 4 },
         "d7":   { "ok": 12, "failed": 2, "total": 14 },
-        "d30":  { "ok": 30, "failed": 2, "total": 32 },
-        "d365": { "ok": 40, "failed": 2, "total": 42 }
-      },
-      "users": [
-        { "user_id": "admin", "calls_total": 30, "calls_ok": 29, "calls_failed": 1, "last_called_at": "2026-09-15T06:12:33.000Z" },
-        { "user_id": "zpf",   "calls_total": 12, "calls_ok": 11, "calls_failed": 1, "last_called_at": "2026-09-14T09:00:00.000Z" }
-      ]
+        "d30":  { "ok": 20, "failed": 2, "total": 22 },
+        "d365": { "ok": 29, "failed": 1, "total": 30 }
+      }
+    },
+    {
+      "service": "ocr",
+      "tool_name": "ocr_pdf",
+      "user_id": null,
+      "calls_total": 12,
+      "calls_ok": 11,
+      "calls_failed": 1,
+      "last_called_at": "2026-09-22T09:00:00.000Z",
+      "windows": {
+        "h24":  { "ok": 0,  "failed": 0, "total": 0 },
+        "d7":   { "ok": 1,  "failed": 0, "total": 1 },
+        "d30":  { "ok": 11, "failed": 1, "total": 12 },
+        "d365": { "ok": 11, "failed": 1, "total": 12 }
+      }
     }
   ]
 }
@@ -224,16 +281,23 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `stats_available` | boolean | 统计存储是否可读；为 `false` 时 `items` 为空 |
-| `items[].calls_total` | integer | 累计调用次数（= `calls_ok + calls_failed`） |
-| `items[].last_called_at` | string \| null | 最近调用时间（ISO8601），从未调用为 `null` |
-| `items[].windows` | object | 按时间窗聚合（任务 2026-09-15）：`h24`（最近24h）/ `d7`（最近7天）/ `d30`（最近30天）/ `d365`（最近一年），每窗 `{ ok, failed, total }`。数据源为**每次调用一行**的事件明细表 `mcp_call_events`（只保留一年，与最长统计窗对齐），MUST NOT 从日志文件解析 |
-| `items[].users` | array | 按用户的调用明细（十四次调整，2026-09-16）：每项 `{ user_id, calls_total, calls_ok, calls_failed, last_called_at }`，在事件明细表上按 `user_id` 聚合（故只覆盖**最近一年**，与 `windows` 同口径）；`user_id` 为 `null` 表示升级前的历史事件未记录归属（平台侧显示"未归属"）；服务无事件明细行时为空数组 |
+| `stats_available` | boolean | 统计存储是否可读；为 `false` 时 `items` 与 `groups` 均为空数组 |
+| `items[]` | array | **服务级汇总**（供平台**卡片**展示"最近一年调用次数"）：每项 `{ name, calls_total, calls_ok, calls_failed, last_called_at }` |
+| `items[].calls_total` | integer | 该服务的调用次数（= `calls_ok + calls_failed`）。**2026-09-23 起口径为最近一年**（独立累计表已删，改由只保留一年的事件明细聚合）；`calls_ok` / `calls_failed` / `last_called_at` 同此口径 |
+| `groups[]` | array | **平台统计表的行**（2026-09-23）：按「**服务 × 工具 × 用户**」分组，`service` + `tool_name` + `user_id` 三元组唯一，每项字段见下 |
+| `groups[].service` | string | MCP 服务名 |
+| `groups[].tool_name` | string \| null | **MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），不含暴露给模型的 `{server}__` 前缀；`null` = 升级前的历史事件未记录工具名 |
+| `groups[].user_id` | string \| null | 调用发起用户；`null` = 升级前的历史事件未记录归属 |
+| `groups[].calls_total` / `calls_ok` / `calls_failed` | integer | 该组合的调用次数/成功/失败，等于 `windows.d365`（同一保留期口径） |
+| `groups[].last_called_at` | string \| null | 该组合的最近调用时间（ISO8601）；从未调用为 `null` |
+| `groups[].windows` | object | 按时间窗聚合（任务 2026-09-15）：`h24`（最近24h）/ `d7`（最近7天）/ `d30`（最近30天）/ `d365`（最近一年），每窗 `{ ok, failed, total }`。数据源为**每次调用一行**的事件明细表 `mcp_call_events`（只保留一年，与最长统计窗对齐），MUST NOT 从日志文件解析 |
 
 **关键约束**：
 - **只读**，无副作用。
 - 统计口径为 **MCP 工具调用次数**（`research.md` D6），MUST 与本契约一致，MUST NOT 在未来悄悄改为"HTTP 请求数"。
-- 未出现过的服务**不出现在 `items` 中**（平台侧以 0 呈现）。
+- 未出现过的服务**不出现在 `items` 中**（平台侧以 0 呈现）；**超过一年未被调用**的服务同理——事件明细只保留一年，与该保留策略一致。
+- `groups` 是**最细粒度**：更粗的视角（按服务、按用户）MUST 由它折叠得出，MUST NOT 再并列返回第二套明细数组（十四次调整的 `users[]` 与 `tools[]` 已在 2026-09-23 被 `groups` 取代——两者都不带时间窗，无法表达统计表所需的列）。
+- `null` 是 `tool_name` / `user_id` 的**合法取值**（表示该维度在升级前未落库），平台侧 MUST 显示"未归属·升级前记录"而非空白。
 
 **错误码**：`INTERNAL_ERROR`（500）。
 
@@ -386,12 +450,13 @@ MCP 服务调用配置新增 `confirmation` 字段（缺省 `never`，**存量�
 
 经部署物化进运行环境 `MCP.json` 的 server 条目（`never` 时**不写该字段**）；运行环境 `agent-instance.ts` 在加载期校验形状，非法即 `AgentConfigError` 挡下该数字人（不把 typo 静默当 never）。
 
-**2026-09-19 新增 `rules_fields`**（HITL 规则选择器声明，配合 R9；当日由 string 版 `rules_field` 升级为按工具映射）：MCP 服务调用配置的可选字段，形状 `{ 工具名: 字段名 }`——声明该工具入参里承载 `array[object]` 规则清单的字段。语义边界：
+**2026-09-19 新增 `rules_fields`**（HITL 规则选择器声明，配合 R9；当日由 string 版 `rules_field` 升级为按工具映射）：MCP 服务调用配置的可选字段，形状 `{ 工具名: 字段名或对象路径 }`——声明该工具入参里承载 `array[object]` 规则清单的字段。语义边界：
 
 - **不改变是否走 HITL**——是否弹参数确认窗仍只由 `confirmation` 决定；`confirmation: never` 时参数由模型直接填写，`rules_fields` 不生效（无挂起点即无快照即无入口）；不在确认范围内的工具的映射同样不生效（工具未被包装）；
-- 装配时按**当前工具名**查映射，且该工具 schema 确实含此字段时，运行环境把字段名带进 interaction 快照（快照内仍叫 `rules_field`，单次交互粒度的投影）；
-- 物化口径与 `confirmation` 相同：空对象不写该字段；平台侧保存期校验（非对象/值非非空字符串即 `VALIDATION_FAILED`），运行环境加载期校验（非法即 `AgentConfigError`）；历史存档的 string 版 `rules_field` 读取时收敛为 `{}`；
-- 管理端表单联动（产品决定，2026-09-19）：该设置独立成栏、位于 HITL 栏之下并与「URL铸造参数设置」平级；HITL = 无需确认 → 栏禁用且所填清空；仅指定工具 → 工具列只列勾选工具、清单外声明级联清掉；全部工具 → 全部可选。「字段」下拉 = 该工具参数 Schema 中 `type: "array"` 的入参。
+- 装配时按**当前工具名**查映射，且该**路径在工具 schema 里走得通**时（沿 `properties` 逐段下行、末段存在即算走得通；与旧实现强度一致，**不要求**末段是数组），运行环境把路径带进 interaction 快照（快照内仍叫 `rules_field`，单次交互粒度的投影）；
+- **2026-09-22：取值从"顶层字段名"泛化为"对象路径"**（`rules` / `input.targetPriorities`）。起因：规则数组常嵌在入参对象内部（真实形态 `hd_scheduling_submit` 的 `input.targetPriorities`——`input` 承载 7 个排产输入项，规则清单只是其一），只认顶层会让这类声明**静默失效**：配置已保存、界面也回显，只是入口永不出现。语法：分段用 `.`、**只走对象**、不支持数组段（`items[].rules` 判非法——"写第几个元素"没有业务含义）；两侧同一判据（`agent-backend/src/domain/rules-field-path.ts` 与 `admin-backend/src/domain/mcp/rules-field-path.ts` 同构，与 `file-arg-path.ts` 同一约定）；
+- 物化口径与 `confirmation` 相同：空对象不写该字段；平台侧保存期校验（非对象 / 值不是合法字段路径即 `VALIDATION_FAILED`；**只校验语法、不校验工具 schema**——工具清单是探测结果，服务不可达时拒保存会把"服务抖动"变成"配置改不了"），运行环境加载期校验（非法路径即 `AgentConfigError`）；历史存档的 string 版 `rules_field` 读取时收敛为 `{}`，**存档里的非法路径读取时一并丢弃**（否则一次部署就会让整只数字人加载失败，破坏面止于"该声明不生效"，与 `confirmation` 的收敛口径一致）；
+- 管理端表单联动（产品决定，2026-09-19）：该设置独立成栏、位于 HITL 栏之下并与「URL铸造参数设置」平级；HITL = 无需确认 → 栏禁用且所填清空；仅指定工具 → 工具列只列勾选工具、清单外声明级联清掉；全部工具 → 全部可选。「字段」下拉 = 该工具参数 Schema 里的 array 入参**按对象路径列出**（2026-09-22 起含嵌套；只沿对象下行、不进入数组元素）。
 
 ### 9.3 SSE 事件（非终结事件）
 
@@ -408,8 +473,10 @@ data: {
   "proposed_args": { … },       // 模型提议值（预填，用户可改）
   "required": [ … ],
   "timeout_seconds": 300,       // 超时按拒绝收尾
-  "rules_field": "rules"        // 可选（R9）：服务按工具声明（rules_fields 映射）且
-}                               //       工具 schema 含该字段时才有；快照内为单次交互投影
+  "rules_field": "rules"        // 可选（R9）：服务按工具声明（rules_fields 映射）且该路径在
+                                //   工具 schema 里走得通时才有——字段名**或对象路径**
+                                //   （如 input.targetPriorities，2026-09-22）
+}                               //   快照内为单次交互粒度的投影（非全局配置）
 ```
 
 ### 9.4 端点
@@ -444,12 +511,28 @@ data: {
 ### 9.6 前端契约
 
 - `frontend` 新增通用组件 `InteractionDialog.vue`：props 仅 `{ request: InteractionRequest }`、emits 仅 `submit(args)`/`reject()`——**组件内禁止出现任何具体工具/MCP 服务名**；
-- 控件映射：`enum→下拉`、`boolean→开关`、`integer/number→数字输入`、`string→输入框`（description 含「多行」→ 多行文本）、`object/array→JSON 文本`；required 标星 + 本地校验；
+- 控件映射（**2026-09-23 起按 schema 递归**）：`enum→下拉`、`boolean→开关`、`integer/number→数字输入`、`string→输入框`（description 含「多行」→ 多行文本）；`object` 且声明了 `properties` → **子字段逐行**（任意深度递归）；`array` 且 `items.type=object` → **表格**（一行一个元素；列 = `items.properties` 的键，不足时补"值里实际出现的键"）；`array` 且 `items` 为标量/枚举 → **列表**（一行一项）；其余形状（无 `properties` 的自由对象、数组套数组、`items` 缺失）→ **JSON 文本框**（逃逸舱）。required 标星 + 本地校验；
+- 行内操作条：分组/表格/列表行提供「按 JSON 编辑 / 按表单编辑」切换（任一层都可手动切回或切出）；表格另有「＋ 添加行」与每行「删除」；`@` 文件引用与结构化文件卡片仍**只挂文本类控件**（表格单元格不挂，避免在格子里展开面板）；
+- 分层（宪章原则二，各自带同名测试）：控件推导与值逻辑在 `utils/arg-schema.ts` / `utils/arg-values.ts`（纯函数），值路径读写在 `utils/json-path.ts`（2026-09-23 起支持数组下标），表单状态在 `composables/useInteractionForm.ts`，单节点递归渲染在 `components/chat/InteractionField.vue`（单元格/列表项用 `cell` 模式只出控件本体），`InteractionDialog.vue` 只做外壳；
 - 倒计时取 `timeout_seconds`，归零按拒绝关闭；终验失败展示后端逐字段错误并保持弹窗。
 
 ### 9.7 算法规则选择（R9，2026-09-19）
 
-**交互**：HITL 参数确认窗中，快照声明了 `rules_field` 的 JSON 字段旁渲染「从算法规则选择」按钮（未声明不渲染）；点击弹结构化表格——列 = 最新规则文件表头，行首勾选，**优先级列（表头匹配 `priority`/`优先级`）就地编辑**（数字文本转数字，留空则不携带该键），其余列只读；确认后勾选行原样生成 `array[object]`（**键 = 表头列名，值 = 该行该列的值**）写回 JSON 编辑框（可再手改），提交仍走 §9.4 服务端终验。
+**交互**：HITL 参数确认窗中，快照声明了 `rules_field` 的**字段那一行**渲染「从算法规则选择」按钮（未声明不渲染；2026-09-23 前为"顶层 JSON 字段旁"，见下方该日修订）；点击弹结构化表格——列 = 最新规则文件表头，行首勾选，**优先级列（表头匹配 `priority`/`优先级`）就地编辑**（数字文本转数字，留空则不携带该键），其余列只读；确认后勾选行原样生成 `array[object]`（**键 = 表头列名，值 = 该行该列的值**）写回 JSON 编辑框（可再手改），提交仍走 §9.4 服务端终验。
+
+**2026-09-22：`rules_field` 为对象路径（如 `input.targetPriorities`）时的落点与写回**：
+
+- **落点**——弹窗只渲染**顶层**字段（顶层对象一律是 json 文本框，没有分字段控件），故入口挂在 `rules_field` **首段**对应的顶层控件旁；按钮 aria-label、旁注与选择器标题都写明完整目标路径，避免"到底填到哪个字段"含糊；
+- **写回**——把勾选生成的数组**深写**进该 JSON 编辑框文本的对应位置（中间层缺失即创建空对象；中间层存在但不是对象、或编辑框文本不是合法 JSON → **只报错、不覆盖**，避免破坏用户已填的其他输入项）；顶层字段（`rules`）保持既有的整段替换语义；
+- **预勾选**——取编辑框**当前文本**按路径解析出的值（不是 `initForm` 时模型提议值那份旧快照），用户手改过 JSON 后再打开选择器也能正确反勾。
+
+**2026-09-23：弹窗改为按 schema 递归渲染后，落点与写回的收敛**
+
+- **起因**：真实工具把 7 个排产输入项包在一个顶层 `input` 对象里（`input.targetPriorities` 只是其一），而旧实现只渲染**顶层**字段、`object/array` 一律塌成一个 JSON 文本框——"字段逐行""入口在它那一行"在界面上根本不成立，入口只能挂在祖先 JSON 框下方、靠旁注说明它到底改哪里。该 MCP 服务由第三方提供、**不可改**，因此只能在客户端补通用能力（§9.6 的控件映射同步改为递归）；
+- **落点**：`rules_field` 改为按**完整路径**匹配"能被结构化渲染到的**最长前缀**"（`utils/arg-schema.ts: rulesAnchorOf`）。路径全程可渲染 → 入口就在目标那一行（与它要影响的表格/JSON 框同属一个字段块）；中途撞上 JSON 逃逸舱（祖先对象未声明 `properties`）→ 落点退到该祖先那一行，`exact = false`，写回仍按**完整路径**；
+- **写回**：不再"往 JSON 文本里塞字符串"，而是按值路径**深写进结构化模型**（`utils/json-path.ts: setAtPath`，2026-09-23 起支持数组下标）。因此"当前不是合法 JSON，请先修正后再选择规则"只在**目标路径上仍有祖先处于 JSON 编辑态**时才会出现（`composables/useInteractionForm.ts: applyRules`）；结构化路径下不存在"把文本解析回来"这一步，也就不会再因半截文本而拒绝；
+- **预勾选/反勾**口径不变（仍取当前模型值按路径解析），只是取值来源从"编辑框文本"变为"模型"；
+- **单文件行数**：原 `InteractionDialog.vue` 已超宪章 500 行硬门禁，本次按"拆子组件 / 抽 composable / 抽纯函数"三种方式拆分到位。
 
 **数据源端点（新）**：`GET /api/files/rules` —— 取「数据准备/算法规则」中 `updated_at` 最新的规则文件（`.xlsx`/`.csv`），**服务端解析**（运行环境已带 `xlsx` 依赖；CSV 按 UTF-8 解码，xlsx 先验 ZIP 魔数防"改后缀文本"蒙混），返回：
 

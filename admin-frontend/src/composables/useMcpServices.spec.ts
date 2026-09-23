@@ -55,7 +55,7 @@ beforeEach(() => {
   stopMcpService.mockReset()
   testMcpService.mockReset()
   fetchMcpLogs.mockReset().mockResolvedValue({ items: [], truncated: false })
-  fetchMcpStats.mockReset().mockResolvedValue({ stats_available: true, items: [] })
+  fetchMcpStats.mockReset().mockResolvedValue({ stats_available: true, items: [], groups: [] })
 })
 
 describe('useMcpServices', () => {
@@ -74,15 +74,28 @@ describe('useMcpServices', () => {
     expect(mcp.error.value?.code).toBe('ADM_COMPOSE_FILE_UNREADABLE')
   })
 
-  it('loadStats：可用时写入数据', async () => {
+  it('loadStats：可用时写入数据（服务级汇总 + 分组行）', async () => {
     fetchMcpStats.mockResolvedValue({
       stats_available: true,
       items: [{ name: 'ocr', calls_total: 1, calls_ok: 1, calls_failed: 0, last_called_at: null }],
+      groups: [
+        {
+          service: 'ocr',
+          tool_name: 'ocr_image',
+          user_id: 'admin',
+          calls_total: 1,
+          calls_ok: 1,
+          calls_failed: 0,
+          last_called_at: null,
+        },
+      ],
     })
     const mcp = useMcpServices()
     await mcp.loadStats()
     expect(mcp.statsAvailable.value).toBe(true)
     expect(mcp.stats.value).toHaveLength(1)
+    expect(mcp.statsGroups.value).toHaveLength(1)
+    expect(mcp.statsGroups.value[0]!.tool_name).toBe('ocr_image')
   })
 
   it('loadStats：**不可达 → statsAvailable=false 且不填 0**（FR-009）', async () => {
@@ -91,13 +104,15 @@ describe('useMcpServices', () => {
     await mcp.loadStats()
     expect(mcp.statsAvailable.value).toBe(false)
     expect(mcp.stats.value).toEqual([])
+    expect(mcp.statsGroups.value).toEqual([])
   })
 
   it('loadStats：后端明确告知不可用（stats_available=false）时同样保持"未知"', async () => {
-    fetchMcpStats.mockResolvedValue({ stats_available: false, items: [] })
+    fetchMcpStats.mockResolvedValue({ stats_available: false, items: [], groups: [] })
     const mcp = useMcpServices()
     await mcp.loadStats()
     expect(mcp.statsAvailable.value).toBe(false)
+    expect(mcp.statsGroups.value).toEqual([])
   })
 
   it('loadLogs：写入有界日志；失败时清空并可读报错', async () => {

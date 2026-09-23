@@ -187,36 +187,49 @@ export interface McpStatsWindow {
   total: number
 }
 
-/** 单用户调用统计（2026-09-16 十四次调整） */
-export interface McpStatsUser {
-  /** 调用发起用户；`null` = 升级前的历史事件未记录归属 */
-  user_id: string | null
+/**
+ * 服务级调用汇总（平台卡片用：最近一年调用次数）。
+ *
+ * 2026-09-23：时间窗已移到分组行 `McpStatsGroup`，此处只留最近一年总量。
+ */
+export interface McpStatsItem {
+  name: string
+  /** 调用次数（以下三个计数同此口径）；2026-09-23 起**等于最近一年**（运行环境侧已删独立累计表） */
   calls_total: number
   calls_ok: number
   calls_failed: number
   last_called_at: string | null
 }
 
-export interface McpStatsItem {
-  name: string
+/**
+ * 按「**服务 × 工具 × 用户**」分组的统计行（2026-09-23）—— 统计表的**一行**。
+ *
+ * `tool_name` 是 MCP 服务自己的工具名（不含 `{server}__` 前缀）；`tool_name` / `user_id`
+ * 为 `null` 表示升级前的历史事件未记录该维度（界面显示"未归属·升级前记录"）。
+ */
+export interface McpStatsGroup {
+  service: string
+  tool_name: string | null
+  user_id: string | null
   calls_total: number
   calls_ok: number
   calls_failed: number
   last_called_at: string | null
-  /** 时间窗聚合：最近24h / 7天 / 30天 / 1年（任务 2026-09-15） */
+  /** 时间窗聚合：最近24h / 7天 / 30天 / 1年 */
   windows?: {
     h24: McpStatsWindow
     d7: McpStatsWindow
     d30: McpStatsWindow
     d365: McpStatsWindow
   }
-  /** 按用户明细（成功/失败分列）；数据来自事件明细，只覆盖最近一年 */
-  users?: McpStatsUser[]
 }
 
 export interface McpStatsResponse {
   stats_available: boolean
+  /** 服务级汇总（卡片用） */
   items: McpStatsItem[]
+  /** 按「服务 × 工具 × 用户」分组的行（统计表用） */
+  groups: McpStatsGroup[]
 }
 
 /* ---------- §4 SKILL ---------- */

@@ -10,13 +10,36 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import type { McpConnectionStatus, McpServerConfig } from '../../types.js';
+import type { McpCallErrorKind, McpConnectionStatus, McpServerConfig } from '../../types.js';
 
 export class McpUnavailableError extends Error {
   constructor(server: string) {
     super(`外部服务 ${server} 当前不可用，请稍后尝试`);
     this.name = 'McpUnavailableError';
   }
+}
+
+/**
+ * 是否为**连接级**失败（连接被拒/超时/`StreamableHTTPError` 等）。
+ *
+ * 判据与降级决策同源（见 `degradeOnTransportFailure`）：`McpError` 表示服务端活着、
+ * 已应答协议错误（参数/schema 类，如 -32602），不算连接级。对外导出以便调用点
+ * （如 `mcp-tool-adapter` 的统计埋点）复用同一规则，不各自再实现一遍。
+ */
+export function isTransportFailure(err: unknown): boolean {
+  return !(err instanceof McpError);
+}
+
+/**
+ * 把一次调用失败归类为粗粒度枚举，供观测统计落库（`McpCallEvent.errorKind`）。
+ *
+ * 刻意只分三类、**不存错误原文**（长度与脱敏不可控）——要细节去 pino 运行日志。
+ * 判定从具体到泛化：不可用 > 协议错误 > 传输/其它。
+ */
+export function classifyMcpError(err: unknown): McpCallErrorKind {
+  if (err instanceof McpUnavailableError) return 'unavailable';
+  if (err instanceof McpError) return 'protocol';
+  return 'transport';
 }
 
 export interface McpToolInfo {
@@ -285,7 +308,7 @@ export class McpManager {
    * 降级重连对活服务只会造成状态抖动。
    */
   private degradeOnTransportFailure(server: string, err: unknown, reason: string): void {
-    if (err instanceof McpError) return;
+    if (!isTransportFailure(err)) return;
     this.markUnavailable(server, reason);
   }
 

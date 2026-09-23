@@ -21,20 +21,24 @@ export const LOGS_LIMIT_DEFAULT = 50;
 
 export interface McpStatsResult {
   stats_available: boolean;
+  /** 服务级汇总（平台卡片用） */
   items: Array<{
     name: string;
     calls_total: number;
     calls_ok: number;
     calls_failed: number;
     last_called_at: string | null;
-    /** 按用户明细（透传运行环境；`user_id` 为 null = 升级前的历史事件未记录归属） */
-    users?: Array<{
-      user_id: string | null;
-      calls_total: number;
-      calls_ok: number;
-      calls_failed: number;
-      last_called_at: string | null;
-    }>;
+  }>;
+  /** 按「服务 × 工具 × 用户」分组的行（平台统计表用，2026-09-23） */
+  groups: Array<{
+    service: string;
+    tool_name: string | null;
+    user_id: string | null;
+    calls_total: number;
+    calls_ok: number;
+    calls_failed: number;
+    last_called_at: string | null;
+    windows?: Record<string, { ok: number; failed: number; total: number }>;
   }>;
 }
 
@@ -121,9 +125,9 @@ export class McpServiceOperations {
   async stats(): Promise<McpStatsResult> {
     try {
       const result = await this.deps.runtime.mcpCallStats();
-      return { stats_available: result.stats_available, items: result.items };
+      return { stats_available: result.stats_available, items: result.items, groups: result.groups };
     } catch {
-      return { stats_available: false, items: [] };
+      return { stats_available: false, items: [], groups: [] };
     }
   }
 

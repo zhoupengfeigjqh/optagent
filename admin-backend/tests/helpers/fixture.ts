@@ -95,7 +95,7 @@ export class FakeDockerHost extends DockerHost {
 /** 假运行环境：预置内置工具目录与调用统计；可切换"不可达" */
 export class FakeRuntimeClient extends RuntimeClient {
   tools: unknown[] = [];
-  stats: unknown = { stats_available: true, items: [] };
+  stats: unknown = { stats_available: true, items: [], groups: [] };
   unreachable = false;
 
   constructor() {

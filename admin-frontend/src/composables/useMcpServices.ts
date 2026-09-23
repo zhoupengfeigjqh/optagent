@@ -21,6 +21,7 @@ import type {
   McpServiceConfigPayload,
   McpServiceDetail,
   McpServiceListItem,
+  McpStatsGroup,
   McpStatsItem,
   McpTestResult,
   Paged,
@@ -32,6 +33,8 @@ export function useMcpServices() {
   const list = shallowRef<Paged<McpServiceListItem> | null>(null)
   const detail = shallowRef<McpServiceDetail | null>(null)
   const stats = ref<McpStatsItem[]>([])
+  /** 按「服务 × 工具 × 用户」分组的统计行（2026-09-23；统计表的行） */
+  const statsGroups = ref<McpStatsGroup[]>([])
   const statsAvailable = ref(true)
   const logs = ref<McpLogLine[]>([])
   const testResult = shallowRef<McpTestResult | null>(null)
@@ -65,9 +68,11 @@ export function useMcpServices() {
       const res = await fetchMcpStats()
       statsAvailable.value = res.stats_available
       stats.value = res.items
+      statsGroups.value = res.groups
     } catch {
       statsAvailable.value = false
       stats.value = []
+      statsGroups.value = []
     }
   }
 
@@ -148,6 +153,7 @@ export function useMcpServices() {
     list,
     detail,
     stats,
+    statsGroups,
     statsAvailable,
     logs,
     testResult,

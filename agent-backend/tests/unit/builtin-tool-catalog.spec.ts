@@ -31,15 +31,16 @@ const values: Partial<TemplateValues> = {
 };
 
 describe('BUILTIN_TOOL_CATALOG', () => {
-  it('共 5 项，名称与顺序与改造前一致', () => {
+  it('前 5 项与改造前逐字一致（顺序不变），read_skill 为 2026-09-23 追加在末尾', () => {
     expect(BUILTIN_TOOL_CATALOG.map((t) => t.name)).toEqual([
       'read_file',
       'write_file',
       'list_dir',
       'grep_files',
       'calculator',
+      'read_skill',
     ]);
-    expect(builtinToolNames()).toHaveLength(5);
+    expect(builtinToolNames()).toHaveLength(6);
   });
 
   it('writable 标记：仅 write_file 为 true（FR-011）', () => {
@@ -56,7 +57,7 @@ describe('BUILTIN_TOOL_CATALOG', () => {
   });
 
   it('listBuiltinTools 返回全部条目；findBuiltinTool 命中/未命中', () => {
-    expect(listBuiltinTools()).toHaveLength(5);
+    expect(listBuiltinTools()).toHaveLength(6);
     expect(findBuiltinTool('calculator')?.label).toBe('计算器');
     expect(findBuiltinTool('nope')).toBeUndefined();
   });
@@ -155,6 +156,24 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['expression'],
       properties: { expression: { type: 'string', description: '数学表达式，如 "(1+2)*3"' } },
+    });
+  });
+
+  it('read_skill 的说明与入参（2026-09-23 新增，无占位符故渲染后不变）', () => {
+    expect(rendered.get('read_skill')?.description).toBe(
+      '读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），' +
+        '也可读 references/ 等其他文档（如 "references/算法详解.md"）；path 为目录时返回该目录下的文件清单。' +
+        '技能名取自系统提示中的「技能」小节。仅文本文件；内容过大时返回截断片段，可用 offset 继续读。',
+    );
+    expect(rendered.get('read_skill')?.parameters).toEqual({
+      type: 'object',
+      required: ['skill'],
+      properties: {
+        skill: { type: 'string', description: '技能名，如 "调度算法"' },
+        path: { type: 'string', description: '技能内相对路径，省略则为 SKILL.md' },
+        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', description: '本次最多返回字节数' },
+      },
     });
   });
 

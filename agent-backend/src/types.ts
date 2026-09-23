@@ -106,14 +106,47 @@ export interface UsageStore {
   summary(filter: UsageFilter): UsageSummary;
   /**
    * MCP 工具调用计数（R4 / FR-049）：口径为**工具调用次数**，非 HTTP 请求数。
-   * `userId` 为调用发起用户（2026-09-16 十四次调整：支撑按用户明细）；
-   * 缺省/null 表示老数据未记录归属。
+   *
+   * 2026-09-23：入参由位置参数改为事件对象——字段增至 6 个后位置参数已不可读，
+   * 且与同接口的 `record(entry)` 保持同一风格。
    */
-  recordMcpCall(serviceName: string, ok: boolean, userId?: string | null): void;
-  /** 按服务名的调用统计；未出现过的服务不在此列 */
-  mcpCallStats(): McpCallStat[];
+  recordMcpCall(entry: McpCallEvent): void;
+  /** 服务级汇总 + 按「服务 × 工具 × 用户」的分组行；未出现过的服务不在此列 */
+  mcpCallStats(): McpCallStats;
   close(): void;
 }
+
+/**
+ * 一次 MCP **工具调用**的事件（2026-09-23：事件表扩列后的写入契约）。
+ *
+ * - 口径：每次 `tools/call` 记一条；**调用未发出**（如 file_args 校验失败）不记，
+ *   与"计数 = 工具调用次数"的既定口径一致。
+ * - `durationMs` 含 `McpManager` 内部的一次重试，即**用户感知耗时**，非单次尝试耗时。
+ * - 字段名与运行日志的 `mcp.tool.call` 结构（`service`/`tool`/`ok`）对齐。
+ */
+export interface McpCallEvent {
+  /** MCP 服务名（适配器里的 `serverName`） */
+  service: string;
+  /** 工具名（适配器里的 `t.name`，不含服务前缀） */
+  tool: string;
+  ok: boolean;
+  /** 含重试的用户感知耗时（毫秒） */
+  durationMs: number;
+  /** 仅失败时有值 */
+  errorKind?: McpCallErrorKind;
+  /** 调用发起用户；缺省/null = 老数据未记录归属 */
+  userId?: string | null;
+  /** 当前会话 id（= `thread_id`），用于把事件接回具体对话 */
+  threadId?: string | null;
+}
+
+/**
+ * MCP 调用失败的**粗粒度**分类（2026-09-23）。
+ *
+ * 刻意不存错误原文（长度与脱敏不可控）：要细节去 pino 运行日志。
+ * 判定复用 `McpManager` 既有的"连接级错误 vs `McpError`"规则，不在此处重新实现。
+ */
+export type McpCallErrorKind = 'unavailable' | 'protocol' | 'transport';
 
 /** MCP 服务调用统计（`contracts/runtime-api-delta.md` §4.3） */
 /** 单个时间窗的调用计数（任务 2026-09-15：24h / 7 天 / 30 天 / 1 年） */
@@ -123,34 +156,51 @@ export interface McpCallWindow {
   total: number;
 }
 
-/** 单用户调用统计（2026-09-16 十四次调整：由事件明细按 user_id 聚合） */
-export interface McpCallUserStat {
-  /** 调用发起用户；`null` = 升级前的历史事件未记录归属 */
-  user_id: string | null;
-  calls_total: number;
-  calls_ok: number;
-  calls_failed: number;
-  last_called_at: string | null;
-}
-
+/**
+ * 服务级调用汇总（2026-09-23：时间窗已移到分组行，此处只留最近一年总量）。
+ *
+ * 供平台**卡片**展示"最近一年调用次数"；平台统计表的每一行是 `McpCallGroupStat`。
+ * 计数口径为最近一年（独立累计表已删，改由只保留一年的事件明细聚合）。
+ */
 export interface McpCallStat {
   name: string;
   calls_total: number;
   calls_ok: number;
   calls_failed: number;
   last_called_at: string | null;
-  /** 按时间窗聚合（依赖每次调用的事件明细，事件只保留一年） */
+}
+
+/**
+ * 按「**服务 × 工具 × 用户**」分组的调用统计（2026-09-23）——平台统计表的**一行**。
+ *
+ * 时间窗放在这一层：每个组合都回答"最近 24h/7 天/30 天/一年各调了多少次、成功多少次"。
+ * 更粗的视角（按服务、按用户）都能由它折叠而来，故不再单独提供。
+ *
+ * `tool_name` 是 **MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），
+ * 不是暴露给模型的 `{server}__{tool}`；`tool_name` / `user_id` 为 `null` 表示
+ * 升级前的历史事件未记录该维度（界面显示"未归属·升级前记录"）。
+ */
+export interface McpCallGroupStat {
+  service: string;
+  tool_name: string | null;
+  user_id: string | null;
+  calls_total: number;
+  calls_ok: number;
+  calls_failed: number;
+  last_called_at: string | null;
+  /** 四个时间窗（数据源同为事件明细，故都覆盖在"最近一年"这一保留期内） */
   windows: {
     h24: McpCallWindow;
     d7: McpCallWindow;
     d30: McpCallWindow;
     d365: McpCallWindow;
   };
-  /**
-   * 按用户的调用明细（成功/失败分列）。数据来自事件明细表，故只覆盖
-   * **最近一年**（与 windows 同口径）；未开过库的统计行可能为空数组。
-   */
-  users: McpCallUserStat[];
+}
+
+/** `UsageStore.mcpCallStats()` 的返回：一次聚合同时给出服务级汇总与分组行 */
+export interface McpCallStats {
+  items: McpCallStat[];
+  groups: McpCallGroupStat[];
 }
 
 /** 实例池 key */
@@ -194,11 +244,17 @@ export interface McpServerConfig {
   /** 调用确认策略（缺省 `never`） */
   confirmation?: McpConfirmation;
   /**
-   * 算法规则参数设置（可选）：`{ 工具名: 字段名 }`——该工具入参里承载
+   * 算法规则参数设置（可选）：`{ 工具名: 字段名或对象路径 }`——该工具入参里承载
    * `array[object]` 规则清单的字段。声明后 HITL 确认窗中该字段旁出现
    * 「从算法规则选择」入口（读取「数据准备/算法规则」最新规则文件），
-   * 由包装层把字段名带进 interaction 快照。装配时按**当前工具名**查本映射；
-   * 空/缺省 = 不启用。不改变是否走 HITL（仍只由 confirmation 决定）。
+   * 由包装层把路径带进 interaction 快照。
+   *
+   * 路径支持对象嵌套（如 `input.targetPriorities`，2026-09-22）——规则数组常在入参
+   * 对象内部，只认顶层字段名会让这类声明**静默失效**。写法与判据见
+   * `domain/rules-field-path.ts`。
+   *
+   * 装配时按**当前工具名**查本映射；空/缺省 = 不启用。
+   * 不改变是否走 HITL（仍只由 confirmation 决定）。
    */
   rulesFields?: Record<string, string>;
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */

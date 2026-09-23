@@ -472,3 +472,190 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 - 读屏实机抽查（原则四 §8 第 4 条）。
 
 以上三项属**人工验收动作**，其对应功能行为均有自动化断言覆盖（`quickstart.md` §10.5），但"计时/计数/读屏"本身未由本次实现代跑。
+
+---
+
+## 增量记录（2026-09-23）：HITL 弹窗按 schema 递归渲染
+
+**起因**（契约已同步：`contracts/runtime-api-delta.md` §9.6 / §9.7）：真实工具把 7 个排产输入项包在一个
+顶层 `input` 对象里，而弹窗只渲染**顶层**字段、`object/array` 一律塌成一个 JSON 文本框——
+"字段逐行""规则入口在它那一行"在界面上根本不成立，入口只能挂在祖先 JSON 框下方靠旁注说明改哪里。
+产品要求**全部改成表格化的结构化形式**；而该 MCP 服务（`hd-algorithm`，`192.168.0.188:8080`）
+由第三方提供、**不可改**，因此只能在客户端补通用递归渲染能力。
+
+**分层落地**（宪章原则二；每层各自带同名测试）：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 纯函数 | `frontend/src/utils/json-path.ts` | 值路径读写（本次起支持**数组下标**），写入返回新值、类型不符**不静默覆盖** |
+| 纯函数 | `frontend/src/utils/arg-schema.ts` | schema 内省：控件形态分派、表格列（schema 声明列 + 值里出现的动态列）、规则入口落点 |
+| 纯函数 | `frontend/src/utils/arg-values.ts` | 本地校验（required 由父级传入，与 JSON Schema 语义一致）与提交构建（剪枝 + 数字收敛） |
+| composable | `frontend/src/composables/useInteractionForm.ts` | 模型（唯一事实源）、JSON 草稿（逃逸舱）、规则写回、校验与提交编排 |
+| 组件 | `frontend/src/components/chat/InteractionField.vue` | **字段行**：标签、说明、操作条、文件卡片、规则入口；分组时递归自身 |
+| 组件 | `frontend/src/components/chat/InteractionControl.vue` | **控件本体**：标量控件、JSON 视图文本、`@` 引用面板；`compact` 模式供表格单元格复用（单元格里放不下的形状退化为 JSON 框，而不是渲染成 `[object Object]`） |
+| 组件 | `frontend/src/components/chat/InteractionTable.vue` | **表格块**：一行一个元素、列与行由父级传入、删行只上报事件（不自己改数据） |
+| 组件 | `frontend/src/components/chat/InteractionDialog.vue` | 瘦身为弹窗外壳 |
+
+**行为变化**：
+
+1. 对象 → 子字段**逐行**（任意深度递归）；对象数组 → **表格**（一行一个元素，可加行/删行、单元格就地编辑）；
+   标量数组 → **列表**；schema 表达不了的形状（自由对象、数组套数组等）→ **JSON 逃逸舱**（任一层可手动切换）；
+2. 规则入口按 `rules_field` **完整路径**落点：能结构化渲染时按钮就在目标那一行（与它要影响的表格同一个字段块）；
+3. 写回从"往 JSON 文本里塞字符串"改为**按值路径深写进结构化模型**（因此结构化路径下不再出现"请先修正 JSON"的拒绝）；
+4. 提交口径不变：空值不进 `args`（与改造前"空文本框不进 args"一致），另补"表格里整行留空不以 `{}` 混进提交值"。
+
+**门禁**（本地，宪章「开发工作流与质量门禁」）：`frontend` —— `lint` 0 error、`typecheck` 通过、
+`test` **295/295**（22 个文件）、`test:coverage` 通过、`build` 通过；**单文件行数全部 ≤ 500**
+（最大 `InteractionField.vue` 408 行；拆前 `InteractionDialog.vue` 与 `InteractionDialog.spec.ts`
+分别 790 / 581 行都已超限，本次一并拆到位）。覆盖率：新增/改动的 4 个模块均 ≥ 80%
+（实测语句/分支 `json-path` 98.07/95.12、`arg-schema` 95.65/94.11、`arg-values` 97.89/91.75、
+`useInteractionForm` 96.33/83.63），**全局防倒退地板随补测自 14/22/8/14 上调至 45/52/34/44**
+（实测 46.18/53.19/35.36/45.30），模块阈值清单已按宪章要求补入这 4 个模块。
+
+**顺带修掉的缺陷**：重写 `InteractionDialog` 时曾丢掉"挂载即预取文件空间"的 `immediate` 标志，
+导致结构化文件卡片与 `@` 面板首屏没有数据源——由既有组件测试当场拦下并修复。
+
+**副作用与遗留**：
+
+- 规则选择器生成的行的键 = **规则文件表头**，而工具要求的是 `ruleId`/`rulePriority`（见该工具
+  `input.targetPriorities.items.properties`）。若规则文件表头不是这两个字段名，勾选结果会缺必填键——
+  现在弹窗会**在行内/校验里明确提示**（而不是等第三方服务拒绝）。该核对需在规则文件就位后确认，
+  必要时应补一次"表头 → 目标字段名"的显式映射（属新需求，未在本次实现）。
+- `admin-backend/.platform-data` 侧无需改动：`rules_fields` 的取值语法未变（仍是对象路径）。
+
+### 同日追加：MCP 服务配置从 compose 收敛到服务自己的 `.env`
+
+**起因**：`OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS` 原先由 `docker-compose.yml` 的
+`environment` 拿根 `.env` 的 `HOST_LAN_IP` 拼装——一处配置两个主人（compose 里的默认值与根
+`.env` 的覆盖并存）。表现是"改了 `.env` 却没反应"：**环境变量在容器创建时固化**，
+`docker restart` 以及机器重启后由 `restart: unless-stopped` 拉起，都只是让既有容器再跑一遍，
+于是出现"`docker compose config` 显示 `192.168.0.140`、容器里却还是 `192.168.1.3` /
+`192.168.0.143`"——实测两个容器各冻着不同年代的旧 IP，**回源其实一直被 SSRF 拒绝**。
+
+**改动**（与 backend / admin-backend 自 2026-09-20 起的同一模式）：
+
+- 新增入库的 `ocr-service/.env` / `jev-service/.env`：容器形态取值（白名单只需服务名 `backend`）；
+- 新增 gitignore 的 `ocr-service/.env.local`，`jev-service/.env.local` 追加白名单 LAN IP：
+  本机形态（backend 跑在宿主机）的追加覆盖；两者均由 compose `env_file` 注入
+  （`.env.local` 用 `required: false`，缺失不报错——容器形态本就不需要它）；
+- `docker-compose.yml` 的 ocr / jev 段**删除 `environment`**，只声明注入哪两个文件；
+  全文唯一的 `environment` 单点覆盖只剩 `PUBLIC_BASE_URL`；
+- 根 `.env` / `.env.example` 移除 `HOST_LAN_IP`（已无任何读者）；
+- **`.gitignore` 放行 `ocr-service/.env` / `jev-service/.env`**：`.env` 规则对**所有层级**生效，
+  不显式放行会处于"被忽略且未跟踪"——提交时静默丢失，而 `env_file` 第一项默认必需，
+  fresh clone 会直接起不来（本次已踩到并修正，与既有 `!admin-backend/.env` 同一手法）；
+- README：配置地图（新增 4 行、`.env（根）` 收窄为端口项）、启动步骤、**本地配置要点**三处同步；
+  并把"改完必须**重建**容器、`restart` 不更新环境变量"写成显式警告 + 一条验证命令。
+
+**验证**：`docker compose config` 已无 `HOST_LAN_IP` 引用、两值为 `backend,192.168.0.140`；
+`docker compose up -d ocr jev` 重建后 `docker inspect` 与两个服务自报的 `allow_hosts` 一致；
+容器内直接跑 SSRF 判定：`192.168.0.140` 放行、`192.168.0.143` 被拒并给出可读原因（两个服务都验）。
+
+---
+
+## 增量记录（2026-09-23）：MCP 调用统计下钻到工具 + 去掉独立累计表
+
+**起因**：两件事一并处理——①统计只到"服务"粒度，`ocr` 失败若干次看不出是**哪个工具**；
+②产品确认**只关心最近一年的调用总数**，而现有实现同时维护一张"全历史累计"表（`mcp_call_stats`）
+与一张"只留一年"的事件明细表（`mcp_call_events`），两者靠同一次写入各自累加，
+存在"累计 +1 但明细没落"的窗口（两条独立自动提交语句，`catch` 只记日志不抛出）。
+
+**处置**：
+
+1. **只保留事件明细一张表**：`DROP TABLE IF EXISTS mcp_call_stats`（幂等，随建表段执行）。
+   累计值改由事件明细聚合，**口径即"最近一年"**——`calls_total/ok/failed` 与 `windows.d365` 恒相等。
+   取舍理由：一张停写后会**冻结在切换时刻**的表，比删掉更容易被误读。
+   **代价（已确认接受）**：全历史总调用量永久不可得（超过 365 天的老事件此前已被清理，无法回填）。
+2. **事件明细新增 4 列**（旧库打开即自愈，沿用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`；
+   建在这些列上的索引一律在**补列之后**创建，与既有 `idx_mcp_events_user` 同一坑位）：
+   - `tool_name`——**MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），不含暴露给模型的 `{server}__` 前缀；
+   - `thread_id`——取自强制穿透上下文里的 `sid`（七次调整已具备，**无需新增透传**），把事件接回具体对话；
+   - `duration_ms`——**含 `McpManager` 内部一次重试**的用户感知耗时（口径写进注释与契约，避免被当成单次尝试耗时）；
+   - `error_kind`——仅失败有值，粗粒度枚举 `unavailable | protocol | transport`，**不存错误原文**
+     （长度与脱敏不可控，细节看运行日志）；判定提炼 `McpManager` 既有的"连接级 vs `McpError`"规则为
+     导出的 `isTransportFailure` / `classifyMcpError`，**不在适配器里写第二份**。
+3. **`recordMcpCall` 入参由位置参数改为事件对象**（字段增至 6 个后位置参数已不可读，且与同接口
+   `record(entry)` 同风格），并把"写入 + 顺手清理"包进 `db.transaction()`，一并堵掉上述 ② 的一致性问题。
+4. **响应每项新增 `tools[]`**（与既有 `users[]` 同构），在事件明细上 `GROUP BY service_name, tool_name`。
+   **顺带修一处既有缺陷**：`users[]` 的聚合原先**没有时间条件**、默认"清理一定跑过"——而清理只在
+   写入时触发，现补上 365 天上界。
+5. **管理端**：`McpStatsTable` 展开行新增「按工具（最近一年）」区块；「累计（成功/失败）」列头与卡片
+   文案改为「最近一年（成功/失败）」/「最近一年调用」——口径变了措辞必须跟着变，否则界面会并排出现
+   两个数值完全相同的列而被当成 bug。
+
+**契约同步**：`contracts/runtime-api-delta.md` §4.2（计数点：删累计表、逐列口径表）、
+§4.3（响应 + `items[].tools`、`calls_*` 注明近一年口径、`items` 不含超一年未调用服务）；
+`data-model.md` §3.3（字段说明与口径注记）。
+
+**口径说明（对 `FR-049` 的解读）**：`FR-049` 与 `spec.md` 用户故事 4 场景 7 里的"累计调用次数"，
+自本次起按**最近一年**解读，不再表示全历史；`spec.md` 作为需求快照保留原文。
+
+**回归测试**：`usage-db.spec.ts` 19 例（新增：全字段落库且工具名不带前缀、成功不留 `error_kind`、
+按工具分组聚合、老库补齐全部新增列）；`mcp-manager.spec.ts` +3 例（连接级/协议判据与分类）；
+`mcp-tool-adapter.spec.ts` +4 例（埋点：工具名为 MCP 原名、失败带分类且**异常照常上抛**、
+无运行上下文时用户/会话为 `null`、**`file_args` 校验失败不记事件**——守住"计数 = 工具调用次数"）；
+`mcp-call-stats.spec.ts` 8 例（+ 按工具明细与服务级求和自洽）；`McpStatsTable.spec.ts` 13 例
+（+3：按工具展开、`tool_name` 为 `null` 显示"未归属"、无 `tools` 时明说原因）；`McpCardList.spec.ts` 文案同步。
+
+**门禁**：`agent-backend` `tsc --noEmit` 通过、`test:all` **243/243**；`admin-backend` `tsc --noEmit` 通过；
+`admin-frontend` `src/components/mcp` **63/63**。
+
+### 同日追加：调用统计表改为「一行 = 用户 × 服务 × 工具」，去掉明细展开
+
+**要求**（产品）：统计表每行为「用户名 / 服务名 / 工具名 / 最近24h / 最近7天 / 最近30天 / 最近一年 / 最近调用时间」，
+四个时间窗单元格格式为「**总次数/成功次数**」；**不要明细**（取消展开列）。
+
+**处置**：
+
+1. **响应新增 `groups[]`**（`GET /api/mcp-call-stats`）：在事件明细上按 `(service_name, tool_name, user_id)`
+   分组、**每个组合带四个时间窗**——正是统计表所需的一行。
+2. **`users[]` / `tools[]` 被 `groups` 取代并删除**：两者都不带时间窗，无法表达上表的列；且分组行本身就是
+   最细粒度（按服务、按用户都能由它折叠算出），再并列第二套明细只会造成口径分裂。
+   `items[]` 保留但**只留服务级总量**（`windows` 移入分组行）——它仍供列表页卡片显示"最近一年调用次数"。
+3. **聚合实现**：`mcpCallStats()` 由"三条独立查询"改为**一次按 (服务, 工具, 用户) 的逐窗聚合**，
+   服务级汇总在 JS 里折叠分组行得出（同一口径，可直接相加）——少一次查询，且两视图天然自洽。
+4. **前端 `McpStatsTable.vue`**：8 列网格、无展开行与按钮，单元格 `总/成功`；`only` 仍用于服务详情页过滤。
+   **顺带修掉一处既有缺陷**：原先"空态"分两条 `<tr>` 判断，`only` 且该服务无行时**两条空态会同时渲染**
+   （重复提示），现收敛为一个 computed 文案。
+5. **平台后端**：`runtime-client` / `operations` 透传 `groups`，并把 `groups` 纳入**响应结构校验**
+   （缺字段即报"结构不合法"）——否则旧运行环境会被静默当成"空表"，与 `FR-009`"不以 0 冒充"同一口径。
+
+**契约同步**：`contracts/runtime-api-delta.md` §4.1（追加分组视图要求）/§4.3（响应示例与字段表改为
+`items` + `groups`，并写明"`groups` 为最细粒度，MUST NOT 再并列第二套明细"）；`data-model.md` §3.3 口径注记同步。
+
+**回归测试**：`usage-db.spec.ts`（分组行四窗、窗口补 0 而非缺字段、服务级 = 分组之和、老行三维度 `null` 单独成行）；
+`mcp-call-stats.spec.ts`（`groups` 成行 + 求和自洽 + 不可读时 `groups` 也为空）；`runtime-client.spec.ts`
+（+1 例：缺 `groups` 即结构不合法）；`mcp.spec.ts`（分组行透传 + 不可达时两数组皆空）；
+`McpStatsTable.spec.ts` 重写为 10 例（表头 8 列、一行一组合、窗口格式、无展开入口、`only` 过滤、不可达未知、
+"未归属"、缺窗口显示"—"、空态三种文案）；`useMcpServices.spec.ts` 同步。
+
+**门禁（本条目完成后）**：`agent-backend` `lint` 0 error、`tsc --noEmit` 通过、`test:all` **243/243**、
+`test:coverage` 通过、`build` 通过；`admin-backend` `lint` 0 error、`tsc --noEmit` 通过、测试 **471/471**、
+`check:lines` 通过、`build` 通过；`admin-frontend` `lint` 0 error、`typecheck` 通过、测试 **360/360**、
+`test:coverage` 通过、`check:lines` 通过、`build` 通过。
+
+**遗留（非本次引入）**：`agent-backend/src/infra/mcp/mcp-tool-adapter.ts` **605 行**（HEAD 即 **583 行**，
+本次 +22 行），超出宪章的 500 行上限——`agent-backend` 没有 `check:lines` 脚本，故一直未被门禁拦住。
+需要时按"工具装配 / file_args 改写"两个职责拆件，属独立任务。
+
+### 同日追加：新增内置工具 `read_skill`（补齐 SKILL 正文的读取通道）
+
+**问题（实测确认，非配置问题）**：SKILL **此前只把 frontmatter 的 `name`/`description` 注入 System Prompt**（`agent-instance.ts:59-60`），正文与 `references/` 附件**没有任何读取通道**。三重证据：①`agent-backend/src` 里 `'skills'` 路径只出现在 `config-fingerprint.ts`（算指纹）与 `agent-instance.ts`（读 frontmatter），**无任何工具读它**；②内置工具目录当时就 5 项；③沙箱也读不到——`FileAccess` 白名单是用户三空间（`users/{uid}/user-data/{…}`），而技能在 `users/{uid}/agents/{agent}/skills/**`，是另一个子树，`read_file` 报 `目录不在白名单: skills`。规格侧也只有**管理端**读技能文件（`admin-api.md` §4.3），运行环境无对应契约。
+
+**处置**（方案 A：描述进提示词 + 正文按需用工具读）：
+
+1. **新增领域实现 `agent-backend/src/domain/tools/read-skill.ts`**（只读，**不经 `FileAccess`**）：
+   - `read_skill(skill, path?, offset?, limit?)`：`path` 缺省为 `SKILL.md`，可读 `references/` 等附件；`path` 为目录时返回**文件清单**；
+   - 安全口径与平台侧 `resolveInsideSkill` / `isSafeSkillName` **同判据**：技能名限单个目录名；路径拒绝对路径/盘符/`..`/控制字符（C0+DEL）；`\` 按分隔符归一；解析后必须在技能目录内 + realpath 校验（防符号链接逃逸）；只读普通文件，符号链接一律拒；
+   - **预期内用法问题**（技能/文件不存在、二进制）返回**可读文本 + 可用清单**（不静默留白）；**越权**上抛 `SkillAccessError` → 拒绝文案 + `file.access.denied`（`alert: true`）审计日志，与文件越权同一口径；
+   - 沙箱根由 `agent-factory` 在**每次 run 装配时**注入 `users/{uid}/agents/{agent}/skills` → **天然隔离到当前数字人**。
+2. **进内置工具目录**（`builtin-tool-catalog.ts`，`FR-011` 单一来源）：追加在**末尾**，**前 5 项顺序与文本零变化**（golden 不变式仍成立）；`GET /api/builtin-tools` 由 5 项变 6 项，平台的内置工具选择器**自动出现**「读取技能文件」，无需改平台代码。
+3. **启用方式**：与其它内置工具一致，须在 `TOOL.json` 的 `enabled` 里显式声明——**存量数字人需在管理平台勾选后重新部署**才生效（刻意的：技能读取与"配了哪些技能"一样属显式配置，MUST NOT 隐式开启）。
+
+**契约同步**：`contracts/runtime-api-delta.md` §0（新增 R10 行）/§1.4（目录 5→6、新增行、不变式限定为"前 5 项"）/§1.4.1（新增小节：为什么加、安全口径、启用方式）/§2（工具数 5→6）。
+
+**回归测试**：新增 `tests/unit/read-skill.spec.ts`（22 例：默认 `SKILL.md`、`references/` 附件、目录清单、`\` 归一、截断与 `offset` 续读、`limit` 上限、技能/文件不存在的可读提示、二进制、9 类越权、符号链接文件与目录、越界不返回任何内容）；新增 `tests/unit/builtin-tools.spec.ts`（4 例：接线、白名单未启用即不装配、越权 → 拒绝文案 + alert 日志、技能不存在不记 alert）；`builtin-tool-catalog.spec.ts`（5→6 + `read_skill` golden 文本）；集成 `builtin-tools.spec.ts`（`total` 6 + 含 `read_skill`）。
+
+**顺带修掉一个真实设计缺陷**：目录清单最初按"被问的那个目录"列相对路径（给出 `算法详解.md`），模型回填 `path` 时会取不到——由单测当场拦下，改为**一律相对技能根**（给出 `references/算法详解.md`，可直接回填）。
+
+**门禁**：`agent-backend` `lint` 0 error、`tsc --noEmit` 通过、`test:all` **270/270**、`test:coverage` 通过、`build` 通过；本轮改动文件行数 221 / 199 / 150 / 292，均 ≤ 500。

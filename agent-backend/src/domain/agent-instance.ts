@@ -22,6 +22,7 @@ import {
   type FileArgMode,
 } from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport } from './mcp-transport.js';
+import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.js';
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
 /**
@@ -146,8 +147,12 @@ function parseConfirmation(
 }
 
 /**
- * 解析 rules_fields：`{ 工具名: 字段名 }`，非法结构（非对象、值非非空字符串）
- * 即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
+ * 解析 rules_fields：`{ 工具名: 字段名或对象路径 }`，非法结构（非对象、值不是合法
+ * 字段路径）即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
+ *
+ * 取值支持对象嵌套（如 `input.targetPriorities`，2026-09-22）：规则数组常嵌在入参
+ * 对象内部，旧实现只接受顶层名字，这类声明会**静默失效**。语法与平台保存期
+ * 同一判据（`rules-field-path.ts`，两侧同构）。
  */
 function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -155,10 +160,12 @@ function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<str
   }
   const out: Record<string, string> = {};
   for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof field !== 'string' || field.trim() === '') {
-      throw bad(`rules_fields.${tool} 须为非空字符串（字段名）`);
+    if (parseRulesFieldPath(field) === null) {
+      throw bad(
+        `rules_fields.${tool} 须为${RULES_FIELD_PATH_HINT}，当前：${JSON.stringify(field)}`,
+      );
     }
-    out[tool] = field.trim();
+    out[tool] = (field as string).trim();
   }
   return out;
 }

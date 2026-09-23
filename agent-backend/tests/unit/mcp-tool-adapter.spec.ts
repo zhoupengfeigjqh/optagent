@@ -25,6 +25,7 @@ import {
   type RuntimeContext,
 } from '../../src/infra/mcp/mcp-tool-adapter.js';
 import type { FileArgMode } from '../../src/domain/file-arg-path.js';
+import type { McpCallEvent } from '../../src/types.js';
 
 interface Call {
   server: string;
@@ -91,6 +92,108 @@ async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, p
     content: Array<{ text: string }>;
   };
 }
+
+describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（2026-09-23）', () => {
+  /** 与真实 OCR 同形：只认 image，未声明 uid/sid */
+  const EVENT_TOOL = {
+    name: 'ocr_image',
+    description: '识别图片文字',
+    inputSchema: {
+      type: 'object',
+      properties: { image: { type: 'string' } },
+      required: ['image'],
+    },
+  };
+
+  /** 只关心计数事件：callTool 的成功/失败由用例决定 */
+  function build(events: McpCallEvent[], callTool: () => Promise<unknown>) {
+    const [tool] = mcpToolsAsAgentTools(
+      { callTool } as unknown as McpManager,
+      'svc',
+      [EVENT_TOOL] as never,
+      RUNTIME,
+      undefined,
+      undefined,
+      (event) => events.push(event),
+    );
+    return tool!;
+  }
+
+  it('成功：带服务名、MCP 工具名（不带 {server}__ 前缀）、耗时、用户与会话', async () => {
+    const events: McpCallEvent[] = [];
+    await exec(build(events, async () => 'ok'), { image: 'a.png' });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      service: 'svc',
+      // 落库的是 MCP 服务自己的工具名，而非暴露给模型的 `svc__ocr_image`
+      tool: 'ocr_image',
+      ok: true,
+      userId: 'admin',
+      threadId: 'th_123',
+    });
+    expect(events[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    // 成功不留错误分类（避免"ok=1 却有 errorKind"的歧义行）
+    expect(events[0]!.errorKind).toBeUndefined();
+  });
+
+  it('失败：带 ok=false 与错误分类，且原错误仍上抛（埋点不吞异常）', async () => {
+    const events: McpCallEvent[] = [];
+    const tool = build(events, async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    });
+
+    await expect(exec(tool, { image: 'a.png' })).rejects.toThrow('ECONNREFUSED');
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      service: 'svc',
+      tool: 'ocr_image',
+      ok: false,
+      errorKind: 'transport',
+      userId: 'admin',
+      threadId: 'th_123',
+    });
+  });
+
+  it('无运行上下文：事件照记，用户/会话为 null（不静默丢事件）', async () => {
+    const events: McpCallEvent[] = [];
+    const [tool] = mcpToolsAsAgentTools(
+      { callTool: async () => 'ok' } as unknown as McpManager,
+      'svc',
+      [EVENT_TOOL] as never,
+      undefined,
+      undefined,
+      undefined,
+      (event) => events.push(event),
+    );
+
+    await exec(tool!, { image: 'a.png' });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ ok: true, userId: null, threadId: null });
+  });
+
+  it('file_args 校验失败（调用未发出）：不记事件，守住"计数 = 工具调用次数"口径', async () => {
+    const events: McpCallEvent[] = [];
+    const calls: Call[] = [];
+    const [tool] = mcpToolsAsAgentTools(
+      fakeManager(calls),
+      'svc',
+      [EVENT_TOOL] as never,
+      RUNTIME,
+      { ocr_image: { image: 'url' } },
+      sandbox(),
+      (event) => events.push(event),
+    );
+
+    const result = await exec(tool!, { image: '不存在/a.png' });
+
+    expect(result.content[0]?.text).toContain('文件参数校验失败');
+    expect(calls).toHaveLength(0);
+    expect(events).toEqual([]);
+  });
+});
 
 describe('MCP 工具：uid/sid 强制穿透', () => {
   it('声明了 uid/sid：注入的是运行环境的值，LLM 伪造的值被覆盖', async () => {

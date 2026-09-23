@@ -19,7 +19,9 @@
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage",
     "smoke": "tsx scripts/smoke.ts",
-    "perf": "tsx scripts/perf.ts"
+    "perf": "tsx scripts/perf.ts",
+    "db:inspect": "tsx scripts/clear-db.ts inspect",
+    "db:clear": "tsx scripts/clear-db.ts clear"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.85.1",

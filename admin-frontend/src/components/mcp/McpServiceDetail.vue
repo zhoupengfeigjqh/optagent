@@ -146,7 +146,7 @@ async function confirmStop(): Promise<void> {
         <McpLogViewer v-else-if="tab === 'logs'" :service-name="name" />
 
         <div v-else-if="tab === 'stats'">
-          <McpStatsTable :items="m.stats.value" :available="m.statsAvailable.value" :only="name" />
+          <McpStatsTable :groups="m.statsGroups.value" :available="m.statsAvailable.value" :only="name" />
           <button type="button" class="btn" @click="m.loadStats()">刷新统计</button>
         </div>
       </TabsNav>

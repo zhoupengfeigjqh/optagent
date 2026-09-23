@@ -5,7 +5,9 @@
     "read_file",
     "list_dir",
     "grep_files",
-    "write_file"
+    "write_file",
+    "read_skill",
+    "calculator"
   ],
   "mcp_services": [
     "ocr",
@@ -202,7 +204,7 @@
       ],
       "算法规则": [
         {
-          "name": "ruleCode",
+          "name": "ruleId",
           "type": "string",
           "required": true
         },
@@ -212,12 +214,12 @@
           "required": false
         },
         {
-          "name": "priority",
-          "type": "string",
+          "name": "rulePriority",
+          "type": "integer",
           "required": true
         }
       ]
     }
   },
-  "updated_at": "2026-09-22T05:53:33.200Z"
+  "updated_at": "2026-09-23T07:05:52.667Z"
 }

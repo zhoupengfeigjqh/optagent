@@ -40,14 +40,39 @@ interface SchemaNode {
   items?: SchemaNode
 }
 
-/** 该工具入参里的 array 字段名（规则选择器产物是 array[object]，只列 array 入参） */
-function arrayFieldsOf(toolName: string): string[] {
+/** 递归深度上限：真实入参 2–3 层足够，防病态 schema 造成极深枚举 */
+const MAX_DEPTH = 5
+
+/**
+ * 该工具入参里可声明为规则字段的**路径**（规则选择器产物是 array[object]）。
+ *
+ * 2026-09-22 起返回对象路径：规则数组常嵌在入参对象内部（如 `hd_scheduling_submit` 的
+ * `input.targetPriorities`），只列顶层字段会让这类目标**根本选不出来**（选不出来 → 配不上
+ * → 声明静默失效）。只沿对象下行、不进入数组元素——`items[].rules` 没有业务含义
+ * （"写第几个元素"无解），运行环境的路径语法也不接受数组段。
+ */
+function rulesFieldPathsOf(toolName: string): string[] {
   const tool = props.tools.find((t) => t.name === toolName)
-  const properties = (tool?.parameters as SchemaNode | undefined)?.properties
-  if (!properties || typeof properties !== 'object') return []
-  return Object.entries(properties)
-    .filter(([, node]) => node?.type === 'array' || node?.items !== undefined)
-    .map(([key]) => key)
+  return collectPaths((tool?.parameters as SchemaNode | undefined)?.properties, '', 0)
+}
+
+function collectPaths(
+  properties: Record<string, SchemaNode> | undefined,
+  prefix: string,
+  depth: number,
+): string[] {
+  if (!properties || typeof properties !== 'object' || depth > MAX_DEPTH) return []
+  const out: string[] = []
+  for (const [key, node] of Object.entries(properties)) {
+    if (!node || typeof node !== 'object') continue
+    const path = prefix === '' ? key : `${prefix}.${key}`
+    if (node.type === 'array' || node.items !== undefined) {
+      out.push(path)
+      continue
+    }
+    if (node.properties !== undefined) out.push(...collectPaths(node.properties, path, depth + 1))
+  }
+  return out
 }
 
 /**
@@ -56,7 +81,7 @@ function arrayFieldsOf(toolName: string): string[] {
  * 否则 schema 漂移/服务改版后存量配置会被静默丢掉。
  */
 function fieldOptions(toolName: string, current: string): string[] {
-  const enumerated = arrayFieldsOf(toolName)
+  const enumerated = rulesFieldPathsOf(toolName)
   if (current !== '' && !enumerated.includes(current)) return [...enumerated, current]
   return enumerated
 }
@@ -144,7 +169,7 @@ function isFieldOrphan(row: RuleRow): boolean {
   return (
     row.field !== '' &&
     row.tool !== '' &&
-    !arrayFieldsOf(row.tool).includes(row.field)
+    !rulesFieldPathsOf(row.tool).includes(row.field)
   )
 }
 </script>
@@ -157,13 +182,15 @@ function isFieldOrphan(row: RuleRow): boolean {
       「从算法规则选择」，从「数据准备/算法规则」的最新规则文件勾选规则并调整优先级，
       确认后生成 array[object] 填入该字段。只对该工具自身开启「调用人工确认」时生效；
       无需确认时参数由模型直接填写，本设置不生效。
+      字段嵌在入参对象内部时按**对象路径**声明（如 <code>input.targetPriorities</code>）：
+      确认窗里入口挂在首段对应的控件旁，勾选后写回该 JSON 内的对应位置。
     </p>
 
     <table v-if="rows.length > 0" class="rules-field-table__grid">
       <thead>
         <tr>
           <th>工具</th>
-          <th>规则参数字段（array 入参）</th>
+          <th>规则参数字段（array 入参或对象路径）</th>
           <th aria-label="操作" />
         </tr>
       </thead>

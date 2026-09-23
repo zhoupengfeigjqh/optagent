@@ -100,17 +100,23 @@ optagent/
 | `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
 | `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
-| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `HOST_LAN_IP` / `GATEWAY_HOST_PORT` / `JEV_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
-| `jev-service/.env.local` | Jev 服务 | compose `env_file` 注入 jev 容器 | `TYPESAFE_API_KEY` 等（含密钥，gitignore；样板 `.env.example`） |
-| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络/单点覆盖（`PUBLIC_BASE_URL`、`JEV_URL_ALLOW_HOSTS`） |
+| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `GATEWAY_HOST_PORT` / `JEV_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
+| `ocr-service/.env` | OCR 服务 | compose `env_file` 注入 ocr 容器 | **容器形态**配置（`OCR_URL_ALLOW_HOSTS=backend` 等，无密钥，入库） |
+| `ocr-service/.env.local` | OCR 服务 | compose `env_file` 注入 ocr 容器 | 本机私产：白名单**追加**宿主机 LAN IP（gitignore；样板 `.env.example`） |
+| `jev-service/.env` | Jev 服务 | compose `env_file` 注入 jev 容器 | **容器形态**配置（`JEV_URL_ALLOW_HOSTS=backend`，无密钥，入库） |
+| `jev-service/.env.local` | Jev 服务 | compose `env_file` 注入 jev 容器 | `TYPESAFE_API_KEY` + 白名单 LAN IP 追加（含密钥，gitignore；样板 `.env.example`） |
+| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`） |
 
-读取规则（2026-09-20 严格分工）：
-- **容器**：compose `env_file` 注入——admin 只读 `.env`；agent 读 `.env` + `.env.local`
-  （运行需要密钥），`PUBLIC_BASE_URL` 由 compose `environment` 单点覆盖为服务名口径；
+读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务）：
+- **容器**：一律由 compose `env_file` 注入**服务自己的**配置——admin / ocr / jev 读各自的
+  `.env`（+ `.env.local` 追加覆盖）；agent 读 `.env` + `.env.local`（运行需要密钥）。
+  **compose 文件本身不逐行配置服务变量**；唯一的 `environment` 单点覆盖是
+  `PUBLIC_BASE_URL`（容器内必须是服务名口径，本机 LAN IP 只留在 `.env.local`）；
 - **本地**：dev/start 只读 `.env.local`（`--env-file=.env.local`），不读 `.env`。
   `.env.local` 是**完整的本地形态配置**（非增量覆盖），样板 `.env.example` 含两形态完整对照。
-换机器/换网络时通常只动两处：`agent-backend/.env.local` 的 `PUBLIC_BASE_URL` 和
-根 `.env` 的 `HOST_LAN_IP`（二者 MUST 一致，见下「本地配置要点」）。
+换机器/换网络时只动**三个** `.env.local` 里的同一个 LAN IP：`agent-backend` 的
+`PUBLIC_BASE_URL`、`ocr-service` 的 `OCR_URL_ALLOW_HOSTS`、`jev-service` 的
+`JEV_URL_ALLOW_HOSTS`（见下「本地配置要点」）。
 
 ## 功能模块说明
 
@@ -161,11 +167,12 @@ optagent/
 
 | 模块 | 作用 |
 |---|---|
-| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog**（HITL 通用表单：schema 驱动控件映射 + @ 路径引用 + 结构化文件卡片）、MentionPicker |
+| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog + InteractionField**（HITL 通用表单：schema 驱动**递归**控件映射——对象逐行、对象数组→表格、标量数组→列表、其余走 JSON 逃逸舱——外加 @ 路径引用、结构化文件卡片、算法规则入口）、MentionPicker |
 | `components/layout/` | 应用骨架：历史会话侧栏、文件空间面板（空间树 + 文件列表 + 上传） |
 | `composables/useChatStream.ts` | 会话流核心：SSE 接收、消息追加、中断/重发、HITL 快照恢复 |
 | `composables/useFileMention.ts` | 聊天输入框 @ 引用状态机（触发检测、级联导航、引用登记、提交剥离） |
 | `composables/usePathInsert.ts` | HITL 弹窗 @ 路径插入状态机（路径插入语义，复用 MentionPicker 面板协议） |
+| `composables/useInteractionForm.ts` | HITL 弹窗表单状态：结构化模型（唯一事实源）、JSON 草稿（逃逸舱）、算法规则入口落点与写回、校验与提交构建 |
 | `composables/useWorkspace.ts` | 文件空间数据（三空间汇总、目录文件加载） |
 | `composables/useAppSession.ts` | 会话上下文（provide/inject 总线：workspace、toast 等） |
 | `composables/useThreads.ts` / `useAgents.ts` / `useModels.ts` | 会话/数字人/模型数据管理 |
@@ -243,7 +250,8 @@ nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口
 
 ```bash
 docker compose up -d ocr                            # 首次构建镜像较慢；模型加载约 30 秒
-cp jev-service/.env.example jev-service/.env.local  # 首次：填入 TYPESAFE_API_KEY
+cp ocr-service/.env.example ocr-service/.env.local  # 本机形态才需要：填宿主机 LAN IP（回源白名单）
+cp jev-service/.env.example jev-service/.env.local  # 首次：填 TYPESAFE_API_KEY 与同一个 LAN IP
 docker compose up -d jev                            # 无本地模型，构建后秒级启动
 ```
 
@@ -294,7 +302,7 @@ MCP 服务**无需在平台侧登记**——`docker-compose.yml` 就是服务清
    | 运行形态 | `transport` | `url` |
    |---|---|---|
    | 容器编排内网 `container_network` | `http` | `http://jev:8000/mcp` |
-   | 宿主机本地 `host_local` | `http` | `http://<HOST_LAN_IP>:8001/mcp` |
+   | 宿主机本地 `host_local` | `http` | `http://<宿主机 LAN IP>:8001/mcp` |
 
    `file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条 `state_file: url`，
    否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
@@ -307,12 +315,13 @@ MCP 服务**无需在平台侧登记**——`docker-compose.yml` 就是服务清
 
 ## 本地配置要点：文件回源链路必须使用本机 IP
 
-agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `http://<主机>:3000/api/files/raw?...&sig=...`），交给 MCP 服务（如 OCR）回源下载。这条链路要求两处配置使用同一个主机名——**本机局域网 IP**（用 `ipconfig` 查看实际 IPv4 地址，下文以 `192.168.1.3` 为例）：
+agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `http://<主机>:3000/api/files/raw?...&sig=...`），交给 MCP 服务（如 OCR / Jev）回源下载。这条链路要求**三个文件写同一个主机名**——即本机局域网 IP（用 `ipconfig` 查看实际 IPv4 地址，下文以 `192.168.1.3` 为例）：
 
 | 配置项 | 位置 | 作用 |
 |---|---|---|
-| `PUBLIC_BASE_URL` | `agent-backend/.env` | 铸造签名 URL 时使用的对外基址 |
-| `HOST_LAN_IP` | **根 `.env`**（compose 插值注入 `OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS`） | 宿主机 LAN IP；不配则缺省 `192.168.1.3` |
+| `PUBLIC_BASE_URL` | `agent-backend/.env.local` | 铸造签名 URL 时使用的对外基址（容器形态由 compose 覆盖为 `http://backend:3000`） |
+| `OCR_URL_ALLOW_HOSTS` | **`ocr-service/.env.local`** | OCR 回源白名单（**追加**在 `.env` 的 `backend` 之后） |
+| `JEV_URL_ALLOW_HOSTS` | **`jev-service/.env.local`** | Jev 回源白名单（同上） |
 
 ```env
 # agent-backend/.env.local
@@ -320,20 +329,40 @@ PUBLIC_BASE_URL=http://192.168.1.3:3000
 ```
 
 ```env
-# 根 .env（首次：cp .env.example .env）；只改这一处，不必动 docker-compose.yml
-HOST_LAN_IP=192.168.1.3
+# ocr-service/.env.local（首次：cp ocr-service/.env.example ocr-service/.env.local）
+OCR_URL_ALLOW_HOSTS=backend,192.168.1.3
 ```
 
-> `docker-compose.yml` 里 `OCR_URL_ALLOW_HOSTS` 与 `JEV_URL_ALLOW_HOSTS` 取值相同，都是
-> `backend,${HOST_LAN_IP:-192.168.1.3}`：`backend` 保留给全 Docker 部署形态（容器内互访）；
-> 本地运行时 backend 跑在宿主机，容器需经宿主 IP 回源，该 IP 即 `HOST_LAN_IP`。
-> 该白名单只影响**引用文件回源下载**（OCR 的 `image`、Jev 的 `state_file`），纯文本调用不受影响。
+```env
+# jev-service/.env.local（首次：cp jev-service/.env.example jev-service/.env.local）
+TYPESAFE_API_KEY=...
+JEV_URL_ALLOW_HOSTS=backend,192.168.1.3
+```
 
-改完后需要重建 MCP 容器、重启 backend 才生效：
+> **为什么白名单在服务自己的文件里**（2026-09-23 变更）：原先由 `docker-compose.yml` 的
+> `environment` 拿根 `.env` 的 `HOST_LAN_IP` 拼装——一处配置两个主人（compose 里的默认值与
+> 根 `.env` 的覆盖并存），而且**只有重建容器才生效**：`docker restart` 或机器重启后由
+> `restart: unless-stopped` 拉起，都只是让**既有容器**再跑一遍，环境变量仍是**创建时**固化
+> 的旧值。现在 compose 只声明"注入哪个文件"，服务配置归服务文件，改完 `docker compose
+> up -d ocr jev` 重建即生效。
+>
+> `backend` 保留给全 Docker 形态（容器内互访）；本地运行时 backend 跑在宿主机，容器需经宿主
+> IP 回源，故追加该 IP。白名单只影响**引用文件回源下载**（OCR 的 `image`、Jev 的
+> `state_file`），纯文本调用不受影响。
+
+改完后需要**重建** MCP 容器、重启 backend 才生效：
 
 ```bash
-docker compose up -d ocr jev    # 重建并加载新环境变量
+docker compose up -d ocr jev    # 重建容器（只 restart 不会更新环境变量！）
 # agent-backend 重启（Ctrl+C 后重新 npm run dev）
+```
+
+改完**先验证容器真的拿到了新值**（别只看 compose 文件——它只是"下次创建时会用的值"）：
+
+```bash
+docker compose config | grep ALLOW_HOSTS                    # 插值后即将使用的值
+docker inspect optagent-ocr --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ALLOW_HOSTS
+docker inspect optagent-jev --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ALLOW_HOSTS
 ```
 
 **为什么不能写 `localhost`**——两个层面都会失败：

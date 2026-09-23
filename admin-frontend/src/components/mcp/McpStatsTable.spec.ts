@@ -1,177 +1,198 @@
 /**
- * 组件测试：MCP 调用统计表（T118）
+ * 组件测试：MCP 调用统计表。
  *
  * 核心口径（`FR-009`）：不可达时显示**「未知」而非 0**。
+ *
+ * 2026-09-23 改版：**一行 = 一个「用户 × 服务 × 工具」组合**，单元格为「总次数/成功次数」；
+ * 原「明细」展开列已移除（用户已进列，分组行即最细粒度）。
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import McpStatsTable from './McpStatsTable.vue'
 
-const ITEMS = [
+const GROUPS = [
   {
-    name: 'ocr',
+    service: 'ocr',
+    tool_name: 'ocr_image',
+    user_id: 'admin',
     calls_total: 5,
     calls_ok: 4,
     calls_failed: 1,
-    last_called_at: '2026-09-15T06:00:00Z',
+    last_called_at: '2026-09-23T06:00:00Z',
     windows: {
       h24: { ok: 2, failed: 0, total: 2 },
       d7: { ok: 3, failed: 1, total: 4 },
       d30: { ok: 4, failed: 1, total: 5 },
       d365: { ok: 4, failed: 1, total: 5 },
     },
-    users: [
-      {
-        user_id: 'admin',
-        calls_total: 4,
-        calls_ok: 3,
-        calls_failed: 1,
-        last_called_at: '2026-09-15T06:00:00Z',
-      },
-      {
-        user_id: 'zpf',
-        calls_total: 1,
-        calls_ok: 1,
-        calls_failed: 0,
-        last_called_at: '2026-09-14T09:00:00Z',
-      },
-    ],
+  },
+  {
+    service: 'ocr',
+    tool_name: 'ocr_pdf',
+    user_id: 'zpf',
+    calls_total: 1,
+    calls_ok: 1,
+    calls_failed: 0,
+    last_called_at: '2026-09-22T09:00:00Z',
+    windows: {
+      h24: { ok: 1, failed: 0, total: 1 },
+      d7: { ok: 1, failed: 0, total: 1 },
+      d30: { ok: 1, failed: 0, total: 1 },
+      d365: { ok: 1, failed: 0, total: 1 },
+    },
+  },
+  {
+    service: 'jev',
+    tool_name: 'jev_run',
+    user_id: 'admin',
+    calls_total: 2,
+    calls_ok: 2,
+    calls_failed: 0,
+    last_called_at: '2026-09-21T09:00:00Z',
+    windows: {
+      h24: { ok: 0, failed: 0, total: 0 },
+      d7: { ok: 2, failed: 0, total: 2 },
+      d30: { ok: 2, failed: 0, total: 2 },
+      d365: { ok: 2, failed: 0, total: 2 },
+    },
   },
 ]
 
-describe('McpStatsTable', () => {
-  it('展示四个时间窗（成功/总数）+ 累计（成功/失败）+ 最近调用时间', () => {
-    const wrapper = mount(McpStatsTable, { props: { items: ITEMS, available: true } })
-    const text = wrapper.text()
-    expect(text).toContain('ocr')
-    // 时间窗列头
-    expect(text).toContain('最近24h')
-    expect(text).toContain('最近7天')
-    expect(text).toContain('最近30天')
-    expect(text).toContain('最近一年')
-    // 窗口单元格：成功/总数
-    expect(text).toContain('2/2')
-    expect(text).toContain('3/4')
-    // 累计：成功 / 失败
-    expect(text).toContain('4 / 1')
-    expect(text).toContain('2026-09-15T06:00:00Z')
+describe('McpStatsTable —— 表头与网格', () => {
+  it('列出 用户名 / 服务名 / 工具名 + 四个时间窗 + 最近调用时间（共 8 列）', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: GROUPS, available: true } })
+
+    expect(wrapper.findAll('thead th').map((th) => th.text())).toEqual([
+      '用户名',
+      '服务名',
+      '工具名',
+      '最近24h',
+      '最近7天',
+      '最近30天',
+      '最近一年',
+      '最近调用时间',
+    ])
   })
 
-  it('旧数据无 windows 字段：时间窗显示"—"而非报错', () => {
+  it('一行 = 一个「用户 × 服务 × 工具」组合，窗口单元格为「总次数/成功次数」', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: GROUPS, available: true } })
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(3)
+
+    expect(rows[0]!.findAll('td').map((td) => td.text())).toEqual([
+      'admin',
+      'ocr',
+      'ocr_image',
+      '2/2',
+      '4/3',
+      '5/4',
+      '5/4',
+      '2026-09-23T06:00:00Z',
+    ])
+    // 同一服务的另一个工具、另一用户各占一行，互不合并
+    expect(rows[1]!.findAll('td')[2]!.text()).toBe('ocr_pdf')
+    expect(rows[1]!.findAll('td')[0]!.text()).toBe('zpf')
+  })
+
+  it('不再有「明细」列与展开入口（2026-09-23 移除）', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: GROUPS, available: true } })
+    expect(wrapper.findAll('thead th')).toHaveLength(8)
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('展开')
+  })
+
+  it('only：只显示指定服务的行（服务详情页用）', () => {
     const wrapper = mount(McpStatsTable, {
-      props: {
-        items: [{ name: 'legacy', calls_total: 1, calls_ok: 1, calls_failed: 0, last_called_at: null }],
-        available: true,
-      },
+      props: { groups: GROUPS, available: true, only: 'ocr' },
     })
-    expect(wrapper.text()).toContain('legacy')
-    expect(wrapper.text()).toContain('—')
-  })
 
-  it('不可达时全部数值显示为"未知"，并给出明确说明（MUST NOT 以 0 冒充）', () => {
-    const wrapper = mount(McpStatsTable, { props: { items: [], available: false } })
-    expect(wrapper.text()).toContain('未知')
-    expect(wrapper.text()).toContain('MUST NOT 以 0 冒充')
-    expect(wrapper.find('[role="status"]').exists()).toBe(true)
-  })
-
-  it('only 过滤：只显示指定服务', () => {
-    const wrapper = mount(McpStatsTable, {
-      props: {
-        items: [...ITEMS, { name: 'other', calls_total: 1, calls_ok: 1, calls_failed: 0, last_called_at: null }],
-        available: true,
-        only: 'other',
-      },
-    })
-    expect(wrapper.text()).toContain('other')
-    expect(wrapper.text()).not.toContain('ocr')
-  })
-
-  it('边界：可用但无任何调用记录时给出明确空态（而不是"未知"）', () => {
-    const wrapper = mount(McpStatsTable, { props: { items: [], available: true } })
-    expect(wrapper.text()).toContain('尚无任何调用记录')
-  })
-
-  it('边界：从未调用的服务显示"从未调用"而非空', () => {
-    const wrapper = mount(McpStatsTable, {
-      props: {
-        items: [{ name: 'ocr', calls_total: 0, calls_ok: 0, calls_failed: 0, last_called_at: null }],
-        available: true,
-      },
-    })
-    expect(wrapper.text()).toContain('从未调用')
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('jev')
   })
 })
 
-describe('McpStatsTable —— 按用户明细展开（2026-09-16 十四次调整）', () => {
-  it('展开后显示该服务每个用户的调用次数（成功/失败分列）', async () => {
-    const wrapper = mount(McpStatsTable, { props: { items: ITEMS, available: true } })
+describe('McpStatsTable —— 不可达时以「未知」呈现（FR-009）', () => {
+  it('available=false：计数与时间一律「未知」，不出现 0', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: GROUPS, available: false } })
 
-    expect(wrapper.find('.mcp-stats__detail').exists()).toBe(false)
-
-    await wrapper.find('button.mcp-stats__toggle').trigger('click')
-
-    const detail = wrapper.find('.mcp-stats__detail')
-    expect(detail.exists()).toBe(true)
-    const text = detail.text().replace(/\s+/g, '')
-    expect(text).toContain('admin')
-    expect(text).toContain('成功3/失败1（共4次）')
-    expect(text).toContain('zpf')
-    expect(text).toContain('成功1/失败0（共1次）')
-    expect(wrapper.find('button.mcp-stats__toggle').attributes('aria-expanded')).toBe('true')
+    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    // 三个维度列仍照实显示（那是"谁调的"，不是统计值），计数与时间列一律未知
+    expect(cells.slice(0, 3)).toEqual(['admin', 'ocr', 'ocr_image'])
+    expect(cells.slice(3)).toEqual(['未知', '未知', '未知', '未知', '未知'])
+    expect(wrapper.find('.mcp-stats__unknown').exists()).toBe(true)
   })
 
-  it('同时只展开一行：展开第二个服务时第一个自动收起', async () => {
-    const wrapper = mount(McpStatsTable, {
-      props: {
-        items: [...ITEMS, { name: 'other', calls_total: 1, calls_ok: 1, calls_failed: 0, last_called_at: null }],
-        available: true,
-      },
-    })
+  it('不可达且无行：空态也是「未知」，MUST NOT 说成"尚无任何调用记录"', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: [], available: false } })
 
-    const buttons = wrapper.findAll('button.mcp-stats__toggle')
-    await buttons[0]!.trigger('click')
-    expect(wrapper.findAll('tr.mcp-stats__detail-row')).toHaveLength(1)
-
-    await buttons[1]!.trigger('click')
-    expect(wrapper.findAll('tr.mcp-stats__detail-row')).toHaveLength(1)
-    expect(wrapper.find('.mcp-stats__detail').text()).toContain('暂无按用户明细')
+    expect(wrapper.find('tbody').text()).toContain('未知')
+    expect(wrapper.find('tbody').text()).not.toContain('尚无任何调用记录')
   })
+})
 
-  it('无 users 明细（旧响应或明细已超保留期）：明说原因，不静默留白', async () => {
+describe('McpStatsTable —— 历史与缺失数据', () => {
+  it('user_id / tool_name 为 null（升级前的事件）：显示"未归属·升级前记录"而非空白', () => {
     const wrapper = mount(McpStatsTable, {
       props: {
-        items: [{ name: 'legacy', calls_total: 2, calls_ok: 2, calls_failed: 0, last_called_at: null }],
-        available: true,
-      },
-    })
-
-    await wrapper.find('button.mcp-stats__toggle').trigger('click')
-
-    expect(wrapper.find('.mcp-stats__detail').text()).toContain('暂无按用户明细')
-  })
-
-  it('user_id 为 null（升级前的历史事件）：显示"未归属"而非空白', async () => {
-    const wrapper = mount(McpStatsTable, {
-      props: {
-        items: [
+        groups: [
           {
-            name: 'ocr',
+            service: 'ocr',
+            tool_name: null,
+            user_id: null,
             calls_total: 1,
             calls_ok: 1,
             calls_failed: 0,
             last_called_at: null,
-            users: [
-              { user_id: null, calls_total: 1, calls_ok: 1, calls_failed: 0, last_called_at: null },
-            ],
           },
         ],
         available: true,
       },
     })
 
-    await wrapper.find('button.mcp-stats__toggle').trigger('click')
+    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    expect(cells[0]).toBe('（未归属·升级前记录）')
+    expect(cells[2]).toBe('（未归属·升级前记录）')
+  })
 
-    expect(wrapper.find('.mcp-stats__detail').text()).toContain('未归属·升级前记录')
+  it('缺时间窗（旧响应）：该单元格显示"—"，未调用过的时间显示"从未调用"', () => {
+    const wrapper = mount(McpStatsTable, {
+      props: {
+        groups: [
+          {
+            service: 'ocr',
+            tool_name: 'ocr_image',
+            user_id: 'admin',
+            calls_total: 1,
+            calls_ok: 1,
+            calls_failed: 0,
+            last_called_at: null,
+          },
+        ],
+        available: true,
+      },
+    })
+
+    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    expect(cells.slice(3, 7)).toEqual(['—', '—', '—', '—'])
+    expect(cells[7]).toBe('从未调用')
+  })
+})
+
+describe('McpStatsTable —— 空态', () => {
+  it('有统计但无任何行：明说"尚无任何调用记录"', () => {
+    const wrapper = mount(McpStatsTable, { props: { groups: [], available: true } })
+    expect(wrapper.find('tbody').text()).toContain('尚无任何调用记录')
+  })
+
+  it('only 且该服务无行：只提示一次"该服务从未被调用过"（不重复渲染两条空态）', () => {
+    const wrapper = mount(McpStatsTable, {
+      props: { groups: GROUPS, available: true, only: 'never-called' },
+    })
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.text()).toContain('该服务从未被调用过')
+    expect(wrapper.text()).not.toContain('尚无任何调用记录')
   })
 })

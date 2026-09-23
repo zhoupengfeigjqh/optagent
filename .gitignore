@@ -24,13 +24,19 @@ coverage/
 *.db-wal
 *.db-shm
 # 2026-09-20 起分层（见 README 配置地图）：
-#   .env              形态配置（无密钥，随仓库入库）——放行在各目录自己的 .gitignore
+#   .env              形态配置（无密钥，随仓库入库）
 #   .env.local        本机私产（密钥/局域网 IP，gitignore，不入库）
 #   .env.example      模板（= .env.local 的创建样板）
 .env
 .env.*
 !.env.example
+# 需入库的形态配置逐个放行：`.env` 规则对**所有层级**生效，不显式放行的话
+# 这些文件会处于"被忽略且未跟踪"状态——提交时静默丢失，而 compose 的 env_file
+# 第一项默认必需，fresh clone 会直接起不来（2026-09-23 踩到）。
 !admin-backend/.env
+!agent-backend/.env
+!ocr-service/.env
+!jev-service/.env
 
 # 服务级密钥文件（如仓库根的 .env_jev）：与 `.env.*` 同一口径，
 # 避免"下划线命名"的密钥文件因不匹配点号规则而漏网入库

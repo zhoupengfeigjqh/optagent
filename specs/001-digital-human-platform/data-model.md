@@ -120,7 +120,7 @@ platform-data/
 | `endpoints.host_local` | string | 可选 | 合法地址 | 宿主机本地地址 |
 | `command` / `args` | string / array | 可选 | `transport=stdio` 时必填 | 启动命令与参数 |
 | `file_args` | object | ✅ | 可为空对象 | 文件参数映射：`{工具名: {取值路径: "url"}}`。取值路径可为顶层参数名（`{"ocr_image":{"image":"url"}}`），也可**穿过数组**（`{"parse_excel_files":{"items[].excelFileUrl":"url"}}`，`[]` 表示"每个元素"，2026-09-16） |
-| `rules_fields` | object | ✅ | 形状 `{工具名: 字段名}`，键值均非空串；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（详见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非非空串即 `VALIDATION_FAILED`，历史存档的 string 版 `rules_field` 读取时收敛为 `{}`；物化进 `MCP.json` 的键同名，空对象不写 |
+| `rules_fields` | object | ✅ | 形状 `{工具名: 字段名或对象路径}`，键非空、值为合法字段路径（点分对象路径，**不支持数组段**）；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射；**2026-09-22 起值支持对象嵌套**）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（嵌套路径的落点与写回见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非法路径即 `VALIDATION_FAILED`（只校验语法、不校验工具 schema），历史存档的 string 版 `rules_field` 与**非法路径**读取时收敛/丢弃；物化进 `MCP.json` 的键同名，空对象不写 |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 已从本实体移除（产品决定）；读取历史存档时 MUST 收敛掉这两个字段。
 
@@ -139,10 +139,12 @@ platform-data/
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | string | 服务名 |
-| `calls_total` | integer | 累计调用次数 |
-| `calls_ok` | integer | 成功次数 |
-| `calls_failed` | integer | 失败次数 |
+| `calls_total` | integer | 调用次数（= `calls_ok + calls_failed`）；**2026-09-23 起口径为最近一年** |
+| `calls_ok` | integer | 成功次数（同"最近一年"口径） |
+| `calls_failed` | integer | 失败次数（同"最近一年"口径） |
 | `last_called_at` | string \| null | 最近调用时间（ISO8601） |
+
+> **2026-09-23**：`calls_*` 口径收紧为**最近一年**——运行环境侧独立累计表 `mcp_call_stats` 已删除，累计值改由"只保留一年"的事件明细 `mcp_call_events` 聚合。平台统计表所需的**四个时间窗**位于**分组行 `groups[]`**（一行 = 一个「服务 × 工具 × 用户」组合）；十四次调整的 `users[]` 与本日的 `tools[]` 两层明细已被它取代（两者都不带时间窗，无法表达统计表所需的列）。完整字段与口径见 `contracts/runtime-api-delta.md` §4.2 / §4.3。
 
 **校验规则**：统计 MUST 在数字人实际调用后**自动更新**（`FR-050`），MUST NOT 依赖人工录入。运行环境不可达时，统计字段整体为"未知"，**不得**以 0 冒充（`FR-009` 可读原因）。
 

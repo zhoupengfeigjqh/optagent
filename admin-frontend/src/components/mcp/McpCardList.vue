@@ -65,7 +65,7 @@ function transportLabel(transport: string): string {
           {{ (item as McpServiceListItem).description || '（未填写用途描述）' }}
         </p>
         <p class="card__meta">
-          传输 {{ transportLabel((item as McpServiceListItem).transport) }} · 累计调用 {{ callsOf((item as McpServiceListItem).name) }}
+          传输 {{ transportLabel((item as McpServiceListItem).transport) }} · 最近一年调用 {{ callsOf((item as McpServiceListItem).name) }}
           · {{ (item as McpServiceListItem).configured ? '已配置' : '未配置' }}
         </p>
         <p v-if="(item as McpServiceListItem).abnormal_reason" class="card__abnormal-reason">

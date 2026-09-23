@@ -72,14 +72,14 @@ describe('McpCardList', () => {
     expect(abnormal.text()).toContain('已不在容器编排声明中')
   })
 
-  it('统计可用时显示累计调用次数', () => {
+  it('统计可用时显示最近一年调用次数', () => {
     const wrapper = mountList()
-    expect(wrapper.text()).toContain('累计调用 7')
+    expect(wrapper.text()).toContain('最近一年调用 7')
   })
 
   it('统计不可达时显示"未知"而非 0（FR-009）', () => {
     const wrapper = mountList({ statsAvailable: false, stats: [] })
-    expect(wrapper.text()).toContain('累计调用 未知')
+    expect(wrapper.text()).toContain('最近一年调用 未知')
   })
 
   it('未配置的服务明确标注', () => {

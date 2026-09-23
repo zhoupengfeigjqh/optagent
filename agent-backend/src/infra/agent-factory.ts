@@ -25,6 +25,7 @@ import {
 import type {
   AgentConfigBundle,
   LlmEvent,
+  McpCallEvent,
   McpConfirmation,
   McpConnectionStatus,
   ModelSelection,
@@ -69,8 +70,8 @@ export interface AgentFactoryDeps {
   fileSignSecret: string;
   /** 实例内 MCP 单 server 建连落定时回调（server.ts 接线到事件总线 → SSE 推送） */
   onMcpStatus?: (key: PoolKey) => void;
-  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb。第三参为调用发起用户 */
-  onMcpCall?: (serviceName: string, ok: boolean, userId?: string) => void;
+  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb */
+  onMcpCall?: (event: McpCallEvent) => void;
 }
 
 export class AgentInstanceFactory {
@@ -146,6 +147,12 @@ export class AgentInstanceFactory {
           threadId: req.threadId,
           enabled: inst.config.enabledTools,
           availableDirs,
+          // 技能目录（数字人级）：`read_skill` 的沙箱根，与用户三空间分开、不经 FileAccess
+          skillsDir: path.join(
+            userAgentsDir(this.deps.root, inst.key.userId),
+            inst.key.agentName,
+            'skills',
+          ),
           logger,
         }),
       );

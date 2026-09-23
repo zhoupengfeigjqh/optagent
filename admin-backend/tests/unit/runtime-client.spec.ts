@@ -11,7 +11,7 @@ import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { RuntimeClient } from '../../src/infra/runtime-client.js';
 
 let baseUrl = '';
-let mode: 'ok' | 'http-500' | 'not-json' | 'bad-shape' = 'ok';
+let mode: 'ok' | 'http-500' | 'not-json' | 'bad-shape' | 'no-groups' = 'ok';
 
 const server = http.createServer((req, res) => {
   if (mode === 'http-500') {
@@ -51,18 +51,34 @@ const server = http.createServer((req, res) => {
     JSON.stringify(
       mode === 'bad-shape'
         ? { items: [] }
-        : {
-            stats_available: true,
-            items: [
-              {
-                name: 'ocr',
-                calls_total: 2,
-                calls_ok: 2,
-                calls_failed: 0,
-                last_called_at: '2026-09-15T06:00:00Z',
-              },
-            ],
-          },
+        : mode === 'no-groups'
+          ? // 2026-09-23：`groups` 是必填结构——缺失即"结构不合法"，
+            // 不能让平台静默显示空表、冒称"没调用过"
+            { stats_available: true, items: [] }
+          : {
+              stats_available: true,
+              items: [
+                {
+                  name: 'ocr',
+                  calls_total: 2,
+                  calls_ok: 2,
+                  calls_failed: 0,
+                  last_called_at: '2026-09-15T06:00:00Z',
+                },
+              ],
+              groups: [
+                {
+                  service: 'ocr',
+                  tool_name: 'ocr_image',
+                  user_id: 'admin',
+                  calls_total: 2,
+                  calls_ok: 2,
+                  calls_failed: 0,
+                  last_called_at: '2026-09-15T06:00:00Z',
+                  windows: { d365: { ok: 2, failed: 0, total: 2 } },
+                },
+              ],
+            },
     ),
   );
 });
@@ -129,15 +145,21 @@ describe('RuntimeClient.builtinTools', () => {
 });
 
 describe('RuntimeClient.mcpCallStats', () => {
-  it('正常返回统计', async () => {
+  it('正常返回统计：服务级汇总 + 分组行都取到', async () => {
     mode = 'ok';
     const stats = await client().mcpCallStats();
     expect(stats.stats_available).toBe(true);
     expect(stats.items[0]?.calls_total).toBe(2);
+    expect(stats.groups[0]?.tool_name).toBe('ocr_image');
   });
 
   it('结构不合法 → ADM_RUNTIME_UNREACHABLE', async () => {
     mode = 'bad-shape';
+    await expect(client().mcpCallStats()).rejects.toThrow(ApiError);
+  });
+
+  it('缺 groups 字段（旧运行环境）→ ADM_RUNTIME_UNREACHABLE，不静默当空表', async () => {
+    mode = 'no-groups';
     await expect(client().mcpCallStats()).rejects.toThrow(ApiError);
   });
 

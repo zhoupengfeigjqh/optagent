@@ -9,9 +9,26 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
-import type { McpCallStat, McpCallUserStat, McpCallWindow, UsageFilter, UsageRecord, UsageStore, UsageSummary } from '../types.js';
+import type {
+  McpCallEvent,
+  McpCallGroupStat,
+  McpCallStat,
+  McpCallStats,
+  UsageFilter,
+  UsageRecord,
+  UsageStore,
+  UsageSummary,
+} from '../types.js';
 
 export type JournalModeOutcome = 'WAL' | 'DELETE' | 'default';
+
+/**
+ * 事件明细保留期（一年）：既是清理策略，也是**所有统计口径的统一上界**（2026-09-23）。
+ *
+ * 累计值已不再来自独立的累计表，而是"最近一年"的事件聚合，因此这个常量同时决定
+ * 清理边界与查询边界——改一处即同时生效（原先清理与时间窗各写一遍字面量）。
+ */
+const MCP_EVENT_RETENTION_MS = 365 * 86_400_000;
 
 /**
  * 选择日志模式：**优先 WAL，不支持则回退 DELETE**。
@@ -110,36 +127,59 @@ export class UsageDb implements UsageStore {
       CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_records(agent_name);
       CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_records(created_at);
 
-      -- R4：MCP 工具调用计数（按服务名）。与用量表共库，不新增数据库引擎（原则六）。
+      -- R4：MCP 工具调用计数。与用量表共库，不新增数据库引擎（原则六）。
       -- 用 CREATE TABLE IF NOT EXISTS：无需迁移步骤，老库打开即自动补表。
-      CREATE TABLE IF NOT EXISTS mcp_call_stats (
-        service_name TEXT PRIMARY KEY,
-        calls_ok INTEGER NOT NULL DEFAULT 0,
-        calls_failed INTEGER NOT NULL DEFAULT 0,
-        last_called_at TEXT
-      );
+      --
+      -- 2026-09-23：**只保留事件明细一张表**。原 mcp_call_stats 累计表已删除——
+      -- 明细本就只留一年，与"只看最近一年"的既定口径不存在"全历史累计"需求；
+      -- 而一张停写后会冻结在切换时刻的表，比删掉更容易被误读。
+      --
       -- 任务 2026-09-15：每次调用一行事件明细，支撑"最近24h/7天/30天/1年"时间窗聚合；
       -- 事件只保留一年（与最长统计窗对齐），更早的由 recordMcpCall 顺手清理。
       -- user_id（2026-09-16 十四次调整）：调用发起用户，支撑按用户明细；老行可能为 NULL
+      -- tool_name / thread_id / duration_ms / error_kind（2026-09-23）：见 types.ts 的 McpCallEvent
       CREATE TABLE IF NOT EXISTS mcp_call_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         service_name TEXT NOT NULL,
         ok INTEGER NOT NULL,
         called_at TEXT NOT NULL,
-        user_id TEXT
+        user_id TEXT,
+        tool_name TEXT,
+        thread_id TEXT,
+        duration_ms INTEGER,
+        error_kind TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_mcp_events_time ON mcp_call_events(called_at);
+      -- 一次性清理：累计表已无读者，删掉避免留孤儿表（幂等，见上方 2026-09-23 说明）
+      DROP TABLE IF EXISTS mcp_call_stats;
     `);
-      // 旧库迁移：事件表在 user_id 列加入之前就已存在的库，打开时补列（SQLite 无 IF NOT EXISTS 修饰 ADD COLUMN，
-      // 故先查 pragma table_info；与 CREATE TABLE IF NOT EXISTS 同一"打开即自愈"口径，无需人工迁移步骤）。
-      // 注意：按 user_id 的索引必须在补列**之后**建——老库此刻还没有这一列。
-      const eventColumns = this.db.prepare(`PRAGMA table_info(mcp_call_events)`).all() as Array<{
-        name: string;
-      }>;
-      if (!eventColumns.some((column) => column.name === 'user_id')) {
-        this.db.exec(`ALTER TABLE mcp_call_events ADD COLUMN user_id TEXT`);
+      // 旧库迁移：事件表在这些列加入之前就已存在的库，打开时逐列补齐（SQLite 无 IF NOT EXISTS
+      // 修饰 ADD COLUMN，故先查 pragma table_info；与 CREATE TABLE IF NOT EXISTS 同一"打开即自愈"
+      // 口径，无需人工迁移步骤）。
+      // 注意：建在这些列上的索引必须在补列**之后**建——老库此刻还没有这些列。
+      const eventColumns = new Set(
+        (this.db.prepare(`PRAGMA table_info(mcp_call_events)`).all() as Array<{ name: string }>).map(
+          (column) => column.name,
+        ),
+      );
+      // 每项为 [列名, 列定义]；后续再加列在此追加一行即可
+      const addableColumns: Array<[string, string]> = [
+        ['user_id', 'TEXT'], // 2026-09-16 十四次调整
+        ['tool_name', 'TEXT'],
+        ['thread_id', 'TEXT'],
+        ['duration_ms', 'INTEGER'],
+        ['error_kind', 'TEXT'],
+      ];
+      for (const [name, definition] of addableColumns) {
+        if (!eventColumns.has(name)) {
+          this.db.exec(`ALTER TABLE mcp_call_events ADD COLUMN ${name} ${definition}`);
+        }
       }
-      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_mcp_events_user ON mcp_call_events(service_name, user_id)`);
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_mcp_events_user ON mcp_call_events(service_name, user_id);
+        CREATE INDEX IF NOT EXISTS idx_mcp_events_tool ON mcp_call_events(service_name, tool_name, called_at);
+        CREATE INDEX IF NOT EXISTS idx_mcp_events_thread ON mcp_call_events(thread_id);
+      `);
     } catch (err) {
       if (isShmOpenFailure(err)) {
         throw new Error(describeShmOpenFailure(dbPath, (err as NodeJS.ErrnoException).code), { cause: err });
@@ -220,32 +260,40 @@ export class UsageDb implements UsageStore {
    * `initialize` / `tools/list` / 多次 `tools/call`，二者不等价，
    * 用请求数会给出误导性数字（`research.md` D6）。
    *
-   * `userId` 记进事件明细（一次调用一行），供按用户明细聚合；缺省/null 为
-   * 升级前的历史事件（界面显示"未归属"）。
+   * **调用未发出**（`file_args` 校验失败等）不记——保持"计数 = 工具调用次数"的口径。
+   *
+   * 2026-09-23：只写事件明细一张表（原累计表已删）。`durationMs` 含 `McpManager`
+   * 内部的一次重试，即**用户感知耗时**，非单次尝试耗时。
    *
    * 写入失败只记日志不抛出——统计是观测能力，MUST NOT 影响对话主链路。
    */
-  recordMcpCall(serviceName: string, ok: boolean, userId?: string | null): void {
+  recordMcpCall(entry: McpCallEvent): void {
     try {
       const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `INSERT INTO mcp_call_stats (service_name, calls_ok, calls_failed, last_called_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(service_name) DO UPDATE SET
-             calls_ok = calls_ok + excluded.calls_ok,
-             calls_failed = calls_failed + excluded.calls_failed,
-             last_called_at = excluded.last_called_at`,
-        )
-        .run(serviceName, ok ? 1 : 0, ok ? 0 : 1, now);
-      // 事件明细：时间窗与按用户明细的数据源（一次调用一行）
-      this.db
-        .prepare(`INSERT INTO mcp_call_events (service_name, ok, called_at, user_id) VALUES (?, ?, ?, ?)`)
-        .run(serviceName, ok ? 1 : 0, now, userId ?? null);
-      // 事件只保留一年：与最长统计窗对齐，顺手清理（低频调用下代价可忽略）
-      this.db
-        .prepare(`DELETE FROM mcp_call_events WHERE called_at < ?`)
-        .run(new Date(Date.now() - 365 * 86_400_000).toISOString());
+      // 写入与"顺手清理"包进同一事务：避免事件已落、清理半途失败的中间态
+      this.db.transaction(() => {
+        this.db
+          .prepare(
+            `INSERT INTO mcp_call_events
+               (service_name, tool_name, ok, called_at, user_id, thread_id, duration_ms, error_kind)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            entry.service,
+            entry.tool,
+            entry.ok ? 1 : 0,
+            now,
+            entry.userId ?? null,
+            entry.threadId ?? null,
+            entry.durationMs,
+            // 成功时不留错误分类，避免"有 error_kind 但 ok=1"的歧义行
+            entry.ok ? null : (entry.errorKind ?? null),
+          );
+        // 事件只保留一年：与最长统计窗对齐，顺手清理（低频调用下代价可忽略）
+        this.db
+          .prepare(`DELETE FROM mcp_call_events WHERE called_at < ?`)
+          .run(new Date(Date.now() - MCP_EVENT_RETENTION_MS).toISOString());
+      })();
     } catch (err) {
       this.logger?.error({ event: 'mcp.stats.record.failed', err }, 'MCP 调用统计写入失败');
     }
@@ -256,87 +304,106 @@ export class UsageDb implements UsageStore {
     { key: 'h24', ms: 24 * 3_600_000 },
     { key: 'd7', ms: 7 * 86_400_000 },
     { key: 'd30', ms: 30 * 86_400_000 },
-    { key: 'd365', ms: 365 * 86_400_000 },
+    { key: 'd365', ms: MCP_EVENT_RETENTION_MS },
   ];
 
-  /** 全部服务的调用统计（未出现过的服务不在此列，由平台侧以 0 呈现） */
-  mcpCallStats(): McpCallStat[] {
-    const rows = this.db
-      .prepare(
-        `SELECT service_name AS name, calls_ok, calls_failed, last_called_at
-         FROM mcp_call_stats ORDER BY service_name`,
-      )
-      .all() as Array<{
-      name: string;
-      calls_ok: number;
-      calls_failed: number;
-      last_called_at: string | null;
-    }>;
-
-    // 各时间窗聚合：每次调用的事件明细行上做 GROUP BY
-    const zero: McpCallWindow = { ok: 0, failed: 0, total: 0 };
-    const byService = new Map<string, Record<string, McpCallWindow>>();
+  /**
+   * 调用统计：**一次聚合出两份视图**（2026-09-23）。
+   *
+   * - `groups`：按「**服务 × 工具 × 用户**」分组，每组带四个时间窗——平台统计表的一行；
+   * - `items`：服务级汇总（折叠该服务的全部分组行），供平台卡片展示"最近一年调用次数"。
+   *
+   * 唯一数据源是事件明细表，**计数口径 = 最近一年**（原独立累计表已删），故 `calls_*`
+   * 与 `windows.d365` 恒相等；超过一年未调用的服务不再出现，与"事件只留一年"一致。
+   *
+   * `tool_name` 是 **MCP 服务自己的工具名**（如 `ocr` 服务下的 `ocr_image`），
+   * 不是暴露给模型的那个 `{server}__{tool}` 名字。
+   */
+  mcpCallStats(): McpCallStats {
+    // 逐窗在事件明细上按 (服务, 工具, 用户) 做 GROUP BY，累加到同一批分组行上。
+    // 用循环而不是一条带 8 个 CASE 的 SQL：与既有时间窗定义共用同一处口径来源。
+    const groups = new Map<string, McpCallGroupStat>();
     for (const { key, ms } of UsageDb.WINDOWS) {
-      const since = new Date(Date.now() - ms).toISOString();
-      const rowsW = this.db
+      const rows = this.db
         .prepare(
-          `SELECT service_name AS name,
+          `SELECT service_name, tool_name, user_id,
                   COALESCE(SUM(ok), 0) AS ok,
                   COALESCE(SUM(1 - ok), 0) AS failed,
-                  COUNT(*) AS total
-           FROM mcp_call_events WHERE called_at >= ? GROUP BY service_name`,
+                  MAX(called_at) AS last_called_at
+           FROM mcp_call_events WHERE called_at >= ?
+           GROUP BY service_name, tool_name, user_id`,
         )
-        .all(since) as Array<{ name: string; ok: number; failed: number; total: number }>;
-      for (const row of rowsW) {
-        const bucket = byService.get(row.name) ?? {};
-        bucket[key] = { ok: row.ok, failed: row.failed, total: row.total };
-        byService.set(row.name, bucket);
+        .all(new Date(Date.now() - ms).toISOString()) as Array<{
+        service_name: string;
+        tool_name: string | null;
+        user_id: string | null;
+        ok: number;
+        failed: number;
+        last_called_at: string;
+      }>;
+      for (const row of rows) {
+        // 复合键用 NUL 分隔（服务名/工具名/用户名都不会含 NUL）
+        const id = `${row.service_name}\u0000${row.tool_name ?? ''}\u0000${row.user_id ?? ''}`;
+        const group = groups.get(id) ?? {
+          service: row.service_name,
+          tool_name: row.tool_name,
+          user_id: row.user_id,
+          calls_total: 0,
+          calls_ok: 0,
+          calls_failed: 0,
+          last_called_at: null,
+          // 每个分组行各自持有窗口对象（不能共享同一个引用）
+          windows: {
+            h24: { ok: 0, failed: 0, total: 0 },
+            d7: { ok: 0, failed: 0, total: 0 },
+            d30: { ok: 0, failed: 0, total: 0 },
+            d365: { ok: 0, failed: 0, total: 0 },
+          },
+        };
+        group.windows[key] = { ok: row.ok, failed: row.failed, total: row.ok + row.failed };
+        // 最长窗（= 保留上界）覆盖其余窗，故用它定下该组的"最近一年"总量与最近调用时间
+        if (key === 'd365') {
+          group.calls_ok = row.ok;
+          group.calls_failed = row.failed;
+          group.calls_total = row.ok + row.failed;
+          group.last_called_at = row.last_called_at;
+        }
+        groups.set(id, group);
       }
     }
 
-    // 按用户明细：在事件明细上 GROUP BY（user_id 为 NULL 的老行归入 "未归属"）
-    const userRows = this.db
-      .prepare(
-        `SELECT service_name AS name,
-                user_id,
-                COALESCE(SUM(ok), 0) AS ok,
-                COALESCE(SUM(1 - ok), 0) AS failed,
-                MAX(called_at) AS last_called_at
-         FROM mcp_call_events GROUP BY service_name, user_id`,
-      )
-      .all() as Array<{
-      name: string;
-      user_id: string | null;
-      ok: number;
-      failed: number;
-      last_called_at: string | null;
-    }>;
-    const usersByService = new Map<string, McpCallUserStat[]>();
-    for (const row of userRows) {
-      const list = usersByService.get(row.name) ?? [];
-      list.push({
-        user_id: row.user_id,
-        calls_ok: row.ok,
-        calls_failed: row.failed,
-        calls_total: row.ok + row.failed,
-        last_called_at: row.last_called_at,
-      });
-      usersByService.set(row.name, list);
+    // 排序：服务 → 工具 → 用户（与表格列顺序一致；`null` 排在该维度最前）
+    const ordered = [...groups.values()].sort(
+      (a, b) =>
+        a.service.localeCompare(b.service) ||
+        (a.tool_name ?? '').localeCompare(b.tool_name ?? '') ||
+        (a.user_id ?? '').localeCompare(b.user_id ?? ''),
+    );
+
+    // 服务级汇总：折叠该服务的全部分组行（同一口径，可直接相加）
+    const items = new Map<string, McpCallStat>();
+    for (const group of ordered) {
+      const acc = items.get(group.service) ?? {
+        name: group.service,
+        calls_total: 0,
+        calls_ok: 0,
+        calls_failed: 0,
+        last_called_at: null,
+      };
+      acc.calls_total += group.calls_total;
+      acc.calls_ok += group.calls_ok;
+      acc.calls_failed += group.calls_failed;
+      if (
+        group.last_called_at !== null &&
+        (acc.last_called_at === null || group.last_called_at > acc.last_called_at)
+      ) {
+        acc.last_called_at = group.last_called_at;
+      }
+      items.set(group.service, acc);
     }
 
-    return rows.map((row) => {
-      const bucket = byService.get(row.name) ?? {};
-      const w = (key: 'h24' | 'd7' | 'd30' | 'd365'): McpCallWindow => bucket[key] ?? zero;
-      return {
-        name: row.name,
-        calls_total: row.calls_ok + row.calls_failed,
-        calls_ok: row.calls_ok,
-        calls_failed: row.calls_failed,
-        last_called_at: row.last_called_at,
-        windows: { h24: w('h24'), d7: w('d7'), d30: w('d30'), d365: w('d365') },
-        users: usersByService.get(row.name) ?? [],
-      };
-    });
+    // 插入序即服务名有序，故 items 不必再排一次
+    return { items: [...items.values()], groups: ordered };
   }
 
   close(): void {

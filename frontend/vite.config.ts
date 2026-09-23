@@ -52,12 +52,13 @@ export default defineConfig({
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。当前实测：stmts 14.58 / branch 22.77 / funcs 8.36 / lines 14.95
+        // ① 全局地板（防倒退）。2026-09-23 实测：stmts 46.18 / branch 53.19 / funcs 35.36 / lines 45.30
+        //    （新增 HITL 表单三件套后大幅上行，地板随之抬到实测值略下方）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 14,
-        branches: 22,
-        functions: 8,
-        lines: 14,
+        statements: 45,
+        branches: 52,
+        functions: 34,
+        lines: 44,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -66,6 +67,11 @@ export default defineConfig({
         'src/utils/error-message.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
         'src/utils/segments.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 92.55 / 86.53 / 100 / 92.22
         'src/utils/sse-parser.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.55 / 92.30 / 100 / 96.55
+        // HITL 递归表单三件套（2026-09-23）：路径读写、schema 内省、值校验与提交构建
+        'src/utils/json-path.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 98.07 / 95.12 / 100 / 100
+        'src/utils/arg-schema.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 95.65 / 94.11 / 100 / 97.10
+        'src/utils/arg-values.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 97.89 / 91.75 / 100 / 100
+        'src/composables/useInteractionForm.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.33 / 83.63 / 100 / 100
       },
     },
   },

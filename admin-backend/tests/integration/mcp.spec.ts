@@ -398,20 +398,33 @@ describe('GET /api/admin/mcp/services/{name}/logs', () => {
 });
 
 describe('GET /api/admin/mcp/stats', () => {
-  it('可用时返回按服务的统计（FR-049）', async () => {
+  it('可用时返回服务级汇总与分组行（FR-049）', async () => {
     fx.runtime.stats = {
       stats_available: true,
       items: [{ name: 'ocr', calls_total: 3, calls_ok: 3, calls_failed: 0, last_called_at: '2026-09-15T06:00:00Z' }],
+      groups: [
+        {
+          service: 'ocr',
+          tool_name: 'ocr_image',
+          user_id: 'admin',
+          calls_total: 3,
+          calls_ok: 3,
+          calls_failed: 0,
+          last_called_at: '2026-09-15T06:00:00Z',
+        },
+      ],
     };
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/stats' });
     expect(res.json().stats_available).toBe(true);
     expect(res.json().items[0].calls_total).toBe(3);
+    // 分组行原样透传（平台统计表的行）
+    expect(res.json().groups[0].tool_name).toBe('ocr_image');
   });
 
-  it('运行环境不可达时**不以 0 冒充**：stats_available=false 且 items 为空（FR-009）', async () => {
+  it('运行环境不可达时**不以 0 冒充**：stats_available=false 且两数组皆空（FR-009）', async () => {
     fx.runtime.unreachable = true;
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/stats' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ stats_available: false, items: [] });
+    expect(res.json()).toEqual({ stats_available: false, items: [], groups: [] });
   });
 });
