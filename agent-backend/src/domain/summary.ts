@@ -1,5 +1,5 @@
 /**
- * 滚动摘要（FR-017/018）：最近 20 条完整注入，更早消息并入滚动摘要。
+ * 滚动摘要（FR-017/018）：正文池达上限即归档一批，池子左边界 = 归档游标（见 context-window）。
  *
  * - 每轮结束 trigger()：窗口外攒满 batchSize（20）条 → fire-and-forget 增量重写
  *   （旧摘要 + 新归档 20 条 → LLM 合并 → 新摘要）
@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmEvent } from '../types.js';
+import { ARCHIVE_BATCH_MESSAGES, POOL_MAX_MESSAGES } from './context-window.js';
 import { threadDir } from './dirs.js';
 import type { HistoryStore } from './history.js';
 
@@ -34,8 +35,8 @@ export interface SummaryDeps {
   /** 惰性获取 LLM（默认模型） */
   llm: () => SummaryLlm;
   logger?: { warn(msg: string): void };
-  /** 上下文窗口：最近 N 条完整注入（默认 20） */
-  windowSize?: number;
+  /** 池子上限：池子（= 总数 - 已归档）达到它即归档一批（默认见 `context-window`） */
+  poolMax?: number;
   /** 窗口外攒满 N 条触发一次增量重写（默认 20） */
   batchSize?: number;
   /** 摘要生成超时（默认 60s） */
@@ -46,7 +47,7 @@ const EMPTY: SummaryData = { summary: '', coveredCount: 0 };
 
 export class SummaryStore {
   private readonly chains = new Map<string, Promise<void>>();
-  private readonly windowSize: number;
+  private readonly poolMax: number;
   private readonly batchSize: number;
   private readonly timeoutMs: number;
 
@@ -55,8 +56,8 @@ export class SummaryStore {
     private readonly history: HistoryStore,
     private readonly deps: SummaryDeps,
   ) {
-    this.windowSize = deps.windowSize ?? 20;
-    this.batchSize = deps.batchSize ?? 20;
+    this.poolMax = deps.poolMax ?? POOL_MAX_MESSAGES;
+    this.batchSize = deps.batchSize ?? ARCHIVE_BATCH_MESSAGES;
     this.timeoutMs = deps.timeoutMs ?? 60_000;
   }
 
@@ -96,8 +97,10 @@ export class SummaryStore {
     try {
       const messages = this.history.readAll(userId, threadId);
       const { summary, coveredCount } = this.read(userId, threadId);
-      // 窗口外消息 = 总数 - 窗口 - 已归档；攒满一批才重写
-      if (messages.length - this.windowSize - coveredCount < this.batchSize) return;
+      // 池子（= 总数 - 已归档）达上限才归档：一次调用清掉一整格，池子回到保留长度
+      // —— 正因为触发点是"池子满"、且只归档池内最早的若干条，
+      //    归档游标恒等于池子左边界，不会出现"既不在正文也不在摘要"的消息
+      if (messages.length - coveredCount < this.poolMax) return;
       const archived = messages.slice(coveredCount, coveredCount + this.batchSize);
       const next = await this.rewrite(summary, archived);
       fs.mkdirSync(path.dirname(this.filePath(userId, threadId)), { recursive: true });

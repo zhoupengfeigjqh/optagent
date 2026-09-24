@@ -46,16 +46,6 @@ describe('selectReplay —— 预算分配', () => {
     expect(selection.placeholders[0]!.text).toContain('已省略');
   });
 
-  it('单条超上限：不进原文回灌（避免一条吃掉整个预算）', () => {
-    const selection = selectReplay([record({ callId: 'c1', content: 'x'.repeat(20) })], 'th1', {
-      budgetBytes: 1000,
-      itemMaxBytes: 10,
-    });
-
-    expect(selection.replay).toHaveLength(0);
-    expect(selection.placeholders).toHaveLength(1);
-  });
-
   it('running 记录不参与（无结果）', () => {
     const selection = selectReplay(
       [record({ callId: 'c1', status: 'running', content: '不完整' }), record({ callId: 'c2', content: 'ok' })],

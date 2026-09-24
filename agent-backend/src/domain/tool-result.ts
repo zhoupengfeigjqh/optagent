@@ -13,8 +13,8 @@ import path from 'node:path';
 
 /** 结果 ≤ 该字节数：原文内联进 tool-events.jsonl 的 `inline_content` */
 export const TOOL_INLINE_MAX_BYTES = 16 * 1024;
-/** 外置正文的落盘上限（超出截断并标 truncated） */
-export const TOOL_ARTIFACT_MAX_BYTES = 10 * 1024 * 1024;
+/** 外置正文的落盘上限 2MB（超出截断并标 truncated） */
+export const TOOL_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
 /** 摘要字符上限（外置结果的索引行展示用） */
 export const TOOL_SUMMARY_MAX_CHARS = 200;
 /** 入参摘要：单值字符上限 */

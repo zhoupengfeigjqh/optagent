@@ -15,6 +15,7 @@
  */
 import type { Logger } from 'pino';
 import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, UsageInfo, UsageStore } from '../types.js';
+import { POOL_MAX_MESSAGES } from './context-window.js';
 import type { HistoryStore } from './history.js';
 import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
@@ -269,10 +270,15 @@ export class RunManager {
     userMessage: HistoryMessage,
   ): { messages: HistoryMessage[]; systemExtra?: string } {
     const { userId, threadId } = opts;
-    const recent: HistoryMessage[] = [
-      ...this.deps.history.readRecent(userId, threadId, 20),
-      userMessage,
-    ];
+    // 摘要与归档游标一次读盘、两处复用（末尾的摘要段也用同一份）：
+    // 正文池的左边界就是归档游标 —— 这是"无空洞"的构造性保证（见 context-window）
+    const summaryData = this.deps.summary?.read(userId, threadId) ?? { summary: '', coveredCount: 0 };
+    // 正文池 = `[已归档, 总数)`；未装配 summary 时游标为 0（等于全量），由下面的上限兜底收口
+    const pooled = this.deps.history.readAll(userId, threadId).slice(summaryData.coveredCount);
+    // 兜底：摘要长期失败时游标不推进，池子会超上限 —— 截到末尾 POOL_MAX 条。
+    // 此时退回"末尾窗口"口径，可能短暂出现空洞，属降级行为（不阻断对话）。
+    const bounded = pooled.length > POOL_MAX_MESSAGES ? pooled.slice(-POOL_MAX_MESSAGES) : pooled;
+    const recent: HistoryMessage[] = [...bounded, userMessage];
     // 工具回灌投影（缺省未装配 toolEvents 时为空，等于既有行为）
     const records = this.deps.toolEvents?.readAll(userId, threadId) ?? [];
     const selection = selectReplay(records, threadId);
@@ -293,9 +299,8 @@ export class RunManager {
     });
 
     // FR-017：滚动摘要；002 特性：外置工具结果的索引段（无外置结果时长度为 0）
-    const { summary } = this.deps.summary?.read(userId, threadId) ?? { summary: '' };
     const parts: string[] = [];
-    if (summary !== '') parts.push(`以下是对话早期内容的摘要：\n${summary}`);
+    if (summaryData.summary !== '') parts.push(`以下是对话早期内容的摘要：\n${summaryData.summary}`);
     const indexText = formatArtifactIndex(selection.index);
     if (indexText !== '') parts.push(indexText);
     return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };

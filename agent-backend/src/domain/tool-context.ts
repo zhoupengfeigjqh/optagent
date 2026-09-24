@@ -2,7 +2,7 @@
  * 工具记录的上下文投影（002 特性：受控回灌）。
  *
  * 核心约束：**工具结果原文永不整体注入提示词**，只按预算投影：
- * - 内联结果（≤ 单条上限）：按预算从最近往前回灌**原文**，拼进对应轮次的
+ * - 内联结果：按预算从最近往前回灌**原文**，拼进对应轮次的
  *   assistant 消息（历史侧，带"第几轮"的位置感）
  * - 外置结果：systemPrompt 里只留一行**索引**（名称 / 体积 / 摘要 / 路径），
  *   模型需要细节时自己 `read_file` 去取（业界策略 B）
@@ -17,8 +17,6 @@ import { artifactRelPath, formatBytes } from './tool-result.js';
 
 /** 每轮 prompt 中工具结果原文的总预算（字节） */
 export const TOOL_REPLAY_BUDGET_BYTES = 32 * 1024;
-/** 单条回灌上限（字节）；超过则不进原文回灌 */
-export const TOOL_REPLAY_ITEM_MAX_BYTES = 16 * 1024;
 /** systemPrompt 索引段最多列几条外置结果 */
 export const TOOL_INDEX_MAX_ITEMS = 10;
 /** 被预算挤出的内联结果最多留几条占位 */
@@ -51,7 +49,6 @@ export interface ReplaySelection {
 
 export interface SelectReplayOptions {
   budgetBytes?: number;
-  itemMaxBytes?: number;
   indexMaxItems?: number;
   placeholderMaxItems?: number;
 }
@@ -70,7 +67,6 @@ export function selectReplay(
   options: SelectReplayOptions = {},
 ): ReplaySelection {
   const budget = options.budgetBytes ?? TOOL_REPLAY_BUDGET_BYTES;
-  const itemMax = options.itemMaxBytes ?? TOOL_REPLAY_ITEM_MAX_BYTES;
   const indexMax = options.indexMaxItems ?? TOOL_INDEX_MAX_ITEMS;
   const placeholderMax = options.placeholderMaxItems ?? TOOL_PLACEHOLDER_MAX_ITEMS;
 
@@ -98,7 +94,8 @@ export function selectReplay(
 
     if (record.content === undefined) continue;
     const bytes = Buffer.byteLength(record.content, 'utf8');
-    if (bytes <= itemMax && bytes <= remaining) {
+    // 预算本身即单条上限：remaining ≤ 总预算，故不需要另设单条阈值
+    if (bytes <= remaining) {
       replay.push({
         messageId: record.messageId,
         callId: record.callId,

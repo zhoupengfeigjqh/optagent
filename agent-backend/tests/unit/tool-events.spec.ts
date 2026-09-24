@@ -98,7 +98,7 @@ describe('tool-events —— 体积分流', () => {
 
   it('超过单条落盘上限：截断并标记 truncated', async () => {
     const store = makeStore();
-    const huge = 'x'.repeat(TOOL_ARTIFACT_MAX_BYTES + 1024); // 略超 10MB 上限
+    const huge = 'x'.repeat(TOOL_ARTIFACT_MAX_BYTES + 1024); // 略超 2MB 上限
     await appendEnd(store, { callId: 'call_huge', resultText: huge });
 
     const record = store.readAll('admin', 'th1')[0]!;

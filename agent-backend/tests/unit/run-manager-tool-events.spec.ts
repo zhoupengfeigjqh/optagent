@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { POOL_MAX_MESSAGES } from '../../src/domain/context-window.js';
+import { threadDir } from '../../src/domain/dirs.js';
 import { FileAccess } from '../../src/domain/file-access.js';
 import { HistoryStore } from '../../src/domain/history.js';
 import {
@@ -20,6 +22,7 @@ import {
   type SsePayload,
   type StartRunOptions,
 } from '../../src/domain/run-manager.js';
+import { SummaryStore, type SummaryLlm } from '../../src/domain/summary.js';
 import { ToolEventStore } from '../../src/domain/tool-events.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { LlmEvent } from '../../src/types.js';
@@ -67,6 +70,33 @@ function runTurn(
   run.subscribe((e) => events.push(e));
   return { settled: run.settled, events };
 }
+
+/** 灌历史消息：内容 h0..h{count-1}（user/assistant 交替，凑整数轮） */
+async function seedHistory(count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await history.append('admin', 'th1', {
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `h${i}`,
+    });
+  }
+}
+
+/** 直接落 summary.json（绕过 LLM）：声明"前 covered 条已归档进摘要" */
+function writeSummary(covered: number, text = '早前摘要'): void {
+  const dir = threadDir(root, 'admin', 'th1');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'summary.json'),
+    JSON.stringify({ summary: text, covered_count: covered }),
+    'utf8',
+  );
+}
+
+const poolLlm: SummaryLlm = {
+  async *streamChat() {
+    yield { type: 'content_delta', delta: '摘要正文' };
+  },
+};
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-manager-tool-'));
@@ -164,5 +194,53 @@ describe('下一轮回灌', () => {
     const joined = captured[0]!.messages.map((m) => m.content).join('\n');
     expect(joined).not.toContain('内部结果');
     expect(fs.existsSync(path.join(root, 'users', 'admin', 'user-data', 'threads', 'th1', 'tool-events.jsonl'))).toBe(false);
+  });
+});
+
+describe('上下文池（方案 A）：正文按归档游标注入', () => {
+  it('池子在保留量内：注入 [已归档, 总数) 全部，摘要同步进 systemExtra', async () => {
+    await seedHistory(70);
+    writeSummary(45);
+    const summary = new SummaryStore(root, history, { llm: () => poolLlm });
+    const manager = new RunManager({ history, usage, summary });
+
+    const captured: AgentRunRequest[] = [];
+    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+
+    const req = captured[0]!;
+    expect(req.messages).toHaveLength(70 - 45 + 1); // 池子 + 本轮新消息
+    expect(req.messages[0]!.content).toBe('h45'); // 左边界 = 归档游标
+    expect(req.messages.at(-1)).toMatchObject({ role: 'user', content: '继续' });
+    expect(req.systemExtra).toContain('早前摘要');
+  });
+
+  it('零空洞：摘要右边界与正文左边界相接（不重、不漏）', async () => {
+    await seedHistory(100);
+    writeSummary(40);
+    const summary = new SummaryStore(root, history, { llm: () => poolLlm });
+    const manager = new RunManager({ history, usage, summary });
+
+    const captured: AgentRunRequest[] = [];
+    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+
+    const req = captured[0]!;
+    // 摘要覆盖 h0..h39，正文从 h40 一直到最后一条 —— 两者之间没有任何空隙
+    expect(req.messages).toHaveLength(100 - 40 + 1);
+    expect(req.messages[0]!.content).toBe('h40');
+    expect(req.messages.at(-2)).toMatchObject({ content: 'h99' });
+    expect(req.systemExtra).toContain('早前摘要');
+  });
+
+  it('摘要不可用（未装配）：池子超上限时兜底截断到末尾 POOL_MAX 条', async () => {
+    await seedHistory(80);
+    const manager = new RunManager({ history, usage });
+
+    const captured: AgentRunRequest[] = [];
+    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+
+    const req = captured[0]!;
+    expect(req.messages).toHaveLength(POOL_MAX_MESSAGES + 1);
+    expect(req.messages[0]!.content).toBe('h20'); // 兜底取末尾 60 条 = h20..h79
+    expect(req.systemExtra).toBeUndefined();
   });
 });
