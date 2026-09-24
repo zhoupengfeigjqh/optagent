@@ -63,3 +63,9 @@ export const STORAGE_KEY_MODEL = `${STORAGE_PREFIX}model`
 
 /** 思考开关缓存键。 */
 export const STORAGE_KEY_THINKING = `${STORAGE_PREFIX}thinking`
+
+/**
+ * 当前会话缓存键（002 特性）：刷新后恢复上次会话，URL `?thread=` 优先、本键兜底。
+ * 见 `utils/thread-restore.ts`。
+ */
+export const STORAGE_KEY_THREAD = `${STORAGE_PREFIX}thread`

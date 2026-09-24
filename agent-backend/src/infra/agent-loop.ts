@@ -7,6 +7,7 @@
  */
 import type { Model, Provider } from '@earendil-works/pi-ai';
 import { runAgentLoop, type AgentEvent, type AgentTool, type StreamFn } from '@earendil-works/pi-agent-core';
+import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
 /** 由 pi-ai provider 构造 runAgentLoop 所需的 streamFn（请求级注入 apiKey） */
@@ -65,11 +66,24 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
       if (ev.type === 'thinking_delta') push({ type: 'thinking_delta', delta: ev.delta });
       else if (ev.type === 'text_delta') push({ type: 'content_delta', delta: ev.delta });
     } else if (event.type === 'tool_execution_start') {
-      // 仅透传工具名与调用标识；args 永不复制（spec 002 FR-001）
-      push({ type: 'tool_call_start', callId: event.toolCallId, name: event.toolName });
+      // 入参只带**短标量摘要**（供展示"查了什么"）；原文永不下发（spec 002 FR-001）
+      const argsDigest = digestArgs(event.args);
+      push({
+        type: 'tool_call_start',
+        callId: event.toolCallId,
+        name: event.toolName,
+        ...(argsDigest ? { argsDigest } : {}),
+      });
     } else if (event.type === 'tool_execution_end') {
-      // 仅透传成功/失败状态；result 永不复制（spec 002 FR-002）
-      push({ type: 'tool_call_end', callId: event.toolCallId, status: event.isError ? 'error' : 'success' });
+      // 结果拍平成文本上行（由 run-manager 落 tool-events.jsonl）；
+      // **SSE 仍只透出状态**，结果不经事件总线广播（spec 002 FR-002 的对外部分不变）
+      push({
+        type: 'tool_call_end',
+        callId: event.toolCallId,
+        name: event.toolName,
+        status: event.isError ? 'error' : 'success',
+        resultText: serializeToolResult(event.result).text,
+      });
     } else if (event.type === 'agent_end') {
       // usage 精确统计：工具循环有多跳 LLM 调用，每跳产生一条带 usage 的
       // assistant 消息，须全部累加（只取最后一条会漏掉中间跳的大 prompt）

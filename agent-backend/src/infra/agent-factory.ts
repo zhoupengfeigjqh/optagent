@@ -50,6 +50,11 @@ export interface ChatAgent extends PooledInstance {
   unavailableMcp(): string[];
   /** 单服务连接状态（FR-019）：建连结果未产生前为 `unknown`，不误报为 `failed` */
   mcpStatusOf(server: string): McpConnectionStatus;
+  /**
+   * 主动健康探测（2026-09-23）：由 `server.ts` 的调度器定期调用，补齐
+   * "服务被停掉但无流量、`onClose` 不触发"导致的假绿；返回本次翻转为 failed 的服务名。
+   */
+  probeMcp(): Promise<string[]>;
   run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
 }
 
@@ -106,6 +111,7 @@ export class AgentInstanceFactory {
       lastActiveAt: Date.now(),
       unavailableMcp: () => mcp.unavailable(),
       mcpStatusOf: (server) => mcp.statusOf(server),
+      probeMcp: () => mcp.probe(),
       dispose: () => mcp.closeAll(),
       run: (req) => this.runWith(instance, mcp, req),
     };

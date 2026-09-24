@@ -55,6 +55,7 @@ const {
   onStop,
   onRegenerate,
   onLoadMore,
+  onLoadToolResult,
   onRecover,
   onFeedback,
   onToggleThinking,
@@ -122,6 +123,7 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         :search-keyword="search.keyword.value"
         :active-match-index="search.activeIndex.value"
         :has-more="threads.hasMore.value"
+        :load-tool-result="onLoadToolResult"
         @load-more="onLoadMore"
         @feedback="onFeedback"
         @regenerate="onRegenerate"

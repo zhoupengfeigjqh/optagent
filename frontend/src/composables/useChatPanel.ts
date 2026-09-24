@@ -10,7 +10,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { ErrorInfo, FeedbackValue, FileReference } from '../api/types'
+import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
@@ -179,6 +179,16 @@ export function useChatPanel() {
 
   function onLoadMore(): void {
     void threads.loadMore()
+  }
+
+  /**
+   * 工具卡片懒加载外置结果正文（002 特性）。
+   *
+   * 仅做"装配层转发"：错误不在此处理——卡片按 `code === 'TOOL_RESULT_EXPIRED'`
+   * 区分"内容已清理"（降级展示）与其他失败（提示可重试）。
+   */
+  function onLoadToolResult(callId: string): Promise<ToolCallResult> {
+    return threads.toolCallResult(callId)
   }
 
   function onRecover(): void {
@@ -389,6 +399,7 @@ export function useChatPanel() {
     onStop,
     onRegenerate,
     onLoadMore,
+    onLoadToolResult,
     onRecover,
     onFeedback,
     onToggleThinking,

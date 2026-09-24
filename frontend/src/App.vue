@@ -6,7 +6,7 @@
  * 左栏历史会话（US5）、中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8）——
  * 文件空间列表与文件内容在该面板内互换，二者不并存，故只有一个右栏组件。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import type { Conversation, FileReference } from './api/types'
 import ChatPanel from './components/chat/ChatPanel.vue'
@@ -32,9 +32,42 @@ const busy = computed(
 )
 
 // 首屏拉取历史会话：一次性拉全量，10 / 100 条切在前端完成（V-09）
-onMounted(() => {
-  void session.threads.loadList()
+onMounted(async () => {
+  await session.threads.loadList()
+  await restoreThread()
 })
+
+/**
+ * 刷新恢复（002 特性）：首屏按 URL / 本地存储选中的会话自动加载历史。
+ *
+ * 为什么必须做：工具记录落盘后，"刷新后能看到工具卡片"还差最后一环——
+ * 不自动恢复会话的话，中栏仍是空态，用户得手动点左侧历史才看得到。
+ *
+ * 降级：目标会话已被删除（或加载失败）→ **静默**回空态并清除痕迹，不报错。
+ */
+async function restoreThread(): Promise<void> {
+  const target = session.initialThreadId
+  if (!target) {
+    return
+  }
+  const exists = session.threads.list.value.some((item) => item.thread_id === target)
+  if (!exists) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+    return
+  }
+  await session.threads.select(target)
+  if (session.threads.error.value !== null) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+  }
+}
+
+// 会话切换即记住（地址栏 + 本地存储双写），供下次刷新恢复
+watch(
+  () => session.threads.activeId.value,
+  (threadId) => session.rememberActiveThread(threadId),
+)
 
 function onSelectThread(threadId: string): void {
   void session.threads.select(threadId)

@@ -28,12 +28,15 @@ const CFG: McpServerConfig = { name: 'ocr', transport: 'streamable-http', url: '
 function fakeClient(script: {
   callTool?: (name: string, args: unknown) => Promise<unknown>;
   listTools?: () => Promise<{ tools: McpToolInfo[] }>;
+  /** 健康探针；不提供 = 该 server 不支持 ping（探测直接走 listTools） */
+  ping?: () => Promise<unknown>;
 }): McpClientLike & { close: () => Promise<void> } {
   return {
     listTools: script.listTools ?? (async () => ({ tools: [] })),
     callTool: script.callTool ?? (async () => 'ok'),
     close: async () => {},
     onClose: () => {},
+    ...(script.ping ? { ping: script.ping } : {}),
   };
 }
 
@@ -187,5 +190,171 @@ describe('MCP 调用错误分类（2026-09-23：供统计落库的粗粒度枚�
   it('非 Error 值也能归类：不抛错，落到 transport（统计埋点不许反过来搞挂主链路）', () => {
     expect(classifyMcpError('boom')).toBe('transport');
     expect(classifyMcpError(undefined)).toBe('transport');
+  });
+});
+
+describe('McpManager —— 保活重连（2026-09-23：退避用尽后不再停止）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('退避表走完后转入保活重试：服务恢复后自动接回（无需实例换代/重启）', async () => {
+    let reachable = false;
+    const statuses: Array<[string, string]> = [];
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => {
+        if (!reachable) throw new Error('connect ECONNREFUSED');
+        return fakeClient({ callTool: async () => 'ok' });
+      },
+      onStatusChange: (server, status) => statuses.push([server, status]),
+    });
+
+    await manager.connectAll([CFG]);
+    expect(manager.statusOf('ocr')).toBe('failed');
+
+    // 走完 5 档退避（5s + 15s + 30s + 60s + 60s = 170s）：全部失败，但**不停**
+    await vi.advanceTimersByTimeAsync(170_000);
+    expect(manager.statusOf('ocr')).toBe('failed');
+    expect(manager.isAvailable('ocr')).toBe(false);
+
+    // 服务恢复；再等一个保活周期（120s）→ 自动接回，且工具恢复可用
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(manager.statusOf('ocr')).toBe('connected');
+    expect(manager.isAvailable('ocr')).toBe(true);
+    expect(statuses.filter(([, s]) => s === 'failed')).toHaveLength(1);
+    expect(statuses.filter(([, s]) => s === 'connected')).toHaveLength(1);
+    await expect(manager.callTool('ocr', 'ocr_image', {})).resolves.toBe('ok');
+    await manager.closeAll();
+  });
+
+  it('保活期反复失败也不叠加状态推送（避免每 2 分钟骚扰前端）', async () => {
+    const statuses: Array<[string, string]> = [];
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+      onStatusChange: (server, status) => statuses.push([server, status]),
+    });
+    await manager.connectAll([CFG]);
+
+    // 覆盖快节奏退避 + 三个保活周期，全程 down
+    await vi.advanceTimersByTimeAsync(170_000 + 120_000 * 3);
+
+    expect(manager.statusOf('ocr')).toBe('failed');
+    expect(statuses.filter(([, s]) => s === 'failed')).toHaveLength(1);
+    await manager.closeAll();
+  });
+});
+
+describe('McpManager —— 主动健康探测（2026-09-23：补齐假绿）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('探测失败（连接级）→ 降级变红并推送，返回翻转为 failed 的服务', async () => {
+    const statuses: Array<[string, string]> = [];
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () =>
+        fakeClient({
+          ping: async () => {
+            throw new Error('connect ECONNREFUSED');
+          },
+        }),
+      onStatusChange: (server, status) => statuses.push([server, status]),
+    });
+    await manager.connectAll([CFG]);
+    expect(manager.statusOf('ocr')).toBe('connected');
+
+    const changed = await manager.probe();
+
+    expect(changed).toEqual(['ocr']);
+    expect(manager.statusOf('ocr')).toBe('failed');
+    expect(statuses).toContainEqual(['ocr', 'failed']);
+    await manager.closeAll();
+  });
+
+  it('探测成功：用最轻的 ping，不拉工具清单、不改状态', async () => {
+    const ping = vi.fn(async () => ({}));
+    const listTools = vi.fn(async () => ({ tools: [] }));
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => fakeClient({ ping, listTools }),
+    });
+    await manager.connectAll([CFG]);
+
+    expect(await manager.probe()).toEqual([]);
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(listTools).not.toHaveBeenCalled();
+    expect(manager.statusOf('ocr')).toBe('connected');
+    await manager.closeAll();
+  });
+
+  it('服务未实现 ping（-32601）→ 回退 listTools 探测，且不误判为故障；下次不再试 ping', async () => {
+    const ping = vi.fn(async () => {
+      throw new McpError(ErrorCode.MethodNotFound, 'Method not found');
+    });
+    const listTools = vi.fn(async () => ({ tools: [] }));
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => fakeClient({ ping, listTools }),
+    });
+    await manager.connectAll([CFG]);
+
+    expect(await manager.probe()).toEqual([]);
+    expect(manager.statusOf('ocr')).toBe('connected');
+
+    // 第二次探测：已记下"该 server 无 ping"，直接 listTools，不再白试一次
+    await manager.probe();
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(listTools).toHaveBeenCalledTimes(2);
+    await manager.closeAll();
+  });
+
+  it('探测遇到协议错误（McpError）不降级：活服务不该被误判为故障', async () => {
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () =>
+        fakeClient({
+          ping: async () => {
+            throw new McpError(ErrorCode.InvalidParams, '参数不合法');
+          },
+        }),
+    });
+    await manager.connectAll([CFG]);
+
+    expect(await manager.probe()).toEqual([]);
+    expect(manager.statusOf('ocr')).toBe('connected');
+    await manager.closeAll();
+  });
+
+  it('不支持 ping 的客户端直接用 listTools 探测', async () => {
+    const listTools = vi.fn(async () => ({ tools: [] }));
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => fakeClient({ listTools }),
+    });
+    await manager.connectAll([CFG]);
+
+    expect(await manager.probe()).toEqual([]);
+    expect(listTools).toHaveBeenCalledTimes(1);
+    await manager.closeAll();
+  });
+
+  it('已降级的服务不参与探测（由保活重连负责），探测不产生额外状态推送', async () => {
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      createClient: async () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+    });
+    await manager.connectAll([CFG]);
+    expect(manager.statusOf('ocr')).toBe('failed');
+
+    expect(await manager.probe()).toEqual([]);
+    expect(manager.statusOf('ocr')).toBe('failed');
+    await manager.closeAll();
   });
 });

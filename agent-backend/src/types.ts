@@ -20,7 +20,10 @@ export interface ModelSelection {
 
 /**
  * 对话消息（history.jsonl 落盘格式，仅 user/assistant 正文 + 元数据）。
- * 注意：不落思考内容与工具调用信息（spec 002 FR-006/009），故无相应字段。
+ *
+ * 注意：**思考内容不落历史**（spec 002 FR-006/009），故无相应字段；
+ * **工具调用记录不在此文件**——它落在同目录的 `tool-events.jsonl`
+ * （元数据与结果），供刷新后展示与下一轮受控回灌，见 `domain/tool-events.ts`。
  * 元数据字段均可选：旧格式行（仅 role/content）保持可读。
  */
 export interface HistoryMessage {
@@ -51,10 +54,21 @@ export interface HistoryMessage {
 export type LlmEvent =
   | { type: 'thinking_delta'; delta: string }
   | { type: 'content_delta'; delta: string }
-  /** 工具调用开始：仅工具名与调用标识，永不带入参 */
-  | { type: 'tool_call_start'; callId: string; name: string }
-  /** 工具调用结束：仅状态，永不带结果内容 */
-  | { type: 'tool_call_end'; callId: string; status: 'success' | 'error' }
+  /**
+   * 工具调用开始：工具名 + 调用标识 + **入参短标量摘要**。
+   *
+   * 入参原文永不透出（可能含大 payload 或敏感信息）；摘要只留短标量，
+   * 供展示"查了哪个文件/哪条记录"与审计（见 `domain/tool-result.ts` 的 digestArgs）。
+   */
+  | { type: 'tool_call_start'; callId: string; name: string; argsDigest?: Record<string, string> }
+  /**
+   * 工具调用结束：状态 + **已序列化的结果文本**。
+   *
+   * 结果文本由 `domain/tool-result.serializeToolResult` 拍平（图片块只留占位、
+   * 不落 base64），会话内写入 `tool-events.jsonl`；是否外置成临时空间文件
+   * 由体积阈值决定（见 `domain/tool-events.ts`）。SSE 仍只透出状态，不透出结果。
+   */
+  | { type: 'tool_call_end'; callId: string; name: string; status: 'success' | 'error'; resultText?: string }
   | { type: 'done'; usage: UsageInfo }
   | { type: 'error'; code: string; message: string; usage?: UsageInfo };
 

@@ -13,8 +13,9 @@ services:
     build: ./gateway
     container_name: optagent-gateway
     ports:
-      # 宿主机对外端口可用根 .env 的 GATEWAY_HOST_PORT 覆盖（compose 插值，缺省 82）
-      - "${GATEWAY_HOST_PORT:-82}:80"
+      # 宿主机对外端口固定 82（2026-09-23：取消根 .env 插值——编排层不再有可变项，
+      # 端口调整直接改本文件。原 GATEWAY_HOST_PORT 的实际取值与默认值等价，无迁移成本）
+      - "82:80"
     depends_on:
       - frontend
       - backend
@@ -62,9 +63,9 @@ services:
     build: ./jev-service
     container_name: optagent-jev
     # 向宿主机发布 8001：本地直跑（非 Docker）的 backend 经 LAN IP 访问 Jev
-    # 端口可用根 .env 的 JEV_HOST_PORT 覆盖（compose 插值，缺省 8001）
+    # 端口固定 8001（2026-09-23：取消根 .env 插值，编排层不再有可变项）
     ports:
-      - "${JEV_HOST_PORT:-8001}:8000"
+      - "8001:8000"
     env_file:
       # 容器形态配置 = 入库的 .env（与 backend / admin-backend 同模式，2026-09-23 起）：
       # compose 文件本身不再逐行拼装 JEV_URL_ALLOW_HOSTS（旧写法一处配置两个主人，

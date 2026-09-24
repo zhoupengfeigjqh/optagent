@@ -5,6 +5,8 @@
  *   传入的 `agent_name` 仅作为**起始数字人标签**——会话不绑定数字人（FR-014 修订）
  * - GET /api/threads：列表（agent_name 过滤、updated_at 倒序、默认标题）
  * - GET /api/threads/:id：详情 + 历史分页（limit≤200 默认 50、offset 从最新往前数、total、running）
+ *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联小结果）
+ * - GET /api/threads/:id/tool-calls/:call_id：外置结果正文（懒加载；过期 → 410）
  * - PATCH /api/threads/:id：重命名（≤100 字）
  * - DELETE /api/threads/:id：删除连带清理（进行中 run 先 abort）
  */
@@ -15,6 +17,7 @@ import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { userAgentsDir } from '../domain/dirs.js';
 import { defaultTitleOf } from '../domain/thread-store.js';
+import type { ToolCallRecord } from '../domain/tool-events.js';
 import { ApiError } from '../server.js';
 
 const createBodySchema = {
@@ -53,6 +56,29 @@ function metaJson(m: { threadId: string; agentName: string; title: string | null
     title: m.title,
     created_at: m.createdAt,
     updated_at: m.updatedAt,
+  };
+}
+
+/**
+ * 工具调用记录 → HTTP 契约。
+ *
+ * `content` = 内联结果正文（小结果，随详情一起下发）；
+ * `artifact_size` 有值 = 正文在临时空间，前端按需拉 `…/tool-calls/{call_id}`。
+ * **不下发路径**：路径由后端按 `{threadId, callId}` 重算，避免数据被篡改成越权读。
+ */
+function toolCallJson(r: ToolCallRecord) {
+  return {
+    call_id: r.callId,
+    name: r.name,
+    status: r.status,
+    started_at: r.startedAt,
+    ...(r.durationMs !== undefined ? { duration_ms: r.durationMs } : {}),
+    ...(r.size !== undefined ? { size: r.size } : {}),
+    ...(r.content !== undefined ? { content: r.content } : {}),
+    ...(r.artifactSize !== undefined ? { artifact_size: r.artifactSize } : {}),
+    ...(r.truncated === true ? { truncated: true } : {}),
+    ...(r.summary !== undefined ? { summary: r.summary } : {}),
+    ...(r.argsDigest !== undefined ? { args_digest: r.argsDigest } : {}),
   };
 }
 
@@ -97,11 +123,14 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     // offset 从最新往前数；返回按时间正序
     const end = Math.max(0, total - offset);
     const page = all.slice(Math.max(0, end - limit), end);
+    // 002 特性：工具调用记录按归属消息分组（无记录的会话为空 Map，只多一次 existsSync）
+    const toolCallsByMessage = ctx.toolEvents.readByMessage(userId, threadId);
     // 契约升级（002 US2/US3）：消息带元数据与反馈状态；
     // 旧格式行合成稳定 id（{threadId}-{全局序号}）、ts 回填线程创建时间
     const messages = page.map((m, i) => {
       const globalIndex = Math.max(0, end - limit) + i + 1;
       const id = m.id ?? `${threadId}-${globalIndex}`;
+      const toolCalls = toolCallsByMessage.get(id) ?? [];
       return {
         id,
         role: m.role,
@@ -114,6 +143,7 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         ...(m.duration_ms !== undefined ? { duration_seconds: Math.round(m.duration_ms) / 1000 } : {}),
         ...(m.attachments ? { attachments: m.attachments } : {}),
         ...(m.error ? { error: m.error } : {}),
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(toolCallJson) } : {}),
         feedback: feedback.get(id) ?? null,
       };
     });
@@ -126,6 +156,35 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
       running: ctx.runManager.hasActive(threadId),
       // HITL 断连恢复：若当前有等待用户确认的工具调用，附快照让前端重建弹窗
       pending_interaction: ctx.runManager.pendingInteractionOf(threadId),
+    };
+  });
+
+  /**
+   * 外置工具结果正文（懒加载）：前端点开卡片才请求。
+   *
+   * - 记录不存在 / 该调用结果未外置（已随详情内联下发）→ 404
+   * - 外置文件已被临时空间清理或用户删除 → **410**（前端降级为"内容已过期"，
+   *   卡片元数据仍在，不视为错误）
+   */
+  app.get('/api/threads/:id/tool-calls/:callId', async (req) => {
+    const userId = getCurrentUser().userId;
+    const { id: threadId, callId } = req.params as { id: string; callId: string };
+    ctx.threadStore.get(userId, threadId); // 404
+    const record = ctx.toolEvents.readAll(userId, threadId).find((r) => r.callId === callId);
+    if (!record || record.artifactSize === undefined) {
+      throw new ApiError(404, 'TOOL_CALL_NOT_FOUND', `工具调用结果不存在或未外置: ${callId}`);
+    }
+    const artifact = await ctx.toolEvents.readArtifact(userId, threadId, callId);
+    if (!artifact) {
+      throw new ApiError(410, 'TOOL_RESULT_EXPIRED', '工具结果内容已被临时空间清理');
+    }
+    return {
+      call_id: record.callId,
+      name: record.name,
+      status: record.status,
+      size: artifact.size,
+      content: artifact.content,
+      ...(record.truncated === true ? { truncated: true } : {}),
     };
   });
 

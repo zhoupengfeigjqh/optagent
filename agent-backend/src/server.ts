@@ -17,12 +17,14 @@ import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
 import { computeConfigFingerprint } from './domain/config-fingerprint.js';
 import { ensureRootDirs, userAgentsDir, userDataDir, SPACE_TMP } from './domain/dirs.js';
+import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
 import { RunManager } from './domain/run-manager.js';
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
 import { cleanupTmpDir } from './domain/tmp-cleanup.js';
+import { ToolEventStore } from './domain/tool-events.js';
 import { gracefulShutdown } from './graceful-shutdown.js';
 import { AgentInstanceFactory, type ChatAgent } from './infra/agent-factory.js';
 import type { LlmProvider } from './infra/llm/llm-provider.js';
@@ -84,6 +86,23 @@ export async function buildServer(options: BuildServerOptions = {}) {
     warn: (msg) => loggers.logger.warn({ alert: true, event: 'history.recover', scope: 'system' }, msg),
   });
   const threadStore = new ThreadStore(root, history);
+  // 工具调用记录（002 特性）：元数据常驻会话目录，超阈值的结果正文外置到临时空间。
+  // 外置读写走 FileAccess（顶层目录白名单 + 符号链接校验 + `{threadId}_` 前缀强制），
+  // 因此模型能用 read_file 按需取回，且删会话时随前缀被一并清理。
+  const toolEvents = new ToolEventStore({
+    root,
+    logger: {
+      warn: (msg: string) =>
+        loggers.logger.warn({ alert: true, event: 'tool-events.recover', scope: 'system' }, msg),
+    },
+    artifacts: (userId: string) =>
+      new FileAccess({
+        optAgentRoot: root,
+        userId,
+        logger: loggers.logger,
+        truncateKb: config.readTruncateKb,
+      }),
+  });
   const pool = new AgentPool({ maxSize: config.poolSize });
   const currentAgent = new CurrentAgentStore();
   const mcpEvents = new McpStatusEvents();
@@ -157,11 +176,48 @@ export async function buildServer(options: BuildServerOptions = {}) {
     'pool-idle-evict',
   );
 
+  // MCP 健康探测（2026-09-23）：`streamable-http` 是无状态请求/响应，服务被停掉时
+  // **不会有断线回调**——若此刻没有工具调用，状态会一直显示"绿灯"（假绿）。
+  // 这里定期对池内实例的已连接服务发探针：探测失败即降级变红并推送；
+  // 不可用的服务由 McpManager 的保活重连负责（每 2 分钟一次），恢复后自动变绿。
+  scheduler.every(
+    60 * 1000,
+    async () => {
+      for (const instance of pool.list()) {
+        // 池内实际是 ChatAgent；这里只用到探针能力，按最小契约收窄
+        const agent = instance as unknown as ChatAgent;
+        if (typeof agent.probeMcp !== 'function') continue;
+        try {
+          const failed = await agent.probeMcp();
+          if (failed.length > 0) {
+            loggers.logger.warn(
+              {
+                event: 'mcp.probe.failed',
+                scope: 'system',
+                user_id: agent.key.userId,
+                agent_name: agent.key.agentName,
+                servers: failed,
+              },
+              `MCP 健康探测发现服务不可用：${failed.join('、')}`,
+            );
+          }
+        } catch (err) {
+          loggers.logger.warn(
+            { err, event: 'mcp.probe.error', scope: 'system', agent_name: agent.key.agentName },
+            'MCP 健康探测异常（不影响主流程）',
+          );
+        }
+      }
+    },
+    'mcp-health-check',
+  );
+
   const runManager = new RunManager({
     history,
     usage: usageDb,
     logger: loggers.logger,
     summary,
+    toolEvents,
     // FR-030：实例崩溃 → 销毁（下一条消息经 getOrCreateAgent 自动重建）
     onCrash: (key) => pool.remove(key),
   });
@@ -174,6 +230,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     threadStore,
     history,
     summary,
+    toolEvents,
     runManager,
     usage: usageDb,
     mcpEvents,

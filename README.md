@@ -2,7 +2,7 @@
 
 智能体（Agent）应用平台。平台分两端：
 
-- **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用、人工确认（HITL）、文件空间、多会话管理
+- **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用（**调用记录随会话持久化，刷新后仍可见**）、人工确认（HITL）、文件空间、多会话管理
 - **数字人管理平台**：面向运营/管理员的管理后台，管理数字人（Agent）、技能、MCP 服务与平台配置，并负责把配置下发部署到运行端
 
 OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务独立部署（Docker）。
@@ -46,13 +46,13 @@ optagent/
 │   └── src/
 │       ├── api/            # 后端接口封装与类型
 │       ├── components/
-│       │   ├── chat/       # 对话区：消息流、输入框(Composer)、HITL 弹窗、@引用面板
+│       │   ├── chat/       # 对话区：消息流、工具调用卡片、输入框(Composer)、HITL 弹窗、@引用面板
 │       │   ├── layout/     # 应用骨架：历史侧栏、文件空间面板、空间树
 │       │   └── common/     # 通用组件（按钮/弹窗/图标等）
 │       ├── composables/    # 状态与逻辑：会话流、@文件引用、路径插入、工作区
 │       ├── constants/      # 常量
 │       ├── styles/         # 全局样式
-│       └── utils/          # 工具函数（格式化、空间判定等）
+│       └── utils/          # 工具函数（格式化、空间判定、工具记录展示模型、会话恢复）
 │
 ├── admin-backend/          # 数字人管理平台后端（端口 3001）
 │   └── src/
@@ -85,7 +85,6 @@ optagent/
 │
 ├── gateway/                # 生产网关（nginx）
 ├── specs/                  # 需求/设计规格文档
-├── .env.example            # 编排层变量样例（compose 插值专用，见下「配置地图」）
 └── docker-compose.yml      # Docker 编排（OCR / Jev 等；同时是容器形态运行配置的权威源）
 ```
 
@@ -100,7 +99,6 @@ optagent/
 | `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
 | `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
-| `.env`（根） | 编排层 | 仅 docker-compose 插值 | `GATEWAY_HOST_PORT` / `JEV_HOST_PORT`，**不注入任何容器**（样板 `.env.example`） |
 | `ocr-service/.env` | OCR 服务 | compose `env_file` 注入 ocr 容器 | **容器形态**配置（`OCR_URL_ALLOW_HOSTS=backend` 等，无密钥，入库） |
 | `ocr-service/.env.local` | OCR 服务 | compose `env_file` 注入 ocr 容器 | 本机私产：白名单**追加**宿主机 LAN IP（gitignore；样板 `.env.example`） |
 | `jev-service/.env` | Jev 服务 | compose `env_file` 注入 jev 容器 | **容器形态**配置（`JEV_URL_ALLOW_HOSTS=backend`，无密钥，入库） |
@@ -129,7 +127,7 @@ optagent/
 | `chat.ts` | 对话接口（SSE 流式输出），Agent 执行主链路 |
 | `agents.ts` | 数字人（Agent）列表/切换/配置 |
 | `files.ts` | 文件空间：三空间汇总、上传/删除、**签名直链铸造与回源下载** |
-| `threads.ts` | 会话（线程）管理与历史 |
+| `threads.ts` | 会话（线程）管理与历史；**工具调用记录**（详情附带 + 外置正文懒加载端点） |
 | `models.ts` | 模型列表/选择 |
 | `builtin-tools.ts` | 内置工具开关与配置 |
 | `monitor.ts` | 运行监控（事件流） |
@@ -145,7 +143,9 @@ optagent/
 | `file-access.ts` / `fs-safe.ts` / `dirs.ts` | 文件访问安全：user-data 沙箱路径解析、越权拦截 |
 | `file-arg-path.ts` | MCP 文件参数声明解析（`file_args`：`url` / `url:from=` 模式） |
 | `mcp-transport.ts` / `mcp-events.ts` | MCP 连接生命周期与状态事件 |
-| `run-manager.ts` | 运行任务管理（中断/恢复/快照） |
+| `run-manager.ts` | 运行任务管理（中断/恢复/快照）；提示词组装（滚动摘要 + 工具结果按预算回灌） |
+| `run-impl.ts` / `run-events.ts` / `message-format.ts` | Run 实例与事件类型、消息标识/格式化（按 ≤500 行门禁自 `run-manager.ts` 拆出） |
+| `tool-events.ts` / `tool-context.ts` / `tool-result.ts` | **工具调用记录**：事件落盘与体积分流、上下文回灌投影、结果序列化与外置命名 |
 | `thread-store.ts` / `history.ts` / `summary.ts` | 会话/消息/摘要持久化 |
 | `tools/` | 内置工具实现：计算器、读/写文件、列目录、内容检索 |
 | `field-check.ts` / `tmp-cleanup.ts` / `config-fingerprint.ts` | 字段校验 / 临时目录清理 / 配置指纹 |
@@ -155,7 +155,7 @@ optagent/
 | 模块 | 作用 |
 |---|---|
 | `llm/` | LLM 提供商抽象（`llm-provider.ts`）与实现（`pi-ai-provider.ts`） |
-| `mcp/` | MCP 客户端管理（`mcp-manager.ts`）与工具适配（`mcp-tool-adapter.ts`） |
+| `mcp/` | MCP 客户端管理（`mcp-manager.ts`，含**连接状态自愈**：退避用尽后保活重连 + 定期主动健康探测）与工具适配（`mcp-tool-adapter.ts`） |
 | `agent-loop.ts` | Agent 主循环：LLM 流 → 工具调用 → 结果回填 |
 | `tool-intercept.ts` | 工具调用拦截（HITL 挂起点） |
 | `file-sign.ts` | 签名直链 HMAC 签名/验签 |
@@ -167,7 +167,7 @@ optagent/
 
 | 模块 | 作用 |
 |---|---|
-| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog + InteractionField**（HITL 通用表单：schema 驱动**递归**控件映射——对象逐行、对象数组→表格、标量数组→列表、其余走 JSON 逃逸舱——外加 @ 路径引用、结构化文件卡片、算法规则入口）、MentionPicker |
+| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog + InteractionField**（HITL 通用表单：schema 驱动**递归**控件映射——对象逐行、对象数组→表格、标量数组→列表、其余走 JSON 逃逸舱——外加 @ 路径引用、结构化文件卡片、算法规则入口）、MentionPicker、**ToolCallList**（工具调用卡片：内联结果展开即见、外置正文按需拉取、已清理时降级展示） |
 | `components/layout/` | 应用骨架：历史会话侧栏、文件空间面板（空间树 + 文件列表 + 上传） |
 | `composables/useChatStream.ts` | 会话流核心：SSE 接收、消息追加、中断/重发、HITL 快照恢复 |
 | `composables/useFileMention.ts` | 聊天输入框 @ 引用状态机（触发检测、级联导航、引用登记、提交剥离） |
@@ -178,6 +178,8 @@ optagent/
 | `composables/useThreads.ts` / `useAgents.ts` / `useModels.ts` | 会话/数字人/模型数据管理 |
 | `composables/useUploads.ts` | 文件上传队列 |
 | `composables/useResizablePanel.ts` | 侧栏宽度拖拽 |
+| `utils/tool-calls.ts` | 工具调用记录的展示模型（历史态与流式态统一、体积与耗时格式化） |
+| `utils/thread-restore.ts` | 会话恢复：URL `?thread=` 与本地存储的读写（刷新后回到原会话） |
 
 ### admin-backend（数字人管理平台后端）
 

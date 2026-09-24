@@ -3,7 +3,10 @@
  *
  * - 每 thread 单活跃 run；事件总线广播（SSE 订阅者 + 内部落盘器）
  * - 断连 = 仅退订，run 照跑落盘；stop = AbortController 中断，丢弃本轮但记 usage
- * - 工具调用：仅转发工具名与状态（tool_call/tool_call_end），入参与结果永不透出
+ * - 工具调用：SSE 仅转发工具名与状态；**结果落 `tool-events.jsonl`**
+ *   （入参只留短标量摘要）供刷新后展示与下一轮受控回灌
+ * - 下一轮：按预算把内联结果回灌进对应轮次的 assistant 消息，
+ *   外置结果只在 systemExtra 留一行索引（见 domain/tool-context.ts）
  * - done：整轮耗时 + message_id + agent_name 广播；user+assistant 带元数据落盘（先落盘后广播）+ usage 记录
  * - error：失败轮落 status='failed' 消息行（含错误信息与已消耗 usage/耗时）
  * - 思考内容仅实时广播，不落历史（FR-006/009）
@@ -13,51 +16,16 @@
 import type { Logger } from 'pino';
 import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, UsageInfo, UsageStore } from '../types.js';
 import type { HistoryStore } from './history.js';
-import type {
-  InteractionRequestPayload,
-  InteractionSink,
-  InteractionSnapshot,
-} from './interaction-gate.js';
-import { InteractionGate } from './interaction-gate.js';
+import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
+import { genMessageId, toLlmContent, toSeconds } from './message-format.js';
+import type { ResolveInteractionResult, RunState, SsePayload } from './run-events.js';
+import { RunImpl, type Run } from './run-impl.js';
+import { formatArtifactIndex, formatReplayBlock, selectReplay } from './tool-context.js';
+import type { ToolEventStore } from './tool-events.js';
 
-export type RunState = 'running' | 'draining' | 'done' | 'aborted' | 'error';
-
-/** resolveInteraction 的结果（路由层映射 HTTP 状态码） */
-export type ResolveInteractionResult =
-  | { ok: true; result: 'settled' | 'already-resolved' }
-  | { ok: false; code: 'NOT_FOUND' | 'EXPIRED' | 'VALIDATION_FAILED'; message: string; errors?: string[] };
-
-/** 广播给订阅者的事件（与 SSE 契约同构） */
-export type SsePayload =
-  | { type: 'thinking'; data: { delta: string } }
-  | { type: 'content'; data: { delta: string } }
-  | { type: 'tool_call'; data: { call_id: string; name: string; status: 'running' } }
-  | { type: 'tool_call_end'; data: { call_id: string; status: 'success' | 'error' } }
-  /** 工具调用前的人工确认请求（HITL）：仅含被声明为需确认的工具 */
-  | { type: 'interaction_request'; data: InteractionRequestPayload }
-  | {
-      type: 'done';
-      data: {
-        finish_reason: 'stop' | 'completed';
-        usage: { input_tokens: number; output_tokens: number };
-        duration_seconds: number;
-        /** assistant 落盘消息 ID；stop（本轮丢弃）时为 null */
-        message_id: string | null;
-        /** 本轮回答的数字人（会话可跨数字人） */
-        agent_name: string;
-      };
-    }
-  | {
-      type: 'error';
-      data: {
-        error: { code: string; message: string };
-        duration_seconds?: number;
-        usage?: { input_tokens: number; output_tokens: number };
-        /** 本轮回答的数字人（会话可跨数字人） */
-        agent_name: string;
-      };
-    };
+// 类型迁移到 run-events / run-impl 后仍从本模块转出：既有引用路径（routes、测试）不变
+export type { ResolveInteractionResult, RunState, SsePayload, Run };
 
 export interface AgentRunRequest {
   threadId: string;
@@ -99,16 +67,6 @@ export class ThreadBusyLimitError extends Error {
   }
 }
 
-export interface Run {
-  readonly threadId: string;
-  readonly state: RunState;
-  /** 订阅事件流；返回退订函数（客户端断开时调用，run 不受影响） */
-  subscribe(cb: (e: SsePayload) => void): () => void;
-  stop(): void;
-  /** 收尾完成（含落盘与 usage 记录）后 resolve；永不 reject */
-  readonly settled: Promise<void>;
-}
-
 export interface StartRunOptions {
   userId: string;
   threadId: string;
@@ -134,76 +92,11 @@ export interface RunManagerDeps {
   onCrash?: (key: PoolKey, err: unknown) => void;
   /** 注入时钟（测试用） */
   now?: () => number;
-}
-
-class RunImpl implements Run {
-  state: RunState = 'running';
-  readonly controller = new AbortController();
-  buffer = '';
-  settled!: Promise<void>;
-  /** run 开始时间（注入时钟），用于整轮耗时统计 */
-  startedAt = 0;
   /**
-   * 人工确认交互门（HITL）：挂起点建立时经 onCreated 广播 interaction_request；
-   * gate 本身即 InteractionSink，直接作为 interactionSink 传给 agent.run
+   * 工具调用记录（可选）：装配后每次工具调用落 `tool-events.jsonl`，
+   * 并在组 prompt 时按预算回灌。缺省 = 不落盘、不回灌（既有单元测试场景）。
    */
-  readonly gate = new InteractionGate({
-    onCreated: (payload) => this.emit({ type: 'interaction_request', data: payload }),
-    onLog: (message) => this.logInteraction?.(message),
-  });
-  private readonly subs = new Set<(e: SsePayload) => void>();
-  /** 交互审计日志（构造时注入；迟绑定读取，gate 字段初始化早于构造函数体赋值） */
-  private logInteraction: ((message: string) => void) | undefined;
-
-  constructor(
-    readonly threadId: string,
-    readonly userId: string,
-    readonly agentName: string,
-    onLog?: (message: string) => void,
-  ) {
-    this.logInteraction = onLog;
-  }
-
-  subscribe(cb: (e: SsePayload) => void): () => void {
-    this.subs.add(cb);
-    return () => this.subs.delete(cb);
-  }
-
-  emit(e: SsePayload): void {
-    for (const cb of [...this.subs]) {
-      try {
-        cb(e);
-      } catch {
-        /* 订阅者异常不影响其他订阅者与落盘器 */
-      }
-    }
-  }
-
-  stop(): void {
-    this.controller.abort();
-    // HITL：中断时全部挂起点按 reject 收尾，等待中的工具调用不会悬挂
-    this.gate.drain();
-  }
-}
-
-/** 消息 ID：m_{base36时间戳}_{4位随机} */
-function genMessageId(now: number): string {
-  return `m_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-}
-
-/** 引用段文本：提交给 LLM 时追加在 user content 末尾（历史行本体保持纯净）。
- *  统一只给 user-data 相对路径：内置工具与 MCP 工具（file_args 转换）同口径 */
-function refsText(attachments: FileReference[]): string {
-  return `\n[引用文件] ${attachments.map((a) => `${a.dir}/${a.filename}`).join('；')}`;
-}
-
-/** LLM 上下文消息：user 消息若有 @ 引用则追加引用段 */
-function toLlmContent(m: HistoryMessage): string {
-  return m.attachments && m.attachments.length > 0 ? m.content + refsText(m.attachments) : m.content;
-}
-
-function toSeconds(ms: number): number {
-  return Math.round(ms) / 1000;
+  toolEvents?: ToolEventStore;
 }
 
 export class RunManager {
@@ -353,6 +246,7 @@ export class RunManager {
         ),
     );
     run.startedAt = this.now();
+    run.assistantMessageId = genMessageId(run.startedAt);
     this.reserving.delete(opts.threadId); // 额度占位转正为活跃 run
     this.active.set(opts.threadId, run);
     run.settled = this.consume(run, opts).catch((err: unknown) => {
@@ -362,17 +256,56 @@ export class RunManager {
     return run;
   }
 
+  /**
+   * 组本轮 prompt（002 特性：工具结果受控回灌）。
+   *
+   * 工具结果**不整体注入**：内联结果按预算回灌到**对应轮次**的 assistant 消息
+   * （历史侧，带位置感）；外置结果只在 systemExtra 留一行索引，模型按需
+   * `read_file` 自取。投影每次现算、不落盘，故 `history.jsonl` 保持纯净，
+   * 前端展示不受影响（原则五：单一权威源）。
+   */
+  private buildPrompt(
+    opts: StartRunOptions,
+    userMessage: HistoryMessage,
+  ): { messages: HistoryMessage[]; systemExtra?: string } {
+    const { userId, threadId } = opts;
+    const recent: HistoryMessage[] = [
+      ...this.deps.history.readRecent(userId, threadId, 20),
+      userMessage,
+    ];
+    // 工具回灌投影（缺省未装配 toolEvents 时为空，等于既有行为）
+    const records = this.deps.toolEvents?.readAll(userId, threadId) ?? [];
+    const selection = selectReplay(records, threadId);
+    const extraByMessage = new Map<string, string[]>();
+    const addExtra = (messageId: string, text: string): void => {
+      const exist = extraByMessage.get(messageId);
+      if (exist) exist.push(text);
+      else extraByMessage.set(messageId, [text]);
+    };
+    for (const item of selection.replay) addExtra(item.messageId, formatReplayBlock(item));
+    for (const item of selection.placeholders) addExtra(item.messageId, item.text);
+
+    const messages = recent.map((m) => {
+      let content = toLlmContent(m);
+      const extras = m.role === 'assistant' && m.id ? extraByMessage.get(m.id) : undefined;
+      if (extras && extras.length > 0) content += `\n\n${extras.join('\n\n')}`;
+      return { role: m.role, content };
+    });
+
+    // FR-017：滚动摘要；002 特性：外置工具结果的索引段（无外置结果时长度为 0）
+    const { summary } = this.deps.summary?.read(userId, threadId) ?? { summary: '' };
+    const parts: string[] = [];
+    if (summary !== '') parts.push(`以下是对话早期内容的摘要：\n${summary}`);
+    const indexText = formatArtifactIndex(selection.index);
+    if (indexText !== '') parts.push(indexText);
+    return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
+  }
+
   private async consume(run: RunImpl, opts: StartRunOptions): Promise<void> {
     const { userId, threadId, agent, thinking } = opts;
     const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
     if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
-    const messages: HistoryMessage[] = [
-      ...this.deps.history.readRecent(userId, threadId, 20),
-      userMessage,
-    ].map((m) => ({ role: m.role, content: toLlmContent(m) }));
-    // FR-017：滚动摘要作为 System Prompt 一部分注入
-    const { summary } = this.deps.summary?.read(userId, threadId) ?? { summary: '' };
-    const systemExtra = summary ? `以下是对话早期内容的摘要：\n${summary}` : undefined;
+    const { messages, systemExtra } = this.buildPrompt(opts, userMessage);
     /**
      * 本轮结局：供收尾日志使用（任务 2026-09-16）。
      *
@@ -400,12 +333,38 @@ export class RunManager {
             run.buffer += ev.delta;
             run.emit({ type: 'content', data: { delta: ev.delta } });
             break;
-          case 'tool_call_start':
+          case 'tool_call_start': {
+            const startedAtMs = this.now();
+            const startedAt = new Date(startedAtMs).toISOString();
+            run.toolCalls.set(ev.callId, { name: ev.name, startedAt, startedAtMs });
+            // 落 tool-events.jsonl（写盘失败只告警，不影响对话，见 appendStart 内部兜底）
+            this.deps.toolEvents?.appendStart(userId, threadId, {
+              callId: ev.callId,
+              messageId: run.assistantMessageId,
+              name: ev.name,
+              startedAt,
+              ...(ev.argsDigest ? { argsDigest: ev.argsDigest } : {}),
+            });
             run.emit({ type: 'tool_call', data: { call_id: ev.callId, name: ev.name, status: 'running' } });
             break;
-          case 'tool_call_end':
+          }
+          case 'tool_call_end': {
+            const meta = run.toolCalls.get(ev.callId);
+            run.toolCalls.delete(ev.callId);
+            const endedAtMs = this.now();
+            // fire-and-forget：落盘不阻塞 SSE，失败也不影响本轮回答（原则九）
+            void this.deps.toolEvents?.appendEnd(userId, threadId, {
+              callId: ev.callId,
+              messageId: run.assistantMessageId,
+              name: meta?.name ?? ev.name,
+              startedAt: meta?.startedAt ?? new Date(endedAtMs).toISOString(),
+              status: ev.status,
+              durationMs: meta ? Math.max(0, endedAtMs - meta.startedAtMs) : 0,
+              resultText: ev.resultText ?? '',
+            });
             run.emit({ type: 'tool_call_end', data: { call_id: ev.callId, status: ev.status } });
             break;
+          }
           case 'done':
             await this.finalizeDone(run, opts, userMessage, ev.usage);
             outcome = { ok: true };
@@ -480,8 +439,9 @@ export class RunManager {
     const nowMs = this.now();
     const ts = new Date(nowMs).toISOString();
     const durationMs = nowMs - run.startedAt;
-    const userId = genMessageId(nowMs);
-    const assistantId = genMessageId(nowMs);
+    const userMessageId = genMessageId(nowMs);
+    // assistant 消息 id 用 run 启动时预生成的那个：工具事件行已按它归属
+    const assistantId = run.assistantMessageId;
     this.recordUsage(opts, usage);
     // 先落盘后广播 done：SSE 响应随 done 结束，保证调用方拿到响应时历史已可读
     const assistantMessage: HistoryMessage = {
@@ -497,11 +457,13 @@ export class RunManager {
     await Promise.all([
       this.deps.history.append(opts.userId, opts.threadId, {
         ...userMessage,
-        id: userId,
+        id: userMessageId,
         ts,
         agent_name: run.agentName,
       }),
       this.deps.history.append(opts.userId, opts.threadId, assistantMessage),
+      // 工具记录同样"先落盘后广播"：否则 done 到达时前端立即刷新会读不到工具卡片
+      this.deps.toolEvents?.flush(opts.userId, opts.threadId) ?? Promise.resolve(),
     ]);
     run.emit({
       type: 'done',
@@ -551,6 +513,8 @@ export class RunManager {
         agent_name: run.agentName,
       }),
       this.deps.history.append(opts.userId, opts.threadId, assistantMessage),
+      // 失败轮同样等工具记录落盘（工具可能已成功执行过，卡片不该丢）
+      this.deps.toolEvents?.flush(opts.userId, opts.threadId) ?? Promise.resolve(),
     ]);
     run.emit({
       type: 'error',

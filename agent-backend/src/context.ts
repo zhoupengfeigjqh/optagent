@@ -10,6 +10,7 @@ import type { McpStatusEvents } from './domain/mcp-events.js';
 import type { RunManager } from './domain/run-manager.js';
 import type { SummaryStore } from './domain/summary.js';
 import type { ThreadStore } from './domain/thread-store.js';
+import type { ToolEventStore } from './domain/tool-events.js';
 import type { ChatAgent } from './infra/agent-factory.js';
 import type { AppLoggers } from './logging.js';
 import type { PoolKey, UsageStore } from './types.js';
@@ -22,6 +23,8 @@ export interface AppContext {
   threadStore: ThreadStore;
   history: HistoryStore;
   summary: SummaryStore;
+  /** 工具调用记录（002 特性）：详情接口挂卡片 + 懒加载外置正文 */
+  toolEvents: ToolEventStore;
   runManager: RunManager;
   usage: UsageStore;
   /** MCP 状态变更总线：建连落定 / 选中变化时发出，SSE 路由据此推送快照 */

@@ -551,6 +551,27 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 `docker compose up -d ocr jev` 重建后 `docker inspect` 与两个服务自报的 `allow_hosts` 一致；
 容器内直接跑 SSRF 判定：`192.168.0.140` 放行、`192.168.0.143` 被拒并给出可读原因（两个服务都验）。
 
+### 同日追加（二）：编排层去掉根 `.env` / `.env.example`
+
+**起因**：根目录的 `.env` / `.env.example` 只服务 `docker-compose.yml` 的两处**端口插值**
+（`GATEWAY_HOST_PORT` / `JEV_HOST_PORT`），而根 `.env` 的实际内容只有 `GATEWAY_HOST_PORT=82`
+——与 compose 里的 `:-82` 默认值**完全等价**，属于"存在但不产生任何差异"的冗余配置；
+且该文件被 `.gitignore` 忽略，本就不入库，删除对他人 clone 零影响。
+
+**处置**：
+
+- `docker-compose.yml`：两处 `${VAR:-默认}` 插值改回**字面量**（`82:80` / `8001:8000`），
+  编排层不再有可变项；
+- 删除根 `.env` 与根 `.env.example`；
+- README：目录树与「配置地图」表格各删一行（表中不再有"根 `.env`"这一归属）；
+- **服务级 `.env` / `.env.example`（agent / admin / ocr / jev / frontend）不受影响**；
+  `.gitignore` 的 `!.env.example` 放行规则**必须保留**（服务级样板继续入库）；
+- 编排层配置调整的入口从"改根 `.env`"变为"直接改 `docker-compose.yml`"（唯一权威源）。
+
+**验证**：全仓已无 `GATEWAY_HOST_PORT` / `JEV_HOST_PORT` 引用；根目录两个文件不存在；
+`docker compose config` 端口解析为 `82` / `8001`。影响面仅"宿主机端口不可再经根 `.env` 覆盖"，
+而原取值与默认值等价，故无迁移成本。
+
 ---
 
 ## 增量记录（2026-09-23）：MCP 调用统计下钻到工具 + 去掉独立累计表
