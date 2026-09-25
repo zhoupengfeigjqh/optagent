@@ -15,14 +15,13 @@
  */
 import type { Logger } from 'pino';
 import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, UsageInfo, UsageStore } from '../types.js';
-import { POOL_MAX_MESSAGES } from './context-window.js';
 import type { HistoryStore } from './history.js';
 import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
-import { genMessageId, toLlmContent, toSeconds } from './message-format.js';
+import { genMessageId, toSeconds } from './message-format.js';
+import { buildPromptMessages } from './prompt-builder.js';
 import type { ResolveInteractionResult, RunState, SsePayload } from './run-events.js';
 import { RunImpl, type Run } from './run-impl.js';
-import { formatArtifactIndex, formatReplayBlock, selectReplay } from './tool-context.js';
 import type { ToolEventStore } from './tool-events.js';
 
 // 类型迁移到 run-events / run-impl 后仍从本模块转出：既有引用路径（routes、测试）不变
@@ -37,10 +36,7 @@ export interface AgentRunRequest {
   /** 请求级模型覆盖（缺省用实例默认模型） */
   model?: ModelSelection;
   signal: AbortSignal;
-  /**
-   * 人工确认交互口（HITL）：agent-factory 据此给声明了 confirmation 策略的
-   * MCP 工具包交互门；缺省 undefined 时工具直跑（不挂起）
-   */
+  /** 人工确认交互口（HITL）：给声明了 confirmation 策略的 MCP 工具包交互门；缺省则直跑 */
   interactionSink?: InteractionSink;
 }
 
@@ -93,19 +89,17 @@ export interface RunManagerDeps {
   onCrash?: (key: PoolKey, err: unknown) => void;
   /** 注入时钟（测试用） */
   now?: () => number;
-  /**
-   * 工具调用记录（可选）：装配后每次工具调用落 `tool-events.jsonl`，
-   * 并在组 prompt 时按预算回灌。缺省 = 不落盘、不回灌（既有单元测试场景）。
-   */
+  /** 工具调用记录（可选）：装配后落 `tool-events.jsonl` 并按预算回灌；缺省 = 不落盘不回灌 */
   toolEvents?: ToolEventStore;
+  /** 后台计算结果清单（R11，可选）：无产出时 MUST 返回空串（§10.6 不变式 5）。缺省 = 不注入 */
+  produced?: (userId: string, threadId: string) => Promise<string>;
 }
 
 export class RunManager {
   private readonly active = new Map<string, RunImpl>();
   /**
-   * 并发额度占位（threadId → userId）：已通过 acquireQuota 校验、
-   * 但 agent 实例尚未就绪（仍在校验/装配中）的启动请求。
-   * 作用是把「并发判定」与「run 注册」之间的 await 窗口封闭掉，杜绝超发。
+   * 并发额度占位（threadId → userId）：已过 acquireQuota、但实例尚未就绪的启动请求；
+   * 把「并发判定」与「run 注册」之间的 await 窗口封闭掉，杜绝超发。
    */
   private readonly reserving = new Map<string, string>();
   private draining = false;
@@ -220,7 +214,7 @@ export class RunManager {
     return { ok: true, result: settled.result };
   }
 
-  /** 当前等待用户确认的 interaction 快照（断连恢复用；无进行中 run 或无所待则为 null） */
+  /** 当前等待确认的 interaction 快照（断连恢复用；无进行中 run 或无所待则为 null） */
   pendingInteractionOf(threadId: string): InteractionSnapshot | null {
     const run = this.active.get(threadId);
     if (!run) return null;
@@ -257,60 +251,27 @@ export class RunManager {
     return run;
   }
 
-  /**
-   * 组本轮 prompt（002 特性：工具结果受控回灌）。
-   *
-   * 工具结果**不整体注入**：内联结果按预算回灌到**对应轮次**的 assistant 消息
-   * （历史侧，带位置感）；外置结果只在 systemExtra 留一行索引，模型按需
-   * `read_file` 自取。投影每次现算、不落盘，故 `history.jsonl` 保持纯净，
-   * 前端展示不受影响（原则五：单一权威源）。
-   */
-  private buildPrompt(
+  /** 读素材并交给纯函数拼装本轮 prompt（拼装规则与理由见 `prompt-builder.ts`） */
+  private async buildPrompt(
     opts: StartRunOptions,
     userMessage: HistoryMessage,
-  ): { messages: HistoryMessage[]; systemExtra?: string } {
+  ): Promise<{ messages: HistoryMessage[]; systemExtra?: string }> {
     const { userId, threadId } = opts;
-    // 摘要与归档游标一次读盘、两处复用（末尾的摘要段也用同一份）：
-    // 正文池的左边界就是归档游标 —— 这是"无空洞"的构造性保证（见 context-window）
-    const summaryData = this.deps.summary?.read(userId, threadId) ?? { summary: '', coveredCount: 0 };
-    // 正文池 = `[已归档, 总数)`；未装配 summary 时游标为 0（等于全量），由下面的上限兜底收口
-    const pooled = this.deps.history.readAll(userId, threadId).slice(summaryData.coveredCount);
-    // 兜底：摘要长期失败时游标不推进，池子会超上限 —— 截到末尾 POOL_MAX 条。
-    // 此时退回"末尾窗口"口径，可能短暂出现空洞，属降级行为（不阻断对话）。
-    const bounded = pooled.length > POOL_MAX_MESSAGES ? pooled.slice(-POOL_MAX_MESSAGES) : pooled;
-    const recent: HistoryMessage[] = [...bounded, userMessage];
-    // 工具回灌投影（缺省未装配 toolEvents 时为空，等于既有行为）
-    const records = this.deps.toolEvents?.readAll(userId, threadId) ?? [];
-    const selection = selectReplay(records, threadId);
-    const extraByMessage = new Map<string, string[]>();
-    const addExtra = (messageId: string, text: string): void => {
-      const exist = extraByMessage.get(messageId);
-      if (exist) exist.push(text);
-      else extraByMessage.set(messageId, [text]);
-    };
-    for (const item of selection.replay) addExtra(item.messageId, formatReplayBlock(item));
-    for (const item of selection.placeholders) addExtra(item.messageId, item.text);
-
-    const messages = recent.map((m) => {
-      let content = toLlmContent(m);
-      const extras = m.role === 'assistant' && m.id ? extraByMessage.get(m.id) : undefined;
-      if (extras && extras.length > 0) content += `\n\n${extras.join('\n\n')}`;
-      return { role: m.role, content };
+    return buildPromptMessages({
+      threadId,
+      summaryData: this.deps.summary?.read(userId, threadId) ?? { summary: '', coveredCount: 0 },
+      allMessages: this.deps.history.readAll(userId, threadId),
+      userMessage,
+      records: this.deps.toolEvents?.readAll(userId, threadId) ?? [],
+      producedText: (await this.deps.produced?.(userId, threadId)) ?? '',
     });
-
-    // FR-017：滚动摘要；002 特性：外置工具结果的索引段（无外置结果时长度为 0）
-    const parts: string[] = [];
-    if (summaryData.summary !== '') parts.push(`以下是对话早期内容的摘要：\n${summaryData.summary}`);
-    const indexText = formatArtifactIndex(selection.index);
-    if (indexText !== '') parts.push(indexText);
-    return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
   }
 
   private async consume(run: RunImpl, opts: StartRunOptions): Promise<void> {
     const { userId, threadId, agent, thinking } = opts;
     const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
     if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
-    const { messages, systemExtra } = this.buildPrompt(opts, userMessage);
+    const { messages, systemExtra } = await this.buildPrompt(opts, userMessage);
     /**
      * 本轮结局：供收尾日志使用（任务 2026-09-16）。
      *

@@ -166,6 +166,19 @@ describe('buildMcpServerEntry', () => {
         ?.rules_fields,
     ).toEqual({ optimize: 'rules' });
   });
+
+  it('async_tools 缺省为 []：不写该字段（产物精简）；声明后原样物化到 MCP.json（R11）', () => {
+    configure('ocr');
+    expect(
+      buildMcpServerEntry('ocr', { form: 'container_network', mcpConfigs, skills }),
+    ).not.toHaveProperty('async_tools');
+
+    configure('svc-async', { async_tools: ['submit_job', 'get_status'] });
+    expect(
+      buildMcpServerEntry('svc-async', { form: 'container_network', mcpConfigs, skills })
+        ?.async_tools,
+    ).toEqual(['submit_job', 'get_status']);
+  });
 });
 
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {

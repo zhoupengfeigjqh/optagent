@@ -28,7 +28,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'back'): void
-  (e: 'changed'): void
+  /**
+   * 已发生变更，父级需刷新卡片列表。
+   *
+   * - **保存调用配置**：带上保存响应里的新 `revision` → 父级**原地更新**、不重载详情（契约 §0.5 ②）；
+   * - **启停服务**（`revision` 缺省）：服务状态已变但没有新版本号，父级需**重载详情**刷新状态显示
+   *   ——此时表单草稿仍受"锚定实体标识"保护而不被覆盖（契约 §0.5 ①）。
+   */
+  (e: 'changed', revision?: number): void
   (e: 'announce', text: string): void
 }>()
 
@@ -50,18 +57,20 @@ const name = computed(() => props.service?.name ?? '')
 async function onSave(payload: Omit<McpServiceConfigPayload, 'revision'>): Promise<void> {
   // 显式传入当前详情的 revision：本组件的 composable 实例从未 loadDetail，
   // 不传的话 saveConfig 会因 detail 为空而静默失败（已修复的接线缺陷）
-  const affectedAgents = await m.saveConfig(name.value, payload, props.service?.revision)
-  if (affectedAgents === null) {
+  const result = await m.saveConfig(name.value, payload, props.service?.revision)
+  if (result === null) {
     emit('announce', '保存失败，请查看错误原因')
     return
   }
   emit(
     'announce',
-    affectedAgents.length > 0
-      ? `已保存；${affectedAgents.length} 个引用该服务的数字人将在下次部署时生效`
+    result.affected.length > 0
+      ? `已保存；${result.affected.length} 个引用该服务的数字人将在下次部署时生效`
       : '已保存调用配置',
   )
-  emit('changed')
+  // 带上新 revision：父级据此原地更新，**不重载详情**——详情页的表单草稿
+  // 与工具清单因此都不被扰动（契约 §0.5 原则 ①②）
+  emit('changed', result.revision)
 }
 
 async function start(): Promise<void> {

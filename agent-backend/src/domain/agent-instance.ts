@@ -124,6 +124,7 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.file_args !== undefined) cfg.fileArgs = parseFileArgs(s.file_args, bad);
     if (s.confirmation !== undefined) cfg.confirmation = parseConfirmation(s.confirmation, bad);
     if (s.rules_fields !== undefined) cfg.rulesFields = parseRulesFields(s.rules_fields, bad);
+    if (s.async_tools !== undefined) cfg.asyncTools = parseAsyncTools(s.async_tools, bad);
     return cfg;
   });
 }
@@ -168,6 +169,31 @@ function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<str
     out[tool] = (field as string).trim();
   }
   return out;
+}
+
+/**
+ * 解析 async_tools（R11 异步工具声明）：元素为**该服务自己的原始工具名**。
+ *
+ * 判据与平台保存期**同一口径**（数组 / 元素非空字符串 / 同服务内去重）——
+ * 两边不一致会造成"平台保存得进去、运行环境加载不了"，或反过来。
+ * 非法即配置错误：把 typo 挡在加载期，避免"以为开了异步、实际没开"这类静默失效。
+ */
+function parseAsyncTools(raw: unknown, bad: (why: string) => Error): string[] {
+  if (!Array.isArray(raw)) {
+    throw bad(`async_tools 须为字符串数组（工具名清单），当前：${JSON.stringify(raw)}`);
+  }
+  const names: string[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw bad(`async_tools 的元素须为非空字符串，当前：${JSON.stringify(item)}`);
+    }
+    const name = item.trim();
+    if (names.includes(name)) {
+      throw bad(`async_tools 存在重复的工具名：${name}`);
+    }
+    names.push(name);
+  }
+  return names;
 }
 
 /**

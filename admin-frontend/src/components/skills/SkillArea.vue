@@ -47,13 +47,20 @@ async function loadDetail(name: string): Promise<void> {
 }
 
 /**
- * 文件已保存：刷新详情（`SKILL.md` 改动会更新描述），并把"需重新部署才生效"
- * 这条**易被忽略的后果**明说一次——否则用户会以为改完数字人就已经变了。
+ * 文件已保存：刷新**卡片列表**，但 **MUST NOT 重载详情**（契约 §0.5 原则 ②）。
+ *
+ * 旧实现 `loadDetail(name)` 会换掉 `props.skill` 对象，经 `SkillViewer` 的
+ * `selectFile` 一路把编辑区草稿重置——`SkillViewer.onSaved` 那边"就地改字段、
+ * 不换对象以保留草稿"的努力因此全部作废。保存响应已带回新 `hash`/`size`，
+ * `SkillViewer` 已就地写回，无需二次请求。
+ *
+ * 列表仍要刷：`SKILL.md` 改动会让服务端重新解析 `description`，卡片不能停在旧值。
+ * 同时把"需重新部署才生效"这条**易被忽略的后果**明说一次——否则用户会以为
+ * 改完数字人就已经变了。
  */
 function onFileSaved(saved: SkillFileSaved): void {
   emit('announce', `已保存 ${saved.path}；引用了该技能的数字人需重新部署后生效`)
-  const name = skillDetail.value?.name
-  if (name) void loadDetail(name)
+  void loadList()
 }
 
 onMounted(() => {

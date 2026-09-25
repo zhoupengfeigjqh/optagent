@@ -6,7 +6,7 @@
       "files": [
         {
           "path": "SKILL.md",
-          "size": 2509
+          "size": 2511
         },
         {
           "path": "references/算法详解.md",
@@ -14,12 +14,12 @@
         },
         {
           "path": "references/选型决策树.md",
-          "size": 2189
+          "size": 2190
         }
       ],
       "source": "skill-1.zip",
       "installed_at": "2026-09-15T15:23:58.671Z",
-      "updated_at": "2026-09-16T07:15:08.426Z"
+      "updated_at": "2026-09-25T04:14:55.859Z"
     }
   ]
 }

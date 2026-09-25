@@ -192,6 +192,42 @@ describe('McpServiceConfigForm', () => {
     expect(test?.attributes('disabled')).toBeUndefined()
   })
 
+  it('忙态只锁按钮：`busy` 时表单控件 MUST NOT 被禁用（契约 §0.5 原则 ③）', async () => {
+    const wrapper = mount(McpCallConfigForm, { props: { service: SERVICE, busy: true } })
+    await flushPromises()
+
+    expect(wrapper.find('#mcp-description').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#mcp-transport').attributes('disabled')).toBeUndefined()
+    // 异步工具复选框——"保存时闪一下"的直接现场：保存通常百毫秒级完成，
+    // 控件级的"禁用→恢复"只会退化成一次无意义的视觉抖动
+    const boxes = wrapper.findAll('.async-tools input[type="checkbox"]')
+    expect(boxes.length).toBeGreaterThan(0)
+    expect(boxes.every((b) => b.attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('草稿锚定服务标识：同 name 的 props 刷新 MUST NOT 重置草稿（契约 §0.5 原则 ①）', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    await wrapper.find('#mcp-description').setValue('我改的用途')
+
+    // 保存后父级重载详情：换成**同一服务**的新对象（name 未变）
+    await wrapper.setProps({ service: { ...SERVICE } })
+    await flushPromises()
+
+    expect((wrapper.find('#mcp-description').element as HTMLInputElement).value).toBe('我改的用途')
+  })
+
+  it('切换服务（name 变）→ 按新服务回填（原则 ① 的唯一例外）', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+    await wrapper.find('#mcp-description').setValue('我改的用途')
+
+    await wrapper.setProps({ service: { ...SERVICE, name: 'jev', description: '决策服务' } })
+    await flushPromises()
+
+    expect((wrapper.find('#mcp-description').element as HTMLInputElement).value).toBe('决策服务')
+  })
+
   it('回归：操作区按钮不重复（发起测试 / 保存调用配置 各一个）', async () => {
     const wrapper = mountForm()
     await flushPromises()
@@ -342,6 +378,23 @@ describe('McpServiceConfigForm', () => {
 
     const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
     expect(payload.rules_fields).toEqual({ hd_scheduling_submit: 'input.targetPriorities' })
+  })
+
+  it('异步工具（R11）：缺省为 []；清单不可得时手填后原样进入保存负载', async () => {
+    // 缺省：未声明 → 保存负载里是空数组（不启用异步，存量行为零变化）
+    const plain = mountForm()
+    await flushPromises()
+    await plain.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    expect((plain.emitted('save')?.[0]?.[0] as Record<string, unknown>).async_tools).toEqual([])
+
+    // 清单不可得（服务未启动/探测失败）→ 回退手填，每行一个工具名
+    const wrapper = mountForm({ ...SERVICE, tools: [] } as never)
+    await flushPromises()
+    await wrapper.find('.async-tools textarea').setValue('submit_job\nget_status')
+
+    await wrapper.findAll('button').find((b) => b.text().includes('保存调用配置'))?.trigger('click')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.async_tools).toEqual(['submit_job', 'get_status'])
   })
 
   it('调用人工确认：选「全部工具」保存 always', async () => {

@@ -77,6 +77,28 @@
 | `ADM_STORAGE_UNAVAILABLE` | 503 | 平台设计态存储不可写 | — |
 | `ADM_RUNTIME_UNREACHABLE` | 503 | 运行环境只读依赖不可达（工具目录／调用统计） | `FR-011`、`FR-050` |
 
+### 0.5 保存交互（全部写接口的通用约定，2026-09-25）
+
+管理界面上**每一个保存动作**（数字人设计／MCP 调用配置／SKILL 文件／用户关联／平台设置）MUST 遵循**同一模式**。本节不是新发明——`useAgentDesign.save()` 已是符合形态，本节把该形态固化为**全部保存点的统一口径**。
+
+**三条原则**
+
+| # | 原则 | 判据（可测） |
+|---|---|---|
+| ① | **草稿锚定实体标识** | 表单草稿**只在实体标识变化时**从服务端回填（切换 MCP 服务／切换 SKILL 文件／切换数字人）。同一实体的任何服务端刷新（保存后重载、并发更新、列表轮询）**MUST NOT** 重置草稿——否则用户**未提交的输入**会被静默丢弃 |
+| ② | **响应即元数据源** | 保存响应用于更新 `revision`（或按实体语义的等价基准，如 SKILL 文件的 `hash`），**MUST NOT 为回填表单而二次请求详情**。为满足此条，响应 MUST 携带**本次保存后的权威元数据**；对"表单字段需要服务端规范化回显"的实体（MCP 调用配置见 §3.3、数字人设计见 §5.4），响应 MUST 是**保存后的完整实体** |
+| ③ | **忙态只锁动作按钮** | `disabled` **MUST NOT** 绑到表单控件（输入框／复选框／下拉／编辑表格）。写接口通常在百毫秒级完成，控件级的"禁用→恢复"会退化为无意义的视觉抖动（"闪一下"）；按钮自身的"保存中…"已足以表达进行态 |
+
+**为什么三条必须同时成立**（各自的典型反例）：
+
+- 只做 ② 不做 ①：保存后重载会连用户的**未提交编辑**一起覆盖；
+- 只做 ① 不做 ②：为刷新 `revision` 而重载，若该详情接口含**实时探测**（如 MCP 工具清单，§3.2），探测抖动会让依赖它的渲染分支（复选框清单 ⇄ 手填文本框）来回切换——同样是闪；
+- 缺 ③：全平台只有个别控件绑 `busy` 时，会制造"为什么只有它会闪"的不一致观感。
+
+**与并发控制的关系**：`revision` 为**全局单例**（`.platform-data/meta.json`），任何写操作都会使其递增。因此 ② 中"用响应更新 `revision`"是保证**下一次保存不报 `ADM_CONFIG_REVISION_CONFLICT`** 的必要条件——MUST NOT 为了省一次赋值而丢弃响应里的 `revision`。
+
+**唯一允许整表重载的场合**：**实体标识变化**（用户主动切换目标）——此时覆盖草稿正是期望行为。
+
 ---
 
 ## §1 平台与配置
@@ -188,7 +210,9 @@
 | `description` | string | **用途描述**（供卡片展示，满足 `FR-006`） |
 | `endpoints` | object | **按运行形态分别声明的连接地址**（`FR-056`）；键为形态标识 |
 | `command` / `args` | string / array \| null | `stdio` 时有效 |
-| `file_args` | object | 文件参数映射：`{工具名: {取值路径: "url"}}`；取值路径可为顶层参数名或穿过数组（`items[].excelFileUrl`，2026-09-16） |
+| `file_args` | object | 文件参数映射：`{工具名: {取值路径: "url" \| "url:from=<来源路径>"}}`；取值路径可为顶层参数名或穿过数组（`items[].excelFileUrl`，2026-09-16）；派生模式 2026-09-18 |
+| `rules_fields` | object | 算法规则参数设置：`{工具名: 字段名或对象路径}`（2026-09-19 新增；2026-09-22 支持对象嵌套）；空对象 = 不启用 |
+| `async_tools` | array | **异步工具声明**（2026-09-25 新增）：该服务**原始工具名**（不含 `{server}__` 前缀）清单；声明后运行环境调用这些工具时注入 `result_url`（签名写直链），服务算完把结果回写到用户空间。空数组 = 不启用（完整语义见 `runtime-api-delta.md` §10） |
 | `tools` | array | 每项：`{ name, description, parameters }`（`FR-045`） |
 | `tools_truncated` | boolean | 工具清单是否被截断 |
 | `compose_declaration` | object \| null | 编排文件中的原始声明（用于呈现 `FR-052` 的具体差异）；**仅查看**，平台不提供编辑入口 |
@@ -208,12 +232,16 @@
 | `transport` | string | ✅ | `http` \| `stdio`；**接受别名 `streamable-http`（含 `streamable_http`/大小写变体），响应与落盘统一为 `http`**（2026-09-16） |
 | `endpoints` | object | ✅ | **至少一个键**；键必须是已声明的运行形态标识（`FR-056`） |
 | `command` / `args` | — | 条件 | `transport=stdio` 时必填 |
-| `file_args` | object | ✅ | 可为 `{}`；键为**取值路径**（顶层参数名或 `items[].excelFileUrl` 这类穿过数组的路径），值仅支持 `"url"`；**路径写法非法即 `VALIDATION_FAILED`**（与运行环境同一判据，见 `agent-backend/src/domain/file-arg-path.ts`） |
+| `file_args` | object | ✅ | 可为 `{}`；键为**取值路径**（顶层参数名或 `items[].excelFileUrl` 这类穿过数组的路径），值为 `"url"` 或 `"url:from=<取值路径>"`；**路径写法非法或派生来源形状不相容即 `VALIDATION_FAILED`**（与运行环境同一判据，见 `agent-backend/src/domain/file-arg-path.ts`） |
+| `rules_fields` | object | 可选 | 可为 `{}`；形状 `{工具名: 字段名或对象路径}`，值非法即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（清单是探测结果，服务不可达时不构成配置错误） |
+| `async_tools` | array | 可选 | 可为 `[]`；元素为**非空字符串**（该服务的**原始工具名**），**同服务内去重**，违反即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（同上）；物化时**非空才写**进 `MCP.json`（对齐 `file_args`/`rules_fields` 口径） |
 | `revision` | integer | ✅ | 乐观锁 |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 字段已从调用配置中**移除**（产品决定）。旧客户端提交这两个字段时不再报错（字段被忽略），响应与物化产物中 MUST NOT 再出现；运行环境的 `MCP.json` 因此不再产生 `write` / `permission_boundary`。
 
 **响应 200**：保存后的完整调用配置 + 新 `revision` + `affected_agents`（受影响的数字人名清单，供界面提示）
+
+**响应字段 MUST 与请求体字段一一对应**（含 `command`／`args`／`updated_at`）：界面据此**原地更新 `revision`**、不再为回填而二次请求详情（§0.5 原则 ②）。漏登字段会让客户端"保存成功却丢配置"——`2026-09-25` 实测：`command`／`args` 缺失，客户端只能靠重载详情兜底，从而引入整表覆盖与探测抖动。
 
 **错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`VALIDATION_FAILED`、`ADM_CONFIG_REVISION_CONFLICT`
 

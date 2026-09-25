@@ -680,3 +680,194 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 **顺带修掉一个真实设计缺陷**：目录清单最初按"被问的那个目录"列相对路径（给出 `算法详解.md`），模型回填 `path` 时会取不到——由单测当场拦下，改为**一律相对技能根**（给出 `references/算法详解.md`，可直接回填）。
 
 **门禁**：`agent-backend` `lint` 0 error、`tsc --noEmit` 通过、`test:all` **270/270**、`test:coverage` 通过、`build` 通过；本轮改动文件行数 221 / 199 / 150 / 292，均 ≤ 500。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 1 —— 运行环境侧落地
+
+**上游**：`contracts/runtime-api-delta.md` §10（R11）+ `data-model.md` §3.2 的 `async_tools` 行。
+**范围界定**：本阶段**只做 §10 中落在 `agent-backend` 的改动**（配置解析 → 注入 → 回写端点 → 产出落盘/列表/信号 → 提示词段 → 清理覆盖）。
+**不在本阶段**：平台侧的保存校验与物化（`admin-backend`，`async_tools` 写进 `MCP.json`）与管理界面表单（`admin-frontend`）——界面未就绪前，可手工改 `MCP.json` 验证全链路；注意**下一次平台部署会覆盖手工改动**（物化是整体覆盖，权威源在平台）。
+**测试执行环境**：宿主机本地（宪章原则三）；容器不参与。
+
+- [x] T131 [R11] 回写契约 §10 的三处口径缺口（`sid`/`call_id`/`tool` 的来源与「不参与验签」的判据、`job_id` 取自 `filename` 主干、产出目录 MUST 纳入既有 7 天清理范围）
+- [x] T132 [R11] `agent-backend/src/infra/file-sign.ts`：新增写方向签名（`put\n{userId}\n{dir}\n{exp}` 四段）与 `mintPutUrl`/`verifyPutRef`，**读方向三段格式一字不动**；单测守住"读签名不能用于写、写签名不能用于读、存量读签名零失效"
+- [x] T133 [R11] `agent-backend/src/types.ts` + `domain/agent-instance.ts`：`McpServerConfig.asyncTools` 与 `MCP.json` 的 `async_tools` 解析（数组 / 元素非空字符串 / 同服务内去重，非法即 `AgentConfigError`）；单测覆盖正/异/边界
+- [x] T134 [R11] `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：命中声明的工具注入 `result_url`（**对 LLM 隐藏**，仿 `injectRuntimeContext`）；schema 未声明 `result_url` 时**装配期告警**且不注入（不阻断）；单测守住 §10.6 不变式 1/2/6
+- [x] T135 [R11] `agent-backend/src/infra/agent-factory.ts`：按 run 铸造写方向 URL 并接线到工具装配
+- [x] T136 [R11] `agent-backend/src/domain/file-access.ts`：新增**受控子目录写入**（仅允许 `临时空间/后台产出`，文件名无分隔符/`..`/非空）；单测覆盖越权与合法写入
+- [x] T137 [R11] 新建 `agent-backend/src/domain/produced.ts`：产出落盘（正文 + sidecar 元数据）、目录扫描与列表（目录即索引，不落额外清单）
+- [x] T138 [R11] `agent-backend/src/routes/files-put.ts`：新增 `POST /api/files/put`（验签 → 文件名校验 → `{prefix}_` 前缀 → 受控写入 → sidecar → 202）；集成测试覆盖验签失败、目录越权、幂等重放
+- [x] T139 [R11] 新建 `agent-backend/src/routes/produced.ts`：`GET /api/produced`（有界返回）与 `GET /api/produced/events`（SSE 信号，负载为空，建连即推 + 25s 心跳）；`domain/produced-events.ts` 信号总线；`server.ts` 注册；集成测试覆盖列表形状与信号语义
+- [x] T140 [R11] 新建 `agent-backend/src/domain/prompt-builder.ts`（自 `run-manager` 抽出）：正文池组装时注入「后台计算结果」段（与工具结果索引并列、措辞一致）；**无产出时该段长度为 0**，正文 MUST NOT 被注入；单测守住
+- [x] T141 [R11] `agent-backend/src/domain/tmp-cleanup.ts`：7 天清理 MUST 覆盖 `临时空间/后台产出/`（二级目录原先被跳过）；单测覆盖"子目录内过期即删、未过期保留"
+- [x] T142 [R11] 门禁：`lint` / `tsc --noEmit` / `test` / `test:coverage` / `test:integration` / `build` 全绿，`src/**` 无超 500 行文件
+
+### R11 阶段 1 实现记录（2026-09-25）
+
+**交付物**（全部落在运行环境侧；平台侧的保存校验/物化与界面表单属后续阶段）：
+
+| 环节 | 落点 | 内容 |
+|---|---|---|
+| 签名 | `infra/file-sign.ts` | 写方向**四段**签名（读方向三段**一字未改**）+ `mintPutUrl`（带 `sid`/`call_id`/`tool` 归属提示参数） |
+| 配置 | `domain/agent-instance.ts`、`types.ts` | `MCP.json` 的 `async_tools` 解析：数组 / 元素非空 / 同服务内去重，非法即 `AgentConfigError`（typo 挡在加载期） |
+| 装配 | `infra/mcp/async-result-url.ts`（新）、`mcp-tool-adapter.ts`、`agent-factory.ts` | 命中声明的工具注入 `result_url`（**对 LLM 隐藏**、覆盖模型填写）；schema 未声明即**装配期告警**且不塞多余字段 |
+| 回写 | `domain/file-access.ts`、`domain/produced.ts`（新）、`routes/files-put.ts`（新） | `POST /api/files/put`：验签 → 目录/文件名白名单 → 受控写入 + sidecar → `202` |
+| 消费 | `domain/produced-events.ts`（新）、`routes/produced.ts`（新） | `GET /api/produced`（有界返回、倒序）、`GET /api/produced/events`（SSE 信号，**负载为空**） |
+| 提示词 | `domain/prompt-builder.ts`（新，自 `run-manager` 抽出） | 「后台计算结果」段：只注入**当前会话**的产出；**无产出时长度为 0**、正文不注入 |
+| 清理 | `domain/tmp-cleanup.ts` | 7 天规则**覆盖产出子目录**（此前整目录被跳过 ⇒ 产出**永不清理**，契约 §10.4 名不副实） |
+
+**规格回写**（原则一：先改文档再改代码）：
+
+1. §10.3 补 `sid`/`call_id`/`tool` 的来源与「**不参与验签**」的判据（初稿只定义了签名覆盖的四个参数，而 sidecar 与落盘前缀都依赖它们）；
+2. §10.3 补 `job_id` 的确定方式（取自**服务提供的** `filename` 主干）；
+3. §10.4 写明清理 MUST 覆盖该二级目录（原实现只扫顶层文件）；
+4. §10.5 ③ 补「**只注入当前会话**的产出」（产出目录是用户级的，不过滤会跨会话污染上下文）；
+5. §10.5 ② 响应项补 `relPath`（前端据此取用，避免硬编码目录常量——原则七）。
+
+**实现期偏差（3 处，均已在代码注释中说明）**：
+
+1. **`routes/files.ts` 的超限拆分**：新增回写端点后该文件 562 行（> 500 硬门禁），故把端点拆到 `routes/files-put.ts`；`registerFileRoutes` 内一行调用，既有端点零改动；
+2. **`run-manager.ts` 的超限拆分**：同样因本次增量越过 500 行，把"prompt 组装"整块抽为纯函数模块 `domain/prompt-builder.ts`（职责本就不同：组装 vs 生命周期管理）；
+3. **`mcp-tool-adapter.ts` 的邻近抽出**：该文件**改动前即已超限**（574 行）；本次把"schema 视图裁剪"函数族（`exposeSchema` / `hideSchemaPaths`，即 `result_url` 与 `uid`/`sid` 隐藏所复用的机制）抽到 `infra/mcp/mcp-schema-view.ts`——属**与本次改动直接相关**的邻近逻辑，而非借机搬迁无关代码（`file_args` 改写等 270 行**未动**）。
+
+**门禁（本地，原则三/八）**：`lint` 0 error、`tsc --noEmit` 通过、单测 **398 passed**、集成 **41 passed**、
+`test:coverage` 通过（新增 7 个模块入 80% 清单：`file-sign` / `async-result-url` / `mcp-schema-view` /
+`produced` / `produced-events` / `prompt-builder` / `routes/produced` / `tmp-cleanup`）、`build` 通过；
+`src/**` 全部 ≤ 500 行（最大 `run-manager.ts` 498 行）。
+
+**遗留（按「不追溯」不立项，登记备查）**：
+
+1. `src/domain/file-access.ts` 实测语句覆盖率 **52.7%**（整个沙箱层的大量分支未测），**未**纳入 80% 清单——纳入即须为该存量模块发起补测专项，为宪章「不追溯」所禁。本次**新增的方法**（`writeProduced` 的越权/合法路径、`read` 的 `touch:false`）已有直接单测；
+2. `tests/unit/mcp-tool-adapter.spec.ts` **906 行**（存量超限，本次零净变化），拆件属独立任务；
+3. **平台侧未做**：`admin-backend` 的 `async_tools` 保存校验与物化、`admin-frontend` 的配置表单。在此之前可手工改 `MCP.json` 验证全链路，但**下一次平台部署会覆盖手工改动**（物化是整体覆盖，权威源在平台）。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 2 —— 平台侧落地
+
+**上游**：`contracts/runtime-api-delta.md` §10.2（配置面）+ `contracts/admin-api.md` §3.2/§3.3。
+**范围**：把 `async_tools` 变成**平台可配**——保存校验、读取收敛、部署物化、管理界面表单。
+**不包含**：运行环境侧（阶段 1 已完成）；`hd-algorithm` 等具体服务的配置值（**由管理员在界面填**，代码不预置任何服务名）。
+**测试执行环境**：宿主机本地（宪章原则三）。
+
+- [x] T143 [R11] 回写契约 `admin-api.md`：§3.2 响应字段表与 §3.3 请求体表新增 `async_tools`；**顺带补登记既有缺口**（两表均漏登 `rules_fields`；§3.3 的 `file_args` 值说明漏了 2026-09-18 的 `url:from=` 派生模式）
+- [x] T144 [R11] `admin-backend/src/domain/mcp/service-config.ts`：`McpServiceConfig.async_tools` + 保存期校验（数组 / 元素非空字符串 / 同服务内去重，违反即 `VALIDATION_FAILED`；**只校验语法、不校验工具清单**）+ 读取期容错收敛（残缺值一律丢弃，不阻断存量文档）；单测覆盖正/异/边界
+- [x] T145 [R11] `admin-backend/src/domain/deploy/materialize.ts`：`async_tools` **非空才写入** `MCP.json` 的 `servers[].async_tools`（空数组不写空壳，对齐 `file_args`/`rules_fields` 口径）；单测覆盖"有值写 / 空值不写"
+- [x] T146 [R11] `admin-backend/tests/integration/deploy.spec.ts`：保存 `async_tools` → **部署** → 目标 `MCP.json` 出现该键且**只含声明的工具名**；再清空保存 → 重新部署 → 该键**消失**（整体覆盖语义，`SC-018`）
+- [x] T147 [R11] `admin-frontend`：`api/types.ts` 补 `async_tools`；新建 `components/mcp/AsyncToolsSelector.vue`（**工具清单多选 + 清单不可得时手填**，与 `confirmation` 同一交互范式；清单外遗留项保留展示不静默丢弃）并接入 `McpCallConfigForm.vue`（拆子组件而非继续堆大表单，原则二）；组件测试覆盖 props / emit / 边界（空清单、遗留项、去重）
+- [x] T148 [R11] 门禁：`admin-backend` 与 `admin-frontend` 各自 `lint` / `typecheck` / `test` / `test:coverage` / `build` / `check:lines` / `check:deps` 全绿；契约四处同步（契约 ↔ 前端类型 ↔ 后端校验 ↔ 测试用例）
+
+### R11 阶段 2 实现记录（2026-09-25）
+
+**交付物**：
+
+| 层 | 落点 | 内容 |
+|---|---|---|
+| 契约 | `contracts/admin-api.md` §3.2 / §3.3 | 两个字段表补 `async_tools`（§3.3 的约束与 `VALIDATION_FAILED` 口径） |
+| 平台后端 | `domain/mcp/service-config.ts` | `async_tools` 保存期校验（数组 / 非空字符串 / **同服务内去重**）+ 读取期容错收敛（脏值丢弃，不阻断存量文档） |
+| 平台后端 | `domain/deploy/materialize.ts` | **非空才写** `MCP.json` 的 `servers[].async_tools`（空数组不留空壳，整体覆盖语义） |
+| 管理界面 | `api/types.ts`、`components/mcp/AsyncToolsSelector.vue`（新）、`McpCallConfigForm.vue` | 「后台计算（异步工具）」区块：**清单多选 + 清单不可得时手填**；清单外遗留项保留展示 |
+
+**界面交互口径**（与 HITL 的「需确认的工具」同一范式，降低管理员学习成本）：
+
+- 有工具清单 → 复选框多选；
+- **清单不可得（服务未启动 / 探测失败）→ 回退手填**，每行一个工具名——与保存期"只校验语法、不校验工具清单"同一取向：**服务抖动不该让配置改不了**；
+- 已保存但当前清单没有的工具 → **保留展示**（可能是清单截断或服务改版），不静默丢弃；
+- 手填内容在提交前**去空白 / 丢空行 / 去重**，避免"填了就被服务端拒"。
+
+**规格回写**（原则一；含两处**既有缺口**的顺带修正，已在契约中登记）：
+
+1. §3.2 / §3.3 补 `async_tools`；
+2. 两表此前**均漏登 `rules_fields`**（2026-09-19 新增字段时未同步契约）——本次补齐；
+3. §3.3 的 `file_args` 值说明漏了 2026-09-18 的 `url:from=` 派生模式——一并补正。
+
+**关于具体服务**：代码**不预置任何服务名**（`async_tools` 的值完全由管理员在界面勾选/填写），因此**未触碰 `hd-algorithm`、也未触碰 `ocr`/`jev` 的任何现有配置**。下列服务若需异步，由管理员按需勾选：
+`ocr`（`http://127.0.0.1:8000/mcp`）、`jev`（`http://127.0.0.1:8001/mcp`）——**前提是对方服务的工具 schema 里声明了 `result_url` 参数**，否则运行环境会在装配期告警（`mcp.async.result_url.missing`）且不注入。
+
+**门禁（本地，原则三/八）**：
+
+| 子项目 | lint | typecheck | test | coverage | build | check:lines | check:deps |
+|---|---|---|---|---|---|---|---|
+| `admin-backend` | ✅ 0 error | ✅ | ✅ **481** | ✅ 无违规 | ✅ | ✅ 81 文件 | ✅ |
+| `admin-frontend` | ✅ 0 error | ✅ | ✅ **371** | ✅ 无违规 | ✅ | ✅ 100 文件 | ✅ |
+
+> **环境限制（非代码问题，登记备查）**：本机 `safe-delete` 垫片会拦截 `fs.rm`，而 vitest 的 V8 coverage 在启动时会 `trash` 报告目录（`coverage/`），导致 `npm run test:coverage` 直接抛 `Unhandled Error` 而**不跑测试**。绕行方式：用**全新目录** + 禁用清理——
+> `npx vitest run --coverage --coverage.clean=false --coverage.reportsDirectory=coverage-run-9`。
+> 上表覆盖率结论即以此方式取得（35 文件 / 370 用例全绿、无 `does not meet`）。**这是本机工具链的已知干扰，不影响 CI/Linux 侧行为**，但建议后续在 `quickstart.md` 登记该绕行命令。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 3 —— 服务侧（**仅 `ocr-service`**）
+
+**范围**：**只改 `ocr-service` 的 `ocr_image` 一个工具**。`jev-service` 与第三方 MCP 服务（含 `hd-algorithm`）**一律不动**——异步是**按工具声明**的能力，未声明者行为零变化。
+**上游**：`contracts/runtime-api-delta.md` §10.7（本次新增）。
+
+- [x] T149 [R11] 回写契约：新增 §10.7「服务侧契约」（`ocr_image` 新增**可选** `result_url`；`result_url` 即开关：缺省=同步、有值=异步；`job_id` 与回写形状；**回写地址 MUST 过 host 白名单**，否则 SSRF）
+- [x] T150 [R11] `ocr-service/ocr_core.py`：受理与回写的**纯逻辑**（`make_job_id` / `result_filename` / `with_filename`（保留原有 query）/ `accepted_payload` / `post_result`），**不依赖模型** ⇒ 宿主机本地可单测（原则三）
+- [x] T151 [R11] `ocr-service/server.py`：`ocr_image` 新增 `result_url`；有值时**立即返回受理**（含 `job_id`）+ 后台线程识别并回写；**缺省时同步路径一字不改**；回写地址未过白名单时**降级为同步并在文案里说明**（不静默、也不 SSRF）
+- [x] T152 [R11] `ocr-service/tests/test_ocr_core.py` +10 例：任务号格式与同毫秒唯一、回写 URL **保留原有 query**（含非 ASCII 参数）、受理响应含 `job_id` 与"无需重复提交"、回写 body/编码/**非 2xx**/**连接失败**
+- [x] T153 [R11] 门禁：`python -m pytest -q tests` → **22 passed**；三个文件 224 / 139 / 105 行，均 ≤ 500
+
+### R11 阶段 3 实现记录（2026-09-25）
+
+**交付物**：
+
+| 文件 | 改动 |
+|---|---|
+| `ocr-service/server.py` | `ocr_image(image, result_url=None)`：新增**一个可选参数**即可切换同步/异步；抽出 `_recognize`（两条路径共用）与 `_recognize_and_post`（后台线程体） |
+| `ocr-service/ocr_core.py` | 新增 5 个纯函数（任务号 / 结果文件名 / 回写 URL 拼装 / 受理响应 / POST 回写）+ `OCR_UPLOAD_TIMEOUT_S` 环境变量 |
+| `ocr-service/tests/test_ocr_core.py` | +10 例（原 12 → **22**） |
+
+**两条路径**（`result_url` 即开关，服务侧不需要第二处配置）：
+
+| `result_url` | 行为 |
+|---|---|
+| 缺省 / 空 | **同步**（**既有行为一字未改**）：校验 → 下载 → 识别 → 返回文本 |
+| 有值且过白名单 | **异步**：立即返回 `{"job_id":…,"status":"accepted","message":…}`；后台识别完成后 `POST` 结果到 `result_url&filename={job_id}.txt` |
+
+**安全（这条必须记住）**：`result_url` 是**入参**——模型理论上能看到并伪造它（虽然平台在声明为异步时会把它从可见 schema 里删掉，但不能依赖单侧防线）。因此 `ocr_image` 收到它时**先过与回源下载同一份 host 白名单**；不过则**忽略并降级为同步**，在返回文案里说明"回写地址不可用，已改为同步返回"。既不 SSRF，也不静默（否则调用方以为异步已受理，永远等不到结果）。
+
+**配置：无需新增任何配置**。回写地址由运行环境用既有 `PUBLIC_BASE_URL` 铸出、白名单复用既有 `OCR_URL_ALLOW_HOSTS`（本机形态下它已含 LAN IP，容器形态下含服务名 `backend`）——前提与"回源下载"完全相同，**没有第二套配置需要维护**。
+
+**启用步骤**（三件事，都无副作用）：
+
+1. **重建 ocr 容器**：`docker compose up -d --build ocr`（服务侧代码变了）；
+2. **平台界面**：`ocr` 服务详情 →「发起测试」（让平台重新探测到 `result_url` 参数）→「调用配置」→「后台计算（异步工具）」勾选 `ocr_image` → 保存调用配置；
+3. **部署**：对相关用户部署一次（`async_tools` 随 `MCP.json` 下发）。
+
+**未做**：`jev-service`、`hd-algorithm` 与任何其他 MCP 服务**一个字节未改**（符合"只需要 ocr 做异步"）。如果将来 jev 也要异步，改法与本阶段完全相同（服务侧加 `result_url` 参数 + 回写），不需要动运行环境与平台任何一行代码。
+
+---
+
+### 缺陷修复（2026-09-26）：保存「异步工具」后勾选被清空
+
+**症状**（用户实测）：MCP 服务 `ocr` →「调用配置」→ 勾选「后台计算（异步工具）」→ 保存 → **勾选内容消失**。
+
+**根因**：界面保存成功后会 `loadDetail()` 用**详情接口**的响应覆盖表单，而**详情端点的字段组装漏登记了新字段**——
+`domain/mcp/service-list.ts` 的 `McpServiceDetailView` 与详情返回**都没有 `async_tools`**。链路是：
+保存 ✅ → 重载详情 → 响应里没有 `async_tools` → 表单 `...(service.async_tools ?? [])` → **勾选变空**。
+
+**同处还有一个既有缺口**：`rules_fields`（2026-09-19 加的字段）在同一个 View 与同一个详情返回里**也一直漏登**——
+也就是说 HITL 的「算法规则参数设置」同样是"保存即清空"，只是一直没人报。两个字段同批修。
+
+**为什么测试没拦住**：阶段 2 的用例覆盖了「保存校验」与「物化进 `MCP.json`」，**没有覆盖「保存 → 详情回显」这条界面真实路径**。
+字段漏登只在 **GET 详情**上表现出来，而那一步此前没有任何断言。
+
+**修复（3 处代码 + 1 条测试）**：
+
+| 文件 | 改动 |
+|---|---|
+| `domain/mcp/service-list.ts` | `McpServiceDetailView` 补 `rules_fields` / `async_tools`；详情组装补两行（附注释说明"漏登即保存即清空"） |
+| `routes/mcp.ts` | `PUT` 响应补 `rules_fields` / `async_tools`（契约 §3.3 要求响应是**完整**调用配置） |
+| `admin-frontend/src/api/types.ts` | `McpServiceConfigSaved` 与后端响应对齐：补三字段；**删除**已废弃的 `writable` / `permission_scope`（2026-09-15 已从契约移除） |
+| `tests/integration/mcp.spec.ts` | +1 例：**保存 → GET 详情 → 断言两字段回显**（守住这条路径） |
+
+**教训（已写进代码注释）**：新增一个"调用配置字段"的**登记点是 4 处**——
+① 保存期校验 ② 读取期收敛 **③ 详情回显** ④ 物化。前两处 + 物化在本特性做了，**第三处漏了**；
+后续再加字段时按这 4 处逐一核对（本文件 §3.2 的响应字段表也是一处，属契约侧）。
+
+**门禁（修复后）**：`admin-backend` lint 0 / `tsc` ✅ / **482 passed** / `check:lines` ✅；
+`admin-frontend` `typecheck` ✅ / **371 passed** / `check:lines` ✅。
+
+**生效需要**：**重启 `admin-backend`**（详情端点代码变了）。`admin-frontend` 的改动只在类型层（编译期），但为拿到最新前端类型建议一并重建。

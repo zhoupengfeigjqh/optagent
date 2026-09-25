@@ -15,6 +15,7 @@ import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import {
+  PRODUCED_DIR,
   SPACE_PREP,
   SPACE_SHARED,
   SPACE_TMP,
@@ -28,15 +29,17 @@ import type {
   McpCallEvent,
   McpConfirmation,
   McpConnectionStatus,
+  McpServerConfig,
   ModelSelection,
   PoolKey,
 } from '../types.js';
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
-import { mintSignedUrl } from './file-sign.js';
+import { mintPutUrl, mintSignedUrl } from './file-sign.js';
 import { wrapToolWithInteraction } from './tool-intercept.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
+import type { AsyncToolContext } from './mcp/async-result-url.js';
 import { McpManager } from './mcp/mcp-manager.js';
 import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
 
@@ -192,6 +195,7 @@ export class AgentInstanceFactory {
           fileCtx,
           this.deps.onMcpCall,
           logger,
+          asyncToolContext(server, inst.key.userId, req.threadId, this.deps),
         );
         // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
         // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
@@ -279,6 +283,33 @@ function listAvailableDirs(root: string, userId: string, agentName: string): str
     if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP];
     throw err;
   }
+}
+
+/**
+ * 异步工具的注入依赖（R11）：服务声明了 `async_tools` 才构造，否则返回 `undefined`
+ * （工具装配侧走"不注入"分支，行为与改造前完全一致）。
+ *
+ * 回写地址**每次调用现铸**（而非装配期铸一次）：`exp` 从调用时刻起算更贴合"任务最长时长"，
+ * 且能把 `call_id` 与工具全名作为**归属提示参数**写进 URL——服务只需原样回传，
+ * 产出即可接回具体对话与那一次调用（契约 §10.3）。
+ */
+function asyncToolContext(
+  server: McpServerConfig,
+  userId: string,
+  threadId: string,
+  deps: AgentFactoryDeps,
+): AsyncToolContext | undefined {
+  const tools = server.asyncTools;
+  if (!tools || tools.length === 0) return undefined;
+  return {
+    tools,
+    mintResultUrl: (toolName: string, toolCallId: string) =>
+      mintPutUrl(deps.publicBaseUrl, deps.fileSignSecret, userId, PRODUCED_DIR, {
+        sid: threadId,
+        callId: toolCallId,
+        tool: `${server.name}__${toolName}`,
+      }),
+  };
 }
 
 /** 该服务是否需要任何交互确认（never/缺省 = 否） */

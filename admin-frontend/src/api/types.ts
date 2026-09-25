@@ -128,6 +128,12 @@ export interface McpServiceDetail {
   confirmation?: McpConfirmation
   /** 算法规则参数设置（缺省/空对象 = 不启用「从算法规则选择」入口） */
   rules_fields?: Record<string, string>
+  /**
+   * 异步工具声明（R11，2026-09-25）：该服务**原始工具名**清单（不含 `{server}__` 前缀）。
+   * 声明后运行环境为这些工具注入结果回写地址，服务算完把结果写到用户空间，
+   * 并在下一轮对话注入「后台计算结果」清单。缺省/空数组 = 不启用。
+   */
+  async_tools?: string[]
   tools: McpToolInfo[]
   tools_truncated: boolean
   tools_error?: string | null
@@ -147,17 +153,32 @@ export interface McpServiceConfigPayload {
   confirmation?: McpConfirmation
   /** 算法规则参数设置（空对象 = 不启用） */
   rules_fields?: Record<string, string>
+  /** 异步工具声明（R11；空数组 = 不启用；物化时非空才写入 `MCP.json`） */
+  async_tools?: string[]
   revision: number
 }
 
+/**
+ * `PUT /api/admin/mcp/services/{name}` 的响应 = **保存后的完整调用配置**（契约 §3.3）。
+ *
+ * 与 `McpServiceDetail` 的调用配置字段保持**一一对应**（含 `command`／`args`／`updated_at`）：
+ * 少一个字段，客户端"拿响应回填"或"保存后重载详情"时就会丢配置
+ * （2026-09-25 实测：`async_tools` 漏登导致勾选被清空，同批 `command`／`args` 亦漏登）。
+ * 界面据此**原地更新 `revision`**，不再为回填而二次请求详情（契约 §0.5 原则 ②）。
+ * `writable` / `permission_scope` 已按 2026-09-15 产品决定从契约移除，此处同步删除。
+ */
 export interface McpServiceConfigSaved {
   name: string
   description: string
   transport: 'http' | 'stdio'
   endpoints: Record<string, string>
-  writable: boolean
-  permission_scope: string
+  command: string | null
+  args: string[] | null
   file_args: Record<string, Record<string, string>>
+  rules_fields: Record<string, string>
+  async_tools: string[]
+  confirmation: McpConfirmation
+  updated_at: string
   revision: number
   affected_agents: string[]
 }

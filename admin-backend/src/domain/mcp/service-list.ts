@@ -32,6 +32,15 @@ export interface McpServiceDetailView extends McpServiceView {
   command: string | null;
   args: string[] | null;
   file_args: Record<string, Record<string, string>>;
+  /**
+   * 算法规则参数设置（`{ 工具名: 字段名或对象路径 }`；空对象 = 不启用规则选择器）。
+   *
+   * **必须在详情里回显**：界面「保存 → 重载详情」覆盖表单，字段漏登会让配置
+   * 保存成功却在界面上"消失"（2026-09-26 实测缺陷：`rules_fields` 与本字段同批漏登）。
+   */
+  rules_fields: Record<string, string>;
+  /** 异步工具声明（R11；空数组 = 不启用）。同 `rules_fields`：必须在详情里回显 */
+  async_tools: string[];
   /** 调用确认策略（HITL；`never` 为默认/存量行为） */
   confirmation: 'never' | 'always' | { tools: string[] };
   tools: McpToolDescriptor[];
@@ -129,6 +138,9 @@ export class McpServiceListService {
       command: config?.command ?? null,
       args: config?.args ?? null,
       file_args: config?.file_args ?? {},
+      // 详情**必须**回显这两者：界面保存后会重载详情覆盖表单，漏一个就等于"保存即清空"
+      rules_fields: config?.rules_fields ?? {},
+      async_tools: config?.async_tools ?? [],
       confirmation: config?.confirmation ?? 'never',
       tools: tools.slice(0, TOOLS_LIMIT),
       tools_truncated: tools.length > TOOLS_LIMIT,

@@ -14,6 +14,10 @@ __pycache__/
 
 # ===== 测试覆盖率 =====
 coverage/
+# vitest 的 V8 provider 在**启动时**就会 `trash` 报告目录；本机安全删除垫片会拒绝该操作
+# （详见 specs/001-digital-human-platform/tasks.md 的 R11 阶段 2 记录），
+# 绕行方式是另指定一个目录（`--coverage.reportsDirectory=coverage-xxx`）——那类目录同样不入库
+coverage-*/
 
 # ===== 运行期数据与密钥 =====
 # 注意：.env.example / config.example.yaml 属于示例模板，需纳入版本控制

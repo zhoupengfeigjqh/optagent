@@ -271,6 +271,17 @@ export interface McpServerConfig {
    * 不改变是否走 HITL（仍只由 confirmation 决定）。
    */
   rulesFields?: Record<string, string>;
+  /**
+   * 异步工具声明（R11，2026-09-25）：列出**该服务自己的原始工具名**（不含 `{server}__` 前缀）。
+   *
+   * 声明后，运行环境在调用这些工具时注入 `result_url`（签名写直链，见
+   * `infra/file-sign.ts` 的 `mintPutUrl`），服务算完把结果回写到用户空间
+   * `临时空间/后台产出/`。**不改变工具是否同步、也不改变是否走 HITL**——
+   * 只是给被声明的工具多注入一个回写地址。
+   *
+   * 缺省/空 = 不启用（存量行为零变化）。
+   */
+  asyncTools?: string[];
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;

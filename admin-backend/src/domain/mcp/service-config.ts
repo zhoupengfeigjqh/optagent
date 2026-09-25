@@ -63,6 +63,16 @@ export interface McpServiceConfig {
    * 对象内部，只认顶层字段名会让这类声明静默失效。语法见 `rules-field-path.ts`。
    */
   rules_fields: Record<string, string>;
+  /**
+   * 异步工具声明（R11，2026-09-25）：该服务**自己的原始工具名**（不含 `{server}__` 前缀）
+   * 清单。声明后，运行环境在调用这些工具时注入 `result_url`（签名写直链），服务算完把
+   * 结果回写到用户空间，并在下一轮对话注入「后台计算结果」清单
+   * （完整语义见 `contracts/runtime-api-delta.md` §10）。
+   *
+   * **不改变工具是否同步、也不改变是否走 HITL**——只是给被声明的工具多注入一个回写地址。
+   * 空数组 = 不启用（存量行为零变化）；物化时**非空才写**进 `MCP.json`。
+   */
+  async_tools: string[];
   updated_at: string;
 }
 
@@ -84,6 +94,7 @@ export interface McpConfigInput {
   file_args?: unknown;
   confirmation?: unknown;
   rules_fields?: unknown;
+  async_tools?: unknown;
 }
 
 export class McpServiceConfigService {
@@ -184,6 +195,7 @@ export class McpServiceConfigService {
       file_args: normalizeFileArgs(input.file_args),
       confirmation: normalizeConfirmation(input.confirmation),
       rules_fields: normalizeRulesFields(input.rules_fields),
+      async_tools: normalizeAsyncTools(input.async_tools),
       updated_at: new Date().toISOString(),
     };
   }
@@ -209,8 +221,60 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
     // 历史存档无该字段（或 2026-09-19 早些时候的 string 版 `rules_field`，
     // 工具名不可得）：一律收敛为 {}（不启用规则选择器）
     rules_fields: readRulesFields(raw.rules_fields ?? (raw as { rules_field?: unknown }).rules_field),
+    // 历史存档无该字段：读取时容错收敛为 []（存量行为 = 不启用）
+    async_tools: readAsyncTools(raw.async_tools),
     updated_at: raw.updated_at,
   };
+}
+
+/**
+ * 异步工具声明（保存期，R11）：`string[]`，元素为**该服务自己的原始工具名**。
+ *
+ * 判据与运行环境**加载期同口径**（数组 / 元素非空字符串 / 同服务内去重），
+ * 否则会出现"平台保存得进去、运行环境加载不了"这类两边不一致。
+ *
+ * 与 `rules_fields` / `file_args` 同取向：**只校验语法，不校验工具清单**——
+ * 工具清单是**探测结果**，服务不可达时拿不到；拿不到就拒保存，会把"服务抖动"
+ * 变成"配置改不了"。
+ */
+function normalizeAsyncTools(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'async_tools 须为工具名数组，可为 []');
+  }
+  const out: string[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `async_tools 的元素须为非空字符串（该服务的原始工具名），当前：${JSON.stringify(item)}`,
+      );
+    }
+    const name = item.trim();
+    if (out.includes(name)) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `async_tools 存在重复的工具名：${name}`);
+    }
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * 读取路径的容错收敛：残缺值一律**丢弃并去重**（不阻断读取存量文档）。
+ *
+ * 与 `readRulesFields` 同一取向：运行环境在**加载期**把形状非法判为配置错误，
+ * 若把存量文档里的脏值原样物化进 `MCP.json`，一次部署就会让整个数字人加载失败——
+ * 在这里收敛掉，破坏面止于"该声明不生效"。
+ */
+function readAsyncTools(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'string' || item.trim() === '') continue;
+    const name = item.trim();
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
 }
 
 /**

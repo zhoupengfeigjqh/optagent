@@ -22,8 +22,15 @@ import {
   type FileArgStep,
 } from '../../domain/file-arg-path.js';
 import type { McpCallEvent } from '../../types.js';
+import {
+  ASYNC_RESULT_URL_PARAM,
+  declaresResultUrl,
+  injectResultUrl,
+  type AsyncToolContext,
+} from './async-result-url.js';
 import type { McpManager, McpToolInfo } from './mcp-manager.js';
 import { classifyMcpError, McpUnavailableError } from './mcp-manager.js';
+import { exposeSchema, hideSchemaPaths, type InputSchemaLike } from './mcp-schema-view.js';
 
 /** 文件参数转换依赖（按 server 声明启用；agent-factory 按当前用户注入） */
 export interface FileArgContext {
@@ -71,10 +78,32 @@ export function mcpToolsAsAgentTools(
   onCall?: (event: McpCallEvent) => void,
   /** 绑定了 user_id/agent_name/thread_id 的运行日志（任务 2026-09-15：MCP 调用可归属到用户） */
   logger?: Logger,
+  /**
+   * 异步工具注入依赖（R11）：仅当该服务声明了 `async_tools` 时传入；
+   * 缺省 = 不注入 `result_url`（存量行为零变化，见 `async-result-url.ts` 不变式 1）
+   */
+  asyncCtx?: AsyncToolContext,
 ): AgentTool[] {
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
     const injected = declaredContextParams(t.inputSchema);
+    // 异步工具（R11）：命中声明才注入回写地址。schema 未声明 `result_url` 时**告警但不阻断**——
+    // "配了但服务收不到回写地址"若静默，服务侧只会一直不产出，排查成本极高（不变式 6）。
+    const asyncDeclared = asyncCtx?.tools.includes(t.name) ?? false;
+    const asyncInjected =
+      asyncDeclared && declaresResultUrl(t.inputSchema) ? [ASYNC_RESULT_URL_PARAM] : [];
+    if (asyncDeclared && asyncInjected.length === 0) {
+      logger?.warn(
+        {
+          alert: true,
+          event: 'mcp.async.result_url.missing',
+          service: serverName,
+          tool: t.name,
+        },
+        `MCP 服务 ${serverName} 的工具 ${t.name} 已声明为异步，但其入参 schema 未声明 ` +
+          `${ASYNC_RESULT_URL_PARAM}，回写地址无法送达（该工具不会产生后台产出）——请核对该工具的参数定义`,
+      );
+    }
     // 派生模式（"url:from="）的目标字段同样对 LLM 隐藏：值由运行环境注入，
     // 模型无从填写，也就不可能幻觉出伪造的 http 地址（2026-09-18）
     const decl = fileArgs?.[t.name];
@@ -93,8 +122,11 @@ export function mcpToolsAsAgentTools(
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
       // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
-      parameters: exposeSchema(hideSchemaPaths(t.inputSchema, derivedPaths), injected) as never,
-      execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+      parameters: exposeSchema(hideSchemaPaths(t.inputSchema, derivedPaths), [
+        ...injected,
+        ...asyncInjected,
+      ]) as never,
+      execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
         let finalParams: unknown;
         try {
           // 顺序：先按声明路径铸造文件参数（相对路径 → 签名直链），
@@ -104,6 +136,11 @@ export function mcpToolsAsAgentTools(
             injected,
             runtime,
           );
+          // 异步工具的回写地址（R11）：在 HITL 挂起之后、发出调用之前的最后一跳注入，
+          // 故它不会出现在 interaction_request 的 proposed_args 快照里（不变式 2）
+          if (asyncInjected.length > 0 && asyncCtx) {
+            finalParams = injectResultUrl(finalParams, asyncCtx.mintResultUrl(t.name, toolCallId));
+          }
         } catch (err) {
           // 沙箱校验拒绝（路径越权/文件不存在）：作为工具结果返回，Agent 可自我纠正。
           // 这类失败发生在**调用外部服务之前**，不计入 MCP 调用次数。
@@ -168,13 +205,6 @@ export function mcpToolsAsAgentTools(
   });
 }
 
-/** JSON Schema 里我们关心的部分（只读） */
-interface InputSchemaLike {
-  properties?: Record<string, unknown>;
-  required?: unknown;
-  [key: string]: unknown;
-}
-
 /**
  * 该工具声明了哪些穿透参数（按 `properties` 判定，保持 `RUNTIME_CONTEXT_PARAMS` 的顺序）。
  *
@@ -185,112 +215,6 @@ function declaredContextParams(schema: unknown): Array<keyof RuntimeContext> {
   const properties = (schema as InputSchemaLike).properties;
   if (typeof properties !== 'object' || properties === null) return [];
   return RUNTIME_CONTEXT_PARAMS.filter((name) => name in (properties as Record<string, unknown>));
-}
-
-/**
- * 暴露给 LLM 的入参 schema：**删掉穿透参数**（含 `required` 里的同名项）。
- *
- * 删 `required` 里的一项是否会让模型少填必填参数？不会——这些值由运行环境补齐，
- * 且我们是在**发出调用之前**注入的，服务端看到的参数依旧完整。
- * 未声明穿透参数的工具**原样返回**（不碰第三方给的 schema 对象）。
- */
-function exposeSchema(schema: unknown, injected: readonly string[]): unknown {
-  if (injected.length === 0 || typeof schema !== 'object' || schema === null) {
-    return schema ?? { type: 'object', properties: {} };
-  }
-  const source = schema as InputSchemaLike;
-  const properties = { ...(source.properties ?? {}) };
-  for (const name of injected) delete properties[name];
-  const next: InputSchemaLike = { ...source, properties };
-  if (Array.isArray(source.required)) {
-    const required = source.required.filter(
-      (item): item is string => typeof item === 'string' && !injected.includes(item),
-    );
-    if (required.length > 0) next.required = required;
-    else delete next.required;
-  }
-  return next;
-}
-
-/**
- * 从呈现给 LLM 的 JSON Schema 中**按取值路径剔除派生目标字段**（含嵌套）。
- * 沿路径逐步下行：对象段进 `properties`，数组段进 `items`；沿途只复制走过的分支，
- * 未触碰的部分保持原对象引用。路径上的某层在 schema 里不存在（如服务方没声明
- * 该字段）时跳过——运行期注入仍会发生，服务端是否接受交由服务端校验。
- * 没有可隐藏的字段时**原样返回**（不碰第三方给的 schema 对象）。
- */
-function hideSchemaPaths(schema: unknown, paths: FileArgStep[][]): unknown {
-  if (paths.length === 0 || typeof schema !== 'object' || schema === null) return schema;
-  let out: unknown = schema;
-  for (const steps of paths) {
-    const result = hideSchemaStep(out, steps);
-    if (result.changed) out = result.node;
-  }
-  return out;
-}
-
-function hideSchemaStep(
-  node: unknown,
-  steps: FileArgStep[],
-): { node: unknown; changed: boolean } {
-  if (typeof node !== 'object' || node === null) return { node, changed: false };
-  const step = steps[0]!;
-  const obj = node as InputSchemaLike;
-  const childOf = (key: string): unknown =>
-    (obj.properties as Record<string, unknown> | undefined)?.[key];
-
-  if (step.array) {
-    if (steps.length === 1) {
-      // 目标本身就是数组属性（如 `files[]`）：整段属性从 schema 隐藏
-      const properties = { ...(obj.properties ?? {}) };
-      if (!(step.key in properties)) return { node, changed: false };
-      delete properties[step.key];
-      const next: InputSchemaLike = { ...obj, properties };
-      if (Array.isArray(obj.required)) {
-        const required = obj.required.filter(
-          (item): item is string => typeof item === 'string' && item !== step.key,
-        );
-        if (required.length > 0) next.required = required;
-        else delete next.required;
-      }
-      return { node: next, changed: true };
-    }
-    // 数组段：取该属性的数组 schema，下行到**元素 schema**（`items`）再继续
-    const arraySchema = childOf(step.key);
-    const inner = hideSchemaStep(
-      (arraySchema as { items?: unknown } | undefined)?.items,
-      steps.slice(1),
-    );
-    if (!inner.changed) return { node, changed: false };
-    const nextArray = { ...(arraySchema as object), items: inner.node };
-    return {
-      node: { ...obj, properties: { ...(obj.properties ?? {}), [step.key]: nextArray } },
-      changed: true,
-    };
-  }
-
-  if (steps.length === 1) {
-    const properties = { ...(obj.properties ?? {}) };
-    if (!(step.key in properties)) return { node, changed: false };
-    delete properties[step.key];
-    const next: InputSchemaLike = { ...obj, properties };
-    if (Array.isArray(obj.required)) {
-      const required = obj.required.filter(
-        (item): item is string => typeof item === 'string' && item !== step.key,
-      );
-      if (required.length > 0) next.required = required;
-      else delete next.required;
-    }
-    return { node: next, changed: true };
-  }
-
-  const child = (obj.properties as Record<string, unknown> | undefined)?.[step.key];
-  const inner = hideSchemaStep(child, steps.slice(1));
-  if (!inner.changed) return { node, changed: false };
-  return {
-    node: { ...obj, properties: { ...(obj.properties ?? {}), [step.key]: inner.node } },
-    changed: true,
-  };
 }
 
 /**

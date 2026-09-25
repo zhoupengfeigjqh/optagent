@@ -20,6 +20,8 @@ import { ensureRootDirs, userAgentsDir, userDataDir, SPACE_TMP } from './domain/
 import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
+import { ProducedEvents } from './domain/produced-events.js';
+import { formatProducedList, listProduced } from './domain/produced.js';
 import { RunManager } from './domain/run-manager.js';
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
@@ -40,6 +42,7 @@ import { registerFileRoutes } from './routes/files.js';
 import { registerMcpCallStatsRoutes } from './routes/mcp-call-stats.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
+import { registerProducedRoutes } from './routes/produced.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
 
@@ -106,6 +109,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const pool = new AgentPool({ maxSize: config.poolSize });
   const currentAgent = new CurrentAgentStore();
   const mcpEvents = new McpStatusEvents();
+  const producedEvents = new ProducedEvents();
 
   // LlmProvider 惰性单例：测试注入 fake 时不触碰 pi-ai/真 key
   let llmInstance: LlmProvider | undefined = options.llmProvider;
@@ -220,6 +224,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
     toolEvents,
     // FR-030：实例崩溃 → 销毁（下一条消息经 getOrCreateAgent 自动重建）
     onCrash: (key) => pool.remove(key),
+    // R11：后台计算结果清单 —— 只注入**当前会话**（`sid === threadId`）的产出，
+    // 避免把别的对话提交的任务结果污染进本轮上下文；无产出时返回空串（该段长度为 0）
+    produced: async (userId, threadId) => {
+      const items = await listProduced(
+        new FileAccess({
+          optAgentRoot: root,
+          userId,
+          logger: loggers.logger,
+          truncateKb: config.readTruncateKb,
+        }),
+      );
+      return formatProducedList(items.filter((item) => item.sid === threadId));
+    },
   });
 
   const ctx: AppContext = {
@@ -234,6 +251,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     runManager,
     usage: usageDb,
     mcpEvents,
+    producedEvents,
     async getOrCreateAgent(key) {
       const existing = pool.get(key);
       if (existing) {
@@ -276,6 +294,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     defParamCharset: 'utf8',
   };
   await app.register(multipart, multipartOptions);
+  // R11：后台产出回写的 body 是**结果字节**，不做解析（原样保留 Buffer 写盘）。
+  // 只登记这两种明确的"字节流"类型：`application/json` 仍走 Fastify 默认 parser（对象），
+  // 由路由侧统一转回字节（见 `routes/files.ts` 的 `toResultBytes`），
+  // 这样无需注册 `'*'` 兜底、不改变任何既有端点的 content-type 行为。
+  app.addContentTypeParser(
+    ['application/octet-stream', 'text/plain'],
+    { parseAs: 'buffer' },
+    (_req, body, done) => done(null, body),
+  );
 
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof ApiError) {
@@ -317,6 +344,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerBuiltinToolRoutes(routeApp, ctx);
   // R4：MCP 调用统计（只读，供管理平台投影；FR-049/FR-050）
   registerMcpCallStatsRoutes(routeApp, ctx);
+  // R11：后台产出（列表 + 变更信号）
+  registerProducedRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {
     // 顺序要点（都是实测踩出来的）：

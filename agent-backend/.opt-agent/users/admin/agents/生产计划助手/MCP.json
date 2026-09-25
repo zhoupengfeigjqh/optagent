@@ -9,7 +9,10 @@
           "image": "url"
         }
       },
-      "confirmation": "always"
+      "confirmation": "always",
+      "async_tools": [
+        "ocr_image"
+      ]
     },
     {
       "name": "jev",

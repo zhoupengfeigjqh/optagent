@@ -29,6 +29,16 @@ export type SpaceName = (typeof SPACES)[number];
 
 export const THREADS_DIR = 'threads';
 
+/**
+ * 后台产出目录（R11）：MCP 异步工具回写结果的落点，相对 user-data 的路径。
+ *
+ * 为 `临时空间` 的二级目录 —— 刻意**不是**第四个空间：它是临时产物，
+ * 生命周期与临时空间一致（7 天未访问即清理），且模型用 `read_file`
+ * 按路径读取时天然落进既有白名单（顶层仍是 `临时空间`）。
+ */
+export const PRODUCED_SUBDIR = '后台产出';
+export const PRODUCED_DIR = `${SPACE_TMP}/${PRODUCED_SUBDIR}`;
+
 /** 各空间允许上传的扩展名（小写含点） */
 const DOCUMENT_EXTS = ['.csv', '.xlsx', '.txt', '.json', '.pdf'] as const;
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff'] as const;

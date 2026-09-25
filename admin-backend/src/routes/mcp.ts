@@ -58,8 +58,16 @@ export function registerMcpRoutes(
       description: config.description,
       transport: config.transport,
       endpoints: config.endpoints,
+      command: config.command,
+      args: config.args,
       file_args: config.file_args,
+      // 契约 §3.3 + §0.5 原则 ②：响应 MUST 是"保存后的**完整**调用配置"——
+      // 界面据此原地更新 `revision`、不再二次请求详情。新增字段同样要在这里登记，
+      // 否则客户端拿响应回填时会丢字段（2026-09-25 实测：command/args 漏登）
+      rules_fields: config.rules_fields,
+      async_tools: config.async_tools,
       confirmation: config.confirmation,
+      updated_at: config.updated_at,
       revision,
       affected_agents: agentsReferencingService(ctx.agents.refSources(), name),
     };

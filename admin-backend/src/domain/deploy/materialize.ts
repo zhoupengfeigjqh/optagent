@@ -53,6 +53,9 @@ export function buildMcpServerEntry(
   // 算法规则参数设置：空对象是缺省语义，不写空壳（同上）。
   // 不改变是否走 HITL——不在确认范围内的工具的运行环境侧天然不生效（未被包装）。
   if (Object.keys(config.rules_fields).length > 0) entry.rules_fields = config.rules_fields;
+  // 异步工具声明（R11）：空数组是缺省语义，不写空壳（与上两者同一口径）。
+  // 声明后运行环境为这些工具注入 `result_url`，并接收服务算完后的结果回写。
+  if (config.async_tools.length > 0) entry.async_tools = config.async_tools;
   return entry;
 }
 

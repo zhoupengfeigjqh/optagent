@@ -384,3 +384,67 @@ describe('算法规则参数设置（rules_fields，按工具映射）', () => {
     expect(configs.read('ocr').rules_fields).toEqual({ good: 'input.targetPriorities' });
   });
 });
+
+describe('异步工具声明（async_tools，R11）', () => {
+  it('缺省 → []（不启用异步，存量行为不变）', () => {
+    upsert();
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('保存工具名数组：去空白后按原样读取（顺序保持）', () => {
+    upsert({ async_tools: [' submit_job ', 'get_status'] });
+    expect(configs.read('ocr').async_tools).toEqual(['submit_job', 'get_status']);
+  });
+
+  it('显式空数组可保存（语义与缺省同为"不启用"）', () => {
+    upsert({ async_tools: [] });
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('非数组 / 元素非非空字符串 / 重复 → VALIDATION_FAILED，且不写入', () => {
+    for (const bad of ['submit_job', 42, [42], ['  '], ['a', 'a'], [null]]) {
+      expect(() => upsert({ async_tools: bad })).toThrow(ApiError);
+    }
+    expect(configs.readOrNull('ocr')).toBeNull(); // 一次都没保存成功
+  });
+
+  it('重复项的报错文案指出工具名（便于自查）', () => {
+    let caught: unknown;
+    try {
+      upsert({ async_tools: ['submit_job', 'submit_job'] });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as Error).message).toContain('重复');
+    expect((caught as Error).message).toContain('submit_job');
+  });
+
+  it('只校验语法、不校验工具清单（服务不可达时也保存得进去，与 rules_fields 同取向）', () => {
+    // 工具清单是**探测结果**：拿不到清单不构成配置错误，否则"服务抖动"会变成"配置改不了"
+    upsert({ async_tools: ['not_in_current_catalog'] });
+    expect(configs.read('ocr').async_tools).toEqual(['not_in_current_catalog']);
+  });
+
+  it('历史存档无该字段：读取时容错收敛为 []（不阻断存量文档）', () => {
+    store.writeJson('mcp-services.json', {
+      items: { ocr: { ...BASE, updated_at: '2026-01-01T00:00:00.000Z' } },
+    });
+
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('历史存档里的残缺值（非数组 / 含非串 / 空串 / 重复）：读取时过滤收敛', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          async_tools: ['keep', 42, '  ', null, 'keep'],
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(configs.read('ocr').async_tools).toEqual(['keep']);
+  });
+});

@@ -180,3 +180,32 @@ describe('SkillFileEditor —— 编辑与保存', () => {
     expect(empty.text()).toContain('请从左侧选择一个文件')
   })
 })
+
+describe('SkillFileEditor —— 草稿锚定文件标识（契约 §0.5 原则 ①）', () => {
+  it('同一文件的 props 刷新（同 name/path/hash）MUST NOT 重置草稿', async () => {
+    const wrapper = mountEditor(file())
+    await flushPromises()
+    await wrapper.find('textarea').setValue('# 我的改动\n')
+
+    // 保存后父级可能重载详情：换成**同一文件**的新对象（内容基准未变）
+    await wrapper.setProps({ file: file() })
+    await flushPromises()
+
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('# 我的改动\n')
+    expect(wrapper.text()).toContain('未保存')
+  })
+
+  it('「重新加载最新内容」（hash 变）→ 按服务端新内容重置草稿', async () => {
+    const wrapper = mountEditor(file())
+    await flushPromises()
+    await wrapper.find('textarea').setValue('# 我的改动\n')
+
+    await wrapper.setProps({ file: file({ content: '# 服务端新内容\n', hash: 'h9' }) })
+    await flushPromises()
+
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(
+      '# 服务端新内容\n',
+    )
+    expect(wrapper.text()).not.toContain('未保存')
+  })
+})

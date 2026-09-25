@@ -12,6 +12,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { fetchRuntimeForms } from '../../api/platform'
 import { testMcpService, type McpProbePayload } from '../../api/mcp'
 import type { ErrorInfo, McpConfirmation, McpServiceConfigPayload, McpServiceDetail, McpTestResult, RuntimeFormOption } from '../../api/types'
+import AsyncToolsSelector from './AsyncToolsSelector.vue'
 import FileArgsMappingTable from './FileArgsMappingTable.vue'
 import RulesFieldMappingTable from './RulesFieldMappingTable.vue'
 import McpTestResultDialog from './McpTestResultDialog.vue'
@@ -42,6 +43,8 @@ const confirmationTools = ref<string[]>([])
 const confirmationManualText = ref('')
 /** 算法规则参数设置：`{ 工具名: 字段名 }`（空对象 = 不启用「从算法规则选择」入口） */
 const rulesFields = ref<Record<string, string>>({})
+/** 异步工具声明（R11）：被声明的工具调用时会收到结果回写地址，产出回写后进下一轮上下文 */
+const asyncTools = ref<string[]>([])
 const localError = ref<string | null>(null)
 
 /** 服务当前工具清单（来自平台对服务的最近一次探测） */
@@ -78,6 +81,7 @@ function loadFrom(service: McpServiceDetail | null): void {
     confirmationManualText.value = ''
   }
   rulesFields.value = { ...(service.rules_fields ?? {}) }
+  asyncTools.value = [...(service.async_tools ?? [])]
   // 载入即按当前 HITL 模式收敛一次（watch 只在模式**变化**时触发）：
   // 存量数据里"无需确认却配了规则参数"属于脏数据，与切换语义保持一致——清空
   if (confirmationMode.value === 'never') {
@@ -142,7 +146,21 @@ onMounted(async () => {
   }
 })
 
-watch(() => props.service, (next) => loadFrom(next), { immediate: true })
+/**
+ * 草稿锚定「服务标识」（契约 §0.5 原则 ①）：**只有切换服务才重填表单**。
+ *
+ * 同一服务的 `props.service` 刷新（保存后重载、并发更新、列表轮询）MUST NOT
+ * 覆盖用户未提交的编辑——旧实现无条件 `loadFrom`，等于把"保存"变成一次
+ * "整表重置"。判据用 `name`（服务标识），而非对象引用。
+ */
+watch(
+  () => props.service,
+  (next, prev) => {
+    if (prev && next && prev.name === next.name) return
+    loadFrom(next)
+  },
+  { immediate: true },
+)
 
 function submit(): void {
   localError.value = null
@@ -188,6 +206,7 @@ function submit(): void {
     file_args: fileArgs.value,
     confirmation,
     rules_fields: { ...rulesFields.value },
+    async_tools: [...asyncTools.value],
   }
   emit('save', payload)
 }
@@ -354,6 +373,18 @@ async function runTest(): Promise<void> {
       :allowed-tools="hitlAllowedTools"
       :disabled="rulesDisabled"
     />
+
+    <fieldset class="mcp-config-form__endpoints">
+      <legend class="field__label">后台计算（异步工具）</legend>
+      <p class="field__hint">
+        勾选的工具按**异步**方式调用：平台在调用时注入结果回写地址，服务算完把结果写到该用户的
+        空间，并在**下一轮对话**自动带上「后台计算结果」清单（模型按需读取）。
+        与「是否需要人工确认」互不影响，两者可同时开启。
+      </p>
+      <!-- 不绑 `busy`：忙态只锁动作按钮，MUST NOT 锁表单控件（契约 §0.5 原则 ③）——
+           保存通常在百毫秒级完成，控件级的"禁用→恢复"只会退化成一次无意义的视觉抖动 -->
+      <AsyncToolsSelector v-model="asyncTools" :tools="toolCatalog" />
+    </fieldset>
 
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
 

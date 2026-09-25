@@ -63,6 +63,25 @@ async function loadDetail(name: string): Promise<void> {
   }
 }
 
+/**
+ * 详情内的变更回调（契约 §0.5 保存交互）。
+ *
+ * - **带 `revision`**（保存调用配置）→ 只**原地更新**该字段，MUST NOT 重载详情：
+ *   重载会换掉 `props.service` 对象，从而触发详情页整表重填（丢掉未提交的编辑），
+ *   并多打一次 MCP 实时探测（工具清单抖动 → 复选框清单与手填框来回切换 = "闪"）。
+ * - **不带**（启停服务）→ 服务状态确实变了且没有新版本号，需重载详情刷新状态显示；
+ *   此时详情页的表单草稿由"草稿锚定实体标识"守住（同服务刷新不回填），不会被覆盖。
+ */
+function onDetailChanged(revision?: number): void {
+  void loadList()
+  if (!serviceDetail.value) return
+  if (revision === undefined) {
+    void loadDetail(serviceDetail.value.name)
+    return
+  }
+  serviceDetail.value.revision = revision
+}
+
 onMounted(() => {
   void loadList()
   void loadStats()
@@ -93,12 +112,7 @@ watch(
           emit('navigate', '/mcp')
         }
       "
-      @changed="
-        () => {
-          void loadList()
-          void loadDetail(serviceDetail!.name)
-        }
-      "
+      @changed="onDetailChanged"
       @announce="emit('announce', $event)"
     />
     <template v-else>

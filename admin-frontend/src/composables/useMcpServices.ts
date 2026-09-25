@@ -92,12 +92,19 @@ export function useMcpServices() {
    * `detail` 可能从未加载——早期实现 `if (!detail.value) return null` 会让
    * 详情页的保存**永远静默失败**（实测缺陷，2026-09-15 修复）。
    * 兼容旧调用：不传时仍回退到本实例已加载的 detail。
+   *
+   * **不再 `loadDetail`**（2026-09-25，契约 §0.5 原则 ②）：保存响应本身即
+   * "保存后的**完整**调用配置"（含新 `revision`），回填所需的一切都在里面。
+   * 二次请求详情还会连带触发一次 MCP 服务的**实时探测**（§3.2 的工具清单），
+   * 探测抖动会让界面上依赖清单的渲染分支（复选框清单 ⇄ 手填文本框）来回切换
+   * ——这是"保存时闪一下"的第二个来源。返回 `revision` 供调用方**原地更新**，
+   * 从而保证下一次保存不报 `ADM_CONFIG_REVISION_CONFLICT`。
    */
   async function saveConfig(
     name: string,
     payload: Omit<McpServiceConfigPayload, 'revision'>,
     revision?: number,
-  ): Promise<string[] | null> {
+  ): Promise<{ affected: string[]; revision: number } | null> {
     const currentRevision = revision ?? detail.value?.revision
     if (currentRevision === undefined) return null
     busy.value = true
@@ -107,8 +114,7 @@ export function useMcpServices() {
         ...payload,
         revision: currentRevision,
       })
-      await loadDetail(name)
-      return saved.affected_agents
+      return { affected: saved.affected_agents, revision: saved.revision }
     } catch (err) {
       error.value = toErrorInfo(err)
       return null

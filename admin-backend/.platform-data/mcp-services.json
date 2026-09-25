@@ -5,8 +5,8 @@
       "description": "图片文字识别（RapidOCR）：传用户消息中引用的图片，返回按行拼接的识别文本",
       "transport": "http",
       "endpoints": {
-        "container_network": "http://ocr:8000/mcp",
-        "host_local": "http://127.0.0.1:8000/mcp"
+        "host_local": "http://127.0.0.1:8000/mcp",
+        "container_network": "http://ocr:8000/mcp"
       },
       "command": null,
       "args": null,
@@ -17,7 +17,10 @@
       },
       "confirmation": "always",
       "rules_fields": {},
-      "updated_at": "2026-09-22T05:48:43.853Z"
+      "async_tools": [
+        "ocr_image"
+      ],
+      "updated_at": "2026-09-25T04:21:18.599Z"
     },
     "jev": {
       "name": "jev",
@@ -42,7 +45,8 @@
       },
       "confirmation": "never",
       "rules_fields": {},
-      "updated_at": "2026-09-22T05:48:46.591Z"
+      "async_tools": [],
+      "updated_at": "2026-09-25T04:14:38.318Z"
     }
   }
 }

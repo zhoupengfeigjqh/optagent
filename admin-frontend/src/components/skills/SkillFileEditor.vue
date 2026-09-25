@@ -54,9 +54,27 @@ const dirty = computed(() => editable.value && draft.value !== baseline.value)
 /** 冲突：内容已被他处修改（需要重新读取，而不是盲目再存） */
 const conflicted = computed(() => saveError.value?.code === 'ADM_CONFIG_REVISION_CONFLICT')
 
+/**
+ * 草稿锚定「文件标识」（契约 §0.5 原则 ①）：**同一文件的服务端刷新 MUST NOT 重置草稿**。
+ *
+ * 判据用 `name + path + hash`（文件标识 + 内容基准），而不是对象引用：
+ * - 保存成功：父组件**就地**改 `size`/`hash`、不换对象 → 不触发，"已保存"提示也留住；
+ * - 详情被刷新（同文件、同 hash）：**跳过**——否则用户未提交的编辑会被静默丢弃；
+ * - 点"重新加载最新内容"：内容已变、`hash` 随之变 → **重置**（正是期望行为）；
+ * - 切换文件 / 切换技能：标识变化 → 重置。
+ */
 watch(
   () => props.file,
-  (next) => {
+  (next, prev) => {
+    if (
+      prev &&
+      next &&
+      prev.name === next.name &&
+      prev.path === next.path &&
+      prev.hash === next.hash
+    ) {
+      return
+    }
     baseline.value = next?.content ?? ''
     draft.value = baseline.value
     saveError.value = null

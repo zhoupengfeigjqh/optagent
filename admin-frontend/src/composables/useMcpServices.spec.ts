@@ -127,7 +127,7 @@ describe('useMcpServices', () => {
     expect(mcp.error.value?.code).toBe('ADM_DOCKER_UNAVAILABLE')
   })
 
-  it('saveConfig：成功时刷新详情并回传受影响的数字人（FR-044）', async () => {
+  it('saveConfig：成功时用响应回传受影响数字人与新 revision，**不再二次请求详情**（FR-044、契约 §0.5 ②）', async () => {
     saveMcpServiceConfig.mockResolvedValue({
       name: 'ocr',
       description: 'OCR',
@@ -142,7 +142,7 @@ describe('useMcpServices', () => {
     const mcp = useMcpServices()
     await mcp.loadDetail('ocr')
 
-    const affected = await mcp.saveConfig('ocr', {
+    const result = await mcp.saveConfig('ocr', {
       description: 'OCR',
       transport: 'http',
       endpoints: { container_network: 'http://ocr:9000/mcp' },
@@ -153,8 +153,10 @@ describe('useMcpServices', () => {
       'ocr',
       expect.objectContaining({ revision: 2 }),
     )
-    expect(affected).toEqual(['demo'])
-    expect(getMcpService).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({ affected: ['demo'], revision: 3 })
+    // 详情只被显式 `loadDetail` 请求过一次：保存路径 MUST NOT 再次 GET 详情——
+    // 否则会连带触发一次 MCP 实时探测（工具清单抖动 → 界面"闪一下"）
+    expect(getMcpService).toHaveBeenCalledTimes(1)
   })
 
   it('saveConfig：未加载 detail 时可用**显式 revision** 保存（修复详情页保存静默失败的接线缺陷）', async () => {
@@ -173,7 +175,7 @@ describe('useMcpServices', () => {
     const mcp = useMcpServices()
     expect(mcp.detail.value).toBeNull()
 
-    const affected = await mcp.saveConfig(
+    const result = await mcp.saveConfig(
       'ocr',
       { description: 'OCR', transport: 'http', endpoints: {}, file_args: {} },
       9,
@@ -183,7 +185,7 @@ describe('useMcpServices', () => {
       'ocr',
       expect.objectContaining({ revision: 9 }),
     )
-    expect(affected).toEqual([])
+    expect(result).toEqual({ affected: [], revision: 9 })
   })
 
   it('saveConfig：未加载详情且未提供 revision 时不做任何事（防御性）', async () => {

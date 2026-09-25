@@ -157,6 +157,40 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
     expect(mcp.servers[0].file_args).toEqual({ ocr_image: { image: 'url' } });
   });
 
+  it('async_tools（R11）：声明后物化进 MCP.json；清空后重新部署该键**消失**', async () => {
+    const upsertConfig = (asyncTools: string[]): void => {
+      fx.ctx.mcpConfigs.upsert(
+        'ocr',
+        {
+          description: 'OCR 识别服务',
+          transport: 'http',
+          endpoints: { container_network: 'http://ocr:8000/mcp' },
+          file_args: { ocr_image: { image: 'url' } },
+          async_tools: asyncTools,
+        },
+        fx.ctx.store.revision(),
+      );
+    };
+    const deploy = () =>
+      fx.app.inject({
+        method: 'POST',
+        url: '/api/admin/deploy',
+        payload: { user_ids: ['admin'], revision: revision() },
+      });
+    const mcpPath = path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'MCP.json');
+
+    upsertConfig(['submit_ocr']);
+    expect((await deploy()).statusCode).toBe(200);
+    const declared = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+    expect(declared.servers[0].async_tools).toEqual(['submit_ocr']);
+
+    // 清空声明 → 重新部署：产物里该键**消失**（不留空数组空壳，"整体覆盖"语义）
+    upsertConfig([]);
+    expect((await deploy()).statusCode).toBe(200);
+    const cleared = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+    expect(cleared.servers[0]).not.toHaveProperty('async_tools');
+  });
+
   it('幂等：相同内容重复部署结果稳定（FR-030）', async () => {
     await fx.app.inject({
       method: 'POST',
