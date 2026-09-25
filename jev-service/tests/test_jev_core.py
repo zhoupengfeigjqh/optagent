@@ -383,7 +383,7 @@ def test_format_noul_answer(monkeypatch):
 
     out = core.format_answer("noul", _answer_payload(type="noul", noul=0.95))
 
-    assert json.loads(out) == {"type": "noul", "noul": 0.95}
+    assert out == {"status": "success", "type": "noul", "noul": 0.95}
 
 
 def test_format_choice_answer(monkeypatch):
@@ -399,7 +399,8 @@ def test_format_choice_answer(monkeypatch):
         ),
     )
 
-    assert json.loads(out) == {
+    assert out == {
+        "status": "success",
         "type": "choice",
         "choice": "billing",
         "confidence": 0.81,
@@ -421,10 +422,10 @@ def test_format_score_answer(monkeypatch):
         ),
     )
 
-    parsed = json.loads(out)
-    assert parsed["type"] == "score"
-    assert parsed["score"] == 1.05
-    assert parsed["legend"]["2"] == "非常愤怒"
+    assert out["status"] == "success"
+    assert out["type"] == "score"
+    assert out["score"] == 1.05
+    assert out["legend"]["2"] == "非常愤怒"
 
 
 def test_format_answer_rejects_unexpected_payloads(monkeypatch):
@@ -446,6 +447,46 @@ def test_usage_of_returns_tokens(monkeypatch):
 
     assert core.usage_of(_answer_payload(type="noul", noul=1))["input_tokens"] == 10
     assert core.usage_of({"answers": {}}) == {}
+
+
+# ---------- 结果形状（标准 JSON：成功与失败**同形状**）----------
+
+
+def test_failed_result_shape(monkeypatch):
+    core = _load_core(monkeypatch)
+
+    assert core.failed_result("错误：Jev 触发限流（HTTP 429）") == {
+        "status": "failed",
+        "message": "错误：Jev 触发限流（HTTP 429）",
+    }
+
+
+def test_success_and_failure_share_status_field(monkeypatch):
+    """成败都能用同一个键（status）判读——不再出现"成功是 JSON、失败是纯文本"。"""
+    core = _load_core(monkeypatch)
+
+    ok = core.format_answer("noul", _answer_payload(type="noul", noul=0.95))
+    bad = core.failed_result("错误：未配置 TYPESAFE_API_KEY")
+
+    assert ok["status"] == core.RESULT_STATUS_SUCCESS
+    assert bad["status"] == core.RESULT_STATUS_FAILED
+
+
+def test_result_json_is_compact_and_readable(monkeypatch):
+    core = _load_core(monkeypatch)
+
+    text = core.result_json(core.failed_result("错误：已重试 2 次"))
+
+    assert text == '{"status":"failed","message":"错误：已重试 2 次"}'
+    assert "\\u" not in text  # 中文不转义，人和模型都能直读
+
+
+def test_success_result_serializes_to_json(monkeypatch):
+    core = _load_core(monkeypatch)
+
+    text = core.result_json(core.format_answer("noul", _answer_payload(type="noul", noul=0.95)))
+
+    assert json.loads(text) == {"status": "success", "type": "noul", "noul": 0.95}
 
 
 # ---------- 错误映射与退避 ----------

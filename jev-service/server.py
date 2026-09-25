@@ -21,7 +21,7 @@ state 双通道（**合并**，不是二选一）：
 
 无共享存储依赖：可本地容器运行，也可远程部署。
 分工：入参校验 / 请求构造 / 重试 / 错误映射在 ``jev_core``（不依赖 MCP 框架，可单测）；
-本文件只做 MCP 工具装配、日志与结果/错误的文本化。
+本文件只做 MCP 工具装配、日志与结果/错误的 **JSON 化**。
 """
 import json
 import os
@@ -38,10 +38,12 @@ from jev_core import (
     JevError,
     build_body,
     choice_question,
+    failed_result,
     format_answer,
     noul_question,
     post_with_retry,
     resolve_state,
+    result_json,
     score_question,
     usage_of,
 )
@@ -75,10 +77,11 @@ def _log(event: str, **fields: Any) -> None:
 
 
 def _run(kind: str, question: dict[str, Any], state: str, state_file: str) -> str:
-    """统一执行入口：解析 state → 调用 Jev → 格式化；任何失败都转成**可读文本**返回。
+    """统一执行入口：解析 state → 调用 Jev → 格式化；**成功与失败都返回标准 JSON**。
 
-    降级对用户可感知（宪章原则九）：错误以自然语言作为工具结果返回，
-    Agent 与用户都能读到"发生了什么、该怎么办"，而不是一个堆栈。
+    降级对用户可感知（宪章原则九）：失败时把**可读原因**放进 ``message``，
+    Agent 与用户都能读到"发生了什么、该怎么办"，而不是一个堆栈；
+    但形状与成功一致（都带 ``status``）——调用方无需按"是不是纯文本"来猜成败。
     原始错误（状态码 + 上游返回体）落结构化日志，不丢失。
     """
     try:
@@ -92,7 +95,7 @@ def _run(kind: str, question: dict[str, Any], state: str, state_file: str) -> st
             state_chars=len(resolved),
             state_file=bool((state_file or "").strip()),
         )
-        return format_answer(kind, payload)
+        return result_json(format_answer(kind, payload))
     except JevError as e:
         _log(
             "jev.call.failed",
@@ -101,10 +104,10 @@ def _run(kind: str, question: dict[str, Any], state: str, state_file: str) -> st
             reason=str(e),
             detail=(e.body or "")[:500] or None,
         )
-        return str(e)
+        return result_json(failed_result(str(e)))
     except Exception as e:  # 兜底：未预期异常也必须被用户看见，且原文落日志
         _log("jev.call.failed", kind=kind, status=None, reason=f"{type(e).__name__}: {e}", alert=True)
-        return f"错误：Jev 调用失败（{type(e).__name__}），请稍后重试"
+        return result_json(failed_result(f"错误：Jev 调用失败（{type(e).__name__}），请稍后重试"))
 
 
 @mcp.tool()
@@ -118,7 +121,7 @@ def noul(
     """判断一个命题是否成立，返回真值概率（0=假，1=真）。
 
     适合"是/否"型原子判断：是否紧急、是否重复工单、是否满足某条件。
-    返回紧凑 JSON：{"type":"noul","noul":0.95}
+    返回标准 JSON：{"status":"success","type":"noul","noul":0.95}；失败时 {"status":"failed","message":"错误：…"}
     """
     return _run("noul", noul_question(instructions, true_meaning, false_meaning), state, state_file)
 
@@ -133,7 +136,7 @@ def choice(
     """从给定选项里选一个，返回选中项、各选项概率分布与置信度。
 
     适合路由/分类类决策（该工单归哪个团队、属于哪类意图）。
-    返回紧凑 JSON：{"type":"choice","choice":"billing","confidence":0.81,"probabilities":{...}}
+    返回标准 JSON：{"status":"success","type":"choice","choice":"billing","confidence":0.81,"probabilities":{...}}；失败时 {"status":"failed","message":"错误：…"}
     """
     return _run(
         "choice",
@@ -156,7 +159,7 @@ def score(
     """按给定量表打分，返回概率加权分值（可能落在两级之间）、等级表与置信度。
 
     适合强度/程度类判断（紧急程度、客户不满程度）。
-    返回紧凑 JSON：{"type":"score","score":1.05,"confidence":0.92,"legend":{...},"probabilities":{...}}
+    返回标准 JSON：{"status":"success","type":"score","score":1.05,"confidence":0.92,"legend":{...},"probabilities":{...}}；失败时 {"status":"failed","message":"错误：…"}
     """
     return _run("score", score_question(instructions, levels), state, state_file)
 

@@ -18,6 +18,7 @@ import ComposerToolbar from './ComposerToolbar.vue'
 import MentionPicker from './MentionPicker.vue'
 import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
+import ProducedBell from './ProducedBell.vue'
 import SessionSearch from './SessionSearch.vue'
 import UploadMenu from './UploadMenu.vue'
 
@@ -102,7 +103,12 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       @toggle-search="onToggleSearch"
       @toggle-workspace="onToggleWorkspace"
       @toggle-agent="onToggleAgent"
-    />
+    >
+      <!-- 后台产出铃铛（R11）：自带数据与面板，故不走上面对三个按钮的 toggle 通道 -->
+      <template #actions-extra>
+        <ProducedBell />
+      </template>
+    </ChatHeader>
 
     <!-- 会话内搜索栏（US8）：命中高亮由 MessageContent 经 segments 统一渲染 -->
     <SessionSearch

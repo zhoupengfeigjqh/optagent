@@ -31,8 +31,22 @@ const putQuerySchema = {
     sid: { type: 'string' },
     call_id: { type: 'string' },
     tool: { type: 'string' },
+    // 由**服务提供**的一行摘要（面向人可读，如"识别到 47 行文字"）；可缺省。归一规则见 `clampSummary`
+    summary: { type: 'string' },
   },
 } as const;
+
+/** 摘要长度上限（契约 §10.3）：超出**截断**而非拒绝——任务已经算完，不该因摘要过长而失败 */
+const SUMMARY_MAX_CHARS = 200;
+
+/** 归一摘要：去空白；空串等同缺省；超长按**码点**截断（不切开 emoji 等代理对） */
+function clampSummary(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  const chars = Array.from(trimmed);
+  return chars.length > SUMMARY_MAX_CHARS ? chars.slice(0, SUMMARY_MAX_CHARS).join('') : trimmed;
+}
 
 /**
  * 回写 body → 结果字节。
@@ -54,7 +68,7 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
   // 但 payload 是**四段**（`put\nu\nd\nexp`），与读方向三段形状隔离
   // ⇒ 读签名不能被改用来写（§10.6 不变式 3）。
   app.post('/api/files/put', { schema: { querystring: putQuerySchema } }, async (req, reply) => {
-    const { u, d, exp, sig, filename, sid, call_id, tool } = req.query as Record<
+    const { u, d, exp, sig, filename, sid, call_id, tool, summary } = req.query as Record<
       string,
       string | undefined
     >;
@@ -83,6 +97,7 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
         sid,
         callId: call_id,
         tool,
+        summary: clampSummary(summary),
         filename: filename!,
         content,
         userId: u!,

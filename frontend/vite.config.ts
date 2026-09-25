@@ -72,6 +72,9 @@ export default defineConfig({
         'src/utils/arg-schema.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 95.65 / 94.11 / 100 / 97.10
         'src/utils/arg-values.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 97.89 / 91.75 / 100 / 100
         'src/composables/useInteractionForm.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.33 / 83.63 / 100 / 100
+        // 后台产出展示（2026-09-25 / 26）：元数据格式化 + 正文展示解析
+        'src/utils/produced-display.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/utils/produced-content.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
       },
     },
   },

@@ -66,6 +66,7 @@ const ICON_PATHS: Readonly<Record<string, readonly string[]>> = {
     'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6',
   ],
   edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'],
+  bell: ['M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
 }
 
 const paths = computed<readonly string[]>(() => ICON_PATHS[props.name] ?? [])

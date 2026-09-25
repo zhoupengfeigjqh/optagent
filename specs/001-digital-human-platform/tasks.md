@@ -703,6 +703,23 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 - [x] T141 [R11] `agent-backend/src/domain/tmp-cleanup.ts`：7 天清理 MUST 覆盖 `临时空间/后台产出/`（二级目录原先被跳过）；单测覆盖"子目录内过期即删、未过期保留"
 - [x] T142 [R11] 门禁：`lint` / `tsc --noEmit` / `test` / `test:coverage` / `test:integration` / `build` 全绿，`src/**` 无超 500 行文件
 
+### R11 增量：后台记录铃铛与已读状态（2026-09-25）
+
+**上游**：`contracts/runtime-api-delta.md` §10.5 ⑤⑥（已读状态与界面形态）+ §10.3 的 `summary` 参数。
+**范围**：产出的**第二个消费场景**——右上角铃铛 + 历史面板 + 未读/已读；对话内工具卡片挂载仍属后续。
+
+- [x] T143 [R11] 契约：§10.5 新增「已读状态」（判定/存储/标记时机/未读数/首次上线）与「界面形态」两节；§10.3 回写参数新增 `summary`（由服务提供、超出按码点截断）；§10.6 新增不变式 7（**已读与产出同生命周期**，MUST NOT 另立独立文件）
+- [x] T144 [R11] `agent-backend/src/domain/produced.ts`：sidecar 增 `read_at`；抽出 `scanProduced`（**无界扫描**——列表有界 50 条，但"标记已读"必须能命中第 51 条）；`markProducedRead`（幂等不刷新时间 / 不存在忽略 / 返回实际条数）
+- [x] T145 [R11] `agent-backend/src/routes/produced.ts`：新增 `POST /api/produced/read`（批量，`maxItems=200`，响应 `{marked}`）；`routes/files-put.ts`：接收 `summary` 并**截断到 200 字符**（按码点，不切开代理对）
+- [x] T146 [R11] `ocr-service`：回写携带一行摘要——`summary_of`（取首个非空行 + 限长）、`with_filename` 增可选 `summary`（保留原 query；空摘要**不写入**该参数）
+- [x] T147 [R11] `frontend`：`api/produced.ts`（列表/标记/SSE 订阅）、`composables/useProduced.ts`（**未读自算**、标记成功后就地生效**不重拉**、订阅幂等且可重入）、装配进 `useAppSession`
+- [x] T148 [R11] `frontend`：`components/chat/ProducedBell.vue`（未读角标 + 面板 + 未读叹号 + 摘要兜底 + **点开才标记已读**并打开正文预览）、`ChatHeader` 增 `actions-extra` 插槽（保持纯展示）、`BaseIcon` 增 `bell`、`utils/produced-display.ts`
+- [x] T149 [R11] 测试：后端集成 +16、单元 +6（含"列表之外的第 51 条"与"只改 sidecar 不动正文"）；前端 3 组共 35 项（格式化纯函数 / store 语义 / 组件角标与已读时机）；OCR +5
+- [x] T150 [R11] 门禁：`agent-backend` lint/build/`416` 通过/覆盖率达标；`frontend` lint/build/`354` 通过/覆盖率达标；`ocr-service` `27` 通过；改动文件行数均 ≤ 500
+- [x] T151 [R11] **修复「点开报参数非法」**：产出在**二级目录**，`files` 预览接口的 `dir` 只认空间顶层目录（已实测 `VALIDATION_FAILED`）→ 新增 `GET /api/produced/raw?job_id=`，按 `job_id` 在产出目录内读取（无界定位 / 固定 `text/plain` + `nosniff` / 超 `previewMaxMb` 413 / 读取算一次访问）；契约 §10.5 新增 ⑦ 记录该教训，`findProduced` 与之配套
+- [x] T152 [R11] **修复「标题是无意义 hash」**：面板改**双视图**（列表 ⇄ 正文 + 返回），不再复用右侧文件预览；`summary` 缺省的兜底改为**人类可读**文案——MUST NOT 回落成 `{会话UUID}_{job_id}` 落盘名（2026-09-25 实测反馈）
+- [x] T153 [R11] 门禁（修复轮）：`agent-backend` `421` 通过、`frontend` `358` 通过；两端 typecheck / lint 全绿；`GET /api/produced/raw` 用真实 `job_id` 端到端验证通过
+
 ### R11 阶段 1 实现记录（2026-09-25）
 
 **交付物**（全部落在运行环境侧；平台侧的保存校验/物化与界面表单属后续阶段）：

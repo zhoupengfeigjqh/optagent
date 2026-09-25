@@ -20,12 +20,14 @@ import { createAgentsApi } from '../api/agents'
 import { createFilesApi, type FilesApi } from '../api/files'
 import { createHttpClient } from '../api/http'
 import { createModelsApi } from '../api/models'
+import { createProducedApi } from '../api/produced'
 import { createThreadsApi } from '../api/threads'
 import { createAgentsStore, type AgentsStore } from './useAgents'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
 import { createModelsStore, type ModelsStore } from './useModels'
 import { createPreviewStore, type PreviewStore } from './usePreview'
+import { createProducedStore, type ProducedStore } from './useProduced'
 import { createSessionSearchStore, type SessionSearchStore } from './useSessionSearch'
 import { createThreadsStore, type ThreadsStore } from './useThreads'
 import { createToastStore, type ToastStore } from './useToast'
@@ -62,6 +64,8 @@ export interface AppSession {
   readonly workspace: WorkspaceStore
   readonly search: SessionSearchStore
   readonly preview: PreviewStore
+  /** 后台产出（R11）：列表 + 未读数 + 标记已读 + 信号订阅 */
+  readonly produced: ProducedStore
   readonly toast: ToastStore
   /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
   readonly files: FilesApi
@@ -152,6 +156,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     }
   }
 
+  const produced = createProducedStore({ produced: createProducedApi(client) })
   const preview = createPreviewStore({ files: filesApi })
   // 删除动作需要提示成功/失败原因，故 workspace 依赖 toast
   const workspace = createWorkspaceStore({ files: filesApi, toast })
@@ -211,6 +216,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     workspace,
     search,
     preview,
+    produced,
     toast,
     files: filesApi,
     now,

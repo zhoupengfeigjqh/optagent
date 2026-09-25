@@ -374,3 +374,42 @@ export function parseSpaceDir(
   }
   return { space, relPath: space };
 }
+
+/* ---------- 模型可用目录清单 ---------- */
+
+/**
+ * 模型可用目录清单（`read_file` / `list_dir` / `grep_files` 的说明与示例取值来源）。
+ *
+ * = 数据准备子目录（**该数字人** scenario 定义）+ 共享空间 + 临时空间 + `临时空间/后台产出`。
+ *
+ * **产出目录为什么进清单**（契约 §10.8）：产出清单只注入**发起会话**，换会话后模型既看不到
+ * 清单也不知道落点。把它写进 `list_dir` 的说明，模型即可自行列目录、按路径取回——这是
+ * **纯"告知"**：该目录本就在 `FileAccess` 白名单内（顶层 `临时空间`，不限二级目录），
+ * 此前就能读，本清单不参与任何权限校验。
+ *
+ * **MUST 追加在末尾**：`{示例路径}` / `{首个目录}` 取首项，末尾追加才能保证那两处取值不变。
+ *
+ * **与 `parseSpaceDir` 的口径差异是有意的**：文件浏览 API 对非数据准备空间拒绝二级目录
+ * （`临时空间/后台产出` 判 400）。两者消费者不同（模型内置工具 vs 管理端浏览），
+ * MUST NOT 为"看起来一致"而放宽 `parseSpaceDir`。
+ *
+ * 场景未配置时退化为三空间根（不含数据准备子目录），产出目录同样在末尾。
+ */
+export function listAvailableDirs(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+): string[] {
+  try {
+    const scenario = loadScenario(optAgentRoot, userId, agentName);
+    return [
+      ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
+      SPACE_SHARED,
+      SPACE_TMP,
+      PRODUCED_DIR,
+    ];
+  } catch (err) {
+    if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP, PRODUCED_DIR];
+    throw err;
+  }
+}

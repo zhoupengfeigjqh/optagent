@@ -19,6 +19,7 @@ import {
   formatProducedList,
   jobIdOf,
   listProduced,
+  markProducedRead,
   metaFilename,
   producedFilename,
   producedPrefix,
@@ -224,5 +225,76 @@ describe('提示词段（契约 §10.5 ③）', () => {
       relPath: '临时空间/后台产出/f',
     };
     expect(formatProducedList([item])).toContain('- j_7 ·');
+  });
+});
+
+describe('标记已读（契约 §10.5 ⑤）', () => {
+  /** 写一条产出；`at` 决定完成时刻（倒序与边界用例需要可控时序） */
+  function seed(jobId: string, at = '2026-09-25T02:00:00.000Z'): ReturnType<typeof writeProduced> {
+    return writeProduced({
+      access,
+      filename: `${jobId}.json`,
+      content: Buffer.from('x'),
+      userId: 'admin',
+      now: new Date(at),
+    });
+  }
+
+  it('标记后写入 read_at，并返回**实际写入条数**', async () => {
+    await seed('j_1');
+
+    const marked = await markProducedRead(access, ['j_1'], new Date('2026-09-25T03:00:00.000Z'));
+
+    expect(marked).toBe(1);
+    expect((await listProduced(access))[0]?.read_at).toBe('2026-09-25T03:00:00.000Z');
+  });
+
+  it('幂等：重复标记**不改动**原 read_at，返回 0', async () => {
+    await seed('j_1');
+    await markProducedRead(access, ['j_1'], new Date('2026-09-25T03:00:00.000Z'));
+
+    const marked = await markProducedRead(access, ['j_1'], new Date('2026-09-25T04:00:00.000Z'));
+
+    expect(marked).toBe(0);
+    // 时间**不刷新**：重复点击不该把"什么时候读的"越推越近
+    expect((await listProduced(access))[0]?.read_at).toBe('2026-09-25T03:00:00.000Z');
+  });
+
+  it('不存在的 job_id 一律忽略；空数组直接返回 0', async () => {
+    expect(await markProducedRead(access, ['ghost'])).toBe(0);
+    expect(await markProducedRead(access, [])).toBe(0);
+  });
+
+  it('能命中**列表之外**的条目（列表有界 50 条，但已读必须标得到任意一条）', async () => {
+    for (let i = 0; i < 55; i += 1) {
+      await seed(`j_${i}`, `2026-09-25T02:${String(i).padStart(2, '0')}:00.000Z`);
+    }
+
+    // 列表按完成时间倒序 + 有界：最旧的 j_0 不在列表里
+    const listed = await listProduced(access);
+    expect(listed).toHaveLength(50);
+    expect(listed.some((item) => item.job_id === 'j_0')).toBe(false);
+
+    expect(await markProducedRead(access, ['j_0'])).toBe(1);
+  });
+
+  it('只改 sidecar，**不动正文**（正文是服务的计算结果，元数据操作不该碰它）', async () => {
+    const saved = await seed('j_1');
+    const bodyPath = path.join(root, 'users', 'admin', 'user-data', saved.relPath);
+
+    await markProducedRead(access, ['j_1']);
+
+    expect(fs.readFileSync(bodyPath, 'utf8')).toBe('x');
+  });
+
+  it('一次标记多条：返回写入的成功条数（已读的与不存在的都不计入）', async () => {
+    await seed('j_1');
+    await seed('j_2');
+    await markProducedRead(access, ['j_1']);
+
+    const marked = await markProducedRead(access, ['j_1', 'j_2', 'ghost']);
+
+    expect(marked).toBe(1);
+    expect((await listProduced(access)).every((item) => item.read_at !== undefined)).toBe(true);
   });
 });

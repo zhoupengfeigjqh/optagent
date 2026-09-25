@@ -14,15 +14,7 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
-import {
-  PRODUCED_DIR,
-  SPACE_PREP,
-  SPACE_SHARED,
-  SPACE_TMP,
-  ScenarioNotConfiguredError,
-  loadScenario,
-  userAgentsDir,
-} from '../domain/dirs.js';
+import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
   AgentConfigBundle,
   LlmEvent,
@@ -262,26 +254,6 @@ export class AgentInstanceFactory {
       thinking: req.thinking,
       signal: req.signal,
     });
-  }
-}
-
-/**
- * list_dir/read_file 可用的目录清单：数据准备子目录（**该数字人** scenario 定义）
- * + 共享空间 + 临时空间。
- *
- * 场景随数字人存放，故同一用户的不同数字人清单可以不同。
- */
-function listAvailableDirs(root: string, userId: string, agentName: string): string[] {
-  try {
-    const scenario = loadScenario(root, userId, agentName);
-    return [
-      ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
-      SPACE_SHARED,
-      SPACE_TMP,
-    ];
-  } catch (err) {
-    if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP];
-    throw err;
   }
 }
 

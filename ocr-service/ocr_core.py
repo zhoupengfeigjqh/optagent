@@ -9,6 +9,7 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Mapping
 from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 import httpx
@@ -19,8 +20,11 @@ MAX_BYTES = int(os.environ.get("OCR_MAX_BYTES", str(2 * 1024 * 1024)))
 # 结果回写的超时（秒）。与下载分开配置：回写发生在"算完之后"，语义与失败面都不同
 UPLOAD_TIMEOUT = float(os.environ.get("OCR_UPLOAD_TIMEOUT_S", "10"))
 
-# 识别结果的落盘扩展名（纯文本；运行环境会再补 `{prefix}_` 前缀）
-RESULT_SUFFIX = ".txt"
+# 识别结果的落盘扩展名（**标准 JSON**；运行环境会再补 `{prefix}_` 前缀）
+RESULT_SUFFIX = ".json"
+
+# 回写摘要的一行长度上限（运行环境侧同样按 200 字符截断；此处先截好，少传多余字节）
+SUMMARY_MAX_CHARS = 200
 
 # 允许回源下载的 host 白名单（防 SSRF：服务会按入参发 HTTP 请求）
 # 默认**空集 = 拒绝一切回源**：部署方 MUST 显式声明允许的主机名，
@@ -104,15 +108,69 @@ def result_filename(job_id: str) -> str:
     return f"{job_id}{RESULT_SUFFIX}"
 
 
-def with_filename(url: str, filename: str) -> str:
-    """在回写地址上追加 ``filename``，**保留原有 query**（u/d/exp/sig/sid/call_id/tool 一个不丢）。
+# ---------- 结果形状（标准 JSON）----------
+
+#: 识别成功（拿到了可用文字）
+RESULT_STATUS_SUCCESS = "success"
+#: 未拿到可用结果（下载/解码失败、图片无文字、回源地址不可信等）
+RESULT_STATUS_FAILED = "failed"
+
+
+def success_result(text: str) -> dict[str, object]:
+    """成功的识别结果（标准 JSON 形状）。
+
+    ``message`` 是**给人看的一行结论**（行数），``text`` 才是识别正文——
+    两者刻意分开：列表标题用 ``message``/首行，正文用 ``text``。
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    return {
+        "status": RESULT_STATUS_SUCCESS,
+        "message": f"识别到 {len(lines)} 行文字",
+        "text": text,
+    }
+
+
+def failed_result(message: str) -> dict[str, object]:
+    """失败的结果（标准 JSON 形状）：原因在 ``message``，``text`` 恒为**空串**。
+
+    用**同一个形状**承载成败（而不是成功给文本、失败给一句话），调用方无需分支猜测。
+    """
+    return {"status": RESULT_STATUS_FAILED, "message": message, "text": ""}
+
+
+def summary_of(result: Mapping[str, object]) -> str:
+    """从结果提炼**一行摘要**（回写给产出列表用，面向人可读）。
+
+    - 失败：直接用 ``message``（错误原因本身就是最该被看到的）
+    - 成功：取识别文本的**首个非空行**（图片里的文字对用户最有辨识度）
+
+    限长 ``SUMMARY_MAX_CHARS``。Python 的 ``str`` 切片按**码点**，不会切开代理对（emoji 安全）。
+    """
+    if result.get("status") != RESULT_STATUS_SUCCESS:
+        return str(result.get("message") or "识别失败")[:SUMMARY_MAX_CHARS]
+    text = str(result.get("text") or "")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:SUMMARY_MAX_CHARS]
+    return str(result.get("message") or "识别完成")[:SUMMARY_MAX_CHARS]
+
+
+def with_filename(url: str, filename: str, summary: str | None = None) -> str:
+    """在回写地址上追加 ``filename``（与可选的 ``summary``），**保留原有 query**
+    （u/d/exp/sig/sid/call_id/tool 一个不丢）。
 
     不能直接字符串拼 ``&filename=``：URL 是否已有 query、是否以 ``?`` 结尾都要判，
     且服务原样回传的地址可能带 fragment。
+
+    ``summary`` 缺省/空串时**不写入该参数**——运行环境把"缺省"与"空串"同样视为无摘要，
+    但少传一个空参数更干净（也让"服务到底提没提供摘要"在日志里一眼可辨）。
     """
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query["filename"] = filename
+    if summary:
+        query["summary"] = summary
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
@@ -132,15 +190,26 @@ def accepted_payload(job_id: str) -> str:
     )
 
 
+def result_json(result: Mapping[str, object]) -> str:
+    """结果的**标准 JSON 文本**（同步返回与异步回写**同一份形状**）。
+
+    不转义非 ASCII：中文识别结果直接可读，也少传多余字节。
+    """
+    return json.dumps(result, ensure_ascii=False)
+
+
 def post_result(
     url: str,
-    text: str,
+    result: Mapping[str, object],
     transport: httpx.BaseTransport | None = None,
 ) -> str | None:
-    """把识别结果回写到 ``url``（运行环境的签名**写**直链）。
+    """把结果（**标准 JSON**）回写到 ``url``（运行环境的签名**写**直链）。
 
     成功返回 ``None``，失败返回**错误文案**（与 ``download`` 同一风格：不抛异常，
     由调用方决定怎么记——这里是后台线程，只能写日志）。
+
+    content-type 为 ``application/json``：运行环境按"原样存"落盘（不解析，§10.3），
+    该头只说明正文形态，便于人和模型读到时认出这是结构化结果。
 
     :param transport: 仅供测试注入（如 ``httpx.MockTransport``），生产调用保持缺省。
     """
@@ -152,8 +221,8 @@ def post_result(
         ) as client:
             r = client.post(
                 url,
-                content=text.encode("utf-8"),
-                headers={"content-type": "text/plain; charset=utf-8"},
+                content=result_json(result).encode("utf-8"),
+                headers={"content-type": "application/json; charset=utf-8"},
             )
             if r.status_code not in (200, 202):
                 return f"回写失败（HTTP {r.status_code}）"

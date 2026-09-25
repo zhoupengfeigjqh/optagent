@@ -21,6 +21,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import {
   DirValidationError,
   ScenarioNotConfiguredError,
+  listAvailableDirs,
   loadScenario,
   parseSpaceDir,
   scenarioPath,
@@ -236,5 +237,38 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
 
     expect(error).toBeInstanceOf(DirValidationError)
     expect((error as DirValidationError).statusCode).toBe(403)
+  })
+})
+
+describe('listAvailableDirs - 模型可用目录清单（契约 §10.8）', () => {
+  it('顺序固定：数据准备子目录 → 共享空间 → 临时空间 → 临时空间/后台产出', () => {
+    writeScenario('agent-dirs-full', { scenario: '生产调度', data_prep_dirs: ['生产计划', '产线信息'] })
+
+    expect(listAvailableDirs(root, userId, 'agent-dirs-full')).toEqual([
+      '数据准备/生产计划',
+      '数据准备/产线信息',
+      '共享空间',
+      '临时空间',
+      '临时空间/后台产出',
+    ])
+  })
+
+  it('产出目录**恒在末尾**：{示例路径}/{首个目录} 取首项，末尾追加才不改动那两处取值', () => {
+    writeScenario('agent-dirs-order', { scenario: '生产调度', data_prep_dirs: ['生产计划'] })
+
+    const dirs = listAvailableDirs(root, userId, 'agent-dirs-order')
+
+    expect(dirs[0]).toBe('数据准备/生产计划')
+    expect(dirs[dirs.length - 1]).toBe('临时空间/后台产出')
+  })
+
+  it('场景未配置：退化为三空间根（不含数据准备子目录），产出目录仍在末尾', () => {
+    writeScenario('agent-dirs-missing', null)
+
+    expect(listAvailableDirs(root, userId, 'agent-dirs-missing')).toEqual([
+      '共享空间',
+      '临时空间',
+      '临时空间/后台产出',
+    ])
   })
 })

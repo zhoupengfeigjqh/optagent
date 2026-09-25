@@ -70,10 +70,15 @@ interface ListedItem {
   tool: string;
   status: string;
   size: number;
+  summary?: string;
   filename: string;
   relPath: string;
   created_at: string;
   finished_at: string;
+  /** 查询期由 `sid` 反查的数字人；缺省 = `sid` 缺失或会话已删除 */
+  agent_name?: string;
+  /** 缺省 = 未读（契约 §10.5 ⑤） */
+  read_at?: string;
 }
 
 async function list(limit?: number): Promise<ListedItem[]> {
@@ -83,6 +88,20 @@ async function list(limit?: number): Promise<ListedItem[]> {
   });
   expect(res.statusCode).toBe(200);
   return (res.json() as { items: ListedItem[] }).items;
+}
+
+/** 标记已读（载荷故意宽松：非法形状也要能发出去，供边界用例断言 400） */
+function markRead(jobIds: unknown) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/produced/read',
+    payload: { job_ids: jobIds },
+  });
+}
+
+/** 取某条产出在列表里的当前形态（不存在则 `undefined`） */
+async function findItem(jobId: string): Promise<ListedItem | undefined> {
+  return (await list()).find((i) => i.job_id === jobId);
 }
 
 describe('POST /api/files/put —— 回写通道', () => {
@@ -222,5 +241,194 @@ describe('GET /api/produced/events —— 变更信号（SSE）', () => {
     } finally {
       controller.abort();
     }
+  });
+});
+
+describe('POST /api/produced/read —— 已读状态（契约 §10.5 ⑤）', () => {
+  it('标记未读产出 → 写入 read_at、返回实际条数，列表随之带出该字段', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_r1' } })}&filename=j_r1.json`);
+
+    const res = await markRead(['j_r1']);
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { marked: number }).marked).toBe(1);
+    expect(typeof (await findItem('j_r1'))?.read_at).toBe('string');
+  });
+
+  it('新产出默认未读（read_at 缺省）——不写 `read_at: false` 之类的反向表达', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_r3' } })}&filename=j_r3.json`);
+
+    expect((await findItem('j_r3'))?.read_at).toBeUndefined();
+  });
+
+  it('幂等：重复标记**不改动**原 read_at，且 marked=0', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_r2' } })}&filename=j_r2.json`);
+    await markRead(['j_r2']);
+    const first = (await findItem('j_r2'))!.read_at;
+
+    const again = await markRead(['j_r2']);
+
+    expect((again.json() as { marked: number }).marked).toBe(0);
+    expect((await findItem('j_r2'))!.read_at).toBe(first);
+  });
+
+  it('不存在的 job_id 一律忽略（产出可能已被 7 天清理），不报错', async () => {
+    const res = await markRead(['never-existed']);
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { marked: number }).marked).toBe(0);
+  });
+
+  it('空数组是合法请求（无事发生）', async () => {
+    const res = await markRead([]);
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { marked: number }).marked).toBe(0);
+  });
+
+  it('job_ids 非法 → 400（缺字段 / 元素为空串）', async () => {
+    for (const jobIds of [undefined, ['']]) {
+      const res = await markRead(jobIds);
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
+  it('标量被 Fastify 的 ajv 强转为单元素数组（框架既有约定，非本端点特有）', async () => {
+    // `'j_r1'` → `['j_r1']`：等于标记一个不存在的 job_id → 按"忽略"处理，不报错也不误标
+    const res = await markRead('j_r1');
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { marked: number }).marked).toBe(0);
+  });
+
+  it('已读是本条产出的属性：不同产出互不影响', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_r4' } })}&filename=j_r4.json`);
+    await post(`${putUrl({ hints: { sid: 'th_r5' } })}&filename=j_r5.json`);
+
+    await markRead(['j_r4']);
+
+    expect(typeof (await findItem('j_r4'))?.read_at).toBe('string');
+    expect((await findItem('j_r5'))?.read_at).toBeUndefined();
+  });
+});
+
+describe('GET /api/produced/raw —— 读单条产出正文（契约 §10.5 ⑦）', () => {
+  it('按 job_id 返回正文：纯文本 + nosniff（产出内容不该被当作主动内容渲染）', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_raw' } })}&filename=j_raw.txt`, '识别结果正文');
+
+    const res = await app.inject({ method: 'GET', url: '/api/produced/raw?job_id=j_raw' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.body).toBe('识别结果正文');
+  });
+
+  it('job_id 不存在 → 404 FILE_NOT_FOUND（与"已被 7 天清理"同一语义）', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/produced/raw?job_id=ghost' });
+
+    expect(res.statusCode).toBe(404);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('FILE_NOT_FOUND');
+  });
+
+  it('缺 job_id → 400', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/produced/raw' })).statusCode).toBe(400);
+  });
+
+  it('能读到**列表之外**的更旧条目（列表有界，不代表读不到）', async () => {
+    for (let i = 0; i < 55; i += 1) {
+      await post(
+        `${putUrl({ hints: { sid: 'th_old' } })}&filename=j_old_${i}.txt`,
+        `body-${i}`,
+      );
+    }
+    expect((await list()).some((i) => i.job_id === 'j_old_0')).toBe(false);
+
+    const res = await app.inject({ method: 'GET', url: '/api/produced/raw?job_id=j_old_0' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('body-0');
+  });
+
+  it('产出目录是**二级目录**——这正是它不能走 files 预览接口的原因', () => {
+    // files 系列接口的 `dir` 语义是**空间顶层目录**（数据准备的二级目录还须命中
+    // `scenario.json` 清单），而产出落在 `临时空间/后台产出/`（契约 §10.4）。
+    // 这里钉住这条事实：将来若有人想"顺手复用" files 预览，先看这里。
+    // （不写成"请求 files 预览应当 400"的接口断言：那条路径要先选中数字人，
+    //   否则请求在 `checkDir` 之前就会以 409 AGENT_NOT_SELECTED 结束，测不到目标分支。）
+    expect(PRODUCED_DIR.startsWith('临时空间/')).toBe(true);
+    expect(PRODUCED_DIR.split('/')).toHaveLength(2);
+  });
+});
+
+describe('回写摘要（契约 §10.3）—— 产出列表的可辨识度', () => {
+  it('服务带 summary → 落到 sidecar 并出现在列表里', async () => {
+    const url =
+      `${putUrl({ hints: { sid: 'th_s1' } })}` +
+      `&filename=j_s1.txt&summary=${encodeURIComponent('识别到 47 行文字')}`;
+
+    expect((await post(url)).statusCode).toBe(202);
+    expect((await findItem('j_s1'))?.summary).toBe('识别到 47 行文字');
+  });
+
+  it('缺省 summary → 列表项不含该字段（界面据此走兜底文案，而不是显示空串）', async () => {
+    await post(`${putUrl({ hints: { sid: 'th_s2' } })}&filename=j_s2.txt`);
+
+    expect((await findItem('j_s2'))?.summary).toBeUndefined();
+  });
+
+  it('超长 summary 截断到 200 字符（截断而非拒绝：算完的任务不该因摘要过长而失败）', async () => {
+    const url =
+      `${putUrl({ hints: { sid: 'th_s3' } })}` +
+      `&filename=j_s3.txt&summary=${encodeURIComponent('甲'.repeat(500))}`;
+
+    expect((await post(url)).statusCode).toBe(202);
+    expect((await findItem('j_s3'))?.summary).toHaveLength(200);
+  });
+
+  it('summary 不参与验签（与 filename 同一处置）：篡改它只影响展示，不构成越权', async () => {
+    // 签名覆盖的仍是 u/d/exp；这里只换 summary，写入必须照常成功
+    const url = `${putUrl({ hints: { sid: 'th_s4' } })}&filename=j_s4.txt&summary=tampered`;
+
+    expect((await post(url)).statusCode).toBe(202);
+    expect((await findItem('j_s4'))?.summary).toBe('tampered');
+  });
+});
+
+describe('GET /api/produced —— 数字人归属（查询期由 sid 反查，§10.5 ⑥）', () => {
+  function ctxOf(): AppContext {
+    return (app as unknown as { ctx: AppContext }).ctx;
+  }
+
+  it('sid 命中的会话 → 列表项带 agent_name（该会话最近一轮使用的数字人）', async () => {
+    const thread = ctxOf().threadStore.create('admin', '数字人甲');
+    await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent1.txt`);
+
+    expect((await findItem('j_agent1'))?.agent_name).toBe('数字人甲');
+  });
+
+  it('会话 meta 的 agent_name 变了 → 反查结果随之更新（不落 sidecar，故不会漂移）', async () => {
+    const thread = ctxOf().threadStore.create('admin', '数字人甲');
+    await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent1b.txt`);
+    ctxOf().threadStore.touch('admin', thread.threadId, '数字人丙'); // 会话可跨数字人
+
+    expect((await findItem('j_agent1b'))?.agent_name).toBe('数字人丙');
+  });
+
+  it('会话已删除 → 产出仍在，但不带 agent_name（界面据此显示"未知"，不报错）', async () => {
+    const thread = ctxOf().threadStore.create('admin', '数字人乙');
+    await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent2.txt`);
+
+    ctxOf().threadStore.delete('admin', thread.threadId);
+
+    const item = await findItem('j_agent2');
+    expect(item).toBeDefined(); // 产出在二级目录，不随会话删除而消失（已知边界）
+    expect(item?.agent_name).toBeUndefined();
+  });
+
+  it('sid 缺失 → 不带 agent_name，且列表照常返回', async () => {
+    await post(`${putUrl()}&filename=j_agent3.txt`);
+
+    expect((await findItem('j_agent3'))?.agent_name).toBeUndefined();
   });
 });

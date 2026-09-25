@@ -11,6 +11,7 @@
 import json
 import os
 import time
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -329,14 +330,36 @@ def _plain_map(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _json(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+# ---------- 结果形状（标准 JSON）----------
+
+#: 求值成功（拿到了结构化决策）
+RESULT_STATUS_SUCCESS = "success"
+#: 未拿到结果（入参校验失败、上游错误、重试耗尽等）
+RESULT_STATUS_FAILED = "failed"
 
 
-def format_answer(kind: str, payload: Any) -> str:
-    """把 Jev 返回体格式化成**紧凑 JSON 文本**（工具返回口径与 ocr 一致：字符串）。
+def failed_result(message: str) -> dict[str, Any]:
+    """失败的结果（标准 JSON 形状）：原因在 ``message``。
+
+    与成功结果**同一形状**（都有 ``status``）——调用方不必靠"是不是自然语言"来猜成败，
+    也不必对两种返回值做分支处理。
+    """
+    return {"status": RESULT_STATUS_FAILED, "message": message}
+
+
+def result_json(result: Mapping[str, Any]) -> str:
+    """结果的**标准 JSON 文本**（工具返回口径与 `ocr-service` 一致）。
+
+    不转义非 ASCII；用紧凑分隔符（工具结果会进对话上下文，少占 token）。
+    """
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+def format_answer(kind: str, payload: Any) -> dict[str, Any]:
+    """把 Jev 返回体格式化成**结果对象**（标准 JSON 形状，恒带 ``status``）。
 
     只回传模型需要的取值；``model`` / ``usage`` 是成本观测信息，落日志即可，不占对话上下文。
+    序列化统一交给 ``result_json``（与失败路径共用同一出口）。
     """
     if not isinstance(payload, dict):
         raise JevError("错误：Jev 返回体不是 JSON 对象")
@@ -346,26 +369,28 @@ def format_answer(kind: str, payload: Any) -> str:
         raise JevError(f"错误：Jev 返回体缺少「{QUESTION_KEY}」的结果")
 
     if kind == "noul":
-        return _json({"type": "noul", "noul": _number(answer.get("noul"), "noul")})
+        return {
+            "status": RESULT_STATUS_SUCCESS,
+            "type": "noul",
+            "noul": _number(answer.get("noul"), "noul"),
+        }
     if kind == "choice":
-        return _json(
-            {
-                "type": "choice",
-                "choice": str(answer.get("choice") or ""),
-                "confidence": _number(answer.get("confidence"), "confidence"),
-                "probabilities": _plain_map(answer.get("probabilities")),
-            }
-        )
+        return {
+            "status": RESULT_STATUS_SUCCESS,
+            "type": "choice",
+            "choice": str(answer.get("choice") or ""),
+            "confidence": _number(answer.get("confidence"), "confidence"),
+            "probabilities": _plain_map(answer.get("probabilities")),
+        }
     if kind == "score":
-        return _json(
-            {
-                "type": "score",
-                "score": _number(answer.get("score"), "score"),
-                "confidence": _number(answer.get("confidence"), "confidence"),
-                "legend": _plain_map(answer.get("legend")),
-                "probabilities": _plain_map(answer.get("probabilities")),
-            }
-        )
+        return {
+            "status": RESULT_STATUS_SUCCESS,
+            "type": "score",
+            "score": _number(answer.get("score"), "score"),
+            "confidence": _number(answer.get("confidence"), "confidence"),
+            "legend": _plain_map(answer.get("legend")),
+            "probabilities": _plain_map(answer.get("probabilities")),
+        }
     raise JevError(f"错误：未知的 primitive 类型「{kind}」")
 
 

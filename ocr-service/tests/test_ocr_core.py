@@ -141,10 +141,10 @@ def test_make_job_id_is_unique_within_same_millisecond(monkeypatch):
     assert len(ids) == 50
 
 
-def test_result_filename_uses_txt_suffix(monkeypatch):
+def test_result_filename_uses_json_suffix(monkeypatch):
     core = _load_core(monkeypatch, "backend")
 
-    assert core.result_filename("ocr_1_ab") == "ocr_1_ab.txt"
+    assert core.result_filename("ocr_1_ab") == "ocr_1_ab.json"
 
 
 def test_with_filename_preserves_existing_query(monkeypatch):
@@ -155,13 +155,13 @@ def test_with_filename_preserves_existing_query(monkeypatch):
         "?u=admin&d=%E4%B8%B4%E6%97%B6%E7%A9%BA%E9%97%B4&exp=1&sig=abc&sid=th_1"
     )
 
-    out = httpx.URL(core.with_filename(url, "ocr_1_ab.txt"))
+    out = httpx.URL(core.with_filename(url, "ocr_1_ab.json"))
 
     assert out.params["u"] == "admin"
     assert out.params["d"] == "临时空间"  # 非 ASCII 参数原样解回
     assert out.params["sig"] == "abc"
     assert out.params["sid"] == "th_1"
-    assert out.params["filename"] == "ocr_1_ab.txt"
+    assert out.params["filename"] == "ocr_1_ab.json"
 
 
 def test_with_filename_handles_url_without_query(monkeypatch):
@@ -183,7 +183,7 @@ def test_accepted_payload_is_json_and_tells_model_not_to_retry(monkeypatch):
     assert "无需重复提交" in payload["message"]
 
 
-def test_post_result_sends_utf8_text(monkeypatch):
+def test_post_result_sends_utf8_json(monkeypatch):
     core = _load_core(monkeypatch, "backend")
     seen: dict[str, object] = {}
 
@@ -195,20 +195,31 @@ def test_post_result_sends_utf8_text(monkeypatch):
 
     err = core.post_result(
         "http://backend:3000/api/files/put?u=admin",
-        "产能表\n冲压 1200",
+        core.success_result("产能表\n冲压 1200"),
         transport=httpx.MockTransport(handler),
     )
 
     assert err is None
     assert str(seen["url"]).endswith("?u=admin")
-    assert seen["body"] == "产能表\n冲压 1200".encode("utf-8")
-    assert "text/plain" in str(seen["ctype"])
+    assert "application/json" in str(seen["ctype"])
+    # 正文是**标准 JSON**：可被解析回同一形状，且中文不转义（人/模型直读）
+    body = bytes(seen["body"]).decode("utf-8")
+    assert "产能表" in body
+    assert json.loads(body) == {
+        "status": "success",
+        "message": "识别到 2 行文字",
+        "text": "产能表\n冲压 1200",
+    }
 
 
 def test_post_result_reports_non_2xx(monkeypatch):
     core = _load_core(monkeypatch, "backend")
 
-    err = core.post_result("http://backend:3000/x", "t", transport=_transport(403, b""))
+    err = core.post_result(
+        "http://backend:3000/x",
+        core.success_result("t"),
+        transport=_transport(403, b""),
+    )
 
     assert err is not None
     assert "403" in err
@@ -221,7 +232,100 @@ def test_post_result_reports_transport_error(monkeypatch):
     def boom(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
 
-    err = core.post_result("http://backend:3000/x", "t", transport=httpx.MockTransport(boom))
+    err = core.post_result(
+        "http://backend:3000/x",
+        core.success_result("t"),
+        transport=httpx.MockTransport(boom),
+    )
 
     assert err is not None
     assert "ConnectError" in err
+
+
+# ---------- 结果形状（标准 JSON）----------
+
+
+def test_success_result_shape(monkeypatch):
+    core = _load_core(monkeypatch, "backend")
+
+    result = core.success_result("产能表\n冲压 1200\n")
+
+    assert result["status"] == "success"
+    assert result["message"] == "识别到 2 行文字"
+    assert result["text"] == "产能表\n冲压 1200\n"
+
+
+def test_failed_result_shape_has_empty_text(monkeypatch):
+    """失败与成功**同一形状**，只是 status 不同、text 为空串。"""
+    core = _load_core(monkeypatch, "backend")
+
+    result = core.failed_result("未识别到文字")
+
+    assert result == {"status": "failed", "message": "未识别到文字", "text": ""}
+
+
+def test_result_json_is_readable_unicode(monkeypatch):
+    core = _load_core(monkeypatch, "backend")
+
+    text = core.result_json(core.success_result("产能表"))
+
+    assert "产能表" in text  # 不转义成 \uXXXX，便于人/模型直读
+    assert json.loads(text)["text"] == "产能表"
+
+
+# ---------- 回写摘要（产出列表的可辨识度） ----------
+
+
+def test_summary_of_uses_first_non_empty_line_on_success(monkeypatch):
+    core = _load_core(monkeypatch, "backend")
+
+    result = core.success_result("\n\n  产能表  \n冲压 1200\n")
+
+    assert core.summary_of(result) == "产能表"
+
+
+def test_summary_of_uses_message_on_failure(monkeypatch):
+    """失败时摘要就是错误原因——标题上直接能看到"为什么没结果"。"""
+    core = _load_core(monkeypatch, "backend")
+
+    result = core.failed_result("错误：下载失败（HTTP 403），签名可能已过期")
+
+    assert core.summary_of(result) == "错误：下载失败（HTTP 403），签名可能已过期"
+
+
+def test_summary_of_falls_back_to_message_when_text_is_blank(monkeypatch):
+    """成功但文本全空白（理论上不出现）→ 回落 message，**绝不留白**。"""
+    core = _load_core(monkeypatch, "backend")
+
+    result = {"status": "success", "message": "识别到 0 行文字", "text": "   \n\t\n"}
+
+    assert core.summary_of(result) == "识别到 0 行文字"
+
+
+def test_summary_of_truncates_to_limit(monkeypatch):
+    core = _load_core(monkeypatch, "backend")
+
+    result = core.success_result("甲" * (core.SUMMARY_MAX_CHARS + 50))
+
+    assert len(core.summary_of(result)) == core.SUMMARY_MAX_CHARS
+
+
+def test_with_filename_appends_summary_and_keeps_query(monkeypatch):
+    core = _load_core(monkeypatch, "backend")
+    url = "http://backend:3000/api/files/put?u=admin&sig=abc&sid=th_1"
+
+    out = httpx.URL(core.with_filename(url, "ocr_1_ab.json", "产能表"))
+
+    assert out.params["sig"] == "abc"
+    assert out.params["sid"] == "th_1"
+    assert out.params["filename"] == "ocr_1_ab.json"
+    assert out.params["summary"] == "产能表"
+
+
+def test_with_filename_omits_summary_when_absent(monkeypatch):
+    """无摘要时**不写**该参数：运行环境把"缺省"与"空串"都视为无摘要，少传更干净。"""
+    core = _load_core(monkeypatch, "backend")
+
+    out = httpx.URL(core.with_filename("http://backend:3000/api/files/put?u=admin", "a.txt"))
+
+    assert "summary" not in out.params
