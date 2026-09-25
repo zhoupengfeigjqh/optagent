@@ -153,7 +153,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     'tmp-cleanup',
   );
 
-  // 空闲实例回收（T049）：每分钟淘汰空闲超时（默认 10min）的实例
+  // 空闲实例回收（T049）：每分钟淘汰空闲超时（默认 30min）的实例
   scheduler.every(
     60 * 1000,
     async () => {
