@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { HistoryMessage } from '../types.js';
 import { SPACE_TMP, THREADS_DIR, threadDir, userDataDir } from './dirs.js';
-import { removeDirRecursive, removeFileSafe } from './fs-safe.js';
+import { removeDirRecursiveAsync, removeFileSafeAsync } from './fs-safe.js';
 import type { HistoryStore } from './history.js';
 
 /** 默认标题截取长度（首条 user 消息前 20 字） */
@@ -197,17 +197,29 @@ export class ThreadStore {
     return meta;
   }
 
-  /** 删除连带清理（FR-010）：thread 目录 + tmp 下 `{thread_id}_` 前缀文件 */
-  delete(userId: string, threadId: string): void {
+  /**
+   * 删除连带清理（FR-010）：thread 目录 + tmp 下 `{thread_id}_` 前缀文件。
+   *
+   * **async**：删除是「多文件 × 单次文件系统调用」，而单次删除的开销在软件层可能差两个数量级
+   * （见 `fs-safe` 头部的实测：同机 C: 0–1ms vs D: ~300ms）。同步实现会把整段删除占住
+   * 事件循环，令用户**紧接着**发出的"切换会话"请求一起排队——表现为"删完再点别的会话要转几秒"。
+   */
+  async delete(userId: string, threadId: string): Promise<void> {
     this.get(userId, threadId); // 不存在抛 ThreadNotFoundError
     this.titleCache.delete(this.cacheKey(userId, threadId));
-    removeDirRecursive(threadDir(this.root, userId, threadId));
+    await removeDirRecursiveAsync(threadDir(this.root, userId, threadId));
+
     const tmpDir = path.join(userDataDir(this.root, userId), SPACE_TMP);
-    if (!fs.existsSync(tmpDir)) return;
-    for (const entry of fs.readdirSync(tmpDir)) {
+    let entries: string[];
+    try {
+      entries = await fs.promises.readdir(tmpDir);
+    } catch {
+      return; // 临时空间不存在 = 无可清理
+    }
+    for (const entry of entries) {
       // tmp 产出均为文件；统一走安全删除原语（见 fs-safe）
       if (entry.startsWith(`${threadId}_`)) {
-        removeFileSafe(path.join(tmpDir, entry));
+        await removeFileSafeAsync(path.join(tmpDir, entry));
       }
     }
   }

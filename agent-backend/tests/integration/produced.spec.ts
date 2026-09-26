@@ -419,7 +419,7 @@ describe('GET /api/produced —— 数字人归属（查询期由 sid 反查，�
     const thread = ctxOf().threadStore.create('admin', '数字人乙');
     await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent2.txt`);
 
-    ctxOf().threadStore.delete('admin', thread.threadId);
+    await ctxOf().threadStore.delete('admin', thread.threadId);
 
     const item = await findItem('j_agent2');
     expect(item).toBeDefined(); // 产出在二级目录，不随会话删除而消失（已知边界）

@@ -202,7 +202,9 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     ctx.threadStore.get(userId, threadId); // 404
     // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）
     ctx.runManager.stop(threadId);
-    ctx.threadStore.delete(userId, threadId);
+    // 删除是「多文件 × 单次系统调用」，**await 异步版**：不让它占住事件循环
+    // （否则用户紧接着的"切换会话"请求会被一起拖慢，见 fs-safe 头部实测）
+    await ctx.threadStore.delete(userId, threadId);
     return reply.status(204).send();
   });
 }
