@@ -96,10 +96,10 @@
 | `status` | 固定 `"accepted"` |
 | `message` | 含"无需重复提交" —— 否则模型常会再调一次，白排一遍 |
 
-**同步降级**（`result_url` 缺失或不在白名单）：直接返回原来的同步结果，并在前面说明原因：
+**同步降级**（`result_url` 缺失，或其协议不是 http/https）：直接返回原来的同步结果，并在前面说明原因：
 
 ```
-错误：URL 主机 evil 不在允许名单（backend, 192.168.1.7）；请在容器的 HD_URL_ALLOW_HOSTS 中声明该主机
+错误：仅支持 http/https URL
 （回写地址不可用，已改为同步返回）
 {算法返回的完整结果}
 ```
@@ -238,11 +238,6 @@ RESULT_SUFFIX = ".json"
 SUMMARY_MAX_CHARS = 200
 MAX_BODY_BYTES = 5 * 1024 * 1024                        # 平台上限 5MB，超出回写会 413
 UPLOAD_TIMEOUT = float(os.environ.get("HD_UPLOAD_TIMEOUT_S", "10"))
-ALLOW_HOSTS = {                                         # 值 = 平台 PUBLIC_BASE_URL 的 host
-    h.strip().lower()
-    for h in os.environ.get("HD_URL_ALLOW_HOSTS", "").split(",")
-    if h.strip()
-}
 
 
 # ── 输入结构（pydantic → FastMCP 自动生成 inputSchema）──────────
@@ -290,10 +285,10 @@ def hd_scheduling_submit(
     **统一结果 JSON**（§4.3，`status` 同样是 success/failed）。
     """
     if result_url:
-        err = check_url(result_url)
+        err = check_http_url(result_url)
         if err:
-            # 回写地址不可信（模型幻觉 / 被篡改）：忽略它并降级为同步。
-            # 不能照样 POST（SSRF）；也不能静默丢弃（调用方会一直等不到结果）。
+            # 回写地址的协议不可用：忽略它并降级为同步。
+            # 不能照样 POST（等于向任意目标发请求）；也不能静默丢弃（调用方会一直等不到结果）。
             return f"{err}\n（回写地址不可用，已改为同步返回）\n" + json.dumps(
                 result_payload(submit_and_wait(uid, sid, input)), ensure_ascii=False
             )
@@ -338,22 +333,20 @@ def submit_and_wait(uid: str, sid: str, cfg: SchedulingInput) -> dict:
     raise NotImplementedError("替换为现有的算法提交逻辑")
 
 
-# ── 通用工具函数（可从 ocr_core.py 整段照抄）───────────────────
-def check_url(url: str) -> str | None:
-    """校验回写地址；返回错误文案，None 表示放行。"""
+# ── 通用工具函数（可从 ocr-service/ocr_core.py 整段照抄）─────────
+def check_http_url(url: str) -> str | None:
+    """校验回写地址的协议；返回错误文案，None 表示放行。
+
+    只接受 http/https：`result_url` 由平台按 `PUBLIC_BASE_URL` 铸造后注入，服务侧无需
+    （也不应）再维护一份 host 白名单——它要求"直链基址 + 每个服务各一份"三处写同一个
+    主机名，IP 一变就漏（2026-09-28 起移除）。想自行加固的话，加白名单属**可选**。
+    """
     try:
         u = urlparse(url)
     except Exception:
         return "错误：无效的 URL"
     if u.scheme not in ("http", "https"):
         return "错误：仅支持 http/https URL"
-    host = (u.hostname or "").lower()
-    if host not in ALLOW_HOSTS:
-        allowed = ", ".join(sorted(ALLOW_HOSTS)) or "未配置任何允许主机"
-        return (
-            f"错误：URL 主机 {host or '(空)'} 不在允许名单（{allowed}）；"
-            "请在容器的 HD_URL_ALLOW_HOSTS 中声明该主机"
-        )
     return None
 
 
@@ -442,8 +435,6 @@ def post_result(url: str, body: bytes) -> str | None:
 
 
 if __name__ == "__main__":
-    if not ALLOW_HOSTS:
-        print("警告：未配置 HD_URL_ALLOW_HOSTS，异步模式将拒绝所有回写", file=sys.stderr)
     mcp.run(transport="streamable-http")
 ```
 
@@ -454,9 +445,10 @@ if __name__ == "__main__":
 | # | 事项 | 取值 |
 |---|---|---|
 | 1 | 平台声明异步工具 | `"async_tools": ["hd_scheduling_submit"]`（**原始工具名，不含 `hd__` 前缀**） |
-| 2 | 服务侧白名单 | `HD_URL_ALLOW_HOSTS=backend,192.168.1.7`（值 = 平台 `PUBLIC_BASE_URL` 的 host） |
-| 3 | 改过 `.env.local` 后 | **重建**容器：`docker compose up -d hd --force-recreate`（`restart` 不更新 env） |
-| 4 | 平台侧保存后 | 无需重启后端 —— 配置物化后按指纹自动重建实例 |
+| 2 | 服务侧校验（MUST） | `result_url` 只接受 **http/https**（其余忽略并降级为同步）；注入的地址由平台保证是 `PUBLIC_BASE_URL` 下的直链 |
+| 3 | 服务侧加固（可选） | 如你的服务想再加一道 host 白名单（`HD_URL_ALLOW_HOSTS`）属**可选**——地址已由平台**单点铸造**，不再要求逐个服务维护同值清单（2026-09-28 起） |
+| 4 | 改过 `.env.local` 后 | **重建**容器：`docker compose up -d hd --force-recreate`（`restart` 不更新 env） |
+| 5 | 平台侧保存后 | 无需重启后端 —— 配置物化后按指纹自动重建实例 |
 
 ---
 

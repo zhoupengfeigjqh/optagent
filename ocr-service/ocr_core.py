@@ -1,6 +1,6 @@
 """OCR 服务的可测核心逻辑（不依赖 rapidocr / opencv）。
 
-分层目的：把"回源 URL 校验（SSRF 白名单）+ 受限下载"这类纯逻辑与模型推理分开，
+分层目的：把"回源 URL 协议校验 + 受限下载"这类纯逻辑与模型推理分开，
 使单测不必加载 ONNX 模型、不必安装 opencv（在宿主机本地跑 `python -m pytest -q tests` 即可）。
 
 server.py 负责 MCP 工具装配与识别；本模块只回答"能不能下、下多少"。
@@ -26,35 +26,31 @@ RESULT_SUFFIX = ".json"
 # 回写摘要的一行长度上限（运行环境侧同样按 200 字符截断；此处先截好，少传多余字节）
 SUMMARY_MAX_CHARS = 200
 
-# 允许回源下载的 host 白名单（防 SSRF：服务会按入参发 HTTP 请求）
-# 默认**空集 = 拒绝一切回源**：部署方 MUST 显式声明允许的主机名，
-# 不把"服务名必须叫 backend"这类部署假设写死在服务代码的默认值里。
-ALLOW_HOSTS = {
-    h.strip().lower()
-    for h in os.environ.get("OCR_URL_ALLOW_HOSTS", "").split(",")
-    if h.strip()
-}
-
 # 回源下载超时（秒）
 DOWNLOAD_TIMEOUT = float(os.environ.get("OCR_DOWNLOAD_TIMEOUT_S", "10"))
 
 
-def check_url(url: str) -> str | None:
-    """校验回源地址；返回错误文案，``None`` 表示放行。"""
+def check_http_url(url: str) -> str | None:
+    """校验回源地址的**协议**；返回错误文案，``None`` 表示放行。
+
+    **2026-09-28 变更**：这里原有一道回源 host 白名单（`OCR_URL_ALLOW_HOSTS`，默认空集 =
+    拒绝一切回源），已整体移除。原因：回源直链与 `result_url` 都由运行环境按
+    `PUBLIC_BASE_URL` **单点铸造**后注入，服务侧再验一遍 host 属同一判据的第二次执行；
+    且它要求"平台直链基址 + 每个 MCP 服务各一份白名单"三处写同一个主机名，IP 一变就漏
+    （历史上已因此出现过"回源被 SSRF 拒绝"的故障）。
+
+    于是 SSRF 的防线收敛到**唯一的生产者**：运行环境 MUST NOT 把"模型可自由填写的地址"
+    当作回源目标——URL 类参数一律经 `file_args` 的 `url` / `url:from=` 注入
+    （契约见 `specs/001-*/contracts/runtime-api-delta.md` §10）。
+
+    这里保留的协议校验与白名单无关，是廉价兜底：挡 `file:///etc/passwd` 这类非 HTTP 目标。
+    """
     try:
         u = urlparse(url)
     except Exception:
         return "错误：无效的 URL"
     if u.scheme not in ("http", "https"):
         return "错误：仅支持 http/https URL"
-    host = (u.hostname or "").lower()
-    if host not in ALLOW_HOSTS:
-        allowed = ", ".join(sorted(ALLOW_HOSTS)) or "未配置任何允许主机"
-        return (
-            f"错误：URL 主机 {host or '(空)'} 不在允许名单（{allowed}）；"
-            "请在容器的 OCR_URL_ALLOW_HOSTS 中声明该主机"
-        )
-    # 解析为内网/回环 IP 的主名一律拒绝（白名单主机名除外，其解析结果可能是内网——属预期部署）
     return None
 
 

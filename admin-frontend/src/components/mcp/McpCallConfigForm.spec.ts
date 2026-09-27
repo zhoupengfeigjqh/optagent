@@ -3,14 +3,14 @@
  *
  * 守住三件事：
  * 1. **连接地址只有一个**（不再按运行形态分形态声明）；
- * 2. 表单同时承担**新建**与编辑：新建态名称可编辑且按同一判据预校验；
+ * 2. 表单**只服务已登记的服务**（名称只读、恒提供「发起测试」）——新建走弹窗；
  * 3. `FR-044` 的既有语义不变：file_args / HITL / rules_fields / async_tools。
  * （writable / permission_scope 已按 2026-09-15 的产品决定从配置中移除。）
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpCallConfigForm from './McpCallConfigForm.vue'
-import type { McpServiceDetail, McpServiceSubmitPayload } from '../../api/types'
+import type { McpServiceConfigInput, McpServiceDetail } from '../../api/types'
 
 const testMcpService = vi.fn()
 
@@ -89,8 +89,8 @@ const SERVICE_WITH_NESTED_SCHEMA: McpServiceDetail = {
   ],
 }
 
-function mountForm(service: McpServiceDetail | null = SERVICE, isNew = false) {
-  return mount(McpCallConfigForm, { props: { service, isNew } })
+function mountForm(service: McpServiceDetail = SERVICE) {
+  return mount(McpCallConfigForm, { props: { service } })
 }
 
 /** 表单内唯一的动作按钮：「发起测试」（与连接地址同排） */
@@ -98,8 +98,8 @@ function testButton(wrapper: ReturnType<typeof mountForm>) {
   return wrapper.findAll('button').find((b) => b.text().includes('发起测试'))
 }
 
-function submitted(wrapper: ReturnType<typeof mountForm>, index = 0): McpServiceSubmitPayload {
-  return wrapper.emitted('submit')?.[index]?.[0] as McpServiceSubmitPayload
+function submitted(wrapper: ReturnType<typeof mountForm>, index = 0): McpServiceConfigInput {
+  return wrapper.emitted('submit')?.[index]?.[0] as McpServiceConfigInput
 }
 
 /**
@@ -132,17 +132,18 @@ describe('McpCallConfigForm —— 编辑态', () => {
     expect(wrapper.findAll('#mcp-url')).toHaveLength(1)
   })
 
-  it('保存时提交 {name, config}，config 里是单一 url；废弃字段 MUST NOT 出现', async () => {
+  it('保存时提交调用配置：单一 url，且不带 name（名称由详情页按路径取）与废弃字段', async () => {
     const wrapper = mountForm()
     await flushPromises()
     await save(wrapper)
 
     const payload = submitted(wrapper)
-    expect(payload.name).toBe('ocr')
-    expect(payload.config.url).toBe('http://192.168.1.2:8000/mcp')
-    expect(payload.config).not.toHaveProperty('endpoints')
-    expect((payload.config as Record<string, unknown>).writable).toBeUndefined()
-    expect((payload.config as Record<string, unknown>).permission_scope).toBeUndefined()
+    expect(payload.url).toBe('http://192.168.1.2:8000/mcp')
+    expect(payload).not.toHaveProperty('endpoints')
+    expect(payload).not.toHaveProperty('name')
+    expect(payload).not.toHaveProperty('revision')
+    expect((payload as Record<string, unknown>).writable).toBeUndefined()
+    expect((payload as Record<string, unknown>).permission_scope).toBeUndefined()
   })
 
   it('http 连接地址为空时报错且不提交', async () => {
@@ -165,7 +166,7 @@ describe('McpCallConfigForm —— 编辑态', () => {
     await flushPromises()
     await save(wrapper)
 
-    expect(submitted(wrapper).config.file_args).toEqual({
+    expect(submitted(wrapper).file_args).toEqual({
       ocr_image: { image: 'url' },
       parse_excel_files: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
     })
@@ -209,7 +210,7 @@ describe('McpCallConfigForm —— 编辑态', () => {
   })
 
   it('忙态只锁按钮：`busy` 时表单控件 MUST NOT 被禁用（契约 §0.5 原则 ③）', async () => {
-    const wrapper = mount(McpCallConfigForm, { props: { service: SERVICE, isNew: false, busy: true } })
+    const wrapper = mount(McpCallConfigForm, { props: { service: SERVICE, busy: true } })
     await flushPromises()
 
     expect(wrapper.find('#mcp-description').attributes('disabled')).toBeUndefined()
@@ -236,39 +237,14 @@ describe('McpCallConfigForm —— 编辑态', () => {
       wrapper.findAll('button').filter((b) => /保存调用配置|创建服务|删除服务/.test(b.text())),
     ).toHaveLength(0)
   })
-})
 
-describe('McpCallConfigForm —— 新建态', () => {
-  it('名称可编辑且为必填；不提供发起测试（服务尚不存在）；创建按钮在页面右上角', async () => {
-    const wrapper = mountForm(null, true)
+  it('服务名只读（名称即工具前缀，创建后不可改）；「发起测试」恒提供', async () => {
+    const wrapper = mountForm()
     await flushPromises()
 
-    expect(wrapper.find('#mcp-name').attributes('readonly')).toBeUndefined()
-    expect(testButton(wrapper)).toBeUndefined()
-    expect(wrapper.findAll('button').filter((b) => /创建服务/.test(b.text()))).toHaveLength(0)
-  })
-
-  it('服务名非法（含空格/中文）→ 报错且不提交', async () => {
-    const wrapper = mountForm(null, true)
-    await flushPromises()
-    await wrapper.find('#mcp-name').setValue('bad name')
-    await wrapper.find('#mcp-url').setValue('http://host:8000/mcp')
-    await save(wrapper)
-
-    expect(wrapper.emitted('submit')).toBeUndefined()
-    expect(wrapper.text()).toContain('服务名非法')
-  })
-
-  it('合法名称 + 地址 → 提交 {name, config}', async () => {
-    const wrapper = mountForm(null, true)
-    await flushPromises()
-    await wrapper.find('#mcp-name').setValue('new-mcp')
-    await wrapper.find('#mcp-url').setValue('http://192.168.1.2:9000/mcp')
-    await save(wrapper)
-
-    const payload = submitted(wrapper)
-    expect(payload.name).toBe('new-mcp')
-    expect(payload.config.url).toBe('http://192.168.1.2:9000/mcp')
+    expect(wrapper.find('#mcp-name').attributes('readonly')).toBeDefined()
+    expect((wrapper.find('#mcp-name').element as HTMLInputElement).value).toBe('ocr')
+    expect(testButton(wrapper)).toBeTruthy()
   })
 })
 
@@ -305,7 +281,7 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     const wrapper = mountForm()
     await flushPromises()
     await save(wrapper)
-    expect(submitted(wrapper).config.confirmation).toBe('never')
+    expect(submitted(wrapper).confirmation).toBe('never')
   })
 
   it('选「全部工具」提交 always', async () => {
@@ -313,7 +289,7 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     await flushPromises()
     await wrapper.find('#mcp-confirmation-mode').setValue('always')
     await save(wrapper)
-    expect(submitted(wrapper).config.confirmation).toBe('always')
+    expect(submitted(wrapper).confirmation).toBe('always')
   })
 
   it('按工具模式从清单勾选 → { tools }；一个都没勾不提交', async () => {
@@ -330,7 +306,7 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     await boxes[1]?.setValue(true)
     await save(wrapper)
 
-    expect(submitted(wrapper).config.confirmation).toEqual({ tools: ['ocr_image', 'parse_excel'] })
+    expect(submitted(wrapper).confirmation).toEqual({ tools: ['ocr_image', 'parse_excel'] })
   })
 
   it('服务工具清单不可得时回退手填文本', async () => {
@@ -341,7 +317,7 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     await wrapper.find('#mcp-confirmation-tools').setValue('query_price\n\ncreate_order  ')
     await save(wrapper)
 
-    expect(submitted(wrapper).config.confirmation).toEqual({ tools: ['query_price', 'create_order'] })
+    expect(submitted(wrapper).confirmation).toEqual({ tools: ['query_price', 'create_order'] })
   })
 
   it('编辑已配置 { tools } 的服务时预填勾选状态', async () => {
@@ -365,13 +341,14 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     expect(orphan.text()).toContain('legacy_tool')
 
     await save(wrapper)
-    expect(submitted(wrapper).config.confirmation).toEqual({ tools: ['legacy_tool'] })
+    expect(submitted(wrapper).confirmation).toEqual({ tools: ['legacy_tool'] })
 
     // 取消勾选（并勾一个清单内工具，避免空清单校验拦截）→ 提交不再带
     await wrapper.find('.mcp-config-form__tool--orphan input[type="checkbox"]').setValue(false)
     await wrapper.findAll('.mcp-config-form__tools input[type="checkbox"]')[0]?.setValue(true)
     await save(wrapper)
-    expect(submitted(wrapper, 1).config.confirmation).toEqual({ tools: ['ocr_image'] })
+    // 第二次提交（索引 1）
+    expect(submitted(wrapper, 1).confirmation).toEqual({ tools: ['ocr_image'] })
   })
 })
 
@@ -382,7 +359,7 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
 
     expect(wrapper.find('[data-test="add-rule"]').attributes('disabled')).toBeDefined()
     await save(wrapper)
-    expect(submitted(wrapper).config.rules_fields).toEqual({})
+    expect(submitted(wrapper).rules_fields).toEqual({})
   })
 
   it('全部工具需确认时所有工具可选，按 工具-字段 提交', async () => {
@@ -402,7 +379,7 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
     await wrapper.find('[data-test="rule-field-0"]').setValue('rules')
 
     await save(wrapper)
-    expect(submitted(wrapper).config.rules_fields).toEqual({ ocr_image: 'rules' })
+    expect(submitted(wrapper).rules_fields).toEqual({ ocr_image: 'rules' })
 
     // 编辑已配置的服务时预填（行回填 + 字段下拉选中；开 HITL 声明才会保留）
     const wrapper2 = mountForm({
@@ -439,7 +416,7 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
     await wrapper.find('[data-test="rule-field-0"]').setValue('input.targetPriorities')
     await save(wrapper)
 
-    expect(submitted(wrapper).config.rules_fields).toEqual({
+    expect(submitted(wrapper).rules_fields).toEqual({
       hd_scheduling_submit: 'input.targetPriorities',
     })
   })
@@ -450,12 +427,12 @@ describe('McpCallConfigForm —— 异步工具（R11）', () => {
     const plain = mountForm()
     await flushPromises()
     await save(plain)
-    expect(submitted(plain).config.async_tools).toEqual([])
+    expect(submitted(plain).async_tools).toEqual([])
 
     const wrapper = mountForm({ ...SERVICE, tools: [] })
     await flushPromises()
     await wrapper.find('.async-tools textarea').setValue('submit_job\nget_status')
     await save(wrapper)
-    expect(submitted(wrapper).config.async_tools).toEqual(['submit_job', 'get_status'])
+    expect(submitted(wrapper).async_tools).toEqual(['submit_job', 'get_status'])
   })
 })

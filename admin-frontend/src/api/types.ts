@@ -138,13 +138,23 @@ export interface McpServiceDetail {
   revision: number
 }
 
-export interface McpServiceConfigPayload {
+/**
+ * 调用配置的**基础连接字段**（弹窗新建与详情页表单共用；2026-09-27）。
+ *
+ * 后端 `normalize()` 会为未提供者补默认（`file_args: {}`、`confirmation: 'never'`、
+ * `rules_fields: {}`、`async_tools: []`），故新建只 MUST 提供基础字段。
+ */
+export interface McpServiceBasics {
   description: string
   transport: 'http' | 'stdio'
   /** 连接地址（`transport=http` 时必填） */
   url?: string
   command?: string
   args?: string[]
+}
+
+/** `PUT /api/admin/mcp/services/{name}` 的载荷（契约 §3.3）；`revision` 为乐观锁版本 */
+export interface McpServiceConfigPayload extends McpServiceBasics {
   file_args: Record<string, Record<string, string>>
   /** 调用确认策略（HITL；缺省 never 直跑） */
   confirmation?: McpConfirmation
@@ -155,26 +165,19 @@ export interface McpServiceConfigPayload {
   revision: number
 }
 
+/** 表单提交的调用配置：`revision` 由详情页按当前详情补上（乐观锁在调用处决定） */
+export type McpServiceConfigInput = Omit<McpServiceConfigPayload, 'revision'>
+
 /**
  * `POST /api/admin/mcp/services` 的新建载荷（契约 §3.3，2026-09-27）。
  *
- * 与保存载荷的唯一差别是**名称由管理员指定**（且全局唯一）；
+ * 与保存载荷的差别有两点：**名称由管理员指定**（且全局唯一）、
+ * 只需提供基础字段（其余调用配置依赖工具清单，创建后到详情页补全）；
  * `revision` 可选——带了即做乐观锁校验。
  */
-export interface McpServiceCreatePayload extends Omit<McpServiceConfigPayload, 'revision'> {
+export interface McpServiceCreatePayload extends McpServiceBasics {
   name: string
   revision?: number
-}
-
-/**
- * 调用配置表单的提交载荷（2026-09-27）。
- *
- * 表单同时承担"新建"与"编辑"，二者的差别只有"名称是否可改"，
- * 故统一成一个载荷：新建时 `name` 是新建名，编辑时是当前服务名（服务端按路径参数取）。
- */
-export interface McpServiceSubmitPayload {
-  name: string
-  config: Omit<McpServiceConfigPayload, 'revision'>
 }
 
 /**

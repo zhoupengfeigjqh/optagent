@@ -103,12 +103,12 @@ describe('api/mcp', () => {
     await mcp.getMcpService('ocr')
     expect(lastCall().url).toBe('/api/admin/mcp/services/ocr')
 
+    // 新建只提交基础字段（其余调用配置由服务端补默认，创建后到详情页补全）
     await mcp.createMcpService({
       name: 'ocr',
       description: '',
       transport: 'http',
       url: 'http://host:8000/mcp',
-      file_args: {},
     })
     expect(lastCall().init.method).toBe('POST')
     expect(lastCall().url).toBe('/api/admin/mcp/services')

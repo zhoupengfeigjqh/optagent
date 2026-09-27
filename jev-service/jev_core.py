@@ -35,14 +35,7 @@ RETRY_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 MAX_STATE_CHARS = int(os.environ.get("JEV_MAX_STATE_CHARS", "200000"))
 MAX_FILE_BYTES = int(os.environ.get("JEV_MAX_FILE_BYTES", str(512 * 1024)))
 
-# ---------- 引用文件回源（与 ocr_core 同一 SSRF 判据）----------
-# 默认**空集 = 拒绝一切回源**：部署方 MUST 显式声明允许的主机名，
-# 不把"服务名必须叫 backend"这类部署假设写死进服务代码的默认值里。
-ALLOW_HOSTS = {
-    h.strip().lower()
-    for h in os.environ.get("JEV_URL_ALLOW_HOSTS", "").split(",")
-    if h.strip()
-}
+# ---------- 引用文件回源（与 ocr_core 同一判据：只校验协议）----------
 DOWNLOAD_TIMEOUT_S = float(os.environ.get("JEV_DOWNLOAD_TIMEOUT_S", "10"))
 
 # ---------- primitive 取值域（官方 API reference）----------
@@ -73,22 +66,24 @@ class JevError(Exception):
 # ---------- 引用文件回源 ----------
 
 
-def check_url(url: str) -> str | None:
-    """校验回源地址；返回错误文案，``None`` 表示放行。"""
+def check_http_url(url: str) -> str | None:
+    """校验回源地址的**协议**；返回错误文案，``None`` 表示放行。
+
+    **2026-09-28 变更**：这里原有一道回源 host 白名单（`JEV_URL_ALLOW_HOSTS`，默认空集 =
+    拒绝一切回源），已整体移除——理由与 `ocr-service/ocr_core.py` 的同名函数一致：
+    回源直链由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入（`file_args` 的 `url` /
+    `url:from=`），服务侧再验一遍 host 只是同一判据的第二次执行，且三处配置必须写同一个
+    主机名、IP 一变就漏。SSRF 的防线因此收敛到唯一的生产者
+    （契约见 `specs/001-*/contracts/runtime-api-delta.md` §10）。
+
+    保留的协议校验与白名单无关：挡 `file:///etc/passwd` 这类非 HTTP 目标。
+    """
     try:
         u = urlparse(url)
     except Exception:
         return "错误：无效的 URL"
     if u.scheme not in ("http", "https"):
         return "错误：仅支持 http/https URL"
-    host = (u.hostname or "").lower()
-    if host not in ALLOW_HOSTS:
-        allowed = ", ".join(sorted(ALLOW_HOSTS)) or "未配置任何允许主机"
-        return (
-            f"错误：URL 主机 {host or '(空)'} 不在允许名单（{allowed}）；"
-            "请在容器的 JEV_URL_ALLOW_HOSTS 中声明该主机"
-        )
-    # 解析为内网/回环 IP 的主名一律拒绝（白名单主机名除外，其解析结果可能是内网——属预期部署）
     return None
 
 
@@ -213,19 +208,18 @@ def resolve_state(
     若收到的是相对路径，说明平台侧没声明该文件参数——给出可操作的诊断而非泛泛报错。
     """
     file_ref = (state_file or "").strip()
-    if file_ref and not file_ref.lower().startswith(("http://", "https://")):
-        echoed = file_ref if len(file_ref) <= 60 else f"{file_ref[:60]}…"
-        raise JevError(
-            f"错误：state_file 收到的不是下载直链而是「{echoed}」——"
-            "请检查平台侧该工具的 file_args 是否声明了 state_file: url"
-        )
-
     if not file_ref:
         return merge_state(state)
 
-    err = check_url(file_ref)
+    # 只接受运行环境铸造的 http(s) 直链。不是的话**把成因说清楚**：最常见的成因是
+    # 平台侧漏声明 `file_args`，此时光说"URL 不合法"对排查毫无帮助。
+    err = check_http_url(file_ref)
     if err:
-        raise JevError(err)
+        echoed = file_ref if len(file_ref) <= 60 else f"{file_ref[:60]}…"
+        raise JevError(
+            f"{err}（state_file 收到的值是「{echoed}」——请检查平台侧该工具的 "
+            "file_args 是否声明了 state_file: url）"
+        )
 
     label = source_label(file_ref)
     file_text = decode_text(download(file_ref, transport=transport))

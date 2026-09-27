@@ -19,9 +19,8 @@ from pydantic import Field
 from rapidocr_onnxruntime import RapidOCR
 
 from ocr_core import (
-    ALLOW_HOSTS,
     accepted_payload,
-    check_url,
+    check_http_url,
     download,
     failed_result,
     make_job_id,
@@ -68,10 +67,10 @@ def ocr_image(
     {"status":"success"|"failed","message":"一行说明或失败原因","text":"识别文本（失败时为空串）"}
     """
     if result_url:
-        err = check_url(result_url)
+        err = check_http_url(result_url)
         if err:
-            # 回写地址不可信（模型幻觉 / 被篡改）：**忽略它并降级为同步**。
-            # 不能"照样 POST"——那等于给任意主机发请求（SSRF）；也不能静默丢掉，
+            # 回写地址的协议不可用（非 http/https）：**忽略它并降级为同步**。
+            # 不能"照样 POST"——那等于给任意目标发请求；也不能静默丢掉，
             # 否则调用方以为异步已受理却永远等不到结果。
             return f"{err}\n（回写地址不可用，已改为同步返回）\n{result_json(_recognize(image))}"
         job_id = make_job_id()
@@ -89,7 +88,7 @@ def _recognize(image_url: str) -> dict[str, object]:
 
     成功与失败是**同一形状**，只有 ``status`` 不同：失败原因在 ``message``、``text`` 为空串。
     """
-    err = check_url(image_url)
+    err = check_http_url(image_url)
     if err:
         return failed_result(err)
     data = download(image_url)
@@ -121,13 +120,4 @@ def _recognize_and_post(job_id: str, image_url: str, result_url: str) -> None:
 
 
 if __name__ == "__main__":
-    if not ALLOW_HOSTS:
-        print(
-            "警告：未配置 OCR_URL_ALLOW_HOSTS，OCR 将拒绝所有回源下载请求",
-            file=sys.stderr,
-        )
-    print(
-        f"OCR MCP 服务启动，允许回源主机：{', '.join(sorted(ALLOW_HOSTS)) or '（无）'}",
-        file=sys.stderr,
-    )
     mcp.run(transport="streamable-http")

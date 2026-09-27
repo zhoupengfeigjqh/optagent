@@ -32,7 +32,6 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 from jev_core import (
-    ALLOW_HOSTS,
     BASE_URL,
     MODEL,
     JevError,
@@ -176,6 +175,5 @@ if __name__ == "__main__":
         model=MODEL,
         base_url=BASE_URL,
         api_key_configured=bool(API_KEY),
-        allow_hosts=sorted(ALLOW_HOSTS),
     )
     mcp.run(transport="streamable-http")

@@ -107,22 +107,22 @@ optagent/
 | `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
 | `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
-| `ocr-service/.env` | OCR 服务 | compose `env_file` 注入 ocr 容器 | **容器形态**配置（`OCR_URL_ALLOW_HOSTS=backend` 等，无密钥，入库） |
-| `ocr-service/.env.local` | OCR 服务 | compose `env_file` 注入 ocr 容器 | 本机私产：白名单**追加**宿主机 LAN IP（gitignore；样板 `.env.example`） |
-| `jev-service/.env` | Jev 服务 | compose `env_file` 注入 jev 容器 | **容器形态**配置（`JEV_URL_ALLOW_HOSTS=backend`，无密钥，入库） |
-| `jev-service/.env.local` | Jev 服务 | compose `env_file` 注入 jev 容器 | `TYPESAFE_API_KEY` + 白名单 LAN IP 追加（含密钥，gitignore；样板 `.env.example`） |
+| `ocr-service/.env.local` | OCR 服务 | compose `env_file`（`required: false`） | 本机私产：可调项（下载上限、超时）；缺失即用代码缺省值（gitignore；样板 `.env.example`） |
+| `jev-service/.env.local` | Jev 服务 | compose `env_file`（`required: false`） | `TYPESAFE_API_KEY` 与上游端点/超时等（含密钥，gitignore；样板 `.env.example`） |
 | `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`）。**（2026-09-27）** `admin-backend` 已不再挂载 `docker.sock` 与编排文件本身——平台不读容器编排声明与容器运行态 |
 
-读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务）：
-- **容器**：一律由 compose `env_file` 注入**服务自己的**配置——admin / ocr / jev 读各自的
-  `.env`（+ `.env.local` 追加覆盖）；agent 读 `.env` + `.env.local`（运行需要密钥）。
-  **compose 文件本身不逐行配置服务变量**；唯一的 `environment` 单点覆盖是
+读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务，2026-09-28 简化）：
+- **容器**：一律由 compose `env_file` 注入**服务自己的**配置——admin 读 `.env`（+ `.env.local`
+  追加覆盖）；agent 读 `.env` + `.env.local`（运行需要密钥）；**ocr / jev 只读各自可选的
+  `.env.local`**（它们没有"容器形态必需变量"：可调项都有代码缺省值，故 2026-09-28 起不再有
+  入库的 `.env`）。**compose 文件本身不逐行配置服务变量**；唯一的 `environment` 单点覆盖是
   `PUBLIC_BASE_URL`（容器内必须是服务名口径，本机 LAN IP 只留在 `.env.local`）；
 - **本地**：dev/start 只读 `.env.local`（`--env-file=.env.local`），不读 `.env`。
   `.env.local` 是**完整的本地形态配置**（非增量覆盖），样板 `.env.example` 含两形态完整对照。
-换机器/换网络时只动**三个** `.env.local` 里的同一个 LAN IP：`agent-backend` 的
-`PUBLIC_BASE_URL`、`ocr-service` 的 `OCR_URL_ALLOW_HOSTS`、`jev-service` 的
-`JEV_URL_ALLOW_HOSTS`（见下「本地配置要点」）。
+换机器/换网络时只需改**一处**：`agent-backend/.env.local` 的 `PUBLIC_BASE_URL`——它决定
+签名直链的 host，也就是 MCP 服务回源下载的目标。原先还要求 ocr / jev 各写一份同值白名单，
+该白名单已于 **2026-09-28 移除**（回源地址由运行环境**单点铸造**，服务侧不再各自验一遍
+主机名；理由与替代控制见下「本地配置要点」）。
 
 ## 功能模块说明
 
@@ -242,7 +242,7 @@ optagent/
 | 模块 | 作用 |
 |---|---|
 | `server.py` | MCP 服务入口，暴露 `ocr_image` 等工具 |
-| `ocr_core.py` | 表格识别核心：下载签名直链 → SSRF 白名单校验（`OCR_URL_ALLOW_HOSTS`）→ 识别 → 结构化输出 |
+| `ocr_core.py` | 文字识别核心：下载签名直链（**只接受 http/https** + 限时、限大小、不跟随重定向）→ 识别 → 结构化输出；异步回写的受理与结果形状也在此 |
 
 ### jev-service（Jev 决策 MCP 服务）
 
@@ -252,7 +252,7 @@ TypeSafe System One 决策模型（Jev）的 MCP 封装：把「state + 类型�
 | 模块 | 作用 |
 |---|---|
 | `server.py` | MCP 服务入口，暴露三个**原子工具**：`noul`（真假命题→0–1）、`choice`（择一→概率分布+置信度）、`score`（量表打分→加权分值+置信度）；运行时呈现为 `jev__noul` 等 |
-| `jev_core.py` | 调用核心：state 合并（LLM 文本 + 引用文件内容）、请求体构造与取值域校验、响应格式化、**有界指数退避**重试（429/529/5xx）、错误映射、回源 SSRF 白名单（`JEV_URL_ALLOW_HOSTS`） |
+| `jev_core.py` | 调用核心：state 合并（LLM 文本 + 引用文件内容，回源只接受 http/https 直链）、请求体构造与取值域校验、响应格式化、**有界指数退避**重试（429/529/5xx）、错误映射 |
 
 工具入参中的 state 为**双通道合并**：`state`（LLM 生成的文本）+ `state_file`（可选，
 文件空间相对路径，经 `file_args` 铸成签名直链后由本服务回源下载）。两者以
@@ -329,19 +329,23 @@ npm run dev
 **MCP 服务由管理员在平台内人工登记**（2026-09-27 起）：平台是 MCP 服务配置的**唯一权威源**，
 不再读取 `docker-compose.yml`、也不再读 Docker 容器状态。以 `jev` 为例：
 
-1. `/admin/mcp` 右上角「**新建 MCP 服务**」→ 填名称 `jev`、用途描述、传输方式 `streamable-http`
-   与**唯一连接地址**后保存（名称会成为运行环境的工具前缀，须为字母/数字/下划线/连字符）：
+1. `/admin/mcp` 右上角「**新建 MCP 服务**」→ 弹窗填名称 `jev`、用途描述、传输方式 `streamable-http`
+   与**唯一连接地址** → 点「创建服务」（名称会成为运行环境的工具前缀，须为字母/数字/下划线/连字符）。
+   创建成功即进入该服务**详情页并自动测试一次**连接：地址填错时结果弹窗直接给出原因
+   （连接被拒／超时／协议不匹配）。弹窗只收基础连接信息，**在线测试在详情页做**——
+   `/api/admin/mcp/services/{name}/test` 只接受已登记的服务，所以测试时机是"创建后立刻"：
 
-   | 部署形态 | `url` |
+   | MCP 服务跑在哪 | 该填的 `url` |
    |---|---|
    | 全 Docker（容器内互访） | `http://jev:8000/mcp` |
-   | 后端跑在宿主机 | `http://<宿主机 LAN IP>:8001/mcp` |
+   | 宿主机的服务（后端也在宿主机） | `http://<宿主机 LAN IP>:8001/mcp` |
 
-   随后进详情保存**调用配置**：`file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条
+2. 在详情页补全**调用配置**并保存：`file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条
    `state_file: url`，否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
    `confirmation` 建议 `never`（纯求值、无副作用），`rules_fields` 留空。
+   「发起测试」就在连接地址旁，改完地址可**先测再保存**。
 
-2. 数字人设计态勾选 `mcp_services` 含 `jev` → 部署 → 平台物化 `MCP.json` → Agent 运行时加载。
+3. 数字人设计态勾选 `mcp_services` 含 `jev` → 部署 → 平台物化 `MCP.json` → Agent 运行时加载。
 
 > 修改调用配置会**自动作用于所有引用它的数字人**（下次部署生效）；删除服务时若仍被引用，
 > 平台会先列出受影响数字人并要求二次确认，删除后这些引用变为失效（保存与部署都会被拦截）。
@@ -356,60 +360,45 @@ npm run dev
 
 ## 本地配置要点：文件回源链路必须使用本机 IP
 
-agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `http://<主机>:3000/api/files/raw?...&sig=...`），交给 MCP 服务（如 OCR / Jev）回源下载。这条链路要求**三个文件写同一个主机名**——即本机局域网 IP（用 `ipconfig` 查看实际 IPv4 地址，下文以 `192.168.1.3` 为例）：
+agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `http://<主机>:3000/api/files/raw?...&sig=...`），交给 MCP 服务（如 OCR / Jev）回源下载。这条链路只有**一处**配置决定主机名——即本机局域网 IP（用 `ipconfig` 查看实际 IPv4 地址，下文以 `192.168.1.3` 为例）：
 
 | 配置项 | 位置 | 作用 |
 |---|---|---|
 | `PUBLIC_BASE_URL` | `agent-backend/.env.local` | 铸造签名 URL 时使用的对外基址（容器形态由 compose 覆盖为 `http://backend:3000`） |
-| `OCR_URL_ALLOW_HOSTS` | **`ocr-service/.env.local`** | OCR 回源白名单（**追加**在 `.env` 的 `backend` 之后） |
-| `JEV_URL_ALLOW_HOSTS` | **`jev-service/.env.local`** | Jev 回源白名单（同上） |
 
 ```env
 # agent-backend/.env.local
 PUBLIC_BASE_URL=http://192.168.1.3:3000
 ```
 
-```env
-# ocr-service/.env.local（首次：cp ocr-service/.env.example ocr-service/.env.local）
-OCR_URL_ALLOW_HOSTS=backend,192.168.1.3
-```
+> **2026-09-28 变更：回源 host 白名单已移除。** ocr / jev 原先各有一份
+> `OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS`（默认空集 = 拒绝一切回源），现整体删除：
+> - 回源直链与 `result_url` 都由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入
+>   （URL 类参数一律经 `file_args` 的 `url` / `url:from=` 注入，模型无从指定主机），
+>   服务侧再验一遍 host 属于同一判据的第二次执行；
+> - 它要求"直链基址 + 每个 MCP 服务各一份白名单"三处写同一个主机名，**IP 一变就漏**，
+>   历史上已因此出现过"回源被 SSRF 拒绝"的故障；
+> - 服务侧保留的防护与白名单无关：**只接受 http/https**、不跟随重定向、下载超时、大小上限。
+> - 附带效果：`ocr-service/.env`、`jev-service/.env` 两个入库文件随之删除（它们只剩白名单一行），
+>   这两个服务在 compose 里只注入**可选**的本机私产 `.env.local`。
 
-```env
-# jev-service/.env.local（首次：cp jev-service/.env.example jev-service/.env.local）
-TYPESAFE_API_KEY=...
-JEV_URL_ALLOW_HOSTS=backend,192.168.1.3
-```
-
-> **为什么白名单在服务自己的文件里**（2026-09-23 变更）：原先由 `docker-compose.yml` 的
-> `environment` 拿根 `.env` 的 `HOST_LAN_IP` 拼装——一处配置两个主人（compose 里的默认值与
-> 根 `.env` 的覆盖并存），而且**只有重建容器才生效**：`docker restart` 或机器重启后由
-> `restart: unless-stopped` 拉起，都只是让**既有容器**再跑一遍，环境变量仍是**创建时**固化
-> 的旧值。现在 compose 只声明"注入哪个文件"，服务配置归服务文件，改完 `docker compose
-> up -d ocr jev` 重建即生效。
->
-> `backend` 保留给全 Docker 形态（容器内互访）；本地运行时 backend 跑在宿主机，容器需经宿主
-> IP 回源，故追加该 IP。白名单只影响**引用文件回源下载**（OCR 的 `image`、Jev 的
-> `state_file`），纯文本调用不受影响。
-
-改完后需要**重建** MCP 容器、重启 backend 才生效：
+改完需要**重建** MCP 容器、重启 backend 才生效（环境变量在容器创建时固化，`restart` 不更新）：
 
 ```bash
-docker compose up -d ocr jev    # 重建容器（只 restart 不会更新环境变量！）
+docker compose up -d --build ocr jev    # 代码变更必须重建镜像；环境变量同样只在重建时固化
 # agent-backend 重启（Ctrl+C 后重新 npm run dev）
 ```
 
-改完**先验证容器真的拿到了新值**（别只看 compose 文件——它只是"下次创建时会用的值"）：
+改完**先确认容器真的拿到了新值**（别只看 compose 文件——它只是"下次创建时会用的值"）：
 
 ```bash
-docker compose config | grep ALLOW_HOSTS                    # 插值后即将使用的值
-docker inspect optagent-ocr --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ALLOW_HOSTS
-docker inspect optagent-jev --format '{{range .Config.Env}}{{println .}}{{end}}' | grep ALLOW_HOSTS
+docker compose config | grep PUBLIC_BASE_URL
+docker inspect optagent-backend --format '{{range .Config.Env}}{{println .}}{{end}}' | grep PUBLIC_BASE_URL
 ```
 
-**为什么不能写 `localhost`**——两个层面都会失败：
-
-1. **白名单是字符串精确匹配**：容器收到的 URL host 是 `192.168.1.3`，与 allowlist 里的 `localhost` 字面不匹配 → SSRF 拒绝。
-2. **容器内的 localhost 不是宿主机**：回源动作由 OCR / Jev 容器发起，容器内的 `localhost`/`127.0.0.1` 指向容器自己（其 3000 端口无服务），不是宿主机。容器访问宿主机必须用宿主在网络中的名字——局域网 IP 或 `host.docker.internal`。
+**为什么不能写 `localhost`**——回源动作由 OCR / Jev **容器**发起，容器内的
+`localhost`/`127.0.0.1` 指向容器自己（其 3000 端口无服务），不是宿主机。容器访问宿主机必须用
+宿主在网络中的名字——局域网 IP 或 `host.docker.internal`。
 
 ## 常用命令
 

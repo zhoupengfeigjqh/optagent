@@ -822,7 +822,7 @@ MCP 服务调用配置新增 `async_tools` 字段（缺省 = 不启用）：
 | `result_url` | 行为 |
 |---|---|
 | 缺省 / 空 | **同步**：校验 → 下载 → 识别 → 返回**上述 JSON 文本** |
-| 有值且通过 host 白名单 | **异步**：**立即返回受理** `{"job_id":"…","status":"accepted","message":"…"}`；识别在后台线程进行，完成后把**上述 JSON** `POST` 回 `result_url` |
+| 有值且协议为 http/https | **异步**：**立即返回受理** `{"job_id":"…","status":"accepted","message":"…"}`；识别在后台线程进行，完成后把**上述 JSON** `POST` 回 `result_url` |
 
 **回写形状**：`POST {result_url}&filename={job_id}.json`，body = **标准 JSON**（utf-8，`content-type: application/json; charset=utf-8`）。`job_id` 形如 `ocr_<毫秒时间戳>_<随机 8 位>`（时间戳在前便于人眼排序，随机后缀防同毫秒碰撞）。落盘名由运行环境补 `{prefix}_` 前缀 ⇒ `{prefix}_ocr_….json`（§10.3/§10.4 口径）。
 
@@ -830,7 +830,9 @@ MCP 服务调用配置新增 `async_tools` 字段（缺省 = 不启用）：
 
 **摘要口径**（`summary` 参数，决定界面标题）：失败 → `message`（错误原因）；成功 → `text` 的**首个非空行**。限 200 字符。
 
-**安全（MUST）**：`result_url` **MUST** 过与回源下载**同一份** host 白名单（`OCR_URL_ALLOW_HOSTS`）——否则一个被模型幻觉出来、或被篡改的 `result_url` 就能让本服务向任意主机发 POST（**SSRF**）。未通过校验时**忽略该参数并降级为同步**，且在返回文案里说明（不静默）。
+**安全（2026-09-28 修订）**：`result_url` **MUST** 由运行环境注入（模型填的值一律被覆盖），服务侧 **MUST** 只接受 **http/https** 的 `result_url`——其余情况**忽略该参数并降级为同步**，且在返回文案里说明（不静默）。
+
+原"**MUST** 过与回源下载同一份 host 白名单（`OCR_URL_ALLOW_HOSTS`）"**已废止**：该要求让"平台直链基址 + 每个 MCP 服务各一份白名单"三处必须写同一个主机名，IP 一变就漏（历史上已因此出现过"回源被拒绝"的故障）。SSRF 的防线收敛到**唯一的生产者**：平台只把 `PUBLIC_BASE_URL` 下的直链交给服务，且 URL 类参数一律经 `file_args` 的 `url` / `url:from=` 注入（模型无从指定主机）。服务侧保留的廉价兜底：只接受 http(s)、不跟随重定向、超时、大小上限。
 
 **可测性**：结果形状构造、受理响应构造、回写 URL 拼装（保留原有 query）、`job_id` 生成与 `POST` 回写都放在 `ocr_core`（**不依赖模型**），单测在宿主机本地跑（原则三）。
 

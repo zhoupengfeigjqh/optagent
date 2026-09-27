@@ -3,7 +3,7 @@
 运行方式（**宿主机本地**；宪章原则三：测试环境＝仅本地，容器 MUST NOT 承担测试职责）：
     cd jev-service && pip install -r requirements-test.txt && python -m pytest -q tests
 
-覆盖：回源白名单（默认拒绝 / 命中放行 / 非 http 拒绝）、state 解析与**合并**
+覆盖：回源**协议**校验（非 http/https 拒绝）、state 解析与**合并**
 （纯文本、仅文件、两者合并、来源标注、编码回退、尺寸上限、未铸链诊断）、
 三个 primitive 的请求体构造与取值域校验、响应格式化、错误映射与退避有界，
 以及带重试调用的"该重试几次就几次 / 不该重试就一次都不多"。
@@ -17,7 +17,6 @@ import httpx
 import pytest
 
 _ENV_KEYS = (
-    "JEV_URL_ALLOW_HOSTS",
     "JEV_BASE_URL",
     "JEV_MODEL",
     "JEV_TIMEOUT_S",
@@ -84,27 +83,24 @@ def _sequence_transport(statuses, body: bytes = b"{}", seen: list | None = None)
     return httpx.MockTransport(handler)
 
 
-# ---------- 回源白名单 ----------
+# ---------- 回源协议校验 ----------
 
 
-def test_default_allowlist_is_empty_and_denies_everything(monkeypatch):
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "ftp://backend/x", "临时空间/订单.csv", "not-a-url"]
+)
+def test_check_http_url_rejects_non_http_scheme(monkeypatch, url):
     core = _load_core(monkeypatch)
 
-    assert core.ALLOW_HOSTS == set()
-    assert core.check_url("http://backend:3000/api/files/raw") is not None
+    assert core.check_http_url(url) is not None
 
 
-def test_allowed_host_passes_and_match_is_case_insensitive(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS=" Backend , gateway ")
+def test_check_http_url_accepts_any_http_host(monkeypatch):
+    """回归锚点：白名单已移除（2026-09-28）——任意 http(s) 主机都放行，协议校验仍在。"""
+    core = _load_core(monkeypatch)
 
-    assert core.check_url("http://BACKEND:3000/api/files/raw") is None
-    assert core.check_url("http://gateway/x") is None
-
-
-def test_non_http_scheme_is_rejected(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
-
-    assert core.check_url("file:///etc/passwd") is not None
+    assert core.check_http_url(SIGNED) is None
+    assert core.check_http_url("http://192.168.1.2:3000/api/files/raw") is None
 
 
 # ---------- 来源标注 ----------
@@ -168,7 +164,7 @@ def test_merge_state_without_any_content_raises(monkeypatch):
 
 
 def test_resolve_state_merges_text_and_file(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     out = core.resolve_state(
         "客户投诉三次", SIGNED, transport=_transport(200, "序号,金额\n1,100".encode())
@@ -180,7 +176,7 @@ def test_resolve_state_merges_text_and_file(monkeypatch):
 
 
 def test_resolve_state_file_only(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     out = core.resolve_state("", SIGNED, transport=_transport(200, "内容".encode()))
 
@@ -189,7 +185,7 @@ def test_resolve_state_file_only(monkeypatch):
 
 def test_resolve_state_rejects_blank_file_without_text(monkeypatch):
     """空白文件 + 无文本 = 没有可判断的内容：报错，而不是拼出一个只剩标题的空壳分节。"""
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("", SIGNED, transport=_transport(200, b"   \n  "))
@@ -198,7 +194,7 @@ def test_resolve_state_rejects_blank_file_without_text(monkeypatch):
 
 
 def test_resolve_state_drops_blank_file_section_when_text_given(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     out = core.resolve_state("客户投诉", SIGNED, transport=_transport(200, b"  \n"))
 
@@ -208,7 +204,7 @@ def test_resolve_state_drops_blank_file_section_when_text_given(monkeypatch):
 
 def test_resolve_state_rejects_relative_path_in_state_file(monkeypatch):
     """未铸链的诊断：收到相对路径说明平台侧 file_args 没声明（可操作提示，而非泛泛报错）。"""
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("文本", "临时空间/订单.csv")
@@ -216,17 +212,8 @@ def test_resolve_state_rejects_relative_path_in_state_file(monkeypatch):
     assert "file_args" in str(err.value)
 
 
-def test_resolve_state_rejects_unauthorized_host(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
-
-    with pytest.raises(core.JevError) as err:
-        core.resolve_state("", "http://evil.local/api/files/raw?p=a.csv")
-
-    assert "不在允许名单" in str(err.value)
-
-
 def test_resolve_state_reports_download_failure(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("", SIGNED, transport=_transport(403, b"denied"))
@@ -236,7 +223,7 @@ def test_resolve_state_reports_download_failure(monkeypatch):
 
 
 def test_resolve_state_decodes_gbk_file(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     out = core.resolve_state("", SIGNED, transport=_transport(200, "客户投诉".encode("gbk")))
 
@@ -244,7 +231,7 @@ def test_resolve_state_decodes_gbk_file(monkeypatch):
 
 
 def test_resolve_state_rejects_undecodable_file(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend")
+    core = _load_core(monkeypatch)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("", SIGNED, transport=_transport(200, b"\xff\xff\xff"))
@@ -253,7 +240,7 @@ def test_resolve_state_rejects_undecodable_file(monkeypatch):
 
 
 def test_resolve_state_rejects_oversized_file(monkeypatch):
-    core = _load_core(monkeypatch, JEV_URL_ALLOW_HOSTS="backend", JEV_MAX_FILE_BYTES=4)
+    core = _load_core(monkeypatch, JEV_MAX_FILE_BYTES=4)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("", SIGNED, transport=_transport(200, b"12345"))
@@ -272,9 +259,7 @@ def test_resolve_state_rejects_oversized_merged_state(monkeypatch):
 
 def test_resolve_state_checks_size_after_merge(monkeypatch):
     """上限判据作用在**合并后**的 state 上，而不是只看文本部分。"""
-    core = _load_core(
-        monkeypatch, JEV_URL_ALLOW_HOSTS="backend", JEV_MAX_STATE_CHARS=20
-    )
+    core = _load_core(monkeypatch, JEV_MAX_STATE_CHARS=20)
 
     with pytest.raises(core.JevError) as err:
         core.resolve_state("文本", SIGNED, transport=_transport(200, "很长的文件内容" * 5))

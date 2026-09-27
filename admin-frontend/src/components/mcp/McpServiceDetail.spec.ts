@@ -1,28 +1,29 @@
 /**
- * 组件测试：MCP 服务详情（2026-09-27 按钮位置调整）
+ * 组件测试：MCP 服务详情（2026-09-27 改版）
  *
- * 守住三条容易回退的口径：
- * 1. **页面级动作在右上角**——「删除服务」「保存调用配置 / 创建服务」在页头，不在表单里；
+ * 守住四条容易回退的口径：
+ * 1. **页面级动作在右上角**——「删除服务」「保存调用配置」在页头，不在表单里；
  * 2. 右上角的保存**走表单自身的提交路径**（含本地校验），不是第二套判据；
- * 3. 配置面板**常驻**（`v-show`）——切页签回来时未保存的编辑不丢，保存按钮在任意页签可用。
+ * 3. 配置面板**常驻**（`v-show`）——切页签回来时未保存的编辑不丢，保存按钮在任意页签可用；
+ * 4. 暴露的 `runTest()`（父级"创建成功后自动测试一次"用）与「发起测试」按钮**同一路径**。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpServiceDetail from './McpServiceDetail.vue'
-import type { McpServiceDetail as Detail } from '../../api/types'
+import type { ErrorInfo, McpServiceDetail as Detail } from '../../api/types'
 
 const saveMcpServiceConfig = vi.fn()
-const createMcpService = vi.fn()
 const deleteMcpService = vi.fn()
+const testMcpService = vi.fn()
 const fetchReferences = vi.fn()
 
 vi.mock('../../api/mcp', () => ({
   listMcpServices: vi.fn(),
   getMcpService: vi.fn(),
-  createMcpService: (...a: unknown[]) => createMcpService(...a),
+  createMcpService: vi.fn(),
   saveMcpServiceConfig: (...a: unknown[]) => saveMcpServiceConfig(...a),
   deleteMcpService: (...a: unknown[]) => deleteMcpService(...a),
-  testMcpService: vi.fn(),
+  testMcpService: (...a: unknown[]) => testMcpService(...a),
   fetchMcpStats: vi.fn().mockResolvedValue({ stats_available: true, items: [], groups: [] }),
 }))
 
@@ -51,8 +52,18 @@ const SERVICE: Detail = {
   revision: 1,
 }
 
-function mountDetail(service: Detail | null = SERVICE, isNew = false) {
-  return mount(McpServiceDetail, { props: { service, isNew, error: null } })
+function mountDetail(
+  service: Detail | null = SERVICE,
+  extra: { loading?: boolean; openedName?: string; error?: ErrorInfo | null } = {},
+) {
+  return mount(McpServiceDetail, {
+    props: {
+      openedName: extra.openedName ?? service?.name ?? 'ghost',
+      service,
+      loading: extra.loading ?? false,
+      error: extra.error ?? null,
+    },
+  })
 }
 
 function button(wrapper: ReturnType<typeof mountDetail>, text: string) {
@@ -80,8 +91,14 @@ beforeEach(() => {
     revision: 2,
     affected_agents: [],
   })
-  createMcpService.mockReset()
   deleteMcpService.mockReset().mockResolvedValue(undefined)
+  testMcpService.mockReset().mockResolvedValue({
+    ok: true,
+    connectivity: { ok: true, duration_ms: 1 },
+    capability: { ok: true, method: 'ping', duration_ms: 1 },
+    target: { transport: 'http', url: 'http://192.168.1.2:8000/mcp', command: null },
+    checked_at: '2026-09-27T00:00:00.000Z',
+  })
   fetchReferences.mockReset().mockResolvedValue({ target_type: 'mcp_service', target_name: 'ocr', affected: [] })
 })
 
@@ -96,12 +113,18 @@ describe('McpServiceDetail —— 页面级动作位置', () => {
     expect(wrapper.findAll('button').filter((b) => /保存调用配置|创建服务/.test(b.text()))).toHaveLength(1)
   })
 
-  it('新建态：右上角只有「创建服务」，无删除入口', async () => {
-    const wrapper = mountDetail(null, true)
+  it('暴露的 runTest()（父级"创建后自动测试一次"用）：按表单当前值探测并播报结果', async () => {
+    const wrapper = mountDetail()
     await flushPromises()
 
-    expect(headerActions(wrapper).text()).toContain('创建服务')
-    expect(headerActions(wrapper).text()).not.toContain('删除服务')
+    await (wrapper.vm as unknown as { runTest: () => Promise<void> }).runTest()
+    await flushPromises()
+
+    expect(testMcpService).toHaveBeenCalledWith('ocr', {
+      transport: 'http',
+      url: 'http://192.168.1.2:8000/mcp',
+    })
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('连通性与能力验证均通过')
   })
 
   it('点击右上角保存 → 走表单提交路径发出 PUT（含当前 revision）', async () => {
@@ -148,6 +171,42 @@ describe('McpServiceDetail —— 页面级动作位置', () => {
     await flushPromises()
     expect(deleteMcpService).toHaveBeenCalledWith('ocr')
     expect(wrapper.emitted('deleted')?.[0]).toEqual(['ocr'])
+  })
+})
+
+describe('McpServiceDetail —— 加载态（方案 B，2026-09-28）', () => {
+  it('加载中：标题用已知服务名、给出加载提示、页头动作禁用（revision 未到手）', async () => {
+    const wrapper = mountDetail(null, { loading: true, openedName: 'antv' })
+    await flushPromises()
+
+    expect(wrapper.find('#mcp-detail-title').text()).toBe('antv')
+    expect(wrapper.text()).toContain('正在读取调用配置与工具清单')
+    // 数据未到手：不得渲染表单，也不得让"保存/删除"可点
+    expect(wrapper.find('#mcp-description').exists()).toBe(false)
+    expect(wrapper.find('[data-test="save"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="delete"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('数据到手后动作区恢复可用', async () => {
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="save"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="delete"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('读取失败：停在详情页给出可读原因与「重试」（不是默默退回列表）', async () => {
+    const wrapper = mountDetail(null, {
+      openedName: 'antv',
+      error: { code: 'ADM_RUNTIME_UNREACHABLE', message: '连不上' },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('未能读取该服务的配置')
+    expect(wrapper.text()).toContain('ADM_RUNTIME_UNREACHABLE')
+
+    await wrapper.find('[data-test="retry"]').trigger('click')
+    expect(wrapper.emitted('reload')).toEqual([[]])
   })
 })
 

@@ -45,13 +45,10 @@ services:
     # 向宿主机发布 8000：本地直跑（非 Docker）的 backend 经 LAN IP 访问 OCR
     ports:
       - "8000:8000"
+    # 可调项（下载上限、超时）都有代码缺省值；本机私产放 .env.local（gitignore，缺失不报错）。
+    # 2026-09-28：回源 host 白名单（OCR_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
+    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名（也无需三处配置对齐）。
     env_file:
-      # 容器形态配置 = 入库的 .env（与 backend / admin-backend 同模式，2026-09-23 起）：
-      # compose 文件本身不再逐行拼装 OCR_URL_ALLOW_HOSTS。旧写法一处配置两个主人，
-      # 且必须**重建**容器才生效（只 restart 会继续用创建时固化的旧值）。
-      # .env.local（本机私产，gitignore）= 宿主机 LAN IP 的追加白名单，缺失不报错
-      # （容器形态靠 .env 里的 `backend` 已足够，缺的只是本机形态的回源）。
-      - ./ocr-service/.env
       - path: ./ocr-service/.env.local
         required: false
     restart: unless-stopped
@@ -66,14 +63,12 @@ services:
     # 端口固定 8001（2026-09-23：取消根 .env 插值，编排层不再有可变项）
     ports:
       - "8001:8000"
+    # 本机私产放 .env.local（gitignore）：TYPESAFE_API_KEY、上游端点与超时等；
+    # 缺失不报错（Key 缺省时服务照常启动，三个工具返回可读错误）。
+    # 首次：cp jev-service/.env.example jev-service/.env.local 并填入 Key。
+    # 2026-09-28：回源 host 白名单（JEV_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
+    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名。
     env_file:
-      # 容器形态配置 = 入库的 .env（与 backend / admin-backend 同模式，2026-09-23 起）：
-      # compose 文件本身不再逐行拼装 JEV_URL_ALLOW_HOSTS（旧写法一处配置两个主人，
-      # 且必须**重建**容器才生效，只 restart 会继续用创建时固化的旧值）。
-      # .env.local（本机私产，gitignore）：TYPESAFE_API_KEY + 宿主机 LAN IP 白名单；
-      # 缺失不报错（Key 缺省时服务照常启动，三个工具返回可读错误）。
-      # 首次：cp jev-service/.env.example jev-service/.env.local 并填入 Key
-      - ./jev-service/.env
       - path: ./jev-service/.env.local
         required: false
     restart: unless-stopped
