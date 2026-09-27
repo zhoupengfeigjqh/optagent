@@ -25,9 +25,7 @@ describe('文案映射表完整性', () => {
 
   it('新增 ADM_ 码与复用码都以可读中文呈现', () => {
     expect(toUserMessage({ code: 'ADM_SKILL_ARCHIVE_UNSAFE', message: 'raw' })).toContain('安全风险')
-    expect(toUserMessage({ code: 'ADM_RUNTIME_FORM_NOT_CONFIGURED', message: 'raw' })).toContain(
-      '运行形态',
-    )
+    expect(toUserMessage({ code: 'ADM_MCP_SERVICE_EXISTS', message: 'raw' })).toContain('已存在')
   })
 })
 

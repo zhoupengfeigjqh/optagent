@@ -44,9 +44,16 @@ export function registerDeployRoutes(
     return deployer.history.list(limit);
   });
 
+  /**
+   * 部署清单（§6.8）。
+   *
+   * 同时返回平台设计态的当前 `revision`：部署接口需要乐观锁版本，而
+   * 「目标运行形态」下架后不再有 `/platform/settings` 作为版本来源，
+   * 故由部署功能区自己的读端点提供（2026-09-27）。
+   */
   app.get('/api/admin/deploy/manifest', async () => {
     const items = deployer.manifest.read();
-    return { items, total: items.length };
+    return { items, total: items.length, revision: ctx.store.revision() };
   });
 
   /**

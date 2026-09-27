@@ -11,8 +11,8 @@ import { ApiError, revisionConflict, validationFailed } from '../../src/domain/a
 import { ALL_ERROR_CODES, ERROR_CODES, ERROR_STATUS, PLATFORM_OPERATOR } from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 24 个码，且与 HTTP 状态映射一一对应（契约 §0.4）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(24);
+  it('共 21 个码，且与 HTTP 状态映射一一对应（契约 §0.4）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(21);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }

@@ -47,6 +47,19 @@
       "rules_fields": {},
       "async_tools": [],
       "updated_at": "2026-09-25T04:14:38.318Z"
+    },
+    "antv": {
+      "name": "antv",
+      "description": "画图",
+      "transport": "http",
+      "url": "https://mcp.api-inference.modelscope.net/2cffb77e48c640/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": "never",
+      "rules_fields": {},
+      "async_tools": [],
+      "updated_at": "2026-09-27T15:33:49.304Z"
     }
   }
 }

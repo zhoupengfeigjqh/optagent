@@ -106,9 +106,9 @@ services:
     logging: *default-logging
 
   # ---- 数字人管理平台：管理服务 ----
-  # 风险登记（research.md D3）：挂载 docker.sock **等价于授予宿主机 root 权限**，
-  # 故本容器可访问的 Docker 操作限定为「容器状态/日志查询 + 白名单内 start/stop」，
-  # 收口在 infra/docker-host.ts 单一模块，**不暴露任意 API 透传**。
+  # 2026-09-27：MCP 服务改为**平台内全人工配置**，平台不再读容器编排声明、
+  # 也不再读 Docker 容器状态，故本服务**不再挂载 docker.sock，也不再挂载
+  # docker-compose.yml**（原有的容器状态/日志/启停能力已整体下架）。
   admin-backend:
     build: ./admin-backend
     container_name: optagent-admin-backend
@@ -124,10 +124,6 @@ services:
       - ./admin-backend/.platform-data:/app/.platform-data
       # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
       - ./agent-backend/.opt-agent:/app/.opt-agent
-      # 编排声明（只读投影，FR-043）
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
-      # 容器状态/日志/启停（风险见上方注释）
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - backend
     restart: unless-stopped

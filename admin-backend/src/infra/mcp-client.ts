@@ -47,8 +47,8 @@ export interface McpTestReport {
 function assertTargetUsable(target: McpConnectionTarget, serviceName: string): void {
   if (target.transport === 'http' && !target.url) {
     throw new ApiError(
-      ERROR_CODES.ADM_RUNTIME_FORM_NOT_CONFIGURED,
-      `MCP 服务 ${serviceName} 在当前目标运行形态下没有连接地址`,
+      ERROR_CODES.VALIDATION_FAILED,
+      `MCP 服务 ${serviceName} 尚未配置连接地址（http 传输必填）`,
     );
   }
   if (target.transport === 'stdio' && !target.command) {

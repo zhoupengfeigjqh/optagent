@@ -4,9 +4,9 @@
  * 流程固定为：**只读预校验 → 全部通过才写入**（`FR-027`）。
  * 校验不通过时**运行环境写入次数为 0**（`SC-020`），并**一次性列出全部错误项**。
  *
- * 错误码选择规则（使三类具体原因都能被直接看到，而不是一律压在通用码下）：
- * - 全部错误项**同码** → 直接返回该码（如 `ADM_RUNTIME_FORM_NOT_CONFIGURED`、
- *   `ADM_DEPLOY_TARGET_NOT_WRITABLE`），便于界面与合作方按码处理；
+ * 错误码选择规则（使各类具体原因都能被直接看到，而不是一律压在通用码下）：
+ * - 全部错误项**同码** → 直接返回该码（如 `ADM_DEPLOY_TARGET_NOT_WRITABLE`、
+ *   `ADM_AGENT_INVALID_REF`），便于界面与合作方按码处理；
  * - 混合原因 → 返回 `ADM_DEPLOY_VALIDATION_FAILED`，`details.errors` 含全部错误项。
  * 两种情况下 `details.errors` 都完整——"一次性列出全部"不被这条规则削弱。
  */
@@ -19,7 +19,6 @@ import type { AgentDesignDocument, AgentDesignService } from '../config-center/a
 import type { UnifiedCatalog } from '../config-center/unified-catalog.js';
 import type { UserLinkService } from '../config-center/user-links.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
-import type { PlatformSettingsService } from '../platform-settings.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import type { DeployHistoryService, DeployUserRecord } from './history.js';
 import type { DeployManifestService, ManifestDiffEntry } from './manifest.js';
@@ -36,7 +35,6 @@ export interface DeployerDeps {
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
   catalog: UnifiedCatalog;
-  settings: PlatformSettingsService;
   writer: OptAgentWriter;
   manifest: DeployManifestService;
   history: DeployHistoryService;
@@ -49,7 +47,6 @@ export interface DeployValidationResult {
 }
 
 export interface DeployRunResult {
-  target_runtime_form: string;
   users: DeployUserRecord[];
   manifest_diff: ManifestDiffEntry[];
   history_id: string;
@@ -89,9 +86,7 @@ export class Deployer {
     const { errors, targets, snapshot } = await this.collect(userIds);
     if (errors.length > 0) throw validationError(errors);
 
-    const form = this.deps.settings.targetForm();
     const context: MaterializeContext = {
-      form,
       mcpConfigs: this.deps.mcpConfigs,
       skills: this.deps.skills,
     };
@@ -104,7 +99,6 @@ export class Deployer {
     this.deps.logger.info(
       {
         event: 'deploy.begin',
-        target_runtime_form: form,
         users: targets.map((t) => t.user_id),
         agent_count: targets.reduce((sum, t) => sum + t.agents.length, 0),
       },
@@ -154,7 +148,6 @@ export class Deployer {
     this.deps.logger.info(
       {
         event: 'deploy.done',
-        target_runtime_form: form,
         ok_users: results.filter((r) => r.ok).length,
         failed_users: errorCount,
         written_agents: results.flatMap((r) => r.agents).length,
@@ -164,7 +157,6 @@ export class Deployer {
       `部署完成：成功 ${results.filter((r) => r.ok).length} / 失败 ${errorCount} 个用户`,
     );
     const historyId = this.deps.history.append({
-      target_runtime_form: form,
       result: errorCount === 0 ? 'succeeded' : errorCount === results.length ? 'failed' : 'partial',
       users: results,
       validation: { passed: true, error_count: 0 },
@@ -174,7 +166,7 @@ export class Deployer {
     });
     void snapshot;
 
-    return { target_runtime_form: form, users: results, manifest_diff: diffs, history_id: historyId };
+    return { users: results, manifest_diff: diffs, history_id: historyId };
   }
 
   /**
@@ -207,7 +199,6 @@ export class Deployer {
     snapshot: Awaited<ReturnType<UnifiedCatalog['snapshot']>>;
   }> {
     const snapshot = await this.deps.catalog.snapshot();
-    const form = this.deps.settings.targetForm();
 
     const all: PrecheckUser[] = this.deps.users
       .listAll()
@@ -229,8 +220,6 @@ export class Deployer {
       readDesign: (name) => this.deps.agents.readOrNull(name),
       index: snapshot.index,
       toolsUnavailableReason: snapshot.toolsUnavailableReason,
-      runtimeForm: form,
-      endpointFor: (serviceName) => this.deps.mcpConfigs.endpointFor(serviceName, form),
       isWritable: (userId) => this.isUserTargetWritable(userId),
     });
     return { errors, targets, snapshot };

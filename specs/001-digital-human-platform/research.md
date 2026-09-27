@@ -43,7 +43,7 @@
 | `@fastify/multipart` | `^10.1.1` | SKILL ZIP 上传 | 复用 |
 | `zod` | `^4.5.4` | `.env` 与请求体校验 | 复用 |
 | `pino` / `pino-pretty` | `^10.3.1` / `^13.1.3` | 日志 | 复用 |
-| `yaml` | `^2.9.0` | 只读解析 `docker-compose.yml`（`FR-043`） | 复用 |
+| ~~`yaml`~~ | ~~`^2.9.0`~~ | ~~只读解析 `docker-compose.yml`（`FR-043`）~~ **（2026-09-27 移除）** 平台不再解析编排文件，依赖已删除 | 已移除 |
 | `@modelcontextprotocol/sdk` | `^1.30.0` | MCP 客户端：列工具、连通性与能力测试（`FR-045/047`） | 复用 |
 | **`yauzl`** | 见 D7 | SKILL ZIP 安全解压 | **新增（已论证）** |
 
@@ -53,11 +53,11 @@
 
 | 候选 | 不引入的理由 |
 |---|---|
-| `dockerode` 等 Docker SDK | Node 内置 `http` + `socketPath` 即可直连 Docker Engine API（见 D3），属"能用原生能力实现" |
+| `dockerode` 等 Docker SDK | **（2026-09-27）** 平台不再访问 Docker Engine（D3 已废止），无需任何 Docker 客户端 |
 | `express` / `koa` | 既有后端已用 Fastify，同构优先 |
 | `better-sqlite3` | 平台设计态用 JSON + 原子替换即可（见 D4），无需新增引擎 |
 | `ajv` 之外的手写校验 | Fastify 5 内置 JSON Schema 校验（既有用法），请求体校验沿用 schema + zod |
-| `socket.io` / `EventSource` 封装 | 平台无流式需求（`FR-046` 的启停为短操作，用普通请求即可） |
+| `socket.io` / `EventSource` 封装 | 平台无流式需求（REST 短操作用普通请求即可） |
 
 ### `admin-frontend`
 
@@ -69,21 +69,18 @@
 
 ---
 
-## D3 宿主资源访问：Docker Engine API over Unix Socket（零依赖）
+## D3 ~~宿主资源访问：Docker Engine API over Unix Socket（零依赖）~~（2026-09-27 废止）
 
-**决策**：`admin-backend` 通过挂载的 `/var/run/docker.sock`，用 **Node 内置 `node:http` 的 `{ socketPath }`** 直接调用 Docker Engine API，不引入任何 Docker SDK。可访问的操作**限定为**：①容器列表与状态查询（`FR-043`）；②容器日志读取（`FR-048`）；③对**白名单内** MCP 服务容器的 `start` / `stop`（`FR-046`）。其余 API（构建、删除、exec、卷操作）**不得调用**，并在代码中以单一模块收口以便审查。
+**原决策**：`admin-backend` 通过挂载的 `/var/run/docker.sock`，用 Node 内置 `node:http` 的 `{ socketPath }` 直接调用 Docker Engine API，操作限定为容器状态查询、容器日志读取与白名单内服务的启停。
 
-**理由**：①`FR-043/046/048` 必须从宿主机读取容器状态与日志，这是唯一可行路径；②Node 内置 `http.request` 支持 `socketPath`，因此**零新增依赖**，符合原则六；③`docker-compose.yml` 的**声明式解析**交给 `yaml` 库（只读文件），与 Docker 查询职责分离——文件声明是"应该有什么"，Engine API 是"实际是什么"，两者的差异正是 `FR-052` 要求检测的对象。
+**废止理由**：MCP 服务改为**平台内全人工配置**后，平台是 MCP 服务配置的唯一权威源——不再需要读取容器编排声明（"应该有什么"）、也不再需要读取容器状态与日志（"实际是什么"）。相应地：
 
-**被否决的替代方案**：
+- 端点下架：`/start`、`/stop`、`/logs` 与 `platform/health` 的 `docker`/`compose_file` 字段（见 `contracts/admin-api.md` §1.1、§3）；
+- 需求废止：`FR-046`（启停）、`FR-048`（运行日志）、`FR-052` 的原编排比对口径；
+- 代码删除：`infra/docker-host.ts`、`infra/compose-reader.ts`；依赖删除：`yaml`；
+- 部署清理：`docker-compose.yml` 中 `admin-backend` 的 `/var/run/docker.sock` 与 `docker-compose.yml` 两个挂载已移除。
 
-| 方案 | 否决理由 |
-|---|---|
-| 容器内安装 `docker` + `compose` CLI | ①镜像显著变大（CLI + 插件）；②需处理"容器内路径 ↔ 宿主机路径"的映射才能让 compose 找到项目文件，脆弱；③属"引入非必要新基础设施"（原则六） |
-| 由 `agent-backend` 代理容器操作 | ①脏化数据面职责（管理面能力塞进对话服务）；②它自身也无 Docker 权限，等于把问题平移后仍需挂 socket |
-| `dockerode` 等 SDK | 功能远超声明的三项操作，属"能在原生能力上实现却引库" |
-
-**风险登记（MUST 在实现说明与部署说明中显式标注）**：挂载 Docker socket **等价于授予宿主机 root 权限**。本平台是单机内部管理工具，采用以下约束把暴露面压到最小：①只挂 socket，不挂 `docker` 二进制；②操作白名单收口在 `infra/docker-host.ts` 单一模块；③**不**暴露任何"任意 API 透传"端点，管理界面只能触发上述三类操作；④新增的 `GET /api/admin/platform/health` 明确报告 socket 是否可达，便于排查。
+**收益**：原"挂载 docker.sock 等价于授予宿主机 root 权限"这一最高权限边界**从本特性中彻底消失**，攻击面显著收窄。
 
 ---
 
@@ -137,7 +134,7 @@
 | 解析 MCP 容器日志统计 | ①日志格式随服务而异，解析脆弱；②一次 streamable-http 会话可能包含 `initialize` / `tools/list` / 多次 `tools/call`，"HTTP 请求数"与"工具调用次数"**不等价**，会给出误导性数字（`FR-049` 要求"成功/失败次数"） |
 | 平台作为 MCP 代理（数字人经平台调用 MCP） | ①把平台变成**运行期关键路径**——平台故障将导致数字人无法调用任何工具，违反 `FR-026`"使运行环境无需依赖平台即可独立加载"；②需改动运行环境既有的直连方式，改动面远大于加一个端点 |
 
-**与 `FR-005` / `SC-017` 的关系（MUST 回写规格）**：本决策与 `FR-048`（读容器日志）都要求平台**只读采集运行观测**，而 `SC-017` 现表述为"运行环境 → 平台的反向数据通道数量为 **0**"。二者需澄清：**「严格单向」约束的是配置数据流**（平台不得反向导入配置、运行环境不得回写平台配置），运行观测的只读采集不在其列。处置见 `plan.md` § 已知口径差异，MUST 在实现前补入 `spec.md` 的 `FR-005` / `SC-017`。
+**与 `FR-005` / `SC-017` 的关系（已回写规格）**：本决策要求平台**只读采集运行观测**，而 `SC-017` 现表述为"运行环境 → 平台的反向数据通道数量为 **0**"。二者需澄清：**「严格单向」约束的是配置数据流**（平台不得反向导入配置、运行环境不得回写平台配置），运行观测的只读采集不在其列。处置见 `plan.md` § 已知口径差异，**已补入** `spec.md` 的 `FR-005` / `SC-017`。**（2026-09-27）** 原同列的 `FR-048`（读容器日志）已废止，本决策现在是**唯一的**运行观测只读采集点。
 
 ---
 

@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { UnifiedCatalog } from '../../src/domain/config-center/unified-catalog.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
+import { McpServiceConfigService } from '../../src/domain/mcp/service-config.js';
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
-import { ComposeReader } from '../../src/infra/compose-reader.js';
 import { RuntimeClient } from '../../src/infra/runtime-client.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 
@@ -55,13 +55,13 @@ function memoryLogger() {
 }
 
 function buildCatalog(runtime: FlakyRuntime): UnifiedCatalog {
-  const composeFile = path.join(root, 'docker-compose.yml');
-  fs.writeFileSync(composeFile, 'services:\n  ocr:\n    build: ./ocr-service\n', 'utf8');
   const store = new PlatformStore(path.join(root, '.platform-data'));
   store.ensureLayout();
+  const mcpConfigs = new McpServiceConfigService(store);
+  mcpConfigs.create({ name: 'ocr', transport: 'http', url: 'http://ocr:8000/mcp' });
   return new UnifiedCatalog({
     runtime,
-    compose: new ComposeReader(composeFile),
+    mcpConfigs,
     skills: new SkillLibraryService(store),
     logger: memoryLogger(),
   });

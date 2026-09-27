@@ -21,7 +21,6 @@ const ALLOWED_DEPENDENCIES = new Set([
   'zod',
   'pino',
   'pino-pretty',
-  'yaml',
   '@modelcontextprotocol/sdk',
   'yauzl', // D7：唯一新增依赖（SKILL ZIP 安全解压）
 ]);

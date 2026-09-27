@@ -6,22 +6,15 @@
  *    而不是只留第一条；
  * 2. **空选择一律拒绝**（2026-09-16）：部署对象在用户卡片上勾选后传进来，
  *    空数组若要落回服务端"缺省 = 全部用户"，就会变成误部署全平台。
+ *
+ * **2026-09-27**：乐观锁版本改由**部署清单端点**提供（不再有 `/platform/settings`）。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDeploy } from './useDeploy'
 
-const fetchSettings = vi.fn()
-const fetchRuntimeForms = vi.fn()
-const saveSettings = vi.fn()
+const fetchManifest = vi.fn()
 const validateDeploy = vi.fn()
 const deployApi = vi.fn()
-
-vi.mock('../api/platform', () => ({
-  fetchSettings: (...a: unknown[]) => fetchSettings(...a),
-  fetchRuntimeForms: (...a: unknown[]) => fetchRuntimeForms(...a),
-  saveSettings: (...a: unknown[]) => saveSettings(...a),
-  fetchHealth: vi.fn(),
-}))
 
 vi.mock('../api/deploy', () => ({
   validateDeploy: (...a: unknown[]) => validateDeploy(...a),
@@ -29,36 +22,27 @@ vi.mock('../api/deploy', () => ({
   fetchReferences: vi.fn(),
   fetchAnomalies: vi.fn(),
   fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
+  fetchManifest: (...a: unknown[]) => fetchManifest(...a),
 }))
 
 beforeEach(() => {
-  fetchSettings.mockReset().mockResolvedValue({ target_runtime_form: 'container_network', revision: 7 })
-  fetchRuntimeForms.mockReset().mockResolvedValue({
-    items: [
-      { value: 'container_network', label: '容器编排内网' },
-      { value: 'host_local', label: '宿主机本地' },
-    ],
-  })
-  saveSettings.mockReset()
+  fetchManifest.mockReset().mockResolvedValue({ items: [], total: 0, revision: 7 })
   validateDeploy.mockReset()
   deployApi.mockReset()
 })
 
 describe('useDeploy', () => {
-  it('loadSettings：写入设置与形态枚举，并给出中文标签', async () => {
+  it('loadRevision：写入清单端点返回的 revision', async () => {
     const d = useDeploy()
-    await d.loadSettings()
+    await d.loadRevision()
 
-    expect(d.settings.value?.revision).toBe(7)
-    expect(d.forms.value).toHaveLength(2)
-    expect(d.targetFormLabel.value).toBe('容器编排内网')
+    expect(d.revision.value).toBe(7)
   })
 
-  it('loadSettings 失败：错误可读，不抛出', async () => {
-    fetchSettings.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
+  it('loadRevision 失败：错误可读，不抛出', async () => {
+    fetchManifest.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
     const d = useDeploy()
-    await d.loadSettings()
+    await d.loadRevision()
     expect(d.error.value?.code).toBe('ADM_STORAGE_UNAVAILABLE')
   })
 
@@ -77,7 +61,7 @@ describe('useDeploy', () => {
     validateDeploy.mockResolvedValue({
       passed: false,
       errors: [
-        { user_id: 'a', agent_name: 'x', category: 'runtime_form', code: 'X', message: 'm1' },
+        { user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm1' },
         { user_id: 'b', agent_name: 'y', category: 'reference_validity', code: 'Y', message: 'm2' },
       ],
     })
@@ -96,30 +80,27 @@ describe('useDeploy', () => {
   })
 
   it('deploy：成功时写入结果、清空校验态并刷新 revision', async () => {
-    deployApi.mockResolvedValue({
-      target_runtime_form: 'container_network',
-      users: [],
-      manifest_diff: [],
-      history_id: 'h1',
-    })
-    fetchSettings.mockResolvedValue({ target_runtime_form: 'container_network', revision: 8 })
+    deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h1' })
+    // 部署后重新读到的版本
+    fetchManifest.mockResolvedValue({ items: [], total: 0, revision: 8 })
 
     const d = useDeploy()
     expect(await d.deploy(['admin'])).toBe(true)
-    // 设置未加载 → 先取到 revision=8 再提交（不是用陈旧的 0）
+    // 版本未加载 → 先取到 revision 再提交（不是用陈旧的 0）
+    expect(fetchManifest).toHaveBeenCalled()
     expect(deployApi).toHaveBeenCalledWith(['admin'], 8)
     expect(d.result.value?.history_id).toBe('h1')
     expect(d.validationErrors.value).toEqual([])
     expect(d.validated.value).toBe(false)
-    expect(d.settings.value?.revision).toBe(8)
+    expect(d.revision.value).toBe(8)
   })
 
-  it('deploy：设置未加载时先自动加载（避免用 revision=0 提交）', async () => {
-    deployApi.mockResolvedValue({ target_runtime_form: 'x', users: [], manifest_diff: [], history_id: 'h' })
+  it('deploy：版本未加载时先自动加载（避免用 revision=0 提交）', async () => {
+    deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h' })
     const d = useDeploy()
     await d.deploy(['admin'])
 
-    expect(fetchSettings).toHaveBeenCalled()
+    expect(fetchManifest).toHaveBeenCalled()
     expect(deployApi).toHaveBeenCalledWith(['admin'], 7)
   })
 
@@ -129,13 +110,13 @@ describe('useDeploy', () => {
       message: 'x',
       details: {
         errors: [
-          { user_id: 'a', agent_name: 'x', category: 'c', code: 'X', message: 'm1' },
-          { user_id: 'b', agent_name: 'y', category: 'c', code: 'Y', message: 'm2' },
+          { user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm1' },
+          { user_id: 'b', agent_name: 'y', category: 'reference_validity', code: 'Y', message: 'm2' },
         ],
       },
     })
     const d = useDeploy()
-    await d.loadSettings()
+    await d.loadRevision()
 
     expect(await d.deploy(['admin'])).toBe(false)
     expect(deployApi).toHaveBeenCalledWith(['admin'], 7)
@@ -144,54 +125,23 @@ describe('useDeploy', () => {
   })
 
   it('deploy 失败但无 details.errors：错误可读且不伪造错误清单', async () => {
-    deployApi.mockRejectedValue({ code: 'ADM_RUNTIME_FORM_NOT_CONFIGURED', message: 'x' })
+    deployApi.mockRejectedValue({ code: 'ADM_DEPLOY_TARGET_NOT_WRITABLE', message: 'x' })
     const d = useDeploy()
-    await d.loadSettings()
+    await d.loadRevision()
 
     expect(await d.deploy(['admin'])).toBe(false)
     expect(d.validationErrors.value).toEqual([])
-    expect(d.error.value?.code).toBe('ADM_RUNTIME_FORM_NOT_CONFIGURED')
+    expect(d.error.value?.code).toBe('ADM_DEPLOY_TARGET_NOT_WRITABLE')
   })
 
-  it('switchForm：切换成功后同步新 revision（FR-057）', async () => {
-    saveSettings.mockResolvedValue({ target_runtime_form: 'host_local', revision: 8, deploy_required: true })
-    const d = useDeploy()
-    await d.loadSettings()
-
-    expect(await d.switchForm('host_local')).toBe(true)
-    expect(saveSettings).toHaveBeenCalledWith('host_local', 7)
-    expect(d.settings.value).toEqual({ target_runtime_form: 'host_local', revision: 8 })
-  })
-
-  it('targetFormLabel：设置未加载时显示占位符（不显示 undefined）', () => {
-    expect(useDeploy().targetFormLabel.value).toBe('—')
-  })
-
-  it('targetFormLabel：形态不在枚举中时回退占位符（后端新增形态的前后兼容）', async () => {
-    fetchSettings.mockResolvedValue({ target_runtime_form: 'brand_new_form', revision: 1 })
-    const d = useDeploy()
-    await d.loadSettings()
-    expect(d.targetFormLabel.value).toBe('—')
-  })
-
-  it('设置不可得时部署以 revision=0 提交（交由后端以版本冲突拒绝，而不是静默用旧版本）', async () => {
-    fetchSettings.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
+  it('清单不可得时部署以 revision=0 提交（交由后端以版本冲突拒绝，而不是静默用旧版本）', async () => {
+    fetchManifest.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
     deployApi.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })
     const d = useDeploy()
 
     expect(await d.deploy(['admin'])).toBe(false)
     expect(deployApi).toHaveBeenCalledWith(['admin'], 0)
     expect(d.error.value?.code).toBe('ADM_CONFIG_REVISION_CONFLICT')
-  })
-
-  it('switchForm 失败：返回 false 并可读报错（不静默改状态）', async () => {
-    saveSettings.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })
-    const d = useDeploy()
-    await d.loadSettings()
-
-    expect(await d.switchForm('host_local')).toBe(false)
-    expect(d.error.value?.code).toBe('ADM_CONFIG_REVISION_CONFLICT')
-    expect(d.settings.value?.target_runtime_form).toBe('container_network')
   })
 })
 
@@ -210,30 +160,14 @@ describe('部署对象：空选择一律拒绝（MUST NOT 落回"全部用户"�
     expect(await d.deploy([])).toBe(false)
 
     expect(deployApi).not.toHaveBeenCalled()
-    expect(fetchSettings).not.toHaveBeenCalled()
+    expect(fetchManifest).not.toHaveBeenCalled()
     expect(d.error.value?.message).toContain('勾选')
-  })
-
-  it('目标运行形态切换 → 上一次预检作废（第⑤类结论会变）', async () => {
-    saveSettings.mockResolvedValue({
-      target_runtime_form: 'host_local',
-      revision: 8,
-      deploy_required: true,
-    })
-    validateDeploy.mockResolvedValue({ passed: true, errors: [] })
-    const d = useDeploy()
-    await d.loadSettings()
-    await d.validate(['admin'])
-    expect(d.validated.value).toBe(true)
-
-    await d.switchForm('host_local')
-    expect(d.validated.value).toBe(false)
   })
 
   it('invalidateValidation：勾选变化后由界面调用，用于作废上一次结论', async () => {
     validateDeploy.mockResolvedValue({
       passed: false,
-      errors: [{ user_id: 'a', agent_name: 'x', category: 'c', code: 'X', message: 'm' }],
+      errors: [{ user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm' }],
     })
     const d = useDeploy()
     await d.validate(['admin'])

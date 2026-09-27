@@ -1,17 +1,20 @@
 /**
- * MCP **调用配置**（`FR-044`、`FR-056`，`data-model.md` §3.2）。
+ * MCP **调用配置**（`FR-044`，`data-model.md` §3.2；2026-09-27 改版）。
  *
  * 「服务级」的含义：**同一服务只有一份配置**，修改它 MUST **自动作用于所有
  * 引用它的数字人**（下次部署生效），MUST NOT 要求逐个改动数字人。
  *
- * 连接地址按**运行形态分别声明**（`endpoints`）：这是 `FR-056` 的落点——
- * 容器编排内网用服务名（`http://ocr:8000/mcp`），宿主机本地用可达地址。
- * 目标运行形态缺地址即**阻止部署**，MUST NOT 静默回退到另一形态
- * （`FR-057`、`ADM_RUNTIME_FORM_NOT_CONFIGURED`）。
+ * **2026-09-27 产品决定（全人工配置）**：MCP 服务不再取自容器编排声明、
+ * 不再区分"容器编排内网 / 宿主机本地"**运行形态**，因此连接地址由
+ * `endpoints: Record<形态, 地址>` 收敛为**单一 `url`**；服务本体（名称/用途/
+ * 传输方式/连接信息）一律由管理员在平台新建与维护——平台是 MCP 服务配置的
+ * **唯一权威源**。
+ *
+ * 存量迁移：旧文档里的 `endpoints` 在**读取期**收敛为 `url`（见 `readUrl`），
+ * 保证升级后既有服务不丢配置；物化与下发的仍只有一份地址。
  */
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import { runtimeFormLabel, type RuntimeForm } from '../platform-settings.js';
 import {
   FILE_ARG_PATH_HINT,
   isCompatibleFromPath,
@@ -27,13 +30,28 @@ const REL = 'mcp-services.json';
 // 归一后的规范取值类型（`http` 即 Streamable HTTP）；对外仍从本模块导出，保持既有引用不变
 export type { McpTransport };
 
+/** 服务名判据提示（新建表单与报错共用） */
+export const MCP_SERVICE_NAME_HINT =
+  '由字母、数字、下划线或连字符组成，1~64 字符（会成为运行环境的工具前缀）';
+
+/**
+ * 服务名判据：它同时是运行环境里的工具前缀（`{server}__{tool}`），
+ * 故不允许空白、路径分隔符与中文等会污染工具名的字符。
+ */
+export function isValidMcpServiceName(name: string): boolean {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(name);
+}
+
+/** 连接地址判据提示 */
+export const MCP_URL_HINT = 'http(s):// 开头的可达地址，如 http://192.168.1.2:8000/mcp';
+
 export interface McpServiceConfig {
   name: string;
   /** 用途描述（供卡片展示，`FR-006`）；可为空串 */
   description: string;
   transport: McpTransport;
-  /** 按运行形态分别声明的连接地址：`{ [运行形态标识]: 地址 }` */
-  endpoints: Record<string, string>;
+  /** 连接地址（`transport=http` 时必填；`stdio` 时无意义、恒为 `null`） */
+  url: string | null;
   command: string | null;
   args: string[] | null;
   /**
@@ -84,9 +102,10 @@ interface Document {
 }
 
 export interface McpConfigInput {
+  name?: unknown;
   description?: unknown;
   transport?: unknown;
-  endpoints?: unknown;
+  url?: unknown;
   command?: unknown;
   args?: unknown;
   writable?: unknown;
@@ -128,31 +147,68 @@ export class McpServiceConfigService {
   }
 
   /**
-   * 目标运行形态下的连接地址；缺该形态即 `null`
-   * （由调用方决定是"阻止部署"还是"呈现为未配置"）。
+   * **新建**服务（2026-09-27）：名称由管理员指定，重名即拒（`ADM_MCP_SERVICE_EXISTS`）。
+   * `revision` 可选——带了即做乐观锁校验，缺省按"当前版本"写入并递增。
    */
-  endpointFor(name: string, form: RuntimeForm | string): string | null {
-    const config = this.readOrNull(name);
-    const value = config?.endpoints?.[form];
-    return typeof value === 'string' && value.trim() !== '' ? value : null;
+  create(input: McpConfigInput, revision?: number): { config: McpServiceConfig; revision: number } {
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!isValidMcpServiceName(name)) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `MCP 服务名非法：${JSON.stringify(input.name)}（${MCP_SERVICE_NAME_HINT}）`,
+      );
+    }
+    if (this.exists(name)) {
+      throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_EXISTS, `MCP 服务名称已存在：${name}`);
+    }
+    const nextRevision = this.write(name, input, revision);
+    return { config: this.read(name), revision: nextRevision };
   }
 
-  /** 保存调用配置（`FR-044`）；返回保存后的配置与新 revision */
+  /** **删除**服务（2026-09-27）；不存在即 404。影响面由路由层用引用推导呈现。 */
+  remove(name: string, revision?: number): { name: string; revision: number } {
+    if (!this.exists(name)) {
+      throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_NOT_FOUND, `MCP 服务不存在：${name}`);
+    }
+    const removeItem = (): void => {
+      const doc = this.store.readJson<Document>(REL) ?? { items: {} };
+      delete doc.items[name];
+      this.store.writeJson(REL, doc);
+    };
+    const nextRevision =
+      revision === undefined
+        ? (removeItem(), this.store.bumpRevision())
+        : this.store.withRevision(revision, removeItem).revision;
+    return { name, revision: nextRevision };
+  }
+
+  /** 保存调用配置（`FR-044`）；服务必须已存在（新建走 `create`） */
   upsert(
     name: string,
     input: McpConfigInput,
     revision: number,
   ): { config: McpServiceConfig; revision: number } {
+    if (!this.exists(name)) {
+      throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_NOT_FOUND, `MCP 服务不存在：${name}`);
+    }
+    const nextRevision = this.write(name, input, revision);
+    return { config: this.read(name), revision: nextRevision };
+  }
+
+  /** 校验 + 落盘的公共段（create / upsert 共用） */
+  private write(name: string, input: McpConfigInput, revision?: number): number {
     let validated!: McpServiceConfig;
-    const { revision: nextRevision } = this.store.withRevision(revision, () => {
+    const commit = (): void => {
       validated = this.normalize(name, input);
       const doc = this.store.readJson<Document>(REL) ?? { items: {} };
       doc.items[name] = validated;
       this.store.writeJson(REL, doc);
-    });
-
-    const doc = this.store.readJson<Document>(REL);
-    return { config: doc?.items?.[name] ?? validated, revision: nextRevision };
+    };
+    if (revision === undefined) {
+      commit();
+      return this.store.bumpRevision();
+    }
+    return this.store.withRevision(revision, commit).revision;
   }
 
   private normalize(name: string, input: McpConfigInput): McpServiceConfig {
@@ -166,16 +222,16 @@ export class McpServiceConfigService {
       );
     }
 
-    const endpoints = normalizeEndpoints(input.endpoints);
-    if (Object.keys(endpoints).length === 0) {
+    // 连接地址：http 必填；stdio 丢弃（与"http 丢弃 command/args"对称，避免隐性配置漂移）
+    const url = normalizeUrl(input.url);
+    if (transport === 'http' && url === null) {
       throw new ApiError(
         ERROR_CODES.VALIDATION_FAILED,
-        'endpoints 至少需要一个运行形态的连接地址（FR-056）',
+        `transport=http 时 url 必填（${MCP_URL_HINT}）`,
       );
     }
 
-    // 启动命令与参数只对 stdio 有意义：http 形态下**丢弃**它们，
-    // 避免"同一个服务里残留一份用不上的命令"这种隐性配置漂移。
+    // 启动命令与参数只对 stdio 有意义
     const command =
       transport === 'stdio' && typeof input.command === 'string' && input.command.trim() !== ''
         ? input.command
@@ -189,7 +245,7 @@ export class McpServiceConfigService {
       name,
       description,
       transport,
-      endpoints,
+      url: transport === 'http' ? url : null,
       command,
       args,
       file_args: normalizeFileArgs(input.file_args),
@@ -201,9 +257,21 @@ export class McpServiceConfigService {
   }
 }
 
+/** 连接地址归一：非空字符串且为 http(s) 绝对地址；否则 `null` */
+function normalizeUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const value = raw.trim();
+  if (!/^https?:\/\/.+/i.test(value)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `url 须为 ${MCP_URL_HINT}（当前：${value}）`);
+  }
+  return value;
+}
+
 /**
  * 读取时收敛为当前 schema：历史存档里的遗留字段（`writable`/`permission_scope`，
  * 已按 2026-09-15 的产品决定移除）不再透出到任何响应里。
+ *
+ * `url` 另含**存量迁移**（2026-09-27）：旧文档是 `endpoints` 多形态对象。
  */
 function sanitize(raw: McpServiceConfig): McpServiceConfig {
   return {
@@ -212,7 +280,7 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
     // 历史文档可能写着别名（`streamable-http`）：读取时归一，界面与物化都只用规范值；
     // 完全不认识的值保持原样透出（不阻断读取，也不静默改写成别的传输方式）
     transport: normalizeTransport(raw.transport) ?? raw.transport,
-    endpoints: raw.endpoints ?? {},
+    url: readUrl(raw),
     command: raw.command ?? null,
     args: Array.isArray(raw.args) ? raw.args : null,
     file_args: raw.file_args ?? {},
@@ -225,6 +293,31 @@ function sanitize(raw: McpServiceConfig): McpServiceConfig {
     async_tools: readAsyncTools(raw.async_tools),
     updated_at: raw.updated_at,
   };
+}
+
+/**
+ * `url` 读取 + 存量迁移（2026-09-27）。
+ *
+ * 旧文档（2026-09-27 之前）把地址存在 `endpoints: { [运行形态]: 地址 }` 里。
+ * 平台已不再区分运行形态，故取其**唯一可用**的一份：优先「宿主机本地」
+ * （本地实际在用的形态），否则取第一个非空值。存量配置因此不丢。
+ */
+function readUrl(raw: McpServiceConfig): string | null {
+  const direct = (raw as { url?: unknown }).url;
+  if (typeof direct === 'string' && direct.trim() !== '') return direct.trim();
+
+  const legacy = (raw as { endpoints?: unknown }).endpoints;
+  if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+    const map = legacy as Record<string, unknown>;
+    for (const key of ['host_local', 'container_network']) {
+      const value = map[key];
+      if (typeof value === 'string' && value.trim() !== '') return value.trim();
+    }
+    for (const value of Object.values(map)) {
+      if (typeof value === 'string' && value.trim() !== '') return value.trim();
+    }
+  }
+  return null;
 }
 
 /**
@@ -330,23 +423,6 @@ function readConfirmation(raw: unknown): McpConfirmation {
     }
   }
   return 'never';
-}
-
-function normalizeEndpoints(raw: unknown): Record<string, string> {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'endpoints 须为对象（键为运行形态标识）');
-  }
-  const out: Record<string, string> = {};
-  for (const [form, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value !== 'string' || value.trim() === '') {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `endpoints.${form} 须为非空字符串（${runtimeFormLabel(form)}）`,
-      );
-    }
-    out[form] = value.trim();
-  }
-  return out;
 }
 
 /**

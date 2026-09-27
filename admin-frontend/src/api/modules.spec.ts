@@ -41,23 +41,10 @@ beforeEach(() => {
 })
 
 describe('api/platform', () => {
-  it('fetchHealth / fetchSettings / fetchRuntimeForms 走 §1.1~§1.3 路径', async () => {
+  it('fetchHealth 走 §1.1 路径（§1.2~§1.4 运行形态端点已下架）', async () => {
     const platform = await import('./platform')
     await platform.fetchHealth()
     expect(lastCall().url).toBe('/api/admin/platform/health')
-
-    await platform.fetchSettings()
-    expect(lastCall().url).toBe('/api/admin/platform/settings')
-
-    await platform.fetchRuntimeForms()
-    expect(lastCall().url).toBe('/api/admin/platform/runtime-forms')
-  })
-
-  it('saveSettings 用 PUT 提交 target_runtime_form 与 revision（§1.4）', async () => {
-    const platform = await import('./platform')
-    await platform.saveSettings('host_local', 7)
-    expect(lastCall().init.method).toBe('PUT')
-    expect(bodyOf(lastCall())).toEqual({ target_runtime_form: 'host_local', revision: 7 })
   })
 })
 
@@ -107,7 +94,7 @@ describe('api/builtin-tools', () => {
 })
 
 describe('api/mcp', () => {
-  it('卡片 / 详情 / 启停 / 测试 / 日志 / 统计走 §3 路径', async () => {
+  it('卡片 / 详情 / 新建 / 保存 / 删除 / 测试 / 统计走 §3 路径', async () => {
     const mcp = await import('./mcp')
 
     await mcp.listMcpServices(1)
@@ -116,26 +103,32 @@ describe('api/mcp', () => {
     await mcp.getMcpService('ocr')
     expect(lastCall().url).toBe('/api/admin/mcp/services/ocr')
 
+    await mcp.createMcpService({
+      name: 'ocr',
+      description: '',
+      transport: 'http',
+      url: 'http://host:8000/mcp',
+      file_args: {},
+    })
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/mcp/services')
+    expect(bodyOf(lastCall())).toMatchObject({ name: 'ocr', url: 'http://host:8000/mcp' })
+
     await mcp.saveMcpServiceConfig('ocr', {
       description: '',
       transport: 'http',
-      endpoints: {},
+      url: 'http://host:8000/mcp',
       file_args: {},
       revision: 1,
     })
     expect(lastCall().init.method).toBe('PUT')
 
-    await mcp.startMcpService('ocr')
-    expect(lastCall().url).toBe('/api/admin/mcp/services/ocr/start')
-
-    await mcp.stopMcpService('ocr')
-    expect(lastCall().url).toBe('/api/admin/mcp/services/ocr/stop')
-
     await mcp.testMcpService('ocr')
     expect(lastCall().url).toBe('/api/admin/mcp/services/ocr/test')
 
-    await mcp.fetchMcpLogs('ocr', 50)
-    expect(lastCall().url).toBe('/api/admin/mcp/services/ocr/logs?limit=50')
+    await mcp.deleteMcpService('ocr')
+    expect(lastCall().init.method).toBe('DELETE')
+    expect(lastCall().url).toBe('/api/admin/mcp/services/ocr')
 
     await mcp.fetchMcpStats()
     expect(lastCall().url).toBe('/api/admin/mcp/stats')

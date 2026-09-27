@@ -114,7 +114,7 @@ export function validateAgentInput(
   const skills = normalizeNameList(raw.skills, 'skills');
 
   rejectUnknown(enabledTools, options.index.builtinTools, '内置工具', '工具目录（FR-011）');
-  rejectUnknown(mcpServices, options.index.mcpServices, 'MCP 服务', '容器编排声明（FR-043）');
+  rejectUnknown(mcpServices, options.index.mcpServices, 'MCP 服务', '平台 MCP 服务列表（FR-043）');
   rejectUnknown(skills, options.index.skills, 'SKILL', '共享技能库（FR-036）');
 
   return {

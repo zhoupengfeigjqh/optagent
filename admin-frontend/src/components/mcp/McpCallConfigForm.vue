@@ -1,36 +1,45 @@
 <script setup lang="ts">
 /**
- * MCP 调用配置表单（`FR-044`、`FR-056`；原"服务级配置"，2026-09-15 更名）。
+ * MCP 调用配置表单（`FR-044`；2026-09-27 改版）。
  *
- * 关键点：**`endpoints` 按运行形态分组**——每个形态一个输入框，
- * 至少填一个。目标形态缺地址不会静默回退，而是**阻止部署**
- * （`ADM_RUNTIME_FORM_NOT_CONFIGURED`）。
- *
- * 运行形态选项来自服务端（前端 MUST NOT 硬编码，原则七）。
+ * 关键点：
+ * - **连接地址只有一个**（不再按"容器编排内网 / 宿主机本地"分形态声明）；
+ * - 表单同时承担**新建**与**编辑**，差别只有"名称是否可改"；
+ * - 服务名会成为运行环境的工具前缀，故新建时按同一判据做前端预校验
+ *   （最终判据仍在服务端，这里只为少一次往返）。
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import { fetchRuntimeForms } from '../../api/platform'
+import { computed, ref, watch } from 'vue'
 import { testMcpService, type McpProbePayload } from '../../api/mcp'
-import type { ErrorInfo, McpConfirmation, McpServiceConfigPayload, McpServiceDetail, McpTestResult, RuntimeFormOption } from '../../api/types'
+import type {
+  ErrorInfo,
+  McpConfirmation,
+  McpServiceDetail,
+  McpServiceSubmitPayload,
+  McpTestResult,
+} from '../../api/types'
+import { MCP_NAME_HINT, MCP_URL_HINT } from '../../constants/mcp'
 import AsyncToolsSelector from './AsyncToolsSelector.vue'
 import FileArgsMappingTable from './FileArgsMappingTable.vue'
 import RulesFieldMappingTable from './RulesFieldMappingTable.vue'
 import McpTestResultDialog from './McpTestResultDialog.vue'
 
 const props = defineProps<{
-  service: McpServiceDetail
+  /** 编辑态的服务详情；新建态为 `null` */
+  service: McpServiceDetail | null
+  /** 新建态（名称可编辑、服务尚未存在） */
+  isNew: boolean
   busy?: boolean
 }>()
 
 const emit = defineEmits<{
-  (e: 'save', payload: Omit<McpServiceConfigPayload, 'revision'>): void
+  (e: 'submit', payload: McpServiceSubmitPayload): void
   (e: 'announce', text: string): void
 }>()
 
-const forms = ref<RuntimeFormOption[]>([])
+const name = ref('')
 const description = ref('')
 const transport = ref<'http' | 'stdio'>('http')
-const endpoints = ref<Record<string, string>>({})
+const url = ref('')
 const command = ref('')
 const argsText = ref('')
 /** 文件参数映射（结构化对象；表格组件只是编辑视图，存储契约不变） */
@@ -47,8 +56,12 @@ const rulesFields = ref<Record<string, string>>({})
 const asyncTools = ref<string[]>([])
 const localError = ref<string | null>(null)
 
-/** 服务当前工具清单（来自平台对服务的最近一次探测） */
-const toolCatalog = computed(() => props.service.tools ?? [])
+/**
+ * 服务当前工具清单（来自平台对服务的最近一次探测）。
+ *
+ * 新建态（`service === null`）没有清单 → 一律走手填回退。
+ */
+const toolCatalog = computed(() => props.service?.tools ?? [])
 /** 清单不可得 → 回退手填（服务未启动/探测失败时管理员仍要能改配置） */
 const manualFallback = computed(() => toolCatalog.value.length === 0)
 /** 已保存、但当前清单里已没有的工具：保留勾选展示（可能是清单截断或服务改版），不静默丢弃 */
@@ -57,10 +70,26 @@ const orphanTools = computed(() =>
 )
 
 function loadFrom(service: McpServiceDetail | null): void {
-  if (!service) return
+  if (!service) {
+    // 新建态初值
+    name.value = ''
+    description.value = ''
+    transport.value = 'http'
+    url.value = ''
+    command.value = ''
+    argsText.value = ''
+    fileArgs.value = {}
+    confirmationMode.value = 'never'
+    confirmationTools.value = []
+    confirmationManualText.value = ''
+    rulesFields.value = {}
+    asyncTools.value = []
+    return
+  }
+  name.value = service.name
   description.value = service.description
   transport.value = service.transport
-  endpoints.value = { ...service.endpoints }
+  url.value = service.url ?? ''
   command.value = service.command ?? ''
   argsText.value = (service.args ?? []).join('\n')
   fileArgs.value = Object.fromEntries(
@@ -111,12 +140,7 @@ const rulesDisabled = computed(
   () => confirmationMode.value === 'never' || manualFallback.value,
 )
 
-/**
- * HITL 模式切换的级联（2026-09-19 产品决定）：
- * - 切到「无需确认」→ 清空所填（未开确认时规则入口本就不会出现，留着是脏数据）；
- * - 切到「仅指定工具」→ 丢掉不在勾选清单里的声明；
- * - 切到「全部工具」→ 保留全部声明。
- */
+/** HITL 模式切换的级联（2026-09-19）：无需确认→清空；仅指定→丢清单外；全部→保留 */
 watch(confirmationMode, (mode) => {
   if (mode === 'never') {
     rulesFields.value = {}
@@ -137,27 +161,24 @@ watch(confirmationTools, (tools) => {
   )
 })
 
-onMounted(async () => {
-  try {
-    forms.value = (await fetchRuntimeForms()).items
-  } catch {
-    // 形态列表不可得时仍可编辑已有形态的地址（不阻断主流程）
-    forms.value = Object.keys(props.service.endpoints).map((value) => ({ value, label: value }))
-  }
-})
-
 /**
- * 草稿锚定「服务标识」（契约 §0.5 原则 ①）：**只有切换服务才重填表单**。
+ * 草稿锚定「服务标识」（契约 §0.5 原则 ①）：**只有切换服务（或切换到新建态）才重填表单**。
  *
  * 同一服务的 `props.service` 刷新（保存后重载、并发更新、列表轮询）MUST NOT
  * 覆盖用户未提交的编辑——旧实现无条件 `loadFrom`，等于把"保存"变成一次
  * "整表重置"。判据用 `name`（服务标识），而非对象引用。
  */
 watch(
-  () => props.service,
+  () => [props.service, props.isNew] as const,
   (next, prev) => {
-    if (prev && next && prev.name === next.name) return
-    loadFrom(next)
+    const [nextService, nextIsNew] = next
+    const prevService = prev?.[0] ?? null
+    const prevIsNew = prev?.[1] ?? false
+    // 同一服务的刷新（保存后重载、列表轮询）：不动草稿
+    if (!nextIsNew && nextService !== null && prevService?.name === nextService.name) return
+    // 已处于新建态：不重填（否则输入会被清空）
+    if (nextIsNew && prevIsNew) return
+    loadFrom(nextService)
   },
   { immediate: true },
 )
@@ -165,10 +186,12 @@ watch(
 function submit(): void {
   localError.value = null
 
-  const cleaned = cleanedEndpoints()
-  if (Object.keys(cleaned).length === 0) {
-    localError.value = '至少需要一个运行形态的连接地址'
-    return
+  const serviceName = name.value.trim()
+  if (props.isNew) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(serviceName)) {
+      localError.value = `服务名非法：${MCP_NAME_HINT}`
+      return
+    }
   }
 
   // 确认策略：custom 模式须至少勾选一个工具（保存期服务端会再校验形状）
@@ -190,10 +213,16 @@ function submit(): void {
     confirmation = { tools }
   }
 
-  const payload: Omit<McpServiceConfigPayload, 'revision'> = {
+  const trimmedUrl = url.value.trim()
+  if (transport.value === 'http' && trimmedUrl === '') {
+    localError.value = `连接地址必填（${MCP_URL_HINT}）`
+    return
+  }
+
+  const config: McpServiceSubmitPayload['config'] = {
     description: description.value,
     transport: transport.value,
-    endpoints: cleaned,
+    ...(transport.value === 'http' ? { url: trimmedUrl } : {}),
     ...(transport.value === 'stdio'
       ? {
           command: command.value,
@@ -208,25 +237,17 @@ function submit(): void {
     rules_fields: { ...rulesFields.value },
     async_tools: [...asyncTools.value],
   }
-  emit('save', payload)
-}
-
-function cleanedEndpoints(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(endpoints.value)) {
-    if (value.trim() !== '') out[key] = value.trim()
-  }
-  return out
+  emit('submit', { name: serviceName, config })
 }
 
 /**
- * 表单当前值（**允许未保存**）："发起测试"据此探测，保证测的就是管理员
- * 正在编辑的地址，而不是上一次保存的旧值（实测缺陷，2026-09-15）。
+ * 表单当前值（**允许未保存**）："发起测试"据此探测，保证测的是管理员正在编辑的地址，
+ * 而不是上一次保存的旧值（实测缺陷，2026-09-15）。新建态服务还不存在，故不提供测试。
  */
 function probeTarget(): McpProbePayload {
   return {
     transport: transport.value,
-    endpoints: cleanedEndpoints(),
+    ...(transport.value === 'http' ? { url: url.value.trim() } : {}),
     ...(transport.value === 'stdio'
       ? {
           command: command.value,
@@ -239,17 +260,20 @@ function probeTarget(): McpProbePayload {
   }
 }
 
-defineExpose({ probeTarget })
-
 /**
- * 连通性测试（按表单当前值探测，允许未保存）。结果弹窗见 `McpTestResultDialog`。
+ * 暴露给详情页：保存/创建按钮在**页面右上角**（不在表单里），故需 `submit()` 供父组件触发；
+ * `submit` 与表单内回车走同一路径（含本地校验），避免两套判据。
  */
+defineExpose({ submit, probeTarget })
+
+/** 连通性测试（按表单当前值探测，允许未保存）。结果弹窗见 `McpTestResultDialog`。 */
 const testResult = ref<McpTestResult | null>(null)
 const testBusy = ref(false)
 const testError = ref<ErrorInfo | null>(null)
 const testDialog = ref<InstanceType<typeof McpTestResultDialog> | null>(null)
 
 async function runTest(): Promise<void> {
+  if (!props.service) return
   testBusy.value = true
   testError.value = null
   try {
@@ -270,6 +294,21 @@ async function runTest(): Promise<void> {
 
 <template>
   <form class="mcp-config-form" @submit.prevent="submit">
+    <label class="field" for="mcp-name">
+      <span class="field__label">
+        服务名称<span v-if="isNew" class="field__required" aria-hidden="true">*</span>
+      </span>
+      <input
+        id="mcp-name"
+        v-model="name"
+        type="text"
+        :readonly="!isNew"
+        :placeholder="MCP_NAME_HINT"
+      />
+      <span v-if="isNew" class="field__hint">{{ MCP_NAME_HINT }}；保存后不可改名。</span>
+      <span v-else class="field__hint">名称即运行环境的工具前缀，不可修改。</span>
+    </label>
+
     <label class="field" for="mcp-description">
       <span class="field__label">用途描述</span>
       <input id="mcp-description" v-model="description" type="text" placeholder="展示在卡片上的用途说明" />
@@ -283,33 +322,37 @@ async function runTest(): Promise<void> {
       </select>
     </label>
 
-    <fieldset class="mcp-config-form__endpoints">
-      <legend class="field__label">连接地址（按运行形态分别声明）</legend>
-      <p class="field__hint">
-        至少填一个。目标运行形态缺地址会**阻止部署**，不会回退到其他形态的地址。
-      </p>
-      <label v-for="form in forms" :key="form.value" class="field">
-        <span class="field__label">{{ form.label }}（<code class="mono">{{ form.value }}</code>）</span>
-        <input
-          v-model="endpoints[form.value]"
-          type="text"
-          :placeholder="form.hint ?? 'http://service:port/mcp'"
-        />
+    <!-- 连接目标（http=连接地址 / stdio=启动命令）与「发起测试」**同排**：测的就是这一行的值 -->
+    <div class="field">
+      <label v-if="transport === 'http'" class="field__label" for="mcp-url">
+        连接地址<span class="field__required" aria-hidden="true">*</span>
       </label>
-    </fieldset>
+      <label v-else class="field__label" for="mcp-command">
+        启动命令<span class="field__required" aria-hidden="true">*</span>
+      </label>
+      <div class="mcp-config-form__target-row">
+        <input v-if="transport === 'http'" id="mcp-url" v-model="url" type="text" :placeholder="MCP_URL_HINT" />
+        <input v-else id="mcp-command" v-model="command" type="text" placeholder="例如：python" />
+        <!-- 新建态服务还不存在，故不提供测试入口 -->
+        <button
+          v-if="!isNew"
+          type="button"
+          class="btn btn--success"
+          :disabled="testBusy || busy === true"
+          @click="runTest"
+        >
+          {{ testBusy ? '测试中…' : '发起测试' }}
+        </button>
+      </div>
+      <span v-if="transport === 'http'" class="field__hint">
+        平台按此地址连接该 MCP 服务（含协议与端口）。改完可直接「发起测试」验证，无需先保存。
+      </span>
+    </div>
 
-    <template v-if="transport === 'stdio'">
-      <label class="field" for="mcp-command">
-        <span class="field__label">
-          启动命令<span class="field__required" aria-hidden="true">*</span>
-        </span>
-        <input id="mcp-command" v-model="command" type="text" placeholder="例如：python" />
-      </label>
-      <label class="field" for="mcp-args">
-        <span class="field__label">启动参数（每行一个）</span>
-        <textarea id="mcp-args" v-model="argsText" rows="3" />
-      </label>
-    </template>
+    <label v-if="transport === 'stdio'" class="field" for="mcp-args">
+      <span class="field__label">启动参数（每行一个）</span>
+      <textarea id="mcp-args" v-model="argsText" rows="3" />
+    </label>
 
     <FileArgsMappingTable v-model="fileArgs" :tools="toolCatalog" />
 
@@ -339,17 +382,17 @@ async function runTest(): Promise<void> {
           </label>
           <!-- 已保存但当前清单未包含：保留展示，避免静默丢弃存量配置 -->
           <label
-            v-for="name in orphanTools"
-            :key="`orphan:${name}`"
+            v-for="orphan in orphanTools"
+            :key="`orphan:${orphan}`"
             class="mcp-config-form__tool mcp-config-form__tool--orphan"
           >
-            <input v-model="confirmationTools" type="checkbox" :value="name" />
-            <span class="mcp-config-form__tool-name mono">{{ name }}</span>
+            <input v-model="confirmationTools" type="checkbox" :value="orphan" />
+            <span class="mcp-config-form__tool-name mono">{{ orphan }}</span>
             <span class="mcp-config-form__tool-desc">（已保存，当前服务清单中未包含；可能是清单截断或服务改版）</span>
           </label>
         </div>
 
-        <!-- 清单不可得（服务未启动/探测失败）：回退手填 -->
+        <!-- 清单不可得（服务未启动/探测失败/新建态）：回退手填 -->
         <template v-else>
           <textarea
             id="mcp-confirmation-tools"
@@ -361,7 +404,7 @@ async function runTest(): Promise<void> {
 
         <span class="field__hint">
           勾选的工具被调用前会弹出参数确认窗。
-          <template v-if="props.service.tools_truncated">清单被截断显示，完整清单以服务端为准。</template>
+          <template v-if="service?.tools_truncated">清单被截断显示，完整清单以服务端为准。</template>
         </span>
       </div>
 
@@ -386,23 +429,8 @@ async function runTest(): Promise<void> {
       <AsyncToolsSelector v-model="asyncTools" :tools="toolCatalog" />
     </fieldset>
 
+    <!-- 本地校验失败时的可读报错（保存/创建按钮在页面右上角，见 McpServiceDetail） -->
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
-
-    <div class="mcp-config-form__actions">
-      <!-- 发起测试在保存之前：按表单当前值探测，填写了即可测，无需先保存 -->
-      <button
-        type="button"
-        class="btn btn--success"
-        :disabled="testBusy === true"
-        @click="runTest"
-      >
-        {{ testBusy ? '测试中…' : '发起测试' }}
-      </button>
-      <!-- 同时挂 click：不依赖浏览器是否通过按钮触发 form 的 submit 事件 -->
-      <button type="button" class="btn btn--primary" :disabled="busy === true" @click="submit">
-        {{ busy ? '保存中…' : '保存调用配置' }}
-      </button>
-    </div>
   </form>
 
   <!-- 测试结果弹窗：不在原页面上展示，避免挤占表单版面 -->
@@ -453,10 +481,18 @@ async function runTest(): Promise<void> {
   color: var(--color-status-warning);
 }
 
-.mcp-config-form__actions {
+.mcp-config-form__target-row {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: var(--space-2);
 }
 
+.mcp-config-form__target-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-config-form__target-row .btn {
+  flex-shrink: 0;
+}
 </style>

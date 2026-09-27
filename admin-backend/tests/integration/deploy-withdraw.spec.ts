@@ -61,16 +61,13 @@ function withdraw(userId: string, rev = revision()) {
 beforeEach(async () => {
   fx = await createFixture({ userIds: ['admin', 'ops'] });
   fx.runtime.tools = TOOL_FIXTURE;
-  fx.ctx.mcpConfigs.upsert(
-    'ocr',
-    {
-      description: 'OCR 识别服务',
-      transport: 'http',
-      endpoints: { container_network: 'http://ocr:8000/mcp' },
-      file_args: {},
-    },
-    fx.ctx.store.revision(),
-  );
+  fx.ctx.mcpConfigs.create({
+    name: 'ocr',
+    description: 'OCR 识别服务',
+    transport: 'http',
+    url: 'http://ocr:8000/mcp',
+    file_args: {},
+  });
   await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: AGENT });
   fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
 });

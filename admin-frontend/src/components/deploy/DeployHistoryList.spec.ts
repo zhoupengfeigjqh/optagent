@@ -21,7 +21,6 @@ function record(index: number, overrides: Partial<DeployHistoryItem> = {}): Depl
     id: `h${index}`,
     deployed_at: stamp(index),
     operator: 'zyw_admin',
-    target_runtime_form: 'container_network',
     result: 'succeeded',
     user_count: 1,
     error_count: 0,

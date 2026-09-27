@@ -54,8 +54,20 @@ export function withdrawDeploy(
   })
 }
 
-export function fetchManifest(): Promise<{ items: ManifestEntry[]; total: number }> {
-  return http.get<{ items: ManifestEntry[]; total: number }>('/api/admin/deploy/manifest')
+/**
+ * 部署清单（§6.8）。
+ *
+ * 响应同时带平台设计态的当前 `revision`——部署接口需要乐观锁版本，
+ * 而「目标运行形态」下架后不再有 `/platform/settings` 作为版本来源（2026-09-27）。
+ */
+export function fetchManifest(): Promise<{
+  items: ManifestEntry[]
+  total: number
+  revision: number
+}> {
+  return http.get<{ items: ManifestEntry[]; total: number; revision: number }>(
+    '/api/admin/deploy/manifest',
+  )
 }
 
 /**

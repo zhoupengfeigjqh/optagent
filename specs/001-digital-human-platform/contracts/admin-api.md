@@ -1,6 +1,6 @@
 # 接口契约：数字人管理平台（admin-api）
 
-**特性**：`001-digital-human-platform` | **版本**：1.0 | **日期**：2026-09-15
+**特性**：`001-digital-human-platform` | **版本**：1.1 | **日期**：2026-09-27
 
 本契约定义**管理界面（`admin-frontend`）↔ 管理服务（`admin-backend`）**之间的全部接口。按宪章原则七，本文件与 `admin-frontend/src/api/types.ts` **一一映射**；契约变更 MUST 四处同步（本文件、前端类型定义、后端请求/响应 schema、测试用例）。
 
@@ -33,7 +33,7 @@
 { "items": [], "total": 0, "page": 1, "page_size": 8, "total_pages": 0 }
 ```
 
-**非卡片类的长列表**（MCP 工具清单、运行日志、部署历史、异常项汇总）MUST 具备**有界返回**（`limit` + 条数上限），MUST NOT 无界返回（`FR-006`）。
+**非卡片类的长列表**（MCP 工具清单、部署历史、异常项汇总）MUST 具备**有界返回**（`limit` + 条数上限），MUST NOT 无界返回（`FR-006`）。
 
 ### 0.3 错误响应（`FR-009`、原则七）
 
@@ -65,21 +65,24 @@
 | `ADM_SKILL_ARCHIVE_UNSAFE` | 400 | 压缩包安全校验失败（越界路径／符号链接／超限） | `FR-039` |
 | `ADM_SKILL_NOT_FOUND` | 404 | SKILL 不在共享技能库中 | — |
 | `ADM_MCP_SERVICE_NOT_FOUND` | 404 | MCP 服务不存在 | — |
-| `ADM_MCP_SERVICE_UNMANAGED` | 409 | 该服务不在容器编排白名单内，不允许启停 | `FR-043` |
-| `ADM_RUNTIME_FORM_NOT_CONFIGURED` | 409 | 某 MCP 服务缺少目标运行形态的连接地址 | `FR-056`、`FR-057` |
+| `ADM_MCP_SERVICE_EXISTS` | 409 | MCP 服务名称已存在（新建重名，2026-09-27） | `FR-043` |
 | `ADM_DEPLOY_VALIDATION_FAILED` | 409 | 部署前校验不通过（阻止部署，`details.errors` 列出全部错误项） | `FR-027`、`SC-020` |
 | `ADM_DEPLOY_TARGET_NOT_WRITABLE` | 409 | 目标位置不可写 | `FR-027` |
 | `ADM_USER_ID_TAKEN` | 409 | 用户标识已存在或非法 | `FR-024` |
 | `ADM_USER_NOT_FOUND` | 404 | 用户不存在 | — |
 | `ADM_CONFIG_REVISION_CONFLICT` | 409 | 并发编辑冲突（`revision` 不符） | `FR-008` |
-| `ADM_DOCKER_UNAVAILABLE` | 503 | 无法访问宿主机 Docker（socket 不可达） | — |
-| `ADM_COMPOSE_FILE_UNREADABLE` | 503 | 无法读取容器编排声明 | `FR-043` |
 | `ADM_STORAGE_UNAVAILABLE` | 503 | 平台设计态存储不可写 | — |
 | `ADM_RUNTIME_UNREACHABLE` | 503 | 运行环境只读依赖不可达（工具目录／调用统计） | `FR-011`、`FR-050` |
 
+> **2026-09-27 变更**：随 MCP 服务改为平台内全人工配置，**移除四个码**——
+> 启停白名单类、运行形态缺地址类、Docker 不可达类、编排声明不可读类（正文提及处已一并清理，
+> 故此处不再以代码格式回引旧名）。平台不再读容器编排声明、不再读 Docker 容器运行态，
+> 也不再持有"目标运行形态"（详见 §1 与 §3）。新增 `ADM_MCP_SERVICE_EXISTS`。
+> 全表共 **21 个**码（4 个复用 + 17 个 `ADM_` 前缀码）。
+
 ### 0.5 保存交互（全部写接口的通用约定，2026-09-25）
 
-管理界面上**每一个保存动作**（数字人设计／MCP 调用配置／SKILL 文件／用户关联／平台设置）MUST 遵循**同一模式**。本节不是新发明——`useAgentDesign.save()` 已是符合形态，本节把该形态固化为**全部保存点的统一口径**。
+管理界面上**每一个保存动作**（数字人设计／MCP 调用配置／MCP 新建／SKILL 文件／用户关联）MUST 遵循**同一模式**。本节不是新发明——`useAgentDesign.save()` 已是符合形态，本节把该形态固化为**全部保存点的统一口径**。
 
 **三条原则**
 
@@ -101,7 +104,7 @@
 
 ---
 
-## §1 平台与配置
+## §1 平台健康
 
 ### 1.1 `GET /api/admin/platform/health`
 
@@ -113,38 +116,14 @@
 |---|---|---|
 | `platform_data` | object | `{ writable: boolean, path: string }` |
 | `opt_agent` | object | `{ readable: boolean, writable: boolean, path: string }` |
-| `compose_file` | object | `{ readable: boolean, path: string }` |
-| `docker` | object | `{ available: boolean }`（socket 可达性，`research.md` D3） |
-| `runtime_form` | string | 当前目标运行形态 |
 
 **错误码**：无（依赖不可达以字段表达，便于一次性看到全部问题）。
 
-### 1.2 `GET /api/admin/platform/settings`
-
-**用途**：读取平台级设置。
-
-**响应 200**：`{ "target_runtime_form": "container_network", "revision": 12 }`
-
-### 1.3 `GET /api/admin/platform/runtime-forms`
-
-**用途**：列出可选运行形态（供界面渲染选择项，前端 MUST NOT 硬编码，原则七）。
-
-**响应 200**：`{ "items": [ { "value": "container_network", "label": "容器编排内网" }, { "value": "host_local", "label": "宿主机本地" } ] }`
-
-### 1.4 `PUT /api/admin/platform/settings`
-
-**用途**：切换目标运行形态（`FR-057`）。**属破坏性操作**，界面 MUST 先提示"既有部署产物将按新形态重新物化"并要求二次确认；本接口**不写入** `.opt-agent/`，仅更新平台设置。
-
-**请求体**
-
-| 字段 | 类型 | 必填 | 约束 |
-|---|---|---|---|
-| `target_runtime_form` | string | ✅ | 必须为 `1.3` 返回的 `value` 之一 |
-| `revision` | integer | ✅ | 乐观锁；与 `1.2` 返回值不符即冲突 |
-
-**响应 200**：`{ "target_runtime_form": "host_local", "revision": 13, "deploy_required": true }`
-
-**错误码**：`VALIDATION_FAILED`、`ADM_CONFIG_REVISION_CONFLICT`
+> **2026-09-27 变更**：`compose_file` / `docker` / `runtime_form` 三个字段**已移除**，
+> 原 §1.2（读取设置）、§1.3（运行形态列表）、§1.4（切换运行形态）**三个端点整体下架**：
+> MCP 服务改为平台内全人工配置后，平台不再读容器编排声明、不再读 Docker 容器运行态，
+> 也不再持有"目标运行形态"这一等概念（`FR-056`、`FR-057` 随之废止，见 `spec.md`）。
+> 部署接口所需的乐观锁版本改由 §6.8 的部署清单端点提供。
 
 ---
 
@@ -180,7 +159,9 @@
 
 ### 3.1 `GET /api/admin/mcp/services`
 
-**用途**：卡片列表（`FR-043`）。清单来源为**容器编排文件声明**，平台 MUST NOT 要求二次登记。
+**用途**：卡片列表（`FR-043`）。**清单来源为平台侧调用配置**（2026-09-27 起）——
+平台是 MCP 服务配置的**唯一权威源**：管理员在平台内新建什么就有什么，
+MUST NOT 读取容器编排声明或容器运行状态。
 
 **查询参数**：`page`（见 §0.2）
 
@@ -188,15 +169,16 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `name` | string | 服务名 |
-| `description` | string | **用途描述**（来自调用配置 §3.3；未填写为空串）——满足 `FR-006` 对卡片信息的要求 |
+| `name` | string | 服务名（同时是运行环境的工具前缀，须匹配 `^[A-Za-z0-9_-]{1,64}$`） |
+| `description` | string | **用途描述**（未填写为空串）——满足 `FR-006` 对卡片信息的要求 |
 | `transport` | string | `http` / `stdio`（规范值；界面按 `streamable-http` 展示 `http`） |
-| `status` | string | `running` / `stopped` / `abnormal` / `unknown` |
-| `in_compose` | boolean | 是否仍存在于编排声明（`false` 即异常，`FR-052`） |
-| `configured` | boolean | 平台侧是否已有调用配置 |
-| `abnormal_reason` | string \| null | 异常原因（可读，`FR-009`） |
+| `url` | string \| null | **连接地址**（`http` 必有；`stdio` 为 `null`） |
 
-**错误码**：`ADM_COMPOSE_FILE_UNREADABLE`、`ADM_DOCKER_UNAVAILABLE`（容器状态不可得时 `status` 记为 `unknown` 而非报错，`FR-043`）
+**错误码**：无（清单恒可得：它就在平台设计态里）
+
+> **2026-09-27 变更**：`status`（容器四态）、`in_compose`、`configured`、`abnormal_reason`
+> 四个字段**已移除**——平台不再读 Docker 容器状态，且每条记录都由管理员手工新建，
+> "是否已配置/是否在编排中"这类比对失去前提（`FR-052` 的语义见 §7.2 异常汇总）。
 
 ### 3.2 `GET /api/admin/mcp/services/{name}`
 
@@ -206,23 +188,56 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `name` / `transport` / `status` / `in_compose` | — | 同 `3.1` |
-| `description` | string | **用途描述**（供卡片展示，满足 `FR-006`） |
-| `endpoints` | object | **按运行形态分别声明的连接地址**（`FR-056`）；键为形态标识 |
+| `name` / `transport` / `description` / `url` | — | 同 `3.1` |
 | `command` / `args` | string / array \| null | `stdio` 时有效 |
 | `file_args` | object | 文件参数映射：`{工具名: {取值路径: "url" \| "url:from=<来源路径>"}}`；取值路径可为顶层参数名或穿过数组（`items[].excelFileUrl`，2026-09-16）；派生模式 2026-09-18 |
 | `rules_fields` | object | 算法规则参数设置：`{工具名: 字段名或对象路径}`（2026-09-19 新增；2026-09-22 支持对象嵌套）；空对象 = 不启用 |
 | `async_tools` | array | **异步工具声明**（2026-09-25 新增）：该服务**原始工具名**（不含 `{server}__` 前缀）清单；声明后运行环境调用这些工具时注入 `result_url`（签名写直链），服务算完把结果回写到用户空间。空数组 = 不启用（完整语义见 `runtime-api-delta.md` §10） |
+| `confirmation` | string \| object | 调用确认策略（HITL）：`never`（默认）/ `always` / `{ tools: [...] }` |
 | `tools` | array | 每项：`{ name, description, parameters }`（`FR-045`） |
 | `tools_truncated` | boolean | 工具清单是否被截断 |
-| `compose_declaration` | object \| null | 编排文件中的原始声明（用于呈现 `FR-052` 的具体差异）；**仅查看**，平台不提供编辑入口 |
+| `tools_error` | string \| null | 工具清单不可得时的可读原因（`null` = 可得） |
 | `references` | array | 引用该服务的数字人（**仅在详情视图呈现**；MUST NOT 作为常驻浏览视图，见 §7.1 说明） |
+| `revision` | integer | 平台设计态当前版本（乐观锁基准） |
 
-**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`ADM_RUNTIME_UNREACHABLE`（工具清单不可得时 `tools` 为空且 `tools_truncated=false`，并在响应中给出 `tools_error` 字段）
+**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`（工具清单不可得时 `tools` 为空且 `tools_truncated=false`，并在响应中给出 `tools_error` 字段，**不报错**）
+
+> **2026-09-27 变更**：`endpoints`（按运行形态键控的对象）收敛为**单一 `url`**；
+> `compose_declaration`（编排原始声明投影）随启停页一并移除。`status` / `in_compose` 同 §3.1。
+
+### 3.3.1 `POST /api/admin/mcp/services`（新建，2026-09-27）
+
+**用途**：在平台内**新建**一个 MCP 服务。MCP 服务不再从容器编排声明派生，
+平台是唯一权威源——管理员新建什么就有什么。
+
+**请求体**：与 §3.3 的请求体相同，另加 `name`；`revision` 可选（带了即做乐观锁校验）
+
+| 字段 | 类型 | 必填 | 约束 |
+|---|---|---|---|
+| `name` | string | ✅ | **全局唯一**；须匹配 `^[A-Za-z0-9_-]{1,64}$`（会成为运行环境的工具前缀）；首尾空白自动去除 |
+| 其余字段 | — | — | 见 §3.3 |
+
+**响应 201**：`{ ...完整调用配置, "revision": 13, "affected_agents": [] }`（形状与 §3.3 响应一致）
+
+**错误码**：`ADM_MCP_SERVICE_EXISTS`（重名）、`VALIDATION_FAILED`（名称非法／`transport` 非法／`http` 缺 `url`／`url` 非 http(s) 地址）、`ADM_CONFIG_REVISION_CONFLICT`
+
+### 3.3.2 `DELETE /api/admin/mcp/services/{name}`（删除，2026-09-27）
+
+**用途**：删除服务。**若该服务正被数字人引用**，界面 MUST 先经 `§7.1` 取出受影响数字人清单、
+提示并要求二次确认（原 `FR-051` 的"关闭前提示引用"能力迁移到**删除**上）。
+
+**请求体（可选）**：`{ "revision": 13 }`（带了即做乐观锁校验）
+
+**响应 204**：无响应体
+
+**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`ADM_CONFIG_REVISION_CONFLICT`
+
+> 删除后引用它的数字人会变成"引用失效"：保存时被 `ADM_AGENT_INVALID_REF` 拦截、
+> 部署预检与全局异常汇总（§7.2）都会列出该失效引用。
 
 ### 3.3 `PUT /api/admin/mcp/services/{name}`
 
-**用途**：保存**调用配置**（`FR-044`）。修改 MUST **自动作用于所有引用它的数字人**（下次部署生效），MUST NOT 要求逐个改动数字人。
+**用途**：保存**调用配置**（`FR-044`）。修改 MUST **自动作用于所有引用它的数字人**（下次部署生效），MUST NOT 要求逐个改动数字人。服务 MUST 已存在（新建见 §3.3.1）。
 
 **请求体**
 
@@ -230,12 +245,16 @@
 |---|---|---|---|
 | `description` | string | ✅ | **用途描述**（供卡片展示，满足 `FR-006`；可为空串） |
 | `transport` | string | ✅ | `http` \| `stdio`；**接受别名 `streamable-http`（含 `streamable_http`/大小写变体），响应与落盘统一为 `http`**（2026-09-16） |
-| `endpoints` | object | ✅ | **至少一个键**；键必须是已声明的运行形态标识（`FR-056`） |
-| `command` / `args` | — | 条件 | `transport=stdio` 时必填 |
+| `url` | string | 条件 | `transport=http` 时**必填**，且须为 `http(s)://` 绝对地址；`stdio` 时**丢弃**（与 http 丢弃 `command`/`args` 对称） |
+| `command` / `args` | — | 条件 | `transport=stdio` 时 `command` 必填 |
 | `file_args` | object | ✅ | 可为 `{}`；键为**取值路径**（顶层参数名或 `items[].excelFileUrl` 这类穿过数组的路径），值为 `"url"` 或 `"url:from=<取值路径>"`；**路径写法非法或派生来源形状不相容即 `VALIDATION_FAILED`**（与运行环境同一判据，见 `agent-backend/src/domain/file-arg-path.ts`） |
 | `rules_fields` | object | 可选 | 可为 `{}`；形状 `{工具名: 字段名或对象路径}`，值非法即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（清单是探测结果，服务不可达时不构成配置错误） |
 | `async_tools` | array | 可选 | 可为 `[]`；元素为**非空字符串**（该服务的**原始工具名**），**同服务内去重**，违反即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（同上）；物化时**非空才写**进 `MCP.json`（对齐 `file_args`/`rules_fields` 口径） |
+| `confirmation` | string \| object | 可选 | 调用确认策略（HITL）：`never`（缺省）/ `always` / `{ tools: string[] }`（非空）；非法即 `VALIDATION_FAILED` |
 | `revision` | integer | ✅ | 乐观锁 |
+
+> **存量迁移（2026-09-27）**：旧文档里的 `endpoints`（`{运行形态: 地址}`）在**读取期**收敛为
+> 单一 `url`（优先取 `host_local`，否则取第一个非空值），既有配置不丢；写回后只剩 `url`。
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 字段已从调用配置中**移除**（产品决定）。旧客户端提交这两个字段时不再报错（字段被忽略），响应与物化产物中 MUST NOT 再出现；运行环境的 `MCP.json` 因此不再产生 `write` / `permission_boundary`。
 
@@ -245,27 +264,11 @@
 
 **错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`VALIDATION_FAILED`、`ADM_CONFIG_REVISION_CONFLICT`
 
-### 3.4 `POST /api/admin/mcp/services/{name}/start`
-
-**用途**：启动服务（`FR-046`）。操作后 `status` MUST 反映**真实结果**。
-
-**响应 200**：`{ "name": "ocr", "status": "running" }`
-
-**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`ADM_MCP_SERVICE_UNMANAGED`（不在编排白名单，不允许启停）、`ADM_DOCKER_UNAVAILABLE`、`INTERNAL_ERROR`（启动失败并给出原因，`FR-046`）
-
-### 3.5 `POST /api/admin/mcp/services/{name}/stop`
-
-**用途**：关闭服务（`FR-046`）。**若该服务正被数字人引用**，界面 MUST 先经 `§7.1` 取出受影响数字人清单、提示并要求二次确认（`FR-051`）。
-
-**响应 200**：`{ "name": "ocr", "status": "stopped" }`
-
-**错误码**：同 `3.4`
-
 ### 3.6 `POST /api/admin/mcp/services/{name}/test`
 
 **用途**：发起测试 = **连通性检查 + 一次实际能力验证**（`FR-047`）。
 
-**请求体（可选）**：携带 `{ transport, endpoints, command?, args? }` 时按**表单当前（尚未保存）的值**探测；缺省按已保存的调用配置测试。
+**请求体（可选）**：携带 `{ transport, url, command?, args? }` 时按**表单当前（尚未保存）的值**探测；缺省按已保存的调用配置测试。
 
 **响应 200**
 
@@ -281,19 +284,10 @@
 
 **错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`VALIDATION_FAILED`（body 的 `transport` 非法）
 
-### 3.7 `GET /api/admin/mcp/services/{name}/logs`
-
-**用途**：查看服务运行日志片段（`FR-048`）。**有界返回**，日志量大时页面 MUST 仍能快速返回。
-
-**查询参数**
-
-| 参数 | 类型 | 默认 | 约束 |
-|---|---|---|---|
-| `limit` | integer | 200 | 1~500（上限硬约束） |
-
-**响应 200**：`{ "items": [ { "ts": "ISO8601|null", "line": "…" } ], "truncated": true }`（按时间倒序）
-
-**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`ADM_DOCKER_UNAVAILABLE`
+> **2026-09-27 下架**：原 §3.4（`/start`）、§3.5（`/stop`）、§3.7（`/logs`）三个端点
+> **整体移除**——MCP 服务改为全人工配置，平台不再读容器运行态，故"启停"与"运行日志"
+> 失去前提（`FR-046`、`FR-048` 随之废止，见 `spec.md`）。原 `/start`、`/stop` 端点
+> 承载的"关闭前提示引用（`FR-051`）"能力**迁移到 §3.3.2 删除**上。
 
 ### 3.8 `GET /api/admin/mcp/stats`
 
@@ -523,6 +517,8 @@
 
 **响应 200**：`{ "passed": boolean, "errors": [ { user_id, agent_name, category, code, message, detail } ] }`
 
+`category` ∈ `config_integrity` \| `reference_validity` \| `name_path_safety` \| `target_writable`（四类；原第五类 `runtime_form` 随运行形态下架，2026-09-27）。
+
 **关键约束**：校验 MUST 一次性列出**全部**错误项（不是发现一个就停）；错误读取不到即按失败处理。
 
 ### 6.6 `POST /api/admin/deploy`
@@ -535,12 +531,11 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `target_runtime_form` | string | 本次部署使用的目标运行形态（`FR-057`） |
 | `users` | array | 每用户：`{ user_id, ok, agents: [{ name, action: "written"|"removed", ok }], error? }` |
 | `manifest_diff` | array | 与部署清单不一致的差异（如手工删改过的目录，`FR-032`） |
 | `history_id` | string | 对应 `§6.7` 的一条记录 |
 
-**错误码**：`ADM_DEPLOY_VALIDATION_FAILED`（`details.errors` 列出全部错误项；**运行环境写入次数 MUST 为 0**，`SC-020`）、`ADM_DEPLOY_TARGET_NOT_WRITABLE`、`ADM_RUNTIME_FORM_NOT_CONFIGURED`、`ADM_CONFIG_REVISION_CONFLICT`
+**错误码**：`ADM_DEPLOY_VALIDATION_FAILED`（`details.errors` 列出全部错误项；**运行环境写入次数 MUST 为 0**，`SC-020`）、`ADM_DEPLOY_TARGET_NOT_WRITABLE`、`ADM_AGENT_INVALID_REF`（单因同码时直接返回该码）、`ADM_CONFIG_REVISION_CONFLICT`
 
 **关键约束**（`SC-004`、`SC-012`、`SC-018`）：
 - 原子性：以**用户为最小单位**，失败即该用户零写入；实现为"临时目录构建 → 校验 → 目录级原子改名"（`research.md` D8）。
@@ -556,7 +551,9 @@
 
 **查询参数**：`limit`（默认 20，1~100）
 
-**响应 200**：`{ "items": [ { id, deployed_at, operator, target_runtime_form, result, user_count, error_count, users, validation, manifest_diff } ], "truncated": boolean }`
+**响应 200**：`{ "items": [ { id, deployed_at, operator, result, user_count, error_count, users, validation, manifest_diff } ], "truncated": boolean }`
+
+> **2026-09-27**：`target_runtime_form` 字段随运行形态下架；存量记录的该字段在读取时被忽略（JSONL 只追加的容错口径）。
 
 - `result`：`succeeded`（全部成功）/ `partial`（部分成功）/ `failed`（失败）——按**失败用户数**判定（`users` 里 `ok === false` 的个数，`error_count` 即该数）；
 - `users` / `validation` / `manifest_diff`：逐用户结果（失败原因在该用户的 `error`）、校验摘要、与运行环境的差异（字段口径见 `data-model.md` §7.3）。**界面的「展开」据此还原"失败的是谁、哪个数字人、为什么"**，MUST NOT 为此另设详情端点；
@@ -566,7 +563,10 @@
 
 **用途**：查看部署清单（`FR-031`），界定部署时允许删除的范围。
 
-**响应 200**：`{ "items": [ { user_id, agent_names, last_deployed_at } ], "total": 0 }`
+**响应 200**：`{ "items": [ { user_id, agent_names, last_deployed_at } ], "total": 0, "revision": 13 }`
+
+> **2026-09-27**：响应新增 `revision`（平台设计态当前版本）。部署接口（§6.6）需要乐观锁版本，
+> 而"目标运行形态"下架后 `/platform/settings` 已不存在，故由部署功能区自己的读端点提供。
 
 ### 6.9 `POST /api/admin/deploy/withdraw`
 
@@ -592,7 +592,7 @@
 
 ### 7.1 `GET /api/admin/references`
 
-**用途**：**仅供破坏性操作的确认环节**查询引用关系（`FR-042`、`FR-051`、`FR-013`）。界面 MUST 在管理员触发删除/关闭后**才**调用。
+**用途**：**仅供破坏性操作的确认环节**查询引用关系（`FR-042`、`FR-051`、`FR-013`）。界面 MUST 在管理员触发删除后**才**调用（MCP 服务的"删除前提示引用"见 §3.3.2）。
 
 **查询参数**
 
@@ -630,8 +630,10 @@
 
 | 本契约 | 前端类型 | 说明 |
 |---|---|---|
-| `§3.1` 的 `items` 元素 | `McpServiceListItem` | 字段名、可选性完全对齐 |
-| `§3.2` 的响应 | `McpServiceDetail` | 含 `endpoints: Record<RuntimeForm, string>` |
+| `§3.1` 的 `items` 元素 | `McpServiceListItem` | 字段名、可选性完全对齐（含单一 `url`） |
+| `§3.2` 的响应 | `McpServiceDetail` | 调用配置 + 工具清单 + 引用 |
+| `§3.3.1` 的请求体 | `McpServiceCreatePayload` | 名称由管理员指定 |
+| `§3.3` / `§3.3.1` 的响应 | `McpServiceConfigSaved` | 完整调用配置 + `revision` + `affected_agents` |
 | `§5.3` 的响应 | `AgentDesign` | 五类配置字段与设计态 JSON 一致 |
 | `§6.6` 的响应 | `DeployResult` | 含 `manifest_diff` |
 | `§0.4` 的错误码 | `ADMIN_ERROR_CODES` 常量 + `error-message.ts` 中文文案映射 | 前端 MUST NOT 直接展示后端 `message`（沿用既有 `frontend` 的口径） |

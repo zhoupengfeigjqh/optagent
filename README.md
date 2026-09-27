@@ -2,7 +2,7 @@
 
 智能体（Agent）应用平台。平台分两端：
 
-- **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用（**调用记录随会话持久化，刷新后仍可见**）、人工确认（HITL）、文件空间、多会话管理
+- **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用（**调用记录随会话持久化，刷新后仍可见**）、人工确认（HITL）、文件空间、**后台产出**（异步 MCP 任务完成后自动汇入「后台记录」，可在后续对话中读取）、多会话管理
 - **数字人管理平台**：面向运营/管理员的管理后台，管理数字人（Agent）、技能、MCP 服务与平台配置，并负责把配置下发部署到运行端
 
 OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务独立部署（Docker）。
@@ -29,18 +29,25 @@ OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务�
 └─────────────────┘         └───────────────────────────┘
 ```
 
+除同步调用外，MCP 服务也可走**异步**：运行环境为声明过的工具注入 `result_url`，服务立即返回受理，
+算完后 POST 回写结果 → 落盘到 `临时空间/后台产出/` → 前端铃铛「后台记录」出现条目，模型可在后续
+对话中用 `read_file` 读取。约定详见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
+
 ## 目录结构
 
 ```
 optagent/
 ├── agent-backend/          # Agent 运行时后端（Fastify + Node ≥ 20，端口 3000）
 │   └── src/
-│       ├── routes/         # HTTP 接口层（10 个路由模块）
+│       ├── routes/         # HTTP 接口层（12 个路由模块）
 │       ├── domain/         # 领域层：纯业务逻辑，不依赖框架
 │       ├── infra/          # 基础设施层：LLM、MCP、签名、数据库
 │       ├── config.ts       # 配置加载（.env + config.yaml，启动校验）
 │       ├── server.ts       # Fastify 装配与启动
-│       └── context.ts      # 请求上下文（当前用户/数字人）
+│       ├── context.ts      # 请求上下文（当前用户/数字人）
+│       ├── logging.ts      # 结构化日志（实例标识、字段脱敏）
+│       ├── graceful-shutdown.ts  # 优雅关闭（等在途回答收尾）
+│       └── types.ts        # 跨层共享类型
 │
 ├── frontend/               # Agent 对话前端（Vue 3 + Vite，端口 5173）
 │   └── src/
@@ -49,16 +56,16 @@ optagent/
 │       │   ├── chat/       # 对话区：消息流、工具调用卡片、输入框(Composer)、HITL 弹窗、@引用面板
 │       │   ├── layout/     # 应用骨架：历史侧栏、文件空间面板、空间树
 │       │   └── common/     # 通用组件（按钮/弹窗/图标等）
-│       ├── composables/    # 状态与逻辑：会话流、@文件引用、路径插入、工作区
+│       ├── composables/    # 状态与逻辑：会话流、@文件引用、路径插入、工作区、后台产出、预览、会话内搜索
 │       ├── constants/      # 常量
 │       ├── styles/         # 全局样式
-│       └── utils/          # 工具函数（格式化、空间判定、工具记录展示模型、会话恢复）
+│       └── utils/          # 工具函数（SSE 解析、搜索分段、空间/文件判定、产出与工具记录展示、会话恢复）
 │
 ├── admin-backend/          # 数字人管理平台后端（端口 3001）
 │   └── src/
-│       ├── routes/         # agents / mcp / skills / deploy / users / references ...
-│       ├── domain/         # 配置中心、部署、MCP、技能库、审计、平台设置
-│       └── infra/          # Docker 主机探测、compose 读取、运行时客户端、配置下发
+│       ├── routes/         # agents / mcp / skills / builtin-tools / deploy / users / references / platform
+│       ├── domain/         # 配置中心、部署、MCP、技能库、审计、错误码
+│       └── infra/          # Docker 主机探测、compose 读取、运行时客户端、配置下发、设计态存储
 │
 ├── admin-frontend/         # 数字人管理平台前端（Vue 3 + Vite，端口 5174）
 │   └── src/
@@ -84,8 +91,9 @@ optagent/
 │   └── tests/              # 服务端测试
 │
 ├── gateway/                # 生产网关（nginx）
-├── specs/                  # 需求/设计规格文档
-└── docker-compose.yml      # Docker 编排（OCR / Jev 等；同时是容器形态运行配置的权威源）
+├── specs/                  # 需求/设计规格文档（001 数字人平台、002 对话运行时）
+├── 异步MCP服务接入约定.md    # 异步 MCP 服务接入约定（result_url 注入 → 受理 → 回写）
+└── docker-compose.yml      # Docker 编排（OCR / Jev 等）；容器形态运行配置的权威源（非 MCP 服务清单来源）
 ```
 
 ## 配置地图：env / config 归属一览
@@ -103,7 +111,7 @@ optagent/
 | `ocr-service/.env.local` | OCR 服务 | compose `env_file` 注入 ocr 容器 | 本机私产：白名单**追加**宿主机 LAN IP（gitignore；样板 `.env.example`） |
 | `jev-service/.env` | Jev 服务 | compose `env_file` 注入 jev 容器 | **容器形态**配置（`JEV_URL_ALLOW_HOSTS=backend`，无密钥，入库） |
 | `jev-service/.env.local` | Jev 服务 | compose `env_file` 注入 jev 容器 | `TYPESAFE_API_KEY` + 白名单 LAN IP 追加（含密钥，gitignore；样板 `.env.example`） |
-| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/socket/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`） |
+| `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`）。**（2026-09-27）** `admin-backend` 已不再挂载 `docker.sock` 与编排文件本身——平台不读容器编排声明与容器运行态 |
 
 读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务）：
 - **容器**：一律由 compose `env_file` 注入**服务自己的**配置——admin / ocr / jev 读各自的
@@ -127,11 +135,13 @@ optagent/
 | `chat.ts` | 对话接口（SSE 流式输出），Agent 执行主链路 |
 | `agents.ts` | 数字人（Agent）列表/切换/配置 |
 | `files.ts` | 文件空间：三空间汇总、上传/删除、**签名直链铸造与回源下载** |
+| `files-put.ts` | **后台产出回写端点**（异步 MCP 服务 POST 结果落盘；因 ≤500 行门禁自 `files.ts` 拆出） |
 | `threads.ts` | 会话（线程）管理与历史；**工具调用记录**（详情附带 + 外置正文懒加载端点） |
 | `models.ts` | 模型列表/选择 |
 | `builtin-tools.ts` | 内置工具开关与配置 |
 | `monitor.ts` | 运行监控（事件流） |
 | `usage.ts` / `mcp-call-stats.ts` | Token 用量统计 / MCP 调用统计 |
+| `produced.ts` | **后台产出**：列表 / 单条正文 / 批量标记已读 / SSE 变更信号 |
 | `feedback.ts` | 对话反馈（点赞点踩） |
 
 **领域层 `domain/`（纯业务逻辑）**
@@ -139,13 +149,18 @@ optagent/
 | 模块 | 作用 |
 |---|---|
 | `agent-pool.ts` / `agent-instance.ts` / `agent-catalog.ts` | Agent 实例池与目录管理（多用户隔离复用） |
+| `current-user.ts` / `current-agent.ts` | 当前用户 / 当前数字人解析 |
 | `interaction-gate.ts` / `interaction-schema.ts` | **HITL 人工确认**：工具调用挂起、倒计时、schema 驱动表单生成 |
+| `rule-file.ts` / `rules-field-path.ts` | HITL「算法规则」：规则文件解析 + `rules_fields` 对象路径求值 |
 | `file-access.ts` / `fs-safe.ts` / `dirs.ts` | 文件访问安全：user-data 沙箱路径解析、越权拦截 |
 | `file-arg-path.ts` | MCP 文件参数声明解析（`file_args`：`url` / `url:from=` 模式） |
 | `mcp-transport.ts` / `mcp-events.ts` | MCP 连接生命周期与状态事件 |
-| `run-manager.ts` | 运行任务管理（中断/恢复/快照）；提示词组装（滚动摘要 + 工具结果按预算回灌） |
+| `run-manager.ts` | 运行任务管理（中断/恢复/快照） |
+| `prompt-builder.ts` / `context-window.ts` | 提示词组装（纯函数：滚动摘要 + 工具结果按预算回灌 + 产出段）/ 上下文池与归档游标（单一权威源，无空洞） |
 | `run-impl.ts` / `run-events.ts` / `message-format.ts` | Run 实例与事件类型、消息标识/格式化（按 ≤500 行门禁自 `run-manager.ts` 拆出） |
 | `tool-events.ts` / `tool-context.ts` / `tool-result.ts` | **工具调用记录**：事件落盘与体积分流、上下文回灌投影、结果序列化与外置命名 |
+| `produced.ts` / `produced-events.ts` | **后台产出**：sidecar 落盘与「目录即索引」投影；进程内变更信号（驱动铃铛 SSE） |
+| `builtin-tool-catalog.ts` | 内置工具元数据的**单一来源目录**（装配时渲染给模型） |
 | `thread-store.ts` / `history.ts` / `summary.ts` | 会话/消息/摘要持久化 |
 | `tools/` | 内置工具实现：计算器、读/写文件、列目录、内容检索 |
 | `field-check.ts` / `tmp-cleanup.ts` / `config-fingerprint.ts` | 字段校验 / 临时目录清理 / 配置指纹 |
@@ -161,13 +176,14 @@ optagent/
 | `file-sign.ts` | 签名直链 HMAC 签名/验签 |
 | `usage-db.ts` | 用量数据存储 |
 | `scheduler.ts` | 定时任务（如临时文件清理） |
+| `builtin-tools.ts` | 内置工具 → AgentTool 适配（异常翻译为可读文本，对话不中断） |
 | `agent-factory.ts` | Agent 实例工厂 |
 
 ### frontend（Agent 对话前端）
 
 | 模块 | 作用 |
 |---|---|
-| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog + InteractionField**（HITL 通用表单：schema 驱动**递归**控件映射——对象逐行、对象数组→表格、标量数组→列表、其余走 JSON 逃逸舱——外加 @ 路径引用、结构化文件卡片、算法规则入口）、MentionPicker、**ToolCallList**（工具调用卡片：内联结果展开即见、外置正文按需拉取、已清理时降级展示） |
+| `components/chat/` | 消息气泡与 Markdown 渲染、Composer 输入框（**@ 文件引用**三级级联面板）、**InteractionDialog + InteractionField**（HITL 通用表单：schema 驱动**递归**控件映射——对象逐行、对象数组→表格、标量数组→列表、其余走 JSON 逃逸舱——外加 @ 路径引用、结构化文件卡片、算法规则入口）、MentionPicker、**ToolCallList**（工具调用卡片：内联结果展开即见、外置正文按需拉取、已清理时降级展示）、**ProducedBell + ProducedJsonView**（后台产出铃铛：未读角标、列表⇄正文双视图、结构化展示）、RulePickerDialog、SessionSearch、ThinkingBlock / ThinkingToggle |
 | `components/layout/` | 应用骨架：历史会话侧栏、文件空间面板（空间树 + 文件列表 + 上传） |
 | `composables/useChatStream.ts` | 会话流核心：SSE 接收、消息追加、中断/重发、HITL 快照恢复 |
 | `composables/useFileMention.ts` | 聊天输入框 @ 引用状态机（触发检测、级联导航、引用登记、提交剥离） |
@@ -177,8 +193,16 @@ optagent/
 | `composables/useAppSession.ts` | 会话上下文（provide/inject 总线：workspace、toast 等） |
 | `composables/useThreads.ts` / `useAgents.ts` / `useModels.ts` | 会话/数字人/模型数据管理 |
 | `composables/useUploads.ts` | 文件上传队列 |
+| `composables/useProduced.ts` | 后台产出 store：列表 / 未读数（自算）/ 标记已读 / 信号订阅 |
+| `composables/usePreview.ts` | 右侧面板「文件列表 ⇄ 内容预览」双视图 |
+| `composables/useChatPanel.ts` | 中栏装配 view-model（跨 composable 事件编排，使 ChatPanel 满足 ≤500 行） |
+| `composables/useSessionSearch.ts` | 会话内搜索与命中定位（与高亮同一匹配口径） |
+| `composables/useToast.ts` | 轻量提示队列（aria-live、最多 3 条、4s 自动消失） |
 | `composables/useResizablePanel.ts` | 侧栏宽度拖拽 |
 | `utils/tool-calls.ts` | 工具调用记录的展示模型（历史态与流式态统一、体积与耗时格式化） |
+| `utils/produced-content.ts` / `utils/produced-display.ts` | 产出正文解析（对象/数组结构化，否则回落 `<pre>`）/ 角标与时间、体积格式化 |
+| `utils/sse-parser.ts` / `utils/segments.ts` / `utils/error-message.ts` | SSE 帧解析 / 搜索高亮分段 / 错误信息归一 |
+| `utils/arg-schema.ts` / `utils/arg-values.ts` / `utils/json-path.ts` / `utils/file-kind.ts` / `utils/space.ts` / `utils/format.ts` | HITL 入参 schema 与取值、JSON 路径、文件类型与空间判定、格式化 |
 | `utils/thread-restore.ts` | 会话恢复：URL `?thread=` 与本地存储的读写（刷新后回到原会话） |
 
 ### admin-backend（数字人管理平台后端）
@@ -188,21 +212,27 @@ optagent/
 | `domain/config-center/` | 配置中心：数字人/MCP/技能的配置模型与校验 |
 | `domain/deploy/` | 部署编排：把配置下发到 agent-backend 运行时 |
 | `domain/skill-library/` | 技能库管理 |
-| `domain/mcp/` | MCP 服务注册与连通性检测 |
+| `domain/mcp/` | MCP 服务的**新建/删除/清单**与调用配置（含 `file_args` / `rules_fields` / **`async_tools`**（异步工具声明）/ `confirmation`）、测试与统计（2026-09-27：启停/日志已下架） |
 | `domain/audit.ts` | 操作审计 |
 | `domain/platform-settings.ts` | 平台级设置 |
-| `infra/docker-host.ts` / `compose-reader.ts` | Docker 环境探测、compose 文件解析 |
+| `domain/api-error.ts` / `domain/error-codes.ts` | 统一错误类型与错误码目录 |
+| `domain/paging.ts` | 分页参数归一 |
+| `infra/fs-probe.ts` | 路径可读/可写探测（健康检查） |
+| `infra/fs-probe.ts` | 路径可读 / 可写探测（健康检查） |
+| `infra/platform-store.ts` | 平台设计态存储（原子写 + revision 乐观锁） |
 | `infra/opt-agent-writer.ts` | 运行时配置文件写入（下发） |
 | `infra/runtime-client.ts` | 调用 agent-backend 运行时接口 |
 | `infra/mcp-client.ts` | MCP 服务连接测试 |
 | `routes/deploy.ts` | 部署下发接口；`routes/users.ts` 用户管理；`routes/references.ts` 引用数据 |
+| `routes/platform.ts` | 平台健康检查（2026-09-27：平台设置与运行形态端点已下架） |
+| `routes/builtin-tools.ts` | 内置工具配置 |
 
 ### admin-frontend（数字人管理平台前端）
 
 | 模块 | 作用 |
 |---|---|
 | `components/agents/` | 数字人列表/编辑/配置 |
-| `components/mcp/` | MCP 服务注册、参数配置、连通性测试 |
+| `components/mcp/` | MCP 服务卡片列表 + 新建/编辑/删除、调用配置、工具清单、连通性测试（启停与运行日志已下架） |
 | `components/skills/` | 技能库维护 |
 | `components/deploy/` | 部署预览与下发、运行状态查看 |
 | `components/layout/` | 后台框架（导航、布局） |
@@ -296,24 +326,33 @@ npm run dev
 
 ### 6. 把 MCP 服务接入数字人（数字人平台）
 
-MCP 服务**无需在平台侧登记**——`docker-compose.yml` 就是服务清单的权威源
-（非平台基础服务的容器一律视为候选 MCP 服务），新增即自动出现在 `/admin/mcp`：
+**MCP 服务由管理员在平台内人工登记**（2026-09-27 起）：平台是 MCP 服务配置的**唯一权威源**，
+不再读取 `docker-compose.yml`、也不再读 Docker 容器状态。以 `jev` 为例：
 
-1. `/admin/mcp` 出现 `jev` 卡片后进详情保存**调用配置**（地址按目标运行形态填）：
+1. `/admin/mcp` 右上角「**新建 MCP 服务**」→ 填名称 `jev`、用途描述、传输方式 `streamable-http`
+   与**唯一连接地址**后保存（名称会成为运行环境的工具前缀，须为字母/数字/下划线/连字符）：
 
-   | 运行形态 | `transport` | `url` |
-   |---|---|---|
-   | 容器编排内网 `container_network` | `http` | `http://jev:8000/mcp` |
-   | 宿主机本地 `host_local` | `http` | `http://<宿主机 LAN IP>:8001/mcp` |
+   | 部署形态 | `url` |
+   |---|---|
+   | 全 Docker（容器内互访） | `http://jev:8000/mcp` |
+   | 后端跑在宿主机 | `http://<宿主机 LAN IP>:8001/mcp` |
 
-   `file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条 `state_file: url`，
-   否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
+   随后进详情保存**调用配置**：`file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条
+   `state_file: url`，否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
    `confirmation` 建议 `never`（纯求值、无副作用），`rules_fields` 留空。
 
 2. 数字人设计态勾选 `mcp_services` 含 `jev` → 部署 → 平台物化 `MCP.json` → Agent 运行时加载。
 
+> 修改调用配置会**自动作用于所有引用它的数字人**（下次部署生效）；删除服务时若仍被引用，
+> 平台会先列出受影响数字人并要求二次确认，删除后这些引用变为失效（保存与部署都会被拦截）。
+
 > MUST NOT 手工编辑 `.opt-agent/users/{uid}/agents/{agent}/MCP.json`：它是**部署产物**，
 > 下次部署按平台设计态整体覆盖，手改不会留存（数字人配置的权威源在平台侧）。
+
+**异步 MCP 服务**（如排产 `hd`）：在 MCP 详情的 `async_tools` 里登记**原始工具名**（不含 `hd__` 前缀），
+运行环境便会为这些工具注入 `result_url`，服务立即返回受理、算完后 POST 回写；结果落盘到
+`临时空间/后台产出/` 并由前端铃铛「后台记录」呈现，模型可在后续对话中读取。回写形状（`status` 只有
+`success` / `failed` + `summary`）与完整示例见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
 
 ## 本地配置要点：文件回源链路必须使用本机 IP
 
@@ -379,8 +418,16 @@ docker inspect optagent-jev --format '{{range .Config.Env}}{{println .}}{{end}}'
 npm run test
 npm run typecheck
 
-# 后端测试
-npm run test
+# 后端测试（agent-backend：单元 / 集成 / 全量 / 覆盖率）
+npm run test            # = test:unit
+npm run test:integration
+npm run test:all
+npm run test:coverage
+
+# 后端门禁（admin-backend；admin-frontend 有前两项）
+npm run check:lines     # 单文件 ≤500 行
+npm run check:deps      # 依赖边界
+npm run check:contract  # 错误码契约（仅 admin-backend）
 
 # MCP 服务测试（Python，**宿主机本地**；容器不承担测试职责——宪章原则三）
 cd ocr-service && pip install -r requirements-test.txt && python -m pytest -q tests

@@ -1,6 +1,6 @@
 /**
  * 物化：把设计态 + 调用配置 + 共享技能库转成 `.opt-agent` 落盘产物
- * （`FR-026`、`FR-044`、`FR-056`，`data-model.md` §8）。
+ * （`FR-026`、`FR-044`，`data-model.md` §8）。
  *
  * 落盘格式 MUST 与运行环境既有读取口径**完全一致**
  * （`agent-backend/src/domain/agent-instance.ts` / `dirs.ts`）：
@@ -15,8 +15,10 @@
  *
  * **整体覆盖**：本模块产出的是"该数字人应当具有的**完整**内容清单"，
  * 平台侧未搭配的内容不会出现在清单里，因此不会残留（`FR-026`、`SC-018`）。
+ *
+ * **2026-09-27**：连接地址取消运行形态维度，`MCP.json` 的 `url` 直接取调用配置的
+ * 单一 `url`（`http` 必填、保存期已保证非空）。
  */
-import type { RuntimeForm } from '../platform-settings.js';
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { scenarioFields, type AgentScenario } from '../config-center/scenario.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
@@ -24,7 +26,6 @@ import type { SkillLibraryService } from '../skill-library/install.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
 
 export interface MaterializeContext {
-  form: RuntimeForm;
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
 }
@@ -42,10 +43,9 @@ export function buildMcpServerEntry(
     entry.command = config.command ?? '';
     if (config.args && config.args.length > 0) entry.args = config.args;
   } else {
-    // url **按目标运行形态取值**（FR-056）——设计态只持名称，不含连接信息
-    const url = config.endpoints[ctx.form];
-    if (!url) return null; // 缺目标形态地址：由部署前校验拦截，这里不静默回退
-    entry.url = url;
+    // 单一连接地址：http 传输在保存期已保证非空，这里再兜一道（存量脏数据不静默下发空 url）
+    if (!config.url) return null;
+    entry.url = config.url;
   }
   if (Object.keys(config.file_args).length > 0) entry.file_args = config.file_args;
   // HITL 调用确认策略：never 是运行环境缺省语义，不写空壳（与 file_args 同一口径）

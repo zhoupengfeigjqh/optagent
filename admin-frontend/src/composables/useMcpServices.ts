@@ -1,24 +1,28 @@
 /**
- * MCP 服务管理（US4）：列表、详情、调用配置、启停、测试、日志与统计。
+ * MCP 服务管理：列表、详情、调用配置、测试、统计，以及**新建/删除**。
+ *
+ * **2026-09-27**：MCP 服务改为平台内全人工配置，故：
+ * - 移除 `setRunning`（启停）与 `loadLogs`（运行日志）——平台不再读容器运行态；
+ * - 新增 `createService` / `removeService`。
  *
  * 统计的呈现口径（`FR-009`）：`stats_available=false` 表示**读不到**，
  * 界面 MUST 显示"未知"，MUST NOT 以 0 冒充——0 是"确实没调用过"的确定结论。
  */
 import { ref, shallowRef } from 'vue'
 import {
-  fetchMcpLogs,
+  createMcpService,
+  deleteMcpService,
   fetchMcpStats,
   getMcpService,
   listMcpServices,
   saveMcpServiceConfig,
-  startMcpService,
-  stopMcpService,
   testMcpService,
 } from '../api/mcp'
 import type {
   ErrorInfo,
-  McpLogLine,
   McpServiceConfigPayload,
+  McpServiceConfigSaved,
+  McpServiceCreatePayload,
   McpServiceDetail,
   McpServiceListItem,
   McpStatsGroup,
@@ -36,7 +40,6 @@ export function useMcpServices() {
   /** 按「服务 × 工具 × 用户」分组的统计行（2026-09-23；统计表的行） */
   const statsGroups = ref<McpStatsGroup[]>([])
   const statsAvailable = ref(true)
-  const logs = ref<McpLogLine[]>([])
   const testResult = shallowRef<McpTestResult | null>(null)
   const loading = ref(false)
   const busy = ref(false)
@@ -76,12 +79,22 @@ export function useMcpServices() {
     }
   }
 
-  async function loadLogs(name: string, limit = 50): Promise<void> {
+  /**
+   * 新建服务（2026-09-27）。成功返回保存后的完整配置（含新 `revision`）。
+   * 失败返回 `null` 并把可读原因放进 `error`（重名 → `ADM_MCP_SERVICE_EXISTS`）。
+   */
+  async function createService(
+    payload: McpServiceCreatePayload,
+  ): Promise<McpServiceConfigSaved | null> {
+    busy.value = true
     error.value = null
     try {
-      logs.value = (await fetchMcpLogs(name, limit)).items
+      return await createMcpService(payload)
     } catch (err) {
       error.value = toErrorInfo(err)
+      return null
+    } finally {
+      busy.value = false
     }
   }
 
@@ -123,14 +136,17 @@ export function useMcpServices() {
     }
   }
 
-  async function setRunning(name: string, running: boolean): Promise<boolean> {
+  /**
+   * 删除服务（2026-09-27）。
+   *
+   * 影响面提示（受影响数字人清单）由调用方**先**经 §7.1 引用查询取得并二次确认，
+   * 本方法只负责删除。
+   */
+  async function removeService(name: string): Promise<boolean> {
     busy.value = true
     error.value = null
     try {
-      if (running) await startMcpService(name)
-      else await stopMcpService(name)
-      await loadDetail(name)
-      await loadList()
+      await deleteMcpService(name)
       return true
     } catch (err) {
       error.value = toErrorInfo(err)
@@ -161,7 +177,6 @@ export function useMcpServices() {
     stats,
     statsGroups,
     statsAvailable,
-    logs,
     testResult,
     loading,
     busy,
@@ -169,9 +184,9 @@ export function useMcpServices() {
     loadList,
     loadDetail,
     loadStats,
-    loadLogs,
+    createService,
     saveConfig,
-    setRunning,
+    removeService,
     runTest,
   }
 }

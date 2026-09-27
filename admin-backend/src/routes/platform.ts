@@ -1,15 +1,16 @@
 /**
- * 平台与配置路由（`contracts/admin-api.md` §1.1~§1.4）。
+ * 平台健康检查路由（`contracts/admin-api.md` §1.1）。
  *
- * - `GET  /api/admin/platform/health`          — 全部外部依赖可达性（一次性看到全部问题）
- * - `GET  /api/admin/platform/settings`        — 读取平台设置
- * - `GET  /api/admin/platform/runtime-forms`   — 列出可选运行形态（前端不硬编码）
- * - `PUT  /api/admin/platform/settings`        — 切换目标运行形态（破坏性操作）
+ * **2026-09-27 改版（全人工配置）**：MCP 服务不再取自容器编排声明、平台不再读
+ * Docker 容器状态，因此：
+ * - 移除 `runtime_form` / `compose_file` / `docker` 三个字段（前提概念已下架）；
+ * - **移除** §1.2 读取设置、§1.3 运行形态列表、§1.4 切换运行形态——
+ *   平台不再有"目标运行形态"这一等概念。
+ *
+ * 保留下来的只有**外部依赖可达性的只读体检**：平台设计态与运行环境用户数据根。
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
-import { ApiError } from '../domain/api-error.js';
-import { ERROR_CODES } from '../domain/error-codes.js';
 import { probePath } from '../infra/fs-probe.js';
 
 export function registerPlatformRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -20,8 +21,6 @@ export function registerPlatformRoutes(app: FastifyInstance, ctx: AppContext): v
   app.get('/api/admin/platform/health', async () => {
     const platformData = probePath(ctx.config.platformDataDir);
     const optAgent = probePath(ctx.config.optAgentRoot);
-    const compose = probePath(ctx.config.composeFilePath);
-    const dockerAvailable = await ctx.docker.available();
 
     return {
       platform_data: { writable: platformData.writable, path: ctx.config.platformDataDir },
@@ -30,23 +29,6 @@ export function registerPlatformRoutes(app: FastifyInstance, ctx: AppContext): v
         writable: optAgent.writable,
         path: ctx.config.optAgentRoot,
       },
-      compose_file: { readable: compose.readable, path: ctx.config.composeFilePath },
-      docker: { available: dockerAvailable },
-      runtime_form: ctx.settings.targetForm(),
     };
-  });
-
-  app.get('/api/admin/platform/settings', async () => ctx.settings.get());
-
-  app.get('/api/admin/platform/runtime-forms', async () => ({
-    items: ctx.settings.listForms(),
-  }));
-
-  app.put('/api/admin/platform/settings', async (req) => {
-    const body = (req.body ?? {}) as { target_runtime_form?: unknown; revision?: unknown };
-    if (typeof body.revision !== 'number' || !Number.isInteger(body.revision)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'revision 必填且须为整数（乐观锁）');
-    }
-    return ctx.settings.set(body.target_runtime_form, body.revision);
   });
 }

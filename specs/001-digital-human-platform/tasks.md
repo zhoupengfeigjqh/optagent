@@ -888,3 +888,60 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 `admin-frontend` `typecheck` ✅ / **371 passed** / `check:lines` ✅。
 
 **生效需要**：**重启 `admin-backend`**（详情端点代码变了）。`admin-frontend` 的改动只在类型层（编译期），但为拿到最新前端类型建议一并重建。
+
+---
+
+## 增量任务（2026-09-27）：MCP 服务改为平台内**全人工配置**
+
+**需求变更（产品决定）**：MCP 服务不再从容器编排声明派生、不再读 Docker 容器运行态，
+连接地址不再按运行形态分形态声明，改为**管理员在平台内新建/维护 + 单一连接地址**。
+
+**废止 / 重定义的需求**：
+
+| 需求 | 处置 |
+|---|---|
+| `FR-043` | **重定义**：清单来源＝平台侧配置（唯一权威源）；卡片字段＝名称/用途/传输方式/连接地址；新增"新建/删除"；去掉容器四态 |
+| `FR-046`（启停）、`FR-048`（运行日志） | **废止**（平台不再读容器运行态） |
+| `FR-051` | **迁移**：从"关闭服务前提示引用"改为"**删除服务**前提示引用" |
+| `FR-052` | **重定义**：从"与编排声明比对"改为"引用的服务已在平台删除 → 引用失效" |
+| `FR-056`、`FR-057` | **废止**（运行形态概念整体下架；`endpoints` 收敛为单一 `url`） |
+| `SC-010`、`SC-024` | **重定义 / 废止**（详见 `spec.md`） |
+
+**新增接口**：`POST /api/admin/mcp/services`（新建）、`DELETE /api/admin/mcp/services/{name}`（删除）；
+**移除接口**：`/start`、`/stop`、`/logs`，以及 `/platform/settings`、`/platform/runtime-forms`。
+**新增错误码**：`ADM_MCP_SERVICE_EXISTS`；**移除**：启停白名单类、运行形态缺地址类、Docker 不可达类、编排不可读类（共 4 个；`§0.4` 总表 24 → 21 个）。
+
+**被本增量取代（superseded）的原任务条目**：
+
+| 原任务 | 说明 |
+|---|---|
+| `T001` | 澄清项中"容器状态 `FR-043`、日志 `FR-048`"的只读消费表述已收窄（`spec.md` FR-005／SC-017 同步修订） |
+| `T012` | `docker-compose.yml` 的 `admin-backend` 挂载由四个减为两个（去掉 `docker-compose.yml:ro` 与 `docker.sock`） |
+| `T014`、`T015` | `config.ts` 去掉 `COMPOSE_FILE_PATH`／`DOCKER_SOCKET_PATH`；`context.ts` 去掉 `compose`／`docker`／`settings` |
+| `T020`、`T022`、`T023` | `infra/compose-reader.ts`、`tests/unit/compose-reader.spec.ts`、`domain/platform-settings.ts` **已删除** |
+| `T061` | `service-config.ts` 的 `endpoints` → 单一 `url`；新增 `create`／`remove`；新增 `service-config-create.spec.ts` |
+| `T064` | `precheck.ts` 五类校验 → **四类**（去掉 `runtime_form`） |
+| `T065` | `materialize.ts` 的 `url` 直接取 `config.url`（去掉运行形态取值） |
+| `T070`、`T079` | 部署集成测试去掉"双形态对比 `SC-024`"；`RuntimeFormSwitch.vue` 及其测试**已删除** |
+| `T104`、`T105` | `service-list.ts` 清单来源改平台配置；`operations.ts` 只留测试与统计 |
+| `T107`、`T108`、`T110`、`T111`、`T112`、`T115`、`T116` | 测试与组件同步：`mcp.spec.ts`（新建/重名/删除/引用失效）、`mcp-service-list.spec.ts`、`useMcpServices.spec.ts`、`McpCardList.spec.ts`、`McpCallConfigForm.spec.ts`；`McpLogViewer.vue/.spec.ts` **已删除** |
+| `tests/unit/docker-host*.spec.ts` | **已删除**（源码模块下线） |
+
+**代码层改动清单**：
+
+- 后端：`domain/mcp/{service-config,service-list,operations}.ts`、`routes/mcp.ts`、`routes/platform.ts`、`routes/deploy.ts`（清单响应加 `revision`）、`domain/{error-codes,config,context,server}.ts`、`domain/config-center/{unified-catalog,agent-design,references}.ts`、`domain/deploy/{precheck,materialize,deployer,history}.ts`、`infra/mcp-client.ts`；**删除** `infra/docker-host.ts`、`infra/compose-reader.ts`、`domain/platform-settings.ts`；`package.json` 移除 `yaml`。
+- 前端：`api/{mcp,platform,deploy,types}.ts`、`composables/{useMcpServices,useDeploy}.ts`、`constants/{error-messages,mcp}.ts`、`components/mcp/{McpArea,McpCardList,McpServiceDetail,McpCallConfigForm}.vue`、`components/deploy/{DeployPanel,DeployHistoryList}.vue`、`components/agents/McpSelector.vue`；**删除** `components/mcp/McpLogViewer.vue`、`components/deploy/RuntimeFormSwitch.vue` 及各自 spec。
+- 部署：`docker-compose.yml`（`admin-backend` 去掉两个挂载）；`admin-backend/.env*`（去掉两个变量）。
+- 文档：`contracts/admin-api.md`（§0.2/§0.4/§0.5、§1 重写、§3 重写并新增 §3.3.1/§3.3.2、§6.5~§6.8、§7.1、§8）、`data-model.md`（§1.1/§1.2、§3、§7.2/§7.3、§8、§9）、`spec.md`（FR/SC/实体/假设）、`plan.md`、`research.md`（D2/D3/D6）、`quickstart.md`、本文件、`README.md`。
+
+**验证（门禁全绿）**：
+
+| 项 | 结果 |
+|---|---|
+| `admin-backend` `tsc --noEmit` / `lint` | ✅ |
+| `admin-backend` 测试 | **420 passed**（29 文件） |
+| `admin-backend` `check:lines` / `check:deps` / `check:contract` | ✅ / ✅ / ✅（契约 §0.4 登记 21 个码，四处一致） |
+| `admin-frontend` `vue-tsc` / `lint` / `check:lines` / `check:deps` | ✅ / ✅ / ✅ / ✅（97 文件 ≤500 行） |
+| `admin-frontend` 测试 | **352 passed**（33 文件） |
+
+**生效需要**：重启 `admin-backend` 与重新构建 `admin-frontend`；`docker compose up -d admin-backend`（挂载变了，必须**重建**容器而非 `restart`）。

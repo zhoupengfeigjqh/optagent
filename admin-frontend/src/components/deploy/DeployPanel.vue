@@ -1,20 +1,21 @@
 <script setup lang="ts">
 /**
- * 部署面板（`FR-027`、`FR-057`）。
+ * 部署面板（`FR-027`）。
  *
- * 职责：目标运行形态可见 → **本次范围**（部署对象在「用户与关联数字人」页勾选）
- * → 校验预检（**一次性列出全部错误项**）→ 部署触发 → 结果明细。
+ * 职责：**本次范围**（部署对象在「用户与关联数字人」页勾选）→ 校验预检
+ * （**一次性列出全部错误项**）→ 部署触发 → 结果明细。
  *
  * 两条硬约束：
  * 1. **未勾选任何用户 → 既不能预检、也不能部署**（空选择绝不能落回服务端
  *    "缺省 = 全部用户"的语义，那会变成误部署全平台）；
- * 2. 勾选或目标形态**任一变化即作废上一次预检**，避免"用 A 的结论部署 B"。
+ * 2. 勾选**变化即作废上一次预检**，避免"用 A 的结论部署 B"。
+ *
+ * **2026-09-27**：「目标运行形态」随 MCP 单一连接地址下架，本面板不再有形态切换。
  */
 import { computed, onMounted, watch } from 'vue'
 import { useDeploy } from '../../composables/useDeploy'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
-import RuntimeFormSwitch from './RuntimeFormSwitch.vue'
 
 const props = defineProps<{
   /** 部署对象（在「用户与关联数字人」页勾选） */
@@ -39,7 +40,7 @@ const scopeLabel = computed(() =>
 )
 
 onMounted(() => {
-  void d.loadSettings()
+  void d.loadRevision()
 })
 
 // 勾选变化 → 上一次预检结论作废（服务端部署时也会重新校验，但界面不能给假承诺）
@@ -67,10 +68,6 @@ async function onDeploy(): Promise<void> {
   if (ok) emit('deployed')
 }
 
-async function onSwitch(form: string): Promise<void> {
-  await d.switchForm(form)
-}
-
 /** 范围文案里的用户名清单：最多列 3 个，其余折叠为"等 N 个"（避免撑爆标题） */
 function nameList(userIds: string[]): string {
   if (userIds.length <= 3) return userIds.join('、')
@@ -80,20 +77,13 @@ function nameList(userIds: string[]): string {
 
 <template>
   <section class="deploy-panel" aria-label="部署生效">
-    <RuntimeFormSwitch
-      :current="d.settings.value?.target_runtime_form ?? '—'"
-      :forms="d.forms.value"
-      @switch="onSwitch"
-      @announce="emit('announce', $event)"
-    />
-
     <!-- 本次范围：部署对象在「用户与关联数字人」页的卡片上勾选（未勾选则两个按钮都不可用） -->
     <p class="deploy-panel__scope" role="status" aria-live="polite">
       本次范围：<strong>{{ scopeLabel }}</strong>
       <span v-if="!hasTarget" class="muted">
         （请在下方「用户与关联」中勾选要部署的用户；未勾选时不能校验、也不能部署）
       </span>
-      <span v-else class="muted">（变更勾选或目标运行形态后需重新校验）</span>
+      <span v-else class="muted">（变更勾选后需重新校验）</span>
     </p>
 
     <div class="deploy-panel__actions">
@@ -155,10 +145,7 @@ function nameList(userIds: string[]): string {
     <!-- 部署结果 -->
     <div v-if="d.result.value" class="deploy-panel__result" aria-live="polite">
       <h3>部署结果</h3>
-      <p class="field__hint">
-        目标运行形态：{{ d.result.value.target_runtime_form }}；已在部署历史中记录（id
-        {{ d.result.value.history_id }}）。
-      </p>
+      <p class="field__hint">已在部署历史中记录（id {{ d.result.value.history_id }}）。</p>
       <ul>
         <li v-for="user in d.result.value.users" :key="user.user_id">
           <StatusBadge :status="user.ok ? 'ok' : 'failed'" :label="user.ok ? '成功' : '失败'" />

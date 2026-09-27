@@ -1,8 +1,11 @@
 /**
- * 集成测试夹具：每个用例一套**隔离的临时目录**（平台设计态 + `.opt-agent` + 编排文件）。
+ * 集成测试夹具：每个用例一套**隔离的临时目录**（平台设计态 + `.opt-agent`）。
  *
  * 之所以每个用例各建一套：部署类用例会真实写入 `.opt-agent`，
  * 共用目录会让用例之间互相污染（尤其是"零写入""100% 不变"这类断言）。
+ *
+ * **2026-09-27**：随「MCP 服务全人工配置」，夹具不再需要编排文件与假 Docker
+ * ——平台已不读这两者。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,86 +14,10 @@ import type { FastifyInstance } from 'fastify';
 import { loadConfig, type AppConfig } from '../../src/config.js';
 import type { AppContext } from '../../src/context.js';
 import { buildServer } from '../../src/server.js';
-import type { ContainerStatus, DockerLogLine } from '../../src/infra/docker-host.js';
-import { DockerHost } from '../../src/infra/docker-host.js';
 import { RuntimeClient } from '../../src/infra/runtime-client.js';
 import { McpClientService, type McpTestReport, type McpToolDescriptor } from '../../src/infra/mcp-client.js';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
-
-/** 默认的编排声明（含一个 MCP 服务 `ocr` 与全部平台服务） */
-export const DEFAULT_COMPOSE = `services:
-  gateway:
-    build: ./gateway
-  frontend:
-    build: ./frontend
-  backend:
-    build: ./agent-backend
-  admin-frontend:
-    build: ./admin-frontend
-  admin-backend:
-    build: ./admin-backend
-  ocr:
-    build: ./ocr-service
-    container_name: optagent-ocr
-    ports:
-      - "8000"
-`;
-
-/**
- * 假 Docker：默认"容器不存在"（`unknown`），可预置状态与日志。
- * 真实 Docker 在测试机上不可用（也不应依赖），故集成测试一律注入本类。
- */
-export class FakeDockerHost extends DockerHost {
-  statuses = new Map<string, ContainerStatus>();
-  logsByService = new Map<string, DockerLogLine[]>();
-  started: string[] = [];
-  stopped: string[] = [];
-
-  constructor(private readonly manageable: (name: string) => boolean = () => true) {
-    super({ socketPath: '/nonexistent/docker.sock' });
-  }
-
-  override async available(): Promise<boolean> {
-    return true;
-  }
-
-  override async statusOf(serviceName: string): Promise<ContainerStatus> {
-    return this.statuses.get(serviceName) ?? 'unknown';
-  }
-
-  override async statusMap(): Promise<Map<string, ContainerStatus>> {
-    return new Map(this.statuses);
-  }
-
-  override async logs(serviceName: string, limit: number): Promise<DockerLogLine[]> {
-    const all = this.logsByService.get(serviceName) ?? [];
-    return all.slice(0, Math.max(0, Math.min(limit, 500)));
-  }
-
-  override async start(serviceName: string): Promise<ContainerStatus> {
-    this.assertManageable(serviceName);
-    this.started.push(serviceName);
-    this.statuses.set(serviceName, 'running');
-    return 'running';
-  }
-
-  override async stop(serviceName: string): Promise<ContainerStatus> {
-    this.assertManageable(serviceName);
-    this.stopped.push(serviceName);
-    this.statuses.set(serviceName, 'stopped');
-    return 'stopped';
-  }
-
-  private assertManageable(serviceName: string): void {
-    if (!this.manageable(serviceName)) {
-      throw new ApiError(
-        ERROR_CODES.ADM_MCP_SERVICE_UNMANAGED,
-        `服务 ${serviceName} 不在容器编排声明内，不允许启停`,
-      );
-    }
-  }
-}
 
 /** 假运行环境：预置内置工具目录与调用统计；可切换"不可达" */
 export class FakeRuntimeClient extends RuntimeClient {
@@ -164,34 +91,28 @@ export interface TestFixture {
   root: string;
   platformDataDir: string;
   optAgentRoot: string;
-  composeFilePath: string;
   config: AppConfig;
   app: FastifyInstance;
   ctx: AppContext;
-  docker: FakeDockerHost;
   runtime: FakeRuntimeClient;
   mcpClient: FakeMcpClient;
   cleanup(): Promise<void>;
 }
 
 export interface FixtureOptions {
-  /** 编排文件内容；传 `null` 表示不创建该文件 */
-  composeYaml?: string | null;
   /** 预置用户（创建 `.opt-agent/users/{uid}/` 与三个文件空间） */
   userIds?: string[];
+  /** 预置 MCP 服务（key = 服务名，value = 传给 `create` 的入参片段） */
+  mcpServices?: Record<string, Record<string, unknown>>;
 }
 
 export async function createFixture(options: FixtureOptions = {}): Promise<TestFixture> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'optagent-admin-'));
   const platformDataDir = path.join(root, '.platform-data');
   const optAgentRoot = path.join(root, '.opt-agent');
-  const composeFilePath = path.join(root, 'docker-compose.yml');
 
   fs.mkdirSync(platformDataDir, { recursive: true });
   fs.mkdirSync(optAgentRoot, { recursive: true });
-
-  const composeYaml = options.composeYaml === undefined ? DEFAULT_COMPOSE : options.composeYaml;
-  if (composeYaml !== null) fs.writeFileSync(composeFilePath, composeYaml, 'utf8');
 
   for (const userId of options.userIds ?? []) {
     for (const space of ['数据准备', '共享空间', '临时空间']) {
@@ -206,28 +127,27 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
       PORT: '3000',
       PLATFORM_DATA_DIR: platformDataDir,
       OPT_AGENT_ROOT: optAgentRoot,
-      COMPOSE_FILE_PATH: composeFilePath,
-      DOCKER_SOCKET_PATH: path.join(root, 'nonexistent-docker.sock'),
       OPT_AGENT_BACKEND_URL: 'http://127.0.0.1:1',
       RUNTIME_TIMEOUT_MS: '200',
     },
   });
 
-  const docker = new FakeDockerHost();
   const runtime = new FakeRuntimeClient();
   const mcpClient = new FakeMcpClient();
-  const app = await buildServer({ config, docker, runtime, mcpClient });
+  const app = await buildServer({ config, runtime, mcpClient });
   const ctx = (app as unknown as { ctx: AppContext }).ctx;
+
+  for (const [name, input] of Object.entries(options.mcpServices ?? {})) {
+    ctx.mcpConfigs.create({ name, transport: 'http', url: `http://127.0.0.1:1/${name}/mcp`, ...input });
+  }
 
   return {
     root,
     platformDataDir,
     optAgentRoot,
-    composeFilePath,
     config,
     app,
     ctx,
-    docker,
     runtime,
     mcpClient,
     async cleanup() {

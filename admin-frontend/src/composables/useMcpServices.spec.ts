@@ -1,48 +1,41 @@
 /**
- * 单元测试：MCP 服务管理状态（US4）
+ * 单元测试：MCP 服务管理状态
  *
  * 重点守住 `FR-009`：统计读不到时 `statsAvailable=false`，
- * **MUST NOT 以 0 冒充**。
+ * **MUST NOT 以 0 冒充**；以及 2026-09-27 新增的新建/删除语义。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useMcpServices } from './useMcpServices'
 
 const listMcpServices = vi.fn()
 const getMcpService = vi.fn()
+const createMcpService = vi.fn()
 const saveMcpServiceConfig = vi.fn()
-const startMcpService = vi.fn()
-const stopMcpService = vi.fn()
+const deleteMcpService = vi.fn()
 const testMcpService = vi.fn()
-const fetchMcpLogs = vi.fn()
 const fetchMcpStats = vi.fn()
 
 vi.mock('../api/mcp', () => ({
   listMcpServices: (...a: unknown[]) => listMcpServices(...a),
   getMcpService: (...a: unknown[]) => getMcpService(...a),
+  createMcpService: (...a: unknown[]) => createMcpService(...a),
   saveMcpServiceConfig: (...a: unknown[]) => saveMcpServiceConfig(...a),
-  startMcpService: (...a: unknown[]) => startMcpService(...a),
-  stopMcpService: (...a: unknown[]) => stopMcpService(...a),
+  deleteMcpService: (...a: unknown[]) => deleteMcpService(...a),
   testMcpService: (...a: unknown[]) => testMcpService(...a),
-  fetchMcpLogs: (...a: unknown[]) => fetchMcpLogs(...a),
   fetchMcpStats: (...a: unknown[]) => fetchMcpStats(...a),
 }))
 
 const DETAIL = {
   name: 'ocr',
   transport: 'http' as const,
-  status: 'running' as const,
-  in_compose: true,
   description: 'OCR',
-  endpoints: { container_network: 'http://ocr:8000/mcp' },
+  url: 'http://192.168.1.2:8000/mcp',
   command: null,
   args: null,
-  writable: false,
-  permission_scope: '只读',
   file_args: {},
   tools: [],
   tools_truncated: false,
   tools_error: null,
-  compose_declaration: null,
   references: [],
   revision: 2,
 }
@@ -50,11 +43,10 @@ const DETAIL = {
 beforeEach(() => {
   listMcpServices.mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
   getMcpService.mockReset().mockResolvedValue(DETAIL)
+  createMcpService.mockReset()
   saveMcpServiceConfig.mockReset()
-  startMcpService.mockReset()
-  stopMcpService.mockReset()
+  deleteMcpService.mockReset()
   testMcpService.mockReset()
-  fetchMcpLogs.mockReset().mockResolvedValue({ items: [], truncated: false })
   fetchMcpStats.mockReset().mockResolvedValue({ stats_available: true, items: [], groups: [] })
 })
 
@@ -68,10 +60,10 @@ describe('useMcpServices', () => {
   })
 
   it('loadList 失败：错误可读', async () => {
-    listMcpServices.mockRejectedValue({ code: 'ADM_COMPOSE_FILE_UNREADABLE', message: 'x' })
+    listMcpServices.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
     const mcp = useMcpServices()
     await mcp.loadList()
-    expect(mcp.error.value?.code).toBe('ADM_COMPOSE_FILE_UNREADABLE')
+    expect(mcp.error.value?.code).toBe('ADM_STORAGE_UNAVAILABLE')
   })
 
   it('loadStats：可用时写入数据（服务级汇总 + 分组行）', async () => {
@@ -115,16 +107,55 @@ describe('useMcpServices', () => {
     expect(mcp.statsGroups.value).toEqual([])
   })
 
-  it('loadLogs：写入有界日志；失败时清空并可读报错', async () => {
-    fetchMcpLogs.mockResolvedValue({ items: [{ ts: null, line: 'x' }], truncated: true })
-    const mcp = useMcpServices()
-    await mcp.loadLogs('ocr', 50)
-    expect(fetchMcpLogs).toHaveBeenCalledWith('ocr', 50)
-    expect(mcp.logs.value).toHaveLength(1)
+  it('createService：成功后返回保存后的完整配置（含新 revision）', async () => {
+    createMcpService.mockResolvedValue({
+      name: 'ocr',
+      description: 'OCR',
+      transport: 'http',
+      url: 'http://192.168.1.2:8000/mcp',
+      command: null,
+      args: null,
+      file_args: {},
+      rules_fields: {},
+      async_tools: [],
+      confirmation: 'never',
+      updated_at: 'x',
+      revision: 3,
+      affected_agents: [],
+    })
 
-    fetchMcpLogs.mockRejectedValue({ code: 'ADM_DOCKER_UNAVAILABLE', message: 'x' })
-    await mcp.loadLogs('ocr')
-    expect(mcp.error.value?.code).toBe('ADM_DOCKER_UNAVAILABLE')
+    const mcp = useMcpServices()
+    const saved = await mcp.createService({
+      name: 'ocr',
+      description: 'OCR',
+      transport: 'http',
+      url: 'http://192.168.1.2:8000/mcp',
+      file_args: {},
+    })
+
+    expect(createMcpService).toHaveBeenCalled()
+    expect(saved?.name).toBe('ocr')
+    expect(mcp.error.value).toBeNull()
+  })
+
+  it('createService：重名失败返回 null 且错误可读（ADM_MCP_SERVICE_EXISTS）', async () => {
+    createMcpService.mockRejectedValue({ code: 'ADM_MCP_SERVICE_EXISTS', message: 'x' })
+    const mcp = useMcpServices()
+    expect(
+      await mcp.createService({ name: 'ocr', description: '', transport: 'http', url: 'http://x/mcp', file_args: {} }),
+    ).toBeNull()
+    expect(mcp.error.value?.code).toBe('ADM_MCP_SERVICE_EXISTS')
+    expect(mcp.busy.value).toBe(false)
+  })
+
+  it('removeService：成功 true；失败 false 且错误可读', async () => {
+    deleteMcpService.mockResolvedValue(undefined)
+    const mcp = useMcpServices()
+    expect(await mcp.removeService('ocr')).toBe(true)
+
+    deleteMcpService.mockRejectedValue({ code: 'ADM_MCP_SERVICE_NOT_FOUND', message: 'x' })
+    expect(await mcp.removeService('ghost')).toBe(false)
+    expect(mcp.error.value?.code).toBe('ADM_MCP_SERVICE_NOT_FOUND')
   })
 
   it('saveConfig：成功时用响应回传受影响数字人与新 revision，**不再二次请求详情**（FR-044、契约 §0.5 ②）', async () => {
@@ -132,9 +163,7 @@ describe('useMcpServices', () => {
       name: 'ocr',
       description: 'OCR',
       transport: 'http',
-      endpoints: { container_network: 'http://ocr:9000/mcp' },
-      writable: false,
-      permission_scope: '只读',
+      url: 'http://192.168.1.2:9000/mcp',
       file_args: {},
       revision: 3,
       affected_agents: ['demo'],
@@ -145,7 +174,7 @@ describe('useMcpServices', () => {
     const result = await mcp.saveConfig('ocr', {
       description: 'OCR',
       transport: 'http',
-      endpoints: { container_network: 'http://ocr:9000/mcp' },
+      url: 'http://192.168.1.2:9000/mcp',
       file_args: {},
     })
 
@@ -167,7 +196,7 @@ describe('useMcpServices', () => {
       name: 'ocr',
       description: 'OCR',
       transport: 'http',
-      endpoints: {},
+      url: 'http://x/mcp',
       file_args: {},
       revision: 9,
       affected_agents: [],
@@ -177,7 +206,7 @@ describe('useMcpServices', () => {
 
     const result = await mcp.saveConfig(
       'ocr',
-      { description: 'OCR', transport: 'http', endpoints: {}, file_args: {} },
+      { description: 'OCR', transport: 'http', url: 'http://x/mcp', file_args: {} },
       9,
     )
 
@@ -200,26 +229,6 @@ describe('useMcpServices', () => {
     await mcp.loadDetail('ocr')
     expect(await mcp.saveConfig('ocr', {} as never)).toBeNull()
     expect(mcp.error.value?.code).toBe('ADM_CONFIG_REVISION_CONFLICT')
-  })
-
-  it('setRunning：启动 / 关闭分别调用对应端点并刷新（FR-046）', async () => {
-    startMcpService.mockResolvedValue({ name: 'ocr', status: 'running' })
-    stopMcpService.mockResolvedValue({ name: 'ocr', status: 'stopped' })
-
-    const mcp = useMcpServices()
-    expect(await mcp.setRunning('ocr', true)).toBe(true)
-    expect(startMcpService).toHaveBeenCalledWith('ocr')
-
-    expect(await mcp.setRunning('ocr', false)).toBe(true)
-    expect(stopMcpService).toHaveBeenCalledWith('ocr')
-  })
-
-  it('setRunning 失败：返回 false 并可读报错（不误报为成功）', async () => {
-    startMcpService.mockRejectedValue({ code: 'ADM_MCP_SERVICE_UNMANAGED', message: 'x' })
-    const mcp = useMcpServices()
-    expect(await mcp.setRunning('ocr', true)).toBe(false)
-    expect(mcp.error.value?.code).toBe('ADM_MCP_SERVICE_UNMANAGED')
-    expect(mcp.busy.value).toBe(false)
   })
 
   it('runTest：返回测试报告；失败可读（FR-047）', async () => {
