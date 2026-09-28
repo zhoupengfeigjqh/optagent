@@ -2,12 +2,16 @@
 /**
  * 工作台视图（T033 / T042 / T062）
  *
- * 由路由 `/`（`src/router/index.ts`）挂载；原应用根组件的装配职责不变：
- * 装配全局会话上下文（`useAppSession` 内部 `provide`）并渲染三栏骨架：
- * 左栏历史会话（US5）、中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8）——
- * 文件空间列表与文件内容在该面板内互换，二者不并存，故只有一个右栏组件。
+ * 由路由 `/`（`src/router/index.ts`）挂载：渲染三栏骨架——左栏历史会话（US5）、
+ * 中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8），文件空间列表与文件内容在
+ * 该面板内互换，二者不并存，故只有一个右栏组件。
+ *
+ * 会话上下文由根组件 `App.vue` 装配一次（`provide`），本视图用 `useSession()` 取用——
+ * MUST NOT 在此再 `useAppSession()` 一次：那会**另建一套**状态（两份 threads/chat 各自
+ * 打请求，且"记住当前会话"会双写地址栏）。同理，"首屏拉列表 + 刷新恢复会话"这两件
+ * **工作台专属**的事也归本视图，见下方 `onMounted`。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import type { Conversation, FileReference } from '@/api/types'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
@@ -16,10 +20,10 @@ import ToastHost from '@/components/common/ToastHost.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import HistorySidebar from '@/components/layout/HistorySidebar.vue'
 import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
-import { useAppSession } from '@/composables/useAppSession'
+import { useSession } from '@/composables/useAppSession'
 import { RUN_PHASE } from '@/constants/events'
 
-const session = useAppSession()
+const session = useSession()
 
 /** 有历史消息或本轮已开始 → 展开为完整对话布局（FR-003 / FR-004）。 */
 const expanded = computed(
@@ -33,9 +37,46 @@ const busy = computed(
 )
 
 // 首屏拉取历史会话：一次性拉全量，10 / 100 条切在前端完成（V-09）
-onMounted(() => {
-  void session.threads.loadList()
+onMounted(async () => {
+  await session.threads.loadList()
+  await restoreThread()
 })
+
+/**
+ * 刷新恢复（002 特性）：首屏按 URL 的 `?thread=` / 本地存储选中的会话自动加载历史。
+ *
+ * 为什么必须做：工具记录落盘后，"刷新后能看到工具卡片"还差最后一环——
+ * 不自动恢复会话的话，中栏仍是空态，用户得手动点左侧历史才看得到。
+ *
+ * 为什么归工作台而不是根组件：它只对"打开着聊天界面"的路径有意义；放在根组件会让
+ * `/ganttdemo`、`/datapage/*` 也白拉一次历史，并在那些路径上改写 URL（2026-09-28 修正）。
+ *
+ * 降级：目标会话已被删除（或加载失败）→ **静默**回空态并清除痕迹，不报错。
+ */
+async function restoreThread(): Promise<void> {
+  const target = session.initialThreadId
+  if (!target) {
+    return
+  }
+  const exists = session.threads.list.value.some((item) => item.thread_id === target)
+  if (!exists) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+    return
+  }
+  await session.threads.select(target)
+  if (session.threads.error.value !== null) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+  }
+}
+
+// 会话切换即记住（地址栏 + 本地存储双写），供下次刷新恢复。只在工作台生效：
+// 甘特图示意页与数据页不消费会话，本就不该被会话状态牵动地址栏。
+watch(
+  () => session.threads.activeId.value,
+  (threadId) => session.rememberActiveThread(threadId),
+)
 
 function onSelectThread(threadId: string): void {
   void session.threads.select(threadId)

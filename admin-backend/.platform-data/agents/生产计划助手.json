@@ -11,10 +11,11 @@
   ],
   "mcp_services": [
     "ocr",
-    "jev"
+    "jev",
+    "hd-algorithm"
   ],
   "skills": [
-    "调度算法"
+    "海大算法求解"
   ],
   "scenario": {
     "scenario": "海大计划",
@@ -221,5 +222,5 @@
       ]
     }
   },
-  "updated_at": "2026-09-25T04:14:59.876Z"
+  "updated_at": "2026-09-28T05:49:33.603Z"
 }
