@@ -20,6 +20,19 @@
       "source": "skill-1.zip",
       "installed_at": "2026-09-15T15:23:58.671Z",
       "updated_at": "2026-09-25T04:14:55.859Z"
+    },
+    {
+      "name": "海大算法求解",
+      "description": "海大单工序排产的作业指引：先用 hd_algorithm_input_parser 解析数据、确认 5 类数据版本齐备，再用 hd_scheduling_submit 提交求解；求解时间与规则优先级可留空，提交前的参数确认弹窗可二次确认或修改。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 4270
+        }
+      ],
+      "source": "AI 助手创建",
+      "installed_at": "2026-09-28T05:35:57.746Z",
+      "updated_at": "2026-09-28T05:45:07.283Z"
     }
   ]
 }

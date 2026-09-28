@@ -18,7 +18,18 @@ import pluginVue from 'eslint-plugin-vue';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'coverage/**',
+      // 第三方 vendored 静态资源（甘特图组件自带的 Highcharts 及其扩展，共 22k+ 行）。
+      // 它们不是本项目代码，且是压缩/老式写法：实测 1952 条问题里 1815 条出自这里
+      // （1558 条 `no-unused-expressions`、156 条 `no-this-alias`），只会淹没真问题。
+      // 这类文件永远不该被 lint；改动它们也不归本仓库维护（2026-09-28）。
+      'src/components/z-gantt/static/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
