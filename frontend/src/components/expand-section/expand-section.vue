@@ -103,7 +103,7 @@ const handleMenuClick = ({
 
 <template>
   <div class="expand-section bg-white" :class="{ 'px-4': withPadding }">
-    <div class="flex items-center border-b">
+    <div class="flex items-center border-b border-gray-200 mb-2">
       <!-- 折叠/展开箭头 -->
       <span
         class="inline-flex cursor-pointer items-center justify-center px-1 transition-transform duration-200"

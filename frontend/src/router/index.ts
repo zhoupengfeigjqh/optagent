@@ -1,3 +1,7 @@
+/*
+ * @Author: Nose陈建
+ * @LastEditTime: 2026-09-28 11:37:51
+ */
 /**
  * 路由配置
  *
@@ -16,10 +20,17 @@ const router = createRouter({
       // 懒加载：路由级组件按需分包，不进首屏关键路径
       component: () => import('@/views/WorkbenchView.vue'),
     },
+    //数据展示页面
     {
       path: '/datapage/:pageid',
       name: 'datapage',
       component: () => import('@/views/datapage/datapage.vue'),
+    },
+    //排产任务结果页面
+    {
+      path: '/taskresult',
+      name: 'taskResult',
+      component: () => import('@/views/datapage/task-result.vue'),
     },
     {
         path: '/ganttdemo',

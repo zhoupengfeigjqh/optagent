@@ -118,3 +118,41 @@ export function deleteProductionCapacityApi(data) {
     return axios.delete(API_PREFIX + '/production-capacity/delete', {params: data})
 }
 
+
+
+/**============================排产任务结果============================== */
+
+//算法排产结果回调
+export function schedulingCallbackApi(data) {
+    return axios.post(API_PREFIX + '/scheduling/callback', data)
+}
+
+//工单加工计划分页查询
+export function getOverallPlanListApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/overall-plan/page', {params: data})
+}
+
+//排产结果指标
+export function getMetricsApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/metrics', {params: data})
+}
+
+//产线利用率分页查询
+export function getLineUsageRateListApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/line-usage-rate/page', {params: data})
+}
+
+//产线加工计划分页查询
+export function getLinePlanListApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/line-plan/page', {params: data})
+}
+
+//排产结果甘特图
+export function getGanttApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/gantt', {params: data})
+}
+
+//排产结果 Excel 导出（blob 文件流，由页面触发浏览器下载）
+export function exportSchedulingApi(data) {
+    return axios.get(API_PREFIX + '/scheduling/export', {params: data, responseType: 'blob'})
+}
