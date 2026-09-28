@@ -18,7 +18,8 @@ const AGENT = {
 };
 
 beforeEach(async () => {
-  fx = await createFixture({ userIds: ['admin'] });
+  // MCP 服务改为平台内人工新建：`AGENT` 里引用的 `ocr` 必须先存在
+  fx = await createFixture({ userIds: ['admin'], mcpServices: { ocr: {} } });
   fx.runtime.tools = [
     {
       name: 'read_file',

@@ -288,9 +288,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
               ]
               break
             case 'tool_call_end':
-              // 结束即从展示中移除（V-05）
-              toolCalls.value = toolCalls.value.filter(
-                (item) => item.call_id !== event.data.call_id,
+              // 002 特性（V-05 修订）：结束**不再立即移除**，而是标记为终态——
+              // 这样一轮跑完前后的展示与"刷新后的历史卡片"一致；
+              // 本轮真正收尾时由 finally 统一清空，交给历史消息接管
+              toolCalls.value = toolCalls.value.map((item) =>
+                item.call_id === event.data.call_id
+                  ? { ...item, status: event.data.status }
+                  : item,
               )
               break
             case 'interaction_request':

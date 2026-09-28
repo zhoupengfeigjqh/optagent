@@ -18,7 +18,7 @@
 | Python | 不需要 | 本特性不涉及 `ocr-service` 的改动 |
 | 既有栈 | `agent-backend` / `frontend` / `ocr-service` 可独立运行 | 本平台依赖运行环境提供的内置工具目录与调用统计（见 `contracts/runtime-api-delta.md`） |
 
-**宿主机 `hosts` 文件 SHOULD NOT 被修改**：`FR-056` 要求 MCP 连接地址按运行形态分别声明，本地联调**不得**再依赖修改 hosts 文件或手工编辑数字人配置（`SC-024`）。若本地验证时发现仍需改 hosts，说明目标运行形态或调用配置未按要求声明，**应视为缺陷**。
+**宿主机 `hosts` 文件 SHOULD NOT 被修改**：**（2026-09-27）** MCP 连接地址是平台内登记的**唯一取值**，本地联调**不得**依赖修改 hosts 文件或手工编辑数字人配置。若本地验证时发现仍需改 hosts，说明该 MCP 服务的调用配置里登记的地址不可达（例如容器内网服务名在宿主机上无法解析），**应视为配置缺陷**——本地形态应登记宿主机可达地址（如 `http://192.168.1.2:8000/mcp`）。
 
 ---
 
@@ -79,7 +79,7 @@ cd admin-backend  && npm run dev     # :3001（本地开发端口，避免与 ag
 cd admin-frontend && npm run dev     # :5174（Vite 代理 /api/admin → :3001）
 ```
 
-**本地开发的 MCP 连通前提**：把平台设置里的**目标运行形态**切到「宿主机本地」，并确认每个被引用 MCP 服务的调用配置都声明了该形态的地址（`FR-056`）。这是唯一被允许的切换方式——**MUST NOT** 改 hosts 文件或改数字人配置文件（`SC-024`）。
+**本地开发的 MCP 连通前提**：**（2026-09-27）** 在「MCP 服务」区为每个要用的服务登记**宿主机可达的连接地址**（如 `http://192.168.1.2:8000/mcp`），并在数字人设计里勾选它。这是唯一被允许的方式——**MUST NOT** 改 hosts 文件或改数字人配置文件。
 
 ---
 
@@ -97,7 +97,7 @@ docker compose up -d --build
 | 管理服务健康检查 | `http://localhost:82/api/admin/platform/health` |
 | 既有对话工作台 | `http://localhost:82/` |
 
-**部署说明中 MUST 显式标注的风险**：`admin-backend` 挂载了 `/var/run/docker.sock`（用于读取容器状态与日志、启停 MCP 服务，`FR-043`/`046`/`048`）。该挂载**等价于授予宿主机 root 权限**，缓解措施见 `research.md` D3。**平台当前无鉴权**（`research.md` D11），因此**MUST NOT** 把网关端口暴露到公网。
+**部署说明中 MUST 显式标注的风险**：**（2026-09-27）** `admin-backend` **不再挂载** `/var/run/docker.sock`，也不再挂载 `docker-compose.yml`——平台不读容器编排声明与容器运行态，原"挂载 socket 等价于授予宿主机 root 权限"的风险已消除（见 `research.md` D3）。**平台当前无鉴权**（`research.md` D11），因此**MUST NOT** 把网关端口暴露到公网。
 
 ---
 
@@ -138,7 +138,7 @@ curl -s -o /dev/null -w "chat-ui %{http_code}\n" http://localhost:82/
 | 2 | 新建数字人，SOUL 留空保存 | 被拒绝，指明"SOUL 必填" | `FR-019` |
 | 3 | 用已存在或含 `/`、`..` 的名称保存 | 被拒绝并说明原因 | `FR-015` |
 | 4 | 完整填写五类配置（SOUL / MCP / 工具 / SKILL / 文件空间场景）后保存 | 保存成功；重新打开**原样回显**（含换行、标点、条目顺序） | `FR-016`、`FR-017` |
-| 5 | 打开 MCP 服务的调用配置 | 可**分别为两种运行形态**各声明一份地址 | `FR-056` |
+| 5 | 打开某 MCP 服务的调用配置 | **只有一个**连接地址输入框（不再按运行形态分形态声明） | `FR-043`、`FR-044` |
 | 6 | 打开内置工具只读目录 | 说明以**占位符模板**呈现（`{可用目录}` / `{示例路径}` / `{会话标识}`），**不出现任何具体用户目录名或会话标识** | `FR-012`、`FR-054`、`SC-014` |
 | 7 | 在工具选择器中查找不在目录中的工具名 | 无法选中；已有的失效引用被标为异常并指明失效工具名 | `FR-013` |
 
@@ -147,9 +147,9 @@ curl -s -o /dev/null -w "chat-ui %{http_code}\n" http://localhost:82/
 | # | 步骤 | 期望结果 | 对应需求 |
 |---|---|---|---|
 | 1 | 为 `admin` 关联某个数字人，点击**部署生效** | 运行环境 `users/admin/agents/{agent}/` 出现四文件 + `skills/`；部署结果显示成功 | `FR-026` |
-| 2 | 检查 `MCP.json` 的 `servers[].url` | 取值为**当前目标运行形态**对应的地址 | `FR-056` |
-| 3 | 把目标运行形态切到另一种，**再部署一次** | 地址相应变为另一形态的取值；**全程未修改 hosts 文件、未手工编辑任何数字人配置** | `FR-057`、`SC-024` |
-| 4 | 让某 MCP 服务只声明一种形态的地址，切到另一形态后部署 | 部署被**阻止**、`details.errors` 指明"哪个服务缺哪个形态的地址"、运行环境**零写入** | `FR-027`、`SC-020` |
+| 2 | 检查 `MCP.json` 的 `servers[].url` | 与平台侧调用配置里登记的**唯一连接地址逐字一致** | `FR-044` |
+| 3 | 在平台修改该服务的连接地址，**再部署一次** | 落盘产物中的地址随之更新；**全程未修改 hosts 文件、未手工编辑任何数字人配置** | `FR-044` |
+| 4 | 删除某被数字人引用的 MCP 服务后再部署 | 部署被**阻止**、`details.errors` 指明"哪个数字人引用了已不存在的 MCP 服务"、运行环境**零写入** | `FR-027`、`FR-052`、`SC-020` |
 | 5 | 让某数字人引用一个已下线的工具 / 已删除的 SKILL，点击部署 | 部署被阻止，**一次性列出全部错误项**（含用户、数字人、配置类别），运行环境零写入 | `FR-027`、`SC-020` |
 | 6 | 无任何改动的情况下再次点击部署 | 结果稳定（幂等），不产生重复或损坏 | `FR-030` |
 | 7 | 在 `数据准备`/`共享空间`/`临时空间` 下放入文件，执行一次部署 | 三个空间下既有文件与二级目录**数量与内容 100% 不变** | `FR-028`、`SC-012` |
@@ -174,15 +174,18 @@ curl -s -o /dev/null -w "chat-ui %{http_code}\n" http://localhost:82/
 
 | # | 步骤 | 期望结果 | 对应需求 |
 |---|---|---|---|
-| 1 | 打开 MCP 卡片列表 | 展示名称、传输方式与状态（运行中／已停止／异常／未知） | `FR-043` |
-| 2 | 在 `docker-compose.yml` 新增一个 MCP 服务并重启编排 | **无需任何平台侧配置**，卡片列表自动出现该服务 | `FR-043`、`SC-010` |
-| 3 | 打开某服务详情 | 展示工具清单及每个工具的用途与入参说明 | `FR-045` |
-| 4 | 停止某运行中的服务后点击启动 | 状态变为运行中；日志与状态反映**真实结果** | `FR-046` |
+| 1 | 打开 MCP 卡片列表 | 展示名称、用途描述、传输方式与连接地址；空态给出「新建 MCP 服务」引导 | `FR-043` |
+| 2 | 点击右上角「新建 MCP 服务」，在弹窗填名称与连接地址后点「创建服务」 | 弹窗关闭 → 进入该服务**详情页** → **自动测试一次**并展示连通性结果；新服务**立即**出现在卡片列表（无需改编排、无需重启、无需改代码） | `FR-043`、`FR-047`、`SC-010` |
+| 3 | 用已存在的名称新建 | 被拒绝并提示"名称已存在"（`ADM_MCP_SERVICE_EXISTS`）；弹窗**不关闭**、已填内容保留 | `FR-043` |
+| 3b | 弹窗里填一个不可达的地址后创建 | 创建成功（可达性不由创建校验），详情页的自动测试给出**明确失败原因**，不误报为成功 | `FR-047`、`FR-009` |
+| 3c | 创建请求未返回时按 `Esc` 或点「取消」 | 弹窗**不关闭**、按钮为禁用态（避免"以为没建成"而重复创建） | 原则五 |
+| 4 | 打开某服务详情 | 展示工具清单及每个工具的用途与入参说明；不可得时给出可读原因（不报错） | `FR-045` |
 | 5 | 对某服务发起测试 | 返回连通性 + 一次实际能力验证的结果；失败时给出**明确原因**（超时／连接被拒／协议不匹配），**不把失败误报为成功** | `FR-047` |
-| 6 | 查看某服务的日志 | 按时间倒序展示日志片段；日志量很大时页面仍快速返回（有界返回） | `FR-048` |
-| 7 | 让数字人实际调用某服务若干次后查看统计 | 累计/成功/失败次数与最近调用时间**自动更新**，无需人工录入 | `FR-049`、`FR-050` |
-| 8 | 关闭一个正被数字人引用的服务 | 提示受影响数字人并要求二次确认 | `FR-051` |
-| 9 | 把某服务从 `docker-compose.yml` 移除后刷新 | 卡片标为异常并给出**具体差异**；引用它的数字人被部署前校验拦截 | `FR-052`、`FR-025`（`SC` 对应项） |
+| 6 | 让数字人实际调用某服务若干次后查看统计 | 累计/成功/失败次数与最近调用时间**自动更新**，无需人工录入 | `FR-049`、`FR-050` |
+| 7 | 删除一个正被数字人引用的服务 | 先列出受影响数字人并要求二次确认 | `FR-051` |
+| 8 | 刷新列表 | 被删除的服务不再出现；引用它的数字人在异常项汇总中以失效引用列出 | `FR-052`、`FR-055` |
+| 9 | 打开一个**不可达**或响应很慢的 MCP 服务详情 | 界面**立即**进入详情页并显示"正在读取调用配置与工具清单…"（标题用服务名）；超时后给出可读原因 + 「重试」；期间「保存调用配置」为禁用态 | `FR-009`、原则五、原则九 |
+| 10 | 详情读取失败后点「重试」 | 重新拉取该服务详情（成功后正常显示调用配置、工具清单与统计） | `FR-009` |
 
 ---
 
@@ -203,11 +206,10 @@ curl -s -o /dev/null -w "chat-ui %{http_code}\n" http://localhost:82/
 | 现象 | 排查 |
 |---|---|
 | 管理界面打开但所有接口 404 | 检查 `gateway/nginx.conf` 是否已加 `/api/admin/` 且**在 `/api/` 之前**被最长前缀命中；确认 `admin-backend` 已在编排中 |
-| `health` 显示 `docker.available=false` | Docker Desktop 未启动、socket 未挂载（`contracts/runtime-api-delta.md` §6）；**或守护进程拒绝了请求的 Engine API 版本**（见 §10 的实测记录：路径不带版本前缀即可协商） |
-| `health` 显示 `compose_file.readable=false` | `docker-compose.yml` 未挂载进 `admin-backend`（同上） |
 | 内置工具目录为空 / 调用统计为"未知" | `agent-backend` 未运行或未包含 R2/R4 的新端点（`contracts/runtime-api-delta.md` §2、§4） |
-| 本地联调时 MCP 连接失败 | 检查**目标运行形态**与调用配置的 `endpoints` 是否匹配（`FR-056`）。**不要**去改 hosts 文件 |
-| 部署报 `ADM_RUNTIME_FORM_NOT_CONFIGURED` | 某被引用 MCP 服务缺少目标形态的地址，按错误信息补齐后重试 |
+| 本地联调时 MCP 连接失败 | 检查该服务的**连接地址**（`FR-044`）在本地是否可达——本地形态应登记宿主机可达地址（如 `http://192.168.1.2:8000/mcp`），而非容器内网服务名。**不要**去改 hosts 文件 |
+| 新建 MCP 服务报 `ADM_MCP_SERVICE_EXISTS` | 名称已被占用，换一个名称（服务名全局唯一，且会成为运行环境的工具前缀） |
+| 某数字人保存/部署报引用失效 | 它引用的 MCP 服务已被删除，去「MCP 服务」区重建同名服务或改该数字人的勾选 |
 | 部署报 `ADM_DEPLOY_VALIDATION_FAILED` | 按 `details.errors` 逐条修（该列表是**一次性全部**错误，不是第一个） |
 | `check:lines` 失败 | 有文件超过 500 行，按"拆子组件 / 抽 `useXxx` / 抽纯函数"拆分（原则二） |
 
@@ -263,6 +265,11 @@ admin-ui 200    # /admin/（管理界面静态资源）
 chat-ui  200    # /（既有对话工作台未被误伤）
 ```
 
+> **历史记录（2026-09-15）**：以下载荷为当时的实测快照。**2026-09-27 起**
+> `health` 不再返回 `compose_file` / `docker` / `runtime_form` 三个字段；
+> MCP 卡片项也不再返回 `status` / `in_compose` / `configured` / `abnormal_reason`，
+> 改为返回单一 `url`（见 `contracts/admin-api.md` §1.1、§3.1）。原文保留以作对照。
+
 `health` 的实际载荷（四类依赖一并可见）：
 
 ```json
@@ -283,12 +290,16 @@ MCP 卡片列表的实际载荷（清单来自编排声明 + 真实容器状态�
 
 ### 10.3 真实部署暴露并修复的两个问题（原文保留证据）
 
+> **历史记录（2026-09-15）**：本节两个问题均位于**当时**的 Docker/编排读取路径
+> （`infra/docker-host.ts`、`infra/compose-reader.ts`）。**2026-09-27 起这两个模块已删除**，
+> 问题随之不再存在；原文保留以作证据与经验记录（"冒烟确认不是走过场"依然成立）。
+
 冒烟确认**不是走过场**——第一次执行时它抓出了两个只有真部署才能发现的问题：
 
 | # | 现象 | 根因 | 处置 |
 |---|---|---|---|
-| 1 | `health` 报 `docker.available=false`，但容器内 `/var/run/docker.sock` 明明存在且可读 | `DockerHost` 把 Engine API 路径写死为 `/v1.43/...`，而本机 Docker Engine **29** 要求最低 `1.44`，返回 `400 client version 1.43 is too old`；`available()` 把非 200 视为不可达，于是表现为"权限/挂载问题"，极具误导性 | 改为**路径不带版本前缀**，由守护进程协商版本（`infra/docker-host.ts`）。修复后 `docker.available=true` |
-| 2 | MCP 卡片把 `ocr` 的传输方式显示为 `stdio` | 编排里 `ocr` **不对外暴露端口**（只在容器内网提供 streamable-http），而推断规则是"有 ports → http，否则 stdio" | 改为**编排内服务一律按 `http`**：容器网络里的服务对平台而言必然是跨进程网络调用，`stdio` 只能由调用配置显式声明（`infra/compose-reader.ts`） |
+| 1 | `health` 报 `docker.available=false`，但容器内 `/var/run/docker.sock` 明明存在且可读 | `DockerHost` 把 Engine API 路径写死为 `/v1.43/...`，而本机 Docker Engine **29** 要求最低 `1.44`，返回 `400 client version 1.43 is too old`；`available()` 把非 200 视为不可达，于是表现为"权限/挂载问题"，极具误导性 | 改为**路径不带版本前缀**，由守护进程协商版本（`infra/docker-host.ts`）。修复后 `docker.available=true`（**该模块已于 2026-09-27 删除**） |
+| 2 | MCP 卡片把 `ocr` 的传输方式显示为 `stdio` | 编排里 `ocr` **不对外暴露端口**（只在容器内网提供 streamable-http），而推断规则是"有 ports → http，否则 stdio" | 改为**编排内服务一律按 `http`**：容器网络里的服务对平台而言必然是跨进程网络调用，`stdio` 只能由调用配置显式声明（`infra/compose-reader.ts`，**该模块已于 2026-09-27 删除**） |
 
 ### 10.4 性能与可用性（`SC-001`、`SC-002`、`SC-015`、`SC-021`、`SC-022`、`SC-023`、原则五）
 
@@ -297,7 +308,7 @@ MCP 卡片列表的实际载荷（清单来自编排声明 + 真实容器状态�
 | `SC-002`（列表 ≤ 1s） | 卡片列表为**单次** JSON 文档读取 + 内存切片，无 N+1：`PlatformStore.readJson` 一次读盘，`paginate` 纯内存 | 本地实测 < 50ms（集成测试中的接口耗时同量级） |
 | `SC-022`（翻页 ≤ 100ms） | 翻页为**纯前端切片**（服务端已返回固定 8 项），无新请求 | 单元测试覆盖（`EntityCardList` 翻页只发 `update:page`） |
 | `SC-023`（单页恒 8 项） | `page_size` 由服务端固定为 8，**不接受客户端覆盖** | `paging.ts` 无页大小参数；4 处卡片列表共用；测试断言 `page_size === 8` |
-| `SC-021`（预校验 ≤ 3s） | 预检为纯内存判定 + 一次 Docker 状态查询 | 集成测试中 `deploy/validate` 全量用户 < 100ms |
+| `SC-021`（预校验 ≤ 3s） | 预检为纯内存判定 + 一次运行环境只读端点查询（**2026-09-27**：原"Docker 状态查询"已移除） | 集成测试中 `deploy/validate` 全量用户 < 100ms |
 | 原则五（接口 P95 ≤ 500ms） | 写路径为"临时文件 → fsync → rename"；部署的 IO 集中在一次目录改名 | 见上述各项实测值 |
 | `SC-001`（≤ 5 分钟完成一个数字人并部署） | 按 §7.1 + §7.2 的步骤：新建 → 填五类 → 保存 → 关联用户 → 校验 → 部署 | **由自动化测试等价覆盖**（见 §10.5）；界面侧的手工计时**未执行**，需由验收人按 §7 逐条走一遍 |
 | `SC-015`（≤ 3 次点击到编辑位置） | 一级导航（1 次）→ 卡片「打开设计/查看与编辑」（2 次）→ 页签切到目标分区（3 次） | 导航深度上限两级由 `FR-053` 与组件结构保证；**手工逐页计数未执行**，需由验收人复核 |
@@ -309,9 +320,9 @@ MCP 卡片列表的实际载荷（清单来自编排声明 + 真实容器状态�
 | §7 场景 | 自动化落点 |
 |---|---|
 | 7.1 US1 第 1~7 步 | `admin-backend/tests/integration/agents.spec.ts`、`builtin-tools.spec.ts`；`admin-frontend` 的 `AgentCardList/AgentDesigner/ToolSelector/BuiltinToolCatalog/ScenarioEditor.spec.ts` |
-| 7.2 US2 第 1~11 步 | `admin-backend/tests/integration/deploy.spec.ts`（含双形态对比 `SC-024`、既有数据零破坏 `SC-007`、`§7.1` 引用一致性）、`deploy-scope.spec.ts`（`SC-012`、`SC-009`、`SC-019`）、`users.spec.ts`；`DeployPanel/UserCardList/RuntimeFormSwitch/AnomalySummary.spec.ts` |
+| 7.2 US2 第 1~11 步 | `admin-backend/tests/integration/deploy.spec.ts`（含既有数据零破坏 `SC-007`、`§7.1` 引用一致性）、`deploy-scope.spec.ts`（`SC-012`、`SC-009`、`SC-019`）、`users.spec.ts`；`DeployPanel/UserCardList/AnomalySummary.spec.ts`（**2026-09-27**：`SC-024` 双形态对比与 `RuntimeFormSwitch.spec.ts` 已随运行形态下架移除） |
 | 7.3 US3 第 1~7 步 | `admin-backend/tests/integration/skills.spec.ts`、`tests/unit/skill-archive.spec.ts`、`skill-library.spec.ts`；`SkillCardList/SkillContentEditor/SkillUploadDialog.spec.ts` |
-| 7.4 US4 第 1~9 步 | `admin-backend/tests/integration/mcp.spec.ts`、`tests/unit/mcp-service-list.spec.ts`、`mcp-client.spec.ts`、`docker-host-engine.spec.ts`；`McpCardList/McpServiceConfigForm/McpLogViewer/McpStatsTable.spec.ts` |
+| 7.4 US4 第 1~8 步 | `admin-backend/tests/integration/mcp.spec.ts`（含新建/重名/删除/引用失效）、`tests/unit/mcp-service-list.spec.ts`、`service-config.spec.ts`、`service-config-create.spec.ts`、`mcp-client.spec.ts`；`McpCardList/McpCallConfigForm/McpStatsTable.spec.ts`（**2026-09-27**：`McpLogViewer.spec.ts` 与 `docker-host*.spec.ts` 已下架移除） |
 | 10.2（本节） | 一次**真实的** `docker compose up -d --build` + 七个 HTTP 打点 |
 
 ### 10.6 无障碍复核（原则四；`quickstart.md` §8）

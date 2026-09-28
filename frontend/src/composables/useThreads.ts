@@ -11,7 +11,14 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import type { ThreadsApi } from '../api/threads'
-import type { Conversation, ErrorInfo, FeedbackValue, InteractionSnapshot, Message } from '../api/types'
+import type {
+  Conversation,
+  ErrorInfo,
+  FeedbackValue,
+  InteractionSnapshot,
+  Message,
+  ToolCallResult,
+} from '../api/types'
 import { HISTORY_DEFAULT_LIMIT, HISTORY_EXPANDED_LIMIT, MESSAGE_PAGE_SIZE } from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
@@ -54,6 +61,19 @@ export interface ThreadsStore {
   select(id: string): Promise<void>
   loadMore(): Promise<void>
   refresh(): Promise<void>
+  /**
+   * 拉取某次工具调用的**外置结果正文**（002 特性，卡片点开时才调用）。
+   *
+   * 内容已被临时空间清理时后端回 410，此处**不吞错**：由卡片把它渲染成
+   * "内容已清理"的降级态（TR-16），而不是错误提示。
+   */
+  toolCallResult(callId: string): Promise<ToolCallResult>
+  /**
+   * 清空当前选中并回到空态（002 特性）。
+   *
+   * 用于"URL 恢复出的会话已被删除"的降级：静默回空态，不报错、不留残留消息。
+   */
+  clearActive(): void
   /** 删除会话（乐观更新）；返回是否真正删除成功（失败已自动回滚并提示） */
   remove(id: string): Promise<boolean>
   /** 本地改写某条消息的反馈（供 `useChatStream` 做乐观更新与回滚，不发请求） */
@@ -116,13 +136,18 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     }
   }
 
+  function clearActive(): void {
+    deps.activeThreadId.value = null
+    messages.value = []
+    total.value = 0
+    running.value = false
+    pendingInteraction.value = null
+  }
+
   async function refresh(): Promise<void> {
     const threadId = deps.activeThreadId.value
     if (!threadId) {
-      messages.value = []
-      total.value = 0
-      running.value = false
-      pendingInteraction.value = null
+      clearActive()
       return
     }
 
@@ -204,6 +229,15 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     }
   }
 
+  async function toolCallResult(callId: string): Promise<ToolCallResult> {
+    const threadId = deps.activeThreadId.value
+    if (!threadId) {
+      // 未选中会话时不应触发懒加载（卡片只在详情渲染后才存在）
+      throw new Error('未选中会话，无法读取工具结果')
+    }
+    return deps.threads.toolCallResult(threadId, callId)
+  }
+
   /** 本地改写反馈：仅替换目标消息对象以触发最小范围重渲染（配合 `v-memo`）。 */
   function patchFeedback(messageId: string, value: FeedbackValue): void {
     messages.value = messages.value.map((message) =>
@@ -229,6 +263,8 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     select,
     loadMore,
     refresh,
+    toolCallResult,
+    clearActive,
     remove,
     patchFeedback,
   }

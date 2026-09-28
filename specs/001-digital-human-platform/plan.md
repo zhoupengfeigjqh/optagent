@@ -19,15 +19,15 @@
 **Language/Version**: 后端 TypeScript 6 / Node 20+（镜像 `node:22-bookworm-slim`，与 `agent-backend` 一致）；前端 TypeScript 6 + Vue 3.5。
 
 **Primary Dependencies**:
-- 后端（均为**既有子项目已在用**的依赖，见 research.md D2）：`fastify@5`、`@fastify/cors`、`@fastify/multipart`、`zod@4`、`pino@10`、`pino-pretty@13`、`yaml@2`（解析 `docker-compose.yml`）、`@modelcontextprotocol/sdk@1.30`（MCP 客户端：列工具 + 连通性/能力测试）。
+- 后端（均为**既有子项目已在用**的依赖，见 research.md D2）：`fastify@5`、`@fastify/cors`、`@fastify/multipart`、`zod@4`、`pino@10`、`pino-pretty@13`、`@modelcontextprotocol/sdk@1.30`（MCP 客户端：列工具 + 连通性/能力测试）。**（2026-09-27）** `yaml@2` 已移除——平台不再解析 `docker-compose.yml`。
 - 前端：`vue@3.5`、`vite@8`、`vue-tsc@3`；**零第三方运行时库**——导航/分页/卡片/确认框/页签/异常态全部用 Vue 原生能力（`provide/inject`、`reactive`、`<Teleport>`、原生 `<dialog>`、`<details>`）。
 - 测试：后端 `vitest@5` + `@vitest/coverage-v8`；前端 `vitest@5` + `@vue/test-utils@2.5` + `jsdom@30`。
-- **新增依赖**：无。唯一需要 D1 级论证的是 Docker 访问方式，结论为**零依赖实现**（见 research.md D3）。
+- **新增依赖**：无。**（2026-09-27）** 原需 D1 级论证的"Docker 访问方式"已不存在——平台不再访问 Docker Engine（见 research.md D3 的废止说明）。
 
 **Storage**:
 - 平台**设计态**：文件存储于 `platform-data/`（仓库根，bind mount 进 `admin-backend`），JSON 文档 + **原子替换**（写临时文件 → `rename`）保证原则五的一致性要求。理由见 research.md D4（被否决：SQLite 新增引擎但收益不足；复用 `.opt-agent` 违反 FR-005）。
 - 平台**运行态产物**：写入 `.opt-agent/`，即运行环境的用户数据目录，**与运行环境共享同一份**（FR-001）。
-- 平台**运行观测**：MCP 服务容器日志与调用次数由 `admin-backend` 只读采集（见 research.md D6 与「已知口径差异」）。
+- 平台**运行观测**：**（2026-09-27 收窄）** 只保留 MCP **调用次数**的只读采集（见 research.md D6 与「已知口径差异」）；容器状态与容器日志的采集已下架。
 
 **Testing**: 本地（宿主机）执行，容器不参与（宪章原则三）。后端 `npm run test`（端点集成测试用 `app.inject`）+ `npm run test:coverage`（阈值配置与 `agent-backend/vitest.config.ts` 同构：全局防倒退地板 + 受约束模块 80%）；前端 `npm run test` + `npm run test:coverage`（`@vue/test-utils` + jsdom），组件与 composable 各自同名同目录测试（原则三）。
 
@@ -60,8 +60,8 @@
 | 四 | 无障碍 WAI-ARIA | 一级导航、卡片、分页、确认框、页签全部要求键盘可达 + `aria-*`；状态不只靠颜色（异常态同时给文本）；确认框用原生 `<dialog>`；尊重 `prefers-reduced-motion` | ✅ |
 | 五 | 性能与数据一致性 | 接口 P95 ≤ 500ms；列表分页避免全量渲染；写入用原子替换 + 检查-占位；破坏性操作二次确认；并发编辑有冲突检测（SC 已定义口径） | ✅ |
 | 五 | 无 N+1 查询 | 设计态为 JSON 文档，一次读取；列表派生信息一次算完，未在循环内发起 IO | ✅ |
-| 六 | 依赖控制 | **零新增依赖**；复用既有后端依赖与 Vue 原生能力；Docker 访问用 Node 内置 `http` + `socketPath` 实现，不引入 docker SDK | ✅ |
-| 六 | 新增基础设施说明必要性 | 新增 2 个容器（`admin-frontend` / `admin-backend`）+ 网关路由 + 1 个 bind mount 目录 + 1 个新增挂载（Docker socket）；必要性逐条在 research.md D3/D8 说明 | ✅ |
+| 六 | 依赖控制 | **零新增依赖**；复用既有后端依赖与 Vue 原生能力。**（2026-09-27）** 原"Docker 访问用 Node 内置 `http` + `socketPath`"的实现已随 Docker 访问整体下架，依赖面进一步收窄（`yaml` 亦已移除） | ✅ |
+| 六 | 新增基础设施说明必要性 | 新增 2 个容器（`admin-frontend` / `admin-backend`）+ 网关路由 + 1 个 bind mount 目录；必要性逐条在 research.md D8 说明。**（2026-09-27）** 原"Docker socket 挂载"已移除，暴露面随之收窄 | ✅ |
 | 七 | 接口契约与前后端一致性 | 新增 `contracts/admin-api.md`（含端点、请求/响应、错误码表），`admin-frontend/src/api/types.ts` 与之**一一映射**；契约变更四处同步列入门禁 | ✅ |
 | 七 | REST 与错误格式 | 资源化路径 + 正确方法与状态码；错误体统一 envelope，错误码全局唯一（与既有码表合并后不得重复） | ✅ |
 | 八 | 一条命令跑门禁 | 两个新子项目各自 `package.json` 提供 `lint`/`typecheck`/`test`/`test:coverage`/`build`；并在 `quickstart.md` 记录 | ✅ |
@@ -74,7 +74,7 @@
 
 ### 已知口径差异（MUST 在实现前回写 `spec.md`，原则一）
 
-1. **FR-005 / SC-017「严格单向」与 FR-048/049/050 的边界**：`SC-017` 表述为"运行环境 → 平台的反向数据通道数量为 **0**"，但 `FR-048`（查看 MCP 服务日志）与 `FR-049/050`（调用次数统计，MUST 自动更新）**必然要求平台只读采集运行环境的运行观测**。本计划的口径为：**「严格单向」约束的是配置数据流**（平台不得从运行环境反向导入配置、运行环境不得回写平台配置），**运行观测（容器状态、日志、调用次数）的只读采集不在其列**。处理方式：在 `spec.md` 的 `FR-005` 与 `SC-017` 补一句限定，并在 `checklists/requirements.md` 追加一条澄清项。
+1. **FR-005 / SC-017「严格单向」与 FR-049/050 的边界**：`SC-017` 表述为"运行环境 → 平台的反向数据通道数量为 **0**"，但 `FR-049/050`（调用次数统计，MUST 自动更新）**必然要求平台只读采集运行环境的运行观测**。本计划的口径为：**「严格单向」约束的是配置数据流**（平台不得从运行环境反向导入配置、运行环境不得回写平台配置），**运行观测（调用次数）的只读采集不在其列**。处理方式：已在 `spec.md` 的 `FR-005` 与 `SC-017` 补限定，并在 `checklists/requirements.md` 追加澄清项。**（2026-09-27）** 原列入本条的 `FR-048`（容器日志）已废止，容器状态采集亦下架。
 2. **技术栈约束「前端 API 基址 MUST 走同源相对路径（`/api/*`）」** 对新平台仍然成立——本计划采用 `/api/admin/*` 由网关分发到 `admin-backend`，而非另立 `/admin-api/*`，以保持与既有约定的字面一致。其中 `/api/admin/` 与既有 `/api/` 在 nginx 下按**最长前缀**匹配，不冲突。
 
 ### 设计后复核（Phase 1 完成后，重跑宪章门禁）
@@ -174,13 +174,12 @@ admin-backend/                     # 独立管理服务（Fastify 5 + TS，与 a
 │   │   ├── config-center/         # 四类配置的读写与一致性（含「名称引用」解析）
 │   │   ├── skill-library/         # SKILL 库：元数据解析、ZIP 安全解压与校验
 │   │   ├── deploy/                # 部署编排：预校验、整体覆盖物化、部署清单、结果与历史
-│   │   └── mcp/                   # MCP 服务清单投影、服务级配置、启停/测试/日志/统计
+│   │   └── mcp/                   # MCP 服务配置与清单、测试/统计（2026-09-27：启停/日志已下架）
 │   ├── infra/                     # 数据访问层
 │   │   ├── platform-store.ts      # 平台设计态存储（JSON + 原子替换）
 │   │   ├── opt-agent-writer.ts    # .opt-agent 物化（整体覆盖，含 tmp → rename）
-│   │   ├── compose-reader.ts      # 只读解析 docker-compose.yml
-│   │   ├── docker-host.ts         # 经 unix socket 访问 Docker Engine API（零依赖）
 │   │   └── mcp-client.ts          # MCP 客户端（列工具、连通性/能力测试）
+│   │                              # （2026-09-27：compose-reader.ts / docker-host.ts 已删除）
 │   ├── config.ts / context.ts / logging.ts / server.ts
 ├── tests/
 │   ├── unit/                      # domain 单测
@@ -213,7 +212,7 @@ platform-data/                     # 平台设计态（bind mount；不进镜像
 | 项 | 说明 | 被否决的更简方案 / 处置 |
 |---|---|---|
 | **平台差异：Windows 开发 → Linux 交付** | 本地（Windows）测试无法覆盖 Linux 侧行为：①路径大小写敏感性；②非 ASCII 路径（`生产计划` 等中文目录名是本产品的**常态**，非边缘）；③行尾符；④bind mount 的文件权限与属主；⑤`rename` 原子替换在跨设备时行为不同（`platform-data` 与目标目录若不在同一挂载点，`rename` 会失败） | ①/②：沿用既有 `domain/fs-safe.ts` 的思路，路径规范化与大小写校验集中在单一模块；③：读写统一按 `utf8` 且解析时容忍 `\r\n`；④/⑤：原子替换前**先校验是否同一挂载点**，否则降级为"写临时文件 + 校验 + 逐文件替换"，并把该降级路径纳入集成测试。**部署后 MUST 执行一次非交互冒烟确认**（原则八）。被否决：恢复容器内测试（违反原则三 2.0.0） |
-| **Docker 访问（最高权限边界）** | FR-043/046/048 要求读取容器编排声明、启停容器、读取容器日志。需把宿主机 Docker socket 挂载进 `admin-backend` | 被否决①：容器内安装 `docker`/`docker compose` CLI（镜像显著变大、需处理 socket 路径与 compose 文件路径映射、且属"引入非必要新基础设施"）；被否决②：改由 `agent-backend` 代理这些操作（脏化数据面职责、且它自身也无 Docker 权限）。**采用**：Node 内置 `http.request` + `socketPath` 直连 Docker Engine API（零新增依赖），并把可访问的操作**限定为只读查询 + 对白名单内服务的 start/stop**。该 socket 等价于宿主机 root 权限，**MUST 在实现说明与部署说明中显式标注该风险** |
+| ~~**Docker 访问（最高权限边界）**~~ | **（2026-09-27 废止）** 原风险为"FR-043/046/048 要求读取容器编排声明、启停容器、读取容器日志，故需把宿主机 Docker socket 挂载进 `admin-backend`"。MCP 服务改为平台内全人工配置后，平台不再读容器编排声明与容器运行态，**Docker socket 挂载已移除**，本风险项随之消除（该边界不再存在于本特性中） | 处置：删除 `infra/docker-host.ts` 与 `infra/compose-reader.ts`；`docker-compose.yml` 中 `admin-backend` 的 `/var/run/docker.sock` 与 `docker-compose.yml` 两个挂载一并移除 |
 | **部署的原子性 vs 整体覆盖** | FR-008/026/029 要求"要么完整生效要么完全不生效"，且以用户为最小单位 | 采用"**先在临时目录构建完整产物 → 校验 → 目录级原子改名**"，失败即丢弃临时目录；被否决：逐文件原地覆盖（中途失败即产生半成品，违反 FR-029） |
 | **`docker-compose.yml` 既有 test profile 冲突** | 与宪章 2.0.0「容器 MUST NOT 承担任何测试职责」冲突 | 本特性必须改该文件，故一并清理 `backend-test` / `ocr-test` 两个 profile 及对应 `Dockerfile.test`。**不回溯**既有 `frontend`/`agent-backend` 的其他存量问题 |
 

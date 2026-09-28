@@ -66,15 +66,15 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
     const wrapper = mountMenu()
 
     // 默认不直接展示表头要求文案
-    expect(wrapper.find('.upload-menu__hint-pop').exists()).toBe(false)
+    expect(wrapper.find('.hint-tip__pop').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('表头须含')
 
     // 点击「?」展开浮层
-    const btn = wrapper.find('.upload-menu__hint-btn')
+    const btn = wrapper.find('.hint-tip__btn')
     expect(btn.exists()).toBe(true)
     await btn.trigger('click')
 
-    const pop = wrapper.find('.upload-menu__hint-pop')
+    const pop = wrapper.find('.hint-tip__pop')
     expect(pop.exists()).toBe(true)
     expect(pop.text()).toContain('表头须含：产线编号')
     expect(pop.text()).toContain('可选：计划量(integer)')
@@ -83,18 +83,18 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
   it('再次点击「?」收起提示浮层', async () => {
     const wrapper = mountMenu()
 
-    const btn = wrapper.find('.upload-menu__hint-btn')
+    const btn = wrapper.find('.hint-tip__btn')
     await btn.trigger('click')
-    expect(wrapper.find('.upload-menu__hint-pop').exists()).toBe(true)
+    expect(wrapper.find('.hint-tip__pop').exists()).toBe(true)
 
     await btn.trigger('click')
-    expect(wrapper.find('.upload-menu__hint-pop').exists()).toBe(false)
+    expect(wrapper.find('.hint-tip__pop').exists()).toBe(false)
   })
 
   it('无约束目录（fields 为空）不渲染「?」按钮', () => {
     const wrapper = mountMenu()
 
-    const btns = wrapper.findAll('.upload-menu__hint-btn')
+    const btns = wrapper.findAll('.hint-tip__btn')
     expect(btns).toHaveLength(1)
   })
 
@@ -102,6 +102,6 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
     const wrapper = mountMenu([])
 
     expect(wrapper.text()).toContain('文件空间加载中或尚未配置场景')
-    expect(wrapper.find('.upload-menu__hint-btn').exists()).toBe(false)
+    expect(wrapper.find('.hint-tip__btn').exists()).toBe(false)
   })
 })

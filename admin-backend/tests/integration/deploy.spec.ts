@@ -1,12 +1,15 @@
 /**
- * 集成测试：部署端点（T070，契约 §6.5~§6.8 与 §7.1）
+ * 集成测试：部署端点（契约 §6.5~§6.8 与 §7.1）
  *
  * MUST 覆盖每个端点（宪章原则三），且至少包含：
  * ①核心负向——校验不过 → 运行环境**零写入**且一次性列出全部错误项（`SC-020`）；
- * ②运行形态缺地址 → `ADM_RUNTIME_FORM_NOT_CONFIGURED`；
+ * ②被引用的 MCP 服务不存在 → 引用有效性失败（`FR-052`）；
  * ③单用户失败零写入、其余用户不受影响（`FR-029`）；
  * ④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；
- * ⑥双形态对比（`SC-024`）；⑦既有数据零破坏（`SC-007`）；⑧§7.1 引用清单一致。
+ * ⑥既有数据零破坏（`SC-007`）；⑦§7.1 引用清单一致。
+ *
+ * **2026-09-27**：原"运行形态缺地址"与"双形态对比"两条随运行形态概念下架
+ * ——MCP 连接地址为**单一 `url`**。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,24 +32,19 @@ const TOOL_FIXTURE = [
   },
 ];
 
-/** 配置一个带两种形态地址的 MCP 服务（`FR-056`） */
-function configureMcp(
-  name = 'ocr',
-  endpoints: Record<string, string> = {
-    container_network: 'http://ocr:8000/mcp',
-    host_local: 'http://127.0.0.1:8000/mcp',
-  },
-): void {
-  fx.ctx.mcpConfigs.upsert(
-    name,
-    {
-      description: 'OCR 识别服务',
-      transport: 'http',
-      endpoints,
-      file_args: { ocr_image: { image: 'url' } },
-    },
-    fx.ctx.store.revision(),
-  );
+/** 新建/覆盖一个 MCP 服务（单一连接地址） */
+function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
+  const input = {
+    description: 'OCR 识别服务',
+    transport: 'http',
+    url,
+    file_args: { ocr_image: { image: 'url' } },
+  };
+  if (fx.ctx.mcpConfigs.exists(name)) {
+    fx.ctx.mcpConfigs.upsert(name, input, fx.ctx.store.revision());
+  } else {
+    fx.ctx.mcpConfigs.create({ name, ...input });
+  }
 }
 
 async function createAgent(body: Record<string, unknown>): Promise<void> {
@@ -132,7 +130,7 @@ describe('POST /api/admin/deploy/validate', () => {
 });
 
 describe('POST /api/admin/deploy —— 正常路径', () => {
-  it('部署后落盘四文件；MCP.json 的 url 取目标运行形态的地址（FR-026、FR-056）', async () => {
+  it('部署后落盘四文件；MCP.json 的 url 取配置里的单一连接地址（FR-026）', async () => {
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',
@@ -140,7 +138,6 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.target_runtime_form).toBe('container_network');
     expect(body.users[0]).toMatchObject({ user_id: 'admin', ok: true });
 
     const dir = path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo');
@@ -149,12 +146,46 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
     expect(mcp.servers[0]).toMatchObject({
       name: 'ocr',
       transport: 'http',
-      url: 'http://ocr:8000/mcp',
+      url: 'http://192.168.1.2:8000/mcp',
     });
     // writable / permission_scope 已随 2026-09-15 的产品决定移除：产物 MUST NOT 再含写能力声明
     expect(mcp.servers[0].write).toBeUndefined();
     expect(mcp.servers[0].permission_boundary).toBeUndefined();
     expect(mcp.servers[0].file_args).toEqual({ ocr_image: { image: 'url' } });
+  });
+
+  it('async_tools（R11）：声明后物化进 MCP.json；清空后重新部署该键**消失**', async () => {
+    const upsertConfig = (asyncTools: string[]): void => {
+      fx.ctx.mcpConfigs.upsert(
+        'ocr',
+        {
+          description: 'OCR 识别服务',
+          transport: 'http',
+          url: 'http://192.168.1.2:8000/mcp',
+          file_args: { ocr_image: { image: 'url' } },
+          async_tools: asyncTools,
+        },
+        fx.ctx.store.revision(),
+      );
+    };
+    const deploy = () =>
+      fx.app.inject({
+        method: 'POST',
+        url: '/api/admin/deploy',
+        payload: { user_ids: ['admin'], revision: revision() },
+      });
+    const mcpPath = path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'MCP.json');
+
+    upsertConfig(['submit_ocr']);
+    expect((await deploy()).statusCode).toBe(200);
+    const declared = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+    expect(declared.servers[0].async_tools).toEqual(['submit_ocr']);
+
+    // 清空声明 → 重新部署：产物里该键**消失**（不留空数组空壳，"整体覆盖"语义）
+    upsertConfig([]);
+    expect((await deploy()).statusCode).toBe(200);
+    const cleared = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
+    expect(cleared.servers[0]).not.toHaveProperty('async_tools');
   });
 
   it('幂等：相同内容重复部署结果稳定（FR-030）', async () => {
@@ -197,12 +228,12 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
 
 describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
   it('校验不过 → 运行环境零写入，且一次性列出全部错误项 + 指明用户与数字人', async () => {
-    // 制造三类错误：SOUL 为空（config_integrity）+ 失效引用 + 缺运行形态地址
+    // 制造两类错误：SOUL 为空（config_integrity）+ 失效引用（reference_validity）
     await createAgent(baseAgent({ name: 'broken', soul: 'x', skills: [] }));
-    // 直接改写设计态文档以模拟"已保存但后来失效"的引用
+    // 直接改写设计态文档以模拟"已保存但后来失效"的引用 + 被清空的 SOUL
     fx.ctx.store.writeJson('agents/broken.json', {
       name: 'broken',
-      soul: 'x',
+      soul: '   ',
       enabled_tools: ['ghost_tool'],
       mcp_services: ['ocr'],
       skills: [],
@@ -210,8 +241,6 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
       updated_at: '2026-09-15T00:00:00.000Z',
     });
     link('ops', ['broken']);
-    // 让 ocr 只声明宿主机本地地址：目标形态（容器编排内网）缺地址 → 第二类错误
-    configureMcp('ocr', { host_local: 'http://127.0.0.1:8000/mcp' });
 
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
     const res = await fx.app.inject({
@@ -227,7 +256,7 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
     expect(errors.length).toBeGreaterThanOrEqual(2);
     const categories = new Set(errors.map((e) => e.category));
     expect(categories.has('reference_validity')).toBe(true);
-    expect(categories.has('runtime_form')).toBe(true);
+    expect(categories.has('config_integrity')).toBe(true);
     for (const err of errors) {
       expect(typeof err.user_id).toBe('string');
       expect(typeof err.agent_name).toBe('string');
@@ -237,17 +266,16 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });
 
-  it('运行形态缺地址 → 单因同码，直接返回 ADM_RUNTIME_FORM_NOT_CONFIGURED', async () => {
-    // 只声明宿主机本地地址，而目标形态是容器编排内网 → 缺地址
-    configureMcp('ocr', { host_local: 'http://127.0.0.1:8000/mcp' });
+  it('被引用的 MCP 服务已被删除 → 引用有效性失败（单因同码 ADM_AGENT_INVALID_REF）', async () => {
+    fx.ctx.mcpConfigs.remove('ocr');
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',
       payload: { user_ids: ['admin'], revision: revision() },
     });
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error.code).toBe('ADM_RUNTIME_FORM_NOT_CONFIGURED');
-    expect(res.json().error.details.errors[0].message).toContain('目标运行形态');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('ADM_AGENT_INVALID_REF');
+    expect(res.json().error.details.errors[0].detail).toBe('ocr');
   });
 });
 
@@ -280,38 +308,8 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
   });
 });
 
-describe('POST /api/admin/deploy —— 双形态对比（SC-024）', () => {
-  it('同一数字人在两种目标形态下部署，MCP.json 的 url 分别取对应取值（全程不改 hosts、不手工编辑配置）', async () => {
-    const deploy = async () =>
-      (
-        await fx.app.inject({
-          method: 'POST',
-          url: '/api/admin/deploy',
-          payload: { user_ids: ['admin'], revision: revision() },
-        })
-      ).json();
-
-    const first = await deploy();
-    expect(first.target_runtime_form).toBe('container_network');
-    const mcpPath = path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'MCP.json');
-    expect(JSON.parse(fs.readFileSync(mcpPath, 'utf8')).servers[0].url).toBe('http://ocr:8000/mcp');
-
-    // 切换目标形态后再次部署
-    await fx.app.inject({
-      method: 'PUT',
-      url: '/api/admin/platform/settings',
-      payload: { target_runtime_form: 'host_local', revision: revision() },
-    });
-    const second = await deploy();
-    expect(second.target_runtime_form).toBe('host_local');
-    expect(JSON.parse(fs.readFileSync(mcpPath, 'utf8')).servers[0].url).toBe(
-      'http://127.0.0.1:8000/mcp',
-    );
-  });
-});
-
 describe('GET /api/admin/deploy/history 与 /manifest', () => {
-  it('历史有界返回且含操作者、形态、结果（FR-033、SC-008）', async () => {
+  it('历史有界返回且含操作者与结果（FR-033、SC-008）', async () => {
     await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',
@@ -321,7 +319,8 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
     expect(res.statusCode).toBe(200);
     const item = res.json().items[0];
     expect(item.operator).toBe('zyw_admin');
-    expect(item.target_runtime_form).toBe('container_network');
+    // 运行形态字段已随概念下架
+    expect(item.target_runtime_form).toBeUndefined();
     expect(item.user_count).toBe(1);
     expect(typeof item.id).toBe('string');
   });

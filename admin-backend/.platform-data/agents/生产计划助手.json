@@ -5,10 +5,13 @@
     "read_file",
     "list_dir",
     "grep_files",
-    "write_file"
+    "write_file",
+    "read_skill",
+    "calculator"
   ],
   "mcp_services": [
-    "ocr"
+    "ocr",
+    "jev"
   ],
   "skills": [
     "调度算法"
@@ -201,7 +204,7 @@
       ],
       "算法规则": [
         {
-          "name": "ruleCode",
+          "name": "ruleId",
           "type": "string",
           "required": true
         },
@@ -211,12 +214,12 @@
           "required": false
         },
         {
-          "name": "priority",
-          "type": "string",
+          "name": "rulePriority",
+          "type": "integer",
           "required": true
         }
       ]
     }
   },
-  "updated_at": "2026-09-19T04:20:49.493Z"
+  "updated_at": "2026-09-25T04:14:59.876Z"
 }

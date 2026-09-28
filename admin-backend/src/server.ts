@@ -25,10 +25,7 @@ import { DeployManifestService } from './domain/deploy/manifest.js';
 import { McpServiceOperations } from './domain/mcp/operations.js';
 import { McpServiceConfigService } from './domain/mcp/service-config.js';
 import { McpServiceListService } from './domain/mcp/service-list.js';
-import { PlatformSettingsService } from './domain/platform-settings.js';
 import { SkillLibraryService } from './domain/skill-library/install.js';
-import { ComposeReader } from './infra/compose-reader.js';
-import { DockerHost } from './infra/docker-host.js';
 import { McpClientService } from './infra/mcp-client.js';
 import { OptAgentWriter } from './infra/opt-agent-writer.js';
 import { PlatformStore } from './infra/platform-store.js';
@@ -50,8 +47,6 @@ export interface BuildServerOptions {
   config?: AppConfig;
   /** 测试可注入自定义存储根（默认取 `config.platformDataDir`） */
   store?: PlatformStore;
-  /** 测试可注入 Docker 假实现（容器状态/日志/启停） */
-  docker?: DockerHost;
   /** 测试可注入运行环境客户端假实现（工具目录/调用统计） */
   runtime?: RuntimeClient;
   /** 测试可注入 MCP 客户端假实现（工具清单 / 连通性与能力测试） */
@@ -66,21 +61,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const store = options.store ?? new PlatformStore(config.platformDataDir, { logger: loggers.logger });
   store.ensureLayout();
 
-  const compose = new ComposeReader(config.composeFilePath);
-  const docker =
-    options.docker ??
-    new DockerHost({
-      socketPath: config.dockerSocketPath,
-      timeoutMs: config.runtimeTimeoutMs,
-      // 启停白名单＝编排声明的服务名（FR-043「不允许启停未声明服务」）
-      isManageable: (name) => {
-        try {
-          return compose.listMcpServices().some((s) => s.name === name);
-        } catch {
-          return false;
-        }
-      },
-    });
   const runtime =
     options.runtime ??
     new RuntimeClient({
@@ -88,7 +68,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       timeoutMs: config.runtimeTimeoutMs,
     });
 
-  const settings = new PlatformSettingsService(store);
   const skills = new SkillLibraryService(store, { logger: loggers.logger });
   const agents = new AgentDesignService(store);
   const users = new UserLinkService(store);
@@ -96,7 +75,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
   const writer = new OptAgentWriter({ optAgentRoot: config.optAgentRoot, logger: loggers.logger });
-  const catalog = new UnifiedCatalog({ runtime, compose, skills, logger: loggers.logger });
+  const catalog = new UnifiedCatalog({ runtime, mcpConfigs, skills, logger: loggers.logger });
   const mcpClient = options.mcpClient ?? new McpClientService({ timeoutMs: config.mcpTimeoutMs });
 
   /** 引用某 MCP 服务的「用户 × 数字人」对（§3.2/§3.3 的影响面） */
@@ -107,31 +86,22 @@ export async function buildServer(options: BuildServerOptions = {}) {
     );
 
   const mcpServices = new McpServiceListService({
-    compose,
-    docker,
     configs: mcpConfigs,
     mcpClient,
     referencesOf: referencesOfService,
-    targetForm: () => settings.targetForm(),
     currentRevision: () => store.revision(),
   });
   const mcpOperations = new McpServiceOperations({
-    docker,
     configs: mcpConfigs,
     mcpClient,
-    serviceList: mcpServices,
     runtime,
-    targetForm: () => settings.targetForm(),
   });
 
   const ctx: AppContext = {
     config,
     loggers,
     store,
-    compose,
-    docker,
     runtime,
-    settings,
     agents,
     users,
     skills,
@@ -150,7 +120,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       mcpConfigs,
       skills,
       catalog,
-      settings,
       writer,
       manifest,
       history,
@@ -180,7 +149,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
    * 写操作留痕（任务 2026-09-16）。
    *
    * 关闭逐请求访问日志后，admin 侧的写操作一度只剩"部署"与"技能文件保存"有记录，
-   * 于是"谁删了数字人""谁关了 MCP 服务""谁改了调用地址"在日志里查不到。
+   * 于是"谁删了数字人""谁删了 MCP 服务""谁改了调用地址"在日志里查不到。
    * 这里用**一个钩子 + 错误处理器**统一补齐，不必逐个路由插桩：
    * - 成功（2xx/3xx）→ info `admin.write`；
    * - 被拒（4xx）→ warn `admin.write.rejected`（含错误码，界面报错可直接对到日志）；

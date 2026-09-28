@@ -3,6 +3,9 @@
  *
  * 追加写 `deploy/history.jsonl`（逐行一条记录），**有界返回**（`FR-006`）。
  * 用 JSONL 而非 JSON 数组：历史是纯追加的，追加写天然不会破坏已写入的记录。
+ *
+ * **2026-09-27**：`target_runtime_form` 字段随运行形态概念下架；存量记录的
+ * 该字段在读取时被忽略（不影响其余记录，符合 JSONL "只追加"的容错口径）。
  */
 import { randomUUID } from 'node:crypto';
 import { PLATFORM_OPERATOR } from '../error-codes.js';
@@ -21,7 +24,6 @@ export interface DeployHistoryRecord {
   id: string;
   deployed_at: string;
   operator: string;
-  target_runtime_form: string;
   result: 'succeeded' | 'partial' | 'failed';
   users: DeployUserRecord[];
   validation: { passed: boolean; error_count: number };

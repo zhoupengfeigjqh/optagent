@@ -46,7 +46,7 @@ description: "任务清单：数字人管理平台"
 - [x] T009 [P] 编写 `admin-backend/Dockerfile` 与 `admin-backend/.dockerignore`（2 段构建，与 `agent-backend/Dockerfile` 同构）
 - [x] T010 [P] 编写 `admin-frontend/Dockerfile`、`admin-frontend/nginx.conf`、`admin-frontend/.dockerignore`（与 `frontend/Dockerfile` 同构，含 SPA 回退）
 - [x] T011 [P] 修改 `gateway/nginx.conf`：新增 `/api/admin/`（→ `admin-backend:3000`，最长前缀）与 `/admin/`（→ `admin-frontend:80`）两条 location；**删除** `/mcp/`、`/skill/`、`/designer/` 三段过时注释（`contracts/runtime-api-delta.md` R5）
-- [x] T012 [P] 修改 `docker-compose.yml`：**仅剩**新增 `admin-backend`（含 `platform-data`、`.opt-agent`、`docker-compose.yml:ro`、`docker.sock` 四个挂载）与 `admin-frontend` 两个服务（R6）。**注**：原属本条"清理 `backend-test` / `ocr-test` 两个 `test` profile"的那半，已随 T013 提前完成——`docker-compose.yml` 现不含任何 test profile
+- [x] T012 [P] 修改 `docker-compose.yml`：新增 `admin-backend`（挂载 `platform-data` 与 `.opt-agent` **两个**）与 `admin-frontend` 两个服务（R6）。**2026-09-27 修订**：原列的 `docker-compose.yml:ro`、`docker.sock` 两个挂载已随"平台不再读编排声明与容器运行态"移除；原属本条"清理 test profile"的那半已随 T013 完成
 - [x] T013 [P] ~~删除 `agent-backend/Dockerfile.test` 与 `ocr-service/Dockerfile.test`~~ —— **已于 2026-09-15 完成**：①两个 `Dockerfile.test` 已删除；②`docker-compose.yml` 的两个 `test` profile 已移除并留注释防止重新引入；③`ocr-service` 的 4 处注释引用已修正，其中 `tests/test_ocr_core.py` 原写「容器内，**MUST NOT 在宿主机直接跑**」——与宪章 2.0.0 恰好相反，已改为本地命令；④`checklists/requirements.md` 的验证记录已改由本地复核口径（`npm run build` / `npm run test:all` / `npm run typecheck`）
 
 ---
@@ -59,8 +59,8 @@ description: "任务清单：数字人管理平台"
 
 ### 后端骨架
 
-- [x] T014 [P] 实现 `admin-backend/src/config.ts`（唯一读 `process.env` 之处；zod 校验 `PORT`/`PLATFORM_DATA_DIR`/`OPT_AGENT_ROOT`/`COMPOSE_FILE_PATH`/`DOCKER_SOCKET_PATH`；缺必填项即拒启动并给出可读报错）
-- [x] T015 实现 `admin-backend/src/context.ts`（`AppContext`：`config`/`loggers`/`store`/`compose`/`docker`/`mcp`；独立成文件以避免 `routes ↔ server` 循环 import，与 `agent-backend` 同构）
+- [x] T014 [P] 实现 `admin-backend/src/config.ts`（唯一读 `process.env` 之处；zod 校验 `PORT`/`PLATFORM_DATA_DIR`/`OPT_AGENT_ROOT`/`OPT_AGENT_BACKEND_URL`；缺必填项即拒启动并给出可读报错。**2026-09-27 修订**：`COMPOSE_FILE_PATH` / `DOCKER_SOCKET_PATH` 两项随 MCP 全人工配置移除）
+- [x] T015 实现 `admin-backend/src/context.ts`（`AppContext`：`config`/`loggers`/`store`/`runtime`/`agents`/`users`/`skills`/`mcpConfigs`/`mcpServices`/`mcpOperations`/`catalog`/`deployer` 等；独立成文件以避免 `routes ↔ server` 循环 import，与 `agent-backend` 同构。**2026-09-27 修订**：原 `compose`/`docker` 两个依赖已随编排与运行态下架移除）
 - [x] T016 [P] 实现 `admin-backend/src/logging.ts`（pino；日志落 `platform-data/logs/`，按日切分）
 - [x] T017 实现 `admin-backend/src/server.ts`（Fastify 装配 + 统一错误 envelope `{ error: { code, message, details? } }` + 路由注册 + `listen`）
 - [x] T018 [P] 实现 `admin-backend/src/domain/error-codes.ts`（`contracts/admin-api.md` §0.4 的 23 个错误码常量）与 `admin-backend/src/domain/api-error.ts`（`ApiError`，与 `agent-backend` 同构）
@@ -68,7 +68,7 @@ description: "任务清单：数字人管理平台"
 ### 数据访问层
 
 - [x] T019 [P] 实现 `admin-backend/src/infra/platform-store.ts`（JSON 文档读写 + **写临时文件 → fsync → 原子 rename** + `revision` 乐观锁；`research.md` D4）
-- [x] T020 [P] 实现 `admin-backend/src/infra/compose-reader.ts`（只读解析 `docker-compose.yml`，暴露 MCP 服务声明清单；用既有 `yaml` 依赖）
+- ~~T020 [P] 实现 `admin-backend/src/infra/compose-reader.ts`（只读解析 `docker-compose.yml`，暴露 MCP 服务声明清单）~~ **（2026-09-27 废止）** 平台不再读编排声明，模块已删除，`yaml` 依赖同步移除（`check-deps` 登记清单已更新）
 - [x] T021 [P] 单元测试 `admin-backend/tests/unit/platform-store.spec.ts`（原子替换、`revision` 冲突、并发写拒绝）
 - [x] T022 [P] 单元测试 `admin-backend/tests/unit/compose-reader.spec.ts`（正常/畸形/缺失文件）
 
@@ -148,8 +148,8 @@ description: "任务清单：数字人管理平台"
 - [x] T061 [US2] 实现 `admin-backend/src/domain/mcp/service-config.ts`（MCP **服务级配置**的读写：按运行形态分别声明的 `endpoints`、`writable`、`permission_scope`、`file_args`；`data-model.md` §3.2）
 - [x] T062 [US2] 实现 `admin-backend/src/infra/opt-agent-writer.ts`（**临时目录构建在同挂载点内 → 目录级原子 `rename`**；`EXDEV` 时降级为逐文件替换 + 回滚；`research.md` D8）
 - [x] T063 [P] [US2] 单元测试 `admin-backend/tests/unit/opt-agent-writer.spec.ts`（原子替换、失败零残留、`EXDEV` 降级路径——**该降级路径 MUST 被测试覆盖**）
-- [x] T064 [US2] 实现 `admin-backend/src/domain/deploy/precheck.ts`（**只读**部署前校验：①配置完整性 ②引用有效性 ③命名与路径安全 ④目标可写 ⑤**运行形态地址齐备**；**一次性列出全部错误项**；信息读取不到即按失败处理；`FR-027`、`FR-057`）
-- [x] T065 [US2] 实现 `admin-backend/src/domain/deploy/materialize.ts`（**整体覆盖**物化：五类配置 + SKILL 从库物化 + `MCP.json` 的 `url` **按目标运行形态取值**；`FR-026`、`FR-056`。**写入 MUST 以目录级原子替换完成**，MUST NOT 原地逐文件改写正在被读取的文件——这是 `FR-034`「不中断进行中的回答」在平台侧的落地，落地方式见 T062）
+- [x] T064 [US2] 实现 `admin-backend/src/domain/deploy/precheck.ts`（**只读**部署前校验：①配置完整性 ②引用有效性 ③命名与路径安全 ④目标可写；**一次性列出全部错误项**；信息读取不到即按失败处理；`FR-027`、`SC-020`。**2026-09-27 修订**：原第 ⑤ 类"运行形态地址齐备"随运行形态下架删除，其覆盖面由 ② 引用有效性承担）
+- [x] T065 [US2] 实现 `admin-backend/src/domain/deploy/materialize.ts`（**整体覆盖**物化：五类配置 + SKILL 从库物化 + `MCP.json` 的 `url` **取该服务的单一连接地址**；`FR-026`。**写入 MUST 以目录级原子替换完成**，MUST NOT 原地逐文件改写正在被读取的文件——这是 `FR-034`「不中断进行中的回答」在平台侧的落地，落地方式见 T062。**2026-09-27 修订**：原"按目标运行形态取值"随运行形态下架删除）
 - [x] T066 [US2] 实现 `admin-backend/src/domain/deploy/manifest.ts` 与 `history.ts`（部署清单、部署历史、与清单的差异报告；`FR-031`、`FR-032`、`FR-033`）
 - [x] T067 [US2] 实现 `admin-backend/src/domain/config-center/user-links.ts`（用户与其关联数字人的读写；`FR-024`、`FR-025`）
 - [x] T129 [US2] **运行环境**：为数字人实例加入**配置指纹**，并在取用池中实例前比对，不一致即丢弃重建（`FR-034`、`plan.md` R7、`contracts/runtime-api-delta.md` §8；落点 `agent-backend/src/infra/agent-factory.ts` 记录指纹 ＋ `agent-backend/src/server.ts` 的 `getOrCreateAgent` 命中后先比对）
@@ -158,7 +158,7 @@ description: "任务清单：数字人管理平台"
 > **编号说明**：T129／T130 为 `/speckit.analyze` 修复阶段新增（`FR-034` 的实例池缺口），为避免重排既有 128 条 ID 而接续末号，**逻辑上属本阶段（US2）**，执行顺序按其在阶段内的位置。
 - [x] T068 [US2] 实现 `admin-backend/src/domain/references.ts` 的路由层 `admin-backend/src/routes/references.ts`（`contracts/admin-api.md` §7.1，**仅供确认环节调用**）
 - [x] T069 [US2] 实现 `admin-backend/src/routes/users.ts`（§6.1~§6.4）与 `admin-backend/src/routes/deploy.ts`（§6.5~§6.8）
-- [x] T070 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy.spec.ts`——**MUST 覆盖 `contracts/admin-api.md §6.5`~`§6.8` 与 `§7.1` 的每一个端点**（原则三：每个接口端点 MUST 有集成测试）。用例 MUST 至少包含：①**核心负向**——校验不过 → 运行环境**零写入**且**一次性列出全部错误项**（`SC-020`）；②运行形态缺地址 → `ADM_RUNTIME_FORM_NOT_CONFIGURED`；③单用户失败零写入、其余用户不受影响（`FR-029`）；④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；⑥**双形态对比（`SC-024`）**——同一数字人在"容器编排内网"与"宿主机本地"两种目标形态下各部署一次，断言 `MCP.json` 的 `url` 分别取对应取值，且**全程未修改宿主机 hosts 文件、未手工编辑数字人配置文件**；⑦**既有数据零破坏（`SC-007`）**——部署前后清点既有数字人／SKILL／用户数量，断言不减少；⑧`§7.1` 的 `references` 各 `target_type` 返回的受影响清单与数字人配置中的引用**一致**
+- [x] T070 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy.spec.ts`——**MUST 覆盖 `contracts/admin-api.md §6.5`~`§6.8` 与 `§7.1` 的每一个端点**（原则三：每个接口端点 MUST 有集成测试）。用例 MUST 至少包含：①**核心负向**——校验不过 → 运行环境**零写入**且**一次性列出全部错误项**（`SC-020`）；②**引用失效**——数字人引用了已被删除的 MCP 服务 → 部署被拦截并在错误清单中给出该条（`ADM_AGENT_INVALID_REF`，**2026-09-27 修订**：原"运行形态缺地址"随运行形态下架）；③单用户失败零写入、其余用户不受影响（`FR-029`）；④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；⑥**单一地址来源**（**2026-09-27 修订**：取代原"双形态对比 `SC-024`"）——同一数字人部署一次，断言物化的 `MCP.json` 中该服务的 `url` 与该服务在平台登记的**唯一连接地址**一致，且**全程未修改宿主机 hosts 文件、未手工编辑数字人配置文件**；⑦**既有数据零破坏（`SC-007`）**——部署前后清点既有数字人／SKILL／用户数量，断言不减少；⑧`§7.1` 的 `references` 各 `target_type` 返回的受影响清单与数字人配置中的引用**一致**
 - [x] T071 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy-scope.spec.ts`——**作用域守卫**：部署前后三个文件空间（数据准备／共享空间／临时空间）下既有文件与二级目录**数量与内容 100% 不变**，含"场景目录清单收缩"场景（`FR-028`、`SC-012`）。**并补两项**：①**`SC-009`**——在库中修改一个被 N 个数字人引用的 SKILL 后部署一次，断言这 N 个数字人技能目录中的内容 100% 与库中版本一致；②**`SC-019`**——同一用户关联 N 个数字人且场景各不相同时，部署后各数字人按**各自**场景加载，且改其中一个的场景不影响其余数字人的可见范围
 - [x] T072 [P] [US2] 集成测试 `admin-backend/tests/integration/users.spec.ts`（新建/重复/非法标识/关联与解除/删除）
 - [x] T073 [P] [US2] 单元测试 `admin-backend/tests/unit/deploy-precheck.spec.ts`（五类校验项各自的正/异/边界 + "信息读取不到按失败处理"）
@@ -207,9 +207,9 @@ description: "任务清单：数字人管理平台"
 
 ## Phase 6: User Story 4 - MCP 服务管理 (Priority: P4)
 
-**Goal**: 以卡片浏览容器编排声明的 MCP 服务，配置服务级信息，启停、测试、查看日志与调用统计。
+**Goal**: 以卡片浏览**平台内人工登记**的 MCP 服务，新建/编辑/删除它、配置调用信息、查看工具清单、发起测试与查看调用统计。**平台不读容器编排声明、不读容器运行态**（启停与运行日志已于 2026-09-27 下架）。
 
-**Independent Test**: "列出 MCP 服务 → 配置其调用信息 → 查看工具清单 → 启停该服务 → 查看日志与调用次数统计"（`spec.md` US4 独立测试）。
+**Independent Test**: "新建 MCP 服务（弹窗）→ 创建后自动测试一次 → 补全调用配置 → 查看工具清单 → 删除 → 查看调用次数统计"（`spec.md` US4 独立测试）。
 
 ### 运行环境改动（R4）
 
@@ -219,28 +219,31 @@ description: "任务清单：数字人管理平台"
 
 ### 后端（平台）
 
-- [x] T101 [US4] 实现 `admin-backend/src/infra/docker-host.ts`（**Node 内置 `node:http` + `socketPath`** 直连 Docker Engine API；**操作白名单收口于此**：容器列表与状态、日志、白名单内 start/stop；不暴露任意 API 透传；`research.md` D3）
-- [x] T102 [P] [US4] 单元测试 `admin-backend/tests/unit/docker-host.spec.ts`（socket 不可达、非白名单服务拒绝、日志有界截断）
+- ~~T101 [US4] 实现 `admin-backend/src/infra/docker-host.ts`（Docker Engine API 直连与操作白名单）~~ **（2026-09-27 废止）** 平台不再读容器运行态，该模块与其测试已删除；`research.md` D3 的相关结论随之失效。
+- ~~T102 [P] [US4] 单元测试 `admin-backend/tests/unit/docker-host.spec.ts`~~ **（2026-09-27 废止）** 同上。
 - [x] T103 [US4] 实现 `admin-backend/src/infra/mcp-client.ts`（基于既有 `@modelcontextprotocol/sdk`：列工具、连通性检查与一次实际能力验证）
-- [x] T104 [US4] 实现 `admin-backend/src/domain/mcp/service-list.ts`（**清单以容器编排声明为唯一来源**；与 Docker 实际状态合成；与平台服务级配置比对产出 `in_compose` 与异常原因；`FR-043`、`FR-052`）
-- [x] T105 [US4] 实现 `admin-backend/src/domain/mcp/operations.ts`（启停 + 测试 + 日志 + 调用统计的领域逻辑，含 `FR-047` 的"不得把失败误报为成功"）
+- [x] T104 [US4] 实现 `admin-backend/src/domain/mcp/service-list.ts`（**清单以平台侧调用配置为唯一来源**；详情聚合调用配置 + 一次实时探测得到的工具清单（不可得时给 `tools_error`，不报错）+ 引用清单；`FR-043`、`FR-045`。**2026-09-27 修订**：原"与 Docker 实际状态合成、产出 `in_compose` 与异常原因"已废止）
+- [x] T105 [US4] 实现 `admin-backend/src/domain/mcp/operations.ts`（仅**测试**与**调用统计**两部分领域逻辑，含 `FR-047` 的"不得把失败误报为成功"、`FR-009` 的"统计不可达不以 0 冒充"。**2026-09-27 修订**：启停与运行日志已下架）
 - [x] T106 [US4] 实现 `admin-backend/src/routes/mcp.ts`（`contracts/admin-api.md` §3.1~§3.8）
-- [x] T107 [P] [US4] 集成测试 `admin-backend/tests/integration/mcp.spec.ts`（列表自动识别新增服务、详情工具清单、服务级配置保存后影响所有引用数字人、启停状态反映真实结果、测试失败给出明确原因、日志有界、统计不可达时**不以 0 冒充**）
-- [x] T108 [P] [US4] 单元测试 `admin-backend/tests/unit/mcp-service-list.spec.ts`（编排改名/移除时的差异检测；`FR-052`）
+- [x] T107 [P] [US4] 集成测试 `admin-backend/tests/integration/mcp.spec.ts`（列表即平台配置、新建重名 → `ADM_MCP_SERVICE_EXISTS`、删除后引用失效、详情工具清单与服务级配置回显、测试失败给出明确原因、统计不可达时**不以 0 冒充**）
+- [x] T108 [P] [US4] 单元测试 `admin-backend/tests/unit/mcp-service-list.spec.ts`（清单取自平台配置；工具清单不可得时 `tools_error` 而非报错。**2026-09-27 修订**：原"编排改名/移除差异检测"随编排来源废止）
 
 ### 前端（平台）
 
 - [x] T109 [P] [US4] 实现 `admin-frontend/src/api/mcp.ts`
 - [x] T110 [P] [US4] 实现 `admin-frontend/src/composables/useMcpServices.ts`
-- [x] T111 [US4] 实现 `admin-frontend/src/components/mcp/McpCardList.vue`（**名称、用途描述**、传输方式、状态四态；`FR-043`、`FR-006`）
-- [x] T112 [US4] 实现 `admin-frontend/src/components/mcp/McpServiceDetail.vue`（工具清单 + 服务级配置编辑，**含按运行形态分别声明的地址输入**；`FR-045`、`FR-056`）
-- [x] T113 [US4] 实现 `admin-frontend/src/components/mcp/McpServiceConfigForm.vue`（**`description`（用途描述，供卡片展示）**、`endpoints` 按形态分组、`writable`、`permission_scope`、`file_args`）
+- [x] T111 [US4] 实现 `admin-frontend/src/components/mcp/McpCardList.vue`（**名称、用途描述、传输方式、连接地址**与调用次数；右上角「新建 MCP 服务」；`FR-043`、`FR-006`。**2026-09-27 修订**：原"状态四态"已废止）
+- [x] T112 [US4] 实现 `admin-frontend/src/components/mcp/McpServiceDetail.vue`（页签：调用配置 / 工具清单 / 调用统计；页头右上角「删除服务」「保存调用配置」；暴露 `runTest()` 供创建后自动测试；`FR-044`、`FR-045`、`FR-047`。**2026-09-27 修订**：原"启停页/运行日志页"与"按运行形态声明的地址输入"已废止）
+- [x] T113 [US4] 实现 `admin-frontend/src/components/mcp/McpCallConfigForm.vue`（**`description`（用途描述，供卡片展示）**、**单一连接地址**（或 `stdio` 启动命令与参数）、`file_args`、HITL、`rules_fields`、`async_tools`；名称只读。**2026-09-27 修订**：原 `McpServiceConfigForm.vue` 改名而来，`endpoints`/`writable`/`permission_scope` 已移除）
 - [x] T114 [P] [US4] 实现 `admin-frontend/src/components/mcp/McpToolList.vue`（用途与入参说明，有界返回）
-- [x] T115 [P] [US4] 实现 `admin-frontend/src/components/mcp/McpLogViewer.vue`（时间倒序、有界、量大仍快速返回；`FR-048`）
+- ~~T115 [P] [US4] 实现 `admin-frontend/src/components/mcp/McpLogViewer.vue`（运行日志，`FR-048`）~~ **（2026-09-27 废止）** 平台不再读容器运行态，组件与测试已删除。
 - [x] T116 [P] [US4] 实现 `admin-frontend/src/components/mcp/McpStatsTable.vue`（累计/成功/失败/最近调用时间；不可用时显示"未知"而非 0；`FR-049`）
-- [x] T117 [US4] 实现 `admin-frontend/src/components/mcp/McpTestPanel.vue`（连通性 + 能力验证结果与**明确失败原因**；`FR-047`）
-- [x] T118 [P] [US4] 组件测试：`McpCardList.spec.ts`、`McpServiceConfigForm.spec.ts`、`McpLogViewer.spec.ts`、`McpStatsTable.spec.ts`
-- [x] T119 [US4] 无障碍验证：关闭被引用服务的二次确认（原生 `<dialog>`）、日志与统计表格的读屏可读性、状态下拉键盘操作
+- [x] T117 [US4] 实现 `admin-frontend/src/components/mcp/McpTestResultDialog.vue`（连通性 + 能力验证结果与**明确失败原因**、回显被测目标；`FR-047`。**2026-09-27 修订**：原 `McpTestPanel.vue` 已改为结果弹窗）
+- [x] T118 [P] [US4] 组件测试：`McpCardList.spec.ts`、`McpCallConfigForm.spec.ts`、`McpStatsTable.spec.ts`、`McpServiceDetail.spec.ts`、`McpCreateDialog.spec.ts`、`McpArea.spec.ts`、`Utils/mcp-config.spec.ts`
+- [x] T119 [US4] 无障碍验证：删除被引用服务的二次确认与新建弹窗（均原生 `<dialog>`：Esc 关闭、焦点陷阱、焦点归还）、统计表格的读屏可读性
+- [x] T120 [US4] **（2026-09-27 新增）** 实现 `admin-frontend/src/components/mcp/McpCreateDialog.vue`（新建弹窗：名称/用途描述/传输方式/连接地址或启动命令；基础校验；**创建失败不关窗、输入不丢**、**创建中禁止关闭**；`FR-043`）
+- [x] T121 [US4] **（2026-09-27 新增）** 抽出 `admin-frontend/src/utils/mcp-config.ts`（基础字段判据的**唯一实现**，弹窗与详情页表单共用，原则二"同一职责唯一实现"）
+- [x] T122 [US4] **（2026-09-27 新增）** `McpArea.vue` 接线：新建入口改为开弹窗；创建成功 → 导航到详情页并**自动测试一次**（一次性意图，离开即放弃）；`FR-047`
 
 **Checkpoint**: 四个功能区全部可用。
 
@@ -472,3 +475,505 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 - 读屏实机抽查（原则四 §8 第 4 条）。
 
 以上三项属**人工验收动作**，其对应功能行为均有自动化断言覆盖（`quickstart.md` §10.5），但"计时/计数/读屏"本身未由本次实现代跑。
+
+---
+
+## 增量记录（2026-09-23）：HITL 弹窗按 schema 递归渲染
+
+**起因**（契约已同步：`contracts/runtime-api-delta.md` §9.6 / §9.7）：真实工具把 7 个排产输入项包在一个
+顶层 `input` 对象里，而弹窗只渲染**顶层**字段、`object/array` 一律塌成一个 JSON 文本框——
+"字段逐行""规则入口在它那一行"在界面上根本不成立，入口只能挂在祖先 JSON 框下方靠旁注说明改哪里。
+产品要求**全部改成表格化的结构化形式**；而该 MCP 服务（`hd-algorithm`，`192.168.0.188:8080`）
+由第三方提供、**不可改**，因此只能在客户端补通用递归渲染能力。
+
+**分层落地**（宪章原则二；每层各自带同名测试）：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 纯函数 | `frontend/src/utils/json-path.ts` | 值路径读写（本次起支持**数组下标**），写入返回新值、类型不符**不静默覆盖** |
+| 纯函数 | `frontend/src/utils/arg-schema.ts` | schema 内省：控件形态分派、表格列（schema 声明列 + 值里出现的动态列）、规则入口落点 |
+| 纯函数 | `frontend/src/utils/arg-values.ts` | 本地校验（required 由父级传入，与 JSON Schema 语义一致）与提交构建（剪枝 + 数字收敛） |
+| composable | `frontend/src/composables/useInteractionForm.ts` | 模型（唯一事实源）、JSON 草稿（逃逸舱）、规则写回、校验与提交编排 |
+| 组件 | `frontend/src/components/chat/InteractionField.vue` | **字段行**：标签、说明、操作条、文件卡片、规则入口；分组时递归自身 |
+| 组件 | `frontend/src/components/chat/InteractionControl.vue` | **控件本体**：标量控件、JSON 视图文本、`@` 引用面板；`compact` 模式供表格单元格复用（单元格里放不下的形状退化为 JSON 框，而不是渲染成 `[object Object]`） |
+| 组件 | `frontend/src/components/chat/InteractionTable.vue` | **表格块**：一行一个元素、列与行由父级传入、删行只上报事件（不自己改数据） |
+| 组件 | `frontend/src/components/chat/InteractionDialog.vue` | 瘦身为弹窗外壳 |
+
+**行为变化**：
+
+1. 对象 → 子字段**逐行**（任意深度递归）；对象数组 → **表格**（一行一个元素，可加行/删行、单元格就地编辑）；
+   标量数组 → **列表**；schema 表达不了的形状（自由对象、数组套数组等）→ **JSON 逃逸舱**（任一层可手动切换）；
+2. 规则入口按 `rules_field` **完整路径**落点：能结构化渲染时按钮就在目标那一行（与它要影响的表格同一个字段块）；
+3. 写回从"往 JSON 文本里塞字符串"改为**按值路径深写进结构化模型**（因此结构化路径下不再出现"请先修正 JSON"的拒绝）；
+4. 提交口径不变：空值不进 `args`（与改造前"空文本框不进 args"一致），另补"表格里整行留空不以 `{}` 混进提交值"。
+
+**门禁**（本地，宪章「开发工作流与质量门禁」）：`frontend` —— `lint` 0 error、`typecheck` 通过、
+`test` **295/295**（22 个文件）、`test:coverage` 通过、`build` 通过；**单文件行数全部 ≤ 500**
+（最大 `InteractionField.vue` 408 行；拆前 `InteractionDialog.vue` 与 `InteractionDialog.spec.ts`
+分别 790 / 581 行都已超限，本次一并拆到位）。覆盖率：新增/改动的 4 个模块均 ≥ 80%
+（实测语句/分支 `json-path` 98.07/95.12、`arg-schema` 95.65/94.11、`arg-values` 97.89/91.75、
+`useInteractionForm` 96.33/83.63），**全局防倒退地板随补测自 14/22/8/14 上调至 45/52/34/44**
+（实测 46.18/53.19/35.36/45.30），模块阈值清单已按宪章要求补入这 4 个模块。
+
+**顺带修掉的缺陷**：重写 `InteractionDialog` 时曾丢掉"挂载即预取文件空间"的 `immediate` 标志，
+导致结构化文件卡片与 `@` 面板首屏没有数据源——由既有组件测试当场拦下并修复。
+
+**副作用与遗留**：
+
+- 规则选择器生成的行的键 = **规则文件表头**，而工具要求的是 `ruleId`/`rulePriority`（见该工具
+  `input.targetPriorities.items.properties`）。若规则文件表头不是这两个字段名，勾选结果会缺必填键——
+  现在弹窗会**在行内/校验里明确提示**（而不是等第三方服务拒绝）。该核对需在规则文件就位后确认，
+  必要时应补一次"表头 → 目标字段名"的显式映射（属新需求，未在本次实现）。
+- `admin-backend/.platform-data` 侧无需改动：`rules_fields` 的取值语法未变（仍是对象路径）。
+
+### 同日追加：MCP 服务配置从 compose 收敛到服务自己的 `.env`
+
+**起因**：`OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS` 原先由 `docker-compose.yml` 的
+`environment` 拿根 `.env` 的 `HOST_LAN_IP` 拼装——一处配置两个主人（compose 里的默认值与根
+`.env` 的覆盖并存）。表现是"改了 `.env` 却没反应"：**环境变量在容器创建时固化**，
+`docker restart` 以及机器重启后由 `restart: unless-stopped` 拉起，都只是让既有容器再跑一遍，
+于是出现"`docker compose config` 显示 `192.168.0.140`、容器里却还是 `192.168.1.3` /
+`192.168.0.143`"——实测两个容器各冻着不同年代的旧 IP，**回源其实一直被 SSRF 拒绝**。
+
+**改动**（与 backend / admin-backend 自 2026-09-20 起的同一模式）：
+
+- 新增入库的 `ocr-service/.env` / `jev-service/.env`：容器形态取值（白名单只需服务名 `backend`）；
+- 新增 gitignore 的 `ocr-service/.env.local`，`jev-service/.env.local` 追加白名单 LAN IP：
+  本机形态（backend 跑在宿主机）的追加覆盖；两者均由 compose `env_file` 注入
+  （`.env.local` 用 `required: false`，缺失不报错——容器形态本就不需要它）；
+- `docker-compose.yml` 的 ocr / jev 段**删除 `environment`**，只声明注入哪两个文件；
+  全文唯一的 `environment` 单点覆盖只剩 `PUBLIC_BASE_URL`；
+- 根 `.env` / `.env.example` 移除 `HOST_LAN_IP`（已无任何读者）；
+- **`.gitignore` 放行 `ocr-service/.env` / `jev-service/.env`**：`.env` 规则对**所有层级**生效，
+  不显式放行会处于"被忽略且未跟踪"——提交时静默丢失，而 `env_file` 第一项默认必需，
+  fresh clone 会直接起不来（本次已踩到并修正，与既有 `!admin-backend/.env` 同一手法）；
+- README：配置地图（新增 4 行、`.env（根）` 收窄为端口项）、启动步骤、**本地配置要点**三处同步；
+  并把"改完必须**重建**容器、`restart` 不更新环境变量"写成显式警告 + 一条验证命令。
+
+**验证**：`docker compose config` 已无 `HOST_LAN_IP` 引用、两值为 `backend,192.168.0.140`；
+`docker compose up -d ocr jev` 重建后 `docker inspect` 与两个服务自报的 `allow_hosts` 一致；
+容器内直接跑 SSRF 判定：`192.168.0.140` 放行、`192.168.0.143` 被拒并给出可读原因（两个服务都验）。
+
+### 同日追加（二）：编排层去掉根 `.env` / `.env.example`
+
+**起因**：根目录的 `.env` / `.env.example` 只服务 `docker-compose.yml` 的两处**端口插值**
+（`GATEWAY_HOST_PORT` / `JEV_HOST_PORT`），而根 `.env` 的实际内容只有 `GATEWAY_HOST_PORT=82`
+——与 compose 里的 `:-82` 默认值**完全等价**，属于"存在但不产生任何差异"的冗余配置；
+且该文件被 `.gitignore` 忽略，本就不入库，删除对他人 clone 零影响。
+
+**处置**：
+
+- `docker-compose.yml`：两处 `${VAR:-默认}` 插值改回**字面量**（`82:80` / `8001:8000`），
+  编排层不再有可变项；
+- 删除根 `.env` 与根 `.env.example`；
+- README：目录树与「配置地图」表格各删一行（表中不再有"根 `.env`"这一归属）；
+- **服务级 `.env` / `.env.example`（agent / admin / ocr / jev / frontend）不受影响**；
+  `.gitignore` 的 `!.env.example` 放行规则**必须保留**（服务级样板继续入库）；
+- 编排层配置调整的入口从"改根 `.env`"变为"直接改 `docker-compose.yml`"（唯一权威源）。
+
+**验证**：全仓已无 `GATEWAY_HOST_PORT` / `JEV_HOST_PORT` 引用；根目录两个文件不存在；
+`docker compose config` 端口解析为 `82` / `8001`。影响面仅"宿主机端口不可再经根 `.env` 覆盖"，
+而原取值与默认值等价，故无迁移成本。
+
+---
+
+## 增量记录（2026-09-28）：移除 MCP 服务的回源 host 白名单
+
+**起因**：`OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS` 要求"平台直链基址 + 每个 MCP 服务各一份
+白名单"三处写同一个主机名，换网络/改 IP 时极易漏配（上一节（一）记录的正是同类故障）；而回源直链与
+`result_url` 本已由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入，服务侧再验一遍 host 属同一判据的
+第二次执行——按原则二"同一职责唯一实现"，应收口在唯一的生产者。
+
+**处置**：
+
+- `ocr-service` / `jev-service`：删除 `ALLOW_HOSTS` 与 host 校验；**保留**与白名单无关的防护
+  （只接受 http/https、不跟随重定向、下载超时、大小上限）。校验函数更名为 `check_http_url`
+  （语义即"只校验协议"）；jev 的"未铸链诊断"文案与之合并，仍是可操作提示。
+- 两服务的启动自报/告警（`allow_hosts`）一并删除——该概念已不存在。
+- 配置：删除入库的 `ocr-service/.env`、`jev-service/.env`（各自只剩白名单一行）与本机
+  `ocr-service/.env.local`；`docker-compose.yml` 这两个服务只注入**可选**的本机私产 `.env.local`
+  （`required: false`）；`.gitignore` 中两条对应放行规则一并移除。
+- 契约：`runtime-api-delta.md §10.7` 的安全条目由"过同一份 host 白名单"改为"只接受 http/https +
+  由平台单点注入"；`异步MCP服务接入约定.md` 的服务侧白名单由 MUST 降为**可选加固**
+  （hd 服务不在本仓库，其代码需各自同步）。
+- 测试：白名单用例删除，改为"任意 http(s) 主机放行、非 http(s) 拒绝"的回归用例。
+
+**验证**：容器内实测（`docker exec`）——任意 http 主机放行（`check_http_url` 返回 `None`）、
+`file://` 仍被拒（"仅支持 http/https URL"）、对宿主 `agent-backend` 的真实回源返回
+`下载失败（HTTP 403），签名可能已过期`（bogus 签名，符合预期；证明主机名不再受限且链路可达）；
+`docker compose config` 已无 `ALLOW_HOSTS`，两服务容器 env 亦不含该变量；
+本地 `python -m pytest -q tests` 通过（ocr 30 / jev 51）。
+
+---
+
+## 增量记录（2026-09-23）：MCP 调用统计下钻到工具 + 去掉独立累计表
+
+**起因**：两件事一并处理——①统计只到"服务"粒度，`ocr` 失败若干次看不出是**哪个工具**；
+②产品确认**只关心最近一年的调用总数**，而现有实现同时维护一张"全历史累计"表（`mcp_call_stats`）
+与一张"只留一年"的事件明细表（`mcp_call_events`），两者靠同一次写入各自累加，
+存在"累计 +1 但明细没落"的窗口（两条独立自动提交语句，`catch` 只记日志不抛出）。
+
+**处置**：
+
+1. **只保留事件明细一张表**：`DROP TABLE IF EXISTS mcp_call_stats`（幂等，随建表段执行）。
+   累计值改由事件明细聚合，**口径即"最近一年"**——`calls_total/ok/failed` 与 `windows.d365` 恒相等。
+   取舍理由：一张停写后会**冻结在切换时刻**的表，比删掉更容易被误读。
+   **代价（已确认接受）**：全历史总调用量永久不可得（超过 365 天的老事件此前已被清理，无法回填）。
+2. **事件明细新增 4 列**（旧库打开即自愈，沿用 `PRAGMA table_info` + `ALTER TABLE ADD COLUMN`；
+   建在这些列上的索引一律在**补列之后**创建，与既有 `idx_mcp_events_user` 同一坑位）：
+   - `tool_name`——**MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），不含暴露给模型的 `{server}__` 前缀；
+   - `thread_id`——取自强制穿透上下文里的 `sid`（七次调整已具备，**无需新增透传**），把事件接回具体对话；
+   - `duration_ms`——**含 `McpManager` 内部一次重试**的用户感知耗时（口径写进注释与契约，避免被当成单次尝试耗时）；
+   - `error_kind`——仅失败有值，粗粒度枚举 `unavailable | protocol | transport`，**不存错误原文**
+     （长度与脱敏不可控，细节看运行日志）；判定提炼 `McpManager` 既有的"连接级 vs `McpError`"规则为
+     导出的 `isTransportFailure` / `classifyMcpError`，**不在适配器里写第二份**。
+3. **`recordMcpCall` 入参由位置参数改为事件对象**（字段增至 6 个后位置参数已不可读，且与同接口
+   `record(entry)` 同风格），并把"写入 + 顺手清理"包进 `db.transaction()`，一并堵掉上述 ② 的一致性问题。
+4. **响应每项新增 `tools[]`**（与既有 `users[]` 同构），在事件明细上 `GROUP BY service_name, tool_name`。
+   **顺带修一处既有缺陷**：`users[]` 的聚合原先**没有时间条件**、默认"清理一定跑过"——而清理只在
+   写入时触发，现补上 365 天上界。
+5. **管理端**：`McpStatsTable` 展开行新增「按工具（最近一年）」区块；「累计（成功/失败）」列头与卡片
+   文案改为「最近一年（成功/失败）」/「最近一年调用」——口径变了措辞必须跟着变，否则界面会并排出现
+   两个数值完全相同的列而被当成 bug。
+
+**契约同步**：`contracts/runtime-api-delta.md` §4.2（计数点：删累计表、逐列口径表）、
+§4.3（响应 + `items[].tools`、`calls_*` 注明近一年口径、`items` 不含超一年未调用服务）；
+`data-model.md` §3.3（字段说明与口径注记）。
+
+**口径说明（对 `FR-049` 的解读）**：`FR-049` 与 `spec.md` 用户故事 4 场景 7 里的"累计调用次数"，
+自本次起按**最近一年**解读，不再表示全历史；`spec.md` 作为需求快照保留原文。
+
+**回归测试**：`usage-db.spec.ts` 19 例（新增：全字段落库且工具名不带前缀、成功不留 `error_kind`、
+按工具分组聚合、老库补齐全部新增列）；`mcp-manager.spec.ts` +3 例（连接级/协议判据与分类）；
+`mcp-tool-adapter.spec.ts` +4 例（埋点：工具名为 MCP 原名、失败带分类且**异常照常上抛**、
+无运行上下文时用户/会话为 `null`、**`file_args` 校验失败不记事件**——守住"计数 = 工具调用次数"）；
+`mcp-call-stats.spec.ts` 8 例（+ 按工具明细与服务级求和自洽）；`McpStatsTable.spec.ts` 13 例
+（+3：按工具展开、`tool_name` 为 `null` 显示"未归属"、无 `tools` 时明说原因）；`McpCardList.spec.ts` 文案同步。
+
+**门禁**：`agent-backend` `tsc --noEmit` 通过、`test:all` **243/243**；`admin-backend` `tsc --noEmit` 通过；
+`admin-frontend` `src/components/mcp` **63/63**。
+
+### 同日追加：调用统计表改为「一行 = 用户 × 服务 × 工具」，去掉明细展开
+
+**要求**（产品）：统计表每行为「用户名 / 服务名 / 工具名 / 最近24h / 最近7天 / 最近30天 / 最近一年 / 最近调用时间」，
+四个时间窗单元格格式为「**总次数/成功次数**」；**不要明细**（取消展开列）。
+
+**处置**：
+
+1. **响应新增 `groups[]`**（`GET /api/mcp-call-stats`）：在事件明细上按 `(service_name, tool_name, user_id)`
+   分组、**每个组合带四个时间窗**——正是统计表所需的一行。
+2. **`users[]` / `tools[]` 被 `groups` 取代并删除**：两者都不带时间窗，无法表达上表的列；且分组行本身就是
+   最细粒度（按服务、按用户都能由它折叠算出），再并列第二套明细只会造成口径分裂。
+   `items[]` 保留但**只留服务级总量**（`windows` 移入分组行）——它仍供列表页卡片显示"最近一年调用次数"。
+3. **聚合实现**：`mcpCallStats()` 由"三条独立查询"改为**一次按 (服务, 工具, 用户) 的逐窗聚合**，
+   服务级汇总在 JS 里折叠分组行得出（同一口径，可直接相加）——少一次查询，且两视图天然自洽。
+4. **前端 `McpStatsTable.vue`**：8 列网格、无展开行与按钮，单元格 `总/成功`；`only` 仍用于服务详情页过滤。
+   **顺带修掉一处既有缺陷**：原先"空态"分两条 `<tr>` 判断，`only` 且该服务无行时**两条空态会同时渲染**
+   （重复提示），现收敛为一个 computed 文案。
+5. **平台后端**：`runtime-client` / `operations` 透传 `groups`，并把 `groups` 纳入**响应结构校验**
+   （缺字段即报"结构不合法"）——否则旧运行环境会被静默当成"空表"，与 `FR-009`"不以 0 冒充"同一口径。
+
+**契约同步**：`contracts/runtime-api-delta.md` §4.1（追加分组视图要求）/§4.3（响应示例与字段表改为
+`items` + `groups`，并写明"`groups` 为最细粒度，MUST NOT 再并列第二套明细"）；`data-model.md` §3.3 口径注记同步。
+
+**回归测试**：`usage-db.spec.ts`（分组行四窗、窗口补 0 而非缺字段、服务级 = 分组之和、老行三维度 `null` 单独成行）；
+`mcp-call-stats.spec.ts`（`groups` 成行 + 求和自洽 + 不可读时 `groups` 也为空）；`runtime-client.spec.ts`
+（+1 例：缺 `groups` 即结构不合法）；`mcp.spec.ts`（分组行透传 + 不可达时两数组皆空）；
+`McpStatsTable.spec.ts` 重写为 10 例（表头 8 列、一行一组合、窗口格式、无展开入口、`only` 过滤、不可达未知、
+"未归属"、缺窗口显示"—"、空态三种文案）；`useMcpServices.spec.ts` 同步。
+
+**门禁（本条目完成后）**：`agent-backend` `lint` 0 error、`tsc --noEmit` 通过、`test:all` **243/243**、
+`test:coverage` 通过、`build` 通过；`admin-backend` `lint` 0 error、`tsc --noEmit` 通过、测试 **471/471**、
+`check:lines` 通过、`build` 通过；`admin-frontend` `lint` 0 error、`typecheck` 通过、测试 **360/360**、
+`test:coverage` 通过、`check:lines` 通过、`build` 通过。
+
+**遗留（非本次引入）**：`agent-backend/src/infra/mcp/mcp-tool-adapter.ts` **605 行**（HEAD 即 **583 行**，
+本次 +22 行），超出宪章的 500 行上限——`agent-backend` 没有 `check:lines` 脚本，故一直未被门禁拦住。
+需要时按"工具装配 / file_args 改写"两个职责拆件，属独立任务。
+
+### 同日追加：新增内置工具 `read_skill`（补齐 SKILL 正文的读取通道）
+
+**问题（实测确认，非配置问题）**：SKILL **此前只把 frontmatter 的 `name`/`description` 注入 System Prompt**（`agent-instance.ts:59-60`），正文与 `references/` 附件**没有任何读取通道**。三重证据：①`agent-backend/src` 里 `'skills'` 路径只出现在 `config-fingerprint.ts`（算指纹）与 `agent-instance.ts`（读 frontmatter），**无任何工具读它**；②内置工具目录当时就 5 项；③沙箱也读不到——`FileAccess` 白名单是用户三空间（`users/{uid}/user-data/{…}`），而技能在 `users/{uid}/agents/{agent}/skills/**`，是另一个子树，`read_file` 报 `目录不在白名单: skills`。规格侧也只有**管理端**读技能文件（`admin-api.md` §4.3），运行环境无对应契约。
+
+**处置**（方案 A：描述进提示词 + 正文按需用工具读）：
+
+1. **新增领域实现 `agent-backend/src/domain/tools/read-skill.ts`**（只读，**不经 `FileAccess`**）：
+   - `read_skill(skill, path?, offset?, limit?)`：`path` 缺省为 `SKILL.md`，可读 `references/` 等附件；`path` 为目录时返回**文件清单**；
+   - 安全口径与平台侧 `resolveInsideSkill` / `isSafeSkillName` **同判据**：技能名限单个目录名；路径拒绝对路径/盘符/`..`/控制字符（C0+DEL）；`\` 按分隔符归一；解析后必须在技能目录内 + realpath 校验（防符号链接逃逸）；只读普通文件，符号链接一律拒；
+   - **预期内用法问题**（技能/文件不存在、二进制）返回**可读文本 + 可用清单**（不静默留白）；**越权**上抛 `SkillAccessError` → 拒绝文案 + `file.access.denied`（`alert: true`）审计日志，与文件越权同一口径；
+   - 沙箱根由 `agent-factory` 在**每次 run 装配时**注入 `users/{uid}/agents/{agent}/skills` → **天然隔离到当前数字人**。
+2. **进内置工具目录**（`builtin-tool-catalog.ts`，`FR-011` 单一来源）：追加在**末尾**，**前 5 项顺序与文本零变化**（golden 不变式仍成立）；`GET /api/builtin-tools` 由 5 项变 6 项，平台的内置工具选择器**自动出现**「读取技能文件」，无需改平台代码。
+3. **启用方式**：与其它内置工具一致，须在 `TOOL.json` 的 `enabled` 里显式声明——**存量数字人需在管理平台勾选后重新部署**才生效（刻意的：技能读取与"配了哪些技能"一样属显式配置，MUST NOT 隐式开启）。
+
+**契约同步**：`contracts/runtime-api-delta.md` §0（新增 R10 行）/§1.4（目录 5→6、新增行、不变式限定为"前 5 项"）/§1.4.1（新增小节：为什么加、安全口径、启用方式）/§2（工具数 5→6）。
+
+**回归测试**：新增 `tests/unit/read-skill.spec.ts`（22 例：默认 `SKILL.md`、`references/` 附件、目录清单、`\` 归一、截断与 `offset` 续读、`limit` 上限、技能/文件不存在的可读提示、二进制、9 类越权、符号链接文件与目录、越界不返回任何内容）；新增 `tests/unit/builtin-tools.spec.ts`（4 例：接线、白名单未启用即不装配、越权 → 拒绝文案 + alert 日志、技能不存在不记 alert）；`builtin-tool-catalog.spec.ts`（5→6 + `read_skill` golden 文本）；集成 `builtin-tools.spec.ts`（`total` 6 + 含 `read_skill`）。
+
+**顺带修掉一个真实设计缺陷**：目录清单最初按"被问的那个目录"列相对路径（给出 `算法详解.md`），模型回填 `path` 时会取不到——由单测当场拦下，改为**一律相对技能根**（给出 `references/算法详解.md`，可直接回填）。
+
+**门禁**：`agent-backend` `lint` 0 error、`tsc --noEmit` 通过、`test:all` **270/270**、`test:coverage` 通过、`build` 通过；本轮改动文件行数 221 / 199 / 150 / 292，均 ≤ 500。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 1 —— 运行环境侧落地
+
+**上游**：`contracts/runtime-api-delta.md` §10（R11）+ `data-model.md` §3.2 的 `async_tools` 行。
+**范围界定**：本阶段**只做 §10 中落在 `agent-backend` 的改动**（配置解析 → 注入 → 回写端点 → 产出落盘/列表/信号 → 提示词段 → 清理覆盖）。
+**不在本阶段**：平台侧的保存校验与物化（`admin-backend`，`async_tools` 写进 `MCP.json`）与管理界面表单（`admin-frontend`）——界面未就绪前，可手工改 `MCP.json` 验证全链路；注意**下一次平台部署会覆盖手工改动**（物化是整体覆盖，权威源在平台）。
+**测试执行环境**：宿主机本地（宪章原则三）；容器不参与。
+
+- [x] T131 [R11] 回写契约 §10 的三处口径缺口（`sid`/`call_id`/`tool` 的来源与「不参与验签」的判据、`job_id` 取自 `filename` 主干、产出目录 MUST 纳入既有 7 天清理范围）
+- [x] T132 [R11] `agent-backend/src/infra/file-sign.ts`：新增写方向签名（`put\n{userId}\n{dir}\n{exp}` 四段）与 `mintPutUrl`/`verifyPutRef`，**读方向三段格式一字不动**；单测守住"读签名不能用于写、写签名不能用于读、存量读签名零失效"
+- [x] T133 [R11] `agent-backend/src/types.ts` + `domain/agent-instance.ts`：`McpServerConfig.asyncTools` 与 `MCP.json` 的 `async_tools` 解析（数组 / 元素非空字符串 / 同服务内去重，非法即 `AgentConfigError`）；单测覆盖正/异/边界
+- [x] T134 [R11] `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：命中声明的工具注入 `result_url`（**对 LLM 隐藏**，仿 `injectRuntimeContext`）；schema 未声明 `result_url` 时**装配期告警**且不注入（不阻断）；单测守住 §10.6 不变式 1/2/6
+- [x] T135 [R11] `agent-backend/src/infra/agent-factory.ts`：按 run 铸造写方向 URL 并接线到工具装配
+- [x] T136 [R11] `agent-backend/src/domain/file-access.ts`：新增**受控子目录写入**（仅允许 `临时空间/后台产出`，文件名无分隔符/`..`/非空）；单测覆盖越权与合法写入
+- [x] T137 [R11] 新建 `agent-backend/src/domain/produced.ts`：产出落盘（正文 + sidecar 元数据）、目录扫描与列表（目录即索引，不落额外清单）
+- [x] T138 [R11] `agent-backend/src/routes/files-put.ts`：新增 `POST /api/files/put`（验签 → 文件名校验 → `{prefix}_` 前缀 → 受控写入 → sidecar → 202）；集成测试覆盖验签失败、目录越权、幂等重放
+- [x] T139 [R11] 新建 `agent-backend/src/routes/produced.ts`：`GET /api/produced`（有界返回）与 `GET /api/produced/events`（SSE 信号，负载为空，建连即推 + 25s 心跳）；`domain/produced-events.ts` 信号总线；`server.ts` 注册；集成测试覆盖列表形状与信号语义
+- [x] T140 [R11] 新建 `agent-backend/src/domain/prompt-builder.ts`（自 `run-manager` 抽出）：正文池组装时注入「后台计算结果」段（与工具结果索引并列、措辞一致）；**无产出时该段长度为 0**，正文 MUST NOT 被注入；单测守住
+- [x] T141 [R11] `agent-backend/src/domain/tmp-cleanup.ts`：7 天清理 MUST 覆盖 `临时空间/后台产出/`（二级目录原先被跳过）；单测覆盖"子目录内过期即删、未过期保留"
+- [x] T142 [R11] 门禁：`lint` / `tsc --noEmit` / `test` / `test:coverage` / `test:integration` / `build` 全绿，`src/**` 无超 500 行文件
+
+### R11 增量：后台记录铃铛与已读状态（2026-09-25）
+
+**上游**：`contracts/runtime-api-delta.md` §10.5 ⑤⑥（已读状态与界面形态）+ §10.3 的 `summary` 参数。
+**范围**：产出的**第二个消费场景**——右上角铃铛 + 历史面板 + 未读/已读；对话内工具卡片挂载仍属后续。
+
+- [x] T143 [R11] 契约：§10.5 新增「已读状态」（判定/存储/标记时机/未读数/首次上线）与「界面形态」两节；§10.3 回写参数新增 `summary`（由服务提供、超出按码点截断）；§10.6 新增不变式 7（**已读与产出同生命周期**，MUST NOT 另立独立文件）
+- [x] T144 [R11] `agent-backend/src/domain/produced.ts`：sidecar 增 `read_at`；抽出 `scanProduced`（**无界扫描**——列表有界 50 条，但"标记已读"必须能命中第 51 条）；`markProducedRead`（幂等不刷新时间 / 不存在忽略 / 返回实际条数）
+- [x] T145 [R11] `agent-backend/src/routes/produced.ts`：新增 `POST /api/produced/read`（批量，`maxItems=200`，响应 `{marked}`）；`routes/files-put.ts`：接收 `summary` 并**截断到 200 字符**（按码点，不切开代理对）
+- [x] T146 [R11] `ocr-service`：回写携带一行摘要——`summary_of`（取首个非空行 + 限长）、`with_filename` 增可选 `summary`（保留原 query；空摘要**不写入**该参数）
+- [x] T147 [R11] `frontend`：`api/produced.ts`（列表/标记/SSE 订阅）、`composables/useProduced.ts`（**未读自算**、标记成功后就地生效**不重拉**、订阅幂等且可重入）、装配进 `useAppSession`
+- [x] T148 [R11] `frontend`：`components/chat/ProducedBell.vue`（未读角标 + 面板 + 未读叹号 + 摘要兜底 + **点开才标记已读**并打开正文预览）、`ChatHeader` 增 `actions-extra` 插槽（保持纯展示）、`BaseIcon` 增 `bell`、`utils/produced-display.ts`
+- [x] T149 [R11] 测试：后端集成 +16、单元 +6（含"列表之外的第 51 条"与"只改 sidecar 不动正文"）；前端 3 组共 35 项（格式化纯函数 / store 语义 / 组件角标与已读时机）；OCR +5
+- [x] T150 [R11] 门禁：`agent-backend` lint/build/`416` 通过/覆盖率达标；`frontend` lint/build/`354` 通过/覆盖率达标；`ocr-service` `27` 通过；改动文件行数均 ≤ 500
+- [x] T151 [R11] **修复「点开报参数非法」**：产出在**二级目录**，`files` 预览接口的 `dir` 只认空间顶层目录（已实测 `VALIDATION_FAILED`）→ 新增 `GET /api/produced/raw?job_id=`，按 `job_id` 在产出目录内读取（无界定位 / 固定 `text/plain` + `nosniff` / 超 `previewMaxMb` 413 / 读取算一次访问）；契约 §10.5 新增 ⑦ 记录该教训，`findProduced` 与之配套
+- [x] T152 [R11] **修复「标题是无意义 hash」**：面板改**双视图**（列表 ⇄ 正文 + 返回），不再复用右侧文件预览；`summary` 缺省的兜底改为**人类可读**文案——MUST NOT 回落成 `{会话UUID}_{job_id}` 落盘名（2026-09-25 实测反馈）
+- [x] T153 [R11] 门禁（修复轮）：`agent-backend` `421` 通过、`frontend` `358` 通过；两端 typecheck / lint 全绿；`GET /api/produced/raw` 用真实 `job_id` 端到端验证通过
+
+### R11 阶段 1 实现记录（2026-09-25）
+
+**交付物**（全部落在运行环境侧；平台侧的保存校验/物化与界面表单属后续阶段）：
+
+| 环节 | 落点 | 内容 |
+|---|---|---|
+| 签名 | `infra/file-sign.ts` | 写方向**四段**签名（读方向三段**一字未改**）+ `mintPutUrl`（带 `sid`/`call_id`/`tool` 归属提示参数） |
+| 配置 | `domain/agent-instance.ts`、`types.ts` | `MCP.json` 的 `async_tools` 解析：数组 / 元素非空 / 同服务内去重，非法即 `AgentConfigError`（typo 挡在加载期） |
+| 装配 | `infra/mcp/async-result-url.ts`（新）、`mcp-tool-adapter.ts`、`agent-factory.ts` | 命中声明的工具注入 `result_url`（**对 LLM 隐藏**、覆盖模型填写）；schema 未声明即**装配期告警**且不塞多余字段 |
+| 回写 | `domain/file-access.ts`、`domain/produced.ts`（新）、`routes/files-put.ts`（新） | `POST /api/files/put`：验签 → 目录/文件名白名单 → 受控写入 + sidecar → `202` |
+| 消费 | `domain/produced-events.ts`（新）、`routes/produced.ts`（新） | `GET /api/produced`（有界返回、倒序）、`GET /api/produced/events`（SSE 信号，**负载为空**） |
+| 提示词 | `domain/prompt-builder.ts`（新，自 `run-manager` 抽出） | 「后台计算结果」段：只注入**当前会话**的产出；**无产出时长度为 0**、正文不注入 |
+| 清理 | `domain/tmp-cleanup.ts` | 7 天规则**覆盖产出子目录**（此前整目录被跳过 ⇒ 产出**永不清理**，契约 §10.4 名不副实） |
+
+**规格回写**（原则一：先改文档再改代码）：
+
+1. §10.3 补 `sid`/`call_id`/`tool` 的来源与「**不参与验签**」的判据（初稿只定义了签名覆盖的四个参数，而 sidecar 与落盘前缀都依赖它们）；
+2. §10.3 补 `job_id` 的确定方式（取自**服务提供的** `filename` 主干）；
+3. §10.4 写明清理 MUST 覆盖该二级目录（原实现只扫顶层文件）；
+4. §10.5 ③ 补「**只注入当前会话**的产出」（产出目录是用户级的，不过滤会跨会话污染上下文）；
+5. §10.5 ② 响应项补 `relPath`（前端据此取用，避免硬编码目录常量——原则七）。
+
+**实现期偏差（3 处，均已在代码注释中说明）**：
+
+1. **`routes/files.ts` 的超限拆分**：新增回写端点后该文件 562 行（> 500 硬门禁），故把端点拆到 `routes/files-put.ts`；`registerFileRoutes` 内一行调用，既有端点零改动；
+2. **`run-manager.ts` 的超限拆分**：同样因本次增量越过 500 行，把"prompt 组装"整块抽为纯函数模块 `domain/prompt-builder.ts`（职责本就不同：组装 vs 生命周期管理）；
+3. **`mcp-tool-adapter.ts` 的邻近抽出**：该文件**改动前即已超限**（574 行）；本次把"schema 视图裁剪"函数族（`exposeSchema` / `hideSchemaPaths`，即 `result_url` 与 `uid`/`sid` 隐藏所复用的机制）抽到 `infra/mcp/mcp-schema-view.ts`——属**与本次改动直接相关**的邻近逻辑，而非借机搬迁无关代码（`file_args` 改写等 270 行**未动**）。
+
+**门禁（本地，原则三/八）**：`lint` 0 error、`tsc --noEmit` 通过、单测 **398 passed**、集成 **41 passed**、
+`test:coverage` 通过（新增 7 个模块入 80% 清单：`file-sign` / `async-result-url` / `mcp-schema-view` /
+`produced` / `produced-events` / `prompt-builder` / `routes/produced` / `tmp-cleanup`）、`build` 通过；
+`src/**` 全部 ≤ 500 行（最大 `run-manager.ts` 498 行）。
+
+**遗留（按「不追溯」不立项，登记备查）**：
+
+1. `src/domain/file-access.ts` 实测语句覆盖率 **52.7%**（整个沙箱层的大量分支未测），**未**纳入 80% 清单——纳入即须为该存量模块发起补测专项，为宪章「不追溯」所禁。本次**新增的方法**（`writeProduced` 的越权/合法路径、`read` 的 `touch:false`）已有直接单测；
+2. `tests/unit/mcp-tool-adapter.spec.ts` **906 行**（存量超限，本次零净变化），拆件属独立任务；
+3. **平台侧未做**：`admin-backend` 的 `async_tools` 保存校验与物化、`admin-frontend` 的配置表单。在此之前可手工改 `MCP.json` 验证全链路，但**下一次平台部署会覆盖手工改动**（物化是整体覆盖，权威源在平台）。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 2 —— 平台侧落地
+
+**上游**：`contracts/runtime-api-delta.md` §10.2（配置面）+ `contracts/admin-api.md` §3.2/§3.3。
+**范围**：把 `async_tools` 变成**平台可配**——保存校验、读取收敛、部署物化、管理界面表单。
+**不包含**：运行环境侧（阶段 1 已完成）；`hd-algorithm` 等具体服务的配置值（**由管理员在界面填**，代码不预置任何服务名）。
+**测试执行环境**：宿主机本地（宪章原则三）。
+
+- [x] T143 [R11] 回写契约 `admin-api.md`：§3.2 响应字段表与 §3.3 请求体表新增 `async_tools`；**顺带补登记既有缺口**（两表均漏登 `rules_fields`；§3.3 的 `file_args` 值说明漏了 2026-09-18 的 `url:from=` 派生模式）
+- [x] T144 [R11] `admin-backend/src/domain/mcp/service-config.ts`：`McpServiceConfig.async_tools` + 保存期校验（数组 / 元素非空字符串 / 同服务内去重，违反即 `VALIDATION_FAILED`；**只校验语法、不校验工具清单**）+ 读取期容错收敛（残缺值一律丢弃，不阻断存量文档）；单测覆盖正/异/边界
+- [x] T145 [R11] `admin-backend/src/domain/deploy/materialize.ts`：`async_tools` **非空才写入** `MCP.json` 的 `servers[].async_tools`（空数组不写空壳，对齐 `file_args`/`rules_fields` 口径）；单测覆盖"有值写 / 空值不写"
+- [x] T146 [R11] `admin-backend/tests/integration/deploy.spec.ts`：保存 `async_tools` → **部署** → 目标 `MCP.json` 出现该键且**只含声明的工具名**；再清空保存 → 重新部署 → 该键**消失**（整体覆盖语义，`SC-018`）
+- [x] T147 [R11] `admin-frontend`：`api/types.ts` 补 `async_tools`；新建 `components/mcp/AsyncToolsSelector.vue`（**工具清单多选 + 清单不可得时手填**，与 `confirmation` 同一交互范式；清单外遗留项保留展示不静默丢弃）并接入 `McpCallConfigForm.vue`（拆子组件而非继续堆大表单，原则二）；组件测试覆盖 props / emit / 边界（空清单、遗留项、去重）
+- [x] T148 [R11] 门禁：`admin-backend` 与 `admin-frontend` 各自 `lint` / `typecheck` / `test` / `test:coverage` / `build` / `check:lines` / `check:deps` 全绿；契约四处同步（契约 ↔ 前端类型 ↔ 后端校验 ↔ 测试用例）
+
+### R11 阶段 2 实现记录（2026-09-25）
+
+**交付物**：
+
+| 层 | 落点 | 内容 |
+|---|---|---|
+| 契约 | `contracts/admin-api.md` §3.2 / §3.3 | 两个字段表补 `async_tools`（§3.3 的约束与 `VALIDATION_FAILED` 口径） |
+| 平台后端 | `domain/mcp/service-config.ts` | `async_tools` 保存期校验（数组 / 非空字符串 / **同服务内去重**）+ 读取期容错收敛（脏值丢弃，不阻断存量文档） |
+| 平台后端 | `domain/deploy/materialize.ts` | **非空才写** `MCP.json` 的 `servers[].async_tools`（空数组不留空壳，整体覆盖语义） |
+| 管理界面 | `api/types.ts`、`components/mcp/AsyncToolsSelector.vue`（新）、`McpCallConfigForm.vue` | 「后台计算（异步工具）」区块：**清单多选 + 清单不可得时手填**；清单外遗留项保留展示 |
+
+**界面交互口径**（与 HITL 的「需确认的工具」同一范式，降低管理员学习成本）：
+
+- 有工具清单 → 复选框多选；
+- **清单不可得（服务未启动 / 探测失败）→ 回退手填**，每行一个工具名——与保存期"只校验语法、不校验工具清单"同一取向：**服务抖动不该让配置改不了**；
+- 已保存但当前清单没有的工具 → **保留展示**（可能是清单截断或服务改版），不静默丢弃；
+- 手填内容在提交前**去空白 / 丢空行 / 去重**，避免"填了就被服务端拒"。
+
+**规格回写**（原则一；含两处**既有缺口**的顺带修正，已在契约中登记）：
+
+1. §3.2 / §3.3 补 `async_tools`；
+2. 两表此前**均漏登 `rules_fields`**（2026-09-19 新增字段时未同步契约）——本次补齐；
+3. §3.3 的 `file_args` 值说明漏了 2026-09-18 的 `url:from=` 派生模式——一并补正。
+
+**关于具体服务**：代码**不预置任何服务名**（`async_tools` 的值完全由管理员在界面勾选/填写），因此**未触碰 `hd-algorithm`、也未触碰 `ocr`/`jev` 的任何现有配置**。下列服务若需异步，由管理员按需勾选：
+`ocr`（`http://127.0.0.1:8000/mcp`）、`jev`（`http://127.0.0.1:8001/mcp`）——**前提是对方服务的工具 schema 里声明了 `result_url` 参数**，否则运行环境会在装配期告警（`mcp.async.result_url.missing`）且不注入。
+
+**门禁（本地，原则三/八）**：
+
+| 子项目 | lint | typecheck | test | coverage | build | check:lines | check:deps |
+|---|---|---|---|---|---|---|---|
+| `admin-backend` | ✅ 0 error | ✅ | ✅ **481** | ✅ 无违规 | ✅ | ✅ 81 文件 | ✅ |
+| `admin-frontend` | ✅ 0 error | ✅ | ✅ **371** | ✅ 无违规 | ✅ | ✅ 100 文件 | ✅ |
+
+> **环境限制（非代码问题，登记备查）**：本机 `safe-delete` 垫片会拦截 `fs.rm`，而 vitest 的 V8 coverage 在启动时会 `trash` 报告目录（`coverage/`），导致 `npm run test:coverage` 直接抛 `Unhandled Error` 而**不跑测试**。绕行方式：用**全新目录** + 禁用清理——
+> `npx vitest run --coverage --coverage.clean=false --coverage.reportsDirectory=coverage-run-9`。
+> 上表覆盖率结论即以此方式取得（35 文件 / 370 用例全绿、无 `does not meet`）。**这是本机工具链的已知干扰，不影响 CI/Linux 侧行为**，但建议后续在 `quickstart.md` 登记该绕行命令。
+
+---
+
+## 增量任务（2026-09-25）：R11 阶段 3 —— 服务侧（**仅 `ocr-service`**）
+
+**范围**：**只改 `ocr-service` 的 `ocr_image` 一个工具**。`jev-service` 与第三方 MCP 服务（含 `hd-algorithm`）**一律不动**——异步是**按工具声明**的能力，未声明者行为零变化。
+**上游**：`contracts/runtime-api-delta.md` §10.7（本次新增）。
+
+- [x] T149 [R11] 回写契约：新增 §10.7「服务侧契约」（`ocr_image` 新增**可选** `result_url`；`result_url` 即开关：缺省=同步、有值=异步；`job_id` 与回写形状；**回写地址 MUST 过 host 白名单**，否则 SSRF）
+- [x] T150 [R11] `ocr-service/ocr_core.py`：受理与回写的**纯逻辑**（`make_job_id` / `result_filename` / `with_filename`（保留原有 query）/ `accepted_payload` / `post_result`），**不依赖模型** ⇒ 宿主机本地可单测（原则三）
+- [x] T151 [R11] `ocr-service/server.py`：`ocr_image` 新增 `result_url`；有值时**立即返回受理**（含 `job_id`）+ 后台线程识别并回写；**缺省时同步路径一字不改**；回写地址未过白名单时**降级为同步并在文案里说明**（不静默、也不 SSRF）
+- [x] T152 [R11] `ocr-service/tests/test_ocr_core.py` +10 例：任务号格式与同毫秒唯一、回写 URL **保留原有 query**（含非 ASCII 参数）、受理响应含 `job_id` 与"无需重复提交"、回写 body/编码/**非 2xx**/**连接失败**
+- [x] T153 [R11] 门禁：`python -m pytest -q tests` → **22 passed**；三个文件 224 / 139 / 105 行，均 ≤ 500
+
+### R11 阶段 3 实现记录（2026-09-25）
+
+**交付物**：
+
+| 文件 | 改动 |
+|---|---|
+| `ocr-service/server.py` | `ocr_image(image, result_url=None)`：新增**一个可选参数**即可切换同步/异步；抽出 `_recognize`（两条路径共用）与 `_recognize_and_post`（后台线程体） |
+| `ocr-service/ocr_core.py` | 新增 5 个纯函数（任务号 / 结果文件名 / 回写 URL 拼装 / 受理响应 / POST 回写）+ `OCR_UPLOAD_TIMEOUT_S` 环境变量 |
+| `ocr-service/tests/test_ocr_core.py` | +10 例（原 12 → **22**） |
+
+**两条路径**（`result_url` 即开关，服务侧不需要第二处配置）：
+
+| `result_url` | 行为 |
+|---|---|
+| 缺省 / 空 | **同步**（**既有行为一字未改**）：校验 → 下载 → 识别 → 返回文本 |
+| 有值且过白名单 | **异步**：立即返回 `{"job_id":…,"status":"accepted","message":…}`；后台识别完成后 `POST` 结果到 `result_url&filename={job_id}.txt` |
+
+**安全（这条必须记住）**：`result_url` 是**入参**——模型理论上能看到并伪造它（虽然平台在声明为异步时会把它从可见 schema 里删掉，但不能依赖单侧防线）。因此 `ocr_image` 收到它时**先过与回源下载同一份 host 白名单**；不过则**忽略并降级为同步**，在返回文案里说明"回写地址不可用，已改为同步返回"。既不 SSRF，也不静默（否则调用方以为异步已受理，永远等不到结果）。
+
+**配置：无需新增任何配置**。回写地址由运行环境用既有 `PUBLIC_BASE_URL` 铸出（服务侧只校验协议为 http/https，**2026-09-28 起不再有 host 白名单**）——前提与"回源下载"完全相同，**没有第二套配置需要维护**。
+
+**启用步骤**（三件事，都无副作用）：
+
+1. **重建 ocr 容器**：`docker compose up -d --build ocr`（服务侧代码变了）；
+2. **平台界面**：`ocr` 服务详情 →「发起测试」（让平台重新探测到 `result_url` 参数）→「调用配置」→「后台计算（异步工具）」勾选 `ocr_image` → 保存调用配置；
+3. **部署**：对相关用户部署一次（`async_tools` 随 `MCP.json` 下发）。
+
+**未做**：`jev-service`、`hd-algorithm` 与任何其他 MCP 服务**一个字节未改**（符合"只需要 ocr 做异步"）。如果将来 jev 也要异步，改法与本阶段完全相同（服务侧加 `result_url` 参数 + 回写），不需要动运行环境与平台任何一行代码。
+
+---
+
+### 缺陷修复（2026-09-26）：保存「异步工具」后勾选被清空
+
+**症状**（用户实测）：MCP 服务 `ocr` →「调用配置」→ 勾选「后台计算（异步工具）」→ 保存 → **勾选内容消失**。
+
+**根因**：界面保存成功后会 `loadDetail()` 用**详情接口**的响应覆盖表单，而**详情端点的字段组装漏登记了新字段**——
+`domain/mcp/service-list.ts` 的 `McpServiceDetailView` 与详情返回**都没有 `async_tools`**。链路是：
+保存 ✅ → 重载详情 → 响应里没有 `async_tools` → 表单 `...(service.async_tools ?? [])` → **勾选变空**。
+
+**同处还有一个既有缺口**：`rules_fields`（2026-09-19 加的字段）在同一个 View 与同一个详情返回里**也一直漏登**——
+也就是说 HITL 的「算法规则参数设置」同样是"保存即清空"，只是一直没人报。两个字段同批修。
+
+**为什么测试没拦住**：阶段 2 的用例覆盖了「保存校验」与「物化进 `MCP.json`」，**没有覆盖「保存 → 详情回显」这条界面真实路径**。
+字段漏登只在 **GET 详情**上表现出来，而那一步此前没有任何断言。
+
+**修复（3 处代码 + 1 条测试）**：
+
+| 文件 | 改动 |
+|---|---|
+| `domain/mcp/service-list.ts` | `McpServiceDetailView` 补 `rules_fields` / `async_tools`；详情组装补两行（附注释说明"漏登即保存即清空"） |
+| `routes/mcp.ts` | `PUT` 响应补 `rules_fields` / `async_tools`（契约 §3.3 要求响应是**完整**调用配置） |
+| `admin-frontend/src/api/types.ts` | `McpServiceConfigSaved` 与后端响应对齐：补三字段；**删除**已废弃的 `writable` / `permission_scope`（2026-09-15 已从契约移除） |
+| `tests/integration/mcp.spec.ts` | +1 例：**保存 → GET 详情 → 断言两字段回显**（守住这条路径） |
+
+**教训（已写进代码注释）**：新增一个"调用配置字段"的**登记点是 4 处**——
+① 保存期校验 ② 读取期收敛 **③ 详情回显** ④ 物化。前两处 + 物化在本特性做了，**第三处漏了**；
+后续再加字段时按这 4 处逐一核对（本文件 §3.2 的响应字段表也是一处，属契约侧）。
+
+**门禁（修复后）**：`admin-backend` lint 0 / `tsc` ✅ / **482 passed** / `check:lines` ✅；
+`admin-frontend` `typecheck` ✅ / **371 passed** / `check:lines` ✅。
+
+**生效需要**：**重启 `admin-backend`**（详情端点代码变了）。`admin-frontend` 的改动只在类型层（编译期），但为拿到最新前端类型建议一并重建。
+
+---
+
+## 增量任务（2026-09-27）：MCP 服务改为平台内**全人工配置**
+
+**需求变更（产品决定）**：MCP 服务不再从容器编排声明派生、不再读 Docker 容器运行态，
+连接地址不再按运行形态分形态声明，改为**管理员在平台内新建/维护 + 单一连接地址**。
+
+**废止 / 重定义的需求**：
+
+| 需求 | 处置 |
+|---|---|
+| `FR-043` | **重定义**：清单来源＝平台侧配置（唯一权威源）；卡片字段＝名称/用途/传输方式/连接地址；新增"新建/删除"；去掉容器四态 |
+| `FR-046`（启停）、`FR-048`（运行日志） | **废止**（平台不再读容器运行态） |
+| `FR-051` | **迁移**：从"关闭服务前提示引用"改为"**删除服务**前提示引用" |
+| `FR-052` | **重定义**：从"与编排声明比对"改为"引用的服务已在平台删除 → 引用失效" |
+| `FR-056`、`FR-057` | **废止**（运行形态概念整体下架；`endpoints` 收敛为单一 `url`） |
+| `SC-010`、`SC-024` | **重定义 / 废止**（详见 `spec.md`） |
+
+**新增接口**：`POST /api/admin/mcp/services`（新建）、`DELETE /api/admin/mcp/services/{name}`（删除）；
+**移除接口**：`/start`、`/stop`、`/logs`，以及 `/platform/settings`、`/platform/runtime-forms`。
+**新增错误码**：`ADM_MCP_SERVICE_EXISTS`；**移除**：启停白名单类、运行形态缺地址类、Docker 不可达类、编排不可读类（共 4 个；`§0.4` 总表 24 → 21 个）。
+
+**被本增量取代（superseded）的原任务条目**：
+
+| 原任务 | 说明 |
+|---|---|
+| `T001` | 澄清项中"容器状态 `FR-043`、日志 `FR-048`"的只读消费表述已收窄（`spec.md` FR-005／SC-017 同步修订） |
+| `T012` | `docker-compose.yml` 的 `admin-backend` 挂载由四个减为两个（去掉 `docker-compose.yml:ro` 与 `docker.sock`） |
+| `T014`、`T015` | `config.ts` 去掉 `COMPOSE_FILE_PATH`／`DOCKER_SOCKET_PATH`；`context.ts` 去掉 `compose`／`docker`／`settings` |
+| `T020`、`T022`、`T023` | `infra/compose-reader.ts`、`tests/unit/compose-reader.spec.ts`、`domain/platform-settings.ts` **已删除** |
+| `T061` | `service-config.ts` 的 `endpoints` → 单一 `url`；新增 `create`／`remove`；新增 `service-config-create.spec.ts` |
+| `T064` | `precheck.ts` 五类校验 → **四类**（去掉 `runtime_form`） |
+| `T065` | `materialize.ts` 的 `url` 直接取 `config.url`（去掉运行形态取值） |
+| `T070`、`T079` | 部署集成测试去掉"双形态对比 `SC-024`"；`RuntimeFormSwitch.vue` 及其测试**已删除** |
+| `T104`、`T105` | `service-list.ts` 清单来源改平台配置；`operations.ts` 只留测试与统计 |
+| `T107`、`T108`、`T110`、`T111`、`T112`、`T115`、`T116` | 测试与组件同步：`mcp.spec.ts`（新建/重名/删除/引用失效）、`mcp-service-list.spec.ts`、`useMcpServices.spec.ts`、`McpCardList.spec.ts`、`McpCallConfigForm.spec.ts`；`McpLogViewer.vue/.spec.ts` **已删除** |
+| `tests/unit/docker-host*.spec.ts` | **已删除**（源码模块下线） |
+
+**代码层改动清单**：
+
+- 后端：`domain/mcp/{service-config,service-list,operations}.ts`、`routes/mcp.ts`、`routes/platform.ts`、`routes/deploy.ts`（清单响应加 `revision`）、`domain/{error-codes,config,context,server}.ts`、`domain/config-center/{unified-catalog,agent-design,references}.ts`、`domain/deploy/{precheck,materialize,deployer,history}.ts`、`infra/mcp-client.ts`；**删除** `infra/docker-host.ts`、`infra/compose-reader.ts`、`domain/platform-settings.ts`；`package.json` 移除 `yaml`。
+- 前端：`api/{mcp,platform,deploy,types}.ts`、`composables/{useMcpServices,useDeploy}.ts`、`constants/{error-messages,mcp}.ts`、`components/mcp/{McpArea,McpCardList,McpServiceDetail,McpCallConfigForm}.vue`、`components/deploy/{DeployPanel,DeployHistoryList}.vue`、`components/agents/McpSelector.vue`；**删除** `components/mcp/McpLogViewer.vue`、`components/deploy/RuntimeFormSwitch.vue` 及各自 spec。
+- 部署：`docker-compose.yml`（`admin-backend` 去掉两个挂载）；`admin-backend/.env*`（去掉两个变量）。
+- 文档：`contracts/admin-api.md`（§0.2/§0.4/§0.5、§1 重写、§3 重写并新增 §3.3.1/§3.3.2、§6.5~§6.8、§7.1、§8）、`data-model.md`（§1.1/§1.2、§3、§7.2/§7.3、§8、§9）、`spec.md`（FR/SC/实体/假设）、`plan.md`、`research.md`（D2/D3/D6）、`quickstart.md`、本文件、`README.md`。
+
+**验证（门禁全绿）**：
+
+| 项 | 结果 |
+|---|---|
+| `admin-backend` `tsc --noEmit` / `lint` | ✅ |
+| `admin-backend` 测试 | **420 passed**（29 文件） |
+| `admin-backend` `check:lines` / `check:deps` / `check:contract` | ✅ / ✅ / ✅（契约 §0.4 登记 21 个码，四处一致） |
+| `admin-frontend` `vue-tsc` / `lint` / `check:lines` / `check:deps` | ✅ / ✅ / ✅ / ✅（97 文件 ≤500 行） |
+| `admin-frontend` 测试 | **352 passed**（33 文件） |
+
+**生效需要**：重启 `admin-backend` 与重新构建 `admin-frontend`；`docker compose up -d admin-backend`（挂载变了，必须**重建**容器而非 `restart`）。

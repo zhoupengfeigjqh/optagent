@@ -23,28 +23,37 @@ export interface BuiltinToolProjection {
   writable: boolean;
 }
 
-/** `GET /api/mcp-call-stats` 的一项 */
+/** `GET /api/mcp-call-stats` 的服务级汇总项（平台卡片用：最近一年调用次数） */
 export interface McpCallStatItem {
   name: string;
   calls_total: number;
   calls_ok: number;
   calls_failed: number;
   last_called_at: string | null;
+}
+
+/**
+ * 按「**服务 × 工具 × 用户**」分组的统计行（2026-09-23，平台统计表的一行）。
+ *
+ * `tool_name` 是 MCP 服务自己的工具名（不含 `{server}__` 前缀）；
+ * `tool_name` / `user_id` 为 `null` 表示升级前的历史事件未记录该维度。
+ */
+export interface McpCallGroupItem {
+  service: string;
+  tool_name: string | null;
+  user_id: string | null;
+  calls_total: number;
+  calls_ok: number;
+  calls_failed: number;
+  last_called_at: string | null;
   /** 时间窗聚合（24h/7天/30天/1年），由运行环境的事件明细聚合得出 */
   windows?: Record<string, { ok: number; failed: number; total: number }>;
-  /** 按用户明细（2026-09-16 十四次调整）：`user_id` 为 null 的是升级前的历史事件（未记录归属） */
-  users?: Array<{
-    user_id: string | null;
-    calls_total: number;
-    calls_ok: number;
-    calls_failed: number;
-    last_called_at: string | null;
-  }>;
 }
 
 export interface McpCallStatsResult {
   stats_available: boolean;
   items: McpCallStatItem[];
+  groups: McpCallGroupItem[];
 }
 
 export interface RuntimeClientOptions {
@@ -85,7 +94,12 @@ export class RuntimeClient {
    */
   async mcpCallStats(): Promise<McpCallStatsResult> {
     const body = await this.getJson<McpCallStatsResult>('/api/mcp-call-stats');
-    if (!body || typeof body.stats_available !== 'boolean' || !Array.isArray(body.items)) {
+    if (
+      !body ||
+      typeof body.stats_available !== 'boolean' ||
+      !Array.isArray(body.items) ||
+      !Array.isArray(body.groups)
+    ) {
       throw new ApiError(
         ERROR_CODES.ADM_RUNTIME_UNREACHABLE,
         '运行环境返回的调用统计结构不合法',

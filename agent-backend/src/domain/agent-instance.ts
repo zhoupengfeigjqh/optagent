@@ -22,6 +22,7 @@ import {
   type FileArgMode,
 } from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport } from './mcp-transport.js';
+import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.js';
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
 /**
@@ -123,6 +124,7 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.file_args !== undefined) cfg.fileArgs = parseFileArgs(s.file_args, bad);
     if (s.confirmation !== undefined) cfg.confirmation = parseConfirmation(s.confirmation, bad);
     if (s.rules_fields !== undefined) cfg.rulesFields = parseRulesFields(s.rules_fields, bad);
+    if (s.async_tools !== undefined) cfg.asyncTools = parseAsyncTools(s.async_tools, bad);
     return cfg;
   });
 }
@@ -146,8 +148,12 @@ function parseConfirmation(
 }
 
 /**
- * 解析 rules_fields：`{ 工具名: 字段名 }`，非法结构（非对象、值非非空字符串）
- * 即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
+ * 解析 rules_fields：`{ 工具名: 字段名或对象路径 }`，非法结构（非对象、值不是合法
+ * 字段路径）即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
+ *
+ * 取值支持对象嵌套（如 `input.targetPriorities`，2026-09-22）：规则数组常嵌在入参
+ * 对象内部，旧实现只接受顶层名字，这类声明会**静默失效**。语法与平台保存期
+ * 同一判据（`rules-field-path.ts`，两侧同构）。
  */
 function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -155,12 +161,39 @@ function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<str
   }
   const out: Record<string, string> = {};
   for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof field !== 'string' || field.trim() === '') {
-      throw bad(`rules_fields.${tool} 须为非空字符串（字段名）`);
+    if (parseRulesFieldPath(field) === null) {
+      throw bad(
+        `rules_fields.${tool} 须为${RULES_FIELD_PATH_HINT}，当前：${JSON.stringify(field)}`,
+      );
     }
-    out[tool] = field.trim();
+    out[tool] = (field as string).trim();
   }
   return out;
+}
+
+/**
+ * 解析 async_tools（R11 异步工具声明）：元素为**该服务自己的原始工具名**。
+ *
+ * 判据与平台保存期**同一口径**（数组 / 元素非空字符串 / 同服务内去重）——
+ * 两边不一致会造成"平台保存得进去、运行环境加载不了"，或反过来。
+ * 非法即配置错误：把 typo 挡在加载期，避免"以为开了异步、实际没开"这类静默失效。
+ */
+function parseAsyncTools(raw: unknown, bad: (why: string) => Error): string[] {
+  if (!Array.isArray(raw)) {
+    throw bad(`async_tools 须为字符串数组（工具名清单），当前：${JSON.stringify(raw)}`);
+  }
+  const names: string[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw bad(`async_tools 的元素须为非空字符串，当前：${JSON.stringify(item)}`);
+    }
+    const name = item.trim();
+    if (names.includes(name)) {
+      throw bad(`async_tools 存在重复的工具名：${name}`);
+    }
+    names.push(name);
+  }
+  return names;
 }
 
 /**

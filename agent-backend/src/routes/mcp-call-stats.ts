@@ -1,7 +1,9 @@
 /**
  * MCP 调用统计端点（`plan.md` R4，`contracts/runtime-api-delta.md` §4）。
  *
- * `GET /api/mcp-call-stats` —— 向管理平台提供**按服务名**的 MCP 工具调用统计。
+ * `GET /api/mcp-call-stats` —— 向管理平台提供 MCP 工具调用统计：
+ * - `items`：服务级汇总（平台卡片）；
+ * - `groups`：按「**服务 × 工具 × 用户**」分组的行，含四个时间窗（平台统计表，2026-09-23）。
  *
  * 口径为 **MCP 工具调用次数**（非 HTTP 请求数），详见 `UsageDb.recordMcpCall`。
  * **只读端点**，无副作用、无请求体、无鉴权（沿用运行环境既有口径）。
@@ -13,10 +15,11 @@ import type { AppContext } from '../context.js';
 export function registerMcpCallStatsRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.get('/api/mcp-call-stats', async () => {
     try {
-      return { stats_available: true, items: ctx.usage.mcpCallStats() };
+      const stats = ctx.usage.mcpCallStats();
+      return { stats_available: true, items: stats.items, groups: stats.groups };
     } catch {
       // 统计存储不可读：明确标注为"不可用"，让平台显示"未知"而不是 0
-      return { stats_available: false, items: [] };
+      return { stats_available: false, items: [], groups: [] };
     }
   });
 }

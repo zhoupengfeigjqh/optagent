@@ -141,4 +141,36 @@ describe('wrapToolWithInteraction', () => {
     await wrapToolWithInteraction(withRules, unsetSink).execute('call_r3', {});
     expect(unsetSink.requests[0]!.rulesField).toBeUndefined();
   });
+
+  it('规则字段路径：嵌套路径走得通时原样进快照；走不通一律不传', async () => {
+    // 真实形态：规则数组嵌在入参对象里（input.targetPriorities）
+    const nested: AgentTool = {
+      ...makeTool(),
+      name: 'hd-algorithm__hd_scheduling_submit',
+      parameters: {
+        type: 'object',
+        properties: {
+          input: {
+            type: 'object',
+            properties: {
+              targetPriorities: { type: 'array', items: { type: 'object' } },
+              solvingTime: { type: 'integer' },
+            },
+          },
+        },
+        required: ['input'],
+      },
+    } as never;
+
+    const hitSink = makeSink({ kind: 'reject' });
+    await wrapToolWithInteraction(nested, hitSink, 'input.targetPriorities').execute('call_n1', {});
+    expect(hitSink.requests[0]!.rulesField).toBe('input.targetPriorities');
+
+    // 末段不存在 / 只有顶层名字 / 穿过数组段 / 中间层不是对象：都不下发
+    for (const path of ['input.missing', 'targetPriorities', 'input.targetPriorities.x']) {
+      const missSink = makeSink({ kind: 'reject' });
+      await wrapToolWithInteraction(nested, missSink, path).execute('call_n2', {});
+      expect(missSink.requests[0]!.rulesField).toBeUndefined();
+    }
+  });
 });

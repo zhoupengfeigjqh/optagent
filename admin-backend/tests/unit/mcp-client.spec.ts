@@ -85,14 +85,15 @@ describe('McpClientService.listTools', () => {
     expect((caught as ApiError).message).toContain('连接被拒绝');
   });
 
-  it('连接目标不合法：http 缺 url → ADM_RUNTIME_FORM_NOT_CONFIGURED', async () => {
+  it('连接目标不合法：http 缺 url → VALIDATION_FAILED（配置问题，非"服务不可用"）', async () => {
     let caught: unknown;
     try {
       await fake().listTools('ocr', { transport: 'http', url: null });
     } catch (err) {
       caught = err;
     }
-    expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_RUNTIME_FORM_NOT_CONFIGURED);
+    expect((caught as ApiError).code).toBe(ERROR_CODES.VALIDATION_FAILED);
+    expect((caught as ApiError).message).toContain('连接地址');
   });
 
   it('连接目标不合法：stdio 缺 command → VALIDATION_FAILED', async () => {
@@ -160,7 +161,7 @@ describe('McpClientService.test —— 连通性 + 能力验证（FR-047）', ()
     expect(report.capability.error_code).toBe('MCP_PROTOCOL_ERROR');
   });
 
-  it('配置不合法（缺目标形态地址）→ 两步都失败并给出配置原因，不发起连接', async () => {
+  it('配置不合法（缺连接地址）→ 两步都失败并给出配置原因，不发起连接', async () => {
     let created = 0;
     const service = fake({}, () => {
       created += 1;
@@ -168,7 +169,7 @@ describe('McpClientService.test —— 连通性 + 能力验证（FR-047）', ()
     const report = await service.test('ocr', { transport: 'http', url: null });
 
     expect(report.ok).toBe(false);
-    expect(report.connectivity.error_code).toBe(ERROR_CODES.ADM_RUNTIME_FORM_NOT_CONFIGURED);
+    expect(report.connectivity.error_code).toBe(ERROR_CODES.VALIDATION_FAILED);
     expect(created).toBe(0);
   });
 

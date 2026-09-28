@@ -1,18 +1,177 @@
-<!--
- * @Author: Nose陈建
- * @LastEditTime: 2026-09-21 17:03:34
--->
-<template>
-  <a-config-provider :locale="locale">
-    <router-view />
-  </a-config-provider>
-</template>
-
 <script setup lang="ts">
-import { ref } from 'vue';
+/**
+ * 应用根组件（T033 / T042 / T062）
+ *
+ * 装配全局会话上下文（`useAppSession` 内部 `provide`）并渲染三栏骨架：
+ * 左栏历史会话（US5）、中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8）——
+ * 文件空间列表与文件内容在该面板内互换，二者不并存，故只有一个右栏组件。
+ */
+import { computed, onMounted, ref, watch } from 'vue'
+
+import type { Conversation, FileReference } from './api/types'
+import ChatPanel from './components/chat/ChatPanel.vue'
+import ConfirmDialog from './components/common/ConfirmDialog.vue'
+import ToastHost from './components/common/ToastHost.vue'
+import AppShell from './components/layout/AppShell.vue'
+import HistorySidebar from './components/layout/HistorySidebar.vue'
+import WorkspacePanel from './components/layout/WorkspacePanel.vue'
+import { useAppSession } from './composables/useAppSession'
+import { RUN_PHASE } from './constants/events'
 // 引入 Ant Design Vue 的中文语言包
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
 
 // 定义 locale 变量
 const locale = ref(zhCN);
+
+const session = useAppSession()
+
+/** 有历史消息或本轮已开始 → 展开为完整对话布局（FR-003 / FR-004）。 */
+const expanded = computed(
+  () =>
+    session.threads.messages.value.length > 0 || session.chat.phase.value !== RUN_PHASE.IDLE,
+)
+
+/** 有进行中的会话时禁止切换历史项（FR-036）。 */
+const busy = computed(
+  () => session.chat.phase.value === RUN_PHASE.STREAMING || session.threads.running.value,
+)
+
+// 首屏拉取历史会话：一次性拉全量，10 / 100 条切在前端完成（V-09）
+onMounted(async () => {
+  await session.threads.loadList()
+  await restoreThread()
+})
+
+/**
+ * 刷新恢复（002 特性）：首屏按 URL / 本地存储选中的会话自动加载历史。
+ *
+ * 为什么必须做：工具记录落盘后，"刷新后能看到工具卡片"还差最后一环——
+ * 不自动恢复会话的话，中栏仍是空态，用户得手动点左侧历史才看得到。
+ *
+ * 降级：目标会话已被删除（或加载失败）→ **静默**回空态并清除痕迹，不报错。
+ */
+async function restoreThread(): Promise<void> {
+  const target = session.initialThreadId
+  if (!target) {
+    return
+  }
+  const exists = session.threads.list.value.some((item) => item.thread_id === target)
+  if (!exists) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+    return
+  }
+  await session.threads.select(target)
+  if (session.threads.error.value !== null) {
+    session.threads.clearActive()
+    session.rememberActiveThread(null)
+  }
+}
+
+// 会话切换即记住（地址栏 + 本地存储双写），供下次刷新恢复
+watch(
+  () => session.threads.activeId.value,
+  (threadId) => session.rememberActiveThread(threadId),
+)
+
+function onSelectThread(threadId: string): void {
+  void session.threads.select(threadId)
+}
+
+function onCreateThread(): void {
+  void session.threads.create()
+}
+
+function onShowMore(): void {
+  session.threads.showMore()
+}
+
+/* ---------- 删除历史会话（二次确认 + 切相邻会话） ---------- */
+
+/** 待确认删除的会话；`null` 表示无待确认项 */
+const pendingRemove = ref<Conversation | null>(null)
+
+/** 二次确认文案：进行中的会话额外提示"会中断本轮"（`data-model.md` §自检规则） */
+const removeMessage = computed(() => {
+  const target = pendingRemove.value
+  if (!target) return ''
+  const interrupting =
+    session.threads.activeId.value === target.thread_id &&
+    (session.chat.phase.value === RUN_PHASE.STREAMING || session.threads.running.value)
+  const warn = interrupting ? '该会话正在生成中，删除会中断本轮回复。\n' : ''
+  return `${warn}删除后该会话的消息与临时文件都会被清理，且不可恢复。\n确定要删除「${target.title ?? '新会话'}」吗？`
+})
+
+/** 点击行内删除入口：先弹确认，不直接发请求 */
+function onRequestRemove(threadId: string): void {
+  pendingRemove.value =
+    session.threads.list.value.find((item) => item.thread_id === threadId) ?? null
+}
+
+async function onConfirmRemove(): Promise<void> {
+  const target = pendingRemove.value
+  if (!target) return
+
+  // 契约 §3.5：删除成功后「切换到相邻会话或空态」——优先下一条，其次上一条。
+  // 邻居必须在 remove 之前算好：remove 走乐观更新，会立刻把目标项移出列表。
+  const list = session.threads.list.value
+  const index = list.findIndex((item) => item.thread_id === target.thread_id)
+  const neighbour = list[index + 1] ?? list[index - 1] ?? null
+  const wasActive = session.threads.activeId.value === target.thread_id
+
+  // 先关弹窗：删除本身是乐观更新，界面立即响应，不再等后面的请求回来
+  pendingRemove.value = null
+
+  const removed = await session.threads.remove(target.thread_id)
+  if (!removed) return // 失败已回滚并弹 toast，不切走当前会话
+
+  if (wasActive && neighbour && neighbour.thread_id !== target.thread_id) {
+    await session.threads.select(neighbour.thread_id)
+  }
+}
+
+/* ---------- 右栏工作空间面板（US7 / US8） ---------- */
+
+/** 面板展开即占位右侧 1/3（FR-001）；收起时中栏恢复满宽（FR-002）。 */
+const panelOpen = computed(() => session.preview.open.value)
+
+function onClosePanel(): void {
+  session.preview.close()
+}
+
+/** 内容态 → 列表态（面板保持展开） */
+function onBackToList(): void {
+  session.preview.backToList()
+}
+
+function onToggleSpace(name: string): void {
+  session.workspace.toggleSpace(name)
+}
+
+function onToggleDir(dir: string): void {
+  session.workspace.toggleDir(dir)
+}
+
+/** 面板内点文件名、消息内点文件引用走**同一入口**：都进内容态（FR-046） */
+function onOpenFile(reference: FileReference): void {
+  void session.preview.openFile(reference)
+}
+
+function onPanelDownload(reference: FileReference): void {
+  session.preview.download(reference)
+}
+
+/** 删除文件：成功后若正看着它则收敛回列表态；失败已由 toast 提示，界面保持现状 */
+async function onRemoveFile(reference: FileReference): Promise<void> {
+  const removed = await session.workspace.remove(reference)
+  if (removed) {
+    session.preview.onFileRemoved(reference)
+  }
+}
 </script>
+
+<template>
+  <a-config-provider :locale="locale">
+    <router-view />
+  </a-config-provider>
+</template>

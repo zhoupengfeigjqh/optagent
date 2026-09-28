@@ -62,7 +62,7 @@ export function detectAnomalies(design: AgentRefSource, index: ReferenceIndex): 
       out.push({
         category: 'mcp_service',
         target_name: service,
-        detail: `引用的 MCP 服务 ${service} 不在容器编排声明中（可能已移除或改名）`,
+        detail: `引用的 MCP 服务 ${service} 不在平台的 MCP 服务列表中（可能已删除或改名）`,
       });
     }
   }

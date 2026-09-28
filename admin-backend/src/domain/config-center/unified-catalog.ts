@@ -5,7 +5,7 @@
  * | 引用类型 | 来源 | 性质 |
  * |---|---|---|
  * | 内置工具 | 运行环境 `GET /api/builtin-tools` | 只读投影（`FR-011`） |
- * | MCP 服务 | 容器编排声明 | 只读投影（`FR-043`） |
+ * | MCP 服务 | 平台侧 MCP 调用配置 | 平台设计态（`FR-043`；2026-09-27 起不再取自编排声明） |
  * | SKILL | 共享技能库索引 | 平台设计态（`FR-036`） |
  *
  * 本模块把三者收拢为一个 `ReferenceIndex` 快照，供**保存校验、异常判定、
@@ -14,14 +14,15 @@
 import type { Logger } from 'pino';
 import { ERROR_CODES } from '../error-codes.js';
 import { ApiError } from '../api-error.js';
-import type { ComposeReader } from '../../infra/compose-reader.js';
+import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { RuntimeClient, BuiltinToolProjection } from '../../infra/runtime-client.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import type { ReferenceIndex } from './reference-index.js';
 
 export interface UnifiedCatalogDeps {
   runtime: RuntimeClient;
-  compose: ComposeReader;
+  /** MCP 服务配置（平台唯一权威源；2026-09-27 起取代编排声明） */
+  mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
   logger?: Logger;
 }
@@ -44,9 +45,9 @@ export class UnifiedCatalog {
 
   constructor(private readonly deps: UnifiedCatalogDeps) {}
 
-  /** MCP 服务名（编排声明的唯一来源，`FR-043`） */
+  /** MCP 服务名（平台侧调用配置的唯一来源，`FR-043`） */
   mcpServiceNames(): string[] {
-    return this.deps.compose.listMcpServices().map((s) => s.name);
+    return this.deps.mcpConfigs.listAll().map((config) => config.name);
   }
 
   /** SKILL 名（共享技能库） */

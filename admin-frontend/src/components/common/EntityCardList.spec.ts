@@ -68,10 +68,10 @@ describe('EntityCardList', () => {
     const wrapper = mountList({
       items: [],
       total: 0,
-      error: { code: 'ADM_COMPOSE_FILE_UNREADABLE', message: 'x' },
+      error: { code: 'ADM_MCP_SERVICE_EXISTS', message: 'x' },
     })
-    expect(wrapper.text()).toContain('无法读取容器编排声明')
-    expect(wrapper.text()).toContain('ADM_COMPOSE_FILE_UNREADABLE')
+    expect(wrapper.text()).toContain('MCP 服务名称已存在')
+    expect(wrapper.text()).toContain('ADM_MCP_SERVICE_EXISTS')
   })
 
   it('空结果：显示空态而非失败', () => {

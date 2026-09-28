@@ -2,25 +2,28 @@
 /**
  * 消息气泡（T039）
  *
- * 装配 `MessageContent` / `ThinkingBlock` / `ToolCallBadge`，流式期间渲染 `TypingIndicator`。
+ * 装配 `MessageContent` / `ThinkingBlock` / `ToolCallList`，流式期间渲染 `TypingIndicator`。
  *
- * **思考与工具经 `streaming` prop 传入**：`Message` 类型从契约层面不含这两类字段（V-04），
+ * **思考经 `streaming` prop 传入**：`Message` 类型从契约层面不含思考内容（V-04），
  * 因此本轮瞬态信息只能由 `useChatStream` 提供、经 `MessageList` 逐层下传。
+ * **工具调用则两侧都有**（002 特性）：流式轮次取瞬态、历史轮次取 `message.tool_calls`，
+ * 二者统一成 `ToolCallItem` 交给同一个卡片组件。
  *
  * 操作区（用量 / 复制 / 点赞点踩）由 T045 接入 `MessageActions`；本组件已按契约预留
  * `feedback` / `copy` 事件出口。
  */
 import { computed } from 'vue'
 
-import type { ErrorInfo, FileReference, Message } from '../../api/types'
+import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import { formatTimestamp } from '../../utils/format'
 import { countMatches } from '../../utils/segments'
+import { streamingToolCallItem, toolCallItemsOf } from '../../utils/tool-calls'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import MessageActions from './MessageActions.vue'
 import MessageContent from './MessageContent.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
-import ToolCallBadge from './ToolCallBadge.vue'
+import ToolCallList from './ToolCallList.vue'
 import TypingIndicator from './TypingIndicator.vue'
 
 interface ToolCallView {
@@ -54,8 +57,19 @@ const props = withDefaults(
     matchIndexBase?: number
     /** 本轮瞬态；`null` 表示非流式气泡 */
     streaming?: StreamingView | null
+    /**
+     * 工具卡片懒加载外置结果正文（002 特性）；仅历史气泡使用。
+     * 缺省时卡片只展示随详情下发的内联内容与摘要。
+     */
+    loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
   }>(),
-  { searchKeyword: '', activeMatchIndex: -1, matchIndexBase: 0, streaming: null },
+  {
+    searchKeyword: '',
+    activeMatchIndex: -1,
+    matchIndexBase: 0,
+    streaming: null,
+    loadToolResult: undefined,
+  },
 )
 
 const emit = defineEmits<{
@@ -89,7 +103,18 @@ const formattedTime = computed(() => formatTimestamp(props.message.ts))
 const attachments = computed(() => props.message.attachments ?? [])
 
 const thinkingText = computed(() => props.streaming?.thinking ?? '')
-const toolCalls = computed(() => props.streaming?.toolCalls ?? [])
+/**
+ * 工具卡片数据（002 特性）：一个组件服务两种来源。
+ * - 流式轮次：`streaming.toolCalls`（SSE 仅给名称与状态，结果尚未产生）
+ * - 历史消息：`message.tool_calls`（落盘记录，含内联结果或外置引用）
+ */
+const toolItems = computed(() =>
+  props.streaming
+    ? props.streaming.toolCalls.map(streamingToolCallItem)
+    : toolCallItemsOf(props.message),
+)
+/** 外置正文只存在于历史记录，流式轮次不触发懒加载 */
+const toolLoader = computed(() => (props.streaming ? undefined : props.loadToolResult))
 const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMING)
 /** 中断轮：保留 partial 正文，但须明确标识"已停止"，与正常回答区分 */
 const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
@@ -172,14 +197,13 @@ const containsActiveMatch = computed(() => {
 
     <ThinkingBlock v-if="showThinking" :text="thinkingText" :streaming="isStreaming" />
 
-    <div v-if="toolCalls.length" class="message-bubble__tools">
-      <ToolCallBadge
-        v-for="call in toolCalls"
-        :key="call.call_id"
-        :name="call.name"
-        :status="call.status"
-      />
-    </div>
+    <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件 -->
+    <ToolCallList
+      v-if="toolItems.length"
+      class="message-bubble__tools"
+      :items="toolItems"
+      :load-result="toolLoader"
+    />
 
     <MessageContent
       :content="message.content"
@@ -274,9 +298,8 @@ const containsActiveMatch = computed(() => {
 }
 
 .message-bubble__tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  /* 工具卡片列表自带纵向布局，此处只作为外层挂点 */
+  display: block;
 }
 
 .message-bubble__aborted {

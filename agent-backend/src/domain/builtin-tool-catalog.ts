@@ -43,7 +43,13 @@ export interface TemplateValues {
   临时空间: string;
 }
 
-/** 内置工具目录（本期 5 项） */
+/**
+ * 内置工具目录。
+ *
+ * 前 5 项与改造前等价（顺序不变）；`read_skill` 为 **2026-09-23 新增**——
+ * 此前 SKILL 只有"frontmatter 摘要进 System Prompt"这一条通道，正文与 `references/`
+ * 附件没有任何读取入口（技能在 `agents/{agent}/skills/`，不在 `FileAccess` 的三空间沙箱内）。
+ */
 export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
   {
     name: 'read_file',
@@ -118,6 +124,25 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       required: ['expression'],
       properties: {
         expression: { type: 'string', description: '数学表达式，如 "(1+2)*3"' },
+      },
+    },
+    writable: false,
+  },
+  {
+    name: 'read_skill',
+    label: '读取技能文件',
+    description_template:
+      '读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），' +
+      '也可读 references/ 等其他文档（如 "references/算法详解.md"）；path 为目录时返回该目录下的文件清单。' +
+      '技能名取自系统提示中的「技能」小节。仅文本文件；内容过大时返回截断片段，可用 offset 继续读。',
+    parameters: {
+      type: 'object',
+      required: ['skill'],
+      properties: {
+        skill: { type: 'string', description: '技能名，如 "调度算法"' },
+        path: { type: 'string', description: '技能内相对路径，省略则为 SKILL.md' },
+        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', description: '本次最多返回字节数' },
       },
     },
     writable: false,

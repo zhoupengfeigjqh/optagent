@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **设计态** | `platform-data/`（bind mount） | 读写（平台的唯一权威源） | 平台自身数据，**不与运行环境共享**（`FR-001` 只要求共享**用户数据**目录） |
 | **物化产物** | `.opt-agent/users/{uid}/agents/{agent}/` | 部署时**整体覆盖**写入 | 平台是内容来源，运行环境是消费方（`FR-026`） |
-| **只读投影** | 容器编排文件、Docker Engine、`agent-backend` 只读端点 | **只读** | 平台 MUST NOT 反写（`FR-005`） |
+| **只读投影** | `agent-backend` 只读端点（内置工具目录、调用统计） | **只读** | 平台 MUST NOT 反写（`FR-005`）。**（2026-09-27）** 容器编排文件与 Docker Engine 已从只读投影中移除——平台不再读它们 |
 
 **判据（与 `FR-028` 同一口径）**：平台在 `.opt-agent/` 产生的写入 **100% 限于** `users/{uid}/agents/{agent}/` 之内；用户文件空间（`数据准备` / `共享空间` / `临时空间`）下的文件与二级目录**一律不触碰**。
 
@@ -23,7 +23,6 @@
 ```text
 platform-data/
 ├── meta.json                 # 平台元数据（含单调递增 revision，用于并发检测）
-├── settings.json             # 平台级设置（当前目标运行形态）
 ├── builtin-tools.json        # 内置工具的本地覆盖（默认空；见 §2 说明）
 ├── mcp-services.json         # MCP 调用配置（按名称索引）
 ├── skills/
@@ -48,20 +47,13 @@ platform-data/
 | `schema_version` | string | ✅ | 语义化版本 | 设计态文档格式版本，供未来迁移 |
 | `created_at` / `updated_at` | string | ✅ | ISO8601 | — |
 
-### 1.2 `settings.json`
+### 1.2 ~~`settings.json`~~（2026-09-27 废止）
 
-| 字段 | 类型 | 必填 | 约束 | 说明 |
-|---|---|---|---|---|
-| `target_runtime_form` | string | ✅ | 必须是**已声明的运行形态标识**之一 | 当前目标运行形态（`FR-057`）。默认 `container_network` |
+原 `settings.json` 只承载一个字段 `target_runtime_form`（当前目标运行形态）。
+运行形态概念整体下架后该文件不再存在，其唯一功能性用途（决定 MCP 连接地址取哪一份取值）
+已由**单一 `url`** 取代。存量文件若存在则被忽略，不影响启动。
 
-**运行形态标识（本期固定两种）**：
-
-| 标识 | 中文名 | 连接地址形态 |
-|---|---|---|
-| `container_network` | 容器编排内网 | 容器服务名，如 `http://ocr:8000/mcp` |
-| `host_local` | 宿主机本地 | 宿主机可达地址，如 `http://127.0.0.1:8000/mcp` |
-
-**校验规则**：`target_runtime_form` MUST 为上述枚举之一（`VALIDATION_FAILED`）。切换它属于破坏性操作，MUST 提示"既有部署产物将按新形态重新物化"并要求二次确认（`FR-057`、`FR-007`）；切换本身**不写入** `.opt-agent/`，须由随后的"部署生效"落地。
+> 部署接口所需的乐观锁版本改由部署清单端点（`contracts/admin-api.md` §6.8）提供。
 
 ---
 
@@ -92,19 +84,24 @@ platform-data/
 
 ---
 
-## 3. MCP 服务（本体，只读投影）+ MCP 服务配置（服务级，平台持有）
+## 3. MCP 服务（平台持有）+ 工具清单（探测）
 
-### 3.1 MCP 服务本体（只读）
+### 3.1 MCP 服务（平台持有，2026-09-27 重定义）
 
-**来源**：根目录 `docker-compose.yml` 中声明的服务（`FR-043`）+ Docker Engine 的实际状态。**平台 MUST NOT 要求二次登记**，新增服务后 MUST 无需改代码即可识别。
+**来源**：**管理员在平台内新建与维护**（`FR-043`）——平台是 MCP 服务配置的**唯一权威源**，
+MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 | 字段 | 类型 | 来源 | 说明 |
 |---|---|---|---|
-| `name` | string | compose 服务名 | 唯一标识 |
-| `transport` | string | 调用配置 | `http` / `stdio` |
-| `status` | enum | Docker Engine | `running` / `stopped` / `abnormal` / `unknown`（`FR-043`） |
-| `in_compose` | boolean | compose 声明 | 为 `false` 表示调用配置指向的目标已不存在或改名（`FR-052`） |
-| `tools` | array | MCP 客户端 | `FR-045` 的工具清单（`[{name, description, parameters}]`） |
+| `name` | string | 管理员填写 | 唯一标识；`^[A-Za-z0-9_-]{1,64}$`（会成为运行环境的工具前缀） |
+| `description` | string | 管理员填写 | 用途描述（可为空串），供卡片展示 |
+| `transport` | string | 管理员填写 | `http` / `stdio` |
+| `url` | string \| null | 管理员填写 | **连接地址**（`http` 必填且须为 http(s) 绝对地址；`stdio` 恒为 `null`） |
+| `tools` | array | MCP 客户端**探测** | `FR-045` 的工具清单（`[{name, description, parameters}]`）；不可得时以 `tools_error` 给出可读原因 |
+| `references` | array | 引用推导 | 引用该服务的「用户 × 数字人」对（不落库） |
+
+> 原 `status`（容器四态）与 `in_compose` 两个字段**已移除**：平台不再读容器运行态，
+> "是否仍在编排声明中"的比对也失去前提（`FR-052` 的语义改为"引用的服务已被平台删除"）。
 
 ### 3.2 MCP 服务配置（服务级，平台持有）
 
@@ -112,23 +109,25 @@ platform-data/
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
-| `name` | string | ✅ | 非空，唯一 | 与 compose 服务名对齐 |
+| `name` | string | ✅ | **唯一**；`^[A-Za-z0-9_-]{1,64}$`（首尾空白自动去除） | 服务名（**新建时由管理员指定**，编辑时不可改）；同时是运行环境的工具前缀 |
 | `description` | string | ✅ | 可为空串 | **用途描述**，供卡片展示（`FR-006`、`FR-043`） |
 | `transport` | enum | ✅ | `http` \| `stdio`（**读写均接受别名 `streamable-http`**，入口归一为 `http`） | `http` 即 MCP 的 **Streamable HTTP** 传输；界面文案显示为 `streamable-http`，落盘与物化统一用规范值 `http`（2026-09-16） |
-| `endpoints` | object | ✅ | **至少一个键** | **按运行形态分别声明的连接地址**（`FR-056`）。键为运行形态标识，值为地址 |
-| `endpoints.container_network` | string | 建议必填 | 合法 URL 或 `host:port` | 容器编排内网地址 |
-| `endpoints.host_local` | string | 可选 | 合法地址 | 宿主机本地地址 |
+| `url` | string | 条件 | `transport=http` 时**必填**且须为 `http(s)://` 绝对地址；`stdio` 时恒为 `null`（丢弃） | **唯一连接地址**（2026-09-27：取消按运行形态分形态声明） |
 | `command` / `args` | string / array | 可选 | `transport=stdio` 时必填 | 启动命令与参数 |
 | `file_args` | object | ✅ | 可为空对象 | 文件参数映射：`{工具名: {取值路径: "url"}}`。取值路径可为顶层参数名（`{"ocr_image":{"image":"url"}}`），也可**穿过数组**（`{"parse_excel_files":{"items[].excelFileUrl":"url"}}`，`[]` 表示"每个元素"，2026-09-16） |
-| `rules_fields` | object | ✅ | 形状 `{工具名: 字段名}`，键值均非空串；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（详见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非非空串即 `VALIDATION_FAILED`，历史存档的 string 版 `rules_field` 读取时收敛为 `{}`；物化进 `MCP.json` 的键同名，空对象不写 |
+| `rules_fields` | object | ✅ | 形状 `{工具名: 字段名或对象路径}`，键非空、值为合法字段路径（点分对象路径，**不支持数组段**）；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射；**2026-09-22 起值支持对象嵌套**）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（嵌套路径的落点与写回见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非法路径即 `VALIDATION_FAILED`（只校验语法、不校验工具 schema），历史存档的 string 版 `rules_field` 与**非法路径**读取时收敛/丢弃；物化进 `MCP.json` 的键同名，空对象不写 |
+
+| `async_tools` | array | ✅ | 可为空数组；元素为**该服务自己的原始工具名**（不含 `{server}__` 前缀），非空且同服务内去重 | **异步工具声明**（2026-09-25 新增）：声明后，该工具调用由运行环境注入 `result_url`（签名写直链），服务算完把结果回写到用户空间 `临时空间/后台产出/`；落盘即经 SSE 通知前端，并在下一轮对话注入「后台计算结果」清单（全文见 `contracts/runtime-api-delta.md` §10）。**不改变工具是否同步、也不改变是否走 HITL**——只是给被声明的工具多注入一个回写地址。保存期只校验语法（数组 / 非空 / 去重，否则 `VALIDATION_FAILED`），**不校验工具清单**（工具清单是探测结果，服务不可达时拒保存会把"服务抖动"变成"配置改不了"，与 `rules_fields` 同一取向）；物化进 `MCP.json` 的键同名、**空数组不写**；缺省/空 = 不启用，存量行为零变化 |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 已从本实体移除（产品决定）；读取历史存档时 MUST 收敛掉这两个字段。
 
 **校验规则**：
-1. `endpoints` MUST 至少含一个运行形态键，否则 `VALIDATION_FAILED`（`FR-056`）。
-2. **部署物化时**：目标运行形态的键 MUST 存在；缺失即**部署前校验不通过**（`RUNTIME_FORM_NOT_CONFIGURED`），MUST NOT 回退到另一形态的地址（`FR-057`、边缘情况「MCP 连接地址与部署目标运行形态不匹配」）。
-3. `name` 在 compose 中不存在或已改名 → 该配置标记 `in_compose: false` 为异常态，并给出具体差异（`FR-052`）；引用它的数字人 MUST 被部署前校验拦截。
+1. `transport=http` 时 `url` MUST 为非空且以 `http(s)://` 开头，否则 `VALIDATION_FAILED`；`stdio` 时 `command` MUST 非空。
+2. **唯一性**：新建时 `name` 已存在 → `ADM_MCP_SERVICE_EXISTS`（409）；`PUT` 保存不存在的服务 → `ADM_MCP_SERVICE_NOT_FOUND`（404，新建必须走 `POST`）。
+3. 数字人所引用的服务若已被删除（或改名）→ 该引用判定为**失效**（`FR-052`）：保存时拦截（`ADM_AGENT_INVALID_REF`），部署前校验与全局异常项汇总均列出。
+4. **存量迁移**：旧文档里的 `endpoints`（`{运行形态: 地址}`）在**读取期**收敛为单一 `url`（优先取 `host_local`，否则取第一个非空值），既有配置不丢。
 4. 修改调用配置 MUST 自动作用于所有引用它的数字人（`FR-044`），无需逐个改动。
+5. `async_tools` 只校验**语法**（数组、元素非空、去重），MUST NOT 因"该工具名不在当前探测到的工具清单里"而拒绝保存——工具清单是探测结果，服务不可达时不构成配置错误（与 `rules_fields` 同一取向）。
 
 **引用关系**：数字人经 `MCP.json` 的 `servers[].name` 按名称引用；引用关系**不落库**（规格关键实体「引用关系」），按需从数字人设计态推导。
 
@@ -139,10 +138,12 @@ platform-data/
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | string | 服务名 |
-| `calls_total` | integer | 累计调用次数 |
-| `calls_ok` | integer | 成功次数 |
-| `calls_failed` | integer | 失败次数 |
+| `calls_total` | integer | 调用次数（= `calls_ok + calls_failed`）；**2026-09-23 起口径为最近一年** |
+| `calls_ok` | integer | 成功次数（同"最近一年"口径） |
+| `calls_failed` | integer | 失败次数（同"最近一年"口径） |
 | `last_called_at` | string \| null | 最近调用时间（ISO8601） |
+
+> **2026-09-23**：`calls_*` 口径收紧为**最近一年**——运行环境侧独立累计表 `mcp_call_stats` 已删除，累计值改由"只保留一年"的事件明细 `mcp_call_events` 聚合。平台统计表所需的**四个时间窗**位于**分组行 `groups[]`**（一行 = 一个「服务 × 工具 × 用户」组合）；十四次调整的 `users[]` 与本日的 `tools[]` 两层明细已被它取代（两者都不带时间窗，无法表达统计表所需的列）。完整字段与口径见 `contracts/runtime-api-delta.md` §4.2 / §4.3。
 
 **校验规则**：统计 MUST 在数字人实际调用后**自动更新**（`FR-050`），MUST NOT 依赖人工录入。运行环境不可达时，统计字段整体为"未知"，**不得**以 0 冒充（`FR-009` 可读原因）。
 
@@ -266,17 +267,16 @@ platform-data/
 |---|---|---|
 | `passed` | boolean | 整体是否通过 |
 | `errors` | array | 全部错误项（**一次性列出，不是发现一个就停**）。每条：`{ user_id, agent_name, category, code, message, detail }` |
-| `category` | enum | `config_integrity` \| `reference_validity` \| `name_path_safety` \| `target_writable` \| `runtime_form` |
+| `category` | enum | `config_integrity` \| `reference_validity` \| `name_path_safety` \| `target_writable`（四类；**2026-09-27** 原第五类 `runtime_form` 随运行形态下架） |
 
-**校验项**（`FR-027` + `FR-057` 追加第 ⑤ 项）：
+**校验项**（`FR-027`）：
 
 | # | 类别 | 内容 |
 |---|---|---|
 | ① | `config_integrity` | SOUL 非空；四类配置文件结构合法且可解析；五类配置无缺字段 |
-| ② | `reference_validity` | 引用的内置工具存在于工具目录；引用的 MCP 服务存在于容器编排声明；引用的 SKILL 存在于共享技能库 |
+| ② | `reference_validity` | 引用的内置工具存在于工具目录；引用的 MCP 服务存在于**平台 MCP 服务列表**；引用的 SKILL 存在于共享技能库 |
 | ③ | `name_path_safety` | 数字人名、用户标识、技能目录名不含路径分隔符或 `..` |
 | ④ | `target_writable` | 目标位置可写 |
-| ⑤ | **`runtime_form`** | 每个被引用 MCP 服务在**目标运行形态**下都有连接地址（`FR-056`/`FR-057`） |
 
 **失败处理**：任一不通过 → **阻止本次部署**、**MUST NOT 产生任何写入**、一次性列出全部错误项，每条可定位到具体的用户、数字人与配置类别（`FR-027`、`SC-020`）。校验所需信息读取不到时 MUST **按校验失败处理**，MUST NOT 视为通过（边缘情况「校验所需信息读取不到」）。
 
@@ -286,7 +286,6 @@ platform-data/
 |---|---|---|
 | `deployed_at` | string | ISO8601（`FR-033`） |
 | `operator` | string | 固定 `zyw_admin`（`research.md` D11） |
-| `target_runtime_form` | string | 本次部署所用的目标运行形态（`FR-057`） |
 | `users` | array | 每个用户：成功/失败、涉及数字人、失败原因 |
 | `validation` | object | 校验结果摘要（含错误项数） |
 | `manifest_diff` | array | 与部署清单不一致的差异（如手工删改过的目录，`FR-032`） |
@@ -323,11 +322,11 @@ platform-data/
 |---|---|---|
 | `soul` | `SOUL.md` | 原样写入（utf8，保留换行与标点） |
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
-| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `file_args` 取自**调用配置**（`FR-044`、`SC-011`），`url` 按**目标运行形态**取 `endpoints[target_runtime_form]`（`FR-056`） |
+| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `file_args` / `confirmation` / `rules_fields` / `async_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `file_args` / `confirmation`(≠never) / `rules_fields` / `async_tools` |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
 | `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`） |
 
-**已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url = http://ocr:8000/mcp` 正是 `endpoints.container_network` 的取值）。
+**已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url` 即平台侧调用配置里登记的唯一连接地址）。
 
 ---
 
@@ -337,8 +336,7 @@ platform-data/
                  ┌────────────────────┐
                  │  运行环境（只读投影） │
                  │  内置工具目录        │
-                 │  compose 声明        │
-                 │  容器状态/日志/统计  │
+                 │  调用统计            │
                  └──────┬─────────────┘
                         │ 只读消费（平台 MUST NOT 反写）
                         ▼

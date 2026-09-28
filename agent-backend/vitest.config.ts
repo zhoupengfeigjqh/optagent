@@ -81,6 +81,62 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-09-25（R11 阶段 1）：签名写方向（与读方向形状隔离）
+        'src/infra/file-sign.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：异步工具的 `result_url` 注入
+        'src/infra/mcp/async-result-url.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：schema 视图裁剪（从适配器抽出，本次复用其隐藏机制）
+        'src/infra/mcp/mcp-schema-view.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：后台产出（落盘 / 目录即索引 / 提示词段）
+        'src/domain/produced.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：产出变更信号总线
+        'src/domain/produced-events.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：prompt 组装（从 run-manager 抽出，含产出段）
+        'src/domain/prompt-builder.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：产出目录纳入 7 天清理
+        'src/domain/tmp-cleanup.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-09-25（R11 阶段 1）：产出列表与变更信号端点
+        'src/routes/produced.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

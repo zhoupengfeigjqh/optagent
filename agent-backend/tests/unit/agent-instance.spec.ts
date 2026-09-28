@@ -244,4 +244,66 @@ describe('MCP.json 的 rules_fields 算法规则参数设置（按工具映射�
       );
     }
   });
+
+  it('对象路径：支持嵌套字段（如 input.targetPriorities），去空白后原样保留', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withRulesFields({ submit: ' input.targetPriorities ' })]),
+    );
+
+    expect(bundle.mcpServers[0]?.rulesFields).toEqual({ submit: 'input.targetPriorities' });
+  });
+
+  it('非法路径（数组段 / 空段）→ AgentConfigError', () => {
+    for (const path of ['items[].rules', 'a..b', 'a.', '.a']) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withRulesFields({ t: path })]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+});
+
+describe('MCP.json 的 async_tools 异步工具声明（R11）', () => {
+  const withAsyncTools = (async_tools: unknown) => ({
+    name: 'hd-algorithm',
+    transport: 'http',
+    url: 'http://hd:8080/mcp',
+    async_tools,
+  });
+
+  it('缺省：不写入 asyncTools（不启用，存量数字人行为零变化）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [httpServer('http')]));
+    expect(bundle.mcpServers[0]?.asyncTools).toBeUndefined();
+  });
+
+  it('字符串数组：去空白后解析进 McpServerConfig.asyncTools', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withAsyncTools([' submit_job ', 'get_status'])]),
+    );
+    expect(bundle.mcpServers[0]?.asyncTools).toEqual(['submit_job', 'get_status']);
+  });
+
+  it('显式空数组可加载（语义与缺省同为"不启用"）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [withAsyncTools([])]));
+    expect(bundle.mcpServers[0]?.asyncTools).toEqual([]);
+  });
+
+  it('非法形状（非数组 / 元素非字符串 / 空串 / 重复）→ AgentConfigError', () => {
+    for (const bad of ['submit_job', 42, [42], ['  '], ['a', 'a'], [null]]) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withAsyncTools(bad)]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+
+  it('重复项的报错文案指出重复的工具名（便于自查）', () => {
+    let caught: unknown;
+    try {
+      loadAgentConfig(writeAgent('demo', [withAsyncTools(['submit_job', 'submit_job'])]));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AgentConfigError);
+    expect((caught as Error).message).toContain('重复');
+    expect((caught as Error).message).toContain('submit_job');
+  });
 });

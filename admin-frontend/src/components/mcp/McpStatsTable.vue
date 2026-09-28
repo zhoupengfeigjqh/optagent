@@ -2,53 +2,73 @@
 /**
  * 调用统计表（`FR-049`、`FR-050`）。
  *
+ * 2026-09-23 改版：**一行 = 一个「用户 × 服务 × 工具」组合**，四个时间窗与最近调用时间并列，
+ * 单元格格式为「**总次数/成功次数**」。原「明细」展开列取消——用户已进列，分组行本身就是
+ * 最细粒度，再挂一层展开没有信息增量（也少一次交互）。
+ *
  * 硬要求（`FR-009`）：运行环境不可达时 MUST 显示**「未知」而非 0**——
  * 0 是"确实没调用过"的确定结论，与"读不到"是两回事。
- *
- * 明细列（2026-09-16 十四次调整）：最右一列可**展开**看该服务**按用户**的调用
- * 次数（成功/失败分列）。数据本就在统计响应的 `users[]` 里（运行环境从事件
- * 明细聚合），**不另设详情端点**；展开**单开**（同时只展开一行）。
  */
-import { ref } from 'vue'
-import type { McpStatsItem, McpStatsUser } from '../../api/types'
+import { computed } from 'vue'
+import type { McpStatsGroup } from '../../api/types'
 
 const props = defineProps<{
-  items: McpStatsItem[]
+  /** 按「用户 × 服务 × 工具」分组的调用行 */
+  groups: McpStatsGroup[]
   /** 统计是否可得；为 false 时全部数值显示为"未知" */
   available: boolean
   /** 只显示某个服务的统计（服务详情页用） */
   only?: string
 }>()
 
-/** 当前展开的服务名；`null` = 全部收起（与部署历史同口径：单开） */
-const expandedName = ref<string | null>(null)
+/** 时间窗列：表头与单元格共用同一份定义，避免两处各写一遍导致错位 */
+const WINDOWS = [
+  { key: 'h24', label: '最近24h' },
+  { key: 'd7', label: '最近7天' },
+  { key: 'd30', label: '最近30天' },
+  { key: 'd365', label: '最近一年' },
+] as const
 
-function rows(): McpStatsItem[] {
-  const list = props.only ? props.items.filter((i) => i.name === props.only) : props.items
-  return list
-}
+const rows = computed(() =>
+  props.only ? props.groups.filter((group) => group.service === props.only) : props.groups,
+)
 
-function toggle(name: string): void {
-  expandedName.value = expandedName.value === name ? null : name
-}
-
-/** 明细里的用户标识：`null` 是升级前的历史事件（未记录归属），不静默留白 */
-function userLabel(user: McpStatsUser): string {
-  return user.user_id ?? '（未归属·升级前记录）'
-}
-
-function valueOf(text: string | number | null | undefined): string {
+/**
+ * 空态文案：三种"没有行"的原因各不相同，不能混成一句。
+ * 原先分两条 `<tr>` 判断，`only` 且无行时两者会**同时**渲染（重复提示），此处收敛成一个。
+ */
+const emptyText = computed(() => {
   if (!props.available) return '未知'
-  if (text === null || text === undefined) return '—'
-  return String(text)
+  return props.only ? '该服务从未被调用过（统计为 0）。' : '尚无任何调用记录'
+})
+
+function text(value: string | number | null | undefined): string {
+  if (!props.available) return '未知'
+  if (value === null || value === undefined) return '—'
+  return String(value)
 }
 
-/** 时间窗单元格：格式"成功/总数"；旧数据无 windows 时显示"—" */
-function windowCell(item: McpStatsItem, key: 'h24' | 'd7' | 'd30' | 'd365'): string {
+/** 时间窗单元格：「总次数/成功次数」；缺该窗（旧响应）显示"—"，不可用时不以 0 冒充 */
+function windowCell(group: McpStatsGroup, key: 'h24' | 'd7' | 'd30' | 'd365'): string {
   if (!props.available) return '未知'
-  const w = item.windows?.[key]
-  if (!w) return '—'
-  return `${w.ok}/${w.total}`
+  const window = group.windows?.[key]
+  if (!window) return '—'
+  return `${window.total}/${window.ok}`
+}
+
+/** 用户标识：`null` = 升级前的历史事件未记录归属，不静默留白 */
+function userLabel(group: McpStatsGroup): string {
+  return group.user_id ?? '（未归属·升级前记录）'
+}
+
+/** 工具标识：`null` 同上（工具名自 2026-09-23 起才落库） */
+function toolLabel(group: McpStatsGroup): string {
+  return group.tool_name ?? '（未归属·升级前记录）'
+}
+
+/** 行键：三个维度都可能是 `null`，故用数组序列化，避免拼接时相邻字段串位 */
+function rowKey(group: McpStatsGroup): string {
+  return JSON.stringify([group.service, group.tool_name, group.user_id])
 }
 </script>
 
@@ -59,76 +79,34 @@ function windowCell(item: McpStatsItem, key: 'h24' | 'd7' | 'd30' | 'd365'): str
     </p>
 
     <table class="mcp-stats__table">
-      <caption class="visually-hidden">按服务的 MCP 工具调用次数（含时间窗与按用户明细）</caption>
+      <caption class="visually-hidden">
+        按「用户 × 服务 × 工具」的 MCP 工具调用次数（含四个时间窗）
+      </caption>
       <thead>
         <tr>
-          <th scope="col">服务</th>
-          <th scope="col">最近24h</th>
-          <th scope="col">最近7天</th>
-          <th scope="col">最近30天</th>
-          <th scope="col">最近一年</th>
-          <th scope="col">累计（成功/失败）</th>
+          <th scope="col">用户名</th>
+          <th scope="col">服务名</th>
+          <th scope="col">工具名</th>
+          <th v-for="window in WINDOWS" :key="window.key" scope="col">{{ window.label }}</th>
           <th scope="col">最近调用时间</th>
-          <th scope="col">明细</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-if="rows().length === 0">
-          <td colspan="8" class="muted">
-            {{ props.available ? '尚无任何调用记录' : '未知' }}
-          </td>
+        <tr v-if="rows.length === 0">
+          <td colspan="8" class="muted">{{ emptyText }}</td>
         </tr>
-        <template v-for="item in rows()" :key="item.name">
-          <tr>
-            <td class="mono">{{ item.name }}</td>
-            <td>{{ windowCell(item, 'h24') }}</td>
-            <td>{{ windowCell(item, 'd7') }}</td>
-            <td>{{ windowCell(item, 'd30') }}</td>
-            <td>{{ windowCell(item, 'd365') }}</td>
-            <td>{{ valueOf(item.calls_ok) }} / {{ valueOf(item.calls_failed) }}</td>
-            <td>{{ valueOf(item.last_called_at ?? '从未调用') }}</td>
-            <td>
-              <button
-                type="button"
-                class="btn mcp-stats__toggle"
-                :aria-expanded="expandedName === item.name"
-                :aria-controls="`mcp-stats-detail-${item.name}`"
-                @click="toggle(item.name)"
-              >
-                {{ expandedName === item.name ? '收起' : '展开' }}
-                <span class="visually-hidden">按用户明细（{{ item.name }}）</span>
-              </button>
-            </td>
-          </tr>
-
-          <!-- 按用户明细：数据本就在统计响应的 users[] 里，不另设详情端点 -->
-          <tr v-if="expandedName === item.name" class="mcp-stats__detail-row">
-            <td colspan="8">
-              <div :id="`mcp-stats-detail-${item.name}`" class="mcp-stats__detail">
-                <p v-if="!item.users || item.users.length === 0" class="mcp-stats__detail-empty">
-                  该服务暂无按用户明细（事件明细已超出一年的保留期，或调用发生在按用户统计升级之前）。
-                </p>
-                <ul v-else class="mcp-stats__users">
-                  <li v-for="user in item.users" :key="user.user_id ?? '（未归属）'" class="mcp-stats__user">
-                    <span class="mono">{{ userLabel(user) }}</span>
-                    <span>
-                      成功 {{ user.calls_ok }} / 失败 {{ user.calls_failed }}（共
-                      {{ user.calls_total }} 次）
-                    </span>
-                    <span class="mcp-stats__user-last">最近 {{ user.last_called_at ?? '—' }}</span>
-                  </li>
-                </ul>
-              </div>
-            </td>
-          </tr>
-        </template>
-        <tr v-if="props.available && props.only && rows().length === 0">
-          <td colspan="8" class="muted">该服务从未被调用过（统计为 0）。</td>
+        <tr v-for="group in rows" :key="rowKey(group)">
+          <td class="mono">{{ userLabel(group) }}</td>
+          <td class="mono">{{ group.service }}</td>
+          <td class="mono">{{ toolLabel(group) }}</td>
+          <td v-for="window in WINDOWS" :key="window.key">{{ windowCell(group, window.key) }}</td>
+          <td>{{ text(group.last_called_at ?? '从未调用') }}</td>
         </tr>
       </tbody>
     </table>
     <p class="mcp-stats__note">
-      时间窗单元格格式：<code class="mono">成功/总数</code>；事件明细保留一年，按用户明细同口径。
+      单元格格式：<code class="mono">总次数/成功次数</code>；一行 = 一个「用户 × 服务 × 工具」组合，
+      事件明细保留一年，故四个时间窗与"最近一年"同源。
     </p>
   </section>
 </template>
@@ -151,44 +129,6 @@ function windowCell(item: McpStatsItem, key: 'h24' | 'd7' | 'd30' | 'd365'): str
   padding: var(--space-2);
   border: 1px solid var(--color-border);
   text-align: left;
-}
-
-.mcp-stats__toggle {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--font-size-xs);
-}
-
-/* 展开行整行铺满（colspan）；背景与正文区分，避免明细被当成又一行记录（与部署历史同口径） */
-.mcp-stats__detail-row td {
-  background: var(--color-bg-subtle);
-  vertical-align: top;
-}
-
-.mcp-stats__detail-empty {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-.mcp-stats__users {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mcp-stats__user {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
-  font-size: var(--font-size-xs);
-}
-
-.mcp-stats__user-last {
-  color: var(--color-text-secondary);
 }
 
 .mcp-stats__note {

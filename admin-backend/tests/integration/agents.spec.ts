@@ -36,7 +36,8 @@ const validBody = {
 };
 
 beforeEach(async () => {
-  fx = await createFixture();
+  // MCP 服务改为平台内人工新建：`validBody` 里引用的 `ocr` 必须先存在
+  fx = await createFixture({ mcpServices: { ocr: {} } });
   fx.runtime.tools = TOOL_FIXTURE;
 });
 

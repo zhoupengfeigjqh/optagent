@@ -31,8 +31,9 @@ export interface InteractionRequestInput {
   /** 模型提议的参数值（预填，用户可改） */
   proposedArgs: Record<string, unknown>;
   /**
-   * 算法规则参数字段名（可选）：服务声明了 rules_field 且本工具 schema 含该字段时
-   * 由包装层传入，原样进快照——前端据此给该字段装配「从算法规则选择」入口。
+   * 算法规则参数**字段名或对象路径**（可选）：服务声明了 `rules_field` 且本工具
+   * schema 里走得通时由包装层传入，原样进快照——前端据此装配「从算法规则选择」入口，
+   * 并按路径首段把它挂到对应的顶层控件上（嵌套目标由前端写回 JSON 内部）。
    */
   rulesField?: string;
   /** 挂起超时（秒）；缺省 300 */

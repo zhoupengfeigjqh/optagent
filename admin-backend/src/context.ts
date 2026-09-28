@@ -2,6 +2,10 @@
  * 应用上下文（wiring）：`server.ts` 装配，`routes/` 消费。
  *
  * 独立成文件以避免 `routes ↔ server` 循环 import，与 `agent-backend` 同构。
+ *
+ * **2026-09-27**：`compose` / `docker` / `settings` 三个依赖随
+ * 「MCP 服务全人工配置」下架——平台不再读容器编排声明、不再读 Docker 容器状态，
+ * 也不再持有"目标运行形态"。
  */
 import type { AppConfig } from './config.js';
 import type { AgentDesignService } from './domain/config-center/agent-design.js';
@@ -13,10 +17,7 @@ import type { DeployManifestService } from './domain/deploy/manifest.js';
 import type { McpServiceConfigService } from './domain/mcp/service-config.js';
 import type { McpServiceListService } from './domain/mcp/service-list.js';
 import type { McpServiceOperations } from './domain/mcp/operations.js';
-import type { PlatformSettingsService } from './domain/platform-settings.js';
 import type { SkillLibraryService } from './domain/skill-library/install.js';
-import type { ComposeReader } from './infra/compose-reader.js';
-import type { DockerHost } from './infra/docker-host.js';
 import type { OptAgentWriter } from './infra/opt-agent-writer.js';
 import type { PlatformStore } from './infra/platform-store.js';
 import type { RuntimeClient } from './infra/runtime-client.js';
@@ -29,27 +30,21 @@ export interface AppContext {
   /* ---- infra：数据访问与宿主资源 ---- */
   /** 平台设计态存储（唯一权威源，`research.md` D4） */
   store: PlatformStore;
-  /** 容器编排声明（只读投影，`FR-043`） */
-  compose: ComposeReader;
-  /** 宿主机 Docker（只读查询 + 白名单内启停，`research.md` D3） */
-  docker: DockerHost;
   /** 运行环境只读端点客户端（`plan.md` R2/R4） */
   runtime: RuntimeClient;
 
   /* ---- domain：业务服务 ---- */
-  /** 平台级设置（目标运行形态，`FR-056`） */
-  settings: PlatformSettingsService;
   /** 数字人设计态（`FR-014`~`FR-022`） */
   agents: AgentDesignService;
   /** 用户与关联数字人（`FR-023`~`FR-025`） */
   users: UserLinkService;
   /** 共享技能库（`FR-035`~`FR-042`） */
   skills: SkillLibraryService;
-  /** MCP 调用配置（`FR-044`） */
+  /** MCP 服务配置（**平台唯一权威源**，`FR-043`/`FR-044`） */
   mcpConfigs: McpServiceConfigService;
-  /** MCP 服务清单投影（`FR-043`、`FR-052`） */
+  /** MCP 服务清单投影（`FR-043`） */
   mcpServices: McpServiceListService;
-  /** MCP 启停/测试/日志/统计（`FR-046`~`FR-050`） */
+  /** MCP 测试/统计（`FR-047`~`FR-049`） */
   mcpOperations: McpServiceOperations;
   /** 部署清单（`FR-031`） */
   manifest: DeployManifestService;

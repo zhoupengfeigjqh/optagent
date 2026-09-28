@@ -12,7 +12,7 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
-import type { ErrorInfo, FileReference, Message } from '../../api/types'
+import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
 import { RUN_PHASE, type RunPhase } from '../../constants/events'
 import type { PendingUserMessage } from '../../composables/useChatStream'
 import { countMatches } from '../../utils/segments'
@@ -55,6 +55,11 @@ const props = withDefaults(
     activeMatchIndex?: number
     /** 是否还有更早的历史可加载 */
     hasMore?: boolean
+    /**
+     * 工具卡片懒加载外置结果正文（002 特性）；缺省 = 卡片只展示已下发的内联内容与摘要。
+     * 仅历史气泡使用（流式轮次尚无结果）。
+     */
+    loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
   }>(),
   {
     messages: () => [],
@@ -63,6 +68,7 @@ const props = withDefaults(
     searchKeyword: '',
     activeMatchIndex: -1,
     hasMore: false,
+    loadToolResult: undefined,
   },
 )
 
@@ -281,6 +287,7 @@ function onOpenFile(reference: FileReference): void {
         :search-keyword="searchKeyword"
         :active-match-index="activeMatchIndex"
         :match-index-base="matchStats.bases[index]"
+        :load-tool-result="loadToolResult"
         @feedback="onFeedback"
         @open-link="onOpenLink"
         @open-file="onOpenFile"

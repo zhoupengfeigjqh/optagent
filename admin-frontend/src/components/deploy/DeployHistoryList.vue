@@ -128,7 +128,6 @@ function diffText(diff: DeployManifestDiffEntry): string {
           <tr>
             <th scope="col">时间</th>
             <th scope="col">操作者</th>
-            <th scope="col">目标运行形态</th>
             <th scope="col">结果</th>
             <th scope="col">用户数</th>
             <th scope="col">失败数</th>
@@ -140,7 +139,6 @@ function diffText(diff: DeployManifestDiffEntry): string {
             <tr class="deploy-history__row">
               <td>{{ item.deployed_at }}</td>
               <td>{{ item.operator }}</td>
-              <td class="mono">{{ item.target_runtime_form }}</td>
               <td>
                 <StatusBadge
                   :status="item.result === 'succeeded' ? 'ok' : 'failed'"
@@ -166,11 +164,10 @@ function diffText(diff: DeployManifestDiffEntry): string {
 
             <!-- 部署明细：逐用户结果（含失败原因）与本次差异项 -->
             <tr v-if="expandedId === item.id" class="deploy-history__detail-row">
-              <td colspan="7">
+              <td colspan="6">
                 <div :id="`deploy-history-detail-${item.id}`" class="deploy-history__detail">
                   <p class="deploy-history__detail-summary">
-                    目标运行形态 <span class="mono">{{ item.target_runtime_form }}</span>；涉及
-                    {{ item.user_count }} 个用户（失败 {{ item.error_count }} 个）；{{
+                    涉及 {{ item.user_count }} 个用户（失败 {{ item.error_count }} 个）；{{
                       validationText(item)
                     }}；本次差异 {{ (item.manifest_diff ?? []).length }} 条
                   </p>

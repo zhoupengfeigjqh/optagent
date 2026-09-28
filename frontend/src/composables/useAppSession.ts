@@ -20,17 +20,26 @@ import { createAgentsApi } from '../api/agents'
 import { createFilesApi, type FilesApi } from '../api/files'
 import { createHttpClient } from '../api/http'
 import { createModelsApi } from '../api/models'
+import { createProducedApi } from '../api/produced'
 import { createThreadsApi } from '../api/threads'
 import { createAgentsStore, type AgentsStore } from './useAgents'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
 import { createModelsStore, type ModelsStore } from './useModels'
 import { createPreviewStore, type PreviewStore } from './usePreview'
+import { createProducedStore, type ProducedStore } from './useProduced'
 import { createSessionSearchStore, type SessionSearchStore } from './useSessionSearch'
 import { createThreadsStore, type ThreadsStore } from './useThreads'
 import { createToastStore, type ToastStore } from './useToast'
 import { createUploadsStore, type UploadsStore } from './useUploads'
 import { createWorkspaceStore, type WorkspaceStore } from './useWorkspace'
+import {
+  readStoredThread,
+  readThreadFromSearch,
+  writeStoredThread,
+  writeThreadToUrl,
+  type UrlLike,
+} from '../utils/thread-restore'
 
 /** 构造参数（全部可选，测试可注入桩）。 */
 export interface AppSessionOptions {
@@ -55,11 +64,20 @@ export interface AppSession {
   readonly workspace: WorkspaceStore
   readonly search: SessionSearchStore
   readonly preview: PreviewStore
+  /** 后台产出（R11）：列表 + 未读数 + 标记已读 + 信号订阅 */
+  readonly produced: ProducedStore
   readonly toast: ToastStore
   /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
   readonly files: FilesApi
   /** 注入的时钟（供需要本地计时的场景使用） */
   readonly now: () => number
+  /**
+   * 装配时恢复出的会话 id（002 特性）：URL `?thread=` 优先、本地存储兜底；无则 `null`。
+   * `App.vue` 首屏据此自动选中并加载历史（会话已不存在时静默回空态）。
+   */
+  readonly initialThreadId: string | null
+  /** 记住（或清除）当前会话：地址栏 + 本地存储双写，供刷新后恢复 */
+  rememberActiveThread(threadId: string | null): void
 }
 
 /** 注入键。 */
@@ -115,9 +133,30 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
 
   const toast = createToastStore()
 
-  /** 当前会话 id：会话、聊天流、搜索共享的单一事实源。 */
-  const activeThreadId = ref<string | null>(null)
+  /**
+   * 刷新恢复（002 特性）：装配时就把上次的会话 id 取回来。
+   *
+   * 只做"读"，写由 `rememberActiveThread` 在会话切换时完成——避免在装配期
+   * 建立 watcher（组件外的 watcher 无人回收）。
+   */
+  const initialThreadId = readRestoredThread(storage)
 
+  /** 当前会话 id：会话、聊天流、搜索共享的单一事实源。 */
+  const activeThreadId = ref<string | null>(initialThreadId)
+
+  /** 记住当前会话：地址栏 + 本地存储双写（任一步失败都不影响会话本身）。 */
+  function rememberActiveThread(threadId: string | null): void {
+    writeStoredThread(storage, threadId)
+    const url = currentUrl()
+    if (!url) return
+    try {
+      writeThreadToUrl(threadId, url, (next) => globalThis.history.replaceState(null, '', next))
+    } catch {
+      /* 沙箱 iframe / 隐私模式：地址栏同步失败不影响会话状态 */
+    }
+  }
+
+  const produced = createProducedStore({ produced: createProducedApi(client) })
   const preview = createPreviewStore({ files: filesApi })
   // 删除动作需要提示成功/失败原因，故 workspace 依赖 toast
   const workspace = createWorkspaceStore({ files: filesApi, toast })
@@ -177,9 +216,12 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     workspace,
     search,
     preview,
+    produced,
     toast,
     files: filesApi,
     now,
+    initialThreadId,
+    rememberActiveThread,
   }
 }
 
@@ -190,4 +232,22 @@ function defaultStorage(): Storage | null {
   } catch {
     return null
   }
+}
+
+/** 当前地址的最小视图（非浏览器环境返回 `null`）。 */
+function currentUrl(): UrlLike | null {
+  try {
+    const location = globalThis.location
+    if (!location) return null
+    return { pathname: location.pathname, search: location.search, hash: location.hash }
+  } catch {
+    return null
+  }
+}
+
+/** 恢复来源：URL `?thread=` 优先（可分享），本地存储兜底（URL 被清掉时仍能恢复）。 */
+function readRestoredThread(storage: Storage | null): string | null {
+  const url = currentUrl()
+  const fromUrl = url ? readThreadFromSearch(url.search) : null
+  return fromUrl ?? readStoredThread(storage)
 }

@@ -1,7 +1,8 @@
 /**
  * 单元测试：部署前校验（T073）
  *
- * 五类校验项各自覆盖正 / 异 / 边界，并守住一条硬性口径：
+ * 四类校验项（2026-09-27：原第 ⑤ 类 `runtime_form` 随运行形态下架）各自覆盖
+ * 正 / 异 / 边界，并守住一条硬性口径：
  * **信息读取不到即按失败处理**，MUST NOT 视为通过。
  */
 import { describe, expect, it } from 'vitest';
@@ -36,15 +37,13 @@ function input(overrides: Partial<PrecheckInput> = {}): PrecheckInput {
     readDesign: (name) => designs.get(name) ?? null,
     index,
     toolsUnavailableReason: null,
-    runtimeForm: 'container_network',
-    endpointFor: (name) => (name === 'ocr' ? 'http://ocr:8000/mcp' : null),
     isWritable: () => true,
     ...overrides,
   };
 }
 
 describe('runPrecheck', () => {
-  it('正向：五类校验全部通过时无错误项', () => {
+  it('正向：四类校验全部通过时无错误项', () => {
     expect(runPrecheck(input())).toEqual([]);
   });
 
@@ -129,7 +128,6 @@ describe('runPrecheck', () => {
     const errors = runPrecheck(
       input({
         index: shrunk,
-        endpointFor: () => null,
         readDesign: () => design({ skills: ['ghost'] }),
       }),
     );
@@ -173,28 +171,20 @@ describe('runPrecheck', () => {
     expect(errors[0]?.code).toBe('ADM_DEPLOY_TARGET_NOT_WRITABLE');
   });
 
-  it('⑤ 运行形态：目标形态缺地址 → runtime_form，且不静默回退', () => {
-    const errors = runPrecheck(input({ runtimeForm: 'host_local', endpointFor: () => null }));
-    expect(errors).toHaveLength(1);
-    expect(errors[0]?.category).toBe('runtime_form');
-    expect(errors[0]?.code).toBe('ADM_RUNTIME_FORM_NOT_CONFIGURED');
-    expect(errors[0]?.message).toContain('host_local');
-    expect(errors[0]?.message).toContain('不会回退');
-  });
-
   it('一次性列出全部错误项（不是发现一个就停）', () => {
     const errors = runPrecheck(
       input({
         users: [
           { user_id: 'admin', agents: ['demo'] },
           { user_id: 'ops', agents: ['demo2'] },
+          { user_id: 'bad/name', agents: [] },
         ],
         readDesign: (name) => (name === 'demo' ? design({ soul: '' }) : design({ name: 'demo2' })),
         index: createReferenceIndex({ builtinTools: [], mcpServices: [], skills: [] }),
-        endpointFor: () => null,
         isWritable: () => false,
       }),
     );
+    // config_integrity / reference_validity / target_writable / name_path_safety 四类齐现
     expect(errors.length).toBeGreaterThanOrEqual(4);
     expect(new Set(errors.map((e) => e.category)).size).toBeGreaterThanOrEqual(4);
   });
@@ -222,9 +212,7 @@ describe('detectAnomalies —— 与预检同源', () => {
     const shrunk = createReferenceIndex({ builtinTools: [], mcpServices: [], skills: [] });
     const d = design();
     const anomalies = detectAnomalies(d, shrunk);
-    const errors = runPrecheck(
-      input({ index: shrunk, readDesign: () => d, endpointFor: () => 'http://x' }),
-    );
+    const errors = runPrecheck(input({ index: shrunk, readDesign: () => d }));
     expect(anomalies.map((a) => a.target_name).sort()).toEqual(
       errors.filter((e) => e.category === 'reference_validity').map((e) => e.detail).sort(),
     );

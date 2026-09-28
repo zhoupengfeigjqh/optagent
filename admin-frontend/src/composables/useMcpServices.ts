@@ -1,26 +1,31 @@
 /**
- * MCP 服务管理（US4）：列表、详情、调用配置、启停、测试、日志与统计。
+ * MCP 服务管理：列表、详情、调用配置、测试、统计，以及**新建/删除**。
+ *
+ * **2026-09-27**：MCP 服务改为平台内全人工配置，故：
+ * - 移除 `setRunning`（启停）与 `loadLogs`（运行日志）——平台不再读容器运行态；
+ * - 新增 `createService` / `removeService`。
  *
  * 统计的呈现口径（`FR-009`）：`stats_available=false` 表示**读不到**，
  * 界面 MUST 显示"未知"，MUST NOT 以 0 冒充——0 是"确实没调用过"的确定结论。
  */
 import { ref, shallowRef } from 'vue'
 import {
-  fetchMcpLogs,
+  createMcpService,
+  deleteMcpService,
   fetchMcpStats,
   getMcpService,
   listMcpServices,
   saveMcpServiceConfig,
-  startMcpService,
-  stopMcpService,
   testMcpService,
 } from '../api/mcp'
 import type {
   ErrorInfo,
-  McpLogLine,
   McpServiceConfigPayload,
+  McpServiceConfigSaved,
+  McpServiceCreatePayload,
   McpServiceDetail,
   McpServiceListItem,
+  McpStatsGroup,
   McpStatsItem,
   McpTestResult,
   Paged,
@@ -32,8 +37,9 @@ export function useMcpServices() {
   const list = shallowRef<Paged<McpServiceListItem> | null>(null)
   const detail = shallowRef<McpServiceDetail | null>(null)
   const stats = ref<McpStatsItem[]>([])
+  /** 按「服务 × 工具 × 用户」分组的统计行（2026-09-23；统计表的行） */
+  const statsGroups = ref<McpStatsGroup[]>([])
   const statsAvailable = ref(true)
-  const logs = ref<McpLogLine[]>([])
   const testResult = shallowRef<McpTestResult | null>(null)
   const loading = ref(false)
   const busy = ref(false)
@@ -65,18 +71,30 @@ export function useMcpServices() {
       const res = await fetchMcpStats()
       statsAvailable.value = res.stats_available
       stats.value = res.items
+      statsGroups.value = res.groups
     } catch {
       statsAvailable.value = false
       stats.value = []
+      statsGroups.value = []
     }
   }
 
-  async function loadLogs(name: string, limit = 50): Promise<void> {
+  /**
+   * 新建服务（2026-09-27）。成功返回保存后的完整配置（含新 `revision`）。
+   * 失败返回 `null` 并把可读原因放进 `error`（重名 → `ADM_MCP_SERVICE_EXISTS`）。
+   */
+  async function createService(
+    payload: McpServiceCreatePayload,
+  ): Promise<McpServiceConfigSaved | null> {
+    busy.value = true
     error.value = null
     try {
-      logs.value = (await fetchMcpLogs(name, limit)).items
+      return await createMcpService(payload)
     } catch (err) {
       error.value = toErrorInfo(err)
+      return null
+    } finally {
+      busy.value = false
     }
   }
 
@@ -87,12 +105,19 @@ export function useMcpServices() {
    * `detail` 可能从未加载——早期实现 `if (!detail.value) return null` 会让
    * 详情页的保存**永远静默失败**（实测缺陷，2026-09-15 修复）。
    * 兼容旧调用：不传时仍回退到本实例已加载的 detail。
+   *
+   * **不再 `loadDetail`**（2026-09-25，契约 §0.5 原则 ②）：保存响应本身即
+   * "保存后的**完整**调用配置"（含新 `revision`），回填所需的一切都在里面。
+   * 二次请求详情还会连带触发一次 MCP 服务的**实时探测**（§3.2 的工具清单），
+   * 探测抖动会让界面上依赖清单的渲染分支（复选框清单 ⇄ 手填文本框）来回切换
+   * ——这是"保存时闪一下"的第二个来源。返回 `revision` 供调用方**原地更新**，
+   * 从而保证下一次保存不报 `ADM_CONFIG_REVISION_CONFLICT`。
    */
   async function saveConfig(
     name: string,
     payload: Omit<McpServiceConfigPayload, 'revision'>,
     revision?: number,
-  ): Promise<string[] | null> {
+  ): Promise<{ affected: string[]; revision: number } | null> {
     const currentRevision = revision ?? detail.value?.revision
     if (currentRevision === undefined) return null
     busy.value = true
@@ -102,8 +127,7 @@ export function useMcpServices() {
         ...payload,
         revision: currentRevision,
       })
-      await loadDetail(name)
-      return saved.affected_agents
+      return { affected: saved.affected_agents, revision: saved.revision }
     } catch (err) {
       error.value = toErrorInfo(err)
       return null
@@ -112,14 +136,17 @@ export function useMcpServices() {
     }
   }
 
-  async function setRunning(name: string, running: boolean): Promise<boolean> {
+  /**
+   * 删除服务（2026-09-27）。
+   *
+   * 影响面提示（受影响数字人清单）由调用方**先**经 §7.1 引用查询取得并二次确认，
+   * 本方法只负责删除。
+   */
+  async function removeService(name: string): Promise<boolean> {
     busy.value = true
     error.value = null
     try {
-      if (running) await startMcpService(name)
-      else await stopMcpService(name)
-      await loadDetail(name)
-      await loadList()
+      await deleteMcpService(name)
       return true
     } catch (err) {
       error.value = toErrorInfo(err)
@@ -148,8 +175,8 @@ export function useMcpServices() {
     list,
     detail,
     stats,
+    statsGroups,
     statsAvailable,
-    logs,
     testResult,
     loading,
     busy,
@@ -157,9 +184,9 @@ export function useMcpServices() {
     loadList,
     loadDetail,
     loadStats,
-    loadLogs,
+    createService,
     saveConfig,
-    setRunning,
+    removeService,
     runTest,
   }
 }

@@ -80,6 +80,10 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
       >
         <BaseIcon name="agent" :size="16" />
       </button>
+
+      <!-- 自带数据与面板的动作位（后台产出铃铛）由调用方注入：
+           本组件保持纯展示，不引入任何业务依赖（与上面三个按钮同一取向） -->
+      <slot name="actions-extra" />
     </div>
   </header>
 </template>

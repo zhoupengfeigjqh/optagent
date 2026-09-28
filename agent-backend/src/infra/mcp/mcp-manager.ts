@@ -5,12 +5,17 @@
  * - connectAll 并发建连，单 server 失败不抛出：标记 unavailable，实例降级就绪
  * - callTool：30s（可配）超时 + 重试 1 次；server 不可用 → McpUnavailableError
  * - createClient 可注入（单测 mock transport）
+ * - **状态双向自愈（2026-09-23）**：
+ *   ① 退避重试用尽后**转入低频保活重试**（不再停止）——服务恢复后自动接回，
+ *      不必等实例换代或重启 backend；
+ *   ② 新增 `probe()` 主动健康探测——`streamable-http` 无常驻连接，服务停掉时
+ *      没有 `onClose` 可听，没有流量就发现不了（假绿）；由外层调度器定期探测补齐。
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import type { McpConnectionStatus, McpServerConfig } from '../../types.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { McpCallErrorKind, McpConnectionStatus, McpServerConfig } from '../../types.js';
 
 export class McpUnavailableError extends Error {
   constructor(server: string) {
@@ -19,10 +24,38 @@ export class McpUnavailableError extends Error {
   }
 }
 
+/**
+ * 是否为**连接级**失败（连接被拒/超时/`StreamableHTTPError` 等）。
+ *
+ * 判据与降级决策同源（见 `degradeOnTransportFailure`）：`McpError` 表示服务端活着、
+ * 已应答协议错误（参数/schema 类，如 -32602），不算连接级。对外导出以便调用点
+ * （如 `mcp-tool-adapter` 的统计埋点）复用同一规则，不各自再实现一遍。
+ */
+export function isTransportFailure(err: unknown): boolean {
+  return !(err instanceof McpError);
+}
+
+/**
+ * 把一次调用失败归类为粗粒度枚举，供观测统计落库（`McpCallEvent.errorKind`）。
+ *
+ * 刻意只分三类、**不存错误原文**（长度与脱敏不可控）——要细节去 pino 运行日志。
+ * 判定从具体到泛化：不可用 > 协议错误 > 传输/其它。
+ */
+export function classifyMcpError(err: unknown): McpCallErrorKind {
+  if (err instanceof McpUnavailableError) return 'unavailable';
+  if (err instanceof McpError) return 'protocol';
+  return 'transport';
+}
+
 export interface McpToolInfo {
   name: string;
   description?: string;
   inputSchema?: unknown;
+}
+
+/** 服务端未实现该请求方法（如"可选实现"的 `ping`）——据此切换探测手段，而非判定为故障 */
+function isMethodNotFound(err: unknown): boolean {
+  return err instanceof McpError && err.code === ErrorCode.MethodNotFound;
 }
 
 /** MCP 客户端的最小契约（SDK Client 与其兼容子集） */
@@ -35,6 +68,13 @@ export interface McpClientLike {
    * 仅在实际断线时触发；close() 主动关闭是否触发由实现保证不触发（见 defaultCreateClient）。
    */
   onClose?(cb: () => void): void;
+  /**
+   * 健康探针（可选；MCP `ping` 请求）。
+   *
+   * `ping` 在 MCP 规范里是**可选实现**，未实现的服务返回 `-32601 Method not found`——
+   * 探测方据此把该 server 记为"用 `listTools` 探测"（工具服务必然实现 `tools/list`）。
+   */
+  ping?(): Promise<unknown>;
 }
 
 export interface McpConnectResult {
@@ -73,6 +113,7 @@ async function defaultCreateClient(cfg: McpServerConfig): Promise<McpClientLike>
       };
     },
     callTool: (name, args) => client.callTool({ name, arguments: args as Record<string, unknown> }),
+    ping: () => client.ping(),
     close: async () => {
       closed = true;
       await client.close();
@@ -87,12 +128,25 @@ async function defaultCreateClient(cfg: McpServerConfig): Promise<McpClientLike>
 
 export class McpManager {
   /**
-   * 断线/建连失败后的主动重连退避表（共 5 次，约 3 分钟窗口）：
-   * 覆盖"server 重启、网络抖动"这一最常见恢复窗口；全部失败后停止后台重试，
-   * 之后由 callTool/listTools 的惰性补试在"下次真正使用时"顺势恢复（零后台成本）。
-   * 重连成功即清零计数——时好时坏的 server 不会被永久拉黑。
+   * 断线/建连失败后的**快节奏**重连退避表（共 5 次，约 3 分钟）：
+   * 覆盖"server 重启、网络抖动"这一最常见恢复窗口。重连成功即清零计数——
+   * 时好时坏的 server 不会被永久拉黑。
    */
   private static readonly RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 60_000];
+
+  /**
+   * 退避表用尽后的**保活重试**间隔（2026-09-23 修正）。
+   *
+   * 旧实现"重试 5 次后彻底停止"，并声称由 `callTool/listTools` 的惰性补试兜底——
+   * 但那条兜底**实际不成立**：`agent-factory` 每轮装配工具时先判
+   * `if (!mcp.isAvailable(server)) continue;`，而 `isAvailable` 在 `markUnavailable`
+   * 时已为 false → `listTools`/`callTool` 根本不会被调用 → 惰性补试永远没有机会执行。
+   * 结果是服务恢复后状态与工具**永久停在不可用**，只能靠实例换代（空闲回收/重启）恢复。
+   *
+   * 故改为：退避用尽后进入低频保活重试，服务恢复会在一个周期内自动接回
+   * （对齐 gRPC/Envoy 的"指数退避 + 封顶 + 持续重试"，而不是"重试 N 次后放弃"）。
+   */
+  private static readonly KEEPALIVE_RETRY_MS = 120_000;
 
   private readonly clients = new Map<string, McpClientLike>();
   private readonly unavailableSet = new Set<string>();
@@ -102,6 +156,8 @@ export class McpManager {
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   /** 同 server 重连去重（定时器与惰性补试可能并发触发） */
   private readonly reconnecting = new Map<string, Promise<boolean>>();
+  /** 不支持 `ping` 的 server（首次探测遇到 -32601 后记下，后续直接用 listTools 探测） */
+  private readonly pingUnsupported = new Set<string>();
   private closed = false;
   private readonly timeoutMs: number;
   private readonly logger: { warn(msg: string): void } | undefined;
@@ -155,16 +211,35 @@ export class McpManager {
     this.scheduleRetry(server);
   }
 
-  /** 安排下一次主动重连；退避表用尽后停止（此后靠惰性补试） */
+  /**
+   * 安排下一次主动重连。
+   *
+   * 先按快节奏退避表（5s/15s/30s/60s/60s）覆盖"服务重启"这一常见窗口；
+   * **用尽后不停**，转入 `KEEPALIVE_RETRY_MS` 低频保活——这是"服务恢复后能自动接回"
+   * 的唯一保障（惰性补试被 `isAvailable` 短路挡住，见常量注释）。
+   */
   private scheduleRetry(server: string): void {
     if (this.closed || this.retryTimers.has(server)) return;
     const attempt = this.retryAttempts.get(server) ?? 0;
     const delay = McpManager.RETRY_DELAYS_MS[attempt];
     if (delay === undefined) {
-      this.logger?.warn(`MCP server ${server} 重连 ${attempt} 次均失败，停止后台重试（下次使用时再试）`);
+      // 首次进入保活档才告警，避免每 2 分钟刷一条日志
+      if (attempt === McpManager.RETRY_DELAYS_MS.length) {
+        this.logger?.warn(
+          `MCP server ${server} 重连 ${attempt} 次均失败，转入保活重试（每 ${
+            McpManager.KEEPALIVE_RETRY_MS / 1000
+          }s，服务恢复后自动接回）`,
+        );
+      }
+      this.retryAttempts.set(server, attempt + 1);
+      this.scheduleTimer(server, McpManager.KEEPALIVE_RETRY_MS);
       return;
     }
     this.retryAttempts.set(server, attempt + 1);
+    this.scheduleTimer(server, delay);
+  }
+
+  private scheduleTimer(server: string, delay: number): void {
     const timer = setTimeout(() => {
       this.retryTimers.delete(server);
       void this.tryReconnect(server);
@@ -231,6 +306,53 @@ export class McpManager {
   }
 
   /**
+   * 主动健康探测（2026-09-23 新增）：对本实例**已连接**的 server 各发一次轻量探针。
+   *
+   * 为什么需要：`streamable-http` 是无状态请求/响应，服务被停掉时没有 `onClose` 可听；
+   * 若此时恰好没有工具调用，状态会恒为 connected（假绿），直到下次调用才发现。
+   * 由外层调度器定期调用本方法，即可补齐"停机能被及时发现"。
+   *
+   * 探针优先级：MCP `ping`（最轻）→ 该 server 未实现 `ping`（`-32601`）时记下并改用
+   * `listTools`（工具服务必然实现 `tools/list`）。探测失败且属**连接级**错误才降级
+   * （复用 `degradeOnTransportFailure`，协议类 `McpError` 不误判为故障）。
+   *
+   * 不可用的 server 不在这里处理——它们由保活重连负责（见 `scheduleRetry`）。
+   *
+   * @returns 本次探测中状态**翻转为 failed** 的 server 名（供调度方日志与测试断言）
+   */
+  async probe(): Promise<string[]> {
+    if (this.closed) return [];
+    const changed: string[] = [];
+    await Promise.all(
+      [...this.clients.keys()].map(async (server) => {
+        const client = this.clients.get(server);
+        if (!client) return;
+        try {
+          await this.probeOne(server, client);
+        } catch (err) {
+          this.degradeOnTransportFailure(server, err, '健康探测失败');
+          if (this.statusOf(server) === 'failed') changed.push(server);
+        }
+      }),
+    );
+    return changed;
+  }
+
+  /** 单 server 探针：优先 `ping`；未实现则记下并回退 `listTools` */
+  private async probeOne(server: string, client: McpClientLike): Promise<void> {
+    if (client.ping && !this.pingUnsupported.has(server)) {
+      try {
+        await this.withTimeout(client.ping());
+        return;
+      } catch (err) {
+        if (!isMethodNotFound(err)) throw err;
+        this.pingUnsupported.add(server);
+      }
+    }
+    await this.withTimeout(client.listTools());
+  }
+
+  /**
    * 单服务连接状态（FR-019）：`clients` 命中 → connected；`unavailableSet` 命中 → failed；
    * 两者皆无 → unknown（首次建连进行中，或未纳入建连）。
    * 建连为异步 fire-and-forget，故必须区分"尚无结果"与"建连失败"。
@@ -285,7 +407,7 @@ export class McpManager {
    * 降级重连对活服务只会造成状态抖动。
    */
   private degradeOnTransportFailure(server: string, err: unknown, reason: string): void {
-    if (err instanceof McpError) return;
+    if (!isTransportFailure(err)) return;
     this.markUnavailable(server, reason);
   }
 

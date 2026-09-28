@@ -19,7 +19,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   OPT_AGENT_ROOT: z.string().min(1).default('.opt-agent'),
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
-  IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(600_000),
+  IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_800_000),
   MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(30_000),
   /**
    * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。

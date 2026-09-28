@@ -14,28 +14,24 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
-import {
-  SPACE_PREP,
-  SPACE_SHARED,
-  SPACE_TMP,
-  ScenarioNotConfiguredError,
-  loadScenario,
-  userAgentsDir,
-} from '../domain/dirs.js';
+import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
   AgentConfigBundle,
   LlmEvent,
+  McpCallEvent,
   McpConfirmation,
   McpConnectionStatus,
+  McpServerConfig,
   ModelSelection,
   PoolKey,
 } from '../types.js';
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
-import { mintSignedUrl } from './file-sign.js';
+import { mintPutUrl, mintSignedUrl } from './file-sign.js';
 import { wrapToolWithInteraction } from './tool-intercept.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
+import type { AsyncToolContext } from './mcp/async-result-url.js';
 import { McpManager } from './mcp/mcp-manager.js';
 import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
 
@@ -49,6 +45,11 @@ export interface ChatAgent extends PooledInstance {
   unavailableMcp(): string[];
   /** 单服务连接状态（FR-019）：建连结果未产生前为 `unknown`，不误报为 `failed` */
   mcpStatusOf(server: string): McpConnectionStatus;
+  /**
+   * 主动健康探测（2026-09-23）：由 `server.ts` 的调度器定期调用，补齐
+   * "服务被停掉但无流量、`onClose` 不触发"导致的假绿；返回本次翻转为 failed 的服务名。
+   */
+  probeMcp(): Promise<string[]>;
   run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
 }
 
@@ -69,8 +70,8 @@ export interface AgentFactoryDeps {
   fileSignSecret: string;
   /** 实例内 MCP 单 server 建连落定时回调（server.ts 接线到事件总线 → SSE 推送） */
   onMcpStatus?: (key: PoolKey) => void;
-  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb。第三参为调用发起用户 */
-  onMcpCall?: (serviceName: string, ok: boolean, userId?: string) => void;
+  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb */
+  onMcpCall?: (event: McpCallEvent) => void;
 }
 
 export class AgentInstanceFactory {
@@ -105,6 +106,7 @@ export class AgentInstanceFactory {
       lastActiveAt: Date.now(),
       unavailableMcp: () => mcp.unavailable(),
       mcpStatusOf: (server) => mcp.statusOf(server),
+      probeMcp: () => mcp.probe(),
       dispose: () => mcp.closeAll(),
       run: (req) => this.runWith(instance, mcp, req),
     };
@@ -146,6 +148,12 @@ export class AgentInstanceFactory {
           threadId: req.threadId,
           enabled: inst.config.enabledTools,
           availableDirs,
+          // 技能目录（数字人级）：`read_skill` 的沙箱根，与用户三空间分开、不经 FileAccess
+          skillsDir: path.join(
+            userAgentsDir(this.deps.root, inst.key.userId),
+            inst.key.agentName,
+            'skills',
+          ),
           logger,
         }),
       );
@@ -179,6 +187,7 @@ export class AgentInstanceFactory {
           fileCtx,
           this.deps.onMcpCall,
           logger,
+          asyncToolContext(server, inst.key.userId, req.threadId, this.deps),
         );
         // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
         // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
@@ -249,23 +258,30 @@ export class AgentInstanceFactory {
 }
 
 /**
- * list_dir/read_file 可用的目录清单：数据准备子目录（**该数字人** scenario 定义）
- * + 共享空间 + 临时空间。
+ * 异步工具的注入依赖（R11）：服务声明了 `async_tools` 才构造，否则返回 `undefined`
+ * （工具装配侧走"不注入"分支，行为与改造前完全一致）。
  *
- * 场景随数字人存放，故同一用户的不同数字人清单可以不同。
+ * 回写地址**每次调用现铸**（而非装配期铸一次）：`exp` 从调用时刻起算更贴合"任务最长时长"，
+ * 且能把 `call_id` 与工具全名作为**归属提示参数**写进 URL——服务只需原样回传，
+ * 产出即可接回具体对话与那一次调用（契约 §10.3）。
  */
-function listAvailableDirs(root: string, userId: string, agentName: string): string[] {
-  try {
-    const scenario = loadScenario(root, userId, agentName);
-    return [
-      ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
-      SPACE_SHARED,
-      SPACE_TMP,
-    ];
-  } catch (err) {
-    if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP];
-    throw err;
-  }
+function asyncToolContext(
+  server: McpServerConfig,
+  userId: string,
+  threadId: string,
+  deps: AgentFactoryDeps,
+): AsyncToolContext | undefined {
+  const tools = server.asyncTools;
+  if (!tools || tools.length === 0) return undefined;
+  return {
+    tools,
+    mintResultUrl: (toolName: string, toolCallId: string) =>
+      mintPutUrl(deps.publicBaseUrl, deps.fileSignSecret, userId, PRODUCED_DIR, {
+        sid: threadId,
+        callId: toolCallId,
+        tool: `${server.name}__${toolName}`,
+      }),
+  };
 }
 
 /** 该服务是否需要任何交互确认（never/缺省 = 否） */

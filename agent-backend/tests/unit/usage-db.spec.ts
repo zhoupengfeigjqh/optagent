@@ -132,34 +132,73 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
     }
   })
 
-  it('可记录 MCP 调用并读回统计：累计 + 四个时间窗（任务 2026-09-15）', () => {
+  it('可记录 MCP 调用并读回统计：分组行四个时间窗 + 服务级汇总（任务 2026-09-15）', () => {
     const db = new UsageDb(path.join(dir, 'usage.db'))
     try {
-      db.recordMcpCall('ocr', true)
-      db.recordMcpCall('ocr', false)
-      const stats = db.mcpCallStats()
-      expect(stats).toHaveLength(1)
-      const item = stats[0]!
-      // 累计口径不变
-      expect(item.name).toBe('ocr')
-      expect(item.calls_total).toBe(2)
-      expect(item.calls_ok).toBe(1)
-      expect(item.calls_failed).toBe(1)
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 12, userId: 'admin' })
+      db.recordMcpCall({
+        service: 'ocr',
+        tool: 'ocr_image',
+        ok: false,
+        durationMs: 30,
+        errorKind: 'transport',
+        userId: 'admin',
+      })
+      const { items, groups } = db.mcpCallStats()
+
+      // 分组行：一行一个「服务 × 工具 × 用户」，时间窗挂在这一层
+      expect(groups).toHaveLength(1)
+      expect(groups[0]).toMatchObject({
+        service: 'ocr',
+        tool_name: 'ocr_image',
+        user_id: 'admin',
+        calls_total: 2,
+      })
       // 刚记录的调用落在所有时间窗内：各窗 total=2 / ok=1 / failed=1
       for (const key of ['h24', 'd7', 'd30', 'd365'] as const) {
-        expect(item.windows[key]).toEqual({ ok: 1, failed: 1, total: 2 })
+        expect(groups[0]!.windows[key]).toEqual({ ok: 1, failed: 1, total: 2 })
       }
+
+      // 服务级汇总由分组行折叠而来，口径都是"最近一年"，故两者恒相等
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({ name: 'ocr', calls_total: 2, calls_ok: 1, calls_failed: 1 })
+      expect(items[0]!.calls_total).toBe(groups[0]!.windows.d365.total)
+      expect(items[0]!.last_called_at).toBe(groups[0]!.last_called_at)
     } finally {
       db.close()
     }
   })
 
-  it('无事件的服务时间窗为 0（而不是缺失字段）', () => {
-    const db = new UsageDb(path.join(dir, 'usage.db'))
+  it('窗口内无调用时补 0 而不是缺字段：只落在 d365 的调用，短窗全为 0', () => {
+    const dbPath = path.join(dir, 'usage.db')
+    new UsageDb(dbPath).close()
+    // 直接写一条 40 天前的调用：在"最近一年"内，但不在 24h/7天/30天 内
+    const raw = new Database(dbPath)
+    raw
+      .prepare(
+        `INSERT INTO mcp_call_events
+           (service_name, tool_name, ok, called_at, user_id, thread_id, duration_ms, error_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'ocr',
+        'ocr_image',
+        1,
+        new Date(Date.now() - 40 * 86_400_000).toISOString(),
+        'admin',
+        't1',
+        5,
+        null,
+      )
+    raw.close()
+
+    const db = new UsageDb(dbPath)
     try {
-      db.recordMcpCall('ocr', true)
-      const stats = db.mcpCallStats()
-      expect(stats[0]?.windows.h24).toEqual({ ok: 1, failed: 0, total: 1 })
+      const { groups } = db.mcpCallStats()
+      expect(groups[0]!.windows.h24).toEqual({ ok: 0, failed: 0, total: 0 })
+      expect(groups[0]!.windows.d7).toEqual({ ok: 0, failed: 0, total: 0 })
+      expect(groups[0]!.windows.d30).toEqual({ ok: 0, failed: 0, total: 0 })
+      expect(groups[0]!.windows.d365).toEqual({ ok: 1, failed: 0, total: 1 })
     } finally {
       db.close()
     }
@@ -168,30 +207,36 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
   it('未出现过的服务不返回（由平台侧以 0 呈现）', () => {
     const db = new UsageDb(path.join(dir, 'usage.db'))
     try {
-      expect(db.mcpCallStats()).toEqual([])
+      expect(db.mcpCallStats()).toEqual({ items: [], groups: [] })
     } finally {
       db.close()
     }
   })
 
-  it('按用户明细：成功/失败分列聚合（2026-09-16 十四次调整）', () => {
+  it('分组行：同一服务下不同「工具 × 用户」各自成行（2026-09-23）', () => {
     const db = new UsageDb(path.join(dir, 'usage.db'))
     try {
-      db.recordMcpCall('ocr', true, 'admin')
-      db.recordMcpCall('ocr', false, 'admin')
-      db.recordMcpCall('ocr', true, 'zpf')
-      const [item] = db.mcpCallStats()
-      expect(item!.calls_total).toBe(3)
-      const byUser = new Map(item!.users.map((user) => [user.user_id, user]))
-      expect(byUser.get('admin')).toMatchObject({ calls_ok: 1, calls_failed: 1, calls_total: 2 })
-      expect(byUser.get('admin')!.last_called_at).not.toBeNull()
-      expect(byUser.get('zpf')).toMatchObject({ calls_ok: 1, calls_failed: 0, calls_total: 1 })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 1, userId: 'admin' })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: false, durationMs: 1, userId: 'admin' })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_pdf', ok: true, durationMs: 1, userId: 'zpf' })
+      const { items, groups } = db.mcpCallStats()
+
+      // 排序：服务 → 工具 → 用户
+      expect(groups.map((group) => [group.service, group.tool_name, group.user_id])).toEqual([
+        ['ocr', 'ocr_image', 'admin'],
+        ['ocr', 'ocr_pdf', 'zpf'],
+      ])
+      expect(groups[0]).toMatchObject({ calls_ok: 1, calls_failed: 1, calls_total: 2 })
+      expect(groups[0]!.last_called_at).not.toBeNull()
+      // 服务级汇总 = 该服务各分组行之和
+      expect(items).toHaveLength(1)
+      expect(items[0]).toMatchObject({ name: 'ocr', calls_ok: 2, calls_failed: 1, calls_total: 3 })
     } finally {
       db.close()
     }
   })
 
-  it('旧库迁移：无 user_id 列的事件表打开即补列，老行归入"未归属"（不丢历史）', () => {
+  it('旧库迁移：老 schema 的事件表打开即补齐新增列，老行归入"未归属"（不丢历史）', () => {
     const dbPath = path.join(dir, 'usage.db')
     // 手工建一个"十四次调整之前"的老-schema 库（事件表没有 user_id 列）
     const legacy = new Database(dbPath)
@@ -208,12 +253,24 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
 
     const db = new UsageDb(dbPath)
     try {
-      db.recordMcpCall('ocr', true, 'admin')
-      const [item] = db.mcpCallStats()
-      // 老行（user_id 补列后为 NULL）与新行各自归组，两边都不丢
-      const byUser = new Map(item!.users.map((user) => [user.user_id, user]))
-      expect(byUser.get(null)).toMatchObject({ calls_ok: 1, calls_total: 1 })
-      expect(byUser.get('admin')).toMatchObject({ calls_ok: 1, calls_total: 1 })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 8, userId: 'admin' })
+      const { items, groups } = db.mcpCallStats()
+      // 老行补列后三个维度都是 NULL：单独成组，而不是从统计里消失（`null` 排在该维度最前）
+      expect(groups).toHaveLength(2)
+      expect(groups[0]).toMatchObject({
+        service: 'ocr',
+        tool_name: null,
+        user_id: null,
+        calls_total: 1,
+      })
+      expect(groups[1]).toMatchObject({
+        service: 'ocr',
+        tool_name: 'ocr_image',
+        user_id: 'admin',
+        calls_total: 1,
+      })
+      // 服务级汇总把两类行都算进来（不丢历史）
+      expect(items[0]).toMatchObject({ name: 'ocr', calls_total: 2, calls_ok: 2 })
     } finally {
       db.close()
     }
@@ -222,10 +279,10 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
   it('未传 userId 的调用归入"未归属"（user_id 为 null）', () => {
     const db = new UsageDb(path.join(dir, 'usage.db'))
     try {
-      db.recordMcpCall('ocr', true)
-      const [item] = db.mcpCallStats()
-      expect(item!.users).toEqual([
-        expect.objectContaining({ user_id: null, calls_ok: 1, calls_total: 1 }),
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 3 })
+      const { groups } = db.mcpCallStats()
+      expect(groups).toEqual([
+        expect.objectContaining({ user_id: null, tool_name: 'ocr_image', calls_ok: 1, calls_total: 1 }),
       ])
     } finally {
       db.close()
@@ -239,5 +296,75 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
     db.close()
     // 正常文件系统上不会回退，因此不应出现该警示（守住"不误报"）
     expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('事件明细落全字段：工具名 / 会话 / 耗时 / 错误分类（2026-09-23）', () => {
+    const dbPath = path.join(dir, 'usage.db')
+    const db = new UsageDb(dbPath)
+    db.recordMcpCall({
+      service: 'ocr',
+      tool: 'ocr_image',
+      ok: false,
+      durationMs: 1234,
+      errorKind: 'transport',
+      userId: 'admin',
+      threadId: 't1',
+    })
+    db.close()
+
+    const raw = new Database(dbPath)
+    try {
+      const row = raw.prepare(`SELECT * FROM mcp_call_events`).get() as Record<string, unknown>
+      expect(row).toMatchObject({
+        service_name: 'ocr',
+        // 工具名是 MCP 服务自己的名字，**不带**暴露给模型的 `ocr__` 前缀
+        tool_name: 'ocr_image',
+        ok: 0,
+        duration_ms: 1234,
+        error_kind: 'transport',
+        user_id: 'admin',
+        thread_id: 't1',
+      })
+      expect(row.called_at).toEqual(expect.any(String))
+    } finally {
+      raw.close()
+    }
+  })
+
+  it('成功的调用不留错误分类（避免"有 error_kind 但 ok=1"的歧义行）', () => {
+    const dbPath = path.join(dir, 'usage.db')
+    const db = new UsageDb(dbPath)
+    // 即便调用方传了 errorKind，成功时也必须清空
+    db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 5, errorKind: 'transport' })
+    db.close()
+
+    const raw = new Database(dbPath)
+    try {
+      const row = raw.prepare(`SELECT ok, error_kind FROM mcp_call_events`).get() as {
+        ok: number
+        error_kind: string | null
+      }
+      expect(row.ok).toBe(1)
+      expect(row.error_kind).toBeNull()
+    } finally {
+      raw.close()
+    }
+  })
+
+  it('按工具分组：同一服务下的不同工具分别成行（2026-09-23 下钻粒度）', () => {
+    const db = new UsageDb(path.join(dir, 'usage.db'))
+    try {
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: true, durationMs: 10 })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_image', ok: false, durationMs: 20 })
+      db.recordMcpCall({ service: 'ocr', tool: 'ocr_pdf', ok: true, durationMs: 30 })
+      const { items, groups } = db.mcpCallStats()
+      const byTool = new Map(groups.map((group) => [group.tool_name, group]))
+      expect(byTool.get('ocr_image')).toMatchObject({ calls_ok: 1, calls_failed: 1, calls_total: 2 })
+      expect(byTool.get('ocr_pdf')).toMatchObject({ calls_ok: 1, calls_failed: 0, calls_total: 1 })
+      expect(byTool.get('ocr_image')!.last_called_at).toEqual(expect.any(String))
+      expect(items[0]).toMatchObject({ name: 'ocr', calls_total: 3 })
+    } finally {
+      db.close()
+    }
   })
 })

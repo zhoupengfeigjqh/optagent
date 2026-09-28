@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
-import { SPACE_PREP, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
+import { PRODUCED_DIR, SPACE_PREP, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
 
 export class PermissionError extends Error {
@@ -143,10 +143,16 @@ export class FileAccess {
     return new PermissionError(message);
   }
 
-  /** 读文本文件（utf8），超 truncateBytes 截断；tmp 文件刷新访问时间（7 天清理依据） */
+  /**
+   * 读文本文件（utf8），超 truncateBytes 截断；tmp 文件刷新访问时间（7 天清理依据）。
+   *
+   * `touch: false` 用于**清单类扫描**（后台产出的 sidecar）：那种读是"为了列表"而非
+   * "为了内容"，若也续命，则每轮对话注入产出清单都会刷新 atime，产出**永远不会过期**
+   * （契约 §10.4 的 7 天口径随之失效）。
+   */
   async read(
     relPath: string,
-    opts?: { offset?: number | undefined; limit?: number | undefined },
+    opts?: { offset?: number | undefined; limit?: number | undefined; touch?: boolean },
   ): Promise<{ content: string; truncated: boolean; totalSize: number }> {
     const abs = this.resolveSafe(relPath);
     let buf: Buffer;
@@ -159,7 +165,8 @@ export class FileAccess {
     const offset = opts?.offset ?? 0;
     const limit = Math.min(opts?.limit ?? this.truncateBytes, this.truncateBytes);
     const slice = buf.subarray(offset, offset + limit);
-    if (relPath.split(path.sep)[0] === SPACE_TMP || relPath.startsWith(`${SPACE_TMP}/`)) {
+    const inTmp = relPath.split(path.sep)[0] === SPACE_TMP || relPath.startsWith(`${SPACE_TMP}/`);
+    if (opts?.touch !== false && inTmp) {
       const now = new Date();
       await fs.promises.utimes(abs, now, now).catch(() => {});
     }
@@ -199,6 +206,31 @@ export class FileAccess {
     const abs = this.resolveSafe(relPath);
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content, 'utf8');
+    return relPath;
+  }
+
+  /**
+   * **后台产出写入**（R11，契约 §10.3 / §10.6 不变式 4）：MCP 服务回写结果的唯一落点。
+   *
+   * 与 `write`（Agent 的 `write_file`）**分属两条权限**，互不放开：
+   * - `write`：临时空间**顶层**、强制 `{threadId}_` 前缀（模型可写）
+   * - 本方法：**只允许** `临时空间/后台产出/`，文件名由调用方按 `{prefix}_{jobId}.{ext}` 拼好
+   *
+   * 路径安全仍由 `resolveSafe` 统一兜住（顶层白名单 / `..` / 符号链接 / realpath），
+   * 因此即便回写签名被伪造，也写不到 `后台产出/` 以外的任何位置。
+   */
+  async writeProduced(dir: string, filename: string, content: Buffer): Promise<string> {
+    if (dir !== PRODUCED_DIR) {
+      throw this.deny(`后台产出只允许写入 ${PRODUCED_DIR}，拒绝: ${dir}`);
+    }
+    const base = path.basename(filename);
+    if (base !== filename || base === '' || base.includes('..')) {
+      throw this.deny(`后台产出文件名非法: ${filename}`);
+    }
+    const relPath = `${PRODUCED_DIR}/${base}`;
+    const abs = this.resolveSafe(relPath);
+    await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+    await fs.promises.writeFile(abs, content);
     return relPath;
   }
 

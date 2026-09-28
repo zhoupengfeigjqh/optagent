@@ -11,22 +11,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DeployPanel from './DeployPanel.vue'
 
-const fetchSettings = vi.fn().mockResolvedValue({ target_runtime_form: 'container_network', revision: 7 })
-const fetchRuntimeForms = vi.fn().mockResolvedValue({
-  items: [
-    { value: 'container_network', label: '容器编排内网' },
-    { value: 'host_local', label: '宿主机本地' },
-  ],
-})
+const fetchManifest = vi.fn().mockResolvedValue({ items: [], total: 0, revision: 7 })
 const validateDeploy = vi.fn()
 const deployApi = vi.fn()
-
-vi.mock('../../api/platform', () => ({
-  fetchSettings: (...a: unknown[]) => fetchSettings(...a),
-  fetchRuntimeForms: (...a: unknown[]) => fetchRuntimeForms(...a),
-  saveSettings: vi.fn(),
-  fetchHealth: vi.fn(),
-}))
 
 vi.mock('../../api/deploy', () => ({
   validateDeploy: (...a: unknown[]) => validateDeploy(...a),
@@ -34,7 +21,7 @@ vi.mock('../../api/deploy', () => ({
   fetchReferences: vi.fn(),
   fetchAnomalies: vi.fn(),
   fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
+  fetchManifest: (...a: unknown[]) => fetchManifest(...a),
 }))
 
 function mountPanel(selectedUserIds: string[] = ['admin']) {
@@ -59,13 +46,6 @@ beforeEach(() => {
 })
 
 describe('DeployPanel', () => {
-  it('展示目标运行形态与可选的形态切换（FR-057）', async () => {
-    const wrapper = mountPanel()
-    await flushPromises()
-    expect(wrapper.text()).toContain('当前目标运行形态')
-    expect(wrapper.text()).toContain('宿主机本地')
-  })
-
   it('展示本次范围（来自勾选的部署对象）', async () => {
     const wrapper = mountPanel(['admin', 'ops'])
     await flushPromises()
@@ -108,7 +88,7 @@ describe('DeployPanel', () => {
     validateDeploy.mockResolvedValue({
       passed: false,
       errors: [
-        { user_id: 'admin', agent_name: 'demo', category: 'runtime_form', code: 'ADM_RUNTIME_FORM_NOT_CONFIGURED', message: '缺少目标形态地址' },
+        { user_id: 'admin', agent_name: 'demo', category: 'config_integrity', code: 'VALIDATION_FAILED', message: 'SOUL 为空' },
         { user_id: 'ops', agent_name: 'demo2', category: 'reference_validity', code: 'ADM_AGENT_INVALID_REF', message: '引用了清单外的工具 ghost' },
       ],
     })
@@ -121,7 +101,7 @@ describe('DeployPanel', () => {
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(2)
     expect(wrapper.text()).toContain('运行环境零写入')
-    expect(wrapper.text()).toContain('缺少目标形态地址')
+    expect(wrapper.text()).toContain('SOUL 为空')
     expect(wrapper.text()).toContain('引用了清单外的工具 ghost')
     // 校验未通过 → 部署按钮保持不可用（阻止部署）
     expect(deployButton(wrapper)?.attributes('disabled')).toBeDefined()
@@ -145,7 +125,6 @@ describe('DeployPanel', () => {
   it('部署带上勾选的用户，且成功后发出 deployed', async () => {
     validateDeploy.mockResolvedValue({ passed: true, errors: [] })
     deployApi.mockResolvedValue({
-      target_runtime_form: 'container_network',
       users: [
         { user_id: 'admin', ok: true, agents: [{ name: 'demo', action: 'written', ok: true }] },
         { user_id: 'ops', ok: false, agents: [], error: '目标不可写' },

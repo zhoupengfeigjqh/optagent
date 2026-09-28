@@ -1,9 +1,13 @@
 /**
  * 错误码常量与中文文案映射表（唯一映射表）。
  *
- * 与 `contracts/admin-api.md` §0.4 的 **24 个**错误码逐行对应：
- * 4 个复用既有码 + 20 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
+ * 与 `contracts/admin-api.md` §0.4 的 **21 个**错误码逐行对应：
+ * 4 个复用既有码 + 17 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
  * （面向开发者且不稳定），一律按 `code` 分派。
+ *
+ * **2026-09-27**：`ADM_MCP_SERVICE_UNMANAGED` / `ADM_RUNTIME_FORM_NOT_CONFIGURED` /
+ * `ADM_DOCKER_UNAVAILABLE` / `ADM_COMPOSE_FILE_UNREADABLE` 随 MCP 全人工配置下架；
+ * 新增 `ADM_MCP_SERVICE_EXISTS`（新建重名）。
  *
  * 未知码回退通用文案并**保留原码**，便于排查。
  */
@@ -26,9 +30,8 @@ export const ADMIN_ERROR_CODES = {
   ADM_SKILL_NOT_FOUND: 'ADM_SKILL_NOT_FOUND',
 
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
-  ADM_MCP_SERVICE_UNMANAGED: 'ADM_MCP_SERVICE_UNMANAGED',
+  ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
 
-  ADM_RUNTIME_FORM_NOT_CONFIGURED: 'ADM_RUNTIME_FORM_NOT_CONFIGURED',
   ADM_DEPLOY_VALIDATION_FAILED: 'ADM_DEPLOY_VALIDATION_FAILED',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
 
@@ -36,8 +39,6 @@ export const ADMIN_ERROR_CODES = {
   ADM_USER_NOT_FOUND: 'ADM_USER_NOT_FOUND',
 
   ADM_CONFIG_REVISION_CONFLICT: 'ADM_CONFIG_REVISION_CONFLICT',
-  ADM_DOCKER_UNAVAILABLE: 'ADM_DOCKER_UNAVAILABLE',
-  ADM_COMPOSE_FILE_UNREADABLE: 'ADM_COMPOSE_FILE_UNREADABLE',
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
 } as const
@@ -63,9 +64,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   ADM_SKILL_NOT_FOUND: '共享技能库中不存在该 SKILL',
 
   ADM_MCP_SERVICE_NOT_FOUND: 'MCP 服务不存在',
-  ADM_MCP_SERVICE_UNMANAGED: '该服务不在容器编排声明内，不允许启停',
+  ADM_MCP_SERVICE_EXISTS: 'MCP 服务名称已存在，请换一个名称',
 
-  ADM_RUNTIME_FORM_NOT_CONFIGURED: '有 MCP 服务缺少当前目标运行形态的连接地址，请先补齐',
   ADM_DEPLOY_VALIDATION_FAILED: '部署前校验未通过，已阻止部署，请按错误清单逐条修复',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: '部署目标位置不可写，请检查目录权限',
 
@@ -74,8 +74,6 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // 同时用于调用配置保存与技能文件保存：两者都是"内容被并发改过"，文案不偏向任一方
   ADM_CONFIG_REVISION_CONFLICT: '内容已被他处修改，请刷新后重试',
-  ADM_DOCKER_UNAVAILABLE: '无法访问宿主机 Docker，请确认 Docker 已启动且 socket 已挂载',
-  ADM_COMPOSE_FILE_UNREADABLE: '无法读取容器编排声明，请确认 docker-compose.yml 已挂载',
   ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可写，请检查 .platform-data 目录',
   ADM_RUNTIME_UNREACHABLE: '运行环境不可达（内置工具目录／调用统计读取失败）',
 }

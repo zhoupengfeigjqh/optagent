@@ -1,7 +1,8 @@
 /**
- * 单元测试：MCP 服务级配置（`FR-044`、`FR-056`，`data-model.md` §3.2）
+ * 单元测试：MCP 服务级配置（`FR-044`，`data-model.md` §3.2）
  *
- * 覆盖"同一服务只有一份配置"、按运行形态分别声明地址、以及五类校验的边界。
+ * 覆盖"同一服务只有一份配置"、**单一连接地址**（2026-09-27：取消按运行形态
+ * 分形态声明）、新建/删除，以及五类校验的边界。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,12 +20,15 @@ let configs: McpServiceConfigService;
 const BASE = {
   description: 'OCR 识别服务',
   transport: 'http' as const,
-  endpoints: { container_network: 'http://ocr:8000/mcp' },
+  url: 'http://ocr:8000/mcp',
   file_args: { ocr_image: { image: 'url' } },
 };
 
+/** 建立或更新 'ocr'（多数用例只关心"保存后读到什么"，故两条路径合并） */
 function upsert(overrides: Record<string, unknown> = {}): void {
-  configs.upsert('ocr', { ...BASE, ...overrides }, store.revision());
+  const input = { ...BASE, ...overrides };
+  if (configs.exists('ocr')) configs.upsert('ocr', input, store.revision());
+  else configs.create({ name: 'ocr', ...input });
 }
 
 beforeEach(() => {
@@ -65,8 +69,8 @@ describe('读写与索引', () => {
   });
 
   it('listAll 按名称排序（列表稳定）', () => {
-    configs.upsert('zeta', BASE, store.revision());
-    configs.upsert('alpha', BASE, store.revision());
+    configs.create({ name: 'zeta', ...BASE });
+    configs.create({ name: 'alpha', ...BASE });
     expect(configs.listAll().map((c) => c.name)).toEqual(['alpha', 'zeta']);
   });
 
@@ -75,11 +79,34 @@ describe('读写与索引', () => {
     expect(configs.listAll()).toEqual([]);
   });
 
-  it('endpointFor 只返回该形态的非空地址（缺形态返回 null，供部署前校验拦截）', () => {
-    upsert({ endpoints: { container_network: 'http://ocr:8000/mcp' } });
-    expect(configs.endpointFor('ocr', 'container_network')).toBe('http://ocr:8000/mcp');
-    expect(configs.endpointFor('ocr', 'host_local')).toBeNull();
-    expect(configs.endpointFor('ghost', 'container_network')).toBeNull();
+  it('url 是单一连接地址（读回原值）', () => {
+    upsert();
+    expect(configs.read('ocr').url).toBe('http://ocr:8000/mcp');
+  });
+
+  it('存量迁移：旧文档的 endpoints 多形态对象收敛为单一 url（优先"宿主机本地"）', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          url: undefined,
+          endpoints: {
+            container_network: 'http://ocr:8000/mcp',
+            host_local: 'http://127.0.0.1:8000/mcp',
+          },
+        },
+      },
+    });
+    expect(configs.read('ocr').url).toBe('http://127.0.0.1:8000/mcp');
+  });
+
+  it('存量迁移：只有一种形态时取该形态的值', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: { ...BASE, url: undefined, endpoints: { container_network: 'http://ocr:8000/mcp' } },
+      },
+    });
+    expect(configs.read('ocr').url).toBe('http://ocr:8000/mcp');
   });
 
   it('保存时递增 revision（乐观锁）', () => {
@@ -130,33 +157,33 @@ describe('校验', () => {
     expect(saved.args).toBeNull();
   });
 
-  it('endpoints 至少一个形态（FR-056）', () => {
+  it('http 时 url 必填（缺省 / 空串 / 纯空白 → VALIDATION_FAILED）', () => {
     let caught: unknown;
     try {
-      upsert({ endpoints: {} });
+      upsert({ url: '' });
     } catch (err) {
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.VALIDATION_FAILED);
-    expect((caught as ApiError).message).toContain('至少需要一个运行形态的连接地址');
+    expect((caught as ApiError).message).toContain('url 必填');
+
+    expect(() => upsert({ url: '   ' })).toThrow(ApiError);
   });
 
-  it('endpoints 非对象 / 地址为空 → VALIDATION_FAILED', () => {
-    expect(() => upsert({ endpoints: 'http://x' })).toThrow(ApiError);
-    expect(() => upsert({ endpoints: { host_local: '   ' } })).toThrow(ApiError);
+  it('url 须为 http(s) 绝对地址（typo 挡在保存期）', () => {
+    expect(() => upsert({ url: 'ocr:8000/mcp' })).toThrow(ApiError);
+    expect(() => upsert({ url: 'ws://ocr:8000/mcp' })).toThrow(ApiError);
+  });
+
+  it('stdio 时 url 无意义：丢弃（与 http 丢弃 command/args 对称）', () => {
+    upsert({ transport: 'stdio', command: 'python' });
+    expect(configs.read('ocr').url).toBeNull();
   });
 
   it('stdio 时 command 必填；给出 command 后可保存并保留 args', () => {
-    expect(() => upsert({ transport: 'stdio', endpoints: { container_network: 'stdio' } })).toThrow(
-      ApiError,
-    );
+    expect(() => upsert({ transport: 'stdio' })).toThrow(ApiError);
 
-    upsert({
-      transport: 'stdio',
-      endpoints: { container_network: 'stdio' },
-      command: 'python',
-      args: ['-u', 'srv.py'],
-    });
+    upsert({ transport: 'stdio', command: 'python', args: ['-u', 'srv.py'] });
     const saved = configs.read('ocr');
     expect(saved.command).toBe('python');
     expect(saved.args).toEqual(['-u', 'srv.py']);
@@ -265,10 +292,11 @@ describe('校验', () => {
 
   it('保存失败时**不递增** revision（失败不留痕）', () => {
     const before = store.revision();
-    expect(() => upsert({ endpoints: {} })).toThrow(ApiError);
+    expect(() => upsert({ url: '' })).toThrow(ApiError);
     expect(store.revision()).toBe(before);
   });
 });
+
 
 describe('调用确认策略（HITL confirmation）', () => {
   it('缺省为 never（存量行为不变）', () => {
@@ -354,5 +382,97 @@ describe('算法规则参数设置（rules_fields，按工具映射）', () => {
       },
     });
     expect(configs.read('ocr').rules_fields).toEqual({ optimize: 'rules' });
+  });
+
+  it('对象路径：支持嵌套字段（如 input.targetPriorities），去空白后原样读取', () => {
+    upsert({ rules_fields: { hd_scheduling_submit: ' input.targetPriorities ' } });
+
+    expect(configs.read('ocr').rules_fields).toEqual({
+      hd_scheduling_submit: 'input.targetPriorities',
+    });
+  });
+
+  it('非法路径（数组段 / 空段）→ VALIDATION_FAILED（typo 挡在保存期）', () => {
+    for (const path of ['items[].rules', 'a..b', 'a.', '.a']) {
+      expect(() => upsert({ rules_fields: { optimize: path } })).toThrow(ApiError);
+    }
+  });
+
+  it('历史存档里的非法路径：读取时丢弃，避免物化进运行环境让整只数字人加载失败', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          rules_fields: { good: 'input.targetPriorities', bad: 'items[].rules' },
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(configs.read('ocr').rules_fields).toEqual({ good: 'input.targetPriorities' });
+  });
+});
+
+describe('异步工具声明（async_tools，R11）', () => {
+  it('缺省 → []（不启用异步，存量行为不变）', () => {
+    upsert();
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('保存工具名数组：去空白后按原样读取（顺序保持）', () => {
+    upsert({ async_tools: [' submit_job ', 'get_status'] });
+    expect(configs.read('ocr').async_tools).toEqual(['submit_job', 'get_status']);
+  });
+
+  it('显式空数组可保存（语义与缺省同为"不启用"）', () => {
+    upsert({ async_tools: [] });
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('非数组 / 元素非非空字符串 / 重复 → VALIDATION_FAILED，且不写入', () => {
+    for (const bad of ['submit_job', 42, [42], ['  '], ['a', 'a'], [null]]) {
+      expect(() => upsert({ async_tools: bad })).toThrow(ApiError);
+    }
+    expect(configs.readOrNull('ocr')).toBeNull(); // 一次都没保存成功
+  });
+
+  it('重复项的报错文案指出工具名（便于自查）', () => {
+    let caught: unknown;
+    try {
+      upsert({ async_tools: ['submit_job', 'submit_job'] });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as Error).message).toContain('重复');
+    expect((caught as Error).message).toContain('submit_job');
+  });
+
+  it('只校验语法、不校验工具清单（服务不可达时也保存得进去，与 rules_fields 同取向）', () => {
+    // 工具清单是**探测结果**：拿不到清单不构成配置错误，否则"服务抖动"会变成"配置改不了"
+    upsert({ async_tools: ['not_in_current_catalog'] });
+    expect(configs.read('ocr').async_tools).toEqual(['not_in_current_catalog']);
+  });
+
+  it('历史存档无该字段：读取时容错收敛为 []（不阻断存量文档）', () => {
+    store.writeJson('mcp-services.json', {
+      items: { ocr: { ...BASE, updated_at: '2026-01-01T00:00:00.000Z' } },
+    });
+
+    expect(configs.read('ocr').async_tools).toEqual([]);
+  });
+
+  it('历史存档里的残缺值（非数组 / 含非串 / 空串 / 重复）：读取时过滤收敛', () => {
+    store.writeJson('mcp-services.json', {
+      items: {
+        ocr: {
+          ...BASE,
+          async_tools: ['keep', 42, '  ', null, 'keep'],
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(configs.read('ocr').async_tools).toEqual(['keep']);
   });
 });

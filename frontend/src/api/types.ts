@@ -4,8 +4,11 @@
  * 与 `specs/001-agent-chat-ui/contracts/backend-api.md` 一一对应，字段名与后端 JSON 保持一致
  * （下划线命名，不做法语化重命名，降低契约映射成本）。
  *
- * ⚠️ `Message` **不得**包含思考内容与工具调用字段——从类型层面杜绝落历史（V-04、FR-023、SC-018）。
- * 思考与工具调用仅存在于本轮 SSE 流中（见 `StreamEvent`），不随消息持久化。
+ * ⚠️ `Message` 仍**不含思考内容**——思考只在 SSE 流中存在、不落历史（V-04、FR-023、SC-018）。
+ *
+ * 工具调用记录（002 特性）与之不同：它随消息经 `tool_calls` 下发（元数据 + 内联小结果），
+ * 超阈值的结果正文存于临时空间，由 `/api/threads/{id}/tool-calls/{call_id}` 按需拉取；
+ * 记录的生命周期与会话一致，**刷新后仍可见**。
  */
 
 /* ============================================================
@@ -139,9 +142,50 @@ export type MessageRole = 'user' | 'assistant'
 export type MessageStatus = 'completed' | 'failed'
 
 /**
+ * 一次工具调用的记录（002 特性）。
+ *
+ * - 元数据（`name` / `status` / `duration_ms` / `size`）恒有；`status==='running'`
+ *   表示该调用没有留下结束事件（进程中途退出），界面渲染为"未完成"
+ * - `content` 有值 = 结果正文已内联下发（小结果）
+ * - `artifact_size` 有值 = 正文在临时空间，需拉 `ToolCallResult` 才可见；
+ *   正文可能已被清理（此时接口返回 410，卡片降级为"内容已过期"）
+ * - `args_digest` 是**入参短标量摘要**：入参原文不落盘、不下发
+ */
+export interface ToolCallRecord {
+  call_id: string
+  name: string
+  status: 'running' | 'success' | 'error'
+  /** ISO8601 */
+  started_at: string
+  duration_ms?: number
+  /** 结果字节数 */
+  size?: number
+  /** 内联结果正文（小结果随详情一起下发） */
+  content?: string
+  /** 外置正文的字节数（有值即需按需拉取） */
+  artifact_size?: number
+  /** 结果被单条落盘上限截断 */
+  truncated?: boolean
+  /** 规则提取的摘要（外置结果的卡片标题） */
+  summary?: string
+  /** 入参短标量摘要 */
+  args_digest?: Record<string, string>
+}
+
+/** `GET /api/threads/{id}/tool-calls/{call_id}` 响应（外置正文全文）。 */
+export interface ToolCallResult {
+  call_id: string
+  name: string
+  status: 'running' | 'success' | 'error'
+  size: number
+  content: string
+  truncated?: boolean
+}
+
+/**
  * 会话消息。
  *
- * 注意：**不含**思考内容与工具调用信息（V-04、SC-018）。
+ * 注意：**不含**思考内容（V-04、SC-018）；工具调用记录经 `tool_calls` 下发。
  */
 export interface Message {
   /** 消息标识（反馈接口使用；旧数据由服务端合成） */
@@ -164,6 +208,8 @@ export interface Message {
    * 一个会话可跨多个数字人（切换后在下一轮生效）；旧数据可能缺省。
    */
   agent_name?: string
+  /** 本轮的工具调用记录（仅该轮确有调用时返回；旧数据无） */
+  tool_calls?: ToolCallRecord[]
   /** 恒返回，默认 `null` */
   feedback: FeedbackValue
   /** 仅 `status === 'failed'` */

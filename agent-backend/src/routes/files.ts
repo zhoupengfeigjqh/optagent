@@ -43,6 +43,7 @@ import { removeFileSafe } from '../domain/fs-safe.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { verifyRef } from '../infra/file-sign.js';
+import { registerFilePutRoute } from './files-put.js';
 
 /** 内联预览 Content-Type 映射；.xlsx 前端无法内联渲染，回退附件下载 */
 const PREVIEW_CONTENT_TYPES: Record<string, string> = {
@@ -150,6 +151,8 @@ const rawQuerySchema = {
 } as const;
 
 export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void {
+  // R11：后台产出回写端点（实现见 `files-put.ts`）
+  registerFilePutRoute(app, ctx);
   app.post('/api/files/upload', async (req, reply) => {
     const userId = getCurrentUser().userId;
     if (!req.isMultipart())

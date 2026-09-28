@@ -13,8 +13,9 @@ services:
     build: ./gateway
     container_name: optagent-gateway
     ports:
-      # 宿主机对外端口可用根 .env 的 GATEWAY_HOST_PORT 覆盖（compose 插值，缺省 82）
-      - "${GATEWAY_HOST_PORT:-82}:80"
+      # 宿主机对外端口固定 82（2026-09-23：取消根 .env 插值——编排层不再有可变项，
+      # 端口调整直接改本文件。原 GATEWAY_HOST_PORT 的实际取值与默认值等价，无迁移成本）
+      - "82:80"
     depends_on:
       - frontend
       - backend
@@ -44,11 +45,32 @@ services:
     # 向宿主机发布 8000：本地直跑（非 Docker）的 backend 经 LAN IP 访问 OCR
     ports:
       - "8000:8000"
-    environment:
-      # SSRF 防护：backend（全 Docker 形态）+ 宿主机 LAN IP（签名 URL 回源校验用）。
-      # IP 可用根 .env 的 HOST_LAN_IP 覆盖（compose 插值，缺省 192.168.0.145），
-      # 必须与 agent-backend/.env 的 PUBLIC_BASE_URL 主机一致
-      - OCR_URL_ALLOW_HOSTS=backend,${HOST_LAN_IP:-192.168.0.145}
+    # 可调项（下载上限、超时）都有代码缺省值；本机私产放 .env.local（gitignore，缺失不报错）。
+    # 2026-09-28：回源 host 白名单（OCR_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
+    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名（也无需三处配置对齐）。
+    env_file:
+      - path: ./ocr-service/.env.local
+        required: false
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Jev 决策 MCP 服务：TypeSafe System One（state + 类型化问题 → 结构化决策），仅内网
+  # 无共享存储：引用文件时经签名直链回源 backend 下载（与 OCR 同一套机制）
+  jev:
+    build: ./jev-service
+    container_name: optagent-jev
+    # 向宿主机发布 8001：本地直跑（非 Docker）的 backend 经 LAN IP 访问 Jev
+    # 端口固定 8001（2026-09-23：取消根 .env 插值，编排层不再有可变项）
+    ports:
+      - "8001:8000"
+    # 本机私产放 .env.local（gitignore）：TYPESAFE_API_KEY、上游端点与超时等；
+    # 缺失不报错（Key 缺省时服务照常启动，三个工具返回可读错误）。
+    # 首次：cp jev-service/.env.example jev-service/.env.local 并填入 Key。
+    # 2026-09-28：回源 host 白名单（JEV_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
+    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名。
+    env_file:
+      - path: ./jev-service/.env.local
+        required: false
     restart: unless-stopped
     logging: *default-logging
 
@@ -79,9 +101,9 @@ services:
     logging: *default-logging
 
   # ---- 数字人管理平台：管理服务 ----
-  # 风险登记（research.md D3）：挂载 docker.sock **等价于授予宿主机 root 权限**，
-  # 故本容器可访问的 Docker 操作限定为「容器状态/日志查询 + 白名单内 start/stop」，
-  # 收口在 infra/docker-host.ts 单一模块，**不暴露任意 API 透传**。
+  # 2026-09-27：MCP 服务改为**平台内全人工配置**，平台不再读容器编排声明、
+  # 也不再读 Docker 容器状态，故本服务**不再挂载 docker.sock，也不再挂载
+  # docker-compose.yml**（原有的容器状态/日志/启停能力已整体下架）。
   admin-backend:
     build: ./admin-backend
     container_name: optagent-admin-backend
@@ -97,10 +119,6 @@ services:
       - ./admin-backend/.platform-data:/app/.platform-data
       # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
       - ./agent-backend/.opt-agent:/app/.opt-agent
-      # 编排声明（只读投影，FR-043）
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
-      # 容器状态/日志/启停（风险见上方注释）
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - backend
     restart: unless-stopped

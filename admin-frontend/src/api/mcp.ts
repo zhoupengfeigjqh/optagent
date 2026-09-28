@@ -1,14 +1,16 @@
 /**
- * MCP 服务 API（`contracts/admin-api.md` §3.1~§3.8）。
+ * MCP 服务 API（`contracts/admin-api.md` §3.1~§3.6）。
+ *
+ * **2026-09-27**：MCP 服务改为**平台内全人工配置**，新增新建/删除两个接口；
+ * 启停（`/start`、`/stop`）与运行日志（`/logs`）随"不再读容器运行态"整体下架。
  */
 import { http } from './http'
 import type {
-  McpLogLine,
   McpServiceConfigPayload,
   McpServiceConfigSaved,
+  McpServiceCreatePayload,
   McpServiceDetail,
   McpServiceListItem,
-  McpServiceStatusResponse,
   McpStatsResponse,
   McpTestResult,
   Paged,
@@ -22,6 +24,11 @@ export function getMcpService(name: string): Promise<McpServiceDetail> {
   return http.get<McpServiceDetail>(`/api/admin/mcp/services/${encodeURIComponent(name)}`)
 }
 
+/** 新建服务（§3.3）；名称由管理员指定且全局唯一（重名 → `ADM_MCP_SERVICE_EXISTS`） */
+export function createMcpService(payload: McpServiceCreatePayload): Promise<McpServiceConfigSaved> {
+  return http.post<McpServiceConfigSaved>('/api/admin/mcp/services', payload)
+}
+
 /** 保存调用配置；响应含 `affected_agents`（`FR-044`：自动作用于所有引用者） */
 export function saveMcpServiceConfig(
   name: string,
@@ -33,12 +40,14 @@ export function saveMcpServiceConfig(
   )
 }
 
-export function startMcpService(name: string): Promise<McpServiceStatusResponse> {
-  return http.post<McpServiceStatusResponse>(`/api/admin/mcp/services/${encodeURIComponent(name)}/start`)
-}
-
-export function stopMcpService(name: string): Promise<McpServiceStatusResponse> {
-  return http.post<McpServiceStatusResponse>(`/api/admin/mcp/services/${encodeURIComponent(name)}/stop`)
+/**
+ * 删除服务（2026-09-27）。
+ *
+ * 被数字人引用时**不阻止删除**，但调用方 MUST 先经 §7.1 引用查询列出受影响清单
+ * 并二次确认（原"关闭前提示引用"的能力迁移到删除上）。
+ */
+export function deleteMcpService(name: string): Promise<void> {
+  return http.del<void>(`/api/admin/mcp/services/${encodeURIComponent(name)}`)
 }
 
 /**
@@ -49,7 +58,7 @@ export function stopMcpService(name: string): Promise<McpServiceStatusResponse> 
  */
 export interface McpProbePayload {
   transport: string
-  endpoints: Record<string, string>
+  url?: string
   command?: string
   args?: string[]
 }
@@ -58,17 +67,6 @@ export function testMcpService(name: string, probe?: McpProbePayload): Promise<M
   return http.post<McpTestResult>(
     `/api/admin/mcp/services/${encodeURIComponent(name)}/test`,
     probe,
-  )
-}
-
-export function fetchMcpLogs(
-  name: string,
-  /** 默认 50 条（与日志查看器的默认值一致）；上限 500 */
-  limit = 50,
-): Promise<{ items: McpLogLine[]; truncated: boolean }> {
-  return http.get<{ items: McpLogLine[]; truncated: boolean }>(
-    `/api/admin/mcp/services/${encodeURIComponent(name)}/logs`,
-    { limit },
   )
 }
 

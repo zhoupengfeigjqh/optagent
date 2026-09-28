@@ -2,7 +2,7 @@
  * 集成测试：内置工具目录端点（T042，`plan.md` R2 / `contracts/runtime-api-delta.md` §2）
  *
  * 覆盖：
- * - 结构合法、`total = 5`、字段齐备（`FR-011`）
+ * - 结构合法、`total = 6`、字段齐备（`FR-011`）；含 2026-09-23 新增的 `read_skill`
  * - `description_template` **保持占位符形态**，未被替换为具体用户/会话取值
  *   （`FR-012`、`SC-014`：模板中出现的具体用户目录名或会话标识数量 MUST 为 0）
  * - 只读、无副作用
@@ -49,13 +49,15 @@ afterAll(async () => {
 })
 
 describe('GET /api/builtin-tools', () => {
-  it('返回可枚举目录：5 项、字段齐备、total 一致', async () => {
+  it('返回可枚举目录：6 项、字段齐备、total 一致', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/builtin-tools' })
 
     expect(res.statusCode).toBe(200)
     const body = res.json() as { items: ToolItem[]; total: number }
-    expect(body.total).toBe(5)
-    expect(body.items).toHaveLength(5)
+    expect(body.total).toBe(6)
+    expect(body.items).toHaveLength(6)
+    // 2026-09-23 新增：技能文件读取（此前 SKILL 正文无任何读取通道）
+    expect(body.items.map((i) => i.name)).toContain('read_skill')
     for (const item of body.items) {
       expect(typeof item.name).toBe('string')
       expect(typeof item.label).toBe('string')

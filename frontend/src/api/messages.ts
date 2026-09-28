@@ -81,6 +81,9 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
 
     case SSE_EVENT.INTERACTION_REQUEST: {
       const schema = asRecord(payload.schema) ?? { type: 'object', properties: {} }
+      // 可选字段"有才写"：与后端不写空壳的同一口径（缺省即不出现，而不是空串）
+      const toolDescription = asString(payload.tool_description)
+      const rulesField = asString(payload.rules_field)
       return {
         type: 'interaction_request',
         data: {
@@ -94,6 +97,11 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
             ? payload.required.filter((r): r is string => typeof r === 'string')
             : [],
           timeout_seconds: asNumber(payload.timeout_seconds, 300),
+          // 以下两项曾在逐字段构造时漏映射（本函数**不是**透传，漏了就静默丢）：
+          // 2026-09-23 修复——`rules_field` 丢失会让「从算法规则选择」入口永不出现，
+          // `tool_description` 丢失会让弹窗头部少一句工具说明。
+          ...(toolDescription !== '' ? { tool_description: toolDescription } : {}),
+          ...(rulesField !== '' ? { rules_field: rulesField } : {}),
         },
       }
     }

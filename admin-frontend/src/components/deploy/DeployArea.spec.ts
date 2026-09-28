@@ -14,8 +14,7 @@ const httpGet = vi.fn()
 const validateDeploy = vi.fn()
 const deployApi = vi.fn()
 const fetchDeployHistoryMock = vi.fn()
-const fetchSettings = vi.fn()
-const fetchRuntimeForms = vi.fn()
+const fetchManifestMock = vi.fn()
 
 vi.mock('../../api/http', () => ({
   http: { get: (...a: unknown[]) => httpGet(...a), put: vi.fn(), post: vi.fn(), del: vi.fn() },
@@ -34,14 +33,7 @@ vi.mock('../../api/deploy', () => ({
   fetchAnomalies: vi.fn(),
   fetchReferences: vi.fn(),
   fetchDeployHistory: (...a: unknown[]) => fetchDeployHistoryMock(...a),
-  fetchManifest: vi.fn(),
-}))
-
-vi.mock('../../api/platform', () => ({
-  fetchSettings: (...a: unknown[]) => fetchSettings(...a),
-  fetchRuntimeForms: (...a: unknown[]) => fetchRuntimeForms(...a),
-  saveSettings: vi.fn(),
-  fetchHealth: vi.fn(),
+  fetchManifest: (...a: unknown[]) => fetchManifestMock(...a),
 }))
 
 vi.mock('../../api/agents', () => ({
@@ -82,12 +74,8 @@ beforeEach(() => {
   validateDeploy.mockReset()
   deployApi.mockReset()
   fetchDeployHistoryMock.mockReset().mockResolvedValue({ items: [], truncated: false })
-  fetchSettings
-    .mockReset()
-    .mockResolvedValue({ target_runtime_form: 'container_network', revision: 7 })
-  fetchRuntimeForms
-    .mockReset()
-    .mockResolvedValue({ items: [{ value: 'container_network', label: '容器编排内网' }] })
+  // 部署的乐观锁版本取自清单端点（2026-09-27：不再有 /platform/settings）
+  fetchManifestMock.mockReset().mockResolvedValue({ items: [], total: 0, revision: 7 })
 })
 
 describe('DeployArea —— 勾选部署对象', () => {
@@ -108,7 +96,6 @@ describe('DeployArea —— 勾选部署对象', () => {
   it('预检与部署只带**勾选的那些**用户（多勾多带）', async () => {
     validateDeploy.mockResolvedValue({ passed: true, errors: [] })
     deployApi.mockResolvedValue({
-      target_runtime_form: 'container_network',
       users: [],
       manifest_diff: [],
       history_id: 'h1',
@@ -162,7 +149,6 @@ describe('DeployArea —— 勾选部署对象', () => {
   it('部署成功后重新拉取用户列表（卡片要显示"已部署 + 最近一次时间"）', async () => {
     validateDeploy.mockResolvedValue({ passed: true, errors: [] })
     deployApi.mockResolvedValue({
-      target_runtime_form: 'container_network',
       users: [{ user_id: 'admin', ok: true, agents: [] }],
       manifest_diff: [],
       history_id: 'h1',

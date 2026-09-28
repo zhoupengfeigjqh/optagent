@@ -10,11 +10,12 @@
  * 只用一个隐藏 `<input type="file">`：点击目录时记录目标目录并触发文件选择，
  * `change` 时把 `{ dir, files }` 交给上层（多选由 `useUploads` 逐文件各发一次请求）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { ScenarioField, WorkspaceSpace } from '../../api/types'
 import type { UploadedDocument } from '../../composables/useUploads'
 import BaseIcon from '../common/BaseIcon.vue'
+import HintTip from '../common/HintTip.vue'
 import UploadItem from './UploadItem.vue'
 
 const props = withDefaults(
@@ -38,31 +39,6 @@ const emit = defineEmits<{
 const inputRef = ref<HTMLInputElement | null>(null)
 /** 本次文件选择的目标目录（相对空间路径） */
 const activeDir = ref<string | null>(null)
-/** 当前展开字段约束提示的目录（同一时刻最多一个；null 表示全部收起） */
-const openHintDir = ref<string | null>(null)
-
-/** 点击「?」切换提示浮层（阻止冒泡，避免触发外层关闭逻辑） */
-function toggleHint(dir: string, event: MouseEvent): void {
-  event.stopPropagation()
-  openHintDir.value = openHintDir.value === dir ? null : dir
-}
-
-/** 点击面板其余任意位置收起浮层 */
-function onDocumentClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement | null
-  if (!target?.closest('.upload-menu__hint-btn, .upload-menu__hint-pop')) {
-    openHintDir.value = null
-  }
-}
-
-// 仅在有浮层展开时挂 document 监听（flush: 'pre' 保证本次点击不会误触发关闭）
-watch(openHintDir, (open) => {
-  if (open) {
-    document.addEventListener('click', onDocumentClick)
-  } else {
-    document.removeEventListener('click', onDocumentClick)
-  }
-})
 
 /** 当前目标空间允许的文件类型（input accept 用） */
 const activeAccept = computed(() => {
@@ -126,23 +102,12 @@ function fieldHint(fields: readonly ScenarioField[]): string {
               <BaseIcon name="folder" :size="14" />
               <span class="upload-menu__dir-label">{{ directory.label }}</span>
             </button>
-            <button
+            <!-- 表头要求收进「?」：默认不占版面（与 HITL 弹窗共用同一组件） -->
+            <HintTip
               v-if="directory.fields.length > 0"
-              type="button"
-              class="upload-menu__hint-btn"
-              :aria-expanded="openHintDir === directory.dir"
-              aria-label="查看表头要求"
-              @click="toggleHint(directory.dir, $event)"
-            >
-              ?
-            </button>
-            <div
-              v-if="openHintDir === directory.dir"
-              class="upload-menu__hint-pop"
-              role="tooltip"
-            >
-              {{ fieldHint(directory.fields) }}
-            </div>
+              :text="fieldHint(directory.fields)"
+              label="查看表头要求"
+            />
           </div>
         </li>
       </ul>
@@ -211,47 +176,8 @@ function fieldHint(fields: readonly ScenarioField[]): string {
 }
 
 .upload-menu__dir-row {
-  position: relative;
   display: flex;
   align-items: center;
-}
-
-.upload-menu__hint-btn {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.upload-menu__hint-btn:hover,
-.upload-menu__hint-btn[aria-expanded='true'] {
-  border-color: var(--color-text-muted);
-  color: var(--color-text);
-}
-
-.upload-menu__hint-pop {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: var(--space-2);
-  z-index: 10;
-  max-width: min(320px, 90vw);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 12%));
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  line-height: 1.4;
-  white-space: normal;
-  word-break: break-all;
 }
 
 .upload-menu__dir-button {

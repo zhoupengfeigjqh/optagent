@@ -1,5 +1,5 @@
 /**
- * 部署前校验（`FR-027`、`FR-057`、`SC-020`，`data-model.md` §7.2）。
+ * 部署前校验（`FR-027`、`SC-020`，`data-model.md` §7.2）。
  *
  * 三条硬性口径：
  * 1. **只读**——在任何写入发生**之前**执行；
@@ -8,14 +8,17 @@
  * 3. **校验所需信息读取不到时按失败处理**，MUST NOT 视为通过
  *    （否则"读不到"会伪装成"没问题"）。
  *
- * 五类校验项：
+ * 四类校验项：
  * | # | 类别 | 内容 |
  * |---|---|---|
  * | ① | `config_integrity` | SOUL 非空；五类配置无缺字段 |
- * | ② | `reference_validity` | 三类引用均存在于统一清单 |
+ * | ② | `reference_validity` | 三类引用均存在于统一清单（含"被引用的 MCP 服务已被删除"） |
  * | ③ | `name_path_safety` | 数字人名、用户标识不含路径分隔符或 `..` |
  * | ④ | `target_writable` | 目标位置可写 |
- * | ⑤ | `runtime_form` | 每个被引用 MCP 服务在**目标运行形态**下有地址 |
+ *
+ * **2026-09-27**：原第 ⑤ 类 `runtime_form`（"目标运行形态下有地址"）随运行形态
+ * 概念一并下架——MCP 连接地址是**单一 url**，其有效性已由 ② 的引用有效性
+ * 覆盖（服务不存在即失败），且 `http` 服务的 url 在保存期即必填。
  */
 import { ERROR_CODES } from '../error-codes.js';
 import { detectAnomalies } from '../config-center/references.js';
@@ -23,14 +26,12 @@ import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { isSafeName } from '../config-center/naming.js';
 import { scenarioFieldIssues } from '../config-center/scenario.js';
 import type { ReferenceIndex } from '../config-center/reference-index.js';
-import type { RuntimeForm } from '../platform-settings.js';
 
 export type PrecheckCategory =
   | 'config_integrity'
   | 'reference_validity'
   | 'name_path_safety'
-  | 'target_writable'
-  | 'runtime_form';
+  | 'target_writable';
 
 export interface PrecheckError {
   user_id: string;
@@ -53,9 +54,6 @@ export interface PrecheckInput {
   index: ReferenceIndex;
   /** 内置工具目录不可得的原因（非 `null` 即"信息读取不到"） */
   toolsUnavailableReason: string | null;
-  runtimeForm: RuntimeForm;
-  /** 目标运行形态下的连接地址；缺该形态返回 `null` */
-  endpointFor(serviceName: string): string | null;
   /** 目标目录是否可写（注入以便单测；缺省用 fs 探测） */
   isWritable(userId: string): boolean;
 }
@@ -188,22 +186,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
             code: ERROR_CODES.ADM_AGENT_INVALID_REF,
             message: anomaly.detail,
             detail: anomaly.target_name,
-          });
-        }
-      }
-
-      // ⑤ 运行形态地址齐备（FR-056 / FR-057）
-      for (const serviceName of design.mcp_services ?? []) {
-        if (input.endpointFor(serviceName) === null) {
-          errors.push({
-            user_id: user.user_id,
-            agent_name: agentName,
-            category: 'runtime_form',
-            code: ERROR_CODES.ADM_RUNTIME_FORM_NOT_CONFIGURED,
-            message:
-              `MCP 服务 ${serviceName} 缺少目标运行形态（${input.runtimeForm}）的连接地址，` +
-              `已阻止部署（不会回退到其他形态的地址）`,
-            detail: serviceName,
           });
         }
       }

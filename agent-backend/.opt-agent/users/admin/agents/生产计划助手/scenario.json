@@ -186,7 +186,7 @@
     ],
     "算法规则": [
       {
-        "name": "ruleCode",
+        "name": "ruleId",
         "type": "string",
         "required": true
       },
@@ -196,8 +196,8 @@
         "required": false
       },
       {
-        "name": "priority",
-        "type": "string",
+        "name": "rulePriority",
+        "type": "integer",
         "required": true
       }
     ]
