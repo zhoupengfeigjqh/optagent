@@ -27,6 +27,8 @@ coverage-*/
 # 无法 merge；写入仓库只会造成噪声，对使用者零价值）与 *.log（下方规则已覆盖）。
 *.db-wal
 *.db-shm
+.opt-agent/
+admin-backend/.platform-data/
 # 2026-09-20 起分层（见 README 配置地图）：
 #   .env              形态配置（无密钥，随仓库入库）
 #   .env.local        本机私产（密钥/局域网 IP，gitignore，不入库）

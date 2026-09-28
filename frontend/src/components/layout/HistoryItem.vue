@@ -9,7 +9,7 @@
  *   故由 `HistorySidebar` 依"存在进行中会话 + 该项为活跃项"派生后传入（契约超集）
  * - 右侧提供「删除」入口（默认淡出，悬停 / 聚焦时显形；`opacity` 不影响可聚焦性，
  *   键盘用户仍可通过 Tab 到达）：本组件只上报 `remove`，**二次确认**与删除后的
- *   "切换到相邻会话或空态"由 `App.vue` 编排（`backend-api.md` §3.5）
+ *   "切换到相邻会话或空态"由 `views/WorkbenchView.vue` 编排（`backend-api.md` §3.5）
  */
 import { computed } from 'vue'
 

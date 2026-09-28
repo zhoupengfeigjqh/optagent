@@ -44,6 +44,11 @@ const emit = defineEmits<{
   switch: [agentName: string]
 }>()
 
+const openValue = computed({
+  get: () => props.open,
+  set: (val) => emit('update:open', val)
+})
+
 /** 预览中的数字人名称；`null` = 详情区展示当前选中 */
 const previewName = ref<string | null>(null)
 
@@ -100,7 +105,8 @@ function onSwitch(name: string): void {
 </script>
 
 <template>
-  <BaseDialog class="agent-panel" :open="open" title="数字人" @close="emit('close')">
+  <!-- <BaseDialog class="agent-panel" :open="open" title="数字人" @close="emit('close')"> -->
+    <a-modal v-model:open="openValue" title="数字人" @cancel="emit('close')" :width="600" :footer="null">
     <section class="agent-panel__detail">
       <p v-if="displayed === null" class="agent-panel__hint">尚未选择数字人</p>
 
@@ -184,7 +190,9 @@ function onSwitch(name: string): void {
       </ul>
       <p v-else class="agent-panel__hint">暂无可切换的数字人</p>
     </section>
-  </BaseDialog>
+    </a-modal>
+
+  <!-- </BaseDialog> -->
 </template>
 
 <style scoped>

@@ -1,14 +1,16 @@
 import { fileURLToPath, URL } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), tailwindcss()],
 
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '#': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
 
@@ -24,6 +26,14 @@ export default defineConfig({
         target: 'http://127.0.0.1:3000',
         changeOrigin: true,
       },
+      '/dataApi': {
+          //后端服务地址（与 minimalist-vue3 一致）
+          target: 'http://192.168.0.188:8080',
+          //允许跨域
+          changeOrigin: true,
+          //规则匹配，去掉前缀转发
+          rewrite: path => path.replace(/^\/dataApi/, '/api'),
+        },
     },
   },
 
