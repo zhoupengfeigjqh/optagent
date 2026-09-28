@@ -39,13 +39,13 @@
           "items[].excelFileUrl": "url:from=items[].realRelativePath"
         }
       },
-      "rules_fields": {
-        "hd_scheduling_submit": "input.targetPriorities"
-      },
       "confirmation": {
         "tools": [
           "hd_scheduling_submit"
         ]
+      },
+      "rules_fields": {
+        "hd_scheduling_submit": "input.targetPriorities"
       }
     }
   ]

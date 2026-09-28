@@ -60,6 +60,29 @@
       "rules_fields": {},
       "async_tools": [],
       "updated_at": "2026-09-27T15:33:49.304Z"
+    },
+    "hd-algorithm": {
+      "name": "hd-algorithm",
+      "description": "海大数据解析和求解",
+      "transport": "http",
+      "url": "http://192.168.0.188:8080/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {
+        "hd_algorithm_input_parser": {
+          "items[].excelFileUrl": "url:from=items[].realRelativePath"
+        }
+      },
+      "confirmation": {
+        "tools": [
+          "hd_scheduling_submit"
+        ]
+      },
+      "rules_fields": {
+        "hd_scheduling_submit": "input.targetPriorities"
+      },
+      "async_tools": [],
+      "updated_at": "2026-09-28T02:32:02.433Z"
     }
   }
 }
