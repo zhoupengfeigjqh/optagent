@@ -23,6 +23,10 @@ export default tseslint.config(
       'dist/**',
       'node_modules/**',
       'coverage/**',
+      // 覆盖率**产物目录**（`coverage-verify/`、`.coverage-gate/` 等）：生成物纳入 lint 只会刷出
+      // 与源码无关的问题（2026-10-08 补，与 `admin-frontend/eslint.config.mjs` 同口径）
+      'coverage-*/**',
+      '.coverage-*/**',
       // 第三方 vendored 静态资源（甘特图组件自带的 Highcharts 及其扩展，共 22k+ 行）。
       // 它们不是本项目代码，且是压缩/老式写法：实测 1952 条问题里 1815 条出自这里
       // （1558 条 `no-unused-expressions`、156 条 `no-this-alias`），只会淹没真问题。

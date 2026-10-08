@@ -62,13 +62,14 @@ export default defineConfig({
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-09-23 实测：stmts 46.18 / branch 53.19 / funcs 35.36 / lines 45.30
-        //    （新增 HITL 表单三件套后大幅上行，地板随之抬到实测值略下方）
+        // ① 全局地板（防倒退）。2026-10-08 实测：stmts 49.70 / branch 56.76 / funcs 39.95 / lines 48.53
+        //    （工具调用折叠展示增量：`utils/tool-calls.ts` 补同名测试 + 新增 `composables/useToolPanels.ts`
+        //     后整体上行，地板随之抬到实测值略下方；上一版为 45/52/34/44 @ 2026-09-23）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 45,
-        branches: 52,
-        functions: 34,
-        lines: 44,
+        statements: 48,
+        branches: 55,
+        functions: 38,
+        lines: 47,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -85,6 +86,9 @@ export default defineConfig({
         // 后台产出展示（2026-09-25 / 26）：元数据格式化 + 正文展示解析
         'src/utils/produced-display.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/utils/produced-content.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // 工具调用的折叠展示（2026-10-08）：展示模型纯函数 + 跨组件实例的查看态
+        'src/utils/tool-calls.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 93.75 / 100 / 100
+        'src/composables/useToolPanels.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
       },
     },
   },

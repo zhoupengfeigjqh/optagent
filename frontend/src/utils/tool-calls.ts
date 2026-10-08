@@ -13,7 +13,10 @@ import type { Message, ToolCallRecord } from '../api/types'
 export interface ToolCallItem {
   callId: string
   name: string
-  /** `running` = 只有开始事件（进程中途退出），界面显示"未完成" */
+  /**
+   * `running` = 结果还没到。两种语境文案不同（见 `toolStatusLabel`）：
+   * 流式进行中 → `进行中`；非流式（中断/失败轮、历史里只有开始行的记录）→ `未完成`
+   */
   status: 'running' | 'success' | 'error'
   durationMs?: number
   /** 结果字节数 */
@@ -63,11 +66,56 @@ export function streamingToolCallItem(call: StreamingToolCall): ToolCallItem {
   return { callId: call.call_id, name: call.name, status: call.status }
 }
 
-/** 工具调用状态的中文标签。 */
-export const TOOL_STATUS_LABEL: Readonly<Record<ToolCallItem['status'], string>> = {
-  running: '进行中',
-  success: '已完成',
-  error: '失败',
+/**
+ * 工具调用状态的中文标签（文案**唯一来源**，组件 MUST NOT 各写一套）。
+ *
+ * `running` 有**两种语境**，必须分流（`TR-33`）：
+ * - `live`（本轮仍在流式进行中）：结果稍后还会到 → `进行中`
+ * - 非 `live`（中断/失败轮，或历史里只有开始行的记录）：它**不会再动** → `未完成`
+ *   —— 此时显示"进行中"是假状态，违反「MUST NOT 假装正常」（宪章原则九）
+ */
+export function toolStatusLabel(status: ToolCallItem['status'], live: boolean): string {
+  if (status === 'success') return '已完成'
+  if (status === 'error') return '失败'
+  return live ? '进行中' : '未完成'
+}
+
+/**
+ * 是否已有终态（= 是否**可展开看结果**）。
+ *
+ * 规则只有这一条来源（`TR-33`）：`running` 无论何种语境都没有结果可看，展开只会是空壳。
+ * 组件与测试都 MUST 用它判断，MUST NOT 各自写 `status !== 'running'`。
+ */
+export function isToolCallFinished(status: ToolCallItem['status']): boolean {
+  return status !== 'running'
+}
+
+/** 本轮调用的计数摘要（折叠态「本轮 N 次调用 · 报错 M 次」的唯一来源）。 */
+export interface ToolCallStats {
+  /** 调用**次数**（同一工具调两次算 2 次） */
+  total: number
+  /** 失败次数（`running` 不计入） */
+  errors: number
+}
+
+/** 统计本轮调用：总数 + 报错数（单次遍历）。 */
+export function summarizeToolCalls(items: ToolCallItem[]): ToolCallStats {
+  let errors = 0
+  for (const item of items) {
+    if (item.status === 'error') errors += 1
+  }
+  return { total: items.length, errors }
+}
+
+/**
+ * 本轮分组的稳定键 = **该轮第一次调用的 `call_id`**。
+ *
+ * 为什么不按消息 id：流式气泡的合成消息 `id` 为空串、历史消息才是真 id，用它做键会让
+ * 查看态在交接时丢失（`TR-36`）。首个 `call_id` 在两条路径上都不变——流式只追加不重排，
+ * 历史按"首次出现顺序"合并（`tool-events.readAll`）。
+ */
+export function toolGroupKey(items: ToolCallItem[]): string {
+  return items[0]?.callId ?? ''
 }
 
 /** 体积的人类可读形式（与后端 `formatBytes` 同口径，便于前后端文案一致）。 */
