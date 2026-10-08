@@ -247,9 +247,7 @@ function isOrphan(tool: string): boolean {
   <fieldset class="file-args-table">
     <legend class="field__label">URL铸造参数设置</legend>
     <p class="field__hint">
-      指明哪些入参由运行环境铸造为签名直链。工具与字段都只能下拉选择（字段来自该工具的参数
-      Schema 枚举，数组自动展开为每个元素）；「派生」表示该字段不让模型填、值从另一个字段读出后铸造。
-      已保存但当前清单/Schema 中不存在的值会作为保留项出现在下拉里；标红的行不会写入配置。
+      指明哪些入参由运行环境铸造为签名直链（若入参为文件路径，该路径需要铸造为url供agent下载），该链接也可以从另一个参数铸造。
     </p>
 
     <table v-if="rows.length > 0" class="file-args-table__grid">
@@ -335,7 +333,7 @@ function isOrphan(tool: string): boolean {
         </tr>
       </tbody>
     </table>
-    <p v-else class="field__hint">当前未配置任何文件参数映射（合法：该服务的入参不含文件）。</p>
+    <p v-else class="field__hint">当前未配置任何文件参数映射。</p>
 
     <p v-if="duplicateError !== ''" class="file-args-table__error" role="alert">
       {{ duplicateError }}

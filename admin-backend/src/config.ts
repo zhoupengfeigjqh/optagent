@@ -30,6 +30,14 @@ const envSchema = z.object({
   /** MCP 客户端超时（毫秒） */
   MCP_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
   /**
+   * 本体市场根目录（optonto 的 `.data/onto_market`，平台侧**只读**；2026-10-02）。
+   *
+   * 配置后 SKILL 管理可从市场目录直接导入技能（`/api/admin/skills/onto-market*`）；
+   * 缺省 = 该功能不可用（列表返回 `configured: false`，导入给出可读报错），不影响启动。
+   * 本地形态：`../optonto/.data/onto_market`；容器形态：只读挂载点 `/opt/onto_market`。
+   */
+  ONTO_MARKET_DIR: z.string().min(1).optional(),
+  /**
    * SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束）。
    * 改这里时 MUST 同步改：agent-backend/src/config.ts 的同名项、
    * gateway/nginx.conf 的 client_max_body_size（= 上限 + 1MB multipart 余量）。
@@ -47,6 +55,8 @@ export interface AppConfig {
   runtimeTimeoutMs: number;
   mcpTimeoutMs: number;
   uploadMaxMb: number;
+  /** 本体市场根目录（绝对路径）；未配置为 null = 导入功能不可用 */
+  ontoMarketDir: string | null;
   logLevel: string;
 }
 
@@ -88,6 +98,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     runtimeTimeoutMs: e.RUNTIME_TIMEOUT_MS,
     mcpTimeoutMs: e.MCP_TIMEOUT_MS,
     uploadMaxMb: e.UPLOAD_MAX_MB,
+    ontoMarketDir: e.ONTO_MARKET_DIR ? path.resolve(cwd, e.ONTO_MARKET_DIR) : null,
     logLevel: e.LOG_LEVEL,
   };
   return Object.freeze(config);

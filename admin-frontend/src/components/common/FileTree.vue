@@ -1,10 +1,15 @@
 <script setup lang="ts">
 /**
- * 技能文件树（只读导航，2026-09-16）。
+ * 通用只读文件树（2026-10-03 由 `skills/SkillFileTree` 抽取为共用件）。
  *
+ * 两处在用，形态必须一致（这是抽取的原因）：
+ * - SKILL 详情：`SKILL.md` + `references/` 等整包文件（选中后可编辑）；
+ * - 本体详情：`ontology.yaml` + `securities.yaml`（根层两个文件，选中后**只读**）。
+ *
+ * 口径：
  * - 层级按路径的 `/` 拆分展示，目录可折叠；
  * - 每一项都是**原生按钮**（键盘可达、焦点可见），当前项标 `aria-current`；
- * - 只负责"选哪个文件"，不负责读内容（读由父组件经只读端点完成）。
+ * - 只负责"选哪个文件"，不负责读内容（读由父组件完成）。
  */
 import { computed, ref } from 'vue'
 
@@ -17,11 +22,16 @@ interface FileNode {
   dir: string
 }
 
-const props = defineProps<{
-  files: Array<{ path: string; size: number }>
-  /** 当前选中的文件路径 */
-  selected: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    files: Array<{ path: string; size: number }>
+    /** 当前选中的文件路径 */
+    selected: string
+    /** 无障碍标签（`nav` 的 `aria-label`），如「技能文件」「本体文件」 */
+    label?: string
+  }>(),
+  { label: '文件' },
+)
 
 const emit = defineEmits<{
   (e: 'select', path: string): void
@@ -73,13 +83,13 @@ function isCollapsed(dir: string): boolean {
 </script>
 
 <template>
-  <nav class="skill-file-tree" aria-label="技能文件">
-    <ul class="skill-file-tree__list">
+  <nav class="file-tree" :aria-label="props.label">
+    <ul class="file-tree__list">
       <li v-for="row in rows" :key="'isDir' in row ? `d:${row.dir}` : `f:${row.path}`">
         <template v-if="'isDir' in row">
           <button
             type="button"
-            class="skill-file-tree__dir"
+            class="file-tree__dir"
             :style="{ paddingLeft: `${row.depth * 12 + 4}px` }"
             :aria-expanded="!isCollapsed(row.dir)"
             @click="toggle(row.dir)"
@@ -91,8 +101,8 @@ function isCollapsed(dir: string): boolean {
         <button
           v-else
           type="button"
-          class="skill-file-tree__file"
-          :class="{ 'skill-file-tree__file--active': row.path === props.selected }"
+          class="file-tree__file"
+          :class="{ 'file-tree__file--active': row.path === props.selected }"
           :style="{ paddingLeft: `${row.depth * 12 + 16}px` }"
           :aria-current="row.path === props.selected ? 'true' : undefined"
           @click="emit('select', row.path)"
@@ -105,21 +115,21 @@ function isCollapsed(dir: string): boolean {
 </template>
 
 <style scoped>
-.skill-file-tree {
+.file-tree {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-2);
   background: var(--color-bg-subtle);
 }
 
-.skill-file-tree__list {
+.file-tree__list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.skill-file-tree__dir,
-.skill-file-tree__file {
+.file-tree__dir,
+.file-tree__file {
   display: block;
   width: 100%;
   padding: var(--space-1) var(--space-2);
@@ -131,11 +141,11 @@ function isCollapsed(dir: string): boolean {
   cursor: pointer;
 }
 
-.skill-file-tree__dir {
+.file-tree__dir {
   color: var(--color-text-secondary);
 }
 
-.skill-file-tree__file--active {
+.file-tree__file--active {
   background: var(--color-bg-muted);
   font-weight: 600;
 }

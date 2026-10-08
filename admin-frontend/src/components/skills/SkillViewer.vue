@@ -21,8 +21,8 @@ import type {
 } from '../../api/types'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
+import FileTree from '../common/FileTree.vue'
 import SkillFileEditor from './SkillFileEditor.vue'
-import SkillFileTree from './SkillFileTree.vue'
 
 const props = defineProps<{
   skill: SkillDetail | null
@@ -44,6 +44,16 @@ const fileError = ref<ErrorInfo | null>(null)
 const localError = ref<ErrorInfo | null>(null)
 const affected = ref<ReferenceItem[]>([])
 const confirmDelete = ref(false)
+
+/**
+ * 本体市场来源的技能**只读**（2026-10-03 产品决定，`FR-062`）。
+ *
+ * 它是市场快照：内容只能经「从本体市场导入」窗口的**更新**整体替换，
+ * 在线编辑会悄悄偏离市场版本、并让 `origin.hash` 失去"市场是否变化"的判据意义。
+ * 后端 `SkillLibraryService.writeFile` 已硬拦截（`ADM_SKILL_READ_ONLY`），
+ * 这里只是不给编辑入口——**两层都要有**，界面不渲染编辑器，服务端才是权威。
+ */
+const readOnly = computed(() => props.skill?.origin?.kind === 'onto_market')
 
 /** 编辑区是否有未保存的修改（由 `SkillFileEditor` 回传） */
 const dirty = ref(false)
@@ -183,19 +193,29 @@ async function doDelete(): Promise<void> {
         <dd>{{ props.skill.installed_at }} / {{ props.skill.updated_at }}</dd>
         <dt>修改方式</dt>
         <dd class="muted">
-          技能内所有文件（含 references/ 等附件）都可在线编辑并保存；保存只改技能库，
-          引用了它的数字人需<strong>重新部署</strong>后才会生效。
+          <template v-if="readOnly">
+            <strong>本体市场导入的技能为只读</strong>：它是市场快照，MUST NOT 在线编辑。
+            内容如需更新，请在「从本体市场导入」窗口中对该技能执行「更新」（以市场现版本整包替换）；
+            更新后引用了它的数字人需<strong>重新部署</strong>才会生效。
+          </template>
+          <template v-else>
+            技能内所有文件（含 references/ 等附件）都可在线编辑并保存；保存只改技能库，
+            引用了它的数字人需<strong>重新部署</strong>后才会生效。
+          </template>
         </dd>
       </dl>
 
       <div class="skill-viewer__body">
-        <SkillFileTree
+        <FileTree
           class="skill-viewer__tree"
+          label="技能文件"
           :files="props.skill.files"
           :selected="selected"
           @select="requestSelect"
         />
+        <!-- 可编辑来源：编辑器；本体市场来源：只读展示（无输入控件、无保存按钮） -->
         <SkillFileEditor
+          v-if="!readOnly"
           class="skill-viewer__editor"
           :file="fileContent"
           :loading="fileLoading"
@@ -204,6 +224,22 @@ async function doDelete(): Promise<void> {
           @reload="selectFile(selected)"
           @update:dirty="dirty = $event"
         />
+        <div v-else class="skill-viewer__editor skill-viewer__readonly">
+          <p v-if="fileLoading" class="skill-viewer__readonly-note" role="status">加载中…</p>
+          <ErrorNotice v-else-if="fileError" :error="fileError" title="文件读取失败" />
+          <template v-else-if="fileContent?.content">
+            <p class="skill-viewer__readonly-note muted">
+              {{ fileContent.path }} · 只读（{{ fileContent.size }} 字节<template
+                v-if="fileContent.truncated"
+                >，已截断</template
+              >）
+            </p>
+            <pre class="skill-viewer__readonly-pre">{{ fileContent.content }}</pre>
+          </template>
+          <p v-else class="skill-viewer__readonly-note muted" role="status">
+            该文件无法以内联文本展示（二进制或超出预览上限）。
+          </p>
+        </div>
       </div>
     </template>
 
@@ -284,5 +320,26 @@ async function doDelete(): Promise<void> {
   .skill-viewer__body {
     grid-template-columns: 1fr;
   }
+}
+
+/* 只读视图（本体市场来源）：等宽全文 + 自身滚动，无任何编辑控件 */
+.skill-viewer__readonly-note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.skill-viewer__readonly-pre {
+  margin: 0;
+  padding: var(--space-3);
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

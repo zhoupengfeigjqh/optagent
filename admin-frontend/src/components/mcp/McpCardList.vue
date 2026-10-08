@@ -65,7 +65,17 @@ function transportLabel(transport: string): string {
           :aria-label="`MCP 服务 ${(item as McpServiceListItem).name}`"
         >
           <p class="card__head">
-            <span class="card__title">{{ (item as McpServiceListItem).name }}</span>
+            <span class="card__title">
+              {{ (item as McpServiceListItem).name }}
+              <span
+                v-if="(item as McpServiceListItem).has_headers"
+                class="card__badge"
+                data-test="headers-badge"
+                title="已配置请求头（通常为访问令牌）；值以掩码显示，不回显明文"
+              >
+                需请求头
+              </span>
+            </span>
           </p>
           <p class="card__description">
             {{ (item as McpServiceListItem).description || '（未填写用途描述）' }}
@@ -113,5 +123,18 @@ function transportLabel(transport: string): string {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* 「需请求头」徽标（2026-10-08）：只标"配了"，不展示任何值 */
+.card__badge {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-muted);
+  color: var(--color-status-warning);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 </style>

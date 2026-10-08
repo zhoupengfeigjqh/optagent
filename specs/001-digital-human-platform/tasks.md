@@ -977,3 +977,76 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 | `admin-frontend` 测试 | **352 passed**（33 文件） |
 
 **生效需要**：重启 `admin-backend` 与重新构建 `admin-frontend`；`docker compose up -d admin-backend`（挂载变了，必须**重建**容器而非 `restart`）。
+
+## 增量记录（2026-10-04）：jev 宿主端口 8001 → 8101（与 optonto core-backend 撞车）
+
+**症状**：`optagent-jev` 起来后 `docker ps -a` 的 PORTS 列为空，宿主 8001 访问不到 jev。
+
+**根因**（实测，非推断）：
+
+| 证据 | 结果 |
+|---|---|
+| `docker inspect optagent-jev` | `Running=false`、`ExitCode=0`、`PortBindings=8000/tcp → 宿主 8001`（**映射本身是配的**，端口列空白只因容器已退出） |
+| `docker events --filter container=optagent-jev` | `container kill signal=15` → `stop` → `die exitCode=0`：被 SIGTERM **优雅停掉**（日志有完整 `Shutting down → Application shutdown complete`），不是崩溃；`restart: unless-stopped` 对**人工停止**不再拉起 |
+| 宿主 8001 占用者 | `optonto-core-backend`（`optonto/docker-compose.yml` 声明 `"8001:8001"`，已运行 15 小时） |
+| `GET http://127.0.0.1:8001/api/ontologies` | 返回**本体列表**——即 8001 应答的是本体侧 core backend，不是 jev |
+
+**改动**：`docker-compose.yml` 的 jev 端口 `"8001:8000"` → `"8101:8000"`；`README.md` 三处同步（架构图、目录说明、平台接入指引的 `url`）。
+
+**验证**：
+
+| 项 | 结果 |
+|---|---|
+| `docker compose up -d jev` | 端口变更触发 recreate，成功；`PORTS=[0.0.0.0:8101->8000/tcp]` |
+| `POST /api/admin/mcp/probe`（`url=http://127.0.0.1:8101/mcp`） | `ok=true`，3 个工具：`noul` / `choice` / `score`（与本文档接入指引的三个工具一致） |
+| `GET http://127.0.0.1:8001/health` | `{"status":"ok"}`——optonto core-backend 不受影响，两边并存 |
+
+**影响面**：平台侧 jev 服务的 `url` MUST 用新端口 `http://<宿主 LAN IP>:8101/mcp`；本文档早前条目中出现的 `http://127.0.0.1:8001/mcp` 即本次被替换的旧地址（历史条目按原样保留，不改写）。运行环境里那份两周前部署的 `MCP.json` 仍写 8001，**下次部署会按设计态重写**，无需手工改。
+
+## 增量任务（2026-10-08）：MCP 请求头（访问令牌）—— `FR-064`
+
+**要解决的问题**：本体侧「自建发布」的动态容器要求调用方带 `X-MCP-Token`，**缺了直接 401**；平台此前没有"请求头"的概念，管理员拿到的连接片段（`{"mcpServers":{…,"headers":{…}}}`）无处安放——而新建流程第一步要"先连上"，于是这类服务**根本登记不进来**。
+
+**改动**（三层一起，缺一层都等于"配了不生效"）：
+
+| 层 | 内容 |
+|---|---|
+| 平台配置（`admin-backend`） | `McpServiceConfig.headers`（明文存、**响应只回掩码**、列表只回 `has_headers`）；保存语义 = **缺省沿用存量 / 提供即全量替换（`{}` 清空）**；`stdio` 丢弃；掩码值提交即 400。`service-config.ts` 涨到 612 行 → 判据拆到 `service-config-fields.ts`（原则二） |
+| 平台连接链路 | `mcp-client`（探测 / 测试 / 详情取工具清单）与 §3.9 探测端点都带 `headers`；§3.6 的 `target` 回显**不含**请求头（凭据） |
+| 物化与运行（`agent-backend`） | `MCP.json` 的 `servers[].headers`（**非空才写**、**明文**）；加载期 `parseHeaders`（与平台同判据）；建连 `StreamableHTTPClientTransport(url, { requestInit: { headers } })` |
+| 前端 | 新建弹窗第一步加「请求头（可选）」（探测与创建都带）；详情表单三态（查看掩码 / 编辑 / 显式清空）+ 保存回执就地刷新掩码；卡片「需请求头」徽标 |
+
+**验证（门禁全绿）**：
+
+| 项 | 结果 |
+|---|---|
+| `admin-backend` 测试 | **560 passed**（41 文件；含新增 `tests/unit/mcp-headers.spec.ts` 12 条与 `tests/integration/mcp-headers.spec.ts` 16 条） |
+| `admin-backend` lint / `tsc` / `check:lines` / `check:contract` | ✅ / ✅ / ✅（94 文件）/ ✅（26 码一致） |
+| `agent-backend` 测试 | **387 passed**（32 文件；含 `mcp-client-headers.spec.ts` —— 用**真实 HTTP 桩服务器**断言"请求头确实上了线路"） |
+| `agent-backend` lint / `tsc` | ✅ / ✅ |
+| `admin-frontend` 测试 | **493 passed**（45 文件；请求头用例单独成 `McpCallConfigForm.headers.spec.ts`） |
+| `admin-frontend` lint / `vue-tsc` / `check:lines` | ✅ / ✅ / ✅（123 文件） |
+
+**拆件记录（原则二，500 行门禁）**：`McpToolPicker.vue`（可见工具多选）、`McpHeadersField.vue`（请求头填写行）、`HitlToolPicker.vue` / `HitlConfirmationField.vue`（HITL 勾选）、`useMcpConnectionTest.ts`（连通性测试）从 `McpCreateDialog.vue` / `McpCallConfigForm.vue` 拆出；`McpCallConfigForm.headers.spec.ts` 独立成文件。
+
+**同日 UI 改版（用户反馈：按"填表"组织）**：详情页与新建弹窗的**传输方式 / 连接地址 / 请求头重组为同一个「连接配置」框**——第一行【连接地址 + 传输方式】（均必填、并排），第二行【请求头】（可空）；stdio 时第一行改为「启动命令 + 传输方式」、启动参数紧随其后。请求头由"三态切换"简化为**一行填写 + 掩码一览**：**留空 = 不修改**（沿用存量）、填写 = 整体替换、已配置时给「清空全部请求头」（可撤销，清空态下输入框禁用）。「发起测试」固定在框内底部——测的就是框内的当前值。
+
+**再改一版（用户反馈：加两处就地反馈）**：① **掩码标绿**——`✓ 当前（掩码）X-MCP-Token: 6UuE…3F` 用 `--color-status-success`，"凭据已配好"一眼可辨；② **格式错误标红**——输入非空且不合规时，`请求头（可空）` 标签后**就地**出现红色「格式错误！」，下方给可读原因、输入框描边转红（`input.invalid` 与全站惯例一致），判据与提交期**同一实现**（`parseHeaders`），避免"这里看着没问题、保存却报错"。新建弹窗复用同一个 `McpHeadersField`（传 `input-id` 与自己的说明文案），两处口径一致。
+
+**线上实测**：见下方"当日实测"小节（平台侧 401→200 全链路 + 运行环境 A/B 对照）。
+
+**当日实测（2026-10-08，对象 = 本体侧自建发布容器 `http://localhost:8021/mcp`）**：
+
+| 场景 | 结果 |
+|---|---|
+| `POST /api/admin/mcp/probe`（带令牌） | `ok=true`，6 个工具（`sumRawNotArrivalQty` / `checkRawMaterialUnit` / `checkArrivalTimeValidity` / `checkSupplierExistence` / `checkRelatedOrderExistence` / `inferPurchasePurpose`）。**同一端点不带令牌时**回 `ok=false`，原因是服务自报"缺少或无效的访问令牌"——这正是改造前的表现 |
+| 新建（带令牌 + 6 工具白名单） | 201；响应 `headers` = **掩码**（`6UuE…3Z`），整条响应**不含明文令牌** |
+| 详情 | `headers` 掩码、`tools` 6 个、`tools_error` 空——**证明平台确实带上了令牌** |
+| 列表 | `has_headers=true`，且**不含 `headers` 字段**（连掩码也不给） |
+| `PUT` **不带** `headers` | 200；令牌未丢（详情仍 6 工具 —— 保存路径不会顺手清空凭据） |
+| `PUT` 带**掩码**值 | **400**（防"把令牌静默换成掩码"） |
+| `PUT` 带 `{}` | 清空 → 详情 `tools=0` 且 `tools_error` = 服务自报 401；**恢复令牌后回到 6 工具** |
+| **运行环境 A/B** | 放一个临时数字人（`MCP.json` 带 `headers`）→ 选中 → 发一轮真实对话触发实例创建 → `GET /api/agents/current/mcp` 回 **`status: "connected"`**、`unavailable_mcp: []`：**运行期真的把令牌发出去了**（不带则该服务 401，状态会是 `failed`） |
+| 清理 | 测试线程删除、`/api/agents/current/exit`、临时数字人目录删除；平台侧**保留** `raw_inventory_purchase_function`（可直接被数字人引用） |
+
+> 注：临时数字人的实例会留在运行环境实例池里直到空闲回收（其目录已删，无法再被选中），不影响其它数字人。

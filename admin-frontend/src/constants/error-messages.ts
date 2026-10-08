@@ -1,9 +1,18 @@
 /**
  * 错误码常量与中文文案映射表（唯一映射表）。
  *
- * 与 `contracts/admin-api.md` §0.4 的 **21 个**错误码逐行对应：
- * 4 个复用既有码 + 17 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
+ * 与 `contracts/admin-api.md` §0.4 的 **26 个**错误码逐行对应：
+ * 4 个复用既有码 + 22 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
  * （面向开发者且不稳定），一律按 `code` 分派。
+ *
+ * **2026-10-03**：新增 `ADM_MCP_TOOL_SCOPE_LOCKED`（工具白名单只在新建时设定，
+ * 保存调用配置携带即被拒——契约 §3.3）。
+ *
+ * **2026-10-02**：新增 `ADM_SKILL_MODIFIED`（本体市场更新时库内版本被人工修改，
+ * 需显式确认——契约 §4.8）。
+ * **2026-10-03**：新增 `ADM_ONTOLOGY_NOT_FOUND` / `ADM_ONTOLOGY_EXISTS`
+ * （本体管理区——契约 §10）；新增 `ADM_SKILL_READ_ONLY`（本体市场来源的 SKILL
+ * 只读，在线编辑被拒——契约 §4.3）。
  *
  * **2026-09-27**：`ADM_MCP_SERVICE_UNMANAGED` / `ADM_RUNTIME_FORM_NOT_CONFIGURED` /
  * `ADM_DOCKER_UNAVAILABLE` / `ADM_COMPOSE_FILE_UNREADABLE` 随 MCP 全人工配置下架；
@@ -28,9 +37,15 @@ export const ADMIN_ERROR_CODES = {
   ADM_SKILL_ARCHIVE_INVALID: 'ADM_SKILL_ARCHIVE_INVALID',
   ADM_SKILL_ARCHIVE_UNSAFE: 'ADM_SKILL_ARCHIVE_UNSAFE',
   ADM_SKILL_NOT_FOUND: 'ADM_SKILL_NOT_FOUND',
+  ADM_SKILL_MODIFIED: 'ADM_SKILL_MODIFIED',
+  ADM_SKILL_READ_ONLY: 'ADM_SKILL_READ_ONLY',
+
+  ADM_ONTOLOGY_NOT_FOUND: 'ADM_ONTOLOGY_NOT_FOUND',
+  ADM_ONTOLOGY_EXISTS: 'ADM_ONTOLOGY_EXISTS',
 
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
   ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
+  ADM_MCP_TOOL_SCOPE_LOCKED: 'ADM_MCP_TOOL_SCOPE_LOCKED',
 
   ADM_DEPLOY_VALIDATION_FAILED: 'ADM_DEPLOY_VALIDATION_FAILED',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
@@ -62,9 +77,16 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   ADM_SKILL_ARCHIVE_INVALID: '压缩包格式不符：需含 SKILL.md 且元数据含 name 与 description',
   ADM_SKILL_ARCHIVE_UNSAFE: '压缩包存在安全风险（越界路径／符号链接／超出大小或层级限制）',
   ADM_SKILL_NOT_FOUND: '共享技能库中不存在该 SKILL',
+  ADM_SKILL_MODIFIED: '库内版本在导入后被人工修改过，更新将丢弃这些修改，请确认后重试',
+  ADM_SKILL_READ_ONLY: '本体市场导入的技能为只读，如需更新请在「从本体市场导入」中执行更新',
+
+  ADM_ONTOLOGY_NOT_FOUND: '本体库中不存在该本体（或本体文件缺失）',
+  ADM_ONTOLOGY_EXISTS: '本体库中已存在同一场景下的同名本体，请改用「更新」',
 
   ADM_MCP_SERVICE_NOT_FOUND: 'MCP 服务不存在',
   ADM_MCP_SERVICE_EXISTS: 'MCP 服务名称已存在，请换一个名称',
+  ADM_MCP_TOOL_SCOPE_LOCKED:
+    '工具范围只在新建服务时确定，不支持修改；如需变更请删除该服务后重新创建',
 
   ADM_DEPLOY_VALIDATION_FAILED: '部署前校验未通过，已阻止部署，请按错误清单逐条修复',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: '部署目标位置不可写，请检查目录权限',
@@ -74,6 +96,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // 同时用于调用配置保存与技能文件保存：两者都是"内容被并发改过"，文案不偏向任一方
   ADM_CONFIG_REVISION_CONFLICT: '内容已被他处修改，请刷新后重试',
-  ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可写，请检查 .platform-data 目录',
+  // 该码在写入与**删除**两条路径上都会出现（2026-10-03：删除后校验未通过也用它），
+  // 故文案不再只写"不可写"——否则管理员遇到"删不掉"时会看到误导性的原因
+  ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可用（写入或删除失败），请检查 .platform-data 目录',
   ADM_RUNTIME_UNREACHABLE: '运行环境不可达（内置工具目录／调用统计读取失败）',
 }

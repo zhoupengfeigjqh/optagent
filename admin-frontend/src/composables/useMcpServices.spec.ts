@@ -181,7 +181,8 @@ describe('useMcpServices', () => {
       'ocr',
       expect.objectContaining({ revision: 2 }),
     )
-    expect(result).toEqual({ affected: ['demo'], revision: 3 })
+    // `maskedHeaders`：保存响应里的掩码请求头（2026-10-08），界面据此就地刷新展示
+    expect(result).toEqual({ affected: ['demo'], revision: 3, maskedHeaders: {} })
     // 详情只被显式 `loadDetail` 请求过一次：保存路径 MUST NOT 再次 GET 详情——
     // 否则会连带触发一次 MCP 实时探测（工具清单抖动 → 界面"闪一下"）
     expect(getMcpService).toHaveBeenCalledTimes(1)
@@ -213,7 +214,7 @@ describe('useMcpServices', () => {
       'ocr',
       expect.objectContaining({ revision: 9 }),
     )
-    expect(result).toEqual({ affected: [], revision: 9 })
+    expect(result).toEqual({ affected: [], revision: 9, maskedHeaders: {} })
   })
 
   it('saveConfig：未加载详情且未提供 revision 时不做任何事（防御性）', async () => {

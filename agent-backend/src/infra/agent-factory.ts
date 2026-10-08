@@ -28,6 +28,7 @@ import type {
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
 import { mintPutUrl, mintSignedUrl } from './file-sign.js';
+import { scopeToolsByAllowlist } from './mcp-tool-scope.js';
 import { wrapToolWithInteraction } from './tool-intercept.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
@@ -163,6 +164,10 @@ export class AgentInstanceFactory {
       if (!mcp.isAvailable(server.name)) continue;
       try {
         const toolInfos = await mcp.listTools(server.name);
+        // 工具白名单（2026-10-03）：只把白名单里的工具挂给数字人——**模型看不到其余工具**
+        // （清单外的工具不进工具表，模型无从发起调用；比"调用时拒绝"更彻底）。
+        // 缺省 / 空数组 = 不限制（语义与判据见 `mcp-tool-scope.ts`）。
+        const visibleToolInfos = scopeToolsByAllowlist(toolInfos, server.allowedTools);
         // file_args 声明：绑定当前用户的 FileAccess + 签名直链铸造（远程服务回源下载）
         const fileCtx = server.fileArgs
           ? {
@@ -179,7 +184,7 @@ export class AgentInstanceFactory {
         const agentTools = mcpToolsAsAgentTools(
           mcp,
           server.name,
-          toolInfos,
+          visibleToolInfos,
           // 强制穿透的运行上下文（2026-09-16）：uid=当前用户、sid=当前会话；
           // 工具 schema 里声明了才注入，没声明的不受影响
           { uid: inst.key.userId, sid: req.threadId },

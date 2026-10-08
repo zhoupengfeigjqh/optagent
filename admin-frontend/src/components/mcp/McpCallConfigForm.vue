@@ -5,22 +5,21 @@
  * 关键点：
  * - **连接地址只有一个**（不再按"容器编排内网 / 宿主机本地"分形态声明）；
  * - 只服务**已登记的服务**（新建走 `McpCreateDialog`）：名称取自服务端且不可改；
- * - 基础字段判据与新建弹窗**共用** `utils/mcp-config.ts`（同一职责唯一实现），
- *   权威判据仍在服务端（这里只为少一次往返）。
+ * - 基础字段判据与新建弹窗**共用** `utils/mcp-config.ts`（权威判据仍在服务端）。
+ *
+ * **请求头（2026-10-08）**：UI 与三态语义见 `McpHeadersField`（掩码回显 / 编辑 / 显式清空）；
+ * 本组件只持有状态与**提交规则**——查看态不带该字段，即服务端沿用存量。
  */
 import { computed, ref, watch } from 'vue'
-import { testMcpService, type McpProbePayload } from '../../api/mcp'
-import type {
-  ErrorInfo,
-  McpConfirmation,
-  McpServiceConfigInput,
-  McpServiceDetail,
-  McpTestResult,
-} from '../../api/types'
+import type { McpProbePayload } from '../../api/mcp'
+import type { McpConfirmation, McpServiceConfigInput, McpServiceDetail } from '../../api/types'
+import { useMcpConnectionTest } from '../../composables/useMcpConnectionTest'
 import { MCP_DESCRIPTION_PLACEHOLDER, MCP_NAME_HINT, MCP_URL_HINT } from '../../constants/mcp'
-import { validateMcpBasics } from '../../utils/mcp-config'
+import { parseHeaders, validateMcpBasics } from '../../utils/mcp-config'
 import AsyncToolsSelector from './AsyncToolsSelector.vue'
 import FileArgsMappingTable from './FileArgsMappingTable.vue'
+import HitlConfirmationField from './HitlConfirmationField.vue'
+import McpHeadersField from './McpHeadersField.vue'
 import RulesFieldMappingTable from './RulesFieldMappingTable.vue'
 import McpTestResultDialog from './McpTestResultDialog.vue'
 
@@ -28,6 +27,14 @@ const props = defineProps<{
   /** 服务详情（MUST 非空：本表单只在服务已登记时渲染） */
   service: McpServiceDetail
   busy?: boolean
+  /**
+   * 最近一次**保存响应**里的掩码请求头（2026-10-08；可为 `null`）。
+   *
+   * 为什么需要：保存后详情**不重载**（重载会连带触发一次 MCP 实时探测，见
+   * `McpServiceDetail` 的注释），详情 props 里的掩码因此会停留在旧值。父级把
+   * 保存响应里的掩码透传下来，本表单据此就地刷新展示并把三态复位为 `view`。
+   */
+  headersOverride?: Record<string, string> | null
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +61,12 @@ const rulesFields = ref<Record<string, string>>({})
 /** 异步工具声明（R11）：被声明的工具调用时会收到结果回写地址，产出回写后进下一轮上下文 */
 const asyncTools = ref<string[]>([])
 const localError = ref<string | null>(null)
+/** 请求头输入（留空 = 不修改；UI 见 `McpHeadersField`）——**不预填掩码**，真值不回显 */
+const headersText = ref('')
+/** 清空意图（显式点「清空全部请求头」；提交时发 `{}`） */
+const headersClearing = ref(false)
+/** 展示用的**掩码**请求头（来自详情，或最近一次保存响应） */
+const headersView = ref<Record<string, string>>({})
 
 /** 服务当前工具清单（来自平台对服务的最近一次探测）；不可得时为空数组 → 走手填回退 */
 const toolCatalog = computed(() => props.service.tools)
@@ -90,23 +103,34 @@ function loadFrom(service: McpServiceDetail): void {
   }
   rulesFields.value = { ...(service.rules_fields ?? {}) }
   asyncTools.value = [...(service.async_tools ?? [])]
+  // 请求头：只载入**掩码**；输入框与清空意图复位（切换服务 = 全新一次编辑）
+  headersView.value = { ...(service.headers ?? {}) }
+  headersText.value = ''
+  headersClearing.value = false
   // 载入即按当前 HITL 模式收敛一次（watch 只在模式**变化**时触发）：
-  // 存量数据里"无需确认却配了规则参数"属于脏数据，与切换语义保持一致——清空
+  // 存量数据里"无需确认却配了规则参数"属于脏数据，与切换语义保持一致——清掉
+  pruneRulesFields()
+}
+
+/**
+ * 按当前 HITL 模式收敛「算法规则参数设置」（级联口径，2026-09-19）：
+ * `never` → 清空（未开 HITL 时本就不生效）；`custom` → 只留勾选清单内的行；`always` → 保留。
+ */
+function pruneRulesFields(): void {
   if (confirmationMode.value === 'never') {
     rulesFields.value = {}
-  } else if (confirmationMode.value === 'custom') {
-    const allowed = new Set(confirmationTools.value)
-    rulesFields.value = Object.fromEntries(
-      Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
-    )
+    return
   }
+  if (confirmationMode.value !== 'custom') return
+  const allowed = new Set(confirmationTools.value)
+  rulesFields.value = Object.fromEntries(
+    Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
+  )
 }
 
 /**
  * 当前 HITL 确认范围内的工具（算法规则参数设置「工具」下拉的选项源）：
- * - never：空（表格同时被禁用并清空）；
- * - always：清单内全部工具；
- * - custom：勾选的工具（含清单外遗留项——与确认清单同一口径，不静默丢弃）。
+ * never 为空；always 取清单内全部；custom 取勾选项（含清单外遗留项，同一口径）。
  */
 const hitlAllowedTools = computed<string[]>(() => {
   if (confirmationMode.value === 'never') return []
@@ -119,25 +143,12 @@ const rulesDisabled = computed(
   () => confirmationMode.value === 'never' || manualFallback.value,
 )
 
-/** HITL 模式切换的级联（2026-09-19）：无需确认→清空；仅指定→丢清单外；全部→保留 */
-watch(confirmationMode, (mode) => {
-  if (mode === 'never') {
-    rulesFields.value = {}
-  } else if (mode === 'custom') {
-    const allowed = new Set(confirmationTools.value)
-    rulesFields.value = Object.fromEntries(
-      Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
-    )
-  }
-})
+/** HITL 模式切换的级联：无需确认→清空；仅指定→丢清单外；全部→保留 */
+watch(confirmationMode, pruneRulesFields)
 
 /** 勾选清单变化：仅指定工具模式下，声明里落在清单外的行随之清掉 */
-watch(confirmationTools, (tools) => {
-  if (confirmationMode.value !== 'custom') return
-  const allowed = new Set(tools)
-  rulesFields.value = Object.fromEntries(
-    Object.entries(rulesFields.value).filter(([tool]) => allowed.has(tool)),
-  )
+watch(confirmationTools, () => {
+  if (confirmationMode.value === 'custom') pruneRulesFields()
 })
 
 /**
@@ -156,6 +167,36 @@ watch(
   },
   { immediate: true },
 )
+
+/**
+ * 保存响应里的掩码请求头（父级透传）：就地刷新展示并把三态复位为 `view`。
+ *
+ * 只在**拿到新值**时动作（`null` = 没有新保存），避免把用户正在填的编辑态冲掉。
+ */
+watch(
+  () => props.headersOverride,
+  (next) => {
+    if (!next) return
+    headersView.value = { ...next }
+    headersText.value = ''
+    headersClearing.value = false
+  },
+)
+
+/**
+ * 请求头提交片段：**"留空 = 不修改"**（见 `McpHeadersField` 的说明）。
+ *
+ * - 点过「清空全部请求头」→ 发 `{}`（显式清空）；
+ * - 输入框留空 → **不带**该字段（服务端沿用存量，保存不会顺手清空令牌）；
+ * - 填了内容 → 整体替换；写法非法返回 `error`，调用方 MUST NOT 提交。
+ */
+function resolveHeadersPatch(): { headers?: Record<string, string>; error?: string } {
+  if (headersClearing.value) return { headers: {} }
+  if (headersText.value.trim() === '') return {}
+  const parsed = parseHeaders(headersText.value)
+  if (parsed.error !== undefined) return { error: parsed.error }
+  return { headers: parsed.headers }
+}
 
 function submit(): void {
   localError.value = null
@@ -192,6 +233,18 @@ function submit(): void {
 
   const trimmedUrl = url.value.trim()
 
+  // 请求头（2026-10-08）：仅 http 有意义（stdio 由启动参数/环境变量承载，服务端也会丢弃）；
+  // 查看态**不带该字段**——服务端据此沿用存量（保存调用配置 MUST NOT 顺手清空令牌）
+  let headersPatch: Record<string, string> | undefined
+  if (transport.value === 'http') {
+    const resolved = resolveHeadersPatch()
+    if (resolved.error !== undefined) {
+      localError.value = resolved.error
+      return
+    }
+    headersPatch = resolved.headers
+  }
+
   const config: McpServiceConfigInput = {
     description: description.value,
     transport: transport.value,
@@ -205,6 +258,7 @@ function submit(): void {
             .filter((line) => line !== ''),
         }
       : {}),
+    ...(headersPatch !== undefined ? { headers: headersPatch } : {}),
     file_args: fileArgs.value,
     confirmation,
     rules_fields: { ...rulesFields.value },
@@ -218,7 +272,7 @@ function submit(): void {
  * 而不是上一次保存的旧值（实测缺陷，2026-09-15）。
  */
 function probeTarget(): McpProbePayload {
-  return {
+  const payload: McpProbePayload = {
     transport: transport.value,
     ...(transport.value === 'http' ? { url: url.value.trim() } : {}),
     ...(transport.value === 'stdio'
@@ -231,7 +285,33 @@ function probeTarget(): McpProbePayload {
         }
       : {}),
   }
+  // 请求头：只有填了内容（或点了清空）才带上；留空即不带 = 服务端按**已保存**的请求头连
+  // （界面手上只有掩码，不带才不会因"没带令牌"误报 401）；写法非法由 runTest 先拦
+  if (transport.value === 'http') {
+    const patch = resolveHeadersPatch()
+    if (patch.headers !== undefined) payload.headers = patch.headers
+  }
+  return payload
 }
+
+/** 连通性测试（按表单当前值探测，允许未保存）：逻辑见 `useMcpConnectionTest` */
+const {
+  result: testResult,
+  busy: testBusy,
+  error: testError,
+  dialog: testDialog,
+  run: runTest,
+} = useMcpConnectionTest({
+  serviceName: () => props.service.name,
+  target: probeTarget,
+  /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
+  beforeTest: () =>
+    transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null,
+  onLocalError: (message) => {
+    localError.value = message
+  },
+  announce: (text) => emit('announce', text),
+})
 
 /**
  * 暴露给详情页：
@@ -241,30 +321,6 @@ function probeTarget(): McpProbePayload {
  * - `probeTarget()`：表单当前连接目标，供外部按需读取。
  */
 defineExpose({ submit, probeTarget, runTest })
-
-/** 连通性测试（按表单当前值探测，允许未保存）。结果弹窗见 `McpTestResultDialog`。 */
-const testResult = ref<McpTestResult | null>(null)
-const testBusy = ref(false)
-const testError = ref<ErrorInfo | null>(null)
-const testDialog = ref<InstanceType<typeof McpTestResultDialog> | null>(null)
-
-async function runTest(): Promise<void> {
-  testBusy.value = true
-  testError.value = null
-  try {
-    testResult.value = await testMcpService(props.service.name, probeTarget())
-    emit(
-      'announce',
-      testResult.value.ok ? '连通性与能力验证均通过' : '测试未通过，详见弹窗中的失败原因',
-    )
-  } catch (err) {
-    testError.value = err as ErrorInfo
-    emit('announce', '测试请求失败')
-  } finally {
-    testBusy.value = false
-    testDialog.value?.open()
-  }
-}
 </script>
 
 <template>
@@ -285,25 +341,54 @@ async function runTest(): Promise<void> {
       />
     </label>
 
-    <label class="field" for="mcp-transport">
-      <span class="field__label">传输方式</span>
-      <select id="mcp-transport" v-model="transport">
-        <option value="http">streamable-http</option>
-        <option value="stdio">stdio</option>
-      </select>
-    </label>
+    <!-- 连接配置（2026-10-08 二次改版）：传输方式 / 连接地址 / 请求头**同框**，一行一件事——
+         第一行「连接地址（或 stdio 启动命令）+ 传输方式」（必填），第二行「请求头」（可空，留空 = 不修改） -->
+    <fieldset class="mcp-config-form__conn">
+      <legend class="field__label">连接配置</legend>
 
-    <!-- 连接目标（http=连接地址 / stdio=启动命令）与「发起测试」**同排**：测的就是这一行的值 -->
-    <div class="field">
-      <label v-if="transport === 'http'" class="field__label" for="mcp-url">
-        连接地址<span class="field__required" aria-hidden="true">*</span>
+      <div class="mcp-config-form__conn-row">
+        <label v-if="transport === 'http'" class="field mcp-config-form__conn-main" for="mcp-url">
+          <span class="field__label">
+            连接地址<span class="field__required" aria-hidden="true">*</span>
+          </span>
+          <input id="mcp-url" v-model="url" type="text" :placeholder="MCP_URL_HINT" />
+          <span class="field__hint">平台按此地址连接该 MCP 服务（含协议与端口）。</span>
+        </label>
+
+        <label v-else class="field mcp-config-form__conn-main" for="mcp-command">
+          <span class="field__label">
+            启动命令<span class="field__required" aria-hidden="true">*</span>
+          </span>
+          <input id="mcp-command" v-model="command" type="text" placeholder="例如：python" />
+          <span class="field__hint">该服务由平台在本机以该命令启动（可选参数见下行）。</span>
+        </label>
+
+        <label class="field mcp-config-form__conn-transport" for="mcp-transport">
+          <span class="field__label">
+            传输方式<span class="field__required" aria-hidden="true">*</span>
+          </span>
+          <select id="mcp-transport" v-model="transport">
+            <option value="http">streamable-http</option>
+            <option value="stdio">stdio</option>
+          </select>
+        </label>
+      </div>
+
+      <!-- 第二行：请求头（可空；留空 = 不修改）——仅 http 传输有意义 -->
+      <McpHeadersField
+        v-if="transport === 'http'"
+        v-model:text="headersText"
+        v-model:clearing="headersClearing"
+        :headers="headersView"
+      />
+
+      <label v-if="transport === 'stdio'" class="field" for="mcp-args">
+        <span class="field__label">启动参数（每行一个）</span>
+        <textarea id="mcp-args" v-model="argsText" rows="3" />
       </label>
-      <label v-else class="field__label" for="mcp-command">
-        启动命令<span class="field__required" aria-hidden="true">*</span>
-      </label>
-      <div class="mcp-config-form__target-row">
-        <input v-if="transport === 'http'" id="mcp-url" v-model="url" type="text" :placeholder="MCP_URL_HINT" />
-        <input v-else id="mcp-command" v-model="command" type="text" placeholder="例如：python" />
+
+      <!-- 测试按框内**当前值**连接（无需先保存）：所以按钮放在这个框里，测的就是上两行 -->
+      <div class="mcp-config-form__conn-actions">
         <button
           type="button"
           class="btn btn--success"
@@ -312,71 +397,28 @@ async function runTest(): Promise<void> {
         >
           {{ testBusy ? '测试中…' : '发起测试' }}
         </button>
+        <span class="field__hint">
+          按上方<strong>当前值</strong>连接一次（改完可直接测，无需先保存）；请求头留空时按已保存的请求头连接。
+        </span>
       </div>
-      <span v-if="transport === 'http'" class="field__hint">
-        平台按此地址连接该 MCP 服务（含协议与端口）。改完可直接「发起测试」验证，无需先保存。
-      </span>
-    </div>
-
-    <label v-if="transport === 'stdio'" class="field" for="mcp-args">
-      <span class="field__label">启动参数（每行一个）</span>
-      <textarea id="mcp-args" v-model="argsText" rows="3" />
-    </label>
+    </fieldset>
 
     <FileArgsMappingTable v-model="fileArgs" :tools="toolCatalog" />
 
     <fieldset class="mcp-config-form__endpoints">
       <legend class="field__label">调用人工确认（HITL）</legend>
       <p class="field__hint">
-        开启后，用户侧触发被命中的工具调用时会弹出参数确认窗（由工具自身的参数
-        Schema 驱动，与具体服务解耦）；拒绝后工具不执行，数字人会说明未执行原因。
+        开启后，用户侧触发被命中的工具调用时会弹出参数确认窗；拒绝后工具不执行，数字人会说明未执行原因。
       </p>
-      <label class="field" for="mcp-confirmation-mode">
-        <span class="field__label">确认范围</span>
-        <select id="mcp-confirmation-mode" v-model="confirmationMode">
-          <option value="never">无需确认（默认，直接执行）</option>
-          <option value="always">该服务全部工具都需确认</option>
-          <option value="custom">仅指定工具需确认</option>
-        </select>
-      </label>
-      <div v-if="confirmationMode === 'custom'" class="field">
-        <span class="field__label">需确认的工具</span>
-
-        <!-- 有工具清单：复选框多选，直接勾选 -->
-        <div v-if="!manualFallback" class="mcp-config-form__tools" role="group" aria-label="需确认的工具清单">
-          <label v-for="tool in toolCatalog" :key="tool.name" class="mcp-config-form__tool">
-            <input v-model="confirmationTools" type="checkbox" :value="tool.name" />
-            <span class="mcp-config-form__tool-name mono">{{ tool.name }}</span>
-            <span v-if="tool.description" class="mcp-config-form__tool-desc">{{ tool.description }}</span>
-          </label>
-          <!-- 已保存但当前清单未包含：保留展示，避免静默丢弃存量配置 -->
-          <label
-            v-for="orphan in orphanTools"
-            :key="`orphan:${orphan}`"
-            class="mcp-config-form__tool mcp-config-form__tool--orphan"
-          >
-            <input v-model="confirmationTools" type="checkbox" :value="orphan" />
-            <span class="mcp-config-form__tool-name mono">{{ orphan }}</span>
-            <span class="mcp-config-form__tool-desc">（已保存，当前服务清单中未包含；可能是清单截断或服务改版）</span>
-          </label>
-        </div>
-
-        <!-- 清单不可得（服务未启动/探测失败/新建态）：回退手填 -->
-        <template v-else>
-          <textarea
-            id="mcp-confirmation-tools"
-            v-model="confirmationManualText"
-            rows="3"
-            placeholder="工具名不含服务前缀，例如：&#10;query_price&#10;create_order"
-          />
-        </template>
-
-        <span class="field__hint">
-          勾选的工具被调用前会弹出参数确认窗。
-          <template v-if="service?.tools_truncated">清单被截断显示，完整清单以服务端为准。</template>
-        </span>
-      </div>
-
+      <HitlConfirmationField
+        v-model:mode="confirmationMode"
+        v-model:tools="confirmationTools"
+        v-model:manual-text="confirmationManualText"
+        :catalog="toolCatalog"
+        :orphans="orphanTools"
+        :manual-fallback="manualFallback"
+        :truncated="service.tools_truncated"
+      />
     </fieldset>
 
     <RulesFieldMappingTable
@@ -389,13 +431,18 @@ async function runTest(): Promise<void> {
     <fieldset class="mcp-config-form__endpoints">
       <legend class="field__label">后台计算（异步工具）</legend>
       <p class="field__hint">
-        勾选的工具按**异步**方式调用：平台在调用时注入结果回写地址，服务算完把结果写到该用户的
-        空间，并在**下一轮对话**自动带上「后台计算结果」清单（模型按需读取）。
-        与「是否需要人工确认」互不影响，两者可同时开启。
+        仅列出在入参 schema 中<strong>声明了 result_url</strong> 的工具（判据与平台注入逻辑一致，
+        见《异步MCP服务接入约定.md》§2.1）。勾选后：平台在调用时注入结果回写地址，服务算完把结果
+        写到该用户的空间，并在<strong>下一轮对话</strong>自动带上「后台计算结果」清单（模型按需读取）。
       </p>
       <!-- 不绑 `busy`：忙态只锁动作按钮，MUST NOT 锁表单控件（契约 §0.5 原则 ③）——
            保存通常在百毫秒级完成，控件级的"禁用→恢复"只会退化成一次无意义的视觉抖动 -->
-      <AsyncToolsSelector v-model="asyncTools" :tools="toolCatalog" />
+      <AsyncToolsSelector
+        v-model="asyncTools"
+        :tools="toolCatalog"
+        :tools-error="service.tools_error"
+        :tools-truncated="service.tools_truncated"
+      />
     </fieldset>
 
     <!-- 本地校验失败时的可读报错（保存/创建按钮在页面右上角，见 McpServiceDetail） -->
@@ -418,50 +465,34 @@ async function runTest(): Promise<void> {
   color: var(--color-status-error);
 }
 
-.mcp-config-form__tools {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  max-height: 260px;
-  overflow-y: auto;
-  padding: var(--space-2);
+/* 连接配置框（传输方式 / 连接地址 / 请求头同框，2026-10-08 二次改版） */
+.mcp-config-form__conn {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
-.mcp-config-form__tool {
+.mcp-config-form__conn-row {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  cursor: pointer;
+  align-items: flex-start;
+  gap: var(--space-3);
 }
 
-.mcp-config-form__tool-name {
-  flex-shrink: 0;
-}
-
-.mcp-config-form__tool-desc {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  overflow-wrap: anywhere;
-}
-
-.mcp-config-form__tool--orphan .mcp-config-form__tool-desc {
-  color: var(--color-status-warning);
-}
-
-.mcp-config-form__target-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.mcp-config-form__target-row input {
+/* 连接地址（或启动命令）占满剩余宽度；传输方式定宽，避免下拉框被拉成一行 */
+.mcp-config-form__conn-main {
   flex: 1;
   min-width: 0;
 }
 
-.mcp-config-form__target-row .btn {
-  flex-shrink: 0;
+.mcp-config-form__conn-transport {
+  flex: 0 0 180px;
+}
+
+.mcp-config-form__conn-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 </style>

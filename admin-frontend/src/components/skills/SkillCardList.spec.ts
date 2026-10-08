@@ -56,4 +56,26 @@ describe('SkillCardList', () => {
     expect(wrapper.text()).toContain('共享技能库中不存在该 SKILL')
     expect(wrapper.text()).toContain('ADM_SKILL_NOT_FOUND')
   })
+
+  it('来源标记：本体市场导入的卡片显示「本体市场」徽标（2026-10-02）', () => {
+    const wrapper = mountList({
+      items: [
+        {
+          ...ITEMS[0]!,
+          origin: {
+            kind: 'onto_market',
+            scenario: '生产调度',
+            ontology: '原材料采购和库存',
+            hash: 'h1',
+          },
+        },
+      ],
+    })
+    expect(wrapper.find('.card__origin--market').text()).toBe('本体市场 · 只读')
+  })
+
+  it('来源标记：非市场来源（ZIP 上传等）显示「外部安装」徽标', () => {
+    const wrapper = mountList()
+    expect(wrapper.find('.card__origin--external').text()).toBe('外部安装')
+  })
 })

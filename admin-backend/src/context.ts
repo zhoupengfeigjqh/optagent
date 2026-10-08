@@ -16,6 +16,7 @@ import type { DeployHistoryService } from './domain/deploy/history.js';
 import type { DeployManifestService } from './domain/deploy/manifest.js';
 import type { McpServiceConfigService } from './domain/mcp/service-config.js';
 import type { McpServiceListService } from './domain/mcp/service-list.js';
+import type { OntologyStore } from './domain/ontology/store.js';
 import type { McpServiceOperations } from './domain/mcp/operations.js';
 import type { SkillLibraryService } from './domain/skill-library/install.js';
 import type { OptAgentWriter } from './infra/opt-agent-writer.js';
@@ -40,6 +41,8 @@ export interface AppContext {
   users: UserLinkService;
   /** 共享技能库（`FR-035`~`FR-042`） */
   skills: SkillLibraryService;
+  /** 本体库（`FR-058`~`FR-061`，2026-10-03）：只读浏览 + 市场导入/更新/删除 */
+  ontologies: OntologyStore;
   /** MCP 服务配置（**平台唯一权威源**，`FR-043`/`FR-044`） */
   mcpConfigs: McpServiceConfigService;
   /** MCP 服务清单投影（`FR-043`） */

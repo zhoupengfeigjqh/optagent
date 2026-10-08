@@ -43,7 +43,8 @@ function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
   if (fx.ctx.mcpConfigs.exists(name)) {
     fx.ctx.mcpConfigs.upsert(name, input, fx.ctx.store.revision());
   } else {
-    fx.ctx.mcpConfigs.create({ name, ...input });
+    // 工具白名单：新建必填非空（2026-10-03，创建后不可改），故只在新建路径给
+    fx.ctx.mcpConfigs.create({ name, allowed_tools: ['ocr_image'], ...input });
   }
 }
 

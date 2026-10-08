@@ -64,8 +64,13 @@
 | `ADM_SKILL_ARCHIVE_INVALID` | 400 | 压缩包格式校验失败（缺 `SKILL.md`／元数据缺字段／不可解压） | `FR-038` |
 | `ADM_SKILL_ARCHIVE_UNSAFE` | 400 | 压缩包安全校验失败（越界路径／符号链接／超限） | `FR-039` |
 | `ADM_SKILL_NOT_FOUND` | 404 | SKILL 不在共享技能库中 | — |
+| `ADM_SKILL_MODIFIED` | 409 | 库内技能内容与导入时不一致（被人工改过），需显式确认才能被市场更新覆盖 | — |
+| `ADM_SKILL_READ_ONLY` | 409 | 本体市场来源的 SKILL 为只读，在线编辑被拒（内容只能经市场更新整体替换） | `FR-062` |
+| `ADM_ONTOLOGY_NOT_FOUND` | 404 | 本体不在本体库中（或本体文件缺失） | — |
+| `ADM_ONTOLOGY_EXISTS` | 409 | 本体库中已存在同一「场景 + 本体目录名」的本体，重复导入被拒 | — |
 | `ADM_MCP_SERVICE_NOT_FOUND` | 404 | MCP 服务不存在 | — |
 | `ADM_MCP_SERVICE_EXISTS` | 409 | MCP 服务名称已存在（新建重名，2026-09-27） | `FR-043` |
+| `ADM_MCP_TOOL_SCOPE_LOCKED` | 409 | 工具白名单只在**新建**时设定，`PUT` 携带 `allowed_tools` 即被拒（2026-10-03） | `FR-063` |
 | `ADM_DEPLOY_VALIDATION_FAILED` | 409 | 部署前校验不通过（阻止部署，`details.errors` 列出全部错误项） | `FR-027`、`SC-020` |
 | `ADM_DEPLOY_TARGET_NOT_WRITABLE` | 409 | 目标位置不可写 | `FR-027` |
 | `ADM_USER_ID_TAKEN` | 409 | 用户标识已存在或非法 | `FR-024` |
@@ -175,6 +180,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `description` | string | **用途描述**（未填写为空串）——满足 `FR-006` 对卡片信息的要求 |
 | `transport` | string | `http` / `stdio`（规范值；界面按 `streamable-http` 展示 `http`） |
 | `url` | string \| null | **连接地址**（`http` 必有；`stdio` 为 `null`） |
+| `has_headers` | boolean | 是否配置了**请求头**（2026-10-08；卡片标「需请求头」用）。**只给布尔量**——请求头里通常是访问令牌，列表 MUST NOT 下发任何值（连掩码也不给） |
 
 **错误码**：无（清单恒可得：它就在平台设计态里）
 
@@ -196,8 +202,11 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `rules_fields` | object | 算法规则参数设置：`{工具名: 字段名或对象路径}`（2026-09-19 新增；2026-09-22 支持对象嵌套）；空对象 = 不启用 |
 | `async_tools` | array | **异步工具声明**（2026-09-25 新增）：该服务**原始工具名**（不含 `{server}__` 前缀）清单；声明后运行环境调用这些工具时注入 `result_url`（签名写直链），服务算完把结果回写到用户空间。空数组 = 不启用（完整语义见 `runtime-api-delta.md` §10） |
 | `confirmation` | string \| object | 调用确认策略（HITL）：`never`（默认）/ `always` / `{ tools: [...] }` |
-| `tools` | array | 每项：`{ name, description, parameters }`（`FR-045`） |
-| `tools_truncated` | boolean | 工具清单是否被截断 |
+| `allowed_tools` | array | **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单（不含 `{server}__` 前缀）。**空数组 = 不限制**（白名单上线前的存量服务语义，物化时不写该字段）。只在**新建**时设定，之后不可修改（§3.3.1 / §3.3） |
+| `headers` | object | **请求头（值已掩码）**（2026-10-08）：`{头名: 掩码值}`，空对象 = 未配置。用于需要访问令牌的服务（本体侧「自建发布」要求 `X-MCP-Token`，缺了直接 401）。**明文令牌 MUST NOT 出现在任何响应里**：每个值都掩码（长值 `6UuE…3F`，短值整串掩掉）。界面 MUST NOT 把掩码提交回来做连接或保存（保存期直接拒，见 §3.3）。完整语义见 `runtime-api-delta.md` §12 |
+| `missing_tools` | array | 白名单里**当前服务清单中已不存在**的工具名（下架/改名）——界面据此在该条目上标异常。**只在探测成功时才有意义**：服务不可达时恒为 `[]`（核对不了由 `tools_error` 表达，MUST NOT 把它呈现成"工具不存在"） |
+| `tools` | array | 每项：`{ name, description, parameters }`（`FR-045`）。**只含白名单里的工具**（顺序与 `allowed_tools` 一致）；白名单为空（不限制）时即服务全量 |
+| `tools_truncated` | boolean | `tools` 是否被截断（**先按白名单过滤、后截断**——反过来的话，白名单里排在截断线之后的工具会被误判成"不存在"） |
 | `tools_error` | string \| null | 工具清单不可得时的可读原因（`null` = 可得） |
 | `references` | array | 引用该服务的数字人（**仅在详情视图呈现**；MUST NOT 作为常驻浏览视图，见 §7.1 说明） |
 | `revision` | integer | 平台设计态当前版本（乐观锁基准） |
@@ -226,22 +235,29 @@ MUST NOT 读取容器编排声明或容器运行状态。
 **用途**：在平台内**新建**一个 MCP 服务。MCP 服务不再从容器编排声明派生，
 平台是唯一权威源——管理员新建什么就有什么。
 
-**请求体**：与 §3.3 的请求体相同，另加 `name`；`revision` 可选（带了即做乐观锁校验）
+**请求体**：与 §3.3 的请求体相同，另加 `name` 与 `allowed_tools`；`revision` 可选（带了即做乐观锁校验）
 
 | 字段 | 类型 | 必填 | 约束 |
 |---|---|---|---|
 | `name` | string | ✅ | **全局唯一**；须匹配 `^[A-Za-z0-9_-]{1,64}$`（会成为运行环境的工具前缀）；首尾空白自动去除 |
+| `allowed_tools` | array | ✅ | **工具白名单**（2026-10-03）：非空字符串数组（该服务的**原始工具名**），trim + 同服务内去重；**缺字段或空数组即 `VALIDATION_FAILED`**——白名单创建后不可改，故 MUST 在创建这一步就问清楚，不留"全部工具放行"的后门。**只校验语法、不校验名字是否存在**（判据见下） |
 | 其余字段 | — | — | 见 §3.3 |
 
-**响应 201**：`{ ...完整调用配置, "revision": 13, "affected_agents": [] }`（形状与 §3.3 响应一致）
+**响应 201**：`{ ...完整调用配置, "revision": 13, "affected_agents": [] }`（形状与 §3.3 响应一致，含 `allowed_tools` 与**掩码后的** `headers`）
 
-**错误码**：`ADM_MCP_SERVICE_EXISTS`（重名）、`VALIDATION_FAILED`（名称非法／`transport` 非法／`http` 缺 `url`／`url` 非 http(s) 地址）、`ADM_CONFIG_REVISION_CONFLICT`
+**错误码**：`ADM_MCP_SERVICE_EXISTS`（重名）、`VALIDATION_FAILED`（名称非法／`transport` 非法／`http` 缺 `url`／`url` 非 http(s) 地址／`allowed_tools` 缺失或为空）、`ADM_RUNTIME_UNREACHABLE`（**目标连不上**，见下）、`ADM_CONFIG_REVISION_CONFLICT`
 
-> **前端交互（2026-09-27）**：本端点由**新建弹窗**调用，弹窗只提交基础字段
-> （`name` / `description` / `transport` / `url` 或 `command`）；其余调用配置由服务端补默认
-> （`file_args: {}`、`confirmation: "never"`、`rules_fields: {}`、`async_tools: []`），
-> 创建成功后再到详情页（§3.3）补全。创建成功 → 界面 MUST 进入该服务详情页并**自动调用一次 §3.6 测试**；
-> 创建失败 → 弹窗 MUST NOT 关闭（§0.5 原则 ④）。
+**关键约束（2026-10-03，创建前必须先连上）**：
+1. 校验顺序：**先**纯字段校验（名称／重名／白名单非空／地址写法，避免为注定失败的新建去连服务）→ **再**对目标发起一次 `listTools` 探测；
+2. **连不上即创建失败**，且**不落盘**（库里 MUST NOT 留下记录）——否则会留下一条"没有工具范围"、等价于全部放行的服务；探测失败按 `ADM_RUNTIME_UNREACHABLE` 返回可读原因；
+3. 走一遍探测的**收益**：管理员据此在界面上勾选白名单（工具清单来自 §3.9）。
+
+**前端交互（2026-10-03 改版）**：本端点由**新建弹窗**调用，弹窗为**两步**：
+① 基本信息（`name` / `description` / `transport` / `url` 或 `command`）→ 调 §3.9 探测 →
+② 从探测到的工具里**多选**（**默认不勾选，至少选一个**）→ 才提交本端点。
+其余调用配置由服务端补默认（`file_args: {}`、`confirmation: "never"`、`rules_fields: {}`、`async_tools: []`、`headers: {}`），
+创建成功后再到详情页（§3.3）补全。**探测失败或白名单未选 → 弹窗 MUST NOT 关闭**（§0.5 原则 ④），
+错误留在窗内；创建成功 → 进入该服务详情页并**沿用既有的"自动测试一次"**（§3.6；与"创建前必然探测过一次"不冲突：前者验证连接与能力，后者取的是工具清单）。
 
 ### 3.3.2 `DELETE /api/admin/mcp/services/{name}`（删除，2026-09-27）
 
@@ -272,19 +288,58 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `file_args` | object | ✅ | 可为 `{}`；键为**取值路径**（顶层参数名或 `items[].excelFileUrl` 这类穿过数组的路径），值为 `"url"` 或 `"url:from=<取值路径>"`；**路径写法非法或派生来源形状不相容即 `VALIDATION_FAILED`**（与运行环境同一判据，见 `agent-backend/src/domain/file-arg-path.ts`） |
 | `rules_fields` | object | 可选 | 可为 `{}`；形状 `{工具名: 字段名或对象路径}`，值非法即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（清单是探测结果，服务不可达时不构成配置错误） |
 | `async_tools` | array | 可选 | 可为 `[]`；元素为**非空字符串**（该服务的**原始工具名**），**同服务内去重**，违反即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（同上）；物化时**非空才写**进 `MCP.json`（对齐 `file_args`/`rules_fields` 口径） |
+| `headers` | object | 可选 | **请求头**（2026-10-08）：`{头名: 值}`（真实值，仅 `http` 有意义，`stdio` 丢弃）。逐项判据：头名合法（RFC 7230 token）、**大小写不敏感下不重复**、值为**单行非空字符串**、**MUST NOT 是掩码形态**（`6UuE…3F`/`••••`，违反即 `VALIDATION_FAILED` 并提示填真实值）；头名与值两端 trim。**语义：缺省 = 沿用存量**（保存调用配置 MUST NOT 顺手清空令牌）、**提供 = 全量替换**（`{}` 即清空）。物化时**非空才写**进 `MCP.json`（同上口径）。完整语义见 `runtime-api-delta.md` §12 |
 | `confirmation` | string \| object | 可选 | 调用确认策略（HITL）：`never`（缺省）/ `always` / `{ tools: string[] }`（非空）；非法即 `VALIDATION_FAILED` |
+| `allowed_tools` | — | **禁止** | **工具白名单不可二次调整**（2026-10-03）：携带该字段 → `ADM_MCP_TOOL_SCOPE_LOCKED`（409），整条请求**不生效**。如需变更请删除服务后重新创建。**不携带时沿用已存白名单**（保存调用配置 MUST NOT 顺手清空它） |
 | `revision` | integer | ✅ | 乐观锁 |
 
 > **存量迁移（2026-09-27）**：旧文档里的 `endpoints`（`{运行形态: 地址}`）在**读取期**收敛为
 > 单一 `url`（优先取 `host_local`，否则取第一个非空值），既有配置不丢；写回后只剩 `url`。
 
+> **界面口径（2026-10-03）**：「后台计算（异步工具）」的选择器**只列出在入参 schema 中声明了
+> `result_url` 的工具**——判据与运行环境注入逻辑同一口径（`declaresResultUrl`），避免"勾了不生效"。
+> 四点 MUST：① 清单不可得（`tools_error` 非空）时回退**手填**并给出原因；② 清单被截断
+> （`tools_truncated`）时同样给出手填入口；③ **已声明但不在可选范围内**（该工具未声明
+> `result_url` 或已不在清单中）的项 MUST 仍保留展示并可取消（否则会持续告警却无从取消）；
+> ④ 上述过滤**只是界面引导**——服务端仍按本表"只校验语法、不校验工具清单"处理，MUST NOT 据此收紧校验。
+
 > **2026-09-15 变更**：`writable` / `permission_scope` 字段已从调用配置中**移除**（产品决定）。旧客户端提交这两个字段时不再报错（字段被忽略），响应与物化产物中 MUST NOT 再出现；运行环境的 `MCP.json` 因此不再产生 `write` / `permission_boundary`。
 
 **响应 200**：保存后的完整调用配置 + 新 `revision` + `affected_agents`（受影响的数字人名清单，供界面提示）
 
-**响应字段 MUST 与请求体字段一一对应**（含 `command`／`args`／`updated_at`）：界面据此**原地更新 `revision`**、不再为回填而二次请求详情（§0.5 原则 ②）。漏登字段会让客户端"保存成功却丢配置"——`2026-09-25` 实测：`command`／`args` 缺失，客户端只能靠重载详情兜底，从而引入整表覆盖与探测抖动。
+**响应字段 MUST 与请求体字段一一对应**（含 `command`／`args`／`updated_at`；`headers` 以**掩码**形态对应）：界面据此**原地更新 `revision`**、不再为回填而二次请求详情（§0.5 原则 ②）。漏登字段会让客户端"保存成功却丢配置"——`2026-09-25` 实测：`command`／`args` 缺失，客户端只能靠重载详情兜底，从而引入整表覆盖与探测抖动。
+**`headers` 的掩码回执另有用途**（2026-10-08）：界面拿它**就地刷新**请求头展示（详情不重载，故不会连带触发一次 MCP 实时探测）。
 
-**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`VALIDATION_FAILED`、`ADM_CONFIG_REVISION_CONFLICT`
+**错误码**：`ADM_MCP_SERVICE_NOT_FOUND`、`VALIDATION_FAILED`、`ADM_MCP_TOOL_SCOPE_LOCKED`（请求体携带 `allowed_tools`）、`ADM_CONFIG_REVISION_CONFLICT`
+
+### 3.9 `POST /api/admin/mcp/probe`（2026-10-03）
+
+**用途**：**新建前的工具清单探测**——对一个**尚未登记**的连接目标连一次，取回其工具清单，供新建流程勾选白名单（§3.3.1）。
+
+与 §3.6 的分工：`test` 只回答"**已登记**的服务通不通"（未登记即 404）；本端点回答"这个**新**目标有哪些工具"，因此 **MUST NOT 要求服务已存在**。
+
+**请求体**：`{ "name"?: "ocr", "transport": "http", "url": "http://…/mcp", "command"?: "…", "args"?: ["…"], "headers"?: {"X-MCP-Token": "…"} }`
+（`name` 仅用于报错文案可读，不参与连接；`headers` 为**真实值**——新建目标没有"存量"可沿用，缺省即空，写法非法仍按 400 返回）
+
+**响应 200**
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `ok` | boolean | 是否探测成功 |
+| `tools` | array | `[{ name, description, parameters }]`（**有界**：最多 `TOOLS_LIMIT`=100 项） |
+| `tools_truncated` | boolean | 是否因超过上限而截断 |
+| `error` | string \| null | `ok=false` 时的可读原因；`ok=true` 时为 `null` |
+| `error_code` | string \| null | `ok=false` 时的错误码（如 `ADM_RUNTIME_UNREACHABLE`） |
+| `target` | object | **实际探测目标** `{ transport, url, command }`——界面上 MUST 展示 |
+| `checked_at` | string | ISO8601 |
+
+**关键约束**：
+1. **不落盘**：本端点只是探测，MUST NOT 创建或修改任何服务记录；
+2. **连接层面的失败不报错**（HTTP 200 + `ok: false` + 可读原因）：失败要留在新建弹窗里，由管理员决定重试或放弃；
+3. **目标写法非法**（`transport` 不认识 / 缺 `url`）仍是 400 `VALIDATION_FAILED`——那属表单校验该拦住的问题；
+4. 探测用的客户端与 §3.6 同一实现（`McpClientService.listTools`），避免"平台测通了、运行环境连不上"的协议口径漂移。
+
+**错误码**：`VALIDATION_FAILED`（目标写法非法）
 
 ### 3.6 `POST /api/admin/mcp/services/{name}/test`
 
@@ -293,7 +348,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 > **服务 MUST 已登记**：未登记的服务 → `ADM_MCP_SERVICE_NOT_FOUND`（`requireConfig` 前置校验）。
 > 这正是"**新建弹窗内不提供测试、改为创建成功后自动测一次**"的原因（§0.5 原则 ④、§3.3.1）。
 
-**请求体（可选）**：携带 `{ transport, url, command?, args? }` 时按**表单当前（尚未保存）的值**探测；缺省按已保存的调用配置测试。
+**请求体（可选）**：携带 `{ transport, url, command?, args?, headers? }` 时按**表单当前（尚未保存）的值**探测；缺省按已保存的调用配置测试。
+
+> **`headers` 的缺省语义**（2026-10-08）：**不携带 = 用已保存的请求头**。理由与其它字段一致但也必须写清：详情回显的是**掩码**，界面"未改动请求头"时手上没有真值可提交；若把"没带 `headers`"读成"没有请求头"，管理员改完地址点「发起测试」会被一个与配置无关的 401 挡住——而保存是沿用存量的，两边行为就对不上了。想显式测"不带请求头"就传 `{}`（与 §3.3 的"提供 = 全量替换"同义）。
 
 **响应 200**
 
@@ -302,7 +359,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `ok` | boolean | 是否成功 |
 | `connectivity` | object | `{ ok, duration_ms, error_code?, message? }` |
 | `capability` | object | `{ ok, method, duration_ms, error_code?, message? }`（如 `ping`） |
-| `target` | object | **实际被测目标** `{ transport, url, command }`——界面上 MUST 展示，否则"测的是谁"不可见 |
+| `target` | object | **实际被测目标** `{ transport, url, command }`——界面上 MUST 展示，否则"测的是谁"不可见。**不含请求头**：那是凭据，回显会给"令牌进日志/截图"开口子 |
 | `checked_at` | string | ISO8601 |
 
 **关键约束**：失败 MUST 返回**明确的失败原因**（超时／连接被拒／协议不匹配等），MUST NOT 把失败误报为成功（`FR-047`、`SC` 验收场景）。
@@ -334,13 +391,13 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **查询参数**：`page`
 
-**响应 200**：`items` 每项：`{ name, description, installed_at, updated_at, source }`
+**响应 200**：`items` 每项：`{ name, description, installed_at, updated_at, source, origin? }`（`origin` 为本体市场导入的溯源与内容指纹，见 §4.6；缺省 = 外部安装）
 
 ### 4.2 `GET /api/admin/skills/{name}`
 
 **用途**：查看单个 SKILL 的元数据与**正文全文**（`FR-036`）。
 
-**响应 200**：`{ name, description, content, content_hash, files, source, installed_at, updated_at, revision }`（`content_hash` 为 `SKILL.md` 内容哈希，供详情页直接改正文时作乐观锁基准；`revision` 为平台全局版本）
+**响应 200**：`{ name, description, content, content_hash, files, source, origin?, installed_at, updated_at, revision }`（`content_hash` 为 `SKILL.md` 内容哈希，供详情页直接改正文时作乐观锁基准；`revision` 为平台全局版本；`origin` 见 §4.6）
 
 **错误码**：`ADM_SKILL_NOT_FOUND`
 
@@ -361,7 +418,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `truncated` | boolean | 超出上限（256KB）→ `true`，`content` 只含前 256KB |
 | `content` | string \| null | 文本内容；二进制为 `null` |
 | `hash` | string | **内容哈希（sha256）**：编辑保存时作为乐观锁基准回传 |
-| `editable` | boolean | 是否可在线编辑：**文本且完整**（二进制、超 256KB 均为 `false`） |
+| `editable` | boolean | 是否可在线编辑：**文本且完整**（二进制、超 256KB 均为 `false`）；**本体市场来源的技能恒为 `false`**（只读快照，2026-10-03，`FR-062`） |
 
 **关键约束**：路径安全口径 MUST 与安装侧一致（复用同一套判定）——拒绝绝对路径、盘符、`..` 穿越、控制字符，且解析后的绝对路径必须落在该技能目录内；只返回目录内真实存在的**普通文件**（目录与符号链接不返回）。
 
@@ -370,6 +427,8 @@ MUST NOT 读取容器编排声明或容器运行状态。
 ### 4.3.1 `PUT /api/admin/skills/{name}/file`
 
 **用途**：**编辑并保存**技能内单个文件（2026-09-16：全部文件可编辑，含 `references/` 等附件）。保存只更新**共享技能库**。
+
+**只读例外（2026-10-03，`FR-062`）**：技能记录的 `origin.kind === "onto_market"`（从本体市场导入）时，**本端点一律拒绝**（`ADM_SKILL_READ_ONLY`，HTTP 409）——它是市场快照，内容只能经 §4.8 的「更新」以市场现版本整体替换。**拦截在写盘之前**（拒绝时文件内容零变化）；**界面 MUST NOT 渲染编辑入口**（服务端仍是权威）。
 
 **请求体**：`{ "path": "references/手册.md", "content": "…", "base_hash": "<GET 返回的 hash>" }`
 
@@ -380,6 +439,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | 情形 | 结果 |
 |---|---|
 | 文本且 ≤ 256KB | 可编辑（二进制、超 256KB 一律拒写——界面不显示编辑入口，服务端也拒绝，避免"保存时静默丢掉未显示的部分"） |
+| **技能来源为 `onto_market`** | `ADM_SKILL_READ_ONLY`（只读快照，改用 §4.8 更新） |
 | 新内容 > 256KB | `VALIDATION_FAILED`，提示改用 ZIP 覆盖安装 |
 | 目标文件不存在 | `ADM_SKILL_NOT_FOUND`（在线编辑只改已存在的文件，不新建） |
 
@@ -417,6 +477,55 @@ MUST NOT 读取容器编排声明或容器运行状态。
 **响应 204**
 
 **错误码**：`ADM_SKILL_NOT_FOUND`
+
+### 4.6 `GET /api/admin/skills/onto-market`
+
+**用途**：列出**本体市场**（optonto `.data/onto_market`，平台**只读**）中可导入的技能，并完成一次"市场文件是否变化"的检查（2026-10-02）。市场目录形态：`{场景}/{本体}/skills/{技能目录}/SKILL.md`（可含附件子目录）。
+
+**响应 200**：`{ configured, reason, items }`
+
+| 字段 | 说明 |
+|---|---|
+| `configured` | 是否配置了 `ONTO_MARKET_DIR`；`false` 时功能不可用（**不报错**） |
+| `reason` | 无法列出时的可读原因（未配置 / 目录不存在 / 不可读）；正常为 `null` |
+| `items[].scenario` / `ontology` / `skill_dir` | 市场侧三级路径（导入请求参数） |
+| `items[].name` / `description` | 来自 SKILL.md frontmatter；解析失败为 `null` 并置 `invalid_reason`（该条不可导入） |
+| `items[].files` / `hash` | 文件清单与**整包内容指纹**（sha256，路径参与哈希） |
+| `items[].status` | `new`（可导入）/ `unchanged`（已导入且市场无变化）/ `changed`（已导入但市场文件已变化，**可经 §4.8 更新**）/ `conflict`（库内同名但非市场来源）/ `invalid`（市场侧格式无效） |
+
+**差异判定**：`status` 由库内同名技能的 `origin.hash` 与市场现算哈希比对得出——打开本接口即完成一次"市场文件是否变化"的检查。
+
+### 4.7 `POST /api/admin/skills/onto-market/install`
+
+**用途**：从本体市场导入一个技能到共享技能库（2026-10-02）。按 `{scenario}/{ontology}/skills/{skill}` 读取市场目录**整包**（对市场只读），复用 ZIP 安装的全部校验与**原子入驻**（§4.4 关键约束同样适用）。
+
+**请求体**：`{ "scenario": "生产调度", "ontology": "原材料采购和库存", "skill": "raw-material-inventory" }`
+
+**响应 201**：`{ name, description, files, installed_at, overwritten: false }`
+
+**错误码**：`ADM_SKILL_NAME_TAKEN`（**重名直接拒绝**——`install` 不提供覆盖；市场文件的更新走 §4.8）、`VALIDATION_FAILED`（未配置 `ONTO_MARKET_DIR`、路径越界、缺 `SKILL.md`、frontmatter 无效、超限等）
+
+**关键约束**：①对市场**只读**，MUST NOT 写/删/改 optonto 任何文件；②导入记录 `source = "onto_market:{场景}/{本体}"` 与 `origin`（含内容指纹）；③库仍是唯一权威来源（`FR-036`）——市场后续更新**不会**自动同步，由管理员经 §4.8 显式更新。
+
+### 4.8 `POST /api/admin/skills/onto-market/update`
+
+**用途**：用市场现版本**更新**一份已从本体市场导入的技能（2026-10-02）。检测到 `changed`（§4.6）后，管理员无需"先删再导"，直接整包原子替换（零时间窗，区别于两步操作——窗口内部署不会物化出缺技能的数字人）。
+
+**请求体**：`{ "scenario": "…", "ontology": "…", "skill": "…", "confirm": false }`（`confirm` 仅在服务端报 `ADM_SKILL_MODIFIED` 后重试时置 `true`）
+
+**覆盖边界**（四重校验，缺一不可）：①库内存在同名技能（不存在 → `VALIDATION_FAILED`，提示走 §4.7 导入）；②该技能 `origin` 为 `onto_market` 且 `scenario`/`ontology` 与本次一致（非市场来源 → `ADM_SKILL_NAME_TAKEN`，市场里挪过位置 → `VALIDATION_FAILED`）；③库内**当前内容**哈希仍等于 `origin.hash`，否则必须 `confirm: true` 显式确认（人工修改随更新被丢弃，**MUST NOT 静默覆盖**）。
+
+**响应 200**：`{ name, description, files, installed_at, overwritten: true, locally_modified, affected_agents }`
+
+| 字段 | 说明 |
+|---|---|
+| `installed_at` | 保留**首次导入**时间（更新不改变安装时间） |
+| `locally_modified` | 更新前库内内容与导入时不一致（本次丢弃了人工修改） |
+| `affected_agents` | 设计里引用该技能的数字人名清单——运行副本需**重新部署**才更新（部署即全量物化，`SC-009`） |
+
+**错误码**：`ADM_SKILL_MODIFIED`（库内版本被人工修改且未确认）、`ADM_SKILL_NAME_TAKEN`（库内同名技能非市场来源）、`VALIDATION_FAILED`（同名不存在／来源位置不符／参数与路径问题，同 §4.7）
+
+**关键约束**：①ZIP 上传等**其他来源**的技能永不接受市场覆盖（`FR-036`）；②更新后 `origin.hash` 换为市场现哈希，后续 `changed` 判定从新基准起算；③运行中的会话：重部后 `read_skill` 即读新内容，但 System Prompt 里的技能 `name`/`description` 为实例构建时快照，实例重建后刷新。
 
 ---
 
@@ -655,12 +764,15 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 | 本契约 | 前端类型 | 说明 |
 |---|---|---|
-| `§3.1` 的 `items` 元素 | `McpServiceListItem` | 字段名、可选性完全对齐（含单一 `url`） |
-| `§3.2` 的响应 | `McpServiceDetail` | 调用配置 + 工具清单 + 引用 |
+| `§3.1` 的 `items` 元素 | `McpServiceListItem` | 字段名、可选性完全对齐（含单一 `url` 与 `has_headers` 布尔量） |
+| `§3.2` 的响应 | `McpServiceDetail` | 调用配置 + 工具清单 + 引用；`headers` 为**掩码值**（`McpHeaders`） |
 | `§3.3.1` 的请求体 | `McpServiceCreatePayload` | 名称由管理员指定 |
-| `§3.3` / `§3.3.1` 的响应 | `McpServiceConfigSaved` | 完整调用配置 + `revision` + `affected_agents` |
+| `§3.3` / `§3.3.1` 的响应 | `McpServiceConfigSaved` | 完整调用配置 + `revision` + `affected_agents`；`headers` 同为掩码（界面据此**就地刷新**请求头展示，不重载详情） |
 | `§5.3` 的响应 | `AgentDesign` | 五类配置字段与设计态 JSON 一致 |
 | `§6.6` 的响应 | `DeployResult` | 含 `manifest_diff` |
+| `§10.1` 的 `items` 元素 | `OntologyListItem` | 6 项 metadata 以对象承载（缺项 `null`）+ `has_securities`；不下发任何文件正文 |
+| `§10.2` 的响应 | `OntologyDetail` | 记录 + `ontology.yaml` 全文 + `securities.yaml` 全文（`null` = 未同步）——只读视图的数据源 |
+| `§10.4` 的 `items` 元素 | `OntologyMarketItem` | 含 `status`、市场侧两个文件的指纹与 `has_securities` |
 | `§0.4` 的错误码 | `ADMIN_ERROR_CODES` 常量 + `error-message.ts` 中文文案映射 | 前端 MUST NOT 直接展示后端 `message`（沿用既有 `frontend` 的口径） |
 
 **错误码文案**：前端 MUST 按 `code` 分派中文文案（新增 `ADM_*` 码的文案映射表），未知码回退通用文案并保留原码——与既有 `frontend/src/utils/error-message.ts` **同一实现思路**，避免两套错误展示习惯。
@@ -676,3 +788,105 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | 分页 | 卡片列表固定 8 项/页（`FR-006`）；消息类接口的既有 `limit`/`offset` 惯例**沿用**于非卡片长列表的 `limit` |
 | 鉴权 | **无**（`research.md` D11）；操作者固定 `zyw_admin`，仅用于审计字段 |
 | 与既有 `/api/*` 的隔离 | `/api/admin/` 由网关按**最长前缀**分发到 `admin-backend`，不进入 `agent-backend`（`research.md` D10） |
+
+---
+
+## §10 本体管理（2026-10-03 新增）
+
+**定位**：一级导航的第二个功能区（MCP 服务与 SKILL 管理之间）。本体来自**本体市场**（optonto `.data/onto_market`，平台**只读**），导入 **`ontology.yaml`（必需）+ `securities.yaml`（可选，行为安全管控）** 两个文件（`data-model.md` §9）；平台侧**只读**——没有任何编辑本体的端点。
+
+**身份**：`scenario`（场景目录名）+ `ontology_dir`（本体目录名）的组合。因路由只承载单段 detail（`FR-053` 两级导航上限），详情与删除把场景放在查询参数 `scenario` 上。两者都 MUST 是**安全路径段**（不含分隔符/`..`/控制字符，≤128 字符；中文与全角括号合法）。
+
+### 10.1 `GET /api/admin/ontologies`
+
+**用途**：本体卡片列表（`FR-058`）。
+
+**查询参数**：`page`（服务端固定 8 项/页）
+
+**响应 200**：`items` 每项：
+
+```jsonc
+{
+  "scenario": "生产调度",
+  "ontology_dir": "原材料采购和库存",
+  "name": "原材料采购和库存",          // metadata.ontology_name，缺失时兜底为目录名
+  "metadata": {                        // 6 项，缺项为 null
+    "created_at": "2026-07-15 16:05:02",
+    "deployed_version": "v1.0",
+    "scenario_name": "生产调度",
+    "scenario_id": 1,
+    "ontology_name": "原材料采购和库存",
+    "ontology_id": 1
+  },
+  "source": "onto_market:生产调度",
+  "hash": "…sha256…",
+  "has_securities": true,               // 是否已同步 securities.yaml（卡片徽标用它）
+  "installed_at": "2026-10-03T…",
+  "updated_at": "2026-10-03T…"
+}
+```
+
+**关键约束**：列表 MUST NOT 下发任何文件全文（正文按需在 §10.2 取）。
+
+### 10.2 `GET /api/admin/ontologies/{ontology_dir}?scenario={场景}`
+
+**用途**：本体详情——记录 + 文件**全文**，供只读视图渲染（`FR-059`）。
+
+**响应 200**：§10.1 的字段 + 下列字段 + `revision`
+
+| 字段 | 说明 |
+|---|---|
+| `content` / `size` | `ontology.yaml` 全文与字节数 |
+| `securities_content` / `securities_size` | `securities.yaml` 全文与字节数；**未同步时为 `null` / `0`**（该本体未配置安全管控，不是错误） |
+
+**错误码**：`ADM_ONTOLOGY_NOT_FOUND`（记录不存在或 `ontology.yaml` 缺失）、`VALIDATION_FAILED`（缺 `scenario`）
+
+### 10.3 `DELETE /api/admin/ontologies/{ontology_dir}?scenario={场景}`
+
+**用途**：从本体库删除（`FR-061`）；目录整体移除（`ontology.yaml` 与已同步的 `securities.yaml` 一并清除）。本体**不被数字人引用**，故无需引用清单与二次确认清单（区别于 SKILL 的 §4.5）。
+
+**响应 204**
+
+**错误码**：`ADM_ONTOLOGY_NOT_FOUND`、`VALIDATION_FAILED`（缺 `scenario`）
+
+### 10.4 `GET /api/admin/ontologies/onto-market`
+
+**用途**：列出本体市场里可导入的本体及其差异状态（`FR-060`）。打开本接口即完成一次"市场侧 `ontology.yaml` / `securities.yaml` 是否变化"的检查。
+
+**响应 200**：`{ configured, reason, items }`
+
+| 字段 | 说明 |
+|---|---|
+| `configured` | 是否配置了 `ONTO_MARKET_DIR`；`false` 时功能不可用（**不报错**） |
+| `reason` | 无法列出时的可读原因；正常为 `null` |
+| `items[].scenario` / `ontology_dir` | 市场侧两级路径（导入/更新请求参数） |
+| `items[].name` / `metadata` | 解析自 `ontology.yaml` 的 `metadata` 段；解析失败为 `null` 并置 `invalid_reason` |
+| `items[].size` / `hash` | `ontology.yaml` 字节数 / **内容指纹**（sha256） |
+| `items[].has_securities` / `securities_size` / `securities_hash` | 市场侧是否有 `securities.yaml`、其字节数与内容指纹（无该文件时 `false` / `0` / `null`；**缺失不是错误**） |
+| `items[].status` | `new`（可导入）/ `unchanged`（已导入且**两个基准文件**都未变）/ `changed`（已导入但任一文件已变——含"市场新增/移除了安全管控"——**可经 §10.6 更新**）/ `invalid`（`ontology.yaml` 缺失、超限或 YAML 无效） |
+
+**关键约束**：对市场**只读**，MUST NOT 写/删/改 optonto 任何文件；单条 `invalid` MUST NOT 拖垮整个列表。
+
+### 10.5 `POST /api/admin/ontologies/onto-market/import`
+
+**用途**：从本体市场导入一个本体（`ontology.yaml` 必需 + `securities.yaml` 可选）到平台本体库。
+
+**请求体**：`{ "scenario": "生产调度", "ontology_dir": "原材料采购和库存" }`
+
+**响应 201**：`{ scenario, ontology_dir, name, metadata, installed_at, overwritten: false }`
+
+**错误码**：`ADM_ONTOLOGY_EXISTS`（**重复导入直接拒绝**——同一「场景 + 目录名」已存在，界面应改用 §10.6）、`VALIDATION_FAILED`（未配置 `ONTO_MARKET_DIR`、路径越界、`ontology.yaml` 缺失/超限、YAML 无效等）
+
+**关键约束**：①对市场只读；②记录 `source = "onto_market:{场景}"`、`hash` 与 `securities_hash`（两个内容指纹）；③落盘 `platform-data/onto_market/{场景}/{本体}/` 下的同名文件（前两级结构与市场一致）。
+
+### 10.6 `POST /api/admin/ontologies/onto-market/update`
+
+**用途**：用市场现版本更新已导入的本体（`FR-061`）。
+
+**请求体**：同 §10.5
+
+**响应 200**：同 §10.5 但 `overwritten: true`；`installed_at` 保留**首次导入**时间。
+
+**错误码**：`VALIDATION_FAILED`（**库内不存在该本体** → 提示先导入；参数与市场侧问题同 §10.5）
+
+**关键约束**：①整体替换两个文件（单文件原子写；市场侧已删除 `securities.yaml` 时 MUST 同时清除库内副本，保证"库内 = 市场快照"）；②更新后 `hash` / `securities_hash` 换为市场现哈希，后续 `changed` 判定从新基准起算；③与 SKILL 不同**没有"人工修改确认"**——本体只读、平台无编辑通道，库内内容必然等于上次导入的市场快照。

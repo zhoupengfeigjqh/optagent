@@ -67,6 +67,8 @@ beforeEach(async () => {
     transport: 'http',
     url: 'http://ocr:8000/mcp',
     file_args: {},
+    // 工具白名单：新建必填非空（2026-10-03）
+    allowed_tools: ['ocr_image'],
   });
   await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: AGENT });
   fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());

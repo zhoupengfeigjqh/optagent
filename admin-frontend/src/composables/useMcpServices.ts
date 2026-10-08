@@ -15,11 +15,14 @@ import {
   fetchMcpStats,
   getMcpService,
   listMcpServices,
+  probeMcpTarget,
   saveMcpServiceConfig,
   testMcpService,
+  type McpProbePayload,
 } from '../api/mcp'
 import type {
   ErrorInfo,
+  McpProbeResult,
   McpServiceConfigPayload,
   McpServiceConfigSaved,
   McpServiceCreatePayload,
@@ -99,6 +102,26 @@ export function useMcpServices() {
   }
 
   /**
+   * 新建前的**探测**（§3.9，2026-10-03）：取回该目标的工具清单供勾选。
+   *
+   * 与 `createService` 共用同一个 `busy`：探测期间弹窗也要禁止关闭。
+   * 连接失败**不算请求失败**（返回 `ok: false` 的结果，由界面呈现可读原因）；
+   * 只有请求本身失败（400/网络）才返回 `null` 并把原因放进 `error`。
+   */
+  async function probeTarget(payload: McpProbePayload): Promise<McpProbeResult | null> {
+    busy.value = true
+    error.value = null
+    try {
+      return await probeMcpTarget(payload)
+    } catch (err) {
+      error.value = toErrorInfo(err)
+      return null
+    } finally {
+      busy.value = false
+    }
+  }
+
+  /**
    * 保存调用配置。
    *
    * `revision` **显式传入**：详情页持有的是父组件加载的 props，本实例的
@@ -117,7 +140,7 @@ export function useMcpServices() {
     name: string,
     payload: Omit<McpServiceConfigPayload, 'revision'>,
     revision?: number,
-  ): Promise<{ affected: string[]; revision: number } | null> {
+  ): Promise<{ affected: string[]; revision: number; maskedHeaders: Record<string, string> } | null> {
     const currentRevision = revision ?? detail.value?.revision
     if (currentRevision === undefined) return null
     busy.value = true
@@ -127,7 +150,13 @@ export function useMcpServices() {
         ...payload,
         revision: currentRevision,
       })
-      return { affected: saved.affected_agents, revision: saved.revision }
+      // `maskedHeaders`：保存响应里的**掩码**请求头（2026-10-08）。调用方据此就地刷新
+      // 展示，无需重载详情（重载会连带触发一次 MCP 实时探测，见上方注释）。
+      return {
+        affected: saved.affected_agents,
+        revision: saved.revision,
+        maskedHeaders: saved.headers ?? {},
+      }
     } catch (err) {
       error.value = toErrorInfo(err)
       return null
@@ -185,6 +214,7 @@ export function useMcpServices() {
     loadDetail,
     loadStats,
     createService,
+    probeTarget,
     saveConfig,
     removeService,
     runTest,

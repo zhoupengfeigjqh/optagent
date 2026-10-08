@@ -33,6 +33,25 @@
       "source": "AI 助手创建",
       "installed_at": "2026-09-28T05:35:57.746Z",
       "updated_at": "2026-09-28T05:45:07.283Z"
+    },
+    {
+      "name": "raw-material-inventory",
+      "description": "原材料采购和库存本体技能，涵盖原材料、供应商、采购记录、库存等核心概念，支持采购单创建、取消、入库、库存查询、采购记录查询、原材料查询、供应商查询及供货能力查询等行为，并定义了从库存查询到采购入库的完整业务流程。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 17799
+        }
+      ],
+      "source": "onto_market:生产调度/原材料采购和库存",
+      "origin": {
+        "kind": "onto_market",
+        "scenario": "生产调度",
+        "ontology": "原材料采购和库存",
+        "hash": "9512d6e3d37b34e7af433e063d47f91fd3a66546def790601647e1944e08c02b"
+      },
+      "installed_at": "2026-10-02T15:25:03.874Z",
+      "updated_at": "2026-10-02T15:32:38.436Z"
     }
   ]
 }

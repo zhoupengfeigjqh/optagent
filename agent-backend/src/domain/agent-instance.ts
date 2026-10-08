@@ -26,6 +26,14 @@ import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.j
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
 /**
+ * HTTP 头名判据（RFC 7230 token）。
+ *
+ * 与平台保存期（`admin-backend/src/domain/mcp/service-config-fields.ts` 的
+ * `HEADER_NAME_RE`）**同一判据**——两侧不一致会造成"平台保存得进去、运行环境加载不了"。
+ */
+const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
  * 内置工具白名单（FR-023）。
  *
  * **R1 改造后从 `builtin-tool-catalog.ts` 派生**——此前这里与
@@ -125,8 +133,88 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.confirmation !== undefined) cfg.confirmation = parseConfirmation(s.confirmation, bad);
     if (s.rules_fields !== undefined) cfg.rulesFields = parseRulesFields(s.rules_fields, bad);
     if (s.async_tools !== undefined) cfg.asyncTools = parseAsyncTools(s.async_tools, bad);
+    if (s.allowed_tools !== undefined) cfg.allowedTools = parseAllowedTools(s.allowed_tools, bad);
+    if (s.headers !== undefined) cfg.headers = parseHeaders(s.headers, bad);
     return cfg;
   });
+}
+
+/**
+ * 解析 headers（**请求头**，2026-10-08）。
+ *
+ * 判据与平台保存期**同一口径**（对象 / 头名合法 / 值为单行非空字符串 / 大小写不敏感下不重复），
+ * 否则会出现"平台保存得进去、运行环境加载不了"。非法即配置错误：把 typo 挡在加载期，
+ * 避免"以为带了令牌、实际没带"这类只能靠 401 反推的静默失效。
+ *
+ * 语义：缺省 = 不带请求头（存量 `MCP.json` 同一口径；物化时也不会写空壳）。
+ */
+function parseHeaders(raw: unknown, bad: (why: string) => Error): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw bad(`headers 须为对象 { 头名: 值 }，当前：${JSON.stringify(raw)}`);
+  }
+  const out: Record<string, string> = {};
+  /** 头名大小写不敏感：同时出现两个只差大小写的头名时，"发哪个"会退化成实现细节 */
+  const seen = new Map<string, string>();
+  for (const [rawName, rawValue] of Object.entries(raw as Record<string, unknown>)) {
+    const name = rawName.trim();
+    if (!HEADER_NAME_RE.test(name)) {
+      throw bad(`headers 的名称非法：${JSON.stringify(rawName)}（须为合法 HTTP 头名，如 X-MCP-Token）`);
+    }
+    const prev = seen.get(name.toLowerCase());
+    if (prev !== undefined) {
+      throw bad(`headers 存在重复的头名：${prev} 与 ${name}（HTTP 头名大小写不敏感）`);
+    }
+    seen.set(name.toLowerCase(), name);
+    if (typeof rawValue !== 'string') {
+      throw bad(`headers.${name} 的值须为字符串（令牌等），当前：${JSON.stringify(rawValue)}`);
+    }
+    const value = rawValue.trim();
+    if (value === '') throw bad(`headers.${name} 的值不能为空`);
+    if (hasControlChars(value)) {
+      throw bad(`headers.${name} 的值须为单行字符串（不得含换行或控制字符）`);
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * 值里是否含换行或控制字符。
+ *
+ * 换行会被 HTTP 客户端拆成**额外的头**（header injection），控制字符同理。
+ * 用逐字符判断而非正则（控制字符类正则触发 `no-control-regex`）；
+ * 与平台保存期 `service-config-fields.ts` 的 `hasControlChars` **同一判据**。
+ */
+function hasControlChars(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * 解析 allowed_tools（**工具白名单**，2026-10-03）。
+ *
+ * 判据与平台**同一口径**（数组 / 元素非空字符串 / 重复项静默去重），避免
+ * "平台保存得进去、运行环境加载不了"这类两边不一致。
+ *
+ * 语义：**缺省或空数组 = 不限制**（存量 `MCP.json` 与平台读取路径同一口径）。
+ * 故空数组**不报错**——它表示"不过滤"，而不是"一个工具都不给"。
+ */
+function parseAllowedTools(raw: unknown, bad: (why: string) => Error): string[] {
+  if (!Array.isArray(raw)) {
+    throw bad(`allowed_tools 须为字符串数组（工具白名单），当前：${JSON.stringify(raw)}`);
+  }
+  const names: string[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw bad(`allowed_tools 的元素须为非空字符串，当前：${JSON.stringify(item)}`);
+    }
+    const name = item.trim();
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
 }
 
 /**

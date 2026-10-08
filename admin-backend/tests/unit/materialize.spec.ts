@@ -30,6 +30,8 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
     transport: 'http',
     url: OCR_URL,
     file_args: {},
+    // 工具白名单：新创建必填非空（2026-10-03）；本文件的用例不关心它的内容
+    allowed_tools: ['ocr_image'],
     ...overrides,
   });
 }
@@ -96,6 +98,19 @@ describe('buildMcpServerEntry', () => {
     });
   });
 
+  it('headers 为空时不写该字段（保持产物精简，与 file_args/async_tools 同口径）', () => {
+    configure('ocr');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('headers');
+  });
+
+  it('headers 非空时**以明文**物化到 MCP.json（运行环境要按原样发送；掩码只用于回显）', () => {
+    const token = '6UuE8_4nY683gZ13rNQbHDCfxgMgEF3Z';
+    configure('ocr', { headers: { 'X-MCP-Token': token } });
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })?.headers).toEqual({
+      'X-MCP-Token': token,
+    });
+  });
+
   it('取值路径原样物化到 MCP.json（对象数组里的字段，2026-09-16）', () => {
     configure('parse', {
       file_args: { parse_excel_files: { 'items[].excelFileUrl': 'url' } },
@@ -129,6 +144,26 @@ describe('buildMcpServerEntry', () => {
     expect(buildMcpServerEntry('svc-rules', { mcpConfigs, skills })?.rules_fields).toEqual({
       optimize: 'rules',
     });
+  });
+
+  it('工具白名单：非空才写进 MCP.json（运行环境据此只挂这些工具）', () => {
+    configure('svc-allowed', { allowed_tools: ['ocr_image', 'query_price'] });
+    expect(buildMcpServerEntry('svc-allowed', { mcpConfigs, skills })?.allowed_tools).toEqual([
+      'ocr_image',
+      'query_price',
+    ]);
+  });
+
+  it('工具白名单为空（存量记录）= 不限制：不写该字段（运行环境放行全部工具）', () => {
+    // 空白名单无法经 create 产出（新建必填非空），故直接写文档模拟存量记录
+    store.writeJson('mcp-services.json', {
+      items: {
+        'svc-open': { name: 'svc-open', description: 'x', transport: 'http', url: OCR_URL },
+      },
+    });
+    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills })).not.toHaveProperty(
+      'allowed_tools',
+    );
   });
 
   it('async_tools 缺省为 []：不写该字段（产物精简）；声明后原样物化到 MCP.json（R11）', () => {

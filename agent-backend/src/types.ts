@@ -255,6 +255,17 @@ export interface McpServerConfig {
   command?: string; // stdio
   args?: string[];
   url?: string; // http
+  /**
+   * **请求头**（2026-10-08）：随每次 MCP 请求发送的 HTTP 头，仅对 `transport=http` 有意义。
+   *
+   * 用于需要**访问令牌**的服务（本体侧「自建发布」的动态容器要求 `X-MCP-Token`，
+   * 缺了直接 401——服务本身是好的，只看得到"连不上"）。
+   *
+   * 由平台调用配置物化而来（平台侧存明文、只回掩码；这里是明文，
+   * 信任边界与 `agent-backend/.env.local` 同级）。缺省/空 = 不带请求头（存量行为零变化）。
+   * 判据见 `domain/agent-instance.ts` 的 `parseHeaders`（与平台保存期同一口径）。
+   */
+  headers?: Record<string, string>;
   /** 调用确认策略（缺省 `never`） */
   confirmation?: McpConfirmation;
   /**
@@ -282,6 +293,18 @@ export interface McpServerConfig {
    * 缺省/空 = 不启用（存量行为零变化）。
    */
   asyncTools?: string[];
+  /**
+   * **工具白名单**（2026-10-03）：该服务对该数字人**可见**的原始工具名清单
+   * （不含 `{server}__` 前缀）。
+   *
+   * 装配时按它过滤该服务的工具表：**清单外的工具不会进入 Agent 工具表**——
+   * 模型连"有这个工具"都不知道，因此无从调用（比"调用时拒绝"更彻底，也省掉
+   * 模型反复尝试的无效轮次）。
+   *
+   * 缺省 / 空数组 = **不限制**（白名单上线前的存量 `MCP.json` 与此同一口径；
+   * 平台物化时也是"非空才写"）——**MUST NOT** 把空数组读成"一个工具都不给"。
+   */
+  allowedTools?: string[];
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;

@@ -59,6 +59,19 @@ const pendingDelete = ref(false)
 const affected = ref<ReferenceItem[]>([])
 /** 调用配置表单：页头的「保存调用配置」通过它的 `submit()` 触发（含本地校验） */
 const configForm = ref<InstanceType<typeof McpCallConfigForm> | null>(null)
+/**
+ * 最近一次保存响应里的**掩码请求头**（2026-10-08）：透传给表单，让"刚改完的令牌"
+ * 立刻以新掩码显示（保存后不重载详情，见 `onSubmit` 注释）。
+ */
+const savedHeaders = ref<Record<string, string> | null>(null)
+
+/** 切换服务即清掉上一次的保存回执，避免把 A 服务的掩码展示成 B 服务的 */
+watch(
+  () => props.openedName,
+  () => {
+    savedHeaders.value = null
+  },
+)
 
 const TABS = [
   { id: 'config', label: '调用配置' },
@@ -99,6 +112,9 @@ async function onSubmit(config: McpServiceConfigInput): Promise<void> {
     emit('announce', '保存失败，请查看错误原因')
     return
   }
+  // 请求头（2026-10-08）：保存响应带的是**掩码**，透传给表单就地刷新展示
+  // （不重载详情——重载会连带触发一次 MCP 实时探测，扰乱表单草稿与清单分支）
+  savedHeaders.value = result.maskedHeaders
   emit(
     'announce',
     result.affected.length > 0
@@ -121,6 +137,16 @@ async function runTest(): Promise<void> {
 }
 
 defineExpose({ runTest })
+
+/**
+ * 「工具清单」页签的「重新探测」：与「读取失败重试」**同一条路径**——重取详情，
+ * 后端详情接口会现连服务拿最新清单。解决"打开详情时服务还不可达 → 空清单一直
+ * 冻在页面上，而『发起测试』每次都现连、看着是通的"的信息差（2026-10-02）。
+ */
+function onReprobe(): void {
+  emit('announce', '正在重新探测工具清单…')
+  emit('reload')
+}
 
 /** 删除前先取受影响清单（§7.1） */
 async function requestDelete(): Promise<void> {
@@ -187,6 +213,7 @@ async function confirmDelete(): Promise<void> {
             ref="configForm"
             :service="props.service"
             :busy="m.busy.value"
+            :headers-override="savedHeaders"
             @submit="onSubmit"
             @announce="emit('announce', $event)"
           />
@@ -195,8 +222,12 @@ async function confirmDelete(): Promise<void> {
         <McpToolList
           v-show="tab === 'tools'"
           :tools="props.service.tools"
+          :allowed-tools="props.service.allowed_tools"
+          :missing-tools="props.service.missing_tools"
           :truncated="props.service.tools_truncated"
           :error-message="props.service.tools_error ?? null"
+          :busy="props.loading"
+          @reprobe="onReprobe"
         />
 
         <div v-show="tab === 'stats'">

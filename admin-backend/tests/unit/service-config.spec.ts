@@ -24,11 +24,19 @@ const BASE = {
   file_args: { ocr_image: { image: 'url' } },
 };
 
+/**
+ * 新建时的工具白名单（2026-10-03 起新建必填非空）。
+ *
+ * **只在 `create` 路径传**：`upsert`（保存调用配置）携带该字段会被显式拒绝
+ * （白名单不可二次调整），故两条路径的入参不同。
+ */
+const ALLOWED = ['ocr_image'];
+
 /** 建立或更新 'ocr'（多数用例只关心"保存后读到什么"，故两条路径合并） */
 function upsert(overrides: Record<string, unknown> = {}): void {
   const input = { ...BASE, ...overrides };
   if (configs.exists('ocr')) configs.upsert('ocr', input, store.revision());
-  else configs.create({ name: 'ocr', ...input });
+  else configs.create({ name: 'ocr', allowed_tools: ALLOWED, ...input });
 }
 
 beforeEach(() => {
@@ -69,8 +77,8 @@ describe('读写与索引', () => {
   });
 
   it('listAll 按名称排序（列表稳定）', () => {
-    configs.create({ name: 'zeta', ...BASE });
-    configs.create({ name: 'alpha', ...BASE });
+    configs.create({ name: 'zeta', allowed_tools: ALLOWED, ...BASE });
+    configs.create({ name: 'alpha', allowed_tools: ALLOWED, ...BASE });
     expect(configs.listAll().map((c) => c.name)).toEqual(['alpha', 'zeta']);
   });
 

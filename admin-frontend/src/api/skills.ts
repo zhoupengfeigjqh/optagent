@@ -5,6 +5,7 @@
  * 编辑走 `PUT .../file` 并携带读到的内容哈希作乐观锁。
  */
 import { http } from './http'
+import type { OntoMarketListing, OntoMarketUpdateResult } from './onto-market'
 import type {
   Paged,
   SkillDetail,
@@ -59,4 +60,45 @@ export function installSkill(file: File, overwrite: boolean): Promise<SkillInsta
 
 export function deleteSkill(name: string): Promise<void> {
   return http.del<void>(`/api/admin/skills/${encodeURIComponent(name)}`)
+}
+
+/**
+ * 本体市场：列出可导入的技能及其与库内的差异状态（2026-10-02）。
+ * 打开本接口即完成一次"市场文件是否变化"的检查（整包内容指纹比对）。
+ */
+export function fetchOntoMarket(): Promise<OntoMarketListing> {
+  return http.get<OntoMarketListing>('/api/admin/skills/onto-market')
+}
+
+/** 从本体市场导入：平台读市场目录整包入驻；**重名直接拒绝**（`ADM_SKILL_NAME_TAKEN`），不提供覆盖 */
+export function installOntoMarketSkill(
+  scenario: string,
+  ontology: string,
+  skill: string,
+): Promise<SkillInstallResult> {
+  return http.post<SkillInstallResult>('/api/admin/skills/onto-market/install', {
+    scenario,
+    ontology,
+    skill,
+  })
+}
+
+/**
+ * 从本体市场更新（§4.8）：整包原子替换一份已从市场导入的技能。
+ *
+ * 库内版本被人工修改过时服务端返回 409 `ADM_SKILL_MODIFIED`；
+ * `confirm: true` 表示管理员已确认丢弃本地修改。
+ */
+export function updateOntoMarketSkill(
+  scenario: string,
+  ontology: string,
+  skill: string,
+  confirm = false,
+): Promise<OntoMarketUpdateResult> {
+  return http.post<OntoMarketUpdateResult>('/api/admin/skills/onto-market/update', {
+    scenario,
+    ontology,
+    skill,
+    confirm,
+  })
 }

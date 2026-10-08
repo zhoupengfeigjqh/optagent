@@ -6,6 +6,7 @@
  */
 import { http } from './http'
 import type {
+  McpProbeResult,
   McpServiceConfigPayload,
   McpServiceConfigSaved,
   McpServiceCreatePayload,
@@ -61,6 +62,13 @@ export interface McpProbePayload {
   url?: string
   command?: string
   args?: string[]
+  /**
+   * 请求头（2026-10-08）：真实值。仅在管理员**显式编辑**过请求头时携带；
+   * 不携带 = 服务端按**已保存**的请求头连（详情页回显的是掩码，界面拿不到真值）。
+   */
+  headers?: Record<string, string>
+  /** 目标名（仅用于服务端报错文案可读；不参与连接） */
+  name?: string
 }
 
 export function testMcpService(name: string, probe?: McpProbePayload): Promise<McpTestResult> {
@@ -68,6 +76,17 @@ export function testMcpService(name: string, probe?: McpProbePayload): Promise<M
     `/api/admin/mcp/services/${encodeURIComponent(name)}/test`,
     probe,
   )
+}
+
+/**
+ * 新建前的**工具清单探测**（契约 §3.9，2026-10-03）。
+ *
+ * 对一个**尚未登记**的连接目标连一次取回工具清单——新建弹窗据此让管理员勾选可见工具。
+ * 与 `testMcpService` 的分工：那个要求服务已登记（未登记 404），这个不要求。
+ * 连接失败时**返回 `ok: false` + 可读原因而不抛错**：失败要留在弹窗里、由管理员决定重试或放弃。
+ */
+export function probeMcpTarget(payload: McpProbePayload): Promise<McpProbeResult> {
+  return http.post<McpProbeResult>('/api/admin/mcp/probe', payload)
 }
 
 /** 调用统计；`stats_available=false` 时界面 MUST 显示"未知"而非 0（`FR-009`） */

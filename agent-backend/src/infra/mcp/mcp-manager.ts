@@ -92,10 +92,17 @@ export interface McpManagerOptions {
 /** SDK 默认建连（stdio / Streamable HTTP） */
 async function defaultCreateClient(cfg: McpServerConfig): Promise<McpClientLike> {
   const client = new Client({ name: 'optagent-backend', version: '0.1.0' });
+  // 请求头（2026-10-08）：需要访问令牌的服务（如本体侧自建发布的 `X-MCP-Token`）
+  // 不带就是一串 401。经 SDK 的 `requestInit` 注入——与平台探测/测试路径同一写法，
+  // 避免"平台测通、运行期连不上"这类协议口径漂移。空对象不传，保持既有行为。
+  const headers = cfg.headers && Object.keys(cfg.headers).length > 0 ? cfg.headers : null;
   const transport =
     cfg.transport === 'stdio'
       ? new StdioClientTransport({ command: cfg.command!, args: cfg.args ?? [] })
-      : new StreamableHTTPClientTransport(new URL(cfg.url!));
+      : new StreamableHTTPClientTransport(
+          new URL(cfg.url!),
+          headers ? { requestInit: { headers } } : undefined,
+        );
   await client.connect(transport as unknown as Parameters<Client['connect']>[0]);
   // 主动 close 也会触发 SDK 的 onclose：用标志位区分"意外断线"与"主动关闭"，
   // 避免实例回收（closeAll）被误判为断线

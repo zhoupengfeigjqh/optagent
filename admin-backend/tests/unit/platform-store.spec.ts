@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
@@ -99,6 +99,38 @@ describe('PlatformStore', () => {
   it('拒绝越界相对路径', () => {
     expect(() => store.abs('../../etc/passwd')).toThrow(ApiError);
     expect(() => store.abs('/etc/passwd')).toThrow(ApiError);
+  });
+
+  describe('remove（2026-10-03 起带删除后校验）', () => {
+    it('删除目录：目标消失；对不存在的目标幂等（不抛错）', () => {
+      store.writeJson('agents/a.json', { name: 'a' });
+      store.remove('agents/a.json');
+      expect(store.exists('agents/a.json')).toBe(false);
+      expect(() => store.remove('agents/a.json')).not.toThrow();
+      expect(() => store.remove('agents/none.json')).not.toThrow();
+    });
+
+    it('删除后目标仍在 → 抛 ADM_STORAGE_UNAVAILABLE（把静默失败变可读错误）', () => {
+      store.writeJson('agents/a.json', { name: 'a' });
+      // 用桩模拟"rmSync 不抛错但也没删掉"的宿主环境（Windows 对非 ASCII 路径即如此）：
+      // 直接打桩比依赖宿主怪癖更确定，也不会在各平台上给出不同结论
+      const spy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined);
+      try {
+        let caught: unknown;
+        try {
+          store.remove('agents/a.json');
+        } catch (err) {
+          caught = err;
+        }
+        expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_STORAGE_UNAVAILABLE);
+        expect((caught as ApiError).message).toContain('目标仍存在');
+        // 失败是"看得见的"：错误里带可操作指引
+        expect((caught as ApiError).message).toContain('手工删除');
+        expect((caught as ApiError).statusCode).toBe(503);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   it('JSONL 追加与读取：损坏行被跳过而不影响其余记录', () => {

@@ -16,12 +16,14 @@ const ITEMS: McpServiceListItem[] = [
     description: 'OCR 识别服务',
     transport: 'http',
     url: 'http://192.168.1.2:8000/mcp',
+    has_headers: false,
   },
   {
     name: 'local-mcp',
     description: '',
     transport: 'stdio',
     url: null,
+    has_headers: false,
   },
 ]
 
@@ -93,5 +95,29 @@ describe('McpCardList', () => {
       error: { code: 'INTERNAL_ERROR', message: 'x' },
     })
     expect(wrapper.text()).toContain('系统繁忙，请稍后重试')
+  })
+
+  it('配了请求头（访问令牌）的服务在卡片上标「需请求头」，且 MUST NOT 展示任何值', () => {
+    const wrapper = mountList({
+      items: [
+        {
+          name: 'raw_inventory_purchase_function',
+          description: '本体侧自建发布',
+          transport: 'http',
+          url: 'http://localhost:8021/mcp',
+          has_headers: true,
+        },
+      ],
+      total: 1,
+    })
+
+    expect(wrapper.find('[data-test="headers-badge"]').text()).toContain('需请求头')
+    // 只标"配了"，不给值：请求头里是凭据
+    expect(wrapper.text()).not.toContain('X-MCP-Token')
+  })
+
+  it('未配请求头的服务不带该徽标', () => {
+    const wrapper = mountList()
+    expect(wrapper.find('[data-test="headers-badge"]').exists()).toBe(false)
   })
 })

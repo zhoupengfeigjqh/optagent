@@ -22,7 +22,8 @@ const ALLOWED_DEPENDENCIES = new Set([
   'pino',
   'pino-pretty',
   '@modelcontextprotocol/sdk',
-  'yauzl', // D7：唯一新增依赖（SKILL ZIP 安全解压）
+  'yauzl', // D7：SKILL ZIP 安全解压
+  'yaml', // D2（2026-10-03 重新引入）：只读解析本体市场 ontology.yaml 的 metadata
 ]);
 
 /** D2 登记的开发依赖 */

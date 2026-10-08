@@ -2,7 +2,8 @@
 
 > 服务：`hd`（单工序排产）｜工具：`hd_scheduling_submit`
 > 结构范本：`ocr-service`（已跑通）。本文所有平台侧规则均取自其实际实现。
-> 更新日期：2026-09-26（§4 结果形状统一：`status` 只有 `success` / `failed`，业务细分码放 `code`）
+> 更新日期：2026-09-28（§4 结果形状**去掉业务细分码 `code`**：只保留 `status` + `message` + 业务字段，
+> 与范本 `ocr-service` 的 `{status, message, text}` 对齐；`status` 仍只有 `success` / `failed`）
 
 ---
 
@@ -111,7 +112,7 @@
 ### 4.1 请求形状
 
 ```http
-POST {result_url}&filename=hd_1790328130074_4005b4b0.json&summary=排产完成（code=80），12 条工单
+POST {result_url}&filename=hd_1790328130074_4005b4b0.json&summary=排产完成，12 条工单
 Content-Type: application/json; charset=utf-8
 
 {统一结果 JSON，见 4.3}
@@ -132,17 +133,16 @@ Content-Type: application/json; charset=utf-8
 |---|---|---|
 | `job_id` | `hd_<毫秒>_<8位随机>` | 前缀 `hd_` 必须保留：多服务共存时 job_id 全局唯一，否则落盘互相覆盖 |
 | `filename` | `{job_id}.json` | 结果是结构化 JSON，用 `.json` |
-| `summary` | 由 `status` + `code` 生成（见 4.4） | 界面上那一行标题；**必须提供** |
+| `summary` | 由服务按本次业务结果生成（见 4.4） | 界面上那一行标题；**必须提供** |
 | body | 统一结果 JSON（见 4.3） | 平台**不解析**，原样存、原样读（模型用 `read_file` 取） |
 
-### 4.3 结果形状（**统一**，2026-09-26）
+### 4.3 结果形状（**统一**，2026-09-28）
 
 回写的 body **MUST** 是**标准 JSON**，且**成功与失败同一形状**：
 
 ```jsonc
 {
   "status": "success" | "failed",   // ★ 统一取值域：平台与界面**只**按它判成败
-  "code": 80,                       // 业务细分码（建议提供；语义由本服务自定义）
   "message": "排产完成，12 条工单",  // 一行给人看的说明；失败时是**原因**
   ...                               // 其余业务字段（如 orderCount / orders）
 }
@@ -151,36 +151,41 @@ Content-Type: application/json; charset=utf-8
 | 字段 | 必填 | 规定 |
 |---|---|---|
 | `status` | ✅ | **只能是 `"success"` 或 `"failed"`**。MUST NOT 用数字或其它字符串——平台与界面**不做任何映射**，直接据此判成败 |
-| `code` | 建议 | 业务细分码（如排产 `80` 完成 / `2` 超时 / `90` 失败）。可缺省；语义由服务自定 |
 | `message` | 建议 | 一行可读说明；失败时是原因。同时作为 `summary` 的取值来源（见 4.4） |
 | 其他业务字段 | 可选 | 如 `orderCount` / `orders`；平台不解析，只是原样存给人和模型读 |
 
+- **MUST NOT** 再放业务细分码（`code` 之类）：成败只由 `status` 表达，细分信息写进 `message` 或自定义业务字段
+  （范本 `ocr-service` 的返回就是 `{status, message, text}`，没有 `code`）；
 - **MUST NOT** 用自然语言纯文本作结果；
 - **失败 MUST 照常回写**（否则界面上什么都不出现，用户无法区分"还在算 / 失败了 / 挂了"）；
-- **同步路径同样适用**：`result_url` 缺省时的**同步返回** MUST 是**同一形状**（`status: success|failed` + `code`）——
+- **同步路径同样适用**：`result_url` 缺省时的**同步返回** MUST 是**同一形状**（`status: success|failed`）——
   不得只在异步回写时统一，否则模型在同步/异步两条路径上会看到两套形状；
 - 平台对本 JSON **仍不解析**（原样存、原样读）；`status` 的**取值域由服务保证**。
 
-### 4.4 摘要映射（决定界面标题；**硬规则**）
+### 4.4 摘要生成（决定界面标题；**硬规则**）
 
 `summary` 参数 **MUST 提供**——它是界面标题的**唯一**来源；且 **MUST 表达业务成败**，
 **失败结论 MUST 前置**（标题是**单行省略号**，结论写在末尾会被截掉）。
 
-| `status` / `code` | 建议 `summary` |
+结果里不再有业务细分码（§4.3），故**没有码表**：由服务按自己的内部结果生成一行，
+成功说结果、失败说原因。示例：
+
+| 本次结果 | 建议 `summary` |
 |---|---|
-| `success` / `80` | `排产完成（code=80），{N} 条工单` |
-| `failed` / `2` | `失败 · 排产超时（code=2），本次提交已撤销，可调大 solvingTime 后重试` |
-| `failed` / `90` | `失败 · 排产失败（code=90）` |
-| 其他 | `排产结束（code={code}）` |
+| 排产成功 | `排产完成，{N} 条工单` |
+| 排产超时（提交已撤销） | `失败 · 排产超时，本次提交已撤销，可调大 solvingTime 后重试` |
+| 排产失败 | `失败 · 排产失败：{一行原因}` |
+
+> 实现上通常直接复用正文的 `message`（本文件 §5 Demo 即 `summary = payload["message"]`）：
+> 两者面向同一个人，取同一个值时不会出现"标题与正文说法不一"。
 
 ### 4.5 回写示例（成功 / 失败**同一形状**）
 
-**成功（`status=success`，`code=80`）**：
+**成功（`status=success`）**：
 
 ```json
 {
   "status": "success",
-  "code": 80,
   "message": "排产完成，12 条工单",
   "orderCount": 12,
   "orders": [
@@ -189,12 +194,11 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
-**超时 / 失败（`status=failed`，`code=2` / `90`）** —— **也要回写**：
+**超时 / 失败（`status=failed`）** —— **也要回写**：
 
 ```json
 {
   "status": "failed",
-  "code": 2,
   "message": "求解超时，本次提交已撤销"
 }
 ```
@@ -311,7 +315,7 @@ def _submit_and_post(
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     if len(body) > MAX_BODY_BYTES:                   # 超限会 413（产出丢失）→ 降级为只回状态
         body = json.dumps(
-            {"status": payload["status"], "code": payload["code"],
+            {"status": payload["status"],
              "message": f"结果过大（{len(body)} 字节），未回写正文"},
             ensure_ascii=False,
         ).encode("utf-8")
@@ -327,8 +331,8 @@ def submit_and_wait(uid: str, sid: str, cfg: SchedulingInput) -> dict:
     """提交算法 + 阻塞等回调（上限 solvingTime + 60 秒）；返回**算法结果** dict。
 
     算法结果须含 `status` 作为**业务细分码**：80 完成 / 2 超时 / 90 失败。
-    `result_payload` 会把它转成统一的 `{status: success|failed, code}` 形状（§4.3）——
-    即平台看到的从来不是 80/2/90，而是 success/failed。
+    `result_payload` 用它判成败并生成摘要，转成统一的 `{status: success|failed, message, ...}`
+    形状（§4.3）——即平台看到的从来不是 80/2/90，而是 success/failed；细分码**不外传**。
     """
     raise NotImplementedError("替换为现有的算法提交逻辑")
 
@@ -365,15 +369,14 @@ def result_payload(algorithm_result: dict) -> dict:
     """算法结果 → **统一结果形状**（§4.3）。
 
     - `status` 只有 `success` / `failed`（平台与界面据此**统一**判成败）
-    - 业务细分码 80/2/90 放 `code`
+    - 算法侧内部码（80 完成 / 2 超时 / 90 失败）**只用于本函数判成败与生成摘要，不写进返回值**
     - `message` 即界面标题用的那行摘要（**失败结论前置**）
     - 其余业务字段原样带上（平台不解析，供人和模型读）
     """
-    code = algorithm_result.get("status")
+    business_code = algorithm_result.get("status")
     payload: dict = {
-        "status": "success" if code == 80 else "failed",
-        "code": code,
-        "message": summary_of(code, algorithm_result),
+        "status": "success" if business_code == 80 else "failed",
+        "message": summary_of(business_code, algorithm_result),
     }
     payload.update(
         {k: v for k, v in algorithm_result.items() if k not in ("status", "message")}
@@ -381,21 +384,20 @@ def result_payload(algorithm_result: dict) -> dict:
     return payload
 
 
-def summary_of(code: object, algorithm_result: dict) -> str:
-    """业务细分码 → 一行摘要（≤200 字符）：成功说结果、失败说原因，**失败结论前置**。"""
-    if code == 80:
+def summary_of(business_code: object, algorithm_result: dict) -> str:
+    """业务细分码 → 一行摘要（≤200 字符）：成功说结果、失败说原因，**失败结论前置**。
+
+    细分码只服务于本函数的文案分叉，**不写进结果 JSON**（§4.3）。
+    """
+    if business_code == 80:
         count = algorithm_result.get("orderCount")
-        text = (
-            f"排产完成（code=80），{count} 条工单"
-            if count is not None
-            else "排产完成（code=80）"
-        )
+        text = f"排产完成，{count} 条工单" if count is not None else "排产完成"
         return text[:SUMMARY_MAX_CHARS]
-    if code == 2:
-        return "失败 · 排产超时（code=2），本次提交已撤销，可调大 solvingTime 后重试"
-    if code == 90:
-        return "失败 · 排产失败（code=90）"
-    return f"排产结束（code={code}）"
+    if business_code == 2:
+        return "失败 · 排产超时，本次提交已撤销，可调大 solvingTime 后重试"
+    if business_code == 90:
+        return "失败 · 排产失败"
+    return "排产结束"
 
 
 def with_filename(url: str, filename: str, summary: str | None = None) -> str:
@@ -459,7 +461,7 @@ if __name__ == "__main__":
   → 平台注入 result_url（覆盖模型填的任何值；HITL 确认窗里看不到它）
   → 服务：check_url 通过 → 返回受理 JSON（含 job_id）→ 模型复述给用户
   → 后台线程：submit_and_wait(…)（阻塞至算法回调，上限 solvingTime+60s）
-             → 算法结果 → 统一形状（status=success|failed + code）→ 生成 summary
+             → 算法结果 → 统一形状（status=success|failed）→ 生成 summary
              → POST 回写（filename + summary + 统一结果 JSON）
   → 平台落盘（正文 .json + sidecar）→ 推 SSE 信号 → 铃铛"后台记录"出现新条目
   → 模型在后续对话中可 read_file 读取该产出的正文

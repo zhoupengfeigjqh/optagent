@@ -34,7 +34,23 @@ const emit = defineEmits<{
   >
     <template #item="{ item }">
       <article class="card" :aria-label="`SKILL ${(item as SkillListItem).name}`">
-        <p class="card__title">{{ (item as SkillListItem).name }}</p>
+        <p class="card__title">
+          {{ (item as SkillListItem).name }}
+          <span
+            class="card__origin"
+            :class="
+              (item as SkillListItem).origin?.kind === 'onto_market'
+                ? 'card__origin--market'
+                : 'card__origin--external'
+            "
+          >
+            {{
+              (item as SkillListItem).origin?.kind === 'onto_market'
+                ? '本体市场 · 只读'
+                : '外部安装'
+            }}
+          </span>
+        </p>
         <p class="card__description">{{ (item as SkillListItem).description }}</p>
         <p class="card__meta">
           来源 {{ (item as SkillListItem).source }} · 更新于 {{ (item as SkillListItem).updated_at }}
@@ -53,3 +69,26 @@ const emit = defineEmits<{
     </template>
   </EntityCardList>
 </template>
+
+<style scoped>
+/* 来源标记（2026-10-02）：本体市场导入 / 外部安装（ZIP 上传等） */
+.card__origin {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  vertical-align: middle;
+}
+
+.card__origin--market {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.card__origin--external {
+  background: var(--color-bg-muted);
+  color: var(--color-text-muted);
+}
+</style>

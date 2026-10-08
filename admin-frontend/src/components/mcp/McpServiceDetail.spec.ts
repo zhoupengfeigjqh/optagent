@@ -45,6 +45,11 @@ const SERVICE: Detail = {
   command: null,
   args: null,
   file_args: {},
+  // 工具白名单与失效核对（2026-10-03）：详情只呈现白名单里的工具
+  allowed_tools: ['ocr_image'],
+  missing_tools: [],
+  // 请求头（2026-10-08）：详情回显的只有掩码
+  headers: {},
   tools: [{ name: 'ocr_image', description: '识别图片', parameters: {} }],
   tools_truncated: false,
   tools_error: null,
@@ -87,6 +92,9 @@ beforeEach(() => {
     rules_fields: {},
     async_tools: [],
     confirmation: 'never',
+    allowed_tools: ['ocr_image'],
+    // 保存响应里的掩码请求头（2026-10-08）：详情页据此就地刷新表单展示
+    headers: { 'X-MCP-Token': '6UuE…3F' },
     updated_at: 'x',
     revision: 2,
     affected_agents: [],
@@ -149,6 +157,18 @@ describe('McpServiceDetail —— 页面级动作位置', () => {
 
     expect(saveMcpServiceConfig).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('连接地址必填')
+  })
+
+  it('保存响应里的掩码请求头透传给表单：不重载详情也能看到新掩码（2026-10-08）', async () => {
+    const wrapper = mountDetail({ ...SERVICE, headers: { 'X-MCP-Token': 'OLD…99' } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="headers-view"]').text()).toContain('OLD…99')
+
+    await button(wrapper, '保存调用配置')?.trigger('click')
+    await flushPromises()
+
+    // 桩响应里是 `6UuE…3F`：保存后展示随之刷新（详情 props 并没有变）
+    expect(wrapper.find('[data-test="headers-view"]').text()).toContain('6UuE…3F')
   })
 
   it('删除：先取受影响清单并二次确认，确认后才调 DELETE', async () => {
@@ -224,6 +244,20 @@ describe('McpServiceDetail —— 页签与草稿', () => {
     await flushPromises()
 
     expect((wrapper.find('#mcp-description').element as HTMLInputElement).value).toBe('我改的用途')
+  })
+
+  it('「重新探测」：向上转发 reload 并播报；探测中（loading）按钮禁用（2026-10-02）', async () => {
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    await wrapper.find('[data-test="reprobe"]').trigger('click')
+    expect(wrapper.emitted('reload')).toEqual([[]])
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('正在重新探测工具清单')
+
+    // 探测进行中：按钮禁用（busy = 详情正在重取）
+    const busy = mountDetail(SERVICE, { loading: true })
+    await flushPromises()
+    expect(busy.find('[data-test="reprobe"]').attributes('disabled')).toBeDefined()
   })
 
   it('进入「调用统计」才拉取统计（该页签此前首次进入是空的）', async () => {
