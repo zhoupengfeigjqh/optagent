@@ -30,5 +30,5 @@
     },
     "allowJs": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "src/**/*.js", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.js", "src/**/*.vue", "tests/**/*.ts"]
 }
