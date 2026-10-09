@@ -80,14 +80,14 @@ export function mcpToolsAsAgentTools(
   logger?: Logger,
   /**
    * 异步工具注入依赖（R11）：仅当该服务声明了 `async_tools` 时传入；
-   * 缺省 = 不注入 `result_url`（存量行为零变化，见 `async-result-url.ts` 不变式 1）
+   * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）
    */
   asyncCtx?: AsyncToolContext,
 ): AgentTool[] {
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
     const injected = declaredContextParams(t.inputSchema);
-    // 异步工具（R11）：命中声明才注入回写地址。schema 未声明 `result_url` 时**告警但不阻断**——
+    // 异步工具（R11）：命中声明才注入回写地址。schema 未声明 `resultUrl` 时**告警但不阻断**——
     // "配了但服务收不到回写地址"若静默，服务侧只会一直不产出，排查成本极高（不变式 6）。
     const asyncDeclared = asyncCtx?.tools.includes(t.name) ?? false;
     const asyncInjected =
@@ -96,7 +96,7 @@ export function mcpToolsAsAgentTools(
       logger?.warn(
         {
           alert: true,
-          event: 'mcp.async.result_url.missing',
+          event: 'mcp.async.resultUrl.missing',
           service: serverName,
           tool: t.name,
         },

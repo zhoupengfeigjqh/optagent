@@ -4,7 +4,8 @@
  * 守住四条：
  * 1. **对象 → 键值行**；**对象数组 → 表格**（列 = 键并集）；**其他数组 → 列表**；
  * 2. **递归**：嵌套对象仍有独立行；
- * 3. **有界**：数组超上限只渲染前 N 项并提示；深度超限交 JSON 逃生舱；
+ * 3. **有界**：数组超上限只渲染前 N 行、表格列超上限只渲染前 N 列，均提示总数与逃生舱；
+ *    深度超限交 JSON 逃生舱；
  * 4. **不裸奔**：空容器、null 都给可读占位（不留白）。
  */
 import { mount } from '@vue/test-utils'
@@ -12,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import {
   PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_DEPTH,
+  PRODUCED_TABLE_MAX_COLUMNS,
 } from '../../utils/produced-content'
 import ProducedJsonView from './ProducedJsonView.vue'
 
@@ -66,15 +68,34 @@ describe('ProducedJsonView —— 分派', () => {
 })
 
 describe('ProducedJsonView —— 有界与逃生舱', () => {
-  it('数组超过上限：只渲染前 N 项，并提示总数', () => {
+  it('数组超过上限：只渲染前 N 行，并提示总数与逃生舱', () => {
     const rows = Array.from({ length: PRODUCED_ARRAY_MAX_ITEMS + 3 }, (_v, i) => ({ i }))
 
     const wrapper = mountView(rows)
 
     expect(wrapper.findAll('tbody tr')).toHaveLength(PRODUCED_ARRAY_MAX_ITEMS)
-    expect(wrapper.find('.produced-json__truncated').text()).toContain(
-      `共 ${PRODUCED_ARRAY_MAX_ITEMS + 3} 项`,
+    const hint = wrapper.find('.produced-json__truncated').text()
+    expect(hint).toContain(`仅显示前 ${PRODUCED_ARRAY_MAX_ITEMS} 行`)
+    expect(hint).toContain(`共 ${PRODUCED_ARRAY_MAX_ITEMS + 3} 行`)
+    expect(hint).toContain('按原始 JSON 查看')
+  })
+
+  it('表格列超过上限：只渲染前 N 列，并提示总列数', () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: PRODUCED_TABLE_MAX_COLUMNS + 2 }, (_v, i) => [`c${i}`, i]),
     )
+
+    const wrapper = mountView([wide])
+
+    expect(wrapper.findAll('th')).toHaveLength(PRODUCED_TABLE_MAX_COLUMNS)
+    expect(wrapper.findAll('tbody td')).toHaveLength(PRODUCED_TABLE_MAX_COLUMNS)
+    const hint = wrapper.find('.produced-json__truncated').text()
+    expect(hint).toContain(`仅显示前 ${PRODUCED_TABLE_MAX_COLUMNS} 列`)
+    expect(hint).toContain(`共 ${PRODUCED_TABLE_MAX_COLUMNS + 2} 列`)
+  })
+
+  it('未超上限：一行提示都不给（提示只在真截断时出现）', () => {
+    expect(mountView([{ a: 1, b: 2 }]).find('.produced-json__truncated').exists()).toBe(false)
   })
 
   it('标量数组同理有界并提示', () => {

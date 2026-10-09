@@ -82,12 +82,32 @@ describe('读写形状隔离（§10.6 不变式 3）', () => {
 });
 
 describe('mintPutUrl', () => {
-  it('缺省不带归属提示参数（只有 u/d/exp/sig）', () => {
+  it('缺省不带归属提示参数（只有 u/d/exp/sig/t）', () => {
     const url = new URL(
       mintPutUrl('http://backend:3000', SECRET, 'admin', PRODUCED_DIR, {}, 1000, NOW),
     );
     expect(url.pathname).toBe('/api/files/put');
-    expect([...url.searchParams.keys()].sort()).toEqual(['d', 'exp', 'sig', 'u']);
+    expect([...url.searchParams.keys()].sort()).toEqual(['d', 'exp', 'sig', 't', 'u']);
+  });
+
+  it('`t` = 铸造时刻（提交时刻，epoch ms，与 exp 同单位）；改它不影响验签', () => {
+    const url = new URL(
+      mintPutUrl('http://backend:3000', SECRET, 'admin', PRODUCED_DIR, {}, 1000, NOW),
+    );
+    expect(Number(url.searchParams.get('t'))).toBe(NOW);
+
+    // 与 sid/call_id/tool 同一处置：改 `t` 只影响列表展示，验签照旧通过（契约 §10.3）
+    url.searchParams.set('t', String(NOW - 60_000));
+    expect(
+      verifyPutRef(
+        SECRET,
+        'admin',
+        PRODUCED_DIR,
+        Number(url.searchParams.get('exp')),
+        url.searchParams.get('sig')!,
+        NOW,
+      ),
+    ).toBe(true);
   });
 
   it('带上 sid / call_id / tool：仅作归属提示，不参与验签', () => {

@@ -144,11 +144,11 @@ export class FileAccess {
   }
 
   /**
-   * 读文本文件（utf8），超 truncateBytes 截断；tmp 文件刷新访问时间（7 天清理依据）。
+   * 读文本文件（utf8），超 truncateBytes 截断；tmp 文件刷新访问时间（30 天清理依据）。
    *
    * `touch: false` 用于**清单类扫描**（后台产出的 sidecar）：那种读是"为了列表"而非
    * "为了内容"，若也续命，则每轮对话注入产出清单都会刷新 atime，产出**永远不会过期**
-   * （契约 §10.4 的 7 天口径随之失效）。
+   * （契约 §10.4 的 30 天口径随之失效）。
    */
   async read(
     relPath: string,

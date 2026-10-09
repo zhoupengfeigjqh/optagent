@@ -6,7 +6,9 @@
  *    `job_id` 取自服务提供的文件名主干；非法 `sid` 回退 `uid`（不让它把路径带歪）；
  * 2. **目录即索引** —— 列表由扫描目录现算；sidecar 损坏即跳过（**不产生悬空引用**）；
  * 3. **无产出即零成本** —— 提示词段为空串，不占一个字符（不变式 5）；
- * 4. **有界返回** —— 列表与提示词段都有条数上限。
+ * 4. **有界返回** —— 列表与提示词段都有条数上限；
+ * 5. **提交时刻**（2026-10-09） —— `createdAt` 落 `created_at`、完成时刻仍是回写时刻；
+ *    缺省时退化为回写时刻（两者相等，与改造前一致）。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -136,6 +138,35 @@ describe('落盘与列表', () => {
     const items = await listProduced(access);
     expect(items[0]?.filename).toBe('admin_j_1.json');
     expect(items[0]?.sid).toBeUndefined();
+  });
+
+  it('提交时刻（createdAt）落 created_at；完成时刻仍是回写时刻——两者不再相同', async () => {
+    await writeProduced({
+      access,
+      filename: 'j_9.json',
+      content: Buffer.from('x'),
+      userId: 'admin',
+      createdAt: new Date('2026-09-25T02:00:00.000Z'),
+      now: new Date('2026-09-25T02:05:00.000Z'),
+    });
+
+    const [item] = await listProduced(access);
+    expect(item?.created_at).toBe('2026-09-25T02:00:00.000Z');
+    expect(item?.finished_at).toBe('2026-09-25T02:05:00.000Z');
+  });
+
+  it('提交时刻缺省 → 退化为回写时刻（与改造前逐字一致）', async () => {
+    await writeProduced({
+      access,
+      filename: 'j_9.json',
+      content: Buffer.from('x'),
+      userId: 'admin',
+      now: new Date('2026-09-25T02:05:00.000Z'),
+    });
+
+    const [item] = await listProduced(access);
+    expect(item?.created_at).toBe('2026-09-25T02:05:00.000Z');
+    expect(item?.created_at).toBe(item?.finished_at);
   });
 
   it('目录不存在 → 空列表（"没有产出"与"目录还没建"同义）', async () => {

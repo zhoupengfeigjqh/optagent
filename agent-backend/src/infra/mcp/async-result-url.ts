@@ -1,5 +1,5 @@
 /**
- * MCP 异步工具的 `result_url` 注入（R11，契约 §10.2 / §10.6 不变式 1、2、6）。
+ * MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.2 / §10.6 不变式 1、2、6）。
  *
  * 与 `RUNTIME_CONTEXT_PARAMS`（`uid`/`sid`）**同一套路**：
  * - 判据取"**该工具自己的入参 schema 里声明了才注入**"——声明了就一定收到运行环境的值
@@ -14,7 +14,7 @@
  */
 
 /** 异步工具的回写地址参数名（服务侧须在自己的 `inputSchema` 里声明它） */
-export const ASYNC_RESULT_URL_PARAM = 'result_url';
+export const ASYNC_RESULT_URL_PARAM = 'resultUrl';
 
 /** JSON Schema 里我们关心的部分（只读） */
 interface InputSchemaLike {
@@ -22,7 +22,7 @@ interface InputSchemaLike {
   [key: string]: unknown;
 }
 
-/** 该工具是否在自己的入参 schema 里声明了 `result_url` */
+/** 该工具是否在自己的入参 schema 里声明了 `resultUrl` */
 export function declaresResultUrl(schema: unknown): boolean {
   if (typeof schema !== 'object' || schema === null) return false;
   const properties = (schema as InputSchemaLike).properties;
@@ -31,7 +31,7 @@ export function declaresResultUrl(schema: unknown): boolean {
 }
 
 /**
- * 注入 `result_url`：值一律以运行环境为准，**覆盖模型填的任何内容**。
+ * 注入 `resultUrl`：值一律以运行环境为准，**覆盖模型填的任何内容**。
  *
  * 参数不是对象时原样返回（防御：MCP 入参本就应当是对象，异常形状交给服务端校验）；
  * `undefined` 视为空入参（与其他注入一致）。

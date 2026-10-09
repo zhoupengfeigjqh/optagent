@@ -30,7 +30,7 @@ export interface ProducedItem {
   /**
    * 已读时刻（契约 §10.5 ⑤）：**缺省 = 未读**。
    *
-   * 与产出**同生命周期**——产出被 7 天清理时它一起消失，未读数因此自然归零，
+   * 与产出**同生命周期**——产出被 30 天清理时它一起消失，未读数因此自然归零，
    * 不会出现"角标 > 0 而列表为空"的悬空状态（§10.6 不变式 7）。
    */
   read_at?: string
@@ -69,7 +69,7 @@ export interface ProducedApi {
    * `POST /api/produced/read` → 批量标记已读。
    *
    * **幂等**（已读的条目不改动原 `read_at`）；**不存在的 `job_id` 忽略**
-   * （产出可能已被 7 天清理，那不是调用方的错误），只体现在 `marked` 的差值里。
+   * （产出可能已被 30 天清理，那不是调用方的错误），只体现在 `marked` 的差值里。
    */
   markRead(jobIds: readonly string[]): Promise<ProducedReadResponse>
   /**

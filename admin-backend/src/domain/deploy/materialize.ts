@@ -58,7 +58,7 @@ export function buildMcpServerEntry(
   // 不改变是否走 HITL——不在确认范围内的工具的运行环境侧天然不生效（未被包装）。
   if (Object.keys(config.rules_fields).length > 0) entry.rules_fields = config.rules_fields;
   // 异步工具声明（R11）：空数组是缺省语义，不写空壳（与上两者同一口径）。
-  // 声明后运行环境为这些工具注入 `result_url`，并接收服务算完后的结果回写。
+  // 声明后运行环境为这些工具注入 `resultUrl`，并接收服务算完后的结果回写。
   if (config.async_tools.length > 0) entry.async_tools = config.async_tools;
   // 工具白名单（2026-10-03）：非空才写（空 = 不限制，即白名单上线前的存量语义）。
   // 运行环境据此只把白名单里的工具挂给数字人，其余工具对模型不可见。

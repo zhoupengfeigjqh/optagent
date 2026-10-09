@@ -4,6 +4,8 @@
  * 覆盖：
  * - `POST /api/files/put`：正常回写 202 → 列表可见；**读签名不能用于写**（不变式 3 的端到端证据）；
  *   目录越权 / 非法文件名 → 400；验签失败 → 403；幂等重放（同名覆盖）；
+ *   **提交时刻 `t`**（2026-10-09）：带 `t` → `created_at < finished_at`；缺省 / 非数字 / 未来时刻
+ *   → 一律退化为回写时刻（两者相等），即 `created_at <= finished_at` 恒成立；
  * - 落盘即推**变更信号**（`producedEvents`），前端据此重拉列表；
  * - `GET /api/produced`：形状、倒序、有界返回、未落盘时为空。
  *
@@ -125,6 +127,67 @@ describe('POST /api/files/put —— 回写通道', () => {
       filename: 'th_a1_j_101.json',
       relPath: `${PRODUCED_DIR}/th_a1_j_101.json`,
     });
+  });
+
+  it('`t` = 提交时刻 → sidecar 的 created_at 早于 finished_at（不再恒等）', async () => {
+    const submitted = Date.now() - 60_000;
+    const url = `${mintPutUrl(
+      'http://backend:3000',
+      SECRET,
+      'admin',
+      PRODUCED_DIR,
+      {},
+      undefined,
+      submitted,
+    )}&filename=j_301.json`;
+    expect((await post(url)).statusCode).toBe(202);
+
+    const saved = await findItem('j_301');
+    expect(saved?.created_at).toBe(new Date(submitted).toISOString());
+    expect(Date.parse(saved!.created_at)).toBeLessThan(Date.parse(saved!.finished_at));
+  });
+
+  it('没有 `t`（旧 URL / 服务未回传）→ created_at 退化为回写时刻', async () => {
+    const url = new URL(`${putUrl()}&filename=j_302.json`);
+    url.searchParams.delete('t');
+    expect((await post(url.toString())).statusCode).toBe(202);
+
+    const saved = await findItem('j_302');
+    expect(saved?.created_at).toBe(saved?.finished_at);
+  });
+
+  it('`t` 非数字 / 未来时刻 → 一律退化（created_at <= finished_at 恒成立）', async () => {
+    const bad = new URL(`${putUrl()}&filename=j_303.json`);
+    bad.searchParams.set('t', 'not-a-number');
+    expect((await post(bad.toString())).statusCode).toBe(202);
+    const degraded = await findItem('j_303');
+    expect(degraded?.created_at).toBe(degraded?.finished_at);
+
+    const future = new URL(`${putUrl()}&filename=j_304.json`);
+    future.searchParams.set('t', String(Date.now() + 3_600_000));
+    expect((await post(future.toString())).statusCode).toBe(202);
+    const clamped = await findItem('j_304');
+    expect(clamped?.created_at).toBe(clamped?.finished_at);
+  });
+
+  it('同一 URL 重放：created_at 保持提交时刻不变（幂等）', async () => {
+    const submitted = Date.now() - 120_000;
+    const url = `${mintPutUrl(
+      'http://backend:3000',
+      SECRET,
+      'admin',
+      PRODUCED_DIR,
+      {},
+      undefined,
+      submitted,
+    )}&filename=j_305.json`;
+    expect((await post(url, 'v1')).statusCode).toBe(202);
+    const first = await findItem('j_305');
+    expect((await post(url, 'v2')).statusCode).toBe(202);
+    const second = await findItem('j_305');
+
+    expect(second?.created_at).toBe(first?.created_at);
+    expect(second?.created_at).toBe(new Date(submitted).toISOString());
   });
 
   it('缺少 filename → 400（不给无主产出）', async () => {
@@ -272,7 +335,7 @@ describe('POST /api/produced/read —— 已读状态（契约 §10.5 ⑤）', (
     expect((await findItem('j_r2'))!.read_at).toBe(first);
   });
 
-  it('不存在的 job_id 一律忽略（产出可能已被 7 天清理），不报错', async () => {
+  it('不存在的 job_id 一律忽略（产出可能已被 30 天清理），不报错', async () => {
     const res = await markRead(['never-existed']);
 
     expect(res.statusCode).toBe(200);
@@ -324,7 +387,7 @@ describe('GET /api/produced/raw —— 读单条产出正文（契约 §10.5 ⑦
     expect(res.body).toBe('识别结果正文');
   });
 
-  it('job_id 不存在 → 404 FILE_NOT_FOUND（与"已被 7 天清理"同一语义）', async () => {
+  it('job_id 不存在 → 404 FILE_NOT_FOUND（与"已被 30 天清理"同一语义）', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/produced/raw?job_id=ghost' });
 
     expect(res.statusCode).toBe(404);

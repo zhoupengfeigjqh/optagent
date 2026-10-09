@@ -139,7 +139,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     onMcpCall: (event) => usageDb.recordMcpCall(event),
   });
 
-  // 后台调度（T040）：每小时清理 tmp/ 下 7 天未访问的临时产出
+  // 后台调度（T040）：每小时清理 tmp/ 下 30 天未访问的临时产出
   const scheduler = new IntervalScheduler({
     warn: (msg) => loggers.logger.warn({ alert: true, event: 'scheduler.task.failed', scope: 'system' }, msg),
   });

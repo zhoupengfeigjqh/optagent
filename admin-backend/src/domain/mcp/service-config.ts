@@ -90,7 +90,7 @@ export interface McpServiceConfig {
   rules_fields: Record<string, string>;
   /**
    * 异步工具声明（R11，2026-09-25）：该服务**自己的原始工具名**（不含 `{server}__` 前缀）
-   * 清单。声明后，运行环境在调用这些工具时注入 `result_url`（签名写直链），服务算完把
+   * 清单。声明后，运行环境在调用这些工具时注入 `resultUrl`（签名写直链），服务算完把
    * 结果回写到用户空间，并在下一轮对话注入「后台计算结果」清单
    * （完整语义见 `contracts/runtime-api-delta.md` §10）。
    *

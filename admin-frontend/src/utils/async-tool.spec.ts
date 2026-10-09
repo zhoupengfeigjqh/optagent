@@ -9,13 +9,13 @@ import { describe, expect, it } from 'vitest'
 import { ASYNC_RESULT_URL_PARAM, hasResultUrl } from './async-tool'
 
 describe('hasResultUrl', () => {
-  it('参数名与运行环境一致（result_url）', () => {
-    expect(ASYNC_RESULT_URL_PARAM).toBe('result_url')
+  it('参数名与运行环境一致（resultUrl）', () => {
+    expect(ASYNC_RESULT_URL_PARAM).toBe('resultUrl')
   })
 
-  it('properties 里声明了 result_url → true', () => {
+  it('properties 里声明了 resultUrl → true', () => {
     expect(
-      hasResultUrl({ type: 'object', properties: { result_url: { type: 'string' } } }),
+      hasResultUrl({ type: 'object', properties: { resultUrl: { type: 'string' } } }),
     ).toBe(true)
   })
 
@@ -31,6 +31,6 @@ describe('hasResultUrl', () => {
   })
 
   it('required 里出现但 properties 未声明 → false（平台注入判据只看 properties）', () => {
-    expect(hasResultUrl({ type: 'object', required: ['result_url'], properties: {} })).toBe(false)
+    expect(hasResultUrl({ type: 'object', required: ['resultUrl'], properties: {} })).toBe(false)
   })
 })

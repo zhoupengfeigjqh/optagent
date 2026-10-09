@@ -3,9 +3,13 @@
 智能体（Agent）应用平台。平台分两端：
 
 - **Agent 端**：面向使用者的对话式智能体，支持 MCP 工具调用（**调用记录随会话持久化，刷新后仍可见**）、人工确认（HITL）、文件空间、**后台产出**（异步 MCP 任务完成后自动汇入「后台记录」，可在后续对话中读取）、多会话管理
-- **数字人管理平台**：面向运营/管理员的管理后台，管理数字人（Agent）、技能、MCP 服务与平台配置，并负责把配置下发部署到运行端
+- **数字人管理平台**：面向运营/管理员的管理后台，管理数字人（Agent）、**本体**、技能、MCP 服务与平台配置，并负责把配置下发部署到运行端
 
 OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务独立部署（Docker）。
+
+平台还支持从**本体平台（optonto）**提取三类资产——**本体**、**技能**、**MCP 服务**（含需要访问令牌的
+「自建发布」服务）——并在设计态把它们装配给数字人、随部署下发到运行端。链路与当前已提取的清单见
+[与本体平台（optonto）的集成](#与本体平台optonto的集成)。
 
 ## 总体架构
 
@@ -29,9 +33,37 @@ OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务�
 └─────────────────┘         └───────────────────────────┘
 ```
 
-除同步调用外，MCP 服务也可走**异步**：运行环境为声明过的工具注入 `result_url`，服务立即返回受理，
+除同步调用外，MCP 服务也可走**异步**：运行环境为声明过的工具注入 `resultUrl`，服务立即返回受理，
 算完后 POST 回写结果 → 落盘到 `临时空间/后台产出/` → 前端铃铛「后台记录」出现条目，模型可在后续
 对话中用 `read_file` 读取。约定详见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
+
+### 资产提取链路（本体 · 技能 · MCP 服务）
+
+本体平台（optonto）是**本体、本体技能、本体函数服务**的权威源；数字人管理平台对市场侧**只读**，
+提取来的内容一律先落平台设计态，再由部署下发到运行端：
+
+```
+本体平台 optonto（权威源，与本平台同机运行）
+  ├─ 本体市场   .data/onto_market/{场景}/{本体}/ ─► ① 只读导入 ─► 平台「本体管理」
+  ├─ 本体技能   {场景}/{本体}/skills/{技能目录}  ─► ① 只读导入 ─► 平台「SKILL 管理」
+  └─ 自建发布   :8021 / :8022（动态容器，需访问令牌）
+                                                 ─► ② 登记为 MCP 服务（填 url + 请求头 X-MCP-Token）
+                                                       └─► ③ 部署物化：MCP.json（含 headers）+ 技能文件
+                                                             └─► agent-backend 运行时：模型可见的工具 / 技能
+```
+
+三条通道的细节、当前已提取的清单与操作步骤见 [与本体平台（optonto）的集成](#与本体平台optonto的集成)。
+
+### 架构图（SVG）
+
+| 图 | 文件 | 关注点 |
+|---|---|---|
+| 业务架构 | [`01-business-architecture.svg`](./docs/architecture/01-business-architecture.svg) | 角色 · 业务能力域 · **OLTP-OLAP 闭环** · 价值与边界 |
+| 数据架构 | [`02-data-architecture.svg`](./docs/architecture/02-data-architecture.svg) | 数据来源 · 存储与唯一权威源 · 消费方 · 治理口径 |
+| 技术架构 | [`03-technology-architecture.svg`](./docs/architecture/03-technology-architecture.svg) | 技术栈 · 部署形态 · 协议与端口 · 横切关注点 |
+| 应用架构 | [`04-application-architecture.svg`](./docs/architecture/04-application-architecture.svg) | 模块划分 · 跨应用链路 · 分层与工程约束 |
+
+图形约定与阅读顺序见 [`docs/architecture/README.md`](./docs/architecture/README.md)。
 
 ## 目录结构
 
@@ -62,16 +94,18 @@ optagent/
 │       └── utils/          # 工具函数（SSE 解析、搜索分段、空间/文件判定、产出与工具记录展示、会话恢复）
 │
 ├── admin-backend/          # 数字人管理平台后端（端口 3001）
-│   └── src/
-│       ├── routes/         # agents / mcp / skills / builtin-tools / deploy / users / references / platform
-│       ├── domain/         # 配置中心、部署、MCP、技能库、审计、错误码
-│       └── infra/          # Docker 主机探测、compose 读取、运行时客户端、配置下发、设计态存储
+│   ├── src/
+│   │   ├── routes/         # agents / mcp / ontologies / skills / builtin-tools / deploy / users / references / platform
+│   │   ├── domain/         # 配置中心、部署、MCP、**本体**、技能库（含本体市场导入）、审计、错误码
+│   │   └── infra/          # MCP 连接测试、运行时客户端、配置下发、设计态存储、路径探测
+│   └── .platform-data/     # 设计态数据（运行期生成，不入库）：agents / skills / onto_market / users / mcp-services.json
 │
 ├── admin-frontend/         # 数字人管理平台前端（Vue 3 + Vite，端口 5174）
 │   └── src/
 │       ├── components/
 │       │   ├── agents/     # 数字人管理
 │       │   ├── mcp/        # MCP 服务管理
+│       │   ├── ontology/   # 本体管理（只读浏览 + 从本体市场导入 / 更新）
 │       │   ├── skills/     # 技能库管理
 │       │   ├── deploy/     # 部署/下发
 │       │   ├── layout/     # 后台布局
@@ -92,7 +126,7 @@ optagent/
 │
 ├── gateway/                # 生产网关（nginx）
 ├── specs/                  # 需求/设计规格文档（001 数字人平台、002 对话运行时）
-├── 异步MCP服务接入约定.md    # 异步 MCP 服务接入约定（result_url 注入 → 受理 → 回写）
+├── 异步MCP服务接入约定.md    # 异步 MCP 服务接入约定（resultUrl 注入 → 受理 → 回写）
 └── docker-compose.yml      # Docker 编排（OCR / Jev 等）；容器形态运行配置的权威源（非 MCP 服务清单来源）
 ```
 
@@ -106,7 +140,7 @@ optagent/
 | `agent-backend/.env.local` | 运行环境 | 本地 `--env-file`（仅本地）+ compose 注入（提供密钥） | **本地形态完整配置**（含密钥 + LAN IP），gitignore；样板 `.env.example` |
 | `agent-backend/config.yaml` | 运行环境 | `src/config.ts` 启动加载 | 模型清单（model / api_key / base_url，缺省拒启动） |
 | `admin-backend/.env` | 管理平台 | compose `env_file` 注入容器 | **容器形态**配置（`/app/...` 路径、服务名，无密钥，入库） |
-| `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example` |
+| `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example`。其中 **`ONTO_MARKET_DIR`** 指向本体平台的本体市场（`../../optonto/.data/onto_market`，平台**只读**）；缺省 = "从本体市场导入"不可用（不影响启动与其余功能） |
 | `ocr-service/.env.local` | OCR 服务 | compose `env_file`（`required: false`） | 本机私产：可调项（下载上限、超时）；缺失即用代码缺省值（gitignore；样板 `.env.example`） |
 | `jev-service/.env.local` | Jev 服务 | compose `env_file`（`required: false`） | `TYPESAFE_API_KEY` 与上游端点/超时等（含密钥，gitignore；样板 `.env.example`） |
 | `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`）。**（2026-09-27）** `admin-backend` 已不再挂载 `docker.sock` 与编排文件本身——平台不读容器编排声明与容器运行态 |
@@ -211,19 +245,19 @@ optagent/
 |---|---|
 | `domain/config-center/` | 配置中心：数字人/MCP/技能的配置模型与校验 |
 | `domain/deploy/` | 部署编排：把配置下发到 agent-backend 运行时 |
-| `domain/skill-library/` | 技能库管理 |
-| `domain/mcp/` | MCP 服务的**新建/删除/清单**与调用配置（含 `file_args` / `rules_fields` / **`async_tools`**（异步工具声明）/ `confirmation`）、测试与统计（2026-09-27：启停/日志已下架） |
+| `domain/skill-library/` | 技能库管理（含**本体市场导入**：整包目录复制 + 内容指纹判"可更新"，来源标 `onto_market:{场景}/{本体}`，导入后**只读**） |
+| `domain/ontology/` | **本体库**：本体快照（`ontology.yaml` + 可选 `securities.yaml`）的导入 / 更新 / 删除与元数据解析；平台侧只读浏览，本体**不被数字人引用**（本期作为可浏览的知识资产） |
+| `domain/mcp/` | MCP 服务的**新建/删除/清单**与调用配置（含 `file_args` / `rules_fields` / **`async_tools`**（异步工具声明）/ `confirmation` / **`headers`**（请求头 / 访问令牌：存明文、响应只回掩码））、测试与统计（2026-09-27：启停/日志已下架） |
 | `domain/audit.ts` | 操作审计 |
 | `domain/platform-settings.ts` | 平台级设置 |
 | `domain/api-error.ts` / `domain/error-codes.ts` | 统一错误类型与错误码目录 |
 | `domain/paging.ts` | 分页参数归一 |
-| `infra/fs-probe.ts` | 路径可读/可写探测（健康检查） |
 | `infra/fs-probe.ts` | 路径可读 / 可写探测（健康检查） |
 | `infra/platform-store.ts` | 平台设计态存储（原子写 + revision 乐观锁） |
 | `infra/opt-agent-writer.ts` | 运行时配置文件写入（下发） |
 | `infra/runtime-client.ts` | 调用 agent-backend 运行时接口 |
 | `infra/mcp-client.ts` | MCP 服务连接测试 |
-| `routes/deploy.ts` | 部署下发接口；`routes/users.ts` 用户管理；`routes/references.ts` 引用数据 |
+| `routes/deploy.ts` | 部署下发接口；`routes/users.ts` 用户管理；`routes/references.ts` 引用数据；`routes/ontologies.ts` 本体管理（列表 / 详情 / 删除 + 本体市场导入与更新） |
 | `routes/platform.ts` | 平台健康检查（2026-09-27：平台设置与运行形态端点已下架） |
 | `routes/builtin-tools.ts` | 内置工具配置 |
 
@@ -232,7 +266,9 @@ optagent/
 | 模块 | 作用 |
 |---|---|
 | `components/agents/` | 数字人列表/编辑/配置 |
-| `components/mcp/` | MCP 服务卡片列表 + 新建/编辑/删除、调用配置、工具清单、连通性测试（启停与运行日志已下架） |
+| `components/mcp/` | MCP 服务卡片列表 + 新建/编辑/删除、调用配置（含**请求头 / 访问令牌**，只显示掩码）、工具白名单、连通性测试（启停与运行日志已下架） |
+| `components/ontology/` | **本体管理**：卡片列表（6 项 metadata）+ 只读详情（左侧文件列表 + 右侧全文）+ 从本体市场导入 / 更新弹窗 |
+| `api/ontologies.ts` | 本体接口封装（列表 / 详情 / 删除 / 市场目录 / 导入 / 更新） |
 | `components/skills/` | 技能库维护 |
 | `components/deploy/` | 部署预览与下发、运行状态查看 |
 | `components/layout/` | 后台框架（导航、布局） |
@@ -273,7 +309,8 @@ nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口
 ## 环境要求
 
 - Node.js >= 20
-- Docker Desktop（OCR / Jev 两个 MCP 服务需要）
+- Docker Desktop（OCR / Jev 两个 MCP 服务需要；若要提取本体平台的本体 / 技能 / 「自建发布」MCP 服务，
+  本体平台自身的容器组也需运行）
 - npm
 
 ## 本地启动
@@ -344,7 +381,8 @@ npm run dev
    > 调用配置的**「请求头（访问令牌）」**里填 `{"X-MCP-Token":"…"}`（2026-10-08）。不带令牌
    > 时服务直接回 **401**，新建流程第一步就会过不去。平台按此头连接与测试，并在部署时把它
    > 物化进数字人的 `MCP.json`——**数字人侧无需另配**（`FR-064`）。值是凭据：界面只显示掩码
-   > （`6UuE…F3Z`），掩码不能当值提交（保存会被拒）。
+   > （`6UuE…F3Z`），掩码不能当值提交（保存会被拒）。至少一个工具的白名单也在这条新建流程里
+   > 勾选——**只有白名单里的函数会进入模型可见的工具表**。
 
 2. 在详情页补全**调用配置**并保存：`file_args` 需为 `noul` / `choice` / `score` 三个工具各声明一条
    `state_file: url`，否则 LLM 传的相对路径不会被铸成下载直链，服务会收到相对路径并报错；
@@ -360,9 +398,98 @@ npm run dev
 > 下次部署按平台设计态整体覆盖，手改不会留存（数字人配置的权威源在平台侧）。
 
 **异步 MCP 服务**（如排产 `hd`）：在 MCP 详情的 `async_tools` 里登记**原始工具名**（不含 `hd__` 前缀），
-运行环境便会为这些工具注入 `result_url`，服务立即返回受理、算完后 POST 回写；结果落盘到
+运行环境便会为这些工具注入 `resultUrl`，服务立即返回受理、算完后 POST 回写；结果落盘到
 `临时空间/后台产出/` 并由前端铃铛「后台记录」呈现，模型可在后续对话中读取。回写形状（`status` 只有
 `success` / `failed` + `summary`）与完整示例见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
+
+### 7. 从本体平台提取本体 / 技能 / MCP 服务（可选）
+
+**前置**：本体平台（optonto）已在同一台机器运行（Docker Desktop），且 `admin-backend/.env.local` 的
+`ONTO_MARKET_DIR` 指向它的本体市场（默认样例 `../../optonto/.data/onto_market`）。
+三条通道的来龙去脉见 [与本体平台（optonto）的集成](#与本体平台optonto的集成)。
+
+1. **本体**：`/admin/ontologies` →「从本体市场导入」→ 选中 `生产调度 / 原材料采购和库存` →
+   导入后进入只读详情（左侧文件列表 + 右侧全文）；市场侧文件变了，卡片会提示"可更新"。
+2. **技能**：`/admin/skills` →「从本体市场导入」→ 选中 `raw-material-inventory`。
+   导入的技能**只读**——想更新只能再走一次"更新"（整包替换），不能在线编辑。
+3. **MCP 服务**（本体侧「自建发布」）：`/admin/mcp` →「新建 MCP 服务」→ 弹窗第一步填
+   名称 `raw_inventory_purchase_function`、传输方式 `streamable-http`、连接地址
+   `http://localhost:8021/mcp`、**请求头** `{"X-MCP-Token":"<令牌>"}` → 「连接并获取工具」→
+   **勾选要暴露给数字人的函数**（默认不勾、至少一个）→ 创建。`:8022`（行为类）同样再建一个。
+   > 令牌取自本体平台的发布信息；界面只显示掩码、掩码不能当值提交。白名单之外的函数模型看不到。
+4. **装配给数字人**：数字人设计态勾选 `skills` / `mcp_services` →「部署」→ 平台把 `MCP.json`（**含请求头**）
+   与技能文件写入运行端用户目录，模型即可使用。
+
+## 与本体平台（optonto）的集成
+
+本体平台（optonto）是**本体、本体技能、本体函数服务**的权威源。数字人管理平台按三条通道提取资产，
+提取来的内容先落**平台设计态**，再由部署下发到运行端——平台对市场侧一律**只读消费**。
+
+### 三条提取通道
+
+| 通道 | 本体平台侧的源 | 平台侧操作（界面） | 落在平台哪里 | 可改性 | 生效链路 |
+|---|---|---|---|---|---|
+| **本体** | `.data/onto_market/{场景}/{本体}/ontology.yaml`（+ 可选 `securities.yaml`） | 本体管理 →「从本体市场导入」 | `.platform-data/onto_market/{场景}/{本体}/` | **只读**：只能经市场"更新"整体替换 | **本期不被数字人引用**，作为可浏览的知识资产（卡片展示 6 项 metadata，详情展示全文） |
+| **技能** | `{场景}/{本体}/skills/{技能目录}` | SKILL 管理 →「从本体市场导入」 | 技能库（来源记 `onto_market:{场景}/{本体}`） | **只读**：MUST NOT 在线编辑，只能整包更新 | 数字人勾选 `skills` → 部署 → 运行端用 `read_skill` 读取 |
+| **MCP 服务**（「自建发布」） | 本体平台把本体的**行为/函数**发布为动态容器（`mcp-publish`，`:8021` / `:8022`） | MCP 服务 →「新建 MCP 服务」：填 `url` + **请求头 `{"X-MCP-Token":"…"}`** → 探测工具 → 勾**工具白名单** | `.platform-data/mcp-services.json`（令牌明文落盘，响应只回掩码） | **可改**（令牌会轮换；工具白名单创建后不可改，要改删了重建） | 数字人勾选 `mcp_services` → 部署 → 物化 `MCP.json`（**含 headers**）→ 运行时按白名单装配工具 |
+
+关于本体导入的范围（2026-10-03 起）：只取 `ontology.yaml`（必需）与 `securities.yaml`（可选，行为安全管控）；
+`data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/` **不导入**。市场侧这两个文件
+任一变化都会让平台标记"可更新"（各自内容指纹比对）。
+
+### 当前已提取的清单（2026-10-08 实测）
+
+| 类别 | 市场侧（optonto） | 平台侧 |
+|---|---|---|
+| 本体 | 4 个：`原材料采购和库存`、`订单排程`、`货品BOM及工艺`、`资源（人员和设备）` | 本体库已导入 **1 个**：`生产调度 / 原材料采购和库存` |
+| 技能 | `raw-material-inventory` | 技能库共 3 个：`调度算法`（ZIP 上传）、`海大算法求解`（在线创建）+ `raw-material-inventory`（**市场导入，只读**，来源记 `onto_market:生产调度/原材料采购和库存`） |
+| MCP 服务 | 自建发布容器 `:8021` / `:8022` | 平台登记 4 个（见下） |
+
+平台当前的 MCP 服务：
+
+| 名称 | 连接地址 | 来源 | 访问令牌 |
+|---|---|---|---|
+| `jev` | `http://localhost:8101/mcp` | 本仓 `jev-service`（Docker） | 无 |
+| `ocr` | `http://localhost:8000/mcp` | 本仓 `ocr-service`（Docker） | 无 |
+| `raw_inventory_purchase_function` | `http://localhost:8021/mcp` | **本体侧自建发布** · 函数类：白名单 6 个，**全为查询/校验** | 需 `X-MCP-Token`（界面显示掩码 `6UuE…F3Z`） |
+| `raw_inventory_purchase_action` | `http://localhost:8022/mcp` | **本体侧自建发布** · 行为类：白名单 8 个（`QueryInventory` / `QueryRawMaterials` / `QueryPurchaseRecords` / `QuerySuppliers` / `QuerySupplierCapability`，**外加 3 个写操作** `CreatePurchaseRecord` / `CancelPurchaseRecord` / `ReceiveRawMaterial`） | 同上 |
+
+> 数字人 `生产计划助手` 目前引用 `skills=[海大算法求解, raw-material-inventory]`、`mcp_services=[jev, ocr]`，
+> **尚未勾选两个本体侧自建发布服务**——要让数字人用上「原材料采购和库存」的本体函数，需在设计态勾选这两个
+> 服务并**部署**（勾选后这些函数才进入模型可见的工具表）。
+
+> ⚠️ **写操作的人工确认**：`raw_inventory_purchase_action` 的白名单里有 3 个**写操作**
+> （`CreatePurchaseRecord` 建采购单 / `CancelPurchaseRecord` 取消采购单 / `ReceiveRawMaterial` 原材料收货），
+> 而它当前的 `confirmation` 是 `never`——即**数字人无需人工确认即可写库**。
+> 若要把这个服务交给数字人使用，建议把调用配置的 `confirmation` 改为 `always`（调用前弹 HITL 确认）。
+> `8021`（全查询/校验）与 `jev`（纯求值）保持 `never` 是合适的。
+
+### 生效三步（提取 ≠ 生效）
+
+```text
+① 设计态：数字人勾选技能 / MCP 服务（本体本身不参与引用，只作浏览）
+② 部署：平台物化 —— MCP.json（含请求头）+ 技能文件写入运行端用户目录
+③ 运行：模型经 read_skill / MCP 工具使用；白名单之外的函数对模型不可见
+```
+
+### 前置与配置
+
+- **本体平台需在运行**（Docker Desktop）：其 core backend（`:8001`）与自建发布容器（`:8021` / `:8022`）；
+  本体市场就是 `optonto/.data/onto_market`。
+- 平台侧只有**一处**配置：`admin-backend/.env.local` 的 **`ONTO_MARKET_DIR`**
+  （默认样例 `../../optonto/.data/onto_market`）；**缺省 = "从本体市场导入"不可用**，不影响启动与其余功能。
+- 令牌来源：本体平台发布服务时会给出形如
+  `{"mcpServers":{"xxx":{"type":"streamable-http","url":"http://localhost:8021/mcp","headers":{"X-MCP-Token":"…"}}}}`
+  的片段——把 `url` 与 `headers` 原样填进平台的「连接地址」与「请求头」即可（平台**原样发送**，不做任何转换）。
+  不带令牌时该类服务直接回 **401**，新建流程第一步就过不去。
+
+### 凭据纪律（请求头 / 访问令牌）
+
+- 请求头**存明文**（服务要求按原样发送），但**响应只回掩码**（列表仅回 `has_headers` 布尔量），
+  明文 MUST NOT 出现在任何响应或日志中；
+- 界面回显的掩码（`6UuE…F3Z`）**不能当值提交**——保存期直接拒绝并给出可读原因；
+- 保存调用配置时**不携带 = 沿用存量**、提供 = 全量替换（`{}` 即清空）：保存 MUST NOT 顺手清空令牌；
+- 令牌轮换后**重建服务即可**（与工具白名单不同，白名单创建后不可改）。
 
 ## 本地配置要点：文件回源链路必须使用本机 IP
 
@@ -379,7 +506,7 @@ PUBLIC_BASE_URL=http://192.168.1.3:3000
 
 > **2026-09-28 变更：回源 host 白名单已移除。** ocr / jev 原先各有一份
 > `OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS`（默认空集 = 拒绝一切回源），现整体删除：
-> - 回源直链与 `result_url` 都由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入
+> - 回源直链与 `resultUrl` 都由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入
 >   （URL 类参数一律经 `file_args` 的 `url` / `url:from=` 注入，模型无从指定主机），
 >   服务侧再验一遍 host 属于同一判据的第二次执行；
 > - 它要求"直链基址 + 每个 MCP 服务各一份白名单"三处写同一个主机名，**IP 一变就漏**，

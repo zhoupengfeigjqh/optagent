@@ -54,12 +54,12 @@
 | **TR-01** | 每次工具调用在 `threads/{thread_id}/tool-events.jsonl` 追加事件行：开始记 `running`、结束记终态，读取时按 `call_id` 合并（后者覆盖前者） | 一次调用后有 2 行且合并为 1 条记录 |
 | **TR-02** | 记录行含 `call_id` / `message_id` / `name` / `status` / `started_at`，终态行含 `duration_ms` / `size` | 字段类型校验通过；`message_id` 等于该轮 assistant 消息 id |
 | **TR-03** | `message_id` 在 **run 启动时**生成（而非收尾时），供工具事件归属 | 工具记录与 `done` 事件的 `message_id` 一致 |
-| **TR-04** | 结果 ≤ **16 KB**：原文内联 `inline_content`；> 阈值：正文外置为 `临时空间/{thread_id}_toolresult_{call_id}.txt`，记录行只记 `artifact_size` + `summary` | 两个分支各有单测；外置时记录行无 `inline_content` |
-| **TR-05** | 单条外置正文落盘上限 **10 MB**，超限截断并标 `truncated: true` | 超限用例：`artifact_size` 恰为上限且标记为真 |
+| **TR-04** | 结果 ≤ **64 KB**：原文内联 `inline_content`；> 阈值：正文外置为 `临时空间/{thread_id}_toolresult_{call_id}.txt`，记录行只记 `artifact_size` + `summary` | 两个分支各有单测；外置时记录行无 `inline_content` |
+| **TR-05** | 单条外置正文落盘上限 **2 MB**，超限截断并标 `truncated: true` | 超限用例：`artifact_size` 恰为上限且标记为真 |
 | **TR-06** | 入参只落**短标量摘要**（`args_digest`）：单值 ≤120 字符，最多 8 键，数组/对象只留形状 | 长字符串被截断；嵌套结构显示为 `<数组 N 项>` / `<对象>` |
 | **TR-07** | 结果为图片内容块时只落 `[图片 mime ~体积]` 占位，**绝不落 base64** | 图片块不增加记录行体积 |
 | **TR-08** | 外置写入失败（或未装配外置能力）时退化为**截断内联**，不丢记录 | 单测覆盖；记录仍可读 |
-| **TR-09** | 记录生命周期 = 会话；删除会话时随 `threads/{thread_id}/` 一并删除；外置正文另随临时空间 `{thread_id}_` 前缀清理与"7 天未访问"策略回收 | 删除后目录与文件均不存在 |
+| **TR-09** | 记录生命周期 = 会话；删除会话时随 `threads/{thread_id}/` 一并删除；外置正文另随临时空间 `{thread_id}_` 前缀清理与"30 天未访问"策略回收 | 删除后目录与文件均不存在 |
 | **TR-10** | 追加经 per-thread Promise 链串行化；单行一次 append 保证原子性 | 并发追加后行数与内容正确 |
 | **TR-11** | 坏行跳过并告警；整体损坏（无一条合法行）→ 备份后重建并告警 | 与 `history.jsonl` 同口径 |
 
@@ -78,7 +78,7 @@
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **TR-18** | 组 prompt 时按**预算**回灌内联结果原文：从最近往前填，单条上限 16 KB、总量 32 KB；预算耗尽的内联结果降级为一行占位 | 预算分配用例（3 档体积） |
+| **TR-18** | 组 prompt 时按**预算**回灌内联结果原文：从最近往前填，总量 **128 KB**（预算即单条上限，不另设单条阈值）；预算耗尽的内联结果降级为一行占位 | 预算分配用例（3 档体积） |
 | **TR-19** | 回灌内容**只拼进 messages**（对应轮次的 assistant 消息），不写回 `history.jsonl` | `history.jsonl` 内容与改动前一致 |
 | **TR-20** | 外置结果在 `systemExtra` 注入索引行（名称 · 体积 · 摘要 · 临时空间路径），最多 **10 条**；无外置结果时该段长度为 0 | 空索引返回空串 |
 | **TR-21** | **工具结果正文永不整体自动注入**；`running` 记录不参与回灌 | 大结果正文在 messages 中出现次数为 0 |
@@ -159,13 +159,14 @@
 
 | 参数 | 默认值 | 位置 |
 |---|---|---|
-| 内联阈值 | 16 KB | `TOOL_INLINE_MAX_BYTES` |
-| 单条落盘上限 | 10 MB | `TOOL_ARTIFACT_MAX_BYTES` |
-| 单条回灌上限 | 16 KB | `TOOL_REPLAY_ITEM_MAX_BYTES` |
-| 回灌总预算 | 32 KB | `TOOL_REPLAY_BUDGET_BYTES` |
+| 内联阈值 | 64 KB | `TOOL_INLINE_MAX_BYTES` |
+| 单条落盘上限 | 2 MB | `TOOL_ARTIFACT_MAX_BYTES` |
+| 回灌总预算 | 128 KB | `TOOL_REPLAY_BUDGET_BYTES` |
 | 索引条数上限 | 10 | `TOOL_INDEX_MAX_ITEMS` |
 | 占位条数上限 | 20 | `TOOL_PLACEHOLDER_MAX_ITEMS` |
 | 摘要字符上限 | 200 | `TOOL_SUMMARY_MAX_CHARS` |
+
+> 无独立「单条回灌上限」：总量预算即单条上限（`selectReplay` 以 `bytes <= remaining` 判定），故不单列。
 
 ## 6. 接口契约增量
 
@@ -244,3 +245,14 @@
 - [x] 只有 1 次调用时行为与改版前一致（不设折叠层）
 - [x] 测试与覆盖率门禁全绿（33 文件 / 425 用例；两个新模块阈值与上调后的全局地板均通过）、`vite build` 成功
 - [ ] `npm run lint` / `npm run typecheck` 全绿——**卡在存量问题上**（详见 [tasks.md](./tasks.md) T015：99 errors / 34 warnings 与 7 条 `TS6133`，全部落在本次未改动的文件里；本次改动文件单独检查为 0 问题）
+
+## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
+
+> **来源**：[docs/architecture/review-2026-10-08.md](../../docs/architecture/review-2026-10-08.md)（第一性原理复盘）。
+> **状态**：以下为**登记项**，不含任何实现；对应复盘的 P1。规格先行，实施时按 `TR-37`~`TR-39` 验收。
+
+- **TR-37**: **运行事件日志（run journal）**：一轮运行的每次状态变更 MUST **追加**写入 `users/{uid}/threads/{thread_id}/run.jsonl`（复用既有 JSONL 写法、per-thread 串行链与坏行告警口径），事件至少含 `run_started` / `tool_call` / `tool_end` / `interaction_pending` / `interaction_resolved` / `text` / `run_finished` / `run_aborted`。**理由**：当前"一轮运行"只存在于进程内存（`run-manager` 的 `active` 表、SSE 订阅、`interaction-gate` 挂起项），进程重启即在途轮与挂起确认全部丢失；而 `history.jsonl` 只记已完成的轮。
+- **TR-38**: **恢复语义**：启动或首次访问时 MUST 能依据 run journal 恢复——①未闭合的 run MUST 呈现为**终态**（`未完成`，与 `TR-33` 同一判据，MUST NOT 显示"进行中"）；②未决的 HITL 挂起项 MUST 可重建（用户重开会话仍可见待确认）；③已落盘历史 MUST 不受影响。内存 run 表由此降级为"本地执行器缓存"，MUST NOT 再作为权威状态。
+- **TR-39**: **流式事件可续传**：SSE 消费端 MUST 能以**事件游标**（如 `?since=<seq>` 或 `Last-Event-ID`）从 run journal 增量续拉，使**多实例**部署下任一实例都能推进同一轮；事件 MUST 携带序号与 `trace_id`。MUST NOT 把"只有创建它的那个进程能推"当作唯一路径。
+
+**实施后验收判据**：①重启后：在途轮显示 `未完成`、挂起确认可继续、历史不损；②起两个实例：中断 / 确认 / HITL 在任一实例均生效；③外置正文不重复请求（`TR-36` 语义保持）。

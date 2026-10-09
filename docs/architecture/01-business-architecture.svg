@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100"
+     font-family="Microsoft YaHei, PingFang SC, Segoe UI, sans-serif" role="img"
+     aria-label="OptAgent 业务架构图：角色、业务能力域、OLTP-OLAP 闭环、价值与边界">
+  <title>OptAgent 业务架构图</title>
+  <desc>业务角色 → 业务能力域（对话式业务问答、数据分析与业务决策、业务回写与闭环、数字人与资产治理）→ OLTP-OLAP 闭环 → 可插拔的工具与服务供给 → 业务对象 → 价值与边界。</desc>
+
+  <defs>
+    <marker id="arr-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e2603f"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#ffffff"/>
+
+  <!-- ===== 标题 ===== -->
+  <text x="48" y="56" font-size="30" font-weight="700" fill="#1f2937">OptAgent 业务架构</text>
+  <text x="48" y="84" font-size="15" fill="#5b6472">Business Architecture · 业务角色 / 业务能力域 / OLTP-OLAP 闭环 / 业务对象 / 价值与边界</text>
+
+  <!-- ===== 图例（右上） ===== -->
+  <g font-size="12" fill="#5b6472">
+    <text x="1150" y="46" font-size="12" font-weight="700" fill="#334155">图例</text>
+    <line x1="1150" y1="62" x2="1196" y2="62" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+    <text x="1206" y="66">业务流 / 数据流</text>
+    <line x1="1150" y1="84" x2="1196" y2="84" stroke="#e2603f" stroke-width="2.5" marker-end="url(#arr-accent)"/>
+    <text x="1206" y="88">闭环关键路径</text>
+    <rect x="1150" y="98" width="46" height="12" fill="none" stroke="#cbd5e1" stroke-dasharray="5 4" rx="3"/>
+    <text x="1206" y="109">可扩展 / 边界</text>
+  </g>
+
+  <!-- ===== 业务角色 ===== -->
+  <text x="48" y="128" font-size="12" font-weight="700" fill="#94a3b8">业务角色</text>
+  <g>
+    <rect x="48" y="138" width="488" height="78" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="68" y="168" font-size="17" font-weight="700" fill="#1f2937">业务使用者</text>
+    <text x="68" y="194" font-size="13" fill="#5b6472">提问 / 上传业务数据 / 确认写回 / 读取后台产出</text>
+
+    <rect x="556" y="138" width="488" height="78" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="576" y="168" font-size="17" font-weight="700" fill="#1f2937">数字人运营管理员</text>
+    <text x="576" y="194" font-size="13" fill="#5b6472">设计数字人 / 维护技能与 MCP 服务 / 本体管理 / 部署下发</text>
+
+    <rect x="1064" y="138" width="483" height="78" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1084" y="168" font-size="17" font-weight="700" fill="#1f2937">本体平台维护者</text>
+    <text x="1084" y="194" font-size="13" fill="#5b6472">维护本体与本体数据 / 发布本体函数与行为服务</text>
+  </g>
+
+  <!-- ===== 业务能力域 ===== -->
+  <text x="48" y="254" font-size="12" font-weight="700" fill="#94a3b8">业务能力域</text>
+  <g>
+    <rect x="48" y="264" width="365" height="148" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+    <text x="68" y="294" font-size="16" font-weight="700" fill="#1e3a5f">① 对话式业务问答</text>
+    <text x="68" y="322" font-size="13" fill="#475569">多轮会话</text>
+    <text x="68" y="346" font-size="13" fill="#475569">文件引用（@ 业务数据）</text>
+    <text x="68" y="370" font-size="13" fill="#475569">流式回答、思考过程可见</text>
+    <text x="68" y="394" font-size="13" fill="#475569">会话历史与检索</text>
+
+    <rect x="426" y="264" width="365" height="148" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+    <text x="446" y="294" font-size="16" font-weight="700" fill="#1e3a5f">② 数据分析与业务决策（OLAP 侧）</text>
+    <text x="446" y="322" font-size="13" fill="#475569">数据接入与准备</text>
+    <text x="446" y="346" font-size="13" fill="#475569">业务数据查询</text>
+    <text x="446" y="370" font-size="13" fill="#475569">算法决策与推演</text>
+    <text x="446" y="394" font-size="13" fill="#475569">规则校验与方案比选</text>
+
+    <rect x="804" y="264" width="365" height="148" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+    <text x="824" y="294" font-size="16" font-weight="700" fill="#1e3a5f">③ 业务回写与闭环（OLTP 侧）</text>
+    <text x="824" y="322" font-size="13" fill="#475569">人工确认</text>
+    <text x="824" y="346" font-size="13" fill="#475569">事务回写（建 / 改 / 取消）</text>
+    <text x="824" y="370" font-size="13" fill="#475569">状态回流、再次可读</text>
+    <text x="824" y="394" font-size="13" fill="#475569">结果留痕与可追溯</text>
+
+    <rect x="1182" y="264" width="365" height="148" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+    <text x="1202" y="294" font-size="16" font-weight="700" fill="#1e3a5f">④ 数字人与资产治理</text>
+    <text x="1202" y="322" font-size="13" fill="#475569">数字人设计</text>
+    <text x="1202" y="346" font-size="13" fill="#475569">技能库</text>
+    <text x="1202" y="370" font-size="13" fill="#475569">MCP 服务与工具白名单</text>
+    <text x="1202" y="394" font-size="13" fill="#475569">本体管理（只读）· 部署下发</text>
+  </g>
+
+  <!-- ===== 贯穿全程：人工在环 ===== -->
+  <rect x="48" y="428" width="1499" height="44" rx="8" fill="#fff7f4" stroke="#f0b7a4" stroke-dasharray="6 5"/>
+  <text x="68" y="456" font-size="14" fill="#b03a1c">贯穿全程 · 人工在环（HITL）：写操作确认 · 参数补齐 · 规则选择 —— 作用于「数据分析与业务决策（OLAP 侧）」与「业务回写与闭环（OLTP 侧）」——两者之间唯一的通道</text>
+
+  <!-- ===== 视觉焦点：OLTP-OLAP 闭环 ===== -->
+  <rect x="48" y="490" width="1499" height="252" rx="14" fill="#fffaf8" stroke="#f0b7a4"/>
+  <text x="68" y="522" font-size="17" font-weight="700" fill="#b03a1c">OLTP-OLAP 闭环</text>
+  <text x="232" y="522" font-size="13" fill="#8a6a5e">读业务数据（OLAP 输入）→ 分析 / 决策 → 人工确认闸门 → 事务回写（OLTP）→ 状态回流再读</text>
+
+  <g>
+    <!-- 环上四节点 -->
+    <rect x="88" y="556" width="300" height="82" rx="10" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="238" y="590" font-size="15" font-weight="700" fill="#7f2f14" text-anchor="middle">① 读取业务数据</text>
+    <text x="238" y="614" font-size="12" fill="#6b7280" text-anchor="middle">查询类工具 · 本体行为 · 文件与表格</text>
+
+    <rect x="461" y="556" width="300" height="82" rx="10" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="611" y="590" font-size="15" font-weight="700" fill="#7f2f14" text-anchor="middle">② 分析与决策</text>
+    <text x="611" y="614" font-size="12" fill="#6b7280" text-anchor="middle">模型 · 算法 · 规则校验</text>
+
+    <rect x="834" y="556" width="300" height="82" rx="10" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="984" y="590" font-size="15" font-weight="700" fill="#7f2f14" text-anchor="middle">③ 人工确认（闸门）</text>
+    <text x="984" y="614" font-size="12" fill="#6b7280" text-anchor="middle">HITL 确认 · 写能力受工具白名单约束</text>
+
+    <rect x="1207" y="556" width="300" height="82" rx="10" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="1357" y="590" font-size="15" font-weight="700" fill="#7f2f14" text-anchor="middle">④ 事务回写（OLTP）</text>
+    <text x="1357" y="614" font-size="12" fill="#6b7280" text-anchor="middle">建单 / 改单 / 取消 · 收货（幂等 · 留痕）</text>
+
+    <!-- 两种范式分区（2026-10-08）：OLAP 侧 / 闸门 / OLTP 侧 -->
+    <line x1="798" y1="530" x2="798" y2="552" stroke="#e2a28c" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <line x1="1171" y1="530" x2="1171" y2="552" stroke="#e2a28c" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="424" y="546" font-size="12" font-weight="700" fill="#b03a1c" text-anchor="middle">OLAP 侧 · 分析型（只读 · 可重算）</text>
+    <text x="984" y="546" font-size="12" font-weight="700" fill="#7f2f14" text-anchor="middle">闸门</text>
+    <text x="1357" y="546" font-size="12" font-weight="700" fill="#b03a1c" text-anchor="middle">OLTP 侧 · 事务型（写入 · 幂等 · 留痕）</text>
+
+    <line x1="388" y1="597" x2="455" y2="597" stroke="#e2603f" stroke-width="2.5" marker-end="url(#arr-accent)"/>
+    <line x1="761" y1="597" x2="828" y2="597" stroke="#e2603f" stroke-width="2.5" marker-end="url(#arr-accent)"/>
+    <line x1="1134" y1="597" x2="1201" y2="597" stroke="#e2603f" stroke-width="2.5" marker-end="url(#arr-accent)"/>
+
+    <!-- 状态回流（闭环收口） -->
+    <path d="M1357,638 V692 H238 V646" fill="none" stroke="#e2603f" stroke-width="2.5" marker-end="url(#arr-accent)"/>
+    <text x="798" y="686" font-size="13" fill="#b03a1c" text-anchor="middle">状态回流：事务回写改变业务状态，下一轮 OLAP 分析读到新状态（闭环收口 · 状态变更发生在业务系统侧）</text>
+  </g>
+
+  <!-- ===== 工具与服务供给带（可插拔） ===== -->
+  <rect x="48" y="758" width="1499" height="108" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="6 5"/>
+  <text x="68" y="786" font-size="15" font-weight="700" fill="#334155">工具与服务接入（可插拔 · 持续扩展）</text>
+  <text x="392" y="786" font-size="12" fill="#94a3b8">供能于上方「数据分析与业务决策（OLAP 侧）」与「业务回写与闭环（OLTP 侧）」</text>
+  <g font-size="13" fill="#334155">
+    <rect x="68" y="798" width="268" height="40" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="202" y="823" text-anchor="middle">文档 / 表格识别</text>
+    <rect x="354" y="798" width="268" height="40" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="488" y="823" text-anchor="middle">决策与推演模型</text>
+    <rect x="640" y="798" width="268" height="40" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="774" y="823" text-anchor="middle">业务系统读写接口</text>
+    <rect x="926" y="798" width="268" height="40" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1060" y="823" text-anchor="middle">校验 / 规则引擎</text>
+    <rect x="1212" y="798" width="268" height="40" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-dasharray="5 4"/>
+    <text x="1346" y="823" text-anchor="middle">更多同类服务 …</text>
+  </g>
+
+  <!-- ===== 业务对象与资产 ===== -->
+  <rect x="48" y="882" width="1499" height="84" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="910" font-size="15" font-weight="700" fill="#334155">业务对象与资产</text>
+  <g font-size="12" fill="#334155">
+    <rect x="68" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="153" y="942" text-anchor="middle">数字人</text>
+    <rect x="250" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="335" y="942" text-anchor="middle">技能</text>
+    <rect x="432" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="517" y="942" text-anchor="middle">MCP 服务</text>
+    <rect x="614" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="699" y="942" text-anchor="middle">本体（只读）</text>
+    <rect x="796" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="881" y="942" text-anchor="middle">会话与工具记录</text>
+    <rect x="978" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1063" y="942" text-anchor="middle">后台产出</text>
+    <rect x="1160" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1245" y="942" text-anchor="middle">业务数据文件</text>
+    <rect x="1342" y="920" width="170" height="34" rx="8" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1427" y="942" text-anchor="middle">业务系统实体</text>
+  </g>
+
+  <!-- ===== 价值与边界 ===== -->
+  <g>
+    <rect x="48" y="982" width="738" height="96" rx="12" fill="#f4f8ff" stroke="#c7d9f0"/>
+    <text x="68" y="1010" font-size="15" font-weight="700" fill="#1e3a5f">业务价值</text>
+    <text x="68" y="1036" font-size="13" fill="#334155">· 打通 OLTP-OLAP 闭环：读业务数据 → 分析决策 → 确认闸门 → 事务回写 → 状态回流再读</text>
+    <text x="68" y="1058" font-size="13" fill="#334155">· 工具与服务可插拔、可持续扩展；配置一次即下发到运行端</text>
+
+    <rect x="809" y="982" width="738" height="96" rx="12" fill="#fbfbfc" stroke="#d7dbe2"/>
+    <text x="829" y="1010" font-size="15" font-weight="700" fill="#334155">边界与约束</text>
+    <text x="829" y="1036" font-size="13" fill="#5b6472">· 不拥有本体与 MCP 容器本体（只持有配置）；本体只作知识资产、不被数字人引用</text>
+    <text x="829" y="1058" font-size="13" fill="#5b6472">· 不持有业务系统数据所有权；写操作是否放行由工具白名单与确认策略决定</text>
+  </g>
+</svg>

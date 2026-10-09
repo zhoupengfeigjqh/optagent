@@ -23,8 +23,10 @@ export const PRODUCED_PROMPT_MAX = 10;
 /**
  * sidecar 元数据（契约 §10.4）。
  *
- * `created_at` 口径：契约定义为"提交时刻"，但服务回写时**不强制回传**它；
- * 缺失时退化为回写时刻（与 `finished_at` 相等），仅影响列表展示的精度。
+ * `created_at` 口径（2026-10-09 补）：**提交时刻**，由回写地址的 `t` 参数带入
+ * （`infra/file-sign.ts` 铸造 URL 的那一刻 = 任务提交时刻，服务原样回传）。
+ * 服务没回传 / 值不可信（非正数、晚于回写时刻）时退化为回写时刻 ——
+ * 此时 `created_at === finished_at`，与改造前一致（降级不阻断，原则九）。
  */
 export interface ProducedMeta {
   /** 服务侧任务号（= 服务提供的文件名主干，见 `jobIdOf`） */
@@ -47,7 +49,7 @@ export interface ProducedMeta {
   /**
    * 已读时刻（契约 §10.5 ⑤）：**缺省 = 未读**。
    *
-   * 写在 sidecar 内 ⇒ 与产出**同生命周期**：产出被 7 天清理时它一起消失，
+   * 写在 sidecar 内 ⇒ 与产出**同生命周期**：产出被 30 天清理时它一起消失，
    * 未读数因此自然归零，不会出现"角标 > 0 而列表为空"的悬空状态（§10.6 不变式 7）。
    */
   read_at?: string;
@@ -113,6 +115,8 @@ export interface WriteProducedInput {
   /** 归属用户（sidecar 记录；前缀回退值） */
   userId: string;
   summary?: string | undefined;
+  /** 提交时刻（回写地址的 `t`，已由调用方校验）；缺省 → 退化为回写时刻 */
+  createdAt?: Date | undefined;
   now?: Date;
 }
 
@@ -131,7 +135,8 @@ export async function writeProduced(
     ...(input.sid ? { sid: input.sid } : {}),
     ...(input.callId ? { call_id: input.callId } : {}),
     tool: input.tool ?? '',
-    created_at: at.toISOString(),
+    // 提交时刻来自回写地址的 `t`；缺失/不可信时退化为回写时刻（两者相等 = 改造前行为）
+    created_at: (input.createdAt ?? at).toISOString(),
     finished_at: at.toISOString(),
     status: 'done',
     ...(input.summary ? { summary: input.summary } : {}),
@@ -157,7 +162,7 @@ interface ScannedProduced {
  *
  * 与 `listProduced` 分开的原因：**"标记已读"必须能命中列表之外的条目**——
  * 列表是有界返回（`PRODUCED_LIST_MAX`），但用户完全可能点开第 51 条。
- * 扫描本身无界（规模 = 7 天内的产出数，量级极小）。
+ * 扫描本身无界（规模 = 30 天内的产出数，量级极小）。
  *
  * - 目录不存在 → 空数组（"没有产出"与"目录还没建"同义）
  * - sidecar 损坏/正文已被清理 → **跳过该条**（不产生悬空引用）
@@ -212,7 +217,7 @@ export async function findProduced(
  * 批量标记已读（契约 §10.5 ⑤）：把 `read_at` 写回 sidecar。
  *
  * - **幂等**：已标记过的条目**不改动**原有 `read_at`（重复点击不刷新时间）；
- * - **不存在的 `job_id` 忽略**：产出可能已被 7 天清理——那不是调用方的错误；
+ * - **不存在的 `job_id` 忽略**：产出可能已被 30 天清理——那不是调用方的错误；
  * - 返回**实际写入的条数**（供界面如实反馈，也便于测试断言）；
  * - 直接改 `scanProduced` 拿到的元数据并整体回写：不重建字段，避免"列表项 → sidecar"
  *   的字段搬运漂移（漏一个字段就等于抹掉一条元数据）。

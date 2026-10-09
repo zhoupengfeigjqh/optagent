@@ -88,7 +88,7 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：异步工具的 `result_url` 注入
+        // 2026-09-25（R11 阶段 1）：异步工具的 `resultUrl` 注入
         'src/infra/mcp/async-result-url.ts': {
           statements: 80,
           branches: 80,
@@ -123,7 +123,7 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：产出目录纳入 7 天清理
+        // 2026-09-25（R11 阶段 1）：产出目录纳入 30 天清理
         'src/domain/tmp-cleanup.ts': {
           statements: 80,
           branches: 80,

@@ -1,5 +1,5 @@
 /**
- * 单元测试：MCP 异步工具的 `result_url` 注入（R11，契约 §10.6 不变式 1/2/6）
+ * 单元测试：MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.6 不变式 1/2/6）
  *
  * 三条不变式：
  * 1. **未声明即零变化** —— `async_tools` 缺省/空数组时，不注入、schema 原样；
@@ -36,18 +36,18 @@ function fakeManager(calls: Call[]) {
 
 const RUNTIME: RuntimeContext = { uid: 'admin', sid: 'th_123' };
 
-/** 声明了 result_url 的工具（服务侧已按异步口径改造） */
+/** 声明了 resultUrl 的工具（服务侧已按异步口径改造） */
 const ASYNC_TOOL = {
   name: 'submit_job',
   description: '提交后台计算任务',
   inputSchema: {
     type: 'object',
-    properties: { result_url: { type: 'string' }, plan: { type: 'string' } },
-    required: ['result_url', 'plan'],
+    properties: { resultUrl: { type: 'string' }, plan: { type: 'string' } },
+    required: ['resultUrl', 'plan'],
   },
 };
 
-/** 被声明为异步，但 schema 里没有 result_url（服务侧尚未改造） */
+/** 被声明为异步，但 schema 里没有 resultUrl（服务侧尚未改造） */
 const ASYNC_TOOL_NO_PARAM = {
   name: 'submit_legacy',
   description: '提交任务（未声明回写地址）',
@@ -91,14 +91,14 @@ async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, p
   };
 }
 
-describe('R11 异步工具：result_url 注入', () => {
+describe('R11 异步工具：resultUrl 注入', () => {
   it('未声明 async_tools（不传 asyncCtx）：不注入、schema 原样（不变式 1）', async () => {
     const calls: Call[] = [];
     const [tool] = build(calls, [ASYNC_TOOL]);
 
     expect(
       (tool!.parameters as { properties: Record<string, unknown> }).properties,
-    ).toHaveProperty('result_url');
+    ).toHaveProperty('resultUrl');
     await exec(tool!, { plan: 'p1' });
     expect(calls[0]!.args).toEqual({ plan: 'p1' });
   });
@@ -107,19 +107,19 @@ describe('R11 异步工具：result_url 注入', () => {
     const calls: Call[] = [];
     const [tool] = build(calls, [ASYNC_TOOL], ctx(['submit_job']));
 
-    // 隐藏：暴露给 LLM 的 schema 里没有 result_url（required 里的同名项一并移除）
+    // 隐藏：暴露给 LLM 的 schema 里没有 resultUrl（required 里的同名项一并移除）
     const exposed = tool!.parameters as {
       properties: Record<string, unknown>;
       required?: string[];
     };
-    expect(exposed.properties).not.toHaveProperty('result_url');
+    expect(exposed.properties).not.toHaveProperty('resultUrl');
     expect(exposed.required).toEqual(['plan']);
 
     // 注入且覆盖：模型塞的伪造地址一律作废
-    await exec(tool!, { plan: 'p1', result_url: 'http://evil.example/put' });
+    await exec(tool!, { plan: 'p1', resultUrl: 'http://evil.example/put' });
     expect(calls[0]!.args).toEqual({
       plan: 'p1',
-      result_url: 'https://backend/api/files/put?tool=submit_job&call_id=call_1&sig=x',
+      resultUrl: 'https://backend/api/files/put?tool=submit_job&call_id=call_1&sig=x',
     });
   });
 
@@ -129,17 +129,17 @@ describe('R11 异步工具：result_url 注入', () => {
 
     expect(
       (tool!.parameters as { properties: Record<string, unknown> }).properties,
-    ).toHaveProperty('result_url');
+    ).toHaveProperty('resultUrl');
     await exec(tool!, { plan: 'p1' });
     expect(calls[0]!.args).toEqual({ plan: 'p1' });
   });
 
-  it('声明为异步但 schema 未声明 result_url：不注入 + 装配期告警（不变式 6）', async () => {
+  it('声明为异步但 schema 未声明 resultUrl：不注入 + 装配期告警（不变式 6）', async () => {
     const calls: Call[] = [];
     const warns: string[] = [];
     const [tool] = build(calls, [ASYNC_TOOL_NO_PARAM], ctx(['submit_legacy']), warns);
 
-    expect(warns.join('\n')).toContain('result_url');
+    expect(warns.join('\n')).toContain('resultUrl');
     expect(warns.join('\n')).toContain('submit_legacy');
 
     await exec(tool!, { plan: 'p1' });
@@ -150,16 +150,16 @@ describe('R11 异步工具：result_url 注入', () => {
     const calls: Call[] = [];
     const tool = {
       name: 'submit_async',
-      description: '异步任务（同时声明 uid/sid/result_url）',
+      description: '异步任务（同时声明 uid/sid/resultUrl）',
       inputSchema: {
         type: 'object',
         properties: {
           uid: { type: 'string' },
           sid: { type: 'string' },
-          result_url: { type: 'string' },
+          resultUrl: { type: 'string' },
           plan: { type: 'string' },
         },
-        required: ['uid', 'sid', 'result_url', 'plan'],
+        required: ['uid', 'sid', 'resultUrl', 'plan'],
       },
     };
     const [built] = build(calls, [tool], ctx(['submit_async']));
@@ -168,7 +168,7 @@ describe('R11 异步工具：result_url 注入', () => {
       properties: Record<string, unknown>;
       required?: string[];
     };
-    expect(exposed.properties).not.toHaveProperty('result_url');
+    expect(exposed.properties).not.toHaveProperty('resultUrl');
     expect(exposed.properties).not.toHaveProperty('uid');
     expect(exposed.required).toEqual(['plan']);
 
@@ -177,7 +177,7 @@ describe('R11 异步工具：result_url 注入', () => {
       plan: 'p1',
       uid: 'admin',
       sid: 'th_123',
-      result_url: 'https://backend/api/files/put?tool=submit_async&call_id=call_1&sig=x',
+      resultUrl: 'https://backend/api/files/put?tool=submit_async&call_id=call_1&sig=x',
     });
   });
 });
@@ -188,7 +188,7 @@ describe('注入原语（边界）', () => {
     expect(declaresResultUrl(undefined)).toBe(false);
     expect(declaresResultUrl({})).toBe(false);
     expect(declaresResultUrl({ properties: { a: { type: 'string' } } })).toBe(false);
-    expect(declaresResultUrl({ properties: { result_url: { type: 'string' } } })).toBe(true);
+    expect(declaresResultUrl({ properties: { resultUrl: { type: 'string' } } })).toBe(true);
   });
 
   it('非对象入参原样返回（防御：形状异常交给服务端校验，不臆造结构）', () => {
@@ -198,14 +198,14 @@ describe('注入原语（边界）', () => {
   });
 
   it('undefined 视为空入参（只带注入字段）', () => {
-    expect(injectResultUrl(undefined, 'u')).toEqual({ result_url: 'u' });
+    expect(injectResultUrl(undefined, 'u')).toEqual({ resultUrl: 'u' });
   });
 
   it('对象入参：浅拷贝后写入，不改动原对象', () => {
     const original = { plan: 'p1' };
     const injected = injectResultUrl(original, 'u') as Record<string, unknown>;
 
-    expect(injected).toEqual({ plan: 'p1', result_url: 'u' });
+    expect(injected).toEqual({ plan: 'p1', resultUrl: 'u' });
     expect(original).toEqual({ plan: 'p1' });
   });
 });

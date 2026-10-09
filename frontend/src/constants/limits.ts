@@ -40,11 +40,6 @@ export const MESSAGE_PAGE_SIZE = 50
 /** 会话详情单页消息条数上限（后端最大 200）。 */
 export const MESSAGE_PAGE_MAX = 200
 
-/* ---------- 预览（FR-048、contracts §5.4） ---------- */
-
-/** 内联预览大小上限（MB），超限引导下载。 */
-export const PREVIEW_MAX_MB = 10
-
 /* ---------- 提示（D14） ---------- */
 
 /** 同一时刻最多展示的提示条数。 */

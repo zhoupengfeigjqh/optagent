@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="890" viewBox="0 0 1600 890"
+     font-family="Microsoft YaHei, PingFang SC, Segoe UI, sans-serif" role="img"
+     aria-label="OptAgent 数据架构图：数据来源、两类存储、消费方与治理口径">
+  <title>OptAgent 数据架构图</title>
+  <desc>数据来源（业务数据文件、本体平台资产、外部服务返回、配置）→ 两类存储（平台设计态为唯一权威源；运行态为部署物化与会话数据）→ 数据消费方（模型上下文、前端展示、平台只读观测）；底部为数据治理口径。</desc>
+
+  <defs>
+    <marker id="arr-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e2603f"/>
+    </marker>
+    <marker id="arr-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="890" fill="#ffffff"/>
+
+  <!-- ===== 标题 ===== -->
+  <text x="48" y="56" font-size="30" font-weight="700" fill="#1f2937">OptAgent 数据架构</text>
+  <text x="48" y="84" font-size="15" fill="#5b6472">Data Architecture · 数据来源 / 存储与权威源 / 消费方 / 治理口径</text>
+
+  <!-- ===== 图例（右上） ===== -->
+  <g font-size="12" fill="#5b6472">
+    <text x="1150" y="46" font-size="12" font-weight="700" fill="#334155">图例</text>
+    <line x1="1150" y1="62" x2="1196" y2="62" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+    <text x="1206" y="66">数据流</text>
+    <line x1="1150" y1="84" x2="1196" y2="84" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-muted)"/>
+    <text x="1206" y="88">只读 / 不落盘</text>
+    <line x1="1150" y1="106" x2="1196" y2="106" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+    <text x="1206" y="110">权威源（配置下发）</text>
+  </g>
+
+  <!-- ===== 数据来源 ===== -->
+  <text x="48" y="134" font-size="13" font-weight="700" fill="#94a3b8">数据来源</text>
+  <g>
+    <rect x="48" y="146" width="380" height="62" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="70" y="172" font-size="14" font-weight="700" fill="#1f2937">业务数据文件</text>
+    <text x="70" y="194" font-size="12" fill="#5b6472">生产计划 · 产能 · 电价 · 算法规则</text>
+
+    <rect x="48" y="218" width="380" height="62" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="70" y="244" font-size="14" font-weight="700" fill="#1f2937">本体平台资产</text>
+    <text x="70" y="266" font-size="12" fill="#5b6472">本体快照 · 安全管控 · 技能目录</text>
+
+    <rect x="48" y="290" width="380" height="62" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="70" y="316" font-size="14" font-weight="700" fill="#1f2937">外部服务返回</text>
+    <text x="70" y="338" font-size="12" fill="#5b6472">识别结果 · 决策结果 · 查询与回执</text>
+
+    <rect x="48" y="362" width="380" height="62" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="70" y="388" font-size="14" font-weight="700" fill="#1f2937">配置</text>
+    <text x="70" y="410" font-size="12" fill="#5b6472">模型清单 · 平台级设置</text>
+  </g>
+
+  <!-- 来源 → 存储 -->
+  <line x1="428" y1="249" x2="552" y2="249" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="490" y="239" font-size="11" fill="#5b6472" text-anchor="middle">只读导入</text>
+  <line x1="428" y1="470" x2="552" y2="470" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="490" y="460" font-size="11" fill="#5b6472" text-anchor="middle">回写 / 回执</text>
+
+  <!-- ===== 存储（两类） ===== -->
+  <text x="560" y="134" font-size="13" font-weight="700" fill="#94a3b8">存储</text>
+
+  <!-- 平台设计态 -->
+  <rect x="560" y="146" width="700" height="190" rx="12" fill="#f4f8ff" stroke="#c7d9f0"/>
+  <text x="580" y="174" font-size="15" font-weight="700" fill="#1e3a5f">平台设计态 · 唯一权威源</text>
+  <text x="820" y="174" font-size="12" fill="#7d8fa8">数字人 / MCP / 技能 / 本体的配置中心</text>
+  <g font-size="13" fill="#334155">
+    <rect x="580" y="186" width="660" height="26" rx="6" fill="#ffffff" stroke="#dbe6f5"/>
+    <text x="594" y="204">数字人与 MCP 服务配置（含请求头令牌）</text>
+    <rect x="580" y="216" width="660" height="26" rx="6" fill="#ffffff" stroke="#dbe6f5"/>
+    <text x="594" y="234">技能库（本体市场导入者只读）</text>
+    <rect x="580" y="246" width="660" height="26" rx="6" fill="#ffffff" stroke="#dbe6f5"/>
+    <text x="594" y="264">本体快照 + 内容指纹（只读）</text>
+    <rect x="580" y="276" width="660" height="26" rx="6" fill="#ffffff" stroke="#dbe6f5"/>
+    <text x="594" y="294">用户与修订号（乐观锁）· 操作日志</text>
+  </g>
+  <text x="580" y="322" font-size="12" fill="#7d8fa8">口径：平台的配置信息是唯一权威源；本体与技能是市场快照，只读消费</text>
+
+  <!-- 部署物化（单向） -->
+  <line x1="910" y1="336" x2="910" y2="382" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+  <text x="928" y="364" font-size="13" font-weight="700" fill="#b03a1c">部署物化（单向 · 运行端只读消费）：取用实例前比对配置指纹，不一致即重建</text>
+
+  <!-- 运行态 -->
+  <rect x="560" y="392" width="700" height="330" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="580" y="420" font-size="15" font-weight="700" fill="#334155">运行态 · 部署物化 + 会话数据</text>
+  <text x="876" y="420" font-size="12" fill="#94a3b8">运行端用户目录内的实际文件</text>
+  <g font-size="13" fill="#334155">
+    <rect x="580" y="434" width="660" height="50" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="594" y="456" font-weight="700">数字人物化配置</text>
+    <text x="594" y="474" font-size="12" fill="#5b6472">MCP.json（含请求头）· 技能文件 · 提示词与场景字段</text>
+
+    <rect x="580" y="492" width="660" height="50" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="594" y="514" font-weight="700">会话消息与工具调用记录</text>
+    <text x="594" y="532" font-size="12" fill="#5b6472">消息历史 · 工具调用起止与摘要 · 滚动摘要</text>
+
+    <rect x="580" y="550" width="660" height="50" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="594" y="572" font-weight="700">外置大结果与后台产出</text>
+    <text x="594" y="590" font-size="12" fill="#5b6472">按需拉取 · 异步任务回写落盘（后台记录）</text>
+
+    <rect x="580" y="608" width="660" height="50" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="594" y="630" font-weight="700">文件空间（工作 / 共享 / 临时）</text>
+    <text x="594" y="648" font-size="12" fill="#5b6472">用户业务数据文件 · 临时空间随会话回收</text>
+
+    <rect x="580" y="666" width="660" height="42" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="594" y="692" font-weight="700">用量库（SQLite）· 交互快照</text>
+  </g>
+
+  <!-- ===== 数据消费方 ===== -->
+  <text x="1300" y="134" font-size="13" font-weight="700" fill="#94a3b8">数据消费方</text>
+  <g>
+    <rect x="1300" y="146" width="247" height="88" rx="10" fill="#fff7f4" stroke="#f0b7a4"/>
+    <text x="1320" y="176" font-size="14" font-weight="700" fill="#7f2f14">模型上下文</text>
+    <text x="1320" y="200" font-size="12" fill="#6b7280">回灌 · 组提示词</text>
+    <text x="1320" y="220" font-size="12" fill="#6b7280">不落盘</text>
+
+    <rect x="1300" y="250" width="247" height="88" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1320" y="280" font-size="14" font-weight="700" fill="#1f2937">前端展示</text>
+    <text x="1320" y="304" font-size="12" fill="#5b6472">消息 · 工具卡片</text>
+    <text x="1320" y="324" font-size="12" fill="#5b6472">后台记录 · 文件预览</text>
+
+    <rect x="1300" y="354" width="247" height="88" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+    <text x="1320" y="384" font-size="14" font-weight="700" fill="#1f2937">平台只读观测</text>
+    <text x="1320" y="408" font-size="12" fill="#5b6472">调用统计 · 引用数据</text>
+    <text x="1320" y="428" font-size="12" fill="#5b6472">健康探测</text>
+  </g>
+
+  <!-- 存储 → 消费方 -->
+  <line x1="1260" y1="190" x2="1294" y2="190" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-muted)"/>
+  <line x1="1260" y1="294" x2="1294" y2="294" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <line x1="1260" y1="398" x2="1294" y2="398" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+
+  <!-- ===== 治理口径 ===== -->
+  <rect x="48" y="748" width="1499" height="108" rx="12" fill="#fbfbfc" stroke="#d7dbe2"/>
+  <text x="68" y="776" font-size="15" font-weight="700" fill="#334155">数据治理口径</text>
+  <g font-size="12" fill="#334155">
+    <rect x="68" y="790" width="280" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="208" y="819" text-anchor="middle">权威源单向 · 运行端只读消费</text>
+    <rect x="363" y="790" width="280" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="503" y="819" text-anchor="middle">只读快照 + 内容指纹判"可更新"</text>
+    <rect x="658" y="790" width="280" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="798" y="819" text-anchor="middle">令牌明文存储 · 响应只回掩码</text>
+    <rect x="953" y="790" width="280" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1093" y="819" text-anchor="middle">原子写 + 修订号 · 串行追加</text>
+    <rect x="1248" y="790" width="280" height="46" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1388" y="819" text-anchor="middle">临时空间回收 · 删除连带清理</text>
+  </g>
+</svg>

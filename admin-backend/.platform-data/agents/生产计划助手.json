@@ -10,12 +10,10 @@
     "calculator"
   ],
   "mcp_services": [
-    "jev",
-    "ocr"
+    "hd-algorithm"
   ],
   "skills": [
-    "海大算法求解",
-    "raw-material-inventory"
+    "海大算法求解"
   ],
   "scenario": {
     "scenario": "海大计划",
@@ -222,5 +220,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-03T16:37:39.198Z"
+  "updated_at": "2026-10-09T03:14:32.818Z"
 }

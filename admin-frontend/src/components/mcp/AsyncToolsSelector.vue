@@ -2,16 +2,16 @@
   异步工具选择（R11，`contracts/admin-api.md` §3.3 的 `async_tools`）。
 
   **只列"支持异步"的工具**（2026-10-03 产品决定）：判据 = 该工具的入参 schema
-  `properties` 里声明了 `result_url`（与运行期注入逻辑同一判据，见 `utils/async-tool.ts`）。
+  `properties` 里声明了 `resultUrl`（与运行期注入逻辑同一判据，见 `utils/async-tool.ts`）。
   不含该参数的工具**一律不展示**——勾了也不会生效（运行期只产生一条告警），列出来只会误导。
 
-  **过滤后为空**（清单可得但没有任何工具声明 `result_url`）→ 单行提示
+  **过滤后为空**（清单可得但没有任何工具声明 `resultUrl`）→ 单行提示
   「当前没有异步计算工具」，与「URL铸造参数设置」的空态同一呈现（`field__hint`）。
 
   四条边界（缺一会让"少列"退化成"看不见"）：
   1. **清单不可得**（服务未启动/探测失败）→ 回退**手填**，并给出 `toolsError` 原因
      —— 服务抖动不该让配置改不了（与保存期"只校验语法、不校验清单"同一取向）；
-  2. **已声明但不在可选范围内**（服务后来去掉了 `result_url`，或该工具已下线）→
+  2. **已声明但不在可选范围内**（服务后来去掉了 `resultUrl`，或该工具已下线）→
      **仍保留展示并可直接取消**，不静默丢弃：否则它会在运行期持续告警而管理员无从取消；
   3. **清单被截断**（`toolsTruncated`）→ 未展示的工具无从判断，故同时给出手填入口；
   4. **忙态不锁控件**：本组件不接收 `busy`/`disabled`（契约 §0.5 原则 ③）。
@@ -39,7 +39,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: string[]): void }>()
 
-/** 支持异步的工具：入参 schema 声明了 `result_url`——**只展示这些** */
+/** 支持异步的工具：入参 schema 声明了 `resultUrl`——**只展示这些** */
 const capableTools = computed(() => props.tools.filter((tool) => hasResultUrl(tool.parameters)))
 
 /** 清单不可得 → 回退手填（服务未启动/探测失败时管理员仍要能改配置） */
@@ -50,7 +50,7 @@ const showManual = computed(() => manualFallback.value || props.toolsTruncated)
 /**
  * 已声明、但**不在可选范围内**的工具：保留展示，不静默丢弃。
  *
- * 包含两类：该工具已不在清单里（服务改版/清单截断），或它存在但没声明 `result_url`
+ * 包含两类：该工具已不在清单里（服务改版/清单截断），或它存在但没声明 `resultUrl`
  * （服务去掉了该参数）。两种情况下声明都不会生效，需让管理员看得见并一键取消。
  */
 const declaredOutOfScope = computed(() =>
@@ -91,7 +91,7 @@ function onManualInput(value: string): void {
 
 <template>
   <div class="async-tools">
-    <!-- 有清单：只列支持异步（声明了 result_url）的工具 -->
+    <!-- 有清单：只列支持异步（声明了 resultUrl）的工具 -->
     <template v-if="!manualFallback">
       <div
         v-if="capableTools.length > 0"
@@ -126,7 +126,7 @@ function onManualInput(value: string): void {
           />
           <span class="async-tools__name mono">{{ name }}</span>
           <span class="async-tools__desc">
-            （已声明，但该工具当前未声明 result_url 或不在清单中——声明不会生效，建议取消）
+            （已声明，但该工具当前未声明 resultUrl 或不在清单中——声明不会生效，建议取消）
           </span>
         </label>
       </div>

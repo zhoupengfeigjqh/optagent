@@ -27,12 +27,12 @@ const SERVICE: McpServiceDetail = {
   args: null,
   file_args: { ocr_image: { image: 'url' } },
   tools: [
-    // ocr_image 声明了 result_url → 出现在「后台计算（异步工具）」可选项里；
+    // ocr_image 声明了 resultUrl → 出现在「后台计算（异步工具）」可选项里；
     // parse_excel 未声明 → 该区不展示它（2026-10-03 产品决定：只列支持异步的工具）
     {
       name: 'ocr_image',
       description: '识别图片中的文字',
-      parameters: { type: 'object', properties: { result_url: { type: 'string' } } },
+      parameters: { type: 'object', properties: { resultUrl: { type: 'string' } } },
     },
     { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
   ],

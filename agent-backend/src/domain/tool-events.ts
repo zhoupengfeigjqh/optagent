@@ -297,7 +297,7 @@ export class ToolEventStore {
     }
     try {
       const buf = await fs.promises.readFile(abs);
-      // 读取即刷新访问时间：临时空间 7 天清理以"最近访问"为准，看过的结果不会被误回收
+      // 读取即刷新访问时间：临时空间 30 天清理以"最近访问"为准，看过的结果不会被误回收
       const now = new Date();
       await fs.promises.utimes(abs, now, now).catch(() => {});
       return { content: buf.toString('utf8'), size: buf.length };

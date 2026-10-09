@@ -20,7 +20,8 @@
       "allowed_tools": [
         "ocr_image"
       ],
-      "updated_at": "2026-10-03T16:30:02.535Z"
+      "headers": {},
+      "updated_at": "2026-10-09T03:08:41.546Z"
     },
     "jev": {
       "name": "jev",
@@ -91,6 +92,36 @@
         "X-MCP-Token": "ZmeYwSB6_APUf54aJbGJl27u7_G5Cjo5"
       },
       "updated_at": "2026-10-08T04:40:23.120Z"
+    },
+    "hd-algorithm": {
+      "name": "hd-algorithm",
+      "description": "海大生产调度工具包",
+      "transport": "http",
+      "url": "http://192.168.0.188:8080/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {
+        "hd_algorithm_input_parser": {
+          "items[].excelFileUrl": "url:from=items[].realRelativePath"
+        }
+      },
+      "confirmation": {
+        "tools": [
+          "hd_scheduling_submit"
+        ]
+      },
+      "rules_fields": {
+        "hd_scheduling_submit": "input.targetPriorities"
+      },
+      "async_tools": [
+        "hd_scheduling_submit"
+      ],
+      "allowed_tools": [
+        "hd_algorithm_input_parser",
+        "hd_scheduling_submit"
+      ],
+      "headers": {},
+      "updated_at": "2026-10-09T03:14:11.365Z"
     }
   }
 }

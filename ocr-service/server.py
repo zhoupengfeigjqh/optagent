@@ -44,7 +44,7 @@ def ocr_image(
         str,
         Field(description="要识别的图片：填文件空间相对路径（如 临时空间/a.png），backend 会自动铸成下载直链"),
     ],
-    result_url: Annotated[
+    resultUrl: Annotated[
         str | None,
         Field(
             description=(
@@ -59,15 +59,15 @@ def ocr_image(
     image：传用户消息 [引用文件] 中的相对路径（如 临时空间/a.png）即可，
     backend 会自动铸成下载直链发过来。图片不超过 2MB，支持 jpg/png/bmp/webp/tif。
 
-    result_url：**请勿自行填写**——平台在把本工具声明为异步时会自动注入。
+    resultUrl：**请勿自行填写**——平台在把本工具声明为异步时会自动注入。
     收到它时本服务**立即返回受理**（含 job_id），识别在后台进行、完成后自动回写，
     结果会出现在后续对话里。留空时按同步方式直接返回识别结果（标准 JSON）。
 
     返回（同步返回与异步回写**同一形状**）：
     {"status":"success"|"failed","message":"一行说明或失败原因","text":"识别文本（失败时为空串）"}
     """
-    if result_url:
-        err = check_http_url(result_url)
+    if resultUrl:
+        err = check_http_url(resultUrl)
         if err:
             # 回写地址的协议不可用（非 http/https）：**忽略它并降级为同步**。
             # 不能"照样 POST"——那等于给任意目标发请求；也不能静默丢掉，
@@ -76,7 +76,7 @@ def ocr_image(
         job_id = make_job_id()
         threading.Thread(
             target=_recognize_and_post,
-            args=(job_id, image, result_url),
+            args=(job_id, image, resultUrl),
             daemon=True,
         ).start()
         return accepted_payload(job_id)
@@ -104,7 +104,7 @@ def _recognize(image_url: str) -> dict[str, object]:
     return success_result("\n".join(line[1] for line in result))
 
 
-def _recognize_and_post(job_id: str, image_url: str, result_url: str) -> None:
+def _recognize_and_post(job_id: str, image_url: str, resultUrl: str) -> None:
     """后台线程体：识别 → 回写。
 
     失败**只记 stderr**：受理早就返回给模型了，这里没有第二条通道可回话；
@@ -114,7 +114,7 @@ def _recognize_and_post(job_id: str, image_url: str, result_url: str) -> None:
     result = _recognize(image_url)
     # 带一行摘要回写（契约 §10.3）：产出列表靠它区分"哪条是哪条"——
     # 否则一屏的 ocr__ocr_image 谁也认不出来
-    err = post_result(with_filename(result_url, result_filename(job_id), summary_of(result)), result)
+    err = post_result(with_filename(resultUrl, result_filename(job_id), summary_of(result)), result)
     if err:
         print(f"异步任务 {job_id} {err}", file=sys.stderr)
 

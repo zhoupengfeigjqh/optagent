@@ -4,6 +4,10 @@
  * 口径与后端 `agent-backend/src/domain/produced.ts` 的 `formatProducedList` / `relativeTime`
  * 以及 `tool-result.ts` 的 `formatBytes` **保持一致**：同一条产出在「提示词清单」与
  * 「铃铛面板」里应给出同样的人类可读描述，否则同一个东西在两处说法不一。
+ *
+ * 2026-10-09 追加**标题两段**（`producedSummary` / `producedTag`，见各自注释）：
+ * 摘要（服务给，可缺省）与标识（平台字段，永不缺省）分开成段，不再拼成一根字符串——
+ * 后者排在前面会被单行省略号整段吃掉，等于没显示。
  */
 
 /** 相对时间：与后端同档位（刚刚 / N 分钟前 / N 小时前 / N 天前） */
@@ -60,4 +64,57 @@ export function splitProducedPath(relPath: string): { dir: string; filename: str
 /** 未读角标文案：超过 99 显示 `99+`，避免角标被长数字撑破 */
 export function badgeText(count: number): string {
   return count > 99 ? '99+' : String(count)
+}
+
+/**
+ * 中间省略：`ocr_1790123456789_8bcccfd2` → `ocr_17901234…cfd2`。
+ *
+ * 为什么不用"尾部省略"：标题里标识排在摘要之后，交给 CSS 的单行省略号时被吃掉的
+ * **永远是末尾**（`job_id` 正好在最末）——等于白放。故先把中段收掉，两端的
+ * 服务前缀与随机后缀都留着，便于人眼比对与复制。
+ *
+ * 按**码点**切（`Array.from`），不切开 emoji 等代理对；短到不需要省略时原样返回。
+ */
+export function middleEllipsis(text: string, head = 12, tail = 4): string {
+  const chars = Array.from(text)
+  if (chars.length <= head + tail + 1) return text
+  return `${chars.slice(0, head).join('')}…${chars.slice(-tail).join('')}`
+}
+
+/**
+ * 标题主段 = 一行摘要：优先服务提供的 `summary`；缺省时给**可读兜底**。
+ *
+ * MUST NOT 回落成落盘文件名（`{会话UUID}_{job_id}`，纯机读）——2026-09-25 实测反馈。
+ */
+export function producedSummary(summary: string | undefined): string {
+  const text = summary?.trim() ?? ''
+  return text === '' ? '后台任务结果（该任务未提供摘要）' : text
+}
+
+/** 标识段的工具名：缺省给可读兜底（与元信息行同口径），不留白 */
+function tagToolName(tool: string): string {
+  const name = tool.trim()
+  return name === '' ? '未知工具' : name
+}
+
+/**
+ * 标题副段（**悬停提示用**）= `工具全名 · job_id`，两个值都保持完整。
+ *
+ * 与 `producedTag` 的分工：那个是屏幕上那行（中段省略到有界宽度），这个是 `title` 属性，
+ * 保证"完整值永远可查"——省略号不该让人拿不到原文。
+ */
+export function producedTagFull(tool: string, jobId: string): string {
+  return `${tagToolName(tool)} · ${jobId}`
+}
+
+/**
+ * 标题副段（屏幕上那行）= `工具名 · job_id`，两段各自中间省略。
+ *
+ * 内容**全部来自平台已知字段**（`tool` 由运行环境写、`job_id` 是落盘键），所以
+ * 永不缺省、天然唯一：服务不给 `summary` 时，多条产出也**不再长得一模一样**（可对账）。
+ * 工具全名可能很长（`{server}__{tool}`），故也收中段——两端的前缀与工具名仍可辨。
+ */
+export function producedTag(tool: string, jobId: string): string {
+  const name = middleEllipsis(tagToolName(tool), 24, 8)
+  return `${name} · ${middleEllipsis(jobId, 12, 4)}`
 }

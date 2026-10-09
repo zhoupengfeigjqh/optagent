@@ -10,12 +10,12 @@
 ## 1. 原理（三步）
 
 ```
-① 输入     工具 inputSchema 里声明 result_url      → 平台自动注入（模型看不到）
+① 输入     工具 inputSchema 里声明 resultUrl      → 平台自动注入（模型看不到）
 ② 提交     立即返回受理 JSON（含 job_id）           → 模型据此回复"已受理"
-③ 回写     算法算完后 POST 回 result_url           → 平台落盘 → "后台记录"出现条目
+③ 回写     算法算完后 POST 回 resultUrl           → 平台落盘 → "后台记录"出现条目
 ```
 
-`result_url` 就是**开关**：有值走异步，缺省/不可信走同步。
+`resultUrl` 就是**开关**：有值走异步，缺省/不可信走同步。
 
 **改造的收益**：当前同步模式下，工具会阻塞等算法回调（上限 `求解时间 + 60 秒`），而平台单次 MCP 调用超时是 5 分钟 —— 求解超过 4 分钟就必然超时，且**超时后平台会重试 1 次，算法侧收到两次提交**。异步化后调用毫秒级返回，不再有这个问题。
 
@@ -27,11 +27,11 @@
 
 | # | 规则 |
 |---|---|
-| 1 | `properties` 里**必须有 `result_url`**（名字逐字一致），类型 `string` 即可 |
+| 1 | `properties` 里**必须有 `resultUrl`**（名字逐字一致），类型 `string` 即可 |
 | 2 | **不要放进 `required`**（有默认值即不在 required，平台照样注入） |
 | 3 | 声明后平台会**从给模型的 schema 中删掉它** —— 模型看不到、填不了；注入时**覆盖**模型填的任何值 |
 
-### 2.2 完整 `inputSchema`（在你现有结构上只加 `result_url`）
+### 2.2 完整 `inputSchema`（在你现有结构上只加 `resultUrl`）
 
 ```json
 {
@@ -67,7 +67,7 @@
         },
         "required": ["capacityVersion","lineVersion","electricityVersion","planVersion","switchVersion","solvingTime","targetPriorities"]
       },
-      "result_url": {
+      "resultUrl": {
         "type": "string",
         "description": "结果回写地址，由运行环境自动注入，模型无需填写"
       }
@@ -77,7 +77,7 @@
 }
 ```
 
-**相比现状，只改三处**：① 新增 `result_url`；② `description` 把"同步等待结果"改成"立即返回受理"（这段文本**直接给模型看**，不改会让模型以为一调用就阻塞几分钟而不敢用）；③ `solvingTime` 说明里去掉"决定本工具最长等待时间"。
+**相比现状，只改三处**：① 新增 `resultUrl`；② `description` 把"同步等待结果"改成"立即返回受理"（这段文本**直接给模型看**，不改会让模型以为一调用就阻塞几分钟而不敢用）；③ `solvingTime` 说明里去掉"决定本工具最长等待时间"。
 
 ---
 
@@ -97,7 +97,7 @@
 | `status` | 固定 `"accepted"` |
 | `message` | 含"无需重复提交" —— 否则模型常会再调一次，白排一遍 |
 
-**同步降级**（`result_url` 缺失，或其协议不是 http/https）：直接返回原来的同步结果，并在前面说明原因：
+**同步降级**（`resultUrl` 缺失，或其协议不是 http/https）：直接返回原来的同步结果，并在前面说明原因：
 
 ```
 错误：仅支持 http/https URL
@@ -112,7 +112,7 @@
 ### 4.1 请求形状
 
 ```http
-POST {result_url}&filename=hd_1790328130074_4005b4b0.json&summary=排产完成，12 条工单
+POST {resultUrl}&filename=hd_1790328130074_4005b4b0.json&summary=排产完成，12 条工单
 Content-Type: application/json; charset=utf-8
 
 {统一结果 JSON，见 4.3}
@@ -120,7 +120,7 @@ Content-Type: application/json; charset=utf-8
 
 | 项 | 规定 |
 |---|---|
-| **必须保留** `result_url` 原有 query | `u/d/exp/sig/sid/call_id/tool` 一个不丢；否则 403 或写错目录 |
+| **必须保留** `resultUrl` 原有 query | `u/d/exp/sig/sid/call_id/tool` 一个不丢；否则 403 或写错目录 |
 | 追加参数方式 | **用 URL 解析器**追加，不能字符串拼 `&filename=`（URL 可能已有 query / 带 fragment） |
 | `filename` | `{job_id}.json`；不含路径分隔符、不含 `..`、非空 |
 | `summary` | **MUST 提供**（界面标题的唯一来源），一行 ≤200 字符，且**失败结论前置**（见 4.4） |
@@ -158,7 +158,7 @@ Content-Type: application/json; charset=utf-8
   （范本 `ocr-service` 的返回就是 `{status, message, text}`，没有 `code`）；
 - **MUST NOT** 用自然语言纯文本作结果；
 - **失败 MUST 照常回写**（否则界面上什么都不出现，用户无法区分"还在算 / 失败了 / 挂了"）；
-- **同步路径同样适用**：`result_url` 缺省时的**同步返回** MUST 是**同一形状**（`status: success|failed`）——
+- **同步路径同样适用**：`resultUrl` 缺省时的**同步返回** MUST 是**同一形状**（`status: success|failed`）——
   不得只在异步回写时统一，否则模型在同步/异步两条路径上会看到两套形状；
 - 平台对本 JSON **仍不解析**（原样存、原样读）；`status` 的**取值域由服务保证**。
 
@@ -272,7 +272,7 @@ def hd_scheduling_submit(
     uid: Annotated[str, Field(description="用户ID，用于标记任务归属")],
     sid: Annotated[str, Field(description="会话ID，用于标记任务归属")],
     input: SchedulingInput,  # noqa: A002  参数名与既有 schema 一致
-    result_url: Annotated[
+    resultUrl: Annotated[
         str | None,
         Field(
             description=(
@@ -285,11 +285,11 @@ def hd_scheduling_submit(
     """提交单工序排产任务。
 
     本工具**立即返回受理**（含 job_id），求解在算法侧后台进行；完成后结果自动出现在
-    后台记录里、并可在后续对话中读取，无需重复提交。留空 result_url 时按同步方式返回
+    后台记录里、并可在后续对话中读取，无需重复提交。留空 resultUrl 时按同步方式返回
     **统一结果 JSON**（§4.3，`status` 同样是 success/failed）。
     """
-    if result_url:
-        err = check_http_url(result_url)
+    if resultUrl:
+        err = check_http_url(resultUrl)
         if err:
             # 回写地址的协议不可用：忽略它并降级为同步。
             # 不能照样 POST（等于向任意目标发请求）；也不能静默丢弃（调用方会一直等不到结果）。
@@ -298,16 +298,16 @@ def hd_scheduling_submit(
             )
         job_id = make_job_id()
         threading.Thread(
-            target=_submit_and_post, args=(job_id, uid, sid, input, result_url), daemon=True
+            target=_submit_and_post, args=(job_id, uid, sid, input, resultUrl), daemon=True
         ).start()
         return accepted_payload(job_id)
-    # 无 result_url = 同步：同样返回**统一结果形状**（平台/模型看到的形状与异步路径一致）
+    # 无 resultUrl = 同步：同样返回**统一结果形状**（平台/模型看到的形状与异步路径一致）
     return json.dumps(result_payload(submit_and_wait(uid, sid, input)), ensure_ascii=False)
 
 
 # ── 后台线程体：求解 → 回写 ────────────────────────────────────
 def _submit_and_post(
-    job_id: str, uid: str, sid: str, cfg: SchedulingInput, result_url: str
+    job_id: str, uid: str, sid: str, cfg: SchedulingInput, resultUrl: str
 ) -> None:
     """失败**只记 stderr**：受理早就返回了，这里没有第二条通道可回话。"""
     result = submit_and_wait(uid, sid, cfg)          # 原阻塞逻辑，现在跑在后台线程里
@@ -320,7 +320,7 @@ def _submit_and_post(
             ensure_ascii=False,
         ).encode("utf-8")
     err = post_result(
-        with_filename(result_url, result_filename(job_id), payload["message"]), body
+        with_filename(resultUrl, result_filename(job_id), payload["message"]), body
     )
     if err:
         print(f"异步任务 {job_id} {err}", file=sys.stderr)
@@ -341,7 +341,7 @@ def submit_and_wait(uid: str, sid: str, cfg: SchedulingInput) -> dict:
 def check_http_url(url: str) -> str | None:
     """校验回写地址的协议；返回错误文案，None 表示放行。
 
-    只接受 http/https：`result_url` 由平台按 `PUBLIC_BASE_URL` 铸造后注入，服务侧无需
+    只接受 http/https：`resultUrl` 由平台按 `PUBLIC_BASE_URL` 铸造后注入，服务侧无需
     （也不应）再维护一份 host 白名单——它要求"直链基址 + 每个服务各一份"三处写同一个
     主机名，IP 一变就漏（2026-09-28 起移除）。想自行加固的话，加白名单属**可选**。
     """
@@ -447,7 +447,7 @@ if __name__ == "__main__":
 | # | 事项 | 取值 |
 |---|---|---|
 | 1 | 平台声明异步工具 | `"async_tools": ["hd_scheduling_submit"]`（**原始工具名，不含 `hd__` 前缀**） |
-| 2 | 服务侧校验（MUST） | `result_url` 只接受 **http/https**（其余忽略并降级为同步）；注入的地址由平台保证是 `PUBLIC_BASE_URL` 下的直链 |
+| 2 | 服务侧校验（MUST） | `resultUrl` 只接受 **http/https**（其余忽略并降级为同步）；注入的地址由平台保证是 `PUBLIC_BASE_URL` 下的直链 |
 | 3 | 服务侧加固（可选） | 如你的服务想再加一道 host 白名单（`HD_URL_ALLOW_HOSTS`）属**可选**——地址已由平台**单点铸造**，不再要求逐个服务维护同值清单（2026-09-28 起） |
 | 4 | 改过 `.env.local` 后 | **重建**容器：`docker compose up -d hd --force-recreate`（`restart` 不更新 env） |
 | 5 | 平台侧保存后 | 无需重启后端 —— 配置物化后按指纹自动重建实例 |
@@ -457,8 +457,8 @@ if __name__ == "__main__":
 ## 附：全链路时序
 
 ```
-模型 hd_scheduling_submit(uid, sid, input, result_url=<平台注入>)
-  → 平台注入 result_url（覆盖模型填的任何值；HITL 确认窗里看不到它）
+模型 hd_scheduling_submit(uid, sid, input, resultUrl=<平台注入>)
+  → 平台注入 resultUrl（覆盖模型填的任何值；HITL 确认窗里看不到它）
   → 服务：check_url 通过 → 返回受理 JSON（含 job_id）→ 模型复述给用户
   → 后台线程：submit_and_wait(…)（阻塞至算法回调，上限 solvingTime+60s）
              → 算法结果 → 统一形状（status=success|failed）→ 生成 summary

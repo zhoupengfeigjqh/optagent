@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+# pip 源同步指向阿里云（与本文件上方 apt 源同一原因）：Docker 构建容器直连 pypi.org
+# 会超时（`ReadTimeoutError ... pypi.org:443`），表现为 `No matching distribution found for mcp`，
+# 导致任何一次真实镜像重建都失败。
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ \
+  && pip config set global.trusted-host mirrors.aliyun.com
 # 模型已打包在 rapidocr_onnxruntime wheel 内，无需额外下载
 RUN pip install --no-cache-dir -r requirements.txt
 

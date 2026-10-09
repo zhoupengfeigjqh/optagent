@@ -5,6 +5,11 @@
  * 受控开合：由 `open` 驱动原生 `<dialog>`，所有关闭意图统一以 `close` 事件上报，
  * 由父级决定是否真正关闭（避免原生关闭与 prop 状态不同步）。
  * 原生 `<dialog>` 自带焦点陷阱与 Esc 关闭，无需自行实现。
+ *
+ * 宽度**两档**（2026-10-09 加宽版）：默认 `min(560px, 92vw)` 够用就不动；
+ * 表格/结构化正文这类横向内容多的场景用 `wide`（`min(900px, 94vw)`），
+ * 否则每列被挤成一条，只能靠横向滚动一列一列地看。
+ * 两档都随视口收窄（窄屏 `92/94vw`），弹窗尺寸始终自适应。
  */
 import { computed, onMounted, ref, useId, watch } from 'vue'
 
@@ -18,8 +23,10 @@ const props = withDefaults(
     title?: string
     /** 外部指定的无障碍标题元素 id（覆盖内部生成的 id） */
     labelledBy?: string | null
+    /** 宽版：表格/结构化正文等横向内容多的场景 */
+    wide?: boolean
   }>(),
-  { open: false, title: '', labelledBy: null },
+  { open: false, title: '', labelledBy: null, wide: false },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -76,6 +83,7 @@ function handleBackdropClick(event: MouseEvent): void {
   <dialog
     ref="dialogRef"
     class="base-dialog"
+    :class="{ 'base-dialog--wide': wide }"
     :aria-labelledby="labelId ?? undefined"
     @cancel="handleCancel"
     @close="handleClose"
@@ -106,6 +114,11 @@ function handleBackdropClick(event: MouseEvent): void {
   border: none;
   border-radius: var(--radius-lg);
   background: transparent;
+}
+
+/* 宽版：表格/结构化正文（列多时 560px 只能看见五六列，其余全靠横向滚） */
+.base-dialog--wide {
+  width: min(900px, 94vw);
 }
 
 .base-dialog::backdrop {

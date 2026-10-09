@@ -5,7 +5,17 @@
  * 必须给出同样的人类可读描述，否则同一个东西在两处说法不一。
  */
 import { describe, expect, it } from 'vitest'
-import { badgeText, formatBytes, formatDateTime, relativeTime, splitProducedPath } from './produced-display'
+import {
+  badgeText,
+  formatBytes,
+  formatDateTime,
+  middleEllipsis,
+  producedSummary,
+  producedTag,
+  producedTagFull,
+  relativeTime,
+  splitProducedPath,
+} from './produced-display'
 
 const NOW = Date.parse('2026-09-25T12:00:00.000Z')
 
@@ -74,5 +84,60 @@ describe('badgeText', () => {
     expect(badgeText(1)).toBe('1')
     expect(badgeText(99)).toBe('99')
     expect(badgeText(100)).toBe('99+')
+  })
+})
+
+describe('middleEllipsis', () => {
+  it('够短就原样返回（不无谓地加省略号）', () => {
+    expect(middleEllipsis('job_1')).toBe('job_1')
+    expect(middleEllipsis('a'.repeat(17))).toBe('a'.repeat(17)) // head+tail+1 = 17
+  })
+
+  it('过长收中段，两端保留——尾部不会再被 CSS 省略号吃掉', () => {
+    expect(middleEllipsis('ocr_1790123456789_8bcccfd2')).toBe('ocr_17901234…cfd2')
+  })
+
+  it('按码点切，不切开代理对（emoji 不会碎成半个）', () => {
+    const out = middleEllipsis('😀'.repeat(20), 2, 2)
+    expect(out).toBe('😀😀…😀😀')
+    expect(Array.from(out)).toHaveLength(5)
+  })
+})
+
+describe('producedSummary', () => {
+  it('有摘要用摘要（去首尾空白）', () => {
+    expect(producedSummary('  识别到 47 行文字  ')).toBe('识别到 47 行文字')
+  })
+
+  it('缺省 / 空串 / 全空白 → 可读兜底，MUST NOT 回落成机读文件名', () => {
+    const fallback = '后台任务结果（该任务未提供摘要）'
+    expect(producedSummary(undefined)).toBe(fallback)
+    expect(producedSummary('')).toBe(fallback)
+    expect(producedSummary('   ')).toBe(fallback)
+    expect(fallback).not.toContain('th_1_')
+  })
+})
+
+describe('producedTag', () => {
+  it('`工具名 · job_id`；短值不做任何截断', () => {
+    expect(producedTag('ocr__ocr_image', 'job_1')).toBe('ocr__ocr_image · job_1')
+  })
+
+  it('工具名与 job_id 各自中间省略：两端可辨、宽度有界', () => {
+    const out = producedTag('a'.repeat(40), 'ocr_1790123456789_8bcccfd2')
+    expect(out).toBe(`${'a'.repeat(24)}…${'a'.repeat(8)} · ocr_17901234…cfd2`)
+  })
+
+  it('工具名缺省 → 可读兜底（与元信息行同口径），不留白', () => {
+    expect(producedTag('', 'job_1')).toBe('未知工具 · job_1')
+    expect(producedTag('   ', 'job_1')).toBe('未知工具 · job_1')
+  })
+})
+
+describe('producedTagFull', () => {
+  it('悬停提示给完整值：截断只影响屏幕，不该让人拿不到原文', () => {
+    const longId = 'ocr_1790123456789_8bcccfd2'
+    expect(producedTagFull('a'.repeat(40), longId)).toBe(`${'a'.repeat(40)} · ${longId}`)
+    expect(producedTagFull('', 'job_1')).toBe('未知工具 · job_1')
   })
 })

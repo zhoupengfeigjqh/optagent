@@ -1,7 +1,7 @@
 /**
  * 单元测试：tmp/ 定期清理（R11 补充口径）
  *
- * 既有口径：顶层文件超 7 天未访问即删；`.upload-` 暂存残留按 1 小时清。
+ * 既有口径：顶层文件超 30 天未访问即删；`.upload-` 暂存残留按 1 小时清。
  * **本次补的漏洞**：二级目录原先被整目录跳过 ⇒ 后台产出**永不清理**，
  * 契约 §10.4 的"随临时空间既有规则清理"不成立。现在 `后台产出/` 按同一口径处理，
  * 且**只认已登记的子目录**（不递归任意目录，避免误删将来可能出现的其他子目录）。
@@ -46,8 +46,8 @@ afterEach(() => {
 });
 
 describe('cleanupTmpDir —— 顶层（既有行为，MUST NOT 变化）', () => {
-  it('超过 7 天未访问即删；未过期保留', async () => {
-    const stale = writeWithAge('old.txt', 8 * DAY);
+  it('超过 30 天未访问即删；未过期保留', async () => {
+    const stale = writeWithAge('old.txt', 31 * DAY);
     const fresh = writeWithAge('fresh.txt', 1 * DAY);
 
     const result = await cleanupTmpDir(tmp);
@@ -68,8 +68,8 @@ describe('cleanupTmpDir —— 顶层（既有行为，MUST NOT 变化）', () =
 
 describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () => {
   it('子目录内的过期产出与 sidecar 一起被清理（原先整目录被跳过）', async () => {
-    const body = writeWithAge(`${PRODUCED_SUBDIR}/p_j1.json`, 8 * DAY);
-    const meta = writeWithAge(`${PRODUCED_SUBDIR}/p_j1.meta.json`, 8 * DAY);
+    const body = writeWithAge(`${PRODUCED_SUBDIR}/p_j1.json`, 31 * DAY);
+    const meta = writeWithAge(`${PRODUCED_SUBDIR}/p_j1.meta.json`, 31 * DAY);
 
     const result = await cleanupTmpDir(tmp);
 
@@ -78,7 +78,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     expect(fs.existsSync(meta)).toBe(false);
   });
 
-  it('未过期的产出保留（7 天窗口内）', async () => {
+  it('未过期的产出保留（30 天窗口内）', async () => {
     const fresh = writeWithAge(`${PRODUCED_SUBDIR}/p_j2.json`, 1 * DAY);
 
     await cleanupTmpDir(tmp);
@@ -87,7 +87,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('只认已登记的子目录：其他子目录不受影响', async () => {
-    const other = writeWithAge('other-sub/x.txt', 8 * DAY);
+    const other = writeWithAge('other-sub/x.txt', 31 * DAY);
 
     await cleanupTmpDir(tmp);
 
@@ -95,8 +95,8 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('顶层与子目录在同一轮扫描里各自生效', async () => {
-    const top = writeWithAge('old.txt', 8 * DAY);
-    const produced = writeWithAge(`${PRODUCED_SUBDIR}/p_j3.json`, 8 * DAY);
+    const top = writeWithAge('old.txt', 31 * DAY);
+    const produced = writeWithAge(`${PRODUCED_SUBDIR}/p_j3.json`, 31 * DAY);
 
     const result = await cleanupTmpDir(tmp);
 
@@ -107,8 +107,8 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
 
   it('清理动作有日志留痕（顶层与产出子目录各自可读）', async () => {
     const infos: string[] = [];
-    writeWithAge('old.txt', 8 * DAY);
-    writeWithAge(`${PRODUCED_SUBDIR}/p_j9.json`, 8 * DAY);
+    writeWithAge('old.txt', 31 * DAY);
+    writeWithAge(`${PRODUCED_SUBDIR}/p_j9.json`, 31 * DAY);
 
     await cleanupTmpDir(tmp, {
       logger: { warn: (msg) => infos.push(`warn:${msg}`), info: (msg) => infos.push(`info:${msg}`) },
@@ -125,8 +125,8 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('条目在扫描间隙消失（stat 失败）：跳过即可，不抛错也不虚报', async () => {
-    writeWithAge('gone.txt', 8 * DAY);
-    writeWithAge(`${PRODUCED_SUBDIR}/gone2.txt`, 8 * DAY);
+    writeWithAge('gone.txt', 31 * DAY);
+    writeWithAge(`${PRODUCED_SUBDIR}/gone2.txt`, 31 * DAY);
     const statSpy = vi.spyOn(fs.promises, 'stat').mockRejectedValue(new Error('ENOENT'));
 
     try {
@@ -136,7 +136,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     }
   });
 
-  it('上传暂存残留的 stat 失败：跳过不抛错（与 7 天规则各自容错）', async () => {
+  it('上传暂存残留的 stat 失败：跳过不抛错（与 30 天规则各自容错）', async () => {
     writeWithAge('.upload-ghost', 2 * 60 * 60 * 1000);
     const statSpy = vi.spyOn(fs.promises, 'stat').mockRejectedValue(new Error('ENOENT'));
 
@@ -147,7 +147,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     }
   });
 
-  it('上传暂存残留删除失败：同样只计数不中断（与 7 天规则那条各走各的容错）', async () => {
+  it('上传暂存残留删除失败：同样只计数不中断（与 30 天规则那条各走各的容错）', async () => {
     writeWithAge('.upload-stale', 2 * 60 * 60 * 1000);
     rmSpy.mockRejectedValueOnce(new Error('EPERM: 拒绝访问'));
 
@@ -156,8 +156,8 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('产出子目录不可读：视为无可清理（不抛错，也不影响顶层）', async () => {
-    writeWithAge('top-old.txt', 8 * DAY);
-    writeWithAge(`${PRODUCED_SUBDIR}/p_j7.json`, 8 * DAY);
+    writeWithAge('top-old.txt', 31 * DAY);
+    writeWithAge(`${PRODUCED_SUBDIR}/p_j7.json`, 31 * DAY);
     // 顶层 readdir 走真实实现，子目录那次注入失败
     const realReaddir = fs.promises.readdir.bind(fs.promises);
     const readdirSpy = vi
@@ -174,7 +174,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('产出子目录内删除失败：只计数不中断', async () => {
-    writeWithAge(`${PRODUCED_SUBDIR}/p_j8.json`, 8 * DAY);
+    writeWithAge(`${PRODUCED_SUBDIR}/p_j8.json`, 31 * DAY);
     rmSpy.mockRejectedValueOnce(new Error('EPERM: 拒绝访问'));
 
     const warns: string[] = [];
@@ -187,8 +187,8 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   });
 
   it('单个条目删除失败：只计数不中断，其余照常清理', async () => {
-    const first = writeWithAge('a.txt', 8 * DAY);
-    const second = writeWithAge('b.txt', 8 * DAY);
+    const first = writeWithAge('a.txt', 31 * DAY);
+    const second = writeWithAge('b.txt', 31 * DAY);
     rmSpy.mockRejectedValueOnce(new Error('EPERM: 拒绝访问'));
 
     const warns: string[] = [];

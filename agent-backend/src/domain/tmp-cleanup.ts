@@ -1,5 +1,5 @@
 /**
- * tmp/ 定期清理（T040 / FR-028）：删除超过 7 天未访问的临时产出。
+ * tmp/ 定期清理（T040 / FR-028）：删除超过 30 天未访问的临时产出。
  *
  * "未访问"判定取 max(atime, mtime)——FileAccess 读 tmp 文件时会 utimes
  * 刷新访问时间，所以正在被引用的产出不会被误删。
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { PRODUCED_SUBDIR } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
 
-export const TMP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const TMP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface CleanupLogger {
   warn(msg: string): void;
@@ -38,7 +38,7 @@ export async function cleanupTmpDir(
   }
   for (const name of names) {
     if (name.startsWith('.upload-')) {
-      // 上传暂存残留：超过 1 小时即清理（与 7 天规则无关）
+      // 上传暂存残留：超过 1 小时即清理（与 30 天规则无关）
       const abs = path.join(tmpDir, name);
       const stat = await fs.promises.stat(abs).catch(() => null);
       if (stat && now - stat.mtimeMs > 60 * 60 * 1000) {
@@ -53,7 +53,7 @@ export async function cleanupTmpDir(
     const stat = await fs.promises.stat(abs).catch(() => null);
     if (!stat) continue;
     if (stat.isDirectory()) {
-      // 后台产出（R11）：二级目录也按同一 7 天口径清理——否则契约 §10.4 的
+      // 后台产出（R11）：二级目录也按同一 30 天口径清理——否则契约 §10.4 的
       // "随临时空间既有规则清理"不成立（原先此处直接跳过目录，产出实际永不清理）。
       // 只认**已登记**的子目录，不递归任意目录，避免误删将来可能出现的其他子目录。
       if (name === PRODUCED_SUBDIR) {
@@ -67,7 +67,7 @@ export async function cleanupTmpDir(
     try {
       await removeFileSafeAsync(abs);
       result.deleted += 1;
-      opts.logger?.info?.(`tmp 清理：已删除 7 天未访问文件 ${name}`);
+      opts.logger?.info?.(`tmp 清理：已删除 30 天未访问文件 ${name}`);
     } catch (err) {
       result.failed += 1;
       opts.logger?.warn(
@@ -81,7 +81,7 @@ export async function cleanupTmpDir(
 /**
  * 清理某个**子目录**内的过期文件（R11 后台产出）。
  *
- * 判据与顶层一致（`max(atime, mtime)` 超 7 天，且以"真正读正文"为访问 —— 清单扫描
+ * 判据与顶层一致（`max(atime, mtime)` 超 30 天，且以"真正读正文"为访问 —— 清单扫描
  * 走 `FileAccess.read(..., { touch: false })`，不给产出续命，见 `file-access`）。
  * 正文与 sidecar 是同生命周期文件、写入时刻相同，故会一起消失。
  */
@@ -107,7 +107,7 @@ async function cleanupFilesIn(
     try {
       await removeFileSafeAsync(abs);
       result.deleted += 1;
-      logger?.info?.(`tmp 清理：已删除 7 天未访问的 ${label}/${name}`);
+      logger?.info?.(`tmp 清理：已删除 30 天未访问的 ${label}/${name}`);
     } catch (err) {
       result.failed += 1;
       logger?.warn(

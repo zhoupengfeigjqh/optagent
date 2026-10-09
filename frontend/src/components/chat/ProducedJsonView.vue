@@ -8,7 +8,9 @@
  *
  * 分派（与 HITL 同构）：
  * - 对象 → 逐行 `key: value`（递归，嵌套缩进）
- * - 对象数组 → **表格**（列 = 各元素键的并集）
+ * - 对象数组 → **表格**（列 = 各元素键的并集）；**行与列都有上限**（`PRODUCED_ARRAY_MAX_ITEMS`
+ *   / `PRODUCED_TABLE_MAX_COLUMNS`），超出只提示总数。弹窗宽度是自适应的，故横向溢出
+ *   **由表格容器自己滚动**（`max-content` 表宽 + `overflow-x`），不把弹窗撑宽。
  * - 其他数组 → **列表**（一行一项）
  * - 超过深度上限 → **JSON 逃生舱**（`<pre>`）
  *
@@ -24,6 +26,7 @@ import { isPlainObject } from '../../utils/arg-schema'
 import {
   PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_DEPTH,
+  PRODUCED_TABLE_MAX_COLUMNS,
   columnsOfRows,
 } from '../../utils/produced-content'
 
@@ -69,7 +72,12 @@ const asTable = computed(
     arrayItems.value.length > 0 &&
     arrayItems.value.every((item) => isPlainObject(item)),
 )
-const columns = computed(() => (asTable.value ? columnsOfRows(arrayItems.value) : []))
+/** 表头列（各元素键的并集，取自**全体**行，不随行的截断而变） */
+const allColumns = computed(() => (asTable.value ? columnsOfRows(arrayItems.value) : []))
+const columns = computed(() => allColumns.value.slice(0, PRODUCED_TABLE_MAX_COLUMNS))
+const hiddenColumnCount = computed(() =>
+  Math.max(0, allColumns.value.length - columns.value.length),
+)
 
 function cellOf(row: unknown, column: string): unknown {
   return isPlainObject(row) ? row[column] : undefined
@@ -143,8 +151,11 @@ function jsonText(value: unknown): string {
           </tbody>
         </table>
       </div>
+      <p v-if="hiddenColumnCount > 0" class="produced-json__truncated">
+        仅显示前 {{ columns.length }} 列，共 {{ allColumns.length }} 列，完整明细请点上方「按原始 JSON 查看」
+      </p>
       <p v-if="truncatedCount > 0" class="produced-json__truncated">
-        仅显示前 {{ shownItems.length }} 项，共 {{ arrayItems.length }} 项。
+        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始 JSON 查看」
       </p>
     </template>
 
@@ -156,7 +167,7 @@ function jsonText(value: unknown): string {
         </li>
       </ol>
       <p v-if="truncatedCount > 0" class="produced-json__truncated">
-        仅显示前 {{ shownItems.length }} 项，共 {{ arrayItems.length }} 项。
+        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始 JSON 查看」
       </p>
     </template>
   </div>
@@ -210,14 +221,18 @@ function jsonText(value: unknown): string {
   word-break: break-word;
 }
 
+/* 表格容器：滚动发生在这里。`max-width: 100%` + 表宽 `max-content` 是关键——
+   若表宽仍是 `100%`，列多时只会把每列压扁换行，横向滚动永远不会触发。 */
 .produced-json__table-wrap {
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
 
 .produced-json__table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: var(--font-size-sm);
 }
@@ -228,6 +243,12 @@ function jsonText(value: unknown): string {
   border-bottom: 1px solid var(--color-border);
   text-align: left;
   vertical-align: top;
+}
+
+/* 单元格内容有上界：单格不因一长串 JSON 无限变宽，超长换行（不参与横向滚动） */
+.produced-json__table td {
+  max-width: 24em;
+  word-break: break-word;
 }
 
 .produced-json__table tbody tr:last-child td {

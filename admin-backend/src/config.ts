@@ -40,7 +40,7 @@ const envSchema = z.object({
   /**
    * SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束）。
    * 改这里时 MUST 同步改：agent-backend/src/config.ts 的同名项、
-   * gateway/nginx.conf 的 client_max_body_size（= 上限 + 1MB multipart 余量）。
+   * gateway/nginx.conf 的 client_max_body_size（= 此值 + 1MB multipart 余量，否则 5MB 包传不上）。
    */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   /** 平台容器是否可管理：缺省仅在容器内可用；测试可注入 */

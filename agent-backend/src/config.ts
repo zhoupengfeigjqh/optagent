@@ -25,11 +25,16 @@ const envSchema = z.object({
   /**
    * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。
    * 改这里时 MUST 同步改：admin-backend/src/config.ts 的同名项、
-   * gateway/nginx.conf 的 client_max_body_size（= 上限 + 1MB multipart 余量）。
+   * gateway/nginx.conf 的 client_max_body_size（= 此值 + 1MB multipart 余量，否则 5MB 文件传不上）。
    */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
-  PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(10),
-  READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(32),
+  /**
+   * 内联预览大小上限（MB）。**防御性上限**：文件进入文件空间的每条路径（上传 / 产出回写 /
+   * 模型 `write_file`）都被 `UPLOAD_MAX_MB` 卡在 5MB，故实际不存在超过它的文件，
+   * 413 分支当前恒不触发（`routes/files.ts` / `routes/produced.ts`）；取值与上传上限对齐，保留兜底。
+   */
+  PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(5),
+  READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(128),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),
   /** MCP 签名直链的对外基址（MCP 服务回源下载用；**必填**，由 loadConfig 显式校验并给出可读报错） */
   PUBLIC_BASE_URL: z.string().url().optional(),

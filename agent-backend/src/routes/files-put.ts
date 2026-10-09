@@ -15,8 +15,9 @@ import { verifyPutRef } from '../infra/file-sign.js';
 import { ApiError } from '../server.js';
 
 /**
- * 查询参数：前五个必须，其余三个是**归属提示参数**
- * （`sid`/`call_id`/`tool`，由运行环境铸造 URL 时预置、服务原样回传，**不参与验签**）。
+ * 查询参数：前五个必须，其余是**提示参数**
+ * （`sid`/`call_id`/`tool` + 提交时刻 `t`，由运行环境铸造 URL 时预置、服务原样回传，
+ * **不参与验签**）。
  */
 const putQuerySchema = {
   type: 'object',
@@ -31,6 +32,8 @@ const putQuerySchema = {
     sid: { type: 'string' },
     call_id: { type: 'string' },
     tool: { type: 'string' },
+    // 提交时刻（epoch ms；铸造回写地址时写入，契约 §10.3/§10.4）。可缺省：缺失即退化
+    t: { type: 'string' },
     // 由**服务提供**的一行摘要（面向人可读，如"识别到 47 行文字"）；可缺省。归一规则见 `clampSummary`
     summary: { type: 'string' },
   },
@@ -46,6 +49,24 @@ function clampSummary(raw: string | undefined): string | undefined {
   if (trimmed === '') return undefined;
   const chars = Array.from(trimmed);
   return chars.length > SUMMARY_MAX_CHARS ? chars.slice(0, SUMMARY_MAX_CHARS).join('') : trimmed;
+}
+
+/**
+ * 解析回写地址里的**提交时刻** `t`（epoch ms）：铸造 URL 的那一刻由运行环境写入
+ * （`infra/file-sign.ts` 的 `mintPutUrl`），服务原样回传。
+ *
+ * 只接受"正数且**不晚于回写时刻**"的值；其余（缺失 / 空串 / 非数字 / 0 或负数 / 未来时刻）
+ * 一律 `undefined` → `writeProduced` 退化为回写时刻。据此
+ * `created_at <= finished_at` 是**构造性成立**的，下游不必再夹取。
+ */
+export function parseSubmittedAt(
+  raw: string | undefined,
+  now: number = Date.now(),
+): Date | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0 || value > now) return undefined;
+  return new Date(value);
 }
 
 /**
@@ -68,7 +89,7 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
   // 但 payload 是**四段**（`put\nu\nd\nexp`），与读方向三段形状隔离
   // ⇒ 读签名不能被改用来写（§10.6 不变式 3）。
   app.post('/api/files/put', { schema: { querystring: putQuerySchema } }, async (req, reply) => {
-    const { u, d, exp, sig, filename, sid, call_id, tool, summary } = req.query as Record<
+    const { u, d, exp, sig, filename, sid, call_id, tool, summary, t } = req.query as Record<
       string,
       string | undefined
     >;
@@ -87,6 +108,10 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
       throw new ApiError(400, 'VALIDATION_FAILED', '请求体为空，无法写入产出');
     }
     try {
+      // 提交时刻与回写时刻取同一个 `now`：`created_at <= finished_at` 由构造保证；
+      // 无 `t`（旧 URL / 服务未回传）时 createdAt 为 undefined → 退化为回写时刻
+      const now = new Date();
+      const createdAt = parseSubmittedAt(t, now.getTime());
       const saved = await writeProduced({
         access: new FileAccess({
           optAgentRoot: ctx.config.optAgentRoot,
@@ -101,6 +126,8 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
         filename: filename!,
         content,
         userId: u!,
+        createdAt,
+        now,
       });
       // 落盘即推信号（负载为空）：前端收到后重拉列表；信号丢失无后果（可从目录重算）
       ctx.producedEvents.emitChanged(u!);

@@ -431,7 +431,7 @@ defineExpose({ submit, probeTarget, runTest })
     <fieldset class="mcp-config-form__endpoints">
       <legend class="field__label">后台计算（异步工具）</legend>
       <p class="field__hint">
-        仅列出在入参 schema 中<strong>声明了 result_url</strong> 的工具（判据与平台注入逻辑一致，
+        仅列出在入参 schema 中<strong>声明了 resultUrl</strong> 的工具（判据与平台注入逻辑一致，
         见《异步MCP服务接入约定.md》§2.1）。勾选后：平台在调用时注入结果回写地址，服务算完把结果
         写到该用户的空间，并在<strong>下一轮对话</strong>自动带上「后台计算结果」清单（模型按需读取）。
       </p>

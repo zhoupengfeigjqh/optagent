@@ -9,7 +9,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ToolCallRecord } from '../../src/domain/tool-events.js';
-import { formatArtifactIndex, formatReplayBlock, selectReplay } from '../../src/domain/tool-context.js';
+import {
+  TOOL_REPLAY_BUDGET_BYTES,
+  formatArtifactIndex,
+  formatReplayBlock,
+  selectReplay,
+} from '../../src/domain/tool-context.js';
+import { TOOL_INLINE_MAX_BYTES } from '../../src/domain/tool-result.js';
 
 function record(partial: Partial<ToolCallRecord> & { callId: string }): ToolCallRecord {
   return {
@@ -107,5 +113,11 @@ describe('格式', () => {
 
     expect(text).toContain('read_file');
     expect(text).toContain('- ocr_image · 1.8 MB · 12 页 · 临时空间/th1_toolresult_c1.txt');
+  });
+});
+
+describe('不变式：单条内联上限 ≤ 回灌总预算', () => {
+  it('否则单条内联结果永远装不进预算，回灌会静默全部退化为占位', () => {
+    expect(TOOL_INLINE_MAX_BYTES).toBeLessThanOrEqual(TOOL_REPLAY_BUDGET_BYTES);
   });
 });

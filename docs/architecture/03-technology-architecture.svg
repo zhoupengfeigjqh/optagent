@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100"
+     font-family="Microsoft YaHei, PingFang SC, Segoe UI, sans-serif" role="img"
+     aria-label="OptAgent 技术架构图：访问层、展现层、应用服务层、服务内基础、工具与模型服务、存储与外部依赖、横切关注点">
+  <title>OptAgent 技术架构图</title>
+  <desc>浏览器经统一入口网关分发到两个前端与两个后端；后端经 MCP streamable-http 调用工具与模型服务，工具服务经 HMAC 签名直链回源下载；底部为存储、外部依赖与横切关注点。</desc>
+
+  <defs>
+    <marker id="arr-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e2603f"/>
+    </marker>
+    <marker id="arr-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#ffffff"/>
+
+  <!-- ===== 标题 ===== -->
+  <text x="48" y="56" font-size="30" font-weight="700" fill="#1f2937">OptAgent 技术架构</text>
+  <text x="48" y="84" font-size="15" fill="#5b6472">Technology Architecture · 接入 / 展现 / 服务 / 工具服务 / 存储与依赖 / 横切</text>
+
+  <!-- ===== 图例（右上） ===== -->
+  <g font-size="12" fill="#5b6472">
+    <text x="1150" y="46" font-size="12" font-weight="700" fill="#334155">图例</text>
+    <line x1="1150" y1="62" x2="1196" y2="62" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+    <text x="1206" y="66">HTTP / SSE / MCP 调用</text>
+    <line x1="1150" y1="84" x2="1196" y2="84" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-muted)"/>
+    <text x="1206" y="88">签名直链回源下载</text>
+    <line x1="1150" y1="106" x2="1196" y2="106" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+    <text x="1206" y="110">配置下发（权威源）</text>
+  </g>
+
+  <!-- ===== 访问层 ===== -->
+  <text x="48" y="134" font-size="13" font-weight="700" fill="#94a3b8">访问层</text>
+  <rect x="48" y="146" width="240" height="64" rx="10" fill="#eef2f7" stroke="#cbd5e1"/>
+  <text x="68" y="176" font-size="15" font-weight="700" fill="#1f2937">浏览器</text>
+  <text x="68" y="196" font-size="12" fill="#5b6472">Chrome / Edge · 单页应用</text>
+
+  <line x1="288" y1="178" x2="330" y2="178" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+
+  <rect x="334" y="146" width="1213" height="64" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+  <text x="354" y="170" font-size="15" font-weight="700" fill="#1e3a5f">统一入口网关（nginx · 80 / 对外 82）</text>
+  <g font-size="12" fill="#334155">
+    <rect x="354" y="178" width="280" height="26" rx="6" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="494" y="196" text-anchor="middle">/api/admin/ → 管理服务</text>
+    <rect x="649" y="178" width="280" height="26" rx="6" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="789" y="196" text-anchor="middle">/admin/ → 管理界面</text>
+    <rect x="944" y="178" width="280" height="26" rx="6" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="1084" y="196" text-anchor="middle">/api/ → 对话后端（SSE 关缓冲）</text>
+    <rect x="1239" y="178" width="280" height="26" rx="6" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="1379" y="196" text-anchor="middle">/ → 对话工作台</text>
+  </g>
+
+  <line x1="408" y1="214" x2="408" y2="248" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <line x1="1188" y1="214" x2="1188" y2="248" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+
+  <!-- ===== 展现层 ===== -->
+  <text x="48" y="240" font-size="13" font-weight="700" fill="#94a3b8">展现层</text>
+  <rect x="48" y="252" width="720" height="92" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="280" font-size="15" font-weight="700" fill="#1f2937">Agent 对话工作台 · frontend（:5173）</text>
+  <text x="68" y="304" font-size="12" fill="#5b6472">Vue 3 · Vite · TypeScript · UI 组件库 · Tailwind · Pinia · vue-router</text>
+  <text x="68" y="326" font-size="12" fill="#5b6472">对话区 · 文件空间 · 人工确认表单 · 后台产出</text>
+
+  <rect x="828" y="252" width="719" height="92" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="848" y="280" font-size="15" font-weight="700" fill="#1f2937">数字人管理平台 · admin-frontend（:5174）</text>
+  <text x="848" y="304" font-size="12" fill="#5b6472">Vue 3 · Vite · TypeScript · 零第三方运行时依赖</text>
+  <text x="848" y="326" font-size="12" fill="#5b6472">数字人 · MCP 服务 · 本体 · 技能 · 部署</text>
+
+  <line x1="408" y1="348" x2="408" y2="382" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="418" y="372" font-size="12" fill="#5b6472">HTTP / SSE</text>
+  <line x1="1188" y1="348" x2="1188" y2="382" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="1198" y="372" font-size="12" fill="#5b6472">HTTP</text>
+
+  <!-- ===== 应用服务层 ===== -->
+  <text x="48" y="374" font-size="13" font-weight="700" fill="#94a3b8">应用服务层</text>
+  <rect x="48" y="386" width="720" height="92" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+  <text x="68" y="414" font-size="15" font-weight="700" fill="#1e3a5f">Agent 运行时 · agent-backend（:3000）</text>
+  <text x="68" y="438" font-size="12" fill="#475569">Node ≥ 20 · TypeScript ESM · Fastify 5 · SSE 流式输出</text>
+  <text x="68" y="460" font-size="12" fill="#475569">对话主链路 · 工具调用 · 会话与产出 · 运行监控</text>
+
+  <rect x="828" y="386" width="719" height="92" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+  <text x="848" y="414" font-size="15" font-weight="700" fill="#1e3a5f">管理服务 · admin-backend（:3001）</text>
+  <text x="848" y="438" font-size="12" fill="#475569">Node ≥ 20 · TypeScript ESM · Fastify 5</text>
+  <text x="848" y="460" font-size="12" fill="#475569">配置中心 · 部署下发 · 对运行端只读观测</text>
+
+  <!-- 管理服务 → Agent 运行时（部署物化） -->
+  <line x1="824" y1="430" x2="774" y2="430" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+  <text x="798" y="420" font-size="11" fill="#b03a1c" text-anchor="middle">部署物化</text>
+
+  <!-- ===== 服务内关键基础 ===== -->
+  <text x="48" y="508" font-size="13" font-weight="700" fill="#94a3b8">服务内关键基础</text>
+  <rect x="48" y="520" width="720" height="120" rx="10" fill="#fbfbfc" stroke="#d7dbe2"/>
+  <text x="68" y="546" font-size="14" font-weight="700" fill="#334155">Agent 侧</text>
+  <g font-size="12" fill="#334155">
+    <rect x="68" y="556" width="320" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="228" y="576" text-anchor="middle">模型接入抽象与 Agent 主循环</text>
+    <rect x="408" y="556" width="320" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="568" y="576" text-anchor="middle">MCP 客户端管理（连接自愈）· 配置变化即失效</text>
+    <rect x="68" y="592" width="320" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="228" y="612" text-anchor="middle">人工确认交互门（HITL）</text>
+    <rect x="408" y="592" width="320" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="568" y="612" text-anchor="middle">签名直链（HMAC）与路径沙箱</text>
+  </g>
+
+  <rect x="828" y="520" width="719" height="120" rx="10" fill="#fbfbfc" stroke="#d7dbe2"/>
+  <text x="848" y="546" font-size="14" font-weight="700" fill="#334155">管理侧</text>
+  <g font-size="12" fill="#334155">
+    <rect x="848" y="556" width="220" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="958" y="576" text-anchor="middle">设计态存储（原子写）</text>
+    <rect x="1078" y="556" width="220" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1188" y="576" text-anchor="middle">配置物化与下发</text>
+    <rect x="1308" y="556" width="220" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1418" y="576" text-anchor="middle">运行端只读客户端</text>
+    <rect x="848" y="592" width="680" height="30" rx="6" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1188" y="612" text-anchor="middle">MCP 连接测试与探测（工具清单 / 请求头校验）</text>
+  </g>
+
+  <!-- ===== 工具与模型服务层 ===== -->
+  <line x1="408" y1="644" x2="408" y2="676" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="418" y="662" font-size="12" fill="#5b6472">MCP streamable-http（带请求头令牌）</text>
+  <line x1="1240" y1="676" x2="1240" y2="644" stroke="#94a3b8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr-muted)"/>
+  <text x="1252" y="662" font-size="12" fill="#5b6472">签名直链回源下载</text>
+
+  <text x="48" y="668" font-size="13" font-weight="700" fill="#94a3b8">工具与模型服务层</text>
+  <rect x="48" y="680" width="1499" height="104" rx="12" fill="#fff7f4" stroke="#f0b7a4"/>
+  <text x="68" y="708" font-size="15" font-weight="700" fill="#7f2f14">工具与模型服务（独立部署，可插拔扩展）</text>
+  <text x="420" y="708" font-size="12" fill="#8a6a5e">每个服务一个容器；平台侧只登记连接地址、请求头与工具白名单</text>
+  <g font-size="13" fill="#7f2f14">
+    <rect x="68" y="720" width="350" height="46" rx="8" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="243" y="748" text-anchor="middle">文档 / 表格识别服务（:8000）</text>
+    <rect x="433" y="720" width="350" height="46" rx="8" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="608" y="748" text-anchor="middle">决策模型服务（:8101）</text>
+    <rect x="798" y="720" width="350" height="46" rx="8" fill="#ffffff" stroke="#e2a28c"/>
+    <text x="973" y="748" text-anchor="middle">本体侧发布服务（:8021 · :8022）</text>
+    <rect x="1163" y="720" width="350" height="46" rx="8" fill="#fffaf8" stroke="#f0b7a4" stroke-dasharray="5 4"/>
+    <text x="1338" y="748" text-anchor="middle">更多同类服务 …</text>
+  </g>
+
+  <!-- ===== 存储与外部依赖 ===== -->
+  <text x="48" y="812" font-size="13" font-weight="700" fill="#94a3b8">存储与外部依赖</text>
+  <rect x="48" y="824" width="720" height="110" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="852" font-size="14" font-weight="700" fill="#334155">存储</text>
+  <text x="68" y="878" font-size="12" fill="#5b6472">文件系统：平台设计态 · 运行态（物化与会话数据）· 临时空间</text>
+  <text x="68" y="902" font-size="12" fill="#5b6472">用量库：SQLite（原生模块 → 必须 glibc 基础镜像）</text>
+  <text x="68" y="924" font-size="12" fill="#94a3b8">运行期数据经 bind mount 提供，不入镜像</text>
+
+  <rect x="828" y="824" width="719" height="110" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="848" y="852" font-size="14" font-weight="700" fill="#334155">外部依赖</text>
+  <text x="848" y="878" font-size="12" fill="#5b6472">大模型端点（OpenAI 兼容）· 决策模型上游（TypeSafe System One）</text>
+  <text x="848" y="902" font-size="12" fill="#5b6472">本体平台：core backend（:8001）与自建发布容器（:8021 / :8022）</text>
+  <text x="848" y="924" font-size="12" fill="#94a3b8">密钥类配置只落在 .env.local（不入库）</text>
+
+  <!-- ===== 横切关注点 ===== -->
+  <rect x="48" y="956" width="1499" height="102" rx="12" fill="#fbfbfc" stroke="#d7dbe2"/>
+    <text x="68" y="984" font-size="15" font-weight="700" fill="#334155">横切关注点（贯穿各层的约束与能力）</text>
+  <text x="404" y="984" font-size="12" fill="#94a3b8">不属于某一层：每层都要遵守，故横铺一条而不画成某一层的方块</text>
+  <g font-size="12" fill="#334155">
+    <rect x="68" y="998" width="350" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="243" y="1025" text-anchor="middle">配置三态：.env · .env.local · config.yaml</text>
+    <rect x="433" y="998" width="350" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="608" y="1025" text-anchor="middle">可观测：结构化日志 · 健康探测 · 监控事件</text>
+    <rect x="798" y="998" width="350" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="973" y="1025" text-anchor="middle">安全：签名直链 · 路径沙箱 · 令牌掩码</text>
+    <rect x="1163" y="998" width="350" height="44" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1338" y="1025" text-anchor="middle">交付：compose 一条命令 · 测试只在本地</text>
+  </g>
+</svg>

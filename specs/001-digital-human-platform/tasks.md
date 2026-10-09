@@ -581,7 +581,7 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 
 **起因**：`OCR_URL_ALLOW_HOSTS` / `JEV_URL_ALLOW_HOSTS` 要求"平台直链基址 + 每个 MCP 服务各一份
 白名单"三处写同一个主机名，换网络/改 IP 时极易漏配（上一节（一）记录的正是同类故障）；而回源直链与
-`result_url` 本已由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入，服务侧再验一遍 host 属同一判据的
+`resultUrl` 本已由运行环境按 `PUBLIC_BASE_URL` **单点铸造**后注入，服务侧再验一遍 host 属同一判据的
 第二次执行——按原则二"同一职责唯一实现"，应收口在唯一的生产者。
 
 **处置**：
@@ -725,7 +725,7 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 - [x] T131 [R11] 回写契约 §10 的三处口径缺口（`sid`/`call_id`/`tool` 的来源与「不参与验签」的判据、`job_id` 取自 `filename` 主干、产出目录 MUST 纳入既有 7 天清理范围）
 - [x] T132 [R11] `agent-backend/src/infra/file-sign.ts`：新增写方向签名（`put\n{userId}\n{dir}\n{exp}` 四段）与 `mintPutUrl`/`verifyPutRef`，**读方向三段格式一字不动**；单测守住"读签名不能用于写、写签名不能用于读、存量读签名零失效"
 - [x] T133 [R11] `agent-backend/src/types.ts` + `domain/agent-instance.ts`：`McpServerConfig.asyncTools` 与 `MCP.json` 的 `async_tools` 解析（数组 / 元素非空字符串 / 同服务内去重，非法即 `AgentConfigError`）；单测覆盖正/异/边界
-- [x] T134 [R11] `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：命中声明的工具注入 `result_url`（**对 LLM 隐藏**，仿 `injectRuntimeContext`）；schema 未声明 `result_url` 时**装配期告警**且不注入（不阻断）；单测守住 §10.6 不变式 1/2/6
+- [x] T134 [R11] `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：命中声明的工具注入 `resultUrl`（**对 LLM 隐藏**，仿 `injectRuntimeContext`）；schema 未声明 `resultUrl` 时**装配期告警**且不注入（不阻断）；单测守住 §10.6 不变式 1/2/6
 - [x] T135 [R11] `agent-backend/src/infra/agent-factory.ts`：按 run 铸造写方向 URL 并接线到工具装配
 - [x] T136 [R11] `agent-backend/src/domain/file-access.ts`：新增**受控子目录写入**（仅允许 `临时空间/后台产出`，文件名无分隔符/`..`/非空）；单测覆盖越权与合法写入
 - [x] T137 [R11] 新建 `agent-backend/src/domain/produced.ts`：产出落盘（正文 + sidecar 元数据）、目录扫描与列表（目录即索引，不落额外清单）
@@ -760,7 +760,7 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 |---|---|---|
 | 签名 | `infra/file-sign.ts` | 写方向**四段**签名（读方向三段**一字未改**）+ `mintPutUrl`（带 `sid`/`call_id`/`tool` 归属提示参数） |
 | 配置 | `domain/agent-instance.ts`、`types.ts` | `MCP.json` 的 `async_tools` 解析：数组 / 元素非空 / 同服务内去重，非法即 `AgentConfigError`（typo 挡在加载期） |
-| 装配 | `infra/mcp/async-result-url.ts`（新）、`mcp-tool-adapter.ts`、`agent-factory.ts` | 命中声明的工具注入 `result_url`（**对 LLM 隐藏**、覆盖模型填写）；schema 未声明即**装配期告警**且不塞多余字段 |
+| 装配 | `infra/mcp/async-result-url.ts`（新）、`mcp-tool-adapter.ts`、`agent-factory.ts` | 命中声明的工具注入 `resultUrl`（**对 LLM 隐藏**、覆盖模型填写）；schema 未声明即**装配期告警**且不塞多余字段 |
 | 回写 | `domain/file-access.ts`、`domain/produced.ts`（新）、`routes/files-put.ts`（新） | `POST /api/files/put`：验签 → 目录/文件名白名单 → 受控写入 + sidecar → `202` |
 | 消费 | `domain/produced-events.ts`（新）、`routes/produced.ts`（新） | `GET /api/produced`（有界返回、倒序）、`GET /api/produced/events`（SSE 信号，**负载为空**） |
 | 提示词 | `domain/prompt-builder.ts`（新，自 `run-manager` 抽出） | 「后台计算结果」段：只注入**当前会话**的产出；**无产出时长度为 0**、正文不注入 |
@@ -778,7 +778,7 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 
 1. **`routes/files.ts` 的超限拆分**：新增回写端点后该文件 562 行（> 500 硬门禁），故把端点拆到 `routes/files-put.ts`；`registerFileRoutes` 内一行调用，既有端点零改动；
 2. **`run-manager.ts` 的超限拆分**：同样因本次增量越过 500 行，把"prompt 组装"整块抽为纯函数模块 `domain/prompt-builder.ts`（职责本就不同：组装 vs 生命周期管理）；
-3. **`mcp-tool-adapter.ts` 的邻近抽出**：该文件**改动前即已超限**（574 行）；本次把"schema 视图裁剪"函数族（`exposeSchema` / `hideSchemaPaths`，即 `result_url` 与 `uid`/`sid` 隐藏所复用的机制）抽到 `infra/mcp/mcp-schema-view.ts`——属**与本次改动直接相关**的邻近逻辑，而非借机搬迁无关代码（`file_args` 改写等 270 行**未动**）。
+3. **`mcp-tool-adapter.ts` 的邻近抽出**：该文件**改动前即已超限**（574 行）；本次把"schema 视图裁剪"函数族（`exposeSchema` / `hideSchemaPaths`，即 `resultUrl` 与 `uid`/`sid` 隐藏所复用的机制）抽到 `infra/mcp/mcp-schema-view.ts`——属**与本次改动直接相关**的邻近逻辑，而非借机搬迁无关代码（`file_args` 改写等 270 行**未动**）。
 
 **门禁（本地，原则三/八）**：`lint` 0 error、`tsc --noEmit` 通过、单测 **398 passed**、集成 **41 passed**、
 `test:coverage` 通过（新增 7 个模块入 80% 清单：`file-sign` / `async-result-url` / `mcp-schema-view` /
@@ -832,7 +832,7 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 3. §3.3 的 `file_args` 值说明漏了 2026-09-18 的 `url:from=` 派生模式——一并补正。
 
 **关于具体服务**：代码**不预置任何服务名**（`async_tools` 的值完全由管理员在界面勾选/填写），因此**未触碰 `hd-algorithm`、也未触碰 `ocr`/`jev` 的任何现有配置**。下列服务若需异步，由管理员按需勾选：
-`ocr`（`http://127.0.0.1:8000/mcp`）、`jev`（`http://127.0.0.1:8001/mcp`）——**前提是对方服务的工具 schema 里声明了 `result_url` 参数**，否则运行环境会在装配期告警（`mcp.async.result_url.missing`）且不注入。
+`ocr`（`http://127.0.0.1:8000/mcp`）、`jev`（`http://127.0.0.1:8001/mcp`）——**前提是对方服务的工具 schema 里声明了 `resultUrl` 参数**，否则运行环境会在装配期告警（`mcp.async.resultUrl.missing`）且不注入。
 
 **门禁（本地，原则三/八）**：
 
@@ -852,9 +852,9 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 **范围**：**只改 `ocr-service` 的 `ocr_image` 一个工具**。`jev-service` 与第三方 MCP 服务（含 `hd-algorithm`）**一律不动**——异步是**按工具声明**的能力，未声明者行为零变化。
 **上游**：`contracts/runtime-api-delta.md` §10.7（本次新增）。
 
-- [x] T149 [R11] 回写契约：新增 §10.7「服务侧契约」（`ocr_image` 新增**可选** `result_url`；`result_url` 即开关：缺省=同步、有值=异步；`job_id` 与回写形状；**回写地址 MUST 过 host 白名单**，否则 SSRF）
+- [x] T149 [R11] 回写契约：新增 §10.7「服务侧契约」（`ocr_image` 新增**可选** `resultUrl`；`resultUrl` 即开关：缺省=同步、有值=异步；`job_id` 与回写形状；**回写地址 MUST 过 host 白名单**，否则 SSRF）
 - [x] T150 [R11] `ocr-service/ocr_core.py`：受理与回写的**纯逻辑**（`make_job_id` / `result_filename` / `with_filename`（保留原有 query）/ `accepted_payload` / `post_result`），**不依赖模型** ⇒ 宿主机本地可单测（原则三）
-- [x] T151 [R11] `ocr-service/server.py`：`ocr_image` 新增 `result_url`；有值时**立即返回受理**（含 `job_id`）+ 后台线程识别并回写；**缺省时同步路径一字不改**；回写地址未过白名单时**降级为同步并在文案里说明**（不静默、也不 SSRF）
+- [x] T151 [R11] `ocr-service/server.py`：`ocr_image` 新增 `resultUrl`；有值时**立即返回受理**（含 `job_id`）+ 后台线程识别并回写；**缺省时同步路径一字不改**；回写地址未过白名单时**降级为同步并在文案里说明**（不静默、也不 SSRF）
 - [x] T152 [R11] `ocr-service/tests/test_ocr_core.py` +10 例：任务号格式与同毫秒唯一、回写 URL **保留原有 query**（含非 ASCII 参数）、受理响应含 `job_id` 与"无需重复提交"、回写 body/编码/**非 2xx**/**连接失败**
 - [x] T153 [R11] 门禁：`python -m pytest -q tests` → **22 passed**；三个文件 224 / 139 / 105 行，均 ≤ 500
 
@@ -864,28 +864,28 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 
 | 文件 | 改动 |
 |---|---|
-| `ocr-service/server.py` | `ocr_image(image, result_url=None)`：新增**一个可选参数**即可切换同步/异步；抽出 `_recognize`（两条路径共用）与 `_recognize_and_post`（后台线程体） |
+| `ocr-service/server.py` | `ocr_image(image, resultUrl=None)`：新增**一个可选参数**即可切换同步/异步；抽出 `_recognize`（两条路径共用）与 `_recognize_and_post`（后台线程体） |
 | `ocr-service/ocr_core.py` | 新增 5 个纯函数（任务号 / 结果文件名 / 回写 URL 拼装 / 受理响应 / POST 回写）+ `OCR_UPLOAD_TIMEOUT_S` 环境变量 |
 | `ocr-service/tests/test_ocr_core.py` | +10 例（原 12 → **22**） |
 
-**两条路径**（`result_url` 即开关，服务侧不需要第二处配置）：
+**两条路径**（`resultUrl` 即开关，服务侧不需要第二处配置）：
 
-| `result_url` | 行为 |
+| `resultUrl` | 行为 |
 |---|---|
 | 缺省 / 空 | **同步**（**既有行为一字未改**）：校验 → 下载 → 识别 → 返回文本 |
-| 有值且过白名单 | **异步**：立即返回 `{"job_id":…,"status":"accepted","message":…}`；后台识别完成后 `POST` 结果到 `result_url&filename={job_id}.txt` |
+| 有值且过白名单 | **异步**：立即返回 `{"job_id":…,"status":"accepted","message":…}`；后台识别完成后 `POST` 结果到 `resultUrl&filename={job_id}.txt` |
 
-**安全（这条必须记住）**：`result_url` 是**入参**——模型理论上能看到并伪造它（虽然平台在声明为异步时会把它从可见 schema 里删掉，但不能依赖单侧防线）。因此 `ocr_image` 收到它时**先过与回源下载同一份 host 白名单**；不过则**忽略并降级为同步**，在返回文案里说明"回写地址不可用，已改为同步返回"。既不 SSRF，也不静默（否则调用方以为异步已受理，永远等不到结果）。
+**安全（这条必须记住）**：`resultUrl` 是**入参**——模型理论上能看到并伪造它（虽然平台在声明为异步时会把它从可见 schema 里删掉，但不能依赖单侧防线）。因此 `ocr_image` 收到它时**先过与回源下载同一份 host 白名单**；不过则**忽略并降级为同步**，在返回文案里说明"回写地址不可用，已改为同步返回"。既不 SSRF，也不静默（否则调用方以为异步已受理，永远等不到结果）。
 
 **配置：无需新增任何配置**。回写地址由运行环境用既有 `PUBLIC_BASE_URL` 铸出（服务侧只校验协议为 http/https，**2026-09-28 起不再有 host 白名单**）——前提与"回源下载"完全相同，**没有第二套配置需要维护**。
 
 **启用步骤**（三件事，都无副作用）：
 
 1. **重建 ocr 容器**：`docker compose up -d --build ocr`（服务侧代码变了）；
-2. **平台界面**：`ocr` 服务详情 →「发起测试」（让平台重新探测到 `result_url` 参数）→「调用配置」→「后台计算（异步工具）」勾选 `ocr_image` → 保存调用配置；
+2. **平台界面**：`ocr` 服务详情 →「发起测试」（让平台重新探测到 `resultUrl` 参数）→「调用配置」→「后台计算（异步工具）」勾选 `ocr_image` → 保存调用配置；
 3. **部署**：对相关用户部署一次（`async_tools` 随 `MCP.json` 下发）。
 
-**未做**：`jev-service`、`hd-algorithm` 与任何其他 MCP 服务**一个字节未改**（符合"只需要 ocr 做异步"）。如果将来 jev 也要异步，改法与本阶段完全相同（服务侧加 `result_url` 参数 + 回写），不需要动运行环境与平台任何一行代码。
+**未做**：`jev-service`、`hd-algorithm` 与任何其他 MCP 服务**一个字节未改**（符合"只需要 ocr 做异步"）。如果将来 jev 也要异步，改法与本阶段完全相同（服务侧加 `resultUrl` 参数 + 回写），不需要动运行环境与平台任何一行代码。
 
 ---
 
@@ -1050,3 +1050,24 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 | 清理 | 测试线程删除、`/api/agents/current/exit`、临时数字人目录删除；平台侧**保留** `raw_inventory_purchase_function`（可直接被数字人引用） |
 
 > 注：临时数字人的实例会留在运行环境实例池里直到空闲回收（其目录已删，无法再被选中），不影响其它数字人。
+
+---
+
+## 增量任务（2026-10-09）：产出「提交时刻」落 sidecar —— 修「创建时间 == 完成时间」
+
+**现象**：铃铛面板里每条产出的「创建时间」与「完成时间」**逐字相同**。
+
+**根因**：`domain/produced.ts` 的 `writeProduced` 把两个字段都写成**回写那一刻**（`at`）——契约 §10.4 规定 `created_at` = **提交时刻**，但该值此前**没有任何来源**：服务回写时不回传它（§10.3 只定义了签名四参数 + `sid`/`call_id`/`tool`/`summary`）。
+
+**约束（用户明确）**：**MCP 服务侧一字不改**。
+
+**方案**：把"提交时刻"做成**铸造回写地址时预置的提示参数** `t`（epoch ms）。回写地址是**每次工具调用现铸**的（`agent-factory` → `mcp-tool-adapter`），铸造那一刻正是任务提交时刻；服务只需**原样回传**（与 `sid`/`call_id`/`tool` 同一处置）——OCR 服务的 `with_filename` 保留原 query，天然满足，**无需改造**。缺失/不可信时退化为回写时刻（＝改造前行为，降级不阻断，原则九）。
+
+- [x] T154 [R11] 契约 §10.3：URL 形态补 `t`；提示参数表新增 `t` 行（含义 / 谁填 / 可缺省）；"不参与验签"的判据扩到 `t`。§10.4 `created_at` 行补来源与退化口径、`created_at <= finished_at` 不变式
+- [x] T155 [R11] `agent-backend/src/infra/file-sign.ts`：`mintPutUrl` **恒写** `t = now`（与 `exp` 同源同单位、同为不验签的提示参数）；URL 形态注释同步
+- [x] T156 [R11] `agent-backend/src/routes/files-put.ts`：query schema 增 `t`（`additionalProperties: false`，不加会 400）；新增纯函数 `parseSubmittedAt`（缺失 / 空串 / 非数字 / 非正 / **晚于回写时刻** → `undefined`）；回写时把 `createdAt` 与**同一个** `now` 交给 `writeProduced`
+- [x] T157 [R11] `agent-backend/src/domain/produced.ts`：`WriteProducedInput.createdAt`；`created_at = (createdAt ?? at)`、`finished_at = at`
+- [x] T158 [R11] 测试：`tests/unit/file-sign.spec.ts`（`t` = 注入的 `now`；键集变化）；`tests/unit/produced.spec.ts`（传 / 不传 `createdAt` 两分支）；`tests/integration/produced.spec.ts`（带 `t` → `created_at < finished_at`；缺 `t` / 非数字 / 未来时刻 → 退化相等；同一 URL 重放 `created_at` 不变）
+- [x] T159 [R11] 门禁：`lint` / `tsc --noEmit` / `test` / `test:integration` / `build` 全绿；改动文件行数均 ≤ 500
+
+**不变式（MUST 由单测守住）**：`created_at <= finished_at` —— 由回写端用**同一个 `now`** 校验 `t` 构造保证；`t` **不参与验签**（改它只影响列表展示，不越权）；服务未回传 `t` 时，sidecar 与改造前**逐字一致**。

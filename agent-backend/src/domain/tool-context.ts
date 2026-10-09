@@ -15,8 +15,14 @@ import { SPACE_TMP } from './dirs.js';
 import type { ToolCallRecord } from './tool-events.js';
 import { artifactRelPath, formatBytes } from './tool-result.js';
 
-/** 每轮 prompt 中工具结果原文的总预算（字节） */
-export const TOOL_REPLAY_BUDGET_BYTES = 32 * 1024;
+/**
+ * 每轮 prompt 中工具结果原文的总预算（字节）。
+ *
+ * **不变式（MUST）**：`TOOL_INLINE_MAX_BYTES ≤ 本值`。预算同时充当"单条回灌上限"
+ * （见 `selectReplay` 的 `bytes <= remaining`），若单条内联上限超过预算，内联结果永远
+ * 装不进去、回灌会静默全部退化为占位。守这条不变式的是 `tests/unit/tool-context.spec.ts`。
+ */
+export const TOOL_REPLAY_BUDGET_BYTES = 128 * 1024;
 /** systemPrompt 索引段最多列几条外置结果 */
 export const TOOL_INDEX_MAX_ITEMS = 10;
 /** 被预算挤出的内联结果最多留几条占位 */

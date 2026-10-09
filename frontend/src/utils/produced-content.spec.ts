@@ -6,7 +6,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_CHARS,
+  PRODUCED_TABLE_MAX_COLUMNS,
   columnsOfRows,
   fallbackHint,
   parseProducedContent,
@@ -73,6 +75,13 @@ describe('parseProducedContent', () => {
 
   it('默认阈值是 256K 字符', () => {
     expect(PRODUCED_JSON_MAX_CHARS).toBe(256 * 1024)
+  })
+})
+
+describe('渲染上限（2026-10-09 产品口径）', () => {
+  it('数组最多渲染 10 行、表格最多渲染 50 列（超出交给「按原始 JSON 查看」）', () => {
+    expect(PRODUCED_ARRAY_MAX_ITEMS).toBe(10)
+    expect(PRODUCED_TABLE_MAX_COLUMNS).toBe(50)
   })
 })
 

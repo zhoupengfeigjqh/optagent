@@ -87,14 +87,20 @@ function isRowObject(index: number): boolean {
 </template>
 
 <style scoped>
+/* 横向滚动**真正**发生在这里（2026-10-09）：容器限宽 + 表宽按内容铺开。
+   此前表宽是 `100%`，列多时只会把每列压扁换行、把可编辑控件塞进窄格，
+   滚动条永远不出现。列多就让它溢出、由本容器滚——**不给列数上限**：
+   列是可编辑字段，藏掉列等于那几个字段没法填。 */
 .interaction-dialog__table-wrap {
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
 
 .interaction-dialog__table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: var(--font-size-sm);
 }

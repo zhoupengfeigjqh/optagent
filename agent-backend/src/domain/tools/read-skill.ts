@@ -24,7 +24,7 @@ const DEFAULT_ENTRY = 'SKILL.md';
 /** 列清单时的条数上限（防止把上下文打爆） */
 const MAX_LISTED_ENTRIES = 50;
 /** 默认截断上限（字节）；实际由调用方注入，与 `read_file` 同一配置来源 */
-const DEFAULT_TRUNCATE_BYTES = 32 * 1024;
+const DEFAULT_TRUNCATE_BYTES = 128 * 1024;
 
 /**
  * 越权访问（非法技能名 / 路径越界 / 符号链接 / 非普通文件）。
@@ -52,7 +52,7 @@ export interface ReadSkillOptions {
   offset?: number | undefined;
   /** 本次最多返回字节数（上限为 `truncateBytes`） */
   limit?: number | undefined;
-  /** 截断上限（字节），默认 32KB */
+  /** 截断上限（字节），默认 128KB */
   truncateBytes?: number | undefined;
 }
 

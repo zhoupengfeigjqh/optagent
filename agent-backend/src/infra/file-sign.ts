@@ -104,7 +104,14 @@ export interface PutUrlHints {
   tool?: string;
 }
 
-/** 铸造写方向直链：{baseUrl}/api/files/put?u=&d=&exp=&sig=[&sid=&call_id=&tool=] */
+/**
+ * 铸造写方向直链：{baseUrl}/api/files/put?u=&d=&exp=&sig=&t=[&sid=&call_id=&tool=]
+ *
+ * `t` = **提交时刻**（epoch ms，= 铸造时刻）——回写地址是"每次工具调用现铸"的，
+ * 铸造这一刻正是任务的提交时刻。服务**只需原样回传**（与 `sid`/`call_id`/`tool` 同一处置），
+ * 回写端点据此落 sidecar 的 `created_at`（契约 §10.4）；服务没回传 / 值不可信时退化为回写时刻。
+ * 与 `exp` 同单位（epoch ms），同属**不参与验签**的提示参数。
+ */
 export function mintPutUrl(
   baseUrl: string,
   secret: string,
@@ -116,7 +123,8 @@ export function mintPutUrl(
 ): string {
   const exp = now + ttlMs;
   const sig = signPutRef(secret, userId, dir, exp);
-  const params: Record<string, string> = { u: userId, d: dir, exp: String(exp), sig };
+  // `t` 恒写入（不放进 `hints`）：任何一条产出都该有"提交时刻"，铸造方不必逐处记得传
+  const params: Record<string, string> = { u: userId, d: dir, exp: String(exp), sig, t: String(now) };
   if (hints.sid) params.sid = hints.sid;
   if (hints.callId) params.call_id = hints.callId;
   if (hints.tool) params.tool = hints.tool;

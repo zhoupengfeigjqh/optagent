@@ -2,7 +2,7 @@
  * 单元测试：异步工具选择（R11）
  *
  * 覆盖四类场景（宪章原则三）：
- * - props：**只渲染含 `result_url` 的工具**（2026-10-03 产品决定）、已声明项回显；
+ * - props：**只渲染含 `resultUrl` 的工具**（2026-10-03 产品决定）、已声明项回显；
  * - emit：勾选 / 取消勾选、手填解析（去空白 / 丢空行 / 去重）；
  * - 边界：清单不可得（回退手填 + 原因）、清单被截断（手填逃生门）、
  *   **已声明但不在可选范围内仍保留展示可取消**（防"看不见的僵尸声明"）、
@@ -12,16 +12,16 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AsyncToolsSelector from './AsyncToolsSelector.vue'
 
-/** 支持异步：入参 schema 声明了 `result_url`（与运行期注入判据一致） */
+/** 支持异步：入参 schema 声明了 `resultUrl`（与运行期注入判据一致） */
 const ASYNC_TOOL = {
   name: 'submit_job',
   description: '提交后台任务',
   parameters: {
     type: 'object',
-    properties: { result_url: { type: 'string', description: '结果回写地址' } },
+    properties: { resultUrl: { type: 'string', description: '结果回写地址' } },
   },
 }
-/** 同步工具：未声明 `result_url` → 不出现在可选项里 */
+/** 同步工具：未声明 `resultUrl` → 不出现在可选项里 */
 const SYNC_TOOL = {
   name: 'get_status',
   description: '查询任务状态',
@@ -44,7 +44,7 @@ function lastEmitted(wrapper: { emitted: (event: string) => unknown }): string[]
 }
 
 describe('AsyncToolsSelector —— 有清单（只列支持异步的工具）', () => {
-  it('只渲染含 result_url 的工具；未声明的工具不展示', () => {
+  it('只渲染含 resultUrl 的工具；未声明的工具不展示', () => {
     const wrapper = mountSelector(['submit_job'])
     const boxes = wrapper.findAll('input[type="checkbox"]')
 
@@ -87,7 +87,7 @@ describe('AsyncToolsSelector —— 有清单（只列支持异步的工具）',
 })
 
 describe('AsyncToolsSelector —— 已声明但不在可选范围内', () => {
-  it('已声明却未声明 result_url / 不在清单：仍保留展示并提示不会生效', () => {
+  it('已声明却未声明 resultUrl / 不在清单：仍保留展示并提示不会生效', () => {
     const wrapper = mountSelector(['get_status', 'legacy_tool'])
     const boxes = wrapper.findAll('input[type="checkbox"]')
 

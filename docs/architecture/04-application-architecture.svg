@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960"
+     font-family="Microsoft YaHei, PingFang SC, Segoe UI, sans-serif" role="img"
+     aria-label="OptAgent 应用架构图：Agent 端与管理端的应用与模块划分、跨应用链路、分层与工程约束">
+  <title>OptAgent 应用架构图</title>
+  <desc>Agent 端（对话工作台前端 + 运行端后端）与管理端（管理界面 + 管理服务）各自的三层划分，两端的部署物化与只读端点链路，以及分层与工程约束。</desc>
+
+  <defs>
+    <marker id="arr-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arr-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#e2603f"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="960" fill="#ffffff"/>
+
+  <!-- ===== 标题 ===== -->
+  <text x="48" y="56" font-size="30" font-weight="700" fill="#1f2937">OptAgent 应用架构</text>
+  <text x="48" y="84" font-size="15" fill="#5b6472">Application Architecture · 两端应用的模块划分 / 跨应用链路 / 分层与工程约束</text>
+
+  <!-- ===== 图例（右上） ===== -->
+  <g font-size="12" fill="#5b6472">
+    <text x="1150" y="46" font-size="12" font-weight="700" fill="#334155">图例</text>
+    <line x1="1150" y1="62" x2="1196" y2="62" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+    <text x="1206" y="66">调用 / 只读依赖</text>
+    <line x1="1150" y1="84" x2="1196" y2="84" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+    <text x="1206" y="88">部署物化（配置下发）</text>
+  </g>
+
+  <!-- ===================== 左：Agent 端 ===================== -->
+  <rect x="48" y="112" width="700" height="488" rx="14" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="142" font-size="17" font-weight="700" fill="#1e3a5f">Agent 端（对话工作台 + 运行端）</text>
+
+  <!-- 前端 -->
+  <rect x="68" y="158" width="660" height="152" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+  <text x="84" y="182" font-size="14" font-weight="700" fill="#1e3a5f">前端 · components → composables → api</text>
+  <g font-size="12" fill="#334155">
+    <text x="84" y="206">对话区：消息气泡 · 工具调用卡片 · 输入与 @ 文件引用</text>
+    <text x="84" y="232">人工确认表单（HITL）· 后台产出铃铛 · 会话内搜索</text>
+    <text x="84" y="258">工作区：文件空间树 · 内容预览</text>
+    <text x="84" y="284">状态层：会话流 · 会话管理 · 产出订阅 · 会话恢复 · 工具明细展开态</text>
+  </g>
+
+  <line x1="398" y1="316" x2="398" y2="338" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="408" y="332" font-size="12" fill="#5b6472">HTTP / SSE</text>
+
+  <!-- 后端 -->
+  <rect x="68" y="344" width="660" height="240" rx="10" fill="#dbe7f5" stroke="#b9cbe3"/>
+  <g>
+    <rect x="84" y="358" width="628" height="56" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="98" y="382" font-size="13" font-weight="700" fill="#1e3a5f">接口层 · routes</text>
+    <text x="98" y="404" font-size="12" fill="#475569">对话 · 文件 · 会话 · 产出 · 监控 · 用量 · 反馈</text>
+
+    <rect x="84" y="422" width="628" height="70" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="98" y="446" font-size="13" font-weight="700" fill="#1e3a5f">业务层 · domain</text>
+    <text x="98" y="466" font-size="12" fill="#475569">运行任务管理 · 提示词组装 · 上下文窗口 · 工具调用记录</text>
+    <text x="98" y="484" font-size="12" fill="#475569">人工确认交互门 · 文件访问安全 · 后台产出 · 内置工具目录</text>
+
+    <rect x="84" y="500" width="628" height="76" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="98" y="524" font-size="13" font-weight="700" fill="#1e3a5f">基础层 · infra</text>
+    <text x="98" y="546" font-size="12" fill="#475569">模型接入（LLM 抽象）· MCP 客户端管理 · Agent 主循环</text>
+    <text x="98" y="566" font-size="12" fill="#475569">签名直链 · 用量库 · 定时清理 · 内置工具适配</text>
+  </g>
+
+  <!-- ===================== 右：管理端 ===================== -->
+  <rect x="852" y="112" width="695" height="488" rx="14" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="872" y="142" font-size="17" font-weight="700" fill="#1e3a5f">管理端（数字人管理平台）</text>
+
+  <rect x="872" y="158" width="655" height="152" rx="10" fill="#e3ebf5" stroke="#b9cbe3"/>
+  <text x="888" y="182" font-size="14" font-weight="700" fill="#1e3a5f">前端 · components → composables → api</text>
+  <g font-size="12" fill="#334155">
+    <text x="888" y="206">数字人：列表 · 设计（提示词 / 工具开关 / 场景字段）</text>
+    <text x="888" y="232">MCP 服务：登记 · 调用配置（请求头）· 工具白名单 · 连通测试</text>
+    <text x="888" y="258">本体（只读浏览）· 技能库 · 部署与下发</text>
+    <text x="888" y="284">状态层：各模块 composable · 接口封装</text>
+  </g>
+
+  <line x1="1199" y1="316" x2="1199" y2="338" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="1209" y="332" font-size="12" fill="#5b6472">HTTP</text>
+
+  <rect x="872" y="344" width="655" height="240" rx="10" fill="#dbe7f5" stroke="#b9cbe3"/>
+  <g>
+    <rect x="888" y="358" width="623" height="56" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="902" y="382" font-size="13" font-weight="700" fill="#1e3a5f">接口层 · routes</text>
+    <text x="902" y="404" font-size="12" fill="#475569">数字人 · MCP · 本体 · 技能 · 部署 · 用户 · 引用 · 健康</text>
+
+    <rect x="888" y="422" width="623" height="70" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="902" y="446" font-size="13" font-weight="700" fill="#1e3a5f">业务层 · domain</text>
+    <text x="902" y="466" font-size="12" fill="#475569">配置中心 · 部署编排 · MCP 调用配置 · 审计与错误码</text>
+    <text x="902" y="484" font-size="12" fill="#475569">本体库 · 技能库（含本体市场导入）</text>
+
+    <rect x="888" y="500" width="623" height="76" rx="8" fill="#ffffff" stroke="#c7d9f0"/>
+    <text x="902" y="524" font-size="13" font-weight="700" fill="#1e3a5f">基础层 · infra</text>
+    <text x="902" y="546" font-size="12" fill="#475569">设计态存储（原子写 + 修订号）· 配置物化写入</text>
+    <text x="902" y="566" font-size="12" fill="#475569">运行端只读客户端 · MCP 连接测试 · 路径探测</text>
+  </g>
+
+  <!-- ===================== 跨应用链路（两栏之间） ===================== -->
+  <line x1="848" y1="430" x2="754" y2="430" stroke="#e2603f" stroke-width="3" marker-end="url(#arr-accent)"/>
+  <text x="801" y="420" font-size="11" fill="#b03a1c" text-anchor="middle">部署物化</text>
+  <line x1="848" y1="472" x2="754" y2="472" stroke="#64748b" stroke-width="2" marker-end="url(#arr-ink)"/>
+  <text x="801" y="462" font-size="11" fill="#5b6472" text-anchor="middle">只读端点</text>
+
+  <!-- ===================== 外部依赖 ===================== -->
+  <rect x="48" y="620" width="1499" height="64" rx="12" fill="#fff7f4" stroke="#f0b7a4"/>
+  <text x="68" y="646" font-size="14" font-weight="700" fill="#7f2f14">外部依赖 · 工具与模型服务（可插拔，详见技术架构图）</text>
+  <text x="68" y="670" font-size="12" fill="#8a6a5e">文档 / 表格识别服务 · 决策模型服务 · 本体侧发布服务 · 更多同类服务 —— 由运行端经 MCP 调用（含请求头令牌）；平台侧只登记配置与工具白名单</text>
+
+  <!-- ===================== 跨应用链路（文字汇总） ===================== -->
+  <rect x="48" y="700" width="1499" height="88" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="68" y="726" font-size="14" font-weight="700" fill="#334155">跨应用链路</text>
+  <text x="68" y="750" font-size="12" fill="#5b6472">管理前端 → 管理后端（同源 /api/admin/*）；管理后端 →（部署物化）→ 运行端用户目录：数字人配置、MCP.json（含请求头）、技能文件</text>
+  <text x="68" y="774" font-size="12" fill="#5b6472">管理后端 →（只读端点）→ 运行后端；运行后端 →（MCP）→ 工具与模型服务；对话前端 →（SSE / REST）→ 运行后端</text>
+
+  <!-- ===================== 分层与工程约束 ===================== -->
+  <rect x="48" y="802" width="1499" height="104" rx="12" fill="#fbfbfc" stroke="#d7dbe2"/>
+  <text x="68" y="830" font-size="14" font-weight="700" fill="#334155">分层与工程约束</text>
+  <g font-size="12" fill="#334155">
+    <rect x="68" y="844" width="350" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="243" y="873" text-anchor="middle">后端：接口层 → 业务层 → 基础层（不越级）</text>
+    <rect x="433" y="844" width="350" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="608" y="873" text-anchor="middle">前端：组件 → 状态 → 接口</text>
+    <rect x="798" y="844" width="350" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="973" y="873" text-anchor="middle">纯函数模块无状态 · 常量集中</text>
+    <rect x="1163" y="844" width="350" height="48" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="1338" y="873" text-anchor="middle">单文件 ≤ 500 行 · 依赖受控</text>
+  </g>
+</svg>

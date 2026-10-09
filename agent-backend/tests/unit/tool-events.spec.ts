@@ -78,7 +78,10 @@ describe('tool-events —— 体积分流', () => {
 
   it('大结果外置到临时空间：事件行只留体积与摘要，正文可全量读回', async () => {
     const store = makeStore();
-    const big = '车间,计划量\n冲压,1200\n'.repeat(1500); // ~33KB（UTF-8 三字节/字）
+    const unit = '车间,计划量\n冲压,1200\n';
+    const big = unit.repeat(
+      Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
+    );
     await appendEnd(store, { callId: 'call_big', resultText: big });
 
     const records = store.readAll('admin', 'th1');
@@ -108,7 +111,7 @@ describe('tool-events —— 体积分流', () => {
 
   it('未装配外置能力：超阈值结果退化为截断内联（不丢记录）', async () => {
     const store = makeStore(false);
-    const big = 'y'.repeat(20 * 1024);
+    const big = 'y'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
     await appendEnd(store, { callId: 'call_c', resultText: big });
 
     const record = store.readAll('admin', 'th1')[0]!;
@@ -165,7 +168,7 @@ describe('tool-events —— 合并与容错', () => {
 
   it('外置正文被清理后：readArtifact 返回 undefined（路由据此回 410）', async () => {
     const store = makeStore();
-    await appendEnd(store, { callId: 'call_gone', resultText: 'z'.repeat(20 * 1024) });
+    await appendEnd(store, { callId: 'call_gone', resultText: 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
     const abs = path.join(userDataDir(root, 'admin'), SPACE_TMP, artifactFileName('th1', 'call_gone'));
     // 必须走安全删除原语：Windows 下 fs.rmSync 对含中文的路径静默失效（见 fs-safe）
     removeFileSafe(abs);
@@ -179,7 +182,7 @@ describe('tool-events —— 合并与容错', () => {
 describe('tool-events —— 路径与归属', () => {
   it('恶意 call_id 不会把写入带出临时空间（文件名安全化）', async () => {
     const store = makeStore();
-    await appendEnd(store, { callId: '../../evil', resultText: 'w'.repeat(20 * 1024) });
+    await appendEnd(store, { callId: '../../evil', resultText: 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
 
     const record = store.readAll('admin', 'th1')[0]!;
     expect(record.artifactSize).toBeGreaterThan(0);

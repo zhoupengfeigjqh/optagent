@@ -5,12 +5,14 @@
  * 1. **未读角标**：0 时不显示；有未读时显示数字，且**读屏名称**带上条数（双通道）；
  * 2. **未读叹号**：未读条有叹号（带 `未读` 无障碍名称），已读条没有；
  * 3. **点开才标记已读**——打开面板本身 MUST NOT 标记（⑤）；
- * 4. **标题只认摘要**：`summary` 缺省时给**可读兜底**，MUST NOT 把落盘文件名
- *    （`{会话UUID}_{job_id}`，纯机读）顶上来当标题——2026-09-25 实测反馈的教训；
+ * 4. **标题两段**（2026-10-09）：主段只认摘要，`summary` 缺省时给**可读兜底**，MUST NOT 把
+ *    落盘文件名（`{会话UUID}_{job_id}`，纯机读）顶上来当标题——2026-09-25 实测反馈的教训；
+ *    副段 `工具名 · job_id` 来自平台字段，永不缺省、中间省略、完整值挂在 `title` 属性上；
  * 5. **正文双视图**：点开走 `produced.text()`（而**不是** `files` 预览接口），
  *    读取失败给**局部降级文案**而不是把整面板变成错误态；
  * 6. **元信息**：工具名 / 数字人名称 / 状态 / 创建与完成时间；缺数字人或工具名时
- *    给可读兜底（`未知数字人` / `未知工具`），不留白。
+ *    给可读兜底（`未知数字人` / `未知工具`），不留白；
+ * 7. **弹窗宽度**（2026-10-09）：结构化正文（表格/嵌套对象）用宽版，列表与原始文本用默认宽度。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, ref, type ComputedRef } from 'vue'
@@ -160,15 +162,17 @@ describe('ProducedBell —— 列表视图', () => {
     expect(flags[0]!.attributes('aria-label')).toBe('未读')
   })
 
-  it('有摘要 → 标题就是摘要，并带上工具名与体积', async () => {
+  it('有摘要 → 标题主段是摘要、副段是「工具名 · job_id」；元信息不再重复工具名', async () => {
     store = makeStore([item('a', undefined, '识别到 47 行文字')])
     h.store = store
 
     const wrapper = mountBell()
     await openPanel(wrapper)
 
-    expect(wrapper.find('.produced-item__summary').text()).toBe('识别到 47 行文字')
-    expect(wrapper.find('.produced-item__meta').text()).toContain('ocr__ocr_image')
+    expect(wrapper.find('.produced-title__summary').text()).toBe('识别到 47 行文字')
+    expect(wrapper.find('.produced-title__tag').text()).toBe('ocr__ocr_image · a')
+    // 工具名只在标题副段出现一次（元信息行不重复）
+    expect(wrapper.find('.produced-item__meta').text()).not.toContain('ocr__ocr_image')
     expect(wrapper.find('.produced-item__meta').text()).toContain('1.0 KB')
   })
 
@@ -179,9 +183,24 @@ describe('ProducedBell —— 列表视图', () => {
     const wrapper = mountBell()
     await openPanel(wrapper)
 
-    const title = wrapper.find('.produced-item__summary').text()
+    const title = wrapper.find('.produced-title__summary').text()
     expect(title).toBe('后台任务结果（该任务未提供摘要）')
     expect(title).not.toContain('th_1_a.txt')
+    // 兜底文案会撞车，靠副段的 job_id 区分——这正是它进标题的理由
+    expect(wrapper.find('.produced-title__tag').text()).toContain('a')
+  })
+
+  it('副段悬停给**完整**值（省略号不该让人拿不到原文）', async () => {
+    const longId = 'ocr_1790123456789_8bcccfd2'
+    store = makeStore([item(longId)])
+    h.store = store
+
+    const wrapper = mountBell()
+    await openPanel(wrapper)
+
+    const tag = wrapper.find('.produced-title__tag')
+    expect(tag.text()).toBe('ocr__ocr_image · ocr_17901234…cfd2') // 中段省略，两端可辨
+    expect(tag.attributes('title')).toBe(`ocr__ocr_image · ${longId}`) // 完整值在 title 属性
   })
 })
 
@@ -194,11 +213,11 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
     await openPanel(wrapper)
 
     const meta = wrapper.find('.produced-item__meta').text()
-    expect(meta).toContain('工具：ocr__ocr_image')
     expect(meta).toContain('数字人：生产调度助手')
     expect(meta).toContain('状态：done') // 原样透出，不做 done → 已完成 的翻译
     expect(meta).toContain('创建：')
     expect(meta).toContain('完成：')
+    expect(wrapper.find('.produced-title__tag').text()).toContain('ocr__ocr_image')
   })
 
   it('缺数字人 / 工具名 → 给可读兜底而不是留白', async () => {
@@ -211,7 +230,7 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
 
     const meta = wrapper.find('.produced-item__meta').text()
     expect(meta).toContain('数字人：未知数字人')
-    expect(meta).toContain('工具：未知工具')
+    expect(wrapper.find('.produced-title__tag').text()).toBe('未知工具 · a')
   })
 
   it('点开某条：内容视图同样显示元信息，并附加正文', async () => {
@@ -228,6 +247,14 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
     expect(meta).toContain('数字人：生产调度助手')
     expect(meta).toContain('状态：done')
     expect(wrapper.find('.produced-content__body').text()).toContain('冲压 1200')
+    // 内容视图只有**一处**标题（列表已切走），且带上标识副段
+    expect(wrapper.findAll('.produced-title')).toHaveLength(1)
+    expect(wrapper.find('.produced-content__head .produced-title__summary').text()).toBe(
+      '识别到 47 行文字',
+    )
+    expect(wrapper.find('.produced-content__head .produced-title__tag').text()).toBe(
+      'ocr__ocr_image · a',
+    )
   })
 })
 
@@ -259,6 +286,48 @@ describe('ProducedBell —— 正文结构化展示（JSON ⇄ 原始）', () =>
 
     await toggle.trigger('click')
     expect(wrapper.find('.produced-json').exists()).toBe(true)
+  })
+
+  it('结构化正文用**宽版**弹窗；列表与原始 JSON 视图用默认宽度', async () => {
+    store = makeStore([item('a')])
+    store.text.mockResolvedValue('{"status":"success","rows":[{"orderNo":"WO-1"}]}')
+    h.store = store
+
+    const wrapper = mountBell()
+    await openPanel(wrapper)
+    // 列表视图：默认宽度
+    expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
+
+    await wrapper.find('.produced-item__button').trigger('click')
+    await flushPromises()
+    // 结构化视图：宽版（表格几十列在 560px 里铺不下）
+    expect(wrapper.find('.base-dialog').classes()).toContain('base-dialog--wide')
+
+    // 切到原始 JSON：文本视图，回默认宽度
+    await wrapper.find('.produced-content__view-toggle').trigger('click')
+    expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
+
+    // 切回结构化：又是宽版
+    await wrapper.find('.produced-content__view-toggle').trigger('click')
+    expect(wrapper.find('.base-dialog').classes()).toContain('base-dialog--wide')
+
+    // 返回列表：回默认宽度
+    await wrapper.find('.produced-content__back').trigger('click')
+    expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
+  })
+
+  it('正文不可结构化（纯文本）→ 内容视图也用默认宽度', async () => {
+    store = makeStore([item('a')])
+    store.text.mockResolvedValue('产能表\n冲压 1200')
+    h.store = store
+
+    const wrapper = mountBell()
+    await openPanel(wrapper)
+    await wrapper.find('.produced-item__button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.produced-json').exists()).toBe(false)
+    expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
   })
 
   it('正文不是 JSON（纯文本）→ 原样展示，且**不给切换**（没有另一种形态可切）', async () => {

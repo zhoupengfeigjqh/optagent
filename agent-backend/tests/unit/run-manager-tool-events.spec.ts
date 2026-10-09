@@ -24,6 +24,7 @@ import {
 } from '../../src/domain/run-manager.js';
 import { SummaryStore, type SummaryLlm } from '../../src/domain/summary.js';
 import { ToolEventStore } from '../../src/domain/tool-events.js';
+import { TOOL_INLINE_MAX_BYTES } from '../../src/domain/tool-result.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { LlmEvent } from '../../src/types.js';
 
@@ -165,7 +166,10 @@ describe('下一轮回灌', () => {
   });
 
   it('外置大结果：正文不进 messages，systemExtra 只留一行索引（含可读路径）', async () => {
-    const big = '车间,计划量\n冲压,1200\n'.repeat(1500); // ~33KB > 内联阈值
+    const unit = '车间,计划量\n冲压,1200\n';
+    const big = unit.repeat(
+      Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
+    ); // > 内联阈值
     const manager = new RunManager({ history, usage, toolEvents });
     await runTurn(manager, recordingAgent([], () => toolTurn(big)), '看下计划').settled;
 
