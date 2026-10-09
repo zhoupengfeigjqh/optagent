@@ -1,19 +1,21 @@
 /**
  * 组件测试：一级导航（T035）
  *
- * 覆盖 props / emit / 边界（`FR-053`：常驻 4 项、当前项 `aria-current`、键盘可达）。
+ * 覆盖 props / emit / 边界（`FR-053`：常驻 5 项——2026-10-03 由 4 项扩为 5 项，
+ * 新增「本体管理」；当前项 `aria-current`、键盘可达）。
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import PrimaryNav from './PrimaryNav.vue'
-import { NAV_ITEMS } from '../../router'
+import { NAV_ITEMS, ROUTE_NAMES } from '../../router'
 
 describe('PrimaryNav', () => {
-  it('常驻渲染 4 个功能区，标签与顺序固定', () => {
+  it('常驻渲染 5 个功能区，标签与顺序固定（MCP 服务 → 本体管理 → SKILL 管理 → …）', () => {
     const wrapper = mount(PrimaryNav, { props: { current: 'agents' } })
     const buttons = wrapper.findAll('button')
-    expect(buttons).toHaveLength(4)
+    expect(buttons).toHaveLength(ROUTE_NAMES.length)
     expect(buttons.map((b) => b.text())).toEqual(NAV_ITEMS.map((i) => i.label))
+    expect(NAV_ITEMS.map((i) => i.name)).toEqual(['mcp', 'ontology', 'skills', 'agents', 'deploy'])
   })
 
   it('当前项标 aria-current=page，其余不标', () => {

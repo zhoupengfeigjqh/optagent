@@ -25,6 +25,7 @@ import { DeployManifestService } from './domain/deploy/manifest.js';
 import { McpServiceOperations } from './domain/mcp/operations.js';
 import { McpServiceConfigService } from './domain/mcp/service-config.js';
 import { McpServiceListService } from './domain/mcp/service-list.js';
+import { OntologyStore } from './domain/ontology/store.js';
 import { SkillLibraryService } from './domain/skill-library/install.js';
 import { McpClientService } from './infra/mcp-client.js';
 import { OptAgentWriter } from './infra/opt-agent-writer.js';
@@ -35,6 +36,7 @@ import { registerAgentRoutes } from './routes/agents.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerDeployRoutes } from './routes/deploy.js';
 import { registerMcpRoutes } from './routes/mcp.js';
+import { registerOntologyRoutes } from './routes/ontologies.js';
 import { registerPlatformRoutes } from './routes/platform.js';
 import { registerReferenceRoutes } from './routes/references.js';
 import { registerSkillRoutes } from './routes/skills.js';
@@ -69,6 +71,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     });
 
   const skills = new SkillLibraryService(store, { logger: loggers.logger });
+  // 本体库（2026-10-03）：只读浏览 + 本体市场导入/更新/删除（FR-058~FR-061）
+  const ontologies = new OntologyStore(store, { logger: loggers.logger });
   const agents = new AgentDesignService(store);
   const users = new UserLinkService(store);
   const mcpConfigs = new McpServiceConfigService(store);
@@ -105,6 +109,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     agents,
     users,
     skills,
+    ontologies,
     mcpConfigs,
     mcpServices,
     mcpOperations,
@@ -226,6 +231,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerMcpRoutes(routeApp, ctx, { serviceList: mcpServices, operations: mcpOperations });
   registerUserRoutes(routeApp, ctx);
   registerSkillRoutes(routeApp, ctx);
+  registerOntologyRoutes(routeApp, ctx);
   registerReferenceRoutes(routeApp, ctx);
   registerDeployRoutes(routeApp, ctx, ctx.deployer);
 

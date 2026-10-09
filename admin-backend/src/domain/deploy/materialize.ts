@@ -8,7 +8,7 @@
  * users/{uid}/agents/{agent}/
  * ├── SOUL.md          ← 设计态 soul 全文（utf8，原样）
  * ├── TOOL.json        ← { "enabled": [...] }
- * ├── MCP.json         ← { "servers": [ { name, transport, url|command, … } ] }
+ * ├── MCP.json         ← { "servers": [ { name, transport, url|command, headers?, … } ] }
  * ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": [...] }
  * └── skills/{name}/…  ← 从共享技能库物化的整包副本
  * ```
@@ -47,6 +47,10 @@ export function buildMcpServerEntry(
     if (!config.url) return null;
     entry.url = config.url;
   }
+  // 请求头（2026-10-08）：空对象是缺省语义，不写空壳（与 file_args/async_tools 同一口径）。
+  // **明文落运行环境**：运行环境要按原样发送（信任边界与 `agent-backend/.env.local` 同级，
+  // 都是本机私产）；平台侧不回显明文，物化是它唯一的"出平台"通道。
+  if (Object.keys(config.headers).length > 0) entry.headers = config.headers;
   if (Object.keys(config.file_args).length > 0) entry.file_args = config.file_args;
   // HITL 调用确认策略：never 是运行环境缺省语义，不写空壳（与 file_args 同一口径）
   if (config.confirmation !== 'never') entry.confirmation = config.confirmation;
@@ -56,6 +60,9 @@ export function buildMcpServerEntry(
   // 异步工具声明（R11）：空数组是缺省语义，不写空壳（与上两者同一口径）。
   // 声明后运行环境为这些工具注入 `result_url`，并接收服务算完后的结果回写。
   if (config.async_tools.length > 0) entry.async_tools = config.async_tools;
+  // 工具白名单（2026-10-03）：非空才写（空 = 不限制，即白名单上线前的存量语义）。
+  // 运行环境据此只把白名单里的工具挂给数字人，其余工具对模型不可见。
+  if (config.allowed_tools.length > 0) entry.allowed_tools = config.allowed_tools;
   return entry;
 }
 

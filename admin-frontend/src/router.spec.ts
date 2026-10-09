@@ -35,10 +35,21 @@ describe('parseLocation', () => {
     expect(r.tab).toBeNull()
   })
 
-  it('解析四个功能区', () => {
+  it('解析五个功能区（含本体管理）', () => {
     for (const name of ROUTE_NAMES) {
       expect(parseLocation(`/admin/${name}`, '/admin').name).toBe(name)
     }
+    expect(parseLocation('/admin/ontology', '/admin').name).toBe('ontology')
+  })
+
+  it('本体详情：目录名在路径、场景名在查询参数（身份是两段）', () => {
+    const r = parseLocation(
+      `/admin/ontology/${encodeURIComponent('原材料采购和库存')}?scenario=${encodeURIComponent('生产调度')}`,
+      '/admin',
+    )
+    expect(r.name).toBe('ontology')
+    expect(r.detail).toBe('原材料采购和库存')
+    expect(r.query.scenario).toBe('生产调度')
   })
 
   it('解析详情对象并做 URL 解码', () => {

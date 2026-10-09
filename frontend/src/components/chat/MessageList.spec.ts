@@ -1,9 +1,12 @@
 /**
- * 组件测试：消息列表的乐观用户气泡（2026-09-16 十七次调整）。
+ * 组件测试：消息列表。
  *
- * 回归的 bug：用户消息只在历史刷新（流完成后）才渲染，发送后要到 AI 答完才看到
- * 自己的消息。修复后 `pendingUser` 应在历史消息**之后**、流式气泡**之前**渲染为
- * 用户气泡；`null` 时（无进行中轮次）不渲染。
+ * 1. **乐观用户气泡**（2026-09-16 十七次调整）：用户消息只在历史刷新（流完成后）才渲染，
+ *    发送后要到 AI 答完才看到自己的消息。修复后 `pendingUser` 应在历史消息**之后**、
+ *    流式气泡**之前**渲染为用户气泡；`null` 时（无进行中轮次）不渲染。
+ * 2. **工具卡片的 `live` 语境**（2026-10-08，TR-33）：`MessageBubble` 把"本轮是否仍在流式"
+ *    传给了卡片，同样一条 `running` 记录在流式态应显示"进行中"、在历史里应显示"未完成"。
+ *    （`MessageBubble.vue` 无同名测试，这条集成断言是它那处 `:live` 绑定的保护网。）
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
@@ -72,5 +75,46 @@ describe('MessageList —— 乐观用户气泡（十七次调整）', () => {
 
     expect(wrapper.find('.empty-state').exists()).toBe(false)
     expect(wrapper.text()).toContain('第一条消息')
+  })
+})
+
+describe('MessageList —— 工具卡片的 live 语境（TR-33）', () => {
+  const runningTool = { call_id: 'c_run', name: 'ocr_image', status: 'running' as const }
+
+  it('流式气泡里的 running 工具显示"进行中"（结果稍后还会到）', () => {
+    const wrapper = mount(MessageList, {
+      props: { streaming: { ...STREAMING_VIEW, toolCalls: [runningTool] } },
+    })
+
+    expect(wrapper.text()).toContain('ocr_image')
+    expect(wrapper.text()).toContain('进行中')
+    expect(wrapper.text()).toContain('本轮 1 次调用')
+  })
+
+  it('同一条 running 记录落在历史里时显示"未完成"（它不会再动了）', () => {
+    const wrapper = mount(MessageList, {
+      props: {
+        messages: [
+          {
+            id: 'm_1',
+            role: 'assistant',
+            content: '本轮被中断',
+            ts: '2026-10-08T10:00:00Z',
+            feedback: null,
+            tool_calls: [
+              {
+                call_id: 'c_run',
+                name: 'ocr_image',
+                status: 'running',
+                started_at: '2026-10-08T10:00:00.000Z',
+              },
+            ],
+          },
+        ],
+      },
+    })
+
+    expect(wrapper.text()).toContain('未完成')
+    expect(wrapper.text()).not.toContain('进行中')
   })
 })

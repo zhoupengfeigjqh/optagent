@@ -1,12 +1,13 @@
 /**
  * 组件测试：SKILL 详情（文件树 + 文件编辑区，2026-09-16 起全部文件可编辑）
  *
- * 守住五点：
+ * 守住六点：
  * 1. SKILL.md 与 references 等附件**都能点开**，默认展示 SKILL.md 正文（不重复请求）；
  * 2. 改完能保存，并把"需要重新部署才生效"这条后果**明说**；
  * 3. **未保存的修改不能悄悄丢**：切换文件 / 返回列表前先确认；
  * 4. 特殊态说清楚：二进制不编辑、超限只读、读取失败可读；
- * 5. 删除前先取受影响清单（`FR-042`）。
+ * 5. 删除前先取受影响清单（`FR-042`）；
+ * 6. **本体市场来源只读**（`FR-062`）：不渲染编辑器与保存入口，正文只读呈现。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -202,5 +203,61 @@ describe('SkillViewer —— 文件查看与编辑', () => {
 
     expect(discardDialog(wrapper).attributes('open')).toBeDefined()
     expect(wrapper.emitted('back')).toBeFalsy()
+  })
+})
+
+describe('SkillViewer —— 本体市场来源只读（FR-062）', () => {
+  const MARKET_SKILL: SkillDetail = {
+    ...SKILL,
+    source: 'onto_market:生产调度/原材料采购和库存',
+    origin: {
+      kind: 'onto_market',
+      scenario: '生产调度',
+      ontology: '原材料采购和库存',
+      hash: 'market-hash',
+    },
+  }
+
+  it('只读：MUST NOT 渲染编辑器，正文以只读文本呈现，且说明更新入口', async () => {
+    const wrapper = mountViewer(MARKET_SKILL)
+    await flushPromises()
+
+    // 无编辑控件（textarea 是编辑器的核心特征）、无保存按钮
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((b) => b.text().includes('保存'))).toBe(false)
+    // 只读正文可见（SKILL.md 正文随详情返回，无需再请求）
+    expect(wrapper.find('.skill-viewer__readonly-pre').text()).toContain('SKILL 正文内容')
+    expect(wrapper.text()).toContain('本体市场导入的技能为只读')
+    expect(wrapper.text()).toContain('从本体市场导入')
+  })
+
+  it('只读：文件树仍可切换查看（只读的是内容，不是浏览）', async () => {
+    fetchSkillFile.mockResolvedValue({
+      name: '调度算法',
+      path: 'references/算法详解.md',
+      size: 10,
+      binary: false,
+      truncated: false,
+      content: '# 附件只读\n',
+      hash: 'h',
+      editable: true,
+    })
+    const wrapper = mountViewer(MARKET_SKILL)
+    await flushPromises()
+
+    await fileButton(wrapper, '算法详解.md')!.trigger('click')
+    await flushPromises()
+
+    expect(fetchSkillFile).toHaveBeenCalledWith('调度算法', 'references/算法详解.md')
+    expect(wrapper.find('.skill-viewer__readonly-pre').text()).toContain('附件只读')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+
+  it('非市场来源（ZIP 安装）仍渲染编辑器，可编辑', async () => {
+    const wrapper = mountViewer()
+    await flushPromises()
+
+    expect(wrapper.find('textarea').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('本体市场导入的技能为只读')
   })
 })

@@ -13,6 +13,7 @@ import { ApiError } from '../domain/api-error.js';
 import { agentsReferencingService } from '../domain/config-center/references.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage, paginate } from '../domain/paging.js';
+import { maskHeaders } from '../domain/mcp/service-config-fields.js';
 import type { McpServiceListService } from '../domain/mcp/service-list.js';
 import type { McpServiceOperations } from '../domain/mcp/operations.js';
 
@@ -43,13 +44,37 @@ export function registerMcpRoutes(
   });
 
   /**
-   * §3.3 新建 MCP 服务（2026-09-27）。
+   * §3.9 新建前的**工具清单探测**（2026-10-03）。
+   *
+   * 对**尚未登记**的连接目标连一次取回工具清单——新建流程据此让管理员勾选"可见工具"
+   * （`allowed_tools`）。与 §3.6 的分工：`test` 只回答"已登记服务通不通"，
+   * 本端点回答"这个新目标有哪些工具"，因此不要求服务已存在。
+   *
+   * 连接失败时 **HTTP 200 + `ok: false` + 可读原因**（失败要留在弹窗里，不是页级报错）；
+   * 目标写法非法（transport/url）仍是 400。
+   */
+  app.post('/api/admin/mcp/probe', async (req) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    return deps.operations.probe(body);
+  });
+
+  /**
+   * §3.3 新建 MCP 服务（2026-09-27；2026-10-03 起要求工具白名单）。
+   *
    * 名称由管理员指定且**全局唯一**（重名 → `ADM_MCP_SERVICE_EXISTS`）；
+   * `allowed_tools` **必填非空**（白名单创建后不可改，见 §3.3 的 `PUT` 说明）。
    * `revision` 可选（带了即做乐观锁校验），响应即"新建后的完整调用配置"。
+   *
+   * **硬门槛（2026-10-03 产品决定）**：先确认目标**连得上**再落盘——连不上即创建失败，
+   * 库里**不产生记录**（避免留下一个"没有工具范围"、等价于全部放行的服务）。
    */
   app.post('/api/admin/mcp/services', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const revision = typeof body.revision === 'number' ? body.revision : undefined;
+    // ① 纯字段校验先行（重名 / 名称 / 白名单非空 / 地址写法）：为注定失败的新建省掉一次连接
+    ctx.mcpConfigs.validateForCreate(body);
+    // ② 连得上才落盘（失败抛 `ADM_RUNTIME_UNREACHABLE`/`VALIDATION_FAILED`，此时尚未写盘）
+    await deps.operations.assertReachable(body);
     const { config, revision: nextRevision } = ctx.mcpConfigs.create(body, revision);
     return reply.status(201).send({ ...toConfigResponse(config), revision: nextRevision, affected_agents: [] });
   });
@@ -58,6 +83,9 @@ export function registerMcpRoutes(
    * §3.3 保存调用配置（`FR-044`）。
    * 修改 MUST **自动作用于所有引用它的数字人**（下次部署生效），
    * 因此响应里带上 `affected_agents` 让界面明确告知影响面。
+   *
+   * **工具白名单不在此端点修改**（2026-10-03）：携带 `allowed_tools` 即
+   * `ADM_MCP_TOOL_SCOPE_LOCKED`——白名单只在新建时设定，容器范围要看数字人能看到什么。
    */
   app.put('/api/admin/mcp/services/:name', async (req) => {
     const { name } = req.params as { name: string };
@@ -114,6 +142,8 @@ function toConfigResponse(config: {
   rules_fields: Record<string, string>;
   async_tools: string[];
   confirmation: 'never' | 'always' | { tools: string[] };
+  allowed_tools: string[];
+  headers: Record<string, string>;
   updated_at: string;
 }): Record<string, unknown> {
   return {
@@ -127,6 +157,11 @@ function toConfigResponse(config: {
     rules_fields: config.rules_fields,
     async_tools: config.async_tools,
     confirmation: config.confirmation,
+    // 白名单必须回显：界面对照"数字人能看到什么"，漏登会让它凭空消失
+    allowed_tools: config.allowed_tools,
+    // 请求头同样必须回显（界面要看出"配了令牌"），但**只回掩码**——
+    // 明文令牌不进任何响应（与详情接口同一口径，见 `maskHeaders`）
+    headers: maskHeaders(config.headers),
     updated_at: config.updated_at,
   };
 }

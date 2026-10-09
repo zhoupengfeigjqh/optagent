@@ -197,12 +197,14 @@ const containsActiveMatch = computed(() => {
 
     <ThinkingBlock v-if="showThinking" :text="thinkingText" :streaming="isStreaming" />
 
-    <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件 -->
+    <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件。
+         `live` 只表达"本轮是否仍在跑"——决定 running 显示"进行中"还是"未完成"（TR-33） -->
     <ToolCallList
       v-if="toolItems.length"
       class="message-bubble__tools"
       :items="toolItems"
       :load-result="toolLoader"
+      :live="isStreaming"
     />
 
     <MessageContent

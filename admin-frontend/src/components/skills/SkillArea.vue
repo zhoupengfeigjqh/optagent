@@ -8,6 +8,7 @@ import { onMounted, ref, watch } from 'vue'
 import { http } from '../../api/http'
 import type { Paged, SkillDetail, SkillFileSaved, SkillListItem } from '../../api/types'
 import SkillCardList from './SkillCardList.vue'
+import SkillMarketDialog from './SkillMarketDialog.vue'
 import SkillViewer from './SkillViewer.vue'
 import SkillUploadDialog from './SkillUploadDialog.vue'
 
@@ -24,6 +25,8 @@ const loading = ref(false)
 /** 当前打开的 SKILL 详情（与 props.detail 同名会与路由参数混淆，故显式改名） */
 const skillDetail = ref<SkillDetail | null>(null)
 const uploadOpen = ref(false)
+/** 本体市场导入弹窗（2026-10-02） */
+const marketOpen = ref(false)
 
 async function loadList(): Promise<void> {
   loading.value = true
@@ -104,6 +107,7 @@ watch(
     />
     <template v-else>
       <div class="skill-area__toolbar">
+        <button type="button" class="btn" @click="marketOpen = true">从本体市场导入</button>
         <button type="button" class="btn btn--primary" @click="uploadOpen = true">
           上传安装 SKILL
         </button>
@@ -129,6 +133,29 @@ watch(
         @installed="
           (result) => {
             emit('announce', `SKILL ${result.name} 安装成功`)
+            void loadList()
+          }
+        "
+        @error="(message) => emit('announce', message)"
+      />
+
+      <SkillMarketDialog
+        v-model:open="marketOpen"
+        @installed="
+          (result) => {
+            emit('announce', `SKILL ${result.name} 已从本体市场导入`)
+            void loadList()
+          }
+        "
+        @updated="
+          (result) => {
+            const affected = result.affected_agents
+            emit(
+              'announce',
+              affected.length > 0
+                ? `SKILL ${result.name} 已更新；受影响数字人：${affected.join('、')}（需重新部署）`
+                : `SKILL ${result.name} 已更新`,
+            )
             void loadList()
           }
         "

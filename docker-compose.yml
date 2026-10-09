@@ -59,10 +59,13 @@ services:
   jev:
     build: ./jev-service
     container_name: optagent-jev
-    # 向宿主机发布 8001：本地直跑（非 Docker）的 backend 经 LAN IP 访问 Jev
-    # 端口固定 8001（2026-09-23：取消根 .env 插值，编排层不再有可变项）
+    # 向宿主机发布 8101：本地直跑（非 Docker）的 backend 经 LAN IP 访问 Jev
+    # 端口固定 8101（2026-09-23：取消根 .env 插值，编排层不再有可变项）
+    # 2026-10-04：8001 → 8101。原因：同机 optonto 编排的 core-backend 占用了宿主 8001
+    # （其 compose 声明 "8001:8001"），两边抢同一端口——症状是 jev 起来后宿主端口拿不到、
+    # 8001 实际应答的是 optonto core-backend。平台侧 jev 服务的 url 一并改用 8101。
     ports:
-      - "8001:8000"
+      - "8101:8000"
     # 本机私产放 .env.local（gitignore）：TYPESAFE_API_KEY、上游端点与超时等；
     # 缺失不报错（Key 缺省时服务照常启动，三个工具返回可读错误）。
     # 首次：cp jev-service/.env.example jev-service/.env.local 并填入 Key。
@@ -119,6 +122,10 @@ services:
       - ./admin-backend/.platform-data:/app/.platform-data
       # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
       - ./agent-backend/.opt-agent:/app/.opt-agent
+      # 本体市场（只读，2026-10-02；2026-10-03 起两个功能区共用同一挂载点）：
+      #   - SKILL 管理：从 `{场景}/{本体}/skills/{技能}` 导入技能
+      #   - 本体管理：从 `{场景}/{本体}/ontology.yaml` 导入本体
+      - ../optonto/.data/onto_market:/opt/onto_market:ro
     depends_on:
       - backend
     restart: unless-stopped

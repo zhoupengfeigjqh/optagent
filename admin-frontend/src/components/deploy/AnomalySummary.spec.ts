@@ -86,7 +86,7 @@ describe('AnomalySummary', () => {
     fetchAnomalies.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
     const wrapper = mount(AnomalySummary)
     await flushPromises()
-    expect(wrapper.find('[role="alert"]').text()).toContain('平台设计态存储不可写')
+    expect(wrapper.find('[role="alert"]').text()).toContain('平台设计态存储不可用')
   })
 
   it('未关联用户的异常项显示为「未关联」而非空白', async () => {

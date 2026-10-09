@@ -32,6 +32,8 @@ async function createService(name = 'ocr', overrides: Record<string, unknown> = 
       transport: 'http',
       url: OCR_URL,
       file_args: { ocr_image: { image: 'url' } },
+      // 工具白名单（2026-10-03 起新建必填非空）
+      allowed_tools: ['ocr_image'],
       ...overrides,
     },
   });

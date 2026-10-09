@@ -11,6 +11,11 @@ import { ApiError } from '../domain/api-error.js';
 import { markAudit } from '../domain/audit.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage } from '../domain/paging.js';
+import {
+  installOntoMarketSkill,
+  listOntoMarket,
+  updateOntoMarketSkill,
+} from '../domain/skill-library/onto-market.js';
 
 /** ZIP 的 local file header 魔数（`PK\x03\x04`） */
 const ZIP_MAGIC = 0x04034b50;
@@ -28,6 +33,7 @@ export function registerSkillRoutes(app: FastifyInstance, ctx: AppContext): void
         installed_at: item.installed_at,
         updated_at: item.updated_at,
         source: item.source,
+        origin: item.origin ?? null,
       })),
     };
   });
@@ -106,6 +112,80 @@ export function registerSkillRoutes(app: FastifyInstance, ctx: AppContext): void
       extra: { source, overwritten: result.overwritten },
     });
     return reply.status(201).send(result);
+  });
+
+  /**
+   * §4.6 本体市场：列出可导入的技能及其与库内的差异状态（2026-10-02）。
+   *
+   * 只读扫描 `ONTO_MARKET_DIR`（未配置时 `configured: false`，不报错）；
+   * 打开本接口即完成一次"市场文件是否变化"的检查（按整包内容指纹比对）。
+   */
+  app.get('/api/admin/skills/onto-market', async () => {
+    return listOntoMarket(ctx.config.ontoMarketDir, ctx.skills);
+  });
+
+  /**
+   * §4.7 从本体市场导入技能（2026-10-02）。
+   *
+   * 按路径 `{scenario}/{ontology}/skills/{skill}` 读取市场目录，复用库的全部校验
+   * （frontmatter、名称安全、**重名直接拒绝**——市场导入不提供覆盖）；成功即原子入驻。
+   */
+  app.post('/api/admin/skills/onto-market/install', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scenario = typeof body.scenario === 'string' ? body.scenario.trim() : '';
+    const ontology = typeof body.ontology === 'string' ? body.ontology.trim() : '';
+    const skill = typeof body.skill === 'string' ? body.skill.trim() : '';
+    if (scenario === '' || ontology === '' || skill === '') {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'scenario / ontology / skill 均为必填');
+    }
+    const result = installOntoMarketSkill(ctx.config.ontoMarketDir, ctx.skills, {
+      scenario,
+      ontology,
+      skill,
+    });
+    markAudit(req, {
+      target: result.name,
+      extra: { source: `onto_market:${scenario}/${ontology}` },
+    });
+    return reply.status(201).send(result);
+  });
+
+  /**
+   * §4.8 从本体市场更新技能（2026-10-02）。
+   *
+   * 与 §4.7 的差别：目标必须是**已从同一市场位置导入**的技能（四重边界校验见
+   * `updateOntoMarketSkill`）；库内版本被人工修改过时需 `confirm: true` 显式确认。
+   * 成功即整包原子替换（零时间窗），并返回**引用该技能的数字人清单**——
+   * 它们的运行副本要等重新部署才会更新（部署即全量物化，`SC-009`）。
+   */
+  app.post('/api/admin/skills/onto-market/update', async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scenario = typeof body.scenario === 'string' ? body.scenario.trim() : '';
+    const ontology = typeof body.ontology === 'string' ? body.ontology.trim() : '';
+    const skill = typeof body.skill === 'string' ? body.skill.trim() : '';
+    const confirm = body.confirm === true;
+    if (scenario === '' || ontology === '' || skill === '') {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'scenario / ontology / skill 均为必填');
+    }
+    const result = updateOntoMarketSkill(
+      ctx.config.ontoMarketDir,
+      ctx.skills,
+      { scenario, ontology, skill },
+      { confirmModified: confirm },
+    );
+    // 传播面收口：设计里引用了该技能的数字人，需重新部署才拿到新副本
+    const affectedAgents = ctx.agents
+      .listAll()
+      .filter((doc) => doc.skills.includes(result.name))
+      .map((doc) => doc.name);
+    markAudit(req, {
+      target: result.name,
+      extra: {
+        source: `onto_market:${scenario}/${ontology}`,
+        locally_modified: result.locally_modified,
+      },
+    });
+    return reply.status(200).send({ ...result, affected_agents: affectedAgents });
   });
 
   /** §4.5 删除；被引用时的确认清单由界面经 §7.1 取得（`FR-042`） */

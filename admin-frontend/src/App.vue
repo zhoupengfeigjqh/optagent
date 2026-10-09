@@ -2,7 +2,8 @@
 /**
  * 应用根组件：装配路由、常驻一级导航与四个功能区。
  *
- * 一级导航固定 4 项（`FR-053`）；功能区内由各自 Area 组件自行承载两级导航。
+ * 一级导航固定 5 项（`FR-053`，2026-10-03 新增「本体管理」）；功能区内由各自
+ * Area 组件自行承载两级导航。
  * 全局播报集中在 `AppShell` 的 `aria-live` 区域，避免多处重复播报（原则四）。
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
@@ -11,6 +12,7 @@ import AgentArea from './components/agents/AgentArea.vue'
 import DeployArea from './components/deploy/DeployArea.vue'
 import SkillArea from './components/skills/SkillArea.vue'
 import McpArea from './components/mcp/McpArea.vue'
+import OntologyArea from './components/ontology/OntologyArea.vue'
 import { NAV_ITEMS, buildPath, createRouter, type RouteName } from './router'
 
 const router = createRouter({ base: '/admin' })
@@ -54,6 +56,14 @@ onBeforeUnmount(() => router.destroy())
       v-else-if="route.name === 'deploy'"
       :detail="route.detail"
       :tab="route.tab"
+      @navigate="navigateTo"
+      @announce="announce"
+    />
+    <OntologyArea
+      v-else-if="route.name === 'ontology'"
+      :detail="route.detail"
+      :tab="route.tab"
+      :scenario="route.query.scenario ?? null"
       @navigate="navigateTo"
       @announce="announce"
     />

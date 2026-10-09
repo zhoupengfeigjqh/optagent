@@ -52,6 +52,8 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
     transport: 'http',
     url: `http://${name}:8000/mcp`,
     file_args: {},
+    // 工具白名单（2026-10-03）：新建必填非空；默认放开下面假客户端返回的那个工具
+    allowed_tools: ['ocr_image'],
     ...overrides,
   });
 }
@@ -136,5 +138,55 @@ describe('McpServiceListService.detail', () => {
     ]);
     const detail = await service.detail('ocr');
     expect(detail?.references).toEqual([{ user_id: 'admin', agent_name: 'ocr-user' }]);
+  });
+});
+
+describe('McpServiceListService.detail —— 工具白名单（2026-10-03）', () => {
+  const CATALOG = [
+    { name: 'ocr_image', description: '识别图片', parameters: { type: 'object' } },
+    { name: 'ocr_pdf', description: '识别 PDF', parameters: { type: 'object' } },
+    { name: 'query_price', description: '查价', parameters: { type: 'object' } },
+  ];
+
+  it('详情只呈现白名单里的工具，顺序与白名单一致，且回显白名单', async () => {
+    configure('ocr', { allowed_tools: ['query_price', 'ocr_image'] });
+    const detail = await buildService({ listTools: async () => CATALOG }).detail('ocr');
+
+    expect(detail?.allowed_tools).toEqual(['query_price', 'ocr_image']);
+    expect(detail?.tools.map((t) => t.name)).toEqual(['query_price', 'ocr_image']);
+    expect(detail?.missing_tools).toEqual([]);
+  });
+
+  it('白名单里有服务当前**不存在**的工具 → missing_tools 列出它（界面据此标异常）', async () => {
+    configure('ocr', { allowed_tools: ['ocr_image', 'gone_tool'] });
+    const detail = await buildService({ listTools: async () => CATALOG }).detail('ocr');
+
+    expect(detail?.tools.map((t) => t.name)).toEqual(['ocr_image']);
+    expect(detail?.missing_tools).toEqual(['gone_tool']);
+  });
+
+  it('服务不可达 → 不误报：missing 恒为空，用 tools_error 表达"核对不了"', async () => {
+    configure('ocr', { allowed_tools: ['ocr_image', 'gone_tool'] });
+    const detail = await buildService({
+      listTools: async () => {
+        throw new Error('连接被拒绝');
+      },
+    }).detail('ocr');
+
+    expect(detail?.tools).toEqual([]);
+    expect(detail?.missing_tools).toEqual([]);
+    expect(detail?.tools_error).toContain('连接被拒绝');
+  });
+
+  it('存量服务（白名单为空）= 不限制：服务全量工具都呈现', async () => {
+    // 直接写文档模拟"白名单上线前的记录"：空白名单**无法经 create 产出**（新建必填非空）
+    store.writeJson('mcp-services.json', {
+      items: { ocr: { name: 'ocr', description: 'x', transport: 'http', url: 'http://ocr:8000/mcp' } },
+    });
+    const detail = await buildService({ listTools: async () => CATALOG }).detail('ocr');
+
+    expect(detail?.allowed_tools).toEqual([]);
+    expect(detail?.tools).toHaveLength(3);
+    expect(detail?.missing_tools).toEqual([]);
   });
 });

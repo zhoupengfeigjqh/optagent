@@ -32,7 +32,7 @@
 
 ## D2 依赖清单（硬门禁：无未记录依赖）
 
-**决策**：`admin-backend` 与 `admin-frontend` **不引入任何新的运行时依赖**（ZIP 库除外，见 D7），全部复用既有子项目已在使用的依赖与 Vue 原生能力。
+**决策**：`admin-backend` 与 `admin-frontend` **不引入任何新的运行时依赖**（ZIP 库见 D7，**本体 metadata 解析**见下表 `yaml` 条），全部复用既有子项目已在使用的依赖与 Vue 原生能力。
 
 ### `admin-backend`
 
@@ -43,7 +43,8 @@
 | `@fastify/multipart` | `^10.1.1` | SKILL ZIP 上传 | 复用 |
 | `zod` | `^4.5.4` | `.env` 与请求体校验 | 复用 |
 | `pino` / `pino-pretty` | `^10.3.1` / `^13.1.3` | 日志 | 复用 |
-| ~~`yaml`~~ | ~~`^2.9.0`~~ | ~~只读解析 `docker-compose.yml`（`FR-043`）~~ **（2026-09-27 移除）** 平台不再解析编排文件，依赖已删除 | 已移除 |
+| ~~`yaml`~~ | ~~`^2.9.0`~~ | ~~只读解析 `docker-compose.yml`（`FR-043`）~~（2026-09-27 移除：平台不再解析编排文件） | 已移除 |
+| **`yaml`** | `^2.9.0`（实装 `^2.9.1`） | **（2026-10-03 重新引入）** 只读解析本体市场 `ontology.yaml` 的 `metadata` 段（`FR-058`~`FR-060`）：卡片要展示的 6 个字段只存在于该文件，市场侧 `meta.json` 并不包含 `deployed_version`/`scenario_name`/`ontology_name` 等项 | **新增（已论证）** |
 | `@modelcontextprotocol/sdk` | `^1.30.0` | MCP 客户端：列工具、连通性与能力测试（`FR-045/047`） | 复用 |
 | **`yauzl`** | 见 D7 | SKILL ZIP 安全解压 | **新增（已论证）** |
 
@@ -111,6 +112,7 @@
 | 用户卡片展开搭配摘要 | **原生 `<details>` / `<summary>`** | 原生键盘与读屏支持 |
 | 功能区内分区/页签 | ARIA Tabs 模式（`role="tablist"/"tab"/"tabpanel"` + 方向键） | `FR-053` 限制导航深度不超过两级，页签承载细分内容 |
 | 选择器（内置工具/MCP/SKILL） | 原生 `<select multiple>` 或自建 listbox + 完整 `aria-*` | 复合控件方向键移动、`aria-selected` |
+| 只读长文本（本体 `ontology.yaml` 全文，2026-10-03） | 原生 `<pre>` + 等宽字体 + 自身滚动容器，**不做语法高亮**（高亮库属新增依赖，原则六） | 文本可选中复制；只读性由"无输入控件"体现（`FR-059`） |
 | 全局提示/部署结果 | `aria-live="polite"` 区域 + 文本（不只靠颜色） | `FR-009` 的可读原因 |
 | 异常态 | 图标 + 文本双通道（`FR-006`） | 色觉障碍可用（原则四） |
 | 动效 | 尊重 `prefers-reduced-motion` | 原则四 |

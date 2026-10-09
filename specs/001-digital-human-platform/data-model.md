@@ -28,6 +28,11 @@ platform-data/
 ├── skills/
 │   ├── index.json            # SKILL 库索引（元数据）
 │   └── {skill-name}/         # SKILL 正文与附件（与库中 SKILL 一一对应）
+├── onto_market/              # 本体库（§10，2026-10-03）：结构与市场前两级一致
+│   ├── index.json            # 本体索引（含 6 项 metadata 与两个内容指纹，§9）
+│   └── {场景}/{本体}/
+│       ├── ontology.yaml     # 本体正文（只读快照，市场侧导入）
+│       └── securities.yaml   # 行为安全管控（可选，随本体一并同步）
 ├── agents/
 │   └── {agent-name}.json     # 数字人设计态（含五类配置）
 ├── users/
@@ -52,6 +57,8 @@ platform-data/
 原 `settings.json` 只承载一个字段 `target_runtime_form`（当前目标运行形态）。
 运行形态概念整体下架后该文件不再存在，其唯一功能性用途（决定 MCP 连接地址取哪一份取值）
 已由**单一 `url`** 取代。存量文件若存在则被忽略，不影响启动。
+（2026-10-02 清理：仓库遗留的本地 `.platform-data/settings.json` 已删除——现役代码对它零引用，
+删除后以 `tests/integration/platform.spec.ts` 的「settings → 404」用例复核无影响。）
 
 > 部署接口所需的乐观锁版本改由部署清单端点（`contracts/admin-api.md` §6.8）提供。
 
@@ -118,6 +125,9 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `rules_fields` | object | ✅ | 形状 `{工具名: 字段名或对象路径}`，键非空、值为合法字段路径（点分对象路径，**不支持数组段**）；缺省/空对象 = 不启用 | **算法规则参数设置**（2026-09-19 新增；当日由 string 版 `rules_field` 升级为按工具映射；**2026-09-22 起值支持对象嵌套**）：声明该工具入参里承载 `array[object]` 规则清单的字段。声明后 HITL 参数确认窗中该字段旁出现「从算法规则选择」入口（嵌套路径的落点与写回见 `contracts/runtime-api-delta.md` §9.7）。**不改变是否走 HITL**（仍只由 `confirmation` 决定，管理端表单随 HITL 模式联动禁用/清空）；保存期非对象/值非法路径即 `VALIDATION_FAILED`（只校验语法、不校验工具 schema），历史存档的 string 版 `rules_field` 与**非法路径**读取时收敛/丢弃；物化进 `MCP.json` 的键同名，空对象不写 |
 
 | `async_tools` | array | ✅ | 可为空数组；元素为**该服务自己的原始工具名**（不含 `{server}__` 前缀），非空且同服务内去重 | **异步工具声明**（2026-09-25 新增）：声明后，该工具调用由运行环境注入 `result_url`（签名写直链），服务算完把结果回写到用户空间 `临时空间/后台产出/`；落盘即经 SSE 通知前端，并在下一轮对话注入「后台计算结果」清单（全文见 `contracts/runtime-api-delta.md` §10）。**不改变工具是否同步、也不改变是否走 HITL**——只是给被声明的工具多注入一个回写地址。保存期只校验语法（数组 / 非空 / 去重，否则 `VALIDATION_FAILED`），**不校验工具清单**（工具清单是探测结果，服务不可达时拒保存会把"服务抖动"变成"配置改不了"，与 `rules_fields` 同一取向）；物化进 `MCP.json` 的键同名、**空数组不写**；缺省/空 = 不启用，存量行为零变化 |
+| `allowed_tools` | array | ✅ | **新建必填且非空**（trim + 同服务内去重）；保存（`PUT`）**禁止携带**；缺省 = `[]`（存量记录） | **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单。语义三点：①**空数组 = 不限制**（白名单上线前的存量记录，物化时不写该字段）；②平台详情只呈现白名单里的工具（`tools`），缺失项进 `missing_tools` 供界面标异常；③运行环境装配时按它过滤工具表（**清单外的工具对模型不可见**，见 `contracts/runtime-api-delta.md` §11）。**创建后不可修改**：新建漏传/空数组即 `VALIDATION_FAILED`、`PUT` 携带即 `ADM_MCP_TOOL_SCOPE_LOCKED`（否则"以为限住了实际没限"） |
+
+| `headers` | object | ✅ | 可为空对象；形状 `{头名: 值}`：头名须为合法 HTTP 头名（RFC 7230 token，两端空白 trim、**大小写不敏感下不重复**），值为**单行非空字符串**（trim），**MUST NOT 是掩码形态**；`transport=stdio` 时恒为 `{}`（丢弃）；**缺省 = 沿用存量**，提供 = 全量替换（`{}` 即清空） | **请求头 / 访问令牌**（2026-10-08）：部分 MCP 服务（本体侧「自建发布」的动态容器）要求调用方带 `X-MCP-Token`，**缺了直接 401**——服务本身是好的，只看得到"连不上"。三条纪律：①**存明文**（服务要按原样发送），信任边界与 `agent-backend/.env.local` 同级；②**响应只回掩码**（`maskHeaders`，形如 `6UuE…F3Z`；列表只给 `has_headers` 布尔量），MUST NOT 把掩码提交回来做连接或保存（保存期直接拒）；③**可改**（令牌会轮换，区别于白名单的"创建后不可改"），但"不携带"必须沿用存量——保存调用配置 MUST NOT 顺手清空令牌。物化进 `MCP.json` 的键同名、**空对象不写**（见 `contracts/runtime-api-delta.md` §12） |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 已从本实体移除（产品决定）；读取历史存档时 MUST 收敛掉这两个字段。
 
@@ -128,6 +138,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 4. **存量迁移**：旧文档里的 `endpoints`（`{运行形态: 地址}`）在**读取期**收敛为单一 `url`（优先取 `host_local`，否则取第一个非空值），既有配置不丢。
 4. 修改调用配置 MUST 自动作用于所有引用它的数字人（`FR-044`），无需逐个改动。
 5. `async_tools` 只校验**语法**（数组、元素非空、去重），MUST NOT 因"该工具名不在当前探测到的工具清单里"而拒绝保存——工具清单是探测结果，服务不可达时不构成配置错误（与 `rules_fields` 同一取向）。
+6. **`allowed_tools`（工具白名单，2026-10-03）**：**新建必填且非空**（漏传/空数组 → `VALIDATION_FAILED`）；`PUT` **携带即拒**（`ADM_MCP_TOOL_SCOPE_LOCKED`）——它是"创建时定、之后不可改"的边界设置，静默忽略会让客户端以为改成功了。同 `async_tools`：只校验语法，**不校验名字是否存在于当前清单**（名字漂移由详情页的 `missing_tools` 核对呈现）。平台详情只呈现白名单里的工具；运行环境只把白名单里的工具挂给数字人。
+7. **`headers`（请求头，2026-10-08）**：逐项判据见上表（头名合法且不重复、值为单行非空、非掩码），违反即 `VALIDATION_FAILED`；`PUT` **不携带即沿用存量**、携带即全量替换（`{}` 清空）；`stdio` 丢弃。**新建/保存响应与详情只回掩码**，明文不进任何响应。
 
 **引用关系**：数字人经 `MCP.json` 的 `servers[].name` 按名称引用；引用关系**不落库**（规格关键实体「引用关系」），按需从数字人设计态推导。
 
@@ -161,7 +173,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `description` | string | ✅ | 非空 | 来自元数据块（`FR-038`）；改 `SKILL.md` 正文时**重新解析并同步** |
 | `content` | string | ✅ | 可为空正文 | `SKILL.md` 全文（`FR-036` 要求可查看与编辑） |
 | `files` | array | ✅ | — | 附件清单（相对路径 + 大小），供展示；在线编辑后同步该项大小 |
-| `source` | string | ✅ | — | 安装来源（上传的包名）；在线编辑**不改写来源**，只更新 `updated_at` |
+| `source` | string | ✅ | — | 安装来源（上传的包名；本体市场导入为 `onto_market:{场景}/{本体}`，见契约 §4.6）；在线编辑**不改写来源**，只更新 `updated_at` |
+| `origin` | object | 可选 | — | 本体市场导入的溯源（2026-10-02）：`{ kind: 'onto_market', scenario, ontology, hash }`；缺省 = 外部安装（ZIP 上传等）。`hash` 为导入时的**整包内容指纹**，与市场现算哈希比对即知"市场文件是否变化"（契约 §4.6） |
 | `installed_at` / `updated_at` | string | ✅ | ISO8601 | 任一文件在线保存都会刷新 `updated_at` |
 
 **在线编辑（2026-09-16）**：`SKILL.md` 与 `references/` 等附件**全部可编辑**（`PUT /api/admin/skills/{name}/file`，契约 §4.3.1）。三条硬约束：①可编辑 ⇔ **文本且 ≤ 256KB**（只显示了一部分就不许改写，避免保存即丢内容）；②并发保护用**文件内容哈希**而不是全局 `revision`（编辑只影响一个文件）；③**保存即覆盖、平台不保留任何副本**（"编辑快照"已按 2026-09-16 产品决定移除）——因此界面 MUST 在保存前二次确认并讲明"无法恢复"（`SkillFileEditor.vue`）。
@@ -181,6 +194,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | 7 | 拒绝 ZIP64 之外的畸形条目与重复条目名 | `SKILL_ARCHIVE_UNSAFE` |
 
 **状态流转**：`未安装 → 校验中 → (校验失败：无残留) | (校验通过 → 原子入驻库中)`；`名称冲突 → 等待管理员显式选择「覆盖」或「取消」`（`FR-040`）。**失败 MUST 回滚，MUST NOT 留下半解压残留**（`FR-041`）。
+
+**本体市场导入（2026-10-02）**：安装来源新增**本体市场**（optonto `.data/onto_market`，平台**只读**扫描）。市场侧 SKILL.md 与库内**同一格式**；导入按 `{场景}/{本体}/skills/{技能目录}` **整包目录复制**（不走 ZIP），校验与原子入驻与 ZIP 安装同链路，`source` 记为 `onto_market:{场景}/{本体}`、`origin.hash` 记整包内容指纹。**重名直接拒绝**（不提供覆盖）——市场后续更新不会自动同步：如需更新，先删除库内同名技能再重新导入；"市场文件是否变化"由 `origin.hash` 与市场现算哈希比对判定（契约 §4.6/§4.7）。
 
 **删除**：删除被引用的 SKILL 时，确认环节 MUST 列出受影响的数字人清单并要求二次确认（`FR-042`）；该清单 MUST 与数字人配置中的 SKILL 搭配一致。平台 MUST NOT 为此维护常驻的"被谁引用"浏览视图。
 
@@ -322,7 +337,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 |---|---|---|
 | `soul` | `SOUL.md` | 原样写入（utf8，保留换行与标点） |
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
-| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `file_args` / `confirmation` / `rules_fields` / `async_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `file_args` / `confirmation`(≠never) / `rules_fields` / `async_tools` |
+| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `async_tools` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `async_tools` / `allowed_tools`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
 | `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`） |
 
@@ -330,7 +345,52 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 ---
 
-## 9. 实体关系图
+## 9. 本体（本体库，2026-10-03）
+
+**存放**：`platform-data/onto_market/index.json`（索引）+ `platform-data/onto_market/{场景}/{本体}/` 下的 **`ontology.yaml`（必需）与 `securities.yaml`（可选）**。
+
+**来源**：本体市场（optonto `.data/onto_market`，平台**只读**）中每个 `{场景}/{本体}/` 目录下的同名文件——`ontology.yaml`（本体正文与 6 项 metadata）+ `securities.yaml`（行为安全管控：`confirm` 需人工确认 / `confirm_content` 弹窗文案 / `scope` 权限范围，2026-10-03 扩展）。其余一律不导入：`data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/`（`FR-060`）。
+
+**身份**：`scenario`（一级目录名）+ `ontology_dir`（二级目录名）的组合；同一目录名可以存在于不同场景。存储路径与市场保持一致，便于人工对照。
+
+### 9.1 索引条目（`index.json` 的 `items[]`）
+
+| 字段 | 类型 | 必填 | 约束 | 说明 |
+|---|---|---|---|---|
+| `scenario` | string | ✅ | 单个路径段（≤128 字符，不含分隔符/`..`/控制字符；**允许中文与全角括号**） | 市场一级目录名 |
+| `ontology_dir` | string | ✅ | 同上 | 市场二级目录名；本体身份的稳定部分 |
+| `name` | string | ✅ | 非空 | 展示名：`metadata.ontology_name`，缺失时兜底为 `ontology_dir` |
+| `metadata` | object | ✅ | 6 个键，缺项为 `null` | `created_at` / `deployed_version` / `scenario_name` / `scenario_id` / `ontology_name` / `ontology_id` |
+| `source` | string | ✅ | 恒为 `onto_market:{场景}` | 来源标记（本体只能从市场来） |
+| `hash` | string | ✅ | sha256 hex | 导入时 `ontology.yaml` 的内容指纹（"市场是否变化"的判据之一） |
+| `securities_hash` | string \| null | ✅ | sha256 hex 或 `null` | 导入时 `securities.yaml` 的内容指纹；该本体未配置安全管控时为 `null`（判据之二） |
+| `installed_at` | string | ✅ | ISO8601 | 首次导入时间（**更新不改**） |
+| `updated_at` | string | ✅ | ISO8601 | 最近一次导入/更新时间 |
+
+### 9.2 关键约束
+
+- **只读**：平台 MUST NOT 提供任何编辑本体文件的端点（`FR-059`）；唯一写入口是"从本体市场导入/更新"，写入的是市场快照。`securities.yaml` 同理——**平台不解析其语义**（原样存取与展示），安全管控的执行仍在本体侧/运行环境。
+- **变化检测**：`hash`（sha256 of `ontology.yaml`）与 `securities_hash`（sha256 of `securities.yaml`，`null` 表示无该文件）**都与市场现算值一致**才算 `unchanged`，任一不同（含市场新增/移除安全管控）即 `changed`；`ontology.yaml` 无效或缺失/超限 → `invalid`（原因可读，单条失效不影响其它条目）。
+- **存量记录**：扩展前导入的记录没有 `securities_hash`，读取时归一为 `null`——若市场有 `securities.yaml` 则自然判为 `changed`，一次更新即补齐（MUST NOT 因缺字段报错）。
+- **原子性**：每个文件独立走 `PlatformStore.writeText`（临时文件 → `fsync` → `rename`）；写入顺序为**先文件、后索引**，中途中断只表现为"导入未生效"，不会产生"卡片在、文件缺"的幽灵条目。市场侧移除安全管控时，更新会显式清除库内副本（`PlatformStore.remove`）。
+- **一致性**：`listAll()` 以索引为准并按目录实际存在过滤（与技能库同一口径）。
+- **上限**：单个文件 ≤ 16MB（全项目单文件口径；实测 `ontology.yaml` 约 30KB、`securities.yaml` 约 1.5KB）。
+- **不参与引用**：本体**不被数字人引用**（本期范围），故删除无需引用清单（区别于 SKILL 的 `FR-042`）。
+
+---
+
+## 10. SKILL 与本体库的只读口径（2026-10-03）
+
+| 来源 | 记录标记 | 在线编辑 | 内容变更方式 |
+|---|---|---|---|
+| 本体市场导入（`§4.6~§4.8`） | `origin.kind = "onto_market"` | **禁止**（`ADM_SKILL_READ_ONLY`，界面不渲染编辑入口） | 只能在「从本体市场导入」窗口执行**更新**（以市场现版本整包替换，`FR-060`） |
+| ZIP 上传安装（`§4.4`）／平台侧其它来源 | 无 `origin` | 允许（文本且 ≤256KB，乐观锁 `base_hash`） | 在线编辑，或重新上传 ZIP 覆盖 |
+
+本体库（`§9`）整体只读：平台不提供任何编辑本体文件的端点，写入口只有"从本体市场导入/更新"。
+
+---
+
+## 11. 实体关系图
 
 ```text
                  ┌────────────────────┐

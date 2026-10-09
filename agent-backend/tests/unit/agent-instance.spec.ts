@@ -307,3 +307,71 @@ describe('MCP.json 的 async_tools 异步工具声明（R11）', () => {
     expect((caught as Error).message).toContain('submit_job');
   });
 });
+
+describe('MCP.json 的工具白名单 allowed_tools（2026-10-03）', () => {
+  const withAllowed = (allowed: unknown) => ({ ...httpServer('http'), allowed_tools: allowed });
+
+  it('解析为原始工具名清单：去空白 + 静默去重（与平台同口径）', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withAllowed([' ocr_image ', 'ocr_image', 'query_price'])]),
+    );
+    expect(bundle.mcpServers[0]?.allowedTools).toEqual(['ocr_image', 'query_price']);
+  });
+
+  it('缺省 → undefined（= 不限制，存量行为不变）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [httpServer('http')]));
+    expect(bundle.mcpServers[0]?.allowedTools).toBeUndefined();
+  });
+
+  it('显式空数组可加载：语义同为"不限制"（MUST NOT 读成"一个工具都不给"）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [withAllowed([])]));
+    expect(bundle.mcpServers[0]?.allowedTools).toEqual([]);
+  });
+
+  it('非法形状（非数组 / 元素非字符串 / 空串）→ AgentConfigError', () => {
+    for (const bad of ['ocr_image', 42, [42], ['  '], [null]]) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withAllowed(bad)]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+});
+
+describe('MCP.json 的请求头 headers（2026-10-08）', () => {
+  const withHeaders = (headers: unknown) => ({ ...httpServer('http'), headers });
+
+  it('解析进 McpServerConfig.headers：头名与值两端空白 trim（与平台同口径）', () => {
+    const bundle = loadAgentConfig(
+      writeAgent('demo', [withHeaders({ ' X-MCP-Token ': ' tk-1234567890 ' })]),
+    );
+    expect(bundle.mcpServers[0]?.headers).toEqual({ 'X-MCP-Token': 'tk-1234567890' });
+  });
+
+  it('缺省 → undefined（= 不带请求头，存量 MCP.json 行为零变化）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [httpServer('http')]));
+    expect(bundle.mcpServers[0]?.headers).toBeUndefined();
+  });
+
+  it('非法形状（非对象 / 值非字符串 / 头名非法 / 空值 / 重复头名 / 换行）→ AgentConfigError', () => {
+    const bads = [
+      'X-MCP-Token',
+      42,
+      ['X-MCP-Token'],
+      { 'X-MCP-Token': 42 },
+      { 'X Token': 'v' },
+      { 'X-MCP-Token': '   ' },
+      { 'X-A': 'a', 'x-a': 'b' },
+      { 'X-MCP-Token': 'a\nb' },
+    ];
+    for (const bad of bads) {
+      expect(() => loadAgentConfig(writeAgent('demo', [withHeaders(bad)]))).toThrow(
+        AgentConfigError,
+      );
+    }
+  });
+
+  it('空对象可加载（语义与缺省同为"不带请求头"）', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', [withHeaders({})]));
+    expect(bundle.mcpServers[0]?.headers).toEqual({});
+  });
+});

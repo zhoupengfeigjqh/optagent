@@ -20,7 +20,8 @@ const envSchema = z.object({
   OPT_AGENT_ROOT: z.string().min(1).default('.opt-agent'),
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
   IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_800_000),
-  MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(30_000),
+  /** 单次 MCP 工具调用超时（毫秒）；同步型算法工具（如 hd_scheduling_submit）依赖此上限，勿再调小 */
+  MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
   /**
    * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。
    * 改这里时 MUST 同步改：admin-backend/src/config.ts 的同名项、

@@ -7,17 +7,26 @@
  *   外置大结果展开时才拉 `/tool-calls/{call_id}`
  * - **流式态**：SSE 只给名称与状态，结果尚未产生（也不外显结果）
  *
+ * 展示分两层（2026-10-08 改版，spec §4.6 / TR-32~TR-36）：
+ * - **计数行**（常显）：`本轮 N 次调用 · 报错 M 次`——报错数**不藏在展开后**
+ * - **摘要行**（≥2 次调用时）：最新一次调用 + 明细开关，**整行一个按钮**
+ * - **明细区**（展开后）：本轮全部调用、时间正序；每条仍可展开自己的结果
+ *
  * 降级（TR-16）：外置正文已被临时空间清理时接口返回 410，卡片显示
  * "内容已被清理"而**不是**错误态——元数据仍然完整。
  */
-import { reactive } from 'vue'
+import { computed, useId } from 'vue'
 
 import type { ToolCallResult } from '../../api/types'
+import { useToolPanels, type ToolPanelState } from '../../composables/useToolPanels'
 import {
-  TOOL_STATUS_LABEL,
   formatArgsDigest,
   formatBytes,
   formatDuration,
+  isToolCallFinished,
+  summarizeToolCalls,
+  toolGroupKey,
+  toolStatusLabel,
   type ToolCallItem,
 } from '../../utils/tool-calls'
 
@@ -29,37 +38,53 @@ const props = withDefaults(
      * 抛出的错误若 `code === 'TOOL_RESULT_EXPIRED'` 视为"内容已清理"而非失败。
      */
     loadResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
+    /**
+     * 本轮是否**仍在流式进行中**（TR-33）：只决定 `running` 的文案是"进行中"还是"未完成"。
+     * 由 `MessageBubble` 从 `streaming.phase` 显式传入——MUST NOT 用"能否懒加载"之类的间接信号推断。
+     */
+    live?: boolean
   }>(),
-  { loadResult: undefined },
+  { loadResult: undefined, live: false },
 )
 
-interface PanelState {
-  open: boolean
-  loading: boolean
-  /** 懒加载到的正文（`null` = 尚未加载） */
-  content: string | null
-  expired: boolean
-  error: string | null
+const panels = useToolPanels()
+
+/** 明细区 / 结果体的 DOM id：同一页面挂着多个实例（每条消息一个），用 `useId()` 保证唯一 */
+const uid = useId()
+const detailsId = `${uid}-details`
+const bodyId = (index: number): string => `${uid}-body-${index}`
+
+const stats = computed(() => summarizeToolCalls(props.items))
+/** 最新一次调用（摘要行的展示对象） */
+const latest = computed<ToolCallItem | null>(() => props.items[props.items.length - 1] ?? null)
+/** ≥2 次调用才有"被折叠掉的明细"；只有 1 次时该卡片即全部（TR-35） */
+const foldable = computed(() => props.items.length > 1)
+const groupKey = computed(() => toolGroupKey(props.items))
+const detailsOpen = computed(() => foldable.value && panels.isDetailsOpen(groupKey.value))
+/** 明细区是否渲染：≥2 次时看展开态；只有 1 次时恒渲染（无折叠层，保持"一次点击看结果"） */
+const detailsVisible = computed(() => !foldable.value || detailsOpen.value)
+
+function toggleDetails(): void {
+  panels.setDetailsOpen(groupKey.value, !detailsOpen.value)
 }
 
-const panels = reactive<Record<string, PanelState>>({})
-
-/**
- * 取（必要时创建）某张卡片的展开态。
- *
- * 必须**返回 reactive 代理**而不是刚 new 出来的原始对象——否则后续的
- * `panel.loading = false` 不触发视图更新，卡片会永远停在"加载中"。
- */
-function panelOf(callId: string): PanelState {
-  if (!panels[callId]) {
-    panels[callId] = { open: false, loading: false, content: null, expired: false, error: null }
-  }
-  return panels[callId]!
+/** 可展开 = 已有终态（TR-33）；规则来自 `utils`，组件不自己重写判断 */
+function canExpand(item: ToolCallItem): boolean {
+  return isToolCallFinished(item.status)
 }
 
-/** 展开/收起；首次展开且结果为外置时懒加载正文。 */
+function statusLabel(item: ToolCallItem): string {
+  return toolStatusLabel(item.status, props.live)
+}
+
+function panelOf(item: ToolCallItem): ToolPanelState {
+  return panels.panelOf(item.callId)
+}
+
+/** 展开/收起；首次展开且结果为外置时懒加载正文。运行中没有结果可看，直接不响应（TR-33）。 */
 async function onToggle(item: ToolCallItem): Promise<void> {
-  const panel = panelOf(item.callId)
+  if (!canExpand(item)) return
+  const panel = panelOf(item)
   if (panel.open) {
     panel.open = false
     return
@@ -85,7 +110,7 @@ async function onToggle(item: ToolCallItem): Promise<void> {
 
 /** 展开后展示的正文：懒加载结果优先，其次内联正文。 */
 function displayContent(item: ToolCallItem): string {
-  const loaded = panels[item.callId]?.content
+  const loaded = panelOf(item).content
   if (loaded !== null && loaded !== undefined) return loaded
   return item.content ?? ''
 }
@@ -97,53 +122,82 @@ function isExpired(cause: unknown): boolean {
 
 <template>
   <div v-if="items.length" class="tool-calls">
-    <p class="tool-calls__head">本轮调用 {{ items.length }} 个工具</p>
+    <!-- 计数行（常显）：报错数 MUST 在折叠态可见——失败绝不能被折叠隐藏（TR-32） -->
+    <p class="tool-calls__head" data-test="tool-counts">
+      本轮 {{ stats.total }} 次调用 · 报错 {{ stats.errors }} 次
+    </p>
 
-    <div v-for="item in items" :key="item.callId" class="tool-call">
-      <button
-        type="button"
-        class="tool-call__head"
-        :aria-expanded="panels[item.callId]?.open === true"
-        @click="onToggle(item)"
-      >
-        <span class="tool-call__name">{{ item.name }}</span>
-        <span class="tool-call__status" :class="`tool-call__status--${item.status}`">
-          {{ TOOL_STATUS_LABEL[item.status] }}
-        </span>
-        <span v-if="item.durationMs !== undefined" class="tool-call__meta">
-          {{ formatDuration(item.durationMs) }}
-        </span>
-        <span v-if="item.size !== undefined" class="tool-call__meta">
-          {{ formatBytes(item.size) }}
-        </span>
-        <span class="tool-call__toggle">
-          {{ panels[item.callId]?.open ? '收起' : '展开' }}
-        </span>
-      </button>
+    <!-- 摘要行（≥2 次调用时）：最新一次调用 + 明细开关，**整行一个按钮**（TR-34）。
+         只有 1 次调用时不渲染它：没有"被折叠的内容"，多一层点击是纯负担（TR-35） -->
+    <button
+      v-if="foldable && latest"
+      type="button"
+      class="tool-calls__summary"
+      :aria-expanded="detailsOpen"
+      :aria-controls="detailsId"
+      data-test="tool-summary"
+      @click="toggleDetails"
+    >
+      <span class="tool-calls__latest">最新</span>
+      <span class="tool-call__name">{{ latest.name }}</span>
+      <span class="tool-call__status" :class="`tool-call__status--${latest.status}`">
+        {{ statusLabel(latest) }}
+      </span>
+      <span v-if="latest.durationMs !== undefined" class="tool-call__meta">
+        {{ formatDuration(latest.durationMs) }}
+      </span>
+      <span class="tool-call__toggle">{{ detailsOpen ? '收起明细' : '查看明细' }}</span>
+    </button>
 
-      <div v-if="panels[item.callId]?.open" class="tool-call__body">
-        <p v-if="item.summary" class="tool-call__summary">{{ item.summary }}</p>
-        <p v-if="item.argsDigest" class="tool-call__args">
-          入参：{{ formatArgsDigest(item.argsDigest) }}
-        </p>
+    <!-- 明细区：本轮全部调用（时间正序，最早在上）。它是摘要行的**兄弟节点**——
+         摘要行是按钮，而按钮内不能再嵌交互元素（TR-34） -->
+    <div v-if="detailsVisible" :id="detailsId" class="tool-calls__details" data-test="tool-details">
+      <div v-for="(item, index) in items" :key="item.callId" class="tool-call">
+        <button
+          type="button"
+          class="tool-call__head"
+          :disabled="!canExpand(item)"
+          :aria-expanded="canExpand(item) ? panelOf(item).open : undefined"
+          :aria-controls="canExpand(item) ? bodyId(index) : undefined"
+          @click="onToggle(item)"
+        >
+          <span class="tool-call__name">{{ item.name }}</span>
+          <span class="tool-call__status" :class="`tool-call__status--${item.status}`">
+            {{ statusLabel(item) }}
+          </span>
+          <span v-if="item.durationMs !== undefined" class="tool-call__meta">
+            {{ formatDuration(item.durationMs) }}
+          </span>
+          <span v-if="item.size !== undefined" class="tool-call__meta">
+            {{ formatBytes(item.size) }}
+          </span>
+          <!-- 运行中没有结果可看：不出现"展开"字样，避免"点开却是空的"（TR-33） -->
+          <span v-if="canExpand(item)" class="tool-call__toggle">
+            {{ panelOf(item).open ? '收起' : '展开' }}
+          </span>
+        </button>
 
-        <p v-if="panels[item.callId]?.loading" class="tool-call__hint">加载中…</p>
-        <p v-else-if="panels[item.callId]?.expired" class="tool-call__hint">
-          内容已被临时空间清理（原 {{ formatBytes(item.artifactSize ?? 0) }}）
-        </p>
-        <p v-else-if="panels[item.callId]?.error" class="tool-call__hint tool-call__hint--error">
-          {{ panels[item.callId]?.error }}
-        </p>
-        <pre v-else-if="displayContent(item)" class="tool-call__content">{{
-          displayContent(item)
-        }}</pre>
-        <p v-else class="tool-call__hint">
-          {{ item.status === 'running' ? '进行中，暂无结果' : '无结果内容' }}
-        </p>
+        <div v-if="canExpand(item) && panelOf(item).open" :id="bodyId(index)" class="tool-call__body">
+          <p v-if="item.summary" class="tool-call__summary">{{ item.summary }}</p>
+          <p v-if="item.argsDigest" class="tool-call__args">
+            入参：{{ formatArgsDigest(item.argsDigest) }}
+          </p>
 
-        <p v-if="item.truncated" class="tool-call__hint">
-          结果过大，仅保留了前一部分
-        </p>
+          <p v-if="panelOf(item).loading" class="tool-call__hint">加载中…</p>
+          <p v-else-if="panelOf(item).expired" class="tool-call__hint">
+            内容已被临时空间清理（原 {{ formatBytes(item.artifactSize ?? 0) }}）
+          </p>
+          <p v-else-if="panelOf(item).error" class="tool-call__hint tool-call__hint--error">
+            {{ panelOf(item).error }}
+          </p>
+          <pre v-else-if="displayContent(item)" class="tool-call__content">{{
+            displayContent(item)
+          }}</pre>
+          <!-- running 不可展开，故此处只剩"终态但无内容"一种情况 -->
+          <p v-else class="tool-call__hint">无结果内容</p>
+
+          <p v-if="item.truncated" class="tool-call__hint">结果过大，仅保留了前一部分</p>
+        </div>
       </div>
     </div>
   </div>
@@ -159,6 +213,38 @@ function isExpired(cause: unknown): boolean {
 .tool-calls__head {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
+}
+
+/* 摘要行：观感与卡片头一致，但它是"本轮概览"而非某条调用的卡片 */
+.tool-calls__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-calls__summary:hover {
+  background: var(--color-surface);
+}
+
+.tool-calls__latest {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.tool-calls__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .tool-call {
@@ -185,6 +271,15 @@ function isExpired(cause: unknown): boolean {
 
 .tool-call__head:hover {
   background: var(--color-surface);
+}
+
+/* 运行中：没有结果可看，故不给可点暗示（不是"静默无反应"，是明确不可点，TR-33） */
+.tool-call__head:disabled {
+  cursor: default;
+}
+
+.tool-call__head:disabled:hover {
+  background: transparent;
 }
 
 .tool-call__name {

@@ -178,12 +178,10 @@ function isFieldOrphan(row: RuleRow): boolean {
   <fieldset class="rules-field-table">
     <legend class="field__label">算法规则参数设置</legend>
     <p class="field__hint">
-      声明哪些工具的 array 入参承载算法规则清单：用户在 HITL 参数确认窗中可点
+      此条仅针对调度算法有效。声明需承载算法规则清单的工具参数：用户在 HITL 参数确认窗中可点
       「从算法规则选择」，从「数据准备/算法规则」的最新规则文件勾选规则并调整优先级，
       确认后生成 array[object] 填入该字段。只对该工具自身开启「调用人工确认」时生效；
       无需确认时参数由模型直接填写，本设置不生效。
-      字段嵌在入参对象内部时按**对象路径**声明（如 <code>input.targetPriorities</code>）：
-      确认窗里入口挂在首段对应的控件旁，勾选后写回该 JSON 内的对应位置。
     </p>
 
     <table v-if="rows.length > 0" class="rules-field-table__grid">

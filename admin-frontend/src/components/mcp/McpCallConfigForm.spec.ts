@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 组件测试：MCP 调用配置表单（2026-09-27 改版）
  *
  * 守住三件事：
@@ -27,14 +27,25 @@ const SERVICE: McpServiceDetail = {
   args: null,
   file_args: { ocr_image: { image: 'url' } },
   tools: [
-    { name: 'ocr_image', description: '识别图片中的文字', parameters: {} },
+    // ocr_image 声明了 result_url → 出现在「后台计算（异步工具）」可选项里；
+    // parse_excel 未声明 → 该区不展示它（2026-10-03 产品决定：只列支持异步的工具）
+    {
+      name: 'ocr_image',
+      description: '识别图片中的文字',
+      parameters: { type: 'object', properties: { result_url: { type: 'string' } } },
+    },
     { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
   ],
   tools_truncated: false,
   tools_error: null,
   references: [],
   revision: 1,
+  allowed_tools: [],
+  missing_tools: [],
+  headers: {},
 }
+
+/* 请求头（访问令牌）的用例见同目录 `McpCallConfigForm.headers.spec.ts`（本文件触 500 行门禁，故分居） */
 
 /** 工具带参数 Schema 的夹具：字段下拉只列 array 入参 */
 const SERVICE_WITH_SCHEMA: McpServiceDetail = {
@@ -222,20 +233,33 @@ describe('McpCallConfigForm —— 编辑态', () => {
     expect(testButton(wrapper)?.attributes('disabled')).toBeDefined()
   })
 
-  it('按钮位置：「发起测试」与连接地址同排；保存/创建/删除不在表单内（在详情页右上角）', async () => {
+  it('按钮位置：「发起测试」在「连接配置」框内（测的就是框内的值）；保存/创建/删除不在表单内', async () => {
     const wrapper = mountForm()
     await flushPromises()
 
     const test = testButton(wrapper)
     expect(test).toBeTruthy()
     expect(test?.classes()).toContain('btn--success')
-    // 与连接地址同处一个 target-row（测的就是这一行的值）
-    expect(wrapper.find('.mcp-config-form__target-row #mcp-url').exists()).toBe(true)
-    expect(wrapper.findAll('.mcp-config-form__target-row button')).toHaveLength(1)
+    // 连接配置框：第一行是「连接地址 + 传输方式」，测试按钮在框内底部
+    expect(wrapper.find('.mcp-config-form__conn #mcp-url').exists()).toBe(true)
+    expect(wrapper.find('.mcp-config-form__conn #mcp-transport').exists()).toBe(true)
+    expect(wrapper.findAll('.mcp-config-form__conn-actions button')).toHaveLength(1)
 
     expect(
       wrapper.findAll('button').filter((b) => /保存调用配置|创建服务|删除服务/.test(b.text())),
     ).toHaveLength(0)
+  })
+
+  it('连接配置同框：连接地址与传输方式同排（第一行），请求头在下一行且可空', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+
+    const row = wrapper.find('.mcp-config-form__conn-row')
+    expect(row.find('#mcp-url').exists()).toBe(true)
+    expect(row.find('#mcp-transport').exists()).toBe(true)
+    // 请求头**不在**第一行：它是框内的独立一行（可空）
+    expect(row.find('[data-test="headers-input"]').exists()).toBe(false)
+    expect(wrapper.find('.mcp-config-form__conn [data-test="headers-input"]').exists()).toBe(true)
   })
 
   it('服务名只读（名称即工具前缀，创建后不可改）；「发起测试」恒提供', async () => {

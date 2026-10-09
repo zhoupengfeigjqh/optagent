@@ -58,7 +58,13 @@ function buildCatalog(runtime: FlakyRuntime): UnifiedCatalog {
   const store = new PlatformStore(path.join(root, '.platform-data'));
   store.ensureLayout();
   const mcpConfigs = new McpServiceConfigService(store);
-  mcpConfigs.create({ name: 'ocr', transport: 'http', url: 'http://ocr:8000/mcp' });
+  mcpConfigs.create({
+    name: 'ocr',
+    transport: 'http',
+    url: 'http://ocr:8000/mcp',
+    // 工具白名单：新建必填非空（2026-10-03）；本文件不涉及 MCP 工具清单
+    allowed_tools: ['ocr_image'],
+  });
   return new UnifiedCatalog({
     runtime,
     mcpConfigs,

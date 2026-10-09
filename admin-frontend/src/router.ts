@@ -1,27 +1,29 @@
 /**
  * 极简路由（原生 History API + `popstate`，**不引入 `vue-router`**，`research.md` D5）。
  *
- * 管理界面的导航模型是**常驻一级导航 4 项**（`FR-053`）+ 功能区内两级
- * （列表 ↔ 详情/编辑器），不需要嵌套路由与守卫，`vue-router` 的收益不足以
- * 抵消新增依赖与升级成本（原则六）。
+ * 管理界面的导航模型是**常驻一级导航 5 项**（`FR-053`，2026-10-03 由 4 项扩为 5 项
+ * ——新增「本体管理」）+ 功能区内两级（列表 ↔ 详情/编辑器），不需要嵌套路由与守卫，
+ * `vue-router` 的收益不足以抵消新增依赖与升级成本（原则六）。
  *
  * 路径方案：`{base}/{功能区}[/{详情对象}]?tab={功能区内分区}`
  *  - `/admin/agents`            → 数字人设计列表
  *  - `/admin/agents/demo`       → 数字人 demo 的设计态
  *  - `/admin/agents/demo?tab=mcp` → 设计态内 MCP 页签
+ *  - `/admin/ontology/原材料采购和库存?scenario=生产调度` → 本体详情（身份是"场景 + 目录名"两段，场景走查询参数）
  *  - `/admin/deploy?tab=anomalies` → 部署区内的异常项汇总分区
  *
  * 自建路由属"自研基础设施"，故 MUST 有单元测试（原则三、D5）。
  */
 import { ref, type Ref } from 'vue'
 
-/** 四个功能区（常驻一级导航，`FR-053`） */
-export const ROUTE_NAMES = ['mcp', 'skills', 'agents', 'deploy'] as const
+/** 五个功能区（常驻一级导航，`FR-053`） */
+export const ROUTE_NAMES = ['mcp', 'ontology', 'skills', 'agents', 'deploy'] as const
 export type RouteName = (typeof ROUTE_NAMES)[number]
 
 /** 一级导航条目（标签与顺序即界面呈现顺序） */
 export const NAV_ITEMS: ReadonlyArray<{ name: RouteName; label: string }> = [
   { name: 'mcp', label: 'MCP 服务' },
+  { name: 'ontology', label: '本体管理' },
   { name: 'skills', label: 'SKILL 管理' },
   { name: 'agents', label: '数字人设计' },
   { name: 'deploy', label: '数字人部署' },

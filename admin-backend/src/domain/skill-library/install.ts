@@ -34,6 +34,7 @@ import {
   type SkillFileContent,
 } from './file-access.js';
 import { isSafeSkillName, parseSkillMetadata } from './metadata.js';
+import { assertSkillEditable, isReadOnlyOrigin, type SkillOrigin } from './origin.js';
 
 const INDEX_REL = `${SKILLS_DIR}/index.json`;
 
@@ -57,6 +58,8 @@ export interface SkillRecord {
   description: string;
   files: SkillFileInfo[];
   source: string;
+  /** 来源标记；缺省 = 外部安装（ZIP 上传等） */
+  origin?: SkillOrigin;
   installed_at: string;
   updated_at: string;
 }
@@ -169,7 +172,12 @@ export class SkillLibraryService {
 
   /** 读取技能内**单个文件**（含附件）：见 `file-access.ts` 的安全与体积口径 */
   readFile(name: string, relPath: unknown): SkillFileContent {
-    return readSkillFile(this.fileDeps(), this.dirRel(name), name, relPath);
+    const content = readSkillFile(this.fileDeps(), this.dirRel(name), name, relPath);
+    // 市场来源只读（`FR-062`）：`editable` 恒 false——与 §4.3.1 的写入拦截同一口径，
+    // 任何客户端据此即可判断"不给编辑入口"，不必各自再去读 `origin`
+    return isReadOnlyOrigin(this.listAll().find((item) => item.name === name)?.origin)
+      ? { ...content, editable: false }
+      : content;
   }
 
   /**
@@ -187,6 +195,9 @@ export class SkillLibraryService {
     content: unknown,
     baseHash: unknown,
   ): SkillFileWriteResult {
+    // 市场来源**只读**（`FR-062`）：权威拦截点在此，路由与界面都只是引导（见 `origin.ts`）
+    assertSkillEditable(name, this.listAll().find((item) => item.name === name)?.origin);
+
     const outcome = writeSkillFile(
       this.fileDeps(),
       this.dirRel(name),
@@ -280,6 +291,133 @@ export class SkillLibraryService {
       files: record.files,
       installed_at: record.installed_at,
       overwritten: existing !== undefined,
+    };
+  }
+
+  /**
+   * 从**目录内容**直接安装（2026-10-02：本体市场导入专用，见 `onto-market.ts`）。
+   *
+   * 与 `install()` 的差别只在"来源"：ZIP 走解压校验，这里由调用方（市场扫描模块）
+   * 读好文件并保证路径安全；后续的元数据校验、**重名直接拒绝**（市场导入不提供
+   * 覆盖，库仍是唯一权威来源）、原子入驻、索引同步与版本递增完全同一条链路。
+   *
+   * @param files 相对技能根的 posix 路径 → 内容（必须含 `SKILL.md`，路径不越界）
+   */
+  installFromDirectory(
+    files: Map<string, Buffer>,
+    options: { source: string; origin: SkillOrigin },
+  ): SkillInstallResult {
+    const skillMd = files.get('SKILL.md');
+    if (skillMd === undefined) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '技能目录缺少 SKILL.md');
+    }
+    const metadata = parseSkillMetadata(skillMd.toString('utf8'));
+    const existing = this.listAll().find((item) => item.name === metadata.name);
+    if (existing) {
+      throw new ApiError(
+        ERROR_CODES.ADM_SKILL_NAME_TAKEN,
+        `共享技能库中已存在同名 SKILL：${metadata.name}；目录导入不提供覆盖，` +
+          '如需更新请先删除库内同名技能再重新导入',
+      );
+    }
+
+    const now = new Date().toISOString();
+    const entries = [...files.entries()]
+      .map(([relPath, content]) => ({ path: relPath, size: content.length }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    const record: SkillRecord = {
+      name: metadata.name,
+      description: metadata.description,
+      files: entries,
+      source: options.source,
+      origin: options.origin,
+      installed_at: now,
+      updated_at: now,
+    };
+
+    this.commitAtomic(metadata.name, {
+      prefix: '',
+      entries,
+      files,
+      skillMd: skillMd.toString('utf8'),
+    });
+    this.writeIndex([...this.listAll().filter((item) => item.name !== metadata.name), record]);
+    this.store.bumpRevision();
+    this.logger?.info(
+      { event: 'skill.installed', skill: metadata.name, source: options.source },
+      'SKILL 已从目录安装',
+    );
+
+    return {
+      name: record.name,
+      description: record.description,
+      files: entries,
+      installed_at: record.installed_at,
+      overwritten: false,
+    };
+  }
+
+  /**
+   * 从**目录内容**更新一份已存在的技能（2026-10-02：本体市场「更新」专用）。
+   *
+   * 与 `installFromDirectory` 的差别：目标**必须已存在**（不存在应走导入）；
+   * 入驻复用同一条 `commitAtomic` 链路——旧目录先改名备份、新内容改名入驻、
+   * 失败回滚，**时间窗为零**（区别于"先 remove 再 install"的两步做法，
+   * 避免窗口内部署物化出缺技能的数字人）。`installed_at` 保留原值（首次安装时间
+   * 不因更新而改变），`updated_at` 刷为当前时间。
+   *
+   * @param files 相对技能根的 posix 路径 → 内容（必须含 `SKILL.md`，路径不越界）
+   */
+  updateFromDirectory(
+    files: Map<string, Buffer>,
+    options: { source: string; origin: SkillOrigin },
+  ): SkillInstallResult {
+    const skillMd = files.get('SKILL.md');
+    if (skillMd === undefined) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '技能目录缺少 SKILL.md');
+    }
+    const metadata = parseSkillMetadata(skillMd.toString('utf8'));
+    const existing = this.listAll().find((item) => item.name === metadata.name);
+    if (!existing) {
+      throw new ApiError(
+        ERROR_CODES.ADM_SKILL_NOT_FOUND,
+        `共享技能库中不存在同名 SKILL：${metadata.name}（更新只针对已导入的技能，请先导入）`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const entries = [...files.entries()]
+      .map(([relPath, content]) => ({ path: relPath, size: content.length }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    const record: SkillRecord = {
+      name: metadata.name,
+      description: metadata.description,
+      files: entries,
+      source: options.source,
+      origin: options.origin,
+      installed_at: existing.installed_at,
+      updated_at: now,
+    };
+
+    this.commitAtomic(metadata.name, {
+      prefix: '',
+      entries,
+      files,
+      skillMd: skillMd.toString('utf8'),
+    });
+    this.writeIndex([...this.listAll().filter((item) => item.name !== metadata.name), record]);
+    this.store.bumpRevision();
+    this.logger?.info(
+      { event: 'skill.updated', skill: metadata.name, source: options.source },
+      'SKILL 已从目录更新（整包替换）',
+    );
+
+    return {
+      name: record.name,
+      description: record.description,
+      files: entries,
+      installed_at: record.installed_at,
+      overwritten: true,
     };
   }
 

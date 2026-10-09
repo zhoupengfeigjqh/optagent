@@ -19,6 +19,14 @@ export interface McpConnectionTarget {
   url?: string | null;
   command?: string | null;
   args?: string[] | null;
+  /**
+   * 请求头（2026-10-08）：本体侧「自建发布」的动态容器要求 `X-MCP-Token`，
+   * 缺了直接 401（服务本身是好的，只看得到"连不上"）。仅对 `http` 有意义。
+   *
+   * 这是**凭据**：本模块 MUST NOT 把它写进任何回显（`McpTestReport.target` 只带
+   * 传输方式/地址/命令）或日志。
+   */
+  headers?: Record<string, string> | null;
 }
 
 export interface McpToolDescriptor {
@@ -38,7 +46,12 @@ export interface McpTestReport {
   ok: boolean;
   connectivity: McpProbeStep;
   capability: McpProbeStep & { method: string };
-  /** 实际被测试的连接目标——界面上 MUST 展示，否则管理员无从知道"测的是谁" */
+  /**
+   * 实际被测试的连接目标——界面上 MUST 展示，否则管理员无从知道"测的是谁"。
+   *
+   * **不含请求头**：那是凭据，回显会给"令牌进日志/截图"开口子；界面只需知道
+   * "测的是哪个地址"（是否带了令牌由配置本身决定，见 `headers` 字段的掩码展示）。
+   */
   target: { transport: 'http' | 'stdio'; url: string | null; command: string | null };
   checked_at: string;
 }
@@ -108,10 +121,17 @@ export interface McpClientLike {
 
 async function defaultCreateClient(target: McpConnectionTarget): Promise<McpClientLike> {
   const client = new Client({ name: 'optagent-admin-backend', version: '0.1.0' });
+  // 请求头经 `requestInit` 交给 SDK（`StreamableHTTPClientTransportOptions.requestInit`）：
+  // 这是 MCP 生态的通行做法（`{"mcpServers":{...,"headers":{...}}}` 片段同义）。
+  // 空对象不传，保持"没有该选项"的既有行为（便于与旧日志/旧行为对齐）。
+  const headers = target.headers && Object.keys(target.headers).length > 0 ? target.headers : null;
   const transport =
     target.transport === 'stdio'
       ? new StdioClientTransport({ command: target.command!, args: target.args ?? [] })
-      : new StreamableHTTPClientTransport(new URL(target.url!));
+      : new StreamableHTTPClientTransport(
+          new URL(target.url!),
+          headers ? { requestInit: { headers } } : undefined,
+        );
   await client.connect(transport as unknown as Parameters<Client['connect']>[0]);
 
   return {

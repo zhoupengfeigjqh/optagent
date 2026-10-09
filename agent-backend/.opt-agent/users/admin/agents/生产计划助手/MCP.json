@@ -1,52 +1,33 @@
 {
   "servers": [
     {
+      "name": "jev",
+      "transport": "http",
+      "url": "http://localhost:8101/mcp",
+      "file_args": {
+        "noul": {
+          "state_file": "url"
+        }
+      },
+      "allowed_tools": [
+        "noul"
+      ]
+    },
+    {
       "name": "ocr",
       "transport": "http",
-      "url": "http://127.0.0.1:8000/mcp",
+      "url": "http://localhost:8000/mcp",
       "file_args": {
         "ocr_image": {
           "image": "url"
         }
       },
-      "confirmation": "always",
       "async_tools": [
         "ocr_image"
+      ],
+      "allowed_tools": [
+        "ocr_image"
       ]
-    },
-    {
-      "name": "jev",
-      "transport": "http",
-      "url": "http://127.0.0.1:8001/mcp",
-      "file_args": {
-        "noul": {
-          "state_file": "url"
-        },
-        "choice": {
-          "state_file": "url"
-        },
-        "score": {
-          "state_file": "url"
-        }
-      }
-    },
-    {
-      "name": "hd-algorithm",
-      "transport": "http",
-      "url": "http://192.168.0.188:8080/mcp",
-      "file_args": {
-        "hd_algorithm_input_parser": {
-          "items[].excelFileUrl": "url:from=items[].realRelativePath"
-        }
-      },
-      "confirmation": {
-        "tools": [
-          "hd_scheduling_submit"
-        ]
-      },
-      "rules_fields": {
-        "hd_scheduling_submit": "input.targetPriorities"
-      }
     }
   ]
 }

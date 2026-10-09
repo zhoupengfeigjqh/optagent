@@ -92,6 +92,8 @@ export interface McpServiceListItem {
   transport: 'http' | 'stdio'
   /** 连接地址（`http` 服务必有；`stdio` 为 null） */
   url: string | null
+  /** 是否配置了请求头（2026-10-08；卡片徽标用）。**只给布尔量**：请求头里是凭据，值一律不下发 */
+  has_headers: boolean
 }
 
 export interface McpToolInfo {
@@ -131,6 +133,19 @@ export interface McpServiceDetail {
    * 并在下一轮对话注入「后台计算结果」清单。缺省/空数组 = 不启用。
    */
   async_tools?: string[]
+  /**
+   * **工具白名单**（2026-10-03）：该服务可见的原始工具名清单。
+   * 空数组 = 不限制（白名单上线前的存量服务）；创建时设定，**之后不可修改**。
+   */
+  allowed_tools: string[]
+  /**
+   * 白名单里**当前服务清单中已不存在**的工具名（下架/改名）——界面据此标异常。
+   * **只在探测成功时才有意义**：服务不可达时恒为 `[]`（"核对不了"由 `tools_error` 表达）。
+   */
+  missing_tools: string[]
+  /** **请求头（值已掩码）**（2026-10-08）：空对象 = 未配置。掩码仅供展示，MUST NOT 提交回去（保存期会拒） */
+  headers: Record<string, string>
+  /** 只含白名单里的工具（顺序与白名单一致）；不限制时即服务全量 */
   tools: McpToolInfo[]
   tools_truncated: boolean
   tools_error?: string | null
@@ -151,6 +166,8 @@ export interface McpServiceBasics {
   url?: string
   command?: string
   args?: string[]
+  /** **请求头**（2026-10-08；真实值，仅 `http`）：缺省 = 沿用存量，提供 = 全量替换（`{}` 清空） */
+  headers?: Record<string, string>
 }
 
 /** `PUT /api/admin/mcp/services/{name}` 的载荷（契约 §3.3）；`revision` 为乐观锁版本 */
@@ -169,15 +186,35 @@ export interface McpServiceConfigPayload extends McpServiceBasics {
 export type McpServiceConfigInput = Omit<McpServiceConfigPayload, 'revision'>
 
 /**
- * `POST /api/admin/mcp/services` 的新建载荷（契约 §3.3，2026-09-27）。
+ * `POST /api/admin/mcp/services` 的新建载荷（契约 §3.3.1，2026-09-27；2026-10-03 起含白名单）。
  *
- * 与保存载荷的差别有两点：**名称由管理员指定**（且全局唯一）、
- * 只需提供基础字段（其余调用配置依赖工具清单，创建后到详情页补全）；
- * `revision` 可选——带了即做乐观锁校验。
+ * 与保存载荷的差别有三点：**名称由管理员指定**（且全局唯一）、
+ * **`allowed_tools` 必填非空**（服务端还会先连一次服务，连不上即创建失败且不落盘）、
+ * 其余调用配置依赖工具清单，创建后到详情页补全；`revision` 可选——带了即做乐观锁校验。
  */
 export interface McpServiceCreatePayload extends McpServiceBasics {
   name: string
+  /** 工具白名单（2026-10-03）：至少一个；创建后不可修改 */
+  allowed_tools: string[]
   revision?: number
+}
+
+/**
+ * 新建前的**工具清单探测**结果（契约 §3.9，2026-10-03）。
+ *
+ * 与 `McpTestResult` 的分工：那个回答"已登记的服务通不通"，这个回答"这个**新**目标有哪些工具"。
+ */
+export interface McpProbeResult {
+  ok: boolean
+  tools: McpToolInfo[]
+  tools_truncated: boolean
+  /** `ok=false` 时的可读原因；`ok=true` 时为 `null` */
+  error: string | null
+  /** `ok=false` 时的错误码（如 `ADM_RUNTIME_UNREACHABLE`） */
+  error_code: string | null
+  /** 实际探测目标——界面上 MUST 展示，否则"测的是谁"不可见 */
+  target: { transport: 'http' | 'stdio'; url: string | null; command: string | null }
+  checked_at: string
 }
 
 /**
@@ -200,6 +237,10 @@ export interface McpServiceConfigSaved {
   rules_fields: Record<string, string>
   async_tools: string[]
   confirmation: McpConfirmation
+  /** 工具白名单（2026-10-03）：创建时设定，保存调用配置不改动它（服务端会拒绝携带） */
+  allowed_tools: string[]
+  /** 请求头（2026-10-08）：同为**掩码值**（界面据此就地刷新展示） */
+  headers: Record<string, string>
   updated_at: string
   revision: number
   affected_agents: string[]
@@ -267,61 +308,17 @@ export interface McpStatsResponse {
 
 /* ---------- §4 SKILL ---------- */
 
-export interface SkillListItem {
-  name: string
-  description: string
-  installed_at: string
-  updated_at: string
-  source: string
-}
-
-export interface SkillDetail {
-  name: string
-  description: string
-  content: string
-  /** `SKILL.md` 的内容哈希：详情页直接改正文时的乐观锁基准 */
-  content_hash: string
-  files: Array<{ path: string; size: number }>
-  source: string
-  installed_at: string
-  updated_at: string
-  revision: number
-}
-
-/** 技能内单个文件的内容（`GET /api/admin/skills/{name}/file`） */
-export interface SkillFileContent {
-  name: string
-  path: string
-  size: number
-  /** 二进制文件：`content` 为 null，界面只提示大小 */
-  binary: boolean
-  /** 超出上限（256KB）时为 true，`content` 只含前 256KB */
-  truncated: boolean
-  content: string | null
-  /** 内容哈希：保存时作为乐观锁基准原样回传 */
-  hash: string
-  /** 是否可在线编辑：文本且完整（二进制、超 256KB 均为 false，界面不给编辑入口） */
-  editable: boolean
-}
-
-/** 保存技能内单个文件的结果（`PUT /api/admin/skills/{name}/file`） */
-export interface SkillFileSaved {
-  name: string
-  path: string
-  size: number
-  /** 保存后的**新**哈希：界面据此更新内部基准，可连续编辑 */
-  hash: string
-  updated_at: string
-  revision: number
-}
-
-export interface SkillInstallResult {
-  name: string
-  description: string
-  files: Array<{ path: string; size: number }>
-  installed_at: string
-  overwritten: boolean
-}
+/**
+ * SKILL 类型组（含 §4.8 市场更新的来源标记 `origin`）——**定义在 `./skill-types.ts`**，
+ * 本文件再导出，既有引用方一律从 `api/types` 取，无需改动（2026-10-03 拆件，原则二）。
+ */
+export type {
+  SkillDetail,
+  SkillFileContent,
+  SkillFileSaved,
+  SkillInstallResult,
+  SkillListItem,
+} from './skill-types'
 
 /* ---------- §5 数字人设计 ---------- */
 

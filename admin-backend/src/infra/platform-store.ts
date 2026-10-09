@@ -53,10 +53,15 @@ export class PlatformStore {
     return path.join(this.root, ...normalized.split('/').filter(Boolean));
   }
 
-  /** 建立目录骨架并确保 `meta.json` 存在（幂等） */
+  /**
+   * 建立目录骨架并确保 `meta.json` 存在（幂等）。
+   *
+   * `onto_market/` 为**本体库**（2026-10-03，`FR-060`）：结构与市场前两级一致
+   * （`{场景}/{本体}/ontology.yaml`），文件名沿用市场侧同名。
+   */
   ensureLayout(): void {
     this.failIfNotWritable();
-    for (const dir of ['', 'skills', 'agents', 'users', 'deploy', 'logs']) {
+    for (const dir of ['', 'skills', 'agents', 'users', 'deploy', 'logs', 'onto_market']) {
       fs.mkdirSync(path.join(this.root, dir), { recursive: true });
     }
     if (!fs.existsSync(this.abs(META_REL))) {
@@ -173,9 +178,26 @@ export class PlatformStore {
     }
   }
 
-  /** 删除文件或目录（幂等） */
+  /**
+   * 删除文件或目录（幂等：目标不存在即视为成功）。
+   *
+   * **删除后校验**（2026-10-03）：某些宿主环境会"静默不删"——例如 Windows 上
+   * 含非 ASCII 段（中文场景名/技能名）的路径，`fs.rmSync(..., { force: true })`
+   * 既不抛错也不删除（Linux 容器实测无此问题）。静默残留的后果是**上层以为删干净了**：
+   * 卡片消失、目录与文件还在，下次同名导入反被"已存在"挡住，排障时极难定位。
+   *
+   * 因此这里把静默失败转成**可读错误**：宁可删除失败被看见，也不要留下不一致状态。
+   * 失败时调用方 SHOULD NOT 继续写索引（保持"记录与磁盘一致"，宁可不删也不半删）。
+   */
   remove(rel: string): void {
-    fs.rmSync(this.abs(rel), { recursive: true, force: true });
+    const abs = this.abs(rel);
+    fs.rmSync(abs, { recursive: true, force: true });
+    if (fs.existsSync(abs)) {
+      throw new ApiError(
+        ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
+        `删除平台设计态失败：${rel}（目标仍存在，可能是宿主环境限制或被其它进程占用；请手工删除后重试）`,
+      );
+    }
   }
 
   /** 目录项（相对路径名）；目录不存在返回空数组 */

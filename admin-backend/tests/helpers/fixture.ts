@@ -15,7 +15,12 @@ import { loadConfig, type AppConfig } from '../../src/config.js';
 import type { AppContext } from '../../src/context.js';
 import { buildServer } from '../../src/server.js';
 import { RuntimeClient } from '../../src/infra/runtime-client.js';
-import { McpClientService, type McpTestReport, type McpToolDescriptor } from '../../src/infra/mcp-client.js';
+import {
+  McpClientService,
+  type McpConnectionTarget,
+  type McpTestReport,
+  type McpToolDescriptor,
+} from '../../src/infra/mcp-client.js';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 
@@ -50,12 +55,25 @@ export class FakeMcpClient extends McpClientService {
   failListTools = new Set<string>();
   /** 测试结果覆盖：`connectivity`/`capability` 各自是否成功 */
   probe = { connectivity: true, capability: true };
+  /**
+   * 最近一次传下来的连接目标（2026-10-08）。
+   *
+   * 用途：断言"请求头确实随连接带下去"——请求头是**凭据**，`McpTestReport.target`
+   * 按设计不含它，测试只能从这里核对透传（服务端另有一层真实 SDK 连接）。
+   */
+  lastTarget: McpConnectionTarget | null = null;
+  /** 最近一次 `test()` 收到的连接目标（同上） */
+  lastTestTarget: McpConnectionTarget | null = null;
 
   constructor() {
     super({ timeoutMs: 100 });
   }
 
-  override async listTools(serviceName: string): Promise<McpToolDescriptor[]> {
+  override async listTools(
+    serviceName: string,
+    target?: McpConnectionTarget,
+  ): Promise<McpToolDescriptor[]> {
+    this.lastTarget = target ?? null;
     if (this.failListTools.has(serviceName)) {
       throw new ApiError(ERROR_CODES.ADM_RUNTIME_UNREACHABLE, `MCP 服务 ${serviceName} 不可达`);
     }
@@ -64,8 +82,9 @@ export class FakeMcpClient extends McpClientService {
 
   override async test(
     serviceName: string,
-    target?: { transport: 'http' | 'stdio'; url?: string | null; command?: string | null },
+    target?: McpConnectionTarget,
   ): Promise<McpTestReport> {
+    this.lastTestTarget = target ?? null;
     const step = (ok: boolean, message?: string) => ({
       ok,
       duration_ms: 1,
@@ -104,6 +123,8 @@ export interface FixtureOptions {
   userIds?: string[];
   /** 预置 MCP 服务（key = 服务名，value = 传给 `create` 的入参片段） */
   mcpServices?: Record<string, Record<string, unknown>>;
+  /** 追加/覆盖的环境变量（如 `ONTO_MARKET_DIR`；相对路径以夹具 root 解析） */
+  env?: Record<string, string | undefined>;
 }
 
 export async function createFixture(options: FixtureOptions = {}): Promise<TestFixture> {
@@ -129,6 +150,7 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
       OPT_AGENT_ROOT: optAgentRoot,
       OPT_AGENT_BACKEND_URL: 'http://127.0.0.1:1',
       RUNTIME_TIMEOUT_MS: '200',
+      ...options.env,
     },
   });
 
@@ -138,7 +160,15 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
   const ctx = (app as unknown as { ctx: AppContext }).ctx;
 
   for (const [name, input] of Object.entries(options.mcpServices ?? {})) {
-    ctx.mcpConfigs.create({ name, transport: 'http', url: `http://127.0.0.1:1/${name}/mcp`, ...input });
+    // 工具白名单：新建必填非空（2026-10-03）；默认放开 `ocr_image`，
+    // 需要别的工具范围时在 `mcpServices` 里显式给 `allowed_tools`
+    ctx.mcpConfigs.create({
+      name,
+      transport: 'http',
+      url: `http://127.0.0.1:1/${name}/mcp`,
+      allowed_tools: ['ocr_image'],
+      ...input,
+    });
   }
 
   return {

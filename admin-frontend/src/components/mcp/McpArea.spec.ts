@@ -14,6 +14,7 @@ import type { McpServiceDetail } from '../../api/types'
 
 const httpGet = vi.fn()
 const createMcpService = vi.fn()
+const probeMcpTarget = vi.fn()
 const testMcpService = vi.fn()
 
 vi.mock('../../api/http', async () => {
@@ -28,6 +29,7 @@ vi.mock('../../api/mcp', () => ({
   saveMcpServiceConfig: vi.fn(),
   deleteMcpService: vi.fn(),
   testMcpService: (...a: unknown[]) => testMcpService(...a),
+  probeMcpTarget: (...a: unknown[]) => probeMcpTarget(...a),
   fetchMcpStats: vi.fn(),
 }))
 
@@ -51,6 +53,11 @@ const DETAIL: McpServiceDetail = {
   command: null,
   args: null,
   file_args: {},
+  // 工具白名单（2026-10-03）：详情只呈现白名单里的工具
+  allowed_tools: ['ocr_image'],
+  missing_tools: [],
+  // 请求头（2026-10-08）：详情回显的只有掩码；本用例不关心其内容
+  headers: {},
   tools: [],
   tools_truncated: false,
   tools_error: null,
@@ -62,13 +69,16 @@ function mountArea(detail: string | null = null) {
   return mount(McpArea, { props: { detail, tab: null } })
 }
 
-/** 走完一次「开弹窗 → 填基础字段 → 创建」 */
+/** 走完一次「开弹窗 → 填基础字段 → 探测 → 勾选一个工具 → 创建」（两步流程） */
 async function createService(wrapper: ReturnType<typeof mountArea>): Promise<void> {
   await wrapper.find('.mcp-card-list__toolbar button').trigger('click')
   await flushPromises()
   await wrapper.find('#mcp-create-name').setValue('new-mcp')
   await wrapper.find('#mcp-create-url').setValue('http://192.168.1.2:9000/mcp')
   await wrapper.find('[data-test="confirm"]').trigger('click')
+  await flushPromises()
+  await wrapper.find('[data-test="tool"]').setValue(true)
+  await wrapper.find('[data-test="create"]').trigger('click')
   await flushPromises()
 }
 
@@ -83,6 +93,16 @@ beforeEach(() => {
     return Promise.reject(new Error(`unexpected path: ${path}`))
   })
   createMcpService.mockReset().mockResolvedValue({ name: 'new-mcp', revision: 2 })
+  // 新建第一步的探测（2026-10-03）：返回一个可选工具，供勾选后创建
+  probeMcpTarget.mockReset().mockResolvedValue({
+    ok: true,
+    tools: [{ name: 'ocr_image', description: '识别图片', parameters: {} }],
+    tools_truncated: false,
+    error: null,
+    error_code: null,
+    target: { transport: 'http', url: 'http://192.168.1.2:9000/mcp', command: null },
+    checked_at: '2026-09-27T00:00:00.000Z',
+  })
   testMcpService.mockReset().mockResolvedValue({
     ok: true,
     connectivity: { ok: true, duration_ms: 1 },

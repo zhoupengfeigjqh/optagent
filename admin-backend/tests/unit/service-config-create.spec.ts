@@ -37,15 +37,25 @@ afterEach(() => {
 
 describe('新建与删除（2026-09-27）', () => {
   it('create 后可按名称读取', () => {
-    configs.create({ name: 'svc', transport: 'http', url: 'http://host:8000/mcp' });
+    configs.create({
+      name: 'svc',
+      transport: 'http',
+      url: 'http://host:8000/mcp',
+      allowed_tools: ['t1'],
+    });
     expect(configs.read('svc').url).toBe('http://host:8000/mcp');
   });
 
   it('重名 → ADM_MCP_SERVICE_EXISTS（且不覆盖既有配置）', () => {
-    configs.create({ name: 'ocr', ...BASE });
+    configs.create({ name: 'ocr', allowed_tools: ['t1'], ...BASE });
     let caught: unknown;
     try {
-      configs.create({ name: 'ocr', transport: 'http', url: 'http://other:8000/mcp' });
+      configs.create({
+        name: 'ocr',
+        transport: 'http',
+        url: 'http://other:8000/mcp',
+        allowed_tools: ['t2'],
+      });
     } catch (err) {
       caught = err;
     }
@@ -55,14 +65,24 @@ describe('新建与删除（2026-09-27）', () => {
 
   it('服务名非法 → VALIDATION_FAILED（该名称会成为运行环境的工具前缀）', () => {
     for (const bad of ['', 'a b', 'a/b', '中文', 'a'.repeat(65)]) {
-      expect(() => configs.create({ name: bad, transport: 'http', url: 'http://x/mcp' })).toThrow(
-        ApiError,
-      );
+      expect(() =>
+        configs.create({
+          name: bad,
+          transport: 'http',
+          url: 'http://x/mcp',
+          allowed_tools: ['t1'],
+        }),
+      ).toThrow(ApiError);
     }
   });
 
   it('服务名首尾空白被去掉后保存（便于复制粘贴）', () => {
-    configs.create({ name: '  svc  ', transport: 'http', url: 'http://x/mcp' });
+    configs.create({
+      name: '  svc  ',
+      transport: 'http',
+      url: 'http://x/mcp',
+      allowed_tools: ['t1'],
+    });
     expect(configs.exists('svc')).toBe(true);
   });
 
@@ -77,7 +97,7 @@ describe('新建与删除（2026-09-27）', () => {
   });
 
   it('remove 删除后读不到、listAll 不再包含；删不存在的 → 404', () => {
-    configs.create({ name: 'ocr', ...BASE });
+    configs.create({ name: 'ocr', allowed_tools: ['t1'], ...BASE });
     expect(configs.remove('ocr').name).toBe('ocr');
     expect(configs.readOrNull('ocr')).toBeNull();
     expect(configs.listAll()).toEqual([]);

@@ -12,17 +12,35 @@
  *
  * 存量迁移：旧文档里的 `endpoints` 在**读取期**收敛为 `url`（见 `readUrl`），
  * 保证升级后既有服务不丢配置；物化与下发的仍只有一份地址。
+ *
+ * **2026-10-03 新增工具白名单 `allowed_tools`**（产品决定）：
+ * 新建服务时 MUST 先连上服务、由管理员勾选可见工具（至少一个），此后：
+ * - 平台详情**只呈现白名单里的工具**（清单外的一律不显示）；
+ * - 运行环境只把白名单里的工具挂给数字人（模型看不到其余工具）；
+ * - 白名单**创建后不可二次调整**（`upsert` 显式拒绝该字段）——如需变更请删除重建。
+ *
+ * **2026-10-08 新增请求头 `headers`**（本体侧「自建发布」要求 `X-MCP-Token`，否则 401）：
+ * - 存**明文**（服务按原样发送），但**响应只回掩码**、列表只回 `has_headers`；
+ * - 保存语义：**缺省 = 沿用存量**，**提供 = 全量替换**（`{}` 即清空）；
+ * - 仅对 `transport=http` 有意义（`stdio` 保存期丢弃）；
+ * - 物化时**非空才写**进 `MCP.json`，运行环境装配 MCP 客户端时带 `requestInit.headers`。
  */
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import {
-  FILE_ARG_PATH_HINT,
-  isCompatibleFromPath,
-  isValidFileArgPath,
-  parseFileArgMode,
-} from './file-arg-path.js';
 import { MCP_TRANSPORT_HINT, normalizeTransport, type McpTransport } from './transport.js';
-import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.js';
+import {
+  MCP_SERVICE_NAME_HINT,
+  MCP_URL_HINT,
+  isValidMcpServiceName,
+  normalizeAllowedTools,
+  normalizeAsyncTools,
+  normalizeConfirmation,
+  normalizeFileArgs,
+  normalizeHeaders,
+  normalizeRulesFields,
+  normalizeUrl,
+  sanitize,
+} from './service-config-fields.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 
 const REL = 'mcp-services.json';
@@ -30,20 +48,9 @@ const REL = 'mcp-services.json';
 // 归一后的规范取值类型（`http` 即 Streamable HTTP）；对外仍从本模块导出，保持既有引用不变
 export type { McpTransport };
 
-/** 服务名判据提示（新建表单与报错共用） */
-export const MCP_SERVICE_NAME_HINT =
-  '由字母、数字、下划线或连字符组成，1~64 字符（会成为运行环境的工具前缀）';
-
-/**
- * 服务名判据：它同时是运行环境里的工具前缀（`{server}__{tool}`），
- * 故不允许空白、路径分隔符与中文等会污染工具名的字符。
- */
-export function isValidMcpServiceName(name: string): boolean {
-  return /^[A-Za-z0-9_-]{1,64}$/.test(name);
-}
-
-/** 连接地址判据提示 */
-export const MCP_URL_HINT = 'http(s):// 开头的可达地址，如 http://192.168.1.2:8000/mcp';
+// 字段判据与提示语已拆到 `service-config-fields.ts`（2026-10-03，原则二：本文件曾超 500 行）；
+// 这里继续对外提供同名导出，既有引用（表单提示语、错误文案）不变
+export { MCP_SERVICE_NAME_HINT, MCP_URL_HINT, isValidMcpServiceName };
 
 export interface McpServiceConfig {
   name: string;
@@ -91,6 +98,29 @@ export interface McpServiceConfig {
    * 空数组 = 不启用（存量行为零变化）；物化时**非空才写**进 `MCP.json`。
    */
   async_tools: string[];
+  /**
+   * **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单（不含 `{server}__` 前缀）。
+   *
+   * - 平台详情只呈现这里面的工具；运行环境只把这些工具挂给数字人（其余对模型不可见）；
+   * - **创建时必填非空**（新建流程 = 连上服务 → 勾选 → 创建），**之后不可修改**；
+   * - 空数组 = **不限制**（历史语义；物化时不写该字段，运行环境放行全部工具）——
+   *   只为兼容"白名单上线前的存量服务"，新创建不可能产出空数组。
+   */
+  allowed_tools: string[];
+  /**
+   * **请求头**（2026-10-08）：`{ 头名: 值 }`，仅对 `transport=http` 有意义
+   * （`stdio` 保存期即丢弃——请求头是 HTTP 的概念，`stdio` 由启动参数/环境变量承载）。
+   *
+   * 用于**需要访问令牌**的服务（本体侧「自建发布」的动态容器要求 `X-MCP-Token`，
+   * 缺了直接 401；见 `optonto/config/mcp-config.json` 的既有约定）。两条纪律：
+   * - **不进任何响应明文**：详情/新建/保存响应一律经 `maskHeaders` 回显掩码
+   *   （形如 `6UuE…F3Z`），列表只给 `has_headers` 布尔量；
+   * - **不进日志**：本文件与物化都不打印值（信任边界与 `.env.local` 同级——本机私产）。
+   *
+   * 缺省 `{}` = 不带请求头（存量服务行为零变化）；物化时**非空才写**进 `MCP.json`
+   * （与 `file_args`/`async_tools`/`allowed_tools` 同一口径）。
+   */
+  headers: Record<string, string>;
   updated_at: string;
 }
 
@@ -114,6 +144,10 @@ export interface McpConfigInput {
   confirmation?: unknown;
   rules_fields?: unknown;
   async_tools?: unknown;
+  /** 工具白名单（2026-10-03）：**仅新建时接受**；`upsert` 携带即拒绝（不可二次调整） */
+  allowed_tools?: unknown;
+  /** 请求头（2026-10-08）：缺省 = 沿用存量，提供 = 全量替换（`{}` 即清空） */
+  headers?: unknown;
 }
 
 export class McpServiceConfigService {
@@ -147,7 +181,10 @@ export class McpServiceConfigService {
   }
 
   /**
-   * **新建**服务（2026-09-27）：名称由管理员指定，重名即拒（`ADM_MCP_SERVICE_EXISTS`）。
+   * **新建**服务（2026-09-27；2026-10-03 起要求工具白名单）：
+   * 名称由管理员指定，重名即拒（`ADM_MCP_SERVICE_EXISTS`）；
+   * **`allowed_tools` 必填非空**——白名单是"创建时定、之后不可改"的，
+   * 因此创建期漏传即拒绝，避免留下"全部工具放行"的服务。
    * `revision` 可选——带了即做乐观锁校验，缺省按"当前版本"写入并递增。
    */
   create(input: McpConfigInput, revision?: number): { config: McpServiceConfig; revision: number } {
@@ -161,8 +198,29 @@ export class McpServiceConfigService {
     if (this.exists(name)) {
       throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_EXISTS, `MCP 服务名称已存在：${name}`);
     }
-    const nextRevision = this.write(name, input, revision);
+    const allowedTools = normalizeAllowedTools(input.allowed_tools, true);
+    // 新建没有"存量"可沿用：`headers` 缺省即 {}
+    const nextRevision = this.write(name, input, allowedTools, {}, revision);
     return { config: this.read(name), revision: nextRevision };
+  }
+
+  /**
+   * 新建前的**只校验不落盘**（给路由层用）：让"重名/字段非法"先于连接探测失败，
+   * 避免为一个注定失败的新建去连一次 MCP 服务。
+   */
+  validateForCreate(input: McpConfigInput): void {
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!isValidMcpServiceName(name)) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `MCP 服务名非法：${JSON.stringify(input.name)}（${MCP_SERVICE_NAME_HINT}）`,
+      );
+    }
+    if (this.exists(name)) {
+      throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_EXISTS, `MCP 服务名称已存在：${name}`);
+    }
+    normalizeAllowedTools(input.allowed_tools, true);
+    this.normalize(name, input, [], {});
   }
 
   /** **删除**服务（2026-09-27）；不存在即 404。影响面由路由层用引用推导呈现。 */
@@ -182,24 +240,48 @@ export class McpServiceConfigService {
     return { name, revision: nextRevision };
   }
 
-  /** 保存调用配置（`FR-044`）；服务必须已存在（新建走 `create`） */
+  /**
+   * 保存调用配置（`FR-044`）；服务必须已存在（新建走 `create`）。
+   *
+   * **工具白名单不可二次调整**（2026-10-03）：携带 `allowed_tools` 直接拒绝
+   * （`ADM_MCP_TOOL_SCOPE_LOCKED`）——静默忽略会让客户端以为改成功了；
+   * 不携带时沿用已存值（保存调用配置 MUST NOT 顺手清空白名单）。
+   *
+   * **请求头（2026-10-08）与白名单相反：可以改**（令牌会轮换，锁死会逼人删服务重建）。
+   * 语义为"**缺省 = 沿用存量，提供 = 全量替换**"：不带 `headers` 的保存 MUST NOT
+   * 顺手清空令牌（那会让运行环境在下一次部署后突然 401，且从界面上看不出来）。
+   */
   upsert(
     name: string,
     input: McpConfigInput,
     revision: number,
   ): { config: McpServiceConfig; revision: number } {
-    if (!this.exists(name)) {
+    const existing = this.readOrNull(name);
+    if (!existing) {
       throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_NOT_FOUND, `MCP 服务不存在：${name}`);
     }
-    const nextRevision = this.write(name, input, revision);
+    if (input.allowed_tools !== undefined) {
+      throw new ApiError(
+        ERROR_CODES.ADM_MCP_TOOL_SCOPE_LOCKED,
+        `MCP 服务 ${name} 的工具白名单只在创建时设定，不支持修改；如需变更请删除该服务后重新创建`,
+      );
+    }
+    // 请求头（2026-10-08）：缺省沿用存量——保存调用配置 MUST NOT 顺手清空令牌
+    const nextRevision = this.write(name, input, existing.allowed_tools, existing.headers, revision);
     return { config: this.read(name), revision: nextRevision };
   }
 
   /** 校验 + 落盘的公共段（create / upsert 共用） */
-  private write(name: string, input: McpConfigInput, revision?: number): number {
+  private write(
+    name: string,
+    input: McpConfigInput,
+    allowedTools: string[],
+    fallbackHeaders: Record<string, string>,
+    revision?: number,
+  ): number {
     let validated!: McpServiceConfig;
     const commit = (): void => {
-      validated = this.normalize(name, input);
+      validated = this.normalize(name, input, allowedTools, fallbackHeaders);
       const doc = this.store.readJson<Document>(REL) ?? { items: {} };
       doc.items[name] = validated;
       this.store.writeJson(REL, doc);
@@ -211,7 +293,12 @@ export class McpServiceConfigService {
     return this.store.withRevision(revision, commit).revision;
   }
 
-  private normalize(name: string, input: McpConfigInput): McpServiceConfig {
+  private normalize(
+    name: string,
+    input: McpConfigInput,
+    allowedTools: string[],
+    fallbackHeaders: Record<string, string>,
+  ): McpServiceConfig {
     const description = typeof input.description === 'string' ? input.description : '';
     // 别名（`streamable-http`）在入口归一为 `http`：见 `mcp/transport.ts`
     const transport = normalizeTransport(input.transport);
@@ -252,243 +339,13 @@ export class McpServiceConfigService {
       confirmation: normalizeConfirmation(input.confirmation),
       rules_fields: normalizeRulesFields(input.rules_fields),
       async_tools: normalizeAsyncTools(input.async_tools),
+      allowed_tools: allowedTools,
+      // 请求头只对 http 有意义：stdio 丢弃（与"http 丢弃 command/args"对称，
+      // 避免留下一条永远不生效、却在界面上显示"已配置令牌"的隐性配置）
+      headers: transport === 'http' ? normalizeHeaders(input.headers, fallbackHeaders) : {},
       updated_at: new Date().toISOString(),
     };
   }
 }
 
-/** 连接地址归一：非空字符串且为 http(s) 绝对地址；否则 `null` */
-function normalizeUrl(raw: unknown): string | null {
-  if (typeof raw !== 'string' || raw.trim() === '') return null;
-  const value = raw.trim();
-  if (!/^https?:\/\/.+/i.test(value)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `url 须为 ${MCP_URL_HINT}（当前：${value}）`);
-  }
-  return value;
-}
-
-/**
- * 读取时收敛为当前 schema：历史存档里的遗留字段（`writable`/`permission_scope`，
- * 已按 2026-09-15 的产品决定移除）不再透出到任何响应里。
- *
- * `url` 另含**存量迁移**（2026-09-27）：旧文档是 `endpoints` 多形态对象。
- */
-function sanitize(raw: McpServiceConfig): McpServiceConfig {
-  return {
-    name: raw.name,
-    description: typeof raw.description === 'string' ? raw.description : '',
-    // 历史文档可能写着别名（`streamable-http`）：读取时归一，界面与物化都只用规范值；
-    // 完全不认识的值保持原样透出（不阻断读取，也不静默改写成别的传输方式）
-    transport: normalizeTransport(raw.transport) ?? raw.transport,
-    url: readUrl(raw),
-    command: raw.command ?? null,
-    args: Array.isArray(raw.args) ? raw.args : null,
-    file_args: raw.file_args ?? {},
-    // 历史存档无该字段：读取时容错收敛为 never（存量行为不变）
-    confirmation: readConfirmation(raw.confirmation),
-    // 历史存档无该字段（或 2026-09-19 早些时候的 string 版 `rules_field`，
-    // 工具名不可得）：一律收敛为 {}（不启用规则选择器）
-    rules_fields: readRulesFields(raw.rules_fields ?? (raw as { rules_field?: unknown }).rules_field),
-    // 历史存档无该字段：读取时容错收敛为 []（存量行为 = 不启用）
-    async_tools: readAsyncTools(raw.async_tools),
-    updated_at: raw.updated_at,
-  };
-}
-
-/**
- * `url` 读取 + 存量迁移（2026-09-27）。
- *
- * 旧文档（2026-09-27 之前）把地址存在 `endpoints: { [运行形态]: 地址 }` 里。
- * 平台已不再区分运行形态，故取其**唯一可用**的一份：优先「宿主机本地」
- * （本地实际在用的形态），否则取第一个非空值。存量配置因此不丢。
- */
-function readUrl(raw: McpServiceConfig): string | null {
-  const direct = (raw as { url?: unknown }).url;
-  if (typeof direct === 'string' && direct.trim() !== '') return direct.trim();
-
-  const legacy = (raw as { endpoints?: unknown }).endpoints;
-  if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
-    const map = legacy as Record<string, unknown>;
-    for (const key of ['host_local', 'container_network']) {
-      const value = map[key];
-      if (typeof value === 'string' && value.trim() !== '') return value.trim();
-    }
-    for (const value of Object.values(map)) {
-      if (typeof value === 'string' && value.trim() !== '') return value.trim();
-    }
-  }
-  return null;
-}
-
-/**
- * 异步工具声明（保存期，R11）：`string[]`，元素为**该服务自己的原始工具名**。
- *
- * 判据与运行环境**加载期同口径**（数组 / 元素非空字符串 / 同服务内去重），
- * 否则会出现"平台保存得进去、运行环境加载不了"这类两边不一致。
- *
- * 与 `rules_fields` / `file_args` 同取向：**只校验语法，不校验工具清单**——
- * 工具清单是**探测结果**，服务不可达时拿不到；拿不到就拒保存，会把"服务抖动"
- * 变成"配置改不了"。
- */
-function normalizeAsyncTools(raw: unknown): string[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'async_tools 须为工具名数组，可为 []');
-  }
-  const out: string[] = [];
-  for (const item of raw as unknown[]) {
-    if (typeof item !== 'string' || item.trim() === '') {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `async_tools 的元素须为非空字符串（该服务的原始工具名），当前：${JSON.stringify(item)}`,
-      );
-    }
-    const name = item.trim();
-    if (out.includes(name)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `async_tools 存在重复的工具名：${name}`);
-    }
-    out.push(name);
-  }
-  return out;
-}
-
-/**
- * 读取路径的容错收敛：残缺值一律**丢弃并去重**（不阻断读取存量文档）。
- *
- * 与 `readRulesFields` 同一取向：运行环境在**加载期**把形状非法判为配置错误，
- * 若把存量文档里的脏值原样物化进 `MCP.json`，一次部署就会让整个数字人加载失败——
- * 在这里收敛掉，破坏面止于"该声明不生效"。
- */
-function readAsyncTools(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const item of raw as unknown[]) {
-    if (typeof item !== 'string' || item.trim() === '') continue;
-    const name = item.trim();
-    if (!out.includes(name)) out.push(name);
-  }
-  return out;
-}
-
-/**
- * 算法规则参数设置（保存期）：`{ 工具名: 字段名或对象路径 }`。
- * 缺省 → `{}`（不启用）；非对象/值不是合法字段路径 → 报错——typo 挡在保存期，
- * 避免"以为开了选择器实际没开"。
- *
- * 与 `file_args` 同口径：**只校验语法，不校验工具 schema**（工具清单是探测结果，
- * 服务不可达时拿不到；拿不到就拒保存会把"服务抖动"变成"配置改不了"）。
- */
-function normalizeRulesFields(raw: unknown): Record<string, string> {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'rules_fields 须为对象 { 工具名: 字段名 }，可为 {}');
-  }
-  const out: Record<string, string> = {};
-  for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (parseRulesFieldPath(field) === null) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `rules_fields.${tool} 须为${RULES_FIELD_PATH_HINT}，当前：${JSON.stringify(field)}`,
-      );
-    }
-    out[tool] = (field as string).trim();
-  }
-  return out;
-}
-
-/**
- * 读取路径的容错收敛：历史存档里的 string 版 `rules_field`（无工具名可归属）
- * 与任何残缺值一律收敛为 `{}`（不阻断读取存量文档，存量行为 = 不启用）。
- *
- * **非法路径同样在此丢弃**（2026-09-22）：运行环境在加载期把非法路径判为配置错误，
- * 若把存量文档里的非法值原样物化进 `MCP.json`，一次部署就会让整个数字人加载失败——
- * 读取期收敛掉，破坏面止于"该声明不生效"（与 `confirmation` 的收敛口径一致）。
- */
-function readRulesFields(raw: unknown): Record<string, string> {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
-  for (const [tool, field] of Object.entries(raw as Record<string, unknown>)) {
-    if (parseRulesFieldPath(field) !== null) out[tool] = (field as string).trim();
-  }
-  return out;
-}
-
-/** 读取路径的容错收敛：不认识/残缺的值一律回落 never（不阻断读取存量文档） */
-function readConfirmation(raw: unknown): McpConfirmation {
-  if (raw === 'always') return 'always';
-  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
-    const tools = (raw as Record<string, unknown>).tools;
-    if (Array.isArray(tools) && tools.length > 0 && tools.every((t) => typeof t === 'string')) {
-      return { tools: tools as string[] };
-    }
-  }
-  return 'never';
-}
-
-/**
- * 调用确认策略（HITL）：缺省/非法即 `never` 还是报错？
- * ——报错。这是安全相关开关，把 typo 挡在保存期（"以为开了确认实际没开"比报错更糟）。
- */
-function normalizeConfirmation(raw: unknown): McpConfirmation {
-  if (raw === undefined || raw === null || raw === 'never') return 'never';
-  if (raw === 'always') return 'always';
-  if (typeof raw === 'object' && !Array.isArray(raw)) {
-    const tools = (raw as Record<string, unknown>).tools;
-    if (Array.isArray(tools) && tools.length > 0 && tools.every((t) => typeof t === 'string')) {
-      return { tools: tools as string[] };
-    }
-  }
-  throw new ApiError(
-    ERROR_CODES.VALIDATION_FAILED,
-    'confirmation 须为 "never" | "always" | { "tools": string[] }（tools 非空）',
-  );
-}
-
-function normalizeFileArgs(raw: unknown): Record<string, Record<string, string>> {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'file_args 须为对象，可为 {}');
-  }
-  const out: Record<string, Record<string, string>> = {};
-  for (const [tool, params] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `file_args.${tool} 须为对象`);
-    }
-    const inner: Record<string, string> = {};
-    for (const [param, modeRaw] of Object.entries(params as Record<string, unknown>)) {
-      const mode = parseFileArgMode(modeRaw);
-      if (!mode) {
-        throw new ApiError(
-          ERROR_CODES.VALIDATION_FAILED,
-          `file_args.${tool}.${param} 仅支持 "url" 或 "url:from=<取值路径>"（与运行环境口径一致）`,
-        );
-      }
-      // 取值路径的语法与运行环境同一判据（`file-arg-path.ts` 两侧同构）：
-      // 在这里拦住，总好过"保存成功、物化成功、运行期静默不生效"
-      if (!isValidFileArgPath(param)) {
-        throw new ApiError(
-          ERROR_CODES.VALIDATION_FAILED,
-          `file_args.${tool} 的「${param}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
-        );
-      }
-      if (mode.from !== undefined) {
-        if (!isValidFileArgPath(mode.from)) {
-          throw new ApiError(
-            ERROR_CODES.VALIDATION_FAILED,
-            `file_args.${tool}.${param} 的来源「${mode.from}」不是合法取值路径（${FILE_ARG_PATH_HINT}）`,
-          );
-        }
-        if (!isCompatibleFromPath(param, mode.from)) {
-          throw new ApiError(
-            ERROR_CODES.VALIDATION_FAILED,
-            `file_args.${tool}.${param} 的派生来源「${mode.from}」与目标形状不相容：` +
-              '两段数须相同，且除最后一段外逐段一致（如 items[].excelFileUrl ← items[].realRelativePath）',
-          );
-        }
-      }
-      inner[param] = modeRaw as string;
-    }
-    out[tool] = inner;
-  }
-  return out;
-}
+// 字段判据与读取收敛已迁至 `service-config-fields.ts`（2026-10-03 拆件，原则二）
