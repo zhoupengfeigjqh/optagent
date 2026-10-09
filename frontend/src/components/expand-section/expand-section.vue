@@ -128,7 +128,9 @@ const handleMenuClick = ({
           font-size: 15px;
           font-weight: 600;
           line-height: 45px;
+          cursor: pointer;
         "
+        @click="handleToggle"
         v-else
       >
         {{ menuItems[0].label }}

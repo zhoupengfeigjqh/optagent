@@ -735,7 +735,7 @@ export function buildGanttOption(data: GanttPoint[]) {
         dragDrop: { draggableX: false, draggableY: false },
       },
     },
-    rangeSelector: { enabled: false },
+    rangeSelector: { enabled: true },
     // 周末灰底高亮 + 日期轴按「几号 周几」展示（对应原型 days 轴）
     xAxis: {
       plotBands: buildWeekendPlotBands(minTs, maxTs),
