@@ -7,6 +7,9 @@
  * 只吃一个值——这也是它不能直接复用 `InteractionField` 的原因。
  *
  * 分派（与 HITL 同构）：
+ * - **视图链接**（2026-10-10，`TR-40`/`TR-41`）：字段名为 `viewUrl` 且值是字符串 → 渲染为
+ *   链接（文本 = 值本身）。**只按字段名判定**，不看值像不像 URL；值的归一化
+ *   （缺 `http://host:port` 前缀时补当前页面入口）交给 `utils/view-link.ts`（唯一实现）
  * - 对象 → 逐行 `key: value`（递归，嵌套缩进）
  * - 对象数组 → **表格**（列 = 各元素键的并集）；**行与列都有上限**（`PRODUCED_ARRAY_MAX_ITEMS`
  *   / `PRODUCED_TABLE_MAX_COLUMNS`），超出只提示总数。弹窗宽度是自适应的，故横向溢出
@@ -23,6 +26,7 @@
 import { computed } from 'vue'
 
 import { isPlainObject } from '../../utils/arg-schema'
+import { isViewUrlField, resolveViewUrl } from '../../utils/view-link'
 import {
   PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_DEPTH,
@@ -38,11 +42,28 @@ const props = withDefaults(
     depth?: number
     /** 紧凑模式：非标量以 JSON 文本呈现（表格单元格用） */
     compact?: boolean
+    /**
+     * 该值所属的**字段名**（对象行 = 键；表格单元格 = 列名）。
+     *
+     * 视图链接只按字段名判定（`TR-40`）：值像不像 URL 一律不看——否则正文里任何
+     * 形如 `/api/…` 的普通字段都会被链接化，那是误报而非功能。
+     */
+    fieldKey?: string
   }>(),
-  { depth: 0, compact: false },
+  { depth: 0, compact: false, fieldKey: undefined },
 )
 
 const isScalar = computed(() => !isPlainObject(props.value) && !Array.isArray(props.value))
+
+/**
+ * 视图链接地址（`null` = 不渲染为链接，按普通文本呈现）。
+ *
+ * 走 `computed`：模板每次渲染都会读它（宪章原则五：渲染路径不重复计算）。
+ * 值判定与拼接只在 `utils/view-link.ts` 里实现一处（`TR-42`）。
+ */
+const linkHref = computed(() =>
+  isViewUrlField(props.fieldKey) ? resolveViewUrl(props.value) : null,
+)
 
 /** 紧凑模式下非标量直接转 JSON 文本（不递归）；与"深度超限"共用逃生舱渲染 */
 const asRawJson = computed(() => (props.compact && !isScalar.value) || props.depth >= PRODUCED_JSON_MAX_DEPTH)
@@ -111,6 +132,15 @@ function jsonText(value: unknown): string {
     <!-- 紧凑模式（表格单元格）或深度超限：交给 JSON 逃生舱，不再递归 -->
     <pre v-if="asRawJson" class="produced-json__raw">{{ jsonText(value) }}</pre>
 
+    <!-- 视图链接：分支必须排在纯标量之前（字符串也是标量，否则永远轮不到它） -->
+    <a
+      v-else-if="linkHref !== null"
+      class="produced-json__link"
+      :href="linkHref"
+      target="_blank"
+      rel="noopener noreferrer"
+    >{{ scalarText(value) }}</a>
+
     <span
       v-else-if="isScalar"
       class="produced-json__scalar"
@@ -128,7 +158,7 @@ function jsonText(value: unknown): string {
       <template v-for="entry in objectEntries" :key="entry[0]">
         <dt class="produced-json__key">{{ entry[0] }}</dt>
         <dd class="produced-json__value">
-          <ProducedJsonView :value="entry[1]" :depth="depth + 1" />
+          <ProducedJsonView :value="entry[1]" :depth="depth + 1" :field-key="entry[0]" />
         </dd>
       </template>
     </dl>
@@ -145,7 +175,12 @@ function jsonText(value: unknown): string {
           <tbody>
             <tr v-for="(row, index) in shownItems" :key="index">
               <td v-for="column in columns" :key="column">
-                <ProducedJsonView :value="cellOf(row, column)" :depth="depth + 1" compact />
+                <ProducedJsonView
+                  :value="cellOf(row, column)"
+                  :depth="depth + 1"
+                  :field-key="column"
+                  compact
+                />
               </td>
             </tr>
           </tbody>
@@ -183,6 +218,14 @@ function jsonText(value: unknown): string {
 
 .produced-json__scalar {
   word-break: break-word;
+}
+
+/* 视图链接：沿用全局链接色（`tokens.css --color-primary`）+ 下划线。
+   下划线不是装饰——可点性 MUST NOT 只靠颜色传达（宪章原则四）。 */
+.produced-json__link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  word-break: break-all;
 }
 
 .produced-json__scalar--empty {

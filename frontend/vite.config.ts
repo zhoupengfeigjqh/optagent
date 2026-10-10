@@ -89,6 +89,8 @@ export default defineConfig({
         // 工具调用的折叠展示（2026-10-08）：展示模型纯函数 + 跨组件实例的查看态
         'src/utils/tool-calls.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 93.75 / 100 / 100
         'src/composables/useToolPanels.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        // 产出正文的视图链接（2026-10-10，TR-40~TR-43）：viewUrl 字段判定 + 值归一化（唯一实现）
+        'src/utils/view-link.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
       },
     },
   },

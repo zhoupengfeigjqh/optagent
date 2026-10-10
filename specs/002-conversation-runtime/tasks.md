@@ -54,3 +54,48 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T013 [P] 硬门禁：改动/新增文件最大 **354 行**（≤500）；**无新增依赖**（`package.json` 未变）
 - [x] T014 构建与冒烟：`vite build` 成功（3422 模块）；dev server 编译三个改动模块均 HTTP 200
 - [ ] T015（**存量问题，非本次改动引入**）`npm run lint` 99 errors / 34 warnings、`npm run typecheck` 7 条 `TS6133`——全部落在本次**未改动**的文件里（`src/views/demo/*`、`src/views/datapage/*`、`src/router/index.ts`、`src/components/{data,expand-section,z-gantt,z-gantt-table,z-table}/**`）。本次改动的 7 个源文件单独 lint 与类型检查均为 **0 问题**。另：`npm run test:coverage` 在本机被 safe-delete 钩子阻断（无法清理既有 `coverage/` 目录），已用等价命令 `npx vitest run --coverage --coverage.reportsDirectory=.coverage-gate`（新目录，不触发清理）取得同一结论；`frontend/eslint.config.mjs` 已补 `coverage-*/**`、`.coverage-*/**` 忽略，使这些产物不再污染 lint 结论
+
+---
+
+# Tasks: 对话运行时 · 产出正文的视图链接（2026-10-10 增量）
+
+**Input**: [spec.md](./spec.md) §4.7（`TR-40`~`TR-43`）、§7.2、§9.2；[plan.md](./plan.md)
+
+**范围**: **仅异步产出（铃铛）**；同步对话内入口本次不做。
+
+**Prerequisites**: [spec.md](./spec.md) 与 [plan.md](./plan.md)（本次**新增** `plan.md`：承载 Complexity Tracking、平台差异登记，以及宪章 2.0.2 待办要求的"存量模块补测顺序与范围"结论）。
+
+**Tests**: 本增量必须包含测试任务（宪章原则三）。测试全部在**宿主机本地**执行，容器不参与。
+
+## 设计取舍（对应宪章「治理 § 例外」的登记口径；**均非原则违反**）
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 只按**字段名**判定（不看值像不像 URL） | 避免把正文里任何形如 `/api/…` 的普通字段误链接化 | 按值形态判定（误报率高，且用户无法预期） |
+| 值非法时**按普通文本**渲染、不额外提示 | 界面展示的是正文原文，信息完整；属"形态不匹配"而非降级（见 `plan.md` §3 原则九判定） | 加"链接不可用"禁用态（多一套状态与文案，收益低） |
+| 前缀补**当前页面入口**（`window.location.origin`） | 同一份代码适配开发/生产/换域名/HTTPS | 写死 `ip:端口`（换环境即失效） |
+| 正文 >256K 字符不做定向提取 | 与既有"结构化展示"同一判据，避免两个解析口径 | 启发式定位字段（复杂且易误判） |
+
+## Phase 1: 规格（宪章原则一：先规格后代码）
+
+- [x] T016 回写 `specs/002-conversation-runtime/spec.md`：§3 术语（视图链接 / 归一化）、新增 §4.7（`TR-40`~`TR-43` + 明确不做 + 原则九判定）、§7.2 修订记录、§8 宪章落实、§9.2 验收清单
+- [x] T017 新增 `specs/002-conversation-runtime/plan.md`：技术方案 / 文件清单 / Complexity Tracking（含被否决的替代与已知限制）/ 平台差异登记 / **宪章 2.0.2 待办的补测顺序与范围结论**
+- [x] T018 回写本文件（`tasks.md`）本次增量任务
+- [x] T019 回写 `异步MCP服务接入约定.md` §4.7：`viewUrl` 字段名与值形态（根相对路径或完整 `http(s)`，其余形态不链接化）
+
+## Phase 2: 前端实现
+
+- [x] T020 新增 `frontend/src/utils/view-link.ts`（68 行）：`VIEW_URL_FIELD` / `isViewUrlField()` / `resolveViewUrl(value, origin?)`（已带前缀原样；单个 `/` 开头拼当前入口；`//`、其它 scheme、无前导 `/`、控制字符或反斜杠 → `null`）。控制字符判定用显式码点（`hasControlOrBackslash`）而非正则：避免 `no-control-regex` 规则、也无需禁用规则
+- [x] T021 `frontend/src/components/chat/ProducedJsonView.vue`（298 行）：新增 `fieldKey` 属性（对象行传键、表格单元格传列名）+ 链接分支（原生 `<a>`，`target="_blank"` + `rel="noopener noreferrer"`，文本 = 值本身，**分支排在纯标量之前**）+ `.produced-json__link` 样式（链接色 + 下划线，双通道）
+
+## Phase 3: 测试（宪章原则三）
+
+- [x] T022 [P] 新增 `frontend/src/utils/view-link.spec.ts`（94 行 / 20 例）：已带前缀（含协议大小写）**不被拼接** / 根相对路径拼出 `origin`（断言 `URL.origin` 相等）/ query 与 fragment / 中文路径编码 / 首尾空白 / 未注入 origin 时取当前入口 / 八类拒绝形态 / 非字符串 / 非法 origin / 字段名匹配与不匹配
+- [x] T023 `frontend/src/components/chat/ProducedJsonView.spec.ts`（199 行，追加 11 例）：对象行 / 嵌套 / 表格单元格 / 已带前缀原样 / 大小写字段名 / 非法值（`//`、无前导 `/`、`javascript:`）不链接化 / 非字符串值不链接化 / 非 `viewUrl` 字段不误链接 / 无 `viewUrl` 时回归不变
+
+## Phase 4: 门禁与验收（宪章原则八 + hard gate）
+
+- [x] T024 [P] `frontend/vite.config.ts`：`src/utils/view-link.ts` 登记进模块覆盖率阈值清单（80%）
+- [x] T025 [P] 测试与覆盖率：`npx vitest run --coverage --coverage.reportsDirectory=.coverage-gate` → **35 文件 / 478 用例全绿**；`view-link.ts` 96.29 / 89.65 / 100 / 100；全局地板实测 50.66 / 57.93 / 41.09 / 49.43 ≥ 48 / 55 / 38 / 47（地板未下调）
+- [x] T026 硬门禁：改动/新增文件最大 **298 行**（≤500）；**无新增依赖**（`package.json` 未变）
+- [x] T027 `lint` / `typecheck` / `build`：本次 5 个改动文件 `eslint` **0 问题**；`npx vite build` 退出码 0；`vue-tsc` 仅剩**存量**报错（`src/router/index.ts`、`src/views/datapage/*`、`src/views/demo/*`，非本次改动文件，沿用 T015 口径）

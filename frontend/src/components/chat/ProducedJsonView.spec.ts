@@ -121,3 +121,84 @@ describe('ProducedJsonView —— 有界与逃生舱', () => {
     expect(wrapper.text()).toContain('x')
   })
 })
+
+describe('ProducedJsonView —— 视图链接（viewUrl，TR-40 / TR-41）', () => {
+  /** 未传 origin 时组件取当前页面入口；断言按同一来源，避免硬编码主机 */
+  const ORIGIN = window.location.origin
+
+  it('字段名 viewUrl + 无前缀 → 渲染链接：文本 = 值本身，href 拼当前入口', () => {
+    const wrapper = mountView({ viewUrl: '/datasource/dsdasds/dstsd/abc/xlsx' })
+
+    const link = wrapper.find('.produced-json__link')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('/datasource/dsdasds/dstsd/abc/xlsx')
+    expect(link.attributes('href')).toBe(`${ORIGIN}/datasource/dsdasds/dstsd/abc/xlsx`)
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('已带前缀 → href 与值完全一致（MUST NOT 被拼接）', () => {
+    const raw = 'http://192.168.0.188:8080/datasource/x'
+
+    expect(mountView({ viewUrl: raw }).find('.produced-json__link').attributes('href')).toBe(raw)
+  })
+
+  it('字段名大小写不敏感', () => {
+    expect(mountView({ ViewUrl: '/a/b' }).find('.produced-json__link').exists()).toBe(true)
+  })
+
+  it('嵌套对象里的 viewUrl 也能点', () => {
+    const wrapper = mountView({ data: { viewUrl: '/a/b' } })
+
+    expect(wrapper.find('.produced-json__link').attributes('href')).toBe(`${ORIGIN}/a/b`)
+  })
+
+  it('对象数组表格：viewUrl 列渲染为链接', () => {
+    const wrapper = mountView([{ orderNo: 'WO-1', viewUrl: '/a/b' }])
+
+    const link = wrapper.find('tbody .produced-json__link')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href')).toBe(`${ORIGIN}/a/b`)
+  })
+
+  it('值非法（协议相对 //）→ 不产生链接，按普通文本显示原文', () => {
+    const wrapper = mountView({ viewUrl: '//evil.com/x' })
+
+    expect(wrapper.find('.produced-json__link').exists()).toBe(false)
+    expect(wrapper.find('.produced-json__scalar').text()).toBe('//evil.com/x')
+  })
+
+  it('值非法（无前导斜杠）→ 不产生链接', () => {
+    expect(mountView({ viewUrl: 'datasource/x' }).find('.produced-json__link').exists()).toBe(false)
+  })
+
+  it('值非法（javascript scheme）→ 不产生链接', () => {
+    expect(
+      mountView({ viewUrl: 'javascript:alert(1)' }).find('.produced-json__link').exists(),
+    ).toBe(false)
+  })
+
+  it('非字符串值 → 不产生链接（数字照常显示）', () => {
+    const wrapper = mountView({ viewUrl: 123 })
+
+    expect(wrapper.find('.produced-json__link').exists()).toBe(false)
+    expect(wrapper.text()).toContain('123')
+  })
+
+  it('只按字段名判定：其它字段的值像路径也不链接化', () => {
+    const wrapper = mountView({ path: '/api/files/raw' })
+
+    expect(wrapper.find('.produced-json__link').exists()).toBe(false)
+    expect(wrapper.text()).toContain('/api/files/raw')
+  })
+
+  it('无 viewUrl 的普通正文：渲染与改动前一致（回归）', () => {
+    const wrapper = mountView({ status: 'success', message: '识别到 2 行文字' })
+
+    expect(wrapper.find('.produced-json__link').exists()).toBe(false)
+    expect(wrapper.findAll('.produced-json__key').map((node) => node.text())).toEqual([
+      'status',
+      'message',
+    ])
+  })
+})
