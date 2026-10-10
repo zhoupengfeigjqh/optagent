@@ -27,6 +27,13 @@ export interface PromptSources {
   records: readonly ToolCallRecord[];
   /** 已拼好的「后台计算结果」段（无产出时为空串） */
   producedText: string;
+  /**
+   * 本轮请求级指引（004：问题实例关联工具生成的隐藏引导）。
+   *
+   * **不落盘、不进历史**，只追加到本轮 `systemExtra`——用户消息气泡因此保持干净
+   * （用户看到的只有问题文本本身），而模型仍能读到"本轮优先用哪些工具"。
+   */
+  guidance?: string;
 }
 
 /**
@@ -75,5 +82,7 @@ export function buildPromptMessages(sources: PromptSources): {
   const indexText = formatArtifactIndex(selection.index);
   if (indexText !== '') parts.push(indexText);
   if (sources.producedText !== '') parts.push(sources.producedText);
+  // 004：问题实例的隐藏工具引导。放最后——本轮指令紧邻用户消息，更容易被遵循
+  if (sources.guidance) parts.push(sources.guidance);
   return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
 }

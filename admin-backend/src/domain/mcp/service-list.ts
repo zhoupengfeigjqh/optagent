@@ -28,6 +28,14 @@ export interface McpServiceView {
    * **只回布尔量**：请求头里通常是访问令牌，列表 MUST NOT 出现任何值（连掩码也不给）。
    */
   has_headers: boolean;
+  /**
+   * 工具白名单（2026-10-09）：数字人"问题实例"的工具关联需要在**列表**就拿到
+   * 每个服务的可见工具——否则打开选择器要逐服务拉详情，而详情会**实际连接服务**探测
+   * 工具清单（服务不可达时取不到）。
+   *
+   * 只回工具名清单：不含连接细节，也不含任何凭据（与 `has_headers` 的克制口径一致）。
+   */
+  allowed_tools: string[];
 }
 
 export interface McpServiceDetailView extends McpServiceView {
@@ -166,5 +174,6 @@ function toView(config: McpServiceConfig): McpServiceView {
     url: config.url,
     // 只回布尔量：请求头里通常是令牌，列表连掩码都不给
     has_headers: Object.keys(config.headers).length > 0,
+    allowed_tools: config.allowed_tools,
   };
 }

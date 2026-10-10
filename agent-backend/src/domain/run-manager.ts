@@ -74,6 +74,11 @@ export interface StartRunOptions {
   attachments?: FileReference[];
   /** 请求级模型覆盖 */
   model?: ModelSelection;
+  /**
+   * 本轮请求级指引（004：问题实例关联工具的隐藏引导）。
+   * 只进本轮 System Prompt 追加段，**不落盘、不进历史**——用户消息气泡因此保持干净。
+   */
+  guidance?: string;
 }
 
 export interface RunManagerDeps {
@@ -264,6 +269,8 @@ export class RunManager {
       userMessage,
       records: this.deps.toolEvents?.readAll(userId, threadId) ?? [],
       producedText: (await this.deps.produced?.(userId, threadId)) ?? '',
+      // 004：问题实例的隐藏工具引导（请求级，不落盘）
+      ...(opts.guidance ? { guidance: opts.guidance } : {}),
     });
   }
 

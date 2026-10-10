@@ -4,19 +4,27 @@
  * 设计要点：
  * - 草稿与已保存态分离：`dirty` 让"未保存就离开"可被提示；
  * - `revision` 为 `null` 表示**新建**（尚无设计态文档），保存时走 POST；
- * - `soul` 等字符串字段**不做 trim**——`FR-017` 要求原样回显含换行与标点。
+ * - `soul` 为**结构化对象**（004）：与 `scenario.data_prep_fields` 同理，
+ *   草稿必须**深拷贝**——否则弹窗里的编辑会直接改到"已保存态"，`dirty` 失效；
+ * - 新建态的初值有两个来源（2026-10-09）：空草稿（`resetToNew`）与
+ *   「新建数字人」弹窗的结果（`resetToCopy`，含"以既有数字人为模板复制"）。
  */
 import { computed, ref, shallowRef } from 'vue'
-import type { AgentDesign, AgentDesignPayload, AgentScenario, ScenarioField } from '../api/types'
+import type {
+  AgentDesign,
+  AgentDesignPayload,
+  AgentScenario,
+  ErrorInfo,
+  ScenarioField,
+  SoulDesign,
+} from '../api/types'
 import { createAgent, getAgent, updateAgent } from '../api/agents'
-import { PREDEFINED_DATA_PREP_DIRS } from '../constants/agent-design'
-import { emptyScenario } from '../constants/agent-design'
+import { PREDEFINED_DATA_PREP_DIRS, emptyScenario, emptySoulDesign } from '../constants/agent-design'
 import { toErrorInfo } from '../utils/error-message'
-import type { ErrorInfo } from '../api/types'
 
 export interface AgentDesignDraft {
   name: string
-  soul: string
+  soul: SoulDesign
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
@@ -34,10 +42,23 @@ function cloneFields(
   return out
 }
 
+/** 结构化 SOUL 深拷贝（问题实例与工具引用都是嵌套结构，浅拷贝会串改） */
+function cloneSoul(soul: SoulDesign): SoulDesign {
+  return {
+    ...soul,
+    capability_tags: [...soul.capability_tags],
+    forbidden: [...soul.forbidden],
+    starters: soul.starters.map((starter) => ({
+      prompt: starter.prompt,
+      tools: starter.tools.map((tool) => ({ ...tool })),
+    })),
+  }
+}
+
 export function emptyDraft(): AgentDesignDraft {
   return {
     name: '',
-    soul: '',
+    soul: emptySoulDesign(),
     enabled_tools: [],
     mcp_services: [],
     skills: [],
@@ -48,7 +69,7 @@ export function emptyDraft(): AgentDesignDraft {
 function toDraft(design: AgentDesign): AgentDesignDraft {
   return {
     name: design.name,
-    soul: design.soul,
+    soul: cloneSoul(design.soul),
     enabled_tools: [...design.enabled_tools],
     mcp_services: [...design.mcp_services],
     skills: [...design.skills],
@@ -73,7 +94,8 @@ export function useAgentDesign() {
     if (isNew.value) {
       return (
         draft.value.name !== '' ||
-        draft.value.soul !== '' ||
+        // 结构化 SOUL 的"是否有输入"判据：与空结构逐字段比较
+        JSON.stringify(draft.value.soul) !== JSON.stringify(emptySoulDesign()) ||
         draft.value.scenario.scenario !== '' ||
         // 预定义目录（算法规则）是新建初值自带的，不算"有输入"
         draft.value.scenario.data_prep_dirs.some(
@@ -108,7 +130,11 @@ export function useAgentDesign() {
     saving.value = true
     error.value = null
     try {
-      const payload: AgentDesignPayload = { ...draft.value, scenario: { ...draft.value.scenario } }
+      const payload: AgentDesignPayload = {
+        ...draft.value,
+        soul: cloneSoul(draft.value.soul),
+        scenario: { ...draft.value.scenario },
+      }
       const result =
         revision.value === null
           ? await createAgent(payload)
@@ -135,5 +161,53 @@ export function useAgentDesign() {
     error.value = null
   }
 
-  return { draft, saved, revision, loading, saving, error, isNew, dirty, load, save, resetToNew }
+  /**
+   * 新建态的**预填**（2026-10-09：「新建数字人」弹窗的结果，`FR-015`）。
+   *
+   * - `copyFrom === null`：全部重建，只预填名称；
+   * - 否则：以源数字人的**五类配置**为模板复制，名称换成新名称。
+   *
+   * `revision` 一律保持 `null`——复制出来的是**尚未保存的新建态**，保存必须走 POST
+   * （`createAgent`）。这也是不能复用 `saved` / `load()` 的原因：那会把源文档当成
+   * "已保存态"，保存时错误地走 PUT，反而去改源数字人。
+   *
+   * 源在弹窗确认后、设计器挂载前被删（或读取失败）→ **降级为空草稿但保留名称**，
+   * 并把可读原因**返回**给调用方去播报（不写 `error`：它的语义是"保存未完成"）。
+   */
+  async function resetToCopy(name: string, copyFrom: string | null): Promise<string | null> {
+    saved.value = null
+    revision.value = null
+    error.value = null
+    if (copyFrom === null) {
+      draft.value = { ...emptyDraft(), name }
+      return null
+    }
+    loading.value = true
+    try {
+      const source = await getAgent(copyFrom)
+      draft.value = { ...toDraft(source), name }
+      return null
+    } catch (err) {
+      draft.value = { ...emptyDraft(), name }
+      const info = toErrorInfo(err)
+      return `无法复制数字人「${copyFrom}」的内容（${info.code}），已改为全新设计（名称保留）。`
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return {
+    draft,
+    saved,
+    revision,
+    loading,
+    saving,
+    error,
+    isNew,
+    dirty,
+    load,
+    save,
+    resetToNew,
+    resetToCopy,
+  }
 }

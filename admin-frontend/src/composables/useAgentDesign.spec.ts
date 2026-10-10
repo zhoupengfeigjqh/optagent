@@ -19,9 +19,20 @@ vi.mock('../api/agents', () => ({
   deleteAgent: vi.fn(),
 }))
 
+/** 结构化 SOUL 夹具（004）：必填项齐全，测试按需 spread 覆盖 */
+const SOUL = {
+  intro: '简介',
+  welcome: '欢迎',
+  starters: [],
+  mission: '你是助手',
+  capability_tags: [],
+  forbidden: [],
+  prompt_extra: '',
+}
+
 const DESIGN = {
   name: 'demo',
-  soul: '你是助手',
+  soul: SOUL,
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
@@ -46,7 +57,15 @@ describe('emptyDraft', () => {
   it('初值为五类配置齐全的空草稿（MUST NOT 缺字段）', () => {
     expect(emptyDraft()).toEqual({
       name: '',
-      soul: '',
+      soul: {
+        intro: '',
+        welcome: '',
+        starters: [],
+        mission: '',
+        capability_tags: [],
+        forbidden: [],
+        prompt_extra: '',
+      },
       enabled_tools: [],
       mcp_services: [],
       skills: [],
@@ -70,7 +89,7 @@ describe('useAgentDesign', () => {
     expect(getAgent).toHaveBeenCalledWith('demo')
     expect(editor.isNew.value).toBe(false)
     expect(editor.revision.value).toBe(3)
-    expect(editor.draft.value.soul).toBe('你是助手')
+    expect(editor.draft.value.soul.mission).toBe('你是助手')
     expect(editor.dirty.value).toBe(false)
   })
 
@@ -116,7 +135,7 @@ describe('useAgentDesign', () => {
 
   it('dirty：新建态下有任意输入即视为已修改', () => {
     const editor = useAgentDesign()
-    editor.draft.value.soul = 'x'
+    editor.draft.value.soul = { ...SOUL, mission: 'x' }
     expect(editor.dirty.value).toBe(true)
   })
 
@@ -135,15 +154,15 @@ describe('useAgentDesign', () => {
   })
 
   it('save（编辑）：走 PUT 并带上 revision（乐观锁）', async () => {
-    updateAgent.mockResolvedValue({ ...DESIGN, soul: '改后', revision: 4 })
+    updateAgent.mockResolvedValue({ ...DESIGN, soul: { ...SOUL, mission: '改后' }, revision: 4 })
     const editor = useAgentDesign()
     await editor.load('demo')
-    editor.draft.value.soul = '改后'
+    editor.draft.value.soul = { ...SOUL, mission: '改后' }
 
     await editor.save()
     expect(updateAgent).toHaveBeenCalledWith('demo', expect.objectContaining({ revision: 3 }))
     expect(editor.revision.value).toBe(4)
-    expect(editor.draft.value.soul).toBe('改后')
+    expect(editor.draft.value.soul.mission).toBe('改后')
   })
 
   it('save 失败：返回 null、错误按码可读、revision 不变（不误以为已保存）', async () => {
@@ -168,11 +187,73 @@ describe('useAgentDesign', () => {
     expect(editor.dirty.value).toBe(false)
   })
 
-  it('soul 原样保留（含换行与标点，不 trim；FR-017）', async () => {
-    const soul = '第一行\n第二行，含标点！？\n\n'
-    getAgent.mockResolvedValue({ ...DESIGN, soul })
+  it('使命原样填充草稿（含换行与标点，不额外 trim；FR-017 / 004）', async () => {
+    const mission = '第一行\n第二行，含标点！？\n\n'
+    getAgent.mockResolvedValue({ ...DESIGN, soul: { ...SOUL, mission } })
     const editor = useAgentDesign()
     await editor.load('demo')
-    expect(editor.draft.value.soul).toBe(soul)
+    expect(editor.draft.value.soul.mission).toBe(mission)
+  })
+})
+
+describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，2026-10-09）', () => {
+  it('无复制源：只预填名称，五类配置为全新初始值', async () => {
+    const editor = useAgentDesign()
+    expect(await editor.resetToCopy('新助手', null)).toBeNull()
+
+    expect(editor.draft.value).toEqual({ ...emptyDraft(), name: '新助手' })
+    expect(getAgent).not.toHaveBeenCalled()
+    expect(editor.isNew.value).toBe(true)
+  })
+
+  it('带复制源：五类配置取自源、名称取新名，且仍是**新建态**（保存走 POST）', async () => {
+    createAgent.mockResolvedValue({ ...DESIGN, name: '副本', revision: 1 })
+    const editor = useAgentDesign()
+    expect(await editor.resetToCopy('副本', 'demo')).toBeNull()
+
+    expect(getAgent).toHaveBeenCalledWith('demo')
+    expect(editor.draft.value.name).toBe('副本')
+    expect(editor.draft.value.soul.mission).toBe('你是助手')
+    expect(editor.draft.value.enabled_tools).toEqual(['read_file'])
+    expect(editor.draft.value.mcp_services).toEqual(['ocr'])
+    expect(editor.draft.value.scenario.scenario).toBe('生产')
+
+    // 复制出来的是"尚未保存的新建态"：revision 必须为 null，保存走 POST（而非 PUT）
+    expect(editor.revision.value).toBeNull()
+    expect(editor.isNew.value).toBe(true)
+    await editor.save()
+    expect(createAgent).toHaveBeenCalledTimes(1)
+    expect(updateAgent).not.toHaveBeenCalled()
+  })
+
+  it('复制草稿是**深副本**：改草稿不污染源，源也不被当作"已保存态"', async () => {
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+
+    editor.draft.value.enabled_tools.push('write_file')
+    editor.draft.value.scenario.data_prep_fields.生产计划.push({
+      name: '计划量',
+      type: 'integer',
+      required: false,
+    })
+
+    expect(editor.saved.value).toBeNull()
+    expect(editor.dirty.value).toBe(true)
+  })
+
+  it('复制源读取失败：降级为空草稿 + 保留名称，返回可读原因且不写 error', async () => {
+    getAgent.mockRejectedValue({ code: 'ADM_AGENT_NOT_FOUND', message: 'raw backend msg' })
+    const editor = useAgentDesign()
+
+    const failure = await editor.resetToCopy('副本', 'gone')
+
+    expect(failure).toContain('ADM_AGENT_NOT_FOUND')
+    expect(failure).not.toContain('raw backend msg')
+    expect(editor.draft.value.name).toBe('副本')
+    expect(editor.draft.value.soul.mission).toBe('')
+    expect(editor.isNew.value).toBe(true)
+    expect(editor.loading.value).toBe(false)
+    // error 专表"保存未完成"：降级原因由调用方播报，不占用它
+    expect(editor.error.value).toBeNull()
   })
 })

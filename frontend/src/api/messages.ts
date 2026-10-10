@@ -21,6 +21,8 @@ export interface SendMessageInput {
   model: string | null
   /** 结构化引用 */
   attachments: FileReference[]
+  /** 本轮隐藏指引（004）；空串 / 缺省表示不提交该字段 */
+  guidance?: string
 }
 
 /**
@@ -42,6 +44,9 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
       dir: item.dir,
       filename: item.filename,
     }))
+  }
+  if (input.guidance) {
+    body.guidance = input.guidance
   }
   return body
 }

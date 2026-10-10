@@ -10,6 +10,7 @@ import { detectAnomalies } from '../../src/domain/config-center/references.js';
 import { createReferenceIndex } from '../../src/domain/config-center/reference-index.js';
 import type { AgentDesignDocument } from '../../src/domain/config-center/agent-design.js';
 import { precheckPassed, runPrecheck, type PrecheckInput } from '../../src/domain/deploy/precheck.js';
+import { soulDesign } from '../helpers/soul.js';
 
 const index = createReferenceIndex({
   builtinTools: ['read_file'],
@@ -20,7 +21,7 @@ const index = createReferenceIndex({
 function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocument {
   return {
     name: 'demo',
-    soul: '你是助手',
+    soul: soulDesign('你是助手'),
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
@@ -49,7 +50,7 @@ describe('runPrecheck', () => {
 
   it('① 配置完整性：SOUL 为空 → config_integrity', () => {
     const errors = runPrecheck(
-      input({ readDesign: () => design({ soul: '   ' }) }),
+      input({ readDesign: () => design({ soul: soulDesign('   ') }) }),
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.category).toBe('config_integrity');
@@ -179,7 +180,8 @@ describe('runPrecheck', () => {
           { user_id: 'ops', agents: ['demo2'] },
           { user_id: 'bad/name', agents: [] },
         ],
-        readDesign: (name) => (name === 'demo' ? design({ soul: '' }) : design({ name: 'demo2' })),
+        readDesign: (name) =>
+          name === 'demo' ? design({ soul: soulDesign('') }) : design({ name: 'demo2' }),
         index: createReferenceIndex({ builtinTools: [], mcpServices: [], skills: [] }),
         isWritable: () => false,
       }),

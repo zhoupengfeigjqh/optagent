@@ -228,7 +228,12 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     }
   }
 
-  async function send(payload: { content: string; attachments: FileReference[] }): Promise<void> {
+  async function send(payload: {
+    content: string
+    attachments: FileReference[]
+    /** 本轮隐藏指引（004：问题实例关联工具引导）；只进本轮系统提示词，不落盘 */
+    guidance?: string
+  }): Promise<void> {
     // 进行中直接忽略，不重复发起（FR-006）
     if (phase.value === RUN_PHASE.STREAMING) {
       return
@@ -261,6 +266,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       thinking: thinkingEnabled.value,
       model: deps.getModel(),
       attachments: payload.attachments,
+      ...(payload.guidance ? { guidance: payload.guidance } : {}),
     })
 
     controller = new AbortController()

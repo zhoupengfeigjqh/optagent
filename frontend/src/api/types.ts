@@ -54,10 +54,35 @@ export interface McpServerRef {
   transport: string
 }
 
+/** 问题实例关联的工具（`starters[].tools[]`，004）。 */
+export interface AgentStarterTool {
+  kind: 'builtin' | 'mcp'
+  name: string
+  /** 仅 `kind: 'mcp'` 存在：所属 MCP 服务名 */
+  service?: string
+  /** 模型实际看到的工具名（MCP 带 `{server}__` 前缀） */
+  exposed_name: string
+}
+
+/** 新建对话页的引导卡片（004）。 */
+export interface AgentStarter {
+  /** 卡片文本，点击即作为用户消息发出 */
+  prompt: string
+  tools: AgentStarterTool[]
+  /** 隐藏工具引导：发送时随请求回传，**对用户不可见**（空串 = 无关联工具） */
+  guidance: string
+}
+
 /** `GET /api/agents/{agent_name}` 响应。 */
 export interface DigitalHuman {
   agent_name: string
-  /** SOUL.md 全文，界面展示为"描述" */
+  /** 角色简介：数字人切换面板展示（旧版 SOUL.md 无结构化数据时为空串） */
+  intro: string
+  /** 新建对话页首屏欢迎语 */
+  welcome: string
+  /** 新建对话页问题卡片 */
+  starters: AgentStarter[]
+  /** SOUL.md 全文（兼容保留；展示语义已由 `intro` 承担） */
   soul: string
   skills: AgentSkill[]
   enabled_tools: string[]
@@ -270,6 +295,11 @@ export interface SendMessageRequest {
   model?: string
   /** 结构化引用（maxItems: 10） */
   attachments?: FileReference[]
+  /**
+   * 本轮隐藏指引（004：问题实例关联工具生成的引导，maxLength: 500）。
+   * 只追加到本轮系统提示词，**不落盘、不进历史**——用户气泡里看不到它。
+   */
+  guidance?: string
 }
 
 /** `done.finish_reason`：`completed` 正常落盘；`stop` 本轮被中断丢弃、不落盘。 */

@@ -16,6 +16,7 @@ import type {
   ErrorInfo,
   McpServiceListItem,
   SkillListItem,
+  SoulDesign,
 } from '../../api/types'
 import { deleteAgent } from '../../api/agents'
 import { AGENT_DESIGN_TABS, NEW_AGENT_SENTINEL } from '../../constants/agent-design'
@@ -32,6 +33,14 @@ import ToolSelector from './ToolSelector.vue'
 const props = defineProps<{
   name: string
   design: AgentDesign | null
+  /**
+   * 新建初值（`FR-015`，2026-10-09）：由「新建数字人」弹窗给出——
+   * 名称必填，复制源可选（选定即以该数字人的五类配置为模板）。
+   *
+   * `null` 表示未经弹窗进入的兜底路径（如直接访问 `agents/__new__`）：
+   * 此时退回全空草稿，行为与改造前一致。
+   */
+  initial: { name: string; copyFrom: string | null } | null
   builtinTools: BuiltinTool[]
   builtinToolsError: unknown
   mcpServices: McpServiceListItem[]
@@ -68,10 +77,11 @@ const builtinToolsErrorMessage = computed<string | null>(() => {
 })
 
 /* ---- 显式 setter：避免在模板里对 ref 属性做赋值 ---- */
-function setName(value: string): void {
-  draft.value.name = value
-}
-function setSoul(value: string): void {
+/*
+ * 注：名称**没有 setter**——`FR-015` 规定名称在创建时经弹窗确定、创建后不可修改，
+ * 设计器内为只读展示（见模板）。`draft.name` 只由 `resetToCopy` / `load` 写入。
+ */
+function setSoul(value: SoulDesign): void {
   draft.value.soul = value
 }
 function setTools(value: string[]): void {
@@ -89,7 +99,15 @@ function setScenario(value: AgentScenario): void {
 
 async function bootstrap(): Promise<void> {
   if (isNew.value) {
-    editor.resetToNew()
+    const seed = props.initial
+    if (!seed) {
+      editor.resetToNew()
+      return
+    }
+    // 预填：名称 + （可选的）复制源。复制失败会**降级为空草稿并保留名称**，
+    // 由这里把可读原因交给上层播报（不写 editor.error，它的语义是"保存未完成"）。
+    const failure = await editor.resetToCopy(seed.name, seed.copyFrom)
+    if (failure) emit('error', failure)
     return
   }
   await editor.load(props.name)
@@ -183,24 +201,32 @@ async function doDelete(): Promise<void> {
 
     <p v-if="loading" role="status">加载中…</p>
 
+    <!-- 名称只读：由「新建数字人」弹窗确定，创建后不可修改（`FR-015`） -->
     <label class="field" for="agent-name">
-      <span class="field__label">
-        数字人名称<span class="field__required" aria-hidden="true">*</span>
-      </span>
+      <span class="field__label">数字人名称</span>
       <input
         id="agent-name"
         type="text"
         :value="draft.name"
-        placeholder="例如：生产计划助手"
-        @input="setName(($event.target as HTMLInputElement).value)"
+        readonly
+        aria-readonly="true"
+        data-test="agent-name"
       />
-      <span class="field__hint">不得含路径分隔符或 “..”，且不可与既有数字人重名。</span>
+      <span class="field__hint">名称在「新建数字人」时确定，创建后不可修改。</span>
     </label>
 
     <ErrorNotice :error="saveError" title="保存未完成" />
 
     <TabsNav v-model="tab" :tabs="[...AGENT_DESIGN_TABS]" label="数字人设计分区">
-      <SoulEditor v-if="tab === 'soul'" :model-value="draft.soul" @update:model-value="setSoul" />
+      <SoulEditor
+        v-if="tab === 'soul'"
+        :model-value="draft.soul"
+        :enabled-tools="draft.enabled_tools"
+        :builtin-tools="builtinTools"
+        :mounted-services="draft.mcp_services"
+        :mcp-services="mcpServices"
+        @update:model-value="setSoul"
+      />
 
       <template v-else-if="tab === 'tools'">
         <ToolSelector

@@ -21,6 +21,7 @@ import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
+import { removeTree } from '../../infra/fs-remove.js';
 import {
   extractSkillArchive,
   type ArchiveLimits,
@@ -476,10 +477,10 @@ export class SkillLibraryService {
         if (existed) fs.renameSync(backupDir, target); // 回滚
         throw err;
       }
-      if (existed) fs.rmSync(backupDir, { recursive: true, force: true });
+      if (existed) removeTree(backupDir);
     } catch (err) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      fs.rmSync(backupDir, { recursive: true, force: true });
+      removeTree(tmpDir);
+      removeTree(backupDir);
       if (err instanceof ApiError) throw err;
       throw new ApiError(
         ERROR_CODES.ADM_STORAGE_UNAVAILABLE,

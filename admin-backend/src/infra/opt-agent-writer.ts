@@ -28,6 +28,7 @@ import path from 'node:path';
 import type { Logger } from 'pino';
 import { ApiError } from '../domain/api-error.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
+import { removeTree } from './fs-remove.js';
 
 export interface MaterializeFile {
   /** 相对该数字人目录的 posix 路径，如 `TOOL.json`、`skills/pdf-parse/SKILL.md` */
@@ -143,16 +144,17 @@ export class OptAgentWriter {
       }
 
       // ⑤ 清理临时与备份
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
-      fs.rmSync(backupRoot, { recursive: true, force: true });
+      // 目录名带用户/数字人标识（可能是中文），删除一律走 removeTree（见 fs-remove.ts）
+      removeTree(tmpRoot);
+      removeTree(backupRoot);
       return { userId, written, removed };
     } catch (err) {
       // 回滚：删除新建目录、恢复备份，做到"该用户零写入"
-      for (const dir of created) fs.rmSync(dir, { recursive: true, force: true });
+      for (const dir of created) removeTree(dir);
       for (const { from, to } of backups.reverse()) {
         try {
           if (fs.existsSync(from)) {
-            fs.rmSync(to, { recursive: true, force: true });
+            removeTree(to);
             this.renameSafe(from, to);
           }
         } catch (rollbackErr) {
@@ -162,8 +164,9 @@ export class OptAgentWriter {
           );
         }
       }
-      fs.rmSync(tmpRoot, { recursive: true, force: true });
-      fs.rmSync(backupRoot, { recursive: true, force: true });
+      // 目录名带用户/数字人标识（可能是中文），删除一律走 removeTree（见 fs-remove.ts）
+      removeTree(tmpRoot);
+      removeTree(backupRoot);
 
       if (err instanceof ApiError) throw err;
       throw new ApiError(
@@ -199,7 +202,7 @@ export class OptAgentWriter {
       );
     }
     try {
-      fs.rmSync(backup, { recursive: true, force: true });
+      removeTree(backup);
     } catch (err) {
       // 目录已经改走（撤回本身已生效），只是备份没删掉：留待人工清理，不影响结果
       this.logger?.warn(
@@ -229,7 +232,7 @@ export class OptAgentWriter {
         `rename 不可用（${code}），降级为逐文件替换`,
       );
       copyRecursive(from, to);
-      fs.rmSync(from, { recursive: true, force: true });
+      removeTree(from);
     }
   }
 }

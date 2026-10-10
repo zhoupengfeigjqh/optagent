@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 const TOOL_FIXTURE = [
   {
@@ -26,9 +27,13 @@ const TOOL_FIXTURE = [
 
 let fx: TestFixture;
 
+/** SOUL 主要使命：用例据此断言换行与标点被**原样保留**（004 起由 `mission` 承载） */
+const SOUL_MISSION = '第一行：你是一名助手。\n第二行：含标点，！？\n\n第四行结束。';
+
 const validBody = {
   name: 'demo',
-  soul: '第一行：你是一名助手。\n第二行：含标点，！？\n\n第四行结束。',
+  // 角色简介同时作为卡片"用途描述"的来源（004 起不再取 SOUL 首行）
+  soul: soulDesign(SOUL_MISSION, { intro: '第一行：你是一名助手。' }),
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
@@ -74,11 +79,11 @@ describe('POST /api/admin/agents', () => {
     expect(res.json().error.code).toBe('ADM_AGENT_NAME_TAKEN');
   });
 
-  it('SOUL 为空 → 400 VALIDATION_FAILED', async () => {
+  it('结构化 SOUL 的必填项为空 → 400 VALIDATION_FAILED（004）', async () => {
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/agents',
-      payload: { ...validBody, soul: '   ' },
+      payload: { ...validBody, soul: soulDesign('   ') },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('VALIDATION_FAILED');
@@ -126,7 +131,8 @@ describe('GET /api/admin/agents/{name}', () => {
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.soul).toBe(validBody.soul);
+    // 004：换行与标点仍**原样保留**，只是改由 `mission` 承载
+    expect(body.soul.mission).toBe(SOUL_MISSION);
     expect(body.scenario.data_prep_dirs).toEqual(['生产计划', '算法规则']);
   });
 
@@ -138,7 +144,7 @@ describe('GET /api/admin/agents/{name}', () => {
 });
 
 describe('GET /api/admin/agents', () => {
-  it('卡片列表含名称、用途描述（取自 SOUL 首行）与异常态', async () => {
+  it('卡片列表含名称、用途描述（取自角色简介）与异常态', async () => {
     await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents?page=1' });
     expect(res.statusCode).toBe(200);
@@ -180,14 +186,14 @@ describe('PUT /api/admin/agents/{name}', () => {
     const created = (
       await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody })
     ).json();
-    const nextSoul = '改后的 SOUL\n含换行、标点：！？\n';
+    const nextMission = '改后的 SOUL\n含换行、标点：！？';
     const res = await fx.app.inject({
       method: 'PUT',
       url: '/api/admin/agents/demo',
-      payload: { ...validBody, soul: nextSoul, revision: created.revision },
+      payload: { ...validBody, soul: soulDesign(nextMission), revision: created.revision },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().soul).toBe(nextSoul);
+    expect(res.json().soul.mission).toBe(nextMission);
     expect(res.json().revision).toBeGreaterThan(created.revision);
   });
 
@@ -209,12 +215,12 @@ describe('PUT /api/admin/agents/{name}', () => {
     const res = await fx.app.inject({
       method: 'PUT',
       url: '/api/admin/agents/demo',
-      payload: { ...validBody, soul: '新内容', revision: created.revision - 1 },
+      payload: { ...validBody, soul: soulDesign('新内容'), revision: created.revision - 1 },
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ADM_CONFIG_REVISION_CONFLICT');
     const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' })).json();
-    expect(after.soul).toBe(validBody.soul);
+    expect(after.soul).toEqual(validBody.soul);
   });
 
   it('改名冲突 → ADM_AGENT_NAME_TAKEN', async () => {

@@ -22,6 +22,7 @@ import {
   SECURITIES_FILE,
   OntologyStore,
 } from '../../src/domain/ontology/store.js';
+import { removeTree } from '../../src/infra/fs-remove.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 
 const SCENARIO = '生产调度';
@@ -62,9 +63,8 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
 /**
  * 写/删市场侧的安全管控文件（`null` = 删掉，模拟本体未配置或后续移除）。
  *
- * 删除后**校验**：Windows 宿主对含非 ASCII 段的路径存在 `fs.rmSync` 静默不删，
- * 静默残留会让"移除"用例变成假失败，故这里把删除失败直接暴露成夹具错误
- * （需要真删的用例请用 ASCII 场景/目录名，见下面的用例注释）。
+ * 删除走 `removeTree`（见 `src/infra/fs-remove.ts`）：修复前用 `fs.rmSync` 删含非 ASCII
+ * 段的路径会**静默不删**，残留会让"移除"用例变成假失败。改后中文场景/目录名也能真删。
  */
 function writeMarketSecurities(
   ontologyDir: string,
@@ -73,10 +73,7 @@ function writeMarketSecurities(
 ): void {
   const file = path.join(market, scenario, ontologyDir, SECURITIES_FILE);
   if (content === null) {
-    fs.rmSync(file, { force: true });
-    if (fs.existsSync(file)) {
-      throw new Error(`测试夹具无法删除市场文件（宿主对非 ASCII 路径的限制）：${file}`);
-    }
+    removeTree(file);
     return;
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -237,9 +234,10 @@ describe('导入 / 更新 / 删除', () => {
   });
 
   /**
-   * 删除的**落地断言用 ASCII 目录名**：Windows 宿主对含非 ASCII 段的路径存在
-   * "`fs.rmSync` 静默不删"的环境限制（Linux 容器实测正常，见 `PlatformStore.remove`
-   * 的删除后校验）。中文名的删除行为由下一条用例按"环境相关"口径覆盖。
+   * 删除的落地断言：磁盘目录清除、记录消失、再删报 `ADM_ONTOLOGY_NOT_FOUND`。
+   *
+   * 这里用 ASCII 目录名只是用例可读性——与中文名已无行为差异：修复 `fs.rmSync`
+   * 静默失败后（2026-10-09），中文路径同样能真删，见下一条用例。
    */
   it('删除：磁盘目录清除、记录消失、再删 → ADM_ONTOLOGY_NOT_FOUND', () => {
     const scenario = 'demo-scenario';
@@ -263,30 +261,21 @@ describe('导入 / 更新 / 删除', () => {
   });
 
   /**
-   * 中文路径删除：**环境相关**，但两种结果都必须自洽。
+   * 中文路径删除：**必须是真删**（2026-10-09 起）。
    *
-   * - 删除成功（Linux 等）→ 记录随之消失；
-   * - 删除失败（Windows 宿主限制）→ `PlatformStore.remove` 抛**可读错误**，
-   *   且索引**未被改写**（记录仍在）—— 宁可不删，也不留"卡片没了、文件还在"的半删状态。
+   * 修正前本用例还容得下"删不掉 → 抛可读错误且不半删"的分支：根因是 `fs.rmSync`
+   * 在 Windows 上对非 ASCII 路径静默失败。现删除走 `removeTree`，中文名同样能删，
+   * 故断言收紧为**记录消失且磁盘目录清除**。
    */
-  it('中文路径删除：成功则记录消失；失败则报可读错误且不半删', () => {
+  it('中文路径删除：记录消失、磁盘目录清除', () => {
     importOntoMarketOntology(market, ontologies, REF);
+    const dir = path.join(dataDir, ONTO_MARKET_DIR, SCENARIO, ONTOLOGY);
+    expect(fs.existsSync(dir)).toBe(true);
 
-    let code: string | null = null;
-    try {
-      ontologies.remove(SCENARIO, ONTOLOGY);
-    } catch (err) {
-      code = (err as ApiError).code;
-    }
+    ontologies.remove(SCENARIO, ONTOLOGY);
 
-    if (code === null) {
-      expect(ontologies.find(SCENARIO, ONTOLOGY)).toBeNull();
-    } else {
-      expect(code).toBe(ERROR_CODES.ADM_STORAGE_UNAVAILABLE);
-      expect(ontologies.find(SCENARIO, ONTOLOGY)).not.toBeNull();
-      // 清掉残留，避免影响其它用例
-      fs.rmSync(path.join(dataDir, ONTO_MARKET_DIR, SCENARIO), { recursive: true, force: true });
-    }
+    expect(ontologies.find(SCENARIO, ONTOLOGY)).toBeNull();
+    expect(fs.existsSync(dir)).toBe(false);
   });
 
   it('路径安全：场景名/目录名含 `..` 或分隔符 → VALIDATION_FAILED', () => {

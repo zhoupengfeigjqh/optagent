@@ -185,45 +185,35 @@ describe('DELETE /api/admin/ontologies/{name}?scenario=（§10.3）', () => {
   });
 
   /**
-   * 中文路径删除：**环境相关**，但两种结果都必须自洽（2026-10-03）。
+   * 中文路径删除：**必须是真删**（2026-10-09 起）。
    *
-   * - 宿主能删（Linux 容器等）→ 204，记录消失；
-   * - 宿主删不掉（Windows 对非 ASCII 路径存在 `fs.rmSync` 静默失败）→ 平台**不静默**：
-   *   返回 503 `ADM_STORAGE_UNAVAILABLE` + 可读原因，且**记录仍在**（索引未被改写）——
-   *   宁可不删，也不留"卡片没了、文件还在"的半删状态。
+   * 修正前本用例还容得下"宿主删不掉 → 503 且不半删"的分支：根因是 `fs.rmSync` 在
+   * Windows 上对非 ASCII 路径静默失败。现已改用 `removeTree`（`unlinkSync`/`rmdirSync`
+   * 手工递归），中文名同样能真删，故断言收紧为 **204 + 记录与磁盘目录都消失**——
+   * 这正是"删除不生效"这一 bug 的回归守护。
+   *
+   * 兜底的 503 行为（真被其它进程占用时）由 `tests/unit/platform-store.spec.ts` 打桩覆盖。
    */
-  it('中文名本体删除：成功则 204；宿主限制下报可读 503 且不半删', async () => {
+  it('中文名本体删除：204，记录与磁盘目录都消失', async () => {
     await setup();
     await importOntology();
+    expect(fs.existsSync(savedFile())).toBe(true);
 
     const res = await fx.app.inject({
       method: 'DELETE',
       url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
       query: { scenario: SCENARIO },
     });
+    expect(res.statusCode).toBe(204);
 
-    if (res.statusCode === 204) {
-      const detail = await fx.app.inject({
-        method: 'GET',
-        url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-        query: { scenario: SCENARIO },
-      });
-      expect(detail.statusCode).toBe(404);
-    } else {
-      expect(res.statusCode).toBe(503);
-      expect(res.json().error.code).toBe('ADM_STORAGE_UNAVAILABLE');
-      expect(res.json().error.message).toContain('手工删除');
-      // 不半删：记录仍在，且市场状态仍为 unchanged（索引没被改写）
-      const detail = await fx.app.inject({
-        method: 'GET',
-        url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-        query: { scenario: SCENARIO },
-      });
-      expect(detail.statusCode).toBe(200);
-      const market = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies/onto-market' });
-      const item = market.json().items.find((i: { ontology_dir: string }) => i.ontology_dir === ONTOLOGY);
-      expect(item.status).toBe('unchanged');
-    }
+    const detail = await fx.app.inject({
+      method: 'GET',
+      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
+      query: { scenario: SCENARIO },
+    });
+    expect(detail.statusCode).toBe(404);
+    // 不留"卡片没了、文件还在"的半删状态
+    expect(fs.existsSync(savedFile())).toBe(false);
   });
 });
 

@@ -85,6 +85,21 @@ const disabledReason = computed(() =>
   props.switchingDisabled ? '会话进行中，无法切换数字人' : null,
 )
 
+/**
+ * 面板展示用的简介（004）：优先取结构化 SOUL 的**角色简介**（`intro`）；
+ * 存量旧数字人没有该字段 → 回退 SOUL 全文的首个非空行（改造前的展示口径）。
+ */
+const displayedIntro = computed<string>(() => {
+  const intro = displayed.value?.intro?.trim() ?? ''
+  if (intro !== '') return intro
+  return (
+    (displayed.value?.soul ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? ''
+  )
+})
+
 function isCurrent(name: string): boolean {
   return props.current?.agent_name === name
 }
@@ -128,7 +143,7 @@ function onSwitch(name: string): void {
         </div>
 
         <h3 class="agent-panel__name">{{ displayed.agent_name }}</h3>
-        <p class="agent-panel__description">{{ displayed.soul || '暂无描述' }}</p>
+        <p class="agent-panel__description">{{ displayedIntro || '暂无简介' }}</p>
 
         <h4 class="agent-panel__section">技能</h4>
         <ul v-if="displayed.skills.length > 0" class="agent-panel__list">

@@ -14,6 +14,7 @@ import path from 'node:path';
 import type { Logger } from 'pino';
 import { ApiError } from '../domain/api-error.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
+import { removeTree } from './fs-remove.js';
 
 export interface MetaDocument {
   revision: number;
@@ -167,7 +168,8 @@ export class PlatformStore {
         }
       }
       try {
-        fs.rmSync(tmp, { force: true });
+        // 临时文件名带目标 basename（可能是中文），故同样不能走 `fs.rmSync`（见 fs-remove.ts）
+        removeTree(tmp);
       } catch {
         /* 清理临时文件失败不影响报错语义 */
       }
@@ -181,21 +183,21 @@ export class PlatformStore {
   /**
    * 删除文件或目录（幂等：目标不存在即视为成功）。
    *
-   * **删除后校验**（2026-10-03）：某些宿主环境会"静默不删"——例如 Windows 上
-   * 含非 ASCII 段（中文场景名/技能名）的路径，`fs.rmSync(..., { force: true })`
-   * 既不抛错也不删除（Linux 容器实测无此问题）。静默残留的后果是**上层以为删干净了**：
-   * 卡片消失、目录与文件还在，下次同名导入反被"已存在"挡住，排障时极难定位。
+   * **不使用 `fs.rmSync`**（2026-10-09 根因修正）：它在 Windows 上对含非 ASCII
+   * 字符（中文数字人/技能/场景名）的路径**既不抛错也不删除**，留下"界面说删了、
+   * 磁盘还在"的不一致状态——排查与实测见 `fs-remove.ts`。这里改为手工递归删除。
    *
-   * 因此这里把静默失败转成**可读错误**：宁可删除失败被看见，也不要留下不一致状态。
-   * 失败时调用方 SHOULD NOT 继续写索引（保持"记录与磁盘一致"，宁可不删也不半删）。
+   * **删除后校验**保留作兜底：真被其它进程占用时仍把静默失败转成**可读错误**，
+   * 宁可删除失败被看见，也不要留下不一致状态。失败时调用方 SHOULD NOT 继续写索引
+   * （保持"记录与磁盘一致"，宁可不删也不半删）。
    */
   remove(rel: string): void {
     const abs = this.abs(rel);
-    fs.rmSync(abs, { recursive: true, force: true });
+    removeTree(abs);
     if (fs.existsSync(abs)) {
       throw new ApiError(
         ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
-        `删除平台设计态失败：${rel}（目标仍存在，可能是宿主环境限制或被其它进程占用；请手工删除后重试）`,
+        `删除平台设计态失败：${rel}（目标仍存在，可能是被其它进程占用；请手工删除后重试）`,
       );
     }
   }

@@ -9,6 +9,7 @@
  */
 import { computed } from 'vue'
 
+import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import AgentPanel from './AgentPanel.vue'
@@ -89,6 +90,32 @@ const {
  * 除 `expanded` 与历史消息外，本轮已开始（首轮尚未落盘）也应下移入口（FR-004）。
  */
 const showList = computed(() => props.expanded || hasMessages.value || streaming.value !== null)
+
+/* ---------- 首屏引导（004） ---------- */
+
+/** 当前数字人的首屏欢迎语；旧版 SOUL 无结构化数据时为空 → 退回原空状态文案 */
+const heroWelcome = computed(() => agents.currentAgent.value?.welcome ?? '')
+
+/** 问题卡片：全部平铺展示，点击即发起一轮对话 */
+const heroStarters = computed<AgentStarter[]>(() => agents.currentAgent.value?.starters ?? [])
+
+const agentSelected = computed(() => agents.currentAgent.value !== null)
+
+/**
+ * 点击问题卡片 = 发起一轮对话。
+ *
+ * 正文只发问题本身（用户气泡保持干净）；关联工具的引导随 `guidance` 走
+ * **请求级隐藏通道**——不落盘、不进历史，只在那一轮的系统提示词里出现。
+ * 未选数字人或本轮进行中时不响应（未选数字人的提示由 `threads.create()` 兜底）。
+ */
+function onStarterClick(starter: AgentStarter): void {
+  if (!agentSelected.value || streaming.value !== null) return
+  void onSend({
+    content: starter.prompt,
+    attachments: [],
+    ...(starter.guidance ? { guidance: starter.guidance } : {}),
+  })
+}
 </script>
 
 <template>
@@ -139,8 +166,31 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
     </div>
 
     <div v-else class="chat-panel__hero">
-      <h1 class="chat-panel__hero-title">开始新的对话</h1>
-      <p class="chat-panel__hero-desc">在下方输入消息，即可开始本轮求解。</p>
+      <div class="chat-panel__hero-inner">
+        <h1 class="chat-panel__hero-title">{{ heroWelcome || '开始新的对话' }}</h1>
+        <p v-if="!agentSelected" class="chat-panel__hero-desc">
+          请先选择数字人，再使用下方的问题快速开始。
+        </p>
+        <p v-else-if="heroStarters.length === 0" class="chat-panel__hero-desc">
+          在下方输入消息，即可开始本轮求解。
+        </p>
+
+        <ul v-if="heroStarters.length > 0" class="chat-panel__starters">
+          <li v-for="(starter, index) in heroStarters" :key="index">
+            <button
+              type="button"
+              class="chat-panel__starter"
+              :disabled="!agentSelected || streaming !== null"
+              :data-test="`chat-starter-${index}`"
+              @click="onStarterClick(starter)"
+            >
+              <span class="chat-panel__starter-text">{{ starter.prompt }}</span>
+              <!-- 关联工具不在此展示：它只用于生成隐藏引导（`guidance`，见 onStarterClick），
+                   而且 `exposed_name` 是内部实现细节（如 erp__query_order），对业务用户无意义 -->
+            </button>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <ErrorNotice
@@ -262,6 +312,18 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
   justify-content: center;
   gap: var(--space-2);
   text-align: center;
+  padding: var(--space-4);
+  /* 问题实例全部平铺，可能很多：超出时整块滚动，不挤压输入区 */
+  overflow-y: auto;
+}
+
+.chat-panel__hero-inner {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .chat-panel__hero-title {
@@ -272,6 +334,46 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
 .chat-panel__hero-desc {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.chat-panel__starters {
+  width: 100%;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  /* 卡片只承载一行问题文字，列宽可以更窄：同样宽度下多放一张卡 */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-2);
+}
+
+.chat-panel__starter {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border, #dfe3ea);
+  border-radius: var(--radius-md);
+  background: var(--color-surface, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-sm, 13px);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-panel__starter-text {
+  line-height: var(--line-height-tight);
+}
+
+.chat-panel__starter:hover:not(:disabled) {
+  border-color: var(--color-primary, #2f6fed);
+}
+
+.chat-panel__starter:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .chat-panel__error {

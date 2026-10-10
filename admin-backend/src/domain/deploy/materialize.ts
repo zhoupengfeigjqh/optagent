@@ -6,7 +6,7 @@
  * （`agent-backend/src/domain/agent-instance.ts` / `dirs.ts`）：
  * ```text
  * users/{uid}/agents/{agent}/
- * ├── SOUL.md          ← 设计态 soul 全文（utf8，原样）
+ * ├── SOUL.md          ← 由结构化 soul **渲染**（frontmatter = 前台展示/引导，正文 = 提示词）
  * ├── TOOL.json        ← { "enabled": [...] }
  * ├── MCP.json         ← { "servers": [ { name, transport, url|command, headers?, … } ] }
  * ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": [...] }
@@ -18,9 +18,13 @@
  *
  * **2026-09-27**：连接地址取消运行形态维度，`MCP.json` 的 `url` 直接取调用配置的
  * 单一 `url`（`http` 必填、保存期已保证非空）。
+ *
+ * **2026-10-09（004）**：`SOUL.md` 不再原样透传，改由 `renderSoulMd` 渲染——
+ * 产物仍只有这一个文件；前台的展示/引导数据从 frontmatter 读，模型只读正文。
  */
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { scenarioFields, type AgentScenario } from '../config-center/scenario.js';
+import { renderSoulMd } from '../config-center/soul-design.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
@@ -89,7 +93,7 @@ export function buildAgentArtifact(
   ctx: MaterializeContext,
 ): AgentArtifact {
   const files: MaterializeFile[] = [
-    { relPath: 'SOUL.md', content: design.soul },
+    { relPath: 'SOUL.md', content: renderSoulMd(design.soul) },
     { relPath: 'TOOL.json', content: `${JSON.stringify({ enabled: design.enabled_tools }, null, 2)}\n` },
     {
       relPath: 'MCP.json',

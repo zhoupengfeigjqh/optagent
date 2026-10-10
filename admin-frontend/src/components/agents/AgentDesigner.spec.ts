@@ -23,9 +23,19 @@ vi.mock('../../api/agents', () => ({
   deleteAgent: (...args: unknown[]) => deleteAgent(...args),
 }))
 
+const SOUL: AgentDesign['soul'] = {
+  intro: '简介',
+  welcome: '欢迎',
+  starters: [],
+  mission: '你是助手',
+  capability_tags: [],
+  forbidden: [],
+  prompt_extra: '',
+}
+
 const DESIGN: AgentDesign = {
   name: 'demo',
-  soul: '你是助手',
+  soul: SOUL,
   enabled_tools: [],
   mcp_services: [],
   skills: [],
@@ -40,11 +50,16 @@ const DESIGN: AgentDesign = {
   revision: 3,
 }
 
-function mountDesigner(name = NEW_AGENT_SENTINEL, design: AgentDesign | null = null) {
+function mountDesigner(
+  name = NEW_AGENT_SENTINEL,
+  design: AgentDesign | null = null,
+  initial: { name: string; copyFrom: string | null } | null = null,
+) {
   return mount(AgentDesigner, {
     props: {
       name,
       design,
+      initial,
       builtinTools: [],
       builtinToolsError: null,
       mcpServices: [],
@@ -77,32 +92,65 @@ describe('AgentDesigner', () => {
     expect(editing.text()).toContain('设计数字人：demo')
   })
 
-  it('名称为必填项且标注为必填', () => {
-    const wrapper = mountDesigner()
+  it('名称在设计器内只读：由弹窗确定、创建后不可修改（FR-015）', () => {
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, {
+      name: '生产计划助手',
+      copyFrom: null,
+    })
+
+    const input = wrapper.find('#agent-name')
     expect(wrapper.text()).toContain('数字人名称')
-    expect(wrapper.find('#agent-name').attributes('aria-required')).toBeUndefined()
-    expect(wrapper.find('.field__required').exists()).toBe(true)
+    expect(input.attributes('readonly')).toBeDefined()
+    expect(input.attributes('aria-readonly')).toBe('true')
+    expect((input.element as HTMLInputElement).value).toBe('生产计划助手')
+    expect(wrapper.text()).toContain('创建后不可修改')
+  })
+
+  it('新建初值带复制源：以源数字人的五类配置为模板，名称取新名称', async () => {
+    getAgent.mockResolvedValue(DESIGN)
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, {
+      name: '副本',
+      copyFrom: 'demo',
+    })
+    await flushPromises()
+
+    expect(getAgent).toHaveBeenCalledWith('demo')
+    expect((wrapper.find('#agent-name').element as HTMLInputElement).value).toBe('副本')
+    // 五类配置来自源（此处以角色简介与场景名为代表）
+    expect((wrapper.find('#soul-intro').element as HTMLInputElement).value).toBe('简介')
+  })
+
+  it('复制源已不可读：降级为空草稿但保留名称，并发出可读原因', async () => {
+    getAgent.mockRejectedValue({ code: 'ADM_AGENT_NOT_FOUND', message: 'raw backend msg' })
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, {
+      name: '副本',
+      copyFrom: 'gone',
+    })
+    await flushPromises()
+
+    expect((wrapper.find('#agent-name').element as HTMLInputElement).value).toBe('副本')
+    expect(wrapper.emitted('error')?.[0]?.[0]).toContain('ADM_AGENT_NOT_FOUND')
+    expect(wrapper.text()).not.toContain('raw backend msg')
   })
 
   it('保存成功发出 saved 事件（FR-017）', async () => {
     createAgent.mockResolvedValue({ ...DESIGN, name: '新数字人' })
-    const wrapper = mountDesigner()
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, { name: '新数字人', copyFrom: null })
 
-    await wrapper.find('#agent-name').setValue('新数字人')
     await wrapper.findAll('[role="tab"]')[0]?.trigger('click')
     const save = wrapper.findAll('button').find((b) => b.text().includes('保存'))
     await save?.trigger('click')
     await flushPromises()
 
     expect(createAgent).toHaveBeenCalledTimes(1)
+    expect(createAgent.mock.calls[0]?.[0]).toMatchObject({ name: '新数字人' })
     expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ name: '新数字人' })
   })
 
   it('保存失败：发出 error 且错误按码给出可读文案（不展示后端 message）', async () => {
     createAgent.mockRejectedValue({ code: 'ADM_AGENT_NAME_TAKEN', message: 'raw backend msg' })
-    const wrapper = mountDesigner()
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, { name: 'demo', copyFrom: null })
 
-    await wrapper.find('#agent-name').setValue('demo')
     const save = wrapper.findAll('button').find((b) => b.text().includes('保存'))
     await save?.trigger('click')
     await flushPromises()
@@ -113,16 +161,17 @@ describe('AgentDesigner', () => {
   })
 
   it('有未保存修改时返回需二次确认（不静默丢弃）', async () => {
-    const wrapper = mountDesigner()
-    await wrapper.find('#agent-name').setValue('改过的名字')
+    // 弹窗确认后名称已预填，即"有未保存内容"
+    const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, { name: '改过的名字', copyFrom: null })
 
     const back = wrapper.findAll('button').find((b) => b.text().includes('返回列表'))
     await back?.trigger('click')
     await flushPromises()
 
     expect(wrapper.emitted('back')).toBeUndefined()
-    const dialog = wrapper.find('dialog')
-    expect(dialog.text()).toContain('放弃未保存的修改')
+    // 页面里还有「快速上手」弹窗的 `<dialog>`（常驻 DOM、未打开），按文本定位确认框
+    const dialog = wrapper.findAll('dialog').find((d) => d.text().includes('放弃未保存的修改'))
+    expect(dialog).toBeTruthy()
   })
 
   it('无修改时返回直接生效', async () => {
@@ -137,6 +186,7 @@ describe('AgentDesigner', () => {
       props: {
         name: NEW_AGENT_SENTINEL,
         design: null,
+        initial: null,
         builtinTools: [],
         builtinToolsError: { code: 'ADM_RUNTIME_UNREACHABLE', message: 'x' },
         mcpServices: [],

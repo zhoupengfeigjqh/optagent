@@ -1,5 +1,5 @@
 /**
- * 单测：SSE 事件解码（`decodeStreamEvent`）。
+ * 单测：SSE 事件解码（`decodeStreamEvent`）与发消息请求体（`buildSendMessageBody`）。
  *
  * 重点守住 HITL 的 `interaction_request`：它是**逐字段构造**的（不是透传），
  * 新增字段忘了映射就会被静默丢弃——`rules_field` 与 `tool_description` 正是这样漏掉的
@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { decodeStreamEvent } from './messages'
+import { buildSendMessageBody, decodeStreamEvent } from './messages'
 
 function interactionData(extra: Record<string, unknown> = {}): Record<string, unknown> {
   const event = decodeStreamEvent({
@@ -59,5 +59,25 @@ describe('decodeStreamEvent —— interaction_request（HITL）', () => {
 
   it('required 过滤非字符串项（既有行为，顺带守住）', () => {
     expect(interactionData({ required: ['input', 42, null] }).required).toEqual(['input'])
+  })
+})
+
+describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
+  const base = { content: '帮我梳理昨天订单的交付风险', thinking: false, model: null, attachments: [] }
+
+  it('有指引时随请求体下发（模型能看到，用户气泡里看不到）', () => {
+    const body = buildSendMessageBody({
+      ...base,
+      guidance: '本轮请优先使用以下工具完成任务：read_file',
+    })
+
+    expect(body.guidance).toBe('本轮请优先使用以下工具完成任务：read_file')
+    // 正文保持干净：引导绝不拼进 content
+    expect(body.content).toBe('帮我梳理昨天订单的交付风险')
+  })
+
+  it('空串 / 缺省时不写该键（后端 Schema 为 additionalProperties:false）', () => {
+    expect('guidance' in buildSendMessageBody(base)).toBe(false)
+    expect('guidance' in buildSendMessageBody({ ...base, guidance: '' })).toBe(false)
   })
 })

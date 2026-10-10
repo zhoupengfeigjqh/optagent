@@ -24,14 +24,19 @@ export interface McpConnectionTestOptions {
   onLocalError: (message: string | null) => void
   /** 结果播报（成功/失败/请求失败各一句） */
   announce: (text: string) => void
+  /**
+   * 结果弹窗实例的 ref：**由调用方创建并挂到模板上**（`ref="..."`），本函数只借用。
+   *
+   * 之所以由调用方持有、而非本函数返回：传统字符串模板 ref 是编译期魔法，语言工具
+   * 不把它计作"读取"，由本函数返回会被调用方的 `noUnusedLocals` 误报为未使用变量。
+   */
+  dialog: Ref<{ open: () => void } | null>
 }
 
 export interface McpConnectionTest {
   result: Ref<McpTestResult | null>
   busy: Ref<boolean>
   error: Ref<ErrorInfo | null>
-  /** 结果弹窗实例（调用方在模板上挂 `ref`） */
-  dialog: Ref<{ open: () => void } | null>
   run: () => Promise<void>
 }
 
@@ -39,7 +44,6 @@ export function useMcpConnectionTest(opts: McpConnectionTestOptions): McpConnect
   const result = ref<McpTestResult | null>(null)
   const busy = ref(false)
   const error = ref<ErrorInfo | null>(null)
-  const dialog = ref<{ open: () => void } | null>(null)
 
   async function run(): Promise<void> {
     opts.onLocalError(null)
@@ -61,9 +65,9 @@ export function useMcpConnectionTest(opts: McpConnectionTestOptions): McpConnect
       opts.announce('测试请求失败')
     } finally {
       busy.value = false
-      dialog.value?.open()
+      opts.dialog.value?.open()
     }
   }
 
-  return { result, busy, error, dialog, run }
+  return { result, busy, error, run }
 }

@@ -5,12 +5,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let fx: TestFixture;
 
 const AGENT = {
   name: 'demo',
-  soul: '# 生产计划助手\n你是助手',
+  soul: soulDesign('# 生产计划助手\n你是助手'),
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],

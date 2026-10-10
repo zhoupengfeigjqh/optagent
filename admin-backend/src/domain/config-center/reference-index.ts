@@ -10,12 +10,26 @@ export interface ReferenceIndex {
   mcpServices: ReadonlySet<string>;
   /** SKILL（来自共享技能库，`FR-036`） */
   skills: ReadonlySet<string>;
+  /**
+   * MCP 服务名 → 该服务的**可见工具**（`allowed_tools` 白名单）。
+   *
+   * 004 新增：数字人"问题实例"的关联工具允许引用 MCP 工具，判据是
+   * **模型真正看得到的工具**——挂载后由 `allowed_tools` 过滤（见
+   * `agent-backend/src/infra/mcp-tool-scope.ts`），白名单外的工具模型无从调用，
+   * 因此引导它也没有意义，保存期直接拒绝。
+   */
+  mcpTools: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 export interface ReferenceIndexInput {
   builtinTools: Iterable<string>;
   mcpServices: Iterable<string>;
   skills: Iterable<string>;
+  /**
+   * 服务 → 可见工具（004）。**可选**：不关心 MCP 工具粒度的调用方（如只校验三类引用的场景）
+   * 可以不给，此时 `mcpTools` 为空映射——只影响问题实例的工具关联校验。
+   */
+  mcpTools?: Iterable<readonly [string, Iterable<string>]>;
 }
 
 export function createReferenceIndex(input: ReferenceIndexInput): ReferenceIndex {
@@ -23,6 +37,7 @@ export function createReferenceIndex(input: ReferenceIndexInput): ReferenceIndex
     builtinTools: new Set(input.builtinTools),
     mcpServices: new Set(input.mcpServices),
     skills: new Set(input.skills),
+    mcpTools: new Map([...(input.mcpTools ?? [])].map(([name, tools]) => [name, new Set(tools)])),
   };
 }
 
@@ -31,4 +46,5 @@ export const EMPTY_REFERENCE_INDEX: ReferenceIndex = createReferenceIndex({
   builtinTools: [],
   mcpServices: [],
   skills: [],
+  mcpTools: [],
 });

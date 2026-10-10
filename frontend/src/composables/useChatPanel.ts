@@ -126,7 +126,12 @@ export function useChatPanel() {
 
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
-  async function onSend(payload: { content: string; attachments: FileReference[] }): Promise<void> {
+  async function onSend(payload: {
+    content: string
+    attachments: FileReference[]
+    /** 本轮隐藏指引（004）；由问题实例携带，用户气泡里看不到 */
+    guidance?: string
+  }): Promise<void> {
     // 展示层 → 提交层：正文去掉 `@文件名` 标记，引用以结构化 `attachments` 提交（FR-016）
     const content = stripMentionTokens(payload.content, payload.attachments)
     if (content === '') {
@@ -151,7 +156,11 @@ export function useChatPanel() {
 
     const previous = payload.content
     chat.draft.value = ''
-    await chat.send({ content, attachments: payload.attachments })
+    await chat.send({
+      content,
+      attachments: payload.attachments,
+      ...(payload.guidance ? { guidance: payload.guidance } : {}),
+    })
     if (chat.phase.value === RUN_PHASE.FAILED) {
       // 发送失败保留输入与引用（data-model §14）
       chat.draft.value = previous

@@ -112,9 +112,10 @@ describe('PlatformStore', () => {
 
     it('删除后目标仍在 → 抛 ADM_STORAGE_UNAVAILABLE（把静默失败变可读错误）', () => {
       store.writeJson('agents/a.json', { name: 'a' });
-      // 用桩模拟"rmSync 不抛错但也没删掉"的宿主环境（Windows 对非 ASCII 路径即如此）：
+      // 用桩模拟"底层删除不抛错、但也没删掉"的情形（修复前 `fs.rmSync` 对本宿主的中文
+      // 路径即如此；2026-10-09 起删除改走 `removeTree` 的 `unlinkSync`，故打桩该调用）。
       // 直接打桩比依赖宿主怪癖更确定，也不会在各平台上给出不同结论
-      const spy = vi.spyOn(fs, 'rmSync').mockImplementation(() => undefined);
+      const spy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => undefined);
       try {
         let caught: unknown;
         try {

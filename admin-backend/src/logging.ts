@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import pino, { type Logger, type LoggerOptions } from 'pino';
 import { PLATFORM_OPERATOR } from './domain/error-codes.js';
+import { removeTree } from './infra/fs-remove.js';
 
 /** 日志保留天数（任务 2026-09-15） */
 export const LOG_RETENTION_DAYS = 3;
@@ -87,7 +88,8 @@ export function pruneOldLogs(dir: string, prefixes: string[], keepDays: number):
       const dayMs = Date.parse(m[1] ?? '');
       if (Number.isFinite(dayMs) && dayMs < cutoffMs) {
         try {
-          fs.rmSync(path.join(dir, entry.name), { force: true });
+          // 日志目录路径可能含中文（工作区目录名），删除不能走 `fs.rmSync`（见 fs-remove.ts）
+          removeTree(path.join(dir, entry.name));
         } catch {
           // 单个文件删除失败：留待下次清理，不抛出
         }

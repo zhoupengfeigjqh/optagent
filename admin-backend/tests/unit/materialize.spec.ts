@@ -15,6 +15,7 @@ import { buildAgentArtifact, buildMcpServerEntry, buildUserArtifacts } from '../
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let root: string;
 let store: PlatformStore;
@@ -39,7 +40,7 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
 function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocument {
   return {
     name: 'demo',
-    soul: '你是助手\n第二行\n',
+    soul: soulDesign('你是助手\n第二行'),
     enabled_tools: ['read_file'],
     mcp_services: [],
     skills: [],
@@ -189,7 +190,11 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       'TOOL.json',
       'scenario.json',
     ]);
-    expect(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content).toBe('你是助手\n第二行\n');
+    // 004：SOUL.md 不再是原样透传，而是**渲染产物**（frontmatter + 提示词正文）
+    const soulMd = String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+    expect(soulMd.startsWith('---\nsoul_version: 1')).toBe(true);
+    expect(soulMd).toContain('intro: 测试用简介');
+    expect(soulMd).toContain('## 主要使命\n\n你是助手\n第二行');
     expect(JSON.parse(String(artifact.files.find((f) => f.relPath === 'TOOL.json')?.content))).toEqual({
       enabled: ['read_file'],
     });
