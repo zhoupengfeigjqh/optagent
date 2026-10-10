@@ -411,16 +411,16 @@ export const productionPlanMetrics = ref({
 // 指标卡片配置（key 对应 productionPlanMetrics 字段）
 export const metricCards = [
   // {key: 'taskNo', title: '排产任务编号', sub: '排产任务编号', color: '#2f6bff'},
-  {key: 'productionOrderCount', title: '生产订单数', sub: '参与排产', color: '#2f6bff'},
+  {key: 'productionOrderCount', title: '生产订单数', sub: '参与排产', color: '#722ed1'},
   {key: 'unfinishedOrderCount', title: '未完成订单数', sub: '未完成', color: '#ff4d4f'},
   {key: 'targetTotalQuantity', title: '目标总产量', sub: '吨', color: '#fa8c16'},
-  {key: 'scheduledTotalQuantity', title: '总产量', sub: '吨', color: '#fa8c16'},
-  {key: 'lineCount', title: '产线数', sub: '参与排产', color: '#57606a'},
-  {key: 'lineTaskCount', title: '产线任务', sub: '含切换', color: '#2f6bff'},
+  {key: 'scheduledTotalQuantity', title: '总产量', sub: '吨', color: '#57606a'},
+  {key: 'lineCount', title: '产线数', sub: '参与排产', color: '#2f6bff'},
+  {key: 'lineTaskCount', title: '产线任务', sub: '含切换', color: '#722ed1'},
   // {key: 'schedulingStartTime', title: '排产开始时间', sub: '排产开始时间', color: '#57606a'},
   // {key: 'latestFinishTime', title: '最迟完工时间', sub: '最迟完工时间', color: '#57606a'},
-  {key: 'totalDurationMinutes', title: '总耗时时长', sub: '分钟', color: '#57606a'},
-  {key: 'totalActualProcessMinutes', title: '所有产线实际生产时长', sub: '分钟', color: '#57606a'},
+  {key: 'totalDurationMinutes', title: '总耗时时长', sub: '分钟', color: '#ff4d4f'},
+  {key: 'totalActualProcessMinutes', title: '所有产线实际生产时长', sub: '分钟', color: '#fa8c16'},
   {key: 'mixerTaskCount', title: '混合机任务', sub: '特殊时段', color: '#13c2c2'},
   {key: 'mixerCount', title: '混合机数', sub: '参与排产', color: '#ff4d4f'},
 
@@ -483,7 +483,7 @@ export function toTaskGanttData(lines) {
         end: toTimestamp(block.blockEndTime || block.processEndTime),
         y,
         color: blockColor(block),
-        borderColor: isSwitch ? '#8c8c8c' : undefined,
+        borderColor: isSwitch ? '' : undefined,
         borderWidth: isSwitch ? 1 : undefined,
         // ---- 以下为 tooltip 自定义透传字段 ----
         isSwitch,
