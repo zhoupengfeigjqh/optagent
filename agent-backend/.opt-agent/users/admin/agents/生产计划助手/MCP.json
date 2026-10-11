@@ -25,6 +25,22 @@
         "hd_algorithm_input_parser",
         "hd_scheduling_submit"
       ]
+    },
+    {
+      "name": "ocr",
+      "transport": "http",
+      "url": "http://localhost:8000/mcp",
+      "file_args": {
+        "ocr_image": {
+          "image": "url"
+        }
+      },
+      "async_tools": [
+        "ocr_image"
+      ],
+      "allowed_tools": [
+        "ocr_image"
+      ]
     }
   ]
 }

@@ -1,11 +1,12 @@
 /**
  * 单元测试：工具调用记录存储（002 特性）
  *
- * 守住四件事：
+ * 守住五件事：
  * 1. **体积分流** —— 小结果内联进行、大结果外置成临时空间文件（且不双写）
  * 2. **合并语义** —— start(running) + end(终态) 按 call_id 合并，后者覆盖前者
  * 3. **降级不丢记录** —— 外置写入失败 / 未装配外置能力 → 退化为截断内联
  * 4. **路径不信任数据** —— 正文路径按 `{threadId, callId}` 重算，恶意 call_id 不越权
+ * 5. **视图链接 sidecar**（2026-10-10）—— 与正文分离、正文外置时仍在、非法结构整段丢弃
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -201,5 +202,84 @@ describe('tool-events —— 路径与归属', () => {
 
     const grouped = store.readByMessage('admin', 'th1');
     expect(grouped.get('m_a1')?.map((r) => r.callId)).toEqual(['call_1', 'call_2']);
+  });
+});
+
+describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
+  /** 覆写本会话 JSONL 的最后一行（模拟"数据被手改/旧版本写入"） */
+  function tamperLastLine(patch: (line: Record<string, unknown>) => void): void {
+    const file = path.join(userDataDir(root, 'admin'), 'threads', 'th1', 'tool-events.jsonl');
+    const lines = fs
+      .readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
+    patch(last);
+    lines[lines.length - 1] = JSON.stringify(last);
+    fs.writeFileSync(file, `${lines.join('\n')}\n`, 'utf8');
+  }
+
+  it('结果里的 viewUrl + viewUrlName 被抽成 sidecar 落盘，读回时成对', async () => {
+    const store = makeStore();
+    await appendEnd(store, {
+      callId: 'call_view',
+      resultText: JSON.stringify({
+        status: 'success',
+        viewUrl: '/datasource/plan/ws1/xlsx',
+        viewUrlName: '一车间产能明细',
+      }),
+    });
+
+    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toEqual([
+      { url: '/datasource/plan/ws1/xlsx', name: '一车间产能明细' },
+    ]);
+  });
+
+  it('大结果外置时 sidecar 仍在：不必加载正文就能给出入口', async () => {
+    const store = makeStore();
+    const payload = {
+      status: 'success',
+      viewUrl: '/datasource/big/xlsx',
+      pad: 'x'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
+    };
+    await appendEnd(store, { callId: 'call_bigview', resultText: JSON.stringify(payload) });
+
+    const record = store.readAll('admin', 'th1')[0]!;
+    expect(record.content).toBeUndefined(); // 正文已外置
+    expect(record.artifactSize).toBeGreaterThan(0);
+    expect(record.viewLinks).toEqual([{ url: '/datasource/big/xlsx' }]);
+  });
+
+  it('结果里没有视图链接：不写 view_links 字段（行为与改动前一致）', async () => {
+    const store = makeStore();
+    await appendEnd(store, { callId: 'call_plain', resultText: '车间,计划量\n冲压,1200' });
+
+    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toBeUndefined();
+  });
+
+  it('落盘行里的 view_links 混入非法项：只保留合法项（白名单复制，不猜）', async () => {
+    const store = makeStore();
+    await appendEnd(store, { callId: 'call_mixed', resultText: 'ok' });
+    tamperLastLine((line) => {
+      line.view_links = [
+        { url: '/ok', name: '合法' },
+        { name: '缺地址' },
+        { url: 42 },
+        'not-an-object',
+        null,
+      ];
+    });
+
+    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toEqual([{ url: '/ok', name: '合法' }]);
+  });
+
+  it('落盘行里的 view_links 一条都不合法：整段丢弃（等价于没有视图链接）', async () => {
+    const store = makeStore();
+    await appendEnd(store, { callId: 'call_bad', resultText: 'ok' });
+    tamperLastLine((line) => {
+      line.view_links = [{ name: '只有名字' }, { url: '' }];
+    });
+
+    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toBeUndefined();
   });
 });

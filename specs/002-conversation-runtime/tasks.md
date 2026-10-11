@@ -99,3 +99,67 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T025 [P] 测试与覆盖率：`npx vitest run --coverage --coverage.reportsDirectory=.coverage-gate` → **35 文件 / 478 用例全绿**；`view-link.ts` 96.29 / 89.65 / 100 / 100；全局地板实测 50.66 / 57.93 / 41.09 / 49.43 ≥ 48 / 55 / 38 / 47（地板未下调）
 - [x] T026 硬门禁：改动/新增文件最大 **298 行**（≤500）；**无新增依赖**（`package.json` 未变）
 - [x] T027 `lint` / `typecheck` / `build`：本次 5 个改动文件 `eslint` **0 问题**；`npx vite build` 退出码 0；`vue-tsc` 仅剩**存量**报错（`src/router/index.ts`、`src/views/datapage/*`、`src/views/demo/*`，非本次改动文件，沿用 T015 口径）
+
+---
+
+# Tasks: 对话运行时 · 同步侧视图入口（2026-10-10 增量 #2）
+
+**Input**: [spec.md](./spec.md) §4.8（`TR-44`~`TR-48`）、§7.3、§9.3；[plan.md](./plan.md) §8~§12
+
+**范围**：**同步工具结果**（聊天区的工具卡片）里的 `viewUrl` → 回答正文之后的入口行；另含**工具结果正文的结构化展示**（同属"让工具结果可读"，一并交付）。**异步产出（铃铛）链路不改**（§4.7 语义保持）。
+
+**Prerequisites**: [spec.md](./spec.md) 与 [plan.md](./plan.md)（**续写在同一文件**的 §8~§12，理由见该节：与上一增量同源、共用"归一化唯一实现"）。
+
+**Tests**: 必须包含测试任务（宪章原则三）。测试全部在**宿主机本地**执行，容器不参与。
+
+## 设计取舍（对应宪章「治理 § 例外」的登记口径；**均非原则违反**）
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| sidecar 存 `tool-events.jsonl` 行（与正文分离） | 正文外置时入口仍可用；不挤占回灌预算 | 只在前端解析正文（正文 >64KB 外置后**拿不到值**——正是本次要解决的问题） |
+| 后端只做"形态卫生"，scheme 合法性只在前端判 | 单一漂移点（`TR-42`） | 后端也判一遍（前端改规则后，记录里还留着按老规则挑出的值） |
+| 名称缺省 = 显示地址，不推断、不编号 | 不假装有名字（原则九）；地址永远可核对 | 从 URL 末段取名 / 「视图 1/2」占位（顺序一漂就变假） |
+| 入口行放正文之后、操作区之前 | 它是"正文的附件"，不是"对消息的操作" | 并入 `MessageActions`（语义错位） |
+| 结构化展示复用 `ProducedJsonView` + `parseProducedContent` | 零新增解析实现与第二套上限 | 为工具结果另写一套 JSON 渲染 |
+| `raw`（原文切换）与查看态同放 `useToolPanels` | 不随流式→历史交接丢失（与 `TR-36` 同口径） | 组件内 `ref`（交接时组件重建即丢） |
+
+## Phase 1: 规格（宪章原则一：先规格后代码）
+
+- [x] T028 回写 `spec.md`：§3 术语（视图入口 / 视图链接名称）、新增 §4.8（`TR-44`~`TR-48` + 明确不做）、§4.7 交叉标注、§5.1 示例（`view_links`）、§5.3 参数表（7 项新增上限）、§6 契约（`tool_calls[].view_links` + `ViewLink`）、§7.3 修订记录、§8 宪章落实、§9.3 验收清单
+- [x] T029 回写 `异步MCP服务接入约定.md`（§4.7 新增 `viewUrlName` 与平台"搬运 / 抽 sidecar"行为、§4.3 例外标注、尾部说明与规格依据）+ `plan.md` 续写 §8~§12
+- [x] T030 回写本文件本次增量任务
+
+## Phase 2: 后端实现
+
+- [x] T031 新增 `agent-backend/src/domain/view-links.ts`（175 行）：`extractViewLinks()`（判据与顺序见 §4.8 `TR-44`：解析字符上限 / 深度上限 / **同层**名称配对 / 形态卫生 / 按地址原值去重 / 条数上限）、`VIEW_LINK_*` 与 `VIEW_URL_*` 限额常量、`ViewLink` 类型
+- [x] T032 `agent-backend/src/domain/tool-events.ts`：终态行写入 `view_links`（**与体积分流无关**：内联与外置两条路径都先抽取）；`parseViewLinks()` 白名单结构校验；`ToolCallRecord.viewLinks` 对外
+- [x] T033 `agent-backend/src/routes/threads.ts`：`toolCallJson()` 下发 `view_links`（仅非空时下发；**仍不下发路径**）
+
+## Phase 3: 前端实现
+
+- [x] T034 `frontend/src/utils/view-link.ts`：`VIEW_LINK_DISPLAY_MAX` / `VIEW_LINK_ADDRESS_MAX_CHARS`、`toViewLinkEntries()`（归一化 + 按 `href` 去重 + 名称取首个非空值）、`viewLinkLabel()` / `viewLinkTitle()` / `truncateMiddle()`（中段省略）
+- [x] T035 `frontend/src/utils/tool-calls.ts`：`ToolCallItem.viewLinks` 透传 + `collectToolViewLinks()`（本条回答**全部**调用的并集；**不去重、不归一化**——那是 `view-link.ts` 的唯一职责）
+- [x] T036 新增 `frontend/src/components/chat/MessageViewLinks.vue`（146 行）：入口行（原生 `<a href>` + `target="_blank"` + `rel="noopener noreferrer"`；前 3 条 + 「另有 N 个」/「收起」；**空态整行不渲染**）
+- [x] T037 `frontend/src/components/chat/MessageBubble.vue`：在 `MessageContent` 之后、状态提示与 `MessageActions` **之前**挂载入口行（`viewLinks` 走 `computed`）
+- [x] T038 `frontend/src/api/types.ts`：新增 `ViewLink` 与 `ToolCallRecord.view_links?`（与后端 `toolCallJson` **同批**，宪章原则七）
+- [x] T039 `frontend/src/components/chat/ToolCallList.vue` + `frontend/src/composables/useToolPanels.ts`：结果正文**结构化展示**（复用 `ProducedJsonView` + `parseProducedContent`，只解析**已展开**的卡片）+ 「按原始 JSON 查看 / 按结构化查看」切换（`raw` 与查看态同放，故不随交接丢失）
+
+## Phase 4: 测试（宪章原则三）
+
+- [x] T040 [P] 新增 `agent-backend/tests/unit/view-links.spec.ts`（21 例）：层级与结构、同层名称配对（跨层视同没给）、地址与名称两类脏值的**不同**处置（丢名字保地址）、去重与名称补齐、三条上限、全失败路径返回 `undefined`
+- [x] T041 `agent-backend/tests/unit/tool-events.spec.ts`（+5 例）：`view_links` 成对落盘、**正文外置时 sidecar 仍在**（`content` 缺席而 `viewLinks` 有值）、无链接不写字段、混入非法项只留合法项、全非法整段丢弃
+- [x] T042 [P] `frontend/src/utils/view-link.spec.ts`（+14 例：`toViewLinkEntries` 8 + 入口文案 3 + `truncateMiddle` 3）、`frontend/src/utils/tool-calls.spec.ts`（+5 例：透传 / 不写空数组 / 并集顺序 / 流式空数组 / 无调用空数组）、`frontend/src/composables/useToolPanels.spec.ts`（断言补 `raw`）、`frontend/src/components/chat/ToolCallList.spec.ts`（+5 例：结构化展示与原文切换）
+- [x] T043 [P] 新增 `frontend/src/components/chat/MessageViewLinks.spec.ts`（12 例：空态 2 / 归一化与去重 3 / 文案 3 / 上限与溢出 3 / 交互 1）与 `frontend/src/components/chat/MessageBubble.viewLinks.spec.ts`（5 例：落点 DOM 顺序、无 `view_links` 时无入口且工具卡片照常、多调用并集去重、与工具卡片并存、用户消息无入口）
+
+## Phase 5: 门禁与验收（宪章原则八 + hard gate）
+
+- [x] T044 [P] `agent-backend/vitest.config.ts`：`src/domain/view-links.ts` 登记进模块覆盖率阈值清单（80%）
+- [x] T045 测试与覆盖率：后端 **39 文件 / 497 用例全绿**（`view-links.ts` 100 / 97.91 / 100 / 100；`tool-events.ts` 91.46 / 90.65 / 84 / 90.37）；前端 **37 文件 / 519 用例全绿**（较上一版 +2 文件 / +41 例；`view-link.ts` 98.11 / 94.33 / 100 / 100、`tool-calls.ts` 100 / 94.44 / 100 / 100、`useToolPanels.ts` 全 100；全局地板实测 51.39 / 58.93 / 41.82 / 50.13 ≥ 48 / 55 / 38 / 47，**未下调**）
+- [x] T046 硬门禁：源码与测试文件最大 **436 行**（`frontend/src/components/chat/ToolCallList.spec.ts` 与 `agent-backend/src/domain/tool-events.ts`，均 ≤500）；本次新增源文件 `view-links.ts` 175 行 / `MessageViewLinks.vue` 146 行；**无新增依赖**（两侧 `package.json` 未变）
+- [x] T047 静态检查与构建：本次改动文件 `eslint` 两侧 **0 问题**；`tsc --noEmit` 退出码 0；`npx vite build` 退出码 0；`vue-tsc` 仅剩 **11 条存量报错**（`src/router/index.ts`、`src/views/datapage/task-result.vue`、`src/views/demo/**`，均非本次改动文件）
+- [ ] T048（**存量问题，非本次引入**）`npm run lint` / `npm run typecheck` 全绿——沿用 T015 口径（本次改动文件单独检查为 0 问题）
+- [x] T049 `docs/viewurl-chat-demo.html`（1093 行）：入口行**落点与观感**的独立静态演示页（双击即开、不接任何接口、**不参与构建与门禁**）。注意其中字段名是设计期的 `view_urls`，**以 `spec.md` §4.8 的 `view_links` 为准**（演示页不随代码变更同步修订）
+- [x] T050 `README.md` §6（把 MCP 服务接入数字人）末尾补一段面向**服务作者**的说明：**需要链接跳转时，请在工具返回里加上 `viewUrl` / `viewUrlName` 字段**（含前提"正文须是合法 JSON 对象/数组"与指向 `异步MCP服务接入约定.md` §4.7 / `spec.md` §4.8 的依据链接）
+- [x] T051 `README.md` 新增顶层章节 **`## MCP 服务配置详解`**（置于「功能模块说明」之后、「环境要求」之前）：权威源与流转（`mcp-services.json` → 设计态只存服务名 → 物化 `MCP.json`）／字段总表（12 字段的必填、取值域、判据）／各字段要点（`transport` 无状态、`headers` 掩码与全量替换、`allowed_tools` 创建后锁定、`file_args` 两种模式与路径语法、`confirmation` 写操作应 `always`、`rules_fields` 不改变 HITL、`async_tools`）／`MCP.json` 结构示例（非空才写）／运行端默认参数（前缀、白名单、状态机、退避 5-15-30-60-60s + 保活 120s、探针 60s、超时 60s）／平台接口与错误码表／常见故障对照；并在 §6 末尾加双向指引
+
+**观察项（登记，不追溯）**：`frontend/src/api/types.ts` 489 行、`agent-backend/src/domain/tool-events.ts` 436 行、`frontend/src/components/chat/ToolCallList.vue` 428 行、`frontend/src/components/chat/ToolCallList.spec.ts` 436 行——均在 ≤500 内但已偏高，后续再有增量时**触发即拆**（不为存量发起专项）。

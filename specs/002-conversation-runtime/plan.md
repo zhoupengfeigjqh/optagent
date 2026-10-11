@@ -1,5 +1,5 @@
 ---
-description: "实施计划：对话运行时 · 产出正文的视图链接（2026-10-10 增量）"
+description: "实施计划：对话运行时 · 视图入口（2026-10-10 两个增量：异步产出正文链接 §1-7 / 同步侧 sidecar 入口 §8-12）"
 ---
 
 # Plan: 对话运行时 · 产出正文的视图链接（2026-10-10 增量）
@@ -89,3 +89,83 @@ npm run lint && npm run typecheck && npm run test:coverage && npm run build
 ## 7. 验收
 
 见 [spec.md](./spec.md) §9.2；任务与勾选状态见 [tasks.md](./tasks.md)。
+
+---
+
+# Plan: 对话运行时 · 同步侧视图入口（2026-10-10 增量 #2，§4.8）
+
+**为何在本文件续写、不新开 plan**：同一特性（002）的第二增量，且与上一增量**同源**——`frontend/src/utils/view-link.ts` 就是那条"值归一化唯一实现"；跨侧契约变更与覆盖率登记口径也一致。新开文件会让"归一化只有一处"这件事分散在两条计划里。
+
+**Input**：[spec.md](./spec.md) §4.8（`TR-44`~`TR-48`）、§7.3（修订记录）、§9.3（验收清单）。
+
+## 8. 技术方案
+
+```
+工具结果文本（JSON）
+  → [后端] extractViewLinks()     形态卫生（不拼前缀、不判 scheme、不改写值）
+  → tool-events.jsonl 行的 view_links          与正文**分离**存放
+  → GET /api/threads/{id} → tool_calls[].view_links
+  → [前端] collectToolViewLinks()  本条回答全部工具调用的并集
+  → toViewLinkEntries()            归一化 + 按 href 去重 + 名称取首个非空值
+  → MessageViewLinks               回答正文之后；前 3 条 + 「另有 N 个」
+```
+
+**关键判据（唯一来源，与前增量同一份）**：
+
+| 判据 | 实现位置 |
+|---|---|
+| 是不是视图链接字段：只看**字段名**（`viewUrl` / `viewUrlName`，大小写不敏感） | 后端 `domain/view-links.ts`；前端 `utils/view-link.ts`（`TR-40`） |
+| 值 → 可点地址：已带前缀原样 / 单个 `/` 开头拼当前入口 / 其余丢弃 | 前端 `utils/view-link.ts` → `resolveViewUrl()`（`TR-41`），**后端不重复判定** |
+| 名称 → 显示文本：有名称用名称 / 无名称显示地址（中段省略） | 前端 `utils/view-link.ts` → `viewLinkLabel()`（`TR-46`） |
+
+**为什么"搬运"放后端、"能不能点"留前端**：值本身是服务给的（后端拿得到，正文外置时更是**只有后端**拿得到）；而前缀 = 用户**当前访问入口**，只有浏览器知道。若把 scheme 合法性判定也搬到后端，就会出现**第二个漂移点**：前端改了拒绝规则，记录里还留着按老规则挑出来的值。
+
+**为什么 sidecar 与正文分离**：① 正文外置（>64KB）时入口仍可用；② 不挤占模型上下文回灌预算（`tool-context.ts` 根本不读 `viewLinks`）。
+
+## 9. 文件清单（本增量）
+
+| # | 文件 | 动作 | 行数 |
+|---|---|---|---|
+| 1 | `agent-backend/src/domain/view-links.ts` | 新增（纯函数：抽取 + 形态卫生） | 175 |
+| 2 | `agent-backend/src/domain/tool-events.ts` | 改动：终态行写 `view_links`、读取白名单校验、对外 `viewLinks` | 436 |
+| 3 | `agent-backend/src/routes/threads.ts` | 改动：`tool_call` 序列化下发 `view_links` | 215 |
+| 4 | `agent-backend/tests/unit/view-links.spec.ts` | 新增（21 例） | 208 |
+| 5 | `agent-backend/tests/unit/tool-events.spec.ts` | 改动（+5 例：sidecar 落盘 / 外置仍在 / 白名单） | 286 |
+| 6 | `agent-backend/vitest.config.ts` | 改动：登记 `src/domain/view-links.ts`（80%） | 151 |
+| 7 | `frontend/src/api/types.ts` | 改动：`ViewLink` + `ToolCallRecord.view_links?` | 489 |
+| 8 | `frontend/src/utils/view-link.ts` | 改动：入口行派生（归一化 / 去重 / 文案 / 中段省略） | 173 |
+| 9 | `frontend/src/utils/tool-calls.ts` | 改动：`viewLinks` 透传 + `collectToolViewLinks()` | 158 |
+| 10 | `frontend/src/components/chat/MessageViewLinks.vue` | 新增（入口行） | 146 |
+| 11 | `frontend/src/components/chat/MessageBubble.vue` | 改动：正文之后挂载入口行 | 345 |
+| 12 | `frontend/src/components/chat/ToolCallList.vue` | 改动：结果正文结构化展示 + 「按原始 JSON 查看」 | 428 |
+| 13 | `frontend/src/composables/useToolPanels.ts` | 改动：查看态新增 `raw` 开关 | 85 |
+| 14 | `frontend/src/utils/view-link.spec.ts` / `tool-calls.spec.ts` / `ToolCallList.spec.ts` / `useToolPanels.spec.ts` | 改动（+24 例 / 断言补 `raw`） | — |
+| 15 | `frontend/src/components/chat/MessageViewLinks.spec.ts` | 新增（12 例） | 120 |
+| 16 | `frontend/src/components/chat/MessageBubble.viewLinks.spec.ts` | 新增（5 例：位置与装配） | 99 |
+| 17 | `异步MCP服务接入约定.md` | 改动：§4.7（`viewUrlName` + 平台搬运行为）+ §4.3 例外标注 | 跨侧文档 |
+| 18 | `docs/viewurl-chat-demo.html` | 新增：**独立静态演示页**（不接接口、不参与构建与门禁） | 1093 |
+
+**零变更**：`tool-context.ts`（回灌链路）、`tool-calls` 端点、SSE 事件、`contracts/`、两侧依赖。
+
+## 10. Complexity Tracking（本增量）
+
+| 项 | 内容 |
+|---|---|
+| 取舍：sidecar 存 `tool-events.jsonl` 行（与正文分离） | 正文外置时入口仍可用、不占回灌预算 |
+| 被否决：只在前端解析正文（上一增量做法） | 结果 >64KB 外置后前端**拿不到值**——这是本次要解决的核心问题 |
+| 被否决：由模型在回答里转写地址 | 可能抄错、与记录**无绑定**（模型可漏写、改写）；需提示词约定与标记解析 |
+| 被否决：后端也判 scheme 合法性 | 制造第二个漂移点（前端改规则后，记录里留着按老规则挑出的值） |
+| 被否决：名称缺失时从 URL 末段取名 / "视图 1/2" 占位 | 等于**假装有名字**（原则九）；编号会随顺序漂移；地址永远可核对，比假名字可信 |
+| 被否决：入口行并入 `MessageActions` | 语义错位：它是"正文的附件"，不是"对消息的操作" |
+| 已知限制（登记） | ① 正文 >256K 字符不抽取（与前端结构化展示**同判据**）；② `viewUrl` 在深度 >8 处不抽取；③ 单次结果 >50 条只取前 50（先出现者胜）；④ `viewUrlName` 与 `viewUrl` **跨层**配不上 → 视同没给名字（显示地址）；⑤ 正文被手改成非法 JSON → 无入口（不猜） |
+| 原则九判定（登记） | 入口**不出现**不等于"降级未提示"：无入口 = 本就没有可识别的跳转目标，信息仍完整保留在正文里（未被隐藏/替换）。抽取失败一律 `undefined`：**不抛错、不打日志**，表达"没有可识别项"而非"出错"。名称缺失或脏 → **显示地址**（少一个更友好的称呼，信息不缺失） |
+
+## 11. 覆盖率与平台差异（本增量）
+
+- **覆盖率**：后端把 `src/domain/view-links.ts` 登记进模块阈值清单（80%），实测 **100 / 97.91 / 100 / 100**；前端 `view-link.ts`（既有登记）实测 **98.11 / 94.33 / 100 / 100**；两侧全局地板**未下调**（前端实测 51.39 / 58.93 / 41.82 / 50.13 ≥ 48 / 55 / 38 / 47）。
+- **平台差异**：无。改动是字符串判定 + JSON 遍历 + Vue 渲染，本地（Windows）与交付目标（Linux 容器）行为一致；不涉及文件系统、路径大小写、非 ASCII 路径、行尾符或原生模块。
+- **观察项（登记）**：`frontend/src/api/types.ts` 已到 **489 行**（≤500 但接近上限），后续再有字段增量时宜按域拆分（不追溯，触发即拆）。
+
+## 12. 验收
+
+见 [spec.md](./spec.md) §9.3；任务与勾选状态见 [tasks.md](./tasks.md)。

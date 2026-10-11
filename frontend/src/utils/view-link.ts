@@ -18,8 +18,94 @@
  *   （`javascript:` / `data:` …）、含控制字符或反斜杠的。
  */
 
+import type { ViewLink } from '../api/types'
+
 /** 视图链接的字段名（`TR-40` 判定用）。 */
 export const VIEW_URL_FIELD = 'viewUrl'
+
+/** 入口行**直接显示**的条数上限；超出走「另有 N 个」，不静默丢弃（`TR-47`）。 */
+export const VIEW_LINK_DISPLAY_MAX = 3
+
+/**
+ * 无名称时地址的显示长度上限（超出做**中段**省略）。
+ *
+ * 为什么是中段省略：尾部（目录段 + 文件名）才是最有辨识度的部分，
+ * 尾部省略（`text-overflow: ellipsis`）恰好会把最有用的一段吃掉。
+ */
+export const VIEW_LINK_ADDRESS_MAX_CHARS = 32
+
+/** 入口行的一项（已归一化、已按地址去重）。 */
+export interface ViewLinkEntry {
+  /** 完整绝对地址：去重键与跳转目标都用它 */
+  href: string
+  /** 服务给的原值（无名称时作为显示文本） */
+  raw: string
+  /** 服务给的名称；缺省 = 服务没给名字（界面显示地址） */
+  name?: string
+}
+
+/**
+ * 记录里的视图链接 → 入口行的一项（`TR-45`）。
+ *
+ * 做三件事，顺序固定：
+ * 1. 归一化：`resolveViewUrl()`（唯一实现，见本模块头注释）；返回 `null` 的直接丢弃
+ * 2. 按 `href` 去重：同一目标只留一项（跨工具重复也只留一项）
+ * 3. 同一 `href` 重复出现时，**名称取首个非空值**（首个没给名字、后面给了就用后面那个）
+ *
+ * 为什么在这一层做去重：后端只能按"单次调用结果内"去重；同一条回答的**跨工具并集**
+ * 只有前端拿得到，且归一化必须用浏览器的 `origin`（后端不许拼前缀，`TR-42`）。
+ */
+export function toViewLinkEntries(
+  links: readonly ViewLink[] | undefined,
+  origin?: string,
+): ViewLinkEntry[] {
+  const byHref = new Map<string, ViewLinkEntry>()
+
+  for (const link of links ?? []) {
+    const href = resolveViewUrl(link.url, origin)
+    if (href === null) continue
+
+    const name = normalizedName(link.name)
+    const existing = byHref.get(href)
+    if (existing) {
+      if (existing.name === undefined && name !== undefined) existing.name = name
+      continue
+    }
+    byHref.set(href, name === undefined ? { href, raw: link.url.trim() } : { href, raw: link.url.trim(), name })
+  }
+
+  return [...byHref.values()]
+}
+
+/** 名称卫生化：非字符串 / 空白 → `undefined`（视同没给名字）。 */
+function normalizedName(name: unknown): string | undefined {
+  if (typeof name !== 'string') return undefined
+  const trimmed = name.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+/**
+ * 入口的显示文本（`TR-46`）：有名称用名称，没有则用地址（中段省略）。
+ *
+ * **不推断名称**（不拿同层业务字段、不从 URL 末段取名）、**不编号占位**
+ * （"视图 1/2" 会随顺序漂移，等于假装有名字——宪章原则九）。
+ */
+export function viewLinkLabel(entry: ViewLinkEntry): string {
+  return entry.name ?? truncateMiddle(entry.raw, VIEW_LINK_ADDRESS_MAX_CHARS)
+}
+
+/** 入口的悬停提示：有名称时 `名称 — 完整地址`，无名称时完整地址（地址永远可核对）。 */
+export function viewLinkTitle(entry: ViewLinkEntry): string {
+  return entry.name === undefined ? entry.href : `${entry.name} — ${entry.href}`
+}
+
+/** 中段省略：保留首段与末段（`maxChars` 含省略号本身）。 */
+export function truncateMiddle(text: string, maxChars: number): string {
+  if (maxChars <= 1 || text.length <= maxChars) return text
+  const head = Math.ceil((maxChars - 1) / 2)
+  const tail = maxChars - 1 - head
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`
+}
 
 /**
  * 是否是视图链接字段。

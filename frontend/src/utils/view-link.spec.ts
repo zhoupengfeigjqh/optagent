@@ -10,7 +10,17 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { VIEW_URL_FIELD, isViewUrlField, resolveViewUrl } from './view-link'
+import {
+  VIEW_LINK_ADDRESS_MAX_CHARS,
+  VIEW_URL_FIELD,
+  isViewUrlField,
+  resolveViewUrl,
+  toViewLinkEntries,
+  truncateMiddle,
+  viewLinkLabel,
+  viewLinkTitle,
+  type ViewLinkEntry,
+} from './view-link'
 
 const ORIGIN = 'http://192.168.0.100:8080'
 
@@ -97,5 +107,123 @@ describe('isViewUrlField —— 只按字段名判定', () => {
     expect(isViewUrlField('view_url')).toBe(false)
     expect(isViewUrlField(undefined)).toBe(false)
     expect(isViewUrlField(1)).toBe(false)
+  })
+})
+
+describe('toViewLinkEntries —— 入口行派生（TR-45）', () => {
+  it('归一化：单个 / 开头拼 origin、已带前缀原样、非法形态丢弃', () => {
+    const entries = toViewLinkEntries(
+      [
+        { url: '/a/b' },
+        { url: 'http://other:8080/x' },
+        { url: '//evil.com/x' },
+        { url: 'javascript:alert(1)' },
+        { url: 'datasource/x' },
+      ],
+      ORIGIN,
+    )
+
+    expect(entries.map((entry) => entry.href)).toEqual([`${ORIGIN}/a/b`, 'http://other:8080/x'])
+  })
+
+  it('按 href 去重：原值不同但归一化后同一目标只留一项', () => {
+    const entries = toViewLinkEntries(
+      [{ url: '/a/b' }, { url: '  /a/b  ' }, { url: `${ORIGIN}/a/b` }],
+      ORIGIN,
+    )
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.href).toBe(`${ORIGIN}/a/b`)
+  })
+
+  it('同一 href 重复：名称取**首个非空值**（首次没给名字、后面给了就用后面那个）', () => {
+    const entries = toViewLinkEntries([{ url: '/a' }, { url: '/a', name: 'A 明细' }], ORIGIN)
+
+    expect(entries).toEqual([{ href: `${ORIGIN}/a`, raw: '/a', name: 'A 明细' }])
+  })
+
+  it('同一 href 重复：首个已有名称则不被后面的覆盖（确定性）', () => {
+    const entries = toViewLinkEntries(
+      [
+        { url: '/a', name: '首个名字' },
+        { url: '/a', name: '后给的名字' },
+      ],
+      ORIGIN,
+    )
+
+    expect(entries[0]?.name).toBe('首个名字')
+  })
+
+  it('名称空白 / 非字符串 → 视同没给名字（不是空串）', () => {
+    expect(toViewLinkEntries([{ url: '/a', name: '   ' }], ORIGIN)[0]?.name).toBeUndefined()
+    expect(
+      toViewLinkEntries([{ url: '/a', name: '  A 明细  ' }], ORIGIN)[0]?.name,
+    ).toBe('A 明细')
+  })
+
+  it('raw 保留原值（去首尾空白），供无名称时显示与悬停核对', () => {
+    expect(toViewLinkEntries([{ url: '  /a  ' }], ORIGIN)[0]?.raw).toBe('/a')
+  })
+
+  it('空输入与 undefined 都返回空数组（调用方无需判空）', () => {
+    expect(toViewLinkEntries(undefined, ORIGIN)).toEqual([])
+    expect(toViewLinkEntries([], ORIGIN)).toEqual([])
+  })
+
+  it('全部非法时不返回半成品（空数组 → 界面整行不渲染）', () => {
+    expect(toViewLinkEntries([{ url: '//evil.com/x' }, { url: '' }], ORIGIN)).toEqual([])
+  })
+})
+
+describe('入口文案（TR-46）', () => {
+  const entry = (over: Partial<ViewLinkEntry> = {}): ViewLinkEntry => ({
+    href: `${ORIGIN}/a/b`,
+    raw: '/a/b',
+    ...over,
+  })
+
+  it('有名称 → 显示名称；悬停给「名称 — 完整地址」', () => {
+    const named = entry({ name: '一车间产能明细' })
+
+    expect(viewLinkLabel(named)).toBe('一车间产能明细')
+    expect(viewLinkTitle(named)).toBe(`一车间产能明细 — ${ORIGIN}/a/b`)
+  })
+
+  it('无名称 → 显示地址（中段省略，首尾都保留）；悬停给完整地址', () => {
+    const raw = '/datasource/dsdasds/dstsd/abc/xlsx'
+    const unnamed = entry({ raw, href: `${ORIGIN}${raw}` })
+    const label = viewLinkLabel(unnamed)
+
+    expect(label).toBe(truncateMiddle(raw, VIEW_LINK_ADDRESS_MAX_CHARS))
+    expect(label).toContain('…')
+    expect(label.startsWith('/datasource/')).toBe(true)
+    expect(label.endsWith('abc/xlsx')).toBe(true)
+    expect(viewLinkTitle(unnamed)).toBe(`${ORIGIN}${raw}`)
+  })
+
+  it('不推断名称、不编号占位：短地址原样显示（不出现"视图 1"之类）', () => {
+    expect(viewLinkLabel(entry())).toBe('/a/b')
+  })
+})
+
+describe('truncateMiddle —— 中段省略', () => {
+  it('不超长时原样返回', () => {
+    expect(truncateMiddle('/a/b', VIEW_LINK_ADDRESS_MAX_CHARS)).toBe('/a/b')
+    expect(truncateMiddle('/a/b', 4)).toBe('/a/b')
+  })
+
+  it('超长时保留首尾、中间省略（尾部最有辨识度，不能被吃掉）', () => {
+    const text = '/datasource/plan/ws1/xlsx-extra'
+    const out = truncateMiddle(text, 12)
+
+    expect(out).toHaveLength(12)
+    expect(out).toContain('…')
+    expect(out.startsWith(text.slice(0, 6))).toBe(true)
+    expect(out.endsWith(text.slice(-5))).toBe(true)
+  })
+
+  it('maxChars ≤ 1 时不做省略（避免退化成空串或只剩省略号）', () => {
+    expect(truncateMiddle('/abcdef', 1)).toBe('/abcdef')
+    expect(truncateMiddle('/abcdef', 0)).toBe('/abcdef')
   })
 })

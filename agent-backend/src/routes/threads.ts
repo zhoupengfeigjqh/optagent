@@ -65,6 +65,8 @@ function metaJson(m: { threadId: string; agentName: string; title: string | null
  * `content` = 内联结果正文（小结果，随详情一起下发）；
  * `artifact_size` 有值 = 正文在临时空间，前端按需拉 `…/tool-calls/{call_id}`。
  * **不下发路径**：路径由后端按 `{threadId, callId}` 重算，避免数据被篡改成越权读。
+ * `view_links` = 结果里的视图链接（地址 + 可选名称）：正文外置时它仍在详情里，
+ * 因此前端不必先加载正文就能给出入口（见 `view-links.ts`）。
  */
 function toolCallJson(r: ToolCallRecord) {
   return {
@@ -79,6 +81,8 @@ function toolCallJson(r: ToolCallRecord) {
     ...(r.truncated === true ? { truncated: true } : {}),
     ...(r.summary !== undefined ? { summary: r.summary } : {}),
     ...(r.argsDigest !== undefined ? { args_digest: r.argsDigest } : {}),
+    // 视图链接（2026-10-10）：只搬服务给的原值，不拼前缀、不归一化（那是前端的唯一职责）
+    ...(r.viewLinks !== undefined && r.viewLinks.length > 0 ? { view_links: r.viewLinks } : {}),
   };
 }
 

@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>同步工具结果 viewUrl → 聊天区（回答正文之后）· 设计演示</title>
+<!--
+  静态演示页（不接入任何接口，双击即可打开）。
+
+  落点：MessageBubble.vue 模板中 <MessageContent> 之后、<TypingIndicator> 之前
+        （对应 MessageBubble.vue:210-217 之间）—— 即「LLM 回答正文之后」。
+  取值：该条 assistant 消息的 tool_calls[].view_urls（后端从工具结果里抽取的 sidecar）
+  样式：tokens 取自 frontend/src/styles/tokens.css；工具卡片沿用 ToolCallList.vue 的类名与取值。
+  归一化：与 frontend/src/utils/view-link.ts 等价的移植（仅演示用）。
+-->
+<style>
+  :root {
+    --color-bg: #ffffff;
+    --color-bg-subtle: #f7f8fa;
+    --color-bg-muted: #eef0f4;
+    --color-surface: #ffffff;
+    --color-border: #e3e6ec;
+    --color-border-strong: #c9cfda;
+    --color-text: #1f2430;
+    --color-text-muted: #8b93a3;
+    --color-primary: #2f6feb;
+    --color-primary-subtle: #e8f0fe;
+    --color-focus-ring: #2f6feb;
+    --color-status-success: #1f9d55;
+    --color-status-warning: #b54708;
+    --color-status-warning-bg: #fdf3e7;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-full: 999px;
+    --font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+    --font-family-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
+    --font-size-xs: 12px;
+    --font-size-sm: 13px;
+    --font-size-md: 14px;
+    --font-size-lg: 16px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-md);
+    line-height: 1.6;
+    color: var(--color-text);
+    background: var(--color-bg-muted);
+  }
+
+  :focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+  /* ---------- 顶栏 ---------- */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: 10px 20px;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    font-size: var(--font-size-sm);
+  }
+  .topbar strong { font-size: var(--font-size-lg); }
+  .tag {
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary-subtle);
+    color: var(--color-primary);
+    font-size: var(--font-size-xs);
+  }
+  .tag--warn { background: var(--color-status-warning-bg); color: var(--color-status-warning); }
+  .topbar__spacer { margin-left: auto; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+
+  /* ---------- 布局 ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: 400px minmax(0, 1fr);
+    gap: 20px;
+    padding: 20px;
+    align-items: start;
+  }
+  @media (max-width: 1060px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .panel { position: static !important; }
+  }
+
+  .panel {
+    position: sticky;
+    top: 64px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    max-height: calc(100vh - 84px);
+    overflow: auto;
+    padding: var(--space-4);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+  .panel h2 {
+    margin: 0 0 var(--space-2);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-muted);
+  }
+  .panel section + section { border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--space-3); }
+  .field > label { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+  .field__hint { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-text-muted); }
+  select, .seg button {
+    font: inherit;
+    font-size: var(--font-size-sm);
+    color: inherit;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    padding: 6px 8px;
+  }
+  .seg { display: flex; }
+  .seg button { flex: 1; cursor: pointer; }
+  .seg button:first-child { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+  .seg button:last-child { border-radius: 0 var(--radius-md) var(--radius-md) 0; border-left: none; }
+  .seg button[aria-pressed='true'] { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-sm); }
+
+  pre.snippet, pre.dom {
+    margin: 0;
+    padding: var(--space-2);
+    overflow: auto;
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-subtle);
+    border: 1px solid var(--color-border);
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .snippet .add { color: var(--color-status-success); font-weight: 600; }
+  .snippet .dim { color: var(--color-text-muted); }
+
+  .spec { margin: 0; padding-left: 18px; font-size: var(--font-size-xs); line-height: 1.7; }
+  .spec li { margin-bottom: 4px; }
+  .spec code {
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    background: var(--color-bg-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0 3px;
+  }
+
+  /* ---------- 管线核对 ---------- */
+  .pipe { display: flex; flex-direction: column; gap: var(--space-3); }
+  .pipe__stage { border-left: 2px solid var(--color-border-strong); padding-left: 10px; }
+  .pipe__stage h3 { margin: 0 0 4px; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+  .pipe__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  .pipe__list li {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pipe__empty { font-size: var(--font-size-xs); color: var(--color-text-muted); }
+  .pipe__note { margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-muted); }
+
+  /* ---------- 聊天区 ---------- */
+  .stage { display: flex; justify-content: center; min-width: 0; }
+  .chat {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    width: 100%;
+    max-width: 720px;
+    padding: var(--space-4);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* 对齐 MessageBubble.vue 的结构与类名 */
+  .message-bubble {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+  }
+  .message-bubble--user {
+    align-self: flex-end;
+    max-width: 80%;
+    background: var(--color-primary-subtle);
+  }
+  .message-bubble--assistant { border: 1px solid var(--color-border); }
+  .message-bubble__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+  }
+  .message-bubble__role { font-weight: 600; }
+  .message-bubble__refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .message-bubble__ref {
+    font: inherit;
+    font-size: var(--font-size-xs);
+    color: var(--color-primary);
+    background: var(--color-bg-subtle);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    padding: 1px 10px;
+    cursor: pointer;
+  }
+  .message-content { white-space: pre-wrap; }
+
+  /* ===== 新增：视图入口行（MessageViewLinks）===== */
+  .message-view-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+  }
+  .message-view-links__label {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+  }
+  .message-view-link {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    max-width: 100%;
+    padding: 2px 10px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  .message-view-link:hover { background: var(--color-primary-subtle); border-color: var(--color-primary); }
+  .message-view-link__raw { font-size: var(--font-size-xs); }
+  .message-view-link__href {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+  .message-view-links__more, .message-view-links__less {
+    font: inherit;
+    font-size: var(--font-size-xs);
+    color: var(--color-primary);
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  /* 工具调用区（对齐 ToolCallList.vue） */
+  .tool-calls { display: flex; flex-direction: column; gap: var(--space-2); }
+  .tool-calls__head { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  .tool-calls__summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-subtle);
+    color: inherit;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .tool-calls__summary:hover { background: var(--color-surface); }
+  .tool-calls__latest { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  .tool-calls__details { display: flex; flex-direction: column; gap: var(--space-2); }
+  .tool-call {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-subtle);
+    overflow: hidden;
+  }
+  .tool-call__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--font-size-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+  .tool-call__head:hover { background: var(--color-surface); }
+  .tool-call__name { font-weight: 600; }
+  .tool-call__status--success { color: var(--color-status-success); }
+  .tool-call__meta { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  .tool-call__toggle { margin-left: auto; color: var(--color-primary); font-size: var(--font-size-xs); }
+  .tool-call__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border-top: 1px solid var(--color-border);
+  }
+  .tool-call__args { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+  .tool-call__content {
+    max-height: 320px;
+    margin: 0;
+    padding: var(--space-2);
+    overflow: auto;
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tool-link {
+    color: var(--color-primary);
+    font-size: var(--font-size-xs);
+    text-decoration: none;
+    border-bottom: 1px dashed currentColor;
+  }
+
+  /* 结构化正文（对齐 ProducedJsonView 的形态） */
+  .json {
+    max-height: 320px;
+    overflow: auto;
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-xs);
+  }
+  .json__row { display: flex; gap: 6px; padding: 1px 0; }
+  .json__key { color: var(--color-text-muted); flex: none; }
+  .json__scalar { word-break: break-all; }
+  .json__link { color: var(--color-primary); text-decoration: underline; word-break: break-all; }
+  .json__table { border-collapse: collapse; width: 100%; }
+  .json__table th, .json__table td {
+    border: 1px solid var(--color-border);
+    padding: 3px 8px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .json__table th { background: var(--color-bg-subtle); font-weight: 600; }
+  .json__hint { color: var(--color-text-muted); }
+  .json__nested { padding-left: var(--space-3); }
+
+  .message-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+  }
+  .message-actions button {
+    font: inherit;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  .message-actions button:hover { background: var(--color-bg-subtle); }
+
+  .note {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    padding: 6px 10px;
+    border-left: 3px solid var(--color-status-warning);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--color-status-warning-bg);
+    color: var(--color-status-warning);
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+  }
+  .note--info { border-left-color: var(--color-primary); background: var(--color-primary-subtle); color: var(--color-primary); }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    z-index: 300;
+    max-width: min(760px, 92vw);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    background: rgb(15 20 30 / 92%);
+    color: #fff;
+    font-size: var(--font-size-sm);
+    word-break: break-all;
+    opacity: 0;
+    transform: translate(-50%, 8px);
+    transition: opacity .18s, transform .18s;
+    pointer-events: none;
+  }
+  .toast--on { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <strong>OptAgent · 对话工作台</strong>
+  <span class="tag">静态演示</span>
+  <span class="tag tag--warn">不接入真实接口</span>
+  <span class="topbar__spacer">同步工具结果的 viewUrl → 落在「回答正文之后」</span>
+</header>
+
+<div class="app">
+  <!-- ============ 左栏：控制 + 设计要点 ============ -->
+  <aside class="panel">
+    <section>
+      <h2>演示控制</h2>
+      <div class="field">
+        <label>显示模式</label>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-mode="before" aria-pressed="false">改前（现状）</button>
+          <button type="button" data-mode="after" aria-pressed="true">改后</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>受控消息的工具结果</label>
+        <select id="scenarioSel"></select>
+        <p class="field__hint" id="scenarioHint"></p>
+      </div>
+      <div class="field">
+        <label>模拟“用户当前访问的入口”（决定自动拼接的前缀）</label>
+        <select id="originSel">
+          <option value="http://localhost:5173">http://localhost:5173</option>
+          <option value="http://192.168.1.2:5173">http://192.168.1.2:5173</option>
+          <option value="https://optagent.example.com">https://optagent.example.com</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="noteChk" checked /> 显示讲解批注与解析地址</label>
+    </section>
+
+    <section>
+      <h2>落点（真实组件里的插入位置）</h2>
+      <pre class="dom">&lt;ToolCallList … /&gt;
+&lt;MessageContent … /&gt;          <span class="dim">← LLM 回答正文</span>
+<span class="add">+ &lt;MessageViewLinks</span>
+<span class="add">+   :items="toolItems" /&gt;      ← 新增组件（纯展示）</span>
+&lt;TypingIndicator v-if="showTyping" /&gt;
+&lt;ErrorNotice … /&gt;
+&lt;MessageActions … /&gt;         <span class="dim">← 复制 / 点赞（不改）</span></pre>
+      <p class="field__hint" style="margin-top:8px">
+        对应 <code style="font-family:var(--font-family-mono);font-size:11px">MessageBubble.vue</code> 模板
+        <code style="font-family:var(--font-family-mono);font-size:11px">:210-217</code> 之间。
+        插入点在正文之后、状态提示与操作区之前 —— 入口是“正文的附件”，不是“操作”。
+      </p>
+    </section>
+
+    <section>
+      <h2>设计细则</h2>
+      <ul class="spec">
+        <li><b>取值</b>：该条消息 <code>tool_calls[].view_urls</code>（后端抽取的 sidecar），<b>不读模型正文</b>。</li>
+        <li><b>去重</b>：先按消息内跨工具去重，再按解析后的 <code>href</code> 去重（同一目标只留一个）。</li>
+        <li><b>顺序</b>：按工具调用顺序、首次出现顺序。</li>
+        <li><b>上限</b>：直接显示前 3 个 + 「另有 N 个」展开；<b>不静默丢弃</b>（宪章原则九）。</li>
+        <li><b>归一化</b>：单个 <code>/</code> 开头 → 拼当前页面入口；已带 <code>http(s)://</code> → 原样；其余形态不产生链接。唯一实现仍是 <code>utils/view-link.ts</code>。</li>
+        <li><b>空态</b>：没有合法链接 → 整行不渲染（<code>v-if</code>），不留空行、不留间距。</li>
+        <li><b>无障碍</b>：原生 <code>&lt;a&gt;</code> 可 Tab；链接文本是地址原值（不只念“打开视图”）；新窗口带 <code>rel="noopener noreferrer"</code>；「另有 N 个」带 <code>aria-expanded</code>。</li>
+        <li><b>不可用态</b>：<code>running</code>（本轮仍在跑）或正文被截断时不会有值 —— 该行自然不出现，无需额外分支。</li>
+        <li><b>与卡片头入口的区别</b>：卡片头那个是「这一次调用」的入口（固定取该次调用的第一个地址）；本行是「这条回答」的入口（并集 + 去重）。两者语义不同，都保留。</li>
+        <li><b>已知限制</b>：结果 &gt;256K 字符不解析、嵌套深度 &gt;8 不抽取 → 没有入口（登记为已知限制）。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>数据管线核对</h2>
+      <div class="pipe">
+        <div class="pipe__stage">
+          <h3>① 工具结果里的原始 viewUrl（出现顺序，未去重）</h3>
+          <ul class="pipe__list" id="pipeRaw"></ul>
+        </div>
+        <div class="pipe__stage">
+          <h3>② 后端抽取 → sidecar <code>view_urls</code>（形态卫生 + 原值去重）</h3>
+          <ul class="pipe__list" id="pipeSidecar"></ul>
+          <p class="pipe__note" id="pipeSidecarNote"></p>
+        </div>
+        <div class="pipe__stage">
+          <h3>③ 前端渲染 → 正文之后那一行（拼当前入口 + 按 href 去重）</h3>
+          <ul class="pipe__list" id="pipeHref"></ul>
+          <p class="pipe__note" id="pipeHrefNote"></p>
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ============ 右栏：聊天区（多条消息） ============ -->
+  <main class="stage">
+    <div class="chat" id="chat"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================================
+// 归一化：frontend/src/utils/view-link.ts 的等价移植（仅演示，语义逐条对齐）
+// ============================================================================
+const VIEW_URL_FIELD = 'viewUrl';
+const VIEW_URL_MAX_ITEMS = 50;          // 后端：防病态上限（不是展示上限）
+const VIEW_URL_MAX_CHARS = 2048;        // 后端：单值长度上限
+const JSON_MAX_DEPTH = 8;               // 与正文结构化渲染同判据
+const EXTRACT_MAX_CHARS = 256 * 1024;   // 与 parseProducedContent 同判据
+const DISPLAY_MAX_CHIPS = 3;            // 展示上限（超出走「另有 N 个」）
+
+function hasControlOrBackslash(raw) {
+  for (const ch of raw) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f || ch === '\\') return true;
+  }
+  return false;
+}
+
+function resolveViewUrl(value, origin) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (raw === '') return null;
+  if (hasControlOrBackslash(raw)) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;                     // ① 已带前缀：原样
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return null;             // 其它 scheme：拒绝
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;  // 只认单个 / 开头
+  try {
+    return new URL(raw, origin).href;                            // ② 拼当前入口
+  } catch {
+    return null;
+  }
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** 能否当 JSON 结构化展示（等价 parseProducedContent 的判据：非对象/数组、超限 → 不结构化） */
+function parseStructured(text) {
+  if (typeof text !== 'string' || text === '') return null;
+  if (text.length > EXTRACT_MAX_CHARS) return null;
+  let value;
+  try { value = JSON.parse(text); } catch { return null; }
+  return isPlainObject(value) || Array.isArray(value) ? value : null;
+}
+
+/** 后端抽取：只认字段名 + 形态卫生；不做 scheme 判定（那是前端唯一实现的职责） */
+function extractViewUrls(resultText) {
+  if (typeof resultText !== 'string' || resultText === '') return [];
+  if (resultText.length > EXTRACT_MAX_CHARS) return [];
+  let value;
+  try { value = JSON.parse(resultText); } catch { return []; }
+  if (!isPlainObject(value) && !Array.isArray(value)) return [];
+
+  const out = [];
+  const seen = new Set();
+
+  (function walk(node, depth) {
+    if (depth > JSON_MAX_DEPTH || out.length >= VIEW_URL_MAX_ITEMS) return;
+    if (Array.isArray(node)) { for (const item of node) walk(item, depth + 1); return; }
+    if (!isPlainObject(node)) return;
+    for (const [key, val] of Object.entries(node)) {
+      if (key.trim().toLowerCase() === VIEW_URL_FIELD.toLowerCase() && typeof val === 'string') {
+        const trimmed = val.trim();
+        if (trimmed !== '' && trimmed.length <= VIEW_URL_MAX_CHARS &&
+            !hasControlOrBackslash(trimmed) && !seen.has(trimmed)) {
+          seen.add(trimmed);
+          out.push(trimmed);
+        }
+        continue;
+      }
+      walk(val, depth + 1);
+    }
+  })(value, 0);
+
+  return out;
+}
+
+/** 前端渲染：resolve 后按 href 去重 */
+function toViewLinks(values, origin) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of values) {
+    const href = resolveViewUrl(raw, origin);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    out.push({ raw, href });
+  }
+  return out;
+}
+
+/** 结果文本里所有“疑似 viewUrl 的原值”（仅核对面板用：含非法与重复） */
+function rawViewUrlOccurrences(resultText) {
+  let value;
+  try { value = JSON.parse(resultText); } catch { return []; }
+  const out = [];
+  (function walk(node, depth) {
+    if (depth > JSON_MAX_DEPTH) return;
+    if (Array.isArray(node)) { for (const item of node) walk(item, depth + 1); return; }
+    if (!isPlainObject(node)) return;
+    for (const [key, val] of Object.entries(node)) {
+      if (key.trim().toLowerCase() === VIEW_URL_FIELD.toLowerCase() && typeof val === 'string') {
+        out.push(val);
+        continue;
+      }
+      walk(val, depth + 1);
+    }
+  })(value, 0);
+  return out;
+}
+
+// ============================================================================
+// 场景数据（受控消息的工具结果；result 会序列化成 JSON 文本再交给抽取）
+// ============================================================================
+const EIGHT_ROWS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((suffix, i) => ({
+  id: i + 1,
+  orderNo: 'WO-' + (i + 1),
+  viewUrl: '/datasource/' + suffix + '/xlsx',
+}));
+
+const SCENARIOS = {
+  single: {
+    label: '① 单个 viewUrl（最常见）',
+    hint: '一次调用只给一个视图地址 —— 正文之后出现一个入口。',
+    calls: [
+      {
+        name: 'hd__产能表解析',
+        status: 'success',
+        durationMs: 1620,
+        size: 96,
+        argsDigest: { path: '数据准备/产能表.xlsx' },
+        result: { status: 'success', message: '产能表解析完成', viewUrl: '/datasource/dsdasds/dstsd/abc/xlsx' },
+      },
+    ],
+    answer: '产能表已解析完成，共 12 个工序。建议先核对水泥用量与设备负荷，再进入排程。',
+  },
+  multi: {
+    label: '② 多个 viewUrl（2 个不同，分散在不同层级）',
+    hint: '判定只认“字段名是 viewUrl”，与它在哪一层无关 —— 嵌套对象里各一个也能都出来。',
+    calls: [
+      {
+        name: 'hd__排产结果',
+        status: 'success',
+        durationMs: 2140,
+        size: 236,
+        argsDigest: { scene: '生产调度', horizon: '7d' },
+        result: {
+          status: 'success',
+          message: '排产完成，两个车间各有一张明细表',
+          firstWorkshop: { workshop: '一车间', viewUrl: '/datasource/plan/ws1/xlsx' },
+          secondWorkshop: { workshop: '二车间', viewUrl: '/datasource/plan/ws2/xlsx' },
+        },
+      },
+    ],
+    answer: '两个车间都已排定，各自的明细表地址见下方入口。合计 2 个视图地址，没有重复。',
+  },
+  dup: {
+    label: '③ 多个 + 重复 + 非法值',
+    hint: '重复分两种：原值完全相同（后端去重）、归一化后指向同一地址（前端按 href 去重）。非法形态只在前端被丢弃。',
+    calls: [
+      {
+        name: 'hd__订单查询',
+        status: 'success',
+        durationMs: 980,
+        size: 418,
+        argsDigest: { scene: '生产调度', limit: '6' },
+        result: [
+          { id: 1, orderNo: 'WO-1', viewUrl: '/datasource/a/xlsx' },
+          { id: 2, orderNo: 'WO-2', viewUrl: '/datasource/a/xlsx' },
+          { id: 3, orderNo: 'WO-3', viewUrl: '  /datasource/a/xlsx  ' },
+          { id: 4, orderNo: 'WO-4', viewUrl: 'http://localhost:5173/datasource/a/xlsx' },
+          { id: 5, orderNo: 'WO-5', viewUrl: '/datasource/b/xlsx' },
+          { id: 6, orderNo: 'WO-6', viewUrl: '//evil.com/x' },
+        ],
+      },
+    ],
+    answer: '查到 6 条工单，其中 5 条带可查看的明细页。重复的地址只保留一个入口，非法地址不会被链接化。',
+  },
+  over: {
+    label: '④ 跨工具重复 + 超过展示上限',
+    hint: '8 个不同地址 + 1 个跨工具重复：先合并重复，再只显示前 3 个，其余用「另有 N 个」展开。',
+    calls: [
+      {
+        name: 'hd__产能表解析',
+        status: 'success',
+        durationMs: 1620,
+        size: 1024,
+        argsDigest: { path: '数据准备/产能表.xlsx' },
+        result: EIGHT_ROWS,
+      },
+      {
+        name: 'hd__订单详情',
+        status: 'success',
+        durationMs: 420,
+        size: 88,
+        argsDigest: { orderNo: 'WO-1' },
+        result: { status: 'success', message: '订单详情', viewUrl: '/datasource/a/xlsx' },
+      },
+    ],
+    answer: '两次调用共产生 8 个不同的视图地址，另有 1 个与已有重复、已合并。这里只直接给前 3 个，其余用「另有 N 个」展开。',
+  },
+};
+
+/** 固定的对照消息：工具结果里没有 viewUrl（且不是 JSON） */
+const CONTROL_ANSWER = '共享空间里那份说明只是纯文本，没有可跳转的页面，所以这条回答下面不会出现入口行。';
+const CONTROL_CALL = {
+  name: 'read_file',
+  status: 'success',
+  durationMs: 120,
+  size: 268,
+  argsDigest: { path: '共享空间/产能表说明.txt' },
+  resultText: '产能表说明\n1. 每道工序的标准工时见附表\n2. 设备可用日历按周维护\n3. 异常工时需在排程前修正',
+};
+
+// ============================================================================
+// 状态
+// ============================================================================
+const state = {
+  mode: 'after',
+  scenario: 'multi',
+  origin: 'http://localhost:5173',
+  notes: true,
+  expanded: new Set(),   // 展开的工具卡片序号
+  showAll: false,        // 入口行是否展开全部
+};
+
+const els = {
+  chat: document.getElementById('chat'),
+  modeSeg: document.getElementById('modeSeg'),
+  scenarioSel: document.getElementById('scenarioSel'),
+  scenarioHint: document.getElementById('scenarioHint'),
+  originSel: document.getElementById('originSel'),
+  noteChk: document.getElementById('noteChk'),
+  pipeRaw: document.getElementById('pipeRaw'),
+  pipeSidecar: document.getElementById('pipeSidecar'),
+  pipeSidecarNote: document.getElementById('pipeSidecarNote'),
+  pipeHref: document.getElementById('pipeHref'),
+  pipeHrefNote: document.getElementById('pipeHrefNote'),
+  toast: document.getElementById('toast'),
+};
+
+// ============================================================================
+// 小工具
+// ============================================================================
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function textOf(call) {
+  return typeof call.resultText === 'string' ? call.resultText : JSON.stringify(call.result, null, 2);
+}
+function note(text, kind) {
+  if (!state.notes) return '';
+  return '<p class="note' + (kind === 'info' ? ' note--info' : '') + '"><span>☝</span><span>' + esc(text) + '</span></p>';
+}
+
+// ---- 结构化正文渲染（等价 ProducedJsonView：对象逐行 / 对象数组走表格 / viewUrl 变链接） ----
+function renderCell(value, fieldKey, origin) {
+  if (isPlainObject(value) || Array.isArray(value)) {
+    return '<span class="json__hint">' + esc(JSON.stringify(value)) + '</span>';
+  }
+  const isView = typeof fieldKey === 'string' && fieldKey.trim().toLowerCase() === VIEW_URL_FIELD.toLowerCase();
+  if (isView && typeof value === 'string') {
+    const href = resolveViewUrl(value, origin);
+    if (href) {
+      return '<a class="json__link" data-demo-link href="' + esc(href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(href) + '">' + esc(value) + '</a>';
+    }
+  }
+  return '<span class="json__scalar">' + esc(String(value)) + '</span>';
+}
+
+function renderJson(value, origin) {
+  if (Array.isArray(value)) {
+    const rows = value.filter(isPlainObject);
+    if (rows.length > 0 && rows.length === value.length) {
+      const cols = [];
+      for (const row of rows) for (const k of Object.keys(row)) if (!cols.includes(k)) cols.push(k);
+      const head = cols.map((c) => '<th>' + esc(c) + '</th>').join('');
+      const body = rows
+        .map((row) => '<tr>' + cols.map((c) => '<td>' + renderCell(row[c], c, origin) + '</td>').join('') + '</tr>')
+        .join('');
+      return '<table class="json__table"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>';
+    }
+    return value.map((v) => renderJson(v, origin)).join('');
+  }
+  if (isPlainObject(value)) {
+    return Object.entries(value)
+      .map(([k, v]) => {
+        if (isPlainObject(v) || Array.isArray(v)) {
+          return '<div class="json__row"><span class="json__key">' + esc(k) + ':</span></div>' +
+            '<div class="json__nested">' + renderJson(v, origin) + '</div>';
+        }
+        return '<div class="json__row"><span class="json__key">' + esc(k) + ':</span>' + renderCell(v, k, origin) + '</div>';
+      })
+      .join('');
+  }
+  return '<span class="json__hint">' + esc(String(value)) + '</span>';
+}
+
+// ---- 工具调用区（对齐 ToolCallList.vue 的 DOM 形状） ----
+function renderToolCalls(calls, origin, groupKey) {
+  const after = state.mode === 'after';
+  const parts = [];
+  parts.push('<div class="tool-calls">');
+  parts.push('<p class="tool-calls__head">本轮 ' + calls.length + ' 次调用 · 报错 0 次</p>');
+
+  if (calls.length >= 2) {
+    const latest = calls[calls.length - 1];
+    parts.push(
+      '<button type="button" class="tool-calls__summary">' +
+        '<span class="tool-calls__latest">最新</span>' +
+        '<span class="tool-call__name">' + esc(latest.name) + '</span>' +
+        '<span class="tool-call__status--success">已完成</span>' +
+        '<span class="tool-call__meta">' + latest.durationMs + 'ms</span>' +
+        '<span class="tool-call__toggle">查看明细</span>' +
+      '</button>'
+    );
+  }
+
+  parts.push('<div class="tool-calls__details">');
+  calls.forEach((call, index) => {
+    const key = groupKey + ':' + index;
+    const open = state.expanded.has(key);
+    const text = textOf(call);
+    const sidecar = extractViewUrls(text);
+    const callLinks = toViewLinks(sidecar, origin);
+
+    parts.push('<div class="tool-call">');
+    parts.push('<button type="button" class="tool-call__head" data-call="' + esc(key) + '" aria-expanded="' + open + '">');
+    parts.push('<span class="tool-call__name">' + esc(call.name) + '</span>');
+    parts.push('<span class="tool-call__status--success">已完成</span>');
+    parts.push('<span class="tool-call__meta">' + call.durationMs + 'ms</span>');
+    parts.push('<span class="tool-call__meta">' + call.size + ' B</span>');
+    if (after && callLinks.length > 0) {
+      parts.push('<a class="tool-link" data-demo-link href="' + esc(callLinks[0].href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(callLinks[0].href) + '">打开视图</a>');
+    }
+    parts.push('<span class="tool-call__toggle">' + (open ? '收起' : '展开') + '</span>');
+    parts.push('</button>');
+
+    if (open) {
+      parts.push('<div class="tool-call__body">');
+      if (call.argsDigest) {
+        parts.push('<p class="tool-call__args">入参：' + esc(Object.entries(call.argsDigest).map(([k, v]) => k + '=' + v).join('  ')) + '</p>');
+      }
+      const structured = after ? parseStructured(text) : null;
+      parts.push(structured !== null
+        ? '<div class="json">' + renderJson(structured, origin) + '</div>'
+        : '<pre class="tool-call__content">' + esc(text) + '</pre>');
+      parts.push('</div>');
+      if (after && structured === null) {
+        parts.push(note('结果不是 JSON → 仍按原文展示，与改动前一致（沿用 parseProducedContent 的既有判据）。', 'info'));
+      }
+      if (after && structured !== null && callLinks.length > 0) {
+        parts.push(note('展开后字段名为 viewUrl 的值是链接（任意层级生效，表格单元格里也能点）；字段名不叫 viewUrl 的不会被链接化。'));
+      }
+    }
+    parts.push('</div>');
+  });
+  parts.push('</div></div>');
+  return parts.join('');
+}
+
+// ---- 新增：视图入口行（插在回答正文之后） ----
+function renderViewLinks(links, origin) {
+  const after = state.mode === 'after';
+  if (!after) {
+    return note('改前（现状）：记录里不带 view_urls，正文之后没有任何视图入口 —— 用户只能展开工具卡片、自己在原始 JSON 里找路径。');
+  }
+  if (links.length === 0) {
+    return note('这条回答的视图入口为空 → 整行不渲染：不留空行、不留额外间距，界面与改动前完全一致。', 'info');
+  }
+
+  const visible = state.showAll ? links : links.slice(0, DISPLAY_MAX_CHIPS);
+  const hidden = links.length - visible.length;
+
+  const chips = visible
+    .map((l) =>
+      '<a class="message-view-link" data-demo-link href="' + esc(l.href) + '" target="_blank" rel="noopener noreferrer" title="' + esc(l.href) + '">' +
+        '<span class="message-view-link__raw">↗ ' + esc(l.raw) + '</span>' +
+        (state.notes ? '<span class="message-view-link__href">→ ' + esc(l.href) + '</span>' : '') +
+      '</a>'
+    )
+    .join('');
+
+  const more = hidden > 0
+    ? '<button type="button" class="message-view-links__more" data-more aria-expanded="false">另有 ' + hidden + ' 个</button>'
+    : '';
+  const less = state.showAll && links.length > DISPLAY_MAX_CHIPS
+    ? '<button type="button" class="message-view-links__less" data-less aria-expanded="true">收起</button>'
+    : '';
+
+  return (
+    '<div class="message-view-links">' +
+      '<span class="message-view-links__label">打开视图：</span>' + chips + more + less +
+    '</div>' +
+    note('新增：这行紧跟在 LLM 回答正文之后（MessageContent 与 TypingIndicator 之间）。常显、不用展开；内容是该条消息全部工具调用的 view_urls 去重后的结果，不是模型转写的文本。')
+  );
+}
+
+// ============================================================================
+// 渲染
+// ============================================================================
+function render() {
+  const scn = SCENARIOS[state.scenario];
+  const origin = state.origin;
+  const after = state.mode === 'after';
+
+  els.scenarioHint.textContent = scn.hint;
+
+  // 「这条回答能打开哪些视图」= 该消息全部工具调用的 sidecar 并集（再按 href 去重）
+  const aggregated = [];
+  for (const call of scn.calls) {
+    for (const v of extractViewUrls(textOf(call))) if (!aggregated.includes(v)) aggregated.push(v);
+  }
+  const links = toViewLinks(aggregated, origin);
+  const controlLinks = []; // 对照消息：无 viewUrl
+
+  const html = [];
+
+  // ---- 消息 1：用户 ----
+  html.push(
+    '<article class="message-bubble message-bubble--user">' +
+      '<header class="message-bubble__head"><span class="message-bubble__role">我</span><time>14:02</time></header>' +
+      '<div class="message-content">帮我解析一下产能表，并把能看明细的地址给我。</div>' +
+    '</article>'
+  );
+
+  // ---- 消息 2：数字人（受控场景）----
+  html.push(
+    '<article class="message-bubble message-bubble--assistant">' +
+      '<header class="message-bubble__head"><span class="message-bubble__role">生产计划助手</span><time>14:02</time></header>' +
+      '<ul class="message-bubble__refs"><li><button type="button" class="message-bubble__ref">@产能表.xlsx</button></li></ul>' +
+      renderToolCalls(scn.calls, origin, 'A') +
+      '<div class="message-content">' + esc(scn.answer) + '</div>' +
+      renderViewLinks(links, origin) +
+      '<div class="message-actions"><span>1.2k tokens</span><span>3.4s</span><button type="button">复制</button><button type="button">👍</button><button type="button">👎</button></div>' +
+    '</article>'
+  );
+
+  // ---- 消息 3：用户 ----
+  html.push(
+    '<article class="message-bubble message-bubble--user">' +
+      '<header class="message-bubble__head"><span class="message-bubble__role">我</span><time>14:05</time></header>' +
+      '<div class="message-content">共享空间里那份说明里写了什么？</div>' +
+    '</article>'
+  );
+
+  // ---- 消息 4：数字人（对照：工具结果里没有 viewUrl）----
+  html.push(
+    '<article class="message-bubble message-bubble--assistant">' +
+      '<header class="message-bubble__head"><span class="message-bubble__role">生产计划助手</span><time>14:05</time></header>' +
+      renderToolCalls([CONTROL_CALL], origin, 'B') +
+      '<div class="message-content">' + esc(CONTROL_ANSWER) + '</div>' +
+      renderViewLinks(controlLinks, origin) +
+      '<div class="message-actions"><span>0.4k tokens</span><span>1.1s</span><button type="button">复制</button><button type="button">👍</button><button type="button">👎</button></div>' +
+    '</article>'
+  );
+
+  els.chat.innerHTML = html.join('');
+
+  // ---- 核对面板 ----
+  const rawOccurrences = [];
+  for (const call of scn.calls) rawOccurrences.push(...rawViewUrlOccurrences(textOf(call)));
+  els.pipeRaw.innerHTML = rawOccurrences.length
+    ? rawOccurrences.map((v) => '<li>' + esc(v) + '</li>').join('')
+    : '<li class="pipe__empty">（结果里没有 viewUrl）</li>';
+
+  const sidecarAll = [];
+  for (const call of scn.calls) sidecarAll.push(...extractViewUrls(textOf(call)));
+  els.pipeSidecar.innerHTML = sidecarAll.length
+    ? sidecarAll.map((v) => '<li>' + esc(v) + '</li>').join('')
+    : '<li class="pipe__empty">（抽取结果为空 → 不写 sidecar 字段，行为与今天一致）</li>';
+  els.pipeSidecarNote.textContent =
+    rawOccurrences.length + ' 条原值 → ' + sidecarAll.length + ' 条（形态卫生 + 原值去重；上限 ' +
+    VIEW_URL_MAX_ITEMS + ' 条防病态）。后端只做形态卫生，不做 scheme 判定 —— 合法性由前端唯一决定。';
+
+  els.pipeHref.innerHTML = links.length
+    ? links.map((l) => '<li title="' + esc(l.raw) + '">' + esc(l.href) + '</li>').join('')
+    : (after
+        ? '<li class="pipe__empty">（无合法链接 → 正文之后不出现入口行）</li>'
+        : '<li class="pipe__empty">改前：不渲染任何入口</li>');
+  els.pipeHrefNote.textContent = after
+    ? '显示 ' + Math.min(links.length, DISPLAY_MAX_CHIPS) + ' 个' +
+      (links.length > DISPLAY_MAX_CHIPS ? '，另有 ' + (links.length - DISPLAY_MAX_CHIPS) + ' 个（不静默丢弃）' : '') +
+      '。拼的是“当前入口”，切换上方入口地址可见全部链接随之变化；已带 http(s):// 的值不参与拼接。'
+    : '改前：即使记录里有值，正文之后也不渲染入口。';
+}
+
+// ============================================================================
+// 交互
+// ============================================================================
+document.getElementById('scenarioSel').innerHTML = Object.entries(SCENARIOS)
+  .map(([key, s]) => '<option value="' + key + '">' + esc(s.label) + '</option>')
+  .join('');
+
+els.modeSeg.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-mode]');
+  if (!btn) return;
+  state.mode = btn.dataset.mode;
+  [...els.modeSeg.querySelectorAll('button')].forEach((b) =>
+    b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode))
+  );
+  render();
+});
+
+els.scenarioSel.addEventListener('change', () => {
+  state.scenario = els.scenarioSel.value;
+  state.expanded.clear();
+  state.showAll = false;
+  render();
+});
+
+els.originSel.addEventListener('change', () => {
+  state.origin = els.originSel.value;
+  render();
+});
+
+els.noteChk.addEventListener('change', () => {
+  state.notes = els.noteChk.checked;
+  render();
+});
+
+function onChatClick(e) {
+  const head = e.target.closest('button[data-call]');
+  if (head) {
+    const key = head.dataset.call;
+    if (state.expanded.has(key)) state.expanded.delete(key);
+    else state.expanded.add(key);
+    render();
+    return;
+  }
+  if (e.target.closest('a[data-demo-link]')) return;
+  if (e.target.closest('button[data-more]')) { state.showAll = true; render(); return; }
+  if (e.target.closest('button[data-less]')) { state.showAll = false; render(); return; }
+}
+els.chat.addEventListener('click', onChatClick);
+
+// 点链接不真的跳转（避免演示页点出 404），改为提示"将要打开的绝对地址"
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-demo-link]');
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toast('新窗口打开 → ' + a.getAttribute('href'));
+});
+
+let toastTimer;
+function toast(msg) {
+  els.toast.textContent = msg;
+  els.toast.classList.add('toast--on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove('toast--on'), 2600);
+}
+
+els.scenarioSel.value = state.scenario;
+els.originSel.value = state.origin;
+render();
+</script>
+</body>
+</html>

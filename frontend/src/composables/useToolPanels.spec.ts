@@ -31,13 +31,14 @@ describe('useToolPanels', () => {
     expect(seen).toEqual([false, true])
   })
 
-  it('新 call_id 的初始态：收起、未加载、无降级标记', () => {
+  it('新 call_id 的初始态：收起、未加载、无降级标记、正文按结构化展示', () => {
     expect(useToolPanels().panelOf('c9')).toEqual({
       open: false,
       loading: false,
       content: null,
       expired: false,
       error: null,
+      raw: false,
     })
   })
 

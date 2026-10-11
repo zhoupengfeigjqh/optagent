@@ -18,10 +18,11 @@ import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../ap
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import { formatTimestamp } from '../../utils/format'
 import { countMatches } from '../../utils/segments'
-import { streamingToolCallItem, toolCallItemsOf } from '../../utils/tool-calls'
+import { collectToolViewLinks, streamingToolCallItem, toolCallItemsOf } from '../../utils/tool-calls'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import MessageActions from './MessageActions.vue'
 import MessageContent from './MessageContent.vue'
+import MessageViewLinks from './MessageViewLinks.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallList from './ToolCallList.vue'
 import TypingIndicator from './TypingIndicator.vue'
@@ -115,6 +116,13 @@ const toolItems = computed(() =>
 )
 /** 外置正文只存在于历史记录，流式轮次不触发懒加载 */
 const toolLoader = computed(() => (props.streaming ? undefined : props.loadToolResult))
+/**
+ * 本条回答的视图入口（2026-10-10，`TR-45`）：该条消息**全部**工具调用的
+ * `view_links` 并集，交给 `MessageViewLinks` 归一化与去重。
+ *
+ * 流式轮次的记录里没有结果，故恒为空 → 入口行在流式期不出现（`TR-48`）。
+ */
+const viewLinks = computed(() => collectToolViewLinks(toolItems.value))
 const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMING)
 /** 中断轮：保留 partial 正文，但须明确标识"已停止"，与正常回答区分 */
 const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
@@ -213,6 +221,10 @@ const containsActiveMatch = computed(() => {
       :match-index-base="matchIndexBase"
       @open-link="emit('open-link', $event)"
     />
+
+    <!-- 视图入口行（2026-10-10，TR-45）：紧跟回答正文之后、状态提示与操作区之前。
+         无合法链接时组件整行不渲染（TR-48），因此不必在这里再判空 -->
+    <MessageViewLinks :links="viewLinks" @open-link="emit('open-link', $event)" />
 
     <TypingIndicator v-if="showTyping" />
 

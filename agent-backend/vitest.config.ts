@@ -137,6 +137,13 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-10-10：工具结果里的视图链接抽取（同步侧视图入口，TR-44）
+        'src/domain/view-links.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

@@ -166,6 +166,12 @@ export type MessageRole = 'user' | 'assistant'
 /** 消息状态：仅 assistant 完成轮返回，缺省视为 `completed`。 */
 export type MessageStatus = 'completed' | 'failed'
 
+/** 视图链接：服务给的**原值**地址 + 可选名称（名称缺省 = 界面显示地址，`TR-46`）。 */
+export interface ViewLink {
+  url: string
+  name?: string
+}
+
 /**
  * 一次工具调用的记录（002 特性）。
  *
@@ -195,6 +201,8 @@ export interface ToolCallRecord {
   summary?: string
   /** 入参短标量摘要 */
   args_digest?: Record<string, string>
+  /** 结果里的视图链接（与正文分离下发；正文外置时仍在，见 `TR-44`） */
+  view_links?: ViewLink[]
 }
 
 /** `GET /api/threads/{id}/tool-calls/{call_id}` 响应（外置正文全文）。 */

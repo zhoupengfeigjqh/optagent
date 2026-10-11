@@ -10,6 +10,8 @@
  * 4. **结果展示与降级**（TR-15 / TR-16）：内联结果展开即见；外置结果点开才拉取；
  *    已清理（410）降级为"已清理"而非错误；加载失败可重试；截断有明确提示
  * 5. **查看态跨"流式 → 历史"交接保持**（TR-36）
+ * 6. **结果正文的结构化展示**（2026-10-10）：JSON 结果按结构化渲染（`viewUrl` 成链接）、
+ *    非 JSON 仍按原文、超限回落原文并说明原因；「按原始 JSON 查看」逃生舱可用且跨重挂载保持
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { h } from 'vue'
@@ -17,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ToolCallResult } from '../../api/types'
 import { useToolPanels } from '../../composables/useToolPanels'
+import { PRODUCED_JSON_MAX_CHARS } from '../../utils/produced-content'
 import type { ToolCallItem } from '../../utils/tool-calls'
 import ToolCallList from './ToolCallList.vue'
 
@@ -350,5 +353,83 @@ describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-3
     expect(history.find('[data-test="tool-details"]').exists()).toBe(true)
     expect(history.text()).toContain('连接排产库失败：timeout')
     expect(loadResult).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ToolCallList —— 结果正文的结构化展示（2026-10-10）', () => {
+  /** 典型结果：JSON 对象 + `viewUrl` / `viewUrlName`（服务给的原值） */
+  const JSON_ITEM: ToolCallItem = {
+    callId: 'c1',
+    name: 'hd__排产结果',
+    status: 'success',
+    content: JSON.stringify({
+      status: 'success',
+      viewUrl: '/datasource/plan/ws1/xlsx',
+      viewUrlName: '一车间产能明细',
+    }),
+  }
+
+  async function expand(wrapper: ReturnType<typeof mountList>) {
+    await wrapper.find('.tool-call__head').trigger('click')
+  }
+
+  it('JSON 结果默认结构化展示：键值可读，且 viewUrl 渲染为链接（拼当前入口）', async () => {
+    const wrapper = mountList([JSON_ITEM])
+    await expand(wrapper)
+
+    expect(wrapper.find('.produced-json').exists()).toBe(true)
+    expect(wrapper.find('.tool-call__content').exists()).toBe(false)
+
+    const link = wrapper.find('.produced-json__link')
+    expect(link.text()).toBe('/datasource/plan/ws1/xlsx')
+    expect(link.attributes('href')).toBe(`${window.location.origin}/datasource/plan/ws1/xlsx`)
+  })
+
+  it('可一键切回原始 JSON（逃生舱），再点回到结构化', async () => {
+    const wrapper = mountList([JSON_ITEM])
+    await expand(wrapper)
+
+    const toggle = wrapper.find('.tool-call__view-toggle')
+    expect(toggle.text()).toBe('按原始 JSON 查看')
+
+    await toggle.trigger('click')
+    expect(wrapper.find('.tool-call__content').exists()).toBe(true)
+    expect(wrapper.find('.produced-json').exists()).toBe(false)
+    expect(wrapper.find('.tool-call__view-toggle').text()).toBe('按结构化查看')
+
+    await wrapper.find('.tool-call__view-toggle').trigger('click')
+    expect(wrapper.find('.produced-json').exists()).toBe(true)
+  })
+
+  it('非 JSON 结果仍按原文展示，且不给逃生舱（与改动前完全一致）', async () => {
+    const wrapper = mountList([
+      { callId: 'c1', name: 'read_file', status: 'success', content: '车间,计划量\n冲压,1200' },
+    ])
+    await expand(wrapper)
+
+    expect(wrapper.find('.tool-call__content').exists()).toBe(true)
+    expect(wrapper.find('.tool-call__view-toggle').exists()).toBe(false)
+    expect(wrapper.find('.produced-json').exists()).toBe(false)
+  })
+
+  it('超过解析上限的结果不解析：回落原文并说明原因（防卡顿）', async () => {
+    const huge = JSON.stringify({ pad: 'x'.repeat(PRODUCED_JSON_MAX_CHARS + 1) })
+    const wrapper = mountList([{ callId: 'c1', name: 'ocr', status: 'success', content: huge }])
+    await expand(wrapper)
+
+    expect(wrapper.find('.tool-call__content').exists()).toBe(true)
+    expect(wrapper.text()).toContain('已按原始文本展示')
+  })
+
+  it('逃生舱开关跨重挂载保持（与 TR-36 的查看态同源，不随交接丢失）', async () => {
+    const first = mountList([JSON_ITEM])
+    await expand(first)
+    await first.find('.tool-call__view-toggle').trigger('click')
+    first.unmount()
+
+    // 交接后的新实例：展开态与"原始 JSON"态都在（**不再点一次**——查看态是记忆的）
+    const again = mountList([JSON_ITEM])
+    expect(again.find('.tool-call__content').exists()).toBe(true)
+    expect(again.find('.produced-json').exists()).toBe(false)
   })
 })
