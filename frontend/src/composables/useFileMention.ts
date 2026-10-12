@@ -37,6 +37,11 @@ export interface MentionDeps {
 /** `@` 引用 composable 契约。 */
 export interface FileMentionStore {
   open: Ref<boolean>
+  /**
+   * 最近一次输入的光标位置（浮层定位读它：面板要贴 `@` 光标右侧弹出）。
+   * 收起时归零——留着旧下标会让下一次定位从错误的位置起算（与 `usePathInsert` 同口径）。
+   */
+  caret: Ref<number>
   /** 三空间树（workspace 同源） */
   spaces: ComputedRef<WorkspaceSpace[]>
   /** 当前聚焦列 */
@@ -53,8 +58,8 @@ export interface FileMentionStore {
   /** 三级列的文件清单 */
   files: ComputedRef<{ filename: string }[]>
   maxReached: ComputedRef<boolean>
-  /** 文本/光标变化时检测 `@` 触发与引用同步 */
-  handleInput(text: string, caret: number): void
+  /** 文本/光标变化时检测 `@` 触发与引用同步（触发时记录光标，供浮层定位） */
+  handleInput(text: string, nextCaret: number): void
   /** 点击空间：数据准备进二级目录列，其余直接出文件列 */
   pickSpace(space: string): void
   /** 点击二级目录 → 出文件列 */
@@ -107,6 +112,7 @@ export function stripMentionTokens(
 /** 创建 `@` 引用状态。 */
 export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   const open = ref(false)
+  const caret = ref(0)
   const column = ref<MentionColumn>('space')
   const activeSpace = ref<string | null>(null)
   const activeDir = ref<string | null>(null)
@@ -137,20 +143,21 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
 
   function close(): void {
     open.value = false
+    caret.value = 0
     column.value = 'space'
     activeSpace.value = null
     activeDir.value = null
     activeIndex.value = 0
   }
 
-  function handleInput(text: string, caret: number): void {
+  function handleInput(text: string, nextCaret: number): void {
     // 引用同步：文本中已不存在 `@文件名` 的引用一律移除（US4 场景 8）
     const remaining = references.value.filter((reference) => text.includes(mentionToken(reference)))
     if (remaining.length !== references.value.length) {
       references.value = remaining
     }
 
-    const beforeCaret = text.slice(0, Math.max(0, caret))
+    const beforeCaret = text.slice(0, Math.max(0, nextCaret))
     if (!TRIGGER_PATTERN.test(beforeCaret)) {
       if (open.value) {
         close()
@@ -168,6 +175,7 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
         void deps.workspace.load()
       }
     }
+    caret.value = nextCaret
     activeIndex.value = 0
   }
 
@@ -267,6 +275,7 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
 
   return {
     open,
+    caret,
     spaces,
     column,
     activeSpace,

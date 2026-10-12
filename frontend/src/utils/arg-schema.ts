@@ -6,7 +6,8 @@
  * 一致的渲染，不需要为某个工具写适配。
  *
  * 控件映射（JSON Schema 子集）：
- * - `enum` → 下拉；`boolean` → 开关；`integer`/`number` → 数字；`string` → 文本
+ * - `enum`（以及 `const` / `anyOf`/`oneOf` 的常量集合）→ 下拉；`boolean` → 开关；
+ *   `integer`/`number` → 数字；`string` → 文本
  *   （description 含「多行」→ 多行文本）
  * - `object` 且声明了 `properties` → **分组**：子字段逐个成行（递归，支持任意深度）；
  *   未声明 `properties` 的自由对象（如任意键值 map）→ JSON 逃生舱
@@ -23,6 +24,9 @@
 export interface FieldSchema {
   type?: unknown
   enum?: unknown
+  const?: unknown
+  anyOf?: unknown
+  oneOf?: unknown
   title?: unknown
   description?: unknown
   properties?: unknown
@@ -116,9 +120,28 @@ export function itemSchemaOf(schema: FieldSchema): FieldSchema | null {
   return asSchema(schema.items)
 }
 
-/** enum 选项（非数组 → 空）。 */
+/**
+ * 下拉选项：`enum` 优先，其次 `const`（单值），再次 `anyOf`/`oneOf` 里的常量集合。
+ *
+ * `anyOf`/`oneOf` 在 JSON Schema 里也用于表达联合**类型**（如 `{anyOf:[{type:'string'},{type:'null'}]}`），
+ * 那不是选项——因此只在**每个分支都能取出具体常量**时才认作枚举，否则整体交回非下拉。
+ */
 export function optionsOf(schema: FieldSchema): unknown[] {
-  return Array.isArray(schema.enum) ? schema.enum : []
+  if (Array.isArray(schema.enum)) return schema.enum
+  if (schema.const !== undefined) return [schema.const]
+  return unionOptionsOf(schema.anyOf ?? schema.oneOf)
+}
+
+/** `anyOf`/`oneOf` → 常量选项集合（有任一分支不是常量集合 → 空，不猜）。 */
+function unionOptionsOf(raw: unknown): unknown[] {
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  const collected: unknown[] = []
+  for (const branch of raw) {
+    const branchOptions = optionsOf(asSchema(branch))
+    if (branchOptions.length === 0) return []
+    collected.push(...branchOptions)
+  }
+  return collected
 }
 
 /** 节点说明（无 → 空串）。 */

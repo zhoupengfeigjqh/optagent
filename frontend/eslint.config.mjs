@@ -66,5 +66,33 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // 移植 / 第三方来源的树（2026-10-12 补）：
+    // - `z-gantt*` / `z-table`：甘特图与表格包装层，透传的是 Highcharts 的选项对象——那些对象
+    //   本身就没有可用的 TS 类型，逐处补类型等于重写第三方适配层；
+    // - `views/datapage/**`、`views/demo/**`：自另一个项目整体移植的数据页与演示页，文件名
+    //   （`datapage.vue` / `index.vue` / `gantt.vue`）与 `any` 都是"照原样搬运"的结果，改名会牵动
+    //   全仓 import。
+    //
+    // 因此这里**按路径**只关掉三条与"搬运方式"绑定的规则，其余规则照常生效——特别是不把整棵树
+    // 塞进 `ignores`（那样连真问题也一并放过；`no-unused-vars` 仍在生效，那 16 处死代码已单独清理）。
+    // 理由：宪章「治理 § 适用范围与不追溯」禁止借改动之机对无关存量做大范围重构；该决定已登记在
+    // `.specify/memory/constitution.md` 的同步影响报告中。
+    files: [
+      'src/components/z-gantt/**',
+      'src/components/z-gantt-table/**',
+      'src/components/z-table/**',
+      'src/views/datapage/**',
+      'src/views/demo/**',
+    ],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-this-alias': 'off',
+      // 搬运过来的列配置里写的是 `customRender?: Function`；改成具体签名会一路牵动
+      // 第三方表格组件的类型，仍属"重写适配层"，故一并按路径放开
+      '@typescript-eslint/no-unsafe-function-type': 'off',
+      'vue/multi-word-component-names': 'off',
+    },
+  },
   prettier,
 );

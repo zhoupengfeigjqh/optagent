@@ -519,8 +519,10 @@ data: {
 ### 9.6 前端契约
 
 - `frontend` 新增通用组件 `InteractionDialog.vue`：props 仅 `{ request: InteractionRequest }`、emits 仅 `submit(args)`/`reject()`——**组件内禁止出现任何具体工具/MCP 服务名**；
-- 控件映射（**2026-09-23 起按 schema 递归**）：`enum→下拉`、`boolean→开关`、`integer/number→数字输入`、`string→输入框`（description 含「多行」→ 多行文本）；`object` 且声明了 `properties` → **子字段逐行**（任意深度递归）；`array` 且 `items.type=object` → **表格**（一行一个元素；列 = `items.properties` 的键，不足时补"值里实际出现的键"）；`array` 且 `items` 为标量/枚举 → **列表**（一行一项）；其余形状（无 `properties` 的自由对象、数组套数组、`items` 缺失）→ **JSON 文本框**（逃逸舱）。required 标星 + 本地校验；
-- 行内操作条：分组/表格/列表行提供「按 JSON 编辑 / 按表单编辑」切换（任一层都可手动切回或切出）；表格另有「＋ 添加行」与每行「删除」；`@` 文件引用与结构化文件卡片仍**只挂文本类控件**（表格单元格不挂，避免在格子里展开面板）；
+- 控件映射（**2026-09-23 起按 schema 递归**）：`enum→下拉`（**2026-10-12 起**含 `const` 与 `anyOf`/`oneOf` 的常量集合；联合**类型**如 `{anyOf:[{type:'string'},{type:'null'}]}` 不算选项）、`boolean→开关`、`integer/number→数字输入`、`string→输入框`（description 含「多行」→ 多行文本）；`object` 且声明了 `properties` → **子字段逐行**（任意深度递归）；`array` 且 `items.type=object` → **表格**（一行一个元素；列 = `items.properties` 的键，不足时补"值里实际出现的键"）；`array` 且 `items` 为标量/枚举 → **列表**（一行一项）；其余形状（无 `properties` 的自由对象、数组套数组、`items` 缺失）→ **JSON 文本框**（逃逸舱）。required 标星 + 本地校验；
+- 行内操作条：分组/表格/列表行提供「按 JSON 编辑 / 按表单编辑」切换（任一层都可手动切回或切出）；表格另有「＋ 添加行」与每行「删除」；
+- **2026-10-12 修订（原条文为"`@` 文件引用与结构化文件卡片仍只挂文本类控件（表格单元格不挂，避免在格子里展开面板）"）**：`@` 文件引用与结构化文件卡片**凡文本类控件一律挂**（`text` / `textarea`，**表格单元格同样挂**）。原理由随面板改为 `fixed` 浮层而消失——浮层紧贴 `@` 光标右侧弹出、不占布局、不被祖先滚动容器裁剪，且因仍留在所在 `<dialog>` 子树内而不会被 `inert` 挡住点击（旧实现是字段行内 `absolute`，会被 `.base-dialog__body` 的 `overflow-y: auto` 裁断，这正是当初"格子里不挂"的原因）；
+- **2026-10-12**：文本类控件的占位提示统一为 `可打 @ 选择文件`；`enum` 下拉**写回选项原值**（`{"type":"integer","enum":[1,2,3,4,5]}` 选中 `4` 后模型值为数字 `4`，不得写成字符串 `"4"`）；面板坐标计算与光标测量分层在 `utils/popup-position.ts` / `utils/caret-rect.ts`（纯函数，可单测），浮层外壳在 `components/chat/MentionPopup.vue`，聊天侧与 HITL 侧共用同一实现；
 - 分层（宪章原则二，各自带同名测试）：控件推导与值逻辑在 `utils/arg-schema.ts` / `utils/arg-values.ts`（纯函数），值路径读写在 `utils/json-path.ts`（2026-09-23 起支持数组下标），表单状态在 `composables/useInteractionForm.ts`，单节点递归渲染在 `components/chat/InteractionField.vue`（单元格/列表项用 `cell` 模式只出控件本体），`InteractionDialog.vue` 只做外壳；
 - 倒计时取 `timeout_seconds`，归零按拒绝关闭；终验失败展示后端逐字段错误并保持弹窗。
 

@@ -34,7 +34,7 @@ const props = withDefaults(
     disabled: false,
     sending: false,
     references: () => [],
-    placeholder: '输入消息，Enter 发送，Shift + Enter 换行',
+    placeholder: '输入消息：打 @ 可引用文件空间里的文件',
     mentionOpen: false,
   },
 )
@@ -128,7 +128,11 @@ function onKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="composer">
-    <slot name="mention" :references="references" />
+    <!--
+      `mention` 插槽只出**数据与锚点**：面板本体是 `fixed` 浮层（见 MentionPopup），
+      渲染位置不影响布局，所以这里不再让它参与流内排版（原先它会把输入框顶下去）。
+    -->
+    <slot name="mention" :references="references" :anchor="inputRef" />
 
     <ul v-if="references.length" class="composer__refs">
       <li
@@ -158,6 +162,9 @@ function onKeydown(event: KeyboardEvent): void {
       @input="onInput"
       @keydown="onKeydown"
     />
+
+    <!-- 键盘提示常驻（原型同款）：占位文案让给"打 @ 可引用文件"这条更容易被忽略的信息 -->
+    <p class="composer__hint">Enter 发送 · Shift + Enter 换行</p>
 
     <div class="composer__toolbar">
       <slot name="toolbar" :can-send="canSend" :sending="sending">
@@ -204,6 +211,13 @@ function onKeydown(event: KeyboardEvent): void {
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
+}
+
+/* 键盘提示常驻（原型同款）：占位文案留给"打 @ 可引用文件" */
+.composer__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
 
 .composer__input {

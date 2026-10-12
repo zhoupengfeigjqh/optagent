@@ -53,7 +53,9 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     const wrapper = mountDialog()
 
     expect(wrapper.find('select').exists()).toBe(true)
-    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('峰')
+    // DOM 的 value 是选项**下标**（原值由下标承载）：0 即「峰」
+    expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('0')
+    expect(wrapper.findAll('option')[1]!.text()).toBe('峰')
     expect(wrapper.find('input[type=number]').exists()).toBe(true)
     expect((wrapper.find('input[type=number]').element as HTMLInputElement).value).toBe('3')
     expect(wrapper.find('input[type=text]').exists()).toBe(true)

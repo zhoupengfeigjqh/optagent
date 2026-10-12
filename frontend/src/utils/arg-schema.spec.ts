@@ -14,6 +14,7 @@ import {
   isScalarControl,
   itemSchemaOf,
   labelHintOf,
+  optionsOf,
   propertiesOf,
   requiredSetOf,
   rulesAnchorOf,
@@ -52,6 +53,32 @@ describe('controlOf —— 控件分派', () => {
     expect(controlOf({ type: 'integer' })).toBe('number')
     expect(controlOf({ type: 'number' })).toBe('number')
     expect(controlOf({ type: 'string' })).toBe('text')
+  })
+
+  it('数字枚举同样是下拉（保留原始类型，不转字符串）', () => {
+    // 数字取值的枚举（如"数据版本 1~5"这类语义）。
+    // 注意：真实契约里这类语义只写在 description 里（字段本身是 `{"type":"integer"}`、没有 enum），
+    // 这里刻意按 enum 声明，验证的是"服务方一旦声明数字枚举"时的规则
+    const schema = { type: 'integer', enum: [1, 2, 3, 4, 5] }
+    expect(controlOf(schema)).toBe('select')
+    expect(optionsOf(schema)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('选项形态：const 单值、anyOf/oneOf 常量集合都是下拉；联合类型不是', () => {
+    expect(optionsOf({ const: 'PR001' })).toEqual(['PR001'])
+    expect(controlOf({ const: 'PR001' })).toBe('select')
+
+    expect(optionsOf({ anyOf: [{ const: '甲' }, { const: '乙' }] })).toEqual(['甲', '乙'])
+    expect(optionsOf({ oneOf: [{ enum: ['甲'] }, { enum: ['乙'] }] })).toEqual(['甲', '乙'])
+    expect(controlOf({ anyOf: [{ const: '甲' }, { const: '乙' }] })).toBe('select')
+
+    // 联合**类型**（Pydantic 的 Optional 等）不能被误判成选项
+    expect(optionsOf({ anyOf: [{ type: 'string' }, { type: 'null' }] })).toEqual([])
+    expect(controlOf({ anyOf: [{ type: 'string' }, { type: 'null' }] })).toBe('json')
+
+    // 空数组与缺省都保持"非下拉"语义
+    expect(optionsOf({ enum: [] })).toEqual([])
+    expect(optionsOf({})).toEqual([])
   })
 
   it('description 含「多行」的字符串 → 多行文本（既有约定）', () => {

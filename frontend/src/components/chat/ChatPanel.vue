@@ -17,6 +17,7 @@ import ChatHeader from './ChatHeader.vue'
 import Composer from './Composer.vue'
 import ComposerToolbar from './ComposerToolbar.vue'
 import MentionPicker from './MentionPicker.vue'
+import MentionPopup from './MentionPopup.vue'
 import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
@@ -225,26 +226,33 @@ function onStarterClick(starter: AgentStarter): void {
       @send="onSend"
       @stop="onStop"
     >
-      <template #mention>
-        <MentionPicker
+      <template #mention="{ anchor }">
+        <MentionPopup
           class="chat-panel__mention"
           :open="mention.open.value"
-          :spaces="mention.spaces.value"
-          :column="mention.column.value"
-          :active-space="mention.activeSpace.value"
-          :active-dir="mention.activeDir.value"
-          :dirs="mention.dirs.value"
-          :files="mention.files.value"
-          :active-index="mention.activeIndex.value"
-          :loading="workspace.loading.value"
-          @pick-space="onPickSpace"
-          @pick-dir="onPickDir"
-          @pick-file="onPickFile"
+          :anchor="anchor"
+          :caret="mention.caret.value"
           @close="mention.close"
-          @move="mention.move"
-          @confirm="onConfirmMention"
-          @back="mention.back"
-        />
+        >
+          <MentionPicker
+            :open="mention.open.value"
+            :spaces="mention.spaces.value"
+            :column="mention.column.value"
+            :active-space="mention.activeSpace.value"
+            :active-dir="mention.activeDir.value"
+            :dirs="mention.dirs.value"
+            :files="mention.files.value"
+            :active-index="mention.activeIndex.value"
+            :loading="workspace.loading.value"
+            @pick-space="onPickSpace"
+            @pick-dir="onPickDir"
+            @pick-file="onPickFile"
+            @close="mention.close"
+            @move="mention.move"
+            @confirm="onConfirmMention"
+            @back="mention.back"
+          />
+        </MentionPopup>
       </template>
 
       <template #toolbar>
@@ -381,9 +389,15 @@ function onStarterClick(starter: AgentStarter): void {
   margin: 0 var(--space-5) var(--space-2);
 }
 
-.chat-panel__upload,
-.chat-panel__mention {
+.chat-panel__upload {
   flex: none;
   margin: 0 var(--space-5) var(--space-2);
+}
+
+/* `@` 面板是 `fixed` 浮层（见 MentionPopup）：坐标由脚本写死，任何 margin
+   都会把它从光标处推走，故这里显式清零；也不再参与流内排版。 */
+.chat-panel__mention {
+  flex: none;
+  margin: 0;
 }
 </style>
