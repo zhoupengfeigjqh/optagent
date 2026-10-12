@@ -192,6 +192,32 @@
 - **不做 scheme 合法性的后端判定**：合法性只在前端一处（`TR-42`），后端只做形态卫生（避免两个漂移点）；
 - **不改异步产出（R11）链路**：§4.7 的正文内链接化原样保留，两条链路共用同一份归一化实现。
 
+### 4.9 MCP 工具结果文本口径（2026-10-12 修正）
+
+**问题**（实踩：解析类工具 `hd-algorithm__hd_algorithm_input_parser` 的结果里有 `viewUrl`，但**回答尾部没有入口行**）：根因不在抽取器，而在**上游的结果文本口径**——适配器把**整个** MCP `CallToolResult` 用 `JSON.stringify` 塞进一个 text 块：
+
+```json
+{"content":[{"type":"text","text":"[{\"businessType\":3,…,\"viewUrl\":\"/datapage/…\"}]"}],"isError":false}
+```
+
+于是：① 服务返回的业务正文成了"**字符串里的 JSON**"；② `TR-44` 的 `extractViewLinks` 只递归**对象/数组**、不重新解析字符串（刻意的边界，见 §4.8），`viewUrl` 因此不可达，前端"结构化查看"也只能看到一个信封；③ `type:'image'` 块的 base64 随信封进入结果文本，**绕过** `serializeToolResult` 的"不落 base64"占位保护。
+
+**处置**：把结果文本口径的**唯一实现**下沉到 `agent-backend/src/domain/tool-result.ts` 的 `serializeToolResult()`（模型可见与落盘共用同一份），适配器侧只保留形状分发与可观测，独立成 `agent-backend/src/infra/mcp/mcp-result-text.ts`。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-49** | **结果文本 MUST 取服务正文**：MCP 成功结果进模型与落盘的文本 MUST 是 `serializeToolResult()` 的输出——`content[].text` 按序用 `\n` 拼接、`image` 块转 `[图片 mime ~体积]` 占位、认不出形状时 JSON 兜底；**MUST NOT** 把整个 `CallToolResult` 序列化成信封 | 单测：对象结果 → 文本 == 业务 JSON（不含 `isError`、不含被转义的内层引号）；image 块 → 文本不含 base64；空 `content` / 非块形状 → JSON 兜底（不丢信息） |
+| **TR-50** | **口径只有一处实现，且新逻辑不加重超限文件**：模型看到的那份与落盘的那份 MUST 出自同一函数；适配器新增逻辑 MUST NOT 堆进 `mcp-tool-adapter.ts`（该文件已超 500 行门禁，属**既有状态**，见 `async-result-url.ts` 头注释），而是独立成纯函数模块 | 端到端用例：工具结果文本 == `serializeToolResult(result).text`，且 `extractViewLinks(该文本)` 能抽到 `viewUrl`（回归本次 bug） |
+| **TR-51** | **被跳过的块 MUST 可观测**：`serializeToolResult` 不认识的块类型（`audio` / `resource_link` / 内嵌 resource，以及 `text` 块但 `text` 非字符串）MUST 记一条结构化 `warn`（`event: 'mcp.result.block_unsupported'`，字段含 `service` / `tool` / `block_type`）；MUST NOT 静默丢弃（宪章原则九）。缺日志落点时不扫描、不告警 | 单测：`text` 与不支持块混排时 text 保留、被跳过块逐个上报（字段断言）；image 块**不**产生告警 |
+| **TR-52** | **历史记录回填 MUST 是一次性、原子、幂等、可干跑**：旧记录（信封格式）的 `view_links` MAY 由 `scripts/backfill-view-links.ts` 回填——默认干跑、`--apply` 才写；写盘 MUST 走"临时文件 + 原子改名"，失败保持原文件不变；已有 `view_links` 的行 MUST 不动；判据 MUST 复用运行时实现（`unwrapMcpEnvelopeText` + `extractViewLinks`），**MUST NOT** 在运行时链路里加"解信封"分支（避免第二套抽取口径）；失败 MUST 以非零退出码结束 | 干跑逐条列出将改动项；`--apply` 后重跑为 0 条待回填（幂等）；无 `.tmp` 残留；回填行其余字段与其余行逐字节不变 |
+
+**明确不做**（本次）：
+
+- **不把 MCP 的 `image` 块原样交给引擎**：`AgentToolResult.content` 支持 `ImageContent`，但会改变模型侧语义、跨 provider 有风险、token 计量也变；本次沿用"占位"口径（与 `serializeToolResult` 既有行为一致）。要"让模型真看图"另立增量；
+- **不改内置工具与 HITL 拒绝的结果形状**：`builtin-tools.ts` / `tool-intercept.ts` 本就是纯文本，一个字段都不动；
+- **不给 `AgentToolResult.details` 新增用途**：平台不消费它，落盘只取 `content[].text`（不造第二份真相）；
+- **不改接口与前端**：`tool_calls[].content` 的**字段与类型**不变，只是其**内容口径**回归"服务正文"；前端 `ProducedJsonView` / `MessageViewLinks` 零改动。
+
 ## 5. 数据模型
 
 ### 5.1 `threads/{thread_id}/tool-events.jsonl`
@@ -203,6 +229,7 @@
 ```
 
 - `view_links`（2026-10-10，`TR-44`/`TR-45`）：结果正文里 `viewUrl`（+ 同层可选 `viewUrlName`）抽出的 **sidecar**，值是服务给的**原值**（未拼前缀、未归一化）。它与正文**分离**：所以上面这行正文已外置、`inline_content` 缺席，入口仍然可用；也不进回灌预算。
+- `inline_content` 的口径（2026-10-12，`TR-49`）：它是 `serializeToolResult()` 的输出——MCP 工具即**服务返回的 `content` 文本本身**（**不是**整个 `CallToolResult` 的信封）；因此结果里的业务字段（如 `viewUrl`）在第一层就能被抽取与结构化展示。改动前后的差异见 §7.4。
 
 ### 5.2 外置正文
 
@@ -300,6 +327,19 @@
 - **前端类型**：`api/types.ts` **由"不动"改为新增** `ViewLink` 与 `ToolCallRecord.view_links?`（**两侧同批**，宪章原则七）；
 - **跨侧文档**：`异步MCP服务接入约定.md` §4.7 同批更新（新增 `viewUrlName` 名称字段约定 + 平台"搬运"行为说明 + 同步链路的下发语义）。
 
+### 7.4 修订记录（2026-10-12）：MCP 工具结果文本口径
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| —（原实现无规格条目） | 适配器把**整个** MCP `CallToolResult` 用 `JSON.stringify` 塞进一个 text 块 | **新增** §4.9：`TR-49`~`TR-52`（结果文本取服务正文 / 唯一实现 / 被跳过块可观测 / 历史回填一次性原子幂等） | 业务正文成了"字符串里的 JSON"，`viewUrl` 抽不到——同步侧视图入口（§4.8）整条链路对该形状失效；且 `image` 块 base64 随信封落盘 |
+| §5.1 记录行 `inline_content` | 描述为"已序列化的结果文本"（MCP 工具实为信封） | **明确**：MCP 工具即**服务返回的 `content` 文本本身**（`serializeToolResult()` 的输出） | 把口径写进规格；删掉那层多余编码 |
+| §4.8 `TR-44`（抽取输入） | "结果文本里字段名为 `viewUrl` 的字符串值" | **不变**：`view-links.ts` **零改动**；本次只修**上游喂给它的文本** | 抽取器本身无缺陷（只递归对象/数组是刻意边界，见 §4.8 头）；在抽取器里"解字符串"会引入第二套解析规则与第二个漂移点 |
+| §8 宪章落实 · 八（门禁） | 后端门禁列有"类型检查"，但 `package.json` **缺** `typecheck` 脚本 | **补齐**：`agent-backend/package.json` 新增 `"typecheck": "tsc --noEmit"` | 宪章「开发工作流与质量门禁」：脚本缺失时 MUST 先补齐，MUST NOT 以"没有脚本"为由跳过，并在规格中登记 |
+
+**接口与数据零变更**：`tool_calls[].content` / `view_links` 的字段、类型、端点与 SSE 全部不动，故 `contracts/` 与前端 `api/types.ts` **无改动**；本次只改**该字段的内容口径**，外加一份历史落盘数据的**一次性回填**（`TR-52`）。
+
+**跨侧文档**：`异步MCP服务接入约定.md` §4.7 同批追加"平台侧口径修正（服务写法不变）"说明。
+
 ## 8. 宪章符合性
 
 | 原则 | 落实 |
@@ -351,6 +391,19 @@
 | 八（简单可控） | 门禁仍是单条入口：后端 `npm run test:coverage`；前端 `npm run lint / typecheck / test:coverage / build` |
 | 九（优雅降级与可观测） | 抽取失败一律 `undefined`：**不写字段、不抛错、不打日志**（表达"没有可识别的视图链接"，不是"出错了"）；落盘行的坏结构经白名单校验后丢弃；值形态非法由前端丢弃且**不产生入口**（绝不产生"点不开的链接"）；"服务没给名字"与"名称脏"两种情形都退化为**显示地址**（信息不缺失，仅少了一个更友好的称呼） |
 
+**2026-10-12 增量（§4.9 MCP 结果文本口径）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | **先**回写本规格（§4.9 `TR-49`~`TR-52` / §5.1 口径 / §7.4 修订记录 / §8 / §9.4）与 [plan.md](./plan.md) §13 / [tasks.md](./tasks.md)，**再**改代码；跨侧文档 `异步MCP服务接入约定.md` §4.7 同批追加 |
+| 二（模块化，≤500 行） | 新增纯函数模块 `agent-backend/src/infra/mcp/mcp-result-text.ts`（137 行，单一职责：形状分发 + 被跳过块上报 + 历史信封解包）；文本生成规则仍**只有一处实现**（`domain/tool-result.ts` 的 `serializeToolResult`）；`mcp-tool-adapter.ts` 为**既有超限文件**（532 行，在 [tasks.md](./tasks.md) 已登记拆件），本次仅净 +3 行（1 行 import + 2 行接线）、新逻辑不堆进去 |
+| 三（测试完备） | 新增同名测试 `tests/unit/mcp-result-text.spec.ts`（17 例：形状分发 / JSON 兜底 / 上报 / 信封解包 / **适配器端到端回归**——`viewUrl` 可抽出）；新模块登记进 `vitest.config.ts` 模块阈值清单（80%）；无端点变更故无缺集成测试 |
+| 六（依赖治理） | 零新增依赖（复用 `pino` 类型与既有 `serializeToolResult`） |
+| 七（接口契约两侧同改） | **无契约变更**：字段与类型不动，前端零改动；跨侧文档增量已在同批落盘 |
+| 八（简单可控） | 补齐后端缺失的 `typecheck` 门禁脚本（`tsc --noEmit`），四侧门禁口径对齐；回填脚本**默认干跑**、`--apply` 才写、失败非零退出码 |
+| 九（优雅降级与可观测） | 降级**用户可感知**：不支持的块在结果文本里以 `[不支持的块类型 X]` 显式占位，不假装正常；同时记结构化 `warn`（`mcp.result.block_unsupported`，含 service/tool/block_type），不静默吞错；`view-links.ts` 的"返回 `undefined` 不算异常"判定原样保留 |
+| 五（数据一致性） | 回填写盘走"临时文件 + 原子改名"，失败保持原文件不变；只改 `view_links` 一个字段，未改动行逐字节原样；重复执行幂等（已有字段的行不动） |
+
 ## 9. 验收清单
 
 - [x] 刷新页面后，历史消息展示工具卡片（内联内容可直接展开）
@@ -398,6 +451,37 @@
 - [ ] `npm run lint` / `npm run typecheck` 全绿——**仍卡在存量问题上**（同上，沿用 T015 口径；本次改动文件单独检查为 0 问题）
 
 > 附：`docs/viewurl-chat-demo.html`（1093 行）是本次为确认"入口行落点与观感"而做的**独立静态演示页**（双击即开、不接任何接口、不参与构建与门禁），不适用源码 ≤500 行的硬门禁；其中字段名用的是设计期的 `view_urls`，与落地字段 `view_links` 不一致，**以本规格为准**。
+
+### 9.4 验收清单（2026-10-12 增量：MCP 工具结果文本口径）
+
+**功能（`TR-49`~`TR-51`）**
+
+- [x] 对象结果（`{content:[{type:'text',text}]}`）→ 结果文本 == 服务正文 JSON 本身：**不含 `isError`、不含被转义的内层引号**（适配器端到端断言）
+- [x] 同一份结果文本交给 `extractViewLinks()` → 抽出 `viewUrl`（**回归本次 bug**：`hd-algorithm__hd_algorithm_input_parser` 场景单测化）
+- [x] 多块 text 用 `\n` 拼接；`image` 块 → `[图片 mime ~体积]` 占位，**base64 不出现在结果文本里**
+- [x] 空 `content` / `content` 非数组 / 非 content 对象 → JSON 兜底（不丢信息）
+- [x] 字符串结果 → 原样返回（旧行为不变，`mcp-tool-adapter` 既有用例全绿）
+- [x] `audio` / `resource_link` / 非字符串 text 块 → 记结构化 `warn`（`event: 'mcp.result.block_unsupported'`，含 `service` / `tool` / `block_type`）；无日志落点时不扫描、不告警
+- [x] 文本生成规则**只有一处实现**：`mcp-result-text.ts` 不含任何拼块 / 占位 / 兜底逻辑（全部委托 `serializeToolResult`）
+
+**历史回填（`TR-52`）**
+
+- [x] 干跑（默认）：逐条列出将改动项，**不写盘**
+- [x] `--apply`：本机 `.opt-agent` 命中 **1 行**（`b5aa7eba…` / `call_00_9kG2Qz6BGaXxg8KJod4u1418`）并原子写回
+- [x] 重跑 → 待回填 **0 行**、已有 `view_links` **1 行**（幂等）
+- [x] 无 `.tmp` 残留；该文件总行数不变，未命中行逐字节原样
+- [x] 根目录不存在时**非零退出码**结束
+
+**门禁（宪章原则八 + 硬门禁）**
+
+- [x] `npm run typecheck`（**新增脚本**，`tsc --noEmit`）/ `npm run lint` / `npm run build` 三者退出码 **0**
+- [x] 后端测试 **40 文件 / 514 用例全绿**（`npm run test:all`：单测 + 端点集成）
+- [x] 覆盖率：新模块 `src/infra/mcp/mcp-result-text.ts` = **95.34 / 86.11 / 100 / 100**（≥80% 阈值）；`src/domain/view-links.ts` = 100 / 97.91 / 100 / 100（**未变**）；全局地板 67.62 / 63.2 / 67.41 / 69.37，**未下调**
+- [x] 单文件 ≤500 行：本增量新增最大 250 行（测试）/ 199 行（脚本）/ 137 行（模块）；`src/infra/mcp/mcp-tool-adapter.ts` 532 行属**既有超限**（本次仅 +3 行接线，未借机重构）
+- [x] **零新增依赖**；`package.json` 仅新增 `typecheck` 脚本
+- [x] 前端**零改动**，但仍跑一遍回归确认不破坏既有功能：`frontend/npm run test` **43 文件 / 562 用例全绿**
+- [x] 真实结果端到端复核：用本次实踩的 `hd-algorithm__hd_algorithm_input_parser` 返回值（信封形状）跑修复后实现 → 结果文本 = 业务 JSON，`extractViewLinks()` 抽出 `/datapage/production-line-electricity?…`
+- [x] 前端、`contracts/`、端点、SSE、`api/types.ts` 零改动
 
 ## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
 

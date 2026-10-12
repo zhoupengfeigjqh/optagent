@@ -12,7 +12,7 @@ description: "实施计划：对话运行时 · 视图入口（2026-10-10 两个
 
 1. 宪章**原则一**要求"规范 → 计划 → 任务"三件套；
 2. 宪章**原则三 / 九**与「治理 § 例外」要求把复杂度与平台差异风险登记在本文件的 Complexity Tracking；
-3. 宪章「同步影响报告 § 新增待办（2.0.2）」规定：`src/api/**` 与 `src/composables/**` 中尚无测试的模块，"其补测顺序与范围 MUST 在下一个特性的 `plan.md` 中给出结论"——本文件 §4 给出该结论。
+3. 宪章「同步影响报告 § 仍生效的待办与口径」第 1 项（存量补测待办，原 2.0.2 登记）规定：`src/api/**` 与 `src/composables/**` 中尚无测试的模块，"其补测顺序与范围 MUST 在下一个特性的 `plan.md` 中给出结论"——本文件 §4 给出该结论。
 
 ## 1. 技术方案
 
@@ -169,3 +169,58 @@ npm run lint && npm run typecheck && npm run test:coverage && npm run build
 ## 12. 验收
 
 见 [spec.md](./spec.md) §9.3；任务与勾选状态见 [tasks.md](./tasks.md)。
+
+---
+
+# 计划：MCP 工具结果文本口径修正（2026-10-12 增量）
+
+**Input**: [spec.md](./spec.md) §4.9（`TR-49`~`TR-52`）、§5.1、§7.4、§9.4
+
+## 13. 技术方案
+
+**一句话**：把 MCP 工具结果的**文本口径**从上（适配器）改对——文本取"服务返回的 `content` 文本"，而**不是**整个 `CallToolResult` 的序列化信封；文本生成规则保持**只有一处实现**（`serializeToolResult`），新增逻辑收敛到一个纯函数模块。
+
+**为什么必须在上游改**（而不是在抽取器里"再解析一次字符串"）：本次的三个症状同源——
+① 回答尾部没有入口行（`extractViewLinks` 抽不到 `viewUrl`）；
+② 工具卡片"结构化查看"只显示一个信封；
+③ `image` 块 base64 随信封进入结果文本（绕过 `serializeToolResult` 的占位保护）。
+只改抽取器只能治①，且会在"只递归对象/数组"的窄边界上开一个口子（第二套解析规则）。
+
+### 13.1 改动清单
+
+| # | 文件 | 性质 | 行数 |
+|---|---|---|---|
+| 1 | `agent-backend/src/infra/mcp/mcp-result-text.ts` | 新增：`mcpResultText()`（形状分发 + 被跳过块上报）、`unwrapMcpEnvelopeText()`（历史信封解包） | 137 |
+| 2 | `agent-backend/src/infra/mcp/mcp-tool-adapter.ts` | 改动：成功分支接线（`mcpResultText(result, { logger, service, tool })`），删除 `JSON.stringify(result)` | 532（**既有超限**，见 §13.2） |
+| 3 | `agent-backend/src/domain/tool-result.ts` | 改动：**注释**明确它是"模型可见 + 落盘"的唯一实现（无行为变化） | 168 |
+| 4 | `agent-backend/tests/unit/mcp-result-text.spec.ts` | 新增：17 例（形状分发 / JSON 兜底 / 上报 / 信封解包 / 适配器端到端） | 250 |
+| 5 | `agent-backend/scripts/backfill-view-links.ts` | 新增：一次性回填（默认干跑 + 原子改名 + 幂等 + 非零退出码） | 199 |
+| 6 | `agent-backend/vitest.config.ts` | 改动：`src/infra/mcp/mcp-result-text.ts` 登记进 80% 模块阈值清单 | — |
+| 7 | `agent-backend/package.json` | 改动：补 `"typecheck": "tsc --noEmit"`（宪章八：脚本缺失 MUST 补齐并登记） | — |
+| 8 | `specs/002-conversation-runtime/{spec,plan,tasks}.md`、`异步MCP服务接入约定.md` | 改动：规格、计划、任务与跨侧文档 | — |
+
+**零变更**：`frontend`（全部）、`admin-backend` / `admin-frontend`、`api/types.ts`、`GET /api/threads/{id}`、`GET /api/threads/{id}/tool-calls/{call_id}`、SSE 事件、`contracts/`、两侧依赖（**零新增**）。
+
+## 14. Complexity Tracking（本增量）
+
+| 项 | 内容 |
+|---|---|
+| 取舍：在**上游**（结果文本口径）修，而不是在抽取器里再解析字符串 | 一次修好三个同源症状；`view-links.ts` 保持"只递归对象/数组"的窄边界与既有限制登记（§4.8 `TR-48`）不变 |
+| 取舍：文本规则复用 `serializeToolResult`，新模块只做形状分发与上报 | 宪章原则二"同一职责只有一处实现"：模型看到的与落盘的**结构上同一份**，不是靠约定保持同步 |
+| 取舍：被跳过的块 → 显式占位文本 + 结构化 warn | 原则九"降级不掩盖问题"：`audio` / `resource_link` / 内嵌 resource 会被跳过（与既有"不落 base64"同一取舍），但必须留下可查线索 |
+| 取舍：历史回填走**一次性脚本**，不在运行时加兼容分支 | 运行时再加"解信封"＝第二套抽取口径（前端改规则后与记录里的老值漂移）；脚本幂等、原子、可干跑，且复用运行时同一实现 |
+| **被否决**：透传 MCP 的 `content` 块数组（含 `ImageContent`）给引擎 | 会改变模型侧语义（真图片 vs 占位文本）、跨 provider 有风险、token 计量与既有 usage 统计口径都要重估——另立增量 |
+| **被否决**：只在前端"解一层"（`ProducedJsonView` 里再 parse 字符串） | 只解决"看得见"，解决不了 sidecar 抽取（入口行仍缺）与 base64 落盘；且把解析责任放进展示层，与 §4.7"平台不解析"的边界冲突 |
+| **被否决**：改 `tool-events.ts` 的抽取入口去解信封 | 该入口服务所有工具（含内置工具），为一个特定 provider 的形状加分支属越权耦合 |
+| 已知限制（登记） | ① 结果文本 >256K 字符仍不抽取（与前端结构化展示同判据，既有）；② 非 text/image 块只留占位（本次不做真图/真音频投递）；③ 历史回填只覆盖指定 `--root` 的数据，其它环境各跑一次 |
+| 既有技术债（**不追溯**，仅登记） | `mcp-tool-adapter.ts` 532 行 > 500 行门禁：属**既有超限**，拆件任务原已在 [tasks.md](./tasks.md) 登记；本次把新逻辑放进新模块，未借改动之机做拆件重构（宪章「不追溯」条款） |
+
+## 15. 覆盖率与平台差异（本增量）
+
+- **覆盖率**：`src/infra/mcp/mcp-result-text.ts` 登记进 `vitest.config.ts` 模块阈值清单（80%）；全局地板**未下调**。
+- **平台差异：有（仅回填脚本）**——脚本要遍历 `users/{uid}/user-data/threads/*/tool-events.jsonl`，而仓库路径与用户数据路径可能含**非 ASCII 字符**（本机为 `d:/公司项目/智能体/optagent`），且 Windows 与交付目标（Linux 容器）的**路径大小写敏感性**不同。对策：① 全程 `node:path` 拼接、不做字符串比较；② 目录项按 `readdirSync` 取到的**实际名字**拼接，不猜测大小写；③ 根目录从 `--root` / `OPT_AGENT_ROOT` 解析（与 `src/config.ts` 同口径）；④ 写盘"临时文件 + 原子改名"，失败保持原文件不变。**该脚本不参与运行时**，交付目标不依赖它。
+- **运行时改动无平台差异**：字符串/块遍历与 JSON 序列化在两端行为一致。
+
+## 16. 验收
+
+见 [spec.md](./spec.md) §9.4；任务与勾选状态见 [tasks.md](./tasks.md)。

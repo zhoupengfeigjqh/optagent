@@ -32,6 +32,10 @@ export interface SerializedToolResult {
 /**
  * 把工具执行结果拍平成文本。
  *
+ * **结果文本的唯一实现**（2026-10-12）：模型看到的那份（MCP 适配器出参，见
+ * `infra/mcp/mcp-result-text.ts`）与落盘的那份（`tool-events`）都出自这里，
+ * 因此"模型看到的 == 记录里的"是本函数的**结构保证**，不是约定。
+ *
  * - `string` → 原样
  * - `{ content: [{type:'text',text}, {type:'image',mimeType,data}] }` → 文本块拼接，
  *   图片块只留 `[图片 mime ~体积]` 占位（base64 落盘会膨胀且无检索价值）

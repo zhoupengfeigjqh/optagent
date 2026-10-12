@@ -30,6 +30,7 @@ import {
 } from './async-result-url.js';
 import type { McpManager, McpToolInfo } from './mcp-manager.js';
 import { classifyMcpError, McpUnavailableError } from './mcp-manager.js';
+import { mcpResultText } from './mcp-result-text.js';
 import { exposeSchema, hideSchemaPaths, type InputSchemaLike } from './mcp-schema-view.js';
 
 /** 文件参数转换依赖（按 server 声明启用；agent-factory 按当前用户注入） */
@@ -175,7 +176,9 @@ export function mcpToolsAsAgentTools(
             { event: 'mcp.tool.call', scope: 'run', service: serverName, tool: t.name, ok: true },
             `MCP 工具调用成功：${serverName}.${t.name}`,
           );
-          const text = typeof result === 'string' ? result : JSON.stringify(result);
+          // 结果文本口径（2026-10-12）：逐块挑选，**不再**把整个 CallToolResult 序列化成
+          // 信封——否则业务字段（如 viewUrl）被压进字符串，抽取与结构化展示都够不着（见 mcp-result-text.ts）
+          const text = mcpResultText(result, { logger, service: serverName, tool: t.name });
           return { content: [{ type: 'text', text }], details: {} };
         } catch (err) {
           // 真的发起了调用但失败：计入失败次数（含"服务不可用"）

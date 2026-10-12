@@ -144,6 +144,13 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-10-12：MCP 工具结果文本口径（逐块挑选，取代"整体序列化信封"，TR-49）
+        'src/infra/mcp/mcp-result-text.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

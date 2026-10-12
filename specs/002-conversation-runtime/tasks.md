@@ -162,4 +162,53 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T050 `README.md` §6（把 MCP 服务接入数字人）末尾补一段面向**服务作者**的说明：**需要链接跳转时，请在工具返回里加上 `viewUrl` / `viewUrlName` 字段**（含前提"正文须是合法 JSON 对象/数组"与指向 `异步MCP服务接入约定.md` §4.7 / `spec.md` §4.8 的依据链接）
 - [x] T051 `README.md` 新增顶层章节 **`## MCP 服务配置详解`**（置于「功能模块说明」之后、「环境要求」之前）：权威源与流转（`mcp-services.json` → 设计态只存服务名 → 物化 `MCP.json`）／字段总表（12 字段的必填、取值域、判据）／各字段要点（`transport` 无状态、`headers` 掩码与全量替换、`allowed_tools` 创建后锁定、`file_args` 两种模式与路径语法、`confirmation` 写操作应 `always`、`rules_fields` 不改变 HITL、`async_tools`）／`MCP.json` 结构示例（非空才写）／运行端默认参数（前缀、白名单、状态机、退避 5-15-30-60-60s + 保活 120s、探针 60s、超时 60s）／平台接口与错误码表／常见故障对照；并在 §6 末尾加双向指引
 
+---
+
+# Tasks: 对话运行时 · MCP 工具结果文本口径（2026-10-12 增量）
+
+**Input**: [spec.md](./spec.md) §4.9（`TR-49`~`TR-52`）、§5.1、§7.4、§9.4；[plan.md](./plan.md) §13~§16
+
+**范围**：**MCP 工具成功结果的结果文本口径**（模型可见 + 落盘）——业务正文不再被整体序列化进信封；含 `viewUrl` 抽取失效的历史记录**一次性回填**与一个门禁脚本补齐。**前端、契约、端点、SSE 零改动。**
+
+**Prerequisites**: [spec.md](./spec.md) 与 [plan.md](./plan.md)（**续写在同一文件**的 §13~§16，理由：与 §4.8 同源——同一份 `viewUrl` 抽取链路的上游）。
+
+**Tests**: 必须包含测试任务（宪章原则三）。测试全部在**宿主机本地**执行，容器不参与。
+
+## 设计取舍（对应宪章「治理 § 例外」的登记口径；**均非原则违反**）
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 在**上游**（适配器结果文本口径）修，不在抽取器里"再解析一次字符串" | 三个症状（入口行缺失 / 结构化视图只见信封 / image 块 base64 落盘）同源，上游修一次全好；`view-links.ts` 保持"只递归对象/数组"的窄边界 | 抽取器加"解字符串"分支（第二套解析规则 + 第二个漂移点） |
+| 文本规则复用 `serializeToolResult`，新模块只做形状分发与上报 | 原则二"同一职责只有一处实现"：模型看到的与落盘的**结构上同一份** | 新模块自己拼块文本（image 占位等规则出现两份实现） |
+| 被跳过的块 → 显式占位文本 + 结构化 `warn` | 原则九"降级不掩盖问题" | 静默 `continue`（丢了块没人知道） |
+| 历史回填走**一次性脚本**（默认干跑 + 原子改名 + 幂等） | 新记录不再有信封，回填只服务存量数据 | 运行时加"解信封"兼容分支（第二套口径，且对新记录无用） |
+| 新逻辑独立成 `infra/mcp/mcp-result-text.ts` | `mcp-tool-adapter.ts` 532 行属**既有超限**（登记在案），不再加重 | 把逻辑塞进适配器（继续推高既有超限文件） |
+
+## Phase 1: 规格（宪章原则一：先规格后代码）
+
+- [x] T052 回写 `spec.md`：新增 §4.9（`TR-49`~`TR-52` + 明确不做）、§5.1 `inline_content` 口径、§7.4 修订记录、§8 宪章落实增量、§9.4 验收清单
+- [x] T053 回写 `异步MCP服务接入约定.md` §4.7（追加"平台侧口径修正，服务写法不变"）+ `plan.md` 续写 §13~§16
+- [x] T054 回写本文件本次增量任务
+
+## Phase 2: 后端实现
+
+- [x] T055 新增 `agent-backend/src/infra/mcp/mcp-result-text.ts`（137 行）：`mcpResultText()`（字符串原样；其余委托 `serializeToolResult()`；被跳过块上报）、`unwrapMcpEnvelopeText()`（历史信封解包，判据收窄为"`content` 数组 + 至少一块字符串 text"）、`UnsupportedBlockLog`
+- [x] T056 `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：成功分支接线 `mcpResultText(result, { logger, service, tool })`，删除 `JSON.stringify(result)`（**净 +3 行**：1 行 import + 2 行接线）
+- [x] T057 `agent-backend/src/domain/tool-result.ts`：注释明确它是"模型可见 + 落盘"的**唯一实现**（无行为变化）
+- [x] T058 新增 `agent-backend/scripts/backfill-view-links.ts`（199 行）：干跑默认 / `--apply` 写盘 / 临时文件 + 原子改名 / 幂等 / 复用运行时判据 / 失败非零退出码
+
+## Phase 3: 测试（宪章原则三）
+
+- [x] T059 [P] 新增 `agent-backend/tests/unit/mcp-result-text.spec.ts`（250 行 / **17 例**）：形状分发与逐块挑选（5）、JSON 兜底（2）、被跳过块上报（4）、历史信封解包（3）、**适配器接线端到端**（3：对象结果 → `viewUrl` 可抽出 / image base64 不入文本 / 不支持块记 warn）
+
+## Phase 4: 门禁与验收（宪章原则八 + hard gate）
+
+- [x] T060 `agent-backend/vitest.config.ts`：`src/infra/mcp/mcp-result-text.ts` 登记进模块覆盖率阈值清单（80%）
+- [x] T061 `agent-backend/package.json`：补 `"typecheck": "tsc --noEmit"`（宪章八：后端门禁脚本缺失 MUST 补齐并在规格中登记）
+- [x] T062 测试与覆盖率：后端 **40 文件 / 514 用例全绿**（`npm run test:all`）；`mcp-result-text.ts` 95.34 / 86.11 / 100 / 100；`view-links.ts` 100 / 97.91 / 100 / 100（**未变**）；全局地板 67.62 / 63.2 / 67.41 / 69.37，**未下调**；前端**零改动**仍跑一遍回归：**43 文件 / 562 用例全绿**（`frontend/npm run test`，退出码 0）
+- [x] T063 静态检查与构建：`npm run typecheck` / `npm run lint` / `npm run build` **退出码均 0**（`scripts/` 在 lint 覆盖内）
+- [x] T064 硬门禁：本增量新增文件最大 **250 行**（测试）／199 行（脚本）／137 行（模块），均 ≤500；`mcp-tool-adapter.ts` 532 行属**既有超限**（原 529，本次 +3 行接线，未借机重构）；**零新增依赖**（后端 `package.json` 仅加脚本）
+- [x] T065 历史回填执行（本机 `.opt-agent`）：干跑 → `--apply` 命中 **1 行**（`b5aa7eba…` / `call_00_9kG2Qz6BGaXxg8KJod4u1418`，即 `hd-algorithm__hd_algorithm_input_parser` 那条）；重跑待回填 **0** 行（幂等）；无 `.tmp` 残留；文件总行数不变、未命中行逐字节原样
+- [x] T066 已知限制与存量缺口登记：① 结果文本 >256K 字符仍不抽取（与前端结构化展示同判据，既有）；② 非 text/image 块只留占位（不做真图 / 真音频投递）；③ 回填只覆盖指定 `--root` 的数据；④ `src/domain/tool-result.ts` 覆盖率 62.5 / 48.75 / 81.81 / 65.21（<80%）——本次仅**注释**改动，按「不追溯」不纳入模块清单，补齐属独立任务
+
 **观察项（登记，不追溯）**：`frontend/src/api/types.ts` 489 行、`agent-backend/src/domain/tool-events.ts` 436 行、`frontend/src/components/chat/ToolCallList.vue` 428 行、`frontend/src/components/chat/ToolCallList.spec.ts` 436 行——均在 ≤500 内但已偏高，后续再有增量时**触发即拆**（不为存量发起专项）。

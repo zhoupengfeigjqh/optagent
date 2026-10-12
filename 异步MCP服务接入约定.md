@@ -249,6 +249,12 @@ Content-Type: application/json; charset=utf-8
 > 渲染为链接（文本 = 值本身）。两条链路共用同一份值归一化实现。
 > 规格依据：`specs/002-conversation-runtime/spec.md` §4.7（`TR-40`~`TR-43`，字段判定与值归一化）
 > 与 §4.8（`TR-44`~`TR-48`，sidecar 抽取、下发与入口行）。
+>
+> **2026-10-12 补充（平台侧口径修正，服务的写法不变）**：平台下发给模型与落盘的结果文本 = 服务返回的
+> **`content` 文本本身**（不再把整个 MCP 结果对象整体序列化成"字符串里的 JSON"），因此正文第一层的
+> `viewUrl` 即可被抽取；`type:'image'` 块转 `[图片 mime ~体积]` 占位（base64 不入结果文本）。
+> 服务侧无需任何改动——返回 dict / list 或 JSON 文本都仍然可以。
+> 平台侧实现与验收见 `specs/002-conversation-runtime/spec.md` §4.9（`TR-49`~`TR-52`）。
 
 ---
 
