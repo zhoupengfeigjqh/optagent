@@ -38,7 +38,7 @@
           class="relative overflow-hidden rounded-lg bg-white px-5 py-4"
         >
           <span class="absolute inset-y-0 left-0 w-1" :style="{backgroundColor: card.color}"></span>
-          <div class="text-sm text-gray-500">{{ card.label }}</div>
+          <div class="text-sm text-gray-500">{{ card.title }}</div>
           <div class="mt-1 text-2xl font-bold leading-8">{{ metricValue(card.key) }}</div>
           <div class="mt-0.5 text-xs text-gray-400">{{ card.sub }}</div>
         </div>
@@ -56,7 +56,7 @@
         <div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-gray-600">
           <span v-for="item in legendItems" :key="item.key" class="flex items-center gap-1">
             <span class="inline-block h-3 w-3 rounded-sm" :style="{backgroundColor: item.color}"></span>
-            {{ item.label }}
+            {{ item.title }}
           </span>
         </div>
 
