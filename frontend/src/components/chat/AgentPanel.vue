@@ -2,8 +2,8 @@
 /**
  * 数字人明细与切换面板（T066，FR-035 / FR-036 / FR-037）
  *
- * 基于 ant-design-vue 的 `a-modal`：焦点陷阱与 Esc 关闭由 Modal 提供
- * （旧的 `BaseDialog` 实现留在模板注释里备查，勿据此判断当前实现）。
+ * 基于 `BaseDialog`（原生 `<dialog>`）：与铃铛「后台记录」、HITL 参数确认同一套弹窗体系，
+ * 视觉与居中口径一致；焦点陷阱与 Esc 关闭由原生 `dialog` 提供（2026-10-13 由 `a-modal` 改回）。
  * - 详情区默认展示**当前选中**数字人；点击候选名称可**只读预览**其他数字人
  *   （描述/技能/已启用工具/MCP 清单取自 `candidates`，不额外发请求、不触发切换）
  * - 预览态展示「预览中」标识与「切换到此数字人」按钮；预览是只读操作，**不受**会话进行中限制
@@ -16,6 +16,7 @@ import { computed, ref, watch } from 'vue'
 
 import type { DigitalHuman } from '../../api/types'
 import BaseButton from '../common/BaseButton.vue'
+import BaseDialog from '../common/BaseDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -42,14 +43,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: []
   switch: [agentName: string]
-  /** `a-modal` 的 `v-model:open` 回写（面板关闭时由 Modal 触发） */
-  'update:open': [value: boolean]
 }>()
-
-const openValue = computed({
-  get: () => props.open,
-  set: (val) => emit('update:open', val)
-})
 
 /** 预览中的数字人名称；`null` = 详情区展示当前选中 */
 const previewName = ref<string | null>(null)
@@ -122,8 +116,7 @@ function onSwitch(name: string): void {
 </script>
 
 <template>
-  <!-- <BaseDialog class="agent-panel" :open="open" title="数字人" @close="emit('close')"> -->
-    <a-modal v-model:open="openValue" title="数字人" @cancel="emit('close')" :width="600" :footer="null">
+  <BaseDialog class="agent-panel" :open="open" title="数字人" @close="emit('close')">
     <section class="agent-panel__detail">
       <p v-if="displayed === null" class="agent-panel__hint">尚未选择数字人</p>
 
@@ -207,9 +200,7 @@ function onSwitch(name: string): void {
       </ul>
       <p v-else class="agent-panel__hint">暂无可切换的数字人</p>
     </section>
-    </a-modal>
-
-  <!-- </BaseDialog> -->
+  </BaseDialog>
 </template>
 
 <style scoped>

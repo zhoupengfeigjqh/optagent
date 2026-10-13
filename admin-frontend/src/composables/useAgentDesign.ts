@@ -19,7 +19,12 @@ import type {
   SoulDesign,
 } from '../api/types'
 import { createAgent, getAgent, updateAgent } from '../api/agents'
-import { PREDEFINED_DATA_PREP_DIRS, emptyScenario, emptySoulDesign } from '../constants/agent-design'
+import {
+  PREDEFINED_DATA_PREP_DIRS,
+  SOUL_LIMITS,
+  emptyScenario,
+  emptySoulDesign,
+} from '../constants/agent-design'
 import { toErrorInfo } from '../utils/error-message'
 
 export interface AgentDesignDraft {
@@ -46,6 +51,12 @@ function cloneFields(
 function cloneSoul(soul: SoulDesign): SoulDesign {
   return {
     ...soul,
+    // 007：开关与其条数（同样是标量，本可由展开运算符带到）仍显式列出——
+    // **字段清单是这里的契约**，后来者加字段时对照它才不会漏
+    // （漏掉的字段在"复制数字人"路径上会整片丢失）
+    next_action_hints: soul.next_action_hints === true,
+    // 缺省兜底：接口应当恒有该键，旧存档万一没有也不至于让输入框显示 `undefined`
+    next_action_hints_count: soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault,
     capability_tags: [...soul.capability_tags],
     forbidden: [...soul.forbidden],
     starters: soul.starters.map((starter) => ({

@@ -17,7 +17,10 @@
  * - frontmatter 有头无尾、YAML 非法、字段类型不符 → 一律按"该项缺失"降级，
  *   **不抛错、不吞掉整篇配置**（配置损坏不应该让数字人不可用）。
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { agentDir } from './dirs.js';
 
 /**
  * frontmatter 定界：**只认文件首行**的 `---`，且**必须有闭合的 `---`**。
@@ -41,16 +44,47 @@ export interface SoulStarter {
   tools: SoulToolRef[];
 }
 
+/**
+ * 「下一步动作提示条数」的取值范围与缺省（frontmatter `next_action_hints_count`）。
+ *
+ * 与 `admin-backend` `SOUL_LIMITS.nextActionHintsMin / Max / Default` **MUST 同步**：
+ * 平台侧拒绝越界值，运行侧对坏值只做**收敛**（见 `readHintCount`）——
+ * 两侧共用同一组数字，才不会出现"平台存得下、运行读不懂"的断点。
+ */
+export const NEXT_ACTION_HINTS_MIN = 1;
+export const NEXT_ACTION_HINTS_MAX = 6;
+export const NEXT_ACTION_HINTS_DEFAULT = 3;
+
 /** 只给前台的展示/引导数据。 */
 export interface SoulMeta {
   intro: string;
   welcome: string;
   starters: SoulStarter[];
+  /**
+   * 007：是否开启「下一步动作提示」（frontmatter `next_action_hints`）。
+   *
+   * 与其它字段的关键差异：它是**功能开关**而非展示数据，故缺省口径是 `false`
+   * （fail-closed：写错类型就关闭功能，不会因为一个笔误让数字人额外发起模型调用）。
+   */
+  nextActionHints: boolean;
+  /**
+   * 007：开关开启时**每轮最多几条**提示（frontmatter `next_action_hints_count`）。
+   *
+   * 缺省 / 坏值一律收敛到 `NEXT_ACTION_HINTS_DEFAULT`（3）：条数只影响"多生成几条、
+   * 多花多少 token"，读不出来时按缺省走即可，不必像开关那样 fail-closed 到关闭。
+   */
+  nextActionHintsCount: number;
 }
 
 /** 空值工厂（每次返回新对象，避免调用方误改共享引用）。 */
 export function emptySoulMeta(): SoulMeta {
-  return { intro: '', welcome: '', starters: [] };
+  return {
+    intro: '',
+    welcome: '',
+    starters: [],
+    nextActionHints: false,
+    nextActionHintsCount: NEXT_ACTION_HINTS_DEFAULT,
+  };
 }
 
 /**
@@ -88,7 +122,62 @@ export function parseSoulMeta(raw: string): SoulMeta {
     intro: readText(record.intro),
     welcome: readText(record.welcome),
     starters: readStarters(record.starters),
+    // 007：非布尔一律 false（fail-closed，见 SoulMeta.nextActionHints）
+    nextActionHints: record.next_action_hints === true,
+    // 007：缺省 / 非整数 / 越界一律收敛到缺省（见 SoulMeta.nextActionHintsCount）
+    nextActionHintsCount: readHintCount(record.next_action_hints_count),
   };
+}
+
+/**
+ * 007：读取某数字人「是否开启下一步动作提示」。
+ *
+ * **fail-closed**：文件缺失、读取异常、YAML 非法、键缺失/非布尔 → 一律 `false`（并告警）。
+ * 理由：开关只影响"要不要多发一次模型调用"，任何不确定性都应当收敛到关——
+ * 宁可少给建议，也不因为配置读不出来就多做一次调用。
+ *
+ * 每次调用都读盘（SOUL.md 体积极小）：开关随部署整体覆盖，读一次缓存反而会
+ * 让"部署后不生效"这种问题变得难以解释。
+ */
+export function isNextActionsEnabled(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  logger?: { warn(msg: string): void },
+): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'), 'utf8');
+    return parseSoulMeta(raw).nextActionHints;
+  } catch (err) {
+    logger?.warn(
+      `读取数字人开关失败按关闭处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * 007：读取某数字人「每轮最多几条下一步动作提示」。
+ *
+ * 与 `isNextActionsEnabled` 的**失败口径刻意不同**：这里读不出来时返回**缺省 3**，
+ * 而不是 0——条数只是"生成几条"的上限，读不到就按缺省走（少给建议才是过度降级）；
+ * 只有开关才是非开即关的硬判据。
+ */
+export function nextActionHintsCount(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  logger?: { warn(msg: string): void },
+): number {
+  try {
+    const raw = fs.readFileSync(path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'), 'utf8');
+    return parseSoulMeta(raw).nextActionHintsCount;
+  } catch (err) {
+    logger?.warn(
+      `读取数字人提示条数失败按缺省 ${NEXT_ACTION_HINTS_DEFAULT} 处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return NEXT_ACTION_HINTS_DEFAULT;
+  }
 }
 
 /**
@@ -100,6 +189,26 @@ export function parseSoulMeta(raw: string): SoulMeta {
  */
 export function toolExposedName(tool: SoulToolRef): string {
   return tool.kind === 'builtin' ? tool.name : `${tool.service}__${tool.name}`;
+}
+
+/**
+ * `toolExposedName` 的**逆**：把模型看到的工具名还原成规范引用。
+ *
+ * 为什么要逆一次（007 实测发现）：工具清单只以**暴露名**给模型看，模型照抄时
+ * `kind` 基本靠猜——真实产物里 MCP 工具被写成 `{ kind: 'builtin', name: 'hd-algorithm__hd_algorithm_input_parser' }`。
+ * 这种"名字对、类型错"的引用今天不报错，但任何按 `kind` 解析的消费方都会找不到工具，
+ * 且 `tools` 与 `guidance` 不再同源（`guidance` 由暴露名拼出，是对的）。
+ *
+ * 判据只有命名规则（`{server}__{tool}`，见 `infra/mcp/mcp-tool-adapter.ts:120`）：
+ * 含 `__` 且两侧非空 → MCP；否则 → 内置。**与 `toolExposedName` 成对维护**，
+ * 两者互为往返（`soul.spec.ts` 用往返断言钉住，改任一侧都会红）。
+ */
+export function parseExposedName(exposed: string): SoulToolRef {
+  const name = exposed.trim();
+  const sep = name.indexOf('__');
+  // 无分隔符 / 任一侧为空 → 内置工具（内置工具名用 snake_case，不含 `__`）
+  if (sep <= 0 || sep >= name.length - 2) return { kind: 'builtin', name };
+  return { kind: 'mcp', service: name.slice(0, sep), name: name.slice(sep + 2) };
 }
 
 /**
@@ -118,6 +227,24 @@ export function buildStarterGuidance(tools: readonly SoulToolRef[]): string {
 
 function readText(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/**
+ * 提示条数：**收敛式**读取（与 `parseSoulMeta` 的其它容错字段同口径）。
+ *
+ * 平台侧（`normalizeSoulDesign`）是拒绝式——非法值根本存不下去；这里面对的是
+ * 磁盘上可能被人手改过的文件，收敛到缺省比抛错或取 0 都更符合"少给建议也不能多花 token"。
+ */
+function readHintCount(raw: unknown): number {
+  if (
+    typeof raw === 'number' &&
+    Number.isInteger(raw) &&
+    raw >= NEXT_ACTION_HINTS_MIN &&
+    raw <= NEXT_ACTION_HINTS_MAX
+  ) {
+    return raw;
+  }
+  return NEXT_ACTION_HINTS_DEFAULT;
 }
 
 function readStarters(raw: unknown): SoulStarter[] {

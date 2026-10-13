@@ -13,6 +13,7 @@ import { loadAgentConfig } from '../domain/agent-instance.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
+import { buildTailInstruction } from '../domain/next-actions.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
@@ -221,6 +222,16 @@ export class AgentInstanceFactory {
       }
     }
 
+    // 007：把"本轮模型真正能用的工具"回填给域层（轮末生成「下一步动作提示」要据此裁剪引用）。
+    // 放在工具装配**之后、降级判定之前**：直聊分支（tools 为空）同样回填空数组，
+    // 语义即"本轮模型没有任何工具"。
+    if (req.runtime) {
+      req.runtime.availableTools = tools.map((t) => ({
+        name: t.name,
+        description: t.description ?? '',
+      }));
+    }
+
     // 请求级模型覆盖（FR-023）：指定模型时按该 entry 构造临时 provider，
     // 不重建实例（实例共享 MCP/工具连接）；缺省用默认模型全局单例
     const llm = req.model
@@ -229,9 +240,18 @@ export class AgentInstanceFactory {
         : new PiAiLlmProvider(req.model)
       : this.deps.llm();
     // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
-    const systemPrompt = req.systemExtra
+    let systemPrompt = req.systemExtra
       ? `${inst.config.systemPrompt}\n\n${req.systemExtra}`
       : inst.config.systemPrompt;
+    // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
+    // 必须放在工具装配之后：指令里的工具目录取 `tools`（本轮模型真实可见的清单），
+    // 与轮末引用裁剪的判据同源；放在最末尾也让"输出格式要求"最贴近生成位置、最易被遵循。
+    if (req.nextActionsMax !== undefined) {
+      systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(
+        req.runtime?.availableTools ?? [],
+        req.nextActionsMax,
+      )}`;
+    }
     if (tools.length === 0 || !(llm instanceof PiAiLlmProvider)) {
       if (tools.length > 0) {
         logger.warn(

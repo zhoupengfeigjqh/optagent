@@ -6,6 +6,8 @@
  * ```markdown
  * ---                        ← frontmatter：只给聊天前台（展示与引导）
  * soul_version: 1
+ * next_action_hints: true    ← 仅开启时出现（007：运行期开关，不是给模型看的内容）
+ * next_action_hints_count: 3 ← 与开关同进同出：开启时每轮最多几条提示
  * intro: 角色简介
  * welcome: 首屏欢迎语
  * starters: [ { prompt, tools } ]
@@ -58,6 +60,25 @@ export interface SoulDesign {
   forbidden: string[];
   /** 补充说明：进提示词（可选） */
   prompt_extra: string;
+  /**
+   * 下一步动作提示开关（007，2026-10-12）：**运行期开关**，不是给模型看的内容。
+   *
+   * - **可选 + 缺省 `false`**：004 期存档的设计态文档没有这个键，读取时必须照常可用
+   *   （`isSoulDesign` 不把它算作判据），缺省即"关"，符合 fail-closed；
+   * - 物化时**仅在 `true` 时**写进 frontmatter（`renderSoulMd`）：关闭态产物与 007 之前
+   *   逐字一致，不给运行环境留下任何新键（"平台是唯一权威源、未搭配的不残留"）；
+   * - 它进 frontmatter 而不进正文：正文仍只装提示词，运行环境用 frontmatter 做功能开关
+   *   （见文件头"为什么这样切分"）。
+   */
+  next_action_hints?: boolean;
+  /**
+   * 下一步动作提示的**条数上限**（007，2026-10-12 补充）：开关开启时每轮最多生成几条。
+   *
+   * - **正整数，1~`SOUL_LIMITS.nextActionHintsMax`（6）**，缺省 `SOUL_LIMITS.nextActionHintsDefault`（3）；
+   * - 仅在开关开启时有意义（管理台里开关关闭时该输入框置灰），物化时**仅开关为 `true` 时**写键；
+   * - 与开关同一失败口径：缺省取默认值，非法值（小数 / 0 / 负数 / 越界 / 非数字）**拒绝**保存。
+   */
+  next_action_hints_count?: number;
 }
 
 /**
@@ -72,7 +93,7 @@ export const SOUL_LIMITS = {
   /** 首屏欢迎语字数 */
   welcome: 100,
   /** 单条问题内容字数 */
-  starterPrompt: 500,
+  starterPrompt: 150,
   /** 问题实例条数 */
   starters: 12,
   /** 单条问题实例可关联的工具数 */
@@ -81,6 +102,13 @@ export const SOUL_LIMITS = {
   mission: 4000,
   /** 补充说明字数 */
   promptExtra: 4000,
+  /**
+   * 下一步动作提示条数（007）：下限、上限与缺省。
+   * 开关关闭时**保留**管理员填写的数字（只是不物化进产物），再次打开即恢复，不必重填。
+   */
+  nextActionHintsMin: 1,
+  nextActionHintsMax: 6,
+  nextActionHintsDefault: 3,
   /** 能力标签 / 绝对禁止的条数 */
   listItems: 20,
   /** 绝对禁止单项字数 */
@@ -99,6 +127,11 @@ export function emptySoulDesign(): SoulDesign {
     capability_tags: [],
     forbidden: [],
     prompt_extra: '',
+    // 显式写 `false` 而不是省略：新建数字人默认关闭（007），
+    // 且前端 `emptySoulDesign()` 的"脏检查"按逐字段比较，两侧形态必须一致
+    next_action_hints: false,
+    // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与前端初值不等
+    next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
   };
 }
 
@@ -112,7 +145,14 @@ export function fromLegacySoul(text: string): SoulDesign {
   return { ...emptySoulDesign(), mission: text };
 }
 
-/** 是否已是结构化形态（用于读取期判断，避免对旧文档做无谓包装） */
+/**
+ * 是否已是结构化形态（用于读取期判断，避免对旧文档做无谓包装）。
+ *
+ * **判据只有 `mission` 是字符串**——007 新增的 `next_action_hints` 不参与判定：
+ * 004 期存档的文档没有该键，它们 MUST 继续被认作"已结构化"（否则会被当旧文本包装、
+ * 把整篇 JSON 塞进 `mission`）。该键的缺省补齐在读取归一化处做（`agent-design.ts`
+ * 的 `withSoulDefaults`）。
+ */
 export function isSoulDesign(raw: unknown): raw is SoulDesign {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return false;
   return typeof (raw as { mission?: unknown }).mission === 'string';
@@ -150,6 +190,10 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     capability_tags: readTextList(record.capability_tags, '能力标签', SOUL_LIMITS.capabilityTagLength),
     forbidden: readTextList(record.forbidden, '绝对禁止', SOUL_LIMITS.listItemLength),
     prompt_extra: readOptionalText(record.prompt_extra, '补充说明', SOUL_LIMITS.promptExtra),
+    // 007：键缺失 = 关（老表单不带这个键照常保存）；键在但类型不对 = 拒绝
+    next_action_hints: readBool(record.next_action_hints, '下一步动作提示开关'),
+    // 007：键缺失 = 缺省 3；非整数 / 越界 = 拒绝（不做 round / clamp：静默改数字最难排查）
+    next_action_hints_count: readPositiveInt(record.next_action_hints_count),
   };
 }
 
@@ -162,6 +206,13 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
  */
 export function renderSoulMd(soul: SoulDesign): string {
   const frontmatter: Record<string, unknown> = { soul_version: 1 };
+  // 007：**仅 `true` 时写**（`false` / 缺省都不写键）——关闭态的 SOUL.md 与 007 之前逐字一致，
+  // 运行环境也就不会读到"开关存在但为关"的中间形态（未搭配的内容不残留）。
+  // 条数紧随其后，**同样只在开启时写**：关闭态产物里连"条数"都不该出现
+  if (soul.next_action_hints === true) {
+    frontmatter.next_action_hints = true;
+    frontmatter.next_action_hints_count = soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault;
+  }
   if (soul.intro !== '') frontmatter.intro = soul.intro;
   if (soul.welcome !== '') frontmatter.welcome = soul.welcome;
   if (soul.starters.length > 0) {
@@ -189,6 +240,19 @@ export function renderSoulMd(soul: SoulDesign): string {
   return `---\n${yamlText}---\n\n${sections.join('\n\n')}\n`;
 }
 
+/**
+ * **读取期容错**取提示条数（007）。
+ *
+ * 与保存期的 `readPositiveInt`（拒绝式）刻意不同：读取的是**自己写下的**存档，
+ * 可能来自本字段引入之前（键缺失），也可能被人手改坏（越界 / 非整数）。
+ * 这里一律**收敛到合法值**——读盘不该因为一个坏数字让整个数字人打不开，
+ * 而"保存期拒绝"已经保证了新写入的值必然合法。
+ */
+export function readStoredHintCount(raw: unknown): number {
+  const { nextActionHintsMin: min, nextActionHintsMax: max, nextActionHintsDefault: fallback } = SOUL_LIMITS;
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= min && raw <= max ? raw : fallback;
+}
+
 /** 卡片"用途描述"：结构化后取角色简介，缺省回退主要使命首行 */
 export function describeSoul(soul: SoulDesign): string {
   if (soul.intro !== '') return soul.intro;
@@ -209,6 +273,47 @@ function readRequiredText(raw: unknown, label: string, max: number): string {
   }
   assertLength(text, label, max);
   return text;
+}
+
+/**
+ * 布尔字段（007）。
+ *
+ * 三态口径与其它字段一致（**拒绝式校验**）：
+ * - 键**缺失**（`undefined`）→ 缺省 `false`：老表单 / 存量文档不带这个键，照常保存；
+ * - `true` / `false` → 原样；
+ * - 其余（字符串 `"true"`、数字 `1`、`null`…）→ **拒绝**，不做隐式转换——
+ *   `"false"` 这类值一旦被当成真值，界面显示关闭而运行环境已开启，属于最难排查的错配。
+ */
+function readBool(raw: unknown, label: string): boolean {
+  if (raw === undefined) return false;
+  if (typeof raw !== 'boolean') {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      `${label}须为布尔值（true / false，当前：${JSON.stringify(raw)}）`,
+    );
+  }
+  return raw;
+}
+
+/**
+ * 提示条数（007）：正整数，1~`SOUL_LIMITS.nextActionHintsMax`，缺省 `SOUL_LIMITS.nextActionHintsDefault`。
+ *
+ * **拒绝式**，不做自动纠正（不四舍五入、不 clamp、不把 `"3"` 当 `3`）：
+ * 管理员填错时应当立刻看到"保存被拒"，而不是存下一个与界面显示不一致的数字——
+ * 这个数字直接决定后台生成几条提示、以及多花多少 token，静默改写属于最难的错配。
+ */
+function readPositiveInt(raw: unknown): number {
+  const { nextActionHintsMin: min, nextActionHintsMax: max, nextActionHintsDefault: fallback } = SOUL_LIMITS;
+  // **只有键缺失**才落缺省（与 `readBool` 的开关口径一致）；`null` 是"显式给了个空值"，
+  // 按非法拒绝——静默当成缺省会让界面显示的 `null` 与产物里的 `3` 对不上
+  if (raw === undefined) return fallback;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      `下一步动作提示条数须为 ${min}~${max} 的整数（当前：${JSON.stringify(raw)}）`,
+    );
+  }
+  return raw;
 }
 
 function readOptionalText(raw: unknown, label: string, max: number): string {

@@ -12,7 +12,8 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
-import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
+import type { AgentStarter, ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
+import type { ThreadNextSteps } from '../../api/threads'
 import { RUN_PHASE, type RunPhase } from '../../constants/events'
 import type { PendingUserMessage } from '../../composables/useChatStream'
 import { countMatches } from '../../utils/segments'
@@ -60,6 +61,13 @@ const props = withDefaults(
      * 仅历史气泡使用（流式轮次尚无结果）。
      */
     loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
+    /**
+     * 会话最新一轮的下一步动作提示（007）。
+     *
+     * 只在 `message.id === message_id` 的那条气泡上透传（`visibleActions` 也守同一判据）：
+     * 历史轮次一律不展示卡片（FR-015）。
+     */
+    nextSteps?: ThreadNextSteps | null
   }>(),
   {
     messages: () => [],
@@ -69,6 +77,7 @@ const props = withDefaults(
     activeMatchIndex: -1,
     hasMore: false,
     loadToolResult: undefined,
+    nextSteps: null,
   },
 )
 
@@ -82,6 +91,8 @@ const emit = defineEmits<{
   'open-link': [href: string]
   /** 空间目录文件点击（契约未列，向上透传；FR-046 预览由装配层执行） */
   'open-file': [reference: FileReference]
+  /** 下一步动作卡片点选（007，向上透传；确认与发送由 ChatPanel 执行） */
+  'send-suggestion': [action: AgentStarter]
 }>()
 
 const listRef = ref<HTMLElement | null>(null)
@@ -90,6 +101,9 @@ const isEmpty = computed(
   () =>
     props.messages.length === 0 && props.streaming === null && props.pendingUser === null,
 )
+
+/** 卡片归属消息 id（`''` = 无卡片）：`v-memo` 用它触发"卡片刚到达"的重渲染 */
+const nextStepsId = computed(() => props.nextSteps?.message_id ?? '')
 
 /** 每条消息内首个命中的全局序号（与 `useSessionSearch` 同口径）。 */
 const matchStats = computed(() => {
@@ -261,6 +275,16 @@ function onOpenLink(href: string): void {
 function onOpenFile(reference: FileReference): void {
   emit('open-file', reference)
 }
+
+/**
+ * 只把卡片透传给**归属的那一条**消息（其余传 `null`）。
+ *
+ * 这样历史气泡连"判断要不要渲染"这一步都不必走，`v-memo` 也只需盯住
+ * `nextStepsMessageId` 一个标量（数组里多一个对象会频繁打断记忆化）。
+ */
+function nextStepsOf(message: Message): ThreadNextSteps | null {
+  return props.nextSteps && props.nextSteps.message_id === message.id ? props.nextSteps : null
+}
 </script>
 
 <template>
@@ -282,15 +306,17 @@ function onOpenFile(reference: FileReference): void {
       <MessageBubble
         v-for="(message, index) in messages"
         :key="message.id"
-        v-memo="[message, searchKeyword, activeMatchIndex, matchStats.bases[index]]"
+        v-memo="[message, searchKeyword, activeMatchIndex, matchStats.bases[index], nextStepsId]"
         :message="message"
         :search-keyword="searchKeyword"
         :active-match-index="activeMatchIndex"
         :match-index-base="matchStats.bases[index]"
         :load-tool-result="loadToolResult"
+        :next-steps="nextStepsOf(message)"
         @feedback="onFeedback"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
+        @send-suggestion="emit('send-suggestion', $event)"
       />
 
       <!-- 乐观用户气泡（十七次调整）：发送即出现；流终结时随 `pendingUser` 清除，由历史真身接管 -->

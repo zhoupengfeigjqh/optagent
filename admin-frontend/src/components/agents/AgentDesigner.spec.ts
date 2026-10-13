@@ -31,6 +31,8 @@ const SOUL: AgentDesign['soul'] = {
   capability_tags: [],
   forbidden: [],
   prompt_extra: '',
+  next_action_hints: false,
+  next_action_hints_count: 3,
 }
 
 const DESIGN: AgentDesign = {

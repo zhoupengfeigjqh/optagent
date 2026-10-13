@@ -1,7 +1,7 @@
 /**
- * 单元测试：结构化 SOUL 的校验与渲染（004）。
+ * 单元测试：结构化 SOUL 的校验与渲染（004 / 007）。
  *
- * 覆盖三类：
+ * 覆盖四类：
  * - **校验**：必填、字数 / 条数上限、工具引用合法性（拒绝式，不做隐式剔除）；
  * - **渲染**：frontmatter 只装展示数据、正文只装提示词、空字段不写空壳；
  * - **兼容**：存量自由文本 → `{ mission: 原文 }`，渲染出的正文与原文逐字一致。
@@ -13,6 +13,7 @@ import {
   describeSoul,
   emptySoulDesign,
   fromLegacySoul,
+  isSoulDesign,
   normalizeSoulDesign,
   renderSoulMd,
 } from '../../src/domain/config-center/soul-design.js';
@@ -91,6 +92,21 @@ describe('normalizeSoulDesign', () => {
       () => normalizeSoulDesign({ ...validRaw(), intro: 'x'.repeat(SOUL_LIMITS.intro + 1) }, OPTIONS),
       ERROR_CODES.VALIDATION_FAILED,
     );
+    // 问题实例单条内容封顶（004 修订：150 字）：151 拒绝、150 通过
+    expectCode(
+      () =>
+        normalizeSoulDesign(
+          { ...validRaw(), starters: [{ prompt: 'x'.repeat(SOUL_LIMITS.starterPrompt + 1), tools: [] }] },
+          OPTIONS,
+        ),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+    expect(() =>
+      normalizeSoulDesign(
+        { ...validRaw(), starters: [{ prompt: 'x'.repeat(SOUL_LIMITS.starterPrompt), tools: [] }] },
+        OPTIONS,
+      ),
+    ).not.toThrow();
     expectCode(
       () =>
         normalizeSoulDesign(
@@ -195,6 +211,125 @@ describe('normalizeSoulDesign', () => {
         ),
       ERROR_CODES.VALIDATION_FAILED,
     );
+  });
+});
+
+describe('next_action_hints —— 下一步动作提示开关（007）', () => {
+  it('缺省口径：键缺失 → false（老表单 / 存量文档照常保存）', () => {
+    expect(normalizeSoulDesign(validRaw(), OPTIONS).next_action_hints).toBe(false);
+    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: undefined }, OPTIONS).next_action_hints).toBe(
+      false,
+    );
+  });
+
+  it('true / false 原样通过（拒绝式，不做隐式转换）', () => {
+    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS).next_action_hints).toBe(true);
+    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS).next_action_hints).toBe(false);
+  });
+
+  it('非布尔（字符串 / 数字 / null）→ VALIDATION_FAILED', () => {
+    for (const value of ['true', 'false', 1, 0, null, {}]) {
+      expectCode(
+        () => normalizeSoulDesign({ ...validRaw(), next_action_hints: value }, OPTIONS),
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+  });
+
+  it('渲染：仅 `true` 时写 frontmatter 键；`false` / 缺省不写键（不残留未搭配的配置）', () => {
+    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
+    expect(on).toContain('next_action_hints: true');
+
+    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS));
+    expect(off).not.toContain('next_action_hints');
+
+    const missing = renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS));
+    expect(missing).not.toContain('next_action_hints');
+    // 关闭态与缺省态产物**逐字一致**（同一份文档，不再有第三种形态）
+    expect(off).toBe(missing);
+  });
+
+  it('开 / 关两态产物只差 frontmatter 那两行（开关 + 条数），正文逐字一致（System Prompt 恒等）', () => {
+    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
+    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS));
+
+    const body = (md: string) => md.slice(md.indexOf('---', 3) + 3);
+    expect(body(on)).toBe(body(off));
+    // 差异**恰好是两行**（开关 + 条数）：把这两行删掉，开启态与关闭态逐字相同
+    const strip = (md: string) =>
+      md.split('\n').filter((line) => !line.startsWith('next_action_hints')).join('\n');
+    expect(strip(on)).toBe(strip(off));
+    expect(on.split('\n').length - off.split('\n').length).toBe(2);
+  });
+
+  it('存量兼容：旧自由文本升级路径落 false', () => {
+    const legacy = fromLegacySoul('# 生产计划助手\n\n你是助手。');
+    expect(legacy.next_action_hints).toBe(false);
+    expect(renderSoulMd(legacy)).not.toContain('next_action_hints');
+  });
+
+  it('isSoulDesign：新字段在 / 不在都不影响"已结构化"判定（存量文档不被误判为旧文本）', () => {
+    expect(isSoulDesign({ mission: '你是助手' })).toBe(true);
+    expect(isSoulDesign({ mission: '你是助手', next_action_hints: true })).toBe(true);
+    expect(isSoulDesign({ mission: '你是助手', next_action_hints: false })).toBe(true);
+    // 仍按原判据拒绝非结构化形态
+    expect(isSoulDesign({ intro: 'x' })).toBe(false);
+    expect(isSoulDesign('你是助手')).toBe(false);
+  });
+
+  it('emptySoulDesign 带 `false`（新建默认关闭；与前端初值同形，脏检查才不会误报）', () => {
+    expect(emptySoulDesign().next_action_hints).toBe(false);
+  });
+
+  it('条数：缺省 3；开启时写进 frontmatter，关闭 / 缺省一律不写', () => {
+    expect(emptySoulDesign().next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault);
+    expect(normalizeSoulDesign(validRaw(), OPTIONS).next_action_hints_count).toBe(
+      SOUL_LIMITS.nextActionHintsDefault,
+    );
+
+    const on = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), next_action_hints: true, next_action_hints_count: 5 }, OPTIONS),
+    );
+    expect(on).toContain('next_action_hints: true');
+    expect(on).toContain('next_action_hints_count: 5');
+
+    // 关闭态连"条数"都不出现（未搭配的内容不残留）
+    const off = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), next_action_hints: false, next_action_hints_count: 5 }, OPTIONS),
+    );
+    expect(off).not.toContain('next_action_hints_count');
+    expect(off).toBe(renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS)));
+
+    // 开启但未给条数 → 落缺省值，产物仍是显式的
+    const onDefault = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS),
+    );
+    expect(onDefault).toContain(`next_action_hints_count: ${SOUL_LIMITS.nextActionHintsDefault}`);
+  });
+
+  it('条数取值口径：1~6 的整数通过；0 / 7 / 负数 / 小数 / 字符串 / null → 拒绝', () => {
+    for (const value of [SOUL_LIMITS.nextActionHintsMin, 4, SOUL_LIMITS.nextActionHintsMax]) {
+      expect(normalizeSoulDesign({ ...validRaw(), next_action_hints_count: value }, OPTIONS).next_action_hints_count).toBe(
+        value,
+      );
+    }
+
+    for (const value of [0, -1, 2.5, SOUL_LIMITS.nextActionHintsMax + 1, '3', null, {}, true]) {
+      expectCode(
+        () => normalizeSoulDesign({ ...validRaw(), next_action_hints_count: value }, OPTIONS),
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+  });
+
+  it('条数与开关独立：关闭时填的数字被保留（再次打开即恢复，不必重填）', () => {
+    const saved = normalizeSoulDesign(
+      { ...validRaw(), next_action_hints: false, next_action_hints_count: 2 },
+      OPTIONS,
+    );
+
+    expect(saved.next_action_hints_count).toBe(2);
+    expect(renderSoulMd(saved)).not.toContain('next_action_hints');
   });
 });
 

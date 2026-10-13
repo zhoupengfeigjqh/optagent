@@ -56,11 +56,18 @@ export function emptyScenario(): AgentScenario {
 export const SOUL_LIMITS = {
   intro: 100,
   welcome: 100,
-  starterPrompt: 500,
+  starterPrompt: 150,
   starters: 12,
   toolsPerStarter: 10,
   mission: 4000,
   promptExtra: 4000,
+  /**
+   * 下一步动作提示条数（007）：下限、上限与缺省。
+   * 输入框的 `min` / `max` 与初值共用这组数字，后端 `readPositiveInt` 用同一组做拒绝式校验。
+   */
+  nextActionHintsMin: 1,
+  nextActionHintsMax: 6,
+  nextActionHintsDefault: 3,
   listItems: 20,
   listItemLength: 100,
   capabilityTagLength: 20,
@@ -76,5 +83,11 @@ export function emptySoulDesign(): SoulDesign {
     capability_tags: [],
     forbidden: [],
     prompt_extra: '',
+    // 007：新建默认关闭。**这个键必须显式写出**——`useAgentDesign.dirty` 用
+    // `JSON.stringify(draft.soul) !== JSON.stringify(emptySoulDesign())` 判"是否有输入"，
+    // 漏了字段会让"只勾了这个开关"或"什么都没填"的两种状态判反
+    next_action_hints: false,
+    // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与后端 `emptySoulDesign()` 不等
+    next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
   }
 }

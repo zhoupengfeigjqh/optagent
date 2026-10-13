@@ -11,6 +11,7 @@ import { computed } from 'vue'
 
 import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
+import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import AgentPanel from './AgentPanel.vue'
 import ChatHeader from './ChatHeader.vue'
@@ -22,6 +23,7 @@ import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
 import SessionSearch from './SessionSearch.vue'
+import SuggestionCard from './SuggestionCard.vue'
 import UploadMenu from './UploadMenu.vue'
 
 const props = withDefaults(
@@ -57,6 +59,12 @@ const {
   onSend,
   onStop,
   onRegenerate,
+  nextSteps,
+  pendingSuggestion,
+  suggestionSending,
+  onPickNextStep,
+  onCancelSuggestion,
+  onConfirmSuggestion,
   onLoadMore,
   onLoadToolResult,
   onRecover,
@@ -158,9 +166,11 @@ function onStarterClick(starter: AgentStarter): void {
         :active-match-index="search.activeIndex.value"
         :has-more="threads.hasMore.value"
         :load-tool-result="onLoadToolResult"
+        :next-steps="nextSteps.steps.value"
         @load-more="onLoadMore"
         @feedback="onFeedback"
         @regenerate="onRegenerate"
+        @send-suggestion="onPickNextStep"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
       />
@@ -178,17 +188,15 @@ function onStarterClick(starter: AgentStarter): void {
 
         <ul v-if="heroStarters.length > 0" class="chat-panel__starters">
           <li v-for="(starter, index) in heroStarters" :key="index">
-            <button
-              type="button"
-              class="chat-panel__starter"
+            <!-- 与回答下方的下一步动作卡片**同一枚卡片**（FR-012）：两处必须同源同形，
+                 否则就是引入了第二套视觉体系。关联工具不在此展示（它只用于生成隐藏引导，
+                 `exposed_name` 亦是内部实现细节，对业务用户无意义） -->
+            <SuggestionCard
+              :text="starter.prompt"
               :disabled="!agentSelected || streaming !== null"
               :data-test="`chat-starter-${index}`"
-              @click="onStarterClick(starter)"
-            >
-              <span class="chat-panel__starter-text">{{ starter.prompt }}</span>
-              <!-- 关联工具不在此展示：它只用于生成隐藏引导（`guidance`，见 onStarterClick），
-                   而且 `exposed_name` 是内部实现细节（如 erp__query_order），对业务用户无意义 -->
-            </button>
+              @select="onStarterClick(starter)"
+            />
           </li>
         </ul>
       </div>
@@ -290,6 +298,17 @@ function onStarterClick(starter: AgentStarter): void {
       @submit="onSubmitInteraction"
       @reject="onRejectInteraction"
     />
+
+    <!-- 007 US2：点卡片先经二次确认（正文为提示词全文），确认后才经既有链路发送 -->
+    <ConfirmDialog
+      :open="pendingSuggestion !== null"
+      title="发送下一步动作"
+      :message="pendingSuggestion?.prompt ?? ''"
+      confirm-label="发送"
+      :busy="suggestionSending"
+      @confirm="onConfirmSuggestion"
+      @cancel="onCancelSuggestion"
+    />
   </section>
 </template>
 
@@ -344,44 +363,19 @@ function onStarterClick(starter: AgentStarter): void {
   font-size: var(--font-size-sm);
 }
 
+/* 卡片本体（`.suggestion-card`）由 `SuggestionCard.vue` 自带：首屏与回答下方共用同一枚卡片，
+   样式也必须在同一处（FR-012），故这里只留栅格 */
 .chat-panel__starters {
   width: 100%;
   margin: var(--space-3) 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  /* 卡片只承载一行问题文字，列宽可以更窄：同样宽度下多放一张卡 */
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* 首屏**多列紧凑**（2026-10-12 产品口径）：一行可放多张、按内容自动铺满整行，
+     纵向高度随列数成比例下降。与回答下方的下一步动作卡片（单列）**刻意不同**——
+     两处共用同一枚卡片（FR-012），但栅格各自定义 */
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: var(--space-2);
-}
-
-.chat-panel__starter {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border, #dfe3ea);
-  border-radius: var(--radius-md);
-  background: var(--color-surface, #fff);
-  color: inherit;
-  font: inherit;
-  font-size: var(--font-size-sm, 13px);
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-panel__starter-text {
-  line-height: var(--line-height-tight);
-}
-
-.chat-panel__starter:hover:not(:disabled) {
-  border-color: var(--color-primary, #2f6fed);
-}
-
-.chat-panel__starter:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .chat-panel__error {

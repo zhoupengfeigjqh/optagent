@@ -14,14 +14,17 @@
  */
 import { computed } from 'vue'
 
-import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
+import type { AgentStarter, ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
+import type { ThreadNextSteps } from '../../api/threads'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import { formatTimestamp } from '../../utils/format'
+import { visibleActions } from '../../utils/next-steps'
 import { countMatches } from '../../utils/segments'
 import { collectToolViewLinks, streamingToolCallItem, toolCallItemsOf } from '../../utils/tool-calls'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import MessageActions from './MessageActions.vue'
 import MessageContent from './MessageContent.vue'
+import MessageNextSteps from './MessageNextSteps.vue'
 import MessageViewLinks from './MessageViewLinks.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallList from './ToolCallList.vue'
@@ -63,6 +66,13 @@ const props = withDefaults(
      * 缺省时卡片只展示随详情下发的内联内容与摘要。
      */
     loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
+    /**
+     * 会话最新一轮的下一步动作提示（007）。
+     *
+     * 由上层原样传入即可：**只有 id 命中 `message_id` 的那条气泡会渲染卡片**
+     * （`visibleActions` 是唯一判据），历史轮次天然为空（FR-015）。
+     */
+    nextSteps?: ThreadNextSteps | null
   }>(),
   {
     searchKeyword: '',
@@ -70,6 +80,7 @@ const props = withDefaults(
     matchIndexBase: 0,
     streaming: null,
     loadToolResult: undefined,
+    nextSteps: null,
   },
 )
 
@@ -86,6 +97,8 @@ const emit = defineEmits<{
   'open-link': [href: string]
   /** 空间目录文件点击：由上层打开右侧内联预览（FR-046） */
   'open-file': [reference: FileReference]
+  /** 点选下一步动作卡片（007）：确认与发送由装配层（ChatPanel）承担 */
+  'send-suggestion': [action: AgentStarter]
 }>()
 
 const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)
@@ -123,6 +136,11 @@ const toolLoader = computed(() => (props.streaming ? undefined : props.loadToolR
  * 流式轮次的记录里没有结果，故恒为空 → 入口行在流式期不出现（`TR-48`）。
  */
 const viewLinks = computed(() => collectToolViewLinks(toolItems.value))
+/**
+ * 本条回答下方的下一步动作卡片（007）：只有"最新一轮"（快照归属的消息）才非空。
+ * 流式气泡的 id 为空串，天然不可能命中，故流式期间不会出现卡片。
+ */
+const nextActions = computed(() => visibleActions(props.nextSteps ?? null, props.message.id))
 const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMING)
 /** 中断轮：保留 partial 正文，但须明确标识"已停止"，与正常回答区分 */
 const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
@@ -225,6 +243,14 @@ const containsActiveMatch = computed(() => {
     <!-- 视图入口行（2026-10-10，TR-45）：紧跟回答正文之后、状态提示与操作区之前。
          无合法链接时组件整行不渲染（TR-48），因此不必在这里再判空 -->
     <MessageViewLinks :links="viewLinks" @open-link="emit('open-link', $event)" />
+
+    <!-- 下一步动作卡片（007）：在正文（与视图入口行）**之后**（FR-010），
+         与工具记录、视图入口同层的侧车位置；无卡片时整块不渲染（FR-014） -->
+    <MessageNextSteps
+      :actions="nextActions"
+      :disabled="isStreaming"
+      @select="emit('send-suggestion', $event)"
+    />
 
     <TypingIndicator v-if="showTyping" />
 

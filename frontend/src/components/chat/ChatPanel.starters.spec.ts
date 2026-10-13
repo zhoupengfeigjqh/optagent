@@ -87,6 +87,13 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     onSend: options.onSend ?? noop,
     onStop: noop,
     onRegenerate: noop,
+    // 007：回答下方的卡片数据与确认弹窗（本组用例只走首屏引导，故取空形态）
+    nextSteps: { steps: ref({ message_id: null, actions: [] }) },
+    pendingSuggestion: ref(null),
+    suggestionSending: ref(false),
+    onPickNextStep: noop,
+    onCancelSuggestion: noop,
+    onConfirmSuggestion: noop,
     onLoadMore: noop,
     onLoadToolResult: noop,
     onRecover: noop,
@@ -117,8 +124,33 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
   }
 }
 
+/**
+ * 只打桩与本组用例无关的重型子组件。
+ *
+ * **刻意不用 `shallow: true`**：`shallow` 会把 `SuggestionCard` 也换成桩，而桩不转发
+ * `select` 事件——那样"点卡片"这件事就测不到了，等于把这条用例变成"DOM 上有个按钮"。
+ * 这里放行卡片本体（正是要断言的对象），其余一律打桩。
+ */
 function mountPanel() {
-  return mount(ChatPanel, { shallow: true, props: { expanded: false } })
+  return mount(ChatPanel, {
+    props: { expanded: false },
+    global: {
+      stubs: {
+        AgentPanel: true,
+        ChatHeader: true,
+        Composer: true,
+        ComposerToolbar: true,
+        ConfirmDialog: true,
+        InteractionDialog: true,
+        MentionPicker: true,
+        MentionPopup: true,
+        MessageList: true,
+        ProducedBell: true,
+        SessionSearch: true,
+        UploadMenu: true,
+      },
+    },
+  })
 }
 
 beforeEach(() => {

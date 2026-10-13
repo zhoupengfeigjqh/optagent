@@ -28,6 +28,8 @@ const SOUL = {
   capability_tags: [],
   forbidden: [],
   prompt_extra: '',
+  next_action_hints: false,
+  next_action_hints_count: 3,
 }
 
 const DESIGN = {
@@ -65,6 +67,8 @@ describe('emptyDraft', () => {
         capability_tags: [],
         forbidden: [],
         prompt_extra: '',
+        next_action_hints: false,
+        next_action_hints_count: 3,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -136,6 +140,16 @@ describe('useAgentDesign', () => {
   it('dirty：新建态下有任意输入即视为已修改', () => {
     const editor = useAgentDesign()
     editor.draft.value.soul = { ...SOUL, mission: 'x' }
+    expect(editor.dirty.value).toBe(true)
+  })
+
+  it('dirty（007）：只把提示条数从缺省改成别的值，也算已修改（逐字段比较）', async () => {
+    const editor = useAgentDesign()
+    await editor.load('demo')
+    expect(editor.dirty.value).toBe(false)
+
+    editor.draft.value.soul = { ...editor.draft.value.soul, next_action_hints_count: 5 }
+
     expect(editor.dirty.value).toBe(true)
   })
 
@@ -255,5 +269,27 @@ describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，202
     expect(editor.loading.value).toBe(false)
     // error 专表"保存未完成"：降级原因由调用方播报，不占用它
     expect(editor.error.value).toBeNull()
+  })
+
+  it('带复制源：提示条数一并带走（`cloneSoul` 的字段清单是契约，漏了就整片丢失）', async () => {
+    getAgent.mockResolvedValue({
+      ...DESIGN,
+      soul: { ...SOUL, next_action_hints: true, next_action_hints_count: 5 },
+    })
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+
+    expect(editor.draft.value.soul.next_action_hints).toBe(true)
+    expect(editor.draft.value.soul.next_action_hints_count).toBe(5)
+  })
+
+  it('复制源缺提示条数（老存档）：兜底为缺省值，不把 `undefined` 带进草稿', async () => {
+    const legacy = { ...SOUL } as Partial<typeof SOUL>
+    delete legacy.next_action_hints_count
+    getAgent.mockResolvedValue({ ...DESIGN, soul: legacy })
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+
+    expect(editor.draft.value.soul.next_action_hints_count).toBe(3)
   })
 })

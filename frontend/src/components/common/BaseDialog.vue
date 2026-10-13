@@ -108,6 +108,10 @@ function handleBackdropClick(event: MouseEvent): void {
 
 <style scoped>
 .base-dialog {
+  /* MUST 显式居中：Tailwind preflight 的 `* { margin: 0 }`（在 `@layer base`）会压过
+     浏览器 UA 给 `dialog` 的 `margin: auto`，而作者来源优先于 UA —— 不补这一行，
+     `showModal()` 出来的弹窗会贴在视口左上角。 */
+  margin: auto;
   width: min(560px, 92vw);
   max-width: none;
   padding: 0;

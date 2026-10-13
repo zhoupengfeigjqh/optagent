@@ -62,15 +62,16 @@ export default defineConfig({
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 54.28 / branch 60.47 / funcs 43.03 / lines 53.17
-        //    （`@` 引用浮层与 HITL 控件口径统一增量：新增 `utils/popup-position` / `utils/caret-rect`
-        //     两个纯函数模块并补测，整体上行，地板随之抬到实测值略下方；
-        //     上一版为 48/55/38/47 @ 2026-10-08，再上一版 45/52/34/44 @ 2026-09-23）
+        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 60.05 / branch 64.98 / funcs 49.20 / lines 59.36
+        //    （007「下一步动作提示」增量：新增 `utils/next-steps` / `api/next-steps` /
+        //     `composables/useNextSteps` 三个模块并补测至满覆盖，整体上行，地板随之抬到实测值略下方；
+        //     上一版为 53/59/42/52 @ 2026-10-12（`@` 引用浮层与 HITL 口径统一），
+        //     再上一版 48/55/38/47 @ 2026-10-08，45/52/34/44 @ 2026-09-23）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 53,
-        branches: 59,
-        functions: 42,
-        lines: 52,
+        statements: 59,
+        branches: 63,
+        functions: 48,
+        lines: 58,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -95,6 +96,10 @@ export default defineConfig({
         // `@` 引用浮层（2026-10-12，FR-102~106 / TR-01~02）：坐标计算纯函数 + 光标测量
         'src/utils/popup-position.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
         'src/utils/caret-rect.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 92.85 / 100 / 100
+        // 下一步动作提示（2026-10-12，007）：拉取时刻表与可见性判定 + 窗口调度 + 只读拉取封装
+        'src/utils/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/composables/useNextSteps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/api/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
       },
     },
   },

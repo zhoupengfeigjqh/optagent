@@ -31,6 +31,7 @@ import { RUN_PHASE, type RunPhase, type ToolStatus } from '../constants/events'
 import { STORAGE_KEY_THINKING } from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { isAbortError } from '../api/sse'
+import type { ThreadNextSteps } from '../api/threads'
 import { useSession } from './useAppSession'
 import type { ToastStore } from './useToast'
 
@@ -65,6 +66,11 @@ export interface ChatStreamDeps {
   stopRun?: (threadId: string) => Promise<void>
   /** 一轮结束（完成/中断/失败）后刷新会话详情 */
   onTurnFinished?: (threadId: string) => void | Promise<void>
+  /**
+   * 007 修订（Tail Protocol）：done 直推的当轮卡片写入（`done.next_actions` 缺省时不调用）。
+   * 会话层把它接到 `nextSteps.apply`——卡片随事件即时可见，不再轮询拉取。
+   */
+  applyNextActions?: (steps: ThreadNextSteps) => void
   /** 读取某条消息当前反馈（失败回滚用） */
   feedbackOf?: (messageId: string) => FeedbackValue
   /** 本地乐观更新某条消息的反馈 */
@@ -212,6 +218,10 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       // message_id 为 null ⇒ 中断轮，不落盘、不展示操作与用量（FR-007、FR-028）
       streamingAgentName.value = event.data.agent_name
       phase.value = event.data.message_id === null ? RUN_PHASE.ABORTED : RUN_PHASE.COMPLETED
+      // 007 修订（Tail Protocol）：卡片随 done 直推，即刻写入（无卡片时字段缺省，不动现态）
+      if (event.data.next_actions) {
+        deps.applyNextActions?.(event.data.next_actions)
+      }
       return
     }
 

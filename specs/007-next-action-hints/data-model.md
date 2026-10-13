@@ -19,18 +19,22 @@
 
 ---
 
-## 2. 下一步动作开关（`next_action_hints`）
+## 2. 下一步动作开关（`next_action_hints`）与其条数参数（`next_action_hints_count`）
 
 ### 2.1 设计态（平台唯一权威源）
 
 | 字段 | 类型 | 必填 | 缺省 | 校验 |
 |---|---|---|---|---|
 | `soul.next_action_hints` | boolean | 否 | `false` | 给了非布尔值 → **拒绝保存**（`ADM_AGENT_INVALID`，同既有 SOUL 字段的拒绝式口径） |
+| `soul.next_action_hints_count` | number | 否 | `3` | 1~6 的整数；**键缺失才取缺省**，`null` / 小数 / 越界 / 非数字 → **拒绝保存**（`readPositiveInt`，与开关同口径） |
 
 - 载体：`admin-backend/src/domain/config-center/soul-design.ts` 的 `SoulDesign`；
   `emptySoulDesign()` / `fromLegacySoul()`（旧字符串 SOUL 升级）/ `normalizeSoulDesign()` / `isSoulDesign()` 四处 MUST 同步。
-- 存量兼容：旧设计态 JSON 无该字段 → `false`（零行为变化，FR-031）。
-- 上限常量：**无需新增**（布尔字段不进 `SOUL_LIMITS`）。
+- 存量兼容：旧设计态 JSON 无该字段 → `false` + 条数 `3`（零行为变化，FR-031）。
+- 上限常量：`SOUL_LIMITS.nextActionHintsMin = 1` / `nextActionHintsMax = 6` / `nextActionHintsDefault = 3`
+  （前端输入框的 `min`/`max`/初值与后端校验共用同一组数字）。
+- **同进同出**：条数只在开关开启时有意义；开关关闭时**数值仍被保留**（管理台输入框置灰、不回退），
+  但物化产物不写条数键——于是"开启态产物 = 关闭态产物 + 开关与条数两行"，关闭态与 007 之前逐字一致。
 
 ### 2.2 物化产物（`SOUL.md` frontmatter）
 
@@ -39,7 +43,8 @@
 soul_version: 1
 intro: …
 welcome: …
-next_action_hints: true      # 仅在为 true 时写；false/缺省不写键（不写空壳）
+next_action_hints: true        # 仅在为 true 时写；false/缺省不写键（不写空壳）
+next_action_hints_count: 3     # 与开关同进同出：仅开关开启时写；缺省/坏值一律落 3
 starters: …
 ---
 ```
@@ -48,8 +53,14 @@ starters: …
 
 ### 2.3 运行态读取
 
-- `soul.ts` 的 `SoulMeta` 新增 `nextActionHints: boolean`；`parseSoulMeta` 读取 frontmatter 键 `next_action_hints`（非布尔/缺失 → `false`）。
+- `soul.ts` 的 `SoulMeta` 新增 `nextActionHints: boolean` 与 `nextActionHintsCount: number`；
+  `parseSoulMeta` 读取 frontmatter 键 `next_action_hints`（非布尔/缺失 → `false`）与
+  `next_action_hints_count`（缺省/非整数/越界 → 收敛到 `3`，`readHintCount`）。
 - 新增 `isNextActionsEnabled(optAgentRoot, userId, agentName): boolean`：只读该数字人的 `SOUL.md` → `parseSoulMeta` → `.nextActionHints`；**读失败/解析失败一律返回 `false`**（fail-closed）并告警。
+- 新增 `nextActionHintsCount(optAgentRoot, userId, agentName): number`：同上读盘 → `.nextActionHintsCount`；**读失败返回缺省 `3`**（条数只是"生成几条"的上限，读不到按缺省走，不必像开关那样关到 0）。
+- `next-actions.ts` 的 `NextActionsStore` 新增依赖 `NextActionsDeps.hintCount`：生成时取
+  `hintCount(userId, agentName) ?? maxActions` 作为该轮的条数上限，并把它写进生成提示词
+  （`0~N 件事` / `数量 0~N 个`），`sanitizeActions` 也按它裁剪。
 
 **状态转换（单数字人视角）**
 

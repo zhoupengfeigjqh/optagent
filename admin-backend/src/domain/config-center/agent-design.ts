@@ -27,6 +27,7 @@ import {
   fromLegacySoul,
   isSoulDesign,
   normalizeSoulDesign,
+  readStoredHintCount,
   type SoulDesign,
 } from './soul-design.js';
 
@@ -237,11 +238,25 @@ export class AgentDesignService {
   /**
    * 读取归一化（004）：改造前的 `soul` 是自由文本字符串，
    * 整体包装为 `{ mission: 原文, 其余为空 }` —— 存量文档因此无需迁移脚本即可打开与保存。
+   *
+   * **2026-10-12（007）**：已结构化的存档文档补齐 `next_action_hints: false`
+   * 与 `next_action_hints_count` 的缺省值。
+   * 与 `data_prep_fields` 同理——目的是**对外契约恒有该键**，界面不必判空、
+   * 部署物化不依赖 `undefined`（`renderSoulMd` 只在 `true` 时写 frontmatter，
+   * 故补齐不会让关闭态产物多出任何键）。
    */
   private static withSoulDefaults(doc: AgentDesignDocument): AgentDesignDocument {
-    if (isSoulDesign(doc.soul)) return doc;
-    const legacy = typeof doc.soul === 'string' ? doc.soul : '';
-    return { ...doc, soul: fromLegacySoul(legacy) };
+    if (!isSoulDesign(doc.soul)) {
+      const legacy = typeof doc.soul === 'string' ? doc.soul : '';
+      return { ...doc, soul: fromLegacySoul(legacy) };
+    }
+    // 条数同样补齐（见 `readStoredHintCount`）：键缺失（本次字段引入前的存档）或手改坏了
+    // 都收敛到缺省 3，使**对外契约恒有该键**、且与 `emptySoulDesign()` 同形（脏检查不误报）
+    const soul = doc.soul;
+    const hints = typeof soul.next_action_hints === 'boolean' ? soul.next_action_hints : false;
+    const count = readStoredHintCount(soul.next_action_hints_count);
+    if (hints === soul.next_action_hints && count === soul.next_action_hints_count) return doc;
+    return { ...doc, soul: { ...soul, next_action_hints: hints, next_action_hints_count: count } };
   }
 
   /**

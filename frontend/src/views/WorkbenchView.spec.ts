@@ -33,7 +33,8 @@ const stubs = {
 
 /** 只造本视图会触碰的字段；其余由 `useSession()` 的消费方（子组件）负责，这里已打桩 */
 function makeSession(initialThreadId: string | null, threadIds: string[]) {
-  const activeThreadId = ref<string | null>(initialThreadId)
+  // 与真实装配同起点：装配期 ref 为 null，恢复是"事后"由 select 写入（见 useAppSession）
+  const activeThreadId = ref<string | null>(null)
   return {
     initialThreadId,
     rememberActiveThread: vi.fn(),

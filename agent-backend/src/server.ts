@@ -20,9 +20,11 @@ import { ensureRootDirs, userAgentsDir, userDataDir, SPACE_TMP } from './domain/
 import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
+import { NextActionsStore } from './domain/next-actions.js';
 import { ProducedEvents } from './domain/produced-events.js';
 import { formatProducedList, listProduced } from './domain/produced.js';
 import { RunManager } from './domain/run-manager.js';
+import { isNextActionsEnabled, nextActionHintsCount } from './domain/soul.js';
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
 import { cleanupTmpDir } from './domain/tmp-cleanup.js';
@@ -33,7 +35,7 @@ import type { LlmProvider } from './infra/llm/llm-provider.js';
 import { PiAiLlmProvider } from './infra/llm/pi-ai-provider.js';
 import { IntervalScheduler } from './infra/scheduler.js';
 import { UsageDb } from './infra/usage-db.js';
-import { createLoggers } from './logging.js';
+import { createLoggers, createThrottledWarn } from './logging.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerChatRoutes } from './routes/chat.js';
@@ -216,12 +218,31 @@ export async function buildServer(options: BuildServerOptions = {}) {
     'mcp-health-check',
   );
 
+  /**
+   * 下一步动作提示（007 修订 · Tail Protocol）。
+   *
+   * 卡片与回答同流产出：开关与条数在**提示词装配时**逐次现读（SOUL.md frontmatter，
+   * fail-closed 见 `soul.ts`），驱动尾部块指令；轮末同步定稿入快照、随 `done` 直推。
+   * 读取侧不再判"当前选中数字人"——卡片持久化与恢复跟数字人切换无关（修订 G4）。
+   *
+   * 告警经 `createThrottledWarn` 合并：开关文件读不出来时，每个请求都会命中同一条消息。
+   */
+  const nextActionsWarn = createThrottledWarn(loggers.logger, 'next-actions.failed');
+  const nextActions = new NextActionsStore(root, { logger: nextActionsWarn });
+
   const runManager = new RunManager({
     history,
     usage: usageDb,
     logger: loggers.logger,
     summary,
     toolEvents,
+    nextActions,
+    // 007 修订：开关与条数逐次现读（SOUL.md frontmatter）；开启时条数上限同时驱动
+    // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
+    nextActionsConfig: (userId, agentName) => {
+      if (!isNextActionsEnabled(root, userId, agentName, nextActionsWarn)) return null;
+      return { enabled: true, max: nextActionHintsCount(root, userId, agentName, nextActionsWarn) };
+    },
     // FR-030：实例崩溃 → 销毁（下一条消息经 getOrCreateAgent 自动重建）
     onCrash: (key) => pool.remove(key),
     // R11：后台计算结果清单 —— 只注入**当前会话**（`sid === threadId`）的产出，
@@ -248,6 +269,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     history,
     summary,
     toolEvents,
+    nextActions,
     runManager,
     usage: usageDb,
     mcpEvents,

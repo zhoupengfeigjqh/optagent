@@ -20,12 +20,14 @@ import { createAgentsApi } from '../api/agents'
 import { createFilesApi, type FilesApi } from '../api/files'
 import { createHttpClient } from '../api/http'
 import { createModelsApi } from '../api/models'
+import { createNextStepsApi } from '../api/next-steps'
 import { createProducedApi } from '../api/produced'
 import { createThreadsApi } from '../api/threads'
 import { createAgentsStore, type AgentsStore } from './useAgents'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
 import { createModelsStore, type ModelsStore } from './useModels'
+import { createNextStepsStore, type NextStepsStore } from './useNextSteps'
 import { createPreviewStore, type PreviewStore } from './usePreview'
 import { createProducedStore, type ProducedStore } from './useProduced'
 import { createSessionSearchStore, type SessionSearchStore } from './useSessionSearch'
@@ -66,6 +68,8 @@ export interface AppSession {
   readonly preview: PreviewStore
   /** 后台产出（R11）：列表 + 未读数 + 标记已读 + 信号订阅 */
   readonly produced: ProducedStore
+  /** 下一步动作提示（007）：轮末拉取窗口（不阻塞、失败静默） */
+  readonly nextSteps: NextStepsStore
   readonly toast: ToastStore
   /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
   readonly files: FilesApi
@@ -141,8 +145,15 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
    */
   const initialThreadId = readRestoredThread(storage)
 
-  /** 当前会话 id：会话、聊天流、搜索共享的单一事实源。 */
-  const activeThreadId = ref<string | null>(initialThreadId)
+  /**
+   * 当前会话 id：会话、聊天流、搜索共享的单一事实源。
+   *
+   * MUST NOT 用 `initialThreadId` 预置：本 ref 表达"当前选中"这一**状态**，只由选中动作
+   * 驱动；而 `useNextSteps` / `useChatStream` 的 watch 都以"它发生变化"为触发条件，预置
+   * 会让初值不产生变化——刷新时 `WorkbenchView.restoreThread` 写回的是同一个 id，下一步
+   * 动作卡片因此永不恢复。"要恢复哪个会话"是 `initialThreadId`（值），二者各司其职。
+   */
+  const activeThreadId = ref<string | null>(null)
 
   /** 记住当前会话：地址栏 + 本地存储双写（任一步失败都不影响会话本身）。 */
   function rememberActiveThread(threadId: string | null): void {
@@ -176,12 +187,22 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
 
   const search = createSessionSearchStore({ messages: () => threads.messages.value })
 
+  // 下一步动作提示（007 修订 · Tail Protocol）：与 `threads` 共享同一个 `activeThreadId` ——
+  // 切会话即清空并一次性恢复最新卡片；流式轮的卡片由 done 事件直推（见 `applyNextActions`）
+  const nextSteps = createNextStepsStore({
+    nextSteps: createNextStepsApi(client),
+    activeThreadId,
+  })
+
   const chat = createChatStreamStore({
     activeThreadId,
     getModel: () => models.current.value,
     getAgentName: () => currentAgentName.value,
     stopRun: (threadId) => threadsApi.stop(threadId).then(() => undefined),
+    /** 轮末：刷新会话详情（正文/工具卡片即时可见）；卡片已随 done 直推，无需轮询 */
     onTurnFinished: () => threads.refresh(),
+    /** done 直推的当轮卡片写入（`useChatStream` 收到 `done.next_actions` 时调用） */
+    applyNextActions: (steps) => nextSteps.apply(steps),
     feedbackOf: (messageId) =>
       threads.messages.value.find((message) => message.id === messageId)?.feedback ?? null,
     applyFeedback: (messageId, value) => threads.patchFeedback(messageId, value),
@@ -217,6 +238,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     search,
     preview,
     produced,
+    nextSteps,
     toast,
     files: filesApi,
     now,

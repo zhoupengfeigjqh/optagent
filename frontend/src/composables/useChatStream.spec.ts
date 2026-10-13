@@ -127,3 +127,40 @@ describe('useChatStream —— 乐观用户气泡（十七次调整）', () => {
     expect(store.phase.value).toBe(RUN_PHASE.ABORTED)
   })
 })
+
+describe('useChatStream —— done 直推卡片（007 修订 · Tail Protocol）', () => {
+  /** done 带 `next_actions` 的 SSE 脚本（形状与后端 `run-finalize` 直推一致） */
+  const SCRIPT_WITH_CARD = [
+    'event: content',
+    'data: {"delta":"你好"}',
+    '',
+    'event: done',
+    'data: {"finish_reason":"completed","usage":{"input_tokens":1,"output_tokens":2},"duration_seconds":1.2,"message_id":"m_1","agent_name":"demo","next_actions":{"message_id":"m_1","actions":[{"prompt":"整理表格","tools":[],"guidance":""}]}}',
+    '',
+    '',
+  ].join('\n')
+
+  it('done 带 next_actions → 经 applyNextActions 写入（即刻可见，无轮询）', async () => {
+    const applyNextActions = vi.fn()
+    const store = createChatStreamStore(
+      makeDeps({ fetchImpl: sseFetch(SCRIPT_WITH_CARD), applyNextActions }),
+    )
+
+    await store.send({ content: '你好', attachments: [] })
+
+    expect(applyNextActions).toHaveBeenCalledTimes(1)
+    expect(applyNextActions).toHaveBeenCalledWith({
+      message_id: 'm_1',
+      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+    })
+  })
+
+  it('done 不带 next_actions → 不调用 applyNextActions（不动现态）', async () => {
+    const applyNextActions = vi.fn()
+    const store = createChatStreamStore(makeDeps({ applyNextActions }))
+
+    await store.send({ content: '你好', attachments: [] })
+
+    expect(applyNextActions).not.toHaveBeenCalled()
+  })
+})

@@ -1,0 +1,249 @@
+/**
+ * 单元测试：轮次收尾家族（007 从 `run-manager.ts` 拆分而来）。
+ *
+ * 收尾是**副作用密集**的地方，且三条入口的顺序是硬约束：
+ * - `done`：卡片定稿（解析尾部块 + 写快照）→ 落盘（正文**不含**尾部块）→ 广播 `done`
+ *   （负载带 `next_actions` 直推，007 修订）→ 摘要 fire-and-forget（FR-018）；
+ * - `error` / `aborted`：失败与中断轮无卡片；
+ * - `aborted`：只广播 + 记账（本轮消息丢弃，但已消耗 token 照记，FR-027）。
+ *
+ * 这里用假依赖直接驱动 `RunFinalizer`（不经 RunManager），把"未装配某依赖时不能崩"
+ * 这类防御分支也钉住——它们在真实装配里几乎不会走到，但正是拆分后最容易坏的地方。
+ */
+import { describe, expect, it, vi } from 'vitest';
+import type { HistoryMessage, UsageInfo } from '../../src/types.js';
+import { RunImpl } from '../../src/domain/run-impl.js';
+import { RunFinalizer, type FinalizeTurn } from '../../src/domain/run-finalize.js';
+import type { HistoryStore } from '../../src/domain/history.js';
+import type { ToolEventStore } from '../../src/domain/tool-events.js';
+import type { NextActionsFinalizeInput, NextActionsView } from '../../src/domain/next-actions.js';
+import type { SsePayload } from '../../src/domain/run-events.js';
+import type { UsageStore } from '../../src/types.js';
+
+const USAGE: UsageInfo = { inputTokens: 11, outputTokens: 22 };
+
+/** 假落盘口：只记调用，不碰磁盘 */
+function fakeHistory() {
+  const appended: Array<{ userId: string; threadId: string; message: HistoryMessage }> = [];
+  return {
+    appended,
+    store: {
+      append: (userId: string, threadId: string, message: HistoryMessage) => {
+        appended.push({ userId, threadId, message });
+        return undefined as unknown as Promise<void>;
+      },
+    } as unknown as HistoryStore,
+  };
+}
+
+function fakeUsage() {
+  const rows: Array<Record<string, unknown>> = [];
+  return { rows, store: { record: (row: Record<string, unknown>) => rows.push(row) } as unknown as UsageStore };
+}
+
+function makeRun(): RunImpl {
+  const run = new RunImpl('th_1', 'admin', 'demo');
+  run.startedAt = 1_000;
+  run.assistantMessageId = 'm-assistant';
+  run.buffer = '回答正文';
+  run.calledTools.add('read_file');
+  return run;
+}
+
+function turn(runtime: FinalizeTurn['runtime'] = { availableTools: [] }, nextActionsMax?: number): FinalizeTurn {
+  return {
+    userId: 'admin',
+    threadId: 'th_1',
+    runtime,
+    ...(nextActionsMax === undefined ? {} : { nextActionsMax }),
+  };
+}
+
+function collect(run: RunImpl): SsePayload[] {
+  const events: SsePayload[] = [];
+  run.subscribe((e) => events.push(e));
+  return events;
+}
+
+describe('RunFinalizer.done', () => {
+  it('最小依赖：落两条消息 + 广播 done + 记账；未装配的后台任务一律不触发', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const run = makeRun();
+
+    const events = collect(run);
+    await finalizer.done(run, turn(), { role: 'user', content: '你好' }, USAGE);
+
+    expect(run.state).toBe('done');
+    expect(history.appended.map((a) => a.message.role)).toEqual(['user', 'assistant']);
+    // assistant 行用 run 启动时预生成的 id（工具事件行已按它归属）
+    expect(history.appended[1]!.message.id).toBe('m-assistant');
+    expect(history.appended[1]!.message).toMatchObject({
+      status: 'completed',
+      content: '回答正文',
+      agent_name: 'demo',
+      duration_ms: 4_000,
+      usage: { input_tokens: 11, output_tokens: 22 },
+    });
+    expect(usage.rows).toHaveLength(1);
+    expect(events).toEqual([
+      {
+        type: 'done',
+        data: {
+          finish_reason: 'completed',
+          usage: { input_tokens: 11, output_tokens: 22 },
+          duration_seconds: 4,
+          message_id: 'm-assistant',
+          agent_name: 'demo',
+        },
+      },
+    ]);
+  });
+
+  it('全量依赖：工具记录 flush、摘要触发；卡片定稿先于广播并随 done 直推（007 修订）', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const flush = vi.fn(async () => undefined);
+    const summaryTrigger = vi.fn(async () => undefined);
+    const finalizeInputs: NextActionsFinalizeInput[] = [];
+    const view: NextActionsView = {
+      message_id: 'm-assistant',
+      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+    };
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      toolEvents: { flush } as unknown as ToolEventStore,
+      summary: { trigger: summaryTrigger },
+      nextActions: {
+        finalize: (input) => {
+          finalizeInputs.push(input);
+          return view;
+        },
+      },
+      now: () => 5_000,
+    });
+    const run = makeRun();
+    run.nextActionsTail = '{"actions":[{"prompt":"整理表格"}]}';
+    const runtime = { availableTools: [{ name: 'read_file', description: '读取文件' }] };
+
+    const events = collect(run);
+    await finalizer.done(run, turn(runtime, 3), { role: 'user', content: '你好' }, USAGE);
+
+    expect(flush).toHaveBeenCalledWith('admin', 'th_1');
+    expect(summaryTrigger).toHaveBeenCalledWith('admin', 'th_1');
+    // 素材取自本轮真相：捕获的尾部块原文 + 本轮可用工具；条数上限与提示词装配同源
+    expect(finalizeInputs).toHaveLength(1);
+    expect(finalizeInputs[0]).toMatchObject({
+      userId: 'admin',
+      threadId: 'th_1',
+      messageId: 'm-assistant',
+      agentName: 'demo',
+      tailText: '{"actions":[{"prompt":"整理表格"}]}',
+      availableTools: [{ name: 'read_file', description: '读取文件' }],
+      max: 3,
+    });
+    // 定稿后归档清空（同一 run 不会被二次定稿）
+    expect(run.nextActionsTail).toBe('');
+    // 卡片随 done 直推（前端不再轮询拉取）
+    expect(events[0]).toMatchObject({ type: 'done', data: { next_actions: view } });
+  });
+
+  it('未开启开关（nextActionsMax 缺省）→ 不定稿卡片、done 不带 next_actions', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalize = vi.fn(() => undefined);
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      nextActions: { finalize },
+      now: () => 5_000,
+    });
+    const run = makeRun();
+    run.nextActionsTail = '{"actions":[]}';
+
+    const events = collect(run);
+    await finalizer.done(run, turn(), { role: 'user', content: '你好' }, USAGE);
+
+    expect(finalize).not.toHaveBeenCalled();
+    expect(JSON.stringify(events[0])).not.toContain('next_actions');
+  });
+});
+
+describe('RunFinalizer.error', () => {
+  it('有 usage：留痕失败轮、记一次用量、error 载荷带 usage', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const run = makeRun();
+
+    const events = collect(run);
+    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, {
+      code: 'LLM_ERROR',
+      message: '上游模型不可用',
+      usage: USAGE,
+    });
+
+    expect(run.state).toBe('error');
+    expect(history.appended[1]!.message).toMatchObject({
+      status: 'failed',
+      error: { code: 'LLM_ERROR', message: '上游模型不可用' },
+      usage: { input_tokens: 11, output_tokens: 22 },
+    });
+    expect(usage.rows).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'error',
+      data: { error: { code: 'LLM_ERROR' }, usage: { input_tokens: 11, output_tokens: 22 } },
+    });
+  });
+
+  it('无 usage（未消耗）：不记账、载荷里也不出现 usage 字段', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const run = makeRun();
+
+    const events = collect(run);
+    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, {
+      code: 'LLM_ERROR',
+      message: '上游模型不可用',
+    });
+
+    expect(usage.rows).toHaveLength(0);
+    expect(history.appended[1]!.message.usage).toBeUndefined();
+    expect(events[0]).toMatchObject({ type: 'error' });
+    expect(JSON.stringify(events[0])).not.toContain('usage');
+  });
+});
+
+describe('RunFinalizer.aborted', () => {
+  it('有 usage：丢弃本轮消息（message_id=null）但照记 token（FR-027）', () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const run = makeRun();
+
+    const events = collect(run);
+    finalizer.aborted(run, turn(), USAGE);
+
+    expect(run.state).toBe('aborted');
+    expect(history.appended).toHaveLength(0); // 中断轮不落盘
+    expect(usage.rows[0]).toMatchObject({ inputTokens: 11, outputTokens: 22, agentName: 'demo' });
+    expect(events[0]).toMatchObject({
+      type: 'done',
+      data: { finish_reason: 'stop', message_id: null },
+    });
+  });
+
+  it('usage 缺省：按 0 记账（中断时的用量未知也不能漏记这一轮）', () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const run = makeRun();
+
+    finalizer.aborted(run, turn());
+
+    expect(usage.rows[0]).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+  });
+});

@@ -14,6 +14,7 @@ import {
   validateAgentInput,
 } from '../../src/domain/config-center/agent-design.js';
 import { createReferenceIndex } from '../../src/domain/config-center/reference-index.js';
+import { SOUL_LIMITS } from '../../src/domain/config-center/soul-design.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { soulDesign } from '../helpers/soul.js';
@@ -338,7 +339,50 @@ describe('AgentDesignService', () => {
 
     expect(service.read('legacy').scenario.data_prep_fields).toEqual({});
     expect(service.view('legacy', index).scenario.data_prep_fields).toEqual({});
-  });
+  })
+
+  it('读取归一化（007）：结构化 SOUL 缺开关与条数 → 补齐为 false / 缺省 3（对外恒有该键）', () => {
+    // "结构化但没有这两个键"的形态：本次字段引入前的存档
+    const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>
+    delete stale.next_action_hints
+    delete stale.next_action_hints_count
+    store.writeJson('agents/stale.json', {
+      name: 'stale',
+      soul: stale,
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+      updated_at: '2026-10-12T00:00:00.000Z',
+    })
+
+    const soul = service.read('stale').soul
+    expect(soul.next_action_hints).toBe(false)
+    expect(soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
+  })
+
+  it('读取归一化（007）：手改坏的条数收敛到缺省（一个坏数字不该让数字人打不开）', () => {
+    const writeWithCount = (value: unknown): void => {
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul: { ...soulDesign('你是助手'), next_action_hints: true, next_action_hints_count: value },
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-10-12T00:00:00.000Z',
+      })
+    }
+
+    for (const broken of [0, -1, 2.5, SOUL_LIMITS.nextActionHintsMax + 1, '3', null, {}]) {
+      writeWithCount(broken)
+      expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
+    }
+
+    // 合法值原样保留（收敛只对坏值生效）
+    writeWithCount(SOUL_LIMITS.nextActionHintsMax)
+    expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax)
+  })
 
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision())

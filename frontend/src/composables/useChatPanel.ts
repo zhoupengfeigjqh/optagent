@@ -10,12 +10,14 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
+import type { AgentStarter, ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
+import { nextStepSendPayload } from '../utils/next-steps'
 import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
 import { mentionToken, stripMentionTokens, useFileMention } from './useFileMention'
 import { useModels } from './useModels'
+import { useNextSteps } from './useNextSteps'
 import { usePreview } from './usePreview'
 import { useSessionSearch } from './useSessionSearch'
 import { useThreads } from './useThreads'
@@ -34,6 +36,7 @@ export function useChatPanel() {
   const workspace = useWorkspace()
   const agents = useAgents()
   const preview = usePreview()
+  const nextSteps = useNextSteps()
   const toast = useToast()
 
   /** 上传面板展开状态（纯 UI，故留在本层） */
@@ -126,47 +129,81 @@ export function useChatPanel() {
 
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
-  async function onSend(payload: {
-    content: string
-    attachments: FileReference[]
-    /** 本轮隐藏指引（004）；由问题实例携带，用户气泡里看不到 */
-    guidance?: string
-  }): Promise<void> {
+  /**
+   * 发起一轮对话（**唯一**发送链路：输入区、问题实例、下一步动作卡片都走它）。
+   *
+   * @param options.settleBeforeReturn 默认 `false`→`undefined`：等本轮**结束**才返回（历史刷新、
+   *   失败还原草稿都依赖这一等待）。传 `false` 时**本地校验一过、请求一发出即返回**——
+   *   给"点卡片确认"用：弹窗要立刻关，不能陪着这一轮输出一起等（否则用户会看到
+   *   "点了确认、弹窗却一直挂着直到答完才消失"）。
+   *
+   * @returns 是否真的发出：`false` = 在本地被拦下（正文为空 / 引用失效 / 会话建不出来 / 发送失败）。
+   *   调用方据此决定后续动作——例如卡片的确认弹窗**只有真发出去了才关闭**，否则保留内容让用户重试。
+   */
+  async function onSend(
+    payload: {
+      content: string
+      attachments: FileReference[]
+      /** 本轮隐藏指引（004）；由问题实例与下一步动作卡片携带，用户气泡里看不到 */
+      guidance?: string
+    },
+    options: { settleBeforeReturn?: boolean } = {},
+  ): Promise<boolean> {
     // 展示层 → 提交层：正文去掉 `@文件名` 标记，引用以结构化 `attachments` 提交（FR-016）
     const content = stripMentionTokens(payload.content, payload.attachments)
     if (content === '') {
       toast.push('error', '请输入消息内容')
-      return
+      return false
     }
 
     // 发送前校验引用仍存在，不存在则提示且不发送（FR-018 / V-15）
     const missing = payload.attachments.filter((reference) => !workspace.exists(reference))
     if (missing.length > 0) {
       toast.push('error', `引用的文件已不存在：${missing.map((item) => item.filename).join('、')}`)
-      return
+      return false
     }
 
     if (!threads.activeId.value) {
       await threads.create()
       if (!threads.activeId.value) {
-        // 未选定数字人等情况下创建失败：保留输入，不发起请求
-        return
+        // 未选定数字人等情况下创建失败：保留输入，不发起请求（提示由 useThreads 负责）
+        return false
       }
     }
 
     const previous = payload.content
     chat.draft.value = ''
-    await chat.send({
+    /**
+     * 007：**发起即清空**上一轮的卡片。
+     *
+     * 卡片属于"最新一轮"，而这一轮在 `chat.send` 之后就不再是最新了。若等到本轮 `done`
+     * 才清掉，用户会看到"点了卡片、旧卡片一直挂着、直到新回答输出完毕才消失"——
+     * 既像卡住，也让人以为这轮没产出新卡片。新一轮的卡片由 done 直推写入（`apply`）。
+     *
+     * 放在 **`chat.send` 之前**：从用户视角"发起"就是这一刻，早于首字节返回。
+     * 服务端同样在轮开始就删除快照（`RunManager.startRun` 的 `clear`），两侧同一语义。
+     */
+    nextSteps.reset()
+    const run = chat.send({
       content,
       attachments: payload.attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
     })
+    if (options.settleBeforeReturn === false) {
+      // 007：卡片确认——本地校验已过、请求已发出即视为成功，**不等待本轮结束**，
+      // 弹窗即刻关闭。`chat.send` 内部永不 reject（错误一律转 phase），故 fire-and-forget 安全；
+      // 本轮成败由 chat 自身负责（失败会 toast；卡片正文不进输入框，无需还原草稿）。
+      void run
+      return true
+    }
+    await run
     if (chat.phase.value === RUN_PHASE.FAILED) {
       // 发送失败保留输入与引用（data-model §14）
       chat.draft.value = previous
-      return
+      return false
     }
     mention.reset()
+    return true
   }
 
   function onStop(): void {
@@ -184,6 +221,50 @@ export function useChatPanel() {
       return
     }
     await onSend({ content: turn.content, attachments: turn.attachments })
+  }
+
+  /* ---------- 下一步动作卡片（007 · US2） ---------- */
+
+  /** 待确认的卡片（`null` = 弹窗关闭）；点卡片只**打开弹窗**，不发消息 */
+  const pendingSuggestion = ref<AgentStarter | null>(null)
+  /** 发送进行中：弹窗两个按钮均禁用（连点只发一次） */
+  const suggestionSending = ref(false)
+
+  /**
+   * 点选卡片 → 打开确认弹窗。
+   *
+   * 三处不可用态都**拒绝并且不发送**（007 `FR-025` 的可感知口径）：
+   * - 本轮进行中：`onSend` 的通道已被占用，此时排队发送会让用户搞不清点了什么；
+   * - 未选数字人：明确提示（会话创建也会以 `AGENT_NOT_SELECTED` 兜底）；
+   * - 会话已被删除：交给 `onSend` 走既有降级（`threads.create` 失败会 toast 且保留输入）。
+   */
+  function onPickNextStep(action: AgentStarter): void {
+    if (streaming.value !== null) return
+    if (agents.currentAgent.value === null) {
+      toast.push('error', '请先选择数字人再发送')
+      return
+    }
+    pendingSuggestion.value = action
+  }
+
+  function onCancelSuggestion(): void {
+    pendingSuggestion.value = null
+  }
+
+  /** 确认发送：走**既有** `onSend` 链路（引用校验、建会话、失败还原草稿都在那里） */
+  async function onConfirmSuggestion(): Promise<void> {
+    const action = pendingSuggestion.value
+    if (!action || suggestionSending.value) return
+    suggestionSending.value = true
+    try {
+      // 正文只有提示词；关联工具经 `guidance` 的隐藏通道回传（与问题实例同款）
+      const sent = await onSend(nextStepSendPayload(action), { settleBeforeReturn: false })
+      // 只有真发出去了才关弹窗：被拦下（会话不可用 / 发送失败）时保留提示词，用户可重试或取消；
+      // 一旦发出即关（不等本轮答完）——弹窗不能陪着输出一起挂到结束
+      if (sent) pendingSuggestion.value = null
+    } finally {
+      suggestionSending.value = false
+    }
   }
 
   function onLoadMore(): void {
@@ -407,6 +488,12 @@ export function useChatPanel() {
     onSend,
     onStop,
     onRegenerate,
+    nextSteps,
+    pendingSuggestion,
+    suggestionSending,
+    onPickNextStep,
+    onCancelSuggestion,
+    onConfirmSuggestion,
     onLoadMore,
     onLoadToolResult,
     onRecover,

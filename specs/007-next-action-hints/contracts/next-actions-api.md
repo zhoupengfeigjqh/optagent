@@ -123,17 +123,18 @@
 soul_version: 1
 intro: …
 welcome: …
-next_action_hints: true     # 新增；仅在开启时写
+next_action_hints: true        # 新增；仅在开启时写
+next_action_hints_count: 3     # 新增；与开关同进同出，仅开启时写
 starters: …
 ---
 ```
 
 | 项 | 约束 |
 |---|---|
-| 键名 | `next_action_hints` |
-| 取值 | 布尔；**仅 `true` 时写键**（`false`/缺省不写，沿用"不写空壳"口径） |
+| 键名 | `next_action_hints` / `next_action_hints_count` |
+| 取值 | 开关为布尔、**仅 `true` 时写键**；条数为 1~6 的整数、**仅开关开启时写键**（二者都 `false`/缺省不写，沿用"不写空壳"口径） |
 | 与 System Prompt 的关系 | frontmatter **不进** System Prompt（`stripFrontmatter` 既有保证）⇒ 开关开/关两种产物的 System Prompt MUST 逐字一致（FR-035 快照测试） |
-| 运行侧读取 | `parseSoulMeta` → `SoulMeta.nextActionHints`；缺省/非布尔/解析失败 → `false` |
+| 运行侧读取 | 开关：`parseSoulMeta` → `SoulMeta.nextActionHints`；缺省/非布尔/解析失败 → `false`。条数：`SoulMeta.nextActionHintsCount`；缺省/非整数/越界/解析失败 → `3`（收敛式，`readHintCount`） |
 
 ---
 

@@ -9,6 +9,7 @@
  * | 角色简介 | **只给前台**：数字人切换面板展示 |
  * | 首屏欢迎语 / 问题实例 | **只给前台**：新建对话页的引导（经「快速上手」弹窗编辑） |
  * | 主要使命 / 能力标签 / 绝对禁止 / 补充说明 | **进系统提示词** |
+ * | 下一步动作提示（007） | **运行环境开关**：只写进 SOUL.md 的 frontmatter，由运行环境读取 |
  *
  * 这么分是因为运行环境只把 SOUL.md 的**正文**当作系统提示词
  * （frontmatter 承载展示数据），界面上说清归属，管理员才不会把展示文案
@@ -48,6 +49,28 @@ function patch(partial: Partial<SoulDesign>): void {
 
 function onQuickStartSave(value: { welcome: string; starters: SoulStarter[] }): void {
   patch({ welcome: value.welcome, starters: value.starters })
+}
+
+/**
+ * 条数输入（`type="number"`，min / max 与初值共用 `SOUL_LIMITS`）。
+ *
+ * **拒绝式，与后端同口径**：只有 1~6 的整数才上抛；其余（空 / 小数 / 越界 / 手输字母）
+ * 一律**把输入框弹回当前值**、不产生改动——既避免"界面显示 7、产物写 3"这类错配，
+ * 也不为一次误输入打断保存（保存期后端仍会独立拒绝非法值）。
+ */
+function onHintCountChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const value = Number(input.value)
+  const valid =
+    input.value.trim() !== '' &&
+    Number.isInteger(value) &&
+    value >= SOUL_LIMITS.nextActionHintsMin &&
+    value <= SOUL_LIMITS.nextActionHintsMax
+  if (!valid) {
+    input.value = String(soul.value.next_action_hints_count)
+    return
+  }
+  if (value !== soul.value.next_action_hints_count) patch({ next_action_hints_count: value })
 }
 </script>
 
@@ -166,6 +189,53 @@ function onQuickStartSave(value: { welcome: string; starters: SoulStarter[] }): 
       </button>
     </fieldset>
 
+    <!-- 007：运行期开关。它既不属于"只给前台"也不属于"进系统提示词"，而是**只写进
+         SOUL.md 的 frontmatter**、由运行环境当作功能开关读取，故单独成区并写明去向，
+         避免管理员误以为它会影响模型行为 -->
+    <fieldset class="soul-editor__next-steps">
+      <legend class="field__label">
+        下一步动作提示
+        <span class="soul-editor__scope">运行环境开关</span>
+      </legend>
+      <label class="soul-editor__switch">
+        <input
+          type="checkbox"
+          data-test="next-action-hints"
+          :checked="soul.next_action_hints === true"
+          @change="patch({ next_action_hints: ($event.target as HTMLInputElement).checked })"
+        />
+        是否开启下一步动作提示
+      </label>
+      <!-- 开关的**参数**：关闭时**置灰且不可填写**（`disabled`），但**不回退数值**——
+           管理员先前填的数字被保留，再次打开即恢复，不必重填（它只在开启时才写进产物） -->
+      <label
+        class="soul-editor__count"
+        :class="{ 'soul-editor__count--off': soul.next_action_hints !== true }"
+        for="soul-next-action-hints-count"
+      >
+        <span>每轮最多提示条数</span>
+        <input
+          id="soul-next-action-hints-count"
+          data-test="next-action-hints-count"
+          type="number"
+          :min="SOUL_LIMITS.nextActionHintsMin"
+          :max="SOUL_LIMITS.nextActionHintsMax"
+          step="1"
+          :value="soul.next_action_hints_count"
+          :disabled="soul.next_action_hints !== true"
+          @change="onHintCountChange"
+        />
+        <span class="field__hint">
+          可填 {{ SOUL_LIMITS.nextActionHintsMin }}~{{ SOUL_LIMITS.nextActionHintsMax }} 的整数，
+          缺省 {{ SOUL_LIMITS.nextActionHintsDefault }} 条；关闭开关时该数值保留、不写进产物。
+        </span>
+      </label>
+      <p class="field__hint" data-test="next-action-hints-hint">
+        开启后，该数字人每一轮回答的下方会出现最多 {{ soul.next_action_hints_count }} 条可点击的下一步动作卡片（点击即经确认发起下一轮）。
+        关闭则部署后该功能消失：<strong>产物里不会写这个键</strong>，运行环境不会为此多做一次模型调用。
+      </p>
+    </fieldset>
+
     <QuickStartDialog
       v-model:open="quickStartOpen"
       :welcome="soul.welcome"
@@ -205,6 +275,52 @@ function onQuickStartSave(value: { welcome: string; starters: SoulStarter[] }): 
   border: 1px solid var(--color-border, #dfe3ea);
   border-radius: var(--radius-md);
   padding: var(--space-3);
+}
+
+.soul-editor__next-steps {
+  border: 1px solid var(--color-border, #dfe3ea);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+/* 布尔开关：原生 checkbox（与 `ScenarioFieldDialog` 的「必填」同款），
+   整行可点——点击文字也能切换，不必精确命中那个小方块 */
+.soul-editor__switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+/* 开关的条数参数：与开关同区、紧随其后；`disabled` 由模板按开关状态控制 */
+.soul-editor__count {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  cursor: pointer;
+}
+
+.soul-editor__count input {
+  width: 6em;
+}
+
+/* 关闭开关时：条数输入**置灰且不可填写**（`disabled` 由模板控制），
+   行内文字与手型一并弱化——让"这个数字当前不生效"一眼可见 */
+.soul-editor__count input:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-bg-muted, #f2f4f8);
+  cursor: not-allowed;
+}
+
+.soul-editor__count--off {
+  cursor: default;
+  color: var(--color-text-muted);
+}
+
+.soul-editor__count .field__hint {
+  flex-basis: 100%;
 }
 
 .soul-editor__summary {

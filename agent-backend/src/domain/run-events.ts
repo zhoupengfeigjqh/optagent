@@ -37,6 +37,19 @@ export type SsePayload =
         message_id: string | null;
         /** 本轮回答的数字人（会话可跨数字人） */
         agent_name: string;
+        /**
+         * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
+         * 卡片与回答同流产出，`done` 时已就绪，故随事件直推（前端不再轮询拉取）。
+         * 无卡片（开关关闭 / 模型未输出块 / 解析失败）时字段缺省。
+         */
+        next_actions?: {
+          message_id: string;
+          actions: Array<{
+            prompt: string;
+            tools: Array<{ kind: 'builtin' | 'mcp'; name: string; service?: string; exposed_name: string }>;
+            guidance: string;
+          }>;
+        };
       };
     }
   | {
