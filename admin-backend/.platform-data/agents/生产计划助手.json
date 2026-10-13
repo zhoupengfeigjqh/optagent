@@ -67,9 +67,7 @@
     "hd-algorithm",
     "ocr"
   ],
-  "skills": [
-    "海大算法求解"
-  ],
+  "skills": [],
   "scenario": {
     "scenario": "海大计划",
     "data_prep_dirs": [
@@ -275,5 +273,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-12T14:59:24.842Z"
+  "updated_at": "2026-10-13T02:09:08.710Z"
 }
