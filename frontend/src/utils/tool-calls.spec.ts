@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Message, ToolCallRecord } from '../api/types'
 import {
+  collectToolViewLinks,
   formatArgsDigest,
   formatBytes,
   formatDuration,
@@ -24,6 +25,53 @@ import {
 function item(over: Partial<ToolCallItem> = {}): ToolCallItem {
   return { callId: 'c1', name: 'read_file', status: 'success', ...over }
 }
+
+describe('tool-calls —— 视图链接（TR-44 / TR-45）', () => {
+  it('记录里的 view_links 透传为展示模型（snake_case 转换集中在此）', () => {
+    const record: ToolCallRecord = {
+      call_id: 'c1',
+      name: 'hd__排产结果',
+      status: 'success',
+      started_at: '2026-10-10T00:00:00.000Z',
+      view_links: [{ url: '/a' }, { url: '/b', name: 'B 明细' }],
+    }
+
+    expect(toToolCallItem(record).viewLinks).toEqual([
+      { url: '/a' },
+      { url: '/b', name: 'B 明细' },
+    ])
+  })
+
+  it('没有 view_links 时不产生该字段（不写空数组，与"后端不下发"一致）', () => {
+    const record: ToolCallRecord = {
+      call_id: 'c1',
+      name: 'read_file',
+      status: 'success',
+      started_at: '2026-10-10T00:00:00.000Z',
+    }
+
+    expect(toToolCallItem(record).viewLinks).toBeUndefined()
+  })
+
+  it('并集按工具调用顺序拼接（**去重不在这里做**：那是 view-link 的唯一职责）', () => {
+    const items = [
+      item({ callId: 'c1', viewLinks: [{ url: '/a' }] }),
+      item({ callId: 'c2', viewLinks: [{ url: '/b' }, { url: '/a' }] }),
+    ]
+
+    expect(collectToolViewLinks(items)).toEqual([{ url: '/a' }, { url: '/b' }, { url: '/a' }])
+  })
+
+  it('流式瞬态没有结果 → 空数组（入口行因此不会在流式期出现）', () => {
+    const streaming = streamingToolCallItem({ call_id: 'c1', name: 'x', status: 'running' })
+
+    expect(collectToolViewLinks([streaming])).toEqual([])
+  })
+
+  it('无调用时返回空数组（调用方无需判空）', () => {
+    expect(collectToolViewLinks([])).toEqual([])
+  })
+})
 
 describe('tool-calls —— 状态文案（TR-17 / TR-33）', () => {
   it('终态文案与 live 无关', () => {

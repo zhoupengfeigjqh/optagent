@@ -15,6 +15,7 @@ import { buildAgentArtifact, buildMcpServerEntry, buildUserArtifacts } from '../
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let root: string;
 let store: PlatformStore;
@@ -39,7 +40,7 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
 function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocument {
   return {
     name: 'demo',
-    soul: '你是助手\n第二行\n',
+    soul: soulDesign('你是助手\n第二行'),
     enabled_tools: ['read_file'],
     mcp_services: [],
     skills: [],
@@ -189,7 +190,11 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       'TOOL.json',
       'scenario.json',
     ]);
-    expect(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content).toBe('你是助手\n第二行\n');
+    // 004：SOUL.md 不再是原样透传，而是**渲染产物**（frontmatter + 提示词正文）
+    const soulMd = String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+    expect(soulMd.startsWith('---\nsoul_version: 1')).toBe(true);
+    expect(soulMd).toContain('intro: 测试用简介');
+    expect(soulMd).toContain('## 主要使命\n\n你是助手\n第二行');
     expect(JSON.parse(String(artifact.files.find((f) => f.relPath === 'TOOL.json')?.content))).toEqual({
       enabled: ['read_file'],
     });
@@ -230,6 +235,39 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     expect(
       JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
     ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] });
+  });
+
+  it('007：下一步动作提示开关**只影响 SOUL.md 的两行 frontmatter**（开关 + 条数），正文与其余三件套逐字一致', () => {
+    const off = buildAgentArtifact(design(), { mcpConfigs, skills });
+    const on = buildAgentArtifact(
+      design({ soul: soulDesign('你是助手\n第二行', { next_action_hints: true }) }),
+      { mcpConfigs, skills },
+    );
+
+    const soulOf = (artifact: typeof off) => String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+    const offMd = soulOf(off);
+    const onMd = soulOf(on);
+
+    expect(offMd).not.toContain('next_action_hints');
+    expect(onMd).toContain('next_action_hints: true');
+    expect(onMd).toContain('next_action_hints_count: 3');
+    // 差异恰好两行（开关 + 条数）：删掉这两行，开启态与关闭态逐字相同
+    const stripSwitch = (md: string) =>
+      md
+        .split('\n')
+        .filter((line) => !line.startsWith('next_action_hints'))
+        .join('\n');
+    expect(stripSwitch(onMd)).toBe(stripSwitch(offMd));
+    expect(onMd.split('\n').length - offMd.split('\n').length).toBe(2);
+    // 正文（模型看到的系统提示词）逐字一致 ⇒ FR-035
+    expect(onMd.slice(onMd.indexOf('## 主要使命'))).toBe(offMd.slice(offMd.indexOf('## 主要使命')));
+
+    // 其余三件套与开关无关（配置面变更不得扩散到别的产物）
+    for (const relPath of ['TOOL.json', 'MCP.json', 'scenario.json']) {
+      expect(on.files.find((f) => f.relPath === relPath)?.content).toBe(
+        off.files.find((f) => f.relPath === relPath)?.content,
+      );
+    }
   });
 
   it('未配置任何 MCP 服务时写空 servers 数组（MUST NOT 缺字段）', () => {

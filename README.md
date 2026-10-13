@@ -306,6 +306,161 @@ TypeSafe System One 决策模型（Jev）的 MCP 封装：把「state + 类型�
 
 nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口。
 
+## MCP 服务配置详解
+
+> 本节是**字段级参考**（每个字段的含义、取值域、判据与常见故障）；操作步骤见
+> [§6 把 MCP 服务接入数字人](#6-把-mcp-服务接入数字人数字人平台)，异步回写协议见
+> [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
+
+### 配置的权威源与流转
+
+- **唯一权威源是数字人管理平台**（`admin-backend`）：服务配置落在 `PLATFORM_DATA_DIR` 下的
+  `mcp-services.json`（按服务名索引）。字段模型 `admin-backend/src/domain/mcp/service-config.ts`，
+  判据与归一 `service-config-fields.ts`。
+- 数字人**设计态只存服务名**（`mcp_services: string[]`）——`transport` / `url` / `headers` /
+  `file_args` / `confirmation` / … 全部取自**服务级**配置，因此改一处即作用于所有引用它的数字人。
+- 部署时按数字人**整体物化**出 `MCP.json`（平台未搭配的内容不残留），落点：
+
+```text
+.opt-agent/users/{uid}/agents/{agent}/MCP.json
+```
+
+- **MUST NOT 手工编辑该文件**：它是部署产物，下次部署按平台设计态整体覆盖（见 §6）。
+
+### 字段总表（平台侧）
+
+| 字段 | 必填 / 默认 | 取值与判据 | 作用 |
+|---|---|---|---|
+| `name` | 必填 | 字母、数字、下划线或连字符，1~64 字符 | 服务名，成为运行环境的**工具前缀**（`{name}__{工具名}`） |
+| `description` | 缺省空串 | 任意文本 | 平台卡片上的用途描述 |
+| `transport` | 必填 | `http`（界面文案 `streamable-http`）或 `stdio`；别名自动归一 | 传输方式，**只有这两种**（不支持 SSE） |
+| `url` | `transport=http` 必填 | `http(s)://` 开头的可达地址 | 连接地址：容器内互访用服务名，宿主机服务用 LAN IP（见 §6 的表） |
+| `command` / `args` | `stdio` 必填 `command` | 非空字符串 / 字符串数组 | `stdio` 服务的启动命令与参数 |
+| `headers` | 缺省 `{}` | `{头名: 值}`；头名须为合法 token，值为单行非空字符串 | `http` 服务的**请求头 / 访问令牌**（如 `X-MCP-Token`） |
+| `allowed_tools` | **新建必填非空**，之后不可改 | 该服务**原始工具名**清单（不含 `{server}__` 前缀） | 工具白名单：平台只呈现这些工具，运行环境只把它们挂给数字人 |
+| `file_args` | 缺省 `{}` | `{工具名: {取值路径: 模式}}`，模式为 `url` 或 `url:from=<来源路径>` | 把文件空间相对路径铸成**签名直链**后注入工具入参 |
+| `confirmation` | 缺省 `never` | `never` / `always` / `{tools: string[]}` | 调用前是否弹 **HITL 参数确认窗** |
+| `rules_fields` | 缺省 `{}` | `{工具名: 字段名或对象路径}` | 声明哪个入参承载「算法规则」清单，供 HITL 弹窗提供「从算法规则选择」入口 |
+| `async_tools` | 缺省 `[]` | 该服务原始工具名清单 | 声明后运行环境为这些工具注入 `resultUrl`（异步回写） |
+
+> 平台侧还有一组**遗留字段**（`writable` / `permission_scope`）已在 2026-09-15 移除、不再透出；
+> 运行端加载仍兼容 `write` / `permission_boundary`（仅对历史上的手工配置有意义）。
+
+### 各字段要点
+
+**`transport`**：`http` 即 **Streamable HTTP**。它是**无状态**的——服务被停掉时没有可靠的 close
+信号，所以断线靠**探针**发现（见下"运行端行为"）；`stdio` 由运行端按 `command` 拉起。
+写 `sse` 会被拒（未支持）。
+
+**`headers`（访问令牌）**：仅 `http` 有意义（`stdio` 保存期即丢弃）。响应只回**掩码**
+（如 `6UuE…F3Z`），列表只给 `has_headers` 布尔量；**掩码不能当值提交**（保存期直接拒绝）。
+保存时**不携带 = 沿用存量**、提供 = **全量替换**（`{}` 即清空）。完整纪律见
+[§凭据纪律](#凭据纪律请求头--访问令牌)。
+
+**`allowed_tools`（工具白名单）**：新建流程 = 连上服务 → 勾选 → 创建，**至少勾一个**
+（漏传即拒，避免留下"全部工具放行"的服务）。**创建后不可修改**：保存时携带 `allowed_tools`
+直接 `409 ADM_MCP_TOOL_SCOPE_LOCKED`，要改只能**删除服务后重建**。空数组 = 不限制，
+只为兼容白名单上线前的存量服务（新创建不可能产出空数组）。
+
+**`file_args`（URL 铸造）**：
+
+| 项 | 说明 |
+|---|---|
+| 取值路径语法 | `image`（顶层参数）、`files[]`（字符串数组逐元素）、`items[].excelFileUrl`（对象数组元素字段）、`groups[].files[].url`（多级）；**不支持下标**（`a[0]` 非法） |
+| 模式 `url` | 模型填**相对路径**，运行端原位铸成签名直链；已是 `http(s)://` 的值**原样透传** |
+| 模式 `url:from=<来源路径>` | **派生模式**：目标字段的值由运行端从来源字段推导、**无条件覆盖**模型填写、且对模型**隐藏**——用于根治模型对 http 地址字段的幻觉 |
+| 相容性 | 派生模式的来源与目标**形状必须相容**（同长度、除最后一段外逐段一致），否则保存被拒 |
+| 不声明的后果 | 该参数会把模型原样填的相对路径发给服务 → 服务侧报"收到相对路径" |
+
+**`confirmation`（HITL 闸门）**：`never`（默认）= 直跑；`always` = 该服务**全部工具**调用前都弹确认窗；
+`{tools:[...]}` = 仅列出的**原始工具名**需确认。命中即"执行前挂起、等用户确认参数"，确认后才真正调用。
+> **写操作类工具应设 `always`**：`docs/architecture/review-2026-10-08.md` 记录过一个
+> `confirmation = never` 的写操作服务（模型可无确认写业务系统），列为 P0 待办。
+
+**`rules_fields`（算法规则参数）**：`{工具名: 字段名或对象路径}`，如 `rules` 或
+`input.targetPriorities`（**不支持数组段**）。声明后该字段在 HITL 确认窗出现「从算法规则选择」入口。
+**它不改变是否走 HITL**：`confirmation: never` 时本映射不生效（工具未被包装，没有挂起点）。
+
+**`async_tools`（后台计算）**：填**原始工具名**（不含 `{server}__` 前缀）。声明后运行端为这些工具注入
+签名写直链 `resultUrl`，服务算完 POST 回写 → 落 `临时空间/后台产出/` → 前端铃铛「后台记录」，
+模型可在后续对话中读取。**不改变工具是否同步、也不改变是否走 HITL**。
+
+### 部署产物 `MCP.json` 的结构
+
+**只有非空字段才写入**（空对象 / 空数组 = 缺省语义，不写空壳），所以运行端"字段缺席"就等于"不启用"：
+
+```jsonc
+{
+  "servers": [
+    {
+      "name": "jev",                     // 必写
+      "transport": "http",               // 必写（规范值 http）
+      "url": "http://jev:8000/mcp",      // http：必写；stdio 则为 command（+ 可选 args）
+      "headers": { "X-MCP-Token": "…" }, // 非空才写（明文，运行端按原样发送）
+      "file_args": { "noul": { "state_file": "url" } }, // 非空才写
+      "confirmation": "always",          // ≠ never 才写
+      "rules_fields": { "noul": "input.targetPriorities" }, // 非空才写
+      "async_tools": [ "solve" ],        // 非空才写（原始工具名，**不含** {server}__ 前缀）
+      "allowed_tools": [ "noul", "choice" ] // 非空才写
+    }
+  ]
+}
+```
+
+运行端加载在 `agent-backend/src/domain/agent-instance.ts`（**手写校验，与平台同构**，无独立
+JSON Schema）；缺字段一律按"不启用"处理，配置损坏时**跳过该数字人并告警**。
+
+> 已登记待办：物化文件**无 `schema_version`**（跨端契约无版本）、令牌**明文**下发运行端、
+> 平台**无鉴权**——均见 `docs/architecture/review-2026-10-08.md`。
+
+### 运行端行为与默认参数
+
+| 项 | 行为 / 默认值 | 位置 |
+|---|---|---|
+| 工具名 | `{服务名}__{工具名}`；界面标签 `服务名: 工具名` | `infra/mcp/mcp-tool-adapter.ts` |
+| 白名单 | 未声明或空数组 = 不限制；否则只挂白名单内工具 | `infra/mcp/mcp-tool-scope.ts` |
+| 连接状态 | `connected` / `failed` / `unknown` | `infra/mcp/mcp-manager.ts` |
+| 断线退避 | 5s → 15s → 30s → 60s → 60s，用尽后**不停**，转入保活重试（每 **120s**），服务恢复自动接回 | `infra/mcp/mcp-manager.ts` |
+| 健康探测 | 每 **60s** 一次：优先 MCP `ping`，遇 `-32601 Method not found` 记下该服务并回退 `listTools` | `infra/mcp/mcp-manager.ts` + `server.ts` |
+| 工具调用超时 | 默认 **60s**（`MCP_TIMEOUT_MS`），超时后**重试 1 次** | `config.ts` |
+| 内置工具 | 数字人目录下 `TOOL.json`（`{"enabled":[…]}`）；与 MCP 工具进**同一张工具表**，靠 `{服务名}__` 前缀区分 | `domain/agent-instance.ts` |
+
+### 平台侧接口与错误码
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/mcp/services` | 列表（分页） |
+| GET | `/api/admin/mcp/services/:name` | 详情（工具清单、引用、`revision`） |
+| POST | `/api/admin/mcp/probe` | 新建**前**探测工具清单（不要求已登记） |
+| POST | `/api/admin/mcp/services` | 新建（`201`；`allowed_tools` 必填） |
+| PUT | `/api/admin/mcp/services/:name` | 保存调用配置（**`revision` 必填**，乐观锁） |
+| DELETE | `/api/admin/mcp/services/:name` | 删除（`204`） |
+| POST | `/api/admin/mcp/services/:name/test` | 连通性 + 能力验证 |
+| GET | `/api/admin/mcp/stats` | 调用统计 |
+
+| 错误码 | HTTP | 触发 |
+|---|---|---|
+| `VALIDATION_FAILED` | 400 | 名称 / `url` / `transport` / `headers` / `file_args` / `confirmation` / `async_tools` / `revision` 不合法 |
+| `ADM_MCP_SERVICE_EXISTS` | 409 | 新建重名 |
+| `ADM_MCP_TOOL_SCOPE_LOCKED` | 409 | 保存时携带 `allowed_tools`（白名单只在创建时设定） |
+| `ADM_MCP_SERVICE_NOT_FOUND` | 404 | 服务不存在 |
+| `ADM_RUNTIME_UNREACHABLE` | 503 | 连接 / 测试失败 |
+
+> **删除不阻止引用**：删除会先列出受影响的数字人（见 §6）；删除后这些引用变为失效，
+> 引用它的数字人**部署会被 precheck 拦截**（部署前校验引用有效性）。
+
+### 常见故障对照
+
+| 现象 | 原因与处置 |
+|---|---|
+| 新建时服务直接回 **401** | 服务需要访问令牌：在「请求头」填 `{"X-MCP-Token":"…"}`（见 §凭据纪律） |
+| 服务报"收到的是相对路径" | 该出参没在 `file_args` 里声明 → 补 `{工具名: {"参数字段": "url"}}` |
+| 模型编造 http 地址 | 改用派生模式 `url:from=<来源路径>`（覆盖模型填写且对其隐藏） |
+| 异步工具算完，界面上没有条目 | 该工具没登记进 `async_tools`；或服务 schema 未声明 `resultUrl`（运行端告警但不阻断） |
+| 想调整白名单 | 创建后不可改：删除服务后重建，并重新部署引用它的数字人 |
+| 服务停过又起来，工具仍是不可用 | 已修：退避用尽会转保活重试（每 120s）并自动接回，**无需重启 agent-backend**（规格 `specs/002-conversation-runtime/spec.md` §4.5） |
+| 结果里想给个可点开的地址 | 工具返回的 JSON 里加 `viewUrl` / `viewUrlName`（见 §6 末的说明） |
+
 ## 环境要求
 
 - Node.js >= 20
@@ -401,6 +556,24 @@ npm run dev
 运行环境便会为这些工具注入 `resultUrl`，服务立即返回受理、算完后 POST 回写；结果落盘到
 `临时空间/后台产出/` 并由前端铃铛「后台记录」呈现，模型可在后续对话中读取。回写形状（`status` 只有
 `success` / `failed` + `summary`）与完整示例见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md)。
+
+> **需要链接跳转时，请在工具返回里加上 `viewUrl` 与 `viewUrlName` 字段**，方便工具调用后的结果展示：
+>
+> - `viewUrl`（必给）：可跳转的页面地址，**二选一**——**根相对路径**（**单个** `/` 开头，如
+>   `/datasource/ds1/dst1/t1/xlsx`）或**完整 `http(s)://` 地址**。协议相对（`//host/…`）、
+>   缺前导 `/`、`javascript:` / `data:` 等其它 scheme **不会被链接化**；
+> - `viewUrlName`（可选，**必须与 `viewUrl` 同层**）：入口显示的**名称**；不提供就显示地址本身。
+>
+> 前提：**结果正文须是一个合法 JSON 对象或数组**（`viewUrl` 可在任意层级，深度 ≤8）——纯文本、CSV、
+> 或 JSON 之外还夹着说明文字、带 BOM 的文本都不会被解析。带上该字段后，工具调用会在**回答正文之后**
+> 多出一行可点入口（最多直接显示 3 个，其余走「另有 N 个」），工具卡片的结构化视图里该地址也会变成链接。
+> 平台**不改写值、不拼前缀**（根相对路径的前缀由界面按用户当前访问入口补）。
+>
+> 完整约定（含**不会被链接化**的各种形态）见 [`异步MCP服务接入约定.md`](./异步MCP服务接入约定.md) §4.7
+> ——同步返回与异步回写用**同一口径**；规格依据 `specs/002-conversation-runtime/spec.md` §4.8（`TR-44`~`TR-48`）。
+
+**字段级参考**（每个字段的含义 / 取值域 / 判据，以及平台接口、错误码、运行端默认参数与常见故障对照）
+见 [MCP 服务配置详解](#mcp-服务配置详解)。
 
 ### 7. 从本体平台提取本体 / 技能 / MCP 服务（可选）
 

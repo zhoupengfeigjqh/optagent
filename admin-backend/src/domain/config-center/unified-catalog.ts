@@ -98,6 +98,10 @@ export class UnifiedCatalog {
         builtinTools: new Set(tools),
         mcpServices: new Set(this.mcpServiceNames()),
         skills: new Set(this.skillNames()),
+        // 004：问题实例关联工具需要知道"每个 MCP 服务有哪些可见工具"
+        mcpTools: new Map(
+          this.deps.mcpConfigs.listAll().map((config) => [config.name, new Set(config.allowed_tools)]),
+        ),
       },
       toolsUnavailableReason,
     };

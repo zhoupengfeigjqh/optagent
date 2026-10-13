@@ -62,14 +62,16 @@ export default defineConfig({
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-08 实测：stmts 49.70 / branch 56.76 / funcs 39.95 / lines 48.53
-        //    （工具调用折叠展示增量：`utils/tool-calls.ts` 补同名测试 + 新增 `composables/useToolPanels.ts`
-        //     后整体上行，地板随之抬到实测值略下方；上一版为 45/52/34/44 @ 2026-09-23）
+        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 60.05 / branch 64.98 / funcs 49.20 / lines 59.36
+        //    （007「下一步动作提示」增量：新增 `utils/next-steps` / `api/next-steps` /
+        //     `composables/useNextSteps` 三个模块并补测至满覆盖，整体上行，地板随之抬到实测值略下方；
+        //     上一版为 53/59/42/52 @ 2026-10-12（`@` 引用浮层与 HITL 口径统一），
+        //     再上一版 48/55/38/47 @ 2026-10-08，45/52/34/44 @ 2026-09-23）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 48,
-        branches: 55,
-        functions: 38,
-        lines: 47,
+        statements: 59,
+        branches: 63,
+        functions: 48,
+        lines: 58,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -80,7 +82,7 @@ export default defineConfig({
         'src/utils/sse-parser.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.55 / 92.30 / 100 / 96.55
         // HITL 递归表单三件套（2026-09-23）：路径读写、schema 内省、值校验与提交构建
         'src/utils/json-path.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 98.07 / 95.12 / 100 / 100
-        'src/utils/arg-schema.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 95.65 / 94.11 / 100 / 97.10
+        'src/utils/arg-schema.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.19 / 94.73 / 100 / 97.43
         'src/utils/arg-values.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 97.89 / 91.75 / 100 / 100
         'src/composables/useInteractionForm.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.33 / 83.63 / 100 / 100
         // 后台产出展示（2026-09-25 / 26）：元数据格式化 + 正文展示解析
@@ -89,6 +91,15 @@ export default defineConfig({
         // 工具调用的折叠展示（2026-10-08）：展示模型纯函数 + 跨组件实例的查看态
         'src/utils/tool-calls.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 93.75 / 100 / 100
         'src/composables/useToolPanels.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        // 产出正文的视图链接（2026-10-10，TR-40~TR-43）：viewUrl 字段判定 + 值归一化（唯一实现）
+        'src/utils/view-link.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // `@` 引用浮层（2026-10-12，FR-102~106 / TR-01~02）：坐标计算纯函数 + 光标测量
+        'src/utils/popup-position.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/utils/caret-rect.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 92.85 / 100 / 100
+        // 下一步动作提示（2026-10-12，007）：拉取时刻表与可见性判定 + 窗口调度 + 只读拉取封装
+        'src/utils/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/composables/useNextSteps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/api/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
       },
     },
   },

@@ -53,7 +53,7 @@ const router = createRouter({
 
 
 //全局前置守卫：必须登录后才能进入问答页面
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
     //标题
     // if (to.meta.title) {
     //     document.title = to.meta.title

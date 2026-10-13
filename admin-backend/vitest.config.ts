@@ -20,12 +20,13 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/types.ts', '**/*.d.ts'],
       thresholds: {
-        // ① 全局地板（防倒退）。实测：stmts 94.14 / branch 84.16 / funcs 95.83 / lines 95.4
+        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 93.20 / branch 84.24 / funcs 95.71 / lines 94.45
+        //    （007 按 T066 复核后上调：上一版 90/80/90/90 对现状过于宽松）
         //    地板只可上调（原则三 / 治理 § 不追溯）。
-        statements: 90,
-        branches: 80,
-        functions: 90,
-        lines: 90,
+        statements: 91,
+        branches: 82,
+        functions: 94,
+        lines: 93,
 
         // ② 受宪章 80% 门禁约束的模块（本次新增/改动且已被充分覆盖）
         'src/domain/error-codes.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },

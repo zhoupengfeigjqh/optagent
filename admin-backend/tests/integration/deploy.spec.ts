@@ -19,6 +19,7 @@ import {
   snapshotTree,
   type TestFixture,
 } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let fx: TestFixture;
 
@@ -56,7 +57,7 @@ async function createAgent(body: Record<string, unknown>): Promise<void> {
 function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: 'demo',
-    soul: '你是一名生产计划助手。\n第二行。',
+    soul: soulDesign('你是一名生产计划助手。\n第二行。'),
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
@@ -230,7 +231,8 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
 describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
   it('校验不过 → 运行环境零写入，且一次性列出全部错误项 + 指明用户与数字人', async () => {
     // 制造两类错误：SOUL 为空（config_integrity）+ 失效引用（reference_validity）
-    await createAgent(baseAgent({ name: 'broken', soul: 'x', skills: [] }));
+    // 创建成功后再手工改坏；下面写入的**字符串** soul 同时覆盖"存量文档兼容"路径
+    await createAgent(baseAgent({ name: 'broken', soul: soulDesign('x'), skills: [] }));
     // 直接改写设计态文档以模拟"已保存但后来失效"的引用 + 被清空的 SOUL
     fx.ctx.store.writeJson('agents/broken.json', {
       name: 'broken',

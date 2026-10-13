@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let fx: TestFixture;
 
@@ -45,7 +46,7 @@ async function createAgent(name: string, mcpServices: string[]): Promise<void> {
     url: '/api/admin/agents',
     payload: {
       name,
-      soul: 'x',
+      soul: soulDesign('x'),
       enabled_tools: [],
       mcp_services: mcpServices,
       skills: [],

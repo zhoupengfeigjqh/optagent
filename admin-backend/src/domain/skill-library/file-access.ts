@@ -16,6 +16,7 @@ import path from 'node:path';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
+import { removeTree } from '../../infra/fs-remove.js';
 import { normalizeEntryName, unsafeEntryReason } from './archive.js';
 import { parseSkillMetadata } from './metadata.js';
 
@@ -295,7 +296,8 @@ function writeAtomicFile(deps: SkillFileDeps, abs: string, bytes: Buffer): void 
       }
     }
     try {
-      fs.rmSync(tmp, { force: true });
+      // 临时文件名带技能文件名（可能是中文），同样不能走 `fs.rmSync`（见 fs-remove.ts）
+      removeTree(tmp);
     } catch {
       /* 清理临时文件失败不影响报错语义 */
     }

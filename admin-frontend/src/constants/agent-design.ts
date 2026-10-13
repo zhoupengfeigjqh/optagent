@@ -1,7 +1,7 @@
 /**
  * 数字人设计区的常量。
  */
-import type { AgentScenario } from '../api/types'
+import type { AgentScenario, SoulDesign } from '../api/types'
 
 /**
  * "新建数字人"的路径哨兵。
@@ -11,6 +11,16 @@ import type { AgentScenario } from '../api/types'
  * 是为了保持**功能区内导航不超过两级**（`FR-053`）。
  */
 export const NEW_AGENT_SENTINEL = '__new__'
+
+/**
+ * 数字人名称的长度上限与提示文案（`FR-015`）。
+ *
+ * 与 `admin-backend` `domain/config-center/naming.ts` 的 `isSafeName` MUST 同步
+ * （名称最终成为设计态文件名 `.platform-data/agents/{name}.json`）。
+ */
+export const AGENT_NAME_MAX_LENGTH = 64
+
+export const AGENT_NAME_HINT = '不得含路径分隔符或 “..”，且不可与既有数字人重名'
 
 /** 五类配置在编辑器内的分区（页签）标识 */
 export const AGENT_DESIGN_TABS = [
@@ -34,4 +44,50 @@ export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const
 /** 空场景（新建时的初值）：带预定义目录，无字段约束 */
 export function emptyScenario(): AgentScenario {
   return { scenario: '', data_prep_dirs: [...PREDEFINED_DATA_PREP_DIRS], data_prep_fields: {} }
+}
+
+/**
+ * 结构化 SOUL 的字段上限（004）。
+ *
+ * 与 `admin-backend` `domain/config-center/soul-design.ts` 的 `SOUL_LIMITS`
+ * MUST 同步：前端用它做 maxlength 与计数提示，后端用它做保存校验，
+ * 两侧不同步会造成"界面允许输入、保存却被拒"的割裂体验。
+ */
+export const SOUL_LIMITS = {
+  intro: 100,
+  welcome: 100,
+  starterPrompt: 150,
+  starters: 12,
+  toolsPerStarter: 10,
+  mission: 4000,
+  promptExtra: 4000,
+  /**
+   * 下一步动作提示条数（007）：下限、上限与缺省。
+   * 输入框的 `min` / `max` 与初值共用这组数字，后端 `readPositiveInt` 用同一组做拒绝式校验。
+   */
+  nextActionHintsMin: 1,
+  nextActionHintsMax: 6,
+  nextActionHintsDefault: 3,
+  listItems: 20,
+  listItemLength: 100,
+  capabilityTagLength: 20,
+} as const
+
+/** 空结构化 SOUL（新建数字人时的初值） */
+export function emptySoulDesign(): SoulDesign {
+  return {
+    intro: '',
+    welcome: '',
+    starters: [],
+    mission: '',
+    capability_tags: [],
+    forbidden: [],
+    prompt_extra: '',
+    // 007：新建默认关闭。**这个键必须显式写出**——`useAgentDesign.dirty` 用
+    // `JSON.stringify(draft.soul) !== JSON.stringify(emptySoulDesign())` 判"是否有输入"，
+    // 漏了字段会让"只勾了这个开关"或"什么都没填"的两种状态判反
+    next_action_hints: false,
+    // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与后端 `emptySoulDesign()` 不等
+    next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
+  }
 }

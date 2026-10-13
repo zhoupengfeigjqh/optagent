@@ -44,6 +44,10 @@
 | **外置结果** | 体积 > 内联阈值的结果，正文存于临时空间，记录行只留体积与摘要 |
 | **回灌** | 组 prompt 时把工具结果投影进 messages（**不落盘**） |
 | **索引** | 组 prompt 时注入 systemPrompt 的外置结果清单（名称·体积·摘要·路径） |
+| **视图链接** | 产出正文里**字段名**为 `viewUrl` 的字符串值：服务给出的"可跳转页面地址"（`TR-40`） |
+| **归一化** | 把 `viewUrl` 值转成可点地址：已带 `http(s)://` 前缀则**原样**，根相对路径（单个 `/`）则补**当前页面入口**（`TR-41`） |
+| **视图入口** | 由**工具结果正文**里的 `viewUrl` 抽出的 sidecar 字段（`view_links` = `{ url, name? }[]`），随工具记录落盘与下发，在**回答正文之后**渲染为可点入口（`TR-44`~`TR-48`） |
+| **视图链接名称** | 与 `viewUrl` **同层**的可选字段 `viewUrlName`：服务给的展示名；缺失时界面显示地址（`TR-46`） |
 
 ## 4. 功能需求
 
@@ -139,6 +143,81 @@
 | **TR-35** | 明细区列出**本轮全部**调用，**时间正序（最早在上）**，每条仍可展开自己的结果。**只有 1 次**调用时**不设折叠层**——该卡片即全部，保持"一次点击看结果"（否则单工具从 1 次点击退化为 2 次） | 组件测试：单条行为与改版前一致 |
 | **TR-36** | **查看态跨"流式 → 历史"交接保持**：明细是否展开、各条结果是否展开、已懒加载的正文。理由：流式气泡的合成消息 `id` 为空串、列表按 `key=message.id` 渲染，交接时组件重建，组件内状态必丢——表现为"刚展开的明细与正文在回答结束瞬间自己收回去"。故查看态提升为**页面级、按 `call_id` 记忆**；**不持久化**（刷新即回到收起态），切换会话不清空（键唯一，不会串味） | 组件测试：展开 → 卸载 → 同数据重新挂载 → 仍展开，且**不重复请求**外置正文 |
 
+### 4.7 产出正文的视图链接（2026-10-10 补充）
+
+**问题**：异步产出（R11）的正文里，服务会带一个 `viewUrl` 字段，值是**已经生成好的跳转地址，但常常缺 `http://host:port` 前缀**（只有路径）。缺前缀时它只是一串**死文本**——用户看得见、点不动；而"这个字段能不能点"不该由服务是否记得拼前缀决定。
+
+**处置**（**纯前端展示层**；端点、SSE、`viewUrl` 的落盘口径**零变更**）：
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-40** | 结构化视图（`ProducedJsonView`）渲染标量时，若其**字段名**为 `viewUrl`（大小写不敏感）且值是**字符串**，则渲染为**链接**（链接文本 = 值本身），`target="_blank"` + `rel="noopener noreferrer"`。**任意层级生效**（对象行、嵌套对象、对象数组表格单元格）。判定**只按字段名**，MUST NOT 按"值像不像 URL"判定（否则正文里任何形如 `/api/…` 的普通字段都会被误链接化） | 组件测试：对象行 / 嵌套 / 表格单元格各 1 例；非 `viewUrl` 字段不链接化 1 例 |
+| **TR-41** | 值**归一化**（唯一实现：`frontend/src/utils/view-link.ts`）：① 以 `http://` / `https://` 开头（大小写不敏感）→ **原样**使用，MUST NOT 二次拼接；② 以**单个 `/`** 开头 → 拼**当前页面入口**（`window.location.origin`）；③ 其余形态（协议相对 `//host/…`、无前导 `/`、其它 scheme、空串、含控制字符或反斜杠）→ 返回 `null`，由调用方**按普通文本**渲染 | 四类各 1 例；两条不变式断言：**① 已带前缀的值不被拼接**、**② 拼出的 host 恰为注入的 origin** |
+| **TR-42** | 归一化逻辑 MUST **只有一处实现**（`view-link.ts`）；`origin` 可注入（默认 `window.location.origin`），使单测不依赖真实 `location`；链接地址走 `computed`（宪章原则五：渲染路径不重复计算） | 单测注入固定 origin 断言；组件测试断言 `href` 不含硬编码主机 |
+| **TR-43** | **零变化与不引入新失败**：正文非 JSON / 无 `viewUrl` / 值非法 / 结构被既有上限截断（行 10、列 50、深度 8、正文 >256K 字符不解析）时，渲染结果 MUST 与改动前**一致**，且 MUST NOT 抛异常 | 回归用例（DOM 一致性）+ 非法值用例 |
+
+**明确不做**（本次）：
+
+- **不新增接口字段、不改 `api/types.ts`、不改后端**：值本就在正文里，由展示层解析（平台仍"原样存、原样读"，契约 §10.3 不变）；
+- **不做正文 >256K 字符时的定向提取**：与既有"结构化展示"同一判据（`parseProducedContent` 不解析此类正文），该类产出回落原始文本、不产生链接——登记为**已知限制**（见 [plan.md](./plan.md) §3）；
+- **不在铃铛列表行上给入口**：需要后端把 `viewUrl` 由正文提升为 sidecar 字段并由列表下发（两侧同改），不在本次范围；
+- **同步侧（工具结果的对话内入口）不做**：值将经过模型转写，需要提示词约定与标记解析，另立增量。
+
+> **2026-10-10 更新**：以上第 1、3、4 条已被 **§4.8** 取代——同步工具结果侧改为**由运行时抽成 sidecar（`view_links`）下发**，且**不采用"模型转写"方案**；异步产出链路（铃铛）的"正文内解析"语义**不变**。修订对照见 §7.3。
+
+**关于宪章原则九的判定**（登记）：值形态不匹配时**按普通文本渲染、不额外提示**，**不构成"假装正常"**——界面展示的是正文原文（信息完整、未被隐藏或替换），平台从未向用户承诺该字段一定可跳转；这属"形态不匹配"而非"降级"。本改动也**不引入静默吞错**：`resolveViewUrl()` 返回 `null` 表达"不是可识别的链接形态"，不是异常。完整论证见 [plan.md](./plan.md) §3。
+
+### 4.8 同步侧视图入口（2026-10-10 补充）
+
+**问题**：`viewUrl`（`TR-40`）不只出现在异步产出（R11）的正文里，**同步工具结果**里同样有——例如解析数据源后返回的表格预览页地址。但 §4.7 的处置在这条链路上够不着，三个原因：
+
+1. **可见性**：值在工具卡片的结果正文里，用户要先展开卡片才知道"有没有能点开的地址"；
+2. **拿不到**：结果 >64KB 会被**外置**（`TR-04`），`tool_calls` 里只有 `artifact_size` + `summary`，前端**根本没有那段值**；
+3. **不可靠**：让模型在回答里把地址转写一遍，既可能抄错，也与记录**没有绑定**（模型可以不写、可以改写）。
+
+**处置**（**两侧同改**）：运行时把结果里的 `viewUrl` **抬成 sidecar 字段**（`view_links`）随工具记录落盘、随 `tool_calls` 下发，前端在**回答正文之后**渲染成入口行。归一化仍只在前端（`TR-42` 的"唯一实现"不变，后端**不拼前缀**）。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-44** | **抽取**（后端，唯一实现 `agent-backend/src/domain/view-links.ts`）：只做"搬运"——把结果文本里**字段名**为 `viewUrl`（大小写不敏感）的**字符串**值与**同层**的 `viewUrlName` 一起收起，**不改写值、不拼前缀、不补名称**。判据与顺序固定：① 文本长于 256K 字符 / 非 JSON / 不是对象或数组 → 不抽取；② 深度 ≤8 递归，任意层级（对象、嵌套、对象数组）生效；③ **形态卫生**：值 trim 后非空、≤2048 字符、无控制字符与反斜杠；名称同规则但**超长/脏只丢名字、保留地址**；④ **按地址原值去重**（首次出现者胜），同地址重复出现时名称取**首个非空值**；⑤ 条数上限 50（防病态，不是展示上限）。**不做 scheme 合法性判定**——那是前端 `resolveViewUrl()` 的唯一职责，后端再判一遍就是第二个漂移点 | 单测 21 例：结构/层级、名称配对（同层才配对、跨层配不上视同没给）、两类脏值丢弃差异、去重与名称补齐、三条上限、全失败路径均返回 `undefined` |
+| **TR-45** | **落盘与下发**：抽取结果写入 `tool-events.jsonl` 的 `view_links`（`TR-02` 的同一行口径），并经 `GET /api/threads/{id}` 的 `tool_calls[].view_links` 随详情下发。**MUST 与结果正文分离**：① sidecar **不进**上下文回灌预算（不挤占 `TOOL_REPLAY_BUDGET_BYTES`，`TR-18`）；② 正文**外置时入口照样可用**（值已在记录行里，前端不必先拉外置正文）；③ 流式事件（`tool_call` / `tool_call_end`）**仍不外发结果**，故 entry 只在终态后的详情里出现。前端取该条消息**全部**工具调用的**并集**（`collectToolViewLinks`），再归一化、**按 `href` 去重**（跨工具重复也只留一项，归一化必须用浏览器 `origin`，后端做不到） | 单测 5 例（`tests/unit/tool-events.spec.ts`）：`view_links` 成对落盘、**正文外置时 sidecar 仍在**（`content` 缺席而 `viewLinks` 有值）、无链接不写字段、混入非法项只留合法项、全非法整段丢弃；前端单测覆盖并集与跨工具去重。**不进回灌预算**是结构性保证（`tool-context.ts` 不读 `viewLinks`），无独立用例 |
+| **TR-46** | **显示文本与提示**（`frontend/src/utils/view-link.ts`）：有 `name` 用名称，**没有则显示地址**（长度上限 32 字符、**中段**省略——尾部目录段与文件名才是辨识度所在，尾部省略恰好会吃掉它）；`title` = `名称 — 完整地址`，无名称时即完整地址（地址永远可核对）。**MUST NOT 推断名称**（不拿同层业务字段、不从 URL 末段取名）、**MUST NOT 编号占位**（"视图 1/2" 会随顺序漂移，等于假装有名字——宪章原则九）。名称卫生化：非字符串或空白 → 视同没给 | 单测 14 例（`view-link.spec.ts`）：`toViewLinkEntries`（归一化、按 `href` 去重、名称取首个非空值、空白名称视同没给、空输入、全非法返回空数组）、入口文案 3 例（有名称 / 无名称中段省略 / 不推断不编号）、`truncateMiddle` 3 例；组件测试断言显示文本与 `title` |
+| **TR-47** | **入口行的位置与上限**：位置 = `MessageContent`（回答正文）之后、状态提示（`TypingIndicator` / `ErrorNotice`）与 `MessageActions` **之前**——它是"正文的附件"，不是"对消息的操作"，故**不并入操作区**。直接显示前 **3** 条，超出显示「另有 N 个」（点击展开、**瞬态不持久化**）。折叠的条数 **MUST 让用户看得见**，MUST NOT 静默丢弃。条为原生 `<a href>`（`target="_blank"` + `rel="noopener noreferrer"`），可点性**不只靠颜色**（边框 + 悬停 + 可见焦点环） | 组件测试 12 例（`MessageViewLinks.spec.ts`：空态 2 + 归一化与去重 3 + 文案 3 + 上限与溢出 3 + 交互 1）+ 位置与装配用例（`MessageBubble.viewLinks.spec.ts`：断言 DOM 顺序 `工具卡片 < 回答正文 < 入口行 < 操作区`，谁挪位置就红） |
+| **TR-48** | **零出现与零变化边界**：① **流式期不出现**——转写中的轮次没有结果，`view_links` 天然为空，入口行**整行不渲染**（无 DOM 即无间距）；② 后端抽取失败（非 JSON / 结构不符 / 一条都没命中 / 结构校验不通过）**一律不写字段**，行为与改动前**完全一致**；③ 记录行里的 `view_links` 消费前经**白名单结构校验**（只认 `{ url: string, name?: string }`，不符项跳过、全不符视同没有）。**降级不是异常**：后端返回 `undefined`、前端丢弃非法形态，MUST NOT 抛错、MUST NOT 打日志（宪章原则九：表达"没有可识别的视图链接"，不是"出错了"） | 回归用例：无 `view_links` 时不渲染入口行且工具卡片照常、用户消息不产生入口行（`MessageBubble.viewLinks.spec.ts` 2 例）；全非法形态不渲染空壳行（`MessageViewLinks.spec.ts` 2 例）；坏结构（`url` 非字符串）整段丢弃（后端单测 1 例）；流式期不出现由「流式记录无结果 → 并集为空」结构性保证（`tool-calls.spec.ts` 1 例断言空数组） |
+
+**明确不做**（本次）：
+
+- **不做正文 >256K 字符时的定向提取**：与既有结构化展示同一判据（`VIEW_LINK_PARSE_MAX_CHARS` = `parseProducedContent` 的 256K），该类结果不产生入口——与 §4.7 同一**已知限制**；
+- **不在铃铛列表行上给入口**：那需要列表接口也下发 sidecar，属另一条链路（异步产出），本次不改；
+- **不做 scheme 合法性的后端判定**：合法性只在前端一处（`TR-42`），后端只做形态卫生（避免两个漂移点）；
+- **不改异步产出（R11）链路**：§4.7 的正文内链接化原样保留，两条链路共用同一份归一化实现。
+
+### 4.9 MCP 工具结果文本口径（2026-10-12 修正）
+
+**问题**（实踩：解析类工具 `hd-algorithm__hd_algorithm_input_parser` 的结果里有 `viewUrl`，但**回答尾部没有入口行**）：根因不在抽取器，而在**上游的结果文本口径**——适配器把**整个** MCP `CallToolResult` 用 `JSON.stringify` 塞进一个 text 块：
+
+```json
+{"content":[{"type":"text","text":"[{\"businessType\":3,…,\"viewUrl\":\"/datapage/…\"}]"}],"isError":false}
+```
+
+于是：① 服务返回的业务正文成了"**字符串里的 JSON**"；② `TR-44` 的 `extractViewLinks` 只递归**对象/数组**、不重新解析字符串（刻意的边界，见 §4.8），`viewUrl` 因此不可达，前端"结构化查看"也只能看到一个信封；③ `type:'image'` 块的 base64 随信封进入结果文本，**绕过** `serializeToolResult` 的"不落 base64"占位保护。
+
+**处置**：把结果文本口径的**唯一实现**下沉到 `agent-backend/src/domain/tool-result.ts` 的 `serializeToolResult()`（模型可见与落盘共用同一份），适配器侧只保留形状分发与可观测，独立成 `agent-backend/src/infra/mcp/mcp-result-text.ts`。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-49** | **结果文本 MUST 取服务正文**：MCP 成功结果进模型与落盘的文本 MUST 是 `serializeToolResult()` 的输出——`content[].text` 按序用 `\n` 拼接、`image` 块转 `[图片 mime ~体积]` 占位、认不出形状时 JSON 兜底；**MUST NOT** 把整个 `CallToolResult` 序列化成信封 | 单测：对象结果 → 文本 == 业务 JSON（不含 `isError`、不含被转义的内层引号）；image 块 → 文本不含 base64；空 `content` / 非块形状 → JSON 兜底（不丢信息） |
+| **TR-50** | **口径只有一处实现，且新逻辑不加重超限文件**：模型看到的那份与落盘的那份 MUST 出自同一函数；适配器新增逻辑 MUST NOT 堆进 `mcp-tool-adapter.ts`（该文件已超 500 行门禁，属**既有状态**，见 `async-result-url.ts` 头注释），而是独立成纯函数模块 | 端到端用例：工具结果文本 == `serializeToolResult(result).text`，且 `extractViewLinks(该文本)` 能抽到 `viewUrl`（回归本次 bug） |
+| **TR-51** | **被跳过的块 MUST 可观测**：`serializeToolResult` 不认识的块类型（`audio` / `resource_link` / 内嵌 resource，以及 `text` 块但 `text` 非字符串）MUST 记一条结构化 `warn`（`event: 'mcp.result.block_unsupported'`，字段含 `service` / `tool` / `block_type`）；MUST NOT 静默丢弃（宪章原则九）。缺日志落点时不扫描、不告警 | 单测：`text` 与不支持块混排时 text 保留、被跳过块逐个上报（字段断言）；image 块**不**产生告警 |
+| **TR-52** | **历史记录回填 MUST 是一次性、原子、幂等、可干跑**：旧记录（信封格式）的 `view_links` MAY 由 `scripts/backfill-view-links.ts` 回填——默认干跑、`--apply` 才写；写盘 MUST 走"临时文件 + 原子改名"，失败保持原文件不变；已有 `view_links` 的行 MUST 不动；判据 MUST 复用运行时实现（`unwrapMcpEnvelopeText` + `extractViewLinks`），**MUST NOT** 在运行时链路里加"解信封"分支（避免第二套抽取口径）；失败 MUST 以非零退出码结束 | 干跑逐条列出将改动项；`--apply` 后重跑为 0 条待回填（幂等）；无 `.tmp` 残留；回填行其余字段与其余行逐字节不变 |
+
+**明确不做**（本次）：
+
+- **不把 MCP 的 `image` 块原样交给引擎**：`AgentToolResult.content` 支持 `ImageContent`，但会改变模型侧语义、跨 provider 有风险、token 计量也变；本次沿用"占位"口径（与 `serializeToolResult` 既有行为一致）。要"让模型真看图"另立增量；
+- **不改内置工具与 HITL 拒绝的结果形状**：`builtin-tools.ts` / `tool-intercept.ts` 本就是纯文本，一个字段都不动；
+- **不给 `AgentToolResult.details` 新增用途**：平台不消费它，落盘只取 `content[].text`（不造第二份真相）；
+- **不改接口与前端**：`tool_calls[].content` 的**字段与类型**不变，只是其**内容口径**回归"服务正文"；前端 `ProducedJsonView` / `MessageViewLinks` 零改动。
+
 ## 5. 数据模型
 
 ### 5.1 `threads/{thread_id}/tool-events.jsonl`
@@ -146,8 +225,11 @@
 ```jsonl
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"running","started_at":"2026-09-23T09:12:03.120Z","args_digest":{"path":"数据准备/生产计划/9月计划.xlsx"}}
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"success","started_at":"2026-09-23T09:12:03.120Z","duration_ms":84,"size":120,"inline_content":"车间,计划量\n冲压,1200"}
-{"call_id":"call_b2","message_id":"m_abc_0001","name":"ocr_image","status":"success","started_at":"2026-09-23T09:12:05.400Z","duration_ms":1620,"size":1843200,"truncated":false,"summary":"识别到 12 页产能表（共 480 行）","artifact_size":1843200}
+{"call_id":"call_b2","message_id":"m_abc_0001","name":"ocr_image","status":"success","started_at":"2026-09-23T09:12:05.400Z","duration_ms":1620,"size":1843200,"truncated":false,"summary":"识别到 12 页产能表（共 480 行）","artifact_size":1843200,"view_links":[{"url":"/datasource/ds1/dst1/t9/xlsx","name":"产能表预览"}]}
 ```
+
+- `view_links`（2026-10-10，`TR-44`/`TR-45`）：结果正文里 `viewUrl`（+ 同层可选 `viewUrlName`）抽出的 **sidecar**，值是服务给的**原值**（未拼前缀、未归一化）。它与正文**分离**：所以上面这行正文已外置、`inline_content` 缺席，入口仍然可用；也不进回灌预算。
+- `inline_content` 的口径（2026-10-12，`TR-49`）：它是 `serializeToolResult()` 的输出——MCP 工具即**服务返回的 `content` 文本本身**（**不是**整个 `CallToolResult` 的信封）；因此结果里的业务字段（如 `viewUrl`）在第一层就能被抽取与结构化展示。改动前后的差异见 §7.4。
 
 ### 5.2 外置正文
 
@@ -165,14 +247,22 @@
 | 索引条数上限 | 10 | `TOOL_INDEX_MAX_ITEMS` |
 | 占位条数上限 | 20 | `TOOL_PLACEHOLDER_MAX_ITEMS` |
 | 摘要字符上限 | 200 | `TOOL_SUMMARY_MAX_CHARS` |
+| 视图链接条数上限 | 50 | `VIEW_LINK_MAX_ITEMS`（`domain/view-links.ts`） |
+| 视图地址字符上限 | 2048 | `VIEW_URL_MAX_CHARS` |
+| 视图名称字符上限 | 120 | `VIEW_URL_NAME_MAX_CHARS` |
+| 视图链接解析字符上限 | 256 K | `VIEW_LINK_PARSE_MAX_CHARS`（与前端 `parseProducedContent` 同判据） |
+| 视图链接递归深度上限 | 8 | `VIEW_LINK_MAX_DEPTH` |
+| 入口行直接显示条数 | 3 | `VIEW_LINK_DISPLAY_MAX`（前端；超出走「另有 N 个」） |
+| 无名称地址显示字符上限 | 32 | `VIEW_LINK_ADDRESS_MAX_CHARS`（前端；中段省略） |
 
 > 无独立「单条回灌上限」：总量预算即单条上限（`selectReplay` 以 `bytes <= remaining` 判定），故不单列。
+> `view_links` 的五个上限（`VIEW_LINK_*` / `VIEW_URL_*`）是**防病态**上限，不是展示上限——展示上限在前端（`VIEW_LINK_DISPLAY_MAX`）。
 
 ## 6. 接口契约增量
 
 | 接口 | 变更 |
 |---|---|
-| `GET /api/threads/{id}` | 消息新增可选字段 `tool_calls: ToolCallRecord[]`（仅该轮确有调用时返回） |
+| `GET /api/threads/{id}` | 消息新增可选字段 `tool_calls: ToolCallRecord[]`（仅该轮确有调用时返回）；**2026-10-10**：`ToolCallRecord` 再新增可选字段 `view_links: ViewLink[]`（结果里的视图链接；仅确有链接时返回，`TR-45`） |
 | `GET /api/threads/{id}/tool-calls/{call_id}` | **新增**。200 → `{ call_id, name, status, size, content, truncated? }`；410 → `TOOL_RESULT_EXPIRED`；404 → `TOOL_CALL_NOT_FOUND` |
 | `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发 |
 
@@ -182,8 +272,14 @@
 { call_id, name, status, started_at, duration_ms?, size?,
   content?,          // 内联结果正文
   artifact_size?,    // 有值 = 正文在临时空间
-  truncated?, summary?, args_digest? }
+  truncated?, summary?, args_digest?,
+  view_links? }      // 2026-10-10：结果里的视图链接（与正文分离下发）
+
+// ViewLink（前后端同名同形）：url = 服务给的原值（未拼前缀、未归一化），name 可选
+{ url: string; name?: string }
 ```
+
+**2026-10-10 的契约增量（`TR-44`~`TR-48`）**：`tool_calls[].view_links` 是本次**唯一**的接口字段变化——`GET /api/threads/{id}/tool-calls/{call_id}` 与 SSE 均**零变更**（结果正文仍不经事件总线外发，故入口只在终态后的详情里出现）；`view_links` 与结果正文分离，因此**正文外置时仍随详情下发**。
 
 ## 7. 对既有规格的修订
 
@@ -202,6 +298,47 @@
 | `TR-17` | `status === 'running'` 渲染为"进行中/未完成" | **明确分流口径**：流式进行中 → `进行中`；非流式 → `未完成`；且 `running` **不可展开**（无结果可看） | 原文未区分两种语境；历史里只有开始行的记录显示"进行中"是假状态（宪章原则九） |
 
 **接口与数据零变更**：`Message.tool_calls` 字段、`GET /api/threads/{id}/tool-calls/{call_id}`、SSE `tool_call` / `tool_call_end` 均不动，故 `contracts/` 无改动。
+
+### 7.2 修订记录（2026-10-10）：产出正文的视图链接
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| §10.3「平台不解析产出正文」 | 平台原样存、原样读 | **不变**：`viewUrl` 仍是正文里的业务字段，解析只发生在**前端展示层**（与既有结构化展示同口径） | 保持"平台不解析"的边界，避免为展示引入后端解析 |
+| `TR-25`（正文过期降级） | 读取失败显示"内容已过期" | **不变**：读取失败时不产生链接 | 无链接 = 无内容可跳，语义自洽 |
+| — | — | **新增** §4.7：`TR-40`~`TR-43`（视图链接的字段判定、值归一化、唯一实现、零变化边界） | 服务给的地址常缺 `http://host:port` 前缀，端到端体验不完整 |
+
+**接口与数据零变更**：`GET /api/produced`、`GET /api/produced/raw?job_id=`、`POST /api/files/put`（异步回写）、SSE 均不动；`api/types.ts` 不动；`agent-backend` 不动。故 `contracts/` 无改动，唯一的**跨侧文档**增量是 [`异步MCP服务接入约定.md`](../../异步MCP服务接入约定.md) §4.7（`viewUrl` 的字段名与值形态约定）。
+
+### 7.3 修订记录（2026-10-10）：同步侧视图入口
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| §4.7「明确不做」第 1 条 | 「**不新增接口字段、不改 `api/types.ts`、不改后端**」 | **收窄到异步产出链路**：异步产出侧仍"正文里解析、平台不解析"；**同步工具结果侧**改为 sidecar 下发（新增 `view_links` 字段、新增 `ViewLink` 类型、`tool-events.ts` 写/读该字段） | 两条链路的**可获取性不同**：异步产出的正文由前端主动整段拉取；同步结果的外置正文前端拿不到 |
+| §4.7「明确不做」第 3 条 | 「**不在铃铛列表行上给入口**：需要后端把 `viewUrl` 由正文提升为 sidecar 字段并由列表下发（两侧同改），不在本次范围」 | **该手段已实施，但落点不是铃铛列表，而是同步工具结果**：`viewUrl` 由运行时抽成 sidecar（`view_links`）随工具记录落盘与下发，在**回答正文之后**渲染入口行 | 同步结果 >64KB 会外置（`TR-04`），前端**根本拿不到那段值**；入口因此不能靠"展示层解析正文"实现 |
+| §4.7「明确不做」第 4 条 | 「**同步侧（工具结果的对话内入口）不做**：值将经过模型转写，需要提示词约定与标记解析，另立增量」 | **本次实施**（`TR-44`~`TR-48`），但**不采用"模型转写"方案**：值由运行时从结果文本直接搬运，模型不参与 | 模型转写可能抄错，且正文与记录**没有绑定**（模型可以不写、可以改写）；sidecar 与记录天然同源 |
+| `TR-40`~`TR-43` | §4.7 的字段判定与值归一化 | **不变，且复用**：§4.8 只做"搬运"（后端不拼前缀、不判 scheme），归一化唯一实现仍是 `frontend/src/utils/view-link.ts`（`TR-42`） | 保持"唯一实现"，避免后端再判一遍变成第二个漂移点 |
+| `TR-02`（记录行字段） | 行含 `call_id` / `message_id` / `name` / `status` / `started_at`，终态行含 `duration_ms` / `size` | **扩展**：行可再含 `view_links`（sidecar，与正文分离） | 入口必须在正文外置时也可用（见 §5.1 示例） |
+| `TR-15`（工具卡片的展示态） | 内联结果展开即见 / 外置结果展开才懒加载 / 已清理降级 / 失败可重试 | **扩展**：结果正文能解析为对象或数组时**结构化展示**（复用 `ProducedJsonView`，与产出弹窗同构），并提供「按原始 JSON 查看 / 按结构化查看」一键切换；非 JSON、标量、超 256K 一律回落 `<pre>` 原文（与 `parseProducedContent` 同判据）。原四种降级态语义**不变** | 工具结果多为 JSON，`<pre>` 原文难读；开关与"查看态"同放 `useToolPanels`，故**不随流式→历史交接丢失**（与 `TR-36` 同口径） |
+| `TR-18`（回灌预算语义） | 只回灌内联结果原文，总预算 128KB | **不变**：sidecar 与正文分离存放，`tool-context.ts` 不读 `viewLinks`，故不占用预算 | 入口的可用性不应以"挤占模型上下文"为代价 |
+
+**契约与文档增量（跨侧）**：
+
+- **接口**：`tool_calls[].view_links` 是本次**唯一**字段变化；`GET /api/threads/{id}/tool-calls/{call_id}` 与 SSE 无变化，故 `contracts/` 无改动；
+- **前端类型**：`api/types.ts` **由"不动"改为新增** `ViewLink` 与 `ToolCallRecord.view_links?`（**两侧同批**，宪章原则七）；
+- **跨侧文档**：`异步MCP服务接入约定.md` §4.7 同批更新（新增 `viewUrlName` 名称字段约定 + 平台"搬运"行为说明 + 同步链路的下发语义）。
+
+### 7.4 修订记录（2026-10-12）：MCP 工具结果文本口径
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| —（原实现无规格条目） | 适配器把**整个** MCP `CallToolResult` 用 `JSON.stringify` 塞进一个 text 块 | **新增** §4.9：`TR-49`~`TR-52`（结果文本取服务正文 / 唯一实现 / 被跳过块可观测 / 历史回填一次性原子幂等） | 业务正文成了"字符串里的 JSON"，`viewUrl` 抽不到——同步侧视图入口（§4.8）整条链路对该形状失效；且 `image` 块 base64 随信封落盘 |
+| §5.1 记录行 `inline_content` | 描述为"已序列化的结果文本"（MCP 工具实为信封） | **明确**：MCP 工具即**服务返回的 `content` 文本本身**（`serializeToolResult()` 的输出） | 把口径写进规格；删掉那层多余编码 |
+| §4.8 `TR-44`（抽取输入） | "结果文本里字段名为 `viewUrl` 的字符串值" | **不变**：`view-links.ts` **零改动**；本次只修**上游喂给它的文本** | 抽取器本身无缺陷（只递归对象/数组是刻意边界，见 §4.8 头）；在抽取器里"解字符串"会引入第二套解析规则与第二个漂移点 |
+| §8 宪章落实 · 八（门禁） | 后端门禁列有"类型检查"，但 `package.json` **缺** `typecheck` 脚本 | **补齐**：`agent-backend/package.json` 新增 `"typecheck": "tsc --noEmit"` | 宪章「开发工作流与质量门禁」：脚本缺失时 MUST 先补齐，MUST NOT 以"没有脚本"为由跳过，并在规格中登记 |
+
+**接口与数据零变更**：`tool_calls[].content` / `view_links` 的字段、类型、端点与 SSE 全部不动，故 `contracts/` 与前端 `api/types.ts` **无改动**；本次只改**该字段的内容口径**，外加一份历史落盘数据的**一次性回填**（`TR-52`）。
+
+**跨侧文档**：`异步MCP服务接入约定.md` §4.7 同批追加"平台侧口径修正（服务写法不变）"说明。
 
 ## 8. 宪章符合性
 
@@ -226,6 +363,47 @@
 | 七（契约一致） | 无契约变更：`api/types.ts`、端点、SSE 事件均不动 |
 | 九（优雅降级） | `running` 按语境分流为 `进行中` / `未完成`（不再假装正常）；运行中显式不可展开（不是静默无反应）；既有"已清理/加载失败可重试/截断"降级全部保留 |
 
+**2026-10-10 增量（§4.7 视图链接）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | **先**回写本规格（§3 / §4.7 / §7.2 / §8 / §9.2）与 [plan.md](./plan.md) / [tasks.md](./tasks.md)，**再**改代码 |
+| 二（模块化，≤500 行） | 新增纯函数模块 `frontend/src/utils/view-link.ts`（单一职责：字段判定 + 值归一化）；渲染改动集中在 `ProducedJsonView.vue`（278 → 约 320 行）；**同一规则只有一处实现**（`TR-42`） |
+| 三（测试完备） | 新增 `view-link.spec.ts`（同名测试，含两条不变式）；`ProducedJsonView.spec.ts` 追加渲染用例；新模块登记进 `vite.config.ts` 模块阈值清单（80%）；无端点变更故无缺集成测试 |
+| 四（无障碍） | 用**原生 `<a href>`**（读屏可识别为链接、Tab/Enter 原生可用）；下划线 + 链接色**双通道**表达（不只靠颜色）；新窗口带 `rel="noopener noreferrer"` |
+| 五（性能） | 链接判定走 `computed`，不在模板中重复计算（`TR-42`） |
+| 六（依赖控制） | 零新增依赖（`URL` 与正则的原生能力） |
+| 七（契约两侧同改） | 无端点与 `api/types.ts` 变更；唯一跨侧文档增量为 `异步MCP服务接入约定.md` §4.7（同批更新） |
+| 八（简单可控） | 门禁仍是 `npm run lint / typecheck / test:coverage / build` 单条入口 |
+| 九（优雅降级） | 形态不匹配 → 按普通文本渲染（判定与理由见 §4.7 末段）；**不新增静默吞错**：纯函数返回 `null` 表达"非链接形态"，不是异常 |
+
+**2026-10-10 增量（§4.8 同步侧视图入口）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | **先**回写本规格（§3 / §4.8 / §5.1 / §5.3 / §6 / §7.3 / §8 / §9.3）与 [plan.md](./plan.md) / [tasks.md](./tasks.md)，**再**改代码 |
+| 二（模块化，≤500 行） | 后端新增纯函数模块 `agent-backend/src/domain/view-links.ts`（175 行，单一职责：抽取 + 形态卫生）；前端新增 `MessageViewLinks.vue`（146 行，单一职责：入口行渲染）；归一化与去重仍只在 `frontend/src/utils/view-link.ts`（173 行）一处；`ToolCallList.vue`（428 行）的结构化分支复用既有 `ProducedJsonView` 与 `parseProducedContent`，**未新增第二套解析实现**；触及的 `api/types.ts` 为 489 行（≤500，但已接近上限，登记为后续拆分观察项） |
+| 三（测试完备） | 后端新增 26 例（`view-links.spec.ts` 21 + `tool-events.spec.ts` 5，两者均同名同目录）；前端新增 41 例（`view-link.spec.ts` +14、`tool-calls.spec.ts` +5、`ToolCallList.spec.ts` +5，以及新增 `MessageViewLinks.spec.ts` 12 与 `MessageBubble.viewLinks.spec.ts` 5）；`src/domain/view-links.ts` 登记进后端模块覆盖率阈值清单（80%） |
+| 四（无障碍） | 入口为**原生 `<a href>`**（读屏识别为链接、Tab/Enter 原生可用）+ `rel="noopener noreferrer"`；可点性**不只靠颜色**（边框 + 悬停 + `:focus-visible` 焦点环）；溢出按钮为原生 `<button>` 且带 `aria-expanded`，折叠条数以文本明示（不静默丢弃） |
+| 五（性能与数据一致性） | 抽取只发生在**落盘那一跳**（写行时一次），读取只做结构校验；前端 `collectToolViewLinks` / `toViewLinkEntries` 均走 `computed`（渲染路径不重复计算）；`ToolCallList` 只解析**已展开**的卡片（不为折叠卡片付 `JSON.parse` 成本）；`view_links` 与正文分离存放，回灌负载不变（`TR-18` 语义保持） |
+| 六（依赖治理） | 零新增依赖（两侧 `package.json` 未变） |
+| 七（接口契约两侧同改） | 后端 `routes/threads.ts` 的 `tool_call` 序列化与前端 `api/types.ts` / `utils/tool-calls.ts` **同批**变更；跨侧文档 `异步MCP服务接入约定.md` §4.7 同批更新 |
+| 八（简单可控） | 门禁仍是单条入口：后端 `npm run test:coverage`；前端 `npm run lint / typecheck / test:coverage / build` |
+| 九（优雅降级与可观测） | 抽取失败一律 `undefined`：**不写字段、不抛错、不打日志**（表达"没有可识别的视图链接"，不是"出错了"）；落盘行的坏结构经白名单校验后丢弃；值形态非法由前端丢弃且**不产生入口**（绝不产生"点不开的链接"）；"服务没给名字"与"名称脏"两种情形都退化为**显示地址**（信息不缺失，仅少了一个更友好的称呼） |
+
+**2026-10-12 增量（§4.9 MCP 结果文本口径）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | **先**回写本规格（§4.9 `TR-49`~`TR-52` / §5.1 口径 / §7.4 修订记录 / §8 / §9.4）与 [plan.md](./plan.md) §13 / [tasks.md](./tasks.md)，**再**改代码；跨侧文档 `异步MCP服务接入约定.md` §4.7 同批追加 |
+| 二（模块化，≤500 行） | 新增纯函数模块 `agent-backend/src/infra/mcp/mcp-result-text.ts`（137 行，单一职责：形状分发 + 被跳过块上报 + 历史信封解包）；文本生成规则仍**只有一处实现**（`domain/tool-result.ts` 的 `serializeToolResult`）；`mcp-tool-adapter.ts` 为**既有超限文件**（532 行，在 [tasks.md](./tasks.md) 已登记拆件），本次仅净 +3 行（1 行 import + 2 行接线）、新逻辑不堆进去 |
+| 三（测试完备） | 新增同名测试 `tests/unit/mcp-result-text.spec.ts`（17 例：形状分发 / JSON 兜底 / 上报 / 信封解包 / **适配器端到端回归**——`viewUrl` 可抽出）；新模块登记进 `vitest.config.ts` 模块阈值清单（80%）；无端点变更故无缺集成测试 |
+| 六（依赖治理） | 零新增依赖（复用 `pino` 类型与既有 `serializeToolResult`） |
+| 七（接口契约两侧同改） | **无契约变更**：字段与类型不动，前端零改动；跨侧文档增量已在同批落盘 |
+| 八（简单可控） | 补齐后端缺失的 `typecheck` 门禁脚本（`tsc --noEmit`），四侧门禁口径对齐；回填脚本**默认干跑**、`--apply` 才写、失败非零退出码 |
+| 九（优雅降级与可观测） | 降级**用户可感知**：不支持的块在结果文本里以 `[不支持的块类型 X]` 显式占位，不假装正常；同时记结构化 `warn`（`mcp.result.block_unsupported`，含 service/tool/block_type），不静默吞错；`view-links.ts` 的"返回 `undefined` 不算异常"判定原样保留 |
+| 五（数据一致性） | 回填写盘走"临时文件 + 原子改名"，失败保持原文件不变；只改 `view_links` 一个字段，未改动行逐字节原样；重复执行幂等（已有字段的行不动） |
+
 ## 9. 验收清单
 
 - [x] 刷新页面后，历史消息展示工具卡片（内联内容可直接展开）
@@ -245,6 +423,65 @@
 - [x] 只有 1 次调用时行为与改版前一致（不设折叠层）
 - [x] 测试与覆盖率门禁全绿（33 文件 / 425 用例；两个新模块阈值与上调后的全局地板均通过）、`vite build` 成功
 - [ ] `npm run lint` / `npm run typecheck` 全绿——**卡在存量问题上**（详见 [tasks.md](./tasks.md) T015：99 errors / 34 warnings 与 7 条 `TS6133`，全部落在本次未改动的文件里；本次改动文件单独检查为 0 问题）
+
+### 9.2 2026-10-10 增量验收清单
+
+- [x] 铃铛里点开某条产出，正文里 `viewUrl` 值为**无前缀的相对路径**（如 `/datasource/…/xlsx`）时，该值显示为**可点击链接**，点开新窗口打开（组件测试：对象行 / 嵌套 / 表格单元格各 1 例）
+- [x] 值**已带** `http://` / `https://` 前缀时**原样**跳转（MUST NOT 被二次拼接）——组件测试断言 `href` 与值完全一致，单测覆盖协议大小写
+- [x] 值非法（`//host/…`、无前导 `/`、`javascript:`）时按**普通文本**显示：不产生链接、不抛错（单测 8 类拒绝形态 + 组件测试 3 例）
+- [x] 正文无 `viewUrl` / 非 JSON / 超 256K 字符时渲染与改动前**一致**（回归用例：普通对象无链接且键列表不变；超 256K 走既有原始文本与逃生舱路径）
+- [x] 对象行、嵌套对象、对象数组表格单元格里的 `viewUrl` 都能点；非 `viewUrl` 字段（如 `path: "/api/x"`）**不**被链接化（用例各 1 条）
+- [x] 测试与覆盖率门禁通过：**35 文件 / 478 用例全绿**；`view-link.ts` 语句 96.29 / 分支 89.65 / 函数 100 / 行 100（≥80%）；全局地板 50.66 / 57.93 / 41.09 / 49.43 ≥ 48 / 55 / 38 / 47；改动文件最大 **298 行**（≤500）；**无新增依赖**；无端点与前端类型契约变更
+- [x] 构建与静态检查：`npx vite build` 退出码 0；本次 5 个改动文件 `eslint` **0 问题**；`typecheck` 仅剩**存量**报错（`src/router/index.ts`、`src/views/datapage/*`、`src/views/demo/*`，均非本次改动文件，沿 [tasks.md](./tasks.md) T015 口径）
+
+### 9.3 2026-10-10 增量验收清单（同步侧视图入口）
+
+- [x] 工具结果正文里带 `viewUrl` 时，**回答正文之后**出现入口行；地址为**当前页面入口 + 值**（组件测试断言 `origin` 拼接，不硬编码主机）
+- [x] 结果**超过内联阈值被外置**时入口**照样出现**（值已在 `view_links` sidecar 里，不必先加载外置正文）——单测：`content` 缺席而 `viewLinks` 有值
+- [x] 服务给了 `viewUrlName` 时显示名称、悬停给「名称 — 完整地址」；**没给名字时显示地址**（中段省略，首尾都保留），**不推断、不编号占位**
+- [x] 一条回答里多个工具调用给出的地址**合并去重**；同一地址重复出现时名称取**首个非空值**（首个已给名称不被后面的空名称抹掉）
+- [x] 值非法（`//host/…`、无前导 `/`、`javascript:` 等）**不产生入口**——绝不渲染"点不开的链接"；全是非法形态时**整行不渲染**（无 DOM 即无间距）
+- [x] 流式期不出现入口行（转写中的轮次没有工具结果）；正文没有 `viewUrl`、非 JSON、>256K 字符时行为与改动前**一致**（后端不写字段、前端无入口行、DOM 无变化）
+- [x] 落盘行里的 `view_links` 消费前经**白名单结构校验**：混入非法项只留合法项，一条都不合法则整段丢弃（等价于没有视图链接）
+- [x] `view_links` **不进上下文回灌**：回灌内容仍只由 `inline_content` 决定，128KB 预算不变
+- [x] 工具卡片结果正文：可解析为对象/数组时**结构化展示**（与产出弹窗同构），并可一键切回**原始 JSON**；非 JSON / 标量 / 超 256K 回落 `<pre>` 原文（四种既有降级态不变）
+- [x] 测试与覆盖率门禁通过：后端 **39 文件 / 497 用例全绿**（新增 `view-links.spec.ts` 21 例；`view-links.ts` 语句 100 / 分支 97.91 / 函数 100 / 行 100 ≥ 80）；前端 **37 文件 / 519 用例全绿**（较上一版 +2 文件 / +41 例；`view-link.ts` 98.11 / 94.33 / 100 / 100、`tool-calls.ts` 100 / 94.44 / 100 / 100、`useToolPanels.ts` 全 100；全局地板实测 51.39 / 58.93 / 41.82 / 50.13 ≥ 48 / 55 / 38 / 47）
+- [x] 硬门禁：源码与测试文件最大 **436 行**（`ToolCallList.spec.ts` / `tool-events.ts`，均 ≤500；本次新增源文件最大 `view-links.ts` 175 行、`MessageViewLinks.vue` 146 行）；**无新增依赖**（两侧 `package.json` 未变）
+- [x] 静态检查：本次改动文件 `eslint` 两侧均 **0 问题**；后端 `tsc --noEmit` 退出码 0；前端 `npx vite build` 退出码 0；`vue-tsc` 仅剩 **11 条存量报错**（`src/router/index.ts`、`src/views/datapage/task-result.vue`、`src/views/demo/**`，均非本次改动文件，沿 [tasks.md](./tasks.md) T015 口径）
+- [ ] `npm run lint` / `npm run typecheck` 全绿——**仍卡在存量问题上**（同上，沿用 T015 口径；本次改动文件单独检查为 0 问题）
+
+> 附：`docs/viewurl-chat-demo.html`（1093 行）是本次为确认"入口行落点与观感"而做的**独立静态演示页**（双击即开、不接任何接口、不参与构建与门禁），不适用源码 ≤500 行的硬门禁；其中字段名用的是设计期的 `view_urls`，与落地字段 `view_links` 不一致，**以本规格为准**。
+
+### 9.4 验收清单（2026-10-12 增量：MCP 工具结果文本口径）
+
+**功能（`TR-49`~`TR-51`）**
+
+- [x] 对象结果（`{content:[{type:'text',text}]}`）→ 结果文本 == 服务正文 JSON 本身：**不含 `isError`、不含被转义的内层引号**（适配器端到端断言）
+- [x] 同一份结果文本交给 `extractViewLinks()` → 抽出 `viewUrl`（**回归本次 bug**：`hd-algorithm__hd_algorithm_input_parser` 场景单测化）
+- [x] 多块 text 用 `\n` 拼接；`image` 块 → `[图片 mime ~体积]` 占位，**base64 不出现在结果文本里**
+- [x] 空 `content` / `content` 非数组 / 非 content 对象 → JSON 兜底（不丢信息）
+- [x] 字符串结果 → 原样返回（旧行为不变，`mcp-tool-adapter` 既有用例全绿）
+- [x] `audio` / `resource_link` / 非字符串 text 块 → 记结构化 `warn`（`event: 'mcp.result.block_unsupported'`，含 `service` / `tool` / `block_type`）；无日志落点时不扫描、不告警
+- [x] 文本生成规则**只有一处实现**：`mcp-result-text.ts` 不含任何拼块 / 占位 / 兜底逻辑（全部委托 `serializeToolResult`）
+
+**历史回填（`TR-52`）**
+
+- [x] 干跑（默认）：逐条列出将改动项，**不写盘**
+- [x] `--apply`：本机 `.opt-agent` 命中 **1 行**（`b5aa7eba…` / `call_00_9kG2Qz6BGaXxg8KJod4u1418`）并原子写回
+- [x] 重跑 → 待回填 **0 行**、已有 `view_links` **1 行**（幂等）
+- [x] 无 `.tmp` 残留；该文件总行数不变，未命中行逐字节原样
+- [x] 根目录不存在时**非零退出码**结束
+
+**门禁（宪章原则八 + 硬门禁）**
+
+- [x] `npm run typecheck`（**新增脚本**，`tsc --noEmit`）/ `npm run lint` / `npm run build` 三者退出码 **0**
+- [x] 后端测试 **40 文件 / 514 用例全绿**（`npm run test:all`：单测 + 端点集成）
+- [x] 覆盖率：新模块 `src/infra/mcp/mcp-result-text.ts` = **95.34 / 86.11 / 100 / 100**（≥80% 阈值）；`src/domain/view-links.ts` = 100 / 97.91 / 100 / 100（**未变**）；全局地板 67.62 / 63.2 / 67.41 / 69.37，**未下调**
+- [x] 单文件 ≤500 行：本增量新增最大 250 行（测试）/ 199 行（脚本）/ 137 行（模块）；`src/infra/mcp/mcp-tool-adapter.ts` 532 行属**既有超限**（本次仅 +3 行接线，未借机重构）
+- [x] **零新增依赖**；`package.json` 仅新增 `typecheck` 脚本
+- [x] 前端**零改动**，但仍跑一遍回归确认不破坏既有功能：`frontend/npm run test` **43 文件 / 562 用例全绿**
+- [x] 真实结果端到端复核：用本次实踩的 `hd-algorithm__hd_algorithm_input_parser` 返回值（信封形状）跑修复后实现 → 结果文本 = 业务 JSON，`extractViewLinks()` 抽出 `/datapage/production-line-electricity?…`
+- [x] 前端、`contracts/`、端点、SSE、`api/types.ts` 零改动
 
 ## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
 

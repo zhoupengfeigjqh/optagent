@@ -2,7 +2,7 @@
  * 数字人配置包加载（T020 / FR-011）。
  *
  * 读取 agents/{name}/ 下：
- * - SOUL.md（人格全文，必填，追加到 System Prompt）
+ * - SOUL.md（必填；**正文**追加到 System Prompt，frontmatter 只供前台展示/引导，见 soul.ts）
  * - skills/{name}/SKILL.md（仅 YAML frontmatter 的 name/description，追加到 System Prompt）
  * - TOOL.json（{"enabled": [...]}，从内置工具白名单过滤）
  * - MCP.json（{"servers": [...]}，stdio/http；写能力必须声明 permission_boundary，FR-024）
@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { builtinToolNames } from './builtin-tool-catalog.js';
+import { stripFrontmatter } from './soul.js';
 import {
   FILE_ARG_PATH_HINT,
   isCompatibleFromPath,
@@ -60,12 +61,21 @@ export function loadAgentConfig(agentDir: string, opts?: { logger?: LoadLogger }
   const soul = readRequired(agentDir, 'SOUL.md');
   if (!soul.trim()) throw new AgentConfigError(`数字人 ${agentName} 的 SOUL.md 为空`);
 
+  // SOUL 结构化（004）：frontmatter 只承载**前台展示与引导**数据（角色简介 / 首屏欢迎语 /
+  // 问题实例），**正文才是提示词**。剥掉 frontmatter 后，模型看不到那些展示数据，
+  // 也就不会把 UI 配置当成指令。旧版 SOUL.md（无 frontmatter）原样返回
+  // ⇒ 存量数字人的 System Prompt 与改造前逐字一致（兼容不变式）。
+  const soulBody = stripFrontmatter(soul).trim();
+  if (!soulBody) {
+    throw new AgentConfigError(`数字人 ${agentName} 的 SOUL.md 正文为空（仅有 frontmatter）`);
+  }
+
   const enabledTools = loadEnabledTools(agentDir, agentName, logger);
   const mcpServers = loadMcpServers(agentDir, agentName);
   const skills = loadSkills(agentDir, agentName, logger);
 
   const skillSections = skills.map((s) => `## 技能：${s.name}\n${s.description}`).join('\n\n');
-  const systemPrompt = skillSections ? `${soul.trim()}\n\n${skillSections}` : soul.trim();
+  const systemPrompt = skillSections ? `${soulBody}\n\n${skillSections}` : soulBody;
 
   return { agentName, systemPrompt, enabledTools, mcpServers, skills };
 }

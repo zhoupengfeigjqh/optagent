@@ -9,6 +9,7 @@
 
 import type { FileReference, RawSseEvent, SendMessageRequest, StreamEvent, Usage } from './types'
 import { SSE_EVENT } from '../constants/events'
+import { normalizeNextSteps } from './next-steps'
 import { postSseStream, type SseRequestOptions } from './sse'
 
 /** 发消息入参（组件/composable 视角）。 */
@@ -21,6 +22,8 @@ export interface SendMessageInput {
   model: string | null
   /** 结构化引用 */
   attachments: FileReference[]
+  /** 本轮隐藏指引（004）；空串 / 缺省表示不提交该字段 */
+  guidance?: string
 }
 
 /**
@@ -42,6 +45,9 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
       dir: item.dir,
       filename: item.filename,
     }))
+  }
+  if (input.guidance) {
+    body.guidance = input.guidance
   }
   return body
 }
@@ -106,7 +112,13 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
       }
     }
 
-    case SSE_EVENT.DONE:
+    case SSE_EVENT.DONE: {
+      // 007 修订（Tail Protocol）：卡片随 done 直推——形状校验与快照端点同一条实现
+      // （normalizeNextSteps）；字段缺省 / 非法一律空形态（= 本轮无卡片）
+      const nextActions =
+        payload.next_actions === undefined || payload.next_actions === null
+          ? null
+          : normalizeNextSteps(payload.next_actions)
       return {
         type: 'done',
         data: {
@@ -117,8 +129,11 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
           message_id: typeof payload.message_id === 'string' ? payload.message_id : null,
           // 会话可跨数字人：本轮由谁回答（缺省空串，UI 回退为「助手」）
           agent_name: asString(payload.agent_name),
+          // 空形态（message_id 为 null）也视作"无卡片"，不写该键（与后端口径一致）
+          ...(nextActions && nextActions.message_id !== null ? { next_actions: nextActions } : {}),
         },
       }
+    }
 
     case SSE_EVENT.ERROR: {
       const error = asRecord(payload.error)

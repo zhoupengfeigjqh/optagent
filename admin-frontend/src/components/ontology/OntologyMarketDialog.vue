@@ -87,10 +87,13 @@ async function proceed(): Promise<void> {
   error.value = null
   const isUpdate = item.status === 'changed'
   try {
-    const result = isUpdate
-      ? await updateOntoMarketOntology(item.scenario, item.ontology_dir)
-      : await importOntoMarketOntology(item.scenario, item.ontology_dir)
-    emit(isUpdate ? 'updated' : 'imported', result)
+    // 两条分支写开，而不是「三元 + 动态事件名」：`emit` 的重载需要字面量事件名才能收敛，
+    // 且两个接口的返回类型也要各自推导（否则 TS2769）
+    if (isUpdate) {
+      emit('updated', await updateOntoMarketOntology(item.scenario, item.ontology_dir))
+    } else {
+      emit('imported', await importOntoMarketOntology(item.scenario, item.ontology_dir))
+    }
     requestClose()
   } catch (err) {
     // 失败不关窗：错误留在窗内，管理员可刷新后重试

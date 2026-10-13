@@ -45,12 +45,16 @@ export default defineConfig({
       // 两层阈值（与 `frontend/vite.config.ts`、`agent-backend/vitest.config.ts` 同口径）：
       // ① 全局「防倒退地板」；② 受宪章 80% 门禁约束的模块清单。
       thresholds: {
-        // ① 全局地板（防倒退）。实测：stmts 96.7 / branch 90.6 / funcs 99 / lines 97.1
+        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 95.31 / branch 93.21 / funcs 88.79 / lines 95.46
+        //    （007 按 T066 复核：stmts / branch / lines 按"实测值略下方"上调；
+        //     **funcs 保持 95 不下调**——它当前不达（88.79），原因是**存量**模块 `src/api/skills.ts`
+        //     的函数未被覆盖（其消费方 spec 一律 `vi.mock` 掉该模块），与本特性无关，
+        //     按「不追溯」登记而不修：见 `specs/007-next-action-hints/tasks.md` 同步记录）
         //    地板只可上调（原则三 / 治理 § 不追溯）。
-        statements: 92,
-        branches: 85,
+        statements: 94,
+        branches: 92,
         functions: 95,
-        lines: 92,
+        lines: 94,
 
         // ② 受宪章 80% 门禁约束的模块（新增或改动时 MUST 加入本清单）
         'src/router.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },

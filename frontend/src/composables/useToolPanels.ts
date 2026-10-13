@@ -23,6 +23,13 @@ export interface ToolPanelState {
   content: string | null
   expired: boolean
   error: string | null
+  /**
+   * 结果正文是否**按原始 JSON 展示**（`false` = 能结构化就结构化，2026-10-10）。
+   *
+   * 与"查看态"同放一处的理由相同：默认结构化渲染后必须保留回看原文的逃生舱
+   * （与产出弹窗的「按原始 JSON 查看」同口径），且该开关 MUST NOT 随流式→历史交接丢失。
+   */
+  raw: boolean
 }
 
 /** 查看态存取口。 */
@@ -48,7 +55,14 @@ const details = reactive<Record<string, boolean>>({})
 const shared: ToolPanels = {
   panelOf(callId: string): ToolPanelState {
     if (!panels[callId]) {
-      panels[callId] = { open: false, loading: false, content: null, expired: false, error: null }
+      panels[callId] = {
+        open: false,
+        loading: false,
+        content: null,
+        expired: false,
+        error: null,
+        raw: false,
+      }
     }
     return panels[callId]!
   },

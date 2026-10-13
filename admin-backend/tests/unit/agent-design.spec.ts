@@ -14,8 +14,10 @@ import {
   validateAgentInput,
 } from '../../src/domain/config-center/agent-design.js';
 import { createReferenceIndex } from '../../src/domain/config-center/reference-index.js';
+import { SOUL_LIMITS } from '../../src/domain/config-center/soul-design.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
+import { soulDesign } from '../helpers/soul.js';
 
 // 名称与场景判据已按 500 行门禁拆到独立模块（`naming.ts` / `scenario.ts`），
 // 各自有对应单测（`naming.spec.ts` / `scenario.spec.ts`）。
@@ -24,11 +26,13 @@ const index = createReferenceIndex({
   builtinTools: ['read_file', 'write_file', 'calculator'],
   mcpServices: ['ocr'],
   skills: ['pdf-parse'],
+  // 004：问题实例的工具关联校验需要"服务的可见工具"
+  mcpTools: [['ocr', ['ocr_extract']]],
 });
 
 const validRaw = {
   name: 'demo',
-  soul: '# 生产计划助手\n\n你是生产计划助手。',
+  soul: soulDesign('# 生产计划助手\n\n你是生产计划助手。', { intro: '生产计划助手' }),
   enabled_tools: ['read_file', 'calculator'],
   mcp_services: ['ocr'],
   skills: ['pdf-parse'],
@@ -67,21 +71,38 @@ describe('validateAgentInput', () => {
 
   it('边界：省略三类引用字段时按空集合处理（不报错）', () => {
     const out = validateAgentInput(
-      { name: 'a', soul: 's', scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } },
+      {
+        name: 'a',
+        soul: soulDesign('s'),
+        scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] },
+      },
       { index, takenNames: new Set() },
     );
     expect(out.enabled_tools).toEqual([]);
   });
 
-  it('异常：SOUL 为空或仅空白 → VALIDATION_FAILED（FR-019）', () => {
+  it('异常：结构化 SOUL 缺失或必填为空 → VALIDATION_FAILED（FR-019 / 004）', () => {
+    // 旧版字符串形态：004 起不再是合法输入
     expectCode(
-      () =>
-        validateAgentInput({ ...validRaw, soul: '' }, { index, takenNames: new Set() }),
+      () => validateAgentInput({ ...validRaw, soul: 's' }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
+    // 主要使命仅空白
     expectCode(
       () =>
-        validateAgentInput({ ...validRaw, soul: '   \n\t ' }, { index, takenNames: new Set() }),
+        validateAgentInput(
+          { ...validRaw, soul: soulDesign('   \n\t ') },
+          { index, takenNames: new Set() },
+        ),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+    // 角色简介缺失
+    expectCode(
+      () =>
+        validateAgentInput(
+          { ...validRaw, soul: soulDesign('使命', { intro: '' }) },
+          { index, takenNames: new Set() },
+        ),
       ERROR_CODES.VALIDATION_FAILED,
     );
   });
@@ -194,32 +215,41 @@ describe('validateAgentInput', () => {
     ).not.toThrow();
   });
 
-  it('原样保留：SOUL 的换行与标点、条目顺序均不被规范化（FR-017）', () => {
-    const soul = '第一行\n第二行，含标点！\r\n第三行\t制表符\n'
+  it('原样保留：主要使命的换行与标点、条目顺序均不被规范化（FR-017）', () => {
+    // 004 起"原样回显"作用于结构化字段：使命内部换行 / 标点 / 制表符原样保留
+    const mission = '第一行\n第二行，含标点！\r\n第三行\t制表符'
     const out = validateAgentInput(
-      { ...validRaw, soul, enabled_tools: ['calculator', 'read_file'] },
+      { ...validRaw, soul: soulDesign(mission), enabled_tools: ['calculator', 'read_file'] },
       { index, takenNames: new Set() },
     )
-    expect(out.soul).toBe(soul)
+    expect(out.soul.mission).toBe(mission)
     expect(out.enabled_tools).toEqual(['calculator', 'read_file'])
   })
 });
 
-describe('deriveDescription', () => {
-  it('取 SOUL 首个非空行并去掉 Markdown 井号', () => {
-    expect(deriveDescription('\n# 生产计划助手\n正文')).toBe('生产计划助手')
-    expect(deriveDescription('  普通首行  \n第二行')).toBe('普通首行')
+describe('deriveDescription（004：优先取角色简介）', () => {
+  it('有角色简介时取简介', () => {
+    expect(deriveDescription(soulDesign('使命正文', { intro: '生产计划助手' }))).toBe(
+      '生产计划助手',
+    )
+  })
+
+  it('无角色简介时回退使命首行并去掉 Markdown 井号', () => {
+    expect(deriveDescription(soulDesign('\n# 生产计划助手\n正文', { intro: '' }))).toBe(
+      '生产计划助手',
+    )
+    expect(deriveDescription(soulDesign('  普通首行  \n第二行', { intro: '' }))).toBe('普通首行')
   })
 
   it('超长时截断为 80 字符以内', () => {
-    const text = deriveDescription('x'.repeat(200))
+    const text = deriveDescription(soulDesign('x'.repeat(200), { intro: '' }))
     expect(text.length).toBe(80)
     expect(text.endsWith('…')).toBe(true)
   })
 
-  it('空 SOUL 返回空串', () => {
-    expect(deriveDescription('')).toBe('')
-    expect(deriveDescription('\n\n')).toBe('')
+  it('简介与使命都为空时返回空串', () => {
+    expect(deriveDescription(soulDesign('', { intro: '' }))).toBe('')
+    expect(deriveDescription(soulDesign('\n\n', { intro: '' }))).toBe('')
   })
 })
 
@@ -244,7 +274,7 @@ describe('AgentDesignService', () => {
     expect(created.name).toBe('demo')
     expect(created.abnormal).toBe(false)
     const read = service.view('demo', index)
-    expect(read.soul).toBe(validRaw.soul)
+    expect(read.soul).toEqual(validRaw.soul)
     expect(read.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价', '算法规则'])
     expect(read.revision).toBe(created.revision)
   })
@@ -264,10 +294,10 @@ describe('AgentDesignService', () => {
     service.create(validRaw, index, store.revision())
     const stale = store.revision() - 1
     expectCode(
-      () => service.update('demo', { ...validRaw, soul: '新内容' }, index, stale),
+      () => service.update('demo', { ...validRaw, soul: soulDesign('新内容') }, index, stale),
       ERROR_CODES.ADM_CONFIG_REVISION_CONFLICT,
     )
-    expect(service.read('demo').soul).toBe(validRaw.soul)
+    expect(service.read('demo').soul).toEqual(validRaw.soul)
   })
 
   it('异常态：引用被移除后列表与详情均标记异常并指明失效对象（FR-013）', () => {
@@ -295,7 +325,7 @@ describe('AgentDesignService', () => {
     expect(service.list(2, index).items).toHaveLength(2)
   })
 
-  it('读取归一化：历史文档缺 data_prep_fields 时对外恒补为空对象', () => {
+  it('读取归一化：历史文档缺 data_prep_fields、SOUL 为字符串时，对外恒为结构化形态', () => {
     // 手工写入"本字段引入前"的文档形态，模拟线上既有数据
     store.writeJson('agents/legacy.json', {
       name: 'legacy',
@@ -309,7 +339,50 @@ describe('AgentDesignService', () => {
 
     expect(service.read('legacy').scenario.data_prep_fields).toEqual({});
     expect(service.view('legacy', index).scenario.data_prep_fields).toEqual({});
-  });
+  })
+
+  it('读取归一化（007）：结构化 SOUL 缺开关与条数 → 补齐为 false / 缺省 3（对外恒有该键）', () => {
+    // "结构化但没有这两个键"的形态：本次字段引入前的存档
+    const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>
+    delete stale.next_action_hints
+    delete stale.next_action_hints_count
+    store.writeJson('agents/stale.json', {
+      name: 'stale',
+      soul: stale,
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+      updated_at: '2026-10-12T00:00:00.000Z',
+    })
+
+    const soul = service.read('stale').soul
+    expect(soul.next_action_hints).toBe(false)
+    expect(soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
+  })
+
+  it('读取归一化（007）：手改坏的条数收敛到缺省（一个坏数字不该让数字人打不开）', () => {
+    const writeWithCount = (value: unknown): void => {
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul: { ...soulDesign('你是助手'), next_action_hints: true, next_action_hints_count: value },
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-10-12T00:00:00.000Z',
+      })
+    }
+
+    for (const broken of [0, -1, 2.5, SOUL_LIMITS.nextActionHintsMax + 1, '3', null, {}]) {
+      writeWithCount(broken)
+      expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
+    }
+
+    // 合法值原样保留（收敛只对坏值生效）
+    writeWithCount(SOUL_LIMITS.nextActionHintsMax)
+    expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax)
+  })
 
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision())

@@ -1,5 +1,5 @@
 /**
- * 单测：SSE 事件解码（`decodeStreamEvent`）。
+ * 单测：SSE 事件解码（`decodeStreamEvent`）与发消息请求体（`buildSendMessageBody`）。
  *
  * 重点守住 HITL 的 `interaction_request`：它是**逐字段构造**的（不是透传），
  * 新增字段忘了映射就会被静默丢弃——`rules_field` 与 `tool_description` 正是这样漏掉的
@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { decodeStreamEvent } from './messages'
+import { buildSendMessageBody, decodeStreamEvent } from './messages'
 
 function interactionData(extra: Record<string, unknown> = {}): Record<string, unknown> {
   const event = decodeStreamEvent({
@@ -59,5 +59,62 @@ describe('decodeStreamEvent —— interaction_request（HITL）', () => {
 
   it('required 过滤非字符串项（既有行为，顺带守住）', () => {
     expect(interactionData({ required: ['input', 42, null] }).required).toEqual(['input'])
+  })
+})
+
+describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推）', () => {
+  function doneData(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const event = decodeStreamEvent({
+      event: 'done',
+      data: JSON.stringify({
+        finish_reason: 'completed',
+        usage: { input_tokens: 1, output_tokens: 2 },
+        duration_seconds: 1.5,
+        message_id: 'm-1',
+        agent_name: 'demo',
+        ...extra,
+      }),
+    })
+    if (event?.type !== 'done') throw new Error('预期 done')
+    return event.data as unknown as Record<string, unknown>
+  }
+
+  it('带合法卡片 → 解码并归一形状（tools / guidance 缺失补齐，与快照端点同一条校验）', () => {
+    const data = doneData({ next_actions: { message_id: 'm-1', actions: [{ prompt: '整理表格' }] } })
+
+    expect(data.next_actions).toEqual({
+      message_id: 'm-1',
+      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+    })
+  })
+
+  it('无卡片（字段缺省 / 显式 null）→ 不写该键（= 本轮无卡片）', () => {
+    expect('next_actions' in doneData()).toBe(false)
+    expect('next_actions' in doneData({ next_actions: null })).toBe(false)
+  })
+
+  it('脏卡片（形状非法 / actions 为空）→ 不写该键，不抛错', () => {
+    expect('next_actions' in doneData({ next_actions: { foo: 1 } })).toBe(false)
+    expect('next_actions' in doneData({ next_actions: { message_id: 'm-1', actions: [] } })).toBe(false)
+  })
+})
+
+describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
+  const base = { content: '帮我梳理昨天订单的交付风险', thinking: false, model: null, attachments: [] }
+
+  it('有指引时随请求体下发（模型能看到，用户气泡里看不到）', () => {
+    const body = buildSendMessageBody({
+      ...base,
+      guidance: '本轮请优先使用以下工具完成任务：read_file',
+    })
+
+    expect(body.guidance).toBe('本轮请优先使用以下工具完成任务：read_file')
+    // 正文保持干净：引导绝不拼进 content
+    expect(body.content).toBe('帮我梳理昨天订单的交付风险')
+  })
+
+  it('空串 / 缺省时不写该键（后端 Schema 为 additionalProperties:false）', () => {
+    expect('guidance' in buildSendMessageBody(base)).toBe(false)
+    expect('guidance' in buildSendMessageBody({ ...base, guidance: '' })).toBe(false)
   })
 })

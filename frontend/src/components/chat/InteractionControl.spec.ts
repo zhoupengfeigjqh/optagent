@@ -131,7 +131,8 @@ describe('InteractionControl —— 标量控件', () => {
     expect(toggle.form.valueOf(['开关'])).toBe(false)
 
     const select = mountControl({ root, path: ['类型'], proposed })
-    await select.wrapper.find('select').setValue('谷')
+    // DOM 的 value 是选项**下标**（原值由下标承载）：下标 1 即「谷」
+    await select.wrapper.find('select').setValue('1')
     expect(select.form.valueOf(['类型'])).toBe('谷')
   })
 
@@ -202,6 +203,37 @@ describe('InteractionControl —— 紧凑模式（表格单元格 / 列表项�
     expect(area.exists()).toBe(true)
     expect(JSON.parse((area.element as HTMLTextAreaElement).value)).toEqual({ a: 1 })
   })
+
+  it('有 enum 的单元格同样是下拉（compact 只改排版，不改控件形态与取值口径）', async () => {
+    // 合成字段名：真实契约里并没有"数字枚举"的字段（`businessType` 是 `{"type":"integer"}`，
+    // 1~5 只写在 description 里），故不借用真实字段名，免得"数字枚举"被误挂到它身上
+    const { wrapper, form } = mountControl({
+      root: { properties: { 数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] } } },
+      path: ['数字枚举'],
+      proposed: { 数字枚举: 1 },
+      name: '数字枚举',
+      compact: true,
+    })
+
+    const select = wrapper.find('select')
+    expect(select.exists()).toBe(true)
+    expect(wrapper.find('input[type=text]').exists()).toBe(false)
+
+    // 与字段行同源：写回的仍是选项原值（number），不是字符串
+    await select.setValue('3')
+    expect(form.valueOf(['数字枚举'])).toBe(4)
+  })
+
+  it('单元格里的文本类控件同样带「可打 @ 选择文件」占位提示（与字段行同源）', () => {
+    const { wrapper } = mountControl({
+      root: { properties: { realRelativePath: { type: 'string' } } },
+      path: ['realRelativePath'],
+      name: 'realRelativePath',
+      compact: true,
+    })
+
+    expect(wrapper.find('input[type=text]').attributes('placeholder')).toBe('可打 @ 选择文件')
+  })
 })
 
 describe('InteractionControl —— @ 文件引用面板', () => {
@@ -243,17 +275,104 @@ describe('InteractionControl —— @ 文件引用面板', () => {
     expect((wrapper.find('input[type=text]').element as HTMLInputElement).value).toBe('@no')
   })
 
-  it('紧凑模式不装配面板（单元格里不塞面板）', async () => {
-    const { wrapper } = mountControl({
+  it('紧凑模式（表格单元格）同样装配面板：格子里也能 @ 选文件', async () => {
+    const { wrapper, form } = mountControl({
       root: { properties: { 路径: { type: 'string' } } },
       path: ['路径'],
+      proposed: { 路径: '' },
       mention: true,
       compact: true,
     })
     await flushPromises()
 
     await typeAt(wrapper, '@')
+    expect(wrapper.find('.mention-picker').exists()).toBe(true)
 
-    expect(wrapper.find('.mention-picker').exists()).toBe(false)
+    const space = wrapper.findAll('.mention-picker__item').find((item) => item.text() === '临时空间')!
+    await space.trigger('click')
+    const file = wrapper.findAll('.mention-picker__item').find((item) => item.text() === 'note.txt')!
+    await file.trigger('click')
+
+    expect(form.valueOf(['路径'])).toBe('临时空间/note.txt')
+  })
+
+  it('浮层留在原 DOM 子树内（不 Teleport），随字段卸载而消失', async () => {
+    const { wrapper } = mountControl({
+      root: { properties: { 路径: { type: 'string' } } },
+      path: ['路径'],
+      mention: true,
+    })
+    await flushPromises()
+
+    await typeAt(wrapper, '@')
+
+    // Teleport 的内容不会出现在 wrapper.html() 里，因此这条断言即"没有搬动 DOM"
+    expect(wrapper.html()).toContain('mention-popup')
+    expect(wrapper.find('.mention-popup').exists()).toBe(true)
+  })
+})
+
+describe('InteractionControl —— 占位提示', () => {
+  it('文本类控件提示「可打 @ 选择文件」；数字控件仍是「数字」；开关不提示', () => {
+    const text = mountControl({ root: { properties: { 路径: { type: 'string' } } }, path: ['路径'] })
+    expect(text.wrapper.find('input[type=text]').attributes('placeholder')).toBe('可打 @ 选择文件')
+
+    const number = mountControl({
+      root: { properties: { 数量: { type: 'integer' } } },
+      path: ['数量'],
+    })
+    expect(number.wrapper.find('input[type=number]').attributes('placeholder')).toBe('数字')
+
+    const toggle = mountControl({ root: { properties: { 开关: { type: 'boolean' } } }, path: ['开关'] })
+    expect(toggle.wrapper.find('input[type=checkbox]').attributes('placeholder')).toBeUndefined()
+  })
+})
+
+describe('InteractionControl —— 下拉取值类型', () => {
+  it('数字枚举写回保留 number（schema 声明 integer 时不得变成字符串）', async () => {
+    // 合成字段名，理由同上条
+    const { wrapper, form } = mountControl({
+      root: { properties: { 数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] } } },
+      path: ['数字枚举'],
+      proposed: { 数字枚举: 1 },
+    })
+
+    const select = wrapper.find('select')
+    expect(select.exists()).toBe(true)
+
+    // DOM 里 `option.value` 是**下标**（原值由下标承载），下标 3 即原值 4
+    await select.setValue('3')
+
+    expect(form.valueOf(['数字枚举'])).toBe(4)
+    expect(typeof form.valueOf(['数字枚举'])).toBe('number')
+  })
+
+  it('字符串枚举仍写回字符串', async () => {
+    const { wrapper, form } = mountControl({
+      root: { properties: { 类型: { type: 'string', enum: ['峰', '谷'] } } },
+      path: ['类型'],
+      proposed: { 类型: '峰' },
+    })
+
+    // 下标 1 即「谷」
+    await wrapper.find('select').setValue('1')
+
+    expect(form.valueOf(['类型'])).toBe('谷')
+  })
+
+  it('字符串化后彼此相同的退化枚举靠**下标**分辨（按字符串反查会静默写错）', async () => {
+    const { wrapper, form } = mountControl({
+      root: { properties: { code: { enum: [1, '1'] } } },
+      path: ['code'],
+      proposed: { code: 1 },
+    })
+
+    // 两个选项的**原值**不同（数字 1 / 字符串 '1'），但字符串化后完全一样
+    expect(wrapper.findAll('option').map((option) => option.text())).toEqual(['请选择', '1', '1'])
+
+    await wrapper.find('select').setValue('1')
+
+    expect(form.valueOf(['code'])).toBe('1')
+    expect(typeof form.valueOf(['code'])).toBe('string')
   })
 })

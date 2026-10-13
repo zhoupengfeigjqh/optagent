@@ -21,6 +21,7 @@ import { buildPath } from '../../router'
 import { NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import AgentCardList from './AgentCardList.vue'
 import AgentDesigner from './AgentDesigner.vue'
+import CreateAgentDialog from './CreateAgentDialog.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
 const emit = defineEmits<{
@@ -41,6 +42,34 @@ const mcpServices = ref<McpServiceListItem[]>([])
 const skills = ref<SkillListItem[]>([])
 
 const design = ref<AgentDesign | null>(null)
+
+/** 「新建数字人」弹窗开关（`FR-015`：新建先经弹窗采集名称与可选复制源） */
+const createOpen = ref(false)
+/**
+ * 弹窗确认后的**新建初值**（名称 + 可选复制源），供设计器预填草稿。
+ *
+ * 用组件内状态而非 URL：新建草稿本来就不落盘、刷新即丢，而把用户输入的
+ * 名称塞进地址栏会让 URL 与草稿状态互相不同步（设计器内改名后地址栏不跟着变）。
+ */
+const pendingNew = ref<{ name: string; copyFrom: string | null } | null>(null)
+
+function onNewAgentConfirmed(payload: { name: string; copyFrom: string | null }): void {
+  pendingNew.value = payload
+  emit('navigate', buildPath({ name: 'agents', detail: NEW_AGENT_SENTINEL }))
+}
+
+/** 离开设计器（返回列表）即丢弃"待预填"意图，避免复用到下一次进入 */
+function backToList(): void {
+  pendingNew.value = null
+  emit('navigate', buildPath({ name: 'agents' }))
+}
+
+function onDeleted(name: string): void {
+  pendingNew.value = null
+  emit('announce', `数字人 ${name} 已删除`)
+  // 删掉后没有可编辑的对象了：退回列表（列表会重新拉取，卡片随之消失）
+  emit('navigate', buildPath({ name: 'agents' }))
+}
 
 async function loadCatalog(): Promise<void> {
   builtinToolsError.value = null
@@ -101,42 +130,40 @@ watch(
       v-if="detail"
       :name="detail"
       :design="design"
+      :initial="pendingNew"
       :builtin-tools="builtinTools"
       :builtin-tools-error="builtinToolsError"
       :mcp-services="mcpServices"
       :skills="skills"
       :initial-tab="tab"
-      @back="emit('navigate', buildPath({ name: 'agents' }))"
+      @back="backToList"
       @saved="
         (saved) => {
           design = saved
           emit('announce', `数字人 ${saved.name} 已保存`)
         }
       "
-      @deleted="
-        (name) => {
-          emit('announce', `数字人 ${name} 已删除`)
-          // 删掉后没有可编辑的对象了：退回列表（列表会重新拉取，卡片随之消失）
-          emit('navigate', buildPath({ name: 'agents' }))
-        }
-      "
+      @deleted="onDeleted"
       @error="(message) => emit('announce', message)"
     />
-    <AgentCardList
-      v-else
-      :items="list?.items ?? []"
-      :total="list?.total ?? 0"
-      :page="page"
-      :loading="listLoading"
-      :error="(listError as never)"
-      @update:page="
-        (next) => {
-          page = next
-          void loadList()
-        }
-      "
-      @open="(name) => emit('navigate', buildPath({ name: 'agents', detail: name }))"
-      @create="emit('navigate', buildPath({ name: 'agents', detail: NEW_AGENT_SENTINEL }))"
-    />
+    <template v-else>
+      <AgentCardList
+        :items="list?.items ?? []"
+        :total="list?.total ?? 0"
+        :page="page"
+        :loading="listLoading"
+        :error="(listError as never)"
+        @update:page="
+          (next) => {
+            page = next
+            void loadList()
+          }
+        "
+        @open="(name) => emit('navigate', buildPath({ name: 'agents', detail: name }))"
+        @create="createOpen = true"
+      />
+
+      <CreateAgentDialog v-model:open="createOpen" @confirm="onNewAgentConfirmed" />
+    </template>
   </section>
 </template>

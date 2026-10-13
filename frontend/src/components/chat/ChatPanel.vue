@@ -9,17 +9,21 @@
  */
 import { computed } from 'vue'
 
+import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
+import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import AgentPanel from './AgentPanel.vue'
 import ChatHeader from './ChatHeader.vue'
 import Composer from './Composer.vue'
 import ComposerToolbar from './ComposerToolbar.vue'
 import MentionPicker from './MentionPicker.vue'
+import MentionPopup from './MentionPopup.vue'
 import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
 import SessionSearch from './SessionSearch.vue'
+import SuggestionCard from './SuggestionCard.vue'
 import UploadMenu from './UploadMenu.vue'
 
 const props = withDefaults(
@@ -55,6 +59,12 @@ const {
   onSend,
   onStop,
   onRegenerate,
+  nextSteps,
+  pendingSuggestion,
+  suggestionSending,
+  onPickNextStep,
+  onCancelSuggestion,
+  onConfirmSuggestion,
   onLoadMore,
   onLoadToolResult,
   onRecover,
@@ -90,6 +100,32 @@ const {
  * 除 `expanded` 与历史消息外，本轮已开始（首轮尚未落盘）也应下移入口（FR-004）。
  */
 const showList = computed(() => props.expanded || hasMessages.value || streaming.value !== null)
+
+/* ---------- 首屏引导（004） ---------- */
+
+/** 当前数字人的首屏欢迎语；旧版 SOUL 无结构化数据时为空 → 退回原空状态文案 */
+const heroWelcome = computed(() => agents.currentAgent.value?.welcome ?? '')
+
+/** 问题卡片：全部平铺展示，点击即发起一轮对话 */
+const heroStarters = computed<AgentStarter[]>(() => agents.currentAgent.value?.starters ?? [])
+
+const agentSelected = computed(() => agents.currentAgent.value !== null)
+
+/**
+ * 点击问题卡片 = 发起一轮对话。
+ *
+ * 正文只发问题本身（用户气泡保持干净）；关联工具的引导随 `guidance` 走
+ * **请求级隐藏通道**——不落盘、不进历史，只在那一轮的系统提示词里出现。
+ * 未选数字人或本轮进行中时不响应（未选数字人的提示由 `threads.create()` 兜底）。
+ */
+function onStarterClick(starter: AgentStarter): void {
+  if (!agentSelected.value || streaming.value !== null) return
+  void onSend({
+    content: starter.prompt,
+    attachments: [],
+    ...(starter.guidance ? { guidance: starter.guidance } : {}),
+  })
+}
 </script>
 
 <template>
@@ -131,9 +167,11 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         :active-match-index="search.activeIndex.value"
         :has-more="threads.hasMore.value"
         :load-tool-result="onLoadToolResult"
+        :next-steps="nextSteps.steps.value"
         @load-more="onLoadMore"
         @feedback="onFeedback"
         @regenerate="onRegenerate"
+        @send-suggestion="onPickNextStep"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
         @open-page="onOpenPage"
@@ -141,8 +179,29 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
     </div>
 
     <div v-else class="chat-panel__hero">
-      <h1 class="chat-panel__hero-title">开始新的对话</h1>
-      <p class="chat-panel__hero-desc">在下方输入消息，即可开始本轮求解。</p>
+      <div class="chat-panel__hero-inner">
+        <h1 class="chat-panel__hero-title">{{ heroWelcome || '开始新的对话' }}</h1>
+        <p v-if="!agentSelected" class="chat-panel__hero-desc">
+          请先选择数字人，再使用下方的问题快速开始。
+        </p>
+        <p v-else-if="heroStarters.length === 0" class="chat-panel__hero-desc">
+          在下方输入消息，即可开始本轮求解。
+        </p>
+
+        <ul v-if="heroStarters.length > 0" class="chat-panel__starters">
+          <li v-for="(starter, index) in heroStarters" :key="index">
+            <!-- 与回答下方的下一步动作卡片**同一枚卡片**（FR-012）：两处必须同源同形，
+                 否则就是引入了第二套视觉体系。关联工具不在此展示（它只用于生成隐藏引导，
+                 `exposed_name` 亦是内部实现细节，对业务用户无意义） -->
+            <SuggestionCard
+              :text="starter.prompt"
+              :disabled="!agentSelected || streaming !== null"
+              :data-test="`chat-starter-${index}`"
+              @select="onStarterClick(starter)"
+            />
+          </li>
+        </ul>
+      </div>
     </div>
 
     <ErrorNotice
@@ -177,26 +236,33 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       @send="onSend"
       @stop="onStop"
     >
-      <template #mention>
-        <MentionPicker
+      <template #mention="{ anchor }">
+        <MentionPopup
           class="chat-panel__mention"
           :open="mention.open.value"
-          :spaces="mention.spaces.value"
-          :column="mention.column.value"
-          :active-space="mention.activeSpace.value"
-          :active-dir="mention.activeDir.value"
-          :dirs="mention.dirs.value"
-          :files="mention.files.value"
-          :active-index="mention.activeIndex.value"
-          :loading="workspace.loading.value"
-          @pick-space="onPickSpace"
-          @pick-dir="onPickDir"
-          @pick-file="onPickFile"
+          :anchor="anchor"
+          :caret="mention.caret.value"
           @close="mention.close"
-          @move="mention.move"
-          @confirm="onConfirmMention"
-          @back="mention.back"
-        />
+        >
+          <MentionPicker
+            :open="mention.open.value"
+            :spaces="mention.spaces.value"
+            :column="mention.column.value"
+            :active-space="mention.activeSpace.value"
+            :active-dir="mention.activeDir.value"
+            :dirs="mention.dirs.value"
+            :files="mention.files.value"
+            :active-index="mention.activeIndex.value"
+            :loading="workspace.loading.value"
+            @pick-space="onPickSpace"
+            @pick-dir="onPickDir"
+            @pick-file="onPickFile"
+            @close="mention.close"
+            @move="mention.move"
+            @confirm="onConfirmMention"
+            @back="mention.back"
+          />
+        </MentionPopup>
       </template>
 
       <template #toolbar>
@@ -234,6 +300,17 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
       @submit="onSubmitInteraction"
       @reject="onRejectInteraction"
     />
+
+    <!-- 007 US2：点卡片先经二次确认（正文为提示词全文），确认后才经既有链路发送 -->
+    <ConfirmDialog
+      :open="pendingSuggestion !== null"
+      title="发送下一步动作"
+      :message="pendingSuggestion?.prompt ?? ''"
+      confirm-label="发送"
+      :busy="suggestionSending"
+      @confirm="onConfirmSuggestion"
+      @cancel="onCancelSuggestion"
+    />
   </section>
 </template>
 
@@ -264,6 +341,18 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
   justify-content: center;
   gap: var(--space-2);
   text-align: center;
+  padding: var(--space-4);
+  /* 问题实例全部平铺，可能很多：超出时整块滚动，不挤压输入区 */
+  overflow-y: auto;
+}
+
+.chat-panel__hero-inner {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .chat-panel__hero-title {
@@ -276,14 +365,35 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
   font-size: var(--font-size-sm);
 }
 
+/* 卡片本体（`.suggestion-card`）由 `SuggestionCard.vue` 自带：首屏与回答下方共用同一枚卡片，
+   样式也必须在同一处（FR-012），故这里只留栅格 */
+.chat-panel__starters {
+  width: 100%;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  /* 首屏**多列紧凑**（2026-10-12 产品口径）：一行可放多张、按内容自动铺满整行，
+     纵向高度随列数成比例下降。与回答下方的下一步动作卡片（单列）**刻意不同**——
+     两处共用同一枚卡片（FR-012），但栅格各自定义 */
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-2);
+}
+
 .chat-panel__error {
   flex: none;
   margin: 0 var(--space-5) var(--space-2);
 }
 
-.chat-panel__upload,
-.chat-panel__mention {
+.chat-panel__upload {
   flex: none;
   margin: 0 var(--space-5) var(--space-2);
+}
+
+/* `@` 面板是 `fixed` 浮层（见 MentionPopup）：坐标由脚本写死，任何 margin
+   都会把它从光标处推走，故这里显式清零；也不再参与流内排版。 */
+.chat-panel__mention {
+  flex: none;
+  margin: 0;
 }
 </style>

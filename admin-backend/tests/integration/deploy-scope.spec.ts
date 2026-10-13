@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, snapshotTree, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
 
 let fx: TestFixture;
@@ -48,7 +49,7 @@ async function createAgent(body: Record<string, unknown>): Promise<void> {
 function agentBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     name: 'demo',
-    soul: '你是助手',
+    soul: soulDesign('你是助手'),
     enabled_tools: [],
     mcp_services: [],
     skills: [],

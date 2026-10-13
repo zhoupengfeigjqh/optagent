@@ -130,6 +130,7 @@ describe('useMcpServices', () => {
       description: 'OCR',
       transport: 'http',
       url: 'http://192.168.1.2:8000/mcp',
+      allowed_tools: ['detect_text'],
     })
 
     expect(createMcpService).toHaveBeenCalled()
@@ -141,7 +142,13 @@ describe('useMcpServices', () => {
     createMcpService.mockRejectedValue({ code: 'ADM_MCP_SERVICE_EXISTS', message: 'x' })
     const mcp = useMcpServices()
     expect(
-      await mcp.createService({ name: 'ocr', description: '', transport: 'http', url: 'http://x/mcp' }),
+      await mcp.createService({
+        name: 'ocr',
+        description: '',
+        transport: 'http',
+        url: 'http://x/mcp',
+        allowed_tools: ['detect_text'],
+      }),
     ).toBeNull()
     expect(mcp.error.value?.code).toBe('ADM_MCP_SERVICE_EXISTS')
     expect(mcp.busy.value).toBe(false)

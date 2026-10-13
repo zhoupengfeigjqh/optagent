@@ -576,6 +576,25 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - **该键恒出现在响应中**（历史文档缺该键时，服务端读取即补为 `{}`），客户端无需判空；请求体可省略（按无约束处理）。
 - 完整字段表与校验规则见 `data-model.md` §5；字段值的实际判定（上传表表头预检）在运行环境侧，见 `runtime-api-delta.md` §3.1。
 
+**`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增）：
+
+| 字段 | 类型 | 必填 | 归属 | 说明 |
+|---|---|---|---|---|
+| `intro` | string | ✅ | 只给前台 | 角色简介（≤100 字） |
+| `welcome` | string | ✅ | 只给前台 | 首屏欢迎语（≤100 字） |
+| `starters` | array | ➖ | 只给前台 | 问题实例；每项 `{ prompt, tools: [{ kind, name, service? }] }` |
+| `mission` | string | ✅ | 进提示词 | 主要使命（≤4000 字） |
+| `capability_tags` | string[] | ➖ | 进提示词 | 能力标签（≤20 项、单项 ≤20 字） |
+| `forbidden` | string[] | ➖ | 进提示词 | 绝对禁止（≤20 项、单项 ≤100 字） |
+| `prompt_extra` | string | ➖ | 进提示词 | 补充说明（≤4000 字） |
+| `next_action_hints` | boolean | ➖ | **运行环境开关** | 下一步动作提示（007）：开启后该数字人每轮回答下方出现可点击卡片。缺省 `false`；**仅 `true` 时**物化进 `SOUL.md` 的 frontmatter |
+| `next_action_hints_count` | number | ➖ | **运行环境开关（参数）** | 开关开启时**每轮最多几条**提示（007）：`1~6` 的整数，缺省 `3`；**与开关同进同出**——仅开关开启时物化进 frontmatter，关闭态不写该键 |
+
+- `next_action_hints` 为**拒绝式校验**：键缺失 = `false`（不写该键的老表单 / 004 期存档照常保存）；键在但非布尔（`"true"` / `1` / `null` / `{}`…）→ `VALIDATION_FAILED`，MUST NOT 做隐式转换（"显示关闭、运行环境却已开启"是最难排查的错配）；
+- `next_action_hints_count` 同样**拒绝式**：键缺失 = `3`；`null` / 小数 / 越界 / 非数字 → `VALIDATION_FAILED`（不做 round / clamp）；开关关闭时**数值仍被保留**（管理台输入框置灰、不回退），只是不写进产物；
+- 响应中**恒有这两个键**（读取归一化时缺省补 `false` / `3`）；
+- **对模型行为零影响**：它们只进 frontmatter，正文（System Prompt）在开 / 关两态逐字一致（`FR-035`）。运行环境侧的读取、生成与端点口径见 `runtime-api-delta.md` §16。
+
 **错误码**：`ADM_AGENT_NOT_FOUND`（复用 `AGENT_NOT_FOUND` 语义，因属平台自有命名空间故加前缀；**同名不同义的情况在本契约中不存在**）
 
 ### 5.4 `PUT /api/admin/agents/{name}`

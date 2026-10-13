@@ -495,9 +495,11 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 | 纯函数 | `frontend/src/utils/arg-values.ts` | 本地校验（required 由父级传入，与 JSON Schema 语义一致）与提交构建（剪枝 + 数字收敛） |
 | composable | `frontend/src/composables/useInteractionForm.ts` | 模型（唯一事实源）、JSON 草稿（逃逸舱）、规则写回、校验与提交编排 |
 | 组件 | `frontend/src/components/chat/InteractionField.vue` | **字段行**：标签、说明、操作条、文件卡片、规则入口；分组时递归自身 |
-| 组件 | `frontend/src/components/chat/InteractionControl.vue` | **控件本体**：标量控件、JSON 视图文本、`@` 引用面板；`compact` 模式供表格单元格复用（单元格里放不下的形状退化为 JSON 框，而不是渲染成 `[object Object]`） |
+| 组件 | `frontend/src/components/chat/InteractionControl.vue` | **控件本体**：标量控件、JSON 视图文本、`@` 引用面板；`compact` 模式供表格单元格复用——**只改排版与可达性**（不挂 DOM id、`aria-label` 取列名、多行文本退化为单行，单元格里放不下的形状退化为 JSON 框而不是渲染成 `[object Object]`），**不改取值口径、不改挂载口径** |
 | 组件 | `frontend/src/components/chat/InteractionTable.vue` | **表格块**：一行一个元素、列与行由父级传入、删行只上报事件（不自己改数据） |
 | 组件 | `frontend/src/components/chat/InteractionDialog.vue` | 瘦身为弹窗外壳 |
+
+**`compact` 语义修订（2026-10-12，随 `006-mention-popup`）**：上表 `compact` 一栏由"`@` 引用面板是否挂"改为**只改排版与可达性**——`@` 面板的判据从 `isTextControl(control) && !compact` 收敛为 `isTextControl(control)`，表格单元格与普通字段同源（面板已改为 `fixed` 浮层，格子里不再有"塞不开"的问题）；单元格与普通字段的**取值口径**（模型写回、提交剪枝）本来就共用同一处实现，本次未变。理由、落点与验收见 `specs/006-mention-popup/`，契约侧同步见 `contracts/runtime-api-delta.md` §9.6 的 2026-10-12 修订。
 
 **行为变化**：
 

@@ -60,7 +60,17 @@ describe('api/agents', () => {
 
     await agents.createAgent({
       name: 'demo',
-      soul: 'x',
+      soul: {
+        intro: '简介',
+        welcome: '欢迎',
+        starters: [],
+        mission: 'x',
+        capability_tags: [],
+        forbidden: [],
+        prompt_extra: '',
+        next_action_hints: false,
+        next_action_hints_count: 3,
+      },
       enabled_tools: [],
       mcp_services: [],
       skills: [],
@@ -70,7 +80,17 @@ describe('api/agents', () => {
 
     await agents.updateAgent('demo', {
       name: 'demo',
-      soul: 'x',
+      soul: {
+        intro: '简介',
+        welcome: '欢迎',
+        starters: [],
+        mission: 'x',
+        capability_tags: [],
+        forbidden: [],
+        prompt_extra: '',
+        next_action_hints: false,
+        next_action_hints_count: 3,
+      },
       enabled_tools: [],
       mcp_services: [],
       skills: [],
@@ -103,12 +123,14 @@ describe('api/mcp', () => {
     await mcp.getMcpService('ocr')
     expect(lastCall().url).toBe('/api/admin/mcp/services/ocr')
 
-    // 新建只提交基础字段（其余调用配置由服务端补默认，创建后到详情页补全）
+    // 新建提交「基础字段 + 工具白名单」（`allowed_tools` 必填非空，2026-10-03；
+    // 其余调用配置由服务端补默认，创建后到详情页补全）
     await mcp.createMcpService({
       name: 'ocr',
       description: '',
       transport: 'http',
       url: 'http://host:8000/mcp',
+      allowed_tools: ['ocr_detect'],
     })
     expect(lastCall().init.method).toBe('POST')
     expect(lastCall().url).toBe('/api/admin/mcp/services')

@@ -9,6 +9,7 @@
  * 生命周期编排（并发配额、落盘、收尾、onCrash）留在 `RunManager`。
  */
 import { InteractionGate } from './interaction-gate.js';
+import { TailCapture } from './next-actions-tail.js';
 import type { RunState, SsePayload } from './run-events.js';
 
 export interface Run {
@@ -37,6 +38,22 @@ export class RunImpl implements Run {
   assistantMessageId = '';
   /** 本轮进行中的工具调用（call_id → 开始信息），供结束行计算耗时 */
   readonly toolCalls = new Map<string, { name: string; startedAt: string; startedAtMs: number }>();
+  /**
+   * 本轮**调用过**的工具名（去重，按首次调用顺序）。
+   *
+   * 007：轮末生成「下一步动作提示」需要知道本轮已经调过什么；
+   * `toolCalls` 是"进行中"的活表、`tool_call_end` 即删，轮末已空，故单独留一份。
+   */
+  readonly calledTools = new Set<string>();
+  /**
+   * 007 修订（Tail Protocol）：回答流尾部块捕获状态机。
+   *
+   * content 增量在 `consume` 里先过它再下发——命中 `<next_actions>` 后的增量
+   * 只进缓冲不下发（用户不可见），轮末由 `run-finalize` 解析成卡片随 `done` 直推。
+   */
+  readonly tailCapture = new TailCapture();
+  /** 捕获到的尾部块原文（`done` 收尾时由 `consume` 从 `tailCapture` 归档；空串 = 本轮无块） */
+  nextActionsTail = '';
   /**
    * 人工确认交互门（HITL）：挂起点建立时经 onCreated 广播 interaction_request；
    * gate 本身即 InteractionSink，直接作为 interactionSink 传给 agent.run

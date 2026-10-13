@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { removeTree } from '../../src/infra/fs-remove.js';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 
 const SCENARIO = '生产调度';
@@ -56,9 +57,8 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
 /**
  * 写/删市场侧的安全管控文件（`null` = 删掉，模拟本体未配置或后续移除）。
  *
- * 删除后**校验**：Windows 宿主对含非 ASCII 段的路径存在 `fs.rmSync` 静默不删，
- * 静默残留会让"移除"用例变成假失败，故这里把删除失败暴露成夹具错误
- * （需要真删的用例请用 ASCII 场景/目录名，见下面的用例注释）。
+ * 删除走 `removeTree`（见 `src/infra/fs-remove.ts`）：修复前用 `fs.rmSync` 删含非 ASCII
+ * 段的路径会**静默不删**，残留会让"移除"用例变成假失败。改后中文场景/目录名也能真删。
  */
 function writeMarketSecurities(
   ontologyDir: string,
@@ -67,10 +67,7 @@ function writeMarketSecurities(
 ): void {
   const file = path.join(marketDir!, scenario, ontologyDir, 'securities.yaml');
   if (content === null) {
-    fs.rmSync(file, { force: true });
-    if (fs.existsSync(file)) {
-      throw new Error(`测试夹具无法删除市场文件（宿主对非 ASCII 路径的限制）：${file}`);
-    }
+    removeTree(file);
     return;
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });

@@ -21,7 +21,7 @@
         "ocr_image"
       ],
       "headers": {},
-      "updated_at": "2026-10-09T03:08:41.546Z"
+      "updated_at": "2026-10-10T08:06:35.214Z"
     },
     "jev": {
       "name": "jev",
@@ -107,7 +107,8 @@
       },
       "confirmation": {
         "tools": [
-          "hd_scheduling_submit"
+          "hd_scheduling_submit",
+          "hd_algorithm_input_parser"
         ]
       },
       "rules_fields": {
@@ -121,7 +122,7 @@
         "hd_scheduling_submit"
       ],
       "headers": {},
-      "updated_at": "2026-10-09T03:14:11.365Z"
+      "updated_at": "2026-10-09T07:47:14.756Z"
     }
   }
 }

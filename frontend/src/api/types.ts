@@ -11,6 +11,8 @@
  * 记录的生命周期与会话一致，**刷新后仍可见**。
  */
 
+import type { ThreadNextSteps } from './threads'
+
 /* ============================================================
  * 通用
  * ============================================================ */
@@ -54,10 +56,35 @@ export interface McpServerRef {
   transport: string
 }
 
+/** 问题实例关联的工具（`starters[].tools[]`，004）。 */
+export interface AgentStarterTool {
+  kind: 'builtin' | 'mcp'
+  name: string
+  /** 仅 `kind: 'mcp'` 存在：所属 MCP 服务名 */
+  service?: string
+  /** 模型实际看到的工具名（MCP 带 `{server}__` 前缀） */
+  exposed_name: string
+}
+
+/** 新建对话页的引导卡片（004）。 */
+export interface AgentStarter {
+  /** 卡片文本，点击即作为用户消息发出 */
+  prompt: string
+  tools: AgentStarterTool[]
+  /** 隐藏工具引导：发送时随请求回传，**对用户不可见**（空串 = 无关联工具） */
+  guidance: string
+}
+
 /** `GET /api/agents/{agent_name}` 响应。 */
 export interface DigitalHuman {
   agent_name: string
-  /** SOUL.md 全文，界面展示为"描述" */
+  /** 角色简介：数字人切换面板展示（旧版 SOUL.md 无结构化数据时为空串） */
+  intro: string
+  /** 新建对话页首屏欢迎语 */
+  welcome: string
+  /** 新建对话页问题卡片 */
+  starters: AgentStarter[]
+  /** SOUL.md 全文（兼容保留；展示语义已由 `intro` 承担） */
   soul: string
   skills: AgentSkill[]
   enabled_tools: string[]
@@ -141,6 +168,12 @@ export type MessageRole = 'user' | 'assistant'
 /** 消息状态：仅 assistant 完成轮返回，缺省视为 `completed`。 */
 export type MessageStatus = 'completed' | 'failed'
 
+/** 视图链接：服务给的**原值**地址 + 可选名称（名称缺省 = 界面显示地址，`TR-46`）。 */
+export interface ViewLink {
+  url: string
+  name?: string
+}
+
 /**
  * 一次工具调用的记录（002 特性）。
  *
@@ -170,6 +203,8 @@ export interface ToolCallRecord {
   summary?: string
   /** 入参短标量摘要 */
   args_digest?: Record<string, string>
+  /** 结果里的视图链接（与正文分离下发；正文外置时仍在，见 `TR-44`） */
+  view_links?: ViewLink[]
 }
 
 /** `GET /api/threads/{id}/tool-calls/{call_id}` 响应（外置正文全文）。 */
@@ -270,6 +305,11 @@ export interface SendMessageRequest {
   model?: string
   /** 结构化引用（maxItems: 10） */
   attachments?: FileReference[]
+  /**
+   * 本轮隐藏指引（004：问题实例关联工具生成的引导，maxLength: 500）。
+   * 只追加到本轮系统提示词，**不落盘、不进历史**——用户气泡里看不到它。
+   */
+  guidance?: string
 }
 
 /** `done.finish_reason`：`completed` 正常落盘；`stop` 本轮被中断丢弃、不落盘。 */
@@ -307,6 +347,12 @@ export interface DoneEventData {
   message_id: string | null
   /** 本轮回答的数字人（会话可跨数字人） */
   agent_name: string
+  /**
+   * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
+   * 卡片与回答同流产出，`done` 时已就绪，随事件直推（前端不再轮询拉取）；
+   * 无卡片（开关关闭 / 模型未输出块 / 解析失败）时为 `null` 或字段缺省。
+   */
+  next_actions?: ThreadNextSteps | null
 }
 
 /** `error` 事件数据（`duration_seconds` / `usage` 可选）。 */

@@ -41,6 +41,9 @@ const messageBodySchema = {
     content: { type: 'string', minLength: 1 },
     thinking: { type: 'boolean' },
     model: { type: 'string', minLength: 1 },
+    // 004：问题实例关联工具生成的隐藏引导。只追加到本轮系统提示词，
+    // 不落盘、不进历史 —— 用户气泡里看不到它。
+    guidance: { type: 'string', maxLength: 500 },
     attachments: {
       type: 'array',
       maxItems: MAX_ATTACHMENTS,
@@ -117,6 +120,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       content: string;
       thinking?: boolean;
       model?: string;
+      guidance?: string;
       attachments?: FileReference[];
     };
 
@@ -170,6 +174,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         thinking: body.thinking ?? false,
         ...(body.attachments && body.attachments.length > 0 ? { attachments: body.attachments } : {}),
         ...(model ? { model } : {}),
+        // 004：问题实例的隐藏工具引导（只影响本轮系统提示词，不落盘）
+        ...(body.guidance ? { guidance: body.guidance } : {}),
       });
     } catch (err) {
       releaseQuota();

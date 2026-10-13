@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 import { multipartBody } from '../helpers/multipart.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
 
@@ -71,7 +72,7 @@ interface AgentBody {
 function agentBody(overrides: Partial<AgentBody> = {}): AgentBody {
   return {
     name: 'demo',
-    soul: '你是助手',
+    soul: soulDesign('你是助手'),
     enabled_tools: [],
     mcp_services: [],
     skills: [],
@@ -158,7 +159,7 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
 
   it('业务内容不进日志：只记字段名，SOUL 正文一字不落（SC-014 口径）', async () => {
     const canary = 'CANARY-SOUL-7f31d';
-    await createAgent({ soul: `你是助手 ${canary}` });
+    await createAgent({ soul: soulDesign(`你是助手 ${canary}`) });
     await waitForLog((rows) => rows.some((row) => row.event === 'admin.write'));
 
     const raw = fs.readFileSync(logFile(), 'utf8');

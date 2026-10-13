@@ -169,8 +169,9 @@ describe('InteractionField —— 标量控件', () => {
     expect(onOff.form.valueOf(['开关'])).toBe(false)
 
     const choice = mountField({ root, path: ['类型'], proposed })
-    expect((choice.wrapper.find('select').element as HTMLSelectElement).value).toBe('峰')
-    await choice.wrapper.find('select').setValue('谷')
+    // DOM 的 value 是选项**下标**（原值由下标承载）：0 即「峰」，下标 1 即「谷」
+    expect((choice.wrapper.find('select').element as HTMLSelectElement).value).toBe('0')
+    await choice.wrapper.find('select').setValue('1')
     expect(choice.form.valueOf(['类型'])).toBe('谷')
   })
 })
@@ -236,6 +237,35 @@ describe('InteractionField —— 对象数组（表格）', () => {
     expect((wrapper.find('tbody input[type=text]').element as HTMLInputElement).value).toBe('PR001')
   })
 
+  it('单元格里的 enum 列渲染为下拉，文本列仍是输入框（表格与字段行同一处实现）', () => {
+    const { wrapper } = mountField({
+      root: {
+        properties: {
+          清单: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                // 合成字段名：真实契约里并没有"数字枚举"的字段（`businessType` 是 integer、无 enum）
+                数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] },
+                realRelativePath: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      path: ['清单'],
+      proposed: { 清单: [{ 数字枚举: 1, realRelativePath: '数据准备/生产计划/a.csv' }] },
+    })
+
+    const cells = wrapper.findAll('tbody td')
+    expect(cells[0]!.find('select').exists()).toBe(true)
+    expect(cells[0]!.find('input[type=text]').exists()).toBe(false)
+    expect(cells[1]!.find('input[type=text]').exists()).toBe(true)
+    // 文本列的单元格同样提示可以打 @（原型同款）
+    expect(cells[1]!.find('input[type=text]').attributes('placeholder')).toBe('可打 @ 选择文件')
+  })
+
   it('加行/删行都写回模型（行下标不因渲染而错位）', async () => {
     const { wrapper, form } = mountField({
       root,
@@ -289,6 +319,48 @@ describe('InteractionField —— 标量数组（列表）', () => {
       .find((button) => button.text().includes('添加一项'))!
       .trigger('click')
     expect(form.valueOf(['天数'])).toEqual([1, ''])
+  })
+})
+
+describe('InteractionField —— 结构变化时收起 @ 面板', () => {
+  const TABLE_ROOT = {
+    properties: {
+      清单: {
+        type: 'array',
+        items: { type: 'object', properties: { ruleId: { type: 'string' } } },
+      },
+    },
+  }
+
+  it('删行即收起（行下标移位后，状态机里的激活路径已失效，不能留下孤儿面板）', async () => {
+    const mention = makeMention()
+    const { wrapper } = mountField({
+      root: TABLE_ROOT,
+      path: ['清单'],
+      proposed: { 清单: [{ ruleId: 'PR001' }, { ruleId: 'PR002' }] },
+      mention,
+    })
+
+    await wrapper.findAll('.interaction-dialog__row-remove')[0]!.trigger('click')
+
+    expect(vi.mocked(mention.close)).toHaveBeenCalled()
+  })
+
+  it('切到 JSON 视图也收起', async () => {
+    const mention = makeMention()
+    const { wrapper } = mountField({
+      root: TABLE_ROOT,
+      path: ['清单'],
+      proposed: { 清单: [{ ruleId: 'PR001' }] },
+      mention,
+    })
+
+    const toggle = wrapper
+      .findAll('.interaction-dialog__tool-btn')
+      .find((button) => button.text().includes('按 JSON 编辑'))!
+    await toggle.trigger('click')
+
+    expect(vi.mocked(mention.close)).toHaveBeenCalled()
   })
 })
 

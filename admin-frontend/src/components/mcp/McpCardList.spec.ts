@@ -17,6 +17,7 @@ const ITEMS: McpServiceListItem[] = [
     transport: 'http',
     url: 'http://192.168.1.2:8000/mcp',
     has_headers: false,
+    allowed_tools: [],
   },
   {
     name: 'local-mcp',
@@ -24,6 +25,7 @@ const ITEMS: McpServiceListItem[] = [
     transport: 'stdio',
     url: null,
     has_headers: false,
+    allowed_tools: [],
   },
 ]
 

@@ -148,6 +148,7 @@ function write(value: unknown): void {
 }
 
 function toggleJson(): void {
+  closeMention()
   context?.form.toggleJsonView(props.path)
 }
 
@@ -156,7 +157,16 @@ function addElement(): void {
 }
 
 function removeElement(index: number): void {
+  closeMention()
   write(elements.value.filter((_, position) => position !== index))
+}
+
+/**
+ * 收起 `@` 浮层。结构变化（删行、切 JSON 视图）会让状态机里记录的"激活字段/光标"
+ * 指向已失效的路径，不关就会留下一个孤儿面板，甚至把路径插到别处。
+ */
+function closeMention(): void {
+  context?.mention?.close()
 }
 
 function openRules(): void {

@@ -110,8 +110,12 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
         continue;
       }
 
-      // ① 配置完整性
-      if (typeof design.soul !== 'string' || design.soul.trim() === '') {
+      // ① 配置完整性（004：soul 为结构化对象，必填项是**主要使命**）
+      if (
+        !design.soul ||
+        typeof design.soul.mission !== 'string' ||
+        design.soul.mission.trim() === ''
+      ) {
         errors.push({
           user_id: user.user_id,
           agent_name: agentName,

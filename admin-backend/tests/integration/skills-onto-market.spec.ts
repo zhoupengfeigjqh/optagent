@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 import { multipartBody } from '../helpers/multipart.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
 
@@ -269,7 +270,7 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
       url: '/api/admin/agents',
       payload: {
         name: '计划员',
-        soul: '你是生产计划助手。',
+        soul: soulDesign('你是生产计划助手。'),
         enabled_tools: [],
         mcp_services: [],
         skills: ['raw-material-inventory'],

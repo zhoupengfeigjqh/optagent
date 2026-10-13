@@ -26,11 +26,14 @@ export default defineConfig({
       // 纯类型声明文件无运行期语句，计入分母无意义
       exclude: ['src/types.ts', '**/*.d.ts'],
       thresholds: {
-        // ① 全局地板（防倒退）。当前实测：stmts 21.1 / branch 13.1 / funcs 20.0 / lines 22.6
-        statements: 20,
-        branches: 12,
-        functions: 19,
-        lines: 21,
+        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 69.04 / branch 64.59 / funcs 68.88 / lines 70.77
+        //    本次（007）按 T066 复核：上一版地板 20/12/19/21 是早期实测留下的**远低于现状**的值
+        //    （注释里的 21.1/13.1/20.0/22.6），已丧失"发现整体下滑"的作用，故按同一个
+        //    "地板 = 实测值略下方"的口径抬到 66/61/65/67。地板只可上调，不得下调。
+        statements: 66,
+        branches: 61,
+        functions: 65,
+        lines: 67,
 
         // ② 受宪章 80% 门禁约束的模块（在本次改动中已被充分覆盖）
         //    形如：'src/domain/xxx.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }
@@ -132,6 +135,34 @@ export default defineConfig({
         },
         // 2026-09-25（R11 阶段 1）：产出列表与变更信号端点
         'src/routes/produced.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-10：工具结果里的视图链接抽取（同步侧视图入口，TR-44）
+        'src/domain/view-links.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-12：MCP 工具结果文本口径（逐块挑选，取代"整体序列化信封"，TR-49）
+        'src/infra/mcp/mcp-result-text.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-12（007）：下一步动作提示（生成 / 合规判定 / 会话级单快照）
+        'src/domain/next-actions.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-12（007）：轮次收尾家族（从 run-manager 拆分而来）
+        'src/domain/run-finalize.ts': {
           statements: 80,
           branches: 80,
           functions: 80,

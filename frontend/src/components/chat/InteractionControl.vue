@@ -7,7 +7,7 @@
  * 表格单元格（`compact`）复用的也是本组件，因此"字段行里能填什么"与"单元格里能填什么"
  * 是同一处实现，不存在两套口径。
  */
-import { computed, inject } from 'vue'
+import { computed, inject, ref } from 'vue'
 
 import type { FileReference } from '../../api/types'
 import {
@@ -23,6 +23,7 @@ import {
 } from '../../utils/arg-schema'
 import { pathKey, type NodePath } from '../../utils/json-path'
 import MentionPicker from './MentionPicker.vue'
+import MentionPopup from './MentionPopup.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -30,7 +31,7 @@ const props = withDefaults(
     path: NodePath
     /** 字段名（`compact` 时作为 `aria-label`，非 compact 时由 `InteractionField` 的 label 承担） */
     name: string
-    /** 单元格/列表项：紧凑模式——不挂 DOM id、不展开 `@` 面板、多行文本退化为单行 */
+    /** 单元格/列表项：紧凑模式——只改排版（不挂 DOM id、多行文本退化为单行），不改可取内容 */
     compact?: boolean
   }>(),
   { compact: false },
@@ -40,7 +41,11 @@ const context = inject<InteractionFormContext | null>(INTERACTION_FORM_KEY, null
 
 const control = computed(() => controlOf(props.schema))
 const options = computed(() => optionsOf(props.schema))
-const mentionable = computed(() => isTextControl(control.value) && !props.compact)
+/**
+ * `@` 引用入口：**凡文本类控件都可挂**——不在 `compact` 上打折扣，表格单元格与普通
+ * 字段因此同一口径（面板是浮层，格子里放得下，不存在"格子里塞不开面板"的问题）。
+ */
+const mentionable = computed(() => isTextControl(control.value))
 
 /**
  * 单元格里放不下的形状（对象分组/表格/列表）退化为 JSON 文本框：单元格只出控件本体，
@@ -59,10 +64,27 @@ const textValue = computed(() => {
 })
 const checkedValue = computed(() => rawValue.value === true)
 const jsonText = computed(() => context?.form.jsonTextOf(props.path) ?? '')
-const placeholder = computed(() => (control.value === 'number' ? '数字' : '请输入'))
+const placeholder = computed(() => {
+  if (control.value === 'number') return '数字'
+  return mentionable.value ? '可打 @ 选择文件' : '请输入'
+})
+
+/**
+ * 下拉当前项的下标。
+ *
+ * DOM 的 `select.value` / `option.value` 永远是字符串，因此**原值由下标承载**：
+ * 选项渲染成下标、写回时按 `options[index]` 取原值。这样 `{"type":"integer","enum":[1,2,3,4,5]}`
+ * 选中的仍是数字 `4`；而"按字符串反查原值"在 `[1, "1"]` 这类字符串化后彼此相同的枚举上会静默写错。
+ */
+const selectedIndex = computed(() =>
+  options.value.findIndex((item) => String(item) === textValue.value),
+)
 
 /** 控件的 DOM id（`for` 关联用；encodeURIComponent 保证路径不同则 id 不同）。 */
 const domId = computed(() => `interaction-input-${encodeURIComponent(pathKey(props.path))}`)
+
+/** `@` 面板的锚点：文本类控件自己的元素（面板贴它的光标右侧弹出）。 */
+const inputEl = ref<HTMLElement | null>(null)
 
 /** `@` 面板：当前激活字段就是本节点时展开（同一时刻只服务一个字段）。 */
 const mentionOpen = computed(() => {
@@ -70,6 +92,9 @@ const mentionOpen = computed(() => {
   if (!mention || !mentionable.value) return false
   return mention.open.value && mention.activeField.value === pathKey(props.path)
 })
+
+/** 浮层容器的 DOM id（输入框的 `aria-controls` 指向它）。 */
+const popupId = computed(() => `interaction-mention-${encodeURIComponent(pathKey(props.path))}`)
 
 function write(value: unknown): void {
   context?.form.setValue(props.path, value)
@@ -81,8 +106,24 @@ function onTextInput(event: Event): void {
   context?.mention?.handleInput(pathKey(props.path), el.value, el.selectionStart ?? el.value.length)
 }
 
+/**
+ * 下拉写回。直接写回 `event.target.value` 会把**数字 / 布尔枚举**（服务方声明
+ * `{"type":"integer","enum":[1,2,3,4,5]}` 这种）变成 `"1"`、与 schema 声明的 `integer` 不符；
+ * 故按**下标**取回选项原值（见 `selectedIndex` 的说明）。
+ *
+ * 注：修的是"服务方一旦声明数字枚举就会失真"，不是某个已知线上字段的症状。当前契约里唯一的
+ * `enum` 是字符串枚举（`ruleId`: `PR001~PR009`）；`businessType` 这类字段本身只有
+ * `{"type":"integer"}`、取值语义写在 `description` 里，**不是枚举字段**（不要被它的 1~5 语义误导）。
+ */
 function onSelect(event: Event): void {
-  write((event.target as HTMLSelectElement).value)
+  const raw = (event.target as HTMLSelectElement).value
+  // 空串是"请选择"占位项（disabled，正常选不中）：清空而不是误落到第一项
+  if (raw === '') {
+    write('')
+    return
+  }
+  const option = options.value[Number(raw)]
+  write(option === undefined ? '' : option)
 }
 
 function onSwitch(event: Event): void {
@@ -148,6 +189,11 @@ function confirmMention(): void {
   const path = context?.mention?.confirmActive()
   if (path !== undefined && path !== null) applyPath(path)
 }
+
+/** 浮层自身的关闭请求（焦点在面板内按 Esc）。 */
+function closeMention(): void {
+  context?.mention?.close()
+}
 </script>
 
 <template>
@@ -167,11 +213,11 @@ function confirmMention(): void {
     :id="compact ? undefined : domId"
     class="interaction-dialog__input"
     :aria-label="compact ? name : undefined"
-    :value="textValue"
+    :value="selectedIndex"
     @change="onSelect"
   >
     <option value="" disabled>请选择</option>
-    <option v-for="(option, index) in options" :key="index" :value="option">
+    <option v-for="(option, index) in options" :key="index" :value="index">
       {{ String(option) }}
     </option>
   </select>
@@ -201,7 +247,11 @@ function confirmMention(): void {
   <textarea
     v-else-if="control === 'textarea' && !compact"
     :id="domId"
+    ref="inputEl"
     class="interaction-dialog__input interaction-dialog__input--area"
+    :aria-haspopup="mentionable ? 'listbox' : undefined"
+    :aria-expanded="mentionable ? mentionOpen : undefined"
+    :aria-controls="mentionOpen ? popupId : undefined"
     :placeholder="placeholder"
     rows="4"
     :value="textValue"
@@ -212,17 +262,30 @@ function confirmMention(): void {
   <input
     v-else
     :id="compact ? undefined : domId"
+    ref="inputEl"
     type="text"
     class="interaction-dialog__input"
     :aria-label="compact ? name : undefined"
-    :placeholder="compact ? undefined : placeholder"
+    :aria-haspopup="mentionable ? 'listbox' : undefined"
+    :aria-expanded="mentionable ? mentionOpen : undefined"
+    :aria-controls="mentionOpen ? popupId : undefined"
+    :placeholder="placeholder"
     :value="textValue"
     @input="onTextInput"
     @keydown="onKeydown"
   />
 
-  <!-- `@` 文件引用面板：绝对定位覆盖在字段下方（定位上下文是字段行），不推挤表单布局 -->
-  <div v-if="mentionOpen" class="interaction-dialog__picker">
+  <!--
+    `@` 文件引用面板：`fixed` 浮层，紧贴 `@` 光标右侧弹出。不占布局、不被祖先滚动容器
+    （弹窗 body / 表格）裁剪，且因仍在所在 `<dialog>` 子树内而不会被 `inert` 挡住点击。
+  -->
+  <MentionPopup
+    :id="popupId"
+    :open="mentionOpen"
+    :anchor="inputEl"
+    :caret="context?.mention?.caret.value ?? null"
+    @close="closeMention"
+  >
     <MentionPicker
       :open="true"
       :spaces="context!.mention!.spaces.value"
@@ -241,7 +304,7 @@ function confirmMention(): void {
       @confirm="confirmMention"
       @back="context!.mention!.back"
     />
-  </div>
+  </MentionPopup>
 </template>
 
 <style scoped>
@@ -269,14 +332,5 @@ function confirmMention(): void {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-size-sm);
-}
-
-.interaction-dialog__picker {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
-  z-index: 30;
-  width: max-content;
-  max-width: 100%;
 }
 </style>

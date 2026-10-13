@@ -7,7 +7,7 @@
  * - 流式：`useChatStream.toolCalls`（仅名称与状态，无结果）
  */
 
-import type { Message, ToolCallRecord } from '../api/types'
+import type { Message, ToolCallRecord, ViewLink } from '../api/types'
 
 /** 工具调用卡片的展示模型。 */
 export interface ToolCallItem {
@@ -31,6 +31,8 @@ export interface ToolCallItem {
   truncated?: boolean
   /** 入参短标量摘要（原文不下发） */
   argsDigest?: Record<string, string>
+  /** 结果里的视图链接（服务给的原值 + 可选名称）；正文外置时也仍在 */
+  viewLinks?: ViewLink[]
 }
 
 /** 流式瞬态工具项（SSE 只给名称与状态）。 */
@@ -58,7 +60,23 @@ export function toToolCallItem(record: ToolCallRecord): ToolCallItem {
     ...(record.summary !== undefined ? { summary: record.summary } : {}),
     ...(record.truncated === true ? { truncated: true } : {}),
     ...(record.args_digest !== undefined ? { argsDigest: record.args_digest } : {}),
+    ...(record.view_links !== undefined ? { viewLinks: record.view_links } : {}),
   }
+}
+
+/**
+ * 该条消息**全部**工具调用的视图链接（并入后交给入口行去重，`TR-45`）。
+ *
+ * 并的是"这条回答能打开哪些视图"这个语义，因此**跨工具**合并；
+ * 去重与归一化不在这里做（那是 `utils/view-link.ts` 的唯一职责）。
+ * 流式瞬态没有结果，故天然是空数组——入口行在流式期不出现（`TR-48`）。
+ */
+export function collectToolViewLinks(items: readonly ToolCallItem[]): ViewLink[] {
+  const links: ViewLink[] = []
+  for (const item of items) {
+    if (item.viewLinks !== undefined) links.push(...item.viewLinks)
+  }
+  return links
 }
 
 /** 流式瞬态 → 展示模型。 */

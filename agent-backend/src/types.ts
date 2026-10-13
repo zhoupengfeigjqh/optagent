@@ -77,6 +77,28 @@ export interface UsageInfo {
   outputTokens: number;
 }
 
+/**
+ * 一轮 run 中**可用工具**的摘要（007 · 下一步动作提示）。
+ *
+ * 由 `infra/agent-factory.runWith` 在工具装配完成后回填：装配处才是"模型到底能用哪些工具"
+ * 的**唯一权威来源**（内置工具经启用清单过滤、MCP 工具经白名单过滤且带 `listTools` 的真实用途）。
+ * 域层的生成与引用校验一律据此，MUST NOT 二次枚举（会与装配判据漂移）。
+ */
+export interface RuntimeToolBrief {
+  /** 模型看到的工具名：内置为本名，MCP 为 `{server}__{tool}` */
+  name: string;
+  /** 用途摘要（上游未提供时为空串） */
+  description: string;
+}
+
+/**
+ * run 期可回填的运行时事实（007）：`AgentRunRequest.runtime` 的载荷。
+ * 缺省 = 调用方不关心；直聊分支（无工具）保持空数组。
+ */
+export interface RunRuntime {
+  availableTools: RuntimeToolBrief[];
+}
+
 /** 工具规格（传给 LLM 的工具声明） */
 export interface ToolSpec {
   name: string;

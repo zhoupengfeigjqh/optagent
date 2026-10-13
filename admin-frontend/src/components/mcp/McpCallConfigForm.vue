@@ -294,24 +294,24 @@ function probeTarget(): McpProbePayload {
   return payload
 }
 
-/** 连通性测试（按表单当前值探测，允许未保存）：逻辑见 `useMcpConnectionTest` */
-const {
-  result: testResult,
-  busy: testBusy,
-  error: testError,
-  dialog: testDialog,
-  run: runTest,
-} = useMcpConnectionTest({
-  serviceName: () => props.service.name,
-  target: probeTarget,
-  /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
-  beforeTest: () =>
-    transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null,
-  onLocalError: (message) => {
-    localError.value = message
-  },
-  announce: (text) => emit('announce', text),
-})
+/**
+ * 连通性测试（按表单当前值探测，允许未保存）：逻辑见 `useMcpConnectionTest`；
+ * 结果弹窗 ref 归本组件所有（模板 `ref="testDialog"`），借给它用（原因见该处 `dialog` 注释）。
+ */
+const testDialog = ref<{ open: () => void } | null>(null)
+const { result: testResult, busy: testBusy, error: testError, run: runTest } =
+  useMcpConnectionTest({
+    serviceName: () => props.service.name,
+    target: probeTarget,
+    dialog: testDialog,
+    /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
+    beforeTest: () =>
+      transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null,
+    onLocalError: (message) => {
+      localError.value = message
+    },
+    announce: (text) => emit('announce', text),
+  })
 
 /**
  * 暴露给详情页：

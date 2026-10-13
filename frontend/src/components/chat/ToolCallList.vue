@@ -14,6 +14,11 @@
  *
  * 降级（TR-16）：外置正文已被临时空间清理时接口返回 410，卡片显示
  * "内容已被清理"而**不是**错误态——元数据仍然完整。
+ *
+ * 结果正文的**结构化展示**（2026-10-10）：能解析成对象/数组就按与产出弹窗同构的规则渲染
+ * （`ProducedJsonView`），并可一键切回**原始 JSON**。这是**展示层**的选择——平台仍
+ * "原样存、原样读"，服务端存储与投影一字不变（契约 §10.3）；解析判据也复用同一处
+ * （`parseProducedContent`：超 256K / 非 JSON / 标量一律回落 `<pre>`）。
  */
 import { computed, useId } from 'vue'
 
@@ -29,6 +34,8 @@ import {
   toolStatusLabel,
   type ToolCallItem,
 } from '../../utils/tool-calls'
+import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
+import ProducedJsonView from './ProducedJsonView.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -118,6 +125,47 @@ function displayContent(item: ToolCallItem): string {
 function isExpired(cause: unknown): boolean {
   return (cause as { code?: string } | null)?.code === 'TOOL_RESULT_EXPIRED'
 }
+
+/** 结果正文的展示视图（结构化解析 + 降级提示） */
+interface ResultView {
+  /** `true` = 可结构化展示（此时 `value` 是对象或数组） */
+  structured: boolean
+  value: unknown
+  /** 降级提示（`''` = 不提示） */
+  hint: string
+}
+
+const EMPTY_RESULT_VIEW: ResultView = { structured: false, value: null, hint: '' }
+
+/**
+ * 各条调用的结果正文解析（`call_id` → 视图），**一次算完**供模板读取（宪章原则五）。
+ *
+ * 只解析**已展开**的卡片：折叠的卡片不必付出解析成本（大结果的 `JSON.parse` 不便宜）。
+ * `computed` 依赖 `panelOf(item).open` 与 `displayContent(item)`，故懒加载到正文后会自动重算。
+ */
+const resultViews = computed(() => {
+  const views = new Map<string, ResultView>()
+  for (const item of props.items) {
+    if (!panelOf(item).open) continue
+    const parsed = parseProducedContent(displayContent(item) || null)
+    views.set(item.callId, {
+      structured: parsed.structured,
+      value: parsed.value,
+      hint: fallbackHint(parsed.reason),
+    })
+  }
+  return views
+})
+
+function parsedOf(item: ToolCallItem): ResultView {
+  return resultViews.value.get(item.callId) ?? EMPTY_RESULT_VIEW
+}
+
+/** 切换"按原始 JSON 查看"：逃生舱——结构化只是默认视角，原文永远可回看 */
+function toggleRaw(item: ToolCallItem): void {
+  const panel = panelOf(item)
+  panel.raw = !panel.raw
+}
 </script>
 
 <template>
@@ -190,9 +238,22 @@ function isExpired(cause: unknown): boolean {
           <p v-else-if="panelOf(item).error" class="tool-call__hint tool-call__hint--error">
             {{ panelOf(item).error }}
           </p>
-          <pre v-else-if="displayContent(item)" class="tool-call__content">{{
-            displayContent(item)
-          }}</pre>
+          <template v-else-if="displayContent(item)">
+            <!-- 逃生舱在**上方**：结构化视图里的截断提示写的就是"点上方"（两处口径一致） -->
+            <button
+              v-if="parsedOf(item).structured"
+              type="button"
+              class="tool-call__view-toggle"
+              @click="toggleRaw(item)"
+            >
+              {{ panelOf(item).raw ? '按结构化查看' : '按原始 JSON 查看' }}
+            </button>
+            <div v-if="parsedOf(item).structured && !panelOf(item).raw" class="tool-call__structured">
+              <ProducedJsonView :value="parsedOf(item).value" />
+            </div>
+            <pre v-else class="tool-call__content">{{ displayContent(item) }}</pre>
+            <p v-if="parsedOf(item).hint" class="tool-call__hint">{{ parsedOf(item).hint }}</p>
+          </template>
           <!-- running 不可展开，故此处只剩"终态但无内容"一种情况 -->
           <p v-else class="tool-call__hint">无结果内容</p>
 
@@ -339,5 +400,28 @@ function isExpired(cause: unknown): boolean {
   font-size: var(--font-size-xs);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 结构化结果正文：与产出弹窗同观感（可滚动），等宽字形便于读键值 */
+.tool-call__structured {
+  max-height: 320px;
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-family: var(--font-family-mono, monospace);
+  font-size: var(--font-size-xs);
+}
+
+.tool-call__view-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-decoration: underline;
+  cursor: pointer;
 }
 </style>

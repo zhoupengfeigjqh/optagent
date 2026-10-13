@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
+import { soulDesign } from '../helpers/soul.js';
 
 let fx: TestFixture;
 
@@ -30,7 +31,7 @@ const TOOL_FIXTURE = [
 
 const AGENT = {
   name: 'demo',
-  soul: '你是一名生产计划助手。\n第二行。',
+  soul: soulDesign('你是一名生产计划助手。\n第二行。'),
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],

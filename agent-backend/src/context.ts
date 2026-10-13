@@ -7,6 +7,7 @@ import type { AgentPool } from './domain/agent-pool.js';
 import type { CurrentAgentStore } from './domain/current-agent.js';
 import type { HistoryStore } from './domain/history.js';
 import type { McpStatusEvents } from './domain/mcp-events.js';
+import type { NextActionsStore } from './domain/next-actions.js';
 import type { ProducedEvents } from './domain/produced-events.js';
 import type { RunManager } from './domain/run-manager.js';
 import type { SummaryStore } from './domain/summary.js';
@@ -26,6 +27,8 @@ export interface AppContext {
   summary: SummaryStore;
   /** 工具调用记录（002 特性）：详情接口挂卡片 + 懒加载外置正文 */
   toolEvents: ToolEventStore;
+  /** 下一步动作提示（007）：轮末生成 + 会话级单快照读取（新端点据此下发） */
+  nextActions: NextActionsStore;
   runManager: RunManager;
   usage: UsageStore;
   /** MCP 状态变更总线：建连落定 / 选中变化时发出，SSE 路由据此推送快照 */

@@ -7,6 +7,7 @@
  * - GET /api/threads/:id：详情 + 历史分页（limit≤200 默认 50、offset 从最新往前数、total、running）
  *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联小结果）
  * - GET /api/threads/:id/tool-calls/:call_id：外置结果正文（懒加载；过期 → 410）
+ * - GET /api/threads/:id/next-actions：该会话最新一轮的「下一步动作提示」（007；四类空态一律 200 空）
  * - PATCH /api/threads/:id：重命名（≤100 字）
  * - DELETE /api/threads/:id：删除连带清理（进行中 run 先 abort）
  */
@@ -65,6 +66,8 @@ function metaJson(m: { threadId: string; agentName: string; title: string | null
  * `content` = 内联结果正文（小结果，随详情一起下发）；
  * `artifact_size` 有值 = 正文在临时空间，前端按需拉 `…/tool-calls/{call_id}`。
  * **不下发路径**：路径由后端按 `{threadId, callId}` 重算，避免数据被篡改成越权读。
+ * `view_links` = 结果里的视图链接（地址 + 可选名称）：正文外置时它仍在详情里，
+ * 因此前端不必先加载正文就能给出入口（见 `view-links.ts`）。
  */
 function toolCallJson(r: ToolCallRecord) {
   return {
@@ -79,6 +82,8 @@ function toolCallJson(r: ToolCallRecord) {
     ...(r.truncated === true ? { truncated: true } : {}),
     ...(r.summary !== undefined ? { summary: r.summary } : {}),
     ...(r.argsDigest !== undefined ? { args_digest: r.argsDigest } : {}),
+    // 视图链接（2026-10-10）：只搬服务给的原值，不拼前缀、不归一化（那是前端的唯一职责）
+    ...(r.viewLinks !== undefined && r.viewLinks.length > 0 ? { view_links: r.viewLinks } : {}),
   };
 }
 
@@ -186,6 +191,28 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
       content: artifact.content,
       ...(record.truncated === true ? { truncated: true } : {}),
     };
+  });
+
+  /**
+   * 007：读取该会话最新一轮的「下一步动作提示」（会话级单快照，见契约 §1）。
+   *
+   * 三条刻意的取舍：
+   * - **会话归属校验前置**：他人会话一律 404 `THREAD_NOT_FOUND`（与详情接口同码），
+   *   不让"这个 id 有没有快照"泄漏出去；
+   * - **空态一律 200 + 空**（`{message_id: null, actions: []}`）：对前端而言"没有建议"
+   *   是正常态而非错误态（FR-042），快照损坏/开关关闭/数字人不一致都不该变成 5xx；
+   * - **判据全部在 `nextActions.read` 内收敛**：那里是唯一同时掌握"快照归属数字人"
+   *   与"当前选中数字人"的地方（跨数字人越权的唯一兜底点，FR-019/SC-011）。
+   *
+   * `Cache-Control: no-store`：内容随轮次与开关变化，缓存住会给出过期卡片。
+   */
+  app.get('/api/threads/:id/next-actions', async (req, reply) => {
+    const userId = getCurrentUser().userId;
+    const { id: threadId } = req.params as { id: string };
+    ctx.threadStore.get(userId, threadId); // 404 THREAD_NOT_FOUND
+    reply.header('Cache-Control', 'no-store');
+    // `read` 永不抛错：快照缺失/损坏/超限/判据不符都返回 undefined
+    return ctx.nextActions.read(userId, threadId) ?? { message_id: null, actions: [] };
   });
 
   app.patch('/api/threads/:id', { schema: { body: renameBodySchema } }, async (req) => {

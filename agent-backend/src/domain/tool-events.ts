@@ -7,6 +7,8 @@
  * - 结果 ≤ 内联阈值：原文存本行 `inline_content`
  * - 结果 > 内联阈值：正文外置到「临时空间/{thread_id}_toolresult_{call_id}.txt」，
  *   本行只记 `artifact_size` + `summary`（**不记路径**，读取时按同一函数重算）
+ * - 结果里的视图链接（2026-10-10）：抽成 `view_links` sidecar 存本行，
+ *   **与正文分离**——不进回灌预算，且正文外置时入口照样可用（见 `view-links.ts`）
  *
  * 与 history.jsonl 一致的口径：
  * - 追加经 per-thread Promise 链串行化；单行一次 append 保证原子性
@@ -27,6 +29,7 @@ import {
   summarizeResult,
   truncateToBytes,
 } from './tool-result.js';
+import { extractViewLinks, type ViewLink } from './view-links.js';
 
 /** 外置正文的读写口（装配层用 FileAccess 实现；缺省时超阈值结果退化为截断内联） */
 export interface ToolArtifactAccess {
@@ -67,6 +70,13 @@ export interface ToolCallRecord {
   summary?: string;
   /** 入参短标量摘要（原文不落盘） */
   argsDigest?: Record<string, string>;
+  /**
+   * 结果里的视图链接（2026-10-10，同步侧视图入口）：服务给的地址 + 可选名称。
+   *
+   * 与结果正文**分离存放**：正文会进上下文回灌预算（`tool-context`），
+   * sidecar 不进；正文外置（>64KB）时入口也照样可用（随详情下发）。
+   */
+  viewLinks?: ViewLink[];
 }
 
 export interface AppendStartInput {
@@ -102,6 +112,8 @@ interface ToolEventLine {
   truncated?: boolean;
   summary?: string;
   args_digest?: Record<string, string>;
+  /** 视图链接（sidecar；见 `view-links.ts` 的抽取规则） */
+  view_links?: ViewLink[];
 }
 
 export class ToolEventStore {
@@ -160,6 +172,9 @@ export class ToolEventStore {
         duration_ms: input.durationMs,
         size: Buffer.byteLength(input.resultText, 'utf8'),
       };
+      // 视图链接与体积分流无关：在内联/外置两条路径上都先抽取（外置正文被截断也不影响已抽出的值）
+      const viewLinks = extractViewLinks(input.resultText);
+      if (viewLinks) line.view_links = viewLinks;
       await this.splitResult(userId, threadId, input, line);
       await this.doAppend(userId, threadId, JSON.stringify(line));
     }).catch((err: unknown) => {
@@ -357,6 +372,7 @@ function toRecord(line: ToolEventLine): ToolCallRecord {
   if (typeof line.truncated === 'boolean') record.truncated = line.truncated;
   if (typeof line.summary === 'string') record.summary = line.summary;
   if (isStringMap(line.args_digest)) record.argsDigest = line.args_digest;
+  if (line.view_links !== undefined && line.view_links.length > 0) record.viewLinks = line.view_links;
   return record;
 }
 
@@ -390,7 +406,27 @@ function parseLine(line: string): ToolEventLine | undefined {
   if (typeof obj.truncated === 'boolean') out.truncated = obj.truncated;
   if (typeof obj.summary === 'string') out.summary = obj.summary;
   if (isStringMap(obj.args_digest)) out.args_digest = obj.args_digest;
+  const viewLinks = parseViewLinks(obj.view_links);
+  if (viewLinks) out.view_links = viewLinks;
   return out;
+}
+
+/**
+ * 行里的 `view_links` 结构校验（白名单复制的一环：结构不符整段丢弃，不猜）。
+ *
+ * 只认 `{ url: string, name?: string }`；缺席或全部不合法的项被跳过，
+ * 一条都不合法 → `undefined`（等价于"这一行没有视图链接"）。
+ */
+function parseViewLinks(value: unknown): ViewLink[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const out: ViewLink[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
+    const { url, name } = item as { url?: unknown; name?: unknown };
+    if (typeof url !== 'string' || url === '') continue;
+    out.push(typeof name === 'string' && name !== '' ? { url, name } : { url });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function isStringMap(value: unknown): value is Record<string, string> {

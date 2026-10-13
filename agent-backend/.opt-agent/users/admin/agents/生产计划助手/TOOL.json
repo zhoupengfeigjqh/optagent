@@ -4,7 +4,6 @@
     "list_dir",
     "grep_files",
     "write_file",
-    "read_skill",
-    "calculator"
+    "read_skill"
   ]
 }

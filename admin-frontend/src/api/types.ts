@@ -94,6 +94,8 @@ export interface McpServiceListItem {
   url: string | null
   /** 是否配置了请求头（2026-10-08；卡片徽标用）。**只给布尔量**：请求头里是凭据，值一律不下发 */
   has_headers: boolean
+  /** 工具白名单（2026-10-09）：数字人问题实例的「关联工具」可选项来源 */
+  allowed_tools: string[]
 }
 
 export interface McpToolInfo {
@@ -365,10 +367,13 @@ export interface AgentListItem {
   updated_at: string
 }
 
+import type { SoulDesign, SoulStarter, SoulStarterTool } from './soul'
+export type { SoulDesign, SoulStarter, SoulStarterTool }
+
 /** 设计态完整内容（§5.3 响应） */
 export interface AgentDesign {
   name: string
-  soul: string
+  soul: SoulDesign
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
@@ -381,7 +386,7 @@ export interface AgentDesign {
 
 export interface AgentDesignPayload {
   name: string
-  soul: string
+  soul: SoulDesign
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
