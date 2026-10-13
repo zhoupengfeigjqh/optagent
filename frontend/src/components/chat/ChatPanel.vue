@@ -73,6 +73,7 @@ const {
   onSwitchAgent,
   onOpenLink,
   onOpenFile,
+  onOpenPage,
   onUpdateDraft,
   onSendFromToolbar,
   onInputText,
@@ -135,6 +136,7 @@ const showList = computed(() => props.expanded || hasMessages.value || streaming
         @regenerate="onRegenerate"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
+        @open-page="onOpenPage"
       />
     </div>
 

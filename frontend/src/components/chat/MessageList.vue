@@ -261,6 +261,10 @@ function onOpenLink(href: string): void {
 function onOpenFile(reference: FileReference): void {
   emit('open-file', reference)
 }
+
+function onOpenPage(item: { url: string; title: string,type:string,sub:string }): void {
+  emit('open-page', item)
+}
 </script>
 
 <template>
@@ -291,6 +295,7 @@ function onOpenFile(reference: FileReference): void {
         @feedback="onFeedback"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
+        @open-page="onOpenPage"
       />
 
       <!-- 乐观用户气泡（十七次调整）：发送即出现；流终结时随 `pendingUser` 清除，由历史真身接管 -->

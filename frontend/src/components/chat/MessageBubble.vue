@@ -12,7 +12,7 @@
  * 操作区（用量 / 复制 / 点赞点踩）由 T045 接入 `MessageActions`；本组件已按契约预留
  * `feedback` / `copy` 事件出口。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import type { ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
@@ -25,6 +25,9 @@ import MessageContent from './MessageContent.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallList from './ToolCallList.vue'
 import TypingIndicator from './TypingIndicator.vue'
+import FileIcon from '@/components/layout/FileIcon.vue'
+
+
 
 interface ToolCallView {
   call_id: string
@@ -85,6 +88,8 @@ const emit = defineEmits<{
   'open-link': [href: string]
   /** 空间目录文件点击：由上层打开右侧内联预览（FR-046） */
   'open-file': [reference: FileReference]
+  /** 页面卡片点击：由上层打开右侧新窗口预览（FR-046）（V-10） */
+  'open-page': [item: { url: string; title: string ,type:string,sub:string}]
 }>()
 
 const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)
@@ -165,6 +170,41 @@ const containsActiveMatch = computed(() => {
     props.activeMatchIndex < props.matchIndexBase + total
   )
 })
+
+
+/****************** 数据标签与数据对话框 ******************/
+const  localhost = window.location.origin || '/'
+type FileItem = {
+  key: string
+  name: string
+  type: string
+  size: string
+  sub: string
+  src: string
+}
+const filesData = ref<FileItem[]>([
+    {
+    key: 'html',
+    name: '产品周报.html',
+    type: 'html',
+    size: '24 KB',
+    sub: 'HTML 文件 · iframe 沙箱实时渲染',
+    src: localhost+'/taskresult?taskNo=SCHBE027CEC8DB44BC9A586265951D931DE'
+    // src: localhost+'/datapage/production-plan'
+  },
+  { 
+    key: 'docx',
+    name: '项目方案.docx',
+    type: 'docx',
+    size: '56 KB',
+    sub: 'DOCX 文件 · 服务端转 HTML 预览',
+    src: localhost+'/taskresult?taskNo=SCHBE027CEC8DB44BC9A586265951D931DE'
+    // src: localhost+'/datapage/switch-time'
+  }
+])
+
+
+
 </script>
 
 <template>
@@ -217,6 +257,18 @@ const containsActiveMatch = computed(() => {
     <TypingIndicator v-if="showTyping" />
 
     <ErrorNotice v-if="showError && errorInfo" :error="errorInfo" @retry="emit('retry')" />
+----
+    <!-- 文件卡片 -->
+    <div v-for="item in filesData" :key="item.key" class="file-card" @click="emit('open-page', { url: item.src, title: item.name,type:item.type,sub:item.sub })">
+      <div class="file-icon" :class="item.type">
+        <FileIcon :type="item.type" />
+      </div>
+      <div class="file-meta">
+        <div class="file-name">{{ item.name }}</div>
+        <div class="file-size">{{ item.size }} · 点击在右侧打开预览</div>
+      </div>
+      <div class="file-open">预览</div>
+    </div>
 
     <!-- 中断轮标识（流式气泡专属）：partial 内容非完整回答；可重发时给「重新生成」 -->
     <div v-if="isAborted" class="message-bubble__aborted">

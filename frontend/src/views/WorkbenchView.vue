@@ -20,6 +20,8 @@ import ToastHost from '@/components/common/ToastHost.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import HistorySidebar from '@/components/layout/HistorySidebar.vue'
 import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
+import PreviewPanel from '@/components/layout/PreviewPanel.vue'
+
 import { useSession } from '@/composables/useAppSession'
 import { RUN_PHASE } from '@/constants/events'
 
@@ -199,7 +201,14 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
 
     <!-- 右栏：工作空间面板（列表态 / 内容态，US7 + US8） -->
     <template #preview>
+      <!-- {{ session.preview.target }} -->
+      <PreviewPanel
+        v-if="session.preview.target.value.kind === 'page'"
+        :file="session.preview.target.value"
+        @close="onClosePanel"
+      />
       <WorkspacePanel
+        v-else
         :view="session.preview.view.value"
         :spaces="session.workspace.spaces.value"
         :expanded-spaces="session.workspace.expandedSpaces.value"
@@ -216,6 +225,7 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
         @download="onPanelDownload"
         @remove="onRemoveFile"
       />
+      
     </template>
   </AppShell>
 
