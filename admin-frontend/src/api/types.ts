@@ -325,74 +325,21 @@ export type {
 /* ---------- §5 数字人设计 ---------- */
 
 /**
- * 字段取值类型（JSON Schema 基本类型的子集）。
- *
- * 与 `admin-backend` / `agent-backend` 的同一枚举**三处同步**（契约 §5.2）。
+ * 数字人设计相关类型**定义在 `./agent-types.ts`**，本文件再导出（2026-10-13 拆件，原则二：
+ * `types.ts` 实测 499 行，距 500 行硬门禁仅 1 行）。既有引用方一律从 `api/types` 取，无需改动。
  */
-export const SCENARIO_FIELD_TYPES = [
-  'string',
-  'integer',
-  'number',
-  'boolean',
-  'object',
-  'array',
-] as const
-export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number]
-
-/**
- * 数据准备目录的上传表字段约束。
- *
- * 校验发生在**上传时**（由运行环境按表头预检，本期未实现）；此处只声明结构。
- */
-export interface ScenarioField {
-  /** 字段名（＝上传表的表头名），同目录内唯一 */
-  name: string
-  type: ScenarioFieldType
-  /** 必填：表头 MUST 包含；`false` 为可选（出现则类型仍须匹配） */
-  required: boolean
-}
-
-export interface AgentScenario {
-  scenario: string
-  data_prep_dirs: string[]
-  /** 目录 → 字段约束；无约束的目录不出现（服务端保证总有该键） */
-  data_prep_fields: Record<string, ScenarioField[]>
-}
-
-export interface AgentListItem {
-  name: string
-  description: string
-  abnormal: boolean
-  abnormal_reason: string | null
-  updated_at: string
-}
-
-import type { SoulDesign, SoulStarter, SoulStarterTool } from './soul'
-export type { SoulDesign, SoulStarter, SoulStarterTool }
-
-/** 设计态完整内容（§5.3 响应） */
-export interface AgentDesign {
-  name: string
-  soul: SoulDesign
-  enabled_tools: string[]
-  mcp_services: string[]
-  skills: string[]
-  scenario: AgentScenario
-  abnormal: boolean
-  abnormal_reason: string | null
-  updated_at: string
-  revision: number
-}
-
-export interface AgentDesignPayload {
-  name: string
-  soul: SoulDesign
-  enabled_tools: string[]
-  mcp_services: string[]
-  skills: string[]
-  scenario: AgentScenario
-  revision?: number
-}
+export {
+  SCENARIO_FIELD_TYPES,
+  type AgentDesign,
+  type AgentDesignPayload,
+  type AgentListItem,
+  type AgentScenario,
+  type ScenarioField,
+  type ScenarioFieldType,
+  type SoulDesign,
+  type SoulStarter,
+  type SoulStarterTool,
+} from './agent-types'
 
 /* ---------- §6 用户与部署 ---------- */
 

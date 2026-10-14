@@ -555,7 +555,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **响应 200**：`{ name, soul, enabled_tools, mcp_services, skills, scenario, abnormal, abnormal_reason, updated_at, revision }`
 
-**`scenario` 的结构**（`FR-020`；字段约束为 2026-09-17 新增）：
+**`scenario` 的结构**（`FR-020`；字段约束为 2026-09-17 新增；目录级可上传类型为 2026-10-13 新增）：
 
 ```jsonc
 {
@@ -566,6 +566,10 @@ MUST NOT 读取容器编排声明或容器运行状态。
       { "name": "产线编号", "type": "string",  "required": true },
       { "name": "计划量",   "type": "integer", "required": false }
     ]
+  },
+  "data_prep_uploads": {
+    "生产计划": [".csv", ".xlsx", ".txt"],
+    "产线电价": [".json"]
   }
 }
 ```
@@ -575,6 +579,11 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - `required` 为 `true` 时，上传表的表头 MUST 含该字段；`false` 表示可选（出现则类型仍须匹配）。
 - **该键恒出现在响应中**（历史文档缺该键时，服务端读取即补为 `{}`），客户端无需判空；请求体可省略（按无约束处理）。
 - 完整字段表与校验规则见 `data-model.md` §5；字段值的实际判定（上传表表头预检）在运行环境侧，见 `runtime-api-delta.md` §3.1。
+- `data_prep_uploads`（**目录级可上传文件类型白名单**，2026-10-13 新增）的键 MUST 在 `data_prep_dirs` 内；**只出现被配置的目录**（未配置的目录不出现，缺失 ≡ 使用平台默认 `.csv`、`.xlsx`）。
+- 其值为**非空**字符串数组，每项为小写含前导点的扩展名，∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.zip` / `.jpg` / `.png` / `.jpeg`（2026-10-14 增 `.xls`，顺序即服务端归一顺序）；同目录内 MUST NOT 重复；服务端保存时按上述顺序归一。
+- 为空数组、含非法项、或引用 `data_prep_dirs` 清单外的目录 ⇒ **拒绝保存**（`VALIDATION_FAILED`）。
+- **该键可省略**（请求体与响应体皆然）；历史文档缺该键时按"全部目录使用平台默认"处理，客户端无需迁移。
+- 该配置仅约束**数据准备空间**的**用户上传**；共享空间与临时空间的可上传类型不由此字段影响。
 
 **`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增）：
 

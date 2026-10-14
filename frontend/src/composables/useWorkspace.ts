@@ -34,6 +34,20 @@ export interface WorkspaceDeps {
   toast: ToastStore
 }
 
+/**
+ * 目录级可上传类型的**唯一实现**（2026-10-13）。
+ *
+ * 从目录列表里取**该目录自身**的 `upload_extensions`（后端下发：数据准备 = 该目录配置，
+ * 未配置 = 平台默认；共享/临时空间恒等于空间值）。由本 composable 的 `uploadExtensionsOf`
+ * 与 `UploadMenu` 的文件选择器 `accept` **共用**，消除"按空间反查"这第二套口径。
+ */
+export function uploadExtensionsOfDir(
+  dirs: readonly WorkspaceDir[],
+  dir: string,
+): readonly string[] {
+  return dirs.find((item) => item.dir === dir)?.upload_extensions ?? []
+}
+
 /** 工作空间 composable 契约。 */
 export interface WorkspaceStore {
   /** 三空间树（加载前/失败为空数组） */
@@ -54,7 +68,7 @@ export interface WorkspaceStore {
   filesOf(dir: string): WorkspaceFile[]
   /** 取目录展示名（未知目录回退为路径最后一段） */
   labelOf(dir: string): string
-  /** 取目录所属空间允许的上传扩展名（未知目录返回空数组） */
+  /** 取**该目录**允许的上传扩展名（2026-10-13 起为目录级；未知目录返回空数组） */
   uploadExtensionsOf(dir: string): readonly string[]
   /** 目录内文件是否可删除（共享空间只读） */
   deletableOf(dir: string): boolean
@@ -110,12 +124,14 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
     return dirs.value.find((item) => item.dir === dir)?.label ?? dir.split('/').pop() ?? dir
   }
 
-  function spaceOf(dir: string): WorkspaceSpace | undefined {
-    return spaces.value.find((space) => space.dirs.some((item) => item.dir === dir))
-  }
-
+  /**
+   * 该**目录**允许的上传扩展名（2026-10-13：粒度由空间级下放到目录级）。
+   *
+   * 前端**不再自行按空间反查**，避免与服务端出现第二套口径；实现见模块级
+   * `uploadExtensionsOfDir`（与 `UploadMenu` 共用）。
+   */
   function uploadExtensionsOf(dir: string): readonly string[] {
-    return spaceOf(dir)?.upload_extensions ?? []
+    return uploadExtensionsOfDir(dirs.value, dir)
   }
 
   function deletableOf(dir: string): boolean {

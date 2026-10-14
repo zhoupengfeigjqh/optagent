@@ -1,12 +1,15 @@
 /**
- * 单测：`@` 面板的坐标计算（纯几何）。
+ * 单测：弹层坐标计算（纯几何）。
  *
- * 守住的语义：紧贴锚点**右侧**；右侧放不下翻**左侧**；两侧都放不下夹取进视口；
+ * `placePopup`（`@` 面板）：紧贴锚点**右侧**；右侧放不下翻**左侧**；两侧都放不下夹取进视口；
  * 垂直方向不出视口；测不到光标（`preferRight=false`）时退化为「贴锚点下方」。
+ *
+ * `placeMenu`（下拉菜单，2026-10-13）：优先**下方**；下方放不下翻**上方**；上下都放不下夹进视口；
+ * 水平方向越界一律夹取 —— 底部工具栏（模型选择）因此向上弹，且左右永不溢出。
  */
 import { describe, expect, it } from 'vitest'
 
-import { placePopup, type PopupRect } from './popup-position'
+import { placeMenu, placePopup, type PopupRect } from './popup-position'
 
 const VIEWPORT = { width: 1000, height: 600 }
 const SIZE = { width: 300, height: 200 }
@@ -62,5 +65,48 @@ describe('placePopup —— 降级', () => {
 
     expect(place.left).toBe(VIEWPORT.width - SIZE.width - 8)
     expect(place.top).toBe(VIEWPORT.height - SIZE.height - 8)
+  })
+})
+
+describe('placeMenu —— 上下方位（2026-10-13）', () => {
+  it('下方放得下：紧贴触发器下缘（含间隙），水平左对齐触发器', () => {
+    expect(placeMenu(rect(120, 300, 200, 24), SIZE, VIEWPORT)).toEqual({
+      left: 120,
+      top: 330,
+      side: 'below',
+    })
+  })
+
+  it('底部工具栏：下方放不下 ⇒ 翻到**上方**，不盖住触发器', () => {
+    // 触发器贴底（600 高视口里的 y=552~580），200 高菜单下方只剩 20px
+    const place = placeMenu(rect(120, 552, 200, 28), SIZE, VIEWPORT)
+
+    expect(place.side).toBe('above')
+    expect(place.top).toBe(552 - SIZE.height - 6)
+  })
+
+  it('上下都放不下（菜单高于视口可用高度）⇒ 整块夹进视口，绝不跑到屏幕外', () => {
+    const tall = { width: 300, height: 700 }
+    const place = placeMenu(rect(120, 300, 200, 24), tall, VIEWPORT)
+
+    expect(place.top).toBe(8)
+    expect(place.top).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('placeMenu —— 水平方向永不溢出', () => {
+  it('触发器靠近右缘：菜单左移夹取，右边缘不越出视口', () => {
+    const place = placeMenu(rect(900, 100, 100, 28), SIZE, VIEWPORT)
+
+    expect(place.left).toBe(VIEWPORT.width - SIZE.width - 8)
+    expect(place.left + SIZE.width).toBeLessThanOrEqual(VIEWPORT.width - 8)
+  })
+
+  it('触发器靠近左缘：夹取到左边界', () => {
+    expect(placeMenu(rect(-40, 100, 100, 28), SIZE, VIEWPORT).left).toBe(8)
+  })
+
+  it('视口比菜单还窄：仍夹进视口（左边界优先）', () => {
+    expect(placeMenu(rect(10, 100, 80, 28), SIZE, { width: 200, height: 600 }).left).toBe(8)
   })
 })

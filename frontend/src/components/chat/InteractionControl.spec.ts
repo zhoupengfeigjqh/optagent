@@ -74,6 +74,7 @@ const WORKSPACE_RESPONSE = {
           deletable: true,
           files: [{ filename: 'note.txt', size: 12, updated_at: '2026-09-18 11:00' }],
           fields: [],
+          upload_extensions: ['.txt'],
         },
       ],
     },

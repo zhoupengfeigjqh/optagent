@@ -3,7 +3,10 @@
  *
  * 预览分派与后端 `GET /api/files/preview` 的 Content-Type 映射一一对应
  * （`contracts/backend-api.md` §5.4、`research.md` D12）：
- * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.xlsx` → 回退下载；其余不支持。
+ * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.xlsx` / `.xls` / `.zip` → 回退下载；其余不支持。
+ *
+ * 2026-10-13：`.zip` 归入 `download`（数据准备目录现允许 `scenario.data_prep_uploads` 配置 `.zip`，
+ * 压缩包无内联预览形态，归下载而非 `unsupported`）。
  */
 
 import { MAX_UPLOAD_BYTES } from '../constants/limits'
@@ -21,7 +24,7 @@ const PDF_EXTENSION = '.pdf'
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif'])
 
 /** 需回退下载的扩展名。 */
-const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.tif', '.tiff'])
+const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.xls', '.zip', '.tif', '.tiff'])
 
 /** 上传预校验结果。 */
 export interface UploadPrecheckResult {
@@ -66,7 +69,7 @@ export function resolvePreviewKind(filename: string): PreviewKind {
 /**
  * 上传前客户端预校验（FR-010 + 003 按空间白名单）。
  *
- * `allowedExtensions` 取目标空间的 `upload_extensions`（workspace 接口下发）；
+ * `allowedExtensions` 取**目标目录**的 `upload_extensions`（workspace 接口下发；2026-10-13 起为目录级）；
  * 未传（工作空间尚未加载）时只校验大小，扩展名交给后端兜底。
  * 不合规时调用方 MUST **不发请求**，直接把该项置为失败并展示原因。
  */

@@ -13,7 +13,7 @@ import { loadAgentConfig } from '../domain/agent-instance.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
-import { buildTailInstruction } from '../domain/next-actions.js';
+import { buildTailInstruction, effectiveNextActionsMax } from '../domain/next-actions.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
@@ -246,11 +246,14 @@ export class AgentInstanceFactory {
     // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
     // 必须放在工具装配之后：指令里的工具目录取 `tools`（本轮模型真实可见的清单），
     // 与轮末引用裁剪的判据同源；放在最末尾也让"输出格式要求"最贴近生成位置、最易被遵循。
-    if (req.nextActionsMax !== undefined) {
-      systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(
-        req.runtime?.availableTools ?? [],
-        req.nextActionsMax,
-      )}`;
+    //
+    // 2026-10-14（卡片强制绑定工具）：**本轮没有可用工具时不再追加指令**——新口径下每条建议
+    // 都必须绑定工具，无工具必然产不出卡片；追加指令只会白耗 token，并让轮末每次都按
+    // "条目全部被丢弃"告警（等价于该轮关闭了该功能）。判据见 `effectiveNextActionsMax`。
+    const nextActionTools = req.runtime?.availableTools ?? [];
+    const tailMax = effectiveNextActionsMax(req.nextActionsMax, nextActionTools);
+    if (tailMax !== undefined) {
+      systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(nextActionTools, tailMax)}`;
     }
     if (tools.length === 0 || !(llm instanceof PiAiLlmProvider)) {
       if (tools.length > 0) {

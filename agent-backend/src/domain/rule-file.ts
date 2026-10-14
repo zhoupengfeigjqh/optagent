@@ -3,7 +3,7 @@
  *
  * 规则文件由用户上传到「数据准备/算法规则」，**首行是表头，其余每行是一条规则**；
  * 选择器把勾选行原样转成 `array[object]` 填入工具参数（键 = 表头列名，值 = 该行值）。
- * 本模块按扩展名分派解析（`.xlsx` / `.csv` 都走 `xlsx` 库），运行环境侧解析、
+ * 本模块按扩展名分派解析（`.xlsx` / `.xls` / `.csv` 都走 `xlsx` 库），运行环境侧解析、
  * 前端只渲染——不在用户侧引入表格解析依赖。
  *
  * 目录名与 `admin-backend` `PREDEFINED_DATA_PREP_DIRS` 保持同步（平台预定义目录）。
@@ -37,8 +37,12 @@ const PRIORITY_HEADER = /priority|优先级/i;
  */
 export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
   const ext = path.extname(filename).toLowerCase();
-  if (ext !== '.xlsx' && ext !== '.csv') {
-    throw new Error(`不支持的规则文件格式「${ext === '' ? '无扩展名' : ext}」，仅支持 .xlsx / .csv`);
+  // `.xls`（OLE2/BIFF）与 `.xlsx`（zip）同属 Excel 表格，2026-10-14 起一并接受：
+  // 数据准备的「算法规则」目录可以配置 `.xls`，此处不放开会出现"能上传、选不中"的断点。
+  if (ext !== '.xlsx' && ext !== '.xls' && ext !== '.csv') {
+    throw new Error(
+      `不支持的规则文件格式「${ext === '' ? '无扩展名' : ext}」，仅支持 .xlsx / .xls / .csv`,
+    );
   }
 
   let workbook: XLSX.WorkBook;
@@ -48,9 +52,12 @@ export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
       // 中文表头会乱码
       workbook = XLSX.read(buf.toString('utf8'), { type: 'string' });
     } else {
-      // .xlsx（zip 容器）先验魔数：纯文本会被 xlsx 库宽容地按 CSV 解析，不验则
-      // "改后缀名的文本文件"能蒙混过关
-      if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
+      // 容器魔数先验：纯文本会被 xlsx 库宽容地按 CSV 解析，不验则"改后缀名的文本文件"
+      // 能蒙混过关。`.xlsx` = zip（PK）、`.xls` = OLE2 复合文档（D0 CF 11 E0 …），
+      // 两者都交给 SheetJS 按文件头自判解析器。
+      const okZip = buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4b;
+      const okOle2 = buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1;
+      if (ext === '.xls' ? !okOle2 : !okZip) {
         throw new Error('bad magic');
       }
       workbook = XLSX.read(buf, { type: 'buffer' });

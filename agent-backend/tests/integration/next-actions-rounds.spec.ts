@@ -31,10 +31,20 @@ function snapshotFile(): string {
   return path.join(root, 'users', USER, 'user-data', 'threads', THREAD, 'next-actions.json');
 }
 
-/** 尾部块：每轮条目不同，便于确认"确实是本轮产出" */
+/**
+ * 尾部块：每轮条目不同，便于确认"确实是本轮产出"。
+ *
+ * 条目必须绑定本轮可用工具（`stubAgent` 回填的 `read_file`）：2026-10-14 起，
+ * 无工具绑定的条目会被定稿层整条丢弃（FR-009），卡片也就随 `done` 推不出去。
+ */
 function tailFor(round: number): string {
   return `<next_actions>${JSON.stringify({
-    actions: [{ prompt: `第 ${round} 轮建议：核对交付日期` }],
+    actions: [
+      {
+        prompt: `第 ${round} 轮建议：核对交付日期`,
+        tools: [{ kind: 'builtin', name: 'read_file' }],
+      },
+    ],
   })}</next_actions>`;
 }
 

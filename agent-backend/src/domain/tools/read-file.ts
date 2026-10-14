@@ -2,7 +2,7 @@
  * read_file 工具的格式分派（T037 / FR-021）。
  *
  * - 文本（.csv/.txt/.json/.md/.log）：FileAccess.read 直读（内部已做截断与 utimes）
- * - .xlsx：SheetJS 逐 sheet 转 CSV
+ * - .xlsx / .xls：SheetJS 逐 sheet 转 CSV（`.xls` 为 OLE2/BIFF 容器，库按文件头自判）
  * - .pdf：pdfjs-dist 提取文本层；无文本层（扫描件）→ 友好提示
  * - 其余扩展名：明确拒绝并说明支持范围
  *
@@ -16,7 +16,9 @@ import * as XLSX from 'xlsx';
 import type { FileAccess } from '../file-access.js';
 
 const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
-const SUPPORTED = '.csv/.xlsx/.txt/.json/.pdf/.md/.log';
+/** 需经 SheetJS 转文本的 Excel 容器（`.xlsx` zip / `.xls` OLE2，库按文件头自判） */
+const EXCEL_EXTENSIONS = new Set(['.xlsx', '.xls']);
+const SUPPORTED = '.csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log';
 
 export interface ReadToolResult {
   /** 交给模型的文本（含截断提示） */
@@ -51,7 +53,7 @@ export async function readToolFile(
   }
 
   let full: string;
-  if (ext === '.xlsx') {
+  if (EXCEL_EXTENSIONS.has(ext)) {
     full = xlsxToText(await fa.readBuffer(relPath));
   } else if (ext === '.pdf') {
     full = await pdfToText(await fa.readBuffer(relPath));
@@ -86,7 +88,7 @@ function withTruncationNote(
   );
 }
 
-/** xlsx → 逐 sheet CSV 文本 */
+/** Excel（xlsx / xls）→ 逐 sheet CSV 文本 */
 function xlsxToText(buf: Buffer): string {
   const wb = XLSX.read(buf, { type: 'buffer' });
   const parts: string[] = [];

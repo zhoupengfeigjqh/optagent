@@ -12,8 +12,7 @@
 import { computed, ref } from 'vue'
 import type { AgentListItem, ErrorInfo, UserListItem } from '../../api/types'
 import { listAgents } from '../../api/agents'
-import { withdrawDeploy } from '../../api/deploy'
-import { http } from '../../api/http'
+import { fetchManifest, withdrawDeploy } from '../../api/deploy'
 import { createUser, deleteUser, updateUser } from '../../api/users'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import EntityCardList from '../common/EntityCardList.vue'
@@ -49,7 +48,14 @@ const pendingDelete = ref<UserListItem | null>(null)
 const pendingWithdraw = ref<UserListItem | null>(null)
 const withdrawing = ref(false)
 
-const showError = computed(() => localError.value ?? props.error)
+/**
+ * 卡片列表区域只承载**加载**失败（`props.error` 由父级的数据请求给出）。
+ *
+ * 操作类错误（保存 / 删除 / 撤回）由上面那条 `localError` 以「操作未完成」呈现——
+ * 不能再喂给列表，否则同一个错误会顶着「用户与关联数字人加载失败」再出现一次，
+ * 把"保存失败"误报成"加载失败"（2026-10-14：编辑关联保存失败就是这么被误导的）。
+ */
+const showError = computed(() => props.error)
 
 /** 卡片上的部署状态文案（`deployed_at` 为 null 即"从未部署过"） */
 function deployLabel(user: UserListItem): string {
@@ -93,9 +99,11 @@ async function submit(payload: { user_id: string; agents: string[] }): Promise<v
   localError.value = null
   try {
     if (editing.value) {
-      // 编辑需要乐观锁版本；列表响应不含 revision，故以最新全局版本提交
-      const settings = await http.get<{ revision: number }>('/api/admin/platform/settings')
-      await updateUser(editing.value.user_id, payload.agents, settings.revision)
+      // 编辑需要乐观锁版本；列表响应不含 revision，故取**部署清单端点**的当前 revision。
+      // 2026-09-27「目标运行形态」下架后 `/api/admin/platform/settings` 已不存在（恒 404
+      // NOT_FOUND）——原先在这里取版本，表现为"选完数字人点保存必失败"。
+      const { revision } = await fetchManifest()
+      await updateUser(editing.value.user_id, payload.agents, revision)
       emit('announce', `用户 ${editing.value.user_id} 的关联已更新`)
     } else {
       await createUser(payload.user_id, payload.agents)
@@ -137,8 +145,9 @@ async function confirmWithdraw(): Promise<void> {
   withdrawing.value = true
   localError.value = null
   try {
-    const settings = await http.get<{ revision: number }>('/api/admin/platform/settings')
-    const result = await withdrawDeploy(target.user_id, settings.revision)
+    // 同一口径的版本来源（部署清单端点），与「编辑关联」一致
+    const { revision } = await fetchManifest()
+    const result = await withdrawDeploy(target.user_id, revision)
     emit(
       'announce',
       `已撤回用户 ${target.user_id} 的部署：下架 ${result.withdrawn.length} 个数字人（文件空间未动，重新部署即可恢复）`,

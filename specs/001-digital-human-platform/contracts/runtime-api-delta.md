@@ -160,15 +160,15 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 |---|---|
 | `/api/files/*`（`upload`/`list`/`download`/`preview`/`DELETE`/`workspace`） | 目录合法性改为按**当前选中数字人**的场景清单判定；未选中数字人时 `409 AGENT_NOT_SELECTED` |
 | `POST /api/files/upload` | 数据准备目录带字段约束时，暂存后落盘前校验上传表（`400 FILE_SCHEMA_INVALID` + `details[]` 逐条问题，失败不落盘），详见 §3.1；单文件上限 **5MB**（413 `FILE_TOO_LARGE`，与平台 SKILL ZIP 导入同一全局约束） |
-| `GET /api/files/workspace` | 目录项（dirs）新增 `fields`（字段约束，无约束为 `[]`）：供前端上传入口做**只读提示**；权威校验在上传路由，前端 MUST NOT 自行判定 |
+| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定 |
 | `POST /api/threads/:id/messages` 的 `attachments` 校验 | 同一引用在不同数字人下可能合法/非法，按**本轮数字人**判定 |
 | `SCENARIO_NOT_CONFIGURED`（503） | 错误码不变，message 改为指名数字人 |
 
 **平台侧的对应约束**：部署 MUST 把 `scenario.json` 写入**该数字人目录内**（`FR-026`），MUST NOT 依赖任何用户级共享配置文件（`data-model.md` §8）。
 
-### 3.1 `scenario.json` 扩展：目录字段约束（2026-09-17 新增；2026-09-17 当日补完上传校验）
+### 3.1 `scenario.json` 扩展：目录字段约束 + 目录级可上传类型（字段约束 2026-09-17 新增；可上传类型 2026-10-13 新增）
 
-**用途**：声明"数据准备某二级目录的上传表**必须有哪些表头、各是什么类型**"。**校验已实现**：运行环境（`agent-backend`）是**唯一权威**——上传路由在暂存后、落盘前校验，前端不做同款校验（避免双实现漂移），仅经 `workspace` 接口下发的 `fields` 在上传入口做**只读提示**。
+**用途**：声明"数据准备某二级目录的上传表**必须有哪些表头、各是什么类型**"，以及"该目录**允许上传哪些文件类型**"。**校验已实现**：运行环境（`agent-backend`）是**唯一权威**——上传路由在暂存后、落盘前校验，前端不做同款校验（避免双实现漂移），仅经 `workspace` 接口下发的 `fields` 与目录级 `upload_extensions` 在上传入口做**只读提示与类型过滤**。
 
 ```jsonc
 {
@@ -176,15 +176,24 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
   "data_prep_dirs": ["生产计划"],
   "data_prep_fields": {
     "生产计划": [{ "name": "产线编号", "type": "string", "required": true }]
+  },
+  "data_prep_uploads": {
+    "生产计划": [".csv", ".xlsx", ".txt"]
   }
 }
 ```
+
+**目录级可上传类型（`data_prep_uploads`，2026-10-13 新增；2026-10-14 候选增 `.xls`）**：值为**非空**扩展名数组，项 ∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.zip` / `.jpg` / `.png` / `.jpeg`；键 MUST 在 `data_prep_dirs` 内，只出现被配置的目录（缺失 ≡ 平台默认 `.csv` + `.xlsx`）。运行环境解析口径见 `parseScenarioUploads`：整体非对象 / 孤儿键 / 值非数组或空数组 / 项非法（非字符串、空串、不在候选枚举内）⇒ **逐项丢弃 + 告警**，该目录回落平台默认；上传校验与 `workspace` 下发共用 `uploadExtensionsOf` 作为**该目录可上传类型的唯一来源**。
 
 **运行环境读取口径**（`agent-backend/src/domain/dirs.ts` 的 `parseScenarioFields`）：运行环境是**消费方**，非法内容一律**丢弃并告警**，MUST NOT 因此让整个场景不可用。丢弃判据：整体非对象 / 某目录值非数组 / 项非对象 / 字段名非法（空、含分隔符或 `..`、超 64 字符）/ 类型不在枚举内 / `required` 非布尔 / 同目录内重名（留首个）/ 目录不在**有效目录清单**内（孤儿约束）。空清单的目录**不写入结果**——`data_prep_fields` 缺失或某目录无键 = **该目录无约束**；本字段是后加的，历史 `scenario.json` 自然按"无约束"处理（零迁移）。
 
 **字段取值类型**：`string` / `integer` / `number` / `boolean` / `object` / `array`（JSON Schema 基本类型子集；与平台设计态、管理界面**同一枚举**，三处 MUST 同步）。
 
-**类型判定规则（供未来的上传预检使用，本期只落配置）**：数据准备空间的上传白名单为 `.csv` / `.xlsx`（`SPACE_POLICIES`），故字段值取自**上传表的表头**，而单元格内容在判定时是**文本**：
+**可上传类型**：数据准备的**每个二级目录**可有各自的允许类型（由数字人配置 `scenario.data_prep_uploads` 下发，缺省为 `.csv` / `.xlsx`）；共享空间与临时空间仍取 `SPACE_POLICIES`（与改造前一致）。
+
+**字段约束适用范围**：**仅对 `.csv` 与 `.xlsx` 生效**；其他类型（含经白名单允许的 `.txt` / `.pdf` / `.json` / `.zip` / 图片）与**未声明字段约束的目录**一律**跳过表结构校验**——避免用"缺少必填表头"去描述一个本没有表头的文件。判定落点为 `agent-backend/src/domain/field-check.ts` 的 `supportsFieldCheck(ext)`（唯一判据）。
+
+**类型判定规则**：字段值取自**上传表的表头**，而单元格内容在判定时是**文本**：
 
 | 类型 | 判定规则 |
 |---|---|
@@ -197,12 +206,14 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 `required: true` = 表头 MUST 存在；`false` = 表头可缺，**出现则类型仍须匹配**。判定规则的唯一实现在 `agent-backend/src/domain/field-check.ts`（判据以本表为准）；平台侧（admin-backend / admin-frontend）**只生成配置、不做取值判定**。
 
-**校验执行口径**（`agent-backend/src/domain/field-check.ts`，上传路由 `POST /api/files/upload` 在暂存后、落盘前调用；仅"数据准备空间且该目录有约束"时触发，共享/临时空间与无约束目录不触发）：
+**校验执行口径**（`agent-backend/src/domain/field-check.ts`，上传路由 `POST /api/files/upload` 在暂存后、落盘前调用；触发条件为 **数据准备空间 && 有二级目录 && `supportsFieldCheck(ext)` && 该目录有字段约束**，共享/临时空间、非表格类型与无约束目录一律不触发）：
 
 - **解析**：`.csv` 按逗号分隔（支持 `"` 引用与 `""` 转义、`\r\n` / `\n`），编码 UTF-8（去 BOM）优先，出现替换字符回退 **GBK**（中文 Excel 导出常见编码）；`.xlsx` 复用既有 `xlsx` 依赖，仅**第一个 sheet**，单元格取**显示文本**（`raw: false`，日期等按格式串判定），前置 **ZIP 魔数**（`PK\x03\x04`）校验（SheetJS 对非 zip 输入不抛错，需确定性拦截损坏文件）。
 - **取值判定**：全量数据行逐行判定；**空单元格跳过**（`required` 语义是表头必含，不做行级必填）；全空行丢弃，**行号按"表头为第 1 行"的非空数据行顺序计**；重复表头取首个匹配列；超长取值（>32 字符）截断展示。
 - **失败响应**：`400` + 错误码 **`FILE_SCHEMA_INVALID`**，响应体 `error.details` 为**逐条中文问题清单**（缺必填表头一次性列全；逐行指出"第 N 行「字段」取值 … 类型不符（期望…）"；超过 `MAX_ISSUES = 30` 条截断为"…等 N 处"）；失败文件**不落盘**（暂存清理）。
 - **前端展示**（`frontend`）：`ApiError.details` 透传至 `ErrorInfo`；`FILE_SCHEMA_INVALID` 是 D13（不直接展示后端 message）的**唯一例外**——问题清单按文件动态生成，按码分派无法承载，`toUserMessage` 直接换行拼接 `details` 展示；上传入口（`UploadMenu`）按 `workspace` 接口 dirs 的 `fields` 做只读提示（`表头须含：A、B；可选：C(integer)`），MUST NOT 自行判定。
+
+**既有校验不受削弱**：`.csv` / `.xlsx` 的表头与取值类型判定（上表）逐字不变（2026-10-13 登记）。
 
 ---
 
@@ -415,6 +426,8 @@ location /admin/ {
 ### 8.2 目标方案
 
 在**取用池中实例之前**比对**配置指纹**：对数字人目录下的关键文件（`SOUL.md`／`TOOL.json`／`MCP.json`／`scenario.json`／`skills/**`）取**修改时间与大小的组合摘要**（或内容摘要），与实例创建时记录的指纹不一致即**丢弃该实例并重建**。
+
+> **2026-10-13 登记**：`scenario.json` 内新增的 `data_prep_uploads` 键属指纹输入的一部分——首次为某目录配置白名单时会引起一次实例重建（属预期行为）；未配置的目录不写该键，因此不产生额外重建。
 
 **落点**：`agent-factory` 记录指纹；`server.ts` 的 `getOrCreateAgent` 在 `pool.get(key)` 命中后先做指纹比对，不一致则 `pool.remove(key)` 再 `create(key)`。
 
@@ -1001,6 +1014,7 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 - **现状**：`agent-backend/src/domain/config-fingerprint.ts` 以 `size:mtimeMs` 作为关键文件（`SOUL.md` / `TOOL.json` / `MCP.json` / `scenario.json`）的指纹；
 - **风险**：尺寸相同 + 时间戳未变（同秒内修改、保留时间戳的同步方式、文件系统时间精度不足）→ 判定"未变化" → **静默沿用旧配置**，与 `FR-034`「新对话立即使用新配置」直接冲突；
 - **目标**：指纹 MUST 由这 4 个文件的**内容摘要**（sha256）计算。成本可忽略（4 个小文件），且仓库已有 sha256 用法可复用（本体导入的 `hash` 字段）。
+- **2026-10-13 登记**：`scenario.json` 新增 `data_prep_uploads` 键后仍是同一份指纹输入文件；`data_prep_uploads` 按候选枚举固定顺序归一，保证"同一勾选集"不产生字节差异（避免无谓的实例重建）。
 
 ### 14.2 物化文件权限
 
@@ -1058,7 +1072,8 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 - **时机**：`done` 广播**之后** fire-and-forget，**不阻塞主链路**；失败/超时（上限 **5s**、最多 1 次尝试）一律静默降级为"本轮无建议"；
 - **素材**：本轮用户输入 + 回答正文节选（上限 1500 字）+ 本轮已调用工具 + 本轮可用工具清单；
 - **合规过滤**：提示词 MUST 全中文且 ≤ 50 字；命中任一可用工具名（内置名 / MCP 暴露名 `{server}__{tool}`）或含 `snake_case` / `kebab-case` / `CamelCase` 标识符 token 的条目**丢弃**；
-- **工具引用越界**：只丢引用、**保留卡片文本**；隐藏引导超 500 字则置空。
+- **工具引用越界**：只丢该引用；**裁剪后已无有效引用的条目整条丢弃**（2026-10-14 修订，见 §16.8 —— MUST NOT 下发"无工具卡片"）；
+- **隐藏引导**：由运行环境按关联工具铸造，**指明本轮要调用的工具 + 其用途摘要**；长度 ≤ 500 字，**超长截断、MUST NOT 置空**（2026-10-14 修订，见 §16.8）。
 
 ### 16.3 存储（会话级单快照）
 
@@ -1117,3 +1132,21 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 - **不变式修订**：§16.5 之 1/2/6 作废（独立调用、入链机制已删除），代之为：① 尾部块内容对用户 MUST 完全不可见（SSE content 逐字 = 落盘正文）；② 历史 jsonl 的 assistant 正文 MUST NOT 含尾部块；③ 卡片 token 计入本轮 `usage`（同流产出）；
 - **快照数据形状零变更**：存量 `next-actions.json` 无需迁移；单快照覆盖写、轮开始 `clear`、64KB 上限等存储口径不变；
 - **前端**：轮末拉取窗口与代次机制删除；卡片随 `done` 直推；新增会话选中时**一次性**恢复拉取（刷新后最新卡片不消失）。
+
+### 16.8 修订（2026-10-14）：卡片强制绑定工具
+
+**背景**：无工具绑定的下一步建议会退化为开放式闲聊式指令，实际使用中出现大量与数字人能力无关的"奇怪指令"。
+用户口径：**下一步建议必须绑定工具、直接指明调用什么工具完成什么任务；没有关联到具体可用工具就不下发该条卡片。**
+
+| 项 | 修订 |
+|---|---|
+| 生成（提示词） | 尾部指令 MUST 要求每条建议关联 **1~2 个**清单内工具，且建议本身是"该工具能完成的具体任务"；关联不到则**不输出该条**；一条都没有则输出 `{"actions":[]}`。**无可用工具的轮次 MUST NOT 追加尾部指令**（等价关闭：省 token、不产生"条目全部不合规"告警） |
+| 定稿（硬门禁） | 白名单裁剪后**有效引用为空 → 整条丢弃**（取代 §16.2 旧条款"只丢引用、保留卡片文本"）。本轮全部条目被丢弃 = 本轮 0 条（`{message_id:null, actions:[]}`，200 而非错误） |
+| 引导文案 | 由关联工具铸造，**指明本轮要调用的工具 + 其用途摘要**；长度 ≤ 500 字，**超长截断、MUST NOT 置空**（置空会让"必须绑定"在下一轮失效）。首屏"问题实例"的引导文案与行为**零变更**（不强制 starters 绑定工具） |
+| 读取侧 | 存量 `next-actions.json` 中无有效工具引用的条目按**同一判据**过滤（唯一实现） |
+| 端点 / 字段形状 | **零变更**（路径、结构、字段名与可选性均不变）；`guidance` 由"可为空串"收紧为"恒非空"，空串仅作防御性兼容 |
+| 能力边界 | **强提示而非强制**：不引入 Function Calling、不预置工具参数、不改变工具权限；本轮是否真的发起调用仍由模型在工具循环中决定 |
+| 可观测（原则九） | 定稿告警 MUST 区分 `no_tools`（模型未给工具）与 `tools_out_of_scope`（引用越界被裁空），并带丢弃条数 |
+| 同步落点 | `specs/007-next-action-hints/`：`spec.md`（FR-009 / FR-024 / SC-012 / 修订记录）、`data-model.md` §3、`contracts/next-actions-api.md` §1.2/§5/§6、`revision-tail-protocol.md` §1 非目标 + §11、`tasks.md` 同步记录 |
+
+**前端影响：无**（类型定义与渲染链路不变）。**回滚**：恢复 §16.2 旧口径并撤下 FR-009 即可，无数据迁移。

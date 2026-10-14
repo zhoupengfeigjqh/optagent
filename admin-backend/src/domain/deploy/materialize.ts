@@ -23,7 +23,7 @@
  * 产物仍只有这一个文件；前台的展示/引导数据从 frontmatter 读，模型只读正文。
  */
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
-import { scenarioFields, type AgentScenario } from '../config-center/scenario.js';
+import { scenarioFields, scenarioUploads, type AgentScenario } from '../config-center/scenario.js';
 import { renderSoulMd } from '../config-center/soul-design.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
@@ -73,9 +73,10 @@ export function buildMcpServerEntry(
 /**
  * 构造 `scenario.json` 的落盘内容。
  *
- * `data_prep_fields` **仅在非空时写入**：运行环境（`agent-backend/src/domain/dirs.ts`）
- * 对"缺失"与"空对象"的解读一致（该目录无字段约束），故不写空壳
- * ——与"平台侧未搭配的内容不得残留"同一口径。
+ * `data_prep_fields` 与 `data_prep_uploads`（2026-10-13）**仅在非空时写入**：
+ * 运行环境（`agent-backend/src/domain/dirs.ts`）对"缺失"与"空对象"的解读一致
+ * （该目录无字段约束 / 用平台默认可上传类型），故不写空壳
+ * ——与"平台侧未搭配的内容不得残留"同一口径（`FR-026`、`SC-018`）。
  */
 export function buildScenarioDocument(scenario: AgentScenario): Record<string, unknown> {
   const doc: Record<string, unknown> = {
@@ -84,6 +85,8 @@ export function buildScenarioDocument(scenario: AgentScenario): Record<string, u
   };
   const fields = scenarioFields(scenario);
   if (Object.keys(fields).length > 0) doc.data_prep_fields = fields;
+  const uploads = scenarioUploads(scenario);
+  if (uploads && Object.keys(uploads).length > 0) doc.data_prep_uploads = uploads;
   return doc;
 }
 

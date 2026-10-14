@@ -51,6 +51,16 @@ describe('resolvePreviewKind', () => {
     expect(resolvePreviewKind(filename)).toBe('download')
   })
 
+  it('2026-10-14：.xls → 回退下载（与 .xlsx 同口径，不再落到 unsupported）', () => {
+    expect(resolvePreviewKind('总BOM.xls')).toBe('download')
+    expect(resolvePreviewKind('ARCHIVE.XLS')).toBe('download')
+  })
+
+  it('2026-10-13：.zip → 回退下载（不再落到 unsupported）', () => {
+    expect(resolvePreviewKind('archive.zip')).toBe('download')
+    expect(resolvePreviewKind('ARCHIVE.ZIP')).toBe('download')
+  })
+
   it('扩展名大小写不敏感', () => {
     expect(resolvePreviewKind('A.TXT')).toBe('text')
     expect(resolvePreviewKind('A.Pdf')).toBe('pdf')

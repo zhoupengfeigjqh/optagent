@@ -20,6 +20,12 @@ function xlsxBuffer(rows: unknown[][]): Buffer {
   return XLSX.write({ SheetNames: ['规则'], Sheets: { 规则: sheet } }, { type: 'buffer', bookType: 'xlsx' });
 }
 
+/** 真实 `.xls`（OLE2/BIFF8）缓冲：SheetJS 写入，避免手搓二进制 fixture */
+function xlsBuffer(rows: unknown[][]): Buffer {
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  return XLSX.write({ SheetNames: ['规则'], Sheets: { 规则: sheet } }, { type: 'buffer', bookType: 'biff8' });
+}
+
 describe('parseRuleFile —— CSV', () => {
   it('表头 + 数据行 → columns/rows；行对象键 = 表头列名', () => {
     const buf = csvBuffer('规则编码,规则名称,优先级\nR001,峰谷平移,3\nR002,需量控制,1\n');
@@ -68,16 +74,36 @@ describe('parseRuleFile —— XLSX', () => {
     ]);
     expect(parsed.priority_column).toBe('优先级');
   });
+
+  it('2026-10-14：.xls（OLE2/BIFF8）按同样口径解析', () => {
+    const parsed = parseRuleFile(
+      'rules.xls',
+      xlsBuffer([
+        ['规则编码', '规则名称', '优先级'],
+        ['R001', '峰谷平移', 3],
+      ]),
+    );
+
+    expect(parsed.columns).toEqual(['规则编码', '规则名称', '优先级']);
+    expect(parsed.rows).toEqual([{ 规则编码: 'R001', 规则名称: '峰谷平移', 优先级: 3 }]);
+    expect(parsed.priority_column).toBe('优先级');
+  });
 });
 
 describe('parseRuleFile —— 异常', () => {
   it('不支持的扩展名 → 可读错误', () => {
-    expect(() => parseRuleFile('rules.json', csvBuffer('{}'))).toThrow('仅支持 .xlsx / .csv');
-    expect(() => parseRuleFile('rules', csvBuffer('a'))).toThrow('仅支持 .xlsx / .csv');
+    expect(() => parseRuleFile('rules.json', csvBuffer('{}'))).toThrow('仅支持 .xlsx / .xls / .csv');
+    expect(() => parseRuleFile('rules', csvBuffer('a'))).toThrow('仅支持 .xlsx / .xls / .csv');
   });
 
   it('内容损坏 → 可读错误（不抛底层异常）', () => {
     expect(() => parseRuleFile('rules.xlsx', Buffer.from('not a spreadsheet'))).toThrow('解析失败');
+  });
+
+  it('损坏的 .xls（非 OLE2 容器，含改后缀名的文本）→ 可读错误', () => {
+    for (const bad of [Buffer.from('not a compound file'), csvBuffer('code,priority\nR001,1\n')]) {
+      expect(() => parseRuleFile('rules.xls', bad)).toThrow('解析失败');
+    }
   });
 
   it('空表头单元格 / 重复列名 → 可读错误', () => {

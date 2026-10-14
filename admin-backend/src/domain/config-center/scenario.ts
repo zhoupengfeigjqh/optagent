@@ -36,6 +36,30 @@ export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number];
 export const MAX_FIELDS_PER_DIR = 50;
 
 /**
+ * 「数据准备」二级目录的**可上传文件类型候选**（本次新增，平台权威定义）。
+ *
+ * 与运行环境（`agent-backend/src/domain/dirs.ts` 的同名常量——解析时合法性判定）、
+ * 管理界面（`admin-frontend/src/constants/agent-design.ts` 的同名常量——勾选项）
+ * **同一枚举**，三处 MUST 同步（契约 `admin-api.md` §5.3、`runtime-api-delta.md` §3）。
+ *
+ * **数组顺序即归一化后的固定顺序**：保存时按此顺序重排，防止"同一勾选集、不同顺序"
+ * 造成 `scenario.json` 字节变化进而触发运行环境实例重建（见 `data-model.md` §1.1 规则 8）。
+ */
+export const DATA_PREP_UPLOAD_EXTS = [
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.txt',
+  '.pdf',
+  '.json',
+  '.zip',
+  '.jpg',
+  '.png',
+  '.jpeg',
+] as const;
+export type DataPrepUploadExt = (typeof DATA_PREP_UPLOAD_EXTS)[number];
+
+/**
  * 「数据准备」预定义二级目录（平台硬编码）。
  *
  * 场景清单 MUST 包含该目录：保存时缺失即拒（`normalizeScenario`），部署前校验对
@@ -70,6 +94,13 @@ export interface AgentScenario {
    * `scenarioFields()` 归一化，因此**对外契约恒有该键**。
    */
   data_prep_fields?: Record<string, ScenarioField[]>;
+  /**
+   * 目录 → 可上传文件类型（2026-10-13 新增）。
+   *
+   * 只保存**被配置**的目录（未配置的目录不出现，缺失 ≡ 平台默认 `.csv` + `.xlsx`）；
+   * 清单外的目录名即拒（与 `data_prep_fields` 同口径）。
+   */
+  data_prep_uploads?: Record<string, string[]>;
 }
 
 /** 归一化读取：历史文档缺 `data_prep_fields` 时按"无字段约束"处理 */
@@ -81,12 +112,29 @@ export function scenarioFields(
   return fields;
 }
 
+/**
+ * 归一化读取：`data_prep_uploads` **缺键即"全部目录用平台默认"**。
+ *
+ * 与 `scenarioFields()` 的**取舍不同**：`data_prep_fields` 在对外契约里恒有该键（读取补 `{}`），
+ * 而 `data_prep_uploads` 是**可选键**（契约 C1 明确"请求体与响应体皆可省略"）——
+ * 补成 `{}` 会让"未配置"与"显式清空"在回显上无法区分，故此处只在**键存在且为对象**时返回它，
+ * 否则返回 `undefined`（调用方据此不写键）。
+ */
+export function scenarioUploads(
+  scenario: AgentScenario | null | undefined,
+): Record<string, string[]> | undefined {
+  const uploads = scenario?.data_prep_uploads;
+  if (!uploads || typeof uploads !== 'object' || Array.isArray(uploads)) return undefined;
+  return uploads;
+}
+
 /** 场景：名称非空；目录清单拒绝空值 / 重复 / 含分隔符 / `..`（`FR-020`） */
 export function normalizeScenario(raw: unknown): AgentScenario {
   const obj = (raw ?? {}) as {
     scenario?: unknown;
     data_prep_dirs?: unknown;
     data_prep_fields?: unknown;
+    data_prep_uploads?: unknown;
   };
   const scenario = typeof obj.scenario === 'string' ? obj.scenario.trim() : '';
   if (scenario === '') {
@@ -131,7 +179,70 @@ export function normalizeScenario(raw: unknown): AgentScenario {
     scenario,
     data_prep_dirs: dirs,
     data_prep_fields: normalizeScenarioFields(obj.data_prep_fields, dirs),
+    data_prep_uploads: normalizeScenarioUploads(obj.data_prep_uploads, dirs),
   };
+}
+
+/**
+ * 目录级可上传类型（保存时**严格**校验并归一，`data-model.md` §1.1 八条规则）。
+ *
+ * - 缺省 / `null` ⇒ `{}`（"未配置"，不写键）；
+ * - 非对象（数组、字符串…）⇒ 拒绝；
+ * - 键不在目录清单内（孤儿键）⇒ 拒绝；
+ * - 值为非数组 / 空数组 ⇒ 拒绝（"至少一项"）；
+ * - 项非字符串、空串、或（转小写后）不在候选枚举内 ⇒ 拒绝；
+ * - 同目录内重复 ⇒ 去重（归一为一份）；
+ * - 顺序 ⇒ 按 `DATA_PREP_UPLOAD_EXTS` 固定顺序重排。
+ */
+function normalizeScenarioUploads(
+  raw: unknown,
+  dirs: readonly string[],
+): Record<string, string[]> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      '可上传文件类型须为对象（目录名 → 扩展名清单）',
+    );
+  }
+
+  const out: Record<string, string[]> = {};
+  for (const [dir, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!dirs.includes(dir)) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `可上传文件类型引用了数据准备目录清单外的目录：${dir}`,
+      );
+    }
+    if (!Array.isArray(value)) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `目录 ${dir} 的可上传类型须为数组`);
+    }
+    const allowed = new Set<string>();
+    for (const item of value) {
+      if (typeof item !== 'string' || item.trim() === '') {
+        throw new ApiError(
+          ERROR_CODES.VALIDATION_FAILED,
+          `目录 ${dir} 的可上传类型含非法项：${JSON.stringify(item)}`,
+        );
+      }
+      const ext = item.trim().toLowerCase();
+      if (!(DATA_PREP_UPLOAD_EXTS as readonly string[]).includes(ext)) {
+        throw new ApiError(
+          ERROR_CODES.VALIDATION_FAILED,
+          `目录 ${dir} 的可上传类型非法：${item}（仅支持 ${DATA_PREP_UPLOAD_EXTS.join(' / ')}）`,
+        );
+      }
+      allowed.add(ext);
+    }
+    if (allowed.size === 0) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `目录 ${dir} 的可上传类型至少选择一项（不配置该目录即使用平台默认）`,
+      );
+    }
+    out[dir] = DATA_PREP_UPLOAD_EXTS.filter((ext) => allowed.has(ext));
+  }
+  return out;
 }
 
 /**
@@ -257,6 +368,47 @@ export function scenarioFieldIssues(scenario: AgentScenario | null | undefined):
       }
       if (typeof field.required !== 'boolean') {
         issues.push(`字段 ${field.name} 的 required 须为布尔值`);
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * 目录级可上传类型的**问题清单**（不抛错，供部署前校验一次性列出全部错误）。
+ *
+ * 与 `normalizeScenarioUploads` 同一判据，但**收集全部**而非首条即停：
+ * 手工改过设计态文档、或本字段引入前的历史文档被外部修改时都能一次列清。
+ */
+export function scenarioUploadIssues(scenario: AgentScenario | null | undefined): string[] {
+  const raw = scenario?.data_prep_uploads;
+  if (raw === undefined || raw === null) return [];
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return ['可上传文件类型（data_prep_uploads）须为对象'];
+  }
+  const dirs = Array.isArray(scenario?.data_prep_dirs) ? scenario.data_prep_dirs : [];
+  const issues: string[] = [];
+  for (const [dir, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!dirs.includes(dir)) {
+      issues.push(`可上传文件类型引用了目录清单外的目录：${dir}`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      issues.push(`目录 ${dir} 的可上传类型须为数组`);
+      continue;
+    }
+    if (value.length === 0) {
+      issues.push(`目录 ${dir} 的可上传类型至少选择一项`);
+      continue;
+    }
+    for (const item of value) {
+      if (typeof item !== 'string' || item.trim() === '') {
+        issues.push(`目录 ${dir} 的可上传类型含非法项：${JSON.stringify(item)}`);
+        continue;
+      }
+      const ext = item.trim().toLowerCase();
+      if (!(DATA_PREP_UPLOAD_EXTS as readonly string[]).includes(ext)) {
+        issues.push(`目录 ${dir} 的可上传类型非法：${item}`);
       }
     }
   }

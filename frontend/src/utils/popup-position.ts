@@ -36,6 +36,13 @@ export interface PopupPlacement {
   side: 'right' | 'left' | 'below'
 }
 
+/** 菜单落点：坐标 + 上下方位（便于测试与排查）。 */
+export interface MenuPlacement {
+  left: number
+  top: number
+  side: 'below' | 'above'
+}
+
 /** 面板与锚点之间的间隙。 */
 const GAP = 6
 
@@ -73,4 +80,37 @@ export function placePopup(
 
   // 视口比面板还窄：两侧都放不下，夹取并保持右侧语义
   return { left: clamp(right, MARGIN, maxLeft), top, side: 'right' }
+}
+
+/**
+ * 菜单（下拉/浮窗）坐标计算：优先「贴锚点**下方**」→ 下方放不下翻到**上方** →
+ * 上下都放不下时把整块夹进视口（宁可压住触发器，也不让它跑到屏幕外）。
+ *
+ * 水平方向：优先左对齐锚点左缘，越界则左移，仍越界再夹取 —— 因此**右侧永不溢出**。
+ *
+ * 为什么不复用 `placePopup`：两者的首选方向不同。`placePopup` 服务「`@` 光标面板」，
+ * 首选贴光标**右侧**（横向展开不遮挡输入）；本函数服务「工具栏按钮的菜单」，
+ * 首选**下方**展开，且 MUST NOT 盖住触发器——底部工具栏（如模型选择）会因此自动向上弹。
+ */
+export function placeMenu(
+  anchor: PopupRect,
+  size: PopupSize,
+  viewport: PopupViewport,
+): MenuPlacement {
+  const maxLeft = Math.max(MARGIN, viewport.width - size.width - MARGIN);
+  const left = clamp(anchor.left, MARGIN, maxLeft);
+
+  const below = anchor.bottom + GAP;
+  const above = anchor.top - size.height - GAP;
+
+  if (below + size.height <= viewport.height - MARGIN) {
+    return { left, top: below, side: 'below' };
+  }
+  if (above >= MARGIN) {
+    return { left, top: above, side: 'above' };
+  }
+
+  // 上下都放不下（菜单高于可用高度）：夹取，保证整块仍在视口内
+  const maxTop = Math.max(MARGIN, viewport.height - size.height - MARGIN);
+  return { left, top: clamp(below, MARGIN, maxTop), side: 'below' };
 }

@@ -118,6 +118,57 @@ describe('runPrecheck', () => {
     expect(errors).toEqual([]);
   });
 
+  it('① 配置完整性（2026-10-13）：可上传类型非法 → 逐条并入 config_integrity', () => {
+    const errors = runPrecheck(
+      input({
+        readDesign: () =>
+          design({
+            scenario: {
+              scenario: '生产',
+              data_prep_dirs: ['生产计划', '算法规则'],
+              data_prep_uploads: {
+                生产计划: ['.doc' as never],
+                算法规则: [],
+                不在清单: ['.csv'],
+              },
+            },
+          }),
+      }),
+    );
+
+    const integrity = errors.filter((e) => e.category === 'config_integrity');
+    expect(integrity).toHaveLength(3);
+    const joined = integrity.map((e) => e.message).join('；');
+    expect(joined).toContain('可上传类型配置非法');
+    expect(joined).toContain('可上传类型非法');
+    expect(joined).toContain('至少选择一项');
+    expect(joined).toContain('目录清单外');
+  });
+
+  it('① 边界（2026-10-13）：可上传类型合法 / 缺省 → 不报错', () => {
+    const legal = runPrecheck(
+      input({
+        readDesign: () =>
+          design({
+            scenario: {
+              scenario: '生产',
+              data_prep_dirs: ['生产计划', '算法规则'],
+              data_prep_uploads: { 生产计划: ['.csv', '.xlsx', '.txt'] },
+            },
+          }),
+      }),
+    );
+    expect(legal).toEqual([]);
+
+    const absent = runPrecheck(
+      input({
+        readDesign: () =>
+          design({ scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] } }),
+      }),
+    );
+    expect(absent).toEqual([]);
+  });
+
   it('① 关联了不存在的数字人 → config_integrity（按失败处理）', () => {
     const errors = runPrecheck(input({ readDesign: () => null }));
     expect(errors[0]?.category).toBe('config_integrity');

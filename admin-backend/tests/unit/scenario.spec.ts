@@ -12,6 +12,7 @@ import {
   MAX_FIELDS_PER_DIR,
   normalizeScenario,
   scenarioFieldIssues,
+  scenarioUploadIssues,
 } from '../../src/domain/config-center/scenario.js';
 
 function expectCode(fn: () => unknown, code: string): void {
@@ -195,5 +196,101 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
     ]);
     // 预定义目录本身不强制字段约束：存在即无问题
     expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['算法规则'] })).toEqual([]);
+  });
+});
+
+/* ---------- 2026-10-13：目录级可上传类型（data_prep_uploads，8 条归一规则） ---------- */
+
+describe('normalizeScenario —— 可上传类型（data_prep_uploads）', () => {
+  it('正向：去重 + 大小写归一 + 按候选枚举顺序重排', () => {
+    const out = normalizeScenario({
+      ...base,
+      data_prep_uploads: {
+        生产计划: ['.TXT', '.csv', '.csv', '.xls', '.XLS', '.xlsx'],
+        产线电价: ['.JSON'],
+      },
+    });
+    expect(out.data_prep_uploads).toEqual({
+      // `.xls`（2026-10-14 新增候选）在 `.xlsx` 之后，且随枚举序重排、去重
+      生产计划: ['.xlsx', '.xls', '.csv', '.txt'],
+      产线电价: ['.json'],
+    });
+  });
+
+  it('边界：缺省 / null ⇒ 归一为空对象（不写键，等价"用平台默认"）', () => {
+    expect(normalizeScenario(base).data_prep_uploads).toEqual({});
+    expect(normalizeScenario({ ...base, data_prep_uploads: null }).data_prep_uploads).toEqual({});
+  });
+
+  it('异常：空数组被拒（"至少一项"；"不配置"才是表达默认的方式）', () => {
+    expectCode(
+      () => normalizeScenario({ ...base, data_prep_uploads: { 生产计划: [] } }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+  });
+
+  it('异常：整体非对象（数组 / 字符串）', () => {
+    for (const bad of [[], 'oops', 3]) {
+      expectCode(
+        () => normalizeScenario({ ...base, data_prep_uploads: bad }),
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+  });
+
+  it('异常：孤儿键（引用了目录清单外的目录）', () => {
+    expectCode(
+      () => normalizeScenario({ ...base, data_prep_uploads: { 不存在的目录: ['.csv'] } }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+  });
+
+  it('异常：值非数组 / 含非字符串 / 空串 / 不在候选枚举内', () => {
+    const badList = [
+      { 生产计划: 'not-array' } as never,
+      { 生产计划: [1] } as never,
+      { 生产计划: ['  '] } as never,
+      { 生产计划: ['.doc'] } as never,
+      { 生产计划: ['csv'] } as never,
+    ];
+    for (const uploads of badList) {
+      expectCode(
+        () => normalizeScenario({ ...base, data_prep_uploads: uploads }),
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+  });
+});
+
+describe('scenarioUploadIssues —— 部署前校验出口（收集全部问题，不抛错）', () => {
+  it('正向：合法配置与缺省（历史文档）均无问题', () => {
+    expect(scenarioUploadIssues(base)).toEqual([]);
+    expect(
+      scenarioUploadIssues({ ...base, data_prep_uploads: { 生产计划: ['.csv', '.xlsx'] } }),
+    ).toEqual([]);
+  });
+
+  it('异常：一次性列出全部问题（孤儿键 + 非法项 + 空数组）', () => {
+    const issues = scenarioUploadIssues({
+      scenario: '生产',
+      data_prep_dirs: ['生产计划', '算法规则'],
+      data_prep_uploads: {
+        生产计划: ['.doc', 1 as never],
+        算法规则: [],
+        不在清单: ['.csv'],
+      },
+    });
+    const joined = issues.join('；');
+    expect(joined).toContain('目录清单外');
+    expect(joined).toContain('至少选择一项');
+    expect(joined).toContain('可上传类型非法');
+    expect(joined).toContain('含非法项');
+  });
+
+  it('边界：非对象一条结论；缺省 / null 无问题', () => {
+    expect(
+      scenarioUploadIssues({ ...base, data_prep_uploads: [] as never }),
+    ).toEqual(['可上传文件类型（data_prep_uploads）须为对象']);
+    expect(scenarioUploadIssues(null)).toEqual([]);
   });
 });

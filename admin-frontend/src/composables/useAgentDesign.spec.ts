@@ -73,7 +73,12 @@ describe('emptyDraft', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
-      scenario: { scenario: '', data_prep_dirs: ['算法规则'], data_prep_fields: {} },
+      scenario: {
+        scenario: '',
+        data_prep_dirs: ['算法规则'],
+        data_prep_fields: {},
+        data_prep_uploads: {},
+      },
     })
   })
 })
@@ -207,6 +212,62 @@ describe('useAgentDesign', () => {
     const editor = useAgentDesign()
     await editor.load('demo')
     expect(editor.draft.value.soul.mission).toBe(mission)
+  })
+
+  /* ---------- 2026-10-13：目录级可上传类型（FR-005） ---------- */
+
+  it('load：未配置该键的数字人草稿归一为 `{}`（不产生 undefined）', async () => {
+    const editor = useAgentDesign()
+    await editor.load('demo')
+    expect(editor.draft.value.scenario.data_prep_uploads).toEqual({})
+    expect(editor.dirty.value).toBe(false)
+  })
+
+  it('可上传类型是**深副本**：改草稿里的数组不污染已保存态', async () => {
+    getAgent.mockResolvedValue({
+      ...DESIGN,
+      scenario: { ...DESIGN.scenario, data_prep_uploads: { 生产计划: ['.csv', '.xlsx'] } },
+    })
+    const editor = useAgentDesign()
+    await editor.load('demo')
+
+    editor.draft.value.scenario.data_prep_uploads!['生产计划'].push('.txt')
+    editor.draft.value.scenario.data_prep_uploads!['新增目录'] = ['.json']
+
+    expect(editor.dirty.value).toBe(true)
+    expect(editor.saved.value?.scenario.data_prep_uploads).toEqual({ 生产计划: ['.csv', '.xlsx'] })
+  })
+
+  it('可上传类型的改动触发 dirty（即便场景名与字段约束未变）', async () => {
+    getAgent.mockResolvedValue({
+      ...DESIGN,
+      scenario: { ...DESIGN.scenario, data_prep_uploads: { 生产计划: ['.csv'] } },
+    })
+    const editor = useAgentDesign()
+    await editor.load('demo')
+    expect(editor.dirty.value).toBe(false)
+
+    editor.draft.value.scenario.data_prep_uploads!['生产计划'] = ['.csv', '.txt']
+    expect(editor.dirty.value).toBe(true)
+  })
+
+  it('dirty：新建态下仅配置了可上传类型即视为已修改', () => {
+    const editor = useAgentDesign()
+    editor.draft.value.scenario.data_prep_uploads!['算法规则'] = ['.json']
+    expect(editor.dirty.value).toBe(true)
+  })
+
+  it('save 带上可上传类型（深副本，避免草稿后续改动污染载荷）', async () => {
+    createAgent.mockResolvedValue({ ...DESIGN, name: 'demo2', revision: 1 })
+    const editor = useAgentDesign()
+    editor.draft.value.name = 'demo2'
+    editor.draft.value.scenario.data_prep_uploads!['算法规则'] = ['.json']
+
+    await editor.save()
+    const payload = createAgent.mock.calls[0][0] as {
+      scenario: { data_prep_uploads: Record<string, string[]> }
+    }
+    expect(payload.scenario.data_prep_uploads).toEqual({ 算法规则: ['.json'] })
   })
 })
 

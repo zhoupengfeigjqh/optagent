@@ -39,8 +39,13 @@ export const THREADS_DIR = 'threads';
 export const PRODUCED_SUBDIR = '后台产出';
 export const PRODUCED_DIR = `${SPACE_TMP}/${PRODUCED_SUBDIR}`;
 
-/** 各空间允许上传的扩展名（小写含点） */
-const DOCUMENT_EXTS = ['.csv', '.xlsx', '.txt', '.json', '.pdf'] as const;
+/**
+ * 各空间允许上传的扩展名（小写含点）。
+ *
+ * `共享空间` / `临时空间` 取它（空间级、不可按目录配置）。`.xls` 于 2026-10-14 加入：
+ * 客户侧总BOM 等既有资料是 `.xls`（BIFF），与 `.xlsx` 同为 Excel 表格，不应因容器格式不同被拒。
+ */
+const DOCUMENT_EXTS = ['.csv', '.xlsx', '.xls', '.txt', '.json', '.pdf'] as const;
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff'] as const;
 
 export interface SpacePolicy {
@@ -55,6 +60,11 @@ export const SPACE_POLICIES: Record<SpaceName, SpacePolicy> = {
   [SPACE_SHARED]: { agentWritable: false, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
   [SPACE_TMP]: { agentWritable: true, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
 };
+
+/** 「数据准备」可上传类型候选；与 admin-backend / admin-frontend 同名常量三处 MUST 同步（契约 §3），枚举外的项丢弃并告警 */
+export const DATA_PREP_UPLOAD_EXTS = [
+  '.xlsx', '.xls', '.csv', '.txt', '.pdf', '.json', '.zip', '.jpg', '.png', '.jpeg',
+] as const;
 
 /** 用户数据根：users/{userId}/user-data */
 export function userDataDir(optAgentRoot: string, userId: string): string {
@@ -127,7 +137,8 @@ export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number];
  * 单个字段约束（用于**上传预检**：上传表的表头必须包含必填字段，且取值类型匹配）。
  *
  * `string`/`object`/`array` 之外的判定规则见契约 §3.1；本模块只**承载**约束，
- * 判定发生在未来的上传校验链路（本期不实现）。
+ * **判定已实现**于 `domain/field-check.ts`（`checkUploadBuffer`），由 `routes/files.ts`
+ * 在上传暂存后、落盘前调用，且仅对表格类型（`supportsFieldCheck`）触发。
  */
 export interface ScenarioField {
   name: string;
@@ -148,6 +159,8 @@ export interface Scenario {
    * 无约束的目录**不会**以空数组形式出现。
    */
   dataPrepFields: Record<string, ScenarioField[]>;
+  /** 目录 → 可上传类型（`data_prep_uploads`，2026-10-13）；缺失 = 用平台默认，未配置的目录不出现键 */
+  dataPrepUploads: Record<string, string[]>;
 }
 
 interface ScenarioCacheEntry {
@@ -196,6 +209,7 @@ export function loadScenario(
       scenario?: unknown;
       data_prep_dirs?: unknown;
       data_prep_fields?: unknown;
+      data_prep_uploads?: unknown;
     };
     if (typeof obj.scenario !== 'string' || obj.scenario.trim() === '') {
       throw new Error('scenario 字段缺失');
@@ -218,6 +232,7 @@ export function loadScenario(
       name: obj.scenario.trim(),
       dataPrepDirs: dirs,
       dataPrepFields: parseScenarioFields(obj.data_prep_fields, dirs, logger),
+      dataPrepUploads: parseScenarioUploads(obj.data_prep_uploads, dirs, logger),
     };
   } catch (err) {
     if (err instanceof ScenarioNotConfiguredError) throw err;
@@ -299,6 +314,79 @@ function parseScenarioFields(
     if (list.length > 0) out[dir] = list;
   }
   return out;
+}
+
+/**
+ * 解析 `data_prep_uploads`（目录 → 可上传类型，2026-10-13 新增）。
+ *
+ * 消费方口径（与 `parseScenarioFields` 一致）：非法内容**丢弃 + 告警**，MUST NOT 让整个场景不可用。
+ * 丢弃判据：整体非对象 / 孤儿键 / 值非数组或空数组 / 项非字符串、空串或不在候选枚举内 / 同目录重复（留首个）。
+ * 解析后为空的目录不写入（缺失 ≡ 用平台默认）；非法项只丢弃该项，其余合法项保留。
+ */
+function parseScenarioUploads(
+  raw: unknown,
+  dirs: readonly string[],
+  logger?: { warn(msg: string): void },
+): Record<string, string[]> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    logger?.warn('scenario.json 的 data_prep_uploads 非对象，已忽略');
+    return {};
+  }
+
+  const out: Record<string, string[]> = {};
+  for (const [dir, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!dirs.includes(dir)) {
+      logger?.warn(`scenario.json 可上传类型引用了清单外的目录已忽略: ${dir}`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      logger?.warn(`scenario.json 目录 ${dir} 的可上传类型非数组，已忽略`);
+      continue;
+    }
+
+    const list: string[] = [];
+    for (const item of value) {
+      if (typeof item !== 'string' || item.trim() === '') {
+        logger?.warn(`scenario.json 目录 ${dir} 的可上传类型含非法项已跳过: ${String(item)}`);
+        continue;
+      }
+      const ext = item.toLowerCase();
+      if (!(DATA_PREP_UPLOAD_EXTS as readonly string[]).includes(ext)) {
+        logger?.warn(`scenario.json 目录 ${dir} 的可上传类型不在候选枚举内已跳过: ${item}`);
+        continue;
+      }
+      if (list.includes(ext)) {
+        logger?.warn(`scenario.json 目录 ${dir} 的可上传类型重复已跳过: ${ext}`);
+        continue;
+      }
+      list.push(ext);
+    }
+
+    if (list.length > 0) out[dir] = list;
+  }
+  return out;
+}
+
+/**
+ * 某上传目标**允许上传的扩展名**（本次改动的**唯一实现**，2026-10-13）。
+ *
+ * 数据准备 + 有二级目录 → 该目录配置，缺省回落平台默认；其余空间（含数据准备空间根）恒取
+ * `SPACE_POLICIES`。上传校验与 `workspace` 下发共用它，"界面允许的"与"服务端放行的"永远同源（契约 §3）。
+ *
+ * `scenario` 可为 `null`（调用方未加载场景）：仅当空间非数据准备、或未指定二级目录时合法
+ * （此时判定与场景无关）。
+ */
+export function uploadExtensionsOf(
+  scenario: Scenario | null | undefined,
+  space: SpaceName,
+  sub?: string,
+): readonly string[] {
+  if (space === SPACE_PREP && sub) {
+    // scenario 为 null（调用方未加载场景）时按平台默认处理：与"未配置该目录"同一语义
+    return scenario?.dataPrepUploads[sub] ?? SPACE_POLICIES[SPACE_PREP].uploadExtensions;
+  }
+  return SPACE_POLICIES[space].uploadExtensions;
 }
 
 /** 惰性创建数据准备子目录（幂等） */

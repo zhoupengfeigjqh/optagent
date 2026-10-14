@@ -24,7 +24,7 @@ import { ERROR_CODES } from '../error-codes.js';
 import { detectAnomalies } from '../config-center/references.js';
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { isSafeName } from '../config-center/naming.js';
-import { scenarioFieldIssues } from '../config-center/scenario.js';
+import { scenarioFieldIssues, scenarioUploadIssues } from '../config-center/scenario.js';
 import type { ReferenceIndex } from '../config-center/reference-index.js';
 
 export type PrecheckCategory =
@@ -159,6 +159,16 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
             category: 'config_integrity',
             code: ERROR_CODES.VALIDATION_FAILED,
             message: `数字人 ${agentName} 的场景字段约束非法：${issue}`,
+          });
+        }
+        // 目录级可上传类型（2026-10-13）：同一出口并入 config_integrity 预检
+        for (const issue of scenarioUploadIssues(design.scenario)) {
+          errors.push({
+            user_id: user.user_id,
+            agent_name: agentName,
+            category: 'config_integrity',
+            code: ERROR_CODES.VALIDATION_FAILED,
+            message: `数字人 ${agentName} 的可上传类型配置非法：${issue}`,
           });
         }
       }

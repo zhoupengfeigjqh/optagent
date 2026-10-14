@@ -3,9 +3,10 @@
  * 上传入口面板（T052 + 003 三空间改造）
  *
  * 目录树一律来自 workspace 接口（空间 → 子目录），前端不保留目录常量：
- * - 数据准备：列出 scenario 定义的子目录，仅可选 csv/xlsx
+ * - 数据准备：列出 scenario 定义的子目录，允许类型按**目录**配置（缺省 csv/xlsx）
  * - 共享空间 / 临时空间：空间自身即目标目录，支持 csv/xlsx/txt/json/pdf/图片
- * 文件选择的 `accept` 按目标空间的 `upload_extensions` 动态设置。
+ * 文件选择的 `accept` 按**目标目录**自身的 `upload_extensions` 动态设置
+ * （与 `useWorkspace.uploadExtensionsOf` 共用同一实现 `uploadExtensionsOfDir`，MUST NOT 自行反查空间级）。
  *
  * 只用一个隐藏 `<input type="file">`：点击目录时记录目标目录并触发文件选择，
  * `change` 时把 `{ dir, files }` 交给上层（多选由 `useUploads` 逐文件各发一次请求）。
@@ -14,6 +15,7 @@ import { computed, ref } from 'vue'
 
 import type { ScenarioField, WorkspaceSpace } from '../../api/types'
 import type { UploadedDocument } from '../../composables/useUploads'
+import { uploadExtensionsOfDir } from '../../composables/useWorkspace'
 import BaseIcon from '../common/BaseIcon.vue'
 import HintTip from '../common/HintTip.vue'
 import UploadItem from './UploadItem.vue'
@@ -40,12 +42,20 @@ const inputRef = ref<HTMLInputElement | null>(null)
 /** 本次文件选择的目标目录（相对空间路径） */
 const activeDir = ref<string | null>(null)
 
-/** 当前目标空间允许的文件类型（input accept 用） */
+/**
+ * 当前目标**目录**允许的文件类型（input accept 用）。
+ *
+ * 2026-10-13：粒度下放到目录级 —— 与 `useWorkspace.uploadExtensionsOf` 共用同一实现
+ * （`uploadExtensionsOfDir`），删除原先的"按空间反查"（那会让同空间两个白名单不同的
+ * 数据准备目录呈现相同的过滤范围，属失败判据 2）。
+ */
 const activeAccept = computed(() => {
   const dir = activeDir.value
   if (!dir) return ''
-  const space = props.spaces.find((item) => item.dirs.some((d) => d.dir === dir))
-  return space?.upload_extensions.join(',') ?? ''
+  return uploadExtensionsOfDir(
+    props.spaces.flatMap((space) => space.dirs),
+    dir,
+  ).join(',')
 })
 
 function chooseDir(dir: string): void {
@@ -91,10 +101,7 @@ function fieldHint(fields: readonly ScenarioField[]): string {
 <template>
   <div v-if="open" class="upload-menu">
     <div v-for="space in spaces" :key="space.name" class="upload-menu__space">
-      <p class="upload-menu__space-title">
-        {{ space.name }}
-        <span class="upload-menu__space-exts">{{ space.upload_extensions.join(' ') }}</span>
-      </p>
+      <p class="upload-menu__space-title">{{ space.name }}</p>
       <ul class="upload-menu__dirs">
         <li v-for="directory in space.dirs" :key="directory.dir" class="upload-menu__dir">
           <div class="upload-menu__dir-row">
@@ -108,6 +115,16 @@ function fieldHint(fields: readonly ScenarioField[]): string {
               :text="fieldHint(directory.fields)"
               label="查看表头要求"
             />
+            <!--
+              可上传类型挂在**二级目录**行内、紧跟「?」（2026-10-13 粒度下放到目录）：
+              数据准备各二级目录可各不相同，空间级的值只是平台默认，展示它会误导
+              （与 `accept`、服务端校验三者同源：`directory.upload_extensions`）。
+              长清单（共享/临时空间 13 项）在格子内自然折行。
+            -->
+            <span
+              class="upload-menu__dir-exts"
+              :class="{ 'upload-menu__dir-exts--after-hint': directory.fields.length > 0 }"
+            >{{ directory.upload_extensions.join(' ') }}</span>
           </div>
         </li>
       </ul>
@@ -158,12 +175,6 @@ function fieldHint(fields: readonly ScenarioField[]): string {
   font-weight: 600;
 }
 
-.upload-menu__space-exts {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 400;
-}
-
 .upload-menu__dirs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -175,17 +186,46 @@ function fieldHint(fields: readonly ScenarioField[]): string {
   flex-direction: column;
 }
 
+/*
+ * 目录级可上传类型：与「?」/目录名同一条 flex 行，紧跟其后。
+ * - `min-width: 0` 允许它在格子内收缩并**自身折行**（共享/临时空间 13 项），
+ *   从而首段类型紧贴名字右侧，不会整段掉到下一行；
+ * - 左侧不给 padding（默认 0）：无「?」时（共享/临时空间）直接贴住文件名右侧，
+ *   仅当「?」在其前面时才留 4px 气口（见下一条规则）。
+ */
+.upload-menu__dir-exts {
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* 类型前面有「?」→ 留 4px 气口；无「?」（共享/临时空间）→ 紧贴文件名右侧 */
+.upload-menu__dir-exts--after-hint {
+  padding-left: var(--space-1);
+}
+
 .upload-menu__dir-row {
   display: flex;
   align-items: center;
+  /*
+   * 不设 `flex-wrap`：目录名 +「?」+ 类型始终在**同一条 flex 行**上，
+   * 类型过长时在自身盒内折行（`min-width: 0`），从而第一段类型紧贴名字右侧，
+   * 而不会整段被挤到下一行（那会让「共享空间」这种无「?」的目录看起来是两段）。
+   */
 }
 
+/*
+ * 目录按钮**不撑满整格**（`width: auto`）：紧随其后的「?」才会贴在目录名右侧
+ * （如「生产计划?」），而不是被挤到三列网格的最右端。
+ * 右侧 padding 收到 `--space-1` 是为了让「?」与名字读起来是连在一起的整体。
+ */
 .upload-menu__dir-button {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  width: 100%;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;

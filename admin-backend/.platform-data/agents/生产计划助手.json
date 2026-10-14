@@ -67,9 +67,7 @@
     "hd-algorithm",
     "ocr"
   ],
-  "skills": [
-    "海大算法求解"
-  ],
+  "skills": [],
   "scenario": {
     "scenario": "海大计划",
     "data_prep_dirs": [
@@ -78,7 +76,8 @@
       "产线信息",
       "产能信息",
       "产线电价",
-      "算法规则"
+      "算法规则",
+      "test"
     ],
     "data_prep_fields": {
       "生产计划": [
@@ -273,7 +272,17 @@
           "required": true
         }
       ]
+    },
+    "data_prep_uploads": {
+      "算法规则": [
+        ".xlsx",
+        ".csv",
+        ".txt"
+      ],
+      "test": [
+        ".xlsx"
+      ]
     }
   },
-  "updated_at": "2026-10-12T14:59:24.842Z"
+  "updated_at": "2026-10-13T03:34:00.501Z"
 }
