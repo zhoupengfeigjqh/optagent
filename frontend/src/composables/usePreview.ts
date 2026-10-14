@@ -23,7 +23,7 @@ import { useSession } from './useAppSession'
 export type PanelView = 'list' | 'content'
 
 /** 预览目标：`none` 表示内容态无目标（列表态恒为 `none`）。 */
-export type PreviewTarget = { kind: 'none' } | { kind: 'file'; dir: string; filename: string }
+export type PreviewTarget = { kind: 'none' } | { kind: 'file'; dir: string; filename: string } | { kind: 'page'; url: string; title: string }
 
 /** 预览内容（加载结果）。 */
 export interface PreviewContent {
@@ -53,6 +53,8 @@ export interface PreviewStore {
   openList(): void
   /** 展开面板并内联预览该文件（面板内点击 / 消息内引用，FR-046） */
   openFile(reference: FileReference): Promise<void>
+  /** 页面卡片点击：由右侧内联预览（FR-046）（V-10） */
+  openPage(item: { url: string; title: string }): void
   /** 从内容态返回列表态（面板不收起） */
   backToList(): void
   /** 文件被删除后的收敛：若正在看该文件则退回列表态，否则不动 */
@@ -191,6 +193,13 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
     }
   }
 
+  /** 页面卡片点击：由右侧内联预览（FR-046）（V-10） */
+  function openPage(item: { url: string; title: string,type:string,sub:string }): void {
+    open.value = true
+    view.value = 'content'
+    target.value = { kind: 'page', ...item }
+  }
+
   function openLink(href: string): void {
     // 外部地址直接跳转：刻意不改动面板状态（V-10）
     if (typeof window === 'undefined') {
@@ -226,6 +235,7 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
     loading,
     openList,
     openFile,
+    openPage,
     backToList,
     onFileRemoved,
     openLink,

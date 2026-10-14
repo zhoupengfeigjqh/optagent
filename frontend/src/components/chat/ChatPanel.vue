@@ -83,6 +83,7 @@ const {
   onSwitchAgent,
   onOpenLink,
   onOpenFile,
+  onOpenPage,
   onUpdateDraft,
   onSendFromToolbar,
   onInputText,
@@ -192,6 +193,7 @@ function onStarterClick(starter: AgentStarter): void {
         @send-suggestion="onPickNextStep"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
+        @open-page="onOpenPage"
       />
     </div>
 

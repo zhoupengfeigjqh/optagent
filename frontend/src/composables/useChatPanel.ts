@@ -386,6 +386,11 @@ export function useChatPanel() {
     void preview.openFile(reference)
   }
 
+  /** 页面卡片点击：由右侧内联预览（FR-046）（V-10） */
+  function onOpenPage(item: { url: string; title: string }): void {
+    void preview.openPage(item)
+  }
+
   function onUpdateDraft(value: string): void {
     chat.draft.value = value
   }
@@ -512,6 +517,7 @@ export function useChatPanel() {
     onSwitchAgent,
     onOpenLink,
     onOpenFile,
+    onOpenPage,
     onUpdateDraft,
     onSendFromToolbar,
     onInputText,

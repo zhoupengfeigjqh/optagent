@@ -276,6 +276,9 @@ function onOpenFile(reference: FileReference): void {
   emit('open-file', reference)
 }
 
+function onOpenPage(item: { url: string; title: string,type:string,sub:string }): void {
+  emit('open-page', item)
+}
 /**
  * 只把卡片透传给**归属的那一条**消息（其余传 `null`）。
  *
@@ -316,6 +319,7 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
         @feedback="onFeedback"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
+        @open-page="onOpenPage"
         @send-suggestion="emit('send-suggestion', $event)"
       />
 

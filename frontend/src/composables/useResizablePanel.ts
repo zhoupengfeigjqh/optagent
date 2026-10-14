@@ -15,7 +15,7 @@ import { computed, onBeforeUnmount, ref, type CSSProperties, type ComputedRef, t
 export const PANEL_MIN_WIDTH = 280
 
 /** 面板宽度上限的绝对封顶（px） */
-export const PANEL_MAX_WIDTH = 960
+export const PANEL_MAX_WIDTH = 1300
 
 /** 左栏 + 中栏需保留的最小宽度（px），用于推算上限 */
 export const PANEL_RESERVED_WIDTH = 520
