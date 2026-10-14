@@ -28,6 +28,14 @@ export interface PromptSources {
   /** 已拼好的「后台计算结果」段（无产出时为空串） */
   producedText: string;
   /**
+   * 本轮 `【当前时间】` 段文本（R18；无则空串/缺省，不占一个字符）。
+   *
+   * 由调用方按当前时钟格式化后传入（`formatCurrentTime`）——本模块是纯函数，**不读系统时钟**。
+   * 拼装位置：**后台产出段之后、`guidance` 之前**。这样既让"本轮指令"`guidance` 保持
+   * 紧邻用户消息，又把"每轮变化"的字节压到末尾，尽量不伤 prompt 前缀缓存。
+   */
+  nowText?: string;
+  /**
    * 本轮请求级指引（004：问题实例关联工具生成的隐藏引导）。
    *
    * **不落盘、不进历史**，只追加到本轮 `systemExtra`——用户消息气泡因此保持干净
@@ -74,7 +82,9 @@ export function buildPromptMessages(sources: PromptSources): {
   });
 
   // FR-017：滚动摘要；002：外置工具结果索引；R11：后台计算结果清单。
-  // 三者都是"有内容才占位"——无内容时不占一个字符
+  // 这三者是"有内容才占位"——无内容时不占一个字符。
+  // R18：当前时间——**恒占位**（每轮必注入），是唯一"一定有内容"的段
+  //   ⇒ `systemExtra` 在正常轮次不再可能是 `undefined`（契约 R18 §17.2）。
   const parts: string[] = [];
   if (sources.summaryData.summary !== '') {
     parts.push(`以下是对话早期内容的摘要：\n${sources.summaryData.summary}`);
@@ -82,6 +92,8 @@ export function buildPromptMessages(sources: PromptSources): {
   const indexText = formatArtifactIndex(selection.index);
   if (indexText !== '') parts.push(indexText);
   if (sources.producedText !== '') parts.push(sources.producedText);
+  // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 仍是最末段（本轮指令紧邻用户消息）
+  if (sources.nowText) parts.push(sources.nowText);
   // 004：问题实例的隐藏工具引导。放最后——本轮指令紧邻用户消息，更容易被遵循
   if (sources.guidance) parts.push(sources.guidance);
   return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };

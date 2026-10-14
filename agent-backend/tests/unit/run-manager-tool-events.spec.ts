@@ -194,7 +194,8 @@ describe('下一轮回灌', () => {
     const captured: AgentRunRequest[] = [];
     await runTurn(manager, recordingAgent(captured, () => plainTurn()), '再确认下').settled;
 
-    expect(captured[0]!.systemExtra).toBeUndefined();
+    // R18 起 `systemExtra` 恒含【当前时间】段 ⇒ 断言"外置索引段长度为 0"
+    expect(captured[0]!.systemExtra ?? '').not.toContain('【可用的工具结果原文】');
     const joined = captured[0]!.messages.map((m) => m.content).join('\n');
     expect(joined).not.toContain('内部结果');
     expect(fs.existsSync(path.join(root, 'users', 'admin', 'user-data', 'threads', 'th1', 'tool-events.jsonl'))).toBe(false);
@@ -245,6 +246,7 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     const req = captured[0]!;
     expect(req.messages).toHaveLength(POOL_MAX_MESSAGES + 1);
     expect(req.messages[0]!.content).toBe('h20'); // 兜底取末尾 60 条 = h20..h79
-    expect(req.systemExtra).toBeUndefined();
+    // 未装配摘要 ⇒ 摘要段长度为 0（`systemExtra` 仍含 R18 的【当前时间】段）
+    expect(req.systemExtra ?? '').not.toContain('以下是对话早期内容的摘要');
   });
 });

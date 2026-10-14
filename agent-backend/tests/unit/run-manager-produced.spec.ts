@@ -93,15 +93,16 @@ describe('后台计算结果清单注入（R11）', () => {
     const manager = new RunManager({ history, usage, produced: async () => '' });
     const [req] = await runOnce(manager);
 
-    expect(req!.systemExtra).toBeUndefined();
+    // R18 起 `systemExtra` 恒含【当前时间】段 ⇒ 这里改断言"该段长度为 0"（不出现产出段）
+    expect(req!.systemExtra).not.toContain('【后台计算结果】');
     expect(req!.messages.map((m) => m.content).join('\n')).not.toContain('后台计算结果');
   });
 
-  it('未装配 produced：与既有行为完全一致（不注入、不报错）', async () => {
+  it('未装配 produced：与既有行为完全一致（不注入产出段、不报错）', async () => {
     const manager = new RunManager({ history, usage });
     const [req] = await runOnce(manager);
 
-    expect(req!.systemExtra).toBeUndefined();
+    expect(req!.systemExtra).not.toContain('【后台计算结果】');
   });
 
   it('与摘要段并列：摘要在前、产出清单在后', async () => {

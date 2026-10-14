@@ -21,7 +21,7 @@ import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, 
 import type { HistoryStore } from './history.js';
 import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
-import { genMessageId, toSeconds } from './message-format.js';
+import { formatCurrentTime, genMessageId, toSeconds } from './message-format.js';
 import type { NextActionsStore } from './next-actions.js';
 import { buildPromptMessages } from './prompt-builder.js';
 import type { ResolveInteractionResult, RunState, SsePayload } from './run-events.js';
@@ -312,6 +312,8 @@ export class RunManager {
       userMessage,
       records: this.deps.toolEvents?.readAll(userId, threadId) ?? [],
       producedText: (await this.deps.produced?.(userId, threadId)) ?? '',
+      // R18：当前时间（每轮现算；纯函数层不读时钟，故在此注入）
+      nowText: formatCurrentTime(new Date()),
       // 004：问题实例的隐藏工具引导（请求级，不落盘）
       ...(opts.guidance ? { guidance: opts.guidance } : {}),
     });

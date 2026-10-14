@@ -27,3 +27,24 @@ export function toLlmContent(m: HistoryMessage): string {
 export function toSeconds(ms: number): number {
   return Math.round(ms) / 1000;
 }
+
+/**
+ * 当前时间段（契约 R18）：`【当前时间】2026-10-14 15:30:45（周三，UTC+08:00）`。
+ *
+ * **每轮现算**：由调用方（`run-manager.buildPrompt`）读时钟后传入，本函数本身是纯函数
+ * （`prompt-builder` 不读系统时钟，保住"同输入 → 同输出"的可测性）。
+ *
+ * 时区取运行环境**本地时区**并**显式标注偏移**：容器时区若不是东八区，模型仍能据此换算；
+ * 需要固定北京时间请给运行环境设 `TZ=Asia/Shanghai`（无需改代码）。
+ */
+export function formatCurrentTime(d: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const ymd = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const offsetMin = -d.getTimezoneOffset(); // 东八区 = +480
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const abs = Math.abs(offsetMin);
+  const tz = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  const week = '日一二三四五六'[d.getDay()] ?? '';
+  return `【当前时间】${ymd} ${hms}（周${week}，${tz}）`;
+}
