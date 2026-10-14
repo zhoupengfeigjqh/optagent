@@ -1183,3 +1183,62 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 - 前端 **零改动**；管理台 **零改动**（无新配置字段）；
 - 回滚：撤掉 `prompt-builder.ts` 里的该段拼装即可，无数据迁移、无配置残留；
 - 已知副作用（有意为之）：System Prompt 每轮变化 ⇒ provider 端 prompt 前缀缓存只在"时间点之前"的部分命中。这正是把该段放在靠后位置的原因。
+
+---
+
+## §18 R19 — 用户数据按数字人隔离（2026-10-14，特性 `009-agent-data-isolation`）
+
+**规格**：[`specs/009-agent-data-isolation/spec.md`](../../009-agent-data-isolation/spec.md) | **契约细节**：[`contracts/api-delta.md`](../../009-agent-data-isolation/contracts/api-delta.md) | **数据模型**：[`data-model.md`](../../009-agent-data-isolation/data-model.md)
+
+### 18.1 路径根：数据域下移到数字人一级
+
+| 类别 | 改前 | 改后 |
+|---|---|---|
+| 数据准备 / 共享空间 / 临时空间 | `users/{uid}/user-data/{空间}` | `users/{uid}/user-data/{数字人}/{空间}` |
+| 会话 | `users/{uid}/user-data/threads/{tid}` | `users/{uid}/user-data/{数字人}/threads/{tid}` |
+| 数字人配置（不变） | `users/{uid}/agents/{agent}/` | `users/{uid}/agents/{agent}/`（平台唯一写入位置） |
+
+- 用户的 `user-data/` 一级下**只有数字人目录**；平台对 `users/{uid}/user-data/**` **零创建、零写入、零删除**（`FR-005`／`FR-028`／`SC-012`）。
+- 骨架（三空间 + `threads`）由运行环境在**选中数字人时惰性创建**（幂等），不再依赖进程启动期预建。
+
+### 18.2 作用域与错误码
+
+- 作用域＝**服务端当前选中数字人**（按用户维度记录）。客户端传参一律无效：`POST /api/threads` 的 `agent_name` 只用于**一致性告警**（不一致时落 `warn` 并以服务端为准，仍 `201`），`GET /api/threads` 的 `agent_name` 查询参数**退出作用域**（传了就忽略）。
+- **新增错误码 `AGENT_NOT_AVAILABLE`（409）**：已选中但该数字人已不可用（配置目录不存在或配置不完整、未被平台关联）。文案 MUST 可读且可执行（例如"该数字人已不可用，请重新选择"）；**MUST NOT** 自动清空选中态（由用户显式重选）。`AGENT_NOT_SELECTED`（409）语义不变。
+- 跨数字人的会话/文件访问：会话详情与续聊/改名/删除一律 `404 THREAD_NOT_FOUND`（与"不存在"**同形**，不泄露存在性）；文件目录参数越界为 `403 UPLOAD_DIR_FORBIDDEN`（一级不是三空间之一）或 `400 VALIDATION_FAILED`（穿越、绝对路径、非法字符）。
+- 拒绝与降级 MUST 落结构化日志：`event=agent.scope.unavailable`（含 `user_id` / `agent_name` / `route` / `reason`）、`event=dir.validation.rejected`（含 `user_id` / `agent_name` / `dir` / `status_code`）。
+
+### 18.3 `select` 的幂等副作用
+
+`POST /api/agents/{name}/select` 成功后按顺序（**顺序不可颠倒**）执行两件幂等的事：
+
+1. `migrateUserDataLayout`：把该用户"用户级共享"的存量数据搬到归属数字人目录（归属判定：①当前选中→②清单唯一→③名称升序第一；清单为空则原地保留并告警）；
+2. `ensureAgentDataDirs`：补齐该数字人的三空间与 `threads/` 骨架。
+
+两者对同一输入重复执行结果一致（幂等），失败项保持原状并在下次触发时重试。
+
+### 18.4 迁移日志事件名（结构化审计）
+
+| 事件 | 级别 | 关键字段 |
+|---|---|---|
+| `data.migration.start` | info | `uid`、`entries`（待迁一级条目数） |
+| `data.migration.owner` | info | `uid`、`owner_agent`、`reason`（`current`/`single`/`first`）、`candidates` |
+| `data.migration.moved` | info | `uid`、`owner_agent`、`entry` |
+| `data.migration.rescued_empty_target` | info | `uid`、`owner_agent`、`entry`（目标同名项为空目录，直接搬入） |
+| `data.migration.skipped` | warn | `uid`、`owner_agent`、`entry`、`reason=target_exists`（目标非空：不合并、不覆盖） |
+| `data.migration.blocked` | warn | `uid`、`reason=no_available_agent`（原地保留，待有数字人后重试） |
+| `data.migration.error` | error（`alert: true`） | `uid`、`owner_agent`、`entry`、`reason`（如 `EXDEV`）；该项保持原状，MUST NOT 降级为复制 |
+| `data.migration.done` | info | `uid`、`owner_agent`、`moved_count`、`skipped`、`failed` |
+
+### 18.5 会话语义变更
+
+- 「新建对话」＝**视图态**空对话：MUST NOT 调创建接口；会话由**首条消息**创建（`FR-010`）。
+- `GET /api/threads` 只返回**有消息**的会话（空对话是视图态，不落盘呈现，`FR-016`）。
+- 切换数字人后 MUST 立即进入新的空对话视图（前端 `onSwitched`：`startNew` → 重取列表 → 重取文件空间）；**当前对话已有消息**或**一轮回答进行中**时切换入口 MUST 不可用且给出可读原因（`FR-015`）。
+
+### 18.6 兼容性与回滚
+
+- SSE 事件名、`history.jsonl` 行结构、`meta.json` 结构（新增 `agent_name`，读取时**以目录作用域为准**，存量缺字段可正常读取）**零变更语义**；
+- 存量数据由**一次性迁移**处理（逐项 `rename`，可中断续跑、幂等）：`user-data/` 一级存在非数字人条目才算待迁移；
+- 回滚：恢复旧路径工厂实现 + 手动把 `user-data/{数字人}/**` 移回 `user-data/**`（迁移是纯改名的逆操作）；改前数据备份位于 `agent-backend/.opt-agent.backup-20261014/`；
+- 已知副作用（有意为之）：切换数字人后原会话不再可见（须切回该数字人）；这是隔离的**目的**而非缺陷。

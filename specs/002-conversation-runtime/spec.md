@@ -223,6 +223,8 @@
 
 ### 5.1 `threads/{thread_id}/tool-events.jsonl`
 
+> **路径根（2026-10-14）**：完整落点是 `users/{uid}/user-data/{数字人}/threads/{thread_id}/tool-events.jsonl`——`threads/` 与三个文件空间同属**数字人级**数据域（用户级共享布局已由一次性迁移搬入归属数字人目录，见 §5.2 的漂移登记）。
+
 ```jsonl
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"running","started_at":"2026-09-23T09:12:03.120Z","args_digest":{"path":"数据准备/生产计划/9月计划.xlsx"}}
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"success","started_at":"2026-09-23T09:12:03.120Z","duration_ms":84,"size":120,"inline_content":"车间,计划量\n冲压,1200"}
@@ -234,9 +236,15 @@
 
 ### 5.2 外置正文
 
-- 落点：`users/{userId}/user-data/临时空间/{thread_id}_toolresult_{call_id}.txt`
+- 落点：`users/{userId}/user-data/{数字人}/临时空间/{thread_id}_toolresult_{call_id}.txt`
 - 文件名由 `artifactFileName(threadId, callId)` **唯一推导**（`call_id` 做 `[A-Za-z0-9_-]` 安全化并截断 64 字符）
 - 落在三个文件空间之内，因此：模型可 `read_file` 按需取回、删会话时随前缀清理、界面可见
+
+> **（2026-10-14 修订，`009-agent-data-isolation`）** 上文的 `临时空间` 与 §5.1 的 `threads/` 多了一层**数字人目录**：数据域由用户级收敛到数字人级（`users/{uid}/user-data/{数字人}/{数据准备|共享空间|临时空间|threads}`）。
+>
+> **既有漂移登记**：本规格此前若写作 `users/{uid}/threads/`（无 `user-data/` 一层，见 `TR-37`），该写法与实现始终不一致——真实落点一直是 `user-data/` 之下；本次一并更正为数据域口径，`TR-37` 的实施 MUST 以 `users/{uid}/user-data/{数字人}/threads/{thread_id}/run.jsonl` 为准。
+>
+> 另：会话的**归属与作用域**由「平台当前选中的数字人」决定（服务端权威）：跨数字人取会话一律 `404`（与不存在同形）；「新建对话」是视图态、会话由首条消息创建。契约见 `specs/001-digital-human-platform/contracts/runtime-api-delta.md` §18。
 
 ### 5.3 参数表
 

@@ -21,13 +21,17 @@ function fakeLogger(): Logger {
   return { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 }
 
+/** 本用例使用的数字人（技能根与数据域的一级目录名，009 两者同源） */
+const AGENT = 'demo';
+
 /** 本数字人的技能根：users/{uid}/agents/{agent}/skills */
 const skillsDirOf = (): string =>
-  path.join(root, 'users', 'admin', 'agents', 'demo', 'skills');
+  path.join(root, 'users', 'admin', 'agents', AGENT, 'skills');
 
 function build(enabled: string[]) {
   return buildBuiltinTools({
-    fileAccess: new FileAccess({ optAgentRoot: root, userId: 'admin' }),
+    // 009：文件访问按（用户，数字人）取数据域
+    fileAccess: new FileAccess({ optAgentRoot: root, userId: 'admin', agentName: AGENT }),
     threadId: 'th_1',
     enabled,
     availableDirs: ['共享空间'],

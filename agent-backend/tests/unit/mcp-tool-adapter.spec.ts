@@ -240,10 +240,12 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
     const calls: Call[] = [];
     const fileCtx = {
       fileAccess: {
-        resolveVerified: (value: string) => ({ relPath: `users/admin/user-data/${value}` }),
+        // 009：`resolveVerified` 返回的是**相对数字人数据域**的路径（与生产同口径）
+        resolveVerified: (value: string) => ({ relPath: value }),
       } as unknown as FileAccess,
       userId: 'admin',
-      mintUrl: (_userId: string, relPath: string) => `https://signed.example/${relPath}`,
+      // 009：生产侧铸造的 `p` 带数字人段（`agentScopedPath(agent, relPath)`），夹具同形
+      mintUrl: (_userId: string, relPath: string) => `https://signed.example/demo/${relPath}`,
     } satisfies FileArgContext;
 
     const tool = {
@@ -266,7 +268,7 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
     await exec(built!, { path: '临时空间/a.png' });
 
     expect(calls[0]?.args).toEqual({
-      path: 'https://signed.example/users/admin/user-data/临时空间/a.png',
+      path: 'https://signed.example/demo/临时空间/a.png',
       uid: 'admin',
       sid: 'th_123',
     });
@@ -336,11 +338,12 @@ function sandbox(verified: string[] = []): FileArgContext {
       resolveVerified: (value: string) => {
         verified.push(value);
         if (value.includes('不存在')) throw new PermissionError(`文件不存在或不可读: ${value}`);
-        return { relPath: `users/admin/user-data/${value}` };
+        return { relPath: value }; // 相对数字人数据域（009）
       },
     } as unknown as FileAccess,
     userId: 'admin',
-    mintUrl: (_userId: string, relPath: string) => `https://signed.example/${relPath}`,
+    // 009：生产侧铸造的 `p` 带数字人段（`agentScopedPath(agent, relPath)`），夹具同形
+    mintUrl: (_userId: string, relPath: string) => `https://signed.example/demo/${relPath}`,
   };
 }
 
@@ -411,11 +414,11 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
       items: [
         {
           businessType: 1,
-          excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+          excelFileUrl: 'https://signed.example/demo/临时空间/产能.xlsx',
         },
         {
           businessType: 4,
-          excelFileUrl: 'https://signed.example/users/admin/user-data/数据准备/排产/计划.xlsx',
+          excelFileUrl: 'https://signed.example/demo/数据准备/排产/计划.xlsx',
         },
       ],
     });
@@ -441,7 +444,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
     expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx'); // 外部直链不动
     expect(items[1]?.excelFileUrl).toBe(
-      'https://signed.example/users/admin/user-data/临时空间/电价.xlsx',
+      'https://signed.example/demo/临时空间/电价.xlsx',
     );
     expect(verified).toEqual(['临时空间/电价.xlsx']); // 外部直链从未被当成本地路径
   });
@@ -463,8 +466,8 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
 
     expect(sentArgs(calls)).toEqual({
       files: [
-        'https://signed.example/users/admin/user-data/临时空间/a.png',
-        'https://signed.example/users/admin/user-data/共享空间/b.png',
+        'https://signed.example/demo/临时空间/a.png',
+        'https://signed.example/demo/共享空间/b.png',
       ],
     });
   });
@@ -488,11 +491,11 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
       groups: [
         {
           label: 'A',
-          files: [{ url: 'https://signed.example/users/admin/user-data/临时空间/a.png', size: 1 }],
+          files: [{ url: 'https://signed.example/demo/临时空间/a.png', size: 1 }],
         },
         {
           label: 'B',
-          files: [{ url: 'https://signed.example/users/admin/user-data/共享空间/b.png', size: 2 }],
+          files: [{ url: 'https://signed.example/demo/共享空间/b.png', size: 2 }],
         },
       ],
     });
@@ -508,7 +511,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     await exec(tool!, { image: '临时空间/a.png' });
 
     expect(sentArgs(calls)).toEqual({
-      image: 'https://signed.example/users/admin/user-data/临时空间/a.png',
+      image: 'https://signed.example/demo/临时空间/a.png',
     });
   });
 
@@ -550,7 +553,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
 
     const { items } = sentArgs<{ items: Array<Record<string, unknown>> }>(calls);
     expect(items[0]?.excelFileUrl).toBe(
-      'https://signed.example/users/admin/user-data/临时空间/a.xlsx',
+      'https://signed.example/demo/临时空间/a.xlsx',
     );
     expect(items[1]).toEqual({ businessType: 2 });
     expect(warns).toHaveLength(1);
@@ -726,12 +729,12 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
         {
           businessType: 1,
           realRelativePath: '临时空间/产能.xlsx',
-          excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+          excelFileUrl: 'https://signed.example/demo/临时空间/产能.xlsx',
         },
         {
           businessType: 4,
           realRelativePath: '数据准备/排产/计划.xlsx',
-          excelFileUrl: 'https://signed.example/users/admin/user-data/数据准备/排产/计划.xlsx',
+          excelFileUrl: 'https://signed.example/demo/数据准备/排产/计划.xlsx',
         },
       ],
     });
@@ -756,7 +759,7 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
 
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
     expect(items[0]?.excelFileUrl).toBe(
-      'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+      'https://signed.example/demo/临时空间/产能.xlsx',
     );
   });
 
@@ -819,7 +822,7 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
     expect(sentArgs(calls)).toEqual({
       businessType: 2,
       realRelativePath: '临时空间/电价.xlsx',
-      excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/电价.xlsx',
+      excelFileUrl: 'https://signed.example/demo/临时空间/电价.xlsx',
     });
     const schema = tool!.parameters as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(schema.properties)).toEqual(['businessType', 'realRelativePath']);
@@ -914,9 +917,9 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
     });
 
     expect(sentArgs(calls)).toEqual({
-      image: 'https://signed.example/users/admin/user-data/临时空间/a.png',
+      image: 'https://signed.example/demo/临时空间/a.png',
       realRelativePath: '临时空间/产能.xlsx',
-      excelFileUrl: 'https://signed.example/users/admin/user-data/临时空间/产能.xlsx',
+      excelFileUrl: 'https://signed.example/demo/临时空间/产能.xlsx',
     });
   });
 });

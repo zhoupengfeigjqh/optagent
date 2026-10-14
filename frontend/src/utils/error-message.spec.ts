@@ -27,6 +27,18 @@ describe('toUserMessage - 基础映射', () => {
     )
   })
 
+  it('AGENT_NOT_AVAILABLE：默认与发消息/建会话场景都指向"重新选择"（009 FR-032）', () => {
+    expect(toUserMessage({ code: 'AGENT_NOT_AVAILABLE', message: 'raw' })).toBe(
+      '该数字人已不可用，请重新选择数字人',
+    )
+    expect(toUserMessage({ code: 'AGENT_NOT_AVAILABLE', message: '' }, 'send-message')).toContain(
+      '选择其他数字人',
+    )
+    expect(toUserMessage({ code: 'AGENT_NOT_AVAILABLE', message: '' }, 'create-thread')).toContain(
+      '重新选择',
+    )
+  })
+
   it('null / undefined / 无 code → 通用兜底文案', () => {
     expect(toUserMessage(null)).toBe(GENERIC)
     expect(toUserMessage(undefined)).toBe(GENERIC)

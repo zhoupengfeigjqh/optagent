@@ -1,20 +1,27 @@
 /**
  * 对话管理路由（T034 / FR-010）：
- * - POST /api/threads：创建（未选中 → 409 AGENT_NOT_SELECTED、AGENT_NOT_FOUND；**不限制会话总数**，
- *   上限只作用于"进行中"的会话，见 chat.ts 的 THREAD_BUSY_LIMIT）。
- *   传入的 `agent_name` 仅作为**起始数字人标签**——会话不绑定数字人（FR-014 修订）
- * - GET /api/threads：列表（agent_name 过滤、updated_at 倒序、默认标题）
+ * - POST /api/threads：创建（未选中 → 409 AGENT_NOT_SELECTED；当前数字人不可用 → 409
+ *   AGENT_NOT_AVAILABLE；**不限制会话总数**，上限只作用于"进行中"的会话，见 chat.ts 的
+ *   THREAD_BUSY_LIMIT）。body 的 `agent_name` **保留但不再决定归属**（009）：
+ *   归属一律取服务端当前选中的数字人，两者不一致时落 `warn` 并以服务端为准
+ * - GET /api/threads：列表（**只含当前数字人**、updated_at 倒序、默认标题；查询参数
+ *   `agent_name` 保留但不再参与作用域，传了忽略）
  * - GET /api/threads/:id：详情 + 历史分页（limit≤200 默认 50、offset 从最新往前数、total、running）
  *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联小结果）
  * - GET /api/threads/:id/tool-calls/:call_id：外置结果正文（懒加载；过期 → 410）
  * - GET /api/threads/:id/next-actions：该会话最新一轮的「下一步动作提示」（007；四类空态一律 200 空）
  * - PATCH /api/threads/:id：重命名（≤100 字）
  * - DELETE /api/threads/:id：删除连带清理（进行中 run 先 abort）
+ *
+ * **009 归属口径**：会话归属＝**目录位置**（`user-data/{数字人}/threads/{id}`），
+ * 作用域一律来自 `resolveAgentScope`（唯一判定入口）。跨数字人请求在路径层解析不到 →
+ * 一律 `404 THREAD_NOT_FOUND`（与"不存在"不可区分，FR-021），MUST NOT 出现"存在但无权限"。
  */
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import type { AppContext } from '../context.js';
 import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
+import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { userAgentsDir } from '../domain/dirs.js';
 import { defaultTitleOf } from '../domain/thread-store.js';
@@ -90,28 +97,37 @@ function toolCallJson(r: ToolCallRecord) {
 export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post('/api/threads', { schema: { body: createBodySchema } }, async (req, reply) => {
     const userId = getCurrentUser().userId;
-    const { agent_name: agentName } = req.body as { agent_name: string };
+    const { agent_name: bodyAgentName } = req.body as { agent_name: string };
 
-    // 未选中数字人 → 拒绝（会话需要一个起始数字人；之后可在会话内切换，FR-014 修订）
-    if (!ctx.currentAgent.current(userId)) {
-      throw new ApiError(409, 'AGENT_NOT_SELECTED', '请先选定数字人再创建对话');
-    }
-
-    // 数字人配置必须可加载（损坏的数字人不允许开对话）
-    try {
-      loadAgentConfig(path.join(userAgentsDir(ctx.config.optAgentRoot, userId), agentName));
-    } catch (err) {
-      if (err instanceof AgentConfigError) throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
-      throw err;
+    // 归属唯一来源＝服务端当前选中数字人（未选中 / 不可用一律 409）
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人再创建对话',
+      route: 'POST /api/threads',
+    });
+    if (bodyAgentName !== agentName) {
+      // 契约：字段保留但不再决定归属；不一致**不静默**（原则九），落 warn 并以服务端为准
+      ctx.loggers.logger.warn(
+        { event: 'thread.create.agent_mismatch', user_id: userId, body_agent: bodyAgentName, scope_agent: agentName },
+        `创建会话的数字人参数与服务端当前选中不一致，已按当前选中归属（body=${bodyAgentName} scope=${agentName}）`,
+      );
+      // 既有口径保留：body 指定的数字人配置损坏时仍是 404 AGENT_NOT_FOUND（不静默放过）
+      try {
+        loadAgentConfig(path.join(userAgentsDir(ctx.config.optAgentRoot, userId), bodyAgentName));
+      } catch (err) {
+        if (err instanceof AgentConfigError) throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
+        throw err;
+      }
     }
 
     const meta = ctx.threadStore.create(userId, agentName);
     return reply.status(201).send({ thread_id: meta.threadId, title: meta.title, created_at: meta.createdAt });
   });
 
-  app.get('/api/threads', { schema: { querystring: listQuerySchema } }, async (req) => {
+  app.get('/api/threads', { schema: { querystring: listQuerySchema } }, async () => {
     const userId = getCurrentUser().userId;
-    const { agent_name: agentName } = req.query as { agent_name?: string };
+    // 查询参数 `agent_name` **退出作用域**（契约 §2）：作用域恒为当前选中数字人，
+    // 传了就忽略（Schema 保留该字段，免得既有的显式传参变成 400）
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads' });
     return ctx.threadStore.list(userId, agentName).map(metaJson);
   });
 
@@ -119,9 +135,10 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
     const { limit, offset } = req.query as { limit: number; offset: number };
-    const meta = ctx.threadStore.get(userId, threadId); // 404
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id' });
+    const meta = ctx.threadStore.get(userId, agentName, threadId); // 不属于本数字人 → 404
     // 一次读盘取回消息 + 反馈（原先 readAll + readFeedback 会把同一文件解析两遍）
-    const snapshot = ctx.history.readSnapshot(userId, threadId);
+    const snapshot = ctx.history.readSnapshot(userId, agentName, threadId);
     const all = snapshot.messages;
     const feedback = snapshot.feedback;
     const total = all.length;
@@ -129,7 +146,7 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const end = Math.max(0, total - offset);
     const page = all.slice(Math.max(0, end - limit), end);
     // 002 特性：工具调用记录按归属消息分组（无记录的会话为空 Map，只多一次 existsSync）
-    const toolCallsByMessage = ctx.toolEvents.readByMessage(userId, threadId);
+    const toolCallsByMessage = ctx.toolEvents.readByMessage(userId, agentName, threadId);
     // 契约升级（002 US2/US3）：消息带元数据与反馈状态；
     // 旧格式行合成稳定 id（{threadId}-{全局序号}）、ts 回填线程创建时间
     const messages = page.map((m, i) => {
@@ -141,7 +158,7 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         role: m.role,
         content: m.content,
         ts: m.ts ?? meta.createdAt,
-        // 会话可跨数字人：每条消息带上当轮数字人（旧数据缺省）
+        // 每条消息记该轮**实际执行**的数字人（009 下恒等于会话归属；旧数据缺省）
         ...(m.agent_name ? { agent_name: m.agent_name } : {}),
         ...(m.status ? { status: m.status } : {}),
         ...(m.usage ? { usage: m.usage } : {}),
@@ -174,12 +191,13 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
   app.get('/api/threads/:id/tool-calls/:callId', async (req) => {
     const userId = getCurrentUser().userId;
     const { id: threadId, callId } = req.params as { id: string; callId: string };
-    ctx.threadStore.get(userId, threadId); // 404
-    const record = ctx.toolEvents.readAll(userId, threadId).find((r) => r.callId === callId);
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id/tool-calls' });
+    ctx.threadStore.get(userId, agentName, threadId); // 404
+    const record = ctx.toolEvents.readAll(userId, agentName, threadId).find((r) => r.callId === callId);
     if (!record || record.artifactSize === undefined) {
       throw new ApiError(404, 'TOOL_CALL_NOT_FOUND', `工具调用结果不存在或未外置: ${callId}`);
     }
-    const artifact = await ctx.toolEvents.readArtifact(userId, threadId, callId);
+    const artifact = await ctx.toolEvents.readArtifact(userId, agentName, threadId, callId);
     if (!artifact) {
       throw new ApiError(410, 'TOOL_RESULT_EXPIRED', '工具结果内容已被临时空间清理');
     }
@@ -209,29 +227,32 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
   app.get('/api/threads/:id/next-actions', async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
-    ctx.threadStore.get(userId, threadId); // 404 THREAD_NOT_FOUND
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id/next-actions' });
+    ctx.threadStore.get(userId, agentName, threadId); // 404 THREAD_NOT_FOUND
     reply.header('Cache-Control', 'no-store');
     // `read` 永不抛错：快照缺失/损坏/超限/判据不符都返回 undefined
-    return ctx.nextActions.read(userId, threadId) ?? { message_id: null, actions: [] };
+    return ctx.nextActions.read(userId, agentName, threadId) ?? { message_id: null, actions: [] };
   });
 
   app.patch('/api/threads/:id', { schema: { body: renameBodySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
     const { title } = req.body as { title: string };
-    const meta = ctx.threadStore.rename(userId, threadId, title); // 404
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'PATCH /api/threads/:id' });
+    const meta = ctx.threadStore.rename(userId, agentName, threadId, title); // 404
     return { thread_id: meta.threadId, title: meta.title };
   });
 
   app.delete('/api/threads/:id', async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
-    ctx.threadStore.get(userId, threadId); // 404
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'DELETE /api/threads/:id' });
+    ctx.threadStore.get(userId, agentName, threadId); // 404
     // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）
     ctx.runManager.stop(threadId);
     // 删除是「多文件 × 单次系统调用」，**await 异步版**：不让它占住事件循环
     // （否则用户紧接着的"切换会话"请求会被一起拖慢，见 fs-safe 头部实测）
-    await ctx.threadStore.delete(userId, threadId);
+    await ctx.threadStore.delete(userId, agentName, threadId);
     return reply.status(204).send();
   });
 }

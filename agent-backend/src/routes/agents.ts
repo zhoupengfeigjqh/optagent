@@ -13,7 +13,8 @@ import type { AppContext } from '../context.js';
 import { getAgentDetail, listAgents } from '../domain/agent-catalog.js';
 import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
 import { getCurrentUser } from '../domain/current-user.js';
-import { userAgentsDir } from '../domain/dirs.js';
+import { migrateUserDataLayout } from '../domain/data-migration.js';
+import { ensureAgentDataDirs, userAgentsDir } from '../domain/dirs.js';
 import type { ChatAgent } from '../infra/agent-factory.js';
 import { createThrottledWarn } from '../logging.js';
 import { ApiError } from '../server.js';
@@ -69,6 +70,18 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
 
     // 覆盖式选中：无需先 exit；切换后新数字人在下一轮对话生效
     ctx.currentAgent.select(userId, name);
+    // 009 补判：启动期该用户可能还没有任何数字人（判定②③无从执行），此时存量数据原地保留；
+    // 首次选中即触发一次迁移（判定①：当前选中），把数据搬进这个数字人目录（幂等，无源即返回）。
+    //
+    // **顺序不可颠倒**：迁移 MUST 早于建骨架——先把三空间骨架建出来，存量里的同名目录
+    // 就会被判"目标已存在"而**全部跳过**，数据反而留在旧位（`migrateUserDataLayout` 内部同理）。
+    migrateUserDataLayout(ctx.config.optAgentRoot, userId, {
+      currentAgentName: name,
+      logger: ctx.loggers.logger,
+    });
+    // 选中即初始化**该数字人**的数据域骨架（3 空间 + threads，幂等）——迁移之后补齐源里缺的目录；
+    // 文件空间与「新建对话后发首条消息」都不再依赖进程启动时的预建目录
+    ensureAgentDataDirs(ctx.config.optAgentRoot, userId, name);
     // 快照随选中变化 → 通知 SSE 订阅方推送新数字人的 MCP 状态
     ctx.mcpEvents.emitChanged(userId);
     return { agent_name: name, selected: true };

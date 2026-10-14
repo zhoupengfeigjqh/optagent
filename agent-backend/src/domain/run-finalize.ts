@@ -43,8 +43,8 @@ export interface RunFinalizeDeps {
   logger?: Logger;
   /** 工具调用记录：轮末 `flush`，保证 done 到达时工具卡片已可读 */
   toolEvents?: ToolEventStore;
-  /** 滚动摘要（FR-018） */
-  summary?: { trigger(userId: string, threadId: string): Promise<void> };
+  /** 滚动摘要（FR-018）；009：落点按（用户，数字人，会话）解析 */
+  summary?: { trigger(userId: string, agentName: string, threadId: string): Promise<void> };
   /** 007 修订：卡片定稿口（缺省 = 该侧未装配，功能整体不生效） */
   nextActions?: Pick<NextActionsStore, 'finalize'>;
   now: () => number;
@@ -87,15 +87,15 @@ export class RunFinalizer {
       agent_name: run.agentName,
     };
     await Promise.all([
-      this.deps.history.append(turn.userId, turn.threadId, {
+      this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
         ...userMessage,
         id: userMessageId,
         ts,
         agent_name: run.agentName,
       }),
-      this.deps.history.append(turn.userId, turn.threadId, assistantMessage),
+      this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
       // 工具记录同样"先落盘后广播"：否则 done 到达时前端立即刷新会读不到工具卡片
-      this.deps.toolEvents?.flush(turn.userId, turn.threadId) ?? Promise.resolve(),
+      this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
     ]);
     run.emit({
       type: 'done',
@@ -109,7 +109,7 @@ export class RunFinalizer {
       },
     });
     // FR-018：窗口外攒满一批则 fire-and-forget 增量重写摘要
-    void this.deps.summary?.trigger(turn.userId, turn.threadId);
+    void this.deps.summary?.trigger(turn.userId, run.agentName, turn.threadId);
   }
 
   /** LLM 错误（非中断）：失败轮落盘（status='failed' + 错误信息 + 已消耗 usage/耗时） */
@@ -139,15 +139,15 @@ export class RunFinalizer {
       assistantMessage.usage = { input_tokens: ev.usage.inputTokens, output_tokens: ev.usage.outputTokens };
     }
     await Promise.all([
-      this.deps.history.append(turn.userId, turn.threadId, {
+      this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
         ...userMessage,
         id: genMessageId(nowMs),
         ts,
         agent_name: run.agentName,
       }),
-      this.deps.history.append(turn.userId, turn.threadId, assistantMessage),
+      this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
       // 失败轮同样等工具记录落盘（工具可能已成功执行过，卡片不该丢）
-      this.deps.toolEvents?.flush(turn.userId, turn.threadId) ?? Promise.resolve(),
+      this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
     ]);
     run.emit({
       type: 'error',
@@ -179,7 +179,7 @@ export class RunFinalizer {
     this.recordUsage(turn, run.agentName, u);
   }
 
-  /** 用量记在**本轮实际使用的数字人**名下（会话不绑定数字人，用谁记谁） */
+  /** 用量记在**本轮实际使用的数字人**名下（009 下恒等于会话归属：会话归属不可变更） */
   private recordUsage(turn: FinalizeTurn, agentName: string, u: UsageInfo): void {
     this.deps.usage.record({
       userId: turn.userId,

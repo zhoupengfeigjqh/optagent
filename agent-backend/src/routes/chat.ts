@@ -5,13 +5,16 @@
  *   attachments（@ 文件引用 ≤10，目录白名单 + 存在性校验 → 400 FILE_REF_NOT_FOUND）
  * - POST /api/threads/:id/stop — 幂等中断
  *
- * 409 判定链：AGENT_NOT_SELECTED → THREAD_BUSY_LIMIT
+ * 409 判定链（009）：AGENT_NOT_SELECTED → AGENT_NOT_AVAILABLE → THREAD_NOT_FOUND（404，
+ * 会话不属于当前数字人时与"不存在"不可区分）→ THREAD_BUSY_LIMIT
  * （并发上限，唯一的会话数量约束）→ POOL_EXHAUSTED → THREAD_RUN_ACTIVE。
  * THREAD_BUSY_LIMIT 由 runManager.acquireQuota 同步「检查+占位」完成：
  * 判定与 run 注册之间不再有 await 窗口，同一用户的并发请求无法同时通过。
  *
- * 数字人归属（FR-014 修订）：会话**不绑定**数字人，本轮由「当前选中数字人」执行；
- * 用户可在同一会话内切换数字人，切换在下一轮消息生效。
+ * **数字人归属（009，取代 002 的"会话可跨数字人"口径）**：会话归属在创建时写定
+ * （＝其所在目录，FR-022），生命周期内**不可变更**；本轮由「当前选中数字人」执行，
+ * 若该数字人已不可用 → `409 AGENT_NOT_AVAILABLE`（陈旧上下文 MUST 失败且可读，
+ * MUST NOT 静默改由其他数字人回答，FR-032）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +22,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { AgentConfigError } from '../domain/agent-instance.js';
 import { PoolExhaustedError } from '../domain/agent-pool.js';
+import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import {
   DirValidationError,
@@ -105,7 +109,7 @@ function validateAttachments(
     if (att.filename !== path.basename(att.filename) || att.filename.includes('..')) {
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${att.filename}`);
     }
-    const abs = path.join(userDataDir(root, userId), target.relPath, att.filename);
+    const abs = path.join(userDataDir(root, userId, agentName), target.relPath, att.filename);
     if (!fs.existsSync(abs)) {
       throw new ApiError(400, 'FILE_REF_NOT_FOUND', `引用的文件不存在: ${att.dir}/${att.filename}`);
     }
@@ -124,11 +128,13 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       attachments?: FileReference[];
     };
 
-    ctx.threadStore.get(userId, threadId); // ThreadNotFoundError → 404（全局映射）
-
-    // 本轮数字人 = 当前选中数字人（会话不绑定数字人，可在会话内切换）
-    const selected = ctx.currentAgent.current(userId);
-    if (!selected) throw new ApiError(409, 'AGENT_NOT_SELECTED', '请先选定数字人再发送消息');
+    // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人再发送消息',
+      route: 'POST /api/threads/:id/messages',
+    });
+    // 会话不属于当前数字人 → 404（与"不存在"不可区分，FR-021）
+    ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404（全局映射）
 
     // 请求级模型解析（FR-023/024）：未指定 → 默认模型
     let model;
@@ -141,7 +147,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     // @ 文件引用校验（FR-028/029）：按本轮数字人的场景清单判定
     if (body.attachments && body.attachments.length > 0) {
-      validateAttachments(ctx.config.optAgentRoot, userId, selected.agentName, body.attachments);
+      validateAttachments(ctx.config.optAgentRoot, userId, agentName, body.attachments);
     }
 
     // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；
@@ -156,7 +162,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     let agent;
     try {
-      agent = await ctx.getOrCreateAgent({ userId, agentName: selected.agentName });
+      agent = await ctx.getOrCreateAgent({ userId, agentName });
     } catch (err) {
       releaseQuota(); // 未走到 startRun，额度必须归还，否则该用户永久少一个并发名额
       if (err instanceof PoolExhaustedError) throw new ApiError(409, 'POOL_EXHAUSTED', err.message);
@@ -186,8 +192,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
     agent.activeThreads++;
     void run.settled.then(() => {
       agent.activeThreads--;
-      // 会话的 agent_name 记录**最近一轮**使用的数字人（会话可跨数字人）
-      ctx.threadStore.touch(userId, threadId, selected.agentName);
+      // 只刷新 updated_at：会话归属在创建时写定，MUST NOT 因轮次改变（FR-022）
+      ctx.threadStore.touch(userId, agentName, threadId);
     });
 
     // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
@@ -208,7 +214,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.post('/api/threads/:id/stop', async (req) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
-    ctx.threadStore.get(userId, threadId); // 404 校验
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'POST /api/threads/:id/stop' });
+    ctx.threadStore.get(userId, agentName, threadId); // 404 校验
     return { stopped: ctx.runManager.stop(threadId) };
   });
 
@@ -217,7 +224,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.post('/api/threads/:id/interaction', { schema: { body: interactionBodySchema } }, async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
-    ctx.threadStore.get(userId, threadId); // 404 校验
+    const { agentName } = resolveAgentScope(ctx, userId, { route: 'POST /api/threads/:id/interaction' });
+    ctx.threadStore.get(userId, agentName, threadId); // 404 校验
     const body = req.body as {
       interaction_id: string;
       action: 'submit' | 'reject';

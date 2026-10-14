@@ -1,0 +1,75 @@
+{
+  "description": "按编码族分类的子BOM字段映射, 每类一个字典; key=子BOM原始列名(含双语写法), value=总BOM标准字段; 同族内不同版式的列名全部并入同一字典",
+  "source_file": "子BOM",
+  
+  "_header_detect": {
+    "说明": "标题行特征: 前N行内第0列归一化后含任一关键词即为标题行",
+    "max_scan_rows": 12,
+    "keywords": ["DISEGNO", "DRAWING", "CODICE"]
+  },
+
+  "_missing_component": {
+    "说明": "判定『该编码本应有子BOM文件』的正则; 只有命中者, 在树上找不到文件时才提示",
+    "remark": "缺省不配置=不提示。刻意不用『编码族前缀』当判据: 叶子件与组件同前缀(如 VCPM6B2EH9001 与 VCPM6B2EH5ZE), 会造成大量误报",
+    "patterns": ["^WCCUN-\\d+-S$", "^WCXXX00000\\d+$", "^VCPM[A-Z0-9]+ZE$", "^WCCMT-\\d+$"]
+  },
+
+  "VCPM": {
+    "N°DISEGNO": "mat_code",
+    "POSIZ.": "posiz",
+    "PROGETTO: STANDARD": "posiz",
+    "QTA'": "qty",
+    "DESCRIZIONE": "descr",
+    "MATERIALE   TABELLA    FORNITORE": "materiale",
+    "SIGLA    COMMERCIALE": "sigla",
+    "RICAMBIO": "ricambio",
+    "REVIS.": "revis",
+    "TAV.": "tav"
+  },
+
+  "WCXXX": {
+    "N°DISEGNO": "mat_code",
+    "POSIZ.": "posiz",
+    "QTA'": "qty",
+    "DESCRIZIONE": "descr",
+    "MATERIALE   TABELLA    FORNITORE": "materiale",
+    "SIGLA    COMMERCIALE": "sigla",
+    "RICAMBIO": "ricambio",
+    "REVIS.": "revis",
+    "TAV.": "tav"
+  },
+
+  "WCCMT": {
+    "CODICE COMAU (SAP)": "mat_code",
+    "POSIZ.": "posiz",
+    "QTA'": "qty",
+    "DESCRIZIONE": "descr",
+    "MATERIALE   TABELLA    FORNITORE": "materiale",
+    "SIGLA    COMMERCIALE": "sigla",
+    "RICAMBIO": "ricambio",
+    "REVIS.": "revis",
+    "TAV.": "tav"
+  },
+
+  "WCCUN": {
+    "N°DISEGNO": "mat_code",
+    "N°DRAWING\nN°DISEGNO": "mat_code",
+    "POSIZ.": "posiz",
+    "POSIT.\nPOSIZ.": "posiz",
+    "QTA'": "qty",
+    "QTY\nQTA'": "qty",
+    "DESCRIZIONE": "descr",
+    "DESCRIPTION": "descr",
+    "/DESCRIZIONE": "descr",
+    "MATERIALE   TABELLA    FORNITORE": "materiale",
+    "SUPPLIER\nFORNITORE": "materiale",
+    "SIGLA    COMMERCIALE": "sigla",
+    "COMMERCIAL CODE\nSIGLA COMMERCIALE": "sigla",
+    "RICAMBIO": "ricambio",
+    "SPARE PART\nRICAMBIO": "ricambio",
+    "REVIS.": "revis",
+    "UPDATE\nREVIS.": "revis",
+    "TAV.": "tav",
+    "TAB. TAV.": "tav"
+  }
+}

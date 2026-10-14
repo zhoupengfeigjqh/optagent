@@ -13,10 +13,12 @@ import type { FastifyInstance } from 'fastify';
 import { loadConfig, type AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { AgentPool } from './domain/agent-pool.js';
+import { listAgents } from './domain/agent-catalog.js';
 import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
 import { computeConfigFingerprint } from './domain/config-fingerprint.js';
-import { ensureRootDirs, userAgentsDir, userDataDir, SPACE_TMP } from './domain/dirs.js';
+import { listUserIds, migrateAllUsers } from './domain/data-migration.js';
+import { ensureRootDirs, userAgentsDir } from './domain/dirs.js';
 import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
@@ -27,7 +29,7 @@ import { RunManager } from './domain/run-manager.js';
 import { isNextActionsEnabled, nextActionHintsCount } from './domain/soul.js';
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
-import { cleanupTmpDir } from './domain/tmp-cleanup.js';
+import { cleanupAllAgentTmpDirs } from './domain/tmp-cleanup.js';
 import { ToolEventStore } from './domain/tool-events.js';
 import { gracefulShutdown } from './graceful-shutdown.js';
 import { AgentInstanceFactory, type ChatAgent } from './infra/agent-factory.js';
@@ -67,6 +69,8 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   THREAD_RUN_ACTIVE: 409,
   THREAD_BUSY_LIMIT: 409,
   AGENT_NOT_SELECTED: 409,
+  // 009 新增：已选定但该数字人对本用户不可用（配置目录不存在或配置损坏）
+  AGENT_NOT_AVAILABLE: 409,
   POOL_EXHAUSTED: 409,
   THREAD_NOT_FOUND: 404,
   AGENT_NOT_FOUND: 404,
@@ -85,6 +89,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const { userId } = getCurrentUser();
   ensureRootDirs(root, [userId]);
 
+  // 启动期存量迁移（009 FR-040 / T043）：把"用户级共享"数据搬到归属数字人目录。
+  // 进程内此时**没有选中态**（内存 Map 刚建），故实际走判定②③；判定①在
+  // `POST /api/agents/:name/select` 成功后触发（覆盖"清单为空 → 后来才有数字人"的收口）。
+  migrateAllUsers(root, { logger: loggers.logger });
+
   // ---- wiring：routes → domain → infra ----
   const usageDb = new UsageDb(path.join(root, 'usage.db'), loggers.logger);
   const history = new HistoryStore(root, {
@@ -100,10 +109,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
       warn: (msg: string) =>
         loggers.logger.warn({ alert: true, event: 'tool-events.recover', scope: 'system' }, msg),
     },
-    artifacts: (userId: string) =>
+    // 外置正文落在**该数字人**的临时空间（009）：读写口按（用户，数字人）取用
+    artifacts: (userId: string, agentName: string) =>
       new FileAccess({
         optAgentRoot: root,
         userId,
+        agentName,
         logger: loggers.logger,
         truncateKb: config.readTruncateKb,
       }),
@@ -148,13 +159,20 @@ export async function buildServer(options: BuildServerOptions = {}) {
   scheduler.every(
     60 * 60 * 1000,
     async () => {
-      await cleanupTmpDir(path.join(userDataDir(root, userId), SPACE_TMP), {
-        logger: {
-          warn: (msg) =>
-            loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed', scope: 'system' }, msg),
-          info: (msg) => loggers.logger.info({ event: 'tmp.cleanup', scope: 'system' }, msg),
+      // 009：临时空间是**数字人级**的 ⇒ 按（用户 × 数字人）逐一清理，
+      // 数字人清单取 `listAgents`（只清可用数字人：已移除者的数据一律保留，FR-031）
+      await cleanupAllAgentTmpDirs(
+        root,
+        listUserIds(root),
+        (uid) => listAgents(root, uid).map((a) => a.agent_name),
+        {
+          logger: {
+            warn: (msg) =>
+              loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed', scope: 'system' }, msg),
+            info: (msg) => loggers.logger.info({ event: 'tmp.cleanup', scope: 'system' }, msg),
+          },
         },
-      });
+      );
     },
     'tmp-cleanup',
   );
@@ -247,11 +265,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     onCrash: (key) => pool.remove(key),
     // R11：后台计算结果清单 —— 只注入**当前会话**（`sid === threadId`）的产出，
     // 避免把别的对话提交的任务结果污染进本轮上下文；无产出时返回空串（该段长度为 0）
-    produced: async (userId, threadId) => {
+    produced: async (userId, agentName, threadId) => {
       const items = await listProduced(
         new FileAccess({
           optAgentRoot: root,
           userId,
+          agentName,
           logger: loggers.logger,
           truncateKb: config.readTruncateKb,
         }),

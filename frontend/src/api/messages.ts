@@ -127,7 +127,7 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
           usage: asUsage(payload.usage),
           duration_seconds: asNumber(payload.duration_seconds),
           message_id: typeof payload.message_id === 'string' ? payload.message_id : null,
-          // 会话可跨数字人：本轮由谁回答（缺省空串，UI 回退为「助手」）
+          // 本轮由谁回答（009：会话归属固定；逐条保留以兼容存量数据。缺省空串，UI 回退为「助手」）
           agent_name: asString(payload.agent_name),
           // 空形态（message_id 为 null）也视作"无卡片"，不写该键（与后端口径一致）
           ...(nextActions && nextActions.message_id !== null ? { next_actions: nextActions } : {}),

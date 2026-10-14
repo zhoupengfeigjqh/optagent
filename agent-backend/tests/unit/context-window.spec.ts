@@ -10,6 +10,8 @@
  * 前提：`maybeArchive` 由每轮对话结束触发（真实调用口径），故用例逐步 trigger；
  * 若一次性灌入远超上限的消息（异常积压），归档会跨轮分批消化，入口侧另有
  * `POOL_MAX_MESSAGES` 兜底截断（见 run-manager.buildPrompt）。
+ *
+ * 009：history / summary 的落点按（用户，数字人，会话）解析，用例统一用 `AGENT`。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,6 +24,9 @@ import {
 } from '../../src/domain/context-window.js';
 import { HistoryStore } from '../../src/domain/history.js';
 import { SummaryStore, type SummaryLlm } from '../../src/domain/summary.js';
+
+/** 本用例使用的数字人（数据域一级目录名） */
+const AGENT = 'demo';
 
 let root: string;
 
@@ -38,7 +43,7 @@ function makeSummary(history: HistoryStore, deps: { poolMax?: number; batchSize?
 /** 灌入 count 条消息（user/assistant 交替） */
 async function seed(history: HistoryStore, count: number): Promise<void> {
   for (let i = 0; i < count; i++) {
-    await history.append('admin', 'th1', {
+    await history.append('admin', AGENT, 'th1', {
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `m${i}`,
     });
@@ -70,17 +75,17 @@ describe('归档时机（池子达上限即归档）', () => {
     const history = new HistoryStore(root);
     const summary = makeSummary(history);
     await seed(history, POOL_MAX_MESSAGES - 1);
-    await summary.trigger('admin', 'th1');
-    expect(summary.read('admin', 'th1').coveredCount).toBe(0);
+    await summary.trigger('admin', AGENT, 'th1');
+    expect(summary.read('admin', AGENT, 'th1').coveredCount).toBe(0);
   });
 
   it('60 条：池子满，归档一批，池子回到保留长度', async () => {
     const history = new HistoryStore(root);
     const summary = makeSummary(history);
     await seed(history, POOL_MAX_MESSAGES);
-    await summary.trigger('admin', 'th1');
+    await summary.trigger('admin', AGENT, 'th1');
 
-    const { coveredCount, summary: text } = summary.read('admin', 'th1');
+    const { coveredCount, summary: text } = summary.read('admin', AGENT, 'th1');
     expect(coveredCount).toBe(ARCHIVE_BATCH_MESSAGES);
     // 池子 = 总数 - 已归档 = 保留长度（这正是"零空洞"的落点）
     expect(POOL_MAX_MESSAGES - coveredCount).toBe(POOL_RESERVED_MESSAGES);
@@ -92,12 +97,12 @@ describe('归档时机（池子达上限即归档）', () => {
     const summary = makeSummary(history);
 
     await seed(history, POOL_MAX_MESSAGES + ARCHIVE_BATCH_MESSAGES - 1); // 79
-    await summary.trigger('admin', 'th1');
-    expect(summary.read('admin', 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES);
+    await summary.trigger('admin', AGENT, 'th1');
+    expect(summary.read('admin', AGENT, 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES);
 
     await seed(history, 1); // 80
-    await summary.trigger('admin', 'th1');
-    expect(summary.read('admin', 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES * 2);
+    await summary.trigger('admin', AGENT, 'th1');
+    expect(summary.read('admin', AGENT, 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES * 2);
   });
 
   it('零空洞不变量：逐条推进到 120 条，摘要覆盖与正文池始终无缝拼接', async () => {
@@ -106,14 +111,14 @@ describe('归档时机（池子达上限即归档）', () => {
     const total = 120;
 
     for (let i = 0; i < total; i++) {
-      await history.append('admin', 'th1', {
+      await history.append('admin', AGENT, 'th1', {
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: `m${i}`,
       });
-      await summary.trigger('admin', 'th1');
+      await summary.trigger('admin', AGENT, 'th1');
 
-      const messages = history.readAll('admin', 'th1');
-      const { coveredCount } = summary.read('admin', 'th1');
+      const messages = history.readAll('admin', AGENT, 'th1');
+      const { coveredCount } = summary.read('admin', AGENT, 'th1');
       const pool = messages.length - coveredCount;
       const at = `第 ${messages.length} 条（covered=${coveredCount}, pool=${pool}）`;
 
@@ -134,11 +139,11 @@ describe('参数可注入', () => {
     const history = new HistoryStore(root);
     const summary = makeSummary(history, { poolMax: 30 });
     await seed(history, 29);
-    await summary.trigger('admin', 'th1');
-    expect(summary.read('admin', 'th1').coveredCount).toBe(0);
+    await summary.trigger('admin', AGENT, 'th1');
+    expect(summary.read('admin', AGENT, 'th1').coveredCount).toBe(0);
 
     await seed(history, 1); // 30
-    await summary.trigger('admin', 'th1');
-    expect(summary.read('admin', 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES);
+    await summary.trigger('admin', AGENT, 'th1');
+    expect(summary.read('admin', AGENT, 'th1').coveredCount).toBe(ARCHIVE_BATCH_MESSAGES);
   });
 });

@@ -7,8 +7,8 @@
  *   **整条丢弃**；引导由 `buildActionGuidance` 铸造（含工具名 + 用途摘要），超 500 字**截断**而非置空；
  * - **尾部块捕获**：`<next_actions>` 块对用户完全不可见，正文逐字无损（跨增量 / 误前缀 / 块后正文）；
  * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出与"全无工具"告警附归因；
- * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取不再判数字人（修订 G4）、
- *   读取侧按同一判据过滤存量"无工具卡片"。
+ * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取侧不按当前选中数字人过滤
+ *   （009：作用域由路径承载）、读取侧按同一判据过滤存量"无工具卡片"。
  *
  * 全链路（含 done 直推）见 `tests/integration/next-actions-rounds.spec.ts`。
  */
@@ -244,8 +244,11 @@ let warns: string[];
 
 const logger = () => ({ warn: (msg: string) => warns.push(msg) });
 
-function file(userId: string, threadId: string): string {
-  return path.join(threadDir(root, userId, threadId), 'next-actions.json');
+/** 本用例使用的数字人（夹具路径与 `finInput.agentName` 同值） */
+const AGENT = 'demo';
+
+function file(userId: string, agentName: string, threadId: string): string {
+  return path.join(threadDir(root, userId, agentName, threadId), 'next-actions.json');
 }
 
 function finInput(overrides: Partial<NextActionsFinalizeInput> = {}): NextActionsFinalizeInput {
@@ -345,7 +348,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
       '按交付日期梳理订单风险',
       '按月汇总这批订单的数量',
     ]);
-    const snapshot = JSON.parse(fs.readFileSync(file('admin', 'th_1'), 'utf8')) as {
+    const snapshot = JSON.parse(fs.readFileSync(file('admin', AGENT, 'th_1'), 'utf8')) as {
       message_id: string;
       agent_name: string;
       created_at: string;
@@ -361,14 +364,14 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
   it('空尾部（开关关闭 / 模型省略）→ 不写快照、不告警', () => {
     expect(store().finalize(finInput({ tailText: '' }))).toBeUndefined();
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
     expect(warns).toEqual([]);
   });
 
   it('产出 0 条（模型**明确**判定"无需下一步"）→ 不写快照，且**不告警**（FR-005）', () => {
     expect(store().finalize(finInput({ tailText: '{"actions":[]}' }))).toBeUndefined();
 
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
     // 闲聊轮次不该刷日志：这是"模型选择 0 条"，不是降级
     expect(warns.filter((w) => w.includes('下一步动作提示'))).toEqual([]);
   });
@@ -376,7 +379,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
   it('输出非法 → 不写快照，且告警附原文节选（FR-041）', () => {
     expect(store().finalize(finInput({ tailText: '我觉得可以先看看订单' }))).toBeUndefined();
 
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
     const warned = warns.find((w) => w.includes('尾部块非法或为空'));
     expect(warned).toBeDefined();
     expect(warned).toContain('msg=m-1');
@@ -390,7 +393,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
     expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
 
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
     const warned = warns.find((w) => w.includes('全部被丢弃'));
     expect(warned).toBeDefined();
     expect(warned).toContain('候选 2 条');
@@ -404,7 +407,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
     expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
 
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
     const warned = warns.find((w) => w.includes('全部被丢弃'));
     expect(warned).toBeDefined();
     expect(warned).toContain('候选 2 条');
@@ -433,7 +436,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
     store().finalize(finInput({ tailText: tail, max: 2 }));
 
-    const snapshot = JSON.parse(fs.readFileSync(file('admin', 'th_1'), 'utf8')) as {
+    const snapshot = JSON.parse(fs.readFileSync(file('admin', AGENT, 'th_1'), 'utf8')) as {
       actions: Array<{ prompt: string }>;
     };
     expect(snapshot.actions.map((a) => a.prompt)).toEqual(['第一条', '第二条']);
@@ -459,7 +462,7 @@ describe('NextActionsStore —— 读取与清空', () => {
     });
     store().finalize(finInput({ tailText: tail }));
 
-    const view = store().read('admin', 'th_1');
+    const view = store().read('admin', AGENT, 'th_1');
 
     expect(view?.message_id).toBe('m-1');
     expect(view?.actions[0]).toMatchObject({
@@ -470,16 +473,18 @@ describe('NextActionsStore —— 读取与清空', () => {
     expect(view?.actions[0]!.guidance).toContain('erp__query_order');
   });
 
-  it('修订 G4：读取不再判"当前选中数字人"——快照在即下发（卡片与数字人切换无关）', () => {
+  it('读取侧不按"当前选中数字人"过滤——快照在即下发（作用域由路径承载，009）', () => {
     // 独立生成链时代的两条读取判据（归属开关 / 归属数字人 = 当前选中）已删除：
     // 生成侧由提示词装配期的开关门控（关着开关就不会产出快照），读取侧再判只会
-    // 造成"切换数字人后卡片消失"。因此这里只断言：快照在 → 无条件下发。
+    // 造成"切换数字人后卡片消失"。009 后跨数字人越权已由**目录位置**挡住（读的是
+    // user-data/{数字人}/threads/{tid}/，压根取不到别的数字人的快照），
+    // 因此这里只断言：快照在 → 下发。
     store().finalize(finInput());
-    expect(store().read('admin', 'th_1')?.message_id).toBe('m-1');
+    expect(store().read('admin', AGENT, 'th_1')?.message_id).toBe('m-1');
   });
 
   it('存量快照：无有效工具引用的条目在读取侧被过滤（同一判据，MUST NOT 继续下发）', () => {
-    const target = file('admin', 'th_1');
+    const target = file('admin', AGENT, 'th_1');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(
       target,
@@ -495,13 +500,13 @@ describe('NextActionsStore —— 读取与清空', () => {
       'utf8',
     );
 
-    const view = store().read('admin', 'th_1');
+    const view = store().read('admin', AGENT, 'th_1');
 
     expect(view?.actions.map((a) => a.prompt)).toEqual(['有工具的卡片']);
   });
 
   it('存量快照全部无工具 → 等同无提示（undefined），不告警（不是损坏）', () => {
-    const target = file('admin', 'th_1');
+    const target = file('admin', AGENT, 'th_1');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(
       target,
@@ -514,37 +519,37 @@ describe('NextActionsStore —— 读取与清空', () => {
       'utf8',
     );
 
-    expect(store().read('admin', 'th_1')).toBeUndefined();
+    expect(store().read('admin', AGENT, 'th_1')).toBeUndefined();
     expect(warns.some((w) => w.includes('损坏'))).toBe(false);
   });
 
   it('无快照 / 损坏 JSON / 超 64KB / actions 为空 → undefined，且仅损坏与超限告警', () => {
     const s = store();
 
-    expect(s.read('admin', 'th_1')).toBeUndefined(); // 无快照：最常见路径，不告警
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined(); // 无快照：最常见路径，不告警
     expect(warns).toHaveLength(0);
 
-    const target = file('admin', 'th_1');
+    const target = file('admin', AGENT, 'th_1');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, '{ 半个 JSON', 'utf8');
-    expect(s.read('admin', 'th_1')).toBeUndefined();
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined();
     expect(warns.some((w) => w.includes('损坏'))).toBe(true);
 
     fs.writeFileSync(target, JSON.stringify({ message_id: 'm', agent_name: 'demo', actions: [] }));
-    expect(s.read('admin', 'th_1')).toBeUndefined(); // actions 为空 → 等同无提示
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined(); // actions 为空 → 等同无提示
 
     fs.writeFileSync(target, `{"pad":"${'x'.repeat(70 * 1024)}"}`, 'utf8');
-    expect(s.read('admin', 'th_1')).toBeUndefined();
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined();
     expect(warns.some((w) => w.includes('大小上限'))).toBe(true);
   });
 
   it('clear 同步清空上一轮快照（轮开始即无卡片，语义与旧链版一致）', () => {
     const s = store();
     s.finalize(finInput());
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(true);
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(true);
 
-    s.clear('admin', 'th_1');
-    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    s.clear('admin', AGENT, 'th_1');
+    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
   });
 
   it('新一轮覆盖旧快照（会话级只保留最新一轮；历史轮次不保留）', () => {
@@ -557,7 +562,7 @@ describe('NextActionsStore —— 读取与清空', () => {
       }),
     );
 
-    const snapshot = JSON.parse(fs.readFileSync(file('admin', 'th_1'), 'utf8')) as {
+    const snapshot = JSON.parse(fs.readFileSync(file('admin', AGENT, 'th_1'), 'utf8')) as {
       message_id: string;
       actions: Array<{ prompt: string }>;
     };
@@ -568,7 +573,7 @@ describe('NextActionsStore —— 读取与清空', () => {
   it('原子替换：正常路径不残留 .tmp 文件', () => {
     store().finalize(finInput());
 
-    const dir = path.dirname(file('admin', 'th_1'));
+    const dir = path.dirname(file('admin', AGENT, 'th_1'));
     expect(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 });

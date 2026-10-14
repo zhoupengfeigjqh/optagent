@@ -23,8 +23,15 @@ const h = vi.hoisted(() => ({ session: null as unknown }))
 vi.mock('@/composables/useAppSession', () => ({ useSession: () => h.session }))
 
 const stubs = {
-  AppShell: true,
-  HistorySidebar: true,
+  // `AppShell` 必须**渲染插槽**：三栏内容都经它的具名插槽下发，
+  // 布尔桩不渲染插槽 ⇒ 子树（含侧栏）根本不挂载，也就无法派发事件。
+  // 只渲染 `history`：其余两栏的插槽表达式需要更完整的 mock，与本文件用例无关。
+  AppShell: { name: 'AppShell', template: '<div><slot name="history" /></div>' },
+  // 侧栏用一个"点得出 create 事件"的微型桩，用于验证视图的事件接线
+  HistorySidebar: {
+    name: 'HistorySidebar',
+    template: '<aside class="sidebar-stub"><button class="sidebar-create" @click="$emit(\'create\')" /></aside>',
+  },
   ChatPanel: true,
   WorkspacePanel: true,
   ToastHost: true,
@@ -49,6 +56,10 @@ function makeSession(initialThreadId: string | null, threadIds: string[]) {
       loadList: vi.fn().mockResolvedValue(undefined),
       select: vi.fn().mockResolvedValue(undefined),
       create: vi.fn(),
+      // 009：「新建对话」＝视图态清空（不调创建接口）
+      startNew: vi.fn(() => {
+        activeThreadId.value = null
+      }),
       showMore: vi.fn(),
       remove: vi.fn(),
       clearActive: vi.fn(() => {
@@ -123,5 +134,48 @@ describe('WorkbenchView —— 会话上下文与刷新恢复', () => {
     await flushPromises()
 
     expect(session.rememberActiveThread).toHaveBeenCalledWith('t1')
+  })
+})
+
+/**
+ * 009 FR-010 / FR-022（会话按数字人隔离）：
+ * 「新建对话」是**视图态**——只清空当前选中，**不**落盘。
+ *
+ * 若在这里调 `create()`，切换数字人一次就多一条"没有任何消息"的记录；
+ * 而服务端列表只呈现有消息的会话（FR-016），用户会看到"点了没反应"。
+ */
+describe('WorkbenchView —— 新建对话＝空对话视图（009）', () => {
+  it('侧栏「新建对话」→ 调 startNew，且**不**调创建接口', async () => {
+    const session = makeSession(null, ['t1'])
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.sidebar-create').trigger('click')
+    await flushPromises()
+
+    expect(session.threads.startNew).toHaveBeenCalledTimes(1)
+    expect(session.threads.create).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('新建对话后当前选中被清空（回到空态视图），不再指向原会话', async () => {
+    const session = makeSession(null, ['t1'])
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // 先选中一个会话（模拟用户正在看历史），再点「新建对话」
+    await session.threads.select('t1')
+    session.threads.activeId.value = 't1'
+    await flushPromises()
+
+    await wrapper.find('.sidebar-create').trigger('click')
+    await flushPromises()
+
+    expect(session.threads.activeId.value).toBeNull()
+    wrapper.unmount()
   })
 })

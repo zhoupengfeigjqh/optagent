@@ -36,6 +36,8 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   // 数字人
   AGENT_NOT_SELECTED: '请先选择数字人',
   AGENT_NOT_FOUND: '数字人不存在或配置异常',
+  // 009：数字人已被移除/未对该用户关联（陈旧上下文）→ 说明"为什么失败"并给出下一步动作
+  AGENT_NOT_AVAILABLE: '该数字人已不可用，请重新选择数字人',
   POOL_EXHAUSTED: '系统繁忙，请稍后重试',
   // 模型
   MODEL_NOT_FOUND: '所选模型不可用，请重新选择',
@@ -64,6 +66,11 @@ const CONTEXT_MESSAGES: Readonly<
   'send-message': {
     // 并发上限（同一用户活跃回复 ≥ 3，跨数字人累计）——创建接口不限制会话总数
     THREAD_BUSY_LIMIT: '系统繁忙，请稍后重试',
+    // 009 FR-052：降级必须用户可感知——发消息被拒时明确"数字人已不可用 + 怎么办"
+    AGENT_NOT_AVAILABLE: '当前数字人已不可用，请选择其他数字人后重试',
+  },
+  'create-thread': {
+    AGENT_NOT_AVAILABLE: '当前数字人已不可用，请重新选择数字人',
   },
   upload: {
     VALIDATION_FAILED: '文件格式不支持',

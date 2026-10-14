@@ -7,6 +7,9 @@
  * 3. **降级不丢记录** —— 外置写入失败 / 未装配外置能力 → 退化为截断内联
  * 4. **路径不信任数据** —— 正文路径按 `{threadId, callId}` 重算，恶意 call_id 不越权
  * 5. **视图链接 sidecar**（2026-10-10）—— 与正文分离、正文外置时仍在、非法结构整段丢弃
+ *
+ * 009：外置正文落进**该数字人**的临时空间，事件行落进**该数字人**的会话目录，
+ * 因此所有调用与夹具路径都带 `AGENT`。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,13 +25,24 @@ import {
   artifactFileName,
 } from '../../src/domain/tool-result.js';
 
+/** 本用例使用的数字人（数据域一级目录名） */
+const AGENT = 'demo';
+
 let root: string;
+
+/** 该数字人的数据域根 */
+function dataRoot(): string {
+  return userDataDir(root, 'admin', AGENT);
+}
 
 function makeStore(withArtifacts = true): ToolEventStore {
   return new ToolEventStore({
     root,
     ...(withArtifacts
-      ? { artifacts: (userId: string) => new FileAccess({ optAgentRoot: root, userId }) }
+      ? {
+          artifacts: (userId: string, agentName: string) =>
+            new FileAccess({ optAgentRoot: root, userId, agentName }),
+        }
       : {}),
   });
 }
@@ -37,7 +51,7 @@ function appendEnd(
   store: ToolEventStore,
   input: { callId: string; resultText: string; status?: 'success' | 'error' },
 ): Promise<void> {
-  return store.appendEnd('admin', 'th1', {
+  return store.appendEnd('admin', AGENT, 'th1', {
     callId: input.callId,
     messageId: 'm_a1',
     name: 'read_file',
@@ -61,7 +75,7 @@ describe('tool-events —— 体积分流', () => {
     const store = makeStore();
     await appendEnd(store, { callId: 'call_a', resultText: '车间,计划量\n冲压,1200' });
 
-    const records = store.readAll('admin', 'th1');
+    const records = store.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       callId: 'call_a',
@@ -72,7 +86,7 @@ describe('tool-events —— 体积分流', () => {
     });
     expect(records[0]!.artifactSize).toBeUndefined();
 
-    const tmpDir = path.join(userDataDir(root, 'admin'), SPACE_TMP);
+    const tmpDir = path.join(dataRoot(), SPACE_TMP);
     const files = fs.existsSync(tmpDir) ? fs.readdirSync(tmpDir) : [];
     expect(files).toHaveLength(0);
   });
@@ -85,18 +99,18 @@ describe('tool-events —— 体积分流', () => {
     );
     await appendEnd(store, { callId: 'call_big', resultText: big });
 
-    const records = store.readAll('admin', 'th1');
+    const records = store.readAll('admin', AGENT, 'th1');
     const record = records[0]!;
     expect(record.content).toBeUndefined();
     expect(record.artifactSize).toBeGreaterThan(TOOL_INLINE_MAX_BYTES);
     expect(record.summary).toContain('共');
     expect(record.truncated).toBe(false);
 
-    const abs = path.join(userDataDir(root, 'admin'), SPACE_TMP, artifactFileName('th1', 'call_big'));
+    const abs = path.join(dataRoot(), SPACE_TMP, artifactFileName('th1', 'call_big'));
     expect(fs.existsSync(abs)).toBe(true);
     expect(fs.readFileSync(abs, 'utf8')).toBe(big);
 
-    const artifact = await store.readArtifact('admin', 'th1', 'call_big');
+    const artifact = await store.readArtifact('admin', AGENT, 'th1', 'call_big');
     expect(artifact?.content).toBe(big);
   });
 
@@ -105,7 +119,7 @@ describe('tool-events —— 体积分流', () => {
     const huge = 'x'.repeat(TOOL_ARTIFACT_MAX_BYTES + 1024); // 略超 2MB 上限
     await appendEnd(store, { callId: 'call_huge', resultText: huge });
 
-    const record = store.readAll('admin', 'th1')[0]!;
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.truncated).toBe(true);
     expect(record.artifactSize).toBe(TOOL_ARTIFACT_MAX_BYTES);
   });
@@ -115,7 +129,7 @@ describe('tool-events —— 体积分流', () => {
     const big = 'y'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
     await appendEnd(store, { callId: 'call_c', resultText: big });
 
-    const record = store.readAll('admin', 'th1')[0]!;
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.artifactSize).toBeUndefined();
     expect(record.truncated).toBe(true);
     expect(Buffer.byteLength(record.content ?? '', 'utf8')).toBeLessThanOrEqual(TOOL_INLINE_MAX_BYTES);
@@ -125,7 +139,7 @@ describe('tool-events —— 体积分流', () => {
 describe('tool-events —— 合并与容错', () => {
   it('start(running) + end：按 call_id 合并为终态（后者覆盖前者）', async () => {
     const store = makeStore();
-    store.appendStart('admin', 'th1', {
+    store.appendStart('admin', AGENT, 'th1', {
       callId: 'call_d',
       messageId: 'm_a1',
       name: 'grep',
@@ -134,23 +148,23 @@ describe('tool-events —— 合并与容错', () => {
     });
     await appendEnd(store, { callId: 'call_d', resultText: '命中 3 行' });
 
-    const records = store.readAll('admin', 'th1');
+    const records = store.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ status: 'success', content: '命中 3 行', argsDigest: { pattern: '车间' } });
   });
 
   it('只有 running 行（进程中途崩溃）：读到"未完成"而不是丢记录', async () => {
     const store = makeStore();
-    store.appendStart('admin', 'th1', {
+    store.appendStart('admin', AGENT, 'th1', {
       callId: 'call_e',
       messageId: 'm_a1',
       name: 'ocr',
       startedAt: '2026-09-23T00:00:00.000Z',
     });
     // appendStart 是 fire-and-forget：显式等落盘链，而不是猜一个 sleep 时长
-    await store.flush('admin', 'th1');
+    await store.flush('admin', AGENT, 'th1');
 
-    const records = store.readAll('admin', 'th1');
+    const records = store.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ callId: 'call_e', status: 'running' });
     expect(records[0]!.content).toBeUndefined();
@@ -159,10 +173,10 @@ describe('tool-events —— 合并与容错', () => {
   it('坏行跳过，其余记录照读', async () => {
     const store = makeStore();
     await appendEnd(store, { callId: 'call_ok', resultText: 'ok' });
-    const file = path.join(userDataDir(root, 'admin'), 'threads', 'th1', 'tool-events.jsonl');
+    const file = path.join(dataRoot(), 'threads', 'th1', 'tool-events.jsonl');
     fs.appendFileSync(file, '{坏行不是JSON\n', 'utf8');
 
-    const records = store.readAll('admin', 'th1');
+    const records = store.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
     expect(records[0]!.callId).toBe('call_ok');
   });
@@ -170,13 +184,13 @@ describe('tool-events —— 合并与容错', () => {
   it('外置正文被清理后：readArtifact 返回 undefined（路由据此回 410）', async () => {
     const store = makeStore();
     await appendEnd(store, { callId: 'call_gone', resultText: 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
-    const abs = path.join(userDataDir(root, 'admin'), SPACE_TMP, artifactFileName('th1', 'call_gone'));
+    const abs = path.join(dataRoot(), SPACE_TMP, artifactFileName('th1', 'call_gone'));
     // 必须走安全删除原语：Windows 下 fs.rmSync 对含中文的路径静默失效（见 fs-safe）
     removeFileSafe(abs);
 
     // 元数据仍在（卡片不消失），只是正文取不到
-    expect(store.readAll('admin', 'th1')[0]!.artifactSize).toBeGreaterThan(0);
-    expect(await store.readArtifact('admin', 'th1', 'call_gone')).toBeUndefined();
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.artifactSize).toBeGreaterThan(0);
+    expect(await store.readArtifact('admin', AGENT, 'th1', 'call_gone')).toBeUndefined();
   });
 });
 
@@ -185,10 +199,10 @@ describe('tool-events —— 路径与归属', () => {
     const store = makeStore();
     await appendEnd(store, { callId: '../../evil', resultText: 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
 
-    const record = store.readAll('admin', 'th1')[0]!;
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.artifactSize).toBeGreaterThan(0);
     // 文件仍落在本会话的临时空间内，且文件名已被安全化
-    const tmpDir = path.join(userDataDir(root, 'admin'), SPACE_TMP);
+    const tmpDir = path.join(dataRoot(), SPACE_TMP);
     const files = fs.readdirSync(tmpDir);
     expect(files).toHaveLength(1);
     expect(files[0]).not.toContain('/');
@@ -200,7 +214,7 @@ describe('tool-events —— 路径与归属', () => {
     await appendEnd(store, { callId: 'call_1', resultText: 'a' });
     await appendEnd(store, { callId: 'call_2', resultText: 'b' });
 
-    const grouped = store.readByMessage('admin', 'th1');
+    const grouped = store.readByMessage('admin', AGENT, 'th1');
     expect(grouped.get('m_a1')?.map((r) => r.callId)).toEqual(['call_1', 'call_2']);
   });
 });
@@ -208,7 +222,7 @@ describe('tool-events —— 路径与归属', () => {
 describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
   /** 覆写本会话 JSONL 的最后一行（模拟"数据被手改/旧版本写入"） */
   function tamperLastLine(patch: (line: Record<string, unknown>) => void): void {
-    const file = path.join(userDataDir(root, 'admin'), 'threads', 'th1', 'tool-events.jsonl');
+    const file = path.join(dataRoot(), 'threads', 'th1', 'tool-events.jsonl');
     const lines = fs
       .readFileSync(file, 'utf8')
       .split('\n')
@@ -230,7 +244,7 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
       }),
     });
 
-    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toEqual([
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toEqual([
       { url: '/datasource/plan/ws1/xlsx', name: '一车间产能明细' },
     ]);
   });
@@ -244,7 +258,7 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
     };
     await appendEnd(store, { callId: 'call_bigview', resultText: JSON.stringify(payload) });
 
-    const record = store.readAll('admin', 'th1')[0]!;
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.content).toBeUndefined(); // 正文已外置
     expect(record.artifactSize).toBeGreaterThan(0);
     expect(record.viewLinks).toEqual([{ url: '/datasource/big/xlsx' }]);
@@ -254,7 +268,7 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
     const store = makeStore();
     await appendEnd(store, { callId: 'call_plain', resultText: '车间,计划量\n冲压,1200' });
 
-    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toBeUndefined();
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toBeUndefined();
   });
 
   it('落盘行里的 view_links 混入非法项：只保留合法项（白名单复制，不猜）', async () => {
@@ -270,7 +284,7 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
       ];
     });
 
-    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toEqual([{ url: '/ok', name: '合法' }]);
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toEqual([{ url: '/ok', name: '合法' }]);
   });
 
   it('落盘行里的 view_links 一条都不合法：整段丢弃（等价于没有视图链接）', async () => {
@@ -280,6 +294,6 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
       line.view_links = [{ name: '只有名字' }, { url: '' }];
     });
 
-    expect(store.readAll('admin', 'th1')[0]!.viewLinks).toBeUndefined();
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toBeUndefined();
   });
 });

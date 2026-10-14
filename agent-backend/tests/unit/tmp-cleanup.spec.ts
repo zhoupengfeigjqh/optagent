@@ -5,13 +5,16 @@
  * **本次补的漏洞**：二级目录原先被整目录跳过 ⇒ 后台产出**永不清理**，
  * 契约 §10.4 的"随临时空间既有规则清理"不成立。现在 `后台产出/` 按同一口径处理，
  * 且**只认已登记的子目录**（不递归任意目录，避免误删将来可能出现的其他子目录）。
+ *
+ * 009 补充：临时空间是**数字人级**的，定时任务改为按（用户 × 数字人）逐一清理
+ * （`cleanupAllAgentTmpDirs`）——漏清或越界清都会让"30 天清理"这条契约对部分数字人失效。
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PRODUCED_SUBDIR } from '../../src/domain/dirs.js';
-import { cleanupTmpDir } from '../../src/domain/tmp-cleanup.js';
+import { PRODUCED_SUBDIR, SPACE_TMP, userDataDir } from '../../src/domain/dirs.js';
+import { cleanupAllAgentTmpDirs, cleanupTmpDir } from '../../src/domain/tmp-cleanup.js';
 
 /**
  * 删除原语的替身：**默认转发真实实现**，只在个别用例里注入一次失败，
@@ -201,5 +204,90 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     expect(warns.join('\n')).toContain('失败');
     // 失败的那个仍在（不因一个失败就"假装删掉了"）
     expect([fs.existsSync(first), fs.existsSync(second)].filter(Boolean)).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 009：按（用户 × 数字人）逐一清理
+ * ------------------------------------------------------------------ */
+
+describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）', () => {
+  /** 建某用户的某数字人数据域，并放一个过期文件；返回该文件的绝对路径 */
+  function seedAgentTmp(userId: string, agentName: string, fileName: string, ageMs = 31 * DAY): string {
+    const abs = path.join(userDataDir(tmp, userId, agentName), SPACE_TMP, fileName);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, 'x', 'utf8');
+    const at = new Date(Date.now() - ageMs);
+    fs.utimesSync(abs, at, at);
+    return abs;
+  }
+
+  it('逐一清理每个数字人：同一用户多个数字人都不漏', async () => {
+    const a = seedAgentTmp('admin', 'agent-a', 'a_j1.json');
+    const b = seedAgentTmp('admin', 'agent-b', 'b_j1.json');
+    const c = seedAgentTmp('bob', 'agent-c', 'c_j1.json');
+
+    const result = await cleanupAllAgentTmpDirs(
+      tmp,
+      ['admin', 'bob'],
+      () => ['agent-a', 'agent-b', 'agent-c'],
+    );
+
+    expect(result.deleted).toBe(3);
+    expect(result.dirs).toBe(6); // 2 用户 × 3 数字人（不存在的目录按 0 计账）
+    for (const abs of [a, b, c]) expect(fs.existsSync(abs)).toBe(false);
+  });
+
+  it('某数字人临时空间不存在 → 跳过，不抛错', async () => {
+    seedAgentTmp('admin', 'agent-a', 'a_j1.json');
+
+    const result = await cleanupAllAgentTmpDirs(tmp, ['admin'], () => ['agent-a', 'never-used']);
+
+    expect(result).toMatchObject({ deleted: 1, failed: 0, dirs: 2 });
+  });
+
+  it('**不越界**：只清清单内数字人的临时空间，他人/未列出的数字人一律不碰', async () => {
+    const inside = seedAgentTmp('admin', 'agent-a', 'a_j1.json');
+    const outsider = seedAgentTmp('admin', 'agent-other', 'other_j1.json');
+    const otherUser = seedAgentTmp('bob', 'agent-a', 'bob_j1.json');
+
+    const result = await cleanupAllAgentTmpDirs(tmp, ['admin'], () => ['agent-a']);
+
+    expect(result.deleted).toBe(1);
+    expect(fs.existsSync(inside)).toBe(false);
+    expect(fs.existsSync(outsider)).toBe(true); // 不在清单内：保留（已移除数字人的数据也不清）
+    expect(fs.existsSync(otherUser)).toBe(true); // 别人的同名数字人：保留
+  });
+
+  it('某个数字人清理失败不中断其余（逐个独立计账）', async () => {
+    seedAgentTmp('admin', 'agent-a', 'a_j1.json');
+    seedAgentTmp('admin', 'agent-b', 'b_j1.json');
+    rmSpy.mockRejectedValueOnce(new Error('EPERM: 拒绝访问'));
+
+    const result = await cleanupAllAgentTmpDirs(tmp, ['admin'], () => ['agent-a', 'agent-b']);
+
+    expect(result.failed).toBe(1);
+    expect(result.deleted).toBe(1);
+  });
+
+  it('有删除动作时落一行汇总日志（便于运维核对"跑没跑、清了多少"）', async () => {
+    seedAgentTmp('admin', 'agent-a', 'a_j1.json');
+    const infos: string[] = [];
+
+    await cleanupAllAgentTmpDirs(tmp, ['admin'], () => ['agent-a'], {
+      logger: { warn: () => {}, info: (msg) => infos.push(msg) },
+    });
+
+    expect(infos.join('\n')).toContain('1');
+  });
+
+  it('无可清理内容时不产生噪音日志', async () => {
+    const infos: string[] = [];
+
+    await cleanupAllAgentTmpDirs(tmp, ['admin'], () => ['never-used'], {
+      logger: { warn: () => {}, info: (msg) => infos.push(msg) },
+    });
+
+    expect(infos).toEqual([]);
   });
 });

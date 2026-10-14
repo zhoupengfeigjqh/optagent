@@ -104,10 +104,10 @@ export interface RunManagerDeps {
   history: HistoryStore;
   usage: UsageStore;
   logger?: Logger;
-  /** 滚动摘要（FR-017/018）：注入 System Prompt + 每轮结束触发增量重写 */
+  /** 滚动摘要（FR-017/018）：注入 System Prompt + 每轮结束触发增量重写；009：落点按（用户，数字人，会话）解析 */
   summary?: {
-    read(userId: string, threadId: string): { summary: string; coveredCount: number };
-    trigger(userId: string, threadId: string): Promise<void>;
+    read(userId: string, agentName: string, threadId: string): { summary: string; coveredCount: number };
+    trigger(userId: string, agentName: string, threadId: string): Promise<void>;
   };
   /** run 未知异常（疑似实例崩溃）回调：上层销毁池内实例（FR-030） */
   onCrash?: (key: PoolKey, err: unknown) => void;
@@ -116,7 +116,7 @@ export interface RunManagerDeps {
   /** 工具调用记录（可选）：装配后落 `tool-events.jsonl` 并按预算回灌；缺省 = 不落盘不回灌 */
   toolEvents?: ToolEventStore;
   /** 后台计算结果清单（R11，可选）：无产出时 MUST 返回空串（§10.6 不变式 5）。缺省 = 不注入 */
-  produced?: (userId: string, threadId: string) => Promise<string>;
+  produced?: (userId: string, agentName: string, threadId: string) => Promise<string>;
   /**
    * 007 修订「下一步动作提示」（可选）：轮开始 `clear`、轮末 `finalize`。
    * 缺省 = 该侧未装配，功能整体不生效（与开关关闭同一效果）。
@@ -291,7 +291,7 @@ export class RunManager {
     this.active.set(opts.threadId, run);
     // 007 修订：新一轮开始即清空上一轮的「下一步动作提示」快照（同步，无独立生成链后无顺序竞态）。
     // 语义不变：发起新一轮的瞬间上一轮卡片即消失（前端 onSend 的 reset 与之同刻）。
-    this.deps.nextActions?.clear(opts.userId, opts.threadId);
+    this.deps.nextActions?.clear(opts.userId, opts.agent.key.agentName, opts.threadId);
     run.settled = this.consume(run, opts).catch((err: unknown) => {
       // consume 内部已兜底；此处防御性吞掉，保证 settled 不 reject
       this.deps.logger?.error({ err, event: 'run.consume.unhandled' }, 'run 收尾异常');
@@ -305,13 +305,15 @@ export class RunManager {
     userMessage: HistoryMessage,
   ): Promise<{ messages: HistoryMessage[]; systemExtra?: string }> {
     const { userId, threadId } = opts;
+    // 009：本轮数据的归属数字人＝执行本轮的实例（会话归属不可变更，故恒等于会话归属）
+    const { agentName } = opts.agent.key;
     return buildPromptMessages({
       threadId,
-      summaryData: this.deps.summary?.read(userId, threadId) ?? { summary: '', coveredCount: 0 },
-      allMessages: this.deps.history.readAll(userId, threadId),
+      summaryData: this.deps.summary?.read(userId, agentName, threadId) ?? { summary: '', coveredCount: 0 },
+      allMessages: this.deps.history.readAll(userId, agentName, threadId),
       userMessage,
-      records: this.deps.toolEvents?.readAll(userId, threadId) ?? [],
-      producedText: (await this.deps.produced?.(userId, threadId)) ?? '',
+      records: this.deps.toolEvents?.readAll(userId, agentName, threadId) ?? [],
+      producedText: (await this.deps.produced?.(userId, agentName, threadId)) ?? '',
       // R18：当前时间（每轮现算；纯函数层不读时钟，故在此注入）
       nowText: formatCurrentTime(new Date()),
       // 004：问题实例的隐藏工具引导（请求级，不落盘）
@@ -387,7 +389,7 @@ export class RunManager {
             // 007 修订：另记一份"本轮调用过哪些工具"（去重）——`toolCalls` 在 end 即删、轮末为空，
             // 快照溯源与日志需要它（见 types.RunRuntime 与 next-actions.ts）
             // 落 tool-events.jsonl（写盘失败只告警，不影响对话，见 appendStart 内部兜底）
-            this.deps.toolEvents?.appendStart(userId, threadId, {
+            this.deps.toolEvents?.appendStart(userId, agent.key.agentName, threadId, {
               callId: ev.callId,
               messageId: run.assistantMessageId,
               name: ev.name,
@@ -402,7 +404,7 @@ export class RunManager {
             run.toolCalls.delete(ev.callId);
             const endedAtMs = this.now();
             // fire-and-forget：落盘不阻塞 SSE，失败也不影响本轮回答（原则九）
-            void this.deps.toolEvents?.appendEnd(userId, threadId, {
+            void this.deps.toolEvents?.appendEnd(userId, agent.key.agentName, threadId, {
               callId: ev.callId,
               messageId: run.assistantMessageId,
               name: meta?.name ?? ev.name,

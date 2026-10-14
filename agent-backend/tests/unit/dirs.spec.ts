@@ -12,7 +12,7 @@
  * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
  * 由 Vitest 解析到 `src/domain/dirs.ts`。
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -21,10 +21,16 @@ import { afterAll, describe, expect, it } from 'vitest'
 import {
   DirValidationError,
   ScenarioNotConfiguredError,
+  ensureAgentDataDirs,
+  ensureRootDirs,
+  ensureUserDirs,
   listAvailableDirs,
   loadScenario,
   parseSpaceDir,
   scenarioPath,
+  threadDir,
+  userDataDir,
+  userDataRoot,
 } from '../../src/domain/dirs'
 
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-dirs-'))
@@ -237,6 +243,67 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
 
     expect(error).toBeInstanceOf(DirValidationError)
     expect((error as DirValidationError).statusCode).toBe(403)
+  })
+})
+
+describe('路径工厂 - 数据域归到数字人一级（009）', () => {
+  const userDataChildNames = (uid: string, agent: string): string[] =>
+    readdirSync(userDataDir(root, uid, agent)).sort()
+
+  it('userDataDir 是**数字人数据根**，其父目录才是用户级落点', () => {
+    expect(userDataDir(root, userId, 'agent-a')).toBe(
+      path.join(userDataRoot(root, userId), 'agent-a'),
+    )
+    expect(userDataRoot(root, userId)).toBe(path.join(root, 'users', userId, 'user-data'))
+  })
+
+  it('**跨用户**同名数字人的数据域互不相同（FR-004 的路径层保证）', () => {
+    // 运行期是单用户，但路径里始终带 uid：同名的两个数字人各自一份数据域
+    expect(userDataDir(root, 'admin', '同名数字人')).not.toBe(
+      userDataDir(root, 'bob', '同名数字人'),
+    )
+    expect(threadDir(root, 'admin', '同名数字人', 'th_1')).not.toBe(
+      threadDir(root, 'bob', '同名数字人', 'th_1'),
+    )
+  })
+
+  it('threadDir 落在该数字人的数据域下（会话按数字人隔离）', () => {
+    expect(threadDir(root, userId, 'agent-a', 'th_1')).toBe(
+      path.join(userDataDir(root, userId, 'agent-a'), 'threads', 'th_1'),
+    )
+    expect(threadDir(root, userId, 'agent-a', 'th_1')).not.toBe(
+      threadDir(root, userId, 'agent-b', 'th_1'),
+    )
+  })
+
+  it('ensureAgentDataDirs 建齐三空间 + threads，且幂等（重复调用不报错、已有内容不动）', () => {
+    ensureAgentDataDirs(root, userId, 'agent-skel')
+    expect(userDataChildNames(userId, 'agent-skel')).toEqual(
+      ['共享空间', '临时空间', '数据准备', 'threads'].sort(),
+    )
+
+    const marker = path.join(userDataDir(root, userId, 'agent-skel'), '临时空间', 'keep.txt')
+    writeFileSync(marker, 'x', 'utf8')
+
+    expect(() => ensureAgentDataDirs(root, userId, 'agent-skel')).not.toThrow()
+    expect(existsSync(marker)).toBe(true)
+  })
+
+  it('ensureUserDirs **只**建 agents/：不再预建用户级三空间与 threads（009）', () => {
+    // 用独立用户，避免与其他用例已建的数据目录互相干扰
+    const onlyUser = 'dirs-only-user'
+    ensureUserDirs(root, onlyUser)
+
+    expect(existsSync(path.join(root, 'users', onlyUser, 'agents'))).toBe(true)
+    // 用户级不再有数据目录（数据域全在数字人一级，随选中/使用时惰性创建）
+    expect(existsSync(userDataRoot(root, onlyUser))).toBe(false)
+  })
+
+  it('ensureRootDirs 对已知用户只建 agents/（数字人数据域留给 ensureAgentDataDirs）', () => {
+    ensureRootDirs(root, ['dirs-skel-user'])
+
+    expect(existsSync(path.join(root, 'users', 'dirs-skel-user', 'agents'))).toBe(true)
+    expect(existsSync(path.join(root, 'users', 'dirs-skel-user', 'user-data'))).toBe(false)
   })
 })
 

@@ -27,6 +27,8 @@ export default defineConfig({
       exclude: ['src/types.ts', '**/*.d.ts'],
       thresholds: {
         // ① 全局地板（防倒退）。2026-10-12 实测：stmts 69.04 / branch 64.59 / funcs 68.88 / lines 70.77
+        //    2026-10-14（009）复测：stmts 73.33 / branch 67.31 / funcs 73.28 / lines 75.29（只上不下，
+        //    下次需要时可据此再抬地板；本次保持原值以免门禁抖动）
         //    本次（007）按 T066 复核：上一版地板 20/12/19/21 是早期实测留下的**远低于现状**的值
         //    （注释里的 21.1/13.1/20.0/22.6），已丧失"发现整体下滑"的作用，故按同一个
         //    "地板 = 实测值略下方"的口径抬到 66/61/65/67。地板只可上调，不得下调。
@@ -163,6 +165,27 @@ export default defineConfig({
         },
         // 2026-10-12（007）：轮次收尾家族（从 run-manager 拆分而来）
         'src/domain/run-finalize.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-14（009）：存量数据布局迁移（三判定 / 逐项改名 / 可中断续跑 / 幂等）
+        'src/domain/data-migration.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-14（009）：数字人作用域判定（AGENT_NOT_SELECTED / AGENT_NOT_AVAILABLE）
+        'src/domain/agent-scope.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-14（009）：场景解析块从 dirs.ts 搬出（纯搬移；行为零变化由测试锁定）
+        'src/domain/scenario.ts': {
           statements: 80,
           branches: 80,
           functions: 80,

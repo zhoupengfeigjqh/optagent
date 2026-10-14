@@ -14,8 +14,11 @@
  * 3. **尾部指令装配**：SOUL 开关开启时追加到 System Prompt 末尾的协议指令
  *    （含条数上限与工具目录），是"模型到底被要求怎么输出"的唯一事实源。
  *
- * 读取路径**不再判数字人**（修订 G4）：卡片持久化与恢复跟"当前选中数字人"无关，
- * 归属判定只保留前端按 `message_id` 挂载这一条。
+ * 读取路径**不在读取侧再判数字人**（修订 G4）：卡片的存在与否只由轮末是否产出快照决定，
+ * 读取侧不按"归属数字人 = 当前选中数字人"过滤（那会造成"切换后卡片消失"）。
+ * **009 修订**：不再需要在读取侧判定的真正原因是**归属已由路径承载**——
+ * 快照落在 `user-data/{数字人}/threads/{tid}/`，跨数字人在路径层就取不到；
+ * 因此数字人只作为**路径入参**贯穿（`filePath(uid, agent, threadId)`），不是过滤条件。
  *
  * 2026-10-14 修订（契约 §6：卡片**强制绑定工具**）：白名单裁剪后无有效工具引用的条目
  * **整条丢弃**（`sanitizeActionsWithStats`），引导文案改由 `buildActionGuidance` 铸造
@@ -26,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { RuntimeToolBrief } from '../types.js';
 import { threadDir } from './dirs.js';
+import { removeFileSafe } from './fs-safe.js';
 import {
   buildActionGuidance,
   NEXT_ACTION_HINTS_DEFAULT,
@@ -59,7 +63,7 @@ export interface NextAction {
   guidance: string;
 }
 
-/** 会话级单份快照（`users/{uid}/user-data/threads/{tid}/next-actions.json`） */
+/** 会话级单份快照（`users/{uid}/user-data/{数字人}/threads/{tid}/next-actions.json`，009 归属） */
 export interface NextActionsSnapshot {
   /** 归属的 assistant 消息 id（前端据此把卡片挂到对应气泡） */
   message_id: string;
@@ -104,13 +108,13 @@ export class NextActionsStore {
     private readonly deps: NextActionsDeps,
   ) {}
 
-  private filePath(userId: string, threadId: string): string {
-    return path.join(threadDir(this.root, userId, threadId), 'next-actions.json');
+  private filePath(userId: string, agentName: string, threadId: string): string {
+    return path.join(threadDir(this.root, userId, agentName, threadId), 'next-actions.json');
   }
 
   /** 新一轮开始：清空上一轮的卡片（同步，语义与旧链版一致：轮开始即无卡片） */
-  clear(userId: string, threadId: string): void {
-    this.remove(this.filePath(userId, threadId));
+  clear(userId: string, agentName: string, threadId: string): void {
+    this.remove(this.filePath(userId, agentName, threadId));
   }
 
   /**
@@ -173,8 +177,8 @@ export class NextActionsStore {
    * 读取侧再判只会造成"切换数字人后卡片消失"的体验问题。
    * 调用方据此返回空（`message_id: null, actions: []`），前端即不渲染。
    */
-  read(userId: string, threadId: string): NextActionsView | undefined {
-    const snapshot = this.readSnapshot(userId, threadId);
+  read(userId: string, agentName: string, threadId: string): NextActionsView | undefined {
+    const snapshot = this.readSnapshot(userId, agentName, threadId);
     if (!snapshot) return undefined;
     return {
       message_id: snapshot.message_id,
@@ -184,7 +188,7 @@ export class NextActionsStore {
 
   /** 覆盖写：临时文件 + 原子改名（MUST NOT 出现"半个文件被读到"，原则五） */
   private writeSnapshot(input: NextActionsFinalizeInput, actions: NextAction[]): boolean {
-    const file = this.filePath(input.userId, input.threadId);
+    const file = this.filePath(input.userId, input.agentName, input.threadId);
     const tmp = `${file}.tmp`;
     const snapshot: NextActionsSnapshot = {
       message_id: input.messageId,
@@ -206,12 +210,12 @@ export class NextActionsStore {
   }
 
   /** 读取快照；不存在/损坏/超限 → `undefined`（不存在是最常见路径，不告警） */
-  private readSnapshot(userId: string, threadId: string): NextActionsSnapshot | undefined {
-    const file = this.filePath(userId, threadId);
+  private readSnapshot(userId: string, agentName: string, threadId: string): NextActionsSnapshot | undefined {
+    const file = this.filePath(userId, agentName, threadId);
     let raw: string;
     try {
       if (fs.statSync(file).size > SNAPSHOT_MAX_BYTES) {
-        this.warn(userId, threadId, 'next-actions.json 超过大小上限，按无提示处理');
+        this.warn(userId, threadId, 'next-actions.json 超过大小上限，按无提示处理', agentName);
         return undefined;
       }
       raw = fs.readFileSync(file, 'utf8');
@@ -236,14 +240,15 @@ export class NextActionsStore {
         actions,
       };
     } catch {
-      this.warn(userId, threadId, 'next-actions.json 损坏，按无提示处理');
+      this.warn(userId, threadId, 'next-actions.json 损坏，按无提示处理', agentName);
       return undefined;
     }
   }
 
   private remove(file: string): void {
     try {
-      fs.rmSync(file, { force: true });
+      // 单文件删除走 fs-safe：Windows 下 `fs.rmSync` 对含中文路径静默失效（见 fs-safe.ts 文件头）
+      removeFileSafe(file);
     } catch {
       /* 轮开始清空失败不影响本轮对话 */
     }

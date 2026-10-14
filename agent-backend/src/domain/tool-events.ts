@@ -2,11 +2,12 @@
  * 工具调用记录存储（002 特性：tool-events.jsonl）。
  *
  * 落点与生命周期（与 history.jsonl 同层的**会话私有数据**）：
- * - `threads/{thread_id}/tool-events.jsonl`：一行一次事件（start 记 running、
+ * - `user-data/{数字人}/threads/{thread_id}/tool-events.jsonl`：一行一次事件（start 记 running、
  *   end 记终态），读取时按 `call_id` 合并（后者覆盖前者，与反馈行同语义）
  * - 结果 ≤ 内联阈值：原文存本行 `inline_content`
- * - 结果 > 内联阈值：正文外置到「临时空间/{thread_id}_toolresult_{call_id}.txt」，
+ * - 结果 > 内联阈值：正文外置到「**该数字人**的 临时空间/{thread_id}_toolresult_{call_id}.txt」，
  *   本行只记 `artifact_size` + `summary`（**不记路径**，读取时按同一函数重算）
+ * - 009 归属：数字人是**必填入参**（`threadDir` 唯一解析），外置正文读写口亦按（用户，数字人）取用
  * - 结果里的视图链接（2026-10-10）：抽成 `view_links` sidecar 存本行，
  *   **与正文分离**——不进回灌预算，且正文外置时入口照样可用（见 `view-links.ts`）
  *
@@ -46,8 +47,8 @@ export interface ToolEventsLogger {
 export interface ToolEventsOptions {
   root: string;
   logger?: ToolEventsLogger;
-  /** 按用户取外置正文读写口（缺省 = 不支持外置，超阈值结果截断内联） */
-  artifacts?: (userId: string) => ToolArtifactAccess;
+  /** 按（用户，数字人）取外置正文读写口（缺省 = 不支持外置，超阈值结果截断内联） */
+  artifacts?: (userId: string, agentName: string) => ToolArtifactAccess;
 }
 
 /** 对外投影的工具调用记录（接口层再映射为 snake_case 契约） */
@@ -122,22 +123,23 @@ export class ToolEventStore {
 
   constructor(private readonly opts: ToolEventsOptions) {}
 
-  private filePath(userId: string, threadId: string): string {
-    return path.join(threadDir(this.opts.root, userId, threadId), 'tool-events.jsonl');
+  private filePath(userId: string, agentName: string, threadId: string): string {
+    return path.join(threadDir(this.opts.root, userId, agentName, threadId), 'tool-events.jsonl');
   }
 
-  private access(userId: string): ToolArtifactAccess | undefined {
+  private access(userId: string, agentName: string): ToolArtifactAccess | undefined {
     if (!this.opts.artifacts) return undefined;
-    let access = this.artifactCache.get(userId);
+    const key = `${userId}::${agentName}`;
+    let access = this.artifactCache.get(key);
     if (!access) {
-      access = this.opts.artifacts(userId);
-      this.artifactCache.set(userId, access);
+      access = this.opts.artifacts(userId, agentName);
+      this.artifactCache.set(key, access);
     }
     return access;
   }
 
   /** 记一次调用开始（fire-and-forget：写盘失败不影响对话） */
-  appendStart(userId: string, threadId: string, input: AppendStartInput): void {
+  appendStart(userId: string, agentName: string, threadId: string, input: AppendStartInput): void {
     const line: ToolEventLine = {
       call_id: input.callId,
       message_id: input.messageId,
@@ -146,8 +148,8 @@ export class ToolEventStore {
       started_at: input.startedAt,
       ...(input.argsDigest ? { args_digest: input.argsDigest } : {}),
     };
-    void this.enqueueTask(userId, threadId, () =>
-      this.doAppend(userId, threadId, JSON.stringify(line)),
+    void this.enqueueTask(userId, agentName, threadId, () =>
+      this.doAppend(userId, agentName, threadId, JSON.stringify(line)),
     ).catch(() => {});
   }
 
@@ -161,8 +163,8 @@ export class ToolEventStore {
    * 生产路径 **fire-and-forget**（void 调用方）：落盘失败 MUST NOT 影响
    * 已广播给用户的回答（原则九：降级不阻断）。
    */
-  appendEnd(userId: string, threadId: string, input: AppendEndInput): Promise<void> {
-    return this.enqueueTask(userId, threadId, async () => {
+  appendEnd(userId: string, agentName: string, threadId: string, input: AppendEndInput): Promise<void> {
+    return this.enqueueTask(userId, agentName, threadId, async () => {
       const line: ToolEventLine = {
         call_id: input.callId,
         message_id: input.messageId,
@@ -175,11 +177,11 @@ export class ToolEventStore {
       // 视图链接与体积分流无关：在内联/外置两条路径上都先抽取（外置正文被截断也不影响已抽出的值）
       const viewLinks = extractViewLinks(input.resultText);
       if (viewLinks) line.view_links = viewLinks;
-      await this.splitResult(userId, threadId, input, line);
-      await this.doAppend(userId, threadId, JSON.stringify(line));
+      await this.splitResult(userId, agentName, threadId, input, line);
+      await this.doAppend(userId, agentName, threadId, JSON.stringify(line));
     }).catch((err: unknown) => {
       this.opts.logger?.warn(
-        `tool-events 落盘失败（user=${userId} thread=${threadId} call=${input.callId}）：${
+        `tool-events 落盘失败（user=${userId} agent=${agentName} thread=${threadId} call=${input.callId}）：${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -189,6 +191,7 @@ export class ToolEventStore {
   /** 体积分流：≤ 内联阈值存原文；> 阈值外置正文（外置失败则退化为截断内联） */
   private async splitResult(
     userId: string,
+    agentName: string,
     threadId: string,
     input: AppendEndInput,
     line: ToolEventLine,
@@ -200,7 +203,7 @@ export class ToolEventStore {
     const bounded = truncateToBytes(input.resultText, TOOL_ARTIFACT_MAX_BYTES);
     line.truncated = bounded.truncated;
     line.summary = summarizeResult(bounded.text);
-    const access = this.access(userId);
+    const access = this.access(userId, agentName);
     if (!access) {
       // 未装配外置能力：降级为截断内联（不丢记录，只丢超长部分）
       const fallback = truncateToBytes(input.resultText, TOOL_INLINE_MAX_BYTES);
@@ -216,7 +219,7 @@ export class ToolEventStore {
       line.size = line.artifact_size;
     } catch (err: unknown) {
       this.opts.logger?.warn(
-        `tool-events 外置正文写入失败，退化为截断内联（thread=${threadId} call=${input.callId}）：${
+        `tool-events 外置正文写入失败，退化为截断内联（agent=${agentName} thread=${threadId} call=${input.callId}）：${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -230,10 +233,11 @@ export class ToolEventStore {
   /** 把一个任务排进该会话的串行链（前一个失败不阻塞后一个） */
   private enqueueTask(
     userId: string,
+    agentName: string,
     threadId: string,
     task: () => Promise<void>,
   ): Promise<void> {
-    const key = `${userId}/${threadId}`;
+    const key = `${userId}/${agentName}/${threadId}`;
     const prev = this.chains.get(key) ?? Promise.resolve();
     const next = prev.then(task);
     this.chains.set(
@@ -243,8 +247,8 @@ export class ToolEventStore {
     return next;
   }
 
-  private async doAppend(userId: string, threadId: string, line: string): Promise<void> {
-    const file = this.filePath(userId, threadId);
+  private async doAppend(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+    const file = this.filePath(userId, agentName, threadId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await fs.promises.appendFile(file, line + '\n', 'utf8');
   }
@@ -256,14 +260,14 @@ export class ToolEventStore {
    * （关机收尾、测试断言）用本方法显式等待，而不是猜一个 sleep 时长。
    * 链内含**外置正文写入**（见 appendEnd），因此返回即代表记录与产物都已就绪。
    */
-  flush(userId: string, threadId: string): Promise<void> {
-    return this.chains.get(`${userId}/${threadId}`) ?? Promise.resolve();
+  flush(userId: string, agentName: string, threadId: string): Promise<void> {
+    return this.chains.get(`${userId}/${agentName}/${threadId}`) ?? Promise.resolve();
   }
 
   /** 读取全部记录（按 call_id 合并、保持首次出现顺序）；时间正序 */
-  readAll(userId: string, threadId: string): ToolCallRecord[] {
+  readAll(userId: string, agentName: string, threadId: string): ToolCallRecord[] {
     const merged = new Map<string, ToolCallRecord>();
-    for (const line of this.readLines(userId, threadId)) {
+    for (const line of this.readLines(userId, agentName, threadId)) {
       const incoming = toRecord(line);
       const exist = merged.get(line.call_id);
       if (!exist) {
@@ -279,9 +283,9 @@ export class ToolEventStore {
   }
 
   /** 按 assistant 消息分组（详情接口挂卡片用） */
-  readByMessage(userId: string, threadId: string): Map<string, ToolCallRecord[]> {
+  readByMessage(userId: string, agentName: string, threadId: string): Map<string, ToolCallRecord[]> {
     const grouped = new Map<string, ToolCallRecord[]>();
-    for (const record of this.readAll(userId, threadId)) {
+    for (const record of this.readAll(userId, agentName, threadId)) {
       const list = grouped.get(record.messageId);
       if (list) list.push(record);
       else grouped.set(record.messageId, [record]);
@@ -298,10 +302,11 @@ export class ToolEventStore {
    */
   async readArtifact(
     userId: string,
+    agentName: string,
     threadId: string,
     callId: string,
   ): Promise<{ content: string; size: number } | undefined> {
-    const access = this.access(userId);
+    const access = this.access(userId, agentName);
     if (!access) return undefined;
     const relPath = `${SPACE_TMP}/${artifactFileName(threadId, callId)}`;
     let abs: string;
@@ -322,8 +327,8 @@ export class ToolEventStore {
   }
 
   /** 读取文件全部合法行；坏行跳过告警，整体损坏备份重建（与 history.jsonl 同口径） */
-  private readLines(userId: string, threadId: string): ToolEventLine[] {
-    const file = this.filePath(userId, threadId);
+  private readLines(userId: string, agentName: string, threadId: string): ToolEventLine[] {
+    const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return [];
     const raw = fs.readFileSync(file, 'utf8');
     const lines = raw.split('\n').filter((l) => l.trim() !== '');
@@ -335,7 +340,9 @@ export class ToolEventStore {
       else bad++;
     }
     if (bad > 0) {
-      this.opts.logger?.warn(`tool-events 坏行跳过 ${bad} 条（user=${userId} thread=${threadId}）`);
+      this.opts.logger?.warn(
+        `tool-events 坏行跳过 ${bad} 条（user=${userId} agent=${agentName} thread=${threadId}）`,
+      );
     }
     if (lines.length > 0 && parsed.length === 0) {
       const backup = path.join(
@@ -346,7 +353,7 @@ export class ToolEventStore {
         fs.renameSync(file, backup);
         fs.writeFileSync(file, '', 'utf8');
         this.opts.logger?.warn(
-          `tool-events 整体损坏，已备份至 ${backup} 并重建（user=${userId} thread=${threadId}）`,
+          `tool-events 整体损坏，已备份至 ${backup} 并重建（user=${userId} agent=${agentName} thread=${threadId}）`,
         );
       } catch {
         /* 备份失败：保持原文件不动，下次读取继续告警 */

@@ -28,6 +28,9 @@ import { TOOL_INLINE_MAX_BYTES } from '../../src/domain/tool-result.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { LlmEvent } from '../../src/types.js';
 
+/** 本用例使用的数字人（数据域一级目录名，009 会话/临时空间都在它下面） */
+const AGENT = 'demo';
+
 let root: string;
 let history: HistoryStore;
 let usage: UsageDb;
@@ -75,7 +78,7 @@ function runTurn(
 /** 灌历史消息：内容 h0..h{count-1}（user/assistant 交替，凑整数轮） */
 async function seedHistory(count: number): Promise<void> {
   for (let i = 0; i < count; i++) {
-    await history.append('admin', 'th1', {
+    await history.append('admin', AGENT, 'th1', {
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `h${i}`,
     });
@@ -84,7 +87,7 @@ async function seedHistory(count: number): Promise<void> {
 
 /** 直接落 summary.json（绕过 LLM）：声明"前 covered 条已归档进摘要" */
 function writeSummary(covered: number, text = '早前摘要'): void {
-  const dir = threadDir(root, 'admin', 'th1');
+  const dir = threadDir(root, 'admin', AGENT, 'th1');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'summary.json'),
@@ -105,7 +108,8 @@ beforeEach(() => {
   usage = new UsageDb(path.join(root, 'usage.db'));
   toolEvents = new ToolEventStore({
     root,
-    artifacts: (userId: string) => new FileAccess({ optAgentRoot: root, userId }),
+    artifacts: (userId: string, agentName: string) =>
+      new FileAccess({ optAgentRoot: root, userId, agentName }),
   });
 });
 
@@ -124,7 +128,7 @@ describe('工具记录落盘', () => {
     const done = events.find((e) => e.type === 'done');
     const assistantId = (done as { data: { message_id: string } }).data.message_id;
 
-    const records = toolEvents.readAll('admin', 'th1');
+    const records = toolEvents.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       callId: 'call_1',
@@ -142,7 +146,7 @@ describe('工具记录落盘', () => {
     const { settled } = runTurn(manager, recordingAgent([], () => toolTurn('ok')), '看下计划');
     await settled;
 
-    const grouped = toolEvents.readByMessage('admin', 'th1');
+    const grouped = toolEvents.readByMessage('admin', AGENT, 'th1');
     expect([...grouped.values()].flat()).toHaveLength(1);
   });
 });
@@ -198,7 +202,11 @@ describe('下一轮回灌', () => {
     expect(captured[0]!.systemExtra ?? '').not.toContain('【可用的工具结果原文】');
     const joined = captured[0]!.messages.map((m) => m.content).join('\n');
     expect(joined).not.toContain('内部结果');
-    expect(fs.existsSync(path.join(root, 'users', 'admin', 'user-data', 'threads', 'th1', 'tool-events.jsonl'))).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(root, 'users', 'admin', 'user-data', AGENT, 'threads', 'th1', 'tool-events.jsonl'),
+      ),
+    ).toBe(false);
   });
 });
 

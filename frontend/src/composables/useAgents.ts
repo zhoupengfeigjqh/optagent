@@ -3,11 +3,18 @@
  *
  * ⚠️ 后端 `POST /api/agents/{name}/select` 为**覆盖式**选中：可在任意时刻切换，
  * 无需先 `exit`，也不校验会话是否进行中；切换后的新数字人在**下一轮对话**时激活。
- * "会话进行中禁止切换"是**纯前端 UX 约束**（V-14），本 composable 通过 `switchingDisabled`
- * 在 `phase === 'streaming'` 时**不发请求**来兜住。
+ * "禁止切换"是**纯前端 UX 约束**（V-14），本 composable 通过 `switchingDisabled`
+ * **不发请求**来兜住。禁用态只有一种：`phase === 'streaming'`（一轮回答正在进行，
+ * 思考与工具调用都在此阶段内）。对话**结束**（completed / failed / aborted）后即可切换，
+ * 切换后由 `onSwitched` 进入新的空对话视图（会话按数字人隔离，FR-022）。
+ *
+ * 禁用**原因文案**由 `AgentPanel.vue` 呈现（只置灰不解释等于让用户猜，FR-015 要求可读提示）。
  *
  * 切换流程为**单次 `select`**（FR-037 修订）：同一时刻仍只有一个"当前选中数字人"，
- * 但切换是直接覆盖，不再需要"先退出"；会话可跨数字人（下一轮生效）。
+ * 但切换是直接覆盖，不再需要"先退出"。
+ *
+ * 009（数字人数据隔离）：会话与文件都按数字人隔离，因此切换后的收尾动作为
+ * **进入新的空对话视图**（`onSwitched` 里 `threads.startNew()`）——不再"续用同一会话"。
  */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
@@ -37,8 +44,10 @@ export interface AgentsStore {
   loading: Readonly<Ref<boolean>>
   switching: Readonly<Ref<boolean>>
   error: Readonly<Ref<ErrorInfo | null>>
-  /** `phase === 'streaming'` 时为 `true`（V-06、V-14） */
+  /** 一轮回答进行中时为 `true`（V-06、V-14）；对话结束即可切换 */
   switchingDisabled: ComputedRef<boolean>
+  /** 禁用**原因**（可读文案）；可切换时为 `null`（FR-015：只置灰不解释等于让用户猜） */
+  switchingDisabledReason: ComputedRef<string | null>
   loadCurrent(): Promise<void>
   loadDetail(name: string): Promise<void>
   loadCandidates(): Promise<void>
@@ -59,7 +68,15 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
 
   let unsubscribe: (() => void) | null = null
 
-  const switchingDisabled = computed(() => deps.getPhase() === RUN_PHASE.STREAMING)
+  const streaming = computed(() => deps.getPhase() === RUN_PHASE.STREAMING)
+
+  /** 禁用判据单一实现（V-14）：仅"回答进行中"禁用；对话结束（completed/failed/aborted）即可切换 */
+  const switchingDisabled = computed(() => streaming.value)
+
+  /** 禁用原因（可读文案）：只在"回答进行中"出现；其余时刻为 `null`（可切换） */
+  const switchingDisabledReason = computed(() =>
+    streaming.value ? '回答进行中，暂时无法切换数字人' : null,
+  )
 
   async function loadDetail(name: string): Promise<void> {
     try {
@@ -127,10 +144,11 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
 
     switching.value = true
     try {
-      // 覆盖式选中：无需先 exit（FR-037 修订）；会话可跨数字人，下一轮生效
+      // 覆盖式选中：无需先 exit（FR-037 修订）；后续动作（进入新对话视图）由装配方编排
       await deps.agents.select(name)
       await loadCurrent()
-      deps.toast?.push('success', '已切换数字人，下一轮对话生效')
+      // 009：会话按数字人隔离，切换即进入新的空对话（由 onSwitched 落 `threads.startNew()`）
+      deps.toast?.push('success', '已切换数字人，已开启新对话')
       await deps.onSwitched?.()
     } catch (cause) {
       deps.toast?.push('error', toUserMessage(toErrorInfo(cause)))
@@ -174,6 +192,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     switching,
     error,
     switchingDisabled,
+    switchingDisabledReason,
     loadCurrent,
     loadDetail,
     loadCandidates,

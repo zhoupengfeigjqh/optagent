@@ -1,0 +1,21 @@
+{
+  "scenario": "柯昆BOM合成",
+  "data_prep_dirs": [
+    "算法规则",
+    "总BOM目录",
+    "子BOM目录"
+  ],
+  "data_prep_uploads": {
+    "算法规则": [
+      ".txt",
+      ".json"
+    ],
+    "总BOM目录": [
+      ".xlsx",
+      ".xls"
+    ],
+    "子BOM目录": [
+      ".zip"
+    ]
+  }
+}

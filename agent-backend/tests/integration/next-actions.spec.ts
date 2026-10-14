@@ -49,11 +49,19 @@ function ctx(): AppContext {
   return (app as unknown as { ctx: AppContext }).ctx;
 }
 
-/** 给数字人写一份 SOUL.md（只影响开关读取，不需要是可加载的完整配置） */
+/**
+ * 给数字人写一份 SOUL.md（frontmatter 供开关读取）+ 最小可加载的 TOOL/MCP。
+ *
+ * 009 起数据接口先做**可用性判定**（`resolveAgentScope` → `loadAgentConfig`），
+ * 缺 TOOL.json / MCP.json 的数字人会被判"不可用"（409 AGENT_NOT_AVAILABLE），
+ * 因此夹具必须是一份完整可加载的配置。
+ */
 function writeSoul(userId: string, agentName: string, frontmatter: string): void {
   const dir = agentDir(root, userId, agentName);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'SOUL.md'), `---\n${frontmatter}\n---\n\n## 主要使命\n\n你是助手。\n`, 'utf8');
+  writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
+  writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
 interface Action {
@@ -69,7 +77,7 @@ function writeSnapshot(
   agentName: string,
   actions: unknown[],
 ): void {
-  const file = path.join(threadDir(root, userId, threadId), 'next-actions.json');
+  const file = path.join(threadDir(root, userId, agentName, threadId), 'next-actions.json');
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(
     file,
@@ -114,16 +122,19 @@ describe('GET /api/threads/:id/next-actions', () => {
     expect(body.actions[0]!.guidance).toContain('erp__query_order');
   });
 
-  it('修订 G4：归属数字人 ≠ 当前选中数字人 → 仍下发（卡片与数字人切换无关）', async () => {
+  it('009：会话不属于当前选中数字人 → 404（跨数字人不可达，与"不存在"不可区分）', async () => {
     const thread = ctx().threadStore.create('admin', 'demo');
     writeSoul('admin', 'demo', 'next_action_hints: true');
     writeSoul('admin', 'another', 'next_action_hints: true');
     writeSnapshot('admin', thread.threadId, 'demo', ONE_ACTION);
 
+    // 切到另一个数字人：它的数据域里没有这个会话（卡片取不到、存在性也不泄漏）
     ctx().currentAgent.select('admin', 'another');
-    const body = (await (await get(thread.threadId)).json()) as { message_id: string | null };
-    expect(body.message_id).toBe('m-1');
+    const crossAgent = await get(thread.threadId);
+    expect(crossAgent.statusCode).toBe(404);
+    expect((crossAgent.json() as { error: { code: string } }).error.code).toBe('THREAD_NOT_FOUND');
 
+    // 切回来即可见：归属由目录承载，不随选中态改写
     ctx().currentAgent.select('admin', 'demo');
     expect(((await (await get(thread.threadId)).json()) as { message_id: string | null }).message_id).toBe('m-1');
   });
@@ -152,7 +163,7 @@ describe('GET /api/threads/:id/next-actions', () => {
     const thread = ctx().threadStore.create('admin', 'demo');
     writeSoul('admin', 'demo', 'next_action_hints: true');
     ctx().currentAgent.select('admin', 'demo');
-    const file = path.join(threadDir(root, 'admin', thread.threadId), 'next-actions.json');
+    const file = path.join(threadDir(root, 'admin', 'demo', thread.threadId), 'next-actions.json');
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, '{ 半个 JSON', 'utf8');
 

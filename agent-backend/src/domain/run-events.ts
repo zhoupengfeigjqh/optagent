@@ -35,7 +35,7 @@ export type SsePayload =
         duration_seconds: number;
         /** assistant 落盘消息 ID；stop（本轮丢弃）时为 null */
         message_id: string | null;
-        /** 本轮回答的数字人（会话可跨数字人） */
+        /** 本轮回答的数字人（009 起会话归属固定；逐条标注保留以兼容存量数据） */
         agent_name: string;
         /**
          * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
@@ -58,7 +58,7 @@ export type SsePayload =
         error: { code: string; message: string };
         duration_seconds?: number;
         usage?: { input_tokens: number; output_tokens: number };
-        /** 本轮回答的数字人（会话可跨数字人） */
+        /** 本轮回答的数字人（009 起会话归属固定；逐条标注保留以兼容存量数据） */
         agent_name: string;
       };
     };

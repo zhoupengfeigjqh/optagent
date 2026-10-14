@@ -106,7 +106,7 @@ export interface ChatStreamStore {
   error: Readonly<Ref<ErrorInfo | null>>
   usage: Readonly<Ref<Usage | null>>
   durationSeconds: Readonly<Ref<number | null>>
-  /** 本轮回答的数字人（会话可跨数字人；流式气泡据此标注） */
+  /** 本轮回答的数字人（009 起会话归属固定；流式气泡据此标注，逐条保留以兼容存量数据） */
   streamingAgentName: Readonly<Ref<string | null>>
   /**
    * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除；`null` = 无进行中轮次。
@@ -264,7 +264,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     // 新一轮发送即取代旧的中断缓存（「重新生成」自身也走这里，随后 finally 会重新置位）
     lastAbortedTurn.value = null
     startedAt.value = now()
-    // 本轮数字人快照（会话可跨数字人：同一会话的相邻两轮可能由不同数字人回答）
+    // 本轮数字人快照（009：本轮必然由当前选中数字人执行；快照仅在存量历史里可能与上一轮不同）
     streamingAgentName.value = deps.getAgentName?.() ?? null
     // 乐观用户气泡（十七次调整）：历史刷新只在完成后触发，发送即先本地呈现，
     // 避免"AI 答完才看到自己的消息"

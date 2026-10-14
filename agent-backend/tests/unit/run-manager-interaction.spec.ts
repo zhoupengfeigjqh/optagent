@@ -26,6 +26,9 @@ const SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** 本用例使用的数字人（与假实例 key 同值，009 会话落点按它解析） */
+const AGENT = 'demo';
+
 let root: string;
 let history: HistoryStore;
 let usage: UsageDb;
@@ -110,7 +113,7 @@ describe('run-manager × 交互门', () => {
     expect(ok).toEqual({ ok: true, result: 'settled' });
 
     await run.settled;
-    const messages = history.readRecent('admin', 'th_1', 10);
+    const messages = history.readRecent('admin', AGENT, 'th_1', 10);
     const assistant = messages.filter((x) => x.role === 'assistant').at(-1);
     expect(assistant?.content).toContain('确认后执行 n=5');
     // run 结束后挂起状态已清理
@@ -136,7 +139,7 @@ describe('run-manager × 交互门', () => {
       result: 'already-resolved',
     });
     await run.settled;
-    const assistant = history.readRecent('admin', 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
     expect(assistant?.content).toContain('n=1'); // 首次结果生效
   });
 
@@ -154,7 +157,7 @@ describe('run-manager × 交互门', () => {
       result: 'settled',
     });
     await run.settled;
-    const assistant = history.readRecent('admin', 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
     expect(assistant?.content).toContain('调用未执行');
   });
 
@@ -173,7 +176,7 @@ describe('run-manager × 交互门', () => {
 
     expect(m.stop('th_1')).toBe(true);
     await run.settled; // 不超时即证明挂起点已收尾
-    const assistant = history.readRecent('admin', 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
     expect(assistant?.content).toContain('调用未执行');
   });
 });

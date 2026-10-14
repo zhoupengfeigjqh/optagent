@@ -6,11 +6,13 @@
  * 视觉与居中口径一致；焦点陷阱与 Esc 关闭由原生 `dialog` 提供（2026-10-13 由 `a-modal` 改回）。
  * - 详情区默认展示**当前选中**数字人；点击候选名称可**只读预览**其他数字人
  *   （描述/技能/已启用工具/MCP 清单取自 `candidates`，不额外发请求、不触发切换）
- * - 预览态展示「预览中」标识与「切换到此数字人」按钮；预览是只读操作，**不受**会话进行中限制
- * - 有进行中的会话（`switchingDisabled`）→ **切换**按钮置灰、`aria-disabled` 并说明原因（V-14）
+ * - 预览态展示「预览中」标识与「切换到此数字人」按钮；预览是只读操作，**不受**禁止切换限制
+ * - 禁止切换（`switchingDisabled`：一轮回答进行中，FR-015/V-14）→
+ *   **切换**按钮置灰 + `aria-disabled`，并把**原因文案**同时渲染成可见提示（`role="status"`）
+ *   ——只置灰不解释等于让用户猜；原因由 `useAgents.switchingDisabledReason` 给出（唯一实现）
  * - 切换请求进行中（`busy`）→ 禁止重复点击
  * - 切换为**单次覆盖式选中**（无需先退出），由 `useAgents.switchTo` 落库，成功提示由该 composable 给出；
- *   会话不绑定数字人，切换后的新数字人在**下一轮消息**生效（FR-014 / FR-037 修订）
+ *   009 起切换即进入**新的空对话视图**（会话按数字人隔离，FR-010/FR-022）
  */
 import { computed, ref, watch } from 'vue'
 
@@ -26,8 +28,13 @@ const props = withDefaults(
     current?: DigitalHuman | null
     /** 可切换列表 */
     candidates?: DigitalHuman[]
-    /** 会话进行中 → 置灰（FR-036） */
+    /** 禁止切换（一轮回答进行中）→ 置灰（FR-015 / FR-036） */
     switchingDisabled?: boolean
+    /**
+     * 禁止切换的**原因文案**（由 `useAgents.switchingDisabledReason` 给出）。
+     * 缺省时回落到通用文案，保证"禁用必有解释"。
+     */
+    switchingDisabledReason?: string | null
     /** 切换请求进行中 */
     busy?: boolean
   }>(),
@@ -36,6 +43,7 @@ const props = withDefaults(
     current: null,
     candidates: () => [],
     switchingDisabled: false,
+    switchingDisabledReason: null,
     busy: false,
   },
 )
@@ -75,9 +83,25 @@ const previewing = computed(
 )
 
 const canSwitch = computed(() => !props.switchingDisabled && !props.busy)
-const disabledReason = computed(() =>
-  props.switchingDisabled ? '会话进行中，无法切换数字人' : null,
-)
+
+/**
+ * 禁用原因提示的元素 id：按钮以 `aria-describedby` 关联它。
+ *
+ * 仅靠 `title` 不足以让辅助技术稳定播报（且触屏无悬停），故原因必须**同时**是
+ * DOM 里的可读文本（FR-015 的"可读提示"）。
+ */
+const REASON_ID = 'agent-panel-switch-blocked'
+
+/**
+ * 禁止切换的原因（禁用态必有解释，FR-015）。
+ *
+ * 文案来自 `useAgents.switchingDisabledReason`（判定与文案的唯一实现）；
+ * 缺省（调用方未传）回落到通用文案，避免出现"置灰但说不出为什么"。
+ */
+const disabledReason = computed(() => {
+  if (!props.switchingDisabled) return null
+  return props.switchingDisabledReason ?? '会话进行中，无法切换数字人'
+})
 
 /**
  * 面板展示用的简介（004）：优先取结构化 SOUL 的**角色简介**（`intro`）；
@@ -129,6 +153,7 @@ function onSwitch(name: string): void {
             size="sm"
             :disabled="!canSwitch"
             :disabled-reason="disabledReason"
+            :aria-describedby="disabledReason ? REASON_ID : undefined"
             @click="onSwitch(displayed.agent_name)"
           >
             切换到此数字人
@@ -170,6 +195,15 @@ function onSwitch(name: string): void {
     <section class="agent-panel__candidates">
       <h4 class="agent-panel__section">可切换的数字人（点击名称查看配置）</h4>
 
+      <p
+        v-if="disabledReason"
+        :id="REASON_ID"
+        class="agent-panel__hint agent-panel__blocked"
+        role="status"
+      >
+        {{ disabledReason }}
+      </p>
+
       <ul v-if="candidates.length > 0" class="agent-panel__list">
         <li
           v-for="candidate in candidates"
@@ -192,6 +226,7 @@ function onSwitch(name: string): void {
             size="sm"
             :disabled="!canSwitch || isCurrent(candidate.agent_name)"
             :disabled-reason="disabledReason"
+            :aria-describedby="disabledReason ? REASON_ID : undefined"
             @click="onSwitch(candidate.agent_name)"
           >
             {{ isCurrent(candidate.agent_name) ? '当前' : '切换' }}
@@ -307,5 +342,12 @@ function onSwitch(name: string): void {
 .agent-panel__hint {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+/* 禁用原因：与"提示"同色但用左侧竖线强调——用户必须能读到"为什么不能切" */
+.agent-panel__blocked {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-warning, var(--color-border));
+  color: var(--color-text-secondary);
 }
 </style>

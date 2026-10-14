@@ -18,16 +18,28 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config';
 import type { AppContext } from '../../src/context.js';
-import { PRODUCED_DIR } from '../../src/domain/dirs.js';
-import { mintPutUrl, mintSignedUrl } from '../../src/infra/file-sign.js';
+import { PRODUCED_DIR, agentDir } from '../../src/domain/dirs.js';
+import { agentScopedPath, mintPutUrl, mintSignedUrl } from '../../src/infra/file-sign.js';
 import { buildServer } from '../../src/server';
 
 const SECRET = 'test-secret-0123456789';
+/** 本用例的数字人（009：产出/列表/会话都按它隔离） */
+const AGENT = 'demo';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-produced-'));
 let app: FastifyInstance;
 
+/** 写一份可加载的数字人配置（缺 TOOL/MCP 会被判"不可用"→ 数据接口 409） */
+function writeAgent(name: string): void {
+  const dir = agentDir(root, 'admin', name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'SOUL.md'), '你是助手。\n', 'utf8');
+  writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
+  writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
+}
+
 beforeAll(async () => {
   mkdirSync(path.join(root, 'users', 'admin'), { recursive: true });
+  writeAgent(AGENT);
   const configPath = path.join(root, 'config.yaml');
   writeFileSync(configPath, 'models:\n  - model: test-model\n    api_key: test-key\n', 'utf8');
   const config = loadConfig({
@@ -35,6 +47,8 @@ beforeAll(async () => {
     configPath,
   });
   app = await buildServer({ config });
+  // 009：产出列表/已读/正文都按"当前选中数字人"取作用域
+  ctxOf().currentAgent.select('admin', AGENT);
 });
 
 afterAll(async () => {
@@ -42,17 +56,28 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 铸一条回写 URL（默认归属 admin、落到产出目录），随后按其 `hints` 带上归属提示参数 */
+/** 铸一条回写 URL（默认归属 admin、落到**该数字人**的产出目录），`hints` 带归属提示参数 */
 function putUrl(
-  opts: { userId?: string; dir?: string; hints?: { sid?: string; callId?: string; tool?: string } } = {},
+  opts: {
+    userId?: string;
+    agent?: string;
+    dir?: string;
+    hints?: { sid?: string; callId?: string; tool?: string };
+  } = {},
 ): string {
   return mintPutUrl(
     'http://backend:3000',
     SECRET,
     opts.userId ?? 'admin',
-    opts.dir ?? PRODUCED_DIR,
+    // 009：写方向的 `d` 首段是数字人（在签名内，不可篡改）
+    agentScopedPath(opts.agent ?? AGENT, opts.dir ?? PRODUCED_DIR),
     opts.hints ?? {},
   );
+}
+
+/** 运行期上下文（多处用例要直接操作存储） */
+function ctxOf(): AppContext {
+  return (app as unknown as { ctx: AppContext }).ctx;
 }
 
 function post(url: string, body = '{"rows":12}') {
@@ -135,7 +160,7 @@ describe('POST /api/files/put —— 回写通道', () => {
       'http://backend:3000',
       SECRET,
       'admin',
-      PRODUCED_DIR,
+      agentScopedPath(AGENT, PRODUCED_DIR),
       {},
       undefined,
       submitted,
@@ -176,7 +201,7 @@ describe('POST /api/files/put —— 回写通道', () => {
       'http://backend:3000',
       SECRET,
       'admin',
-      PRODUCED_DIR,
+      agentScopedPath(AGENT, PRODUCED_DIR),
       {},
       undefined,
       submitted,
@@ -459,30 +484,27 @@ describe('回写摘要（契约 §10.3）—— 产出列表的可辨识度', ()
 });
 
 describe('GET /api/produced —— 数字人归属（查询期由 sid 反查，§10.5 ⑥）', () => {
-  function ctxOf(): AppContext {
-    return (app as unknown as { ctx: AppContext }).ctx;
-  }
-
-  it('sid 命中的会话 → 列表项带 agent_name（该会话最近一轮使用的数字人）', async () => {
-    const thread = ctxOf().threadStore.create('admin', '数字人甲');
+  it('sid 命中的会话 → 列表项带 agent_name（009 下恒等于当前作用域）', async () => {
+    const thread = ctxOf().threadStore.create('admin', AGENT);
     await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent1.txt`);
 
-    expect((await findItem('j_agent1'))?.agent_name).toBe('数字人甲');
+    expect((await findItem('j_agent1'))?.agent_name).toBe(AGENT);
   });
 
-  it('会话 meta 的 agent_name 变了 → 反查结果随之更新（不落 sidecar，故不会漂移）', async () => {
-    const thread = ctxOf().threadStore.create('admin', '数字人甲');
+  it('009：touch 不再改写归属 → 反查结果恒为数据域所属数字人（回到旧语义会在这里失败）', async () => {
+    const thread = ctxOf().threadStore.create('admin', AGENT);
     await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent1b.txt`);
-    ctxOf().threadStore.touch('admin', thread.threadId, '数字人丙'); // 会话可跨数字人
+    // 归属在创建时写定，`touch` 只刷新 updated_at（会话不再跨数字人）
+    ctxOf().threadStore.touch('admin', AGENT, thread.threadId);
 
-    expect((await findItem('j_agent1b'))?.agent_name).toBe('数字人丙');
+    expect((await findItem('j_agent1b'))?.agent_name).toBe(AGENT);
   });
 
   it('会话已删除 → 产出仍在，但不带 agent_name（界面据此显示"未知"，不报错）', async () => {
-    const thread = ctxOf().threadStore.create('admin', '数字人乙');
+    const thread = ctxOf().threadStore.create('admin', AGENT);
     await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent2.txt`);
 
-    await ctxOf().threadStore.delete('admin', thread.threadId);
+    await ctxOf().threadStore.delete('admin', AGENT, thread.threadId);
 
     const item = await findItem('j_agent2');
     expect(item).toBeDefined(); // 产出在二级目录，不随会话删除而消失（已知边界）

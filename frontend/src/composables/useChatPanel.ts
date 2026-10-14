@@ -79,7 +79,7 @@ export function useChatPanel() {
       thinking: chat.streamingThinking.value,
       toolCalls: chat.toolCalls.value,
       error: chat.error.value,
-      // 会话可跨数字人：本轮气泡标注"谁在回答"
+      // 本轮气泡标注"谁在回答"（009 起会话归属固定，标注用于如实还原存量历史）
       agentName: chat.streamingAgentName.value,
       // 中断轮「重新生成」是否可用：有中断缓存且当前未在流式中
       canRegenerate: phase === RUN_PHASE.ABORTED && chat.lastAbortedTurn.value !== null,

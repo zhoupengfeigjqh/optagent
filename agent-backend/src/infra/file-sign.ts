@@ -7,11 +7,40 @@
  * 设计：
  * - HMAC-SHA256 绑定 (userId, relPath, exp)：任一字段被篡改验签即失败，URL 即凭证
  * - 无状态验签（不查库）；时效默认 24h（远程服务可能跨时段回源）
- * - relPath 为 user-data 相对路径（posix 分隔），路径安全由 FileAccess 在铸造/下载两侧各把一关
+ * - 路径安全由 FileAccess 在铸造/下载两侧各把一关
+ * - **009 归属**：`relPath` 的形状是 `{数字人}/{数字人数据域内相对路径}`——
+ *   数字人段**在签名内**，故"跨数字人读取"在签名层即不可达（篡改数字人段 ⇒ 验签失败）。
+ *   读方向 `p` 与写方向 `d` 共用这一形状（`agentScopedPath` / `splitAgentScopedPath`）。
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 组装签名内的路径：`{数字人}/{数字人数据域内相对路径}`（posix 分隔）。
+ *
+ * 数字人名称由平台保证合法（不含路径分隔符），此处只做拼接、不归一化。
+ */
+export function agentScopedPath(agentName: string, relPath: string): string {
+  return `${agentName}/${relPath}`;
+}
+
+/**
+ * 解析签名内的路径；形状非法（缺数字人段 / 空相对路径 / 反斜杠 / `.`/`..`）→ `undefined`。
+ *
+ * 只做**形状**解析：数字人段的可信性由验签保证，路径穿越仍由 `FileAccess.resolveSafe` 兜住。
+ */
+export function splitAgentScopedPath(
+  value: string,
+): { agentName: string; relPath: string } | undefined {
+  if (value.includes('\\')) return undefined;
+  const idx = value.indexOf('/');
+  if (idx <= 0) return undefined;
+  const agentName = value.slice(0, idx);
+  const relPath = value.slice(idx + 1);
+  if (relPath === '' || agentName === '.' || agentName === '..') return undefined;
+  return { agentName, relPath };
+}
 
 function payloadOf(userId: string, relPath: string, exp: number): string {
   return `${userId}\n${relPath}\n${exp}`;
@@ -37,7 +66,7 @@ export function verifyRef(
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-/** 铸造签名直链：{baseUrl}/api/files/raw?u=&p=&exp=&sig= */
+/** 铸造签名直链：{baseUrl}/api/files/raw?u=&p=&exp=&sig=（`p` 见 `agentScopedPath`） */
 export function mintSignedUrl(
   baseUrl: string,
   secret: string,

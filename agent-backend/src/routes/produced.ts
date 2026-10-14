@@ -11,6 +11,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
+import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import {
@@ -56,27 +57,32 @@ const rawQuerySchema = {
   properties: { job_id: { type: 'string', minLength: 1 } },
 } as const;
 
-function accessFor(ctx: AppContext, userId: string): FileAccess {
+function accessFor(ctx: AppContext, userId: string, agentName: string): FileAccess {
   return new FileAccess({
     optAgentRoot: ctx.config.optAgentRoot,
     userId,
+    agentName,
     logger: ctx.loggers.logger,
     truncateKb: ctx.config.readTruncateKb,
   });
 }
 
 /**
- * 为产出列表补「发起它的数字人」（`agent_name`）。
+ * 为产出列表补「发起它的数字人」（`agent_name`，契约字段保留）。
  *
- * 产出是**用户级**的（同一用户的数字人共享一份 `user-data`），sidecar 只记 `sid`
- * （= thread_id）；要知道它属于哪个数字人，必须回查 `threads/{sid}/meta.json` 的
- * `agent_name`。刻意**不落 sidecar**：`agent_name` 会随会话跨数字人而变，落盘即第二份
- * 会漂移的真相（原则五）。
+ * **009 口径变更**：产出清单与产出目录都已是**数字人级**的（侧栏/接口一律只看当前数字人），
+ * 因此这里的 `agent_name` **恒等于当前作用域**——字段保留是为了不改动前端契约
+ * （列表项仍带 `agent_name`），不再是"跨数字人混合列表里区分来源"的载荷。
  *
  * 降级：`sid` 缺失、或会话 meta 不存在/损坏（如对话已删除）→ 该条**不带** `agent_name`，
  * 由界面显示"未知"。逐条 `get` 的读盘量 = **去重后**的会话数（≤ 列表上限），量级可忽略。
  */
-function withAgentNames(ctx: AppContext, userId: string, items: ProducedItem[]): ProducedItem[] {
+function withAgentNames(
+  ctx: AppContext,
+  userId: string,
+  scopeAgentName: string,
+  items: ProducedItem[],
+): ProducedItem[] {
   const cache = new Map<string, string | undefined>();
   return items.map((item) => {
     const sid = item.sid;
@@ -84,7 +90,7 @@ function withAgentNames(ctx: AppContext, userId: string, items: ProducedItem[]):
     if (!cache.has(sid)) {
       let name: string | undefined;
       try {
-        name = ctx.threadStore.get(userId, sid).agentName;
+        name = ctx.threadStore.get(userId, scopeAgentName, sid).agentName;
       } catch {
         name = undefined; // 对话已删除 / meta 损坏：不因一条归属缺失而让整张列表失败
       }
@@ -102,8 +108,13 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     const requested = raw === undefined ? PRODUCED_LIST_MAX : Number(raw);
     const limit =
       Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : PRODUCED_LIST_MAX;
-    const items = await listProduced(accessFor(ctx, userId), limit);
-    return { items: withAgentNames(ctx, userId, items) };
+    // 009：产出清单是**当前数字人**的（目录即作用域）
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人后再操作文件空间',
+      route: 'GET /api/produced',
+    });
+    const items = await listProduced(accessFor(ctx, userId, agentName), limit);
+    return { items: withAgentNames(ctx, userId, agentName, items) };
   });
 
   /**
@@ -126,7 +137,11 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
   app.get('/api/produced/raw', { schema: { querystring: rawQuerySchema } }, async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { job_id } = req.query as { job_id: string };
-    const access = accessFor(ctx, userId);
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人后再操作文件空间',
+      route: 'GET /api/produced/raw',
+    });
+    const access = accessFor(ctx, userId, agentName);
     const item = await findProduced(access, job_id);
     if (!item) {
       throw new ApiError(404, 'FILE_NOT_FOUND', `后台产出不存在或已被清理：${job_id}`);
@@ -158,7 +173,11 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
   app.post('/api/produced/read', { schema: { body: readBodySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { job_ids } = req.body as { job_ids: string[] };
-    const marked = await markProducedRead(accessFor(ctx, userId), job_ids);
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人后再操作文件空间',
+      route: 'POST /api/produced/read',
+    });
+    const marked = await markProducedRead(accessFor(ctx, userId, agentName), job_ids);
     ctx.loggers.logger.info(
       { event: 'produced.read', user_id: userId, requested: job_ids.length, marked },
       `后台产出标记已读：${marked}/${job_ids.length}`,

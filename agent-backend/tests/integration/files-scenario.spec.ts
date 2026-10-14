@@ -14,7 +14,7 @@
  * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
  * 由 Vitest 解析到 `src/*`。
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -756,5 +756,45 @@ describe('US5 未配置 data_prep_uploads 的存量数字人（FR-014）', () =>
     // 内部异常为 DirValidationError（code = 'DIR_VALIDATION'）；HTTP 层按既有映射落 VALIDATION_FAILED
     expect(err.code).toBe('VALIDATION_FAILED')
     expect(err.message).toContain('二级目录')
+  })
+})
+
+describe('FR-060 场景读取口径**不变**（009 回归护栏）', () => {
+  it('场景仍只认 users/{uid}/agents/{name}/scenario.json：改文件即生效，与数据域位置无关', async () => {
+    await select('beta')
+    expect(prepDirs((await app.inject({ method: 'GET', url: '/api/files/workspace' })).json())).toEqual([
+      '数据准备/产线电价',
+    ])
+
+    // 就地改 scenario.json（不触碰任何数据目录）→ 下次读取即生效
+    const scenarioFile = path.join(root, 'users', userId, 'agents', 'beta', 'scenario.json')
+    writeFileSync(
+      scenarioFile,
+      JSON.stringify({ scenario: '精简改', data_prep_dirs: ['产线电价', '生产计划'] }),
+      'utf8',
+    )
+
+    const after = await app.inject({ method: 'GET', url: '/api/files/workspace' })
+    expect(prepDirs(after.json())).toEqual(['数据准备/产线电价', '数据准备/生产计划'])
+    // 新列出的目录被惰性建到**该数字人的数据域**里（不是用户级、也不是场景文件旁边）
+    expect(
+      existsSync(path.join(root, 'users', userId, 'user-data', 'beta', '数据准备', '生产计划')),
+    ).toBe(true)
+    expect(existsSync(path.join(root, 'users', userId, 'agents', 'beta', '数据准备'))).toBe(false)
+  })
+
+  it('场景清单收缩不回删数据目录（FR-060：清单是"可见范围"，不是清理依据）', async () => {
+    await select('beta')
+    const dir = path.join(root, 'users', userId, 'user-data', 'beta', '数据准备', '生产计划')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, '既有文件.csv'), '车间\n冲压\n', 'utf8')
+
+    const scenarioFile = path.join(root, 'users', userId, 'agents', 'beta', 'scenario.json')
+    writeFileSync(scenarioFile, JSON.stringify({ scenario: '精简', data_prep_dirs: ['产线电价'] }), 'utf8')
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/workspace' })
+    expect(prepDirs(res.json())).toEqual(['数据准备/产线电价'])
+    // 目录与文件都还在（平台只负责可见范围，运行环境 MUST NOT 因清单收缩删数据）
+    expect(existsSync(path.join(dir, '既有文件.csv'))).toBe(true)
   })
 })

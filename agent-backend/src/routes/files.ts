@@ -19,8 +19,11 @@
  * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
  * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
  *
- * 文件空间视角＝**当前选中的数字人**：场景（scenario.json）随数字人存放，
- * 故同一用户的不同数字人可见的目录清单不同。未选中数字人 → 409 AGENT_NOT_SELECTED；
+ * **归属（009）**：文件空间视角＝**当前选中的数字人**，且路径根是**该数字人的数据域**
+ * （`user-data/{数字人}/`）。相对路径语义不变（`数据准备/生产计划`、`共享空间`…），
+ * 但解析结果随数字人而异 ⇒ 跨数字人访问在路径层不可达（403 DIR_VALIDATION / 404）。
+ * 场景（scenario.json）随数字人存放，故同一用户的不同数字人可见的目录清单不同。
+ * 未选中数字人 → 409 AGENT_NOT_SELECTED；选中但不可用 → 409 AGENT_NOT_AVAILABLE；
  * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED。
  */
 import { createWriteStream } from 'node:fs';
@@ -29,6 +32,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
+import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import {
   DirValidationError,
@@ -47,7 +51,7 @@ import { checkUploadBuffer, supportsFieldCheck } from '../domain/field-check.js'
 import { removeFileSafe } from '../domain/fs-safe.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
-import { verifyRef } from '../infra/file-sign.js';
+import { splitAgentScopedPath, verifyRef } from '../infra/file-sign.js';
 import { registerFilePutRoute } from './files-put.js';
 
 /** 内联预览 Content-Type 映射；.xlsx/.xls 前端无法内联渲染，回退附件下载 */
@@ -83,25 +87,28 @@ const downloadQuerySchema = {
   },
 } as const;
 
-function fileAccessFor(ctx: AppContext, userId: string): FileAccess {
+function fileAccessFor(ctx: AppContext, userId: string, agentName: string): FileAccess {
   return new FileAccess({
     optAgentRoot: ctx.config.optAgentRoot,
     userId,
+    agentName,
     logger: ctx.loggers.logger,
     truncateKb: ctx.config.readTruncateKb,
   });
 }
 
 /**
- * 文件空间视角所属的数字人＝当前选中数字人（场景随数字人存放）。
- * 未选中时无法确定可见目录清单 → 409，与对话路由的判定口径保持一致。
+ * 文件空间视角所属的数字人＝当前选中数字人（场景随数字人存放，数据域亦随数字人）。
+ *
+ * 判定**复用唯一入口** `resolveAgentScope`（未选中 → 409 AGENT_NOT_SELECTED；
+ * 选中但不可用 → 409 AGENT_NOT_AVAILABLE）：本文件只负责沿用既有文案，MUST NOT
+ * 再写一遍"查选中态"的逻辑（双实现漂移，FR-023）。
  */
 function currentAgentFor(ctx: AppContext, userId: string): string {
-  const selected = ctx.currentAgent.current(userId);
-  if (!selected) {
-    throw new ApiError(409, 'AGENT_NOT_SELECTED', '请先选定数字人后再操作文件空间');
-  }
-  return selected.agentName;
+  return resolveAgentScope(ctx, userId, {
+    notSelectedMessage: '请先选定数字人后再操作文件空间',
+    route: 'files',
+  }).agentName;
 }
 
 /** 目录参数统一校验：穿越 → 400；空间外/清单外 → 403；scenario 缺失 → 503 */
@@ -110,6 +117,19 @@ function checkDir(ctx: AppContext, userId: string, agentName: string, dir: strin
     return parseSpaceDir(ctx.config.optAgentRoot, userId, agentName, dir);
   } catch (err) {
     if (err instanceof DirValidationError) {
+      // 越界拒绝 MUST 可观测（FR-051）：含用户标识、数字人标识与请求线索（被拒的目录参数）
+      ctx.loggers.logger.warn(
+        {
+          alert: false,
+          event: 'dir.validation.rejected',
+          user_id: userId,
+          agent_name: agentName,
+          dir,
+          status_code: err.statusCode,
+          reason: err.message,
+        },
+        `目录参数被拒（uid=${userId} agent=${agentName} dir=${dir}）：${err.message}`,
+      );
       throw new ApiError(
         err.statusCode,
         err.statusCode === 400 ? 'VALIDATION_FAILED' : 'UPLOAD_DIR_FORBIDDEN',
@@ -173,6 +193,26 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
      * Fastify 会把原始错误包成 500；改为排空后续文件段、循环外统一抛（状态码保真）。
      */
     let earlyError: unknown;
+    /**
+     * 归属数字人：**懒解析 + 早验失败缓存**。
+     *
+     * 暂存目录也是**该数字人**的临时空间（009），而 `dir` 字段可能晚于文件段到达，
+     * 因此这里按需解析；解析失败（未选中 / 不可用）与目录校验失败同一处置——
+     * 记入 `earlyError`、排空文件段、循环外统一抛（不 500，见下方注释）。
+     */
+    let agentName: string | undefined;
+    let agentError: unknown;
+    const resolveAgent = (): string => {
+      if (agentName !== undefined) return agentName;
+      if (agentError !== undefined) throw agentError;
+      try {
+        agentName = currentAgentFor(ctx, userId);
+        return agentName;
+      } catch (err) {
+        agentError = err;
+        throw err;
+      }
+    };
     let staging: string | undefined;
     let originalName = 'file';
     let savedSize = 0;
@@ -180,6 +220,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     const parts = req.parts();
     for await (const part of parts) {
       if (part.type === 'file') {
+        if (!earlyError) {
+          try {
+            resolveAgent(); // 无归属数字人则无处暂存：视为早验失败
+          } catch (err) {
+            earlyError = err;
+          }
+        }
         if (earlyError) {
           // 已早验失败：排空文件段（不暂存），让请求体完整消费完，错误在循环外抛出
           for await (const chunk of part.file) {
@@ -187,8 +234,9 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           }
           continue;
         }
-        // dir 可能还没解析到：先流式写入用户临时空间暂存，待 dir 确认后移动
-        const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), SPACE_TMP);
+        // dir 可能还没解析到：先流式写入**该数字人**临时空间暂存，待 dir 确认后移动
+        const agent = resolveAgent(); // 缓存命中：上面已解析成功（失败即上面已 continue）
+        const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId, agent), SPACE_TMP);
         fs.mkdirSync(tmpAbs, { recursive: true });
         staging = path.join(tmpAbs, `.upload-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         try {
@@ -211,7 +259,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           try {
             // 早验：dir 先于 file 到达时，目录合法性/选中态在**文件上传之前**即拒绝，
             // 省带宽与暂存 IO；file 先到的旧顺序退回「先收后验」（结果一致，仅时机不同）
-            validatedTarget = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+            validatedTarget = checkDir(ctx, userId, resolveAgent(), dir);
           } catch (err) {
             earlyError = err;
           }
@@ -232,18 +280,14 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(400, 'VALIDATION_FAILED', '缺少目标目录字段 dir');
     }
     try {
+      const agent = resolveAgent(); // 归属数字人（早验阶段通常已解析，缓存命中）
       // 早验命中直接用缓存结果（同一 dir 值已校验过），否则按旧顺序补验
-      const target = validatedTarget ?? checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+      const target = validatedTarget ?? checkDir(ctx, userId, agent, dir);
       const ext = path.extname(originalName).toLowerCase();
       // 数据准备目录：载入该数字人场景（目录级白名单与字段约束的共同来源）；其余空间不读场景
       const scenario =
         target.space === SPACE_PREP && target.sub
-          ? loadScenario(
-              ctx.config.optAgentRoot,
-              userId,
-              currentAgentFor(ctx, userId),
-              ctx.loggers.logger,
-            )
+          ? loadScenario(ctx.config.optAgentRoot, userId, agent, ctx.loggers.logger)
           : null;
       // 允许上传的类型：**唯一实现** `uploadExtensionsOf`（数据准备按目录、缺省回落平台默认；
       // 其余空间恒取 SPACE_POLICIES）。提示含允许类型，满足 FR-042 / SC-002。
@@ -272,7 +316,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           }
         }
       }
-      const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId), target.relPath);
+      const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId, agent), target.relPath);
       fs.mkdirSync(dirAbs, { recursive: true });
       const name = stampedName(dirAbs, originalName);
       fs.renameSync(staging, path.join(dirAbs, name));
@@ -286,8 +330,9 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get('/api/files/list', { schema: { querystring: listQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { dir } = req.query as { dir: string };
-    const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
-    const entries = await fileAccessFor(ctx, userId).list(target.relPath);
+    const agent = currentAgentFor(ctx, userId);
+    const target = checkDir(ctx, userId, agent, dir);
+    const entries = await fileAccessFor(ctx, userId, agent).list(target.relPath);
     return entries
       .filter((e) => !e.isDirectory)
       .map((e) => ({ filename: e.name, size: e.size, updated_at: e.modifiedAt }));
@@ -299,13 +344,14 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+      const agent = currentAgentFor(ctx, userId);
+      const target = checkDir(ctx, userId, agent, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       let buf: Buffer;
       try {
-        buf = await fileAccessFor(ctx, userId).readBuffer(`${target.relPath}/${filename}`);
+        buf = await fileAccessFor(ctx, userId, agent).readBuffer(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在: ${dir}/${filename}`);
@@ -328,13 +374,14 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+      const agent = currentAgentFor(ctx, userId);
+      const target = checkDir(ctx, userId, agent, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       let buf: Buffer;
       try {
-        buf = await fileAccessFor(ctx, userId).readBuffer(`${target.relPath}/${filename}`);
+        buf = await fileAccessFor(ctx, userId, agent).readBuffer(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
@@ -364,8 +411,9 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   // 规则文件（.xlsx / .csv），解析成结构化行返回（解析在服务端，前端只渲染）。
   app.get('/api/files/rules', async (_req) => {
     const userId = getCurrentUser().userId;
-    const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), `${SPACE_PREP}/${RULES_SUBDIR}`);
-    const access = fileAccessFor(ctx, userId);
+    const agent = currentAgentFor(ctx, userId);
+    const target = checkDir(ctx, userId, agent, `${SPACE_PREP}/${RULES_SUBDIR}`);
+    const access = fileAccessFor(ctx, userId, agent);
 
     let entries;
     try {
@@ -419,7 +467,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     async (req) => {
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
-      const target = checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
+      const agent = currentAgentFor(ctx, userId);
+      const target = checkDir(ctx, userId, agent, dir);
       if (target.space === SPACE_SHARED) {
         throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
       }
@@ -427,7 +476,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
       try {
-        await fileAccessFor(ctx, userId).remove(`${target.relPath}/${filename}`);
+        await fileAccessFor(ctx, userId, agent).remove(`${target.relPath}/${filename}`);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
@@ -437,7 +486,9 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     },
   );
 
-  // MCP 签名直链（远程/跨容器服务回源下载）：HMAC 绑定 (u, p, exp)，URL 即凭证，无需会话
+  // MCP 签名直链（远程/跨容器服务回源下载）：HMAC 绑定 (u, p, exp)，URL 即凭证，无需会话。
+  // 009：`p` = `{数字人}/{数字人数据域内相对路径}`（数字人段同样在签名内 ⇒ 不可篡改），
+  // 因此跨数字人读取在签名层即不可达；形状不合法一律 404（与"文件不存在"不可区分）。
   app.get(
     '/api/files/raw',
     { schema: { querystring: rawQuerySchema } },
@@ -447,9 +498,13 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       if (!verifyRef(ctx.config.fileSignSecret, u, p, expNum, sig)) {
         throw new ApiError(403, 'FILE_SIGN_INVALID', '签名无效或已过期');
       }
+      const signed = splitAgentScopedPath(p);
+      if (!signed) {
+        throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或不可访问: ${p}`);
+      }
       let buf: Buffer;
       try {
-        buf = await fileAccessFor(ctx, u).readBuffer(p);
+        buf = await fileAccessFor(ctx, u, signed.agentName).readBuffer(signed.relPath);
       } catch (err) {
         if (err instanceof PermissionError)
           throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或不可访问: ${p}`);
@@ -467,15 +522,11 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   // 2026-10-13：响应体装配拆到 `domain/workspace-view.ts`（本文件行数逼近 500 门禁，原则二）
   app.get('/api/files/workspace', async (_req) => {
     const userId = getCurrentUser().userId;
+    const agent = currentAgentFor(ctx, userId);
 
     let scenario;
     try {
-      scenario = loadScenario(
-        ctx.config.optAgentRoot,
-        userId,
-        currentAgentFor(ctx, userId),
-        ctx.loggers.logger,
-      );
+      scenario = loadScenario(ctx.config.optAgentRoot, userId, agent, ctx.loggers.logger);
     } catch (err) {
       if (err instanceof ScenarioNotConfiguredError) {
         throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
@@ -483,6 +534,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw err;
     }
 
-    return buildWorkspaceView(scenario, fileAccessFor(ctx, userId));
+    return buildWorkspaceView(scenario, fileAccessFor(ctx, userId, agent));
   });
 }

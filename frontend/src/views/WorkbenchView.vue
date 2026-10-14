@@ -82,8 +82,14 @@ function onSelectThread(threadId: string): void {
   void session.threads.select(threadId)
 }
 
+/**
+ * 「新建对话」（009 FR-010 修订）：**只进入空对话视图**，不调创建接口。
+ *
+ * 历史列表只呈现有消息的会话（服务端判据），会话由首条消息创建——
+ * 若在这里 `create()`，每次点击都会多出一条"没有任何消息"的记录。
+ */
 function onCreateThread(): void {
-  void session.threads.create()
+  session.threads.startNew()
 }
 
 function onShowMore(): void {

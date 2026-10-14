@@ -6,6 +6,12 @@
  * 一次性拉取全部会话，"更多"只改本地切片长度，**不产生网络请求**（FR-039、FR-040、SC-014）。
  *
  * 只有**详情**接口支持分页（`limit` 默认 50 / 上限 200，`offset` 从最新往前数）。
+ *
+ * 009（数字人数据隔离）：
+ * - `GET /api/threads` 返回的**只含当前选中数字人**的会话，且服务端已剔除"尚无任何轮次"
+ *   的空会话（FR-016）——前端不再需要（也不应）自行按消息数过滤，作用域判定是服务端权威。
+ * - 「新建对话」是**视图态**（`startNew()`，FR-010）：只清空当前选中与消息，**不调创建接口**；
+ *   真正的会话由既有"首条消息且无 activeId"路径创建，避免每次切换数字人都留下一个空会话。
  */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
@@ -58,6 +64,12 @@ export interface ThreadsStore {
   /** 纯前端切到 100 条（不发请求） */
   showMore(): void
   create(): Promise<void>
+  /**
+   * 进入「新的空对话」**视图态**（FR-010 修订）：只清空，不落盘、不发请求。
+   *
+   * 历史列表只呈现**有消息**的会话（服务端判据），因此空对话不会留下任何记录。
+   */
+  startNew(): void
   select(id: string): Promise<void>
   loadMore(): Promise<void>
   refresh(): Promise<void>
@@ -101,7 +113,8 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     error.value = null
     try {
       const items = await deps.threads.list()
-      // 后端已按 updated_at 倒序，前端再排一次以防契约漂移
+      // 后端已按 updated_at 倒序、且只给**当前数字人的有消息会话**（009 FR-016），
+      // 前端再排一次以防契约漂移；不在此处过滤消息数（作用域与空会话判据均为服务端权威）
       list.value = [...items].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     } catch (cause) {
       error.value = toErrorInfo(cause)
@@ -142,6 +155,17 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     total.value = 0
     running.value = false
     pendingInteraction.value = null
+  }
+
+  /**
+   * 「新建对话」＝ 视图态空对话（FR-010 修订 / D14）。
+   *
+   * 语义上就是 `clearActive()`：**MUST NOT** 调 `create()`——服务端只呈现有消息的会话，
+   * 若在这里创建，切换数字人一次就多一条空记录（列表被塞满，且用户以为"删不掉"）。
+   * 首条消息由 `useChatPanel` 的既有路径（无 activeId → `create()`）创建。
+   */
+  function startNew(): void {
+    clearActive()
   }
 
   async function refresh(): Promise<void> {
@@ -260,6 +284,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     loadList,
     showMore,
     create,
+    startNew,
     select,
     loadMore,
     refresh,

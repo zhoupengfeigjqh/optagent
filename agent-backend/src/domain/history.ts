@@ -7,6 +7,9 @@
  * - 旧格式行（仅 role/content）兼容可读；反馈行不出现在 readAll/readRecent 结果中
  * - 追加经 per-thread Promise 链串行化，并发安全；单行一次 append 保证原子性
  * - 读取时坏行跳过并告警；整体损坏（无一条合法行）→ 备份后重建并告警
+ *
+ * **009 归属**：落点 `user-data/{数字人}/threads/{threadId}/history.jsonl`——
+ * 数字人作为**必填入参**贯穿全部方法（路径工厂唯一来源仍是 `dirs.ts#threadDir`）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,25 +30,31 @@ export class HistoryStore {
     private readonly logger?: HistoryLogger,
   ) {}
 
-  private filePath(userId: string, threadId: string): string {
-    return path.join(threadDir(this.root, userId, threadId), 'history.jsonl');
+  private filePath(userId: string, agentName: string, threadId: string): string {
+    return path.join(threadDir(this.root, userId, agentName, threadId), 'history.jsonl');
   }
 
   /** 追加一条消息（per-thread 串行；写盘失败抛给调用方记录，不影响已广播的响应） */
-  append(userId: string, threadId: string, msg: HistoryMessage): Promise<void> {
-    return this.enqueue(userId, threadId, JSON.stringify(msg));
+  append(userId: string, agentName: string, threadId: string, msg: HistoryMessage): Promise<void> {
+    return this.enqueue(userId, agentName, threadId, JSON.stringify(msg));
   }
 
   /** 追加反馈行（value=null 表示取消反馈；合并语义见 readFeedback） */
-  appendFeedback(userId: string, threadId: string, messageId: string, value: FeedbackValue): Promise<void> {
+  appendFeedback(
+    userId: string,
+    agentName: string,
+    threadId: string,
+    messageId: string,
+    value: FeedbackValue,
+  ): Promise<void> {
     const line = JSON.stringify({ type: 'feedback', message_id: messageId, value, ts: new Date().toISOString() });
-    return this.enqueue(userId, threadId, line);
+    return this.enqueue(userId, agentName, threadId, line);
   }
 
-  private enqueue(userId: string, threadId: string, line: string): Promise<void> {
-    const key = `${userId}/${threadId}`;
+  private enqueue(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+    const key = `${userId}/${agentName}/${threadId}`;
     const prev = this.chains.get(key) ?? Promise.resolve();
-    const next = prev.then(() => this.doAppend(userId, threadId, line));
+    const next = prev.then(() => this.doAppend(userId, agentName, threadId, line));
     this.chains.set(
       key,
       next.catch(() => {}),
@@ -53,15 +62,15 @@ export class HistoryStore {
     return next;
   }
 
-  private async doAppend(userId: string, threadId: string, line: string): Promise<void> {
-    const file = this.filePath(userId, threadId);
+  private async doAppend(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+    const file = this.filePath(userId, agentName, threadId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await fs.promises.appendFile(file, line + '\n', 'utf8');
   }
 
   /** 读取文件全部合法行（消息 + 反馈）；坏行跳过告警，整体损坏备份重建（FR-029） */
-  private readLines(userId: string, threadId: string): ParsedLine[] {
-    const file = this.filePath(userId, threadId);
+  private readLines(userId: string, agentName: string, threadId: string): ParsedLine[] {
+    const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return [];
     const raw = fs.readFileSync(file, 'utf8');
     const lines = raw.split('\n').filter((l) => l.trim().length > 0);
@@ -73,21 +82,23 @@ export class HistoryStore {
       else bad++;
     }
     if (bad > 0) {
-      this.logger?.warn(`history 坏行跳过 ${bad} 条（user=${userId} thread=${threadId}）`);
+      this.logger?.warn(`history 坏行跳过 ${bad} 条（user=${userId} agent=${agentName} thread=${threadId}）`);
     }
     if (lines.length > 0 && parsed.length === 0) {
       // 整体损坏：备份原文件并重建为空
       const backup = path.join(path.dirname(file), `history.corrupt-${Date.now()}.jsonl`);
       fs.renameSync(file, backup);
       fs.writeFileSync(file, '', 'utf8');
-      this.logger?.warn(`history 整体损坏，已备份至 ${backup} 并重建（user=${userId} thread=${threadId}）`);
+      this.logger?.warn(
+        `history 整体损坏，已备份至 ${backup} 并重建（user=${userId} agent=${agentName} thread=${threadId}）`,
+      );
     }
     return parsed;
   }
 
   /** 读取全部消息（反馈行被过滤）；时间正序 */
-  readAll(userId: string, threadId: string): HistoryMessage[] {
-    return this.readLines(userId, threadId)
+  readAll(userId: string, agentName: string, threadId: string): HistoryMessage[] {
+    return this.readLines(userId, agentName, threadId)
       .filter((p): p is Extract<ParsedLine, { kind: 'message' }> => p.kind === 'message')
       .map((p) => p.message);
   }
@@ -100,11 +111,12 @@ export class HistoryStore {
    */
   readSnapshot(
     userId: string,
+    agentName: string,
     threadId: string,
   ): { messages: HistoryMessage[]; feedback: Map<string, 'up' | 'down'> } {
     const messages: HistoryMessage[] = [];
     const feedback = new Map<string, 'up' | 'down'>();
-    for (const p of this.readLines(userId, threadId)) {
+    for (const p of this.readLines(userId, agentName, threadId)) {
       if (p.kind === 'message') {
         messages.push(p.message);
       } else if (p.value === null) {
@@ -124,14 +136,14 @@ export class HistoryStore {
    * "取末尾 N 条"的窗口起点与摘要边界是两个独立指针，会在二者之间留下
    * 既不在正文、也不在摘要的空洞。保留本方法供测试与临时取数使用。
    */
-  readRecent(userId: string, threadId: string, n: number): HistoryMessage[] {
-    return this.readAll(userId, threadId).slice(-n);
+  readRecent(userId: string, agentName: string, threadId: string, n: number): HistoryMessage[] {
+    return this.readAll(userId, agentName, threadId).slice(-n);
   }
 
   /** 反馈合并：按行序后者覆盖前者；value=null 视为无反馈（从结果中移除） */
-  readFeedback(userId: string, threadId: string): Map<string, 'up' | 'down'> {
+  readFeedback(userId: string, agentName: string, threadId: string): Map<string, 'up' | 'down'> {
     const map = new Map<string, 'up' | 'down'>();
-    for (const p of this.readLines(userId, threadId)) {
+    for (const p of this.readLines(userId, agentName, threadId)) {
       if (p.kind !== 'feedback') continue;
       if (p.value === null) map.delete(p.messageId);
       else map.set(p.messageId, p.value);

@@ -72,19 +72,20 @@ afterEach(() => {
 
 describe('后台计算结果清单注入（R11）', () => {
   it('有产出：整段文本进 systemExtra，且按当前用户与会话取', async () => {
-    const asked: Array<[string, string]> = [];
+    const asked: Array<[string, string, string]> = [];
     const manager = new RunManager({
       history,
       usage,
-      produced: async (userId, threadId) => {
-        asked.push([userId, threadId]);
+      // 009：装配侧按（用户，数字人，会话）取产出清单
+      produced: async (userId, agentName, threadId) => {
+        asked.push([userId, agentName, threadId]);
         return PRODUCED_TEXT;
       },
     });
 
     const [req] = await runOnce(manager);
 
-    expect(asked).toEqual([['admin', 'th1']]);
+    expect(asked).toEqual([['admin', 'demo', 'th1']]);
     expect(req!.systemExtra).toContain('【后台计算结果】');
     expect(req!.systemExtra).toContain('临时空间/后台产出/th1_j_1.json');
   });

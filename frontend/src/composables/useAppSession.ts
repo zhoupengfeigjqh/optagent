@@ -199,8 +199,14 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     getModel: () => models.current.value,
     getAgentName: () => currentAgentName.value,
     stopRun: (threadId) => threadsApi.stop(threadId).then(() => undefined),
-    /** 轮末：刷新会话详情（正文/工具卡片即时可见）；卡片已随 done 直推，无需轮询 */
-    onTurnFinished: () => threads.refresh(),
+    /**
+     * 轮末：刷新会话详情（正文/工具卡片即时可见）与会话列表（新会话进入侧栏、
+     * 标题与 updated_at 排序同步到最新）；卡片已随 done 直推，无需轮询。
+     */
+    onTurnFinished: async () => {
+      await threads.refresh()
+      await threads.loadList()
+    },
     /** done 直推的当轮卡片写入（`useChatStream` 收到 `done.next_actions` 时调用） */
     applyNextActions: (steps) => nextSteps.apply(steps),
     feedbackOf: (messageId) =>
@@ -221,6 +227,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     getPhase: () => chat.phase.value,
     toast,
     onSwitched: async () => {
+      // 009：会话按数字人隔离 ⇒ 切换即进入**新的空对话视图**（不落盘，见 ThreadsStore.startNew）
+      threads.startNew()
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()

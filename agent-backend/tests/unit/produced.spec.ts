@@ -28,13 +28,16 @@ import {
   writeProduced,
 } from '../../src/domain/produced.js';
 
+/** 本用例使用的数字人（数据域一级目录名，009 产出目录也随之落到它下面） */
+const AGENT = 'demo';
+
 let root: string;
 let access: FileAccess;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'produced-'));
-  fs.mkdirSync(path.join(root, 'users', 'admin', 'user-data'), { recursive: true });
-  access = new FileAccess({ optAgentRoot: root, userId: 'admin' });
+  fs.mkdirSync(path.join(root, 'users', 'admin', 'user-data', AGENT), { recursive: true });
+  access = new FileAccess({ optAgentRoot: root, userId: 'admin', agentName: AGENT });
 });
 
 afterEach(() => {
@@ -43,7 +46,7 @@ afterEach(() => {
 
 /** 产出目录的绝对路径（断言正文真的落到磁盘时用） */
 function producedAbs(name: string): string {
-  return path.join(root, 'users', 'admin', 'user-data', PRODUCED_DIR, name);
+  return path.join(root, 'users', 'admin', 'user-data', AGENT, PRODUCED_DIR, name);
 }
 
 describe('FileAccess.writeProduced —— 受控子目录写入（§10.6 不变式 4）', () => {
@@ -311,7 +314,8 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
 
   it('只改 sidecar，**不动正文**（正文是服务的计算结果，元数据操作不该碰它）', async () => {
     const saved = await seed('j_1');
-    const bodyPath = path.join(root, 'users', 'admin', 'user-data', saved.relPath);
+    // relPath 相对**数字人数据域**（009），故拼到 {AGENT} 之下
+    const bodyPath = path.join(root, 'users', 'admin', 'user-data', AGENT, saved.relPath);
 
     await markProducedRead(access, ['j_1']);
 

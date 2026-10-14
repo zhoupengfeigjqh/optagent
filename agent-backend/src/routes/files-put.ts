@@ -11,7 +11,7 @@ import type { AppContext } from '../context.js';
 import { PRODUCED_DIR } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { writeProduced } from '../domain/produced.js';
-import { verifyPutRef } from '../infra/file-sign.js';
+import { splitAgentScopedPath, verifyPutRef } from '../infra/file-sign.js';
 import { ApiError } from '../server.js';
 
 /**
@@ -96,8 +96,23 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
     if (!verifyPutRef(ctx.config.fileSignSecret, u!, d!, Number(exp), sig!)) {
       throw new ApiError(403, 'FILE_SIGN_INVALID', '签名无效或已过期');
     }
-    // 目录白名单再收一道：即便签名合法，也只允许写产出目录（`d` 本就在签名内）
-    if (d !== PRODUCED_DIR) {
+    // `d` 的形状（009）：`{数字人}/{数字人数据域内相对路径}`，数字人段在签名内不可篡改；
+    // 目录白名单再收一道：即便签名合法，也只允许写产出目录
+    const scoped = splitAgentScopedPath(d!);
+    if (!scoped || scoped.relPath !== PRODUCED_DIR) {
+      // 越界写入拒绝同样落结构化日志（FR-051）：签名合法但目录不在白名单，必须能追溯
+      ctx.loggers.logger.warn(
+        {
+          alert: false,
+          event: 'dir.validation.rejected',
+          user_id: u,
+          agent_name: scoped?.agentName ?? null,
+          dir: d,
+          status_code: 400,
+          reason: 'not_produced_dir',
+        },
+        `回写目录被拒（uid=${u} dir=${d}）：只允许写 ${PRODUCED_DIR}`,
+      );
       throw new ApiError(400, 'VALIDATION_FAILED', `不允许的写入目录：${d}`);
     }
     if (filename !== path.basename(filename!) || filename!.includes('..')) {
@@ -116,6 +131,8 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
         access: new FileAccess({
           optAgentRoot: ctx.config.optAgentRoot,
           userId: u!,
+          // 落点＝该数字人的数据域（`d` 的首段，签名内保证）
+          agentName: scoped.agentName,
           logger: ctx.loggers.logger,
           truncateKb: ctx.config.readTruncateKb,
         }),

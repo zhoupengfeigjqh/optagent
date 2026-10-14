@@ -120,6 +120,69 @@ describe('作用域：文件空间内容 100% 不变（FR-028 / SC-012）', () =
   });
 });
 
+/**
+ * 009（数字人数据隔离）：数据域归到**数字人一级**后，`user-data/**` 对平台依然是**只读区**。
+ *
+ * 三个要点：
+ * 1. 未关联（甚至平台侧不存在）的数字人数据目录同样保留——"未纳管"不等于"可清理"；
+ * 2. 已关联数字人的数据域（`user-data/{name}/**`）不被部署覆盖；
+ * 3. 平台对数据目录**零创建**（新用户部署后不产生任何 `user-data/**`）。
+ */
+describe('作用域：未关联数字人的数据目录保留（009 FR-031）', () => {
+  it('部署与撤回都不触碰 user-data/**：未关联数字人的数据目录原样保留', async () => {
+    const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
+    // 平台侧**从未纳管**的数字人（移除后遗留 / 手工存在）：数据必须原样保留
+    fs.mkdirSync(path.join(dataRoot, '历史数字人', '共享空间'), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, '历史数字人', '共享空间', 'keep.csv'), 'x,y\n1,2\n', 'utf8');
+    fs.mkdirSync(path.join(dataRoot, '历史数字人', '数据准备', '生产计划'), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, '历史数字人', '数据准备', '生产计划', 'plan.csv'), 'a\n', 'utf8');
+    // 已关联数字人的数据域：部署也不得覆盖
+    fs.mkdirSync(path.join(dataRoot, 'demo', '临时空间'), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, 'demo', '临时空间', 'th_out.txt'), '产出\n', 'utf8');
+
+    const before = snapshotTree(dataRoot);
+
+    await createAgent(agentBody());
+    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    expect((await deployAll()).statusCode).toBe(200);
+    expect(snapshotTree(dataRoot)).toEqual(before);
+
+    // 撤回同样零触碰（撤回的是"能力"，不是数据）
+    const withdraw = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy/withdraw',
+      payload: { user_id: 'admin', revision: fx.ctx.store.revision() },
+    });
+    expect(withdraw.statusCode).toBe(200);
+    expect(snapshotTree(dataRoot)).toEqual(before);
+    expect(fs.existsSync(path.join(dataRoot, '历史数字人', '共享空间', 'keep.csv'))).toBe(true);
+  });
+
+  it('平台对数据目录零创建：新用户部署后 `user-data` 一个目录都不出现', async () => {
+    await createAgent(agentBody({ name: 'a1' }));
+    fx.ctx.users.create('admin', ['a1'], fx.ctx.store.revision());
+    fx.ctx.users.create('ops', ['a1'], fx.ctx.store.revision());
+
+    // 清掉夹具预置的旧布局目录，观察"平台自己会不会建"
+    fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'), {
+      recursive: true,
+      force: true,
+    });
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'))).toBe(false);
+
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['admin', 'ops'], revision: fx.ctx.store.revision() },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // 数字人目录才有产物；数据域由运行环境惰性创建（Q2=A：平台零触碰）
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'a1'))).toBe(true);
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'))).toBe(false);
+  });
+});
+
 describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
   it('改库中 SKILL 正文后部署一次，N 个数字人的技能目录内容与库中一致', async () => {
     const zip = zipFixture({

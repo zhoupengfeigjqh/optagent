@@ -43,7 +43,7 @@ interface StreamingView {
   thinking: string
   toolCalls: ToolCallView[]
   error: ErrorInfo | null
-  /** 本轮回答的数字人（会话可跨数字人） */
+  /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
   agentName: string | null
   /** ABORTED 态是否有可重发的中断轮缓存（「重新生成」按钮渲染条件） */
   canRegenerate?: boolean
@@ -104,7 +104,11 @@ const emit = defineEmits<{
 const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)
 /**
  * 本条消息所属数字人：已落盘消息取 `message.agent_name`（后端逐条返回），
- * 流式气泡取本轮快照。会话可跨数字人（FR-014 修订），因此逐条标注而非按会话标注。
+ * 流式气泡取本轮快照。
+ *
+ * **009 修订**：原"会话可跨数字人（FR-014）"的口径已废止——会话归属在创建时写定、
+ * 生命周期内不可变更（跨数字人访问一律 404）。之所以仍**逐条**标注而非按会话标注：
+ * 存量数据里同一会话的相邻轮次可能留有不同归属，逐条取用能如实还原历史。
  */
 const agentName = computed(
   () => props.message.agent_name ?? props.streaming?.agentName ?? null,

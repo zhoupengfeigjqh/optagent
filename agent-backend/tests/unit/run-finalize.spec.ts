@@ -22,14 +22,19 @@ import type { UsageStore } from '../../src/types.js';
 
 const USAGE: UsageInfo = { inputTokens: 11, outputTokens: 22 };
 
-/** 假落盘口：只记调用，不碰磁盘 */
+/** 假落盘口：只记调用，不碰磁盘（009：入参为 用户 → 数字人 → 会话 → 消息） */
 function fakeHistory() {
-  const appended: Array<{ userId: string; threadId: string; message: HistoryMessage }> = [];
+  const appended: Array<{
+    userId: string;
+    agentName: string;
+    threadId: string;
+    message: HistoryMessage;
+  }> = [];
   return {
     appended,
     store: {
-      append: (userId: string, threadId: string, message: HistoryMessage) => {
-        appended.push({ userId, threadId, message });
+      append: (userId: string, agentName: string, threadId: string, message: HistoryMessage) => {
+        appended.push({ userId, agentName, threadId, message });
         return undefined as unknown as Promise<void>;
       },
     } as unknown as HistoryStore,
@@ -77,6 +82,8 @@ describe('RunFinalizer.done', () => {
 
     expect(run.state).toBe('done');
     expect(history.appended.map((a) => a.message.role)).toEqual(['user', 'assistant']);
+    // 009：落点取**本轮的**数字人（run.agentName），两条消息同域
+    expect(history.appended.map((a) => a.agentName)).toEqual(['demo', 'demo']);
     // assistant 行用 run 启动时预生成的 id（工具事件行已按它归属）
     expect(history.appended[1]!.message.id).toBe('m-assistant');
     expect(history.appended[1]!.message).toMatchObject({
@@ -131,8 +138,8 @@ describe('RunFinalizer.done', () => {
     const events = collect(run);
     await finalizer.done(run, turn(runtime, 3), { role: 'user', content: '你好' }, USAGE);
 
-    expect(flush).toHaveBeenCalledWith('admin', 'th_1');
-    expect(summaryTrigger).toHaveBeenCalledWith('admin', 'th_1');
+    expect(flush).toHaveBeenCalledWith('admin', 'demo', 'th_1');
+    expect(summaryTrigger).toHaveBeenCalledWith('admin', 'demo', 'th_1');
     // 素材取自本轮真相：捕获的尾部块原文 + 本轮可用工具；条数上限与提示词装配同源
     expect(finalizeInputs).toHaveLength(1);
     expect(finalizeInputs[0]).toMatchObject({

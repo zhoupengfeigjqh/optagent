@@ -7,7 +7,7 @@
  * - 全部接线（事件编排、UI 开关、生命周期）集中在 `useChatPanel()`，
  *   本组件只负责 props 相关的布局派生与渲染（宪章原则二：单文件 ≤500 行）
  */
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 
 import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
@@ -111,6 +111,25 @@ const heroStarters = computed<AgentStarter[]>(() => agents.currentAgent.value?.s
 const agentSelected = computed(() => agents.currentAgent.value !== null)
 
 /**
+ * 陈旧的数字人上下文（已被移除/不再对该用户可用）→ 在**既有错误提示位**补一句
+ * "现在还能选谁"（009 FR-032/052；不新增控件）。
+ *
+ * 候选清单可能尚未加载（面板没打开过），此时先触发一次加载；文案在清单到位后自然补全。
+ */
+const degradedAgentHint = computed(() => {
+  if (errorInfo.value?.code !== 'AGENT_NOT_AVAILABLE') return null
+  const names = agents.candidates.value.map((item) => item.agent_name)
+  return names.length > 0 ? `可切换的数字人：${names.join('、')}` : '请重新选择数字人'
+})
+
+watch(
+  () => errorInfo.value?.code,
+  (code) => {
+    if (code === 'AGENT_NOT_AVAILABLE') void agents.loadCandidates()
+  },
+)
+
+/**
  * 点击问题卡片 = 发起一轮对话。
  *
  * 正文只发问题本身（用户气泡保持干净）；关联工具的引导随 `guidance` 走
@@ -206,6 +225,8 @@ function onStarterClick(starter: AgentStarter): void {
       v-if="isFailed && errorInfo"
       class="chat-panel__error"
       :error="errorInfo"
+      :hint="degradedAgentHint"
+      context="send-message"
       retry-label="重新获取"
       @retry="onRecover"
     />
@@ -285,6 +306,7 @@ function onStarterClick(starter: AgentStarter): void {
       :current="agents.currentAgent.value"
       :candidates="agents.candidates.value"
       :switching-disabled="agents.switchingDisabled.value"
+      :switching-disabled-reason="agents.switchingDisabledReason.value"
       :busy="agents.switching.value"
       @close="onCloseAgentPanel"
       @switch="onSwitchAgent"

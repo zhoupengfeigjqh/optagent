@@ -6,6 +6,10 @@
  * - 目录白名单：三空间（数据准备/共享空间/临时空间）；数据准备的二级目录须真实存在
  * - 权限矩阵：数据准备/共享空间只读；临时空间可写但强制 `{thread_id}_` 前缀
  * - 违规抛 PermissionError 并记日志（对话不中断由上层保证）
+ *
+ * **009 归属**：`dataRoot` 是**数字人数据域**（`user-data/{数字人}`），`agentName` 为必填入参；
+ * 因此相对路径（`数据准备/生产计划`、`临时空间`…）语义不变，但**解析结果随数字人而异**——
+ * 跨数字人访问在路径层即不可达（白名单外 → PermissionError）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,6 +50,8 @@ const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
 export interface FileAccessOptions {
   optAgentRoot: string;
   userId: string;
+  /** 数据域所属数字人（009 必填）：决定 `dataRoot = user-data/{数字人}` */
+  agentName: string;
   logger?: Logger;
   /** read 截断上限（KB），默认 32 */
   truncateKb?: number | undefined;
@@ -61,7 +67,7 @@ export class FileAccess {
 
   private readonly truncateBytesInternal: number;
   constructor(opts: FileAccessOptions) {
-    this.dataRoot = userDataDir(opts.optAgentRoot, opts.userId);
+    this.dataRoot = userDataDir(opts.optAgentRoot, opts.userId, opts.agentName);
     if (opts.logger) this.logger = opts.logger;
     this.truncateBytesInternal = (opts.truncateKb ?? 32) * 1024;
   }
@@ -193,7 +199,7 @@ export class FileAccess {
     return buf;
   }
 
-  /** 写文件：仅允许 tmp/ 且文件名强制 `{threadId}_` 前缀；返回 user-data 相对路径 */
+  /** 写文件：仅允许 tmp/ 且文件名强制 `{threadId}_` 前缀；返回**数字人数据域**相对路径 */
   async write(threadId: string, filename: string, content: string): Promise<string> {
     const base = path.basename(filename);
     if (base !== filename || base.includes('..')) {

@@ -28,7 +28,7 @@ import type {
 } from '../types.js';
 import { runAgentLoopEvents } from './agent-loop.js';
 import { buildBuiltinTools } from './builtin-tools.js';
-import { mintPutUrl, mintSignedUrl } from './file-sign.js';
+import { agentScopedPath, mintPutUrl, mintSignedUrl } from './file-sign.js';
 import { scopeToolsByAllowlist } from './mcp-tool-scope.js';
 import { wrapToolWithInteraction } from './tool-intercept.js';
 import type { LlmProvider } from './llm/llm-provider.js';
@@ -134,6 +134,7 @@ export class AgentInstanceFactory {
       const fa = new FileAccess({
         optAgentRoot: this.deps.root,
         userId: inst.key.userId,
+        agentName: inst.key.agentName,
         logger,
         truncateKb: this.deps.truncateKb,
       });
@@ -169,17 +170,24 @@ export class AgentInstanceFactory {
         // （清单外的工具不进工具表，模型无从发起调用；比"调用时拒绝"更彻底）。
         // 缺省 / 空数组 = 不限制（语义与判据见 `mcp-tool-scope.ts`）。
         const visibleToolInfos = scopeToolsByAllowlist(toolInfos, server.allowedTools);
-        // file_args 声明：绑定当前用户的 FileAccess + 签名直链铸造（远程服务回源下载）
+        // file_args 声明：绑定当前（用户，数字人）的 FileAccess + 签名直链铸造（远程服务回源下载）。
+        // 签名内的路径带数字人段（`agentScopedPath`）⇒ 直链只能取回**本数字人**数据域的文件。
         const fileCtx = server.fileArgs
           ? {
               fileAccess: new FileAccess({
                 optAgentRoot: this.deps.root,
                 userId: inst.key.userId,
+                agentName: inst.key.agentName,
                 logger,
               }),
               userId: inst.key.userId,
               mintUrl: (userId: string, relPath: string) =>
-                mintSignedUrl(this.deps.publicBaseUrl, this.deps.fileSignSecret, userId, relPath),
+                mintSignedUrl(
+                  this.deps.publicBaseUrl,
+                  this.deps.fileSignSecret,
+                  userId,
+                  agentScopedPath(inst.key.agentName, relPath),
+                ),
             }
           : undefined;
         const agentTools = mcpToolsAsAgentTools(
@@ -193,7 +201,7 @@ export class AgentInstanceFactory {
           fileCtx,
           this.deps.onMcpCall,
           logger,
-          asyncToolContext(server, inst.key.userId, req.threadId, this.deps),
+          asyncToolContext(server, inst.key.userId, inst.key.agentName, req.threadId, this.deps),
         );
         // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
         // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
@@ -296,6 +304,7 @@ export class AgentInstanceFactory {
 function asyncToolContext(
   server: McpServerConfig,
   userId: string,
+  agentName: string,
   threadId: string,
   deps: AgentFactoryDeps,
 ): AsyncToolContext | undefined {
@@ -303,8 +312,9 @@ function asyncToolContext(
   if (!tools || tools.length === 0) return undefined;
   return {
     tools,
+    // 回写目录带数字人段（009）：产出落进**发起该轮的数字人**的临时空间/后台产出
     mintResultUrl: (toolName: string, toolCallId: string) =>
-      mintPutUrl(deps.publicBaseUrl, deps.fileSignSecret, userId, PRODUCED_DIR, {
+      mintPutUrl(deps.publicBaseUrl, deps.fileSignSecret, userId, agentScopedPath(agentName, PRODUCED_DIR), {
         sid: threadId,
         callId: toolCallId,
         tool: `${server.name}__${toolName}`,

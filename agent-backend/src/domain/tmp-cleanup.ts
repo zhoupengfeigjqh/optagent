@@ -4,10 +4,14 @@
  * "未访问"判定取 max(atime, mtime)——FileAccess 读 tmp 文件时会 utimes
  * 刷新访问时间，所以正在被引用的产出不会被误删。
  * 单个文件删除失败不中断整轮扫描。
+ *
+ * **009 归属**：临时空间是**数字人级**的，因此定时任务 MUST **按（用户 × 数字人）逐一**清理
+ * （`cleanupAllAgentTmpDirs`）——只清某一个目录或漏清都会让"30 天清理"这条契约对部分数字人失效。
+ * 某数字人的临时空间不存在（从未使用过）⇒ 直接跳过，不视作异常。
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { PRODUCED_SUBDIR } from './dirs.js';
+import { PRODUCED_SUBDIR, SPACE_TMP, userDataDir } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
 
 export const TMP_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -76,6 +80,38 @@ export async function cleanupTmpDir(
     }
   }
   return result;
+}
+
+/**
+ * 按（用户 × 数字人）逐一清理各自的临时空间（009）。
+ *
+ * - 数字人清单由调用方给出（`listAgents` 口径：只含配置可用者）；已移除数字人的残留数据
+ *   **不清理**（数据保留，只是不可见——FR-031），故不扫 `user-data/` 下的目录名。
+ * - 数据目录不存在 ⇒ 该数字人从未写过临时空间，`cleanupTmpDir` 直接返回 0；
+ * - 任一数字人清理失败不中断其余数字人（逐个独立计账）。
+ */
+export async function cleanupAllAgentTmpDirs(
+  optAgentRoot: string,
+  userIds: readonly string[],
+  listAgentsOf: (userId: string) => readonly string[],
+  opts: { maxAgeMs?: number; now?: Date; logger?: CleanupLogger } = {},
+): Promise<CleanupResult & { dirs: number }> {
+  const total: CleanupResult & { dirs: number } = { deleted: 0, failed: 0, dirs: 0 };
+  for (const userId of userIds) {
+    for (const agentName of listAgentsOf(userId)) {
+      const tmpDir = path.join(userDataDir(optAgentRoot, userId, agentName), SPACE_TMP);
+      const one = await cleanupTmpDir(tmpDir, opts);
+      total.deleted += one.deleted;
+      total.failed += one.failed;
+      total.dirs += 1;
+    }
+  }
+  if (total.deleted > 0 || total.failed > 0) {
+    opts.logger?.info?.(
+      `tmp 清理（按数字人遍历 ${total.dirs} 个临时空间）：删除 ${total.deleted} 个、失败 ${total.failed} 个`,
+    );
+  }
+  return total;
 }
 
 /**

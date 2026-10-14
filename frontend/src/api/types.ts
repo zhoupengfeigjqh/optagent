@@ -351,7 +351,7 @@ export interface DoneEventData {
   duration_seconds: number
   /** 中断轮为 `null` */
   message_id: string | null
-  /** 本轮回答的数字人（会话可跨数字人） */
+  /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
   agent_name: string
   /**
    * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
@@ -366,7 +366,7 @@ export interface StreamErrorEventData {
   error: ErrorInfo
   duration_seconds?: number
   usage?: Usage
-  /** 本轮回答的数字人（会话可跨数字人） */
+  /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
   agent_name: string
 }
 

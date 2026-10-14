@@ -15,6 +15,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ErrorInfo } from '../../api/types'
 import ChatPanel from './ChatPanel.vue'
 
 const h = vi.hoisted(() => ({ panel: null as unknown }))
@@ -71,17 +72,20 @@ function makePanel(
     workspace: { spaces: ref([]), loading: ref(false) },
     agents: {
       currentAgent: ref(null),
-      candidates: ref([]),
+      candidates: ref<Array<{ agent_name: string }>>([]),
       mcpServers: ref([]),
       switchingDisabled: ref(false),
+      switchingDisabledReason: ref(null),
       switching: ref(false),
+      // 009：陈旧数字人降级时面板会主动拉一次候选清单（用于"现在还能选谁"）
+      loadCandidates: noop,
     },
     uploadOpen: ref(false),
     agentPanelOpen: ref(false),
     workspaceOpen: ref(false),
     streaming: ref(null),
     isFailed: ref(false),
-    errorInfo: ref(null),
+    errorInfo: ref<ErrorInfo | null>(null),
     sending: ref(false),
     hasMessages: ref(false),
     pendingUserMessage: ref(null),
@@ -180,6 +184,57 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
 
     // 是否真的移除由上层决定，组件只上报（与 Composer 的契约一致）
     expect(onRemoveReference).toHaveBeenCalledWith(reference)
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 009 FR-032 / FR-052：数字人不可用的降级必须**用户可感知**。
+ *
+ * 落在既有 `ErrorNotice` 提示位（不新增控件）：第一行给"为什么失败"，
+ * 第二行（`hint`）给"现在还能选谁"。
+ */
+describe('ChatPanel —— 数字人不可用的降级呈现（009）', () => {
+  it('陈旧数字人：错误态给出原因文案 + 当前可用数字人清单，并主动拉一次候选', async () => {
+    const { wrapper, panel } = setup()
+    const agents = (panel as Panel).agents as { candidates: { value: unknown[] }; loadCandidates: ReturnType<typeof vi.fn> }
+    agents.candidates.value = [{ agent_name: 'agent-a' }, { agent_name: 'agent-b' }]
+
+    ;(panel as Panel).isFailed.value = true
+    ;(panel as Panel).errorInfo.value = { code: 'AGENT_NOT_AVAILABLE', message: '' }
+    await nextTick()
+
+    const notice = wrapper.find('.error-notice')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('不可用')
+    expect(wrapper.find('.error-notice__hint').text()).toBe('可切换的数字人：agent-a、agent-b')
+    expect(agents.loadCandidates).toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('候选清单尚未加载：hint 回落到"请重新选择数字人"（不显示空提示）', async () => {
+    const { wrapper, panel } = setup()
+
+    ;(panel as Panel).isFailed.value = true
+    ;(panel as Panel).errorInfo.value = { code: 'AGENT_NOT_AVAILABLE', message: '' }
+    await nextTick()
+
+    expect(wrapper.find('.error-notice__hint').text()).toBe('请重新选择数字人')
+
+    wrapper.unmount()
+  })
+
+  it('其它错误码：不出现 hint 行（不把所有错误都说成"数字人不可用"）', async () => {
+    const { wrapper, panel } = setup()
+
+    ;(panel as Panel).isFailed.value = true
+    ;(panel as Panel).errorInfo.value = { code: 'THREAD_NOT_FOUND', message: '' }
+    await nextTick()
+
+    expect(wrapper.find('.error-notice').exists()).toBe(true)
+    expect(wrapper.find('.error-notice__hint').exists()).toBe(false)
 
     wrapper.unmount()
   })

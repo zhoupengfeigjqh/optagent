@@ -4,7 +4,8 @@
  * - 每轮结束 trigger()：窗口外攒满 batchSize（20）条 → fire-and-forget 增量重写
  *   （旧摘要 + 新归档 20 条 → LLM 合并 → 新摘要）
  * - per-thread Promise 链串行互斥；失败记日志、保留旧摘要，绝不阻塞对话
- * - 存储：threads/{thread_id}/summary.json  { "summary": "...", "covered_count": 40 }
+ * - 存储：user-data/{数字人}/threads/{thread_id}/summary.json  { "summary": "...", "covered_count": 40 }
+ *   （009：数字人作为必填入参，落点由 `dirs.ts#threadDir` 唯一解析）
  *
  * domain 层不依赖 infra 的 LlmProvider 具体类型，仅依赖结构化的最小接口。
  */
@@ -61,13 +62,13 @@ export class SummaryStore {
     this.timeoutMs = deps.timeoutMs ?? 60_000;
   }
 
-  private filePath(userId: string, threadId: string): string {
-    return path.join(threadDir(this.root, userId, threadId), 'summary.json');
+  private filePath(userId: string, agentName: string, threadId: string): string {
+    return path.join(threadDir(this.root, userId, agentName, threadId), 'summary.json');
   }
 
   /** 读取摘要；文件缺失/损坏按空摘要处理（损坏告警） */
-  read(userId: string, threadId: string): SummaryData {
-    const file = this.filePath(userId, threadId);
+  read(userId: string, agentName: string, threadId: string): SummaryData {
+    const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return { ...EMPTY };
     try {
       const obj = JSON.parse(fs.readFileSync(file, 'utf8')) as { summary?: unknown; covered_count?: unknown };
@@ -76,7 +77,9 @@ export class SummaryStore {
       }
       throw new Error('字段缺失');
     } catch {
-      this.deps.logger?.warn(`summary.json 损坏按空摘要处理（user=${userId} thread=${threadId}）`);
+      this.deps.logger?.warn(
+        `summary.json 损坏按空摘要处理（user=${userId} agent=${agentName} thread=${threadId}）`,
+      );
       return { ...EMPTY };
     }
   }
@@ -85,34 +88,34 @@ export class SummaryStore {
    * 每轮对话结束后调用：窗口外攒满一批则增量重写。
    * 返回链上 Promise（永不 reject），调用方可 void 掉（fire-and-forget）。
    */
-  trigger(userId: string, threadId: string): Promise<void> {
-    const key = `${userId}/${threadId}`;
+  trigger(userId: string, agentName: string, threadId: string): Promise<void> {
+    const key = `${userId}/${agentName}/${threadId}`;
     const prev = this.chains.get(key) ?? Promise.resolve();
-    const next = prev.then(() => this.maybeArchive(userId, threadId)).catch(() => {});
+    const next = prev.then(() => this.maybeArchive(userId, agentName, threadId)).catch(() => {});
     this.chains.set(key, next);
     return next;
   }
 
-  private async maybeArchive(userId: string, threadId: string): Promise<void> {
+  private async maybeArchive(userId: string, agentName: string, threadId: string): Promise<void> {
     try {
-      const messages = this.history.readAll(userId, threadId);
-      const { summary, coveredCount } = this.read(userId, threadId);
+      const messages = this.history.readAll(userId, agentName, threadId);
+      const { summary, coveredCount } = this.read(userId, agentName, threadId);
       // 池子（= 总数 - 已归档）达上限才归档：一次调用清掉一整格，池子回到保留长度
       // —— 正因为触发点是"池子满"、且只归档池内最早的若干条，
       //    归档游标恒等于池子左边界，不会出现"既不在正文也不在摘要"的消息
       if (messages.length - coveredCount < this.poolMax) return;
       const archived = messages.slice(coveredCount, coveredCount + this.batchSize);
       const next = await this.rewrite(summary, archived);
-      fs.mkdirSync(path.dirname(this.filePath(userId, threadId)), { recursive: true });
+      fs.mkdirSync(path.dirname(this.filePath(userId, agentName, threadId)), { recursive: true });
       fs.writeFileSync(
-        this.filePath(userId, threadId),
+        this.filePath(userId, agentName, threadId),
         JSON.stringify({ summary: next, covered_count: coveredCount + archived.length }, null, 2),
         'utf8',
       );
     } catch (err) {
       // FR-018：失败记日志、保留旧摘要，不阻塞对话
       this.deps.logger?.warn(
-        `摘要生成失败，沿用旧摘要（user=${userId} thread=${threadId}）：${err instanceof Error ? err.message : String(err)}`,
+        `摘要生成失败，沿用旧摘要（user=${userId} agent=${agentName} thread=${threadId}）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
