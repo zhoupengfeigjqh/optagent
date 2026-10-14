@@ -35,6 +35,10 @@ TOTAL_BOM_NAME = "WCCMT-00000B0570_00_0B.xls"
 SCHEMA_NAME = "总BOM标准字段.json"
 MAPPING_NAME = "子BOM字段映射.json"
 
+#: 真实数据展开行数（含根行），与 ``test_integration_real.EXPECTED_NODES`` 同源：
+#: 含 5 行"mat_code 空、posiz 有值"的外购/标准件明细（曾经被整行丢掉）
+EXPECTED_NODES = 327
+
 pytestmark = pytest.mark.skipif(
     not (SUBMIT / ZIP_NAME).exists() or not (REPO / SCHEMA_NAME).exists(),
     reason="真实数据不在位，跳过端到端测试",
@@ -195,7 +199,7 @@ def test_validate_returns_summary_and_no_output(mcp_server, static_url):
     text, _ = mcp_call(mcp_server["url"], "bom_validate", file_args(static_url), timeout=60)
     payload = json.loads(text[0])
     assert payload["status"] == "success", payload["message"]
-    assert payload["summary"]["tree"]["nodes"] == 322
+    assert payload["summary"]["tree"]["nodes"] == EXPECTED_NODES
     assert payload["artifact"] is None
     assert "viewUrl" not in payload and "viewUrlName" not in payload
     assert list(mcp_server["artifacts"].iterdir()) == []      # 校验不落任何文件
@@ -206,13 +210,13 @@ def test_merge_returns_summary_and_downloadable_url(mcp_server, static_url):
     text, _ = mcp_call(mcp_server["url"], "bom_merge", file_args(static_url), timeout=120)
     payload = json.loads(text[0])
     assert payload["status"] == "success", payload["message"]
-    assert payload["summary"]["tree"]["nodes"] == 322
+    assert payload["summary"]["tree"]["nodes"] == EXPECTED_NODES
     # 结果统计就在这一次返回里（同步：不再有"受理时算不出来"这回事）
     assert payload["summary"]["counts"]["error"] == 0
     name = payload["artifact"]["filename"]
     assert payload["viewUrlName"] == name
     assert name.startswith("总BOM_WCCMT-00000B0570_bom_") and name.endswith(".xlsx")
-    assert payload["artifact"]["rows"] == 322 and payload["artifact"]["bytes"] > 0
+    assert payload["artifact"]["rows"] == EXPECTED_NODES and payload["artifact"]["bytes"] > 0
     assert payload["viewUrl"].startswith(mcp_server["base"] + "/files/")
 
     # 用返回的地址真下一遍：拿到的必须是能打开的 xlsx，且下载名是那个中文名
@@ -222,7 +226,7 @@ def test_merge_returns_summary_and_downloadable_url(mcp_server, static_url):
     assert quote(name) in r.headers["content-disposition"]
     wb = load_workbook(filename=__import__("io").BytesIO(r.content))
     assert wb.sheetnames == ["Total BOM", "校验汇总"]
-    assert wb["Total BOM"].max_row == 323           # 表头 + 322 行
+    assert wb["Total BOM"].max_row == EXPECTED_NODES + 1      # 表头 + 数据行
 
 
 def test_merge_output_is_stored_atomically(mcp_server, static_url):

@@ -658,7 +658,14 @@ def normalize(raw, cfg, issues):
                 return None
 
             code = get("mat_code")
-            if code is None or not str(code).strip():
+            posiz_raw = get("posiz")
+            code_text = "" if code is None else str(code).strip().upper()
+            if not code_text and (posiz_raw is None or not str(posiz_raw).strip()):
+                # mat_code 与 posiz **都**空 = 表内空行/填充行 → 跳过（源表空行很多）。
+                # 但"mat_code 空、posiz 有值"是**合法明细行**：外购/标准件（螺钉、垫圈、
+                # 传感器…）源表不写图号，只以 SIGLA/描述标识位置；源表与人工参考总表里
+                # 都存在这样的行（实测 WCCUN-0000147236/147248/147250）。此时必须保留，
+                # 否则整行数据连同数量被静默丢弃。这类行 mat_code 留空、下游按叶子零件展开。
                 continue
             descr_parts = [str(row[c]).strip() for c in sorted(descr_cols)
                            if c < len(row) and row[c] is not None and str(row[c]).strip()]
@@ -672,13 +679,13 @@ def normalize(raw, cfg, issues):
                     "W301", "warn", "S2",
                     f"qty 非数值：{qty_raw!r}",
                     target=fname, family=fam, location=f"第{r + 1}行", field="qty",
-                    evidence={"mat_code": str(code).strip().upper()},
+                    evidence={"mat_code": code_text},
                     hint="修正该行数量（保留原值继续，累计用量将无法计算）",
                 ))
             item = {}
             for f in set(colmap.values()):
                 if f == "mat_code":
-                    item[f] = str(code).strip().upper()
+                    item[f] = code_text
                 elif f == "descr":
                     item[f] = " ".join(descr_parts)
                 elif f == "qty":
@@ -735,7 +742,10 @@ def build_resolver(raw, items_by_key, root, issues):
             continue
         visited.add(fkey)
         for item in items_by_key.get(fkey, []):
-            queue.append(item["mat_code"])
+            # 编码留空的明细行（外购/标准件）不参与认领：空串会被 `startswith("")`
+            # 判成"匹配所有文件"——单文件时静默认错、多文件时报假 E202 版本冲突。
+            if item["mat_code"]:
+                queue.append(item["mat_code"])
     for code, cands in sorted(conflicts.items()):
         issues.append(issue(
             "E202", "error", "S2.5",
@@ -771,6 +781,8 @@ def expand(key, level, path, items_by_key, resolver, out, issues, cfg, node_base
         return out
     for item in items_by_key.get(key, []):
         child = item["mat_code"]
+        # 编码留空的行认领不到文件（resolver 里没有空 key），自然落到叶子分支，
+        # posiz/qty/descr 等原样带出——保留行、也不误报"缺子BOM 文件"。
         child_key = resolver.get(child)
         if child_key is not None and child_key in path:
             issues.append(issue(

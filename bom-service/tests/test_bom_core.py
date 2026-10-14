@@ -345,6 +345,41 @@ def test_qty_not_numeric_is_warn_and_keeps_value():
     assert node["qty"] == "abc" and node["total_qty"] is None
 
 
+def test_blank_mat_code_with_posiz_is_kept_as_leaf():
+    """N°DISEGNO 空但 POSIZ. 有值 = 外购/标准件的合法明细行 → 必须保留成叶子行。
+
+    这类行认不到子BOM 文件，也**不得**触发假 E202：空编码若进了编码认领队列，
+    ``startswith("")`` 会匹配上所有文件（单文件时静默认错、多文件时报版本冲突）。
+    """
+    core = load_core(pytest.MonkeyPatch())
+    d = docs(root_items=[item("", "6", 2, "BOCCOLA AUTOLUBRIFICANTE"), item("WCCUN-0001-S")])
+    result = core.run_pipeline(**d, emit=True)
+    assert result["status"] == "success"
+    assert "E202" not in codes(result)
+    blanks = [n for n in result["_nodes"] if n["mat_code"] == ""]
+    assert len(blanks) == 1
+    n = blanks[0]
+    assert n["level"] == 1 and not n["is_component"] and not n["as_leaf"]
+    assert (n["posiz"], n["qty"], n["descr"]) == ("6", 2, "BOCCOLA AUTOLUBRIFICANTE")
+    assert n["total_qty"] == 2                       # 仍按父件连乘，量不丢
+    assert result["_nodes"][1]["mat_code"] == ""     # 行序 = 源表行序（紧跟根行）
+    # 产出里真的留了一行（mat_code 列空，posiz 原样带出）
+    ws = load_workbook(io.BytesIO(result["_xlsx"]))["Total BOM"]
+    blank_rows = [r for r in range(2, ws.max_row + 1) if not ws.cell(row=r, column=1).value]
+    assert len(blank_rows) == 1
+    assert ws.cell(row=blank_rows[0], column=2).value == "6"
+
+
+def test_row_blank_in_both_code_and_posiz_is_skipped():
+    """mat_code 与 posiz **都**空才是空行/填充行：照旧跳过，不产出节点。"""
+    core = load_core(pytest.MonkeyPatch())
+    d = docs(root_items=[item("WCCUN-0001-S", "1", 2, "GR. COLONNE"), [None] * 9,
+                         item("LEAF-0001", "2", 3, "叶子件")])
+    result = core.run_pipeline(**d)
+    assert [n["mat_code"] for n in result["_nodes"]] == [
+        "WCCMT-00000B0570_00_0B", "WCCUN-0001-S", "LEAF-0002", "LEAF-0001"]
+
+
 def test_duplicate_row_reports_E201_with_positions():
     core = load_core(pytest.MonkeyPatch())
     d = docs(child_items=[item("LEAF-0002"), item("LEAF-0002")])

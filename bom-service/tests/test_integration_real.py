@@ -11,8 +11,8 @@
 然后走 ``bom_core.run_from_urls`` 跑完整流程。**计算本身不落盘**；交付那一跳
 （算完落盘 + 按名取回）由 ``bom_store`` 负责，这里用 ``tmp_path`` 走一遍真字节。
 
-回归口径：与既有实现（``bom_integrate.py``，24 文件）逐行对齐——展开 322 行（含根）、
-明细 321 行、0 阻断性错误。这不是"与真实BOM 的一致性校验"，而是"新旧实现等价性回归"。
+回归口径：与既有实现（``bom_integrate.py``，24 文件）逐行对齐——展开 327 行（含根）、
+明细 326 行、0 阻断性错误。这不是"与真实BOM 的一致性校验"，而是"新旧实现等价性回归"。
 """
 import functools
 import http.server
@@ -39,7 +39,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 #: 旧实现（bom_integrate.py）在同一批数据上的产出：展开行数（含根行）
-EXPECTED_NODES = 322
+#: 327 = 原 322 + 5 行"mat_code 空、posiz 有值"的外购/标准件明细（WCCUN-0000147236 1 行、
+#: WCCUN-0000147248 3 行、WCCUN-0000147250 1 行）——人工参考总表 WCCMT-00000B0570-B包 里
+#: 这 5 行同样存在，属于必须保留的合法明细行（见 bom_core.normalize 的判据注释）
+EXPECTED_NODES = 327
 
 
 @pytest.fixture(scope="module")
@@ -91,6 +94,12 @@ def test_validate_passes_on_real_data(base_url):
     # W402 只提示、不改变结果：这些编码按叶子零件正常出现在树上
     leaf_codes = {n["mat_code"] for n in result["_nodes"] if n.get("as_leaf")}
     assert leaf_codes == {i["field"] for i in w402}
+    # 外购/标准件明细行（mat_code 空、posiz 有值）必须保留，且按叶子零件出现、不误报缺文件
+    blanks = [n for n in result["_nodes"] if n["mat_code"] == ""]
+    assert len(blanks) == 5
+    assert {n["source_key"] for n in blanks} == {
+        "WCCUN-0000147236-S_00_0A", "WCCUN-0000147248-S_00_0A", "WCCUN-0000147250-S_00_0A"}
+    assert all(not n["is_component"] and not n["as_leaf"] and n["total_qty"] for n in blanks)
 
 
 def test_merge_returns_xlsx_following_schema(base_url):
@@ -140,7 +149,8 @@ def test_nodes_match_legacy_pipeline_row_by_row(base_url):
     old = [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
     assert len(old) == len(mine)
     for i, (old_row, node) in enumerate(zip(old, mine)):
-        assert str(old_row[0]) == str(node["mat_code"]), f"第{i + 2}行 mat_code 不一致"
+        # 空编码行（外购/标准件）在 xlsx 里是空单元格 → 读回 None；两边都归一成 "" 再比
+        assert (old_row[0] or "") == (node["mat_code"] or ""), f"第{i + 2}行 mat_code 不一致"
         assert (old_row[1] or "") == (node["posiz"] or ""), f"第{i + 2}行 posiz 不一致"
         assert float(old_row[2]) == float(node["qty"]), f"第{i + 2}行 qty 不一致"
         assert float(old_row[3]) == float(node["total_qty"]), f"第{i + 2}行 total_qty 不一致"
