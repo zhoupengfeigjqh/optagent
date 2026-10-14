@@ -25,7 +25,7 @@ export async function grepToolFiles(
     );
   }
   if (skippedBinary > 0) {
-    parts.push(`（已跳过 ${skippedBinary} 个二进制文件，xlsx/pdf 请用 read_file 阅读）`);
+    parts.push(`（已跳过 ${skippedBinary} 个二进制文件，xlsx/xls/pdf 请用 read_file 阅读）`);
   }
   return parts.join('\n');
 }

@@ -1,0 +1,12 @@
+# mcp 2.x 将 FastMCP 改名为 MCPServer 且 API 大改，先钉 v1 稳定 API
+mcp>=1.10,<2
+# 读表：.xls 走 xlrd、.xlsx 走 openpyxl（pandas 按文件头自动选引擎）
+pandas>=2.0
+openpyxl>=3.1
+xlrd>=2.0
+# 四个输入直链的受限下载（不跟随重定向、限时限大小）
+httpx>=0.27
+# 以下两项由 mcp 传递依赖带入，但 server.py **直接** import（starlette 的 Request/Response/
+# FileResponse、anyio 的 to_thread）⇒ 按依赖治理原则显式声明，floors 取 mcp 自身的下限
+starlette>=0.27
+anyio>=4.5

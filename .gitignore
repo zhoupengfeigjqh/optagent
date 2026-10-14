@@ -47,6 +47,11 @@ admin-backend/.platform-data/
 # 服务级密钥文件（如仓库根的 .env_jev）：与 `.env.*` 同一口径，
 # 避免"下划线命名"的密钥文件因不匹配点号规则而漏网入库
 .env_*
+
+# ===== BOM 服务的合并产出（bom-service/.data）=====
+# 与 .opt-agent / .platform-data 的区别：那两个是**配置**（入库以便开箱可用），
+# 这里是运行期算法产出（二进制 xlsx，含用户业务数据，且按 TTL 自动清理）⇒ 不入库。
+bom-service/.data/
 config.yaml
 
 # ===== 本地开发临时产物 =====

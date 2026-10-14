@@ -223,6 +223,56 @@ export function buildStarterGuidance(tools: readonly SoulToolRef[]): string {
   return `本轮请优先使用以下工具完成任务：${names.join('、')}`;
 }
 
+/**
+ * 隐藏引导的长度上限（**500 字**，与 `POST /api/threads/:id/messages` 的 `guidance` 约束一致）。
+ *
+ * 超长**截断**、MUST NOT 置空：2026-10-14 起下一步动作卡片必须绑定工具，
+ * 引导一旦置空，"绑定"就在下一轮静默失效（见 `next-actions.ts` 与 007 契约 §6）。
+ */
+export const GUIDANCE_MAX_CHARS = 500;
+
+/** 单个工具的用途摘要在引导里的长度上限：防止一个长描述吃掉整个预算 */
+const GUIDANCE_USAGE_MAX_CHARS = 80;
+
+/**
+ * 生成**下一步动作卡片**的隐藏工具引导（007 修订 2026-10-14：卡片强制绑定工具）。
+ *
+ * 与 `buildStarterGuidance` 刻意分成两个函数（MUST NOT 合并）：
+ * - 首屏"问题实例"来自**设计态配置**，只有工具引用、没有用途摘要，且本次修订**不**要求它绑定工具
+ *   ⇒ 其文案与行为保持不变（`agent-catalog` 继续调 `buildStarterGuidance`）；
+ * - 下一步卡片来自**本轮真实装配**的工具清单（含用途摘要）⇒ 引导必须讲清"调哪个工具、做什么"。
+ *
+ * 能力边界（MUST NOT 被误读）：这是**强提示，不是强制**——不引入 Function Calling、不预置参数，
+ * 本轮是否真的发起调用仍由模型在工具循环中决定。
+ *
+ * @param briefs 本轮可用工具清单（只取 `name` / `description` 两个字段的结构子集，
+ *   避免域层反向依赖 `types.ts` 的 `RuntimeToolBrief`）
+ */
+export function buildActionGuidance(
+  tools: readonly SoulToolRef[],
+  briefs: readonly { name: string; description: string }[],
+  maxChars: number = GUIDANCE_MAX_CHARS,
+): string {
+  if (tools.length === 0) return '';
+  const usage = new Map(briefs.map((b) => [b.name, b.description] as const));
+  const items = tools.map((tool) => {
+    const exposed = toolExposedName(tool);
+    const desc = (usage.get(exposed) ?? '').trim();
+    return desc === '' ? exposed : `${exposed}（${clip(desc, GUIDANCE_USAGE_MAX_CHARS)}）`;
+  });
+  const text =
+    `本轮请调用以下工具完成用户上一条消息要求的任务：${items.join('、')}。`
+    + '请按用户消息与已知上下文补全参数；不要改用其它工具。';
+  return clip(text, maxChars);
+}
+
+/** 按 **Unicode 码点**截断（MUST NOT 用 `slice` 切开代理对）；超长时以省略号收尾 */
+function clip(text: string, maxChars: number): string {
+  const chars = [...text];
+  if (chars.length <= maxChars) return text;
+  return chars.slice(0, Math.max(0, maxChars - 1)).join('') + '…';
+}
+
 /* ---------- 内部：逐字段容错读取 ---------- */
 
 function readText(raw: unknown): string {

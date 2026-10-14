@@ -11,7 +11,9 @@ import type { UserListItem } from '../../api/types'
 
 const listAgents = vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
 const deleteUser = vi.fn()
+const updateUser = vi.fn()
 const withdrawDeploy = vi.fn()
+const fetchManifest = vi.fn()
 
 vi.mock('../../api/deploy', () => ({
   withdrawDeploy: (...a: unknown[]) => withdrawDeploy(...a),
@@ -20,7 +22,9 @@ vi.mock('../../api/deploy', () => ({
   fetchReferences: vi.fn(),
   fetchAnomalies: vi.fn(),
   fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
+  // 乐观锁版本的**唯一**来源（2026-09-27「目标运行形态」下架后
+  // `/api/admin/platform/settings` 已不存在，取版本会 404 → 保存必失败）
+  fetchManifest: (...a: unknown[]) => fetchManifest(...a),
 }))
 
 vi.mock('../../api/agents', () => ({
@@ -34,12 +38,14 @@ vi.mock('../../api/agents', () => ({
 vi.mock('../../api/users', () => ({
   listUsers: vi.fn(),
   createUser: vi.fn(),
-  updateUser: vi.fn(),
+  updateUser: (...args: unknown[]) => updateUser(...args),
   deleteUser: (...args: unknown[]) => deleteUser(...args),
 }))
 
 vi.mock('../../api/http', () => ({
-  http: { get: vi.fn().mockResolvedValue({ revision: 1 }), put: vi.fn(), post: vi.fn(), del: vi.fn() },
+  // 故意**不**提供 revision：组件取版本 MUST 走部署清单端点。一旦有人改回
+  // `/api/admin/platform/settings`（那个路由已下架），版本断言就会失败。
+  http: { get: vi.fn().mockResolvedValue({}), put: vi.fn(), post: vi.fn(), del: vi.fn() },
   ApiError: class extends Error {},
   createHttpClient: vi.fn(),
   CLIENT_ERROR_CODE: {},
@@ -79,7 +85,10 @@ function mountList(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   deleteUser.mockReset()
+  updateUser.mockReset()
   withdrawDeploy.mockReset()
+  // 乐观锁版本：由部署清单端点给出（当前 revision = 1）
+  fetchManifest.mockReset().mockResolvedValue({ items: [], total: 0, revision: 1 })
 })
 
 describe('UserCardList', () => {
@@ -237,7 +246,8 @@ describe('UserCardList —— 撤回部署（2026-09-16）', () => {
     await wrapper.find('[data-test="withdraw-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()
 
-    // http.get 被 mock 为 { revision: 1 }
+    // 版本取自部署清单端点（fetchManifest → revision: 1）
+    expect(fetchManifest).toHaveBeenCalled()
     expect(withdrawDeploy).toHaveBeenCalledWith('admin', 1)
     expect(wrapper.emitted('changed')).toHaveLength(1)
     expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('下架 1 个数字人')
@@ -254,5 +264,83 @@ describe('UserCardList —— 撤回部署（2026-09-16）', () => {
 
     expect(wrapper.emitted('changed')).toBeUndefined()
     expect(wrapper.find('[role="alert"]').text().length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * 编辑关联保存（2026-10-14 修复回归）。
+ *
+ * 原先这里取版本用的是**已下架**的 `/api/admin/platform/settings` ⇒ 一保存就 404
+ * （NOT_FOUND「请求的内容不存在」），保存根本走不到 `updateUser`。
+ * 且该错误被同时喂进卡片列表的错误位，顶着"用户与关联数字人加载失败"展示——
+ * 一个"保存失败"被误报成"加载失败"。下面两条分别守住这两点。
+ */
+describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
+  const AGENTS = [
+    {
+      name: 'demo',
+      description: '演示',
+      abnormal: false,
+      abnormal_reason: null,
+      updated_at: '2026-10-01T00:00:00.000Z',
+    },
+    {
+      name: 'extra',
+      description: '新数字人',
+      abnormal: false,
+      abnormal_reason: null,
+      updated_at: '2026-10-01T00:00:00.000Z',
+    },
+  ]
+
+  /** 打开"编辑关联"（候选数字人由 `listAgents` 提供） */
+  async function openEditor(wrapper: ReturnType<typeof mountList>): Promise<void> {
+    await wrapper.findAll('button').find((b) => b.text() === '编辑关联')?.trigger('click')
+    await flushPromises()
+  }
+
+  function saveButton(wrapper: ReturnType<typeof mountList>) {
+    return wrapper.findAll('button').find((b) => b.text() === '保存')
+  }
+
+  it('选完数字人保存：版本取自部署清单端点，成功发出 changed + announce', async () => {
+    listAgents.mockResolvedValueOnce({
+      items: AGENTS,
+      total: 2,
+      page: 1,
+      page_size: 8,
+      total_pages: 1,
+    })
+    updateUser.mockResolvedValue({ user_id: 'admin', agents: ['demo', 'broken', 'extra'], revision: 2 })
+
+    const wrapper = mountList()
+    await openEditor(wrapper)
+
+    // "选了数字人"：admin 原本关联 demo / broken，这里再勾上 extra
+    const option = wrapper
+      .findAll('li.checkbox-list__item')
+      .find((li) => li.text().includes('extra'))
+    await option!.find('input[type="checkbox"]').setValue(true)
+    await saveButton(wrapper)!.trigger('click')
+    await flushPromises()
+
+    expect(fetchManifest).toHaveBeenCalled()
+    expect(updateUser).toHaveBeenCalledWith('admin', ['demo', 'broken', 'extra'], 1)
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('关联已更新')
+  })
+
+  it('保存失败：以"操作未完成"呈现可读原因，不冒充列表加载失败', async () => {
+    updateUser.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })
+
+    const wrapper = mountList()
+    await openEditor(wrapper)
+    await saveButton(wrapper)!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('操作未完成')
+    expect(wrapper.text()).toContain('内容已被他处修改，请刷新后重试')
+    expect(wrapper.text()).not.toContain('用户与关联数字人加载失败')
+    expect(wrapper.emitted('changed')).toBeUndefined()
   })
 })

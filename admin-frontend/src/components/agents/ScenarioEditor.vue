@@ -14,14 +14,17 @@
  */
 import { computed, ref } from 'vue'
 import type { ScenarioField } from '../../api/types'
-import { PREDEFINED_DATA_PREP_DIRS } from '../../constants/agent-design'
+import { DEFAULT_DATA_PREP_UPLOADS, PREDEFINED_DATA_PREP_DIRS } from '../../constants/agent-design'
 import ScenarioFieldDialog from './ScenarioFieldDialog.vue'
+import ScenarioUploadTypesDialog from './ScenarioUploadTypesDialog.vue'
 
 export interface ScenarioValue {
   scenario: string
   data_prep_dirs: string[]
   /** 目录 → 字段约束；无约束的目录不出现 */
   data_prep_fields: Record<string, ScenarioField[]>
+  /** 目录 → 可上传类型（2026-10-13 新增）；未配置的目录不出现 */
+  data_prep_uploads?: Record<string, string[]>
 }
 
 const props = defineProps<{
@@ -39,9 +42,45 @@ const fieldDialogOpen = ref(false)
 const fieldDialogDir = ref('')
 const editingFields = ref<ScenarioField[]>([])
 
+/** 可上传类型窗口：同一口径，目录名单独持有 */
+const uploadDialogOpen = ref(false)
+const uploadDialogDir = ref('')
+const editingUploads = ref<string[]>([])
+
 /** 该目录当前的字段约束（缺失即"无约束"） */
 function fieldsOf(dir: string): ScenarioField[] {
   return props.modelValue.data_prep_fields?.[dir] ?? []
+}
+
+/** 该目录当前的文件类型配置（缺失即"未配置"，生效为平台默认） */
+function uploadsOf(dir: string): string[] {
+  return props.modelValue.data_prep_uploads?.[dir] ?? []
+}
+
+/** 入口摘要计数：未配置时显示默认项数（`.csv` + `.xlsx`），与生效结果一致 */
+function uploadCountOf(dir: string): number {
+  const configured = uploadsOf(dir)
+  return configured.length > 0 ? configured.length : DEFAULT_DATA_PREP_UPLOADS.length
+}
+
+function openUploadDialog(dir: string): void {
+  uploadDialogDir.value = dir
+  editingUploads.value = [...uploadsOf(dir)]
+  uploadDialogOpen.value = true
+}
+
+/**
+ * 保存某目录的可上传类型。
+ *
+ * 空列表 ⇒ **移除该目录的键**（"缺失即用平台默认"），不在设计态留空数组空壳。
+ * 组件层已保证"至少一项"，此处再兜底一次。
+ */
+function saveUploads(extensions: string[]): void {
+  const dir = uploadDialogDir.value
+  const next: Record<string, string[]> = { ...(props.modelValue.data_prep_uploads ?? {}) }
+  if (extensions.length > 0) next[dir] = extensions
+  else delete next[dir]
+  emit('update:modelValue', { ...props.modelValue, data_prep_uploads: next })
 }
 
 /** 预定义目录（平台硬编码）：始终存在、不可移除，但**不强制**字段约束 */
@@ -110,7 +149,7 @@ function addDir(): void {
 }
 
 /**
- * 移除目录：**同时移除其字段约束**（键是目录名，不清理会留下孤儿约束）。
+ * 移除目录：**同时移除其字段约束与可上传类型配置**（键是目录名，不清理会留下孤儿键）。
  *
  * 只动配置，**不动文件系统**——被移除目录下的既有文件仍保留在用户空间。
  * 预定义目录不可移除（后端保存时同样拒绝缺失预定义目录的清单）。
@@ -121,10 +160,13 @@ function removeDir(index: number): void {
   const nextDirs = props.modelValue.data_prep_dirs.filter((_, i) => i !== index)
   const nextFields: Record<string, ScenarioField[]> = { ...(props.modelValue.data_prep_fields ?? {}) }
   delete nextFields[dir]
+  const nextUploads: Record<string, string[]> = { ...(props.modelValue.data_prep_uploads ?? {}) }
+  delete nextUploads[dir]
   emit('update:modelValue', {
     ...props.modelValue,
     data_prep_dirs: nextDirs,
     data_prep_fields: nextFields,
+    data_prep_uploads: nextUploads,
   })
 }
 </script>
@@ -174,6 +216,15 @@ function removeDir(index: number): void {
               字段({{ fieldsOf(dir).length }})
             </button>
             <button
+              type="button"
+              class="btn"
+              :data-test="`upload-types-${dir}`"
+              :aria-label="`配置目录 ${dir} 的可上传文件类型`"
+              @click="openUploadDialog(dir)"
+            >
+              文件类型({{ uploadCountOf(dir) }})
+            </button>
+            <button
               v-if="!isPredefined(dir)"
               type="button"
               class="btn"
@@ -209,6 +260,11 @@ function removeDir(index: number): void {
         每个目录可有各自的字段约束（上传表的表头校验用）：新增目录后立即弹出确认窗口，
         也可随时点目录行的「字段」按钮修改。未配置字段的目录不受约束。
       </p>
+
+      <p class="field__hint">
+        每个目录还可各自限定**可上传的文件类型**：点目录行的「文件类型」按钮配置，至少选一项；
+        未配置时使用平台默认（.csv 与 .xlsx）。共享空间与临时空间不受此配置影响。
+      </p>
     </fieldset>
 
     <ScenarioFieldDialog
@@ -216,6 +272,13 @@ function removeDir(index: number): void {
       :dir="fieldDialogDir"
       :fields="editingFields"
       @save="saveFields"
+    />
+
+    <ScenarioUploadTypesDialog
+      v-model:open="uploadDialogOpen"
+      :dir="uploadDialogDir"
+      :extensions="editingUploads"
+      @save="saveUploads"
     />
   </div>
 </template>

@@ -341,6 +341,56 @@ describe('AgentDesignService', () => {
     expect(service.view('legacy', index).scenario.data_prep_fields).toEqual({});
   })
 
+  it('读取归一化（2026-10-13）：缺 data_prep_uploads 时**不写键**（可选键，缺失 ≡ 平台默认）', () => {
+    // 与 data_prep_fields 的取舍不同：后者恒补 `{}`，前者是可选键，补空壳会让"未配置"与"显式清空"无法区分
+    store.writeJson('agents/legacy-up.json', {
+      name: 'legacy-up',
+      soul: '你是助手',
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+      updated_at: '2026-10-13T00:00:00.000Z',
+    });
+
+    const scenario = service.read('legacy-up').scenario;
+    expect(scenario.data_prep_fields).toEqual({});
+    expect('data_prep_uploads' in scenario).toBe(false);
+    expect(scenario.data_prep_uploads).toBeUndefined();
+  })
+
+  it('读取归一化（2026-10-13）：手改坏成非对象的 data_prep_uploads 被丢弃，合法对象原样保留', () => {
+    store.writeJson('agents/up.json', {
+      name: 'up',
+      soul: '你是助手',
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: {
+        scenario: '生产',
+        data_prep_dirs: ['生产计划', '算法规则'],
+        data_prep_uploads: ['.csv'] as never,
+      },
+      updated_at: '2026-10-13T00:00:00.000Z',
+    });
+    expect(service.read('up').scenario.data_prep_uploads).toBeUndefined();
+
+    store.writeJson('agents/up2.json', {
+      name: 'up2',
+      soul: '你是助手',
+      enabled_tools: [],
+      mcp_services: [],
+      skills: [],
+      scenario: {
+        scenario: '生产',
+        data_prep_dirs: ['生产计划', '算法规则'],
+        data_prep_uploads: { 生产计划: ['.csv', '.xlsx'] },
+      },
+      updated_at: '2026-10-13T00:00:00.000Z',
+    });
+    expect(service.read('up2').scenario.data_prep_uploads).toEqual({ 生产计划: ['.csv', '.xlsx'] });
+  })
+
   it('读取归一化（007）：结构化 SOUL 缺开关与条数 → 补齐为 false / 缺省 3（对外恒有该键）', () => {
     // "结构化但没有这两个键"的形态：本次字段引入前的存档
     const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>

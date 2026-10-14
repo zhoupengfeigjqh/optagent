@@ -7,9 +7,15 @@
  *
  * 高亮索引为组件内部状态（初值取自 `activeIndex`），对外只暴露意图事件，
  * 避免把"移动高亮"这种瞬时交互细节泄漏到父级。
+ *
+ * **2026-10-13 弹层改为视口安全浮窗**：菜单由 `position: absolute`（贴触发器
+ * `left: 0` 向下弹、受祖先 `overflow` 裁剪）改为 `position: fixed`，坐标由
+ * `placeMenu()` 按**视口**实时计算——下方放不下翻上方（底部工具栏场景）、
+ * 左右越界夹取，因此**永不弹到屏幕外看不到**。滚动/视口变化时合帧重算。
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { placeMenu } from '../../utils/popup-position'
 import BaseIcon from './BaseIcon.vue'
 
 interface DropdownItem {
@@ -40,6 +46,54 @@ const rootRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
 const highlight = ref(props.activeIndex)
+
+let frame = 0
+
+/**
+ * 按触发器与菜单的**视口**矩形重算落点，写回 `left`/`top`。
+ *
+ * 写 `dataset.side` 是为了排查（`below` / `above`），也便于测试断言。
+ */
+function reposition(): void {
+  const trigger = triggerRef.value
+  const menu = menuRef.value
+  if (!trigger || !menu) {
+    return
+  }
+  const rect = trigger.getBoundingClientRect()
+  const place = placeMenu(
+    { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+    { width: menu.offsetWidth, height: menu.offsetHeight },
+    { width: window.innerWidth, height: window.innerHeight },
+  )
+  menu.style.left = `${place.left}px`
+  menu.style.top = `${place.top}px`
+  menu.dataset.side = place.side
+}
+
+/** 合帧重算：滚动与改尺寸可能在同一帧内触发多次。 */
+function schedule(): void {
+  if (!props.open) {
+    return
+  }
+  cancelFrame(frame)
+  frame = nextFrame(reposition)
+}
+
+/** 环境没有 rAF 时退化为定时器（浏览器都有，测试环境未必）。 */
+function nextFrame(callback: () => void): number {
+  return typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame(callback)
+    : window.setTimeout(callback, 0)
+}
+
+function cancelFrame(handle: number): void {
+  if (typeof cancelAnimationFrame === 'function') {
+    cancelAnimationFrame(handle)
+    return
+  }
+  window.clearTimeout(handle)
+}
 
 /** 可聚焦项索引（跳过禁用项）。 */
 const enabledIndexes = computed(() =>
@@ -156,7 +210,11 @@ watch(
     if (value) {
       highlight.value = props.activeIndex
       document.addEventListener('pointerdown', onDocumentPointerDown)
-      void nextTick(focusHighlighted)
+      void nextTick(() => {
+        // 菜单此刻才挂载，必须先定位再聚焦（否则会先滚到绝对定位处）
+        reposition()
+        focusHighlighted()
+      })
       return
     }
     document.removeEventListener('pointerdown', onDocumentPointerDown)
@@ -166,10 +224,26 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(() => {
-  if (typeof document !== 'undefined') {
-    document.removeEventListener('pointerdown', onDocumentPointerDown)
+onMounted(() => {
+  if (typeof document === 'undefined') {
+    return
   }
+  // capture：滚动可能发生在任意祖先（消息列表、面板）上
+  document.addEventListener('scroll', schedule, true)
+  window.addEventListener('resize', schedule)
+  if (props.open) {
+    schedule()
+  }
+})
+
+onBeforeUnmount(() => {
+  if (typeof document === 'undefined') {
+    return
+  }
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  document.removeEventListener('scroll', schedule, true)
+  window.removeEventListener('resize', schedule)
+  cancelFrame(frame)
 })
 </script>
 
@@ -226,12 +300,20 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+/*
+ * `fixed` + 脚本写 `left`/`top`（视口坐标系）：逃逸祖先 `overflow` 裁剪，
+ * 且不会像 `absolute` 那样在底部工具栏里向下弹到屏幕外。
+ * `inset: auto` 显式清掉可能继承来的 inset，避免与脚本坐标打架。
+ */
 .base-dropdown__menu {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
+  position: fixed;
+  inset: auto;
   z-index: var(--z-index-dropdown);
   min-width: 180px;
+  max-width: calc(100vw - 16px);
+  /* 菜单自身也不得超出视口（模型列表可能很长） */
+  max-height: min(320px, calc(100vh - 16px));
+  overflow-y: auto;
   padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

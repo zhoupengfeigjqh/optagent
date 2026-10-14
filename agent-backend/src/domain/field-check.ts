@@ -20,6 +20,38 @@ import type { ScenarioField, ScenarioFieldType } from './dirs.js';
 /** 问题清单上限：超出截断，避免 400 响应体过大（上传文件本身 ≤5MB，行数有界） */
 export const MAX_ISSUES = 30;
 
+/**
+ * 该扩展名**是否需要表结构校验**（本次改动的**唯一判据**，2026-10-13）。
+ *
+ * 仅表格类型（`.csv` / `.xlsx` / `.xls`）需要；其他任何类型（含经白名单允许的 `.txt` /
+ * `.pdf` / `.json` / `.zip` / 图片）与未声明字段约束的目录一律**跳过**表结构校验——避免用
+ * "缺少必填表头"去描述一个本没有表头的文件（`FR-020`，契约 §3.1）。
+ *
+ * `.xls` 于 2026-10-14 归入表格类型：它是**同一种业务对象**（Excel 表格）的旧容器格式，
+ * 若排除在外，"白名单允许 .xls + 目录声明了字段约束"就会**静默跳过**表头/取值校验
+ * （等于约束形同虚设）。SheetJS 按文件头选择 BIFF/zip 解析器，两种容器共用 `parseXlsxRows`。
+ */
+export function supportsFieldCheck(ext: string): boolean {
+  // 大小写不敏感（上游 `routes/files.ts` 已归一小写，此处再兜一层，避免误触发/漏触发）
+  const normalized = ext.toLowerCase();
+  return normalized === '.csv' || isExcelContainer(normalized);
+}
+
+/**
+ * 两种 Excel 容器（zip 的 `.xlsx` 与 OLE2 的 `.xls`）：都交给 SheetJS 按文件头自判解析器。
+ * 单独成函数是为了让"是否表格容器"在 `supportsFieldCheck` 与 `checkUploadBuffer` 里同源。
+ */
+function isExcelContainer(ext: string): boolean {
+  return ext === '.xlsx' || ext === '.xls';
+}
+
+/** OLE2 复合文档魔数（`.xls` 的 BIFF8 容器）：`D0 CF 11 E0 A1 B1 1A E1` */
+const OLE2_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1] as const;
+
+function hasOle2Magic(buf: Buffer): boolean {
+  return buf.length >= OLE2_MAGIC.length && OLE2_MAGIC.every((byte, i) => buf[i] === byte);
+}
+
 /** 取值类型的用户可读标签（问题清单用） */
 const TYPE_LABELS: Record<ScenarioFieldType, string> = {
   string: '文本',
@@ -125,7 +157,10 @@ export function decodeCsvBuffer(buf: Buffer): string {
   return new TextDecoder('gbk').decode(buf).replace(/^\uFEFF/, '');
 }
 
-/** xlsx 字节 → 表结构：仅**第一个 sheet**（契约 §3.1 口径）；单元格取**显示文本**（`raw: false`，日期等按格式串判定） */
+/**
+ * Excel 字节（`.xlsx` zip / `.xls` OLE2，SheetJS 按文件头自判）→ 表结构：
+ * 仅**第一个 sheet**（契约 §3.1 口径）；单元格取**显示文本**（`raw: false`，日期等按格式串判定）。
+ */
 export function parseXlsxRows(buf: Buffer): UploadTable {
   const workbook = XLSX.read(buf, { type: 'buffer' });
   const first = workbook.SheetNames[0];
@@ -191,7 +226,7 @@ export function checkUploadTable(fields: readonly ScenarioField[], table: Upload
 /**
  * 上传校验入口：按扩展名分派解析，返回问题清单。
  *
- * 解析失败（损坏的 csv/xlsx）视为一条问题返回，由路由统一以
+ * 解析失败（损坏的表格文件）视为一条问题返回，由路由统一以
  * `FILE_SCHEMA_INVALID` 拒绝——不区分"损坏"与"不符合约束"对用户更可读。
  */
 export function checkUploadBuffer(
@@ -199,14 +234,21 @@ export function checkUploadBuffer(
   ext: string,
   buf: Buffer,
 ): string[] {
-  // xlsx 前置 ZIP 魔数校验：SheetJS 对非 zip 输入异常宽容（不抛错、产出脏表），
-  // 损坏文件在这里确定性拦截（与 admin-backend `skills.ts` 的 ZIP_MAGIC 同一口径）
-  if (ext === '.xlsx' && (buf.length < 4 || buf.readUInt32LE(0) !== 0x04034b50)) {
+  const normalized = ext.toLowerCase();
+  // 容器魔数前置校验：SheetJS 对非容器输入异常宽容（不抛错、按文本产出脏表），
+  // 于是"改后缀名的文本文件"能蒙混过关、损坏文件也会变成一堆空表头。在这里确定性拦截
+  // （`.xlsx` 与 admin-backend `skills.ts` 的 ZIP_MAGIC 同一口径；`.xls` 同理走 OLE2 魔数）。
+  if (normalized === '.xlsx' && (buf.length < 4 || buf.readUInt32LE(0) !== 0x04034b50)) {
+    return ['文件内容无法解析为有效表格（文件损坏或编码异常）'];
+  }
+  if (normalized === '.xls' && !hasOle2Magic(buf)) {
     return ['文件内容无法解析为有效表格（文件损坏或编码异常）'];
   }
   let table: UploadTable;
   try {
-    table = ext === '.xlsx' ? parseXlsxRows(buf) : parseCsvRows(decodeCsvBuffer(buf));
+    table = isExcelContainer(normalized)
+      ? parseXlsxRows(buf)
+      : parseCsvRows(decodeCsvBuffer(buf));
   } catch {
     return ['文件内容无法解析为有效表格（文件损坏或编码异常）'];
   }

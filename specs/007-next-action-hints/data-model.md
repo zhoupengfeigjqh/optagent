@@ -77,8 +77,8 @@ starters: …
 | 字段 | 类型 | 必填 | 约束（生成期校验，违反即丢弃该条） |
 |---|---|---|---|
 | `prompt` | string | 是 | 中文自然语言指令；trim 后非空；**≤ 50 字**（Unicode 码点）；MUST NOT 命中任何工具标识符；MUST NOT 含 `snake_case`/`kebab-case`/`CamelCase` 形态 token；同一轮内不重复 |
-| `tools[]` | `SoulToolRef[]` | 否 | `{ kind: 'builtin', name }` 或 `{ kind: 'mcp', service, name }`；`toolExposedName(ref)` MUST ∈ 本轮可用工具清单，越界即丢弃**该引用**（保留卡片文本） |
-| `guidance` | string | **是（始终出现）** | 由 `buildStarterGuidance(tools)` 派生（与问题实例**同一实现/同一文案**）；**无关联工具时为空串**（与既有 `AgentStarterView.guidance: string` 逐字同形，`identity: 空串 = 无引导`）；长度 > 500 字时 MUST 回落为空串（保留卡片文本与 `tools[]`；上限来自既有 `POST .../messages` 的 `guidance` 约束） |
+| `tools[]` | `SoulToolRef[]` | **是（≥1）** | `{ kind: 'builtin', name }` 或 `{ kind: 'mcp', service, name }`；`toolExposedName(ref)` MUST ∈ 本轮可用工具清单，越界即丢弃**该引用**；**裁剪后引用为空 → 整条丢弃**（FR-009：MUST NOT 下发"无工具卡片"） |
+| `guidance` | string | **是（恒非空）** | 由运行环境按关联工具铸造：下一步卡片用 `buildActionGuidance(tools, briefs)` —— **指明本轮要调用的工具 + 其用途摘要**；首屏问题实例仍用 `buildStarterGuidance`（文案口径不变，本特性不强制 starters 绑定工具）。长度 MUST ≤ **500 字**，**超长按上限截断、MUST NOT 置空**（上限来自既有 `POST .../messages` 的 `guidance` 约束；置空会让 FR-009 的绑定在下一轮失效） |
 
 **条数上限**：单轮 0~3 条（超出取前 3 条）；0 条等价于"本轮无需下一步"。
 

@@ -55,8 +55,8 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
     name: 'read_file',
     label: '读取文件',
     description_template:
-      '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.txt/.json/.pdf/.md/.log；' +
-      'xlsx 自动转 CSV，pdf 提取文本层。大文件返回截断内容，可用 offset 继续分段读取。' +
+      '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log；' +
+      'xlsx/xls 自动转 CSV，pdf 提取文本层。大文件返回截断内容，可用 offset 继续分段读取。' +
       '参数 path 为相对空间的路径，如 "{示例路径}"。',
     parameters: {
       type: 'object',
@@ -102,7 +102,7 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
     name: 'grep_files',
     label: '检索文件内容',
     description_template:
-      '在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/pdf 会被跳过（请改用 read_file）。' +
+      '在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/xls/pdf 会被跳过（请改用 read_file）。' +
       '可指定目录，缺省检索全部开放目录。',
     parameters: {
       type: 'object',

@@ -223,7 +223,7 @@ D1~D12 的完整决策、理由与被否决替代方案见 **[research.md](./res
 
 **不加**：`useChatStream.ts`（**535 行，存量超限**，本特性 MUST NOT 在其中新增代码；挂钩点用既有 `onTurnFinished`）、`api/types.ts`（488 行）、`MessageViewLinks.vue`、`ConfirmDialog.vue`/`BaseDialog.vue`（复用，不改）。
 
-**已知存量缺陷（本次不修，需在验收时向用户说明）**：`ConfirmDialog` / `BaseDialog` 的原生 `<dialog>` 因 Tailwind preflight 的 `* { margin: 0 }` 覆盖了 UA 的 `dialog { margin: auto }`，弹窗不居中（贴视口左上角）。该缺陷**先于本特性存在**且用户此前明确"先记一下、先不改"；本特性只是新增了一处复用。若验收时用户要求一并修复，按独立一行修复（`.base-dialog` 补 `margin: auto`）并单独登记，MUST NOT 混入本特性的交付判定。
+**存量缺陷——已修复（2026-10-13 更新）**：`ConfirmDialog` / `BaseDialog` 的原生 `<dialog>` 曾因 Tailwind preflight 的 `* { margin: 0 }` 覆盖了 UA 的 `dialog { margin: auto }` 而不居中（贴视口左上角）。该缺陷**先于本特性存在**，已于 2026-10-13 按"独立一行修复 + 单独登记"的口径处理完毕：`frontend/src/components/common/BaseDialog.vue` 的 `.base-dialog` 补 `margin: auto`，并把数字人面板 `frontend/src/components/chat/AgentPanel.vue` 由 `a-modal` 改回 `BaseDialog`，统一弹窗体系与居中口径（全量前端单测 613 通过）。**该修复不属本特性（007）的交付判定范围**。
 
 ### 3.3 `admin-backend`
 

@@ -219,6 +219,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `scenario.data_prep_fields[dir][].name` | string | ✅ | 非空、≤64 字符、不含路径分隔符 / `..`、**同目录内唯一** | 字段名＝上传表的表头名 |
 | `scenario.data_prep_fields[dir][].type` | string | ✅ | ∈ `string` / `integer` / `number` / `boolean` / `object` / `array` | JSON Schema 基本类型的子集（与运行环境同一枚举） |
 | `scenario.data_prep_fields[dir][].required` | boolean | ✅ | MUST 显式为布尔 | `true` = 上传表的表头 MUST 含该字段；`false` = 可选（出现则类型仍须匹配）。不给隐式默认 |
+| `scenario.data_prep_uploads` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为**非空**扩展名数组，项 ∈ 10 项候选；顺序由服务端归一 | **目录级可上传类型白名单**（2026-10-13 新增；2026-10-14 增 `.xls`）：目录名 → 允许上传的扩展名。未配置的目录**不出现**（缺失 ≡ 平台默认 `.csv` + `.xlsx`） |
+| `scenario.data_prep_uploads[dir][]` | string | ✅ | 小写、含前导点；∈ `.xlsx` `.xls` `.csv` `.txt` `.pdf` `.json` `.zip` `.jpg` `.png` `.jpeg`；同目录内不重复；保存时按枚举顺序归一 | 单个允许的扩展名 |
 | `updated_at` | string | ✅ | ISO8601 | — |
 
 每个目录的字段数上限：**50**（`MAX_FIELDS_PER_DIR`，防滥用）。
@@ -230,6 +232,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 4. 名称冲突或非法 → 拒绝并说明原因（`FR-015`）。
 5. 场景：场景名非空且合法；目录清单拒绝空值 / 重复 / 含分隔符 / `..`；字段约束须满足上表约束（**孤儿键**——引用了目录清单外的目录——即拒，不是可忽略的冗余）。
 6. 保存后 MUST 能**原样回显**，含换行、标点与条目顺序（`FR-017`）。
+7. 目录级可上传类型（`data_prep_uploads`，2026-10-13 新增）：键须在 `data_prep_dirs` 内（孤儿键即拒）；值为**非空**数组、逐项为小写含点的合法候选（判定前先转小写）、去重、并按候选枚举固定顺序归一（防止同一勾选集因顺序不同导致物化产物字节变化）。
 
 > **实现落点**：场景（含字段约束）的判据集中在 `admin-backend/src/domain/config-center/scenario.ts`，名称安全判据在 `naming.ts`（`agent-design.ts` 因 500 行门禁拆分）。保存路径抛首条错误，部署前校验（`deploy/precheck.ts`）经 `scenarioFieldIssues()` **收集全部**问题。
 
@@ -327,7 +330,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 ├── SOUL.md          ← 数字人 soul 全文（纯 Markdown 文本）
 ├── TOOL.json        ← { "enabled": ["read_file", ...] }
 ├── MCP.json         ← { "servers": [ { name, transport, url|command, file_args } ] }
-├── scenario.json    ← { "scenario": "…", "data_prep_dirs": ["…"], "data_prep_fields": { … } }
+├── scenario.json    ← { "scenario": "…", "data_prep_dirs": ["…"], "data_prep_fields": { … }, "data_prep_uploads": { … } }
 └── skills/{name}/SKILL.md
 ```
 
@@ -339,7 +342,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
 | `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `async_tools` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `async_tools` / `allowed_tools`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
-| `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`） |
+| `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`）；`data_prep_uploads`（2026-10-13 新增）同样**仅在非空时写入**（未配置的目录不出现键），产物随数字人目录**整体覆盖**，平台侧未配置则无该键，运行环境据此回落平台默认 `.csv` + `.xlsx` |
 
 **已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url` 即平台侧调用配置里登记的唯一连接地址）。
 

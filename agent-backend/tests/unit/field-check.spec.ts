@@ -20,6 +20,7 @@ import {
   decodeCsvBuffer,
   parseCsvRows,
   parseXlsxRows,
+  supportsFieldCheck,
   valueMatchesType,
 } from '../../src/domain/field-check'
 
@@ -27,6 +28,35 @@ const FIELDS: ScenarioField[] = [
   { name: '产线编号', type: 'string', required: true },
   { name: '计划量', type: 'integer', required: false },
 ]
+
+/** 真实 `.xls`（OLE2/BIFF8）缓冲：SheetJS 写入，避免手搓二进制 fixture */
+function xlsBuffer(rows: unknown[][]): Buffer {
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1')
+  return XLSX.write(wb, { type: 'buffer', bookType: 'biff8' }) as Buffer
+}
+
+describe('supportsFieldCheck —— 表结构校验的类型判据（2026-10-13 新增；2026-10-14 增 .xls）', () => {
+  it('表格类型（.csv / .xlsx / .xls）为真，且大小写不敏感', () => {
+    expect(supportsFieldCheck('.csv')).toBe(true)
+    expect(supportsFieldCheck('.xlsx')).toBe(true)
+    expect(supportsFieldCheck('.xls')).toBe(true)
+    expect(supportsFieldCheck('.CSV')).toBe(true)
+    expect(supportsFieldCheck('.Xlsx')).toBe(true)
+    expect(supportsFieldCheck('.XLS')).toBe(true)
+  })
+
+  it('其余类型一律为假（含经白名单允许的非表格类型与图片）', () => {
+    for (const ext of ['.txt', '.pdf', '.json', '.zip', '.jpg', '.png', '.jpeg']) {
+      expect(supportsFieldCheck(ext)).toBe(false)
+    }
+  })
+
+  it('空串与未知扩展名为假（不误触发校验）', () => {
+    expect(supportsFieldCheck('')).toBe(false)
+    expect(supportsFieldCheck('.doc')).toBe(false)
+  })
+})
 
 describe('valueMatchesType —— §3.1 判据', () => {
   it('string：任意非空文本通过，空串不匹配', () => {
@@ -204,5 +234,23 @@ describe('checkUploadBuffer —— 按扩展名分派', () => {
     expect(checkUploadBuffer(FIELDS, '.xlsx', Buffer.from('not a zip'))).toEqual([
       '文件内容无法解析为有效表格（文件损坏或编码异常）',
     ])
+  })
+
+  it('.xls 走同一条 Excel 链路（OLE2/BIFF8，SheetJS 按文件头自判）', () => {
+    expect(checkUploadBuffer(FIELDS, '.xls', xlsBuffer([['产线编号'], ['A1']]))).toEqual([])
+  })
+
+  it('.xls 与 .xlsx 同口径：缺必填表头照样被拒（不因容器不同而跳过校验）', () => {
+    expect(checkUploadBuffer(FIELDS, '.xls', xlsBuffer([['计划量'], ['1']]))).toEqual([
+      '缺少必填表头：「产线编号」',
+    ])
+  })
+
+  it('非 OLE2 内容（含"改后缀名的文本文件"）返回单条解析失败（不抛错）', () => {
+    for (const bad of [Buffer.from('not a compound file'), Buffer.from('产线编号\nA1\n', 'utf8')]) {
+      expect(checkUploadBuffer(FIELDS, '.xls', bad)).toEqual([
+        '文件内容无法解析为有效表格（文件损坏或编码异常）',
+      ])
+    }
   })
 })

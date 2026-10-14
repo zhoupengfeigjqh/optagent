@@ -6,7 +6,8 @@
     "产线信息",
     "产能信息",
     "产线电价",
-    "算法规则"
+    "算法规则",
+    "test"
   ],
   "data_prep_fields": {
     "生产计划": [
@@ -200,6 +201,16 @@
         "type": "integer",
         "required": true
       }
+    ]
+  },
+  "data_prep_uploads": {
+    "算法规则": [
+      ".xlsx",
+      ".csv",
+      ".txt"
+    ],
+    "test": [
+      ".xlsx"
     ]
   }
 }

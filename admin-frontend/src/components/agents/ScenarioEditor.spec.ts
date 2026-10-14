@@ -16,10 +16,16 @@ function mountEditor(
   scenario = '',
   dirs: string[] = [],
   fields: Record<string, ScenarioField[]> = {},
+  uploads?: Record<string, string[]>,
 ) {
-  return mount(ScenarioEditor, {
-    props: { modelValue: { scenario, data_prep_dirs: dirs, data_prep_fields: fields } },
-  })
+  const modelValue: Record<string, unknown> = {
+    scenario,
+    data_prep_dirs: dirs,
+    data_prep_fields: fields,
+  }
+  // 仅在显式给出时才带该键：既有用例比对的是"不带该键"的载荷形状
+  if (uploads) modelValue.data_prep_uploads = uploads
+  return mount(ScenarioEditor, { props: { modelValue: modelValue as never } })
 }
 
 describe('ScenarioEditor', () => {
@@ -84,6 +90,7 @@ describe('ScenarioEditor', () => {
       scenario: '生产',
       data_prep_dirs: ['产线电价'],
       data_prep_fields: {},
+      data_prep_uploads: {},
     })
   })
 
@@ -214,6 +221,83 @@ describe('ScenarioEditor', () => {
       scenario: '生产',
       data_prep_dirs: ['产线电价'],
       data_prep_fields: {},
+      data_prep_uploads: {},
     })
+  })
+
+  /* ---------- 2026-10-13：目录级可上传文件类型（FR-001~FR-006） ---------- */
+
+  it('每个目录行在「字段」与「移除」之间出现「文件类型」入口，数量等于目录数', () => {
+    const wrapper = mountEditor('生产', ['算法规则', '生产计划'])
+    const rows = wrapper.findAll('.scenario-editor__list li')
+    expect(rows).toHaveLength(2)
+
+    // 自定义目录：字段 → 文件类型 → 移除
+    expect(rows[1].findAll('button').map((b) => b.text())).toEqual([
+      '字段(0)',
+      '文件类型(2)',
+      '移除',
+    ])
+    // 预定义目录同样有该入口（无「移除」）
+    expect(rows[0].findAll('button').map((b) => b.text())).toEqual(['字段(0)', '文件类型(2)'])
+    expect(wrapper.findAll('[data-test^="upload-types-"]')).toHaveLength(2)
+  })
+
+  it('未配置目录显示默认项数 2，已配置目录显示实际项数', () => {
+    const wrapper = mountEditor('生产', ['生产计划', '产线电价'], {}, { 产线电价: ['.csv', '.xlsx', '.txt'] })
+    expect(wrapper.text()).toContain('文件类型(3)')
+    expect(wrapper.text()).toContain('文件类型(2)')
+  })
+
+  it('打开窗口默认勾选 .csv/.xlsx，保存后按目录写入 data_prep_uploads', async () => {
+    const wrapper = mountEditor('生产', ['产线电价'])
+    await wrapper.find('[data-test="upload-types-产线电价"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('[data-test="upload-ext-.txt"]').setValue(true)
+    // 两个弹窗都在 DOM 中：显式限定在可上传类型窗口内
+    const dialog = '[data-test="scenario-upload-types-dialog"]'
+    await wrapper.find(`${dialog} [data-test="save"]`).trigger('click')
+
+    const emitted = wrapper.emitted('update:modelValue')?.[0]?.[0] as {
+      data_prep_uploads: Record<string, string[]>
+    }
+    expect(emitted.data_prep_uploads).toEqual({ 产线电价: ['.xlsx', '.csv', '.txt'] })
+  })
+
+  it('已配置目录打开窗口时回显其配置（非默认）', async () => {
+    const wrapper = mountEditor('生产', ['产线电价'], {}, { 产线电价: ['.json'] })
+    await wrapper.find('[data-test="upload-types-产线电价"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const json = wrapper.find('[data-test="upload-ext-.json"]').element as HTMLInputElement
+    const csv = wrapper.find('[data-test="upload-ext-.csv"]').element as HTMLInputElement
+    expect(json.checked).toBe(true)
+    expect(csv.checked).toBe(false)
+  })
+
+  it('取消不改动配置（不发 update:modelValue）', async () => {
+    const wrapper = mountEditor('生产', ['产线电价'])
+    await wrapper.find('[data-test="upload-types-产线电价"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    const dialog = '[data-test="scenario-upload-types-dialog"]'
+    await wrapper.find(`${dialog} [data-test="cancel"]`).trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.find(dialog).attributes('open')).toBeUndefined()
+  })
+
+  it('移除目录时**同时移除**其可上传类型配置（不留孤儿键）', async () => {
+    const wrapper = mountEditor('生产', ['生产计划', '产线电价'], {}, {
+      生产计划: ['.csv', '.xlsx'],
+      产线电价: ['.json'],
+    })
+    const remove = wrapper.findAll('button').find((b) => b.text() === '移除')
+    await remove?.trigger('click')
+
+    const emitted = wrapper.emitted('update:modelValue')?.[0]?.[0] as {
+      data_prep_uploads: Record<string, string[]>
+    }
+    expect(emitted.data_prep_uploads).toEqual({ 产线电价: ['.json'] })
   })
 })

@@ -43,8 +43,35 @@ export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const
 
 /** 空场景（新建时的初值）：带预定义目录，无字段约束 */
 export function emptyScenario(): AgentScenario {
-  return { scenario: '', data_prep_dirs: [...PREDEFINED_DATA_PREP_DIRS], data_prep_fields: {} }
+  return {
+    scenario: '',
+    data_prep_dirs: [...PREDEFINED_DATA_PREP_DIRS],
+    data_prep_fields: {},
+    data_prep_uploads: {},
+  }
 }
+
+/**
+ * 「数据准备」二级目录的可上传文件类型候选（勾选项）。
+ *
+ * 权威定义在 `admin-backend` `domain/config-center/scenario.ts` 的 `DATA_PREP_UPLOAD_EXTS`
+ * （MUST 同步），数组顺序也就是服务端归一化后的固定顺序。
+ */
+export const DATA_PREP_UPLOAD_EXTS = [
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.txt',
+  '.pdf',
+  '.json',
+  '.zip',
+  '.jpg',
+  '.png',
+  '.jpeg',
+] as const
+
+/** 未配置目录时弹窗的默认勾选值（与平台默认 `.csv` / `.xlsx` 一致，FR-004） */
+export const DEFAULT_DATA_PREP_UPLOADS = ['.csv', '.xlsx'] as const
 
 /**
  * 结构化 SOUL 的字段上限（004）。

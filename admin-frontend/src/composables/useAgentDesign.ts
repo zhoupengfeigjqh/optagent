@@ -47,6 +47,17 @@ function cloneFields(
   return out
 }
 
+/** 目录级可上传类型也是"目录 → 数组"的两层结构，逐层复制（避免草稿改动污染已保存态） */
+function cloneUploads(
+  uploads: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [dir, list] of Object.entries(uploads ?? {})) {
+    out[dir] = [...list]
+  }
+  return out
+}
+
 /** 结构化 SOUL 深拷贝（问题实例与工具引用都是嵌套结构，浅拷贝会串改） */
 function cloneSoul(soul: SoulDesign): SoulDesign {
   return {
@@ -88,6 +99,7 @@ function toDraft(design: AgentDesign): AgentDesignDraft {
       scenario: design.scenario.scenario,
       data_prep_dirs: [...design.scenario.data_prep_dirs],
       data_prep_fields: cloneFields(design.scenario.data_prep_fields),
+      data_prep_uploads: cloneUploads(design.scenario.data_prep_uploads),
     },
   }
 }
@@ -112,7 +124,8 @@ export function useAgentDesign() {
         draft.value.scenario.data_prep_dirs.some(
           (dir) => !(PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir),
         ) ||
-        Object.keys(draft.value.scenario.data_prep_fields).length > 0
+        Object.keys(draft.value.scenario.data_prep_fields).length > 0 ||
+        Object.keys(draft.value.scenario.data_prep_uploads ?? {}).length > 0
       )
     }
     const base = saved.value
@@ -144,7 +157,10 @@ export function useAgentDesign() {
       const payload: AgentDesignPayload = {
         ...draft.value,
         soul: cloneSoul(draft.value.soul),
-        scenario: { ...draft.value.scenario },
+        scenario: {
+          ...draft.value.scenario,
+          data_prep_uploads: cloneUploads(draft.value.scenario.data_prep_uploads),
+        },
       }
       const result =
         revision.value === null

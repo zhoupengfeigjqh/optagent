@@ -21,7 +21,12 @@ import type { PlatformStore } from '../../infra/platform-store.js';
 import { anomalyReason, detectAnomalies, type AgentRefSource } from './references.js';
 import type { ReferenceIndex } from './reference-index.js';
 import { isSafeName } from './naming.js';
-import { normalizeScenario, scenarioFields, type AgentScenario } from './scenario.js';
+import {
+  normalizeScenario,
+  scenarioFields,
+  scenarioUploads,
+  type AgentScenario,
+} from './scenario.js';
 import {
   describeSoul,
   fromLegacySoul,
@@ -263,13 +268,21 @@ export class AgentDesignService {
    * 读取归一化：历史设计态文档（`data_prep_fields` 引入前保存的）补齐为 `{}`。
    *
    * 目的是**对外契约恒有该键**——界面与部署物化因此都不必各自判空。
+   *
+   * `data_prep_uploads`（2026-10-13）**取舍不同**：它是**可选键**（契约 C1"请求体与响应体皆可省略"），
+   * 缺键 ≡ "全部目录用平台默认"，因此这里**不补空对象**——补成 `{}` 会让"未配置"与"显式清空"
+   * 在回显上无法区分。仅在键存在且为对象时保留（非对象则丢弃，交由保存校验兜底）。
    */
   private static withScenarioDefaults(doc: AgentDesignDocument): AgentDesignDocument {
     if (!doc.scenario || typeof doc.scenario !== 'object') return doc;
-    return {
-      ...doc,
-      scenario: { ...doc.scenario, data_prep_fields: scenarioFields(doc.scenario) },
+    const next: AgentScenario = {
+      ...doc.scenario,
+      data_prep_fields: scenarioFields(doc.scenario),
     };
+    const uploads = scenarioUploads(doc.scenario);
+    if (uploads === undefined) delete next.data_prep_uploads;
+    else next.data_prep_uploads = uploads;
+    return { ...doc, scenario: next };
   }
 
   read(name: string): AgentDesignDocument {

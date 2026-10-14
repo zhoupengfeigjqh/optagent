@@ -15,8 +15,9 @@ export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 export const MAX_UPLOAD_MB = 5
 
 /**
- * 扩展名白名单按空间定义（数据准备仅 csv/xlsx；共享/临时空间加 txt/json/pdf/图片），
- * 由 `GET /api/files/workspace` 的 `upload_extensions` 下发，前端不再保留全局常量。
+ * 扩展名白名单由 `GET /api/files/workspace` 的**目录级** `upload_extensions` 下发，
+ * 前端不再保留全局常量。2026-10-13 起粒度下放到目录：数据准备的**每个二级目录**各自一份
+ * （未配置 = 平台默认 `.csv` / `.xlsx`）；共享空间与临时空间仍为空间级（csv/xlsx/xls/txt/json/pdf + 图片）。
  */
 
 /* ---------- 文件引用（FR-017、SC-019） ---------- */

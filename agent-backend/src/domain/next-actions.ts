@@ -16,13 +16,18 @@
  *
  * 读取路径**不再判数字人**（修订 G4）：卡片持久化与恢复跟"当前选中数字人"无关，
  * 归属判定只保留前端按 `message_id` 挂载这一条。
+ *
+ * 2026-10-14 修订（契约 §6：卡片**强制绑定工具**）：白名单裁剪后无有效工具引用的条目
+ * **整条丢弃**（`sanitizeActionsWithStats`），引导文案改由 `buildActionGuidance` 铸造
+ * （指明要调用的工具 + 用途摘要，超 500 字**截断**而非置空）。无工具绑定的建议会退化成
+ * 开放式闲聊指令，故不再下发。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { RuntimeToolBrief } from '../types.js';
 import { threadDir } from './dirs.js';
 import {
-  buildStarterGuidance,
+  buildActionGuidance,
   NEXT_ACTION_HINTS_DEFAULT,
   parseExposedName,
   toolExposedName,
@@ -40,8 +45,8 @@ export const PROMPT_MAX_CHARS = 50;
 export const MAX_ACTIONS = NEXT_ACTION_HINTS_DEFAULT;
 /** 快照文件大小上限：超限视为损坏（脏文件防护） */
 const SNAPSHOT_MAX_BYTES = 64 * 1024;
-/** 隐藏引导长度上限：与 `POST /api/threads/:id/messages` 的 `guidance` 约束一致 */
-const GUIDANCE_MAX_CHARS = 500;
+/* 隐藏引导的长度上限（`GUIDANCE_MAX_CHARS`）随文案铸造一起落在 `soul.ts`：
+   `buildActionGuidance` 生成时即按上限**截断**（MUST NOT 置空），本模块不再自行判长。 */
 
 /** 一条下一步动作提示（内部形态；下发时补 `exposed_name`） */
 export interface NextAction {
@@ -132,15 +137,29 @@ export class NextActionsStore {
       }
       return undefined;
     }
-    const actions = sanitizeActions(raw, input.availableTools, input.max);
+    const { actions, stats } = sanitizeActionsWithStats(raw, input.availableTools, input.max);
     if (actions.length === 0) {
+      // 归因（原则九）：卡片变少必须看得出是"模型没给工具"还是"工具名越界被裁空"
       this.warn(
         input.userId,
         input.threadId,
-        `下一步动作提示尾部块条目全部不合规（msg=${input.messageId}，候选 ${raw.length} 条，原文节选：${excerptOf(text)}）`,
+        `下一步动作提示尾部块条目全部被丢弃（msg=${input.messageId}，候选 ${raw.length} 条；`
+          + `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope} / 其它 ${stats.droppedOther}；`
+          + `原文节选：${excerptOf(text)}）`,
         input.agentName,
       );
       return undefined;
+    }
+    if (stats.droppedNoTools + stats.droppedToolsOutOfScope > 0) {
+      // 部分条目因"未绑定可用工具"被丢（FR-009）：其余卡片照常下发，但必须留痕，
+      // 否则"这一轮怎么少了两张卡"无从解释。稳定后可评估降为 info 级。
+      this.warn(
+        input.userId,
+        input.threadId,
+        `下一步动作提示部分条目未绑定可用工具被丢弃（msg=${input.messageId}；`
+          + `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope}；保留 ${actions.length} 条）`,
+        input.agentName,
+      );
     }
     if (!this.writeSnapshot(input, actions)) return undefined;
     return { message_id: input.messageId, actions: actions.map(toView) };
@@ -246,13 +265,27 @@ export class NextActionsStore {
  * 工具目录取**本轮真实装配的工具清单**（`runWith` 在工具装配完成后调用），
  * 与引用裁剪的判据同源——模型只能引用它真正看得到的工具。
  */
+/**
+ * 本轮**生效**的提示条数上限：SOUL 开关开启（`max !== undefined`）**且**本轮有可用工具时才生效。
+ *
+ * 后半条是 2026-10-14 修订的前提（FR-009）：卡片必须绑定工具，本轮没有工具就必然产不出卡片，
+ * 这时仍追加收尾指令只会白耗 token，并让轮末每次都按"条目全部被丢弃"告警 ⇒ 等价于该轮关闭。
+ * 返回值即"是否追加指令"的判据（`undefined` = 不追加），避免调用方用非空断言。
+ */
+export function effectiveNextActionsMax(
+  max: number | undefined,
+  availableTools: readonly unknown[],
+): number | undefined {
+  return max !== undefined && availableTools.length > 0 ? max : undefined;
+}
+
 export function buildTailInstruction(
   availableTools: readonly RuntimeToolBrief[],
   max: number,
 ): string {
   const catalog =
     availableTools.length === 0
-      ? '（本数字人当前没有可用工具，`tools` 一律留空数组）'
+      ? '（本数字人当前没有可用工具——没有工具就**不要输出任何建议**，直接输出 {"actions":[]}）'
       : availableTools.map((t) => `- ${t.name}：${t.description || '无说明'}`).join('\n');
   return [
     '## 回答收尾要求：下一步动作建议',
@@ -265,12 +298,16 @@ export function buildTailInstruction(
     '1. 收尾块只输出一次，必须在整条回答的**最末尾**，块前后不要加 ``` 等代码围栏；',
     '2. `prompt` 必须是**全中文**、意图清晰简洁、**不超过 50 字**；',
     '   严禁出现工具名、英文单词、下划线或驼峰式标识符；',
-    '3. `tools` 是可选的关联工具数组（0~2 个），元素只能取自下方清单，且**只能出现在 `tools` 里**，',
-    '   绝不能出现在 `prompt` 中；',
-    `4. 数量 0~${max} 个：用户目标已达成、只是闲聊、或没有明确下一步时，输出 {"actions":[]}，不要硬凑；`,
-    '5. 不要重复同一件事，按用户最可能想做的顺序排列。',
+    '3. **每条建议都必须绑定工具**：`tools` 为 1~2 个元素（不允许空数组），',
+    '   元素只能取自下方清单，且**只能出现在 `tools` 里**，绝不能出现在 `prompt` 中；',
+    '4. 建议本身必须是"**用该工具能完成的具体任务**"且与用户目标相关；',
+    '   关联不到合适工具的建议**不要输出**——宁可少给，也不要给不相关的建议；',
+    '   不要为了凑数把不相关的工具塞进 `tools`；',
+    `5. 数量 0~${max} 个：用户目标已达成、只是闲聊、或没有能关联工具的下一步时，`,
+    '   输出 {"actions":[]}，不要硬凑；',
+    '6. 不要重复同一件事，按用户最可能想做的顺序排列。',
     '',
-    '本数字人当前可调用的工具（仅供 `tools` 字段使用）：',
+    '本数字人当前可调用的工具（`tools` 只能取自这里）：',
     catalog,
   ].join('\n');
 }
@@ -320,30 +357,82 @@ function excerptOf(raw: string, max = 200): string {
   return chars.slice(0, max).join('') + (chars.length > max ? '…' : '');
 }
 
+/** 丢弃原因统计（宪章原则九：卡片变少 MUST 可归因，MUST NOT 静默） */
+export interface SanitizeStats {
+  /** 模型**压根没给**工具 → 整条丢弃的条数（FR-009） */
+  droppedNoTools: number;
+  /** 模型**给过**工具、但引用全部越界或形态非法（被白名单裁空）→ 整条丢弃的条数（FR-009） */
+  droppedToolsOutOfScope: number;
+  /** 其它原因：提示词不合规 / 重复 / 条目类型错（FR-003 / FR-043） */
+  droppedOther: number;
+  /** 合规但因条数上限未收录（FR-004） */
+  droppedOverLimit: number;
+}
+
+/** `sanitizeActionsWithStats` 的返回：保留条目 + 丢弃归因 */
+export interface SanitizeResult {
+  actions: NextAction[];
+  stats: SanitizeStats;
+}
+
 /**
- * 逐条校验并裁剪（FR-003/FR-004/FR-043）：不合规条目只丢自己，条数超限取前 N 条。
- * 工具引用越界只丢该引用、**保留卡片文本**（边界情况·工具引用越界）。
+ * 逐条校验并裁剪（FR-003/FR-004/FR-009/FR-043）：不合规条目只丢自己，条数超限取前 N 条。
+ *
+ * **2026-10-14 修订（卡片强制绑定工具）**：白名单裁剪**之后**若已无有效工具引用，
+ * **整条丢弃**——不再沿用旧口径"只丢引用、保留卡片文本"（无工具绑定的建议会退化成
+ * 开放式闲聊指令）。判据顺序是"先裁剪、再判空"，所以模型把工具名写错同样会整条消失，
+ * 这是有意的；两种情况分别计入 `stats`，供定稿告警区分。
  */
+export function sanitizeActionsWithStats(
+  raw: readonly unknown[],
+  availableTools: readonly RuntimeToolBrief[],
+  max: number = MAX_ACTIONS,
+): SanitizeResult {
+  const allowed = new Set(availableTools.map((t) => t.name));
+  const out: NextAction[] = [];
+  const seen = new Set<string>();
+  const stats: SanitizeStats = {
+    droppedNoTools: 0,
+    droppedToolsOutOfScope: 0,
+    droppedOther: 0,
+    droppedOverLimit: 0,
+  };
+  for (const item of raw) {
+    if (out.length >= max) {
+      stats.droppedOverLimit++;
+      continue;
+    }
+    if (!isRecord(item)) {
+      stats.droppedOther++;
+      continue;
+    }
+    const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
+    if (!isCompliantPrompt(prompt, allowed) || seen.has(prompt)) {
+      stats.droppedOther++;
+      continue;
+    }
+    // `declared` 用于区分"压根没给"与"给了但全被裁掉"：两者都整条丢弃，但归因不同
+    const declared = Array.isArray(item.tools) ? item.tools : [];
+    const tools = filterTools(declared, allowed);
+    if (tools.length === 0) {
+      if (declared.length === 0) stats.droppedNoTools++;
+      else stats.droppedToolsOutOfScope++;
+      continue;
+    }
+    seen.add(prompt);
+    // 引导在铸造处即截断到上限内（超长截断、MUST NOT 置空，否则"绑定"会在下一轮静默失效）
+    out.push({ prompt, tools, guidance: buildActionGuidance(tools, availableTools) });
+  }
+  return { actions: out, stats };
+}
+
+/** 只要保留条目（既有调用口径）；需要丢弃归因时用 `sanitizeActionsWithStats` */
 export function sanitizeActions(
   raw: readonly unknown[],
   availableTools: readonly RuntimeToolBrief[],
   max: number = MAX_ACTIONS,
 ): NextAction[] {
-  const allowed = new Set(availableTools.map((t) => t.name));
-  const out: NextAction[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (out.length >= max) break;
-    if (!isRecord(item)) continue;
-    const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
-    if (!isCompliantPrompt(prompt, allowed)) continue;
-    if (seen.has(prompt)) continue;
-    seen.add(prompt);
-    const tools = filterTools(item.tools, allowed);
-    const guidance = buildStarterGuidance(tools);
-    out.push({ prompt, tools, guidance: guidance.length > GUIDANCE_MAX_CHARS ? '' : guidance });
-  }
-  return out;
+  return sanitizeActionsWithStats(raw, availableTools, max).actions;
 }
 
 /**
@@ -412,10 +501,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * 快照条目的形状校验（读取侧）。
+ *
+ * 除字段形状外**必判 `tools` 非空**：2026-10-14 起"卡片必须绑定工具"，而存量快照里
+ * 可能还留着旧口径产出的"无工具卡片"——读取时按同一判据过滤，避免它们继续下发。
+ */
 function isStoredAction(value: unknown): value is NextAction {
   if (!isRecord(value)) return false;
   if (typeof value.prompt !== 'string' || value.prompt === '') return false;
   if (typeof value.guidance !== 'string') return false;
-  if (!Array.isArray(value.tools)) return false;
+  if (!Array.isArray(value.tools) || value.tools.length === 0) return false;
   return true;
 }

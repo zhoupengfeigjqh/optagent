@@ -1,15 +1,19 @@
 /**
  * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7 + 003 三空间改造）：
  * - POST /api/files/upload：multipart 上传——dir 为空间相对路径（数据准备需二级目录，
- *   二级目录须命中 scenario.json 清单），扩展名按空间策略（数据准备仅 csv/xlsx，
- *   共享/临时空间 csv/xlsx/txt/json/pdf + 图片），≤5MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
- * - 数据准备目录带字段约束（data_prep_fields）时：暂存后、落盘前校验上传表的
- *   表头与取值类型（`domain/field-check.ts`），失败 400 FILE_SCHEMA_INVALID（不落盘）
+ *   二级目录须命中 scenario.json 清单），扩展名按**该目标允许的类型**判定
+ *   （2026-10-13 起：数据准备的**每个二级目录**各自一份白名单 `scenario.data_prep_uploads`，
+ *   缺省回落平台默认 csv/xlsx；共享/临时空间仍取 `SPACE_POLICIES`，
+ *   即 csv/xlsx/xls/txt/json/pdf + 图片），≤5MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
+ * - 数据准备目录带字段约束（data_prep_fields）且上传**表格类型**（`.csv`/`.xlsx`/`.xls`）时：
+ *   暂存后、落盘前校验上传表的表头与取值类型（`domain/field-check.ts`），
+ *   失败 400 FILE_SCHEMA_INVALID（不落盘）；非表格类型跳过表结构校验（FR-020）
  * - GET /api/files/list?dir=：列目录
  * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
- *   按扩展名映射 Content-Type；.xlsx 回退附件下载；超过预览上限 → 413）
- * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略）
+ *   按扩展名映射 Content-Type；.xlsx/.xls 回退附件下载；超过预览上限 → 413）
+ * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略 +
+ *   目录级可上传类型 `upload_extensions`）
  * - GET /api/files/rules：HITL「从算法规则选择」数据源——「数据准备/算法规则」最新
  *   规则文件（updated_at 最大）解析成结构化行（columns/rows/priority_column）
  * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
@@ -30,22 +34,23 @@ import {
   DirValidationError,
   ScenarioNotConfiguredError,
   SPACE_PREP,
-  SPACE_POLICIES,
   SPACE_SHARED,
   SPACE_TMP,
   loadScenario,
   parseSpaceDir,
+  uploadExtensionsOf,
   userDataDir,
 } from '../domain/dirs.js';
+import { buildWorkspaceView } from '../domain/workspace-view.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
-import { checkUploadBuffer } from '../domain/field-check.js';
+import { checkUploadBuffer, supportsFieldCheck } from '../domain/field-check.js';
 import { removeFileSafe } from '../domain/fs-safe.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { verifyRef } from '../infra/file-sign.js';
 import { registerFilePutRoute } from './files-put.js';
 
-/** 内联预览 Content-Type 映射；.xlsx 前端无法内联渲染，回退附件下载 */
+/** 内联预览 Content-Type 映射；.xlsx/.xls 前端无法内联渲染，回退附件下载 */
 const PREVIEW_CONTENT_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
@@ -229,9 +234,20 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     try {
       // 早验命中直接用缓存结果（同一 dir 值已校验过），否则按旧顺序补验
       const target = validatedTarget ?? checkDir(ctx, userId, currentAgentFor(ctx, userId), dir);
-      // 按目标空间策略校验扩展名
       const ext = path.extname(originalName).toLowerCase();
-      const allowed = SPACE_POLICIES[target.space].uploadExtensions;
+      // 数据准备目录：载入该数字人场景（目录级白名单与字段约束的共同来源）；其余空间不读场景
+      const scenario =
+        target.space === SPACE_PREP && target.sub
+          ? loadScenario(
+              ctx.config.optAgentRoot,
+              userId,
+              currentAgentFor(ctx, userId),
+              ctx.loggers.logger,
+            )
+          : null;
+      // 允许上传的类型：**唯一实现** `uploadExtensionsOf`（数据准备按目录、缺省回落平台默认；
+      // 其余空间恒取 SPACE_POLICIES）。提示含允许类型，满足 FR-042 / SC-002。
+      const allowed = uploadExtensionsOf(scenario, target.space, target.sub);
       if (!allowed.includes(ext)) {
         throw new ApiError(
           400,
@@ -239,15 +255,10 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           `${target.space} 不支持格式 "${ext}"，允许：${allowed.join(' ')}`,
         );
       }
-      // 字段约束校验（暂存后、落盘前）：仅数据准备目录且该目录声明了约束时触发。
+      // 字段约束校验（暂存后、落盘前）：仅**数据准备目录**且**该类型需要表结构校验**且该目录声明了约束时触发。
+      // `supportsFieldCheck` 是唯一判据（非表格类型跳过，避免"缺少必填表头"描述一个本没有表头的文件，FR-020）。
       // 运行环境是唯一权威（前端不做同款校验，契约 §3.1）；失败不落盘。
-      if (target.space === SPACE_PREP && target.sub) {
-        const scenario = loadScenario(
-          ctx.config.optAgentRoot,
-          userId,
-          currentAgentFor(ctx, userId),
-          ctx.loggers.logger,
-        );
+      if (scenario && target.sub && supportsFieldCheck(ext)) {
         const fields = scenario.dataPrepFields[target.sub] ?? [];
         if (fields.length > 0) {
           const issues = checkUploadBuffer(fields, ext, fs.readFileSync(staging));
@@ -336,7 +347,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       const ext = path.extname(filename).toLowerCase();
       const contentType = PREVIEW_CONTENT_TYPES[ext];
       if (!contentType) {
-        // 不可内联类型（如 .xlsx）回退附件下载
+        // 不可内联类型（如 .xlsx/.xls）回退附件下载
         return reply
           .header('content-type', 'application/octet-stream')
           .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`)
@@ -453,14 +464,18 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   );
 
   // 三空间工作空间汇总（003 改造）：空间 → 子目录 → 文件，附每空间策略
+  // 2026-10-13：响应体装配拆到 `domain/workspace-view.ts`（本文件行数逼近 500 门禁，原则二）
   app.get('/api/files/workspace', async (_req) => {
     const userId = getCurrentUser().userId;
-    const access = fileAccessFor(ctx, userId);
-    const root = ctx.config.optAgentRoot;
 
     let scenario;
     try {
-      scenario = loadScenario(root, userId, currentAgentFor(ctx, userId), ctx.loggers.logger);
+      scenario = loadScenario(
+        ctx.config.optAgentRoot,
+        userId,
+        currentAgentFor(ctx, userId),
+        ctx.loggers.logger,
+      );
     } catch (err) {
       if (err instanceof ScenarioNotConfiguredError) {
         throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
@@ -468,41 +483,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw err;
     }
 
-    const listFiles = async (relPath: string) => {
-      // 目录初始化时已预创建；运行中被删（如手动清理）按空目录容错
-      const entries = await access.list(relPath).catch(() => []);
-      return entries
-        .filter((e) => !e.isDirectory)
-        .map((e) => ({ filename: e.name, size: e.size, updated_at: e.modifiedAt }));
-    };
-
-    const spaces = [];
-    for (const space of [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const) {
-      const policy = SPACE_POLICIES[space];
-      const subDirs =
-        space === SPACE_PREP ? scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`) : [space];
-      const dirs = [];
-      for (const relPath of subDirs) {
-        dirs.push({
-          dir: relPath,
-          label: relPath === space ? space : relPath.slice(space.length + 1),
-          deletable: space !== SPACE_SHARED,
-          files: await listFiles(relPath),
-          // 字段约束随目录下发（无约束为 []）：前端据此在上传入口做只读提示；
-          // 权威校验在上传路由执行，前端 MUST NOT 自行判定（契约 §3.1）
-          fields:
-            space === SPACE_PREP
-              ? (scenario.dataPrepFields[relPath.slice(space.length + 1)] ?? [])
-              : [],
-        });
-      }
-      spaces.push({
-        name: space,
-        agent_writable: policy.agentWritable,
-        upload_extensions: policy.uploadExtensions,
-        dirs,
-      });
-    }
-    return { scenario: scenario.name, spaces };
+    return buildWorkspaceView(scenario, fileAccessFor(ctx, userId));
   });
 }

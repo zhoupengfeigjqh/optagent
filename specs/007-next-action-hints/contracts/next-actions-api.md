@@ -10,8 +10,10 @@
   既有 `guidance` 字段语义均**不变**。
 - **本特性依赖两条既有事实**（取证见 `../research.md` §3）：① 会话**不绑定**数字人、可跨数字人
   （`thread-store.ts` 的 FR-014 修订）⇒ 需要 §1 的下发前置双判据；② 既有下发形状
-  `AgentStarterView.guidance: string` **始终出现**（空串 = 无关联工具）⇒ 本端点的 `guidance` 同口径，
-  以保持"与问题实例逐字同形"。
+  `AgentStarterView.guidance: string` **始终出现**，本端点的 `guidance` 沿用同一字段与同一隐藏通道。
+- **2026-10-14 修订（卡片强制绑定工具）**：本端点的卡片**必然关联 ≥1 个本轮可用工具**，
+  故 `guidance` **恒非空**且**指明本轮要调用的工具**；超长按 500 字**截断**而非置空。
+  空串只是"防御性兼容"（历史快照 / 异常），不再是"无关联工具"的正常表达。见 §6。
 
 ---
 
@@ -59,8 +61,8 @@
 | `message_id` | `string \| null` | 无快照、开关关闭、**当前选中数字人与卡片归属不一致**、快照损坏时一律 `null` |
 | `actions` | `NextAction[]` | 1~3 条（**有内容才下发**，不存在 0 条的下发形态）；顺序即展示顺序 |
 | `actions[].prompt` | `string` | 中文、≤50 字（生成期已校验） |
-| `actions[].tools[]` | `{ kind: 'builtin' \| 'mcp'; name: string; service?: string; exposed_name: string }[]` | 与 `AgentStarterTool` **逐字同形**；仅内部使用，前端 MUST NOT 展示 |
-| `actions[].guidance` | `string` | **始终出现**（与 `AgentStarterView.guidance: string` 逐字同形；**空串 = 无关联工具 / 引导超 500 字被回落**）；前端 MUST 原样回传，MUST NOT 自行拼装；发送时为空串则 MUST NOT 携带该请求字段 |
+| `actions[].tools[]` | `{ kind: 'builtin' \| 'mcp'; name: string; service?: string; exposed_name: string }[]` | 与 `AgentStarterTool` **逐字同形**；**必然非空（≥1 项，2026-10-14）**——裁剪后为空引用的条目不下发；仅内部使用，前端 MUST NOT 展示 |
+| `actions[].guidance` | `string` | **始终出现且恒非空**（2026-10-14）：由关联工具铸造，**指明本轮要调用的工具 + 其用途摘要**；长度 ≤ 500 字（超长**截断**、MUST NOT 置空）；前端 MUST 原样回传，MUST NOT 自行拼装；为空串时 MUST NOT 携带该请求字段（防御性保留，正常路径不下发） |
 
 **"无内容"的表达**：`{ "message_id": null, "actions": [] }`（**200**，不是 404/204）。
 理由：对前端而言"没有建议"是正常态而非错误态（FR-042：降级 MUST NOT 呈现错误）。
@@ -155,10 +157,25 @@ nextSteps(threadId: string): Promise<ThreadNextSteps>   // GET /api/threads/{id}
 |---|---|---|---|
 | `message_id` | `ThreadNextSteps.message_id` | ✅ | `null` ⇒ 不渲染 |
 | `actions[].prompt` | `AgentStarter.prompt` | ✅ | 卡片文本 |
-| `actions[].tools[]` | `AgentStarterTool[]` | ✅ | 仅内部使用（MUST NOT 展示） |
-| `actions[].guidance` | `AgentStarter.guidance` | ✅ | **始终出现**（空串 = 无引导）；仅回传，MUST NOT 自行拼装；发送时为空串则 MUST NOT 携带该请求字段 |
+| `actions[].tools[]` | `AgentStarterTool[]` | ✅ | **必然非空（≥1，2026-10-14）**；仅内部使用（MUST NOT 展示） |
+| `actions[].guidance` | `AgentStarter.guidance` | ✅ | **始终出现且恒非空**（由关联工具铸造，含工具名与用途）；仅回传，MUST NOT 自行拼装；为空串时 MUST NOT 携带该请求字段（防御性保留） |
 
 **契约同步的四处（宪章"契约变更的四处同步"）**：契约文档（本节 + `specs/001/.../contracts/*`）、
 前端类型定义（`frontend/src/api/types.ts` + `api/threads.ts`）、后端请求/响应 schema
 （`agent-backend/src/routes/threads.ts` 的路由 schema 与序列化形状）、测试用例
 （`agent-backend/tests/integration/next-actions.spec.ts` + 前端 `useNextSteps.spec.ts`）。
+
+---
+
+## 6. 修订登记（2026-10-14）：卡片强制绑定工具
+
+| 项 | 变更 |
+|---|---|
+| 动机 | 无工具绑定的建议退化为开放式闲聊指令，实际出现大量与数字人能力无关的"奇怪指令"（用户口径） |
+| `actions[].tools[]` | **必填且 ≥1**：白名单裁剪后为空引用的条目**整条丢弃**，MUST NOT 下发"无工具卡片"（FR-009） |
+| `actions[].guidance` | **恒非空**，文案升级为"指明本轮要调用的工具 + 其用途摘要"；超 500 字**截断**而非置空（FR-024） |
+| 本轮 0 条的既有表达 | **不变**：`{ "message_id": null, "actions": [] }`（"全部条目因无工具被丢弃"同样落到该形态，200 而非错误） |
+| 端点 / 形状 | 路径、响应结构、字段名与可选性**零变更**；前端类型定义**无需改动**（`AgentStarter.tools: AgentStarterTool[]` 已可表达非空数组，前端仍按形状容错） |
+| 读取侧 | 存量 `next-actions.json` 中"无有效工具引用"的条目在读取时按**同一判据**过滤（唯一实现，TR-02） |
+| 上游回写 | `specs/001/.../contracts/runtime-api-delta.md` §16.2（工具引用越界条款）+ 新增 §16.8；同特性 `spec.md`（FR-009 / FR-024 / SC-012）、`data-model.md` §3、`revision-tail-protocol.md` §1 非目标（第 25 行被本修订取代）+ §11 |
+| 不变量 | 不引入 Function Calling、不预置工具参数、不改变工具权限；首屏"问题实例"卡片行为与引导文案**零变更**；`guidance` 上限仍 **500 字** |

@@ -3,10 +3,12 @@
  *
  * 分五组守住五条硬约束（口径见 `src/domain/next-actions.ts` 文件头）：
  * - **解析与合规**：模型输出脏（代码块围栏 / 裸数组 / 超长 / 夹工具名）时逐条丢弃，绝不透出工具标识符；
- * - **工具引用与引导**：引用只认本轮装配出来的清单，越界只丢引用、保留卡片文本；
+ * - **工具引用与引导**（2026-10-14 修订）：卡片**强制绑定工具**——白名单裁剪后无有效引用的条目
+ *   **整条丢弃**；引导由 `buildActionGuidance` 铸造（含工具名 + 用途摘要），超 500 字**截断**而非置空；
  * - **尾部块捕获**：`<next_actions>` 块对用户完全不可见，正文逐字无损（跨增量 / 误前缀 / 块后正文）；
- * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出告警附节选；
- * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取不再判数字人（修订 G4）。
+ * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出与"全无工具"告警附归因；
+ * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取不再判数字人（修订 G4）、
+ *   读取侧按同一判据过滤存量"无工具卡片"。
  *
  * 全链路（含 done 直推）见 `tests/integration/next-actions-rounds.spec.ts`。
  */
@@ -19,13 +21,15 @@ import {
   NextActionsStore,
   PROMPT_MAX_CHARS,
   buildTailInstruction,
+  effectiveNextActionsMax,
   isCompliantPrompt,
   parseActions,
   sanitizeActions,
+  sanitizeActionsWithStats,
   type NextActionsFinalizeInput,
 } from '../../src/domain/next-actions.js';
 import { TailCapture } from '../../src/domain/next-actions-tail.js';
-import { buildStarterGuidance } from '../../src/domain/soul.js';
+import { GUIDANCE_MAX_CHARS, buildActionGuidance } from '../../src/domain/soul.js';
 import { threadDir } from '../../src/domain/dirs.js';
 import type { RuntimeToolBrief } from '../../src/types.js';
 
@@ -37,6 +41,10 @@ const TOOLS: RuntimeToolBrief[] = [
 function action(prompt: string, tools?: unknown[]): Record<string, unknown> {
   return { prompt, ...(tools === undefined ? {} : { tools }) };
 }
+
+/** 合法绑定：`read_file` 恒在 `TOOLS` 清单内，用来构造"带工具"的合规条目 */
+const bound = (prompt: string): Record<string, unknown> =>
+  action(prompt, [{ kind: 'builtin', name: 'read_file' }]);
 
 describe('parseActions —— 输出容错解析', () => {
   it('顶层裸数组 / 对象包裹 / 代码块围栏三种形态都能解析', () => {
@@ -82,17 +90,15 @@ describe('isCompliantPrompt —— 合规判定（唯一实现）', () => {
 });
 
 describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
-  it('合法引用保留并生成与问题实例同款的隐藏引导', () => {
-    const out = sanitizeActions(
-      [action('按交付日期梳理这批订单的风险', [{ kind: 'mcp', service: 'erp', name: 'query_order' }])],
-      TOOLS,
-    );
+  it('合法引用保留，并生成"指明工具 + 用途"的隐藏引导', () => {
+    const ref = { kind: 'mcp', service: 'erp', name: 'query_order' };
+    const out = sanitizeActions([action('按交付日期梳理这批订单的风险', [ref])], TOOLS);
 
     expect(out).toHaveLength(1);
-    expect(out[0]!.tools).toEqual([{ kind: 'mcp', service: 'erp', name: 'query_order' }]);
-    expect(out[0]!.guidance).toBe(
-      buildStarterGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
-    );
+    expect(out[0]!.tools).toEqual([ref]);
+    expect(out[0]!.guidance).toBe(buildActionGuidance([ref], TOOLS));
+    expect(out[0]!.guidance).toContain('erp__query_order');
+    expect(out[0]!.guidance).toContain('查询订单');
   });
 
   it('模型把 MCP 工具写成 builtin + 暴露名 → 落盘为规范引用（kind=mcp + 服务名）', () => {
@@ -103,55 +109,103 @@ describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
     );
 
     expect(out[0]!.tools).toEqual([{ kind: 'mcp', service: 'erp', name: 'query_order' }]);
-    // `tools` 与 `guidance` 同源：两者都由暴露名拼出，任何消费方重建引导都得到同一串
+    // `tools` 与 `guidance` 同源：任何消费方重建引导都得到同一串
     expect(out[0]!.guidance).toBe(
-      buildStarterGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
+      buildActionGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }], TOOLS),
     );
   });
 
-  it('越界引用只丢该引用，**卡片文本保留**（边界情况·工具引用越界）', () => {
+  it('FR-009：越界引用被裁空 → **整条丢弃**（不再保留卡片文本）', () => {
     const out = sanitizeActions(
       [action('整理一下共享空间的表格', [{ kind: 'builtin', name: 'not_enabled' }])],
       TOOLS,
     );
 
-    expect(out.map((a) => a.prompt)).toEqual(['整理一下共享空间的表格']);
-    expect(out[0]!.tools).toEqual([]);
-    expect(out[0]!.guidance).toBe('');
+    expect(out).toEqual([]);
   });
 
-  it('可用工具清单为空 → 所有引用被丢弃（无处可指）', () => {
+  it('FR-009：完全没给 `tools` → 整条丢弃', () => {
+    const out = sanitizeActions([action('整理一下共享空间的表格')], TOOLS);
+
+    expect(out).toEqual([]);
+  });
+
+  it('FR-009：可用工具清单为空 → 一切条目都无处可指，整轮 0 条', () => {
     const out = sanitizeActions(
       [action('整理一下表格', [{ kind: 'mcp', service: 'erp', name: 'query_order' }])],
       [],
     );
 
-    expect(out[0]!.tools).toEqual([]);
+    expect(out).toEqual([]);
   });
 
-  it('引导超长（>500 字）→ 丢掉引导而保留卡片', () => {
+  it('FR-009 验收③：混合输入（1 条有效 + 2 条无/越界）→ 只下发 1 条', () => {
+    const out = sanitizeActions(
+      [
+        bound('按交付日期梳理订单风险'),
+        action('整理共享空间的表格'),
+        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
+      ],
+      TOOLS,
+    );
+
+    expect(out.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
+  });
+
+  it('丢弃归因可分辨：没给工具 vs 给了但引用越界（原则九）', () => {
+    const { actions, stats } = sanitizeActionsWithStats(
+      [
+        bound('按交付日期梳理订单风险'),
+        action('整理共享空间的表格'),
+        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
+      ],
+      TOOLS,
+    );
+
+    expect(actions.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
+    expect(stats.droppedNoTools).toBe(1);
+    expect(stats.droppedToolsOutOfScope).toBe(1);
+    expect(stats.droppedOther).toBe(0);
+  });
+
+  it('引导超 500 字 → **截断**到上限内且仍含工具名（MUST NOT 置空，否则绑定失效）', () => {
     const longName = 'x'.repeat(600);
     const out = sanitizeActions(
       [action('整理一下表格', [{ kind: 'builtin', name: longName }])],
       [{ name: longName, description: '' }],
     );
 
-    expect(out[0]!.guidance).toBe('');
+    expect(out).toHaveLength(1);
     expect(out[0]!.tools).toHaveLength(1);
+    expect(out[0]!.guidance.length).toBeLessThanOrEqual(GUIDANCE_MAX_CHARS);
+    expect(out[0]!.guidance).toContain('x'.repeat(100)); // 工具名在前，未被截掉
+    expect(out[0]!.guidance.endsWith('…')).toBe(true);
+  });
+
+  it('单工具用途摘要单独限长（长描述不会吃光整个预算）', () => {
+    const desc = '描'.repeat(200);
+    const out = sanitizeActions(
+      [action('整理共享空间的表格', [{ kind: 'builtin', name: 'read_file' }])],
+      [{ name: 'read_file', description: desc }],
+    );
+
+    expect(out[0]!.guidance).toContain('描'.repeat(79));
+    expect(out[0]!.guidance).not.toContain('描'.repeat(81));
+    expect(out[0]!.guidance.length).toBeLessThanOrEqual(GUIDANCE_MAX_CHARS);
   });
 
   it('不合规条目只丢自己；重复提示词去重；条数超上限取前 N 条', () => {
     const raw = [
-      action('甲'.repeat(PROMPT_MAX_CHARS + 1)), // 超长 → 丢
-      action(''), // 空 → 丢
-      action('先做 query_order'), // 夹标识符 → 丢
-      { prompt: 123 }, // 类型错 → 丢
+      action('甲'.repeat(PROMPT_MAX_CHARS + 1), [{ kind: 'builtin', name: 'read_file' }]), // 超长 → 丢
+      bound(''), // 空 → 丢
+      action('先做 query_order', [{ kind: 'builtin', name: 'read_file' }]), // 夹标识符 → 丢
+      { prompt: 123, tools: [{ kind: 'builtin', name: 'read_file' }] }, // 类型错 → 丢
       'not-an-object',
-      action('整理共享空间的表格'),
-      action('整理共享空间的表格'), // 重复 → 丢
-      action('按交付日期梳理订单风险'),
-      action('按月汇总这批订单的数量'),
-      action('第四条应当被条数上限截掉'),
+      bound('整理共享空间的表格'),
+      bound('整理共享空间的表格'), // 重复 → 丢
+      bound('按交付日期梳理订单风险'),
+      bound('按月汇总这批订单的数量'),
+      bound('第四条应当被条数上限截掉'),
     ];
 
     const out = sanitizeActions(raw, TOOLS);
@@ -164,7 +218,7 @@ describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
     expect(out).toHaveLength(MAX_ACTIONS);
   });
 
-  it('kind 非法 / MCP 缺服务名 / 重名引用 → 该引用丢弃', () => {
+  it('kind 非法 / MCP 缺服务名 / 重名引用 → 该引用丢弃（有效引用非空则条目保留）', () => {
     const out = sanitizeActions(
       [
         action('整理一下共享空间的表格', [
@@ -178,6 +232,7 @@ describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
       TOOLS,
     );
 
+    expect(out).toHaveLength(1);
     expect(out[0]!.tools).toEqual([{ kind: 'builtin', name: 'read_file' }]);
   });
 });
@@ -201,8 +256,8 @@ function finInput(overrides: Partial<NextActionsFinalizeInput> = {}): NextAction
     agentName: 'demo',
     tailText: JSON.stringify({
       actions: [
-        action('按交付日期梳理订单风险', [{ kind: 'builtin', name: 'read_file' }]),
-        action('按月汇总这批订单的数量'),
+        bound('按交付日期梳理订单风险'),
+        action('按月汇总这批订单的数量', [{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
       ],
     }),
     availableTools: TOOLS,
@@ -300,6 +355,8 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
     expect(snapshot.agent_name).toBe('demo');
     expect(snapshot.created_at).toBeTruthy();
     expect(snapshot.actions[0]!.guidance).toContain('read_file');
+    // 部分条目被丢时仍照常下发其余卡片，但必须留痕（见下条用例）
+    expect(warns.filter((w) => w.includes('未绑定可用工具'))).toEqual([]);
   });
 
   it('空尾部（开关关闭 / 模型省略）→ 不写快照、不告警', () => {
@@ -328,20 +385,50 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
   it('有候选条目但全部不合规 → 不写快照，且告警给出候选条数（FR-041）', () => {
     const tail = JSON.stringify({
-      actions: [action('先做 query_order'), action('再看 read_file 的结果')],
+      actions: [bound('先做 query_order'), bound('再看 read_file 的结果')],
     });
 
     expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
 
     expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
-    const warned = warns.find((w) => w.includes('全部不合规'));
+    const warned = warns.find((w) => w.includes('全部被丢弃'));
     expect(warned).toBeDefined();
     expect(warned).toContain('候选 2 条');
+    expect(warned).toContain('其它 2');
+  });
+
+  it('候选条目全部因"未绑定可用工具"被丢弃 → 告警给出归因计数（FR-009 + 原则九）', () => {
+    const tail = JSON.stringify({
+      actions: [action('整理共享空间的表格'), action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }])],
+    });
+
+    expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
+
+    expect(fs.existsSync(file('admin', 'th_1'))).toBe(false);
+    const warned = warns.find((w) => w.includes('全部被丢弃'));
+    expect(warned).toBeDefined();
+    expect(warned).toContain('候选 2 条');
+    expect(warned).toContain('无工具 1');
+    expect(warned).toContain('引用越界 1');
+  });
+
+  it('部分条目未绑定工具被丢弃 → 其余照常下发，并留痕可归因（FR-009）', () => {
+    const tail = JSON.stringify({
+      actions: [bound('按交付日期梳理订单风险'), action('整理共享空间的表格')],
+    });
+
+    const view = store().finalize(finInput({ tailText: tail }));
+
+    expect(view?.actions.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
+    const warned = warns.find((w) => w.includes('未绑定可用工具'));
+    expect(warned).toBeDefined();
+    expect(warned).toContain('无工具 1');
+    expect(warned).toContain('保留 1 条');
   });
 
   it('条数上限压到 2（SOUL 配置与提示词同源）→ 只落 2 条', () => {
     const tail = JSON.stringify({
-      actions: [action('第一条'), action('第二条'), action('第三条'), action('第四条')],
+      actions: [bound('第一条'), bound('第二条'), bound('第三条'), bound('第四条')],
     });
 
     store().finalize(finInput({ tailText: tail, max: 2 }));
@@ -366,7 +453,7 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 });
 
 describe('NextActionsStore —— 读取与清空', () => {
-  it('read 下发形态：message_id + 动作（tools 带 exposed_name、guidance 始终出现）', () => {
+  it('read 下发形态：message_id + 动作（tools 带 exposed_name、guidance 指明工具）', () => {
     const tail = JSON.stringify({
       actions: [action('按交付日期梳理订单风险', [{ kind: 'mcp', service: 'erp', name: 'query_order' }])],
     });
@@ -378,8 +465,9 @@ describe('NextActionsStore —— 读取与清空', () => {
     expect(view?.actions[0]).toMatchObject({
       prompt: '按交付日期梳理订单风险',
       tools: [{ kind: 'mcp', name: 'query_order', service: 'erp', exposed_name: 'erp__query_order' }],
-      guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+      guidance: buildActionGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }], TOOLS),
     });
+    expect(view?.actions[0]!.guidance).toContain('erp__query_order');
   });
 
   it('修订 G4：读取不再判"当前选中数字人"——快照在即下发（卡片与数字人切换无关）', () => {
@@ -388,6 +476,46 @@ describe('NextActionsStore —— 读取与清空', () => {
     // 造成"切换数字人后卡片消失"。因此这里只断言：快照在 → 无条件下发。
     store().finalize(finInput());
     expect(store().read('admin', 'th_1')?.message_id).toBe('m-1');
+  });
+
+  it('存量快照：无有效工具引用的条目在读取侧被过滤（同一判据，MUST NOT 继续下发）', () => {
+    const target = file('admin', 'th_1');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      JSON.stringify({
+        message_id: 'm-old',
+        agent_name: 'demo',
+        created_at: new Date().toISOString(),
+        actions: [
+          { prompt: '旧口径的无工具卡片', tools: [], guidance: '' },
+          { prompt: '有工具的卡片', tools: [{ kind: 'builtin', name: 'read_file' }], guidance: 'x' },
+        ],
+      }),
+      'utf8',
+    );
+
+    const view = store().read('admin', 'th_1');
+
+    expect(view?.actions.map((a) => a.prompt)).toEqual(['有工具的卡片']);
+  });
+
+  it('存量快照全部无工具 → 等同无提示（undefined），不告警（不是损坏）', () => {
+    const target = file('admin', 'th_1');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      JSON.stringify({
+        message_id: 'm-old',
+        agent_name: 'demo',
+        created_at: new Date().toISOString(),
+        actions: [{ prompt: '旧口径的无工具卡片', tools: [], guidance: '' }],
+      }),
+      'utf8',
+    );
+
+    expect(store().read('admin', 'th_1')).toBeUndefined();
+    expect(warns.some((w) => w.includes('损坏'))).toBe(false);
   });
 
   it('无快照 / 损坏 JSON / 超 64KB / actions 为空 → undefined，且仅损坏与超限告警', () => {
@@ -422,7 +550,12 @@ describe('NextActionsStore —— 读取与清空', () => {
   it('新一轮覆盖旧快照（会话级只保留最新一轮；历史轮次不保留）', () => {
     const s = store();
     s.finalize(finInput());
-    s.finalize(finInput({ messageId: 'm-2', tailText: '{"actions":[{"prompt":"第二轮的建议"}]}' }));
+    s.finalize(
+      finInput({
+        messageId: 'm-2',
+        tailText: JSON.stringify({ actions: [bound('第二轮的建议')] }),
+      }),
+    );
 
     const snapshot = JSON.parse(fs.readFileSync(file('admin', 'th_1'), 'utf8')) as {
       message_id: string;
@@ -451,9 +584,34 @@ describe('buildTailInstruction —— 尾部块指令装配（System Prompt 末�
     expect(text).toContain('50 字');
   });
 
-  it('无可用工具 → 目录提示 tools 一律留空', () => {
+  it('FR-009：明示"每条建议都必须绑定工具"且关联不到就不要输出', () => {
+    const text = buildTailInstruction(TOOLS, MAX_ACTIONS);
+
+    expect(text).toContain('每条建议都必须绑定工具');
+    expect(text).toContain('1~2 个元素');
+    expect(text).toContain('不要输出');
+    expect(text).toContain('不要为了凑数');
+  });
+
+  it('无可用工具 → 目录提示直接输出空 actions（不再引导"留空数组"的卡片）', () => {
     const text = buildTailInstruction([], MAX_ACTIONS);
 
     expect(text).toContain('没有可用工具');
+    expect(text).toContain('{"actions":[]}');
+  });
+});
+
+describe('effectiveNextActionsMax —— 本轮是否追加尾部指令的唯一判据', () => {
+  it('开关关闭（max 为 undefined）→ 不追加', () => {
+    expect(effectiveNextActionsMax(undefined, TOOLS)).toBeUndefined();
+  });
+
+  it('FR-009：开关开启但本轮无可用工具 → 不追加（等价于该轮关闭该功能）', () => {
+    expect(effectiveNextActionsMax(MAX_ACTIONS, [])).toBeUndefined();
+  });
+
+  it('开关开启且本轮有可用工具 → 返回本轮上限（照常追加）', () => {
+    expect(effectiveNextActionsMax(MAX_ACTIONS, TOOLS)).toBe(MAX_ACTIONS);
+    expect(effectiveNextActionsMax(2, TOOLS)).toBe(2);
   });
 });

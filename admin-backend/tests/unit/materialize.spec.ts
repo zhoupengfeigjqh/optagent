@@ -237,6 +237,43 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] });
   });
 
+  it('2026-10-13：有可上传类型时写入 data_prep_uploads；空对象 / 缺失时**不写空壳键**', () => {
+    const scenarioJson = (artifact: ReturnType<typeof buildAgentArtifact>): unknown =>
+      JSON.parse(String(artifact.files.find((f) => f.relPath === 'scenario.json')?.content));
+
+    const withUploads = buildAgentArtifact(
+      design({
+        scenario: {
+          scenario: '生产',
+          data_prep_dirs: ['生产计划', '算法规则'],
+          data_prep_uploads: { 生产计划: ['.csv', '.xlsx', '.txt'] },
+        },
+      }),
+      { mcpConfigs, skills },
+    );
+    expect(scenarioJson(withUploads)).toEqual({
+      scenario: '生产',
+      data_prep_dirs: ['生产计划', '算法规则'],
+      data_prep_uploads: { 生产计划: ['.csv', '.xlsx', '.txt'] },
+    });
+
+    // 空对象 ⇒ 与"键缺失"等价（运行环境按平台默认处理），MUST NOT 留下空壳键
+    const emptyUploads = buildAgentArtifact(
+      design({
+        scenario: {
+          scenario: '生产',
+          data_prep_dirs: ['生产计划', '算法规则'],
+          data_prep_uploads: {},
+        },
+      }),
+      { mcpConfigs, skills },
+    );
+    expect(scenarioJson(emptyUploads)).toEqual({
+      scenario: '生产',
+      data_prep_dirs: ['生产计划', '算法规则'],
+    });
+  });
+
   it('007：下一步动作提示开关**只影响 SOUL.md 的两行 frontmatter**（开关 + 条数），正文与其余三件套逐字一致', () => {
     const off = buildAgentArtifact(design(), { mcpConfigs, skills });
     const on = buildAgentArtifact(
