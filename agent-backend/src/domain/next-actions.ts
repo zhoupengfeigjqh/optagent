@@ -147,9 +147,9 @@ export class NextActionsStore {
       this.warn(
         input.userId,
         input.threadId,
-        `下一步动作提示尾部块条目全部被丢弃（msg=${input.messageId}，候选 ${raw.length} 条；`
-          + `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope} / 其它 ${stats.droppedOther}；`
-          + `原文节选：${excerptOf(text)}）`,
+        `下一步动作提示尾部块条目全部被丢弃（msg=${input.messageId}，候选 ${raw.length} 条；` +
+          `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope} / 其它 ${stats.droppedOther}；` +
+          `原文节选：${excerptOf(text)}）`,
         input.agentName,
       );
       return undefined;
@@ -160,8 +160,8 @@ export class NextActionsStore {
       this.warn(
         input.userId,
         input.threadId,
-        `下一步动作提示部分条目未绑定可用工具被丢弃（msg=${input.messageId}；`
-          + `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope}；保留 ${actions.length} 条）`,
+        `下一步动作提示部分条目未绑定可用工具被丢弃（msg=${input.messageId}；` +
+          `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope}；保留 ${actions.length} 条）`,
         input.agentName,
       );
     }
@@ -204,13 +204,23 @@ export class NextActionsStore {
     } catch (err) {
       this.remove(tmp);
       // 写失败保留旧快照（或保持无），不影响本轮回答；返回 false → 本轮无卡片（done 不带）
-      this.warn(input.userId, input.threadId, '下一步动作提示快照写入失败（保留旧快照）', input.agentName, err);
+      this.warn(
+        input.userId,
+        input.threadId,
+        '下一步动作提示快照写入失败（保留旧快照）',
+        input.agentName,
+        err,
+      );
       return false;
     }
   }
 
   /** 读取快照；不存在/损坏/超限 → `undefined`（不存在是最常见路径，不告警） */
-  private readSnapshot(userId: string, agentName: string, threadId: string): NextActionsSnapshot | undefined {
+  private readSnapshot(
+    userId: string,
+    agentName: string,
+    threadId: string,
+  ): NextActionsSnapshot | undefined {
     const file = this.filePath(userId, agentName, threadId);
     let raw: string;
     try {
@@ -254,7 +264,13 @@ export class NextActionsStore {
     }
   }
 
-  private warn(userId: string, threadId: string, message: string, agentName?: string, err?: unknown): void {
+  private warn(
+    userId: string,
+    threadId: string,
+    message: string,
+    agentName?: string,
+    err?: unknown,
+  ): void {
     const detail = err === undefined ? '' : `：${err instanceof Error ? err.message : String(err)}`;
     this.deps.logger?.warn(
       `user=${userId} thread=${threadId}${agentName ? ` agent=${agentName}` : ''} ${message}${detail}`,
@@ -458,7 +474,8 @@ export function isCompliantPrompt(prompt: string, toolNames: ReadonlySet<string>
 }
 
 /** `snake_case` / `kebab-case` / `CamelCase` 形态（"工具英文名"的可判定形态） */
-const IDENTIFIER_RE = /[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+|[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/;
+const IDENTIFIER_RE =
+  /[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+|[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/;
 
 /* ---------- 内部 ---------- */
 
@@ -473,7 +490,11 @@ function filterTools(raw: unknown, allowed: ReadonlySet<string>): SoulToolRef[] 
     let ref: SoulToolRef | undefined;
     if (item.kind === 'builtin') {
       ref = { kind: 'builtin', name };
-    } else if (item.kind === 'mcp' && typeof item.service === 'string' && item.service.trim() !== '') {
+    } else if (
+      item.kind === 'mcp' &&
+      typeof item.service === 'string' &&
+      item.service.trim() !== ''
+    ) {
       ref = { kind: 'mcp', service: item.service.trim(), name };
     }
     if (!ref) continue;

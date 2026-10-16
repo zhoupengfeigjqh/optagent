@@ -1,36 +1,36 @@
 <script setup lang="ts">
-import type { ColumnsType } from '#/components/z-table/table.data';
+import type { ColumnsType } from '#/components/z-table/table.data'
 
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
-import ZGantt from '#/components/z-gantt/index.vue';
-import { isTruth } from '#/utils/is';
+import ZGantt from '#/components/z-gantt/index.vue'
+import { isTruth } from '#/utils/is'
 
 const props = defineProps<{
-  cols: any[];
-  ganttData: any[];
-  ganttOption: any;
-  isFixedBtn?: boolean;
-  navPosition?: 'bottom' | 'top';
-  rowKey?: string;
-  tableData: any[];
-}>();
+  cols: any[]
+  ganttData: any[]
+  ganttOption: any
+  isFixedBtn?: boolean
+  navPosition?: 'bottom' | 'top'
+  rowKey?: string
+  tableData: any[]
+}>()
 
-const emit = defineEmits(['update:cols']);
+const emit = defineEmits(['update:cols'])
 
-const navPaddingTop = 160;
-const normalPaddingTop = props.ganttOption.rangeSelector.enabled ? 90 : 55;
-const ganttRef = ref<any>(null);
-const tableSectionRef = ref<any>(null);
-const containerRef = ref<any>(null);
-const showGuideLine = ref(false);
-const guideLinePosition = ref(200);
-const tableWidth = ref('200px');
-const tempWidth = ref(0);
-const handlerTop = ref(0);
-const openTour = ref(false);
-const tourRef = ref();
-let isClick = true;
+const navPaddingTop = 160
+const normalPaddingTop = props.ganttOption.rangeSelector.enabled ? 90 : 55
+const ganttRef = ref<any>(null)
+const tableSectionRef = ref<any>(null)
+const containerRef = ref<any>(null)
+const showGuideLine = ref(false)
+const guideLinePosition = ref(200)
+const tableWidth = ref('200px')
+const tempWidth = ref(0)
+const handlerTop = ref(0)
+const openTour = ref(false)
+const tourRef = ref()
+let isClick = true
 
 const cols = computed<ColumnsType[]>({
   get: () => {
@@ -41,28 +41,28 @@ const cols = computed<ColumnsType[]>({
       maxWidth: isTruth(col.maxWidth) ? col.maxWidth : 600,
       width: isTruth(col.width) ? col.width : 100,
       ellipsis: isTruth(col.ellipsis) ? col.ellipsis : true,
-    }));
-    return resizableCols;
+    }))
+    return resizableCols
   },
   set: (val) => emit('update:cols', val),
-});
+})
 /**
  * 更新甘特图数据
  * @param option
  */
 const updateGantt = (option: any) => {
-  if (ganttRef.value) ganttRef.value.updateGantt(option);
-};
+  if (ganttRef.value) ganttRef.value.updateGantt(option)
+}
 /**
  * 将可解析的时间字符串统一转为时间戳，避免 Highcharts 无法解析
  */
 const toTimestamp = (value: any): any => {
   if (typeof value === 'string') {
-    const ts = Date.parse(value);
-    return Number.isNaN(ts) ? value : ts;
+    const ts = Date.parse(value)
+    return Number.isNaN(ts) ? value : ts
   }
-  return value;
-};
+  return value
+}
 /**
  * 将外部甘特图数据规范化为 Highcharts Gantt 所需字段：
  * - startTime/endTime（接口常用字段）兼容转成 start/end
@@ -70,45 +70,43 @@ const toTimestamp = (value: any): any => {
  * - 缺失 y（行坐标）时按数据顺序补齐，保证每个点都能定位到行
  */
 const normalizeGanttData = (list: any[] = []): any[] => {
-  if (!Array.isArray(list)) return [];
+  if (!Array.isArray(list)) return []
   return list.map((item: any, index: number) => {
-    const hasStart = item.start !== undefined || item.x !== undefined;
-    const hasEnd = item.end !== undefined || item.x2 !== undefined;
+    const hasStart = item.start !== undefined || item.x !== undefined
+    const hasEnd = item.end !== undefined || item.x2 !== undefined
     return {
       ...item,
       start: toTimestamp(hasStart ? (item.start ?? item.x) : item.startTime),
       end: toTimestamp(hasEnd ? (item.end ?? item.x2) : item.endTime),
       y: item.y === undefined ? index : item.y,
-    };
-  });
-};
+    }
+  })
+}
 /** 规范化后的甘特图数据（传给 z-gantt，同时供 option 组装与更新使用） */
-const ganttChartData = computed<any[]>(() =>
-  normalizeGanttData(props.ganttData),
-);
+const ganttChartData = computed<any[]>(() => normalizeGanttData(props.ganttData))
 /**
  * 监听甘特图数据变化，变化后同步更新甘特图数据
  */
 watch(
   () => props.ganttData,
   () => {
-    if (!ganttRef.value) return;
+    if (!ganttRef.value) return
     nextTick(() => {
       // 携带最新的数据与 y 轴分类/范围，避免行数变化时出现截断或错位
-      updateGantt(ganttOpt.value);
-    });
+      updateGantt(ganttOpt.value)
+    })
   },
   { deep: true },
-);
+)
 /**
  * 共享运行时上下文：由本组件创建并透传给 z-gantt，
  * z-gantt 会把图表实例、鼠标坐标、当前数据点注入其中，业务侧无需自行声明
  */
-const ganttCtx: Record<string, any> = {};
+const ganttCtx: Record<string, any> = {}
 
 /** 解析 ganttOption：支持工厂函数 (ctx) => option 与普通对象两种形式 */
 const resolveGanttOption = (option: any): any =>
-  typeof option === 'function' ? option(ganttCtx) : option || {};
+  typeof option === 'function' ? option(ganttCtx) : option || {}
 
 /**
  * 组装传给 z-gantt 的 option：
@@ -120,27 +118,23 @@ const resolveGanttOption = (option: any): any =>
  * - y 轴未配置分类时，按甘特图数据顺序自动生成分类与范围
  */
 const ganttOpt = computed(() => {
-  const data = ganttChartData.value;
+  const data = ganttChartData.value
   // 解析业务配置（函数形式会把本组件的共享上下文传入，回调内可直接用 ctx）
-  const rawOption = resolveGanttOption(props.ganttOption);
-  const rawSeries = Array.isArray(rawOption?.series) ? rawOption.series : [];
-  const baseSeries =
-    rawSeries.length > 0 ? rawSeries[0] : { name: '甘特图', turboThreshold: 0 };
+  const rawOption = resolveGanttOption(props.ganttOption)
+  const rawSeries = Array.isArray(rawOption?.series) ? rawOption.series : []
+  const baseSeries = rawSeries.length > 0 ? rawSeries[0] : { name: '甘特图', turboThreshold: 0 }
 
-  const rawYAxis = rawOption?.yAxis || {};
-  const needAutoAxis =
-    !Array.isArray(rawYAxis.categories) || rawYAxis.categories.length === 0;
+  const rawYAxis = rawOption?.yAxis || {}
+  const needAutoAxis = !Array.isArray(rawYAxis.categories) || rawYAxis.categories.length === 0
   // y 轴基础配置：未配置分类时按甘特图数据顺序自动生成分类与范围
   const baseYAxis = needAutoAxis
     ? {
         ...rawYAxis,
-        categories: data.map(
-          (d: any, index: number) => d?.name ?? `任务${index + 1}`,
-        ),
+        categories: data.map((d: any, index: number) => d?.name ?? `任务${index + 1}`),
         min: 0,
         max: Math.max(data.length - 1, rawYAxis.min ?? 0),
       }
-    : { ...rawYAxis };
+    : { ...rawYAxis }
 
   return {
     ...rawOption,
@@ -166,59 +160,59 @@ const ganttOpt = computed(() => {
       lineWidth: baseYAxis.lineWidth ?? 1,
     },
     series: [{ ...baseSeries, data }, ...rawSeries.slice(1)],
-  };
-});
+  }
+})
 /**
  * 鼠标按下句柄
  * @param e
  */
 const handleMouseDown = (e: MouseEvent) => {
-  e.preventDefault();
-  showGuideLine.value = true;
+  e.preventDefault()
+  showGuideLine.value = true
   if (tableSectionRef.value) {
-    tempWidth.value = tableSectionRef.value.offsetWidth;
+    tempWidth.value = tableSectionRef.value.offsetWidth
   }
 
   if (containerRef.value) {
-    const containerRect = containerRef.value.getBoundingClientRect();
-    guideLinePosition.value = e.clientX - containerRect.left;
+    const containerRect = containerRef.value.getBoundingClientRect()
+    guideLinePosition.value = e.clientX - containerRect.left
   }
 
-  document.addEventListener('mousemove', handleMouseMove);
-  document.addEventListener('mouseup', handleMouseUp);
-};
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+}
 /**
  * 鼠标移动句柄
  * @param e
  */
 const handleMouseMove = (e: MouseEvent) => {
-  e.preventDefault();
-  isClick = false;
-  if (!containerRef.value) return;
+  e.preventDefault()
+  isClick = false
+  if (!containerRef.value) return
 
-  const containerRect = containerRef.value.getBoundingClientRect();
-  const minWidth = 100;
-  const maxWidth = containerRect.width * 0.6;
+  const containerRect = containerRef.value.getBoundingClientRect()
+  const minWidth = 100
+  const maxWidth = containerRect.width * 0.6
 
-  let newWidth = e.clientX - containerRect.left;
-  newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+  let newWidth = e.clientX - containerRect.left
+  newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth))
 
-  guideLinePosition.value = newWidth;
-  tempWidth.value = newWidth;
-};
+  guideLinePosition.value = newWidth
+  tempWidth.value = newWidth
+}
 /**
  * 鼠标抬起句柄
  */
 const handleMouseUp = () => {
-  showGuideLine.value = false;
-  tableWidth.value = `${tempWidth.value}px`;
-  document.removeEventListener('mousemove', handleMouseMove);
-  document.removeEventListener('mouseup', handleMouseUp);
+  showGuideLine.value = false
+  tableWidth.value = `${tempWidth.value}px`
+  document.removeEventListener('mousemove', handleMouseMove)
+  document.removeEventListener('mouseup', handleMouseUp)
   const timer = setTimeout(() => {
-    isClick = true;
-    clearTimeout(timer);
-  }, 1000);
-};
+    isClick = true
+    clearTimeout(timer)
+  }, 1000)
+}
 /**
  * 表格调整列宽
  * @param w
@@ -227,48 +221,47 @@ const handleMouseUp = () => {
 function handleResizeColumn(w: any, col: any) {
   cols.value = cols.value.map((item) =>
     item.dataIndex === col.dataIndex ? { ...item, width: w } : item,
-  );
+  )
 }
 /**
  * 全局滚动时，带动拖拽句柄一起移动，方便用户在任何位置操作句柄
  */
 const handleScroll = () => {
-  const base = props.navPosition === 'top' ? navPaddingTop : normalPaddingTop;
-  handlerTop.value = base + window.scrollY;
-};
+  const base = props.navPosition === 'top' ? navPaddingTop : normalPaddingTop
+  handlerTop.value = base + window.scrollY
+}
 
 const handleVisibleTable = () => {
   if (isClick) {
-    tableWidth.value = tableWidth.value === '0px' ? '100px' : '0px';
-    guideLinePosition.value = tableWidth.value === '0px' ? 0 : 100;
+    tableWidth.value = tableWidth.value === '0px' ? '100px' : '0px'
+    guideLinePosition.value = tableWidth.value === '0px' ? 0 : 100
   }
-};
+}
 
 onMounted(() => {
   if (tableSectionRef.value) {
-    tableWidth.value = `${tableSectionRef.value.offsetWidth}px`;
+    tableWidth.value = `${tableSectionRef.value.offsetWidth}px`
   }
-  handlerTop.value =
-    props.navPosition === 'top' ? navPaddingTop : normalPaddingTop;
+  handlerTop.value = props.navPosition === 'top' ? navPaddingTop : normalPaddingTop
 
   const timer = setTimeout(() => {
-    const hasDragedHandler = localStorage.getItem('hasDragedHandler');
+    const hasDragedHandler = localStorage.getItem('hasDragedHandler')
     if (!hasDragedHandler) {
-      localStorage.setItem('hasDragedHandler', '1');
-      openTour.value = true;
+      localStorage.setItem('hasDragedHandler', '1')
+      openTour.value = true
     }
-    clearTimeout(timer);
-  }, 1500);
-  if (!props?.isFixedBtn) window.addEventListener('scroll', handleScroll);
-});
+    clearTimeout(timer)
+  }, 1500)
+  if (!props?.isFixedBtn) window.addEventListener('scroll', handleScroll)
+})
 /**
  * 销毁绑定的事件
  */
 onUnmounted(() => {
-  document.removeEventListener('mousemove', handleMouseMove);
-  document.removeEventListener('mouseup', handleMouseUp);
-  if (!props?.isFixedBtn) window.removeEventListener('scroll', handleScroll);
-});
+  document.removeEventListener('mousemove', handleMouseMove)
+  document.removeEventListener('mouseup', handleMouseUp)
+  if (!props?.isFixedBtn) window.removeEventListener('scroll', handleScroll)
+})
 
 const steps = [
   {
@@ -276,29 +269,25 @@ const steps = [
     description: '拖拽该按钮可调节表格与甘特图的宽度',
     target: () => tourRef.value && tourRef.value.$el,
   },
-];
+]
 
 defineExpose({
   updateGantt,
-});
+})
 </script>
 
 <template>
   <div>
-    <main
-      class="of-hidden relative flex"
-      id="gantt-table-container"
-      ref="containerRef"
-    >
+    <main id="gantt-table-container" ref="containerRef" class="of-hidden relative flex">
       <a-button
         ref="tourRef"
         class="drag-handler"
-        @click="handleVisibleTable"
-        @mousedown="handleMouseDown"
         :style="{
           left: `${guideLinePosition}px`,
           top: `${handlerTop}px`,
         }"
+        @click="handleVisibleTable"
+        @mousedown="handleMouseDown"
       />
 
       <div
@@ -308,36 +297,28 @@ defineExpose({
       ></div>
 
       <section
+        v-show="tableWidth !== '0px'"
         ref="tableSectionRef"
         class="table-section"
         :style="{
-          paddingTop:
-            props.navPosition === 'top'
-              ? `${navPaddingTop}px`
-              : `${normalPaddingTop}px`,
+          paddingTop: props.navPosition === 'top' ? `${navPaddingTop}px` : `${normalPaddingTop}px`,
           width: tableWidth,
           minWidth: '100px',
           maxWidth: '60%',
         }"
-        v-show="tableWidth !== '0px'"
       >
         <a-table
           :row-key="props.rowKey || 'id'"
           :columns="cols"
           :data-source="props.tableData"
           :pagination="false"
-          @resize-column="handleResizeColumn"
           size="small"
           bordered
+          @resize-column="handleResizeColumn"
         >
           <template #bodyCell="{ column, record, text }">
             <template v-if="column.slot">
-              <slot
-                :name="column.slot"
-                :record="record"
-                :text="text"
-                :column="column"
-              ></slot>
+              <slot :name="column.slot" :record="record" :text="text" :column="column"></slot>
             </template>
             <template v-else>
               {{ text }}
@@ -348,10 +329,10 @@ defineExpose({
 
       <div class="min-w-0 flex-1">
         <ZGantt
+          ref="ganttRef"
           :option="ganttOpt"
           :data="ganttChartData"
           :context="ganttCtx"
-          ref="ganttRef"
           :nav-position="props.navPosition"
         />
       </div>
@@ -454,14 +435,7 @@ $td-height: 33px;
   border-inline-end: none;
 }
 
-:deep(
-  .ant-table-wrapper
-    .ant-table-container
-    table
-    > thead
-    > tr:first-child
-    > *:last-child
-) {
+:deep(.ant-table-wrapper .ant-table-container table > thead > tr:first-child > *:last-child) {
   border-start-end-radius: 0;
 }
 </style>

@@ -97,20 +97,20 @@ export function placeMenu(
   size: PopupSize,
   viewport: PopupViewport,
 ): MenuPlacement {
-  const maxLeft = Math.max(MARGIN, viewport.width - size.width - MARGIN);
-  const left = clamp(anchor.left, MARGIN, maxLeft);
+  const maxLeft = Math.max(MARGIN, viewport.width - size.width - MARGIN)
+  const left = clamp(anchor.left, MARGIN, maxLeft)
 
-  const below = anchor.bottom + GAP;
-  const above = anchor.top - size.height - GAP;
+  const below = anchor.bottom + GAP
+  const above = anchor.top - size.height - GAP
 
   if (below + size.height <= viewport.height - MARGIN) {
-    return { left, top: below, side: 'below' };
+    return { left, top: below, side: 'below' }
   }
   if (above >= MARGIN) {
-    return { left, top: above, side: 'above' };
+    return { left, top: above, side: 'above' }
   }
 
   // 上下都放不下（菜单高于可用高度）：夹取，保证整块仍在视口内
-  const maxTop = Math.max(MARGIN, viewport.height - size.height - MARGIN);
-  return { left, top: clamp(below, MARGIN, maxTop), side: 'below' };
+  const maxTop = Math.max(MARGIN, viewport.height - size.height - MARGIN)
+  return { left, top: clamp(below, MARGIN, maxTop), side: 'below' }
 }

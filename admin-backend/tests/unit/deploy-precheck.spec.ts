@@ -49,9 +49,7 @@ describe('runPrecheck', () => {
   });
 
   it('① 配置完整性：SOUL 为空 → config_integrity', () => {
-    const errors = runPrecheck(
-      input({ readDesign: () => design({ soul: soulDesign('   ') }) }),
-    );
+    const errors = runPrecheck(input({ readDesign: () => design({ soul: soulDesign('   ') }) }));
     expect(errors).toHaveLength(1);
     expect(errors[0]?.category).toBe('config_integrity');
     expect(errors[0]?.user_id).toBe('admin');
@@ -71,7 +69,12 @@ describe('runPrecheck', () => {
     const errors = runPrecheck(
       input({
         readDesign: () =>
-          design({ enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } }),
+          design({
+            enabled_tools: [],
+            mcp_services: [],
+            skills: [],
+            scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] },
+          }),
       }),
     );
     expect(errors).toEqual([]);
@@ -191,7 +194,10 @@ describe('runPrecheck', () => {
 
   it('② 信息读取不到（工具目录不可得）→ 按失败处理，MUST NOT 视为通过', () => {
     const errors = runPrecheck(
-      input({ toolsUnavailableReason: '运行环境不可达', index: createReferenceIndex({ builtinTools: [], mcpServices: ['ocr'], skills: [] }) }),
+      input({
+        toolsUnavailableReason: '运行环境不可达',
+        index: createReferenceIndex({ builtinTools: [], mcpServices: ['ocr'], skills: [] }),
+      }),
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.category).toBe('reference_validity');
@@ -267,7 +273,10 @@ describe('detectAnomalies —— 与预检同源', () => {
     const anomalies = detectAnomalies(d, shrunk);
     const errors = runPrecheck(input({ index: shrunk, readDesign: () => d }));
     expect(anomalies.map((a) => a.target_name).sort()).toEqual(
-      errors.filter((e) => e.category === 'reference_validity').map((e) => e.detail).sort(),
+      errors
+        .filter((e) => e.category === 'reference_validity')
+        .map((e) => e.detail)
+        .sort(),
     );
   });
 });

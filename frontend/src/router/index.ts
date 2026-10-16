@@ -9,7 +9,7 @@
  * 页面级组件统一放在 `src/views/` 下，新增页面时在此登记路由即可。
  */
 import { createRouter, createWebHistory } from 'vue-router'
-import {getToken} from '@/utils/cookie'
+import { getToken } from '@/utils/cookie'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -33,16 +33,16 @@ const router = createRouter({
       component: () => import('@/views/datapage/task-result.vue'),
     },
     {
-        path: '/ganttdemo',
-        name: 'GanttDemo',
-        component: () => import('@/views/demo/gantt-demo.vue'),
-        meta: {title: 'DataEvoluter · Gantt Demo', requiresAuth: false}
+      path: '/ganttdemo',
+      name: 'GanttDemo',
+      component: () => import('@/views/demo/gantt-demo.vue'),
+      meta: { title: 'DataEvoluter · Gantt Demo', requiresAuth: false },
     },
     {
-        path: '/gantt',
-        name: 'Gantt',
-        component: () => import('@/views/demo/gantt.vue'),
-        meta: {title: 'DataEvoluter · Gantt', requiresAuth: false}
+      path: '/gantt',
+      name: 'Gantt',
+      component: () => import('@/views/demo/gantt.vue'),
+      meta: { title: 'DataEvoluter · Gantt', requiresAuth: false },
     },
     // {
     //     path: '/:pathMatch(.*)*',
@@ -51,28 +51,27 @@ const router = createRouter({
   ],
 })
 
-
 //全局前置守卫：必须登录后才能进入问答页面
 router.beforeEach((to, _from, next) => {
-    //标题
-    // if (to.meta.title) {
-    //     document.title = to.meta.title
-    // }
-    //需要登录的页面
-    if (to.meta.requiresAuth) {
-        if (!getToken()) {
-            //未登录，跳转登录页
-            next('/login')
-            return
-        }
-    } else if (to.path === '/login') {
-        //已登录访问登录页，直接进入问答页
-        if (getToken()) {
-            next('/')
-            return
-        }
+  //标题
+  // if (to.meta.title) {
+  //     document.title = to.meta.title
+  // }
+  //需要登录的页面
+  if (to.meta.requiresAuth) {
+    if (!getToken()) {
+      //未登录，跳转登录页
+      next('/login')
+      return
     }
-    next()
+  } else if (to.path === '/login') {
+    //已登录访问登录页，直接进入问答页
+    if (getToken()) {
+      next('/')
+      return
+    }
+  }
+  next()
 })
 
 export default router

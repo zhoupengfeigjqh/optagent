@@ -11,12 +11,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import QuickStartDialog from './QuickStartDialog.vue'
-import type {
-  BuiltinTool,
-  McpServiceListItem,
-  SoulStarter,
-  SoulStarterTool,
-} from '../../api/types'
+import type { BuiltinTool, McpServiceListItem, SoulStarter, SoulStarterTool } from '../../api/types'
 
 const BUILTIN_TOOLS: BuiltinTool[] = [
   { name: 'read_file', label: '读文件', description_template: '', parameters: {}, writable: false },

@@ -220,7 +220,10 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
     const wrapper = mountDesigner('demo')
     await flushPromises()
 
-    await wrapper.findAll('button').find((b) => b.text() === '删除')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
     await wrapper.vm.$nextTick()
 
     const dialog = wrapper.find('[data-test="agent-delete-dialog"]')
@@ -235,7 +238,10 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
     const wrapper = mountDesigner('demo')
     await flushPromises()
 
-    await wrapper.findAll('button').find((b) => b.text() === '删除')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.find('[data-test="agent-delete-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()
@@ -250,7 +256,10 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
     const wrapper = mountDesigner('demo')
     await flushPromises()
 
-    await wrapper.findAll('button').find((b) => b.text() === '删除')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.find('[data-test="agent-delete-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()

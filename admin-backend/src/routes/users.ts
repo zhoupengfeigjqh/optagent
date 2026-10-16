@@ -85,9 +85,7 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
 /** `FR-025`：可关联的 MUST 是平台内**已存在**的数字人 */
 function assertAgentsExist(ctx: AppContext, raw: unknown): void {
   if (!Array.isArray(raw)) return;
-  const missing = raw.filter(
-    (name): name is string => typeof name === 'string' && !ctx.agents.exists(name),
-  );
+  const missing = raw.filter((name): name is string => typeof name === 'string' && !ctx.agents.exists(name));
   if (missing.length > 0) {
     throw new ApiError(
       ERROR_CODES.VALIDATION_FAILED,

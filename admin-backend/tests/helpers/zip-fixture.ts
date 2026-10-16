@@ -32,23 +32,23 @@ function crc32(buf: Buffer): number {
 
 export interface ZipEntrySpec {
   /** 条目名（可含 `../`、绝对路径等恶意形态，用于夹具） */
-  name: string
-  content?: string | Buffer
+  name: string;
+  content?: string | Buffer;
   /** 符号链接目标（写入 externalFileAttributes 的 Unix 模式位） */
-  symlinkTo?: string
+  symlinkTo?: string;
   /** 直接指定 externalFileAttributes（覆盖默认） */
-  externalAttributes?: number
+  externalAttributes?: number;
 }
 
 export interface ZipFixtureOptions {
   /** 是否用 deflate 压缩（默认 STORE） */
-  compress?: boolean
+  compress?: boolean;
 }
 
 /** 常规文件的外部属性（Unix 模式 100644） */
-export const MODE_FILE = 0o100644
+export const MODE_FILE = 0o100644;
 /** 符号链接的外部属性（Unix 模式 120777） */
-export const MODE_SYMLINK = 0o120777
+export const MODE_SYMLINK = 0o120777;
 
 /**
  * 用 `{ 路径: 内容 }` 构造一个 ZIP（便捷形式）。
@@ -70,14 +70,14 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipFixtureOptions = {
 
   for (const entry of entries) {
     const nameBuf = Buffer.from(entry.name, 'utf8');
-    const raw = entry.symlinkTo !== undefined ? Buffer.from(entry.symlinkTo, 'utf8') : toBuffer(entry.content);
+    const raw =
+      entry.symlinkTo !== undefined ? Buffer.from(entry.symlinkTo, 'utf8') : toBuffer(entry.content);
     const method = options.compress ? 8 : 0;
     const payload = options.compress ? deflateRawSync(raw) : raw;
 
     const crc = crc32(raw);
     const externalAttributes =
-      entry.externalAttributes ??
-      ((entry.symlinkTo !== undefined ? MODE_SYMLINK : MODE_FILE) << 16);
+      entry.externalAttributes ?? (entry.symlinkTo !== undefined ? MODE_SYMLINK : MODE_FILE) << 16;
 
     const local = Buffer.alloc(30);
     local.writeUInt32LE(LOCAL_HEADER, 0);

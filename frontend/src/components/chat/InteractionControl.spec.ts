@@ -119,7 +119,11 @@ describe('InteractionControl —— 标量控件', () => {
 
   it('数字控件回写文本中间态，开关回写布尔，下拉回写枚举值', async () => {
     const root = {
-      properties: { 数量: { type: 'integer' }, 开关: { type: 'boolean' }, 类型: { type: 'string', enum: ['峰', '谷'] } },
+      properties: {
+        数量: { type: 'integer' },
+        开关: { type: 'boolean' },
+        类型: { type: 'string', enum: ['峰', '谷'] },
+      },
     }
     const proposed = { 数量: 3, 开关: true, 类型: '峰' }
 
@@ -165,8 +169,14 @@ describe('InteractionControl —— JSON 视图', () => {
   })
 
   it('结构化节点被切到 JSON 视图时，控件本体就是那个 JSON 文本框', async () => {
-    const root = { properties: { input: { type: 'object', properties: { a: { type: 'string' } } } } }
-    const { wrapper, form } = mountControl({ root, path: ['input'], proposed: { input: { a: 'v' } } })
+    const root = {
+      properties: { input: { type: 'object', properties: { a: { type: 'string' } } } },
+    }
+    const { wrapper, form } = mountControl({
+      root,
+      path: ['input'],
+      proposed: { input: { a: 'v' } },
+    })
 
     form.toggleJsonView(['input'])
     await flushPromises() // 直接调状态方法后要等一次渲染
@@ -250,9 +260,13 @@ describe('InteractionControl —— @ 文件引用面板', () => {
     await typeAt(wrapper, '@')
     expect(wrapper.find('.mention-picker').exists()).toBe(true)
 
-    const space = wrapper.findAll('.mention-picker__item').find((item) => item.text() === '临时空间')!
+    const space = wrapper
+      .findAll('.mention-picker__item')
+      .find((item) => item.text() === '临时空间')!
     await space.trigger('click')
-    const file = wrapper.findAll('.mention-picker__item').find((item) => item.text() === 'note.txt')!
+    const file = wrapper
+      .findAll('.mention-picker__item')
+      .find((item) => item.text() === 'note.txt')!
     await file.trigger('click')
 
     expect(form.valueOf(['路径'])).toBe('临时空间/note.txt')
@@ -289,9 +303,13 @@ describe('InteractionControl —— @ 文件引用面板', () => {
     await typeAt(wrapper, '@')
     expect(wrapper.find('.mention-picker').exists()).toBe(true)
 
-    const space = wrapper.findAll('.mention-picker__item').find((item) => item.text() === '临时空间')!
+    const space = wrapper
+      .findAll('.mention-picker__item')
+      .find((item) => item.text() === '临时空间')!
     await space.trigger('click')
-    const file = wrapper.findAll('.mention-picker__item').find((item) => item.text() === 'note.txt')!
+    const file = wrapper
+      .findAll('.mention-picker__item')
+      .find((item) => item.text() === 'note.txt')!
     await file.trigger('click')
 
     expect(form.valueOf(['路径'])).toBe('临时空间/note.txt')
@@ -315,7 +333,10 @@ describe('InteractionControl —— @ 文件引用面板', () => {
 
 describe('InteractionControl —— 占位提示', () => {
   it('文本类控件提示「可打 @ 选择文件」；数字控件仍是「数字」；开关不提示', () => {
-    const text = mountControl({ root: { properties: { 路径: { type: 'string' } } }, path: ['路径'] })
+    const text = mountControl({
+      root: { properties: { 路径: { type: 'string' } } },
+      path: ['路径'],
+    })
     expect(text.wrapper.find('input[type=text]').attributes('placeholder')).toBe('可打 @ 选择文件')
 
     const number = mountControl({
@@ -324,7 +345,10 @@ describe('InteractionControl —— 占位提示', () => {
     })
     expect(number.wrapper.find('input[type=number]').attributes('placeholder')).toBe('数字')
 
-    const toggle = mountControl({ root: { properties: { 开关: { type: 'boolean' } } }, path: ['开关'] })
+    const toggle = mountControl({
+      root: { properties: { 开关: { type: 'boolean' } } },
+      path: ['开关'],
+    })
     expect(toggle.wrapper.find('input[type=checkbox]').attributes('placeholder')).toBeUndefined()
   })
 })

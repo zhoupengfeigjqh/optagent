@@ -16,10 +16,7 @@ let fx: TestFixture;
 
 const SKILL_MD = '---\nname: pdf-parse\ndescription: 解析 PDF 文本层\n---\n\n第一版正文\n';
 
-async function install(
-  buffer: Buffer,
-  options: { overwrite?: boolean; filename?: string } = {},
-) {
+async function install(buffer: Buffer, options: { overwrite?: boolean; filename?: string } = {}) {
   const body = multipartBody(
     options.overwrite === undefined ? {} : { overwrite: String(options.overwrite) },
     { name: options.filename ?? 'skill.zip', content: buffer },
@@ -56,7 +53,10 @@ describe('POST /api/admin/skills/install', () => {
     });
 
     const list = await fx.app.inject({ method: 'GET', url: '/api/admin/skills?page=1' });
-    expect(list.json().items[0]).toMatchObject({ name: 'pdf-parse', description: '解析 PDF 文本层' });
+    expect(list.json().items[0]).toMatchObject({
+      name: 'pdf-parse',
+      description: '解析 PDF 文本层',
+    });
   });
 
   it('缺少 SKILL.md → ADM_SKILL_ARCHIVE_INVALID，且无任何残留', async () => {
@@ -93,9 +93,7 @@ describe('POST /api/admin/skills/install', () => {
   });
 
   it('深层嵌套超限 → 在写入目标目录之前按上限拒绝（FR-039），无半解压残留（FR-041）', async () => {
-    const res = await install(
-      zipFixture({ 'SKILL.md': SKILL_MD, 'a/b/c/d/e/f/g/deep.txt': 'x' }),
-    );
+    const res = await install(zipFixture({ 'SKILL.md': SKILL_MD, 'a/b/c/d/e/f/g/deep.txt': 'x' }));
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('ADM_SKILL_ARCHIVE_UNSAFE');
     expect(fs.existsSync(path.join(skillsRoot(), 'pdf-parse'))).toBe(false);
@@ -162,9 +160,7 @@ describe('GET /api/admin/skills/{name}（查看）与 /file（读取单文件）
   });
 
   it('读取参考文件正文（2026-09-16：SKILL.md 与附件都可查看/编辑）', async () => {
-    await install(
-      zipFixture({ 'SKILL.md': SKILL_MD, 'references/手册.md': '# 手册\n\n内容\n' }),
-    );
+    await install(zipFixture({ 'SKILL.md': SKILL_MD, 'references/手册.md': '# 手册\n\n内容\n' }));
     const res = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/skills/pdf-parse/file?path=references/%E6%89%8B%E5%86%8C.md',
@@ -202,9 +198,7 @@ describe('GET /api/admin/skills/{name}（查看）与 /file（读取单文件）
   });
 
   it('不存在 → 404 ADM_SKILL_NOT_FOUND', async () => {
-    expect(
-      (await fx.app.inject({ method: 'GET', url: '/api/admin/skills/ghost' })).statusCode,
-    ).toBe(404);
+    expect((await fx.app.inject({ method: 'GET', url: '/api/admin/skills/ghost' })).statusCode).toBe(404);
   });
 
   it('文件端点：技能不存在 → 404', async () => {
@@ -278,15 +272,13 @@ describe('PUT /api/admin/skills/{name}/file（在线编辑，2026-09-16）', () 
     const res = await save('pdf-parse', 'references/手册.md', '# 我的改动\n', stale);
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ADM_CONFIG_REVISION_CONFLICT');
-    expect(
-      fs.readFileSync(path.join(skillsRoot(), 'pdf-parse', 'references', '手册.md'), 'utf8'),
-    ).toBe('# 他处的改动\n');
+    expect(fs.readFileSync(path.join(skillsRoot(), 'pdf-parse', 'references', '手册.md'), 'utf8')).toBe(
+      '# 他处的改动\n',
+    );
   });
 
   it('越界路径 → 400；二进制 → 400；不存在 → 404', async () => {
-    await install(
-      zipFixture({ 'SKILL.md': SKILL_MD, 'assets/bin.dat': 'a\u0000b' }),
-    );
+    await install(zipFixture({ 'SKILL.md': SKILL_MD, 'assets/bin.dat': 'a\u0000b' }));
     const base = await hashOf('pdf-parse', 'SKILL.md');
 
     const traversal = await save('pdf-parse', '../index.json', 'x', base);
@@ -318,11 +310,11 @@ describe('PUT /api/admin/skills/{name}/file（在线编辑，2026-09-16）', () 
     });
 
     const base = await hashOf('pdf-parse', 'SKILL.md');
-    expect((await save('pdf-parse', 'SKILL.md', SKILL_MD.replace('正文', '改过的正文'), base)).statusCode).toBe(200);
-
     expect(
-      fs.readFileSync(path.join(skillsRoot(), 'pdf-parse', 'SKILL.md'), 'utf8'),
-    ).toContain('改过的正文');
+      (await save('pdf-parse', 'SKILL.md', SKILL_MD.replace('正文', '改过的正文'), base)).statusCode,
+    ).toBe(200);
+
+    expect(fs.readFileSync(path.join(skillsRoot(), 'pdf-parse', 'SKILL.md'), 'utf8')).toContain('改过的正文');
     // 编辑不落物化产物：数字人目录要么不存在，要么内容不由编辑产生
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo'))).toBe(false);
   });

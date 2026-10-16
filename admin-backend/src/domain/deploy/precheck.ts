@@ -28,10 +28,7 @@ import { scenarioFieldIssues, scenarioUploadIssues } from '../config-center/scen
 import type { ReferenceIndex } from '../config-center/reference-index.js';
 
 export type PrecheckCategory =
-  | 'config_integrity'
-  | 'reference_validity'
-  | 'name_path_safety'
-  | 'target_writable';
+  'config_integrity' | 'reference_validity' | 'name_path_safety' | 'target_writable';
 
 export interface PrecheckError {
   user_id: string;
@@ -111,11 +108,7 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
       }
 
       // ① 配置完整性（004：soul 为结构化对象，必填项是**主要使命**）
-      if (
-        !design.soul ||
-        typeof design.soul.mission !== 'string' ||
-        design.soul.mission.trim() === ''
-      ) {
+      if (!design.soul || typeof design.soul.mission !== 'string' || design.soul.mission.trim() === '') {
         errors.push({
           user_id: user.user_id,
           agent_name: agentName,

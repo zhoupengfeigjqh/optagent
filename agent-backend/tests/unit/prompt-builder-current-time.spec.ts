@@ -43,7 +43,8 @@ describe('buildPromptMessages —— 当前时间段的拼装与去向', () => {
   it('段序：后台产出 → 当前时间 → guidance（guidance 仍是末段）', () => {
     const out = buildPromptMessages(
       sources({
-        producedText: '【后台计算结果】（需要内容时用 read_file 按路径读取）\n- x · 已完成 · 1 KB · 临时空间/后台产出/a.json',
+        producedText:
+          '【后台计算结果】（需要内容时用 read_file 按路径读取）\n- x · 已完成 · 1 KB · 临时空间/后台产出/a.json',
         nowText: TIME,
         guidance: '本轮请调用以下工具完成用户上一条消息要求的任务：erp__query_order（查询订单）。',
       }),

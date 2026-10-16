@@ -94,9 +94,7 @@ function agentNames(user: DeployUserResult, action: 'written' | 'removed'): stri
 /** 校验结论：`passed` 为假时**带上错误项数**，只说"未通过"无法定位问题规模 */
 function validationText(item: DeployHistoryItem): string {
   if (!item.validation) return '校验结果未记录'
-  return item.validation.passed
-    ? '校验通过'
-    : `校验未通过（${item.validation.error_count} 项）`
+  return item.validation.passed ? '校验通过' : `校验未通过（${item.validation.error_count} 项）`
 }
 
 /** 差异项一行文字：用户 / 数字人：可读说明（缺说明时回退到差异类型） */
@@ -122,7 +120,19 @@ function diffText(diff: DeployManifestDiffEntry): string {
     <template v-else>
       <table class="deploy-history__table">
         <caption class="visually-hidden">
-          部署记录第 {{ page }} 页（每页 {{ PAGE_SIZE }} 条，共 {{ props.items.length }} 条）
+          部署记录第
+          {{
+            page
+          }}
+          页（每页
+          {{
+            PAGE_SIZE
+          }}
+          条，共
+          {{
+            props.items.length
+          }}
+          条）
         </caption>
         <thead>
           <tr>
@@ -177,11 +187,7 @@ function diffText(diff: DeployManifestDiffEntry): string {
                   </p>
 
                   <ul v-else class="deploy-history__users">
-                    <li
-                      v-for="user in item.users"
-                      :key="user.user_id"
-                      class="deploy-history__user"
-                    >
+                    <li v-for="user in item.users" :key="user.user_id" class="deploy-history__user">
                       <p class="deploy-history__user-head">
                         <span class="mono">{{ user.user_id }}</span>
                         <StatusBadge
@@ -191,7 +197,8 @@ function diffText(diff: DeployManifestDiffEntry): string {
                         />
                       </p>
                       <p v-if="!user.ok" class="deploy-history__error">
-                        <span class="deploy-history__error-label">失败原因：</span>{{ user.error ?? '未记录原因' }}
+                        <span class="deploy-history__error-label">失败原因：</span
+                        >{{ user.error ?? '未记录原因' }}
                       </p>
                       <p class="deploy-history__agents">
                         <template v-if="agentNames(user, 'written').length > 0">
@@ -200,7 +207,10 @@ function diffText(diff: DeployManifestDiffEntry): string {
                         </template>
                         <template v-else>写入：无（该用户本次没有数字人产物）</template>
                       </p>
-                      <p v-if="agentNames(user, 'removed').length > 0" class="deploy-history__agents">
+                      <p
+                        v-if="agentNames(user, 'removed').length > 0"
+                        class="deploy-history__agents"
+                      >
                         下架（{{ agentNames(user, 'removed').length }}）：
                         <span class="mono">{{ agentNames(user, 'removed').join('、') }}</span>
                       </p>
@@ -212,7 +222,11 @@ function diffText(diff: DeployManifestDiffEntry): string {
                       差异项（{{ (item.manifest_diff ?? []).length }} 条）
                     </p>
                     <ul class="deploy-history__diffs">
-                      <li v-for="(diff, index) in item.manifest_diff ?? []" :key="index" class="mono">
+                      <li
+                        v-for="(diff, index) in item.manifest_diff ?? []"
+                        :key="index"
+                        class="mono"
+                      >
                         {{ diffText(diff) }}
                       </li>
                     </ul>

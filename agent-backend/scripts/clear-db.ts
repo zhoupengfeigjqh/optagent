@@ -24,9 +24,11 @@ const dbPath = path.resolve(process.argv[3] ?? DEFAULT_DB);
 const db = new Database(dbPath);
 try {
   // 只取业务表：`sqlite_*`（如 `sqlite_sequence`）是引擎内部表，不动
-  const tables = (db
-    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
-    .all() as Array<{ name: string }>)
+  const tables = (
+    db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`).all() as Array<{
+      name: string;
+    }>
+  )
     .map((row) => row.name)
     .filter((name) => !name.startsWith('sqlite_'));
 

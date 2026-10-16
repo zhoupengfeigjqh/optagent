@@ -32,11 +32,7 @@ import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { Logger } from 'pino';
 import type { PlatformStore } from '../../infra/platform-store.js';
-import {
-  ontologyDisplayName,
-  parseOntologyMetadata,
-  type OntologyMetadata,
-} from './metadata.js';
+import { ontologyDisplayName, parseOntologyMetadata, type OntologyMetadata } from './metadata.js';
 
 /** 本体库在设计态根下的目录名（与市场根同名，便于对照） */
 export const ONTO_MARKET_DIR = 'onto_market';
@@ -128,10 +124,7 @@ export function assertSafeSegment(kind: string, value: string): void {
     // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f]/.test(value)
   ) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `${kind}不合法：${JSON.stringify(value)}`,
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${kind}不合法：${JSON.stringify(value)}`);
   }
 }
 
@@ -174,9 +167,7 @@ export class OntologyStore {
     assertSafeSegment('场景名', scenario);
     assertSafeSegment('本体目录名', ontologyDir);
     return (
-      this.listAll().find(
-        (item) => item.scenario === scenario && item.ontology_dir === ontologyDir,
-      ) ?? null
+      this.listAll().find((item) => item.scenario === scenario && item.ontology_dir === ontologyDir) ?? null
     );
   }
 
@@ -188,10 +179,7 @@ export class OntologyStore {
   read(scenario: string, ontologyDir: string): OntologyDetail {
     const record = this.find(scenario, ontologyDir);
     if (!record) {
-      throw new ApiError(
-        ERROR_CODES.ADM_ONTOLOGY_NOT_FOUND,
-        `本体不存在：${scenario}/${ontologyDir}`,
-      );
+      throw new ApiError(ERROR_CODES.ADM_ONTOLOGY_NOT_FOUND, `本体不存在：${scenario}/${ontologyDir}`);
     }
     const dirRel = this.dirRel(scenario, ontologyDir);
     const content = this.store.readText(`${dirRel}/${ONTOLOGY_FILE}`);
@@ -222,7 +210,10 @@ export class OntologyStore {
   install(pkg: OntologyPackageInput): OntologyWriteResult {
     assertSafeSegment('场景名', pkg.scenario);
     assertSafeSegment('本体目录名', pkg.ontology_dir);
-    if (this.exists(pkg.scenario, pkg.ontology_dir) || this.store.exists(this.dirRel(pkg.scenario, pkg.ontology_dir))) {
+    if (
+      this.exists(pkg.scenario, pkg.ontology_dir) ||
+      this.store.exists(this.dirRel(pkg.scenario, pkg.ontology_dir))
+    ) {
       throw new ApiError(
         ERROR_CODES.ADM_ONTOLOGY_EXISTS,
         `本体库中已存在同名本体：${pkg.scenario}/${pkg.ontology_dir}；如需更新请使用「更新」`,
@@ -248,9 +239,7 @@ export class OntologyStore {
     this.read(scenario, ontologyDir);
     this.store.remove(this.dirRel(scenario, ontologyDir));
     this.writeIndex(
-      this.listAll().filter(
-        (item) => !(item.scenario === scenario && item.ontology_dir === ontologyDir),
-      ),
+      this.listAll().filter((item) => !(item.scenario === scenario && item.ontology_dir === ontologyDir)),
     );
     this.store.bumpRevision();
     this.logger?.info(

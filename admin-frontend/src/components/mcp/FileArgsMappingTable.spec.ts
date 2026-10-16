@@ -57,7 +57,9 @@ describe('FileArgsMappingTable', () => {
     })
 
     expect(wrapper.find('[data-test="row-tool-0"]').exists()).toBe(true)
-    expect((wrapper.find('[data-test="row-path-0"]').element as HTMLSelectElement).value).toBe('image')
+    expect((wrapper.find('[data-test="row-path-0"]').element as HTMLSelectElement).value).toBe(
+      'image',
+    )
     // 直链模式没有来源字段选择
     expect(wrapper.find('[data-test="row-from-0"]').exists()).toBe(false)
     // 派生模式回显来源字段

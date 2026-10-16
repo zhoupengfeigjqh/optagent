@@ -218,7 +218,10 @@ function listFiles(skillRoot: string, from: string): string {
     }
   };
   walk(from);
-  return out.map((rel) => rel.split(path.sep).join('/')).sort().join('\n');
+  return out
+    .map((rel) => rel.split(path.sep).join('/'))
+    .sort()
+    .join('\n');
 }
 
 /** 可用技能名清单（"技能不存在"时的可读提示） */

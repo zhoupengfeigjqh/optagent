@@ -69,10 +69,7 @@ export class FakeMcpClient extends McpClientService {
     super({ timeoutMs: 100 });
   }
 
-  override async listTools(
-    serviceName: string,
-    target?: McpConnectionTarget,
-  ): Promise<McpToolDescriptor[]> {
+  override async listTools(serviceName: string, target?: McpConnectionTarget): Promise<McpToolDescriptor[]> {
     this.lastTarget = target ?? null;
     if (this.failListTools.has(serviceName)) {
       throw new ApiError(ERROR_CODES.ADM_RUNTIME_UNREACHABLE, `MCP 服务 ${serviceName} 不可达`);
@@ -80,10 +77,7 @@ export class FakeMcpClient extends McpClientService {
     return this.toolsByService.get(serviceName) ?? [];
   }
 
-  override async test(
-    serviceName: string,
-    target?: McpConnectionTarget,
-  ): Promise<McpTestReport> {
+  override async test(serviceName: string, target?: McpConnectionTarget): Promise<McpTestReport> {
     this.lastTestTarget = target ?? null;
     const step = (ok: boolean, message?: string) => ({
       ok,
@@ -137,7 +131,9 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
 
   for (const userId of options.userIds ?? []) {
     for (const space of ['数据准备', '共享空间', '临时空间']) {
-      fs.mkdirSync(path.join(optAgentRoot, 'users', userId, 'user-data', space), { recursive: true });
+      fs.mkdirSync(path.join(optAgentRoot, 'users', userId, 'user-data', space), {
+        recursive: true,
+      });
     }
     fs.mkdirSync(path.join(optAgentRoot, 'users', userId, 'agents'), { recursive: true });
   }

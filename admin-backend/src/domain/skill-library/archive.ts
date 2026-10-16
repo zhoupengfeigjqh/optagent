@@ -116,8 +116,7 @@ export function stripCommonPrefix(paths: string[]): { prefix: string; relative: 
   const firstSegments = paths.map((p) => p.split('/')[0] ?? '');
   const candidate = firstSegments[0]!;
   if (candidate === '') return { prefix: '', relative: paths };
-  const allShare =
-    firstSegments.every((s) => s === candidate) && paths.every((p) => p.includes('/'));
+  const allShare = firstSegments.every((s) => s === candidate) && paths.every((p) => p.includes('/'));
   if (!allShare) return { prefix: '', relative: paths };
   return {
     prefix: candidate,
@@ -212,10 +211,7 @@ function readEntryBuffer(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<Buffer
 }
 
 /** 第一遍：只校验元数据（**不读内容**） */
-async function collectValidatedEntries(
-  buffer: Buffer,
-  limits: ArchiveLimits,
-): Promise<RawEntry[]> {
+async function collectValidatedEntries(buffer: Buffer, limits: ArchiveLimits): Promise<RawEntry[]> {
   const zip = await openZip(buffer);
   const raws: RawEntry[] = [];
   const seen = new Set<string>();
@@ -273,10 +269,7 @@ async function collectValidatedEntries(
 }
 
 /** 第二遍：校验已全部通过，此时才读取内容 */
-async function readAllContents(
-  buffer: Buffer,
-  wanted: Set<string>,
-): Promise<Map<string, Buffer>> {
+async function readAllContents(buffer: Buffer, wanted: Set<string>): Promise<Map<string, Buffer>> {
   const zip = await openZip(buffer);
   const files = new Map<string, Buffer>();
   await walkEntries(zip, async (entry) => {

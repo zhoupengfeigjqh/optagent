@@ -46,8 +46,27 @@ export interface HistoryMessage {
    * 一个会话可跨多个数字人（切换后在下一轮生效），旧格式行缺省。
    */
   agent_name?: string;
-  /** 失败轮错误信息（仅 status='failed'） */
-  error?: { code: string; message: string };
+  /** 失败轮错误信息（仅 status='failed'）；诊断字段见 `HistoryErrorInfo` */
+  error?: HistoryErrorInfo;
+}
+
+/**
+ * 失败轮错误信息（`history.jsonl` 与 SSE `error` 事件**同形**）。
+ *
+ * 2026-10-15：新增三个**可选**诊断字段（`contracts/runtime-api-delta.md` §19.3）——
+ * 上游状态码 / 上游错误类型 / 上游请求 id。字段名用 snake_case 是因为它们就是契约字段，
+ * 由 `domain/llm-error.ts` 的 `classifyLlmFailure()` **一次构造**后原样落盘与下发
+ * （避免"内部 camelCase → 出口改一次名"的第二处实现）。**有才写**：缺省即不写 `null`。
+ */
+export interface HistoryErrorInfo {
+  code: string;
+  message: string;
+  /** 上游 HTTP 状态码（如 503）；无法判定时缺省 */
+  upstream_status?: number;
+  /** 上游错误类型（如 `service_unavailable_error`）；无法判定时缺省 */
+  upstream_type?: string;
+  /** 上游请求 id（向 provider 报障用）；报文里没有时缺省 */
+  request_id?: string;
 }
 
 /** LLM 流式事件（LlmProvider / agent-loop 输出） */
@@ -68,9 +87,24 @@ export type LlmEvent =
    * 不落 base64），会话内写入 `tool-events.jsonl`；是否外置成临时空间文件
    * 由体积阈值决定（见 `domain/tool-events.ts`）。SSE 仍只透出状态，不透出结果。
    */
-  | { type: 'tool_call_end'; callId: string; name: string; status: 'success' | 'error'; resultText?: string }
+  | {
+      type: 'tool_call_end';
+      callId: string;
+      name: string;
+      status: 'success' | 'error';
+      resultText?: string;
+    }
   | { type: 'done'; usage: UsageInfo }
-  | { type: 'error'; code: string; message: string; usage?: UsageInfo };
+  /**
+   * 失败（`ABORTED` = 用户中断）。
+   *
+   * 2026-10-15：`code` / `message` 之外的三个诊断字段可选透传（与 `HistoryErrorInfo` 同形），
+   * 由 `domain/llm-error.ts` 分类产出，经收尾写入失败行与 SSE `error` 事件。
+   */
+  | ({
+      type: 'error';
+      usage?: UsageInfo;
+    } & HistoryErrorInfo);
 
 export interface UsageInfo {
   inputTokens: number;

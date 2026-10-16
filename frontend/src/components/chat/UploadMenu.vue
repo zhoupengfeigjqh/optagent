@@ -124,7 +124,8 @@ function fieldHint(fields: readonly ScenarioField[]): string {
             <span
               class="upload-menu__dir-exts"
               :class="{ 'upload-menu__dir-exts--after-hint': directory.fields.length > 0 }"
-            >{{ directory.upload_extensions.join(' ') }}</span>
+              >{{ directory.upload_extensions.join(' ') }}</span
+            >
           </div>
         </li>
       </ul>

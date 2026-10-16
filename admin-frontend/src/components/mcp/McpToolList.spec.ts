@@ -5,7 +5,8 @@
  * 1. **只显示白名单里的工具**（顺序与白名单一致）；白名单为空（存量服务 = 不限制）则显示服务全量；
  * 2. **白名单失效标异常**：白名单里但当前服务清单中已不存在的工具 → 叹号 + 汇总；
  *    **探测失败时不能这么判**（核对不了 ≠ 不存在），只显示可读原因（`FR-009` 不静默省略）；
- * 3. 「重新探测」按钮（2026-10-02）：清单是打开详情那一刻的探测快照，界面不自动重取；
+ * 3. 「重新探测」按钮（2026-10-02；2026-10-15 起兼作调整入口）：清单是打开详情那一刻的
+ *    探测快照，界面不自动重取；点击后父级重取，并在**探测成功**时弹出工具范围窗；
  * 4. 探测进行中（`busy`）按钮禁用并改文案，防止重复点击。
  */
 import { mount } from '@vue/test-utils'
@@ -71,6 +72,9 @@ describe('McpToolList —— 白名单渲染', () => {
     expect(missing.text()).toContain('gone_tool')
     expect(missing.text()).toContain('已不存在')
     expect(wrapper.find('[data-test="missing-summary"]').text()).toContain('gone_tool')
+    // 2026-10-15：清理失效项不再要求"删除服务重建"，指向重新探测后的工具范围窗
+    expect(missing.text()).toContain('工具范围窗')
+    expect(missing.text()).not.toContain('删除该服务')
   })
 
   it('白名单全失效 → 全部标异常（不显示成"没有工具"）', () => {

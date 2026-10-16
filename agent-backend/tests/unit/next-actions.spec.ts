@@ -402,7 +402,10 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 
   it('候选条目全部因"未绑定可用工具"被丢弃 → 告警给出归因计数（FR-009 + 原则九）', () => {
     const tail = JSON.stringify({
-      actions: [action('整理共享空间的表格'), action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }])],
+      actions: [
+        action('整理共享空间的表格'),
+        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
+      ],
     });
 
     expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
@@ -458,7 +461,9 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 describe('NextActionsStore —— 读取与清空', () => {
   it('read 下发形态：message_id + 动作（tools 带 exposed_name、guidance 指明工具）', () => {
     const tail = JSON.stringify({
-      actions: [action('按交付日期梳理订单风险', [{ kind: 'mcp', service: 'erp', name: 'query_order' }])],
+      actions: [
+        action('按交付日期梳理订单风险', [{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
+      ],
     });
     store().finalize(finInput({ tailText: tail }));
 
@@ -467,7 +472,9 @@ describe('NextActionsStore —— 读取与清空', () => {
     expect(view?.message_id).toBe('m-1');
     expect(view?.actions[0]).toMatchObject({
       prompt: '按交付日期梳理订单风险',
-      tools: [{ kind: 'mcp', name: 'query_order', service: 'erp', exposed_name: 'erp__query_order' }],
+      tools: [
+        { kind: 'mcp', name: 'query_order', service: 'erp', exposed_name: 'erp__query_order' },
+      ],
       guidance: buildActionGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }], TOOLS),
     });
     expect(view?.actions[0]!.guidance).toContain('erp__query_order');
@@ -494,7 +501,11 @@ describe('NextActionsStore —— 读取与清空', () => {
         created_at: new Date().toISOString(),
         actions: [
           { prompt: '旧口径的无工具卡片', tools: [], guidance: '' },
-          { prompt: '有工具的卡片', tools: [{ kind: 'builtin', name: 'read_file' }], guidance: 'x' },
+          {
+            prompt: '有工具的卡片',
+            tools: [{ kind: 'builtin', name: 'read_file' }],
+            guidance: 'x',
+          },
         ],
       }),
       'utf8',

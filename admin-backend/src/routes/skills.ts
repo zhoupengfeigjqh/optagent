@@ -97,10 +97,7 @@ export function registerSkillRoutes(app: FastifyInstance, ctx: AppContext): void
     }
     // 按**魔数**判定而非扩展名：扩展名可伪造，且契约要求"压缩包可正常解压"前置
     if (buffer.length < 4 || buffer.readUInt32LE(0) !== ZIP_MAGIC) {
-      throw new ApiError(
-        ERROR_CODES.ADM_SKILL_ARCHIVE_INVALID,
-        '上传内容不是 ZIP 压缩包（缺少 PK 头）',
-      );
+      throw new ApiError(ERROR_CODES.ADM_SKILL_ARCHIVE_INVALID, '上传内容不是 ZIP 压缩包（缺少 PK 头）');
     }
 
     const result = await ctx.skills.install(buffer, { overwrite, source });

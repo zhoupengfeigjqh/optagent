@@ -116,7 +116,10 @@ describe('McpStatsTable —— 不可达时以「未知」呈现（FR-009）', (
   it('available=false：计数与时间一律「未知」，不出现 0', () => {
     const wrapper = mount(McpStatsTable, { props: { groups: GROUPS, available: false } })
 
-    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    const cells = wrapper
+      .findAll('tbody tr')[0]!
+      .findAll('td')
+      .map((td) => td.text())
     // 三个维度列仍照实显示（那是"谁调的"，不是统计值），计数与时间列一律未知
     expect(cells.slice(0, 3)).toEqual(['admin', 'ocr', 'ocr_image'])
     expect(cells.slice(3)).toEqual(['未知', '未知', '未知', '未知', '未知'])
@@ -150,7 +153,10 @@ describe('McpStatsTable —— 历史与缺失数据', () => {
       },
     })
 
-    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    const cells = wrapper
+      .findAll('tbody tr')[0]!
+      .findAll('td')
+      .map((td) => td.text())
     expect(cells[0]).toBe('（未归属·升级前记录）')
     expect(cells[2]).toBe('（未归属·升级前记录）')
   })
@@ -173,7 +179,10 @@ describe('McpStatsTable —— 历史与缺失数据', () => {
       },
     })
 
-    const cells = wrapper.findAll('tbody tr')[0]!.findAll('td').map((td) => td.text())
+    const cells = wrapper
+      .findAll('tbody tr')[0]!
+      .findAll('td')
+      .map((td) => td.text())
     expect(cells.slice(3, 7)).toEqual(['—', '—', '—', '—'])
     expect(cells[7]).toBe('从未调用')
   })

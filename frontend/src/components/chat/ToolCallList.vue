@@ -225,7 +225,11 @@ function toggleRaw(item: ToolCallItem): void {
           </span>
         </button>
 
-        <div v-if="canExpand(item) && panelOf(item).open" :id="bodyId(index)" class="tool-call__body">
+        <div
+          v-if="canExpand(item) && panelOf(item).open"
+          :id="bodyId(index)"
+          class="tool-call__body"
+        >
           <p v-if="item.summary" class="tool-call__summary">{{ item.summary }}</p>
           <p v-if="item.argsDigest" class="tool-call__args">
             入参：{{ formatArgsDigest(item.argsDigest) }}
@@ -248,7 +252,10 @@ function toggleRaw(item: ToolCallItem): void {
             >
               {{ panelOf(item).raw ? '按结构化查看' : '按原始 JSON 查看' }}
             </button>
-            <div v-if="parsedOf(item).structured && !panelOf(item).raw" class="tool-call__structured">
+            <div
+              v-if="parsedOf(item).structured && !panelOf(item).raw"
+              class="tool-call__structured"
+            >
               <ProducedJsonView :value="parsedOf(item).value" />
             </div>
             <pre v-else class="tool-call__content">{{ displayContent(item) }}</pre>

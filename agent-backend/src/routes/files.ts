@@ -307,12 +307,7 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         if (fields.length > 0) {
           const issues = checkUploadBuffer(fields, ext, fs.readFileSync(staging));
           if (issues.length > 0) {
-            throw new ApiError(
-              400,
-              'FILE_SCHEMA_INVALID',
-              '上传表不符合该目录的字段约束',
-              issues,
-            );
+            throw new ApiError(400, 'FILE_SCHEMA_INVALID', '上传表不符合该目录的字段约束', issues);
           }
         }
       }
@@ -389,7 +384,11 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
       const maxBytes = ctx.config.previewMaxMb * 1024 * 1024;
       if (buf.length > maxBytes) {
-        throw new ApiError(413, 'FILE_TOO_LARGE', `文件超过预览上限（${ctx.config.previewMaxMb}MB），请使用下载`);
+        throw new ApiError(
+          413,
+          'FILE_TOO_LARGE',
+          `文件超过预览上限（${ctx.config.previewMaxMb}MB），请使用下载`,
+        );
       }
       const ext = path.extname(filename).toLowerCase();
       const contentType = PREVIEW_CONTENT_TYPES[ext];
@@ -397,7 +396,10 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         // 不可内联类型（如 .xlsx/.xls）回退附件下载
         return reply
           .header('content-type', 'application/octet-stream')
-          .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`)
+          .header(
+            'content-disposition',
+            `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+          )
           .send(buf);
       }
       return reply
@@ -426,10 +428,16 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     }
     const files = entries.filter((e) => !e.isDirectory);
     if (files.length === 0) {
-      throw new ApiError(404, 'FILE_NOT_FOUND', `「${SPACE_PREP}/${RULES_SUBDIR}」目录暂无文件，请先上传规则文件`);
+      throw new ApiError(
+        404,
+        'FILE_NOT_FOUND',
+        `「${SPACE_PREP}/${RULES_SUBDIR}」目录暂无文件，请先上传规则文件`,
+      );
     }
     // 「最新」按 mtime 判定（与 list 接口的 updated_at 同一来源）
-    const latest = files.reduce((a, b) => (Date.parse(b.modifiedAt) > Date.parse(a.modifiedAt) ? b : a));
+    const latest = files.reduce((a, b) =>
+      Date.parse(b.modifiedAt) > Date.parse(a.modifiedAt) ? b : a,
+    );
 
     const maxBytes = ctx.config.previewMaxMb * 1024 * 1024;
     let buf: Buffer;
@@ -442,7 +450,11 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw err;
     }
     if (buf.length > maxBytes) {
-      throw new ApiError(413, 'FILE_TOO_LARGE', `规则文件超过大小上限（${ctx.config.previewMaxMb}MB）`);
+      throw new ApiError(
+        413,
+        'FILE_TOO_LARGE',
+        `规则文件超过大小上限（${ctx.config.previewMaxMb}MB）`,
+      );
     }
 
     let parsed;
@@ -461,62 +473,54 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   // 文件空间删除（002 US8 / FR-031）：共享空间为只读，其余空间可删
-  app.delete(
-    '/api/files',
-    { schema: { querystring: downloadQuerySchema } },
-    async (req) => {
-      const userId = getCurrentUser().userId;
-      const { dir, filename } = req.query as { dir: string; filename: string };
-      const agent = currentAgentFor(ctx, userId);
-      const target = checkDir(ctx, userId, agent, dir);
-      if (target.space === SPACE_SHARED) {
-        throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
-      }
-      if (filename !== path.basename(filename) || filename.includes('..')) {
-        throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
-      }
-      try {
-        await fileAccessFor(ctx, userId, agent).remove(`${target.relPath}/${filename}`);
-      } catch (err) {
-        if (err instanceof PermissionError)
-          throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
-        throw err;
-      }
-      return { dir: target.relPath, filename, deleted: true };
-    },
-  );
+  app.delete('/api/files', { schema: { querystring: downloadQuerySchema } }, async (req) => {
+    const userId = getCurrentUser().userId;
+    const { dir, filename } = req.query as { dir: string; filename: string };
+    const agent = currentAgentFor(ctx, userId);
+    const target = checkDir(ctx, userId, agent, dir);
+    if (target.space === SPACE_SHARED) {
+      throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
+    }
+    if (filename !== path.basename(filename) || filename.includes('..')) {
+      throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
+    }
+    try {
+      await fileAccessFor(ctx, userId, agent).remove(`${target.relPath}/${filename}`);
+    } catch (err) {
+      if (err instanceof PermissionError)
+        throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或已被清理: ${dir}/${filename}`);
+      throw err;
+    }
+    return { dir: target.relPath, filename, deleted: true };
+  });
 
   // MCP 签名直链（远程/跨容器服务回源下载）：HMAC 绑定 (u, p, exp)，URL 即凭证，无需会话。
   // 009：`p` = `{数字人}/{数字人数据域内相对路径}`（数字人段同样在签名内 ⇒ 不可篡改），
   // 因此跨数字人读取在签名层即不可达；形状不合法一律 404（与"文件不存在"不可区分）。
-  app.get(
-    '/api/files/raw',
-    { schema: { querystring: rawQuerySchema } },
-    async (req, reply) => {
-      const { u, p, exp, sig } = req.query as { u: string; p: string; exp: string; sig: string };
-      const expNum = Number(exp);
-      if (!verifyRef(ctx.config.fileSignSecret, u, p, expNum, sig)) {
-        throw new ApiError(403, 'FILE_SIGN_INVALID', '签名无效或已过期');
-      }
-      const signed = splitAgentScopedPath(p);
-      if (!signed) {
+  app.get('/api/files/raw', { schema: { querystring: rawQuerySchema } }, async (req, reply) => {
+    const { u, p, exp, sig } = req.query as { u: string; p: string; exp: string; sig: string };
+    const expNum = Number(exp);
+    if (!verifyRef(ctx.config.fileSignSecret, u, p, expNum, sig)) {
+      throw new ApiError(403, 'FILE_SIGN_INVALID', '签名无效或已过期');
+    }
+    const signed = splitAgentScopedPath(p);
+    if (!signed) {
+      throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或不可访问: ${p}`);
+    }
+    let buf: Buffer;
+    try {
+      buf = await fileAccessFor(ctx, u, signed.agentName).readBuffer(signed.relPath);
+    } catch (err) {
+      if (err instanceof PermissionError)
         throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或不可访问: ${p}`);
-      }
-      let buf: Buffer;
-      try {
-        buf = await fileAccessFor(ctx, u, signed.agentName).readBuffer(signed.relPath);
-      } catch (err) {
-        if (err instanceof PermissionError)
-          throw new ApiError(404, 'FILE_NOT_FOUND', `文件不存在或不可访问: ${p}`);
-        throw err;
-      }
-      const ext = path.extname(p).toLowerCase();
-      return reply
-        .header('content-type', PREVIEW_CONTENT_TYPES[ext] ?? 'application/octet-stream')
-        .header('cache-control', 'no-store')
-        .send(buf);
-    },
-  );
+      throw err;
+    }
+    const ext = path.extname(p).toLowerCase();
+    return reply
+      .header('content-type', PREVIEW_CONTENT_TYPES[ext] ?? 'application/octet-stream')
+      .header('cache-control', 'no-store')
+      .send(buf);
+  });
 
   // 三空间工作空间汇总（003 改造）：空间 → 子目录 → 文件，附每空间策略
   // 2026-10-13：响应体装配拆到 `domain/workspace-view.ts`（本文件行数逼近 500 门禁，原则二）

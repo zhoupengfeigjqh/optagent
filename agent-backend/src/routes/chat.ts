@@ -117,99 +117,108 @@ function validateAttachments(
 }
 
 export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void {
-  app.post('/api/threads/:id/messages', { schema: { body: messageBodySchema } }, async (req, reply) => {
-    const userId = getCurrentUser().userId;
-    const { id: threadId } = req.params as { id: string };
-    const body = req.body as {
-      content: string;
-      thinking?: boolean;
-      model?: string;
-      guidance?: string;
-      attachments?: FileReference[];
-    };
+  app.post(
+    '/api/threads/:id/messages',
+    { schema: { body: messageBodySchema } },
+    async (req, reply) => {
+      const userId = getCurrentUser().userId;
+      const { id: threadId } = req.params as { id: string };
+      const body = req.body as {
+        content: string;
+        thinking?: boolean;
+        model?: string;
+        guidance?: string;
+        attachments?: FileReference[];
+      };
 
-    // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
-    const { agentName } = resolveAgentScope(ctx, userId, {
-      notSelectedMessage: '请先选定数字人再发送消息',
-      route: 'POST /api/threads/:id/messages',
-    });
-    // 会话不属于当前数字人 → 404（与"不存在"不可区分，FR-021）
-    ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404（全局映射）
+      // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
+      const { agentName } = resolveAgentScope(ctx, userId, {
+        notSelectedMessage: '请先选定数字人再发送消息',
+        route: 'POST /api/threads/:id/messages',
+      });
+      // 会话不属于当前数字人 → 404（与"不存在"不可区分，FR-021）
+      ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404（全局映射）
 
-    // 请求级模型解析（FR-023/024）：未指定 → 默认模型
-    let model;
-    if (body.model !== undefined) {
-      model = ctx.config.models.find((m) => m.model === body.model);
-      if (!model) {
-        throw new ApiError(400, 'MODEL_NOT_FOUND', `模型不存在或不可用: ${body.model}`);
+      // 请求级模型解析（FR-023/024）：未指定 → 默认模型
+      let model;
+      if (body.model !== undefined) {
+        model = ctx.config.models.find((m) => m.model === body.model);
+        if (!model) {
+          throw new ApiError(400, 'MODEL_NOT_FOUND', `模型不存在或不可用: ${body.model}`);
+        }
       }
-    }
 
-    // @ 文件引用校验（FR-028/029）：按本轮数字人的场景清单判定
-    if (body.attachments && body.attachments.length > 0) {
-      validateAttachments(ctx.config.optAgentRoot, userId, agentName, body.attachments);
-    }
+      // @ 文件引用校验（FR-028/029）：按本轮数字人的场景清单判定
+      if (body.attachments && body.attachments.length > 0) {
+        validateAttachments(ctx.config.optAgentRoot, userId, agentName, body.attachments);
+      }
 
-    // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；
-    // 创建接口不限制会话总数）。acquireQuota **同步**完成「检查 + 占位」，
-    // 与下方 await 取实例之间没有被并发请求插队的窗口——占位已计入额度，
-    // 后续请求不可能同时通过判定（原实现在此判定、到 startRun 才注册，存在 TOCTOU 超发）。
-    const releaseQuota = ctx.runManager.acquireQuota(
-      userId,
-      threadId,
-      MAX_ACTIVE_THREADS_PER_USER,
-    );
-
-    let agent;
-    try {
-      agent = await ctx.getOrCreateAgent({ userId, agentName });
-    } catch (err) {
-      releaseQuota(); // 未走到 startRun，额度必须归还，否则该用户永久少一个并发名额
-      if (err instanceof PoolExhaustedError) throw new ApiError(409, 'POOL_EXHAUSTED', err.message);
-      if (err instanceof AgentConfigError) throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
-      throw err;
-    }
-
-    let run: Run;
-    try {
-      run = ctx.runManager.startRun({
+      // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；
+      // 创建接口不限制会话总数）。acquireQuota **同步**完成「检查 + 占位」，
+      // 与下方 await 取实例之间没有被并发请求插队的窗口——占位已计入额度，
+      // 后续请求不可能同时通过判定（原实现在此判定、到 startRun 才注册，存在 TOCTOU 超发）。
+      const releaseQuota = ctx.runManager.acquireQuota(
         userId,
         threadId,
-        agent,
-        userMessage: body.content,
-        thinking: body.thinking ?? false,
-        ...(body.attachments && body.attachments.length > 0 ? { attachments: body.attachments } : {}),
-        ...(model ? { model } : {}),
-        // 004：问题实例的隐藏工具引导（只影响本轮系统提示词，不落盘）
-        ...(body.guidance ? { guidance: body.guidance } : {}),
+        MAX_ACTIVE_THREADS_PER_USER,
+      );
+
+      let agent;
+      try {
+        agent = await ctx.getOrCreateAgent({ userId, agentName });
+      } catch (err) {
+        releaseQuota(); // 未走到 startRun，额度必须归还，否则该用户永久少一个并发名额
+        if (err instanceof PoolExhaustedError)
+          throw new ApiError(409, 'POOL_EXHAUSTED', err.message);
+        if (err instanceof AgentConfigError)
+          throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
+        throw err;
+      }
+
+      let run: Run;
+      try {
+        run = ctx.runManager.startRun({
+          userId,
+          threadId,
+          agent,
+          userMessage: body.content,
+          thinking: body.thinking ?? false,
+          ...(body.attachments && body.attachments.length > 0
+            ? { attachments: body.attachments }
+            : {}),
+          ...(model ? { model } : {}),
+          // 004：问题实例的隐藏工具引导（只影响本轮系统提示词，不落盘）
+          ...(body.guidance ? { guidance: body.guidance } : {}),
+        });
+      } catch (err) {
+        releaseQuota();
+        if (err instanceof ThreadRunActiveError)
+          throw new ApiError(409, 'THREAD_RUN_ACTIVE', err.message);
+        throw err;
+      }
+
+      agent.activeThreads++;
+      void run.settled.then(() => {
+        agent.activeThreads--;
+        // 只刷新 updated_at：会话归属在创建时写定，MUST NOT 因轮次改变（FR-022）
+        ctx.threadStore.touch(userId, agentName, threadId);
       });
-    } catch (err) {
-      releaseQuota();
-      if (err instanceof ThreadRunActiveError) throw new ApiError(409, 'THREAD_RUN_ACTIVE', err.message);
-      throw err;
-    }
 
-    agent.activeThreads++;
-    void run.settled.then(() => {
-      agent.activeThreads--;
-      // 只刷新 updated_at：会话归属在创建时写定，MUST NOT 因轮次改变（FR-022）
-      ctx.threadStore.touch(userId, agentName, threadId);
-    });
-
-    // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    const unsubscribe = run.subscribe((e) => {
-      reply.raw.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
-      if (e.type === 'done' || e.type === 'error') reply.raw.end();
-    });
-    reply.raw.on('close', unsubscribe);
-    return reply;
-  });
+      // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+      const unsubscribe = run.subscribe((e) => {
+        reply.raw.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
+        if (e.type === 'done' || e.type === 'error') reply.raw.end();
+      });
+      reply.raw.on('close', unsubscribe);
+      return reply;
+    },
+  );
 
   app.post('/api/threads/:id/stop', async (req) => {
     const userId = getCurrentUser().userId;
@@ -221,29 +230,40 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   // 人工确认提交/拒绝（HITL）：幂等（重复提交返回首次结果）；
   // submit 的服务端终验失败返回 400 + 逐字段错误，interaction 保持挂起可重提
-  app.post('/api/threads/:id/interaction', { schema: { body: interactionBodySchema } }, async (req, reply) => {
-    const userId = getCurrentUser().userId;
-    const { id: threadId } = req.params as { id: string };
-    const { agentName } = resolveAgentScope(ctx, userId, { route: 'POST /api/threads/:id/interaction' });
-    ctx.threadStore.get(userId, agentName, threadId); // 404 校验
-    const body = req.body as {
-      interaction_id: string;
-      action: 'submit' | 'reject';
-      args?: Record<string, unknown>;
-    };
-    if (body.action === 'submit' && body.args === undefined) {
-      throw new ApiError(400, 'VALIDATION_FAILED', '提交确认时必须提供 args');
-    }
-    const result = ctx.runManager.resolveInteraction(threadId, body.interaction_id, body.action, body.args);
-    if (!result.ok) {
-      if (result.code === 'NOT_FOUND') {
-        throw new ApiError(404, 'INTERACTION_NOT_FOUND', result.message);
+  app.post(
+    '/api/threads/:id/interaction',
+    { schema: { body: interactionBodySchema } },
+    async (req, reply) => {
+      const userId = getCurrentUser().userId;
+      const { id: threadId } = req.params as { id: string };
+      const { agentName } = resolveAgentScope(ctx, userId, {
+        route: 'POST /api/threads/:id/interaction',
+      });
+      ctx.threadStore.get(userId, agentName, threadId); // 404 校验
+      const body = req.body as {
+        interaction_id: string;
+        action: 'submit' | 'reject';
+        args?: Record<string, unknown>;
+      };
+      if (body.action === 'submit' && body.args === undefined) {
+        throw new ApiError(400, 'VALIDATION_FAILED', '提交确认时必须提供 args');
       }
-      if (result.code === 'EXPIRED') {
-        throw new ApiError(409, 'INTERACTION_EXPIRED', result.message);
+      const result = ctx.runManager.resolveInteraction(
+        threadId,
+        body.interaction_id,
+        body.action,
+        body.args,
+      );
+      if (!result.ok) {
+        if (result.code === 'NOT_FOUND') {
+          throw new ApiError(404, 'INTERACTION_NOT_FOUND', result.message);
+        }
+        if (result.code === 'EXPIRED') {
+          throw new ApiError(409, 'INTERACTION_EXPIRED', result.message);
+        }
+        throw new ApiError(400, 'SCHEMA_VALIDATION_FAILED', result.message);
       }
-      throw new ApiError(400, 'SCHEMA_VALIDATION_FAILED', result.message);
-    }
-    return reply.status(202).send({ accepted: true, result: result.result });
-  });
+      return reply.status(202).send({ accepted: true, result: result.result });
+    },
+  );
 }

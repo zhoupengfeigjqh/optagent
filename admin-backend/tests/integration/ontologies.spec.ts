@@ -236,7 +236,10 @@ describe('GET /api/admin/ontologies/onto-market（§10.4）', () => {
     expect(after.json().items[0].status).toBe('unchanged');
 
     writeMarket(ONTOLOGY, YAML.replace('v1.0', 'v1.1'));
-    const changed = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies/onto-market' });
+    const changed = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/ontologies/onto-market',
+    });
     expect(changed.json().items[0].status).toBe('changed');
   });
 

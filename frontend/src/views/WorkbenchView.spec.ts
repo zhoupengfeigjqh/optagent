@@ -30,7 +30,8 @@ const stubs = {
   // 侧栏用一个"点得出 create 事件"的微型桩，用于验证视图的事件接线
   HistorySidebar: {
     name: 'HistorySidebar',
-    template: '<aside class="sidebar-stub"><button class="sidebar-create" @click="$emit(\'create\')" /></aside>',
+    template:
+      '<aside class="sidebar-stub"><button class="sidebar-create" @click="$emit(\'create\')" /></aside>',
   },
   ChatPanel: true,
   WorkspacePanel: true,

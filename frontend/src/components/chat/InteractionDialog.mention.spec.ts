@@ -171,7 +171,10 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
       '数据准备/生产计划/plan.csv',
     )
     // 提交层：字段值即相对路径，无附件/标记语义
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     expect(wrapper.emitted('submit')).toEqual([[{ excelFileUrl: '数据准备/生产计划/plan.csv' }]])
   })
 
@@ -239,7 +242,9 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
 
     const labels = wrapper.findAll('.interaction-dialog__label')
     expect(labels[0]!.text()).toContain('image')
-    expect(labels[0]!.find('.interaction-dialog__label-hint').text()).toBe('要识别的图片：填相对路径')
+    expect(labels[0]!.find('.interaction-dialog__label-hint').text()).toBe(
+      '要识别的图片：填相对路径',
+    )
     expect(labels[1]!.find('.interaction-dialog__label-hint').text()).toBe('产线')
     expect(labels[2]!.find('.interaction-dialog__label-hint').exists()).toBe(false)
   })
@@ -283,7 +288,10 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
       '使用文件 临时空间/note.txt',
     )
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     expect(wrapper.emitted('submit')).toEqual([[{ 备注: '使用文件 临时空间/note.txt' }]])
   })
 

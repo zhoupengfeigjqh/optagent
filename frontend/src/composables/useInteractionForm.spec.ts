@@ -128,7 +128,10 @@ describe('JSON 草稿（逃逸舱）', () => {
     const { form } = make()
     form.toggleJsonView(['input'])
 
-    form.onJsonInput(['input'], '{"solvingTime":30,"targetPriorities":[{"ruleId":"PR009","rulePriority":9}]}')
+    form.onJsonInput(
+      ['input'],
+      '{"solvingTime":30,"targetPriorities":[{"ruleId":"PR009","rulePriority":9}]}',
+    )
     expect(form.valueOf(['input', 'solvingTime'])).toBe(30)
 
     form.onJsonInput(['input'], '')
@@ -147,7 +150,10 @@ describe('JSON 草稿（逃逸舱）', () => {
   })
 
   it('schema 表达不了的形状天然是 JSON 视图（无需用户切换）', () => {
-    const { form } = make({ schema: { properties: { 自由对象: { type: 'object' } } }, proposed: {} })
+    const { form } = make({
+      schema: { properties: { 自由对象: { type: 'object' } } },
+      proposed: {},
+    })
 
     expect(form.isJsonView(['自由对象'], 'json')).toBe(true)
   })
@@ -216,7 +222,9 @@ describe('规则入口', () => {
 
     expect(error).toBe('')
     expect(form.valueOf(['input', 'solvingTime'])).toBe(60)
-    expect(form.valueOf(['input', 'targetPriorities'])).toEqual([{ ruleId: 'PR002', rulePriority: 2 }])
+    expect(form.valueOf(['input', 'targetPriorities'])).toEqual([
+      { ruleId: 'PR002', rulePriority: 2 },
+    ])
     expect(form.actionError.value).toBe('')
   })
 

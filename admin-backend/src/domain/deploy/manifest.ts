@@ -27,7 +27,11 @@ interface Document {
 export interface ManifestDiffEntry {
   user_id: string;
   target: string;
-  kind: 'missing_in_runtime' | 'unexpected_in_runtime' | 'agent_missing_in_runtime' | 'agent_unexpected_in_runtime';
+  kind:
+    | 'missing_in_runtime'
+    | 'unexpected_in_runtime'
+    | 'agent_missing_in_runtime'
+    | 'agent_unexpected_in_runtime';
   detail: string;
 }
 
@@ -52,9 +56,10 @@ export class DeployManifestService {
   updateUser(userId: string, agentNames: string[], deployedAt: string): void {
     const others = this.read().filter((entry) => entry.user_id !== userId);
     this.save(
-      [...others, { user_id: userId, agent_names: [...agentNames].sort(), last_deployed_at: deployedAt }].sort(
-        (a, b) => a.user_id.localeCompare(b.user_id, 'zh-Hans-CN'),
-      ),
+      [
+        ...others,
+        { user_id: userId, agent_names: [...agentNames].sort(), last_deployed_at: deployedAt },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id, 'zh-Hans-CN')),
     );
   }
 

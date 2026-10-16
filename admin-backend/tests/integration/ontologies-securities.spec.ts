@@ -60,11 +60,7 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
  * 删除走 `removeTree`（见 `src/infra/fs-remove.ts`）：修复前用 `fs.rmSync` 删含非 ASCII
  * 段的路径会**静默不删**，残留会让"移除"用例变成假失败。改后中文场景/目录名也能真删。
  */
-function writeMarketSecurities(
-  ontologyDir: string,
-  content: string | null,
-  scenario = SCENARIO,
-): void {
+function writeMarketSecurities(ontologyDir: string, content: string | null, scenario = SCENARIO): void {
   const file = path.join(marketDir!, scenario, ontologyDir, 'securities.yaml');
   if (content === null) {
     removeTree(file);
@@ -118,8 +114,7 @@ describe('安全管控同步 securities.yaml（§10.1 / §10.2 / §10.5）', () 
     expect(imported.statusCode).toBe(201);
     expect(fs.readFileSync(savedSecurities(), 'utf8')).toBe(SECURITIES);
 
-    const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json()
-      .items[0];
+    const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json().items[0];
     expect(listItem.has_securities).toBe(true);
     // 列表仍不下发正文（含安全管控正文）
     expect(listItem).not.toHaveProperty('content');
@@ -147,8 +142,7 @@ describe('安全管控同步 securities.yaml（§10.1 / §10.2 / §10.5）', () 
     expect(detail.json().securities_content).toBeNull();
     expect(detail.json().has_securities).toBe(false);
 
-    const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json()
-      .items[0];
+    const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json().items[0];
     expect(listItem.has_securities).toBe(false);
   });
 });

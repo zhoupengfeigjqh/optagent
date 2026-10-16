@@ -329,10 +329,7 @@ function readOptionalText(raw: unknown, label: string, max: number): string {
 
 function assertLength(text: string, label: string, max: number): void {
   if (text.length > max) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `${label}不得超过 ${max} 字（当前 ${text.length} 字）`,
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}不得超过 ${max} 字（当前 ${text.length} 字）`);
   }
 }
 
@@ -406,11 +403,7 @@ function readStarters(raw: unknown, options: SoulNormalizeOptions): SoulStarter[
   return starters;
 }
 
-function readStarterTools(
-  raw: unknown,
-  label: string,
-  options: SoulNormalizeOptions,
-): SoulStarterTool[] {
+function readStarterTools(raw: unknown, label: string, options: SoulNormalizeOptions): SoulStarterTool[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
     throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}的关联工具须为数组`);

@@ -54,7 +54,10 @@ describe('selectReplay —— 预算分配', () => {
 
   it('running 记录不参与（无结果）', () => {
     const selection = selectReplay(
-      [record({ callId: 'c1', status: 'running', content: '不完整' }), record({ callId: 'c2', content: 'ok' })],
+      [
+        record({ callId: 'c1', status: 'running', content: '不完整' }),
+        record({ callId: 'c2', content: 'ok' }),
+      ],
       'th1',
     );
 
@@ -97,9 +100,9 @@ describe('selectReplay —— 外置结果只给索引', () => {
 
 describe('格式', () => {
   it('回灌块带工具名，便于模型区分来源', () => {
-    expect(formatReplayBlock({ messageId: 'm1', callId: 'c1', name: 'grep', text: '命中 3 行' })).toBe(
-      '[工具 grep 结果]\n命中 3 行',
-    );
+    expect(
+      formatReplayBlock({ messageId: 'm1', callId: 'c1', name: 'grep', text: '命中 3 行' }),
+    ).toBe('[工具 grep 结果]\n命中 3 行');
   });
 
   it('无外置结果时索引段为空串（不占上下文）', () => {
@@ -108,7 +111,13 @@ describe('格式', () => {
 
   it('索引段按"名称 · 体积 · 摘要 · 路径"排列', () => {
     const text = formatArtifactIndex([
-      { callId: 'c1', name: 'ocr_image', size: 1843200, summary: '12 页', relPath: '临时空间/th1_toolresult_c1.txt' },
+      {
+        callId: 'c1',
+        name: 'ocr_image',
+        size: 1843200,
+        summary: '12 页',
+        relPath: '临时空间/th1_toolresult_c1.txt',
+      },
     ]);
 
     expect(text).toContain('read_file');

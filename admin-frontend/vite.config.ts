@@ -45,12 +45,15 @@ export default defineConfig({
       // 两层阈值（与 `frontend/vite.config.ts`、`agent-backend/vitest.config.ts` 同口径）：
       // ① 全局「防倒退地板」；② 受宪章 80% 门禁约束的模块清单。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 95.31 / branch 93.21 / funcs 88.79 / lines 95.46
-        //    （007 按 T066 复核：stmts / branch / lines 按"实测值略下方"上调；
-        //     **funcs 保持 95 不下调**——它当前不达（88.79），原因是**存量**模块 `src/api/skills.ts`
-        //     的函数未被覆盖（其消费方 spec 一律 `vi.mock` 掉该模块），与本特性无关，
-        //     按「不追溯」登记而不修：见 `specs/007-next-action-hints/tasks.md` 同步记录）
-        //    地板只可上调（原则三 / 治理 § 不追溯）。
+        // ① 全局地板（防倒退）。2026-10-15 实测：stmts 98.14 / branch 94.19 / funcs 100 / lines 98.37
+        //    （2026-10-12 的实测是 95.31 / 93.21 / 88.79 / 95.46，其中 funcs 不达 95，
+        //     原因是 `src/api/skills.ts` 的 3 个本体市场函数与 `src/api/ontologies.ts` 的 6 个函数
+        //     没有任何 spec 直接调用（其消费方 spec 一律 `vi.mock` 掉这些模块）——
+        //     已于 2026-10-15 补齐 `modules.spec.ts` 的请求形状断言后归零，见 `specs/001-digital-human-platform/tasks.md`
+        //     §「维护性修复（2026-10-15）：§11 两个错误码补登 + `admin-frontend` 覆盖率门禁归零」；
+        //     地板此次**维持不变**——按"实测值略下方"上调留待下一次按实测复核，
+        //     避免把地板抬到会挡住并发在途改动的水平）。
+        //    地板只可上调（原则三）。
         statements: 94,
         branches: 92,
         functions: 95,
@@ -60,10 +63,20 @@ export default defineConfig({
         'src/router.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/utils/error-message.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useAsync.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
-        'src/composables/useAgentDesign.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/composables/useAgentDesign.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
         'src/composables/useDeploy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useSkills.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
-        'src/composables/useMcpServices.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/composables/useMcpServices.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
         'src/api/http.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/agents.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/builtin-tools.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },

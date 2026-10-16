@@ -179,12 +179,7 @@ function onHintCountChange(event: Event): void {
         <li>首屏欢迎语：{{ soul.welcome ? soul.welcome : '（未设置）' }}</li>
         <li>问题实例：{{ soul.starters.length }} 条</li>
       </ul>
-      <button
-        type="button"
-        class="btn"
-        data-test="open-quick-start"
-        @click="quickStartOpen = true"
-      >
+      <button type="button" class="btn" data-test="open-quick-start" @click="quickStartOpen = true">
         编辑快速上手
       </button>
     </fieldset>
@@ -231,7 +226,8 @@ function onHintCountChange(event: Event): void {
         </span>
       </label>
       <p class="field__hint" data-test="next-action-hints-hint">
-        开启后，该数字人每一轮回答的下方会出现最多 {{ soul.next_action_hints_count }} 条可点击的下一步动作卡片（点击即经确认发起下一轮）。
+        开启后，该数字人每一轮回答的下方会出现最多
+        {{ soul.next_action_hints_count }} 条可点击的下一步动作卡片（点击即经确认发起下一轮）。
         关闭则部署后该功能消失：<strong>产物里不会写这个键</strong>，运行环境不会为此多做一次模型调用。
       </p>
     </fieldset>

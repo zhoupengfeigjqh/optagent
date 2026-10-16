@@ -59,6 +59,8 @@ const {
   onSend,
   onStop,
   onRegenerate,
+  onRetryTurn,
+  onRetryFailedRun,
   nextSteps,
   pendingSuggestion,
   suggestionSending,
@@ -67,7 +69,6 @@ const {
   onConfirmSuggestion,
   onLoadMore,
   onLoadToolResult,
-  onRecover,
   onFeedback,
   onToggleThinking,
   onSelectModel,
@@ -83,7 +84,7 @@ const {
   onSwitchAgent,
   onOpenLink,
   onOpenFile,
-  onOpenPage,
+  onOpenView,
   onUpdateDraft,
   onSendFromToolbar,
   onInputText,
@@ -190,10 +191,11 @@ function onStarterClick(starter: AgentStarter): void {
         @load-more="onLoadMore"
         @feedback="onFeedback"
         @regenerate="onRegenerate"
+        @retry="onRetryTurn"
         @send-suggestion="onPickNextStep"
         @open-link="onOpenLink"
         @open-file="onOpenFile"
-        @open-page="onOpenPage"
+        @open-view="onOpenView"
       />
     </div>
 
@@ -223,14 +225,19 @@ function onStarterClick(starter: AgentStarter): void {
       </div>
     </div>
 
+    <!--
+      本轮失败提示（TR-58 分流）：本轮用户消息还在缓存里（服务端已终局）→「重试本轮」真正重发；
+      缓存不可用（断连/传输层失败：后端那一轮可能仍在跑）→ 保持「重新获取」重拉历史。
+      分流的**判断**在 `onRetryFailedRun` 里——模板里不能写 `@retry="a ? f : g"`（编译成语句，点了没反应）
+    -->
     <ErrorNotice
       v-if="isFailed && errorInfo"
       class="chat-panel__error"
       :error="errorInfo"
       :hint="degradedAgentHint"
       context="send-message"
-      retry-label="重新获取"
-      @retry="onRecover"
+      :retry-label="streaming?.canRegenerate ? '重试本轮' : '重新获取'"
+      @retry="onRetryFailedRun"
     />
 
     <!-- 加号上传入口：目录树一律取自 workspace 接口（三空间，scenario 定义子目录） -->

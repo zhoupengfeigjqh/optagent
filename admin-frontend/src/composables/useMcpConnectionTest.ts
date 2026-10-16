@@ -57,9 +57,7 @@ export function useMcpConnectionTest(opts: McpConnectionTestOptions): McpConnect
     error.value = null
     try {
       result.value = await testMcpService(opts.serviceName(), opts.target())
-      opts.announce(
-        result.value.ok ? '连通性与能力验证均通过' : '测试未通过，详见弹窗中的失败原因',
-      )
+      opts.announce(result.value.ok ? '连通性与能力验证均通过' : '测试未通过，详见弹窗中的失败原因')
     } catch (err) {
       error.value = err as ErrorInfo
       opts.announce('测试请求失败')

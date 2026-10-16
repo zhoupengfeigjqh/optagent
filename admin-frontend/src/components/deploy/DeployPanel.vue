@@ -73,6 +73,19 @@ function nameList(userIds: string[]): string {
   if (userIds.length <= 3) return userIds.join('、')
   return `${userIds.slice(0, 3).join('、')} 等 ${userIds.length} 个`
 }
+
+/**
+ * 差异项一行文字：优先用服务端给的 `detail`，缺失（或不是字符串）时回退到整条 JSON。
+ *
+ * 必须走函数而不是在插值里写类型断言：`{{ (diff as Record<string, string>).detail }}`
+ * 里的尖括号会让 prettier 的 Vue 解析器把 `<Record<...>` 当成标签起始，
+ * 报 `Unexpected closing tag "li"`（解析失败 ⇒ `format:check` 退出码 2，
+ * 比"格式不一致"更隐蔽）。`DeployHistoryList.vue` 的 `diffText` 是同一处理方式。
+ */
+function diffText(diff: Record<string, unknown>): string {
+  const detail = diff.detail
+  return typeof detail === 'string' ? detail : JSON.stringify(diff)
+}
 </script>
 
 <template>
@@ -117,11 +130,16 @@ function nameList(userIds: string[]): string {
       </p>
       <template v-else>
         <p class="deploy-panel__fail">
-          <StatusBadge status="failed" :label="`校验未通过（${d.validationErrors.value.length} 项）`" />
+          <StatusBadge
+            status="failed"
+            :label="`校验未通过（${d.validationErrors.value.length} 项）`"
+          />
           部署已被阻止，**运行环境零写入**。以下为全部错误项：
         </p>
         <table class="deploy-panel__table">
-          <caption class="visually-hidden">部署前校验错误清单</caption>
+          <caption class="visually-hidden">
+            部署前校验错误清单
+          </caption>
           <thead>
             <tr>
               <th scope="col">用户</th>
@@ -151,8 +169,8 @@ function nameList(userIds: string[]): string {
           <StatusBadge :status="user.ok ? 'ok' : 'failed'" :label="user.ok ? '成功' : '失败'" />
           <span class="mono">{{ user.user_id }}</span>
           <span v-if="user.ok" class="muted">
-            写入 {{ user.agents.filter((a) => a.action === 'written').length }} 个、
-            移除 {{ user.agents.filter((a) => a.action === 'removed').length }} 个
+            写入 {{ user.agents.filter((a) => a.action === 'written').length }} 个、 移除
+            {{ user.agents.filter((a) => a.action === 'removed').length }} 个
           </span>
           <span v-else class="deploy-panel__error">{{ user.error }}</span>
         </li>
@@ -162,12 +180,11 @@ function nameList(userIds: string[]): string {
         <h4>本次部署的差异</h4>
         <ul>
           <li v-for="(diff, index) in d.result.value.manifest_diff" :key="index">
-            {{ (diff as Record<string, string>).detail ?? JSON.stringify(diff) }}
+            {{ diffText(diff) }}
           </li>
         </ul>
       </template>
     </div>
-
   </section>
 </template>
 

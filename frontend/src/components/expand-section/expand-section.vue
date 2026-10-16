@@ -1,28 +1,28 @@
 <script lang="ts" setup>
-import { computed, onActivated, ref } from 'vue';
+import { computed, onActivated, ref } from 'vue'
 
-import { RightOutlined } from '@ant-design/icons-vue';
+import { RightOutlined } from '@ant-design/icons-vue'
 
 defineOptions({
   name: 'ExpandSection',
-});
+})
 
 const props = withDefaults(
   defineProps<{
     /** 默认是否展开（未受控时使用） */
-    defaultExpanded?: boolean;
+    defaultExpanded?: boolean
     /** 是否展开（v-model:expanded），不传时组件内部自行维护展开状态 */
-    expanded?: boolean;
+    expanded?: boolean
     /** 隐藏是否销毁 */
-    hideDestory?: boolean;
+    hideDestory?: boolean
     /** 菜单项列表（支持多个，横向 a-menu 展示） */
-    items?: SectionMenuItem[];
+    items?: SectionMenuItem[]
     /** 当前选中菜单项 key */
-    selectedKey?: string;
+    selectedKey?: string
     /** 标题文本（单菜单项模式时使用；多菜单项模式请用 items） */
-    title?: string;
+    title?: string
     /** 是否间距 */
-    withPadding?: boolean;
+    withPadding?: boolean
   }>(),
   {
     title: '',
@@ -33,72 +33,65 @@ const props = withDefaults(
     hideDestory: true,
     withPadding: true,
   },
-);
+)
 
 const emit = defineEmits<{
   /** 点击标题栏切换展开状态 */
-  'update:expanded': [value: boolean];
+  'update:expanded': [value: boolean]
   /** 切换选中的菜单项 */
-  'update:selectedKey': [value: string];
-}>();
+  'update:selectedKey': [value: string]
+}>()
 
 /** 菜单项：key + 标签文本 */
 export interface SectionMenuItem {
-  key: string;
-  label: string;
+  key: string
+  label: string
 }
 
 // 内部受控状态：父级未传 expanded 时生效
-const innerExpanded = ref(props.defaultExpanded);
+const innerExpanded = ref(props.defaultExpanded)
 
 // 横向 a-menu 由内部 vc-overflow 通过 ResizeObserver 测量宽度来决定 item 是否溢出。
 // keep-alive 切走时容器宽度变 0，切回后未重新测量，导致 item 被收进隐藏的
 // 溢出下拉而不显示。这里在组件重新激活时通过 key 强制重挂载 a-menu，使其重新测量。
-const menuKey = ref(0);
+const menuKey = ref(0)
 onActivated(() => {
-  menuKey.value += 1;
-});
+  menuKey.value += 1
+})
 
 // 实际展开状态：优先使用父级受控值
 const isExpanded = computed({
   get: () => props.expanded ?? innerExpanded.value,
   set: (val) => {
-    innerExpanded.value = val;
-    emit('update:expanded', val);
+    innerExpanded.value = val
+    emit('update:expanded', val)
   },
-});
+})
 
 const menuItems = computed<SectionMenuItem[]>(() => {
-  if (props.items.length > 0) return props.items;
-  return props.title ? [{ key: '1', label: props.title }] : [];
-});
+  if (props.items.length > 0) return props.items
+  return props.title ? [{ key: '1', label: props.title }] : []
+})
 
 const selectedKeys = computed(() => {
-  if (props.items.length > 0)
-    return props.selectedKey ? [props.selectedKey] : [];
-  return ['1'];
-});
+  if (props.items.length > 0) return props.selectedKey ? [props.selectedKey] : []
+  return ['1']
+})
 
 const handleToggle = () => {
-  isExpanded.value = !isExpanded.value;
-};
+  isExpanded.value = !isExpanded.value
+}
 
-const handleMenuClick = ({
-  key,
-  domEvent,
-}: {
-  domEvent: PointerEvent;
-  key: string;
-}) => {
+const handleMenuClick = ({ key, domEvent }: { domEvent: PointerEvent; key: string }) => {
   if (props.items.length > 0) {
-    emit('update:selectedKey', key);
+    emit('update:selectedKey', key)
   }
 
   if (props.items.length > 1) {
     // 菜单超过一个点击就不折叠
-    domEvent?.stopPropagation();
+    domEvent?.stopPropagation()
   }
-};
+}
 </script>
 
 <template>
@@ -122,6 +115,7 @@ const handleMenuClick = ({
         @click="handleMenuClick"
       />
       <div
+        v-else
         style="
           height: 45px;
           padding-left: 5px;
@@ -131,7 +125,6 @@ const handleMenuClick = ({
           cursor: pointer;
         "
         @click="handleToggle"
-        v-else
       >
         {{ menuItems[0].label }}
       </div>

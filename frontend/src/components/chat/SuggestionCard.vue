@@ -29,12 +29,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <button
-    type="button"
-    class="suggestion-card"
-    :disabled="disabled"
-    @click="emit('select')"
-  >
+  <button type="button" class="suggestion-card" :disabled="disabled" @click="emit('select')">
     <span class="suggestion-card__text">{{ text }}</span>
   </button>
 </template>

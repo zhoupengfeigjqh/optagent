@@ -12,10 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Logger } from 'pino';
 import type { McpManager } from '../../src/infra/mcp/mcp-manager.js';
-import {
-  mcpToolsAsAgentTools,
-  type RuntimeContext,
-} from '../../src/infra/mcp/mcp-tool-adapter.js';
+import { mcpToolsAsAgentTools, type RuntimeContext } from '../../src/infra/mcp/mcp-tool-adapter.js';
 import { declaresResultUrl, injectResultUrl } from '../../src/infra/mcp/async-result-url.js';
 
 interface Call {
@@ -96,9 +93,9 @@ describe('R11 异步工具：resultUrl 注入', () => {
     const calls: Call[] = [];
     const [tool] = build(calls, [ASYNC_TOOL]);
 
-    expect(
-      (tool!.parameters as { properties: Record<string, unknown> }).properties,
-    ).toHaveProperty('resultUrl');
+    expect((tool!.parameters as { properties: Record<string, unknown> }).properties).toHaveProperty(
+      'resultUrl',
+    );
     await exec(tool!, { plan: 'p1' });
     expect(calls[0]!.args).toEqual({ plan: 'p1' });
   });
@@ -127,9 +124,9 @@ describe('R11 异步工具：resultUrl 注入', () => {
     const calls: Call[] = [];
     const [tool] = build(calls, [ASYNC_TOOL], ctx(['other_tool']));
 
-    expect(
-      (tool!.parameters as { properties: Record<string, unknown> }).properties,
-    ).toHaveProperty('resultUrl');
+    expect((tool!.parameters as { properties: Record<string, unknown> }).properties).toHaveProperty(
+      'resultUrl',
+    );
     await exec(tool!, { plan: 'p1' });
     expect(calls[0]!.args).toEqual({ plan: 'p1' });
   });

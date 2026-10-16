@@ -143,9 +143,7 @@ onBeforeUnmount(() => {
     @cancel="onCancel"
   >
     <form method="dialog" class="field-dialog__body" @submit.prevent>
-      <h2 id="scenario-field-dialog-title" class="field-dialog__title">
-        字段约束确认：{{ dir }}
-      </h2>
+      <h2 id="scenario-field-dialog-title" class="field-dialog__title">字段约束确认：{{ dir }}</h2>
       <p class="field-dialog__hint">
         这些字段将在上传文件到该目录时，按上传表的表头校验：必填字段必须存在，且取值类型须匹配。
         字段列表为空即该目录不设约束。
@@ -198,12 +196,7 @@ onBeforeUnmount(() => {
 
       <button type="button" class="btn" data-test="add-field" @click="addRow">添加字段</button>
 
-      <p
-        v-for="message in errors"
-        :key="message"
-        class="field-dialog__error"
-        role="alert"
-      >
+      <p v-for="message in errors" :key="message" class="field-dialog__error" role="alert">
         {{ message }}
       </p>
 

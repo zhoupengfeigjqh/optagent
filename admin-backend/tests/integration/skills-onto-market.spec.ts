@@ -24,13 +24,7 @@ let marketDir: string | null = null;
 async function setup(withMarket: boolean): Promise<void> {
   if (withMarket) {
     marketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-market-'));
-    const skillDir = path.join(
-      marketDir,
-      '生产调度',
-      '原材料采购和库存',
-      'skills',
-      'raw-material-inventory',
-    );
+    const skillDir = path.join(marketDir, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory');
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), SKILL_MD);
     fx = await createFixture({ env: { ONTO_MARKET_DIR: marketDir } });
@@ -65,13 +59,7 @@ function update(scenario: string, ontology: string, skill: string, confirm = fal
 
 /** 市场技能目录的绝对路径（改市场文件用） */
 function marketSkillDir(): string {
-  return path.join(
-    marketDir!,
-    '生产调度',
-    '原材料采购和库存',
-    'skills',
-    'raw-material-inventory',
-  );
+  return path.join(marketDir!, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory');
 }
 
 describe('GET /api/admin/skills/onto-market', () => {
@@ -95,18 +83,9 @@ describe('GET /api/admin/skills/onto-market', () => {
   it('市场文件变化后 → status=changed（打开列表即完成一次"是否变化"检查）', async () => {
     await setup(true);
     // 先导入，库内才有一份带 origin.hash 的记录可比对
-    expect(
-      (await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode,
-    ).toBe(201);
+    expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(201);
     fs.writeFileSync(
-      path.join(
-        marketDir!,
-        '生产调度',
-        '原材料采购和库存',
-        'skills',
-        'raw-material-inventory',
-        'SKILL.md',
-      ),
+      path.join(marketDir!, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory', 'SKILL.md'),
       SKILL_MD.replace('正文', '正文（更新）'),
     );
 
@@ -142,18 +121,9 @@ describe('POST /api/admin/skills/onto-market/install', () => {
 
   it('重名直接拒绝（409 ADM_SKILL_NAME_TAKEN）：市场文件已变化也不得覆盖库内版本', async () => {
     await setup(true);
-    expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(
-      201,
-    );
+    expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(201);
     fs.writeFileSync(
-      path.join(
-        marketDir!,
-        '生产调度',
-        '原材料采购和库存',
-        'skills',
-        'raw-material-inventory',
-        'SKILL.md',
-      ),
+      path.join(marketDir!, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory', 'SKILL.md'),
       SKILL_MD.replace('正文', '正文（更新）'),
     );
 
@@ -190,10 +160,7 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
     await setup(true);
     const installed = (await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).json();
     expect(installed.overwritten).toBe(false);
-    fs.writeFileSync(
-      path.join(marketSkillDir(), 'SKILL.md'),
-      SKILL_MD.replace('正文', '正文（更新）'),
-    );
+    fs.writeFileSync(path.join(marketSkillDir(), 'SKILL.md'), SKILL_MD.replace('正文', '正文（更新）'));
     fs.mkdirSync(path.join(marketSkillDir(), 'references'), { recursive: true });
     fs.writeFileSync(path.join(marketSkillDir(), 'references', '附录.md'), '附录内容');
 
@@ -229,20 +196,12 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
   it('库内版本被人工修改 + 未确认 → 409 ADM_SKILL_MODIFIED；confirm=true 后成功且 locally_modified=true', async () => {
     await setup(true);
     await install('生产调度', '原材料采购和库存', 'raw-material-inventory');
-    fs.writeFileSync(
-      path.join(marketSkillDir(), 'SKILL.md'),
-      SKILL_MD.replace('正文', '正文（更新）'),
-    );
+    fs.writeFileSync(path.join(marketSkillDir(), 'SKILL.md'), SKILL_MD.replace('正文', '正文（更新）'));
 
     // 模拟"库内被人工修改"：**直接改磁盘**（2026-10-03 起市场来源技能已只读，
     // §4.3 编辑接口会 409，所以这里走带外改动——正是本用例要防的场景：
     // 有人绕过平台改了库内文件，`origin.hash` 与库内内容不再一致）
-    const libraryFile = path.join(
-      fx.platformDataDir,
-      'skills',
-      'raw-material-inventory',
-      'SKILL.md',
-    );
+    const libraryFile = path.join(fx.platformDataDir, 'skills', 'raw-material-inventory', 'SKILL.md');
     fs.writeFileSync(libraryFile, SKILL_MD.replace('正文', '正文（人工改）'));
 
     const refused = await update('生产调度', '原材料采购和库存', 'raw-material-inventory');
@@ -277,10 +236,7 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
         scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
       },
     });
-    fs.writeFileSync(
-      path.join(marketSkillDir(), 'SKILL.md'),
-      SKILL_MD.replace('正文', '正文（更新）'),
-    );
+    fs.writeFileSync(path.join(marketSkillDir(), 'SKILL.md'), SKILL_MD.replace('正文', '正文（更新）'));
 
     const res = await update('生产调度', '原材料采购和库存', 'raw-material-inventory');
     expect(res.statusCode).toBe(200);
@@ -316,9 +272,7 @@ describe('本体市场来源的技能只读（2026-10-03，FR-062）', () => {
 
   it('从市场导入后：在线编辑被拒（409 ADM_SKILL_READ_ONLY），且内容零变化', async () => {
     await setup(true);
-    expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(
-      201,
-    );
+    expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(201);
     const before = await readFile();
     // 只读来源：读取接口即回 `editable: false`（与写入拦截同一口径）
     expect(before.json().editable).toBe(false);

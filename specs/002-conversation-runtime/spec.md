@@ -219,6 +219,34 @@
 - **不给 `AgentToolResult.details` 新增用途**：平台不消费它，落盘只取 `content[].text`（不造第二份真相）；
 - **不改接口与前端**：`tool_calls[].content` 的**字段与类型**不变，只是其**内容口径**回归"服务正文"；前端 `ProducedJsonView` / `MessageViewLinks` 零改动。
 
+### 4.10 LLM 失败的有界重试与可诊断（2026-10-15 增量）
+
+**问题**（实踩：2026-10-15 本机连续 3 次失败轮，全部是 DeepSeek `503 Service is too busy`，耗时 **318~440ms**，即"首字节之前就失败"）：
+
+1. **可自愈的瞬时错误被直接升级为"对话失败"**：`pi-ai` 的 `retryProviderRequest` 已把 `x-should-retry` 优先、无状态码、`408` / `409` / `429` / `≥500` 判为**可重试**，并且退避可被 `AbortSignal` 打断；但它的 `maxRetries` 默认 **0**，而 `agent-backend/src/infra/llm/pi-ai-provider.ts` 与 `infra/agent-loop.ts` 从未传该选项 → **重试一次也没有发生**。
+2. **原因对用户与运维都不可见**：上游原文（含 `request_id`）只落在该会话自己的 `history.jsonl`；应用日志只有 `run.end ok=false error_code='LLM_ERROR'`（无状态码、无 `request_id`、无原文）；前端按码分派而 `frontend/src/utils/error-message.ts` **没有** `LLM_ERROR` / `LOOP_ERROR` 条目 → 用户看到的是"请求失败，请稍后重试（LLM_ERROR）"（D13 口径本身没问题，缺的是**粒度**与**诊断线索**）。
+3. **失败轮没有重试入口**：`canRegenerate` 只认中断轮（`phase === ABORTED && lastAbortedTurn`），失败轮的 `ErrorNotice` 按钮是「重新获取」（`recover()` 只重拉历史、不重发），用户只能手打或重开会话。**（2026-10-15 实现期修正）** 实测病灶还有相反的一处：气泡级的「重试」按钮**一直存在**，但它发出的 `retry` 事件在列表层与面板层都**没有接收方**（点了没反应）——即"文档以为没有入口，代码里其实有个悬空入口"，修复见 T081a。
+
+**处置总览**：把**重试交给 pi-ai 既有实现**（传 `maxRetries` / `maxRetryDelayMs`），把**分类**收敛到一个纯函数模块（`agent-backend/src/domain/llm-error.ts`，`infra` 两处调用点共用），把**诊断线索**沿既有通道下发（SSE `error` 事件 + 失败轮 `history.jsonl` 行 + 结构化日志 `llm.call.failed`），前端补**可行动文案 + 诊断信息行 + 失败轮「重试本轮」**。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-53** | **重试 MUST 有界、且 MUST 复用 pi-ai 的既有实现**：`streamChat` 与 `createStreamFn` 两条路径 MUST 都把 `maxRetries` / `maxRetryDelayMs` 传给 `provider.streamSimple()`（`StreamOptions` 上的既有字段）；**MUST NOT** 自建退避 / 重试循环（宪章原则二"同一职责只有一处实现"、原则六"用平台原生能力"）。默认 `maxRetries = 2`、`maxRetryDelayMs = 15000`，经 `.env`（`LLM_MAX_RETRIES` / `LLM_RETRY_MAX_DELAY_MS`）可配且经 zod 校验 | 单测：①构造"前两次 503、第三次 200"的假 provider，断言**只发 3 次**且最终成功；②`LLM_MAX_RETRIES=0` 时不重试；③不可重试错误（400/401）**只发 1 次**；④重试期间 `abort` → 不再重试且按 `ABORTED` 收尾 |
+| **TR-54** | **失败 MUST 分类**：上游失败 MUST 归一到细粒度错误码（5xx→`LLM_UNAVAILABLE`、429→`LLM_RATE_LIMITED`、402→`LLM_INSUFFICIENT_BALANCE`、401/403→`LLM_UNAUTHORIZED`、400+上下文特征→`LLM_CONTEXT_TOO_LONG`、其余含 `LLM_ERROR` 兜底）；分类判据 MUST 只有一处实现（`domain/llm-error.ts` 的纯函数），`streamChat` / `agent-loop` 两个调用点共用 | 单测（纯函数）：逐类样本 + 边界（消息里无状态码 / 未知状态码 / 非 JSON 体 / `pi` 的 `"<prefix> (<status>): …"` 形态 / 抛出的 `Error` 带 `status`）；回归：既有 `LLM_ERROR` 兜底语义不变 |
+| **TR-55** | **诊断线索 MUST 下发，上游原文 MUST NOT 下发**：`POST /api/threads/{id}/messages` 的 `error` 事件与失败轮 `history.jsonl` 行的 `error` 对象 MAY 携带 `upstream_status`（number）/ `upstream_type`（string）/ `request_id`（string）三个**可选**字段；`message` 仍是后端原始文案（沿用既有口径，前端不展示）；**MUST NOT** 把上游响应体原文透出（可能含 provider 内部信息与英文技术文本） | 单测/集成：SSE `error` 事件与落盘行含三字段（有则含、无则缺省不写 `null`）；旧前端忽略未知字段（契约向后兼容） |
+| **TR-56** | **原始错误 MUST 落结构化日志**（原则九）：失败收尾 MUST 记一条 `event: 'llm.call.failed'`，字段含 `code` / `upstream_status` / `upstream_type` / `request_id` / `provider` / `model` / `message`（截断）+ 既有 `user_id` / `thread_id` / `agent_name`；需人工介入的两类（`LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED`）MUST 带 `alert: true` | 单测：注入假 logger 断言事件名与字段（含 `alert` 仅这两类为真）；日志缺失时不影响收尾 |
+| **TR-57** | **前端 MUST 给可行动文案 + 诊断信息**：新增错误码 MUST 有中文文案（如"模型服务暂时过载（上游 503），已自动重试仍未成功，请稍后再试"）；错误块 SHOULD 增补一行**诊断信息**（错误码 · 上游状态码 · `request_id`），用**纯函数**生成（唯一实现）、缺失字段自动省略；**MUST NOT** 展示上游原文 | 单测：文案映射完整性（每个新码都有文案）；诊断行生成（全字段 / 部分字段 / 无诊断字段 → 不渲染该行）；组件测试：诊断行存在与缺省两种情况 |
+| **TR-58** | **失败轮 MUST 可「重试本轮」**：失败轮 MUST 与中断轮一样缓存"上一轮用户消息"（缓存字段语义由"中断轮"扩为"可重试轮"，字段 `lastRetryableTurn`），`canRegenerate` 对 `FAILED` 同样为真；`ErrorNotice` 的按钮在**可重试**时显示「重试本轮」（真正重发），仅在**不可重试**（如流断了但后端其实已答完）时保留「重新获取」语义。**「可重试」的判据即"后端能否安全接收重发"**：`aborted`（本轮已丢弃）与服务端**已终局**的 `failed`（收到 `error` 终结事件：后端已落盘并释放实例）MUST 置位缓存；`failed` 但属**断连/传输层**（流无终结事件、请求异常）时后端那一轮可能仍在跑（断连 = 仅退订），重发会被 `409 THREAD_RUN_ACTIVE` 挡回，MUST NOT 置位缓存（按钮落回「重新获取」）；缓存非 `null` ⇔ 可重发，是该字段的不变式。面板级与气泡级两个入口 MUST 用同一判据、同一文案（「重试本轮」）；分流 MUST 落在函数里（**MUST NOT** 写成模板三元表达式 `@retry="a ? f : g"`——它被编译为语句而非处理器，点击不触发）；**历史失败轮**（已落盘、由历史渲染的那一条，如刷新后再看）MUST 同样可「重试本轮」——载荷 MUST 取自历史里该轮的上一条 `user` 消息（`lastRetryableTurn` 只覆盖本次会话内刚失败的那一轮），且该消息不在已加载分页窗口内时 MUST NOT 渲染入口（不得留一个点了没反应的按钮） | 单测：失败轮后缓存可用、`canRegenerate` 为真、重发走 `onSend` 全链路；中断轮既有行为不变；不可重试失败的按钮文案仍为「重新获取」；历史失败轮：列表层解析同轮用户消息 → 装配层复用 `onSend` 重发（本轮进行中不响应、不清草稿），窗口切分导致解析不出该用户消息时不渲染入口；缓存判据两态：`error` 终结事件 → 置位、流无终结事件（断连）→ 不置位；面板级分流两态：文案随 `canRegenerate` 切换且点击落到面板重试入口（可重发走 `onRegenerate`、断连走 `onRecover`）；`ErrorNotice` 契约：`retryLabel = null` 时不渲染入口 |
+
+**明确不做**（本次）：
+
+- **不做"降级到备用模型 / 备用供应商"**（配置多条目切换）：涉及产品语义（记账归谁、是否自动切换、如何告知），用户 2026-10-15 明确**暂不降级**；
+- **不把上游响应体原文展示给用户**：仍守 D13/V-12 口径——用户看分类文案 + `upstream_status` + `request_id`，原文进日志（`TR-56`）；
+- **不自建重试/退避实现**：`pi-ai` 的 `retryProviderRequest` 已含指数退避、抖动、`x-should-retry` / `Retry-After` 尊重与可打断睡眠；
+- **不新增"总时长"超时配置**：单请求超时沿用 pi/OpenAI SDK 默认（**10 分钟**，`ProviderRequestOptions.timeoutMs` 的文档口径），重试次数上限保证总尝试 ≤ `1 + LLM_MAX_RETRIES`；本次**不设** `timeoutMs`（对流式长回答，SDK 的 `timeout` 会连同正文读取一起截断，风险高于收益——如需另立增量并单独评估）；
+- **不改"流到一半失败"的语义**：`retryProviderRequest` 只在**响应到达前**重试；正文已产出后的失败仍按 §4.4 与 `TR-33` 的既有口径（半截回答与已成功的工具记录照常保留与落盘、未完项显示 `未完成`），由用户在 `TR-58` 的入口重发；
+- **不给"重试次数"单独出一个 SSE 事件**：重试期间的等待态由既有流式"生成中"承载（原则九的"暴露等待状态"），改契约面为一个小事件不值得。
+
 ## 5. 数据模型
 
 ### 5.1 `threads/{thread_id}/tool-events.jsonl`
@@ -273,7 +301,7 @@
 |---|---|
 | `GET /api/threads/{id}` | 消息新增可选字段 `tool_calls: ToolCallRecord[]`（仅该轮确有调用时返回）；**2026-10-10**：`ToolCallRecord` 再新增可选字段 `view_links: ViewLink[]`（结果里的视图链接；仅确有链接时返回，`TR-45`） |
 | `GET /api/threads/{id}/tool-calls/{call_id}` | **新增**。200 → `{ call_id, name, status, size, content, truncated? }`；410 → `TOOL_RESULT_EXPIRED`；404 → `TOOL_CALL_NOT_FOUND` |
-| `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发 |
+| `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发。**2026-10-15**：`error` 事件的 `error` 对象新增**可选**诊断字段（见下，`TR-55`） |
 
 `ToolCallRecord`（snake_case）：
 
@@ -289,6 +317,8 @@
 ```
 
 **2026-10-10 的契约增量（`TR-44`~`TR-48`）**：`tool_calls[].view_links` 是本次**唯一**的接口字段变化——`GET /api/threads/{id}/tool-calls/{call_id}` 与 SSE 均**零变更**（结果正文仍不经事件总线外发，故入口只在终态后的详情里出现）；`view_links` 与结果正文分离，因此**正文外置时仍随详情下发**。
+
+**2026-10-15 的契约增量（`TR-54` / `TR-55`）**：SSE `error` 事件与 `GET /api/threads/{id}` 消息项的 `error` 对象 MAY 携带三个**可选**诊断字段——`upstream_status`（上游 HTTP 状态码）/ `upstream_type`（上游错误类型，如 `service_unavailable_error`）/ `request_id`（上游请求 id）；同时新增一批**流级错误码**（`LLM_UNAVAILABLE` / `LLM_RATE_LIMITED` / `LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` / `LLM_CONTEXT_TOO_LONG`），**既有 `LLM_ERROR` 保留为兜底**（语义不变）。权威表与字段定义见 [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)（运行环境侧契约的登记处；`contracts/backend-api.md` 并不存在，见本节前的落点说明）。前端 `api/types.ts` 的 `ErrorInfo` **同批**新增这三个可选字段（宪章原则七：契约、类型、后端 schema、测试四处同步）。
 
 ## 7. 对既有规格的修订
 
@@ -348,6 +378,17 @@
 **接口与数据零变更**：`tool_calls[].content` / `view_links` 的字段、类型、端点与 SSE 全部不动，故 `contracts/` 与前端 `api/types.ts` **无改动**；本次只改**该字段的内容口径**，外加一份历史落盘数据的**一次性回填**（`TR-52`）。
 
 **跨侧文档**：`异步MCP服务接入约定.md` §4.7 同批追加"平台侧口径修正（服务写法不变）"说明。
+
+### 7.5 修订记录（2026-10-15）：LLM 失败的有界重试与可诊断
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| —（原实现无规格条目） | LLM 调用失败即一轮失败：无重试、无分类，原因只落在该会话自己的 `history.jsonl` | **新增** §4.10：`TR-53`~`TR-58`（有界重试复用 `pi-ai` 实现 / 失败分类唯一实现 / 诊断字段下发 / 原始错误入结构化日志 / 前端可行动文案与诊断行 / 失败轮可「重试本轮」） | 实踩 3 次 DeepSeek `503 Service is too busy`（318~440ms）：本可自愈的瞬时错误被升级为对话失败，且用户与运维都看不到原因 |
+| §4.4（降级与可观测） | "影响用户体验的调用 MUST 做降级分析、失败 MUST 可观测" | **具体化**：LLM 失败 MUST 记 `llm.call.failed`（含上游状态码 / `request_id` / 截断原文）；`LLM_INSUFFICIENT_BALANCE` 与 `LLM_UNAUTHORIZED` MUST 带 `alert: true`；重试有界（默认 2 次、单次等待上限 15s、总尝试 ≤3） | 把原则九的抽象要求落成可断言的字段与上限 |
+| §4.4（用户可见状态） | 失败轮用户可见"通用文案 + 错误码" | **收窄**：按细分错误码给可行动文案，并增加一行"诊断信息"（码 · 上游状态码 · `request_id`）；**仍不展示上游原文**（守 D13/V-12） | "请求失败，请稍后重试（LLM_ERROR）"既不可行动、也无法向上游报障 |
+| `TR-33`（`未完成` 徽标口径） | 中断/失败轮、只有开始行的记录显示 `未完成` | **不变**：本次只改"失败之后能做什么"，不改徽标与既有降级展示 | 避免借改动之机放大范围（宪章「不追溯」） |
+
+**接口与数据变更**：SSE `error` 事件的 `error` 对象新增三个可选字段（`TR-55`），失败轮 `history.jsonl` 行的 `error` 对象**同形**；新增一批流级错误码（`TR-54`）。前端 `api/types.ts` 的 `ErrorInfo`、`frontend/src/utils/error-message.ts` 的文案表与 `frontend/src/components/common/ErrorNotice.vue` 的展示**同批**变更（宪章原则七）。运行环境侧契约登记在 [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)。
 
 ## 8. 宪章符合性
 
@@ -412,6 +453,20 @@
 | 八（简单可控） | 补齐后端缺失的 `typecheck` 门禁脚本（`tsc --noEmit`），四侧门禁口径对齐；回填脚本**默认干跑**、`--apply` 才写、失败非零退出码 |
 | 九（优雅降级与可观测） | 降级**用户可感知**：不支持的块在结果文本里以 `[不支持的块类型 X]` 显式占位，不假装正常；同时记结构化 `warn`（`mcp.result.block_unsupported`，含 service/tool/block_type），不静默吞错；`view-links.ts` 的"返回 `undefined` 不算异常"判定原样保留 |
 | 五（数据一致性） | 回填写盘走"临时文件 + 原子改名"，失败保持原文件不变；只改 `view_links` 一个字段，未改动行逐字节原样；重复执行幂等（已有字段的行不动） |
+
+**2026-10-15 增量（§4.10 LLM 失败的有界重试与可诊断）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | **先**回写本规格（§4.10 / §6 / §7.5 / §8 / §9.5）与 [plan.md](./plan.md) / [tasks.md](./tasks.md) + [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)，**再**改代码 |
+| 二（模块化，≤500 行） | 新增纯函数模块 `agent-backend/src/domain/llm-error.ts`（单一职责：上游报文 → 错误码 + 诊断字段），`infra` 两处调用点（`pi-ai-provider.ts` / `agent-loop.ts`）共用同一实现；前端诊断行由纯函数 `formatErrorDiagnostics()` 生成（唯一实现）；改动文件行数实测见 §9.5 |
+| 三（测试完备） | 后端新增 `tests/unit/llm-error.spec.ts`（分类逐类 + 边界）、重试接线用例（假 provider：503×2 → 200 只发 3 次 / 不可重试只发 1 次 / 重试中 `abort`）、`run-finalize` 的日志与字段断言；前端新增文案与诊断行单测、`ErrorNotice` 组件用例、失败轮可重试的 composable 用例 |
+| 四（无障碍） | 诊断信息是**文本 + 颜色**双通道（不只靠颜色）；`ErrorNotice` 根 `role="alert"` 保持；新按钮沿用原生 `<button>`（Tab/Enter 原生可用） |
+| 五（性能） | 分类是纯字符串/JSON 解析，只在**失败收尾那一刻**执行一次；诊断行由 `computed` 生成，不在模板里重复计算；重试不引入轮询 |
+| 六（依赖治理） | **零新增依赖**：重试复用 `pi-ai` 既有 `retryProviderRequest`；分类只用平台原生 `JSON` / `RegExp`；配置只加两个 `.env` 标量 |
+| 七（契约两侧同改） | 契约（[`runtime-api-delta.md` §19](../../001-digital-human-platform/contracts/runtime-api-delta.md)）+ 前端类型（`api/types.ts` 的 `ErrorInfo`）+ 后端类型（`types.ts` 的 `LlmEvent.error` / `HistoryMessage.error`）+ 测试**同批**变更 |
+| 八（简单可控） | 门禁仍是单条入口：后端 `npm run typecheck / lint / test:all`；前端 `npm run lint / typecheck / test:coverage / build` |
+| 九（优雅降级与可观测） | 重试**有界**（默认 2 次、单次等待 ≤15s、总尝试 ≤3、可被「停止」打断）；重试期间用户看到既有流式等待态（既不是无反馈，也不假装正常）；原始错误**进结构化日志**（`llm.call.failed`，含上游状态码与 `request_id`），需人工介入的两类带 `alert: true`；用户侧给可行动文案 + 诊断行，**不**展示上游原文（不泄漏 provider 内部信息） |
 
 ## 9. 验收清单
 
@@ -491,6 +546,25 @@
 - [x] 前端**零改动**，但仍跑一遍回归确认不破坏既有功能：`frontend/npm run test` **43 文件 / 562 用例全绿**
 - [x] 真实结果端到端复核：用本次实踩的 `hd-algorithm__hd_algorithm_input_parser` 返回值（信封形状）跑修复后实现 → 结果文本 = 业务 JSON，`extractViewLinks()` 抽出 `/datapage/production-line-electricity?…`
 - [x] 前端、`contracts/`、端点、SSE、`api/types.ts` 零改动
+
+### 9.5 验收清单（2026-10-15 增量：LLM 失败的有界重试与可诊断）
+
+**功能（`TR-53`~`TR-58`）**
+
+- [ ] 503×2 → 200：假 provider 断言 `streamSimple` 只被调用 **3 次**且最终成功（`LLM_MAX_RETRIES=2`）
+- [ ] `LLM_MAX_RETRIES=0` 时不重试；不可重试错误（400/401）只尝试 1 次；重试等待期间 `abort` → 立即停止且按 `ABORTED` 收尾
+- [ ] 分类逐类断言：5xx→`LLM_UNAVAILABLE`、429→`LLM_RATE_LIMITED`、402→`LLM_INSUFFICIENT_BALANCE`、401/403→`LLM_UNAUTHORIZED`、400+上下文特征→`LLM_CONTEXT_TOO_LONG`、其余→`LLM_ERROR`（含"无状态码 / 非 JSON 体 / 抛出带 `status` 的 `Error`"三种边界）
+- [ ] 真样本回归：本机 2026-10-15 的 `503 Service is too busy` 报文 → `upstream_status=503`、`upstream_type=service_unavailable_error`、`request_id` 可解析；SSE `error` 与失败轮落盘行**同形**
+- [ ] 日志：`llm.call.failed` 字段齐备（`code` / `upstream_status` / `upstream_type` / `request_id` / `provider` / `model` / 截断 `message` + `user_id` / `thread_id` / `agent_name`）；仅 `LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` 带 `alert: true`；无 logger 时不抛错、不影响收尾
+- [ ] 前端：每个新码都有中文文案；诊断行在"三字段齐全 / 部分齐全 / 全缺"三种情形分别渲染与省略
+- [ ] 失败轮后「重试本轮」可用且**真正重发**（走 `onSend` 全链路）；不可重试的失败仍是「重新获取」；中断轮既有行为不变
+- [ ] 回归不变：`LLM_ERROR` 兜底语义、`ABORTED` 中断语义（本轮不落盘、token 照记）、失败轮落盘（`status:'failed'` + `error` + `usage` + 工具记录）逐字不变
+
+**门禁（宪章原则八 + 硬门禁）**
+
+- [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）后端 `npm run typecheck` / `lint` / `test:all` 与覆盖率全绿
+- [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）前端 `npm run lint` / `typecheck` / `test:coverage` / `build` 全绿
+- [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）单文件 ≤500 行；**零新增依赖**
 
 ## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
 

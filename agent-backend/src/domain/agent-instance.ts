@@ -54,7 +54,10 @@ export interface LoadLogger {
   warn(msg: string): void;
 }
 
-export function loadAgentConfig(agentDir: string, opts?: { logger?: LoadLogger }): AgentConfigBundle {
+export function loadAgentConfig(
+  agentDir: string,
+  opts?: { logger?: LoadLogger },
+): AgentConfigBundle {
   const logger = opts?.logger;
   const agentName = path.basename(agentDir);
 
@@ -119,7 +122,8 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
   }
   return data.servers.map((raw, i) => {
     const s = raw as Record<string, unknown>;
-    const bad = (why: string) => new AgentConfigError(`数字人 ${agentName} MCP.json servers[${i}] ${why}`);
+    const bad = (why: string) =>
+      new AgentConfigError(`数字人 ${agentName} MCP.json servers[${i}] ${why}`);
     if (typeof s.name !== 'string' || !s.name) throw bad('缺少 name');
     // 传输方式**在入口归一**：`streamable-http` 是 `http` 的生态叫法，二者同义，
     // 不接受会让手工按生态写法改过的 MCP.json 把整个数字人打成"配置损坏"（实测报错）
@@ -168,7 +172,9 @@ function parseHeaders(raw: unknown, bad: (why: string) => Error): Record<string,
   for (const [rawName, rawValue] of Object.entries(raw as Record<string, unknown>)) {
     const name = rawName.trim();
     if (!HEADER_NAME_RE.test(name)) {
-      throw bad(`headers 的名称非法：${JSON.stringify(rawName)}（须为合法 HTTP 头名，如 X-MCP-Token）`);
+      throw bad(
+        `headers 的名称非法：${JSON.stringify(rawName)}（须为合法 HTTP 头名，如 X-MCP-Token）`,
+      );
     }
     const prev = seen.get(name.toLowerCase());
     if (prev !== undefined) {

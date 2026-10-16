@@ -114,7 +114,10 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     writeWithAge(`${PRODUCED_SUBDIR}/p_j9.json`, 31 * DAY);
 
     await cleanupTmpDir(tmp, {
-      logger: { warn: (msg) => infos.push(`warn:${msg}`), info: (msg) => infos.push(`info:${msg}`) },
+      logger: {
+        warn: (msg) => infos.push(`warn:${msg}`),
+        info: (msg) => infos.push(`info:${msg}`),
+      },
     });
 
     const joined = infos.join('\n');
@@ -213,7 +216,12 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
 
 describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）', () => {
   /** 建某用户的某数字人数据域，并放一个过期文件；返回该文件的绝对路径 */
-  function seedAgentTmp(userId: string, agentName: string, fileName: string, ageMs = 31 * DAY): string {
+  function seedAgentTmp(
+    userId: string,
+    agentName: string,
+    fileName: string,
+    ageMs = 31 * DAY,
+  ): string {
     const abs = path.join(userDataDir(tmp, userId, agentName), SPACE_TMP, fileName);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, 'x', 'utf8');
@@ -227,11 +235,11 @@ describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）'
     const b = seedAgentTmp('admin', 'agent-b', 'b_j1.json');
     const c = seedAgentTmp('bob', 'agent-c', 'c_j1.json');
 
-    const result = await cleanupAllAgentTmpDirs(
-      tmp,
-      ['admin', 'bob'],
-      () => ['agent-a', 'agent-b', 'agent-c'],
-    );
+    const result = await cleanupAllAgentTmpDirs(tmp, ['admin', 'bob'], () => [
+      'agent-a',
+      'agent-b',
+      'agent-c',
+    ]);
 
     expect(result.deleted).toBe(3);
     expect(result.dirs).toBe(6); // 2 用户 × 3 数字人（不存在的目录按 0 计账）

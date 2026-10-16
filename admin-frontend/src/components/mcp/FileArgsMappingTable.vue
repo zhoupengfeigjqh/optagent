@@ -63,7 +63,8 @@ const FROM_PREFIX = 'url:from='
 
 function parseMode(value: string): { mode: 'url' | 'derive'; from: string } {
   if (value === 'url') return { mode: 'url', from: '' }
-  if (value.startsWith(FROM_PREFIX)) return { mode: 'derive', from: value.slice(FROM_PREFIX.length) }
+  if (value.startsWith(FROM_PREFIX))
+    return { mode: 'derive', from: value.slice(FROM_PREFIX.length) }
   // 非法值按直链模式兜底展示（序列化时该行会被判据拦下）
   return { mode: 'url', from: '' }
 }
@@ -269,7 +270,9 @@ function isOrphan(tool: string): boolean {
               @change="setRow(index, 'tool', ($event.target as HTMLSelectElement).value)"
             >
               <option value="" disabled>（选工具）</option>
-              <option v-for="tool in tools" :key="tool.name" :value="tool.name">{{ tool.name }}</option>
+              <option v-for="tool in tools" :key="tool.name" :value="tool.name">
+                {{ tool.name }}
+              </option>
               <option v-if="isOrphan(row.tool)" :value="row.tool">{{ row.tool }}（清单外）</option>
             </select>
           </td>
@@ -302,7 +305,8 @@ function isOrphan(tool: string): boolean {
                 :value="row.from"
                 :class="{
                   invalid:
-                    rowError(row) !== '' && parsePath(row.from) !== null &&
+                    rowError(row) !== '' &&
+                    parsePath(row.from) !== null &&
                     !compatibleFromPath(row.path, row.from),
                 }"
                 :data-test="`row-from-${index}`"

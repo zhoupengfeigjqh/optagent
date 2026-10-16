@@ -13,7 +13,11 @@
  */
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { fetchOntoMarket, installOntoMarketSkill, updateOntoMarketSkill } from '../../api/skills'
-import type { OntoMarketItem, OntoMarketListing, OntoMarketUpdateResult } from '../../api/onto-market'
+import type {
+  OntoMarketItem,
+  OntoMarketListing,
+  OntoMarketUpdateResult,
+} from '../../api/onto-market'
 import type { ErrorInfo, SkillInstallResult } from '../../api/types'
 import ErrorNotice from '../common/ErrorNotice.vue'
 
@@ -87,7 +91,12 @@ async function proceed(): Promise<void> {
   modifiedWarning.value = null
   try {
     if (item.status === 'changed') {
-      const result = await updateOntoMarketSkill(item.scenario, item.ontology, item.skill_dir, false)
+      const result = await updateOntoMarketSkill(
+        item.scenario,
+        item.ontology,
+        item.skill_dir,
+        false,
+      )
       emit('updated', result)
     } else {
       const result = await installOntoMarketSkill(item.scenario, item.ontology, item.skill_dir)
@@ -102,7 +111,10 @@ async function proceed(): Promise<void> {
     } else {
       // 失败不关窗：错误留在窗内，管理员可改选或刷新后重试
       error.value = info
-      emit('error', item.status === 'changed' ? '更新未完成，请查看错误原因' : '导入未完成，请查看错误原因')
+      emit(
+        'error',
+        item.status === 'changed' ? '更新未完成，请查看错误原因' : '导入未完成，请查看错误原因',
+      )
     }
   } finally {
     importing.value = false
@@ -176,7 +188,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <dialog ref="dialogEl" class="skill-market" aria-labelledby="skill-market-title" @cancel="onCancel">
+  <dialog
+    ref="dialogEl"
+    class="skill-market"
+    aria-labelledby="skill-market-title"
+    @cancel="onCancel"
+  >
     <div class="skill-market__body">
       <h2 id="skill-market-title" class="skill-market__title">从本体市场导入 SKILL</h2>
       <p class="skill-market__hint">
@@ -246,7 +263,13 @@ onBeforeUnmount(() => {
         <button type="button" class="btn" :disabled="loading || importing" @click="void load()">
           刷新
         </button>
-        <button type="button" class="btn" data-test="close" :disabled="importing" @click="requestClose">
+        <button
+          type="button"
+          class="btn"
+          data-test="close"
+          :disabled="importing"
+          @click="requestClose"
+        >
           关闭
         </button>
         <button
@@ -257,11 +280,7 @@ onBeforeUnmount(() => {
           @click="proceed"
         >
           {{
-            importing
-              ? '处理中…'
-              : selected?.status === 'changed'
-                ? '更新选中技能'
-                : '导入选中技能'
+            importing ? '处理中…' : selected?.status === 'changed' ? '更新选中技能' : '导入选中技能'
           }}
         </button>
       </div>

@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Prettier 忽略清单（与 frontend/eslint.config.mjs 的 ignores 同口径）
+#
+# 背景：本仓库此前**没有** .prettierrc / .prettierignore，prettier 只能落回默认值
+# （双引号 + 分号 + 80 列），与全仓既有风格（单引号 + 无分号）正好相反；于是
+# `npm run format:check` 对 245 个文件（含全部 190 个源码文件）必然报错，门禁
+# 形同虚设，且 `npm run format` 一旦被误跑就会把全仓刷成相反风格（因
+# eslint-config-prettier 已关闭冲突规则，这一步不会报任何错）。这与
+# eslint.config.mjs 文首记录的「仓库缺 eslint 配置导致 npm run lint 必然失败」
+# 属同一类根因。
+#
+# .prettierrc.json 的取值不是照抄官方默认，而是**反推既有风格**得到：
+# 以 --single-quote --no-semi --end-of-line auto 扫 printWidth 80/90/100/110/120/140，
+# 不一致文件数在 100 处最小（95 个），故取 100；endOfLine 取 auto 以保持每个文件
+# 既有行尾，避免一次全仓 CRLF/LF 翻转。
+# ---------------------------------------------------------------------------
+
+# 构建产物与覆盖率产物（覆盖率可落到 coverage-* / .coverage-* 等自定义目录）
+dist/
+coverage/
+coverage-*/
+.coverage-*/
+
+# 锁文件不由本仓库维护格式
+package-lock.json
+
+# 门禁/校验的报告产物（生成物）。注意：PowerShell 重定向会把它写成 **UTF-16**，
+# 于是 prettier 会按 JSON 去解析并抛 SyntaxError，使 format:check 以退出码 2
+# （"解析失败"）失败——比"格式不一致"更早、更隐蔽地卡住门禁。
+# 另外建议把这类产物一并写进 .gitignore（它们本就不该入库）。
+fe-lint.*
+fe-gates.log
+*.log
+
+# 第三方 vendored 静态资源：甘特图组件自带的 Highcharts 及其扩展（2.2 万行）。
+# 与 eslint.config.mjs 的 ignores 同口径——它们不是本项目代码，也不归本仓库维护。
+# 若纳入格式化，仅这 8 个文件就贡献约 87% 的改动量（highcharts-gantt.js 单文件 1.8 万行）。
+src/components/z-gantt/static/**

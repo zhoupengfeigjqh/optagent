@@ -114,8 +114,6 @@ describe('ScenarioUploadTypesDialog', () => {
     for (const label of labels) {
       expect(label.find('input[type="checkbox"]').exists()).toBe(true)
     }
-    expect(wrapper.find('dialog').attributes('aria-labelledby')).toBe(
-      'scenario-upload-types-title',
-    )
+    expect(wrapper.find('dialog').attributes('aria-labelledby')).toBe('scenario-upload-types-title')
   })
 })

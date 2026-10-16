@@ -36,6 +36,19 @@ const envSchema = z.object({
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(5),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(128),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),
+  /**
+   * LLM 调用的**重试次数**（首次调用不计；`0` = 不重试）。
+   *
+   * 由 pi-ai 既有的 `retryProviderRequest` 执行（指数退避 + 抖动 / `x-should-retry` 优先 /
+   * 尊重 `Retry-After` / 睡眠可被 AbortSignal 打断），运行环境**不自建**退避实现。
+   * 契约：`contracts/runtime-api-delta.md` §19.1（默认 2 ⇒ 单轮总尝试 ≤ 3）。
+   */
+  LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  /**
+   * 单次重试的**等待上限**（毫秒）：上游要求的退避超过它即立即失败，不静默长等
+   * （`0` = 不设上限，与 pi-ai 的 `maxRetryDelayMs` 同义）。
+   */
+  LLM_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(15_000),
   /** MCP 签名直链的对外基址（MCP 服务回源下载用；**必填**，由 loadConfig 显式校验并给出可读报错） */
   PUBLIC_BASE_URL: z.string().url().optional(),
   /** 签名直链 HMAC 密钥（≥16 字符；缺省启动时随机生成——重启后未过期 URL 失效） */
@@ -58,6 +71,19 @@ export interface ModelEntry {
   baseUrl?: string;
 }
 
+/**
+ * LLM 调用的**有界重试**参数（直接作为 pi-ai `StreamOptions` 的 `maxRetries` /
+ * `maxRetryDelayMs` 传给 `streamSimple`；运行环境不自建退避实现）。
+ *
+ * 契约：`contracts/runtime-api-delta.md` §19.1。
+ */
+export interface LlmRetryOptions {
+  /** 重试次数（首次调用不计；0 = 不重试） */
+  maxRetries: number;
+  /** 单次重试等待上限（毫秒；0 = 不设上限，与 pi-ai 语义一致） */
+  maxRetryDelayMs: number;
+}
+
 export interface AppConfig {
   port: number;
   /** 运行数据根目录（绝对路径） */
@@ -70,6 +96,8 @@ export interface AppConfig {
   previewMaxMb: number;
   readTruncateKb: number;
   shutdownGraceMs: number;
+  /** LLM 调用的有界重试参数（唯一表示；不要另存两个标量，避免两份口径） */
+  llmRetry: LlmRetryOptions;
   /** MCP 签名直链对外基址 */
   publicBaseUrl: string;
   /** 签名直链 HMAC 密钥 */
@@ -174,6 +202,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     previewMaxMb: e.PREVIEW_MAX_MB,
     readTruncateKb: e.READ_TRUNCATE_KB,
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
+    llmRetry: { maxRetries: e.LLM_MAX_RETRIES, maxRetryDelayMs: e.LLM_RETRY_MAX_DELAY_MS },
     publicBaseUrl,
     fileSignSecret: e.FILE_SIGN_SECRET ?? randomBytes(32).toString('hex'),
     models,

@@ -127,9 +127,9 @@ describe('BaseDropdown —— 弹层定位（视口安全浮窗，2026-10-13）'
     document.dispatchEvent(new Event('scroll'))
     await flushFrames(wrapper)
 
-    expect((wrapper.element as El).querySelector<HTMLElement>('.base-dropdown__menu')!.style.left).toBe(
-      '60px',
-    )
+    expect(
+      (wrapper.element as El).querySelector<HTMLElement>('.base-dropdown__menu')!.style.left,
+    ).toBe('60px')
     wrapper.unmount()
   })
 })

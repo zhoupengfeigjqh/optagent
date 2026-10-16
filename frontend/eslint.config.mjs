@@ -12,10 +12,10 @@
  * 组合：官方推荐集 + Vue 3 推荐集 + Prettier 兼容层（关掉与 Prettier 冲突的格式规则，
  * 因为本项目用 `format:check` 单独管格式）。
  */
-import js from '@eslint/js';
-import prettier from 'eslint-config-prettier';
-import pluginVue from 'eslint-plugin-vue';
-import tseslint from 'typescript-eslint';
+import js from '@eslint/js'
+import prettier from 'eslint-config-prettier'
+import pluginVue from 'eslint-plugin-vue'
+import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
@@ -95,4 +95,4 @@ export default tseslint.config(
     },
   },
   prettier,
-);
+)

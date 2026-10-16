@@ -18,7 +18,12 @@ const TOOL: AgentStarterTool = {
 }
 
 function action(prompt: string, overrides: Partial<AgentStarter> = {}): AgentStarter {
-  return { prompt, tools: [TOOL], guidance: '本轮请优先使用以下工具完成任务：erp__query_order', ...overrides }
+  return {
+    prompt,
+    tools: [TOOL],
+    guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+    ...overrides,
+  }
 }
 
 describe('MessageNextSteps', () => {
@@ -47,7 +52,9 @@ describe('MessageNextSteps', () => {
   })
 
   it('不出现任何工具信息（服务名 / 工具名 / 暴露名一律不上界面）', () => {
-    const wrapper = mount(MessageNextSteps, { props: { actions: [action('按交付日期梳理订单风险')] } })
+    const wrapper = mount(MessageNextSteps, {
+      props: { actions: [action('按交付日期梳理订单风险')] },
+    })
 
     expect(wrapper.text()).not.toContain('erp__query_order')
     expect(wrapper.text()).not.toContain('query_order')
@@ -65,9 +72,13 @@ describe('MessageNextSteps', () => {
   })
 
   it('disabled 透传到每张卡片（本轮进行中 / 未选数字人时置灰）', () => {
-    const wrapper = mount(MessageNextSteps, { props: { actions: [action('整理表格')], disabled: true } })
+    const wrapper = mount(MessageNextSteps, {
+      props: { actions: [action('整理表格')], disabled: true },
+    })
 
-    expect(wrapper.findAll('button').every((card) => card.attributes('disabled') !== undefined)).toBe(true)
+    expect(
+      wrapper.findAll('button').every((card) => card.attributes('disabled') !== undefined),
+    ).toBe(true)
   })
 
   it('语义容器：列表项为 button（原生键盘可达），并带可读的 aria-label', () => {

@@ -136,8 +136,9 @@ export interface McpServiceDetail {
    */
   async_tools?: string[]
   /**
-   * **工具白名单**（2026-10-03）：该服务可见的原始工具名清单。
-   * 空数组 = 不限制（白名单上线前的存量服务）；创建时设定，**之后不可修改**。
+   * **工具白名单**（2026-10-03；2026-10-15 起可调整）：该服务可见的原始工具名清单。
+   * 空数组 = 不限制（白名单上线前的存量服务）；新建时必填非空，
+   * 之后可在「工具范围」弹窗里调整（保存走 `PUT`，全量替换、同样必填非空）。
    */
   allowed_tools: string[]
   /**
@@ -150,6 +151,15 @@ export interface McpServiceDetail {
   /** 只含白名单里的工具（顺序与白名单一致）；不限制时即服务全量 */
   tools: McpToolInfo[]
   tools_truncated: boolean
+  /**
+   * **本次探测到的全部工具**（2026-10-15）：工具范围弹窗的勾选基准。
+   *
+   * `tools` 是白名单投影，拿它当基准就永远加不进一个当前不在白名单里的工具。
+   * **探测失败（`tools_error` 非空）时为空数组**——此时 MUST NOT 开弹窗，
+   * 因为拿不到可信清单，勾选等于凭空造范围。
+   */
+  available_tools: McpToolInfo[]
+  available_tools_truncated: boolean
   tools_error?: string | null
   references: ReferenceItem[]
   revision: number
@@ -181,6 +191,14 @@ export interface McpServiceConfigPayload extends McpServiceBasics {
   rules_fields?: Record<string, string>
   /** 异步工具声明（R11；空数组 = 不启用；物化时非空才写入 `MCP.json`） */
   async_tools?: string[]
+  /**
+   * 工具白名单（**2026-10-15 起可在此调整**）：缺省 = 沿用存量，提供 = **全量替换**
+   * 且必须非空（空数组 = 不限制，与"一个都不给"语义相反，服务端会 400）。
+   *
+   * 载荷仍是**全量替换**语义：只改白名单时其余字段 MUST 一并回填
+   * （见 `utils/mcp-config.ts` 的 `buildToolScopePayload`），否则会被补成默认值。
+   */
+  allowed_tools?: string[]
   revision: number
 }
 
@@ -196,7 +214,7 @@ export type McpServiceConfigInput = Omit<McpServiceConfigPayload, 'revision'>
  */
 export interface McpServiceCreatePayload extends McpServiceBasics {
   name: string
-  /** 工具白名单（2026-10-03）：至少一个；创建后不可修改 */
+  /** 工具白名单（2026-10-03）：至少一个；创建后可在「工具范围」弹窗里调整 */
   allowed_tools: string[]
   revision?: number
 }
@@ -251,7 +269,13 @@ export interface McpServiceConfigSaved {
 export interface McpTestResult {
   ok: boolean
   connectivity: { ok: boolean; duration_ms: number; error_code?: string; message?: string }
-  capability: { ok: boolean; method: string; duration_ms: number; error_code?: string; message?: string }
+  capability: {
+    ok: boolean
+    method: string
+    duration_ms: number
+    error_code?: string
+    message?: string
+  }
   /** 实际被测试的连接目标（界面上必须展示，避免"测的是谁"不可见） */
   target?: { transport: string; url: string | null; command: string | null }
   checked_at: string

@@ -1073,3 +1073,53 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 - [x] T159 [R11] 门禁：`lint` / `tsc --noEmit` / `test` / `test:integration` / `build` 全绿；改动文件行数均 ≤ 500
 
 **不变式（MUST 由单测守住）**：`created_at <= finished_at` —— 由回写端用**同一个 `now`** 校验 `t` 构造保证；`t` **不参与验签**（改它只影响列表展示，不越权）；服务未回传 `t` 时，sidecar 与改造前**逐字一致**。
+
+---
+
+## 维护性修复（2026-10-15）：§11 两个错误码补登 + `admin-frontend` 覆盖率门禁归零
+
+**触发（两条存量红灯，用户显式授权追溯）**：
+
+1. `npm run check:contract`（`admin-backend/scripts/check-error-codes.mjs`，原则七「错误码四处同步」的机械核对）**持续红**：§11 于 2026-10-08 以「**建议**错误码」形式登记了 `ADM_UNAUTHENTICATED`（401）/ `ADM_FORBIDDEN`（403）（`FR-065`/`FR-066`，**未实施**），而该门禁按「契约**全文**出现的码逐一比对四处」的口径核对，于是把这两个未进 §0.4 总表的码报成"契约中出现了未在 §0.4 登记的错误码"。§11 登记后此门禁一直未再跑（仅 `admin-backend` 手动执行），故红灯长期潜伏——与 2026-10-15 的 `ADM_MCP_TOOL_SCOPE_LOCKED` 下架是同一批工作发现的。
+2. `admin-frontend` `npm run test:coverage` 红：全局 functions **88.98%** < 地板 95%（另 `src/api/skills.ts` 的 4 项均 < 80% 逐文件阈值）。
+
+**处置 1：两个码补登四处，门禁文案与口径对齐（收窄扫描范围**未被采纳**）**
+
+| 落点 | 改动 |
+|---|---|
+| `contracts/admin-api.md` §0.4 | 新增两行（401/403，来源 `FR-065`/`FR-066`，注明**预登记、未实施**）；并**修正 2026-09-27 记录里过时的计数**——那句"全表 21 个（4+17）"停留在当日，未随 10-02／10-03 三次新增更新，**现全表 27 个（4 + 23）** |
+| 同上 §11 | 末尾新增「错误码登记状态（2026-10-15）」：两码已进三处码表、门禁恢复通过、当前运行期**不可达**（无校验钩子） |
+| `admin-backend/src/domain/error-codes.ts` | `ERROR_CODES` 新增 §11 分组两码；`ERROR_STATUS` 新增 `401` / `403`；模块注释登记该次变更 |
+| `admin-frontend/src/constants/error-messages.ts` | 常量与中文文案各 +2（`登录状态已失效，请重新登录` / `当前账号没有管理员权限，请联系管理员授权`）；计数 25 → 27、`ADM_` 前缀 21 → 23 |
+| `admin-backend/tests/unit/api-error.spec.ts` | `toHaveLength(25)` → **27**；新增一例钉住两码的状态码（401/403 已冻结） |
+| `admin-backend/scripts/check-error-codes.mjs` | **只改文案不动扫描范围**：`契约端点使用了未在 §0.4 登记的错误码` → `契约中出现了未在 §0.4 登记的错误码`（与实际行为"全文"对齐），头部注释与成功文案同步说明口径 |
+
+**为何补登记而不是改脚本只扫端点小节**（决策留痕）：① §0.4 的定义是「命名/唯一性登记表」（§0.4 首段），不是"可达性清单"——两次删码（09-27 四码、10-15 `ADM_MCP_TOOL_SCOPE_LOCKED`）的理由都是**语义消失**而非"暂时打不到"；② 同类先例的既定解法就是补登记：`ADM_AGENT_NOT_FOUND` 由分析阶段发现后进表，其「来源」列至今为 `—`（门禁头注释即以此为例）；③ 全量扫描是门禁在 `tasks.md` 中登记的**设计规格**，收窄它等于给"未实施章节"开豁免口，而这类手工豁免标记在本文件里已经在腐烂——同一次修复中就发现 §0.4 的计数注释停留在 09-27。④ 前端文案是 §11 落地时**必须**交付的链路（§11 末段），提前备好不浪费。
+
+**处置 2：`admin-frontend` 覆盖率补齐（不动的口径：地板不降）**
+
+根因取证（`--coverage.reporter=json-summary`）：全局 **118** 个函数、**105** 已覆盖，缺的 **13** 个全部是"**没有任何 spec 直接调用**"的模块函数——其消费方 spec 一律 `vi.mock` 掉这些模块，故只有 `api/modules.spec.ts` 覆盖了部分分支：
+
+| 缺口 | 函数数 |
+|---|---|
+| `src/api/ontologies.ts`（§10，2026-10-03 新增，**零 spec**） | 6 |
+| `src/api/skills.ts` 的本体市场三函数（§4.6~§4.8） | 3 |
+| `src/composables/useAgentDesign.ts::cloneSoul` 的两个 `map` 回调（夹具 `starters: []`，嵌套分支从未进入） | 2 |
+| `src/api/mcp.ts::probeMcpTarget`（§3.9） | 1 |
+| `src/api/http.ts::parseErrorResponse` 的 `.catch(() => null)`（响应体流中断） | 1 |
+
+补测落点（**纯新增用例，零生产代码改动**）：`api/modules.spec.ts` +4 例（mcp 探测 / skills 本体市场三接口 / ontologies `§10.1~§10.3` / ontologies `§10.4~§10.6`，逐条断言路径、方法与请求体字段名）、`api/http.spec.ts` +1 例（`text()` reject → `HTTP_{status}` + `statusText`）、`composables/useAgentDesign.spec.ts` +1 例（问题实例逐层深拷贝：改副本的提示文本与关联工具都不污染源）。
+
+`admin-frontend/vite.config.ts` 的全局地板注释同步为实测值（2026-10-15 实测 98.14 / 94.19 / **100** / 98.37；2026-10-12 的 88.79 归零）。**地板本次维持不变**：007 的 T066 先例是"实测高于地板则按略下方上调"，本次**未**上调（在途改动较多，抬到 97/99 会立刻约束未完成的改动）；上调留待下一轮按实测复核。
+
+**门禁结果（2026-10-15，两侧复跑）**
+
+| 子项目 | 结果 |
+|---|---|
+| `admin-backend` `check:contract` | ✅ **通过：§0.4 登记 27 个码，四处一致，无"契约提到但未登记"**（修复前 exit 1，报 `ADM_UNAUTHENTICATED` / `ADM_FORBIDDEN`） |
+| `admin-backend` lint / `tsc` / `check:lines` / `check:deps` | ✅ / ✅ / ✅（99 文件 ≤500 行）/ ✅ |
+| `admin-backend` test / `test:coverage` | ✅ **609 passed**（43 文件）/ ✅ **93.39 / 84.85 / 95.76 / 94.61**（`error-codes.ts`、`api-error.ts` 均 **100%**） |
+| `admin-frontend` lint / `vue-tsc` | ✅ / ✅ |
+| `admin-frontend` test / `test:coverage` | ✅ **587 passed**（52 文件）/ ✅ **98.14 / 94.19 / 100 / 98.37**（`skills.ts`、`ontologies.ts`、`http.ts` 函数均 **100%**；修复前 exit 1） |
+
+**未改动的部分（口径边界）**：§11 仍是「**未实施**」——没有新增任何 401/403 校验钩子、没有登录/登出/会话端点，两码在运行期不可达，登记只冻结**命名与状态码**；既有端点请求/响应结构零变更。

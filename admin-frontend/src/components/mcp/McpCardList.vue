@@ -42,9 +42,7 @@ function transportLabel(transport: string): string {
 <template>
   <div class="mcp-card-list">
     <div class="mcp-card-list__toolbar">
-      <button type="button" class="btn btn--primary" @click="emit('create')">
-        新建 MCP 服务
-      </button>
+      <button type="button" class="btn btn--primary" @click="emit('create')">新建 MCP 服务</button>
     </div>
 
     <EntityCardList
@@ -60,10 +58,7 @@ function transportLabel(transport: string): string {
       @update:page="emit('update:page', $event)"
     >
       <template #item="{ item }">
-        <article
-          class="card"
-          :aria-label="`MCP 服务 ${(item as McpServiceListItem).name}`"
-        >
+        <article class="card" :aria-label="`MCP 服务 ${(item as McpServiceListItem).name}`">
           <p class="card__head">
             <span class="card__title">
               {{ (item as McpServiceListItem).name }}

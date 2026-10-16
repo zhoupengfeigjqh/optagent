@@ -13,7 +13,11 @@
 import { computed } from 'vue'
 
 import type { ErrorInfo } from '../../api/types'
-import { toUserMessage, type ErrorMessageContext } from '../../utils/error-message'
+import {
+  formatErrorDiagnostics,
+  toUserMessage,
+  type ErrorMessageContext,
+} from '../../utils/error-message'
 
 const props = withDefaults(
   defineProps<{
@@ -32,12 +36,20 @@ const props = withDefaults(
 const emit = defineEmits<{ retry: [] }>()
 
 const message = computed(() => toUserMessage(props.error, props.context))
+
+/**
+ * 诊断信息行（2026-10-15，`TR-57`）：错误码 · 上游状态码 · 上游类型 · 请求 ID。
+ * 生成逻辑在**纯函数** `formatErrorDiagnostics()` 里（唯一实现）；三个诊断字段全缺时
+ * 返回 `null`，此处即不渲染该行。文字里带字段名（不只靠颜色区分），满足无障碍双通道。
+ */
+const diagnostics = computed(() => formatErrorDiagnostics(props.error))
 </script>
 
 <template>
   <div class="error-notice" role="alert">
     <p class="error-notice__message">{{ message }}</p>
     <p v-if="hint" class="error-notice__hint">{{ hint }}</p>
+    <p v-if="diagnostics" class="error-notice__diagnostics">{{ diagnostics }}</p>
     <button
       v-if="retryLabel !== null"
       type="button"
@@ -70,6 +82,14 @@ const message = computed(() => toUserMessage(props.error, props.context))
 .error-notice__hint {
   flex: 1 1 100%;
   color: var(--color-text-secondary);
+}
+
+/* 诊断线索：次要信息，独占一行、不参与主文案与按钮的同行排布 */
+.error-notice__diagnostics {
+  flex: 1 1 100%;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  word-break: break-all;
 }
 
 .error-notice__retry {

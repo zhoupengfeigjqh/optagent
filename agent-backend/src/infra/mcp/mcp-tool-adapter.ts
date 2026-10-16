@@ -114,7 +114,10 @@ export function mcpToolsAsAgentTools(
             steps: parseFileArgPath(path),
             from: parseFileArgMode(mode)?.from,
           }))
-          .filter((e): e is { steps: FileArgStep[]; from: string } => e.steps !== null && e.from !== undefined)
+          .filter(
+            (e): e is { steps: FileArgStep[]; from: string } =>
+              e.steps !== null && e.from !== undefined,
+          )
           .map((e) => e.steps)
       : [];
     return {
@@ -360,9 +363,7 @@ function deriveFileArg(
         );
       }
       if (typeof value === 'string' && value.trim() === '') {
-        throw new Error(
-          `file_args 声明「${ctx.path}」：${loc} 为空串，无法铸造「${targetKey}」`,
-        );
+        throw new Error(`file_args 声明「${ctx.path}」：${loc} 为空串，无法铸造「${targetKey}」`);
       }
       // 沙箱校验 + 铸造（外部 http 直链照旧透传，见 convertLeaf）
       const minted = convertLeaf(value, ctx, loc);
@@ -409,7 +410,12 @@ function deriveFileArg(
 }
 
 /** 派生读取用的取属性：与 `takeProperty` 的区别是**缺失即抛错**（派生来源是管道命脉） */
-function requireProperty(container: unknown, key: string, prefix: string, ctx: PathContext): unknown {
+function requireProperty(
+  container: unknown,
+  key: string,
+  prefix: string,
+  ctx: PathContext,
+): unknown {
   if (typeof container !== 'object' || container === null || Array.isArray(container)) {
     throw new Error(
       `file_args 声明「${ctx.path}」：${prefix || '入参'} 应为对象（实际是 ${shapeOf(container)}）`,
@@ -471,9 +477,7 @@ function mapElements(
   ctx: PathContext,
 ): unknown[] {
   if (!Array.isArray(items)) {
-    throw new Error(
-      `file_args 声明「${ctx.path}」：${loc} 应为数组（实际是 ${shapeOf(items)}）`,
-    );
+    throw new Error(`file_args 声明「${ctx.path}」：${loc} 应为数组（实际是 ${shapeOf(items)}）`);
   }
   return items.map((item, index) => {
     try {
@@ -491,9 +495,7 @@ function mapElements(
 /** 路径末端：铸签名直链（相对路径）或原样透传（外部直链） */
 function convertLeaf(value: unknown, ctx: PathContext, loc: string): unknown {
   if (typeof value !== 'string') {
-    throw new Error(
-      `file_args 声明「${ctx.path}」：${loc} 应为字符串（实际是 ${shapeOf(value)}）`,
-    );
+    throw new Error(`file_args 声明「${ctx.path}」：${loc} 应为字符串（实际是 ${shapeOf(value)}）`);
   }
   if (value.trim() === '') {
     warnUnmatched(ctx, loc, '值为空串');

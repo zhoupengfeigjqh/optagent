@@ -45,14 +45,14 @@ const orphans = computed(() => props.modelValue.filter((name) => !known.value.ha
       是占位符，部署到具体用户后才会替换为真实取值；目录由运行环境提供，平台只读。
     </p>
     <CheckboxList
-    legend="启用的内置工具"
-    :options="options"
-    :model-value="modelValue"
-    :orphans="orphans"
-    search-placeholder="按名称或说明搜索工具…"
-    empty-text="运行环境未提供任何内置工具（请确认运行环境可达）"
-    @update:model-value="emit('update:modelValue', $event)"
-  />
+      legend="启用的内置工具"
+      :options="options"
+      :model-value="modelValue"
+      :orphans="orphans"
+      search-placeholder="按名称或说明搜索工具…"
+      empty-text="运行环境未提供任何内置工具（请确认运行环境可达）"
+      @update:model-value="emit('update:modelValue', $event)"
+    />
   </div>
 </template>
 

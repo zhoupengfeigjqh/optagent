@@ -109,9 +109,7 @@ export interface UploadTable {
 export function parseCsvRows(text: string): UploadTable {
   const lines = text.split(/\r\n|\n/);
   // 引号内的换行不做支持（§3.1 登记的口径：逗号分隔的简单表格）
-  const rows = lines
-    .map(parseCsvLine)
-    .filter((cells) => cells.some((cell) => cell !== ''));
+  const rows = lines.map(parseCsvLine).filter((cells) => cells.some((cell) => cell !== ''));
   if (rows.length === 0) return { header: [], rows: [] };
   return { header: rows[0]!, rows: rows.slice(1) };
 }
@@ -246,9 +244,7 @@ export function checkUploadBuffer(
   }
   let table: UploadTable;
   try {
-    table = isExcelContainer(normalized)
-      ? parseXlsxRows(buf)
-      : parseCsvRows(decodeCsvBuffer(buf));
+    table = isExcelContainer(normalized) ? parseXlsxRows(buf) : parseCsvRows(decodeCsvBuffer(buf));
   } catch {
     return ['文件内容无法解析为有效表格（文件损坏或编码异常）'];
   }

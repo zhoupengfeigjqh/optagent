@@ -72,6 +72,14 @@ const reference = computed<FileReference | null>(() => {
   return current.kind === 'file' ? { dir: current.dir, filename: current.filename } : null
 })
 
+/**
+ * 内容态对应的**跳转地址**目标（同源 `viewUrl` / 本地文件路径归一化后）；其余为 `null`。
+ *
+ * 它与 `content` 是两回事：`content` 承载"拉取到的正文"（文本 / PDF / 图片），
+ * 地址目标没有正文，只有地址本身与预检结论（`renderMode`），故直接从 `target` 分派渲染。
+ */
+const urlTarget = computed(() => (props.target.kind === 'url' ? props.target : null))
+
 /** 目录展示名：在空间树中按相对路径取 workspace 下发的 label，回退路径最后一段 */
 function dirLabel(dir: string): string {
   for (const space of props.spaces) {
@@ -83,8 +91,8 @@ function dirLabel(dir: string): string {
   return dir.split('/').pop() ?? dir
 }
 
-/** 头部主标题：内容态显示文件名，列表态显示面板名。 */
-const headerTitle = computed(() => reference.value?.filename ?? '文件空间')
+/** 头部主标题：内容态显示文件/入口名，列表态显示面板名。 */
+const headerTitle = computed(() => reference.value?.filename ?? urlTarget.value?.name ?? '文件空间')
 
 const errorInfo = computed<ErrorInfo>(
   () => props.content?.error ?? { code: 'UNKNOWN', message: '' },
@@ -117,6 +125,37 @@ function onDownload(): void {
   if (current !== null) {
     emit('download', current)
   }
+}
+
+/**
+ * 预检结论为 `download`（响应头声明 `attachment`，或类型不可内联）时的出口。
+ *
+ * 新窗口交给浏览器自己处理：带 `attachment` 的响应会直接下载，可内联的会正常打开。
+ * 前端刻意不自造下载（拿不到文件名与大小，等于猜）。
+ */
+function onOpenUrl(): void {
+  const current = urlTarget.value
+  if (current === null || typeof window === 'undefined') {
+    return
+  }
+  window.open(current.url, '_blank', 'noopener,noreferrer')
+}
+
+/**
+ * 内联 `iframe` 的滚动兜底（自已删除的 `PreviewPanel` 迁移）。
+ *
+ * 嵌入页由外部服务生成、样式不可控：若其 `html`/`body` 自带 `overflow: hidden` 或
+ * 100% 高度链，内容超出 iframe 视口后**在面板里滚不动**。同源才拿得到
+ * `contentDocument`，故只对同源地址生效（跨域本就直跳，不进这里）。
+ */
+function ensureInnerScroll(event: Event): void {
+  const doc = (event.target as HTMLIFrameElement).contentDocument
+  if (doc === null) {
+    return
+  }
+  const style = doc.createElement('style')
+  style.textContent = 'html,body{overflow:auto !important;}'
+  doc.head.appendChild(style)
 }
 </script>
 
@@ -180,10 +219,29 @@ function onDownload(): void {
     <div v-else class="workspace-panel__body">
       <LoadingDots v-if="contentLoading" label="正在加载预览" />
 
+      <!-- 同源地址目标（`viewUrl` / 本地文件路径归一化后）：按预检结论分派。
+           与文件预览互斥——`openView` 只写 `target`，不写 `content` -->
+      <template v-else-if="urlTarget">
+        <iframe
+          v-if="urlTarget.renderMode === 'iframe'"
+          class="workspace-panel__frame"
+          :src="urlTarget.url"
+          :title="urlTarget.name"
+          @load="ensureInnerScroll"
+        />
+
+        <div v-else class="workspace-panel__fallback">
+          <p class="workspace-panel__hint">该地址不支持内联预览，请在浏览器中打开。</p>
+          <BaseButton variant="primary" size="sm" @click="onOpenUrl">打开</BaseButton>
+        </div>
+      </template>
+
       <template v-else-if="content">
         <!-- 文本类：原样展示（CSV / JSON 不做表格化，避免引入解析库）
              插值必须与标签同行：<pre> 保留空白，换行写法会给内容注入缩进 -->
-        <pre v-if="content.renderMode === 'text'" class="workspace-panel__text">{{ content.text }}</pre>
+        <pre v-if="content.renderMode === 'text'" class="workspace-panel__text">{{
+          content.text
+        }}</pre>
 
         <!-- PDF -->
         <iframe

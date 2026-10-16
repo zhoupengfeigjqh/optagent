@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Prettier 忽略清单（与 agent-backend/eslint.config.mjs 的 ignores 同口径）
+#
+# 背景：本包此前**没有** .prettierrc / .prettierignore，prettier 只能落回默认值
+# （双引号 + 分号 + 80 列），与既有风格（单引号，**带**分号）不一致；于是
+# `npm run format:check` 对大量源码必然报错、门禁形同虚设，而 `npm run format`
+# 一旦被误跑就会成片改写（eslint 配置不校验格式，不会报任何错）。
+#
+# .prettierrc.json 的取值不是照抄官方默认，而是**反推既有风格**得到（后端与前端
+# 的既有风格不同，此处以本包实测为准，不强行对齐 frontend）：
+#   --single-quote --print-width 100            → 83 个文件不一致（最小）
+#   --single-quote --no-semi --print-width 100  → 140
+#   双引号 + 分号 + 100 列                       → 140
+#   80/90/100/110/120 列（单引号+分号）          → 128 / 112 / 83 / 90 / 92
+# ⇒ singleQuote=true、semi=true、printWidth=100；endOfLine 取 auto 以保留每个文件
+# 既有行尾，避免一次全仓 CRLF/LF 翻转。
+#
+# 本文件只忽略"不是本仓库手写源码"的东西：构建产物、覆盖率报告、运行期数据、
+# 锁文件与日志；`src/`、`tests/`、`scripts/` 与根级配置文件一律纳入检查。
+# ---------------------------------------------------------------------------
+
+# 构建产物与覆盖率产物（vitest 可另指定 coverage-* / .coverage-* 目录）
+dist/
+coverage/
+coverage-*/
+.coverage-*/
+
+# 运行期数据：数字人配置 / 场景定义 / MCP 配置 / skills（数据而非源码，
+# 根 .gitignore 亦按"运行期数据"对待），纳入格式化只会产生无意义的巨量 diff。
+.opt-agent/
+*.db-wal
+*.db-shm
+
+# 锁文件不由本仓库维护格式
+package-lock.json
+
+# 门禁/运行日志产物（生成物，不入库）
+*.log

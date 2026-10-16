@@ -63,7 +63,11 @@ export interface AgentDetail {
 }
 
 /** 扫描并列出配置完好的数字人（损坏者跳过 + 告警） */
-export function listAgents(optAgentRoot: string, userId: string, logger?: CatalogLogger): AgentListItem[] {
+export function listAgents(
+  optAgentRoot: string,
+  userId: string,
+  logger?: CatalogLogger,
+): AgentListItem[] {
   const dir = userAgentsDir(optAgentRoot, userId);
   if (!fs.existsSync(dir)) return [];
   const items: AgentListItem[] = [];
@@ -139,5 +143,10 @@ function agentDescription(agentDir: string): string {
   const raw = fs.readFileSync(path.join(agentDir, 'SOUL.md'), 'utf8');
   const intro = parseSoulMeta(raw).intro;
   if (intro !== '') return intro;
-  return raw.split(/\r?\n/).find((l) => l.trim())?.trim() ?? '';
+  return (
+    raw
+      .split(/\r?\n/)
+      .find((l) => l.trim())
+      ?.trim() ?? ''
+  );
 }

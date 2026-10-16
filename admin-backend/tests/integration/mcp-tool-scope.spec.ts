@@ -1,11 +1,12 @@
 /**
- * 集成测试：MCP 服务的**工具白名单**（2026-10-03，契约 §3.2 / §3.3 / §3.9）
+ * 集成测试：MCP 服务的**工具白名单**（2026-10-03；2026-10-15 起可二次调整，契约 §3.2 / §3.3 / §3.9）
  *
  * 覆盖：
  * - `POST /api/admin/mcp/probe`：新建前的工具清单探测（未登记目标；失败 `ok:false` 不抛错）；
  * - `POST /api/admin/mcp/services`：**连不上即创建失败且不落盘**、白名单必填非空；
- * - `PUT /api/admin/mcp/services/{name}`：**白名单不可二次调整**；
- * - `GET .../{name}`：详情只呈现白名单里的工具，缺失项进 `missing_tools`。
+ * - `PUT /api/admin/mcp/services/{name}`：**白名单可全量替换**（提供必非空，空数组 400）；
+ * - `GET .../{name}`：`tools` 只呈现白名单里的工具（缺失项进 `missing_tools`），
+ *   另有 `available_tools` 给出本次探测的**全量**清单供工具范围弹窗勾选。
  *
  * 自 `mcp.spec.ts` 独立成文件：该文件已接近 500 行门禁（原则二）。
  */
@@ -63,11 +64,7 @@ describe('POST /api/admin/mcp/probe（§3.9 新建前探测）', () => {
     const body = res.json();
     expect(body.ok).toBe(true);
     expect(body.error).toBeNull();
-    expect(body.tools.map((t: { name: string }) => t.name)).toEqual([
-      'ocr_image',
-      'ocr_pdf',
-      'query_price',
-    ]);
+    expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['ocr_image', 'ocr_pdf', 'query_price']);
     expect(body.target).toMatchObject({ transport: 'http', url: OCR_URL });
     // 只是探测，**不落盘**
     expect(await serviceNames()).toEqual([]);
@@ -117,16 +114,13 @@ describe('POST /api/admin/mcp/services（§3.3 新建）', () => {
 
     const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
     expect(detail.json().allowed_tools).toEqual(['query_price', 'ocr_image']);
-    expect(detail.json().tools.map((t: { name: string }) => t.name)).toEqual([
-      'query_price',
-      'ocr_image',
-    ]);
+    expect(detail.json().tools.map((t: { name: string }) => t.name)).toEqual(['query_price', 'ocr_image']);
     expect(detail.json().missing_tools).toEqual([]);
   });
 });
 
 describe('PUT /api/admin/mcp/services/{name}（§3.3 保存调用配置）', () => {
-  it('携带 allowed_tools → 409 ADM_MCP_TOOL_SCOPE_LOCKED，且白名单不变', async () => {
+  it('携带 allowed_tools → 全量替换白名单（2026-10-15 起可改），其余字段照常保存', async () => {
     await createService('ocr', { allowed_tools: ['ocr_image'] });
     const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
 
@@ -141,8 +135,38 @@ describe('PUT /api/admin/mcp/services/{name}（§3.3 保存调用配置）', () 
       },
     });
 
-    expect(res.statusCode).toBe(409);
-    expect(res.json().error.code).toBe('ADM_MCP_TOOL_SCOPE_LOCKED');
+    expect(res.statusCode).toBe(200);
+    expect(res.json().allowed_tools).toEqual(['ocr_pdf']);
+    expect(res.json().confirmation).toBe('always');
+
+    // 详情随之一致：`tools` 跟新白名单，全量候选仍是服务那三个
+    const after = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
+    expect(after.json().allowed_tools).toEqual(['ocr_pdf']);
+    expect(after.json().tools.map((t: { name: string }) => t.name)).toEqual(['ocr_pdf']);
+    expect(after.json().available_tools.map((t: { name: string }) => t.name)).toEqual([
+      'ocr_image',
+      'ocr_pdf',
+      'query_price',
+    ]);
+  });
+
+  it('携带**空数组** → 400 VALIDATION_FAILED，整条请求不生效（空 = 不限制，不是"全不给"）', async () => {
+    await createService('ocr', { allowed_tools: ['ocr_image'] });
+    const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
+
+    const res = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/mcp/services/ocr',
+      payload: {
+        ...BASICS,
+        confirmation: 'always',
+        allowed_tools: [],
+        revision: detail.json().revision,
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
 
     const after = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
     expect(after.json().allowed_tools).toEqual(['ocr_image']);

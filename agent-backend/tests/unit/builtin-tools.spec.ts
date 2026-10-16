@@ -25,8 +25,7 @@ function fakeLogger(): Logger {
 const AGENT = 'demo';
 
 /** 本数字人的技能根：users/{uid}/agents/{agent}/skills */
-const skillsDirOf = (): string =>
-  path.join(root, 'users', 'admin', 'agents', AGENT, 'skills');
+const skillsDirOf = (): string => path.join(root, 'users', 'admin', 'agents', AGENT, 'skills');
 
 function build(enabled: string[]) {
   return buildBuiltinTools({

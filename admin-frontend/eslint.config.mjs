@@ -4,10 +4,10 @@
  * 与 `frontend/eslint.config.mjs` 同构：官方推荐集 + Vue 3 推荐集 + Prettier 兼容层。
  * 用 `.mjs` 而非 `.ts`（ESLint 加载 TS 配置需 `jiti`，按原则六不引入）。
  */
-import js from '@eslint/js';
-import prettier from 'eslint-config-prettier';
-import pluginVue from 'eslint-plugin-vue';
-import tseslint from 'typescript-eslint';
+import js from '@eslint/js'
+import prettier from 'eslint-config-prettier'
+import pluginVue from 'eslint-plugin-vue'
+import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   // `coverage-*/` 与 `.gitignore` 同一口径：覆盖率产物目录（如 `coverage-run-9/`、
@@ -38,4 +38,4 @@ export default tseslint.config(
     },
   },
   prettier,
-);
+)

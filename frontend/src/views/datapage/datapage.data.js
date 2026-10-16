@@ -19,7 +19,6 @@ export const productionPlanColumns = [
     label: '来源地址',
     prop: 'sourceValue',
     width: 150,
-
   },
   {
     label: '记录ID',
@@ -141,7 +140,7 @@ export const productionPlanColumns = [
     prop: 'createTime',
     width: 150,
   },
-];
+]
 
 // 产线信息数据表列配置
 export const productionLineColumns = [
@@ -270,7 +269,7 @@ export const productionLineColumns = [
     prop: 'createTime',
     width: 150,
   },
-];
+]
 
 // 切换时间信息数据表列配置
 export const switchTimeColumns = [
@@ -314,7 +313,7 @@ export const switchTimeColumns = [
     prop: 'createTime',
     width: 150,
   },
-];
+]
 
 // 产能信息数据表列配置
 export const productionCapacityColumns = [
@@ -378,10 +377,10 @@ export const productionCapacityColumns = [
   },
   {
     label: '产线优先级',
-    prop: 'productionLinePriority', 
+    prop: 'productionLinePriority',
     width: 150,
   },
-];
+]
 
 // 求解时间列配置
 export const solvingTimeColumns = [
@@ -420,7 +419,7 @@ export const solvingTimeColumns = [
     prop: 'updateTime',
     width: 150,
   },
-];
+]
 
 // 产线电价信息数据表列配置
 export const productionLineElectricityColumns = [
@@ -470,7 +469,7 @@ export const productionLineElectricityColumns = [
     prop: 'updateTime',
     width: 150,
   },
-];
+]
 
 // 目标优先级配置数据表列配置
 export const targetPriorityConfigColumns = [
@@ -514,30 +513,30 @@ export const targetPriorityConfigColumns = [
     prop: 'createTime',
     width: 150,
   },
-];
+]
 
-export const getTableNames = val => {
+export const getTableNames = (val) => {
   switch (val) {
     case 'production-plan':
       return {
         name: '生产计划数据表',
         columns: productionPlanColumns,
-      };
+      }
     case 'production-line':
       return {
         name: '产线信息数据表',
         columns: productionLineColumns,
-      };
+      }
     case 'switch-time':
       return {
         name: '切换时间信息数据表',
         columns: switchTimeColumns,
-      };
+      }
     case 'production-capacity':
       return {
         name: '产能信息数据表',
         columns: productionCapacityColumns,
-      };
+      }
     // case 'solving-time':
     //   return {
     //     name: '求解时间',
@@ -547,11 +546,11 @@ export const getTableNames = val => {
       return {
         name: '产线电价信息数据表',
         columns: productionLineElectricityColumns,
-      };
+      }
     // case 'target-priority-config':
     //   return {
     //     name: '目标优先级配置表',
     //     columns: targetPriorityConfigColumns,
     //   };
   }
-};
+}

@@ -130,7 +130,9 @@ describe('CreateAgentDialog —— 降级与关闭', () => {
 
     expect(wrapper.text()).toContain('未能读取已有数字人清单')
     expect(wrapper.text()).not.toContain('raw backend msg')
-    expect(wrapper.find('[data-test="create-agent-copy-from"]').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('[data-test="create-agent-copy-from"]').attributes('disabled'),
+    ).toBeDefined()
 
     await wrapper.find('[data-test="create-agent-name"]').setValue('任意名')
     await wrapper.find('[data-test="confirm"]').trigger('click')

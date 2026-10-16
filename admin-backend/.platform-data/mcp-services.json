@@ -39,9 +39,12 @@
       "rules_fields": {},
       "async_tools": [],
       "allowed_tools": [
-        "noul"
+        "noul",
+        "choice",
+        "score"
       ],
-      "updated_at": "2026-10-03T16:32:28.306Z"
+      "headers": {},
+      "updated_at": "2026-10-15T16:11:25.152Z"
     },
     "raw_inventory_purchase_function": {
       "name": "raw_inventory_purchase_function",
@@ -119,10 +122,12 @@
       ],
       "allowed_tools": [
         "hd_algorithm_input_parser",
-        "hd_scheduling_submit"
+        "hd_scheduling_submit",
+        "hd_scheduling_query",
+        "hd_algorithm_input_query"
       ],
       "headers": {},
-      "updated_at": "2026-10-09T07:47:14.756Z"
+      "updated_at": "2026-10-15T09:12:09.966Z"
     },
     "bom-service": {
       "name": "bom-service",

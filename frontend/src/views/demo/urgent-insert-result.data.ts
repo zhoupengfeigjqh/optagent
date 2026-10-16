@@ -1,6 +1,6 @@
-import type { ColumnsType } from '#/components/z-table/table.data';
+import type { ColumnsType } from '#/components/z-table/table.data'
 
-import dayjs from 'dayjs';
+import dayjs from 'dayjs'
 
 // ========== 状态颜色映射 ==========
 export const ganttStatusColor: Record<string, string> = {
@@ -10,7 +10,7 @@ export const ganttStatusColor: Record<string, string> = {
   warning: '#fa8c16',
   delayed: '#ff4d4f',
   urgent: '#722ed1',
-};
+}
 
 export const statusTextMap: Record<string, string> = {
   completed: '已完工',
@@ -19,17 +19,17 @@ export const statusTextMap: Record<string, string> = {
   warning: '预警',
   delayed: '延期',
   urgent: '紧急',
-};
+}
 
 // ========== 顶部 KPI ==========
 export interface KpiItem {
-  afterValue: string;
-  beforeValue: string;
-  key: string;
-  label: string;
-  text: string;
-  trend: '' | 'down' | 'up';
-  unit: string;
+  afterValue: string
+  beforeValue: string
+  key: string
+  label: string
+  text: string
+  trend: '' | 'down' | 'up'
+  unit: string
 }
 
 export const kpiItems: KpiItem[] = [
@@ -78,50 +78,50 @@ export const kpiItems: KpiItem[] = [
     text: '↓ 需关注',
     trend: 'down',
   },
-];
+]
 
 // ========== 甘特图数据（排产前后，设备/工序为行） ==========
 /** 甘特图色块（工序任务条） */
 interface GanttBlock {
   /** 受影响工序（计划调整）：渲染橙色描边 */
-  affected?: boolean;
-  endDay: number;
-  id: string;
-  label: string;
+  affected?: boolean
+  endDay: number
+  id: string
+  label: string
   /** 完成进度 0~100，渲染为色块内的局部进度填充 */
-  progress: number;
-  startDay: number;
-  status: string;
-  workOrder: string;
+  progress: number
+  startDay: number
+  status: string
+  workOrder: string
 }
 /** 甘特图行（设备 + 工序任务），行级状态/进度用于左侧表格展示 */
 interface GanttRow {
-  blocks: GanttBlock[];
-  id: string;
-  name: string;
-  progress: number;
-  status: string;
+  blocks: GanttBlock[]
+  id: string
+  name: string
+  progress: number
+  status: string
 }
 
 /** 甘特图数据点（传给 Highcharts 的单条任务） */
 export interface GanttPoint {
-  borderColor?: string;
-  borderWidth?: number;
-  color: string;
-  end: number;
-  id: string;
-  name: string;
-  partialFill: { amount: number };
-  progress: number;
-  start: number;
-  status: string;
-  workOrder: string;
-  y: number;
+  borderColor?: string
+  borderWidth?: number
+  color: string
+  end: number
+  id: string
+  name: string
+  partialFill: { amount: number }
+  progress: number
+  start: number
+  status: string
+  workOrder: string
+  y: number
 }
 
 // 使用本地时区零点作为基准，保证周末 plotBands 与坐标轴日期刻度对齐
-const BASE_TIME = new Date(2026, 7, 1).getTime(); // 2026-08-01
-const DAY = 24 * 3600 * 1000;
+const BASE_TIME = new Date(2026, 7, 1).getTime() // 2026-08-01
+const DAY = 24 * 3600 * 1000
 
 /**
  * 将行结构展开为 Highcharts 甘特图数据点：
@@ -131,7 +131,7 @@ const DAY = 24 * 3600 * 1000;
  * - status/workOrder/progress：自定义字段透传，tooltip 中展示
  */
 function toGanttData(rows: GanttRow[]): GanttPoint[] {
-  const data: GanttPoint[] = [];
+  const data: GanttPoint[] = []
   rows.forEach((row, y) => {
     row.blocks.forEach((b) => {
       data.push({
@@ -147,10 +147,10 @@ function toGanttData(rows: GanttRow[]): GanttPoint[] {
         status: b.status,
         workOrder: b.workOrder,
         y,
-      });
-    });
-  });
-  return data;
+      })
+    })
+  })
+  return data
 }
 
 // 排产前（原始排产）
@@ -372,7 +372,7 @@ export const beforeGanttRows: GanttRow[] = [
       },
     ],
   },
-];
+]
 
 // 排产后（插入紧急单）
 export const afterGanttRows: GanttRow[] = [
@@ -624,16 +624,16 @@ export const afterGanttRows: GanttRow[] = [
       },
     ],
   },
-];
+]
 
-export const beforeGanttData = toGanttData(beforeGanttRows);
-export const afterGanttData = toGanttData(afterGanttRows);
+export const beforeGanttData = toGanttData(beforeGanttRows)
+export const afterGanttData = toGanttData(afterGanttRows)
 
 // 甘特图左侧表格列（设备 + 任务）
 export const ganttTableCols: ColumnsType[] = [
   { title: '设备', dataIndex: 'id' },
   { title: '任务', dataIndex: 'name' },
-];
+]
 
 // 甘特图左侧表格列（排产前后对比：设备/工序、状态、进度）
 export const ganttCompareCols: ColumnsType[] = [
@@ -658,37 +658,35 @@ export const ganttCompareCols: ColumnsType[] = [
     slot: 'progress',
     width: 90,
   },
-];
+]
 
 /**
  * 计算时间范围内每个周末（周六 00:00 ~ 周一 00:00）的 plotBands，
  * 用于甘特图周末灰底高亮（对应原型的 .gantt-axis-cell.weekend）
  */
 function buildWeekendPlotBands(minTs: number, maxTs: number) {
-  const bands: { color: string; from: number; to: number }[] = [];
-  const cursor = new Date(minTs);
-  cursor.setHours(0, 0, 0, 0);
+  const bands: { color: string; from: number; to: number }[] = []
+  const cursor = new Date(minTs)
+  cursor.setHours(0, 0, 0, 0)
   while (cursor.getTime() <= maxTs) {
     // getDay() === 6 表示周六，一个周末覆盖周六 + 周日两天
     if (cursor.getDay() === 6) {
-      const from = cursor.getTime();
-      bands.push({ color: 'rgba(0, 0, 0, 0.035)', from, to: from + 2 * DAY });
+      const from = cursor.getTime()
+      bands.push({ color: 'rgba(0, 0, 0, 0.035)', from, to: from + 2 * DAY })
     }
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setDate(cursor.getDate() + 1)
   }
-  return bands;
+  return bands
 }
 
-const WEEKDAY_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-const day = 24 * 36e5;
-const today = Math.floor(Date.now() / day) * day;
+const WEEKDAY_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 // 甘特图 Highcharts option 构建
 export function buildGanttOption(data: GanttPoint[]) {
-  const categories = [...new Set(data.map((d) => d.y))];
+  const categories = [...new Set(data.map((d) => d.y))]
   // 取数据的时间范围，用于生成周末灰底 plotBands
-  const times = data.flatMap((d) => [d.start, d.end]);
-  const minTs = Math.min(...times);
-  const maxTs = Math.max(...times);
+  const times = data.flatMap((d) => [d.start, d.end])
+  const minTs = Math.min(...times)
+  const maxTs = Math.max(...times)
   return {
     chart: {
       spacingTop: 10,
@@ -711,9 +709,9 @@ export function buildGanttOption(data: GanttPoint[]) {
       useHTML: true,
       formatter: (ctx: any) => {
         // ZGantt 会把当前数据点挂到 ctx.point 上（兼容 this.point 写法）
-        const p = ctx?.point ?? {};
-        const status = p.status ?? p.options?.status ?? '';
-        const bg = ganttStatusColor[status] ?? '#bfbfbf';
+        const p = ctx?.point ?? {}
+        const status = p.status ?? p.options?.status ?? ''
+        const bg = ganttStatusColor[status] ?? '#bfbfbf'
         return `
           <div style="min-width:180px;">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
@@ -726,7 +724,7 @@ export function buildGanttOption(data: GanttPoint[]) {
               <div>计划时间：${dayjs(p.start).format('MM-DD')} ~ ${dayjs(p.end).format('MM-DD')}</div>
               <div>进度：${p.progress ?? 0}%</div>
             </div>
-          </div>`;
+          </div>`
       },
     },
     plotOptions: {
@@ -741,9 +739,9 @@ export function buildGanttOption(data: GanttPoint[]) {
       plotBands: buildWeekendPlotBands(minTs, maxTs),
       labels: {
         formatter(this: any) {
-          const d = new Date(this.value as number);
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${day} ${WEEKDAY_TEXT[d.getDay()]}`;
+          const d = new Date(this.value as number)
+          const day = String(d.getDate()).padStart(2, '0')
+          return `${day} ${WEEKDAY_TEXT[d.getDay()]}`
         },
       },
       // min: minTs - 1 * day,
@@ -805,15 +803,15 @@ export function buildGanttOption(data: GanttPoint[]) {
         })),
       },
     ],
-  };
+  }
 }
 
 // ========== 影响分析统计 ==========
 export interface ImpactStats {
-  name: string;
-  text: string;
-  unit: string;
-  value: number;
+  name: string
+  text: string
+  unit: string
+  value: number
 }
 
 export const impactStats: ImpactStats[] = [
@@ -847,18 +845,18 @@ export const impactStats: ImpactStats[] = [
     unit: '%',
     text: '延期 2 单 / 受影响 8 单',
   },
-];
+]
 
 // ========== 影响分析表 ==========
 export interface ImpactEntity {
-  id: string;
-  impactDesc: string;
-  impactType: string;
-  newEquipment: string;
-  newTime: string;
-  originalEquipment: string;
-  originalTime: string;
-  product: string;
+  id: string
+  impactDesc: string
+  impactType: string
+  newEquipment: string
+  newTime: string
+  originalEquipment: string
+  originalTime: string
+  product: string
 }
 
 export const impactCols: ColumnsType[] = [
@@ -875,7 +873,7 @@ export const impactCols: ColumnsType[] = [
     slot: 'impactType',
   },
   { title: '影响说明', dataIndex: 'impactDesc', width: 220, ellipsis: true },
-];
+]
 
 export const impactMock: ImpactEntity[] = [
   {
@@ -958,7 +956,7 @@ export const impactMock: ImpactEntity[] = [
     impactType: '无影响',
     impactDesc: '装配阶段不受前置调整影响',
   },
-];
+]
 
 /** 影响类型标签颜色 */
 export const impactTypeColor: Record<string, string> = {
@@ -967,4 +965,4 @@ export const impactTypeColor: Record<string, string> = {
   调整设备: 'blue',
   提前: 'green',
   无影响: 'default',
-};
+}

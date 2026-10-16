@@ -96,7 +96,10 @@ describe('normalizeSoulDesign', () => {
     expectCode(
       () =>
         normalizeSoulDesign(
-          { ...validRaw(), starters: [{ prompt: 'x'.repeat(SOUL_LIMITS.starterPrompt + 1), tools: [] }] },
+          {
+            ...validRaw(),
+            starters: [{ prompt: 'x'.repeat(SOUL_LIMITS.starterPrompt + 1), tools: [] }],
+          },
           OPTIONS,
         ),
       ERROR_CODES.VALIDATION_FAILED,
@@ -217,14 +220,18 @@ describe('normalizeSoulDesign', () => {
 describe('next_action_hints —— 下一步动作提示开关（007）', () => {
   it('缺省口径：键缺失 → false（老表单 / 存量文档照常保存）', () => {
     expect(normalizeSoulDesign(validRaw(), OPTIONS).next_action_hints).toBe(false);
-    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: undefined }, OPTIONS).next_action_hints).toBe(
-      false,
-    );
+    expect(
+      normalizeSoulDesign({ ...validRaw(), next_action_hints: undefined }, OPTIONS).next_action_hints,
+    ).toBe(false);
   });
 
   it('true / false 原样通过（拒绝式，不做隐式转换）', () => {
-    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS).next_action_hints).toBe(true);
-    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS).next_action_hints).toBe(false);
+    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS).next_action_hints).toBe(
+      true,
+    );
+    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS).next_action_hints).toBe(
+      false,
+    );
   });
 
   it('非布尔（字符串 / 数字 / null）→ VALIDATION_FAILED', () => {
@@ -257,7 +264,10 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     expect(body(on)).toBe(body(off));
     // 差异**恰好是两行**（开关 + 条数）：把这两行删掉，开启态与关闭态逐字相同
     const strip = (md: string) =>
-      md.split('\n').filter((line) => !line.startsWith('next_action_hints')).join('\n');
+      md
+        .split('\n')
+        .filter((line) => !line.startsWith('next_action_hints'))
+        .join('\n');
     expect(strip(on)).toBe(strip(off));
     expect(on.split('\n').length - off.split('\n').length).toBe(2);
   });
@@ -301,17 +311,16 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     expect(off).toBe(renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS)));
 
     // 开启但未给条数 → 落缺省值，产物仍是显式的
-    const onDefault = renderSoulMd(
-      normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS),
-    );
+    const onDefault = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
     expect(onDefault).toContain(`next_action_hints_count: ${SOUL_LIMITS.nextActionHintsDefault}`);
   });
 
   it('条数取值口径：1~6 的整数通过；0 / 7 / 负数 / 小数 / 字符串 / null → 拒绝', () => {
     for (const value of [SOUL_LIMITS.nextActionHintsMin, 4, SOUL_LIMITS.nextActionHintsMax]) {
-      expect(normalizeSoulDesign({ ...validRaw(), next_action_hints_count: value }, OPTIONS).next_action_hints_count).toBe(
-        value,
-      );
+      expect(
+        normalizeSoulDesign({ ...validRaw(), next_action_hints_count: value }, OPTIONS)
+          .next_action_hints_count,
+      ).toBe(value);
     }
 
     for (const value of [0, -1, 2.5, SOUL_LIMITS.nextActionHintsMax + 1, '3', null, {}, true]) {
@@ -352,10 +361,7 @@ describe('renderSoulMd', () => {
   });
 
   it('空的可选字段不渲染空壳小节', () => {
-    const soul = normalizeSoulDesign(
-      { intro: 'a', welcome: 'b', mission: 'm' },
-      OPTIONS,
-    );
+    const soul = normalizeSoulDesign({ intro: 'a', welcome: 'b', mission: 'm' }, OPTIONS);
     const md = renderSoulMd(soul);
     expect(md).not.toContain('## 能力标签');
     expect(md).not.toContain('## 绝对禁止');
@@ -387,8 +393,6 @@ describe('fromLegacySoul / describeSoul', () => {
 
   it('describeSoul：优先角色简介，缺省回退主要使命首行', () => {
     expect(describeSoul(fromLegacySoul('你是助手'))).toBe('你是助手');
-    expect(describeSoul(normalizeSoulDesign({ ...validRaw(), intro: '简介优先' }, OPTIONS))).toBe(
-      '简介优先',
-    );
+    expect(describeSoul(normalizeSoulDesign({ ...validRaw(), intro: '简介优先' }, OPTIONS))).toBe('简介优先');
   });
 });

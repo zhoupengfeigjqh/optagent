@@ -353,4 +353,34 @@ describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，202
 
     expect(editor.draft.value.soul.next_action_hints_count).toBe(3)
   })
+
+  it('问题实例（starters）逐层深拷贝：改草稿的提示文本与关联工具都不污染源', async () => {
+    // 嵌套两层（问题实例 → 关联工具），浅拷贝会让弹窗里的编辑直接改到"已保存态"
+    interface StarterLike {
+      prompt: string
+      tools: Array<{ kind: 'builtin' | 'mcp'; name: string; service?: string }>
+    }
+    const starters: StarterLike[] = [
+      {
+        prompt: '看生产计划',
+        tools: [
+          { kind: 'builtin', name: 'read_file' },
+          { kind: 'mcp', name: 'ocr_detect', service: 'ocr' },
+        ],
+      },
+    ]
+    getAgent.mockResolvedValue({ ...DESIGN, soul: { ...SOUL, starters } })
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+
+    expect(editor.draft.value.soul.starters).toEqual(starters)
+
+    editor.draft.value.soul.starters[0]!.prompt = '改过了'
+    editor.draft.value.soul.starters[0]!.tools[0]!.name = 'write_file'
+    editor.draft.value.soul.starters[0]!.tools.push({ kind: 'builtin', name: 'list_files' })
+
+    expect(starters[0]!.prompt).toBe('看生产计划')
+    expect(starters[0]!.tools[0]!.name).toBe('read_file')
+    expect(starters[0]!.tools).toHaveLength(2)
+  })
 })

@@ -72,7 +72,16 @@ export const SPACE_POLICIES: Record<SpaceName, SpacePolicy> = {
 
 /** 「数据准备」可上传类型候选；与 admin-backend / admin-frontend 同名常量三处 MUST 同步（契约 §3），枚举外的项丢弃并告警 */
 export const DATA_PREP_UPLOAD_EXTS = [
-  '.xlsx', '.xls', '.csv', '.txt', '.pdf', '.json', '.zip', '.jpg', '.png', '.jpeg',
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.txt',
+  '.pdf',
+  '.json',
+  '.zip',
+  '.jpg',
+  '.png',
+  '.jpeg',
 ] as const;
 
 /**
@@ -130,11 +139,7 @@ export function ensureUserDirs(optAgentRoot: string, userId: string): void {
  * 初始化**某数字人**的数据域骨架（幂等）：3 空间 + threads。
  * 场景子目录由 `loadScenario` 惰性创建；已在磁盘上的内容一律不动（覆盖清理由平台侧负责）。
  */
-export function ensureAgentDataDirs(
-  optAgentRoot: string,
-  userId: string,
-  agentName: string,
-): void {
+export function ensureAgentDataDirs(optAgentRoot: string, userId: string, agentName: string): void {
   const data = userDataDir(optAgentRoot, userId, agentName);
   for (const dir of [...SPACES, THREADS_DIR]) {
     fs.mkdirSync(path.join(data, dir), { recursive: true });
@@ -162,9 +167,4 @@ export {
   parseSpaceDir,
   uploadExtensionsOf,
 } from './scenario.js';
-export type {
-  Scenario,
-  ScenarioField,
-  ScenarioFieldType,
-  SpaceDirTarget,
-} from './scenario.js';
+export type { Scenario, ScenarioField, ScenarioFieldType, SpaceDirTarget } from './scenario.js';

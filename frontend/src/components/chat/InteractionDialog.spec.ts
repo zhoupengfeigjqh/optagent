@@ -74,7 +74,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     await wrapper.find('input[type=text]').setValue('L09')
     await wrapper.find('input[type=number]').setValue('5')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
 
     const events = wrapper.emitted('submit')
     expect(events).toHaveLength(1)
@@ -85,7 +88,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     const wrapper = mountDialog()
     await wrapper.find('input[type=text]').setValue('')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
 
     expect(wrapper.emitted('submit')).toBeUndefined()
     expect(wrapper.find('.interaction-dialog__error').text()).toContain('产线')
@@ -95,7 +101,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     const wrapper = mountDialog()
     await wrapper.find('input[type=number]').setValue('')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
 
     expect(wrapper.emitted('submit')).toBeUndefined()
     expect(wrapper.find('.interaction-dialog__error').text()).toContain('数量')
@@ -121,7 +130,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     expect(JSON.parse((area.element as HTMLTextAreaElement).value)).toEqual([[1, 2]])
 
     await area.setValue('{bad json')
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
 
     expect(wrapper.emitted('submit')).toBeUndefined()
     expect(wrapper.find('.interaction-dialog__error').text()).toContain('矩阵')
@@ -130,7 +142,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
   it('拒绝按钮 emit reject', async () => {
     const wrapper = mountDialog()
 
-    await wrapper.findAll('button').find((b) => b.text() === '拒绝调用')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '拒绝调用')!
+      .trigger('click')
 
     expect(wrapper.emitted('reject')).toHaveLength(1)
     expect(wrapper.emitted('submit')).toBeUndefined()
@@ -178,7 +193,10 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     )
 
     expect(wrapper.find('.interaction-dialog__empty').exists()).toBe(true)
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     expect(wrapper.emitted('submit')).toEqual([[{}]])
   })
 })
@@ -263,12 +281,18 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
     expect(wrapper.find('.rule-picker__table').exists()).toBe(true)
 
     await wrapper.findAll('tbody input[type="checkbox"]')[0]!.setValue(true)
-    await wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('确认选择'))!
+      .trigger('click')
 
     // 表格里已出现勾选的那一行（列由数据决定：规则文件表头）
     expect(wrapper.findAll('th').map((cell) => cell.text())).toContain('规则编码')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     const events = wrapper.emitted('submit')
     expect(events).toHaveLength(1)
     expect(events![0]!).toEqual([
@@ -282,9 +306,15 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
 
     await wrapper.find('.interaction-dialog__rules-btn').trigger('click')
     await flushPromises()
-    await wrapper.findAll('button').find((b) => b.text() === '取消')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '取消')!
+      .trigger('click')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     // rules 未填 → 不进提交值（与改造前"空文本框不进 args"同一口径）
     expect(wrapper.emitted('submit')![0]!).toEqual([{ days: 7 }])
   })
@@ -327,9 +357,15 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
     await target.find('.interaction-dialog__rules-btn').trigger('click')
     await flushPromises()
     await wrapper.findAll('tbody input[type="checkbox"]')[0]!.setValue(true)
-    await wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('确认选择'))!
+      .trigger('click')
 
-    await wrapper.findAll('button').find((b) => b.text() === '确认提交')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '确认提交')!
+      .trigger('click')
     expect(wrapper.emitted('submit')![0]!).toEqual([
       {
         input: {
@@ -356,7 +392,10 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
     await wrapper.find('.interaction-dialog__rules-btn').trigger('click')
     await flushPromises()
     await wrapper.findAll('tbody input[type="checkbox"]')[0]!.setValue(true)
-    await wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('确认选择'))!
+      .trigger('click')
 
     expect(wrapper.text()).toContain('不是合法 JSON')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('{ 坏掉的 ')

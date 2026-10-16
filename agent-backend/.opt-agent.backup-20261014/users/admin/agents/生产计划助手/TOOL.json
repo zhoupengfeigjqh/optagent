@@ -1,9 +1,0 @@
-{
-  "enabled": [
-    "read_file",
-    "list_dir",
-    "grep_files",
-    "write_file",
-    "read_skill"
-  ]
-}

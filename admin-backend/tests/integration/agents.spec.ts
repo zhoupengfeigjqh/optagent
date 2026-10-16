@@ -52,7 +52,11 @@ afterEach(async () => {
 
 describe('POST /api/admin/agents', () => {
   it('新建成功：返回完整设计态与 revision', async () => {
-    const res = await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: validBody,
+    });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.name).toBe('demo');
@@ -64,7 +68,11 @@ describe('POST /api/admin/agents', () => {
 
   it('名称冲突 → 409 ADM_AGENT_NAME_TAKEN', async () => {
     await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
-    const res = await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: validBody,
+    });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ADM_AGENT_NAME_TAKEN');
   });
@@ -173,7 +181,11 @@ describe('GET /api/admin/agents', () => {
     // 工具目录被清空后，引用了 read_file 的 demo 变为异常卡片，而 demo2 不受影响
     fx.runtime.tools = [];
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents?page=1' });
-    const items = res.json().items as Array<{ name: string; abnormal: boolean; abnormal_reason: string | null }>;
+    const items = res.json().items as Array<{
+      name: string;
+      abnormal: boolean;
+      abnormal_reason: string | null;
+    }>;
     const demo = items.find((i) => i.name === 'demo')!;
     expect(demo.abnormal).toBe(true);
     expect(demo.abnormal_reason).toContain('read_file');
@@ -246,9 +258,7 @@ describe('DELETE /api/admin/agents/{name}', () => {
     await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
     const res = await fx.app.inject({ method: 'DELETE', url: '/api/admin/agents/demo' });
     expect(res.statusCode).toBe(204);
-    expect(
-      (await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' })).statusCode,
-    ).toBe(404);
+    expect((await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' })).statusCode).toBe(404);
   });
 
   it('被用户关联时阻止删除 → 409 ADM_AGENT_IN_USE 并指明用户（FR-021）', async () => {

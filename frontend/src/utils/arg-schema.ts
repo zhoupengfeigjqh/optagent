@@ -36,15 +36,7 @@ export interface FieldSchema {
 
 /** 控件形态（递归渲染的分派依据）。 */
 export type ControlKind =
-  | 'select'
-  | 'switch'
-  | 'number'
-  | 'textarea'
-  | 'text'
-  | 'group'
-  | 'table'
-  | 'list'
-  | 'json'
+  'select' | 'switch' | 'number' | 'textarea' | 'text' | 'group' | 'table' | 'list' | 'json'
 
 /** 标量类控件（表格单元格与列表元素都用它们）。 */
 export function isScalarControl(control: ControlKind): boolean {
@@ -175,7 +167,10 @@ export function columnKeysOf(itemSchema: FieldSchema, rows: readonly unknown[]):
  * 按值路径取出对应的 schema 节点（对象键走 `properties`、下标走 `items`）。
  * 路径在 schema 里走不通 → `null`（调用方据此退化为 JSON 文本框）。
  */
-export function schemaAtPath(schema: FieldSchema, path: readonly (string | number)[]): FieldSchema | null {
+export function schemaAtPath(
+  schema: FieldSchema,
+  path: readonly (string | number)[],
+): FieldSchema | null {
   let node: FieldSchema = schema
   for (const segment of path) {
     if (typeof segment === 'number') {

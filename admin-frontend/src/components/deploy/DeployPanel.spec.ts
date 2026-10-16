@@ -88,8 +88,20 @@ describe('DeployPanel', () => {
     validateDeploy.mockResolvedValue({
       passed: false,
       errors: [
-        { user_id: 'admin', agent_name: 'demo', category: 'config_integrity', code: 'VALIDATION_FAILED', message: 'SOUL 为空' },
-        { user_id: 'ops', agent_name: 'demo2', category: 'reference_validity', code: 'ADM_AGENT_INVALID_REF', message: '引用了清单外的工具 ghost' },
+        {
+          user_id: 'admin',
+          agent_name: 'demo',
+          category: 'config_integrity',
+          code: 'VALIDATION_FAILED',
+          message: 'SOUL 为空',
+        },
+        {
+          user_id: 'ops',
+          agent_name: 'demo2',
+          category: 'reference_validity',
+          code: 'ADM_AGENT_INVALID_REF',
+          message: '引用了清单外的工具 ghost',
+        },
       ],
     })
     const wrapper = mountPanel(['admin', 'ops'])
@@ -154,7 +166,13 @@ describe('DeployPanel', () => {
       message: 'x',
       details: {
         errors: [
-          { user_id: 'admin', agent_name: 'demo', category: 'target_writable', code: 'ADM_DEPLOY_TARGET_NOT_WRITABLE', message: '目标不可写' },
+          {
+            user_id: 'admin',
+            agent_name: 'demo',
+            category: 'target_writable',
+            code: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
+            message: '目标不可写',
+          },
         ],
       },
     })

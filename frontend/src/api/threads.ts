@@ -61,11 +61,7 @@ export interface ThreadsApi {
   /** `DELETE /api/threads/{id}` → 204（服务端先 stop 进行中的 run） */
   remove(threadId: string): Promise<void>
   /** `PUT /api/threads/{id}/messages/{messageId}/feedback`（同值重复提交 = 取消） */
-  feedback(
-    threadId: string,
-    messageId: string,
-    value: FeedbackValue,
-  ): Promise<FeedbackResponse>
+  feedback(threadId: string, messageId: string, value: FeedbackValue): Promise<FeedbackResponse>
   /** `POST /api/threads/{id}/stop` → 中断本轮（本轮不落盘） */
   stop(threadId: string): Promise<StopResponse>
   /**
@@ -83,7 +79,8 @@ export function createThreadsApi(client: HttpClient): ThreadsApi {
   const base = (threadId: string): string => `/api/threads/${encodeURIComponent(threadId)}`
 
   return {
-    create: (agentName) => client.post<ThreadCreateResponse>('/api/threads', { agent_name: agentName }),
+    create: (agentName) =>
+      client.post<ThreadCreateResponse>('/api/threads', { agent_name: agentName }),
 
     // 注意：MUST NOT 传 limit / offset（会被静默丢弃，拿不到分页效果）
     list: (agentName) =>
@@ -96,9 +93,7 @@ export function createThreadsApi(client: HttpClient): ThreadsApi {
       }),
 
     toolCallResult: (threadId, callId) =>
-      client.get<ToolCallResult>(
-        `${base(threadId)}/tool-calls/${encodeURIComponent(callId)}`,
-      ),
+      client.get<ToolCallResult>(`${base(threadId)}/tool-calls/${encodeURIComponent(callId)}`),
 
     rename: (threadId, title) =>
       client.patch<{ thread_id: string; title: string }>(base(threadId), { title }),

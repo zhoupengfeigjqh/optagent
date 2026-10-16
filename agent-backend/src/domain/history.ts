@@ -20,7 +20,9 @@ export interface HistoryLogger {
   warn(msg: string): void;
 }
 
-type ParsedLine = { kind: 'message'; message: HistoryMessage } | { kind: 'feedback'; messageId: string; value: FeedbackValue };
+type ParsedLine =
+  | { kind: 'message'; message: HistoryMessage }
+  | { kind: 'feedback'; messageId: string; value: FeedbackValue };
 
 export class HistoryStore {
   private readonly chains = new Map<string, Promise<void>>();
@@ -47,11 +49,21 @@ export class HistoryStore {
     messageId: string,
     value: FeedbackValue,
   ): Promise<void> {
-    const line = JSON.stringify({ type: 'feedback', message_id: messageId, value, ts: new Date().toISOString() });
+    const line = JSON.stringify({
+      type: 'feedback',
+      message_id: messageId,
+      value,
+      ts: new Date().toISOString(),
+    });
     return this.enqueue(userId, agentName, threadId, line);
   }
 
-  private enqueue(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+  private enqueue(
+    userId: string,
+    agentName: string,
+    threadId: string,
+    line: string,
+  ): Promise<void> {
     const key = `${userId}/${agentName}/${threadId}`;
     const prev = this.chains.get(key) ?? Promise.resolve();
     const next = prev.then(() => this.doAppend(userId, agentName, threadId, line));
@@ -62,7 +74,12 @@ export class HistoryStore {
     return next;
   }
 
-  private async doAppend(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+  private async doAppend(
+    userId: string,
+    agentName: string,
+    threadId: string,
+    line: string,
+  ): Promise<void> {
     const file = this.filePath(userId, agentName, threadId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await fs.promises.appendFile(file, line + '\n', 'utf8');
@@ -82,7 +99,9 @@ export class HistoryStore {
       else bad++;
     }
     if (bad > 0) {
-      this.logger?.warn(`history 坏行跳过 ${bad} 条（user=${userId} agent=${agentName} thread=${threadId}）`);
+      this.logger?.warn(
+        `history 坏行跳过 ${bad} 条（user=${userId} agent=${agentName} thread=${threadId}）`,
+      );
     }
     if (lines.length > 0 && parsed.length === 0) {
       // 整体损坏：备份原文件并重建为空
@@ -178,13 +197,15 @@ function parseLine(line: string): ParsedLine | undefined {
   if (typeof obj.id === 'string') msg.id = obj.id;
   if (typeof obj.ts === 'string') msg.ts = obj.ts;
   if (obj.status === 'completed' || obj.status === 'failed') msg.status = obj.status;
-  if (isUsage(obj.usage)) msg.usage = { input_tokens: obj.usage.input_tokens, output_tokens: obj.usage.output_tokens };
+  if (isUsage(obj.usage))
+    msg.usage = { input_tokens: obj.usage.input_tokens, output_tokens: obj.usage.output_tokens };
   if (typeof obj.duration_ms === 'number') msg.duration_ms = obj.duration_ms;
   if (typeof obj.agent_name === 'string') msg.agent_name = obj.agent_name;
   if (Array.isArray(obj.attachments)) {
     const atts = obj.attachments.filter(
       (a): a is { dir: string; filename: string } =>
-        typeof a === 'object' && a !== null &&
+        typeof a === 'object' &&
+        a !== null &&
         typeof (a as { dir?: unknown }).dir === 'string' &&
         typeof (a as { filename?: unknown }).filename === 'string',
     );
@@ -196,7 +217,8 @@ function parseLine(line: string): ParsedLine | undefined {
 
 function isUsage(u: unknown): u is { input_tokens: number; output_tokens: number } {
   return (
-    typeof u === 'object' && u !== null &&
+    typeof u === 'object' &&
+    u !== null &&
     typeof (u as { input_tokens?: unknown }).input_tokens === 'number' &&
     typeof (u as { output_tokens?: unknown }).output_tokens === 'number'
   );
@@ -204,7 +226,8 @@ function isUsage(u: unknown): u is { input_tokens: number; output_tokens: number
 
 function isErrorMeta(e: unknown): e is { code: string; message: string } {
   return (
-    typeof e === 'object' && e !== null &&
+    typeof e === 'object' &&
+    e !== null &&
     typeof (e as { code?: unknown }).code === 'string' &&
     typeof (e as { message?: unknown }).message === 'string'
   );

@@ -24,7 +24,9 @@ describe('文案映射表完整性', () => {
   })
 
   it('新增 ADM_ 码与复用码都以可读中文呈现', () => {
-    expect(toUserMessage({ code: 'ADM_SKILL_ARCHIVE_UNSAFE', message: 'raw' })).toContain('安全风险')
+    expect(toUserMessage({ code: 'ADM_SKILL_ARCHIVE_UNSAFE', message: 'raw' })).toContain(
+      '安全风险',
+    )
     expect(toUserMessage({ code: 'ADM_MCP_SERVICE_EXISTS', message: 'raw' })).toContain('已存在')
   })
 })
@@ -80,7 +82,13 @@ describe('extractDetailErrors —— 部署前校验的明细（SC-020）', () =
     const items = extractDetailErrors({
       errors: [
         { user_id: 'admin', agent_name: 'demo', category: 'runtime_form', code: 'X', message: 'a' },
-        { user_id: 'ops', agent_name: 'demo2', category: 'reference_validity', code: 'Y', message: 'b' },
+        {
+          user_id: 'ops',
+          agent_name: 'demo2',
+          category: 'reference_validity',
+          code: 'Y',
+          message: 'b',
+        },
       ],
     })
     expect(items).toHaveLength(2)

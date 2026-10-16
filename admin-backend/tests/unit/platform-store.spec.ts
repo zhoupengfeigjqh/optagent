@@ -138,10 +138,7 @@ describe('PlatformStore', () => {
     store.appendJsonl('deploy/history.jsonl', { id: 'h1' });
     fs.appendFileSync(store.abs('deploy/history.jsonl'), '{坏行\n', 'utf8');
     store.appendJsonl('deploy/history.jsonl', { id: 'h2' });
-    expect(store.readJsonl<{ id: string }>('deploy/history.jsonl').map((r) => r.id)).toEqual([
-      'h1',
-      'h2',
-    ]);
+    expect(store.readJsonl<{ id: string }>('deploy/history.jsonl').map((r) => r.id)).toEqual(['h1', 'h2']);
   });
 
   it('设计态目录不可写时以 ADM_STORAGE_UNAVAILABLE 拒绝（health 据此上报）', () => {

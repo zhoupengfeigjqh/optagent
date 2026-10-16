@@ -38,7 +38,9 @@ function validateNode(schema: SchemaLike, value: unknown, path: string, errors: 
   // enum 优先：值的类型由枚举成员决定，type 可能缺席
   if (Array.isArray(schema.enum)) {
     if (!schema.enum.some((e) => deepEqual(e, value))) {
-      errors.push(`${labelOf(path)} 须为以下值之一：${schema.enum.map((e) => JSON.stringify(e)).join('、')}`);
+      errors.push(
+        `${labelOf(path)} 须为以下值之一：${schema.enum.map((e) => JSON.stringify(e)).join('、')}`,
+      );
       return;
     }
   }
@@ -60,7 +62,8 @@ function validateNode(schema: SchemaLike, value: unknown, path: string, errors: 
       }
       return;
     case 'integer':
-      if (typeof value !== 'number' || !Number.isInteger(value)) errors.push(`${labelOf(path)} 须为整数`);
+      if (typeof value !== 'number' || !Number.isInteger(value))
+        errors.push(`${labelOf(path)} 须为整数`);
       else checkNumberRange(schema, value, path, errors);
       return;
     case 'number':
@@ -76,7 +79,9 @@ function validateNode(schema: SchemaLike, value: unknown, path: string, errors: 
         return;
       }
       if (isSchema(schema.items)) {
-        value.forEach((item, i) => validateNode(schema.items as SchemaLike, item, `${path}[${i}]`, errors));
+        value.forEach((item, i) =>
+          validateNode(schema.items as SchemaLike, item, `${path}[${i}]`, errors),
+        );
       }
       return;
     default:
@@ -92,7 +97,9 @@ function validateObject(schema: SchemaLike, value: unknown, path: string, errors
   }
   const obj = value as Record<string, unknown>;
 
-  const props = isPlainRecord(schema.properties) ? (schema.properties as Record<string, unknown>) : {};
+  const props = isPlainRecord(schema.properties)
+    ? (schema.properties as Record<string, unknown>)
+    : {};
   const required = Array.isArray(schema.required)
     ? schema.required.filter((r): r is string => typeof r === 'string')
     : [];
@@ -154,9 +161,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return ka.every(
     (k) =>
       k in (b as Record<string, unknown>) &&
-      deepEqual(
-        (a as Record<string, unknown>)[k],
-        (b as Record<string, unknown>)[k],
-      ),
+      deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
   );
 }

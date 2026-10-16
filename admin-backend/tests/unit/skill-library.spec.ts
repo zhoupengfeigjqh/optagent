@@ -38,12 +38,16 @@ function skillDir(name = 'pdf-parse'): string {
 
 describe('安装', () => {
   it('合规包入驻成功，整包落盘（含附件）', async () => {
-    const result = await skills.install(
-      zipFixture({ 'SKILL.md': SKILL_MD, 'ref/a.md': '附件' }),
-      { overwrite: false, source: 'p.zip' },
-    );
+    const result = await skills.install(zipFixture({ 'SKILL.md': SKILL_MD, 'ref/a.md': '附件' }), {
+      overwrite: false,
+      source: 'p.zip',
+    });
 
-    expect(result).toMatchObject({ name: 'pdf-parse', description: '解析 PDF', overwritten: false });
+    expect(result).toMatchObject({
+      name: 'pdf-parse',
+      description: '解析 PDF',
+      overwritten: false,
+    });
     expect(fs.readFileSync(path.join(skillDir(), 'SKILL.md'), 'utf8')).toBe(SKILL_MD);
     expect(fs.existsSync(path.join(skillDir(), 'ref', 'a.md'))).toBe(true);
   });
@@ -70,7 +74,10 @@ describe('安装', () => {
       source: 'a',
     });
     const result = await skills.install(
-      zipFixture({ 'SKILL.md': '---\nname: pdf-parse\ndescription: 新\n---\n\n新正文\n', 'new.txt': 'y' }),
+      zipFixture({
+        'SKILL.md': '---\nname: pdf-parse\ndescription: 新\n---\n\n新正文\n',
+        'new.txt': 'y',
+      }),
       { overwrite: true, source: 'b' },
     );
 
@@ -81,7 +88,10 @@ describe('安装', () => {
 
   it('失败无残留：校验不通过时库中不出现该目录，也不留临时/备份目录（FR-041）', async () => {
     await expect(
-      skills.install(zipFixture({ 'readme.md': '没有 SKILL.md' }), { overwrite: false, source: 'a' }),
+      skills.install(zipFixture({ 'readme.md': '没有 SKILL.md' }), {
+        overwrite: false,
+        source: 'a',
+      }),
     ).rejects.toThrow(ApiError);
 
     expect(fs.existsSync(skillDir())).toBe(false);
@@ -138,10 +148,10 @@ describe('列表与读取', () => {
 
   it('list 固定每页 8 项；names 供统一清单判定（FR-019）', async () => {
     for (let i = 0; i < 10; i += 1) {
-      await skills.install(
-        zipFixture({ 'SKILL.md': `---\nname: skill-${i}\ndescription: d\n---\n` }),
-        { overwrite: false, source: 'a' },
-      );
+      await skills.install(zipFixture({ 'SKILL.md': `---\nname: skill-${i}\ndescription: d\n---\n` }), {
+        overwrite: false,
+        source: 'a',
+      });
     }
     expect(skills.list(1).items).toHaveLength(8);
     expect(skills.list(1).page_size).toBe(8);
@@ -277,12 +287,7 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
 
   it('正向：改附件正文 → 落盘、索引大小与 updated_at 同步，hash 可用于下一次保存', () => {
     const before = skills.readFile('pdf-parse', 'references/手册.md');
-    const result = skills.writeFile(
-      'pdf-parse',
-      'references/手册.md',
-      '# 手册（第二版）\n',
-      before.hash,
-    );
+    const result = skills.writeFile('pdf-parse', 'references/手册.md', '# 手册（第二版）\n', before.hash);
 
     expect(result).toMatchObject({ path: 'references/手册.md', size: 24 });
     expect(fs.readFileSync(path.join(skillDir(), 'references', '手册.md'), 'utf8')).toBe(
@@ -294,9 +299,7 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
     expect(after.hash).toBe(result.hash);
     expect(after.hash).not.toBe(before.hash);
     expect(skills.listAll()[0]?.updated_at).toBe(result.updated_at);
-    expect(skills.listAll()[0]?.files.find((f) => f.path === 'references/手册.md')?.size).toBe(
-      result.size,
-    );
+    expect(skills.listAll()[0]?.files.find((f) => f.path === 'references/手册.md')?.size).toBe(result.size);
   });
 
   it('正向：改 SKILL.md → 索引 description 按新正文重新解析（卡片描述不脱节）', () => {

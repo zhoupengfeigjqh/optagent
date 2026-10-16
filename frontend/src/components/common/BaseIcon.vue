@@ -27,10 +27,7 @@ const ICON_PATHS: Readonly<Record<string, readonly string[]>> = {
   search: ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z', 'm21 21-4.3-4.3'],
   send: ['m22 2-7 20-4-9-9-4Z', 'M22 2 11 13'],
   stop: ['M6 6h12v12H6z'],
-  copy: [
-    'M8 8h11v11H8z',
-    'M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3',
-  ],
+  copy: ['M8 8h11v11H8z', 'M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3'],
   'chevron-down': ['m6 9 6 6 6-6'],
   'chevron-right': ['m9 18 6-6-6-6'],
   'chevron-left': ['m15 18-6-6 6-6'],

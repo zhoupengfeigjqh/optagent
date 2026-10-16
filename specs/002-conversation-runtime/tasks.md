@@ -212,3 +212,63 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T066 已知限制与存量缺口登记：① 结果文本 >256K 字符仍不抽取（与前端结构化展示同判据，既有）；② 非 text/image 块只留占位（不做真图 / 真音频投递）；③ 回填只覆盖指定 `--root` 的数据；④ `src/domain/tool-result.ts` 覆盖率 62.5 / 48.75 / 81.81 / 65.21（<80%）——本次仅**注释**改动，按「不追溯」不纳入模块清单，补齐属独立任务
 
 **观察项（登记，不追溯）**：`frontend/src/api/types.ts` 489 行、`agent-backend/src/domain/tool-events.ts` 436 行、`frontend/src/components/chat/ToolCallList.vue` 428 行、`frontend/src/components/chat/ToolCallList.spec.ts` 436 行——均在 ≤500 内但已偏高，后续再有增量时**触发即拆**（不为存量发起专项）。
+
+---
+
+# Tasks: 对话运行时 · LLM 失败的有界重试与可诊断（2026-10-15 增量）
+
+**Input**: [spec.md](./spec.md) §4.10（`TR-53`~`TR-58`）、§6、§7.5、§8、§9.5；[plan.md](./plan.md) §17~§20
+
+**范围**：LLM 调用的**有界重试**（复用 `pi-ai` 的 `retryProviderRequest`，不自建）与**失败可诊断**（分类错误码 + 诊断字段随既有通道下发 + 原始错误入结构化日志 + 前端可行动文案/诊断行 + 失败轮「重试本轮」）。`admin-backend` / `admin-frontend` **零改动**；SSE **事件类型集合不变**（`error` 仅负载增可选字段）。
+
+**Prerequisites**: [spec.md](./spec.md) 与 [plan.md](./plan.md)（**续写在同一文件**的 §17~§20，理由：与 §4.6~§4.9 同源——同一轮对话收尾链路）。
+
+**Tests**: 必须包含测试任务（宪章原则三）。测试全部在**宿主机本地**执行，容器不参与。
+
+## 设计取舍（对应宪章「治理 § 例外」的登记口径；**均非原则违反**）
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 重试交给 `pi-ai`，只传 `maxRetries` / `maxRetryDelayMs` | 原则二"同一职责只有一处实现"+ 原则六"用平台原生能力"：退避/抖动/`x-should-retry`/`Retry-After`/可打断睡眠均已实现 | 自建 `withRetry` 包一层流（第二套退避语义 + 需泵送 `AssistantMessageEventStream`） |
+| 分类下沉为 `domain/llm-error.ts` 纯函数 | 直聊与工具循环两条路径必须给出**同一个码**，否则前端文案与日志口径漂移 | 两个调用点各写一套 `if (status === …)` |
+| 诊断字段挂到**既有** `error` 对象（SSE + 落盘行） | 不新增事件类型 → 旧前端天然兼容（向后兼容的最小契约面） | 新增 `retry_notice` / `llm_diagnostic` 事件（事件集合、前端分支、四处契约全要动） |
+| 原始错误只进日志、不进 UI | 守 D13/V-12；上游原文可能含 provider 内部信息与英文技术文本 | 把 `message` 直出（与既有口径冲突，且用户看不懂） |
+| 不设 `timeoutMs` | SDK 的 `timeout` 会连同流式正文读取一起截断（误杀长回答的风险 > 收益） | 设 120s 单请求超时（可能把长回答切成失败） |
+| 失败轮复用"以缓存的上一条用户消息重发" | 与中断轮同一入口、同一链路，语义一致 | 后端自动重跑上一轮（绕过前端草稿/引用校验，且"用户已改输入"时语义含混） |
+
+## Phase 1: 规格（宪章原则一：先规格后代码）
+
+- [x] T067 回写 `spec.md`：新增 §4.10（`TR-53`~`TR-58` + 明确不做）、§6 契约增量、§7.5 修订记录、§8 宪章落实增量、§9.5 验收清单
+- [x] T068 回写 [`runtime-api-delta.md`](../../001-digital-human-platform/contracts/runtime-api-delta.md)：新增 §19 R20（错误码表 / 诊断字段 / 重试口径 / 日志事件 / 兼容性 / 不变式）
+- [x] T069 回写 `plan.md` §17~§20 与本文件本次增量任务
+
+## Phase 2: 后端实现
+
+- [ ] T070 新增 `agent-backend/src/domain/llm-error.ts`：`LlmErrorCode` / `LlmFailure` / `classifyLlmFailure({ message?, status? })`（状态码优先 → 文案兜底 → JSON 体取 `type` / `request_id`），不抛错、不猜中断
+- [ ] T071 `agent-backend/src/config.ts`：`envSchema` 新增 `LLM_MAX_RETRIES`（`int 0..5`，默认 2）与 `LLM_RETRY_MAX_DELAY_MS`（`int 0..60000`，默认 15000）+ `AppConfig` 字段；登记进 `README` 的运行参数表
+- [ ] T072 `agent-backend/src/types.ts`：`LlmEvent` 的 `error` 变体与 `HistoryMessage.error` 新增可选 `upstream_status` / `upstream_type` / `request_id`
+- [ ] T073 `agent-backend/src/infra/llm/pi-ai-provider.ts` + `src/infra/agent-loop.ts`：两条路径把 `maxRetries` / `maxRetryDelayMs` 传给 `streamSimple`；两处 `error` 事件改用 `classifyLlmFailure()`（`aborted` 仍走 `ABORTED`）
+- [ ] T074 `agent-backend/src/domain/run-finalize.ts`：失败行 `error` 与 SSE `error` 事件写入诊断字段（有才写）；新增结构化日志 `llm.call.failed`（`warn`；`LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` 带 `alert: true`），字段含 `code` / `upstream_status` / `upstream_type` / `request_id` / `provider` / `model` / 截断 `message` + `user_id` / `thread_id` / `agent_name`；无 logger 时不抛错
+- [ ] T075 装配 `llmInfo` 取值口（`server.ts` / `run-manager.ts` / `agent-factory.ts` 最小接线）：`provider` / `model` 由装配处注入，`domain` 不反向依赖 `config`
+
+## Phase 3: 后端测试（宪章原则三）
+
+- [ ] T076 [P] 新增 `agent-backend/tests/unit/llm-error.spec.ts`：分类逐类（401/402/403/429/500/502/503/408/400 上下文/400 其它/无状态码/非 JSON 体/`"<prefix> (<status>):"` 形态/显式 `status` 字段）与诊断字段解析（`type` / `request_id` 缺失 → 省略）
+- [ ] T077 [P] 新增 `agent-backend/tests/unit/llm-retry.spec.ts`（假 provider，无网络）：503×2 → 200 **只发 3 次**且成功；`LLM_MAX_RETRIES=0` 只发 1 次；不可重试错误（400/401）只发 1 次；重试等待期间 `abort` → 立刻停止且为 `ABORTED`
+- [ ] T078 `agent-backend/tests/unit/run-finalize.spec.ts`（+5 例）：失败行含三诊断字段（有则写、无则缺省）；SSE `error` 事件同形；`llm.call.failed` 事件名与字段（含 `alert` 仅两类为真）；无 logger 不抛错；实时 `test` 与 `test:all` 同步
+
+## Phase 4: 前端实现与测试
+
+- [ ] T079 [P] `frontend/src/api/types.ts`：`ErrorInfo` 新增三个可选诊断字段（附契约指针注释）；`frontend/src/utils/error-message.ts`：新增 5 个码的文案（`send-message` 场景）+ 纯函数 `formatErrorDiagnostics()`；`error-message.spec.ts` 增补文案完整性与诊断行（全字段 / 部分 / 全缺）用例
+- [ ] T080 [P] `frontend/src/components/common/ErrorNotice.vue`：新增诊断信息行（`v-if`，文本 + 颜色双通道）；`ErrorNotice.spec.ts` 增补存在/缺省两态
+- [x] T081 `frontend/src/composables/useChatStream.ts`：`lastAbortedTurn` → `lastRetryableTurn`（收尾时置位缓存：`aborted` 或**服务端已终局**的 `failed`——新增 `terminalFailure` 标记，断连/传输层失败不置位，否则重发会撞 `409 THREAD_RUN_ACTIVE`）；`useChatPanel.ts`：`canRegenerate` 扩到 `FAILED` + 新增 `onRetryFailedRun()` 承担面板级分流（**不能写模板三元表达式**：`@retry="a ? f : g"` 编译成语句，点击不触发）；`ChatPanel.vue`：失败块文案分流（可重试 →「重试本轮」，否则 →「重新获取」）；`useChatStream.regenerate.spec.ts`（+3 例：终局失败置位 / 断连不置位 / 完成不置位）、`useChatPanel.retry.spec.ts`（+4 例：`canRegenerate` 两态 + 面板级分流两态）、`ChatPanel.spec.ts`（+2 例：文案两态 + 点击落到面板重试入口）覆盖
+- [x] T081c 补 `frontend/src/components/common/ErrorNotice.spec.ts`（该组件此前**没有任何**同名 spec，只在别处被间接带到）：覆盖文案映射（已知码 / 同码不同义 / 未知码保留原码 / 空错误体）、`retryLabel` 三态（缺省「重试」/ 自定义 / `null` 不渲染入口）、`hint` 两态、`role="alert"`（**T080 的诊断信息行用例在其落地时追加**）
+- [x] T081a 修复**历史失败轮重试断链**（2026-10-15，与 T081 同一入口、同一语义，但线索来自历史而非本轮缓存）：`MessageBubble.vue` 新增 `retryLabel`（`null` = 不渲染入口）；`MessageList.vue` 从历史解析该轮的**上一条 `user` 消息**（按索引向前找，不依赖 id 反查）并新增 `retry` 上抛（载荷即 `onSend` 入参；解析不出时不给入口，文案 `retryLabels` 纳入 `v-memo` 比较项）；`ChatPanel.vue` 接上 `@retry="onRetryTurn"`；`useChatPanel.ts` 新增 `onRetryTurn`（复用 `onSend`；本轮进行中不响应，避免清草稿后被并发校验挡下）；`MessageList.spec.ts`（+3 例）/ `ChatPanel.spec.ts`（+1 例，渲染真列表与真气泡）/ 新增 `useChatPanel.retry.spec.ts`（+2 例）覆盖
+
+## Phase 5: 门禁与验收（宪章原则八 + hard gate）
+
+- [ ] T082 `agent-backend/vitest.config.ts`：`src/domain/llm-error.ts` 登记进模块覆盖率阈值清单（80%）
+- [ ] T083 后端门禁实测：`npm run typecheck` / `lint` / `test:all` / `test:coverage`（覆盖率与地板实测值登记在 T085）
+- [ ] T084 前端门禁实测：`npm run lint` / `typecheck` / `test:coverage` / `build`（实测值登记在 T085）
+- [ ] T085 硬门禁与口径登记：改动文件 ≤500 行（逐个实测行数）、**零新增依赖**（两侧 `package.json` 未变）、错误码表与前端文案表逐项对照、`spec.md` §9.5 勾选与实测值回填
+

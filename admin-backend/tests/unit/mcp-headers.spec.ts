@@ -73,19 +73,13 @@ describe('normalizeHeaders（保存期归一）', () => {
 
   it('头名非法（含空格/冒号/中文/空）→ VALIDATION_FAILED', () => {
     for (const name of ['X Token', 'X:Token', '令牌', '']) {
-      expect(codeOf(() => normalizeHeaders({ [name]: 'v' }, {}))).toBe(
-        ERROR_CODES.VALIDATION_FAILED,
-      );
+      expect(codeOf(() => normalizeHeaders({ [name]: 'v' }, {}))).toBe(ERROR_CODES.VALIDATION_FAILED);
     }
   });
 
   it('值非字符串 / 空串 → VALIDATION_FAILED（并提示如何删除该头）', () => {
-    expect(codeOf(() => normalizeHeaders({ 'X-Token': 123 }, {}))).toBe(
-      ERROR_CODES.VALIDATION_FAILED,
-    );
-    expect(codeOf(() => normalizeHeaders({ 'X-Token': '   ' }, {}))).toBe(
-      ERROR_CODES.VALIDATION_FAILED,
-    );
+    expect(codeOf(() => normalizeHeaders({ 'X-Token': 123 }, {}))).toBe(ERROR_CODES.VALIDATION_FAILED);
+    expect(codeOf(() => normalizeHeaders({ 'X-Token': '   ' }, {}))).toBe(ERROR_CODES.VALIDATION_FAILED);
     expect(messageOf(() => normalizeHeaders({ 'X-Token': '' }, {}))).toContain('不能为空');
   });
 
@@ -100,9 +94,7 @@ describe('normalizeHeaders（保存期归一）', () => {
 
   it('值含换行/控制字符 → VALIDATION_FAILED（header injection）', () => {
     for (const value of ['a\nb', 'a\rb', 'a\u0000b']) {
-      expect(codeOf(() => normalizeHeaders({ 'X-Token': value }, {}))).toBe(
-        ERROR_CODES.VALIDATION_FAILED,
-      );
+      expect(codeOf(() => normalizeHeaders({ 'X-Token': value }, {}))).toBe(ERROR_CODES.VALIDATION_FAILED);
     }
   });
 });

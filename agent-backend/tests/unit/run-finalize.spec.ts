@@ -43,7 +43,10 @@ function fakeHistory() {
 
 function fakeUsage() {
   const rows: Array<Record<string, unknown>> = [];
-  return { rows, store: { record: (row: Record<string, unknown>) => rows.push(row) } as unknown as UsageStore };
+  return {
+    rows,
+    store: { record: (row: Record<string, unknown>) => rows.push(row) } as unknown as UsageStore,
+  };
 }
 
 function makeRun(): RunImpl {
@@ -55,7 +58,10 @@ function makeRun(): RunImpl {
   return run;
 }
 
-function turn(runtime: FinalizeTurn['runtime'] = { availableTools: [] }, nextActionsMax?: number): FinalizeTurn {
+function turn(
+  runtime: FinalizeTurn['runtime'] = { availableTools: [] },
+  nextActionsMax?: number,
+): FinalizeTurn {
   return {
     userId: 'admin',
     threadId: 'th_1',
@@ -74,7 +80,11 @@ describe('RunFinalizer.done', () => {
   it('最小依赖：落两条消息 + 广播 done + 记账；未装配的后台任务一律不触发', async () => {
     const history = fakeHistory();
     const usage = fakeUsage();
-    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
     const run = makeRun();
 
     const events = collect(run);
@@ -182,15 +192,24 @@ describe('RunFinalizer.error', () => {
   it('有 usage：留痕失败轮、记一次用量、error 载荷带 usage', async () => {
     const history = fakeHistory();
     const usage = fakeUsage();
-    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
     const run = makeRun();
 
     const events = collect(run);
-    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, {
-      code: 'LLM_ERROR',
-      message: '上游模型不可用',
-      usage: USAGE,
-    });
+    await finalizer.error(
+      run,
+      turn(),
+      { role: 'user', content: '你好' },
+      {
+        code: 'LLM_ERROR',
+        message: '上游模型不可用',
+        usage: USAGE,
+      },
+    );
 
     expect(run.state).toBe('error');
     expect(history.appended[1]!.message).toMatchObject({
@@ -208,14 +227,23 @@ describe('RunFinalizer.error', () => {
   it('无 usage（未消耗）：不记账、载荷里也不出现 usage 字段', async () => {
     const history = fakeHistory();
     const usage = fakeUsage();
-    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
     const run = makeRun();
 
     const events = collect(run);
-    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, {
-      code: 'LLM_ERROR',
-      message: '上游模型不可用',
-    });
+    await finalizer.error(
+      run,
+      turn(),
+      { role: 'user', content: '你好' },
+      {
+        code: 'LLM_ERROR',
+        message: '上游模型不可用',
+      },
+    );
 
     expect(usage.rows).toHaveLength(0);
     expect(history.appended[1]!.message.usage).toBeUndefined();
@@ -224,11 +252,170 @@ describe('RunFinalizer.error', () => {
   });
 });
 
+describe('RunFinalizer.error：诊断字段与 llm.call.failed（2026-10-15）', () => {
+  it('三个诊断字段写进失败行，且与 SSE error 事件**同形**（§19.5 不变式 5）', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
+    const run = makeRun();
+    const expectedError = {
+      code: 'LLM_UNAVAILABLE',
+      message: '503 status code (no body)',
+      upstream_status: 503,
+      upstream_type: 'service_unavailable_error',
+      request_id: 'rid-1',
+    };
+
+    const events = collect(run);
+    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, expectedError);
+
+    expect(history.appended[1]!.message.error).toEqual(expectedError);
+    expect(events[0]).toMatchObject({ type: 'error', data: { error: expectedError } });
+  });
+
+  it('没有诊断字段时**键不存在**（不是 `null` / `undefined` 占位）', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
+    const run = makeRun();
+
+    const events = collect(run);
+    await finalizer.error(
+      run,
+      turn(),
+      { role: 'user', content: '你好' },
+      {
+        code: 'LLM_ERROR',
+        message: 'LLM 流异常结束',
+      },
+    );
+
+    const persisted = history.appended[1]!.message.error!;
+    expect(Object.keys(persisted).sort()).toEqual(['code', 'message']);
+    expect(JSON.stringify(events[0])).not.toContain('upstream_status');
+  });
+
+  it('llm.call.failed：字段齐备；请求级模型覆盖优先；"需人工介入"的两类带 alert', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const warn = vi.fn();
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+      logger: { warn } as never,
+      llmInfo: () => ({ provider: 'deepseek', model: 'deepseek-v4-flash' }),
+    });
+    const run = makeRun();
+    run.modelId = 'deepseek-v4-pro'; // 请求级覆盖（FR-023）
+
+    await finalizer.error(
+      run,
+      turn(),
+      { role: 'user', content: '你好' },
+      {
+        code: 'LLM_INSUFFICIENT_BALANCE',
+        message: '402: {"error":{"message":"Insufficient Balance"}}',
+        upstream_status: 402,
+      },
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [fields, text] = warn.mock.calls[0]! as [Record<string, unknown>, string];
+    expect(fields).toMatchObject({
+      event: 'llm.call.failed',
+      scope: 'run',
+      user_id: 'admin',
+      thread_id: 'th_1',
+      agent_name: 'demo',
+      code: 'LLM_INSUFFICIENT_BALANCE',
+      upstream_status: 402,
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      message: '402: {"error":{"message":"Insufficient Balance"}}',
+      duration_ms: 4_000,
+      alert: true,
+    });
+    expect('upstream_type' in fields).toBe(false); // 没有就不写，不塞 undefined
+    expect('request_id' in fields).toBe(false);
+    expect(text).toContain('LLM_INSUFFICIENT_BALANCE');
+    expect(text).toContain('402');
+  });
+
+  it('5xx 不带 alert；未装配 llmInfo 时少 provider / model 两列；超长原文截断到 500 字符', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const warn = vi.fn();
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+      logger: { warn } as never,
+    });
+    const run = makeRun();
+
+    await finalizer.error(
+      run,
+      turn(),
+      { role: 'user', content: '你好' },
+      {
+        code: 'LLM_UNAVAILABLE',
+        message: 'x'.repeat(900),
+        upstream_status: 503,
+      },
+    );
+
+    const [fields] = warn.mock.calls[0]! as [Record<string, unknown>, string];
+    expect(fields.alert).toBeUndefined();
+    expect(fields.model).toBeUndefined();
+    expect(fields.provider).toBeUndefined();
+    expect((fields.message as string).length).toBe(500);
+  });
+
+  it('未装配 logger：收尾照常完成，不抛错（日志不致命）', async () => {
+    const history = fakeHistory();
+    const usage = fakeUsage();
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
+    const run = makeRun();
+
+    await expect(
+      finalizer.error(
+        run,
+        turn(),
+        { role: 'user', content: '你好' },
+        {
+          code: 'LLM_UNAVAILABLE',
+          message: '503 status code (no body)',
+          upstream_status: 503,
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(run.state).toBe('error');
+    expect(history.appended).toHaveLength(2);
+  });
+});
+
 describe('RunFinalizer.aborted', () => {
   it('有 usage：丢弃本轮消息（message_id=null）但照记 token（FR-027）', () => {
     const history = fakeHistory();
     const usage = fakeUsage();
-    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
     const run = makeRun();
 
     const events = collect(run);
@@ -246,7 +433,11 @@ describe('RunFinalizer.aborted', () => {
   it('usage 缺省：按 0 记账（中断时的用量未知也不能漏记这一轮）', () => {
     const history = fakeHistory();
     const usage = fakeUsage();
-    const finalizer = new RunFinalizer({ history: history.store, usage: usage.store, now: () => 5_000 });
+    const finalizer = new RunFinalizer({
+      history: history.store,
+      usage: usage.store,
+      now: () => 5_000,
+    });
     const run = makeRun();
 
     finalizer.aborted(run, turn());

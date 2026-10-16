@@ -7,15 +7,15 @@ export const Authentication = 'Authentication'
 
 //获取token
 export function getToken() {
-    return cookie.get(Authentication)
+  return cookie.get(Authentication)
 }
 
 //设置token
 export function setToken(token) {
-    return cookie.set(Authentication, token)
+  return cookie.set(Authentication, token)
 }
 
 //清除token
 export function removeToken() {
-    return cookie.remove(Authentication)
+  return cookie.remove(Authentication)
 }

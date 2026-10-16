@@ -104,7 +104,10 @@ describe('AnomalySummary', () => {
     fetchAnomalies.mockResolvedValue(PAYLOAD)
     const wrapper = mount(AnomalySummary)
     await flushPromises()
-    await wrapper.findAll('button').find((b) => b.text() === '刷新')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '刷新')
+      ?.trigger('click')
     await flushPromises()
     expect(fetchAnomalies).toHaveBeenCalledTimes(2)
   })

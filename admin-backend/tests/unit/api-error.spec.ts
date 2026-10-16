@@ -8,11 +8,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ApiError, revisionConflict, validationFailed } from '../../src/domain/api-error.js';
-import { ALL_ERROR_CODES, ERROR_CODES, ERROR_STATUS, PLATFORM_OPERATOR } from '../../src/domain/error-codes.js';
+import {
+  ALL_ERROR_CODES,
+  ERROR_CODES,
+  ERROR_STATUS,
+  PLATFORM_OPERATOR,
+} from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 26 个码，且与 HTTP 状态映射一一对应（契约 §0.4；26 = 25 + ADM_MCP_TOOL_SCOPE_LOCKED）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(26);
+  it('共 27 个码，且与 HTTP 状态映射一一对应（契约 §0.4；26 → 25 是 2026-10-15 下架 ADM_MCP_TOOL_SCOPE_LOCKED，25 → 27 是同日补登 §11 的 401/403 两码）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(27);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }
@@ -27,6 +32,11 @@ describe('错误码总表', () => {
     expect(ERROR_STATUS[ERROR_CODES.NOT_FOUND]).toBe(404);
     expect(ERROR_STATUS[ERROR_CODES.INTERNAL_ERROR]).toBe(500);
     expect(ERROR_STATUS[ERROR_CODES.SERVICE_UNAVAILABLE]).toBe(503);
+  });
+
+  it('§11 预登记码的状态码已冻结（401/403，功能未实施）', () => {
+    expect(ERROR_STATUS[ERROR_CODES.ADM_UNAUTHENTICATED]).toBe(401);
+    expect(ERROR_STATUS[ERROR_CODES.ADM_FORBIDDEN]).toBe(403);
   });
 
   it('ADM_ 前缀码与既有码零碰撞', () => {

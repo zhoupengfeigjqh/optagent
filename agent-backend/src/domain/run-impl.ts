@@ -39,6 +39,13 @@ export class RunImpl implements Run {
   /** 本轮进行中的工具调用（call_id → 开始信息），供结束行计算耗时 */
   readonly toolCalls = new Map<string, { name: string; startedAt: string; startedAtMs: number }>();
   /**
+   * 本轮**实际使用**的模型 id（仅请求级覆盖时有值）。
+   *
+   * 2026-10-15：LLM 失败日志要说清"是哪个模型失败的"，而 `RunImpl` 是收尾时唯一
+   * 还能读到本轮请求信息的地方（`finalize` 只拿到 `run` + `turn`）。
+   */
+  modelId?: string;
+  /**
    * 本轮**调用过**的工具名（去重，按首次调用顺序）。
    *
    * 007：轮末生成「下一步动作提示」需要知道本轮已经调过什么；

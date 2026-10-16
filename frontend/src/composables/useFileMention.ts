@@ -98,10 +98,7 @@ export function mentionToken(reference: FileReference): string {
  * 后端 `content` MUST NOT 含引用文本（引用以结构化 `attachments` 提交），
  * 因此发送前把标记替换为空格并规整空白；结果为空的场景由调用方拦下并提示。
  */
-export function stripMentionTokens(
-  text: string,
-  references: readonly FileReference[],
-): string {
+export function stripMentionTokens(text: string, references: readonly FileReference[]): string {
   let result = text
   for (const reference of references) {
     result = result.split(mentionToken(reference)).join(' ')

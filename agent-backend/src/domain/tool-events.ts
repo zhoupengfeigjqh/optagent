@@ -163,7 +163,12 @@ export class ToolEventStore {
    * 生产路径 **fire-and-forget**（void 调用方）：落盘失败 MUST NOT 影响
    * 已广播给用户的回答（原则九：降级不阻断）。
    */
-  appendEnd(userId: string, agentName: string, threadId: string, input: AppendEndInput): Promise<void> {
+  appendEnd(
+    userId: string,
+    agentName: string,
+    threadId: string,
+    input: AppendEndInput,
+  ): Promise<void> {
     return this.enqueueTask(userId, agentName, threadId, async () => {
       const line: ToolEventLine = {
         call_id: input.callId,
@@ -247,7 +252,12 @@ export class ToolEventStore {
     return next;
   }
 
-  private async doAppend(userId: string, agentName: string, threadId: string, line: string): Promise<void> {
+  private async doAppend(
+    userId: string,
+    agentName: string,
+    threadId: string,
+    line: string,
+  ): Promise<void> {
     const file = this.filePath(userId, agentName, threadId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await fs.promises.appendFile(file, line + '\n', 'utf8');
@@ -283,7 +293,11 @@ export class ToolEventStore {
   }
 
   /** 按 assistant 消息分组（详情接口挂卡片用） */
-  readByMessage(userId: string, agentName: string, threadId: string): Map<string, ToolCallRecord[]> {
+  readByMessage(
+    userId: string,
+    agentName: string,
+    threadId: string,
+  ): Map<string, ToolCallRecord[]> {
     const grouped = new Map<string, ToolCallRecord[]>();
     for (const record of this.readAll(userId, agentName, threadId)) {
       const list = grouped.get(record.messageId);
@@ -345,10 +359,7 @@ export class ToolEventStore {
       );
     }
     if (lines.length > 0 && parsed.length === 0) {
-      const backup = path.join(
-        path.dirname(file),
-        `tool-events.corrupt-${Date.now()}.jsonl`,
-      );
+      const backup = path.join(path.dirname(file), `tool-events.corrupt-${Date.now()}.jsonl`);
       try {
         fs.renameSync(file, backup);
         fs.writeFileSync(file, '', 'utf8');
@@ -379,7 +390,8 @@ function toRecord(line: ToolEventLine): ToolCallRecord {
   if (typeof line.truncated === 'boolean') record.truncated = line.truncated;
   if (typeof line.summary === 'string') record.summary = line.summary;
   if (isStringMap(line.args_digest)) record.argsDigest = line.args_digest;
-  if (line.view_links !== undefined && line.view_links.length > 0) record.viewLinks = line.view_links;
+  if (line.view_links !== undefined && line.view_links.length > 0)
+    record.viewLinks = line.view_links;
   return record;
 }
 

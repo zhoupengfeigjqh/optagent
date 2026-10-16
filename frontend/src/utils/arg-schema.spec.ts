@@ -199,7 +199,9 @@ describe('rulesAnchorOf —— 「从算法规则选择」的落点', () => {
 
   it('祖先是被 JSON 逃生舱接管的自由对象 → 落点退到最近可见的那一行（非 exact）', () => {
     // input 未声明 properties → 渲染成一个 JSON 文本框，子字段没有独立行
-    expect(rulesAnchorOf({ properties: { input: { type: 'object' } } }, ['input', 'targetPriorities'])).toEqual({
+    expect(
+      rulesAnchorOf({ properties: { input: { type: 'object' } } }, ['input', 'targetPriorities']),
+    ).toEqual({
       anchor: ['input'],
       exact: false,
     })
@@ -220,9 +222,12 @@ describe('rulesAnchorOf —— 「从算法规则选择」的落点', () => {
 
 describe('labelHintOf —— 参数名旁的中文短标签', () => {
   it('title 与参数名同义（大小写变体）时忽略，退到 description 首句', () => {
-    expect(labelHintOf('image', { title: 'Image', description: '要识别的图片：填相对路径。图片不超过 2MB' })).toBe(
-      '要识别的图片：填相对路径',
-    )
+    expect(
+      labelHintOf('image', {
+        title: 'Image',
+        description: '要识别的图片：填相对路径。图片不超过 2MB',
+      }),
+    ).toBe('要识别的图片：填相对路径')
   })
 
   it('有意义的 title 直接用；都没有 → 空串；首句超长按 24 字截断', () => {

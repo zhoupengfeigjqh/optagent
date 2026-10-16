@@ -118,7 +118,11 @@ describe('POST /api/admin/users', () => {
 
 describe('PUT /api/admin/users/{user_id}', () => {
   it('增加/移除关联数字人（FR-024、FR-025）', async () => {
-    await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: { ...AGENT, name: 'demo2' } });
+    await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: { ...AGENT, name: 'demo2' },
+    });
     const created = fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
 
     const res = await fx.app.inject({
@@ -179,7 +183,11 @@ describe('GET /api/admin/anomalies（§7.2）', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.total).toBeGreaterThan(0);
-    expect(body.items[0]).toMatchObject({ user_id: 'admin', agent_name: 'demo', category: 'builtin_tool' });
+    expect(body.items[0]).toMatchObject({
+      user_id: 'admin',
+      agent_name: 'demo',
+      category: 'builtin_tool',
+    });
     expect(body.edit_path).toContain('{agent_name}');
   });
 

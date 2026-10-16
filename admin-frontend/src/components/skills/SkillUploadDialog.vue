@@ -113,12 +113,17 @@ async function upload(overwrite: boolean): Promise<void> {
     confirm-label="覆盖"
     cancel-label="取消"
     danger
-    @update:open="(value) => { if (!value) conflict = null }"
+    @update:open="
+      (value) => {
+        if (!value) conflict = null
+      }
+    "
     @confirm="upload(true)"
   >
     <ul v-if="conflict && conflict.affected.length > 0">
       <li v-for="(item, index) in conflict.affected" :key="index">
-        <span class="mono">{{ item.user_id }}</span> 的 <span class="mono">{{ item.agent_name }}</span>
+        <span class="mono">{{ item.user_id }}</span> 的
+        <span class="mono">{{ item.agent_name }}</span>
       </li>
     </ul>
   </ConfirmDialog>

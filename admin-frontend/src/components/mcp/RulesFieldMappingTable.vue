@@ -166,11 +166,7 @@ function isOrphan(tool: string): boolean {
 
 /** 字段保留项：已保存值不在当前 Schema 枚举里（schema 漂移），标徽提示 */
 function isFieldOrphan(row: RuleRow): boolean {
-  return (
-    row.field !== '' &&
-    row.tool !== '' &&
-    !rulesFieldPathsOf(row.tool).includes(row.field)
-  )
+  return row.field !== '' && row.tool !== '' && !rulesFieldPathsOf(row.tool).includes(row.field)
 }
 </script>
 
@@ -179,8 +175,8 @@ function isFieldOrphan(row: RuleRow): boolean {
     <legend class="field__label">算法规则参数设置</legend>
     <p class="field__hint">
       此条仅针对调度算法有效。声明需承载算法规则清单的工具参数：用户在 HITL 参数确认窗中可点
-      「从算法规则选择」，从「数据准备/算法规则」的最新规则文件勾选规则并调整优先级，
-      确认后生成 array[object] 填入该字段。只对该工具自身开启「调用人工确认」时生效；
+      「从算法规则选择」，从「数据准备/算法规则」的最新规则文件勾选规则并调整优先级， 确认后生成
+      array[object] 填入该字段。只对该工具自身开启「调用人工确认」时生效；
       无需确认时参数由模型直接填写，本设置不生效。
     </p>
 
@@ -215,8 +211,13 @@ function isFieldOrphan(row: RuleRow): boolean {
               @change="setRow(index, 'field', ($event.target as HTMLSelectElement).value)"
             >
               <option value="" disabled>（选字段）</option>
-              <option v-for="field in fieldOptions(row.tool, row.field)" :key="field" :value="field">
-                {{ field }}<template v-if="isFieldOrphan(row) && field === row.field">（清单外）</template>
+              <option
+                v-for="field in fieldOptions(row.tool, row.field)"
+                :key="field"
+                :value="field"
+              >
+                {{ field
+                }}<template v-if="isFieldOrphan(row) && field === row.field">（清单外）</template>
               </option>
             </select>
             <div v-if="row.field === ''" class="rules-field-table__error" role="alert">
@@ -242,7 +243,9 @@ function isFieldOrphan(row: RuleRow): boolean {
       </tbody>
     </table>
     <p v-else class="field__hint">
-      当前未声明任何算法规则参数{{ disabled === true ? '（HITL 无需确认或未开启时不可配置）' : '。' }}
+      当前未声明任何算法规则参数{{
+        disabled === true ? '（HITL 无需确认或未开启时不可配置）' : '。'
+      }}
     </p>
 
     <p v-if="duplicateError !== ''" class="rules-field-table__error" role="alert">

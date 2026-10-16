@@ -56,7 +56,9 @@ export function serializeToolResult(result: unknown): SerializedToolResult {
         } else if (b.type === 'image') {
           const mime = typeof b.mimeType === 'string' ? b.mimeType : 'image/*';
           const approxBytes = typeof b.data === 'string' ? Math.floor((b.data.length * 3) / 4) : 0;
-          parts.push(approxBytes > 0 ? `[图片 ${mime} ~${formatBytes(approxBytes)}]` : `[图片 ${mime}]`);
+          parts.push(
+            approxBytes > 0 ? `[图片 ${mime} ~${formatBytes(approxBytes)}]` : `[图片 ${mime}]`,
+          );
         }
       }
       if (parts.length === 0) parts.push(safeJson(result));
@@ -72,7 +74,10 @@ export function serializeToolResult(result: unknown): SerializedToolResult {
 }
 
 /** 按字节截断（不切坏 UTF-8：末尾残留的代理字符丢弃） */
-export function truncateToBytes(text: string, maxBytes: number): { text: string; truncated: boolean } {
+export function truncateToBytes(
+  text: string,
+  maxBytes: number,
+): { text: string; truncated: boolean } {
   const buf = Buffer.from(text, 'utf8');
   if (buf.length <= maxBytes) return { text, truncated: false };
   let sliced = buf.subarray(0, maxBytes).toString('utf8');
@@ -129,7 +134,10 @@ export function digestArgs(args: unknown): Record<string, string> | undefined {
   for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
     if (n >= DIGEST_MAX_ITEMS) break;
     if (typeof value === 'string') {
-      out[key] = value.length <= DIGEST_VALUE_MAX_CHARS ? value : `${value.slice(0, DIGEST_VALUE_MAX_CHARS)}…`;
+      out[key] =
+        value.length <= DIGEST_VALUE_MAX_CHARS
+          ? value
+          : `${value.slice(0, DIGEST_VALUE_MAX_CHARS)}…`;
     } else if (typeof value === 'number' || typeof value === 'boolean') {
       out[key] = String(value);
     } else if (value === null) {

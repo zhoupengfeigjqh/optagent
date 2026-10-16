@@ -11,6 +11,7 @@ import type { Logger } from 'pino';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { loadAgentConfig } from '../domain/agent-instance.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
+import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import { buildTailInstruction, effectiveNextActionsMax } from '../domain/next-actions.js';
@@ -64,6 +65,11 @@ export interface AgentFactoryDeps {
   providerFor?: (entry: ModelSelection) => LlmProvider;
   logger: Logger;
   mcpTimeoutMs: number;
+  /**
+   * 2026-10-15：请求级模型覆盖的临时 provider 的有界重试口径。
+   * 缺省 = 不重试（测试默认；生产由 `server.ts` 注入 `config.llmRetry`）。
+   */
+  llmRetry?: LlmRetryOptions;
   /** read_file 截断上限（KB） */
   truncateKb?: number;
   /** 签名直链对外基址（file_args 转换用） */
@@ -75,6 +81,9 @@ export interface AgentFactoryDeps {
   /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb */
   onMcpCall?: (event: McpCallEvent) => void;
 }
+
+/** 未注入重试口径时的缺省（= 不重试，与 pi-ai 的 `maxRetries` 默认一致；测试路径即此） */
+const NO_LLM_RETRY: LlmRetryOptions = { maxRetries: 0, maxRetryDelayMs: 0 };
 
 export class AgentInstanceFactory {
   constructor(private readonly deps: AgentFactoryDeps) {}
@@ -140,11 +149,7 @@ export class AgentInstanceFactory {
       });
       // list_dir/read_file 的目录清单按**该数字人**的 scenario 动态生成；
       // 未配置场景时退化为三空间根
-      const availableDirs = listAvailableDirs(
-        this.deps.root,
-        inst.key.userId,
-        inst.key.agentName,
-      );
+      const availableDirs = listAvailableDirs(this.deps.root, inst.key.userId, inst.key.agentName);
       tools.push(
         ...buildBuiltinTools({
           fileAccess: fa,
@@ -245,7 +250,7 @@ export class AgentInstanceFactory {
     const llm = req.model
       ? this.deps.providerFor
         ? this.deps.providerFor(req.model)
-        : new PiAiLlmProvider(req.model)
+        : new PiAiLlmProvider(req.model, this.deps.llmRetry ?? NO_LLM_RETRY)
       : this.deps.llm();
     // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
     let systemPrompt = req.systemExtra
@@ -314,11 +319,17 @@ function asyncToolContext(
     tools,
     // 回写目录带数字人段（009）：产出落进**发起该轮的数字人**的临时空间/后台产出
     mintResultUrl: (toolName: string, toolCallId: string) =>
-      mintPutUrl(deps.publicBaseUrl, deps.fileSignSecret, userId, agentScopedPath(agentName, PRODUCED_DIR), {
-        sid: threadId,
-        callId: toolCallId,
-        tool: `${server.name}__${toolName}`,
-      }),
+      mintPutUrl(
+        deps.publicBaseUrl,
+        deps.fileSignSecret,
+        userId,
+        agentScopedPath(agentName, PRODUCED_DIR),
+        {
+          sid: threadId,
+          callId: toolCallId,
+          tool: `${server.name}__${toolName}`,
+        },
+      ),
   };
 }
 

@@ -11,17 +11,17 @@
  * D13 唯一例外：`FILE_SCHEMA_INVALID`（上传表头/字段校验）的问题清单是后端按文件
  * 动态生成的（缺哪些表头、哪行哪个字段类型不符），按码分派无法承载——该码直接
  * 透传后端 `details`（逐条问题的中文清单），不套固定文案。
+ *
+ * 2026-10-15（`TR-57`）：另提供 `formatErrorDiagnostics()` 生成"诊断信息行"
+ * （错误码 · 上游状态码 · 上游类型 · 请求 ID），与文案映射**同源同处**——两者都只读
+ * `ErrorInfo`，且都不展示后端 `message`。
  */
 
 import type { ErrorInfo } from '../api/types'
 
 /** 错误展示场景。 */
 export type ErrorMessageContext =
-  | 'default'
-  | 'create-thread'
-  | 'send-message'
-  | 'upload'
-  | 'preview'
+  'default' | 'create-thread' | 'send-message' | 'upload' | 'preview'
 
 /** 通用兜底文案。 */
 const GENERIC_MESSAGE = '请求失败，请稍后重试'
@@ -57,6 +57,17 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   INTERNAL_ERROR: '系统繁忙，请稍后重试',
   SERVICE_UNAVAILABLE: '系统繁忙，请稍后重试',
   NETWORK_ERROR: '网络异常，请检查连接后重试',
+  // 模型调用失败分级（2026-10-15，TR-54 / 契约 §19.2）——只出现在发消息链路
+  // （`useChatStream` 的失败 toast 与 `ChatPanel` 的失败块，两处都传 `send-message`）。
+  //
+  // 口径上有意与契约表的示例文案差两处，理由都是"写死会失真"：
+  // ① 不写死上游状态码（同一码覆盖 5xx/408、429 等，实际值走诊断行，`formatErrorDiagnostics`）；
+  // ② 不断言"已自动重试"（是否重试由 `LLM_MAX_RETRIES` 决定，置 0 时该句即为假话）。
+  LLM_UNAVAILABLE: '模型服务暂时不可用，请稍后重试',
+  LLM_RATE_LIMITED: '模型调用过于频繁，请稍后重试',
+  LLM_INSUFFICIENT_BALANCE: '模型账户余额不足，请联系管理员充值',
+  LLM_UNAUTHORIZED: '模型凭证无效或无权限，请联系管理员检查 API Key',
+  LLM_CONTEXT_TOO_LONG: '本轮上下文过长，请精简输入或新开会话',
 }
 
 /** 场景化覆盖（优先级高于基础映射）。 */
@@ -126,6 +137,37 @@ export function toUserMessage(
 
   // 未知码：通用文案 + 保留原码，便于排查
   return `${GENERIC_MESSAGE}（${code}）`
+}
+
+/**
+ * 生成错误块的**诊断信息行**（2026-10-15，`TR-57`）：`错误码 · 上游状态码 · 上游类型 · 请求 ID`。
+ *
+ * - 缺失字段**自动省略**：全字段 → `LLM_UNAVAILABLE · 上游 503 · 上游类型 service_unavailable_error · 请求 ID rid-1`，
+ *   只带 `request_id` → `LLM_UNAVAILABLE · 请求 ID rid-1`；
+ * - 三个诊断字段**全缺** → `null`：调用方据此**不渲染**该行——否则只剩一个错误码，
+ *   与已展示的文案重复（未知码的文案本就带码），纯属噪音；
+ * - **MUST NOT** 掺入 `message`（后端原始文案，可能含 provider 内部信息与英文技术文本，见契约 §19.3）。
+ */
+export function formatErrorDiagnostics(error: ErrorInfo | null | undefined): string | null {
+  if (!error) {
+    return null
+  }
+
+  const parts: string[] = []
+  if (typeof error.upstream_status === 'number') {
+    parts.push(`上游 ${error.upstream_status}`)
+  }
+  if (error.upstream_type) {
+    parts.push(`上游类型 ${error.upstream_type}`)
+  }
+  if (error.request_id) {
+    parts.push(`请求 ID ${error.request_id}`)
+  }
+  if (parts.length === 0) {
+    return null
+  }
+
+  return error.code ? [error.code, ...parts].join(' · ') : parts.join(' · ')
 }
 
 /**

@@ -17,21 +17,29 @@ import type { ThreadsApi } from '../api/threads'
 import type { Message, ThreadDetail } from '../api/types'
 import { createThreadsStore } from './useThreads'
 
+/**
+ * 详情响应夹具。
+ *
+ * 显式标注 `ThreadDetail`：让 tsc 守住「桩形状 == 接口契约」，避免契约漂移；
+ * 用例可用 `calls.detail.mockResolvedValue({ ...DETAIL_FIXTURE, ... })` 改写上游返回。
+ */
+const DETAIL_FIXTURE: ThreadDetail = {
+  thread_id: 'th_1',
+  agent_name: 'demo',
+  title: null,
+  created_at: '',
+  updated_at: '',
+  total: 0,
+  running: false,
+  pending_interaction: null,
+  messages: [],
+}
+
 function makeApi(overrides: Partial<Record<keyof ThreadsApi, unknown>> = {}) {
   const calls = {
     create: vi.fn(async () => ({ thread_id: 'th_new', created_at: '', title: null })),
     list: vi.fn(async () => []),
-    detail: vi.fn(async () => ({
-      thread_id: 'th_1',
-      agent_name: 'demo',
-      title: null,
-      created_at: '',
-      updated_at: '',
-      total: 0,
-      running: false,
-      pending_interaction: null,
-      messages: [],
-    })),
+    detail: vi.fn(async () => DETAIL_FIXTURE),
     remove: vi.fn(async () => undefined),
   }
   const api = {
@@ -66,12 +74,17 @@ describe('ThreadsStore.startNew —— 视图态空对话（不落盘）', () =>
     const { api, calls } = makeApi()
     const { store, activeThreadId } = makeStore(api)
 
-    // 先造出"正在看一个已有消息的会话"的状态
-    activeThreadId.value = 'th_1'
-    store.messages.value = ONE_MESSAGE
-    store.total.value = 1
-    store.running.value = true
-    store.pendingInteraction.value = null
+    // 先造出"正在看一个已有消息的会话"的状态：
+    // 走公开路径（select → detail），而不是直接改写 store 暴露的只读视图——
+    // 那些视图的契约就是 Readonly<Ref>，生产代码同样写不了。
+    calls.detail.mockResolvedValue({
+      ...DETAIL_FIXTURE,
+      messages: ONE_MESSAGE,
+      total: 1,
+      running: true,
+    })
+    await store.select('th_1')
+    calls.detail.mockClear()
 
     store.startNew()
     await Promise.resolve()
@@ -88,12 +101,17 @@ describe('ThreadsStore.startNew —— 视图态空对话（不落盘）', () =>
     expect(calls.detail).not.toHaveBeenCalled()
   })
 
-  it('与 clearActive 同效（同一条实现，不引入第二套清空逻辑）', () => {
-    const { api } = makeApi()
+  it('与 clearActive 同效（同一条实现，不引入第二套清空逻辑）', async () => {
+    const { api, calls } = makeApi()
     const { store, activeThreadId } = makeStore(api)
 
-    activeThreadId.value = 'th_1'
-    store.messages.value = ONE_MESSAGE
+    calls.detail.mockResolvedValue({
+      ...DETAIL_FIXTURE,
+      messages: ONE_MESSAGE,
+      total: 1,
+    })
+    await store.select('th_1')
+
     store.startNew()
 
     expect(activeThreadId.value).toBeNull()
@@ -152,7 +170,3 @@ describe('ThreadsStore —— 列表口径（服务端权威，前端不过滤�
     expect(store.list.value).toEqual([])
   })
 })
-
-/** 详情响应形状的编译期护栏（避免上面的桩与真实契约漂移） */
-const _detailShape: ThreadDetail | null = null
-void _detailShape

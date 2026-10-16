@@ -84,8 +84,9 @@ export function sanitize(raw: McpServiceConfig): McpServiceConfig {
  * - 元素为**该服务的原始工具名**（不含 `{server}__` 前缀），trim 后去重；
  * - **不校验名字是否真实存在**：清单是探测结果，服务不可达时也要能保存
  *   （与 `rules_fields`/`async_tools` 的既有约定一致），名字漂移由详情页的白名单核对呈现；
- * - `required = true`（新建）：缺字段 / 空数组都拒绝——白名单创建后不可改，
- *   所以 MUST 在创建这一步就问清楚，不留"全部工具放行"的后门。
+ * - `required = true`（新建，以及保存时显式携带该字段）：缺字段 / 空数组都拒绝——
+ *   空数组的语义是"不限制"（与"一个都不给"相反），MUST 在问清楚的这一步就拦住，
+ *   不留"全部工具放行"的后门（白名单之后可在 `PUT` 里整体替换）。
  */
 export function normalizeAllowedTools(raw: unknown, required: boolean): string[] {
   if (raw === undefined || raw === null) {
@@ -146,8 +147,7 @@ function readAllowedTools(raw: unknown): string[] {
  * **缺省 = 沿用存量**（保存调用配置 MUST NOT 顺手清空令牌）；**提供 = 全量替换**
  * （`{}` 即清空全部请求头）。仅对 `http` 传输有意义（`stdio` 由启动参数/环境变量承载）。
  */
-export const MCP_HEADERS_HINT =
-  '请求头为「头名 → 值」的对象，例如 {"X-MCP-Token":"…"}；值为单行字符串';
+export const MCP_HEADERS_HINT = '请求头为「头名 → 值」的对象，例如 {"X-MCP-Token":"…"}；值为单行字符串';
 
 /** 掩码里的省略号（长值中间省略；保存期据此识别"把掩码当值提交"） */
 export const HEADER_MASK_ELLIPSIS = '…';
@@ -214,16 +214,10 @@ function headerValueProblem(name: string, raw: unknown): string | null {
  *
  * 值只 trim 两端空白（HTTP 本身会剥 OWS；粘贴带尾空格是最常见的"配了却 401"来源）。
  */
-export function normalizeHeaders(
-  raw: unknown,
-  fallback: Record<string, string>,
-): Record<string, string> {
+export function normalizeHeaders(raw: unknown, fallback: Record<string, string>): Record<string, string> {
   if (raw === undefined || raw === null) return fallback;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `headers 须为对象（${MCP_HEADERS_HINT}），可为 {}`,
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `headers 须为对象（${MCP_HEADERS_HINT}），可为 {}`);
   }
   const out: Record<string, string> = {};
   /** 头名大小写不敏感：`X-MCP-Token` 与 `x-mcp-token` 同时出现会让"发哪个"变成实现细节 */

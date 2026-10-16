@@ -37,7 +37,10 @@
           :key="card.key"
           class="relative overflow-hidden rounded-lg bg-white px-5 py-4"
         >
-          <span class="absolute inset-y-0 left-0 w-1" :style="{backgroundColor: card.color}"></span>
+          <span
+            class="absolute inset-y-0 left-0 w-1"
+            :style="{ backgroundColor: card.color }"
+          ></span>
           <div class="text-sm text-gray-500">{{ card.title }}</div>
           <div class="mt-1 text-2xl font-bold leading-8">{{ metricValue(card.key) }}</div>
           <div class="mt-0.5 text-xs text-gray-400">{{ card.sub }}</div>
@@ -55,7 +58,10 @@
         <!-- 图例：常规 / 加药+加色 / 仅加药 / 仅加色 / 切换准备 -->
         <div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-gray-600">
           <span v-for="item in legendItems" :key="item.key" class="flex items-center gap-1">
-            <span class="inline-block h-3 w-3 rounded-sm" :style="{backgroundColor: item.color}"></span>
+            <span
+              class="inline-block h-3 w-3 rounded-sm"
+              :style="{ backgroundColor: item.color }"
+            ></span>
             {{ item.title }}
           </span>
         </div>
@@ -70,7 +76,7 @@
           :is-fixed-btn="true"
         >
           <!-- 设备列：产线名称在上、编号在下两行展示 -->
-          <template #device="{record}">
+          <template #device="{ record }">
             <div class="leading-tight">
               <div class="font-medium">{{ record.name }}</div>
               <div class="text-xs text-gray-400">{{ record.id }}</div>
@@ -87,7 +93,7 @@
         :columns="overallCols"
         :data-source="overallRows"
         :loading="loading.overall"
-        :scroll="{x: 'max-content'}"
+        :scroll="{ x: 'max-content' }"
         :pagination="false"
         row-key="id"
         size="small"
@@ -111,7 +117,7 @@
         :columns="usageCols"
         :data-source="usageRows"
         :loading="loading.usage"
-        :scroll="{x: 'max-content'}"
+        :scroll="{ x: 'max-content' }"
         :pagination="false"
         row-key="id"
         size="small"
@@ -135,7 +141,7 @@
         :columns="linePlanCols"
         :data-source="linePlanRows"
         :loading="loading.linePlan"
-        :scroll="{x: 'max-content'}"
+        :scroll="{ x: 'max-content' }"
         :pagination="false"
         row-key="id"
         size="small"
@@ -264,7 +270,14 @@ interface ColumnConfig {
   title: string
   dataIndex: string
   width?: number
-  customRender?: (text: string | number) => any
+  /**
+   * 自定义渲染。
+   *
+   * 入参是 ant-design-vue 的单元格上下文**对象**（`{ text, record, index, ... }`），
+   * 不是标量 `text`——`task-result.data.js` 里所有列都写成 `({ text }) => ...`，
+   * 标量签名会让这些列一个都传不进来。
+   */
+  customRender?: (ctx: { text: any; record?: any; index?: number }) => any
   align?: 'center' | 'left' | 'right'
 }
 
@@ -301,7 +314,7 @@ const loading = reactive({
 /* ---------- 2. 排产结果指标 ---------- */
 
 /** 指标数据：以 task-result.data.js 中的结构为初始模板，请求后合并替换 */
-const metrics = ref<MetricItem>({...productionPlanMetrics.value})
+const metrics = ref<MetricItem>({ ...productionPlanMetrics.value })
 
 /** 空串 / 空值统一展示 0，避免卡片出现空白 */
 function metricValue(key: string): string | number {
@@ -322,7 +335,7 @@ const totalDurationText = computed(() => formatDuration(metrics.value.totalDurat
 /* ---------- 3. 排产结果甘特图 ---------- */
 
 /** 甘特图数据：以 task-result.data.js 中的结构为初始模板（lines 置空） */
-const gantt = ref<GanttData>({...productionPlanGantt.value, lines: []})
+const gantt = ref<GanttData>({ ...productionPlanGantt.value, lines: [] })
 
 const ganttLines = computed<GanttLine[]>(() => gantt.value.lines || [])
 
@@ -344,7 +357,7 @@ const ganttCategories = computed(() =>
 
 /** 甘特图左侧表格列：设备（slot 两行展示） */
 const ganttCols = ref<GanttCol[]>([
-  {title: '设备', dataIndex: 'name', key: 'device', slot: 'device', width: 130},
+  { title: '设备', dataIndex: 'name', key: 'device', slot: 'device', width: 130 },
 ])
 
 const ganttOption = computed(() => buildTaskGanttOption(ganttCategories.value))
@@ -366,9 +379,9 @@ const overallCols = toColumns(overallPlanColumns)
 const usageCols = toColumns(lineUsageRateColumns)
 const linePlanCols = toColumns(linePlanColumns)
 
-const overallState = reactive<PageState>({pageNum: 1, pageSize: 10})
-const usageState = reactive<PageState>({pageNum: 1, pageSize: 10})
-const linePlanState = reactive<PageState>({pageNum: 1, pageSize: 10})
+const overallState = reactive<PageState>({ pageNum: 1, pageSize: 10 })
+const usageState = reactive<PageState>({ pageNum: 1, pageSize: 10 })
+const linePlanState = reactive<PageState>({ pageNum: 1, pageSize: 10 })
 
 const overallTotal = ref(0)
 const usageTotal = ref(0)
@@ -424,9 +437,9 @@ const fetchLinePlan = () =>
 async function fetchMetrics() {
   loading.metrics = true
   try {
-    const res: ApiResult<MetricItem> = await getMetricsApi({...baseQuery})
+    const res: ApiResult<MetricItem> = await getMetricsApi({ ...baseQuery })
     if (res.code === 200 && res.data) {
-      metrics.value = {...metrics.value, ...res.data}
+      metrics.value = { ...metrics.value, ...res.data }
     }
   } catch {
     // 业务错误已由 axios 拦截器统一提示
@@ -438,9 +451,9 @@ async function fetchMetrics() {
 async function fetchGantt() {
   loading.gantt = true
   try {
-    const res: ApiResult<GanttData> = await getGanttApi({...baseQuery})
+    const res: ApiResult<GanttData> = await getGanttApi({ ...baseQuery })
     if (res.code === 200 && res.data) {
-      gantt.value = {...gantt.value, ...res.data}
+      gantt.value = { ...gantt.value, ...res.data }
     }
   } catch {
     // 业务错误已由 axios 拦截器统一提示
@@ -453,7 +466,7 @@ async function fetchGantt() {
 async function handleExport() {
   loading.export = true
   try {
-    const res: Blob | ApiResult = await exportSchedulingApi({...baseQuery})
+    const res: Blob | ApiResult = await exportSchedulingApi({ ...baseQuery })
     // 后端异常时可能仍返回 JSON（blob 形态下表现为 type 含 application/json）
     if (res instanceof Blob && res.type.includes('json')) {
       const text = await res.text()
@@ -483,7 +496,7 @@ async function handleExport() {
 
 /** 首屏初始化：解析路由查询参数并并行拉取全部数据 */
 onMounted(() => {
-  const {userId, conversationId, sourceType, sourceValue, taskId, taskNo} = route.query
+  const { userId, conversationId, sourceType, sourceValue, taskId, taskNo } = route.query
   baseQuery.userId = String(userId ?? '') || 111
   baseQuery.conversationId = String(conversationId ?? '')
   baseQuery.sourceType = String(sourceType ?? '')

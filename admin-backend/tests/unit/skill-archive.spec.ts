@@ -52,7 +52,7 @@ describe('纯函数：条目安全判定', () => {
     expect(unsafeEntryReason('a/../../b')).toMatch(/穿越/);
     expect(unsafeEntryReason('a\u0000b')).toMatch(/控制字符/);
     expect(unsafeEntryReason('')).toMatch(/为空/);
-  })
+  });
 
   it('反斜杠按**路径分隔符**归一（Windows 打包工具产出），但仍拒绝反斜杠开头的绝对路径与穿越', () => {
     // Windows 的"发送到压缩文件夹"/PowerShell 用 \ 作分隔符：必须能装
@@ -96,7 +96,12 @@ describe('parseSkillMetadata', () => {
   });
 
   it('异常：缺 frontmatter / 缺字段 / 空字段 → ADM_SKILL_ARCHIVE_INVALID', () => {
-    const cases = ['正文没有元数据块', '---\ndescription: y\n---\n', '---\nname: x\n---\n', '---\nname: "  "\ndescription: y\n---\n'];
+    const cases = [
+      '正文没有元数据块',
+      '---\ndescription: y\n---\n',
+      '---\nname: x\n---\n',
+      '---\nname: "  "\ndescription: y\n---\n',
+    ];
     for (const raw of cases) {
       let caught: unknown;
       try {

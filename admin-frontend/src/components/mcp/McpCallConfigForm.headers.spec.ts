@@ -31,6 +31,8 @@ const SERVICE: McpServiceDetail = {
   file_args: {},
   tools: [{ name: 'sum_raw_not_arrival_qty', description: '求和', parameters: {} }],
   tools_truncated: false,
+  available_tools: [{ name: 'sum_raw_not_arrival_qty', description: '求和', parameters: {} }],
+  available_tools_truncated: false,
   tools_error: null,
   references: [],
   revision: 1,

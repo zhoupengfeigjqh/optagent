@@ -81,9 +81,7 @@ export function detectAnomalies(design: AgentRefSource, index: ReferenceIndex): 
 /** 异常态的可读原因（无异常返回 `null`；异常态 MUST 可见且可定位到具体对象） */
 export function anomalyReason(anomalies: Anomaly[]): string | null {
   if (anomalies.length === 0) return null;
-  return anomalies
-    .map((a) => `${CATEGORY_LABEL[a.category]}「${a.target_name}」已失效`)
-    .join('；');
+  return anomalies.map((a) => `${CATEGORY_LABEL[a.category]}「${a.target_name}」已失效`).join('；');
 }
 
 /** 引用了某内置工具的数字人名 */

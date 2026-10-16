@@ -103,9 +103,7 @@ describe('McpServiceListService.detail', () => {
   it('返回调用配置与工具清单', async () => {
     configure('ocr');
     const detail = await buildService({
-      listTools: async () => [
-        { name: 'ocr_image', description: '识别图片', parameters: { type: 'object' } },
-      ],
+      listTools: async () => [{ name: 'ocr_image', description: '识别图片', parameters: { type: 'object' } }],
     }).detail('ocr');
 
     expect(detail).not.toBeNull();
@@ -124,6 +122,8 @@ describe('McpServiceListService.detail', () => {
 
     expect(detail?.tools).toEqual([]);
     expect(detail?.tools_truncated).toBe(false);
+    // 探测失败 → 全量候选也为空：界面据此**不开**工具范围弹窗（拿不到可信基准）
+    expect(detail?.available_tools).toEqual([]);
     expect(detail?.tools_error).toContain('连接被拒绝');
   });
 
@@ -133,9 +133,7 @@ describe('McpServiceListService.detail', () => {
 
   it('服务详情里的 references 由注入的引用推导提供（不落库）', async () => {
     configure('ocr');
-    const service = buildService({}, (name) => [
-      { user_id: 'admin', agent_name: `${name}-user` },
-    ]);
+    const service = buildService({}, (name) => [{ user_id: 'admin', agent_name: `${name}-user` }]);
     const detail = await service.detail('ocr');
     expect(detail?.references).toEqual([{ user_id: 'admin', agent_name: 'ocr-user' }]);
   });
@@ -155,6 +153,9 @@ describe('McpServiceListService.detail —— 工具白名单（2026-10-03）', 
     expect(detail?.allowed_tools).toEqual(['query_price', 'ocr_image']);
     expect(detail?.tools.map((t) => t.name)).toEqual(['query_price', 'ocr_image']);
     expect(detail?.missing_tools).toEqual([]);
+    // 全量候选（2026-10-15）：工具范围弹窗的勾选基准，顺序 = 服务返回顺序
+    expect(detail?.available_tools.map((t) => t.name)).toEqual(['ocr_image', 'ocr_pdf', 'query_price']);
+    expect(detail?.available_tools_truncated).toBe(false);
   });
 
   it('白名单里有服务当前**不存在**的工具 → missing_tools 列出它（界面据此标异常）', async () => {
@@ -181,7 +182,9 @@ describe('McpServiceListService.detail —— 工具白名单（2026-10-03）', 
   it('存量服务（白名单为空）= 不限制：服务全量工具都呈现', async () => {
     // 直接写文档模拟"白名单上线前的记录"：空白名单**无法经 create 产出**（新建必填非空）
     store.writeJson('mcp-services.json', {
-      items: { ocr: { name: 'ocr', description: 'x', transport: 'http', url: 'http://ocr:8000/mcp' } },
+      items: {
+        ocr: { name: 'ocr', description: 'x', transport: 'http', url: 'http://ocr:8000/mcp' },
+      },
     });
     const detail = await buildService({ listTools: async () => CATALOG }).detail('ocr');
 

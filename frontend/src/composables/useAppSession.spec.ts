@@ -132,14 +132,15 @@ describe('切换数字人 → 进入新的空对话视图（009 FR-010/FR-022）
     expect(after.some((item) => item.url.includes('/api/files/workspace'))).toBe(true)
 
     // MUST NOT 落盘空会话：没有任何创建会话的 POST
-    expect(after.filter((item) => item.method === 'POST' && item.url.endsWith('/api/threads'))).toEqual([])
+    expect(
+      after.filter((item) => item.method === 'POST' && item.url.endsWith('/api/threads')),
+    ).toEqual([])
 
     // 视图已回到空对话
     expect(session.threads.activeId.value).toBeNull()
     expect(session.threads.messages.value).toEqual([])
     expect(session.agents.currentAgent.value?.agent_name).toBe('agent-b')
   })
-
 })
 
 describe('装配期不预置 activeThreadId（刷新恢复的前提）', () => {

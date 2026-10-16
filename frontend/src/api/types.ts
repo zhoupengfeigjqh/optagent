@@ -32,6 +32,19 @@ export interface ErrorInfo {
   message: string
   /** 后端结构化问题清单（仅 `FILE_SCHEMA_INVALID` 使用；D13 例外，透传展示） */
   details?: unknown
+  /**
+   * 2026-10-15（`TR-55` / 契约 §19.3）：`error` 对象的三个**可选**诊断字段，
+   * 连同 `code` 一起由后端 `domain/llm-error.ts` 的 `classifyLlmFailure()` 一次构造。
+   * **有才写、缺省不写 `null`**（旧前端忽略未知字段即可，向后兼容）。
+   *
+   * 它们只喂**诊断信息行**（`formatErrorDiagnostics()`），MUST NOT 直接展示上游原文。
+   */
+  /** 上游 HTTP 状态码（如 503） */
+  upstream_status?: number
+  /** 上游错误类型（如 `service_unavailable_error`） */
+  upstream_type?: string
+  /** 上游请求 id（向 provider 报障用） */
+  request_id?: string
 }
 
 /* ============================================================
@@ -174,10 +187,17 @@ export type MessageRole = 'user' | 'assistant'
 /** 消息状态：仅 assistant 完成轮返回，缺省视为 `completed`。 */
 export type MessageStatus = 'completed' | 'failed'
 
-/** 视图链接：服务给的**原值**地址 + 可选名称（名称缺省 = 界面显示地址，`TR-46`）。 */
+/**
+ * 视图链接：服务给的**原值** + 可选名称（名称缺省 = 界面显示地址，`TR-46`）。
+ *
+ * `kind` 缺省 = `'url'`（外部地址：`/` 开头相对路径或完整 `http(s)://`）；
+ * `'file'` = 本地文件空间**相对路径**（`filePath`），界面转成
+ * `/api/files/preview?…` 后再走同一条入口行（`2026-10-15`）。
+ */
 export interface ViewLink {
   url: string
   name?: string
+  kind?: 'url' | 'file'
 }
 
 /**

@@ -10,9 +10,16 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { AgentStarter, ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
+import type {
+  AgentStarter,
+  ErrorInfo,
+  FeedbackValue,
+  FileReference,
+  ToolCallResult,
+} from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import { nextStepSendPayload } from '../utils/next-steps'
+import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
 import { mentionToken, stripMentionTokens, useFileMention } from './useFileMention'
@@ -81,8 +88,10 @@ export function useChatPanel() {
       error: chat.error.value,
       // 本轮气泡标注"谁在回答"（009 起会话归属固定，标注用于如实还原存量历史）
       agentName: chat.streamingAgentName.value,
-      // 中断轮「重新生成」是否可用：有中断缓存且当前未在流式中
-      canRegenerate: phase === RUN_PHASE.ABORTED && chat.lastAbortedTurn.value !== null,
+      // 「重新生成」/「重试本轮」是否可用：本轮的用户消息仍在缓存里（中断轮，或服务端已终局的失败轮）
+      canRegenerate:
+        (phase === RUN_PHASE.ABORTED || phase === RUN_PHASE.FAILED) &&
+        chat.lastRetryableTurn.value !== null,
     }
   })
 
@@ -130,7 +139,8 @@ export function useChatPanel() {
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
   /**
-   * 发起一轮对话（**唯一**发送链路：输入区、问题实例、下一步动作卡片都走它）。
+   * 发起一轮对话（**唯一**发送链路：输入区、问题实例、下一步动作卡片、失败轮「重试本轮」
+   * 都走它）。
    *
    * @param options.settleBeforeReturn 默认 `false`→`undefined`：等本轮**结束**才返回（历史刷新、
    *   失败还原草稿都依赖这一等待）。传 `false` 时**本地校验一过、请求一发出即返回**——
@@ -211,16 +221,54 @@ export function useChatPanel() {
   }
 
   /**
-   * 中断轮「重新生成」：以缓存的上一条用户消息重发。
+   * 「重新生成」/「重试本轮」（**本轮**缓存路径）：以缓存的上一条用户消息重发。
    * 走 `onSend` 全链路（引用存在性校验、线程创建、失败还原草稿），
    * 缓存内容发前已去除 `@` 标记，`stripMentionTokens` 为空操作。
+   *
+   * 缓存 `null` 即不可重发（断连/传输层失败：后端那一轮可能仍在跑，重发会撞 409），
+   * 此时失败块保留「重新获取」走 `recover()` 重拉历史。
    */
   async function onRegenerate(): Promise<void> {
-    const turn = chat.lastAbortedTurn.value
+    const turn = chat.lastRetryableTurn.value
     if (!turn) {
       return
     }
     await onSend({ content: turn.content, attachments: turn.attachments })
+  }
+
+  /**
+   * 历史失败轮「重试本轮」：重发该轮的用户消息（载荷由 `MessageList` 从历史里解析——
+   * 它是唯一知道"失败消息的同轮用户消息是谁"的地方；`lastRetryableTurn` 只覆盖本次会话内
+   * 刚中断/失败的那一轮，刷新即空）。
+   *
+   * **为什么不是 `recover()`**：失败轮在服务端已终局并落盘，重新拉取历史只会拿回同一条
+   * 失败记录——按钮会变成"点了没反应"。这里要的是**真正重发**，故复用 `onSend` 全链路。
+   *
+   * 本轮进行中不响应（与首屏问题卡片同口径）：`onSend` 会先清草稿、清卡片，再被
+   * `chat.send` 的并发校验挡下——那会平白丢掉用户正在输入的内容。
+   */
+  function onRetryTurn(payload: { content: string; attachments: FileReference[] }): void {
+    if (sending.value) {
+      return
+    }
+    void onSend(payload)
+  }
+
+  /**
+   * **面板级**失败块的重试入口（TR-58 分流）：本轮可重发就重发，否则重拉历史。
+   *
+   * 为什么不是一个模板三元表达式：`@retry="a ? f : g"` 会被编译成语句而非处理器引用，
+   * 点下去**什么都不会发生**（与本次修的悬空事件同一类坑）——故分流必须落在函数里。
+   *
+   * 分流判据就是 `streaming.canRegenerate`（本轮用户消息是否还在缓存里）：
+   * 断连/传输层失败的后端那一轮可能仍在跑，重发会撞 409，此时只能先 `recover()` 看结果。
+   */
+  function onRetryFailedRun(): void {
+    if (streaming.value?.canRegenerate) {
+      void onRegenerate()
+      return
+    }
+    onRecover()
   }
 
   /* ---------- 下一步动作卡片（007 · US2） ---------- */
@@ -316,7 +364,11 @@ export function useChatPanel() {
 
   function onPickFiles(payload: { dir: string; files: FileList }): void {
     // 扩展名白名单按目标空间下发（workspace 接口），数据准备仅 csv/xlsx
-    void uploads.upload(payload.dir, Array.from(payload.files), workspace.uploadExtensionsOf(payload.dir))
+    void uploads.upload(
+      payload.dir,
+      Array.from(payload.files),
+      workspace.uploadExtensionsOf(payload.dir),
+    )
   }
 
   function onRetryUpload(localId: string): void {
@@ -386,9 +438,9 @@ export function useChatPanel() {
     void preview.openFile(reference)
   }
 
-  /** 页面卡片点击：由右侧内联预览（FR-046）（V-10） */
-  function onOpenPage(item: { url: string; title: string }): void {
-    void preview.openPage(item)
+  /** 跳转入口点击：`kind:'file'` 走文件预览口径，其余异源直跳 / 同源预检后进右侧面板 */
+  function onOpenView(item: ViewLinkTarget): void {
+    void preview.openView(item)
   }
 
   function onUpdateDraft(value: string): void {
@@ -493,6 +545,8 @@ export function useChatPanel() {
     onSend,
     onStop,
     onRegenerate,
+    onRetryTurn,
+    onRetryFailedRun,
     nextSteps,
     pendingSuggestion,
     suggestionSending,
@@ -517,7 +571,7 @@ export function useChatPanel() {
     onSwitchAgent,
     onOpenLink,
     onOpenFile,
-    onOpenPage,
+    onOpenView,
     onUpdateDraft,
     onSendFromToolbar,
     onInputText,

@@ -257,7 +257,8 @@ async function doDelete(): Promise<void> {
     >
       <ul v-if="affected.length > 0">
         <li v-for="(item, index) in affected" :key="index">
-          <span class="mono">{{ item.user_id }}</span> 的 <span class="mono">{{ item.agent_name }}</span>
+          <span class="mono">{{ item.user_id }}</span> 的
+          <span class="mono">{{ item.agent_name }}</span>
         </li>
       </ul>
     </ConfirmDialog>

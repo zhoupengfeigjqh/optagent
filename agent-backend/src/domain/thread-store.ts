@@ -187,7 +187,9 @@ export class ThreadStore {
 
   /** 展示用标题：已命名返回原名，否则回落默认标题 */
   resolveTitle(userId: string, agentName: string, threadId: string): string | null {
-    return this.get(userId, agentName, threadId).title ?? this.defaultTitle(userId, agentName, threadId);
+    return (
+      this.get(userId, agentName, threadId).title ?? this.defaultTitle(userId, agentName, threadId)
+    );
   }
 
   /** 默认标题：首条 user 消息前 20 字（按 Unicode 码点计）；命中缓存则不读盘 */
@@ -249,6 +251,10 @@ export class ThreadStore {
       created_at: meta.createdAt,
       updated_at: meta.updatedAt,
     };
-    fs.writeFileSync(this.metaPath(userId, agentName, meta.threadId), JSON.stringify(file, null, 2), 'utf8');
+    fs.writeFileSync(
+      this.metaPath(userId, agentName, meta.threadId),
+      JSON.stringify(file, null, 2),
+      'utf8',
+    );
   }
 }

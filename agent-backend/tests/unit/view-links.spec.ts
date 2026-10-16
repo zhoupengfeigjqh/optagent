@@ -71,9 +71,7 @@ describe('extractViewLinks —— 命中与配对', () => {
   });
 
   it('字段名大小写不敏感、忽略首尾空白', () => {
-    const links = extractViewLinks(
-      JSON.stringify({ ViewUrl: '/a', VIEWURLNAME: 'A 明细' }),
-    );
+    const links = extractViewLinks(JSON.stringify({ ViewUrl: '/a', VIEWURLNAME: 'A 明细' }));
 
     expect(links).toEqual([{ url: '/a', name: 'A 明细' }]);
   });
@@ -82,6 +80,98 @@ describe('extractViewLinks —— 命中与配对', () => {
     const links = extractViewLinks(JSON.stringify([[{ viewUrl: '/deep' }]]));
 
     expect(links).toEqual([{ url: '/deep' }]);
+  });
+});
+
+describe('extractViewLinks —— filePath（本地文件空间相对路径，2026-10-15）', () => {
+  it('顶层 filePath：收起一条，带 kind:file', () => {
+    const links = extractViewLinks(
+      JSON.stringify({ status: 'success', filePath: '数据准备/生产计划/9月计划.xlsx' }),
+    );
+
+    expect(links).toEqual([{ url: '数据准备/生产计划/9月计划.xlsx', kind: 'file' }]);
+  });
+
+  it('同层 filePathName 与路径配对', () => {
+    const links = extractViewLinks(
+      JSON.stringify({ filePath: '临时空间/x.pdf', filePathName: '产能表' }),
+    );
+
+    expect(links).toEqual([{ url: '临时空间/x.pdf', kind: 'file', name: '产能表' }]);
+  });
+
+  it('viewUrl 与 filePath 同层混排：都收，顺序 = 出现顺序（深度优先）', () => {
+    const links = extractViewLinks(
+      JSON.stringify({
+        viewUrl: '/datasource/a/xlsx',
+        viewUrlName: '外部视图',
+        filePath: '数据准备/x.pdf',
+        filePathName: '本地文件',
+      }),
+    );
+
+    expect(links).toEqual([
+      { url: '/datasource/a/xlsx', name: '外部视图' },
+      { url: '数据准备/x.pdf', kind: 'file', name: '本地文件' },
+    ]);
+  });
+
+  it('字段名大小写不敏感、忽略首尾空白（FilePath / FILEPATHNAME）', () => {
+    const links = extractViewLinks(
+      JSON.stringify({ ' FilePath ': '共享空间/x.csv', FILEPATHNAME: '共享表' }),
+    );
+
+    expect(links).toEqual([{ url: '共享空间/x.csv', kind: 'file', name: '共享表' }]);
+  });
+
+  it('名称与路径跨层不配对：有路径、无名字', () => {
+    const links = extractViewLinks(
+      JSON.stringify({ outer: { filePath: '数据准备/x.pdf' }, filePathName: '外层名字' }),
+    );
+
+    expect(links).toEqual([{ url: '数据准备/x.pdf', kind: 'file' }]);
+  });
+
+  it('viewUrlName 不会与 filePath 串配对（名称字段各归各）', () => {
+    const links = extractViewLinks(
+      JSON.stringify({ filePath: '数据准备/x.pdf', viewUrlName: '错位的名字' }),
+    );
+
+    expect(links).toEqual([{ url: '数据准备/x.pdf', kind: 'file' }]);
+  });
+
+  it('filePath 形态卫生：非字符串 / 空白 / 超长 / 控制字符一律忽略', () => {
+    expect(extractViewLinks(JSON.stringify({ filePath: 123 }))).toBeUndefined();
+    expect(extractViewLinks(JSON.stringify({ filePath: '   ' }))).toBeUndefined();
+    expect(extractViewLinks(JSON.stringify({ filePath: '数据\t准备/x' }))).toBeUndefined();
+    expect(
+      extractViewLinks(JSON.stringify({ filePath: 'x'.repeat(VIEW_URL_MAX_CHARS + 1) })),
+    ).toBeUndefined();
+  });
+
+  it('filePath 名称脏 → 只丢名字、路径保留', () => {
+    const dirty = extractViewLinks(
+      JSON.stringify({ filePath: '数据准备/x.pdf', filePathName: '有\t制表符' }),
+    );
+
+    expect(dirty).toEqual([{ url: '数据准备/x.pdf', kind: 'file' }]);
+  });
+
+  it('去重按 kind 分命名空间：同值的外部地址与文件路径各留一条', () => {
+    const links = extractViewLinks(JSON.stringify([{ viewUrl: '/a' }, { filePath: '/a' }]));
+
+    expect(links).toEqual([{ url: '/a' }, { url: '/a', kind: 'file' }]);
+  });
+
+  it('同一 filePath 重复出现：只补名字，不重复收', () => {
+    const links = extractViewLinks(
+      JSON.stringify([
+        { filePath: '数据准备/x.pdf' },
+        { filePath: '数据准备/x.pdf', filePathName: '后给的名字' },
+      ]),
+    );
+
+    expect(links).toEqual([{ url: '数据准备/x.pdf', kind: 'file', name: '后给的名字' }]);
   });
 });
 
@@ -180,7 +270,9 @@ describe('extractViewLinks —— 边界与降级', () => {
   });
 
   it('没有 viewUrl（普通对象 / 纯数组）→ undefined', () => {
-    expect(extractViewLinks(JSON.stringify({ status: 'success', message: '完成' }))).toBeUndefined();
+    expect(
+      extractViewLinks(JSON.stringify({ status: 'success', message: '完成' })),
+    ).toBeUndefined();
     expect(extractViewLinks(JSON.stringify([1, 2, 3]))).toBeUndefined();
   });
 

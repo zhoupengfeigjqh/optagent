@@ -260,7 +260,8 @@ onBeforeUnmount(() => {
       <template v-if="step === 'basics'">
         <p class="mcp-create-dialog__intro">
           先登记基础连接信息并<strong>连接一次</strong>以获取工具清单；连接成功后再勾选该服务对数字人
-          <strong>可见的工具</strong>（其余工具对数字人不可见）。工具范围在创建后不可修改。
+          <strong>可见的工具</strong>（其余工具对数字人不可见）。工具范围之后可在详情页 「工具清单 →
+          重新探测」里调整。
         </p>
 
         <label class="field" for="mcp-create-name">
@@ -307,11 +308,7 @@ onBeforeUnmount(() => {
               <span class="field__hint">平台按此地址连接该 MCP 服务（含协议与端口）。</span>
             </label>
 
-            <label
-              v-else
-              class="field mcp-create-dialog__conn-main"
-              for="mcp-create-command"
-            >
+            <label v-else class="field mcp-create-dialog__conn-main" for="mcp-create-command">
               <span class="field__label">
                 启动命令<span class="field__required" aria-hidden="true">*</span>
               </span>
@@ -353,7 +350,7 @@ onBeforeUnmount(() => {
         <p class="mcp-create-dialog__intro">
           已连接成功，共探测到 <strong>{{ tools.length }}</strong> 个工具。
           勾选该服务对数字人<strong>可见的工具</strong>——未勾选的工具对模型完全不可见；
-          选择<strong>创建后不可修改</strong>。
+          创建后仍可在详情页「工具清单 → 重新探测」里增删。
         </p>
 
         <p v-if="tools.length === 0" class="mcp-create-dialog__error" role="alert">

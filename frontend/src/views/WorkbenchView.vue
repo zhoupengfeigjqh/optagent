@@ -20,7 +20,6 @@ import ToastHost from '@/components/common/ToastHost.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import HistorySidebar from '@/components/layout/HistorySidebar.vue'
 import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
-import PreviewPanel from '@/components/layout/PreviewPanel.vue'
 
 import { useSession } from '@/composables/useAppSession'
 import { RUN_PHASE } from '@/constants/events'
@@ -29,8 +28,7 @@ const session = useSession()
 
 /** 有历史消息或本轮已开始 → 展开为完整对话布局（FR-003 / FR-004）。 */
 const expanded = computed(
-  () =>
-    session.threads.messages.value.length > 0 || session.chat.phase.value !== RUN_PHASE.IDLE,
+  () => session.threads.messages.value.length > 0 || session.chat.phase.value !== RUN_PHASE.IDLE,
 )
 
 /** 有进行中的会话时禁止切换历史项（FR-036）。 */
@@ -207,14 +205,7 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
 
     <!-- 右栏：工作空间面板（列表态 / 内容态，US7 + US8） -->
     <template #preview>
-      <!-- {{ session.preview.target }} -->
-      <PreviewPanel
-        v-if="session.preview.target.value.kind === 'page'"
-        :file="session.preview.target.value"
-        @close="onClosePanel"
-      />
       <WorkspacePanel
-        v-else
         :view="session.preview.view.value"
         :spaces="session.workspace.spaces.value"
         :expanded-spaces="session.workspace.expandedSpaces.value"
@@ -231,7 +222,6 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
         @download="onPanelDownload"
         @remove="onRemoveFile"
       />
-      
     </template>
   </AppShell>
 

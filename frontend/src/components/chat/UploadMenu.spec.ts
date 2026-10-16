@@ -83,8 +83,13 @@ function mountMenu(spaces: WorkspaceSpace[] = makeSpaces()) {
 }
 
 /** 点击某目录按钮 → 读取隐藏 file input 的 `accept`（= 该目录允许的类型） */
-async function acceptAfterClick(wrapper: ReturnType<typeof mountMenu>, dir: string): Promise<string> {
-  const button = wrapper.findAll('button').find((b) => b.text().includes(dir.split('/').pop() ?? dir))
+async function acceptAfterClick(
+  wrapper: ReturnType<typeof mountMenu>,
+  dir: string,
+): Promise<string> {
+  const button = wrapper
+    .findAll('button')
+    .find((b) => b.text().includes(dir.split('/').pop() ?? dir))
   await button?.trigger('click')
   await wrapper.vm.$nextTick()
   return wrapper.find('input[type="file"]').attributes('accept') ?? ''

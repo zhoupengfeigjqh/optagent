@@ -79,9 +79,7 @@ describe('parseOntologyMetadata', () => {
   });
 
   it('非标量取值（数组/对象）→ null，不抛错', () => {
-    const metadata = parseOntologyMetadata(
-      'metadata:\n  ontology_name: [a, b]\n  scenario_id: {x: 1}\n',
-    );
+    const metadata = parseOntologyMetadata('metadata:\n  ontology_name: [a, b]\n  scenario_id: {x: 1}\n');
 
     expect(metadata.ontology_name).toBeNull();
     expect(metadata.scenario_id).toBeNull();
@@ -100,9 +98,7 @@ describe('parseOntologyMetadata', () => {
 
   it('顶层不是对象（数组/标量）→ VALIDATION_FAILED', () => {
     expect(codeOf(() => parseOntologyMetadata('- a\n- b\n'))).toBe(ERROR_CODES.VALIDATION_FAILED);
-    expect(codeOf(() => parseOntologyMetadata('just a string\n'))).toBe(
-      ERROR_CODES.VALIDATION_FAILED,
-    );
+    expect(codeOf(() => parseOntologyMetadata('just a string\n'))).toBe(ERROR_CODES.VALIDATION_FAILED);
   });
 
   it('缺 metadata 段（或为空）→ VALIDATION_FAILED', () => {
@@ -119,9 +115,7 @@ describe('parseOntologyMetadata', () => {
 
 describe('ontologyDisplayName', () => {
   it('优先 metadata.ontology_name，缺失时兜底目录名', () => {
-    expect(ontologyDisplayName({ ...EMPTY_ONTOLOGY_METADATA, ontology_name: '库存' }, 'dir')).toBe(
-      '库存',
-    );
+    expect(ontologyDisplayName({ ...EMPTY_ONTOLOGY_METADATA, ontology_name: '库存' }, 'dir')).toBe('库存');
     expect(ontologyDisplayName(EMPTY_ONTOLOGY_METADATA, 'dir')).toBe('dir');
   });
 });

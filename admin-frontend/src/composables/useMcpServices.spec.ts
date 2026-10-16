@@ -41,7 +41,9 @@ const DETAIL = {
 }
 
 beforeEach(() => {
-  listMcpServices.mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
+  listMcpServices
+    .mockReset()
+    .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
   getMcpService.mockReset().mockResolvedValue(DETAIL)
   createMcpService.mockReset()
   saveMcpServiceConfig.mockReset()

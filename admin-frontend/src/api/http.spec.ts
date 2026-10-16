@@ -106,14 +106,18 @@ describe('createHttpClient', () => {
 
   it('非 2xx 且符合契约 → 保留后端错误码与 details', async () => {
     const client = createHttpClient({
-      fetchImpl: vi
-        .fn()
-        .mockResolvedValue(
-          jsonResponse(
-            { error: { code: 'ADM_DEPLOY_VALIDATION_FAILED', message: 'x', details: { errors: [1] } } },
-            409,
-          ),
-        ) as never,
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error: {
+              code: 'ADM_DEPLOY_VALIDATION_FAILED',
+              message: 'x',
+              details: { errors: [1] },
+            },
+          },
+          409,
+        ),
+      ) as never,
     })
     let caught: unknown
     try {
@@ -139,6 +143,21 @@ describe('parseErrorResponse', () => {
   it('code 为空串视为不符合契约', async () => {
     const error = await parseErrorResponse(jsonResponse({ error: { code: '', message: 'x' } }, 500))
     expect(error.code).toBe('HTTP_500')
+  })
+
+  it('响应体读不出来（流中断）也不抛错 → HTTP_{status} + statusText', async () => {
+    // 网关在回错误页时把连接断掉：`response.text()` 直接 reject
+    const broken = {
+      status: 503,
+      statusText: 'Service Unavailable',
+      text: () => Promise.reject(new Error('body stream error')),
+    } as unknown as Response
+
+    const error = await parseErrorResponse(broken)
+
+    expect(error.code).toBe('HTTP_503')
+    expect(error.status).toBe(503)
+    expect(error.message).toBe('Service Unavailable')
   })
 
   it('能区分 `ErrorInfo`（供文案映射使用）', () => {

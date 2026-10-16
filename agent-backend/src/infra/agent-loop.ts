@@ -6,14 +6,36 @@
  * 工具执行由 loop 内部驱动；usage 从 agent_end 的最后一条 assistant 消息提取。
  */
 import type { Model, Provider } from '@earendil-works/pi-ai';
-import { runAgentLoop, type AgentEvent, type AgentTool, type StreamFn } from '@earendil-works/pi-agent-core';
+import {
+  runAgentLoop,
+  type AgentEvent,
+  type AgentTool,
+  type StreamFn,
+} from '@earendil-works/pi-agent-core';
+import type { LlmRetryOptions } from '../config.js';
+import { classifyLlmFailure } from '../domain/llm-error.js';
 import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
-/** 由 pi-ai provider 构造 runAgentLoop 所需的 streamFn（请求级注入 apiKey） */
-export function createStreamFn(provider: Provider, apiKey: string): StreamFn {
+/**
+ * 由 pi-ai provider 构造 runAgentLoop 所需的 streamFn（请求级注入 apiKey）。
+ *
+ * `retry` 是两个 LLM 调用路径（本函数与 `PiAiLlmProvider.streamChat`）**共用**的有界重试口径：
+ * 交给 pi-ai 的 `retryProviderRequest` 执行（退避 / `x-should-retry` / `Retry-After` /
+ * 可打断睡眠均已实现），运行环境只传参、不自建（`runtime-api-delta.md` §19.1）。
+ */
+export function createStreamFn(
+  provider: Provider,
+  apiKey: string,
+  retry: LlmRetryOptions,
+): StreamFn {
   return (model, context, options) =>
-    provider.streamSimple(model as never, context, { ...options, apiKey }) as never;
+    provider.streamSimple(model as never, context, {
+      ...options,
+      apiKey,
+      maxRetries: retry.maxRetries,
+      maxRetryDelayMs: retry.maxRetryDelayMs,
+    }) as never;
 }
 
 export interface RunAgentLoopOptions {
@@ -103,12 +125,24 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
           const stopReason = (m as { stopReason?: string }).stopReason;
           const errorMessage = (m as { errorMessage?: string }).errorMessage;
           if (stopReason === 'aborted') {
-            push({ type: 'error', code: 'ABORTED', message: errorMessage ?? '已中断', usage });
+            push({
+              type: 'error',
+              ...classifyLlmFailure({
+                ...(errorMessage ? { message: errorMessage } : {}),
+                aborted: true,
+              }),
+              usage,
+            });
             push(null);
             return;
           }
           if (stopReason === 'error') {
-            push({ type: 'error', code: 'LLM_ERROR', message: errorMessage ?? 'LLM 调用失败', usage });
+            // 分类唯一实现：与直聊路径（`PiAiLlmProvider.streamChat`）产出同一个错误码 + 诊断字段
+            push({
+              type: 'error',
+              ...classifyLlmFailure(errorMessage ? { message: errorMessage } : {}),
+              usage,
+            });
             push(null);
             return;
           }
@@ -127,7 +161,9 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
       model: opts.model,
       ...(opts.thinking ? { reasoning: 'low' as const } : {}),
       convertToLlm: (msgs) =>
-        msgs.filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') as never,
+        msgs.filter(
+          (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
+        ) as never,
     },
     emit,
     opts.signal,

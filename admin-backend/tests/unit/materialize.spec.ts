@@ -11,7 +11,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentDesignDocument } from '../../src/domain/config-center/agent-design.js';
 import { McpServiceConfigService } from '../../src/domain/mcp/service-config.js';
-import { buildAgentArtifact, buildMcpServerEntry, buildUserArtifacts } from '../../src/domain/deploy/materialize.js';
+import {
+  buildAgentArtifact,
+  buildMcpServerEntry,
+  buildUserArtifacts,
+} from '../../src/domain/deploy/materialize.js';
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
@@ -74,9 +78,19 @@ describe('buildMcpServerEntry', () => {
   });
 
   it('stdio：写 command 与 args，且不产生 url', () => {
-    configure('local-mcp', { transport: 'stdio', url: undefined, command: 'python', args: ['-u', 'srv.py'] });
+    configure('local-mcp', {
+      transport: 'stdio',
+      url: undefined,
+      command: 'python',
+      args: ['-u', 'srv.py'],
+    });
     const entry = buildMcpServerEntry('local-mcp', { mcpConfigs, skills });
-    expect(entry).toMatchObject({ name: 'local-mcp', transport: 'stdio', command: 'python', args: ['-u', 'srv.py'] });
+    expect(entry).toMatchObject({
+      name: 'local-mcp',
+      transport: 'stdio',
+      command: 'python',
+      args: ['-u', 'srv.py'],
+    });
     expect(entry).not.toHaveProperty('url');
   });
 
@@ -162,9 +176,7 @@ describe('buildMcpServerEntry', () => {
         'svc-open': { name: 'svc-open', description: 'x', transport: 'http', url: OCR_URL },
       },
     });
-    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills })).not.toHaveProperty(
-      'allowed_tools',
-    );
+    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills })).not.toHaveProperty('allowed_tools');
   });
 
   it('async_tools 缺省为 []：不写该字段（产物精简）；声明后原样物化到 MCP.json（R11）', () => {
@@ -217,9 +229,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       }),
       { mcpConfigs, skills },
     );
-    expect(
-      JSON.parse(String(withFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
-    ).toEqual({
+    expect(JSON.parse(String(withFields.files.find((f) => f.relPath === 'scenario.json')?.content))).toEqual({
       scenario: '生产',
       data_prep_dirs: ['生产计划', '产线电价', '算法规则'],
       data_prep_fields: { 生产计划: [{ name: '产线编号', type: 'string', required: true }] },
@@ -228,13 +238,18 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     // 空约束 ⇒ 与"字段缺失"等价，MUST NOT 在运行环境留下空壳键
     const noFields = buildAgentArtifact(
       design({
-        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'], data_prep_fields: {} },
+        scenario: {
+          scenario: '生产',
+          data_prep_dirs: ['生产计划', '算法规则'],
+          data_prep_fields: {},
+        },
       }),
       { mcpConfigs, skills },
     );
-    expect(
-      JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content)),
-    ).toEqual({ scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] });
+    expect(JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content))).toEqual({
+      scenario: '生产',
+      data_prep_dirs: ['生产计划', '算法规则'],
+    });
   });
 
   it('2026-10-13：有可上传类型时写入 data_prep_uploads；空对象 / 缺失时**不写空壳键**', () => {
@@ -281,7 +296,8 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       { mcpConfigs, skills },
     );
 
-    const soulOf = (artifact: typeof off) => String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+    const soulOf = (artifact: typeof off) =>
+      String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
     const offMd = soulOf(off);
     const onMd = soulOf(on);
 

@@ -23,7 +23,7 @@
 | R9 | HITL 参数确认窗**算法规则选择**：MCP 服务配置新增 `rules_fields`（`{ 工具名: 字段名或对象路径 }`——2026-09-19 由 string 版 `rules_field` 升级、**2026-09-22 支持对象嵌套**），`interaction_request`/快照新增可选 `rules_field`（单次交互粒度投影），新增 `GET /api/files/rules`（只读） | 新增端点 + 配置字段 + 可选事件字段 | 否（`rules_fields` 缺省 `{}` 不启用，存量快照不写该键；历史 string 版存档读取收敛为 `{}`，存档里的**非法路径**读取时一并丢弃） |
 | R10 | 新增内置工具 **`read_skill`**：补齐 SKILL 正文与 `references/` 附件的读取通道（此前只有 frontmatter 摘要进 System Prompt），内置工具目录由 5 项增至 6 项 | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
 | R11 | MCP **异步工具与后台产出**：调用配置新增 `async_tools`（按工具名声明哪些工具异步）；新增签名 `POST /api/files/put`（服务回写结果）、`GET /api/produced`（产出列表）、`GET /api/produced/events`（SSE 信号）；正文池组装时注入「后台计算结果」段 | 新增配置字段 + 3 个端点 + 一处提示词段 | 否（`async_tools` 缺省 `[]` 不启用；未声明工具不注入、不落盘、不依赖新端点） |
-| R12 | MCP **工具白名单**：服务配置新增 `allowed_tools`，创建时"先连上再勾选"、创建后不可修改（2026-10-03） | 新增配置字段 | 否（存量无该字段按"不限制"处理） |
+| R12 | MCP **工具白名单**：服务配置新增 `allowed_tools`，创建时"先连上再勾选"（2026-10-03）；**2026-10-15 起可二次调整**（保存时缺省沿用、提供即全量替换且必须非空） | 新增配置字段 | 否（存量无该字段按"不限制"处理） |
 | R13 | MCP **请求头**：配置新增 `headers`（存明文、响应只回掩码、部署物化后生效，2026-10-08） | 新增配置字段 + 物化 | 否（缺省不带请求头） |
 | R14 | **物化契约版本化**：产物与只读端点响应新增 `schema_version`、SSE 事件新增 `v`（**2026-10-08 登记，未实施**） | 新增字段 | 否（无版本字段按 v0 解析） |
 | R15 | **配置指纹与凭据硬化**：指纹改内容摘要（sha256）、物化文件权限 `0600`、签名密钥生产缺失即拒启动、清理判据不依赖 atime（**2026-10-08 登记，未实施**） | 行为变更 | 否（端点契约不变；指纹判据变严属**修正漏判**） |
@@ -899,7 +899,7 @@ MCP 服务调用配置新增 `allowed_tools` 字段：
 | 环节 | 判据 | 非法处理 |
 |---|---|---|
 | 平台新建（`admin-backend`） | **必填且非空**；元素为非空字符串；trim + 同服务内去重 | `VALIDATION_FAILED`（不留"全部放行"的后门） |
-| 平台保存（`PUT`） | **禁止携带**该字段（白名单创建后不可改） | `ADM_MCP_TOOL_SCOPE_LOCKED`（409），整条请求不生效 |
+| 平台保存（`PUT`） | **可携带**（2026-10-15 起）：缺省 = 沿用存量，提供 = 全量替换；提供时元素判据同新建 | 空数组 / 形状非法 → `VALIDATION_FAILED`（400），整条请求不生效 |
 | 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].allowed_tools`（对齐 `file_args`/`rules_fields`/`async_tools` 口径） | — |
 | 运行环境加载期（`agent-instance.ts`） | 必须为数组、元素为非空字符串（重复项静默去重）；**空数组合法**（= 不限制） | 形状非法 → `AgentConfigError`（把 typo 挡在加载期） |
 | 装配期（`agent-factory`） | 按白名单过滤该服务的工具表（`infra/mcp-tool-scope.ts`） | — |
@@ -1242,3 +1242,78 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 - 存量数据由**一次性迁移**处理（逐项 `rename`，可中断续跑、幂等）：`user-data/` 一级存在非数字人条目才算待迁移；
 - 回滚：恢复旧路径工厂实现 + 手动把 `user-data/{数字人}/**` 移回 `user-data/**`（迁移是纯改名的逆操作）；改前数据备份位于 `agent-backend/.opt-agent.backup-20261014/`；
 - 已知副作用（有意为之）：切换数字人后原会话不再可见（须切回该数字人）；这是隔离的**目的**而非缺陷。
+
+---
+
+## §19 R20 — LLM 调用的有界重试与失败可诊断（2026-10-15，特性 `002-conversation-runtime` 增量）
+
+**规格**：[`specs/002-conversation-runtime/spec.md`](../../002-conversation-runtime/spec.md) §4.10（`TR-53`~`TR-58`） | **计划**：[`plan.md`](../../002-conversation-runtime/plan.md) §17~§20 | **任务**：[`tasks.md`](../../002-conversation-runtime/tasks.md)
+
+**来源**（实踩 2026-10-15）：本机连续 **3** 次失败轮全部是 DeepSeek `503 Service is too busy`、耗时 **318~440ms**（即"首字节之前就失败"）；`pi-ai` 的 `retryProviderRequest` 已支持重试（含退避、`x-should-retry`、`Retry-After`），但其 `maxRetries` 默认 **0** 而运行环境两条调用路径都没传 → **重试一次也没有发生**；上游原文（含 `request_id`）只落在该会话自己的 `history.jsonl`，应用日志与前端都看不到原因。
+
+### 19.1 重试口径（不改任何端点行为）
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 实现 | `pi-ai` 的 `retryProviderRequest`（`openai-completions` 适配器在 `chat.completions.create(...).withResponse()` 外层调用） | 运行环境**不自建**退避/重试（原则二"同一职责只有一处实现"、原则六"用平台原生能力"） |
+| 可重试判据 | `x-should-retry: true` 优先；否则 无状态码 / `408` / `409` / `429` / `≥500` | 由 `pi-ai` 判定，本契约不重复定义 |
+| 次数 | `LLM_MAX_RETRIES`（默认 **2**，首次调用不计）→ 总尝试 ≤ **3** | 有界（原则九） |
+| 单次等待上限 | `LLM_RETRY_MAX_DELAY_MS`（默认 **15000**）：上游要求的退避超过该值即**立即失败**（不静默长等） | 同上 |
+| 中断 | 退避睡眠可被请求 `AbortSignal` 打断：用户点「停止」→ 立刻停止，按 `ABORTED` 收尾 | 中断语义不变 |
+| 重试时机 | **仅在响应到达之前**（首字节前）；正文已产出后的失败**不重试**（避免重复正文） | 半截回答与已成功的工具记录仍按既有口径保留/落盘 |
+| 单请求超时 | 沿用 `pi`/OpenAI SDK 默认（**10 分钟**）；本次**不设** `timeoutMs` | 对流式长回答，SDK 的 `timeout` 会连同正文读取一起截断（登记为已知口径） |
+
+### 19.2 失败分类（新增流级错误码）
+
+| 错误码 | 判定（分类器顺序） | 前端文案口径 | 是否 `alert` |
+|---|---|---|---|
+| `LLM_UNAVAILABLE` | 上游 `5xx`（含 `503 Service is too busy`）与 `408` | "模型服务暂时不可用（上游 503），已自动重试仍未成功，请稍后重试" | 否 |
+| `LLM_RATE_LIMITED` | `429` | "模型调用过于频繁（上游 429），请稍后重试" | 否 |
+| `LLM_INSUFFICIENT_BALANCE` | `402` | "模型账户余额不足，请联系管理员充值" | **是** |
+| `LLM_UNAUTHORIZED` | `401` / `403` | "模型凭证无效或无权限，请联系管理员检查 API Key" | **是** |
+| `LLM_CONTEXT_TOO_LONG` | `400` 且报文含上下文长度特征（`context length` / `maximum context` / `too long` / `token`） | "本轮上下文过长，请精简输入或新开会话" | 否 |
+| `LLM_ERROR` | 其余（无状态码 / 报文不可解析 / 400 其它） | "请求失败，请稍后重试"（**兜底，语义不变**） | 否 |
+| `ABORTED` | 用户中断（`pi` 的 `reason === 'aborted'`） | 既有中断文案（**不变**） | 否 |
+
+判定实现**唯一**：`agent-backend/src/domain/llm-error.ts` 的 `classifyLlmFailure()`（状态码优先 → 文案兜底 → 错误体取 `type` / `request_id`；失败即省略字段，绝不抛错）。
+
+### 19.3 `error` 对象的诊断字段（向后兼容新增）
+
+`POST /api/threads/{id}/messages` 的 SSE `error` 事件与失败轮 `history.jsonl` 行（以及 `GET /api/threads/{id}` 的消息项）中的 `error` 对象：
+
+```ts
+error: {
+  code: string;              // §19.2 的取值；既有取值不受影响
+  message: string;           // 后端原始文案（前端不展示，D13/V-12 不变）
+  upstream_status?: number;  // 上游 HTTP 状态码（如 503）
+  upstream_type?: string;    // 上游错误类型（如 service_unavailable_error）
+  request_id?: string;       // 上游请求 id（向 provider 报障用）
+}
+```
+
+- 三个字段**有才写、缺省不写 `null`**；旧前端忽略未知字段（**向后兼容**）；
+- **MUST NOT** 下发上游响应体原文；
+- SSE **事件类型集合不变**（无新增事件类型）。
+
+### 19.4 结构化日志（原则九）
+
+| 事件 | 级别 | 关键字段 |
+|---|---|---|
+| `llm.call.failed` | `warn` | `code`、`upstream_status`、`upstream_type`、`request_id`、`provider`、`model`、`message`（截断 ≤500 字符）、`duration_ms`，并带既有 `user_id` / `thread_id` / `agent_name`；`LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` 额外带 **`alert: true`** |
+
+- 未装配 logger 时**不抛错**（沿既有"日志不致命"口径）；
+- "流无终结事件"分支（`run-manager` 的 `LLM 流异常结束`）沿用 `LLM_ERROR`，且**不编造**诊断字段（无上游报文可解析）。
+
+### 19.5 不变式（MUST 由单测守住）
+
+1. `LLM_MAX_RETRIES=0` ⇒ 每个请求只发一次（可回退到既有行为）；`=2` 且连续两次 `503` ⇒ 假 provider 上**恰好 3 次**调用后成功；
+2. 不可重试错误（`400` / `401`）**不重试**（调用次数 = 1）；
+3. 重试等待期间 `abort` ⇒ 不再发起新请求，错误码为 `ABORTED`；
+4. 同一输入报文在**两条路径**（直聊 `streamChat` / 工具循环 `createStreamFn`）产出**同一个错误码**（分类唯一实现）；
+5. 失败轮落盘行的 `error` 与 SSE `error` 事件的 `error` **同形**（同一份诊断字段）；
+6. 既有 `LLM_ERROR` / `ABORTED` 语义与"失败轮落盘（`status:'failed'` + `error` + `usage` + 工具记录）"逐字不变。
+
+### 19.6 兼容性与回滚
+
+- **兼容**：SSE 事件集合、`history.jsonl` 行结构（仅 `error` 对象可多三个可选字段）、端点请求/响应的其余字段、前端类型（`ErrorInfo` 加可选字段）**全部向后兼容**；
+- **回滚**：把 `LLM_MAX_RETRIES` 设为 `0` 即回到"不重试"；诊断字段与其日志可独立保留（不影响旧前端）。

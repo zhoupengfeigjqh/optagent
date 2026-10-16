@@ -224,3 +224,133 @@ npm run lint && npm run typecheck && npm run test:coverage && npm run build
 ## 16. 验收
 
 见 [spec.md](./spec.md) §9.4；任务与勾选状态见 [tasks.md](./tasks.md)。
+
+---
+
+# 计划：LLM 失败的有界重试与可诊断（2026-10-15 增量）
+
+**Input**: [spec.md](./spec.md) §4.10（`TR-53`~`TR-58`）、§6、§7.5、§8、§9.5；契约落点 [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)
+
+## 17. 技术方案
+
+**一句话**：**别自己写重试**——把 `maxRetries` / `maxRetryDelayMs` 传给 `pi-ai` 既有的 `retryProviderRequest`；把"上游报文 → 错误码 + 诊断字段"收敛成**一个纯函数**；把诊断线索沿**已有通道**（SSE `error` / 失败轮落盘 / 结构化日志）下发；前端补可行动文案与「重试本轮」。
+
+### 17.1 重试接线（`TR-53`）：只传参，不实现
+
+| 注入点 | 现状 | 改动 |
+|---|---|---|
+| `src/infra/llm/pi-ai-provider.ts` 的 `streamChat` | `streamSimple(model, context, { reasoning?, signal, apiKey })` | 追加 `{ maxRetries, maxRetryDelayMs }`（来自 `AppConfig`） |
+| `src/infra/agent-loop.ts` 的 `createStreamFn` | `streamSimple(model, context, { ...options, apiKey })` | 同上；`createStreamFn(provider, apiKey, retry)` 增第三参（工具循环路径共用同一份上限） |
+
+- 为什么这样够：`pi-ai` 的 `openai-completions` 适配器在 `client.chat.completions.create(...).withResponse()` 外层包了 `retryProviderRequest(..., { maxRetries, maxRetryDelayMs, signal })`——它已实现指数退避 + 抖动、`x-should-retry` 优先、尊重 `Retry-After`（超过 `maxRetryDelayMs` 直接失败，不静默长等）、睡眠可被 `AbortSignal` 打断（用户点「停止」立即生效）。**重试点在响应到达之前**，因此不会出现"重复正文"。
+- 为什么不用 `utils/retry.d.ts` 的 `retryAssistantCall`：它以 `Promise<AssistantMessage>` 为产出（需要先把整段回答收完），与流式首字节优先的体验相悖；本项目两条路径都是**流式**。
+- 配置（`src/config.ts` 的 `envSchema`，宪章原则八：单条命令即可用）：
+
+| 环境变量 | 默认 | 校验 | 语义 |
+|---|---|---|---|
+| `LLM_MAX_RETRIES` | `2` | `int 0..5` | 重试次数（首次调用不计）；总尝试 ≤ `1 + 该值` |
+| `LLM_RETRY_MAX_DELAY_MS` | `15000` | `int 0..60000` | 单次重试等待上限（`0` = 不设上限，与 pi 同义） |
+
+- **超时**：沿用 `ProviderRequestOptions.timeoutMs` 的既有默认（OpenAI/Anthropic SDK 客户端默认 10 分钟）——本次**不设**该值：对流式长回答，SDK 的 `timeout` 会连同正文读取一起截断，风险高于收益（§4.10「明确不做」）。
+
+### 17.2 失败分类（`TR-54`）：一个纯函数，两处共用
+
+新增 `agent-backend/src/domain/llm-error.ts`（domain 层纯函数，`infra` 向下依赖，符合既有分层先例：`agent-loop.ts` 已 import `domain/tool-result.js`）：
+
+```ts
+export type LlmErrorCode =
+  | 'ABORTED' | 'LLM_ERROR' | 'LLM_UNAVAILABLE' | 'LLM_RATE_LIMITED'
+  | 'LLM_INSUFFICIENT_BALANCE' | 'LLM_UNAUTHORIZED' | 'LLM_CONTEXT_TOO_LONG';
+
+export interface LlmFailure { code: LlmErrorCode; message: string;
+  upstreamStatus?: number; upstreamType?: string; requestId?: string; }
+
+/** 输入：pi-ai 给出的错误文案（`"<status>: <body>"` / `"<prefix> (<status>): <body>"`）+ 可选显式状态码 */
+export function classifyLlmFailure(input: { message?: string; status?: number }): LlmFailure;
+```
+
+判定顺序（**唯一实现**，两侧调用点不再各写一套）：
+
+1. 显式 `status`（从抛出的 `Error` 上取 `status` / `statusCode`）优先；否则从文案里解析前导的 3 位状态码；
+2. 状态码 → 码：`401` / `403` → `LLM_UNAUTHORIZED`；`402` → `LLM_INSUFFICIENT_BALANCE`；`408` → `LLM_TIMEOUT`（见下注）；`429` → `LLM_RATE_LIMITED`；`≥500` → `LLM_UNAVAILABLE`；`400` 且文案/类型含上下文长度特征（`context length` / `maximum context` / `too long` / `token`）→ `LLM_CONTEXT_TOO_LONG`；其余 → `LLM_ERROR`；
+3. 从错误体（JSON）尽力取 `type`（`upstreamType`）与 `request_id`（也兼容 `requestId` / `id`），失败则省略——**不抛错**；
+4. `ABORTED` 由调用点按 pi 的 `reason === 'aborted'` 判定后传入（分类器不猜中断）。
+
+> 注：`pi-ai` 把 `408` 归入可重试集合，但两者语义不同（`408` = 上游等待超时）。本增量**不新增** `LLM_TIMEOUT` 码，`408` 归入 `LLM_UNAVAILABLE` 并保留 `upstream_status=408` 供诊断——避免为一次实现里不会单独出现的分支新增对外码。
+
+### 17.3 诊断通道（`TR-55` / `TR-56`）：沿既有通道下发，不新增事件
+
+| 落点 | 改动 |
+|---|---|
+| `src/types.ts` | `LlmEvent` 的 `error` 变体与 `HistoryMessage.error` 各新增三个**可选**字段（`upstream_status` / `upstream_type` / `request_id`） |
+| `src/infra/llm/pi-ai-provider.ts` / `infra/agent-loop.ts` | 两处 `error` 事件改用 `classifyLlmFailure()` 产出 `code` + 诊断字段（中断仍走 `ABORTED`） |
+| `src/domain/run-finalize.ts` 的 `error()` | ① 失败行 `error` 对象写入诊断字段（有才写，不写 `null`）；② SSE `error` 事件同形；③ **新增一条结构化日志** `event: 'llm.call.failed'`（`warn`；`LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` 带 `alert: true`），字段：`code` / `upstream_status` / `upstream_type` / `request_id` / `provider` / `model` / `message`（截断 500 字符）+ 既有 `user_id` / `thread_id` / `agent_name` / `duration_ms`（原则九：原始错误落日志、含关联线索） |
+| `src/domain/run-manager.ts` | 仅"流无终结事件"分支（`LLM 流异常结束`）沿用 `LLM_ERROR`：该分支没有上游报文可分类，**不编造**诊断字段 |
+
+> `provider` / `model` 从哪来：`RunFinalizer` 的注入依赖里加一个**只读取值口**（`llmInfo?: () => { provider: string; model: string }`），由装配处（`server.ts` / `agent-factory`）注入——`domain` 层不反向依赖 `config`（既有约束，见 `types.ts` 的 `ModelSelection` 注释）。
+
+### 17.4 前端（`TR-55` / `TR-57` / `TR-58`）
+
+| 文件 | 改动 |
+|---|---|
+| `src/api/types.ts` | `ErrorInfo` 新增三个可选字段（与后端 JSON 同名）+ 注释指向契约 |
+| `src/utils/error-message.ts` | 文案表新增 5 个码（`send-message` 场景口径）；新增**纯函数** `formatErrorDiagnostics(error): string \| null`（码 · 上游状态码 · `request_id`，缺失自动省略；全缺返回 `null`） |
+| `src/components/common/ErrorNotice.vue` | 新增一行诊断信息（`v-if`），保留 `role="alert"` 与原生按钮 |
+| `src/composables/useChatStream.ts` | `lastAbortedTurn` → **`lastRetryableTurn`**（语义从"中断轮"扩为"可重试轮"）：收尾时置位缓存，判据为 `aborted` 或"服务端**已终局**的 `failed`（收到 `error` 终结事件，`terminalFailure`）；断连/传输层失败不置位（后端可能仍在跑，重发撞 409） |
+| `src/composables/useChatPanel.ts` | `canRegenerate = (phase === ABORTED \|\| phase === FAILED) && lastRetryableTurn !== null`；新增 `onRetryTurn(payload)`（**历史失败轮**的重发入口：复用 `onSend`，本轮进行中不响应）；新增 `onRetryFailedRun()`（**面板级**分流：可重发 → `onRegenerate`，否则 → `onRecover`） |
+| `src/components/chat/ChatPanel.vue` | 失败块的按钮文案分流：可重试 → 「重试本轮」；不可重试 → 「重新获取」；点击一律走 `onRetryFailedRun`（**⚠ 分流不能在模板里写成三元表达式**：`@retry="a ? f : g"` 被编译为语句，点击不触发处理器）；消息列表新增 `@retry="onRetryTurn"` |
+| `src/components/chat/MessageList.vue` | 从历史解析失败轮的**同轮用户消息**（按索引向前找，不依赖 id 反查）并新增 `retry` 上抛；解析不出（窗口切分）时不给入口（文案经 `retryLabels` 派生并纳入 `v-memo` 比较项） |
+| `src/components/chat/MessageBubble.vue` | 新增 `retryLabel`（失败提示条的入口文案；`null` = 不渲染入口——该不该重试只有列表层知道） |
+
+### 17.5 改动清单
+
+| # | 文件 | 性质 |
+|---|---|---|
+| 1 | `agent-backend/src/domain/llm-error.ts` | 新增：分类纯函数 + 码类型（唯一实现） |
+| 2 | `agent-backend/src/config.ts` | 改动：`LLM_MAX_RETRIES` / `LLM_RETRY_MAX_DELAY_MS`（zod 校验 + `AppConfig` 字段） |
+| 3 | `agent-backend/.env.example`（若存在，否则 README 的运行参数表） | 改动：登记两个新参数 |
+| 4 | `agent-backend/src/infra/llm/pi-ai-provider.ts` | 改动：传重试参数 + 分类接线 |
+| 5 | `agent-backend/src/infra/agent-loop.ts` | 改动：`createStreamFn` 增第三参 + 分类接线 |
+| 6 | `agent-backend/src/types.ts` | 改动：`LlmEvent.error` / `HistoryMessage.error` 可选诊断字段 |
+| 7 | `agent-backend/src/domain/run-finalize.ts` | 改动：诊断字段落盘/下发 + `llm.call.failed` 日志 |
+| 8 | `agent-backend/src/{server,domain/run-manager,infra/agent-factory}.ts` | 改动：装配 `llmInfo` 取值口（最小接线） |
+| 9 | `agent-backend/tests/unit/llm-error.spec.ts` | 新增：分类逐类 + 边界 |
+| 10 | `agent-backend/tests/unit/llm-retry.spec.ts` | 新增：重试接线（假 provider：503×2→200 / 0 重试 / 不可重试 / abort） |
+| 11 | `agent-backend/tests/unit/run-finalize.spec.ts` | 改动：诊断字段与 `llm.call.failed` 断言 |
+| 12 | `agent-backend/vitest.config.ts` | 改动：`src/domain/llm-error.ts` 登记进模块覆盖率阈值清单（80%） |
+| 13 | `frontend/src/api/types.ts` | 改动：`ErrorInfo` 诊断字段 |
+| 14 | `frontend/src/utils/error-message.ts` / `.spec.ts` | 改动：新码文案 + `formatErrorDiagnostics` 纯函数与用例 |
+| 15 | `frontend/src/components/common/ErrorNotice.vue` / `.spec.ts` | 改动：诊断行 + 用例 |
+| 16 | `frontend/src/composables/useChatStream.ts` / `.spec.ts` | 改动：`lastRetryableTurn` + 失败轮缓存 |
+| 17 | `frontend/src/composables/useChatPanel.ts` / `ChatPanel.spec.ts` | 改动：`canRegenerate` 扩展 + 按钮分流 + 历史失败轮 `onRetryTurn` |
+| 17a | `frontend/src/components/chat/{MessageList,MessageBubble}.vue` | 改动：失败轮 `retry` 的解析与上抛（**断链修复**：原先该事件无接收方） |
+| 17b | `frontend/src/composables/useChatPanel.retry.spec.ts` | 新增：重发链路（一次点击 = 一次 `chat.send`）与"进行中不响应且不清草稿" |
+| 18 | `specs/002-conversation-runtime/{spec,plan,tasks}.md`、`contracts/runtime-api-delta.md` | 改动：规格与契约登记 |
+
+**零变更**：`admin-backend` / `admin-frontend`（全部）、SSE **事件类型集合**（仍只有既有 8 种，`error` 只是负载增字段）、`GET /api/threads/{id}` 的其余字段、`tool_call*` 事件、上下文回灌、两侧依赖（**零新增**）。
+
+## 18. Complexity Tracking（本增量）
+
+| 项 | 内容 |
+|---|---|
+| 取舍：重试交给 `pi-ai`（传参）而非自建循环 | 宪章原则二"同一职责只有一处实现"+ 原则六"用平台原生能力"：退避 / 抖动 / `x-should-retry` / `Retry-After` / 可打断睡眠都已实现，自建即第二套语义 |
+| 取舍：分类下沉到 `domain/` 纯函数 | 两个调用点（直聊 / 工具循环）必须给出**同一个码**，否则前端文案与日志口径会漂移；纯函数可穷举单测、无网络依赖（原则三） |
+| 取舍：诊断走"已有通道 + 可选字段" | 不新增 SSE 事件类型 → 旧前端天然兼容；`error` 对象加字段是**向后兼容**的最小面 |
+| 取舍：不设 `timeoutMs` | SDK 的 `timeout` 对流式响应会连正文读取一起截断；本次的收益点（首字节前 503）由重试覆盖，挂死由用户「停止」+ SDK 默认 10 分钟兜底（登记，见 §19） |
+| 取舍：诊断信息在 UI 上**不做"复制"按钮** | 一次点击的不是本次痛点；`request_id` 文本可选中即满足"可报障"，避免为小概率操作引入新控件与 a11y 面 |
+| **被否决**：自己写 `withRetry(streamFactory)` 包一层流 | 会重复实现退避与 `Retry-After` 判定；且包装 `AssistantMessageEventStream`（`StreamFn` 要求同步返回流对象）需要额外的泵送与错误重放，复杂度换不来新能力 |
+| **被否决**：用 `utils/retry.d.ts` 的 `retryAssistantCall` | 它吃 `Promise<AssistantMessage>`（整段收完才返回），会毁掉首字节流式体验 |
+| **被否决**：把上游 `message` 原文展示给用户 | 与 D13/V-12 冲突，且可能含 provider 内部信息；原文进日志、用户看分类文案 + 状态码 + `request_id` |
+| **被否决**：给"重试中"新增 SSE 事件 | 重试发生在首字节前（≤ 秒级），既有"生成中"已是可感知的等待态；新增事件要动事件集合、前端分支与 4 处契约，收益不足 |
+| **被否决**：失败轮把"重发"做成后端能力（自动重跑上一轮） | 会绕过前端草稿/引用校验链路，且在"用户已改动输入"时语义含混；沿用既有"以缓存的上一条用户消息重发"的交互 |
+| 已知限制（登记） | ① 流到一半失败仍不重试（避免重复正文），需用户点「重试本轮」；② `upstream_type` / `request_id` 依赖上游响应体形状（DeepSeek 会带；换成不带的 provider 时字段省略）；③ 重试次数对用户不可见（只有失败后的"已自动重试仍未成功"文案） |
+
+## 19. 覆盖率与平台差异（本增量）
+
+- **覆盖率**：`src/domain/llm-error.ts` 登记进 `agent-backend/vitest.config.ts` 模块阈值清单（80%）；两侧全局地板**不下调**。
+- **平台差异**：无。改动是"HTTP 请求选项 + 字符串/JSON 解析 + Vue 渲染"，不涉及文件系统、路径大小写、非 ASCII 路径、行尾符或原生模块；测试全部本地（宿主机）执行。
+- **观察项（登记）**：`agent-backend/src/domain/run-finalize.ts` 与 `src/infra/llm/pi-ai-provider.ts` 改动后行数见 §17.5 实测；`frontend/src/api/types.ts`（上次 489 行）本次再增 3 个字段，触发即拆的门槛仍在 ≤500 内——若越线则先拆类型文件再合入。
+
+## 20. 验收
+
+见 [spec.md](./spec.md) §9.5；任务与勾选状态见 [tasks.md](./tasks.md)。

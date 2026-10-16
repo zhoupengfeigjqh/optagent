@@ -174,9 +174,7 @@ describe('buildSegments - 链接与高亮叠加', () => {
 
   it('关键词覆盖整个链接 → 单一 mark 分段且仍可点击', () => {
     const url = 'https://a.com'
-    expect(buildSegments(url, url)).toEqual([
-      { type: 'mark', text: url, href: url, matchIndex: 0 },
-    ])
+    expect(buildSegments(url, url)).toEqual([{ type: 'mark', text: url, href: url, matchIndex: 0 }])
   })
 })
 

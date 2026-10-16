@@ -16,9 +16,14 @@
  * - 其余形态 → `null`：协议相对的 `//host/…`（`new URL` 会把 host 换成对方）、
  *   无前导 `/` 的（会被解析成"相对当前路径"，落点不可预期）、其它 scheme
  *   （`javascript:` / `data:` …）、含控制字符或反斜杠的。
+ *
+ * 2026-10-15：`ViewLink.kind === 'file'`（本地文件空间相对路径）**不走上面的拒绝规则**——
+ * 它是"空间相对路径"，先经 `filePathToPreviewPath()` 转成 `/api/files/preview?…`
+ * （根相对路径），再按同样规则归一化。是否同源另由 `isSameOrigin()` 判定。
  */
 
 import type { ViewLink } from '../api/types'
+import { splitProducedPath } from './produced-display'
 
 /** 视图链接的字段名（`TR-40` 判定用）。 */
 export const VIEW_URL_FIELD = 'viewUrl'
@@ -42,6 +47,34 @@ export interface ViewLinkEntry {
   raw: string
   /** 服务给的名称；缺省 = 服务没给名字（界面显示地址） */
   name?: string
+  /**
+   * 来源形态（2026-10-15）：`'file'` = 本地文件空间相对路径（`raw` 就是那条路径）；
+   * `'url'` = 外部 / 同源地址。
+   *
+   * 必须**随行携带**：它决定点开后的渲染口径（相对路径按扩展名预览；地址按响应头预检），
+   * 而 `href` 对两者都是绝对地址，事后无法反推——从 `/api/files/preview?…` 解析回
+   * `dir`/`filename` 是拿前端自己拼的串当输入，等于自欺。
+   */
+  kind: 'url' | 'file'
+}
+
+/**
+ * 入口点击后交给上层的跳转目标（2026-10-15，跨组件契约）。
+ *
+ * 与 `ViewLinkEntry` 的分工：`ViewLinkEntry` 是**入口行长什么样**（含显示文本、去重键），
+ * 这里是**点下去要做什么**（只留跳转必需的信息）。装配层（`usePreview`）据此二选一：
+ * - `kind: 'file'` + `filePath` → 与"在文件空间里点文件"**同一条路**（按扩展名预览）
+ * - 其余 → 同源预检 / 异源直跳
+ */
+export interface ViewLinkTarget {
+  /** 可点开的绝对地址（`kind:'file'` 时是 `/api/files/preview?…`，供中键 / 复制链接） */
+  url: string
+  /** 显示名（有名称用名称，否则中段省略的地址 / 路径） */
+  name: string
+  /** 来源形态（缺省的 `viewUrl` 一律为 `'url'`） */
+  kind: 'url' | 'file'
+  /** `kind: 'file'` 时的空间相对路径（上层据此拆 `dir` + `filename`） */
+  filePath?: string
 }
 
 /**
@@ -62,7 +95,12 @@ export function toViewLinkEntries(
   const byHref = new Map<string, ViewLinkEntry>()
 
   for (const link of links ?? []) {
-    const href = resolveViewUrl(link.url, origin)
+    const raw = link.url.trim()
+    if (raw === '') continue
+    // `kind: 'file'` 是本地文件空间相对路径：先转成预览接口地址，再按同一规则归一化（拼入口）
+    const kind: ViewLinkEntry['kind'] = link.kind === 'file' ? 'file' : 'url'
+    const source = kind === 'file' ? filePathToPreviewPath(raw) : raw
+    const href = resolveViewUrl(source, origin)
     if (href === null) continue
 
     const name = normalizedName(link.name)
@@ -71,7 +109,8 @@ export function toViewLinkEntries(
       if (existing.name === undefined && name !== undefined) existing.name = name
       continue
     }
-    byHref.set(href, name === undefined ? { href, raw: link.url.trim() } : { href, raw: link.url.trim(), name })
+    // 显示文本仍取**原值**：文件路径（`数据准备/x.pdf`）比 `/api/files/preview?…` 可读
+    byHref.set(href, name === undefined ? { href, raw, kind } : { href, raw, kind, name })
   }
 
   return [...byHref.values()]
@@ -94,9 +133,29 @@ export function viewLinkLabel(entry: ViewLinkEntry): string {
   return entry.name ?? truncateMiddle(entry.raw, VIEW_LINK_ADDRESS_MAX_CHARS)
 }
 
-/** 入口的悬停提示：有名称时 `名称 — 完整地址`，无名称时完整地址（地址永远可核对）。 */
+/**
+ * 入口的悬停提示：有名称时 `名称 — 可核对的地址`，无名称时只给地址。
+ *
+ * 2026-10-15 修正：`kind: 'file'` 的"可核对地址"取**原相对路径**而不是 `href`。
+ * 原因是 `href` 是前端自己拼的 `/api/files/preview?dir=%E6%95%B0…`（含 URL 编码），
+ * 拿它给用户核对等于让人读一串编码——而用户能对上号的是 `数据准备/9月计划.xlsx`。
+ * 外部地址（`kind: 'url'`）仍给 `href`：那里的绝对形式才可复制可核对。
+ */
 export function viewLinkTitle(entry: ViewLinkEntry): string {
-  return entry.name === undefined ? entry.href : `${entry.name} — ${entry.href}`
+  const address = entry.kind === 'file' ? entry.raw : entry.href
+  return entry.name === undefined ? address : `${entry.name} — ${address}`
+}
+
+/**
+ * 入口行的一项 → 交给装配层的跳转目标（`ViewLinkTarget`）。
+ *
+ * 映射放在这里而不是组件里：组件只负责"点了哪一项"，**点下去要做什么**是纯函数，
+ * 才好被单测钉住（跨组件契约的漂移是最难查的那类）。
+ */
+export function toViewLinkTarget(entry: ViewLinkEntry): ViewLinkTarget {
+  const base: ViewLinkTarget = { url: entry.href, name: viewLinkLabel(entry), kind: entry.kind }
+  // `kind: 'url'` 不写 `filePath`：上层据此判"这不是文件，别按扩展名预览"
+  return entry.kind === 'file' ? { ...base, filePath: entry.raw } : base
 }
 
 /** 中段省略：保留首段与末段（`maxChars` 含省略号本身）。 */
@@ -148,6 +207,42 @@ export function resolveViewUrl(value: unknown, origin?: string): string | null {
   } catch {
     // 注入的 origin 不是合法基址（调用方传错）——不猜，按普通文本处理
     return null
+  }
+}
+
+/**
+ * 本地文件空间相对路径（`filePath`）→ 预览接口地址（根相对路径，单个 `/` 开头）。
+ *
+ * `数据准备/生产计划/9月计划.xlsx` → `dir` + `filename` → `/api/files/preview?dir=…&filename=…`
+ * （`URLSearchParams` 负责中文与斜杠的编码）。无分隔符时 `dir` 为空串——**不猜**：
+ * 照样构造、交给预览接口按自己的口径报可读错误，好过前端拼出一个必然错的路径。
+ *
+ * 只拼**根相对路径**（前缀 = 用户当前入口，由 `resolveViewUrl` 补）。
+ */
+export function filePathToPreviewPath(filePath: string): string {
+  const { dir, filename } = splitProducedPath(filePath)
+  const search = new URLSearchParams()
+  if (dir !== '') search.append('dir', dir)
+  search.append('filename', filename)
+  return `/api/files/preview?${search.toString()}`
+}
+
+/**
+ * 是否与当前访问入口**同源**（协议 + 主机 + 端口三者相同）。
+ *
+ * 判据是标准 `origin` 比较——**不是**"ip+端口一致"：`https://a` vs `http://a`、
+ * `localhost` vs `127.0.0.1` 都算跨域，只看 ip+端口会误判。
+ *
+ * `origin` 可注入（默认 `window.location.origin`）：单测不依赖真实 `location`。
+ * 非法地址（`new URL` 抛错）一律**不当同源**（保守：走外部跳转而不是往 iframe 里塞）。
+ */
+export function isSameOrigin(href: string, origin?: string): boolean {
+  const base = origin ?? currentOrigin()
+  if (base === '') return false
+  try {
+    return new URL(href, base).origin === base
+  } catch {
+    return false
   }
 }
 

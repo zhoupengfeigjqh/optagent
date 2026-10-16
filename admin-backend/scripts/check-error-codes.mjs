@@ -5,7 +5,9 @@
  * 按 T120 的要求做**机械核对**：逐一提取契约内出现的全部错误码，
  * 与 `§0.4` 的错误码总表、后端码表、前端文案表三处比对，
  * 出现以下任一种情况即非零退出：
- *   - 契约端点用到但 `§0.4` 未登记（来源：分析阶段发现的 `ADM_AGENT_NOT_FOUND`）
+ *   - 契约**全文**提到但 `§0.4` 未登记（来源：分析阶段发现的 `ADM_AGENT_NOT_FOUND`；
+ *     2026-10-15 §11 的两个 401/403 码同属此类）。口径是"全文"而非"端点小节"——
+ *     契约里出现过的码名都必须进表，否则 §11 那样的"约束级登记"会绕过门禁
  *   - `§0.4` 登记了但后端码表缺失
  *   - 后端码表与前端常量表不一致
  *   - 前端缺少该码的中文文案
@@ -17,21 +19,9 @@ import path from 'node:path';
 import process from 'node:process';
 
 const repoRoot = path.resolve(process.cwd(), '..');
-const contractPath = path.join(
-  repoRoot,
-  'specs',
-  '001-digital-human-platform',
-  'contracts',
-  'admin-api.md',
-);
+const contractPath = path.join(repoRoot, 'specs', '001-digital-human-platform', 'contracts', 'admin-api.md');
 const backendCodesPath = path.join(process.cwd(), 'src', 'domain', 'error-codes.ts');
-const frontendCodesPath = path.join(
-  repoRoot,
-  'admin-frontend',
-  'src',
-  'constants',
-  'error-messages.ts',
-);
+const frontendCodesPath = path.join(repoRoot, 'admin-frontend', 'src', 'constants', 'error-messages.ts');
 
 function readOrFail(file) {
   if (!fs.existsSync(file)) {
@@ -58,7 +48,9 @@ function tableCodes(source) {
 /** 提取全文出现的码（含端点小节里的"错误码"行） */
 function mentionedCodes(source) {
   const codes = new Set();
-  for (const match of source.matchAll(/`(ADM_[A-Z0-9_]+|VALIDATION_FAILED|NOT_FOUND|INTERNAL_ERROR|SERVICE_UNAVAILABLE)`/g)) {
+  for (const match of source.matchAll(
+    /`(ADM_[A-Z0-9_]+|VALIDATION_FAILED|NOT_FOUND|INTERNAL_ERROR|SERVICE_UNAVAILABLE)`/g,
+  )) {
     codes.add(match[1]);
   }
   return codes;
@@ -82,7 +74,7 @@ const problems = [];
 
 for (const code of contractMentioned) {
   if (!contractTable.has(code)) {
-    problems.push(`契约端点使用了未在 §0.4 登记的错误码：${code}`);
+    problems.push(`契约中出现了未在 §0.4 登记的错误码：${code}`);
   }
 }
 for (const code of contractTable) {
@@ -108,5 +100,5 @@ if (unique.length > 0) {
 
 console.log(
   `[check:contract] 通过：契约 §0.4 登记 ${contractTable.size} 个错误码，` +
-    `后端与前端码表一致，且无"端点使用但未登记"的码`,
+    `后端与前端码表一致，且无"契约提到但未登记"的码`,
 );

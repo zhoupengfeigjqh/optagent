@@ -48,9 +48,7 @@ function cloneFields(
 }
 
 /** 目录级可上传类型也是"目录 → 数组"的两层结构，逐层复制（避免草稿改动污染已保存态） */
-function cloneUploads(
-  uploads: Record<string, string[]> | undefined,
-): Record<string, string[]> {
+function cloneUploads(uploads: Record<string, string[]> | undefined): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const [dir, list] of Object.entries(uploads ?? {})) {
     out[dir] = [...list]

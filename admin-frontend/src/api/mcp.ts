@@ -72,10 +72,7 @@ export interface McpProbePayload {
 }
 
 export function testMcpService(name: string, probe?: McpProbePayload): Promise<McpTestResult> {
-  return http.post<McpTestResult>(
-    `/api/admin/mcp/services/${encodeURIComponent(name)}/test`,
-    probe,
-  )
+  return http.post<McpTestResult>(`/api/admin/mcp/services/${encodeURIComponent(name)}/test`, probe)
 }
 
 /**

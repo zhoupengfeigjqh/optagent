@@ -5,11 +5,13 @@
  * 会话选中即清空并**一次性恢复拉取**、恢复响应的**过期丢弃**、
  * done 直推的 `apply`、发起新一轮的 `reset`；再加一条"失败静默"。
  */
-import { ref } from 'vue'
+import { mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyNextSteps, type NextStepsApi } from '../api/next-steps'
 import type { ThreadNextSteps } from '../api/threads'
-import { createNextStepsStore, type NextStepsStore } from './useNextSteps'
+import { APP_SESSION_KEY, useAppSession } from './useAppSession'
+import { createNextStepsStore, useNextSteps, type NextStepsStore } from './useNextSteps'
 
 const HIT: ThreadNextSteps = {
   message_id: 'm-1',
@@ -24,7 +26,9 @@ const HIT: ThreadNextSteps = {
  */
 function setup() {
   const activeThreadId = ref<string | null>(null)
-  const fetcher = vi.fn<(threadId: string) => Promise<ThreadNextSteps>>(async () => emptyNextSteps())
+  const fetcher = vi.fn<(threadId: string) => Promise<ThreadNextSteps>>(async () =>
+    emptyNextSteps(),
+  )
   const api: NextStepsApi = { fetch: (threadId: string) => fetcher(threadId) }
   const store: NextStepsStore = createNextStepsStore({ nextSteps: api, activeThreadId })
   return {
@@ -84,6 +88,20 @@ describe('会话选中 → 一次性恢复拉取（修订 G3：刷新后卡片�
 
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(store.steps.value).toEqual(emptyNextSteps())
+  })
+
+  it('退出到无会话（`activeThreadId → null`）：只清空，**不发请求**（没有会话就没有卡片）', async () => {
+    const { activeThreadId, enter, fetcher, store } = setup()
+    enter('th_1')
+    await settle()
+    store.apply(HIT)
+    fetcher.mockClear()
+
+    activeThreadId.value = null
+    await settle()
+
+    expect(store.steps.value).toEqual(emptyNextSteps())
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })
 
@@ -147,5 +165,26 @@ describe('失败静默', () => {
     enter('th_1')
     await expect(settle()).resolves.toBeUndefined()
     expect(store.steps.value).toEqual(emptyNextSteps())
+  })
+})
+
+describe('组件内访问器（provide/inject 的唯一入口）', () => {
+  it('`useNextSteps()` 取到的就是注入的会话上下文里那一份（不新建第二份状态）', () => {
+    // 无组件实例时 `useAppSession()` 只装配、不 `provide`（见其文档），故这里显式注入。
+    // 装配期不发请求，`fetchImpl` 桩只是为了让构造参数合法。
+    const session = useAppSession({ storage: null, fetchImpl: async () => new Response('{}') })
+    const holder: { injected: NextStepsStore | null } = { injected: null }
+
+    const Probe = defineComponent({
+      setup() {
+        holder.injected = useNextSteps()
+        return () => null
+      },
+    })
+
+    mount(Probe, { global: { provide: { [APP_SESSION_KEY]: session } } })
+
+    expect(holder.injected).not.toBeNull()
+    expect(holder.injected).toBe(session.nextSteps)
   })
 })

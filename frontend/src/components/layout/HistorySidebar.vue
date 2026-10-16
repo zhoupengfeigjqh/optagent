@@ -70,12 +70,7 @@ const hasMore = computed(() => props.threads.length > props.limit)
       />
     </ul>
 
-    <button
-      v-if="hasMore"
-      type="button"
-      class="history-sidebar__more"
-      @click="emit('more')"
-    >
+    <button v-if="hasMore" type="button" class="history-sidebar__more" @click="emit('more')">
       查看更多（最多 100 条）
     </button>
   </nav>

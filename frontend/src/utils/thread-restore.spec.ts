@@ -64,11 +64,7 @@ describe('withThreadParam', () => {
 describe('writeThreadToUrl', () => {
   it('拼接 pathname + search + hash，走 replace 回调', () => {
     const replace = vi.fn()
-    writeThreadToUrl(
-      'abc',
-      { pathname: '/chat', search: '?foo=1', hash: '#top' },
-      replace,
-    )
+    writeThreadToUrl('abc', { pathname: '/chat', search: '?foo=1', hash: '#top' }, replace)
 
     expect(replace).toHaveBeenCalledWith('/chat?foo=1&thread=abc#top')
   })

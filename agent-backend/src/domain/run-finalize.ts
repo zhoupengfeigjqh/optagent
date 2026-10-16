@@ -17,10 +17,21 @@
  * 与并发编排（配额、活跃表、drain）无关；注入后本模块可独立单测，`run-manager.ts` 只留编排。
  */
 import type { Logger } from 'pino';
-import type { HistoryMessage, RunRuntime, UsageInfo, UsageStore } from '../types.js';
+import type {
+  HistoryErrorInfo,
+  HistoryMessage,
+  RunRuntime,
+  UsageInfo,
+  UsageStore,
+} from '../types.js';
+import { isAlertLlmFailure, toHistoryErrorInfo } from './llm-error.js';
 import type { HistoryStore } from './history.js';
 import { genMessageId, toSeconds } from './message-format.js';
-import type { NextActionsFinalizeInput, NextActionsStore, NextActionsView } from './next-actions.js';
+import type {
+  NextActionsFinalizeInput,
+  NextActionsStore,
+  NextActionsView,
+} from './next-actions.js';
 import type { RunImpl } from './run-impl.js';
 import type { ToolEventStore } from './tool-events.js';
 
@@ -47,8 +58,18 @@ export interface RunFinalizeDeps {
   summary?: { trigger(userId: string, agentName: string, threadId: string): Promise<void> };
   /** 007 修订：卡片定稿口（缺省 = 该侧未装配，功能整体不生效） */
   nextActions?: Pick<NextActionsStore, 'finalize'>;
+  /**
+   * 2026-10-15：LLM 身份取值口（`provider` / 默认 `model`），由装配处注入。
+   *
+   * 为什么不在 `domain` 里直接读 `config`：分层约束（`domain` 不反向依赖 `config`）；
+   * 注入后本模块仍可独立单测（缺省即不记这两个字段，日志只是少两列，不影响收尾）。
+   */
+  llmInfo?: () => { provider: string; model: string };
   now: () => number;
 }
+
+/** 失败日志里上游原文的截断长度（够定位问题，又不至于把一行日志撑成一篇报文） */
+const LLM_FAILURE_LOG_TEXT_MAX = 500;
 
 export class RunFinalizer {
   constructor(private readonly deps: RunFinalizeDeps) {}
@@ -117,13 +138,17 @@ export class RunFinalizer {
     run: RunImpl,
     turn: FinalizeTurn,
     userMessage: HistoryMessage,
-    ev: { code: string; message: string; usage?: UsageInfo },
+    ev: HistoryErrorInfo & { usage?: UsageInfo },
   ): Promise<void> {
     run.state = 'error';
     const nowMs = this.deps.now();
     const ts = new Date(nowMs).toISOString();
     const durationMs = nowMs - run.startedAt;
     if (ev.usage) this.recordUsage(turn, run.agentName, ev.usage);
+    // 同一份诊断：失败行与 SSE error 事件共用同一个对象（§19.5 不变式 5）
+    const error = toHistoryErrorInfo(ev);
+    // 原则九：原始错误落结构化日志（上游状态码 / 请求 id / 截断原文 + 关联线索）
+    this.logLlmFailure(run, turn, error, durationMs);
     // FR-011：失败轮留痕（assistant 行 content 为空，错误信息在 error 字段）
     const assistantMessage: HistoryMessage = {
       id: genMessageId(nowMs),
@@ -132,11 +157,14 @@ export class RunFinalizer {
       ts,
       status: 'failed',
       duration_ms: durationMs,
-      error: { code: ev.code, message: ev.message },
+      error,
       agent_name: run.agentName,
     };
     if (ev.usage) {
-      assistantMessage.usage = { input_tokens: ev.usage.inputTokens, output_tokens: ev.usage.outputTokens };
+      assistantMessage.usage = {
+        input_tokens: ev.usage.inputTokens,
+        output_tokens: ev.usage.outputTokens,
+      };
     }
     await Promise.all([
       this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
@@ -152,7 +180,7 @@ export class RunFinalizer {
     run.emit({
       type: 'error',
       data: {
-        error: { code: ev.code, message: ev.message },
+        error,
         duration_seconds: toSeconds(durationMs),
         agent_name: run.agentName,
         ...(ev.usage
@@ -189,6 +217,44 @@ export class RunFinalizer {
       outputTokens: u.outputTokens,
       createdAt: new Date(this.deps.now()).toISOString(),
     });
+  }
+
+  /**
+   * 原则九：LLM 失败 MUST 落结构化日志（含上游状态码 / 请求 id / 截断原文 + 关联线索）。
+   *
+   * 只告警**需要人工介入**的两类（余额不足 / 凭证无效）——把"用户稍后重试就好"的 5xx
+   * 也标成 `alert` 会让告警失去意义。未装配 logger 时静默跳过（日志不致命）。
+   */
+  private logLlmFailure(
+    run: RunImpl,
+    turn: FinalizeTurn,
+    error: HistoryErrorInfo,
+    durationMs: number,
+  ): void {
+    const logger = this.deps.logger;
+    if (!logger) return;
+    const llm = this.deps.llmInfo?.();
+    // 请求级模型覆盖优先（`run.modelId`），否则记默认模型——日志要说清"是哪个模型失败的"
+    const model = run.modelId ?? llm?.model;
+    logger.warn(
+      {
+        event: 'llm.call.failed',
+        scope: 'run',
+        user_id: turn.userId,
+        thread_id: turn.threadId,
+        agent_name: run.agentName,
+        code: error.code,
+        ...(error.upstream_status !== undefined ? { upstream_status: error.upstream_status } : {}),
+        ...(error.upstream_type !== undefined ? { upstream_type: error.upstream_type } : {}),
+        ...(error.request_id !== undefined ? { request_id: error.request_id } : {}),
+        ...(llm?.provider !== undefined ? { provider: llm.provider } : {}),
+        ...(model !== undefined ? { model } : {}),
+        message: error.message.slice(0, LLM_FAILURE_LOG_TEXT_MAX),
+        duration_ms: durationMs,
+        ...(isAlertLlmFailure(error.code) ? { alert: true } : {}),
+      },
+      `LLM 调用失败：${error.code}${error.upstream_status !== undefined ? `（上游 ${error.upstream_status}）` : ''}`,
+    );
   }
 
   /**

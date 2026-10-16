@@ -11,7 +11,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 
-import type { InteractionRequestInput, InteractionOutcome } from '../../src/domain/interaction-gate.js';
+import type {
+  InteractionRequestInput,
+  InteractionOutcome,
+} from '../../src/domain/interaction-gate.js';
 import { wrapToolWithInteraction } from '../../src/infra/tool-intercept.js';
 
 const SCHEMA = {
@@ -125,7 +128,10 @@ describe('wrapToolWithInteraction', () => {
       name: 'pricing__optimize',
       parameters: {
         type: 'object',
-        properties: { rules: { type: 'array', items: { type: 'object' } }, days: { type: 'integer' } },
+        properties: {
+          rules: { type: 'array', items: { type: 'object' } },
+          days: { type: 'integer' },
+        },
       } as never,
     };
 

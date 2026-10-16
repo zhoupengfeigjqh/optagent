@@ -139,9 +139,7 @@ const hitlAllowedTools = computed<string[]>(() => {
 })
 
 /** 无需确认 / 清单不可得：算法规则参数设置不可编辑（未开 HITL 时本就不生效） */
-const rulesDisabled = computed(
-  () => confirmationMode.value === 'never' || manualFallback.value,
-)
+const rulesDisabled = computed(() => confirmationMode.value === 'never' || manualFallback.value)
 
 /** HITL 模式切换的级联：无需确认→清空；仅指定→丢清单外；全部→保留 */
 watch(confirmationMode, pruneRulesFields)
@@ -152,11 +150,9 @@ watch(confirmationTools, () => {
 })
 
 /**
- * 草稿锚定「服务标识」（契约 §0.5 原则 ①）：**只有切换服务才重填表单**。
- *
- * 同一服务的 `props.service` 刷新（保存后重载、并发更新、列表轮询）MUST NOT
- * 覆盖用户未提交的编辑——旧实现无条件 `loadFrom`，等于把"保存"变成一次
- * "整表重置"。判据用 `name`（服务标识），而非对象引用。
+ * 草稿锚定「服务标识」（契约 §0.5 原则 ①）：**只有切换服务才重填表单**——同一服务的
+ * `props.service` 刷新（保存后重载、并发更新、列表轮询）MUST NOT 覆盖用户未提交的编辑，
+ * 旧实现无条件 `loadFrom` 等于把"保存"变成一次"整表重置"。判据用 `name`，而非对象引用。
  */
 watch(
   () => props.service,
@@ -184,11 +180,9 @@ watch(
 )
 
 /**
- * 请求头提交片段：**"留空 = 不修改"**（见 `McpHeadersField` 的说明）。
- *
- * - 点过「清空全部请求头」→ 发 `{}`（显式清空）；
- * - 输入框留空 → **不带**该字段（服务端沿用存量，保存不会顺手清空令牌）；
- * - 填了内容 → 整体替换；写法非法返回 `error`，调用方 MUST NOT 提交。
+ * 请求头提交片段：**"留空 = 不修改"**（见 `McpHeadersField` 的说明）——点过「清空全部请求头」
+ * 发 `{}`（显式清空）；输入框留空则**不带**该字段（服务端沿用存量，保存不会顺手清空令牌）；
+ * 填了内容即整体替换，写法非法返回 `error`，调用方 MUST NOT 提交。
  */
 function resolveHeadersPatch(): { headers?: Record<string, string>; error?: string } {
   if (headersClearing.value) return { headers: {} }
@@ -198,7 +192,8 @@ function resolveHeadersPatch(): { headers?: Record<string, string>; error?: stri
   return { headers: parsed.headers }
 }
 
-function submit(): void {
+/** 提交（页头「保存调用配置」与表单内回车同一条路径）；返回**本地校验是否通过**（页头据此在别的页签补播报） */
+function submit(): boolean {
   localError.value = null
 
   // 连接目标判据与新建弹窗**共用同一实现**；名称取自服务端且不可改，故不校验
@@ -209,7 +204,7 @@ function submit(): void {
   })
   if (invalid !== null) {
     localError.value = invalid
-    return
+    return false
   }
 
   // 确认策略：custom 模式须至少勾选一个工具（保存期服务端会再校验形状）
@@ -226,7 +221,7 @@ function submit(): void {
     const tools = [...new Set(raw)]
     if (tools.length === 0) {
       localError.value = '按工具确认模式须至少勾选一个工具（清单为空时请在文本框填写工具名）'
-      return
+      return false
     }
     confirmation = { tools }
   }
@@ -240,7 +235,7 @@ function submit(): void {
     const resolved = resolveHeadersPatch()
     if (resolved.error !== undefined) {
       localError.value = resolved.error
-      return
+      return false
     }
     headersPatch = resolved.headers
   }
@@ -265,6 +260,7 @@ function submit(): void {
     async_tools: [...asyncTools.value],
   }
   emit('submit', config)
+  return true
 }
 
 /**
@@ -299,23 +295,26 @@ function probeTarget(): McpProbePayload {
  * 结果弹窗 ref 归本组件所有（模板 `ref="testDialog"`），借给它用（原因见该处 `dialog` 注释）。
  */
 const testDialog = ref<{ open: () => void } | null>(null)
-const { result: testResult, busy: testBusy, error: testError, run: runTest } =
-  useMcpConnectionTest({
-    serviceName: () => props.service.name,
-    target: probeTarget,
-    dialog: testDialog,
-    /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
-    beforeTest: () =>
-      transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null,
-    onLocalError: (message) => {
-      localError.value = message
-    },
-    announce: (text) => emit('announce', text),
-  })
+const {
+  result: testResult,
+  busy: testBusy,
+  error: testError,
+  run: runTest,
+} = useMcpConnectionTest({
+  serviceName: () => props.service.name,
+  target: probeTarget,
+  dialog: testDialog,
+  /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
+  beforeTest: () => (transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null),
+  onLocalError: (message) => {
+    localError.value = message
+  },
+  announce: (text) => emit('announce', text),
+})
 
 /**
  * 暴露给详情页：
- * - `submit()`：页头右上角的「保存调用配置」用它——与表单内回车同一路径（含本地校验），避免两套判据；
+ * - `submit()`：页头右上角的「保存调用配置」用它——与表单内回车同一路径（含本地校验、**返回是否通过**），避免两套判据；
  * - `runTest()`：创建成功后的"自动测试一次"（`McpArea` → `McpServiceDetail` → 此处）用它，
  *   与「发起测试」按钮同一路径（同一套结果弹窗与播报）；
  * - `probeTarget()`：表单当前连接目标，供外部按需读取。

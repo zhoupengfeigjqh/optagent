@@ -22,11 +22,7 @@ import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 import { removeTree } from '../../infra/fs-remove.js';
-import {
-  extractSkillArchive,
-  type ArchiveLimits,
-  type SkillArchive,
-} from './archive.js';
+import { extractSkillArchive, type ArchiveLimits, type SkillArchive } from './archive.js';
 import {
   SKILLS_DIR,
   contentHash,
@@ -190,23 +186,11 @@ export class SkillLibraryService {
    * 注意：保存只改**库里这一份**。数字人目录里的副本由部署写入（`FR-026`），
    * 因此引用者需**重新部署**才会拿到新版本（界面 MUST 明确提示这一点）。
    */
-  writeFile(
-    name: string,
-    relPath: unknown,
-    content: unknown,
-    baseHash: unknown,
-  ): SkillFileWriteResult {
+  writeFile(name: string, relPath: unknown, content: unknown, baseHash: unknown): SkillFileWriteResult {
     // 市场来源**只读**（`FR-062`）：权威拦截点在此，路由与界面都只是引导（见 `origin.ts`）
     assertSkillEditable(name, this.listAll().find((item) => item.name === name)?.origin);
 
-    const outcome = writeSkillFile(
-      this.fileDeps(),
-      this.dirRel(name),
-      name,
-      relPath,
-      content,
-      baseHash,
-    );
+    const outcome = writeSkillFile(this.fileDeps(), this.dirRel(name), name, relPath, content, baseHash);
 
     const updatedAt = new Date().toISOString();
     const record = this.listAll().find((item) => item.name === name);
@@ -256,10 +240,7 @@ export class SkillLibraryService {
     const archive = await extractSkillArchive(buffer, options.limits ?? {});
     const metadata = parseSkillMetadata(archive.skillMd);
     if (!isSafeSkillName(metadata.name)) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `SKILL 名称不可作为目录名：${metadata.name}`,
-      );
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `SKILL 名称不可作为目录名：${metadata.name}`);
     }
 
     const existing = this.listAll().find((item) => item.name === metadata.name);

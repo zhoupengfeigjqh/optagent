@@ -29,11 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import {
-  ontologyDisplayName,
-  parseOntologyMetadata,
-  type OntologyMetadata,
-} from './metadata.js';
+import { ontologyDisplayName, parseOntologyMetadata, type OntologyMetadata } from './metadata.js';
 import {
   MAX_ONTOLOGY_BYTES,
   ONTOLOGY_FILE,
@@ -101,9 +97,7 @@ function invalid(message: string): ApiError {
 function readFileChecked(file: string): { content: string; size: number } {
   const stat = fs.statSync(file);
   if (stat.size > MAX_ONTOLOGY_BYTES) {
-    throw invalid(
-      `${path.basename(file)} 超过单文件上限（${MAX_ONTOLOGY_BYTES} 字节，实际 ${stat.size}）`,
-    );
+    throw invalid(`${path.basename(file)} 超过单文件上限（${MAX_ONTOLOGY_BYTES} 字节，实际 ${stat.size}）`);
   }
   return { content: fs.readFileSync(file, 'utf8'), size: stat.size };
 }
@@ -205,8 +199,7 @@ export function listOntoMarketOntologies(
       const record = ontologies.find(item.scenario, item.ontology_dir);
       if (!record) return { ...item, status: 'new' as const };
       // 两个基准文件全部一致才算"无变化"：正文或安全管控任一改动（含新增/移除）都是 changed
-      const sameSecurities =
-        (record.securities_hash ?? null) === (item.securities_hash ?? null);
+      const sameSecurities = (record.securities_hash ?? null) === (item.securities_hash ?? null);
       const unchanged = record.hash === item.hash && sameSecurities;
       return { ...item, status: unchanged ? ('unchanged' as const) : ('changed' as const) };
     }),
@@ -214,10 +207,7 @@ export function listOntoMarketOntologies(
 }
 
 /** 读取市场侧一个本体（导入与更新共用的前置校验） */
-export function readMarketOntology(
-  root: string | null,
-  ref: OntologyMarketRef,
-): MarketOntologyPackage {
+export function readMarketOntology(root: string | null, ref: OntologyMarketRef): MarketOntologyPackage {
   if (root === null || root === '') {
     throw invalid('未配置 ONTO_MARKET_DIR（本体市场目录），无法读取本体');
   }

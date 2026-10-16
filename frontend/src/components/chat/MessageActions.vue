@@ -91,12 +91,7 @@ onBeforeUnmount(clearTimer)
     <span v-if="tokenText" class="message-actions__usage">{{ tokenText }}</span>
     <span v-if="durationText" class="message-actions__duration">{{ durationText }}</span>
 
-    <button
-      type="button"
-      class="message-actions__copy"
-      :disabled="disabled"
-      @click="onClickCopy"
-    >
+    <button type="button" class="message-actions__copy" :disabled="disabled" @click="onClickCopy">
       <BaseIcon name="copy" :size="14" />
       <span class="message-actions__hint">{{ copied ? '已复制' : '复制' }}</span>
     </button>

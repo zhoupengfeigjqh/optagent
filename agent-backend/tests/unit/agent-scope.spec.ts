@@ -14,7 +14,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../../src/context.js';
-import { AgentScopeError, resolveAgentScope, unavailableReason } from '../../src/domain/agent-scope.js';
+import {
+  AgentScopeError,
+  resolveAgentScope,
+  unavailableReason,
+} from '../../src/domain/agent-scope.js';
 import { CurrentAgentStore } from '../../src/domain/current-agent.js';
 import { agentDir } from '../../src/domain/dirs.js';
 
@@ -23,12 +27,17 @@ const agentName = 'demo';
 
 let root: string;
 
-function writeAgent(name: string, opts: { tool?: boolean; mcp?: boolean; soul?: boolean } = {}): void {
+function writeAgent(
+  name: string,
+  opts: { tool?: boolean; mcp?: boolean; soul?: boolean } = {},
+): void {
   const dir = agentDir(root, userId, name);
   mkdirSync(dir, { recursive: true });
   if (opts.soul !== false) writeFileSync(path.join(dir, 'SOUL.md'), '你是助手。\n', 'utf8');
-  if (opts.tool !== false) writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
-  if (opts.mcp !== false) writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
+  if (opts.tool !== false)
+    writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
+  if (opts.mcp !== false)
+    writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
 /** 最小可用上下文：真实 currentAgent + 假 logger（只记录） */

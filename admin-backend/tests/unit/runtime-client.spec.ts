@@ -190,8 +190,6 @@ describe('RuntimeClient.mcpCallStats', () => {
   });
 
   it('baseUrl 结尾斜杠被规范化（避免出现 //api）', () => {
-    expect(new RuntimeClient({ baseUrl: 'http://x:1/', timeoutMs: 10 }).getBaseUrl()).toBe(
-      'http://x:1',
-    );
+    expect(new RuntimeClient({ baseUrl: 'http://x:1/', timeoutMs: 10 }).getBaseUrl()).toBe('http://x:1');
   });
 });

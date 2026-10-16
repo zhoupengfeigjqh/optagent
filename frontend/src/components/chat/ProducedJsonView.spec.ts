@@ -95,7 +95,11 @@ describe('ProducedJsonView —— 有界与逃生舱', () => {
   })
 
   it('未超上限：一行提示都不给（提示只在真截断时出现）', () => {
-    expect(mountView([{ a: 1, b: 2 }]).find('.produced-json__truncated').exists()).toBe(false)
+    expect(
+      mountView([{ a: 1, b: 2 }])
+        .find('.produced-json__truncated')
+        .exists(),
+    ).toBe(false)
   })
 
   it('标量数组同理有界并提示', () => {

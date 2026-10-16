@@ -232,9 +232,10 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     expect(fs.existsSync(path.join(dst, '共享空间', 'marker-共享空间.txt'))).toBe(false);
     // 源目录仍有跳过项 → 不清掉（下次触发继续尝试）
     expect(fs.existsSync(path.join(userDataRoot(root, userId), '共享空间'))).toBe(true);
-    expect(
-      logs.find((l) => l.fields.event === 'data.migration.skipped')?.fields,
-    ).toMatchObject({ entry: '共享空间', reason: 'target_exists' });
+    expect(logs.find((l) => l.fields.event === 'data.migration.skipped')?.fields).toMatchObject({
+      entry: '共享空间',
+      reason: 'target_exists',
+    });
   });
 
   it('名单内的数字人数据目录（含归属者自己）原样不动 —— 不把新布局搬进另一个数字人', () => {
@@ -271,9 +272,7 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     }
     // 用户级落点只剩数字人目录
     expect(fs.readdirSync(userDataRoot(root, userId))).toEqual(['only-数字人']);
-    expect(
-      logs.some((l) => l.fields.event === 'data.migration.rescued_empty_target'),
-    ).toBe(true);
+    expect(logs.some((l) => l.fields.event === 'data.migration.rescued_empty_target')).toBe(true);
   });
 
   it('目标同名项**非空**才是硬冲突：该项跳过，其余项照常迁（已迁内容不被覆盖）', () => {
@@ -288,7 +287,9 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     expect(result.skipped).toEqual(['共享空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
     // 冲突项原样留在旧位，等人工处理；目标里的既有内容一字未改
-    expect(fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt'))).toBe(true);
+    expect(
+      fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt')),
+    ).toBe(true);
     expect(fs.readFileSync(path.join(dst, '共享空间', 'existing.txt'), 'utf8')).toBe('existing');
   });
 
@@ -299,9 +300,12 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     const result = migrateUserDataLayout(root, userId, { logger: makeLogger(logs) });
 
     expect(result).toMatchObject({ status: 'blocked', ownerAgent: null, movedCount: 0 });
-    expect(fs.readFileSync(path.join(userDataRoot(root, userId), '数据准备', 'marker-数据准备.txt'), 'utf8')).toBe(
-      '数据准备',
-    );
+    expect(
+      fs.readFileSync(
+        path.join(userDataRoot(root, userId), '数据准备', 'marker-数据准备.txt'),
+        'utf8',
+      ),
+    ).toBe('数据准备');
     expect(logs.at(-1)).toMatchObject({
       level: 'warn',
       fields: { event: 'data.migration.blocked', uid: userId, reason: 'no_available_agent' },
@@ -339,9 +343,13 @@ describe('migrateUserDataLayout —— 失败保持原状（EXDEV）', () => {
     expect(result.failed).toEqual(['共享空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
     // 保持原状：源里的内容没被动过，也没有被"复制"到目标
-    expect(fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt'))).toBe(true);
     expect(
-      fs.existsSync(path.join(userDataDir(root, userId, 'only-数字人'), '共享空间', 'marker-共享空间.txt')),
+      fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt')),
+    ).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(userDataDir(root, userId, 'only-数字人'), '共享空间', 'marker-共享空间.txt'),
+      ),
     ).toBe(false);
 
     const errorLog = logs.find((l) => l.level === 'error');

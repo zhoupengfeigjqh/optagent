@@ -21,8 +21,11 @@ import type { ViewLink } from '../../api/types'
 import {
   VIEW_LINK_DISPLAY_MAX,
   toViewLinkEntries,
+  toViewLinkTarget,
   viewLinkLabel,
   viewLinkTitle,
+  type ViewLinkEntry,
+  type ViewLinkTarget,
 } from '../../utils/view-link'
 
 const props = withDefaults(
@@ -34,8 +37,15 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** 外部地址点击：由上层直跳新窗口，不进预览区（V-10，与 `MessageContent` 同口径） */
-  'open-link': [href: string]
+  /**
+   * 入口点击（2026-10-15）：交给上层决定怎么打开。
+   *
+   * 与 `MessageContent` 的外链不同——视图入口的地址可能是**同源页面或本地文件**，
+   * 不能一律 `window.open`（那会把本该右侧渲染的内容弹成新标签）。故携带
+   * `ViewLinkTarget`（归一化地址 + 显示名 + 来源形态），由装配层统一判定：
+   * `kind:'file'` 走文件预览口径，其余按同源预检 / 异源直跳。
+   */
+  'open-view': [item: ViewLinkTarget]
 }>()
 
 /** 归一化 + 跨工具去重（纯函数，`computed` 缓存：宪章原则五） */
@@ -50,8 +60,8 @@ const visible = computed(() =>
 /** 被折叠的条数：MUST 让用户看得见，不静默丢弃（`TR-47`） */
 const hiddenCount = computed(() => entries.value.length - visible.value.length)
 
-function onLinkClick(href: string): void {
-  emit('open-link', href)
+function onLinkClick(entry: ViewLinkEntry): void {
+  emit('open-view', toViewLinkTarget(entry))
 }
 </script>
 
@@ -67,7 +77,7 @@ function onLinkClick(href: string): void {
       target="_blank"
       rel="noopener noreferrer"
       :title="viewLinkTitle(entry)"
-      @click.prevent="onLinkClick(entry.href)"
+      @click.prevent="onLinkClick(entry)"
     >
       {{ viewLinkLabel(entry) }}
     </a>

@@ -19,7 +19,8 @@ export function registerMonitorRoutes(app: FastifyInstance, ctx: AppContext): vo
         agent_name: inst.key.agentName,
         active_threads: inst.activeThreads,
         idle_seconds: Math.max(0, Math.floor((now - inst.lastActiveAt) / 1000)),
-        unavailable_mcp: typeof maybeMcp.unavailableMcp === 'function' ? maybeMcp.unavailableMcp() : [],
+        unavailable_mcp:
+          typeof maybeMcp.unavailableMcp === 'function' ? maybeMcp.unavailableMcp() : [],
       };
     });
     return { alive: instances.length, max: ctx.config.poolSize, instances };

@@ -159,7 +159,11 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('开启开关：输入可用；关闭时填的数值被保留回显（不必重填）', () => {
-    const off = mountEditor({ ...emptySoulDesign(), next_action_hints: false, next_action_hints_count: 5 })
+    const off = mountEditor({
+      ...emptySoulDesign(),
+      next_action_hints: false,
+      next_action_hints_count: 5,
+    })
     expect(countInput(off).element.disabled).toBe(true)
     expect(countInput(off).element.value).toBe('5')
 
@@ -187,7 +191,11 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('越界 / 小数 / 空 → 拒绝式：不上抛，输入框弹回当前值', async () => {
-    const wrapper = mountEditor({ ...emptySoulDesign(), next_action_hints: true, next_action_hints_count: 5 })
+    const wrapper = mountEditor({
+      ...emptySoulDesign(),
+      next_action_hints: true,
+      next_action_hints_count: 5,
+    })
 
     for (const bad of ['7', '0', '2.5', '', 'abc']) {
       const input = await setCount(wrapper, bad)

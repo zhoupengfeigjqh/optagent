@@ -137,7 +137,7 @@ watch(
         :total="users?.total ?? 0"
         :page="page"
         :loading="usersLoading"
-        :error="(usersError as never)"
+        :error="usersError as never"
         :selected="selectedUserIds"
         @update:page="
           (next) => {

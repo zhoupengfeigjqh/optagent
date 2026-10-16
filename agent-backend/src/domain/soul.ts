@@ -35,8 +35,7 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /** 问题实例关联的工具引用。 */
 export type SoulToolRef =
-  | { kind: 'builtin'; name: string }
-  | { kind: 'mcp'; service: string; name: string };
+  { kind: 'builtin'; name: string } | { kind: 'mcp'; service: string; name: string };
 
 /** 问题实例：卡片文本（点击即发送）+ 关联工具（生成隐藏引导）。 */
 export interface SoulStarter {
@@ -146,7 +145,10 @@ export function isNextActionsEnabled(
   logger?: { warn(msg: string): void },
 ): boolean {
   try {
-    const raw = fs.readFileSync(path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'), 'utf8');
+    const raw = fs.readFileSync(
+      path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'),
+      'utf8',
+    );
     return parseSoulMeta(raw).nextActionHints;
   } catch (err) {
     logger?.warn(
@@ -170,7 +172,10 @@ export function nextActionHintsCount(
   logger?: { warn(msg: string): void },
 ): number {
   try {
-    const raw = fs.readFileSync(path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'), 'utf8');
+    const raw = fs.readFileSync(
+      path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'),
+      'utf8',
+    );
     return parseSoulMeta(raw).nextActionHintsCount;
   } catch (err) {
     logger?.warn(
@@ -261,8 +266,8 @@ export function buildActionGuidance(
     return desc === '' ? exposed : `${exposed}（${clip(desc, GUIDANCE_USAGE_MAX_CHARS)}）`;
   });
   const text =
-    `本轮请调用以下工具完成用户上一条消息要求的任务：${items.join('、')}。`
-    + '请按用户消息与已知上下文补全参数；不要改用其它工具。';
+    `本轮请调用以下工具完成用户上一条消息要求的任务：${items.join('、')}。` +
+    '请按用户消息与已知上下文补全参数；不要改用其它工具。';
   return clip(text, maxChars);
 }
 

@@ -23,10 +23,7 @@ export const NEXT_STEPS_GUIDE_TEXT = '您接下来可以操作以下动作，请
  * 只有**最新一轮**（快照归属的那条 assistant 消息）才展示：历史轮次一律不展示（FR-015），
  * 而"最新一轮"在后端就是快照里的 `message_id`——故这里是唯一判据，不做别的推断。
  */
-export function visibleActions(
-  steps: ThreadNextSteps | null,
-  messageId: string,
-): AgentStarter[] {
+export function visibleActions(steps: ThreadNextSteps | null, messageId: string): AgentStarter[] {
   if (!steps || steps.message_id === null || steps.message_id !== messageId) return []
   return steps.actions
 }

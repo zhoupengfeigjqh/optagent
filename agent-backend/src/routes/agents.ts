@@ -28,8 +28,14 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     const selected = ctx.currentAgent.current(userId);
     if (!selected) return { agent_name: null, mcp_servers: [] as unknown[] };
 
-    const detail = getAgentDetail(ctx.config.optAgentRoot, userId, selected.agentName, catalogLogger);
-    if (!detail) throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${selected.agentName}`);
+    const detail = getAgentDetail(
+      ctx.config.optAgentRoot,
+      userId,
+      selected.agentName,
+      catalogLogger,
+    );
+    if (!detail)
+      throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${selected.agentName}`);
 
     // 池内活跃实例 → 取实际连接结果（connected/failed，建连进行中为 unknown）；
     // 实例未创建（首次建连前或空闲回收后）→ 尚无连接结果，一律 unknown，不误报为断线（FR-019/020）
@@ -64,7 +70,8 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     try {
       loadAgentConfig(path.join(userAgentsDir(ctx.config.optAgentRoot, userId), name));
     } catch (err) {
-      if (err instanceof AgentConfigError) throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${name}`);
+      if (err instanceof AgentConfigError)
+        throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${name}`);
       throw err;
     }
 

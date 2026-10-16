@@ -199,7 +199,12 @@ describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
 
     // 改库中正文：**在线编辑**（2026-09-16 开放），附件不必随包重传
     const v2 = '---\nname: pdf-parse\ndescription: 解析 PDF\n---\n\n第二版正文\n';
-    fx.ctx.skills.writeFile('pdf-parse', 'SKILL.md', v2, fx.ctx.skills.readFile('pdf-parse', 'SKILL.md').hash);
+    fx.ctx.skills.writeFile(
+      'pdf-parse',
+      'SKILL.md',
+      v2,
+      fx.ctx.skills.readFile('pdf-parse', 'SKILL.md').hash,
+    );
 
     // 编辑只改**库里那一份**：已部署的副本必须原样不动（否则会出现"改库即静默推送"）
     for (const agent of ['a1', 'a2']) {
@@ -230,8 +235,18 @@ describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
 
 describe('SC-019：场景是数字人级的，互不影响', () => {
   it('同一用户关联两个数字人且场景不同 → 各自落盘自己的场景；改其一不影响另一个', async () => {
-    await createAgent(agentBody({ name: 'a1', scenario: { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价', '算法规则'] } }));
-    await createAgent(agentBody({ name: 'a2', scenario: { scenario: '精简', data_prep_dirs: ['产线电价', '算法规则'] } }));
+    await createAgent(
+      agentBody({
+        name: 'a1',
+        scenario: { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价', '算法规则'] },
+      }),
+    );
+    await createAgent(
+      agentBody({
+        name: 'a2',
+        scenario: { scenario: '精简', data_prep_dirs: ['产线电价', '算法规则'] },
+      }),
+    );
     fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
     await deployAll();
 
@@ -243,8 +258,14 @@ describe('SC-019：场景是数字人级的，互不影响', () => {
         ),
       );
 
-    expect(scenarioOf('a1')).toEqual({ scenario: '全量', data_prep_dirs: ['生产计划', '产线电价', '算法规则'] });
-    expect(scenarioOf('a2')).toEqual({ scenario: '精简', data_prep_dirs: ['产线电价', '算法规则'] });
+    expect(scenarioOf('a1')).toEqual({
+      scenario: '全量',
+      data_prep_dirs: ['生产计划', '产线电价', '算法规则'],
+    });
+    expect(scenarioOf('a2')).toEqual({
+      scenario: '精简',
+      data_prep_dirs: ['产线电价', '算法规则'],
+    });
 
     // 改 a1 的场景后再次部署：a2 不受影响
     const current = (await fx.app.inject({ method: 'GET', url: '/api/admin/agents/a1' })).json();
@@ -263,7 +284,13 @@ describe('SC-019：场景是数字人级的，互不影响', () => {
     });
     await deployAll();
 
-    expect(scenarioOf('a1')).toEqual({ scenario: '仅生产计划', data_prep_dirs: ['生产计划', '算法规则'] });
-    expect(scenarioOf('a2')).toEqual({ scenario: '精简', data_prep_dirs: ['产线电价', '算法规则'] });
+    expect(scenarioOf('a1')).toEqual({
+      scenario: '仅生产计划',
+      data_prep_dirs: ['生产计划', '算法规则'],
+    });
+    expect(scenarioOf('a2')).toEqual({
+      scenario: '精简',
+      data_prep_dirs: ['产线电价', '算法规则'],
+    });
   });
 });

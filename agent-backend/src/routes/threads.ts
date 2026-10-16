@@ -57,7 +57,13 @@ const renameBodySchema = {
   properties: { title: { type: 'string', minLength: 1, maxLength: 100 } },
 } as const;
 
-function metaJson(m: { threadId: string; agentName: string; title: string | null; createdAt: string; updatedAt: string }) {
+function metaJson(m: {
+  threadId: string;
+  agentName: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+}) {
   return {
     thread_id: m.threadId,
     agent_name: m.agentName,
@@ -107,20 +113,28 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     if (bodyAgentName !== agentName) {
       // 契约：字段保留但不再决定归属；不一致**不静默**（原则九），落 warn 并以服务端为准
       ctx.loggers.logger.warn(
-        { event: 'thread.create.agent_mismatch', user_id: userId, body_agent: bodyAgentName, scope_agent: agentName },
+        {
+          event: 'thread.create.agent_mismatch',
+          user_id: userId,
+          body_agent: bodyAgentName,
+          scope_agent: agentName,
+        },
         `创建会话的数字人参数与服务端当前选中不一致，已按当前选中归属（body=${bodyAgentName} scope=${agentName}）`,
       );
       // 既有口径保留：body 指定的数字人配置损坏时仍是 404 AGENT_NOT_FOUND（不静默放过）
       try {
         loadAgentConfig(path.join(userAgentsDir(ctx.config.optAgentRoot, userId), bodyAgentName));
       } catch (err) {
-        if (err instanceof AgentConfigError) throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
+        if (err instanceof AgentConfigError)
+          throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
         throw err;
       }
     }
 
     const meta = ctx.threadStore.create(userId, agentName);
-    return reply.status(201).send({ thread_id: meta.threadId, title: meta.title, created_at: meta.createdAt });
+    return reply
+      .status(201)
+      .send({ thread_id: meta.threadId, title: meta.title, created_at: meta.createdAt });
   });
 
   app.get('/api/threads', { schema: { querystring: listQuerySchema } }, async () => {
@@ -162,7 +176,9 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         ...(m.agent_name ? { agent_name: m.agent_name } : {}),
         ...(m.status ? { status: m.status } : {}),
         ...(m.usage ? { usage: m.usage } : {}),
-        ...(m.duration_ms !== undefined ? { duration_seconds: Math.round(m.duration_ms) / 1000 } : {}),
+        ...(m.duration_ms !== undefined
+          ? { duration_seconds: Math.round(m.duration_ms) / 1000 }
+          : {}),
         ...(m.attachments ? { attachments: m.attachments } : {}),
         ...(m.error ? { error: m.error } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(toolCallJson) } : {}),
@@ -191,9 +207,13 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
   app.get('/api/threads/:id/tool-calls/:callId', async (req) => {
     const userId = getCurrentUser().userId;
     const { id: threadId, callId } = req.params as { id: string; callId: string };
-    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id/tool-calls' });
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      route: 'GET /api/threads/:id/tool-calls',
+    });
     ctx.threadStore.get(userId, agentName, threadId); // 404
-    const record = ctx.toolEvents.readAll(userId, agentName, threadId).find((r) => r.callId === callId);
+    const record = ctx.toolEvents
+      .readAll(userId, agentName, threadId)
+      .find((r) => r.callId === callId);
     if (!record || record.artifactSize === undefined) {
       throw new ApiError(404, 'TOOL_CALL_NOT_FOUND', `工具调用结果不存在或未外置: ${callId}`);
     }
@@ -227,7 +247,9 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
   app.get('/api/threads/:id/next-actions', async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
-    const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id/next-actions' });
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      route: 'GET /api/threads/:id/next-actions',
+    });
     ctx.threadStore.get(userId, agentName, threadId); // 404 THREAD_NOT_FOUND
     reply.header('Cache-Control', 'no-store');
     // `read` 永不抛错：快照缺失/损坏/超限/判据不符都返回 undefined

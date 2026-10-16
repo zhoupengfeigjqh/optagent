@@ -73,6 +73,13 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-10-15：LLM 失败分类（唯一实现；两条调用路径共用，判据必须被逐类钉住）
+        'src/domain/llm-error.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
         // 本特性新增（R2/R4：两个只读端点）
         'src/routes/builtin-tools.ts': {
           statements: 80,

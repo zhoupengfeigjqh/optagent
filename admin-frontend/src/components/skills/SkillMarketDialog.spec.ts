@@ -72,7 +72,10 @@ describe('SkillMarketDialog —— 扫描与状态', () => {
 
   it('changed → "市场文件已变化 · 可更新"且可选；conflict → 不可选', async () => {
     fetchOntoMarket.mockResolvedValue(
-      listing([item({ status: 'changed' }), item({ skill_dir: 'other', name: 'other', status: 'conflict' })]),
+      listing([
+        item({ status: 'changed' }),
+        item({ skill_dir: 'other', name: 'other', status: 'conflict' }),
+      ]),
     )
     const wrapper = mountDialog()
     await flushPromises()
@@ -143,7 +146,10 @@ describe('SkillMarketDialog —— 导入', () => {
 
   it('导入失败不关窗：错误留在窗内（校验失败不关窗口径）', async () => {
     fetchOntoMarket.mockResolvedValue(listing([item()]))
-    installOntoMarketSkill.mockRejectedValue({ code: 'ADM_SKILL_NAME_TAKEN', message: '已存在同名' })
+    installOntoMarketSkill.mockRejectedValue({
+      code: 'ADM_SKILL_NAME_TAKEN',
+      message: '已存在同名',
+    })
     const wrapper = mountDialog()
     await flushPromises()
 

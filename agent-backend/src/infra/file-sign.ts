@@ -47,7 +47,9 @@ function payloadOf(userId: string, relPath: string, exp: number): string {
 }
 
 export function signRef(secret: string, userId: string, relPath: string, exp: number): string {
-  return createHmac('sha256', secret).update(payloadOf(userId, relPath, exp)).digest('hex');
+  return createHmac('sha256', secret)
+    .update(payloadOf(userId, relPath, exp))
+    .digest('hex');
 }
 
 /** 验签 + 时效校验（now 可注入便于测试） */
@@ -98,7 +100,9 @@ function putPayloadOf(userId: string, dir: string, exp: number): string {
 }
 
 export function signPutRef(secret: string, userId: string, dir: string, exp: number): string {
-  return createHmac('sha256', secret).update(putPayloadOf(userId, dir, exp)).digest('hex');
+  return createHmac('sha256', secret)
+    .update(putPayloadOf(userId, dir, exp))
+    .digest('hex');
 }
 
 /** 验签 + 时效校验（now 可注入便于测试） */
@@ -153,7 +157,13 @@ export function mintPutUrl(
   const exp = now + ttlMs;
   const sig = signPutRef(secret, userId, dir, exp);
   // `t` 恒写入（不放进 `hints`）：任何一条产出都该有"提交时刻"，铸造方不必逐处记得传
-  const params: Record<string, string> = { u: userId, d: dir, exp: String(exp), sig, t: String(now) };
+  const params: Record<string, string> = {
+    u: userId,
+    d: dir,
+    exp: String(exp),
+    sig,
+    t: String(now),
+  };
   if (hints.sid) params.sid = hints.sid;
   if (hints.callId) params.call_id = hints.callId;
   if (hints.tool) params.tool = hints.tool;

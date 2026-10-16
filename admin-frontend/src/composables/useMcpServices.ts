@@ -140,7 +140,11 @@ export function useMcpServices() {
     name: string,
     payload: Omit<McpServiceConfigPayload, 'revision'>,
     revision?: number,
-  ): Promise<{ affected: string[]; revision: number; maskedHeaders: Record<string, string> } | null> {
+  ): Promise<{
+    affected: string[]
+    revision: number
+    maskedHeaders: Record<string, string>
+  } | null> {
     const currentRevision = revision ?? detail.value?.revision
     if (currentRevision === undefined) return null
     busy.value = true

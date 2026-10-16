@@ -63,9 +63,7 @@ export interface InteractionSnapshot extends InteractionRequestPayload {
 
 /** 挂起解除时的结局 */
 export type InteractionOutcome =
-  | { kind: 'submit'; args: Record<string, unknown> }
-  | { kind: 'reject' }
-  | { kind: 'expired' };
+  { kind: 'submit'; args: Record<string, unknown> } | { kind: 'reject' } | { kind: 'expired' };
 
 /** 工具包装器经 AgentRunRequest 拿到的交互口（run-manager 每 run 装配一个） */
 export interface InteractionSink {
@@ -194,7 +192,9 @@ export class InteractionGate {
     for (const entry of this.pending.values()) {
       if (entry.state === 'waiting') {
         this.resolveEntry(entry, { kind: 'reject' });
-        this.deps.onLog?.(`interaction 因中断收尾：${entry.payload.tool_name}（${entry.payload.interaction_id}）`);
+        this.deps.onLog?.(
+          `interaction 因中断收尾：${entry.payload.tool_name}（${entry.payload.interaction_id}）`,
+        );
       }
     }
   }

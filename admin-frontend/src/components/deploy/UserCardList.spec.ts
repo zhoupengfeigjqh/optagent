@@ -9,7 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import UserCardList from './UserCardList.vue'
 import type { UserListItem } from '../../api/types'
 
-const listAgents = vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
+const listAgents = vi
+  .fn()
+  .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
 const deleteUser = vi.fn()
 const updateUser = vi.fn()
 const withdrawDeploy = vi.fn()
@@ -134,7 +136,10 @@ describe('UserCardList', () => {
   it('确认删除调用接口并发出 changed', async () => {
     deleteUser.mockResolvedValue(undefined)
     const wrapper = mountList()
-    await wrapper.findAll('button').find((b) => b.text() === '删除')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.find('[data-test="confirm"]').trigger('click')
     await flushPromises()
@@ -193,7 +198,10 @@ describe('UserCardList —— 部署对象勾选与部署状态（2026-09-16）'
     const wrapper = mountList({ selected: ['admin', 'ops'] })
 
     expect(wrapper.text()).toContain('已勾选 2 个部署对象')
-    await wrapper.findAll('button').find((b) => b.text() === '清空勾选')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '清空勾选')
+      ?.trigger('click')
     expect(wrapper.emitted('clear')).toHaveLength(1)
   })
 
@@ -295,7 +303,10 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
 
   /** 打开"编辑关联"（候选数字人由 `listAgents` 提供） */
   async function openEditor(wrapper: ReturnType<typeof mountList>): Promise<void> {
-    await wrapper.findAll('button').find((b) => b.text() === '编辑关联')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '编辑关联')
+      ?.trigger('click')
     await flushPromises()
   }
 
@@ -311,7 +322,11 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
       page_size: 8,
       total_pages: 1,
     })
-    updateUser.mockResolvedValue({ user_id: 'admin', agents: ['demo', 'broken', 'extra'], revision: 2 })
+    updateUser.mockResolvedValue({
+      user_id: 'admin',
+      agents: ['demo', 'broken', 'extra'],
+      revision: 2,
+    })
 
     const wrapper = mountList()
     await openEditor(wrapper)

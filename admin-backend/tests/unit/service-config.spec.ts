@@ -146,8 +146,10 @@ describe('校验', () => {
     upsert({ transport: 'streamable-http' });
     expect(configs.read('ocr').transport).toBe('http');
     // 归一后再存一次，落盘文档里也只有规范值
-    expect(store.readJson<{ items: Record<string, { transport: string }> }>('mcp-services.json')
-      ?.items.ocr?.transport).toBe('http');
+    expect(
+      store.readJson<{ items: Record<string, { transport: string }> }>('mcp-services.json')?.items.ocr
+        ?.transport,
+    ).toBe('http');
   });
 
   it('历史文档里写着别名时，读取即归一（界面与物化都只用规范值）', () => {
@@ -213,7 +215,12 @@ describe('校验', () => {
     // 历史存档里的遗留字段在读取时被收敛掉（sanitize）
     store.writeJson('mcp-services.json', {
       items: {
-        ocr: { ...BASE, writable: false, permission_scope: '旧边界', updated_at: '2026-01-01T00:00:00.000Z' },
+        ocr: {
+          ...BASE,
+          writable: false,
+          permission_scope: '旧边界',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
       },
     });
     const legacy = configs.read('ocr') as Record<string, unknown>;
@@ -305,7 +312,6 @@ describe('校验', () => {
   });
 });
 
-
 describe('调用确认策略（HITL confirmation）', () => {
   it('缺省为 never（存量行为不变）', () => {
     upsert();
@@ -337,7 +343,11 @@ describe('调用确认策略（HITL confirmation）', () => {
   it('历史存档里的残缺 confirmation：读取时收敛为 never（不抛错）', () => {
     store.writeJson('mcp-services.json', {
       items: {
-        ocr: { ...BASE, confirmation: { tool_names: ['x'] }, updated_at: '2026-01-01T00:00:00.000Z' },
+        ocr: {
+          ...BASE,
+          confirmation: { tool_names: ['x'] },
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
       },
     });
     expect(configs.read('ocr').confirmation).toBe('never');

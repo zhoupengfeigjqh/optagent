@@ -244,7 +244,12 @@ describe('ScenarioEditor', () => {
   })
 
   it('未配置目录显示默认项数 2，已配置目录显示实际项数', () => {
-    const wrapper = mountEditor('生产', ['生产计划', '产线电价'], {}, { 产线电价: ['.csv', '.xlsx', '.txt'] })
+    const wrapper = mountEditor(
+      '生产',
+      ['生产计划', '产线电价'],
+      {},
+      { 产线电价: ['.csv', '.xlsx', '.txt'] },
+    )
     expect(wrapper.text()).toContain('文件类型(3)')
     expect(wrapper.text()).toContain('文件类型(2)')
   })
@@ -288,10 +293,15 @@ describe('ScenarioEditor', () => {
   })
 
   it('移除目录时**同时移除**其可上传类型配置（不留孤儿键）', async () => {
-    const wrapper = mountEditor('生产', ['生产计划', '产线电价'], {}, {
-      生产计划: ['.csv', '.xlsx'],
-      产线电价: ['.json'],
-    })
+    const wrapper = mountEditor(
+      '生产',
+      ['生产计划', '产线电价'],
+      {},
+      {
+        生产计划: ['.csv', '.xlsx'],
+        产线电价: ['.json'],
+      },
+    )
     const remove = wrapper.findAll('button').find((b) => b.text() === '移除')
     await remove?.trigger('click')
 

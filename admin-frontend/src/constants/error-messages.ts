@@ -1,12 +1,15 @@
 /**
  * 错误码常量与中文文案映射表（唯一映射表）。
  *
- * 与 `contracts/admin-api.md` §0.4 的 **26 个**错误码逐行对应：
- * 4 个复用既有码 + 22 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
+ * 与 `contracts/admin-api.md` §0.4 的 **27 个**错误码逐行对应：
+ * 4 个复用既有码 + 23 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
  * （面向开发者且不稳定），一律按 `code` 分派。
  *
- * **2026-10-03**：新增 `ADM_MCP_TOOL_SCOPE_LOCKED`（工具白名单只在新建时设定，
- * 保存调用配置携带即被拒——契约 §3.3）。
+ * **2026-10-15**：新增 `ADM_UNAUTHENTICATED` / `ADM_FORBIDDEN`（契约 §11 的
+ * 401/403「身份与分权」，**预登记、尚未实施**——功能落地前不会真的返回，
+ * 此处先备好文案，使 §11 实施时前端只需接"登录态与 401/403 处理"链路）。
+ * 同日：`ADM_MCP_TOOL_SCOPE_LOCKED` 下架——工具白名单改为可在
+ * `PUT /api/admin/mcp/services/{name}` 里调整（契约 §3.3），该码不再可能返回。
  *
  * **2026-10-02**：新增 `ADM_SKILL_MODIFIED`（本体市场更新时库内版本被人工修改，
  * 需显式确认——契约 §4.8）。
@@ -45,7 +48,6 @@ export const ADMIN_ERROR_CODES = {
 
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
   ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
-  ADM_MCP_TOOL_SCOPE_LOCKED: 'ADM_MCP_TOOL_SCOPE_LOCKED',
 
   ADM_DEPLOY_VALIDATION_FAILED: 'ADM_DEPLOY_VALIDATION_FAILED',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
@@ -56,6 +58,10 @@ export const ADMIN_ERROR_CODES = {
   ADM_CONFIG_REVISION_CONFLICT: 'ADM_CONFIG_REVISION_CONFLICT',
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
+
+  // §11 预登记（未实施）
+  ADM_UNAUTHENTICATED: 'ADM_UNAUTHENTICATED',
+  ADM_FORBIDDEN: 'ADM_FORBIDDEN',
 } as const
 
 /** 通用兜底文案 */
@@ -85,8 +91,6 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   ADM_MCP_SERVICE_NOT_FOUND: 'MCP 服务不存在',
   ADM_MCP_SERVICE_EXISTS: 'MCP 服务名称已存在，请换一个名称',
-  ADM_MCP_TOOL_SCOPE_LOCKED:
-    '工具范围只在新建服务时确定，不支持修改；如需变更请删除该服务后重新创建',
 
   ADM_DEPLOY_VALIDATION_FAILED: '部署前校验未通过，已阻止部署，请按错误清单逐条修复',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: '部署目标位置不可写，请检查目录权限',
@@ -100,4 +104,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // 故文案不再只写"不可写"——否则管理员遇到"删不掉"时会看到误导性的原因
   ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可用（写入或删除失败），请检查 .platform-data 目录',
   ADM_RUNTIME_UNREACHABLE: '运行环境不可达（内置工具目录／调用统计读取失败）',
+
+  // §11 预登记（未实施）：功能落地前不会真的出现；文案先按"管理员视角可行动"写好
+  ADM_UNAUTHENTICATED: '登录状态已失效，请重新登录',
+  ADM_FORBIDDEN: '当前账号没有管理员权限，请联系管理员授权',
 }

@@ -13,9 +13,12 @@ import { describe, expect, it } from 'vitest'
 import {
   VIEW_LINK_ADDRESS_MAX_CHARS,
   VIEW_URL_FIELD,
+  filePathToPreviewPath,
+  isSameOrigin,
   isViewUrlField,
   resolveViewUrl,
   toViewLinkEntries,
+  toViewLinkTarget,
   truncateMiddle,
   viewLinkLabel,
   viewLinkTitle,
@@ -139,7 +142,7 @@ describe('toViewLinkEntries —— 入口行派生（TR-45）', () => {
   it('同一 href 重复：名称取**首个非空值**（首次没给名字、后面给了就用后面那个）', () => {
     const entries = toViewLinkEntries([{ url: '/a' }, { url: '/a', name: 'A 明细' }], ORIGIN)
 
-    expect(entries).toEqual([{ href: `${ORIGIN}/a`, raw: '/a', name: 'A 明细' }])
+    expect(entries).toEqual([{ href: `${ORIGIN}/a`, raw: '/a', kind: 'url', name: 'A 明细' }])
   })
 
   it('同一 href 重复：首个已有名称则不被后面的覆盖（确定性）', () => {
@@ -156,9 +159,7 @@ describe('toViewLinkEntries —— 入口行派生（TR-45）', () => {
 
   it('名称空白 / 非字符串 → 视同没给名字（不是空串）', () => {
     expect(toViewLinkEntries([{ url: '/a', name: '   ' }], ORIGIN)[0]?.name).toBeUndefined()
-    expect(
-      toViewLinkEntries([{ url: '/a', name: '  A 明细  ' }], ORIGIN)[0]?.name,
-    ).toBe('A 明细')
+    expect(toViewLinkEntries([{ url: '/a', name: '  A 明细  ' }], ORIGIN)[0]?.name).toBe('A 明细')
   })
 
   it('raw 保留原值（去首尾空白），供无名称时显示与悬停核对', () => {
@@ -175,10 +176,151 @@ describe('toViewLinkEntries —— 入口行派生（TR-45）', () => {
   })
 })
 
+describe('toViewLinkEntries —— kind:file（本地文件空间相对路径，2026-10-15）', () => {
+  it('相对路径 → /api/files/preview 地址（拼注入 origin，中文与斜杠被编码）', () => {
+    const entries = toViewLinkEntries(
+      [{ url: '数据准备/生产计划/9月计划.xlsx', kind: 'file' }],
+      ORIGIN,
+    )
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.href).toBe(
+      `${ORIGIN}/api/files/preview?dir=%E6%95%B0%E6%8D%AE%E5%87%86%E5%A4%87%2F%E7%94%9F%E4%BA%A7%E8%AE%A1%E5%88%92&filename=9%E6%9C%88%E8%AE%A1%E5%88%92.xlsx`,
+    )
+  })
+
+  it('显示文本仍取原相对路径（不是 /api/files/preview?…）', () => {
+    const entry = toViewLinkEntries([{ url: '数据准备/x.pdf', kind: 'file' }], ORIGIN)[0]
+
+    expect(entry?.raw).toBe('数据准备/x.pdf')
+    expect(viewLinkLabel(entry as ViewLinkEntry)).toBe('数据准备/x.pdf')
+  })
+
+  it('kind 缺省 = url：相对路径仍按原规则被拒绝（不产生入口）', () => {
+    expect(toViewLinkEntries([{ url: '数据准备/x.pdf' }], ORIGIN)).toEqual([])
+  })
+
+  it('kind:file 与 kind:url 同现：两条各归各，都渲染', () => {
+    const entries = toViewLinkEntries(
+      [
+        { url: '/datasource/a', name: '外部' },
+        { url: '数据准备/x.pdf', kind: 'file', name: '本地' },
+      ],
+      ORIGIN,
+    )
+
+    expect(entries).toEqual([
+      { href: `${ORIGIN}/datasource/a`, raw: '/datasource/a', kind: 'url', name: '外部' },
+      {
+        href: `${ORIGIN}/api/files/preview?dir=%E6%95%B0%E6%8D%AE%E5%87%86%E5%A4%87&filename=x.pdf`,
+        raw: '数据准备/x.pdf',
+        kind: 'file',
+        name: '本地',
+      },
+    ])
+  })
+})
+
+describe('viewLinkTitle —— 可核对的地址（2026-10-15）', () => {
+  it('file 类入口：悬停给**原相对路径**，不是带 URL 编码的预览接口地址', () => {
+    const entry = toViewLinkEntries([{ url: '数据准备/9月计划.xlsx', kind: 'file' }], ORIGIN)[0]
+
+    expect(viewLinkTitle(entry as ViewLinkEntry)).toBe('数据准备/9月计划.xlsx')
+    expect(viewLinkTitle(entry as ViewLinkEntry)).not.toContain('%E6%95%B0')
+  })
+
+  it('file 类入口有名称：`名称 — 原路径`', () => {
+    const entry = toViewLinkEntries(
+      [{ url: '数据准备/9月计划.xlsx', kind: 'file', name: '一车间产能明细' }],
+      ORIGIN,
+    )[0]
+
+    expect(viewLinkTitle(entry as ViewLinkEntry)).toBe('一车间产能明细 — 数据准备/9月计划.xlsx')
+  })
+
+  it('url 类入口不变：仍给拼好前缀的**绝对**地址（可复制可核对）', () => {
+    const entry = toViewLinkEntries([{ url: '/datasource/a', name: '外部' }], ORIGIN)[0]
+
+    expect(viewLinkTitle(entry as ViewLinkEntry)).toBe(`外部 — ${ORIGIN}/datasource/a`)
+  })
+})
+
+describe('toViewLinkTarget —— 入口 → 跳转目标（2026-10-15）', () => {
+  it('url 类：不带 filePath（上层据此判"不是文件"）', () => {
+    const entry = toViewLinkEntries([{ url: '/a', name: '外部' }], ORIGIN)[0]
+
+    expect(toViewLinkTarget(entry as ViewLinkEntry)).toEqual({
+      url: `${ORIGIN}/a`,
+      name: '外部',
+      kind: 'url',
+    })
+  })
+
+  it('file 类：带原路径，且 `url` 仍是可点开的预览接口地址', () => {
+    const entry = toViewLinkEntries([{ url: '数据准备/9月计划.xlsx', kind: 'file' }], ORIGIN)[0]
+    const target = toViewLinkTarget(entry as ViewLinkEntry)
+
+    expect(target.kind).toBe('file')
+    expect(target.filePath).toBe('数据准备/9月计划.xlsx')
+    expect(target.name).toBe('数据准备/9月计划.xlsx')
+    expect(target.url).toBe(
+      `${ORIGIN}/api/files/preview?dir=%E6%95%B0%E6%8D%AE%E5%87%86%E5%A4%87&filename=9%E6%9C%88%E8%AE%A1%E5%88%92.xlsx`,
+    )
+  })
+
+  it('无名称时 `name` 用中段省略后的显示文本（与入口行一致，不另造一套）', () => {
+    const entry = toViewLinkEntries([{ url: '/a/very/long/path/to/somewhere/x' }], ORIGIN)[0]
+
+    expect(toViewLinkTarget(entry as ViewLinkEntry).name).toBe(
+      viewLinkLabel(entry as ViewLinkEntry),
+    )
+  })
+})
+
+describe('filePathToPreviewPath', () => {
+  it('拆出 dir 与 filename 并做 URL 编码', () => {
+    expect(filePathToPreviewPath('临时空间/后台产出/th_1_j_2.txt')).toBe(
+      '/api/files/preview?dir=%E4%B8%B4%E6%97%B6%E7%A9%BA%E9%97%B4%2F%E5%90%8E%E5%8F%B0%E4%BA%A7%E5%87%BA&filename=th_1_j_2.txt',
+    )
+  })
+
+  it('无分隔符：dir 为空串被省略（不猜，交给预览接口报可读错误）', () => {
+    expect(filePathToPreviewPath('lonely.txt')).toBe('/api/files/preview?filename=lonely.txt')
+  })
+})
+
+describe('isSameOrigin —— 协议 + 主机 + 端口三者全等', () => {
+  it('同 origin → true', () => {
+    expect(isSameOrigin(`${ORIGIN}/a/b`, ORIGIN)).toBe(true)
+  })
+
+  it('端口不同 → false', () => {
+    expect(isSameOrigin('http://192.168.0.100:9090/a', ORIGIN)).toBe(false)
+  })
+
+  it('协议不同 → false（只看 ip+端口会误判）', () => {
+    expect(isSameOrigin('https://192.168.0.100:8080/a', ORIGIN)).toBe(false)
+  })
+
+  it('主机字面量不同 → false（localhost 与 127.0.0.1 不同源）', () => {
+    expect(isSameOrigin('http://localhost:8080/a', ORIGIN)).toBe(false)
+  })
+
+  it('根相对路径按注入 origin 解析 → true', () => {
+    expect(isSameOrigin('/a/b', ORIGIN)).toBe(true)
+  })
+
+  it('非法地址 / 空 origin → false（保守，不当同源）', () => {
+    expect(isSameOrigin('http://[', ORIGIN)).toBe(false)
+    expect(isSameOrigin('/a', '')).toBe(false)
+  })
+})
+
 describe('入口文案（TR-46）', () => {
   const entry = (over: Partial<ViewLinkEntry> = {}): ViewLinkEntry => ({
     href: `${ORIGIN}/a/b`,
     raw: '/a/b',
+    kind: 'url',
     ...over,
   })
 

@@ -71,7 +71,10 @@ export class SummaryStore {
     const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return { ...EMPTY };
     try {
-      const obj = JSON.parse(fs.readFileSync(file, 'utf8')) as { summary?: unknown; covered_count?: unknown };
+      const obj = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+        summary?: unknown;
+        covered_count?: unknown;
+      };
       if (typeof obj.summary === 'string' && typeof obj.covered_count === 'number') {
         return { summary: obj.summary, coveredCount: obj.covered_count };
       }
@@ -125,7 +128,9 @@ export class SummaryStore {
     oldSummary: string,
     archived: Array<{ role: 'user' | 'assistant'; content: string }>,
   ): Promise<string> {
-    const transcript = archived.map((m) => `${m.role === 'user' ? '用户' : '数字人'}：${m.content}`).join('\n');
+    const transcript = archived
+      .map((m) => `${m.role === 'user' ? '用户' : '数字人'}：${m.content}`)
+      .join('\n');
     const prompt = oldSummary
       ? `以下是一段对话的既有摘要与后续新增的对话内容，请将它们合并为一份更新的摘要，保留关键事实、结论与用户偏好，直接输出摘要正文：\n\n【既有摘要】\n${oldSummary}\n\n【新增对话】\n${transcript}`
       : `请为以下对话生成一份摘要，保留关键事实、结论与用户偏好，直接输出摘要正文：\n\n${transcript}`;

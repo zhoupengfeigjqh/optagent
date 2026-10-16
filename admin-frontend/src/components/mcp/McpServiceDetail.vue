@@ -16,10 +16,15 @@
  *
  * **已下架**：服务启停页（含编排原始声明）与运行日志页——平台不再读容器运行态。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { fetchReferences } from '../../api/deploy'
 import { useMcpServices } from '../../composables/useMcpServices'
-import type { ErrorInfo, McpServiceConfigInput, McpServiceDetail, ReferenceItem } from '../../api/types'
+import type {
+  ErrorInfo,
+  McpServiceConfigInput,
+  McpServiceDetail,
+  ReferenceItem,
+} from '../../api/types'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import TabsNav from '../common/TabsNav.vue'
@@ -50,6 +55,11 @@ const emit = defineEmits<{
   (e: 'deleted', name: string): void
   /** 详情读取失败后用户点「重试」：父级重新拉取 */
   (e: 'reload'): void
+  /**
+   * 「工具清单」页签的「重新探测」：父级重新拉取详情，并在**探测成功后**打开工具范围弹窗
+   * （2026-10-15）。与 `reload` 的分工：那个只是"把数据拿回来"，这个还要"顺手让管理员调整"。
+   */
+  (e: 'reprobe'): void
   (e: 'announce', text: string): void
 }>()
 
@@ -96,12 +106,21 @@ watch(tab, (next) => {
  * 页头右上角的「保存调用配置」。
  *
  * 动作在页头、**校验与提交仍走表单自身路径**（`submit()` 先本地校验再 emit `submit`），
- * 避免两套判据。先切回「调用配置」页签：让管理员看到被保存的内容与校验报错落在哪。
+ * 避免两套判据。
+ *
+ * **MUST NOT 切页签**（2026-10-16 由用户否掉）：此前这里是 `tab.value = 'config'`，
+ * 在「工具清单」/「调用统计」页签点保存会被**悄悄拽回**「调用配置」——那不是管理员要的
+ * 动作，还丢了他正看着的位置。改为**就地保存**：校验没过时（报错正文此刻在别的页签的
+ * 视野外，且 `v-show` 隐藏的 `role="alert"` 读屏也不播报）补一句播报指路，
+ * 让"点了没反应"变成可解释（原则九）。
  */
-async function requestSave(): Promise<void> {
-  tab.value = 'config'
-  await nextTick()
-  configForm.value?.submit()
+function requestSave(): void {
+  const form = configForm.value
+  if (!form) return
+  const submitted = form.submit()
+  if (!submitted && tab.value !== 'config') {
+    emit('announce', '保存未完成：调用配置里有校验错误，请切到「调用配置」页签查看并修正')
+  }
 }
 
 async function onSubmit(config: McpServiceConfigInput): Promise<void> {
@@ -139,13 +158,17 @@ async function runTest(): Promise<void> {
 defineExpose({ runTest })
 
 /**
- * 「工具清单」页签的「重新探测」：与「读取失败重试」**同一条路径**——重取详情，
+ * 「工具清单」页签的「重新探测」：**取数路径**与「读取失败重试」同一条——重取详情，
  * 后端详情接口会现连服务拿最新清单。解决"打开详情时服务还不可达 → 空清单一直
  * 冻在页面上，而『发起测试』每次都现连、看着是通的"的信息差（2026-10-02）。
+ *
+ * **取到之后做的事不同**（2026-10-15）：本事件交给父级，父级在**探测成功**时
+ * 打开工具范围弹窗（探测失败则只保留错误提示）——"能不能调整"取决于"清单是否可信"，
+ * 这个判断只有拿得到详情结果的父级能做。
  */
 function onReprobe(): void {
   emit('announce', '正在重新探测工具清单…')
-  emit('reload')
+  emit('reprobe')
 }
 
 /** 删除前先取受影响清单（§7.1） */
@@ -231,7 +254,11 @@ async function confirmDelete(): Promise<void> {
         />
 
         <div v-show="tab === 'stats'">
-          <McpStatsTable :groups="m.statsGroups.value" :available="m.statsAvailable.value" :only="name" />
+          <McpStatsTable
+            :groups="m.statsGroups.value"
+            :available="m.statsAvailable.value"
+            :only="name"
+          />
           <button type="button" class="btn" @click="m.loadStats()">刷新统计</button>
         </div>
       </TabsNav>
@@ -262,7 +289,8 @@ async function confirmDelete(): Promise<void> {
     >
       <ul v-if="affected.length > 0">
         <li v-for="(item, index) in affected" :key="index">
-          <span class="mono">{{ item.user_id }}</span> 的 <span class="mono">{{ item.agent_name }}</span>
+          <span class="mono">{{ item.user_id }}</span> 的
+          <span class="mono">{{ item.agent_name }}</span>
         </li>
       </ul>
     </ConfirmDialog>

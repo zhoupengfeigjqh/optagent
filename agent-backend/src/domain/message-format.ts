@@ -20,7 +20,9 @@ export function refsText(attachments: FileReference[]): string {
 
 /** LLM 上下文消息：user 消息若有 @ 引用则追加引用段 */
 export function toLlmContent(m: HistoryMessage): string {
-  return m.attachments && m.attachments.length > 0 ? m.content + refsText(m.attachments) : m.content;
+  return m.attachments && m.attachments.length > 0
+    ? m.content + refsText(m.attachments)
+    : m.content;
 }
 
 /** 毫秒 → 秒（保留小数，契约里的 `duration_seconds`） */

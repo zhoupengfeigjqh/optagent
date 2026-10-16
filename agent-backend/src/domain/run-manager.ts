@@ -17,7 +17,15 @@
  * **纯搬运**到 `run-finalize.ts`，本文件只留编排（并发配额、活跃表、prompt 装配、事件分派）。
  */
 import type { Logger } from 'pino';
-import type { FileReference, HistoryMessage, LlmEvent, ModelSelection, PoolKey, RunRuntime, UsageStore } from '../types.js';
+import type {
+  FileReference,
+  HistoryMessage,
+  LlmEvent,
+  ModelSelection,
+  PoolKey,
+  RunRuntime,
+  UsageStore,
+} from '../types.js';
 import type { HistoryStore } from './history.js';
 import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
@@ -106,7 +114,11 @@ export interface RunManagerDeps {
   logger?: Logger;
   /** 滚动摘要（FR-017/018）：注入 System Prompt + 每轮结束触发增量重写；009：落点按（用户，数字人，会话）解析 */
   summary?: {
-    read(userId: string, agentName: string, threadId: string): { summary: string; coveredCount: number };
+    read(
+      userId: string,
+      agentName: string,
+      threadId: string,
+    ): { summary: string; coveredCount: number };
     trigger(userId: string, agentName: string, threadId: string): Promise<void>;
   };
   /** run 未知异常（疑似实例崩溃）回调：上层销毁池内实例（FR-030） */
@@ -126,7 +138,15 @@ export interface RunManagerDeps {
    * 007 修订：某数字人的「下一步动作提示」配置（读 SOUL.md frontmatter，逐次现读）。
    * `null` = 开关关闭（不追加尾部块指令、收尾不定稿卡片）；开启时带条数上限。
    */
-  nextActionsConfig?: (userId: string, agentName: string) => { enabled: boolean; max: number } | null;
+  nextActionsConfig?: (
+    userId: string,
+    agentName: string,
+  ) => { enabled: boolean; max: number } | null;
+  /**
+   * 2026-10-15：LLM 身份取值口（`provider` / 默认 `model`），由装配处注入。
+   * 缺省 = 失败日志少记这两列（收尾与落盘不受影响）。
+   */
+  llmInfo?: () => { provider: string; model: string };
 }
 
 export class RunManager {
@@ -150,6 +170,7 @@ export class RunManager {
       ...(deps.toolEvents ? { toolEvents: deps.toolEvents } : {}),
       ...(deps.summary ? { summary: deps.summary } : {}),
       ...(deps.nextActions ? { nextActions: deps.nextActions } : {}),
+      ...(deps.llmInfo ? { llmInfo: deps.llmInfo } : {}),
       now: this.now,
     });
   }
@@ -287,6 +308,8 @@ export class RunManager {
     );
     run.startedAt = this.now();
     run.assistantMessageId = genMessageId(run.startedAt);
+    // 2026-10-15：本轮实际模型（请求级覆盖优先）——LLM 失败日志据此定位到具体模型
+    if (opts.model) run.modelId = opts.model.model;
     this.reserving.delete(opts.threadId); // 额度占位转正为活跃 run
     this.active.set(opts.threadId, run);
     // 007 修订：新一轮开始即清空上一轮的「下一步动作提示」快照（同步，无独立生成链后无顺序竞态）。
@@ -309,7 +332,10 @@ export class RunManager {
     const { agentName } = opts.agent.key;
     return buildPromptMessages({
       threadId,
-      summaryData: this.deps.summary?.read(userId, agentName, threadId) ?? { summary: '', coveredCount: 0 },
+      summaryData: this.deps.summary?.read(userId, agentName, threadId) ?? {
+        summary: '',
+        coveredCount: 0,
+      },
       allMessages: this.deps.history.readAll(userId, agentName, threadId),
       userMessage,
       records: this.deps.toolEvents?.readAll(userId, agentName, threadId) ?? [],
@@ -396,7 +422,10 @@ export class RunManager {
               startedAt,
               ...(ev.argsDigest ? { argsDigest: ev.argsDigest } : {}),
             });
-            run.emit({ type: 'tool_call', data: { call_id: ev.callId, name: ev.name, status: 'running' } });
+            run.emit({
+              type: 'tool_call',
+              data: { call_id: ev.callId, name: ev.name, status: 'running' },
+            });
             break;
           }
           case 'tool_call_end': {
@@ -428,7 +457,11 @@ export class RunManager {
             run.nextActionsTail = run.tailCapture.captured;
             if (run.tailCapture.overflowed) {
               this.deps.logger?.warn(
-                { event: 'next-actions.tail.overflow', thread_id: threadId, agent_name: agent.key.agentName },
+                {
+                  event: 'next-actions.tail.overflow',
+                  thread_id: threadId,
+                  agent_name: agent.key.agentName,
+                },
                 '下一步动作提示尾部块超过大小上限，本轮按无卡片处理',
               );
             }
@@ -463,7 +496,14 @@ export class RunManager {
       run.state = 'error';
       outcome = { ok: false, error_code: 'INTERNAL_ERROR' };
       this.deps.logger?.error(
-        { err, alert: true, event: 'agent.crashed', user_id: userId, thread_id: threadId, agent_name: agent.key.agentName },
+        {
+          err,
+          alert: true,
+          event: 'agent.crashed',
+          user_id: userId,
+          thread_id: threadId,
+          agent_name: agent.key.agentName,
+        },
         'Agent 实例崩溃，已销毁',
       );
       this.deps.onCrash?.(agent.key, err);
@@ -495,5 +535,4 @@ export class RunManager {
       );
     }
   }
-
 }

@@ -1,10 +1,11 @@
 /**
  * 单元测试：MCP 服务**工具白名单**（2026-10-03 产品决定）
  *
- * 口径：
- * - 新建**必填非空**（白名单创建后不可改，故在创建这一步就问清楚，不留"全部放行"的后门）；
+ * 口径（2026-10-15 起白名单**可二次调整**）：
+ * - 新建**必填非空**（创建这一步就问清楚，不留"全部放行"的后门）；
  * - 归一：元素 trim + 同服务去重；非数组/残缺值即 `VALIDATION_FAILED`；
- * - **保存调用配置不得改白名单**：携带即 `ADM_MCP_TOOL_SCOPE_LOCKED`，不携带则**沿用原值**
+ * - **保存调用配置可以改白名单**：携带即**全量替换**，且 MUST 非空
+ *   （空数组 = 不限制，与"一个都不给"语义相反）；不携带则**沿用原值**
  *   （保存 MUST NOT 顺手清空它）；
  * - 存量记录（白名单上线前）读取为 `[]` = **不限制**，存量行为零变化。
  *
@@ -53,9 +54,7 @@ afterEach(() => {
 describe('新建：白名单必填非空', () => {
   it('缺字段 / 空数组 → VALIDATION_FAILED，且**不落盘**', () => {
     for (const allowed of [undefined, []]) {
-      expect(codeOf(() => create('svc', { allowed_tools: allowed }))).toBe(
-        ERROR_CODES.VALIDATION_FAILED,
-      );
+      expect(codeOf(() => create('svc', { allowed_tools: allowed }))).toBe(ERROR_CODES.VALIDATION_FAILED);
     }
     expect(configs.exists('svc')).toBe(false);
   });
@@ -64,12 +63,8 @@ describe('新建：白名单必填非空', () => {
     create('svc', { allowed_tools: [' ocr_image ', 'ocr_image', 'query_price'] });
     expect(configs.read('svc').allowed_tools).toEqual(['ocr_image', 'query_price']);
 
-    expect(codeOf(() => create('svc2', { allowed_tools: ['ok', 42] }))).toBe(
-      ERROR_CODES.VALIDATION_FAILED,
-    );
-    expect(codeOf(() => create('svc3', { allowed_tools: 'ocr_image' }))).toBe(
-      ERROR_CODES.VALIDATION_FAILED,
-    );
+    expect(codeOf(() => create('svc2', { allowed_tools: ['ok', 42] }))).toBe(ERROR_CODES.VALIDATION_FAILED);
+    expect(codeOf(() => create('svc3', { allowed_tools: 'ocr_image' }))).toBe(ERROR_CODES.VALIDATION_FAILED);
   });
 
   it('validateForCreate：只校验不落盘（给路由层"先校验、后连接"用）', () => {
@@ -87,15 +82,23 @@ describe('新建：白名单必填非空', () => {
   });
 });
 
-describe('保存：白名单不可二次调整', () => {
-  it('携带 allowed_tools → ADM_MCP_TOOL_SCOPE_LOCKED，且原值不变', () => {
+describe('保存：白名单可二次调整（2026-10-15）', () => {
+  it('携带非空数组 → **全量替换**（trim + 去重后生效）', () => {
+    create('ocr', { allowed_tools: ['ocr_image'] });
+    configs.upsert('ocr', { ...BASE, allowed_tools: [' query_price ', 'query_price'] }, store.revision());
+
+    expect(configs.read('ocr').allowed_tools).toEqual(['query_price']);
+  });
+
+  it('携带空数组 / 残缺值 → VALIDATION_FAILED，且原值不变', () => {
     create('ocr', { allowed_tools: ['ocr_image'] });
 
-    expect(
-      codeOf(() =>
-        configs.upsert('ocr', { ...BASE, allowed_tools: ['ocher'] }, store.revision()),
-      ),
-    ).toBe(ERROR_CODES.ADM_MCP_TOOL_SCOPE_LOCKED);
+    for (const allowed of [[], 'ocr_image', ['ok', 42]]) {
+      expect(codeOf(() => configs.upsert('ocr', { ...BASE, allowed_tools: allowed }, store.revision()))).toBe(
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+    // 空 = 不限制，与"一个都不给"语义相反：MUST NOT 被静默接受
     expect(configs.read('ocr').allowed_tools).toEqual(['ocr_image']);
   });
 

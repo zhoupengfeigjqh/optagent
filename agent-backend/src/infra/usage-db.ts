@@ -158,9 +158,9 @@ export class UsageDb implements UsageStore {
       // 口径，无需人工迁移步骤）。
       // 注意：建在这些列上的索引必须在补列**之后**建——老库此刻还没有这些列。
       const eventColumns = new Set(
-        (this.db.prepare(`PRAGMA table_info(mcp_call_events)`).all() as Array<{ name: string }>).map(
-          (column) => column.name,
-        ),
+        (
+          this.db.prepare(`PRAGMA table_info(mcp_call_events)`).all() as Array<{ name: string }>
+        ).map((column) => column.name),
       );
       // 每项为 [列名, 列定义]；后续再加列在此追加一行即可
       const addableColumns: Array<[string, string]> = [
@@ -182,7 +182,9 @@ export class UsageDb implements UsageStore {
       `);
     } catch (err) {
       if (isShmOpenFailure(err)) {
-        throw new Error(describeShmOpenFailure(dbPath, (err as NodeJS.ErrnoException).code), { cause: err });
+        throw new Error(describeShmOpenFailure(dbPath, (err as NodeJS.ErrnoException).code), {
+          cause: err,
+        });
       }
       throw err;
     }

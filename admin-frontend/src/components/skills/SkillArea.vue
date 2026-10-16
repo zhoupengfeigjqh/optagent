@@ -88,7 +88,7 @@ watch(
     <SkillViewer
       v-if="skillDetail"
       :skill="skillDetail"
-      :error="(error as never)"
+      :error="error as never"
       @back="
         () => {
           skillDetail = null
@@ -118,7 +118,7 @@ watch(
         :total="list?.total ?? 0"
         :page="page"
         :loading="loading"
-        :error="(error as never)"
+        :error="error as never"
         @update:page="
           (next) => {
             page = next

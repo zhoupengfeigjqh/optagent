@@ -111,7 +111,13 @@ describe('useDeploy', () => {
       details: {
         errors: [
           { user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm1' },
-          { user_id: 'b', agent_name: 'y', category: 'reference_validity', code: 'Y', message: 'm2' },
+          {
+            user_id: 'b',
+            agent_name: 'y',
+            category: 'reference_validity',
+            code: 'Y',
+            message: 'm2',
+          },
         ],
       },
     })
@@ -167,7 +173,9 @@ describe('部署对象：空选择一律拒绝（MUST NOT 落回"全部用户"�
   it('invalidateValidation：勾选变化后由界面调用，用于作废上一次结论', async () => {
     validateDeploy.mockResolvedValue({
       passed: false,
-      errors: [{ user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm' }],
+      errors: [
+        { user_id: 'a', agent_name: 'x', category: 'config_integrity', code: 'X', message: 'm' },
+      ],
     })
     const d = useDeploy()
     await d.validate(['admin'])

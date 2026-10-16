@@ -34,7 +34,10 @@ describe('ScenarioFieldDialog', () => {
     const checkbox = wrapper.find('input[type="checkbox"]').element as HTMLInputElement
     expect(checkbox.checked).toBe(true)
 
-    await wrapper.findAll('button').find((b) => b.text() === '移除')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '移除')
+      ?.trigger('click')
     expect(wrapper.find('[data-test="no-fields"]').exists()).toBe(true)
   })
 

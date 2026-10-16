@@ -114,9 +114,7 @@ function fieldsOf(item: ProducedItem): Array<{ label: string; value: string }> {
 }
 
 /** 列表行 = 条目 + 预算好的标题（模板里就不必对每个条目重复调用纯函数） */
-const rows = computed(() =>
-  produced.items.value.map((item) => ({ item, title: titleOf(item) })),
-)
+const rows = computed(() => produced.items.value.map((item) => ({ item, title: titleOf(item) })))
 
 /** 详情页当前条目的标题（未选中任何条目时为 `null`，模板据此不渲染标题行） */
 const activeTitle = computed(() => (active.value ? titleOf(active.value) : null))
@@ -179,10 +177,16 @@ function closePanel(): void {
           <span class="produced-title__summary" :title="activeTitle.summary">
             {{ activeTitle.summary }}
           </span>
-          <span class="produced-title__tag" :title="activeTitle.tagFull">{{ activeTitle.tag }}</span>
+          <span class="produced-title__tag" :title="activeTitle.tagFull">{{
+            activeTitle.tag
+          }}</span>
         </span>
         <span class="produced-content__meta">
-          <span v-for="field in fieldsOf(active)" :key="field.label" class="produced-content__field">
+          <span
+            v-for="field in fieldsOf(active)"
+            :key="field.label"
+            class="produced-content__field"
+          >
             {{ field.label }}：{{ field.value }}
           </span>
         </span>

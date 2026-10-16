@@ -31,13 +31,19 @@ describe('SkillCardList', () => {
 
   it('点击「查看与编辑」发出 open(name)', async () => {
     const wrapper = mountList()
-    await wrapper.findAll('button').find((b) => b.text() === '查看与编辑')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '查看与编辑')
+      ?.trigger('click')
     expect(wrapper.emitted('open')?.[0]).toEqual(['pdf-parse'])
   })
 
   it('翻页透传 update:page', async () => {
     const wrapper = mountList({ total: 20 })
-    await wrapper.findAll('button').find((b) => b.text() === '下一页')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '下一页')
+      ?.trigger('click')
     expect(wrapper.emitted('update:page')?.[0]).toEqual([2])
   })
 

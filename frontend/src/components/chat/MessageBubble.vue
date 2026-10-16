@@ -12,15 +12,26 @@
  * 操作区（用量 / 复制 / 点赞点踩）由 T045 接入 `MessageActions`；本组件已按契约预留
  * `feedback` / `copy` 事件出口。
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
-import type { AgentStarter, ErrorInfo, FileReference, Message, ToolCallResult } from '../../api/types'
+import type {
+  AgentStarter,
+  ErrorInfo,
+  FileReference,
+  Message,
+  ToolCallResult,
+} from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import { formatTimestamp } from '../../utils/format'
 import { visibleActions } from '../../utils/next-steps'
 import { countMatches } from '../../utils/segments'
-import { collectToolViewLinks, streamingToolCallItem, toolCallItemsOf } from '../../utils/tool-calls'
+import {
+  collectToolViewLinks,
+  streamingToolCallItem,
+  toolCallItemsOf,
+} from '../../utils/tool-calls'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import MessageActions from './MessageActions.vue'
 import MessageContent from './MessageContent.vue'
@@ -29,9 +40,6 @@ import MessageViewLinks from './MessageViewLinks.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallList from './ToolCallList.vue'
 import TypingIndicator from './TypingIndicator.vue'
-import FileIcon from '@/components/layout/FileIcon.vue'
-
-
 
 interface ToolCallView {
   call_id: string
@@ -48,7 +56,7 @@ interface StreamingView {
   error: ErrorInfo | null
   /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
   agentName: string | null
-  /** ABORTED 态是否有可重发的中断轮缓存（「重新生成」按钮渲染条件） */
+  /** 本轮是否有可重发的用户消息缓存（中断轮 / 服务端已终局的失败轮）→「重新生成」按钮渲染条件 */
   canRegenerate?: boolean
 }
 
@@ -76,6 +84,14 @@ const props = withDefaults(
      * （`visibleActions` 是唯一判据），历史轮次天然为空（FR-015）。
      */
     nextSteps?: ThreadNextSteps | null
+    /**
+     * 失败轮的「重试本轮」入口文案；`null` = 不渲染该入口（`ErrorNotice` 的既有语义）。
+     *
+     * **由列表层判定**：重发的载荷是"同轮的那条用户消息"，本组件只认识自己这一条，
+     * 无从判断它是否已加载（分页窗口可能正好切在两者之间）。故此处只接文案，
+     * 避免在消息不在窗口内时留下一个点了没反应的按钮（原则九：MUST NOT 假装正常）。
+     */
+    retryLabel?: string | null
   }>(),
   {
     searchKeyword: '',
@@ -84,6 +100,7 @@ const props = withDefaults(
     streaming: null,
     loadToolResult: undefined,
     nextSteps: null,
+    retryLabel: '重试本轮',
   },
 )
 
@@ -92,7 +109,11 @@ const emit = defineEmits<{
   feedback: [payload: { message_id: string; value: 'up' | 'down' | null }]
   /** T045 接入操作区后由 MessageActions 触发 */
   copy: [message_id: string]
-  /** 失败轮重试入口 */
+  /**
+   * 失败轮「重试本轮」：入口文案见 `retryLabel`（`null` 即不渲染）。
+   *
+   * 本组件只负责"点到了"这件事——重发所需的那条用户消息由列表层给，装配层执行重发。
+   */
   retry: []
   /** 中断轮「重新生成」：以缓存的上一条用户消息重发一轮 */
   regenerate: []
@@ -100,8 +121,13 @@ const emit = defineEmits<{
   'open-link': [href: string]
   /** 空间目录文件点击：由上层打开右侧内联预览（FR-046） */
   'open-file': [reference: FileReference]
-  /** 页面卡片点击：由上层打开右侧新窗口预览（FR-046）（V-10） */
-  'open-page': [item: { url: string; title: string ,type:string,sub:string}]
+  /**
+   * 跳转入口点击（`viewUrl` / `filePath` 归一化后）。
+   *
+   * 负载见 `ViewLinkTarget`：`kind:'file'` → 上层按扩展名预览（与文件空间同口径）；
+   * 其余 → 同源预检后进面板 / 异源直跳新窗口。
+   */
+  'open-view': [item: ViewLinkTarget]
   /** 点选下一步动作卡片（007）：确认与发送由装配层（ChatPanel）承担 */
   'send-suggestion': [action: AgentStarter]
 }>()
@@ -115,9 +141,7 @@ const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)
  * 生命周期内不可变更（跨数字人访问一律 404）。之所以仍**逐条**标注而非按会话标注：
  * 存量数据里同一会话的相邻轮次可能留有不同归属，逐条取用能如实还原历史。
  */
-const agentName = computed(
-  () => props.message.agent_name ?? props.streaming?.agentName ?? null,
-)
+const agentName = computed(() => props.message.agent_name ?? props.streaming?.agentName ?? null)
 const roleLabel = computed(() => {
   if (isUser.value) return '我'
   return agentName.value ? `${agentName.value} · 助手` : '助手'
@@ -159,7 +183,8 @@ const showTyping = computed(() => isStreaming.value && props.message.content ===
 
 /**
  * 只处理**已落盘的失败轮**（`status === 'failed'`）。
- * 流式过程中的断连由 `ChatPanel` 统一提示"重新获取"（FR-049），避免两处重复告警。
+ * 本轮（刚失败、尚未落盘到列表）的提示由 `ChatPanel` 统一负责——TR-58 分流：
+ * 可重发时「重试本轮」，否则「重新获取」；两处各管一段生命周期，避免重复告警。
  */
 const errorInfo = computed<ErrorInfo | null>(() => props.message.error ?? null)
 const showError = computed(
@@ -200,41 +225,6 @@ const containsActiveMatch = computed(() => {
     props.activeMatchIndex < props.matchIndexBase + total
   )
 })
-
-
-/****************** 数据标签与数据对话框 ******************/
-const  localhost = window.location.origin || '/'
-type FileItem = {
-  key: string
-  name: string
-  type: string
-  size: string
-  sub: string
-  src: string
-}
-const filesData = ref<FileItem[]>([
-    {
-    key: 'html',
-    name: '产品周报.html',
-    type: 'html',
-    size: '24 KB',
-    sub: 'HTML 文件 · iframe 沙箱实时渲染',
-    src: localhost+'/taskresult?taskNo=SCHBE027CEC8DB44BC9A586265951D931DE'
-    // src: localhost+'/datapage/production-plan'
-  },
-  { 
-    key: 'docx',
-    name: '项目方案.docx',
-    type: 'docx',
-    size: '56 KB',
-    sub: 'DOCX 文件 · 服务端转 HTML 预览',
-    src: localhost+'/taskresult?taskNo=SCHBE027CEC8DB44BC9A586265951D931DE'
-    // src: localhost+'/datapage/switch-time'
-  }
-])
-
-
-
 </script>
 
 <template>
@@ -286,7 +276,7 @@ const filesData = ref<FileItem[]>([
 
     <!-- 视图入口行（2026-10-10，TR-45）：紧跟回答正文之后、状态提示与操作区之前。
          无合法链接时组件整行不渲染（TR-48），因此不必在这里再判空 -->
-    <MessageViewLinks :links="viewLinks" @open-link="emit('open-link', $event)" />
+    <MessageViewLinks :links="viewLinks" @open-view="emit('open-view', $event)" />
 
     <!-- 下一步动作卡片（007）：在正文（与视图入口行）**之后**（FR-010），
          与工具记录、视图入口同层的侧车位置；无卡片时整块不渲染（FR-014） -->
@@ -298,19 +288,13 @@ const filesData = ref<FileItem[]>([
 
     <TypingIndicator v-if="showTyping" />
 
-    <ErrorNotice v-if="showError && errorInfo" :error="errorInfo" @retry="emit('retry')" />
-----
-    <!-- 文件卡片 -->
-    <div v-for="item in filesData" :key="item.key" class="file-card" @click="emit('open-page', { url: item.src, title: item.name,type:item.type,sub:item.sub })">
-      <div class="file-icon" :class="item.type">
-        <FileIcon :type="item.type" />
-      </div>
-      <div class="file-meta">
-        <div class="file-name">{{ item.name }}</div>
-        <div class="file-size">{{ item.size }} · 点击在右侧打开预览</div>
-      </div>
-      <div class="file-open">预览</div>
-    </div>
+    <!-- 失败轮的重试入口：文案由列表层决定（`null` = 该轮的用户消息不在窗口内，不给入口） -->
+    <ErrorNotice
+      v-if="showError && errorInfo"
+      :error="errorInfo"
+      :retry-label="retryLabel"
+      @retry="emit('retry')"
+    />
 
     <!-- 中断轮标识（流式气泡专属）：partial 内容非完整回答；可重发时给「重新生成」 -->
     <div v-if="isAborted" class="message-bubble__aborted">

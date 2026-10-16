@@ -66,7 +66,9 @@ const linkHref = computed(() =>
 )
 
 /** 紧凑模式下非标量直接转 JSON 文本（不递归）；与"深度超限"共用逃生舱渲染 */
-const asRawJson = computed(() => (props.compact && !isScalar.value) || props.depth >= PRODUCED_JSON_MAX_DEPTH)
+const asRawJson = computed(
+  () => (props.compact && !isScalar.value) || props.depth >= PRODUCED_JSON_MAX_DEPTH,
+)
 
 const isObject = computed(() => isPlainObject(props.value))
 const objectEntries = computed(() =>
@@ -76,7 +78,9 @@ const objectEntries = computed(() =>
 const isArray = computed(() => Array.isArray(props.value))
 const arrayItems = computed(() => (isArray.value ? (props.value as unknown[]) : []))
 const shownItems = computed(() => arrayItems.value.slice(0, PRODUCED_ARRAY_MAX_ITEMS))
-const truncatedCount = computed(() => Math.max(0, arrayItems.value.length - shownItems.value.length))
+const truncatedCount = computed(() =>
+  Math.max(0, arrayItems.value.length - shownItems.value.length),
+)
 
 /** 空容器（`{}` / `[]`）单独呈现，避免渲染出没有内容的分组 */
 const isEmptyContainer = computed(
@@ -139,7 +143,8 @@ function jsonText(value: unknown): string {
       :href="linkHref"
       target="_blank"
       rel="noopener noreferrer"
-    >{{ scalarText(value) }}</a>
+      >{{ scalarText(value) }}</a
+    >
 
     <span
       v-else-if="isScalar"
@@ -187,10 +192,12 @@ function jsonText(value: unknown): string {
         </table>
       </div>
       <p v-if="hiddenColumnCount > 0" class="produced-json__truncated">
-        仅显示前 {{ columns.length }} 列，共 {{ allColumns.length }} 列，完整明细请点上方「按原始 JSON 查看」
+        仅显示前 {{ columns.length }} 列，共 {{ allColumns.length }} 列，完整明细请点上方「按原始
+        JSON 查看」
       </p>
       <p v-if="truncatedCount > 0" class="produced-json__truncated">
-        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始 JSON 查看」
+        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始
+        JSON 查看」
       </p>
     </template>
 
@@ -202,7 +209,8 @@ function jsonText(value: unknown): string {
         </li>
       </ol>
       <p v-if="truncatedCount > 0" class="produced-json__truncated">
-        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始 JSON 查看」
+        仅显示前 {{ shownItems.length }} 行，共 {{ arrayItems.length }} 行，完整明细请点上方「按原始
+        JSON 查看」
       </p>
     </template>
   </div>

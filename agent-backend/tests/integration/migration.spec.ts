@@ -14,7 +14,15 @@
  *
  * 运行方式（本地执行）：npm run test:integration
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -42,7 +50,11 @@ function seedLegacyLayout(userId: string, marker: string): void {
     JSON.stringify({ thread_id: `th_${marker}`, agent_name: '旧语义' }),
     'utf8',
   );
-  writeFileSync(path.join(base, THREADS_DIR, `th_${marker}`, 'history.jsonl'), '{"role":"user","content":"你好"}\n', 'utf8');
+  writeFileSync(
+    path.join(base, THREADS_DIR, `th_${marker}`, 'history.jsonl'),
+    '{"role":"user","content":"你好"}\n',
+    'utf8',
+  );
 }
 
 /** 建数字人配置（`agents/{name}/`） */
@@ -56,7 +68,8 @@ function seedAgent(userId: string, name: string): void {
 
 /** 数据快照：relative path → 文件内容（目录以 `/` 结尾） */
 function snapshot(userId: string, agentName?: string): Record<string, string> {
-  const base = agentName === undefined ? userDataRoot(root, userId) : userDataDir(root, userId, agentName);
+  const base =
+    agentName === undefined ? userDataRoot(root, userId) : userDataDir(root, userId, agentName);
   const out: Record<string, string> = {};
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -126,7 +139,9 @@ describe('启动期迁移（判定②：清单唯一）', () => {
 
     await startServer();
 
-    expect(existsSync(path.join(userDataDir(root, 'admin', 'a-数字人'), '共享空间', 'old-共享空间.txt'))).toBe(true);
+    expect(
+      existsSync(path.join(userDataDir(root, 'admin', 'a-数字人'), '共享空间', 'old-共享空间.txt')),
+    ).toBe(true);
     expect(existsSync(path.join(userDataDir(root, 'admin', 'b-数字人'), '共享空间'))).toBe(false);
   });
 
@@ -140,7 +155,9 @@ describe('启动期迁移（判定②：清单唯一）', () => {
 
     // admin 迁走，bob（无数字人）原地保留
     expect(existsSync(path.join(userDataRoot(root, 'admin'), '共享空间'))).toBe(false);
-    expect(existsSync(path.join(userDataRoot(root, 'bob'), '共享空间', 'bob-共享空间.txt'))).toBe(true);
+    expect(existsSync(path.join(userDataRoot(root, 'bob'), '共享空间', 'bob-共享空间.txt'))).toBe(
+      true,
+    );
   });
 });
 
@@ -161,7 +178,11 @@ describe('select 触发的补判（判定①）', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    expect(existsSync(path.join(userDataDir(root, 'admin', '迟到数字人'), '共享空间', 'old-共享空间.txt'))).toBe(true);
+    expect(
+      existsSync(
+        path.join(userDataDir(root, 'admin', '迟到数字人'), '共享空间', 'old-共享空间.txt'),
+      ),
+    ).toBe(true);
     expect(readdirSync(userDataRoot(root, 'admin'))).toEqual(['迟到数字人']);
   });
 
@@ -170,7 +191,10 @@ describe('select 触发的补判（判定①）', () => {
     seedLegacyLayout('admin', 'old');
     await startServer();
     seedAgent('admin', '迟到数字人');
-    await app!.inject({ method: 'POST', url: `/api/agents/${encodeURIComponent('迟到数字人')}/select` });
+    await app!.inject({
+      method: 'POST',
+      url: `/api/agents/${encodeURIComponent('迟到数字人')}/select`,
+    });
 
     const list = await app!.inject({
       method: 'GET',

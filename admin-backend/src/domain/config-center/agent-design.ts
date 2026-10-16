@@ -21,12 +21,7 @@ import type { PlatformStore } from '../../infra/platform-store.js';
 import { anomalyReason, detectAnomalies, type AgentRefSource } from './references.js';
 import type { ReferenceIndex } from './reference-index.js';
 import { isSafeName } from './naming.js';
-import {
-  normalizeScenario,
-  scenarioFields,
-  scenarioUploads,
-  type AgentScenario,
-} from './scenario.js';
+import { normalizeScenario, scenarioFields, scenarioUploads, type AgentScenario } from './scenario.js';
 import {
   describeSoul,
   fromLegacySoul,
@@ -160,12 +155,7 @@ function normalizeNameList(raw: unknown, field: string): string[] {
   return out;
 }
 
-function rejectUnknown(
-  values: string[],
-  allowed: ReadonlySet<string>,
-  label: string,
-  source: string,
-): void {
+function rejectUnknown(values: string[], allowed: ReadonlySet<string>, label: string, source: string): void {
   const missing = values.filter((v) => !allowed.has(v));
   if (missing.length > 0) {
     throw new ApiError(
@@ -315,17 +305,13 @@ export class AgentDesignService {
 
   /** 新建（`FR-015`）；`revision` 缺省时不校验（新建无并发语义） */
   create(raw: AgentInputRaw, index: ReferenceIndex, revision?: number): AgentDesignView {
-    const validate = () =>
-      validateAgentInput(raw, { index, takenNames: this.names() });
+    const validate = () => validateAgentInput(raw, { index, takenNames: this.names() });
     let created: Omit<AgentDesignDocument, 'updated_at'>;
     let nextRevision: number;
 
     if (revision === undefined) {
       created = validate();
-      this.store.writeJson(
-        AgentDesignService.relPath(created.name),
-        this.toDocument(created),
-      );
+      this.store.writeJson(AgentDesignService.relPath(created.name), this.toDocument(created));
       nextRevision = this.store.bumpRevision();
     } else {
       const run = this.store.withRevision(revision, () => {
@@ -345,12 +331,7 @@ export class AgentDesignService {
   }
 
   /** 编辑（`FR-017`）；改名时删除旧文档并返回新名称 */
-  update(
-    name: string,
-    raw: AgentInputRaw,
-    index: ReferenceIndex,
-    revision: number,
-  ): AgentDesignView {
+  update(name: string, raw: AgentInputRaw, index: ReferenceIndex, revision: number): AgentDesignView {
     this.read(name); // 不存在 → ADM_AGENT_NOT_FOUND
     const taken = this.names();
     taken.delete(name);

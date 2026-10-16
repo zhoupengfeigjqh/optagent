@@ -82,10 +82,7 @@ export class PlatformStore {
       fs.mkdirSync(this.root, { recursive: true });
       fs.accessSync(this.root, fs.constants.W_OK);
     } catch {
-      throw new ApiError(
-        ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
-        `平台设计态目录不可写：${this.root}`,
-      );
+      throw new ApiError(ERROR_CODES.ADM_STORAGE_UNAVAILABLE, `平台设计态目录不可写：${this.root}`);
     }
   }
 
@@ -109,10 +106,7 @@ export class PlatformStore {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new ApiError(
-        ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
-        `平台设计态文档损坏（不是合法 JSON）：${rel}`,
-      );
+      throw new ApiError(ERROR_CODES.ADM_STORAGE_UNAVAILABLE, `平台设计态文档损坏（不是合法 JSON）：${rel}`);
     }
   }
 

@@ -9,14 +9,26 @@
  * 详情页补全其余调用配置，并**自动测试一次**。之所以不在弹窗里测：`POST /{name}/test`
  * 只接受**已登记**的服务（服务不存在 → `ADM_MCP_SERVICE_NOT_FOUND`），
  * 所以测试时机是"创建后立刻"而非"创建前"。
+ *
+ * **2026-10-15 工具范围可调整**：详情页「工具清单」的「重新探测」不再只是刷新——
+ * 探测成功后本组件立即打开 `McpToolScopeDialog`（勾选增减可见工具，保存走 `PUT`）。
+ * 开窗开关与"探测是否成功"的判断都放在这里：只有拿到详情结果的这一层才知道
+ * 清单可不可信（探测失败时开窗等于让管理员凭空造范围）。
  */
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { http } from '../../api/http'
-import type { McpServiceDetail, McpServiceListItem, McpStatsItem, Paged } from '../../api/types'
+import type {
+  McpServiceDetail,
+  McpServiceListItem,
+  McpStatsItem,
+  McpToolInfo,
+  Paged,
+} from '../../api/types'
 import { buildPath } from '../../router'
 import McpCardList from './McpCardList.vue'
 import McpCreateDialog from './McpCreateDialog.vue'
 import McpServiceDetailView from './McpServiceDetail.vue'
+import McpToolScopeDialog from './McpToolScopeDialog.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
 const emit = defineEmits<{
@@ -42,6 +54,8 @@ const statsAvailable = ref(true)
 
 /** 新建弹窗开关 */
 const createOpen = ref(false)
+/** 工具范围弹窗开关（2026-10-15）：由「重新探测」**成功**后打开 */
+const scopeOpen = ref(false)
 /**
  * 「刚创建、待自动测试一次」的服务名。
  *
@@ -102,6 +116,9 @@ async function syncFromRoute(name: string | null): Promise<void> {
   // **先切视图、再取数据**：点卡片后立刻进入详情壳（标题已可读、正文显示加载中），
   // 不必等后端那次 MCP 实时探测返回（方案 B，2026-09-28）
   openedName.value = name
+  // 路由一动就收起工具范围弹窗：它是"针对某个服务的一次调整"，
+  // 跨服务留着只会张冠李戴（把 A 的勾选画在 B 的清单上）
+  scopeOpen.value = false
 
   if (!name) {
     serviceDetail.value = null
@@ -128,6 +145,52 @@ async function syncFromRoute(name: string | null): Promise<void> {
 /** 详情读取失败后的「重试」（重新拉取当前打开的服务） */
 function reloadDetail(): void {
   if (openedName.value) void loadDetail(openedName.value)
+}
+
+/**
+ * 「重新探测」（2026-10-15 起不止是刷新）：重取详情（后端现连服务）→
+ * **探测成功即打开工具范围弹窗**，让管理员顺手增减可见工具。
+ *
+ * 探测失败（`tools_error` 非空）时**不开窗**：那时拿不到可信的全量清单，
+ * 勾选等于凭空造范围；详情页此刻已如实展示"清单不可得 + 原因"，这里只补一句播报。
+ */
+async function onReprobe(): Promise<void> {
+  const name = openedName.value
+  if (!name) return
+  await loadDetail(name)
+  const detail = serviceDetail.value
+  if (detail === null) return
+  if (detail.tools_error) {
+    emit('announce', '工具清单不可得，本次无法调整工具范围；请先确认服务可达')
+    return
+  }
+  scopeOpen.value = true
+}
+
+/**
+ * 工具范围保存成功：**原地**更新白名单与 `revision`，MUST NOT 重载详情
+ * （契约 §0.5 原则 ①②：重载会整表重填、丢掉未提交的配置草稿，并多打一次实时探测）。
+ *
+ * 但 `tools` 与 `missing_tools` 必须用**本次探测到的全量清单**重新投影：
+ * 留着旧投影的话，刚勾进来的工具会落进"已不存在"分支——那是假告警。
+ */
+function onScopeSaved(result: { allowed_tools: string[]; revision: number }): void {
+  scopeOpen.value = false
+  const detail = serviceDetail.value
+  if (detail) {
+    detail.allowed_tools = result.allowed_tools
+    detail.revision = result.revision
+    detail.tools = result.allowed_tools
+      .map((toolName) => detail.available_tools.find((tool) => tool.name === toolName))
+      .filter((tool): tool is McpToolInfo => tool !== undefined)
+    detail.missing_tools = result.allowed_tools.filter(
+      (toolName) => !detail.available_tools.some((tool) => tool.name === toolName),
+    )
+    // 勾选只可能来自 `available_tools`（本身有界），投影后必然不超上限
+    detail.tools_truncated = false
+  }
+  // 卡片列表带 `allowed_tools`（数字人问题实例的可选项来源），改了范围要跟着刷
+  void loadList()
 }
 
 /** 弹窗创建成功：关弹窗、记下待测服务、导航到其详情页 */
@@ -179,11 +242,21 @@ watch(
       :opened-name="openedName"
       :service="serviceDetail"
       :loading="detailLoading"
-      :error="(error as never)"
+      :error="error as never"
       @back="backToList"
       @deleted="backToList"
       @reload="reloadDetail"
+      @reprobe="onReprobe"
       @changed="onDetailChanged"
+      @announce="emit('announce', $event)"
+    />
+
+    <!-- 工具范围弹窗（2026-10-15）：`serviceDetail` 到手才渲染——`kind` 与清单都取自它 -->
+    <McpToolScopeDialog
+      v-if="openedName && serviceDetail"
+      v-model:open="scopeOpen"
+      :service="serviceDetail"
+      @saved="onScopeSaved"
       @announce="emit('announce', $event)"
     />
     <template v-else>
@@ -192,7 +265,7 @@ watch(
         :total="list?.total ?? 0"
         :page="page"
         :loading="loading"
-        :error="(error as never)"
+        :error="error as never"
         :stats="stats"
         :stats-available="statsAvailable"
         @update:page="

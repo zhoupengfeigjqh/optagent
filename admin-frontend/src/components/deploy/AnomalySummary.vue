@@ -82,7 +82,9 @@ onMounted(() => {
         共 {{ data?.total ?? 0 }} 项失效引用，已在本视图内全部列出。
       </p>
       <table class="anomaly-summary__table">
-        <caption class="visually-hidden">全部失效引用及其所属用户与数字人</caption>
+        <caption class="visually-hidden">
+          全部失效引用及其所属用户与数字人
+        </caption>
         <thead>
           <tr>
             <th scope="col">用户</th>
@@ -98,7 +100,11 @@ onMounted(() => {
             <td>{{ item.user_id || '（未关联）' }}</td>
             <td class="mono">{{ item.agent_name }}</td>
             <td>
-              <StatusBadge status="abnormal" :label="CATEGORY_LABEL[item.category] ?? item.category" tone="error" />
+              <StatusBadge
+                status="abnormal"
+                :label="CATEGORY_LABEL[item.category] ?? item.category"
+                tone="error"
+              />
             </td>
             <td class="mono">{{ item.target_name }}</td>
             <td>{{ item.detail }}</td>

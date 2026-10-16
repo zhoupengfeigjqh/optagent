@@ -49,7 +49,11 @@ function isRowObject(index: number): boolean {
       <tbody>
         <tr v-if="rows.length === 0">
           <td :colspan="columns.length + 1" class="interaction-dialog__table-empty">
-            {{ columns.length === 0 ? '无可用的列：可用「从算法规则选择」生成，或切到 JSON 编辑' : '尚未添加任何行。' }}
+            {{
+              columns.length === 0
+                ? '无可用的列：可用「从算法规则选择」生成，或切到 JSON 编辑'
+                : '尚未添加任何行。'
+            }}
           </td>
         </tr>
         <tr v-for="index in rowIndexes()" :key="index">

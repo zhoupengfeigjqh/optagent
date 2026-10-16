@@ -27,13 +27,13 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/dataApi': {
-          //后端服务地址（与 minimalist-vue3 一致）
-          target: 'http://192.168.0.188:8080',
-          //允许跨域
-          changeOrigin: true,
-          //规则匹配，去掉前缀转发
-          rewrite: path => path.replace(/^\/dataApi/, '/api'),
-        },
+        //后端服务地址（与 minimalist-vue3 一致）
+        target: 'http://192.168.0.188:8080',
+        //允许跨域
+        changeOrigin: true,
+        //规则匹配，去掉前缀转发
+        rewrite: (path) => path.replace(/^\/dataApi/, '/api'),
+      },
     },
   },
 
@@ -84,21 +84,41 @@ export default defineConfig({
         'src/utils/json-path.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 98.07 / 95.12 / 100 / 100
         'src/utils/arg-schema.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.19 / 94.73 / 100 / 97.43
         'src/utils/arg-values.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 97.89 / 91.75 / 100 / 100
-        'src/composables/useInteractionForm.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 96.33 / 83.63 / 100 / 100
+        'src/composables/useInteractionForm.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 96.33 / 83.63 / 100 / 100
         // 后台产出展示（2026-09-25 / 26）：元数据格式化 + 正文展示解析
         'src/utils/produced-display.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/utils/produced-content.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         // 工具调用的折叠展示（2026-10-08）：展示模型纯函数 + 跨组件实例的查看态
         'src/utils/tool-calls.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 93.75 / 100 / 100
-        'src/composables/useToolPanels.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/composables/useToolPanels.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 100 / 100 / 100 / 100
         // 产出正文的视图链接（2026-10-10，TR-40~TR-43）：viewUrl 字段判定 + 值归一化（唯一实现）
         'src/utils/view-link.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // 同源地址「能否内联渲染」预检（2026-10-15）：读响应头判定 iframe 渲染 / 下载入口
+        'src/utils/preview-probe.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // 右侧面板状态机（2026-10-15）：异源直跳 / 同源预检 / 本地文件按扩展名预览的分流
+        // 实测 92.63 / 80.48 / 90.90 / 92.55（`src/composables/usePreview.spec.ts`）
+        'src/composables/usePreview.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         // `@` 引用浮层（2026-10-12，FR-102~106 / TR-01~02）：坐标计算纯函数 + 光标测量
         'src/utils/popup-position.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
         'src/utils/caret-rect.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 92.85 / 100 / 100
         // 下一步动作提示（2026-10-12，007）：拉取时刻表与可见性判定 + 窗口调度 + 只读拉取封装
         'src/utils/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
-        'src/composables/useNextSteps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/composables/useNextSteps.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 100 / 100 / 100 / 100
         'src/api/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
       },
     },

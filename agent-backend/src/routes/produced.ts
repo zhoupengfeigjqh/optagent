@@ -158,11 +158,7 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     }
     const maxBytes = ctx.config.previewMaxMb * 1024 * 1024;
     if (buf.length > maxBytes) {
-      throw new ApiError(
-        413,
-        'FILE_TOO_LARGE',
-        `产出超过预览上限（${ctx.config.previewMaxMb}MB）`,
-      );
+      throw new ApiError(413, 'FILE_TOO_LARGE', `产出超过预览上限（${ctx.config.previewMaxMb}MB）`);
     }
     return reply
       .header('content-type', 'text/plain; charset=utf-8')

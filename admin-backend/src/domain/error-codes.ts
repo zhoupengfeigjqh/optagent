@@ -8,6 +8,10 @@
  *
  * 该模块是**跨层共享内核**：`routes/`、`domain/`、`infra/` 均可引用
  * （与 `agent-backend/src/types.ts` 的角色相同），因此不构成越级依赖。
+ *
+ * **2026-10-15**：补登 §11（身份与分权，`FR-065`/`FR-066`）的 `ADM_UNAUTHENTICATED`（401）
+ * 与 `ADM_FORBIDDEN`（403）。两者为**预登记**：§11 尚未实施，没有任何校验钩子会抛出它们，
+ * 此处的价值是把命名与状态码提前冻结在四张表（契约 §0.4 + 本表 + `ERROR_STATUS` + 前端文案）里。
  */
 
 /** 全部错误码常量（与契约 §0.4 逐行对应） */
@@ -35,7 +39,6 @@ export const ERROR_CODES = {
   // ---- MCP 服务（§3）----
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
   ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
-  ADM_MCP_TOOL_SCOPE_LOCKED: 'ADM_MCP_TOOL_SCOPE_LOCKED',
   // ---- 部署（§6）----
   ADM_DEPLOY_VALIDATION_FAILED: 'ADM_DEPLOY_VALIDATION_FAILED',
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
@@ -46,6 +49,9 @@ export const ERROR_CODES = {
   ADM_CONFIG_REVISION_CONFLICT: 'ADM_CONFIG_REVISION_CONFLICT',
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
+  // ---- 身份与分权（§11；预登记：契约已冻结命名与状态码，功能未实施、当前不可达）----
+  ADM_UNAUTHENTICATED: 'ADM_UNAUTHENTICATED',
+  ADM_FORBIDDEN: 'ADM_FORBIDDEN',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -78,7 +84,6 @@ export const ERROR_STATUS: Readonly<Record<string, number>> = {
 
   [ERROR_CODES.ADM_MCP_SERVICE_NOT_FOUND]: 404,
   [ERROR_CODES.ADM_MCP_SERVICE_EXISTS]: 409,
-  [ERROR_CODES.ADM_MCP_TOOL_SCOPE_LOCKED]: 409,
   [ERROR_CODES.ADM_DEPLOY_VALIDATION_FAILED]: 409,
   [ERROR_CODES.ADM_DEPLOY_TARGET_NOT_WRITABLE]: 409,
 
@@ -88,6 +93,10 @@ export const ERROR_STATUS: Readonly<Record<string, number>> = {
 
   [ERROR_CODES.ADM_STORAGE_UNAVAILABLE]: 503,
   [ERROR_CODES.ADM_RUNTIME_UNREACHABLE]: 503,
+
+  // §11 预登记（未实施）：401 未认证 / 403 越权
+  [ERROR_CODES.ADM_UNAUTHENTICATED]: 401,
+  [ERROR_CODES.ADM_FORBIDDEN]: 403,
 };
 
 /** 全部错误码清单（T120 的机械核对与测试共用） */

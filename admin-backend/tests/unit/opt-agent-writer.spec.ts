@@ -43,9 +43,7 @@ describe('OptAgentWriter', () => {
 
   it('整体覆盖：上一版存在而本版未搭配的文件 MUST NOT 残留（FR-026）', () => {
     const writer = new OptAgentWriter({ optAgentRoot: root });
-    writer.commitUser('admin', [
-      { name: 'demo', files: [file('SOUL.md', 'v1'), file('legacy.json', '{}')] },
-    ]);
+    writer.commitUser('admin', [{ name: 'demo', files: [file('SOUL.md', 'v1'), file('legacy.json', '{}')] }]);
     writer.commitUser('admin', [artifact('demo', 'v2')]);
 
     const dir = writer.agentDir('admin', 'demo');
@@ -198,9 +196,9 @@ describe('OptAgentWriter', () => {
 
   it('拒绝越界的物化相对路径与非法目录名', () => {
     const writer = new OptAgentWriter({ optAgentRoot: root });
-    expect(() =>
-      writer.commitUser('admin', [{ name: 'demo', files: [file('../escape.md', 'x')] }]),
-    ).toThrow(ApiError);
+    expect(() => writer.commitUser('admin', [{ name: 'demo', files: [file('../escape.md', 'x')] }])).toThrow(
+      ApiError,
+    );
     expect(() => writer.commitUser('../admin', [artifact('demo', 'x')])).toThrow(ApiError);
     expect(() => writer.commitUser('admin', [artifact('a/b', 'x')])).toThrow(ApiError);
   });

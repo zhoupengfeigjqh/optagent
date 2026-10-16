@@ -96,3 +96,19 @@ describe('MessageBubble —— 入口取自"本条回答全部工具调用"（TR
     expect(wrapper.find('[data-test="view-links"]').exists()).toBe(false)
   })
 })
+
+describe('MessageBubble —— 入口点击向上透传（2026-10-15）', () => {
+  it('点入口行冒泡为 open-view（`{ url, name }`），异源直跳 / 同源预检交给装配层', async () => {
+    const wrapper = mountBubble({
+      tool_calls: [call({ view_links: [{ url: '/a', name: 'A 明细' }] })],
+    })
+
+    await wrapper.find('.message-view-link').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([
+      [{ url: `${ORIGIN}/a`, name: 'A 明细', kind: 'url' }],
+    ])
+    // 不再是"直跳新窗口"的 open-link 口径（地址可能是同源页面或本地文件）
+    expect(wrapper.emitted('open-link')).toBeUndefined()
+  })
+})

@@ -33,7 +33,8 @@ function mountTable(rows: unknown[], columns: string[] = ['ruleId', 'rulePriorit
       columns,
       rows,
       itemSchema: ITEM,
-      cellSchemaOf: (column: string) => propertiesOf(ITEM).find((item) => item.key === column)?.schema ?? {},
+      cellSchemaOf: (column: string) =>
+        propertiesOf(ITEM).find((item) => item.key === column)?.schema ?? {},
     },
     global: { provide: { [INTERACTION_FORM_KEY as symbol]: context } },
   })
@@ -42,7 +43,10 @@ function mountTable(rows: unknown[], columns: string[] = ['ruleId', 'rulePriorit
 
 describe('InteractionTable —— 结构', () => {
   it('表头 = 传入的列（末尾是行操作列），一行一个元素', () => {
-    const { wrapper } = mountTable([{ ruleId: 'PR001', rulePriority: 1 }, { ruleId: 'PR002', rulePriority: 2 }])
+    const { wrapper } = mountTable([
+      { ruleId: 'PR001', rulePriority: 1 },
+      { ruleId: 'PR002', rulePriority: 2 },
+    ])
 
     expect(wrapper.findAll('th').map((cell) => cell.text())).toEqual(['ruleId', 'rulePriority', ''])
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
@@ -80,10 +84,14 @@ describe('InteractionTable —— 交互与边界', () => {
   })
 
   it('有列无行 → 提示尚未添加；无列无行 → 提示可用规则选择或 JSON 编辑', () => {
-    expect(mountTable([]).wrapper.find('.interaction-dialog__table-empty').text()).toContain('尚未添加')
+    expect(mountTable([]).wrapper.find('.interaction-dialog__table-empty').text()).toContain(
+      '尚未添加',
+    )
 
     const noColumns = mountTable([], [])
-    expect(noColumns.wrapper.find('.interaction-dialog__table-empty').text()).toContain('从算法规则选择')
+    expect(noColumns.wrapper.find('.interaction-dialog__table-empty').text()).toContain(
+      '从算法规则选择',
+    )
   })
 
   it('行不是对象时不渲染单元格，而是给出可操作文案（不静默）', () => {

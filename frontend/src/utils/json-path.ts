@@ -68,12 +68,7 @@ export function setAtPath(root: unknown, path: NodePath, value: unknown): SetAtP
   return writeAt(root, path, value, [])
 }
 
-function writeAt(
-  root: unknown,
-  path: NodePath,
-  value: unknown,
-  walked: NodePath,
-): SetAtPathResult {
+function writeAt(root: unknown, path: NodePath, value: unknown, walked: NodePath): SetAtPathResult {
   if (path.length === 0) return { ok: true, value }
 
   const [head, ...rest] = path

@@ -15,7 +15,8 @@ import { mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ErrorInfo } from '../../api/types'
+import { emptyNextSteps } from '../../api/next-steps'
+import type { ErrorInfo, Message } from '../../api/types'
 import ChatPanel from './ChatPanel.vue'
 
 const h = vi.hoisted(() => ({ panel: null as unknown }))
@@ -83,7 +84,8 @@ function makePanel(
     uploadOpen: ref(false),
     agentPanelOpen: ref(false),
     workspaceOpen: ref(false),
-    streaming: ref(null),
+    // 本轮瞬态：本组用例只关心「失败块分流」读的 `canRegenerate`（形状按需最小化）
+    streaming: ref<{ phase: string; canRegenerate: boolean } | null>(null),
     isFailed: ref(false),
     errorInfo: ref<ErrorInfo | null>(null),
     sending: ref(false),
@@ -96,6 +98,15 @@ function makePanel(
     onSend: noop,
     onStop: noop,
     onRegenerate: noop,
+    onRetryTurn: noop,
+    onRetryFailedRun: noop,
+    // 007：列表渲染会读卡片快照与确认弹窗状态（本组用例不涉及卡片，取空形态即可）
+    nextSteps: { steps: ref(emptyNextSteps()) },
+    pendingSuggestion: ref(null),
+    suggestionSending: ref(false),
+    onPickNextStep: noop,
+    onCancelSuggestion: noop,
+    onConfirmSuggestion: noop,
     onLoadMore: noop,
     onLoadToolResult: noop,
     onRecover: noop,
@@ -128,10 +139,13 @@ function makePanel(
 
 type Panel = ReturnType<typeof makePanel>
 
-function setup(options: Parameters<typeof makePanel>[0] = {}) {
+/** 需要真消息列表时用它替换 `STUBS`（`false` = 不 stub，渲染真实组件） */
+const REAL_LIST_STUBS = { ...STUBS, MessageList: false }
+
+function setup(options: Parameters<typeof makePanel>[0] = {}, stubs: typeof STUBS = STUBS) {
   const panel = makePanel(options)
   h.panel = panel
-  const wrapper = mount(ChatPanel, { props: { expanded: false }, global: { stubs: STUBS } })
+  const wrapper = mount(ChatPanel, { props: { expanded: false }, global: { stubs } })
   return { wrapper, panel }
 }
 
@@ -190,6 +204,98 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
 })
 
 /**
+ * 失败轮「重试本轮」的接线（2026-10-15 断链修复）。
+ *
+ * 病灶是**事件悬空**：气泡发 `retry`、列表层也透传了，但面板模板没接——
+ * 按钮点下去什么都不发生。故这里渲染**真实**列表与气泡，只问一件事：
+ * 点下去之后，装配层（`onRetryTurn`）是否收到了"该轮的用户消息"这个载荷。
+ * （`onRetryTurn → onSend` 这一段由 `useChatPanel.retry.spec.ts` 用真链路覆盖。）
+ */
+describe('ChatPanel —— 失败轮「重试本轮」的接线', () => {
+  it('气泡里的重试入口把该轮的用户消息交给装配层（不再是点了没反应的按钮）', async () => {
+    const { wrapper, panel } = setup({}, REAL_LIST_STUBS)
+    const threads = (panel as Panel).threads as { messages: { value: Message[] } }
+    const retryTurn = (panel as Panel).onRetryTurn as unknown as ReturnType<typeof vi.fn>
+
+    threads.messages.value = [
+      {
+        id: 'm_u1',
+        role: 'user',
+        content: '帮我看看这份计划',
+        ts: '2026-10-15T09:00:00Z',
+        feedback: null,
+        attachments: [{ dir: '数据准备/生产计划', filename: 'plan.csv' }],
+      },
+      {
+        id: 'm_a1',
+        role: 'assistant',
+        content: '',
+        ts: '2026-10-15T09:00:01Z',
+        feedback: null,
+        status: 'failed',
+        error: { code: 'LLM_UNAVAILABLE', message: 'upstream 503' },
+      },
+    ]
+    ;(panel as Panel).hasMessages.value = true
+    await nextTick()
+
+    const retry = wrapper.find('.error-notice__retry')
+    expect(retry.exists()).toBe(true)
+    await retry.trigger('click')
+
+    expect(retryTurn).toHaveBeenCalledWith({
+      content: '帮我看看这份计划',
+      attachments: [{ dir: '数据准备/生产计划', filename: 'plan.csv' }],
+    })
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 面板级失败块的按钮分流（TR-58，2026-10-15）。
+ *
+ * 本层断言两件事：**文案**随 `streaming.canRegenerate` 切换（用户可见的分流信号），
+ * 以及点击**确实落到面板的重试入口**（`onRetryFailedRun`）——即"接线不悬空"。
+ * 分流本身（可重发 → `onRegenerate`；不可重发 → `onRecover`）由
+ * `useChatPanel.retry.spec.ts` 用真实组合式函数覆盖。
+ */
+describe('ChatPanel —— 面板级失败块的按钮分流', () => {
+  it('本轮可重发：按钮是「重试本轮」，点击落到面板重试入口', async () => {
+    const { wrapper, panel } = setup()
+
+    ;(panel as Panel).isFailed.value = true
+    ;(panel as Panel).errorInfo.value = { code: 'LLM_UNAVAILABLE', message: '' }
+    ;(panel as Panel).streaming.value = { phase: 'failed', canRegenerate: true }
+    await nextTick()
+
+    const retry = wrapper.find('.chat-panel__error .error-notice__retry')
+    expect(retry.exists()).toBe(true)
+    expect(retry.text()).toBe('重试本轮')
+
+    await retry.trigger('click')
+
+    expect((panel as Panel).onRetryFailedRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('本轮不可重发（断连，缓存未置位）：按钮仍是「重新获取」，点击同样落到面板重试入口', async () => {
+    const { wrapper, panel } = setup()
+
+    ;(panel as Panel).isFailed.value = true
+    ;(panel as Panel).errorInfo.value = { code: 'NETWORK_ERROR', message: '' }
+    ;(panel as Panel).streaming.value = { phase: 'failed', canRegenerate: false }
+    await nextTick()
+
+    const retry = wrapper.find('.chat-panel__error .error-notice__retry')
+    expect(retry.text()).toBe('重新获取')
+
+    await retry.trigger('click')
+
+    expect((panel as Panel).onRetryFailedRun).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
  * 009 FR-032 / FR-052：数字人不可用的降级必须**用户可感知**。
  *
  * 落在既有 `ErrorNotice` 提示位（不新增控件）：第一行给"为什么失败"，
@@ -198,7 +304,10 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
 describe('ChatPanel —— 数字人不可用的降级呈现（009）', () => {
   it('陈旧数字人：错误态给出原因文案 + 当前可用数字人清单，并主动拉一次候选', async () => {
     const { wrapper, panel } = setup()
-    const agents = (panel as Panel).agents as { candidates: { value: unknown[] }; loadCandidates: ReturnType<typeof vi.fn> }
+    const agents = (panel as Panel).agents as {
+      candidates: { value: unknown[] }
+      loadCandidates: ReturnType<typeof vi.fn>
+    }
     agents.candidates.value = [{ agent_name: 'agent-a' }, { agent_name: 'agent-b' }]
 
     ;(panel as Panel).isFailed.value = true

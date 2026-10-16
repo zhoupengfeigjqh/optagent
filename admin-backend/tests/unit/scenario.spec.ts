@@ -30,7 +30,10 @@ const base = { scenario: '生产', data_prep_dirs: ['生产计划', '产线电�
 
 describe('normalizeScenario —— 场景名与目录清单', () => {
   it('正向：归一化场景名并保留目录顺序', () => {
-    const out = normalizeScenario({ scenario: '  生产  ', data_prep_dirs: ['产线电价', '生产计划', '算法规则'] });
+    const out = normalizeScenario({
+      scenario: '  生产  ',
+      data_prep_dirs: ['产线电价', '生产计划', '算法规则'],
+    });
     expect(out.scenario).toBe('生产');
     expect(out.data_prep_dirs).toEqual(['产线电价', '生产计划', '算法规则']);
   });
@@ -55,10 +58,7 @@ describe('normalizeScenario —— 场景名与目录清单', () => {
   });
 
   it('异常：缺少预定义二级目录（清单必须完整包含预定义目录）', () => {
-    expectCode(
-      () => normalizeScenario({ scenario: 'x', data_prep_dirs: [] }),
-      ERROR_CODES.VALIDATION_FAILED,
-    );
+    expectCode(() => normalizeScenario({ scenario: 'x', data_prep_dirs: [] }), ERROR_CODES.VALIDATION_FAILED);
     expectCode(
       () => normalizeScenario({ scenario: 'x', data_prep_dirs: ['生产计划'] }),
       ERROR_CODES.VALIDATION_FAILED,
@@ -93,9 +93,7 @@ describe('normalizeScenario —— 字段约束（data_prep_fields）', () => {
   });
 
   it('边界：某目录的字段清单为空 ⇒ 不写入该键（缺失即"无约束"）', () => {
-    expect(normalizeScenario({ ...base, data_prep_fields: { 生产计划: [] } }).data_prep_fields).toEqual(
-      {},
-    );
+    expect(normalizeScenario({ ...base, data_prep_fields: { 生产计划: [] } }).data_prep_fields).toEqual({});
   });
 
   it('异常：整体非对象 / 目录不在清单内 / 清单非数组 / 超过每目录上限', () => {
@@ -185,7 +183,11 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
 
   it('边界：data_prep_fields 非对象 / 场景缺失时给出可读结论且不抛错', () => {
     expect(
-      scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['a', '算法规则'], data_prep_fields: [] as never }),
+      scenarioFieldIssues({
+        scenario: 'x',
+        data_prep_dirs: ['a', '算法规则'],
+        data_prep_fields: [] as never,
+      }),
     ).toEqual(['字段约束（data_prep_fields）须为对象']);
     expect(scenarioFieldIssues(null)).toEqual([]);
   });
@@ -231,10 +233,7 @@ describe('normalizeScenario —— 可上传类型（data_prep_uploads）', () =
 
   it('异常：整体非对象（数组 / 字符串）', () => {
     for (const bad of [[], 'oops', 3]) {
-      expectCode(
-        () => normalizeScenario({ ...base, data_prep_uploads: bad }),
-        ERROR_CODES.VALIDATION_FAILED,
-      );
+      expectCode(() => normalizeScenario({ ...base, data_prep_uploads: bad }), ERROR_CODES.VALIDATION_FAILED);
     }
   });
 
@@ -265,9 +264,7 @@ describe('normalizeScenario —— 可上传类型（data_prep_uploads）', () =
 describe('scenarioUploadIssues —— 部署前校验出口（收集全部问题，不抛错）', () => {
   it('正向：合法配置与缺省（历史文档）均无问题', () => {
     expect(scenarioUploadIssues(base)).toEqual([]);
-    expect(
-      scenarioUploadIssues({ ...base, data_prep_uploads: { 生产计划: ['.csv', '.xlsx'] } }),
-    ).toEqual([]);
+    expect(scenarioUploadIssues({ ...base, data_prep_uploads: { 生产计划: ['.csv', '.xlsx'] } })).toEqual([]);
   });
 
   it('异常：一次性列出全部问题（孤儿键 + 非法项 + 空数组）', () => {
@@ -288,9 +285,9 @@ describe('scenarioUploadIssues —— 部署前校验出口（收集全部问题
   });
 
   it('边界：非对象一条结论；缺省 / null 无问题', () => {
-    expect(
-      scenarioUploadIssues({ ...base, data_prep_uploads: [] as never }),
-    ).toEqual(['可上传文件类型（data_prep_uploads）须为对象']);
+    expect(scenarioUploadIssues({ ...base, data_prep_uploads: [] as never })).toEqual([
+      '可上传文件类型（data_prep_uploads）须为对象',
+    ]);
     expect(scenarioUploadIssues(null)).toEqual([]);
   });
 });

@@ -59,7 +59,11 @@ function ctx(): AppContext {
 function writeSoul(userId: string, agentName: string, frontmatter: string): void {
   const dir = agentDir(root, userId, agentName);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, 'SOUL.md'), `---\n${frontmatter}\n---\n\n## 主要使命\n\n你是助手。\n`, 'utf8');
+  writeFileSync(
+    path.join(dir, 'SOUL.md'),
+    `---\n${frontmatter}\n---\n\n## 主要使命\n\n你是助手。\n`,
+    'utf8',
+  );
   writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
   writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
@@ -136,7 +140,9 @@ describe('GET /api/threads/:id/next-actions', () => {
 
     // 切回来即可见：归属由目录承载，不随选中态改写
     ctx().currentAgent.select('admin', 'demo');
-    expect(((await (await get(thread.threadId)).json()) as { message_id: string | null }).message_id).toBe('m-1');
+    expect(
+      ((await (await get(thread.threadId)).json()) as { message_id: string | null }).message_id,
+    ).toBe('m-1');
   });
 
   it('开关已关但快照仍在 → 仍下发（读取侧不再判开关；门控只在提示词装配期）', async () => {

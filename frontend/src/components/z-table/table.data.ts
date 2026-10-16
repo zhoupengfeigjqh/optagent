@@ -1,27 +1,27 @@
 /** z-table 表格列配置 */
 export interface ColumnsType {
   /** 列别名，用于个性化设置中的显示名称（可选） */
-  alias?: string;
+  alias?: string
   /** 列内容对齐方式，默认 left（可选） */
-  align?: 'center' | 'left' | 'right';
+  align?: 'center' | 'left' | 'right'
   /** 个性化条件格式配置列表，用于按条件设置单元格字体/背景色（可选） */
-  conditions?: any[];
+  conditions?: any[]
   /** 自定义渲染单元格 */
-  customRender?: Function;
+  customRender?: Function
   /** 列字段名，对应数据行中的属性 key */
-  dataIndex: string;
+  dataIndex: string
   /** 禁用搜索 */
-  disabledFilter?: boolean;
+  disabledFilter?: boolean
   /** 列显示顺序，由表格个性化配置同步（可选） */
-  displayOrder?: number;
+  displayOrder?: number
   /** 超出列宽时是否省略显示，默认 true（可选） */
-  ellipsis?: boolean;
+  ellipsis?: boolean
   /**
    * 筛选数据源：远程下拉为请求函数；字典下拉为 dictCode字符串（可选）
    *
    * 与 filterType 为 apiSelect、dictSelect、treeSelect 等配合使用
    */
-  filterApi?: Function | string;
+  filterApi?: Function | string
   /**
    * 列控件类型（可选）
    *
@@ -43,29 +43,29 @@ export interface ColumnsType {
     | 'onlyIn'
     | 'textarea'
     | 'time'
-    | 'treeSelect';
+    | 'treeSelect'
   /** 固定列位置：left 左侧、right 右侧，空字符串表示不固定（可选） */
-  fixed?: '' | 'left' | 'right';
+  fixed?: '' | 'left' | 'right'
   /** 数据格式化方法 formatDateTime:日期格式化，formatPast2毫秒转事件*/
-  formatter?: 'formatDateTime' | 'formatPast2';
+  formatter?: 'formatDateTime' | 'formatPast2'
   /** 是否在表格中隐藏该列，true 为隐藏（可选） */
-  hideCol?: boolean;
+  hideCol?: boolean
   /** 列唯一标识，拖拽排序用；未传时默认取 dataIndex（可选） */
-  key?: string;
+  key?: string
   /** 列宽拖拽时的最大宽度，默认 600（可选） */
-  maxWidth?: number;
+  maxWidth?: number
   /** 列宽拖拽时的最小宽度，默认 80（可选） */
-  minWidth?: number;
+  minWidth?: number
   /** 是否允许拖拽调整列宽，默认 true（可选） */
-  resizable?: boolean;
+  resizable?: boolean
   /** 自定义单元格插槽名，在页面中通过具名插槽渲染列内容（可选） */
-  slot?: string;
+  slot?: string
   /** 远程排序状态：ascend 升序、descend 降序、default 默认（可选，一般由表格内部维护） */
-  sortType?: string;
+  sortType?: string
   /** 列标题（表头显示文字） */
-  title: string;
+  title: string
   /** 列宽度，未设置时默认 120（可选） */
-  width?: number | string;
+  width?: number | string
 }
 
 export const dragColumns = [
@@ -105,7 +105,7 @@ export const dragColumns = [
     width: '20%',
     slot: 'fixed',
   },
-];
+]
 
 export const commonCols: ColumnsType[] = [
   {
@@ -142,7 +142,7 @@ export const commonCols: ColumnsType[] = [
     hideCol: true,
     align: 'left',
   },
-];
+]
 
 export const actionCol: ColumnsType = {
   title: '操作',
@@ -150,7 +150,7 @@ export const actionCol: ColumnsType = {
   slot: 'action',
   align: 'center',
   fixed: 'right',
-};
+}
 export const longActionCol: ColumnsType = {
   title: '操作',
   dataIndex: 'action',
@@ -158,19 +158,19 @@ export const longActionCol: ColumnsType = {
   align: 'center',
   fixed: 'right',
   width: 192,
-};
+}
 
 export const alignOpts = [
   { label: '左对齐', value: 'left' },
   { label: '居中', value: 'center' },
   { label: '右对齐', value: 'right' },
-];
+]
 
 export const fixOpts = [
   { label: '左侧', value: 'left' },
   { label: '不固定', value: '' },
   { label: '右侧', value: 'right' },
-];
+]
 
 export const filterTools = [
   {
@@ -197,7 +197,7 @@ export const filterTools = [
     title: '重置所有',
     key: 'resetAllFilter',
   },
-];
+]
 
 export const cuSettingCols = [
   {
@@ -218,7 +218,7 @@ export const cuSettingCols = [
     ellipsis: true,
     width: 120,
   },
-];
+]
 export const cuColorCols = [
   {
     title: '条件名称',
@@ -244,7 +244,7 @@ export const cuColorCols = [
     key: 'expression',
     width: 300,
   },
-];
+]
 
 export const expOpts = [
   {
@@ -271,7 +271,7 @@ export const expOpts = [
     label: '动态表达式',
     value: 'dynamic',
   },
-];
+]
 
 export const matchOpts = [
   {
@@ -284,7 +284,7 @@ export const matchOpts = [
     value: 'OR',
     help: '任意条件匹配',
   },
-];
+]
 
 const commonFilterTypies = [
   {
@@ -307,7 +307,7 @@ const commonFilterTypies = [
     label: '不为空',
     title: '不为空',
   },
-];
+]
 
 export const textFilterTypies = [
   ...commonFilterTypies,
@@ -331,7 +331,7 @@ export const textFilterTypies = [
     label: '以...结尾',
     title: '以...结尾',
   },
-];
+]
 
 export const inputNumberTypies = [
   ...commonFilterTypies,
@@ -360,7 +360,7 @@ export const inputNumberTypies = [
     label: '小于等于',
     title: '小于等于',
   },
-];
+]
 export const dateTypies = [
   ...commonFilterTypies,
   {
@@ -388,7 +388,7 @@ export const dateTypies = [
     label: '小于等于',
     title: '小于等于',
   },
-];
+]
 export const timeTypies = [
   ...commonFilterTypies,
   {
@@ -416,7 +416,7 @@ export const timeTypies = [
     label: '小于等于',
     title: '小于等于',
   },
-];
+]
 
 export const selectTypies = [
   ...commonFilterTypies,
@@ -430,7 +430,7 @@ export const selectTypies = [
     label: '不包含',
     title: '不包含',
   },
-];
+]
 
 export const onlyInType = [
   {
@@ -438,7 +438,7 @@ export const onlyInType = [
     label: '包含',
     title: '包含',
   },
-];
+]
 
 export const pageSizeOpts = [
   {
@@ -461,22 +461,22 @@ export const pageSizeOpts = [
     label: '500条/页',
     value: 500,
   },
-];
+]
 
 export interface Props {
   /** 是否开启表格边框（可选） */
-  bordered?: boolean;
+  bordered?: boolean
   /** 表头 */
-  columns: any[];
+  columns: any[]
   /** 表格数据源 */
-  dataSource: any[];
+  dataSource: any[]
   /** 初始时，是否展开所有行 */
-  defaultExpandAllRows?: boolean;
+  defaultExpandAllRows?: boolean
   /** 默认排序字段和方式 */
-  defaultSortField?: string;
-  defaultSortOrder?: 'ascend' | 'descend';
+  defaultSortField?: string
+  defaultSortOrder?: 'ascend' | 'descend'
   /** 受控展开行 key 集合（配合 #expandedRowRender 插槽使用，可选） */
-  expandedRowKeys?: (number | string)[];
+  expandedRowKeys?: (number | string)[]
   /**
    * 数据列表获取额外参数配置（可选）
    *
@@ -484,60 +484,60 @@ export interface Props {
    */
   fetchListConfig?: {
     /** 额外参数 */
-    extraParams: object;
+    extraParams: object
     /** 请求方法 */
-    method?: string;
-  };
+    method?: string
+  }
   /** 是否自定义导出（可选） */
-  isCustomExport?: boolean;
+  isCustomExport?: boolean
   /** 是否自定义过滤（可选） */
-  isCustomFilter?: boolean;
+  isCustomFilter?: boolean
   /** 禁用进入就初始化 */
-  isDisabledDefaLoad?: boolean;
+  isDisabledDefaLoad?: boolean
   /** 是否不需要扩展功能 */
-  isNoHeader?: boolean;
+  isNoHeader?: boolean
   /** 是否显示行索引（可选） */
-  isNoRowIndex?: boolean;
+  isNoRowIndex?: boolean
   /** 是否不显示数据全选（可选） */
-  isNoSelectedAll?: boolean;
+  isNoSelectedAll?: boolean
   /** 是否不显示行选择框（可选，默认显示） */
-  isNoSelection?: boolean;
+  isNoSelection?: boolean
   /** 需要行合并的字段集合（可选） */
-  mergeRows?: any[];
+  mergeRows?: any[]
   /** 表格组件编码，通过唯一编码获取及更新该表格的个性化设置 */
-  pageCode: string;
+  pageCode: string
   /** 按行禁用勾选：返回 true 时该行复选框置灰不可选（全选时也会自动跳过这些行） */
-  rowSelectionDisabled?: (record: any) => boolean;
+  rowSelectionDisabled?: (record: any) => boolean
   /** 工具箱配置 */
   toolBox?: {
     /** 按钮权限标识 */
-    accessCode?: string[];
+    accessCode?: string[]
     /** 事件名称（可选） */
-    eventName?: string;
+    eventName?: string
     /** 导出文件名称 */
-    fileName?: string;
+    fileName?: string
     /** 工具箱图标 */
-    icon: any;
+    icon: any
     /** 工具箱标题 */
-    title: string;
+    title: string
     /** 地址 */
-    url?: string;
-  }[];
+    url?: string
+  }[]
   /** 获取数据接口地址 */
-  url: any;
+  url: any
 }
 
 export const transformFilterType = (fieldShowType: string) => {
-  const dictType = ['DictSelect', 'Switch'];
-  const dateType = ['DatePicker'];
-  const dateTimeType = ['DateTimePicker'];
-  const timeType = ['Time'];
-  const numberType = ['InputNumber'];
-  const inputType = ['Input', 'Textarea'];
-  if (dictType.includes(fieldShowType)) return 'dictSelect';
-  if (dateType.includes(fieldShowType)) return 'date';
-  if (dateTimeType.includes(fieldShowType)) return 'dateTime';
-  if (timeType.includes(fieldShowType)) return 'time';
-  if (numberType.includes(fieldShowType)) return 'inputNumber';
-  if (inputType.includes(fieldShowType)) return 'textarea';
-};
+  const dictType = ['DictSelect', 'Switch']
+  const dateType = ['DatePicker']
+  const dateTimeType = ['DateTimePicker']
+  const timeType = ['Time']
+  const numberType = ['InputNumber']
+  const inputType = ['Input', 'Textarea']
+  if (dictType.includes(fieldShowType)) return 'dictSelect'
+  if (dateType.includes(fieldShowType)) return 'date'
+  if (dateTimeType.includes(fieldShowType)) return 'dateTime'
+  if (timeType.includes(fieldShowType)) return 'time'
+  if (numberType.includes(fieldShowType)) return 'inputNumber'
+  if (inputType.includes(fieldShowType)) return 'textarea'
+}

@@ -83,8 +83,7 @@ describe('HintTip —— 展开与收起', () => {
     let clicks = 0
     // 用 render 函数而非模板字符串：运行时渲染模板需要编译器，测试环境只带 runtime
     const Outer = defineComponent({
-      render: () =>
-        h('div', { onClick: () => (clicks += 1) }, [h(HintTip, { text: 'x' })]),
+      render: () => h('div', { onClick: () => (clicks += 1) }, [h(HintTip, { text: 'x' })]),
     })
     const wrapper = mount(Outer)
 

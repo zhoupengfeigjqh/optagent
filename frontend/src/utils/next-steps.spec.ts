@@ -10,11 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStarter } from '../api/types'
 import type { ThreadNextSteps } from '../api/threads'
-import {
-  NEXT_STEPS_GUIDE_TEXT,
-  nextStepSendPayload,
-  visibleActions,
-} from './next-steps'
+import { NEXT_STEPS_GUIDE_TEXT, nextStepSendPayload, visibleActions } from './next-steps'
 
 function action(overrides: Partial<AgentStarter> = {}): AgentStarter {
   return { prompt: '按交付日期梳理这批订单的风险', tools: [], guidance: '', ...overrides }
@@ -43,7 +39,9 @@ describe('visibleActions', () => {
 
 describe('nextStepSendPayload', () => {
   it('正文只有提示词、引用为空、引导原样回传（与问题实例同款）', () => {
-    expect(nextStepSendPayload(action({ guidance: '本轮请优先使用以下工具完成任务：read_file' }))).toEqual({
+    expect(
+      nextStepSendPayload(action({ guidance: '本轮请优先使用以下工具完成任务：read_file' })),
+    ).toEqual({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
       guidance: '本轮请优先使用以下工具完成任务：read_file',

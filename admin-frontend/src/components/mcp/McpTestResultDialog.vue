@@ -77,9 +77,10 @@ defineExpose({ open })
         </p>
 
         <p v-if="result.target" class="mcp-test-dialog__target">
-          实际测试：<code class="mono">{{
-            result.target.transport === 'http' ? 'streamable-http' : 'stdio'
-          }} → {{ result.target.url ?? result.target.command ?? '（未填写地址）' }}</code>
+          实际测试：<code class="mono"
+            >{{ result.target.transport === 'http' ? 'streamable-http' : 'stdio' }} →
+            {{ result.target.url ?? result.target.command ?? '（未填写地址）' }}</code
+          >
         </p>
 
         <dl class="mcp-test-dialog__steps">

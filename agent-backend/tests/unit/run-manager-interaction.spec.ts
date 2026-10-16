@@ -15,7 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HistoryStore } from '../../src/domain/history.js';
 import type { InteractionSink } from '../../src/domain/interaction-gate.js';
-import { RunManager, type RunAgentLike, type SsePayload, type StartRunOptions } from '../../src/domain/run-manager.js';
+import {
+  RunManager,
+  type RunAgentLike,
+  type SsePayload,
+  type StartRunOptions,
+} from '../../src/domain/run-manager.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { AgentRunRequest, LlmEvent } from '../../src/types.js';
 
@@ -88,9 +93,7 @@ describe('run-manager × 交互门', () => {
     run.subscribe((e) => events.push(e));
 
     // 挂起点建立 → interaction_request 事件广播
-    await vi.waitFor(() =>
-      expect(events.some((e) => e.type === 'interaction_request')).toBe(true),
-    );
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'interaction_request')).toBe(true));
     const ev = events.find((e) => e.type === 'interaction_request')!;
     if (ev.type !== 'interaction_request') throw new Error('unreachable');
     expect(ev.data.tool_name).toBe('svc__query');
@@ -123,11 +126,13 @@ describe('run-manager × 交互门', () => {
   it('幂等：重复 submit 返回 already-resolved', async () => {
     const m = manager();
     const run = m.startRun(startOpts(interactionAgent(confirmScript)));
-    const id = vi.waitFor(() => {
-      const s = m.pendingInteractionOf('th_1');
-      expect(s).not.toBeNull();
-      return s!;
-    }).then((s) => s.interaction_id);
+    const id = vi
+      .waitFor(() => {
+        const s = m.pendingInteractionOf('th_1');
+        expect(s).not.toBeNull();
+        return s!;
+      })
+      .then((s) => s.interaction_id);
 
     const interactionId = await id;
     expect(m.resolveInteraction('th_1', interactionId, 'submit', { n: 1 })).toEqual({
@@ -139,25 +144,33 @@ describe('run-manager × 交互门', () => {
       result: 'already-resolved',
     });
     await run.settled;
-    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history
+      .readRecent('admin', AGENT, 'th_1', 10)
+      .filter((x) => x.role === 'assistant')
+      .at(-1);
     expect(assistant?.content).toContain('n=1'); // 首次结果生效
   });
 
   it('reject：工具收到拒绝 outcome，本轮以 done 收尾（模型自行组织话术）', async () => {
     const m = manager();
     const run = m.startRun(startOpts(interactionAgent(confirmScript)));
-    const interactionId = await vi.waitFor(() => {
-      const s = m.pendingInteractionOf('th_1');
-      expect(s).not.toBeNull();
-      return s!;
-    }).then((s) => s.interaction_id);
+    const interactionId = await vi
+      .waitFor(() => {
+        const s = m.pendingInteractionOf('th_1');
+        expect(s).not.toBeNull();
+        return s!;
+      })
+      .then((s) => s.interaction_id);
 
     expect(m.resolveInteraction('th_1', interactionId, 'reject')).toEqual({
       ok: true,
       result: 'settled',
     });
     await run.settled;
-    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history
+      .readRecent('admin', AGENT, 'th_1', 10)
+      .filter((x) => x.role === 'assistant')
+      .at(-1);
     expect(assistant?.content).toContain('调用未执行');
   });
 
@@ -176,7 +189,10 @@ describe('run-manager × 交互门', () => {
 
     expect(m.stop('th_1')).toBe(true);
     await run.settled; // 不超时即证明挂起点已收尾
-    const assistant = history.readRecent('admin', AGENT, 'th_1', 10).filter((x) => x.role === 'assistant').at(-1);
+    const assistant = history
+      .readRecent('admin', AGENT, 'th_1', 10)
+      .filter((x) => x.role === 'assistant')
+      .at(-1);
     expect(assistant?.content).toContain('调用未执行');
   });
 });

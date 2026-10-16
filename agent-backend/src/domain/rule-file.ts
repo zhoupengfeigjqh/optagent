@@ -56,7 +56,8 @@ export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
       // 能蒙混过关。`.xlsx` = zip（PK）、`.xls` = OLE2 复合文档（D0 CF 11 E0 …），
       // 两者都交给 SheetJS 按文件头自判解析器。
       const okZip = buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4b;
-      const okOle2 = buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1;
+      const okOle2 =
+        buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1;
       if (ext === '.xls' ? !okOle2 : !okZip) {
         throw new Error('bad magic');
       }

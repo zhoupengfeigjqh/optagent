@@ -4,15 +4,12 @@
 -->
 <template>
   <div>
- <GanttCompareSection />
+    <GanttCompareSection />
   </div>
 </template>
 
 <script setup lang="ts">
-import GanttCompareSection from './modules/gantt-compare-section.vue';
-
+import GanttCompareSection from './modules/gantt-compare-section.vue'
 </script>
 
-<style lang="scss" scoped>
-
-</style>
+<style lang="scss" scoped></style>

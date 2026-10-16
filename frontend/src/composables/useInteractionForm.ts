@@ -38,8 +38,7 @@ export interface InteractionFormContext {
 }
 
 /** 注入键。定义在此以免多出一份纯常量模块。 */
-export const INTERACTION_FORM_KEY: InjectionKey<InteractionFormContext> =
-  Symbol('interaction-form')
+export const INTERACTION_FORM_KEY: InjectionKey<InteractionFormContext> = Symbol('interaction-form')
 
 /** 非法 JSON 的哨兵（不用 null：`null` 是合法 JSON 值）。 */
 const INVALID_JSON = Symbol('invalid-json')
@@ -196,7 +195,9 @@ export function createInteractionForm(deps: InteractionFormDeps): InteractionFor
     if (target === null) return []
     const value = valueOf(target)
     if (!Array.isArray(value)) return []
-    return value.filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
+    return value.filter(
+      (row): row is Record<string, unknown> => typeof row === 'object' && row !== null,
+    )
   }
 
   function applyRules(rows: Array<Record<string, unknown>>): string {
@@ -297,4 +298,3 @@ function cloneJson(value: unknown): Record<string, unknown> {
     ? (cloned as Record<string, unknown>)
     : {}
 }
-

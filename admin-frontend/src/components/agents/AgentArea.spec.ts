@@ -41,7 +41,10 @@ function emptyPage(): Paged<AgentListItem> {
 }
 
 async function openCreateDialog(wrapper: ReturnType<typeof mount>) {
-  await wrapper.findAll('button').find((b) => b.text() === '新建数字人')?.trigger('click')
+  await wrapper
+    .findAll('button')
+    .find((b) => b.text() === '新建数字人')
+    ?.trigger('click')
   await flushPromises()
 }
 

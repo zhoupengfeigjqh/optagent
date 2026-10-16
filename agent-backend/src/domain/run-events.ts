@@ -6,6 +6,7 @@
  * `run-manager.ts` 仍会 re-export 本模块的导出，既有引用路径不变。
  */
 import type { InteractionRequestPayload } from './interaction-gate.js';
+import type { HistoryErrorInfo } from '../types.js';
 
 export type RunState = 'running' | 'draining' | 'done' | 'aborted' | 'error';
 
@@ -46,7 +47,12 @@ export type SsePayload =
           message_id: string;
           actions: Array<{
             prompt: string;
-            tools: Array<{ kind: 'builtin' | 'mcp'; name: string; service?: string; exposed_name: string }>;
+            tools: Array<{
+              kind: 'builtin' | 'mcp';
+              name: string;
+              service?: string;
+              exposed_name: string;
+            }>;
             guidance: string;
           }>;
         };
@@ -55,7 +61,12 @@ export type SsePayload =
   | {
       type: 'error';
       data: {
-        error: { code: string; message: string };
+        /**
+         * 失败原因；2026-10-15 起 `error` 可带三个**可选**诊断字段
+         * （`upstream_status` / `upstream_type` / `request_id`，见 §19.3），
+         * 与失败轮落盘行**同形**（同一个 `classifyLlmFailure()` 的产物）。
+         */
+        error: HistoryErrorInfo;
         duration_seconds?: number;
         usage?: { input_tokens: number; output_tokens: number };
         /** 本轮回答的数字人（009 起会话归属固定；逐条标注保留以兼容存量数据） */

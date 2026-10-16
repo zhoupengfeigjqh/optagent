@@ -169,7 +169,8 @@ export class McpManager {
   private readonly timeoutMs: number;
   private readonly logger: { warn(msg: string): void } | undefined;
   private readonly createClient: (cfg: McpServerConfig) => Promise<McpClientLike>;
-  private readonly onStatusChange: ((server: string, status: McpConnectionStatus) => void) | undefined;
+  private readonly onStatusChange:
+    ((server: string, status: McpConnectionStatus) => void) | undefined;
 
   constructor(opts: McpManagerOptions) {
     this.timeoutMs = opts.timeoutMs;
@@ -390,7 +391,9 @@ export class McpManager {
         return await this.withTimeout(client.callTool(tool, args));
       } catch (err) {
         lastErr = err;
-        this.logger?.warn(`MCP 调用失败（${server}/${tool}，第 ${attempt + 1} 次）：${String(err)}`);
+        this.logger?.warn(
+          `MCP 调用失败（${server}/${tool}，第 ${attempt + 1} 次）：${String(err)}`,
+        );
       }
     }
     // 两次均失败：连接级错误顺势降级（见 degradeOnTransportFailure）
@@ -430,7 +433,10 @@ export class McpManager {
 
   private withTimeout<T>(p: Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`MCP 调用超时（${this.timeoutMs}ms）`)), this.timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error(`MCP 调用超时（${this.timeoutMs}ms）`)),
+        this.timeoutMs,
+      );
       p.then(
         (v) => {
           clearTimeout(timer);

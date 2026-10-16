@@ -73,6 +73,17 @@ export interface McpServiceDetailView extends McpServiceView {
   /** 只含白名单里的工具（不限制时即服务全量），顺序与白名单一致 */
   tools: McpToolDescriptor[];
   tools_truncated: boolean;
+  /**
+   * **本次探测到的全部工具**（2026-10-15；顺序 = 服务返回顺序，有界同 `TOOLS_LIMIT`）。
+   *
+   * 供「工具范围」弹窗勾选：`tools` 是**白名单投影**，拿它当勾选基准的话，管理员
+   * 永远加不进一个当前不在白名单里的工具——而那正是"动态增减"要解决的问题。
+   * 与 `tools` 的关系：探测成功时 `tools ⊆ available_tools`。
+   *
+   * 不含任何凭据：这里只有工具名/说明/入参，连接信息与请求头仍只在配置字段里。
+   */
+  available_tools: McpToolDescriptor[];
+  available_tools_truncated: boolean;
   tools_error: string | null;
   references: Array<{ user_id: string; agent_name: string }>;
   revision: number;
@@ -115,8 +126,7 @@ export class McpServiceListService {
       : tools;
     // 缺失核对只在探测成功时做：探测失败 = 核对不了（由 `tools_error` 表达），
     // 此时 MUST NOT 把白名单里的工具全判成"不存在"——那是误报
-    const missing =
-      scoped && error === null ? allowed.filter((n) => !tools.some((t) => t.name === n)) : [];
+    const missing = scoped && error === null ? allowed.filter((n) => !tools.some((t) => t.name === n)) : [];
     return {
       ...toView(config),
       command: config.command,
@@ -133,6 +143,10 @@ export class McpServiceListService {
       // 先按白名单过滤、后截断：反过来的话，白名单里排在截断线之后的工具会被误判成"不存在"
       tools: visible.slice(0, TOOLS_LIMIT),
       tools_truncated: visible.length > TOOLS_LIMIT,
+      // 全量候选（2026-10-15）：工具范围弹窗的勾选基准，同样有界返回（`FR-006`）。
+      // 探测失败时为空数组——此时由 `tools_error` 说明"核对不了"，界面据此**不开**弹窗
+      available_tools: tools.slice(0, TOOLS_LIMIT),
+      available_tools_truncated: tools.length > TOOLS_LIMIT,
       tools_error: error,
       references: this.deps.referencesOf(name),
       revision: this.deps.currentRevision(),

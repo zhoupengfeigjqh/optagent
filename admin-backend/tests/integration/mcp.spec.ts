@@ -292,7 +292,10 @@ describe('DELETE /api/admin/mcp/services/{name}', () => {
     await fx.app.inject({ method: 'DELETE', url: '/api/admin/mcp/services/ocr' });
 
     const anomalies = await fx.app.inject({ method: 'GET', url: '/api/admin/anomalies' });
-    expect(anomalies.json().items[0]).toMatchObject({ category: 'mcp_service', target_name: 'ocr' });
+    expect(anomalies.json().items[0]).toMatchObject({
+      category: 'mcp_service',
+      target_name: 'ocr',
+    });
   });
 
   it('不存在 → 404 ADM_MCP_SERVICE_NOT_FOUND', async () => {
@@ -376,7 +379,15 @@ describe('GET /api/admin/mcp/stats', () => {
   it('可用时返回服务级汇总与分组行（FR-049）', async () => {
     fx.runtime.stats = {
       stats_available: true,
-      items: [{ name: 'ocr', calls_total: 3, calls_ok: 3, calls_failed: 0, last_called_at: '2026-09-15T06:00:00Z' }],
+      items: [
+        {
+          name: 'ocr',
+          calls_total: 3,
+          calls_ok: 3,
+          calls_failed: 0,
+          last_called_at: '2026-09-15T06:00:00Z',
+        },
+      ],
       groups: [
         {
           service: 'ocr',

@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Prettier 忽略清单（与 admin-frontend/eslint.config.mjs 的 ignores 同口径）
+#
+# 背景：本包此前**没有** .prettierrc / .prettierignore，prettier 只能落回默认值
+# （双引号 + 分号 + 80 列），与既有风格（单引号 + 无分号）正好相反；于是
+# `npm run format:check` 对全部源码必然报错（门禁形同虚设），而 `npm run format`
+# 一旦被误跑，就会把全仓刷成相反风格却**不报任何错**——eslint.config.mjs 里挂的是
+# eslint-config-prettier，它把所有与格式冲突的规则都关掉了（与 frontend 同一成因）。
+#
+# .prettierrc.json 的取值不是照抄官方默认，而是**反推既有风格**得到：
+# 以 --single-quote --no-semi --end-of-line auto 扫 printWidth 80/90/100/110/120，
+# 不一致文件数为 134 / 118 / 81 / 88 / 97，100 处最小 ⇒ 取 100；endOfLine 取 auto
+# 以保留每个文件既有行尾，避免一次全仓 CRLF/LF 翻转。
+#
+# 本文件只忽略"不是本仓库手写源码"的东西：构建产物、覆盖率报告、锁文件与日志；
+# `src/`、`scripts/` 与根级配置（含 `index.html`）一律纳入检查。
+# ---------------------------------------------------------------------------
+
+# 构建产物与覆盖率产物（vitest 可另指定 coverage-* / .coverage-* 目录）
+dist/
+coverage/
+coverage-*/
+.coverage-*/
+
+# 锁文件不由本仓库维护格式
+package-lock.json
+
+# 门禁/运行日志产物（生成物，不入库）
+*.log

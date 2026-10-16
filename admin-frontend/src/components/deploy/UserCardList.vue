@@ -219,7 +219,9 @@ async function confirmWithdraw(): Promise<void> {
             </label>
           </p>
 
-          <p v-if="(item as UserListItem).agents.length === 0" class="card__meta">未关联任何数字人</p>
+          <p v-if="(item as UserListItem).agents.length === 0" class="card__meta">
+            未关联任何数字人
+          </p>
           <details v-else class="user-card-list__details">
             <summary>
               已关联 {{ (item as UserListItem).agents.length }} 个数字人
@@ -247,10 +249,10 @@ async function confirmWithdraw(): Promise<void> {
               aria-label="搭配摘要"
             >
               <li v-for="entry in (item as UserListItem).summary ?? []" :key="entry.name">
-                <span class="mono">{{ entry.name }}</span>：
-                MCP {{ entry.mcp_services.join('、') || '无' }}；
-                工具 {{ entry.enabled_tools.join('、') || '无' }}；
-                SKILL {{ entry.skills.join('、') || '无' }}
+                <span class="mono">{{ entry.name }}</span
+                >： MCP {{ entry.mcp_services.join('、') || '无' }}； 工具
+                {{ entry.enabled_tools.join('、') || '无' }}； SKILL
+                {{ entry.skills.join('、') || '无' }}
               </li>
             </ul>
           </details>
@@ -266,7 +268,9 @@ async function confirmWithdraw(): Promise<void> {
             >
               撤回
             </button>
-            <button type="button" class="btn" @click="openEdit(item as UserListItem)">编辑关联</button>
+            <button type="button" class="btn" @click="openEdit(item as UserListItem)">
+              编辑关联
+            </button>
             <button type="button" class="btn" @click="pendingDelete = item as UserListItem">
               删除
             </button>
@@ -281,7 +285,11 @@ async function confirmWithdraw(): Promise<void> {
       message="仅删除平台侧的用户记录，不会删除运行环境中该用户的数据目录（文件空间内容一律保留）。"
       confirm-label="删除"
       danger
-      @update:open="(value) => { if (!value) pendingDelete = null }"
+      @update:open="
+        (value) => {
+          if (!value) pendingDelete = null
+        }
+      "
       @confirm="confirmDelete"
     />
 
@@ -293,7 +301,11 @@ async function confirmWithdraw(): Promise<void> {
       :message="`将清空用户「${pendingWithdraw?.user_id ?? ''}」在运行环境中的数字人目录，这些数字人随即失去能力；平台侧的关联与该用户的文件空间一律保留，需要时重新部署即可恢复。`"
       confirm-label="撤回"
       danger
-      @update:open="(value) => { if (!value) pendingWithdraw = null }"
+      @update:open="
+        (value) => {
+          if (!value) pendingWithdraw = null
+        }
+      "
       @confirm="confirmWithdraw"
     />
   </div>

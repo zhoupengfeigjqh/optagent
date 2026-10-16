@@ -26,7 +26,12 @@ const emit = defineEmits<{
 
 const buttons = ref<Array<HTMLButtonElement | null>>([])
 
-const activeIndex = computed(() => Math.max(0, props.tabs.findIndex((t) => t.id === props.modelValue)))
+const activeIndex = computed(() =>
+  Math.max(
+    0,
+    props.tabs.findIndex((t) => t.id === props.modelValue),
+  ),
+)
 
 function select(index: number): void {
   const tab = props.tabs[index]

@@ -70,9 +70,7 @@ export class AgentPool {
     if (this.map.size >= this.maxSize) {
       const evicted = this.lruEvictOne();
       if (!evicted) {
-        throw new PoolExhaustedError(
-          `实例池已满（${this.maxSize}）且无空闲实例可淘汰，请稍后再试`,
-        );
+        throw new PoolExhaustedError(`实例池已满（${this.maxSize}）且无空闲实例可淘汰，请稍后再试`);
       }
     }
     instance.lastActiveAt = this.now();

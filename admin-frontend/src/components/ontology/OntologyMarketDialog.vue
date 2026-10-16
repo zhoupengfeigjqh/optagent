@@ -190,11 +190,16 @@ onBeforeUnmount(() => {
             <span class="ontology-market__main">
               <span class="mono">{{ item.name ?? item.ontology_dir }}</span>
               <span class="ontology-market__desc">
-                {{ item.metadata?.deployed_version ? `版本 ${item.metadata.deployed_version} · ` : ''
+                {{
+                  item.metadata?.deployed_version
+                    ? `版本 ${item.metadata.deployed_version} · `
+                    : ''
                 }}{{ item.metadata?.created_at ?? '' }}
                 <template v-if="item.has_securities"> · 含安全管控</template>
               </span>
-              <span class="ontology-market__path">{{ item.scenario }} / {{ item.ontology_dir }}</span>
+              <span class="ontology-market__path"
+                >{{ item.scenario }} / {{ item.ontology_dir }}</span
+              >
             </span>
             <span class="ontology-market__status" :data-status="item.status">{{
               statusText(item)
@@ -212,13 +217,7 @@ onBeforeUnmount(() => {
         <button type="button" class="btn" :disabled="loading || busy" @click="void load()">
           刷新
         </button>
-        <button
-          type="button"
-          class="btn"
-          data-test="close"
-          :disabled="busy"
-          @click="requestClose"
-        >
+        <button type="button" class="btn" data-test="close" :disabled="busy" @click="requestClose">
           关闭
         </button>
         <button
@@ -228,13 +227,7 @@ onBeforeUnmount(() => {
           :disabled="selected === null || busy"
           @click="proceed"
         >
-          {{
-            busy
-              ? '处理中…'
-              : selected?.status === 'changed'
-                ? '更新选中本体'
-                : '导入选中本体'
-          }}
+          {{ busy ? '处理中…' : selected?.status === 'changed' ? '更新选中本体' : '导入选中本体' }}
         </button>
       </div>
     </div>

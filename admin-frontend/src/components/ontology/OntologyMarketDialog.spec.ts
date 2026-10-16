@@ -84,7 +84,10 @@ describe('OntologyMarketDialog —— 扫描与状态', () => {
 
   it('changed 可选且主按钮变「更新选中本体」；unchanged 不可选', async () => {
     fetchOntoMarketOntologies.mockResolvedValue(
-      listing([item({ status: 'changed' }), item({ ontology_dir: '订单排程', status: 'unchanged' })]),
+      listing([
+        item({ status: 'changed' }),
+        item({ ontology_dir: '订单排程', status: 'unchanged' }),
+      ]),
     )
     const wrapper = mountDialog()
     await flushPromises()

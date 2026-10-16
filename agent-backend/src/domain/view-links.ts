@@ -6,6 +6,10 @@
  * 「回答正文之后」渲染成可点入口。为什么这么做、而不是让模型在正文里转写，
  * 见 `specs/002-conversation-runtime/spec.md` §4.8（`TR-44`~`TR-48`）。
  *
+ * 2026-10-15 扩展：同层配对的 `filePath` / `filePathName`（**本地文件空间相对路径**）
+ * 按同一规则收起，条目带 `kind: 'file'` 区分（外部地址缺省 = `'url'`）。平台依旧
+ * **只搬运、不生成**——相对路径转 `/api/files/preview?…` 是前端的职责（同"拼前缀"）。
+ *
  * 边界（都是刻意的，改之前先读完）：
  * - **只搬运，不生成**：不拼前缀（前缀 = 用户当前访问入口，只有浏览器知道，
  *   见前端 `frontend/src/utils/view-link.ts`）、不改写值、不补名称。名称是服务给的，
@@ -24,15 +28,22 @@
 export const VIEW_URL_FIELD = 'viewUrl';
 /** 视图名称字段名（可选；MUST 与它命名的 `viewUrl` 同层）。 */
 export const VIEW_URL_NAME_FIELD = 'viewUrlName';
+/** 本地文件空间相对路径字段名（可选；`2026-10-15` 起，判定与名称配对同口径）。 */
+export const FILE_PATH_FIELD = 'filePath';
+/** 本地文件显示名字段名（可选；MUST 与它命名的 `filePath` 同层）。 */
+export const FILE_PATH_NAME_FIELD = 'filePathName';
 
 /**
  * 单条记录的视图链接：
- * - `url` 是服务给的**原值**（未拼前缀、未归一化）
+ * - `url` 是服务给的**原值**（未拼前缀、未归一化）：外部地址；`kind: 'file'` 时是空间相对路径
  * - `name` 缺省 = 服务没给名字（不是 `''` / `null` —— 少一种状态就少一类误判）
+ * - `kind` 缺省 = `'url'`（外部地址，**兼容存量 `view_links`**）；`'file'` = 本地文件空间相对路径
+ *   （前端据此把相对路径转成 `/api/files/preview?…` 再走同一条入口行）
  */
 export interface ViewLink {
   url: string;
   name?: string;
+  kind?: 'url' | 'file';
 }
 
 /**
@@ -62,8 +73,9 @@ export const VIEW_LINK_MAX_DEPTH = 8;
  * 判据与顺序（确定性）：
  * 1. 文本超 `VIEW_LINK_PARSE_MAX_CHARS` → 不解析，返回 `undefined`；
  * 2. 不是合法 JSON、或不是对象/数组 → `undefined`；
- * 3. 深度 ≤ `VIEW_LINK_MAX_DEPTH` 递归；某层键名命中 `viewUrl` 且值是字符串 → 收起一条，
- *    并在**同一对象内**找 `viewUrlName` 配对（跨层配不上 → 视同没给名字）；
+ * 3. 深度 ≤ `VIEW_LINK_MAX_DEPTH` 递归；某层键名命中 `viewUrl`（或 `filePath`）且值是字符串
+ *    → 收起一条（`filePath` 条目带 `kind: 'file'`），并在**同一对象内**找同名后缀字段
+ *    （`viewUrlName` / `filePathName`）配对（跨层配不上 → 视同没给名字）；
  * 4. 形态卫生：地址 trim 后非空、≤ `VIEW_URL_MAX_CHARS`、无控制字符或反斜杠；
  *    名称同规则（超长/含控制字符 → **丢掉名字、保留地址**，不因名字脏而丢地址）；
  * 5. **按地址原值去重**（首次出现者胜）；同一地址重复出现时**名称取首个非空值**
@@ -89,7 +101,7 @@ export function extractViewLinks(resultText: string): ViewLink[] | undefined {
   walk(parsed, 0, collected);
   return collected.size > 0 ? [...collected.values()] : undefined;
 
-  /** 深度优先遍历；命中地址即收起，命中名称字段由 `collect` 在同层配对时消费 */
+  /** 深度优先遍历；命中地址/路径即收起，命中名称字段由 `collect` 在同层配对时消费 */
   function walk(node: unknown, depth: number, out: Map<string, ViewLink>): void {
     if (depth > VIEW_LINK_MAX_DEPTH) return;
 
@@ -101,40 +113,54 @@ export function extractViewLinks(resultText: string): ViewLink[] | undefined {
 
     for (const [key, value] of Object.entries(node)) {
       if (fieldMatches(key, VIEW_URL_FIELD)) {
-        collect(value, node, out);
+        collect(value, node, out, VIEW_URL_NAME_FIELD, 'url');
+        continue;
+      }
+      if (fieldMatches(key, FILE_PATH_FIELD)) {
+        collect(value, node, out, FILE_PATH_NAME_FIELD, 'file');
         continue;
       }
       walk(value, depth + 1, out);
     }
   }
 
-  /** 同层配对：地址在外层已确认命中，名称在**同一个对象**里找 */
+  /**
+   * 同层配对：值在外层已确认命中，名称在**同一个对象**里按 `nameField` 找。
+   *
+   * 去重键 = `kind` + 原值：外部地址与文件路径各按自己的命名空间去重，
+   * 避免两处恰好同值被误并成一条。
+   */
   function collect(
-    urlValue: unknown,
+    rawValue: unknown,
     sibling: Record<string, unknown>,
     out: Map<string, ViewLink>,
+    nameField: string,
+    kind: 'url' | 'file',
   ): void {
-    const url = sanitizeString(urlValue, VIEW_URL_MAX_CHARS);
+    const url = sanitizeString(rawValue, VIEW_URL_MAX_CHARS);
     if (url === undefined) return;
 
-    const existing = out.get(url);
-    const name = nameOf(sibling);
+    const key = `${kind}\u0000${url}`;
+    const existing = out.get(key);
+    const name = nameOf(sibling, nameField);
 
     if (existing) {
-      // 同名地址再次出现：只补名字，不重复收
+      // 同地址再次出现：只补名字，不重复收
       if (existing.name === undefined && name !== undefined) existing.name = name;
       return;
     }
     if (out.size >= VIEW_LINK_MAX_ITEMS) return;
 
-    out.set(url, name === undefined ? { url } : { url, name });
+    // `kind: 'url'` 是缺省态：不写字段，保持存量记录的形状不变
+    const entry: ViewLink = kind === 'file' ? { url, kind } : { url };
+    out.set(key, name === undefined ? entry : { ...entry, name });
   }
 }
 
 /** 同一个对象里找配对的名称（大小写不敏感；形态不合格 = 视同没给）。 */
-function nameOf(sibling: Record<string, unknown>): string | undefined {
+function nameOf(sibling: Record<string, unknown>, nameField: string): string | undefined {
   for (const [key, value] of Object.entries(sibling)) {
-    if (!fieldMatches(key, VIEW_URL_NAME_FIELD)) continue;
+    if (!fieldMatches(key, nameField)) continue;
     return sanitizeString(value, VIEW_URL_NAME_MAX_CHARS);
   }
   return undefined;

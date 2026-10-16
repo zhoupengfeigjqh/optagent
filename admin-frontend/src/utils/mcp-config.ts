@@ -9,6 +9,7 @@
  * 与 `file_args` / `rules_fields` 等形状校验只有服务端能判定。
  */
 import { MCP_NAME_HINT, MCP_URL_HINT } from '../constants/mcp'
+import type { McpServiceConfigInput, McpServiceDetail } from '../api/types'
 
 /** 服务名判据（与后端 `isValidMcpServiceName` 同口径；它同时是运行环境的工具前缀） */
 export function isValidMcpServiceName(name: string): boolean {
@@ -68,7 +69,9 @@ function hasControlChars(value: string): boolean {
  * 空串 → `{}`（= 不带请求头）。**掩码值直接拒绝**：界面回显的是 `6UuE…F3Z`
  * 这类掩码，原样提交等于把令牌换成掩码（静默 401，几乎无法自查）。
  */
-export function parseHeaders(text: string): { headers: Record<string, string>; error?: undefined } | { headers?: undefined; error: string } {
+export function parseHeaders(
+  text: string,
+): { headers: Record<string, string>; error?: undefined } | { headers?: undefined; error: string } {
   const raw = (text ?? '').trim()
   if (raw === '') return { headers: {} }
 
@@ -93,7 +96,8 @@ export function parseHeaders(text: string): { headers: Record<string, string>; e
     seen.add(name.toLowerCase())
     if (typeof rawValue !== 'string') return { error: `请求头 ${name} 的值必须是字符串` }
     const value = rawValue.trim()
-    if (value === '') return { error: `请求头 ${name} 的值不能为空；如需清空请用「清空全部请求头」` }
+    if (value === '')
+      return { error: `请求头 ${name} 的值不能为空；如需清空请用「清空全部请求头」` }
     if (value.includes('…') || value.includes('•')) {
       return { error: `请求头 ${name} 的值像是界面上显示的掩码，请填真实值` }
     }
@@ -106,4 +110,36 @@ export function parseHeaders(text: string): { headers: Record<string, string>; e
 /** `headers` → 编辑框内容（空对象 → 空串；用于"编辑"态的初始值） */
 export function formatHeaders(headers?: Record<string, string>): string {
   return headers && Object.keys(headers).length > 0 ? JSON.stringify(headers, null, 2) : ''
+}
+
+/**
+ * 由服务详情重放一份**完整的**调用配置载荷（2026-10-15，工具范围弹窗用）。
+ *
+ * 为什么是"重放"而不是"只发白名单"：`PUT` 的语义是**全量替换**——后端 `normalize()`
+ * 会把缺省字段补成默认值，只发 `allowed_tools` 会把 `description`/`file_args`/
+ * `rules_fields`/`async_tools`/`confirmation` 一并清空。详情页表单也是同一口径
+ * （它提交整份表单），这里把"当前值"原样带上，只改 `allowed_tools`。
+ *
+ * **刻意不带 `headers`**：详情里回的是**掩码**，带回去等于把真令牌换成掩码
+ * （与 `parseHeaders` 拒绝掩码值同一个理由）。缺省即服务端沿用存量。
+ *
+ * 并发安全由 `revision` 乐观锁兜底：详情到手后若他处改过配置，保存会得到
+ * `ADM_CONFIG_REVISION_CONFLICT`，MUST NOT 静默覆盖。
+ */
+export function buildToolScopePayload(
+  service: McpServiceDetail,
+  allowedTools: string[],
+): McpServiceConfigInput {
+  return {
+    description: service.description,
+    transport: service.transport,
+    url: service.url ?? undefined,
+    command: service.command ?? undefined,
+    args: service.args ?? undefined,
+    file_args: service.file_args,
+    confirmation: service.confirmation,
+    rules_fields: service.rules_fields,
+    async_tools: service.async_tools,
+    allowed_tools: [...allowedTools],
+  }
 }

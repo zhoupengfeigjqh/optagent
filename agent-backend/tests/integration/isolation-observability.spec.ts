@@ -142,43 +142,45 @@ describe('越界目录拒绝：结构化日志含用户/数字人/请求线索�
 
 describe('数字人数据目录不可用：可读错误且**零回退**（FR-051，T046）', () => {
   it('空间路径被占成文件 → 写入失败返回错误，且**不**在用户级落任何东西', async () => {
-    writeAgent('坏目录数字人')
-    expect((await select('坏目录数字人')).statusCode).toBe(200)
+    writeAgent('坏目录数字人');
+    expect((await select('坏目录数字人')).statusCode).toBe(200);
 
     // 把该数字人的「共享空间」做成一个**文件**（模拟"数字人目录不可写/不可用"）：
     // Windows 下无法用 chmod 可靠模拟不可写，用"路径被占"即可触发同一条失败路径
-    const spacePath = path.join(userDataDir(root, USER, '坏目录数字人'), SPACE_SHARED)
-    await removeDirRecursiveAsync(spacePath)
-    writeFileSync(spacePath, 'not a dir', 'utf8')
+    const spacePath = path.join(userDataDir(root, USER, '坏目录数字人'), SPACE_SHARED);
+    await removeDirRecursiveAsync(spacePath);
+    writeFileSync(spacePath, 'not a dir', 'utf8');
 
-    const boundary = '----vitest-unwritable'
+    const boundary = '----vitest-unwritable';
     const body = Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="dir"\r\n\r\n${SPACE_SHARED}\r\n`),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="dir"\r\n\r\n${SPACE_SHARED}\r\n`,
+      ),
       Buffer.from(
         `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="probe.csv"\r\nContent-Type: text/csv\r\n\r\n`,
       ),
       Buffer.from('x', 'utf8'),
       Buffer.from(`\r\n--${boundary}--\r\n`),
-    ])
+    ]);
     const res = await app.inject({
       method: 'POST',
       url: '/api/files/upload',
       payload: body,
       headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
-    })
+    });
 
     // 可读错误：既不静默成功，也不假装"上传好了"
-    expect(res.statusCode).toBeGreaterThanOrEqual(400)
-    expect((res.json() as { error: { code: string } }).error.code).toBeTruthy()
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBeTruthy();
 
     // **零回退**：用户级绝不能出现同名空间（否则隔离看起来正常、实际失效）
-    expect(existsSync(path.join(root, 'users', USER, 'user-data', SPACE_SHARED))).toBe(false)
+    expect(existsSync(path.join(root, 'users', USER, 'user-data', SPACE_SHARED))).toBe(false);
 
     // 收尾：恢复成目录，避免影响后续用例
-    await removeFileSafeAsync(spacePath)
-    expect((await select(AGENT)).statusCode).toBe(200)
-  })
-})
+    await removeFileSafeAsync(spacePath);
+    expect((await select(AGENT)).statusCode).toBe(200);
+  });
+});
 
 describe('降级：陈旧数字人被拒的原因可观测、响应可读（FR-032/051/052）', () => {
   it('已移除的数字人 → 409 可读文案 + agent.scope.unavailable 带 reason', async () => {

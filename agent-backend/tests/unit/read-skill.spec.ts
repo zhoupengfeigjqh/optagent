@@ -57,7 +57,9 @@ describe('readSkillFile —— 正常读取', () => {
 
   it('可读 references/ 等附件（中文文件名与子目录）', () => {
     expect(readSkillFile(skillsRoot, '调度算法', 'references/算法详解.md').text).toContain('内容A');
-    expect(readSkillFile(skillsRoot, '调度算法', 'references/选型决策树.md').text).toContain('决策树');
+    expect(readSkillFile(skillsRoot, '调度算法', 'references/选型决策树.md').text).toContain(
+      '决策树',
+    );
   });
 
   it('技能名两侧空白被容错（模型常带空格）', () => {
@@ -71,7 +73,9 @@ describe('readSkillFile —— 正常读取', () => {
   });
 
   it('反斜杠按分隔符归一（模型可能用 Windows 写法）', () => {
-    expect(readSkillFile(skillsRoot, '调度算法', 'references\\算法详解.md').text).toContain('内容A');
+    expect(readSkillFile(skillsRoot, '调度算法', 'references\\算法详解.md').text).toContain(
+      '内容A',
+    );
   });
 
   it('内容过大时截断，并可按 offset 续读', () => {

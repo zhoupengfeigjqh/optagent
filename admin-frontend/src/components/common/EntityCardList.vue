@@ -62,7 +62,9 @@ function go(target: number): void {
     <header class="card-list__header">
       <h2 class="card-list__title">{{ title }}</h2>
       <p class="card-list__summary" aria-live="polite">
-        共 {{ total }} 项<template v-if="totalPages > 0">，第 {{ page }} / {{ totalPages }} 页</template>
+        共 {{ total }} 项<template v-if="totalPages > 0"
+          >，第 {{ page }} / {{ totalPages }} 页</template
+        >
       </p>
     </header>
 
@@ -70,11 +72,7 @@ function go(target: number): void {
 
     <ErrorNotice v-else-if="error" :error="error" :title="`${title}加载失败`" />
 
-    <EmptyState
-      v-else-if="items.length === 0"
-      :title="emptyTitle"
-      :description="emptyDescription"
-    >
+    <EmptyState v-else-if="items.length === 0" :title="emptyTitle" :description="emptyDescription">
       <slot name="empty" />
     </EmptyState>
 
@@ -94,7 +92,9 @@ function go(target: number): void {
       >
         上一页
       </button>
-      <span class="card-list__page-indicator" aria-live="polite">第 {{ page }} / {{ totalPages }} 页</span>
+      <span class="card-list__page-indicator" aria-live="polite"
+        >第 {{ page }} / {{ totalPages }} 页</span
+      >
       <button
         type="button"
         class="btn"

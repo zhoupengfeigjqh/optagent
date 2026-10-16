@@ -97,7 +97,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // ---- wiring：routes → domain → infra ----
   const usageDb = new UsageDb(path.join(root, 'usage.db'), loggers.logger);
   const history = new HistoryStore(root, {
-    warn: (msg) => loggers.logger.warn({ alert: true, event: 'history.recover', scope: 'system' }, msg),
+    warn: (msg) =>
+      loggers.logger.warn({ alert: true, event: 'history.recover', scope: 'system' }, msg),
   });
   const threadStore = new ThreadStore(root, history);
   // 工具调用记录（002 特性）：元数据常驻会话目录，超阈值的结果正文外置到临时空间。
@@ -126,12 +127,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   // LlmProvider 惰性单例：测试注入 fake 时不触碰 pi-ai/真 key
   let llmInstance: LlmProvider | undefined = options.llmProvider;
-  const llm = () => (llmInstance ??= new PiAiLlmProvider(config.defaultModel));
+  const llm = () => (llmInstance ??= new PiAiLlmProvider(config.defaultModel, config.llmRetry));
 
   const summary = new SummaryStore(root, history, {
     llm,
     logger: {
-      warn: (msg: string) => loggers.logger.warn({ alert: true, event: 'summary.failed', scope: 'system' }, msg),
+      warn: (msg: string) =>
+        loggers.logger.warn({ alert: true, event: 'summary.failed', scope: 'system' }, msg),
     },
   });
 
@@ -142,6 +144,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.llmProvider ? { providerFor: () => options.llmProvider! } : {}),
     logger: loggers.logger,
     mcpTimeoutMs: config.mcpTimeoutMs,
+    // 2026-10-15：请求级模型覆盖的临时 provider 用同一份重试口径（与默认模型单例同源）
+    llmRetry: config.llmRetry,
     truncateKb: config.readTruncateKb,
     publicBaseUrl: config.publicBaseUrl,
     fileSignSecret: config.fileSignSecret,
@@ -154,7 +158,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   // 后台调度（T040）：每小时清理 tmp/ 下 30 天未访问的临时产出
   const scheduler = new IntervalScheduler({
-    warn: (msg) => loggers.logger.warn({ alert: true, event: 'scheduler.task.failed', scope: 'system' }, msg),
+    warn: (msg) =>
+      loggers.logger.warn({ alert: true, event: 'scheduler.task.failed', scope: 'system' }, msg),
   });
   scheduler.every(
     60 * 60 * 1000,
@@ -168,7 +173,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
         {
           logger: {
             warn: (msg) =>
-              loggers.logger.warn({ alert: true, event: 'tmp.cleanup.failed', scope: 'system' }, msg),
+              loggers.logger.warn(
+                { alert: true, event: 'tmp.cleanup.failed', scope: 'system' },
+                msg,
+              ),
             info: (msg) => loggers.logger.info({ event: 'tmp.cleanup', scope: 'system' }, msg),
           },
         },
@@ -257,6 +265,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     nextActions,
     // 007 修订：开关与条数逐次现读（SOUL.md frontmatter）；开启时条数上限同时驱动
     // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
+    // 2026-10-15：LLM 失败日志要有"哪个 provider / 哪个模型"（请求级覆盖由 run.modelId 提供）
+    llmInfo: () => ({ provider: 'deepseek', model: config.defaultModel.model }),
     nextActionsConfig: (userId, agentName) => {
       if (!isNextActionsEnabled(root, userId, agentName, nextActionsWarn)) return null;
       return { enabled: true, max: nextActionHintsCount(root, userId, agentName, nextActionsWarn) };
@@ -348,7 +358,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof ApiError) {
       return reply.status(err.statusCode).send({
-        error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
+        error: {
+          code: err.code,
+          message: err.message,
+          ...(err.details ? { details: err.details } : {}),
+        },
       });
     }
     // domain 错误（带 code 字段）按映射表转为语义化状态码
@@ -431,7 +445,10 @@ async function main(): Promise<void> {
         })
         .catch((err) => {
           // 先在日志里留痕再退出：容器 stdout 是管道，`process.exit` 会把 console.error 截断
-          ctx.loggers.logger.error({ err, event: 'shutdown.failed', scope: 'system' }, '优雅关闭失败，强制退出');
+          ctx.loggers.logger.error(
+            { err, event: 'shutdown.failed', scope: 'system' },
+            '优雅关闭失败，强制退出',
+          );
           void ctx.loggers.close().finally(() => process.exit(1));
         });
     });

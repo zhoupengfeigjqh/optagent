@@ -1,59 +1,56 @@
 <script setup lang="ts">
-import { getCurrentInstance, onMounted, ref, watch } from 'vue';
-import { useThrottleFn } from '@vueuse/core';
+import { getCurrentInstance, onMounted, ref, watch } from 'vue'
+import { useThrottleFn } from '@vueuse/core'
 
-import Highcharts from './static/js/gantt.js';
-import { getPresetOptions } from '#/components/z-gantt/static/config/presetConfig.js';
+import Highcharts from './static/js/gantt.js'
+import { getPresetOptions } from '#/components/z-gantt/static/config/presetConfig.js'
 
 const props = defineProps<{
-  presetOptions?: ReturnType<typeof getPresetOptions> | Record<string, any>;
+  presetOptions?: ReturnType<typeof getPresetOptions> | Record<string, any>
   /**
    * 甘特图配置：支持两种形式
    * - 工厂函数：(ctx) => option，ctx 为组件创建的共享运行时上下文（推荐）
    * - 普通对象：与旧用法一致
    */
-  option?: Record<string, any> | ((ctx: Record<string, any>) => any);
+  option?: Record<string, any> | ((ctx: Record<string, any>) => any)
   /** 外部共享运行时上下文（如 z-gantt-table 需自行解析 option 时创建），不传则组件内部创建 */
-  context?: Record<string, any>;
-  data?: any[];
-  navPosition?: 'top' | 'bottom';
-}>();
+  context?: Record<string, any>
+  data?: any[]
+  navPosition?: 'top' | 'bottom'
+}>()
 
 const emit = defineEmits<{
-  (e: 'handlePointClick', event: any): void;
-  (e: 'handlePointClickMouseY', event: any): void;
-  (e: 'handlePointDblclick', event: any): void;
-  (e: 'handlePointDragStart', event: any): void;
-  (e: 'handlePointDraging', event: any): void;
-  (e: 'handlePointDragEnd', event: any): void;
-  (
-    e: 'handleViewChange',
-    event: { xMin: number; xMax: number; yMin: number; yMax: number },
-  ): void;
-}>();
+  (e: 'handlePointClick', event: any): void
+  (e: 'handlePointClickMouseY', event: any): void
+  (e: 'handlePointDblclick', event: any): void
+  (e: 'handlePointDragStart', event: any): void
+  (e: 'handlePointDraging', event: any): void
+  (e: 'handlePointDragEnd', event: any): void
+  (e: 'handleViewChange', event: { xMin: number; xMax: number; yMin: number; yMax: number }): void
+}>()
 
-const myChart = ref<any>(null);
+const myChart = ref<any>(null)
 
-let chartInstance: any = null;
+let chartInstance: any = null
 
-const navigatorContainer = ref<any>(null);
+const navigatorContainer = ref<any>(null)
 
-let navInstance: any = null;
+let navInstance: any = null
 
-let isSyncing = false;
+let isSyncing = false
 
 const emitViewChange = () => {
   if (chartInstance && !isSyncing) {
-    const xAxis = chartInstance.xAxis[0];
-    const yAxis = chartInstance.yAxis[0];
+    const xAxis = chartInstance.xAxis[0]
+    const yAxis = chartInstance.yAxis[0]
     emit('handleViewChange', {
       xMin: xAxis.min,
       xMax: xAxis.max,
       yMin: yAxis.min,
       yMax: yAxis.max,
-    });
+    })
   }
-};
+}
 
 /**
  * 处理 tooltip.formatter 并注入共享运行时上下文：
@@ -65,13 +62,13 @@ const emitViewChange = () => {
  *   兼容既有普通函数（this.point）与箭头函数（首参.point）的写法。
  */
 const normalizeTooltipFormatter = (option: any): any => {
-  if (!option) return option;
+  if (!option) return option
   // 取出 ganttOption 工厂挂载的共享上下文引用，不把内部字段透传给 Highcharts
-  const { __ganttCtx: ganttCtx, ...cleanOption } = option;
+  const { __ganttCtx: ganttCtx, ...cleanOption } = option
   if (typeof option?.tooltip?.formatter !== 'function') {
-    return ganttCtx ? cleanOption : option;
+    return ganttCtx ? cleanOption : option
   }
-  const { formatter, ...restTooltip } = option.tooltip;
+  const { formatter, ...restTooltip } = option.tooltip
   return {
     ...cleanOption,
     tooltip: {
@@ -82,26 +79,22 @@ const normalizeTooltipFormatter = (option: any): any => {
       },
       formatter: function (this: any, ...args: any[]) {
         // Highcharts 传入的上下文可能在 this 上，也可能在首个参数上（不同版本实现有差异）
-        const first = args[0];
-        const isCtx = (v: any) => v && (v.point || v.label || v.series);
-        const context = isCtx(this)
-          ? this
-          : isCtx(first)
-            ? first
-            : (this ?? first ?? {});
+        const first = args[0]
+        const isCtx = (v: any) => v && (v.point || v.label || v.series)
+        const context = isCtx(this) ? this : isCtx(first) ? first : (this ?? first ?? {})
         // 注入共享上下文：data.ts 中 ganttOption(ctx) 内任意回调可直接使用 ctx.point
         if (ganttCtx && typeof ganttCtx === 'object') {
-          ganttCtx.point = context?.point ?? context;
-          ganttCtx.tooltip = context;
+          ganttCtx.point = context?.point ?? context
+          ganttCtx.tooltip = context
         }
         // apply 绑定 this + 首参透传上下文，普通函数 / 箭头函数写法均可使用
-        return formatter.apply(context, [context, ...args]);
+        return formatter.apply(context, [context, ...args])
       },
     },
-  };
-};
+  }
+}
 
-const instance = getCurrentInstance();
+const instance = getCurrentInstance()
 
 /**
  * 共享运行时上下文：
@@ -109,12 +102,12 @@ const instance = getCurrentInstance();
  * - 组件会把图表实例、鼠标坐标、当前数据点注入其中，
  *   data.ts 内各回调（tooltip.formatter / positioner / dataLabels.formatter）直接读 ctx 即可
  */
-const runtimeCtx: Record<string, any> = props.context ?? {};
-runtimeCtx.instance = runtimeCtx.instance ?? instance;
+const runtimeCtx: Record<string, any> = props.context ?? {}
+runtimeCtx.instance = runtimeCtx.instance ?? instance
 
 /** 解析 option：支持工厂函数 (ctx) => option 与普通对象两种形式 */
 const resolveOption = (option: any): any =>
-  typeof option === 'function' ? option(runtimeCtx) : option || {};
+  typeof option === 'function' ? option(runtimeCtx) : option || {}
 
 /**
  * 监听容器鼠标移动，把图表坐标写入共享上下文（节流 100ms）
@@ -122,24 +115,22 @@ const resolveOption = (option: any): any =>
  * 只能自行缓存，供 tooltip.positioner / formatter 换算鼠标所在时间
  */
 const bindMouseTracker = (chart: any, ganttCtx: Record<string, any>) => {
-  const container = chart?.container;
-  if (!container || container._ganttMouseBound) return;
-  container._ganttMouseBound = true;
+  const container = chart?.container
+  if (!container || container._ganttMouseBound) return
+  container._ganttMouseBound = true
   const updateMousePosition = useThrottleFn((event: MouseEvent) => {
-    const rect = container.getBoundingClientRect();
+    const rect = container.getBoundingClientRect()
     // 启用 scrollablePlotArea 时需补上内部容器的横向滚动偏移
-    const scrollLeft = chart?.scrollingContainer?.scrollLeft ?? 0;
-    ganttCtx.mouseX = event.clientX - rect.left + scrollLeft;
-    ganttCtx.mouseY = event.clientY - rect.top;
-  }, 100);
-  container.addEventListener('mousemove', (event: MouseEvent) =>
-    updateMousePosition(event),
-  );
+    const scrollLeft = chart?.scrollingContainer?.scrollLeft ?? 0
+    ganttCtx.mouseX = event.clientX - rect.left + scrollLeft
+    ganttCtx.mouseY = event.clientY - rect.top
+  }, 100)
+  container.addEventListener('mousemove', (event: MouseEvent) => updateMousePosition(event))
   container.addEventListener('mouseleave', () => {
-    ganttCtx.mouseX = undefined;
-    ganttCtx.mouseY = undefined;
-  });
-};
+    ganttCtx.mouseX = undefined
+    ganttCtx.mouseY = undefined
+  })
+}
 
 /**
  * 注入共享运行时上下文：
@@ -148,11 +139,11 @@ const bindMouseTracker = (chart: any, ganttCtx: Record<string, any>) => {
  *   使 data.ts 内可直接用形参/闭包 ctx 取 point，无需读 this
  */
 const withRuntimeCtx = (option: any): any => {
-  const { __ganttCtx, ...restOption } = option || {};
-  const ganttCtx = __ganttCtx ?? runtimeCtx;
-  const userLoad = restOption?.chart?.events?.load;
-  const dataLabels = restOption?.plotOptions?.gantt?.dataLabels;
-  const userLabelFormatter = dataLabels?.formatter;
+  const { __ganttCtx, ...restOption } = option || {}
+  const ganttCtx = __ganttCtx ?? runtimeCtx
+  const userLoad = restOption?.chart?.events?.load
+  const dataLabels = restOption?.plotOptions?.gantt?.dataLabels
+  const userLabelFormatter = dataLabels?.formatter
   return {
     ...restOption,
     __ganttCtx: ganttCtx,
@@ -161,11 +152,11 @@ const withRuntimeCtx = (option: any): any => {
       events: {
         ...restOption?.chart?.events,
         load() {
-          const chart: any = this;
-          ganttCtx.chart = chart;
-          bindMouseTracker(chart, ganttCtx);
+          const chart: any = this
+          ganttCtx.chart = chart
+          bindMouseTracker(chart, ganttCtx)
           // 兼容业务侧自定义的 load 钩子
-          if (typeof userLoad === 'function') userLoad.call(chart);
+          if (typeof userLoad === 'function') userLoad.call(chart)
         },
       },
     },
@@ -179,40 +170,40 @@ const withRuntimeCtx = (option: any): any => {
                 ...dataLabels,
                 formatter(this: any, ...args: any[]) {
                   // 把当前数据点写入共享上下文，data.ts 直接用形参 ctx 取 point
-                  ganttCtx.point = this?.point ?? ganttCtx.point;
-                  return userLabelFormatter.call(this, ganttCtx, ...args);
+                  ganttCtx.point = this?.point ?? ganttCtx.point
+                  return userLabelFormatter.call(this, ganttCtx, ...args)
                 },
               },
             },
           },
         }
       : {}),
-  };
-};
+  }
+}
 
 const initGantt = (option: any) => {
   if (myChart.value && option) {
     // 解析（支持 (ctx) => option 工厂函数）并注入共享运行时上下文
-    const ganttOpt = resolveOption(option);
+    const ganttOpt = resolveOption(option)
     chartInstance = Highcharts.ganttChart(
       myChart.value as HTMLElement,
       normalizeTooltipFormatter(withRuntimeCtx(ganttOpt)),
-    );
+    )
 
     Highcharts.addEvent(chartInstance.xAxis[0], 'afterSetExtremes', () => {
-      emitViewChange();
-    });
+      emitViewChange()
+    })
 
     Highcharts.addEvent(chartInstance.yAxis[0], 'afterSetExtremes', () => {
-      emitViewChange();
-    });
+      emitViewChange()
+    })
 
     if (props.navPosition && navigatorContainer.value) {
       // 获取主图表的 Y 轴配置，确保导航器与之同步
-      const mainYAxis = ganttOpt.yAxis || {};
+      const mainYAxis = ganttOpt.yAxis || {}
 
       // 构建导航器概览数据（确保颜色等属性被正确保留）
-      const overviewData = buildOverviewData(ganttOpt.series[0].data);
+      const overviewData = buildOverviewData(ganttOpt.series[0].data)
 
       navInstance = Highcharts.navigator(navigatorContainer.value, {
         liveRedraw: true,
@@ -233,93 +224,83 @@ const initGantt = (option: any) => {
           pointPlacement: 0.5,
           pointPadding: 0.25,
         },
-      });
-      navInstance.bind(chartInstance);
+      })
+      navInstance.bind(chartInstance)
 
       if (navInstance.navigator && navInstance.navigator.chart) {
-        Highcharts.addEvent(
-          navInstance.navigator.chart.xAxis[0],
-          'afterSetExtremes',
-          () => {
-            emitViewChange();
-          },
-        );
+        Highcharts.addEvent(navInstance.navigator.chart.xAxis[0], 'afterSetExtremes', () => {
+          emitViewChange()
+        })
 
-        Highcharts.addEvent(
-          navInstance.navigator.chart.yAxis[0],
-          'afterSetExtremes',
-          () => {
-            emitViewChange();
-          },
-        );
+        Highcharts.addEvent(navInstance.navigator.chart.yAxis[0], 'afterSetExtremes', () => {
+          emitViewChange()
+        })
       }
 
       // 保存导航器的初始位置到 navigatorOptions，这样 render() 会优先使用这个值
       if (navInstance && navInstance.navigator) {
         if (!navInstance.navigator.navigatorOptions) {
-          navInstance.navigator.navigatorOptions = {};
+          navInstance.navigator.navigatorOptions = {}
         }
-        navInstance.navigator.navigatorOptions.top = navInstance.navigator.top;
-        navInstance.navigator.navigatorOptions.left =
-          navInstance.navigator.left;
+        navInstance.navigator.navigatorOptions.top = navInstance.navigator.top
+        navInstance.navigator.navigatorOptions.left = navInstance.navigator.left
       }
 
       // 同步导航器的 Y 轴范围与主图表一致
-      syncNavigatorYAxis();
+      syncNavigatorYAxis()
     }
   }
-};
+}
 /**
  * 进度条点击事件
  */
 const handlePointClick = (event: any) => {
-  emit('handlePointClick', event);
-};
+  emit('handlePointClick', event)
+}
 /**
  * 进度条右键事件
  * @param event
  */
 const handlePointClickMouseY = (event: any) => {
-  emit('handlePointClickMouseY', event);
-};
+  emit('handlePointClickMouseY', event)
+}
 /**
  * 进度条双击事件
  */
 const handlePointDblclick = (event: any) => {
-  emit('handlePointDblclick', event);
-};
+  emit('handlePointDblclick', event)
+}
 /**
  * 拖拽进度条开始事件
  */
 const handlePointDragStart = (event: any) => {
-  emit('handlePointDragStart', event);
-};
+  emit('handlePointDragStart', event)
+}
 /**
  * 拖拽中事件
  */
 const handlePointDraging = (event: any) => {
-  emit('handlePointDraging', event);
-};
+  emit('handlePointDraging', event)
+}
 /**
  * 拖拽结束事件
  */
 const handlePointDragEnd = (event: any) => {
-  emit('handlePointDragEnd', event);
-};
+  emit('handlePointDragEnd', event)
+}
 /**
  * 设置甘特图预设
  */
 const setPresetOptions = () => {
-  const instance = getCurrentInstance();
-  const resolvedPresetOptions =
-    props.presetOptions ?? getPresetOptions(instance?.exposed);
+  const instance = getCurrentInstance()
+  const resolvedPresetOptions = props.presetOptions ?? getPresetOptions(instance?.exposed)
 
-  Highcharts.setOptions(resolvedPresetOptions);
-};
+  Highcharts.setOptions(resolvedPresetOptions)
+}
 onMounted(() => {
-  setPresetOptions();
-  initGantt(props.option);
-});
+  setPresetOptions()
+  initGantt(props.option)
+})
 /**
  * 构建导航器概览数据
  * @param seriesData 甘特图数据
@@ -337,8 +318,8 @@ const buildOverviewData = (seriesData: any[]) => {
       partialFill: item.partialFill,
       accessibility: item.accessibility,
     }))
-    .filter((item: any) => item.x && item.x2);
-};
+    .filter((item: any) => item.x && item.x2)
+}
 
 /**
  * 同步导航器可视范围带
@@ -347,29 +328,24 @@ const buildOverviewData = (seriesData: any[]) => {
  */
 const syncNavBand = (min: number, max: number) => {
   if (navInstance && navInstance.navigator && navInstance.navigator.chart) {
-    navInstance.navigator.chart.xAxis[0]?.setExtremes(min, max, false);
+    navInstance.navigator.chart.xAxis[0]?.setExtremes(min, max, false)
   }
-};
+}
 
 /**
  * 同步导航器的 Y 轴范围与主图表一致
  */
 const syncNavigatorYAxis = () => {
-  if (
-    chartInstance &&
-    navInstance &&
-    navInstance.navigator &&
-    navInstance.navigator.chart
-  ) {
-    const mainYAxis = chartInstance.yAxis[0];
-    const navYAxis = navInstance.navigator.chart.yAxis[0];
+  if (chartInstance && navInstance && navInstance.navigator && navInstance.navigator.chart) {
+    const mainYAxis = chartInstance.yAxis[0]
+    const navYAxis = navInstance.navigator.chart.yAxis[0]
 
     if (mainYAxis && navYAxis) {
       // 同步 Y 轴范围
-      navYAxis.setExtremes(mainYAxis.min, mainYAxis.max, false);
+      navYAxis.setExtremes(mainYAxis.min, mainYAxis.max, false)
     }
   }
-};
+}
 
 /**
  * 更新甘特图配置
@@ -378,27 +354,27 @@ const syncNavigatorYAxis = () => {
 const updateGantt = (option: any) => {
   if (chartInstance && option) {
     // 解析（支持 (ctx) => option 工厂函数）并注入共享运行时上下文
-    const ganttOpt = resolveOption(option);
-    chartInstance.update(normalizeTooltipFormatter(withRuntimeCtx(ganttOpt)));
+    const ganttOpt = resolveOption(option)
+    chartInstance.update(normalizeTooltipFormatter(withRuntimeCtx(ganttOpt)))
     if (navInstance && navInstance.navigator && navInstance.navigator.chart) {
-      const seriesData = ganttOpt.series?.[0]?.data || [];
-      const overviewData = buildOverviewData(seriesData);
+      const seriesData = ganttOpt.series?.[0]?.data || []
+      const overviewData = buildOverviewData(seriesData)
       // 传递完整的数据对象，保持甘特图缩略图的一致性
-      navInstance.navigator.chart.series[0]?.setData(overviewData, false);
+      navInstance.navigator.chart.series[0]?.setData(overviewData, false)
       // 确保颜色设置始终生效
       navInstance.navigator.chart.series[0]?.update(
         {
           colorByPoint: false,
         },
         false,
-      );
-      syncNavBand(chartInstance.xAxis[0].min, chartInstance.xAxis[0].max);
+      )
+      syncNavBand(chartInstance.xAxis[0].min, chartInstance.xAxis[0].max)
       // 同步 Y 轴范围
-      syncNavigatorYAxis();
-      navInstance.navigator.chart.redraw();
+      syncNavigatorYAxis()
+      navInstance.navigator.chart.redraw()
     }
   }
-};
+}
 
 /**
  * 同步视图范围
@@ -409,28 +385,28 @@ const updateGantt = (option: any) => {
  */
 const syncView = (xMin: number, xMax: number, yMin?: number, yMax?: number) => {
   if (chartInstance) {
-    isSyncing = true;
-    chartInstance.xAxis[0].setExtremes(xMin, xMax, false);
+    isSyncing = true
+    chartInstance.xAxis[0].setExtremes(xMin, xMax, false)
     if (yMin !== undefined && yMax !== undefined) {
-      chartInstance.yAxis[0].setExtremes(yMin, yMax, false);
+      chartInstance.yAxis[0].setExtremes(yMin, yMax, false)
     }
-    chartInstance.redraw();
+    chartInstance.redraw()
     if (navInstance && navInstance.navigator && navInstance.navigator.chart) {
-      navInstance.navigator.chart.xAxis[0]?.setExtremes(xMin, xMax, false);
+      navInstance.navigator.chart.xAxis[0]?.setExtremes(xMin, xMax, false)
       if (yMin !== undefined && yMax !== undefined) {
-        navInstance.navigator.chart.yAxis[0]?.setExtremes(yMin, yMax, false);
+        navInstance.navigator.chart.yAxis[0]?.setExtremes(yMin, yMax, false)
       }
-      navInstance.navigator.chart.redraw();
+      navInstance.navigator.chart.redraw()
     }
-    isSyncing = false;
+    isSyncing = false
   }
-};
+}
 
 watch(
   () => props.data,
   (newVal) => {
     if (myChart.value && newVal) {
-      chartInstance.series[0]?.setData(JSON.parse(JSON.stringify(newVal)));
+      chartInstance.series[0]?.setData(JSON.parse(JSON.stringify(newVal)))
       // chartInstance.update({
       //   series: [
       //     {
@@ -440,21 +416,20 @@ watch(
       // });
       // 如果开启了指定位置的导航器，同时更新导航器
       if (
-        (props.navPosition,
-        navInstance && navInstance.navigator && navInstance.navigator.chart)
+        (props.navPosition, navInstance && navInstance.navigator && navInstance.navigator.chart)
       ) {
-        const overviewData = buildOverviewData(newVal);
+        const overviewData = buildOverviewData(newVal)
         // 传递完整的数据对象，保持甘特图缩略图的一致性
-        navInstance.navigator.chart.series[0]?.setData(overviewData, false);
-        syncNavBand(chartInstance.xAxis[0].min, chartInstance.xAxis[0].max);
+        navInstance.navigator.chart.series[0]?.setData(overviewData, false)
+        syncNavBand(chartInstance.xAxis[0].min, chartInstance.xAxis[0].max)
         // 同步 Y 轴范围
-        syncNavigatorYAxis();
-        navInstance.navigator.chart.redraw();
+        syncNavigatorYAxis()
+        navInstance.navigator.chart.redraw()
       }
     }
   },
-);
-const containerRef = ref();
+)
+const containerRef = ref()
 
 defineExpose({
   updateGantt,
@@ -465,14 +440,14 @@ defineExpose({
   handlePointDragStart,
   handlePointDraging,
   handlePointDragEnd,
-});
+})
 </script>
 
 <template>
   <div ref="containerRef">
     <a-affix
-      :offset-top="100"
       v-if="props.navPosition === 'top'"
+      :offset-top="100"
       style="position: relative; z-index: 99"
       :target="() => containerRef.value"
     >
@@ -483,8 +458,8 @@ defineExpose({
     <div ref="myChart"></div>
 
     <a-affix
-      :offset-bottom="5"
       v-if="props.navPosition === 'bottom'"
+      :offset-bottom="5"
       style="position: relative; z-index: 99"
       :target="() => containerRef.value"
     >

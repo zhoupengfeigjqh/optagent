@@ -16,8 +16,15 @@ export function createUser(userId: string, agents: string[]): Promise<UserDetail
   return http.post<UserDetail>('/api/admin/users', { user_id: userId, agents })
 }
 
-export function updateUser(userId: string, agents: string[], revision: number): Promise<UserDetail> {
-  return http.put<UserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`, { agents, revision })
+export function updateUser(
+  userId: string,
+  agents: string[],
+  revision: number,
+): Promise<UserDetail> {
+  return http.put<UserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    agents,
+    revision,
+  })
 }
 
 export function deleteUser(userId: string): Promise<void> {

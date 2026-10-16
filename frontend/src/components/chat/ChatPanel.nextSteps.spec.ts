@@ -30,7 +30,14 @@ function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = 
   return {
     chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
     threads: { messages: ref([]), hasMore: ref(false) },
-    search: { isOpen: ref(false), keyword: ref(''), total: ref(0), activeIndex: ref(0), next: noop, close: noop },
+    search: {
+      isOpen: ref(false),
+      keyword: ref(''),
+      total: ref(0),
+      activeIndex: ref(0),
+      next: noop,
+      close: noop,
+    },
     models: { current: ref(null), models: ref([]) },
     uploads: { items: ref([]) },
     mention: {

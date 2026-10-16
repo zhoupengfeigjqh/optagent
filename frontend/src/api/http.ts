@@ -170,7 +170,11 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
   // 读取失败（如连接中断）时按状态码兜底，避免抛错掩盖原始失败
   const text = await response.text().catch(() => null)
   if (text === null) {
-    return new ApiError({ code: fallbackCode, message: response.statusText, status: response.status })
+    return new ApiError({
+      code: fallbackCode,
+      message: response.statusText,
+      status: response.status,
+    })
   }
 
   if (text.trim() !== '') {

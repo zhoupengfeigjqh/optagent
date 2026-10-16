@@ -16,8 +16,13 @@
  * **2026-10-03 新增工具白名单 `allowed_tools`**（产品决定）：
  * 新建服务时 MUST 先连上服务、由管理员勾选可见工具（至少一个），此后：
  * - 平台详情**只呈现白名单里的工具**（清单外的一律不显示）；
- * - 运行环境只把白名单里的工具挂给数字人（模型看不到其余工具）；
- * - 白名单**创建后不可二次调整**（`upsert` 显式拒绝该字段）——如需变更请删除重建。
+ * - 运行环境只把白名单里的工具挂给数字人（模型看不到其余工具）。
+ *
+ * **2026-10-15 白名单可二次调整**（产品决定）：原先"创建后不可改"（`upsert` 携带即拒
+ * `ADM_MCP_TOOL_SCOPE_LOCKED`）的实际后果是——工具改版/下架后**无从收拾**，
+ * 只能删服务重建，而重建会打断所有引用它的数字人（比"改范围"危险得多）。
+ * 现在与 `headers` 同一口径"**缺省 = 沿用存量，提供 = 全量替换**"，
+ * 且提供时**非空必填**（空数组 = 不限制，与"一个都不给"语义相反，不能静默接受）。
  *
  * **2026-10-08 新增请求头 `headers`**（本体侧「自建发布」要求 `X-MCP-Token`，否则 401）：
  * - 存**明文**（服务按原样发送），但**响应只回掩码**、列表只回 `has_headers`；
@@ -102,9 +107,11 @@ export interface McpServiceConfig {
    * **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单（不含 `{server}__` 前缀）。
    *
    * - 平台详情只呈现这里面的工具；运行环境只把这些工具挂给数字人（其余对模型不可见）；
-   * - **创建时必填非空**（新建流程 = 连上服务 → 勾选 → 创建），**之后不可修改**；
+   * - **创建时必填非空**（新建流程 = 连上服务 → 勾选 → 创建）；
+   * - **2026-10-15 起可二次调整**（`PUT` 携带 `allowed_tools` = 全量替换，同样必填非空；
+   *   不携带 = 沿用存量）。改完 MUST 重新部署受影响的数字人，运行环境才拿得到新范围；
    * - 空数组 = **不限制**（历史语义；物化时不写该字段，运行环境放行全部工具）——
-   *   只为兼容"白名单上线前的存量服务"，新创建不可能产出空数组。
+   *   只为兼容"白名单上线前的存量服务"，新建与二次调整都不可能产出空数组。
    */
   allowed_tools: string[];
   /**
@@ -144,7 +151,10 @@ export interface McpConfigInput {
   confirmation?: unknown;
   rules_fields?: unknown;
   async_tools?: unknown;
-  /** 工具白名单（2026-10-03）：**仅新建时接受**；`upsert` 携带即拒绝（不可二次调整） */
+  /**
+   * 工具白名单（2026-10-03；2026-10-15 起可改）：
+   * `create` **必填非空**；`upsert` **缺省 = 沿用存量，提供 = 全量替换且非空**。
+   */
   allowed_tools?: unknown;
   /** 请求头（2026-10-08）：缺省 = 沿用存量，提供 = 全量替换（`{}` 即清空） */
   headers?: unknown;
@@ -183,8 +193,8 @@ export class McpServiceConfigService {
   /**
    * **新建**服务（2026-09-27；2026-10-03 起要求工具白名单）：
    * 名称由管理员指定，重名即拒（`ADM_MCP_SERVICE_EXISTS`）；
-   * **`allowed_tools` 必填非空**——白名单是"创建时定、之后不可改"的，
-   * 因此创建期漏传即拒绝，避免留下"全部工具放行"的服务。
+   * **`allowed_tools` 必填非空**——创建期漏传即拒绝，避免留下"全部工具放行"的服务
+   * （白名单可在 `upsert` 里二次调整，但"不限制"这个历史语义仍然只能靠存量记录产生）。
    * `revision` 可选——带了即做乐观锁校验，缺省按"当前版本"写入并递增。
    */
   create(input: McpConfigInput, revision?: number): { config: McpServiceConfig; revision: number } {
@@ -243,13 +253,15 @@ export class McpServiceConfigService {
   /**
    * 保存调用配置（`FR-044`）；服务必须已存在（新建走 `create`）。
    *
-   * **工具白名单不可二次调整**（2026-10-03）：携带 `allowed_tools` 直接拒绝
-   * （`ADM_MCP_TOOL_SCOPE_LOCKED`）——静默忽略会让客户端以为改成功了；
-   * 不携带时沿用已存值（保存调用配置 MUST NOT 顺手清空白名单）。
+   * **工具白名单可二次调整**（2026-10-15）：与 `headers` 同口径"**缺省 = 沿用存量，
+   * 提供 = 全量替换**"。原先携带即拒（`ADM_MCP_TOOL_SCOPE_LOCKED`）是为了防
+   * "以为限住了、实际没限"，但它的代价是工具改版/下架后只能删服务重建——重建会打断
+   * 所有引用它的数字人，比"改范围"危险得多。防呆改由**非空校验**承担：
+   * 提供即 MUST 至少一个（空数组 = 不限制，与"一个都不给"语义相反，静默接受
+   * 恰恰就是当初要防的那个风险本身）。
    *
-   * **请求头（2026-10-08）与白名单相反：可以改**（令牌会轮换，锁死会逼人删服务重建）。
-   * 语义为"**缺省 = 沿用存量，提供 = 全量替换**"：不带 `headers` 的保存 MUST NOT
-   * 顺手清空令牌（那会让运行环境在下一次部署后突然 401，且从界面上看不出来）。
+   * **请求头（2026-10-08）同口径**：不带 `headers` 的保存 MUST NOT 顺手清空令牌
+   * （那会让运行环境在下一次部署后突然 401，且从界面上看不出来）。
    */
   upsert(
     name: string,
@@ -260,14 +272,12 @@ export class McpServiceConfigService {
     if (!existing) {
       throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_NOT_FOUND, `MCP 服务不存在：${name}`);
     }
-    if (input.allowed_tools !== undefined) {
-      throw new ApiError(
-        ERROR_CODES.ADM_MCP_TOOL_SCOPE_LOCKED,
-        `MCP 服务 ${name} 的工具白名单只在创建时设定，不支持修改；如需变更请删除该服务后重新创建`,
-      );
-    }
-    // 请求头（2026-10-08）：缺省沿用存量——保存调用配置 MUST NOT 顺手清空令牌
-    const nextRevision = this.write(name, input, existing.allowed_tools, existing.headers, revision);
+    // 白名单：缺省沿用存量（保存调用配置 MUST NOT 顺手清空它）；提供则全量替换，且非空
+    const allowedTools =
+      input.allowed_tools === undefined
+        ? existing.allowed_tools
+        : normalizeAllowedTools(input.allowed_tools, true);
+    const nextRevision = this.write(name, input, allowedTools, existing.headers, revision);
     return { config: this.read(name), revision: nextRevision };
   }
 
@@ -312,10 +322,7 @@ export class McpServiceConfigService {
     // 连接地址：http 必填；stdio 丢弃（与"http 丢弃 command/args"对称，避免隐性配置漂移）
     const url = normalizeUrl(input.url);
     if (transport === 'http' && url === null) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `transport=http 时 url 必填（${MCP_URL_HINT}）`,
-      );
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `transport=http 时 url 必填（${MCP_URL_HINT}）`);
     }
 
     // 启动命令与参数只对 stdio 有意义

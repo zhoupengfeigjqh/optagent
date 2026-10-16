@@ -36,7 +36,8 @@ beforeEach(() => {
   fetchMock.mockReset()
   // 每次调用都返回**新的** Response：Response 的 body 只能读一次
   fetchMock.mockImplementation(
-    async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    async () =>
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
   )
 })
 
@@ -155,6 +156,20 @@ describe('api/mcp', () => {
     await mcp.fetchMcpStats()
     expect(lastCall().url).toBe('/api/admin/mcp/stats')
   })
+
+  it('新建前探测：POST /api/admin/mcp/probe，payload 原样透传（§3.9，2026-10-03）', async () => {
+    const mcp = await import('./mcp')
+
+    await mcp.probeMcpTarget({ transport: 'http', url: 'http://host:8000/mcp', name: 'ocr' })
+
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/mcp/probe')
+    expect(bodyOf(lastCall())).toEqual({
+      transport: 'http',
+      url: 'http://host:8000/mcp',
+      name: 'ocr',
+    })
+  })
 })
 
 describe('api/skills', () => {
@@ -168,7 +183,9 @@ describe('api/skills', () => {
     expect(lastCall().url).toBe('/api/admin/skills/pdf-parse')
 
     await skills.fetchSkillFile('pdf-parse', 'references/手册.md')
-    expect(lastCall().url).toBe('/api/admin/skills/pdf-parse/file?path=references%2F%E6%89%8B%E5%86%8C.md')
+    expect(lastCall().url).toBe(
+      '/api/admin/skills/pdf-parse/file?path=references%2F%E6%89%8B%E5%86%8C.md',
+    )
 
     // 2026-09-16：全部文件可编辑——保存走 PUT .../file，且**必须**带 base_hash 乐观锁
     await skills.saveSkillFile('pdf-parse', 'references/手册.md', '# 新手册\n', 'abc123')
@@ -194,6 +211,77 @@ describe('api/skills', () => {
 
     await skills.installSkill(file, true)
     expect((bodyOf(lastCall()) as FormData).get('overwrite')).toBe('true')
+  })
+
+  it('本体市场：列表 / 导入 / 更新走 §4.6~§4.8 路径', async () => {
+    const skills = await import('./skills')
+
+    await skills.fetchOntoMarket()
+    expect(lastCall().url).toBe('/api/admin/skills/onto-market')
+
+    await skills.installOntoMarketSkill('生产调度', '原材料采购和库存', 'bom-check')
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/skills/onto-market/install')
+    expect(bodyOf(lastCall())).toEqual({
+      scenario: '生产调度',
+      ontology: '原材料采购和库存',
+      skill: 'bom-check',
+    })
+
+    // 缺省 confirm=false：库内被人工改过时服务端回 409 ADM_SKILL_MODIFIED，界面须显式确认
+    await skills.updateOntoMarketSkill('生产调度', '原材料采购和库存', 'bom-check')
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/skills/onto-market/update')
+    expect(bodyOf(lastCall())).toEqual({
+      scenario: '生产调度',
+      ontology: '原材料采购和库存',
+      skill: 'bom-check',
+      confirm: false,
+    })
+
+    await skills.updateOntoMarketSkill('生产调度', '原材料采购和库存', 'bom-check', true)
+    expect(bodyOf(lastCall())).toMatchObject({ confirm: true })
+  })
+})
+
+describe('api/ontologies（§10，2026-10-03）', () => {
+  it('列表 / 详情 / 删除走 §10.1~§10.3（身份 = 场景 + 目录名，场景走查询参数）', async () => {
+    const ontologies = await import('./ontologies')
+
+    await ontologies.listOntologies(2)
+    expect(lastCall().url).toBe('/api/admin/ontologies?page=2')
+
+    const dir = encodeURIComponent('原材料采购和库存')
+    const scenario = encodeURIComponent('生产调度')
+
+    await ontologies.fetchOntology('原材料采购和库存', '生产调度')
+    expect(lastCall().url).toBe(`/api/admin/ontologies/${dir}?scenario=${scenario}`)
+
+    await ontologies.deleteOntology('原材料采购和库存', '生产调度')
+    expect(lastCall().init.method).toBe('DELETE')
+    expect(lastCall().url).toBe(`/api/admin/ontologies/${dir}?scenario=${scenario}`)
+  })
+
+  it('本体市场：列表 / 导入 / 更新走 §10.4~§10.6', async () => {
+    const ontologies = await import('./ontologies')
+
+    await ontologies.fetchOntoMarketOntologies()
+    expect(lastCall().url).toBe('/api/admin/ontologies/onto-market')
+
+    await ontologies.importOntoMarketOntology('生产调度', '原材料采购和库存')
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/ontologies/onto-market/import')
+    expect(bodyOf(lastCall())).toEqual({
+      scenario: '生产调度',
+      ontology_dir: '原材料采购和库存',
+    })
+
+    await ontologies.updateOntoMarketOntology('生产调度', '原材料采购和库存')
+    expect(lastCall().url).toBe('/api/admin/ontologies/onto-market/update')
+    expect(bodyOf(lastCall())).toEqual({
+      scenario: '生产调度',
+      ontology_dir: '原材料采购和库存',
+    })
   })
 })
 

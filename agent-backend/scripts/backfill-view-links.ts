@@ -52,7 +52,10 @@ function argValue(name: string): string | undefined {
 
 /** 解析运行数据根目录（与 `src/config.ts` 同口径） */
 function resolveRoot(): string {
-  return path.resolve(process.cwd(), argValue('--root') ?? process.env['OPT_AGENT_ROOT'] ?? '.opt-agent');
+  return path.resolve(
+    process.cwd(),
+    argValue('--root') ?? process.env['OPT_AGENT_ROOT'] ?? '.opt-agent',
+  );
 }
 
 /** 列出全部 `threads/{threadId}/tool-events.jsonl`（目录不存在 → 空数组） */
@@ -103,12 +106,7 @@ function storedText(file: string, record: Record<string, unknown>): string | und
 }
 
 /** 回填单个文件；返回是否有改动（干跑时只统计与预览，不写盘） */
-function backfillFile(
-  file: string,
-  apply: boolean,
-  stats: Stats,
-  preview: string[],
-): boolean {
+function backfillFile(file: string, apply: boolean, stats: Stats, preview: string[]): boolean {
   const raw = fs.readFileSync(file, 'utf8');
   if (raw === '') return false;
 
@@ -144,7 +142,9 @@ function backfillFile(
     changed = true;
     stats.updated += 1;
     if (preview.length < PREVIEW_MAX) {
-      preview.push(`${path.basename(path.dirname(file))}/${String(record['call_id'])} → ${JSON.stringify(links)}`);
+      preview.push(
+        `${path.basename(path.dirname(file))}/${String(record['call_id'])} → ${JSON.stringify(links)}`,
+      );
     }
     return JSON.stringify(record);
   });
@@ -187,7 +187,8 @@ function main(): void {
     `结果：待回填（命中）${stats.updated} 行；已有 view_links ${stats.alreadyHasLinks} 行；` +
       `取不到正文 ${stats.noTextAvailable} 行；坏行 ${stats.brokenLines} 行`,
   );
-  if (preview.length > 0) console.log(`示例（最多 ${PREVIEW_MAX} 条）：\n  ${preview.join('\n  ')}`);
+  if (preview.length > 0)
+    console.log(`示例（最多 ${PREVIEW_MAX} 条）：\n  ${preview.join('\n  ')}`);
 
   if (!apply) {
     console.log('干跑模式：**未写盘**。确认无误后加 `--apply` 执行。');

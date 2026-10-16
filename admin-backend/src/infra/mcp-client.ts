@@ -91,7 +91,10 @@ export function classifyMcpError(err: unknown): { code: string; message: string 
     return { code: 'MCP_TIMEOUT', message: `连接或调用超时：${message}` };
   }
   if (/ECONNREFUSED|connection refused/i.test(message)) {
-    return { code: 'MCP_CONNECTION_REFUSED', message: `连接被拒绝（服务未监听或端口不通）：${message}` };
+    return {
+      code: 'MCP_CONNECTION_REFUSED',
+      message: `连接被拒绝（服务未监听或端口不通）：${message}`,
+    };
   }
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(message)) {
     return { code: 'MCP_HOST_UNRESOLVED', message: `主机名无法解析：${message}` };
@@ -140,10 +143,7 @@ async function defaultCreateClient(target: McpConnectionTarget): Promise<McpClie
       return res.tools.map((tool) => ({
         name: tool.name,
         description: tool.description ?? '',
-        parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<
-          string,
-          unknown
-        >,
+        parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<string, unknown>,
       }));
     },
     // `ping` 是 MCP 协议内建的**只读**方法：能返回即证明协议层真的通了，
@@ -195,10 +195,7 @@ export class McpClientService {
     try {
       assertTargetUsable(target, serviceName);
     } catch (err) {
-      const info =
-        err instanceof ApiError
-          ? { code: err.code, message: err.message }
-          : classifyMcpError(err);
+      const info = err instanceof ApiError ? { code: err.code, message: err.message } : classifyMcpError(err);
       connectivity.error_code = info.code;
       connectivity.message = info.message;
       capability.error_code = info.code;

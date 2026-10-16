@@ -5,7 +5,9 @@
  * 2026-10-08 追加**请求头**的本地解析（`parseHeaders` / `formatHeaders`）。
  */
 import { describe, expect, it } from 'vitest'
+import type { McpServiceDetail } from '../api/types'
 import {
+  buildToolScopePayload,
   formatHeaders,
   isValidHeaderName,
   isValidMcpServiceName,
@@ -40,7 +42,9 @@ describe('validateMcpBasics —— http 传输', () => {
     expect(validateMcpBasics({ transport: 'http', url: '192.168.1.2:8000/mcp' })).toContain(
       '连接地址须为',
     )
-    expect(validateMcpBasics({ transport: 'http', url: 'ftp://host/mcp' })).toContain('连接地址须为')
+    expect(validateMcpBasics({ transport: 'http', url: 'ftp://host/mcp' })).toContain(
+      '连接地址须为',
+    )
   })
 
   it('合法地址 → 通过（https 同样接受）', () => {
@@ -68,13 +72,15 @@ describe('validateMcpBasics —— stdio 传输', () => {
 
 describe('validateMcpBasics —— 服务名（仅新建时传入）', () => {
   it('非法服务名 → 报「服务名非法」', () => {
-    expect(validateMcpBasics({ name: 'bad name', transport: 'http', url: 'http://h:1/mcp' })).toContain(
-      '服务名非法',
-    )
+    expect(
+      validateMcpBasics({ name: 'bad name', transport: 'http', url: 'http://h:1/mcp' }),
+    ).toContain('服务名非法')
   })
 
   it('名称前后空白按 trim 判定（不误报）', () => {
-    expect(validateMcpBasics({ name: ' ocr ', transport: 'http', url: 'http://h:1/mcp' })).toBeNull()
+    expect(
+      validateMcpBasics({ name: ' ocr ', transport: 'http', url: 'http://h:1/mcp' }),
+    ).toBeNull()
   })
 
   it('编辑态不传 name → 不校验名称（名称取自服务端且不可改）', () => {
@@ -155,5 +161,66 @@ describe('formatHeaders', () => {
 
   it('非空 → 缩进 JSON（便于人工核对头名）', () => {
     expect(formatHeaders({ 'X-MCP-Token': 'tk' })).toBe('{\n  "X-MCP-Token": "tk"\n}')
+  })
+})
+
+describe('buildToolScopePayload（工具范围弹窗的"重放载荷"，2026-10-15）', () => {
+  const SERVICE: McpServiceDetail = {
+    name: 'ocr',
+    transport: 'http',
+    description: 'OCR 识别服务',
+    url: 'http://192.168.1.2:8000/mcp',
+    command: null,
+    args: null,
+    file_args: { ocr_image: { image: 'url' } },
+    confirmation: 'always',
+    rules_fields: { ocr_image: 'rules' },
+    async_tools: ['ocr_image'],
+    allowed_tools: ['ocr_image'],
+    missing_tools: [],
+    headers: { 'X-MCP-Token': '6UuE…F3Z' },
+    tools: [],
+    tools_truncated: false,
+    available_tools: [],
+    available_tools_truncated: false,
+    tools_error: null,
+    references: [],
+    revision: 3,
+  }
+
+  it('重放其余字段，只把 allowed_tools 换成新范围（PUT 是全量替换语义）', () => {
+    const payload = buildToolScopePayload(SERVICE, ['ocr_image', 'ocr_pdf'])
+
+    expect(payload.allowed_tools).toEqual(['ocr_image', 'ocr_pdf'])
+    expect(payload.description).toBe('OCR 识别服务')
+    expect(payload.transport).toBe('http')
+    expect(payload.url).toBe('http://192.168.1.2:8000/mcp')
+    expect(payload.file_args).toEqual({ ocr_image: { image: 'url' } })
+    expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
+    expect(payload.async_tools).toEqual(['ocr_image'])
+    expect(payload.confirmation).toBe('always')
+  })
+
+  it('MUST NOT 带上 `headers`：详情回的是掩码，回传等于把真令牌换成掩码', () => {
+    expect(buildToolScopePayload(SERVICE, ['ocr_image']).headers).toBeUndefined()
+  })
+
+  it('不改动调用方传入的数组（复制一份再放进载荷）', () => {
+    const next = ['ocr_image']
+    const payload = buildToolScopePayload(SERVICE, next)
+    next.push('query_price')
+
+    expect(payload.allowed_tools).toEqual(['ocr_image'])
+  })
+
+  it('stdio 服务：url 为 null → 载荷里是 undefined（不能把 null 当地址提交）', () => {
+    const payload = buildToolScopePayload(
+      { ...SERVICE, transport: 'stdio', url: null, command: '/bin/mcp', args: ['--x'] },
+      ['ocr_image'],
+    )
+
+    expect(payload.url).toBeUndefined()
+    expect(payload.command).toBe('/bin/mcp')
+    expect(payload.args).toEqual(['--x'])
   })
 })

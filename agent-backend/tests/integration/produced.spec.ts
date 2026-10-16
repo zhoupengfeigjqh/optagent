@@ -425,10 +425,7 @@ describe('GET /api/produced/raw —— 读单条产出正文（契约 §10.5 ⑦
 
   it('能读到**列表之外**的更旧条目（列表有界，不代表读不到）', async () => {
     for (let i = 0; i < 55; i += 1) {
-      await post(
-        `${putUrl({ hints: { sid: 'th_old' } })}&filename=j_old_${i}.txt`,
-        `body-${i}`,
-      );
+      await post(`${putUrl({ hints: { sid: 'th_old' } })}&filename=j_old_${i}.txt`, `body-${i}`);
     }
     expect((await list()).some((i) => i.job_id === 'j_old_0')).toBe(false);
 

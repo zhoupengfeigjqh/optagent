@@ -132,7 +132,9 @@ describe('tool-events —— 体积分流', () => {
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.artifactSize).toBeUndefined();
     expect(record.truncated).toBe(true);
-    expect(Buffer.byteLength(record.content ?? '', 'utf8')).toBeLessThanOrEqual(TOOL_INLINE_MAX_BYTES);
+    expect(Buffer.byteLength(record.content ?? '', 'utf8')).toBeLessThanOrEqual(
+      TOOL_INLINE_MAX_BYTES,
+    );
   });
 });
 
@@ -150,7 +152,11 @@ describe('tool-events —— 合并与容错', () => {
 
     const records = store.readAll('admin', AGENT, 'th1');
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ status: 'success', content: '命中 3 行', argsDigest: { pattern: '车间' } });
+    expect(records[0]).toMatchObject({
+      status: 'success',
+      content: '命中 3 行',
+      argsDigest: { pattern: '车间' },
+    });
   });
 
   it('只有 running 行（进程中途崩溃）：读到"未完成"而不是丢记录', async () => {
@@ -183,7 +189,10 @@ describe('tool-events —— 合并与容错', () => {
 
   it('外置正文被清理后：readArtifact 返回 undefined（路由据此回 410）', async () => {
     const store = makeStore();
-    await appendEnd(store, { callId: 'call_gone', resultText: 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
+    await appendEnd(store, {
+      callId: 'call_gone',
+      resultText: 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
+    });
     const abs = path.join(dataRoot(), SPACE_TMP, artifactFileName('th1', 'call_gone'));
     // 必须走安全删除原语：Windows 下 fs.rmSync 对含中文的路径静默失效（见 fs-safe）
     removeFileSafe(abs);
@@ -197,7 +206,10 @@ describe('tool-events —— 合并与容错', () => {
 describe('tool-events —— 路径与归属', () => {
   it('恶意 call_id 不会把写入带出临时空间（文件名安全化）', async () => {
     const store = makeStore();
-    await appendEnd(store, { callId: '../../evil', resultText: 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024) });
+    await appendEnd(store, {
+      callId: '../../evil',
+      resultText: 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
+    });
 
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.artifactSize).toBeGreaterThan(0);
@@ -284,7 +296,9 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
       ];
     });
 
-    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toEqual([{ url: '/ok', name: '合法' }]);
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toEqual([
+      { url: '/ok', name: '合法' },
+    ]);
   });
 
   it('落盘行里的 view_links 一条都不合法：整段丢弃（等价于没有视图链接）', async () => {

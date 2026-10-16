@@ -121,7 +121,10 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
 
   it('成功：带服务名、MCP 工具名（不带 {server}__ 前缀）、耗时、用户与会话', async () => {
     const events: McpCallEvent[] = [];
-    await exec(build(events, async () => 'ok'), { image: 'a.png' });
+    await exec(
+      build(events, async () => 'ok'),
+      { image: 'a.png' },
+    );
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -443,9 +446,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
 
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
     expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx'); // 外部直链不动
-    expect(items[1]?.excelFileUrl).toBe(
-      'https://signed.example/demo/临时空间/电价.xlsx',
-    );
+    expect(items[1]?.excelFileUrl).toBe('https://signed.example/demo/临时空间/电价.xlsx');
     expect(verified).toEqual(['临时空间/电价.xlsx']); // 外部直链从未被当成本地路径
   });
 
@@ -476,7 +477,12 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     const calls: Call[] = [];
     const [tool] = buildWithFileArgs(
       calls,
-      [{ name: 'batch', inputSchema: { type: 'object', properties: { groups: { type: 'array' } } } }],
+      [
+        {
+          name: 'batch',
+          inputSchema: { type: 'object', properties: { groups: { type: 'array' } } },
+        },
+      ],
       { decls: { batch: { 'groups[].files[].url': 'url' } }, ctx: sandbox() },
     );
 
@@ -552,9 +558,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     });
 
     const { items } = sentArgs<{ items: Array<Record<string, unknown>> }>(calls);
-    expect(items[0]?.excelFileUrl).toBe(
-      'https://signed.example/demo/临时空间/a.xlsx',
-    );
+    expect(items[0]?.excelFileUrl).toBe('https://signed.example/demo/临时空间/a.xlsx');
     expect(items[1]).toEqual({ businessType: 2 });
     expect(warns).toHaveLength(1);
   });
@@ -758,9 +762,7 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
     });
 
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
-    expect(items[0]?.excelFileUrl).toBe(
-      'https://signed.example/demo/临时空间/产能.xlsx',
-    );
+    expect(items[0]?.excelFileUrl).toBe('https://signed.example/demo/临时空间/产能.xlsx');
   });
 
   it('派生注入打 mcp.fileargs.derived 日志（注入可观测）', async () => {
@@ -900,7 +902,11 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
       name: 'mixed',
       inputSchema: {
         type: 'object',
-        properties: { image: { type: 'string' }, excelFileUrl: { type: 'string' }, realRelativePath: { type: 'string' } },
+        properties: {
+          image: { type: 'string' },
+          excelFileUrl: { type: 'string' },
+          realRelativePath: { type: 'string' },
+        },
       },
     };
     const [tool] = buildWithFileArgs(calls, [mixedTool], {

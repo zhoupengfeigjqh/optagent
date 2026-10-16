@@ -98,7 +98,12 @@ function availableAgentsOf(
   return listAgents(
     optAgentRoot,
     userId,
-    logger ? { warn: (msg: string) => logger.warn({ event: 'data.migration.agent_skipped', uid: userId }, msg) } : undefined,
+    logger
+      ? {
+          warn: (msg: string) =>
+            logger.warn({ event: 'data.migration.agent_skipped', uid: userId }, msg),
+        }
+      : undefined,
   ).map((a) => a.agent_name);
 }
 
@@ -172,7 +177,10 @@ export function migrateUserDataLayout(
     `开始迁移用户级数据布局（uid=${userId}，一级条目 ${movable.length} 个）`,
   );
 
-  const decision = resolveOwnerAgent(optAgentRoot, userId, { ...opts, availableAgents: candidates });
+  const decision = resolveOwnerAgent(optAgentRoot, userId, {
+    ...opts,
+    availableAgents: candidates,
+  });
   if (!decision) {
     // 兜底分支（FR-040）：原地保留、不对用户可见，待其获得数字人后于下次触发迁移
     result.status = 'blocked';

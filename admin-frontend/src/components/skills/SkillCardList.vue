@@ -53,7 +53,8 @@ const emit = defineEmits<{
         </p>
         <p class="card__description">{{ (item as SkillListItem).description }}</p>
         <p class="card__meta">
-          来源 {{ (item as SkillListItem).source }} · 更新于 {{ (item as SkillListItem).updated_at }}
+          来源 {{ (item as SkillListItem).source }} · 更新于
+          {{ (item as SkillListItem).updated_at }}
         </p>
         <div class="card__actions">
           <button

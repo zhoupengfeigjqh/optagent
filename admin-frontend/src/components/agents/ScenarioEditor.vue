@@ -158,7 +158,9 @@ function removeDir(index: number): void {
   const dir = props.modelValue.data_prep_dirs[index]
   if (isPredefined(dir)) return
   const nextDirs = props.modelValue.data_prep_dirs.filter((_, i) => i !== index)
-  const nextFields: Record<string, ScenarioField[]> = { ...(props.modelValue.data_prep_fields ?? {}) }
+  const nextFields: Record<string, ScenarioField[]> = {
+    ...(props.modelValue.data_prep_fields ?? {}),
+  }
   delete nextFields[dir]
   const nextUploads: Record<string, string[]> = { ...(props.modelValue.data_prep_uploads ?? {}) }
   delete nextUploads[dir]
@@ -195,14 +197,18 @@ function removeDir(index: number): void {
     <fieldset class="scenario-editor__dirs">
       <legend class="field__label">「数据准备」二级目录清单</legend>
       <p class="field__hint">
-        仅这些子目录对数字人可见。「算法规则」为平台预定义目录，始终存在、不可移除，但字段约束可自由配置（可为 0 条）。
-        **收缩清单不会删除已有文件**——被移除的目录及其内容仍保留在用户空间。
+        仅这些子目录对数字人可见。「算法规则」为平台预定义目录，始终存在、不可移除，但字段约束可自由配置（可为
+        0 条）。 **收缩清单不会删除已有文件**——被移除的目录及其内容仍保留在用户空间。
       </p>
 
       <ul v-if="modelValue.data_prep_dirs.length > 0" class="scenario-editor__list">
         <li v-for="(dir, index) in modelValue.data_prep_dirs" :key="`${dir}-${index}`">
           <span class="mono">{{ dir }}</span>
-          <span v-if="isPredefined(dir)" class="scenario-editor__badge" data-test="predefined-badge">
+          <span
+            v-if="isPredefined(dir)"
+            class="scenario-editor__badge"
+            data-test="predefined-badge"
+          >
             预定义
           </span>
           <span class="scenario-editor__row-actions">

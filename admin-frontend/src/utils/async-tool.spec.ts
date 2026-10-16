@@ -14,9 +14,9 @@ describe('hasResultUrl', () => {
   })
 
   it('properties 里声明了 resultUrl → true', () => {
-    expect(
-      hasResultUrl({ type: 'object', properties: { resultUrl: { type: 'string' } } }),
-    ).toBe(true)
+    expect(hasResultUrl({ type: 'object', properties: { resultUrl: { type: 'string' } } })).toBe(
+      true,
+    )
   })
 
   it('properties 里没有它 → false（同步工具）', () => {

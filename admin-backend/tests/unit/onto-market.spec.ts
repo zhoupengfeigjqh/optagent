@@ -21,12 +21,7 @@ import {
 let root: string;
 const SKILL_MD = '---\nname: raw-material-inventory\ndescription: 原材料与库存本体技能\n---\n\n正文\n';
 
-function writeSkill(
-  scenario: string,
-  ontology: string,
-  skill: string,
-  files: Record<string, string>,
-): void {
+function writeSkill(scenario: string, ontology: string, skill: string, files: Record<string, string>): void {
   const dir = path.join(root, scenario, ontology, 'skills', skill);
   for (const [rel, content] of Object.entries(files)) {
     const abs = path.join(dir, ...rel.split('/'));
@@ -95,9 +90,7 @@ describe('扫描市场目录', () => {
     const broken = listing.items.find((item) => item.skill_dir === 'broken')!;
     expect(broken.status).toBe('invalid');
     expect(broken.invalid_reason).toContain('SKILL.md');
-    expect(listing.items.find((item) => item.skill_dir === 'raw-material-inventory')!.status).toBe(
-      'new',
-    );
+    expect(listing.items.find((item) => item.skill_dir === 'raw-material-inventory')!.status).toBe('new');
   });
 });
 
@@ -108,16 +101,12 @@ describe('与库内的差异状态', () => {
 
   it('库内同名且来自市场、哈希一致 → unchanged', () => {
     const hash = listOntoMarket(root, libraryOf([])).items[0]!.hash;
-    const records = [
-      { name: 'raw-material-inventory', origin: { kind: 'onto_market', hash } },
-    ];
+    const records = [{ name: 'raw-material-inventory', origin: { kind: 'onto_market', hash } }];
     expect(listOntoMarket(root, libraryOf(records)).items[0]!.status).toBe('unchanged');
   });
 
   it('库内同名且来自市场、哈希不同 → changed', () => {
-    const records = [
-      { name: 'raw-material-inventory', origin: { kind: 'onto_market', hash: 'stale-hash' } },
-    ];
+    const records = [{ name: 'raw-material-inventory', origin: { kind: 'onto_market', hash: 'stale-hash' } }];
     expect(listOntoMarket(root, libraryOf(records)).items[0]!.status).toBe('changed');
   });
 
@@ -185,7 +174,11 @@ describe('读取技能包（导入前置）', () => {
 });
 
 describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
-  const REF = { scenario: '生产调度', ontology: '原材料采购和库存', skill: 'raw-material-inventory' };
+  const REF = {
+    scenario: '生产调度',
+    ontology: '原材料采购和库存',
+    skill: 'raw-material-inventory',
+  };
   /** 市场当前整包（与 beforeEach 铺设一致） */
   const MARKET_FILES: Record<string, string> = {
     'SKILL.md': SKILL_MD,
@@ -206,10 +199,7 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([p, c]) => ({ path: p, content: Buffer.from(c, 'utf8') }));
       },
-      updateFromDirectory: (
-        _files: Map<string, Buffer>,
-        options: { origin: { hash: string } },
-      ) => {
+      updateFromDirectory: (_files: Map<string, Buffer>, options: { origin: { hash: string } }) => {
         updated.push({ originHash: options.origin.hash });
         return {
           name: 'raw-material-inventory',
@@ -244,9 +234,14 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     const updated: Array<{ originHash: string | null }> = [];
     let caught: unknown;
     try {
-      updateOntoMarketSkill(root, updatableLibrary({ name: 'raw-material-inventory' }, MARKET_FILES, updated), REF, {
-        confirmModified: false,
-      });
+      updateOntoMarketSkill(
+        root,
+        updatableLibrary({ name: 'raw-material-inventory' }, MARKET_FILES, updated),
+        REF,
+        {
+          confirmModified: false,
+        },
+      );
     } catch (err) {
       caught = err;
     }
@@ -258,7 +253,12 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     const updated: Array<{ originHash: string | null }> = [];
     const record = {
       name: 'raw-material-inventory',
-      origin: { kind: 'onto_market', scenario: '其他场景', ontology: '其他本体', hash: marketHash() },
+      origin: {
+        kind: 'onto_market',
+        scenario: '其他场景',
+        ontology: '其他本体',
+        hash: marketHash(),
+      },
     };
     let caught: unknown;
     try {
@@ -276,7 +276,12 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     const updated: Array<{ originHash: string | null }> = [];
     const record = {
       name: 'raw-material-inventory',
-      origin: { kind: 'onto_market', scenario: '生产调度', ontology: '原材料采购和库存', hash: marketHash() },
+      origin: {
+        kind: 'onto_market',
+        scenario: '生产调度',
+        ontology: '原材料采购和库存',
+        hash: marketHash(),
+      },
     };
     const result = updateOntoMarketSkill(root, updatableLibrary(record, MARKET_FILES, updated), REF, {
       confirmModified: false,
@@ -292,7 +297,12 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     const updated: Array<{ originHash: string | null }> = [];
     const record = {
       name: 'raw-material-inventory',
-      origin: { kind: 'onto_market', scenario: '生产调度', ontology: '原材料采购和库存', hash: marketHash() },
+      origin: {
+        kind: 'onto_market',
+        scenario: '生产调度',
+        ontology: '原材料采购和库存',
+        hash: marketHash(),
+      },
     };
     const modified = { ...MARKET_FILES, 'SKILL.md': SKILL_MD.replace('正文', '正文（人工改）') };
     let caught: unknown;
@@ -311,7 +321,12 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     const updated: Array<{ originHash: string | null }> = [];
     const record = {
       name: 'raw-material-inventory',
-      origin: { kind: 'onto_market', scenario: '生产调度', ontology: '原材料采购和库存', hash: marketHash() },
+      origin: {
+        kind: 'onto_market',
+        scenario: '生产调度',
+        ontology: '原材料采购和库存',
+        hash: marketHash(),
+      },
     };
     const modified = { ...MARKET_FILES, 'SKILL.md': SKILL_MD.replace('正文', '正文（人工改）') };
     const result = updateOntoMarketSkill(root, updatableLibrary(record, modified, updated), REF, {

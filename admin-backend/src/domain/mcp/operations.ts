@@ -105,11 +105,7 @@ export class McpServiceOperations {
   async test(name: string, probe?: McpProbeInput): Promise<McpTestReport> {
     const saved = this.requireConfig(name);
     const overrideTransport = probe?.transport;
-    if (
-      overrideTransport !== undefined &&
-      overrideTransport !== 'http' &&
-      overrideTransport !== 'stdio'
-    ) {
+    if (overrideTransport !== undefined && overrideTransport !== 'http' && overrideTransport !== 'stdio') {
       throw new ApiError(
         ERROR_CODES.VALIDATION_FAILED,
         `transport 须为 http 或 stdio（当前：${JSON.stringify(overrideTransport)}）`,
@@ -124,17 +120,10 @@ export class McpServiceOperations {
           : null
         : saved.command;
     const args =
-      probe?.args !== undefined
-        ? Array.isArray(probe.args)
-          ? probe.args.map(String)
-          : null
-        : saved.args;
+      probe?.args !== undefined ? (Array.isArray(probe.args) ? probe.args.map(String) : null) : saved.args;
     // 请求头（2026-10-08）：不携带 = 沿用已保存的（界面回显是掩码，拿不到真值），
     // 携带（含 `{}`）= 按表单当前值。仅 http 有意义，stdio 一律不带
-    const headers =
-      transport === 'http'
-        ? normalizeHeaders(probe?.headers, saved.headers)
-        : {};
+    const headers = transport === 'http' ? normalizeHeaders(probe?.headers, saved.headers) : {};
     return this.deps.mcpClient.test(name, {
       transport,
       url: transport === 'http' ? url : null,
@@ -174,8 +163,7 @@ export class McpServiceOperations {
         checked_at: checkedAt,
       };
     } catch (err) {
-      const info =
-        err instanceof ApiError ? { code: err.code, message: err.message } : classifyMcpError(err);
+      const info = err instanceof ApiError ? { code: err.code, message: err.message } : classifyMcpError(err);
       return {
         ok: false,
         tools: [],
@@ -207,7 +195,11 @@ export class McpServiceOperations {
   async stats(): Promise<McpStatsResult> {
     try {
       const result = await this.deps.runtime.mcpCallStats();
-      return { stats_available: result.stats_available, items: result.items, groups: result.groups };
+      return {
+        stats_available: result.stats_available,
+        items: result.items,
+        groups: result.groups,
+      };
     } catch {
       return { stats_available: false, items: [], groups: [] };
     }

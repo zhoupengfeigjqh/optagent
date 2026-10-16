@@ -60,7 +60,13 @@ describe('validateAgentInput', () => {
 
   it('边界：三类引用可为空数组，且 MUST NOT 缺字段', () => {
     const out = validateAgentInput(
-      { ...validRaw, enabled_tools: [], mcp_services: [], skills: [], scenario: { scenario: '空', data_prep_dirs: ['算法规则'] } },
+      {
+        ...validRaw,
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '空', data_prep_dirs: ['算法规则'] },
+      },
       { index, takenNames: new Set() },
     );
     expect(out.enabled_tools).toEqual([]);
@@ -90,10 +96,7 @@ describe('validateAgentInput', () => {
     // 主要使命仅空白
     expectCode(
       () =>
-        validateAgentInput(
-          { ...validRaw, soul: soulDesign('   \n\t ') },
-          { index, takenNames: new Set() },
-        ),
+        validateAgentInput({ ...validRaw, soul: soulDesign('   \n\t ') }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
     // 角色简介缺失
@@ -141,8 +144,7 @@ describe('validateAgentInput', () => {
       ERROR_CODES.ADM_AGENT_INVALID_REF,
     );
     expectCode(
-      () =>
-        validateAgentInput({ ...validRaw, mcp_services: ['ocr2'] }, { index, takenNames: new Set() }),
+      () => validateAgentInput({ ...validRaw, mcp_services: ['ocr2'] }, { index, takenNames: new Set() }),
       ERROR_CODES.ADM_AGENT_INVALID_REF,
     );
     expectCode(
@@ -161,13 +163,11 @@ describe('validateAgentInput', () => {
       ERROR_CODES.VALIDATION_FAILED,
     );
     expectCode(
-      () =>
-        validateAgentInput({ ...validRaw, skills: [''] }, { index, takenNames: new Set() }),
+      () => validateAgentInput({ ...validRaw, skills: [''] }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
     expectCode(
-      () =>
-        validateAgentInput({ ...validRaw, mcp_services: 'ocr' }, { index, takenNames: new Set() }),
+      () => validateAgentInput({ ...validRaw, mcp_services: 'ocr' }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
   });
@@ -188,10 +188,7 @@ describe('validateAgentInput', () => {
   it('异常：场景目录清单缺字段 / 含空值 / 重复 / 含分隔符 → VALIDATION_FAILED', () => {
     expectCode(
       () =>
-        validateAgentInput(
-          { ...validRaw, scenario: { scenario: 'x' } },
-          { index, takenNames: new Set() },
-        ),
+        validateAgentInput({ ...validRaw, scenario: { scenario: 'x' } }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
     for (const dirs of [['a', ''], ['a', 'a'], ['a/b'], ['a\\b'], ['..'], ['a', 'b..c']]) {
@@ -217,113 +214,109 @@ describe('validateAgentInput', () => {
 
   it('原样保留：主要使命的换行与标点、条目顺序均不被规范化（FR-017）', () => {
     // 004 起"原样回显"作用于结构化字段：使命内部换行 / 标点 / 制表符原样保留
-    const mission = '第一行\n第二行，含标点！\r\n第三行\t制表符'
+    const mission = '第一行\n第二行，含标点！\r\n第三行\t制表符';
     const out = validateAgentInput(
       { ...validRaw, soul: soulDesign(mission), enabled_tools: ['calculator', 'read_file'] },
       { index, takenNames: new Set() },
-    )
-    expect(out.soul.mission).toBe(mission)
-    expect(out.enabled_tools).toEqual(['calculator', 'read_file'])
-  })
+    );
+    expect(out.soul.mission).toBe(mission);
+    expect(out.enabled_tools).toEqual(['calculator', 'read_file']);
+  });
 });
 
 describe('deriveDescription（004：优先取角色简介）', () => {
   it('有角色简介时取简介', () => {
-    expect(deriveDescription(soulDesign('使命正文', { intro: '生产计划助手' }))).toBe(
-      '生产计划助手',
-    )
-  })
+    expect(deriveDescription(soulDesign('使命正文', { intro: '生产计划助手' }))).toBe('生产计划助手');
+  });
 
   it('无角色简介时回退使命首行并去掉 Markdown 井号', () => {
-    expect(deriveDescription(soulDesign('\n# 生产计划助手\n正文', { intro: '' }))).toBe(
-      '生产计划助手',
-    )
-    expect(deriveDescription(soulDesign('  普通首行  \n第二行', { intro: '' }))).toBe('普通首行')
-  })
+    expect(deriveDescription(soulDesign('\n# 生产计划助手\n正文', { intro: '' }))).toBe('生产计划助手');
+    expect(deriveDescription(soulDesign('  普通首行  \n第二行', { intro: '' }))).toBe('普通首行');
+  });
 
   it('超长时截断为 80 字符以内', () => {
-    const text = deriveDescription(soulDesign('x'.repeat(200), { intro: '' }))
-    expect(text.length).toBe(80)
-    expect(text.endsWith('…')).toBe(true)
-  })
+    const text = deriveDescription(soulDesign('x'.repeat(200), { intro: '' }));
+    expect(text.length).toBe(80);
+    expect(text.endsWith('…')).toBe(true);
+  });
 
   it('简介与使命都为空时返回空串', () => {
-    expect(deriveDescription(soulDesign('', { intro: '' }))).toBe('')
-    expect(deriveDescription(soulDesign('\n\n', { intro: '' }))).toBe('')
-  })
-})
+    expect(deriveDescription(soulDesign('', { intro: '' }))).toBe('');
+    expect(deriveDescription(soulDesign('\n\n', { intro: '' }))).toBe('');
+  });
+});
 
 describe('AgentDesignService', () => {
-  let root: string
-  let store: PlatformStore
-  let service: AgentDesignService
+  let root: string;
+  let store: PlatformStore;
+  let service: AgentDesignService;
 
   beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-design-'))
-    store = new PlatformStore(root)
-    store.ensureLayout()
-    service = new AgentDesignService(store)
-  })
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-design-'));
+    store = new PlatformStore(root);
+    store.ensureLayout();
+    service = new AgentDesignService(store);
+  });
 
   afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true })
-  })
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 
   it('新建 → 读取 → 原样回显；revision 递增', () => {
-    const created = service.create(validRaw, index, store.revision())
-    expect(created.name).toBe('demo')
-    expect(created.abnormal).toBe(false)
-    const read = service.view('demo', index)
-    expect(read.soul).toEqual(validRaw.soul)
-    expect(read.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价', '算法规则'])
-    expect(read.revision).toBe(created.revision)
-  })
+    const created = service.create(validRaw, index, store.revision());
+    expect(created.name).toBe('demo');
+    expect(created.abnormal).toBe(false);
+    const read = service.view('demo', index);
+    expect(read.soul).toEqual(validRaw.soul);
+    expect(read.scenario.data_prep_dirs).toEqual(['生产计划', '产线电价', '算法规则']);
+    expect(read.revision).toBe(created.revision);
+  });
 
   it('不存在 → ADM_AGENT_NOT_FOUND', () => {
-    expectCode(() => service.read('nope'), ERROR_CODES.ADM_AGENT_NOT_FOUND)
-  })
+    expectCode(() => service.read('nope'), ERROR_CODES.ADM_AGENT_NOT_FOUND);
+  });
 
   it('编辑改名：旧文档被移除，新文档可读（FR-015）', () => {
-    service.create(validRaw, index, store.revision())
-    service.update('demo', { ...validRaw, name: 'demo2' }, index, store.revision())
-    expect(service.exists('demo')).toBe(false)
-    expect(service.view('demo2', index).name).toBe('demo2')
-  })
+    service.create(validRaw, index, store.revision());
+    service.update('demo', { ...validRaw, name: 'demo2' }, index, store.revision());
+    expect(service.exists('demo')).toBe(false);
+    expect(service.view('demo2', index).name).toBe('demo2');
+  });
 
   it('编辑时版本不符 → ADM_CONFIG_REVISION_CONFLICT，且内容不变（FR-008）', () => {
-    service.create(validRaw, index, store.revision())
-    const stale = store.revision() - 1
+    service.create(validRaw, index, store.revision());
+    const stale = store.revision() - 1;
     expectCode(
       () => service.update('demo', { ...validRaw, soul: soulDesign('新内容') }, index, stale),
       ERROR_CODES.ADM_CONFIG_REVISION_CONFLICT,
-    )
-    expect(service.read('demo').soul).toEqual(validRaw.soul)
-  })
+    );
+    expect(service.read('demo').soul).toEqual(validRaw.soul);
+  });
 
   it('异常态：引用被移除后列表与详情均标记异常并指明失效对象（FR-013）', () => {
-    service.create({ ...validRaw, skills: ['pdf-parse'] }, index, store.revision())
+    service.create({ ...validRaw, skills: ['pdf-parse'] }, index, store.revision());
     const shrunk = createReferenceIndex({
       builtinTools: ['read_file', 'calculator'],
       mcpServices: ['ocr'],
       skills: [],
-    })
-    const list = service.list(1, shrunk)
-    expect(list.items[0]?.abnormal).toBe(true)
-    expect(list.items[0]?.abnormal_reason).toContain('pdf-parse')
-    expect(service.view('demo', shrunk).abnormal_reason).toContain('SKILL')
-  })
+    });
+    const list = service.list(1, shrunk);
+    expect(list.items[0]?.abnormal).toBe(true);
+    expect(list.items[0]?.abnormal_reason).toContain('pdf-parse');
+    expect(service.view('demo', shrunk).abnormal_reason).toContain('SKILL');
+  });
 
   it('列表按名称稳定排序并固定每页 8 项', () => {
     for (let i = 0; i < 10; i += 1) {
-      service.create({ ...validRaw, name: `agent-${i}` }, index, store.revision())
+      service.create({ ...validRaw, name: `agent-${i}` }, index, store.revision());
     }
-    const page1 = service.list(1, index)
-    expect(page1.total).toBe(10)
-    expect(page1.items).toHaveLength(8)
-    expect(page1.page_size).toBe(8)
-    expect(page1.total_pages).toBe(2)
-    expect(service.list(2, index).items).toHaveLength(2)
-  })
+    const page1 = service.list(1, index);
+    expect(page1.total).toBe(10);
+    expect(page1.items).toHaveLength(8);
+    expect(page1.page_size).toBe(8);
+    expect(page1.total_pages).toBe(2);
+    expect(service.list(2, index).items).toHaveLength(2);
+  });
 
   it('读取归一化：历史文档缺 data_prep_fields、SOUL 为字符串时，对外恒为结构化形态', () => {
     // 手工写入"本字段引入前"的文档形态，模拟线上既有数据
@@ -339,7 +332,7 @@ describe('AgentDesignService', () => {
 
     expect(service.read('legacy').scenario.data_prep_fields).toEqual({});
     expect(service.view('legacy', index).scenario.data_prep_fields).toEqual({});
-  })
+  });
 
   it('读取归一化（2026-10-13）：缺 data_prep_uploads 时**不写键**（可选键，缺失 ≡ 平台默认）', () => {
     // 与 data_prep_fields 的取舍不同：后者恒补 `{}`，前者是可选键，补空壳会让"未配置"与"显式清空"无法区分
@@ -357,7 +350,7 @@ describe('AgentDesignService', () => {
     expect(scenario.data_prep_fields).toEqual({});
     expect('data_prep_uploads' in scenario).toBe(false);
     expect(scenario.data_prep_uploads).toBeUndefined();
-  })
+  });
 
   it('读取归一化（2026-10-13）：手改坏成非对象的 data_prep_uploads 被丢弃，合法对象原样保留', () => {
     store.writeJson('agents/up.json', {
@@ -389,13 +382,13 @@ describe('AgentDesignService', () => {
       updated_at: '2026-10-13T00:00:00.000Z',
     });
     expect(service.read('up2').scenario.data_prep_uploads).toEqual({ 生产计划: ['.csv', '.xlsx'] });
-  })
+  });
 
   it('读取归一化（007）：结构化 SOUL 缺开关与条数 → 补齐为 false / 缺省 3（对外恒有该键）', () => {
     // "结构化但没有这两个键"的形态：本次字段引入前的存档
-    const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>
-    delete stale.next_action_hints
-    delete stale.next_action_hints_count
+    const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>;
+    delete stale.next_action_hints;
+    delete stale.next_action_hints_count;
     store.writeJson('agents/stale.json', {
       name: 'stale',
       soul: stale,
@@ -404,40 +397,44 @@ describe('AgentDesignService', () => {
       skills: [],
       scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
       updated_at: '2026-10-12T00:00:00.000Z',
-    })
+    });
 
-    const soul = service.read('stale').soul
-    expect(soul.next_action_hints).toBe(false)
-    expect(soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
-  })
+    const soul = service.read('stale').soul;
+    expect(soul.next_action_hints).toBe(false);
+    expect(soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault);
+  });
 
   it('读取归一化（007）：手改坏的条数收敛到缺省（一个坏数字不该让数字人打不开）', () => {
     const writeWithCount = (value: unknown): void => {
       store.writeJson('agents/stale.json', {
         name: 'stale',
-        soul: { ...soulDesign('你是助手'), next_action_hints: true, next_action_hints_count: value },
+        soul: {
+          ...soulDesign('你是助手'),
+          next_action_hints: true,
+          next_action_hints_count: value,
+        },
         enabled_tools: [],
         mcp_services: [],
         skills: [],
         scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
         updated_at: '2026-10-12T00:00:00.000Z',
-      })
-    }
+      });
+    };
 
     for (const broken of [0, -1, 2.5, SOUL_LIMITS.nextActionHintsMax + 1, '3', null, {}]) {
-      writeWithCount(broken)
-      expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault)
+      writeWithCount(broken);
+      expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault);
     }
 
     // 合法值原样保留（收敛只对坏值生效）
-    writeWithCount(SOUL_LIMITS.nextActionHintsMax)
-    expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax)
-  })
+    writeWithCount(SOUL_LIMITS.nextActionHintsMax);
+    expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax);
+  });
 
   it('删除后不再出现在列表与读取结果中', () => {
-    service.create(validRaw, index, store.revision())
-    service.remove('demo')
-    expect(service.exists('demo')).toBe(false)
-    expectCode(() => service.read('demo'), ERROR_CODES.ADM_AGENT_NOT_FOUND)
-  })
-})
+    service.create(validRaw, index, store.revision());
+    service.remove('demo');
+    expect(service.exists('demo')).toBe(false);
+    expectCode(() => service.read('demo'), ERROR_CODES.ADM_AGENT_NOT_FOUND);
+  });
+});

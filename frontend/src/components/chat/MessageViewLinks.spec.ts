@@ -11,6 +11,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import type { ViewLink } from '../../api/types'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import MessageViewLinks from './MessageViewLinks.vue'
 
 /** 未传 origin 时组件取当前页面入口；断言按同一来源，避免硬编码主机 */
@@ -109,11 +110,37 @@ describe('MessageViewLinks —— 上限与溢出（TR-47）', () => {
 })
 
 describe('MessageViewLinks —— 交互', () => {
-  it('点击链接派发 open-link（与 MessageContent 同口径：由上层直跳新窗口）', async () => {
+  it('点击入口派发 open-view（归一化 href + 显示名 + 来源形态）', async () => {
     const wrapper = mountLinks([{ url: '/a' }])
 
     await wrapper.find('.message-view-link').trigger('click')
 
-    expect(wrapper.emitted('open-link')).toEqual([[`${ORIGIN}/a`]])
+    expect(wrapper.emitted('open-view')).toEqual([
+      [{ url: `${ORIGIN}/a`, name: '/a', kind: 'url' }],
+    ])
+  })
+
+  it('有名称时派发的 name 与显示文案同源（不额外推断）', async () => {
+    const wrapper = mountLinks([{ url: '/a/b', name: '一车间产能明细' }])
+
+    await wrapper.find('.message-view-link').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([
+      [{ url: `${ORIGIN}/a/b`, name: '一车间产能明细', kind: 'url' }],
+    ])
+  })
+
+  it('filePath 入口：派发 kind:file + 原路径（上层据此走文件预览口径，不按地址预检）', async () => {
+    const wrapper = mountLinks([{ url: '数据准备/9月计划.xlsx', kind: 'file' }])
+
+    await wrapper.find('.message-view-link').trigger('click')
+
+    const [payload] = (wrapper.emitted('open-view')?.[0] ?? []) as [ViewLinkTarget]
+
+    expect(payload.kind).toBe('file')
+    expect(payload.filePath).toBe('数据准备/9月计划.xlsx')
+    expect(payload.name).toBe('数据准备/9月计划.xlsx')
+    // `url` 仍是可点开的绝对地址（中键 / 复制链接照旧可用）
+    expect(payload.url).toContain('/api/files/preview?dir=')
   })
 })

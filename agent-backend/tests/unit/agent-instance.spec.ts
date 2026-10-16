@@ -123,7 +123,9 @@ describe('MCP.json 的 file_args 取值路径', () => {
     const bundle = loadAgentConfig(
       writeAgent('demo', [
         withFileArgs({
-          hd_algorithm_input_parser: { 'items[].excelFileUrl': 'url:from=items[].realRelativePath' },
+          hd_algorithm_input_parser: {
+            'items[].excelFileUrl': 'url:from=items[].realRelativePath',
+          },
         }),
       ]),
     );
@@ -137,9 +139,7 @@ describe('MCP.json 的 file_args 取值路径', () => {
     let caught: unknown;
     try {
       loadAgentConfig(
-        writeAgent('demo', [
-          withFileArgs({ tool: { excelFileUrl: 'url:from=items[0].path' } }),
-        ]),
+        writeAgent('demo', [withFileArgs({ tool: { excelFileUrl: 'url:from=items[0].path' } })]),
       );
     } catch (err) {
       caught = err;

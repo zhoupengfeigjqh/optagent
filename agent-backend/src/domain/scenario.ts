@@ -363,10 +363,7 @@ export function parseSpaceDir(
   const segments = dir.split('/').filter((s) => s.length > 0);
   const space = segments[0] as SpaceName | undefined;
   if (!space || !(SPACES as readonly string[]).includes(space)) {
-    throw new DirValidationError(
-      403,
-      `目录 ${dir} 不开放，允许的空间：${SPACES.join('、')}`,
-    );
+    throw new DirValidationError(403, `目录 ${dir} 不开放，允许的空间：${SPACES.join('、')}`);
   }
   if (space === SPACE_PREP) {
     const sub = segments[1];

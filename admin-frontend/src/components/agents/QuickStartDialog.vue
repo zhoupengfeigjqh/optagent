@@ -304,7 +304,12 @@ onBeforeUnmount(() => {
         <button type="button" class="btn" data-test="quick-start-cancel" @click="requestClose">
           取消
         </button>
-        <button type="button" class="btn btn--primary" data-test="quick-start-confirm" @click="confirm">
+        <button
+          type="button"
+          class="btn btn--primary"
+          data-test="quick-start-confirm"
+          @click="confirm"
+        >
           确定
         </button>
       </div>

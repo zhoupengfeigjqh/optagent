@@ -10,12 +10,12 @@
  * （管理界面为**零第三方运行时依赖**，唯一 `dependencies` 是 `vue`）。
  * 与 `admin-backend/scripts/check-deps.mjs` **MUST 保持对称**（原则八）。
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import process from 'node:process';
+import fs from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
 
 /** D2 登记：管理界面零第三方运行时依赖 */
-const ALLOWED_DEPENDENCIES = new Set(['vue']);
+const ALLOWED_DEPENDENCIES = new Set(['vue'])
 
 /** D2 登记的开发依赖（版本与既有 `frontend` 一致） */
 const ALLOWED_DEV_DEPENDENCIES = new Set([
@@ -34,25 +34,25 @@ const ALLOWED_DEV_DEPENDENCIES = new Set([
   'vite',
   'vitest',
   'vue-tsc',
-]);
+])
 
-const pkgPath = path.join(process.cwd(), 'package.json');
-const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+const pkgPath = path.join(process.cwd(), 'package.json')
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
 
-const violations = [];
+const violations = []
 for (const [kind, allowed] of [
   ['dependencies', ALLOWED_DEPENDENCIES],
   ['devDependencies', ALLOWED_DEV_DEPENDENCIES],
 ]) {
   for (const name of Object.keys(pkg[kind] ?? {})) {
-    if (!allowed.has(name)) violations.push(`${kind}: ${name}`);
+    if (!allowed.has(name)) violations.push(`${kind}: ${name}`)
   }
 }
 
 if (violations.length > 0) {
-  console.error('[check:deps] 出现 research.md D2 未登记的依赖（原则六），请先登记再引入：');
-  for (const v of violations) console.error(`  ${v}`);
-  process.exit(1);
+  console.error('[check:deps] 出现 research.md D2 未登记的依赖（原则六），请先登记再引入：')
+  for (const v of violations) console.error(`  ${v}`)
+  process.exit(1)
 }
 
-console.log('[check:deps] 通过：全部依赖均已在 research.md D2 登记');
+console.log('[check:deps] 通过：全部依赖均已在 research.md D2 登记')

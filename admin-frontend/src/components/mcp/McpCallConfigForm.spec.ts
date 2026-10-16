@@ -18,6 +18,21 @@ vi.mock('../../api/mcp', () => ({
   testMcpService: (...a: unknown[]) => testMcpService(...a),
 }))
 
+/**
+ * 该服务当前公开的工具。
+ *
+ * ocr_image 声明了 resultUrl → 出现在「后台计算（异步工具）」可选项里；
+ * parse_excel 未声明 → 该区不展示它（2026-10-03 产品决定：只列支持异步的工具）。
+ */
+const TOOLS = [
+  {
+    name: 'ocr_image',
+    description: '识别图片中的文字',
+    parameters: { type: 'object', properties: { resultUrl: { type: 'string' } } },
+  },
+  { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
+]
+
 const SERVICE: McpServiceDetail = {
   name: 'ocr',
   transport: 'http',
@@ -26,17 +41,11 @@ const SERVICE: McpServiceDetail = {
   command: null,
   args: null,
   file_args: { ocr_image: { image: 'url' } },
-  tools: [
-    // ocr_image 声明了 resultUrl → 出现在「后台计算（异步工具）」可选项里；
-    // parse_excel 未声明 → 该区不展示它（2026-10-03 产品决定：只列支持异步的工具）
-    {
-      name: 'ocr_image',
-      description: '识别图片中的文字',
-      parameters: { type: 'object', properties: { resultUrl: { type: 'string' } } },
-    },
-    { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
-  ],
+  tools: TOOLS,
   tools_truncated: false,
+  // 全量候选（2026-10-15）：本夹具白名单为空 = 不限制，两者必然相同，故复用同一数组
+  available_tools: TOOLS,
+  available_tools_truncated: false,
   tools_error: null,
   references: [],
   revision: 1,
@@ -184,7 +193,13 @@ describe('McpCallConfigForm —— 编辑态', () => {
   })
 
   it('stdio 传输时展示启动命令与参数输入，且不展示连接地址', async () => {
-    const wrapper = mountForm({ ...SERVICE, transport: 'stdio', url: null, command: 'python', args: ['-u', 'srv.py'] })
+    const wrapper = mountForm({
+      ...SERVICE,
+      transport: 'stdio',
+      url: null,
+      command: 'python',
+      args: ['-u', 'srv.py'],
+    })
     await flushPromises()
     expect(wrapper.find('#mcp-command').exists()).toBe(true)
     expect((wrapper.find('#mcp-args').element as HTMLTextAreaElement).value).toBe('-u\nsrv.py')
@@ -276,15 +291,29 @@ describe('McpCallConfigForm —— 发起测试（FR-047）', () => {
   it('以表单当前值（未保存也生效）探测，且无需先保存', async () => {
     testMcpService.mockReset().mockResolvedValue({
       ok: false,
-      connectivity: { ok: false, duration_ms: 0, error_code: 'MCP_CONNECTION_REFUSED', message: 'x' },
-      capability: { ok: false, method: 'ping', duration_ms: 0, error_code: 'MCP_NOT_ATTEMPTED', message: 'y' },
+      connectivity: {
+        ok: false,
+        duration_ms: 0,
+        error_code: 'MCP_CONNECTION_REFUSED',
+        message: 'x',
+      },
+      capability: {
+        ok: false,
+        method: 'ping',
+        duration_ms: 0,
+        error_code: 'MCP_NOT_ATTEMPTED',
+        message: 'y',
+      },
       target: { transport: 'http', url: 'http://192.168.1.9:9999/mcp', command: null },
       checked_at: '2026-09-15T00:00:00.000Z',
     })
     const wrapper = mountForm({ ...SERVICE, url: 'http://192.168.1.9:9999/mcp' })
     await flushPromises()
 
-    await wrapper.findAll('button').find((b) => b.text().includes('发起测试'))?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('发起测试'))
+      ?.trigger('click')
     await flushPromises()
 
     // 探测目标 = 表单当前值，而非已保存的旧地址

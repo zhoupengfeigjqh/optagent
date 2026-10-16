@@ -113,7 +113,8 @@ function domainExecute(
     case 'list_dir':
       return (p) => listToolDir(fa, String(p.dir));
     case 'grep_files':
-      return (p) => grepToolFiles(fa, String(p.pattern), typeof p.dir === 'string' ? p.dir : undefined);
+      return (p) =>
+        grepToolFiles(fa, String(p.pattern), typeof p.dir === 'string' ? p.dir : undefined);
     case 'calculator':
       return (p) => calcTool(String(p.expression));
     case 'read_skill':

@@ -143,7 +143,10 @@ describe('SkillViewer —— 文件查看与编辑', () => {
   })
 
   it('读取失败：显示可读原因，不静默留白', async () => {
-    fetchSkillFile.mockRejectedValue({ code: 'ADM_SKILL_NOT_FOUND', message: '技能内不存在该文件：x' })
+    fetchSkillFile.mockRejectedValue({
+      code: 'ADM_SKILL_NOT_FOUND',
+      message: '技能内不存在该文件：x',
+    })
     const wrapper = mountViewer()
     await flushPromises()
 

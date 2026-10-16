@@ -22,7 +22,11 @@ import {
 } from '../../src/infra/mcp/mcp-manager.js';
 import type { McpServerConfig } from '../../src/types.js';
 
-const CFG: McpServerConfig = { name: 'ocr', transport: 'streamable-http', url: 'http://ocr:8000/mcp' };
+const CFG: McpServerConfig = {
+  name: 'ocr',
+  transport: 'streamable-http',
+  url: 'http://ocr:8000/mcp',
+};
 
 /** 脚本化假客户端：每段"会话"的行为由调用方注入，可中途切换（模拟服务关停/重启） */
 function fakeClient(script: {
@@ -73,7 +77,11 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
 
   it('服务重启场景：旧 session 被拒（404）→ 降级 → 退避重连拿到新 session 自动恢复', async () => {
     // 第一段会话：服务"活着"但服务端已遗忘其 session id（容器重启过）
-    let session = fakeClient({ callTool: async () => { throw transportError(); } });
+    let session = fakeClient({
+      callTool: async () => {
+        throw transportError();
+      },
+    });
     const statuses: Array<[string, string]> = [];
     const manager = new McpManager({
       timeoutMs: 1000,
@@ -136,7 +144,11 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
   });
 
   it('降级后下次使用即惰性恢复：requireClient 顺势补连，且**那次调用直接成功**', async () => {
-    let session = fakeClient({ callTool: async () => { throw new Error('connect ECONNREFUSED'); } });
+    let session = fakeClient({
+      callTool: async () => {
+        throw new Error('connect ECONNREFUSED');
+      },
+    });
     const manager = new McpManager({ timeoutMs: 1000, createClient: async () => session });
     await manager.connectAll([CFG]);
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('ECONNREFUSED');

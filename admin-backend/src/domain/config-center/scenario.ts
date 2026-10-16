@@ -22,14 +22,7 @@ import { isSafeDirName, isSafeName } from './naming.js';
  * 与运行环境（`agent-backend` `SCENARIO_FIELD_TYPES`）、管理界面（`admin-frontend`）
  * **同一枚举**，三处 MUST 同步（契约 `admin-api.md` §5.2、`runtime-api-delta.md` §3.1）。
  */
-export const SCENARIO_FIELD_TYPES = [
-  'string',
-  'integer',
-  'number',
-  'boolean',
-  'object',
-  'array',
-] as const;
+export const SCENARIO_FIELD_TYPES = ['string', 'integer', 'number', 'boolean', 'object', 'array'] as const;
 export type ScenarioFieldType = (typeof SCENARIO_FIELD_TYPES)[number];
 
 /** 单个数据准备目录的字段约束上限（防滥用，与 `UPLOAD_MAX_MB` 同类的边界治理） */
@@ -104,9 +97,7 @@ export interface AgentScenario {
 }
 
 /** 归一化读取：历史文档缺 `data_prep_fields` 时按"无字段约束"处理 */
-export function scenarioFields(
-  scenario: AgentScenario | null | undefined,
-): Record<string, ScenarioField[]> {
+export function scenarioFields(scenario: AgentScenario | null | undefined): Record<string, ScenarioField[]> {
   const fields = scenario?.data_prep_fields;
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return {};
   return fields;
@@ -141,10 +132,7 @@ export function normalizeScenario(raw: unknown): AgentScenario {
     throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '文件空间场景名必填且不能为空（FR-020）');
   }
   if (!isSafeName(scenario)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `场景名非法：${scenario}（不得含路径分隔符或 ".."）`,
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `场景名非法：${scenario}（不得含路径分隔符或 ".."）`);
   }
   if (!Array.isArray(obj.data_prep_dirs)) {
     throw new ApiError(
@@ -194,16 +182,10 @@ export function normalizeScenario(raw: unknown): AgentScenario {
  * - 同目录内重复 ⇒ 去重（归一为一份）；
  * - 顺序 ⇒ 按 `DATA_PREP_UPLOAD_EXTS` 固定顺序重排。
  */
-function normalizeScenarioUploads(
-  raw: unknown,
-  dirs: readonly string[],
-): Record<string, string[]> {
+function normalizeScenarioUploads(raw: unknown, dirs: readonly string[]): Record<string, string[]> {
   if (raw === undefined || raw === null) return {};
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      '可上传文件类型须为对象（目录名 → 扩展名清单）',
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '可上传文件类型须为对象（目录名 → 扩展名清单）');
   }
 
   const out: Record<string, string[]> = {};
@@ -256,34 +238,22 @@ function normalizeScenarioUploads(
  * 边界：**空清单的目录不写入结果**——"缺失"即"无字段约束"，不留空数组空壳
  * （界面上点「保存」但未加任何字段 = 该目录不受约束）。
  */
-function normalizeScenarioFields(
-  raw: unknown,
-  dirs: readonly string[],
-): Record<string, ScenarioField[]> {
+function normalizeScenarioFields(raw: unknown, dirs: readonly string[]): Record<string, ScenarioField[]> {
   if (raw === undefined || raw === null) return {};
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      '数据准备字段约束须为对象（目录名 → 字段清单）',
-    );
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '数据准备字段约束须为对象（目录名 → 字段清单）');
   }
 
   const out: Record<string, ScenarioField[]> = {};
   for (const [dir, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!dirs.includes(dir)) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `字段约束引用了数据准备目录清单外的目录：${dir}`,
-      );
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `字段约束引用了数据准备目录清单外的目录：${dir}`);
     }
     if (!Array.isArray(value)) {
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `目录 ${dir} 的字段清单须为数组`);
     }
     if (value.length > MAX_FIELDS_PER_DIR) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `目录 ${dir} 的字段数超过上限 ${MAX_FIELDS_PER_DIR}`,
-      );
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `目录 ${dir} 的字段数超过上限 ${MAX_FIELDS_PER_DIR}`);
     }
 
     const list: ScenarioField[] = [];

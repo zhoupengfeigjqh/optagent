@@ -45,7 +45,9 @@ const SAVED = {
 }
 
 beforeEach(() => {
-  listSkills.mockReset().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
+  listSkills
+    .mockReset()
+    .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
   getSkill.mockReset().mockResolvedValue(DETAIL)
   fetchSkillFile.mockReset()
   saveSkillFile.mockReset()
@@ -55,7 +57,13 @@ beforeEach(() => {
 
 describe('useSkills', () => {
   it('loadList：写入分页结果', async () => {
-    listSkills.mockResolvedValue({ items: [DETAIL], total: 1, page: 1, page_size: 8, total_pages: 1 })
+    listSkills.mockResolvedValue({
+      items: [DETAIL],
+      total: 1,
+      page: 1,
+      page_size: 8,
+      total_pages: 1,
+    })
     const skills = useSkills()
     await skills.loadList()
     expect(skills.list.value?.total).toBe(1)
@@ -118,7 +126,12 @@ describe('useSkills', () => {
 
     const saved = await skills.saveFile('pdf-parse', 'references/手册.md', '# 新手册\n', 'h1')
 
-    expect(saveSkillFile).toHaveBeenCalledWith('pdf-parse', 'references/手册.md', '# 新手册\n', 'h1')
+    expect(saveSkillFile).toHaveBeenCalledWith(
+      'pdf-parse',
+      'references/手册.md',
+      '# 新手册\n',
+      'h1',
+    )
     expect(saved?.hash).toBe('new-hash')
     expect(listSkills).toHaveBeenCalled()
     expect(skills.error.value).toBeNull()
@@ -136,7 +149,13 @@ describe('useSkills', () => {
   })
 
   it('install：成功返回结果并刷新列表；overwrite 透传（FR-040）', async () => {
-    installSkill.mockResolvedValue({ name: 'pdf-parse', description: '', files: [], installed_at: 'x', overwritten: true })
+    installSkill.mockResolvedValue({
+      name: 'pdf-parse',
+      description: '',
+      files: [],
+      installed_at: 'x',
+      overwritten: true,
+    })
     const skills = useSkills()
     const result = await skills.install(new File(['PK'], 'a.zip'), true)
 

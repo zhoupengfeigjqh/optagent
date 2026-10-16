@@ -72,7 +72,10 @@ describe('McpCardList', () => {
 
   it('点击「查看详情」发出 open(name)', async () => {
     const wrapper = mountList()
-    await wrapper.findAll('button').find((b) => b.text() === '查看详情')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '查看详情')
+      ?.trigger('click')
     expect(wrapper.emitted('open')?.[0]).toEqual(['ocr'])
   })
 

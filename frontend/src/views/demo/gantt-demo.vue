@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import ZGantt from '#/components/z-gantt/index.vue';
-import ZGanttTable from '#/components/z-gantt-table/index.vue';
-import dayjs from 'dayjs';
-import { ref, onMounted } from 'vue';
-
+import ZGantt from '#/components/z-gantt/index.vue'
+import ZGanttTable from '#/components/z-gantt-table/index.vue'
+import dayjs from 'dayjs'
+import { ref, onMounted } from 'vue'
 
 const ganttData = ref<any[]>([
   {
@@ -356,9 +355,9 @@ const ganttData = ref<any[]>([
     end: Date.UTC(2024, 8, 6),
     y: 49,
   },
-]);
+])
 
-ganttData.value = [];
+ganttData.value = []
 
 const colors = [
   '#FF6B6B',
@@ -371,7 +370,7 @@ const colors = [
   '#5F27CD',
   '#00D2D3',
   '#FF9F43',
-];
+]
 
 const ganttOption = {
   // 全局图表样式
@@ -445,25 +444,24 @@ const ganttOption = {
       })),
     },
   ],
-};
+}
 
 const tableData = ref(
-  Array.from(
-    { length: 21 },
-    (_, index) => `任务${index}sdsdssssssssssssssssssssssssssss`,
-  ).map((item) => ({
-    test: item,
-    test2: 'fake data',
-  })),
-);
+  Array.from({ length: 21 }, (_, index) => `任务${index}sdsdssssssssssssssssssssssssssss`).map(
+    (item) => ({
+      test: item,
+      test2: 'fake data',
+    }),
+  ),
+)
 
 const ganttTalbeOption = {
   ...ganttOption,
-};
+}
 
 const handlePointClickMouseY = (event: any) => {
-  console.log('abcefg', event);
-};
+  console.log('abcefg', event)
+}
 
 // setTimeout(() => {
 //   const baseStart = ganttData.value[ganttData.value.length - 1].start;
@@ -481,42 +479,37 @@ const handlePointClickMouseY = (event: any) => {
 //   }
 //   ganttData.value = [...ganttData.value, ...data];
 // }, 3000);
-let times = 0;
-let timer: any = null;
+let times = 0
+let timer: any = null
 
 const setData = () => {
   timer = setInterval(() => {
     if (times > 1) {
-      clearInterval(timer);
-      return;
+      clearInterval(timer)
+      return
     }
     // 每次只是在原数据的基础上做简单变动（如模拟进度偏移，或深拷贝），避免重复创建
-    const baseStart =
-      ganttData.value[ganttData.value.length - 1]?.start || dayjs();
-    const baseEnd = ganttData.value[ganttData.value.length - 1]?.end || dayjs();
-    const oneDay = 24 * 3600 * 1000;
-    let data = [];
+    const baseStart = ganttData.value[ganttData.value.length - 1]?.start || dayjs()
+    const oneDay = 24 * 3600 * 1000
+    let data = []
     for (let i = 0; i < 20; i++) {
       data.push({
         name: `任务${baseStart + oneDay * (i + 1)}`,
         id: `task${baseStart + oneDay * (i + 1)}`,
         start: baseStart + oneDay * (i + 1),
         end: baseStart + oneDay * (i + 2),
-        y:
-          Math.floor(Math.random() * 11) > 10
-            ? 10
-            : Math.floor(Math.random() * 11),
+        y: Math.floor(Math.random() * 11) > 10 ? 10 : Math.floor(Math.random() * 11),
         color: colors[Math.floor(Math.random() * colors.length)],
-      });
+      })
     }
-    ganttData.value = [...ganttData.value, ...data];
-    times++;
-  }, 1000);
-};
+    ganttData.value = [...ganttData.value, ...data]
+    times++
+  }, 1000)
+}
 
 onMounted(() => {
-  setData();
-});
+  setData()
+})
 
 const cols = ref([
   {
@@ -536,64 +529,77 @@ const cols = ref([
   //   minWidth: 80,
   //   ellipsis: true,
   // },
-]);
+])
 
-const activeKey = ref('1');
+const activeKey = ref('1')
 
 const handleTabChange = (key: string) => {
-  activeKey.value = key;
+  activeKey.value = key
   setTimeout(() => {
-    testKey.value++;
-  }, 1000);
-};
+    testKey.value++
+  }, 1000)
+}
 
 const formState = ref({
   timeNav: '1',
-});
+})
 
-const ganttTableRef = ref();
-const testKey = ref(1);
-const handleTimeNavChange = (value: string) => {
-  // formState.value.timeNav = value;
-  testKey.value = 0;
-  testKey.value = 1;
-};
+const testKey = ref(1)
+const handleTimeNavChange = () => {
+  testKey.value = 0
+  testKey.value = 1
+}
 </script>
 
 <template>
   <div>
     <a-tabs :active-key="activeKey" @change="handleTabChange">
-      <a-tab-pane tab="甘特图" key="1">
+      <a-tab-pane key="1" tab="甘特图">
         <main class="flex">
           <div class="min-w-0 bg-white p-2">
-            <ZGantt :option="ganttOption" :data="ganttData" @handlePointClickMouseY="handlePointClickMouseY"
-              :is-top-nav="false" style="min-width: 0" />
+            <ZGantt
+              :option="ganttOption"
+              :data="ganttData"
+              :is-top-nav="false"
+              style="min-width: 0"
+              @handle-point-click-mouse-y="handlePointClickMouseY"
+            />
           </div>
 
-          <div style="
-              width: 4px;
-              height: 1000px;
-              background-color: rgba(217, 233, 251, 0.2);
-            "></div>
+          <div style="width: 4px; height: 1000px; background-color: rgba(217, 233, 251, 0.2)"></div>
           <div class="min-w-0 bg-white p-2">
-            <ZGantt :option="ganttOption" :data="ganttData" @handlePointClickMouseY="handlePointClickMouseY"
-              :is-top-nav="false" style="min-width: 0" />
+            <ZGantt
+              :option="ganttOption"
+              :data="ganttData"
+              :is-top-nav="false"
+              style="min-width: 0"
+              @handle-point-click-mouse-y="handlePointClickMouseY"
+            />
           </div>
         </main>
       </a-tab-pane>
-      <a-tab-pane tab="甘特图表格" key="2">
+      <a-tab-pane key="2" tab="甘特图表格">
         <main class="bg-white p-4">
           <a-form :model="formState" :label-col="{ span: 4 }" :wrapper-col="{ span: 14 }">
             <a-form-item label="时间导航栏">
-              <a-radio-group v-model:value="formState.timeNav" button-style="solid" @change="handleTimeNavChange">
+              <a-radio-group
+                v-model:value="formState.timeNav"
+                button-style="solid"
+                @change="handleTimeNavChange"
+              >
                 <a-radio-button value="1">置底</a-radio-button>
                 <a-radio-button value="2">置顶</a-radio-button>
               </a-radio-group>
             </a-form-item>
           </a-form>
-          <ZGanttTable v-model:cols="cols" :gantt-data="ganttData" :gantt-option="ganttTalbeOption"
-            :table-data="tableData" :nav-position="formState.timeNav === '1' ? 'bottom' : 'top'" v-if="testKey"
-            ref="ganttTableRef">
+          <ZGanttTable
+            v-if="testKey"
+            v-model:cols="cols"
+            :gantt-data="ganttData"
+            :gantt-option="ganttTalbeOption"
+            :table-data="tableData"
+            :nav-position="formState.timeNav === '1' ? 'bottom' : 'top'"
+          >
             <template #test>123</template>
           </ZGanttTable>
         </main>

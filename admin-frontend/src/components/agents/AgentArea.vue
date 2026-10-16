@@ -152,7 +152,7 @@ watch(
         :total="list?.total ?? 0"
         :page="page"
         :loading="listLoading"
-        :error="(listError as never)"
+        :error="listError as never"
         @update:page="
           (next) => {
             page = next

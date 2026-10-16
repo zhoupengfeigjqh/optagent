@@ -17,13 +17,19 @@ function csvBuffer(text: string): Buffer {
 
 function xlsxBuffer(rows: unknown[][]): Buffer {
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  return XLSX.write({ SheetNames: ['规则'], Sheets: { 规则: sheet } }, { type: 'buffer', bookType: 'xlsx' });
+  return XLSX.write(
+    { SheetNames: ['规则'], Sheets: { 规则: sheet } },
+    { type: 'buffer', bookType: 'xlsx' },
+  );
 }
 
 /** 真实 `.xls`（OLE2/BIFF8）缓冲：SheetJS 写入，避免手搓二进制 fixture */
 function xlsBuffer(rows: unknown[][]): Buffer {
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  return XLSX.write({ SheetNames: ['规则'], Sheets: { 规则: sheet } }, { type: 'buffer', bookType: 'biff8' });
+  return XLSX.write(
+    { SheetNames: ['规则'], Sheets: { 规则: sheet } },
+    { type: 'buffer', bookType: 'biff8' },
+  );
 }
 
 describe('parseRuleFile —— CSV', () => {
@@ -40,7 +46,9 @@ describe('parseRuleFile —— CSV', () => {
   });
 
   it('优先级列识别：priority（大小写不敏感）与「优先级」均可；无则 null', () => {
-    expect(parseRuleFile('a.csv', csvBuffer('code,Priority\nR001,2')).priority_column).toBe('Priority');
+    expect(parseRuleFile('a.csv', csvBuffer('code,Priority\nR001,2')).priority_column).toBe(
+      'Priority',
+    );
     expect(parseRuleFile('b.csv', csvBuffer('code,名称\nR001,x')).priority_column).toBeNull();
   });
 
@@ -92,7 +100,9 @@ describe('parseRuleFile —— XLSX', () => {
 
 describe('parseRuleFile —— 异常', () => {
   it('不支持的扩展名 → 可读错误', () => {
-    expect(() => parseRuleFile('rules.json', csvBuffer('{}'))).toThrow('仅支持 .xlsx / .xls / .csv');
+    expect(() => parseRuleFile('rules.json', csvBuffer('{}'))).toThrow(
+      '仅支持 .xlsx / .xls / .csv',
+    );
     expect(() => parseRuleFile('rules', csvBuffer('a'))).toThrow('仅支持 .xlsx / .xls / .csv');
   });
 

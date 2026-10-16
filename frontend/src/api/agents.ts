@@ -41,8 +41,7 @@ export interface AgentsApi {
 export function createAgentsApi(client: HttpClient): AgentsApi {
   return {
     list: () => client.get<AgentListItem[]>('/api/agents'),
-    detail: (agentName) =>
-      client.get<DigitalHuman>(`/api/agents/${encodeURIComponent(agentName)}`),
+    detail: (agentName) => client.get<DigitalHuman>(`/api/agents/${encodeURIComponent(agentName)}`),
     select: (agentName) =>
       client.post<SelectAgentResponse>(`/api/agents/${encodeURIComponent(agentName)}/select`),
     exit: () => client.post<ExitAgentResponse>('/api/agents/current/exit'),

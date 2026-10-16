@@ -58,10 +58,7 @@ export function parseSkillMetadata(raw: string): SkillMetadata {
     throw new ApiError(ERROR_CODES.ADM_SKILL_ARCHIVE_INVALID, 'SKILL.md 元数据缺少非空的 name');
   }
   if (description === '') {
-    throw new ApiError(
-      ERROR_CODES.ADM_SKILL_ARCHIVE_INVALID,
-      'SKILL.md 元数据缺少非空的 description',
-    );
+    throw new ApiError(ERROR_CODES.ADM_SKILL_ARCHIVE_INVALID, 'SKILL.md 元数据缺少非空的 description');
   }
   if (!isSafeSkillName(name)) {
     throw new ApiError(

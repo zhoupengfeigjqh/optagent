@@ -109,9 +109,9 @@ describe('部署产物留存：`agents/` 整体覆盖（SC-007、FR-028）', () 
     // 该目录由平台独占管理 → 整体覆盖后不再存在
     expect(fs.existsSync(foreign)).toBe(false);
     // 本次产物照常在位
-    expect(
-      fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md')),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md'))).toBe(
+      true,
+    );
   });
 });
 

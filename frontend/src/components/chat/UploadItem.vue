@@ -28,9 +28,7 @@ const statusLabel = computed(() => STATUS_LABEL[props.doc.status])
 const sizeText = computed(() => formatFileSize(props.doc.size))
 const displayName = computed(() => props.doc.serverFilename ?? props.doc.name)
 const failureText = computed(() =>
-  props.doc.status === 'failed' && props.doc.error
-    ? toUserMessage(props.doc.error, 'upload')
-    : '',
+  props.doc.status === 'failed' && props.doc.error ? toUserMessage(props.doc.error, 'upload') : '',
 )
 </script>
 

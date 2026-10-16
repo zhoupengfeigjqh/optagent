@@ -39,7 +39,11 @@ beforeEach(async () => {
     received.push(req.headers);
     // 复刻自建发布容器的表现：没有令牌直接 401（连 MCP 握手都到不了）
     res.writeHead(401, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ detail: '缺少或无效的访问令牌（请在 MCP 配置中带上该发布服务的令牌请求头）' }));
+    res.end(
+      JSON.stringify({
+        detail: '缺少或无效的访问令牌（请在 MCP 配置中带上该发布服务的令牌请求头）',
+      }),
+    );
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;

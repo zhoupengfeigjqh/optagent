@@ -47,10 +47,7 @@ function readLogLines(): LogLine[] {
 }
 
 /** 日志是异步落盘的，轮询等待目标行出现（避免用固定 sleep 造成偶发失败） */
-async function waitForLog(
-  predicate: (lines: LogLine[]) => boolean,
-  timeoutMs = 2000,
-): Promise<LogLine[]> {
+async function waitForLog(predicate: (lines: LogLine[]) => boolean, timeoutMs = 2000): Promise<LogLine[]> {
   const deadline = Date.now() + timeoutMs;
   let lines = readLogLines();
   while (!predicate(lines) && Date.now() < deadline) {
@@ -91,7 +88,15 @@ function writeRows(lines: LogLine[], actionPart: string): LogLine[] {
 
 beforeEach(async () => {
   fx = await createFixture();
-  fx.runtime.tools = [{ name: 'read_file', label: '读取文件', description_template: 'x', parameters: {}, writable: false }];
+  fx.runtime.tools = [
+    {
+      name: 'read_file',
+      label: '读取文件',
+      description_template: 'x',
+      parameters: {},
+      writable: false,
+    },
+  ];
 });
 
 afterEach(async () => {
@@ -170,10 +175,7 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
   });
 
   it('multipart 写操作（技能安装）也能记下对象名：由路由标注补齐', async () => {
-    const body = multipartBody(
-      {},
-      { name: 'skill-1.zip', content: zipFixture({ 'SKILL.md': SKILL_MD }) },
-    );
+    const body = multipartBody({}, { name: 'skill-1.zip', content: zipFixture({ 'SKILL.md': SKILL_MD }) });
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/skills/install',
@@ -182,7 +184,9 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
     });
     expect(res.statusCode).toBe(201);
 
-    const lines = await waitForLog((rows) => rows.some((row) => row.event === 'admin.write' && String(row.action).includes('skills/install')));
+    const lines = await waitForLog((rows) =>
+      rows.some((row) => row.event === 'admin.write' && String(row.action).includes('skills/install')),
+    );
     const row = lines.find((item) => String(item.action ?? '').includes('skills/install'));
     expect(row).toMatchObject({
       event: 'admin.write',

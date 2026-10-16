@@ -205,10 +205,7 @@ function scanMarketSkills(root: string): OntoMarketItem[] {
  * - `conflict`：库内已有同名技能但**并非**来自市场（ZIP 上传等）——同样拒绝；
  * - `invalid`：市场侧文件格式无效（原因见 `invalid_reason`）。
  */
-export function listOntoMarket(
-  root: string | null,
-  skills: SkillLibraryService,
-): OntoMarketListing {
+export function listOntoMarket(root: string | null, skills: SkillLibraryService): OntoMarketListing {
   if (root === null || root === '') {
     return {
       configured: false,

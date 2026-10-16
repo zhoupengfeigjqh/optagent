@@ -139,7 +139,8 @@ function coerce(schema: FieldSchema, value: unknown): unknown {
     const items = itemSchemaOf(schema)
     return items === null ? [...value] : value.map((element) => coerce(items, element))
   }
-  if (control === 'number' && typeof value === 'string' && isNumericValue(value)) return Number(value)
+  if (control === 'number' && typeof value === 'string' && isNumericValue(value))
+    return Number(value)
   return value
 }
 

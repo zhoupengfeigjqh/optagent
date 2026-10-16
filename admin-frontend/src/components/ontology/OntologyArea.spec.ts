@@ -65,7 +65,13 @@ beforeEach(() => {
 
 describe('OntologyArea', () => {
   it('挂载即拉列表并渲染卡片与工具栏入口', async () => {
-    listOntologies.mockResolvedValue({ items: [listItem()], total: 1, page: 1, page_size: 8, total_pages: 1 })
+    listOntologies.mockResolvedValue({
+      items: [listItem()],
+      total: 1,
+      page: 1,
+      page_size: 8,
+      total_pages: 1,
+    })
     const wrapper = mountArea()
     await flushPromises()
 
@@ -75,7 +81,13 @@ describe('OntologyArea', () => {
   })
 
   it('点「查看」→ 导航路径带上目录名与场景名两段身份', async () => {
-    listOntologies.mockResolvedValue({ items: [listItem()], total: 1, page: 1, page_size: 8, total_pages: 1 })
+    listOntologies.mockResolvedValue({
+      items: [listItem()],
+      total: 1,
+      page: 1,
+      page_size: 8,
+      total_pages: 1,
+    })
     const wrapper = mountArea()
     await flushPromises()
 

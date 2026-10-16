@@ -100,10 +100,7 @@ export class RuntimeClient {
       !Array.isArray(body.items) ||
       !Array.isArray(body.groups)
     ) {
-      throw new ApiError(
-        ERROR_CODES.ADM_RUNTIME_UNREACHABLE,
-        '运行环境返回的调用统计结构不合法',
-      );
+      throw new ApiError(ERROR_CODES.ADM_RUNTIME_UNREACHABLE, '运行环境返回的调用统计结构不合法');
     }
     return body;
   }
@@ -132,10 +129,7 @@ export class RuntimeClient {
     try {
       return (await response.json()) as T;
     } catch {
-      throw new ApiError(
-        ERROR_CODES.ADM_RUNTIME_UNREACHABLE,
-        `运行环境端点 ${apiPath} 返回非 JSON 响应`,
-      );
+      throw new ApiError(ERROR_CODES.ADM_RUNTIME_UNREACHABLE, `运行环境端点 ${apiPath} 返回非 JSON 响应`);
     }
   }
 }

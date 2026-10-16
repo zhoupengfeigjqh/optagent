@@ -164,7 +164,9 @@ describe('InteractionField —— 标量控件', () => {
     const proposed = { 开关: true, 类型: '峰' }
 
     const onOff = mountField({ root, path: ['开关'], proposed })
-    expect((onOff.wrapper.find('input[type=checkbox]').element as HTMLInputElement).checked).toBe(true)
+    expect((onOff.wrapper.find('input[type=checkbox]').element as HTMLInputElement).checked).toBe(
+      true,
+    )
     await onOff.wrapper.find('input[type=checkbox]').setValue(false)
     expect(onOff.form.valueOf(['开关'])).toBe(false)
 
@@ -209,9 +211,10 @@ describe('InteractionField —— 对象分组（递归）', () => {
     await toggle.trigger('click')
 
     expect(wrapper.find('.interaction-dialog__group').exists()).toBe(false)
-    expect((wrapper.find('textarea.interaction-dialog__input--json').element as HTMLTextAreaElement).value).toBe(
-      JSON.stringify({ a: 'v' }, null, 2),
-    )
+    expect(
+      (wrapper.find('textarea.interaction-dialog__input--json').element as HTMLTextAreaElement)
+        .value,
+    ).toBe(JSON.stringify({ a: 'v' }, null, 2))
   })
 })
 
@@ -426,9 +429,14 @@ describe('InteractionField —— 算法规则入口落点', () => {
     expect(wrapper.find('.rule-picker__table').exists()).toBe(true)
 
     await wrapper.findAll('tbody input[type="checkbox"]')[0]!.setValue(true)
-    await wrapper.findAll('button').find((button) => button.text().includes('确认选择'))!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('确认选择'))!
+      .trigger('click')
 
-    expect(form.valueOf(['input', 'targetPriorities'])).toEqual([{ ruleId: 'PR001', rulePriority: 1 }])
+    expect(form.valueOf(['input', 'targetPriorities'])).toEqual([
+      { ruleId: 'PR001', rulePriority: 1 },
+    ])
   })
 })
 
@@ -440,7 +448,10 @@ describe('InteractionField —— 文件卡片与上下文边界', () => {
       proposed: { 路径: '数据准备/生产计划/plan.csv' },
       mention: makeMention(),
       fileIndex: new Map([
-        ['数据准备/生产计划/plan.csv', { dir: '数据准备/生产计划', file: { filename: 'plan.csv', size: 2048, updated_at: '' } }],
+        [
+          '数据准备/生产计划/plan.csv',
+          { dir: '数据准备/生产计划', file: { filename: 'plan.csv', size: 2048, updated_at: '' } },
+        ],
       ]),
     })
 

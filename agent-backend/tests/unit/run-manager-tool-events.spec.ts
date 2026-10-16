@@ -52,8 +52,19 @@ function recordingAgent(
 }
 
 async function* toolTurn(resultText: string): AsyncIterable<LlmEvent> {
-  yield { type: 'tool_call_start', callId: 'call_1', name: 'read_file', argsDigest: { path: '数据准备/x.csv' } };
-  yield { type: 'tool_call_end', callId: 'call_1', name: 'read_file', status: 'success', resultText };
+  yield {
+    type: 'tool_call_start',
+    callId: 'call_1',
+    name: 'read_file',
+    argsDigest: { path: '数据准备/x.csv' },
+  };
+  yield {
+    type: 'tool_call_end',
+    callId: 'call_1',
+    name: 'read_file',
+    status: 'success',
+    resultText,
+  };
   yield { type: 'content_delta', delta: '我读到了计划量' };
   yield { type: 'done', usage: { inputTokens: 10, outputTokens: 5 } };
 }
@@ -68,7 +79,13 @@ function runTurn(
   agent: RunAgentLike,
   userMessage: string,
 ): { settled: Promise<void>; events: SsePayload[] } {
-  const opts: StartRunOptions = { userId: 'admin', threadId: 'th1', agent, userMessage, thinking: false };
+  const opts: StartRunOptions = {
+    userId: 'admin',
+    threadId: 'th1',
+    agent,
+    userMessage,
+    thinking: false,
+  };
   const run = manager.startRun(opts);
   const events: SsePayload[] = [];
   run.subscribe((e) => events.push(e));
@@ -122,7 +139,11 @@ describe('工具记录落盘', () => {
   it('工具调用落盘，且 message_id 与该轮 assistant 消息一致（前端据此挂卡片）', async () => {
     const manager = new RunManager({ history, usage, toolEvents });
     const captured: AgentRunRequest[] = [];
-    const { settled, events } = runTurn(manager, recordingAgent(captured, () => toolTurn('车间,计划量\n冲压,1200')), '看下计划');
+    const { settled, events } = runTurn(
+      manager,
+      recordingAgent(captured, () => toolTurn('车间,计划量\n冲压,1200')),
+      '看下计划',
+    );
     await settled;
 
     const done = events.find((e) => e.type === 'done');
@@ -143,7 +164,11 @@ describe('工具记录落盘', () => {
 
   it('工具记录按归属消息分组可查（详情接口挂卡片的入口）', async () => {
     const manager = new RunManager({ history, usage, toolEvents });
-    const { settled } = runTurn(manager, recordingAgent([], () => toolTurn('ok')), '看下计划');
+    const { settled } = runTurn(
+      manager,
+      recordingAgent([], () => toolTurn('ok')),
+      '看下计划',
+    );
     await settled;
 
     const grouped = toolEvents.readByMessage('admin', AGENT, 'th1');
@@ -154,10 +179,18 @@ describe('工具记录落盘', () => {
 describe('下一轮回灌', () => {
   it('内联小结果：原文回灌到对应轮次的 assistant 消息（带工具名，位置感正确）', async () => {
     const manager = new RunManager({ history, usage, toolEvents });
-    await runTurn(manager, recordingAgent([], () => toolTurn('车间,计划量\n冲压,1200')), '看下计划').settled;
+    await runTurn(
+      manager,
+      recordingAgent([], () => toolTurn('车间,计划量\n冲压,1200')),
+      '看下计划',
+    ).settled;
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '再确认下').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '再确认下',
+    ).settled;
 
     expect(captured).toHaveLength(1);
     const messages = captured[0]!.messages;
@@ -175,10 +208,18 @@ describe('下一轮回灌', () => {
       Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
     ); // > 内联阈值
     const manager = new RunManager({ history, usage, toolEvents });
-    await runTurn(manager, recordingAgent([], () => toolTurn(big)), '看下计划').settled;
+    await runTurn(
+      manager,
+      recordingAgent([], () => toolTurn(big)),
+      '看下计划',
+    ).settled;
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '第 3 页呢').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '第 3 页呢',
+    ).settled;
 
     const req = captured[0]!;
     // 正文一个字节都不进 messages
@@ -193,10 +234,18 @@ describe('下一轮回灌', () => {
 
   it('未装配 toolEvents：不落盘也不回灌（既有行为零变化）', async () => {
     const manager = new RunManager({ history, usage });
-    await runTurn(manager, recordingAgent([], () => toolTurn('内部结果')), '看下计划').settled;
+    await runTurn(
+      manager,
+      recordingAgent([], () => toolTurn('内部结果')),
+      '看下计划',
+    ).settled;
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '再确认下').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '再确认下',
+    ).settled;
 
     // R18 起 `systemExtra` 恒含【当前时间】段 ⇒ 断言"外置索引段长度为 0"
     expect(captured[0]!.systemExtra ?? '').not.toContain('【可用的工具结果原文】');
@@ -204,7 +253,16 @@ describe('下一轮回灌', () => {
     expect(joined).not.toContain('内部结果');
     expect(
       fs.existsSync(
-        path.join(root, 'users', 'admin', 'user-data', AGENT, 'threads', 'th1', 'tool-events.jsonl'),
+        path.join(
+          root,
+          'users',
+          'admin',
+          'user-data',
+          AGENT,
+          'threads',
+          'th1',
+          'tool-events.jsonl',
+        ),
       ),
     ).toBe(false);
   });
@@ -218,7 +276,11 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     const manager = new RunManager({ history, usage, summary });
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '继续',
+    ).settled;
 
     const req = captured[0]!;
     expect(req.messages).toHaveLength(70 - 45 + 1); // 池子 + 本轮新消息
@@ -234,7 +296,11 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     const manager = new RunManager({ history, usage, summary });
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '继续',
+    ).settled;
 
     const req = captured[0]!;
     // 摘要覆盖 h0..h39，正文从 h40 一直到最后一条 —— 两者之间没有任何空隙
@@ -249,7 +315,11 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     const manager = new RunManager({ history, usage });
 
     const captured: AgentRunRequest[] = [];
-    await runTurn(manager, recordingAgent(captured, () => plainTurn()), '继续').settled;
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '继续',
+    ).settled;
 
     const req = captured[0]!;
     expect(req.messages).toHaveLength(POOL_MAX_MESSAGES + 1);

@@ -89,8 +89,7 @@ export function useDeploy() {
       error.value = toErrorInfo(err)
       // 校验类失败：把 details.errors 一次列全（SC-020）
       const details = (err as { details?: unknown }).details as
-        | { errors?: DeployValidationError[] }
-        | undefined
+        { errors?: DeployValidationError[] } | undefined
       if (details?.errors) validationErrors.value = details.errors
       return false
     } finally {

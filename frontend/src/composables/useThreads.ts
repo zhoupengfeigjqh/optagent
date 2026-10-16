@@ -25,7 +25,11 @@ import type {
   Message,
   ToolCallResult,
 } from '../api/types'
-import { HISTORY_DEFAULT_LIMIT, HISTORY_EXPANDED_LIMIT, MESSAGE_PAGE_SIZE } from '../constants/limits'
+import {
+  HISTORY_DEFAULT_LIMIT,
+  HISTORY_EXPANDED_LIMIT,
+  MESSAGE_PAGE_SIZE,
+} from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
 import type { ToastStore } from './useToast'

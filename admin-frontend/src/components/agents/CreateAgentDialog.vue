@@ -66,7 +66,9 @@ async function loadExisting(): Promise<void> {
   try {
     const first = await listAgents(1)
     const rest = await Promise.all(
-      Array.from({ length: Math.max(0, first.total_pages - 1) }, (_, index) => listAgents(index + 2)),
+      Array.from({ length: Math.max(0, first.total_pages - 1) }, (_, index) =>
+        listAgents(index + 2),
+      ),
     )
     existing.value = [...first.items, ...rest.flatMap((page) => page.items)]
   } catch (err) {
@@ -218,8 +220,7 @@ onBeforeUnmount(() => {
 
       <!-- 复制异常数字人是允许的（便于"以坏为模板修"），但必须提前讲明后果 -->
       <p v-if="selectedAbnormal" class="create-agent-dialog__warn" role="alert">
-        该数字人的部分引用已失效：{{ selected?.abnormal_reason }}。
-        复制后需先修正这些引用才能保存。
+        该数字人的部分引用已失效：{{ selected?.abnormal_reason }}。 复制后需先修正这些引用才能保存。
       </p>
 
       <p v-if="listError" class="create-agent-dialog__warn" role="alert">{{ listError }}</p>

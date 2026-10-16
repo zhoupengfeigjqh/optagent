@@ -80,7 +80,9 @@ describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推
   }
 
   it('带合法卡片 → 解码并归一形状（tools / guidance 缺失补齐，与快照端点同一条校验）', () => {
-    const data = doneData({ next_actions: { message_id: 'm-1', actions: [{ prompt: '整理表格' }] } })
+    const data = doneData({
+      next_actions: { message_id: 'm-1', actions: [{ prompt: '整理表格' }] },
+    })
 
     expect(data.next_actions).toEqual({
       message_id: 'm-1',
@@ -95,12 +97,19 @@ describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推
 
   it('脏卡片（形状非法 / actions 为空）→ 不写该键，不抛错', () => {
     expect('next_actions' in doneData({ next_actions: { foo: 1 } })).toBe(false)
-    expect('next_actions' in doneData({ next_actions: { message_id: 'm-1', actions: [] } })).toBe(false)
+    expect('next_actions' in doneData({ next_actions: { message_id: 'm-1', actions: [] } })).toBe(
+      false,
+    )
   })
 })
 
 describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
-  const base = { content: '帮我梳理昨天订单的交付风险', thinking: false, model: null, attachments: [] }
+  const base = {
+    content: '帮我梳理昨天订单的交付风险',
+    thinking: false,
+    model: null,
+    attachments: [],
+  }
 
   it('有指引时随请求体下发（模型能看到，用户气泡里看不到）', () => {
     const body = buildSendMessageBody({

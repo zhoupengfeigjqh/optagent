@@ -17,7 +17,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoryStore } from '../../src/domain/history.js';
 import { MAX_ACTIONS, NextActionsStore } from '../../src/domain/next-actions.js';
-import { RunManager, type AgentRunRequest, type RunAgentLike } from '../../src/domain/run-manager.js';
+import {
+  RunManager,
+  type AgentRunRequest,
+  type RunAgentLike,
+} from '../../src/domain/run-manager.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { LlmEvent } from '../../src/types.js';
 
@@ -61,7 +65,8 @@ function stubAgent(round: number, recorder?: { maxes: Array<number | undefined> 
     // 注意签名：`RunAgentLike.run` 收**一个请求对象**（`{ threadId, messages, runtime, … }`），
     // 不是 `(messages, options)` —— 传错参数会让 generator 内部抛错、整轮走 error 分支
     async *run(req: AgentRunRequest) {
-      if (req.runtime) req.runtime.availableTools = [{ name: 'read_file', description: '读取文件' }];
+      if (req.runtime)
+        req.runtime.availableTools = [{ name: 'read_file', description: '读取文件' }];
       recorder?.maxes.push(req.nextActionsMax);
       yield { type: 'content_delta', delta: `第 ${round} 轮回答正文` } as LlmEvent;
       yield { type: 'content_delta', delta: tailFor(round) } as LlmEvent;
@@ -71,7 +76,9 @@ function stubAgent(round: number, recorder?: { maxes: Array<number | undefined> 
 }
 
 /** 收集 SSE content 增量（模拟前端"用户所见"） */
-function collectContent(run: { subscribe(cb: (e: { type: string; data: unknown }) => void): void }): {
+function collectContent(run: {
+  subscribe(cb: (e: { type: string; data: unknown }) => void): void;
+}): {
   deltas: string[];
   doneData: Array<Record<string, unknown>>;
 } {
@@ -119,7 +126,10 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
     // done 直推：卡片就绪且归属第 1 轮（无需任何轮询窗口）
     expect(sse1.doneData[0]).toMatchObject({
       message_id: round1.assistantMessageId,
-      next_actions: { message_id: round1.assistantMessageId, actions: [{ prompt: '第 1 轮建议：核对交付日期' }] },
+      next_actions: {
+        message_id: round1.assistantMessageId,
+        actions: [{ prompt: '第 1 轮建议：核对交付日期' }],
+      },
     });
     // 用户所见 = 落盘正文（不含尾部块）
     expect(sse1.deltas.join('')).toBe('第 1 轮回答正文');
@@ -140,7 +150,10 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
     expect(round2.assistantMessageId).not.toBe(round1.assistantMessageId);
     expect(sse2.doneData[0]).toMatchObject({
       message_id: round2.assistantMessageId,
-      next_actions: { message_id: round2.assistantMessageId, actions: [{ prompt: '第 2 轮建议：核对交付日期' }] },
+      next_actions: {
+        message_id: round2.assistantMessageId,
+        actions: [{ prompt: '第 2 轮建议：核对交付日期' }],
+      },
     });
     // 快照只归最新一轮：第 1 轮的消息 id 上不再有任何卡片（FR-015 / FR-017）
     expect(store.read(USER, AGENT, THREAD)?.message_id).toBe(round2.assistantMessageId);

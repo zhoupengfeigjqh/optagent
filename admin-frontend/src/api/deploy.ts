@@ -13,7 +13,10 @@ import type {
 
 /** 只读预检（`FR-027`）：让管理员在真正部署前看到**全部**错误项 */
 export function validateDeploy(userIds?: string[]): Promise<DeployValidateResult> {
-  return http.post<DeployValidateResult>('/api/admin/deploy/validate', userIds ? { user_ids: userIds } : {})
+  return http.post<DeployValidateResult>(
+    '/api/admin/deploy/validate',
+    userIds ? { user_ids: userIds } : {},
+  )
 }
 
 /** 部署生效（`FR-026`）；校验不通过时后端返回 409 + `details.errors` */
@@ -36,7 +39,9 @@ export const DEPLOY_HISTORY_FETCH_LIMIT = 100
 export function fetchDeployHistory(
   limit = DEPLOY_HISTORY_FETCH_LIMIT,
 ): Promise<{ items: DeployHistoryItem[]; truncated: boolean }> {
-  return http.get<{ items: DeployHistoryItem[]; truncated: boolean }>('/api/admin/deploy/history', { limit })
+  return http.get<{ items: DeployHistoryItem[]; truncated: boolean }>('/api/admin/deploy/history', {
+    limit,
+  })
 }
 
 /**

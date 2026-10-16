@@ -66,11 +66,7 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
  * 删除走 `removeTree`（见 `src/infra/fs-remove.ts`）：修复前用 `fs.rmSync` 删含非 ASCII
  * 段的路径会**静默不删**，残留会让"移除"用例变成假失败。改后中文场景/目录名也能真删。
  */
-function writeMarketSecurities(
-  ontologyDir: string,
-  content: string | null,
-  scenario = SCENARIO,
-): void {
+function writeMarketSecurities(ontologyDir: string, content: string | null, scenario = SCENARIO): void {
   const file = path.join(market, scenario, ontologyDir, SECURITIES_FILE);
   if (content === null) {
     removeTree(file);
@@ -184,7 +180,11 @@ describe('导入 / 更新 / 删除', () => {
     const result = importOntoMarketOntology(market, ontologies, REF);
     const saved = path.join(dataDir, ONTO_MARKET_DIR, SCENARIO, ONTOLOGY, ONTOLOGY_FILE);
 
-    expect(result).toMatchObject({ scenario: SCENARIO, ontology_dir: ONTOLOGY, overwritten: false });
+    expect(result).toMatchObject({
+      scenario: SCENARIO,
+      ontology_dir: ONTOLOGY,
+      overwritten: false,
+    });
     expect(result.metadata.deployed_version).toBe('v1.0');
     expect(fs.readFileSync(saved, 'utf8')).toBe(YAML);
   });
@@ -217,7 +217,10 @@ describe('导入 / 更新 / 删除', () => {
 
     let caught: unknown;
     try {
-      updateOntoMarketOntology(market, ontologies, { scenario: SCENARIO, ontology_dir: '没导入过' });
+      updateOntoMarketOntology(market, ontologies, {
+        scenario: SCENARIO,
+        ontology_dir: '没导入过',
+      });
     } catch (err) {
       caught = err;
     }

@@ -5,16 +5,16 @@
  * 不必引入表单库（原则六）。
  */
 export interface MultipartPayload {
-  payload: Buffer
-  headers: Record<string, string>
+  payload: Buffer;
+  headers: Record<string, string>;
 }
 
 export function multipartBody(
   fields: Record<string, string>,
   file: { name: string; content: Buffer; contentType?: string },
 ): MultipartPayload {
-  const boundary = `----optagent-test-boundary-${Date.now()}`
-  const chunks: Buffer[] = []
+  const boundary = `----optagent-test-boundary-${Date.now()}`;
+  const chunks: Buffer[] = [];
 
   for (const [name, value] of Object.entries(fields)) {
     chunks.push(
@@ -22,7 +22,7 @@ export function multipartBody(
         `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
         'utf8',
       ),
-    )
+    );
   }
 
   chunks.push(
@@ -33,10 +33,10 @@ export function multipartBody(
     ),
     file.content,
     Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
-  )
+  );
 
   return {
     payload: Buffer.concat(chunks),
     headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
-  }
+  };
 }

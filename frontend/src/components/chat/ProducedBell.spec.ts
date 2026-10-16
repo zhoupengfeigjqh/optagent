@@ -27,12 +27,7 @@ const h = vi.hoisted(() => ({ store: null as unknown }))
 
 vi.mock('../../composables/useProduced', () => ({ useProduced: () => h.store }))
 
-function item(
-  jobId: string,
-  readAt?: string,
-  summary?: string,
-  agentName?: string,
-): ProducedItem {
+function item(jobId: string, readAt?: string, summary?: string, agentName?: string): ProducedItem {
   return {
     job_id: jobId,
     tool: 'ocr__ocr_image',

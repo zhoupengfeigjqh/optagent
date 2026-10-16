@@ -22,11 +22,7 @@ export interface McpRoutesDeps {
   operations: McpServiceOperations;
 }
 
-export function registerMcpRoutes(
-  app: FastifyInstance,
-  ctx: AppContext,
-  deps: McpRoutesDeps,
-): void {
+export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: McpRoutesDeps): void {
   app.get('/api/admin/mcp/services', async (req) => {
     const query = (req.query ?? {}) as { page?: unknown };
     const page = normalizePage(query.page);
@@ -62,7 +58,7 @@ export function registerMcpRoutes(
    * §3.3 新建 MCP 服务（2026-09-27；2026-10-03 起要求工具白名单）。
    *
    * 名称由管理员指定且**全局唯一**（重名 → `ADM_MCP_SERVICE_EXISTS`）；
-   * `allowed_tools` **必填非空**（白名单创建后不可改，见 §3.3 的 `PUT` 说明）。
+   * `allowed_tools` **必填非空**（之后可在 §3.3 的 `PUT` 里调整）。
    * `revision` 可选（带了即做乐观锁校验），响应即"新建后的完整调用配置"。
    *
    * **硬门槛（2026-10-03 产品决定）**：先确认目标**连得上**再落盘——连不上即创建失败，
@@ -76,7 +72,9 @@ export function registerMcpRoutes(
     // ② 连得上才落盘（失败抛 `ADM_RUNTIME_UNREACHABLE`/`VALIDATION_FAILED`，此时尚未写盘）
     await deps.operations.assertReachable(body);
     const { config, revision: nextRevision } = ctx.mcpConfigs.create(body, revision);
-    return reply.status(201).send({ ...toConfigResponse(config), revision: nextRevision, affected_agents: [] });
+    return reply
+      .status(201)
+      .send({ ...toConfigResponse(config), revision: nextRevision, affected_agents: [] });
   });
 
   /**
@@ -84,8 +82,12 @@ export function registerMcpRoutes(
    * 修改 MUST **自动作用于所有引用它的数字人**（下次部署生效），
    * 因此响应里带上 `affected_agents` 让界面明确告知影响面。
    *
-   * **工具白名单不在此端点修改**（2026-10-03）：携带 `allowed_tools` 即
-   * `ADM_MCP_TOOL_SCOPE_LOCKED`——白名单只在新建时设定，容器范围要看数字人能看到什么。
+   * **工具白名单（`allowed_tools`）也在此端点修改**（2026-10-15）：缺省 = 沿用存量，
+   * 提供 = 全量替换且**必填非空**。原先"携带即 409"（`ADM_MCP_TOOL_SCOPE_LOCKED`）
+   * 让工具范围只能靠删服务重建来变更，代价过大，已下架。
+   *
+   * 注意载荷仍是**全量替换**语义：`normalize()` 会为缺省字段补默认值，因此客户端
+   * 只改白名单时 MUST 一并回填其余字段（见前端 `buildToolScopePayload`）。
    */
   app.put('/api/admin/mcp/services/:name', async (req) => {
     const { name } = req.params as { name: string };

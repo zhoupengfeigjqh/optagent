@@ -7,6 +7,8 @@
  * 关键不变式：
  * - `tool_call` 入队、`tool_call_end` 出队 → 工具项**结束后立即消失**（V-05、SC-011）
  * - `done.message_id === null` ⇒ `aborted`（中断轮不落盘，不展示操作与用量）
+ * - 收尾时 `aborted` / **服务端已终局的 `error`** ⇒ `lastRetryableTurn` 置位（可安全重发）；
+ *   断连与传输层失败不置位（后端那一轮可能仍在跑，重发会撞 409 → 应走 `recover()`）
  * - 读取异常 ⇒ `failed`，并通过 `recover()` 重新拉取最终结果（FR-050、SC-020）
  * - `phase === 'streaming'` ⇒ 发送按钮置灰（FR-006）、数字人切换置灰（FR-036）（V-06）
  * - 发送即出现乐观用户气泡（`pendingUserMessage`，十七次调整）：历史刷新（`onTurnFinished`）
@@ -76,11 +78,7 @@ export interface ChatStreamDeps {
   /** 本地乐观更新某条消息的反馈 */
   applyFeedback?: (messageId: string, value: FeedbackValue) => void
   /** 提交反馈到后端（`null` 表示取消） */
-  sendFeedback?: (
-    threadId: string,
-    messageId: string,
-    value: FeedbackValue,
-  ) => Promise<void>
+  sendFeedback?: (threadId: string, messageId: string, value: FeedbackValue) => Promise<void>
   /** HITL：提交/拒绝工具调用的人工确认（`POST /api/threads/{id}/interaction`） */
   submitInteraction?: (
     threadId: string,
@@ -114,11 +112,18 @@ export interface ChatStreamStore {
    */
   pendingUserMessage: Readonly<Ref<PendingUserMessage | null>>
   /**
-   * 最近一个中断轮的用户消息缓存（`stop` 时从 `pendingUserMessage` 抢救）：
-   * 「重新生成」的数据源；新一轮发送或 `reset()` 时清除。中断轮不落盘，
-   * 用户消息本就消失，缓存仅为重试入口，不改变任何持久化语义。
+   * 最近一个**可重试轮**的用户消息缓存（收尾时从 `pendingUserMessage` 抢救）：
+   * 「重新生成」/「重试本轮」的数据源；新一轮发送或 `reset()` 时清除。
+   * 中断轮不落盘（用户消息本就消失），缓存仅为重试入口，不改变任何持久化语义。
+   *
+   * **只在"可安全重发"时置位**（字段名即不变式：非 `null` ⇔ 可重试）：
+   * - `aborted`（用户点了停止）：本轮已丢弃，重发不会撞车 ✅
+   * - `failed` 且**服务端已终局**（收到 `error` 终结事件）：后端已收尾，重发安全 ✅
+   * - `failed` 但属**断连/传输层**（流无终结事件、请求异常）：后端那一轮可能仍在跑
+   *   （断连 = 仅退订，`run` 照跑落盘），此时重发会被 409 `THREAD_RUN_ACTIVE` 挡回——
+   *   正确动作是先 `recover()` 重拉历史看后端到底答完了没有 ❌（保持 `null`）
    */
-  lastAbortedTurn: Readonly<Ref<PendingUserMessage | null>>
+  lastRetryableTurn: Readonly<Ref<PendingUserMessage | null>>
   /** 本轮本地计时起点（毫秒；仅用于兜底展示） */
   startedAt: Readonly<Ref<number | null>>
   canSend: ComputedRef<boolean>
@@ -135,13 +140,11 @@ export interface ChatStreamStore {
    * 提交确认参数：`close=false` 表示服务端终验失败（message 含逐字段错误），
    * 弹窗保持打开可修正重提；其余情况弹窗关闭。
    */
-  submitInteraction(
-    args: Record<string, unknown>,
-  ): Promise<{ close: boolean; message?: string }>
+  submitInteraction(args: Record<string, unknown>): Promise<{ close: boolean; message?: string }>
   /** 拒绝本次调用（弹窗始终关闭；后端把拒绝作为工具结果交给模型收尾） */
   rejectInteraction(): Promise<void>
   send(payload: { content: string; attachments: FileReference[] }): Promise<void>
-  /** 用 `lastAbortedTurn` 重发上一轮（中断气泡的「重新生成」入口，复用 `send` 全链路） */
+  /** 用 `lastRetryableTurn` 重发上一轮（中断气泡「重新生成」/ 失败块「重试本轮」，复用 `send` 全链路） */
   regenerate(): Promise<void>
   /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */
   submitFeedback(messageId: string, value: FeedbackValue): Promise<void>
@@ -166,19 +169,20 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const durationSeconds = ref<number | null>(null)
   const streamingAgentName = ref<string | null>(null)
   const pendingUserMessage = ref<PendingUserMessage | null>(null)
-  const lastAbortedTurn = ref<PendingUserMessage | null>(null)
+  const lastRetryableTurn = ref<PendingUserMessage | null>(null)
   const pendingInteraction = ref<InteractionSnapshot | null>(null)
   const startedAt = ref<number | null>(null)
 
   const now = deps.now ?? ((): number => Date.now())
   let controller: AbortController | null = null
+  /**
+   * 本轮是否以**服务端终局**的 `error` 事件收尾（仅本轮发送期间有效）。
+   * 与"断连/传输层失败"的区别决定 `lastRetryableTurn` 是否置位：见该字段的注释。
+   */
+  let terminalFailure = false
 
-  const canSend = computed(
-    () => phase.value !== RUN_PHASE.STREAMING && draft.value.trim() !== '',
-  )
-  const hasThinking = computed(
-    () => thinkingEnabled.value && streamingThinking.value.trim() !== '',
-  )
+  const canSend = computed(() => phase.value !== RUN_PHASE.STREAMING && draft.value.trim() !== '')
+  const hasThinking = computed(() => thinkingEnabled.value && streamingThinking.value.trim() !== '')
 
   watch(thinkingEnabled, (value) => writeStoredThinking(storage, value))
 
@@ -200,7 +204,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     durationSeconds.value = null
     streamingAgentName.value = null
     pendingUserMessage.value = null
-    lastAbortedTurn.value = null
+    lastRetryableTurn.value = null
     pendingInteraction.value = null
     startedAt.value = null
   }
@@ -234,6 +238,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         durationSeconds.value = event.data.duration_seconds
       }
       streamingAgentName.value = event.data.agent_name
+      // 服务端已终局（本轮落盘 + 释放）：本轮用户消息可安全重发
+      terminalFailure = true
       phase.value = RUN_PHASE.FAILED
     }
   }
@@ -261,8 +267,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     error.value = null
     usage.value = null
     durationSeconds.value = null
-    // 新一轮发送即取代旧的中断缓存（「重新生成」自身也走这里，随后 finally 会重新置位）
-    lastAbortedTurn.value = null
+    // 新一轮发送即取代旧的可重试缓存（「重新生成」自身也走这里，随后 finally 会重新置位）
+    lastRetryableTurn.value = null
+    terminalFailure = false
     startedAt.value = now()
     // 本轮数字人快照（009：本轮必然由当前选中数字人执行；快照仅在存量历史里可能与上一轮不同）
     streamingAgentName.value = deps.getAgentName?.() ?? null
@@ -308,9 +315,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
               // 这样一轮跑完前后的展示与"刷新后的历史卡片"一致；
               // 本轮真正收尾时由 finally 统一清空，交给历史消息接管
               toolCalls.value = toolCalls.value.map((item) =>
-                item.call_id === event.data.call_id
-                  ? { ...item, status: event.data.status }
-                  : item,
+                item.call_id === event.data.call_id ? { ...item, status: event.data.status } : item,
               )
               break
             case 'interaction_request':
@@ -347,9 +352,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       }
     } finally {
       toolCalls.value = []
-      // 中断轮：用户消息在清除前抢救进 lastAbortedTurn，供「重新生成」复用（不落盘语义不变）
-      if (phase.value === RUN_PHASE.ABORTED && pendingUserMessage.value) {
-        lastAbortedTurn.value = pendingUserMessage.value
+      // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
+      // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
+      // 断连/传输层失败不缓存——后端那一轮可能仍在跑，重发会撞上 409（见该字段注释）
+      const retryable =
+        phase.value === RUN_PHASE.ABORTED || (phase.value === RUN_PHASE.FAILED && terminalFailure)
+      if (retryable && pendingUserMessage.value) {
+        lastRetryableTurn.value = pendingUserMessage.value
       }
       // 乐观用户气泡收口：完成轮由历史真身接管，失败/中断轮维持既有降级语义（不残留、不重复）
       pendingUserMessage.value = null
@@ -358,13 +367,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   }
 
   /**
-   * 「重新生成」：用 `lastAbortedTurn` 重发上一轮。
+   * 「重新生成」/「重试本轮」：用 `lastRetryableTurn` 重发上一轮。
    *
    * 内容在缓存前已去除 `@文件名` 标记（发的就是净化后正文），原样重发即可；
    * 全部复用 `send()`——乐观气泡、并发校验、终结事件收口等既有不变式天然成立。
    */
   async function regenerate(): Promise<void> {
-    const turn = lastAbortedTurn.value
+    const turn = lastRetryableTurn.value
     if (!turn || phase.value === RUN_PHASE.STREAMING) {
       return
     }
@@ -495,7 +504,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     durationSeconds,
     streamingAgentName,
     pendingUserMessage,
-    lastAbortedTurn,
+    lastRetryableTurn,
     startedAt,
     canSend,
     hasThinking,

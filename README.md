@@ -395,9 +395,10 @@ nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口
 [§凭据纪律](#凭据纪律请求头--访问令牌)。
 
 **`allowed_tools`（工具白名单）**：新建流程 = 连上服务 → 勾选 → 创建，**至少勾一个**
-（漏传即拒，避免留下"全部工具放行"的服务）。**创建后不可修改**：保存时携带 `allowed_tools`
-直接 `409 ADM_MCP_TOOL_SCOPE_LOCKED`，要改只能**删除服务后重建**。空数组 = 不限制，
-只为兼容白名单上线前的存量服务（新创建不可能产出空数组）。
+（漏传即拒，避免留下"全部工具放行"的服务）。**之后可以调整**：详情页「工具清单」点
+「重新探测」，探测成功后弹出工具范围窗，在那里增减并保存（走 `PUT`，全量替换、同样至少一个
+——**空数组在平台语义里是"不限制"**，与"一个都不给"正好相反，故被拒）。空数组 = 不限制，
+只为兼容白名单上线前的存量服务（新建与二次调整都不可能产出空数组）。
 
 **`file_args`（URL 铸造）**：
 
@@ -460,6 +461,8 @@ JSON Schema）；缺字段一律按"不启用"处理，配置损坏时**跳过�
 | 断线退避 | 5s → 15s → 30s → 60s → 60s，用尽后**不停**，转入保活重试（每 **120s**），服务恢复自动接回 | `infra/mcp/mcp-manager.ts` |
 | 健康探测 | 每 **60s** 一次：优先 MCP `ping`，遇 `-32601 Method not found` 记下该服务并回退 `listTools` | `infra/mcp/mcp-manager.ts` + `server.ts` |
 | 工具调用超时 | 默认 **60s**（`MCP_TIMEOUT_MS`），超时后**重试 1 次** | `config.ts` |
+| LLM 有界重试 | 默认**重试 2 次**（`LLM_MAX_RETRIES`，总尝试 ≤ 3）、单次等待上限 **15s**（`LLM_RETRY_MAX_DELAY_MS`）；交给 pi-ai 的 `retryProviderRequest`（退避 + `x-should-retry` / `Retry-After`，可被「停止」打断），**只在响应到达前重试**（不会重复正文） | `config.ts` + `infra/llm/pi-ai-provider.ts` + `infra/agent-loop.ts` |
+| LLM 失败可见性 | 失败归类为 `LLM_UNAVAILABLE` / `LLM_RATE_LIMITED` / `LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` / `LLM_CONTEXT_TOO_LONG`（兜底 `LLM_ERROR`）；诊断字段（上游状态码 / 类型 / `request_id`）随 SSE `error` 与失败轮落盘下发；原始错误记 `llm.call.failed` 结构化日志（余额不足 / 凭证无效带 `alert`） | `domain/llm-error.ts` + `domain/run-finalize.ts` |
 | 内置工具 | 数字人目录下 `TOOL.json`（`{"enabled":[…]}`）；与 MCP 工具进**同一张工具表**，靠 `{服务名}__` 前缀区分 | `domain/agent-instance.ts` |
 
 ### 平台侧接口与错误码
@@ -479,7 +482,6 @@ JSON Schema）；缺字段一律按"不启用"处理，配置损坏时**跳过�
 |---|---|---|
 | `VALIDATION_FAILED` | 400 | 名称 / `url` / `transport` / `headers` / `file_args` / `confirmation` / `async_tools` / `revision` 不合法 |
 | `ADM_MCP_SERVICE_EXISTS` | 409 | 新建重名 |
-| `ADM_MCP_TOOL_SCOPE_LOCKED` | 409 | 保存时携带 `allowed_tools`（白名单只在创建时设定） |
 | `ADM_MCP_SERVICE_NOT_FOUND` | 404 | 服务不存在 |
 | `ADM_RUNTIME_UNREACHABLE` | 503 | 连接 / 测试失败 |
 
@@ -657,7 +659,7 @@ npm run dev
 |---|---|---|---|---|---|
 | **本体** | `.data/onto_market/{场景}/{本体}/ontology.yaml`（+ 可选 `securities.yaml`） | 本体管理 →「从本体市场导入」 | `.platform-data/onto_market/{场景}/{本体}/` | **只读**：只能经市场"更新"整体替换 | **本期不被数字人引用**，作为可浏览的知识资产（卡片展示 6 项 metadata，详情展示全文） |
 | **技能** | `{场景}/{本体}/skills/{技能目录}` | SKILL 管理 →「从本体市场导入」 | 技能库（来源记 `onto_market:{场景}/{本体}`） | **只读**：MUST NOT 在线编辑，只能整包更新 | 数字人勾选 `skills` → 部署 → 运行端用 `read_skill` 读取 |
-| **MCP 服务**（「自建发布」） | 本体平台把本体的**行为/函数**发布为动态容器（`mcp-publish`，`:8021` / `:8022`） | MCP 服务 →「新建 MCP 服务」：填 `url` + **请求头 `{"X-MCP-Token":"…"}`** → 探测工具 → 勾**工具白名单** | `.platform-data/mcp-services.json`（令牌明文落盘，响应只回掩码） | **可改**（令牌会轮换；工具白名单创建后不可改，要改删了重建） | 数字人勾选 `mcp_services` → 部署 → 物化 `MCP.json`（**含 headers**）→ 运行时按白名单装配工具 |
+| **MCP 服务**（「自建发布」） | 本体平台把本体的**行为/函数**发布为动态容器（`mcp-publish`，`:8021` / `:8022`） | MCP 服务 →「新建 MCP 服务」：填 `url` + **请求头 `{"X-MCP-Token":"…"}`** → 探测工具 → 勾**工具白名单** | `.platform-data/mcp-services.json`（令牌明文落盘，响应只回掩码） | **可改**（令牌会轮换；工具白名单在详情页「工具清单 → 重新探测」里调整） | 数字人勾选 `mcp_services` → 部署 → 物化 `MCP.json`（**含 headers**）→ 运行时按白名单装配工具 |
 
 关于本体导入的范围（2026-10-03 起）：只取 `ontology.yaml`（必需）与 `securities.yaml`（可选，行为安全管控）；
 `data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/` **不导入**。市场侧这两个文件
@@ -715,7 +717,7 @@ npm run dev
   明文 MUST NOT 出现在任何响应或日志中；
 - 界面回显的掩码（`6UuE…F3Z`）**不能当值提交**——保存期直接拒绝并给出可读原因；
 - 保存调用配置时**不携带 = 沿用存量**、提供 = 全量替换（`{}` 即清空）：保存 MUST NOT 顺手清空令牌；
-- 令牌轮换后**重建服务即可**（与工具白名单不同，白名单创建后不可改）。
+- 令牌轮换后**重建服务即可**；工具白名单同理可改（详情页「工具清单 → 重新探测」）。
 
 ## 本地配置要点：文件回源链路必须使用本机 IP
 

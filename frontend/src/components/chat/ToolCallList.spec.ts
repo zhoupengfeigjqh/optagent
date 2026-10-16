@@ -49,7 +49,11 @@ function mountList(
   live?: boolean,
 ) {
   return mount(ToolCallList, {
-    props: { items, ...(loadResult ? { loadResult } : {}), ...(live === undefined ? {} : { live }) },
+    props: {
+      items,
+      ...(loadResult ? { loadResult } : {}),
+      ...(live === undefined ? {} : { live }),
+    },
   })
 }
 
@@ -135,7 +139,11 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
     // 必须挂在**同一个 app** 下才是真实场景（每条消息一个实例）；两次 mount 是两个 app，
     // 而 `useId()` 的计数是应用级的，那样比不出东西来。
     const host = mount({
-      render: () => h('div', [h(ToolCallList, { items: [READ, QUERY] }), h(ToolCallList, { items: [READ, QUERY] })]),
+      render: () =>
+        h('div', [
+          h(ToolCallList, { items: [READ, QUERY] }),
+          h(ToolCallList, { items: [READ, QUERY] }),
+        ]),
     })
 
     const ids = host
@@ -234,15 +242,14 @@ describe('ToolCallList —— 内联结果', () => {
 
 describe('ToolCallList —— 外置结果懒加载与降级', () => {
   it('外置结果：点开才拉取，拉到后展示正文', async () => {
-    const loadResult = vi.fn(
-      (_callId: string): Promise<ToolCallResult> =>
-        Promise.resolve({
-          call_id: 'c1',
-          name: 'ocr_image',
-          status: 'success',
-          size: 1843200,
-          content: '识别到 12 页产能表',
-        }),
+    const loadResult = vi.fn((_callId: string): Promise<ToolCallResult> =>
+      Promise.resolve({
+        call_id: 'c1',
+        name: 'ocr_image',
+        status: 'success',
+        size: 1843200,
+        content: '识别到 12 页产能表',
+      }),
     )
     const wrapper = mountList(
       [
@@ -328,15 +335,14 @@ describe('ToolCallList —— 未完成的调用', () => {
 
 describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-36）', () => {
   it('展开明细与正文后重挂载（组件实例重建）：仍保持展开，且不重复请求', async () => {
-    const loadResult = vi.fn(
-      (_callId: string): Promise<ToolCallResult> =>
-        Promise.resolve({
-          call_id: 'c2',
-          name: 'sql_query',
-          status: 'error',
-          size: 8192,
-          content: '连接排产库失败：timeout',
-        }),
+    const loadResult = vi.fn((_callId: string): Promise<ToolCallResult> =>
+      Promise.resolve({
+        call_id: 'c2',
+        name: 'sql_query',
+        status: 'error',
+        size: 8192,
+        content: '连接排产库失败：timeout',
+      }),
     )
     const items = [READ, QUERY]
 

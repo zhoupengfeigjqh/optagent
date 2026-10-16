@@ -111,7 +111,11 @@ export function createUploadsStore(deps: UploadsDeps): UploadsStore {
     }
   }
 
-  async function upload(dir: string, files: File[], allowedExtensions?: readonly string[]): Promise<void> {
+  async function upload(
+    dir: string,
+    files: File[],
+    allowedExtensions?: readonly string[],
+  ): Promise<void> {
     const tasks: Promise<void>[] = []
 
     for (const file of files) {

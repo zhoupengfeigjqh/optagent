@@ -132,7 +132,8 @@ const rulesInitialValue = computed(() => context?.form.rulesInitialValue() ?? []
 const rulesOpen = ref(false)
 
 const loadRules = computed(
-  () => context?.form.loadRules ?? ((): Promise<never> => Promise.reject(new Error('无会话上下文'))),
+  () =>
+    context?.form.loadRules ?? ((): Promise<never> => Promise.reject(new Error('无会话上下文'))),
 )
 
 /** 结构化文件卡片：值精确命中文件空间相对路径时才展示（展示层，提交值仍是路径）。 */
@@ -188,7 +189,12 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
 <template>
   <div v-if="context" class="interaction-dialog__field">
     <div class="interaction-dialog__label-row">
-      <label v-if="!structured" class="interaction-dialog__label" :class="{ required }" :for="domId">
+      <label
+        v-if="!structured"
+        class="interaction-dialog__label"
+        :class="{ required }"
+        :for="domId"
+      >
         {{ name }}<span v-if="hint" class="interaction-dialog__label-hint">{{ hint }}</span>
       </label>
       <div v-else class="interaction-dialog__label" :class="{ required }">
@@ -218,10 +224,20 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       >
         ＋ 添加行
       </button>
-      <button v-if="control === 'list'" type="button" class="interaction-dialog__tool-btn" @click="addElement">
+      <button
+        v-if="control === 'list'"
+        type="button"
+        class="interaction-dialog__tool-btn"
+        @click="addElement"
+      >
         ＋ 添加一项
       </button>
-      <button v-if="structured" type="button" class="interaction-dialog__tool-btn" @click="toggleJson">
+      <button
+        v-if="structured"
+        type="button"
+        class="interaction-dialog__tool-btn"
+        @click="toggleJson"
+      >
         {{ jsonMode ? '按表单编辑' : '按 JSON 编辑' }}
       </button>
     </div>
@@ -253,7 +269,12 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
     <div v-else-if="control === 'list' && !jsonMode" class="interaction-dialog__list">
       <p v-if="elements.length === 0" class="interaction-dialog__table-empty">尚未添加任何项。</p>
       <div v-for="index in itemIndexes" :key="index" class="interaction-dialog__list-row">
-        <InteractionControl compact :schema="itemSchema" :path="[...path, index]" :name="`${name}[${index}]`" />
+        <InteractionControl
+          compact
+          :schema="itemSchema"
+          :path="[...path, index]"
+          :name="`${name}[${index}]`"
+        />
         <button
           type="button"
           class="interaction-dialog__row-remove"
@@ -275,7 +296,12 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       <span class="interaction-dialog__file-card-meta">
         {{ cardOf()!.dir }} · {{ formatFileSize(cardOf()!.file.size) }}
       </span>
-      <button type="button" class="interaction-dialog__file-card-clear" aria-label="清除" @click="write('')">
+      <button
+        type="button"
+        class="interaction-dialog__file-card-clear"
+        aria-label="清除"
+        @click="write('')"
+      >
         ×
       </button>
     </div>
@@ -289,7 +315,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       @confirm="onRulesConfirm"
       @close="rulesOpen = false"
     />
-
   </div>
 </template>
 
@@ -447,5 +472,4 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
 .interaction-dialog__file-card-clear:hover {
   color: var(--color-text);
 }
-
 </style>

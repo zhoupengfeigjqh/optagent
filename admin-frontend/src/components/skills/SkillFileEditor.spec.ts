@@ -203,9 +203,7 @@ describe('SkillFileEditor —— 草稿锚定文件标识（契约 §0.5 原则 
     await wrapper.setProps({ file: file({ content: '# 服务端新内容\n', hash: 'h9' }) })
     await flushPromises()
 
-    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe(
-      '# 服务端新内容\n',
-    )
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('# 服务端新内容\n')
     expect(wrapper.text()).not.toContain('未保存')
   })
 })

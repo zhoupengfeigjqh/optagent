@@ -51,16 +51,15 @@ function valueOf(metadata: OntologyMetadata, key: keyof OntologyMetadata): strin
     :page="page"
     :loading="loading"
     :error="error"
-    :item-key="(item) => `${(item as OntologyListItem).scenario}/${(item as OntologyListItem).ontology_dir}`"
+    :item-key="
+      (item) => `${(item as OntologyListItem).scenario}/${(item as OntologyListItem).ontology_dir}`
+    "
     empty-title="本体库为空"
     empty-description="从本体市场导入一个本体即可建立第一条记录（导入 ontology.yaml 与可选的 securities.yaml）。"
     @update:page="emit('update:page', $event)"
   >
     <template #item="{ item }">
-      <article
-        class="card"
-        :aria-label="`本体 ${(item as OntologyListItem).name}`"
-      >
+      <article class="card" :aria-label="`本体 ${(item as OntologyListItem).name}`">
         <p class="card__title">
           {{ (item as OntologyListItem).name }}
           <span class="card__origin">{{ (item as OntologyListItem).scenario }}</span>

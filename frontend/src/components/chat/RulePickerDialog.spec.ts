@@ -24,11 +24,13 @@ const RULES: RuleFileResponse = {
   priority_column: '优先级',
 }
 
-function mountDialog(options: {
-  load?: () => Promise<RuleFileResponse>
-  initialValue?: unknown
-  open?: boolean
-} = {}) {
+function mountDialog(
+  options: {
+    load?: () => Promise<RuleFileResponse>
+    initialValue?: unknown
+    open?: boolean
+  } = {},
+) {
   return mount(RulePickerDialog, {
     props: {
       open: options.open ?? true,
@@ -59,7 +61,12 @@ describe('RulePickerDialog', () => {
     await flushPromises()
 
     // 未勾选时确认不可用
-    expect(wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.attributes('disabled')).toBeDefined()
+    expect(
+      wrapper
+        .findAll('button')
+        .find((b) => b.text().includes('确认选择'))!
+        .attributes('disabled'),
+    ).toBeDefined()
 
     const boxes = wrapper.findAll('tbody input[type="checkbox"]')
     await boxes[0]!.setValue(true)
@@ -69,7 +76,10 @@ describe('RulePickerDialog', () => {
     await wrapper.findAll('.rule-picker__priority-input')[0]!.setValue('5')
     await wrapper.findAll('.rule-picker__priority-input')[1]!.setValue('')
 
-    await wrapper.findAll('button').find((b) => b.text().includes('确认选择'))!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('确认选择'))!
+      .trigger('click')
 
     const events = wrapper.emitted('confirm')
     expect(events).toHaveLength(1)
@@ -91,7 +101,9 @@ describe('RulePickerDialog', () => {
   })
 
   it('加载失败展示错误（目录为空/解析失败的可读结论）', async () => {
-    const wrapper = mountDialog({ load: () => Promise.reject(new Error('「数据准备/算法规则」目录暂无文件')) })
+    const wrapper = mountDialog({
+      load: () => Promise.reject(new Error('「数据准备/算法规则」目录暂无文件')),
+    })
     await flushPromises()
 
     expect(wrapper.text()).toContain('目录暂无文件')
@@ -111,7 +123,10 @@ describe('RulePickerDialog', () => {
     const wrapper = mountDialog()
     await flushPromises()
 
-    await wrapper.findAll('button').find((b) => b.text() === '取消')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '取消')!
+      .trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
     expect(wrapper.emitted('confirm')).toBeUndefined()
   })

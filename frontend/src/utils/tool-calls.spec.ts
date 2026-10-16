@@ -36,10 +36,7 @@ describe('tool-calls —— 视图链接（TR-44 / TR-45）', () => {
       view_links: [{ url: '/a' }, { url: '/b', name: 'B 明细' }],
     }
 
-    expect(toToolCallItem(record).viewLinks).toEqual([
-      { url: '/a' },
-      { url: '/b', name: 'B 明细' },
-    ])
+    expect(toToolCallItem(record).viewLinks).toEqual([{ url: '/a' }, { url: '/b', name: 'B 明细' }])
   })
 
   it('没有 view_links 时不产生该字段（不写空数组，与"后端不下发"一致）', () => {

@@ -144,7 +144,11 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
   const fallbackCode = `HTTP_${response.status}`
   const text = await response.text().catch(() => null)
   if (text === null) {
-    return new ApiError({ code: fallbackCode, message: response.statusText, status: response.status })
+    return new ApiError({
+      code: fallbackCode,
+      message: response.statusText,
+      status: response.status,
+    })
   }
 
   if (text.trim() !== '') {

@@ -21,7 +21,14 @@ const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json'])
 const PDF_EXTENSION = '.pdf'
 
 /** 可用 <img> 内联展示的图片扩展名（.tif/.tiff 浏览器普遍不支持，归 download）。 */
-const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif'])
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.bmp',
+  '.webp',
+  '.gif',
+])
 
 /** 需回退下载的扩展名。 */
 const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.xls', '.zip', '.tif', '.tiff'])

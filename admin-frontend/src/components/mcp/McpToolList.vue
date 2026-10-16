@@ -13,6 +13,10 @@
  * 清单是**打开详情那一刻**平台对服务的实时探测结果，界面不会自动重取
  * （保存配置也刻意不重探，避免依赖清单的渲染分支抖动）——服务后启动或工具
  * 改版后，由管理员点「重新探测」显式刷新（2026-10-02）。
+ *
+ * **2026-10-15 起「重新探测」还兼作调整入口**：探测成功后父级会打开工具范围弹窗
+ * （`McpToolScopeDialog`），在那里增减可见工具。本组件只管把清单如实画出来 +
+ * 把点击抛上去，**不含任何勾选态**（那是弹窗的事，避免两处各持一份范围）。
  */
 import { computed } from 'vue'
 import type { McpToolInfo } from '../../api/types'
@@ -56,8 +60,9 @@ const rows = computed<string[]>(() =>
   <section class="mcp-tool-list" aria-label="MCP 工具清单">
     <div class="mcp-tool-list__toolbar">
       <p class="mcp-tool-list__caption">
-        本清单为该服务<strong>对数字人可见的工具</strong>（工具范围在创建服务时确定，不可修改）；
-        打开本详情时的实时探测结果，服务后启动或工具改版后不会自动更新。
+        本清单为该服务<strong>对数字人可见的工具</strong>；这是打开本详情时的实时探测结果，
+        服务后启动或工具改版后不会自动更新。<strong>点「重新探测」</strong>会重取清单并弹出
+        工具范围窗，在那里增减可见工具。
       </p>
       <button
         type="button"
@@ -75,7 +80,12 @@ const rows = computed<string[]>(() =>
       请先确认服务可达后重新探测。
     </p>
 
-    <p v-else-if="hasMissing" class="mcp-tool-list__missing" role="alert" data-test="missing-summary">
+    <p
+      v-else-if="hasMissing"
+      class="mcp-tool-list__missing"
+      role="alert"
+      data-test="missing-summary"
+    >
       ⚠ 工具范围中有 {{ props.missingTools.length }} 个工具在当前服务清单里已不存在（下架或改名），
       它们对数字人不可用：<span class="mono">{{ props.missingTools.join('、') }}</span>
     </p>
@@ -112,7 +122,7 @@ const rows = computed<string[]>(() =>
         </template>
         <p v-else class="mcp-tool-list__desc">
           该工具在当前服务清单中不存在（已下架或改名）——数字人无法调用它。
-          如需移除它，请删除该服务后重新创建（工具范围创建后不可修改）。
+          如需移除它，点「重新探测」后在工具范围窗里取消勾选即可。
         </p>
       </li>
     </ul>

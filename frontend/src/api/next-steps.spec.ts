@@ -9,11 +9,12 @@ import { createHttpClient } from './http'
 import { createNextStepsApi, emptyNextSteps } from './next-steps'
 
 function apiWith(body: unknown, init: { ok?: boolean; status?: number } = {}) {
-  const fetchImpl = vi.fn(async (_url: string) =>
-    new Response(typeof body === 'string' ? body : JSON.stringify(body), {
-      status: init.status ?? (init.ok === false ? 500 : 200),
-      headers: { 'content-type': 'application/json' },
-    }),
+  const fetchImpl = vi.fn(
+    async (_url: string) =>
+      new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+        status: init.status ?? (init.ok === false ? 500 : 200),
+        headers: { 'content-type': 'application/json' },
+      }),
   )
   const client = createHttpClient({ fetchImpl: fetchImpl as unknown as typeof fetch })
   return { api: createNextStepsApi(client), fetchImpl }
@@ -26,7 +27,9 @@ describe('createNextStepsApi', () => {
       actions: [
         {
           prompt: '按交付日期梳理这批订单的风险',
-          tools: [{ kind: 'mcp', service: 'erp', name: 'query_order', exposed_name: 'erp__query_order' }],
+          tools: [
+            { kind: 'mcp', service: 'erp', name: 'query_order', exposed_name: 'erp__query_order' },
+          ],
           guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
         },
       ],
@@ -59,7 +62,12 @@ describe('createNextStepsApi', () => {
   })
 
   it('形状非法（顶层非对象 / actions 非数组）→ 空形态', async () => {
-    for (const body of ['null', '[]', '{"message_id":1,"actions":[]}', '{"message_id":"m","actions":{}}']) {
+    for (const body of [
+      'null',
+      '[]',
+      '{"message_id":1,"actions":[]}',
+      '{"message_id":"m","actions":{}}',
+    ]) {
       const { api } = apiWith(body)
       expect(await api.fetch('th_1')).toEqual(emptyNextSteps())
     }

@@ -18,11 +18,7 @@ import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizeLimit } from '../domain/paging.js';
 import type { Deployer } from '../domain/deploy/deployer.js';
 
-export function registerDeployRoutes(
-  app: FastifyInstance,
-  ctx: AppContext,
-  deployer: Deployer,
-): void {
+export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, deployer: Deployer): void {
   app.post('/api/admin/deploy/validate', async (req) => {
     const body = (req.body ?? {}) as { user_ids?: unknown };
     const userIds = parseUserIds(body.user_ids);

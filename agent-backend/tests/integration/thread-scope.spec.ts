@@ -89,7 +89,9 @@ describe('POST /api/threads —— 归属取服务端当前选中（D11）', () 
       expect(existsSync(threadDir(root, USER, AGENT_B, threadId))).toBe(false);
 
       // 不静默：留一条可定位的 warn
-      const hit = warn.mock.calls.find((c) => (c[0] as { event?: string })?.event === 'thread.create.agent_mismatch');
+      const hit = warn.mock.calls.find(
+        (c) => (c[0] as { event?: string })?.event === 'thread.create.agent_mismatch',
+      );
       expect(hit).toBeDefined();
       expect(hit![0]).toMatchObject({
         user_id: USER,
@@ -114,7 +116,9 @@ describe('POST /api/threads —— 归属取服务端当前选中（D11）', () 
       const res = await createThread({ agent_name: AGENT_A });
       expect(res.statusCode).toBe(201);
       expect(
-        warn.mock.calls.filter((c) => (c[0] as { event?: string })?.event === 'thread.create.agent_mismatch'),
+        warn.mock.calls.filter(
+          (c) => (c[0] as { event?: string })?.event === 'thread.create.agent_mismatch',
+        ),
       ).toHaveLength(0);
     } finally {
       warn.mockRestore();
@@ -129,7 +133,9 @@ describe('列表与详情 —— 只认当前数字人（§2 / FR-016）', () =>
 
     const list = await listThreads();
     expect(list.statusCode).toBe(200);
-    expect((list.json() as Array<{ thread_id: string }>).some((m) => m.thread_id === threadId)).toBe(false);
+    expect(
+      (list.json() as Array<{ thread_id: string }>).some((m) => m.thread_id === threadId),
+    ).toBe(false);
 
     // 视图态≠删除：详情取得到（用户显式删除才消失）
     expect((await threadDetail(threadId)).statusCode).toBe(200);
@@ -184,7 +190,9 @@ describe('陈旧选中数字人（FR-032）', () => {
     const list = await listThreads();
     expect(list.statusCode).toBe(409);
     expect((list.json() as { error: { code: string } }).error.code).toBe('AGENT_NOT_AVAILABLE');
-    expect(String((list.json() as { error: { message: string } }).error.message)).toContain('请重新选择');
+    expect(String((list.json() as { error: { message: string } }).error.message)).toContain(
+      '请重新选择',
+    );
 
     // 选中态仍在（不自动清空）：用户显式重选才更新
     expect(ctx().currentAgent.current(USER)).toEqual({ userId: USER, agentName: 'to-be-removed' });

@@ -52,7 +52,10 @@ function writeSoul(switchLine: string): void {
 }
 
 /** 与 `server.ts` 逐字同构的装配闭包：开关与条数逐次现读 */
-function makeNextActionsConfig(): (userId: string, agentName: string) => { enabled: boolean; max: number } | null {
+function makeNextActionsConfig(): (
+  userId: string,
+  agentName: string,
+) => { enabled: boolean; max: number } | null {
   return (userId, agentName) => {
     if (!isNextActionsEnabled(root, userId, agentName)) return null;
     return { enabled: true, max: nextActionHintsCount(root, userId, agentName) };

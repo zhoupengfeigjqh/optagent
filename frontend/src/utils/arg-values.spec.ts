@@ -162,7 +162,10 @@ describe('validateArgs —— 最复杂真实形态（回归样本）', () => {
   })
 
   it('缺嵌套必填项 → 精确到值路径', () => {
-    const broken = { uid: 'admin', input: { targetPriorities: [{ ruleId: 'PR001', rulePriority: 1 }] } }
+    const broken = {
+      uid: 'admin',
+      input: { targetPriorities: [{ ruleId: 'PR001', rulePriority: 1 }] },
+    }
 
     expect(validateArgs(NESTED, broken)).toBe('参数「input.solvingTime」为必填项')
   })
@@ -170,7 +173,9 @@ describe('validateArgs —— 最复杂真实形态（回归样本）', () => {
   it('行内必填列缺失 → 精确到下标', () => {
     const broken = { ...valid, input: { solvingTime: 60, targetPriorities: [{ ruleId: 'PR001' }] } }
 
-    expect(validateArgs(NESTED, broken)).toBe('参数「input.targetPriorities[0].rulePriority」为必填项')
+    expect(validateArgs(NESTED, broken)).toBe(
+      '参数「input.targetPriorities[0].rulePriority」为必填项',
+    )
   })
 })
 
@@ -185,9 +190,11 @@ describe('buildArgs —— 提交构建', () => {
       },
     }
 
-    expect(
-      buildArgs(schema, { 开关: false, 数量: 0, 备注: '', 空: undefined, 清单: [] }),
-    ).toEqual({ 开关: false, 数量: 0, 清单: [] })
+    expect(buildArgs(schema, { 开关: false, 数量: 0, 备注: '', 空: undefined, 清单: [] })).toEqual({
+      开关: false,
+      数量: 0,
+      清单: [],
+    })
   })
 
   it('数字串收敛为数字（递归进表格单元格与列表元素）', () => {
@@ -205,7 +212,10 @@ describe('buildArgs —— 提交构建', () => {
   it('表格里的空行（未填的列全被剪掉）不会以空对象形式混进提交值', () => {
     const schema: FieldSchema = {
       properties: {
-        清单: { type: 'array', items: { type: 'object', properties: { 编码: { type: 'string' } } } },
+        清单: {
+          type: 'array',
+          items: { type: 'object', properties: { 编码: { type: 'string' } } },
+        },
       },
     }
 

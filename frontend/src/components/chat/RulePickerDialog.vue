@@ -74,7 +74,8 @@ watch(
         if (Array.isArray(props.initialValue)) {
           const next = new Set<number>()
           result.rows.forEach((row, index) => {
-            if ((props.initialValue as unknown[]).some((item) => deepEqual(item, row))) next.add(index)
+            if ((props.initialValue as unknown[]).some((item) => deepEqual(item, row)))
+              next.add(index)
           })
           checked.value = next
         }
@@ -191,7 +192,6 @@ function onConfirm(): void {
           </tbody>
         </table>
       </div>
-
     </div>
 
     <template #footer>
@@ -268,5 +268,4 @@ function onConfirm(): void {
   border-radius: var(--radius-sm);
   font: inherit;
 }
-
 </style>

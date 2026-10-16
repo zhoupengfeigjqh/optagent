@@ -27,9 +27,7 @@ const emit = defineEmits<{
 <template>
   <div class="agent-card-list">
     <div class="agent-card-list__toolbar">
-      <button type="button" class="btn btn--primary" @click="emit('create')">
-        新建数字人
-      </button>
+      <button type="button" class="btn btn--primary" @click="emit('create')">新建数字人</button>
     </div>
 
     <EntityCardList

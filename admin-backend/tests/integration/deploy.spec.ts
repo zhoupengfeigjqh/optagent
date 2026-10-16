@@ -14,11 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  createFixture,
-  snapshotTree,
-  type TestFixture,
-} from '../helpers/fixture.js';
+import { createFixture, snapshotTree, type TestFixture } from '../helpers/fixture.js';
 import { soulDesign } from '../helpers/soul.js';
 
 let fx: TestFixture;
@@ -286,7 +282,10 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
   it('单用户写入失败 → 该用户零写入，其余用户正常产出', async () => {
     await createAgent(baseAgent({ name: 'demo2' }));
     // 用文件占住 ops 的 agents 目录，使其写入必然失败
-    fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), { recursive: true, force: true });
+    fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), {
+      recursive: true,
+      force: true,
+    });
     fs.writeFileSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), 'blocked', 'utf8');
     link('ops', ['demo2']);
 
@@ -304,9 +303,9 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
     expect(ops?.error).toBeTruthy();
 
     // admin 正常产出；ops 仍是那个占位文件（零写入）
-    expect(
-      fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md')),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md'))).toBe(
+      true,
+    );
     expect(fs.readFileSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), 'utf8')).toBe('blocked');
   });
 });
@@ -378,10 +377,7 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
 
   it('部署后用户列表带 `deployed_at`（卡片据此显示"已部署 + 最近一次时间"）；未部署用户为 null', async () => {
     const before = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
-    expect(before.json().items.map((u: { deployed_at: unknown }) => u.deployed_at)).toEqual([
-      null,
-      null,
-    ]);
+    expect(before.json().items.map((u: { deployed_at: unknown }) => u.deployed_at)).toEqual([null, null]);
 
     await fx.app.inject({
       method: 'POST',

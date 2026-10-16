@@ -9,6 +9,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpArea from './McpArea.vue'
+import McpToolScopeDialog from './McpToolScopeDialog.vue'
 import { buildPath } from '../../router'
 import type { McpServiceDetail } from '../../api/types'
 
@@ -16,6 +17,7 @@ const httpGet = vi.fn()
 const createMcpService = vi.fn()
 const probeMcpTarget = vi.fn()
 const testMcpService = vi.fn()
+const saveMcpServiceConfig = vi.fn()
 
 vi.mock('../../api/http', async () => {
   const actual = await vi.importActual<typeof import('../../api/http')>('../../api/http')
@@ -26,7 +28,7 @@ vi.mock('../../api/mcp', () => ({
   listMcpServices: vi.fn(),
   getMcpService: vi.fn(),
   createMcpService: (...a: unknown[]) => createMcpService(...a),
-  saveMcpServiceConfig: vi.fn(),
+  saveMcpServiceConfig: (...a: unknown[]) => saveMcpServiceConfig(...a),
   deleteMcpService: vi.fn(),
   testMcpService: (...a: unknown[]) => testMcpService(...a),
   probeMcpTarget: (...a: unknown[]) => probeMcpTarget(...a),
@@ -60,6 +62,8 @@ const DETAIL: McpServiceDetail = {
   headers: {},
   tools: [],
   tools_truncated: false,
+  available_tools: [],
+  available_tools_truncated: false,
   tools_error: null,
   references: [],
   revision: 1,
@@ -87,7 +91,8 @@ beforeEach(() => {
     if (path === '/api/admin/mcp/services') {
       return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
     }
-    if (path === '/api/admin/mcp/stats') return Promise.resolve({ stats_available: true, items: [] })
+    if (path === '/api/admin/mcp/stats')
+      return Promise.resolve({ stats_available: true, items: [] })
     if (path === '/api/admin/mcp/services/new-mcp') return Promise.resolve(DETAIL)
     if (path === '/api/admin/mcp/services/ocr') return Promise.resolve({ ...DETAIL, name: 'ocr' })
     return Promise.reject(new Error(`unexpected path: ${path}`))
@@ -173,7 +178,8 @@ describe('McpArea —— 立即反馈（方案 B，2026-09-28）', () => {
           resolveDetail = resolve
         })
       }
-      if (path === '/api/admin/mcp/stats') return Promise.resolve({ stats_available: true, items: [] })
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
       return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
     })
 
@@ -201,7 +207,8 @@ describe('McpArea —— 立即反馈（方案 B，2026-09-28）', () => {
       if (path === '/api/admin/mcp/services/ocr') {
         return Promise.reject({ code: 'ADM_MCP_SERVICE_NOT_FOUND', message: '不存在' })
       }
-      if (path === '/api/admin/mcp/stats') return Promise.resolve({ stats_available: true, items: [] })
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
       return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
     })
     const wrapper = mountArea('ocr')
@@ -214,5 +221,159 @@ describe('McpArea —— 立即反馈（方案 B，2026-09-28）', () => {
     await wrapper.find('[data-test="retry"]').trigger('click')
     await flushPromises()
     expect(httpGet.mock.calls.length).toBeGreaterThan(before)
+  })
+})
+
+describe('McpArea —— 工具范围调整（2026-10-15：「重新探测」成功后开窗）', () => {
+  const OCR = { name: 'ocr_image', description: '识别图片', parameters: {} }
+  const PDF = { name: 'ocr_pdf', description: '识别 PDF', parameters: {} }
+  const WITH_TOOLS: McpServiceDetail = {
+    ...DETAIL,
+    name: 'ocr',
+    allowed_tools: ['ocr_image'],
+    tools: [OCR],
+    available_tools: [OCR, PDF],
+    revision: 4,
+  }
+
+  /** 详情接口被请求了几次（"保存不再重载详情"的断言用） */
+  function detailCalls(): number {
+    return httpGet.mock.calls.filter(([path]) => path === '/api/admin/mcp/services/ocr').length
+  }
+
+  /**
+   * 弹窗实例。
+   *
+   * 后面所有交互都在它内部找元素：`data-test="save"` / `"tool"` 在**详情页头**
+   * （保存调用配置）与调用配置表单里也存在，用 `wrapper.find` 会命中错的按钮
+   * ——那会让用例看起来"点了保存"，实际改的是调用配置。
+   */
+  function scopeDialog(wrapper: ReturnType<typeof mountArea>) {
+    return wrapper.findComponent(McpToolScopeDialog)
+  }
+
+  function checkedTools(wrapper: ReturnType<typeof mountArea>): Array<[string, boolean]> {
+    return scopeDialog(wrapper)
+      .findAll<HTMLInputElement>('[data-test="tool"]')
+      .map((box) => [String(box.element.value), box.element.checked] as [string, boolean])
+  }
+
+  async function reprobe(wrapper: ReturnType<typeof mountArea>): Promise<void> {
+    // 「工具清单」页签是 `v-show` 常驻，无需先切页签
+    await wrapper.find('[data-test="reprobe"]').trigger('click')
+    await flushPromises()
+  }
+
+  beforeEach(() => {
+    saveMcpServiceConfig.mockReset().mockResolvedValue({
+      name: 'ocr',
+      description: 'OCR 识别服务',
+      transport: 'http',
+      url: 'http://192.168.1.2:9000/mcp',
+      command: null,
+      args: null,
+      file_args: {},
+      confirmation: 'never',
+      rules_fields: {},
+      async_tools: [],
+      allowed_tools: ['ocr_image', 'ocr_pdf'],
+      headers: {},
+      updated_at: '2026-10-15T00:00:00.000Z',
+      revision: 5,
+      affected_agents: ['u1/agent-a'],
+    })
+  })
+
+  it('探测成功 → 立即开窗，且按当前白名单预勾选（基准是本次探测的全量清单）', async () => {
+    httpGet.mockImplementation((path: string) => {
+      if (path === '/api/admin/mcp/services/ocr') return Promise.resolve(WITH_TOOLS)
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
+      return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
+    })
+    const wrapper = mountArea('ocr')
+    await flushPromises()
+
+    await reprobe(wrapper)
+
+    expect(wrapper.find('#mcp-tool-scope-title').text()).toContain('ocr')
+    expect(checkedTools(wrapper)).toEqual([
+      ['ocr_image', true],
+      ['ocr_pdf', false],
+    ])
+  })
+
+  it('取消 → 弹窗收起、`open` 属性清掉（2026-10-16 假死缺陷：清了属性但没真关，弹窗会留在模态态 → 整页点不动）', async () => {
+    httpGet.mockImplementation((path: string) => {
+      if (path === '/api/admin/mcp/services/ocr') return Promise.resolve(WITH_TOOLS)
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
+      return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
+    })
+    const wrapper = mountArea('ocr')
+    await flushPromises()
+    await reprobe(wrapper)
+
+    // 必须限定在工具范围弹窗里点：`data-test="cancel"` 在删除确认窗（`ConfirmDialog`）里也有，
+    // 全局 `find` 会命中那一个（它没开，点了什么也不会发生）
+    await scopeDialog(wrapper).find('[data-test="cancel"]').trigger('click')
+    await flushPromises()
+
+    const dialog = scopeDialog(wrapper)
+    expect(dialog.props('open')).toBe(false)
+    expect(dialog.find('dialog').element.hasAttribute('open')).toBe(false)
+  })
+
+  it('探测失败（服务连不上）→ **不开窗**：拿不到可信清单时勾选等于凭空造范围', async () => {
+    httpGet.mockImplementation((path: string) => {
+      if (path === '/api/admin/mcp/services/ocr') {
+        return Promise.resolve({
+          ...WITH_TOOLS,
+          available_tools: [],
+          tools: [],
+          tools_error: '连接被拒绝',
+        })
+      }
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
+      return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
+    })
+    const wrapper = mountArea('ocr')
+    await flushPromises()
+
+    await reprobe(wrapper)
+
+    expect(wrapper.findComponent(McpToolScopeDialog).props('open')).toBe(false)
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('工具清单不可得')
+  })
+
+  it('保存成功 → 白名单与清单**就地**更新，且不重载详情（不丢未提交的表单草稿）', async () => {
+    httpGet.mockImplementation((path: string) => {
+      if (path === '/api/admin/mcp/services/ocr') return Promise.resolve(WITH_TOOLS)
+      if (path === '/api/admin/mcp/stats')
+        return Promise.resolve({ stats_available: true, items: [] })
+      return Promise.resolve({ items: [], total: 0, page: 1, page_size: 20 })
+    })
+    const wrapper = mountArea('ocr')
+    await flushPromises()
+    await reprobe(wrapper)
+
+    const pdf = scopeDialog(wrapper)
+      .findAll<HTMLInputElement>('[data-test="tool"]')
+      .find((box) => box.element.value === 'ocr_pdf')
+    await pdf?.setValue(true)
+    const before = detailCalls()
+
+    await scopeDialog(wrapper).find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(saveMcpServiceConfig).toHaveBeenCalledTimes(1)
+    expect(detailCalls()).toBe(before)
+
+    // 弹窗收起，清单按新白名单重投影：两个工具都在，且 MUST NOT 把新勾的判成"已不存在"
+    expect(wrapper.findComponent(McpToolScopeDialog).props('open')).toBe(false)
+    expect(wrapper.findAll('.mcp-tool-list__item')).toHaveLength(2)
+    expect(wrapper.find('.mcp-tool-list__item--missing').exists()).toBe(false)
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('下次部署时生效')
   })
 })

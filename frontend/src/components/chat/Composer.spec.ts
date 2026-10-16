@@ -14,10 +14,7 @@ import Composer from './Composer.vue'
 
 const REFERENCE: FileReference = { dir: '数据准备/生产计划', filename: '产能.xlsx' }
 
-function mountComposer(
-  props: Record<string, unknown> = {},
-  slots: Record<string, string> = {},
-) {
+function mountComposer(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
   return mount(Composer, { props: { modelValue: '', ...props }, slots })
 }
 

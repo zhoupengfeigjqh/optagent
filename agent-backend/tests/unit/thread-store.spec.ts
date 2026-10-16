@@ -163,7 +163,10 @@ describe('ThreadStore —— 列表判据：只看有消息的会话（009 FR-01
     const newer = store.create('u1', AGENT);
     store.touch('u1', AGENT, newer.threadId);
 
-    expect(store.list('u1', AGENT).map((m) => m.threadId)).toEqual([newer.threadId, older.threadId]);
+    expect(store.list('u1', AGENT).map((m) => m.threadId)).toEqual([
+      newer.threadId,
+      older.threadId,
+    ]);
   });
 
   it('空对话留在磁盘上（只有不列出，不悄悄删）——用户仍可显式删除', async () => {

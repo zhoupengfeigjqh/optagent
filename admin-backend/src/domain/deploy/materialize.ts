@@ -35,10 +35,7 @@ export interface MaterializeContext {
 }
 
 /** 构造 `MCP.json` 中的一条 server 声明（字段与运行环境的读取口径对齐） */
-export function buildMcpServerEntry(
-  name: string,
-  ctx: MaterializeContext,
-): Record<string, unknown> | null {
+export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Record<string, unknown> | null {
   const config = ctx.mcpConfigs.readOrNull(name);
   if (!config) return null;
 
@@ -91,13 +88,13 @@ export function buildScenarioDocument(scenario: AgentScenario): Record<string, u
 }
 
 /** 构造单个数字人的完整产物清单 */
-export function buildAgentArtifact(
-  design: AgentDesignDocument,
-  ctx: MaterializeContext,
-): AgentArtifact {
+export function buildAgentArtifact(design: AgentDesignDocument, ctx: MaterializeContext): AgentArtifact {
   const files: MaterializeFile[] = [
     { relPath: 'SOUL.md', content: renderSoulMd(design.soul) },
-    { relPath: 'TOOL.json', content: `${JSON.stringify({ enabled: design.enabled_tools }, null, 2)}\n` },
+    {
+      relPath: 'TOOL.json',
+      content: `${JSON.stringify({ enabled: design.enabled_tools }, null, 2)}\n`,
+    },
     {
       relPath: 'MCP.json',
       content: `${JSON.stringify(
@@ -126,9 +123,6 @@ export function buildAgentArtifact(
 }
 
 /** 该用户全部数字人的产物清单（整体覆盖语义） */
-export function buildUserArtifacts(
-  designs: AgentDesignDocument[],
-  ctx: MaterializeContext,
-): AgentArtifact[] {
+export function buildUserArtifacts(designs: AgentDesignDocument[], ctx: MaterializeContext): AgentArtifact[] {
   return designs.map((design) => buildAgentArtifact(design, ctx));
 }

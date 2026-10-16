@@ -15,7 +15,11 @@ import { Writable } from 'node:stream';
 import pino from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { HistoryStore } from '../../src/domain/history.js';
-import { RunManager, type RunAgentLike, type StartRunOptions } from '../../src/domain/run-manager.js';
+import {
+  RunManager,
+  type RunAgentLike,
+  type StartRunOptions,
+} from '../../src/domain/run-manager.js';
 import { UsageDb } from '../../src/infra/usage-db.js';
 import type { LlmEvent } from '../../src/types.js';
 

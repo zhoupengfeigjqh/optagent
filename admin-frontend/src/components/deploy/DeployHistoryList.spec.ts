@@ -166,19 +166,19 @@ describe('DeployHistoryList —— 展开行看明细', () => {
 
     await wrapper.findAll('button.deploy-history__toggle')[0]!.trigger('click')
     expect(wrapper.findAll('tr.deploy-history__detail-row')).toHaveLength(1)
-    expect(
-      wrapper.findAll('button.deploy-history__toggle')[0]!.attributes('aria-expanded'),
-    ).toBe('true')
+    expect(wrapper.findAll('button.deploy-history__toggle')[0]!.attributes('aria-expanded')).toBe(
+      'true',
+    )
 
     await wrapper.findAll('button.deploy-history__toggle')[1]!.trigger('click')
 
     expect(wrapper.findAll('tr.deploy-history__detail-row')).toHaveLength(1)
-    expect(
-      wrapper.findAll('button.deploy-history__toggle')[0]!.attributes('aria-expanded'),
-    ).toBe('false')
-    expect(
-      wrapper.findAll('button.deploy-history__toggle')[1]!.attributes('aria-expanded'),
-    ).toBe('true')
+    expect(wrapper.findAll('button.deploy-history__toggle')[0]!.attributes('aria-expanded')).toBe(
+      'false',
+    )
+    expect(wrapper.findAll('button.deploy-history__toggle')[1]!.attributes('aria-expanded')).toBe(
+      'true',
+    )
   })
 
   it('翻页后收起展开行（上一页的明细不留在这一页）', async () => {

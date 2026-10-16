@@ -62,10 +62,7 @@ export function hideSchemaPaths(schema: unknown, paths: FileArgStep[][]): unknow
   return out;
 }
 
-function hideSchemaStep(
-  node: unknown,
-  steps: FileArgStep[],
-): { node: unknown; changed: boolean } {
+function hideSchemaStep(node: unknown, steps: FileArgStep[]): { node: unknown; changed: boolean } {
   if (typeof node !== 'object' || node === null) return { node, changed: false };
   const step = steps[0]!;
   const obj = node as InputSchemaLike;

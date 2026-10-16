@@ -153,7 +153,13 @@ function discard(): void {
           >
             {{ saving ? '保存中…' : '保存' }}
           </button>
-          <button v-if="editable" type="button" class="btn" :disabled="!dirty || saving" @click="discard">
+          <button
+            v-if="editable"
+            type="button"
+            class="btn"
+            :disabled="!dirty || saving"
+            @click="discard"
+          >
             放弃修改
           </button>
         </span>

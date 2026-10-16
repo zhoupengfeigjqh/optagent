@@ -9,7 +9,8 @@
 import type { Model, Provider } from '@earendil-works/pi-ai';
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import type { ModelEntry } from '../../config.js';
+import type { LlmRetryOptions, ModelEntry } from '../../config.js';
+import { classifyLlmFailure, statusOfError } from '../../domain/llm-error.js';
 import type { LlmEvent } from '../../types.js';
 import { createStreamFn } from '../agent-loop.js';
 import type { LlmChatRequest, LlmProvider } from './llm-provider.js';
@@ -18,8 +19,9 @@ export class PiAiLlmProvider implements LlmProvider {
   private readonly provider: Provider<'openai-completions'>;
   private readonly model: Model<'openai-completions'>;
   private readonly apiKey: string;
+  private readonly retry: LlmRetryOptions;
 
-  constructor(entry: ModelEntry) {
+  constructor(entry: ModelEntry, retry: LlmRetryOptions) {
     this.provider = deepseekProvider();
     const found = this.provider.getModels().find((m) => m.id === entry.model);
     if (!found) {
@@ -27,13 +29,14 @@ export class PiAiLlmProvider implements LlmProvider {
     }
     this.model = entry.baseUrl ? { ...found, baseUrl: entry.baseUrl } : found;
     this.apiKey = entry.apiKey;
+    this.retry = retry;
   }
 
   /** agent-loop 路径（带工具时）所需的 pi 低层参数 */
   loopOptions(): { model: Model<never>; streamFn: StreamFn } {
     return {
       model: this.model as Model<never>,
-      streamFn: createStreamFn(this.provider, this.apiKey),
+      streamFn: createStreamFn(this.provider, this.apiKey, this.retry),
     };
   }
 
@@ -55,6 +58,10 @@ export class PiAiLlmProvider implements LlmProvider {
       ...(req.thinking ? { reasoning: 'low' as const } : {}),
       signal: req.signal,
       apiKey: this.apiKey,
+      // 有界重试交给 pi-ai 既有的 retryProviderRequest（§19.1）：重试发生在响应到达之前，
+      // 因此不会出现"重复正文"；退避睡眠可被 signal 打断（用户点「停止」立即生效）
+      maxRetries: this.retry.maxRetries,
+      maxRetryDelayMs: this.retry.maxRetryDelayMs,
     });
     try {
       for await (const event of stream) {
@@ -75,10 +82,14 @@ export class PiAiLlmProvider implements LlmProvider {
             };
             break;
           case 'error':
+            // 分类唯一实现（`domain/llm-error.ts`）：上游状态码 → 错误码 + 诊断字段，
+            // 与工具循环路径（`agent-loop.ts`）产出同一套取值
             yield {
               type: 'error',
-              code: event.reason === 'aborted' ? 'ABORTED' : 'LLM_ERROR',
-              message: event.error.errorMessage ?? 'LLM 调用失败',
+              ...classifyLlmFailure({
+                ...(event.error.errorMessage ? { message: event.error.errorMessage } : {}),
+                ...(event.reason === 'aborted' ? { aborted: true } : {}),
+              }),
             };
             break;
           default:
@@ -86,10 +97,13 @@ export class PiAiLlmProvider implements LlmProvider {
         }
       }
     } catch (err) {
+      const status = statusOfError(err);
       yield {
         type: 'error',
-        code: 'LLM_ERROR',
-        message: err instanceof Error ? err.message : String(err),
+        ...classifyLlmFailure({
+          message: err instanceof Error ? err.message : String(err),
+          ...(status !== undefined ? { status } : {}),
+        }),
       };
     }
   }

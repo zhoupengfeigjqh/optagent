@@ -10,10 +10,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
-import {
-  UnifiedCatalog,
-  type CatalogSnapshot,
-} from '../domain/config-center/unified-catalog.js';
+import { UnifiedCatalog, type CatalogSnapshot } from '../domain/config-center/unified-catalog.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage } from '../domain/paging.js';
 

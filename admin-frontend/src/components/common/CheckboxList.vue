@@ -45,9 +45,7 @@ const filtered = computed(() => {
 })
 
 function toggle(value: string, checked: boolean): void {
-  const next = checked
-    ? [...props.modelValue, value]
-    : props.modelValue.filter((v) => v !== value)
+  const next = checked ? [...props.modelValue, value] : props.modelValue.filter((v) => v !== value)
   emit('update:modelValue', next)
 }
 

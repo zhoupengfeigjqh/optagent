@@ -62,7 +62,9 @@ function toggle(name: string, checked: boolean): void {
           @change="toggle(tool.name, ($event.target as HTMLInputElement).checked)"
         />
         <span class="mcp-config-form__tool-name mono">{{ tool.name }}</span>
-        <span v-if="tool.description" class="mcp-config-form__tool-desc">{{ tool.description }}</span>
+        <span v-if="tool.description" class="mcp-config-form__tool-desc">{{
+          tool.description
+        }}</span>
       </label>
 
       <!-- 已保存但当前清单未包含：保留展示，避免静默丢弃存量配置 -->
