@@ -28,9 +28,11 @@ import type {
 import {
   HISTORY_DEFAULT_LIMIT,
   HISTORY_EXPANDED_LIMIT,
+  MESSAGE_PAGE_MAX,
   MESSAGE_PAGE_SIZE,
 } from '../constants/limits'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
+import { threadToMarkdown } from '../utils/export-thread'
 import { useSession } from './useAppSession'
 import type { ToastStore } from './useToast'
 
@@ -92,6 +94,16 @@ export interface ThreadsStore {
   clearActive(): void
   /** 删除会话（乐观更新）；返回是否真正删除成功（失败已自动回滚并提示） */
   remove(id: string): Promise<boolean>
+  /**
+   * 重命名会话（乐观更新）；返回是否成功。
+   * 空标题或与原值相同 → 视为"用户改回来了"，不产生请求（直接返回 `true`）。
+   */
+  rename(id: string, title: string): Promise<boolean>
+  /**
+   * 导出为 Markdown 全文（**全量拉取**，不受当前分页窗口限制）。
+   * 失败返回 `null`（已提示），调用方据此不产生空文件。
+   */
+  exportMarkdown(id: string): Promise<string | null>
   /** 本地改写某条消息的反馈（供 `useChatStream` 做乐观更新与回滚，不发请求） */
   patchFeedback(messageId: string, value: FeedbackValue): void
 }
@@ -257,6 +269,63 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     }
   }
 
+  /**
+   * 重命名会话（乐观更新）。
+   *
+   * 标题是**纯展示字段**，本地改写即与服务端一致，故先改界面再发请求；失败整体回滚并
+   * 提示（与 `remove` 同口径，都是"终态式"的本地先行）。空标题或未改动一律不发请求——
+   * 用户在行内编辑框里敲了个空格又回车，不该产生一次 PATCH。
+   */
+  async function rename(threadId: string, title: string): Promise<boolean> {
+    const next = title.trim()
+    const prevList = list.value
+    const target = prevList.find((item) => item.thread_id === threadId)
+    if (!target || next === '' || target.title === next) return true
+
+    list.value = prevList.map((item) =>
+      item.thread_id === threadId ? { ...item, title: next } : item,
+    )
+    try {
+      await deps.threads.rename(threadId, next)
+      return true
+    } catch (cause) {
+      list.value = prevList
+      deps.toast?.push('error', toUserMessage(toErrorInfo(cause)))
+      return false
+    }
+  }
+
+  /**
+   * 全量消息拉取（导出用）。
+   *
+   * 详情接口的 `offset` 是**从最新往前数**的一页页窗口（每页内部按时间正序，见 `loadMore`），
+   * 所以这里一页页往前翻、最后把**页序**反转再拼，才得到正序全文。
+   * 页长取后端允许的最大值（200）：几千条的会话也只有几十次请求。
+   */
+  async function fetchAllMessages(threadId: string): Promise<Message[]> {
+    const pages: Message[][] = []
+    let offset = 0
+    for (;;) {
+      const detail = await deps.threads.detail(threadId, { limit: MESSAGE_PAGE_MAX, offset })
+      pages.push(detail.messages)
+      offset += detail.messages.length
+      // 空页 = 后端没更多了（`total` 与实际条数不一致时的兜底，避免死循环）
+      if (detail.messages.length === 0 || offset >= detail.total) break
+    }
+    return pages.reverse().flat()
+  }
+
+  async function exportMarkdown(threadId: string): Promise<string | null> {
+    const thread = list.value.find((item) => item.thread_id === threadId)
+    if (!thread) return null
+    try {
+      return threadToMarkdown(thread, await fetchAllMessages(threadId))
+    } catch (cause) {
+      deps.toast?.push('error', toUserMessage(toErrorInfo(cause)))
+      return null
+    }
+  }
+
   async function toolCallResult(callId: string): Promise<ToolCallResult> {
     const threadId = deps.activeThreadId.value
     if (!threadId) {
@@ -295,6 +364,8 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     toolCallResult,
     clearActive,
     remove,
+    rename,
+    exportMarkdown,
     patchFeedback,
   }
 }

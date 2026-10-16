@@ -99,7 +99,10 @@ export interface ChatStreamStore {
   streamingThinking: Readonly<Ref<string>>
   toolCalls: Readonly<Ref<ToolCallState[]>>
   thinkingEnabled: Ref<boolean>
-  /** 输入区文本（发送前保留、失败时保留，FR-013 相关场景） */
+  /**
+   * 输入区文本（发送前保留、失败时保留，FR-013 相关场景）。
+   * **按会话分桶**：切换会话时旧会话的存起来、新会话的取回来（见实现里的 `drafts`）。
+   */
   draft: Ref<string>
   error: Readonly<Ref<ErrorInfo | null>>
   usage: Readonly<Ref<Usage | null>>
@@ -164,6 +167,36 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const toolCalls = ref<ToolCallState[]>([])
   const thinkingEnabled = ref(readStoredThinking(storage))
   const draft = ref('')
+
+  /**
+   * 每会话草稿（2026-10-16）。
+   *
+   * 原先只有上面这一个全局 `draft`：在 A 里打了一半去 B 问一句，那半句会跟着跑到 B 的
+   * 输入框（串台），或者在 B 发送时被清掉（丢失）。这里按会话 id 分桶，切换时"存旧、取新"。
+   *
+   * `null`（视图态新对话，FR-010）**不建桶**：它要么随发送被消费、要么随离开丢弃；
+   * 若也留一份，首条消息发送时（`threads.create()` 让 id 由 `null` 变为真 id）那份文本
+   * 会变成下次点「新建会话」时冒出来的幽灵草稿。
+   *
+   * 只活在内存里：刷新即失（持久化留待后续，避免把"会话级草稿"变成第二套存储契约）。
+   */
+  const drafts = new Map<string, string>()
+  /** 桶上限：逛过很多会话也不无限增长，超限先淘汰最久没碰过的那一个 */
+  const DRAFT_BUCKETS_LIMIT = 50
+
+  /** 把当前草稿存进某个会话的桶（空串不留桶；超限淘汰最旧） */
+  function stashDraft(threadId: string | null): void {
+    if (threadId === null) return
+    // 先删后塞：Map 按插入序淘汰，这样"最近用过的桶"排在最后
+    drafts.delete(threadId)
+    if (draft.value === '') return
+    drafts.set(threadId, draft.value)
+    while (drafts.size > DRAFT_BUCKETS_LIMIT) {
+      const oldest = drafts.keys().next().value
+      if (oldest === undefined) break
+      drafts.delete(oldest)
+    }
+  }
   const error = ref<ErrorInfo | null>(null)
   const usage = ref<Usage | null>(null)
   const durationSeconds = ref<number | null>(null)
@@ -186,10 +219,17 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
 
   watch(thinkingEnabled, (value) => writeStoredThinking(storage, value))
 
-  // 切换会话 → 清空本轮流式状态
+  /**
+   * 切换会话 → 存旧草稿、清空本轮流式状态、取回新草稿（三件事同一时刻，不能分家：
+   * 分开做就会出现"草稿已经换成新会话的、流式状态还挂在旧会话"的中间态）。
+   */
   watch(
     () => deps.activeThreadId.value,
-    () => reset(),
+    (next, previous) => {
+      stashDraft(previous)
+      reset()
+      draft.value = next === null ? '' : (drafts.get(next) ?? '')
+    },
   )
 
   function reset(): void {

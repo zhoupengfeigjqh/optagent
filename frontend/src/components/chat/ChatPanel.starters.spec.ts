@@ -38,7 +38,7 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
   const noop = vi.fn()
   return {
     chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
-    threads: { messages: ref([]), hasMore: ref(false) },
+    threads: { activeId: ref(null), messages: ref([]), hasMore: ref(false) },
     search: {
       isOpen: ref(false),
       keyword: ref(''),

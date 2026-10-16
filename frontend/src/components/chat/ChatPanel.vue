@@ -7,7 +7,7 @@
  * - 全部接线（事件编排、UI 开关、生命周期）集中在 `useChatPanel()`，
  *   本组件只负责 props 相关的布局派生与渲染（宪章原则二：单文件 ≤500 行）
  */
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
@@ -146,6 +146,38 @@ function onStarterClick(starter: AgentStarter): void {
     ...(starter.guidance ? { guidance: starter.guidance } : {}),
   })
 }
+
+/* ---------- Esc：中断本轮（2026-10-16） ---------- */
+
+/**
+ * Esc = 点「终止」。按下一律走同一条**优先级瀑布**，顺序错了就是灾难（该关的弹窗没关、
+ * 反而把正在输出的回答掐了）：
+ *
+ * 1. 打开的原生 `<dialog>` → 让路。弹窗的 Esc 语义是"关掉它"（`BaseDialog` 系全部基于
+ *    原生 dialog），此时中断本轮属于误伤；
+ * 2. `@引用`面板 / 会话内搜索 → 它们各自已有 Esc 处理，这里不重复消费；
+ * 3. 本轮正在流式 → 中断（复用 `onStop`，与「终止」按钮同一条链路）；
+ * 4. 其余 → 不拦。
+ *
+ * 监听挂在 `window` 而非输入框上：用户此刻可能正把焦点放在消息列表或右侧预览区，
+ * 要求"必须先点回输入框才能停"没有道理（键盘可达性，宪章原则四）。
+ */
+function onEscapeKey(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || event.defaultPrevented) return
+  if (document.querySelector('dialog[open]')) return
+  if (mention.open.value || search.isOpen.value) return
+  if (!sending.value) return
+  event.preventDefault()
+  onStop()
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onEscapeKey)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onEscapeKey)
+})
 </script>
 
 <template>
@@ -180,6 +212,7 @@ function onStarterClick(starter: AgentStarter): void {
 
     <div v-if="showList" class="chat-panel__body">
       <MessageList
+        :thread-id="threads.activeId.value"
         :messages="threads.messages.value"
         :streaming="streaming"
         :pending-user="pendingUserMessage"

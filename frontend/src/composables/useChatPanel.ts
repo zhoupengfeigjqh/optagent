@@ -28,6 +28,7 @@ import { useNextSteps } from './useNextSteps'
 import { usePreview } from './usePreview'
 import { useSessionSearch } from './useSessionSearch'
 import { useThreads } from './useThreads'
+import { useThrottledText } from './useThrottledText'
 import { useToast } from './useToast'
 import { useUploads } from './useUploads'
 import { useWorkspace } from './useWorkspace'
@@ -71,6 +72,14 @@ export function useChatPanel() {
   })
 
   /**
+   * 流式正文/思考的**渲染影子**（2026-10-16）：状态仍逐 token 精确，界面按时间窗合并
+   * （见 `useThrottledText`）。放在这一层而不是 `useChatStream`：节流纯属渲染优化，
+   * 不该污染中断/重试/落盘那些有语义的状态与其测试。
+   */
+  const streamingTextView = useThrottledText(chat.streamingText)
+  const streamingThinkingView = useThrottledText(chat.streamingThinking)
+
+  /**
    * 本轮瞬态：`completed` 已由刷新后的历史消息承载，若继续下传会与持久化消息重复渲染，
    * 因此仅"进行中 / 失败 / 已中断"三种情况由气泡承载
    * （中断轮保留已生成内容，但不落盘、不展示操作与用量）。
@@ -82,8 +91,8 @@ export function useChatPanel() {
     }
     return {
       phase,
-      text: chat.streamingText.value,
-      thinking: chat.streamingThinking.value,
+      text: streamingTextView.value,
+      thinking: streamingThinkingView.value,
       toolCalls: chat.toolCalls.value,
       error: chat.error.value,
       // 本轮气泡标注"谁在回答"（009 起会话归属固定，标注用于如实还原存量历史）

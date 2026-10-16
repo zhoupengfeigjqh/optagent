@@ -27,6 +27,12 @@ export interface ContentSegment {
   matchIndex?: number
 }
 
+/** 命中区间（左闭右开） */
+export interface MatchRange {
+  start: number
+  end: number
+}
+
 /** 链接识别：仅 `http://` / `https://`，遇空白或引号终止。 */
 const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gi
 
@@ -135,6 +141,17 @@ export function buildSegments(content: string, keyword = '', matchIndexBase = 0)
  */
 export function countMatches(content: string, keyword: string): number {
   return findMarkRanges(content, keyword).length
+}
+
+/**
+ * 找出全部关键词命中区间（升序）。
+ *
+ * 与 `buildSegments` 的高亮**同源**（同一套匹配语义）——Markdown 渲染侧需要
+ * "某片段之前已有多少个命中"来换算全局序号，故把区间本身暴露出去，
+ * 避免两边各写一套正则、序号悄悄漂移（`MessageContent` 依赖这个口径）。
+ */
+export function findMatches(content: string, keyword: string): MatchRange[] {
+  return findMarkRanges(content, keyword).map((range) => ({ start: range.start, end: range.end }))
 }
 
 /** 追加分段；与上一段类型/链接/序号完全一致时合并，避免碎片化 DOM。 */

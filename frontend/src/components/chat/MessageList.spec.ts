@@ -317,3 +317,129 @@ describe('MessageList —— 置底与「回到底部」（2026-10-16）', () =>
     expect(wrapper.find(JUMP).exists()).toBe(false)
   })
 })
+
+/**
+ * 切回旧会话恢复上次滚动位置（2026-10-16）。
+ *
+ * 只恢复**上翻过**的会话：贴底离开的会话切回来仍然置底——否则"回来看到最新进展"
+ * 这条更强的语义会被破坏，也与"发消息必须看到自己的话"自相矛盾。
+ */
+describe('MessageList —— 切回旧会话恢复滚动位置（2026-10-16）', () => {
+  const OTHER: Message[] = [
+    {
+      id: 'm_other',
+      role: 'user',
+      content: '另一个会话',
+      ts: '2026-10-16T10:00:00Z',
+      feedback: null,
+    },
+  ]
+
+  it('上翻过的会话切回来落在原位置（不强制置底），箭头仍显示', async () => {
+    const wrapper = mount(MessageList, { props: { threadId: 'th_a', messages: HISTORICAL } })
+    await flushPromises()
+    const list = wrapper.find('.message-list')
+    const readScrollTop = installScrollMetrics(list.element, 1000, 300)
+
+    // 在 th_a 里上翻
+    list.element.scrollTop = 300
+    await list.trigger('scroll')
+    expect(wrapper.find(JUMP).exists()).toBe(true)
+
+    // 切到 th_b：没有存档 → 置底
+    await wrapper.setProps({ threadId: 'th_b', messages: OTHER })
+    await flushPromises()
+    expect(readScrollTop()).toBe(1000)
+
+    // 切回 th_a：回到离开时那一屏
+    await wrapper.setProps({ threadId: 'th_a', messages: HISTORICAL })
+    await flushPromises()
+    expect(readScrollTop()).toBe(300)
+    expect(wrapper.find(JUMP).exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('贴底离开的会话切回来仍置底（贴底不留存档，避免"回来看到半截历史"）', async () => {
+    const wrapper = mount(MessageList, { props: { threadId: 'th_a', messages: HISTORICAL } })
+    await flushPromises()
+    const list = wrapper.find('.message-list')
+    const readScrollTop = installScrollMetrics(list.element, 1000, 300)
+
+    // 先上翻、再滚回底部 —— 离开时是贴底状态
+    list.element.scrollTop = 200
+    await list.trigger('scroll')
+    list.element.scrollTop = 1000
+    await list.trigger('scroll')
+    expect(wrapper.find(JUMP).exists()).toBe(false)
+
+    await wrapper.setProps({ threadId: 'th_b', messages: OTHER })
+    await flushPromises()
+    await wrapper.setProps({ threadId: 'th_a', messages: HISTORICAL })
+    await flushPromises()
+
+    expect(readScrollTop()).toBe(1000)
+    expect(wrapper.find(JUMP).exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 流式正文的读屏播报（2026-10-16）。
+ *
+ * 这里钉的是"**播什么、不播什么**"：逐 token 的正文变化必须静默（否则 live 区每帧
+ * 变一次，播报被反复打断，等于噪音），只在回答落盘时播一句结论；
+ * 结构与文案一起断言——只测文案的话，容器哪天被误改成自动播报就没人发现了。
+ */
+describe('MessageList —— 读屏播报（2026-10-16）', () => {
+  const DONE_ASSISTANT: Message = {
+    id: 'm_done',
+    role: 'assistant',
+    agent_name: 'demo',
+    content: '生产计划已核对完毕',
+    ts: '2026-10-16T11:00:00Z',
+    status: 'completed',
+    feedback: null,
+  }
+
+  it('正文区不自动播报：日志容器与流式气泡都显式 aria-live="off"', async () => {
+    const wrapper = mount(MessageList, {
+      props: { messages: HISTORICAL, streaming: STREAMING_VIEW },
+    })
+    await flushPromises()
+
+    const list = wrapper.find('.message-list')
+    expect(list.attributes('role')).toBe('log')
+    expect(list.attributes('aria-live')).toBe('off')
+    // 流式气泡上的 `aria-live="off"`：经属性透传落到气泡根节点
+    expect(wrapper.find('.message-list [aria-live="off"]').exists()).toBe(true)
+  })
+
+  it('回答落盘 → 播报"已完成 + 字数"（一次结论，而非逐 token）', async () => {
+    const wrapper = mount(MessageList, {
+      props: { messages: HISTORICAL, streaming: STREAMING_VIEW },
+    })
+    await flushPromises()
+    const announce = wrapper.find('[data-test="message-list-announce"]')
+    expect(announce.text()).toBe('')
+
+    await wrapper.setProps({ streaming: null, messages: [...HISTORICAL, DONE_ASSISTANT] })
+    await flushPromises()
+
+    // '生产计划已核对完毕' = 9 字
+    expect(announce.text()).toBe('回答已完成，共 9 字')
+  })
+
+  it('失败轮落盘：不播报（失败由 ErrorNotice 的 role=alert 负责，避免双重播报）', async () => {
+    const wrapper = mount(MessageList, { props: { messages: HISTORICAL } })
+    await flushPromises()
+
+    await wrapper.setProps({
+      messages: [...HISTORICAL, { ...DONE_ASSISTANT, id: 'm_failed', status: 'failed' }],
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="message-list-announce"]').text()).toBe('')
+  })
+})

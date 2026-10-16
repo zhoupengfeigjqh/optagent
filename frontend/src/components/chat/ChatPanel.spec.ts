@@ -43,7 +43,7 @@ function makePanel(
   const noop = vi.fn()
   return {
     chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
-    threads: { messages: ref([]), hasMore: ref(false) },
+    threads: { activeId: ref(null), messages: ref([]), hasMore: ref(false) },
     search: {
       isOpen: ref(false),
       keyword: ref(''),
@@ -346,5 +346,77 @@ describe('ChatPanel —— 数字人不可用的降级呈现（009）', () => {
     expect(wrapper.find('.error-notice__hint').exists()).toBe(false)
 
     wrapper.unmount()
+  })
+})
+
+/**
+ * Esc 中断本轮（2026-10-16）。
+ *
+ * 只钉"接线 + 优先级瀑布"两件事：按下去是否落到中断入口（`onStop`），以及
+ * 弹窗 / `@引用`面板打开时**不许误伤**正在输出的回答。中断本身的行为
+ * （POST /stop、本轮不落盘）由 `useChatStream` 的用例覆盖。
+ */
+describe('ChatPanel —— Esc 中断本轮（2026-10-16）', () => {
+  function pressEscape(): void {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+  }
+
+  it('流式进行中按 Esc：落到中断入口（等价于点「终止」）', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).sending.value = true
+    await nextTick()
+
+    pressEscape()
+
+    expect((panel as Panel).onStop).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('本轮未在流式：Esc 不触发中断（不产生无意义的 stop 请求）', async () => {
+    const { wrapper, panel } = setup()
+    await nextTick()
+
+    pressEscape()
+
+    expect((panel as Panel).onStop).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('原生弹窗打开：Esc 让给弹窗关闭（优先级 1），不中断本轮', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).sending.value = true
+    const dialog = document.createElement('dialog')
+    dialog.setAttribute('open', '')
+    document.body.append(dialog)
+    await nextTick()
+
+    pressEscape()
+
+    expect((panel as Panel).onStop).not.toHaveBeenCalled()
+    dialog.remove()
+    wrapper.unmount()
+  })
+
+  it('`@引用`面板打开：Esc 归面板（优先级 2），不重复消费也不中断本轮', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).sending.value = true
+    ;(panel as Panel).mention.open.value = true
+    await nextTick()
+
+    pressEscape()
+
+    expect((panel as Panel).onStop).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('卸载后不再响应 Esc（监听已摘除，不留悬挂回调）', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).sending.value = true
+    await nextTick()
+    wrapper.unmount()
+
+    pressEscape()
+
+    expect((panel as Panel).onStop).not.toHaveBeenCalled()
   })
 })

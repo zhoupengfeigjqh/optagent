@@ -27,11 +27,16 @@ const stubs = {
   // 布尔桩不渲染插槽 ⇒ 子树（含侧栏）根本不挂载，也就无法派发事件。
   // 只渲染 `history`：其余两栏的插槽表达式需要更完整的 mock，与本文件用例无关。
   AppShell: { name: 'AppShell', template: '<div><slot name="history" /></div>' },
-  // 侧栏用一个"点得出 create 事件"的微型桩，用于验证视图的事件接线
+  // 侧栏用一个"点得出版本事件"的微型桩，用于验证视图的事件接线
   HistorySidebar: {
     name: 'HistorySidebar',
-    template:
-      '<aside class="sidebar-stub"><button class="sidebar-create" @click="$emit(\'create\')" /></aside>',
+    template: [
+      '<aside class="sidebar-stub">',
+      '<button class="sidebar-create" @click="$emit(\'create\')" />',
+      '<button class="sidebar-rename" @click="$emit(\'rename\', { threadId: \'t1\', title: \'改名后\' })" />',
+      '<button class="sidebar-export" @click="$emit(\'export\', \'t1\')" />',
+      '</aside>',
+    ].join(''),
   },
   ChatPanel: true,
   WorkspacePanel: true,
@@ -63,6 +68,9 @@ function makeSession(initialThreadId: string | null, threadIds: string[]) {
       }),
       showMore: vi.fn(),
       remove: vi.fn(),
+      rename: vi.fn().mockResolvedValue(true),
+      // 默认"拉取失败"（返回 null）：导出用例里点一下也不会真的去落盘
+      exportMarkdown: vi.fn().mockResolvedValue(null),
       clearActive: vi.fn(() => {
         activeThreadId.value = null
       }),
@@ -177,6 +185,73 @@ describe('WorkbenchView —— 新建对话＝空对话视图（009）', () => {
     await flushPromises()
 
     expect(session.threads.activeId.value).toBeNull()
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 侧栏的会话重命名与导出（2026-10-16）。
+ *
+ * 本视图只负责**转发与落盘**：标题的乐观更新/回滚在 `useThreads.rename`，
+ * 全文拉取在 `useThreads.exportMarkdown`（各自的用例覆盖其内部细节）。
+ */
+describe('WorkbenchView —— 会话重命名 / 导出（2026-10-16）', () => {
+  it('侧栏重命名 → 转交 `threads.rename`（载荷原样透传）', async () => {
+    const session = makeSession(null, ['t1'])
+    h.session = session
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.sidebar-rename').trigger('click')
+    await flushPromises()
+
+    expect(session.threads.rename).toHaveBeenCalledWith('t1', '改名后')
+    wrapper.unmount()
+  })
+
+  it('导出失败（store 返回 null）→ 不产生任何下载（不留半截空文件）', async () => {
+    const session = makeSession(null, ['t1'])
+    h.session = session
+    const createObjectURL = vi.fn(() => 'blob:fake')
+    const originalCreate = URL.createObjectURL
+    URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('.sidebar-export').trigger('click')
+    await flushPromises()
+
+    expect(session.threads.exportMarkdown).toHaveBeenCalledWith('t1')
+    expect(createObjectURL).not.toHaveBeenCalled()
+
+    URL.createObjectURL = originalCreate
+    wrapper.unmount()
+  })
+
+  it('导出成功 → 交给浏览器下载（Blob + `a[download]` 各触发一次）', async () => {
+    const session = makeSession(null, ['t1'])
+    session.threads.exportMarkdown.mockResolvedValue('# 标题\n')
+    h.session = session
+
+    // jsdom 没有对象 URL 与导航实现：两个静态方法都要就地补上，并拦住锚点跳转
+    const originalCreate = URL.createObjectURL
+    const originalRevoke = URL.revokeObjectURL
+    const createObjectURL = vi.fn(() => 'blob:fake')
+    URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL
+    URL.revokeObjectURL = vi.fn() as unknown as typeof URL.revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('.sidebar-export').trigger('click')
+    await flushPromises()
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+
+    clickSpy.mockRestore()
+    URL.createObjectURL = originalCreate
+    URL.revokeObjectURL = originalRevoke
     wrapper.unmount()
   })
 })

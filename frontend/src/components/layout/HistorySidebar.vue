@@ -34,6 +34,10 @@ const emit = defineEmits<{
   select: [threadId: string]
   more: []
   create: []
+  /** 提交新标题（请求与回滚由 `views/WorkbenchView.vue` 交给 `useThreads.rename`） */
+  rename: [payload: { threadId: string; title: string }]
+  /** 请求导出某会话为 Markdown（拉取与落盘由 `views/WorkbenchView.vue` 编排） */
+  export: [threadId: string]
   /** 请求删除某会话（二次确认与相邻会话切换由 `views/WorkbenchView.vue` 编排） */
   remove: [threadId: string]
 }>()
@@ -66,6 +70,8 @@ const hasMore = computed(() => props.threads.length > props.limit)
         :disabled="busy"
         :running="busy && thread.thread_id === activeId"
         @select="emit('select', $event)"
+        @rename="emit('rename', $event)"
+        @export="emit('export', $event)"
         @remove="emit('remove', $event)"
       />
     </ul>

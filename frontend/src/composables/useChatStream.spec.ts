@@ -7,8 +7,11 @@
  * 不变式（本文件守住）：
  * - 发送即置位（流进行中即可见），内容与引用原样保留；
  * - 完成 / 失败 / 中断 / 切换会话，全部清除（MUST NOT 与历史真身重复渲染）。
+ *
+ * 另含**按会话分桶的草稿**（2026-10-16，见文件末尾）：切会话时存旧取新，
+ * 视图态新对话不留幽灵草稿。
  */
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import { RUN_PHASE } from '../constants/events'
@@ -162,5 +165,85 @@ describe('useChatStream —— done 直推卡片（007 修订 · Tail Protocol�
     await store.send({ content: '你好', attachments: [] })
 
     expect(applyNextActions).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 按会话分桶的草稿（2026-10-16）。
+ *
+ * 回归的 bug：草稿是**全局单例**——在 A 里打了一半、切到 B，那半句跟到了 B（串台）；
+ * 在 B 发送时又被清掉（丢失）。这里钉三件事：存旧取新、视图态新对话不产生幽灵草稿、
+ * 桶数有上限。
+ */
+describe('useChatStream —— 按会话分桶的草稿（2026-10-16）', () => {
+  it('切走再切回：A 里打了一半的草稿原样还在，且不会串到 B', async () => {
+    const activeThreadId = ref<string | null>('th_a')
+    const store = createChatStreamStore(makeDeps({ activeThreadId }))
+
+    store.draft.value = '把上个月的生产计划'
+    activeThreadId.value = 'th_b'
+    await nextTick()
+
+    // 切到 B：输入框是干净的（旧实现里这里会带着 A 的半句话）
+    expect(store.draft.value).toBe('')
+
+    store.draft.value = 'B 的问题'
+    activeThreadId.value = 'th_a'
+    await nextTick()
+
+    // 切回 A：半句话还在
+    expect(store.draft.value).toBe('把上个月的生产计划')
+  })
+
+  it('视图态新对话（id 为 null）：不留幽灵草稿', async () => {
+    const activeThreadId = ref<string | null>(null)
+    const store = createChatStreamStore(makeDeps({ activeThreadId }))
+
+    // 在新对话里敲字 → 首条消息发送时 `threads.create()` 让 id 由 null 变真
+    store.draft.value = '第一句'
+    activeThreadId.value = 'th_created'
+    await nextTick()
+    expect(store.draft.value).toBe('')
+
+    // 再点「新建会话」回到视图态：不能把刚才那句当成"新对话的草稿"吐出来
+    activeThreadId.value = null
+    await nextTick()
+    expect(store.draft.value).toBe('')
+  })
+
+  it('切换会话同时重置本轮瞬态：草稿换了，流式残留也必须清掉（三件事同一时刻）', async () => {
+    const activeThreadId = ref<string | null>('th_a')
+    const store = createChatStreamStore(makeDeps({ activeThreadId, fetchImpl: PENDING_FETCH }))
+
+    const pending = store.send({ content: '你好', attachments: [] })
+    await flush()
+    expect(store.pendingUserMessage.value).not.toBeNull()
+
+    store.draft.value = 'A 的草稿'
+    activeThreadId.value = 'th_b'
+    await nextTick()
+
+    expect(store.pendingUserMessage.value).toBeNull()
+    expect(store.draft.value).toBe('')
+    await pending
+  })
+
+  it('桶上限 50：超限先淘汰最久没碰过的那个，不无限增长', async () => {
+    const activeThreadId = ref<string | null>('th_0')
+    const store = createChatStreamStore(makeDeps({ activeThreadId }))
+
+    for (let index = 0; index < 51; index += 1) {
+      store.draft.value = `草稿 ${index}`
+      activeThreadId.value = `th_${index + 1}`
+      await nextTick()
+    }
+
+    activeThreadId.value = 'th_0'
+    await nextTick()
+    expect(store.draft.value).toBe('')
+
+    activeThreadId.value = 'th_50'
+    await nextTick()
+    expect(store.draft.value).toBe('草稿 50')
   })
 })

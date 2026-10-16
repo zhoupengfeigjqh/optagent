@@ -14,6 +14,8 @@
  * - **回到底部按钮**（2026-10-16）：非底部时在消息区右下角浮出向下箭头，右边缘与
  *   输入区的「发送」按钮对齐（两者同取 Composer 的左右内边距）；`atBottom` 是唯一
  *   真源，按钮显隐与"是否跟随最新"不会出现两套状态
+ * - **切回旧会话恢复上次滚动位置**（2026-10-16）：只对"上翻过"的会话恢复；贴底离开的
+ *   会话切回来仍然置底——否则"回来看到最新进展"这条更强的语义会被破坏
  * - **失败轮「重试本轮」**（2026-10-15）：从历史里解析该轮的用户消息并上抛（此处是全仓
  *   唯一知道"失败消息的上一轮用户消息是谁"的地方——它按索引向前找，不需要 id 反查）；
  *   解析不出（该消息不在已加载分页窗口内）则不给入口，见 `retryLabels`
@@ -84,6 +86,11 @@ const props = withDefaults(
      * 历史轮次一律不展示卡片（FR-015）。
      */
     nextSteps?: ThreadNextSteps | null
+    /**
+     * 当前会话 id（2026-10-16）：**只**用作"切回旧会话恢复上次滚动位置"的存档键。
+     * `null` = 视图态新对话，没有稳定身份，不存档。
+     */
+    threadId?: string | null
   }>(),
   {
     messages: () => [],
@@ -94,6 +101,7 @@ const props = withDefaults(
     hasMore: false,
     loadToolResult: undefined,
     nextSteps: null,
+    threadId: null,
   },
 )
 
@@ -266,6 +274,12 @@ const STICK_THRESHOLD_PX = 80
  */
 const atBottom = ref(true)
 
+/**
+ * 读屏播报文本（视觉隐藏，见模板里的 `role="status"`）。
+ * 只写**结论**（例如"回答已完成，共 120 字"），不写流式增量——理由见 `announceCompleted`。
+ */
+const announcement = ref('')
+
 const firstId = computed(() => props.messages[0]?.id ?? '')
 const lastId = computed(() => props.messages[props.messages.length - 1]?.id ?? '')
 /** 流式指纹：阶段、思考、正文、工具数量任一变化都需跟随 */
@@ -294,6 +308,64 @@ function onScroll(): void {
   atBottom.value = isNearBottom()
 }
 
+/**
+ * 会话切换时的滚动位置记忆（2026-10-16）。
+ *
+ * 只记**上翻过**的会话：贴底的会话本来就会重新置底，"记住底部"没有意义。
+ * 键取会话 id 而非消息 id：分页窗口会因"加载更早消息"而变，会话身份才是稳定锚。
+ */
+const scrollMemory = new Map<string, number>()
+/** 存档上限：与草稿分桶同口径，逛过很多会话也不无限增长 */
+const SCROLL_MEMORY_LIMIT = 50
+/** 列表里此刻显示的会话（切换时用来给"上一个"存档） */
+let currentThreadId: string | null = props.threadId
+
+/** 给离开的会话存档；贴底离开则清掉旧档（避免"贴底走、上翻回"的错觉） */
+function rememberScroll(threadId: string | null): void {
+  if (threadId === null) return
+  const element = listRef.value
+  if (atBottom.value || !element) {
+    scrollMemory.delete(threadId)
+    return
+  }
+  // 先删后塞：Map 按插入序淘汰，最近用过的排最后
+  scrollMemory.delete(threadId)
+  scrollMemory.set(threadId, element.scrollTop)
+  while (scrollMemory.size > SCROLL_MEMORY_LIMIT) {
+    const oldest = scrollMemory.keys().next().value
+    if (oldest === undefined) break
+    scrollMemory.delete(oldest)
+  }
+}
+
+/** 恢复存档位置；恢复后**重新判定**一次是否贴底（正文高度可能与离开时略有出入） */
+function restoreScroll(scrollTop: number): void {
+  atBottom.value = false
+  void nextTick(() => {
+    const element = listRef.value
+    if (!element) return
+    element.scrollTop = scrollTop
+    atBottom.value = isNearBottom()
+  })
+}
+
+/**
+ * 本轮回答落盘时的读屏播报（2026-10-16）。
+ *
+ * 读屏用户看不到"字在长出来"，但**逐 token 播报是噪音**：live 区每帧变一次，播报会被
+ * 反复打断，最后什么也听不清（这是无障碍改造里最常见的自伤）。故分工如下：
+ * - 正文区不自动播报：列表容器 `role="log"` 上显式 `aria-live="off"`，流式气泡也是；
+ * - "正在生成"由 `TypingIndicator` 播（它自带 `aria-live`，且只播一次）；
+ * - 收尾只播**一句结论**：新的 assistant 消息追加进列表的那一刻。
+ *
+ * 失败/中断轮不播报：失败轮由 `ErrorNotice`（`role="alert"`）负责，中断轮根本没落盘。
+ */
+function announceCompleted(latest: Message): void {
+  if (latest.role !== MESSAGE_ROLE.ASSISTANT) return
+  if (latest.status === MESSAGE_STATUS.FAILED) return
+  announcement.value = `回答已完成，共 ${latest.content.length} 字`
+}
+
 // 基线取自首帧，否则首次变化会被误判为"首条也变了"（会话切换）
 let previousFirst = firstId.value
 let previousLast = lastId.value
@@ -319,16 +391,26 @@ watch(
       return
     }
 
-    // 会话切换：直接置底并恢复跟随
+    // 会话切换：先给旧会话存档，再决定新会话落在哪。
+    // watcher 跑在 DOM 更新**之前**，此刻 `listRef.scrollTop` 读到的仍是旧会话的位置。
     if (firstChanged) {
-      atBottom.value = true
-      void nextTick(scrollToLatest)
+      rememberScroll(currentThreadId)
+      currentThreadId = props.threadId
+      const saved = props.threadId === null ? undefined : scrollMemory.get(props.threadId)
+      if (saved === undefined) {
+        atBottom.value = true
+        void nextTick(scrollToLatest)
+      } else {
+        restoreScroll(saved)
+      }
       return
     }
 
-    // 追加新消息（首条未变、末条变化）：原本贴底则继续跟随
-    if (lastChanged && atBottom.value) {
-      void nextTick(scrollToLatest)
+    // 追加新消息（首条未变、末条变化）：原本贴底则继续跟随，并向读屏播报本轮结论
+    if (lastChanged) {
+      if (atBottom.value) void nextTick(scrollToLatest)
+      const latest = props.messages[props.messages.length - 1]
+      if (latest) announceCompleted(latest)
     }
   },
 )
@@ -411,7 +493,14 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
     滚动条仍在内层 `.message-list` 上（那里的类名是既有样式与测试的锚点）。
   -->
   <div class="message-list-wrap">
-    <div ref="listRef" class="message-list" @scroll="onScroll">
+    <div
+      ref="listRef"
+      class="message-list"
+      role="log"
+      aria-label="对话消息"
+      aria-live="off"
+      @scroll="onScroll"
+    >
       <button v-if="hasMore" type="button" class="message-list__more" @click="emit('load-more')">
         加载更早的消息
       </button>
@@ -464,6 +553,7 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
           :key="'streaming'"
           :message="streamingMessage"
           :streaming="streaming"
+          aria-live="off"
           :search-keyword="searchKeyword"
           :active-match-index="activeMatchIndex"
           :match-index-base="matchStats.total"
@@ -474,6 +564,20 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
         />
       </template>
     </div>
+
+    <!--
+      读屏专用播报（视觉隐藏）：只播**结论**（本轮回答已完成）。
+      逐 token 的正文变化刻意不播——`role="status"` 会被打字流反复打断，等于噪音；
+      "正在生成"由 `TypingIndicator` 负责，这里负责收尾。
+    -->
+    <p
+      class="message-list__announce"
+      data-test="message-list-announce"
+      role="status"
+      aria-live="polite"
+    >
+      {{ announcement }}
+    </p>
 
     <!--
       回到底部：非底部（用户上翻过、或搜索定位到了旧消息）才出现。
@@ -542,6 +646,22 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
 .message-list__jump:hover {
   border-color: var(--color-border-strong);
   color: var(--color-text);
+}
+
+/*
+ * 读屏专用播报区：视觉上不可见，但**不能**用 `display: none` / `visibility: hidden`
+ * （那会让辅助技术也看不到，播报直接失效）。用 1px 裁剪的标准做法。
+ */
+.message-list__announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .message-list__more {

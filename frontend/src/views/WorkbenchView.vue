@@ -23,6 +23,8 @@ import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
 
 import { useSession } from '@/composables/useAppSession'
 import { RUN_PHASE } from '@/constants/events'
+import { downloadTextFile } from '@/utils/download'
+import { exportFilename } from '@/utils/export-thread'
 
 const session = useSession()
 
@@ -141,6 +143,29 @@ async function onConfirmRemove(): Promise<void> {
   }
 }
 
+/* ---------- 重命名 / 导出（2026-10-16） ---------- */
+
+/** 提交新标题：请求、乐观更新与失败回滚都在 `useThreads.rename` 里，这里只转发 */
+function onRenameThread(payload: { threadId: string; title: string }): void {
+  void session.threads.rename(payload.threadId, payload.title)
+}
+
+/**
+ * 导出会话为 Markdown，交给浏览器下载。
+ *
+ * 为什么**重新全量拉一次**而不是用中栏现成的 `messages`：那只是已加载的一页
+ * （"加载更早的消息"没点时前面几十轮根本不在内存里），照着它导出会静默少内容——
+ * 而用户拿到的是文件，事后很难发现少了开头。
+ */
+async function onExportThread(threadId: string): Promise<void> {
+  const thread = session.threads.list.value.find((item) => item.thread_id === threadId)
+  if (!thread) return
+  const markdown = await session.threads.exportMarkdown(threadId)
+  // `null` = 拉取失败（已 toast）：不产生空文件
+  if (markdown === null) return
+  downloadTextFile(exportFilename(thread), markdown)
+}
+
 /* ---------- 右栏工作空间面板（US7 / US8） ---------- */
 
 /** 面板展开即占位右侧 1/3（FR-001）；收起时中栏恢复满宽（FR-002）。 */
@@ -194,6 +219,8 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
         @select="onSelectThread"
         @create="onCreateThread"
         @more="onShowMore"
+        @rename="onRenameThread"
+        @export="onExportThread"
         @remove="onRequestRemove"
       />
     </template>
