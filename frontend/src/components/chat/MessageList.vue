@@ -7,20 +7,16 @@
  * - 流式 → 追加"合成气泡"承载本轮思考/工具/正文；其**上方**先渲染乐观用户气泡
  *   （`pendingUser`，十七次调整：发送即出现，完成后由历史真身接管，不重复）
  * - 搜索 → 计算每条消息的全局匹配基准序号，并只对当前活跃序号滚动定位
- * - **自动置底**：切换会话、新消息落定、流式增量都跟随到最新；
- *   用户向上翻阅时暂停（回到近底部即恢复），"加载更早消息"只补偿高度、不跳到底部
- * - **本端发消息即强制置底**（2026-10-16）：用户上翻到很久以前再发送时，自己的消息
- *   必须立刻可见——不看 80px 阈值，直接恢复跟随
- * - **回到底部按钮**（2026-10-16）：非底部时在消息区右下角浮出向下箭头，右边缘与
- *   输入区的「发送」按钮对齐（两者同取 Composer 的左右内边距）；`atBottom` 是唯一
- *   真源，按钮显隐与"是否跟随最新"不会出现两套状态
- * - **切回旧会话恢复上次滚动位置**（2026-10-16）：只对"上翻过"的会话恢复；贴底离开的
- *   会话切回来仍然置底——否则"回来看到最新进展"这条更强的语义会被破坏
+ * - **滚动跟随 / 会话位置记忆 / 读屏播报**（2026-10-16 起由 `useMessageScroll` 承担）：
+ *   自动置底、上翻暂停、本端发送强制置底、「回到底部」按钮的唯一真源 `atBottom`、
+ *   切回旧会话恢复位置、以及"只播结论"的读屏播报，全部实现在
+ *   `composables/useMessageScroll.ts`（本组件只消费它返回的 4 个出口）。
+ *   本文件由此降到 500 行以内（宪章原则二）。
  * - **失败轮「重试本轮」**（2026-10-15）：从历史里解析该轮的用户消息并上抛（此处是全仓
  *   唯一知道"失败消息的上一轮用户消息是谁"的地方——它按索引向前找，不需要 id 反查）；
  *   解析不出（该消息不在已加载分页窗口内）则不给入口，见 `retryLabels`
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import type {
   AgentStarter,
@@ -32,6 +28,7 @@ import type {
 import type { ThreadNextSteps } from '../../api/threads'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import type { PendingUserMessage } from '../../composables/useChatStream'
+import { useMessageScroll } from '../../composables/useMessageScroll'
 import { countMatches } from '../../utils/segments'
 import type { ViewLinkTarget } from '../../utils/view-link'
 import BaseIcon from '../common/BaseIcon.vue'
@@ -259,206 +256,25 @@ watch(
   { immediate: true },
 )
 
-/* ---------- 自动置底（跟随最新） ---------- */
-
-/** 距底部这么多像素以内即视为"跟随最新" */
-const STICK_THRESHOLD_PX = 80
+/* ---------- 自动置底 / 会话位置记忆 / 读屏播报 ---------- */
 
 /**
- * 是否跟随最新（视口是否停在底部）。
- *
- * 2026-10-16 由裸变量改为 `ref`：它同时充当「回到底部」按钮的唯一真源——
- * 非响应式时按钮只能另立一个标志位，两个状态之间必然出现失同步窗口。
- *
- * 用户向上翻阅时暂停，回到近底部即恢复；本端发消息时被强制置为 `true`。
+ * 2026-10-16 起整块抽为 `useMessageScroll`（宪章原则二：单文件 ≤500 行）：
+ * 它只依赖这五个入参，与模板的渲染与事件透传没有耦合，抽走后**行为零变化**。
+ * 三条口径（上翻暂停 / 本端发送强制置底 / `atBottom` 为唯一真源）写在那个文件的头部。
  */
-const atBottom = ref(true)
-
-/**
- * 读屏播报文本（视觉隐藏，见模板里的 `role="status"`）。
- * 只写**结论**（例如"回答已完成，共 120 字"），不写流式增量——理由见 `announceCompleted`。
- */
-const announcement = ref('')
-
-const firstId = computed(() => props.messages[0]?.id ?? '')
-const lastId = computed(() => props.messages[props.messages.length - 1]?.id ?? '')
-/** 流式指纹：阶段、思考、正文、工具数量任一变化都需跟随 */
-const streamKey = computed(
-  () =>
-    `${props.streaming?.phase ?? ''}|${props.streaming?.text.length ?? 0}|${
-      props.streaming?.thinking.length ?? 0
-    }|${props.streaming?.toolCalls.length ?? 0}`,
-)
-
-function isNearBottom(): boolean {
-  const element = listRef.value
-  if (!element) return true
-  return element.scrollHeight - element.scrollTop - element.clientHeight <= STICK_THRESHOLD_PX
-}
-
-function scrollToLatest(): void {
-  const element = listRef.value
-  if (!element) return
-  element.scrollTop = element.scrollHeight
-  // 程序化滚动不一定派发 scroll 事件（jsdom 更不会），状态就地收敛
-  atBottom.value = true
-}
-
-function onScroll(): void {
-  atBottom.value = isNearBottom()
-}
-
-/**
- * 会话切换时的滚动位置记忆（2026-10-16）。
- *
- * 只记**上翻过**的会话：贴底的会话本来就会重新置底，"记住底部"没有意义。
- * 键取会话 id 而非消息 id：分页窗口会因"加载更早消息"而变，会话身份才是稳定锚。
- */
-const scrollMemory = new Map<string, number>()
-/** 存档上限：与草稿分桶同口径，逛过很多会话也不无限增长 */
-const SCROLL_MEMORY_LIMIT = 50
-/** 列表里此刻显示的会话（切换时用来给"上一个"存档） */
-let currentThreadId: string | null = props.threadId
-
-/** 给离开的会话存档；贴底离开则清掉旧档（避免"贴底走、上翻回"的错觉） */
-function rememberScroll(threadId: string | null): void {
-  if (threadId === null) return
-  const element = listRef.value
-  if (atBottom.value || !element) {
-    scrollMemory.delete(threadId)
-    return
-  }
-  // 先删后塞：Map 按插入序淘汰，最近用过的排最后
-  scrollMemory.delete(threadId)
-  scrollMemory.set(threadId, element.scrollTop)
-  while (scrollMemory.size > SCROLL_MEMORY_LIMIT) {
-    const oldest = scrollMemory.keys().next().value
-    if (oldest === undefined) break
-    scrollMemory.delete(oldest)
-  }
-}
-
-/** 恢复存档位置；恢复后**重新判定**一次是否贴底（正文高度可能与离开时略有出入） */
-function restoreScroll(scrollTop: number): void {
-  atBottom.value = false
-  void nextTick(() => {
-    const element = listRef.value
-    if (!element) return
-    element.scrollTop = scrollTop
-    atBottom.value = isNearBottom()
-  })
-}
-
-/**
- * 本轮回答落盘时的读屏播报（2026-10-16）。
- *
- * 读屏用户看不到"字在长出来"，但**逐 token 播报是噪音**：live 区每帧变一次，播报会被
- * 反复打断，最后什么也听不清（这是无障碍改造里最常见的自伤）。故分工如下：
- * - 正文区不自动播报：列表容器 `role="log"` 上显式 `aria-live="off"`，流式气泡也是；
- * - "正在生成"由 `TypingIndicator` 播（它自带 `aria-live`，且只播一次）；
- * - 收尾只播**一句结论**：新的 assistant 消息追加进列表的那一刻。
- *
- * 失败/中断轮不播报：失败轮由 `ErrorNotice`（`role="alert"`）负责，中断轮根本没落盘。
- */
-function announceCompleted(latest: Message): void {
-  if (latest.role !== MESSAGE_ROLE.ASSISTANT) return
-  if (latest.status === MESSAGE_STATUS.FAILED) return
-  announcement.value = `回答已完成，共 ${latest.content.length} 字`
-}
-
-// 基线取自首帧，否则首次变化会被误判为"首条也变了"（会话切换）
-let previousFirst = firstId.value
-let previousLast = lastId.value
-let previousCount = props.messages.length
-
-watch(
-  () => [firstId.value, lastId.value, props.messages.length] as const,
-  ([first, last, count]) => {
-    const firstChanged = first !== previousFirst
-    const lastChanged = last !== previousLast
-    const grew = count > previousCount
-    previousFirst = first
-    previousLast = last
-    previousCount = count
-
-    // 加载更早消息（前插）：补偿新增高度，让视口停在原内容上，不跳到底部
-    if (firstChanged && !lastChanged && grew) {
-      const before = listRef.value?.scrollHeight ?? 0
-      void nextTick(() => {
-        const element = listRef.value
-        if (element) element.scrollTop += element.scrollHeight - before
-      })
-      return
-    }
-
-    // 会话切换：先给旧会话存档，再决定新会话落在哪。
-    // watcher 跑在 DOM 更新**之前**，此刻 `listRef.scrollTop` 读到的仍是旧会话的位置。
-    if (firstChanged) {
-      rememberScroll(currentThreadId)
-      currentThreadId = props.threadId
-      const saved = props.threadId === null ? undefined : scrollMemory.get(props.threadId)
-      if (saved === undefined) {
-        atBottom.value = true
-        void nextTick(scrollToLatest)
-      } else {
-        restoreScroll(saved)
-      }
-      return
-    }
-
-    // 追加新消息（首条未变、末条变化）：原本贴底则继续跟随，并向读屏播报本轮结论
-    if (lastChanged) {
-      if (atBottom.value) void nextTick(scrollToLatest)
-      const latest = props.messages[props.messages.length - 1]
-      if (latest) announceCompleted(latest)
-    }
-  },
-)
-
-// 流式增量：贴底时跟随；用户向上翻阅时不打扰
-watch(streamKey, () => {
-  if (atBottom.value) void nextTick(scrollToLatest)
-})
-
-/**
- * 本端发起一轮（乐观气泡出现）→ **强制**置底（2026-10-16）。
- *
- * `pendingUser` 只在 `useChatStream.send()` 里置位，而发送 / 重试本轮 / 重新生成 /
- * 问题卡片与下一步动作卡片全部汇入同一条发送链路，所以"它由空变非空"等价于
- * "用户刚做了主动动作"。这里**不看阈值**：用户上翻到很久以前再发消息时，自己的
- * 消息必须立刻出现在视口里，否则会以为没发出去（旧实现只在 `stick` 为真时才跟随，
- * 上翻后发送是静默失效的）。
- */
-watch(
-  () => props.pendingUser,
-  (next) => {
-    if (!next) return
-    atBottom.value = true
-    void nextTick(scrollToLatest)
-  },
-)
-
-/**
- * 容器尺寸变化（右侧工作区面板开合、窗口缩放）会让正文重排，`scrollHeight` 随之
- * 改变，却**不会**派发 scroll 事件——缺这一手，按钮会一直停在旧状态上。
- *
- * jsdom 无 `ResizeObserver`，故做存在性守卫（与 Composer 里"scrollHeight 恒为 0
- * 就不写高度"同理：测试环境不参与布局，状态由显式触发驱动）。
- */
-let resizeObserver: ResizeObserver | null = null
-
-onMounted(() => {
-  void nextTick(scrollToLatest)
-  if (typeof ResizeObserver === 'undefined' || !listRef.value) return
-  resizeObserver = new ResizeObserver(() => {
-    atBottom.value = isNearBottom()
-  })
-  resizeObserver.observe(listRef.value)
-})
-
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-  resizeObserver = null
+const { atBottom, announcement, onScroll, scrollToLatest } = useMessageScroll({
+  listRef,
+  messages: computed(() => props.messages),
+  /** 流式指纹：阶段、思考、正文、工具数量任一变化都需跟随 */
+  streamKey: computed(
+    () =>
+      `${props.streaming?.phase ?? ''}|${props.streaming?.text.length ?? 0}|${
+        props.streaming?.thinking.length ?? 0
+      }|${props.streaming?.toolCalls.length ?? 0}`,
+  ),
+  pendingUser: computed(() => props.pendingUser),
+  threadId: computed(() => props.threadId),
 })
 
 function onFeedback(payload: { message_id: string; value: 'up' | 'down' | null }): void {

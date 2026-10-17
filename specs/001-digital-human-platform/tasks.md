@@ -1123,3 +1123,78 @@ platform-data/     # 平台设计态（bind mount，不进镜像）
 | `admin-frontend` test / `test:coverage` | ✅ **587 passed**（52 文件）/ ✅ **98.14 / 94.19 / 100 / 98.37**（`skills.ts`、`ontologies.ts`、`http.ts` 函数均 **100%**；修复前 exit 1） |
 
 **未改动的部分（口径边界）**：§11 仍是「**未实施**」——没有新增任何 401/403 校验钩子、没有登录/登出/会话端点，两码在运行期不可达，登记只冻结**命名与状态码**；既有端点请求/响应结构零变更。
+
+---
+
+## 增量任务（2026-10-17）：`grep_skill` 内置工具 + 内置工具显示口径统一
+
+### 一、新增内置工具 `grep_skill`（技能内容检索）
+
+**问题（上一轮 `read_skill` 只补齐了一半）**：`read_skill` 解决"读得到"，但技能内容的**检索**仍无入口——`grep_files` 的白名单是用户三空间（`FileAccess`），技能在 `users/{uid}/agents/{agent}/skills/**`，是另一个子树。技能一多，模型只能逐个文件读，"技能写了等于没写"。
+
+**处置**：
+
+1. **抽出共享安全层 `agent-backend/src/domain/tools/skill-access.ts`**：把 `read-skill.ts` 的私有校验（`SkillAccessError` / `requireSkillName` / `normalizeSkillRelPath` / `resolveInsideSkill` / `listSkillFiles` / `availableSkills` / 控制字符判定）迁出为单一来源，`read_skill` 与 `grep_skill` 共用——安全判据不允许有两份（原则二）。`read-skill.ts` 行为零变化，仅改为引用并**再导出** `SkillAccessError`（既有引用方无需改动）。
+2. **新增领域实现 `agent-backend/src/domain/tools/grep-skill.ts`**（只读，不经 `FileAccess`）：`grep_skill(pattern, skill?)`，`skill` 缺省检索本数字人全部技能；命中行 `技能名/相对路径:行号: 内容` 可直接回填 `read_skill`；符号链接不跟进、二进制（字节 0）跳过、单文件 >2MB 跳过，均计数并在结果尾部注明；**有界必须可见**（原则九）：最多 100 条匹配 / 500 个文件，触顶显式写明。用法问题（空检索式、非法正则、技能不存在、技能根为空）返回可读文本；越权（非法技能名）上抛 `SkillAccessError` → 拒绝文案 + `file.access.denied`（`alert: true`）。
+3. **进内置工具目录**（`builtin-tool-catalog.ts`）：追加在**末尾**，**前 5 项顺序与文本零变化**（golden 不变式仍成立）；目录 6→7 项，平台选择器**自动出现**「检索技能内容」，平台侧零改动（只读投影）。
+4. **启用方式**：同 `read_skill`，须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人需在管理平台勾选后**重新部署**。
+
+**契约同步**：`contracts/runtime-api-delta.md` §0（新增 R19 行）/§1.4（目录 6→7、新增行、不变式说明补 `grep_skill`）/§1.4.2（新增小节）/§2（工具数 6→7、示例 `total`）。
+
+**回归测试**：新增 `tests/unit/grep-skill.spec.ts`（11 例：缺省全量 / 限定技能 / 大小写不敏感 / 无匹配 / 二进制跳过计数 / 符号链接跳过计数 / 超 100 条明示 / 空与非法检索式 / 技能不存在 / 技能根为空 / 4 类非法技能名越权）；`tests/unit/builtin-tools.spec.ts` +2 例（接线、越权 → 拒绝文案 + alert）；`builtin-tool-catalog.spec.ts`（6→7 + `grep_skill` golden 文本）；集成 `builtin-tools.spec.ts`（`total` 7 + 含 `grep_skill`）。
+
+### 二、内置工具显示口径统一（英文名为标题、中文名进说明）
+
+**问题**：`ToolSelector`（内置工具分区）只显示中文 `label`（`读取文件`），工具的英文名（模型调用名与引用键）在界面上不可见；而聊天前台的工具卡片显示 `read_file`、问题实例的「关联工具」显示 `读取文件（read_file）`——同一个工具在三个界面里叫两个名字。
+
+**处置（只动展示层，零契约 / 零落盘影响）**：`label` 未参与任何判据（引用与校验全程用 `name`，部署物化只写 `enabled: [name]`），故改动面锁在两个组件：
+
+- `admin-frontend/src/components/agents/ToolSelector.vue`：标题改 `tool.name`，副标题为 `${label} · ${description_template}`——中文名不丢，`CheckboxList` 的中文搜索仍可命中（其过滤匹配 `value + label + description`）。
+- `admin-frontend/src/components/agents/QuickStartDialog.vue`：`${meta.label}（${name}）` → `${name}（${meta.label}）`。
+
+**回归测试**：`ToolSelector.spec.ts` +1 例（标题为英文名、中文名在说明行）；`QuickStartDialog.spec.ts` +1 例（选项文案 `read_file（读文件）`）。
+
+**门禁（2026-10-17）**：`agent-backend` 全量 **782 passed / 1 failed**——失败项是 `tests/unit/produced.spec.ts` 的"能命中列表之外的条目"在 57 worker 并发下超时（5000ms），**单文件复跑 24/24 通过**，与本次改动无关的既有并发慢用例；`admin-frontend` 全量 **596 passed（52 文件）**。本批改动文件行数：`skill-access.ts` 174 / `grep-skill.ts` 183 / `read-skill.ts` 137 / `infra/builtin-tools.ts` 174，均 ≤ 500。
+
+---
+
+## 增量任务（2026-10-17）：本体随部署下发（物化 + 预检）
+
+**问题**：本体库已是第四类配置（`FR-058`，数字人设计可引用本体），但部署**只写四件套 + `skills/`**——引用写在设计态里，产物里没有对应文件，运行环境按 `ontology/{场景}/{本体}/` 找不到本体，"配了等于没配"。预检也只校验"引用名字在清单里存在"：库内目录在、文件名对，但 `securities.yaml` 被手删的半残快照会一路通过预检，直到运行期才炸。
+
+**处置**（三层各自单一职责）：
+
+1. **物化**（`admin-backend/src/domain/deploy/materialize.ts`）：设计态 `ontologies: ["场景名/本体名"]` 逐条展开为 `ontology/{场景}/{本体}/ontology.yaml` + `securities.yaml`，与 `skills/` 平级、**原样复制**（平台是权威源，产物不做二次加工）。形状非法的存量手改引用（非两段）静默跳过，避免拼出三段路径。
+2. **预检**（`src/domain/deploy/precheck.ts` + `deployer.ts`）：新增可选回调 `ontologyIssue(ref)`，`Deployer` 用 `OntologyStore.read()` 实现——该方法本身强校验两个必需文件，缺失即抛 `ADM_ONTOLOGY_NOT_FOUND` 并带可读原因（`本体文件缺失：场景/本体/securities.yaml`）。预检只对"引用名字有效"的条目做完整性复查（名字无效已由引用有效性报告，不重复报错）。物化期的跳过与预检期的报错分工明确：前者兜存量脏数据，后者让残缺在部署前就被看见。
+3. **装配**（`src/server.ts`）：`Deployer` 依赖对象注入 `ontologies`，与 `catalog` 共用同一实例。
+
+**契约**：`data-model.md` §8 的产物布局补 `ontology/{场景}/{本体}/` 两个文件；`admin-api` 端点无变化（部署请求/响应对本体不可见）。
+
+**回归测试**：`tests/integration/deploy.spec.ts` +2（两个文件逐字节物化且与 `skills/` 平级；库内删 `securities.yaml` → 预检 `passed=false`、`ADM_ONTOLOGY_NOT_FOUND`、运行环境零写入）；`tests/unit/materialize.spec.ts` +2（整包物化 / 非法形状引用被跳过）并把 `MaterializeContext` 夹具补 `ontologies`；`tests/unit/deploy-precheck.spec.ts`、`tests/unit/unified-catalog.spec.ts` 夹具补必填依赖。
+
+**同时修掉一处两侧不一致（2026-10-17）**：索引去冗余时后端把 `scenario` / `ontology_dir` / `name` / `source` 连同**响应**一起删了，并把查询参数与请求体改名为 `scenario_name` / `ontology_name`——而 `contracts/admin-api.md` §10 与 `admin-frontend`（卡片、详情、删除、导入/更新）仍是原名。按契约恢复：`OntologyStore.toRecord()` 在**视图层派生**四个字段（落盘仍不存）、`OntologyWriteResult` 恢复三个扁平身份字段、市场条目补 `name`、列表路由不再手工裁剪字段、查询参数回到 `scenario`、请求体回到 `{ scenario, ontology_dir }`；对应 spec 断言同步回契约形状。前端零改动。
+
+**门禁（2026-10-17）**：`admin-backend` `tsc --noEmit` 与 `eslint .` 零问题；全量 **43 文件 / 616 passed**（含本批新增用例）。
+
+**卡片名称口径（2026-10-17，同日反馈）**：上面那次"删派生字段"导致卡片标题与场景徽标双双空白（`item.name` / `item.scenario` 为 `undefined`）。恢复契约之外，卡片名称统一为 **`{场景名}-{本体名}`**——身份就是这两段，只显示本体名会把"同名本体分属不同场景"渲染成两张一样的卡片。取值优先用响应的派生字段，缺失时回落到 `metadata.scenario_name` / `metadata.ontology_name` → `ontology_dir`，任何一层存在即不空白；场景徽标随之移除（标题已含场景，不再重复）。取名口径抽到 **`admin-frontend/src/utils/ontology-name.ts`**（`ontologyDisplayName` / `ontologyScenarioOf` / `ontologyNameOf`，+ spec 6 例），**卡片标题、详情页标题、删除二次确认弹窗、全局播报文案**四处共用同一实现——本体区里同一个对象不允许出现两个名字。单段缺失时只显示存在的一段（不留 `—-本体` 这种悬空破折号），两段都缺才是 `—`。场景徽标随之移除（标题已含场景，不再重复）；详情页元数据的「场景 / 本体」两行保持分开（那是 6 项 metadata 的固定口径，不是标题）。改动落点：`OntologyCardList.vue`、`OntologyViewer.vue`、`OntologyArea.vue` 及其 spec（含 `OntologyArea.spec.ts` 的 aria-label）。
+
+**数字人设计新增「本体」页签（2026-10-17，`FR-004` / `FR-064`）**：此前四条链路只缺这一段——平台能存本体、能部署本体，但**设计器没有勾选入口**，`ontologies` 只能手改 JSON 才会出现。补齐：
+
+1. **候选来源**：`GET /api/admin/agents/catalog`（§5.6）新增 `ontologies`，投影 `scenario` + `ontology_dir` + `name` + `metadata`，**不含两个文件的正文**（正文由部署物化时读）；与 §10.1 同源，脏记录已被 `toRecord()` 剔除。
+2. **设计器**：`AGENT_DESIGN_TABS` 在 SKILL 与「文件空间场景」之间插入 `ontologies` 页签；新增 `OntologySelector.vue`（复用 `CheckboxList`，显示名 `{场景名}-{本体名}`、**引用值 `{场景名}/{本体名}`**、副标题放部署版本与创建时间、失效引用单独列出可移除、空库引导去本体管理导入）。
+3. **数据通路**：`AgentDesign` / `AgentDesignPayload` / `AgentDesignDraft` 增 `ontologies: string[]`（`emptyDraft` 与 `toDraft` 同步，深拷贝防串改），`AgentArea` 从 §5.6 取候选并透传。
+4. **回归**：后端 `agents.spec.ts` +3（catalog 下发候选且不含正文、引用保存后原样回显、清单外引用 400 `ADM_AGENT_INVALID_REF`）；前端新增 `OntologySelector.spec.ts`（7 例）与 `AgentDesigner.spec` 的「本体页签勾选 → 保存提交两段引用值」用例，`AgentArea.spec` 覆盖候选透传，`useAgentDesign.spec` / `modules.spec` 夹具补 `ontologies`。
+
+**本体 URL 口径统一为 `{ontology_name}/?scenario_name=`（2026-10-17，同日）**：此前平台内部把本体身份叫 `scenario` / `ontology_dir`（市场目录名），与 `metadata` 的两个字段名（`scenario_name` / `ontology_name`）并存，同一个概念两套叫法。现统一到 metadata 口径：
+
+1. **API**：`GET` / `DELETE /api/admin/ontologies/{ontology_name}?scenario_name={场景名}`（原 `?scenario=`）；缺参错误文案同步。**导入/更新的请求体仍是 `{ scenario, ontology_dir }`**——那是市场侧的目录名，切换发生在"市场 → 库"边界（契约 §10.2 已注明，避免再被误改）。
+2. **SPA 路由**：`/admin/ontology/{本体名}?scenario_name={场景名}`，`App.vue` 从 `route.query.scenario_name` 取场景，`OntologyArea.detailPath()` 同步。
+3. **数据模型文档**：`data-model.md` §5 补 `ontologies` 字段行与命名空间格式校验（恰好一个 `/`、两段非空、不重复、须在库内）、§8 补 `ontology/{场景}/{本体}/` 两个文件的产物布局与映射行，异常态清单补"已删除或改名的本体"。契约 §5.6 / §10.2 / §10.3 同步。
+4. **回归**：后端两个本体集成 spec 的 query 与标题、前端 `router.spec` / `OntologyArea.spec` / `modules.spec` 的 URL 断言全部切到 `scenario_name`。
+
+**本体身份彻底收敛到 metadata（2026-10-17，同日二次调整）**：上一版让 `?scenario_name=` 与 `scenario/ontology_dir/name/source` 四字段并存，等于"同一个概念两套叫法"，且这四个副本只服务卡片文案与 URL。现按"身份即 URL"重做：
+
+1. **删除四个副本字段**：`OntologyRecord` / `OntologyWriteResult` / §10.1 响应 / §10.5 响应 / §5.6 候选全部只留 `metadata`（落盘、内存视图、API 三处同形）；`toRecord()` 不再派生。设计器候选因此从 `{scenario, ontology_dir, name, metadata}` 收敛为 `{ metadata }`。
+2. **URL 两段、场景在前**：`GET/DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}`（原 `?scenario_name=`）；SPA 路由 `/admin/ontology/{场景名}/{本体名}`，`router.ts` 的 `detail` 对本体区取**两段**（`场景名/本体名`，逐段编码），`App.vue` 拆成组件两个 prop。少一段即无此路由（`404`），不再有"缺参 400"。
+3. **前端展示只读 metadata**：`OntologyCardList` 标题、`OntologyViewer` 标题/元数据/删除弹窗、`OntologySelector` 选项与引用值、`OntologyArea` 的 item-key 与「查看」地址，全部经 `utils/ontology-name.ts` 从 `metadata` 取；详情页「来源」行改为固定文案「本体市场」（不再有 `source` 字段）。
+4. **回归**：后端 `ontology-market.spec` / 两个本体集成 spec / `agents.spec` 改为断言"无副本字段 + 两段路径"；前端 `router.spec` / `OntologyArea.spec` / `OntologyCardList.spec` / `OntologyViewer.spec` / `OntologySelector.spec` / `AgentDesigner.spec` / `AgentArea.spec` / `modules.spec` 夹具与断言同步。

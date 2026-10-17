@@ -69,6 +69,12 @@ export interface AgentDesign {
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
+  /**
+   * 引用的本体（2026-10-17，`FR-058`）：`["{场景名}/{本体名}"]`，两段。
+   *
+   * 只存引用不存正文：库里更新本体后，下次部署即同步（与 SKILL 同理）。
+   */
+  ontologies: string[]
   scenario: AgentScenario
   abnormal: boolean
   abnormal_reason: string | null
@@ -82,6 +88,7 @@ export interface AgentDesignPayload {
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
+  ontologies: string[]
   scenario: AgentScenario
   revision?: number
 }

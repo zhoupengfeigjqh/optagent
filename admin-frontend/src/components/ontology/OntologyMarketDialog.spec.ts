@@ -37,10 +37,9 @@ function item(overrides: Partial<OntologyMarketItem> = {}): OntologyMarketItem {
       ontology_id: 1,
     },
     size: 100,
-    hash: 'h1',
-    has_securities: false,
-    securities_size: 0,
-    securities_hash: null,
+    ontology_hash: 'h1',
+    securities_size: 120,
+    securities_hash: 's1',
     status: 'new',
     invalid_reason: null,
     ...overrides,
@@ -121,19 +120,14 @@ describe('OntologyMarketDialog —— 扫描与状态', () => {
     expect(importOntoMarketOntology).not.toHaveBeenCalled()
   })
 
-  it('含安全管控的市场条目在描述里标出（无该文件则不标）', async () => {
+  it('条目描述不再出现「含安全管控」（两个文件均为必填，无可标注差异）', async () => {
     fetchOntoMarketOntologies.mockResolvedValue(
-      listing([
-        item({ has_securities: true, securities_size: 120, securities_hash: 's1' }),
-        item({ ontology_dir: '订单排程', name: '订单排程', has_securities: false }),
-      ]),
+      listing([item(), item({ ontology_dir: '订单排程', name: '订单排程' })]),
     )
     const wrapper = mountDialog()
     await flushPromises()
 
-    const entries = wrapper.findAll('.ontology-market__item')
-    expect(entries[0]?.text()).toContain('含安全管控')
-    expect(entries[1]?.text()).not.toContain('含安全管控')
+    expect(wrapper.text()).not.toContain('含安全管控')
   })
 
   it('未配置市场目录 → 给出可读原因', async () => {

@@ -17,7 +17,7 @@
  * 性能（D6）：增量文本用**单一 ref 累积**，不做逐字数组 push；Vue 的调度器在同一 tick 内合并刷新。
  */
 
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { buildSendMessageBody, sendMessageStream } from '../api/messages'
 import type {
@@ -25,137 +25,33 @@ import type {
   FeedbackValue,
   FileReference,
   InteractionSnapshot,
-  InteractionSubmitResponse,
   StreamEvent,
   Usage,
 } from '../api/types'
-import { RUN_PHASE, type RunPhase, type ToolStatus } from '../constants/events'
-import { STORAGE_KEY_THINKING } from '../constants/limits'
+import { RUN_PHASE, type RunPhase } from '../constants/events'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { isAbortError } from '../api/sse'
-import type { ThreadNextSteps } from '../api/threads'
+import { readStoredThinking, safeSessionStorage, writeStoredThinking } from '../utils/thinking-storage'
 import { useSession } from './useAppSession'
-import type { ToastStore } from './useToast'
-
-/** 进行中的工具调用（仅名称，无入参与结果）。 */
-export interface ToolCallState {
-  call_id: string
-  name: string
-  status: ToolStatus
-}
+import type {
+  ChatStreamDeps,
+  ChatStreamStore,
+  PendingUserMessage,
+  ToolCallState,
+} from './useChatStream.types'
+import { useInteractionGate } from './useInteractionGate'
+import { useThreadDrafts } from './useThreadDrafts'
 
 /**
- * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除——
- * 完成/失败/中断后由历史刷新（成功轮）或既有降级语义（失败还原草稿）接管，
- * MUST NOT 在终结后残留（否则与历史里的真身重复渲染）。
+ * 对外契约（状态形状与依赖注入面）在 `./useChatStream.types`——纯类型文件、零运行期代码，
+ * 不计入覆盖率分母（与 `src/api/types.ts` 同口径）。此处**再导出**，既有导入路径不变。
  */
-export interface PendingUserMessage {
-  /** 已去除 `@文件名` 引用文本的正文 */
-  content: string
-  /** 结构化引用（用户气泡用它还原文件引用区） */
-  attachments: FileReference[]
-}
-
-/** 构造参数。 */
-export interface ChatStreamDeps {
-  /** 当前会话 id（与历史列表共享） */
-  activeThreadId: Ref<string | null>
-  /** 取当前模型（未选择时返回 `null`，不提交 `model` 字段） */
-  getModel: () => string | null
-  /** 取当前选中数字人（为本轮流式气泡标注；未选中返回 `null`） */
-  getAgentName?: () => string | null
-  /** 中断本轮（调用后端 `/stop`） */
-  stopRun?: (threadId: string) => Promise<void>
-  /** 一轮结束（完成/中断/失败）后刷新会话详情 */
-  onTurnFinished?: (threadId: string) => void | Promise<void>
-  /**
-   * 007 修订（Tail Protocol）：done 直推的当轮卡片写入（`done.next_actions` 缺省时不调用）。
-   * 会话层把它接到 `nextSteps.apply`——卡片随事件即时可见，不再轮询拉取。
-   */
-  applyNextActions?: (steps: ThreadNextSteps) => void
-  /** 读取某条消息当前反馈（失败回滚用） */
-  feedbackOf?: (messageId: string) => FeedbackValue
-  /** 本地乐观更新某条消息的反馈 */
-  applyFeedback?: (messageId: string, value: FeedbackValue) => void
-  /** 提交反馈到后端（`null` 表示取消） */
-  sendFeedback?: (threadId: string, messageId: string, value: FeedbackValue) => Promise<void>
-  /** HITL：提交/拒绝工具调用的人工确认（`POST /api/threads/{id}/interaction`） */
-  submitInteraction?: (
-    threadId: string,
-    body: { interaction_id: string; action: 'submit' | 'reject'; args?: Record<string, unknown> },
-  ) => Promise<InteractionSubmitResponse>
-  toast?: ToastStore
-  storage?: Storage | null
-  /** 本地时钟（测试注入假时钟） */
-  now?: () => number
-  baseUrl?: string
-  fetchImpl?: typeof fetch
-}
-
-/** 聊天流 composable 契约。 */
-export interface ChatStreamStore {
-  phase: Readonly<Ref<RunPhase>>
-  streamingText: Readonly<Ref<string>>
-  streamingThinking: Readonly<Ref<string>>
-  toolCalls: Readonly<Ref<ToolCallState[]>>
-  thinkingEnabled: Ref<boolean>
-  /**
-   * 输入区文本（发送前保留、失败时保留，FR-013 相关场景）。
-   * **按会话分桶**：切换会话时旧会话的存起来、新会话的取回来（见实现里的 `drafts`）。
-   */
-  draft: Ref<string>
-  error: Readonly<Ref<ErrorInfo | null>>
-  usage: Readonly<Ref<Usage | null>>
-  durationSeconds: Readonly<Ref<number | null>>
-  /** 本轮回答的数字人（009 起会话归属固定；流式气泡据此标注，逐条保留以兼容存量数据） */
-  streamingAgentName: Readonly<Ref<string | null>>
-  /**
-   * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除；`null` = 无进行中轮次。
-   * 与 `streaming*` 瞬态同生命周期，故同在 `reset()` / `finally` 收口。
-   */
-  pendingUserMessage: Readonly<Ref<PendingUserMessage | null>>
-  /**
-   * 最近一个**可重试轮**的用户消息缓存（收尾时从 `pendingUserMessage` 抢救）：
-   * 「重新生成」/「重试本轮」的数据源；新一轮发送或 `reset()` 时清除。
-   * 中断轮不落盘（用户消息本就消失），缓存仅为重试入口，不改变任何持久化语义。
-   *
-   * **只在"可安全重发"时置位**（字段名即不变式：非 `null` ⇔ 可重试）：
-   * - `aborted`（用户点了停止）：本轮已丢弃，重发不会撞车 ✅
-   * - `failed` 且**服务端已终局**（收到 `error` 终结事件）：后端已收尾，重发安全 ✅
-   * - `failed` 但属**断连/传输层**（流无终结事件、请求异常）：后端那一轮可能仍在跑
-   *   （断连 = 仅退订，`run` 照跑落盘），此时重发会被 409 `THREAD_RUN_ACTIVE` 挡回——
-   *   正确动作是先 `recover()` 重拉历史看后端到底答完了没有 ❌（保持 `null`）
-   */
-  lastRetryableTurn: Readonly<Ref<PendingUserMessage | null>>
-  /** 本轮本地计时起点（毫秒；仅用于兜底展示） */
-  startedAt: Readonly<Ref<number | null>>
-  canSend: ComputedRef<boolean>
-  /** 本轮是否处于思考模式且已产生思考内容（决定是否渲染思考块） */
-  hasThinking: ComputedRef<boolean>
-  /**
-   * HITL：当前等待用户确认的工具调用（弹窗渲染源）。随本轮终结/中断/切会话清除；
-   * 断连后由线程详情的 `pending_interaction` 快照经 `restoreInteraction` 重建。
-   */
-  pendingInteraction: Readonly<Ref<InteractionSnapshot | null>>
-  /** 断连恢复：后端仍有等待中的确认时重建弹窗（不覆盖已存在的） */
-  restoreInteraction(snapshot: InteractionSnapshot): void
-  /**
-   * 提交确认参数：`close=false` 表示服务端终验失败（message 含逐字段错误），
-   * 弹窗保持打开可修正重提；其余情况弹窗关闭。
-   */
-  submitInteraction(args: Record<string, unknown>): Promise<{ close: boolean; message?: string }>
-  /** 拒绝本次调用（弹窗始终关闭；后端把拒绝作为工具结果交给模型收尾） */
-  rejectInteraction(): Promise<void>
-  send(payload: { content: string; attachments: FileReference[] }): Promise<void>
-  /** 用 `lastRetryableTurn` 重发上一轮（中断气泡「重新生成」/ 失败块「重试本轮」，复用 `send` 全链路） */
-  regenerate(): Promise<void>
-  /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */
-  submitFeedback(messageId: string, value: FeedbackValue): Promise<void>
-  stop(): Promise<void>
-  recover(): Promise<void>
-  reset(): void
-  setThinking(value: boolean): void
-}
+export type {
+  ChatStreamDeps,
+  ChatStreamStore,
+  PendingUserMessage,
+  ToolCallState,
+} from './useChatStream.types'
 
 /** 创建聊天流状态。 */
 export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
@@ -169,34 +65,11 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const draft = ref('')
 
   /**
-   * 每会话草稿（2026-10-16）。
-   *
-   * 原先只有上面这一个全局 `draft`：在 A 里打了一半去 B 问一句，那半句会跟着跑到 B 的
-   * 输入框（串台），或者在 B 发送时被清掉（丢失）。这里按会话 id 分桶，切换时"存旧、取新"。
-   *
-   * `null`（视图态新对话，FR-010）**不建桶**：它要么随发送被消费、要么随离开丢弃；
-   * 若也留一份，首条消息发送时（`threads.create()` 让 id 由 `null` 变为真 id）那份文本
-   * 会变成下次点「新建会话」时冒出来的幽灵草稿。
-   *
-   * 只活在内存里：刷新即失（持久化留待后续，避免把"会话级草稿"变成第二套存储契约）。
+   * 每会话草稿（2026-10-16）：分桶规则、桶上限与"`null` 不建桶"的理由见 `useThreadDrafts`。
+   * 单独成模块，是因为它自带状态与淘汰策略，与本轮运行状态机没有关系。
    */
-  const drafts = new Map<string, string>()
-  /** 桶上限：逛过很多会话也不无限增长，超限先淘汰最久没碰过的那一个 */
-  const DRAFT_BUCKETS_LIMIT = 50
+  const drafts = useThreadDrafts(draft)
 
-  /** 把当前草稿存进某个会话的桶（空串不留桶；超限淘汰最旧） */
-  function stashDraft(threadId: string | null): void {
-    if (threadId === null) return
-    // 先删后塞：Map 按插入序淘汰，这样"最近用过的桶"排在最后
-    drafts.delete(threadId)
-    if (draft.value === '') return
-    drafts.set(threadId, draft.value)
-    while (drafts.size > DRAFT_BUCKETS_LIMIT) {
-      const oldest = drafts.keys().next().value
-      if (oldest === undefined) break
-      drafts.delete(oldest)
-    }
-  }
   const error = ref<ErrorInfo | null>(null)
   const usage = ref<Usage | null>(null)
   const durationSeconds = ref<number | null>(null)
@@ -226,9 +99,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   watch(
     () => deps.activeThreadId.value,
     (next, previous) => {
-      stashDraft(previous)
+      drafts.stash(previous)
       reset()
-      draft.value = next === null ? '' : (drafts.get(next) ?? '')
+      draft.value = drafts.take(next)
     },
   )
 
@@ -466,59 +339,18 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     await pending
   }
 
-  /* ---------- HITL：工具调用人工确认 ---------- */
+  /* ---------- HITL：工具调用人工确认（实现在 `useInteractionGate`） ---------- */
 
-  function restoreInteraction(snapshot: InteractionSnapshot): void {
-    if (!pendingInteraction.value) {
-      pendingInteraction.value = snapshot
-    }
-  }
-
-  async function submitInteraction(
-    args: Record<string, unknown>,
-  ): Promise<{ close: boolean; message?: string }> {
-    const pending = pendingInteraction.value
-    const threadId = deps.activeThreadId.value
-    if (!pending || !threadId || !deps.submitInteraction) {
-      return { close: true }
-    }
-    try {
-      await deps.submitInteraction(threadId, {
-        interaction_id: pending.interaction_id,
-        action: 'submit',
-        args,
-      })
-      pendingInteraction.value = null
-      return { close: true }
-    } catch (cause) {
-      const info = toErrorInfo(cause)
-      // 服务端终验失败：弹窗保持打开，逐字段错误交回表单展示，可修正重提
-      if (info.code === 'SCHEMA_VALIDATION_FAILED' || info.code === 'VALIDATION_FAILED') {
-        return { close: false, message: info.message !== '' ? info.message : toUserMessage(info) }
-      }
-      deps.toast?.push('error', toUserMessage(info))
-      pendingInteraction.value = null
-      return { close: true }
-    }
-  }
-
-  async function rejectInteraction(): Promise<void> {
-    const pending = pendingInteraction.value
-    const threadId = deps.activeThreadId.value
-    pendingInteraction.value = null
-    if (!pending || !threadId || !deps.submitInteraction) {
-      return
-    }
-    try {
-      await deps.submitInteraction(threadId, {
-        interaction_id: pending.interaction_id,
-        action: 'reject',
-      })
-    } catch (cause) {
-      // 拒绝失败（如已超时/已被处理）：不影响关闭，提示即可
-      deps.toast?.push('error', toUserMessage(toErrorInfo(cause)))
-    }
-  }
+  /**
+   * 三个函数只围绕 `pendingInteraction` 一个状态转，自带完整语义（含"终验失败保持弹窗打开"
+   * 这条最容易写错的口径），故独立成模块；这里有把状态与注入实现交进去。
+   */
+  const gate = useInteractionGate({
+    pendingInteraction,
+    activeThreadId: deps.activeThreadId,
+    submit: deps.submitInteraction,
+    toast: deps.toast,
+  })
 
   async function recover(): Promise<void> {
     const threadId = deps.activeThreadId.value
@@ -549,9 +381,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     canSend,
     hasThinking,
     pendingInteraction,
-    restoreInteraction,
-    submitInteraction,
-    rejectInteraction,
+    restoreInteraction: gate.restoreInteraction,
+    submitInteraction: gate.submitInteraction,
+    rejectInteraction: gate.rejectInteraction,
     send,
     regenerate,
     submitFeedback,
@@ -567,28 +399,4 @@ export function useChatStream(): ChatStreamStore {
   return useSession().chat
 }
 
-/* ---------- sessionStorage 读写（容错） ---------- */
 
-function safeSessionStorage(): Storage | null {
-  try {
-    return typeof globalThis.sessionStorage === 'undefined' ? null : globalThis.sessionStorage
-  } catch {
-    return null
-  }
-}
-
-function readStoredThinking(storage: Storage | null): boolean {
-  try {
-    return storage?.getItem(STORAGE_KEY_THINKING) === '1'
-  } catch {
-    return false
-  }
-}
-
-function writeStoredThinking(storage: Storage | null, value: boolean): void {
-  try {
-    storage?.setItem(STORAGE_KEY_THINKING, value ? '1' : '0')
-  } catch {
-    // 存储不可用时静默降级
-  }
-}

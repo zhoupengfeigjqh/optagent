@@ -23,7 +23,9 @@
       ],
       "allowed_tools": [
         "hd_algorithm_input_parser",
-        "hd_scheduling_submit"
+        "hd_scheduling_submit",
+        "hd_scheduling_query",
+        "hd_algorithm_input_query"
       ]
     },
     {

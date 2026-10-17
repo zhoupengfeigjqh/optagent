@@ -1,9 +1,9 @@
 /**
  * 组件测试：本体卡片列表（`FR-058`）
  *
- * 守住：6 项 metadata 的标签与取值、缺项显示 `—`、点击「查看」把
- * **两段身份**（场景 + 目录名）交给上层、空库空态、
- * 「含安全管控」徽标只在已同步 `securities.yaml` 时出现（2026-10-03）。
+ * 守住：卡片名称的 `{场景名}-{本体名}` 口径（2026-10-17）、6 项 metadata 的
+ * 标签与取值、缺项显示 `—`、点击「查看」把**两段身份**（场景 + 目录名）交给上层、
+ * 空库空态。
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
@@ -12,9 +12,6 @@ import type { OntologyListItem } from '../../api/ontologies'
 
 function item(overrides: Partial<OntologyListItem> = {}): OntologyListItem {
   return {
-    scenario: '生产调度',
-    ontology_dir: '原材料采购和库存',
-    name: '原材料采购和库存',
     metadata: {
       created_at: '2026-07-15 16:05:02',
       deployed_version: 'v1.0',
@@ -23,9 +20,7 @@ function item(overrides: Partial<OntologyListItem> = {}): OntologyListItem {
       ontology_name: '原材料采购和库存',
       ontology_id: 1,
     },
-    source: 'onto_market:生产调度',
-    hash: 'h1',
-    has_securities: false,
+    ontology_hash: 'h1',
     installed_at: '2026-10-03T00:00:00.000Z',
     updated_at: '2026-10-03T00:00:00.000Z',
     ...overrides,
@@ -39,7 +34,7 @@ function mountList(items: OntologyListItem[]) {
 }
 
 describe('OntologyCardList', () => {
-  it('卡片展示 6 项 metadata（标签 + 取值）与场景徽标', () => {
+  it('卡片名称为 `{场景名}-{本体名}`，并展示 6 项 metadata（标签 + 取值）', () => {
     const wrapper = mountList([item()])
     const text = wrapper.text()
 
@@ -48,8 +43,19 @@ describe('OntologyCardList', () => {
     }
     expect(text).toContain('2026-07-15 16:05:02')
     expect(text).toContain('v1.0')
-    expect(wrapper.find('.card__title').text()).toContain('原材料采购和库存')
-    expect(wrapper.find('.card__origin').text()).toBe('生产调度')
+    expect(wrapper.find('.card__title').text()).toBe('生产调度-原材料采购和库存')
+  })
+
+  it('同名本体分属不同场景 → 卡片名称不同（场景是身份的一半）', () => {
+    const wrapper = mountList([
+      item(),
+      item({ metadata: { ...item().metadata, scenario_name: '资源调度' } }),
+    ])
+
+    expect(wrapper.findAll('.card__title').map((title) => title.text())).toEqual([
+      '生产调度-原材料采购和库存',
+      '资源调度-原材料采购和库存',
+    ])
   })
 
   it('缺项显示 `—`（字段缺失不使整张卡片不可用）', () => {
@@ -76,12 +82,12 @@ describe('OntologyCardList', () => {
     ])
   })
 
-  it('「含安全管控」徽标：已同步时出现，未同步时不出现', () => {
-    const withSecurities = mountList([item({ has_securities: true })])
-    expect(withSecurities.find('[data-test="securities-badge"]').text()).toContain('含安全管控')
+  it('卡片名称只依赖 metadata（没有副本字段可依赖）', () => {
+    // 2026-10-17：服务端不再下发 scenario / ontology_dir / name / source
+    const wrapper = mountList([item()])
 
-    const without = mountList([item()])
-    expect(without.find('[data-test="securities-badge"]').exists()).toBe(false)
+    expect(wrapper.find('.card__title').text()).toBe('生产调度-原材料采购和库存')
+    expect(wrapper.find('.card__title').text()).not.toContain('undefined')
   })
 
   it('点击「查看」发出 open，携带场景 + 目录名', async () => {

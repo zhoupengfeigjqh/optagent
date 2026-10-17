@@ -16,6 +16,7 @@ import {
   buildMcpServerEntry,
   buildUserArtifacts,
 } from '../../src/domain/deploy/materialize.js';
+import { OntologyStore } from '../../src/domain/ontology/store.js';
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { zipFixture } from '../helpers/zip-fixture.js';
@@ -25,8 +26,25 @@ let root: string;
 let store: PlatformStore;
 let mcpConfigs: McpServiceConfigService;
 let skills: SkillLibraryService;
+let ontologies: OntologyStore;
 
 const OCR_URL = 'http://192.168.1.2:8000/mcp';
+
+/** 本体夹具（2026-10-17）：metadata 的两个名字即身份，必须与库内路径一致 */
+const ONTO_REF = '生产调度/原材料采购和库存';
+const ONTO_YAML = `metadata:
+  created_at: '2026-07-15 16:05:02'
+  deployed_version: v1.0
+  scenario_name: 生产调度
+  scenario_id: 1
+  ontology_name: 原材料采购和库存
+  ontology_id: 1
+concepts: []
+`;
+const ONTO_SECURITIES = `securities:
+- action_name: CreatePurchaseRecord
+  op_type: command
+`;
 
 function configure(name: string, overrides: Record<string, unknown> = {}): void {
   mcpConfigs.create({
@@ -48,6 +66,7 @@ function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocume
     enabled_tools: ['read_file'],
     mcp_services: [],
     skills: [],
+    ontologies: [],
     scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     updated_at: '2026-09-15T00:00:00.000Z',
     ...overrides,
@@ -60,6 +79,7 @@ beforeEach(() => {
   store.ensureLayout();
   mcpConfigs = new McpServiceConfigService(store);
   skills = new SkillLibraryService(store);
+  ontologies = new OntologyStore(store);
 });
 
 afterEach(() => {
@@ -69,12 +89,12 @@ afterEach(() => {
 describe('buildMcpServerEntry', () => {
   it('http：url 取配置里的单一连接地址', () => {
     configure('ocr');
-    const entry = buildMcpServerEntry('ocr', { mcpConfigs, skills });
+    const entry = buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies });
     expect(entry).toMatchObject({ name: 'ocr', transport: 'http', url: OCR_URL });
   });
 
   it('未配置的服务 → null（不凭空造一条声明）', () => {
-    expect(buildMcpServerEntry('ghost', { mcpConfigs, skills })).toBeNull();
+    expect(buildMcpServerEntry('ghost', { mcpConfigs, skills, ontologies })).toBeNull();
   });
 
   it('stdio：写 command 与 args，且不产生 url', () => {
@@ -84,7 +104,7 @@ describe('buildMcpServerEntry', () => {
       command: 'python',
       args: ['-u', 'srv.py'],
     });
-    const entry = buildMcpServerEntry('local-mcp', { mcpConfigs, skills });
+    const entry = buildMcpServerEntry('local-mcp', { mcpConfigs, skills, ontologies });
     expect(entry).toMatchObject({
       name: 'local-mcp',
       transport: 'stdio',
@@ -96,32 +116,32 @@ describe('buildMcpServerEntry', () => {
 
   it('任何服务都不写 write / permission_boundary（writable 已按 2026-09-15 产品决定移除）', () => {
     configure('ocr', { writable: true, permission_scope: '仅图片识别' });
-    const entry = buildMcpServerEntry('ocr', { mcpConfigs, skills })!;
+    const entry = buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })!;
     expect(entry).not.toHaveProperty('write');
     expect(entry).not.toHaveProperty('permission_boundary');
   });
 
   it('file_args 为空时不写该字段（保持产物精简）', () => {
     configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('file_args');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('file_args');
   });
 
   it('file_args 非空时原样透传', () => {
     configure('ocr', { file_args: { ocr_image: { image: 'url' } } });
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })?.file_args).toEqual({
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })?.file_args).toEqual({
       ocr_image: { image: 'url' },
     });
   });
 
   it('headers 为空时不写该字段（保持产物精简，与 file_args/async_tools 同口径）', () => {
     configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('headers');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('headers');
   });
 
   it('headers 非空时**以明文**物化到 MCP.json（运行环境要按原样发送；掩码只用于回显）', () => {
     const token = '6UuE8_4nY683gZ13rNQbHDCfxgMgEF3Z';
     configure('ocr', { headers: { 'X-MCP-Token': token } });
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })?.headers).toEqual({
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })?.headers).toEqual({
       'X-MCP-Token': token,
     });
   });
@@ -131,39 +151,39 @@ describe('buildMcpServerEntry', () => {
       file_args: { parse_excel_files: { 'items[].excelFileUrl': 'url' } },
     });
 
-    expect(buildMcpServerEntry('parse', { mcpConfigs, skills })?.file_args).toEqual({
+    expect(buildMcpServerEntry('parse', { mcpConfigs, skills, ontologies })?.file_args).toEqual({
       parse_excel_files: { 'items[].excelFileUrl': 'url' },
     });
   });
 
   it('confirmation 为 never/缺省时不写该字段（运行环境缺省语义，产物精简）', () => {
     configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('confirmation');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('confirmation');
   });
 
   it('confirmation 为 always / { tools } 时原样物化到 MCP.json（HITL 下发）', () => {
     configure('svc-a', { confirmation: 'always' });
     configure('svc-b', { confirmation: { tools: ['query_price'] } });
 
-    expect(buildMcpServerEntry('svc-a', { mcpConfigs, skills })?.confirmation).toBe('always');
-    expect(buildMcpServerEntry('svc-b', { mcpConfigs, skills })?.confirmation).toEqual({
+    expect(buildMcpServerEntry('svc-a', { mcpConfigs, skills, ontologies })?.confirmation).toBe('always');
+    expect(buildMcpServerEntry('svc-b', { mcpConfigs, skills, ontologies })?.confirmation).toEqual({
       tools: ['query_price'],
     });
   });
 
   it('rules_fields 缺省为 {}：不写该字段（产物精简）；声明后按工具映射物化到 MCP.json', () => {
     configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('rules_fields');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('rules_fields');
 
     configure('svc-rules', { rules_fields: { optimize: 'rules' } });
-    expect(buildMcpServerEntry('svc-rules', { mcpConfigs, skills })?.rules_fields).toEqual({
+    expect(buildMcpServerEntry('svc-rules', { mcpConfigs, skills, ontologies })?.rules_fields).toEqual({
       optimize: 'rules',
     });
   });
 
   it('工具白名单：非空才写进 MCP.json（运行环境据此只挂这些工具）', () => {
     configure('svc-allowed', { allowed_tools: ['ocr_image', 'query_price'] });
-    expect(buildMcpServerEntry('svc-allowed', { mcpConfigs, skills })?.allowed_tools).toEqual([
+    expect(buildMcpServerEntry('svc-allowed', { mcpConfigs, skills, ontologies })?.allowed_tools).toEqual([
       'ocr_image',
       'query_price',
     ]);
@@ -176,15 +196,15 @@ describe('buildMcpServerEntry', () => {
         'svc-open': { name: 'svc-open', description: 'x', transport: 'http', url: OCR_URL },
       },
     });
-    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills })).not.toHaveProperty('allowed_tools');
+    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills, ontologies })).not.toHaveProperty('allowed_tools');
   });
 
   it('async_tools 缺省为 []：不写该字段（产物精简）；声明后原样物化到 MCP.json（R11）', () => {
     configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills })).not.toHaveProperty('async_tools');
+    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('async_tools');
 
     configure('svc-async', { async_tools: ['submit_job', 'get_status'] });
-    expect(buildMcpServerEntry('svc-async', { mcpConfigs, skills })?.async_tools).toEqual([
+    expect(buildMcpServerEntry('svc-async', { mcpConfigs, skills, ontologies })?.async_tools).toEqual([
       'submit_job',
       'get_status',
     ]);
@@ -194,7 +214,7 @@ describe('buildMcpServerEntry', () => {
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {
   it('产出四件套（SOUL.md / TOOL.json / MCP.json / scenario.json）', () => {
     configure('ocr');
-    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills });
+    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills, ontologies });
 
     expect(artifact.files.map((f) => f.relPath).sort()).toEqual([
       'MCP.json',
@@ -227,7 +247,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
           },
         },
       }),
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
     expect(JSON.parse(String(withFields.files.find((f) => f.relPath === 'scenario.json')?.content))).toEqual({
       scenario: '生产',
@@ -244,7 +264,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
           data_prep_fields: {},
         },
       }),
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
     expect(JSON.parse(String(noFields.files.find((f) => f.relPath === 'scenario.json')?.content))).toEqual({
       scenario: '生产',
@@ -264,7 +284,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
           data_prep_uploads: { 生产计划: ['.csv', '.xlsx', '.txt'] },
         },
       }),
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
     expect(scenarioJson(withUploads)).toEqual({
       scenario: '生产',
@@ -281,7 +301,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
           data_prep_uploads: {},
         },
       }),
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
     expect(scenarioJson(emptyUploads)).toEqual({
       scenario: '生产',
@@ -290,10 +310,10 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
   });
 
   it('007：下一步动作提示开关**只影响 SOUL.md 的两行 frontmatter**（开关 + 条数），正文与其余三件套逐字一致', () => {
-    const off = buildAgentArtifact(design(), { mcpConfigs, skills });
+    const off = buildAgentArtifact(design(), { mcpConfigs, skills, ontologies });
     const on = buildAgentArtifact(
       design({ soul: soulDesign('你是助手\n第二行', { next_action_hints: true }) }),
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
 
     const soulOf = (artifact: typeof off) =>
@@ -324,7 +344,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
   });
 
   it('未配置任何 MCP 服务时写空 servers 数组（MUST NOT 缺字段）', () => {
-    const artifact = buildAgentArtifact(design(), { mcpConfigs, skills });
+    const artifact = buildAgentArtifact(design(), { mcpConfigs, skills, ontologies });
     expect(JSON.parse(String(artifact.files.find((f) => f.relPath === 'MCP.json')?.content))).toEqual({
       servers: [],
     });
@@ -339,15 +359,49 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       { overwrite: false, source: 'a.zip' },
     );
 
-    const artifact = buildAgentArtifact(design({ skills: ['pdf-parse'] }), { mcpConfigs, skills });
+    const artifact = buildAgentArtifact(design({ skills: ['pdf-parse'] }), { mcpConfigs, skills, ontologies });
     const paths = artifact.files.map((f) => f.relPath);
     expect(paths).toContain('skills/pdf-parse/SKILL.md');
     expect(paths).toContain('skills/pdf-parse/ref/helper.md');
   });
 
+  it('本体把**两个必需文件**整包复制到 ontology/{场景}/{本体}/（2026-10-17）', () => {
+    ontologies.install({
+      scenario: '生产调度',
+      ontology_dir: '原材料采购和库存',
+      content: ONTO_YAML,
+      securities: ONTO_SECURITIES,
+    });
+
+    const artifact = buildAgentArtifact(design({ ontologies: [ONTO_REF] }), {
+      mcpConfigs,
+      skills,
+      ontologies,
+    });
+    const dir = 'ontology/生产调度/原材料采购和库存';
+    expect(artifact.files.find((f) => f.relPath === `${dir}/ontology.yaml`)?.content).toBe(ONTO_YAML);
+    expect(artifact.files.find((f) => f.relPath === `${dir}/securities.yaml`)?.content).toBe(
+      ONTO_SECURITIES,
+    );
+  });
+
+  it('形状非法的存量引用被跳过：不拼出三段路径，也不凭空造目录', () => {
+    const artifact = buildAgentArtifact(design({ ontologies: ['场景/本体/多余段'] }), {
+      mcpConfigs,
+      skills,
+      ontologies,
+    });
+    expect(artifact.files.map((f) => f.relPath)).toEqual([
+      'SOUL.md',
+      'TOOL.json',
+      'MCP.json',
+      'scenario.json',
+    ]);
+  });
+
   it('产物条目顺序稳定（SOUL → TOOL → MCP → scenario → skills）', () => {
     configure('ocr');
-    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills });
+    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills, ontologies });
     expect(artifact.files.slice(0, 4).map((f) => f.relPath)).toEqual([
       'SOUL.md',
       'TOOL.json',
@@ -362,13 +416,13 @@ describe('buildUserArtifacts', () => {
     configure('ocr');
     const artifacts = buildUserArtifacts(
       [design({ name: 'a' }), design({ name: 'b', mcp_services: ['ocr'] })],
-      { mcpConfigs, skills },
+      { mcpConfigs, skills, ontologies },
     );
     expect(artifacts.map((a) => a.name)).toEqual(['a', 'b']);
     expect(artifacts[1]?.files.map((f) => f.relPath)).toContain('MCP.json');
   });
 
   it('边界：无数字人时产出空清单（调用方据此只做移除）', () => {
-    expect(buildUserArtifacts([], { mcpConfigs, skills })).toEqual([]);
+    expect(buildUserArtifacts([], { mcpConfigs, skills, ontologies })).toEqual([]);
   });
 });

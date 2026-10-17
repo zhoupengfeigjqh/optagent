@@ -45,11 +45,17 @@ const localWelcome = ref('')
 const localStarters = ref<SoulStarter[]>([])
 let restoreFocusTo: HTMLElement | null = null
 
-/** 内置工具候选：只列**已启用**的（未启用的工具运行时没注册给模型，引导它没有意义） */
+/**
+ * 内置工具候选：只列**已启用**的（未启用的工具运行时没注册给模型，引导它没有意义）。
+ *
+ * 2026-10-17：展示口径改为**英文名在前、中文名在后**，与「内置工具」分区
+ * （`ToolSelector`）及聊天前台（工具卡片显示英文名）统一——同一个工具在
+ * 三个界面里是同一个名字。
+ */
 const builtinOptions = computed<ToolOption[]>(() =>
   props.enabledTools.map((name) => {
     const meta = props.builtinTools.find((tool) => tool.name === name)
-    return { tool: { kind: 'builtin', name }, label: meta ? `${meta.label}（${name}）` : name }
+    return { tool: { kind: 'builtin', name }, label: meta ? `${name}（${meta.label}）` : name }
   }),
 )
 

@@ -6,7 +6,7 @@
  * - 打开即扫描市场并完成一次"文件是否变化"的检查（`ontology.yaml` 与
  *   `securities.yaml` 两个指纹比对，任一不同即「已变化」）；
  * - 状态语义：new=可导入；unchanged=已导入且文件无变化；changed=已变化**可直接更新**；
- *   invalid=市场侧文件缺失/超限/YAML 无效（不可操作，原因见详情）；
+ *   invalid=市场侧缺 `ontology.yaml` 或 `securities.yaml` / 超限 / YAML 无效（不可操作，原因见详情）；
  * - **没有"人工修改确认"分支**：本体在平台侧只读、没有编辑通道，
  *   整包替换不存在"丢本地修改"的风险（那是 SKILL 独有的 `ADM_SKILL_MODIFIED`）；
  * - 失败**不关窗**：错误留在窗内，管理员可改选或刷新后重试。
@@ -163,7 +163,8 @@ onBeforeUnmount(() => {
       <h2 id="ontology-market-title" class="ontology-market__title">从本体市场导入本体</h2>
       <p class="ontology-market__hint">
         本体来自 optonto 本体市场（平台只读），同步
-        <strong>ontology.yaml 与 securities.yaml</strong>（行为安全管控，市场侧没有则不同步）。
+        <strong>ontology.yaml 与 securities.yaml</strong>（行为安全管控，两个文件均为必需，
+        缺任一即不可导入）。
         打开本窗口即检查一次这两个文件是否变化；检测到「已变化」的本体可在本窗口直接更新。
       </p>
 
@@ -195,7 +196,6 @@ onBeforeUnmount(() => {
                     ? `版本 ${item.metadata.deployed_version} · `
                     : ''
                 }}{{ item.metadata?.created_at ?? '' }}
-                <template v-if="item.has_securities"> · 含安全管控</template>
               </span>
               <span class="ontology-market__path"
                 >{{ item.scenario }} / {{ item.ontology_dir }}</span

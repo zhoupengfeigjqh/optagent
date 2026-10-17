@@ -5,7 +5,7 @@
  * 结构照 `SkillArea`：列表 ↔ 详情两级（`FR-053` 的导航深度上限），工具栏在列表右上角
  * 提供「从本体市场导入」入口。
  *
- * **身份是两段**：`detail` 是本体目录名，场景名在路由查询参数里（`?scenario=`）——
+ * **身份是两段**：`detail` 是本体名，场景名在路由查询参数里（`?scenario_name=`，2026-10-17）——
  * 同名的本体目录可以存在于不同场景。因此本组件比其他 Area 多一个 `scenario` prop，
  * 由 `App.vue` 从 `route.query` 传入（仅本组件声明，不影响其它功能区）。
  */
@@ -18,6 +18,7 @@ import {
   type OntologyWriteResult,
 } from '../../api/ontologies'
 import type { ErrorInfo, Paged } from '../../api/types'
+import { ontologyDisplayName } from '../../utils/ontology-name'
 import OntologyCardList from './OntologyCardList.vue'
 import OntologyMarketDialog from './OntologyMarketDialog.vue'
 import OntologyViewer from './OntologyViewer.vue'
@@ -25,7 +26,7 @@ import OntologyViewer from './OntologyViewer.vue'
 const props = defineProps<{
   detail: string | null
   tab: string | null
-  /** 详情所属场景（路由查询参数 `scenario`） */
+  /** 详情所属场景（路由查询参数 `scenario_name`） */
   scenario: string | null
 }>()
 
@@ -42,9 +43,12 @@ const loading = ref(false)
 const ontologyDetail = ref<OntologyDetail | null>(null)
 const marketOpen = ref(false)
 
-/** 详情路径：本体目录名 + 场景名（两段身份在 URL 上各归其位） */
-function detailPath(ontologyDir: string, scenario: string): string {
-  return `/ontology/${encodeURIComponent(ontologyDir)}?scenario=${encodeURIComponent(scenario)}`
+/**
+ * 详情路径：`{scenario_name}/{ontology_name}`，两段都在路径上、场景在前
+ * （2026-10-17）——与 `metadata` 字段顺序、与部署路径 `ontology/{场景}/{本体}/` 一致。
+ */
+function detailPath(scenarioName: string, ontologyName: string): string {
+  return `/ontology/${encodeURIComponent(scenarioName)}/${encodeURIComponent(ontologyName)}`
 }
 
 async function loadList(): Promise<void> {
@@ -59,10 +63,10 @@ async function loadList(): Promise<void> {
   }
 }
 
-async function loadDetail(ontologyDir: string, scenario: string): Promise<void> {
+async function loadDetail(scenario: string, ontologyName: string): Promise<void> {
   error.value = null
   try {
-    ontologyDetail.value = await fetchOntology(ontologyDir, scenario)
+    ontologyDetail.value = await fetchOntology(scenario, ontologyName)
   } catch (err) {
     error.value = err as ErrorInfo
   }
@@ -70,28 +74,28 @@ async function loadDetail(ontologyDir: string, scenario: string): Promise<void> 
 
 /** 卡片「查看」：先改地址栏（可刷新、可分享），由 watch 触发加载 */
 function open(target: { scenario: string; ontologyDir: string }): void {
-  emit('navigate', detailPath(target.ontologyDir, target.scenario))
+  emit('navigate', detailPath(target.scenario, target.ontologyDir))
 }
 
 function onImported(result: OntologyWriteResult): void {
-  emit('announce', `本体 ${result.name} 已从本体市场导入`)
+  emit('announce', `本体 ${ontologyDisplayName(result)} 已从本体市场导入`)
   void loadList()
 }
 
 function onUpdated(result: OntologyWriteResult): void {
-  emit('announce', `本体 ${result.name} 已更新为市场现版本`)
+  emit('announce', `本体 ${ontologyDisplayName(result)} 已更新为市场现版本`)
   void loadList()
 }
 
 onMounted(() => {
   void loadList()
-  if (props.detail && props.scenario) void loadDetail(props.detail, props.scenario)
+  if (props.detail && props.scenario) void loadDetail(props.scenario, props.detail)
 })
 
 watch(
   () => [props.detail, props.scenario] as const,
-  ([ontologyDir, scenario]) => {
-    if (ontologyDir && scenario) void loadDetail(ontologyDir, scenario)
+  ([ontologyName, scenarioName]) => {
+    if (ontologyName && scenarioName) void loadDetail(scenarioName, ontologyName)
     else {
       ontologyDetail.value = null
       void loadList()

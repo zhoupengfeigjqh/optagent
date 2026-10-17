@@ -31,7 +31,7 @@ const values: Partial<TemplateValues> = {
 };
 
 describe('BUILTIN_TOOL_CATALOG', () => {
-  it('前 5 项与改造前逐字一致（顺序不变），read_skill 为 2026-09-23 追加在末尾', () => {
+  it('前 5 项与改造前逐字一致（顺序不变），read_skill / grep_skill 追加在末尾', () => {
     expect(BUILTIN_TOOL_CATALOG.map((t) => t.name)).toEqual([
       'read_file',
       'write_file',
@@ -39,8 +39,9 @@ describe('BUILTIN_TOOL_CATALOG', () => {
       'grep_files',
       'calculator',
       'read_skill',
+      'grep_skill',
     ]);
-    expect(builtinToolNames()).toHaveLength(6);
+    expect(builtinToolNames()).toHaveLength(7);
   });
 
   it('writable 标记：仅 write_file 为 true（FR-011）', () => {
@@ -57,7 +58,7 @@ describe('BUILTIN_TOOL_CATALOG', () => {
   });
 
   it('listBuiltinTools 返回全部条目；findBuiltinTool 命中/未命中', () => {
-    expect(listBuiltinTools()).toHaveLength(6);
+    expect(listBuiltinTools()).toHaveLength(7);
     expect(findBuiltinTool('calculator')?.label).toBe('计算器');
     expect(findBuiltinTool('nope')).toBeUndefined();
   });
@@ -178,6 +179,22 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       },
     });
   });
+
+  it('grep_skill 的说明与入参（2026-10-17 新增，无占位符故渲染后不变）', () => {
+    expect(rendered.get('grep_skill')?.description).toBe(
+      '在本数字人所配置技能的文件（SKILL.md 与 references/ 等）中按正则检索关键词，' +
+        '返回「技能名/文件路径:行号: 内容」，路径可直接回填给 read_skill；省略 skill 则检索全部技能。' +
+        '技能名取自系统提示中的「技能」小节。xlsx/pdf 等二进制会被跳过（请改用 read_skill）。',
+    );
+    expect(rendered.get('grep_skill')?.parameters).toEqual({
+      type: 'object',
+      required: ['pattern'],
+      properties: {
+        pattern: { type: 'string', description: '检索词或正则表达式' },
+        skill: { type: 'string', description: '限定技能名（可选，省略则检索全部技能）' },
+      },
+    });
+  })
 
   it('可用目录为空时回退默认示例（与改造前的 ?? 兜底一致）', () => {
     const empty: Partial<TemplateValues> = {

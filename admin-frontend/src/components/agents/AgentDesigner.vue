@@ -2,7 +2,8 @@
 /**
  * 数字人设计器（`FR-016`、`FR-017`、`FR-053`）。
  *
- * 五类配置以**分区（页签）**承载，导航深度不超过两级（列表 ↔ 设计器）。
+ * 五类配置（SOUL / 内置工具 / MCP 服务 / SKILL / 本体）+ 文件空间场景以
+ * **分区（页签）**承载，导航深度不超过两级（列表 ↔ 设计器）。
  * 保存失败时错误在 `aria-live` 区域播报（`FR-009`、原则四）。
  *
  * 实现注记：把 composable 返回的 ref **解构为顶层绑定**再在模板中使用，
@@ -18,6 +19,7 @@ import type {
   SkillListItem,
   SoulDesign,
 } from '../../api/types'
+import type { OntologyCandidate } from '../../api/ontologies'
 import { deleteAgent } from '../../api/agents'
 import { AGENT_DESIGN_TABS, NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import { useAgentDesign } from '../../composables/useAgentDesign'
@@ -25,6 +27,7 @@ import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import TabsNav from '../common/TabsNav.vue'
 import McpSelector from './McpSelector.vue'
+import OntologySelector from './OntologySelector.vue'
 import ScenarioEditor from './ScenarioEditor.vue'
 import SkillSelector from './SkillSelector.vue'
 import SoulEditor from './SoulEditor.vue'
@@ -42,9 +45,12 @@ const props = defineProps<{
    */
   initial: { name: string; copyFrom: string | null } | null
   builtinTools: BuiltinTool[]
-  builtinToolsError: unknown
+  /** 工具目录不可读的原因（§5.6 的 `builtin_tools_error`）；`null` = 可读 */
+  builtinToolsError: string | null
   mcpServices: McpServiceListItem[]
   skills: SkillListItem[]
+  /** 本体候选（`§5.6`，2026-10-17）：身份投影，不含正文 */
+  ontologies: OntologyCandidate[]
   initialTab: string | null
 }>()
 
@@ -71,9 +77,9 @@ const title = computed(() => (isNew.value ? '新建数字人' : `设计数字人
 
 /** 失效引用提示（`FR-013`）：后端保存时也会拒绝，这里只是提前暴露 */
 const builtinToolsErrorMessage = computed<string | null>(() => {
-  const err = props.builtinToolsError as ErrorInfo | null
-  if (!err) return null
-  return `内置工具目录不可读，无法确认工具引用是否有效；保存含工具的配置会被拒绝（${err.code}）`
+  const reason = props.builtinToolsError
+  if (!reason) return null
+  return `内置工具目录不可读（${reason}），无法确认工具引用是否有效；保存含工具的配置会被拒绝`
 })
 
 /* ---- 显式 setter：避免在模板里对 ref 属性做赋值 ---- */
@@ -92,6 +98,9 @@ function setMcpServices(value: string[]): void {
 }
 function setSkills(value: string[]): void {
   draft.value.skills = value
+}
+function setOntologies(value: string[]): void {
+  draft.value.ontologies = value
 }
 function setScenario(value: AgentScenario): void {
   draft.value.scenario = value
@@ -249,6 +258,13 @@ async function doDelete(): Promise<void> {
         :skills="skills"
         :model-value="draft.skills"
         @update:model-value="setSkills"
+      />
+
+      <OntologySelector
+        v-else-if="tab === 'ontologies'"
+        :ontologies="ontologies"
+        :model-value="draft.ontologies"
+        @update:model-value="setOntologies"
       />
 
       <ScenarioEditor v-else :model-value="draft.scenario" @update:model-value="setScenario" />

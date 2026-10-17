@@ -23,11 +23,22 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void
 }>()
 
+/**
+ * 2026-10-17：标题改用**英文工具名**（`name`，即模型的调用名与引用键），
+ * 中文名与用途说明一起进副标题。
+ *
+ * 原因：工具的英文名此前在界面上不可见——与聊天前台（工具卡片显示 `read_file`）
+ * 以及问题实例的关联工具清单（`QuickStartDialog`）口径不一致，同一个人同一个工具
+ * 在两个界面里叫两个名字。`label` 仍完整保留（它是唯一来源下发的中文名），
+ * 只是让位给副标题，因此**中文搜索仍然可命中**（`CheckboxList` 会一并匹配 description）。
+ */
 const options = computed<CheckboxOption[]>(() =>
   props.tools.map((tool) => ({
     value: tool.name,
-    label: tool.label,
-    description: tool.description_template,
+    label: tool.name,
+    description: tool.label
+      ? `${tool.label} · ${tool.description_template}`
+      : tool.description_template,
     badge: tool.writable ? '可写' : '只读',
   })),
 )

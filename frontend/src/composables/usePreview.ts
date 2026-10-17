@@ -13,9 +13,14 @@
  * - **本地文件**（空间目录点击 / 消息里的 `filePath` 入口）：打开面板并按**扩展名**分派
  *   （文本 `<pre>` / PDF / 图片 / 下载引导，V-11）——同一份文件从不同入口进来，
  *   判据与渲染口径 MUST 一致
+ *
+ * **放大态**（2026-10-16，`specs/011-preview-maximize`）：内容"平铺整个视口"的瞬态状态。
+ * 它是**呈现层**的状态，不改变 `target` / `content`、不发请求、不落盘（FR-006 / FR-007）。
+ * 归属放这里而不是组件里，是为了让三条退出路径（`close` / `backToList` / `openList`）经
+ * `resetContent()` **一处收敛**；"哪些内容可以放大"的判据也只在本文件写一次（FR-010）。
  */
 
-import { ref, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 
 import type { FilesApi } from '../api/files'
 import type { ErrorInfo, FileReference } from '../api/types'
@@ -65,6 +70,26 @@ export interface PreviewStore {
   target: Readonly<Ref<PreviewTarget>>
   content: Readonly<Ref<PreviewContent | null>>
   loading: Readonly<Ref<boolean>>
+  /**
+   * 放大态（011）：预览内容是否平铺整个视口。瞬态，不持久化、不写地址栏（FR-007）。
+   */
+  maximized: Readonly<Ref<boolean>>
+  /**
+   * 当前内容是否**可放大**（"有版面"的两类：同源 `viewUrl` 的 iframe、本地 PDF / 图片）。
+   * 判据的**唯一实现**在本文件（FR-010）；组件只消费布尔值，MUST NOT 自行判第二遍。
+   */
+  maximizable: Readonly<Ref<boolean>>
+  /**
+   * 头部"放大 / 缩小"入口是否可见：`maximized || maximizable`。
+   *
+   * 带上 `maximized` 是必需的：放大态下切换目标会经过预检 / 加载窗口（`maximizable` 短暂为假），
+   * 若入口随 `maximizable` 显隐，就会出现"全屏状态下没有缩小按钮"（违 FR-005）。
+   */
+  maximizeToggleVisible: Readonly<Ref<boolean>>
+  /** 放大 ↔ 缩小（同一入口）；不可放大且未放大时**无操作** */
+  toggleMaximize(): void
+  /** 退出放大（幂等，供 Esc / 收起路径使用） */
+  restoreMaximize(): void
   /** 展开面板并停在文件空间列表（工具栏入口） */
   openList(): void
   /** 展开面板并内联预览该文件（面板内点击 / 消息内引用，FR-046） */
@@ -97,16 +122,60 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
   const target = ref<PreviewTarget>({ kind: 'none' })
   const content = ref<PreviewContent | null>(null)
   const loading = ref(false)
+  const maximized = ref(false)
+
+  /**
+   * 可放大判据（唯一实现，FR-010）。
+   *
+   * 只看"有版面"的两类：① 同源 `viewUrl` 的内联 iframe；② 本地 PDF / 图片。
+   * 其余（文本流、「需下载」引导、错误态、空内容态、列表态）一律不可放大——
+   * 文本不因变宽而更可读，另两类的出口是"下载完整文件"，加了只是无效按钮（FR-013）。
+   */
+  const maximizable = computed<boolean>(() => {
+    if (view.value !== 'content') {
+      return false
+    }
+    const current = target.value
+    if (current.kind === 'url') {
+      return current.renderMode === 'iframe'
+    }
+    if (current.kind !== 'file') {
+      return false
+    }
+    const mode = content.value?.renderMode
+    return mode === 'pdf' || mode === 'image'
+  })
+
+  /** 入口可见性：放大态必须始终留出口（见接口注释）。 */
+  const maximizeToggleVisible = computed<boolean>(() => maximized.value || maximizable.value)
 
   /** 请求序号：后发请求覆盖先发结果，避免快速切换时旧响应回填。 */
   let requestId = 0
 
-  /** 清空内容态（不动 `open`），用于列表态与内容态之间的单向收敛。 */
+  /**
+   * 清空内容态（不动 `open`），用于列表态与内容态之间的单向收敛。
+   *
+   * 放大态在此一并归零：它依附于"正在看的内容"，内容一清空就没有"平铺什么"可言；
+   * 三条路径（`close` / `backToList` / `openList`）因此自动退出放大（FR-007 / FR-032），
+   * 而 `openFile` / `openView` 刻意**不走**这里，于是"放大态下换目标仍保持放大"（FR-012）。
+   */
   function resetContent(): void {
     requestId += 1
     target.value = { kind: 'none' }
     content.value = null
     loading.value = false
+    maximized.value = false
+  }
+
+  function toggleMaximize(): void {
+    if (!maximizeToggleVisible.value) {
+      return
+    }
+    maximized.value = !maximized.value
+  }
+
+  function restoreMaximize(): void {
+    maximized.value = false
   }
 
   function openList(): void {
@@ -299,6 +368,11 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
     target,
     content,
     loading,
+    maximized,
+    maximizable,
+    maximizeToggleVisible,
+    toggleMaximize,
+    restoreMaximize,
     openList,
     openFile,
     openView,

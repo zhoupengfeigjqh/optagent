@@ -8,10 +8,15 @@
  * - `view='content'` → 内联预览（text / pdf / 回退下载 / 错误态，渲染口径与 US7 一致）
  *
  * 破坏性动作只有删除：本组件负责**二次确认**，确认后才向父级上报 `remove`（不自行发请求）。
+ *
+ * **放大 / 缩小**（2026-10-16，`specs/011-preview-maximize`）：头部「收起」左侧的一枚可逆入口，
+ * 让预览内容铺满整个视口。本组件只做三件事——渲染入口、打放大态标记类、把 Esc 转成一次请求；
+ * "什么内容可放大"由 `maximizeVisible` 决定，"铺满"的定位由 `AppShell` 的预览列负责（栅格归它管）。
  */
 import { computed, ref } from 'vue'
 
 import type { ErrorInfo, FileReference, WorkspaceSpace } from '../../api/types'
+import { bindFrameEscape, useMaximizeEscape } from '../../composables/useMaximizeEscape'
 import type { PanelView, PreviewContent, PreviewTarget } from '../../composables/usePreview'
 import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
@@ -38,6 +43,15 @@ const props = withDefaults(
     content?: PreviewContent | null
     /** 内容态：加载中 */
     contentLoading?: boolean
+    /**
+     * 头部是否显示「放大 / 缩小」入口（011）。
+     *
+     * 由 `usePreview.maximizeToggleVisible` 下发——**面板不自行推导**"什么内容可以放大"，
+     * 判据只有会话态那一处（FR-010）；面板只负责"给了就渲染"。
+     */
+    maximizeVisible?: boolean
+    /** 是否处于放大态（决定图标、可访问名称与根节点标记类） */
+    maximized?: boolean
   }>(),
   {
     view: 'list',
@@ -48,6 +62,8 @@ const props = withDefaults(
     target: () => ({ kind: 'none' }),
     content: null,
     contentLoading: false,
+    maximizeVisible: false,
+    maximized: false,
   },
 )
 
@@ -62,6 +78,10 @@ const emit = defineEmits<{
   download: [reference: FileReference]
   /** 已二次确认的删除 */
   remove: [reference: FileReference]
+  /** 头部入口：放大 ↔ 缩小（011） */
+  'toggle-maximize': []
+  /** 放大态下按 Esc 请求退出（011） */
+  'restore-maximize': []
 }>()
 
 const isContent = computed(() => props.view === 'content')
@@ -148,19 +168,47 @@ function onOpenUrl(): void {
  * 100% 高度链，内容超出 iframe 视口后**在面板里滚不动**。同源才拿得到
  * `contentDocument`，故只对同源地址生效（跨域本就直跳，不进这里）。
  */
-function ensureInnerScroll(event: Event): void {
-  const doc = (event.target as HTMLIFrameElement).contentDocument
-  if (doc === null) {
-    return
-  }
+function ensureInnerScroll(doc: Document): void {
   const style = doc.createElement('style')
   style.textContent = 'html,body{overflow:auto !important;}'
   doc.head.appendChild(style)
 }
+
+/**
+ * 内联 `iframe` 的 `load`：滚动兜底 + Esc 转发（011）。
+ *
+ * 为什么要转发：iframe 是**独立文档**，其中按下的 Esc **不会**冒泡到本页 `window`，
+ * 而"点进页面里翻"正是放大的主场景——不转发的话 `FR-021`（放大态按 Esc 退出）在
+ * 最常用的路径上根本不成立。同源才拿得到 `contentDocument`（跨域直跳新窗口、PDF 由
+ * 插件文档承载时该值为 `null`），两种情况都由 `bindFrameEscape` 安全跳过。
+ */
+function onFrameLoad(event: Event): void {
+  const doc = (event.target as HTMLIFrameElement).contentDocument
+  if (doc === null) {
+    return
+  }
+  ensureInnerScroll(doc)
+  bindFrameEscape(doc, () => emit('restore-maximize'))
+}
+
+/**
+ * 放大态下的 Esc（011）：只在放大态挂全局监听，命中即请求退出。
+ *
+ * 中栏"Esc 中断本轮回答"在冒泡阶段，这里用捕获阶段先一步拦下并 `stopPropagation`，
+ * 于是"按 Esc 退出放大"不会顺手掐掉正在输出的回答（FR-021）。
+ */
+useMaximizeEscape({
+  active: () => props.maximized,
+  onRestore: () => emit('restore-maximize'),
+})
 </script>
 
 <template>
-  <aside class="workspace-panel" aria-label="文件空间">
+  <aside
+    class="workspace-panel"
+    :class="{ 'workspace-panel--maximized': maximized }"
+    aria-label="文件空间"
+  >
     <header class="workspace-panel__header">
       <div class="workspace-panel__leading">
         <BaseButton
@@ -192,6 +240,19 @@ function ensureInnerScroll(event: Event): void {
           @click="onDownload"
         >
           <BaseIcon name="download" :size="16" />
+        </BaseButton>
+
+        <!-- 放大 / 缩小（011）：位置固定在「收起」左侧，两态复用**同一个**按钮节点。
+             图标之外必须有随状态变化的可访问名称——只换图标等于对读屏用户没有变化（FR-022） -->
+        <BaseButton
+          v-if="maximizeVisible"
+          variant="ghost"
+          size="sm"
+          :aria-label="maximized ? '缩小页面' : '放大页面'"
+          :aria-pressed="maximized"
+          @click="emit('toggle-maximize')"
+        >
+          <BaseIcon :name="maximized ? 'minimize' : 'maximize'" :size="16" />
         </BaseButton>
 
         <BaseButton variant="ghost" size="sm" aria-label="收起文件空间" @click="emit('close')">
@@ -227,7 +288,7 @@ function ensureInnerScroll(event: Event): void {
           class="workspace-panel__frame"
           :src="urlTarget.url"
           :title="urlTarget.name"
-          @load="ensureInnerScroll"
+          @load="onFrameLoad"
         />
 
         <div v-else class="workspace-panel__fallback">
@@ -290,6 +351,12 @@ function ensureInnerScroll(event: Event): void {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+/* 放大态标记：铺满视口的定位在 `AppShell` 的预览列上（栅格由它管），
+   这里保证面板自身不透底——覆盖层绝不能"漏"出下面两栏（FR-003） */
+.workspace-panel--maximized {
+  background: var(--color-surface);
 }
 
 .workspace-panel__header {

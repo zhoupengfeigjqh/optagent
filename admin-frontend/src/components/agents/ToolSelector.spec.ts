@@ -35,6 +35,18 @@ describe('ToolSelector', () => {
     expect(wrapper.text()).not.toContain('示例.csv')
   })
 
+  it('标题用英文工具名、中文名与用途进说明（2026-10-17 口径统一）', () => {
+    const wrapper = mount(ToolSelector, { props: { tools: TOOLS, modelValue: [] } })
+
+    // 英文名（模型调用名与引用键）必须可见，且是标题的第一内容
+    const titles = wrapper.findAll('.checkbox-list__title').map((node) => node.text())
+    expect(titles[0]).toContain('read_file')
+    expect(titles[0]).not.toContain('读取文件')
+    // 中文名不丢：进说明行，中文搜索因此仍可用
+    expect(wrapper.findAll('.checkbox-list__description')[0]?.text()).toContain('读取文件')
+    expect(wrapper.text()).toContain('read_file')
+  })
+
   it('writable 以可见标记区分（不只靠颜色）', () => {
     const wrapper = mount(ToolSelector, { props: { tools: TOOLS, modelValue: [] } })
     expect(wrapper.text()).toContain('可写')

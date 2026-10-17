@@ -42,14 +42,13 @@ describe('parseLocation', () => {
     expect(parseLocation('/admin/ontology', '/admin').name).toBe('ontology')
   })
 
-  it('本体详情：目录名在路径、场景名在查询参数（身份是两段）', () => {
+  it('本体详情：场景名与本体名都在路径上，场景在前（身份是两段，2026-10-17）', () => {
     const r = parseLocation(
-      `/admin/ontology/${encodeURIComponent('原材料采购和库存')}?scenario=${encodeURIComponent('生产调度')}`,
+      `/admin/ontology/${encodeURIComponent('生产调度')}/${encodeURIComponent('原材料采购和库存')}`,
       '/admin',
     )
     expect(r.name).toBe('ontology')
-    expect(r.detail).toBe('原材料采购和库存')
-    expect(r.query.scenario).toBe('生产调度')
+    expect(r.detail).toBe('生产调度/原材料采购和库存')
   })
 
   it('解析详情对象并做 URL 解码', () => {

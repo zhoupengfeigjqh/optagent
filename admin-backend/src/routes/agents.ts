@@ -13,6 +13,7 @@ import { ApiError } from '../domain/api-error.js';
 import { UnifiedCatalog, type CatalogSnapshot } from '../domain/config-center/unified-catalog.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage } from '../domain/paging.js';
+import type { BuiltinToolProjection } from '../infra/runtime-client.js';
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void {
   /** 取统一清单快照，并按"是否引用内置工具"决定工具目录是否必须可得 */
@@ -21,6 +22,46 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     UnifiedCatalog.assertToolsAvailableFor(snapshot.toolsUnavailableReason, enabledTools);
     return snapshot;
   }
+
+  /**
+   * 设计器候选目录（2026-10-17，契约 §5.6）。
+   *
+   * 数字人设计器需要**全量**候选（内置工具 / MCP 服务 / SKILL），而三者的卡片列表
+   * 接口固定 8 条一页（`paging.ts`，服务端写死且不接受客户端覆盖）。设计器此前直接取
+   * `page=1`，于是库里第 9 个 SKILL / MCP 服务在界面上**根本选不到**，也没有任何提示。
+   *
+   * 本端点一次返回全部候选，不参与分页；卡片列表自身行为不变。
+   *
+   * 降级口径与 `snapshot()` 一致：内置工具不可达时只清空 `builtin_tools` 并带回原因
+   * （设计器据此提示"保存含工具的配置会被拒绝"），MCP 与 SKILL 候选照常返回。
+   */
+  app.get('/api/admin/agents/catalog', async () => {
+    let builtinTools: BuiltinToolProjection[] = [];
+    let builtinToolsError: string | null = null;
+    try {
+      builtinTools = await ctx.catalog.builtinTools();
+    } catch (err) {
+      builtinToolsError =
+        err instanceof ApiError ? err.message : `运行环境不可达：${(err as Error).message}`;
+    }
+
+    const [mcpServices, skills] = await Promise.all([
+      ctx.mcpServices.list(),
+      Promise.resolve(ctx.skills.listAll()),
+    ]);
+
+    // 本体（`FR-058`，2026-10-17）：设计器第四类引用。候选**就是 metadata 列表**——
+    // 身份只有一份来源（scenario_name / ontology_name），正文由部署物化时从库内取
+    const ontologies = ctx.ontologies.listAll().map((item) => ({ metadata: item.metadata }));
+
+    return {
+      builtin_tools: builtinTools,
+      builtin_tools_error: builtinToolsError,
+      mcp_services: mcpServices,
+      skills,
+      ontologies,
+    };
+  });
 
   app.get('/api/admin/agents', async (req) => {
     const query = (req.query ?? {}) as { page?: unknown };

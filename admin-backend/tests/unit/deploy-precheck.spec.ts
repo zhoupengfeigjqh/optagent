@@ -25,6 +25,8 @@ function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocume
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
+    // 本体引用为必填数组字段（2026-10-17）：缺省会让预检判"字段缺失"
+    ontologies: [],
     scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     updated_at: '2026-09-15T00:00:00.000Z',
     ...overrides,

@@ -7,6 +7,7 @@
  * | 内置工具 | 运行环境 `GET /api/builtin-tools` | 只读投影（`FR-011`） |
  * | MCP 服务 | 平台侧 MCP 调用配置 | 平台设计态（`FR-043`；2026-09-27 起不再取自编排声明） |
  * | SKILL | 共享技能库索引 | 平台设计态（`FR-036`） |
+ * | 本体 | 本体库索引（`"场景名/本体名"`） | 平台设计态（`FR-058`；2026-10-17） |
  *
  * 本模块把三者收拢为一个 `ReferenceIndex` 快照，供**保存校验、异常判定、
  * 部署前校验**共用同一份判据——避免三处各自取数导致结论不一致。
@@ -17,6 +18,7 @@ import { ApiError } from '../api-error.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { RuntimeClient, BuiltinToolProjection } from '../../infra/runtime-client.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
+import type { OntologyStore } from '../ontology/store.js';
 import type { ReferenceIndex } from './reference-index.js';
 
 export interface UnifiedCatalogDeps {
@@ -24,6 +26,8 @@ export interface UnifiedCatalogDeps {
   /** MCP 服务配置（平台唯一权威源；2026-09-27 起取代编排声明） */
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
+  /** 本体库（2026-10-17）：数字人可引用的本体范围 */
+  ontologies: OntologyStore;
   logger?: Logger;
 }
 
@@ -53,6 +57,16 @@ export class UnifiedCatalog {
   /** SKILL 名（共享技能库） */
   skillNames(): string[] {
     return [...this.deps.skills.names()];
+  }
+
+  /**
+   * 本体标识（`"场景名/本体名"`）——两段都取自 `metadata`（唯一来源），
+   * 与部署路径的两级目录完全对应。
+   */
+  ontologyKeys(): string[] {
+    return this.deps.ontologies
+      .listAll()
+      .map((item) => `${item.metadata.scenario_name}/${item.metadata.ontology_name}`);
   }
 
   /** 内置工具目录（只读投影；不可达即抛 `ADM_RUNTIME_UNREACHABLE`） */
@@ -98,6 +112,8 @@ export class UnifiedCatalog {
         builtinTools: new Set(tools),
         mcpServices: new Set(this.mcpServiceNames()),
         skills: new Set(this.skillNames()),
+        // 本体：键与部署路径 `ontology/{场景}/{本体}/` 的两段一致
+        ontologies: new Set(this.ontologyKeys()),
         // 004：问题实例关联工具需要知道"每个 MCP 服务有哪些可见工具"
         mcpTools: new Map(
           this.deps.mcpConfigs.listAll().map((config) => [config.name, new Set(config.allowed_tools)]),

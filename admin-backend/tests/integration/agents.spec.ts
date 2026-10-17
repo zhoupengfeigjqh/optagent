@@ -40,6 +40,24 @@ const validBody = {
   scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
 };
 
+/** 往平台本体库塞一个完整本体（两个必需文件齐备；`FR-058`） */
+function installOntology(scenario = '生产调度', ontologyDir = '原材料采购和库存'): void {
+  fx.ctx.ontologies.install({
+    scenario,
+    ontology_dir: ontologyDir,
+    content: `metadata:
+  created_at: '2026-07-15 16:05:02'
+  deployed_version: v1.0
+  scenario_name: ${scenario}
+  scenario_id: 1
+  ontology_name: ${ontologyDir}
+  ontology_id: 1
+concepts: []
+`,
+    securities: 'securities: []\n',
+  });
+}
+
 beforeEach(async () => {
   // MCP 服务改为平台内人工新建：`validBody` 里引用的 `ocr` 必须先存在
   fx = await createFixture({ mcpServices: { ocr: {} } });
@@ -64,6 +82,29 @@ describe('POST /api/admin/agents', () => {
     expect(body.mcp_services).toEqual(['ocr']);
     expect(body.abnormal).toBe(false);
     expect(typeof body.revision).toBe('number');
+  });
+
+  it('本体引用随设计态保存并原样回显（FR-058，2026-10-17）', async () => {
+    installOntology();
+
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: { ...validBody, ontologies: ['生产调度/原材料采购和库存'] },
+    });
+    expect(res.statusCode).toBe(201);
+    // 只存引用不存正文：正文由部署物化时从库内取
+    expect(res.json().ontologies).toEqual(['生产调度/原材料采购和库存']);
+  });
+
+  it('本体引用不在库内 → 400 ADM_AGENT_INVALID_REF', async () => {
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: { ...validBody, ontologies: ['不存在/本体'] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('ADM_AGENT_INVALID_REF');
   });
 
   it('名称冲突 → 409 ADM_AGENT_NAME_TAKEN', async () => {
@@ -275,5 +316,74 @@ describe('DELETE /api/admin/agents/{name}', () => {
     const res = await fx.app.inject({ method: 'DELETE', url: '/api/admin/agents/nope' });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe('ADM_AGENT_NOT_FOUND');
+  });
+});
+
+describe('GET /api/admin/agents/catalog（§5.6，2026-10-17）', () => {
+  it('一次返回全量候选：9 个 MCP 服务全部下发（卡片列表一页仍只有 8 条）', async () => {
+    // 再补 8 个服务，与 beforeEach 预置的 `ocr` 一起凑满 9 个
+    for (let index = 2; index <= 9; index += 1) {
+      fx.ctx.mcpConfigs.create({
+        name: `svc-${index}`,
+        transport: 'http',
+        url: `http://127.0.0.1:1/svc-${index}/mcp`,
+        allowed_tools: ['ocr_image'],
+      });
+    }
+
+    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/catalog' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(body.builtin_tools.map((tool: { name: string }) => tool.name)).toEqual([
+      'read_file',
+      'write_file',
+    ]);
+    expect(body.builtin_tools_error).toBeNull();
+    expect(body.mcp_services).toHaveLength(9);
+    expect(body.skills).toEqual([]);
+    expect(body.ontologies).toEqual([]);
+
+    // 对照：同一时刻的卡片列表仍是一页 8 条——catalog 不是把分页改大
+    const paged = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/mcp/services?page=1',
+    });
+    expect(paged.json().items).toHaveLength(8);
+    expect(paged.json().total).toBe(9);
+  });
+
+  it('本体候选随目录下发：身份 + metadata，不含两个文件的正文', async () => {
+    installOntology();
+    installOntology('生产调度', '工艺路线');
+
+    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/catalog' });
+    expect(res.statusCode).toBe(200);
+    const items = res.json().ontologies as Array<Record<string, unknown>>;
+
+    expect(items).toHaveLength(2);
+
+    // 候选就是 `{ metadata }`：身份只有一份来源，不再下发 scenario / ontology_dir / name
+    const metaOf = (item: Record<string, unknown>) => item.metadata as Record<string, unknown>;
+    expect(items.map((item) => `${metaOf(item).scenario_name as string}/${metaOf(item).ontology_name as string}`)).toEqual(
+      expect.arrayContaining(['生产调度/原材料采购和库存', '生产调度/工艺路线']),
+    );
+
+    const picked = items.find((item) => metaOf(item).ontology_name === '原材料采购和库存');
+    expect(metaOf(picked!).scenario_name).toBe('生产调度');
+    expect(picked).not.toHaveProperty('content');
+    expect(picked).not.toHaveProperty('securities_content');
+  });
+
+  it('内置工具不可达 → 只清空工具并带回原因，MCP 候选照常返回', async () => {
+    fx.runtime.unreachable = true;
+
+    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/catalog' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+
+    expect(body.builtin_tools).toEqual([]);
+    expect(body.builtin_tools_error).toContain('运行环境不可达');
+    expect(body.mcp_services.map((service: { name: string }) => service.name)).toEqual(['ocr']);
   });
 });

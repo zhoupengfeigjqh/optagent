@@ -33,6 +33,8 @@ export interface AgentDesignDraft {
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
+  /** 引用的本体（`{场景名}/{本体名}`，2026-10-17）；只存引用不存正文 */
+  ontologies: string[]
   scenario: AgentScenario
 }
 
@@ -82,6 +84,7 @@ export function emptyDraft(): AgentDesignDraft {
     enabled_tools: [],
     mcp_services: [],
     skills: [],
+    ontologies: [],
     scenario: emptyScenario(),
   }
 }
@@ -93,6 +96,7 @@ function toDraft(design: AgentDesign): AgentDesignDraft {
     enabled_tools: [...design.enabled_tools],
     mcp_services: [...design.mcp_services],
     skills: [...design.skills],
+    ontologies: [...design.ontologies],
     scenario: {
       scenario: design.scenario.scenario,
       data_prep_dirs: [...design.scenario.data_prep_dirs],

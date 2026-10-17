@@ -61,13 +61,16 @@
     "list_dir",
     "grep_files",
     "write_file",
-    "read_skill"
+    "read_skill",
+    "grep_skill"
   ],
   "mcp_services": [
     "hd-algorithm",
     "ocr"
   ],
-  "skills": [],
+  "skills": [
+    "调度算法"
+  ],
   "scenario": {
     "scenario": "海大计划",
     "data_prep_dirs": [
@@ -284,5 +287,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-13T03:34:00.501Z"
+  "updated_at": "2026-10-17T08:44:47.619Z"
 }

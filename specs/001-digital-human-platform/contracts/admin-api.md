@@ -1,6 +1,8 @@
 # 接口契约：数字人管理平台（admin-api）
 
-**特性**：`001-digital-human-platform` | **版本**：1.1 | **日期**：2026-09-27
+**特性**：`001-digital-human-platform` | **版本**：1.2 | **日期**：2026-10-17
+
+**1.2（2026-10-17）变更**：①新增 §5.6 设计器候选目录端点（一次返回全量候选，修复设计器只取卡片列表第一页导致第 9 个 SKILL / MCP 服务选不到）；②§10 本体库调整——索引去冗余（身份由 `metadata` 派生，字段 `hash` 更名 `ontology_hash`）、`securities.yaml` 转为必需文件、移除 `has_securities`。
 
 本契约定义**管理界面（`admin-frontend`）↔ 管理服务（`admin-backend`）**之间的全部接口。按宪章原则七，本文件与 `admin-frontend/src/api/types.ts` **一一映射**；契约变更 MUST 四处同步（本文件、前端类型定义、后端请求/响应 schema、测试用例）。
 
@@ -26,6 +28,8 @@
 | `page` | integer | 1 | ≥ 1 | 页码，从 1 开始 |
 
 **每页固定 `page_size = 8`**（4 列 × 2 行），由服务端固定，**不接受客户端覆盖**（`FR-006` 要求"每页固定 8 项"）。
+
+**候选枚举类接口不使用分页**：设计器需要的"全部可选对象"（如 §5.6 的 `GET /api/admin/agents/catalog`）MUST 一次返回全量，MUST NOT 复用卡片列表的 `page/page_size`——否则超过 8 个的候选会静默缺席。
 
 响应统一为：
 
@@ -648,6 +652,44 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：`ADM_AGENT_IN_USE`、`ADM_AGENT_NOT_FOUND`
 
+### 5.6 `GET /api/admin/agents/catalog`
+
+**用途**：设计器候选目录（2026-10-17）。设计器需要**全量**候选（内置工具 / MCP 服务 / SKILL / 本体），而卡片列表接口固定 8 条一页（`paging.ts`，服务端写死且不接受客户端覆盖）。设计器此前直接调卡片列表并只取 `page=1`，于是库里第 9 个 SKILL / MCP 服务在界面上**根本选不到**，且没有任何提示。本端点一次返回全部候选，**不参与分页**；卡片列表自身行为不变。
+
+**响应 200**：
+
+```json
+{
+  "builtin_tools": [
+    { "name": "read_file", "label": "读取文件", "description_template": "…", "parameters": {}, "writable": false }
+  ],
+  "builtin_tools_error": null,
+  "mcp_services": [
+    { "name": "ocr", "description": "…", "transport": "http", "url": "http://…", "has_headers": false, "allowed_tools": ["ocr_image"] }
+  ],
+  "skills": [
+    { "name": "pdf-parse", "description": "…", "installed_at": "…", "updated_at": "…", "source": "zip" }
+  ],
+  "ontologies": [
+    {
+      "metadata": { "scenario_name": "生产调度", "ontology_name": "原材料采购和库存", "…": "…" }
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `builtin_tools` | array | 运行环境内置工具目录的**全量**投影（字段同 §2.1） |
+| `builtin_tools_error` | string \| null | 工具目录不可读时的可读原因。此时其余两类候选照常返回；与 §5.2/§5.4 的降级口径一致——引用内置工具的保存会被拒绝（`ADM_RUNTIME_UNREACHABLE`） |
+| `mcp_services` | array | 平台侧 MCP 服务清单全量（字段同 §3.1） |
+| `skills` | array | 共享技能库全量条目（字段同 §4.1，不含正文） |
+| `ontologies` | array | 本体库全量条目的**身份**（2026-10-17）：每项只有 `{ metadata }`（`scenario_name` / `ontology_name` 即两段身份），**不含两个文件的正文**（正文由部署物化时从库内读）。设计器以 `{场景名}/{本体名}` 作为引用值、以 `{场景名}-{本体名}` 作为显示名 |
+
+**关键约束**：①**不分页、不截断**（候选枚举语义，不属于卡片列表）；②只读，不落盘；③内置工具不可达 **MUST NOT** 使整个端点失败——否则 MCP / SKILL / 本体候选会被连带清空；④本体候选与 §10.1 同源（同一 `OntologyStore` 视图），因此同样只含 `metadata` 里 6 项齐全的记录，脏数据已被 `toRecord()` 剔除。
+
+**错误码**：无新增（平台自身故障按兜底码处理）。
+
 ---
 
 ## §6 用户与部署
@@ -821,10 +863,11 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `§3.3.1` 的请求体 | `McpServiceCreatePayload` | 名称由管理员指定 |
 | `§3.3` / `§3.3.1` 的响应 | `McpServiceConfigSaved` | 完整调用配置 + `revision` + `affected_agents`；`headers` 同为掩码（界面据此**就地刷新**请求头展示，不重载详情） |
 | `§5.3` 的响应 | `AgentDesign` | 五类配置字段与设计态 JSON 一致 |
+| `§5.6` 的响应 | `AgentCatalog` | `builtin_tools` / `builtin_tools_error` / `mcp_services` / `skills`，全量不分页 |
 | `§6.6` 的响应 | `DeployResult` | 含 `manifest_diff` |
-| `§10.1` 的 `items` 元素 | `OntologyListItem` | 6 项 metadata 以对象承载（缺项 `null`）+ `has_securities`；不下发任何文件正文 |
-| `§10.2` 的响应 | `OntologyDetail` | 记录 + `ontology.yaml` 全文 + `securities.yaml` 全文（`null` = 未同步）——只读视图的数据源 |
-| `§10.4` 的 `items` 元素 | `OntologyMarketItem` | 含 `status`、市场侧两个文件的指纹与 `has_securities` |
+| `§10.1` 的 `items` 元素 | `OntologyListItem` | 6 项 metadata 以对象承载（缺项 `null`）；身份字段 `scenario` / `ontology_dir` / `name` / `source` 由 metadata 派生；不下发任何文件正文 |
+| `§10.2` 的响应 | `OntologyDetail` | 记录 + `ontology.yaml` 全文 + `securities.yaml` 全文（两个文件均为必需）——只读视图的数据源 |
+| `§10.4` 的 `items` 元素 | `OntologyMarketItem` | 含 `status` 与市场侧两个文件的指纹 |
 | `§0.4` 的错误码 | `ADMIN_ERROR_CODES` 常量 + `error-message.ts` 中文文案映射 | 前端 MUST NOT 直接展示后端 `message`（沿用既有 `frontend` 的口径） |
 
 **错误码文案**：前端 MUST 按 `code` 分派中文文案（新增 `ADM_*` 码的文案映射表），未知码回退通用文案并保留原码——与既有 `frontend/src/utils/error-message.ts` **同一实现思路**，避免两套错误展示习惯。
@@ -845,9 +888,11 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 ## §10 本体管理（2026-10-03 新增）
 
-**定位**：一级导航的第二个功能区（MCP 服务与 SKILL 管理之间）。本体来自**本体市场**（optonto `.data/onto_market`，平台**只读**），导入 **`ontology.yaml`（必需）+ `securities.yaml`（可选，行为安全管控）** 两个文件（`data-model.md` §9）；平台侧**只读**——没有任何编辑本体的端点。
+**定位**：一级导航的第二个功能区（MCP 服务与 SKILL 管理之间）。本体来自**本体市场**（optonto `.data/onto_market`，平台**只读**），导入 **`ontology.yaml` 与 `securities.yaml`（两个都是必需文件，2026-10-17 起）**（`data-model.md` §9）；平台侧**只读**——没有任何编辑本体的端点。
 
-**身份**：`scenario`（场景目录名）+ `ontology_dir`（本体目录名）的组合。因路由只承载单段 detail（`FR-053` 两级导航上限），详情与删除把场景放在查询参数 `scenario` 上。两者都 MUST 是**安全路径段**（不含分隔符/`..`/控制字符，≤128 字符；中文与全角括号合法）。
+**身份**：`metadata.scenario_name`（场景名）+ `metadata.ontology_name`（本体名）。**身份即 URL**：详情与删除都是 `/{scenario_name}/{ontology_name}`，两段顺序与 `metadata` 字段、与部署路径 `ontology/{场景}/{本体}/` 完全一致（2026-10-17）。两者都 MUST 是**安全路径段**（不含分隔符/`..`/控制字符，≤128 字符；中文与全角括号合法）。
+
+**身份的存储与下发口径（2026-10-17）**：库内 `index.json` 与**所有响应**都**只有 `metadata` 一份来源**——不再下发 `scenario` / `ontology_dir` / `name` / `source` 这些副本字段（它们只服务过卡片文案与 URL，而两者现在都直读 `metadata`）。入库时强校验两个名字与市场目录名完全一致（不一致 → `VALIDATION_FAILED`）。
 
 ### 10.1 `GET /api/admin/ontologies`
 
@@ -859,10 +904,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 ```jsonc
 {
-  "scenario": "生产调度",
-  "ontology_dir": "原材料采购和库存",
-  "name": "原材料采购和库存",          // metadata.ontology_name，缺失时兜底为目录名
-  "metadata": {                        // 6 项，缺项为 null
+  "metadata": {                        // 6 项，缺项为 null；身份只在这里
     "created_at": "2026-07-15 16:05:02",
     "deployed_version": "v1.0",
     "scenario_name": "生产调度",
@@ -870,9 +912,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
     "ontology_name": "原材料采购和库存",
     "ontology_id": 1
   },
-  "source": "onto_market:生产调度",
-  "hash": "…sha256…",
-  "has_securities": true,               // 是否已同步 securities.yaml（卡片徽标用它）
+  "ontology_hash": "…sha256…",         // ontology.yaml 的内容指纹
   "installed_at": "2026-10-03T…",
   "updated_at": "2026-10-03T…"
 }
@@ -880,7 +920,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **关键约束**：列表 MUST NOT 下发任何文件全文（正文按需在 §10.2 取）。
 
-### 10.2 `GET /api/admin/ontologies/{ontology_dir}?scenario={场景}`
+### 10.2 `GET /api/admin/ontologies/{scenario_name}/{ontology_name}`
 
 **用途**：本体详情——记录 + 文件**全文**，供只读视图渲染（`FR-059`）。
 
@@ -889,17 +929,19 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | 字段 | 说明 |
 |---|---|
 | `content` / `size` | `ontology.yaml` 全文与字节数 |
-| `securities_content` / `securities_size` | `securities.yaml` 全文与字节数；**未同步时为 `null` / `0`**（该本体未配置安全管控，不是错误） |
+| `securities_content` / `securities_size` | `securities.yaml` 全文与字节数（必填文件，恒有值） |
 
-**错误码**：`ADM_ONTOLOGY_NOT_FOUND`（记录不存在或 `ontology.yaml` 缺失）、`VALIDATION_FAILED`（缺 `scenario`）
+**错误码**：`ADM_ONTOLOGY_NOT_FOUND`（记录不存在，或库内缺 `ontology.yaml` / `securities.yaml` 任一文件）。路径只给一段时不存在该路由（`404`），没有"缺参 400"。
 
-### 10.3 `DELETE /api/admin/ontologies/{ontology_dir}?scenario={场景}`
+### 10.3 `DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}`
 
-**用途**：从本体库删除（`FR-061`）；目录整体移除（`ontology.yaml` 与已同步的 `securities.yaml` 一并清除）。本体**不被数字人引用**，故无需引用清单与二次确认清单（区别于 SKILL 的 §4.5）。
+**用途**：从本体库删除（`FR-061`）；目录整体移除（`ontology.yaml` 与 `securities.yaml` 一并清除）。本体**不被数字人引用**，故无需引用清单与二次确认清单（区别于 SKILL 的 §4.5）。
 
 **响应 204**
 
-**错误码**：`ADM_ONTOLOGY_NOT_FOUND`、`VALIDATION_FAILED`（缺 `scenario`）
+**错误码**：`ADM_ONTOLOGY_NOT_FOUND`
+
+> **路径 vs 请求体的命名边界（2026-10-17）**：寻址用 `metadata` 的名字（`/{scenario_name}/{ontology_name}`）；**导入/更新的请求体仍是 `{ scenario, ontology_dir }`**——那是本体市场的两级目录名（见 §10.5/§10.6）。两者语义相同，切换发生在"市场目录 → 平台库"的边界上。
 
 ### 10.4 `GET /api/admin/ontologies/onto-market`
 
@@ -913,23 +955,23 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `reason` | 无法列出时的可读原因；正常为 `null` |
 | `items[].scenario` / `ontology_dir` | 市场侧两级路径（导入/更新请求参数） |
 | `items[].name` / `metadata` | 解析自 `ontology.yaml` 的 `metadata` 段；解析失败为 `null` 并置 `invalid_reason` |
-| `items[].size` / `hash` | `ontology.yaml` 字节数 / **内容指纹**（sha256） |
-| `items[].has_securities` / `securities_size` / `securities_hash` | 市场侧是否有 `securities.yaml`、其字节数与内容指纹（无该文件时 `false` / `0` / `null`；**缺失不是错误**） |
-| `items[].status` | `new`（可导入）/ `unchanged`（已导入且**两个基准文件**都未变）/ `changed`（已导入但任一文件已变——含"市场新增/移除了安全管控"——**可经 §10.6 更新**）/ `invalid`（`ontology.yaml` 缺失、超限或 YAML 无效） |
+| `items[].size` / `ontology_hash` | `ontology.yaml` 字节数 / **内容指纹**（sha256） |
+| `items[].securities_size` / `securities_hash` | 市场侧 `securities.yaml` 的字节数与内容指纹（该文件为必需，缺失即整条 `invalid`） |
+| `items[].status` | `new`（可导入）/ `unchanged`（已导入且**两个基准文件**都未变）/ `changed`（已导入但任一文件已变，**可经 §10.6 更新**）/ `invalid`（缺 `ontology.yaml` 或 `securities.yaml`、超限、YAML 无效） |
 
 **关键约束**：对市场**只读**，MUST NOT 写/删/改 optonto 任何文件；单条 `invalid` MUST NOT 拖垮整个列表。
 
 ### 10.5 `POST /api/admin/ontologies/onto-market/import`
 
-**用途**：从本体市场导入一个本体（`ontology.yaml` 必需 + `securities.yaml` 可选）到平台本体库。
+**用途**：从本体市场导入一个本体（`ontology.yaml` 与 `securities.yaml` 均为必需）到平台本体库。
 
 **请求体**：`{ "scenario": "生产调度", "ontology_dir": "原材料采购和库存" }`
 
-**响应 201**：`{ scenario, ontology_dir, name, metadata, installed_at, overwritten: false }`
+**响应 201**：`{ metadata, installed_at, overwritten: false }`（身份只在 `metadata` 的两个名字里）
 
-**错误码**：`ADM_ONTOLOGY_EXISTS`（**重复导入直接拒绝**——同一「场景 + 目录名」已存在，界面应改用 §10.6）、`VALIDATION_FAILED`（未配置 `ONTO_MARKET_DIR`、路径越界、`ontology.yaml` 缺失/超限、YAML 无效等）
+**错误码**：`ADM_ONTOLOGY_EXISTS`（**重复导入直接拒绝**——同一「场景 + 目录名」已存在，界面应改用 §10.6）、`VALIDATION_FAILED`（未配置 `ONTO_MARKET_DIR`、路径越界、`ontology.yaml` 或 `securities.yaml` 缺失/超限、YAML 无效、**`metadata` 与市场路径不一致**等）
 
-**关键约束**：①对市场只读；②记录 `source = "onto_market:{场景}"`、`hash` 与 `securities_hash`（两个内容指纹）；③落盘 `platform-data/onto_market/{场景}/{本体}/` 下的同名文件（前两级结构与市场一致）。
+**关键约束**：①对市场只读；②落盘条目只记 `metadata` + `ontology_hash` + `securities_hash` + 时间；③落盘 `platform-data/onto_market/{场景}/{本体}/` 下的同名文件（前两级结构与市场一致）；④入库强校验 `metadata.scenario_name` / `ontology_name` 与市场路径完全一致。
 
 ### 10.6 `POST /api/admin/ontologies/onto-market/update`
 
@@ -941,7 +983,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：`VALIDATION_FAILED`（**库内不存在该本体** → 提示先导入；参数与市场侧问题同 §10.5）
 
-**关键约束**：①整体替换两个文件（单文件原子写；市场侧已删除 `securities.yaml` 时 MUST 同时清除库内副本，保证"库内 = 市场快照"）；②更新后 `hash` / `securities_hash` 换为市场现哈希，后续 `changed` 判定从新基准起算；③与 SKILL 不同**没有"人工修改确认"**——本体只读、平台无编辑通道，库内内容必然等于上次导入的市场快照。
+**关键约束**：①整体替换两个文件（单文件原子写；市场侧缺任一文件时该条 `invalid`、更新被拒且库内快照保持不变）；②更新后 `ontology_hash` / `securities_hash` 换为市场现哈希，后续 `changed` 判定从新基准起算；③与 SKILL 不同**没有"人工修改确认"**——本体只读、平台无编辑通道，库内内容必然等于上次导入的市场快照。
 
 ## §11 身份与分权（2026-10-08 登记，**未实施**）
 

@@ -4,9 +4,9 @@
  * 独立成文件的原因：`ontologies.spec.ts` 触 500 行门禁（原则二），
  * 与主体端点用例分居两个文件，夹具各自自洽。
  *
- * 覆盖：`securities.yaml` 随本体一并导入/更新（可选文件）、列表 `has_securities`、
+ * 覆盖：`securities.yaml` 随本体一并导入/更新（**必需文件**，2026-10-17 起）、
  * 详情 `securities_content` 全文、市场仅改安全管控即 `changed`、
- * 市场移除该文件时清掉库内副本、删除本体连带清除。
+ * 市场缺少/移除该文件时该条 `invalid` 且导入/更新被拒、删除本体连带清除。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,7 +28,17 @@ const YAML = `metadata:
 concepts: []
 `;
 
-/** 行为安全管控样例（可选文件：原样同步，平台不解析其语义） */
+/**
+ * 生成与市场路径**完全一致**的 ontology.yaml（metadata 即身份，入库强校验）。
+ */
+function yamlFor(scenario: string, ontologyDir: string): string {
+  return YAML.replace(`scenario_name: ${SCENARIO}`, `scenario_name: ${scenario}`).replace(
+    `ontology_name: ${ONTOLOGY}`,
+    `ontology_name: ${ontologyDir}`,
+  );
+}
+
+/** 行为安全管控样例（必需文件：原样同步，平台不解析其语义） */
 const SECURITIES = `securities:
 - action_name: CreatePurchaseRecord
   display_name: 创建原材料采购单
@@ -48,10 +58,17 @@ async function setup(): Promise<void> {
   fx = await createFixture({ env: { ONTO_MARKET_DIR: marketDir } });
 }
 
-function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO): void {
+function writeMarket(
+  ontologyDir: string,
+  content: string,
+  scenario = SCENARIO,
+  withSecurities = true,
+): void {
   const dir = path.join(marketDir!, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), content);
+  // 2026-10-17：securities.yaml 为必需文件；测"缺文件"的用例传 false
+  if (withSecurities) fs.writeFileSync(path.join(dir, 'securities.yaml'), SECURITIES);
 }
 
 /**
@@ -108,42 +125,38 @@ afterEach(async () => {
 describe('安全管控同步 securities.yaml（§10.1 / §10.2 / §10.5）', () => {
   it('导入把两个文件都落盘；列表与详情都能看到安全管控（只读全文）', async () => {
     await setup();
-    writeMarketSecurities(ONTOLOGY, SECURITIES);
 
     const imported = await importOntology();
     expect(imported.statusCode).toBe(201);
     expect(fs.readFileSync(savedSecurities(), 'utf8')).toBe(SECURITIES);
 
     const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json().items[0];
-    expect(listItem.has_securities).toBe(true);
     // 列表仍不下发正文（含安全管控正文）
     expect(listItem).not.toHaveProperty('content');
     expect(listItem).not.toHaveProperty('securities_content');
+    expect(listItem).not.toHaveProperty('has_securities');
 
     const detail = await fx.app.inject({
       method: 'GET',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
     expect(detail.json().securities_content).toBe(SECURITIES);
-    expect(detail.json().has_securities).toBe(true);
     expect(detail.json().securities_size).toBe(Buffer.byteLength(SECURITIES, 'utf8'));
   });
 
-  it('市场没有该文件 → 详情 securities_content=null、列表 has_securities=false', async () => {
-    await setup();
-    await importOntology();
+  it('市场缺 securities.yaml → 该条 invalid，导入被拒（400）', async () => {
+    // 该用例需要"市场里只有 ontology.yaml"，故自建市场而不走默认 setup
+    marketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-sec-'));
+    writeMarket(ONTOLOGY, YAML, SCENARIO, false);
+    fx = await createFixture({ env: { ONTO_MARKET_DIR: marketDir } });
 
-    const detail = await fx.app.inject({
-      method: 'GET',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
-    });
-    expect(detail.json().securities_content).toBeNull();
-    expect(detail.json().has_securities).toBe(false);
+    const market = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies/onto-market' });
+    expect(market.json().items[0]).toMatchObject({ status: 'invalid' });
+    expect(market.json().items[0].invalid_reason).toContain('securities.yaml');
 
-    const listItem = (await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' })).json().items[0];
-    expect(listItem.has_securities).toBe(false);
+    const res = await importOntology();
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
   });
 });
 
@@ -153,23 +166,23 @@ describe('安全管控同步 securities.yaml（§10.4 / §10.6）', () => {
     await importOntology();
     expect(await marketStatus()).toBe('unchanged');
 
-    writeMarketSecurities(ONTOLOGY, SECURITIES);
+    const changed = SECURITIES.replace('请再次确认', '请再次核对');
+    writeMarketSecurities(ONTOLOGY, changed);
     expect(await marketStatus()).toBe('changed');
 
     const res = await updateOntology();
     expect(res.statusCode).toBe(200);
-    expect(fs.readFileSync(savedSecurities(), 'utf8')).toBe(SECURITIES);
+    expect(fs.readFileSync(savedSecurities(), 'utf8')).toBe(changed);
 
     const market = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies/onto-market' });
-    expect(market.json().items[0]).toMatchObject({ status: 'unchanged', has_securities: true });
+    expect(market.json().items[0]).toMatchObject({ status: 'unchanged' });
   });
 
-  it('市场移除该文件 → 更新时清掉库内旧副本', async () => {
-    // 本用例要真删文件（市场侧 + 库内），用 ASCII 名避开 Windows 对非 ASCII 路径的删除限制
+  it('市场移除该文件 → 该条 invalid、更新被拒；库内副本保留（无半更新）', async () => {
+    // 本用例要真删文件（市场侧），用 ASCII 名避开 Windows 对非 ASCII 路径的删除限制
     const ASCII = { scenario: 'demo-scenario', ontology_dir: 'demo-ontology' };
     await setup();
-    writeMarket(ASCII.ontology_dir, YAML, ASCII.scenario);
-    writeMarketSecurities(ASCII.ontology_dir, SECURITIES, ASCII.scenario);
+    writeMarket(ASCII.ontology_dir, yamlFor(ASCII.scenario, ASCII.ontology_dir), ASCII.scenario);
     await fx.app.inject({
       method: 'POST',
       url: '/api/admin/ontologies/onto-market/import',
@@ -186,39 +199,30 @@ describe('安全管控同步 securities.yaml（§10.4 / §10.6）', () => {
     expect(fs.existsSync(saved)).toBe(true);
 
     writeMarketSecurities(ASCII.ontology_dir, null, ASCII.scenario);
+    const market = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies/onto-market' });
+    expect(market.json().items[0]).toMatchObject({ status: 'invalid' });
+
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/ontologies/onto-market/update',
       payload: ASCII,
     });
-
-    expect(res.statusCode).toBe(200);
-    expect(fs.existsSync(saved)).toBe(false);
-    const detail = await fx.app.inject({
-      method: 'GET',
-      url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
-      query: { scenario: ASCII.scenario },
-    });
-    expect(detail.json().securities_content).toBeNull();
+    expect(res.statusCode).toBe(400);
+    // 拒绝发生在写入之前：库内仍是完整快照
+    expect(fs.existsSync(saved)).toBe(true);
   });
 
   it('删除本体一并清掉安全管控文件（目录整体移除）', async () => {
     await setup();
-    writeMarketSecurities(ONTOLOGY, SECURITIES);
     await importOntology();
 
     const res = await fx.app.inject({
       method: 'DELETE',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
 
-    if (res.statusCode === 204) {
-      expect(fs.existsSync(savedSecurities())).toBe(false);
-    } else {
-      // Windows 宿主对非 ASCII 路径的删除限制：按"宁可不删"口径则两文件都应还在
-      expect(res.statusCode).toBe(503);
-      expect(fs.existsSync(savedSecurities())).toBe(true);
-    }
+    // 中文路径同样真删（`removeTree` 兜底，2026-10-09）：不留"卡片没了、文件还在"的半删状态
+    expect(res.statusCode).toBe(204);
+    expect(fs.existsSync(savedSecurities())).toBe(false);
   });
 });

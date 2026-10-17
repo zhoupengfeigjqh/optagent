@@ -4,8 +4,8 @@
  * 守住四条（2026-10-03 改为「左文件列表 + 右只读正文」，形态与样式逐项对齐 SKILL 详情）：
  * 1. 默认展示 `ontology.yaml` **全文**（`<pre>`）；右侧头部为「mono 路径 + 大小 + 「只读」徽标」，
  *    元数据为两列 `dl`（场景 / 本体 / 创建时间 / 部署版本 / 来源 / 安装·更新 / 文件 / 修改方式）；
- * 2. 已同步 `securities.yaml` 时左侧出现两个文件、**可切换**（切换不发请求，两个文件都在详情里）；
- *    未同步时左侧只有本体正文一行，并在元数据「文件」行说明"市场侧未配置安全管控"；
+ * 2. `securities.yaml` 自 2026-10-17 起为必填文件，左侧恒有两个文件、**可切换**
+ *    （切换不发请求，两个文件都在详情里）；元数据「文件」行恒标出"均已同步"；
  * 3. **只读**：组件内不存在任何输入控件（`input`/`textarea`/`contenteditable`）与保存按钮；
  * 4. 删除走二次确认，成功后 emit `deleted`；失败留在页内且不 emit。
  */
@@ -25,9 +25,6 @@ const SECURITIES = 'securities:\n- action_name: CreatePurchaseRecord\n  confirm:
 
 function detail(overrides: Partial<OntologyDetail> = {}): OntologyDetail {
   return {
-    scenario: '生产调度',
-    ontology_dir: '原材料采购和库存',
-    name: '原材料采购和库存',
     metadata: {
       created_at: '2026-07-15 16:05:02',
       deployed_version: 'v1.0',
@@ -36,15 +33,13 @@ function detail(overrides: Partial<OntologyDetail> = {}): OntologyDetail {
       ontology_name: '原材料采购和库存',
       ontology_id: 1,
     },
-    source: 'onto_market:生产调度',
-    hash: 'h1',
-    has_securities: false,
+    ontology_hash: 'h1',
     installed_at: '2026-10-03T00:00:00.000Z',
     updated_at: '2026-10-03T00:00:00.000Z',
     content: YAML,
     size: YAML.length,
-    securities_content: null,
-    securities_size: 0,
+    securities_content: SECURITIES,
+    securities_size: SECURITIES.length,
     revision: 3,
     ...overrides,
   }
@@ -73,10 +68,13 @@ describe('OntologyViewer —— 只读展示（左文件列表 + 右正文）', 
     expect(head).toContain('ontology.yaml')
     expect(head).toContain('只读')
     expect(head).toContain(`${YAML.length} B`)
+    // 标题与卡片同一口径：`{场景名}-{本体名}`（2026-10-17）
+    expect(wrapper.find('#ontology-viewer-title').text()).toBe('生产调度-原材料采购和库存')
     // 元数据两列 dl：场景 / 本体 / 创建时间 / 部署版本 / 来源 / 安装·更新 / 文件 / 修改方式
     expect(wrapper.text()).toContain('2026-07-15 16:05:02')
     expect(wrapper.text()).toContain('生产调度（ID 1）')
-    expect(wrapper.text()).toContain('onto_market:生产调度')
+    // 来源不再是服务端字段（2026-10-17）：固定展示"本体市场"
+    expect(wrapper.text()).toContain('本体市场')
     expect(wrapper.text()).toContain('本体是市场快照，平台只读')
   })
 
@@ -87,14 +85,8 @@ describe('OntologyViewer —— 只读展示（左文件列表 + 右正文）', 
     expect(wrapper.text()).not.toContain('保存')
   })
 
-  it('已同步 securities.yaml → 左侧两个文件、可切换；切换后展示其全文与大小', async () => {
-    const wrapper = mountViewer(
-      detail({
-        has_securities: true,
-        securities_content: SECURITIES,
-        securities_size: SECURITIES.length,
-      }),
-    )
+  it('securities.yaml 恒在左侧、可切换；切换后展示其全文与大小', async () => {
+    const wrapper = mountViewer()
 
     // 左侧列表：两个文件都在
     expect(fileButton(wrapper, 'ontology.yaml')).toBeTruthy()
@@ -112,22 +104,8 @@ describe('OntologyViewer —— 只读展示（左文件列表 + 右正文）', 
     expect(wrapper.find('[data-test="file-content"]').element.textContent).toBe(YAML)
   })
 
-  it('未同步 securities.yaml → 左侧只有本体正文一行，元数据「文件」行说明"市场侧未配置"', () => {
+  it('元数据「文件」行恒标出两个文件（均已同步）', () => {
     const wrapper = mountViewer()
-
-    expect(fileButton(wrapper, 'ontology.yaml')).toBeTruthy()
-    expect(fileButton(wrapper, 'securities.yaml')).toBeUndefined()
-    expect(wrapper.text()).toContain('仅 ontology.yaml（市场侧未配置安全管控）')
-  })
-
-  it('已同步时元数据「文件」行标出两个文件（均已同步）', () => {
-    const wrapper = mountViewer(
-      detail({
-        has_securities: true,
-        securities_content: SECURITIES,
-        securities_size: SECURITIES.length,
-      }),
-    )
 
     expect(wrapper.text()).toContain('ontology.yaml + securities.yaml（均已同步）')
   })
@@ -141,17 +119,20 @@ describe('OntologyViewer —— 只读展示（左文件列表 + 右正文）', 
 })
 
 describe('OntologyViewer —— 删除', () => {
-  it('二次确认后删除：按 (目录名, 场景) 调用并 emit deleted', async () => {
+  it('二次确认后删除：按 (场景名, 本体名) 调用并 emit deleted', async () => {
     deleteOntology.mockResolvedValue(undefined)
     const wrapper = mountViewer()
 
     await wrapper.find('[data-test="delete"]').trigger('click')
     expect(wrapper.find('[data-test="confirm"]').exists()).toBe(true)
+    // 二次确认里同样用 `{场景名}-{本体名}`，避免删错同名本体
+    expect(wrapper.text()).toContain('删除本体 生产调度-原材料采购和库存')
 
     await wrapper.find('[data-test="confirm"]').trigger('click')
     await flushPromises()
 
-    expect(deleteOntology).toHaveBeenCalledWith('原材料采购和库存', '生产调度')
+    // 参数顺序 (场景名, 本体名)，与 URL 两段、与 metadata 一致
+    expect(deleteOntology).toHaveBeenCalledWith('生产调度', '原材料采购和库存')
     expect(wrapper.emitted('deleted')).toHaveLength(1)
   })
 

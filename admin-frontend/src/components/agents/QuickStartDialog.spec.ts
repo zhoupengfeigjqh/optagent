@@ -73,6 +73,14 @@ describe('QuickStartDialog —— 问题实例条目的紧凑布局', () => {
     expect(input.attributes('rows')).toBe('1')
   })
 
+  it('内置工具候选用英文名在前、中文名在后（2026-10-17 与其它界面统一）', async () => {
+    const wrapper = await mountDialog()
+
+    const option = wrapper.find('[data-test="quick-start-tool-0-read_file"]')
+    expect(option.exists()).toBe(true)
+    expect(option.element.closest('label')?.textContent).toContain('read_file（读文件）')
+  })
+
   it('关联工具默认收起，summary 显示已选计数（收起也不丢信息）', async () => {
     const wrapper = await mountDialog()
     const details = wrapper.findAll('details.quick-start__tools')

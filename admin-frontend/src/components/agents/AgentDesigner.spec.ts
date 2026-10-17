@@ -6,6 +6,7 @@
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { OntologyCandidate } from '../../api/ontologies'
 import AgentDesigner from './AgentDesigner.vue'
 import { NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import type { AgentDesign } from '../../api/types'
@@ -35,12 +36,24 @@ const SOUL: AgentDesign['soul'] = {
   next_action_hints_count: 3,
 }
 
+const ONTOLOGY_CANDIDATE: OntologyCandidate = {
+  metadata: {
+    created_at: '2026-07-15 16:05:02',
+    deployed_version: 'v1.0',
+    scenario_name: '生产调度',
+    scenario_id: 1,
+    ontology_name: '原材料采购和库存',
+    ontology_id: 1,
+  },
+}
+
 const DESIGN: AgentDesign = {
   name: 'demo',
   soul: SOUL,
   enabled_tools: [],
   mcp_services: [],
   skills: [],
+  ontologies: [],
   scenario: {
     scenario: '生产',
     data_prep_dirs: ['生产计划'],
@@ -66,6 +79,7 @@ function mountDesigner(
       builtinToolsError: null,
       mcpServices: [],
       skills: [],
+      ontologies: [],
       initialTab: null,
     },
   })
@@ -79,10 +93,10 @@ beforeEach(() => {
 })
 
 describe('AgentDesigner', () => {
-  it('五类配置以分区（页签）承载，导航深度不超过两级（FR-016、FR-053）', () => {
+  it('配置以分区（页签）承载，导航深度不超过两级（FR-016、FR-053）', () => {
     const wrapper = mountDesigner()
     const tabs = wrapper.findAll('[role="tab"]').map((t) => t.text())
-    expect(tabs).toEqual(['SOUL', '内置工具', 'MCP 服务', 'SKILL', '文件空间场景'])
+    expect(tabs).toEqual(['SOUL', '内置工具', 'MCP 服务', 'SKILL', '本体', '文件空间场景'])
   })
 
   it('新建时标题为「新建数字人」，编辑时为设计态标题', async () => {
@@ -149,6 +163,37 @@ describe('AgentDesigner', () => {
     expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ name: '新数字人' })
   })
 
+  it('「本体」页签：候选显示 `{场景名}-{本体名}`，勾选后随保存提交引用值（2026-10-17）', async () => {
+    createAgent.mockResolvedValue({ ...DESIGN, name: '新数字人' })
+    const wrapper = mount(AgentDesigner, {
+      props: {
+        name: NEW_AGENT_SENTINEL,
+        design: null,
+        initial: { name: '新数字人', copyFrom: null },
+        builtinTools: [],
+        builtinToolsError: null,
+        mcpServices: [],
+        skills: [],
+        ontologies: [ONTOLOGY_CANDIDATE],
+        initialTab: 'ontologies',
+      },
+    })
+    await flushPromises()
+
+    // 显示名带场景：同名本体分属不同场景时才区分得开
+    expect(wrapper.text()).toContain('生产调度-原材料采购和库存')
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+
+    const save = wrapper.findAll('button').find((b) => b.text().includes('保存'))
+    await save?.trigger('click')
+    await flushPromises()
+
+    // 提交的是两段引用值（部署时按它定位库内目录），不是显示名
+    expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
+      ontologies: ['生产调度/原材料采购和库存'],
+    })
+  })
+
   it('保存失败：发出 error 且错误按码给出可读文案（不展示后端 message）', async () => {
     createAgent.mockRejectedValue({ code: 'ADM_AGENT_NAME_TAKEN', message: 'raw backend msg' })
     const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, { name: 'demo', copyFrom: null })
@@ -190,9 +235,10 @@ describe('AgentDesigner', () => {
         design: null,
         initial: null,
         builtinTools: [],
-        builtinToolsError: { code: 'ADM_RUNTIME_UNREACHABLE', message: 'x' },
+        builtinToolsError: 'ADM_RUNTIME_UNREACHABLE：运行环境不可达',
         mcpServices: [],
         skills: [],
+        ontologies: [],
         initialTab: 'tools',
       },
     })

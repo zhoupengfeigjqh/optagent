@@ -3,12 +3,12 @@
  * 数字人设计功能区（US1）。
  *
  * 两级导航：列表 ↔ 设计器（`FR-053`）。一级导航固定 4 项，本区内部深度不超过两级；
- * `tab` 承载五类配置的分区，不构成第三级导航。
+ * `tab` 承载配置分区（SOUL / 内置工具 / MCP 服务 / SKILL / 本体 / 文件空间场景），
+ * 不构成第三级导航。
  */
 import { onMounted, ref, watch } from 'vue'
-import { getAgent, listAgents } from '../../api/agents'
-import { listBuiltinTools } from '../../api/builtin-tools'
-import { http } from '../../api/http'
+import { getAgent, getAgentCatalog, listAgents } from '../../api/agents'
+import type { OntologyCandidate } from '../../api/ontologies'
 import type {
   AgentDesign,
   AgentListItem,
@@ -37,9 +37,12 @@ const listLoading = ref(false)
 
 /** 编辑器依赖的统一清单（`FR-019`：三类引用只能从清单中选择） */
 const builtinTools = ref<BuiltinTool[]>([])
-const builtinToolsError = ref<unknown>(null)
+/** 工具目录不可读的原因（`null` = 可读）；MCP / SKILL 候选不受此影响 */
+const builtinToolsError = ref<string | null>(null)
 const mcpServices = ref<McpServiceListItem[]>([])
 const skills = ref<SkillListItem[]>([])
+/** 本体候选（`§5.6`）：身份投影，不含正文 */
+const ontologies = ref<OntologyCandidate[]>([])
 
 const design = ref<AgentDesign | null>(null)
 
@@ -71,17 +74,26 @@ function onDeleted(name: string): void {
   emit('navigate', buildPath({ name: 'agents' }))
 }
 
+/**
+ * 取候选清单（§5.6，2026-10-17）。
+ *
+ * 改为一次性全量：原先直接调三张卡片列表并只取 `page=1`，库里第 9 个 SKILL / MCP
+ * 服务会**静默缺席**（服务端页大小写死 8 条）。工具不可读的降级原因由端点带回，
+ * 不拖累另外两类候选。
+ */
 async function loadCatalog(): Promise<void> {
   builtinToolsError.value = null
-  const [tools, mcp, skill] = await Promise.allSettled([
-    listBuiltinTools(),
-    http.get<Paged<McpServiceListItem>>('/api/admin/mcp/services', { page: 1 }),
-    http.get<Paged<SkillListItem>>('/api/admin/skills', { page: 1 }),
-  ])
-  if (tools.status === 'fulfilled') builtinTools.value = tools.value.items
-  else builtinToolsError.value = tools.reason
-  if (mcp.status === 'fulfilled') mcpServices.value = mcp.value.items
-  if (skill.status === 'fulfilled') skills.value = skill.value.items
+  try {
+    const catalog = await getAgentCatalog()
+    builtinTools.value = catalog.builtin_tools
+    builtinToolsError.value = catalog.builtin_tools_error
+    mcpServices.value = catalog.mcp_services
+    skills.value = catalog.skills
+    ontologies.value = catalog.ontologies
+  } catch (err) {
+    // 整体不可用（平台自身故障）：各类候选都取不到，提示保存会被拒绝
+    builtinToolsError.value = err instanceof Error ? err.message : String(err)
+  }
 }
 
 async function loadList(): Promise<void> {
@@ -135,6 +147,7 @@ watch(
       :builtin-tools-error="builtinToolsError"
       :mcp-services="mcpServices"
       :skills="skills"
+      :ontologies="ontologies"
       :initial-tab="tab"
       @back="backToList"
       @saved="

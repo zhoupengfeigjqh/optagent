@@ -79,7 +79,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
   const writer = new OptAgentWriter({ optAgentRoot: config.optAgentRoot, logger: loggers.logger });
-  const catalog = new UnifiedCatalog({ runtime, mcpConfigs, skills, logger: loggers.logger });
+  const catalog = new UnifiedCatalog({
+    runtime,
+    mcpConfigs,
+    skills,
+    ontologies,
+    logger: loggers.logger,
+  });
   const mcpClient = options.mcpClient ?? new McpClientService({ timeoutMs: config.mcpTimeoutMs });
 
   /** 引用某 MCP 服务的「用户 × 数字人」对（§3.2/§3.3 的影响面） */
@@ -124,6 +130,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       users,
       mcpConfigs,
       skills,
+      ontologies,
       catalog,
       writer,
       manifest,

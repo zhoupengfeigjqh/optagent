@@ -4,23 +4,22 @@
  * 市场目录形态（实测）：
  * ```text
  * {root}/{场景名}/{本体名}/ontology.yaml      ← 导入（必需）
- *                          ├── securities.yaml  ← 导入（可选：行为安全管控）
+ *                          ├── securities.yaml  ← 导入（必需：行为安全管控）
  *                          ├── data_engines.yaml / meta.json
  *                          ├── functions/、ontology_versions/、skills/
  * ```
  *
- * 产品决策（2026-10-03）：导入 **`ontology.yaml` + `securities.yaml`** 两个文件——
- * 前者回答"本体是什么"（卡片 metadata 只存在于此），后者承载**行为安全管控**
+ * 产品决策（2026-10-03，2026-10-17 收紧）：导入 **`ontology.yaml` + `securities.yaml`**
+ * 两个文件——前者回答"本体是什么"（卡片 metadata 只存在于此），后者承载**行为安全管控**
  * （`confirm` 需人工确认 / `confirm_content` 弹窗文案 / `scope` 权限范围），
  * 平台的 HITL 配置要与之对齐就得先把它同步进库。其余一律不搬：
  * `functions/`（算法脚本）、`ontology_versions/`（历史版本）、`skills/`（已由共享技能库
  * 独立管理）、`data_engines.yaml` / `meta.json`。
  *
  * 因此：
- * - 「市场是否变化」= **两个文件的 sha256 是否都与库内记录一致**：任一不同即 `changed`。
- *   按整包口径可覆盖两种情况——正文改了、安全管控改了（或从无到有）；
- * - 缺 `securities.yaml` **不是** `invalid`：本体可以不配安全管控（实测 4 个本体里
- *   只有 1 个有该文件），缺失只意味着"库内 `securities_hash = null`"；
+ * - 「市场是否变化」= **两个文件的 sha256 是否都与库内记录一致**：任一不同即 `changed`；
+ * - **缺任一文件即 `invalid`**（2026-10-17）：两个文件都是本体快照的组成部分，
+ *   只导入正文会让"库内 = 市场快照"这一不变式不成立，故缺 `securities.yaml` 不可导入；
  * - 单文件原子写（`store.writeText`）即可，无需目录级改名；
  * - 与技能库不同，这里**没有 `conflict` 状态**：本体没有 ZIP 上传等第二个来源，
  *   库内记录必然来自本市场；也没有"人工修改确认"——本体只读、无本地编辑通道。
@@ -29,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import { ontologyDisplayName, parseOntologyMetadata, type OntologyMetadata } from './metadata.js';
+import { parseOntologyMetadata, type OntologyMetadata } from './metadata.js';
 import {
   MAX_ONTOLOGY_BYTES,
   ONTOLOGY_FILE,
@@ -43,21 +42,22 @@ import {
 export type OntologyMarketStatus = 'new' | 'unchanged' | 'changed' | 'invalid';
 
 export interface OntologyMarketItem {
+  /** 市场一级目录名（文件系统事实，用于读取与定位） */
   scenario: string;
+  /** 市场二级目录名（文件系统事实） */
   ontology_dir: string;
-  /** `metadata.ontology_name`；解析失败为 `null`（该条不可导入） */
-  name: string | null;
+  /** 本体元信息；解析失败为 `null`（该条不可导入，展示时兜底用目录名） */
   metadata: OntologyMetadata | null;
+  /** 展示名：取自 `metadata.ontology_name`，解析失败为 `null`（界面兜底用目录名） */
+  name: string | null;
   /** `ontology.yaml` 字节数 */
   size: number;
-  /** `ontology.yaml` 的 sha256（导入后记入库内记录的 `hash`） */
-  hash: string;
-  /** 市场侧是否有 `securities.yaml`（缺省 = 该本体未配置行为安全管控） */
-  has_securities: boolean;
-  /** `securities.yaml` 字节数；无该文件为 0 */
+  /** `ontology.yaml` 的 sha256（导入后记入库内记录的 `ontology_hash`） */
+  ontology_hash: string;
+  /** `securities.yaml` 字节数 */
   securities_size: number;
-  /** `securities.yaml` 的 sha256；无该文件为 `null`（导入后记入库内记录的 `securities_hash`） */
-  securities_hash: string | null;
+  /** `securities.yaml` 的 sha256（导入后记入库内记录的 `securities_hash`） */
+  securities_hash: string;
   status: OntologyMarketStatus;
   invalid_reason: string | null;
 }
@@ -79,14 +79,14 @@ export interface OntologyMarketRef {
 export interface MarketOntologyPackage {
   scenario: string;
   ontology_dir: string;
-  name: string;
   metadata: OntologyMetadata;
   content: string;
   size: number;
-  hash: string;
-  /** `securities.yaml` 全文；市场侧没有该文件为 `null` */
-  securities: string | null;
-  securitiesHash: string | null;
+  /** `ontology.yaml` 的内容指纹（内部字段；落索引时叫 `ontology_hash`） */
+  ontologyHash: string;
+  /** `securities.yaml` 全文（必填文件） */
+  securities: string;
+  securitiesHash: string;
 }
 
 function invalid(message: string): ApiError {
@@ -100,11 +100,6 @@ function readFileChecked(file: string): { content: string; size: number } {
     throw invalid(`${path.basename(file)} 超过单文件上限（${MAX_ONTOLOGY_BYTES} 字节，实际 ${stat.size}）`);
   }
   return { content: fs.readFileSync(file, 'utf8'), size: stat.size };
-}
-
-/** 读取**可选**文件（不存在 → `null`；存在但超限 → 抛可读错） */
-function readOptionalFile(file: string): { content: string; size: number } | null {
-  return fs.existsSync(file) ? readFileChecked(file) : null;
 }
 
 /** 扫描市场：只处理**存在 `ontology.yaml` 的二级目录**；单条格式问题不拖垮整个列表 */
@@ -125,17 +120,20 @@ function scanMarketOntologies(root: string): OntologyMarketItem[] {
         }
         const { content, size } = readFileChecked(file);
         const metadata = parseOntologyMetadata(content);
-        // 安全管控可选：缺失即 `has_securities: false`（不是错误，不影响可导入性）
-        const securities = readOptionalFile(path.join(dir, SECURITIES_FILE));
+        // 两个文件都是本体快照的组成部分：缺 securities.yaml 同属"不完整"，不可导入
+        const securitiesFile = path.join(dir, SECURITIES_FILE);
+        if (!fs.existsSync(securitiesFile)) {
+          throw invalid(`本体目录缺少 ${SECURITIES_FILE}（行为安全管控为必需文件）`);
+        }
+        const securities = readFileChecked(securitiesFile);
         items.push({
           ...base,
-          name: ontologyDisplayName(metadata, ontologyEntry.name),
           metadata,
+          name: metadata.ontology_name,
           size,
-          hash: contentHash(content),
-          has_securities: securities !== null,
-          securities_size: securities?.size ?? 0,
-          securities_hash: securities === null ? null : contentHash(securities.content),
+          ontology_hash: contentHash(content),
+          securities_size: securities.size,
+          securities_hash: contentHash(securities.content),
           status: 'new',
           invalid_reason: null,
         });
@@ -143,13 +141,12 @@ function scanMarketOntologies(root: string): OntologyMarketItem[] {
         // 单条无效只影响它自己（标 invalid 并给出原因），其余照常可导入（FR-009）
         items.push({
           ...base,
-          name: null,
           metadata: null,
+          name: null,
           size: 0,
-          hash: '',
-          has_securities: false,
+          ontology_hash: '',
           securities_size: 0,
-          securities_hash: null,
+          securities_hash: '',
           status: 'invalid',
           invalid_reason: err instanceof Error ? err.message : String(err),
         });
@@ -163,8 +160,8 @@ function scanMarketOntologies(root: string): OntologyMarketItem[] {
  * 列出市场上可导入的本体，并按库内现状标注差异状态：
  * - `new`：库内没有（场景 + 目录名）这条记录，可导入；
  * - `unchanged`：已导入且**两个基准文件**都无变化（不可重复导入）；
- * - `changed`：已导入但任一个基准文件已变化（`ontology.yaml` 或 `securities.yaml`，
- *   含"市场新增了安全管控文件而库内还没有"）→ 可经"更新"整包替换；
+ * - `changed`：已导入但任一个基准文件已变化（`ontology.yaml` 或 `securities.yaml`）
+ *   → 可经"更新"整包替换；
  * - `invalid`：市场侧 `ontology.yaml` 缺失/超限/YAML 无效（原因见 `invalid_reason`）。
  */
 export function listOntoMarketOntologies(
@@ -198,9 +195,9 @@ export function listOntoMarketOntologies(
       if (item.status === 'invalid') return item;
       const record = ontologies.find(item.scenario, item.ontology_dir);
       if (!record) return { ...item, status: 'new' as const };
-      // 两个基准文件全部一致才算"无变化"：正文或安全管控任一改动（含新增/移除）都是 changed
-      const sameSecurities = (record.securities_hash ?? null) === (item.securities_hash ?? null);
-      const unchanged = record.hash === item.hash && sameSecurities;
+      // 两个基准文件全部一致才算"无变化"：正文或安全管控任一改动都是 changed
+      const sameSecurities = record.securities_hash === item.securities_hash;
+      const unchanged = record.ontology_hash === item.ontology_hash && sameSecurities;
       return { ...item, status: unchanged ? ('unchanged' as const) : ('changed' as const) };
     }),
   };
@@ -224,17 +221,22 @@ export function readMarketOntology(root: string | null, ref: OntologyMarketRef):
   }
   const { content, size } = readFileChecked(file);
   const metadata = parseOntologyMetadata(content);
-  const securities = readOptionalFile(path.join(dir, SECURITIES_FILE));
+  const securitiesFile = path.join(dir, SECURITIES_FILE);
+  if (!fs.existsSync(securitiesFile)) {
+    throw invalid(
+      `本体市场里缺少该本体的 ${SECURITIES_FILE}（行为安全管控为必需文件）：${ref.scenario}/${ref.ontology_dir}`,
+    );
+  }
+  const securities = readFileChecked(securitiesFile);
   return {
     scenario: ref.scenario,
     ontology_dir: ref.ontology_dir,
-    name: ontologyDisplayName(metadata, ref.ontology_dir),
     metadata,
     content,
     size,
-    hash: contentHash(content),
-    securities: securities?.content ?? null,
-    securitiesHash: securities === null ? null : contentHash(securities.content),
+    ontologyHash: contentHash(content),
+    securities: securities.content,
+    securitiesHash: contentHash(securities.content),
   };
 }
 

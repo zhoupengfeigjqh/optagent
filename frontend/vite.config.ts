@@ -47,9 +47,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: ['src/api/**/*.ts', 'src/composables/**/*.ts', 'src/utils/**/*.ts'],
-      // `src/api/types.ts` 为纯类型声明（无运行期语句），计入分母无意义——与后端
-      // `vitest.config.ts` 排除 `src/types.ts` 同口径。
-      exclude: ['src/**/*.spec.ts', 'src/api/types.ts'],
+      // `src/api/types.ts` 与 `src/composables/useChatStream.types.ts` 均为纯类型声明
+      // （无运行期语句），计入分母无意义——与后端 `vitest.config.ts` 排除 `src/types.ts` 同口径。
+      // 后者由 010（2026-10-16）为「契约与实现分离」拆出，与前者同性质：无可测行为。
+      exclude: [
+        'src/**/*.spec.ts',
+        'src/api/types.ts',
+        'src/composables/useChatStream.types.ts',
+      ],
       // 宪章原则三：核心逻辑覆盖率 ≥ 80%
       //
       // 分两层（与 `agent-backend/vitest.config.ts` 同口径）：
@@ -59,19 +64,26 @@ export default defineConfig({
       // 为什么不设全局 80%：`src/api/**`（7 个）与 `src/composables/**`（13 个）共 20 个模块尚无测试，
       // 而宪章「治理 § 适用范围与不追溯」禁止为存量代码发起覆盖率补齐专项，
       // 设全局 80% 只会得到一个长期红灯（红灯久了等同没有门禁）。
+      // 010（2026-10-16）新增与拆出的模块**全部配了同名测试**，故该缺口数量不变（仍是 20）——
+      // `useChatStream.ts` / `useChatPanel.ts` / `useThreads.ts` 属那 20 个之列，
+      // 本次只覆盖了改动到的行为，整体分支/函数口径仍低于 80%，故**不登记模块阈值**
+      // （登记即等于发起存量补齐专项）；其改动行为的覆盖证据见 `specs/010-*/tasks.md` 执行记录。
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 60.05 / branch 64.98 / funcs 49.20 / lines 59.36
-        //    （007「下一步动作提示」增量：新增 `utils/next-steps` / `api/next-steps` /
-        //     `composables/useNextSteps` 三个模块并补测至满覆盖，整体上行，地板随之抬到实测值略下方；
-        //     上一版为 53/59/42/52 @ 2026-10-12（`@` 引用浮层与 HITL 口径统一），
-        //     再上一版 48/55/38/47 @ 2026-10-08，45/52/34/44 @ 2026-09-23）
+        // ① 全局地板（防倒退）。2026-10-16 实测（011 增量后）：stmts 79.01 / branch 76.89 / funcs 70.72 / lines 79.77
+        //    （011「预览面板放大 / 缩小」：新增 `useMaximizeEscape` 模块并补测至 96%+，另补齐
+        //     `AppShell` / `BaseIcon` 两个改动文件此前缺失的同名测试，整体小幅上行，地板随之抬到实测值略下方；
+        //     上一版为 76/74/66/77 @ 2026-10-16（010「聊天消息渲染与会话导出」：新增 `markdown` /
+        //     `export-thread` / `download` / `useThrottledText` 四个模块并补测，另由三个超限文件的拆分
+        //     产出 6 个模块并补测至 87%~100%，实测 78.01/75.87/68.80/78.69；
+        //     再上一版 59/63/48/58 @ 2026-10-12（007「下一步动作提示」），
+        //     更早 53/59/42/52 @ 2026-10-12，48/55/38/47 @ 2026-10-08，45/52/34/44 @ 2026-09-23）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 59,
-        branches: 63,
-        functions: 48,
-        lines: 58,
+        statements: 77,
+        branches: 75,
+        functions: 69,
+        lines: 78,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -106,8 +118,16 @@ export default defineConfig({
         // 同源地址「能否内联渲染」预检（2026-10-15）：读响应头判定 iframe 渲染 / 下载入口
         'src/utils/preview-probe.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         // 右侧面板状态机（2026-10-15）：异源直跳 / 同源预检 / 本地文件按扩展名预览的分流
-        // 实测 92.63 / 80.48 / 90.90 / 92.55（`src/composables/usePreview.spec.ts`）
+        // 2026-10-16（011）新增放大态与"可放大判据"后实测 94.69 / 84.90 / 100 / 94.59
+        // （上一版 92.63 / 80.48 / 90.90 / 92.55；均由 `src/composables/usePreview.spec.ts` 覆盖）
         'src/composables/usePreview.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        // 放大态的 Esc 两种载体（2026-10-16，011）：本页捕获监听 + 同源 iframe 文档转发
+        'src/composables/useMaximizeEscape.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 96.55 / 95.45 / 100 / 96.29
         // `@` 引用浮层（2026-10-12，FR-102~106 / TR-01~02）：坐标计算纯函数 + 光标测量
         'src/utils/popup-position.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
         'src/utils/caret-rect.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 92.85 / 100 / 100
@@ -120,6 +140,50 @@ export default defineConfig({
           lines: 80,
         }, // 100 / 100 / 100 / 100
         'src/api/next-steps.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        // 聊天消息渲染与会话导出（2026-10-16，010）：最小 Markdown 子集 / 分段切分 /
+        // 导出文本映射 / 下载落盘 / 流式渲染影子（阈值一律取宪章下限 80%，实测值备查）
+        'src/utils/markdown.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 95.09 / 91 / 100 / 98.62
+        'src/utils/export-thread.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 96.55 / 100 / 100
+        'src/utils/download.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
+        'src/composables/useThrottledText.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 90.47 / 87.5 / 100 / 90
+        // 010 由三个超限文件拆分产出（2026-10-16）：滚动跟随与位置记忆 / HITL 闸门 /
+        // 草稿分桶 / 存储读写 / `@` 引用接线 / 卡片确认弹窗
+        'src/composables/useMessageScroll.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 94.94 / 80.39 / 100 / 100
+        'src/composables/useInteractionGate.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 100 / 100 / 100 / 100
+        'src/composables/useThreadDrafts.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 93.33 / 90.9 / 100 / 100
+        'src/utils/thinking-storage.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 87.5 / 100 / 100 / 87.5
+        'src/composables/useMentionComposer.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 100 / 100 / 100 / 100
+        'src/composables/useNextStepPrompt.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        }, // 100 / 100 / 100 / 100
       },
     },
   },

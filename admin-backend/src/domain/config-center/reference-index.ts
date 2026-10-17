@@ -11,6 +11,13 @@ export interface ReferenceIndex {
   /** SKILL（来自共享技能库，`FR-036`） */
   skills: ReadonlySet<string>;
   /**
+   * 本体（来自本体库，`FR-058`，2026-10-17）。
+   *
+   * 键形如 `"{metadata.scenario_name}/{metadata.ontology_name}"`——与部署路径
+   * `ontology/{场景}/{本体}/` 的两段完全一致；同名本体可存在于不同场景，故不能只用本体名。
+   */
+  ontologies: ReadonlySet<string>;
+  /**
    * MCP 服务名 → 该服务的**可见工具**（`allowed_tools` 白名单）。
    *
    * 004 新增：数字人"问题实例"的关联工具允许引用 MCP 工具，判据是
@@ -25,6 +32,8 @@ export interface ReferenceIndexInput {
   builtinTools: Iterable<string>;
   mcpServices: Iterable<string>;
   skills: Iterable<string>;
+  /** 本体（`"场景名/本体名"`）。可选：不关心本体的调用方（如单测）可以不给 */
+  ontologies?: Iterable<string>;
   /**
    * 服务 → 可见工具（004）。**可选**：不关心 MCP 工具粒度的调用方（如只校验三类引用的场景）
    * 可以不给，此时 `mcpTools` 为空映射——只影响问题实例的工具关联校验。
@@ -37,6 +46,7 @@ export function createReferenceIndex(input: ReferenceIndexInput): ReferenceIndex
     builtinTools: new Set(input.builtinTools),
     mcpServices: new Set(input.mcpServices),
     skills: new Set(input.skills),
+    ontologies: new Set(input.ontologies ?? []),
     mcpTools: new Map([...(input.mcpTools ?? [])].map(([name, tools]) => [name, new Set(tools)])),
   };
 }
@@ -46,5 +56,6 @@ export const EMPTY_REFERENCE_INDEX: ReferenceIndex = createReferenceIndex({
   builtinTools: [],
   mcpServices: [],
   skills: [],
+  ontologies: [],
   mcpTools: [],
 });

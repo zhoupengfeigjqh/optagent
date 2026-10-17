@@ -97,3 +97,27 @@ describe('buildBuiltinTools —— read_skill 接线', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+describe('buildBuiltinTools —— grep_skill 接线（2026-10-17 新增）', () => {
+  it('启用后能在技能内容中检索，命中行带技能名与路径', async () => {
+    const tools = build(['grep_skill']);
+    expect(tools.map((tool) => tool.name)).toEqual(['grep_skill']);
+
+    expect(await run(tools[0]!, { pattern: '调度算法' })).toContain('调度算法/SKILL.md:1');
+    // 限定技能与缺省全量两条路径都通
+    expect(await run(tools[0]!, { pattern: '详解', skill: '调度算法' })).toContain(
+      '调度算法/references/算法详解.md',
+    );
+  });
+
+  it('越权（非法技能名）→ 拒绝文案交给模型，同时记 alert 日志（与 read_skill 同口径）', async () => {
+    const tools = build(['grep_skill']);
+    const text = await run(tools[0]!, { pattern: 'x', skill: '../调度算法' });
+
+    expect(text).toContain('技能文件访问被拒绝');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ alert: true, event: 'file.access.denied', tool: 'grep_skill' }),
+      expect.stringContaining('越权被拒绝'),
+    );
+  });
+});

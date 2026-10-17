@@ -12,7 +12,7 @@
  * 本视图自身的行为，故不装配它们。
  */
 import { flushPromises, mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { computed, defineComponent, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RUN_PHASE } from '@/constants/events'
 import WorkbenchView from './WorkbenchView.vue'
@@ -22,11 +22,34 @@ const h = vi.hoisted(() => ({ session: null as unknown }))
 
 vi.mock('@/composables/useAppSession', () => ({ useSession: () => h.session }))
 
+/** 中栏桩的挂载次数：012 的"不打扰"要求放大 / 缩回**不重建**中栏（草稿与滚动位置在它里面） */
+let chatMounts = 0
+
+const ChatPanelStub = defineComponent({
+  name: 'ChatPanel',
+  props: { expanded: Boolean },
+  setup() {
+    chatMounts += 1
+    return {}
+  },
+  template: '<div class="chat-stub" />',
+})
+
 const stubs = {
   // `AppShell` 必须**渲染插槽**：三栏内容都经它的具名插槽下发，
   // 布尔桩不渲染插槽 ⇒ 子树（含侧栏）根本不挂载，也就无法派发事件。
-  // 只渲染 `history`：其余两栏的插槽表达式需要更完整的 mock，与本文件用例无关。
-  AppShell: { name: 'AppShell', template: '<div><slot name="history" /></div>' },
+  // `preview` 一并渲染：011 的放大接线要经右栏回到会话态（`data-maximized` 暴露收到的 prop）。
+  AppShell: {
+    name: 'AppShell',
+    props: { previewOpen: Boolean, previewMaximized: Boolean },
+    template: [
+      '<div class="shell-stub" :data-maximized="String(previewMaximized)">',
+      '<slot name="history" />',
+      '<slot name="chat" />',
+      '<slot name="preview" />',
+      '</div>',
+    ].join(''),
+  },
   // 侧栏用一个"点得出版本事件"的微型桩，用于验证视图的事件接线
   HistorySidebar: {
     name: 'HistorySidebar',
@@ -38,8 +61,18 @@ const stubs = {
       '</aside>',
     ].join(''),
   },
-  ChatPanel: true,
-  WorkspacePanel: true,
+  ChatPanel: ChatPanelStub,
+  // 右栏桩：把「放大入口」与「Esc 请求退出」都做成点得出来的按钮（011 接线用）
+  WorkspacePanel: {
+    name: 'WorkspacePanel',
+    props: { maximizeVisible: Boolean, maximized: Boolean },
+    template: [
+      '<div class="panel-stub">',
+      '<button v-if="maximizeVisible" class="panel-toggle" @click="$emit(\'toggle-maximize\')" />',
+      '<button v-if="maximized" class="panel-restore" @click="$emit(\'restore-maximize\')" />',
+      '</div>',
+    ].join(''),
+  },
   ToastHost: true,
   ConfirmDialog: true,
 }
@@ -48,6 +81,9 @@ const stubs = {
 function makeSession(initialThreadId: string | null, threadIds: string[]) {
   // 与真实装配同起点：装配期 ref 为 null，恢复是"事后"由 select 写入（见 useAppSession）
   const activeThreadId = ref<string | null>(null)
+  // 011：放大态的三个派生值与两个动作，按真实 `usePreview` 的语义模拟（懒切换、退出幂等）
+  const maximized = ref(false)
+  const maximizable = ref(false)
   return {
     initialThreadId,
     rememberActiveThread: vi.fn(),
@@ -78,13 +114,35 @@ function makeSession(initialThreadId: string | null, threadIds: string[]) {
     chat: { phase: ref<string>(RUN_PHASE.IDLE) },
     preview: {
       open: ref(false),
+      // 右栏插槽现在会被渲染（011 的接线要经它回来），故列表态 / 内容态字段也要齐
+      view: ref<string>('list'),
+      target: ref({ kind: 'none' }),
+      content: ref<unknown>(null),
+      loading: ref(false),
+      maximized,
+      maximizable,
+      maximizeToggleVisible: computed(() => maximized.value || maximizable.value),
+      toggleMaximize: vi.fn(() => {
+        maximized.value = !maximized.value
+      }),
+      restoreMaximize: vi.fn(() => {
+        maximized.value = false
+      }),
       close: vi.fn(),
       backToList: vi.fn(),
       openFile: vi.fn(),
       download: vi.fn(),
       onFileRemoved: vi.fn(),
     },
-    workspace: { toggleSpace: vi.fn(), toggleDir: vi.fn(), remove: vi.fn() },
+    workspace: {
+      spaces: ref([]),
+      expandedSpaces: ref([]),
+      expandedDirs: ref([]),
+      loading: ref(false),
+      toggleSpace: vi.fn(),
+      toggleDir: vi.fn(),
+      remove: vi.fn(),
+    },
     toast: { items: ref([]), dismiss: vi.fn(), runAction: vi.fn() },
   }
 }
@@ -252,6 +310,95 @@ describe('WorkbenchView —— 会话重命名 / 导出（2026-10-16）', () => 
     clickSpy.mockRestore()
     URL.createObjectURL = originalCreate
     URL.revokeObjectURL = originalRevoke
+    wrapper.unmount()
+  })
+})
+
+/**
+ * 预览面板的放大 / 缩小接线（2026-10-16，011）。
+ *
+ * 本视图只做**转发**：状态与判据都在会话态（`usePreview`），这里断言的是
+ * "面板的点按到达会话态"与"放大态到达骨架"这两段线接对了——判据本身在
+ * `usePreview.spec.ts` 的 8 例矩阵里测（FR-010 的单一实现）。
+ */
+describe('WorkbenchView —— 放大 / 缩小接线（011）', () => {
+  it('可放大内容下入口出现；点击转交 `preview.toggleMaximize`，放大态再回传给骨架', async () => {
+    const session = makeSession(null, ['t1'])
+    session.preview.maximizable.value = true
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.shell-stub').attributes('data-maximized')).toBe('false')
+    expect(wrapper.find('.panel-toggle').exists()).toBe(true)
+
+    await wrapper.find('.panel-toggle').trigger('click')
+    await flushPromises()
+
+    expect(session.preview.toggleMaximize).toHaveBeenCalledTimes(1)
+    expect(session.preview.maximized.value).toBe(true)
+    expect(wrapper.find('.shell-stub').attributes('data-maximized')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('不可放大且未放大时入口不渲染（范围内外只由会话态决定，本视图不判第二遍）', async () => {
+    const session = makeSession(null, ['t1'])
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.panel-toggle').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('已经处于放大态时入口仍在（放大态下切到加载中的目标也不能丢了出口，FR-005）', async () => {
+    const session = makeSession(null, ['t1'])
+    session.preview.maximized.value = true
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.panel-toggle').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('面板请求退出（Esc）→ 转交 `preview.restoreMaximize`，架子随即收到非放大态', async () => {
+    const session = makeSession(null, ['t1'])
+    session.preview.maximized.value = true
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.panel-restore').trigger('click')
+    await flushPromises()
+
+    expect(session.preview.restoreMaximize).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.shell-stub').attributes('data-maximized')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('放大 / 缩回**不重建**中栏：草稿与滚动位置所在的那棵树原地不动（FR-030）', async () => {
+    const session = makeSession(null, ['t1'])
+    session.preview.maximizable.value = true
+    h.session = session
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const mountsBefore = chatMounts
+    const chatNode = wrapper.find('.chat-stub').element
+
+    await wrapper.find('.panel-toggle').trigger('click')
+    await flushPromises()
+    await wrapper.find('.panel-restore').trigger('click')
+    await flushPromises()
+
+    expect(chatMounts).toBe(mountsBefore)
+    expect(wrapper.find('.chat-stub').element).toBe(chatNode)
     wrapper.unmount()
   })
 })

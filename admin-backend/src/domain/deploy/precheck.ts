@@ -53,6 +53,14 @@ export interface PrecheckInput {
   toolsUnavailableReason: string | null;
   /** 目标目录是否可写（注入以便单测；缺省用 fs 探测） */
   isWritable(userId: string): boolean;
+  /**
+   * 本体库内快照的完整性检查（2026-10-17）：返回缺失文件的可读原因，完整返回 `null`。
+   *
+   * 名称存在于索引**不等于**文件齐备（手删过、旧口径导入的残缺快照）；
+   * 不在这里拦，物化阶段会在部署循环中途抛错，变成"部分用户已写、部分失败"。
+   * 可选：不关心本体的单测可以不提供。
+   */
+  ontologyIssue?(ontologyRef: string): string | null;
 }
 
 export function runPrecheck(input: PrecheckInput): PrecheckError[] {
@@ -117,7 +125,7 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
           message: `数字人 ${agentName} 的 SOUL 为空`,
         });
       }
-      for (const field of ['enabled_tools', 'mcp_services', 'skills'] as const) {
+      for (const field of ['enabled_tools', 'mcp_services', 'skills', 'ontologies'] as const) {
         if (!Array.isArray(design[field])) {
           errors.push({
             user_id: user.user_id,
@@ -183,6 +191,7 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
             enabled_tools: design.enabled_tools ?? [],
             mcp_services: design.mcp_services ?? [],
             skills: design.skills ?? [],
+            ontologies: design.ontologies ?? [],
           },
           input.index,
         )) {
@@ -194,6 +203,22 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
             message: anomaly.detail,
             detail: anomaly.target_name,
           });
+        }
+
+        // 本体库内快照完整性：名称有效不代表两个必需文件齐备
+        for (const ref of design.ontologies ?? []) {
+          if (!input.index.ontologies.has(ref)) continue; // 已由上面的引用有效性报告
+          const issue = input.ontologyIssue?.(ref) ?? null;
+          if (issue !== null) {
+            errors.push({
+              user_id: user.user_id,
+              agent_name: agentName,
+              category: 'reference_validity',
+              code: ERROR_CODES.ADM_ONTOLOGY_NOT_FOUND,
+              message: `本体 ${ref} 的文件不完整，无法部署`,
+              detail: issue,
+            });
+          }
         }
       }
     }

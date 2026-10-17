@@ -39,6 +39,13 @@ export interface AgentDesignDocument {
   enabled_tools: string[];
   mcp_services: string[];
   skills: string[];
+  /**
+   * 引用的本体（2026-10-17）：元素形如 `"{场景名}/{本体名}"`。
+   *
+   * 与部署路径 `ontology/{场景}/{本体}/` 的两段一致；两段都来自本体库索引的
+   * `metadata.scenario_name` / `metadata.ontology_name`（唯一来源）。
+   */
+  ontologies: string[];
   scenario: AgentScenario;
   updated_at: string;
 }
@@ -80,6 +87,7 @@ export interface AgentInputRaw {
   enabled_tools?: unknown;
   mcp_services?: unknown;
   skills?: unknown;
+  ontologies?: unknown;
   scenario?: unknown;
 }
 
@@ -114,10 +122,12 @@ export function validateAgentInput(
   const enabledTools = normalizeNameList(raw.enabled_tools, 'enabled_tools');
   const mcpServices = normalizeNameList(raw.mcp_services, 'mcp_services');
   const skills = normalizeNameList(raw.skills, 'skills');
+  const ontologies = normalizeOntologyList(raw.ontologies);
 
   rejectUnknown(enabledTools, options.index.builtinTools, '内置工具', '工具目录（FR-011）');
   rejectUnknown(mcpServices, options.index.mcpServices, 'MCP 服务', '平台 MCP 服务列表（FR-043）');
   rejectUnknown(skills, options.index.skills, 'SKILL', '共享技能库（FR-036）');
+  rejectUnknown(ontologies, options.index.ontologies, '本体', '本体库（FR-058）');
 
   // SOUL 结构化（004）：问题实例关联的工具只能引用**本次提交**的启用内置工具与
   // 已挂载 MCP 服务的可见工具，因此必须放在三类引用校验**之后**
@@ -132,6 +142,7 @@ export function validateAgentInput(
     enabled_tools: enabledTools,
     mcp_services: mcpServices,
     skills,
+    ontologies,
     scenario: normalizeScenario(raw.scenario),
   };
 }
@@ -151,6 +162,31 @@ function normalizeNameList(raw: unknown, field: string): string[] {
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${field} 含重复项：${item}`);
     }
     out.push(item);
+  }
+  return out;
+}
+
+/**
+ * 本体引用：元素必须是 `"{场景名}/{本体名}"`（与部署路径的两段一致）。
+ *
+ * 设计态 JSON 可被手工编辑，故这里独立校验形状：**恰好一个 `/`、两段非空、无重复**。
+ * 两段本身是否存在于本体库由 `rejectUnknown` 判定。
+ */
+function normalizeOntologyList(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const item of normalizeNameList(raw, 'ontologies')) {
+    const ref = item.trim();
+    const parts = ref.split('/');
+    if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `ontologies 的元素须为「场景名/本体名」：${JSON.stringify(item)}`,
+      );
+    }
+    if (out.includes(ref)) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `ontologies 含重复项：${ref}`);
+    }
+    out.push(ref);
   }
   return out;
 }
@@ -213,6 +249,7 @@ export class AgentDesignService {
       enabled_tools: doc.enabled_tools,
       mcp_services: doc.mcp_services,
       skills: doc.skills,
+      ontologies: doc.ontologies ?? [],
     }));
   }
 
@@ -225,9 +262,21 @@ export class AgentDesignService {
     return doc ? AgentDesignService.withDefaults(doc) : null;
   }
 
-  /** 读取归一化：历史字段补默认值（场景字段 + 结构化 SOUL） */
+  /** 读取归一化：历史字段补默认值（场景字段 + 结构化 SOUL + 本体引用） */
   private static withDefaults(doc: AgentDesignDocument): AgentDesignDocument {
-    return AgentDesignService.withSoulDefaults(AgentDesignService.withScenarioDefaults(doc));
+    return AgentDesignService.withSoulDefaults(
+      AgentDesignService.withOntologyDefaults(AgentDesignService.withScenarioDefaults(doc)),
+    );
+  }
+
+  /**
+   * 读取归一化（2026-10-17）：`ontologies` 引入前保存的文档补齐为 `[]`。
+   *
+   * 必须补：预检与前端都假定该键存在；不补的话存量数字人会在部署时报"字段缺失"，
+   * 这是最容易上线即炸的点。
+   */
+  private static withOntologyDefaults(doc: AgentDesignDocument): AgentDesignDocument {
+    return Array.isArray(doc.ontologies) ? doc : { ...doc, ontologies: [] };
   }
 
   /**

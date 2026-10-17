@@ -21,9 +21,6 @@ vi.mock('../../api/ontologies', () => ({
 
 function listItem(overrides: Partial<OntologyListItem> = {}): OntologyListItem {
   return {
-    scenario: '生产调度',
-    ontology_dir: '原材料采购和库存',
-    name: '原材料采购和库存',
     metadata: {
       created_at: '2026-07-15 16:05:02',
       deployed_version: 'v1.0',
@@ -32,9 +29,7 @@ function listItem(overrides: Partial<OntologyListItem> = {}): OntologyListItem {
       ontology_name: '原材料采购和库存',
       ontology_id: 1,
     },
-    source: 'onto_market:生产调度',
-    hash: 'h1',
-    has_securities: false,
+    ontology_hash: 'h1',
     installed_at: 't',
     updated_at: 't',
     ...overrides,
@@ -46,8 +41,8 @@ function detail(): OntologyDetail {
     ...listItem(),
     content: 'metadata:\n  deployed_version: v1.0\n',
     size: 32,
-    securities_content: null,
-    securities_size: 0,
+    securities_content: 'securities: []\n',
+    securities_size: 16,
     revision: 2,
   }
 }
@@ -80,7 +75,7 @@ describe('OntologyArea', () => {
     expect(wrapper.text()).toContain('从本体市场导入')
   })
 
-  it('点「查看」→ 导航路径带上目录名与场景名两段身份', async () => {
+  it('点「查看」→ 导航路径是 `{场景名}/{本体名}` 两段（场景在前）', async () => {
     listOntologies.mockResolvedValue({
       items: [listItem()],
       total: 1,
@@ -91,11 +86,12 @@ describe('OntologyArea', () => {
     const wrapper = mountArea()
     await flushPromises()
 
-    // 点卡片里的「查看」（工具栏第一个按钮是"从本体市场导入"，别选错）
-    await wrapper.find('[aria-label="查看本体 原材料采购和库存"]').trigger('click')
+    // 点卡片里的「查看」（工具栏第一个按钮是"从本体市场导入"，别选错；
+    // 卡片名称 2026-10-17 起为 `{场景名}-{本体名}`）
+    await wrapper.find('[aria-label="查看本体 生产调度-原材料采购和库存"]').trigger('click')
 
     expect(wrapper.emitted('navigate')?.[0]).toEqual([
-      `/ontology/${encodeURIComponent('原材料采购和库存')}?scenario=${encodeURIComponent('生产调度')}`,
+      `/ontology/${encodeURIComponent('生产调度')}/${encodeURIComponent('原材料采购和库存')}`,
     ])
   })
 
@@ -105,7 +101,8 @@ describe('OntologyArea', () => {
     const wrapper = mountArea({ detail: '原材料采购和库存', scenario: '生产调度' })
     await flushPromises()
 
-    expect(fetchOntology).toHaveBeenCalledWith('原材料采购和库存', '生产调度')
+    // 参数顺序 (场景名, 本体名)，与 URL 与 metadata 一致
+    expect(fetchOntology).toHaveBeenCalledWith('生产调度', '原材料采购和库存')
     expect(wrapper.find('[data-test="file-content"]').exists()).toBe(true)
   })
 

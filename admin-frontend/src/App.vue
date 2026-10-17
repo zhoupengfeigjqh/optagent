@@ -23,6 +23,19 @@ const areaLabel = computed(
   () => NAV_ITEMS.find((item) => item.name === route.value.name)?.label ?? '数字人管理平台',
 )
 
+/**
+ * 本体详情的两段身份（2026-10-17）：地址是 `/ontology/{场景名}/{本体名}`，
+ * 路由把两段合成 `detail`（`场景名/本体名`），这里拆成组件需要的两个 prop。
+ * 单段（历史地址）按"只有本体名、缺场景"处理——不加载详情，与缺参同一表现。
+ */
+const ontologyRef = computed<{ scenario: string | null; name: string | null }>(() => {
+  const detail = route.value.detail
+  if (!detail) return { scenario: null, name: null }
+  const index = detail.indexOf('/')
+  if (index < 0) return { scenario: null, name: detail }
+  return { scenario: detail.slice(0, index), name: detail.slice(index + 1) }
+})
+
 function navigateByName(name: RouteName): void {
   router.navigate(buildPath({ name }))
 }
@@ -61,9 +74,9 @@ onBeforeUnmount(() => router.destroy())
     />
     <OntologyArea
       v-else-if="route.name === 'ontology'"
-      :detail="route.detail"
+      :detail="ontologyRef.name"
       :tab="route.tab"
-      :scenario="route.query.scenario ?? null"
+      :scenario="ontologyRef.scenario"
       @navigate="navigateTo"
       @announce="announce"
     />

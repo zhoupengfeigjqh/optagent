@@ -10,7 +10,10 @@
  * ├── TOOL.json        ← { "enabled": [...] }
  * ├── MCP.json         ← { "servers": [ { name, transport, url|command, headers?, … } ] }
  * ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": [...] }
- * └── skills/{name}/…  ← 从共享技能库物化的整包副本
+ * ├── skills/{name}/…  ← 从共享技能库物化的整包副本
+ * └── ontology/{场景}/{本体}/
+ *     ├── ontology.yaml   ← 本体正文（从平台本体库原样复制，2026-10-17）
+ *     └── securities.yaml ← 行为安全管控（两个文件均为必需）
  * ```
  *
  * **整体覆盖**：本模块产出的是"该数字人应当具有的**完整**内容清单"，
@@ -27,11 +30,18 @@ import { scenarioFields, scenarioUploads, type AgentScenario } from '../config-c
 import { renderSoulMd } from '../config-center/soul-design.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
+import {
+  ONTOLOGY_FILE,
+  SECURITIES_FILE,
+  type OntologyStore,
+} from '../ontology/store.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
 
 export interface MaterializeContext {
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
+  /** 本体库（2026-10-17）：按引用把两个必需文件复制进数字人目录 */
+  ontologies: OntologyStore;
 }
 
 /** 构造 `MCP.json` 中的一条 server 声明（字段与运行环境的读取口径对齐） */
@@ -117,6 +127,19 @@ export function buildAgentArtifact(design: AgentDesignDocument, ctx: Materialize
     for (const file of ctx.skills.readFiles(skillName)) {
       files.push({ relPath: `skills/${skillName}/${file.path}`, content: file.content });
     }
+  }
+
+  // 本体（2026-10-17）：两个必需文件原样复制到 `ontology/{场景}/{本体}/`，
+  // 与 `skills/` 平级。形状非法的引用在保存期已拒；这里再判一次，避免拼出
+  // 三段路径（存量手改文件的兜底）。
+  for (const ref of design.ontologies) {
+    const parts = ref.split('/');
+    if (parts.length !== 2) continue;
+    const [scenario, ontologyName] = parts as [string, string];
+    const detail = ctx.ontologies.read(scenario, ontologyName);
+    const dir = `ontology/${scenario}/${ontologyName}`;
+    files.push({ relPath: `${dir}/${ONTOLOGY_FILE}`, content: detail.content });
+    files.push({ relPath: `${dir}/${SECURITIES_FILE}`, content: detail.securities_content });
   }
 
   return { name: design.name, files };

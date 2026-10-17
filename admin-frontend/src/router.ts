@@ -9,7 +9,7 @@
  *  - `/admin/agents`            → 数字人设计列表
  *  - `/admin/agents/demo`       → 数字人 demo 的设计态
  *  - `/admin/agents/demo?tab=mcp` → 设计态内 MCP 页签
- *  - `/admin/ontology/原材料采购和库存?scenario=生产调度` → 本体详情（身份是"场景 + 目录名"两段，场景走查询参数）
+ *  - `/admin/ontology/生产调度/原材料采购和库存` → 本体详情（身份两段：场景名在前、本体名在后，与 API 与部署路径同一顺序）
  *  - `/admin/deploy?tab=anomalies` → 部署区内的异常项汇总分区
  *
  * 自建路由属"自研基础设施"，故 MUST 有单元测试（原则三、D5）。
@@ -75,8 +75,12 @@ export function parseLocation(fullPath: string, base = ''): AdminRoute {
 
   const first = segments[0]
   const name: RouteName = first && isRouteName(first) ? first : DEFAULT_ROUTE
-  const detail = first && isRouteName(first) ? (segments[1] ?? null) : null
-  const decodedDetail = detail ? safeDecode(detail) : null
+  // 本体身份是两段（场景名/本体名，2026-10-17）⇒ 详情可占两段路径；
+  // 其余功能区的详情对象是单段名称（名称本身不允许含 `/`）
+  const restSegments = first && isRouteName(first) ? segments.slice(1) : []
+  const detailSegments = name === 'ontology' ? restSegments : restSegments.slice(0, 1)
+  const decodedDetail =
+    detailSegments.length > 0 ? detailSegments.map((segment) => safeDecode(segment)).join('/') : null
   const tab = query.tab ?? null
 
   return {
@@ -99,7 +103,12 @@ export function buildPath(
   base = '',
 ): string {
   const segments: string[] = [parts.name]
-  if (parts.detail) segments.push(encodeURIComponent(parts.detail))
+  // 详情可能是两段（本体：`场景名/本体名`）；逐段编码，斜杠保留为路径分隔
+  if (parts.detail) {
+    for (const segment of parts.detail.split('/')) {
+      if (segment !== '') segments.push(encodeURIComponent(segment))
+    }
+  }
 
   const search = new URLSearchParams()
   if (parts.tab) search.set('tab', parts.tab)

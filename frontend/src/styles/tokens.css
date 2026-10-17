@@ -79,6 +79,9 @@
 
   /* ---------- 层级 ---------- */
   --z-index-dropdown: 100;
+  /* 放大后的预览面板（平铺整个视口，011）。必须低于 dialog 与 toast：
+     放大态下的二次确认与提示 MUST 仍浮在上面，否则"看不见的确认框"等于没有确认。 */
+  --z-index-panel-maximized: 150;
   --z-index-dialog: 200;
   --z-index-toast: 300;
 

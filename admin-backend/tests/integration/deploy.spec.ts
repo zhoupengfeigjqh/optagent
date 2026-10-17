@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { removeTree } from '../../src/infra/fs-remove.js';
 import { createFixture, snapshotTree, type TestFixture } from '../helpers/fixture.js';
 import { soulDesign } from '../helpers/soul.js';
 
@@ -65,6 +66,45 @@ function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unkn
 /** 关联用户与数字人 */
 function link(userId: string, agents: string[]): void {
   fx.ctx.users.create(userId, agents, fx.ctx.store.revision());
+}
+
+/** 本体夹具（2026-10-17）：两段身份必须与 metadata 完全一致，否则入库被拒 */
+const ONTO_SCENARIO = '生产调度';
+const ONTO_NAME = '原材料采购和库存';
+const ONTO_YAML = `metadata:
+  created_at: '2026-07-15 16:05:02'
+  deployed_version: v1.0
+  scenario_name: ${ONTO_SCENARIO}
+  scenario_id: 1
+  ontology_name: ${ONTO_NAME}
+  ontology_id: 1
+concepts: []
+`;
+const ONTO_SECURITIES = `securities:
+- action_name: CreatePurchaseRecord
+  op_type: command
+`;
+
+/** 往平台本体库塞一个完整本体（两个必需文件齐备） */
+function installOntology(): void {
+  fx.ctx.ontologies.install({
+    scenario: ONTO_SCENARIO,
+    ontology_dir: ONTO_NAME,
+    content: ONTO_YAML,
+    securities: ONTO_SECURITIES,
+  });
+}
+
+/** 库内该本体目录（用于模拟"快照被手改坏"） */
+function libraryOntologyDir(): string {
+  return path.join(fx.platformDataDir, 'onto_market', ONTO_SCENARIO, ONTO_NAME);
+}
+
+/** 建一个引用本体的数字人，并挂到 admin 名下 */
+async function linkOntologyAgent(): Promise<void> {
+  installOntology();
+  await createAgent(baseAgent({ name: 'onto', ontologies: [`${ONTO_SCENARIO}/${ONTO_NAME}`] }));
+  fx.ctx.users.update('admin', ['demo', 'onto'], fx.ctx.store.revision());
 }
 
 function revision(): number {
@@ -186,6 +226,38 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
     expect(cleared.servers[0]).not.toHaveProperty('async_tools');
   });
 
+  it('本体随部署物化：ontology/{场景}/{本体}/ 下两个必需文件与库内逐字节一致', async () => {
+    await linkOntologyAgent();
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['admin'], revision: revision() },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const dir = path.join(
+      fx.optAgentRoot,
+      'users',
+      'admin',
+      'agents',
+      'onto',
+      'ontology',
+      ONTO_SCENARIO,
+      ONTO_NAME,
+    );
+    expect(fs.readdirSync(dir).sort()).toEqual(['ontology.yaml', 'securities.yaml']);
+    expect(fs.readFileSync(path.join(dir, 'ontology.yaml'), 'utf8')).toBe(ONTO_YAML);
+    expect(fs.readFileSync(path.join(dir, 'securities.yaml'), 'utf8')).toBe(ONTO_SECURITIES);
+    // 与 skills/ 平级，不混进数字人的四份配置文件
+    expect(fs.readdirSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'onto')).sort()).toEqual([
+      'MCP.json',
+      'SOUL.md',
+      'TOOL.json',
+      'ontology',
+      'scenario.json',
+    ]);
+  });
+
   it('幂等：相同内容重复部署结果稳定（FR-030）', async () => {
     await fx.app.inject({
       method: 'POST',
@@ -275,6 +347,39 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('ADM_AGENT_INVALID_REF');
     expect(res.json().error.details.errors[0].detail).toBe('ocr');
+  });
+});
+
+describe('本体库快照完整性（2026-10-17）', () => {
+  it('库内缺 securities.yaml → 预检失败并给出可读原因，部署零写入', async () => {
+    await linkOntologyAgent();
+    // 目录仍在（引用本身有效），但两个必需文件不齐 —— 只有快照完整性校验能发现。
+    // 删除走 `removeTree`：中文路径下 `fs.rmSync` 会静默不删（见 `fs-remove.ts`）。
+    removeTree(path.join(libraryOntologyDir(), 'securities.yaml'));
+
+    const validate = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy/validate',
+      payload: { user_ids: ['admin'] },
+    });
+    expect(validate.json().passed).toBe(false);
+    const errors = validate.json().errors as Array<Record<string, string>>;
+    expect(errors[0]).toMatchObject({
+      agent_name: 'onto',
+      category: 'reference_validity',
+      code: 'ADM_ONTOLOGY_NOT_FOUND',
+    });
+    expect(errors[0]!.detail).toContain('securities.yaml');
+
+    const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
+    const deploy = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['admin'], revision: revision() },
+    });
+    expect(deploy.json().error.code).toBe('ADM_ONTOLOGY_NOT_FOUND');
+    // 运行环境写入次数 MUST 为 0
+    expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });
 });
 

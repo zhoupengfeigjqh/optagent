@@ -27,6 +27,22 @@ const YAML = `metadata:
 concepts: []
 `;
 
+/** 行为安全管控（2026-10-17 起为必需文件）：内容无关，够用来占位即可 */
+const SECURITIES = 'securities: []\n';
+
+/**
+ * 生成与市场路径**完全一致**的 ontology.yaml。
+ *
+ * `metadata` 的两个名字就是本体身份（索引不再单独存目录名），入库时强校验，
+ * 故以 ASCII 目录名做删除用例时正文也必须跟着改名。
+ */
+function yamlFor(scenario: string, ontologyDir: string): string {
+  return YAML.replace(`scenario_name: ${SCENARIO}`, `scenario_name: ${scenario}`).replace(
+    `ontology_name: ${ONTOLOGY}`,
+    `ontology_name: ${ontologyDir}`,
+  );
+}
+
 let fx: TestFixture;
 let marketDir: string | null = null;
 
@@ -45,6 +61,8 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
   const dir = path.join(marketDir!, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), content);
+  // 两个文件都是本体快照的组成部分：缺 securities.yaml 的条目不可导入
+  fs.writeFileSync(path.join(dir, 'securities.yaml'), SECURITIES);
 }
 
 /** 库内落盘文件（断言结构与内容用） */
@@ -87,12 +105,11 @@ describe('GET /api/admin/ontologies（§10.1）', () => {
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' });
     expect(res.statusCode).toBe(200);
     const item = res.json().items[0];
-    expect(item).toMatchObject({
-      scenario: SCENARIO,
-      ontology_dir: ONTOLOGY,
-      name: ONTOLOGY,
-      source: `onto_market:${SCENARIO}`,
-    });
+    // 身份只有 metadata 一份来源：不再下发 scenario / ontology_dir / name / source
+    expect(item).not.toHaveProperty('scenario');
+    expect(item).not.toHaveProperty('ontology_dir');
+    expect(item).not.toHaveProperty('name');
+    expect(item).not.toHaveProperty('source');
     expect(item.metadata).toMatchObject({
       created_at: '2026-07-15 16:05:02',
       deployed_version: 'v1.0',
@@ -105,48 +122,46 @@ describe('GET /api/admin/ontologies（§10.1）', () => {
   });
 });
 
-describe('GET /api/admin/ontologies/{name}?scenario=（§10.2）', () => {
+describe('GET /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.2）', () => {
   it('返回 ontology.yaml 全文、大小与指纹', async () => {
     await setup();
     await importOntology();
 
     const res = await fx.app.inject({
       method: 'GET',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().content).toBe(YAML);
     expect(res.json().size).toBe(Buffer.byteLength(YAML, 'utf8'));
-    expect(res.json().hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.json().ontology_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('缺 scenario → 400；本体不存在 → 404 ADM_ONTOLOGY_NOT_FOUND', async () => {
+  it('本体不存在 → 404 ADM_ONTOLOGY_NOT_FOUND（路径只给一段则无此路由）', async () => {
     await setup();
-    const missingScenario = await fx.app.inject({
-      method: 'GET',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-    });
-    expect(missingScenario.statusCode).toBe(400);
-    expect(missingScenario.json().error.code).toBe('VALIDATION_FAILED');
-
     const ghost = await fx.app.inject({
       method: 'GET',
-      url: '/api/admin/ontologies/ghost',
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/ghost`,
     });
     expect(ghost.statusCode).toBe(404);
     expect(ghost.json().error.code).toBe('ADM_ONTOLOGY_NOT_FOUND');
+
+    // 两段身份都在路径上，少一段不再是"缺参 400"
+    const oneSegment = await fx.app.inject({
+      method: 'GET',
+      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
+    });
+    expect(oneSegment.statusCode).toBe(404);
   });
 });
 
-describe('DELETE /api/admin/ontologies/{name}?scenario=（§10.3）', () => {
-  /** ASCII 名（场景 + 目录名）——删除的落地断言用它们，避开 Windows 宿主的非 ASCII 路径限制 */
+describe('DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.3）', () => {
+  /** ASCII 名（场景 + 本体名）——删除的落地断言用它们，避开 Windows 宿主的非 ASCII 路径限制 */
   const ASCII = { scenario: 'demo-scenario', ontology_dir: 'demo-ontology' };
 
-  it('删除 204：磁盘目录清除、记录消失、再读 404、再删 404、缺 scenario 400', async () => {
+  it('删除 204：磁盘目录清除、记录消失、再读 404、再删 404', async () => {
     await setup();
-    writeMarket(ASCII.ontology_dir, YAML, ASCII.scenario);
+    writeMarket(ASCII.ontology_dir, yamlFor(ASCII.scenario, ASCII.ontology_dir), ASCII.scenario);
     await fx.app.inject({
       method: 'POST',
       url: '/api/admin/ontologies/onto-market/import',
@@ -157,31 +172,29 @@ describe('DELETE /api/admin/ontologies/{name}?scenario=（§10.3）', () => {
 
     const res = await fx.app.inject({
       method: 'DELETE',
-      url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
-      query: { scenario: ASCII.scenario },
+      url: `/api/admin/ontologies/${ASCII.scenario}/${ASCII.ontology_dir}`,
     });
     expect(res.statusCode).toBe(204);
     expect(fs.existsSync(dir)).toBe(false);
 
     const detail = await fx.app.inject({
       method: 'GET',
-      url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
-      query: { scenario: ASCII.scenario },
+      url: `/api/admin/ontologies/${ASCII.scenario}/${ASCII.ontology_dir}`,
     });
     expect(detail.statusCode).toBe(404);
 
     const again = await fx.app.inject({
       method: 'DELETE',
-      url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
-      query: { scenario: ASCII.scenario },
+      url: `/api/admin/ontologies/${ASCII.scenario}/${ASCII.ontology_dir}`,
     });
     expect(again.statusCode).toBe(404);
 
-    const noScenario = await fx.app.inject({
+    // 身份两段都在路径上 ⇒ 少一段不是"缺参 400"，而是根本没有这条路由（2026-10-17）
+    const oneSegment = await fx.app.inject({
       method: 'DELETE',
       url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
     });
-    expect(noScenario.statusCode).toBe(400);
+    expect(oneSegment.statusCode).toBe(404);
   });
 
   /**
@@ -201,15 +214,13 @@ describe('DELETE /api/admin/ontologies/{name}?scenario=（§10.3）', () => {
 
     const res = await fx.app.inject({
       method: 'DELETE',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
     expect(res.statusCode).toBe(204);
 
     const detail = await fx.app.inject({
       method: 'GET',
-      url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-      query: { scenario: SCENARIO },
+      url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
     expect(detail.statusCode).toBe(404);
     // 不留"卡片没了、文件还在"的半删状态
@@ -260,12 +271,11 @@ describe('POST /api/admin/ontologies/onto-market/import（§10.5）', () => {
     const res = await importOntology();
 
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({
-      scenario: SCENARIO,
-      ontology_dir: ONTOLOGY,
-      name: ONTOLOGY,
-      overwritten: false,
-    });
+    expect(res.json()).toMatchObject({ overwritten: false });
+    expect(res.json().metadata.scenario_name).toBe(SCENARIO);
+    expect(res.json().metadata.ontology_name).toBe(ONTOLOGY);
+    expect(res.json()).not.toHaveProperty('scenario');
+    expect(res.json()).not.toHaveProperty('ontology_dir');
     expect(fs.readFileSync(savedFile(), 'utf8')).toBe(YAML);
   });
 
@@ -329,7 +339,7 @@ describe('只读保证（FR-059）', () => {
       const res = await fx.app.inject({
         method,
         url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
-        query: { scenario: SCENARIO },
+        query: { scenario_name: SCENARIO },
         payload: { content: 'metadata: {}' },
       });
       expect(res.statusCode).toBe(404);

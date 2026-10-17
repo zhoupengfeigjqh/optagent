@@ -64,6 +64,10 @@ const ICON_PATHS: Readonly<Record<string, readonly string[]>> = {
   ],
   edit: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'],
   bell: ['M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9', 'M13.73 21a2 2 0 0 1-3.46 0'],
+  // 放大 / 缩小（2026-10-16，011）：四角箭头向外 = 铺满、向内 = 收回。
+  // 二者成对出现（同一入口两态），故相邻登记，避免只加一半。
+  maximize: ['M15 3h6v6', 'M9 21H3v-6', 'M21 3l-7 7', 'M3 21l7-7'],
+  minimize: ['M4 14h6v6', 'M20 10h-6V4', 'M14 10l7-7', 'M3 21l7-7'],
 }
 
 const paths = computed<readonly string[]>(() => ICON_PATHS[props.name] ?? [])

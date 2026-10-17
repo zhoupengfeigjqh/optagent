@@ -15,6 +15,7 @@ import { ApiError } from '../../src/domain/api-error.js';
 import { UnifiedCatalog } from '../../src/domain/config-center/unified-catalog.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { McpServiceConfigService } from '../../src/domain/mcp/service-config.js';
+import { OntologyStore } from '../../src/domain/ontology/store.js';
 import { SkillLibraryService } from '../../src/domain/skill-library/install.js';
 import { RuntimeClient } from '../../src/infra/runtime-client.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
@@ -69,6 +70,8 @@ function buildCatalog(runtime: FlakyRuntime): UnifiedCatalog {
     runtime,
     mcpConfigs,
     skills: new SkillLibraryService(store),
+    // 本体（2026-10-17）：快照的第四类引用，空库即可
+    ontologies: new OntologyStore(store),
     logger: memoryLogger(),
   });
 }
@@ -147,5 +150,6 @@ describe('UnifiedCatalog —— 降级告警去重', () => {
     expect(snapshot.toolsUnavailableReason).toContain('不可达');
     expect([...snapshot.index.builtinTools]).toEqual([]);
     expect([...snapshot.index.mcpServices]).toEqual(['ocr']);
+    expect([...snapshot.index.ontologies]).toEqual([]);
   });
 });

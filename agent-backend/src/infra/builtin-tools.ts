@@ -22,6 +22,7 @@ import {
 } from '../domain/builtin-tool-catalog.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { calcTool, CalculatorError } from '../domain/tools/calculator.js';
+import { grepSkillFiles } from '../domain/tools/grep-skill.js';
 import { grepToolFiles } from '../domain/tools/grep-files.js';
 import { listToolDir } from '../domain/tools/list-dir.js';
 import { readToolFile } from '../domain/tools/read-file.js';
@@ -37,10 +38,11 @@ export interface BuiltinToolsOptions {
   /** 可供 list_dir 的目录清单（建 run 时按 scenario 动态生成，如 ['数据准备/生产计划', …, '共享空间', '临时空间']） */
   availableDirs: string[];
   /**
-   * 本数字人的技能目录（`users/{uid}/agents/{agent}/skills`），`read_skill` 的沙箱根。
+   * 本数字人的技能目录（`users/{uid}/agents/{agent}/skills`），
+   * `read_skill` 与 `grep_skill` 的沙箱根。
    *
-   * 与用户三空间分开，故**不经过 `FileAccess`**——由 `domain/tools/read-skill.ts`
-   * 自带一套"只读 + 只能落在该技能目录内"的校验。
+   * 与用户三空间分开，故**不经过 `FileAccess`**——由 `domain/tools/skill-access.ts`
+   * 提供"只读 + 只能落在该技能目录内"的共享校验（两条技能访问通道共用一份判据）。
    */
   skillsDir: string;
   logger: Logger;
@@ -124,6 +126,8 @@ function domainExecute(
           limit: typeof p.limit === 'number' ? p.limit : undefined,
           truncateBytes: fa.truncateBytes,
         }).text;
+    case 'grep_skill':
+      return (p) => grepSkillFiles(opts.skillsDir, p.pattern, p.skill);
     default:
       return async () => `未知内置工具：${name}`;
   }

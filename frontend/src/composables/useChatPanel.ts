@@ -10,20 +10,15 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type {
-  AgentStarter,
-  ErrorInfo,
-  FeedbackValue,
-  FileReference,
-  ToolCallResult,
-} from '../api/types'
+import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
-import { nextStepSendPayload } from '../utils/next-steps'
 import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
-import { mentionToken, stripMentionTokens, useFileMention } from './useFileMention'
+import { stripMentionTokens, useFileMention } from './useFileMention'
+import { useMentionComposer } from './useMentionComposer'
 import { useModels } from './useModels'
+import { useNextStepPrompt } from './useNextStepPrompt'
 import { useNextSteps } from './useNextSteps'
 import { usePreview } from './usePreview'
 import { useSessionSearch } from './useSessionSearch'
@@ -280,49 +275,18 @@ export function useChatPanel() {
     onRecover()
   }
 
-  /* ---------- 下一步动作卡片（007 · US2） ---------- */
-
-  /** 待确认的卡片（`null` = 弹窗关闭）；点卡片只**打开弹窗**，不发消息 */
-  const pendingSuggestion = ref<AgentStarter | null>(null)
-  /** 发送进行中：弹窗两个按钮均禁用（连点只发一次） */
-  const suggestionSending = ref(false)
+  /* ---------- 下一步动作卡片（007 · US2；状态机在 `useNextStepPrompt`） ---------- */
 
   /**
-   * 点选卡片 → 打开确认弹窗。
-   *
-   * 三处不可用态都**拒绝并且不发送**（007 `FR-025` 的可感知口径）：
-   * - 本轮进行中：`onSend` 的通道已被占用，此时排队发送会让用户搞不清点了什么；
-   * - 未选数字人：明确提示（会话创建也会以 `AGENT_NOT_SELECTED` 兜底）；
-   * - 会话已被删除：交给 `onSend` 走既有降级（`threads.create` 失败会 toast 且保留输入）。
+   * 三条拒绝规则、"只有真发出去才关弹窗"的口径都写在该模块头部；
+   * 这里只把状态源（`streaming` / 当前数字人）与唯一发送链路（`onSend`）交进去。
    */
-  function onPickNextStep(action: AgentStarter): void {
-    if (streaming.value !== null) return
-    if (agents.currentAgent.value === null) {
-      toast.push('error', '请先选择数字人再发送')
-      return
-    }
-    pendingSuggestion.value = action
-  }
-
-  function onCancelSuggestion(): void {
-    pendingSuggestion.value = null
-  }
-
-  /** 确认发送：走**既有** `onSend` 链路（引用校验、建会话、失败还原草稿都在那里） */
-  async function onConfirmSuggestion(): Promise<void> {
-    const action = pendingSuggestion.value
-    if (!action || suggestionSending.value) return
-    suggestionSending.value = true
-    try {
-      // 正文只有提示词；关联工具经 `guidance` 的隐藏通道回传（与问题实例同款）
-      const sent = await onSend(nextStepSendPayload(action), { settleBeforeReturn: false })
-      // 只有真发出去了才关弹窗：被拦下（会话不可用 / 发送失败）时保留提示词，用户可重试或取消；
-      // 一旦发出即关（不等本轮答完）——弹窗不能陪着输出一起挂到结束
-      if (sent) pendingSuggestion.value = null
-    } finally {
-      suggestionSending.value = false
-    }
-  }
+  const prompt = useNextStepPrompt({
+    streaming,
+    currentAgent: agents.currentAgent,
+    send: onSend,
+    toast,
+  })
 
   function onLoadMore(): void {
     void threads.loadMore()
@@ -461,73 +425,10 @@ export function useChatPanel() {
     void onSend({ content: chat.draft.value.trim(), attachments: mention.buildAttachments() })
   }
 
-  /* ---------- `@` 引用（US4） ---------- */
+  /* ---------- `@` 引用（US4；输入区接线在 `useMentionComposer`） ---------- */
 
-  /** 文本/光标变化：检测 `@` 触发，并同步移除已从正文删除的引用。 */
-  function onInputText(payload: { value: string; caret: number }): void {
-    mention.handleInput(payload.value, payload.caret)
-  }
-
-  function onPickSpace(space: string): void {
-    mention.pickSpace(space)
-  }
-
-  function onPickDir(dir: string): void {
-    mention.pickDir(dir)
-  }
-
-  function onPickFile(reference: FileReference): void {
-    if (!mention.pickFile(reference)) {
-      return
-    }
-    insertToken(reference)
-    mention.close()
-  }
-
-  /** Enter/→ 确认当前高亮项：空间/目录列下钻，文件列完成引用。 */
-  function onConfirmMention(): void {
-    const reference = mention.confirmActive()
-    if (reference) {
-      onPickFile(reference)
-    }
-  }
-
-  /** `@` 面板展开时的按键路由（Composer 已拦截并 preventDefault）。 */
-  function onMentionKey(key: string): void {
-    switch (key) {
-      case 'ArrowDown':
-        mention.move(1)
-        break
-      case 'ArrowUp':
-        mention.move(-1)
-        break
-      case 'ArrowRight':
-      case 'Enter':
-        onConfirmMention()
-        break
-      case 'ArrowLeft':
-        mention.back()
-        break
-      case 'Escape':
-        // 关闭面板但不丢文本（US4 场景 8）
-        mention.close()
-        break
-      default:
-        break
-    }
-  }
-
-  /** 用完整标记替换触发片段（`…@pl` → `…@plan.csv `），便于按标记同步引用。 */
-  function insertToken(reference: FileReference): void {
-    const replaced = chat.draft.value.replace(/(^|\s)@[^\s@]*$/, '$1')
-    chat.draft.value = `${replaced}${mentionToken(reference)} `
-  }
-
-  /** 移除引用时同步删除正文中的标记。 */
-  function onRemoveReference(reference: FileReference): void {
-    mention.remove(reference)
-    chat.draft.value = stripMentionTokens(chat.draft.value, [reference])
-  }
+  /** 文本与引用必须同步的那条不变式写在该模块头部；这里只交出浮层状态与输入区文本。 */
+  const mentionComposer = useMentionComposer({ mention, draft: chat.draft })
 
   return {
     chat,
@@ -557,11 +458,9 @@ export function useChatPanel() {
     onRetryTurn,
     onRetryFailedRun,
     nextSteps,
-    pendingSuggestion,
-    suggestionSending,
-    onPickNextStep,
-    onCancelSuggestion,
-    onConfirmSuggestion,
+    // 卡片确认弹窗的出口（2 个状态 + 3 个动作）全部来自 `useNextStepPrompt`：
+    // 展开而非逐条重列，避免"清单两处各维护一份"这种最容易漏的漂移
+    ...prompt,
     onLoadMore,
     onLoadToolResult,
     onRecover,
@@ -583,12 +482,7 @@ export function useChatPanel() {
     onOpenView,
     onUpdateDraft,
     onSendFromToolbar,
-    onInputText,
-    onPickSpace,
-    onPickDir,
-    onPickFile,
-    onConfirmMention,
-    onMentionKey,
-    onRemoveReference,
+    // `@` 引用的 7 个出口来自 `useMentionComposer`（同上：展开而非逐条重列）
+    ...mentionComposer,
   }
 }

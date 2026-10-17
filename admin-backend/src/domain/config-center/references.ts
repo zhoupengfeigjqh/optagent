@@ -14,9 +14,11 @@ export interface AgentRefSource {
   enabled_tools: string[];
   mcp_services: string[];
   skills: string[];
+  /** 本体引用：`"{场景名}/{本体名}"`（2026-10-17） */
+  ontologies: string[];
 }
 
-export type AnomalyCategory = 'builtin_tool' | 'mcp_service' | 'skill';
+export type AnomalyCategory = 'builtin_tool' | 'mcp_service' | 'skill' | 'ontology';
 
 export interface Anomaly {
   category: AnomalyCategory;
@@ -39,6 +41,7 @@ const CATEGORY_LABEL: Record<AnomalyCategory, string> = {
   builtin_tool: '内置工具',
   mcp_service: 'MCP 服务',
   skill: 'SKILL',
+  ontology: '本体',
 };
 
 /**
@@ -75,6 +78,15 @@ export function detectAnomalies(design: AgentRefSource, index: ReferenceIndex): 
       });
     }
   }
+  for (const ontology of design.ontologies) {
+    if (!index.ontologies.has(ontology)) {
+      out.push({
+        category: 'ontology',
+        target_name: ontology,
+        detail: `引用的本体 ${ontology} 不在本体库中（可能已被删除或改名）`,
+      });
+    }
+  }
   return out;
 }
 
@@ -97,6 +109,11 @@ export function agentsReferencingService(agents: AgentRefSource[], serviceName: 
 /** 引用了某 SKILL 的数字人名 */
 export function agentsReferencingSkill(agents: AgentRefSource[], skillName: string): string[] {
   return agents.filter((a) => a.skills.includes(skillName)).map((a) => a.name);
+}
+
+/** 引用了某本体（`"场景名/本体名"`）的数字人名 */
+export function agentsReferencingOntology(agents: AgentRefSource[], ontologyRef: string): string[] {
+  return agents.filter((a) => a.ontologies.includes(ontologyRef)).map((a) => a.name);
 }
 
 /**

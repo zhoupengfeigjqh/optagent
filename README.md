@@ -263,7 +263,7 @@ optagent/
 | `domain/config-center/` | 配置中心：数字人/MCP/技能的配置模型与校验 |
 | `domain/deploy/` | 部署编排：把配置下发到 agent-backend 运行时 |
 | `domain/skill-library/` | 技能库管理（含**本体市场导入**：整包目录复制 + 内容指纹判"可更新"，来源标 `onto_market:{场景}/{本体}`，导入后**只读**） |
-| `domain/ontology/` | **本体库**：本体快照（`ontology.yaml` + 可选 `securities.yaml`）的导入 / 更新 / 删除与元数据解析；平台侧只读浏览，本体**不被数字人引用**（本期作为可浏览的知识资产） |
+| `domain/ontology/` | **本体库**：本体快照（`ontology.yaml` + `securities.yaml`，**两个均为必需文件**）的导入 / 更新 / 删除与元数据解析；索引只存 metadata 与两个内容指纹（身份由 metadata 派生）；平台侧只读浏览，本体**不被数字人引用**（本期作为可浏览的知识资产） |
 | `domain/mcp/` | MCP 服务的**新建/删除/清单**与调用配置（含 `file_args` / `rules_fields` / **`async_tools`**（异步工具声明）/ `confirmation` / **`headers`**（请求头 / 访问令牌：存明文、响应只回掩码））、测试与统计（2026-09-27：启停/日志已下架） |
 | `domain/audit.ts` | 操作审计 |
 | `domain/platform-settings.ts` | 平台级设置 |
@@ -657,13 +657,18 @@ npm run dev
 
 | 通道 | 本体平台侧的源 | 平台侧操作（界面） | 落在平台哪里 | 可改性 | 生效链路 |
 |---|---|---|---|---|---|
-| **本体** | `.data/onto_market/{场景}/{本体}/ontology.yaml`（+ 可选 `securities.yaml`） | 本体管理 →「从本体市场导入」 | `.platform-data/onto_market/{场景}/{本体}/` | **只读**：只能经市场"更新"整体替换 | **本期不被数字人引用**，作为可浏览的知识资产（卡片展示 6 项 metadata，详情展示全文） |
+| **本体** | `.data/onto_market/{场景}/{本体}/ontology.yaml`（+ `securities.yaml`，均为必需） | 本体管理 →「从本体市场导入」 | `.platform-data/onto_market/{场景}/{本体}/` | **只读**：只能经市场"更新"整体替换 | **本期不被数字人引用**，作为可浏览的知识资产（卡片展示 6 项 metadata，详情展示两个文件的全文） |
 | **技能** | `{场景}/{本体}/skills/{技能目录}` | SKILL 管理 →「从本体市场导入」 | 技能库（来源记 `onto_market:{场景}/{本体}`） | **只读**：MUST NOT 在线编辑，只能整包更新 | 数字人勾选 `skills` → 部署 → 运行端用 `read_skill` 读取 |
 | **MCP 服务**（「自建发布」） | 本体平台把本体的**行为/函数**发布为动态容器（`mcp-publish`，`:8021` / `:8022`） | MCP 服务 →「新建 MCP 服务」：填 `url` + **请求头 `{"X-MCP-Token":"…"}`** → 探测工具 → 勾**工具白名单** | `.platform-data/mcp-services.json`（令牌明文落盘，响应只回掩码） | **可改**（令牌会轮换；工具白名单在详情页「工具清单 → 重新探测」里调整） | 数字人勾选 `mcp_services` → 部署 → 物化 `MCP.json`（**含 headers**）→ 运行时按白名单装配工具 |
 
-关于本体导入的范围（2026-10-03 起）：只取 `ontology.yaml`（必需）与 `securities.yaml`（可选，行为安全管控）；
+关于本体导入的范围（2026-10-03 起，2026-10-17 收紧）：只取 `ontology.yaml` 与 `securities.yaml`
+（**两个均为必需文件**，后者承载行为安全管控；市场侧缺任一即该条不可导入）；
 `data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/` **不导入**。市场侧这两个文件
 任一变化都会让平台标记"可更新"（各自内容指纹比对）。
+
+本体索引（`.platform-data/onto_market/index.json`）自 2026-10-17 起只保存 `metadata` + 两个内容指纹 + 时间戳：
+场景名 / 本体目录名 / 展示名 / 来源分别由 `metadata.scenario_name`、`metadata.ontology_name` 派生，
+导入时强校验二者与市场目录名完全一致（不一致即拒绝，避免派生出的路径指向不存在的目录）。
 
 ### 当前已提取的清单（2026-10-08 实测）
 

@@ -293,3 +293,200 @@ describe('openView —— 竞态（后发覆盖先发）', () => {
     expect(store.target.value).toMatchObject({ url: `${ORIGIN}/b`, renderMode: 'download' })
   })
 })
+
+/**
+ * 放大态（2026-10-16，011）
+ *
+ * 守三件事：
+ * 1. **可放大判据只有一处**（`maximizable`）——"有版面"的三类可放大，其余五态一律不可（FR-010 / FR-013）；
+ * 2. **出口永远在**（`maximizeToggleVisible = maximized || maximizable`）——放大态下切到加载中的目标时
+ *    不能出现"缩小按钮消失"（FR-005）；
+ * 3. **放大态是纯呈现** —— 不发请求、不落盘，且 `close` / `backToList` / `openList` 三条路径一律归零，
+ *    而 `openFile` / `openView` 换目标时保持（FR-006 / FR-007 / FR-012）。
+ */
+describe('放大态 —— 可放大判据与收敛（011）', () => {
+  /** 进"同源 iframe 页面"内容态。 */
+  async function storeOnIframe(): Promise<ReturnType<typeof createPreviewStore>> {
+    probe.mockResolvedValue('renderable')
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openView({ url: `${ORIGIN}/taskresult?taskNo=1`, name: '周报.html', kind: 'url' })
+    return store
+  }
+
+  it('默认不是放大态，且入口在有版面之前不出现', () => {
+    const store = createPreviewStore({ files: filesStub() })
+
+    expect(store.maximized.value).toBe(false)
+    expect(store.maximizable.value).toBe(false)
+    expect(store.maximizeToggleVisible.value).toBe(false)
+  })
+
+  it('① 同源 `viewUrl` 的 iframe 页面 → 可放大', async () => {
+    const store = await storeOnIframe()
+
+    expect(store.maximizable.value).toBe(true)
+    expect(store.maximizeToggleVisible.value).toBe(true)
+  })
+
+  it('② 本地 PDF → 可放大', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '共享空间', filename: '图纸.pdf' })
+
+    expect(store.maximizable.value).toBe(true)
+  })
+
+  it('③ 本地图片 → 可放大', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '共享空间', filename: '现场.png' })
+
+    expect(store.maximizable.value).toBe(true)
+  })
+
+  it('④ 纯文本 → **不可**放大（文本不因变宽更可读，零变化边界）', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '数据准备', filename: '9月计划.txt' })
+
+    expect(store.content.value?.renderMode).toBe('text')
+    expect(store.maximizable.value).toBe(false)
+    expect(store.maximizeToggleVisible.value).toBe(false)
+  })
+
+  it('⑤ 同源但预检为「需下载」的入口 → **不可**放大', async () => {
+    probe.mockResolvedValue('download')
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openView({ url: `${ORIGIN}/api/files/download?x=1`, name: 'x.xlsx', kind: 'url' })
+
+    expect(store.target.value).toMatchObject({ kind: 'url', renderMode: 'download' })
+    expect(store.maximizable.value).toBe(false)
+  })
+
+  it('⑤b 不支持内联的文件类型（`.xlsx`）→ **不可**放大', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '数据准备', filename: '9月计划.xlsx' })
+
+    expect(store.content.value?.renderMode).toBe('download')
+    expect(store.maximizable.value).toBe(false)
+  })
+
+  it('⑥ 错误态（读取失败）→ **不可**放大', async () => {
+    const files = filesStub({ fetchPreviewText: vi.fn().mockRejectedValue(new Error('413')) })
+    const store = createPreviewStore({ files })
+    await store.openFile({ dir: '数据准备', filename: 'x.csv' })
+
+    expect(store.content.value?.renderMode).toBe('error')
+    expect(store.maximizable.value).toBe(false)
+  })
+
+  it('⑦ 文件空间列表态 → **不可**放大', () => {
+    const store = createPreviewStore({ files: filesStub() })
+    store.openList()
+
+    expect(store.open.value).toBe(true)
+    expect(store.maximizable.value).toBe(false)
+  })
+
+  it('⑧ 内容态但目标为空（预检中）→ 不可放大，且此时入口也不出现', async () => {
+    const gate = deferred<'renderable' | 'download' | 'fallback'>()
+    probe.mockReturnValueOnce(gate.promise)
+    const store = createPreviewStore({ files: filesStub() })
+
+    const pending = store.openView({ url: `${ORIGIN}/x`, name: 'X', kind: 'url' })
+
+    expect(store.view.value).toBe('content')
+    expect(store.target.value).toEqual({ kind: 'none' })
+    expect(store.maximizable.value).toBe(false)
+    expect(store.maximizeToggleVisible.value).toBe(false)
+
+    gate.resolve('renderable')
+    await pending
+  })
+
+  it('越权 `toggleMaximize`：不可放大时不进入放大态', () => {
+    const store = createPreviewStore({ files: filesStub() })
+
+    store.toggleMaximize()
+
+    expect(store.maximized.value).toBe(false)
+  })
+
+  it('放大 ↔ 缩小：同一入口翻转；`restoreMaximize` 幂等', async () => {
+    const store = await storeOnIframe()
+
+    store.toggleMaximize()
+    expect(store.maximized.value).toBe(true)
+
+    store.toggleMaximize()
+    expect(store.maximized.value).toBe(false)
+
+    store.restoreMaximize()
+    expect(store.maximized.value).toBe(false)
+  })
+
+  it('放大态下切到「预检中」的目标：出口不消失，且**保持**放大（I1 / FR-005 / FR-012）', async () => {
+    const store = await storeOnIframe()
+    store.toggleMaximize()
+
+    const gate = deferred<'renderable' | 'download' | 'fallback'>()
+    probe.mockReturnValueOnce(gate.promise)
+    const pending = store.openView({ url: `${ORIGIN}/b`, name: 'B', kind: 'url' })
+
+    expect(store.maximizable.value).toBe(false) // 预检中：内容还不存在
+    expect(store.maximizeToggleVisible.value).toBe(true) // 但出口必须还在
+
+    gate.resolve('renderable')
+    await pending
+
+    expect(store.maximized.value).toBe(true)
+    expect(store.maximizable.value).toBe(true)
+  })
+
+  it('`close` / `backToList` / `openList` 三条路径一律退出放大（I2 / FR-007 / FR-032）', async () => {
+    const closed = createPreviewStore({ files: filesStub() })
+    await closed.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    closed.toggleMaximize()
+    closed.close()
+    expect(closed.maximized.value).toBe(false)
+
+    const back = createPreviewStore({ files: filesStub() })
+    await back.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    back.toggleMaximize()
+    back.backToList()
+    expect(back.maximized.value).toBe(false)
+
+    const list = createPreviewStore({ files: filesStub() })
+    await list.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    list.toggleMaximize()
+    list.openList()
+    expect(list.maximized.value).toBe(false)
+  })
+
+  it('正在看的文件被删除（`onFileRemoved`）→ 连同放大态一起退出（FR-032）', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    store.toggleMaximize()
+
+    store.onFileRemoved({ dir: '共享空间', filename: 'a.pdf' })
+
+    expect(store.view.value).toBe('list')
+    expect(store.maximized.value).toBe(false)
+  })
+
+  it('放大 / 缩小 MUST NOT 产生任何请求（FR-006 的零副作用侧面）', async () => {
+    const files = filesStub()
+    const store = createPreviewStore({ files })
+    await store.openFile({ dir: '共享空间', filename: 'a.pdf' })
+
+    const before = [
+      vi.mocked(files.probePreview).mock.calls.length,
+      vi.mocked(files.fetchPreviewText).mock.calls.length,
+    ]
+
+    store.toggleMaximize()
+    store.restoreMaximize()
+
+    expect([
+      vi.mocked(files.probePreview).mock.calls.length,
+      vi.mocked(files.fetchPreviewText).mock.calls.length,
+    ]).toEqual(before)
+  })
+})

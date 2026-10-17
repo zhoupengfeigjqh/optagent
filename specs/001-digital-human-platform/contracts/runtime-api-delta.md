@@ -30,6 +30,7 @@
 | R16 | **跨服务可追溯标识**：`X-Trace-Id` 请求头 + SSE 事件字段 + 日志字段（**2026-10-08 登记，未实施**） | 新增可选字段/请求头 | 否（缺失不影响既有行为） |
 | R17 | **下一步动作提示**（特性 `007-next-action-hints`）：SOUL.md frontmatter 新增 `next_action_hints` 开关；新增 `GET /api/threads/{id}/next-actions`（只读，会话级单快照） | 新增配置字段 + 新增端点 | 否（开关缺省**关闭**；轮末生成不落历史、不改详情接口） |
 | R18 | **每轮注入当前时间**（2026-10-14）：`systemExtra` 新增 `【当前时间】` 段（`YYYY-MM-DD HH:mm:ss（周X，UTC±HH:MM）`，运行环境本地时区、**精确到秒**），位置在后台产出段之后、`guidance` 之前 | 一处提示词段 | 否（只增段、不改动端点/SSE/历史/气泡；唯一口径变化：因时间恒注入，`systemExtra` 不再可能是 `undefined`） |
+| R19 | 新增内置工具 **`grep_skill`**：补齐 SKILL 内容的**检索**通道（`read_skill` 只解决"读得到"），内置工具目录由 6 项增至 7 项（2026-10-17） | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -82,7 +83,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `{会话标识}` | 当前 run 的 thread_id | `threadId` |
 | `{临时空间}` | 临时空间显示名 | 字面量 `临时空间` |
 
-### 1.4 目录内容（2026-09-23 起共 6 项；**前 5 项**行为 MUST 与现状等价）
+### 1.4 目录内容（2026-10-17 起共 7 项；**前 5 项**行为 MUST 与现状等价）
 
 | `name` | `label` | `writable` | `description_template` |
 |---|---|---|---|
@@ -92,8 +93,9 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `grep_files` | 检索文件内容 | `false` | 在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/pdf 会被跳过（请改用 read_file）。可指定目录，缺省检索全部开放目录。 |
 | `calculator` | 计算器 | `false` | 计算数学表达式。支持 + - * / % ^、括号、sqrt/abs/round/floor/ceil/min/max/pow 函数与常量 pi/e。 |
 | `read_skill` | 读取技能文件 | `false` | 读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），也可读 references/ 等其他文档（如 "references/算法详解.md"）；path 为目录时返回该目录下的文件清单。技能名取自系统提示中的「技能」小节。仅文本文件；内容过大时返回截断片段，可用 offset 继续读。 |
+| `grep_skill` | 检索技能内容 | `false` | 在本数字人所配置技能的文件（SKILL.md 与 references/ 等）中按正则检索关键词，返回「技能名/文件路径:行号: 内容」，路径可直接回填给 read_skill；省略 skill 则检索全部技能。技能名取自系统提示中的「技能」小节。xlsx/pdf 等二进制会被跳过（请改用 read_skill）。 |
 
-**不变式（MUST 由单测守住）**：`renderTemplate` 用现状的运行期取值渲染后，**前 5 项**的结果 MUST 与改造前 `buildBuiltinTools` 产出的 `description` **逐字相等**。这是本重构的安全性保证——改造**只改变元数据的组织方式，不改变任何对模型可见的文本**；`read_skill` 为 2026-09-23 新增，不在此不变式内（其 golden 文本单独断言）。
+**不变式（MUST 由单测守住）**：`renderTemplate` 用现状的运行期取值渲染后，**前 5 项**的结果 MUST 与改造前 `buildBuiltinTools` 产出的 `description` **逐字相等**。这是本重构的安全性保证——改造**只改变元数据的组织方式，不改变任何对模型可见的文本**；`read_skill`（2026-09-23）与 `grep_skill`（2026-10-17）均为新增项，不在此不变式内（其 golden 文本单独断言）。
 
 #### 1.4.1 `read_skill`（2026-09-23 新增）
 
@@ -111,6 +113,24 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 **启用方式**：与其他内置工具一致，MUST 在 `TOOL.json` 的 `enabled` 里显式声明（`FR-023` 白名单）。**存量数字人**若要用，需在管理平台勾选「读取技能文件」并**重新部署**后生效——这是刻意的：技能读取与"配置了哪些技能"一样，属显式配置，MUST NOT 隐式开启。
 
+#### 1.4.2 `grep_skill`（2026-10-17 新增）
+
+**为什么加**：`read_skill` 只解决"读得到"。技能正文与 `references/` 一旦多起来，"在技能里找一句话"仍只能逐个文件读——而用户数据的同类需求早有 `grep_files`，技能侧却没有对应通道（`grep_files` 的白名单是用户三空间，技能在另一个子树）。缺口的后果是**技能写了等于没写**：模型读不完，就退回凭 frontmatter 摘要猜测。
+
+**落点与安全口径**：领域实现 `agent-backend/src/domain/tools/grep-skill.ts`（**只读**，不经 `FileAccess`），与 `read_skill` **共用** `agent-backend/src/domain/tools/skill-access.ts` 的校验——安全判据只有一份，避免两条通道的漂移：
+
+- 技能名：缺省检索**本数字人的全部技能**；提供时必须是**单个目录名**且真实存在（否则给可读提示 + 可用技能清单）；
+- 遍历只从技能根向下；**符号链接一律不跟进**（计数并在结果尾部注明）；
+- 只读普通文件；二进制（字节 0 判定）跳过并计数，不把乱码塞进上下文；
+- 越界/非法技能名上抛 `SkillAccessError` → 拒绝文案 + `file.access.denied`（`alert: true`），与 `read_skill` 同一审计口径；
+- **预期内的用法问题**（空检索式、非法正则、技能不存在、技能根为空）返回**可读文本**，不上抛、不记 alert——那是"模型用错了"，不是"有人在越权"。
+
+**有界且必须可见**（原则九）：单次最多返回 100 条匹配、最多扫描 500 个文件、单文件超过 2MB 跳过；任一上限触顶都在结果里写明（"仅显示前 100 条"等），MUST NOT 静默截断——静默会让模型得出"技能里没有"的错误结论。
+
+**与 `read_skill` 的分工**：`read_skill` 读**指定文件**（含目录清单、截断续读），`grep_skill` 在**一批文件**里定位。命中行格式为 `技能名/相对路径:行号: 内容`，其中的技能名与路径**可直接回填** `read_skill(skill, path)`——两步配合即"先定位、再精读"。
+
+**启用方式**：与其他内置工具一致，MUST 在 `TOOL.json` 的 `enabled` 里显式声明（`FR-023` 白名单）。**存量数字人**若要用，需在管理平台勾选「检索技能内容」并**重新部署**后生效。
+
 ### 1.5 入参说明
 
 `parameters` 沿用现状的 JSON Schema 字面量（含 `required` 与 `description`），不做语义改动。注意现状中 `parameters` 带 `as never` 断言（因 `AgentTool` 的类型未暴露该字段）——迁入纯数据目录后可去除该断言，属**类型层改善**，不影响运行期行为。
@@ -123,7 +143,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 **归属**：`agent-backend/src/routes/`，与既有路由同构注册（`registerBuiltinToolRoutes(app, ctx)`），前缀沿用 `/api`。
 
-**请求**：无参数（工具数固定为 6，无需分页；响应仍带 `total` 以保持形态一致）。
+**请求**：无参数（工具数固定为 7，无需分页；响应仍带 `total` 以保持形态一致）。
 
 **响应 200**
 
@@ -138,7 +158,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
       "writable": false
     }
   ],
-  "total": 5
+  "total": 7
 }
 ```
 
@@ -1014,7 +1034,7 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 
 - **现状**：`agent-backend/src/domain/config-fingerprint.ts` 以 `size:mtimeMs` 作为关键文件（`SOUL.md` / `TOOL.json` / `MCP.json` / `scenario.json`）的指纹；
 - **风险**：尺寸相同 + 时间戳未变（同秒内修改、保留时间戳的同步方式、文件系统时间精度不足）→ 判定"未变化" → **静默沿用旧配置**，与 `FR-034`「新对话立即使用新配置」直接冲突；
-- **目标**：指纹 MUST 由这 4 个文件的**内容摘要**（sha256）计算。成本可忽略（4 个小文件），且仓库已有 sha256 用法可复用（本体导入的 `hash` 字段）。
+- **目标**：指纹 MUST 由这 4 个文件的**内容摘要**（sha256）计算。成本可忽略（4 个小文件），且仓库已有 sha256 用法可复用（本体导入的 `ontology_hash` 字段）。
 - **2026-10-13 登记**：`scenario.json` 新增 `data_prep_uploads` 键后仍是同一份指纹输入文件；`data_prep_uploads` 按候选枚举固定顺序归一，保证"同一勾选集"不产生字节差异（避免无谓的实例重建）。
 
 ### 14.2 物化文件权限

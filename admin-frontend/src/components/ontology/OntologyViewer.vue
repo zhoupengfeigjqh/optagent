@@ -8,8 +8,8 @@
  * `mono 路径 + 小字大小 + 带边框徽标`一行头部，正文 `pre` 用同一套字号/圆角/最小高度。
  *
  * 口径：
- * - 本体文件恒在根层、最多两个：`ontology.yaml`（必需）与 `securities.yaml`
- *   （行为安全管控，可选）；**只有实际同步到库里的文件才出现在左侧列表**；
+ * - 本体文件恒在根层、固定两个：`ontology.yaml` 与 `securities.yaml`
+ *   （行为安全管控，自 2026-10-17 起为必需文件，两个都会出现在左侧列表）；
  * - 两个文件的全文**都随详情响应返回**（契约 §10.2），因此切换文件是纯前端行为，
  *   **不额外发请求**（与 SKILL 详情逐文件请求不同：本体没有编辑通道，无需按需取）；
  * - **只读**：本组件 MUST NOT 出现任何输入控件（`input`/`textarea`/`contenteditable`）
@@ -18,9 +18,14 @@
  * - 删除是破坏性操作，走 `ConfirmDialog` 二次确认（目录整体移除）；本体
  *   **不被数字人引用**，故无需引用清单（区别于 SKILL 的 `FR-042`）。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { deleteOntology, type OntologyDetail } from '../../api/ontologies'
 import type { ErrorInfo } from '../../api/types'
+import {
+  ontologyDisplayName,
+  ontologyNameOf,
+  ontologyScenarioOf,
+} from '../../utils/ontology-name'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import FileTree from '../common/FileTree.vue'
@@ -44,15 +49,22 @@ const localError = ref<ErrorInfo | null>(null)
 /** 当前选中文件（默认本体正文，与 SKILL 详情默认 `SKILL.md` 同一取向） */
 const selected = ref(ONTOLOGY_PATH)
 
-/** 左侧文件列表：只列实际存在的文件（未同步安全管控时只有一行） */
+/**
+ * 详情标题：与卡片同一口径 `{场景名}-{本体名}`（2026-10-17）。
+ * 只显示本体名时，同名本体分属不同场景的两次查看在标题上无法区分。
+ */
+const displayName = computed<string>(() =>
+  props.ontology ? ontologyDisplayName(props.ontology) : '本体详情',
+)
+
+/** 左侧文件列表：两个文件恒在（均为必填文件） */
 const files = computed<Array<{ path: string; size: number }>>(() => {
   const target = props.ontology
   if (!target) return []
-  const list = [{ path: ONTOLOGY_PATH, size: target.size }]
-  if (target.securities_content !== null) {
-    list.push({ path: SECURITIES_PATH, size: target.securities_size })
-  }
-  return list
+  return [
+    { path: ONTOLOGY_PATH, size: target.size },
+    { path: SECURITIES_PATH, size: target.securities_size },
+  ]
 })
 
 /** 选中文件的正文与大小（两个文件都在详情里，无需再取） */
@@ -60,7 +72,7 @@ const current = computed<{ path: string; size: number; text: string }>(() => {
   const target = props.ontology
   if (!target) return { path: selected.value, size: 0, text: '' }
   return selected.value === SECURITIES_PATH
-    ? { path: SECURITIES_PATH, size: target.securities_size, text: target.securities_content ?? '' }
+    ? { path: SECURITIES_PATH, size: target.securities_size, text: target.securities_content }
     : { path: ONTOLOGY_PATH, size: target.size, text: target.content }
 })
 
@@ -79,31 +91,16 @@ const metaRows = computed<Array<{ label: string; value: string }>>(() => {
   const text = (value: string | number | null | undefined): string =>
     value === null || value === undefined || value === '' ? '—' : String(value)
   return [
-    { label: '场景', value: `${target.scenario}（ID ${text(meta.scenario_id)}）` },
-    { label: '本体', value: `${target.name}（ID ${text(meta.ontology_id)}）` },
+    { label: '场景', value: `${text(ontologyScenarioOf(target))}（ID ${text(meta.scenario_id)}）` },
+    { label: '本体', value: `${text(ontologyNameOf(target))}（ID ${text(meta.ontology_id)}）` },
     { label: '创建时间', value: text(meta.created_at) },
     { label: '部署版本', value: text(meta.deployed_version) },
-    { label: '来源', value: target.source },
+    // 来源不再是服务端字段（2026-10-17）：本体只可能来自本体市场，场景名已在上方
+    { label: '来源', value: '本体市场' },
     { label: '安装 / 更新', value: `${target.installed_at} / ${target.updated_at}` },
-    {
-      label: '文件',
-      value: target.has_securities
-        ? 'ontology.yaml + securities.yaml（均已同步）'
-        : '仅 ontology.yaml（市场侧未配置安全管控）',
-    },
+    { label: '文件', value: 'ontology.yaml + securities.yaml（均已同步）' },
   ]
 })
-
-// 详情换了对象（刷新后）时：当前选中的安全管控文件若已不存在，回落到本体正文
-watch(
-  () => props.ontology,
-  (next) => {
-    if (!next) return
-    if (selected.value === SECURITIES_PATH && next.securities_content === null) {
-      selected.value = ONTOLOGY_PATH
-    }
-  },
-)
 
 async function remove(): Promise<void> {
   const target = props.ontology
@@ -111,7 +108,8 @@ async function remove(): Promise<void> {
   deleting.value = true
   localError.value = null
   try {
-    await deleteOntology(target.ontology_dir, target.scenario)
+    // 两个名字都从 metadata 取（服务端不再下发副本字段，2026-10-17）
+    await deleteOntology(ontologyScenarioOf(target), ontologyNameOf(target))
     confirmDelete.value = false
     emit('deleted')
   } catch (err) {
@@ -127,7 +125,7 @@ async function remove(): Promise<void> {
   <section class="ontology-viewer" aria-labelledby="ontology-viewer-title">
     <header class="ontology-viewer__header">
       <button type="button" class="btn" data-test="back" @click="emit('back')">← 返回列表</button>
-      <h2 id="ontology-viewer-title">{{ ontology?.name ?? '本体详情' }}</h2>
+      <h2 id="ontology-viewer-title">{{ displayName }}</h2>
       <button
         type="button"
         class="btn"
@@ -177,10 +175,8 @@ async function remove(): Promise<void> {
     <ConfirmDialog
       v-model:open="confirmDelete"
       danger
-      :title="`删除本体 ${ontology?.name ?? ''}`"
-      :message="`将同时删除库内的 ${ontology?.ontology_dir ?? ''}/ 目录（ontology.yaml${
-        ontology?.has_securities ? ' 与 securities.yaml' : ''
-      }）；如需恢复，可从本体市场重新导入。`"
+      :title="`删除本体 ${displayName}`"
+      :message="`将同时删除库内的 ${ontologyScenarioOf(ontology)}/${ontologyNameOf(ontology)}/ 目录（ontology.yaml 与 securities.yaml）；如需恢复，可从本体市场重新导入。`"
       confirm-label="删除"
       @confirm="remove"
     />

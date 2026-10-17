@@ -35,10 +35,10 @@ platform-data/
 │   ├── index.json            # SKILL 库索引（元数据）
 │   └── {skill-name}/         # SKILL 正文与附件（与库中 SKILL 一一对应）
 ├── onto_market/              # 本体库（§10，2026-10-03）：结构与市场前两级一致
-│   ├── index.json            # 本体索引（含 6 项 metadata 与两个内容指纹，§9）
+│   ├── index.json            # 本体索引（metadata + 两个内容指纹 + 时间；身份由 metadata 派生，§9）
 │   └── {场景}/{本体}/
 │       ├── ontology.yaml     # 本体正文（只读快照，市场侧导入）
-│       └── securities.yaml   # 行为安全管控（可选，随本体一并同步）
+│       └── securities.yaml   # 行为安全管控（必需，随本体一并同步）
 ├── agents/
 │   └── {agent-name}.json     # 数字人设计态（含五类配置）
 ├── users/
@@ -209,7 +209,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 ## 5. 数字人（设计态）
 
-**存放**：`platform-data/agents/{name}.json`。**设计产物是一个结构化 JSON**（`FR-018`），五类配置齐全。
+**存放**：`platform-data/agents/{name}.json`。**设计产物是一个结构化 JSON**（`FR-018`），六类配置齐全（SOUL / 内置工具 / MCP 服务 / SKILL / 本体 / 文件空间场景）。
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
@@ -218,6 +218,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `enabled_tools` | string[] | ✅ | 可为空数组；每项 MUST 在内置工具目录中 | 未配置以空集合表示，MUST NOT 缺字段（`FR-018`）。引自目录（`FR-004`）；清单外引用 → 保存/部署被拒（`FR-019`） |
 | `mcp_services` | `{name}[]` | ✅ | 可为空数组；每项 MUST 在 MCP 服务清单中 | **以名称引用**，MUST NOT 内嵌连接信息（`FR-018`） |
 | `skills` | `{name}[]` | ✅ | 可为空数组；每项 MUST 在 SKILL 库中 | **以名称引用**，MUST NOT 内嵌技能正文（`FR-018`） |
+| `ontologies` | `{场景名}/{本体名}[]` | ✅ | 可为空数组；每项**恰好一个 `/`**、两段非空、无重复；每项 MUST 在本体库中 | **以两段引用**本体（2026-10-17，`FR-064`），MUST NOT 内嵌 `ontology.yaml` / `securities.yaml` 正文；清单外引用 → `ADM_AGENT_INVALID_REF`。部署时按此键物化到 `ontology/{场景}/{本体}/` |
 | `scenario` | object | ✅ | — | 文件空间搭配（`FR-020`） |
 | `scenario.scenario` | string | ✅ | 非空 | 场景名 |
 | `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..`；**MUST 完整包含预定义目录 `算法规则`**（2026-09-19 新增：平台硬编码、不可移除） | "数据准备"二级目录清单 |
@@ -233,7 +234,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 **校验规则**（保存时）：
 1. `soul` 非空（`FR-019`）。
-2. `enabled_tools` / `mcp_services` / `skills` 三类**只能从平台统一清单中选择**，MUST NOT 接受清单外的不存在引用（`FR-019`）。
+2. `enabled_tools` / `mcp_services` / `skills` / `ontologies` 四类**只能从平台统一清单中选择**，MUST NOT 接受清单外的不存在引用（`FR-019`）；`ontologies` 另校验**命名空间格式**（两段、非空、不重复），格式非法即 `VALIDATION_FAILED`。
 3. 引用的内置工具已下线 → 标记异常并指明失效工具名，**保存与部署均 MUT 被拒**（`FR-013`）。
 4. 名称冲突或非法 → 拒绝并说明原因（`FR-015`）。
 5. 场景：场景名非空且合法；目录清单拒绝空值 / 重复 / 含分隔符 / `..`；字段约束须满足上表约束（**孤儿键**——引用了目录清单外的目录——即拒，不是可忽略的冗余）。
@@ -248,7 +249,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 （新建）→ 设计态已保存 ──┬─→ 已部署（与部署清单一致）
                         └─→ 已修改未部署（合法状态，规格假设）
 
-任一时刻可进入「异常态」：引用了失效对象（已下线工具 / 编排中已移除或改名的 MCP 服务 / 已不存在的 SKILL）
+任一时刻可进入「异常态」：引用了失效对象（已下线工具 / 编排中已移除或改名的 MCP 服务 / 已不存在的 SKILL / 已删除或改名的本体）
   └─ 异常态 MUST 可见（卡片异常态 + 全局异常项汇总），MUST NOT 被静默忽略或部署
 ```
 
@@ -329,7 +330,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 ## 8. 物化产物（`.opt-agent/` 落盘格式）
 
-一次部署后，每个数字人目录的内容如下。**这四个文件 + 技能目录的格式 MUST 与运行环境既有读取口径完全一致**（`agent-backend/src/domain/agent-instance.ts` / `dirs.ts`）。
+一次部署后，每个数字人目录的内容如下。**这四个文件 + 技能目录 + 本体目录的格式 MUST 与运行环境既有读取口径完全一致**（`agent-backend/src/domain/agent-instance.ts` / `dirs.ts`）。
 
 ```text
 .opt-agent/users/{uid}/agents/{agent}/
@@ -337,7 +338,10 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 ├── TOOL.json        ← { "enabled": ["read_file", ...] }
 ├── MCP.json         ← { "servers": [ { name, transport, url|command, file_args } ] }
 ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": ["…"], "data_prep_fields": { … }, "data_prep_uploads": { … } }
-└── skills/{name}/SKILL.md
+├── skills/{name}/SKILL.md
+└── ontology/{场景}/{本体}/
+    ├── ontology.yaml
+    └── securities.yaml
 ```
 
 **字段映射（设计态 → 物化）**：
@@ -348,6 +352,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
 | `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `async_tools` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `async_tools` / `allowed_tools`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
+| `ontologies[]`（`{场景名}/{本体名}`） | `ontology/{场景}/{本体}/ontology.yaml` + `securities.yaml` | 从本体库**整包复制这两个必需文件**（原样字节，2026-10-17，`FR-064`）；与 `skills/` 平级，不混进四件套；库内缺任一文件即**预检失败**（`ADM_ONTOLOGY_NOT_FOUND`，零写入） |
 | `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`）；`data_prep_uploads`（2026-10-13 新增）同样**仅在非空时写入**（未配置的目录不出现键），产物随数字人目录**整体覆盖**，平台侧未配置则无该键，运行环境据此回落平台默认 `.csv` + `.xlsx` |
 
 **已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url` 即平台侧调用配置里登记的唯一连接地址）。
@@ -356,32 +361,31 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 ## 9. 本体（本体库，2026-10-03）
 
-**存放**：`platform-data/onto_market/index.json`（索引）+ `platform-data/onto_market/{场景}/{本体}/` 下的 **`ontology.yaml`（必需）与 `securities.yaml`（可选）**。
+**存放**：`platform-data/onto_market/index.json`（索引）+ `platform-data/onto_market/{场景}/{本体}/` 下的 **`ontology.yaml` 与 `securities.yaml`（两个都是必需文件）**。
 
-**来源**：本体市场（optonto `.data/onto_market`，平台**只读**）中每个 `{场景}/{本体}/` 目录下的同名文件——`ontology.yaml`（本体正文与 6 项 metadata）+ `securities.yaml`（行为安全管控：`confirm` 需人工确认 / `confirm_content` 弹窗文案 / `scope` 权限范围，2026-10-03 扩展）。其余一律不导入：`data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/`（`FR-060`）。
+**来源**：本体市场（optonto `.data/onto_market`，平台**只读**）中每个 `{场景}/{本体}/` 目录下的同名文件——`ontology.yaml`（本体正文与 6 项 metadata）+ `securities.yaml`（行为安全管控：`confirm` 需人工确认 / `confirm_content` 弹窗文案 / `scope` 权限范围，2026-10-03 扩展，**2026-10-17 转为必需**）。其余一律不导入：`data_engines.yaml`、`meta.json`、`functions/`、`ontology_versions/`、`skills/`（`FR-060`）。
 
-**身份**：`scenario`（一级目录名）+ `ontology_dir`（二级目录名）的组合；同一目录名可以存在于不同场景。存储路径与市场保持一致，便于人工对照。
+**身份**：`scenario`（一级目录名）+ `ontology_dir`（二级目录名）的组合；同一目录名可以存在于不同场景。**这两个值不单独落盘**——分别等于 `metadata.scenario_name` / `metadata.ontology_name`（2026-10-17 去冗余），入库时强校验二者与市场目录名完全一致。
 
-### 9.1 索引条目（`index.json` 的 `items[]`）
+### 9.1 索引条目（`index.json` 的 `items[]`，2026-10-17 去冗余）
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
-| `scenario` | string | ✅ | 单个路径段（≤128 字符，不含分隔符/`..`/控制字符；**允许中文与全角括号**） | 市场一级目录名 |
-| `ontology_dir` | string | ✅ | 同上 | 市场二级目录名；本体身份的稳定部分 |
-| `name` | string | ✅ | 非空 | 展示名：`metadata.ontology_name`，缺失时兜底为 `ontology_dir` |
-| `metadata` | object | ✅ | 6 个键，缺项为 `null` | `created_at` / `deployed_version` / `scenario_name` / `scenario_id` / `ontology_name` / `ontology_id` |
-| `source` | string | ✅ | 恒为 `onto_market:{场景}` | 来源标记（本体只能从市场来） |
-| `hash` | string | ✅ | sha256 hex | 导入时 `ontology.yaml` 的内容指纹（"市场是否变化"的判据之一） |
-| `securities_hash` | string \| null | ✅ | sha256 hex 或 `null` | 导入时 `securities.yaml` 的内容指纹；该本体未配置安全管控时为 `null`（判据之二） |
+| `metadata` | object | ✅ | 6 个键；`scenario_name` / `ontology_name` 必须非空且与市场目录名完全相同 | `created_at` / `deployed_version` / `scenario_name` / `scenario_id` / `ontology_name` / `ontology_id` |
+| `ontology_hash` | string | ✅ | sha256 hex | 导入时 `ontology.yaml` 的内容指纹（"市场是否变化"的判据之一） |
+| `securities_hash` | string | ✅ | sha256 hex | 导入时 `securities.yaml` 的内容指纹（判据之二；必填文件故恒有值） |
 | `installed_at` | string | ✅ | ISO8601 | 首次导入时间（**更新不改**） |
 | `updated_at` | string | ✅ | ISO8601 | 最近一次导入/更新时间 |
+
+**没有派生字段（2026-10-17）**：曾经在视图层派生 `scenario` / `ontology_dir` / `name` / `source` 四个副本，但它们只服务卡片文案与 URL，而两者现在都直读 `metadata`——副本已删除，**落盘、内存视图、API 响应三处形状一致**。身份的唯一来源是 `metadata.scenario_name` + `metadata.ontology_name`；寻址（§10.2/§10.3）就是 `/{scenario_name}/{ontology_name}` 两段路径。
 
 ### 9.2 关键约束
 
 - **只读**：平台 MUST NOT 提供任何编辑本体文件的端点（`FR-059`）；唯一写入口是"从本体市场导入/更新"，写入的是市场快照。`securities.yaml` 同理——**平台不解析其语义**（原样存取与展示），安全管控的执行仍在本体侧/运行环境。
-- **变化检测**：`hash`（sha256 of `ontology.yaml`）与 `securities_hash`（sha256 of `securities.yaml`，`null` 表示无该文件）**都与市场现算值一致**才算 `unchanged`，任一不同（含市场新增/移除安全管控）即 `changed`；`ontology.yaml` 无效或缺失/超限 → `invalid`（原因可读，单条失效不影响其它条目）。
-- **存量记录**：扩展前导入的记录没有 `securities_hash`，读取时归一为 `null`——若市场有 `securities.yaml` 则自然判为 `changed`，一次更新即补齐（MUST NOT 因缺字段报错）。
-- **原子性**：每个文件独立走 `PlatformStore.writeText`（临时文件 → `fsync` → `rename`）；写入顺序为**先文件、后索引**，中途中断只表现为"导入未生效"，不会产生"卡片在、文件缺"的幽灵条目。市场侧移除安全管控时，更新会显式清除库内副本（`PlatformStore.remove`）。
+- **身份一致（2026-10-17）**：入库时 `metadata.scenario_name` / `metadata.ontology_name` MUST 与市场路径完全一致，不一致即拒绝导入。理由：索引不再存目录名，身份只来自这两个字段；允许漂移会拼出指向不存在目录的路径——`read()` 报"文件缺失"、`listAll()` 把记录当索引残留过滤掉（表现为本体无声消失）。
+- **两个文件必需（2026-10-17）**：市场侧缺 `ontology.yaml` **或** `securities.yaml` → 该条 `invalid`（原因可读），不可导入；库内缺任一文件 → 详情报 `ADM_ONTOLOGY_NOT_FOUND`，不降级为"未配置"。
+- **变化检测**：`ontology_hash`（sha256 of `ontology.yaml`）与 `securities_hash`（sha256 of `securities.yaml`）**都与市场现算值一致**才算 `unchanged`，任一不同即 `changed`；市场条目标 `invalid` 时不可导入/更新。
+- **原子性**：每个文件独立走 `PlatformStore.writeText`（临时文件 → `fsync` → `rename`）；写入顺序为**先文件、后索引**，中途中断只表现为"导入未生效"，不会产生"卡片在、文件缺"的幽灵条目。
 - **一致性**：`listAll()` 以索引为准并按目录实际存在过滤（与技能库同一口径）。
 - **上限**：单个文件 ≤ 16MB（全项目单文件口径；实测 `ontology.yaml` 约 30KB、`securities.yaml` 约 1.5KB）。
 - **不参与引用**：本体**不被数字人引用**（本期范围），故删除无需引用清单（区别于 SKILL 的 `FR-042`）。

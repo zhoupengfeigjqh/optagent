@@ -75,6 +75,7 @@ describe('api/agents', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
+      ontologies: [],
       scenario: { scenario: 's', data_prep_dirs: [], data_prep_fields: {} },
     })
     expect(lastCall().init.method).toBe('POST')
@@ -95,6 +96,7 @@ describe('api/agents', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
+      ontologies: [],
       scenario: { scenario: 's', data_prep_dirs: [], data_prep_fields: {} },
       revision: 3,
     })
@@ -245,7 +247,7 @@ describe('api/skills', () => {
 })
 
 describe('api/ontologies（§10，2026-10-03）', () => {
-  it('列表 / 详情 / 删除走 §10.1~§10.3（身份 = 场景 + 目录名，场景走查询参数）', async () => {
+  it('列表 / 详情 / 删除走 §10.1~§10.3（身份 = 场景名 + 本体名，两段都在路径上）', async () => {
     const ontologies = await import('./ontologies')
 
     await ontologies.listOntologies(2)
@@ -254,12 +256,13 @@ describe('api/ontologies（§10，2026-10-03）', () => {
     const dir = encodeURIComponent('原材料采购和库存')
     const scenario = encodeURIComponent('生产调度')
 
-    await ontologies.fetchOntology('原材料采购和库存', '生产调度')
-    expect(lastCall().url).toBe(`/api/admin/ontologies/${dir}?scenario=${scenario}`)
+    // URL 口径（2026-10-17）：`{scenario_name}/{ontology_name}`，场景在前
+    await ontologies.fetchOntology('生产调度', '原材料采购和库存')
+    expect(lastCall().url).toBe(`/api/admin/ontologies/${scenario}/${dir}`)
 
-    await ontologies.deleteOntology('原材料采购和库存', '生产调度')
+    await ontologies.deleteOntology('生产调度', '原材料采购和库存')
     expect(lastCall().init.method).toBe('DELETE')
-    expect(lastCall().url).toBe(`/api/admin/ontologies/${dir}?scenario=${scenario}`)
+    expect(lastCall().url).toBe(`/api/admin/ontologies/${scenario}/${dir}`)
   })
 
   it('本体市场：列表 / 导入 / 更新走 §10.4~§10.6', async () => {

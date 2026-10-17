@@ -22,12 +22,18 @@ export const AGENT_NAME_MAX_LENGTH = 64
 
 export const AGENT_NAME_HINT = '不得含路径分隔符或 “..”，且不可与既有数字人重名'
 
-/** 五类配置在编辑器内的分区（页签）标识 */
+/**
+ * 五类配置在编辑器内的分区（页签）标识。
+ *
+ * 「本体」自 2026-10-17 起为其中一类（`FR-058`）：与 SKILL 同理，引用值与
+ * 候选清单来自平台本体库，部署时才把两个文件物化进运行环境。
+ */
 export const AGENT_DESIGN_TABS = [
   { id: 'soul', label: 'SOUL' },
   { id: 'tools', label: '内置工具' },
   { id: 'mcp', label: 'MCP 服务' },
   { id: 'skills', label: 'SKILL' },
+  { id: 'ontologies', label: '本体' },
   { id: 'scenario', label: '文件空间场景' },
 ] as const
 

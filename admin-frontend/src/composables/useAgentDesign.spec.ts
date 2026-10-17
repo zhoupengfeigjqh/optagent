@@ -38,6 +38,7 @@ const DESIGN = {
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
   skills: [],
+  ontologies: [],
   scenario: {
     scenario: '生产',
     data_prep_dirs: ['生产计划'],
@@ -73,6 +74,7 @@ describe('emptyDraft', () => {
       enabled_tools: [],
       mcp_services: [],
       skills: [],
+      ontologies: [],
       scenario: {
         scenario: '',
         data_prep_dirs: ['算法规则'],
@@ -80,6 +82,10 @@ describe('emptyDraft', () => {
         data_prep_uploads: {},
       },
     })
+  })
+
+  it('本体引用是草稿的一部分：默认空数组（2026-10-17）', () => {
+    expect(emptyDraft().ontologies).toEqual([])
   })
 })
 

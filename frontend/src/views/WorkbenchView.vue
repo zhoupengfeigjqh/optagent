@@ -197,6 +197,20 @@ function onPanelDownload(reference: FileReference): void {
   session.preview.download(reference)
 }
 
+/**
+ * 头部入口：放大 ↔ 缩小（011）。
+ *
+ * 接线而已：状态与判据都在会话态（`usePreview`），本视图不发请求、不推导"能不能放大"。
+ */
+function onToggleMaximize(): void {
+  session.preview.toggleMaximize()
+}
+
+/** 放大态下按 Esc（本页或同源 iframe 内）：只退出放大，不触发"Esc 中断本轮回答" */
+function onRestoreMaximize(): void {
+  session.preview.restoreMaximize()
+}
+
 /** 删除文件：成功后若正看着它则收敛回列表态；失败已由 toast 提示，界面保持现状 */
 async function onRemoveFile(reference: FileReference): Promise<void> {
   const removed = await session.workspace.remove(reference)
@@ -207,7 +221,10 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
 </script>
 
 <template>
-  <AppShell :preview-open="panelOpen">
+  <AppShell
+    :preview-open="panelOpen"
+    :preview-maximized="session.preview.maximized.value"
+  >
     <!-- 左栏：历史会话（US5） -->
     <template #history>
       <HistorySidebar
@@ -241,8 +258,12 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
         :target="session.preview.target.value"
         :content="session.preview.content.value"
         :content-loading="session.preview.loading.value"
+        :maximize-visible="session.preview.maximizeToggleVisible.value"
+        :maximized="session.preview.maximized.value"
         @close="onClosePanel"
         @back="onBackToList"
+        @toggle-maximize="onToggleMaximize"
+        @restore-maximize="onRestoreMaximize"
         @toggle-space="onToggleSpace"
         @toggle-dir="onToggleDir"
         @preview="onOpenFile"

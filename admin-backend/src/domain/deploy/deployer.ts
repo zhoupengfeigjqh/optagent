@@ -20,6 +20,7 @@ import type { UnifiedCatalog } from '../config-center/unified-catalog.js';
 import type { UserLinkService } from '../config-center/user-links.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
+import type { OntologyStore } from '../ontology/store.js';
 import type { DeployHistoryService, DeployUserRecord } from './history.js';
 import type { DeployManifestService, ManifestDiffEntry } from './manifest.js';
 import { buildUserArtifacts, type MaterializeContext } from './materialize.js';
@@ -34,6 +35,8 @@ export interface DeployerDeps {
   users: UserLinkService;
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
+  /** 本体库（2026-10-17）：物化与预检共用 */
+  ontologies: OntologyStore;
   catalog: UnifiedCatalog;
   writer: OptAgentWriter;
   manifest: DeployManifestService;
@@ -89,6 +92,7 @@ export class Deployer {
     const context: MaterializeContext = {
       mcpConfigs: this.deps.mcpConfigs,
       skills: this.deps.skills,
+      ontologies: this.deps.ontologies,
     };
 
     const results: DeployUserRecord[] = [];
@@ -221,6 +225,19 @@ export class Deployer {
       index: snapshot.index,
       toolsUnavailableReason: snapshot.toolsUnavailableReason,
       isWritable: (userId) => this.isUserTargetWritable(userId),
+      // 本体快照完整性：`read()` 会校验两个必需文件，缺失即返回可读原因
+      ontologyIssue: (ref) => {
+        const parts = ref.split('/');
+        if (parts.length !== 2) {
+          return `本体引用形状非法（应为「场景名/本体名」）：${ref}`;
+        }
+        try {
+          this.deps.ontologies.read(parts[0]!, parts[1]!);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      },
     });
     return { errors, targets, snapshot };
   }

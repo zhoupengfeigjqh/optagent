@@ -49,6 +49,9 @@ export interface TemplateValues {
  * 前 5 项与改造前等价（顺序不变）；`read_skill` 为 **2026-09-23 新增**——
  * 此前 SKILL 只有"frontmatter 摘要进 System Prompt"这一条通道，正文与 `references/`
  * 附件没有任何读取入口（技能在 `agents/{agent}/skills/`，不在 `FileAccess` 的三空间沙箱内）。
+ *
+ * `grep_skill` 为 **2026-10-17 新增**——`read_skill` 只解决"读得到"，技能内容的
+ * **检索**仍无入口（`grep_files` 只覆盖用户三空间），技能一多就只能逐个文件人工翻。
  */
 export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
   {
@@ -143,6 +146,23 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
         path: { type: 'string', description: '技能内相对路径，省略则为 SKILL.md' },
         offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
         limit: { type: 'number', description: '本次最多返回字节数' },
+      },
+    },
+    writable: false,
+  },
+  {
+    name: 'grep_skill',
+    label: '检索技能内容',
+    description_template:
+      '在本数字人所配置技能的文件（SKILL.md 与 references/ 等）中按正则检索关键词，' +
+      '返回「技能名/文件路径:行号: 内容」，路径可直接回填给 read_skill；省略 skill 则检索全部技能。' +
+      '技能名取自系统提示中的「技能」小节。xlsx/pdf 等二进制会被跳过（请改用 read_skill）。',
+    parameters: {
+      type: 'object',
+      required: ['pattern'],
+      properties: {
+        pattern: { type: 'string', description: '检索词或正则表达式' },
+        skill: { type: 'string', description: '限定技能名（可选，省略则检索全部技能）' },
       },
     },
     writable: false,
