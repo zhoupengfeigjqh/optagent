@@ -43,7 +43,6 @@ const SERVICE: McpServiceDetail = {
   file_args: { ocr_image: { image: 'url' } },
   confirmation: 'always',
   rules_fields: { ocr_image: 'rules' },
-  async_tools: ['ocr_image'],
   allowed_tools: ['ocr_image', 'gone_tool'],
   missing_tools: ['gone_tool'],
   // 详情回显的只有掩码：本弹窗 MUST NOT 把它带回去
@@ -124,7 +123,6 @@ beforeEach(() => {
     file_args: {},
     confirmation: 'always',
     rules_fields: {},
-    async_tools: [],
     allowed_tools: ['ocr_image', 'ocr_pdf'],
     headers: { 'X-MCP-Token': '6UuE…F3Z' },
     updated_at: '2026-10-15T00:00:00.000Z',
@@ -185,7 +183,6 @@ describe('McpToolScopeDialog —— 保存', () => {
     // 全量替换语义：其余字段原样带上，否则会被服务端补成默认值
     expect(payload.file_args).toEqual({ ocr_image: { image: 'url' } })
     expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
-    expect(payload.async_tools).toEqual(['ocr_image'])
     expect(payload.confirmation).toBe('always')
     expect(payload.description).toBe('OCR 识别服务')
     expect(payload.transport).toBe('http')

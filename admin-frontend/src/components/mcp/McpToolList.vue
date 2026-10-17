@@ -54,6 +54,32 @@ const byName = computed(() => new Map(props.tools.map((tool) => [tool.name, tool
 const rows = computed<string[]>(() =>
   props.allowedTools.length > 0 ? props.allowedTools : props.tools.map((tool) => tool.name),
 )
+/**
+ * 「可回写结果」标注的悬停说明。
+ *
+ * 判据与运行环境**同一口径**：工具的 `inputSchema.properties` 里声明了 `resultUrl`，
+ * 运行环境就会为它注入签名回写地址（见 `agent-backend/src/infra/mcp/async-result-url.ts`）。
+ */
+const ASYNC_TOOL_HINT =
+  '该工具的入参声明了 resultUrl：调用时运行环境会注入签名回写地址，服务算完可把结果写回文件后台（临时空间/后台产出）'
+
+/** 该工具的入参 schema 是否声明了 `resultUrl`（只认 `properties`，`required` 里出现不算） */
+function declaresResultUrl(parameters: unknown): boolean {
+  if (typeof parameters !== 'object' || parameters === null) return false
+  const properties = (parameters as { properties?: unknown }).properties
+  if (typeof properties !== 'object' || properties === null) return false
+  return 'resultUrl' in properties
+}
+
+/**
+ * 可回写结果的工具名（用于标绿 + 紧贴工具名加「（可回写结果）」）。
+ *
+ * 失效项（`missingTools`）不在 `tools` 里，故天然不会被标绿——工具都不存在了，
+ * 谈"能不能回写"没有意义。
+ */
+const asyncTools = computed(
+  () => new Set(props.tools.filter((tool) => declaresResultUrl(tool.parameters)).map((t) => t.name)),
+)
 </script>
 
 <template>
@@ -62,7 +88,8 @@ const rows = computed<string[]>(() =>
       <p class="mcp-tool-list__caption">
         本清单为该服务<strong>对数字人可见的工具</strong>；这是打开本详情时的实时探测结果，
         服务后启动或工具改版后不会自动更新。<strong>点「重新探测」</strong>会重取清单并弹出
-        工具范围窗，在那里增减可见工具。
+        工具范围窗，在那里增减可见工具。工具名<strong>标绿并带「（可回写结果）」</strong>表示
+        其入参声明了 <code>resultUrl</code>：结果可回写到文件后台。
       </p>
       <button
         type="button"
@@ -104,9 +131,19 @@ const rows = computed<string[]>(() =>
         class="mcp-tool-list__item"
         :class="{ 'mcp-tool-list__item--missing': props.missingTools.includes(toolName) }"
       >
-        <p class="mcp-tool-list__name mono">
-          <span v-if="props.missingTools.includes(toolName)" aria-hidden="true">⚠</span>
-          {{ toolName }}
+        <p
+          class="mcp-tool-list__name mono"
+          :class="{ 'mcp-tool-list__name--async': asyncTools.has(toolName) }"
+        >
+          <span
+            v-if="props.missingTools.includes(toolName)"
+            class="mcp-tool-list__warn"
+            aria-hidden="true"
+          >⚠</span>{{ toolName }}<span
+            v-if="asyncTools.has(toolName)"
+            class="mcp-tool-list__flag"
+            :title="ASYNC_TOOL_HINT"
+          >（可回写结果）</span>
           <span v-if="props.missingTools.includes(toolName)" class="mcp-tool-list__badge">
             已不存在
           </span>
@@ -190,6 +227,24 @@ const rows = computed<string[]>(() =>
   margin: 0;
   font-size: var(--font-size-sm);
   font-weight: 600;
+  /* 标注必须**紧贴**工具名：用 flex 排布，元素间不产生模板空白（零 gap） */
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+/* 声明了 resultUrl 的工具：工具名整体标绿（颜色 + 文字标注双通道，原则四） */
+.mcp-tool-list__name--async {
+  color: var(--color-status-success);
+}
+
+/* flex 下不再有模板空白，失效标记与工具名之间的间距显式给出 */
+.mcp-tool-list__warn {
+  margin-right: var(--space-1);
+}
+
+.mcp-tool-list__flag {
+  font-weight: 500;
 }
 
 .mcp-tool-list__desc {

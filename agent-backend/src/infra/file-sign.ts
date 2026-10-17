@@ -92,8 +92,14 @@ export function mintSignedUrl(
  * 一张"读某文件"的签名**不能被用于写**（否则权限被放大）。
  * ------------------------------------------------------------------ */
 
-/** 写方向默认时效：须 ≥ 任务最长时长（算法任务可能数十分钟，见契约 §10.3） */
-export const DEFAULT_PUT_TTL_MS = DEFAULT_TTL_MS;
+/**
+ * 写方向默认时效：**12h**（须 ≥ 任务最长时长，算法任务可能数十分钟，见契约 §10.3）。
+ *
+ * 与读方向（24h）刻意不同：回写地址由运行环境**每次工具调用现铸**，服务只需在任务
+ * 完成后尽快回写；12h 足够覆盖隔夜长任务，又不至于让一张"能往用户空间写文件"的
+ * 票据长期有效。
+ */
+export const DEFAULT_PUT_TTL_MS = 12 * 60 * 60 * 1000;
 
 function putPayloadOf(userId: string, dir: string, exp: number): string {
   return `put\n${userId}\n${dir}\n${exp}`;

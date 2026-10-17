@@ -58,7 +58,7 @@ export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Reco
     if (!config.url) return null;
     entry.url = config.url;
   }
-  // 请求头（2026-10-08）：空对象是缺省语义，不写空壳（与 file_args/async_tools 同一口径）。
+  // 请求头（2026-10-08）：空对象是缺省语义，不写空壳（与 file_args 同一口径）。
   // **明文落运行环境**：运行环境要按原样发送（信任边界与 `agent-backend/.env.local` 同级，
   // 都是本机私产）；平台侧不回显明文，物化是它唯一的"出平台"通道。
   if (Object.keys(config.headers).length > 0) entry.headers = config.headers;
@@ -68,9 +68,6 @@ export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Reco
   // 算法规则参数设置：空对象是缺省语义，不写空壳（同上）。
   // 不改变是否走 HITL——不在确认范围内的工具的运行环境侧天然不生效（未被包装）。
   if (Object.keys(config.rules_fields).length > 0) entry.rules_fields = config.rules_fields;
-  // 异步工具声明（R11）：空数组是缺省语义，不写空壳（与上两者同一口径）。
-  // 声明后运行环境为这些工具注入 `resultUrl`，并接收服务算完后的结果回写。
-  if (config.async_tools.length > 0) entry.async_tools = config.async_tools;
   // 工具白名单（2026-10-03）：非空才写（空 = 不限制，即白名单上线前的存量语义）。
   // 运行环境据此只把白名单里的工具挂给数字人，其余工具对模型不可见。
   if (config.allowed_tools.length > 0) entry.allowed_tools = config.allowed_tools;

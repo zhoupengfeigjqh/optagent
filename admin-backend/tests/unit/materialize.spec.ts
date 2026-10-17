@@ -133,7 +133,7 @@ describe('buildMcpServerEntry', () => {
     });
   });
 
-  it('headers 为空时不写该字段（保持产物精简，与 file_args/async_tools 同口径）', () => {
+  it('headers 为空时不写该字段（保持产物精简，与 file_args 同口径）', () => {
     configure('ocr');
     expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('headers');
   });
@@ -199,15 +199,22 @@ describe('buildMcpServerEntry', () => {
     expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills, ontologies })).not.toHaveProperty('allowed_tools');
   });
 
-  it('async_tools 缺省为 []：不写该字段（产物精简）；声明后原样物化到 MCP.json（R11）', () => {
-    configure('ocr');
-    expect(buildMcpServerEntry('ocr', { mcpConfigs, skills, ontologies })).not.toHaveProperty('async_tools');
-
-    configure('svc-async', { async_tools: ['submit_job', 'get_status'] });
-    expect(buildMcpServerEntry('svc-async', { mcpConfigs, skills, ontologies })?.async_tools).toEqual([
-      'submit_job',
-      'get_status',
-    ]);
+  it('async_tools（2026-10-17 移除）：存量文档里的该键 MUST NOT 物化进 MCP.json', () => {
+    // 异步能力改由工具入参 schema 是否声明 `resultUrl` 自动判定，平台侧不再有该键
+    store.writeJson('mcp-services.json', {
+      items: {
+        'svc-async': {
+          name: 'svc-async',
+          description: 'x',
+          transport: 'http',
+          url: OCR_URL,
+          async_tools: ['submit_job', 'get_status'],
+        },
+      },
+    });
+    expect(
+      buildMcpServerEntry('svc-async', { mcpConfigs, skills, ontologies }),
+    ).not.toHaveProperty('async_tools');
   });
 });
 

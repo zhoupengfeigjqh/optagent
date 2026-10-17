@@ -144,4 +144,8 @@ describe('mintPutUrl', () => {
     );
     expect(Number(url.searchParams.get('exp'))).toBe(NOW + DEFAULT_PUT_TTL_MS);
   });
+
+  it('写方向 TTL 定为 12h（与读方向 24h 刻意不同）', () => {
+    expect(DEFAULT_PUT_TTL_MS).toBe(12 * 60 * 60 * 1000);
+  });
 });

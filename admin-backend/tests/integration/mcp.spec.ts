@@ -187,7 +187,7 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
     expect(res.json().affected_agents.sort()).toEqual(['a1', 'a2']);
   });
 
-  it('保存后**详情必须回显** async_tools 与 rules_fields（界面保存会重载详情，漏登记即"保存即清空"）', async () => {
+  it('保存后**详情必须回显** rules_fields（界面保存会重载详情，漏登记即"保存即清空"）', async () => {
     await createService();
     const detail = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
 
@@ -200,20 +200,36 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
         url: OCR_URL,
         file_args: { ocr_image: { image: 'url' } },
         rules_fields: { ocr_image: 'input.rules' },
-        async_tools: ['ocr_image'],
         revision: detail.revision,
       },
     });
     expect(saved.statusCode).toBe(200);
     // 保存响应本身 = "保存后的完整调用配置"（契约 §3.3）
-    expect(saved.json().async_tools).toEqual(['ocr_image']);
     expect(saved.json().rules_fields).toEqual({ ocr_image: 'input.rules' });
 
-    // 关键路径：界面在保存成功后会 `loadDetail()` 覆盖表单——详情漏登记这两个字段，
+    // 关键路径：界面在保存成功后会 `loadDetail()` 覆盖表单——详情漏登记该字段，
     // 表现就是"保存成功、勾选却被清空"（2026-09-26 实测缺陷）
     const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
-    expect(after.async_tools).toEqual(['ocr_image']);
     expect(after.rules_fields).toEqual({ ocr_image: 'input.rules' });
+  });
+
+  it('旧客户端仍提交 async_tools：安全忽略（不报错、不回显、不物化）', async () => {
+    await createService();
+    const detail = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
+
+    const saved = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/mcp/services/ocr',
+      payload: {
+        description: 'OCR 识别服务',
+        transport: 'http',
+        url: OCR_URL,
+        async_tools: ['ocr_image'],
+        revision: detail.revision,
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).not.toHaveProperty('async_tools');
   });
 
   it('stdio 缺 command → VALIDATION_FAILED', async () => {

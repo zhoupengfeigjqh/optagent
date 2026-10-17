@@ -16,7 +16,6 @@ import type { McpConfirmation, McpServiceConfigInput, McpServiceDetail } from '.
 import { useMcpConnectionTest } from '../../composables/useMcpConnectionTest'
 import { MCP_DESCRIPTION_PLACEHOLDER, MCP_NAME_HINT, MCP_URL_HINT } from '../../constants/mcp'
 import { parseHeaders, validateMcpBasics } from '../../utils/mcp-config'
-import AsyncToolsSelector from './AsyncToolsSelector.vue'
 import FileArgsMappingTable from './FileArgsMappingTable.vue'
 import HitlConfirmationField from './HitlConfirmationField.vue'
 import McpHeadersField from './McpHeadersField.vue'
@@ -58,8 +57,6 @@ const confirmationTools = ref<string[]>([])
 const confirmationManualText = ref('')
 /** 算法规则参数设置：`{ 工具名: 字段名 }`（空对象 = 不启用「从算法规则选择」入口） */
 const rulesFields = ref<Record<string, string>>({})
-/** 异步工具声明（R11）：被声明的工具调用时会收到结果回写地址，产出回写后进下一轮上下文 */
-const asyncTools = ref<string[]>([])
 const localError = ref<string | null>(null)
 /** 请求头输入（留空 = 不修改；UI 见 `McpHeadersField`）——**不预填掩码**，真值不回显 */
 const headersText = ref('')
@@ -102,7 +99,6 @@ function loadFrom(service: McpServiceDetail): void {
     confirmationManualText.value = ''
   }
   rulesFields.value = { ...(service.rules_fields ?? {}) }
-  asyncTools.value = [...(service.async_tools ?? [])]
   // 请求头：只载入**掩码**；输入框与清空意图复位（切换服务 = 全新一次编辑）
   headersView.value = { ...(service.headers ?? {}) }
   headersText.value = ''
@@ -257,7 +253,6 @@ function submit(): boolean {
     file_args: fileArgs.value,
     confirmation,
     rules_fields: { ...rulesFields.value },
-    async_tools: [...asyncTools.value],
   }
   emit('submit', config)
   return true
@@ -426,23 +421,6 @@ defineExpose({ submit, probeTarget, runTest })
       :allowed-tools="hitlAllowedTools"
       :disabled="rulesDisabled"
     />
-
-    <fieldset class="mcp-config-form__endpoints">
-      <legend class="field__label">后台计算（异步工具）</legend>
-      <p class="field__hint">
-        仅列出在入参 schema 中<strong>声明了 resultUrl</strong> 的工具（判据与平台注入逻辑一致，
-        见《异步MCP服务接入约定.md》§2.1）。勾选后：平台在调用时注入结果回写地址，服务算完把结果
-        写到该用户的空间，并在<strong>下一轮对话</strong>自动带上「后台计算结果」清单（模型按需读取）。
-      </p>
-      <!-- 不绑 `busy`：忙态只锁动作按钮，MUST NOT 锁表单控件（契约 §0.5 原则 ③）——
-           保存通常在百毫秒级完成，控件级的"禁用→恢复"只会退化成一次无意义的视觉抖动 -->
-      <AsyncToolsSelector
-        v-model="asyncTools"
-        :tools="toolCatalog"
-        :tools-error="service.tools_error"
-        :tools-truncated="service.tools_truncated"
-      />
-    </fieldset>
 
     <!-- 本地校验失败时的可读报错（保存/创建按钮在页面右上角，见 McpServiceDetail） -->
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>

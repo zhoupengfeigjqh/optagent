@@ -1,5 +1,5 @@
 /**
- * MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.2 / §10.6 不变式 1、2、6）。
+ * MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.2 / §10.6 不变式 1、2）。
  *
  * 与 `RUNTIME_CONTEXT_PARAMS`（`uid`/`sid`）**同一套路**：
  * - 判据取"**该工具自己的入参 schema 里声明了才注入**"——声明了就一定收到运行环境的值
@@ -8,6 +8,10 @@
  *   一个假的回写地址；
  * - 注入发生在 `execute` 内部、**HITL 挂起之后** ⇒ 签名 URL MUST NOT 出现在
  *   `interaction_request` 的 `proposed_args` 快照里（不变式 2）。
+ *
+ * 2026-10-17：**"是否异步"不再由平台配置声明**（`async_tools` 已移除）。服务侧只要在
+ * 工具入参 schema 里声明 `resultUrl`，运行环境就自动注入——配置与服务的真实能力不会再
+ * 出现"平台勾了、服务收不到"的漂移。
  *
  * 独立成文件的原因：`mcp-tool-adapter.ts` 已超 500 行门禁（**既有状态**，按宪章
  * 「不追溯」不在本次拆分，拆件任务已在 `tasks.md` 登记），新逻辑不再往里堆（原则二）。
@@ -51,11 +55,11 @@ export function injectResultUrl(params: unknown, resultUrl: string): unknown {
 /**
  * 异步工具注入依赖（由 `agent-factory` 在**每次 run 装配工具时**传入）。
  *
- * 未声明 `async_tools` 的服务不传 ⇒ 走 `undefined` 分支 ⇒ 行为与改造前完全一致（不变式 1）。
+ * 2026-10-17：**判据只看工具自己的 `inputSchema`**——声明了 `resultUrl` 的工具就注入，
+ * 平台侧不再维护 `async_tools` 白名单。故本上下文恒可构造（无需"是否启用"的前置判断），
+ * 未声明该参数的工具走"不注入"分支，行为与改造前完全一致（不变式 1）。
  */
 export interface AsyncToolContext {
-  /** 该服务声明的异步工具名（**原始名**，不含 `{server}__` 前缀） */
-  tools: readonly string[];
   /**
    * 铸造**该次调用**的回写地址。
    *

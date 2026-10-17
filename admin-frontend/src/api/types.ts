@@ -130,12 +130,6 @@ export interface McpServiceDetail {
   /** 算法规则参数设置（缺省/空对象 = 不启用「从算法规则选择」入口） */
   rules_fields?: Record<string, string>
   /**
-   * 异步工具声明（R11，2026-09-25）：该服务**原始工具名**清单（不含 `{server}__` 前缀）。
-   * 声明后运行环境为这些工具注入结果回写地址，服务算完把结果写到用户空间，
-   * 并在下一轮对话注入「后台计算结果」清单。缺省/空数组 = 不启用。
-   */
-  async_tools?: string[]
-  /**
    * **工具白名单**（2026-10-03；2026-10-15 起可调整）：该服务可见的原始工具名清单。
    * 空数组 = 不限制（白名单上线前的存量服务）；新建时必填非空，
    * 之后可在「工具范围」弹窗里调整（保存走 `PUT`，全量替换、同样必填非空）。
@@ -169,7 +163,7 @@ export interface McpServiceDetail {
  * 调用配置的**基础连接字段**（弹窗新建与详情页表单共用；2026-09-27）。
  *
  * 后端 `normalize()` 会为未提供者补默认（`file_args: {}`、`confirmation: 'never'`、
- * `rules_fields: {}`、`async_tools: []`），故新建只 MUST 提供基础字段。
+ * `rules_fields: {}`），故新建只 MUST 提供基础字段。
  */
 export interface McpServiceBasics {
   description: string
@@ -189,8 +183,6 @@ export interface McpServiceConfigPayload extends McpServiceBasics {
   confirmation?: McpConfirmation
   /** 算法规则参数设置（空对象 = 不启用） */
   rules_fields?: Record<string, string>
-  /** 异步工具声明（R11；空数组 = 不启用；物化时非空才写入 `MCP.json`） */
-  async_tools?: string[]
   /**
    * 工具白名单（**2026-10-15 起可在此调整**）：缺省 = 沿用存量，提供 = **全量替换**
    * 且必须非空（空数组 = 不限制，与"一个都不给"语义相反，服务端会 400）。
@@ -242,7 +234,7 @@ export interface McpProbeResult {
  *
  * 与 `McpServiceDetail` 的调用配置字段保持**一一对应**（含 `command`／`args`／`updated_at`）：
  * 少一个字段，客户端"拿响应回填"或"保存后重载详情"时就会丢配置
- * （2026-09-25 实测：`async_tools` 漏登导致勾选被清空，同批 `command`／`args` 亦漏登）。
+ * （2026-09-25 实测：勾选类字段漏登导致保存即被清空，同批 `command`／`args` 亦漏登）。
  * 界面据此**原地更新 `revision`**，不再为回填而二次请求详情（契约 §0.5 原则 ②）。
  * `writable` / `permission_scope` 已按 2026-09-15 产品决定从契约移除，此处同步删除。
  */
@@ -255,7 +247,6 @@ export interface McpServiceConfigSaved {
   args: string[] | null
   file_args: Record<string, Record<string, string>>
   rules_fields: Record<string, string>
-  async_tools: string[]
   confirmation: McpConfirmation
   /** 工具白名单（2026-10-03）：创建时设定，保存调用配置不改动它（服务端会拒绝携带） */
   allowed_tools: string[]

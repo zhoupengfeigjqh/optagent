@@ -142,7 +142,6 @@ function toConfigResponse(config: {
   args: string[] | null;
   file_args: Record<string, Record<string, string>>;
   rules_fields: Record<string, string>;
-  async_tools: string[];
   confirmation: 'never' | 'always' | { tools: string[] };
   allowed_tools: string[];
   headers: Record<string, string>;
@@ -157,7 +156,6 @@ function toConfigResponse(config: {
     args: config.args,
     file_args: config.file_args,
     rules_fields: config.rules_fields,
-    async_tools: config.async_tools,
     confirmation: config.confirmation,
     // 白名单必须回显：界面对照"数字人能看到什么"，漏登会让它凭空消失
     allowed_tools: config.allowed_tools,

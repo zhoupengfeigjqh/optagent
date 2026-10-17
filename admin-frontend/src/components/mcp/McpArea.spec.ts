@@ -275,7 +275,6 @@ describe('McpArea —— 工具范围调整（2026-10-15：「重新探测」成
       file_args: {},
       confirmation: 'never',
       rules_fields: {},
-      async_tools: [],
       allowed_tools: ['ocr_image', 'ocr_pdf'],
       headers: {},
       updated_at: '2026-10-15T00:00:00.000Z',

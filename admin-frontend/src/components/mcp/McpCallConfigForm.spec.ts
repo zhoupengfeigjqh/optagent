@@ -4,7 +4,7 @@
  * 守住三件事：
  * 1. **连接地址只有一个**（不再按运行形态分形态声明）；
  * 2. 表单**只服务已登记的服务**（名称只读、恒提供「发起测试」）——新建走弹窗；
- * 3. `FR-044` 的既有语义不变：file_args / HITL / rules_fields / async_tools。
+ * 3. `FR-044` 的既有语义不变：file_args / HITL / rules_fields。
  * （writable / permission_scope 已按 2026-09-15 的产品决定从配置中移除。）
  */
 import { flushPromises, mount } from '@vue/test-utils'
@@ -18,17 +18,12 @@ vi.mock('../../api/mcp', () => ({
   testMcpService: (...a: unknown[]) => testMcpService(...a),
 }))
 
-/**
- * 该服务当前公开的工具。
- *
- * ocr_image 声明了 resultUrl → 出现在「后台计算（异步工具）」可选项里；
- * parse_excel 未声明 → 该区不展示它（2026-10-03 产品决定：只列支持异步的工具）。
- */
+/** 该服务当前公开的工具（HITL / 规则字段区块的可选项来源） */
 const TOOLS = [
   {
     name: 'ocr_image',
     description: '识别图片中的文字',
-    parameters: { type: 'object', properties: { resultUrl: { type: 'string' } } },
+    parameters: { type: 'object', properties: {} },
   },
   { name: 'parse_excel', description: '解析 Excel 文件', parameters: {} },
 ]
@@ -241,9 +236,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
 
     expect(wrapper.find('#mcp-description').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#mcp-transport').attributes('disabled')).toBeUndefined()
-    const boxes = wrapper.findAll('.async-tools input[type="checkbox"]')
-    expect(boxes.length).toBeGreaterThan(0)
-    expect(boxes.every((b) => b.attributes('disabled') === undefined)).toBe(true)
     // 动作按钮则应当被锁住（忙态只锁动作按钮）
     expect(testButton(wrapper)?.attributes('disabled')).toBeDefined()
   })
@@ -475,17 +467,3 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
   })
 })
 
-describe('McpCallConfigForm —— 异步工具（R11）', () => {
-  it('缺省为 []；清单不可得时手填后原样进入提交载荷', async () => {
-    const plain = mountForm()
-    await flushPromises()
-    await save(plain)
-    expect(submitted(plain).async_tools).toEqual([])
-
-    const wrapper = mountForm({ ...SERVICE, tools: [] })
-    await flushPromises()
-    await wrapper.find('.async-tools textarea').setValue('submit_job\nget_status')
-    await save(wrapper)
-    expect(submitted(wrapper).async_tools).toEqual(['submit_job', 'get_status'])
-  })
-})

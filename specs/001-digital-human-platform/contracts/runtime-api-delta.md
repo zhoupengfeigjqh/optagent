@@ -22,7 +22,7 @@
 | R8 | MCP 工具调用**人工参数确认**（HITL）：`interaction_request` SSE 事件 + `POST /api/threads/{id}/interaction`，MCP 服务配置新增 `confirmation` 策略字段 | 新增事件/端点/配置字段 | 否（`confirmation` 缺省 `never`，存量行为零变化） |
 | R9 | HITL 参数确认窗**算法规则选择**：MCP 服务配置新增 `rules_fields`（`{ 工具名: 字段名或对象路径 }`——2026-09-19 由 string 版 `rules_field` 升级、**2026-09-22 支持对象嵌套**），`interaction_request`/快照新增可选 `rules_field`（单次交互粒度投影），新增 `GET /api/files/rules`（只读） | 新增端点 + 配置字段 + 可选事件字段 | 否（`rules_fields` 缺省 `{}` 不启用，存量快照不写该键；历史 string 版存档读取收敛为 `{}`，存档里的**非法路径**读取时一并丢弃） |
 | R10 | 新增内置工具 **`read_skill`**：补齐 SKILL 正文与 `references/` 附件的读取通道（此前只有 frontmatter 摘要进 System Prompt），内置工具目录由 5 项增至 6 项 | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
-| R11 | MCP **异步工具与后台产出**：调用配置新增 `async_tools`（按工具名声明哪些工具异步）；新增签名 `POST /api/files/put`（服务回写结果）、`GET /api/produced`（产出列表）、`GET /api/produced/events`（SSE 信号）；正文池组装时注入「后台计算结果」段 | 新增配置字段 + 3 个端点 + 一处提示词段 | 否（`async_tools` 缺省 `[]` 不启用；未声明工具不注入、不落盘、不依赖新端点） |
+| R11 | MCP **异步工具与后台产出**：工具的 `inputSchema` 声明 `resultUrl` 即视为异步（**2026-10-17 起不再有 `async_tools` 配置项**）；新增签名 `POST /api/files/put`（服务回写结果）、`GET /api/produced`（产出列表）、`GET /api/produced/events`（SSE 信号）；正文池组装时注入「后台计算结果」段 | 3 个端点 + 一处提示词段 | 否（未声明 `resultUrl` 的工具不注入、不落盘、不依赖新端点） |
 | R12 | MCP **工具白名单**：服务配置新增 `allowed_tools`，创建时"先连上再勾选"（2026-10-03）；**2026-10-15 起可二次调整**（保存时缺省沿用、提供即全量替换且必须非空） | 新增配置字段 | 否（存量无该字段按"不限制"处理） |
 | R13 | MCP **请求头**：配置新增 `headers`（存明文、响应只回掩码、部署物化后生效，2026-10-08） | 新增配置字段 + 物化 | 否（缺省不带请求头） |
 | R14 | **物化契约版本化**：产物与只读端点响应新增 `schema_version`、SSE 事件新增 `v`（**2026-10-08 登记，未实施**） | 新增字段 | 否（无版本字段按 v0 解析） |
@@ -619,24 +619,25 @@ data: {
 
 **范围**：异步是**按工具声明**的能力，不是服务级模式；**未声明的工具与既有同步路径行为完全一致**（见 §10.6 不变式 1）。
 
-### 10.2 配置面（平台权威源）
+### 10.2 配置面（判据 = 工具自己的入参 schema）
 
-MCP 服务调用配置新增 `async_tools` 字段（缺省 = 不启用）：
+**2026-10-17 起取消平台配置项**：`async_tools` 已从 `mcp-services.json`、管理接口与 `MCP.json` 中移除。
+"是否异步"的唯一判据是**工具自己的 `inputSchema.properties` 是否声明了 `resultUrl`**——配置与服务的
+真实能力不可能再漂移（旧版"平台勾了、服务 schema 没这个参数"的告警场景随之消失）。
 
 ```jsonc
-// mcp-services.json（平台侧，admin-backend）
-{ "async_tools": [] }                      // 缺省语义：本服务无异步工具（存量行为零变化）
-{ "async_tools": ["submit_ocr"] }          // 仅列出的**原始工具名**（不含 {server}__ 前缀）
+// 服务侧 inputSchema（工具定义里，平台不再有对应配置项）
+"properties": { "resultUrl": { "type": "string" } }
 ```
 
-| 环节 | 判据 | 非法处理 |
+| 环节 | 判据 | 处理 |
 |---|---|---|
-| 平台保存期（`admin-backend`） | 必须为数组；元素为非空字符串；**同服务内去重** | `VALIDATION_FAILED` |
-| 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].async_tools`（对齐 `file_args`/`rules_fields` 口径） | — |
-| 运行环境加载期（`agent-instance.ts`） | 形状非法即抛 `AgentConfigError`（把 typo 挡在加载期，不静默当空） | 该数字人整体不可用 |
-| 装配期（`agent-factory` / `mcp-tool-adapter`） | 命中声明的工具，其 `inputSchema` **MUST** 声明 `resultUrl` 参数；缺失即**告警**（否则"配了但服务收不到回写地址"会静默失效） | 告警不阻断（服务侧尚未改造时不至于整只数字人不可用） |
+| 平台保存期（`admin-backend`） | 无该字段 | 旧客户端仍携带 `async_tools` 时**安全忽略**（不报错、不回显、不物化） |
+| 物化（`materialize.ts`） | 不再产出该键 | 存量文档里的旧键即被整体覆盖清除 |
+| 运行环境加载期（`agent-instance.ts`） | 存量 `MCP.json` 里的 `async_tools` **忽略**（不报错、不纳管） | 下次部署自然消失 |
+| 装配期（`agent-factory` / `mcp-tool-adapter`） | `declaresResultUrl(inputSchema)` 为真才注入 | 未声明 = 普通同步工具，一个多余字段都不加 |
 
-**注入时机**：命中声明的工具，在 `execute` 内**仿 `injectRuntimeContext`** 注入 `resultUrl`（运行环境提供的值、覆盖模型填写、**对 LLM 隐藏**——`exposeSchema` 同款处理）。注入位置见 §10.6 不变式 2。
+**注入时机**：声明了 `resultUrl` 的工具，在 `execute` 内**仿 `injectRuntimeContext`** 注入（运行环境提供的值、覆盖模型填写、**对 LLM 隐藏**——`exposeSchema` 同款处理）。注入位置见 §10.6 不变式 2。
 
 ### 10.3 回写通道（新端点）
 
@@ -803,12 +804,12 @@ MCP 服务调用配置新增 `async_tools` 字段（缺省 = 不启用）：
 
 ### 10.6 不变式（MUST 由单测守住）
 
-1. `async_tools` 缺省/空数组时，行为与改造前**完全一致**——不注入 `resultUrl`、不产生产出目录、不依赖任何新端点；
+1. 工具的 `inputSchema` 未声明 `resultUrl` 时，行为与改造前**完全一致**——不注入、不产生产出目录、不依赖任何新端点；
 2. `resultUrl` 的注入发生在 `execute` 内部、**HITL 挂起之后**——签名 URL MUST NOT 出现在 `interaction_request` 的 `proposed_args` 快照里；
 3. **读写签名 payload 形状隔离**（读三段、写四段）：读签名 MUST NOT 能用于写；且**读方向格式不变**，存量签名 URL 零失效；
 4. 产出落盘走 `FileAccess` 的受控子目录写入（顶层白名单 + 无 `..` + 目录真实存在 + 文件名前缀校验），MUST NOT 绕过文件安全层；agent 的 `write_file` 权限**不变**；
 5. 产出清单是每轮现算的投影，**无产出时该段长度为 0**；产出正文 MUST NOT 被自动注入；
-6. 声明了 `async_tools` 但服务 schema 未声明 `resultUrl` → **装配期告警**（不静默失效）；
+6. **判据唯一**（2026-10-17）：是否注入 `resultUrl` 只看工具自己的 `inputSchema`——平台侧不存在可与之矛盾的第二处声明；旧的 `async_tools` 键在配置、物化与加载三处一律忽略；
 7. **已读状态与产出同生命周期**：已读标记 MUST 写在 sidecar 内、随产出一起被清理，未读数随之归零——MUST NOT 出现"未读数 > 0 但列表为空"的悬空状态（这正是"已读状态不另立独立文件"的理由）；且**打开列表不标记已读**，只有**点开某条查看**才标记（§10.5 ⑤）。
 8. **解析边界（2026-09-26 补）**：正文是**不透明文本**——**运行环境服务端 MUST NOT 解析**它（存储/投影/注入/清理均不解析）；**前端 MAY 为展示而解析**（结构化渲染），但 **MUST** 在解析失败/标量/超阈值时**回落原样展示**，且展示层解析 **MUST NOT** 参与权限判定、清理决策或任何服务端行为——它只影响**界面如何呈现**。
 9. **服务侧结果形状（2026-09-26 补）**：服务返回（同步返回与异步回写 body）**MUST** 是标准 JSON，且 **`status` 取值域恒为 `"success"` / `"failed"`**——业务细分码（如 `80`/`2`/`90`）MUST 放独立字段（建议 `code`）。平台与界面 **MUST NOT** 对 `status` 做取值映射，也 **MUST NOT** 因某个服务的业务码差异而分支判读（§10.7）。
@@ -920,7 +921,7 @@ MCP 服务调用配置新增 `allowed_tools` 字段：
 |---|---|---|
 | 平台新建（`admin-backend`） | **必填且非空**；元素为非空字符串；trim + 同服务内去重 | `VALIDATION_FAILED`（不留"全部放行"的后门） |
 | 平台保存（`PUT`） | **可携带**（2026-10-15 起）：缺省 = 沿用存量，提供 = 全量替换；提供时元素判据同新建 | 空数组 / 形状非法 → `VALIDATION_FAILED`（400），整条请求不生效 |
-| 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].allowed_tools`（对齐 `file_args`/`rules_fields`/`async_tools` 口径） | — |
+| 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].allowed_tools`（对齐 `file_args`/`rules_fields` 口径） | — |
 | 运行环境加载期（`agent-instance.ts`） | 必须为数组、元素为非空字符串（重复项静默去重）；**空数组合法**（= 不限制） | 形状非法 → `AgentConfigError`（把 typo 挡在加载期） |
 | 装配期（`agent-factory`） | 按白名单过滤该服务的工具表（`infra/mcp-tool-scope.ts`） | — |
 
@@ -968,7 +969,7 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 |---|---|---|
 | 平台新建/保存（`admin-backend`） | 头名合法（RFC 7230 token）、大小写不敏感下不重复、值为**单行非空字符串**、**非掩码形态**；头名与值两端 trim | `VALIDATION_FAILED`（含"把掩码当值提交"的情形） |
 | 平台保存（`PUT`）语义 | **缺省 = 沿用存量**（不携带该字段即不动它）；**提供 = 全量替换**（`{}` 清空） | — |
-| 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].headers`（对齐 `file_args`/`rules_fields`/`async_tools`/`allowed_tools` 口径） | — |
+| 物化（`materialize.ts`） | **非空才写**进 `MCP.json` 的 `servers[].headers`（对齐 `file_args`/`rules_fields`/`allowed_tools` 口径） | — |
 | 运行环境加载期（`agent-instance.ts`） | 与平台保存期**同一判据**（对象、头名合法、值单行非空、大小写不敏感下不重复）；**空对象合法**（= 不带请求头） | 形状非法 → `AgentConfigError`（把 typo 挡在加载期） |
 | 建连（`mcp-manager.ts`） | `StreamableHTTPClientTransport(url, { requestInit: { headers } })`——与平台探测/测试路径**同一写法**，避免"平台测通、运行期连不上" | 空对象不传该选项（保持既有行为） |
 
@@ -1047,7 +1048,7 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 |---|---|
 | 读方向 | `GET /api/files/raw?u=&p=&exp=&sig=`（MCP 服务回源下载文件） |
 | 写方向 | `POST /api/files/put?u=&d=&exp=&sig=`（异步工具的后台产出回写） |
-| 有效期 | 24h（`DEFAULT_TTL_MS`）；两方向**共用密钥**、payload 形状刻意不同，以防"读签名"被用于写 |
+| 有效期 | 读方向 24h（`DEFAULT_TTL_MS`）、写方向 **12h**（`DEFAULT_PUT_TTL_MS`，2026-10-17）；两方向**共用密钥**、payload 形状刻意不同，以防"读签名"被用于写 |
 | 生产形态 | `FILE_SIGN_SECRET` 缺失 MUST 拒绝启动，并打印生成方式（如 `openssl rand -hex 32`） |
 | 非生产形态 | MAY 生成临时密钥，但 MUST 打印**显式告警**（重启将使已发出的链接全部失效） |
 | 失效窗口 | 密钥若随重启变化，"重启前发出、重启后使用"的链接 **100% 验签失败** → 表现为工具调用失败与**后台产出丢失**，且日志不会指向"密钥已变" |

@@ -49,8 +49,6 @@ export interface McpServiceDetailView extends McpServiceView {
    * 保存成功却在界面上"消失"（2026-09-26 实测缺陷：`rules_fields` 与本字段同批漏登）。
    */
   rules_fields: Record<string, string>;
-  /** 异步工具声明（R11；空数组 = 不启用）。同 `rules_fields`：必须在详情里回显 */
-  async_tools: string[];
   /** 调用确认策略（HITL；`never` 为默认/存量行为） */
   confirmation: McpConfirmation;
   /** 工具白名单（2026-10-03）；空数组 = 不限制（白名单上线前的存量服务） */
@@ -132,9 +130,8 @@ export class McpServiceListService {
       command: config.command,
       args: config.args,
       file_args: config.file_args,
-      // 详情**必须**回显这两者：界面保存后会重载详情覆盖表单，漏一个就等于"保存即清空"
+      // 详情**必须**回显：界面保存后会重载详情覆盖表单，漏一个就等于"保存即清空"
       rules_fields: config.rules_fields,
-      async_tools: config.async_tools,
       confirmation: config.confirmation,
       allowed_tools: allowed,
       // 请求头**只回掩码**：界面要能看出"配了哪些头、值是什么形状"，但令牌明文不出响应

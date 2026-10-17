@@ -299,8 +299,9 @@ export class AgentInstanceFactory {
 }
 
 /**
- * 异步工具的注入依赖（R11）：服务声明了 `async_tools` 才构造，否则返回 `undefined`
- * （工具装配侧走"不注入"分支，行为与改造前完全一致）。
+ * 异步工具的注入依赖（R11）：**恒构造**——"是否注入"由每个工具自己的入参 schema
+ * 判定（声明了 `resultUrl` 才注入，见 `mcp/async-result-url.ts`），平台侧不再有
+ * `async_tools` 白名单。
  *
  * 回写地址**每次调用现铸**（而非装配期铸一次）：`exp` 从调用时刻起算更贴合"任务最长时长"，
  * 且能把 `call_id` 与工具全名作为**归属提示参数**写进 URL——服务只需原样回传，
@@ -312,11 +313,8 @@ function asyncToolContext(
   agentName: string,
   threadId: string,
   deps: AgentFactoryDeps,
-): AsyncToolContext | undefined {
-  const tools = server.asyncTools;
-  if (!tools || tools.length === 0) return undefined;
+): AsyncToolContext {
   return {
-    tools,
     // 回写目录带数字人段（009）：产出落进**发起该轮的数字人**的临时空间/后台产出
     mintResultUrl: (toolName: string, toolCallId: string) =>
       mintPutUrl(

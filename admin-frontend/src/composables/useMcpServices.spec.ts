@@ -119,7 +119,6 @@ describe('useMcpServices', () => {
       args: null,
       file_args: {},
       rules_fields: {},
-      async_tools: [],
       confirmation: 'never',
       updated_at: 'x',
       revision: 3,

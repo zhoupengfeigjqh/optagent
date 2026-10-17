@@ -7,7 +7,9 @@
  *    **探测失败时不能这么判**（核对不了 ≠ 不存在），只显示可读原因（`FR-009` 不静默省略）；
  * 3. 「重新探测」按钮（2026-10-02；2026-10-15 起兼作调整入口）：清单是打开详情那一刻的
  *    探测快照，界面不自动重取；点击后父级重取，并在**探测成功**时弹出工具范围窗；
- * 4. 探测进行中（`busy`）按钮禁用并改文案，防止重复点击。
+ * 4. 探测进行中（`busy`）按钮禁用并改文案，防止重复点击；
+ * 5. **可回写结果的工具标绿**（2026-10-17）：入参 schema 声明了 `resultUrl` 的工具，
+ *    工具名整条标绿，并在其**紧贴右侧**显示「（可回写结果）」——判据与运行环境注入同一口径。
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
@@ -18,6 +20,16 @@ const TOOLS: McpToolInfo[] = [
   { name: 'ocr_image', description: '识别图片', parameters: { type: 'object' } },
   { name: 'query_price', description: '', parameters: {} },
 ]
+
+/** 入参声明了 `resultUrl` 的工具：调用时由运行环境注入回写地址 */
+const ASYNC_TOOL: McpToolInfo = {
+  name: 'submit_job',
+  description: '提交后台计算任务',
+  parameters: {
+    type: 'object',
+    properties: { plan: { type: 'string' }, resultUrl: { type: 'string' } },
+  },
+}
 
 function mountList(
   tools: McpToolInfo[],
@@ -107,6 +119,53 @@ describe('McpToolList —— 白名单渲染', () => {
     const wrapper = mountList(TOOLS, { truncated: true })
 
     expect(wrapper.text()).toContain('工具数量超过上限')
+  })
+})
+
+describe('McpToolList —— 可回写结果的工具标绿（2026-10-17）', () => {
+  it('声明了 resultUrl：工具名整条标绿，且「（可回写结果）」**紧贴**工具名右侧', () => {
+    const wrapper = mountList([TOOLS[0]!, ASYNC_TOOL])
+    const items = wrapper.findAll('.mcp-tool-list__item')
+
+    // 未声明的工具：不标绿、无标注
+    expect(items[0]!.find('.mcp-tool-list__name').classes()).not.toContain(
+      'mcp-tool-list__name--async',
+    )
+    expect(items[0]!.find('.mcp-tool-list__flag').exists()).toBe(false)
+
+    // 声明的工具：绿色 class + 紧贴标注（textContent 无空格，证明"紧贴"）
+    const name = items[1]!.find('.mcp-tool-list__name')
+    expect(name.classes()).toContain('mcp-tool-list__name--async')
+    expect(name.text()).toBe('submit_job（可回写结果）')
+    expect(items[1]!.find('.mcp-tool-list__flag').attributes('title')).toContain('resultUrl')
+  })
+
+  it('只认 `properties`（`required` 里出现不算）；形状异常一律不标（不误标）', () => {
+    const odd: McpToolInfo[] = [
+      // required 里有 resultUrl，但 properties 没声明：运行环境不会注入
+      { name: 'required_only', description: '', parameters: { required: ['resultUrl'] } },
+      { name: 'no_properties', description: '', parameters: { type: 'object' } },
+      { name: 'bad_properties', description: '', parameters: { properties: 42 } },
+      { name: 'null_params', description: '', parameters: null as never },
+    ]
+    const wrapper = mountList(odd)
+
+    expect(wrapper.findAll('.mcp-tool-list__name--async')).toHaveLength(0)
+    expect(wrapper.findAll('.mcp-tool-list__flag')).toHaveLength(0)
+  })
+
+  it('白名单里的失效工具（服务清单中已不存在）不标绿——没有可回写的工具', () => {
+    const wrapper = mountList([ASYNC_TOOL], {
+      allowedTools: ['submit_job', 'gone_tool'],
+      missingTools: ['gone_tool'],
+    })
+    const items = wrapper.findAll('.mcp-tool-list__item')
+
+    expect(items[0]!.find('.mcp-tool-list__flag').exists()).toBe(true)
+    expect(items[1]!.find('.mcp-tool-list__flag').exists()).toBe(false)
+    expect(items[1]!.find('.mcp-tool-list__name').classes()).not.toContain(
+      'mcp-tool-list__name--async',
+    )
   })
 })
 

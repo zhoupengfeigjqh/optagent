@@ -108,7 +108,6 @@ beforeEach(() => {
     args: null,
     file_args: {},
     rules_fields: {},
-    async_tools: [],
     confirmation: 'never',
     allowed_tools: ['ocr_image'],
     // 保存响应里的掩码请求头（2026-10-08）：详情页据此就地刷新表单展示

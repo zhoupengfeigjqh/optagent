@@ -117,7 +117,7 @@ export function formatHeaders(headers?: Record<string, string>): string {
  *
  * 为什么是"重放"而不是"只发白名单"：`PUT` 的语义是**全量替换**——后端 `normalize()`
  * 会把缺省字段补成默认值，只发 `allowed_tools` 会把 `description`/`file_args`/
- * `rules_fields`/`async_tools`/`confirmation` 一并清空。详情页表单也是同一口径
+ * `rules_fields`/`confirmation` 一并清空。详情页表单也是同一口径
  * （它提交整份表单），这里把"当前值"原样带上，只改 `allowed_tools`。
  *
  * **刻意不带 `headers`**：详情里回的是**掩码**，带回去等于把真令牌换成掩码
@@ -139,7 +139,6 @@ export function buildToolScopePayload(
     file_args: service.file_args,
     confirmation: service.confirmation,
     rules_fields: service.rules_fields,
-    async_tools: service.async_tools,
     allowed_tools: [...allowedTools],
   }
 }

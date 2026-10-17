@@ -1,10 +1,9 @@
 /**
- * 单元测试：MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.6 不变式 1/2/6）
+ * 单元测试：MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.6 不变式 1/2）
  *
- * 三条不变式：
- * 1. **未声明即零变化** —— `async_tools` 缺省/空数组时，不注入、schema 原样；
- * 2. **注入对 LLM 隐藏且覆盖模型填写** —— 模型不可能幻觉出一个假的回写地址；
- * 6. **配了但服务收不到地址要告警** —— 不静默失效。
+ * 2026-10-17 起**判据统一为工具自己的入参 schema**（平台侧 `async_tools` 已移除）：
+ * - 声明了 `resultUrl` → 注入运行环境铸造的地址，且该参数对 LLM 隐藏、覆盖模型填写；
+ * - 未声明 → 一个多余字段都不加（第三方服务常严格校验入参）。
  *
  * 独立成文件：`mcp-tool-adapter.spec.ts` 已远超 500 行门禁（既有状态），
  * 新用例不再往里堆（宪章原则二）。
@@ -44,19 +43,18 @@ const ASYNC_TOOL = {
   },
 };
 
-/** 被声明为异步，但 schema 里没有 resultUrl（服务侧尚未改造） */
-const ASYNC_TOOL_NO_PARAM = {
+/** 未声明 resultUrl 的工具：普通同步工具，行为与改造前完全一致 */
+const SYNC_TOOL = {
   name: 'submit_legacy',
-  description: '提交任务（未声明回写地址）',
+  description: '提交任务（同步返回）',
   inputSchema: { type: 'object', properties: { plan: { type: 'string' } } },
 };
 
 interface AsyncCtxLike {
-  tools: string[];
   mintResultUrl: (tool: string, callId: string) => string;
 }
 
-function build(calls: Call[], tools: unknown[], asyncCtx?: AsyncCtxLike, warns: string[] = []) {
+function build(calls: Call[], tools: unknown[], asyncCtx?: AsyncCtxLike) {
   return mcpToolsAsAgentTools(
     fakeManager(calls),
     'svc',
@@ -65,18 +63,13 @@ function build(calls: Call[], tools: unknown[], asyncCtx?: AsyncCtxLike, warns: 
     undefined,
     undefined,
     undefined,
-    // pino 的 warn 是 (obj, msg) 两参形态；测试只关心可读文案。
-    // `info` 也必须存在：调用成功路径会记 `mcp.tool.call`
-    {
-      warn: (_obj: unknown, msg?: string) => warns.push(msg ?? String(_obj)),
-      info: () => {},
-    } as unknown as Logger,
+    // pino 的 info 必须存在：调用成功路径会记 `mcp.tool.call`
+    { info: () => {}, warn: () => {} } as unknown as Logger,
     asyncCtx,
   );
 }
 
-const ctx = (tools: string[]): AsyncCtxLike => ({
-  tools,
+const ctx = (): AsyncCtxLike => ({
   mintResultUrl: (tool, callId) =>
     `https://backend/api/files/put?tool=${tool}&call_id=${callId}&sig=x`,
 });
@@ -88,21 +81,10 @@ async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, p
   };
 }
 
-describe('R11 异步工具：resultUrl 注入', () => {
-  it('未声明 async_tools（不传 asyncCtx）：不注入、schema 原样（不变式 1）', async () => {
+describe('R11 异步工具：resultUrl 注入（schema 判据）', () => {
+  it('schema 声明了 resultUrl → 注入运行环境的地址并覆盖模型填写，且该参数对 LLM 隐藏', async () => {
     const calls: Call[] = [];
-    const [tool] = build(calls, [ASYNC_TOOL]);
-
-    expect((tool!.parameters as { properties: Record<string, unknown> }).properties).toHaveProperty(
-      'resultUrl',
-    );
-    await exec(tool!, { plan: 'p1' });
-    expect(calls[0]!.args).toEqual({ plan: 'p1' });
-  });
-
-  it('命中声明：注入运行环境的地址并覆盖模型填的假地址，且该参数对 LLM 隐藏', async () => {
-    const calls: Call[] = [];
-    const [tool] = build(calls, [ASYNC_TOOL], ctx(['submit_job']));
+    const [tool] = build(calls, [ASYNC_TOOL], ctx());
 
     // 隐藏：暴露给 LLM 的 schema 里没有 resultUrl（required 里的同名项一并移除）
     const exposed = tool!.parameters as {
@@ -120,27 +102,26 @@ describe('R11 异步工具：resultUrl 注入', () => {
     });
   });
 
-  it('未在声明清单里的工具：完全不受影响（同一服务下混排）', async () => {
+  it('schema 未声明 resultUrl → 不注入、schema 原样（同一服务下混排）', async () => {
     const calls: Call[] = [];
-    const [tool] = build(calls, [ASYNC_TOOL], ctx(['other_tool']));
+    const [tool] = build(calls, [SYNC_TOOL], ctx());
+
+    const exposed = tool!.parameters as { properties: Record<string, unknown> };
+    expect(exposed.properties).toEqual({ plan: { type: 'string' } });
+
+    await exec(tool!, { plan: 'p1' });
+    expect(calls[0]!.args).toEqual({ plan: 'p1' }); // 不塞多余字段
+  });
+
+  it('未提供注入依赖（不传 asyncCtx）：不注入、schema 原样（不变式 1）', async () => {
+    const calls: Call[] = [];
+    const [tool] = build(calls, [ASYNC_TOOL]);
 
     expect((tool!.parameters as { properties: Record<string, unknown> }).properties).toHaveProperty(
       'resultUrl',
     );
     await exec(tool!, { plan: 'p1' });
     expect(calls[0]!.args).toEqual({ plan: 'p1' });
-  });
-
-  it('声明为异步但 schema 未声明 resultUrl：不注入 + 装配期告警（不变式 6）', async () => {
-    const calls: Call[] = [];
-    const warns: string[] = [];
-    const [tool] = build(calls, [ASYNC_TOOL_NO_PARAM], ctx(['submit_legacy']), warns);
-
-    expect(warns.join('\n')).toContain('resultUrl');
-    expect(warns.join('\n')).toContain('submit_legacy');
-
-    await exec(tool!, { plan: 'p1' });
-    expect(calls[0]!.args).toEqual({ plan: 'p1' }); // 不塞多余字段
   });
 
   it('与 uid/sid 穿透共存：两类注入互不干扰', async () => {
@@ -159,7 +140,7 @@ describe('R11 异步工具：resultUrl 注入', () => {
         required: ['uid', 'sid', 'resultUrl', 'plan'],
       },
     };
-    const [built] = build(calls, [tool], ctx(['submit_async']));
+    const [built] = build(calls, [tool], ctx());
 
     const exposed = built!.parameters as {
       properties: Record<string, unknown>;

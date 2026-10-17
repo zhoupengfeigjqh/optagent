@@ -213,7 +213,6 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `command` / `args` | string / array \| null | `stdio` 时有效 |
 | `file_args` | object | 文件参数映射：`{工具名: {取值路径: "url" \| "url:from=<来源路径>"}}`；取值路径可为顶层参数名或穿过数组（`items[].excelFileUrl`，2026-09-16）；派生模式 2026-09-18 |
 | `rules_fields` | object | 算法规则参数设置：`{工具名: 字段名或对象路径}`（2026-09-19 新增；2026-09-22 支持对象嵌套）；空对象 = 不启用 |
-| `async_tools` | array | **异步工具声明**（2026-09-25 新增）：该服务**原始工具名**（不含 `{server}__` 前缀）清单；声明后运行环境调用这些工具时注入 `resultUrl`（签名写直链），服务算完把结果回写到用户空间。空数组 = 不启用（完整语义见 `runtime-api-delta.md` §10） |
 | `confirmation` | string \| object | 调用确认策略（HITL）：`never`（默认）/ `always` / `{ tools: [...] }` |
 | `allowed_tools` | array | **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单（不含 `{server}__` 前缀）。**空数组 = 不限制**（白名单上线前的存量服务语义，物化时不写该字段）。新建时**必填非空**；**2026-10-15 起可在 §3.3 调整**（缺省沿用存量、提供即全量替换且必须非空） |
 | `headers` | object | **请求头（值已掩码）**（2026-10-08）：`{头名: 掩码值}`，空对象 = 未配置。用于需要访问令牌的服务（本体侧「自建发布」要求 `X-MCP-Token`，缺了直接 401）。**明文令牌 MUST NOT 出现在任何响应里**：每个值都掩码（长值 `6UuE…3F`，短值整串掩掉）。界面 MUST NOT 把掩码提交回来做连接或保存（保存期直接拒，见 §3.3）。完整语义见 `runtime-api-delta.md` §12 |
@@ -270,7 +269,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 **前端交互（2026-10-03 改版）**：本端点由**新建弹窗**调用，弹窗为**两步**：
 ① 基本信息（`name` / `description` / `transport` / `url` 或 `command`）→ 调 §3.9 探测 →
 ② 从探测到的工具里**多选**（**默认不勾选，至少选一个**）→ 才提交本端点。
-其余调用配置由服务端补默认（`file_args: {}`、`confirmation: "never"`、`rules_fields: {}`、`async_tools: []`、`headers: {}`），
+其余调用配置由服务端补默认（`file_args: {}`、`confirmation: "never"`、`rules_fields: {}`、`headers: {}`），
 创建成功后再到详情页（§3.3）补全。**探测失败或白名单未选 → 弹窗 MUST NOT 关闭**（§0.5 原则 ④），
 错误留在窗内；创建成功 → 进入该服务详情页并**沿用既有的"自动测试一次"**（§3.6；与"创建前必然探测过一次"不冲突：前者验证连接与能力，后者取的是工具清单）。
 
@@ -302,7 +301,6 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `command` / `args` | — | 条件 | `transport=stdio` 时 `command` 必填 |
 | `file_args` | object | ✅ | 可为 `{}`；键为**取值路径**（顶层参数名或 `items[].excelFileUrl` 这类穿过数组的路径），值为 `"url"` 或 `"url:from=<取值路径>"`；**路径写法非法或派生来源形状不相容即 `VALIDATION_FAILED`**（与运行环境同一判据，见 `agent-backend/src/domain/file-arg-path.ts`） |
 | `rules_fields` | object | 可选 | 可为 `{}`；形状 `{工具名: 字段名或对象路径}`，值非法即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（清单是探测结果，服务不可达时不构成配置错误） |
-| `async_tools` | array | 可选 | 可为 `[]`；元素为**非空字符串**（该服务的**原始工具名**），**同服务内去重**，违反即 `VALIDATION_FAILED`。**只校验语法、不校验工具清单**（同上）；物化时**非空才写**进 `MCP.json`（对齐 `file_args`/`rules_fields` 口径） |
 | `headers` | object | 可选 | **请求头**（2026-10-08）：`{头名: 值}`（真实值，仅 `http` 有意义，`stdio` 丢弃）。逐项判据：头名合法（RFC 7230 token）、**大小写不敏感下不重复**、值为**单行非空字符串**、**MUST NOT 是掩码形态**（`6UuE…3F`/`••••`，违反即 `VALIDATION_FAILED` 并提示填真实值）；头名与值两端 trim。**语义：缺省 = 沿用存量**（保存调用配置 MUST NOT 顺手清空令牌）、**提供 = 全量替换**（`{}` 即清空）。物化时**非空才写**进 `MCP.json`（同上口径）。完整语义见 `runtime-api-delta.md` §12 |
 | `confirmation` | string \| object | 可选 | 调用确认策略（HITL）：`never`（缺省）/ `always` / `{ tools: string[] }`（非空）；非法即 `VALIDATION_FAILED` |
 | `allowed_tools` | array | 可选 | **工具白名单**（2026-10-03；**2026-10-15 起可在此调整**）：非空字符串数组（该服务的**原始工具名**），trim + 同服务内去重。**空数组／非数组／含非字符串元素即 `VALIDATION_FAILED`**——空数组的语义是"不限制"（物化时不写该字段，数字人据此可见该服务的**全部**工具），与"一个都不给"正好相反，MUST NOT 被静默接受。**语义与 `headers` 同口径：缺省 = 沿用存量，提供 = 全量替换**（保存调用配置 MUST NOT 顺手清空白名单）。**只校验语法、不校验名字是否存在**（漂移由 §3.2 的 `missing_tools` 呈现） |

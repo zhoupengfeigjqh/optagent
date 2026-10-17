@@ -80,31 +80,19 @@ export function mcpToolsAsAgentTools(
   /** 绑定了 user_id/agent_name/thread_id 的运行日志（任务 2026-09-15：MCP 调用可归属到用户） */
   logger?: Logger,
   /**
-   * 异步工具注入依赖（R11）：仅当该服务声明了 `async_tools` 时传入；
-   * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）
+   * 异步工具注入依赖（R11）：由 `agent-factory` 恒传入（不再有"服务是否声明异步"的前置判断）。
+   * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）。
    */
   asyncCtx?: AsyncToolContext,
 ): AgentTool[] {
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
     const injected = declaredContextParams(t.inputSchema);
-    // 异步工具（R11）：命中声明才注入回写地址。schema 未声明 `resultUrl` 时**告警但不阻断**——
-    // "配了但服务收不到回写地址"若静默，服务侧只会一直不产出，排查成本极高（不变式 6）。
-    const asyncDeclared = asyncCtx?.tools.includes(t.name) ?? false;
+    // 异步工具（R11）：判据 = 工具自己的入参 schema 是否声明了 `resultUrl`（2026-10-17）。
+    // 平台不再维护 `async_tools` 白名单，故这里没有"配了但服务收不到"的告警场景：
+    // 没声明就是一个普通的同步工具。
     const asyncInjected =
-      asyncDeclared && declaresResultUrl(t.inputSchema) ? [ASYNC_RESULT_URL_PARAM] : [];
-    if (asyncDeclared && asyncInjected.length === 0) {
-      logger?.warn(
-        {
-          alert: true,
-          event: 'mcp.async.resultUrl.missing',
-          service: serverName,
-          tool: t.name,
-        },
-        `MCP 服务 ${serverName} 的工具 ${t.name} 已声明为异步，但其入参 schema 未声明 ` +
-          `${ASYNC_RESULT_URL_PARAM}，回写地址无法送达（该工具不会产生后台产出）——请核对该工具的参数定义`,
-      );
-    }
+      asyncCtx && declaresResultUrl(t.inputSchema) ? [ASYNC_RESULT_URL_PARAM] : [];
     // 派生模式（"url:from="）的目标字段同样对 LLM 隐藏：值由运行环境注入，
     // 模型无从填写，也就不可能幻觉出伪造的 http 地址（2026-09-18）
     const decl = fileArgs?.[t.name];

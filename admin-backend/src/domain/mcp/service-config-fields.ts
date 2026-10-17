@@ -67,8 +67,6 @@ export function sanitize(raw: McpServiceConfig): McpServiceConfig {
     // 历史存档无该字段（或 2026-09-19 早些时候的 string 版 `rules_field`，
     // 工具名不可得）：一律收敛为 {}（不启用规则选择器）
     rules_fields: readRulesFields(raw.rules_fields ?? (raw as { rules_field?: unknown }).rules_field),
-    // 历史存档无该字段：读取时容错收敛为 []（存量行为 = 不启用）
-    async_tools: readAsyncTools(raw.async_tools),
     // 历史存档（白名单上线前）无该字段：收敛为 []（= 不限制，存量行为零变化）
     allowed_tools: readAllowedTools(raw.allowed_tools),
     // 历史存档（请求头上线前）无该字段：收敛为 {}（= 不带请求头，存量行为零变化）；
@@ -83,7 +81,7 @@ export function sanitize(raw: McpServiceConfig): McpServiceConfig {
  *
  * - 元素为**该服务的原始工具名**（不含 `{server}__` 前缀），trim 后去重；
  * - **不校验名字是否真实存在**：清单是探测结果，服务不可达时也要能保存
- *   （与 `rules_fields`/`async_tools` 的既有约定一致），名字漂移由详情页的白名单核对呈现；
+ *   （与 `rules_fields` 的既有约定一致），名字漂移由详情页的白名单核对呈现；
  * - `required = true`（新建，以及保存时显式携带该字段）：缺字段 / 空数组都拒绝——
  *   空数组的语义是"不限制"（与"一个都不给"相反），MUST 在问清楚的这一步就拦住，
  *   不留"全部工具放行"的后门（白名单之后可在 `PUT` 里整体替换）。
@@ -287,56 +285,6 @@ function readUrl(raw: McpServiceConfig): string | null {
     }
   }
   return null;
-}
-
-/**
- * 异步工具声明（保存期，R11）：`string[]`，元素为**该服务自己的原始工具名**。
- *
- * 判据与运行环境**加载期同口径**（数组 / 元素非空字符串 / 同服务内去重），
- * 否则会出现"平台保存得进去、运行环境加载不了"这类两边不一致。
- *
- * 与 `rules_fields` / `file_args` 同取向：**只校验语法，不校验工具清单**——
- * 工具清单是**探测结果**，服务不可达时拿不到；拿不到就拒保存，会把"服务抖动"
- * 变成"配置改不了"。
- */
-export function normalizeAsyncTools(raw: unknown): string[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'async_tools 须为工具名数组，可为 []');
-  }
-  const out: string[] = [];
-  for (const item of raw as unknown[]) {
-    if (typeof item !== 'string' || item.trim() === '') {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `async_tools 的元素须为非空字符串（该服务的原始工具名），当前：${JSON.stringify(item)}`,
-      );
-    }
-    const name = item.trim();
-    if (out.includes(name)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `async_tools 存在重复的工具名：${name}`);
-    }
-    out.push(name);
-  }
-  return out;
-}
-
-/**
- * 读取路径的容错收敛：残缺值一律**丢弃并去重**（不阻断读取存量文档）。
- *
- * 与 `readRulesFields` 同一取向：运行环境在**加载期**把形状非法判为配置错误，
- * 若把存量文档里的脏值原样物化进 `MCP.json`，一次部署就会让整个数字人加载失败——
- * 在这里收敛掉，破坏面止于"该声明不生效"。
- */
-function readAsyncTools(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const out: string[] = [];
-  for (const item of raw as unknown[]) {
-    if (typeof item !== 'string' || item.trim() === '') continue;
-    const name = item.trim();
-    if (!out.includes(name)) out.push(name);
-  }
-  return out;
 }
 
 /**

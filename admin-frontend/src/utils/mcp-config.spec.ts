@@ -175,7 +175,6 @@ describe('buildToolScopePayload（工具范围弹窗的"重放载荷"，2026-10-
     file_args: { ocr_image: { image: 'url' } },
     confirmation: 'always',
     rules_fields: { ocr_image: 'rules' },
-    async_tools: ['ocr_image'],
     allowed_tools: ['ocr_image'],
     missing_tools: [],
     headers: { 'X-MCP-Token': '6UuE…F3Z' },
@@ -197,7 +196,6 @@ describe('buildToolScopePayload（工具范围弹窗的"重放载荷"，2026-10-
     expect(payload.url).toBe('http://192.168.1.2:8000/mcp')
     expect(payload.file_args).toEqual({ ocr_image: { image: 'url' } })
     expect(payload.rules_fields).toEqual({ ocr_image: 'rules' })
-    expect(payload.async_tools).toEqual(['ocr_image'])
     expect(payload.confirmation).toBe('always')
   })
 

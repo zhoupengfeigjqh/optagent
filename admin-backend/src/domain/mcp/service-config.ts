@@ -38,7 +38,6 @@ import {
   MCP_URL_HINT,
   isValidMcpServiceName,
   normalizeAllowedTools,
-  normalizeAsyncTools,
   normalizeConfirmation,
   normalizeFileArgs,
   normalizeHeaders,
@@ -94,16 +93,6 @@ export interface McpServiceConfig {
    */
   rules_fields: Record<string, string>;
   /**
-   * 异步工具声明（R11，2026-09-25）：该服务**自己的原始工具名**（不含 `{server}__` 前缀）
-   * 清单。声明后，运行环境在调用这些工具时注入 `resultUrl`（签名写直链），服务算完把
-   * 结果回写到用户空间，并在下一轮对话注入「后台计算结果」清单
-   * （完整语义见 `contracts/runtime-api-delta.md` §10）。
-   *
-   * **不改变工具是否同步、也不改变是否走 HITL**——只是给被声明的工具多注入一个回写地址。
-   * 空数组 = 不启用（存量行为零变化）；物化时**非空才写**进 `MCP.json`。
-   */
-  async_tools: string[];
-  /**
    * **工具白名单**（2026-10-03）：该服务**可见**的原始工具名清单（不含 `{server}__` 前缀）。
    *
    * - 平台详情只呈现这里面的工具；运行环境只把这些工具挂给数字人（其余对模型不可见）；
@@ -125,7 +114,7 @@ export interface McpServiceConfig {
    * - **不进日志**：本文件与物化都不打印值（信任边界与 `.env.local` 同级——本机私产）。
    *
    * 缺省 `{}` = 不带请求头（存量服务行为零变化）；物化时**非空才写**进 `MCP.json`
-   * （与 `file_args`/`async_tools`/`allowed_tools` 同一口径）。
+   * （与 `file_args`/`allowed_tools` 同一口径）。
    */
   headers: Record<string, string>;
   updated_at: string;
@@ -150,7 +139,6 @@ export interface McpConfigInput {
   file_args?: unknown;
   confirmation?: unknown;
   rules_fields?: unknown;
-  async_tools?: unknown;
   /**
    * 工具白名单（2026-10-03；2026-10-15 起可改）：
    * `create` **必填非空**；`upsert` **缺省 = 沿用存量，提供 = 全量替换且非空**。
@@ -345,7 +333,6 @@ export class McpServiceConfigService {
       file_args: normalizeFileArgs(input.file_args),
       confirmation: normalizeConfirmation(input.confirmation),
       rules_fields: normalizeRulesFields(input.rules_fields),
-      async_tools: normalizeAsyncTools(input.async_tools),
       allowed_tools: allowedTools,
       // 请求头只对 http 有意义：stdio 丢弃（与"http 丢弃 command/args"对称，
       // 避免留下一条永远不生效、却在界面上显示"已配置令牌"的隐性配置）
