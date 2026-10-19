@@ -123,6 +123,10 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
       currentAgent: ref(options.agentSelected === false ? null : { agent_name: 'demo' }),
       candidates: ref([]),
       mcpServers: ref([]),
+      // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待
+      mcpPending: ref(false),
+      ensureMcpReady: vi.fn(async () => true),
+      warmMcp: vi.fn(async () => undefined),
       switchingDisabled: ref(false),
       switching: ref(false),
       loadCurrent: vi.fn(async () => undefined),

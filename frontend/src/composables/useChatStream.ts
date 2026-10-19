@@ -31,7 +31,11 @@ import type {
 import { RUN_PHASE, type RunPhase } from '../constants/events'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { isAbortError } from '../api/sse'
-import { readStoredThinking, safeSessionStorage, writeStoredThinking } from '../utils/thinking-storage'
+import {
+  readStoredThinking,
+  safeSessionStorage,
+  writeStoredThinking,
+} from '../utils/thinking-storage'
 import { useSession } from './useAppSession'
 import type {
   ChatStreamDeps,
@@ -398,5 +402,3 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
 export function useChatStream(): ChatStreamStore {
   return useSession().chat
 }
-
-

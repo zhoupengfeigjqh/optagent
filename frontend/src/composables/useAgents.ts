@@ -20,11 +20,19 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import type { AgentsApi } from '../api/agents'
-import type { DigitalHuman, ErrorInfo, McpServiceStatus } from '../api/types'
+import type { CurrentMcpResponse, DigitalHuman, ErrorInfo, McpServiceStatus } from '../api/types'
 import { RUN_PHASE, type RunPhase } from '../constants/events'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
 import type { ToastStore } from './useToast'
+
+/**
+ * 等待 MCP 出现连接结果时的兜底轮询间隔（毫秒）。
+ *
+ * 只在前端"点击发送且仍有灰"的窗口内轮询，上限 10s，不是常驻轮询
+ * （常驻的 5s 轮询早已被 SSE 取代，勿恢复）。
+ */
+const MCP_READY_POLL_MS = 500
 
 /** 构造参数。 */
 export interface AgentsDeps {
@@ -40,6 +48,8 @@ export interface AgentsDeps {
 export interface AgentsStore {
   currentAgent: Readonly<Ref<DigitalHuman | null>>
   mcpServers: Readonly<Ref<McpServiceStatus[]>>
+  /** 是否仍有服务处于 `unknown`（灰 = 尚无连接结果）；发送前据此决定是否等待 */
+  mcpPending: ComputedRef<boolean>
   candidates: Readonly<Ref<DigitalHuman[]>>
   loading: Readonly<Ref<boolean>>
   switching: Readonly<Ref<boolean>>
@@ -52,6 +62,13 @@ export interface AgentsStore {
   loadDetail(name: string): Promise<void>
   loadCandidates(): Promise<void>
   refreshMcp(): Promise<void>
+  /** 显式预热（幂等）：让后端建实例并开始建连，返回落定后的快照 */
+  warmMcp(): Promise<void>
+  /**
+   * 有界等待"灰色消失"（每个服务都有连接结果：connected / failed）。
+   * @returns `true` 已有结果（含无 MCP 服务）；`false` 等待超时（调用方降级放行）
+   */
+  ensureMcpReady(timeoutMs: number): Promise<boolean>
   switchTo(name: string): Promise<void>
   startMcpSubscription(): void
   stopMcpSubscription(): void
@@ -67,6 +84,9 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   const error = ref<ErrorInfo | null>(null)
 
   let unsubscribe: (() => void) | null = null
+
+  /** 灰 = 尚无连接结果：有任意一个就说明"此刻提交可能拿不到该服务的工具" */
+  const mcpPending = computed(() => mcpServers.value.some((item) => item.status === 'unknown'))
 
   const streaming = computed(() => deps.getPhase() === RUN_PHASE.STREAMING)
 
@@ -87,14 +107,67 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     }
   }
 
+  /**
+   * 采用快照前的**归属校验**（2026-10-18）。
+   *
+   * `GET .../mcp`、`POST .../mcp/warm` 与 SSE 三条来源会交错：切换数字人瞬间旧数字人的
+   * 快照仍可能在途（后端按"推送时刻的选中"重算，但网络与 Vue 更新顺序不保证）。
+   * 归属不一致即丢弃——否则"旧人的绿"会被当成"本人的绿"，发送前的灰色等待就会误放行。
+   */
+  function applyMcpSnapshot(snapshot: CurrentMcpResponse): void {
+    const current = currentAgent.value?.agent_name ?? null
+    if (current !== null && snapshot.agent_name !== null && snapshot.agent_name !== current) return
+    mcpServers.value = snapshot.mcp_servers ?? []
+  }
+
   async function refreshMcp(): Promise<void> {
     try {
       const response = await deps.agents.currentMcp()
       // 实例未创建或首次建连进行中时后端返回 unknown：属正常状态，不视为异常（FR-034、FR-038）
-      mcpServers.value = response.mcp_servers ?? []
+      applyMcpSnapshot(response)
     } catch {
       // MCP 状态为观测信息，失败不阻断主流程、不弹窗
     }
+  }
+
+  /**
+   * 显式预热（2026-10-18）：让后端为当前数字人建实例并开始建连。
+   *
+   * 起因：实例是惰性创建的，此前"灰变绿"的唯一触发方式是发一轮对话。预热把它提前到
+   * 挂载 / 切换 / 点击发送三个时机，绝大多数情况下用户打完字时状态已经落定。
+   * 预热属体验优化：失败不弹窗（保持灰，由发送前等待的超时兜底）。
+   */
+  async function warmMcp(): Promise<void> {
+    const warm = deps.agents.warmMcp
+    // 兼容既有测试桩（未声明该方法时按"未接入"处理）
+    if (!warm) return
+    try {
+      applyMcpSnapshot(await warm())
+    } catch {
+      // 池满 / 配置损坏 / 超时：均不影响主流程
+    }
+  }
+
+  /**
+   * 有界等待"灰色消失"（2026-10-18）。
+   *
+   * 三重驱动：先发一次预热（实例不存在时后端不会自己建），随后 SSE 会推落定结果；
+   * 同时每 500ms 兜底拉一次 GET——SSE 在极端环境（代理/禁用）可能根本订阅不上，
+   * 只等推送会必然超时。
+   *
+   * @returns `true` = 每个服务都有连接结果（connected / failed，含"没有 MCP 服务"）；
+   *   `false` = 等待超时。超时不改状态，调用方按降级继续（原则九）。
+   */
+  async function ensureMcpReady(timeoutMs: number): Promise<boolean> {
+    if (!mcpPending.value) return true
+    const deadline = Date.now() + timeoutMs
+    void warmMcp()
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, MCP_READY_POLL_MS))
+      await refreshMcp()
+      if (!mcpPending.value) return true
+    }
+    return !mcpPending.value
   }
 
   async function loadCurrent(): Promise<void> {
@@ -111,6 +184,9 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
       }
       await loadDetail(name)
       await refreshMcp()
+      // 预热（2026-10-18）：不建实例，MCP 状态就会恒灰（此前只有发一轮对话才建）。
+      // 放在 loadCurrent 这个"当前数字人已确定"的唯一收口上：挂载与切换都自动覆盖。
+      void warmMcp()
     } catch (cause) {
       error.value = toErrorInfo(cause)
       currentAgent.value = null
@@ -143,9 +219,12 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     }
 
     switching.value = true
+    // 切换瞬间先清空：旧数字人的连接结果 MUST NOT 被当成本人的（SSE 与 GET 会交错）
+    mcpServers.value = []
     try {
       // 覆盖式选中：无需先 exit（FR-037 修订）；后续动作（进入新对话视图）由装配方编排
       await deps.agents.select(name)
+      // loadCurrent 内部会预热新数字人：建连提前到"用户开始打字之前"，点击发送时通常已有结果
       await loadCurrent()
       // 009：会话按数字人隔离，切换即进入新的空对话（由 onSwitched 落 `threads.startNew()`）
       deps.toast?.push('success', '已切换数字人，已开启新对话')
@@ -168,7 +247,8 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     }
     try {
       unsubscribe = deps.agents.subscribeMcp((snapshot) => {
-        mcpServers.value = snapshot.mcp_servers ?? []
+        // 归属校验（2026-10-18）：切人瞬间的旧快照不得写进新数字人的状态
+        applyMcpSnapshot(snapshot)
       })
     } catch {
       // SSE 不可用（极端环境）：保持 loadCurrent 的一次性结果，不影响主流程
@@ -187,6 +267,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   return {
     currentAgent,
     mcpServers,
+    mcpPending,
     candidates,
     loading,
     switching,
@@ -197,6 +278,8 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     loadDetail,
     loadCandidates,
     refreshMcp,
+    warmMcp,
+    ensureMcpReady,
     switchTo,
     startMcpSubscription,
     stopMcpSubscription,

@@ -6,6 +6,9 @@
  * `failed` 只是观测结果——不弹窗、不阻断主流程（FR-034 / FR-038）。
  * `unknown` 表示尚无连接结果（实例未创建或首次建连进行中），中性灰呈现，不误报为故障。
  * 状态变化只改类名与文本，元素本身不重挂载。
+ *
+ * 只显示「服务名 + 状态」：传输方式（`streamable-http` 等）是接入实现细节，
+ * 对业务用户没有意义，2026-10-18 起不再出现在界面上（含 AgentPanel 的 MCP 清单）。
  */
 import { computed } from 'vue'
 
@@ -14,8 +17,6 @@ import type { McpConnectionStatus } from '../../api/types'
 const props = defineProps<{
   /** 服务名 */
   name: string
-  /** 传输方式 */
-  transport: string
   /** 连接状态 */
   status: McpConnectionStatus
 }>()
@@ -34,7 +35,6 @@ const statusLabel = computed(() => STATUS_LABEL[props.status] ?? STATUS_LABEL.un
   <span class="mcp-status-item" :class="`mcp-status-item--${status}`">
     <span class="mcp-status-item__dot" aria-hidden="true" />
     <span class="mcp-status-item__name">{{ name }}</span>
-    <span class="mcp-status-item__transport">{{ transport }}</span>
     <span class="mcp-status-item__status">{{ statusLabel }}</span>
   </span>
 </template>

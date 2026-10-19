@@ -31,6 +31,8 @@
 | R17 | **下一步动作提示**（特性 `007-next-action-hints`）：SOUL.md frontmatter 新增 `next_action_hints` 开关；新增 `GET /api/threads/{id}/next-actions`（只读，会话级单快照） | 新增配置字段 + 新增端点 | 否（开关缺省**关闭**；轮末生成不落历史、不改详情接口） |
 | R18 | **每轮注入当前时间**（2026-10-14）：`systemExtra` 新增 `【当前时间】` 段（`YYYY-MM-DD HH:mm:ss（周X，UTC±HH:MM）`，运行环境本地时区、**精确到秒**），位置在后台产出段之后、`guidance` 之前 | 一处提示词段 | 否（只增段、不改动端点/SSE/历史/气泡；唯一口径变化：因时间恒注入，`systemExtra` 不再可能是 `undefined`） |
 | R19 | 新增内置工具 **`grep_skill`**：补齐 SKILL 内容的**检索**通道（`read_skill` 只解决"读得到"），内置工具目录由 6 项增至 7 项（2026-10-17） | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
+| R20 | **LLM 调用的有界重试与失败可诊断**（特性 `002-conversation-runtime` 增量，2026-10-15）：重试复用 `pi-ai`；`error` 对象新增三个可选诊断字段；新增流级错误码 | 新增可选字段 + 错误码 | 否（SSE 事件集合不变，旧前端忽略未知字段） |
+| R21 | **MCP 预热与发送前就绪门**（2026-10-18）：新增 `POST /api/agents/current/mcp/warm`（幂等预热，返回与 `GET .../mcp` 同形快照）；建连新增有界超时 `MCP_CONNECT_TIMEOUT_MS`（10s）；发消息前有界等待建连落定 | 新增端点 + 新环境变量 + 时序变更 | 否（`GET .../mcp` 仍纯只读；稳态首字延迟零变化；超时降级继续） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1338,3 +1340,63 @@ error: {
 
 - **兼容**：SSE 事件集合、`history.jsonl` 行结构（仅 `error` 对象可多三个可选字段）、端点请求/响应的其余字段、前端类型（`ErrorInfo` 加可选字段）**全部向后兼容**；
 - **回滚**：把 `LLM_MAX_RETRIES` 设为 `0` 即回到"不重试"；诊断字段与其日志可独立保留（不影响旧前端）。
+
+---
+
+## §20 R21 — MCP 预热与发送前就绪门（2026-10-18，特性 `002-conversation-runtime` 增量）
+
+**规格**：[`specs/002-conversation-runtime/spec.md`](../../002-conversation-runtime/spec.md) §4.11（`TR-59`~`TR-63`） | **任务**：[`tasks.md`](../../002-conversation-runtime/tasks.md) T086~T090
+
+**背景**：实例**惰性创建**（只有发消息才建），状态端点只读池 → 新登录 / 切换数字人 / 空闲回收后 `unknown`（灰）恒久；此前唯一激活方式是发一轮对话。更实质的是：建连 fire-and-forget，而工具装配按 `isAvailable` 过滤 → **首轮可能静默缺少 MCP 工具**，随后状态才变绿。
+
+### 20.1 新增端点
+
+```
+POST /api/agents/current/mcp/warm
+→ 200 { agent_name: string | null, mcp_servers: [{ name, transport, status }] }
+```
+
+- **同形**：响应与 `GET /api/agents/current/mcp` **完全一致**（无新字段、无新类型）；
+- **语义**：确保当前数字人实例已创建并**开始建连**，并**有界等待**本次建连落定（已落定则立即返回）；未选中 → `{ agent_name: null, mcp_servers: [] }`；
+- **幂等**：实例已在池 → 不重复创建；可安全重复调用；
+- **不抛业务错**：池满（`POOL_EXHAUSTED`）/ 配置损坏（`AGENT_NOT_FOUND` 由随后快照计算给出）/ 建连超时，一律照常返回当前快照（仍为 `unknown` 的部分由调用方超时兜底）；
+- **`GET /api/agents/current/mcp` 行为不变**：纯只读，**MUST NOT** 因查询而创建实例（观测不产生副作用）。
+
+### 20.2 建连有界超时（新环境变量）
+
+| 变量 | 默认 | 语义 |
+|---|---|---|
+| `MCP_CONNECT_TIMEOUT_MS` | `10000` | 单个 MCP 服务**建连**超时。超时即判该服务 `failed`（有连接结果，不再永久 `unknown`），并交给既有退避重连接管；**超时后迟到的连接 MUST 主动关闭**（不留无人管理的客户端/子进程） |
+
+- 与 `MCP_TIMEOUT_MS`（工具调用上限，默认 60s）**刻意分开**：建连期用户正在等首条消息；
+- 不改变既有自愈口径（退避 5/15/30/60/60s → 保活每 120s）。
+
+### 20.3 发消息前的等待（时序变更）
+
+`POST /api/threads/{id}/messages` 在 `getOrCreateAgent` 之后、`startRun` 之前 MUST `await agent.mcpReady(MCP_CONNECT_TIMEOUT_MS)`：
+
+- **已落定（稳态）→ 立即返回**，首字延迟零变化；
+- 未落定 → 等到全部有结果再装配工具（保证本轮工具齐全）；
+- 超时 → **降级继续**（按当前可用工具开跑），记结构化 `WARN`：`mcp.ready.timeout`（含 `timeout_ms`）/ 异常时 `mcp.ready.error`。
+
+### 20.4 前端契约（发送前就绪门）
+
+- 触发：`onSend`（唯一发送链路）在 `chat.send` 之前；**仅当仍有 `unknown`** 时进入等待（≤10s）；
+- 唤醒：先调 `POST .../mcp/warm`；等待期间 SSE 推送为主、每 500ms 拉一次 `GET .../mcp` 兜底（**不是**常驻轮询）；
+- 放行：任一结果（`connected` / `failed`）即放行；**超时也放行**并提示"本轮可能缺少相关工具"；
+- 归属：快照 MUST 校验 `agent_name`（不一致即丢弃），切换数字人时 MUST 先清空旧结果；
+- 呈现：等待期间显示"正在连接 MCP 服务…"（`role="status"`）并禁用输入与两个发送入口。
+
+### 20.5 不变式（MUST 由测试守住）
+
+1. 未预热时 `GET .../mcp` 返回 `unknown` 且**池仍为空**（只读）；
+2. 预热后实例在池，且响应中每个服务**不是** `unknown`；
+3. 重复预热返回**同一实例**（不重复建连）；
+4. 建连挂起 → `MCP_CONNECT_TIMEOUT_MS` 后判 `failed` 并推送；迟到连接被 `close()`；
+5. 已落定的实例上，发消息**不产生额外等待**；
+6. 前端：有灰 → 预热/等待先于提交；无灰 → 预热调用次数为 0；等待中重复点击只提交一次；超时仍提交且提示出现一次。
+
+### 20.6 兼容性与回滚
+
+- **兼容**：不新增/不修改任何既有响应字段与 SSE 事件；不落盘、不改历史行；`api/types.ts` 零新增类型（复用 `CurrentMcpResponse`）；
+- **回滚**：前端不再调用 `warm` 即回到"发消息才激活"（端点保留无副作用）；把 `MCP_CONNECT_TIMEOUT_MS` 调大可放宽建连等待（但不得低于 1000ms），发消息前的等待同理。

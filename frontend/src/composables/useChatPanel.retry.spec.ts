@@ -122,6 +122,10 @@ function makeSession() {
       currentAgent: ref({ agent_name: 'demo' }),
       candidates: ref([]),
       mcpServers: ref([]),
+      // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待
+      mcpPending: ref(false),
+      ensureMcpReady: vi.fn(async () => true),
+      warmMcp: vi.fn(async () => undefined),
       switchingDisabled: ref(false),
       switching: ref(false),
       loadCurrent: vi.fn(async () => undefined),
@@ -271,5 +275,90 @@ describe('useChatPanel —— 失败块「重试本轮」的可用性（TR-58）
 
     expect(chat.send).not.toHaveBeenCalled()
     expect((session.chat as { recover: ReturnType<typeof vi.fn> }).recover).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * 发送前的 MCP 就绪门（2026-10-18）：灰 → 有连接结果 → 才提交。
+ *
+ * 断言的是**顺序**与**次数**，不是"函数被调用过"：
+ * ① 有灰时必须先等（`ensureMcpReady` 先于 `chat.send`）；
+ * ② 无灰时零等待（稳态不能凭空多出延迟）；
+ * ③ 等待期间重复点击只发一次（否则会排队发两轮）。
+ */
+describe('useChatPanel —— 发送前 MCP 就绪门（2026-10-18）', () => {
+  interface GateAgents {
+    mcpPending: { value: boolean }
+    ensureMcpReady: ReturnType<typeof vi.fn>
+  }
+
+  it('仍有灰：先等出连接结果，再提交', async () => {
+    const session = makeSession()
+    const agents = session.agents as unknown as GateAgents
+    const chat = session.chat as unknown as { send: ReturnType<typeof vi.fn> }
+    const order: string[] = []
+    agents.mcpPending.value = true
+    agents.ensureMcpReady.mockImplementation(async () => {
+      order.push('wait')
+      return true
+    })
+    chat.send.mockImplementation(async () => {
+      order.push('send')
+    })
+    const { panel } = mountHarness(session)
+
+    await panel.onSend({ content: '帮我看看产能', attachments: [] })
+
+    expect(order).toEqual(['wait', 'send'])
+  })
+
+  it('无灰（已全部有结果 / 未配 MCP）：零等待直接提交', async () => {
+    const session = makeSession()
+    const agents = session.agents as unknown as GateAgents
+    const chat = session.chat as unknown as { send: ReturnType<typeof vi.fn> }
+    const { panel } = mountHarness(session)
+
+    await panel.onSend({ content: '帮我看看产能', attachments: [] })
+
+    expect(agents.ensureMcpReady).not.toHaveBeenCalled()
+    expect(chat.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('等待期间重复点击：只提交一次', async () => {
+    const session = makeSession()
+    const agents = session.agents as unknown as GateAgents
+    const chat = session.chat as unknown as { send: ReturnType<typeof vi.fn> }
+    agents.mcpPending.value = true
+    let settle: ((ready: boolean) => void) | undefined
+    agents.ensureMcpReady.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        settle = resolve
+      }),
+    )
+    const { panel } = mountHarness(session)
+
+    const first = panel.onSend({ content: '帮我看看产能', attachments: [] })
+    await flush()
+    const second = await panel.onSend({ content: '帮我看看产能', attachments: [] })
+    settle?.(true)
+    await first
+
+    expect(second).toBe(false)
+    expect(chat.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('等到超时：仍然提交，并给出可感知提示（不因 MCP 挂掉而阻断聊天）', async () => {
+    const session = makeSession()
+    const agents = session.agents as unknown as GateAgents
+    const chat = session.chat as unknown as { send: ReturnType<typeof vi.fn> }
+    const toast = session.toast as { push: ReturnType<typeof vi.fn> }
+    agents.mcpPending.value = true
+    agents.ensureMcpReady.mockResolvedValue(false)
+    const { panel } = mountHarness(session)
+
+    await panel.onSend({ content: '帮我看看产能', attachments: [] })
+
+    expect(chat.send).toHaveBeenCalledTimes(1)
+    expect(toast.push).toHaveBeenCalledWith('info', 'MCP 服务连接超时，本轮可能缺少相关工具')
   })
 })

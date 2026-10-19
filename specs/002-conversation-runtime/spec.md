@@ -247,6 +247,31 @@
 - **不改"流到一半失败"的语义**：`retryProviderRequest` 只在**响应到达前**重试；正文已产出后的失败仍按 §4.4 与 `TR-33` 的既有口径（半截回答与已成功的工具记录照常保留与落盘、未完项显示 `未完成`），由用户在 `TR-58` 的入口重发；
 - **不给"重试次数"单独出一个 SSE 事件**：重试期间的等待态由既有流式"生成中"承载（原则九的"暴露等待状态"），改契约面为一个小事件不值得。
 
+### 4.11 MCP 预热与「发送前就绪门」（2026-10-18 增量）
+
+**问题**（体验，实测）：
+
+1. **状态恒灰**：实例是**惰性创建**的（只有发消息才走 `getOrCreateAgent`），而状态端点只读实例池 → 新登录 / 切换数字人 / 空闲回收后，`GET /api/agents/current/mcp` 恒为 `unknown`；此前**唯一**能让它变绿的动作就是"发一轮对话"。
+2. **首轮可能拿不到工具**（比 1 更实质）：建连是 fire-and-forget，而每轮工具装配按 `isAvailable` 过滤 —— 实例刚创建就开跑时，连接还在飞行中，该轮**静默缺少 MCP 工具**，随后状态才变绿（用户感受是"这轮白问"）。
+3. 切人瞬间的旧快照可能被当成本人的结果（SSE 与 GET 交错），会让"等待门"凭旧数据误放行。
+
+**处置总览**：① 后端提供**显式预热**入口（幂等）；② 建连**有界超时** + 落定信号；③ 发消息前**有界等待**落定（正确性兜底）；④ 前端"点击发送时仍有灰 → 等出连接结果再提交"，超时降级放行。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-59** | **预热入口**：新增 `POST /api/agents/current/mcp/warm`，语义为"确保当前数字人实例已创建并开始建连"，返回**与 `GET .../mcp` 同形**的快照（`CurrentMcpResponse`，**不新增字段/类型**）。幂等：实例已在池 → 不重复创建，已落定则立即返回。未选中 → `{ agent_name: null, mcp_servers: [] }`。池满 / 配置损坏 / 建连超时 → **不抛错**，照常返回当前快照（灰由调用方超时兜底）。**`GET .../mcp` 保持纯只读**（查询不产生建实例副作用） | 集成：未选中为空快照；未预热时 GET 仍 `unknown` 且池为空；预热后实例入池且返回**非 unknown**（不可达服务 ⇒ `failed`）；重复预热命中同一实例；预热后 GET 与 POST 结果一致 |
+| **TR-60** | **实例创建 MUST 单飞**：同一 `(user_id, agent_name)` 的并发取用只创建一次（预热与发消息会并发）。否则会建出两套 `McpManager`，后入池者覆盖前者，被覆盖实例的 MCP 连接/子进程**无人关闭** | 单测/集成：并发两次取用返回**同一实例对象**；池满时两方都收到同一次拒绝且不产生泄漏实例 |
+| **TR-61** | **建连 MUST 有界**：新增 `MCP_CONNECT_TIMEOUT_MS`（默认 **10s**，与工具调用上限 `MCP_TIMEOUT_MS`=60s **刻意分开**）。超时即判该服务 `failed`（有连接结果，不再永久 `unknown`）并交给既有退避重连接管；**超时后迟到的连接 MUST 主动关闭**（不得留下无人管理的客户端/进程） | 单测：挂起建连 → 到点 `failed` 并推送；迟到连接被 `close()`；状态**不会**永久停在 `unknown` |
+| **TR-62** | **开跑前 MUST 有界等待落定**：`POST /api/threads/{id}/messages` 在 `getOrCreateAgent` 之后、`startRun` 之前 MUST `await agent.mcpReady(MCP_CONNECT_TIMEOUT_MS)`（已落定 → **立即返回**，稳态首字延迟零影响）；超时 MUST 降级继续（不阻断本轮）+ 记结构化 `mcp.ready.timeout` | 单测/集成：已落定路径不额外等待；未落定路径等到结果后工具**齐全**；超时仍开跑且日志有 `event`/`timeout_ms` |
+| **TR-63** | **前端发送前就绪门**：`onSend`（**唯一发送链路**）在 `chat.send` 之前，若仍有 `unknown` MUST 先调预热并**有界等待**（≤10s）到每个服务都有结果（`connected` / `failed`，红色同样放行）；超时 MUST **放行**并给用户可感知提示（"MCP 服务连接超时，本轮可能缺少相关工具"），**MUST NOT** 因单个服务挂掉而阻断聊天（原则九）。等待期间 MUST 有可见状态（"正在连接 MCP 服务…"）并禁用输入与两个发送入口（防重复提交）。快照 MUST 校验 `agent_name` 归属（旧数字人的绿不得被采用），切换数字人时 MUST 先清空旧结果。挂载与切换时 SHOULD 主动预热（把等待前移到用户打字期间） | 单测：有灰 → `ensureMcpReady` 先于 `chat.send`；无灰 → **零等待**；等待中重复点击只发一次；超时 → 仍提交 + 提示；SSE 推来他人快照被丢弃；切换后不残留旧结果 |
+
+**明确不做**（本次）：
+
+- **不新增 `connecting` 状态值**：`unknown` 仍表示"尚无连接结果"（建连进行中也算），前端用本地 `preparing` 表达"正在连接"，避免动三值枚举（后端 `statusOf`、前端类型、配色与一批测试）；
+- **不做"红色就不许发送"**：红色 = 已有明确结论，阻塞没有收益（且会让服务一挂就完全不能聊天）；
+- **不改"建连不阻断实例就绪"的既有口径**：`connectAll` 仍是 fire-and-forget，本次只是**增加可等待的落定信号**，不让创建实例本身变慢；
+- **不恢复常驻轮询**：仅在"点击发送且仍有灰"的窗口内按 500ms 兜底拉取（上限 10s），SSE 仍是常态通道。
+
 ## 5. 数据模型
 
 ### 5.1 `threads/{thread_id}/tool-events.jsonl`
@@ -302,6 +327,8 @@
 | `GET /api/threads/{id}` | 消息新增可选字段 `tool_calls: ToolCallRecord[]`（仅该轮确有调用时返回）；**2026-10-10**：`ToolCallRecord` 再新增可选字段 `view_links: ViewLink[]`（结果里的视图链接；仅确有链接时返回，`TR-45`） |
 | `GET /api/threads/{id}/tool-calls/{call_id}` | **新增**。200 → `{ call_id, name, status, size, content, truncated? }`；410 → `TOOL_RESULT_EXPIRED`；404 → `TOOL_CALL_NOT_FOUND` |
 | `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发。**2026-10-15**：`error` 事件的 `error` 对象新增**可选**诊断字段（见下，`TR-55`） |
+| `GET /api/agents/current/mcp` | **不变**：仍为纯只读快照（实例未创建时 `unknown`）。**2026-10-18**：明确"查询 MUST NOT 产生建实例副作用" |
+| `POST /api/agents/current/mcp/warm` | **新增**（2026-10-18，`TR-59`）。预热：建实例 + 有界等建连落定；200 → 与 `GET .../mcp` **同形**的快照（未选中 → `{ agent_name: null, mcp_servers: [] }`）；幂等；池满/配置损坏/超时不抛错，返回当前快照 |
 
 `ToolCallRecord`（snake_case）：
 
@@ -390,6 +417,22 @@
 
 **接口与数据变更**：SSE `error` 事件的 `error` 对象新增三个可选字段（`TR-55`），失败轮 `history.jsonl` 行的 `error` 对象**同形**；新增一批流级错误码（`TR-54`）。前端 `api/types.ts` 的 `ErrorInfo`、`frontend/src/utils/error-message.ts` 的文案表与 `frontend/src/components/common/ErrorNotice.vue` 的展示**同批**变更（宪章原则七）。运行环境侧契约登记在 [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)。
 
+### 7.6 修订记录（2026-10-18）：MCP 预热与发送前就绪门
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| —（原实现无规格条目） | 实例惰性创建；MCP 状态靠"发一轮对话"激活；状态端点只读池 | **新增** §4.11：`TR-59`~`TR-63`（预热端点 / 创建单飞 / 建连有界超时 / 开跑前有界等待 / 前端就绪门） | 新登录与切人后状态恒灰是**体验**问题；更实质的是**首轮可能静默缺少 MCP 工具**（建连在飞行中即装配工具） |
+| §4.5 / `TR-29`（自愈） | 退避 + 保活重连，状态可自动恢复 | **不变**：本次只给建连加**上限**（超时判 `failed` 并交给既有重连），不改退避表与保活周期 | 自愈逻辑是既有资产，不因新需求重写 |
+| 性能口径（`SC-001` 首字延迟） | 建连 fire-and-forget，不阻断实例就绪 | **收窄为"创建实例不等待"**：创建仍不 await；**仅在实例尚未落定**时，发消息前有界等待（已落定 ⇒ 零成本） | 首字延迟与工具正确性在此处冲突，取"首次付一次、稳态不付" |
+
+**接口与数据变更**：新增一个端点（`POST /api/agents/current/mcp/warm`，与 `GET .../mcp` 同形），新增一个环境变量（`MCP_CONNECT_TIMEOUT_MS`）；**无数据模型变更**（不落盘、不改历史行），前端 `api/types.ts` **零新增类型**。运行环境侧契约登记在 [`runtime-api-delta.md` §20 R21](../../001-digital-human-platform/contracts/runtime-api-delta.md)。
+
+**顺序偏离登记（如实记录，2026-10-18）**：本次为「需求分析 → 代码 → 规格回写」的**同批落盘**，**未严格遵循原则一的"先规格后代码"**（规格文件在代码之后写入工作区）。补救与约束：
+
+1. 本规格 / [tasks.md](./tasks.md) / 跨侧契约已与实现**逐条核对**：端点路径与响应形状、环境变量名与默认值、日志事件名（`mcp.warm.failed` / `mcp.warm.timeout` / `mcp.ready.timeout` / `mcp.ready.error`）、测试文件名与用例名；
+2. [tasks.md](./tasks.md) 的 T086（规格回写）保留在任务序列首位并标记完成，供后续审计追溯实际顺序；
+3. 本次**不作为先例**：后续同类增量 MUST 先回写规格再改代码（原则一）；`§9.6` 的验收项只证明"文档与实现一致"，不表示顺序合规。
+
 ## 8. 宪章符合性
 
 | 原则 | 落实 |
@@ -467,6 +510,20 @@
 | 七（契约两侧同改） | 契约（[`runtime-api-delta.md` §19](../../001-digital-human-platform/contracts/runtime-api-delta.md)）+ 前端类型（`api/types.ts` 的 `ErrorInfo`）+ 后端类型（`types.ts` 的 `LlmEvent.error` / `HistoryMessage.error`）+ 测试**同批**变更 |
 | 八（简单可控） | 门禁仍是单条入口：后端 `npm run typecheck / lint / test:all`；前端 `npm run lint / typecheck / test:coverage / build` |
 | 九（优雅降级与可观测） | 重试**有界**（默认 2 次、单次等待 ≤15s、总尝试 ≤3、可被「停止」打断）；重试期间用户看到既有流式等待态（既不是无反馈，也不假装正常）；原始错误**进结构化日志**（`llm.call.failed`，含上游状态码与 `request_id`），需人工介入的两类带 `alert: true`；用户侧给可行动文案 + 诊断行，**不**展示上游原文（不泄漏 provider 内部信息） |
+
+**2026-10-18 增量（§4.11 MCP 预热与发送前就绪门）的宪章落实**：
+
+| 原则 | 落实 |
+|---|---|
+| 一（规格驱动） | 规格落点：本规格（§4.11 `TR-59`~`TR-63` / §6 / §7.6 / §8 / §9.6）+ [tasks.md](./tasks.md) + [`runtime-api-delta.md` §20 R21](../../001-digital-human-platform/contracts/runtime-api-delta.md) + 根 `README.md` 运行参数表。**⚠️ 顺序偏离**：本次规格与代码**同批落盘**（未做到"先规格后代码"），偏离原因、逐条核对结果与"不得作为先例"的约束见 §7.6 末段 |
+| 二（模块化，≤500 行） | 等待逻辑独立成 `frontend/src/composables/useMcpReadyGate.ts`（工厂 + 注入包装，便于单测）；`useChatPanel.ts` 仅 +5 行（**499 行**，未越门禁）；后端落点都在既有单一职责文件内（`mcp-manager` / `agent-factory` / `routes/agents` / `routes/chat`），**未新增第二套状态口径**（`statusOf` 仍是唯一状态实现） |
+| 三（测试完备） | 后端新增 7 例（`mcp-manager.spec` 超时/迟到关闭/落定 5 例 + 新集成 `agent-mcp-warm.spec` 5 例）；前端新增 13 例（`useMcpReadyGate.spec` 5 + `useAgents.spec` 5 + `useChatPanel.retry.spec` 门 4）；`useMcpReadyGate.ts` 登记模块覆盖率阈值 |
+| 四（无障碍） | 等待态用 `role="status"` 文本提示（不只靠颜色/动画），并同时禁用两个发送入口（不是"点了没反应"） |
+| 五（性能与数据一致性） | 稳态（已落定）等待为**零成本**（不发请求、不轮询）；仅在"点击发送且仍有灰"的窗口内兜底轮询（500ms、上限 10s）；SSE 仍是常态通道 |
+| 六（依赖治理） | 零新增依赖；新增 1 个 `.env` 标量（`MCP_CONNECT_TIMEOUT_MS`） |
+| 七（契约两侧同改） | 新端点契约（`runtime-api-delta.md` §20）+ 后端路由 + 前端 `api/agents.ts`（`warmMcp`）+ 测试**同批**；`api/types.ts` **零新增类型**（复用 `CurrentMcpResponse`） |
+| 八（简单可控） | 门禁仍是单条入口：后端 `npm run typecheck / lint / test:all`；前端 `npm run lint / typecheck / test:coverage / build` |
+| 九（优雅降级与可观测） | 等待**有界**（建连 10s / 前端 10s），超时一律**降级放行**并让用户可感知（提示"本轮可能缺少相关工具"）；原始原因落结构化日志（`mcp.warm.failed` / `mcp.warm.timeout` / `mcp.ready.timeout` / `mcp.ready.error`），不静默吞错；红色（failed）视为"已有结论"照常提交 |
 
 ## 9. 验收清单
 
@@ -565,6 +622,25 @@
 - [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）后端 `npm run typecheck` / `lint` / `test:all` 与覆盖率全绿
 - [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）前端 `npm run lint` / `typecheck` / `test:coverage` / `build` 全绿
 - [ ] （实测值见 [tasks.md](./tasks.md) 对应任务）单文件 ≤500 行；**零新增依赖**
+
+### 9.6 验收清单（2026-10-18 增量：MCP 预热与发送前就绪门）
+
+**功能（`TR-59`~`TR-63`）**
+
+- [x] 新登录 / 切换数字人后不再恒灰：`loadCurrent` 末尾自动预热 → SSE 推送落定结果（集成：预热返回非 `unknown`）
+- [x] `GET .../mcp` 仍纯只读：未预热时查询**不建实例**（集成用例断言池为空）
+- [x] 预热幂等：重复预热命中同一实例（集成用例断言对象同一）
+- [x] 建连挂起 → 到 `MCP_CONNECT_TIMEOUT_MS` 判 `failed` 并推送；迟到连接被关闭（单测 2 例）
+- [x] 发消息前有界等待：已落定立即返回；未落定等出结果后工具齐全；超时降级继续且记 `mcp.ready.timeout`（`chat.ts`）
+- [x] 前端发送前门：有灰 → 先等再提交；无灰 → 零等待；等待中重复点击只发一次；超时 → 提交 + 提示（`useChatPanel` 4 例）
+- [x] 快照归属校验：别的数字人的 SSE 快照被丢弃；切换后不残留旧结果（`useAgents` 2 例）
+- [x] 等待态可见：显示"正在连接 MCP 服务…"并禁用输入与两个发送入口（组件层）
+
+**门禁（宪章原则八 + 硬门禁）**
+
+- [x] 后端 `npm run typecheck` / `lint` / `test:all` 全绿（58 个测试文件，含新增 `agent-mcp-warm.spec.ts`）
+- [x] 前端 `npm run lint` / `typecheck` / `test:coverage` 全绿（80 个测试文件；`useMcpReadyGate.ts` 已登记模块阈值）
+- [x] `useChatPanel.ts` 499 行（≤500）；**零新增依赖**
 
 ## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
 

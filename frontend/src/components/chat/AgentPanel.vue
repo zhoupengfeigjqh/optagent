@@ -185,7 +185,7 @@ function onSwitch(name: string): void {
         <h4 class="agent-panel__section">MCP 服务</h4>
         <ul v-if="displayed.mcp_servers.length > 0" class="agent-panel__list">
           <li v-for="server in displayed.mcp_servers" :key="server.name">
-            {{ server.name }}（{{ server.transport }}）
+            {{ server.name }}
           </li>
         </ul>
         <p v-else class="agent-panel__hint">未挂载 MCP 服务</p>

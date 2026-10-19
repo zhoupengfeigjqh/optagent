@@ -194,7 +194,7 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
         skill: { type: 'string', description: '限定技能名（可选，省略则检索全部技能）' },
       },
     });
-  })
+  });
 
   it('可用目录为空时回退默认示例（与改造前的 ?? 兜底一致）', () => {
     const empty: Partial<TemplateValues> = {

@@ -50,11 +50,7 @@ export default defineConfig({
       // `src/api/types.ts` 与 `src/composables/useChatStream.types.ts` 均为纯类型声明
       // （无运行期语句），计入分母无意义——与后端 `vitest.config.ts` 排除 `src/types.ts` 同口径。
       // 后者由 010（2026-10-16）为「契约与实现分离」拆出，与前者同性质：无可测行为。
-      exclude: [
-        'src/**/*.spec.ts',
-        'src/api/types.ts',
-        'src/composables/useChatStream.types.ts',
-      ],
+      exclude: ['src/**/*.spec.ts', 'src/api/types.ts', 'src/composables/useChatStream.types.ts'],
       // 宪章原则三：核心逻辑覆盖率 ≥ 80%
       //
       // 分两层（与 `agent-backend/vitest.config.ts` 同口径）：
@@ -71,19 +67,18 @@ export default defineConfig({
       // 该缺口的处置结论由宪章「同步影响报告 § 待办」跟踪，
       // **MUST NOT 把本配置当作该缺口已闭合的依据**。
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-16 实测（011 增量后）：stmts 79.01 / branch 76.89 / funcs 70.72 / lines 79.77
-        //    （011「预览面板放大 / 缩小」：新增 `useMaximizeEscape` 模块并补测至 96%+，另补齐
-        //     `AppShell` / `BaseIcon` 两个改动文件此前缺失的同名测试，整体小幅上行，地板随之抬到实测值略下方；
-        //     上一版为 76/74/66/77 @ 2026-10-16（010「聊天消息渲染与会话导出」：新增 `markdown` /
-        //     `export-thread` / `download` / `useThrottledText` 四个模块并补测，另由三个超限文件的拆分
-        //     产出 6 个模块并补测至 87%~100%，实测 78.01/75.87/68.80/78.69；
-        //     再上一版 59/63/48/58 @ 2026-10-12（007「下一步动作提示」），
+        // ① 全局地板（防倒退）。2026-10-18 实测（012 增量后）：stmts 81.52 / branch 78.57 / funcs 74.79 / lines 82.4
+        //    （012「上传记录与重名编号」：新增 `useUploadPanel` 并补同名测试（≥80），另为**改动**的 `useUploads`
+        //     补齐此前缺失的同名测试、`useWorkspace.registerFile` / `UploadItem` / `UploadMenu` 空态 / 新错误码文案
+        //     各补用例，整体小幅上行，地板随之抬到实测值略下方；
+        //     上一版为 77/75/69/78 @ 2026-10-16（011：实测 79.01/76.89/70.72/79.77，
+        //     再上一版 76/74/66/77 @ 2026-10-16（010），59/63/48/58 @ 2026-10-12（007），
         //     更早 53/59/42/52 @ 2026-10-12，48/55/38/47 @ 2026-10-08，45/52/34/44 @ 2026-09-23）
         //    该地板 MUST 随 `api` / `composables` 逐步补测而上调，不得下调。
-        statements: 77,
-        branches: 75,
-        functions: 69,
-        lines: 78,
+        statements: 81,
+        branches: 78,
+        functions: 74,
+        lines: 82,
 
         // ② 受宪章 80% 门禁约束的模块（已充分覆盖；实测见各模块注释）
         'src/utils/space.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }, // 100 / 100 / 100 / 100
@@ -184,6 +179,31 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         }, // 100 / 100 / 100 / 100
+        // 发送前的 MCP 就绪门（2026-10-18）：灰色等待 + 超时降级放行 + 等待态开关
+        'src/composables/useMcpReadyGate.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 上传面板接线与上传状态机（2026-10-18，012）：
+        // - `useUploadPanel` 是本次**新增**模块 ⇒ 按原则三配同名测试（成功回写 / 收起清空 / 顺序 / 上限）；
+        // - `useUploads` 是本次**改动**模块（`clear()` 口径改为"只清终态"）⇒ 补齐此前缺失的同名测试
+        //   （它原本在"20 个未测模块"之列，本次触达即补，不是存量补齐专项）。
+        // 实测：useUploadPanel 全部 ≥80（达到 100% 的行被 `text` 报告的 skipFull 隐藏，故表中看不到它）；
+        //       useUploads 97.91 / 85 / 100 / 97.82（唯一未覆盖分支是 `startUpload` 里 `!source` 的防御性 return）。
+        'src/composables/useUploadPanel.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/composables/useUploads.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

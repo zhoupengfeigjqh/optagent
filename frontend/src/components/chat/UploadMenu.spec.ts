@@ -206,3 +206,39 @@ describe('UploadMenu - 文件选择器 accept 的粒度', () => {
     expect(await acceptAfterClick(wrapper, '临时空间')).toBe('.csv,.xlsx,.txt')
   })
 })
+
+/* ---------- 012：清空后空态必须干净（FR-015） ---------- */
+
+describe('UploadMenu - 记录区空态（012 FR-015）', () => {
+  it('uploads 为空 ⇒ 不渲染记录区（收起清空后再展开不留残影）', () => {
+    const wrapper = mount(UploadMenu, { props: { open: true, spaces: makeSpaces(), uploads: [] } })
+
+    expect(wrapper.find('.upload-menu__uploads').exists()).toBe(false)
+    expect(wrapper.findAll('.upload-item')).toHaveLength(0)
+    // 目录树照常在（清空只清记录，不清目录）
+    expect(wrapper.text()).toContain('生产计划')
+  })
+
+  it('有记录时按 localId 渲染，且不再有"已完成 N 个"之类的残留计数', () => {
+    const wrapper = mount(UploadMenu, {
+      props: {
+        open: true,
+        spaces: makeSpaces(),
+        uploads: [
+          {
+            localId: 'upload-1',
+            dir: '临时空间',
+            name: 'a.csv',
+            size: 10,
+            status: 'success',
+            serverFilename: 'a.csv',
+            error: null,
+          },
+        ],
+      },
+    })
+
+    expect(wrapper.find('.upload-menu__uploads').exists()).toBe(true)
+    expect(wrapper.findAll('.upload-item')).toHaveLength(1)
+  })
+})

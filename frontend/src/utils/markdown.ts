@@ -119,7 +119,11 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
     }
 
     // 表格：本行有 `|` 且**下一行是分隔行**，才敢认定（否则普通含竖线的句子会被误判）
-    if (line.text.includes('|') && index + 1 < lines.length && isDividerRow(lines[index + 1].text)) {
+    if (
+      line.text.includes('|') &&
+      index + 1 < lines.length &&
+      isDividerRow(lines[index + 1].text)
+    ) {
       const header = splitCells(lines[index])
       index += 2
       const rows: Piece[][] = []
@@ -169,11 +173,7 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
 
     // 段落：连续非空行，遇到任何块级起始行即止
     const paragraph: SourceLine[] = []
-    while (
-      index < lines.length &&
-      lines[index].text.trim() !== '' &&
-      !startsBlock(lines, index)
-    ) {
+    while (index < lines.length && lines[index].text.trim() !== '' && !startsBlock(lines, index)) {
       paragraph.push(lines[index])
       index += 1
     }

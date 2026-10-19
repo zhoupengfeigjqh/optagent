@@ -46,6 +46,8 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   FILE_TOO_LARGE: '文件超过 5MB',
   FILE_NOT_FOUND: '文件不存在或已被清理',
   FILE_READONLY: '共享空间为只读目录，不支持删除',
+  // 012：候选名用尽（同名文件过多）——后端 409，属"能力边界"而非系统故障，文案要可操作
+  FILE_NAME_CONFLICT: '同名文件过多，请先整理目录后重试',
   UPLOAD_DIR_FORBIDDEN: '该目录不允许访问',
   TMP_WRITE_FAILED: '临时空间写入失败，请重试',
   VALIDATION_FAILED: '参数不合法',
@@ -87,6 +89,8 @@ const CONTEXT_MESSAGES: Readonly<
     VALIDATION_FAILED: '文件格式不支持',
     FILE_TOO_LARGE: '文件超过 5MB',
     UPLOAD_DIR_FORBIDDEN: '该目录不允许上传',
+    // 同名候选名用尽（012）：不是"格式不支持"，必须给出可操作的下一步
+    FILE_NAME_CONFLICT: '同名文件过多，请先整理目录后重试',
   },
   preview: {
     FILE_TOO_LARGE: '文件过大，请下载查看',

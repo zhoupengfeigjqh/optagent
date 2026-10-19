@@ -175,6 +175,31 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         throw err;
       }
 
+      // MCP 就绪兜底（2026-10-18）：实例刚创建（新登录 / 切换 / 空闲回收后）时建连仍在
+      // 飞行中，而本轮工具装配按 `isAvailable` 过滤 —— 不等待就会**静默缺少 MCP 工具**，
+      // 状态却在随后变绿。已落定（常态）立即返回，不影响稳态首字延迟。
+      // 超时即降级继续（原则九：有界等待 + 可观测），不阻断本轮回答。
+      try {
+        const ready = await agent.mcpReady(ctx.config.mcpConnectTimeoutMs);
+        if (!ready) {
+          ctx.loggers.logger.warn(
+            {
+              event: 'mcp.ready.timeout',
+              user_id: userId,
+              agent_name: agentName,
+              thread_id: threadId,
+              timeout_ms: ctx.config.mcpConnectTimeoutMs,
+            },
+            'MCP 建连未在超时内落定，本轮按现有可用工具开跑（降级）',
+          );
+        }
+      } catch (err) {
+        ctx.loggers.logger.warn(
+          { err, event: 'mcp.ready.error', user_id: userId, agent_name: agentName },
+          'MCP 就绪等待异常，本轮按现有可用工具开跑（降级）',
+        );
+      }
+
       let run: Run;
       try {
         run = ctx.runManager.startRun({

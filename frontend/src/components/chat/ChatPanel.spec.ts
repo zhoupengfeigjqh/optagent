@@ -4,8 +4,8 @@
  * 守住两条：
  * 1. **浮层不推挤布局**（FR-101 / FR-130）：面板经 `Composer` 的 `#mention` 插槽就地挂载，
  *    坐标由脚本写死（`fixed` 语义的落点），打开前后锚点（输入框）的矩形完全一致；
- * 2. **引用芯片回归**（不变量 I-1）：`mention.references` → `.composer__refs` 的结构与
- *    "移除由上层决定"的上报口径不变。
+ * 2. **引用胶囊回归**（不变量 I-1，2026-10-18 起为正文内联）：`草稿 + mention.references`
+ *    → `.composer__mention` 的结构与"移除由上层决定"的上报口径不变。
  *
  * `useChatPanel()` 整体打桩（与 `ChatPanel.starters.spec.ts` 同口径）：事件编排已收敛在
  * 该组合式函数里（另有其自身用例覆盖），本测试只关心"插槽 + 面板 + 芯片"这段渲染接线。
@@ -36,13 +36,15 @@ const STUBS = {
 
 function makePanel(
   options: {
+    /** 草稿（胶囊由「草稿 + 引用」共同决定：正文里没有标记就不该有胶囊） */
+    draft?: string
     references?: Array<{ dir: string; filename: string }>
     onRemoveReference?: ReturnType<typeof vi.fn>
   } = {},
 ) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
+    chat: { draft: ref(options.draft ?? ''), thinkingEnabled: ref(false), canSend: ref(true) },
     threads: { activeId: ref(null), messages: ref([]), hasMore: ref(false) },
     search: {
       isOpen: ref(false),
@@ -163,7 +165,7 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
   it('浮层经 #mention 插槽就地挂载：坐标由脚本写入，锚点矩形不被推挤', async () => {
     const { wrapper, panel } = setup()
 
-    const anchor = wrapper.find('textarea.composer__input')
+    const anchor = wrapper.find('.composer__input')
     expect(anchor.exists()).toBe(true)
     const before = rectOf(anchor.element)
     expect(wrapper.find('.mention-popup').exists()).toBe(false)
@@ -186,15 +188,21 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
     wrapper.unmount()
   })
 
-  it('引用芯片接线回归：`@文件名` + 移除按钮，点击上报原引用（不变量 I-1）', async () => {
+  it('引用胶囊接线：正文里的 `@文件名` + 移除按钮，点击上报原引用（I-1）', async () => {
     const reference = { dir: '数据准备/生产计划', filename: 'plan.csv' }
     const onRemoveReference = vi.fn()
-    const { wrapper } = setup({ references: [reference], onRemoveReference })
+    const { wrapper } = setup({
+      draft: '看下 @plan.csv 的数据',
+      references: [reference],
+      onRemoveReference,
+    })
 
-    expect(wrapper.findAll('.composer__ref')).toHaveLength(1)
-    expect(wrapper.find('.composer__ref-text').text()).toBe('@plan.csv')
+    expect(wrapper.findAll('.composer__mention')).toHaveLength(1)
+    expect(wrapper.find('.composer__mention').text()).toBe('@plan.csv')
+    // 旧的上方 chip 行已并入正文：同一次选择只显示一处
+    expect(wrapper.find('.composer__refs').exists()).toBe(false)
 
-    await wrapper.find('.composer__ref-remove').trigger('click')
+    await wrapper.find('.composer__mention-remove').trigger('click')
 
     // 是否真的移除由上层决定，组件只上报（与 Composer 的契约一致）
     expect(onRemoveReference).toHaveBeenCalledWith(reference)

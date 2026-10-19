@@ -37,12 +37,33 @@ const MIRRORED_STYLE_NAMES = [
 const FALLBACK_LINE_HEIGHT = 18
 
 /**
+ * 富文本输入区（`contenteditable`）的光标矩形：直接用当前选区的矩形。
+ *
+ * 2026-10-18 起聊天输入区不再是 `<textarea>`（`@文件名` 改为内联胶囊），
+ * mirror-div 那套「克隆 value」的手段对它无效；而 `@` 恰好刚被敲下，
+ * 选区一定落在编辑区里，读矩形即可。选区不在锚点内（如面板点击后失焦）时返回 `null`，
+ * 由调用方回退为「贴锚点下方」。
+ */
+function selectionRectOf(element: HTMLElement): PopupRect | null {
+  const selection = typeof document.getSelection === 'function' ? document.getSelection() : null
+  if (!selection || selection.rangeCount === 0) return null
+
+  const range = selection.getRangeAt(0)
+  if (!element.contains(range.startContainer)) return null
+
+  const box = range.getBoundingClientRect()
+  if ((box.width === 0 && box.height === 0) || box.height <= 0) return null
+  return { left: box.left, top: box.top, right: box.left, bottom: box.top + box.height }
+}
+
+/**
  * `@` 之后的光标矩形；无布局或控制台不认识该控件时返回 `null`。
  * 返回的 `left`/`right` 相同（零宽光标），即面板会紧贴光标右缘。
  */
 export function caretRectOf(element: HTMLElement, caret: number): PopupRect | null {
   const field = element as HTMLInputElement | HTMLTextAreaElement
-  if (typeof field.value !== 'string') return null
+  // 非 input/textarea（contenteditable 编辑区）：选区矩形就是光标位置
+  if (typeof field.value !== 'string') return selectionRectOf(element)
 
   const rect = element.getBoundingClientRect()
   if (rect.width === 0 && rect.height === 0) return null

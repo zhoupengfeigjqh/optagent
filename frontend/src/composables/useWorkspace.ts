@@ -74,6 +74,16 @@ export interface WorkspaceStore {
   deletableOf(dir: string): boolean
   /** 引用存在性校验（FR-018、V-15） */
   exists(reference: FileReference): boolean
+  /**
+   * 就地登记一个刚上传成功的文件（012 FR-004）。
+   *
+   * 为什么必须登记：发送前的存在性校验（`exists`）只读**已加载**清单，而上传成功后不会重拉
+   * workspace；不登记就会出现"刚插入的 `@落盘名` 一发送就被判引用不存在"。
+   * 与 `remove` 一样只改内存（不重拉），保住折叠状态与滚动位置。
+   *
+   * 未知目录（清单未加载 / 非本数字人目录）→ no-op，不抛错（不制造假绿：`exists` 仍为假）。
+   */
+  registerFile(file: { dir: string; filename: string; size: number }): void
   /** 折叠 / 展开某个空间（一级） */
   toggleSpace(name: string): void
   /** 折叠 / 展开某个二级目录分组 */
@@ -142,6 +152,32 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
     return filesOf(reference.dir).some((file) => file.filename === reference.filename)
   }
 
+  function registerFile(file: { dir: string; filename: string; size: number }): void {
+    // 未知目录（清单未加载 / 非本数字人目录）：no-op，不制造"存在"的假象
+    const known = spaces.value.some((space) => space.dirs.some((item) => item.dir === file.dir))
+    if (!known) {
+      return
+    }
+    spaces.value = spaces.value.map((space) => ({
+      ...space,
+      dirs: space.dirs.map((item) => {
+        if (item.dir !== file.dir) {
+          return item
+        }
+        if (item.files.some((existing) => existing.filename === file.filename)) {
+          return item
+        }
+        return {
+          ...item,
+          files: [
+            ...item.files,
+            { filename: file.filename, size: file.size, updated_at: new Date().toISOString() },
+          ],
+        }
+      }),
+    }))
+  }
+
   function toggleSpace(name: string): void {
     expandedSpaces.value = expandedSpaces.value.includes(name)
       ? expandedSpaces.value.filter((item) => item !== name)
@@ -189,6 +225,7 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
     uploadExtensionsOf,
     deletableOf,
     exists,
+    registerFile,
     toggleSpace,
     toggleDir,
     remove,

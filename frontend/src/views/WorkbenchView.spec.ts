@@ -56,7 +56,7 @@ const stubs = {
     template: [
       '<aside class="sidebar-stub">',
       '<button class="sidebar-create" @click="$emit(\'create\')" />',
-      '<button class="sidebar-rename" @click="$emit(\'rename\', { threadId: \'t1\', title: \'改名后\' })" />',
+      "<button class=\"sidebar-rename\" @click=\"$emit('rename', { threadId: 't1', title: '改名后' })\" />",
       '<button class="sidebar-export" @click="$emit(\'export\', \'t1\')" />',
       '</aside>',
     ].join(''),

@@ -53,6 +53,16 @@ export interface ChatAgent extends PooledInstance {
    * "服务被停掉但无流量、`onClose` 不触发"导致的假绿；返回本次翻转为 failed 的服务名。
    */
   probeMcp(): Promise<string[]>;
+  /**
+   * 有界等待本实例的 MCP 建连**全部落定**（2026-10-18）。
+   *
+   * 为什么需要：建连是 fire-and-forget，而一轮对话的工具装配按 `isAvailable` 过滤，
+   * 首轮若在飞行中就开跑，该轮会**静默缺少 MCP 工具**（状态却随后变绿，用户以为已就绪）。
+   * 已落定（常态）→ 立即返回 `true`，不影响首字延迟。
+   *
+   * @returns `true` = 已有连接结果（connected/failed）；`false` = 本次等待超时（降级继续）。
+   */
+  mcpReady(timeoutMs: number): Promise<boolean>;
   run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
 }
 
@@ -65,6 +75,8 @@ export interface AgentFactoryDeps {
   providerFor?: (entry: ModelSelection) => LlmProvider;
   logger: Logger;
   mcpTimeoutMs: number;
+  /** 单服务建连超时（毫秒）；缺省取 `mcpTimeoutMs`（测试路径） */
+  mcpConnectTimeoutMs?: number;
   /**
    * 2026-10-15：请求级模型覆盖的临时 provider 的有界重试口径。
    * 缺省 = 不重试（测试默认；生产由 `server.ts` 注入 `config.llmRetry`）。
@@ -90,7 +102,7 @@ export class AgentInstanceFactory {
 
   /** 创建实例：配置加载失败抛 AgentConfigError；MCP 异步并发建连，不等待 */
   async create(key: PoolKey): Promise<ChatAgent> {
-    const { root, logger, mcpTimeoutMs } = this.deps;
+    const { root, logger, mcpTimeoutMs, mcpConnectTimeoutMs } = this.deps;
     const agentDir = path.join(userAgentsDir(root, key.userId), key.agentName);
     const config = loadAgentConfig(agentDir, {
       logger: {
@@ -100,13 +112,15 @@ export class AgentInstanceFactory {
 
     const mcp = new McpManager({
       timeoutMs: mcpTimeoutMs,
+      ...(mcpConnectTimeoutMs !== undefined ? { connectTimeoutMs: mcpConnectTimeoutMs } : {}),
       logger: {
         warn: (msg: string) => logger.warn({ alert: true, agent_name: key.agentName }, msg),
       },
       ...(this.deps.onMcpStatus ? { onStatusChange: () => this.deps.onMcpStatus!(key) } : {}),
     });
-    // 异步并发建连：不 await，不阻断实例就绪（保首字延迟 SC-001）
-    void mcp.connectAll(config.mcpServers);
+    // 异步并发建连：不 await，不阻断实例就绪（保首字延迟 SC-001）；
+    // 但把落定 Promise 留下，发消息前可 `mcpReady()` 有界等待（见 ChatAgent.mcpReady）
+    void mcp.connectAndTrack(config.mcpServers);
 
     const instance: ChatAgent = {
       key,
@@ -118,6 +132,7 @@ export class AgentInstanceFactory {
       unavailableMcp: () => mcp.unavailable(),
       mcpStatusOf: (server) => mcp.statusOf(server),
       probeMcp: () => mcp.probe(),
+      mcpReady: (timeoutMs) => mcp.waitSettled(timeoutMs),
       dispose: () => mcp.closeAll(),
       run: (req) => this.runWith(instance, mcp, req),
     };

@@ -1,13 +1,8 @@
 /**
  * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7 + 003 三空间改造）：
- * - POST /api/files/upload：multipart 上传——dir 为空间相对路径（数据准备需二级目录，
- *   二级目录须命中 scenario.json 清单），扩展名按**该目标允许的类型**判定
- *   （2026-10-13 起：数据准备的**每个二级目录**各自一份白名单 `scenario.data_prep_uploads`，
- *   缺省回落平台默认 csv/xlsx；共享/临时空间仍取 `SPACE_POLICIES`，
- *   即 csv/xlsx/xls/txt/json/pdf + 图片），≤5MB（413），落盘名自动追加 _YYYYMMDD_HHMMSS
- * - 数据准备目录带字段约束（data_prep_fields）且上传**表格类型**（`.csv`/`.xlsx`/`.xls`）时：
- *   暂存后、落盘前校验上传表的表头与取值类型（`domain/field-check.ts`），
- *   失败 400 FILE_SCHEMA_INVALID（不落盘）；非表格类型跳过表结构校验（FR-020）
+ * - POST /api/files/upload：已**迁到 `files-upload.ts`**（012：本文件达 500 行硬门禁，
+ *   且该端点的落盘命名要改——不重名用原名、重名 `原名(n).ext`，唯一实现在
+ *   `domain/upload-name.ts`）。早验、字段约束、类型白名单等细节见该文件头注释
  * - GET /api/files/list?dir=：列目录
  * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
@@ -26,32 +21,23 @@
  * 未选中数字人 → 409 AGENT_NOT_SELECTED；选中但不可用 → 409 AGENT_NOT_AVAILABLE；
  * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED。
  */
-import { createWriteStream } from 'node:fs';
-import fs from 'node:fs';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
-import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import {
-  DirValidationError,
   ScenarioNotConfiguredError,
   SPACE_PREP,
   SPACE_SHARED,
-  SPACE_TMP,
   loadScenario,
-  parseSpaceDir,
-  uploadExtensionsOf,
-  userDataDir,
 } from '../domain/dirs.js';
 import { buildWorkspaceView } from '../domain/workspace-view.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
-import { checkUploadBuffer, supportsFieldCheck } from '../domain/field-check.js';
-import { removeFileSafe } from '../domain/fs-safe.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { splitAgentScopedPath, verifyRef } from '../infra/file-sign.js';
+import { checkDir, currentAgentFor } from './files-scope.js';
+import { registerFileUploadRoute } from './files-upload.js';
 import { registerFilePutRoute } from './files-put.js';
 
 /** 内联预览 Content-Type 映射；.xlsx/.xls 前端无法内联渲染，回退附件下载 */
@@ -97,72 +83,6 @@ function fileAccessFor(ctx: AppContext, userId: string, agentName: string): File
   });
 }
 
-/**
- * 文件空间视角所属的数字人＝当前选中数字人（场景随数字人存放，数据域亦随数字人）。
- *
- * 判定**复用唯一入口** `resolveAgentScope`（未选中 → 409 AGENT_NOT_SELECTED；
- * 选中但不可用 → 409 AGENT_NOT_AVAILABLE）：本文件只负责沿用既有文案，MUST NOT
- * 再写一遍"查选中态"的逻辑（双实现漂移，FR-023）。
- */
-function currentAgentFor(ctx: AppContext, userId: string): string {
-  return resolveAgentScope(ctx, userId, {
-    notSelectedMessage: '请先选定数字人后再操作文件空间',
-    route: 'files',
-  }).agentName;
-}
-
-/** 目录参数统一校验：穿越 → 400；空间外/清单外 → 403；scenario 缺失 → 503 */
-function checkDir(ctx: AppContext, userId: string, agentName: string, dir: string) {
-  try {
-    return parseSpaceDir(ctx.config.optAgentRoot, userId, agentName, dir);
-  } catch (err) {
-    if (err instanceof DirValidationError) {
-      // 越界拒绝 MUST 可观测（FR-051）：含用户标识、数字人标识与请求线索（被拒的目录参数）
-      ctx.loggers.logger.warn(
-        {
-          alert: false,
-          event: 'dir.validation.rejected',
-          user_id: userId,
-          agent_name: agentName,
-          dir,
-          status_code: err.statusCode,
-          reason: err.message,
-        },
-        `目录参数被拒（uid=${userId} agent=${agentName} dir=${dir}）：${err.message}`,
-      );
-      throw new ApiError(
-        err.statusCode,
-        err.statusCode === 400 ? 'VALIDATION_FAILED' : 'UPLOAD_DIR_FORBIDDEN',
-        err.message,
-      );
-    }
-    if (err instanceof ScenarioNotConfiguredError) {
-      throw new ApiError(503, 'SCENARIO_NOT_CONFIGURED', err.message);
-    }
-    throw err;
-  }
-}
-
-function timestamp(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
-
-/** 落盘名：name_YYYYMMDD_HHMMSS.ext（同名碰撞追加 -1/-2…） */
-function stampedName(dirAbs: string, original: string): string {
-  const base = path.basename(original).replace(/[/\\]/g, '_');
-  const ext = path.extname(base);
-  const stem = base.slice(0, base.length - ext.length) || 'file';
-  let name = `${stem}_${timestamp()}${ext}`;
-  let i = 0;
-  while (fs.existsSync(path.join(dirAbs, name))) {
-    i += 1;
-    name = `${stem}_${timestamp()}-${i}${ext}`;
-  }
-  return name;
-}
-
 const rawQuerySchema = {
   type: 'object',
   required: ['u', 'p', 'exp', 'sig'],
@@ -178,149 +98,8 @@ const rawQuerySchema = {
 export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void {
   // R11：后台产出回写端点（实现见 `files-put.ts`）
   registerFilePutRoute(app, ctx);
-  app.post('/api/files/upload', async (req, reply) => {
-    const userId = getCurrentUser().userId;
-    if (!req.isMultipart())
-      throw new ApiError(400, 'VALIDATION_FAILED', '请求须为 multipart/form-data');
-
-    // 逐 part 流式处理：dir 字段顺序无关；文件流直接落盘不占用内存
-    // 扩展名校验依赖目标空间的策略（dir 可能晚于 file 到达），故延至 dir 确认后统一校验
-    let dir: string | undefined;
-    /** dir 先到（或重复出现）时立即校验并缓存，循环后复用（早验一次，拒绝省带宽） */
-    let validatedTarget: ReturnType<typeof checkDir> | undefined;
-    /**
-     * 早验失败记录于此。刻意**不在 parts 迭代器内抛出**：中途抛错请求体没排完，
-     * Fastify 会把原始错误包成 500；改为排空后续文件段、循环外统一抛（状态码保真）。
-     */
-    let earlyError: unknown;
-    /**
-     * 归属数字人：**懒解析 + 早验失败缓存**。
-     *
-     * 暂存目录也是**该数字人**的临时空间（009），而 `dir` 字段可能晚于文件段到达，
-     * 因此这里按需解析；解析失败（未选中 / 不可用）与目录校验失败同一处置——
-     * 记入 `earlyError`、排空文件段、循环外统一抛（不 500，见下方注释）。
-     */
-    let agentName: string | undefined;
-    let agentError: unknown;
-    const resolveAgent = (): string => {
-      if (agentName !== undefined) return agentName;
-      if (agentError !== undefined) throw agentError;
-      try {
-        agentName = currentAgentFor(ctx, userId);
-        return agentName;
-      } catch (err) {
-        agentError = err;
-        throw err;
-      }
-    };
-    let staging: string | undefined;
-    let originalName = 'file';
-    let savedSize = 0;
-    let truncated = false;
-    const parts = req.parts();
-    for await (const part of parts) {
-      if (part.type === 'file') {
-        if (!earlyError) {
-          try {
-            resolveAgent(); // 无归属数字人则无处暂存：视为早验失败
-          } catch (err) {
-            earlyError = err;
-          }
-        }
-        if (earlyError) {
-          // 已早验失败：排空文件段（不暂存），让请求体完整消费完，错误在循环外抛出
-          for await (const chunk of part.file) {
-            void chunk; // 丢弃
-          }
-          continue;
-        }
-        // dir 可能还没解析到：先流式写入**该数字人**临时空间暂存，待 dir 确认后移动
-        const agent = resolveAgent(); // 缓存命中：上面已解析成功（失败即上面已 continue）
-        const tmpAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId, agent), SPACE_TMP);
-        fs.mkdirSync(tmpAbs, { recursive: true });
-        staging = path.join(tmpAbs, `.upload-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-        try {
-          await pipeline(part.file, createWriteStream(staging));
-        } catch (err) {
-          removeFileSafe(staging);
-          throw err;
-        }
-        if (part.file.truncated) {
-          truncated = true;
-          removeFileSafe(staging);
-          staging = undefined;
-          break;
-        }
-        originalName = part.filename ?? 'file';
-        savedSize = fs.statSync(staging).size;
-      } else if (part.fieldname === 'dir') {
-        dir = String(part.value);
-        if (!earlyError) {
-          try {
-            // 早验：dir 先于 file 到达时，目录合法性/选中态在**文件上传之前**即拒绝，
-            // 省带宽与暂存 IO；file 先到的旧顺序退回「先收后验」（结果一致，仅时机不同）
-            validatedTarget = checkDir(ctx, userId, resolveAgent(), dir);
-          } catch (err) {
-            earlyError = err;
-          }
-        }
-      }
-    }
-
-    if (earlyError) {
-      if (staging) removeFileSafe(staging); // dir 先到时可能尚未暂存
-      throw earlyError;
-    }
-
-    if (truncated)
-      throw new ApiError(413, 'FILE_TOO_LARGE', `文件超过大小上限（${ctx.config.uploadMaxMb}MB）`);
-    if (!staging) throw new ApiError(400, 'VALIDATION_FAILED', '缺少文件字段 file');
-    if (!dir) {
-      removeFileSafe(staging);
-      throw new ApiError(400, 'VALIDATION_FAILED', '缺少目标目录字段 dir');
-    }
-    try {
-      const agent = resolveAgent(); // 归属数字人（早验阶段通常已解析，缓存命中）
-      // 早验命中直接用缓存结果（同一 dir 值已校验过），否则按旧顺序补验
-      const target = validatedTarget ?? checkDir(ctx, userId, agent, dir);
-      const ext = path.extname(originalName).toLowerCase();
-      // 数据准备目录：载入该数字人场景（目录级白名单与字段约束的共同来源）；其余空间不读场景
-      const scenario =
-        target.space === SPACE_PREP && target.sub
-          ? loadScenario(ctx.config.optAgentRoot, userId, agent, ctx.loggers.logger)
-          : null;
-      // 允许上传的类型：**唯一实现** `uploadExtensionsOf`（数据准备按目录、缺省回落平台默认；
-      // 其余空间恒取 SPACE_POLICIES）。提示含允许类型，满足 FR-042 / SC-002。
-      const allowed = uploadExtensionsOf(scenario, target.space, target.sub);
-      if (!allowed.includes(ext)) {
-        throw new ApiError(
-          400,
-          'VALIDATION_FAILED',
-          `${target.space} 不支持格式 "${ext}"，允许：${allowed.join(' ')}`,
-        );
-      }
-      // 字段约束校验（暂存后、落盘前）：仅**数据准备目录**且**该类型需要表结构校验**且该目录声明了约束时触发。
-      // `supportsFieldCheck` 是唯一判据（非表格类型跳过，避免"缺少必填表头"描述一个本没有表头的文件，FR-020）。
-      // 运行环境是唯一权威（前端不做同款校验，契约 §3.1）；失败不落盘。
-      if (scenario && target.sub && supportsFieldCheck(ext)) {
-        const fields = scenario.dataPrepFields[target.sub] ?? [];
-        if (fields.length > 0) {
-          const issues = checkUploadBuffer(fields, ext, fs.readFileSync(staging));
-          if (issues.length > 0) {
-            throw new ApiError(400, 'FILE_SCHEMA_INVALID', '上传表不符合该目录的字段约束', issues);
-          }
-        }
-      }
-      const dirAbs = path.join(userDataDir(ctx.config.optAgentRoot, userId, agent), target.relPath);
-      fs.mkdirSync(dirAbs, { recursive: true });
-      const name = stampedName(dirAbs, originalName);
-      fs.renameSync(staging, path.join(dirAbs, name));
-      return reply.status(201).send({ dir: target.relPath, filename: name, size: savedSize });
-    } catch (err) {
-      removeFileSafe(staging);
-      throw err;
-    }
-  });
+  // 上传端点（012 迁到独立文件，见 `files-upload.ts`）
+  registerFileUploadRoute(app, ctx);
 
   app.get('/api/files/list', { schema: { querystring: listQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;

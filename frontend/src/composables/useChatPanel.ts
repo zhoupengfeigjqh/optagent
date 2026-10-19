@@ -17,6 +17,7 @@ import { useAgents } from './useAgents'
 import { useChatStream } from './useChatStream'
 import { stripMentionTokens, useFileMention } from './useFileMention'
 import { useMentionComposer } from './useMentionComposer'
+import { useMcpReadyGate } from './useMcpReadyGate'
 import { useModels } from './useModels'
 import { useNextStepPrompt } from './useNextStepPrompt'
 import { useNextSteps } from './useNextSteps'
@@ -25,6 +26,7 @@ import { useSessionSearch } from './useSessionSearch'
 import { useThreads } from './useThreads'
 import { useThrottledText } from './useThrottledText'
 import { useToast } from './useToast'
+import { useUploadPanel } from './useUploadPanel'
 import { useUploads } from './useUploads'
 import { useWorkspace } from './useWorkspace'
 
@@ -38,12 +40,12 @@ export function useChatPanel() {
   const mention = useFileMention()
   const workspace = useWorkspace()
   const agents = useAgents()
+  // 发送前的 MCP 就绪门（2026-10-18）：灰 → 有连接结果再提交，见该模块头注释
+  const mcpReady = useMcpReadyGate()
   const preview = usePreview()
   const nextSteps = useNextSteps()
   const toast = useToast()
 
-  /** 上传面板展开状态（纯 UI，故留在本层） */
-  const uploadOpen = ref(false)
   /** 数字人面板展开状态 */
   const agentPanelOpen = ref(false)
   /**
@@ -163,6 +165,9 @@ export function useChatPanel() {
     },
     options: { settleBeforeReturn?: boolean } = {},
   ): Promise<boolean> {
+    // 正在等 MCP 就绪：直接忽略重复点击（否则会排队发两轮）
+    if (mcpReady.preparing.value) return false
+
     // 展示层 → 提交层：正文去掉 `@文件名` 标记，引用以结构化 `attachments` 提交（FR-016）
     const content = stripMentionTokens(payload.content, payload.attachments)
     if (content === '') {
@@ -184,6 +189,10 @@ export function useChatPanel() {
         return false
       }
     }
+
+    // MCP 就绪门（2026-10-18）：仍有灰色 → 先唤醒并等出连接结果，再提交。
+    // 放在 `chat.send` 之前、草稿清空之前：等待期间用户仍能看到自己的输入。
+    await mcpReady.waitMcpReady()
 
     const previous = payload.content
     chat.draft.value = ''
@@ -321,33 +330,6 @@ export function useChatPanel() {
     models.select(model)
   }
 
-  function onToggleUpload(): void {
-    const next = !uploadOpen.value
-    uploadOpen.value = next
-    // 上传入口的目录树取自 workspace 接口（三空间）：展开时若还没有目录就补一次加载，
-    // 否则"进页面直接点加号"时目录为空，只会看到兜底文案
-    if (next && workspace.spaces.value.length === 0 && !workspace.loading.value) {
-      void workspace.load()
-    }
-  }
-
-  function onCloseUpload(): void {
-    uploadOpen.value = false
-  }
-
-  function onPickFiles(payload: { dir: string; files: FileList }): void {
-    // 扩展名白名单按目标空间下发（workspace 接口），数据准备仅 csv/xlsx
-    void uploads.upload(
-      payload.dir,
-      Array.from(payload.files),
-      workspace.uploadExtensionsOf(payload.dir),
-    )
-  }
-
-  function onRetryUpload(localId: string): void {
-    void uploads.retry(localId)
-  }
-
   /* ---------- 头部与数字人（US6） ---------- */
 
   /** 搜索栏开关：搜索状态已在 `useSessionSearch` */
@@ -430,6 +412,20 @@ export function useChatPanel() {
   /** 文本与引用必须同步的那条不变式写在该模块头部；这里只交出浮层状态与输入区文本。 */
   const mentionComposer = useMentionComposer({ mention, draft: chat.draft })
 
+  /* ---------- 上传面板（US3 / 012） ---------- */
+
+  /**
+   * 面板接线整体在 `useUploadPanel`（本文件逼近 500 行门禁，宪章原则二）。
+   * 放在 `mentionComposer` 之后：成功回写复用它的 `onPickFile`（唯一入口），
+   * 不另写一套 `@` 拼写与上限判断。
+   */
+  const uploadPanel = useUploadPanel({
+    uploads,
+    workspace,
+    acceptUpload: mentionComposer.onPickFile,
+  })
+  const { uploadOpen, onToggleUpload, onCloseUpload, onPickFiles, onRetryUpload } = uploadPanel
+
   return {
     chat,
     threads,
@@ -446,6 +442,7 @@ export function useChatPanel() {
     isFailed,
     errorInfo,
     sending,
+    preparing: mcpReady.preparing,
     hasMessages,
     pendingUserMessage,
     pendingInteraction,

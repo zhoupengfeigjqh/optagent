@@ -83,6 +83,11 @@ export interface McpConnectResult {
 
 export interface McpManagerOptions {
   timeoutMs: number;
+  /**
+   * 单 server 建连超时（毫秒）。缺省取 `timeoutMs`（测试桩友好）。
+   * 超时按 failed 落定并交给退避重连——保证 `statusOf()` 不会永久停在 unknown。
+   */
+  connectTimeoutMs?: number;
   logger?: { warn(msg: string): void };
   createClient?: (cfg: McpServerConfig) => Promise<McpClientLike>;
   /** 单 server 建连落定（connected/failed）时回调；用于 SSE 推送状态快照 */
@@ -167,16 +172,58 @@ export class McpManager {
   private readonly pingUnsupported = new Set<string>();
   private closed = false;
   private readonly timeoutMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly logger: { warn(msg: string): void } | undefined;
   private readonly createClient: (cfg: McpServerConfig) => Promise<McpClientLike>;
   private readonly onStatusChange:
     ((server: string, status: McpConnectionStatus) => void) | undefined;
+  /**
+   * 最近一次 `connectAndTrack()` 的落定 Promise（2026-10-18）。
+   *
+   * 建连本身仍是 fire-and-forget（不糊住实例就绪），但把"全部 server 都有结果了"
+   * 这件事变成可等待的：发消息前可据此有界等待，避免首轮装配工具时连接尚在飞行中
+   * （`agent-factory` 的 `isAvailable` 判断会把未落定的 server 直接跳过）。
+   */
+  private settled: Promise<void> | null = null;
 
   constructor(opts: McpManagerOptions) {
     this.timeoutMs = opts.timeoutMs;
+    this.connectTimeoutMs = opts.connectTimeoutMs ?? opts.timeoutMs;
     this.logger = opts.logger;
     this.createClient = opts.createClient ?? defaultCreateClient;
     this.onStatusChange = opts.onStatusChange;
+  }
+
+  /**
+   * 发起建连并记录落定 Promise（**不阻塞调用方**）。
+   * 与 `connectAll` 的区别仅是"把落定信号留给人等"，逻辑仍只有 `connectAll` 一份。
+   */
+  connectAndTrack(configs: McpServerConfig[]): Promise<void> {
+    this.settled = this.connectAll(configs).then(
+      () => undefined,
+      () => undefined, // connectAll 自身不抛；防御性吞掉，落定语义不应把调用方带崩
+    );
+    return this.settled;
+  }
+
+  /**
+   * 等待本次建连全部落定（每台 server 非 connected 即 failed，不再有 unknown）。
+   *
+   * @returns `true` = 已落定（含"从未发起建连"，视为无待等）；`false` = 超时。
+   *   超时**不改状态**：仍在飞行的建连照旧自行落定并推送，只是调用方不再等。
+   */
+  async waitSettled(timeoutMs: number): Promise<boolean> {
+    const settled = this.settled;
+    if (!settled) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    try {
+      return await Promise.race([settled.then(() => true as const), timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /** 并发建连；单 server 失败标记 unavailable（不抛出，不阻断实例就绪），并进入有界重连 */
@@ -185,7 +232,7 @@ export class McpManager {
     await Promise.all(
       configs.map(async (cfg) => {
         try {
-          const client = await this.createClient(cfg);
+          const client = await this.boundedConnect(cfg);
           this.adoptClient(cfg.name, client);
         } catch (err) {
           this.unavailableSet.add(cfg.name);
@@ -198,6 +245,32 @@ export class McpManager {
       }),
     );
     return { unavailable: this.unavailable() };
+  }
+
+  /**
+   * 有界建连（2026-10-18）：SDK 的 `client.connect()` 本身无超时，stdio 拉起卡住或
+   * HTTP 黑洞时可能永不返回 → 状态永久 unknown（灰），发消息前的等待只能靠外部超时。
+   * 这里给出确定上限：超时即按 failed 落定（走既有退避重连），迟到的连接立即关闭防泄漏。
+   */
+  private boundedConnect(cfg: McpServerConfig): Promise<McpClientLike> {
+    const creating = this.createClient(cfg);
+    return new Promise<McpClientLike>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`MCP 建连超时（${this.connectTimeoutMs}ms）`));
+        // 超时后若连接迟到，主动关闭：否则会在 clients 之外留下一个无人管的客户端进程/会话
+        void creating.then((c) => c.close().catch(() => undefined)).catch(() => undefined);
+      }, this.connectTimeoutMs);
+      creating.then(
+        (client) => {
+          clearTimeout(timer);
+          resolve(client);
+        },
+        (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
+    });
   }
 
   /** 建连/重连成功后的统一登记：入池、清重试状态、注册断线钩子、通知 */

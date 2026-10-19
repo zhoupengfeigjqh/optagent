@@ -455,6 +455,7 @@ JSON Schema）；缺字段一律按"不启用"处理，配置损坏时**跳过�
 | 断线退避 | 5s → 15s → 30s → 60s → 60s，用尽后**不停**，转入保活重试（每 **120s**），服务恢复自动接回 | `infra/mcp/mcp-manager.ts` |
 | 健康探测 | 每 **60s** 一次：优先 MCP `ping`，遇 `-32601 Method not found` 记下该服务并回退 `listTools` | `infra/mcp/mcp-manager.ts` + `server.ts` |
 | 工具调用超时 | 默认 **60s**（`MCP_TIMEOUT_MS`），超时后**重试 1 次** | `config.ts` |
+| 建连超时与预热 | 建连默认 **10s**（`MCP_CONNECT_TIMEOUT_MS`，与调用超时**刻意分开**）：超时即判该服务 `failed` 并交给退避重连，迟到的连接主动关闭。新登录 / 切换数字人时前端调 `POST /api/agents/current/mcp/warm` 预热（幂等）；点发送时若仍有灰，等出连接结果（≤10s）再提交，超时降级放行并提示 | `config.ts` + `infra/mcp/mcp-manager.ts` + `routes/agents.ts` + `frontend/src/composables/useMcpReadyGate.ts` |
 | LLM 有界重试 | 默认**重试 2 次**（`LLM_MAX_RETRIES`，总尝试 ≤ 3）、单次等待上限 **15s**（`LLM_RETRY_MAX_DELAY_MS`）；交给 pi-ai 的 `retryProviderRequest`（退避 + `x-should-retry` / `Retry-After`，可被「停止」打断），**只在响应到达前重试**（不会重复正文） | `config.ts` + `infra/llm/pi-ai-provider.ts` + `infra/agent-loop.ts` |
 | LLM 失败可见性 | 失败归类为 `LLM_UNAVAILABLE` / `LLM_RATE_LIMITED` / `LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` / `LLM_CONTEXT_TOO_LONG`（兜底 `LLM_ERROR`）；诊断字段（上游状态码 / 类型 / `request_id`）随 SSE `error` 与失败轮落盘下发；原始错误记 `llm.call.failed` 结构化日志（余额不足 / 凭证无效带 `alert`） | `domain/llm-error.ts` + `domain/run-finalize.ts` |
 | 内置工具 | 数字人目录下 `TOOL.json`（`{"enabled":[…]}`）；与 MCP 工具进**同一张工具表**，靠 `{服务名}__` 前缀区分 | `domain/agent-instance.ts` |

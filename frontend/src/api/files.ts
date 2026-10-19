@@ -3,7 +3,8 @@
  *
  * 关键事实：
  * - §5.1 **上传接口一次只接受一个文件**（多个 `file` part 时仅最后一个生效）→ 多选须**逐文件各发一次请求**（§7 差异 5）
- * - §5.1 落盘名以响应中的 `filename` 为准（后端已追加时间戳并在重名时追加 `-1`/`-2`），前端 MUST NOT 自行拼接
+ * - §5.1 落盘名以响应中的 `filename` 为准（012 起：不重名用**原名**，重名用 `原名(n).ext`，
+ *   半角括号；唯一实现在 `agent-backend/src/domain/upload-name.ts`），前端 MUST NOT 自行拼接后缀
  * - §5.3 下载**无大小上限** → 以 `<a download>` 直链触发，不经 `fetch`
  * - §5.4 预览**有大小上限**（默认 10MB）→ 文本类按需 `fetch`（便于展示错误态），`.pdf` 用 `<iframe>`
  * - §5.5 删除走 REST `DELETE /api/files`（`shared` 为共享只读目录，后端 403 `FILE_READONLY`）

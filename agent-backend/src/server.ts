@@ -144,6 +144,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ...(options.llmProvider ? { providerFor: () => options.llmProvider! } : {}),
     logger: loggers.logger,
     mcpTimeoutMs: config.mcpTimeoutMs,
+    mcpConnectTimeoutMs: config.mcpConnectTimeoutMs,
     // 2026-10-15：请求级模型覆盖的临时 provider 用同一份重试口径（与默认模型单例同源）
     llmRetry: config.llmRetry,
     truncateKb: config.readTruncateKb,
@@ -289,6 +290,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
+  /**
+   * 在途创建表（2026-10-18 单飞）：同一 `(userId, agentName)` 并发取用只创建一次。
+   *
+   * 起因：预热端点（`POST /api/agents/current/mcp/warm`）与发消息会并发命中"池未命中"，
+   * 各自 `agentFactory.create()` 会建出两套 McpManager，后入池者覆盖前者 →
+   * 被覆盖实例的 MCP 连接/stdio 子进程**无人关闭**。键与 `AgentPool` 同口径。
+   */
+  const creating = new Map<string, Promise<ChatAgent>>();
+
   const ctx: AppContext = {
     config,
     loggers,
@@ -317,14 +327,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
         if (current.configFingerprint === diskFingerprint) return existing as never;
         pool.retire(current);
       }
-      const instance = await agentFactory.create(key);
+      const flightId = `${key.userId}\u0000${key.agentName}`;
+      const inflight = creating.get(flightId);
+      if (inflight) return inflight;
+      const creatingNow = (async (): Promise<ChatAgent> => {
+        const instance = await agentFactory.create(key);
+        try {
+          pool.put(instance);
+        } catch (err) {
+          await instance.dispose();
+          throw err;
+        }
+        return instance;
+      })();
+      creating.set(flightId, creatingNow);
       try {
-        pool.put(instance);
-      } catch (err) {
-        await instance.dispose();
-        throw err;
+        return await creatingNow;
+      } finally {
+        // 只在仍是自己时删除：换代期间可能有新的在途创建覆盖本表项
+        if (creating.get(flightId) === creatingNow) creating.delete(flightId);
       }
-      return instance;
     },
   };
 

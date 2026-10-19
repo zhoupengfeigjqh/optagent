@@ -50,6 +50,7 @@ const {
   isFailed,
   errorInfo,
   sending,
+  preparing,
   hasMessages,
   pendingUserMessage,
   pendingInteraction,
@@ -284,10 +285,13 @@ onBeforeUnmount(() => {
       @close="onCloseUpload"
     />
 
+    <!-- 发送前的 MCP 就绪等待（2026-10-18）：必须可见，否则"点了没反应"会被当成卡死 -->
+    <p v-if="preparing" class="chat-panel__mcp-pending" role="status">正在连接 MCP 服务…</p>
+
     <Composer
       :model-value="chat.draft.value"
       :sending="sending"
-      :disabled="sending"
+      :disabled="sending || preparing"
       :references="mention.references.value"
       :mention-open="mention.open.value"
       @update:model-value="onUpdateDraft"
@@ -331,7 +335,7 @@ onBeforeUnmount(() => {
           :thinking="chat.thinkingEnabled.value"
           :model="models.current.value"
           :models="models.models.value"
-          :can-send="chat.canSend.value"
+          :can-send="chat.canSend.value && !preparing"
           :streaming="sending"
           :upload-disabled="sending"
           @toggle-thinking="onToggleThinking"
@@ -450,6 +454,14 @@ onBeforeUnmount(() => {
 .chat-panel__upload {
   flex: none;
   margin: 0 var(--space-5) var(--space-2);
+}
+
+/* 发送前等待 MCP 连接结果：贴近输入区、不抢视觉焦点（文字即状态，不只靠颜色） */
+.chat-panel__mcp-pending {
+  flex: none;
+  margin: 0 var(--space-5) var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 /* `@` 面板是 `fixed` 浮层（见 MentionPopup）：坐标由脚本写死，任何 margin

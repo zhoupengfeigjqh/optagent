@@ -4,7 +4,8 @@
  *
  * 四态渲染：`pending` / `uploading` / `success` / `failed`。
  * `failed` 展示 `error` 经 `toUserMessage(error, 'upload')` 映射后的原因并提供「重试」。
- * 展示名一律优先取响应中的 `serverFilename`（后端已追加时间戳，前端不自行拼接）。
+ * 展示名一律优先取响应中的 `serverFilename`（012：落盘名可能是 `原名` 或 `原名(1).ext`，
+ * 前端不自行拼接；同名的多次上传靠后缀在界面上区分）。
  */
 import { computed } from 'vue'
 

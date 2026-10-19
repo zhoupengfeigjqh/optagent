@@ -29,7 +29,9 @@ function snapshot(overrides: Partial<InteractionSnapshot> = {}): InteractionSnap
 
 function setup(options: { threadId?: string | null; withSubmit?: boolean } = {}) {
   const pendingInteraction = ref<InteractionSnapshot | null>(null)
-  const activeThreadId = ref<string | null>(options.threadId === undefined ? 'th_1' : options.threadId)
+  const activeThreadId = ref<string | null>(
+    options.threadId === undefined ? 'th_1' : options.threadId,
+  )
   const submit = vi.fn().mockResolvedValue({ accepted: true })
   const toast = createToastStore()
   const gate = useInteractionGate({

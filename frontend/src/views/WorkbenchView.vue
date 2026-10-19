@@ -221,10 +221,7 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
 </script>
 
 <template>
-  <AppShell
-    :preview-open="panelOpen"
-    :preview-maximized="session.preview.maximized.value"
-  >
+  <AppShell :preview-open="panelOpen" :preview-maximized="session.preview.maximized.value">
     <!-- 左栏：历史会话（US5） -->
     <template #history>
       <HistorySidebar

@@ -43,7 +43,7 @@
 
 | # | 不变量 | 落点 |
 |---|---|---|
-| I-1 | 聊天侧选完文件的展示风格不变：输入框上方 `@文件名` 芯片 + 移除按钮 | `Composer.vue` 的 `.composer__refs` |
+| I-1 | 聊天侧选完文件**只显示一处**：正文里的 `@文件名` 内联胶囊（不可编辑 + 移除按钮），输入框上方 MUST NOT 再有第二排芯片（2026-10-18 由"上方芯片列表"改为内联，理由见 §9） | `Composer.vue` 的 `.composer__mention`、`utils/composer-text.ts` |
 | I-2 | HITL 选完的展示不变：字段值 + 命中文件空间时的结构化文件卡片；字段标签仍为英文 `name` | `InteractionField.vue` |
 | I-3 | 提交语义不变：聊天发结构化 `attachments`；HITL 写 user-data 相对路径 | `useFileMention.buildAttachments()`、`usePathInsert.relativePathOf()` |
 | I-4 | `@` 触发口径唯一：复用 `TRIGGER_PATTERN`，MUST NOT 新增第二套判定 | `useFileMention.ts` |
@@ -87,7 +87,7 @@
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-130** | 聊天输入框的 `@` 浮层 MUST 复用同一组件与同一状态机（`useFileMention`），MUST NOT 复制一套级联逻辑 | 代码审阅 + 组件测试 |
-| **FR-131** | 聊天侧选完文件后的展示 MUST 保持现状（`@文件名` 芯片列表、移除按钮、发送时的 `attachments`） | 组件测试：断言 `.composer__refs` 结构不变（回归） |
+| **FR-131** | 聊天侧选完文件后的展示 MUST **只有一处**：`@文件名` 在正文里落成内联胶囊（不可编辑 + 移除按钮），输入框上方 MUST NOT 再排第二排芯片；发送仍提交结构化 `attachments`。`@` 触发、反向同步与发送剥离 MUST 继续以**文本**为准（胶囊的序列化文本即标记） | 组件测试：断言 `.composer__mention` 结构与移除上报、`.composer__refs` 不存在；单元测试：胶囊序列化为 `@文件名` |
 | **FR-132** | 聊天输入框 MUST 让用户**看得出可以打 `@`**：占位文案提示可 `@` 引用文件；键盘用法（`Enter` 发送 / `Shift + Enter` 换行）MUST 改为输入框下方的常驻提示，MUST NOT 与 `@` 提示争夺同一行文案 | 组件测试：断言 placeholder 与 `.composer__hint` 文案 |
 
 ## 6. 技术需求
@@ -124,3 +124,4 @@
   2. **FR-111 收紧**：原文说"文本类控件必须有该占位提示"，而实现里 `compact` 把 placeholder 置为 `undefined`，**表格单元格反而没有提示**（原型在单元格上也写了提示）——属实现偏离规格，按规格修回。
   3. **FR-120 / FR-121 明确**："凡有 `enum` 一律下拉"含 `compact` 单元格；写回改为**选项下标承载原值**（计划 D5 的原设计），消掉"按字符串反查"在退化枚举上的静默错值。
 - 2026-10-12（**处置变更：回滚**）：`views/demo/**`（甘特设计）与 `views/datapage/**`（解析 Excel 后跳转的查看页）由其他人负责，应用户要求**恢复至 HEAD**——Phase 6 / 宪章 2.1.1 登记的"存量门禁清理"与"3 个原超限文件拆分"**整体回滚**（4 个拆分产物及其 spec 删除、3 个原文件恢复为 968 / 601 / 507 行），故 `lint` 回到 **16 errors**、`typecheck` 回到 **10 errors**（16 / 10 条**全部**落在回滚回来的文件内）、`npm run build` 不通过；`npm run test` 仍全绿（43 文件 / 562 用例）。**本特性的交付物与结论不受影响**（保留项：`eslint.config.mjs` 的按路径放开、`router/index.ts` 的未使用参数修复，故 `lint` 100 → **16 errors**、`typecheck` 11 → **10 errors**，未退回原值）。详见宪章 2.1.2 与 tasks.md 同步记录表（2）。
+- 2026-10-18（**I-1 / FR-131 修订：去重**）：用户反馈"在对话区输入 `@文件名`，输入框上方又出现一枚同样的 chip，重复了"，选择「把上方那种可点 x 删除的形态直接放进对话区」。实现上输入区由 `<textarea>` 改为 `contenteditable` 富文本容器：`@文件名` 在正文里就是一枚 `contenteditable=false` 的胶囊（点 x 删除），`.composer__refs` 整块删除。为守住 I-3 / I-4，胶囊的**序列化文本仍是 `@文件名` 标记**（唯一实现在 `utils/composer-text.ts`），因此 `useFileMention` 的触发/反向同步、`stripMentionTokens` 的发送剥离、`mentionToken` 的拼写来源全部零改动；浮层定位对 contenteditable 改读选区矩形（`caretRectOf` 的 textarea 分支不变）。回归：`composer-text.spec.ts` 新增 8 例，`Composer.spec.ts` / `ChatPanel.spec.ts` 按新结构改写；前端全量 84 文件 / 1019 用例通过，`typecheck`、`lint`、`format:check` 均通过。

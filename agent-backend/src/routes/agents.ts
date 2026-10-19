@@ -6,6 +6,8 @@
  * - POST /api/agents/:name/select — 配置损坏 → 404；**覆盖式选中**（可随时切换，无需先 exit）；
  *   重复 select 幂等；不销毁实例、不影响进行中的 run（下一轮对话生效）
  * - POST /api/agents/current/exit — 幂等；不销毁实例（LRU + 空闲超时自然回收）
+ * - GET  /api/agents/current/mcp        — 当前数字人 MCP 连接状态快照（**只读**，不建实例）
+ * - POST /api/agents/current/mcp/warm   — 显式预热：建实例 + 有界等建连落定，返回同形快照
  */
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
@@ -111,6 +113,52 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
   // 002 US4 / FR-019/020：当前数字人挂载的 MCP 服务清单与连接状态
   app.get('/api/agents/current/mcp', async () => {
     const userId = getCurrentUser().userId;
+    return mcpSnapshot(userId);
+  });
+
+  /**
+   * MCP 预热（2026-10-18）：确保当前数字人的实例**已创建并开始建连**，返回落定后的快照。
+   *
+   * 为什么需要：实例是惰性创建的，而状态端点只读池；因此"新登录 / 切换数字人 / 空闲回收后"
+   * 状态恒为 `unknown`（灰），此前唯一能把它变绿的入口是**发一轮对话**——这正是体验问题
+   * 的根因。本端点提供幂等的显式唤醒：前端在挂载、切换、点击发送时调用。
+   *
+   * - 未选中 → `{ agent_name: null, mcp_servers: [] }`，与 GET 同形；
+   * - 已有实例（常态）→ 不重复创建，仅等到建连落定（已落定则立即返回）；
+   * - 建连超时 / 池满 / 建连异常 → **不抛错**，照常返回快照（仍为 unknown 的部分由调用方
+   *   超时兜底，与"观测信息不阻断主流程"的既有口径一致）；
+   * - 返回值与 `GET .../mcp` **同形**（`CurrentMcpResponse`），不新增字段、不新增类型。
+   */
+  app.post('/api/agents/current/mcp/warm', async () => {
+    const userId = getCurrentUser().userId;
+    const selected = ctx.currentAgent.current(userId);
+    if (!selected) return { agent_name: null, mcp_servers: [] as unknown[] };
+
+    // `false` 是"预热没成功"的兜底值：池满 / 配置损坏时连实例都拿不到（见 catch）
+    let ready = false;
+    try {
+      const instance =
+        (ctx.pool.get(selected) as ChatAgent | undefined) ??
+        (await ctx.getOrCreateAgent({ userId, agentName: selected.agentName }));
+      ready = await instance.mcpReady(ctx.config.mcpConnectTimeoutMs);
+    } catch (err) {
+      // 池满（PoolExhausted）/ 配置损坏（AgentConfigError）/ 其它：预热失败不改变调用方语义
+      ctx.loggers.logger.warn(
+        { err, event: 'mcp.warm.failed', user_id: userId, agent_name: selected.agentName },
+        'MCP 预热失败（降级为"尚无连接结果"，不阻断发消息）',
+      );
+    }
+    if (!ready) {
+      ctx.loggers.logger.warn(
+        {
+          event: 'mcp.warm.timeout',
+          user_id: userId,
+          agent_name: selected.agentName,
+          timeout_ms: ctx.config.mcpConnectTimeoutMs,
+        },
+        'MCP 建连未在预热超时内落定，仍返回当前快照',
+      );
+    }
     return mcpSnapshot(userId);
   });
 

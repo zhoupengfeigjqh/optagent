@@ -9,11 +9,7 @@ import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { FileReference } from '../api/types'
-import {
-  mentionToken,
-  type FileMentionStore,
-  type MentionColumn,
-} from './useFileMention'
+import { mentionToken, type FileMentionStore, type MentionColumn } from './useFileMention'
 import { useMentionComposer } from './useMentionComposer'
 
 const PLAN: FileReference = { dir: '生产计划', filename: 'plan.csv' }

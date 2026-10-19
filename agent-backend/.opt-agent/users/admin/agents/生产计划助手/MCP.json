@@ -18,9 +18,6 @@
       "rules_fields": {
         "hd_scheduling_submit": "input.targetPriorities"
       },
-      "async_tools": [
-        "hd_scheduling_submit"
-      ],
       "allowed_tools": [
         "hd_algorithm_input_parser",
         "hd_scheduling_submit",
@@ -37,9 +34,6 @@
           "image": "url"
         }
       },
-      "async_tools": [
-        "ocr_image"
-      ],
       "allowed_tools": [
         "ocr_image"
       ]

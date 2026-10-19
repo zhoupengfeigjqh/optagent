@@ -6,7 +6,8 @@
  * 2. **逐文件各发一次请求**：后端上传接口一次只接受一个文件（多 `file` part 仅最后一个生效），
  *    因此多选时必须拆成 N 次请求，各自独立状态与重试，单文件失败不影响其他项。
  *
- * 落盘名一律取响应中的 `filename`（后端已追加时间戳并处理重名），前端 MUST NOT 自行拼接。
+ * 落盘名一律取响应中的 `filename`（后端按"不重名用原名 / 重名 `原名(n).ext`"落盘，
+ * 见 `agent-backend/src/domain/upload-name.ts`），前端 MUST NOT 自行拼接后缀。
  */
 
 import { ref, type Ref } from 'vue'
@@ -32,7 +33,7 @@ export interface UploadedDocument {
   /** 字节数 */
   size: number
   status: UploadStatus
-  /** 服务端落盘名（含时间戳） */
+  /** 服务端落盘名（重名时带 `(n)` 后缀）；**展示名与 `@` 标记都取它** */
   serverFilename: string | null
   /** 失败原因（`ErrorInfo`，由 `toUserMessage(error, 'upload')` 映射文案） */
   error: ErrorInfo | null
@@ -51,7 +52,11 @@ export interface UploadsStore {
   upload(dir: string, files: File[], allowedExtensions?: readonly string[]): Promise<void>
   /** 重试失败项（FR-011） */
   retry(localId: string): Promise<void>
-  /** 清空已完成项 */
+  /**
+   * 清空**终态**记录（成功 / 失败），保留 `pending` / `uploading`（012 FR-010 / FR-013）。
+   *
+   * 只清"记录"：不删已落盘文件、不移除输入区的 `@` 标记与引用、不取消进行中的请求。
+   */
   clear(): void
 }
 
@@ -151,14 +156,21 @@ export function createUploadsStore(deps: UploadsDeps): UploadsStore {
     await startUpload(localId)
   }
 
+  /**
+   * 收起面板即清空**终态**记录（012 FR-010 / FR-013，Q2 = B）。
+   *
+   * 关闭那一刻还在传的文件不参与清空：它继续传完、留到下次展开可见，成功仍照常回写 `@`。
+   * 只清记录，不删文件、不动引用与输入区文本（FR-011）。
+   */
   function clear(): void {
-    const remaining = items.value.filter((item) => item.status !== 'success')
+    const isTerminal = (item: UploadedDocument) =>
+      item.status === 'success' || item.status === 'failed'
     for (const item of items.value) {
-      if (item.status === 'success') {
+      if (isTerminal(item)) {
         sources.delete(item.localId)
       }
     }
-    items.value = remaining
+    items.value = items.value.filter((item) => !isTerminal(item))
   }
 
   return { items, upload, retry, clear }

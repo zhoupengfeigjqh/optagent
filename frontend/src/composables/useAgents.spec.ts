@@ -12,7 +12,7 @@ import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { AgentsApi } from '../api/agents'
-import type { DigitalHuman } from '../api/types'
+import type { CurrentMcpResponse, DigitalHuman, McpServiceStatus } from '../api/types'
 import { RUN_PHASE, type RunPhase } from '../constants/events'
 import { createAgentsStore } from './useAgents'
 
@@ -43,6 +43,8 @@ function makeApi(overrides: Partial<Record<keyof AgentsApi, unknown>> = {}) {
     detail: vi.fn(async (name: string) => (name === 'agent-b' ? AGENT_B : AGENT_A)),
     list: vi.fn(async () => [{ agent_name: 'agent-a' }, { agent_name: 'agent-b' }]),
     currentMcp: vi.fn(async () => ({ agent_name: selectedName, mcp_servers: [] })),
+    // 2026-10-18：loadCurrent 末尾会预热（不 await）；桩默认返回"已落定的空清单"
+    warmMcp: vi.fn(async () => ({ agent_name: selectedName, mcp_servers: [] })),
     subscribeMcp: vi.fn(() => () => undefined),
   }
   const api = { ...calls, ...overrides } as unknown as AgentsApi
@@ -164,6 +166,120 @@ describe('switchTo —— 失败不静默（FR-032：陈旧选中态不自动清
 
     expect(toast.push).toHaveBeenCalledTimes(1)
     expect(store.currentAgent.value).toBe(before)
+  })
+})
+
+/** 单服务状态桩（`unknown` = 尚无连接结果，也就是界面上的灰） */
+const mcp = (status: McpServiceStatus['status']): McpServiceStatus[] => [
+  { name: 'svc', transport: 'streamable-http', status },
+]
+
+describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
+  it('加载当前数字人即预热：不再等"发一轮对话"才建连', async () => {
+    const { api, calls } = makeApi()
+    const { store } = makeStore(api)
+
+    await store.loadCurrent()
+
+    expect(calls.warmMcp).toHaveBeenCalledTimes(1)
+  })
+
+  it('mcpPending：任一服务为 unknown 即为真（有灰 = 尚无连接结果）', async () => {
+    const unknown = { agent_name: 'agent-a', mcp_servers: mcp('unknown') }
+    const { api } = makeApi({
+      currentMcp: vi.fn(async () => unknown),
+      warmMcp: vi.fn(async () => unknown),
+    })
+    const { store } = makeStore(api)
+    await store.loadCurrent()
+
+    expect(store.mcpPending.value).toBe(true)
+  })
+
+  it('别的数字人的快照一律丢弃（否则旧人的绿会让发送前等待误放行）', async () => {
+    // 收集订阅回调（数组而非 let 变量：赋值发生在回调里，闭包窄化会让调用点被判成 never）
+    const pushes: Array<(snapshot: CurrentMcpResponse) => void> = []
+    const { api } = makeApi({
+      subscribeMcp: vi.fn((cb: (snapshot: CurrentMcpResponse) => void) => {
+        pushes.push(cb)
+        return () => undefined
+      }),
+    })
+    const { store } = makeStore(api)
+    await store.loadCurrent()
+    store.startMcpSubscription()
+
+    pushes.at(0)?.({ agent_name: 'agent-b', mcp_servers: mcp('connected') })
+    expect(store.mcpServers.value).toEqual([])
+
+    pushes.at(0)?.({ agent_name: 'agent-a', mcp_servers: mcp('failed') })
+    expect(store.mcpServers.value[0]?.status).toBe('failed')
+    store.stopMcpSubscription()
+  })
+
+  it('切换后只采用新数字人的结果：旧结果既不残留也不冒充新结果', async () => {
+    const stale = { agent_name: 'agent-a', mcp_servers: mcp('connected') }
+    const { api } = makeApi({
+      currentMcp: vi.fn(async () => stale),
+      warmMcp: vi.fn(async () => stale),
+    })
+    const { store } = makeStore(api)
+    await store.loadCurrent()
+    expect(store.mcpServers.value).toHaveLength(1)
+
+    await store.switchTo('agent-b')
+
+    // 桩始终返回 agent-a 的快照 → 归属校验拦下，切人后不会显示旧人的绿
+    expect(store.mcpServers.value).toEqual([])
+  })
+
+  it('ensureMcpReady：灰色 → 轮询取到结果即放行', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      const { api } = makeApi({
+        currentMcp: vi.fn(async () => {
+          calls += 1
+          return {
+            agent_name: 'agent-a',
+            mcp_servers: mcp(calls >= 2 ? 'connected' : 'unknown'),
+          }
+        }),
+        // 预热桩不参与计数：这里要验的是"轮询能取到结果"
+        warmMcp: vi.fn(async () => ({ agent_name: 'agent-a', mcp_servers: mcp('unknown') })),
+      })
+      const { store } = makeStore(api)
+      await store.loadCurrent() // 第 1 次：unknown
+      expect(store.mcpPending.value).toBe(true)
+
+      const running = store.ensureMcpReady(10_000)
+      await vi.advanceTimersByTimeAsync(600)
+
+      await expect(running).resolves.toBe(true)
+      expect(store.mcpPending.value).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ensureMcpReady：始终无色 → 到点返回 false（调用方降级放行，不无限等）', async () => {
+    vi.useFakeTimers()
+    try {
+      const unknown = { agent_name: 'agent-a', mcp_servers: mcp('unknown') }
+      const { api } = makeApi({
+        currentMcp: vi.fn(async () => unknown),
+        warmMcp: vi.fn(async () => unknown),
+      })
+      const { store } = makeStore(api)
+      await store.loadCurrent()
+
+      const running = store.ensureMcpReady(1_000)
+      await vi.advanceTimersByTimeAsync(1_200)
+
+      await expect(running).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

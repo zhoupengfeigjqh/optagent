@@ -30,6 +30,12 @@ export interface AgentsApi {
   /** `GET /api/agents/current/mcp` → 实例未创建时全部为 `unknown`（尚无连接结果） */
   currentMcp(): Promise<CurrentMcpResponse>
   /**
+   * `POST /api/agents/current/mcp/warm`（2026-10-18）→ 显式预热：
+   * 让后端为当前数字人**建实例并开始建连**，有界等到落定后返回同形快照（幂等）。
+   * 实例已存在且已落定时立即返回，可安全重复调用。
+   */
+  warmMcp(): Promise<CurrentMcpResponse>
+  /**
    * 订阅 MCP 状态推送（SSE `GET /api/agents/current/mcp/events`）。
    * 连接建立即收到一次快照，之后状态变化（建连落定 / 切换 / 退出）时推送；
    * 返回退订函数。EventSource 自带断线重连。
@@ -47,6 +53,7 @@ export function createAgentsApi(client: HttpClient): AgentsApi {
     exit: () => client.post<ExitAgentResponse>('/api/agents/current/exit'),
     current: () => client.get<CurrentAgentResponse>('/api/agents/current'),
     currentMcp: () => client.get<CurrentMcpResponse>('/api/agents/current/mcp'),
+    warmMcp: () => client.post<CurrentMcpResponse>('/api/agents/current/mcp/warm'),
     subscribeMcp: (onSnapshot) => {
       const source = new EventSource(`${client.baseUrl}/api/agents/current/mcp/events`)
       source.addEventListener('mcp-status', (event) => {

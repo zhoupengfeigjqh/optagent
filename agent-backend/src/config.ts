@@ -23,6 +23,14 @@ const envSchema = z.object({
   /** 单次 MCP 工具调用超时（毫秒）；同步型算法工具（如 hd_scheduling_submit）依赖此上限，勿再调小 */
   MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
   /**
+   * 单个 MCP 服务的**建连**超时（毫秒，2026-10-18）。
+   *
+   * 与 `MCP_TIMEOUT_MS` 刻意分开：后者是工具调用上限（默认 60s，算法类工具需要），
+   * 拿它做建连超时会让"服务挂起"时的等待长达一分钟——而建连期用户正在等首条消息。
+   * 超时即判该服务 failed（有连接结果、不再是 unknown），并交给既有退避重连接管。
+   */
+  MCP_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(10_000),
+  /**
    * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。
    * 改这里时 MUST 同步改：admin-backend/src/config.ts 的同名项、
    * gateway/nginx.conf 的 client_max_body_size（= 此值 + 1MB multipart 余量，否则 5MB 文件传不上）。
@@ -91,6 +99,8 @@ export interface AppConfig {
   poolSize: number;
   idleTimeoutMs: number;
   mcpTimeoutMs: number;
+  /** 单服务建连超时（毫秒）；超时判 failed，由退避重连接管 */
+  mcpConnectTimeoutMs: number;
   uploadMaxMb: number;
   /** 内联预览大小上限（MB） */
   previewMaxMb: number;
@@ -198,6 +208,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     poolSize: e.POOL_SIZE,
     idleTimeoutMs: e.IDLE_TIMEOUT_MS,
     mcpTimeoutMs: e.MCP_TIMEOUT_MS,
+    mcpConnectTimeoutMs: e.MCP_CONNECT_TIMEOUT_MS,
     uploadMaxMb: e.UPLOAD_MAX_MB,
     previewMaxMb: e.PREVIEW_MAX_MB,
     readTruncateKb: e.READ_TRUNCATE_KB,

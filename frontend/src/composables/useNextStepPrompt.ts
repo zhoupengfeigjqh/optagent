@@ -82,5 +82,11 @@ export function useNextStepPrompt(deps: NextStepPromptDeps): NextStepPrompt {
     }
   }
 
-  return { pendingSuggestion, suggestionSending, onPickNextStep, onCancelSuggestion, onConfirmSuggestion }
+  return {
+    pendingSuggestion,
+    suggestionSending,
+    onPickNextStep,
+    onCancelSuggestion,
+    onConfirmSuggestion,
+  }
 }

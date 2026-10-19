@@ -30,7 +30,7 @@ withDefaults(
       aria-label="MCP 服务状态"
     >
       <li v-for="server in mcpServers" :key="server.name" class="agent-summary__mcp-item">
-        <McpStatusItem :name="server.name" :transport="server.transport" :status="server.status" />
+        <McpStatusItem :name="server.name" :status="server.status" />
       </li>
     </ul>
   </div>

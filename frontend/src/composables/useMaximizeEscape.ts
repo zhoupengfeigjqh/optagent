@@ -70,7 +70,11 @@ export function useMaximizeEscape(deps: MaximizeEscapeDeps): void {
     attached = false
   }
 
-  watch(() => deps.active(), (value) => (value ? attach() : detach()), { immediate: true })
+  watch(
+    () => deps.active(),
+    (value) => (value ? attach() : detach()),
+    { immediate: true },
+  )
   onBeforeUnmount(detach)
 }
 

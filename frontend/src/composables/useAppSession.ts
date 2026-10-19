@@ -229,6 +229,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     onSwitched: async () => {
       // 009：会话按数字人隔离 ⇒ 切换即进入**新的空对话视图**（不落盘，见 ThreadsStore.startNew）
       threads.startNew()
+      // 012：上传记录属于上一个数字人的数据域，切换即清（终态清空，进行中的按 FR-013 保留）
+      uploads.clear()
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()

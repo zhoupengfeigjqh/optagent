@@ -80,7 +80,11 @@ describe('grepSkillFiles —— 检索', () => {
   it('符号链接被跳过并注明（技能目录内的链接一律不跟进）', () => {
     writeFileSync(path.join(dir, 'outside.txt'), '交付日期（技能之外）\n', 'utf8');
     try {
-      fs.symlinkSync(path.join(dir, 'outside.txt'), path.join(skillsRoot, '调度算法', 'link.md'), 'file');
+      fs.symlinkSync(
+        path.join(dir, 'outside.txt'),
+        path.join(skillsRoot, '调度算法', 'link.md'),
+        'file',
+      );
     } catch {
       return; // Windows 未开启开发者模式时无法创建符号链接：跳过而非误报
     }

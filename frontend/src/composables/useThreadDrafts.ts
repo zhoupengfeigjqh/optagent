@@ -30,7 +30,10 @@ export interface ThreadDrafts {
  * @param draft 当前输入区文本（读写，状态源）
  * @param limit 桶上限（测试可注入更小值）
  */
-export function useThreadDrafts(draft: Ref<string>, limit: number = DRAFT_BUCKETS_LIMIT): ThreadDrafts {
+export function useThreadDrafts(
+  draft: Ref<string>,
+  limit: number = DRAFT_BUCKETS_LIMIT,
+): ThreadDrafts {
   const drafts = new Map<string, string>()
 
   function stash(threadId: string | null): void {

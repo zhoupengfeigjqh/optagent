@@ -42,9 +42,7 @@ describe('MessageSegments —— 三种基础形态（2026-10-16）', () => {
   })
 
   it('外链分段：新窗口直跳且带 noopener / noreferrer', () => {
-    const wrapper = mountSegments([
-      { type: 'link', text: 'https://a.b/c', href: 'https://a.b/c' },
-    ])
+    const wrapper = mountSegments([{ type: 'link', text: 'https://a.b/c', href: 'https://a.b/c' }])
 
     const link = wrapper.find('a.message-content__link')
     expect(link.text()).toBe('https://a.b/c')
@@ -89,9 +87,7 @@ describe('MessageSegments —— 高亮与链接叠加（2026-10-16）', () => {
 
 describe('MessageSegments —— open-link 派发（2026-10-16）', () => {
   it('点击外链派发 open-link（V-10 直跳由装配层兜底）', async () => {
-    const wrapper = mountSegments([
-      { type: 'link', text: 'https://a.b/c', href: 'https://a.b/c' },
-    ])
+    const wrapper = mountSegments([{ type: 'link', text: 'https://a.b/c', href: 'https://a.b/c' }])
 
     await wrapper.find('a.message-content__link').trigger('click')
 

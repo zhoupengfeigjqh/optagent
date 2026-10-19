@@ -88,10 +88,9 @@ describe('MessageContent —— 搜索高亮（序号与原文口径一致）', 
         keyword: '产能',
       },
     })
-    expect(table.findAll('mark[data-match-index]').map((mark) => mark.attributes('data-match-index'))).toEqual([
-      '0',
-      '1',
-    ])
+    expect(
+      table.findAll('mark[data-match-index]').map((mark) => mark.attributes('data-match-index')),
+    ).toEqual(['0', '1'])
   })
 
   it('关键词落在被丢掉的标记里：计数照旧按原文，页面上不产生高亮节点', () => {

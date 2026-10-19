@@ -53,9 +53,7 @@ describe('threadToMarkdown —— 结构与角色标签', () => {
   })
 
   it('assistant 用数字人名标注；缺省退回「助手」', () => {
-    const named = threadToMarkdown(THREAD, [
-      makeMessage({ role: 'assistant', agent_name: 'demo' }),
-    ])
+    const named = threadToMarkdown(THREAD, [makeMessage({ role: 'assistant', agent_name: 'demo' })])
     expect(named).toContain('## demo ·')
 
     const anonymous = threadToMarkdown(THREAD, [makeMessage({ role: 'assistant' })])

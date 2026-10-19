@@ -370,3 +370,101 @@ describe('McpManager —— 主动健康探测（2026-09-23：补齐假绿）', 
     await manager.closeAll();
   });
 });
+
+/**
+ * 2026-10-18：建连有界超时 + "落定"可等待。
+ *
+ * 两个都是"发送前等 MCP 出现连接结果"的前置条件：
+ * ① 没有超时 → SDK 的 connect 可能永不返回，状态永久 unknown（灰），等待方只能靠外部超时；
+ * ② 没有落定信号 → 只能靠 SSE 反推，后端自己无法在开跑前确认工具是否齐全。
+ */
+describe('McpManager —— 建连有界超时与落定信号（2026-10-18）', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('建连挂起：到超时即判 failed（灰 → 红），不会永久停在 unknown', async () => {
+    const statuses: Array<[string, string]> = [];
+    const manager = new McpManager({
+      timeoutMs: 60_000, // 工具调用上限（长）不该决定建连等待
+      connectTimeoutMs: 1_000,
+      createClient: () => new Promise<McpClientLike>(() => {}),
+      onStatusChange: (server, status) => statuses.push([server, status]),
+    });
+
+    const tracked = manager.connectAndTrack([CFG]);
+    expect(manager.statusOf('ocr')).toBe('unknown'); // 建连进行中仍是"尚无结果"，不误报故障
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await tracked;
+
+    expect(manager.statusOf('ocr')).toBe('failed');
+    expect(statuses).toContainEqual(['ocr', 'failed']);
+    await manager.closeAll();
+  });
+
+  it('超时后迟到的连接被主动关闭（不遗留无人管理的客户端/子进程）', async () => {
+    let settle: ((client: McpClientLike) => void) | undefined;
+    const close = vi.fn(async () => {});
+    const manager = new McpManager({
+      timeoutMs: 60_000,
+      connectTimeoutMs: 1_000,
+      createClient: () =>
+        new Promise<McpClientLike>((resolve) => {
+          settle = resolve;
+        }),
+    });
+
+    const tracked = manager.connectAndTrack([CFG]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await tracked;
+    expect(manager.statusOf('ocr')).toBe('failed');
+
+    settle?.({ listTools: async () => ({ tools: [] }), callTool: async () => 'ok', close });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(manager.statusOf('ocr')).toBe('failed'); // 迟到的连接不入池
+    await manager.closeAll();
+  });
+
+  it('waitSettled：未发起建连 → 立即 true（稳态零等待）', async () => {
+    const manager = new McpManager({ timeoutMs: 1000, createClient: async () => fakeClient({}) });
+    await expect(manager.waitSettled(5_000)).resolves.toBe(true);
+    await manager.closeAll();
+  });
+
+  it('waitSettled：飞行中 → 落定后 true', async () => {
+    let settle: ((client: McpClientLike) => void) | undefined;
+    const manager = new McpManager({
+      timeoutMs: 60_000,
+      connectTimeoutMs: 5_000,
+      createClient: () =>
+        new Promise<McpClientLike>((resolve) => {
+          settle = resolve;
+        }),
+    });
+
+    const tracked = manager.connectAndTrack([CFG]);
+    const waiting = manager.waitSettled(5_000);
+    settle?.(fakeClient({}));
+    await tracked;
+    await expect(waiting).resolves.toBe(true);
+    expect(manager.statusOf('ocr')).toBe('connected');
+    await manager.closeAll();
+  });
+
+  it('waitSettled：一直不落定 → 到点 false，且不改状态（仍由建连自行落定）', async () => {
+    const manager = new McpManager({
+      timeoutMs: 1000,
+      connectTimeoutMs: 60_000,
+      createClient: () => new Promise<McpClientLike>(() => {}),
+    });
+    void manager.connectAndTrack([CFG]);
+
+    const waiting = manager.waitSettled(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(waiting).resolves.toBe(false);
+    expect(manager.statusOf('ocr')).toBe('unknown');
+    await manager.closeAll();
+  });
+});

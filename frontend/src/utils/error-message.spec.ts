@@ -39,6 +39,15 @@ describe('toUserMessage - 基础映射', () => {
     )
   })
 
+  it('FILE_NAME_CONFLICT（012）：同名文件过多，文案可操作且不套"格式不支持"', () => {
+    expect(toUserMessage({ code: 'FILE_NAME_CONFLICT', message: 'raw' })).toContain('同名文件过多')
+    expect(toUserMessage({ code: 'FILE_NAME_CONFLICT', message: 'raw' }, 'upload')).toContain(
+      '整理目录',
+    )
+    // 与同上下文的其他码互不串味
+    expect(toUserMessage({ code: 'VALIDATION_FAILED', message: '' }, 'upload')).toBe('文件格式不支持')
+  })
+
   it('null / undefined / 无 code → 通用兜底文案', () => {
     expect(toUserMessage(null)).toBe(GENERIC)
     expect(toUserMessage(undefined)).toBe(GENERIC)

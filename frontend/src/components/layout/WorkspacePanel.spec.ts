@@ -80,9 +80,7 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
  * `maximizeVisible` 这个布尔 prop 代表结论——面板 MUST NOT 自行对 `target` / `content` 判第二遍（FR-010）。
  */
 describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
-  function mountMaximizable(
-    over: Partial<{ maximized: boolean; maximizeVisible: boolean }> = {},
-  ) {
+  function mountMaximizable(over: Partial<{ maximized: boolean; maximizeVisible: boolean }> = {}) {
     return mount(WorkspacePanel, {
       props: {
         view: 'content',

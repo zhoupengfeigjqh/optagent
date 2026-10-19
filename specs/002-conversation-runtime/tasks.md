@@ -272,3 +272,28 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [ ] T084 前端门禁实测：`npm run lint` / `typecheck` / `test:coverage` / `build`（实测值登记在 T085）
 - [ ] T085 硬门禁与口径登记：改动文件 ≤500 行（逐个实测行数）、**零新增依赖**（两侧 `package.json` 未变）、错误码表与前端文案表逐项对照、`spec.md` §9.5 勾选与实测值回填
 
+---
+
+## 增量（2026-10-18）：MCP 预热与发送前就绪门（`TR-59`~`TR-63`）
+
+**来源**：用户实测反馈——新登录 / 切换数字人后 MCP 状态恒灰，必须发一轮对话才激活；要求"点击发送时若仍有灰，等出连接结果再提交"。分析另发现更实质的一处：首轮工具装配时建连可能仍在飞行中，该轮**静默缺少 MCP 工具**。
+
+**设计取舍**
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 新增 `POST /api/agents/current/mcp/warm`，而**不**让 `GET .../mcp` 懒创建 | GET 带副作用；SSE push 内部也会调快照计算，叠加"无单飞"会在建实例窗口内自我递归创建 | 把状态端点改成按需建实例（一行改动，但语义脏） |
+| 建连超时独立成 `MCP_CONNECT_TIMEOUT_MS`（10s） | 工具调用上限 60s（算法类工具需要）拿来当建连上限，会让"服务挂起"的等待长达一分钟，而用户正在等首条消息 | 复用 `MCP_TIMEOUT_MS` |
+| 后端在 `startRun` 前有界等待落定 | 前端门可被绕过（刷新即回车、卡片确认、直连 API），只有后端等待才是"本轮一定有工具"的保证 | 只做前端等待 |
+| 不新增 `connecting` 状态值 | 动三值枚举要同步后端 `statusOf`、前端类型/配色/一批测试；`preparing` 已足够表达"正在连接" | 四值枚举（`unknown` / `connecting` / `connected` / `failed`） |
+| 超时**放行**而非阻断 | 红色已是明确结论；阻断等于单个 MCP 服务挂掉就让聊天不可用（原则九） | 一直等到变色（会永久卡住，"connect 无超时"时更是死锁） |
+
+**任务**
+
+- [x] T086 规格回写：`spec.md` §4.11 / §6 / §7.6 / §8 增量 / §9.6 与本文件；[`runtime-api-delta.md` §20 R21](../../001-digital-human-platform/contracts/runtime-api-delta.md) + 根 `README.md` 运行参数表。
+  **顺序偏离（如实记录）**：本次规格与代码**同批落盘**，未做到"先规格后代码"（原则一）；已在 `spec.md` §7.6 末段登记核对结果与"不得作为先例"的约束，本任务保留在序列首位供审计追溯
+- [x] T087 后端：`config.ts` 新增 `MCP_CONNECT_TIMEOUT_MS`（默认 10000）+ `.env.example`；`mcp-manager.ts` 新增 `boundedConnect()` / `connectAndTrack()` / `waitSettled()`（超时判 `failed`、迟到连接主动 `close()`）；`agent-factory.ts` 的 `ChatAgent` 新增 `mcpReady(timeoutMs)` 并把 `void connectAll` 换成 `void connectAndTrack`；`server.ts` 的 `getOrCreateAgent` 增加在途单飞；`routes/agents.ts` 新增 warm 端点；`routes/chat.ts` 在 `startRun` 前有界等待 + `mcp.ready.timeout` / `mcp.ready.error` 日志
+- [x] T088 后端测试：`tests/unit/mcp-manager.spec.ts` +5 例（挂起超时判 failed / 迟到连接关闭 / 未发起立即 true / 飞行中落定 true / 超时 false 且不改状态）；新增 `tests/integration/agent-mcp-warm.spec.ts` 5 例（未选中 / 只读不建实例 / 预热出结果 / 幂等同一实例 / GET 与 POST 同形）
+- [x] T089 前端：`api/agents.ts` 新增 `warmMcp()`（复用 `CurrentMcpResponse`，`types.ts` 零新增）；`useAgents.ts` 新增 `mcpPending` / `warmMcp` / `ensureMcpReady`，快照统一走 `applyMcpSnapshot()` 做 `agent_name` 归属校验，切换时先清空，`loadCurrent` 末尾预热；新增 `composables/useMcpReadyGate.ts`（工厂 + 注入包装，10s 上限、超时提示）；`useChatPanel.ts` 在 `chat.send` 前 `await mcpReady.waitMcpReady()` 并加 `preparing` 幂等锁（文件 499 行）；`ChatPanel.vue` 等待态文案（`role="status"`）+ 禁用输入与两个发送入口
+- [x] T090 前端测试与门禁：新增 `useMcpReadyGate.spec.ts` 5 例；`useAgents.spec.ts` +5 例（预热入口 / `mcpPending` / 他人快照丢弃 / 切换不残留 / 轮询就绪 / 超时 false）；`useChatPanel.retry.spec.ts` +4 例（先等后发 / 无灰零等待 / 等待中重复点击只发一次 / 超时放行 + 提示）；`useMcpReadyGate.ts` 登记 `vite.config.ts` 模块阈值；门禁实测：后端 `typecheck` / `lint` / `test:all`（58 文件）全绿，前端 `lint` / `typecheck` / `test`（80 文件）/ `test:coverage` 全绿
+
