@@ -122,7 +122,7 @@ describe('UserCardList', () => {
     expect(wrapper.text()).toContain('未关联任何数字人')
   })
 
-  it('删除需二次确认，且说明不删除运行环境数据目录（FR-028）', async () => {
+  it('删除需二次确认，且说明"撤回数字人、保留文件空间"（2026-10-20）', async () => {
     const wrapper = mountList()
     const del = wrapper.findAll('button').find((b) => b.text() === '删除')
     await del?.trigger('click')
@@ -130,10 +130,11 @@ describe('UserCardList', () => {
 
     const dialog = wrapper.find('dialog')
     expect(dialog.attributes('open')).toBeDefined()
-    expect(dialog.text()).toContain('不会删除运行环境中该用户的数据目录')
+    expect(dialog.text()).toContain('撤回该用户在运行环境中的数字人')
+    expect(dialog.text()).toContain('文件空间的内容一律保留')
   })
 
-  it('确认删除调用接口并发出 changed', async () => {
+  it('确认删除调用接口、发出 changed 与 removed（后者用于清掉部署勾选）', async () => {
     deleteUser.mockResolvedValue(undefined)
     const wrapper = mountList()
     await wrapper
@@ -146,6 +147,7 @@ describe('UserCardList', () => {
 
     expect(deleteUser).toHaveBeenCalledWith('admin')
     expect(wrapper.emitted('changed')).toHaveLength(1)
+    expect(wrapper.emitted('removed')).toEqual([['admin']])
   })
 
   it('边界：空列表显示空态引导', () => {

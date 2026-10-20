@@ -606,7 +606,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - **该键恒出现在响应中**（历史文档缺该键时，服务端读取即补为 `{}`），客户端无需判空；请求体可省略（按无约束处理）。
 - 完整字段表与校验规则见 `data-model.md` §5；字段值的实际判定（上传表表头预检）在运行环境侧，见 `runtime-api-delta.md` §3.1。
 - `data_prep_uploads`（**目录级可上传文件类型白名单**，2026-10-13 新增）的键 MUST 在 `data_prep_dirs` 内；**只出现被配置的目录**（未配置的目录不出现，缺失 ≡ 使用平台默认 `.csv`、`.xlsx`）。
-- 其值为**非空**字符串数组，每项为小写含前导点的扩展名，∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.zip` / `.jpg` / `.png` / `.jpeg`（2026-10-14 增 `.xls`，顺序即服务端归一顺序）；同目录内 MUST NOT 重复；服务端保存时按上述顺序归一。
+- 其值为**非空**字符串数组，每项为小写含前导点的扩展名，∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.html` / `.zip` / `.jpg` / `.png` / `.jpeg`（2026-10-14 增 `.xls`，2026-10-20 增 `.html`，顺序即服务端归一顺序）；同目录内 MUST NOT 重复；服务端保存时按上述顺序归一。
 - 为空数组、含非法项、或引用 `data_prep_dirs` 清单外的目录 ⇒ **拒绝保存**（`VALIDATION_FAILED`）。
 - **该键可省略**（请求体与响应体皆然）；历史文档缺该键时按"全部目录使用平台默认"处理，客户端无需迁移。
 - 该配置仅约束**数据准备空间**的**用户上传**；共享空间与临时空间的可上传类型不由此字段影响。
@@ -729,17 +729,23 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 ### 6.4 `DELETE /api/admin/users/{user_id}`
 
-**用途**：删除用户。属引用冲突场景，界面 MUST 提示并要求二次确认（边缘情况「引用冲突」）。**注意**：删除平台侧用户**不删除** `.opt-agent/` 中该用户的数据目录（受 `FR-028` 约束）；实际清理由后续"部署生效"按部署清单语义决定。
+**用途**：删除用户。属引用冲突场景，界面 MUST 提示并要求二次确认（边缘情况「引用冲突」）。
+
+**执行顺序（2026-10-20 修订）**：MUST **先撤回该用户的部署**（清 `users/{uid}/agents/**`、移出部署清单），**再**删除平台侧记录。
+
+- 顺序不可颠倒：撤回失败时用户仍在平台、可重试；若先删平台记录，后续部署的目标集合里再也不会有该用户，"实际清理由后续部署决定"就成了永不发生的承诺（遗留部署会继续对外服务）。
+- 用户文件空间 `users/{uid}/user-data/**` MUST NOT 被删除或修改（`FR-028`）：撤回的是**能力**，不是数据。
+- 撤回失败 → 整个删除失败，用户与运行环境均保持原样。
 
 **响应 204**
 
-**错误码**：`ADM_USER_NOT_FOUND`
+**错误码**：`ADM_USER_NOT_FOUND`、`ADM_DEPLOY_TARGET_NOT_WRITABLE`（撤回失败，删除未发生）
 
 ### 6.5 `POST /api/admin/deploy/validate`
 
 **用途**：**只读**预检，让管理员在真正部署前看到全部错误项（`FR-027` 的界面化）。与 `6.6` 的校验逻辑**同一实现**，MUST NOT 形成两套判定。
 
-**请求体**：`{ "user_ids": ["admin"] }`（缺省表示全部用户）
+**请求体**：`{ "user_ids": ["admin"] }`（**省略字段**表示全部用户；**空数组 MUST 被拒绝**（`VALIDATION_FAILED`），`[]` 与"未指定"不得同义；未知用户 → `ADM_USER_NOT_FOUND`，`details.user_ids` 列出具体标识，2026-10-20）
 
 **响应 200**：`{ "passed": boolean, "errors": [ { user_id, agent_name, category, code, message, detail } ] }`
 
@@ -751,14 +757,14 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **用途**：**部署生效**（`FR-026`）。流程 MUST 为：**只读预校验（`FR-027`）→ 全部通过才写入**。
 
-**请求体**：`{ "user_ids": ["admin"], "revision": 13 }`（缺省全部用户）
+**请求体**：`{ "user_ids": ["admin"], "revision": 13 }`（**省略字段**表示全部用户；空数组 MUST 被拒绝，未知用户 `details.user_ids` 列出具体标识；2026-10-20）
 
 **响应 200**
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `users` | array | 每用户：`{ user_id, ok, agents: [{ name, action: "written"|"removed", ok }], error? }` |
-| `manifest_diff` | array | 与部署清单不一致的差异（如手工删改过的目录，`FR-032`） |
+| `manifest_diff` | array | **部署前**与运行环境的差异（agent 级，`FR-032`）：`agent_missing_in_runtime`（期望有、运行环境缺，可能被手工删除）、`agent_unexpected_in_runtime`（曾由平台分发、本次不再需要，将被清掉）。差异是写入前快照，部署后即为一致；失败用户**不产生**差异条目（原因见 `users[].error`） |
 | `history_id` | string | 对应 `§6.7` 的一条记录 |
 
 **错误码**：`ADM_DEPLOY_VALIDATION_FAILED`（`details.errors` 列出全部错误项；**运行环境写入次数 MUST 为 0**，`SC-020`）、`ADM_DEPLOY_TARGET_NOT_WRITABLE`、`ADM_AGENT_INVALID_REF`（单因同码时直接返回该码）、`ADM_CONFIG_REVISION_CONFLICT`

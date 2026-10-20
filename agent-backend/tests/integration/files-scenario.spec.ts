@@ -627,13 +627,14 @@ async function postUpload(
   return app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers });
 }
 
-/** 共享空间 / 临时空间的空间级白名单（2026-10-14 起在既有口径上新增 `.xls`） */
+/** 共享空间 / 临时空间的空间级白名单（2026-10-14 增 `.xls`；2026-10-20 增 `.html`） */
 const SPACE_LEVEL_EXTS = [
   '.csv',
   '.xlsx',
   '.xls',
   '.txt',
   '.json',
+  '.html',
   '.pdf',
   '.jpg',
   '.jpeg',

@@ -99,22 +99,32 @@ export class Deployer {
     const diffs: ManifestDiffEntry[] = [];
     const startedAt = Date.now();
 
+    // `manifest_diff`（FR-032）取**写入前**的运行环境快照：写完后再比就永远一致，
+    // "被手工删改过"这类差异就再也报不出来（2026-10-20）。
+    for (const target of targets) {
+      diffs.push(
+        ...this.deps.manifest.diff(
+          target.user_id,
+          target.agents,
+          this.deps.writer.listAgents(target.user_id),
+        ),
+      );
+    }
+
     // 关键行为日志（任务 2026-09-15）：部署是平台最重的写操作，起止必须留痕
     this.deps.logger.info(
       {
         event: 'deploy.begin',
         users: targets.map((t) => t.user_id),
         agent_count: targets.reduce((sum, t) => sum + t.agents.length, 0),
+        diff_count: diffs.length,
       },
-      `开始部署：${targets.length} 个用户 / ${targets.reduce((sum, t) => sum + t.agents.length, 0)} 个数字人`,
+      `开始部署：${targets.length} 个用户 / ${targets.reduce((sum, t) => sum + t.agents.length, 0)} 个数字人 / ${diffs.length} 条既有差异`,
     );
 
     for (const target of targets) {
-      const designs = target.agents
-        .map((name) => this.deps.agents.readOrNull(name))
-        .filter((doc): doc is AgentDesignDocument => doc !== null);
-
       try {
+        const designs = this.readDesignsStrictly(target.agents);
         const artifacts = buildUserArtifacts(designs, context);
         // 整体覆盖：`agents/` 下不在本次产物里的一切条目都会被清掉（2026-09-16）
         const commit = this.deps.writer.commitUser(target.user_id, artifacts);
@@ -128,18 +138,14 @@ export class Deployer {
         });
         this.deps.manifest.updateUser(target.user_id, target.agents, new Date().toISOString());
       } catch (err) {
-        // FR-029：单用户失败即该用户零写入，其余用户不受影响
+        // FR-029：单用户失败即该用户零写入，其余用户不受影响。
+        // 2026-10-20：失败不再塞进 `manifest_diff`——差异报告只描述"运行环境与期望不一致"，
+        // 失败原因在 `users[].error` 与日志里，混进差异项会让"差异"失去可解释性。
         results.push({
           user_id: target.user_id,
           ok: false,
           agents: [],
           error: err instanceof Error ? err.message : String(err),
-        });
-        diffs.push({
-          user_id: target.user_id,
-          target: '',
-          kind: 'missing_in_runtime',
-          detail: `部署失败：${err instanceof Error ? err.message : String(err)}`,
         });
         this.deps.logger.error(
           { err, event: 'deploy.user.failed', user_id: target.user_id },
@@ -186,14 +192,53 @@ export class Deployer {
     this.deps.store.assertRevision(revision);
     const user = this.deps.users.read(userId); // 未知用户 → 404 ADM_USER_NOT_FOUND
 
-    const withdrawn = this.deps.writer.withdrawUser(user.user_id);
-    this.deps.manifest.removeUser(user.user_id);
-    this.deps.logger.info(
-      { event: 'deploy.withdraw', user_id: user.user_id, agents: withdrawn },
-      `已撤回用户 ${user.user_id} 的部署：下架 ${withdrawn.length} 个数字人`,
-    );
+    return { user_id: user.user_id, withdrawn: this.revokeArtifacts(user.user_id, 'deploy.withdraw') };
+  }
 
-    return { user_id: user.user_id, withdrawn };
+  /**
+   * **删除用户时的随附撤回**（`§6.4`，2026-10-20）。
+   *
+   * 与 `withdraw` 的唯一区别：没有乐观锁与用户存在性检查——由 `DELETE /users/:id`
+   * 在 `users.remove` **之前**调用，确保"平台侧没有这个用户，运行环境也不再为他提供服务"。
+   * 只清 `users/{uid}/agents/**` 与清单条目；`user-data/**`（文件空间）一律保留（`FR-028`）。
+   *
+   * 失败即抛出（删除用户的请求随之失败）：宁可删不掉让管理员重试，也不留下
+   * "平台已无该用户、运行环境仍在服务"的孤儿部署。
+   */
+  purgeUser(userId: string): string[] {
+    return this.revokeArtifacts(userId, 'deploy.purge');
+  }
+
+  /** 撤回的唯一实现：清运行环境 `agents/` + 移出清单（部署与删除用户共用） */
+  private revokeArtifacts(userId: string, event: string): string[] {
+    const withdrawn = this.deps.writer.withdrawUser(userId);
+    this.deps.manifest.removeUser(userId);
+    this.deps.logger.info(
+      { event, user_id: userId, agents: withdrawn },
+      `已撤回用户 ${userId} 的部署：下架 ${withdrawn.length} 个数字人`,
+    );
+    return withdrawn;
+  }
+
+  /**
+   * 部署时**严格**读取设计态（2026-10-20）。
+   *
+   * 此前是 `.filter(doc => doc !== null)`：预检通过后若设计态恰好读不到（被删除/损坏），
+   * 该数字人会被静默剔出产物，而清单仍记它"已部署"——表现为"部署成功，但少了一个"。
+   * 现在改为整用户失败（零写入），原因直接落到 `users[].error`。
+   */
+  private readDesignsStrictly(agentNames: string[]): AgentDesignDocument[] {
+    const designs: AgentDesignDocument[] = [];
+    for (const name of agentNames) {
+      const design = this.deps.agents.readOrNull(name);
+      if (!design) {
+        throw new Error(
+          `数字人 ${name} 的设计态在部署时读取失败（预检后可能被删除或损坏），本用户未写入任何内容`,
+        );
+      }
+      designs.push(design);
+    }
+    return designs;
   }
 
   /** 组装预检输入（校验与实际部署共用，保证判定一致） */
@@ -202,20 +247,31 @@ export class Deployer {
     targets: PrecheckUser[];
     snapshot: Awaited<ReturnType<UnifiedCatalog['snapshot']>>;
   }> {
+    // 2026-10-20：空数组**明确拒绝**——`undefined`（省略字段）才是"全部用户"，
+    // 两者混同会让脚本里的 `user_ids: []`（意为"没有对象"）静默变成全平台覆盖部署。
+    if (userIds !== undefined && userIds.length === 0) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        'user_ids 不能为空数组：部署全部用户请省略该字段，只部署部分用户请传入具体用户标识',
+      );
+    }
+
     const snapshot = await this.deps.catalog.snapshot();
 
     const all: PrecheckUser[] = this.deps.users
       .listAll()
       .map((user) => ({ user_id: user.user_id, agents: [...user.agents] }));
     const targets =
-      userIds === undefined || userIds.length === 0
-        ? all
-        : all.filter((user) => userIds.includes(user.user_id));
+      userIds === undefined ? all : all.filter((user) => userIds.includes(user.user_id));
 
-    if (userIds && userIds.length > 0) {
+    if (userIds) {
       const unknown = userIds.filter((id) => !all.some((user) => user.user_id === id));
       if (unknown.length > 0) {
-        throw new ApiError(ERROR_CODES.ADM_USER_NOT_FOUND, `用户不存在：${unknown.join('、')}`);
+        // 详情随 `details.user_ids` 下发：界面按码映射文案（不展示后端 message），
+        // 但"到底是哪几个用户"必须可呈现，否则整批 404 时无从定位（2026-10-20）。
+        throw new ApiError(ERROR_CODES.ADM_USER_NOT_FOUND, `用户不存在：${unknown.join('、')}`, {
+          user_ids: unknown,
+        });
       }
     }
 

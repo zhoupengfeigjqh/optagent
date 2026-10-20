@@ -240,3 +240,25 @@ describe('DeployHistoryList —— 展开行看明细', () => {
     expect(headers.indexOf('失败数')).toBe(headers.length - 2)
   })
 })
+
+describe('DeployHistoryList —— 加载失败与加载中（2026-10-20）', () => {
+  it('加载失败：显示错误与「重新加载」，MUST NOT 渲染成"还没有部署记录"', async () => {
+    const wrapper = mount(DeployHistoryList, {
+      props: { items: [], error: { code: 'ADM_STORAGE_UNAVAILABLE' } },
+    })
+
+    expect(wrapper.text()).toContain('部署历史加载失败')
+    expect(wrapper.text()).not.toContain('还没有部署记录')
+    expect(wrapper.find('table').exists()).toBe(false)
+
+    await byText(wrapper, '重新加载')?.trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('加载中：空列表显示"正在加载"，不显示空态', () => {
+    const wrapper = mount(DeployHistoryList, { props: { items: [], loading: true } })
+
+    expect(wrapper.text()).toContain('正在加载部署历史')
+    expect(wrapper.text()).not.toContain('还没有部署记录')
+  })
+})

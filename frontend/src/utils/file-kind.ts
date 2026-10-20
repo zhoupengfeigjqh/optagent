@@ -3,22 +3,28 @@
  *
  * 预览分派与后端 `GET /api/files/preview` 的 Content-Type 映射一一对应
  * （`contracts/backend-api.md` §5.4、`research.md` D12）：
- * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.xlsx` / `.xls` / `.zip` → 回退下载；其余不支持。
+ * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.html` → **沙箱** iframe 内联；
+ * `.xlsx` / `.xls` / `.zip` → 回退下载；其余不支持。
  *
  * 2026-10-13：`.zip` 归入 `download`（数据准备目录现允许 `scenario.data_prep_uploads` 配置 `.zip`，
  * 压缩包无内联预览形态，归下载而非 `unsupported`）。
+ * 2026-10-20：`.html` 归入 `html`（文件空间里点开即渲染，与 PDF 同形态）。它是**用户上传的
+ * 可执行内容**，渲染方 MUST 加 `sandbox`，后端同时下发 `CSP: sandbox` 兜底。
  */
 
 import { MAX_UPLOAD_BYTES } from '../constants/limits'
 
 /** 预览渲染方式。 */
-export type PreviewKind = 'text' | 'pdf' | 'image' | 'download' | 'unsupported'
+export type PreviewKind = 'text' | 'pdf' | 'image' | 'html' | 'download' | 'unsupported'
 
 /** 可内联展示为文本的扩展名。 */
 const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json'])
 
 /** 可内联展示的 PDF 扩展名。 */
 const PDF_EXTENSION = '.pdf'
+
+/** 可沙箱内联展示的 HTML 扩展名（脚本由 `sandbox` 关闭）。 */
+const HTML_EXTENSION = '.html'
 
 /** 可用 <img> 内联展示的图片扩展名（.tif/.tiff 浏览器普遍不支持，归 download）。 */
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -63,6 +69,9 @@ export function resolvePreviewKind(filename: string): PreviewKind {
   }
   if (extension === PDF_EXTENSION) {
     return 'pdf'
+  }
+  if (extension === HTML_EXTENSION) {
+    return 'html'
   }
   if (IMAGE_EXTENSIONS.has(extension)) {
     return 'image'

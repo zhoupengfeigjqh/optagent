@@ -5,7 +5,7 @@
  * **单区域双视图**：右侧 1/3 只有这一个面板，内部在「文件空间列表」与「文件内容」之间互换，
  * 两者不并存、不叠加——避免"文件空间"和"内容预览"各占一块互相挤宽。
  * - `view='list'` → `WorkspaceSpaceTree`（三空间分层，默认全部收起）
- * - `view='content'` → 内联预览（text / pdf / 回退下载 / 错误态，渲染口径与 US7 一致）
+ * - `view='content'` → 内联预览（text / pdf / html / 回退下载 / 错误态，渲染口径与 US7 一致）
  *
  * 破坏性动作只有删除：本组件负责**二次确认**，确认后才向父级上报 `remove`（不自行发请求）。
  *
@@ -310,6 +310,18 @@ useMaximizeEscape({
           class="workspace-panel__frame"
           :src="content.url ?? ''"
           title="PDF 预览"
+        />
+
+        <!-- HTML（用户上传的静态页面，2026-10-20）：与 PDF 同形态内联，
+             但 MUST 加 `sandbox=""`——脚本不执行、不共享本站源，否则等于把文件空间
+             变成存储型 XSS 的入口（后端另有 `CSP: sandbox` 兜底）。 -->
+        <iframe
+          v-else-if="content.renderMode === 'html'"
+          class="workspace-panel__frame"
+          :src="content.url ?? ''"
+          title="HTML 预览"
+          sandbox=""
+          referrerpolicy="no-referrer"
         />
 
         <!-- 图片 -->

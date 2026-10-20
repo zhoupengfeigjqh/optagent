@@ -225,8 +225,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `scenario.data_prep_fields[dir][].name` | string | ✅ | 非空、≤64 字符、不含路径分隔符 / `..`、**同目录内唯一** | 字段名＝上传表的表头名 |
 | `scenario.data_prep_fields[dir][].type` | string | ✅ | ∈ `string` / `integer` / `number` / `boolean` / `object` / `array` | JSON Schema 基本类型的子集（与运行环境同一枚举） |
 | `scenario.data_prep_fields[dir][].required` | boolean | ✅ | MUST 显式为布尔 | `true` = 上传表的表头 MUST 含该字段；`false` = 可选（出现则类型仍须匹配）。不给隐式默认 |
-| `scenario.data_prep_uploads` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为**非空**扩展名数组，项 ∈ 10 项候选；顺序由服务端归一 | **目录级可上传类型白名单**（2026-10-13 新增；2026-10-14 增 `.xls`）：目录名 → 允许上传的扩展名。未配置的目录**不出现**（缺失 ≡ 平台默认 `.csv` + `.xlsx`） |
-| `scenario.data_prep_uploads[dir][]` | string | ✅ | 小写、含前导点；∈ `.xlsx` `.xls` `.csv` `.txt` `.pdf` `.json` `.zip` `.jpg` `.png` `.jpeg`；同目录内不重复；保存时按枚举顺序归一 | 单个允许的扩展名 |
+| `scenario.data_prep_uploads` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为**非空**扩展名数组，项 ∈ 11 项候选；顺序由服务端归一 | **目录级可上传类型白名单**（2026-10-13 新增；2026-10-14 增 `.xls`；2026-10-20 增 `.html`）：目录名 → 允许上传的扩展名。未配置的目录**不出现**（缺失 ≡ 平台默认 `.csv` + `.xlsx`） |
+| `scenario.data_prep_uploads[dir][]` | string | ✅ | 小写、含前导点；∈ `.xlsx` `.xls` `.csv` `.txt` `.pdf` `.json` `.html` `.zip` `.jpg` `.png` `.jpeg`；同目录内不重复；保存时按枚举顺序归一 | 单个允许的扩展名 |
 | `updated_at` | string | ✅ | ISO8601 | — |
 
 每个目录的字段数上限：**50**（`MAX_FIELDS_PER_DIR`，防滥用）。
@@ -312,7 +312,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `operator` | string | 固定 `zyw_admin`（`research.md` D11） |
 | `users` | array | 每个用户：成功/失败、涉及数字人、失败原因 |
 | `validation` | object | 校验结果摘要（含错误项数） |
-| `manifest_diff` | array | 与部署清单不一致的差异（如手工删改过的目录，`FR-032`） |
+| `manifest_diff` | array | **部署前**与运行环境的 agent 级差异（写入前快照，`FR-032`）：`agent_missing_in_runtime` / `agent_unexpected_in_runtime`；部署后即一致，失败用户不产生条目 |
 
 ### 7.4 部署执行语义
 
@@ -324,6 +324,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | 幂等 | 相同内容重复部署结果稳定 | `FR-030` |
 | 原子性 | 临时目录构建 → 校验 → **目录级原子改名**；失败丢弃 | `FR-008`、`research.md` D8 |
 | 生效时机 | 新对话立即生效；进行中的回答不中断，完成当前轮次后切换 | `FR-034` |
+| 删除用户 | **先撤回**该用户的部署（清 `agents/**`、移出清单）**再**删平台记录；`user-data/**` 原样保留；撤回失败则删除失败（不产生孤儿部署） | §6.4、`FR-028` |
 
 ---
 

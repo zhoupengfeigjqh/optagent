@@ -231,9 +231,13 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
       threads.startNew()
       // 012：上传记录属于上一个数字人的数据域，切换即清（终态清空，进行中的按 FR-013 保留）
       uploads.clear()
+      // 后台产出同样是数字人级的（后端按当前作用域定位产出目录）：先清旧条目/旧未读数，
+      // 再按新作用域重拉。铃铛是常驻组件、只在挂载时拉一次，这里不补就一直是上一个数字人的。
+      produced.clear()
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()
+      await produced.refresh()
     },
   })
 

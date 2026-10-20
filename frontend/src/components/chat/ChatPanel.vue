@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
     >
       <!-- 后台产出铃铛（R11）：自带数据与面板，故不走上面对三个按钮的 toggle 通道 -->
       <template #actions-extra>
-        <ProducedBell />
+        <ProducedBell @open-view="onOpenView" />
       </template>
     </ChatHeader>
 

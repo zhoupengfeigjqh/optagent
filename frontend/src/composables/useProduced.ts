@@ -34,6 +34,14 @@ export interface ProducedStore {
   readonly unreadCount: ComputedRef<number>
   /** 拉取列表（打开页面 / 收到信号 / 手动刷新） */
   refresh(): Promise<void>
+  /**
+   * 清空列表与未读（**切换数字人时**调用）。
+   *
+   * 产出清单是**数字人级**的（后端按当前作用域定位目录），切人后旧条目一律不再成立；
+   * 清空的另一重作用是让在途的旧请求失效（见 `generation`），避免旧响应晚到后把
+   * 新数字人的列表覆盖回去。
+   */
+  clear(): void
   /** 批量标记已读（幂等）；成功后**就地**改本地状态，不重拉列表 */
   markRead(jobIds: readonly string[]): Promise<void>
   /**
@@ -58,20 +66,40 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
   /** 当前订阅的退订函数；`null` = 未订阅（`start()` 的幂等判据） */
   let unsubscribe: (() => void) | null = null
 
+  /**
+   * 请求代际（**切换数字人必须重拉**，见 `clear()`）。
+   *
+   * 后端清单按"当前选中数字人"定位目录，切人瞬间在途的旧请求可能晚于新请求返回；
+   * 只有最新一代的响应允许写回状态，否则旧数字人的列表会覆盖新数字人的。
+   */
+  let generation = 0
+
   const unreadCount = computed(
     () => items.value.filter((item) => item.read_at === undefined).length,
   )
 
   async function refresh(): Promise<void> {
+    const token = ++generation
     loading.value = true
     error.value = null
     try {
-      items.value = (await options.produced.list(options.limit)).items
+      const next = (await options.produced.list(options.limit)).items
+      if (token !== generation) return
+      items.value = next
     } catch (err) {
+      if (token !== generation) return
       error.value = toErrorInfo(err)
     } finally {
-      loading.value = false
+      if (token === generation) loading.value = false
     }
+  }
+
+  function clear(): void {
+    // 自增即作废旧代际：在途请求返回后一律丢弃（含它 finally 里的 loading 归位）
+    generation++
+    items.value = []
+    error.value = null
+    loading.value = false
   }
 
   /**
@@ -92,14 +120,17 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
       (item) => wanted.has(item.job_id) && item.read_at === undefined,
     )
     if (pending.length === 0) return
+    // 代际快照：请求期间若切了数字人（`clear()`），旧条目的已读回写一律丢弃
+    const token = generation
     try {
       const { marked } = await options.produced.markRead(pending.map((item) => item.job_id))
-      if (marked === 0) return
+      if (marked === 0 || token !== generation) return
       const at = new Date().toISOString()
       items.value = items.value.map((item) =>
         wanted.has(item.job_id) && item.read_at === undefined ? { ...item, read_at: at } : item,
       )
     } catch (err) {
+      if (token !== generation) return
       error.value = toErrorInfo(err)
     }
   }
@@ -125,7 +156,7 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
     }
   }
 
-  return { items, loading, error, unreadCount, refresh, markRead, text, start, stop }
+  return { items, loading, error, unreadCount, refresh, clear, markRead, text, start, stop }
 }
 
 /** 组件内取用（经 `provide/inject` 的会话上下文）。 */

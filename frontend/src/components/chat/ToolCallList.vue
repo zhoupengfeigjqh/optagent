@@ -35,6 +35,7 @@ import {
   type ToolCallItem,
 } from '../../utils/tool-calls'
 import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import ProducedJsonView from './ProducedJsonView.vue'
 
 const props = withDefaults(
@@ -53,6 +54,16 @@ const props = withDefaults(
   }>(),
   { loadResult: undefined, live: false },
 )
+
+const emit = defineEmits<{
+  /**
+   * 结果正文里的视图链接点击（2026-10-20）：向上透传给装配层。
+   *
+   * 与入口行同一出口（`ChatPanel` 的 `openView`）——同源进右侧面板、异源新标签页。
+   * 本组件不做同源判定，只负责"把点击意图带出去"。
+   */
+  'open-view': [item: ViewLinkTarget]
+}>()
 
 const panels = useToolPanels()
 
@@ -256,7 +267,10 @@ function toggleRaw(item: ToolCallItem): void {
               v-if="parsedOf(item).structured && !panelOf(item).raw"
               class="tool-call__structured"
             >
-              <ProducedJsonView :value="parsedOf(item).value" />
+              <ProducedJsonView
+                :value="parsedOf(item).value"
+                @open-view="emit('open-view', $event)"
+              />
             </div>
             <pre v-else class="tool-call__content">{{ displayContent(item) }}</pre>
             <p v-if="parsedOf(item).hint" class="tool-call__hint">{{ parsedOf(item).hint }}</p>

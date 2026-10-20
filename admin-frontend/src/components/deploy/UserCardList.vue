@@ -34,6 +34,8 @@ const emit = defineEmits<{
   (e: 'update:page', value: number): void
   (e: 'toggle', userId: string, checked: boolean): void
   (e: 'clear'): void
+  /** 用户已删除（2026-10-20）：父级据此把它从部署勾选里摘掉 */
+  (e: 'removed', userId: string): void
   (e: 'changed'): void
   (e: 'announce', text: string): void
 }>()
@@ -124,7 +126,11 @@ async function confirmDelete(): Promise<void> {
   localError.value = null
   try {
     await deleteUser(target.user_id)
-    emit('announce', `用户 ${target.user_id} 已从平台删除（运行环境数据目录不受影响）`)
+    emit(
+      'announce',
+      `用户 ${target.user_id} 已从平台删除：数字人已撤回（随即失去能力），文件空间内容保留`,
+    )
+    emit('removed', target.user_id)
     emit('changed')
   } catch (err) {
     localError.value = err as ErrorInfo
@@ -282,7 +288,7 @@ async function confirmWithdraw(): Promise<void> {
     <ConfirmDialog
       :open="pendingDelete !== null"
       title="删除该用户？"
-      message="仅删除平台侧的用户记录，不会删除运行环境中该用户的数据目录（文件空间内容一律保留）。"
+      message="删除平台侧用户记录，并撤回该用户在运行环境中的数字人（这些数字人随即失去能力）；用户文件空间的内容一律保留。"
       confirm-label="删除"
       danger
       @update:open="

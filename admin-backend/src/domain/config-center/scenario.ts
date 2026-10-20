@@ -45,6 +45,7 @@ export const DATA_PREP_UPLOAD_EXTS = [
   '.txt',
   '.pdf',
   '.json',
+  '.html',
   '.zip',
   '.jpg',
   '.png',

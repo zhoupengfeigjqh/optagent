@@ -30,13 +30,20 @@ export function useDeploy() {
   const validated = ref(false)
   const result = shallowRef<DeployResult | null>(null)
   const error = ref<ErrorInfo | null>(null)
+  /** 勾选列表里已被删除的用户（`details.user_ids`）：整批 404 时用于指出是哪些人 */
+  const unknownUserIds = ref<string[]>([])
 
-  /** 读取当前版本（页面进入、以及每次部署后刷新，避免下一次调用版本冲突） */
-  async function loadRevision(): Promise<void> {
+  /**
+   * 读取当前版本（页面进入、以及每次部署后刷新，避免下一次调用版本冲突）。
+   *
+   * `silent`：失败时不覆盖 `error`——部署失败后刷新版本属于收尾动作，
+   * 不能把"部署为什么失败"替换成"版本读取失败"（2026-10-20）。
+   */
+  async function loadRevision(options?: { silent?: boolean }): Promise<void> {
     try {
       revision.value = (await fetchManifest()).revision
     } catch (err) {
-      error.value = toErrorInfo(err)
+      if (!options?.silent) error.value = toErrorInfo(err)
     }
   }
 
@@ -59,6 +66,7 @@ export function useDeploy() {
     }
     validating.value = true
     error.value = null
+    unknownUserIds.value = []
     try {
       const res = await validateDeploy(userIds)
       validationErrors.value = res.errors
@@ -78,19 +86,23 @@ export function useDeploy() {
     if (revision.value === null) await loadRevision()
     deploying.value = true
     error.value = null
+    unknownUserIds.value = []
     try {
       result.value = await runDeployApi(userIds, revision.value ?? 0)
       validationErrors.value = []
       validated.value = false
-      // 部署可能改变 revision（清单/历史写入），刷新以便下次调用不冲突
+      // 部署本身不改 revision，但仍刷新一次：拿到的是"当前最新"，下次调用不会被陈旧版本卡住
       await loadRevision()
       return true
     } catch (err) {
       error.value = toErrorInfo(err)
-      // 校验类失败：把 details.errors 一次列全（SC-020）
+      // 校验类失败：把 details.errors 一次列全（SC-020）；未知用户：把名单列出来
       const details = (err as { details?: unknown }).details as
-        { errors?: DeployValidationError[] } | undefined
+        { errors?: DeployValidationError[]; user_ids?: string[] } | undefined
       if (details?.errors) validationErrors.value = details.errors
+      unknownUserIds.value = Array.isArray(details?.user_ids) ? details.user_ids : []
+      // 失败原因可能正是"版本已被他处修改"：静默刷新，保证同页重试时用的是最新版本
+      await loadRevision({ silent: true })
       return false
     } finally {
       deploying.value = false
@@ -105,6 +117,7 @@ export function useDeploy() {
     validated,
     result,
     error,
+    unknownUserIds,
     loadRevision,
     invalidateValidation,
     validate,

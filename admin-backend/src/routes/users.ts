@@ -6,8 +6,11 @@
  * 并在卡片上显示**部署状态**（`deployed_at`，取自部署清单；`null` = 尚未部署）。
  * 部署对象就在这一页勾选（2026-09-16 十一次调整）。
  *
- * `DELETE` 只删平台侧用户，**不删除** `.opt-agent/` 中该用户的数据目录
- * （受 `FR-028` 约束）；实际清理由后续"部署生效"按部署清单语义决定。
+ * `DELETE`（2026-10-20 修订）：**先撤回该用户的部署**（清 `agents/**`、移出清单），
+ * 再删平台侧记录。文件空间（`user-data/**`）一律保留（`FR-028`）。
+ *
+ * 顺序不能颠倒：撤回失败时用户仍在平台，管理员可重试；若先删平台记录，就再没有
+ * 入口能把该用户从运行环境清掉——遗留的部署会继续对外提供服务。
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -77,6 +80,10 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   app.delete('/api/admin/users/:user_id', async (req, reply) => {
     const { user_id: userId } = req.params as { user_id: string };
+    // 不存在 → 404（先读一次，避免对未知目录做写操作）
+    ctx.users.read(userId);
+    // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
+    ctx.deployer.purgeUser(userId);
     ctx.users.remove(userId);
     return reply.status(204).send();
   });

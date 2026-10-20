@@ -8,7 +8,8 @@
  * 就永不恢复——即"刷新后卡片消失、点其它会话却能看到"。
  *
  * 009 追加：**切换数字人的收尾编排**（`onSwitched`）＝ 进入空对话视图（`startNew`）→
- * 重取会话列表 → 重取文件空间；且全程 **MUST NOT** 创建空会话。
+ * 重取会话列表 → 重取文件空间 → 重取后台产出（铃铛是常驻组件，不重取就会一直显示上一个
+ * 数字人的记录）；且全程 **MUST NOT** 创建空会话。
  */
 import { describe, expect, it } from 'vitest'
 
@@ -107,6 +108,7 @@ function makeSwitchSession() {
       }
       if (url.includes('/api/threads')) return respond([])
       if (url.includes('/api/files/workspace')) return respond({ spaces: [] })
+      if (url.includes('/api/produced')) return respond({ items: [] })
       return respond({})
     }) as unknown as typeof fetch,
   })
@@ -126,10 +128,12 @@ describe('切换数字人 → 进入新的空对话视图（009 FR-010/FR-022）
     await settle()
 
     const after = requests.slice(before)
-    // 选中 + 重新读取当前数字人详情/状态 + 会话列表 + 文件空间
+    // 选中 + 重新读取当前数字人详情/状态 + 会话列表 + 文件空间 + 后台产出
     expect(after.some((item) => item.method === 'POST' && item.url.includes('/select'))).toBe(true)
     expect(after.some((item) => item.url.includes('/api/threads'))).toBe(true)
     expect(after.some((item) => item.url.includes('/api/files/workspace'))).toBe(true)
+    // 产出清单按数字人隔离：切换后必须重拉，否则铃铛一直显示上一个数字人的记录
+    expect(after.some((item) => item.url.includes('/api/produced'))).toBe(true)
 
     // MUST NOT 落盘空会话：没有任何创建会话的 POST
     expect(

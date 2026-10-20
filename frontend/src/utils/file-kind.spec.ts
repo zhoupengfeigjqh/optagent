@@ -43,6 +43,11 @@ describe('resolvePreviewKind', () => {
     expect(resolvePreviewKind('季度报告.pdf')).toBe('pdf')
   })
 
+  it('2026-10-20：.html → 沙箱 iframe 内联（HTML 预览，与 PDF 同形态）', () => {
+    expect(resolvePreviewKind('看板.html')).toBe('html')
+    expect(resolvePreviewKind('REPORT.HTML')).toBe('html')
+  })
+
   it.each(['a.jpg', 'a.jpeg', 'a.png', 'a.bmp', 'a.webp', 'a.gif'])('%s → 图片内联', (filename) => {
     expect(resolvePreviewKind(filename)).toBe('image')
   })

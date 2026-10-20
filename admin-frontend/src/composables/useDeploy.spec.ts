@@ -140,6 +140,43 @@ describe('useDeploy', () => {
     expect(d.error.value?.code).toBe('ADM_DEPLOY_TARGET_NOT_WRITABLE')
   })
 
+  it('2026-10-20：部署失败后**刷新版本**，同页重试不会再用陈旧 revision', async () => {
+    fetchManifest
+      .mockResolvedValueOnce({ items: [], total: 0, revision: 7 }) // deploy 前读取
+      .mockResolvedValueOnce({ items: [], total: 0, revision: 9 }) // 失败后静默刷新
+    deployApi.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })
+    const d = useDeploy()
+
+    expect(await d.deploy(['admin'])).toBe(false)
+    expect(d.revision.value).toBe(9)
+    expect(d.error.value?.code).toBe('ADM_CONFIG_REVISION_CONFLICT')
+  })
+
+  it('2026-10-20：失败后刷新版本**失败**也不覆盖原始错误（错误原因不能被"读取失败"顶掉）', async () => {
+    fetchManifest
+      .mockResolvedValueOnce({ items: [], total: 0, revision: 7 })
+      .mockRejectedValueOnce({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
+    deployApi.mockRejectedValue({ code: 'ADM_DEPLOY_TARGET_NOT_WRITABLE', message: 'x' })
+    const d = useDeploy()
+
+    expect(await d.deploy(['admin'])).toBe(false)
+    expect(d.error.value?.code).toBe('ADM_DEPLOY_TARGET_NOT_WRITABLE')
+  })
+
+  it('2026-10-20：整批 404 时把 `details.user_ids` 暴露给界面（指出是哪几个用户）', async () => {
+    deployApi.mockRejectedValue({
+      code: 'ADM_USER_NOT_FOUND',
+      message: 'x',
+      details: { user_ids: ['ghost1', 'ghost2'] },
+    })
+    const d = useDeploy()
+    await d.loadRevision()
+
+    expect(await d.deploy(['admin', 'ghost1', 'ghost2'])).toBe(false)
+    expect(d.unknownUserIds.value).toEqual(['ghost1', 'ghost2'])
+    expect(d.error.value?.code).toBe('ADM_USER_NOT_FOUND')
+  })
+
   it('清单不可得时部署以 revision=0 提交（交由后端以版本冲突拒绝，而不是静默用旧版本）', async () => {
     fetchManifest.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'x' })
     deployApi.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })

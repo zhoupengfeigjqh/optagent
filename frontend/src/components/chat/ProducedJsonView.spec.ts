@@ -9,12 +9,14 @@
  * 4. **不裸奔**：空容器、null 都给可读占位（不留白）。
  */
 import { mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { describe, expect, it } from 'vitest'
 import {
   PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_DEPTH,
   PRODUCED_TABLE_MAX_COLUMNS,
 } from '../../utils/produced-content'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import ProducedJsonView from './ProducedJsonView.vue'
 
 function mountView(value: unknown, props: Record<string, unknown> = {}) {
@@ -204,5 +206,63 @@ describe('ProducedJsonView —— 视图链接（viewUrl，TR-40 / TR-41）', ()
       'status',
       'message',
     ])
+  })
+})
+
+describe('ProducedJsonView —— 视图链接的点击口径（2026-10-20）', () => {
+  const ORIGIN = window.location.origin
+
+  /**
+   * 用宿主组件接线（等价于装配层写 `@open-view`），并收集载荷。
+   *
+   * 不用 `mount(Comp, { attrs })`：VTU 不会把未声明的 `onXxx` 塞进 `vnode.props`，
+   * 于是监听器根本没接上——那测的是 VTU 的挂载方式，不是真实接线。
+   */
+  function mountWired(value: unknown) {
+    const received: ViewLinkTarget[] = []
+    const Host = defineComponent({
+      render: () =>
+        h(ProducedJsonView, {
+          value,
+          onOpenView: (item: ViewLinkTarget) => received.push(item),
+        }),
+    })
+    return { wrapper: mount(Host), received }
+  }
+
+  /** 派发一个真实左键点击，返回事件（用于断言 `defaultPrevented`） */
+  function click(link: { element: Element }, init: MouseEventInit = {}): MouseEvent {
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init })
+    link.element.dispatchEvent(event)
+    return event
+  }
+
+  it('普通左键 → 拦截导航 + 派发 open-view（同源判定交给上层）', () => {
+    const { wrapper, received } = mountWired({ viewUrl: '/datasource/x' })
+
+    const event = click(wrapper.find('.produced-json__link'))
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(received).toEqual([
+      { url: `${ORIGIN}/datasource/x`, name: '/datasource/x', kind: 'url' },
+    ])
+  })
+
+  it('修饰键点击（Ctrl / Meta）不拦截：用户明确要新标签', () => {
+    const { wrapper, received } = mountWired({ viewUrl: '/datasource/x' })
+    const link = wrapper.find('.produced-json__link')
+
+    expect(click(link, { ctrlKey: true }).defaultPrevented).toBe(false)
+    expect(click(link, { metaKey: true }).defaultPrevented).toBe(false)
+    expect(received).toEqual([])
+  })
+
+  it('表格单元格里的 viewUrl 同样派发（任意层级生效）', () => {
+    const { wrapper, received } = mountWired({ rows: [{ viewUrl: '/a/b' }] })
+
+    const event = click(wrapper.find('tbody .produced-json__link'))
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(received).toEqual([{ url: `${ORIGIN}/a/b`, name: '/a/b', kind: 'url' }])
   })
 })

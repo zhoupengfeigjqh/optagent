@@ -45,7 +45,8 @@ export interface GrepResult {
 }
 
 const READABLE_DIRS: readonly string[] = SPACES;
-const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
+/** grep 可扫描的文本类型（2026-10-20 增 `.html`：与 `read_file` 的可读集合对齐） */
+const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log', '.html']);
 
 export interface FileAccessOptions {
   optAgentRoot: string;

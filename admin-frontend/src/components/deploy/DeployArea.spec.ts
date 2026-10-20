@@ -8,6 +8,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DeployArea from './DeployArea.vue'
+import UserCardList from './UserCardList.vue'
 import type { UserListItem } from '../../api/types'
 
 const httpGet = vi.fn()
@@ -173,5 +174,34 @@ describe('DeployArea —— 勾选部署对象', () => {
     await flushPromises()
 
     expect(fetchDeployHistoryMock).toHaveBeenCalledWith(100)
+  })
+})
+
+describe('DeployArea —— 历史加载失败与勾选剪枝（2026-10-20）', () => {
+  it('历史加载失败：切到历史分区显示错误，不显示"还没有部署记录"', async () => {
+    fetchDeployHistoryMock.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE' })
+    const wrapper = mountArea()
+    await flushPromises()
+
+    await byText(wrapper, '部署历史')?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('部署历史加载失败')
+    expect(wrapper.text()).not.toContain('还没有部署记录')
+  })
+
+  it('用户被删除后从勾选里摘掉（否则带着已不存在的用户去部署会整批 404）', async () => {
+    const wrapper = mountArea()
+    await flushPromises()
+
+    await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('已选用户：admin')
+
+    wrapper.findComponent(UserCardList).vm.$emit('removed', 'admin')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('尚未选择用户')
+    expect(wrapper.findAll('input[type="checkbox"]')[0]!.element).toMatchObject({ checked: false })
   })
 })

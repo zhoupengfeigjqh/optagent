@@ -120,7 +120,15 @@ function diffText(diff: Record<string, unknown>): string {
       <span v-else-if="!d.validated.value" class="muted">请先执行校验预检</span>
     </div>
 
-    <ErrorNotice :error="d.error.value" title="部署未完成" />
+    <ErrorNotice :error="d.error.value" title="部署未完成">
+      <!-- 整批 404 的原因必须可定位：`ADM_USER_NOT_FOUND` 的文案是通用码，
+           具体是哪几个用户由服务端 `details.user_ids` 下发（2026-10-20） -->
+      <p v-if="d.unknownUserIds.value.length > 0" class="deploy-panel__unknown">
+        勾选列表中已不存在的用户：
+        <span class="mono">{{ d.unknownUserIds.value.join('、') }}</span>
+        。请取消勾选后重新校验。
+      </p>
+    </ErrorNotice>
 
     <!-- 校验结果：一次性列出全部错误项（SC-020） -->
     <div v-if="d.validated.value" class="deploy-panel__validation" role="status" aria-live="polite">
@@ -236,5 +244,10 @@ function diffText(diff: Record<string, unknown>): string {
 
 .deploy-panel__error {
   color: var(--color-status-error);
+}
+
+.deploy-panel__unknown {
+  margin: 0;
+  font-size: var(--font-size-sm);
 }
 </style>

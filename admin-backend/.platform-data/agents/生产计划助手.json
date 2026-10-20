@@ -65,12 +65,12 @@
     "grep_skill"
   ],
   "mcp_services": [
-    "hd-algorithm",
-    "ocr"
+    "hd-algorithm"
   ],
   "skills": [
     "调度算法"
   ],
+  "ontologies": [],
   "scenario": {
     "scenario": "海大计划",
     "data_prep_dirs": [
@@ -287,5 +287,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-17T08:44:47.619Z"
+  "updated_at": "2026-10-20T05:32:45.331Z"
 }

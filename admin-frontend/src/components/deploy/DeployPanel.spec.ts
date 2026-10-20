@@ -159,6 +159,26 @@ describe('DeployPanel', () => {
     expect(wrapper.emitted('deployed')).toHaveLength(1)
   })
 
+  it('2026-10-20：整批 404 时列出"已不存在的用户"名单（只有错误码无法定位）', async () => {
+    validateDeploy.mockResolvedValue({ passed: true, errors: [] })
+    deployApi.mockRejectedValue({
+      code: 'ADM_USER_NOT_FOUND',
+      message: '用户不存在：ghost',
+      details: { user_ids: ['ghost'] },
+    })
+    const wrapper = mountPanel(['admin', 'ghost'])
+    await flushPromises()
+
+    await validateButton(wrapper)?.trigger('click')
+    await flushPromises()
+    await deployButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('用户不存在')
+    expect(wrapper.text()).toContain('勾选列表中已不存在的用户')
+    expect(wrapper.text()).toContain('ghost')
+  })
+
   it('部署失败（409）时把 details.errors 一次列全', async () => {
     validateDeploy.mockResolvedValue({ passed: true, errors: [] })
     deployApi.mockRejectedValue({

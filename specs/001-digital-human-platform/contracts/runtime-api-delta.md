@@ -89,10 +89,10 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 
 | `name` | `label` | `writable` | `description_template` |
 |---|---|---|---|
-| `read_file` | 读取文件 | `false` | 读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.txt/.json/.pdf/.md/.log；xlsx 自动转 CSV，pdf 提取文本层。大文件返回截断内容，可用 offset 继续分段读取。参数 path 为相对空间的路径，如 "{示例路径}"。 |
+| `read_file` | 读取文件 | `false` | 读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；xlsx/xls 自动转 CSV，pdf 提取文本层，html 按原文读取（不渲染、不执行脚本）。大文件返回截断内容，可用 offset 继续分段读取。参数 path 为相对空间的路径，如 "{示例路径}"。 |
 | `write_file` | 写入临时文件 | **`true`** | 把内容写入临时空间，文件名会自动要求以 "{会话标识}_" 开头。数据准备与共享空间为只读，写入会被拒绝。写成功后可用路径 临时空间/{filename} 告知用户下载。 |
 | `list_dir` | 列目录 | `false` | 列出指定目录的文件（名称/大小/更新时间）。目录限：{可用目录}。 |
-| `grep_files` | 检索文件内容 | `false` | 在文本类文件（.csv/.txt/.json/.md/.log）中按正则检索关键词；xlsx/pdf 会被跳过（请改用 read_file）。可指定目录，缺省检索全部开放目录。 |
+| `grep_files` | 检索文件内容 | `false` | 在文本类文件（.csv/.txt/.json/.md/.log/.html）中按正则检索关键词；xlsx/xls/pdf 会被跳过（请改用 read_file）。可指定目录，缺省检索全部开放目录。 |
 | `calculator` | 计算器 | `false` | 计算数学表达式。支持 + - * / % ^、括号、sqrt/abs/round/floor/ceil/min/max/pow 函数与常量 pi/e。 |
 | `read_skill` | 读取技能文件 | `false` | 读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），也可读 references/ 等其他文档（如 "references/算法详解.md"）；path 为目录时返回该目录下的文件清单。技能名取自系统提示中的「技能」小节。仅文本文件；内容过大时返回截断片段，可用 offset 继续读。 |
 | `grep_skill` | 检索技能内容 | `false` | 在本数字人所配置技能的文件（SKILL.md 与 references/ 等）中按正则检索关键词，返回「技能名/文件路径:行号: 内容」，路径可直接回填给 read_skill；省略 skill 则检索全部技能。技能名取自系统提示中的「技能」小节。xlsx/pdf 等二进制会被跳过（请改用 read_skill）。 |
@@ -206,13 +206,15 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 }
 ```
 
-**目录级可上传类型（`data_prep_uploads`，2026-10-13 新增；2026-10-14 候选增 `.xls`）**：值为**非空**扩展名数组，项 ∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.zip` / `.jpg` / `.png` / `.jpeg`；键 MUST 在 `data_prep_dirs` 内，只出现被配置的目录（缺失 ≡ 平台默认 `.csv` + `.xlsx`）。运行环境解析口径见 `parseScenarioUploads`：整体非对象 / 孤儿键 / 值非数组或空数组 / 项非法（非字符串、空串、不在候选枚举内）⇒ **逐项丢弃 + 告警**，该目录回落平台默认；上传校验与 `workspace` 下发共用 `uploadExtensionsOf` 作为**该目录可上传类型的唯一来源**。
+**目录级可上传类型（`data_prep_uploads`，2026-10-13 新增；2026-10-14 候选增 `.xls`；2026-10-20 候选增 `.html`）**：值为**非空**扩展名数组，项 ∈ `.xlsx` / `.xls` / `.csv` / `.txt` / `.pdf` / `.json` / `.html` / `.zip` / `.jpg` / `.png` / `.jpeg`；键 MUST 在 `data_prep_dirs` 内，只出现被配置的目录（缺失 ≡ 平台默认 `.csv` + `.xlsx`）。运行环境解析口径见 `parseScenarioUploads`：整体非对象 / 孤儿键 / 值非数组或空数组 / 项非法（非字符串、空串、不在候选枚举内）⇒ **逐项丢弃 + 告警**，该目录回落平台默认；上传校验与 `workspace` 下发共用 `uploadExtensionsOf` 作为**该目录可上传类型的唯一来源**。
 
 **运行环境读取口径**（`agent-backend/src/domain/dirs.ts` 的 `parseScenarioFields`）：运行环境是**消费方**，非法内容一律**丢弃并告警**，MUST NOT 因此让整个场景不可用。丢弃判据：整体非对象 / 某目录值非数组 / 项非对象 / 字段名非法（空、含分隔符或 `..`、超 64 字符）/ 类型不在枚举内 / `required` 非布尔 / 同目录内重名（留首个）/ 目录不在**有效目录清单**内（孤儿约束）。空清单的目录**不写入结果**——`data_prep_fields` 缺失或某目录无键 = **该目录无约束**；本字段是后加的，历史 `scenario.json` 自然按"无约束"处理（零迁移）。
 
 **字段取值类型**：`string` / `integer` / `number` / `boolean` / `object` / `array`（JSON Schema 基本类型子集；与平台设计态、管理界面**同一枚举**，三处 MUST 同步）。
 
 **可上传类型**：数据准备的**每个二级目录**可有各自的允许类型（由数字人配置 `scenario.data_prep_uploads` 下发，缺省为 `.csv` / `.xlsx`）；共享空间与临时空间仍取 `SPACE_POLICIES`（与改造前一致）。
+
+**内联预览（2026-10-20 补登 `.html`）**：`GET /api/files/preview` 的 Content-Type 映射新增 `.html` → `text/html; charset=utf-8`（`inline`），前端在右侧面板以 `<iframe>` 呈现，形态与 `.pdf` 一致。**安全约束（MUST）**：`.html` 是用户上传的可执行内容，预览响应 MUST 带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`（脚本不执行、不共享平台源），前端 iframe MUST 加 `sandbox=""`；签名直链 `GET /api/files/raw` 对 `.html` 同样处理。因为无法内联的复杂页面会白屏，`.html` 预览失败（404 / 413）仍按错误态给下载入口。
 
 **字段约束适用范围**：**仅对 `.csv` 与 `.xlsx` 生效**；其他类型（含经白名单允许的 `.txt` / `.pdf` / `.json` / `.zip` / 图片）与**未声明字段约束的目录**一律**跳过表结构校验**——避免用"缺少必填表头"去描述一个本没有表头的文件。判定落点为 `agent-backend/src/domain/field-check.ts` 的 `supportsFieldCheck(ext)`（唯一判据）。
 

@@ -54,7 +54,34 @@ const PREVIEW_CONTENT_TYPES: Record<string, string> = {
   '.gif': 'image/gif',
   '.tif': 'image/tiff',
   '.tiff': 'image/tiff',
+  // 2026-10-20：用户上传的 `.html` 可内联（文件空间里点开即渲染，与 PDF 同形态），
+  // 但**必须沙箱化**——它会在本站源下执行脚本，见 `appendHtmlSecurityHeaders`
+  '.html': 'text/html; charset=utf-8',
 };
+
+/** 需要在同源下执行脚本的预览类型（目前只有用户上传的 HTML） */
+const SCRIPTABLE_PREVIEW_EXT = '.html';
+
+/**
+ * 给用户上传的 HTML 响应补安全头（内联预览与 `raw` 直链**共用**）。
+ *
+ * 不加这两条的后果：上传一个带 `<script>` 的 HTML，点开预览就等于在平台源上执行它
+ * （读取本站 Cookie / 存储、调用本站接口）——即"存储型 XSS 的入口"。
+ *
+ * - `Content-Security-Policy: sandbox`：把文档降为**唯一不透明源**且**不执行脚本**
+ *   （等价于 iframe 的 `sandbox=""`），CSS 与图片照常渲染；
+ * - `X-Content-Type-Options: nosniff`：禁止浏览器把被声明为 HTML 的内容再猜成别的类型。
+ *
+ * 前端 iframe 另有 `sandbox=""` 作为第二道保险（双保险不冲突）。
+ */
+function appendHtmlSecurityHeaders(
+  reply: { header(key: string, value: string): unknown },
+  ext: string,
+): void {
+  if (ext !== SCRIPTABLE_PREVIEW_EXT) return;
+  reply.header('content-security-policy', 'sandbox');
+  reply.header('x-content-type-options', 'nosniff');
+}
 
 const listQuerySchema = {
   type: 'object',
@@ -181,10 +208,12 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
           )
           .send(buf);
       }
-      return reply
+      const inline = reply
         .header('content-type', contentType)
-        .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
-        .send(buf);
+        .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      // `.html`：沙箱化后内联（脚本不执行、不共享本站源）
+      appendHtmlSecurityHeaders(inline, ext);
+      return inline.send(buf);
     },
   );
 
@@ -295,10 +324,12 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw err;
     }
     const ext = path.extname(p).toLowerCase();
-    return reply
+    const raw = reply
       .header('content-type', PREVIEW_CONTENT_TYPES[ext] ?? 'application/octet-stream')
-      .header('cache-control', 'no-store')
-      .send(buf);
+      .header('cache-control', 'no-store');
+    // 直链同样可能被浏览器**直接打开**：`.html` 不沙箱化就是一次同源 XSS
+    appendHtmlSecurityHeaders(raw, ext);
+    return raw.send(buf);
   });
 
   // 三空间工作空间汇总（003 改造）：空间 → 子目录 → 文件，附每空间策略

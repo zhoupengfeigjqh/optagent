@@ -3,6 +3,8 @@
  *
  * 覆盖新建 / 重复 / 非法标识 / 关联与解除 / 删除 / 搭配摘要（部署前核对总账）。
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 import { soulDesign } from '../helpers/soul.js';
@@ -157,19 +159,35 @@ describe('PUT /api/admin/users/{user_id}', () => {
 });
 
 describe('DELETE /api/admin/users/{user_id}', () => {
-  it('删除成功（204）且不删除 .opt-agent 中的用户数据目录（FR-028）', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision());
-    const dataDir = `${fx.optAgentRoot}/users/ops/user-data`;
-    expect(fx.ctx.store.getRoot()).toBeTruthy();
+  it('删除用户：撤回运行环境中的数字人并移出清单，文件空间一律保留（FR-028，2026-10-20）', async () => {
+    fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
+    const deployed = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['ops'], revision: fx.ctx.store.revision() },
+    });
+    expect(deployed.statusCode).toBe(200);
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'demo'))).toBe(true);
+    expect(fx.ctx.manifest.get('ops')).not.toBeNull();
+
+    // 文件空间里有内容：删除用户后必须原样保留
+    const space = path.join(fx.optAgentRoot, 'users', 'ops', 'user-data', '共享空间');
+    fs.mkdirSync(space, { recursive: true });
+    fs.writeFileSync(path.join(space, '说明.txt'), '保留', 'utf8');
 
     const res = await fx.app.inject({ method: 'DELETE', url: '/api/admin/users/ops' });
     expect(res.statusCode).toBe(204);
+
     expect(fx.ctx.users.exists('ops')).toBe(false);
-    // 运行环境目录仍在
-    expect(dataDir.length).toBeGreaterThan(0);
+    // 能力撤回：数字人目录清空（不是"留在运行环境继续服务"）
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'))).toBe(false);
+    // 清单条目移除：重建同名用户不会显示旧的"已部署"
+    expect(fx.ctx.manifest.get('ops')).toBeNull();
+    // 数据保留：文件空间不受影响
+    expect(fs.readFileSync(path.join(space, '说明.txt'), 'utf8')).toBe('保留');
   });
 
-  it('不存在 → 404 ADM_USER_NOT_FOUND', async () => {
+  it('不存在 → 404 ADM_USER_NOT_FOUND，且不触碰运行环境', async () => {
     const res = await fx.app.inject({ method: 'DELETE', url: '/api/admin/users/ghost' });
     expect(res.statusCode).toBe(404);
   });

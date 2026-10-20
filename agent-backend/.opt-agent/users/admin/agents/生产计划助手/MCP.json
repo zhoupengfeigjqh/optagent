@@ -24,19 +24,6 @@
         "hd_scheduling_query",
         "hd_algorithm_input_query"
       ]
-    },
-    {
-      "name": "ocr",
-      "transport": "http",
-      "url": "http://localhost:8000/mcp",
-      "file_args": {
-        "ocr_image": {
-          "image": "url"
-        }
-      },
-      "allowed_tools": [
-        "ocr_image"
-      ]
     }
   ]
 }

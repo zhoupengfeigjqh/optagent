@@ -11,7 +11,7 @@
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
 | `scenario.data_prep_uploads` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为**非空**字符串数组 | **本次新增**：目录名 → 允许上传的扩展名清单。**只出现被配置的目录**（未配置的目录不出现，缺失≡"用平台默认"） |
-| `scenario.data_prep_uploads[dir][]` | string | ✅ | 小写、含前导点；∈ `.xlsx` `.csv` `.txt` `.pdf` `.json` `.zip` `.jpg` `.png` `.jpeg`；同目录内**不重复**；服务端保存时按枚举顺序归一 | 单个允许的扩展名 |
+| `scenario.data_prep_uploads[dir][]` | string | ✅ | 小写、含前导点；∈ `.xlsx` `.xls` `.csv` `.txt` `.pdf` `.json` `.html` `.zip` `.jpg` `.png` `.jpeg`；同目录内**不重复**；服务端保存时按枚举顺序归一 | 单个允许的扩展名 |
 
 **归一化规则（保存时，权威在 `admin-backend`）**：
 

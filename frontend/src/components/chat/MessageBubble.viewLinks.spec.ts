@@ -111,4 +111,15 @@ describe('MessageBubble —— 入口点击向上透传（2026-10-15）', () => 
     // 不再是"直跳新窗口"的 open-link 口径（地址可能是同源页面或本地文件）
     expect(wrapper.emitted('open-link')).toBeUndefined()
   })
+
+  it('工具卡片展开后的 viewUrl 也走同一条 open-view 出口（2026-10-20）', async () => {
+    const wrapper = mountBubble({ tool_calls: [call({ content: '{"viewUrl":"/a/b"}' })] })
+
+    await wrapper.find('.tool-call__head').trigger('click')
+    await wrapper.find('.produced-json__link').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([
+      [{ url: `${ORIGIN}/a/b`, name: '/a/b', kind: 'url' }],
+    ])
+  })
 })

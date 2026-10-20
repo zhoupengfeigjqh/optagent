@@ -227,6 +227,29 @@ describe('openFile —— 内容态分派与错误态（FR-048 / V-11）', () =>
     expect(store.content.value?.renderMode).toBe('error')
     expect(store.content.value?.url).toContain('/api/files/download')
   })
+
+  it('2026-10-20：.html 与 PDF 同路径 —— 先预检，再给 iframe 直链', async () => {
+    const files = filesStub()
+    const store = createPreviewStore({ files })
+
+    await store.openFile({ dir: '共享空间', filename: '看板.html' })
+
+    expect(files.probePreview).toHaveBeenCalledWith('共享空间', '看板.html')
+    expect(store.content.value?.renderMode).toBe('html')
+    expect(store.content.value?.url).toContain('/api/files/preview')
+  })
+
+  it('2026-10-20：.html 预览失败（超限）→ 错误态 + 下载引导', async () => {
+    const files = filesStub({
+      probePreview: vi.fn().mockRejectedValue(new Error('413')),
+    })
+    const store = createPreviewStore({ files })
+
+    await store.openFile({ dir: '共享空间', filename: 'big.html' })
+
+    expect(store.content.value?.renderMode).toBe('error')
+    expect(store.content.value?.url).toContain('/api/files/download')
+  })
 })
 
 describe('openList / backToList / close —— 面板状态收敛', () => {
@@ -339,6 +362,14 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
     const store = createPreviewStore({ files: filesStub() })
     await store.openFile({ dir: '共享空间', filename: '现场.png' })
 
+    expect(store.maximizable.value).toBe(true)
+  })
+
+  it('③b 本地 HTML → 可放大（有版面，与 PDF 同口径，2026-10-20）', async () => {
+    const store = createPreviewStore({ files: filesStub() })
+    await store.openFile({ dir: '共享空间', filename: '看板.html' })
+
+    expect(store.content.value?.renderMode).toBe('html')
     expect(store.maximizable.value).toBe(true)
   })
 

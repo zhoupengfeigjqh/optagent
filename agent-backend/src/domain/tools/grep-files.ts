@@ -1,7 +1,7 @@
 /**
  * grep_files 工具（T038）：文本检索。
  *
- * 仅作用文本格式（.csv/.txt/.json/.md/.log），.xlsx/.pdf 等二进制跳过
+ * 仅作用文本格式（.csv/.txt/.json/.md/.log/.html，2026-10-20 增 `.html`），.xlsx/.pdf 等二进制跳过
  * 并在结果中注明跳过数量（由 FileAccess.grep 保证）。
  */
 import type { FileAccess } from '../file-access.js';

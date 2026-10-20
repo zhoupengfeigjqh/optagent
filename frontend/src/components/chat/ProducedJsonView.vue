@@ -10,6 +10,10 @@
  * - **视图链接**（2026-10-10，`TR-40`/`TR-41`）：字段名为 `viewUrl` 且值是字符串 → 渲染为
  *   链接（文本 = 值本身）。**只按字段名判定**，不看值像不像 URL；值的归一化
  *   （缺 `http://host:port` 前缀时补当前页面入口）交给 `utils/view-link.ts`（唯一实现）
+ *   - **点击口径**（2026-10-20 修订）：普通左键派发 `open-view`（`ViewLinkTarget`），由装配层
+ *     交给 `usePreview.openView()` 分流——同源进右侧面板、异源 / 预检失败才新标签页。
+ *     `href` / `target` 保留（复制链接、中键新标签），修饰键点击不拦截。
+ *     递归实例必须**逐层上抛**该事件（链接多半在子实例里渲染）。
  * - 对象 → 逐行 `key: value`（递归，嵌套缩进）
  * - 对象数组 → **表格**（列 = 各元素键的并集）；**行与列都有上限**（`PRODUCED_ARRAY_MAX_ITEMS`
  *   / `PRODUCED_TABLE_MAX_COLUMNS`），超出只提示总数。弹窗宽度是自适应的，故横向溢出
@@ -26,7 +30,12 @@
 import { computed } from 'vue'
 
 import { isPlainObject } from '../../utils/arg-schema'
-import { isViewUrlField, resolveViewUrl } from '../../utils/view-link'
+import {
+  isViewUrlField,
+  resolveViewUrl,
+  toViewLinkTarget,
+  type ViewLinkTarget,
+} from '../../utils/view-link'
 import {
   PRODUCED_ARRAY_MAX_ITEMS,
   PRODUCED_JSON_MAX_DEPTH,
@@ -53,6 +62,16 @@ const props = withDefaults(
   { depth: 0, compact: false, fieldKey: undefined },
 )
 
+const emit = defineEmits<{
+  /**
+   * 视图链接点击（2026-10-20）：交给装配层决定怎么打开。
+   *
+   * 载荷与入口行（`MessageViewLinks`）同一份契约：同源 → 右侧面板、异源 → 新标签页。
+   * 组件自身**不判定**同源（那是 `usePreview.openView` 的唯一职责）。
+   */
+  'open-view': [item: ViewLinkTarget]
+}>()
+
 const isScalar = computed(() => !isPlainObject(props.value) && !Array.isArray(props.value))
 
 /**
@@ -64,6 +83,24 @@ const isScalar = computed(() => !isPlainObject(props.value) && !Array.isArray(pr
 const linkHref = computed(() =>
   isViewUrlField(props.fieldKey) ? resolveViewUrl(props.value) : null,
 )
+
+/**
+ * 视图链接点击：普通左键交给上层（同源进面板 / 异源新标签），其余交给浏览器。
+ *
+ * 修饰键（Ctrl/Cmd/Shift/Alt）与非左键 MUST 放行：用户明确要"新标签 / 新窗口 / 下载"，
+ * 拦住反而是倒退；中键同理（`auxclick` 本就不触发 `click`）。
+ *
+ * 不判"有没有监听方"：Vue 的 `emit` 没有返回值，读 `vnode.props` / `attrs` 又依赖挂载方式
+ * （测试与模板编译的键名不一致，实测踩过）。本组件的 `viewUrl` 分支**只在装配层接线处使用**
+ * （铃铛正文、工具卡片），两侧都监听 `open-view`，故直接拦截是确定的。
+ */
+function onLinkClick(event: MouseEvent): void {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  const href = linkHref.value
+  if (href === null) return
+  event.preventDefault()
+  emit('open-view', toViewLinkTarget({ href, raw: String(props.value), kind: 'url' }))
+}
 
 /** 紧凑模式下非标量直接转 JSON 文本（不递归）；与"深度超限"共用逃生舱渲染 */
 const asRawJson = computed(
@@ -143,6 +180,7 @@ function jsonText(value: unknown): string {
       :href="linkHref"
       target="_blank"
       rel="noopener noreferrer"
+      @click="onLinkClick"
       >{{ scalarText(value) }}</a
     >
 
@@ -163,7 +201,13 @@ function jsonText(value: unknown): string {
       <template v-for="entry in objectEntries" :key="entry[0]">
         <dt class="produced-json__key">{{ entry[0] }}</dt>
         <dd class="produced-json__value">
-          <ProducedJsonView :value="entry[1]" :depth="depth + 1" :field-key="entry[0]" />
+          <!-- 递归实例的点击必须逐层上抛：链接多半在**子实例**里渲染（对象行 / 表格单元格） -->
+          <ProducedJsonView
+            :value="entry[1]"
+            :depth="depth + 1"
+            :field-key="entry[0]"
+            @open-view="emit('open-view', $event)"
+          />
         </dd>
       </template>
     </dl>
@@ -185,6 +229,7 @@ function jsonText(value: unknown): string {
                   :depth="depth + 1"
                   :field-key="column"
                   compact
+                  @open-view="emit('open-view', $event)"
                 />
               </td>
             </tr>
@@ -205,7 +250,11 @@ function jsonText(value: unknown): string {
     <template v-else-if="isArray">
       <ol class="produced-json__list">
         <li v-for="(item, index) in shownItems" :key="index" class="produced-json__list-item">
-          <ProducedJsonView :value="item" :depth="depth + 1" />
+          <ProducedJsonView
+            :value="item"
+            :depth="depth + 1"
+            @open-view="emit('open-view', $event)"
+          />
         </li>
       </ol>
       <p v-if="truncatedCount > 0" class="produced-json__truncated">

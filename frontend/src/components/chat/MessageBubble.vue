@@ -265,6 +265,7 @@ const containsActiveMatch = computed(() => {
       :items="toolItems"
       :load-result="toolLoader"
       :live="isStreaming"
+      @open-view="emit('open-view', $event)"
     />
 
     <MessageContent

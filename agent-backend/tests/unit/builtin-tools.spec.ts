@@ -121,3 +121,20 @@ describe('buildBuiltinTools —— grep_skill 接线（2026-10-17 新增）', ()
     );
   });
 });
+
+describe('buildBuiltinTools —— grep_files 接线（2026-10-20 增 .html）', () => {
+  it('共享空间里的 `.html` 可被检索，命中行带路径与行号（与文本类同口径）', async () => {
+    const space = path.join(root, 'users', 'admin', 'user-data', AGENT, '共享空间');
+    mkdirSync(space, { recursive: true });
+    writeFileSync(path.join(space, '看板.html'), '<h1>产能明细</h1>\n', 'utf8');
+    writeFileSync(path.join(space, '说明.txt'), '产能说明\n', 'utf8');
+
+    const tools = build(['grep_files']);
+    expect(tools.map((tool) => tool.name)).toEqual(['grep_files']);
+
+    const text = await run(tools[0]!, { pattern: '产能', dir: '共享空间' });
+
+    expect(text).toContain('共享空间/看板.html:1');
+    expect(text).toContain('共享空间/说明.txt:1');
+  });
+});

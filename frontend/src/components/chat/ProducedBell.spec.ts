@@ -450,3 +450,29 @@ describe('ProducedBell —— 已读时机与正文视图（§10.5 ⑤⑦）', (
     expect(wrapper.find('.produced-content__body').exists()).toBe(false)
   })
 })
+
+describe('ProducedBell —— 正文里的 viewUrl 点击（2026-10-20）', () => {
+  /** 当前页面入口（组件内未注入 origin 时按它拼前缀） */
+  const ORIGIN = window.location.origin
+
+  it('点 viewUrl → 先关弹窗再上报 open-view（同源进面板由装配层决定）', async () => {
+    store = makeStore([item('a')])
+    store.text.mockResolvedValue('{"status":"success","viewUrl":"/datasource/x"}')
+    h.store = store
+
+    const wrapper = mountBell()
+    await openPanel(wrapper)
+    await wrapper.find('.produced-item__button').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.produced-json__link').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([
+      [{ url: `${ORIGIN}/datasource/x`, name: '/datasource/x', kind: 'url' }],
+    ])
+    // MUST 先关模态框：`<dialog>.showModal()` 在 top layer，不关则右侧面板被盖住
+    expect(wrapper.findComponent(BaseDialog).props('open')).toBe(false)
+    // 一并回到列表态，不在关闭后再残留上一条正文
+    expect(wrapper.find('.produced-json').exists()).toBe(false)
+  })
+})

@@ -13,14 +13,26 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { DeployHistoryItem, DeployManifestDiffEntry, DeployUserResult } from '../../api/types'
+import { toErrorInfo } from '../../utils/error-message'
 import EmptyState from '../common/EmptyState.vue'
+import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
 const props = defineProps<{
   items: DeployHistoryItem[]
   /** 服务端有界返回（`FR-006`）：为真即"还有更早的记录没有拉取" */
   truncated?: boolean
+  /** 加载失败（2026-10-20）：失败 MUST NOT 渲染成"还没有部署记录" */
+  error?: unknown
+  loading?: boolean
 }>()
+
+const emit = defineEmits<{
+  (e: 'retry'): void
+}>()
+
+/** 错误提示按错误码分派文案（前端不展示后端 message） */
+const errorInfo = computed(() => (props.error ? toErrorInfo(props.error) : null))
 
 /** 每页条数：固定值，界面只翻页（MUST NOT 由用户调整） */
 const PAGE_SIZE = 5
@@ -111,8 +123,16 @@ function diffText(diff: DeployManifestDiffEntry): string {
       <p class="deploy-history__summary" aria-live="polite">{{ summaryText }}</p>
     </header>
 
+    <ErrorNotice v-if="errorInfo" :error="errorInfo" title="部署历史加载失败">
+      <button type="button" class="btn" @click="emit('retry')">重新加载</button>
+    </ErrorNotice>
+
+    <p v-else-if="props.items.length === 0 && props.loading" class="field__hint">
+      正在加载部署历史…
+    </p>
+
     <EmptyState
-      v-if="props.items.length === 0"
+      v-else-if="props.items.length === 0"
       title="还没有部署记录"
       description="执行一次「部署生效」后，这里会记录时间、涉及对象与结果。"
     />

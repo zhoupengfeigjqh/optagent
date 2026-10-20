@@ -6,7 +6,8 @@
  * - §5.1 落盘名以响应中的 `filename` 为准（012 起：不重名用**原名**，重名用 `原名(n).ext`，
  *   半角括号；唯一实现在 `agent-backend/src/domain/upload-name.ts`），前端 MUST NOT 自行拼接后缀
  * - §5.3 下载**无大小上限** → 以 `<a download>` 直链触发，不经 `fetch`
- * - §5.4 预览**有大小上限**（默认 10MB）→ 文本类按需 `fetch`（便于展示错误态），`.pdf` 用 `<iframe>`
+ * - §5.4 预览**有大小上限**（默认 10MB）→ 文本类按需 `fetch`（便于展示错误态），`.pdf` / `.html` 用 `<iframe>`
+ *   （`.html` 为用户上传内容，iframe MUST 沙箱化，见 `WorkspacePanel.vue`）
  * - §5.5 删除走 REST `DELETE /api/files`（`shared` 为共享只读目录，后端 403 `FILE_READONLY`）
  */
 

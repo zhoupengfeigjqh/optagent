@@ -1,7 +1,8 @@
 /**
  * read_file 工具的格式分派（T037 / FR-021）。
  *
- * - 文本（.csv/.txt/.json/.md/.log）：FileAccess.read 直读（内部已做截断与 utimes）
+ * - 文本（.csv/.txt/.json/.md/.log/.html）：FileAccess.read 直读（内部已做截断与 utimes）；
+ *   `.html` 按**原文**读（2026-10-20），不解析 DOM、不执行脚本、不剥标签——模型要的是源码
  * - .xlsx / .xls：SheetJS 逐 sheet 转 CSV（`.xls` 为 OLE2/BIFF 容器，库按文件头自判）
  * - .pdf：pdfjs-dist 提取文本层；无文本层（扫描件）→ 友好提示
  * - 其余扩展名：明确拒绝并说明支持范围
@@ -15,10 +16,10 @@ import { pathToFileURL } from 'node:url';
 import * as XLSX from 'xlsx';
 import type { FileAccess } from '../file-access.js';
 
-const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log']);
+const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log', '.html']);
 /** 需经 SheetJS 转文本的 Excel 容器（`.xlsx` zip / `.xls` OLE2，库按文件头自判） */
 const EXCEL_EXTENSIONS = new Set(['.xlsx', '.xls']);
-const SUPPORTED = '.csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log';
+const SUPPORTED = '.csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html';
 
 export interface ReadToolResult {
   /** 交给模型的文本（含截断提示） */

@@ -54,7 +54,7 @@ export const PRODUCED_DIR = `${SPACE_TMP}/${PRODUCED_SUBDIR}`;
  * `共享空间` / `临时空间` 取它（空间级、不可按目录配置）。`.xls` 于 2026-10-14 加入：
  * 客户侧总BOM 等既有资料是 `.xls`（BIFF），与 `.xlsx` 同为 Excel 表格，不应因容器格式不同被拒。
  */
-const DOCUMENT_EXTS = ['.csv', '.xlsx', '.xls', '.txt', '.json', '.pdf'] as const;
+const DOCUMENT_EXTS = ['.csv', '.xlsx', '.xls', '.txt', '.json', '.html', '.pdf'] as const;
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.tiff'] as const;
 
 export interface SpacePolicy {
@@ -78,6 +78,7 @@ export const DATA_PREP_UPLOAD_EXTS = [
   '.txt',
   '.pdf',
   '.json',
+  '.html',
   '.zip',
   '.jpg',
   '.png',

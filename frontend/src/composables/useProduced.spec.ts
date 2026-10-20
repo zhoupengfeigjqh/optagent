@@ -5,7 +5,8 @@
  * 1. **未读数自算** —— 列表内 `read_at` 缺省的条数，不依赖后端计数端点；
  * 2. **标记已读只提交当前未读的**，成功后**就地**更新、**不重拉列表**（避免竞态）；
  * 3. **订阅幂等** —— 重复 `start()` 不叠加连接，`stop()` 后可再 `start()`；
- * 4. **拉取失败不清空列表** —— 失败是"这次没拿到"，不等于"没有产出"。
+ * 4. **拉取失败不清空列表** —— 失败是"这次没拿到"，不等于"没有产出"；
+ * 5. **切换数字人** —— `clear()` 清列表与未读，并作废在途请求（旧响应晚到不得覆盖新列表）。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProducedApi, ProducedItem } from '../api/produced'
@@ -64,6 +65,41 @@ describe('列表与未读数', () => {
 
     expect(s.error.value?.code).toBe('NETWORK_ERROR')
     expect(s.items.value).toHaveLength(1)
+  })
+})
+
+describe('切换数字人（clear + 代际保护）', () => {
+  it('clear 立即清空列表与未读（旧数字人的角标不再挂着）', async () => {
+    api.list.mockResolvedValue({ items: [item('a')] })
+    const s = store()
+    await s.refresh()
+
+    s.clear()
+
+    expect(s.items.value).toEqual([])
+    expect(s.unreadCount.value).toBe(0)
+    expect(s.error.value).toBeNull()
+    expect(s.loading.value).toBe(false)
+  })
+
+  it('旧数字人在途的响应晚到，不覆盖新数字人的列表', async () => {
+    const resolvers: Array<(value: { items: ProducedItem[] }) => void> = []
+    api.list.mockImplementation(
+      () => new Promise<{ items: ProducedItem[] }>((resolve) => resolvers.push(resolve)),
+    )
+    const s = store()
+
+    const stale = s.refresh()
+    s.clear()
+    const fresh = s.refresh()
+
+    resolvers[1]!({ items: [item('b')] })
+    await fresh
+    resolvers[0]!({ items: [item('a')] })
+    await stale
+
+    expect(s.items.value.map((entry) => entry.job_id)).toEqual(['b'])
+    expect(s.loading.value).toBe(false)
   })
 })
 

@@ -391,6 +391,23 @@ describe('ToolCallList —— 结果正文的结构化展示（2026-10-10）', (
     expect(link.attributes('href')).toBe(`${window.location.origin}/datasource/plan/ws1/xlsx`)
   })
 
+  it('点结果里的 viewUrl → 向上派发 open-view（同源进面板由装配层决定）', async () => {
+    const wrapper = mountList([JSON_ITEM])
+    await expand(wrapper)
+
+    await wrapper.find('.produced-json__link').trigger('click')
+
+    expect(wrapper.emitted('open-view')).toEqual([
+      [
+        {
+          url: `${window.location.origin}/datasource/plan/ws1/xlsx`,
+          name: '/datasource/plan/ws1/xlsx',
+          kind: 'url',
+        },
+      ],
+    ])
+  })
+
   it('可一键切回原始 JSON（逃生舱），再点回到结构化', async () => {
     const wrapper = mountList([JSON_ITEM])
     await expand(wrapper)

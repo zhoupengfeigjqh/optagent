@@ -29,12 +29,23 @@ import {
   producedTag,
   producedTagFull,
 } from '../../utils/produced-display'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import BaseDialog from '../common/BaseDialog.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import ProducedJsonView from './ProducedJsonView.vue'
 
 const produced = useProduced()
+
+const emit = defineEmits<{
+  /**
+   * 正文里的视图链接点击（2026-10-20）：向上交给装配层（`ChatPanel` 的 `openView`）。
+   *
+   * 不在本组件直接调 `usePreview`：铃铛的宿主是聊天面板，把"怎么打开"留在装配层，
+   * 与入口行、工具卡片共用同一个出口；本组件只负责"先关掉自己的模态框"。
+   */
+  'open-view': [item: ViewLinkTarget]
+}>()
 
 const open = ref(false)
 /** 面板视图：列表 ⇄ 单条正文 */
@@ -148,6 +159,17 @@ function closePanel(): void {
   open.value = false
   backToList()
 }
+
+/**
+ * 正文里的视图链接点击（2026-10-20）。
+ *
+ * **必须先关模态框再上报**：`<dialog>.showModal()` 处于浏览器 top layer，右侧工作空间面板
+ * 在文档层里，不关就会被整块盖住——用户看到的是"点了没反应"。
+ */
+function onOpenView(item: ViewLinkTarget): void {
+  closePanel()
+  emit('open-view', item)
+}
 </script>
 
 <template>
@@ -207,7 +229,11 @@ function closePanel(): void {
             {{ structuredView ? '按原始 JSON 查看' : '按结构化查看' }}
           </button>
         </div>
-        <ProducedJsonView v-if="parsed.structured && structuredView" :value="parsed.value" />
+        <ProducedJsonView
+          v-if="parsed.structured && structuredView"
+          :value="parsed.value"
+          @open-view="onOpenView"
+        />
         <pre v-else class="produced-content__body">{{ content }}</pre>
         <p v-if="contentHint" class="produced-panel__hint">{{ contentHint }}</p>
       </template>

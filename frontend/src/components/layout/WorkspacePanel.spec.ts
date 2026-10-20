@@ -55,6 +55,25 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
     open.mockRestore()
   })
 
+  it('2026-10-20：`.html` → 与 PDF 同形态的 iframe，但 MUST 带 `sandbox=""`', () => {
+    const wrapper = mountContent(
+      { kind: 'file', dir: '共享空间', filename: '看板.html' },
+      {
+        renderMode: 'html',
+        text: null,
+        url: '/api/files/preview?dir=共享空间&filename=看板.html',
+        error: null,
+      },
+    )
+
+    const frame = wrapper.find('iframe')
+    expect(frame.exists()).toBe(true)
+    expect(frame.attributes('src')).toBe('/api/files/preview?dir=共享空间&filename=看板.html')
+    // 空值 = 全限制：脚本不执行、不共享本站源（用户上传内容不能获得平台权限）
+    expect(frame.attributes('sandbox')).toBe('')
+    expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
+  })
+
   it('文件目标（`kind: file`）不受影响：正文照旧按 `content` 渲染', () => {
     const wrapper = mountContent(
       { kind: 'file', dir: '数据准备', filename: '产能.txt' },

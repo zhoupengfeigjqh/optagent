@@ -38,6 +38,9 @@ const selectedUserIds = ref<string[]>([])
 const history = ref<DeployHistoryItem[]>([])
 /** 服务端有界返回（`FR-006`）：为真即"还有更早的记录没有拉取" */
 const historyTruncated = ref(false)
+/** 历史加载失败（2026-10-20）：失败 MUST 与"确实没有记录"区分开，否则空态会撒谎 */
+const historyError = ref<unknown>(null)
+const historyLoading = ref(false)
 
 async function loadUsers(): Promise<void> {
   usersLoading.value = true
@@ -55,9 +58,17 @@ async function loadUsers(): Promise<void> {
 }
 
 async function loadHistory(): Promise<void> {
-  const res = await fetchDeployHistory(DEPLOY_HISTORY_FETCH_LIMIT)
-  history.value = res.items
-  historyTruncated.value = res.truncated
+  historyLoading.value = true
+  historyError.value = null
+  try {
+    const res = await fetchDeployHistory(DEPLOY_HISTORY_FETCH_LIMIT)
+    history.value = res.items
+    historyTruncated.value = res.truncated
+  } catch (err) {
+    historyError.value = err
+  } finally {
+    historyLoading.value = false
+  }
 }
 
 /** 勾选/取消一个用户（新数组 → 部署面板据此作废上一次预检） */
@@ -66,6 +77,17 @@ function toggleUser(userId: string, checked: boolean): void {
   if (checked) next.add(userId)
   else next.delete(userId)
   selectedUserIds.value = [...next]
+}
+
+/**
+ * 用户被删除后把它从勾选里摘掉（2026-10-20）。
+ *
+ * 勾选跨分页保留，所以不能"按当前页收敛"；但删除是**明确的单点失效**，
+ * 不摘掉就会带着一个已不存在的用户去校验/部署 → 整批 404。
+ */
+function forgetUser(userId: string): void {
+  if (!selectedUserIds.value.includes(userId)) return
+  selectedUserIds.value = selectedUserIds.value.filter((id) => id !== userId)
 }
 
 function clearSelection(): void {
@@ -147,11 +169,19 @@ watch(
         "
         @toggle="toggleUser"
         @clear="clearSelection"
+        @removed="forgetUser"
         @changed="() => void loadUsers()"
         @announce="emit('announce', $event)"
       />
       <AnomalySummary v-else-if="tab === 'anomalies'" @navigate="emit('navigate', $event)" />
-      <DeployHistoryList v-else :items="history" :truncated="historyTruncated" />
+      <DeployHistoryList
+        v-else
+        :items="history"
+        :truncated="historyTruncated"
+        :error="historyError"
+        :loading="historyLoading"
+        @retry="loadHistory"
+      />
     </div>
   </section>
 </template>

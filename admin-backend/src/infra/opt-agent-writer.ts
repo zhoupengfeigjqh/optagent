@@ -76,6 +76,28 @@ export class OptAgentWriter {
   }
 
   /**
+   * 运行环境中该用户**已落地的数字人目录名**（2026-10-20，差异报告 `FR-032` 的取数口）。
+   *
+   * 目录不存在 → 空数组（从未部署过）。只看目录，不看文件，避免把残留文件误当成数字人。
+   */
+  listAgents(userId: string): string[] {
+    assertSafeSegment(userId, '用户标识');
+    const agentsDir = path.join(this.userDir(userId), 'agents');
+    if (!fs.existsSync(agentsDir)) return [];
+    try {
+      return fs
+        .readdirSync(agentsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort();
+    } catch {
+      // `agents` 被占成一个文件 / 目录不可读：差异报告只是辅助信息，MUST NOT 阻断部署。
+      // 真正的写入失败由 `commitUser` 暴露并计入 `users[].error`。
+      return [];
+    }
+  }
+
+  /**
    * 以**用户为单位**整体覆盖物化。
    *
    * @param agents 本次需要存在的**全部**数字人产物；`agents/` 下不在其列的一切

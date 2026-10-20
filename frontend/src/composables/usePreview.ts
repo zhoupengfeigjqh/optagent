@@ -11,7 +11,7 @@
  * - **同源地址**：先 `probeRenderable` 预检响应头——可内联 → 面板 iframe；
  *   需下载 → 面板给下载入口；预检失败 → 收起面板并降级外部跳转
  * - **本地文件**（空间目录点击 / 消息里的 `filePath` 入口）：打开面板并按**扩展名**分派
- *   （文本 `<pre>` / PDF / 图片 / 下载引导，V-11）——同一份文件从不同入口进来，
+ *   （文本 `<pre>` / PDF / 图片 / HTML 沙箱 iframe / 下载引导，V-11）——同一份文件从不同入口进来，
  *   判据与渲染口径 MUST 一致
  *
  * **放大态**（2026-10-16，`specs/011-preview-maximize`）：内容"平铺整个视口"的瞬态状态。
@@ -48,10 +48,10 @@ export type PreviewTarget =
 
 /** 预览内容（加载结果）。 */
 export interface PreviewContent {
-  renderMode: 'text' | 'pdf' | 'image' | 'download' | 'error'
+  renderMode: 'text' | 'pdf' | 'image' | 'html' | 'download' | 'error'
   /** 文本类内容（`.txt` / `.csv` / `.json`） */
   text: string | null
-  /** `.pdf` 的 `<iframe>` 地址、图片的 `<img>` 地址，或下载直链 */
+  /** `.pdf` / `.html` 的 `<iframe>` 地址、图片的 `<img>` 地址，或下载直链 */
   url: string | null
   error: ErrorInfo | null
 }
@@ -127,9 +127,9 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
   /**
    * 可放大判据（唯一实现，FR-010）。
    *
-   * 只看"有版面"的两类：① 同源 `viewUrl` 的内联 iframe；② 本地 PDF / 图片。
+   * 只看"有版面"的几类：① 同源 `viewUrl` 的内联 iframe；② 本地 PDF / 图片 / HTML。
    * 其余（文本流、「需下载」引导、错误态、空内容态、列表态）一律不可放大——
-   * 文本不因变宽而更可读，另两类的出口是"下载完整文件"，加了只是无效按钮（FR-013）。
+   * 文本不因变宽而更可读，另几类的出口是"下载完整文件"，加了只是无效按钮（FR-013）。
    */
   const maximizable = computed<boolean>(() => {
     if (view.value !== 'content') {
@@ -143,7 +143,7 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       return false
     }
     const mode = content.value?.renderMode
-    return mode === 'pdf' || mode === 'image'
+    return mode === 'pdf' || mode === 'image' || mode === 'html'
   })
 
   /** 入口可见性：放大态必须始终留出口（见接口注释）。 */
@@ -222,8 +222,8 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       return
     }
 
-    if (kind === 'pdf' || kind === 'image') {
-      // 先预检：`.pdf` 交给 `<iframe>`、图片交给 `<img>` 后前端读不到响应体，
+    if (kind === 'pdf' || kind === 'image' || kind === 'html') {
+      // 先预检：`.pdf` / `.html` 交给 `<iframe>`、图片交给 `<img>` 后前端读不到响应体，
       // 超限（413）/不存在（404）必须在进入前拦住，否则只会渲染出浏览器错误页（FR-048）
       const current = (requestId += 1)
       loading.value = true

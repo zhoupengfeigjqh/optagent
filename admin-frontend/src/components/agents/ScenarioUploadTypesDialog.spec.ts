@@ -1,7 +1,7 @@
 /**
  * 组件测试：数据准备目录的「可上传文件类型」窗口（`FR-001`~`FR-004`）。
  *
- * 覆盖口径：候选恰 10 项且顺序固定（2026-10-14 增 `.xls`）；未配置时默认勾选 `.csv` + `.xlsx`；
+ * 覆盖口径：候选恰 11 项且顺序固定（2026-10-14 增 `.xls`，2026-10-20 增 `.html`）；未配置时默认勾选 `.csv` + `.xlsx`；
  * 取消全部则禁用保存并提示；保存 emit `save` 并关窗；取消与 Esc 不发 `save` 且不改 props；
  * 打开时回显已有配置（副本）；键盘可达（原生 checkbox + label）。
  */
@@ -16,6 +16,7 @@ const CANDIDATES = [
   '.txt',
   '.pdf',
   '.json',
+  '.html',
   '.zip',
   '.jpg',
   '.png',
@@ -46,7 +47,7 @@ describe('ScenarioUploadTypesDialog', () => {
     expect(wrapper.find('[data-test="scenario-upload-types-dialog"]').exists()).toBe(true)
   })
 
-  it('候选恰 10 项且顺序固定', () => {
+  it('候选恰 11 项且顺序固定', () => {
     const wrapper = mountDialog()
     expect(checkboxOrder(wrapper)).toEqual(CANDIDATES)
   })
@@ -57,19 +58,25 @@ describe('ScenarioUploadTypesDialog', () => {
     expect(wrapper.find('[data-test="upload-ext-.xls"]').exists()).toBe(true)
   })
 
+  it('2026-10-20：.html 是可勾选项（网页静态文件）', () => {
+    const wrapper = mountDialog()
+    expect(isChecked(wrapper, '.html')).toBe(false)
+    expect(wrapper.find('[data-test="upload-ext-.html"]').exists()).toBe(true)
+  })
+
   it('未配置（传空数组）时默认勾选 .csv 与 .xlsx', () => {
     const wrapper = mountDialog([])
     expect(isChecked(wrapper, '.csv')).toBe(true)
     expect(isChecked(wrapper, '.xlsx')).toBe(true)
     expect(isChecked(wrapper, '.txt')).toBe(false)
-    expect(wrapper.find('[data-test="selected-count"]').text()).toContain('2 / 10')
+    expect(wrapper.find('[data-test="selected-count"]').text()).toContain('2 / 11')
   })
 
   it('打开时回显已有配置（副本，不直接改 props）', () => {
     const wrapper = mountDialog(['.csv', '.xlsx', '.txt'])
     expect(isChecked(wrapper, '.txt')).toBe(true)
     expect(isChecked(wrapper, '.json')).toBe(false)
-    expect(wrapper.find('[data-test="selected-count"]').text()).toContain('3 / 10')
+    expect(wrapper.find('[data-test="selected-count"]').text()).toContain('3 / 11')
   })
 
   it('取消全部勾选后禁用保存并提示"至少选择一种"', async () => {
@@ -107,10 +114,10 @@ describe('ScenarioUploadTypesDialog', () => {
     expect(escWrapper.emitted('update:open')?.[0]).toEqual([false])
   })
 
-  it('键盘可达：10 个原生 checkbox 各被 label 包裹，且 dialog 有可读标题', () => {
+  it('键盘可达：11 个原生 checkbox 各被 label 包裹，且 dialog 有可读标题', () => {
     const wrapper = mountDialog()
     const labels = wrapper.findAll('label')
-    expect(labels).toHaveLength(10)
+    expect(labels).toHaveLength(11)
     for (const label of labels) {
       expect(label.find('input[type="checkbox"]').exists()).toBe(true)
     }
