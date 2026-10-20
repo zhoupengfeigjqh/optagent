@@ -12,6 +12,7 @@ import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FileAccess } from '../../src/domain/file-access.js';
+import { extractViewLinks } from '../../src/domain/view-links.js';
 import { buildBuiltinTools } from '../../src/infra/builtin-tools.js';
 
 let root: string;
@@ -136,5 +137,43 @@ describe('buildBuiltinTools —— grep_files 接线（2026-10-20 增 .html）',
 
     expect(text).toContain('共享空间/看板.html:1');
     expect(text).toContain('共享空间/说明.txt:1');
+  });
+});
+
+describe('buildBuiltinTools —— write_file 的结果结构化（2026-10-21）', () => {
+  it('成功：返回 JSON（filePath / filePathName / bytes / message），可被视图链接协议抽成「文件」入口', async () => {
+    const tools = build(['write_file']);
+    const content = '<h1>看板</h1>';
+
+    const text = await run(tools[0]!, { filename: 'th_1_看板.html', content });
+
+    const result = JSON.parse(text) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      filePath: '临时空间/th_1_看板.html',
+      filePathName: 'th_1_看板.html',
+      bytes: Buffer.byteLength(content, 'utf8'),
+    });
+    // 人话保留：模型与日志都靠它，不必理解 JSON 结构也能读懂
+    expect(String(result.message)).toBe(
+      `已写入 临时空间/th_1_看板.html（${Buffer.byteLength(content, 'utf8')} 字节）`,
+    );
+    // 闭环：运行时抽取器认这两个字段 → sidecar → 前端渲染可点入口（kind:'file'）
+    expect(extractViewLinks(text)).toEqual([
+      { url: '临时空间/th_1_看板.html', kind: 'file', name: 'th_1_看板.html' },
+    ]);
+  });
+
+  it('越权（文件名缺会话前缀）仍是纯文本：不产生链接，且照旧记 file.write.denied', async () => {
+    const tools = build(['write_file']);
+
+    const text = await run(tools[0]!, { filename: '看板.html', content: 'x' });
+
+    expect(text).toContain('没有权限执行该操作');
+    expect(() => JSON.parse(text)).toThrow();
+    expect(extractViewLinks(text)).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ alert: true, event: 'file.write.denied', tool: 'write_file' }),
+      expect.stringContaining('越权被拒绝'),
+    );
   });
 });

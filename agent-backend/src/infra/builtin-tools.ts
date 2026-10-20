@@ -11,7 +11,14 @@
  * `domain/builtin-tool-catalog.ts` 的单一来源目录；说明与入参模板在装配时
  * 用当前 run 的运行期取值渲染。对模型可见的文本**逐字不变**
  * （由 `tests/unit/builtin-tool-catalog.spec.ts` 守住）。
+ *
+ * **唯一例外：`write_file` 的成功结果（2026-10-21）**——它是"产出文件"的工具，
+ * 必须按 `domain/view-links.ts` 的协议在结果里声明 `filePath` / `filePathName`，
+ * 运行时才能抽成 `view_links` 并在回答下方给出**可点入口**（`TR-44`）。
+ * 其余内置工具、以及 `write_file` 的失败/越权结果**仍是纯文本**（失败没有可指的资源）。
  */
+import path from 'node:path';
+
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Logger } from 'pino';
 import {
@@ -110,7 +117,16 @@ function domainExecute(
     case 'write_file':
       return async (p) => {
         const r = await writeToolFile(fa, opts.threadId, String(p.filename), String(p.content));
-        return `已写入 ${r.path}（${r.bytes} 字节）`;
+        // 结构化结果（2026-10-21）：`filePath` / `filePathName` 是视图链接协议的字段名，
+        // 由 `extractViewLinks()` 抬成 `view_links` sidecar → 前端在回答下方渲染可点入口。
+        // 只给**空间相对路径**（不在后端拼 URL/前缀），归一化仍由前端唯一负责（`TR-42`）。
+        // `message` 保留人话，模型与日志都能直接读懂；工具说明要求模型不要转抄 JSON。
+        return JSON.stringify({
+          message: `已写入 ${r.path}（${r.bytes} 字节）`,
+          filePath: r.path,
+          filePathName: path.basename(r.path),
+          bytes: r.bytes,
+        });
       };
     case 'list_dir':
       return (p) => listToolDir(fa, String(p.dir));

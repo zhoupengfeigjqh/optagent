@@ -99,7 +99,10 @@ export class FileAccess {
 
   /** 路径规范化 + 白名单校验，返回绝对路径；越权抛 PermissionError */
   private resolveSafe(relPath: string): string {
-    if (!relPath || path.isAbsolute(relPath) || /^[a-zA-Z]:[\\/]/.test(relPath)) {
+    // 盘符前缀一律拒（2026-10-21）：`C:foo`（无分隔符）在 win32 下 `path.isAbsolute` 为
+    // false，是"盘符相对路径"，解析结果取决于进程 cwd。此前靠后面的 `path.relative`
+    // 兜住（会以 `..` 或绝对路径出现），属"依赖第二道判定"——这里直接判死。
+    if (!relPath || path.isAbsolute(relPath) || /^[a-zA-Z]:/.test(relPath)) {
       throw this.deny(`拒绝绝对路径: ${relPath}`);
     }
     const resolved = path.resolve(this.dataRoot, relPath);
@@ -206,6 +209,12 @@ export class FileAccess {
     if (base !== filename || base.includes('..')) {
       throw this.deny(`写入仅允许 临时空间/ 下的扁平文件名: ${filename}`);
     }
+    // Windows 冒号 = NTFS 备用数据流（ADS，2026-10-21）：`a.txt:evil` 落的是 `a.txt` 的流，
+    // 目录没变，但 `list_dir` 看不到、`read_file` 却能读——等于绕过"文件可见性"这层约束。
+    // Windows 文件名本来就禁止 `:`，拒绝它不损失任何合法用法（模型可写，故必须拦）。
+    if (base.includes(':')) {
+      throw this.deny(`写入仅允许扁平文件名（不得含 ":"）: ${filename}`);
+    }
     if (!base.startsWith(`${threadId}_`)) {
       throw this.deny(`临时空间写入文件名必须以 "${threadId}_" 前缀开头: ${base}`);
     }
@@ -225,6 +234,11 @@ export class FileAccess {
    *
    * 路径安全仍由 `resolveSafe` 统一兜住（顶层白名单 / `..` / 符号链接 / realpath），
    * 因此即便回写签名被伪造，也写不到 `后台产出/` 以外的任何位置。
+   *
+   * **未加"冒号（NTFS ADS）"判据，是有意的**（2026-10-21）：本方法的文件名来自**服务**
+   * （非模型），落点又被 `dir !== PRODUCED_DIR` 锁死，威胁模型与 `write` 不同；
+   * 且服务可能用含 `:` 的时间戳命名，加判据会让既有回写 400（破坏现有集成）。
+   * 想收紧应当在与服务方的约定层（`§10.3` 的 `{jobId}.{ext}`）解决，而不是在这里拦。
    */
   async writeProduced(dir: string, filename: string, content: Buffer): Promise<string> {
     if (dir !== PRODUCED_DIR) {

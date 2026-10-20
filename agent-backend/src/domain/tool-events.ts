@@ -433,17 +433,24 @@ function parseLine(line: string): ToolEventLine | undefined {
 /**
  * 行里的 `view_links` 结构校验（白名单复制的一环：结构不符整段丢弃，不猜）。
  *
- * 只认 `{ url: string, name?: string }`；缺席或全部不合法的项被跳过，
+ * 认 `{ url: string, name?: string, kind?: 'url' | 'file' }`；缺席或全部不合法的项被跳过，
  * 一条都不合法 → `undefined`（等价于"这一行没有视图链接"）。
+ *
+ * **`kind` MUST 透传（2026-10-21 修复）**：此前只保留 `url`/`name`，落盘时写进去的
+ * `kind:'file'` 在**读回时被丢掉**，前端按缺省 `'url'` 处理 → 空间相对路径通不过
+ * `resolveViewUrl`（无前导 `/`）→ 入口被整条丢弃。结果就是"单测里 file 入口能开，
+ * 真实链路永远不出现"。未知的 `kind` 值一律视同缺省（`'url'`），不猜。
  */
 function parseViewLinks(value: unknown): ViewLink[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const out: ViewLink[] = [];
   for (const item of value) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
-    const { url, name } = item as { url?: unknown; name?: unknown };
+    const { url, name, kind } = item as { url?: unknown; name?: unknown; kind?: unknown };
     if (typeof url !== 'string' || url === '') continue;
-    out.push(typeof name === 'string' && name !== '' ? { url, name } : { url });
+    const link: ViewLink = kind === 'file' ? { url, kind: 'file' } : { url };
+    if (typeof name === 'string' && name !== '') link.name = name;
+    out.push(link);
   }
   return out.length > 0 ? out : undefined;
 }

@@ -276,11 +276,56 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
     expect(record.viewLinks).toEqual([{ url: '/datasource/big/xlsx' }]);
   });
 
+  it('2026-10-21：`write_file` 的结构化结果落成 kind:file 的 sidecar（正文原样、不改写）', async () => {
+    const store = makeStore();
+    const resultText = JSON.stringify({
+      message: '已写入 临时空间/th1_看板.html（12 字节）',
+      filePath: '临时空间/th1_看板.html',
+      filePathName: 'th1_看板.html',
+      bytes: 12,
+    });
+
+    await store.appendEnd('admin', AGENT, 'th1', {
+      callId: 'call_write',
+      messageId: 'm_a1',
+      name: 'write_file',
+      startedAt: '2026-10-21T00:00:00.000Z',
+      status: 'success',
+      durationMs: 5,
+      resultText,
+    });
+
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
+    expect(record.viewLinks).toEqual([
+      { url: '临时空间/th1_看板.html', kind: 'file', name: 'th1_看板.html' },
+    ]);
+    // 正文仍是工具原文：sidecar 只做"搬运"，不改写结果本身（TR-48）
+    expect(record.content).toBe(resultText);
+  });
+
   it('结果里没有视图链接：不写 view_links 字段（行为与改动前一致）', async () => {
     const store = makeStore();
     await appendEnd(store, { callId: 'call_plain', resultText: '车间,计划量\n冲压,1200' });
 
     expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toBeUndefined();
+  });
+
+  it('2026-10-21：`kind` 透传（file 保留），未知值视同缺省 url，存量 {url,name} 形状不变', async () => {
+    const store = makeStore();
+    await appendEnd(store, { callId: 'call_kind', resultText: 'ok' });
+    tamperLastLine((line) => {
+      line.view_links = [
+        { url: '临时空间/a.html', kind: 'file', name: 'a' },
+        { url: '/x', kind: 'weird' },
+        { url: '/y', kind: 'url' },
+      ];
+    });
+
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.viewLinks).toEqual([
+      { url: '临时空间/a.html', kind: 'file', name: 'a' },
+      { url: '/x' },
+      { url: '/y' },
+    ]);
   });
 
   it('落盘行里的 view_links 混入非法项：只保留合法项（白名单复制，不猜）', async () => {

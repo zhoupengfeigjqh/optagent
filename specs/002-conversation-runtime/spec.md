@@ -44,10 +44,10 @@
 | **外置结果** | 体积 > 内联阈值的结果，正文存于临时空间，记录行只留体积与摘要 |
 | **回灌** | 组 prompt 时把工具结果投影进 messages（**不落盘**） |
 | **索引** | 组 prompt 时注入 systemPrompt 的外置结果清单（名称·体积·摘要·路径） |
-| **视图链接** | 产出正文里**字段名**为 `viewUrl` 的字符串值：服务给出的"可跳转页面地址"（`TR-40`） |
+| **视图链接** | 产出正文里**字段名**为 `viewUrl`（或 `filePath`）的字符串值：服务给出的"可跳转页面地址"（`TR-40`） |
 | **归一化** | 把 `viewUrl` 值转成可点地址：已带 `http(s)://` 前缀则**原样**，根相对路径（单个 `/`）则补**当前页面入口**（`TR-41`） |
-| **视图入口** | 由**工具结果正文**里的 `viewUrl` 抽出的 sidecar 字段（`view_links` = `{ url, name? }[]`），随工具记录落盘与下发，在**回答正文之后**渲染为可点入口（`TR-44`~`TR-48`） |
-| **视图链接名称** | 与 `viewUrl` **同层**的可选字段 `viewUrlName`：服务给的展示名；缺失时界面显示地址（`TR-46`） |
+| **视图入口** | 由**工具结果正文**里的 `viewUrl` / `filePath` 抽出的 sidecar 字段（`view_links` = `{ url, name?, kind? }[]`；`kind:'file'` 表示空间相对路径，缺省 `'url'`），随工具记录落盘与下发，在**回答正文之后**渲染为可点入口（`TR-44`~`TR-48`） |
+| **视图链接名称** | 与 `viewUrl`（或 `filePath`，此时用 `filePathName`）**同层**的可选字段 `viewUrlName`：服务给的展示名；缺失时界面显示地址（`TR-46`） |
 
 ## 4. 功能需求
 
@@ -187,11 +187,12 @@
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **TR-44** | **抽取**（后端，唯一实现 `agent-backend/src/domain/view-links.ts`）：只做"搬运"——把结果文本里**字段名**为 `viewUrl`（大小写不敏感）的**字符串**值与**同层**的 `viewUrlName` 一起收起，**不改写值、不拼前缀、不补名称**。判据与顺序固定：① 文本长于 256K 字符 / 非 JSON / 不是对象或数组 → 不抽取；② 深度 ≤8 递归，任意层级（对象、嵌套、对象数组）生效；③ **形态卫生**：值 trim 后非空、≤2048 字符、无控制字符与反斜杠；名称同规则但**超长/脏只丢名字、保留地址**；④ **按地址原值去重**（首次出现者胜），同地址重复出现时名称取**首个非空值**；⑤ 条数上限 50（防病态，不是展示上限）。**不做 scheme 合法性判定**——那是前端 `resolveViewUrl()` 的唯一职责，后端再判一遍就是第二个漂移点 | 单测 21 例：结构/层级、名称配对（同层才配对、跨层配不上视同没给）、两类脏值丢弃差异、去重与名称补齐、三条上限、全失败路径均返回 `undefined` |
+| **TR-44** | **抽取**（后端，唯一实现 `agent-backend/src/domain/view-links.ts`）：只做"搬运"——把结果文本里**字段名**为 `viewUrl`（大小写不敏感）的**字符串**值与**同层**的 `viewUrlName` 一起收起；**2026-10-15 扩展**：`filePath` / 同层 `filePathName`（**本地文件空间相对路径**）按同一规则收起、条目带 `kind:'file'`（外部地址缺省 `'url'`），相对路径转 `/api/files/preview?…` 仍由前端唯一负责。**不改写值、不拼前缀、不补名称**。判据与顺序固定：① 文本长于 256K 字符 / 非 JSON / 不是对象或数组 → 不抽取；② 深度 ≤8 递归，任意层级（对象、嵌套、对象数组）生效；③ **形态卫生**：值 trim 后非空、≤2048 字符、无控制字符与反斜杠；名称同规则但**超长/脏只丢名字、保留地址**；④ **按地址原值去重**（首次出现者胜），同地址重复出现时名称取**首个非空值**；⑤ 条数上限 50（防病态，不是展示上限）。**不做 scheme 合法性判定**——那是前端 `resolveViewUrl()` 的唯一职责，后端再判一遍就是第二个漂移点 | 单测 21 例：结构/层级、名称配对（同层才配对、跨层配不上视同没给）、两类脏值丢弃差异、去重与名称补齐、三条上限、全失败路径均返回 `undefined` |
 | **TR-45** | **落盘与下发**：抽取结果写入 `tool-events.jsonl` 的 `view_links`（`TR-02` 的同一行口径），并经 `GET /api/threads/{id}` 的 `tool_calls[].view_links` 随详情下发。**MUST 与结果正文分离**：① sidecar **不进**上下文回灌预算（不挤占 `TOOL_REPLAY_BUDGET_BYTES`，`TR-18`）；② 正文**外置时入口照样可用**（值已在记录行里，前端不必先拉外置正文）；③ 流式事件（`tool_call` / `tool_call_end`）**仍不外发结果**，故 entry 只在终态后的详情里出现。前端取该条消息**全部**工具调用的**并集**（`collectToolViewLinks`），再归一化、**按 `href` 去重**（跨工具重复也只留一项，归一化必须用浏览器 `origin`，后端做不到） | 单测 5 例（`tests/unit/tool-events.spec.ts`）：`view_links` 成对落盘、**正文外置时 sidecar 仍在**（`content` 缺席而 `viewLinks` 有值）、无链接不写字段、混入非法项只留合法项、全非法整段丢弃；前端单测覆盖并集与跨工具去重。**不进回灌预算**是结构性保证（`tool-context.ts` 不读 `viewLinks`），无独立用例 |
 | **TR-46** | **显示文本与提示**（`frontend/src/utils/view-link.ts`）：有 `name` 用名称，**没有则显示地址**（长度上限 32 字符、**中段**省略——尾部目录段与文件名才是辨识度所在，尾部省略恰好会吃掉它）；`title` = `名称 — 完整地址`，无名称时即完整地址（地址永远可核对）。**MUST NOT 推断名称**（不拿同层业务字段、不从 URL 末段取名）、**MUST NOT 编号占位**（"视图 1/2" 会随顺序漂移，等于假装有名字——宪章原则九）。名称卫生化：非字符串或空白 → 视同没给 | 单测 14 例（`view-link.spec.ts`）：`toViewLinkEntries`（归一化、按 `href` 去重、名称取首个非空值、空白名称视同没给、空输入、全非法返回空数组）、入口文案 3 例（有名称 / 无名称中段省略 / 不推断不编号）、`truncateMiddle` 3 例；组件测试断言显示文本与 `title` |
 | **TR-47** | **入口行的位置与上限**：位置 = `MessageContent`（回答正文）之后、状态提示（`TypingIndicator` / `ErrorNotice`）与 `MessageActions` **之前**——它是"正文的附件"，不是"对消息的操作"，故**不并入操作区**。直接显示前 **3** 条，超出显示「另有 N 个」（点击展开、**瞬态不持久化**）。折叠的条数 **MUST 让用户看得见**，MUST NOT 静默丢弃。条为原生 `<a href>`（`target="_blank"` + `rel="noopener noreferrer"`），可点性**不只靠颜色**（边框 + 悬停 + 可见焦点环） | 组件测试 12 例（`MessageViewLinks.spec.ts`：空态 2 + 归一化与去重 3 + 文案 3 + 上限与溢出 3 + 交互 1）+ 位置与装配用例（`MessageBubble.viewLinks.spec.ts`：断言 DOM 顺序 `工具卡片 < 回答正文 < 入口行 < 操作区`，谁挪位置就红） |
-| **TR-48** | **零出现与零变化边界**：① **流式期不出现**——转写中的轮次没有结果，`view_links` 天然为空，入口行**整行不渲染**（无 DOM 即无间距）；② 后端抽取失败（非 JSON / 结构不符 / 一条都没命中 / 结构校验不通过）**一律不写字段**，行为与改动前**完全一致**；③ 记录行里的 `view_links` 消费前经**白名单结构校验**（只认 `{ url: string, name?: string }`，不符项跳过、全不符视同没有）。**降级不是异常**：后端返回 `undefined`、前端丢弃非法形态，MUST NOT 抛错、MUST NOT 打日志（宪章原则九：表达"没有可识别的视图链接"，不是"出错了"） | 回归用例：无 `view_links` 时不渲染入口行且工具卡片照常、用户消息不产生入口行（`MessageBubble.viewLinks.spec.ts` 2 例）；全非法形态不渲染空壳行（`MessageViewLinks.spec.ts` 2 例）；坏结构（`url` 非字符串）整段丢弃（后端单测 1 例）；流式期不出现由「流式记录无结果 → 并集为空」结构性保证（`tool-calls.spec.ts` 1 例断言空数组） |
+| **TR-48** | **零出现与零变化边界**：① **流式期不出现**——转写中的轮次没有结果，`view_links` 天然为空，入口行**整行不渲染**（无 DOM 即无间距）；② 后端抽取失败（非 JSON / 结构不符 / 一条都没命中 / 结构校验不通过）**一律不写字段**，行为与改动前**完全一致**；③ 记录行里的 `view_links` 消费前经**白名单结构校验**（认 `{ url: string, name?: string, kind?: 'url' | 'file' }`；`kind` MUST **透传**——`kind:'file'` 一旦丢了，空间相对路径就会被当成地址、通不过 `resolveViewUrl`，入口整条消失；未知 `kind` 视同缺省 `'url'`；不符项跳过、全不符视同没有）。**降级不是异常**：后端返回 `undefined`、前端丢弃非法形态，MUST NOT 抛错、MUST NOT 打日志（宪章原则九：表达"没有可识别的视图链接"，不是"出错了"） | 回归用例：无 `view_links` 时不渲染入口行且工具卡片照常、用户消息不产生入口行（`MessageBubble.viewLinks.spec.ts` 2 例）；全非法形态不渲染空壳行（`MessageViewLinks.spec.ts` 2 例）；坏结构（`url` 非字符串）整段丢弃（后端单测 1 例）；流式期不出现由「流式记录无结果 → 并集为空」结构性保证（`tool-calls.spec.ts` 1 例断言空数组） |
+| **TR-59** | **产出文件的内置工具 MUST 结构化声明文件（2026-10-21）**：`write_file` 的**成功**结果 MUST 是 JSON 对象，含 `filePath`（空间相对路径）、`filePathName`（与落盘文件名一致）、`bytes`、`message`（人话，保留给模型与日志）；MUST NOT 在后端拼 URL/前缀。失败与越权结果**仍是纯文本**（无可指资源，沿用既有文案）。工具说明 MUST 提示"系统会自动生成可点入口，不要在正文里重复路径或拼链接"。**其余内置工具结果形状不变**（§4.9 的"不改内置工具结果形状"仅对 `write_file` 成功结果例外） | 单测：结果可被 `extractViewLinks` 抽出 `{url, kind:'file', name}`；越权仍纯文本且 `extractViewLinks` 为 `undefined`；工具说明 golden；落盘读回 `kind` 仍在（`tool-events.spec.ts`） |
 
 **明确不做**（本次）：
 
@@ -222,7 +223,7 @@
 **明确不做**（本次）：
 
 - **不把 MCP 的 `image` 块原样交给引擎**：`AgentToolResult.content` 支持 `ImageContent`，但会改变模型侧语义、跨 provider 有风险、token 计量也变；本次沿用"占位"口径（与 `serializeToolResult` 既有行为一致）。要"让模型真看图"另立增量；
-- **不改内置工具与 HITL 拒绝的结果形状**：`builtin-tools.ts` / `tool-intercept.ts` 本就是纯文本，一个字段都不动；
+- **不改内置工具与 HITL 拒绝的结果形状**：`builtin-tools.ts` / `tool-intercept.ts` 本就是纯文本，一个字段都不动（**2026-10-21 例外**：`write_file` 的**成功**结果改为 JSON，以声明 `filePath`/`filePathName` ⇒ 可点入口，见 §4.8 `TR-59`；HITL 拒绝与其余内置工具仍为零改动）；
 - **不给 `AgentToolResult.details` 新增用途**：平台不消费它，落盘只取 `content[].text`（不造第二份真相）；
 - **不改接口与前端**：`tool_calls[].content` 的**字段与类型**不变，只是其**内容口径**回归"服务正文"；前端 `ProducedJsonView` / `MessageViewLinks` 零改动。
 
@@ -449,6 +450,15 @@
 | §4.8「不改异步产出（R11）链路」 | 异步产出只做正文内链接化 | **收窄表述**：仍不抽 sidecar，但点击口径与同步侧统一 | 「正文内解析」与「怎么打开」是两件事，前者不动、后者共用 |
 
 **接口与数据零变更**：`viewUrl` 的抽取、落盘、下发与 `api/types.ts` 均不动，`agent-backend` 零改动；改动仅在前端展示层（`ProducedJsonView.vue` / `ProducedBell.vue` / `ToolCallList.vue` / `MessageBubble.vue` / `ChatPanel.vue`）。
+
+### 7.8 修订记录（2026-10-21）：产出文件的可点入口
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| §4.9「明确不做：不改内置工具结果形状」 | 内置工具结果一律纯文本，一个字段都不动 | **例外（收窄）**：`write_file` 的**成功**结果改为 JSON（`filePath` / `filePathName` / `bytes` / `message`）；失败与越权仍纯文本；其他内置工具与 HITL 拒绝零改动（`TR-59`） | 用户在临时空间生成了 HTML，路径拿得到却**点不开**——纯文本里的路径前端刻意不识别（不可信内容、必然误报） |
+| `TR-44` / `TR-48`（`kind` 口径未登记，实为缺陷） | 抽取产出 `kind:'file'`，但读回白名单只认 `{url, name?}`，**`kind` 被丢弃**；`filePath` 也未登记 | **修正**：`TR-44` 补登记 `filePath`/`filePathName`；读回**透传** `kind`（未知值视同 `url`）。修复后**存量记录**（落盘 JSON 里本来就有 `kind`）无需回填即可恢复入口 | 单测里 file 入口能开、真实链路永远不出现：入口在 `resolveViewUrl` 处被当成非法地址丢掉 |
+
+**接口与数据变更**：无新端点、无前端类型变更；`tool-events.jsonl` 行内 `view_links[].kind` 为**可选**（缺省 = `url`，向后兼容），经 `GET /api/threads/{id}` 原样下发。契约登记在 [`runtime-api-delta.md`](../../001-digital-human-platform/contracts/runtime-api-delta.md) 的内置工具表。
 
 ## 8. 宪章符合性
 

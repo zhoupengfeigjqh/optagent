@@ -78,7 +78,9 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
     label: '写入临时文件',
     description_template:
       '把内容写入临时空间，文件名会自动要求以 "{会话标识}_" 开头。' +
-      '数据准备与共享空间为只读，写入会被拒绝。写成功后可用路径 临时空间/{filename} 告知用户下载。',
+      '数据准备与共享空间为只读，写入会被拒绝。' +
+      '成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；' +
+      '不要在正文里重复路径或拼链接。',
     parameters: {
       type: 'object',
       required: ['filename', 'content'],
