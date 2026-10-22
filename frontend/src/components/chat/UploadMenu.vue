@@ -11,11 +11,12 @@
  * 只用一个隐藏 `<input type="file">`：点击目录时记录目标目录并触发文件选择，
  * `change` 时把 `{ dir, files }` 交给上层（多选由 `useUploads` 逐文件各发一次请求）。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type { ScenarioField, WorkspaceSpace } from '../../api/types'
 import type { UploadedDocument } from '../../composables/useUploads'
 import { uploadExtensionsOfDir } from '../../composables/useWorkspace'
+import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 import HintTip from '../common/HintTip.vue'
 import UploadItem from './UploadItem.vue'
@@ -85,6 +86,48 @@ function onRetry(localId: string): void {
 }
 
 /**
+ * Esc 关闭面板（2026-10-22），与 `useMaximizeEscape` 同范式：
+ *
+ * - **只在展开期间**在 `window` 上挂监听，用**捕获阶段**先于中栏冒泡阶段的
+ *   "Esc 中断本轮回答"执行；命中后 `preventDefault` + `stopPropagation`，
+ *   避免用户只想关面板却顺手掐掉正在输出的回答；
+ * - 有打开的 `<dialog>`（HITL、确认框等）时一律放行 —— 弹窗的原生 Esc 语义优先，
+ *   否则会出现"弹窗还开着、面板先关了"（判据与 `useMaximizeEscape` 一致）。
+ *
+ * 收起即摘除监听，所以面板没开时 Esc 行为**零变化**。
+ */
+function onEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (document.querySelector('dialog[open]') !== null) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('close')
+}
+
+let escapeAttached = false
+
+function attachEscape(): void {
+  if (escapeAttached || typeof window === 'undefined') return
+  window.addEventListener('keydown', onEscape, true)
+  escapeAttached = true
+}
+
+function detachEscape(): void {
+  if (!escapeAttached || typeof window === 'undefined') return
+  window.removeEventListener('keydown', onEscape, true)
+  escapeAttached = false
+}
+
+// `immediate`：首帧即展开（如路由恢复）时也要挂上，而不是等下一次开关
+watch(
+  () => props.open,
+  (open) => (open ? attachEscape() : detachEscape()),
+  { immediate: true },
+)
+
+onBeforeUnmount(detachEscape)
+
+/**
  * 目录字段约束的只读提示（校验在服务端，前端只展示要求，契约 §3.1）：
  * `表头须含：A、B；可选：C(string)、D(integer)`
  */
@@ -100,6 +143,25 @@ function fieldHint(fields: readonly ScenarioField[]): string {
 
 <template>
   <div v-if="open" class="upload-menu">
+    <!--
+      独立关闭入口（2026-10-22）：本面板内联在输入区上方、无遮罩，此前只能再次点「+」收起。
+      现在有「×」与 Esc 两条显式路径（`close` 上层已接 `onCloseUpload` → 收起并清空终态记录），
+      标题让"这是哪个面板"可见。
+    -->
+    <header class="upload-menu__header">
+      <p class="upload-menu__title">上传文件</p>
+      <BaseButton
+        class="upload-menu__close"
+        variant="ghost"
+        size="sm"
+        aria-label="关闭上传面板"
+        title="关闭上传面板（Esc）"
+        @click="emit('close')"
+      >
+        <BaseIcon name="close" :size="14" />
+      </BaseButton>
+    </header>
+
     <div v-for="space in spaces" :key="space.name" class="upload-menu__space">
       <p class="upload-menu__space-title">{{ space.name }}</p>
       <ul class="upload-menu__dirs">
@@ -163,6 +225,27 @@ function fieldHint(fields: readonly ScenarioField[]): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+}
+
+/* 标题与「×」同一行：左侧对齐空间标题的内缩（`--space-2`），右侧「×」收到面板边缘 */
+.upload-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-left: var(--space-2);
+}
+
+.upload-menu__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+/* BaseButton 的 sm 尺寸带左右 12px 内边距，这里收成方形，避免「×」被撑成大按钮 */
+.upload-menu__close {
+  padding: var(--space-1);
 }
 
 .upload-menu__space-title {

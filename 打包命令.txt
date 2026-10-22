@@ -1,0 +1,137 @@
+======================================================================
+ optagent 部署包打包命令（Windows）
+ 文件位置：optagent/打包命令.txt
+ 用法：打开 PowerShell，整段复制下面「一」里的代码，粘贴执行即可
+======================================================================
+
+一、打包命令（整段复制，PowerShell 中执行）
+----------------------------------------------------------------------
+$py = @'
+import os
+import tarfile
+import datetime
+
+ROOT = r"d:\公司项目\智能体"
+OUTDIR = os.path.join(ROOT, "package-zpf")
+os.makedirs(OUTDIR, exist_ok=True)
+OUT = os.path.join(
+    OUTDIR, "optagent-deploy-%s.tar.gz" % datetime.date.today().strftime("%Y%m%d")
+)
+
+EXCLUDE_DIRS = {
+    "node_modules", "dist", "coverage", ".coverage-gate", "__pycache__",
+    ".pytest_cache", ".git", ".history", ".codebuddy", ".vite",
+    "test-results", "playwright-report", ".idea",
+}
+EXCLUDE_SUFFIXES = (".log", "-out.txt", ".db-wal", ".db-shm")
+EXCLUDE_NAMES = {".dev-pids.json", "list.txt", "_pack.py", "_verify.py", "打包命令.txt"}
+EXCLUDE_PREFIXES = ("optagent/bom-service/.data",)
+
+
+def is_excluded(arc):
+    for prefix in EXCLUDE_PREFIXES:
+        if arc == prefix or arc.startswith(prefix + "/"):
+            return True
+    parts = arc.split("/")
+    if any(p in EXCLUDE_DIRS for p in parts):
+        return True
+    name = parts[-1]
+    if name in EXCLUDE_NAMES:
+        return True
+    return name.endswith(EXCLUDE_SUFFIXES)
+
+
+def fix_mode(ti):
+    ti.mode = 0o755 if ti.isdir() else 0o644
+    ti.uid = ti.gid = 0
+    ti.uname = ti.gname = "root"
+    return ti
+
+
+stats = {"dirs": 0, "files": 0}
+
+
+def walk_add(tf, absdir, arcdir):
+    tf.add(absdir, arcname=arcdir, recursive=False, filter=fix_mode)
+    stats["dirs"] += 1
+    with os.scandir(absdir) as it:
+        entries = sorted(it, key=lambda e: e.name)
+    for entry in entries:
+        arc = arcdir + "/" + entry.name
+        if is_excluded(arc):
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            walk_add(tf, entry.path, arc)
+        elif entry.is_file(follow_symlinks=False):
+            tf.add(entry.path, arcname=arc, recursive=False, filter=fix_mode)
+            stats["files"] += 1
+
+
+# PAX_FORMAT：非 ASCII 文件名以 UTF-8 写入扩展头，Linux 解包不乱码
+with tarfile.open(OUT, "w:gz", format=tarfile.PAX_FORMAT) as tf:
+    walk_add(tf, os.path.join(ROOT, "optagent"), "optagent")
+    for extra in ("optonto", "optonto/.data"):
+        tf.add(
+            os.path.join(ROOT, *extra.split("/")),
+            arcname=extra, recursive=False, filter=fix_mode,
+        )
+    walk_add(
+        tf,
+        os.path.join(ROOT, "optonto", ".data", "onto_market"),
+        "optonto/.data/onto_market",
+    )
+
+print("out   : %s" % OUT)
+print("dirs  : %d" % stats["dirs"])
+print("files : %d" % stats["files"])
+print("size  : %.2f MB" % (os.path.getsize(OUT) / 1024 / 1024))
+'@
+$tmp = Join-Path $env:TEMP 'optagent-pack.py'
+Set-Content -LiteralPath $tmp -Value $py -Encoding UTF8
+python $tmp
+Remove-Item -LiteralPath $tmp -Force
+----------------------------------------------------------------------
+
+
+二、为什么不用 Windows 自带的 tar.exe
+----------------------------------------------------------------------
+Windows 自带的 bsdtar 会把中文文件名按本地代码页（GBK）写进包内，
+Linux 上解压会得到乱码目录名（如「柯昆BOM数字人」「数据准备」全部损坏），
+数字人因此全部丢失。上面的 Python tarfile 用 PAX/UTF-8 写文件名，
+GNU tar 解包时能正确还原中文。务必不要改回 tar.exe / Compress-Archive。
+
+
+三、产物与内容
+----------------------------------------------------------------------
+输出目录：d:\公司项目\智能体\package-zpf\
+文件名  ：optagent-deploy-<当天日期>.tar.gz（同一天重复打包会覆盖）
+
+包内顶层两项（解压时保持同级关系，compose 的 ../optonto 挂载依赖它）：
+  optagent/                         项目源码 + 全部运行配置
+    agent-backend/config.yaml       模型配置（必需，缺则启动失败）
+    agent-backend/.env              Docker 形态配置（入库）
+    agent-backend/.env.local        密钥：DEEPSEEK_API_KEY / FILE_SIGN_SECRET
+    agent-backend/.opt-agent/       运行态：部署产物 + 会话 + 三个文件空间 + usage.db
+    admin-backend/.env              Docker 形态配置（入库）
+    admin-backend/.platform-data/   平台设计态：数字人 / MCP 服务 / 技能 / 本体 / 用户
+    jev-service/.env.local          TYPESAFE_API_KEY
+    docker-compose.yml / gateway/ / 各服务目录
+  optonto/.data/onto_market/        本体市场只读源（供 compose 的 /opt/onto_market 挂载）
+
+已排除：node_modules、dist、coverage、__pycache__、.pytest_cache、.git、
+        .history、.codebuddy、*.log、*-out.txt、bom-service/.data
+
+注意：usage.db 只带主库，不带 -wal/-shm（未 checkpoint 的增量会丢，
+      仅影响 token 用量统计，不影响功能）。要完整就先把本地后端停掉再打包。
+
+
+四、服务器侧解包与启动
+----------------------------------------------------------------------
+sudo tar -xzf optagent-deploy-<日期>.tar.gz -C /opt
+cd /opt/optagent
+docker compose up -d --build
+
+启动后到 http://<服务器IP>:82/admin/mcp 逐个改「连接地址」为容器服务名
+（ocr -> http://ocr:8000/mcp，jev -> http://jev:8000/mcp，
+bom-service -> http://bom:8000/mcp），保存后到 /admin/agents 重新部署数字人。
+======================================================================

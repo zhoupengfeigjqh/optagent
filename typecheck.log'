@@ -1,0 +1,1 @@
+EXIT=0  -WindowStyle Hidden; Start-Sleep -Seconds 8; Get-Content typecheck.log -Tail 5

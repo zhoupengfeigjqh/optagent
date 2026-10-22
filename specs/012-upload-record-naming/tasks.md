@@ -206,3 +206,10 @@ Agent B：Phase 2 前端（T006~T008）→ US1（T009~T016）→ US2（T017~T023
   T011（+`FR-006` 上限、`FR-005` 顺序与原文不变）、T015（+新建 `UploadItem.spec.ts`，`FR-024` 展示名 / 原则三"改动即补测"）、
   T017（+`FR-012` 新记录 `localId` 不同）、T018（+`FR-011` 零删除与快照不变、`FR-007` 删标记后不复活）、
   T024（+`FR-023` 大小写按平台分支、控制字符口径）、T025（+`SC-004` 同名 20 连传）。行为口径未变。
+- **2026-10-22 增量修复（面板自带「×」/ Esc 关闭入口）**：面板内联在输入区上方且无遮罩，此前只有"再次点 `+`"一条收起路径。
+  现于 `UploadMenu` 头部加标题「上传文件」+「×」按钮（`aria-label="关闭上传面板"`），点击 `emit('close')` →
+  `useUploadPanel.onCloseUpload`（收起并清空终态记录，与 `+` 收起同口径）；`+` 的 toggle 行为保留不变，`FR-015` 场景不受影响。
+  Esc 走 `useMaximizeEscape` 的同范式：**仅展开期间**在 `window` 捕获阶段挂监听并 `preventDefault` + `stopPropagation`，
+  因此不会顺带触发中栏"Esc 中断本轮回答"；有打开的 `<dialog>` 时放行，弹窗原生 Esc 优先；收起即摘除，未展开时 Esc 行为零变化。
+  新增 6 条组件用例（`UploadMenu.spec.ts`：点「×」emit `close`、收起时不渲染「×」、Esc 关闭且不冒泡到中栏、收起态不启用 Esc、
+  有 `<dialog open>` 时放行、卸载后摘除监听）；文件改用 `enableAutoUnmount` 保证用例间不残留 `window` 监听。

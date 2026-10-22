@@ -7,14 +7,21 @@
  *   （校验在服务端执行，前端只展示要求，契约 runtime-api-delta.md §3.1）
  * - 可上传类型挂在**二级目录**行下，**不在**空间标题下（2026-10-13：粒度下放到目录，
  *   数据准备的空间值只是平台默认，展示它会误导用户）
+ * - 面板自带「×」与 **Esc** 两条关闭入口（2026-10-22：此前只能再次点「+」收起）
  *
  * 运行方式：`npm run test`（本地执行）
  */
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { WorkspaceSpace } from '../../api/types'
 import UploadMenu from './UploadMenu.vue'
+
+/**
+ * 面板展开期间会在 `window` 上挂 Esc 监听（捕获阶段），故每个用例结束都必须卸载实例，
+ * 否则残留监听会互相干扰（互相 `stopPropagation`，让 `defaultPrevented` 等断言失真）。
+ */
+enableAutoUnmount(afterEach)
 
 function makeSpaces(): WorkspaceSpace[] {
   return [
@@ -240,5 +247,88 @@ describe('UploadMenu - 记录区空态（012 FR-015）', () => {
 
     expect(wrapper.find('.upload-menu__uploads').exists()).toBe(true)
     expect(wrapper.findAll('.upload-item')).toHaveLength(1)
+  })
+})
+
+/* ---------- 2026-10-22：关闭入口（「×」/ Esc），此前只能再次点「+」收起 ---------- */
+
+/** 从 `document.body` 派发一次 Esc：模拟焦点在输入框/面板内，事件沿捕获→冒泡路径传播 */
+function pressEscape(): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+  document.body.dispatchEvent(event)
+  return event
+}
+
+/** 造一个"打开的"原生弹窗（HITL 等），用于验证弹窗的 Esc 语义优先 */
+function openDialog(): HTMLDialogElement {
+  const dialog = document.createElement('dialog')
+  dialog.setAttribute('open', '')
+  document.body.appendChild(dialog)
+  return dialog
+}
+
+describe('UploadMenu - 关闭入口（「×」/ Esc）', () => {
+  afterEach(() => {
+    document.querySelectorAll('dialog[open]').forEach((dialog) => dialog.remove())
+  })
+
+  it('渲染「×」关闭按钮，点击 emit close（不必再点「+」收起）', async () => {
+    const wrapper = mountMenu()
+
+    const closeBtn = wrapper.find('[aria-label="关闭上传面板"]')
+    expect(closeBtn.exists()).toBe(true)
+
+    await closeBtn.trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('收起（open=false）时整个面板含「×」均不渲染', () => {
+    const wrapper = mount(UploadMenu, { props: { open: false, spaces: makeSpaces() } })
+
+    expect(wrapper.find('.upload-menu').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="关闭上传面板"]').exists()).toBe(false)
+  })
+
+  it('展开时按 Esc 关闭面板，并拦下这次按键（不冒泡到中栏"中断本轮回答"）', () => {
+    const wrapper = mountMenu()
+    const bubbled = vi.fn()
+    window.addEventListener('keydown', bubbled)
+
+    const event = pressEscape()
+
+    window.removeEventListener('keydown', bubbled)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(event.defaultPrevented).toBe(true)
+    // 冒泡阶段收不到 ⇒ 中栏那个"Esc 中断本轮回答"的监听不会执行（回答不会被误掐）
+    expect(bubbled).not.toHaveBeenCalled()
+  })
+
+  it('收起状态不挂监听：Esc 既不关面板也不拦按键', () => {
+    const wrapper = mount(UploadMenu, { props: { open: false, spaces: makeSpaces() } })
+
+    const event = pressEscape()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('有打开的 <dialog> 时放行：Esc 交给弹窗，面板不动', () => {
+    const wrapper = mountMenu()
+    openDialog()
+
+    const event = pressEscape()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('卸载后摘除监听：Esc 不再触发 close', () => {
+    const wrapper = mountMenu()
+    wrapper.unmount()
+
+    const event = pressEscape()
+
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(event.defaultPrevented).toBe(false)
   })
 })

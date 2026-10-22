@@ -2,8 +2,9 @@
 /**
  * 聊天区头部（T067）
  *
- * 左侧：数字人概要（名称 + MCP 状态，未选定 → 提示且 MCP 区域为空）；
- * 右侧：搜索 / 工作空间 / 数字人三个按钮位（工作空间抽屉由 US8 接入，此处先维护开关状态）。
+ * 左侧：数字人切换按钮 + 数字人概要（名称 + MCP 状态，未选定 → 提示且 MCP 区域为空），
+ *       切换入口与身份信息同列，呈现为「切换按钮 + 数字人名称」；
+ * 右侧：搜索 / 工作空间两个按钮位（工作空间抽屉由 US8 接入，此处先维护开关状态）。
  */
 import { computed } from 'vue'
 
@@ -48,7 +49,22 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
 
 <template>
   <header class="chat-header">
-    <AgentSummary :agent-name="agentName" :mcp-servers="visibleMcpServers" />
+    <!-- 最左：切换按钮 + 数字人名称（未选定时回落为"请选择数字人"提示），
+         切换入口紧贴身份信息，避免在右上角二次寻找 -->
+    <div class="chat-header__identity">
+      <button
+        type="button"
+        class="chat-header__switch"
+        aria-label="切换数字人"
+        :aria-pressed="agentPanelOpen ? 'true' : 'false'"
+        @click="emit('toggle-agent')"
+      >
+        <BaseIcon name="agent" :size="16" />
+        <span class="chat-header__switch-label">切换</span>
+      </button>
+
+      <AgentSummary :agent-name="agentName" :mcp-servers="visibleMcpServers" />
+    </div>
 
     <div class="chat-header__actions">
       <button
@@ -71,18 +87,8 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
         <BaseIcon name="workspace" :size="16" />
       </button>
 
-      <button
-        type="button"
-        class="chat-header__action"
-        aria-label="数字人"
-        :aria-pressed="agentPanelOpen ? 'true' : 'false'"
-        @click="emit('toggle-agent')"
-      >
-        <BaseIcon name="agent" :size="16" />
-      </button>
-
       <!-- 自带数据与面板的动作位（后台产出铃铛）由调用方注入：
-           本组件保持纯展示，不引入任何业务依赖（与上面三个按钮同一取向） -->
+           本组件保持纯展示，不引入任何业务依赖（与上面两个按钮同一取向） -->
       <slot name="actions-extra" />
     </div>
   </header>
@@ -97,6 +103,43 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
+}
+
+.chat-header__identity {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* 切换按钮：图标 + 文案，描边以区别于右侧纯图标动作位（同列紧邻数字人名称） */
+.chat-header__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.chat-header__switch:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+.chat-header__switch[aria-pressed='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.chat-header__switch-label {
+  white-space: nowrap;
 }
 
 .chat-header__actions {

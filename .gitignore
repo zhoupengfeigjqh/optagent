@@ -58,6 +58,11 @@ config.yaml
 .dev-pids.json
 typecheck-report.txt
 vitest-report.txt
+# 实际产物名与上面两条不一致（vitest-out.txt / check-out.txt / <name>-out.txt），
+# 2026-10-22 起按后缀兜底，避免同类检查输出再次入库
+*-out.txt
+# vitest 的 HTML 覆盖率报告目录：`coverage-*/` 匹配不到以点开头的目录名
+.coverage-gate/
 
 # ===== 日志与临时文件 =====
 *.log
@@ -68,3 +73,28 @@ vitest-report.txt
 .history/
 .DS_Store
 Thumbs.db
+
+# ===== 运行期数据库 =====
+# 配置目录（.opt-agent）入库，但其中的 SQLite 属运行期状态：
+# 随进程增长、二进制无法 merge；WAL/SHM 已单独忽略，本体同一口径
+usage.db
+usage.db-journal
+
+# ===== 一次性调试脚本 =====
+tmp-*.ps1
+tmp-*.sh
+
+# ===== Python 虚拟环境与工具缓存（bom-service / jev-service / ocr-service）=====
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 前端测试与构建缓存 =====
+playwright-report/
+test-results/
+.vite/
+
+# ===== 编辑器 =====
+.idea/
