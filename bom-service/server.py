@@ -4,31 +4,30 @@
 对外只有两件能力：
 
 - ``bom_validate``：校验一批子BOM 能否合并（dry-run，**不产文件**）；
-- ``bom_merge``：合并成多级总BOM，产出 xlsx，并返回一个**能点开的下载地址**
-  （``{base}/files/{产出名}``）——用户从聊天区入口点开即下载。
+- ``bom_merge``：合并成多级总BOM，产出 xlsx，**算完立刻回写平台**，返回 ``filePath``
+  —— 产出落进调用者的文件空间（``临时空间/后台产出/``），用户从聊天区入口点开即下载。
 
-为什么服务自己铸地址：xlsx 是二进制，只能靠 URL 交付；平台的签名读直链**只有平台铸得出来**
-（HMAC 密钥在平台侧，契约也禁止服务自行拼接平台入口地址）。于是服务自管产出：算完落盘到
-产出目录（默认 ``.data``，见 ``bom_store``），自己拼出地址，平台按契约 §4.7 把它渲染成
-聊天区入口行（前端已有实现）。
+为什么回写而不是自己存（2026-10-21 改）：xlsx 是二进制，只能靠 URL 交付，而"用户能打开的那个
+URL"只有平台铸得出来（HMAC 密钥在平台侧，契约也禁止服务自行拼接平台入口地址）。所以本服务
+**不再落盘、不再自铸下载地址**：运行环境为声明了 ``resultUrl`` 的工具注入回写地址
+（``POST /api/files/put``），服务算完把字节 POST 过去，平台落盘后回 ``path``，服务把它原样作为
+``filePath`` 返回（契约 §4.7 的本地文件空间形态）。
 
-分工：业务规则在 ``bom_core``、产出落盘与铸址在 ``bom_store``（两者都不依赖 ``mcp``，
-可脱离 MCP 装配单测）；本文件只做 MCP 装配与那条下载路由。
+分工：业务规则在 ``bom_core``（不依赖 ``mcp``，可脱离 MCP 装配单测）；本文件只做 MCP 装配与
+那一次回写。没有 ``resultUrl`` 时**不给任何假地址**——结果照常返回，只是本次没有可点入口。
 """
 import functools
 import os
 import sys
+import urllib.parse
 from typing import Annotated
 
 import anyio
-from mcp.server.fastmcp import Context, FastMCP
+import httpx
+from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from starlette.requests import Request
-from starlette.responses import FileResponse, Response
 
-import bom_store
 from bom_core import (
-    XLSX_CONTENT_TYPE,
     artifact_filename,
     failed_result,
     issue,
@@ -37,7 +36,6 @@ from bom_core import (
     result_json,
     root_from_total_bom_url,
     run_from_urls,
-    url_basename,
 )
 
 # 监听端口 8000（与 ocr-service 一致）。两个 MCP 服务同号**不冲突**：各自在容器里有独立
@@ -81,23 +79,63 @@ _PATH_DOC = "文件空间相对路径，由平台自动注入"
 # `_pipeline_kwargs` 这一处做。
 
 
-def _base_url(ctx: Context | None = None) -> str:
-    """产出地址的对外基址：``BOM_PUBLIC_BASE_URL`` 优先 → 请求的 scheme+Host → 空串。
+#: 回写的整体超时（秒）：平台在本机/同网段，落盘是写文件，正常几十毫秒
+_PUT_TIMEOUT_S = float(os.environ.get("BOM_PUT_TIMEOUT_S", "30"))
+#: 单次回写的字节上限。平台 ``/api/files/put`` 的 bodyLimit = ``UPLOAD_MAX_MB``（默认 5MB，超限 413）：
+#: 先判大小是为了**不白传一遍**（契约 §4.6 明确要求"结果可能很大时先判大小"）。
+#: 平台侧若调大该上限，这里用 ``BOM_RESULT_MAX_BYTES`` 跟上即可。
+_MAX_RESULT_BYTES = int(os.environ.get("BOM_RESULT_MAX_BYTES", str(5 * 1024 * 1024)))
 
-    **只走 HTTP 传输**（本服务唯一的传输方式）：下载路由挂在 Starlette 应用上，只有
-    进程真的在监听端口时它才存在 ⇒ "能不能给出可点链接"与"进程有没有 HTTP 服务"是同一件事。
-    没拿到请求（例如单测直接调用工具函数）时不猜，只认显式配置；
-    铸不出基址就返回空串，调用方据此**不写 viewUrl**（契约 §4.7：不带 = 本次没有入口）。
+
+def _put_url(result_url: str, filename: str, summary: str) -> str:
+    """在回写地址上追加 ``filename`` / ``summary``：**保留原有 query**（契约 §4.3）。
+
+    必须走 URL 解析器而不是字符串拼 ``&``：地址可能已带 query（``u/d/exp/sig/sid/call_id/t``），
+    拼字符串在带 fragment 或空 query 的形态下会拼出非法 URL，而丢掉任何一个原有参数都会 403。
     """
-    request = getattr(getattr(ctx, "request_context", None), "request", None)
-    if request is None:
-        return bom_store.base_from_request(bom_store.PUBLIC_BASE_URL)
-    return bom_store.base_from_request(
-        bom_store.PUBLIC_BASE_URL,
-        host=request.headers.get("host"),
-        scheme=request.url.scheme,
-        forwarded_proto=request.headers.get("x-forwarded-proto"),
-    )
+    parts = urllib.parse.urlsplit(result_url)
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    query.append(("filename", filename))
+    if summary:
+        query.append(("summary", summary))
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(query), parts.fragment))
+
+
+def _deliver(result_url: str, filename: str, data: bytes, summary: str) -> tuple[str, str]:
+    """把产出**回写平台**（``POST /api/files/put``）；返回 ``(filePath, 失败说明)``。
+
+    成功时 ``filePath`` = 平台返回的 ``path``（形如 ``临时空间/后台产出/{会话}_{产出名}``），
+    它是**权威路径**——服务不自己拼。失败时返回空串 + 一行原因：调用方据此**不写 filePath**
+    （契约 §4.7：不带 = 本次没有入口），而不是编一个点不开的路径。
+    """
+    if len(data) > _MAX_RESULT_BYTES:
+        return "", (f"产出 {len(data)} 字节，超过回写上限 {_MAX_RESULT_BYTES} 字节"
+                    f"（平台 bodyLimit；可用 BOM_RESULT_MAX_BYTES 对齐）")
+    try:
+        # content-type **必须是 octet-stream**：平台只为 `application/octet-stream` / `text/plain`
+        # 注册了"原样收字节"的 parser（见 agent-backend `server.ts`），
+        # 发 xlsx 自己的 MIME 会被 Fastify 判 415 Unsupported Media Type。
+        resp = httpx.post(_put_url(result_url, filename, summary), content=data,
+                          headers={"content-type": "application/octet-stream"},
+                          timeout=_PUT_TIMEOUT_S, follow_redirects=False)
+    except Exception as e:                                  # noqa: BLE001 —— 网络异常绝不穿透成 500
+        return "", f"回写请求失败（{e.__class__.__name__}: {e}）"
+    if resp.status_code not in (200, 202):
+        body = (resp.text or "").strip().replace("\n", " ")[:200]
+        return "", f"回写被拒（HTTP {resp.status_code}）：{body}"
+    try:
+        path = (resp.json() or {}).get("path")
+    except ValueError:
+        path = None
+    if not isinstance(path, str) or not path:
+        return "", "回写成功但响应里没有 path（拿不到 filePath）"
+    return path, ""
+
+
+def _one_line(text: str, limit: int = 200) -> str:
+    """摘要压成一行（契约 §4.4）：界面标题是单行省略号，多行/超长都会被截断。"""
+    return " ".join(str(text or "").split())[:limit]
 
 
 def _pipeline_kwargs(sub_bom_zip_path, total_bom_path, schema_path, mapping_path,
@@ -144,24 +182,6 @@ def _run(kind, kwargs, *, filename: str = "", max_issues: int | None = None) -> 
     return public, (xlsx or b"")
 
 
-@mcp.custom_route(f"{bom_store.URL_PREFIX}/{{name}}", methods=["GET"])
-async def download(request: Request) -> Response:
-    """产出下载：用户从聊天区的入口点进来，落到这里取 xlsx。
-
-    - 只服务 ``bom_store`` 认得出的产出名（单段、后缀白名单）⇒ 无路径穿越；
-    - 找不到 / 已过期 → 404（过期的文件顺手删掉，见 ``bom_store.resolve``）；
-    - 下载名就是产出名本身：URL 里带着它，用户存下来的文件仍是
-      ``总BOM_WCCMT-00000B0570_bom_…xlsx``，不用再改名（Starlette 会把中文名按 RFC 5987
-      编码进 ``Content-Disposition``）。
-    """
-    name = request.path_params.get("name", "")
-    path = bom_store.resolve(name)
-    if path is None:
-        return Response("产出不存在或已过期", status_code=404,
-                        media_type="text/plain; charset=utf-8")
-    return FileResponse(path, media_type=XLSX_CONTENT_TYPE, filename=name)
-
-
 @mcp.tool(structured_output=False)
 async def bom_validate(
     sub_bom_zip_path: Annotated[str, Field(description=f"子BOM 打包 zip，{_PATH_DOC}")],
@@ -191,7 +211,7 @@ async def bom_validate(
     - S4 / S5 循环引用截断 / 无子BOM 文件按叶子展开 / 累计用量无法计算
 
     **本工具不产出任何文件**：校验汇总本身就是结果，它自己就是 JSON，不需要下载通道。
-    所以返回里恒有 ``"artifact": null``，也**没有** ``viewUrl``。
+    所以返回里恒有 ``"artifact": null``，也**没有** ``filePath``。
 
     返回 {"status":"success"|"failed","message":"一行结论","summary":{统计},"issues":[...],"artifact":null}
     其中 issues 每条含 code/level/stage/target/location/field/message/hint，便于直接定位。
@@ -227,26 +247,33 @@ async def bom_merge(
         int,
         Field(description="返回的问题条目上限（默认 20）。完整问题清单在产出 xlsx 的 `校验汇总` sheet 里"),
     ] = 20,
-    ctx: Context | None = None,
+    resultUrl: Annotated[
+        str | None,
+        Field(description=(
+            "产出回写地址。**由运行环境自动注入，请勿自行填写**；"
+            "留空（默认）时只返回统计、不交付文件"
+        )),
+    ] = None,
 ) -> str:
-    """把一批子BOM 合并成一棵多级总BOM，按 schema_path 输出 xlsx，并给出**下载地址**。
+    """把一批子BOM 合并成一棵多级总BOM，按 schema_path 输出 xlsx，并**写入调用者的文件空间**。
 
-    流程（**同步**：调用返回时结果已经算完并交付）：
+    流程（**同步**：调用返回时结果已经算完、文件也已经交付）：
     先跑与 ``bom_validate`` **同一个**校验函数 →
     - 有阻断性错误：**不产出 BOM**（避免半成品被误用），返回 ``status: "failed"`` + 问题清单，
-      没有 ``viewUrl``（没有文件可下载）；
+      没有 ``filePath``（没有文件可下载）；
     - 无阻断性错误：按 schema_path 的 excel_column_order 输出 17 列 xlsx
       （列集合/列序/表头/留空判据 100% 由 schema_path 驱动，代码不硬编码列），
       组件行加粗、mat_code 按层级缩进、"无子BOM 按叶子展开"的行标红，
       并附一个 `校验汇总` sheet。
 
-    产出交付：xlsx 落盘到本服务的产出目录（``BOM_ARTIFACT_DIR``，默认 ``.data``），
-    返回 ``viewUrl`` + ``viewUrlName``；平台据此在聊天区渲染入口行，**用户点开即下载**。
-    地址由**本服务**铸造（``/files/{产出名}``），凭证就是那个不可猜的文件名；
-    文件按 ``BOM_ARTIFACT_TTL_S``（默认 7 天）清理，**过期后链接会失效**。
+    产出交付：xlsx 通过运行环境注入的 ``resultUrl`` **回写到文件空间**
+    （落点 ``临时空间/后台产出/``），返回 ``filePath`` + ``filePathName``；
+    平台据此在聊天区渲染入口行，**用户点开即下载**。``filePath`` 是**文件空间的相对路径**
+    （可直接交给 ``read_file`` / 文件空间接口），也是平台给的**权威路径**——本服务不自己拼。
+    文件随临时空间规则清理（30 天未访问），**过期后入口会失效**。
 
     返回形状（与校验一致，同一份 JSON）：
-    status/message/summary/issues/artifact（+ 成功且有产出通道时的 viewUrl/viewUrlName）。
+    status/message/summary/issues/artifact（+ 成功且回写成功时的 filePath/filePathName）。
     其中 ``summary`` 就是这次合并的汇总统计：``tree.nodes``（行数）/``tree.components``（组件数）
     /``counts``（error/warn 条数）/``by_code``/``by_stage``/``files``/``elapsed_s`` 等。
 
@@ -261,36 +288,30 @@ async def bom_merge(
         functools.partial(_run, "merge", kwargs, filename=filename, max_issues=max_issues))
     if not xlsx:                                            # 合并被阻断 / 内部错误：没有文件
         return result_json(public)
-    try:
-        bom_store.save(filename, xlsx)
-    except OSError as e:
-        # 落盘失败（磁盘满/权限/目录被挂成只读）：**不假装有产出**——artifact 清空、
-        # 不写 viewUrl，并把原因写进 message，同时落一条 stderr 供运维定位
-        print(f"产出落盘失败（{e.__class__.__name__}: {e}），本次无下载链接", file=sys.stderr)
-        public["artifact"] = None
-        public["message"] = f"{public['message']}（产出落盘失败，本次未交付 xlsx：{e.__class__.__name__}）"
+    if not resultUrl:
+        # 没拿到回写地址（直接调用服务 / 平台未注入）：结果照给，但本次**没有可点入口**
+        public["message"] = f"{public['message']}（未收到回写地址，产出未写入文件空间）"
         return result_json(public)
-    base = _base_url(ctx)
-    if not base:
-        # 铸不出可点地址（没拿到请求且未配 BOM_PUBLIC_BASE_URL）：文件在，但不给假链接
-        public["message"] = (f"{public['message']}"
-                             "（已落盘但无法确定对外地址，未给出下载链接；"
-                             "请配置 BOM_PUBLIC_BASE_URL）")
+    # 回写同样放线程里：httpx 是同步客户端，不能在事件循环上等（与计算同一原因）
+    file_path, err = await anyio.to_thread.run_sync(
+        functools.partial(_deliver, resultUrl, filename, xlsx,
+                          _one_line(public.get("message") or "")))
+    if err:
+        # 回写失败（签名过期 / 超过 bodyLimit / 网络）：**不假装有产出** —— 不写 filePath，
+        # 原因进 message，并落一条 stderr 供运维定位
+        print(f"产出回写失败（{filename}）：{err}", file=sys.stderr)
+        public["message"] = f"{public['message']}（产出未交付：{err}）"
         return result_json(public)
-    public["viewUrl"] = bom_store.public_url(base, filename)
-    public["viewUrlName"] = filename
+    public["filePath"] = file_path
+    public["filePathName"] = filename
     return result_json(public)
 
 
 def main() -> None:
-    """启动：备好产出目录 → 清一次历史产出 → 以 streamable-http 跑起来。"""
-    bom_store.ensure_dir()
-    removed = bom_store.sweep()
+    """启动：以 streamable-http 跑起来（本服务**不写磁盘**，没有本地产出目录）。"""
     # 日志走 stderr：stdout 留给运行时（uvicorn 自身也往 stderr 打），运维重定向单一流即可
     print(f"BOM MCP 服务启动：streamable-http http://0.0.0.0:{_PORT}；"
-          f"产出目录 {bom_store.directory()}"
-          f"（保留 {bom_store.TTL_S:g}s / 上限 {bom_store.MAX_FILES} 个、"
-          f"{bom_store.MAX_BYTES // 1024 // 1024}MB；启动清理 {removed} 个）",
+          f"产出经 resultUrl 回写平台（单次上限 {_MAX_RESULT_BYTES // 1024 // 1024}MB）",
           file=sys.stderr, flush=True)
     mcp.run(transport="streamable-http")
 

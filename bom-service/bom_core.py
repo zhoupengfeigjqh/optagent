@@ -11,10 +11,10 @@
 
 分层（对齐 `ocr-service`）：
 - `bom_core`：全部业务规则 + 结果形状 + 产出命名。不依赖 `mcp` ⇒ 单测可在宿主机直接跑。
-- `bom_store`：产出落盘与下载地址铸造（本服务唯一写磁盘的地方）。
-- `server.py`：只做 MCP 工具装配与传输选择。
+- `server.py`：MCP 工具装配、传输选择，以及算完之后把产出**回写平台**（`resultUrl`）。
 
-服务侧**只在算完之后**写一份产出文件（合并的 xlsx，交给用户下载，见 `bom_store`）：
+服务侧**不写磁盘**（2026-10-21）：合并产出的 xlsx 算完直接从内存 POST 给运行环境注入的
+回写地址，由平台落进调用者的文件空间（`临时空间/后台产出/`）并返回权威路径 `filePath`。
 计算全程 `io.BytesIO`，不落盘中转。两个工具都是**同步**的——没有受理、没有后台任务。
 
 判据一致性：校验规则逐条对齐 `bom_integrate.py`，唯一改动是把 `print + sys.exit(1)`
@@ -306,11 +306,12 @@ def make_job_id(now: float | None = None) -> str:
 
 
 def artifact_filename(job_id: str, root: str = "") -> str:
-    """合并产出的**文件名**（既是落盘名，也是用户下载时看到的名字）。
+    """合并产出的**文件名**（既是回写时的文件名，也是聊天区入口的显示名）。
 
-    一份名字干两件事：``bom_store`` 用同一个名字落盘与拼 URL，就不需要"按 job_id 反查
-    展示名"的 sidecar（少一个可能与正文漂移的状态）。``root`` 由**与管线同一处**的
-    推断函数给出，因此不会出现"文件名里的根组件与表里的根组件对不上"。
+    同一个名字贯穿两处：回写时作为 ``filename``（平台据此算 ``job_id`` 与落盘名），返回时
+    作为 ``filePathName``——不需要"按 job_id 反查展示名"的 sidecar（少一个可能与正文漂移的
+    状态）。``root`` 由**与管线同一处**的推断函数给出，因此不会出现"文件名里的根组件与表里
+    的根组件对不上"。
     """
     safe_root = re.sub(r"[^0-9A-Za-z_.-]", "_", root) or "BOM"
     return f"总BOM_{safe_root}_{job_id}{RESULT_SUFFIX_XLSX}"
@@ -1062,24 +1063,19 @@ def _finish_result(issues, stages_run, cfg, raw, root, elapsed, xlsx=None, nodes
     return result
 
 
-def public_result(result: Mapping, *, filename: str = "", bytes_len: int = 0, rows: int = 0,
-                  view_url: str = "", view_url_name: str = "") -> dict:
-    """剥掉内部字段，补上 artifact 与（可选的）下载入口。
+def public_result(result: Mapping, *, filename: str = "", bytes_len: int = 0, rows: int = 0) -> dict:
+    """剥掉内部字段，补上 artifact。
 
     - ``artifact``：本次产出的文件名/行数/字节数；没有产出（校验、或合并被阻断）时置 ``None``；
-    - ``viewUrl`` / ``viewUrlName``：**能点开的下载地址**与它的显示名，由调用方铸好传进来。
-      铸不出可点地址时**必须留空**——契约 §4.7 的缺失语义是"本次没有入口"（界面整行不渲染），
-      而不是给一个点不开的地址。
+    - 视图入口（``filePath`` / ``filePathName``）**不在这里拼**：它只能在回写成功之后由
+      ``server.py`` 补上（平台返回的 ``path`` 才是权威路径）；拼不出就不写，
+      契约 §4.7 的缺失语义是"本次没有入口"（界面整行不渲染）。
     """
     out = {k: v for k, v in result.items() if not k.startswith("_")}
     if filename:
         out["artifact"] = {"filename": filename, "rows": rows, "bytes": bytes_len}
     else:
         out["artifact"] = None
-    if view_url:
-        out["viewUrl"] = view_url
-    if view_url_name:
-        out["viewUrlName"] = view_url_name
     return out
 
 

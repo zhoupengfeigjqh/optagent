@@ -56,6 +56,17 @@ export interface ProducedStore {
   start(): void
   /** 停止订阅（组件卸载时调用；之后可再次 `start()`） */
   stop(): void
+  /**
+   * 订阅「新到达的产出」（`refresh()` 差集里新出现的 `job_id`）；返回退订函数。
+   *
+   * 供"后台任务完成"的即时提示使用（`ProducedBell` 的 toast 出口）。两条语义必须守住：
+   * - **首次 `refresh()` 只建立基线、不通知**——挂载时列表里全是历史条目，
+   *   通知它们等于一打开页面就弹一堆旧提示；
+   * - **`clear()`（切数字人）重置基线**——新数字人的历史条目同样不是"新增"。
+   *
+   * 监听者异常不影响列表刷新（提示是旁路，不是主链路）。
+   */
+  onNewItems(listener: (items: readonly ProducedItem[]) => void): () => void
 }
 
 /** 创建后台产出 store。 */
@@ -74,9 +85,38 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
    */
   let generation = 0
 
+  /**
+   * 已见过的 `job_id` 全集（基线）。`refresh()` 用它算差集。
+   *
+   * 刻意**不放进响应式、也不从 `items` 反推**：`markRead()` 会改 `items`，
+   * 但"已读"不是"新增"；只有列表整体替换时的差集才有意义。
+   */
+  let seen = new Set<string>()
+  /** 基线是否已建立：首次 `refresh()` 或 `clear()` 之后为 `false`，此时只记集合、不通知 */
+  let baselineReady = false
+  /** 新增条目的监听者（toast 等旁路消费）；不参与列表状态 */
+  const newItemListeners = new Set<(items: readonly ProducedItem[]) => void>()
+
   const unreadCount = computed(
     () => items.value.filter((item) => item.read_at === undefined).length,
   )
+
+  /**
+   * 通知"新到达的产出"。
+   *
+   * 逐个监听者包 try/catch：提示是旁路——toast 抛错不该让列表刷新变成错误态
+   * （与 `text()` 的"局部失败不升级为全局错误"同一口径）。
+   */
+  function notifyNew(added: readonly ProducedItem[]): void {
+    if (added.length === 0) return
+    for (const listener of [...newItemListeners]) {
+      try {
+        listener(added)
+      } catch {
+        // 刻意吞掉：见上——列表已经刷新，提示失败不影响这个事实
+      }
+    }
+  }
 
   async function refresh(): Promise<void> {
     const token = ++generation
@@ -84,8 +124,15 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
     error.value = null
     try {
       const next = (await options.produced.list(options.limit)).items
+      // 代际校验 MUST 早于基线更新：切人瞬间旧响应晚到，先写 `seen` 会让基线被
+      // 旧数字人的条目污染，之后新数字人的真实新增就再也算不出来
       if (token !== generation) return
+      // 差集在写回列表**之前**算：写回后 `items` 已是新值，无从对比
+      const added = baselineReady ? next.filter((item) => !seen.has(item.job_id)) : []
+      seen = new Set(next.map((item) => item.job_id))
+      baselineReady = true
       items.value = next
+      notifyNew(added)
     } catch (err) {
       if (token !== generation) return
       error.value = toErrorInfo(err)
@@ -100,6 +147,10 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
     items.value = []
     error.value = null
     loading.value = false
+    // 基线一并重置：切人后新列表里的每条都是"没见过的 job_id"，
+    // 不重置会把新数字人的历史当成新增弹一遍提示
+    seen = new Set()
+    baselineReady = false
   }
 
   /**
@@ -147,6 +198,13 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
     unsubscribe = null
   }
 
+  function onNewItems(listener: (items: readonly ProducedItem[]) => void): () => void {
+    newItemListeners.add(listener)
+    return () => {
+      newItemListeners.delete(listener)
+    }
+  }
+
   async function text(jobId: string): Promise<string | null> {
     try {
       return await options.produced.text(jobId)
@@ -156,7 +214,19 @@ export function createProducedStore(options: ProducedStoreOptions): ProducedStor
     }
   }
 
-  return { items, loading, error, unreadCount, refresh, clear, markRead, text, start, stop }
+  return {
+    items,
+    loading,
+    error,
+    unreadCount,
+    refresh,
+    clear,
+    markRead,
+    text,
+    start,
+    stop,
+    onNewItems,
+  }
 }
 
 /** 组件内取用（经 `provide/inject` 的会话上下文）。 */

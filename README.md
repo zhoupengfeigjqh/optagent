@@ -38,10 +38,11 @@ OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务�
 └─────────────────┘         └───────────────────────────┘
 ```
 
-`bom-service` 是唯一「产出文件并交给用户下载」的 MCP 服务：合并后的 xlsx 由**服务自己**落盘到
-产出目录（容器内 `/app/.data`，bind mount 到宿主机 `bom-service/.data`）并铸造下载直链
-（`http://<宿主机>:8102/files/{产出名}`），平台把它渲染成聊天区入口行，用户点开即下载——
-二进制不经过模型上下文，也不走「后台记录」（这是同步工具，返回时结果已经算完）。
+`bom-service` 是唯一「产出文件并交给用户下载」的 MCP 服务：合并后的 xlsx 算完**直接从内存回写平台**
+（运行环境注入的 `resultUrl` → `POST /api/files/put`），落进调用者的文件空间
+`临时空间/后台产出/`，服务把平台返回的 `path` 作为 `filePath` 交回，聊天区据此渲染入口行、
+用户点开即下载——二进制不经过模型上下文。**服务本身不写磁盘**（2026-10-21 起本地产出目录与
+`BOM_PUBLIC_BASE_URL` 一并下架）。
 
 除同步调用外，MCP 服务也可走**异步**：运行环境为声明过的工具注入 `resultUrl`，服务立即返回受理，
 算完后 POST 回写结果 → 落盘到 `临时空间/后台产出/` → 前端铃铛「后台记录」出现条目，模型可在后续
@@ -135,9 +136,8 @@ optagent/
 │   └── tests/              # 服务端测试
 │
 ├── bom-service/            # BOM 校验/合并 MCP 服务（Docker，宿主机端口 8102）
-│   ├── server.py           # MCP 服务入口（FastMCP / StreamableHTTP）+ 产出下载路由
+│   ├── server.py           # MCP 服务入口（FastMCP / StreamableHTTP）+ 产出回写（resultUrl）
 │   ├── bom_core.py         # 校验与合并管线（S0~S6 阶段、结果形状、产出命名）
-│   ├── bom_store.py        # 产出落盘与下载地址铸造（本服务唯一写磁盘处）
 │   └── tests/              # 服务端测试
 │
 ├── gateway/                # 生产网关（nginx）
@@ -159,7 +159,7 @@ optagent/
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example`。其中 **`ONTO_MARKET_DIR`** 指向本体平台的本体市场（`../../optonto/.data/onto_market`，平台**只读**）；缺省 = "从本体市场导入"不可用（不影响启动与其余功能） |
 | `ocr-service/.env.local` | OCR 服务 | compose `env_file`（`required: false`） | 本机私产：可调项（下载上限、超时）；缺失即用代码缺省值（gitignore；样板 `.env.example`） |
 | `jev-service/.env.local` | Jev 服务 | compose `env_file`（`required: false`） | `TYPESAFE_API_KEY` 与上游端点/超时等（含密钥，gitignore；样板 `.env.example`） |
-| `bom-service/.env.local` | BOM 服务 | compose `env_file`（`required: false`） | 计算限额（输入/解压/节点上限）、产出保留策略，以及 **`BOM_PUBLIC_BASE_URL`**——下载地址的对外基址，**必须填用户浏览器可达的宿主机地址**（如 `http://192.168.1.3:8102`），否则回退成容器内名 `bom:8000`、用户点不开（gitignore；样板 `.env.example`） |
+| `bom-service/.env.local` | BOM 服务 | compose `env_file`（`required: false`） | 可调项：计算限额（输入/解压/节点上限）与**回写上限**（`BOM_RESULT_MAX_BYTES`，须与平台 `UPLOAD_MAX_MB` 对齐）。**2026-10-21 起产出改回写平台**，本机不再有产出目录与对外基址（原 `BOM_PUBLIC_BASE_URL` 已下架）（gitignore；样板 `.env.example`） |
 | `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`）。**（2026-09-27）** `admin-backend` 已不再挂载 `docker.sock` 与编排文件本身——平台不读容器编排声明与容器运行态 |
 
 读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务，2026-09-28 简化）：
@@ -326,16 +326,21 @@ TypeSafe System One 决策模型（Jev）的 MCP 封装：把「state + 类型�
 
 | 模块 | 作用 |
 |---|---|
-| `server.py` | MCP 服务入口：两个**同步**工具 `bom_validate`（校验，dry-run、**不产文件**）/ `bom_merge`（合并并给下载地址）；外加一条产出下载路由 `GET /files/{产出名}`（无鉴权，凭证就是那个不可猜的产出名） |
+| `server.py` | MCP 服务入口：两个**同步**工具 `bom_validate`（校验，dry-run、**不产文件**）/ `bom_merge`（合并 + **回写平台**）；回写地址由平台注入（工具声明 `resultUrl`） |
 | `bom_core.py` | 全部业务规则与结果形状：S0 输入与配置 → S1.2 编码族 → S1.5 表头 1:1 映射 → S2 归一化 → S2.4 整行重复 → S2.5 编码认领 → S4 递归展开 → S5 累计用量连乘 → S6 按 `schema_path` 的 `excel_column_order` 导出 xlsx。错误逐条带 `code/level/stage/target/location/field/message/hint`，**任一阶段出现 error 即停止**（fail-fast）。四个输入经签名直链回源下载（只接受 http/https、限时限大小、不跟随重定向，与 OCR/Jev 同一机制） |
-| `bom_store.py` | 产出落盘与下载地址铸造（**本服务唯一写磁盘的地方**）：产出名白名单（挡路径穿越）、原子写（`.tmp` + `os.replace`）、惰性清理（启动 + 每次落盘，按 `BOM_ARTIFACT_TTL_S` 默认 7 天，另有条数/字节上限兜底） |
 
-**产出交付链路**（关键点：平台的签名直链只有平台铸得出来，所以服务**自管产出、自铸地址**）：
+**产出交付链路**（关键点：能点开的地址只有平台铸得出来，所以服务**不落盘、不自铸地址**，改为回写）：
 
 ```text
-bom_merge 算完 → xlsx 落盘 /app/.data → 拼 {BOM_PUBLIC_BASE_URL}/files/{产出名}
-  → 结果 JSON 里带 viewUrl / viewUrlName（契约 §4.7）→ 平台渲染成聊天区入口行 → 用户点开即下载
+bom_merge 算完 → 内存里的 xlsx POST 到 resultUrl（POST /api/files/put，octet-stream）
+  → 平台落盘 临时空间/后台产出/{会话}_{产出名} → 202 {"path": …}
+  → 结果 JSON 里带 filePath / filePathName（契约 §4.7）→ 聊天区入口行 → 用户点开即下载
 ```
+
+- 单次回写上限 = 平台 `UPLOAD_MAX_MB`（默认 **5MB**，超限 413）⇒ 服务先判大小、超限则**不交付**
+  并把原因写进 `message`（`BOM_RESULT_MAX_BYTES` 可对齐调整）；
+- 没有 `resultUrl`（直接调服务）时结果照给，但**没有入口**——绝不编一个点不开的地址；
+- 产出随临时空间规则清理（**30 天未访问**），入口过期后点开 404。
 
 **边界**：本服务只判「能不能合并」「能不能算出来」，**不做**与真实 BOM 的一致性比对（行序/数量/增删/版本差异）。
 
@@ -640,7 +645,7 @@ docker compose up -d ocr                            # 首次构建镜像较慢�
 cp ocr-service/.env.example ocr-service/.env.local  # 本机形态才需要：填宿主机 LAN IP（回源白名单）
 cp jev-service/.env.example jev-service/.env.local  # 首次：填 TYPESAFE_API_KEY 与同一个 LAN IP
 docker compose up -d jev                            # 无本地模型，构建后秒级启动
-cp bom-service/.env.example bom-service/.env.local  # 首次：填 BOM_PUBLIC_BASE_URL=http://<宿主机 LAN IP>:8102（下载链接的对外基址）
+cp bom-service/.env.example bom-service/.env.local  # 可选：只在要覆盖计算限额 / 回写上限时才需要（产出回写平台，无需对外基址）
 docker compose up -d bom                            # 无本地模型，构建后秒级启动
 ```
 
@@ -725,26 +730,33 @@ npm run dev
 **BOM 服务（`bom`）的登记要点**：
 
 - 连接地址：全 Docker 用 `http://bom:8000/mcp`；后端在宿主机跑用 `http://<宿主机 LAN IP>:8102/mcp`
-  （它另外发布宿主端口 8102 供**用户浏览器**下载产出）；
+  （发布宿主端口只为**宿主机上的 backend** 连 MCP，产出不再经该端口下发）；
 - `file_args`：`bom_validate` / `bom_merge` 的四个文件入参
   （`sub_bom_zip_path` / `total_bom_path` / `schema_path` / `mapping_path`）**每个都要声明为 `url` 模式**
   ——模型填文件空间相对路径，运行端铸成签名直链；漏声明的那个参数会把相对路径原样发给服务，
   结果是 E001「输入取不到」。**声明的 key 就是参数名**（`file_args[toolName]` 的键必须与工具签名
   逐字一致）：这四个名字刻意不带 `url`/`http` 字样，避免模型自己拼直链；改名后**平台侧设计态的
   `file_args` 必须同步改成新名**，否则键对不上 → 铸造不生效 → 直接 E001；
-- `confirmation` 建议 `never`（纯计算，不写业务系统）；两个工具都是**同步**的，**不要**在入参
-  schema 里声明 `resultUrl`——那会让运行端注入一个它用不上、还可能被判为非法入参的字段；
-- 产出的下载入口由服务自己在返回里给出 `viewUrl` / `viewUrlName`（见下），平台零改动渲染。
+- `confirmation` 建议 `never`（纯计算，不写业务系统）；两个工具都是**同步**的。`bom_merge` 自己
+  声明了 `resultUrl`（2026-10-21 起产出回写平台）——**平台侧无需任何登记**，运行端看到声明就会注入；
+  `bom_validate` 不产文件、未声明，也就拿不到回写地址；
+- 产出的下载入口由服务在返回里给出 `filePath` / `filePathName`（文件空间相对路径，见下），
+  平台零改动渲染；点开走 `/api/files/download`（`临时空间/后台产出/` 已放开只读访问）。
 
-> **需要链接跳转时，请在工具返回里加上 `viewUrl` 与 `viewUrlName` 字段**，方便工具调用后的结果展示：
+> **需要链接跳转时，请在工具返回里加上 `viewUrl` / `viewUrlName`（外部地址）或
+> `filePath` / `filePathName`（本地文件空间相对路径）字段**，方便工具调用后的结果展示：
 >
 > - `viewUrl`（必给）：可跳转的页面地址，**二选一**——**根相对路径**（**单个** `/` 开头，如
 >   `/datasource/ds1/dst1/t1/xlsx`）或**完整 `http(s)://` 地址**。协议相对（`//host/…`）、
 >   缺前导 `/`、`javascript:` / `data:` 等其它 scheme **不会被链接化**；
 > - `viewUrlName`（可选，**必须与 `viewUrl` 同层**）：入口显示的**名称**；不提供就显示地址本身。
+> - `filePath`（2026-10-15 起，工具自己产文件时用这个）：**文件空间相对路径**（如
+>   `临时空间/后台产出/th_1_总BOM_….xlsx`，就是回写响应里的 `path`）。平台把它当"本地文件"处理：
+>   点开按**扩展名**分派（文本进面板、`.xlsx` 走下载引导），与"在文件空间里点文件"完全同一条路；
+>   配套 `filePathName`（同层，可选）作显示名。
 >
-> 前提：**结果正文须是一个合法 JSON 对象或数组**（`viewUrl` 可在任意层级，深度 ≤8）——纯文本、CSV、
-> 或 JSON 之外还夹着说明文字、带 BOM 的文本都不会被解析。带上该字段后，工具调用会在**回答正文之后**
+> 前提：**结果正文须是一个合法 JSON 对象或数组**（两类字段可在任意层级，深度 ≤8）——纯文本、CSV、
+> 或 JSON 之外还夹着说明文字、带 BOM 的文本都不会被解析。带上这些字段后，工具调用会在**回答正文之后**
 > 多出一行可点入口（最多直接显示 3 个，其余走「另有 N 个」），工具卡片的结构化视图里该地址也会变成链接。
 > 平台**不改写值、不拼前缀**（根相对路径的前缀由界面按用户当前访问入口补）。
 >

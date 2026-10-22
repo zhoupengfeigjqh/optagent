@@ -1,5 +1,5 @@
-# 服务镜像只需运行期文件（server.py + bom_core.py + bom_store.py）与依赖清单。
-# 测试资产（tests/、requirements-test.txt）、模板与产出目录都不进构建上下文：
+# 服务镜像只需运行期文件（server.py + bom_core.py）与依赖清单。
+# 测试资产（tests/、requirements-test.txt）与本机配置（.env.local）不进构建上下文：
 # 容器只做部署与运行，测试一律在宿主机本地执行。
 #
 # 注意这是**白名单**写法（先 `*` 全排，再逐个 `!` 放行）：Dockerfile 里每多 COPY 一个文件，
@@ -7,6 +7,5 @@
 *
 !server.py
 !bom_core.py
-!bom_store.py
 !requirements.txt
 !Dockerfile

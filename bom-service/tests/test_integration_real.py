@@ -8,8 +8,8 @@
 - ``子BOM字段映射.json``     → 输入3b
 
 做法：用本机 http.server 托管仓库根目录（把文件变成 http 直链，模拟平台的铸造直链），
-然后走 ``bom_core.run_from_urls`` 跑完整流程。**计算本身不落盘**；交付那一跳
-（算完落盘 + 按名取回）由 ``bom_store`` 负责，这里用 ``tmp_path`` 走一遍真字节。
+然后走 ``bom_core.run_from_urls`` 跑完整流程。**全程不落盘**；交付那一跳（算完 POST 到
+``resultUrl``）由 ``server.py`` 负责，见 ``tests/test_server_e2e.py``。
 
 回归口径：与既有实现（``bom_integrate.py``，24 文件）逐行对齐——展开 327 行（含根）、
 明细 326 行、0 阻断性错误。这不是"与真实BOM 的一致性校验"，而是"新旧实现等价性回归"。
@@ -156,22 +156,17 @@ def test_nodes_match_legacy_pipeline_row_by_row(base_url):
         assert float(old_row[3]) == float(node["total_qty"]), f"第{i + 2}行 total_qty 不一致"
 
 
-def test_output_can_be_stored_and_fetched_back(base_url, tmp_path):
-    """交付那一跳：真实产出落盘 → 按名取回 → 字节一模一样，且取回的就是能打开的 xlsx。
+def test_output_bytes_are_a_readable_xlsx_named_after_the_root(base_url):
+    """交付那一跳的**前半段**：真字节确实是一份能打开的 xlsx，且产出名带对根组件。
 
-    （落盘/取回是 ``bom_store`` 的职责；``server.py`` 只把这一步接在算完之后。）
+    （后半段"送出去"在 ``tests/test_server_e2e.py``：真起服务、真 POST 到一个假回写端点；
+    本服务不落盘，故这里没有"落盘 → 取回"这一跳了。）
     """
     import bom_core
-    import bom_store
     result = bom_core.run_from_urls(**urls(base_url), emit=True)
     name = bom_core.artifact_filename("bom_1_ab", result["root"])
     assert name == "总BOM_WCCMT-00000B0570_bom_1_ab.xlsx"
-
-    path = bom_store.save(name, result["_xlsx"], path=tmp_path)
-    assert path.name == name and path.read_bytes() == result["_xlsx"]
-    fetched = bom_store.resolve(name, path=tmp_path)
-    assert fetched == path
-    assert load_workbook(io.BytesIO(fetched.read_bytes())).sheetnames == ["Total BOM", "校验汇总"]
+    assert load_workbook(io.BytesIO(result["_xlsx"])).sheetnames == ["Total BOM", "校验汇总"]
 
 
 def test_validator_writes_no_files(base_url, tmp_path, monkeypatch):

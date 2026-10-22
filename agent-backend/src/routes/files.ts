@@ -20,6 +20,10 @@
  * 场景（scenario.json）随数字人存放，故同一用户的不同数字人可见的目录清单不同。
  * 未选中数字人 → 409 AGENT_NOT_SELECTED；选中但不可用 → 409 AGENT_NOT_AVAILABLE；
  * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED。
+ *
+ * **读方向的唯一例外**（2026-10-21）：`download` / `preview` 额外放行
+ * `临时空间/后台产出`（`checkDirRead`）——MCP 服务回写的产出在那里，聊天区的 `filePath`
+ * 入口要能点开；`upload` / `list` / `delete` 仍走 `checkDir`，口径不变。
  */
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -36,7 +40,7 @@ import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { splitAgentScopedPath, verifyRef } from '../infra/file-sign.js';
-import { checkDir, currentAgentFor } from './files-scope.js';
+import { checkDir, checkDirRead, currentAgentFor } from './files-scope.js';
 import { registerFileUploadRoute } from './files-upload.js';
 import { registerFilePutRoute } from './files-put.js';
 
@@ -146,7 +150,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
       const agent = currentAgentFor(ctx, userId);
-      const target = checkDir(ctx, userId, agent, dir);
+      // 读方向：额外放行 `临时空间/后台产出`（MCP 回写产出的 filePath 入口点开后落到这里）
+      const target = checkDirRead(ctx, userId, agent, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }
@@ -176,7 +181,8 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
       const agent = currentAgentFor(ctx, userId);
-      const target = checkDir(ctx, userId, agent, dir);
+      // 同上：产出目录的读入口（`.xlsx` 在本端点回退成附件下载）
+      const target = checkDirRead(ctx, userId, agent, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
       }

@@ -9,7 +9,7 @@ S1.2/S1.5/S2/S2.4/S2.5 各条校验、递归展开与循环截断、累计用量
 结果形状（标准 JSON）与产出命名（HTTP 均经 ``httpx.MockTransport`` 注入，不发真实请求）。
 
 **不覆盖**：与真实BOM 的一致性比对——那是本服务职责之外，代码里也没有；
-产出落盘与下载地址（``bom_store``）在 ``tests/test_bom_store.py``。
+产出回写平台（``resultUrl``）在 ``tests/test_server_e2e.py``（真起服务 + 假回写端点）。
 """
 import importlib
 import io
@@ -533,29 +533,29 @@ def test_artifact_filename_sanitizes_root(monkeypatch):
     assert dirty.startswith("总BOM_") and dirty.endswith("_bom_1_ab.xlsx")
 
 
-def test_public_result_carries_artifact_and_download_entry(monkeypatch):
-    """对外结果：剥掉内部字段、补 artifact、补下载入口（viewUrl/viewUrlName）。"""
+def test_public_result_carries_artifact_only(monkeypatch):
+    """对外结果：剥掉内部字段、补 artifact；**入口字段不在这一层拼**（回写成功后才由 server 补）。"""
     core = load_core(monkeypatch)
     name = "总BOM_X_bom_1_ab.xlsx"
     result = {"status": "success", "message": "合并完成", "_nodes": [1, 2], "_xlsx": b"PK"}
-    out = core.public_result(result, filename=name, bytes_len=7, rows=322,
-                             view_url="http://bom:8000/files/" + name, view_url_name=name)
+    out = core.public_result(result, filename=name, bytes_len=7, rows=322)
     assert "_nodes" not in out and "_xlsx" not in out                 # 内部字段不外泄
     assert out["artifact"] == {"filename": name, "rows": 322, "bytes": 7}
-    assert out["viewUrl"].startswith("http://bom:8000/files/")
-    assert out["viewUrlName"] == name
-
-
-def test_public_result_without_output_has_no_download_entry(monkeypatch):
-    """没有产出（校验、或合并被阻断）时：artifact 为空，且**不留 viewUrl 空字段**。"""
-    core = load_core(monkeypatch)
-    out = core.public_result({"status": "failed", "message": "校验未通过"})
-    assert out["artifact"] is None
+    # 路径只有平台回写响应才给得出；core 若自己编一个就是"点不开的入口"
+    assert "filePath" not in out and "filePathName" not in out
     assert "viewUrl" not in out and "viewUrlName" not in out
 
 
+def test_public_result_without_output_has_no_download_entry(monkeypatch):
+    """没有产出（校验、或合并被阻断）时：artifact 为空，且**不留入口空字段**。"""
+    core = load_core(monkeypatch)
+    out = core.public_result({"status": "failed", "message": "校验未通过"})
+    assert out["artifact"] is None
+    assert "filePath" not in out and "filePathName" not in out
+
+
 # ---------------------------------------------------------------- 全流程不落盘
-# （`bom_core` 只算不写：落盘是 `server.py` 在拿到产出之后单独做的一步，见 bom_store）
+# （`bom_core` 只算不写：回写是 `server.py` 在拿到产出的字节之后单独做的一步）
 
 
 def test_pipeline_writes_no_files(monkeypatch, tmp_path):

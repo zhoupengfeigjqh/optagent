@@ -10,9 +10,12 @@ import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import {
   DirValidationError,
+  PRODUCED_DIR,
   ScenarioNotConfiguredError,
+  SPACE_TMP,
   parseSpaceDir,
 } from '../domain/dirs.js';
+import type { SpaceDirTarget } from '../domain/dirs.js';
 import { ApiError } from '../server.js';
 
 /**
@@ -59,4 +62,31 @@ export function checkDir(ctx: AppContext, userId: string, agentName: string, dir
     }
     throw err;
   }
+}
+
+/**
+ * **读方向**（预览 / 下载）的目录解析：与 `checkDir` 同一口径，额外放行后台产出目录。
+ *
+ * 为什么单开这一处（2026-10-21）：MCP 服务回写的产出落在 `临时空间/后台产出/`，而
+ * `parseSpaceDir` 对非「数据准备」空间**拒绝二级目录** —— 于是聊天区里的 `filePath` 入口
+ * （`临时空间/后台产出/x.xlsx`）点开必然 400。这里只对**这一个**登记过的二级目录放行。
+ *
+ * 边界（改之前先读完）：
+ * - **仅读**：上传 / 删除 / 列目录仍走 `checkDir`——写进去会打乱产出目录的 `.meta.json`
+ *   索引（`domain/produced.ts` 的"目录即索引"），删掉会留下悬空记录；
+ * - 只认**完全相等**的 `d`，不做前缀匹配：`临时空间/后台产出/子目录` 之类一律交回
+ *   `checkDir` 按原规则拒绝；
+ * - `parseSpaceDir` 的口径**不动**：模型侧 `read_file` / `list_dir` 的白名单本就包含顶层
+ *   临时空间（见 `listAvailableDirs` 的注释），放宽它只会让文件浏览接口的行为漂移。
+ */
+export function checkDirRead(
+  ctx: AppContext,
+  userId: string,
+  agentName: string,
+  dir: string,
+): SpaceDirTarget {
+  if (dir === PRODUCED_DIR) {
+    return { space: SPACE_TMP, relPath: PRODUCED_DIR };
+  }
+  return checkDir(ctx, userId, agentName, dir);
 }

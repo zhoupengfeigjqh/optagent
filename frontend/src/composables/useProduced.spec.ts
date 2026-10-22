@@ -228,3 +228,114 @@ describe('正文读取（契约 §10.5 ⑦）', () => {
     expect(s.error.value).toBeNull()
   })
 })
+
+/* ---------- 2026-10-21：后台任务完成提示（新增条目的差集通知） ---------- */
+
+describe('新增条目通知（onNewItems）', () => {
+  it('首次 refresh 只建立基线、不通知（挂载时列表里都是历史）', async () => {
+    api.list.mockResolvedValue({ items: [item('a')] })
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+
+    await s.refresh()
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('之后出现新 job_id：只通知新增的那几条', async () => {
+    api.list.mockResolvedValueOnce({ items: [item('a')] })
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+    await s.refresh()
+
+    api.list.mockResolvedValueOnce({ items: [item('b'), item('a')] })
+    await s.refresh()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    const added = listener.mock.calls[0]![0] as ProducedItem[]
+    expect(added.map((entry) => entry.job_id)).toEqual(['b'])
+  })
+
+  it('同一批重复 refresh 不重复通知（差集天然去重）', async () => {
+    api.list.mockResolvedValue({ items: [item('a')] })
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+
+    await s.refresh()
+    await s.refresh()
+    await s.refresh()
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('clear（切数字人）重置基线：新数字人的历史不通知', async () => {
+    api.list.mockResolvedValueOnce({ items: [item('a')] })
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+    await s.refresh()
+
+    s.clear()
+    api.list.mockResolvedValueOnce({ items: [item('b'), item('c')] })
+    await s.refresh()
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('refresh 失败不通知，也不污染基线（下一次仍能算出新增）', async () => {
+    api.list.mockResolvedValueOnce({ items: [item('a')] })
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+    await s.refresh()
+
+    api.list.mockRejectedValueOnce({ code: 'NETWORK_ERROR', message: 'x' })
+    await s.refresh()
+    expect(listener).not.toHaveBeenCalled()
+
+    api.list.mockResolvedValueOnce({ items: [item('b'), item('a')] })
+    await s.refresh()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    const added = listener.mock.calls[0]![0] as ProducedItem[]
+    expect(added.map((entry) => entry.job_id)).toEqual(['b'])
+  })
+
+  it('clear 后旧响应晚到：不通知（代际保护，基线不被污染）', async () => {
+    const resolvers: Array<(value: { items: ProducedItem[] }) => void> = []
+    api.list.mockImplementation(
+      () => new Promise<{ items: ProducedItem[] }>((resolve) => resolvers.push(resolve)),
+    )
+    const s = store()
+    const listener = vi.fn()
+    s.onNewItems(listener)
+
+    const first = s.refresh()
+    resolvers[0]!({ items: [item('a')] })
+    await first
+
+    const stale = s.refresh()
+    s.clear()
+    resolvers[1]!({ items: [item('b')] })
+    await stale
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('退订后不再通知', async () => {
+    api.list.mockResolvedValueOnce({ items: [] })
+    const s = store()
+    const listener = vi.fn()
+    const off = s.onNewItems(listener)
+    await s.refresh()
+
+    off()
+    api.list.mockResolvedValueOnce({ items: [item('a')] })
+    await s.refresh()
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+})

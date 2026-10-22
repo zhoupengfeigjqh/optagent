@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""MCP 层端到端测试：真起服务、真走协议、真下载产出。
+"""MCP 层端到端测试：真起服务、真走协议、**真把产出回写出去**。
 
 链路：真实数据（BOM提交/）→ 本机静态服务铸成 http 直链 → 真实 ``server.py`` 进程
-→ MCP 客户端 ``tools/call`` → 结果里带回下载地址 → **用这个地址把 xlsx 真下下来**。
+→ MCP 客户端 ``tools/call``（带平台注入的 ``resultUrl``）→ 服务算完 **POST 到假回写端点**
+→ 结果里带回 ``filePath``，且那个端点收到的字节是**能打开的 xlsx**。
 
-这一层专门守住"注册得起来、参数齐、产出真能拿到"——``server.py`` 里
+这一层专门守住"注册得起来、参数齐、产出真能送出去"——``server.py`` 里
 ``@mcp.tool(structured_output=False)`` 与"工具内不得阻塞事件循环"那两条注释就是它要防的坑
 （前者会让工具注册直接失败，后者会让并发调用互相卡死）。
 
-只测 streamable-http：本服务只提供这一种传输——下载地址要能点开，前提就是进程真的在监听端口。
+只测 streamable-http：本服务只提供这一种传输。
 """
 import asyncio
 import functools
@@ -20,10 +21,10 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from urllib.parse import quote
 
-import httpx
 import pytest
 from openpyxl import load_workbook
 
@@ -79,11 +80,59 @@ def static_url():
         srv.shutdown()
 
 
+class _PutSink(http.server.BaseHTTPRequestHandler):
+    """假的平台回写端点（``POST /api/files/put``）：收字节、记录请求、回 202 + ``path``。"""
+
+    #: 最近一次请求（测试断言用）：``{"path":…, "query":{…}, "body":b"…", "headers":{…}}``
+    last: dict = {}
+    #: 收到的次数（失败场景断言"一次都没发"）
+    calls = 0
+    #: 返回状态码（换成 403 可测"回写被拒"）
+    status = 202
+
+    def log_message(self, *args):        # 测试输出保持干净
+        pass
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(length)
+        parsed = urllib.parse.urlsplit(self.path)
+        query = {k: v[-1] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        cls = type(self)
+        cls.calls += 1
+        cls.last = {"path": parsed.path, "query": query, "body": body,
+                    "headers": dict(self.headers)}
+        if cls.status != 202:
+            self.send_response(cls.status)
+            self.send_header("content-type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b'{"error":{"code":"FILE_SIGN_INVALID"}}')
+            return
+        # 平台落盘名的形状：`临时空间/后台产出/{sid}_{服务给的文件名}`
+        rel = f"临时空间/后台产出/{query.get('sid', 'u')}_{query.get('filename', 'x.xlsx')}"
+        payload = json.dumps({"path": rel, "size": len(body)}, ensure_ascii=False).encode("utf-8")
+        self.send_response(202)
+        self.send_header("content-type", "application/json; charset=utf-8")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+@pytest.fixture()
+def put_sink():
+    """每个用例一个干净的假回写端点；返回 (base_url, 端点类)。"""
+    handler = type("Sink", (_PutSink,), {"last": {}, "calls": 0, "status": 202})
+    srv = _serve(handler)
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}", handler
+    finally:
+        srv.shutdown()
+
+
 @pytest.fixture(scope="module")
 def mcp_server(tmp_path_factory):
-    """真起 ``server.py``（streamable-http），产出目录与对外基址都指到测试自己的位置。"""
+    """真起 ``server.py``（streamable-http）。服务不落盘，故只需给一个空闲端口。"""
     port = _free_port()
-    artifacts = tmp_path_factory.mktemp("artifacts")
     # 服务端日志必须**落文件**，绝不能挂一个没人读的管道：
     # uvicorn/httpx 每次请求都会打日志（Rich 还会把长 URL 折成十几行），管道写满后
     # `logger` 调用会阻塞事件循环 ⇒ 服务端整个卡死、响应永远发不出去。
@@ -91,14 +140,7 @@ def mcp_server(tmp_path_factory):
     # 落文件既不阻塞，失败时还能把服务端日志打出来定位。
     log_path = tmp_path_factory.mktemp("mcp") / "server.log"
     log_file = open(log_path, "wb")
-    env = {
-        **os.environ,
-        "BOM_MCP_PORT": str(port),
-        # 产出落盘到测试专属目录：不污染仓库，也便于断言"文件真在那儿"
-        "BOM_ARTIFACT_DIR": str(artifacts),
-        # 铸地址用的对外基址：用户（这里是测试）能访问到的就是 127.0.0.1:port
-        "BOM_PUBLIC_BASE_URL": f"http://127.0.0.1:{port}",
-    }
+    env = {**os.environ, "BOM_MCP_PORT": str(port)}
     proc = subprocess.Popen([sys.executable, "-u", "server.py"], cwd=str(SERVICE), env=env,
                             stdout=log_file, stderr=subprocess.STDOUT)
 
@@ -115,7 +157,6 @@ def mcp_server(tmp_path_factory):
             pytest.fail(f"server.py 30 秒内未监听 {port}\n{server_log()[-2000:]}")
         yield {"url": f"http://127.0.0.1:{port}/mcp",
                "base": f"http://127.0.0.1:{port}",
-               "artifacts": Path(artifacts),
                "log": server_log}
     finally:
         proc.terminate()
@@ -195,64 +236,86 @@ def test_tools_registered_and_inputs_are_reported_when_unreachable(mcp_server):
 
 
 def test_validate_returns_summary_and_no_output(mcp_server, static_url):
-    """校验是纯计算工具：同一轮拿回完整汇总，**没有产出**（artifact 为空、也不给下载地址）。"""
+    """校验是纯计算工具：同一轮拿回完整汇总，**没有产出**（artifact 为空、也没有 filePath）。"""
     text, _ = mcp_call(mcp_server["url"], "bom_validate", file_args(static_url), timeout=60)
     payload = json.loads(text[0])
     assert payload["status"] == "success", payload["message"]
     assert payload["summary"]["tree"]["nodes"] == EXPECTED_NODES
     assert payload["artifact"] is None
+    assert "filePath" not in payload and "filePathName" not in payload
     assert "viewUrl" not in payload and "viewUrlName" not in payload
-    assert list(mcp_server["artifacts"].iterdir()) == []      # 校验不落任何文件
 
 
-def test_merge_returns_summary_and_downloadable_url(mcp_server, static_url):
-    """合并：**同一轮**返回结果 + 下载地址，并且这个地址真能把那份 xlsx 下下来。"""
-    text, _ = mcp_call(mcp_server["url"], "bom_merge", file_args(static_url), timeout=120)
+def test_merge_writes_back_to_result_url(mcp_server, static_url, put_sink):
+    """合并：**同一轮**返回统计 + 把 xlsx POST 到「平台回写地址」，并把返回的 path 作为 filePath。"""
+    sink_url, sink = put_sink
+    # 平台注入的地址都带原有一串 query（u/d/exp/sig/sid/call_id/tool）——服务必须一个不丢
+    result_url = (f"{sink_url}/api/files/put?u=u1&d=%E4%B8%B4%E6%97%B6%E7%A9%BA%E9%97%B4"
+                  f"&exp=1999999999999&sig=deadbeef&sid=th_1&call_id=c1&tool=bom__bom_merge")
+    text, _ = mcp_call(mcp_server["url"], "bom_merge",
+                       {**file_args(static_url), "resultUrl": result_url}, timeout=120)
     payload = json.loads(text[0])
     assert payload["status"] == "success", payload["message"]
     assert payload["summary"]["tree"]["nodes"] == EXPECTED_NODES
     # 结果统计就在这一次返回里（同步：不再有"受理时算不出来"这回事）
     assert payload["summary"]["counts"]["error"] == 0
+
     name = payload["artifact"]["filename"]
-    assert payload["viewUrlName"] == name
     assert name.startswith("总BOM_WCCMT-00000B0570_bom_") and name.endswith(".xlsx")
     assert payload["artifact"]["rows"] == EXPECTED_NODES and payload["artifact"]["bytes"] > 0
-    assert payload["viewUrl"].startswith(mcp_server["base"] + "/files/")
+    # 入口改为文件空间路径：值与"平台返回的 path"一致，不再是自铸的下载地址
+    assert sink.calls == 1
+    assert payload["filePath"].startswith("临时空间/后台产出/")   # 平台返回的权威路径，原样搬运
+    assert payload["filePath"].endswith(f"th_1_{name}")
+    assert payload["filePathName"] == name
+    assert "viewUrl" not in payload and "viewUrlName" not in payload
 
-    # 用返回的地址真下一遍：拿到的必须是能打开的 xlsx，且下载名是那个中文名
-    r = httpx.get(payload["viewUrl"], timeout=30)
-    assert r.status_code == 200, r.text
-    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
-    assert quote(name) in r.headers["content-disposition"]
-    wb = load_workbook(filename=__import__("io").BytesIO(r.content))
+    # 回写请求本身：原有 query 一个不丢、文件名/摘要齐、body 是能打开的 xlsx
+    query = sink.last["query"]
+    assert query["u"] == "u1" and query["sig"] == "deadbeef" and query["sid"] == "th_1"
+    assert query["call_id"] == "c1" and query["tool"] == "bom__bom_merge"
+    assert query["filename"] == name
+    assert query["summary"]                      # 摘要必须有（界面标题的唯一来源）
+    # 回写必须是"原样收字节"的类型：平台只给 octet-stream / text/plain 注册了 Buffer parser
+    assert sink.last["headers"]["content-type"] == "application/octet-stream"
+    wb = load_workbook(filename=__import__("io").BytesIO(sink.last["body"]))
     assert wb.sheetnames == ["Total BOM", "校验汇总"]
     assert wb["Total BOM"].max_row == EXPECTED_NODES + 1      # 表头 + 数据行
 
 
-def test_merge_output_is_stored_atomically(mcp_server, static_url):
-    """落盘侧：产出目录里能看到那个文件，且**没有 .tmp 残留**（原子写不留中间态）。"""
+def test_merge_without_result_url_gives_no_file_path(mcp_server, static_url):
+    """没有回写地址（直接调用服务）：结果照给，但**不给任何入口**——不编假路径。"""
     text, _ = mcp_call(mcp_server["url"], "bom_merge", file_args(static_url), timeout=120)
-    name = json.loads(text[0])["artifact"]["filename"]
-    stored = sorted(p.name for p in mcp_server["artifacts"].iterdir())
-    assert name in stored
-    assert not [n for n in stored if n.endswith(".tmp")]
+    payload = json.loads(text[0])
+    assert payload["status"] == "success"
+    assert payload["artifact"] is not None
+    assert "filePath" not in payload and "filePathName" not in payload
+    assert "未收到回写地址" in payload["message"]
 
 
-def test_merge_blocked_by_error_has_no_output(mcp_server, static_url):
-    """有阻断性错误时不产出 BOM：status=failed，artifact 为空，也没有下载地址。"""
-    before = sorted(p.name for p in mcp_server["artifacts"].iterdir())
-    args = {**file_args(static_url), "total_bom_sheet": "不存在的表"}
+def test_merge_blocked_by_error_has_no_output(mcp_server, static_url, put_sink):
+    """有阻断性错误时不产出 BOM：status=failed、artifact 为空、**一次回写都不发**。"""
+    sink_url, sink = put_sink
+    args = {**file_args(static_url), "total_bom_sheet": "不存在的表",
+            "resultUrl": f"{sink_url}/api/files/put?u=u1&d=d&exp=1&sig=x"}
     text, _ = mcp_call(mcp_server["url"], "bom_merge", args, timeout=120)
     payload = json.loads(text[0])
     assert payload["status"] == "failed"
     assert "E011" in {i["code"] for i in payload["issues"]}
     assert payload["artifact"] is None
-    assert "viewUrl" not in payload
-    assert sorted(p.name for p in mcp_server["artifacts"].iterdir()) == before
+    assert "filePath" not in payload
+    assert sink.calls == 0
 
 
-def test_download_route_rejects_unknown_and_unsafe_names(mcp_server):
-    """下载端点只服务自己认得出的产出名：不存在、后缀不对、想穿越路径 → 一律 404。"""
-    for name in ("没有这个.xlsx", "notes.txt", "..%2F..%2Fetc%2Fpasswd"):
-        r = httpx.get(f"{mcp_server['base']}/files/{name}", timeout=10)
-        assert r.status_code == 404, f"{name} 应被拒"
+def test_merge_put_failure_does_not_fake_output(mcp_server, static_url, put_sink):
+    """回写被拒（403）：**不假装有产出** —— 不给 filePath，原因写进 message。"""
+    sink_url, sink = put_sink
+    sink.status = 403
+    text, _ = mcp_call(mcp_server["url"], "bom_merge",
+                       {**file_args(static_url),
+                        "resultUrl": f"{sink_url}/api/files/put?u=u1&d=d&exp=1&sig=x"},
+                       timeout=120)
+    payload = json.loads(text[0])
+    assert sink.calls == 1
+    assert "filePath" not in payload
+    assert "产出未交付" in payload["message"] and "403" in payload["message"]

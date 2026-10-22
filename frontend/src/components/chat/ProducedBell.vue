@@ -15,11 +15,16 @@
  * - 正文**默认结构化展示**（`ProducedJsonView`）：能解析成对象/数组就按与 HITL 同构的规则
  *   渲染，并可一键切回**原始 JSON**；解析不了（纯文本/标量/超阈值）**回落 `<pre>`**。
  *   这是**展示层**的解析，平台仍"原样存、原样读"（契约 §10.3）。
+ * - **文件产出**（2026-10-21，如 BOM 回写的 xlsx）不读正文：`/api/produced/raw` 是
+ *   `text/plain`，二进制读出来是乱码 ⇒ 给"打开 / 下载"按钮，走与聊天区 `filePath`
+ *   入口相同的那条路（工作空间面板按扩展名分派）。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { ProducedItem } from '../../api/produced'
 import { useProduced } from '../../composables/useProduced'
+import { useToast } from '../../composables/useToast'
+import { resolvePreviewKind } from '../../utils/file-kind'
 import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
 import {
   badgeText,
@@ -28,8 +33,9 @@ import {
   producedSummary,
   producedTag,
   producedTagFull,
+  splitProducedPath,
 } from '../../utils/produced-display'
-import type { ViewLinkTarget } from '../../utils/view-link'
+import { filePathToPreviewPath, type ViewLinkTarget } from '../../utils/view-link'
 import BaseDialog from '../common/BaseDialog.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -60,6 +66,16 @@ const structuredView = ref(true)
 const unread = computed(() => produced.unreadCount.value)
 /** 正文解析结果（可结构化 / 原样 + 降级原因） */
 const parsed = computed(() => parseProducedContent(content.value))
+/**
+ * 当前条目是否是**文件**产出（如 BOM 合并出的 xlsx）。
+ *
+ * `/api/produced/raw` 恒按 `text/plain` 读（契约 §10.5 ⑦）：二进制读出来只会是一屏乱码。
+ * 这类条目**不读正文**，改为给"打开 / 下载"入口——走 `filePath` 那条路（与聊天区入口一致，
+ * 面板按扩展名分派：`.xlsx` → 下载引导）。
+ */
+const isFileActive = computed(
+  () => active.value !== null && resolvePreviewKind(active.value.filename) !== 'text',
+)
 /** 不可结构化的可读提示（目前只有"太大"需要解释，其余原样展示是预期行为） */
 const contentHint = computed(() => fallbackHint(parsed.value.reason))
 
@@ -72,12 +88,46 @@ const wideDialog = computed(
   () => view.value === 'content' && parsed.value.structured && structuredView.value,
 )
 
+const toast = useToast()
+/** 「新到达产出」的监听退订函数（`null` = 未注册） */
+let offNewItems: (() => void) | null = null
+
+/**
+ * 后台任务完成时的即时提示（2026-10-21）。
+ *
+ * 位置与"上传失败"同处（`ToastHost`，右下角）——用户对"系统消息在右下角"已有预期，
+ * 不为同一类信息再开第二个出口。
+ *
+ * 只提示**本次挂载之后新到达**的条目（`onNewItems` 已排除首次基线与切数字人：
+ * 前者是历史、后者是另一个数据域，弹出来都是噪音）。
+ * 4 秒后自动消失，**持久的那份通知由角标承担**——用户不在屏幕前也不会错过。
+ */
+function announceNewItems(added: readonly ProducedItem[]): void {
+  if (added.length === 0) return
+  const text =
+    added.length === 1
+      ? `后台任务完成：${producedSummary(added[0]!.summary)}`
+      : `后台任务完成：${added.length} 个新结果`
+  // 「查看」直接开面板：toast 只给"现在完成了"的即时感，细节仍在列表里
+  toast.push('success', text, {
+    label: '查看',
+    run: () => {
+      open.value = true
+    },
+  })
+}
+
 onMounted(() => {
   // 「打开页面补算 + 在线订阅」两条都要：前者覆盖离线期间到达的产出，后者保证在线即时
   void produced.refresh()
   produced.start()
+  offNewItems = produced.onNewItems(announceNewItems)
 })
-onBeforeUnmount(() => produced.stop())
+onBeforeUnmount(() => {
+  offNewItems?.()
+  offNewItems = null
+  produced.stop()
+})
 
 const buttonLabel = computed(() =>
   unread.value > 0 ? `后台记录，${unread.value} 条未读` : '后台记录',
@@ -140,11 +190,30 @@ async function openItem(item: ProducedItem): Promise<void> {
   active.value = item
   view.value = 'content'
   content.value = null
-  contentLoading.value = true
   structuredView.value = true
   void produced.markRead([item.job_id])
+  // 文件产出（非文本）不读正文：`/api/produced/raw` 是 text/plain，读出来是乱码
+  if (resolvePreviewKind(item.filename) !== 'text') {
+    contentLoading.value = false
+    return
+  }
+  contentLoading.value = true
   content.value = await produced.text(item.job_id)
   contentLoading.value = false
+}
+
+/**
+ * 打开文件产出：与聊天区的 `filePath` 入口走**同一条路**（交给装配层的工作空间面板，
+ * 按扩展名分派——`.xlsx` 给下载引导）。`line` 面板是模态框，必须先关（见 `onOpenView`）。
+ */
+function openFileItem(item: ProducedItem): void {
+  const { filename } = splitProducedPath(item.relPath)
+  onOpenView({
+    url: filePathToPreviewPath(item.relPath),
+    name: filename,
+    kind: 'file',
+    filePath: item.relPath,
+  })
 }
 
 function backToList(): void {
@@ -214,7 +283,16 @@ function onOpenView(item: ViewLinkTarget): void {
         </span>
       </div>
 
-      <p v-if="contentLoading" class="produced-panel__hint">正在读取…</p>
+      <!-- 文件产出（如 xlsx）：正文是二进制，读出来是乱码 ⇒ 只给"打开 / 下载"入口 -->
+      <div v-if="isFileActive" class="produced-content__file">
+        <p class="produced-panel__hint">
+          该产出是文件（{{ active.filename }}），不在面板里按文本展示。
+        </p>
+        <button type="button" class="produced-content__view-toggle" @click="openFileItem(active)">
+          打开 / 下载文件
+        </button>
+      </div>
+      <p v-else-if="contentLoading" class="produced-panel__hint">正在读取…</p>
       <p v-else-if="content === null" class="produced-panel__hint">
         内容不可读——该产出可能已被清理（临时空间 30 天未访问即清理）。
       </p>

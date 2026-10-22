@@ -19,13 +19,16 @@ import { computed, ref, type ComputedRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProducedItem } from '../../api/produced'
 import { PRODUCED_JSON_MAX_CHARS } from '../../utils/produced-content'
+import type { ViewLinkTarget } from '../../utils/view-link'
 import BaseDialog from '../common/BaseDialog.vue'
 import ProducedBell from './ProducedBell.vue'
 
 /** 用 `vi.hoisted` 承载桩，避开 `vi.mock` 工厂的提升限制（`unknown` 便于测试内直接赋具体类型） */
-const h = vi.hoisted(() => ({ store: null as unknown }))
+const h = vi.hoisted(() => ({ store: null as unknown, toast: null as unknown }))
 
 vi.mock('../../composables/useProduced', () => ({ useProduced: () => h.store }))
+// 2026-10-21：铃铛在「后台任务完成」时会推一条 toast，测试只关心它被怎么调用
+vi.mock('../../composables/useToast', () => ({ useToast: () => h.toast }))
 
 function item(jobId: string, readAt?: string, summary?: string, agentName?: string): ProducedItem {
   return {
@@ -53,10 +56,14 @@ interface FakeStore {
   text: ReturnType<typeof vi.fn>
   start: ReturnType<typeof vi.fn>
   stop: ReturnType<typeof vi.fn>
+  onNewItems: ReturnType<typeof vi.fn>
+  /** 测试口：模拟 store 算出"新到达的产出"并通知监听者 */
+  emitNew: (added: readonly ProducedItem[]) => void
 }
 
 function makeStore(items: ProducedItem[]): FakeStore {
   const list = ref(items)
+  const listeners = new Set<(added: readonly ProducedItem[]) => void>()
   return {
     items: list,
     loading: ref(false),
@@ -67,14 +74,25 @@ function makeStore(items: ProducedItem[]): FakeStore {
     text: vi.fn().mockResolvedValue('识别结果正文'),
     start: vi.fn(),
     stop: vi.fn(),
+    onNewItems: vi.fn((listener: (added: readonly ProducedItem[]) => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    }),
+    emitNew: (added) => {
+      for (const listener of [...listeners]) listener(added)
+    },
   }
 }
 
 let store: FakeStore
+/** toast 桩：断言「后台任务完成」提示的级别、文案与动作 */
+let toast: { push: ReturnType<typeof vi.fn> }
 
 beforeEach(() => {
   store = makeStore([])
   h.store = store
+  toast = { push: vi.fn() }
+  h.toast = toast
 })
 
 function mountBell() {
@@ -369,6 +387,63 @@ describe('ProducedBell —— 正文结构化展示（JSON ⇄ 原始）', () =>
   })
 })
 
+/* ---------- 2026-10-21：后台任务完成提示（与上传失败同一处弹出） ---------- */
+
+describe('ProducedBell —— 后台任务完成提示', () => {
+  it('新到达的产出：用 success 弹一条，文案带摘要', () => {
+    const wrapper = mountBell()
+
+    store.emitNew([item('j_1', undefined, '识别到 47 行文字')])
+
+    expect(toast.push).toHaveBeenCalledTimes(1)
+    const [level, text] = toast.push.mock.calls[0] as [string, string]
+    expect(level).toBe('success')
+    expect(text).toBe('后台任务完成：识别到 47 行文字')
+    wrapper.unmount()
+  })
+
+  it('摘要缺省 → 用可读兜底（不把机读文件名顶上来）', () => {
+    const wrapper = mountBell()
+
+    store.emitNew([item('j_1')])
+
+    expect(toast.push.mock.calls[0]![1]).toBe('后台任务完成：后台任务结果（该任务未提供摘要）')
+    wrapper.unmount()
+  })
+
+  it('一次完成多条 → 合并成一条提示（不把 toast 位占满）', () => {
+    const wrapper = mountBell()
+
+    store.emitNew([item('j_1'), item('j_2'), item('j_3')])
+
+    expect(toast.push).toHaveBeenCalledTimes(1)
+    expect(toast.push.mock.calls[0]![1]).toBe('后台任务完成：3 个新结果')
+    wrapper.unmount()
+  })
+
+  it('提示上的「查看」直接打开铃铛面板', async () => {
+    const wrapper = mountBell()
+    store.emitNew([item('j_1')])
+
+    const action = toast.push.mock.calls[0]![2] as { label: string; run: () => void }
+    expect(action.label).toBe('查看')
+    action.run()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.produced-bell').attributes('aria-pressed')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('卸载后退订：之后到达的产出不再弹', () => {
+    const wrapper = mountBell()
+    wrapper.unmount()
+
+    store.emitNew([item('j_1')])
+
+    expect(toast.push).not.toHaveBeenCalled()
+  })
+})
+
 describe('ProducedBell —— 已读时机与正文视图（§10.5 ⑤⑦）', () => {
   it('**打开面板不标记已读**（否则"未读"无从表达）', async () => {
     store = makeStore([item('a')])
@@ -474,5 +549,54 @@ describe('ProducedBell —— 正文里的 viewUrl 点击（2026-10-20）', () =
     expect(wrapper.findComponent(BaseDialog).props('open')).toBe(false)
     // 一并回到列表态，不在关闭后再残留上一条正文
     expect(wrapper.find('.produced-json').exists()).toBe(false)
+  })
+})
+
+describe('ProducedBell —— 文件产出（2026-10-21：BOM 回写的 xlsx）', () => {
+  const FILE = 'th_1_总BOM_X_bom_1_ab.xlsx'
+
+  function fileItem(): ProducedItem {
+    return {
+      ...item('bom_1'),
+      tool: 'bom__bom_merge',
+      filename: FILE,
+      relPath: `临时空间/后台产出/${FILE}`,
+    }
+  }
+
+  async function openFirstFile(wrapper: ReturnType<typeof mountBell>): Promise<void> {
+    await openPanel(wrapper)
+    await wrapper.find('.produced-item__button').trigger('click')
+    await flushPromises()
+  }
+
+  it('点开**不读正文**（raw 是 text/plain，读二进制是乱码），给"打开 / 下载文件"', async () => {
+    store = makeStore([fileItem()])
+    h.store = store
+
+    const wrapper = mountBell()
+    await openFirstFile(wrapper)
+
+    expect(store.text).not.toHaveBeenCalled()
+    // 已读仍要标记（用户确实看过了这条的存在与结局）
+    expect(store.markRead).toHaveBeenCalledWith(['bom_1'])
+    expect(wrapper.text()).toContain('不在面板里按文本展示')
+    expect(wrapper.find('.produced-content__view-toggle').text()).toContain('打开 / 下载文件')
+  })
+
+  it('点"打开 / 下载文件" → 先关弹窗，再以 `kind:file` + `filePath` 上报（与聊天区入口同一条路）', async () => {
+    store = makeStore([fileItem()])
+    h.store = store
+
+    const wrapper = mountBell()
+    await openFirstFile(wrapper)
+    await wrapper.find('.produced-content__view-toggle').trigger('click')
+
+    const [payload] = wrapper.emitted('open-view')![0] as [ViewLinkTarget]
+    expect(payload.kind).toBe('file')
+    expect(payload.filePath).toBe(`临时空间/后台产出/${FILE}`)
+    expect(payload.name).toBe(FILE)
+    expect(payload.url).toContain('/api/files/preview?')
+    expect(wrapper.findComponent(BaseDialog).props('open')).toBe(false)
   })
 })
