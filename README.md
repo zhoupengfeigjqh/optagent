@@ -357,6 +357,120 @@ bom_merge 算完 → 内存里的 xlsx + HTML 报告各自 POST 到 resultUrl（
 
 nginx 反向网关：生产环境将前端静态资源与后端 API 统一入口。
 
+### MCP 回源 / 回写入口（`PUBLIC_BASE_URL` 与容器→宿主放通）
+
+运行环境会把**唯一一个基址**铸进两类交给 MCP 服务的链接（`agent-backend/src/infra/agent-factory.ts`），
+由 **MCP 服务所在的那台机器**去访问——**不是浏览器地址**：
+
+| 用途 | 链接 | 消费方 |
+|---|---|---|
+| 文件参数回源下载（`file_args`） | `{PUBLIC_BASE_URL}/api/files/raw?…&sig=…` | MCP 服务容器 / 进程 |
+| 异步结果回写（工具入参声明 `resultUrl`） | `{PUBLIC_BASE_URL}/api/files/put?…&sig=…` | MCP 服务容器 / 进程 |
+
+因此取值只有一个判据：**它对所有 MCP 服务的调用方都必须可达**。
+
+#### 取值：按是否存在外部 MCP 服务二选一
+
+| 部署形态 | `PUBLIC_BASE_URL` | 说明 |
+|---|---|---|
+| 全部 MCP 服务都在 compose 网络内（`ocr` / `jev` / `bom-service`） | `http://backend:3000` | 服务名口径，容器原生路由，无额外网络要求 |
+| 存在**外部** MCP 服务（如 `hd-algorithm` 在 `192.168.0.188:8080/mcp`） | `http://<宿主 LAN IP>:82` | 外部机器解析不到 compose 服务名，且 backend **未发布宿主端口**，唯一入口是网关 82；代价是同网络的 MCP 容器也要经此入口回连宿主，**必须放通**（见下） |
+
+配置只在一处生效——`docker-compose.yml` 里 `backend.environment`（`environment` 覆盖 `env_file`）：
+
+```yaml
+    environment:
+      # 由 MCP 服务所在机器访问，不是浏览器地址；有外部 MCP 服务时必须取宿主入口 82
+      - PUBLIC_BASE_URL=http://192.168.0.130:82
+```
+
+> `agent-backend/.env` / `.env.local` 里的同名变量**在容器形态下不生效**（被 `environment` 覆盖），
+> 本地直跑形态见 [§ 本地配置要点](#本地配置要点文件回源链路必须使用本机-ip)。
+
+#### 网络前提：容器 → 宿主 82 必须放通
+
+Docker 给发布端口写的 DNAT 规则带 `! -i br-xxxx`（**排除来自容器网卡的流量**），所以容器访问
+`宿主 IP:82` 既不会被 DNAT 到网关容器，又落进宿主 `INPUT` 链——而 ufw/firewalld 默认入站是 DROP。
+表现是 **SYN 无响应**，10 秒后上游报 `异步任务 ocr_… 回写失败（ConnectTimeout）`。
+注意“外部浏览器能打开 82”不能作为放通依据：外部流量走 `DNAT → FORWARD`，根本不经过 `INPUT`。
+
+**先取真实子网**（不要猜）：
+
+```bash
+docker network inspect optagent_default -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}'   # 例 172.26.0.0/16
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' optagent-ocr
+```
+
+三种放通方式，任选其一（一律持久化）：
+
+```bash
+# ① ufw（推荐，跟随 ufw 服务持久化；ufw 为 active 但规则表为空时默认即 deny incoming）
+sudo ufw allow from 172.26.0.0/16 to any port 82 proto tcp comment 'docker->gateway for MCP callback'
+sudo iptables -L ufw-user-input -n | grep ':82'          # 确认落地
+
+# ② 裸 iptables（必须自己持久化；ufw disable/enable 会重建 INPUT 链并清掉它）
+sudo iptables -I INPUT 1 -s 172.26.0.0/16 -p tcp --dport 82 -j ACCEPT
+sudo apt install -y iptables-persistent && sudo netfilter-persistent save
+
+# ③ firewalld
+sudo firewall-cmd --permanent --zone=trusted --add-source=172.26.0.0/16 && sudo firewall-cmd --reload
+```
+
+若宿主 82 上**没有监听**（`ss -lntp | grep ':82'` 为空 ⇒ `userland-proxy=false`），或放通后仍超时，
+改用 nat 表给容器来源补一条 DNAT，让流量变成同网桥内部通信（不经 `INPUT`）：
+
+```bash
+GW=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' optagent-gateway)
+sudo iptables -t nat -I PREROUTING 1 -s 172.26.0.0/16 -d 192.168.0.130 -p tcp --dport 82 \
+  -j DNAT --to-destination $GW:80
+sudo netfilter-persistent save                            # 规则不在 docker 管理的链里，docker 重启不会丢
+```
+
+#### 生效与验证
+
+`PUBLIC_BASE_URL` 在**启动期读取**，改完必须重建 backend 容器（`restart` 不更新环境变量）：
+
+```bash
+cd /opt/optagent && docker compose up -d backend
+docker exec optagent-backend printenv PUBLIC_BASE_URL     # 期望 http://192.168.0.130:82
+```
+
+四向连通性（缺一个都有隐患）：
+
+```bash
+# 宿主 → 82（真实健康检查路径是 /api/monitor/health，没有 /api/health）
+curl -s -w '\n%{http_code}\n' http://192.168.0.130:82/api/monitor/health
+# 容器 → 宿主 82（TCP）
+docker exec optagent-ocr python -c "import socket;socket.create_connection(('192.168.0.130',82),5);print('tcp ok')"
+# 容器 → 宿主 82（HTTP，走完网关到 backend）
+docker exec optagent-ocr python -c "import urllib.request as u;print(u.urlopen('http://192.168.0.130:82/api/monitor/health',timeout=5).status)"
+# 外部 MCP 服务所在机器（如 192.168.0.188）
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 http://192.168.0.130:82/api/monitor/health
+```
+
+业务级验证：跑一次异步任务（OCR 识别 / hd 排产 / bom 合并），结果应出现在「临时空间/后台产出/」，
+容器日志不再出现 `回写失败（ConnectTimeout）`。
+
+#### 常见故障对照
+
+| 现象 | 含义 | 处置 |
+|---|---|---|
+| `回写失败（ConnectTimeout）` / `下载失败（ConnectTimeout）` | 包被 DROP（防火墙丢包） | 按上一节放通容器网段 → 82 |
+| `回写失败（ConnectError）` | 连接被拒或域名解析失败 | 目标端口无监听（`userland-proxy=false`）或外部机器解析不到主机名 |
+| `回写失败（HTTP 403）` | 票据过期或验签失败 | 回写票据 `12h`、下载直链 `24h`（`file-sign.ts` 的 `DEFAULT_PUT_TTL_MS` / `DEFAULT_TTL_MS`）；改过 `FILE_SIGN_SECRET` 也会 403 |
+| `回写失败（HTTP 413）` | 超过网关 `client_max_body_size`（`gateway/nginx.conf` 默认 `6m`） | `bom-service` 自限 `BOM_RESULT_MAX_BYTES=5MB`；走 82 回写大文件需提高该值并重建 gateway |
+| `/api/health` 返回 404 | 路径不存在，不是故障 | 健康检查是 `/api/monitor/health` |
+
+#### 风险与演进
+
+- **hairpin 依赖**：走 82 意味着所有内部 MCP 流量多一次“容器→宿主→网关”的绕行，Docker 升级、
+  `daemon.json` 调整、防火墙重载都可能悄悄打断它，且症状只是 10s 超时。改过 `gateway/nginx.conf`
+  必须 `docker compose up -d --build gateway`（配置在镜像内，`restart` 不生效）。
+- **宿主 IP 变更**：`PUBLIC_BASE_URL` 是硬编码值（编排层无 `.env` 插值），换机器/换网段要同步改并
+  重新部署；容器与外部机器的 `/etc/hosts` 不参与这条链路。
+- **演进方向**：把基址下沉到 MCP 服务级（服务配置增加可空覆盖项，内部服务走 `backend:3000`、
+  外部服务走宿主入口），可从根上去掉 hairpin 与 6MB 限制；在那之前，本节配置是唯一正确形态。
+
 ## MCP 服务配置详解
 
 > 本节是**字段级参考**（每个字段的含义、取值域、判据与常见故障）；操作步骤见
@@ -877,7 +991,7 @@ agent-backend 会把文件空间的相对路径铸造成**签名直链**（如 `
 
 | 配置项 | 位置 | 作用 |
 |---|---|---|
-| `PUBLIC_BASE_URL` | `agent-backend/.env.local` | 铸造签名 URL 时使用的对外基址（容器形态由 compose 覆盖为 `http://backend:3000`） |
+| `PUBLIC_BASE_URL` | `agent-backend/.env.local` | 铸造签名 URL 时使用的对外基址（**容器形态下本项不生效**，由 compose 覆盖：无外部 MCP 服务时 `http://backend:3000`，有则取宿主入口 `:82` —— 见 [§ MCP 回源 / 回写入口](#mcp-回源--回写入口public_base_url-与容器宿主放通)） |
 
 ```env
 # agent-backend/.env.local

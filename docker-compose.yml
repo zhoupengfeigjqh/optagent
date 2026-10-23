@@ -117,12 +117,7 @@ services:
     environment:
       # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件。
       # env_file 之后的显式覆盖，保证容器内一定是服务名口径（本机 LAN IP 只留在 .env.local）
-      #
-      # MUST 保持服务名口径，MUST NOT 写成宿主机 LAN IP + :82（网关端口）：
-      # 该值会被铸进「回源下载直链」与「异步工具回写地址」（resultUrl），由 **MCP 服务容器**
-      # 去访问。容器回连宿主机 LAN IP:82 会被宿主机防火墙/NAT 丢弃，
-      # 症状是 `异步任务 xxx 回写失败（ConnectTimeout）`（2026-10-23 实测踩坑）。
-      - PUBLIC_BASE_URL=http://backend:3000
+      - PUBLIC_BASE_URL=http://192.168.0.130:82
     volumes:
       # 模型配置（必需，缺省启动失败）
       - ./agent-backend/config.yaml:/app/config.yaml:ro
