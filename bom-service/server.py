@@ -4,8 +4,9 @@
 对外只有两件能力：
 
 - ``bom_validate``：校验一批子BOM 能否合并（dry-run，**不产文件**）；
-- ``bom_merge``：合并成多级总BOM，产出 xlsx，**算完立刻回写平台**，返回 ``filePath``
-  —— 产出落进调用者的文件空间（``临时空间/后台产出/``），用户从聊天区入口点开即下载。
+- ``bom_merge``：合并成多级总BOM，产出 **xlsx + HTML 报告两个文件**，**算完立刻回写平台**，
+  返回两条入口（``filePath`` = 报告，``mergedFile`` = xlsx）——都落进调用者的文件空间
+  （``临时空间/后台产出/``），用户从聊天区入口点开即看/即下载。
 
 为什么回写而不是自己存（2026-10-21 改）：xlsx 是二进制，只能靠 URL 交付，而"用户能打开的那个
 URL"只有平台铸得出来（HMAC 密钥在平台侧，契约也禁止服务自行拼接平台入口地址）。所以本服务
@@ -13,8 +14,14 @@ URL"只有平台铸得出来（HMAC 密钥在平台侧，契约也禁止服务�
 （``POST /api/files/put``），服务算完把字节 POST 过去，平台落盘后回 ``path``，服务把它原样作为
 ``filePath`` 返回（契约 §4.7 的本地文件空间形态）。
 
-分工：业务规则在 ``bom_core``（不依赖 ``mcp``，可脱离 MCP 装配单测）；本文件只做 MCP 装配与
-那一次回写。没有 ``resultUrl`` 时**不给任何假地址**——结果照常返回，只是本次没有可点入口。
+为什么两个文件（2026-10-22 改）：结构树与问题清单需要"能读"的载体，塞进 JSON 正文会挤占模型
+上下文且没人读得下去。报告是 HTML（见 ``report.py``：纯 ``<details>``、无脚本、无外链），
+xlsx 仍是数据本体。**同一个 resultUrl 可以 POST 多次**（平台不消费签名），每次换 ``filename``
+即落一条产出记录——所以"一次调用两条入口"不需要平台改任何东西。
+
+分工：业务规则在 ``bom_core``（不依赖 ``mcp``，可脱离 MCP 装配单测）、报告渲染在 ``report``
+（纯函数）；本文件只做 MCP 装配与那两次回写。没有 ``resultUrl`` 时**不给任何假地址**——
+结果照常返回，只是本次没有可点入口。
 """
 import functools
 import os
@@ -37,6 +44,7 @@ from bom_core import (
     root_from_total_bom_url,
     run_from_urls,
 )
+from report import build_report, report_filename
 
 # 监听端口 8000（与 ocr-service 一致）。两个 MCP 服务同号**不冲突**：各自在容器里有独立
 # 网络命名空间；只有同机裸跑或 host 网络部署时才需要给其中一个设 BOM_MCP_PORT 覆盖。
@@ -158,11 +166,70 @@ def _pipeline_kwargs(sub_bom_zip_path, total_bom_path, schema_path, mapping_path
     }
 
 
-def _run(kind, kwargs, *, filename: str = "", max_issues: int | None = None) -> tuple[dict, bytes]:
-    """跑管线 → ``(对外结果, 待交付字节)``。**不落盘、也不铸地址**——那是调用方的事。
+def _report_bytes(internal: dict, merged_filename: str, job_id: str) -> bytes | None:
+    """生成报告字节；**任何异常都收敛成 ``None``**。
+
+    报告是"附加视图"：它出不来只能少一条入口，绝不能让已经算好的数据文件跟着交不出去
+    （原则九：降级不阻断，且原因落 stderr 供运维定位）。
+    """
+    try:
+        return build_report(internal, merged_filename=merged_filename, job_id=job_id)
+    except Exception as e:                                  # noqa: BLE001
+        print(f"合并报告生成失败：{e.__class__.__name__}: {e}", file=sys.stderr)
+        return None
+
+
+def _report_summary(internal: dict) -> str:
+    """报告那条产出记录的摘要（铃铛「后台记录」里与数据文件那条区分开）。"""
+    summary = internal.get("summary") or {}
+    tree = summary.get("tree") or {}
+    counts = summary.get("counts") or {}
+    return (f"合并报告：{tree.get('nodes', 0)} 行，"
+            f"错误 {counts.get('error', 0)} / 警告 {counts.get('warn', 0)}")
+
+
+def _deliver_outputs(result_url: str, *, filename: str, xlsx: bytes, internal: dict,
+                     job_id: str, summary: str) -> tuple[dict, str]:
+    """两次回写（数据文件 → 报告），返回 ``(入口字段, 要附加到 message 的说明)``。
+
+    **键序即展示顺序**：``filePath`` / ``filePathName``（报告）在前、``mergedFile``（xlsx）在后
+    —— 平台按 JSON 键的顺序深度优先抽取入口行（`agent-backend/src/domain/view-links.ts`）。
+
+    降级链（原则九）：每一档都保住上一档已经交付的东西
+    1. 数据文件回写失败 → **无任何入口**（``{}``），原因进说明（不编假路径）；
+    2. 报告生成/回写失败 → 顶层退回**数据文件**，且**不给** ``mergedFile``
+       （同一路径不给两条入口，否则界面上会出现两行一模一样的链接）。
+    """
+    data_path, err = _deliver(result_url, filename, xlsx, summary)
+    if err:
+        print(f"产出回写失败（{filename}）：{err}", file=sys.stderr)
+        return {}, f"产出未交付：{err}"
+
+    data_entry = {"filePath": data_path, "filePathName": filename}
+    report = _report_bytes(internal, filename, job_id)
+    if report is None:
+        return data_entry, "报告未生成，仅提供数据文件"
+
+    report_name = report_filename(filename)
+    report_path, report_err = _deliver(result_url, report_name, report,
+                                       _one_line(_report_summary(internal)))
+    if report_err:
+        print(f"合并报告回写失败（{report_name}）：{report_err}", file=sys.stderr)
+        return data_entry, f"报告未交付，仅提供数据文件：{report_err}"
+
+    return ({"filePath": report_path, "filePathName": report_name, "mergedFile": data_entry},
+            "")
+
+
+def _run(kind, kwargs, *, filename: str = "",
+         max_issues: int | None = None) -> tuple[dict, bytes, dict]:
+    """跑管线 → ``(对外结果, 待交付字节, 内部结果)``。**不落盘、也不铸地址**——那是调用方的事。
 
     ``filename`` 是产出的文件名（只有合并没有被阻断时才有意义）：给了就写进 ``artifact``，
     没给（校验、或合并被阻断）则 ``artifact`` 为 ``None`` —— 绝不给一个查不到的文件名。
+
+    第三个返回值是**未剥壳**的内部结果：报告要全量 ``_nodes`` 与全量 ``issues``
+    （对外 JSON 的 issues 会被 ``max_issues`` 截断，但报告不该跟着缩水）。
     """
     try:
         result = run_from_urls(**kwargs)
@@ -179,7 +246,7 @@ def _run(kind, kwargs, *, filename: str = "", max_issues: int | None = None) -> 
         total = len(public["issues"])
         public["issues"] = public["issues"][:max_issues]
         public["message"] = f"{public['message']}（仅列出前 {max_issues} 条，共 {total} 条）"
-    return public, (xlsx or b"")
+    return public, (xlsx or b""), result
 
 
 @mcp.tool(structured_output=False)
@@ -219,7 +286,7 @@ async def bom_validate(
     注意：**只判断"能不能合并"**，不做与真实BOM 的一致性比对；两者不要混用。
     """
     # `anyio.to_thread.run_sync` 只接位置参数 ⇒ 关键字用 functools.partial 收进去
-    public, _bytes = await anyio.to_thread.run_sync(
+    public, _bytes, _internal = await anyio.to_thread.run_sync(
         functools.partial(
             _run, "validate",
             _pipeline_kwargs(sub_bom_zip_path, total_bom_path, schema_path, mapping_path,
@@ -245,7 +312,7 @@ async def bom_merge(
     order_units: Annotated[float, Field(description="订单台数；累计用量 total_qty 的连乘基数，默认 1")] = 1.0,
     max_issues: Annotated[
         int,
-        Field(description="返回的问题条目上限（默认 20）。完整问题清单在产出 xlsx 的 `校验汇总` sheet 里"),
+        Field(description="返回的问题条目上限（默认 20）。更完整的清单见合并报告与 xlsx 的 `校验汇总` sheet"),
     ] = 20,
     resultUrl: Annotated[
         str | None,
@@ -264,16 +331,18 @@ async def bom_merge(
     - 无阻断性错误：按 schema_path 的 excel_column_order 输出 17 列 xlsx
       （列集合/列序/表头/留空判据 100% 由 schema_path 驱动，代码不硬编码列），
       组件行加粗、mat_code 按层级缩进、"无子BOM 按叶子展开"的行标红，
-      并附一个 `校验汇总` sheet。
+      并附一个 `校验汇总` sheet；另外生成一份 **HTML 合并报告**（结构树可折叠 + 问题清单）。
 
-    产出交付：xlsx 通过运行环境注入的 ``resultUrl`` **回写到文件空间**
-    （落点 ``临时空间/后台产出/``），返回 ``filePath`` + ``filePathName``；
-    平台据此在聊天区渲染入口行，**用户点开即下载**。``filePath`` 是**文件空间的相对路径**
-    （可直接交给 ``read_file`` / 文件空间接口），也是平台给的**权威路径**——本服务不自己拼。
-    文件随临时空间规则清理（30 天未访问），**过期后入口会失效**。
+    产出交付：**两个文件**都通过运行环境注入的 ``resultUrl`` **回写到文件空间**
+    （落点 ``临时空间/后台产出/``），因此返回**两条入口**：
+    - ``filePath`` / ``filePathName`` → 报告（点开即读，聊天区第一行）；
+    - ``mergedFile: {filePath, filePathName}`` → xlsx（点开即下载）。
+    两者都是**文件空间的相对路径**（可直接交给 ``read_file`` / 文件空间接口），也都是平台给的
+    **权威路径**——本服务不自己拼。报告里**刻意不含下载链接**：`.html` 在平台是以
+    ``sandbox=""`` 内联预览的，下载/脚本都被沙箱关掉，真正的下载入口是平台渲染的那一行。
 
     返回形状（与校验一致，同一份 JSON）：
-    status/message/summary/issues/artifact（+ 成功且回写成功时的 filePath/filePathName）。
+    status/message/summary/issues/artifact（+ 回写成功时的 filePath/filePathName/mergedFile）。
     其中 ``summary`` 就是这次合并的汇总统计：``tree.nodes``（行数）/``tree.components``（组件数）
     /``counts``（error/warn 条数）/``by_code``/``by_stage``/``files``/``elapsed_s`` 等。
 
@@ -284,7 +353,7 @@ async def bom_merge(
     job_id = make_job_id()
     # 产出名里的 root 用**与管线同一处**的推断函数算出来，所以文件名与表里的根组件必然一致
     filename = artifact_filename(job_id, root_from_total_bom_url(total_bom_path, root))
-    public, xlsx = await anyio.to_thread.run_sync(
+    public, xlsx, internal = await anyio.to_thread.run_sync(
         functools.partial(_run, "merge", kwargs, filename=filename, max_issues=max_issues))
     if not xlsx:                                            # 合并被阻断 / 内部错误：没有文件
         return result_json(public)
@@ -292,18 +361,14 @@ async def bom_merge(
         # 没拿到回写地址（直接调用服务 / 平台未注入）：结果照给，但本次**没有可点入口**
         public["message"] = f"{public['message']}（未收到回写地址，产出未写入文件空间）"
         return result_json(public)
-    # 回写同样放线程里：httpx 是同步客户端，不能在事件循环上等（与计算同一原因）
-    file_path, err = await anyio.to_thread.run_sync(
-        functools.partial(_deliver, resultUrl, filename, xlsx,
-                          _one_line(public.get("message") or "")))
-    if err:
-        # 回写失败（签名过期 / 超过 bodyLimit / 网络）：**不假装有产出** —— 不写 filePath，
-        # 原因进 message，并落一条 stderr 供运维定位
-        print(f"产出回写失败（{filename}）：{err}", file=sys.stderr)
-        public["message"] = f"{public['message']}（产出未交付：{err}）"
-        return result_json(public)
-    public["filePath"] = file_path
-    public["filePathName"] = filename
+    # 回写（两个文件，含降级链）同样放线程里：httpx 是同步客户端，不能在事件循环上等
+    entries, note = await anyio.to_thread.run_sync(
+        functools.partial(_deliver_outputs, resultUrl, filename=filename, xlsx=xlsx,
+                          internal=internal, job_id=job_id,
+                          summary=_one_line(public.get("message") or "")))
+    public.update(entries)                     # 键序即展示顺序（报告在前，mergedFile 在后）
+    if note:
+        public["message"] = f"{public['message']}（{note}）"
     return result_json(public)
 
 
@@ -311,7 +376,8 @@ def main() -> None:
     """启动：以 streamable-http 跑起来（本服务**不写磁盘**，没有本地产出目录）。"""
     # 日志走 stderr：stdout 留给运行时（uvicorn 自身也往 stderr 打），运维重定向单一流即可
     print(f"BOM MCP 服务启动：streamable-http http://0.0.0.0:{_PORT}；"
-          f"产出经 resultUrl 回写平台（单次上限 {_MAX_RESULT_BYTES // 1024 // 1024}MB）",
+          f"产出（xlsx + HTML 报告）经 resultUrl 回写平台"
+          f"（单次上限 {_MAX_RESULT_BYTES // 1024 // 1024}MB）",
           file=sys.stderr, flush=True)
     mcp.run(transport="streamable-http")
 

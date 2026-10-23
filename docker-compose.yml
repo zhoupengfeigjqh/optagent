@@ -78,10 +78,11 @@ services:
     logging: *default-logging
 
   # BOM 校验/合并 MCP 服务：FastMCP（streamable-http），两个工具（bom_validate / bom_merge）
-  # 均**同步**；无受理、无后台任务。合并产出的 xlsx 算完即经 `resultUrl` **回写平台**，
-  # 由平台落进调用者的文件空间（`临时空间/后台产出/`）并返回 `filePath`——本服务
+  # 均**同步**；无受理、无后台任务。合并产出的 **xlsx + HTML 报告**算完即经 `resultUrl`
+  # **回写平台**（同一地址 POST 两次），由平台落进调用者的文件空间（`临时空间/后台产出/`）
+  # 并返回两条入口（`filePath`=报告、`mergedFile`=xlsx）——本服务
   # **不写磁盘、无产出目录**（2026-10-21：原 `./bom-service/.data` 挂载与 `BOM_PUBLIC_BASE_URL`
-  # 一并下架，下载链接改由平台铸）。
+  # 一并下架，下载链接改由平台铸；2026-10-22：报告一并回写，报告内不含下载链接）。
   bom:
     build: ./bom-service
     container_name: optagent-bom
@@ -90,8 +91,8 @@ services:
     # （2026-10-14：与 jev 同口径，编排层不再有可变项，端口调整直接改本文件）。
     ports:
       - "8102:8000"
-    # 本机私产放 .env.local（gitignore，缺失不报错）：只需覆盖输入/计算限额或回写上限
-    # （`BOM_MAX_*` / `BOM_RESULT_MAX_BYTES`），全部有代码缺省值。
+    # 本机私产放 .env.local（gitignore，缺失不报错）：只需覆盖输入/计算限额、回写上限或报告预算
+    # （`BOM_MAX_*` / `BOM_RESULT_MAX_BYTES` / `BOM_REPORT_MAX_*`），全部有代码缺省值。
     # 首次：cp bom-service/.env.example bom-service/.env.local。
     env_file:
       - path: ./bom-service/.env.local
@@ -116,6 +117,11 @@ services:
     environment:
       # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件。
       # env_file 之后的显式覆盖，保证容器内一定是服务名口径（本机 LAN IP 只留在 .env.local）
+      #
+      # MUST 保持服务名口径，MUST NOT 写成宿主机 LAN IP + :82（网关端口）：
+      # 该值会被铸进「回源下载直链」与「异步工具回写地址」（resultUrl），由 **MCP 服务容器**
+      # 去访问。容器回连宿主机 LAN IP:82 会被宿主机防火墙/NAT 丢弃，
+      # 症状是 `异步任务 xxx 回写失败（ConnectTimeout）`（2026-10-23 实测踩坑）。
       - PUBLIC_BASE_URL=http://backend:3000
     volumes:
       # 模型配置（必需，缺省启动失败）

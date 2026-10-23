@@ -1,6 +1,16 @@
 /*
  * @Author: Nose陈建
- * @LastEditTime: 2026-09-16 10:41:59
+ * @LastEditTime: 2026-10-22
+ *
+ * 排产数据服务（`/dataApi`）专用的 axios 实例。
+ *
+ * `baseURL` **恒为空串**（同源相对路径），这是语义而非缺省值：
+ * `/dataApi` 只是前端给外部排产服务起的本地别名，它只存在于「同源 + 网关」这条链路上——
+ * 开发期由 `vite.config.ts` 的 `server.proxy['/dataApi']` 转发到 `192.168.0.188:8080` 并把前缀
+ * 重写成 `/api`，生产期由 `gateway/nginx.conf` 的 `location /dataApi/` 做同一件事。
+ * 一旦这里拼上 `VITE_API_BASE_URL`（例如被配成直连 `http://host:3000`），排产请求就会
+ * 绕过网关打到 agent-backend 上，表现为跨源 + 404，且只在改环境变量时才暴露。
+ * 需要按环境切换地址的接口走 `src/api/http.ts`（其 `resolveBaseUrl()` 才读该变量）。
  */
 import axios from 'axios'
 // import Msg from '@/utils/msg';
@@ -11,8 +21,8 @@ import { getToken } from '@/utils/cookie'
 const Authentication = 'Authentication'
 
 const service = axios.create({
-  //基础URL
-  baseURL: import.meta.env.VITE_API_BASE_PREFIX,
+  //基础URL：必须为空（同源相对路径），理由见文件头注释
+  baseURL: '',
   //请求超时30秒
   timeout: 30000,
 })

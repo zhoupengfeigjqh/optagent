@@ -247,16 +247,23 @@ Content-Type: application/json; charset=utf-8
 
 ### 4.7.1 本地文件空间字段 `filePath` / `filePathName`（可选；2026-10-15，2026-10-21 起 BOM 服务采用）
 
-若本次结果**自己产出了一个文件**（如合并出的 xlsx），就别编下载地址，改给**文件空间相对路径**：
+若本次结果**自己产出了文件**（如合并出的 xlsx），就别编下载地址，改给**文件空间相对路径**：
 
 ```json
 {
   "status": "success",
   "message": "合并完成：327 行",
-  "filePath": "临时空间/后台产出/th_1_总BOM_WCCMT-00000B0570_bom_1792_ab391a00.xlsx",
-  "filePathName": "总BOM_WCCMT-00000B0570_bom_1792_ab391a00.xlsx"
+  "filePath": "临时空间/后台产出/th_1_总BOM_WCCMT-00000B0570_bom_1792_ab391a00_报告.html",
+  "filePathName": "总BOM_WCCMT-00000B0570_bom_1792_ab391a00_报告.html",
+  "mergedFile": {
+    "filePath": "临时空间/后台产出/th_1_总BOM_WCCMT-00000B0570_bom_1792_ab391a00.xlsx",
+    "filePathName": "总BOM_WCCMT-00000B0570_bom_1792_ab391a00.xlsx"
+  }
 }
 ```
+
+（这是 `bom-service` 2026-10-22 起的**双产出**真实形状：顶层是报告、`mergedFile` 是数据文件。
+只产一个文件时，就只给顶层 `filePath` / `filePathName`。）
 
 | 项 | 规定 |
 |---|---|
@@ -265,8 +272,10 @@ Content-Type: application/json; charset=utf-8
 | 与 `viewUrl` 的关系 | **二选一**：产文件就用 `filePath`，外部页面地址才用 `viewUrl`。两者都给也不会冲突（各成一条入口），但通常没有意义 |
 | 名称 | `filePathName`（可选，MUST 同层）：入口显示名，不给就显示路径（中段省略） |
 | 平台行为 | 与 `viewUrl` **同一套**：不改写值、不补前缀、只做形态卫生，抽成同一个 sidecar（`view_links`，条目带 `kind: 'file'`）随工具记录下发；正文外置时入口照样在 |
-| 点开行为 | 前端把相对路径转成"按扩展名预览"的那条路（与**在文件空间里点文件**完全一致）：文本进面板、`.xlsx` 等走**下载引导**。因此该路径必须落在**可读**的白名单目录内（`临时空间/后台产出/` 已于 2026-10-21 放开**只读**访问；上传/删除/列目录仍不给） |
+| 点开行为 | 前端把相对路径转成"按扩展名预览"的那条路（与**在文件空间里点文件**完全一致）：文本进面板、`.html` 进**沙箱 iframe**、`.xlsx` 等走**下载引导**。因此该路径必须落在**可读**的白名单目录内（`临时空间/后台产出/` 已于 2026-10-21 放开**只读**访问；上传/删除/列目录仍不给） |
 | 生命周期 | 与临时空间一致：**30 天未访问**清理，过期后入口点开 404 |
+| **一次多个产出** | **允许**：同一个 `resultUrl` 可以 POST **多次**（签名不消费），每次换 `filename` 即多一条产出记录；返回值里给一条顶层 `filePath`（第一入口），其余放进**任意**对象/数组字段里（抽取只看字段名 `filePath`，不看容器名，**默认最多 50 条**）。顶层那条 MUST 是你最想让用户先看到的那个 |
+| 反面用法 | MUST NOT 新建与 `artifact` / `filePath` 语义相近的字段名（如 `artifacts`）：平台不认，人也会读混。范本见 `bom-service`：报告在顶层 `filePath`，xlsx 在 `mergedFile: {filePath, filePathName}` |
 
 ---
 

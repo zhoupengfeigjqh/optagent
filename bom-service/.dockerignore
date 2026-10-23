@@ -1,4 +1,4 @@
-# 服务镜像只需运行期文件（server.py + bom_core.py）与依赖清单。
+# 服务镜像只需运行期文件（server.py + bom_core.py + report.py）与依赖清单。
 # 测试资产（tests/、requirements-test.txt）与本机配置（.env.local）不进构建上下文：
 # 容器只做部署与运行，测试一律在宿主机本地执行。
 #
@@ -7,5 +7,6 @@
 *
 !server.py
 !bom_core.py
+!report.py
 !requirements.txt
 !Dockerfile

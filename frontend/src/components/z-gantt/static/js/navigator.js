@@ -12,36 +12,21 @@
  * A commercial license may be required depending on use.
  * See www.highcharts.com/license
  */
-(function webpackUniversalModuleDefinition(root, factory) {
-  if (typeof exports === 'object' && typeof module === 'object')
-    module.exports = factory(
-      root['_Highcharts'],
-      root['_Highcharts']['Chart'],
-      root['_Highcharts']['Axis'],
-      root['_Highcharts']['Color'],
-    );
-  else if (typeof define === 'function' && define.amd)
-    define('highcharts/modules/navigator', ['highcharts/highcharts'], function (
-      amd1,
-    ) {
-      return factory(amd1, amd1['Chart'], amd1['Axis'], amd1['Color']);
-    });
-  else if (typeof exports === 'object')
-    exports['highcharts/modules/navigator'] = factory(
-      root['_Highcharts'],
-      root['_Highcharts']['Chart'],
-      root['_Highcharts']['Axis'],
-      root['_Highcharts']['Color'],
-    );
-  else
-    root['Highcharts'] = factory(
-      root['Highcharts'],
-      root['Highcharts']['Chart'],
-      root['Highcharts']['Axis'],
-      root['Highcharts']['Color'],
-    );
+import Highcharts from './highcharts-gantt.js';
+
+/*
+ * 原文件是 Highcharts 官方 navigator 模块的 webpack UMD 产物，UMD 头依赖两个全局：
+ * - CommonJS 分支取 root['_Highcharts']（本项目从未设置该全局）；
+ * - 浏览器全局分支取 root['Highcharts']，依赖加载先后（highcharts-gantt.js 先执行才存在）。
+ * 开发态本文件按原生 ESM 直接加载，走全局分支，恰好能拿到 Highcharts；
+ * 生产构建（rolldown）会把这个「没有任何 ESM 语法」的文件判定为 CommonJS 并注入
+ * module/exports，于是走 CommonJS 分支，root['_Highcharts'] 为 undefined，
+ * 抛 `TypeError: Cannot read properties of undefined (reading 'Chart')`。
+ * 这里改成显式 ESM 依赖：既固定求值顺序，也把实例直接由 import 传入，不再读任何全局。
+ */
+;(function (factory) {
+  factory(Highcharts, Highcharts.Chart, Highcharts.Axis, Highcharts.Color);
 })(
-  typeof window === 'undefined' ? this : window,
   (
     __WEBPACK_EXTERNAL_MODULE__944__,
     __WEBPACK_EXTERNAL_MODULE__960__,

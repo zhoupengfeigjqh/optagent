@@ -6,7 +6,9 @@
  *    清单为空 ⇒ **不迁移**、原地保留
  * 2. **迁移是逐项原子改名**：源一级条目整体搬进归属数字人目录；目标同名**跳过不覆盖**
  * 3. **幂等**：源目录不存在即返回（重复调用不产生副作用），迁空的源目录被清掉
- * 4. **不误搬**：名字已是某个数字人的一级目录（新布局）原样不动
+ * 4. **不误搬**：名字已是某个数字人的一级目录（新布局）原样不动；
+ *    **已撤销数字人**的数据域目录（不在 `agents/` 清单内）同样原样不动——撤销只清 `agents/`，
+ *    数据保留在 `user-data/{数字人}/`，MUST NOT 被当成旧布局残留搬进别人的数据域（2026-10-23 回归）
  * 5. **失败保持原状**：跨卷（EXDEV）MUST 落 `error`（`alert: true`）并跳过该项，MUST NOT 降级为复制
  */
 import fs from 'node:fs';
@@ -319,6 +321,83 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     fs.writeFileSync(path.join(brokenDir, 'SOUL.md'), '你是助手。\n', 'utf8');
 
     expect(migrateUserDataLayout(root, userId).status).toBe('blocked');
+  });
+});
+
+describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与迁移（2026-10-23 回归）', () => {
+  /**
+   * 造一个"已撤销数字人"的数据域：`user-data/{name}/` 下三空间 + threads + 一个可辨认文件。
+   * 关键是它**不在** `agents/` 清单里（撤销后 `agents/` 已被整目录清掉）。
+   */
+  function seedRevokedAgentData(name: string): string {
+    const dir = userDataDir(root, userId, name);
+    ensureAgentDataDirs(root, userId, name);
+    fs.writeFileSync(path.join(dir, THREADS_DIR, 'history.jsonl'), 'revoked', 'utf8');
+    return dir;
+  }
+
+  it('只有已撤销数字人的数据域 → no-source：不搬、不建骨架、无审计噪音', () => {
+    const revoked = seedRevokedAgentData('柯昆BOM数字人');
+    seedAgent('BOM数字人');
+    const logs: RecordedLog[] = [];
+
+    const result = migrateUserDataLayout(root, userId, {
+      currentAgentName: 'BOM数字人',
+      logger: makeLogger(logs),
+    });
+
+    expect(result).toMatchObject({ status: 'no-source', ownerAgent: null, movedCount: 0 });
+    // 数据留在自己的数据域里（撤销不撤数据）
+    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe('revoked');
+    // MUST NOT 出现在当前选中的数字人目录下
+    expect(fs.existsSync(path.join(userDataDir(root, userId, 'BOM数字人'), '柯昆BOM数字人'))).toBe(
+      false,
+    );
+    expect(logs).toHaveLength(0);
+  });
+
+  it('旧布局四项 + 已撤销数字人数据域并存 → 只搬四个固定名，撤销目录原地保留', () => {
+    seedLegacyLayout();
+    const revoked = seedRevokedAgentData('柯昆BOM数字人');
+    seedAgent('BOM数字人');
+
+    const result = migrateUserDataLayout(root, userId, { currentAgentName: 'BOM数字人' });
+
+    expect(result).toMatchObject({
+      status: 'migrated',
+      ownerAgent: 'BOM数字人',
+      ownerReason: 'current',
+      movedCount: LEGACY_ENTRIES.length,
+      skipped: [],
+      failed: [],
+    });
+    // 撤销目录未被搬动，也没被当成"目标冲突"参与判定
+    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe('revoked');
+    expect(fs.existsSync(path.join(userDataDir(root, userId, 'BOM数字人'), '柯昆BOM数字人'))).toBe(
+      false,
+    );
+    // 旧布局四项已搬入当前数字人
+    const dst = userDataDir(root, userId, 'BOM数字人');
+    for (const entry of LEGACY_ENTRIES) {
+      expect(fs.existsSync(path.join(dst, entry, `marker-${entry}.txt`))).toBe(true);
+    }
+    // 源目录仍有"非旧布局条目" → 保留（等它自己的数字人回来，幂等）
+    expect(fs.readdirSync(userDataRoot(root, userId)).sort()).toEqual(
+      ['BOM数字人', '柯昆BOM数字人'].sort(),
+    );
+  });
+
+  it('撤销后重新部署同一数字人 → 迁移不再把它的数据域搬给当前选中者', () => {
+    const revoked = seedRevokedAgentData('z-已撤销');
+    seedLegacyLayout();
+    seedAgent('a-数字人');
+
+    // ③ 名称升序第一 → a-数字人；z-已撤销 不属于旧布局，不得被搬
+    const result = migrateUserDataLayout(root, userId);
+
+    expect(result.ownerAgent).toBe('a-数字人');
+    expect(fs.existsSync(path.join(userDataDir(root, userId, 'a-数字人'), 'z-已撤销'))).toBe(false);
+    expect(fs.existsSync(path.join(revoked, THREADS_DIR, 'history.jsonl'))).toBe(true);
   });
 });
 

@@ -14,7 +14,8 @@
  * 2. **迁移＝逐项原子改名**（`fs.renameSync`）：逐个子项搬；目标同名项存在时分两种：
  *    **空目录**（骨架先被建出来 / 上次中断留下的空壳）⇒ 搬进去（不删任何内容，救回"半成品"），
  *    **非空**⇒ **跳过 + 告警**（不合并、不覆盖）。因此可中断续跑、不占双倍空间；
- *    幂等判据＝**源目录不存在**。
+ *    幂等判据＝**源目录不存在**。搬迁对象**只有旧布局的四个固定一级名**（见
+ *    `LEGACY_LAYOUT_ENTRIES`）——其余一等条目一律原地不动。
  * 3. **失败保持原状**：跨卷（`EXDEV`）等改名失败 MUST NOT 静默降级为复制，MUST 明确落
  *    `error` 日志（含 `alert: true`）并跳过该项——其余项照常迁移，下次触发继续尝试。
  *
@@ -23,7 +24,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listAgents } from './agent-catalog.js';
-import { ensureAgentDataDirs, userDataDir, userDataRoot } from './dirs.js';
+import {
+  SPACES,
+  THREADS_DIR,
+  ensureAgentDataDirs,
+  userDataDir,
+  userDataRoot,
+} from './dirs.js';
 
 /** 迁移日志（结构同 pino：`logger.info(obj, msg)`） */
 export interface MigrationLogger {
@@ -52,6 +59,19 @@ export interface OwnerDecision {
   /** 参与判定的可用清单（③ 的歧义决定要能复核） */
   candidates: string[];
 }
+
+/**
+ * 009 改造前**用户级**布局的全部一级条目名：三空间 + `threads`。
+ *
+ * 迁移只认这四个名字（2026-10-23 修复）。原判据是"不在当前 `agents/` 清单里即为旧布局残留"，
+ * 而**撤销部署只清 `agents/`、`user-data/**` 按 `FR-028` 保留**——于是被撤销数字人的数据域目录
+ * （`user-data/{已撤销数字人}/`）被误判成旧布局残留，整体改名搬进"当前选中的数字人"数据域：
+ * 表现为"别人的会话与文件出现在我的数字人文件夹里"，且每次切换数字人都再搬一次。
+ *
+ * 归属数字人的数据域是**数字人级**的（`userDataDir`），其存在性与"当前是否部署"无关，
+ * 故 MUST NOT 用可用清单反推"哪些目录属于数字人"。
+ */
+const LEGACY_LAYOUT_ENTRIES: ReadonlySet<string> = new Set<string>([...SPACES, THREADS_DIR]);
 
 export type MigrationStatus = 'no-source' | 'blocked' | 'migrated';
 
@@ -167,9 +187,15 @@ export function migrateUserDataLayout(
 
   // 可用清单在此**先算一次**：既用于归属判定，也用于"还剩没得搬的"判据
   const candidates = availableAgentsOf(optAgentRoot, userId, opts);
-  // 只剩数字人数据目录（新布局）⇒ 没有可搬的一级条目：直接判"无需迁移"，
-  // 不落任何审计噪音（否则每次启动都会写一遍 start/owner/done）
-  const movable = entries.filter((name) => !candidates.includes(name));
+  // 只认旧布局的四个固定名（2026-10-23）。`user-data/` 下的**其它**一级条目——
+  // 尤其是已撤销数字人的数据域目录（撤销只清 `agents/`，数据按 FR-028 保留）——
+  // 既不是旧布局残留，也 MUST NOT 被搬进别的数字人数据域：一律原地不动。
+  //
+  // 也正因如此，`movable` 为空（只剩数字人数据目录）时直接判"无需迁移"，
+  // 不落任何审计噪音（否则每次启动 / 每次切换数字人都会写一遍 start/owner/done）。
+  const movable = entries.filter(
+    (name) => LEGACY_LAYOUT_ENTRIES.has(name) && !candidates.includes(name),
+  );
   if (movable.length === 0) return result;
 
   opts.logger?.info(
@@ -216,6 +242,8 @@ export function migrateUserDataLayout(
   const available = decision.candidates;
 
   for (const name of entries) {
+    // 非旧布局条目（已撤销数字人的数据域等）：原地不动，连"目标已存在"的判定都不参与
+    if (!LEGACY_LAYOUT_ENTRIES.has(name)) continue;
     // 已是某个数字人的数据目录（新布局）：不动
     if (available.includes(name)) continue;
     const from = path.join(src, name);

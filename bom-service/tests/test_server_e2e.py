@@ -3,7 +3,10 @@
 
 链路：真实数据（BOM提交/）→ 本机静态服务铸成 http 直链 → 真实 ``server.py`` 进程
 → MCP 客户端 ``tools/call``（带平台注入的 ``resultUrl``）→ 服务算完 **POST 到假回写端点**
-→ 结果里带回 ``filePath``，且那个端点收到的字节是**能打开的 xlsx**。
+→ 结果里带回两条入口（``filePath`` = 报告、``mergedFile`` = xlsx），且端点收到的字节
+一份是**能打开的 xlsx**、一份是**自包含的 HTML**。
+
+（不需要真实数据的对应覆盖在 ``test_server_deliver.py`` 的 ``_deliver_outputs`` 用例里。）
 
 这一层专门守住"注册得起来、参数齐、产出真能送出去"——``server.py`` 里
 ``@mcp.tool(structured_output=False)`` 与"工具内不得阻塞事件循环"那两条注释就是它要防的坑
@@ -81,14 +84,22 @@ def static_url():
 
 
 class _PutSink(http.server.BaseHTTPRequestHandler):
-    """假的平台回写端点（``POST /api/files/put``）：收字节、记录请求、回 202 + ``path``。"""
+    """假的平台回写端点（``POST /api/files/put``）：收字节、记录请求、回 202 + ``path``。
+
+    2026-10-22：一次合并会回写**两个**文件（xlsx + HTML 报告），所以除了 ``last`` 还要留
+    全量 ``all``；``fail_html`` 用来单独打掉报告那一跳，验证"降级成只有数据文件"。
+    """
 
     #: 最近一次请求（测试断言用）：``{"path":…, "query":{…}, "body":b"…", "headers":{…}}``
     last: dict = {}
+    #: 全部请求（按到达顺序）
+    all: list = []
     #: 收到的次数（失败场景断言"一次都没发"）
     calls = 0
     #: 返回状态码（换成 403 可测"回写被拒"）
     status = 202
+    #: 只对 ``filename`` 以 ``.html`` 结尾的请求返回 403（测报告回写失败的降级）
+    fail_html = False
 
     def log_message(self, *args):        # 测试输出保持干净
         pass
@@ -100,10 +111,13 @@ class _PutSink(http.server.BaseHTTPRequestHandler):
         query = {k: v[-1] for k, v in urllib.parse.parse_qs(parsed.query).items()}
         cls = type(self)
         cls.calls += 1
-        cls.last = {"path": parsed.path, "query": query, "body": body,
-                    "headers": dict(self.headers)}
-        if cls.status != 202:
-            self.send_response(cls.status)
+        entry = {"path": parsed.path, "query": query, "body": body,
+                 "headers": dict(self.headers)}
+        cls.last = entry
+        cls.all.append(entry)
+        if cls.status != 202 or (cls.fail_html
+                                 and str(query.get("filename", "")).endswith(".html")):
+            self.send_response(403 if cls.fail_html else cls.status)
             self.send_header("content-type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(b'{"error":{"code":"FILE_SIGN_INVALID"}}')
@@ -121,7 +135,8 @@ class _PutSink(http.server.BaseHTTPRequestHandler):
 @pytest.fixture()
 def put_sink():
     """每个用例一个干净的假回写端点；返回 (base_url, 端点类)。"""
-    handler = type("Sink", (_PutSink,), {"last": {}, "calls": 0, "status": 202})
+    handler = type("Sink", (_PutSink,), {"last": {}, "all": [], "calls": 0,
+                                         "status": 202, "fail_html": False})
     srv = _serve(handler)
     try:
         yield f"http://127.0.0.1:{srv.server_address[1]}", handler
@@ -247,7 +262,8 @@ def test_validate_returns_summary_and_no_output(mcp_server, static_url):
 
 
 def test_merge_writes_back_to_result_url(mcp_server, static_url, put_sink):
-    """合并：**同一轮**返回统计 + 把 xlsx POST 到「平台回写地址」，并把返回的 path 作为 filePath。"""
+    """合并：**同一轮**返回统计 + 把 xlsx 与 HTML 报告各 POST 一次到「平台回写地址」，
+    并把两次返回的 path 分别作为 ``mergedFile``（数据文件）与 ``filePath``（报告）。"""
     sink_url, sink = put_sink
     # 平台注入的地址都带原有一串 query（u/d/exp/sig/sid/call_id/tool）——服务必须一个不丢
     result_url = (f"{sink_url}/api/files/put?u=u1&d=%E4%B8%B4%E6%97%B6%E7%A9%BA%E9%97%B4"
@@ -263,24 +279,55 @@ def test_merge_writes_back_to_result_url(mcp_server, static_url, put_sink):
     name = payload["artifact"]["filename"]
     assert name.startswith("总BOM_WCCMT-00000B0570_bom_") and name.endswith(".xlsx")
     assert payload["artifact"]["rows"] == EXPECTED_NODES and payload["artifact"]["bytes"] > 0
-    # 入口改为文件空间路径：值与"平台返回的 path"一致，不再是自铸的下载地址
-    assert sink.calls == 1
+
+    # 两个文件、两条入口：顶层是报告（点开即读），mergedFile 是数据文件（点开即下载）
+    assert sink.calls == 2
+    report_name = payload["filePathName"]
+    assert report_name == f"{name[:-len('.xlsx')]}_报告.html"
     assert payload["filePath"].startswith("临时空间/后台产出/")   # 平台返回的权威路径，原样搬运
-    assert payload["filePath"].endswith(f"th_1_{name}")
-    assert payload["filePathName"] == name
+    assert payload["filePath"].endswith(f"th_1_{report_name}")
+    assert payload["mergedFile"]["filePath"].endswith(f"th_1_{name}")
+    assert payload["mergedFile"]["filePathName"] == name
     assert "viewUrl" not in payload and "viewUrlName" not in payload
 
-    # 回写请求本身：原有 query 一个不丢、文件名/摘要齐、body 是能打开的 xlsx
-    query = sink.last["query"]
-    assert query["u"] == "u1" and query["sig"] == "deadbeef" and query["sid"] == "th_1"
-    assert query["call_id"] == "c1" and query["tool"] == "bom__bom_merge"
-    assert query["filename"] == name
-    assert query["summary"]                      # 摘要必须有（界面标题的唯一来源）
-    # 回写必须是"原样收字节"的类型：平台只给 octet-stream / text/plain 注册了 Buffer parser
-    assert sink.last["headers"]["content-type"] == "application/octet-stream"
-    wb = load_workbook(filename=__import__("io").BytesIO(sink.last["body"]))
+    # 第一次回写是 xlsx，第二次是报告；两次的原有 query 一个都不许丢
+    xlsx_hit, report_hit = sink.all[0], sink.all[1]
+    assert xlsx_hit["query"]["filename"] == name
+    for hit in (xlsx_hit, report_hit):
+        assert hit["query"]["u"] == "u1" and hit["query"]["sig"] == "deadbeef"
+        assert hit["query"]["sid"] == "th_1" and hit["query"]["call_id"] == "c1"
+        assert hit["query"]["tool"] == "bom__bom_merge"
+        assert hit["query"]["summary"]           # 摘要必须有（界面标题的唯一来源）
+        # 回写必须是"原样收字节"的类型：平台只给 octet-stream / text/plain 注册了 Buffer parser
+        assert hit["headers"]["content-type"] == "application/octet-stream"
+    wb = load_workbook(filename=__import__("io").BytesIO(xlsx_hit["body"]))
     assert wb.sheetnames == ["Total BOM", "校验汇总"]
     assert wb["Total BOM"].max_row == EXPECTED_NODES + 1      # 表头 + 数据行
+
+    # 报告是自包含 HTML：无脚本（平台 sandbox="" 预览，脚本本来也不执行）
+    assert report_hit["query"]["filename"] == report_name
+    html = report_hit["body"].decode("utf-8")
+    assert html.startswith("<!doctype html>") and "BOM 合并报告" in html
+    assert "<details" in html and "<script" not in html.lower()
+    assert name in html                        # 数据文件名写进正文（是文字，不是链接）
+
+
+def test_merge_degrades_when_report_put_rejected(mcp_server, static_url, put_sink):
+    """报告那一跳被拒：**降级**成只有数据文件——已经交付的入口绝不能被抹掉。"""
+    sink_url, sink = put_sink
+    sink.fail_html = True
+    text, _ = mcp_call(mcp_server["url"], "bom_merge",
+                       {**file_args(static_url),
+                        "resultUrl": f"{sink_url}/api/files/put?u=u1&d=d&exp=1&sig=x&sid=th_1"},
+                       timeout=120)
+    payload = json.loads(text[0])
+    assert payload["status"] == "success"
+    assert sink.calls == 2                     # 报告那一跳发出过（被拒），不是没尝试
+    name = payload["artifact"]["filename"]
+    assert payload["filePath"].endswith(f"th_1_{name}")     # 顶层退回数据文件
+    assert payload["filePathName"] == name
+    assert "mergedFile" not in payload          # 同一路径不重复给两条入口
+    assert "报告未交付" in payload["message"]
 
 
 def test_merge_without_result_url_gives_no_file_path(mcp_server, static_url):

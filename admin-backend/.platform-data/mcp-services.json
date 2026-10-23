@@ -133,7 +133,7 @@
       "name": "bom-service",
       "description": "柯昆BOM解析",
       "transport": "http",
-      "url": "http://localhost:8102/mcp",
+      "url": "http://192.168.0.130:8102/mcp",
       "command": null,
       "args": null,
       "file_args": {
@@ -157,7 +157,7 @@
         "bom_merge"
       ],
       "headers": {},
-      "updated_at": "2026-10-20T01:21:43.222Z"
+      "updated_at": "2026-10-23T05:56:19.504Z"
     }
   }
 }

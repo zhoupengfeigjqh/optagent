@@ -2,8 +2,8 @@
 soul_version: 1
 next_action_hints: true
 next_action_hints_count: 2
-intro: 海大排产专家
-welcome: 您好，我是海大排产助手，请输入您的问题！
+intro: 我是一名专业的计划排产专家
+welcome: 您好，我是一位专业的计划排产助手，请输入您的问题！
 starters:
   - prompt: 根据文件解析结果，进行排产计算
     tools:

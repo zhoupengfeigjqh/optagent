@@ -38,11 +38,11 @@ OCR 表格识别与 Jev 决策（TypeSafe System One）作为 MCP 工具服务�
 └─────────────────┘         └───────────────────────────┘
 ```
 
-`bom-service` 是唯一「产出文件并交给用户下载」的 MCP 服务：合并后的 xlsx 算完**直接从内存回写平台**
-（运行环境注入的 `resultUrl` → `POST /api/files/put`），落进调用者的文件空间
-`临时空间/后台产出/`，服务把平台返回的 `path` 作为 `filePath` 交回，聊天区据此渲染入口行、
-用户点开即下载——二进制不经过模型上下文。**服务本身不写磁盘**（2026-10-21 起本地产出目录与
-`BOM_PUBLIC_BASE_URL` 一并下架）。
+`bom-service` 是唯一「产出文件并交给用户」的 MCP 服务：合并后的 **xlsx + HTML 报告**算完
+**直接从内存回写平台**（运行环境注入的 `resultUrl` → `POST /api/files/put`，同一地址可多次 POST），
+落进调用者的文件空间 `临时空间/后台产出/`，服务把平台返回的 `path` 交回（报告作 `filePath`、
+xlsx 作 `mergedFile`），聊天区据此渲染两行入口——报告点开即读、xlsx 点开即下载，二进制不经过模型
+上下文。**服务本身不写磁盘**（2026-10-21 起本地产出目录与 `BOM_PUBLIC_BASE_URL` 一并下架）。
 
 除同步调用外，MCP 服务也可走**异步**：运行环境为声明过的工具注入 `resultUrl`，服务立即返回受理，
 算完后 POST 回写结果 → 落盘到 `临时空间/后台产出/` → 前端铃铛「后台记录」出现条目，模型可在后续
@@ -136,8 +136,9 @@ optagent/
 │   └── tests/              # 服务端测试
 │
 ├── bom-service/            # BOM 校验/合并 MCP 服务（Docker，宿主机端口 8102）
-│   ├── server.py           # MCP 服务入口（FastMCP / StreamableHTTP）+ 产出回写（resultUrl）
+│   ├── server.py           # MCP 服务入口（FastMCP / StreamableHTTP）+ 产出回写（resultUrl，xlsx + 报告）
 │   ├── bom_core.py         # 校验与合并管线（S0~S6 阶段、结果形状、产出命名）
+│   ├── report.py           # 合并报告 HTML 渲染（结构树 + 问题清单，无脚本/无外链）
 │   └── tests/              # 服务端测试
 │
 ├── gateway/                # 生产网关（nginx）
@@ -159,7 +160,7 @@ optagent/
 | `admin-backend/.env.local` | 管理平台 | 仅本地 `--env-file` | **本地形态**配置（宿主机相对路径）；样板 `.env.example`。其中 **`ONTO_MARKET_DIR`** 指向本体平台的本体市场（`../../optonto/.data/onto_market`，平台**只读**）；缺省 = "从本体市场导入"不可用（不影响启动与其余功能） |
 | `ocr-service/.env.local` | OCR 服务 | compose `env_file`（`required: false`） | 本机私产：可调项（下载上限、超时）；缺失即用代码缺省值（gitignore；样板 `.env.example`） |
 | `jev-service/.env.local` | Jev 服务 | compose `env_file`（`required: false`） | `TYPESAFE_API_KEY` 与上游端点/超时等（含密钥，gitignore；样板 `.env.example`） |
-| `bom-service/.env.local` | BOM 服务 | compose `env_file`（`required: false`） | 可调项：计算限额（输入/解压/节点上限）与**回写上限**（`BOM_RESULT_MAX_BYTES`，须与平台 `UPLOAD_MAX_MB` 对齐）。**2026-10-21 起产出改回写平台**，本机不再有产出目录与对外基址（原 `BOM_PUBLIC_BASE_URL` 已下架）（gitignore；样板 `.env.example`） |
+| `bom-service/.env.local` | BOM 服务 | compose `env_file`（`required: false`） | 可调项：计算限额（输入/解压/节点上限）、**回写上限**（`BOM_RESULT_MAX_BYTES`，须与平台 `UPLOAD_MAX_MB` 对齐）与**报告预算**（`BOM_REPORT_MAX_NODES` / `BOM_REPORT_MAX_ISSUES`，防 HTML 撞 5MB）。**2026-10-21 起产出改回写平台**，本机不再有产出目录与对外基址（原 `BOM_PUBLIC_BASE_URL` 已下架）（gitignore；样板 `.env.example`） |
 | `docker-compose.yml` | 编排层 | docker compose | 编排权威源：挂载/网络；**单点覆盖只剩 `PUBLIC_BASE_URL`**（服务变量一律走各服务 `env_file`）。**（2026-09-27）** `admin-backend` 已不再挂载 `docker.sock` 与编排文件本身——平台不读容器编排声明与容器运行态 |
 
 读取规则（2026-09-20 分工，2026-09-23 扩到 MCP 服务，2026-09-28 简化）：
@@ -328,17 +329,25 @@ TypeSafe System One 决策模型（Jev）的 MCP 封装：把「state + 类型�
 |---|---|
 | `server.py` | MCP 服务入口：两个**同步**工具 `bom_validate`（校验，dry-run、**不产文件**）/ `bom_merge`（合并 + **回写平台**）；回写地址由平台注入（工具声明 `resultUrl`） |
 | `bom_core.py` | 全部业务规则与结果形状：S0 输入与配置 → S1.2 编码族 → S1.5 表头 1:1 映射 → S2 归一化 → S2.4 整行重复 → S2.5 编码认领 → S4 递归展开 → S5 累计用量连乘 → S6 按 `schema_path` 的 `excel_column_order` 导出 xlsx。错误逐条带 `code/level/stage/target/location/field/message/hint`，**任一阶段出现 error 即停止**（fail-fast）。四个输入经签名直链回源下载（只接受 http/https、限时限大小、不跟随重定向，与 OCR/Jev 同一机制） |
+| `report.py` | 合并报告的 HTML 渲染（纯函数）：结构树（原生 `<details>`，无脚本，深层默认折叠）+ 按文件分组的问题清单 + 汇总卡片。自包含 CSS、**零外链、零脚本**、全字段转义，并受 `BOM_REPORT_MAX_NODES` / `BOM_REPORT_MAX_ISSUES` 两个预算约束 |
 
 **产出交付链路**（关键点：能点开的地址只有平台铸得出来，所以服务**不落盘、不自铸地址**，改为回写）：
 
 ```text
-bom_merge 算完 → 内存里的 xlsx POST 到 resultUrl（POST /api/files/put，octet-stream）
-  → 平台落盘 临时空间/后台产出/{会话}_{产出名} → 202 {"path": …}
-  → 结果 JSON 里带 filePath / filePathName（契约 §4.7）→ 聊天区入口行 → 用户点开即下载
+bom_merge 算完 → 内存里的 xlsx + HTML 报告各自 POST 到 resultUrl（POST /api/files/put，octet-stream）
+  → 平台落盘 临时空间/后台产出/{会话}_{产出名} → 202 {"path": …}（同一 resultUrl 可多次 POST）
+  → 结果 JSON 里带 filePath / filePathName（报告 · 契约 §4.7）+ mergedFile {filePath, filePathName}（xlsx）
+  → 聊天区两行入口 → 报告点开即读（沙箱 iframe）、xlsx 点开即下载
 ```
 
+- 一次合并回写**两个文件**（2026-10-22 起）。报告是第一入口（顶层 `filePath`），xlsx 在
+  `mergedFile` 里——键序即展示顺序（平台按 JSON 键顺序抽取入口行）。两者共用同一个 job 主干命名，
+  报告名多一个 `_报告.html` 后缀，因此在「后台记录」里是两条可区分的记录；
+- 报告里**刻意没有下载链接**：`.html` 在平台以 `sandbox=""` + `CSP: sandbox` 内联预览，脚本与下载
+  都被沙箱关掉，服务也铸不出读方向签名（密钥在平台侧）。下载入口只由平台渲染的那一行提供；
 - 单次回写上限 = 平台 `UPLOAD_MAX_MB`（默认 **5MB**，超限 413）⇒ 服务先判大小、超限则**不交付**
-  并把原因写进 `message`（`BOM_RESULT_MAX_BYTES` 可对齐调整）；
+  并把原因写进 `message`（`BOM_RESULT_MAX_BYTES` 可对齐调整）。**降级链**：数据文件失败 → 零入口；
+  报告生成/回写失败 → 顶层退回数据文件、不给 `mergedFile`，原因写进 `message`；
 - 没有 `resultUrl`（直接调服务）时结果照给，但**没有入口**——绝不编一个点不开的地址；
 - 产出随临时空间规则清理（**30 天未访问**），入口过期后点开 404。
 
@@ -740,8 +749,10 @@ npm run dev
 - `confirmation` 建议 `never`（纯计算，不写业务系统）；两个工具都是**同步**的。`bom_merge` 自己
   声明了 `resultUrl`（2026-10-21 起产出回写平台）——**平台侧无需任何登记**，运行端看到声明就会注入；
   `bom_validate` 不产文件、未声明，也就拿不到回写地址；
-- 产出的下载入口由服务在返回里给出 `filePath` / `filePathName`（文件空间相对路径，见下），
-  平台零改动渲染；点开走 `/api/files/download`（`临时空间/后台产出/` 已放开只读访问）。
+- 产出的入口由服务在返回里给出（都是文件空间相对路径，见下），平台零改动渲染：顶层
+  `filePath` / `filePathName` 指向**报告**（`.html` → 沙箱 iframe 内联预览），
+  `mergedFile: {filePath, filePathName}` 指向 **xlsx**（点开即下载）。
+  两行的顺序就是返回里 JSON 键的顺序；`临时空间/后台产出/` 已放开只读访问。
 
 > **需要链接跳转时，请在工具返回里加上 `viewUrl` / `viewUrlName`（外部地址）或
 > `filePath` / `filePathName`（本地文件空间相对路径）字段**，方便工具调用后的结果展示：

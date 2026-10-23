@@ -162,3 +162,137 @@ def test_deliver_degrades_on_unreachable_endpoint():
     path, err = srv._deliver("http://127.0.0.1:1/api/files/put?u=u1", "a.xlsx", b"PK", "x")
     assert path == ""
     assert err.strip() != ""
+
+
+# ---------------------------------------------------------------- 两次回写（xlsx + 报告）
+#
+# 这一层必须在**没有真实 BOM 数据**的环境也能跑：`test_server_e2e.py` 整层按数据在位与否
+# skip，而"两个文件、两条入口、报告坏了要降级"是这次改动的全部风险点。
+
+class _EchoSink(http.server.BaseHTTPRequestHandler):
+    """按请求里的 ``filename`` 回不同的 ``path``（模拟平台落盘命名）。"""
+
+    all: list = []
+    calls = 0
+    status = 202
+    #: 只对 ``.html`` 返回 403（测"报告回写失败 → 降级成只有数据文件"）
+    fail_html = False
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(length)
+        parsed = urllib.parse.urlsplit(self.path)
+        query = {k: v[-1] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+        cls = type(self)
+        cls.calls += 1
+        cls.all.append({"query": query, "body": body,
+                        "headers": {k.lower(): v for k, v in self.headers.items()}})
+        name = str(query.get("filename", "x"))
+        if cls.status != 202 or (cls.fail_html and name.endswith(".html")):
+            self.send_response(403 if cls.fail_html else cls.status)
+            self.end_headers()
+            return
+        raw = json.dumps({"path": f"临时空间/后台产出/th_1_{name}", "size": len(body)},
+                         ensure_ascii=False).encode("utf-8")
+        self.send_response(202)
+        self.send_header("content-type", "application/json; charset=utf-8")
+        self.send_header("content-length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+@pytest.fixture()
+def echo_sink():
+    handler = type("Echo", (_EchoSink,), {"all": [], "calls": 0, "status": 202,
+                                          "fail_html": False})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}/api/files/put?u=u1&d=d&exp=1&sig=x", handler
+    finally:
+        srv.shutdown()
+
+
+def _internal(nodes: int = 3) -> dict:
+    return {
+        "status": "success",
+        "message": "合并完成",
+        "summary": {"tree": {"nodes": nodes, "components": 1}, "counts": {"error": 0, "warn": 1},
+                    "root": "ROOT"},
+        "issues": [],
+        "_nodes": [{"level": 0, "mat_code": "ROOT", "is_component": True},
+                   {"level": 1, "mat_code": "LEAF-1", "qty": 2, "total_qty": 2}],
+        "artifact": {"filename": "总BOM_ROOT_bom_1.xlsx", "rows": nodes, "bytes": 1024},
+    }
+
+
+def test_deliver_outputs_writes_data_then_report(echo_sink):
+    """两个文件两次 POST；返回的**键序**决定界面顺序：报告在前，mergedFile 在后。"""
+    url, fake = echo_sink
+    srv = server_module()
+    entries, note = srv._deliver_outputs(
+        url, filename="总BOM_ROOT_bom_1.xlsx", xlsx=b"PK\x03\x04xlsx",
+        internal=_internal(), job_id="bom_1", summary="合并完成：3 行")
+
+    assert note == ""
+    assert list(entries) == ["filePath", "filePathName", "mergedFile"]
+    assert entries["filePathName"] == "总BOM_ROOT_bom_1_报告.html"
+    assert entries["filePath"].endswith("th_1_总BOM_ROOT_bom_1_报告.html")
+    assert entries["mergedFile"]["filePathName"] == "总BOM_ROOT_bom_1.xlsx"
+    assert entries["mergedFile"]["filePath"].endswith("th_1_总BOM_ROOT_bom_1.xlsx")
+
+    assert fake.calls == 2
+    data_hit, report_hit = fake.all
+    assert data_hit["query"]["filename"].endswith(".xlsx")
+    assert report_hit["query"]["filename"].endswith(".html")
+    # 报告同样是 octet-stream 原样字节（平台只给这两种类型注册了 Buffer parser）
+    assert report_hit["headers"]["content-type"] == "application/octet-stream"
+    assert report_hit["body"].decode("utf-8").startswith("<!doctype html>")
+    assert report_hit["query"]["summary"].startswith("合并报告")
+
+
+def test_deliver_outputs_falls_back_to_data_when_report_rejected(echo_sink):
+    """报告那一跳被拒：顶层退回数据文件，**不给 mergedFile**，原因写进说明。"""
+    url, fake = echo_sink
+    fake.fail_html = True
+    srv = server_module()
+    entries, note = srv._deliver_outputs(
+        url, filename="总BOM_ROOT_bom_1.xlsx", xlsx=b"PK", internal=_internal(),
+        job_id="bom_1", summary="合并完成")
+
+    assert fake.calls == 2
+    assert list(entries) == ["filePath", "filePathName"]
+    assert entries["filePathName"] == "总BOM_ROOT_bom_1.xlsx"
+    assert "报告未交付" in note and "403" in note
+
+
+def test_deliver_outputs_report_failure_keeps_data(echo_sink, monkeypatch):
+    """报告**生成**就失败（不含网络）：数据文件照交，说明里点名"报告未生成"。"""
+    url, fake = echo_sink
+    srv = server_module()
+    monkeypatch.setattr(srv, "_report_bytes", lambda *_a, **_k: None)
+    entries, note = srv._deliver_outputs(
+        url, filename="总BOM_ROOT_bom_1.xlsx", xlsx=b"PK", internal=_internal(),
+        job_id="bom_1", summary="合并完成")
+
+    assert fake.calls == 1                       # 报告根本不该发出去
+    assert entries["filePathName"] == "总BOM_ROOT_bom_1.xlsx"
+    assert "报告未生成" in note
+
+
+def test_deliver_outputs_no_entries_when_data_rejected(echo_sink):
+    """数据文件第一跳就失败：**一个入口都不给**（不假装有产出），且不再尝试报告。"""
+    url, fake = echo_sink
+    fake.status = 403
+    srv = server_module()
+    entries, note = srv._deliver_outputs(
+        url, filename="总BOM_ROOT_bom_1.xlsx", xlsx=b"PK", internal=_internal(),
+        job_id="bom_1", summary="合并完成")
+
+    assert fake.calls == 1
+    assert entries == {}
+    assert note.startswith("产出未交付") and "403" in note
