@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>总BOM整合架构 — 流程与设计理由</title>
+<style>
+  :root {
+    --blue: #2563eb; --green: #059669; --amber: #d97706; --red: #dc2626;
+    --gray: #64748b; --bg: #f8fafc; --card: #ffffff; --line: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: var(--bg);
+         color: #1e293b; line-height: 1.7; padding: 40px 20px; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; text-align: center; margin-bottom: 6px; }
+  .sub { text-align: center; color: var(--gray); margin-bottom: 36px; font-size: 14px; }
+  h2 { font-size: 20px; margin: 40px 0 16px; padding-left: 12px; border-left: 5px solid var(--blue); }
+  h2.feedback { border-color: var(--amber); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 18px 22px; margin-bottom: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .arrow { text-align: center; color: var(--gray); font-size: 20px; margin: 2px 0; }
+  .stage-tag { display: inline-block; font-size: 12px; font-weight: 600; color: #fff;
+               border-radius: 4px; padding: 2px 8px; margin-right: 8px; vertical-align: middle; }
+  .tag-human { background: var(--green); }
+  .tag-auto  { background: var(--blue); }
+  .tag-check { background: var(--red); }
+  .step-title { font-weight: 700; font-size: 15px; }
+  .step-title code { background: #eff6ff; color: var(--blue); padding: 1px 6px;
+                     border-radius: 4px; font-size: 13px; }
+  .why { color: var(--gray); font-size: 13.5px; margin-top: 6px; }
+  .why b { color: #475569; }
+  pre { background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 16px 20px;
+        font-size: 13px; overflow-x: auto; line-height: 1.6; margin: 10px 0; }
+  pre .c { color: #7dd3fc; } pre .chk { color: #fca5a5; } pre .ok { color: #86efac; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  .loop td:first-child { white-space: nowrap; font-weight: 600; color: var(--red); width: 200px; }
+  .principle { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+  .principle div { flex: 1; min-width: 260px; background: #f0fdf4; border: 1px solid #bbf7d0;
+                   border-radius: 8px; padding: 12px 16px; font-size: 14px; }
+  .principle b { color: var(--green); }
+  .summary { background: linear-gradient(135deg, #eff6ff, #f0fdf4); border: 1px solid #bfdbfe;
+             border-radius: 10px; padding: 20px 24px; font-size: 15.5px; text-align: center;
+             margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>总BOM整合架构</h1>
+<p class="sub">1 个前置阶段（人机结合定标准） + 1 个自动化主流程（机器执行与把关） + 1 条反馈回路（问题回流修标准/修数据）</p>
+
+<!-- ================= 阶段0 ================= -->
+<h2>阶段 0：映射设计（前置 · 人机结合 · 一次性 + 按需迭代）</h2>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-human">人机</span>目标：先定"方言 → 普通话"的翻译规则，再谈自动化</div>
+<pre>
+人工抽样各类子BOM文件
+   ↓
+机器辅助: 扫描各文件表头列名、版式差异(单列 / 双语 / 脏单元格)
+   ↓
+人工确认: 每个原始列名 ↔ 总BOM标准字段 的对应关系
+   ↓
+<span class="ok">固化产物① 子BOM字段映射.json  —— 每族一个字典 + 标题行特征 (适配层, 可迭代)</span>
+<span class="ok">固化产物② 总BOM标准字段.json  —— 字段定义 / schema / 列序 (标准锚点, 不再变)</span>
+</pre>
+  <div class="why">
+    <b>为什么必须人在环里：</b>列名含义、双语列取舍、脏数据识别，机器只能建议，人来拍板。<br>
+    <b>为什么分两个产物：</b>总BOM字段是唯一标准锚点，定稿不动；子BOM映射是适配层，随数据问题迭代完善。<br>
+    <b>副产品：</b>映射表沉淀了对该类装备BOM版式的全部认知，本身即是交付物。
+  </div>
+</div>
+
+<!-- ================= 主流程 ================= -->
+<h2>主流程：自动生成总BOM（全自动）</h2>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S1</span>加载 <code>load_all</code></div>
+  <div class="why">读 BOM/ 全部文件，<b>完整文件名建索引、不截断</b>——版本后缀问题留给匹配阶段显式处理，不悄悄丢弃信息。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-check">预检①</span>S1.2 族识别 <code>precheck_families</code></div>
+  <div class="why">文件名必须归入族字典（VCPM / WCXXX / WCCMT / WCCUN），否则报出并停止。<b>理由：不放行的文件=被静默忽略的文件</b>，它不会进入后续任何检查。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-check">预检②</span>S1.5 表头 1:1 映射 <code>precheck_headers</code></div>
+  <div class="why">每文件三查：①找得到标题行 ②必需字段集齐（schema 中 source=子BOM映射 的全部字段）③无不认识的列。<b>理由：双向卡死——缺字段是"少"，陌生列是"多"，两者都意味着数据会被静默丢。</b></div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S2</span>归一化 <code>normalize</code></div>
+  <div class="why">逐行抽取 → 统一为标准字段的明细 items。预检②已保证可翻译，此步<b>纯翻译、零判断</b>。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-check">预检③</span>S2.4 整行重复 <code>precheck_duplicates</code></div>
+  <div class="why">同一文件内完全重复的明细行 → 报出并停止。<b>理由：重复行会让数量翻倍，且是源文件缺陷的强信号</b>（实战：ER5ZE 重复紧固件块）。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-check">预检④</span>S2.5 编码认领 <code>build_resolver</code></div>
+  <div class="why">从根节点逐层：编码 → 唯一文件（精确 / 前缀匹配）。候选 ≥2 个（版本冲突）→ 报出并停止。<b>理由：选错版本整棵树都是错的，而且错得隐蔽；绝不按排序默默选一个</b>（实战：备份副本混入被拦）。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S4</span>递归展开 <code>expand</code></div>
+  <div class="why">DFS 先序：有文件 → 组件下钻；无文件 → 叶子；循环引用截断；level=1 标记 UNIT → 拍平的多级树。<b>与 S2 分离：翻译和拼装解耦；与 S5 分离：结构和算量解耦。</b></div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S5</span>用量计算 <code>calc_total_qty</code></div>
+  <div class="why">total_qty = qty × 父件 total_qty，单趟栈算法沿树连乘（×订单台数）。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S6</span>输出 <code>export</code></div>
+  <div class="why">Excel 列序 / 每列填不填 <b>全由 schema 的 source 属性驱动</b>：子BOM映射+计算生成 → 填值，人工维护/到料join → 留空。层级缩进、组件加粗、warnings 附表。</div>
+</div>
+<div class="arrow">▼</div>
+
+<div class="card">
+  <div class="step-title"><span class="stage-tag tag-auto">S7</span>回归对账（可选）<code>validate</code></div>
+  <div class="why">与人工维护的参考总表 difflib 对齐，比对 posiz / qty / total_qty。<b>注意：参考表只做"标准答案"校验，绝不参与生成。</b></div>
+</div>
+
+<!-- ================= 反馈回路 ================= -->
+<h2 class="feedback">反馈回路：问题回流（关键闭环）</h2>
+
+<div class="card">
+  <div class="why" style="margin-bottom:4px">主流程任何一步报错停止，<b>不是失败，是设计动作</b>——错误报告直接指出该修哪里；修完重跑，直到全流程通过：</div>
+  <table class="loop">
+    <tr><th>报错类型</th><th>回流到</th></tr>
+    <tr><td>族不识别</td><td>阶段0：补新族的映射字典</td></tr>
+    <tr><td>表头缺字段 / 陌生列</td><td>阶段0：改 子BOM字段映射.json</td></tr>
+    <tr><td>脏单元格 / 重复行</td><td>数据源：清理子BOM源文件</td></tr>
+    <tr><td>版本冲突</td><td>数据源：每个编码只保留一版</td></tr>
+    <tr><td>缺子BOM文件</td><td>数据源：补文件（或确认确实没有）</td></tr>
+    <tr><td>对账差异</td><td>人工归因：版本演进(可解释) / 程序bug(修代码)</td></tr>
+  </table>
+  <div class="why" style="margin-top:10px"><b>效果：</b>映射表随迭代越来越完备，同族新文件进来基本零成本。</div>
+</div>
+
+<!-- ================= 职责划分 ================= -->
+<h2>机器与人的职责划分</h2>
+<div class="principle">
+  <div><b>机器：</b>翻译、拼装、算量，以及"宁可错杀不可放过"的预检——输入有歧义就停机，不猜。</div>
+  <div><b>人：</b>定义映射标准、清理脏数据、裁决版本——所有需要业务知识的判断。</div>
+</div>
+
+<div class="summary">
+  <b>一句话架构：</b>人机结合定标准（阶段0）→ 机器严格执行 + 严格把关（S1~S7）→ 把关发现的问题回流给人修标准或修数据（反馈回路）。
+</div>
+
+</div>
+</body>
+</html>

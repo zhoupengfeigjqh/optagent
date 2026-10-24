@@ -1,0 +1,29 @@
+{
+  "message_id": "m_mvj5aajv_ehpm",
+  "agent_name": "生产计划助手",
+  "created_at": "2026-10-22T06:13:45.354Z",
+  "actions": [
+    {
+      "prompt": "算法服务恢复后，用同一批数据版本重新提交排产任务",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "hd-algorithm",
+          "name": "hd_scheduling_submit"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：hd-algorithm__hd_scheduling_submit（提交单工序排产任务。算法侧受理后立即返回，不等待求解完成。返回值 status=accepted 表示已受理（此时 message 会说明无需重复提交，求解完…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    },
+    {
+      "prompt": "查询已有排产任务的状态与结果摘要",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "hd-algorithm",
+          "name": "hd_scheduling_query"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：hd-algorithm__hd_scheduling_query（按 jobId 主动查询排产任务的状态与结果摘要（区别于提交时受理即返回、回调时被动回写）。返回 jobId、status（accepted-已受理 / su…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

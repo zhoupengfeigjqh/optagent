@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "metadata": {
+        "created_at": "2026-07-15 16:05:02",
+        "deployed_version": "v1.0",
+        "scenario_name": "生产调度",
+        "scenario_id": 1,
+        "ontology_name": "原材料采购和库存",
+        "ontology_id": 1
+      },
+      "ontology_hash": "7fd75bfa018ec1f765615b4615d6d07838203cea719dd66094ffc5691739c3ad",
+      "securities_hash": "4667b6c73347b518668f6a144544c8d1748a5939e7313e79e573e423d91ed9ef",
+      "installed_at": "2026-10-13T02:09:16.541Z",
+      "updated_at": "2026-10-13T02:09:16.541Z"
+    }
+  ]
+}

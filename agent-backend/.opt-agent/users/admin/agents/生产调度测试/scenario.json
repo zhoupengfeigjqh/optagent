@@ -1,0 +1,32 @@
+{
+  "scenario": "海大计划",
+  "data_prep_dirs": [
+    "算法规则"
+  ],
+  "data_prep_fields": {
+    "算法规则": [
+      {
+        "name": "ruleId",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "ruleDesc",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "rulePriority",
+        "type": "integer",
+        "required": true
+      }
+    ]
+  },
+  "data_prep_uploads": {
+    "算法规则": [
+      ".xlsx",
+      ".csv",
+      ".txt"
+    ]
+  }
+}

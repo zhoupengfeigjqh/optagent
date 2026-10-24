@@ -1,0 +1,7 @@
+{
+  "enabled": [
+    "list_dir",
+    "read_file",
+    "write_file"
+  ]
+}

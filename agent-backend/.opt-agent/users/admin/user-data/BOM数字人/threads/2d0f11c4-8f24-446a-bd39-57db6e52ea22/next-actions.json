@@ -1,0 +1,18 @@
+{
+  "message_id": "m_mvkk5tjy_k6rj",
+  "agent_name": "BOM数字人",
+  "created_at": "2026-10-23T05:57:40.873Z",
+  "actions": [
+    {
+      "prompt": "补入缺失的四个下级子BOM文件后重新合并总BOM",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "bom-service",
+          "name": "bom_merge"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：bom-service__bom_merge（把一批子BOM 合并成一棵多级总BOM，按 schema_path 输出 xlsx，并**写入调用者的文件空间**。\n\n    流程（**同步**：调用返回时…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

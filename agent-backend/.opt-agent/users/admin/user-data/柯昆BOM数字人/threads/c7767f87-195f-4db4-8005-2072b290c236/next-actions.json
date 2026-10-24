@@ -1,0 +1,18 @@
+{
+  "message_id": "m_mvkek0px_bydu",
+  "agent_name": "柯昆BOM数字人",
+  "created_at": "2026-10-23T03:20:37.176Z",
+  "actions": [
+    {
+      "prompt": "告诉我子BOM压缩包与总BOM表格的文件路径，我先做格式校验",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "bom-service",
+          "name": "bom_validate"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：bom-service__bom_validate（校验一批子BOM 能否合并成一棵完整的多级总BOM（**dry-run，不产出 BOM 文件**）。\n\n    检查项（判据与既有实现严格一致，逐条带错误码、…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

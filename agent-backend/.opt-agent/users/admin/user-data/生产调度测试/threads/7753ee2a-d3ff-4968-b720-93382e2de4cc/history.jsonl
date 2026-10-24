@@ -1,0 +1,2 @@
+{"role":"user","content":"hi","id":"m_mve0fc2n_xlh0","ts":"2026-10-18T15:58:24.479Z","agent_name":"生产调度测试"}
+{"id":"m_mve0fat2_hqtr","role":"assistant","content":"你好！我是原材料库存与采购助手，可以帮你：\n\n- 查询原材料库存、原材料基本信息\n- 查询供应商及其供货能力\n- 查询原材料采购单\n- 创建、取消、入库原材料采购单\n\n有什么需要我帮忙的，直接说就行～\n\n","ts":"2026-10-18T15:58:24.479Z","status":"completed","usage":{"input_tokens":8672,"output_tokens":159},"duration_ms":1641,"agent_name":"生产调度测试"}

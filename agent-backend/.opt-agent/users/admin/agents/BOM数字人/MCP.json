@@ -1,0 +1,28 @@
+{
+  "servers": [
+    {
+      "name": "bom-service",
+      "transport": "http",
+      "url": "http://192.168.0.130:8102/mcp",
+      "file_args": {
+        "bom_validate": {
+          "sub_bom_zip_path": "url",
+          "total_bom_path": "url",
+          "schema_path": "url",
+          "mapping_path": "url"
+        },
+        "bom_merge": {
+          "sub_bom_zip_path": "url",
+          "total_bom_path": "url",
+          "schema_path": "url",
+          "mapping_path": "url"
+        }
+      },
+      "confirmation": "always",
+      "allowed_tools": [
+        "bom_validate",
+        "bom_merge"
+      ]
+    }
+  ]
+}

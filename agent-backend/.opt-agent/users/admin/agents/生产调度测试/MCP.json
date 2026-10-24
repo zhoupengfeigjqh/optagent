@@ -1,0 +1,38 @@
+{
+  "servers": [
+    {
+      "name": "raw_inventory_purchase_action",
+      "transport": "http",
+      "url": "http://localhost:8022/mcp",
+      "headers": {
+        "X-MCP-Token": "ZmeYwSB6_APUf54aJbGJl27u7_G5Cjo5"
+      },
+      "allowed_tools": [
+        "CreatePurchaseRecord",
+        "CancelPurchaseRecord",
+        "ReceiveRawMaterial",
+        "QueryInventory",
+        "QueryRawMaterials",
+        "QueryPurchaseRecords",
+        "QuerySuppliers",
+        "QuerySupplierCapability"
+      ]
+    },
+    {
+      "name": "raw_inventory_purchase_function",
+      "transport": "http",
+      "url": "http://localhost:8021/mcp",
+      "headers": {
+        "X-MCP-Token": "6UuE8_4nY683gZ13rNQbHDCfxgMgEF3Z"
+      },
+      "allowed_tools": [
+        "sumRawNotArrivalQty",
+        "checkRawMaterialUnit",
+        "checkArrivalTimeValidity",
+        "checkSupplierExistence",
+        "checkRelatedOrderExistence",
+        "inferPurchasePurpose"
+      ]
+    }
+  ]
+}

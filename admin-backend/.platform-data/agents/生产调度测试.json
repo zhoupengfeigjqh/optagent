@@ -1,0 +1,73 @@
+{
+  "name": "生产调度测试",
+  "soul": {
+    "intro": "库存和原材料专家",
+    "welcome": "您好，我是库存和原材料专家，请输入您的问题！",
+    "starters": [],
+    "mission": "你是一名库存和原材料专家，负责库存查询、采购单创建等工作",
+    "capability_tags": [
+      "查询库存",
+      "查询原材料",
+      "查询原材料采购单",
+      "创建原材料采购单"
+    ],
+    "forbidden": [
+      "严谨编造数据",
+      "严谨未经同意修改数据或删除数据"
+    ],
+    "prompt_extra": "",
+    "next_action_hints": true,
+    "next_action_hints_count": 2
+  },
+  "enabled_tools": [
+    "list_dir",
+    "write_file",
+    "read_file",
+    "read_skill",
+    "grep_skill",
+    "grep_files"
+  ],
+  "mcp_services": [
+    "raw_inventory_purchase_action",
+    "raw_inventory_purchase_function"
+  ],
+  "skills": [
+    "raw-material-inventory"
+  ],
+  "ontologies": [
+    "生产调度/原材料采购和库存"
+  ],
+  "scenario": {
+    "scenario": "海大计划",
+    "data_prep_dirs": [
+      "算法规则"
+    ],
+    "data_prep_fields": {
+      "算法规则": [
+        {
+          "name": "ruleId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ruleDesc",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "rulePriority",
+          "type": "integer",
+          "required": true
+        }
+      ]
+    },
+    "data_prep_uploads": {
+      "算法规则": [
+        ".xlsx",
+        ".csv",
+        ".txt"
+      ]
+    }
+  },
+  "updated_at": "2026-10-18T15:53:01.433Z"
+}

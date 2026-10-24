@@ -1,0 +1,18 @@
+{
+  "message_id": "m_mve0dmd5_p7bb",
+  "agent_name": "生产调度测试",
+  "created_at": "2026-10-18T15:57:08.638Z",
+  "actions": [
+    {
+      "prompt": "用原材料名称查询该原材料的基本信息",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "raw_inventory_purchase_action",
+          "name": "QueryRawMaterials"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：raw_inventory_purchase_action__QueryRawMaterials（查询原材料基本信息：根据原材料ID或名称查询原材料的基础信息。（本体「原材料采购和库存」）。返回为执行结果信封 {\"status_code\": int, \"d…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}
