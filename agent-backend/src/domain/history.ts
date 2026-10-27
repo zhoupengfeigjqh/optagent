@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FeedbackValue, HistoryMessage } from '../types.js';
+import { disposeChain } from './chain.js';
 import { threadDir } from './dirs.js';
 
 export interface HistoryLogger {
@@ -72,6 +73,14 @@ export class HistoryStore {
       next.catch(() => {}),
     );
     return next;
+  }
+
+  /**
+   * 释放该会话的串行链内存（2026-10-27）：删会话时调用，等链排空后删键。
+   * 语义与安全性见 `disposeChain` 的注释（期间有新写入则保留不动）。
+   */
+  disposeThread(userId: string, agentName: string, threadId: string): Promise<void> {
+    return disposeChain(this.chains, `${userId}/${agentName}/${threadId}`);
   }
 
   private async doAppend(

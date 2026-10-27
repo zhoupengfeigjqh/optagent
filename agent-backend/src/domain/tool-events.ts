@@ -22,6 +22,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { disposeChain } from './chain.js';
 import { SPACE_TMP, threadDir } from './dirs.js';
 import {
   TOOL_ARTIFACT_MAX_BYTES,
@@ -57,6 +58,8 @@ export interface ToolCallRecord {
   /** 该轮 assistant 消息 id（前端据此把卡片挂到对应气泡） */
   messageId: string;
   name: string;
+  /** 人读名称（2026-10-27）：卡片标题用；缺省 = 无中文名，展示方回退 `name` */
+  label?: string;
   status: 'running' | 'success' | 'error';
   startedAt: string;
   durationMs?: number;
@@ -84,6 +87,8 @@ export interface AppendStartInput {
   callId: string;
   messageId: string;
   name: string;
+  /** 人读名称（可空：无中文名时不写该字段，读回按 `name` 展示） */
+  label?: string;
   startedAt: string;
   argsDigest?: Record<string, string>;
 }
@@ -92,6 +97,8 @@ export interface AppendEndInput {
   callId: string;
   messageId: string;
   name: string;
+  /** 人读名称；开始行已写入时结束行仍带一份，便于"只有结束行"的残缺数据也能显示中文 */
+  label?: string;
   startedAt: string;
   status: 'success' | 'error';
   durationMs: number;
@@ -104,6 +111,8 @@ interface ToolEventLine {
   call_id: string;
   message_id: string;
   name: string;
+  /** 人读名称（2026-10-27；旧行没有该字段，读回时缺省） */
+  label?: string;
   status: 'running' | 'success' | 'error';
   started_at: string;
   duration_ms?: number;
@@ -144,6 +153,8 @@ export class ToolEventStore {
       call_id: input.callId,
       message_id: input.messageId,
       name: input.name,
+      // 非空才写：物化/落盘同一口径，"字段缺席"= 没有中文名
+      ...(input.label !== undefined && input.label !== '' ? { label: input.label } : {}),
       status: 'running',
       started_at: input.startedAt,
       ...(input.argsDigest ? { args_digest: input.argsDigest } : {}),
@@ -174,6 +185,7 @@ export class ToolEventStore {
         call_id: input.callId,
         message_id: input.messageId,
         name: input.name,
+        ...(input.label !== undefined && input.label !== '' ? { label: input.label } : {}),
         status: input.status,
         started_at: input.startedAt,
         duration_ms: input.durationMs,
@@ -272,6 +284,14 @@ export class ToolEventStore {
    */
   flush(userId: string, agentName: string, threadId: string): Promise<void> {
     return this.chains.get(`${userId}/${agentName}/${threadId}`) ?? Promise.resolve();
+  }
+
+  /**
+   * 释放该会话的串行链内存（2026-10-27）：删会话时调用，等链排空后删键。
+   * 安全性见 `disposeChain`（期间有新写入则保留不动）。
+   */
+  disposeThread(userId: string, agentName: string, threadId: string): Promise<void> {
+    return disposeChain(this.chains, `${userId}/${agentName}/${threadId}`);
   }
 
   /** 读取全部记录（按 call_id 合并、保持首次出现顺序）；时间正序 */
@@ -383,6 +403,7 @@ function toRecord(line: ToolEventLine): ToolCallRecord {
     status: line.status,
     startedAt: line.started_at,
   };
+  if (typeof line.label === 'string' && line.label !== '') record.label = line.label;
   if (typeof line.duration_ms === 'number') record.durationMs = line.duration_ms;
   if (typeof line.size === 'number') record.size = line.size;
   if (typeof line.inline_content === 'string') record.content = line.inline_content;
@@ -418,6 +439,7 @@ function parseLine(line: string): ToolEventLine | undefined {
     status: obj.status,
     started_at: obj.started_at,
   };
+  if (typeof obj.label === 'string' && obj.label !== '') out.label = obj.label;
   if (typeof obj.duration_ms === 'number') out.duration_ms = obj.duration_ms;
   if (typeof obj.size === 'number') out.size = obj.size;
   if (typeof obj.inline_content === 'string') out.inline_content = obj.inline_content;

@@ -144,6 +144,7 @@ function toConfigResponse(config: {
   rules_fields: Record<string, string>;
   confirmation: 'never' | 'always' | { tools: string[] };
   allowed_tools: string[];
+  tool_labels: Record<string, string>;
   headers: Record<string, string>;
   updated_at: string;
 }): Record<string, unknown> {
@@ -159,6 +160,8 @@ function toConfigResponse(config: {
     confirmation: config.confirmation,
     // 白名单必须回显：界面对照"数字人能看到什么"，漏登会让它凭空消失
     allowed_tools: config.allowed_tools,
+    // 工具显示名同样必须回显：详情会覆盖表单，漏登 = "保存一次就清空"
+    tool_labels: config.tool_labels,
     // 请求头同样必须回显（界面要看出"配了令牌"），但**只回掩码**——
     // 明文令牌不进任何响应（与详情接口同一口径，见 `maskHeaders`）
     headers: maskHeaders(config.headers),

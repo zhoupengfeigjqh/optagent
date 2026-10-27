@@ -140,5 +140,7 @@ export function buildToolScopePayload(
     confirmation: service.confirmation,
     rules_fields: service.rules_fields,
     allowed_tools: [...allowedTools],
+    // 显示名同样是"全量替换"语义：不带上就会被清空（工具清单悄悄变回英文名）
+    tool_labels: { ...(service.tool_labels ?? {}) },
   }
 }

@@ -86,6 +86,7 @@ function toolCallJson(r: ToolCallRecord) {
   return {
     call_id: r.callId,
     name: r.name,
+    ...(r.label !== undefined ? { label: r.label } : {}),
     status: r.status,
     started_at: r.startedAt,
     ...(r.durationMs !== undefined ? { duration_ms: r.durationMs } : {}),
@@ -270,8 +271,18 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const { id: threadId } = req.params as { id: string };
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'DELETE /api/threads/:id' });
     ctx.threadStore.get(userId, agentName, threadId); // 404
-    // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）
+    // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）；仍在启动中的请求打取消标记
     ctx.runManager.stop(threadId);
+    // 先等落盘链排空再删目录（2026-10-27）：
+    // 1) 在途 append 会把刚删掉的目录重新建出来（残留"没有 meta.json 的孤儿目录"）；
+    // 2) 顺带释放三个 store 的串行链内存——键按会话累积且原先永不清理。
+    await Promise.all([
+      ctx.history.disposeThread(userId, agentName, threadId),
+      ctx.summary.disposeThread(userId, agentName, threadId),
+      ctx.toolEvents.disposeThread(userId, agentName, threadId),
+    ]);
+    // 下一步动作提示是会话级单快照，随会话一起删（与"发起新一轮即清空"同一语义）
+    ctx.nextActions.clear(userId, agentName, threadId);
     // 删除是「多文件 × 单次系统调用」，**await 异步版**：不让它占住事件循环
     // （否则用户紧接着的"切换会话"请求会被一起拖慢，见 fs-safe 头部实测）
     await ctx.threadStore.delete(userId, agentName, threadId);

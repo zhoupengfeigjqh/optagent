@@ -62,6 +62,30 @@ beforeEach(() => {
   useToolPanels().reset()
 })
 
+describe('ToolCallList —— 工具标题（2026-10-27）', () => {
+  it('摘要行与明细行都显示人读名称，原始调用名放 title 悬停', async () => {
+    const wrapper = mountList([
+      { ...READ, label: '读取文件' },
+      { ...OCR, label: '表格识别' },
+    ])
+
+    const summary = wrapper.find('[data-test="tool-summary"]')
+    expect(summary.text()).toContain('表格识别')
+    expect(summary.text()).not.toContain('ocr_image')
+    expect(summary.find('.tool-call__name').attributes('title')).toBe('ocr_image')
+
+    await summary.trigger('click')
+    const detailNames = wrapper.findAll('[data-test="tool-details"] .tool-call__name')
+    expect(detailNames[0]!.text()).toBe('读取文件')
+    expect(detailNames[0]!.attributes('title')).toBe('read_file')
+  })
+
+  it('无 label 时回退调用名（旧记录 / 无中文名的工具）', () => {
+    const wrapper = mountList([OCR])
+    expect(wrapper.text()).toContain('ocr_image')
+  })
+})
+
 describe('ToolCallList —— 计数与报错数（TR-32）', () => {
   it('计数常显：次数口径 + 报错数（不展开也能看出有失败）', () => {
     const wrapper = mountList([READ, QUERY, OCR])

@@ -105,6 +105,26 @@ describe('InteractionGate：挂起与恢复', () => {
     gate.settle(id2, 'reject');
     await req2;
   });
+
+  it('工具人读名称进 tool_label 与标题；缺省/空白回退调用名（恒有值）', async () => {
+    const created: InteractionRequestPayload[] = [];
+    const gate = new InteractionGate({ onCreated: (p) => created.push(p) });
+
+    const req = gate.request({ ...INPUT, toolLabel: '查询电价' });
+    const id = gate.snapshot()!.interaction_id;
+    expect(created[0]!.tool_label).toBe('查询电价');
+    expect(created[0]!.title).toBe('确认调用参数：查询电价');
+    gate.settle(id, 'reject');
+    await req;
+
+    // 无中文名的工具 / 空白值：快照字段仍是字符串，前端无需判空
+    const req2 = gate.request({ ...INPUT, toolLabel: '   ' });
+    const id2 = gate.snapshot()!.interaction_id;
+    expect(created[1]!.tool_label).toBe('pricing__query_price');
+    expect(created[1]!.title).toBe('确认调用参数：pricing__query_price');
+    gate.settle(id2, 'reject');
+    await req2;
+  });
 });
 
 describe('InteractionGate：超时', () => {

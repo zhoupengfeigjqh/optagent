@@ -11,7 +11,7 @@ import { computed } from 'vue'
 
 import type { UploadedDocument, UploadStatus } from '../../composables/useUploads'
 import { toUserMessage } from '../../utils/error-message'
-import { formatFileSize } from '../../utils/format'
+import { formatBytes } from '../../utils/format'
 import BaseIcon from '../common/BaseIcon.vue'
 
 const props = defineProps<{ doc: UploadedDocument }>()
@@ -26,7 +26,7 @@ const STATUS_LABEL: Readonly<Record<UploadStatus, string>> = {
 }
 
 const statusLabel = computed(() => STATUS_LABEL[props.doc.status])
-const sizeText = computed(() => formatFileSize(props.doc.size))
+const sizeText = computed(() => formatBytes(props.doc.size))
 const displayName = computed(() => props.doc.serverFilename ?? props.doc.name)
 const failureText = computed(() =>
   props.doc.status === 'failed' && props.doc.error ? toUserMessage(props.doc.error, 'upload') : '',

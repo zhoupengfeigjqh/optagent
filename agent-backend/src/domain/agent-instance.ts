@@ -148,6 +148,7 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.rules_fields !== undefined) cfg.rulesFields = parseRulesFields(s.rules_fields, bad);
     if (s.allowed_tools !== undefined) cfg.allowedTools = parseAllowedTools(s.allowed_tools, bad);
     if (s.headers !== undefined) cfg.headers = parseHeaders(s.headers, bad);
+    if (s.tool_labels !== undefined) cfg.toolLabels = parseToolLabels(s.tool_labels, bad);
     // 2026-10-17：`async_tools` 已移除（异步能力改由工具入参 schema 是否声明 `resultUrl`
     // 自动判定）。存量 `MCP.json` 里的该键**原样忽略**——不报错、不纳管，部署后自然消失。
     return cfg;
@@ -208,6 +209,45 @@ function hasControlChars(value: string): boolean {
     if (code < 0x20 || code === 0x7f) return true;
   }
   return false;
+}
+
+/** 工具显示名长度上限：与平台保存期同一口径（`MCP_TOOL_LABEL_MAX_CHARS`） */
+const TOOL_LABEL_MAX_CHARS = 40;
+
+/**
+ * 解析 `tool_labels`（**工具显示名**，2026-10-27）。
+ *
+ * 判据与平台保存期**同一口径**（对象 / 键非空 / 值为 1~40 字单行字符串，见
+ * `admin-backend/src/domain/mcp/service-config-fields.ts` 的 `normalizeToolLabels`），
+ * 否则会出现"平台保存得进去、运行环境加载不了"。
+ *
+ * 非法即配置错误：显示名会进意图聚焦命题，一个带换行的名字会直接污染命题文本；
+ * 平台读取期已把脏值收敛掉，物化只会写合法值，这里的报错属于最后一道防线。
+ *
+ * 语义：缺省 / 空对象 = 全部回退英文拼接（与 `headers` 同一口径，物化时"非空才写"）。
+ */
+function parseToolLabels(raw: unknown, bad: (why: string) => Error): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw bad(`tool_labels 须为对象 { 工具名: 显示名 }，当前：${JSON.stringify(raw)}`);
+  }
+  const out: Record<string, string> = {};
+  for (const [rawTool, rawLabel] of Object.entries(raw as Record<string, unknown>)) {
+    const tool = rawTool.trim();
+    if (tool === '') throw bad('tool_labels 的工具名不能为空');
+    if (typeof rawLabel !== 'string') {
+      throw bad(`tool_labels.${tool} 须为字符串，当前：${JSON.stringify(rawLabel)}`);
+    }
+    const label = rawLabel.trim();
+    if (label === '') throw bad(`tool_labels.${tool} 不能为空（如需回退英文工具名请去掉该键）`);
+    if ([...label].length > TOOL_LABEL_MAX_CHARS) {
+      throw bad(`tool_labels.${tool} 超过 ${TOOL_LABEL_MAX_CHARS} 字`);
+    }
+    if (hasControlChars(label)) {
+      throw bad(`tool_labels.${tool} 须为单行字符串（不得含换行或控制字符）`);
+    }
+    out[tool] = label;
+  }
+  return out;
 }
 
 /**

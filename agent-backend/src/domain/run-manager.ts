@@ -180,6 +180,11 @@ export class RunManager {
    * 把「并发判定」与「run 注册」之间的 await 窗口封闭掉，杜绝超发。
    */
   private readonly reserving = new Map<string, string>();
+  /**
+   * 启动中请求的取消标记（2026-10-27）：占位已拿、run 还没注册时收到的 stop / 删会话。
+   * 由 `takeCancel` 一次性消费，`startRun` 转正时也会清掉（防幽灵取消）。
+   */
+  private readonly cancelRequested = new Set<string>();
   private draining = false;
   private readonly now: () => number;
   /** 轮次收尾家族（007 拆分出去；只依赖落盘/记账/后台触发器，见 run-finalize.ts） */
@@ -227,6 +232,16 @@ export class RunManager {
   }
 
   /**
+   * 尚未收尾的请求数（活跃 run + 启动中占位，2026-10-27）：优雅关闭的等待口径。
+   *
+   * 启动中占位横跨「取实例 + 等 MCP 就绪」，最长可达数秒；只等 `active` 会在
+   * 占位转正的瞬间判定"已排空"，导致关服与新一轮开跑赛跑。
+   */
+  inFlightCount(): number {
+    return this.active.size + this.reserving.size;
+  }
+
+  /**
    * 原子占用一个并发额度：**同步**完成「检查 + 占位」，两步之间无 await，
    * 因此同一用户的并发请求不可能同时通过判定。
    *
@@ -246,7 +261,22 @@ export class RunManager {
     this.reserving.set(threadId, userId);
     return () => {
       this.reserving.delete(threadId);
+      // 取消标记随之清掉：请求已放弃，不能留给下一轮（否则下一轮会被"幽灵取消"）
+      this.cancelRequested.delete(threadId);
     };
+  }
+
+  /**
+   * 取走"启动中取消"标记（2026-10-27）。
+   *
+   * `acquireQuota` 与 `startRun` 之间最长有数秒 await（取实例 / 等 MCP 就绪）。
+   * 这段时间里的 stop / 删会话必须能取消掉这一轮，否则用户点了停止、界面也断流了，
+   * 后端随后照样开跑并落一条谁也看不见的回答；删会话更糟——run 会把刚删的目录重建出来。
+   *
+   * 由发起请求的一方在 `startRun` 前调用（一次性消费）。
+   */
+  takeCancel(threadId: string): boolean {
+    return this.cancelRequested.delete(threadId);
   }
 
   /** 关机 draining：进行中 run 标记 draining（当前消息写完收尾，不新开步骤） */
@@ -261,11 +291,21 @@ export class RunManager {
     return this.draining;
   }
 
+  /**
+   * 中断该会话的这一轮：已注册的 run 直接 stop；仍在启动中的请求打取消标记
+   * （2026-10-27）。后者若不处理，用户"停止"后本轮照样开跑并落一条看不见的回答。
+   */
   stop(threadId: string): boolean {
     const run = this.active.get(threadId);
-    if (!run) return false;
-    run.stop();
-    return true;
+    if (run) {
+      run.stop();
+      return true;
+    }
+    if (this.reserving.has(threadId)) {
+      this.cancelRequested.add(threadId);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -335,6 +375,8 @@ export class RunManager {
     // 2026-10-15：本轮实际模型（请求级覆盖优先）——LLM 失败日志据此定位到具体模型
     if (opts.model) run.modelId = opts.model.model;
     this.reserving.delete(opts.threadId); // 额度占位转正为活跃 run
+    // 转正即清取消标记：启动窗口内没收到 stop，这轮就是正常一轮（防幽灵取消影响后续轮次）
+    this.cancelRequested.delete(opts.threadId);
     this.active.set(opts.threadId, run);
     // 007 修订：新一轮开始即清空上一轮的「下一步动作提示」快照（同步，无独立生成链后无顺序竞态）。
     // 语义不变：发起新一轮的瞬间上一轮卡片即消失（前端 onSend 的 reset 与之同刻）。

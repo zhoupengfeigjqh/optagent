@@ -48,6 +48,29 @@ function mountDialog(request: InteractionSnapshot = makeRequest()) {
   return mount(InteractionDialog, { props: { request } })
 }
 
+describe('InteractionDialog —— 标题行（2026-10-27）', () => {
+  it('工具名只由标题承载；倒计时贴标题右侧，正文不再有工具名行与说明入口', () => {
+    const wrapper = mountDialog(
+      makeRequest({
+        tool_label: '识别图片文字',
+        title: '确认调用参数：识别图片文字',
+        tool_description: '识别图片中的文字，返回按行拼接的文本',
+      }),
+    )
+
+    expect(wrapper.find('.base-dialog__title').text()).toBe('确认调用参数：识别图片文字')
+
+    // 倒计时在**头部**（标题右边），不再单独占正文一行；它仍是超时可见性的唯一来源
+    const header = wrapper.find('.base-dialog__header')
+    expect(header.find('.interaction-dialog__countdown').text()).toContain('剩余')
+    expect(wrapper.find('.interaction-dialog__meta').exists()).toBe(false)
+
+    // 工具说明入口（「?」）已移除；正文也没有重复的工具名行
+    expect(wrapper.find('[aria-label="查看工具说明"]').exists()).toBe(false)
+    expect(wrapper.find('.interaction-dialog__tool').exists()).toBe(false)
+  })
+})
+
 describe('InteractionDialog —— Schema 驱动表单', () => {
   it('按 schema 渲染控件：select/switch/number/textarea，并预填 proposed_args', () => {
     const wrapper = mountDialog()

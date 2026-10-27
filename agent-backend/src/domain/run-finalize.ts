@@ -79,13 +79,16 @@ export class RunFinalizer {
    *
    * assistant 消息 id 用 run 启动时**预生成**的那个（工具事件行已按它归属），
    * 不能在这里另生成——否则工具卡片会挂到一条不存在的消息上。
+   *
+   * @returns `false` = 落盘失败（已广播 `HISTORY_WRITE_FAILED`，**未**广播 done）。
+   * 调用方据此把本轮记为失败，避免"日志说成功、用户看到错误"。
    */
   async done(
     run: RunImpl,
     turn: FinalizeTurn,
     userMessage: HistoryMessage,
     usage: UsageInfo,
-  ): Promise<void> {
+  ): Promise<boolean> {
     run.state = 'done';
     const nowMs = this.deps.now();
     const ts = new Date(nowMs).toISOString();
@@ -107,17 +110,20 @@ export class RunFinalizer {
       duration_ms: durationMs,
       agent_name: run.agentName,
     };
-    await Promise.all([
-      this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
-        ...userMessage,
-        id: userMessageId,
-        ts,
-        agent_name: run.agentName,
-      }),
-      this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
-      // 工具记录同样"先落盘后广播"：否则 done 到达时前端立即刷新会读不到工具卡片
-      this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
-    ]);
+    const persisted = await this.persist(run, turn, true, () =>
+      Promise.all([
+        this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
+          ...userMessage,
+          id: userMessageId,
+          ts,
+          agent_name: run.agentName,
+        }),
+        this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
+        // 工具记录同样"先落盘后广播"：否则 done 到达时前端立即刷新会读不到工具卡片
+        this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
+      ]),
+    );
+    if (!persisted) return false;
     run.emit({
       type: 'done',
       data: {
@@ -131,6 +137,7 @@ export class RunFinalizer {
     });
     // FR-018：窗口外攒满一批则 fire-and-forget 增量重写摘要
     void this.deps.summary?.trigger(turn.userId, run.agentName, turn.threadId);
+    return true;
   }
 
   /** LLM 错误（非中断）：失败轮落盘（status='failed' + 错误信息 + 已消耗 usage/耗时） */
@@ -166,17 +173,21 @@ export class RunFinalizer {
         output_tokens: ev.usage.outputTokens,
       };
     }
-    await Promise.all([
-      this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
-        ...userMessage,
-        id: genMessageId(nowMs),
-        ts,
-        agent_name: run.agentName,
-      }),
-      this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
-      // 失败轮同样等工具记录落盘（工具可能已成功执行过，卡片不该丢）
-      this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
-    ]);
+    // 落盘失败不得覆盖"LLM 失败"这个主因：`notify=false`（本轮只允许一个 error 事件），
+    // 只记结构化日志并继续把上游错误告诉用户。
+    await this.persist(run, turn, false, () =>
+      Promise.all([
+        this.deps.history.append(turn.userId, run.agentName, turn.threadId, {
+          ...userMessage,
+          id: genMessageId(nowMs),
+          ts,
+          agent_name: run.agentName,
+        }),
+        this.deps.history.append(turn.userId, run.agentName, turn.threadId, assistantMessage),
+        // 失败轮同样等工具记录落盘（工具可能已成功执行过，卡片不该丢）
+        this.deps.toolEvents?.flush(turn.userId, run.agentName, turn.threadId) ?? Promise.resolve(),
+      ]),
+    );
     run.emit({
       type: 'error',
       data: {
@@ -205,6 +216,55 @@ export class RunFinalizer {
     });
     // FR-027：丢弃本轮消息，但已消耗 token 照记
     this.recordUsage(turn, run.agentName, u);
+  }
+
+  /**
+   * 统一落盘口（2026-10-27 新增）：把"写盘失败"与"实例崩溃"彻底分开。
+   *
+   * 为什么不能直接冒泡：`consumeTurn` 的 catch 把任何未知异常都当成实例崩溃
+   * （销毁池内实例 + 广播 `INTERNAL_ERROR`），而磁盘满 / 权限不足 / 文件被占用
+   * 与 Agent 实例状态毫无关系——一次落盘失败不该让下一句重建全部 MCP 连接，
+   * 也不该把"已经生成的回答"替换成一个笼统的内部错误。
+   *
+   * @param notify `true` = 需要主动告知用户（成功轮没有别的错误事件可复用）；
+   *   `false` = 已有主因错误，只记日志（保证一轮仍然**恰好一个** error 事件）。
+   */
+  private async persist(
+    run: RunImpl,
+    turn: FinalizeTurn,
+    notify: boolean,
+    write: () => Promise<unknown>,
+  ): Promise<boolean> {
+    try {
+      await write();
+      return true;
+    } catch (err) {
+      // `done()` 已把状态置为 'done'；落盘失败后改记为 'error'（终态必须与事实一致）
+      run.state = 'error';
+      this.deps.logger?.error(
+        {
+          err,
+          alert: true,
+          event: 'run.persist.failed',
+          scope: 'run',
+          user_id: turn.userId,
+          thread_id: turn.threadId,
+          agent_name: run.agentName,
+        },
+        '本轮落盘失败（磁盘/权限类），会话数据可能缺失',
+      );
+      if (notify) {
+        run.emit({
+          type: 'error',
+          data: {
+            error: { code: 'HISTORY_WRITE_FAILED', message: '本轮内容未能保存，请重试' },
+            duration_seconds: toSeconds(this.deps.now() - run.startedAt),
+            agent_name: run.agentName,
+          },
+        });
+      }
+      return false;
+    }
   }
 
   /** 用量记在**本轮实际使用的数字人**名下（009 下恒等于会话归属：会话归属不可变更） */

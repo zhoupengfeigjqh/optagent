@@ -239,6 +239,21 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         );
       }
 
+      // 启动窗口内可能已被「停止 / 删除会话」取消（2026-10-27）：归还额度、不开跑。
+      // 否则用户已断流、界面已显示停止，后端仍会跑完并落一条谁也看不见的回答；
+      // 删会话的情况下 run 还会把刚删掉的目录重新创建出来。
+      if (ctx.runManager.takeCancel(threadId)) {
+        releaseQuota();
+        throw new ApiError(409, 'RUN_CANCELLED', '本轮已被停止');
+      }
+
+      // 优雅关闭期间不再开新轮（2026-10-27）：`beginDrain()` 只给在途 run 打标记，
+      // 若这里仍放行，drain 会「排空」后又被新一轮追上（进程已退出、回答写一半）。
+      if (ctx.runManager.isDraining()) {
+        releaseQuota();
+        throw new ApiError(503, 'SERVICE_UNAVAILABLE', '服务正在关闭，请稍后重试');
+      }
+
       let run: Run;
       try {
         run = ctx.runManager.startRun({

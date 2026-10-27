@@ -150,12 +150,22 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
 
     case SSE_EVENT.ERROR: {
       const error = asRecord(payload.error)
+      // 诊断字段（2026-10-27）：后端 `HistoryErrorInfo` 会带 `upstream_status` /
+      // `upstream_type` / `request_id`，前端 `formatErrorDiagnostics` 专门渲染它们。
+      // 此前逐字段构造时漏映射 → 流式失败永远没有诊断行，而刷新后同一条失败却有。
+      // 沿用"有才写"口径：缺省即不出现（与后端不写空壳一致）。
+      const upstreamStatus = error?.upstream_status
+      const upstreamType = asString(error?.upstream_type)
+      const requestId = asString(error?.request_id)
       return {
         type: 'error',
         data: {
           error: {
             code: asString(error?.code, 'INTERNAL_ERROR'),
             message: asString(error?.message),
+            ...(typeof upstreamStatus === 'number' ? { upstream_status: upstreamStatus } : {}),
+            ...(upstreamType !== '' ? { upstream_type: upstreamType } : {}),
+            ...(requestId !== '' ? { request_id: requestId } : {}),
           },
           duration_seconds:
             payload.duration_seconds === undefined ? undefined : asNumber(payload.duration_seconds),

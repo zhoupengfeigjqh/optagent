@@ -2,9 +2,9 @@
   "items": {
     "ocr": {
       "name": "ocr",
-      "description": "解析图片中的文字",
+      "description": "图片文字解析",
       "transport": "http",
-      "url": "http://localhost:8000/mcp",
+      "url": "http://localhost:8100/mcp",
       "command": null,
       "args": null,
       "file_args": {
@@ -12,16 +12,14 @@
           "image": "url"
         }
       },
-      "confirmation": "never",
+      "confirmation": "always",
       "rules_fields": {},
-      "async_tools": [
-        "ocr_image"
-      ],
       "allowed_tools": [
         "ocr_image"
       ],
+      "tool_labels": {},
       "headers": {},
-      "updated_at": "2026-10-10T08:06:35.214Z"
+      "updated_at": "2026-10-27T12:59:33.094Z"
     },
     "jev": {
       "name": "jev",
@@ -37,14 +35,14 @@
       },
       "confirmation": "never",
       "rules_fields": {},
-      "async_tools": [],
       "allowed_tools": [
         "noul",
         "choice",
         "score"
       ],
+      "tool_labels": {},
       "headers": {},
-      "updated_at": "2026-10-15T16:11:25.152Z"
+      "updated_at": "2026-10-27T04:02:20.010Z"
     },
     "raw_inventory_purchase_function": {
       "name": "raw_inventory_purchase_function",

@@ -59,6 +59,17 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   INTERNAL_ERROR: '系统繁忙，请稍后重试',
   SERVICE_UNAVAILABLE: '系统繁忙，请稍后重试',
   NETWORK_ERROR: '网络异常，请检查连接后重试',
+  // 2026-10-27：运行环境新增的两个"非崩溃"失败码（此前会走兜底把内部码曝给用户）
+  // 读取历史/摘要/产出失败：本轮未开始，重试即可（实例未销毁）
+  PROMPT_BUILD_FAILED: '读取会话上下文失败，请重试',
+  // 落盘失败（磁盘/权限）：回答已生成但未能保存，重试即可
+  HISTORY_WRITE_FAILED: '本轮内容未能保存，请重试',
+  // 签名直链失效：链接是短时的，重新打开即可重新铸造
+  FILE_SIGN_INVALID: '文件链接已失效，请重新打开',
+  // 场景未配置：当前用户/数字人缺少 scenario.json，需要管理员处理
+  SCENARIO_NOT_CONFIGURED: '场景未配置，请联系管理员',
+  // 启动窗口内被停止：本轮根本没开跑（重发即可），与"该会话已有一轮在跑"要分清
+  RUN_CANCELLED: '本轮已停止',
   // 模型调用失败分级（2026-10-15，TR-54 / 契约 §19.2）——只出现在发消息链路
   // （`useChatStream` 的失败 toast 与 `ChatPanel` 的失败块，两处都传 `send-message`）。
   //

@@ -445,3 +445,69 @@ describe('RunFinalizer.aborted', () => {
     expect(usage.rows[0]).toMatchObject({ inputTokens: 0, outputTokens: 0 });
   });
 });
+
+/**
+ * 落盘失败（2026-10-27）
+ *
+ * 修复前：`append` 抛错会一路冒到 `consumeTurn` 的 catch，被归类为"实例崩溃"——
+ * 销毁池内实例（连带重建全部 MCP 连接）+ 广播 `INTERNAL_ERROR`，且 `run.state`
+ * 先从 `done` 改成 `error`（双终态）。磁盘满 / 权限不足与实例状态毫无关系。
+ */
+describe('RunFinalizer.done —— 落盘失败不是实例崩溃（2026-10-27）', () => {
+  it('返回 false + 广播 HISTORY_WRITE_FAILED + 终态改 error；不抛错、不广播 done', async () => {
+    const failingHistory = {
+      append: () => Promise.reject(new Error('ENOSPC: no space left on device')),
+    } as unknown as HistoryStore;
+    const usage = fakeUsage();
+    const errorLog = vi.fn();
+    const finalizer = new RunFinalizer({
+      history: failingHistory,
+      usage: usage.store,
+      now: () => 5_000,
+      logger: { error: errorLog } as never,
+    });
+    const run = makeRun();
+    const events = collect(run);
+
+    const ok = await finalizer.done(run, turn(), { role: 'user', content: '你好' }, USAGE);
+
+    expect(ok).toBe(false);
+    expect(run.state).toBe('error');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    expect(events.find((e) => e.type === 'error')).toMatchObject({
+      data: { error: { code: 'HISTORY_WRITE_FAILED' } },
+    });
+    // 结构化告警：落盘失败必须可被监控发现（宪章原则九）
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect((errorLog.mock.calls[0]![0] as Record<string, unknown>).event).toBe('run.persist.failed');
+  });
+
+  it('失败轮（error 路径）落盘失败：只记日志，不额外广播第二个 error 事件', async () => {
+    const failingHistory = {
+      append: () => Promise.reject(new Error('EACCES')),
+    } as unknown as HistoryStore;
+    const usage = fakeUsage();
+    const errorLog = vi.fn();
+    const finalizer = new RunFinalizer({
+      history: failingHistory,
+      usage: usage.store,
+      now: () => 5_000,
+      // error 路径还会调 `logger.warn` 记上游模型失败（`llm.call.failed`），需一并提供
+      logger: { error: errorLog, warn: vi.fn() } as never,
+    });
+    const run = makeRun();
+    const events = collect(run);
+
+    await finalizer.error(run, turn(), { role: 'user', content: '你好' }, {
+      code: 'LLM_UNAVAILABLE',
+      message: '503',
+    });
+
+    // 恰好一个 error 事件（主因是 LLM 失败，落盘失败只进日志）
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'error')[0]).toMatchObject({
+      data: { error: { code: 'LLM_UNAVAILABLE' } },
+    });
+    expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+});

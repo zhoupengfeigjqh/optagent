@@ -337,3 +337,51 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
     expect((await listProduced(access)).every((item) => item.read_at !== undefined)).toBe(true);
   });
 });
+
+/**
+ * 读写两侧的"越界"加固（2026-10-27）
+ *
+ * 漏洞成因：sidecar 里的 `filename` 会被拼成 `临时空间/后台产出/{filename}` 再交给
+ * `FileAccess.readBuffer`，而 `path.resolve` 会把 `..` 归一化——归一化后仍在同一 dataRoot
+ * 内、顶层目录也命中白名单，于是"读产出"能变成"读该用户任意文件"。
+ * 同时正文若以 `.meta.json` 结尾，会被当作元数据解析（内容可控 → `filename` 可控）。
+ */
+describe('落盘名加固 —— 读不出产出目录（2026-10-27）', () => {
+  it('写入：正文名不得以 .meta.json 结尾（否则会被当成 sidecar 解析）', async () => {
+    await expect(
+      writeProduced({
+        access,
+        filename: 'evil.meta.json',
+        content: Buffer.from('{"filename":"../../../共享空间/客户合同.xlsx"}', 'utf8'),
+        userId: 'admin',
+      }),
+    ).rejects.toThrow(/meta\.json/);
+  });
+
+  it('写入：含路径分隔符 / `..` 的文件名一律拒绝', async () => {
+    for (const bad of ['../x.json', 'a/b.json', 'a\\b.json', 'C:x.json', '']) {
+      await expect(
+        writeProduced({ access, filename: bad, content: Buffer.from('x'), userId: 'admin' }),
+      ).rejects.toThrow();
+    }
+  });
+
+  it('读取：sidecar 的 filename 指向产出目录之外时，整条跳过（列表为空，不产生可读条目）', async () => {
+    const dir = path.join(root, 'users', 'admin', 'user-data', AGENT, PRODUCED_DIR);
+    fs.mkdirSync(dir, { recursive: true });
+    // 伪造一份"合法 job、非法 filename"的元数据：这是回写通道最坏情况下能留下的东西
+    fs.writeFileSync(
+      path.join(dir, 'admin_evil.meta.json'),
+      JSON.stringify({
+        job_id: 'evil',
+        filename: '../../../共享空间/客户合同.xlsx',
+        status: 'done',
+        created_at: '2026-10-27T00:00:00.000Z',
+        finished_at: '2026-10-27T00:00:00.000Z',
+      }),
+      'utf8',
+    );
+
+    expect(await listProduced(access)).toEqual([]);
+  });
+});

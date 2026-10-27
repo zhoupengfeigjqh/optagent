@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { PRODUCED_DIR } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
-import { writeProduced } from '../domain/produced.js';
+import { META_SUFFIX, writeProduced } from '../domain/produced.js';
 import { splitAgentScopedPath, verifyPutRef } from '../infra/file-sign.js';
 import { ApiError } from '../server.js';
 
@@ -117,6 +117,12 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
     }
     if (filename !== path.basename(filename!) || filename!.includes('..')) {
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
+    }
+    // 正文不得冒充 sidecar（2026-10-27）：`scanProduced` 按后缀识别元数据，一条内容为
+    // JSON 的"正文"会被当成元数据解析，其中的 `filename` 字段再被当作路径使用。
+    // 这里给出 400；`writeProduced` 内还保留一道兜底（防绕过路由的直接调用）。
+    if (filename!.toLowerCase().endsWith(META_SUFFIX)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', `产出文件名不得以 ${META_SUFFIX} 结尾: ${filename}`);
     }
     const content = toResultBytes(req.body);
     if (content === null) {

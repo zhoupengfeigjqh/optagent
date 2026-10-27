@@ -42,6 +42,7 @@ import {
   normalizeFileArgs,
   normalizeHeaders,
   normalizeRulesFields,
+  normalizeToolLabels,
   normalizeUrl,
   sanitize,
 } from './service-config-fields.js';
@@ -104,6 +105,17 @@ export interface McpServiceConfig {
    */
   allowed_tools: string[];
   /**
+   * **工具显示名**（2026-10-27）：`{ 原始工具名: 人读名称 }`，如
+   * `{"bom_validate": "BOM 校验"}`。
+   *
+   * - 用途：运行环境把显示名放进**意图聚焦的命题文本**（`是否需要使用 BOM 校验 ？`），
+   *   中文名的判定准确率显著高于 `server: tool` 英文拼接；平台工具清单也用它做主标题；
+   * - 语义：**缺省 = 沿用存量，提供 = 全量替换**（`{}` 即清空，全部回退英文工具名）；
+   * - 与 `allowed_tools` 不强制对齐（允许先命名后勾选），物化时按白名单过滤；
+   * - 未配置时**不写**进 `MCP.json`，存量数字人重新部署后产物字节不变。
+   */
+  tool_labels: Record<string, string>;
+  /**
    * **请求头**（2026-10-08）：`{ 头名: 值 }`，仅对 `transport=http` 有意义
    * （`stdio` 保存期即丢弃——请求头是 HTTP 的概念，`stdio` 由启动参数/环境变量承载）。
    *
@@ -144,8 +156,21 @@ export interface McpConfigInput {
    * `create` **必填非空**；`upsert` **缺省 = 沿用存量，提供 = 全量替换且非空**。
    */
   allowed_tools?: unknown;
+  /** 工具显示名（2026-10-27）：缺省 = 沿用存量，提供 = 全量替换（`{}` 即清空） */
+  tool_labels?: unknown;
   /** 请求头（2026-10-08）：缺省 = 沿用存量，提供 = 全量替换（`{}` 即清空） */
   headers?: unknown;
+}
+
+/**
+ * 保存期「缺省 = 沿用存量」的字段（create 时全部为空对象）。
+ *
+ * 这些字段一旦被"不携带的保存"顺手清空，现象很难自查：请求头会变成 401、
+ * 工具显示名会悄悄退回英文——因此统一在此收口，而不是每个字段各写一遍。
+ */
+interface McpFallbacks {
+  headers: Record<string, string>;
+  toolLabels: Record<string, string>;
 }
 
 export class McpServiceConfigService {
@@ -197,8 +222,14 @@ export class McpServiceConfigService {
       throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_EXISTS, `MCP 服务名称已存在：${name}`);
     }
     const allowedTools = normalizeAllowedTools(input.allowed_tools, true);
-    // 新建没有"存量"可沿用：`headers` 缺省即 {}
-    const nextRevision = this.write(name, input, allowedTools, {}, revision);
+    // 新建没有"存量"可沿用：`headers` / `tool_labels` 缺省即 {}
+    const nextRevision = this.write(
+      name,
+      input,
+      allowedTools,
+      { headers: {}, toolLabels: {} },
+      revision,
+    );
     return { config: this.read(name), revision: nextRevision };
   }
 
@@ -218,7 +249,7 @@ export class McpServiceConfigService {
       throw new ApiError(ERROR_CODES.ADM_MCP_SERVICE_EXISTS, `MCP 服务名称已存在：${name}`);
     }
     normalizeAllowedTools(input.allowed_tools, true);
-    this.normalize(name, input, [], {});
+    this.normalize(name, input, [], { headers: {}, toolLabels: {} });
   }
 
   /** **删除**服务（2026-09-27）；不存在即 404。影响面由路由层用引用推导呈现。 */
@@ -265,7 +296,13 @@ export class McpServiceConfigService {
       input.allowed_tools === undefined
         ? existing.allowed_tools
         : normalizeAllowedTools(input.allowed_tools, true);
-    const nextRevision = this.write(name, input, allowedTools, existing.headers, revision);
+    const nextRevision = this.write(
+      name,
+      input,
+      allowedTools,
+      { headers: existing.headers, toolLabels: existing.tool_labels },
+      revision,
+    );
     return { config: this.read(name), revision: nextRevision };
   }
 
@@ -274,12 +311,12 @@ export class McpServiceConfigService {
     name: string,
     input: McpConfigInput,
     allowedTools: string[],
-    fallbackHeaders: Record<string, string>,
+    fallbacks: McpFallbacks,
     revision?: number,
   ): number {
     let validated!: McpServiceConfig;
     const commit = (): void => {
-      validated = this.normalize(name, input, allowedTools, fallbackHeaders);
+      validated = this.normalize(name, input, allowedTools, fallbacks);
       const doc = this.store.readJson<Document>(REL) ?? { items: {} };
       doc.items[name] = validated;
       this.store.writeJson(REL, doc);
@@ -295,7 +332,7 @@ export class McpServiceConfigService {
     name: string,
     input: McpConfigInput,
     allowedTools: string[],
-    fallbackHeaders: Record<string, string>,
+    fallbacks: McpFallbacks,
   ): McpServiceConfig {
     const description = typeof input.description === 'string' ? input.description : '';
     // 别名（`streamable-http`）在入口归一为 `http`：见 `mcp/transport.ts`
@@ -334,9 +371,11 @@ export class McpServiceConfigService {
       confirmation: normalizeConfirmation(input.confirmation),
       rules_fields: normalizeRulesFields(input.rules_fields),
       allowed_tools: allowedTools,
+      // 工具显示名与传输方式无关（stdio/http 都要给模型看）
+      tool_labels: normalizeToolLabels(input.tool_labels, fallbacks.toolLabels),
       // 请求头只对 http 有意义：stdio 丢弃（与"http 丢弃 command/args"对称，
       // 避免留下一条永远不生效、却在界面上显示"已配置令牌"的隐性配置）
-      headers: transport === 'http' ? normalizeHeaders(input.headers, fallbackHeaders) : {},
+      headers: transport === 'http' ? normalizeHeaders(input.headers, fallbacks.headers) : {},
       updated_at: new Date().toISOString(),
     };
   }

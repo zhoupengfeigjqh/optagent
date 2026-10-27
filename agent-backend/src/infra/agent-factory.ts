@@ -222,6 +222,8 @@ export class AgentInstanceFactory {
           this.deps.onMcpCall,
           logger,
           asyncToolContext(server, inst.key.userId, inst.key.agentName, req.threadId, this.deps),
+          // 工具显示名（2026-10-27）：平台配置优先，进意图聚焦命题；缺省回退英文拼接
+          server.toolLabels,
         );
         // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
         // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
@@ -281,8 +283,9 @@ export class AgentInstanceFactory {
         tools.map((t) => ({
           name: t.name,
           description: t.description ?? '',
-          // 中文展示名：内置工具是 `读取文件` 这类 label（判定准确率显著高于英文名），
-          // MCP 工具是 `server: tool` 形式的英文拼接
+          // 中文展示名：内置工具是目录里的 `读取文件`；MCP 工具来自平台 `tool_labels`
+          // （缺省回退服务端 `Tool.title` 再到 `server: tool`）。判定准确率显著高于
+          // 纯英文名，故命题一律用展示名。
           label: t.label,
         })),
       );

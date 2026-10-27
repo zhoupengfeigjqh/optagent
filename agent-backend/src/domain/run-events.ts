@@ -24,7 +24,11 @@ export type ResolveInteractionResult =
 export type SsePayload =
   | { type: 'thinking'; data: { delta: string } }
   | { type: 'content'; data: { delta: string } }
-  | { type: 'tool_call'; data: { call_id: string; name: string; status: 'running' } }
+  | {
+      type: 'tool_call';
+      /** `label` = 人读名称（2026-10-27）；缺省表示无中文名，前端回退 `name` */
+      data: { call_id: string; name: string; label?: string; status: 'running' };
+    }
   | { type: 'tool_call_end'; data: { call_id: string; status: 'success' | 'error' } }
   /** 工具调用前的人工确认请求（HITL）：仅含被声明为需确认的工具 */
   | { type: 'interaction_request'; data: InteractionRequestPayload }

@@ -57,6 +57,13 @@ const confirmationTools = ref<string[]>([])
 const confirmationManualText = ref('')
 /** 算法规则参数设置：`{ 工具名: 字段名 }`（空对象 = 不启用「从算法规则选择」入口） */
 const rulesFields = ref<Record<string, string>>({})
+/**
+ * 工具显示名（2026-10-27）：`{ 工具名: 中文名 }`。
+ *
+ * 空串 = 不配置（界面回退英文工具名）；提交时会 trim 并丢弃空值——后端拒绝空串
+ * （空串的语义是"配了个空名字"，与"不配"必须区分）。
+ */
+const toolLabels = ref<Record<string, string>>({})
 const localError = ref<string | null>(null)
 /** 请求头输入（留空 = 不修改；UI 见 `McpHeadersField`）——**不预填掩码**，真值不回显 */
 const headersText = ref('')
@@ -99,6 +106,8 @@ function loadFrom(service: McpServiceDetail): void {
     confirmationManualText.value = ''
   }
   rulesFields.value = { ...(service.rules_fields ?? {}) }
+  // 工具显示名：按服务详情原样载入（缺省 = 全部回退英文名）
+  toolLabels.value = { ...(service.tool_labels ?? {}) }
   // 请求头：只载入**掩码**；输入框与清空意图复位（切换服务 = 全新一次编辑）
   headersView.value = { ...(service.headers ?? {}) }
   headersText.value = ''
@@ -236,6 +245,14 @@ function submit(): boolean {
     headersPatch = resolved.headers
   }
 
+  // 工具显示名（全量替换语义）：trim 后**丢弃空值**——空串会被后端判为非法
+  // （"配了个空名字"与"不配"必须区分），界面上的留空即"不配"。
+  const toolLabelsPayload = Object.fromEntries(
+    Object.entries(toolLabels.value)
+      .map(([tool, label]) => [tool, label.trim()])
+      .filter(([, label]) => label !== ''),
+  )
+
   const config: McpServiceConfigInput = {
     description: description.value,
     transport: transport.value,
@@ -253,6 +270,7 @@ function submit(): boolean {
     file_args: fileArgs.value,
     confirmation,
     rules_fields: { ...rulesFields.value },
+    tool_labels: toolLabelsPayload,
   }
   emit('submit', config)
   return true
@@ -422,6 +440,30 @@ defineExpose({ submit, probeTarget, runTest })
       :disabled="rulesDisabled"
     />
 
+    <!-- 工具显示名（2026-10-27）：进平台工具清单与「本轮是否需要使用某工具」的判定；
+         留空 = 回退英文工具名（存量服务零变化）。清单不可得时不给编辑入口，
+         避免凭记忆造名字——探测到工具后再配。 -->
+    <fieldset class="mcp-config-form__labels">
+      <legend class="field__label">工具显示名</legend>
+      <p class="field__hint">
+        工具名可另起名说明，方便理解；也可留空采用原始名称。最多 40 字。
+      </p>
+      <p v-if="toolCatalog.length === 0" class="field__hint">
+        工具清单不可得（服务未连接）：保存连接配置、探测成功后即可另起名称。
+      </p>
+      <div v-for="tool in toolCatalog" :key="tool.name" class="mcp-config-form__label-row">
+        <span class="mcp-config-form__label-name mono">{{ tool.name }}</span>
+        <input
+          v-model="toolLabels[tool.name]"
+          type="text"
+          maxlength="40"
+          :placeholder="tool.label || '留空 = 采用原始名称'"
+          :aria-label="`${tool.name} 的显示名`"
+          :disabled="busy === true"
+        />
+      </div>
+    </fieldset>
+
     <!-- 本地校验失败时的可读报错（保存/创建按钮在页面右上角，见 McpServiceDetail） -->
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
   </form>
@@ -440,6 +482,36 @@ defineExpose({ submit, probeTarget, runTest })
 
 .mcp-config-form__error {
   color: var(--color-status-error);
+}
+
+/* 工具显示名（2026-10-27）：与其它配置区块同框，工具名左对齐、输入框占满剩余宽度 */
+.mcp-config-form__labels {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.mcp-config-form__label-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.mcp-config-form__label-name {
+  flex: 0 0 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.mcp-config-form__label-row input {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 连接配置框（传输方式 / 连接地址 / 请求头同框，2026-10-08 二次改版） */

@@ -25,11 +25,10 @@ import type { ProducedItem } from '../../api/produced'
 import { useProduced } from '../../composables/useProduced'
 import { useToast } from '../../composables/useToast'
 import { resolvePreviewKind } from '../../utils/file-kind'
+import { formatBytes, formatTimestamp } from '../../utils/format'
 import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
 import {
   badgeText,
-  formatBytes,
-  formatDateTime,
   producedSummary,
   producedTag,
   producedTagFull,
@@ -157,6 +156,14 @@ function agentNameOf(item: ProducedItem): string {
 }
 
 /**
+ * 时刻的展示口径：本地时间到秒 + 非法值给可读占位。
+ *
+ * 相对时间（`relativeTime`）回答"多久前"，这里回答"具体哪一刻"——铃铛需要创建与完成
+ * 两个时刻才看得出先后与跨天，故不用相对时间。
+ */
+const TIME_OPTS = { withSeconds: true, fallback: '时间未知' } as const
+
+/**
  * 元信息行（列表与内容视图共用，数组顺序即展示顺序）。
  *
  * **不含工具名**：它已进标题副段，重复展示只会挤掉真正需要的信息。
@@ -168,9 +175,10 @@ function fieldsOf(item: ProducedItem): Array<{ label: string; value: string }> {
     // （工具全名等）风格不一。注意它描述的是平台侧"回写完成"，当前恒为 `done`；业务状态
     // （如排产的 80/2/90）在正文与 `summary` 里，平台按契约不解析正文（§10.3）。
     { label: '状态', value: item.status },
-    { label: '创建', value: formatDateTime(item.created_at) },
-    { label: '完成', value: formatDateTime(item.finished_at) },
-    { label: '大小', value: formatBytes(item.size) },
+    // 时刻要精确到秒（同一分钟内完成的产出靠它分辨先后），解析失败也给可读占位
+    { label: '创建', value: formatTimestamp(item.created_at, TIME_OPTS) },
+    { label: '完成', value: formatTimestamp(item.finished_at, TIME_OPTS) },
+    { label: '大小', value: formatBytes(item.size, '—') },
   ]
 }
 

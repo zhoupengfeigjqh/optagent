@@ -100,6 +100,12 @@ export interface McpServiceListItem {
 
 export interface McpToolInfo {
   name: string
+  /**
+   * 平台配置的**工具显示名**（2026-10-27；来自 `tool_labels`）。
+   * 空串/缺省 = 未配置 → 界面回退显示英文工具名。
+   * 探测（`probe`）返回的是服务原始工具，没有该项，故为可选。
+   */
+  label?: string
   description: string
   parameters: Record<string, unknown>
 }
@@ -135,6 +141,11 @@ export interface McpServiceDetail {
    * 之后可在「工具范围」弹窗里调整（保存走 `PUT`，全量替换、同样必填非空）。
    */
   allowed_tools: string[]
+  /**
+   * 平台配置的**工具显示名**（2026-10-27）：空对象 = 未配置，清单回退英文工具名。
+   * 与 `tools[].label` 同源（后者是白名单投影的每项取值）。
+   */
+  tool_labels?: Record<string, string>
   /**
    * 白名单里**当前服务清单中已不存在**的工具名（下架/改名）——界面据此标异常。
    * **只在探测成功时才有意义**：服务不可达时恒为 `[]`（"核对不了"由 `tools_error` 表达）。
@@ -191,6 +202,12 @@ export interface McpServiceConfigPayload extends McpServiceBasics {
    * （见 `utils/mcp-config.ts` 的 `buildToolScopePayload`），否则会被补成默认值。
    */
   allowed_tools?: string[]
+  /**
+   * 工具显示名（2026-10-27）：`{ 原始工具名: 人读名称 }`。
+   * 缺省 = 沿用存量，提供 = **全量替换**（`{}` 即清空，工具清单回退英文名）。
+   * 全量替换语义下，只改白名单 MUST 一并回填（见 `buildToolScopePayload`）。
+   */
+  tool_labels?: Record<string, string>
   revision: number
 }
 

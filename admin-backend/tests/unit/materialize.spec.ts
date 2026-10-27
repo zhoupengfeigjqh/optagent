@@ -218,6 +218,28 @@ describe('buildMcpServerEntry', () => {
       'async_tools',
     );
   });
+
+  it('tool_labels 缺省为 {}：不写该字段（产物精简）；配置后按工具映射物化', () => {
+    configure('svc-labels-empty');
+    expect(
+      buildMcpServerEntry('svc-labels-empty', { mcpConfigs, skills, ontologies }),
+    ).not.toHaveProperty('tool_labels');
+
+    configure('svc-labels', { tool_labels: { ocr_image: '识别图片文字' } });
+    expect(buildMcpServerEntry('svc-labels', { mcpConfigs, skills, ontologies })?.tool_labels).toEqual({
+      ocr_image: '识别图片文字',
+    });
+  });
+
+  it('tool_labels 按白名单过滤：未启用的工具不写进 MCP.json（孤儿键不下发）', () => {
+    configure('svc-labels', {
+      allowed_tools: ['ocr_image'],
+      tool_labels: { ocr_image: '识别图片文字', query_price: '查询价格' },
+    });
+    expect(buildMcpServerEntry('svc-labels', { mcpConfigs, skills, ontologies })?.tool_labels).toEqual({
+      ocr_image: '识别图片文字',
+    });
+  });
 });
 
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {

@@ -7,8 +7,11 @@
  *
  * 列由父级算好传入（schema 声明列 + 值里实际出现的列）；单元格复用 `InteractionControl` 的
  * 紧凑模式，因此单元格里能填什么与字段行里完全一致。
+ *
+ * 列头与字段行的主标签同一口径（`fieldLabelOf`：title 优先、参数名兜底，2026-10-27）——
+ * 否则同一张表里字段叫「产线」、列头却叫 `line`，读起来像两个东西。
  */
-import { isPlainObject } from '../../utils/arg-schema'
+import { fieldLabelOf, isPlainObject } from '../../utils/arg-schema'
 import type { FieldSchema } from '../../utils/arg-schema'
 import type { NodePath } from '../../utils/json-path'
 import InteractionControl from './InteractionControl.vue'
@@ -42,7 +45,9 @@ function isRowObject(index: number): boolean {
     <table class="interaction-dialog__table">
       <thead>
         <tr>
-          <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th v-for="column in columns" :key="column">
+            {{ fieldLabelOf(column, cellSchemaOf(column)) }}
+          </th>
           <th class="interaction-dialog__row-actions" aria-label="行操作" />
         </tr>
       </thead>

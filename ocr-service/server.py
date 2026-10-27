@@ -38,19 +38,23 @@ mcp = FastMCP("ocr", host="0.0.0.0", port=8000)
 engine = RapidOCR()
 
 
-@mcp.tool()
+@mcp.tool(title="图片识别")
 def ocr_image(
     image: Annotated[
         str,
-        Field(description="要识别的图片：填文件空间相对路径（如 临时空间/a.png），backend 会自动铸成下载直链"),
+        Field(
+            title="待识别图片",
+            description="要识别的图片：填文件空间相对路径（如 临时空间/a.png），backend 会自动铸成下载直链",
+        ),
     ],
     resultUrl: Annotated[
         str | None,
         Field(
+            title="结果回写地址",
             description=(
                 "结果回写地址。**由平台自动注入，请勿自行填写**；"
                 "留空（默认）时按同步方式直接返回识别结果（标准 JSON）"
-            )
+            ),
         ),
     ] = None,
 ) -> str:

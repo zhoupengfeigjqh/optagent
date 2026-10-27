@@ -16,6 +16,15 @@ import type { McpClientService, McpToolDescriptor } from '../../infra/mcp-client
 import { maskHeaders } from './service-config-fields.js';
 import type { McpConfirmation, McpServiceConfig, McpServiceConfigService } from './service-config.js';
 
+/**
+ * 工具清单项（2026-10-27）：服务端探测结果 + 平台配置的**显示名**。
+ *
+ * `label` 来自 `tool_labels`（缺省空串 = 未配置，界面回退英文工具名）。
+ * 显示名不参与工具调用（调用名恒为 `name`），只用于平台清单展示与运行环境的
+ * 意图聚焦命题——因此可以安全地"有则显示、无则回退"。
+ */
+export type McpToolView = McpToolDescriptor & { label: string };
+
 export interface McpServiceView {
   name: string;
   description: string;
@@ -68,8 +77,14 @@ export interface McpServiceDetailView extends McpServiceView {
    * 界面据此在白名单条目上标异常，MUST NOT 把"核对不了"呈现成"工具不存在"。
    */
   missing_tools: string[];
+  /**
+   * 平台配置的**工具显示名**（2026-10-27）：`{ 原始工具名: 人读名称 }`；空对象 = 未配置。
+   * 与 `tools[].label` 同源（后者是按下发白名单投影后的每项取值），界面保存后重载会覆盖表单，
+   * 因此本字段 MUST 回显。
+   */
+  tool_labels: Record<string, string>;
   /** 只含白名单里的工具（不限制时即服务全量），顺序与白名单一致 */
-  tools: McpToolDescriptor[];
+  tools: McpToolView[];
   tools_truncated: boolean;
   /**
    * **本次探测到的全部工具**（2026-10-15；顺序 = 服务返回顺序，有界同 `TOOLS_LIMIT`）。
@@ -80,7 +95,7 @@ export interface McpServiceDetailView extends McpServiceView {
    *
    * 不含任何凭据：这里只有工具名/说明/入参，连接信息与请求头仍只在配置字段里。
    */
-  available_tools: McpToolDescriptor[];
+  available_tools: McpToolView[];
   available_tools_truncated: boolean;
   tools_error: string | null;
   references: Array<{ user_id: string; agent_name: string }>;
@@ -125,6 +140,10 @@ export class McpServiceListService {
     // 缺失核对只在探测成功时做：探测失败 = 核对不了（由 `tools_error` 表达），
     // 此时 MUST NOT 把白名单里的工具全判成"不存在"——那是误报
     const missing = scoped && error === null ? allowed.filter((n) => !tools.some((t) => t.name === n)) : [];
+    // 显示名投影（2026-10-27）：探测结果只有英文 `name`，配置的 `tool_labels` 在此合并。
+    // 未配置时给**空串而非 undefined**：前端据此回退英文名，避免"字段有时在、有时不在"。
+    const withLabels = (list: McpToolDescriptor[]): McpToolView[] =>
+      list.map((tool) => ({ ...tool, label: config.tool_labels[tool.name]?.trim() ?? '' }));
     return {
       ...toView(config),
       command: config.command,
@@ -134,15 +153,17 @@ export class McpServiceListService {
       rules_fields: config.rules_fields,
       confirmation: config.confirmation,
       allowed_tools: allowed,
+      // 显示名与 `rules_fields` 同理：漏登 = 保存一次就清空全部中文名
+      tool_labels: config.tool_labels,
       // 请求头**只回掩码**：界面要能看出"配了哪些头、值是什么形状"，但令牌明文不出响应
       headers: maskHeaders(config.headers),
       missing_tools: missing,
       // 先按白名单过滤、后截断：反过来的话，白名单里排在截断线之后的工具会被误判成"不存在"
-      tools: visible.slice(0, TOOLS_LIMIT),
+      tools: withLabels(visible).slice(0, TOOLS_LIMIT),
       tools_truncated: visible.length > TOOLS_LIMIT,
       // 全量候选（2026-10-15）：工具范围弹窗的勾选基准，同样有界返回（`FR-006`）。
       // 探测失败时为空数组——此时由 `tools_error` 说明"核对不了"，界面据此**不开**弹窗
-      available_tools: tools.slice(0, TOOLS_LIMIT),
+      available_tools: withLabels(tools).slice(0, TOOLS_LIMIT),
       available_tools_truncated: tools.length > TOOLS_LIMIT,
       tools_error: error,
       references: this.deps.referencesOf(name),

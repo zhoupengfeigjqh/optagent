@@ -24,7 +24,11 @@ const ITEM: FieldSchema = {
 
 const ROOT = { type: 'object', properties: { 清单: { type: 'array', items: ITEM } } }
 
-function mountTable(rows: unknown[], columns: string[] = ['ruleId', 'rulePriority']) {
+function mountTable(
+  rows: unknown[],
+  columns: string[] = ['ruleId', 'rulePriority'],
+  itemSchema: FieldSchema = ITEM,
+) {
   const form = createInteractionForm({ schema: ROOT, proposed: { 清单: rows }, loadRules: vi.fn() })
   const context: InteractionFormContext = { form, mention: null, fileIndex: new Map() }
   const wrapper = mount(InteractionTable, {
@@ -32,9 +36,9 @@ function mountTable(rows: unknown[], columns: string[] = ['ruleId', 'rulePriorit
       path: ['清单'],
       columns,
       rows,
-      itemSchema: ITEM,
+      itemSchema,
       cellSchemaOf: (column: string) =>
-        propertiesOf(ITEM).find((item) => item.key === column)?.schema ?? {},
+        propertiesOf(itemSchema).find((item) => item.key === column)?.schema ?? {},
     },
     global: { provide: { [INTERACTION_FORM_KEY as symbol]: context } },
   })
@@ -50,6 +54,19 @@ describe('InteractionTable —— 结构', () => {
 
     expect(wrapper.findAll('th').map((cell) => cell.text())).toEqual(['ruleId', 'rulePriority', ''])
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+  })
+
+  it('列名有 title 时列头用 title，与字段行同一口径（2026-10-27）', () => {
+    const item: FieldSchema = {
+      type: 'object',
+      properties: {
+        ruleId: { type: 'string', title: '规则编号' },
+        rulePriority: { type: 'integer', title: '优先级' },
+      },
+    }
+    const { wrapper } = mountTable([{ ruleId: 'PR001', rulePriority: 1 }], undefined, item)
+
+    expect(wrapper.findAll('th').map((cell) => cell.text())).toEqual(['规则编号', '优先级', ''])
   })
 
   it('单元格按「本路径 + [行下标, 列名]」取值与回写（下标不错位）', async () => {

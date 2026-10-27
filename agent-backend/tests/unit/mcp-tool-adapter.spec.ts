@@ -86,6 +86,49 @@ function buildTools(
   );
 }
 
+describe('工具显示名（tool_labels，2026-10-27）', () => {
+  /** 平台配置优先：中文名会进意图聚焦命题，调用名仍必须是 `{server}__{tool}` */
+  it('平台配置的显示名优先于服务端 title 与英文拼接', () => {
+    const tools = mcpToolsAsAgentTools(
+      fakeManager([]),
+      'bom-service',
+      [{ ...TOOL_WITHOUT_CONTEXT, title: '服务端标题' }] as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { ocr_image: '识别图片文字' },
+    );
+    expect(tools[0]?.name).toBe('bom-service__ocr_image');
+    expect(tools[0]?.label).toBe('识别图片文字');
+  });
+
+  it('平台未配置时回退服务端 Tool.title（兜底，不强制服务端声明）', () => {
+    const tools = mcpToolsAsAgentTools(
+      fakeManager([]),
+      'bom-service',
+      [{ ...TOOL_WITHOUT_CONTEXT, title: '服务端标题' }] as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { other_tool: '别的工具' },
+    );
+    expect(tools[0]?.label).toBe('服务端标题');
+  });
+
+  it('都没有时回退 `server: tool`（存量行为零变化）', () => {
+    const tools = mcpToolsAsAgentTools(fakeManager([]), 'bom-service', [
+      TOOL_WITHOUT_CONTEXT,
+    ] as never);
+    expect(tools[0]?.label).toBe('bom-service: ocr_image');
+  });
+});
+
 /** 取工具执行结果（适配 pi-agent-core 的 execute 签名） */
 async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, params: unknown) {
   return (await tool.execute('call_1' as never, params as never)) as {

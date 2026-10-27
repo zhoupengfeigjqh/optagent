@@ -92,6 +92,8 @@ function handleBackdropClick(event: MouseEvent): void {
     <div class="base-dialog__panel">
       <header class="base-dialog__header">
         <h2 v-if="title" :id="titleId" class="base-dialog__title">{{ title }}</h2>
+        <!-- 标题右侧的附加信息（如 HITL 倒计时）：插在标题之后，跟随标题同行而不占正文 -->
+        <slot name="header-extra" />
         <button type="button" class="base-dialog__close" aria-label="关闭" @click="emit('close')">
           <BaseIcon name="close" :size="16" />
         </button>
@@ -138,22 +140,26 @@ function handleBackdropClick(event: MouseEvent): void {
   box-shadow: 0 16px 40px rgb(15 20 30 / 22%);
 }
 
+/* 不再用 `space-between`：头部可能有第三个子元素（`#header-extra`），
+   space-between 会把它挤到正中；改由关闭按钮的 `margin-left: auto` 贴右，
+   标题与附加信息保持相邻（两元素场景渲染结果与改动前一致）。 */
 .base-dialog__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 
 .base-dialog__title {
+  min-width: 0;
   font-size: var(--font-size-lg);
   font-weight: 600;
 }
 
 .base-dialog__close {
   display: inline-flex;
+  margin-left: auto;
   padding: var(--space-1);
   border: none;
   border-radius: var(--radius-sm);

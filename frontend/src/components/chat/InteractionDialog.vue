@@ -24,9 +24,9 @@ import {
   type InteractionFormContext,
   type InteractionFormStore,
 } from '../../composables/useInteractionForm'
+import { dedupeTitles } from '../../utils/arg-schema'
 import BaseButton from '../common/BaseButton.vue'
 import BaseDialog from '../common/BaseDialog.vue'
-import HintTip from '../common/HintTip.vue'
 import InteractionField from './InteractionField.vue'
 
 const props = withDefaults(
@@ -56,7 +56,11 @@ const mention = session ? createPathInsertStore({ workspace: session.workspace }
 /** 构造一份与当前快照对应的表单状态（挂起点变化时整体重建）。 */
 function buildForm(): InteractionFormStore {
   return createInteractionForm({
-    schema: props.request.schema,
+    /**
+     * 同层 `title` 先去重再交给表单：重复的 title 只保留先出现的，其余回退参数名，
+     * 避免两行同名让用户无法区分（`title` 的唯一性由服务端 schema 提供，这里只兜底）。
+     */
+    schema: dedupeTitles(props.request.schema),
     proposed: props.request.proposed_args,
     rulesField: props.request.rules_field,
     loadRules: () => {
@@ -161,20 +165,12 @@ onBeforeUnmount(() => {
 
 <template>
   <BaseDialog :open="true" :title="request.title" @close="onReject">
-    <div class="interaction-dialog">
-      <p class="interaction-dialog__meta">
-        <span class="interaction-dialog__tool">
-          工具：<code>{{ request.tool_name }}</code>
-          <!-- 工具级说明（schema 的 description）收进「?」：默认不占版面 -->
-          <HintTip
-            v-if="request.tool_description"
-            :text="request.tool_description"
-            label="查看工具说明"
-          />
-        </span>
-        <span class="interaction-dialog__countdown">剩余 {{ remaining }} 秒</span>
-      </p>
+    <!-- 倒计时跟着标题走（标题右侧），不再单独占正文一行 -->
+    <template #header-extra>
+      <span class="interaction-dialog__countdown">剩余 {{ remaining }} 秒</span>
+    </template>
 
+    <div class="interaction-dialog">
       <p v-if="topLevel.length === 0" class="interaction-dialog__empty">
         该调用无需填写参数，请确认是否执行。
       </p>
@@ -208,21 +204,10 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
 }
 
-.interaction-dialog__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.interaction-dialog__meta code {
-  font-family: monospace;
-}
-
+/* 倒计时是弹窗头部的第二个子元素（紧跟标题）：不参与收缩，也不折行 */
 .interaction-dialog__countdown {
+  flex: none;
+  white-space: nowrap;
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
 }
@@ -231,14 +216,6 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-}
-
-/* 工具名与「?」同一行（提示贴着它要解释的东西） */
-.interaction-dialog__tool {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
 }
 
 .interaction-dialog__error {

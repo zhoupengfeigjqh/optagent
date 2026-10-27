@@ -72,6 +72,8 @@ export function sanitize(raw: McpServiceConfig): McpServiceConfig {
     // 历史存档（请求头上线前）无该字段：收敛为 {}（= 不带请求头，存量行为零变化）；
     // 存量文档里的脏值逐项丢弃，不让一条坏数据把整个服务打成不可读
     headers: readHeaders(raw.headers),
+    // 历史存档（显示名上线前）无该字段：收敛为 {}（= 全部回退英文工具名，存量行为零变化）
+    tool_labels: readToolLabels(raw.tool_labels),
     updated_at: raw.updated_at,
   };
 }
@@ -258,6 +260,92 @@ function readHeaders(raw: unknown): Record<string, string> {
     if (!isValidHeaderName(name)) continue;
     if (headerValueProblem(name, rawValue) !== null) continue;
     out[name] = (rawValue as string).trim();
+  }
+  return out;
+}
+
+/**
+ * 工具显示名（`tool_labels`，2026-10-27）。
+ *
+ * 为什么需要：MCP `tools/list` 只有英文 `name`（如 `bom_validate`），而运行环境会
+ * 把工具显示名放进**意图聚焦的命题文本**（`是否需要使用 BOM 校验 ？`）——中文名
+ * 的判定准确率显著高于 `server: tool` 的英文拼接。显示名属于**展示/运营配置**，
+ * 按"平台是 MCP 服务配置的唯一权威源"，因此存在平台、随部署物化进 `MCP.json`。
+ *
+ * 语义（与 `headers`/`allowed_tools` 同口径）：**缺省 = 沿用存量，提供 = 全量替换**
+ * （`{}` 即清空全部显示名，全部回退英文工具名）。
+ *
+ * 与 `allowed_tools` 的关系：**不强制** label 的键必须出现在白名单里——允许先命名
+ * 后勾选；物化时按白名单过滤，孤儿键不写进 `MCP.json`（详见 `materialize.ts`）。
+ */
+export const MCP_TOOL_LABEL_HINT =
+  '工具显示名为「工具名 → 人读名称」的对象，如 {"bom_validate":"BOM 校验"}；值 1~40 字';
+
+/** 显示名长度上限：与运行环境意图聚焦的命题截断宽度（`MAX_DISPLAY_CHARS`）同口径 */
+export const MCP_TOOL_LABEL_MAX_CHARS = 40;
+
+/** 单个显示名的可读问题；合法返回 `null`（保存期报错、读取期丢弃共用同一判据） */
+function toolLabelProblem(tool: string, raw: unknown): string | null {
+  if (typeof raw !== 'string') {
+    return `tool_labels.${tool} 须为字符串（人读名称），当前：${JSON.stringify(raw)}`;
+  }
+  const value = raw.trim();
+  if (value === '') {
+    return `tool_labels.${tool} 不能为空；如需回退英文工具名请去掉该键`;
+  }
+  if ([...value].length > MCP_TOOL_LABEL_MAX_CHARS) {
+    return `tool_labels.${tool} 超过 ${MCP_TOOL_LABEL_MAX_CHARS} 字（该名称会进意图聚焦命题，过长会挤占判定上下文）`;
+  }
+  // 换行/控制字符会污染命题文本与工具清单展示
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      return `tool_labels.${tool} 须为单行字符串（不得含换行或控制字符）`;
+    }
+  }
+  return null;
+}
+
+/**
+ * 保存期归一：`undefined`/`null` → **沿用 `fallback`**（保存调用配置 MUST NOT
+ * 顺手清空已配好的显示名）；其余必须为对象且逐项合法（键非空、值为 1~40 字单行）。
+ */
+export function normalizeToolLabels(
+  raw: unknown,
+  fallback: Record<string, string>,
+): Record<string, string> {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      `tool_labels 须为对象（${MCP_TOOL_LABEL_HINT}），可为 {}`,
+    );
+  }
+  const out: Record<string, string> = {};
+  for (const [rawTool, rawLabel] of Object.entries(raw as Record<string, unknown>)) {
+    const tool = rawTool.trim();
+    if (tool === '') {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'tool_labels 的工具名不能为空');
+    }
+    const problem = toolLabelProblem(tool, rawLabel);
+    if (problem !== null) throw new ApiError(ERROR_CODES.VALIDATION_FAILED, problem);
+    out[tool] = (rawLabel as string).trim();
+  }
+  return out;
+}
+
+/**
+ * 读取路径的容错收敛：非对象 → `{}`；**逐项丢弃非法项**（不阻断读取存量文档）。
+ * 与 `readHeaders`/`readRulesFields` 同一取向：坏值只在读取期收敛，不让一条脏数据
+ * 把整个服务打成不可读。
+ */
+function readToolLabels(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [rawTool, rawLabel] of Object.entries(raw as Record<string, unknown>)) {
+    const tool = rawTool.trim();
+    if (tool === '' || toolLabelProblem(tool, rawLabel) !== null) continue;
+    out[tool] = (rawLabel as string).trim();
   }
   return out;
 }

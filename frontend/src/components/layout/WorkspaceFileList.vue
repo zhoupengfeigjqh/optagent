@@ -10,7 +10,7 @@
  * 纯展示：不发起请求；删除的二次确认由 `WorkspacePanel` 承担，本组件只上报意图。
  */
 import type { FileReference, WorkspaceFile } from '../../api/types'
-import { formatFileSize } from '../../utils/format'
+import { formatBytes } from '../../utils/format'
 import BaseIcon from '../common/BaseIcon.vue'
 
 const props = withDefaults(
@@ -49,7 +49,7 @@ function referenceOf(filename: string): FileReference {
         <span class="workspace-files__name">{{ file.filename }}</span>
       </button>
 
-      <span class="workspace-files__size">{{ formatFileSize(file.size) }}</span>
+      <span class="workspace-files__size">{{ formatBytes(file.size) }}</span>
 
       <button
         type="button"

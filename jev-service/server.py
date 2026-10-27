@@ -55,8 +55,10 @@ mcp = FastMCP("jev", host="0.0.0.0", port=8000)
 class ChoiceOption(BaseModel):
     """choice 的一个候选选项"""
 
-    value: str = Field(description="选项取值，Jev 会原样回传（如 billing）")
-    criteria: str = Field(default="", description="该选项的判定标准；无需额外说明可留空")
+    value: str = Field(title="选项取值", description="选项取值，Jev 会原样回传（如 billing）")
+    criteria: str = Field(
+        default="", title="判定标准", description="该选项的判定标准；无需额外说明可留空"
+    )
 
 
 STATE_DESC = (
@@ -109,13 +111,19 @@ def _run(kind: str, question: dict[str, Any], state: str, state_file: str) -> st
         return result_json(failed_result(f"错误：Jev 调用失败（{type(e).__name__}），请稍后重试"))
 
 
-@mcp.tool()
+@mcp.tool(title="真值判断")
 def noul(
-    instructions: Annotated[str, Field(description=INSTRUCTIONS_DESC)],
-    state: Annotated[str, Field(description=STATE_DESC)] = "",
-    state_file: Annotated[str, Field(description=STATE_FILE_DESC)] = "",
-    true_meaning: Annotated[str, Field(description="（可选）命题为真代表什么，用于校准判断口径")] = "",
-    false_meaning: Annotated[str, Field(description="（可选）命题为假代表什么")] = "",
+    instructions: Annotated[str, Field(title="判断命题", description=INSTRUCTIONS_DESC)],
+    state: Annotated[str, Field(title="判断上下文", description=STATE_DESC)] = "",
+    state_file: Annotated[str, Field(title="上下文文件", description=STATE_FILE_DESC)] = "",
+    true_meaning: Annotated[
+        str,
+        Field(title="命题为真的含义", description="（可选）命题为真代表什么，用于校准判断口径"),
+    ] = "",
+    false_meaning: Annotated[
+        str,
+        Field(title="命题为假的含义", description="（可选）命题为假代表什么"),
+    ] = "",
 ) -> str:
     """判断一个命题是否成立，返回真值概率（0=假，1=真）。
 
@@ -125,12 +133,15 @@ def noul(
     return _run("noul", noul_question(instructions, true_meaning, false_meaning), state, state_file)
 
 
-@mcp.tool()
+@mcp.tool(title="选项决策")
 def choice(
-    instructions: Annotated[str, Field(description=INSTRUCTIONS_DESC)],
-    options: Annotated[list[ChoiceOption], Field(description="候选选项，2–255 个，互斥且覆盖全部可能")],
-    state: Annotated[str, Field(description=STATE_DESC)] = "",
-    state_file: Annotated[str, Field(description=STATE_FILE_DESC)] = "",
+    instructions: Annotated[str, Field(title="判断命题", description=INSTRUCTIONS_DESC)],
+    options: Annotated[
+        list[ChoiceOption],
+        Field(title="候选选项", description="候选选项，2–255 个，互斥且覆盖全部可能"),
+    ],
+    state: Annotated[str, Field(title="判断上下文", description=STATE_DESC)] = "",
+    state_file: Annotated[str, Field(title="上下文文件", description=STATE_FILE_DESC)] = "",
 ) -> str:
     """从给定选项里选一个，返回选中项、各选项概率分布与置信度。
 
@@ -148,12 +159,15 @@ def choice(
     )
 
 
-@mcp.tool()
+@mcp.tool(title="量表打分")
 def score(
-    instructions: Annotated[str, Field(description=INSTRUCTIONS_DESC)],
-    levels: Annotated[list[str], Field(description="有序等级描述，从低到高（2–10 个），如 平静/不满/非常愤怒")],
-    state: Annotated[str, Field(description=STATE_DESC)] = "",
-    state_file: Annotated[str, Field(description=STATE_FILE_DESC)] = "",
+    instructions: Annotated[str, Field(title="判断命题", description=INSTRUCTIONS_DESC)],
+    levels: Annotated[
+        list[str],
+        Field(title="等级描述", description="有序等级描述，从低到高（2–10 个），如 平静/不满/非常愤怒"),
+    ],
+    state: Annotated[str, Field(title="判断上下文", description=STATE_DESC)] = "",
+    state_file: Annotated[str, Field(title="上下文文件", description=STATE_FILE_DESC)] = "",
 ) -> str:
     """按给定量表打分，返回概率加权分值（可能落在两级之间）、等级表与置信度。
 

@@ -47,6 +47,14 @@ const hasMissing = computed(() => props.missingTools.length > 0)
 const unreachable = computed(() => Boolean(props.errorMessage))
 /** 按工具名索引命中的描述（缺失项没有可展示的说明） */
 const byName = computed(() => new Map(props.tools.map((tool) => [tool.name, tool])))
+
+/**
+ * 工具显示名（平台配置 `tool_labels`，2026-10-27）。
+ * 空串 = 未配置 → 回退英文工具名，存量服务的观感不变。
+ */
+function labelOf(toolName: string): string {
+  return byName.value.get(toolName)?.label?.trim() ?? ''
+}
 /**
  * 渲染基准：**有白名单就按白名单**（含失效项，逐条标异常）；白名单为空（存量服务 =
  * 不限制）则按服务全量——两种情形都必须有内容，MUST NOT 出现空白清单。
@@ -133,7 +141,7 @@ const asyncTools = computed(
         :class="{ 'mcp-tool-list__item--missing': props.missingTools.includes(toolName) }"
       >
         <p
-          class="mcp-tool-list__name mono"
+          class="mcp-tool-list__name"
           :class="{ 'mcp-tool-list__name--async': asyncTools.has(toolName) }"
         >
           <span
@@ -141,8 +149,13 @@ const asyncTools = computed(
             class="mcp-tool-list__warn"
             aria-hidden="true"
             >⚠</span
-          >{{ toolName
-          }}<span
+          ><span :class="{ mono: labelOf(toolName) === '' }">{{
+            labelOf(toolName) || toolName
+          }}</span
+          ><span v-if="labelOf(toolName) !== ''" class="mcp-tool-list__name-en mono">{{
+            toolName
+          }}</span
+          ><span
             v-if="asyncTools.has(toolName)"
             class="mcp-tool-list__flag"
             :title="ASYNC_TOOL_HINT"
@@ -235,6 +248,13 @@ const asyncTools = computed(
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
+}
+
+/* 中文显示名旁的英文工具名：等宽、弱化但保留（可对照/可搜索） */
+.mcp-tool-list__name-en {
+  margin-left: var(--space-2);
+  font-weight: 500;
+  color: var(--color-text-muted);
 }
 
 /* 声明了 resultUrl 的工具：工具名整体标绿（颜色 + 文字标注双通道，原则四） */

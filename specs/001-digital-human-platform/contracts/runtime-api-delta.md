@@ -34,6 +34,7 @@
 | R20 | **LLM 调用的有界重试与失败可诊断**（特性 `002-conversation-runtime` 增量，2026-10-15）：重试复用 `pi-ai`；`error` 对象新增三个可选诊断字段；新增流级错误码 | 新增可选字段 + 错误码 | 否（SSE 事件集合不变，旧前端忽略未知字段） |
 | R21 | **MCP 预热与发送前就绪门**（2026-10-18）：新增 `POST /api/agents/current/mcp/warm`（幂等预热，返回与 `GET .../mcp` 同形快照）；建连新增有界超时 `MCP_CONNECT_TIMEOUT_MS`（10s）；发消息前有界等待建连落定 | 新增端点 + 新环境变量 + 时序变更 | 否（`GET .../mcp` 仍纯只读；稳态首字延迟零变化；超时降级继续） |
 | R22 | **意图聚焦**（特性 `013-intent-focus`，2026-10-25）：SOUL.md frontmatter 新增 `intent_focus` 开关；`POST /api/threads/{id}/messages` 请求体新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`（只写、无运行期读取方）；主模型调用前新增一次有界判定（独立 Laya 服务，直连 HTTP） | 新增配置字段 + 请求字段 + 侧车文件 + 时序变更 | 否（开关缺省**关闭**；SSE 事件集合、会话详情、`next-actions` 端点、数字人详情、工具清单**零变更**） |
+| R23 | **MCP 工具显示名**（2026-10-27）：MCP 服务配置新增 `tool_labels`（`{原始工具名: 人读名称}`）；部署物化进 `MCP.json`（非空才写、按白名单过滤孤儿键）；运行环境据此取 `AgentTool.label`（优先级：平台配置 > 服务端 `Tool.title` > `server: tool`），用于**意图聚焦命题**与平台工具清单展示 | 新增配置字段 + 物化键 + 展示名来源 | 否（缺省不写键：存量 `MCP.json` 字节不变、英文拼接行为零变化；工具调用名不变） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1495,3 +1496,61 @@ intent_focus:
 4. 聚焦提示 MUST NOT 出现在 `history.jsonl`、消息气泡与后续轮次素材中；
 5. 记录文件 MUST NOT 有运行期读取方；写入失败不影响本轮回答；
 6. 与 007 开关的四组合各自生效。
+
+---
+
+## §22 R23 — MCP 工具显示名（2026-10-27）
+
+**背景**：MCP `tools/list` 只给英文 `name`（如 `bom_validate`），而运行环境会把工具显示名放进**意图聚焦的命题文本**——`server: tool` 形式的英文拼接在中文语境下判定准确率明显偏低。显示名属于"展示/运营配置"，按"平台是 MCP 服务配置的唯一权威源"，因此落在平台配置、随部署物化。
+
+### 22.1 配置字段 `tool_labels`
+
+平台 `mcp-services.json` 与 `PUT /api/admin/mcp/services/{name}` 请求体新增可选字段：
+
+```jsonc
+{ "tool_labels": { "bom_validate": "BOM 校验", "bom_merge": "BOM 合并" } }
+```
+
+| 项 | 口径 |
+|---|---|
+| 形状 | `{ 原始工具名: 人读名称 }`（键不含 `{server}__` 前缀），键 trim 非空 |
+| 值 | 1~40 字单行字符串；空串 / 超长 / 含控制字符 → `VALIDATION_FAILED` |
+| 保存语义 | **缺省 = 沿用存量，提供 = 全量替换**（`{}` 即清空） |
+| 与白名单 | **不强制对齐**（允许先命名后勾选）；物化时按 `allowed_tools` 过滤孤儿键 |
+| 回显 | 详情与保存响应 MUST 回显 `tool_labels`；`tools[]` / `available_tools[]` 每项带 `label`（未配置为空串） |
+| 存量 | 无该字段的记录读取期收敛为 `{}`，行为零变化 |
+
+### 22.2 物化进 `MCP.json`
+
+```jsonc
+{
+  "name": "bom-service",
+  "transport": "http",
+  "url": "http://…/mcp",
+  "allowed_tools": ["bom_validate", "bom_merge"],
+  "tool_labels": { "bom_validate": "BOM 校验", "bom_merge": "BOM 合并" }
+}
+```
+
+- **非空才写**：未配置时不出现该键，存量数字人重新部署后 `MCP.json` 字节不变；
+- 白名单为空（不限制）时全部保留；否则只写白名单内的键。
+
+### 22.3 运行环境读取与优先级
+
+`servers[].tool_labels` 由 `domain/agent-instance.ts` 解析（与平台同一判据，非法即配置错误），装配为 `AgentTool.label`：
+
+```
+tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${server}: ${tool}`
+```
+
+| 项 | 口径 |
+|---|---|
+| 用途 | 意图聚焦命题文本、平台工具清单展示 |
+| 不影响 | 工具调用名（恒为 `{server}__{tool}`）、工具权限、模型可见的 `name`/`description` |
+| 缺省 | 不写键 → 回退英文拼接（与改动前逐字一致） |
+
+### 22.4 兼容与回滚
+
+- **兼容**：新增可选字段，旧客户端不感知；旧运行环境对未知键静默忽略；
+- **回滚**：清空 `tool_labels`（`{}`）→ 部署后 `MCP.json` 无该键 → 命题回到英文拼接，无需发版；
+- **测试**：平台 `normalizeToolLabels`（空串/超长/沿用存量）、物化（非空才写/白名单过滤）、运行侧 `label` 三优先级、前端清单渲染（有/无 label）。

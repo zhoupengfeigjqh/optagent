@@ -53,6 +53,8 @@ export function wrapToolWithInteraction(
       const outcome = await sink.request({
         callId: toolCallId,
         toolName: tool.name,
+        // 人读名称（2026-10-27）：弹窗标题与"工具："一行显示它，`tool.name` 仍是对模型的调用名
+        ...(typeof tool.label === 'string' && tool.label !== '' ? { toolLabel: tool.label } : {}),
         toolDescription: tool.description,
         schema,
         proposedArgs: proposed,

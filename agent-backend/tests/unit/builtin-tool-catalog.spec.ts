@@ -103,9 +103,13 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['path'],
       properties: {
-        path: { type: 'string', description: `相对路径，如 "${DIRS[0]}/示例.csv"` },
-        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
-        limit: { type: 'number', description: '本次最多返回字节数' },
+        path: {
+          type: 'string',
+          title: '文件路径',
+          description: `相对路径，如 "${DIRS[0]}/示例.csv"`,
+        },
+        offset: { type: 'number', title: '起始偏移', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', title: '读取字节数', description: '本次最多返回字节数' },
       },
     });
   });
@@ -121,8 +125,12 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['filename', 'content'],
       properties: {
-        filename: { type: 'string', description: `文件名，必须以 ${THREAD_ID}_ 开头` },
-        content: { type: 'string', description: '文件内容（utf8 文本）' },
+        filename: {
+          type: 'string',
+          title: '文件名',
+          description: `文件名，必须以 ${THREAD_ID}_ 开头`,
+        },
+        content: { type: 'string', title: '文件内容', description: '文件内容（utf8 文本）' },
       },
     });
   });
@@ -134,7 +142,9 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
     expect(rendered.get('list_dir')?.parameters).toEqual({
       type: 'object',
       required: ['dir'],
-      properties: { dir: { type: 'string', description: `目录路径，如 "${DIRS[0]}"` } },
+      properties: {
+        dir: { type: 'string', title: '目录', description: `目录路径，如 "${DIRS[0]}"` },
+      },
     });
   });
 
@@ -148,8 +158,8 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['pattern'],
       properties: {
-        pattern: { type: 'string', description: '检索词或正则表达式' },
-        dir: { type: 'string', description: '限定目录（可选）' },
+        pattern: { type: 'string', title: '检索词', description: '检索词或正则表达式' },
+        dir: { type: 'string', title: '限定目录', description: '限定目录（可选）' },
       },
     });
   });
@@ -161,7 +171,9 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
     expect(rendered.get('calculator')?.parameters).toEqual({
       type: 'object',
       required: ['expression'],
-      properties: { expression: { type: 'string', description: '数学表达式，如 "(1+2)*3"' } },
+      properties: {
+        expression: { type: 'string', title: '表达式', description: '数学表达式，如 "(1+2)*3"' },
+      },
     });
   });
 
@@ -175,10 +187,14 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['skill'],
       properties: {
-        skill: { type: 'string', description: '技能名，如 "调度算法"' },
-        path: { type: 'string', description: '技能内相对路径，省略则为 SKILL.md' },
-        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
-        limit: { type: 'number', description: '本次最多返回字节数' },
+        skill: { type: 'string', title: '技能名', description: '技能名，如 "调度算法"' },
+        path: {
+          type: 'string',
+          title: '技能内路径',
+          description: '技能内相对路径，省略则为 SKILL.md',
+        },
+        offset: { type: 'number', title: '起始偏移', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', title: '读取字节数', description: '本次最多返回字节数' },
       },
     });
   });
@@ -193,8 +209,12 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['pattern'],
       properties: {
-        pattern: { type: 'string', description: '检索词或正则表达式' },
-        skill: { type: 'string', description: '限定技能名（可选，省略则检索全部技能）' },
+        pattern: { type: 'string', title: '检索词', description: '检索词或正则表达式' },
+        skill: {
+          type: 'string',
+          title: '限定技能名',
+          description: '限定技能名（可选，省略则检索全部技能）',
+        },
       },
     });
   });
@@ -213,8 +233,27 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
     expect(renderDeep(listDir.parameters, empty)).toEqual({
       type: 'object',
       required: ['dir'],
-      properties: { dir: { type: 'string', description: '目录路径，如 "共享空间"' } },
+      properties: {
+        dir: { type: 'string', title: '目录', description: '目录路径，如 "共享空间"' },
+      },
     });
+  });
+});
+
+/**
+ * HITL 弹窗的主标签直接取 `title`（缺失才回退参数名），所以**同一层**出现两个相同 title
+ * 时用户会看到两行同名、无法区分。前端有运行时兜底（`dedupeTitles`），但内置工具的 title
+ * 由我们写死，这里守住源头：宁可测试失败，也不要上线后靠兜底把它们变成英文参数名。
+ */
+describe('字段 title 的唯一性（弹窗主标签约束）', () => {
+  it('每个内置工具内部，字段 title 互不重复', () => {
+    for (const entry of BUILTIN_TOOL_CATALOG) {
+      const properties = (entry.parameters.properties ?? {}) as Record<string, { title?: string }>;
+      const titles = Object.values(properties)
+        .map((schema) => (typeof schema.title === 'string' ? schema.title.trim() : ''))
+        .filter((title) => title !== '');
+      expect(new Set(titles).size, `${entry.name} 的字段 title 有重复`).toBe(titles.length);
+    }
   });
 });
 

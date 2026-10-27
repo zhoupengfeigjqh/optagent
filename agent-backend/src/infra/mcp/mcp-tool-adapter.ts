@@ -84,6 +84,11 @@ export function mcpToolsAsAgentTools(
    * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）。
    */
   asyncCtx?: AsyncToolContext,
+  /**
+   * 工具显示名（2026-10-27）：`{ 原始工具名: 人读名称 }`，来自平台 `tool_labels`。
+   * 优先级：本映射 > 服务端 `Tool.title` > `server: tool` 英文拼接。
+   */
+  toolLabels?: Record<string, string>,
 ): AgentTool[] {
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
@@ -110,7 +115,9 @@ export function mcpToolsAsAgentTools(
       : [];
     return {
       name: `${serverName}__${t.name}`,
-      label: `${serverName}: ${t.name}`,
+      // 显示名三级（2026-10-27）：平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`。
+      // 它进意图聚焦命题（中文判定更准），调用名恒为 `name`，模型读不到 label。
+      label: toolLabels?.[t.name]?.trim() || t.title?.trim() || `${serverName}: ${t.name}`,
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
       // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值

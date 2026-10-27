@@ -78,8 +78,17 @@ export type LlmEvent =
    *
    * 入参原文永不透出（可能含大 payload 或敏感信息）；摘要只留短标量，
    * 供展示"查了哪个文件/哪条记录"与审计（见 `domain/tool-result.ts` 的 digestArgs）。
+   *
+   * `label`：人读名称（2026-10-27 起随事件上行）——工具卡片与 HITL 弹窗显示它，
+   * `name` 仍是对模型的调用名（`server__tool`）。缺省表示无中文名，展示方回退 `name`。
    */
-  | { type: 'tool_call_start'; callId: string; name: string; argsDigest?: Record<string, string> }
+  | {
+      type: 'tool_call_start';
+      callId: string;
+      name: string;
+      argsDigest?: Record<string, string>;
+      label?: string;
+    }
   /**
    * 工具调用结束：状态 + **已序列化的结果文本**。
    *
@@ -350,6 +359,17 @@ export interface McpServerConfig {
    * 平台物化时也是"非空才写"）——**MUST NOT** 把空数组读成"一个工具都不给"。
    */
   allowedTools?: string[];
+  /**
+   * **工具显示名**（2026-10-27）：`{ 原始工具名: 人读名称 }`，由平台 `tool_labels`
+   * 物化进 `MCP.json`（平台是唯一权威源）。
+   *
+   * 用途：装配时作为 `AgentTool.label`，进**意图聚焦的命题文本**
+   * （`是否需要使用 BOM 校验 ？`）——中文判定准确率显著高于 `server: tool` 拼接。
+   * 只影响展示与命题，**不影响工具调用名**（恒为 `{server}__{tool}`），模型也读不到它。
+   *
+   * 缺省 / 空 = 全部回退英文拼接（存量 `MCP.json` 同一口径；物化时"非空才写"）。
+   */
+  toolLabels?: Record<string, string>;
   /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;

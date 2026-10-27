@@ -213,6 +213,11 @@ export interface ViewLink {
 export interface ToolCallRecord {
   call_id: string
   name: string
+  /**
+   * 人读名称（2026-10-27）：卡片标题显示它，`name` 仍是对模型的调用名。
+   * 缺省 = 无中文名或旧记录，展示方回退 `name`。
+   */
+  label?: string
   status: 'running' | 'success' | 'error'
   /** ISO8601 */
   started_at: string
@@ -351,10 +356,12 @@ export interface ContentEventData {
   delta: string
 }
 
-/** `tool_call` 事件数据（**仅名称**，无入参与结果）。 */
+/** `tool_call` 事件数据（**仅名称与状态**，无入参与结果）。 */
 export interface ToolCallEventData {
   call_id: string
   name: string
+  /** 人读名称（2026-10-27）；缺省 = 无中文名，展示方回退 `name` */
+  label?: string
   status: 'running'
 }
 
@@ -398,6 +405,11 @@ export interface InteractionRequestData {
   interaction_id: string
   call_id: string
   tool_name: string
+  /**
+   * 工具的人读名称（2026-10-27）：弹窗"工具："一行与窗口标题显示它。
+   * 后端恒给字符串（无中文名时等于 `tool_name`）；**老快照缺省**，展示方仍 `|| tool_name`。
+   */
+  tool_label?: string
   /** 工具级描述（schema 的 description；弹窗头部一句话说明用；老快照可能缺省） */
   tool_description?: string
   title: string

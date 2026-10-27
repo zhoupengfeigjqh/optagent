@@ -67,6 +67,15 @@ export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Reco
   // 工具白名单（2026-10-03）：非空才写（空 = 不限制，即白名单上线前的存量语义）。
   // 运行环境据此只把白名单里的工具挂给数字人，其余工具对模型不可见。
   if (config.allowed_tools.length > 0) entry.allowed_tools = config.allowed_tools;
+  // 工具显示名（2026-10-27）：非空才写（空 = 全部回退英文工具名，存量产物字节不变）。
+  // 按白名单过滤孤儿键——未启用的工具留着中文名没有意义，只会让 `MCP.json` 难以核对；
+  // 白名单为空是"不限制"语义，此时全部保留。
+  const toolLabels = Object.fromEntries(
+    Object.entries(config.tool_labels).filter(
+      ([tool]) => config.allowed_tools.length === 0 || config.allowed_tools.includes(tool),
+    ),
+  );
+  if (Object.keys(toolLabels).length > 0) entry.tool_labels = toolLabels;
   return entry;
 }
 

@@ -86,6 +86,16 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const now = deps.now ?? ((): number => Date.now())
   let controller: AbortController | null = null
   /**
+   * 本轮令牌（2026-10-27）：每次 `send()` 取号，`reset()` 也递增。
+   *
+   * 为什么需要：`reset()` 只 abort 旧流、不等旧 `send()` 退出（切会话/新建会话/删会话
+   * 都走它）。旧流随后才执行 `catch` / `finally`，若无条件写共享状态就会串台——
+   * 把新一轮打成 `aborted`（输入区解锁 → 可并发发第二个 run → 撞 409）、
+   * 把新一轮的 `controller` 置 `null`（此后无法中止）、清空本轮 `toolCalls`。
+   * 规则：**只有自己那一轮的令牌仍是最新时，才能写状态。**
+   */
+  let runToken = 0
+  /**
    * 本轮是否以**服务端终局**的 `error` 事件收尾（仅本轮发送期间有效）。
    * 与"断连/传输层失败"的区别决定 `lastRetryableTurn` 是否置位：见该字段的注释。
    */
@@ -110,6 +120,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   )
 
   function reset(): void {
+    // 先作废旧轮令牌：被中止的旧流此后的 catch/finally 一律不得再写状态
+    runToken += 1
     controller?.abort()
     controller = null
     phase.value = RUN_PHASE.IDLE
@@ -174,6 +186,10 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       return
     }
 
+    // 取本轮令牌：此后所有状态写入都先确认"我还是最新那一轮"（见 `runToken` 注释）
+    const token = ++runToken
+    const stale = (): boolean => token !== runToken
+
     const threadId = deps.activeThreadId.value
     if (!threadId) {
       deps.toast?.push('error', '请先选择数字人')
@@ -213,6 +229,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         threadId,
         body,
         (event) => {
+          // 过期轮的事件一律丢弃：否则切会话后旧流的增量会写进新一轮的正文
+          if (stale()) return
           switch (event.type) {
             case 'thinking':
               streamingThinking.value += event.data.delta
@@ -226,6 +244,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
                 {
                   call_id: event.data.call_id,
                   name: event.data.name,
+                  ...(event.data.label !== undefined ? { label: event.data.label } : {}),
                   status: 'running',
                 },
               ]
@@ -253,6 +272,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         { baseUrl: deps.baseUrl, fetchImpl: deps.fetchImpl, signal: controller.signal },
       )
 
+      // 已被新一轮或 reset() 取代：本轮的结果不再影响界面（历史刷新交给新一轮）
+      if (stale()) return
+
       if (phase.value === RUN_PHASE.STREAMING) {
         // 流结束但未收到终结事件：按连接中断处理
         error.value = { code: 'NETWORK_ERROR', message: '' }
@@ -262,6 +284,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         await deps.onTurnFinished?.(threadId)
       }
     } catch (cause) {
+      // 过期轮的失败不得改写新一轮的状态（否则新一轮被标成 aborted/failed）
+      if (stale()) return
       if (isAbortError(cause)) {
         phase.value = RUN_PHASE.ABORTED
       } else {
@@ -271,18 +295,22 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         deps.toast?.push('error', toUserMessage(info, 'send-message'))
       }
     } finally {
-      toolCalls.value = []
-      // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
-      // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
-      // 断连/传输层失败不缓存——后端那一轮可能仍在跑，重发会撞上 409（见该字段注释）
-      const retryable =
-        phase.value === RUN_PHASE.ABORTED || (phase.value === RUN_PHASE.FAILED && terminalFailure)
-      if (retryable && pendingUserMessage.value) {
-        lastRetryableTurn.value = pendingUserMessage.value
+      // 过期轮不得清共享状态：`toolCalls`/`pendingUserMessage` 已属于新一轮，
+      // `controller` 也可能已是新一轮的（置 null 会让「终止」彻底失效）
+      if (!stale()) {
+        toolCalls.value = []
+        // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
+        // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
+        // 断连/传输层失败不缓存——后端那一轮可能仍在跑，重发会撞上 409（见该字段注释）
+        const retryable =
+          phase.value === RUN_PHASE.ABORTED || (phase.value === RUN_PHASE.FAILED && terminalFailure)
+        if (retryable && pendingUserMessage.value) {
+          lastRetryableTurn.value = pendingUserMessage.value
+        }
+        // 乐观用户气泡收口：完成轮由历史真身接管，失败/中断轮维持既有降级语义（不残留、不重复）
+        pendingUserMessage.value = null
+        controller = null
       }
-      // 乐观用户气泡收口：完成轮由历史真身接管，失败/中断轮维持既有降级语义（不残留、不重复）
-      pendingUserMessage.value = null
-      controller = null
     }
   }
 

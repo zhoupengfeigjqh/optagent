@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
+import { PRODUCED_DIR } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import {
   PRODUCED_LIST_MAX,
@@ -144,6 +145,11 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     const access = accessFor(ctx, userId, agentName);
     const item = await findProduced(access, job_id);
     if (!item) {
+      throw new ApiError(404, 'FILE_NOT_FOUND', `后台产出不存在或已被清理：${job_id}`);
+    }
+    // 第二道防线（2026-10-27）：`readMeta` 已要求 `filename` 是单段名，这里再断言
+    // 路径确实落在产出目录内。两道防线任一失效，都不至于把"读产出"变成"读任意文件"。
+    if (!item.relPath.startsWith(`${PRODUCED_DIR}/`) || item.relPath.includes('..')) {
       throw new ApiError(404, 'FILE_NOT_FOUND', `后台产出不存在或已被清理：${job_id}`);
     }
     let buf: Buffer;

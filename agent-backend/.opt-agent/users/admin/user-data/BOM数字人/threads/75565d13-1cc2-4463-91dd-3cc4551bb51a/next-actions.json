@@ -1,0 +1,18 @@
+{
+  "message_id": "m_mvqqup20_yixa",
+  "agent_name": "BOM数字人",
+  "created_at": "2026-10-27T13:51:54.622Z",
+  "actions": [
+    {
+      "prompt": "等识别结果回写后，把架构图文字内容整理给我",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "ocr",
+          "name": "ocr_image"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：ocr__ocr_image（识别图片中的文字。\n\n    image：传用户消息 [引用文件] 中的相对路径（如 临时空间/a.png）即可，\n    backend 会自动铸成下载直链…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

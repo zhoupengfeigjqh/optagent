@@ -82,6 +82,19 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     return { role: m.role, content: m.content, timestamp: now() };
   });
 
+  /**
+   * 工具名 → 人读名称（2026-10-27）。
+   *
+   * `label` 在装配时已算好（平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`），
+   * 这里只做一张查表，随 `tool_call_start` 一起上行——工具卡片与 HITL 弹窗都要显示中文名，
+   * 而 pi 的 `tool_execution_start` 只给 `toolName`。
+   */
+  const labels = new Map<string, string>();
+  for (const tool of opts.tools) {
+    const label = typeof tool.label === 'string' ? tool.label.trim() : '';
+    if (label !== '') labels.set(tool.name, label);
+  }
+
   const emit = (event: AgentEvent): void => {
     if (event.type === 'message_update') {
       const ev = event.assistantMessageEvent;
@@ -90,11 +103,13 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     } else if (event.type === 'tool_execution_start') {
       // 入参只带**短标量摘要**（供展示"查了什么"）；原文永不下发（spec 002 FR-001）
       const argsDigest = digestArgs(event.args);
+      const label = labels.get(event.toolName);
       push({
         type: 'tool_call_start',
         callId: event.toolCallId,
         name: event.toolName,
         ...(argsDigest ? { argsDigest } : {}),
+        ...(label !== undefined ? { label } : {}),
       });
     } else if (event.type === 'tool_execution_end') {
       // 结果拍平成文本上行（由 run-manager 落 tool-events.jsonl）；
