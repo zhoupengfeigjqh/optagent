@@ -204,3 +204,80 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     }
   })
 })
+
+/**
+ * 013：意图聚焦开关。
+ *
+ * 守三件事：**默认关闭 + 文案**、**勾选即上抛布尔**、**与 007 开关互相独立**
+ * （同一份 SOUL 上两个复选框各管各的，勾一个不会带上另一个）。
+ */
+describe('SoulEditor —— 意图聚焦开关（013）', () => {
+  function checkbox(wrapper: ReturnType<typeof mountEditor>) {
+    return wrapper.find<HTMLInputElement>('[data-test="intent-focus"]')
+  }
+
+  it('渲染为原生 checkbox，文案为「是否开启意图聚焦」，默认关闭', () => {
+    const wrapper = mountEditor()
+    const input = checkbox(wrapper)
+
+    expect(input.exists()).toBe(true)
+    expect(input.element.type).toBe('checkbox')
+    expect(input.element.checked).toBe(false)
+    expect(wrapper.find('.soul-editor__intent-focus').text()).toContain('是否开启意图聚焦')
+  })
+
+  it('勾选 → `update:modelValue` 携带 `intent_focus: true`（布尔，不是字符串）', async () => {
+    const wrapper = mountEditor()
+
+    await checkbox(wrapper).setValue(true)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(true)
+    // 其余字段原样带出（patch 是整体替换），007 的开关不受影响
+    expect(emitted.next_action_hints).toBe(false)
+    expect(emitted.mission).toBe('')
+  })
+
+  it('已开启的设计态回显为勾选；取消勾选回传 `false`', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    const input = checkbox(wrapper)
+    expect(input.element.checked).toBe(true)
+
+    await input.setValue(false)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(false)
+  })
+
+  it('与 007 开关互相独立：勾意图聚焦不会顺带打开下一步动作提示', async () => {
+    const wrapper = mountEditor()
+
+    await checkbox(wrapper).setValue(true)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.next_action_hints).toBe(false)
+    expect(emitted.intent_focus).toBe(true)
+    expect(checkbox(wrapper).element.checked).toBe(true)
+    expect(wrapper.find<HTMLInputElement>('[data-test="next-action-hints"]').element.checked).toBe(
+      false,
+    )
+  })
+
+  it('界面说明开关的去向与关闭后果（关闭即产物无该键、预置卡片轮次跳过）', () => {
+    const wrapper = mountEditor()
+    const hint = wrapper.find('[data-test="intent-focus-hint"]').text()
+
+    expect(hint).toContain('意图判定')
+    expect(hint).toContain('产物里不会写这个键')
+    expect(hint).toContain('预置卡片')
+  })
+
+  it('存量设计态缺该键 → 按关闭渲染，不报错', () => {
+    const legacy = { ...emptySoulDesign() } as Partial<SoulDesign>
+    delete legacy.intent_focus
+
+    const wrapper = mountEditor(legacy as SoulDesign)
+
+    expect(checkbox(wrapper).element.checked).toBe(false)
+  })
+})

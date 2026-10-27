@@ -1,0 +1,274 @@
+﻿[
+	{
+		"Ref": "docker.1ms.run/chaitin/decis:laya-multilingual-v0.4.0@sha256:c2fd5bb79ed80edf83d56e9758107b8b8450c719db9d17d06c2a9ccf343187d5",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:c2fd5bb79ed80edf83d56e9758107b8b8450c719db9d17d06c2a9ccf343187d5",
+			"size": 2773,
+			"platform": {
+				"architecture": "amd64",
+				"os": "linux"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo2MmM1NzdkNzNjMDhhNDRhNTAxZWM1NjFjODI3OWQ2NGQzZTVhYTE0YWYzM2UyN2RkODg0OWM0ODk0MmJmN2ViIiwKICAgICJzaXplIjogMTE4OTAKICB9LAogICJsYXllcnMiOiBbCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjZiMzczNjJiM2RhNzg4NjkwNTBiODk0Yjc5OWFkNGRmMDRmMWYzYjUyNzc0MDg3ZGIwZDgxMTUxNTcwMjQ0YzgiLAogICAgICAic2l6ZSI6IDI5ODMwNDE4CiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjozZDlmYjc0NzE0MjAyYzBkOWJhN2FmMmNhM2UyMjZmZWM1NjQ3ZjczY2VmYzcyNWI3ZmYzNzMzOGJjMWI1OWVjIiwKICAgICAgInNpemUiOiAxMjk0MTE2CiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjoyNjRiYTNkOGFlMTljOTY0YWQ3ZWJlY2RkNDM3OWEzNDhjYzA4Yzc4OThiNTBkMDhkNzg4NDEyN2E3OGZkYjIzIiwKICAgICAgInNpemUiOiAxMTkwODA2NgogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6NGE0M2E0MGIwMzllNzJjNDE3NmUyZmNiYjBjMDhmNDJiZTdmZjRlNmEwNzcyMjQxNzgwMWM5MTQ3YjY3YmZiMiIsCiAgICAgICJzaXplIjogMjUwCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo1MTViOGYwNWU1NjMxNWRjZmRlNmNhOTlkM2VmNzYwODVmMzc0NjFkNTI1ZjM0YTMxNDI0OTk3ODZkYzZiMzAyIiwKICAgICAgInNpemUiOiAyMzEyODUzNwogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6Zjg1MDVhNTUzMDg5MTA4ZjJlY2NmMDdiYzNiOWVmYWEwMDdjZGNhM2M0YWVlNDFmMWM2YzE1ZWJkYTEyN2YyZCIsCiAgICAgICJzaXplIjogOTEKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OmNkNGFiZDRlNGRkMTZiMjBiYjEwNDA1ZWI4YzI0MWJlZDBkYzI4NDk5OTgwMTc4ZWYyNWQ0MDdiYWVjMTMwNjkiLAogICAgICAic2l6ZSI6IDEwODEwCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjpjODFiNjJmZGRlNzU4YWRjZmY3NjlmYzEyODg2YTYwNTY5MjkwYWFmOTk5MDE0ODFiNTQ1NzRhZGM2Y2RjZWIwIiwKICAgICAgInNpemUiOiA5ODE5MwogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6YzUyN2RkMDhjYWM3NTU5NmVjYzNmYTUyMjExZGFlZDVkZWY5OWMwM2YzYzkyODYwZGU3NGMzYWRlZTY5ZjY2MCIsCiAgICAgICJzaXplIjogMzEzNzgwMjMxNAogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6NGY0ZmI3MDBlZjU0NDYxY2ZhMDI1NzFhZTBkYjlhMGRjMWUwY2RiNTU3NzQ4NGE2ZDc1ZTY4ZGMzOGU4YWNjMSIsCiAgICAgICJzaXplIjogMzIKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjRmNGZiNzAwZWY1NDQ2MWNmYTAyNTcxYWUwZGI5YTBkYzFlMGNkYjU1Nzc0ODRhNmQ3NWU2OGRjMzhlOGFjYzEiLAogICAgICAic2l6ZSI6IDMyCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo4ZDI1ZDEwYTNkOGJhMTViODA5NGM0NTkzNDE4MmM0ZWFiM2M0ZGM5MDE4ZjEyMjg3NDY2MDEyMTk2MTllNDkxIiwKICAgICAgInNpemUiOiA1OTg5NjQ4OTIKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OmEzYTQ2ZWFjNTkxYWY5ZjYwNWVkYjNiOGEwZWJiMDZiNTFkOTg2NzE4MzdkOTRlOGQwZThkYTJmNTNmZjIzOTQiLAogICAgICAic2l6ZSI6IDU5OTA4MDI0MwogICAgfQogIF0KfQ==",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.image.config.v1+json",
+				"digest": "sha256:62c577d73c08a44a501ec561c8279d64d3e5aa14af33e27dd8849c48942bf7eb",
+				"size": 11890
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:6b37362b3da78869050b894b799ad4df04f1f3b52774087db0d81151570244c8",
+					"size": 29830418
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:3d9fb74714202c0d9ba7af2ca3e226fec5647f73cefc725b7ff37338bc1b59ec",
+					"size": 1294116
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:264ba3d8ae19c964ad7ebecdd4379a348cc08c7898b50d08d7884127a78fdb23",
+					"size": 11908066
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4a43a40b039e72c4176e2fcbb0c08f42be7ff4e6a07722417801c9147b67bfb2",
+					"size": 250
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:515b8f05e56315dcfde6ca99d3ef76085f37461d525f34a3142499786dc6b302",
+					"size": 23128537
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:f8505a553089108f2eccf07bc3b9efaa007cdca3c4aee41f1c6c15ebda127f2d",
+					"size": 91
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:cd4abd4e4dd16b20bb10405eb8c241bed0dc28499980178ef25d407baec13069",
+					"size": 10810
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:c81b62fdde758adcff769fc12886a60569290aaf99901481b54574adc6cdceb0",
+					"size": 98193
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:c527dd08cac75596ecc3fa52211daed5def99c03f3c92860de74c3adee69f660",
+					"size": 3137802314
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+					"size": 32
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+					"size": 32
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:8d25d10a3d8ba15b8094c45934182c4eab3c4dc9018f1228746601219619e491",
+					"size": 598964892
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:a3a46eac591af9f605edb3b8a0ebb06b51d98671837d94e8d0e8da2f53ff2394",
+					"size": 599080243
+				}
+			]
+		}
+	},
+	{
+		"Ref": "docker.1ms.run/chaitin/decis:laya-multilingual-v0.4.0@sha256:956bbd74e32c1c63c11077dce0db13400a2ba41d39988b9370bac91b0e91f7a2",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:956bbd74e32c1c63c11077dce0db13400a2ba41d39988b9370bac91b0e91f7a2",
+			"size": 1112,
+			"platform": {
+				"architecture": "unknown",
+				"os": "unknown"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImFydGlmYWN0VHlwZSI6ICJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmF0dGVzdGF0aW9uLm1hbmlmZXN0LnYxK2pzb24iLAogICJjb25maWciOiB7CiAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuZW1wdHkudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo0NDEzNmZhMzU1YjM2NzhhMTE0NmFkMTZmN2U4NjQ5ZTk0ZmI0ZmMyMWZlNzdlODMxMGMwNjBmNjFjYWFmZjhhIiwKICAgICJzaXplIjogMiwKICAgICJkYXRhIjogImUzMD0iCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5pbi10b3RvK2pzb24iLAogICAgICAiZGlnZXN0IjogInNoYTI1NjpiMzBjZmNiZjIyNDYyNzdkNjkzYjBkNzg2YzZmYTc2MTRiYWUzODk2ZWZiZGUzODA4OGY2ZDJhM2EyY2ZmNGQwIiwKICAgICAgInNpemUiOiA1MTY4Njk5LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImluLXRvdG8uaW8vcHJlZGljYXRlLXR5cGUiOiAiaHR0cHM6Ly9zcGR4LmRldi9Eb2N1bWVudCIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQuaW4tdG90bytqc29uIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6YWJmMTczNmUxMzAwNmEzZmIzNTAxYjEyMGFmMzhjZGJiNjg1NzYyZTFhODhkYjc3YWZiZTg0NzZiYTMyOThmNyIsCiAgICAgICJzaXplIjogNDUyOTQsCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiaW4tdG90by5pby9wcmVkaWNhdGUtdHlwZSI6ICJodHRwczovL3Nsc2EuZGV2L3Byb3ZlbmFuY2UvdjEiCiAgICAgIH0KICAgIH0KICBdLAogICJzdWJqZWN0IjogewogICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLm1hbmlmZXN0LnYxK2pzb24iLAogICAgImRpZ2VzdCI6ICJzaGEyNTY6YzJmZDViYjc5ZWQ4MGVkZjgzZDU2ZTk3NTgxMDdiOGI4NDUwYzcxOWRiOWQxN2QwNmMyYTljY2YzNDMxODdkNSIsCiAgICAic2l6ZSI6IDI3NzMKICB9Cn0=",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"artifactType": "application/vnd.docker.attestation.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.empty.v1+json",
+				"digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+				"size": 2,
+				"data": "e30="
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.in-toto+json",
+					"digest": "sha256:b30cfcbf2246277d693b0d786c6fa7614bae3896efbde38088f6d2a3a2cff4d0",
+					"size": 5168699,
+					"annotations": {
+						"in-toto.io/predicate-type": "https://spdx.dev/Document"
+					}
+				},
+				{
+					"mediaType": "application/vnd.in-toto+json",
+					"digest": "sha256:abf1736e13006a3fb3501b120af38cdbb685762e1a88db77afbe8476ba3298f7",
+					"size": 45294,
+					"annotations": {
+						"in-toto.io/predicate-type": "https://slsa.dev/provenance/v1"
+					}
+				}
+			],
+			"subject": {
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"digest": "sha256:c2fd5bb79ed80edf83d56e9758107b8b8450c719db9d17d06c2a9ccf343187d5",
+				"size": 2773
+			}
+		}
+	},
+	{
+		"Ref": "docker.1ms.run/chaitin/decis:laya-multilingual-v0.4.0@sha256:6f99b51cb24a829a0ef13c3e01e19080fec19ea88c471b850f4bc17f2ad3812b",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:6f99b51cb24a829a0ef13c3e01e19080fec19ea88c471b850f4bc17f2ad3812b",
+			"size": 2773,
+			"platform": {
+				"architecture": "arm64",
+				"os": "linux"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImNvbmZpZyI6IHsKICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5jb25maWcudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo4ZTlkYzkwODBmYzRiNjM4ODA5YjZjY2VhOGQ2ZmU4ZmYyZGRhYmY3YTFhODI5MjRmN2U2MWQzZTEzNWY4NjFkIiwKICAgICJzaXplIjogMTE4NzYKICB9LAogICJsYXllcnMiOiBbCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OmJkMzY1NjVjMGZkZWJhZjBmM2FmNWMzYjRjZTYxMGNhMDg1Y2VkMzJlOWU5ZGE4NTBkOTU5MTJmNWYxOGY0N2IiLAogICAgICAic2l6ZSI6IDMwMTg5NjkxCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjoxMjNhYmViYmFjZTdiMDA2MTdhZTllM2I3NzE2YWQ2OTQwMGZmNzRlNmNkZGRhNDM0ZDcwMjU0ZDk3NzJhODI2IiwKICAgICAgInNpemUiOiAxMjc1MzI4CiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo0YjgzZmJhZTQ3ZGRiYTNjM2Y5MThlOWQ5ZGM0ODQ2NzM5NTQ0NTVjY2ZlYzMzN2FmZDE2OTFkZjBmYWE5ZDYyIiwKICAgICAgInNpemUiOiAxMTgzMzQ4NQogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6MGZiM2RiNGFlZjlhMmI4Mjk1NzhhZTkxZTc1ODFiMWE2OWI1YTY0MjZiMjI4ZmVkNTE3NDNiODkyNjhjMWYzMyIsCiAgICAgICJzaXplIjogMjQ5CiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo2MTQ3M2YxOGVhOGM3YmMzNjZhYmI2MGQ5N2YxNjIwYTNhNjNjZGVhMjU0NmYwNmQxY2U5ZjBjOGY4MjhmYTIwIiwKICAgICAgInNpemUiOiAyMjI5NzEwNQogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6NGIyNTI3OTQ2MDg4OTJhYjU3OWI1N2Q4M2Y3MmQxNGRhYTZhYzRmOWU3OTY5YTE0YTMwODQ0NDkyMmY3N2ExYyIsCiAgICAgICJzaXplIjogOTMKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjU0ZWRiMGE5YzdmZWU0N2U4ZTA2MTlkNWJmZTA4YjRmZWEwYzVhMzU3NzE0M2U5OTlmZGQzOTdlYWRjNDVlNzAiLAogICAgICAic2l6ZSI6IDEwODExCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1Njo0Yjk0NzdiZGIxNDg2ODI3NGFkNTZhMWI0YWYzYjNiN2NmMGMyMTk1NzFjMTMzODIyMTcyMDU5YzRhMzE5MTYxIiwKICAgICAgInNpemUiOiA5ODE5NQogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6MjQ5N2QyNzZiYTBlMWFlNDhjN2Y4MWE3MjY5NjFkZjViZWE0Zjc3MWFlODViZjdhNTU5YjI1Mzk0NGEwMGJmOCIsCiAgICAgICJzaXplIjogMzI4MDUwMzg4MgogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLmxheWVyLnYxLnRhcitnemlwIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6NGY0ZmI3MDBlZjU0NDYxY2ZhMDI1NzFhZTBkYjlhMGRjMWUwY2RiNTU3NzQ4NGE2ZDc1ZTY4ZGMzOGU4YWNjMSIsCiAgICAgICJzaXplIjogMzIKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjRmNGZiNzAwZWY1NDQ2MWNmYTAyNTcxYWUwZGI5YTBkYzFlMGNkYjU1Nzc0ODRhNmQ3NWU2OGRjMzhlOGFjYzEiLAogICAgICAic2l6ZSI6IDMyCiAgICB9LAogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubGF5ZXIudjEudGFyK2d6aXAiLAogICAgICAiZGlnZXN0IjogInNoYTI1NjpiODNhOWE5M2Q0MDM5ZTI0ODI5OGI3ZWQzNzQyMzc0NDQ5MzU1NDlmZTAxYmE5MDM0NzA5NDUyZGYwN2YyYjE4IiwKICAgICAgInNpemUiOiA1OTg5NjQ2NTMKICAgIH0sCiAgICB7CiAgICAgICJtZWRpYVR5cGUiOiAiYXBwbGljYXRpb24vdm5kLm9jaS5pbWFnZS5sYXllci52MS50YXIrZ3ppcCIsCiAgICAgICJkaWdlc3QiOiAic2hhMjU2OjJmZmEyZGMyMTI0MGU3NzY2NWRiMTRjZWI2NzRiZWZhMzczYzI5YzEyZWEwM2FhMDQ5ODFjZjgyMGQ2NzA2ZjgiLAogICAgICAic2l6ZSI6IDU5OTA4MDE4OAogICAgfQogIF0KfQ==",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.image.config.v1+json",
+				"digest": "sha256:8e9dc9080fc4b638809b6ccea8d6fe8ff2ddabf7a1a82924f7e61d3e135f861d",
+				"size": 11876
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:bd36565c0fdebaf0f3af5c3b4ce610ca085ced32e9e9da850d95912f5f18f47b",
+					"size": 30189691
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:123abebbace7b00617ae9e3b7716ad69400ff74e6cddda434d70254d9772a826",
+					"size": 1275328
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4b83fbae47ddba3c3f918e9d9dc484673954455ccfec337afd1691df0faa9d62",
+					"size": 11833485
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:0fb3db4aef9a2b829578ae91e7581b1a69b5a6426b228fed51743b89268c1f33",
+					"size": 249
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:61473f18ea8c7bc366abb60d97f1620a3a63cdea2546f06d1ce9f0c8f828fa20",
+					"size": 22297105
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4b252794608892ab579b57d83f72d14daa6ac4f9e7969a14a308444922f77a1c",
+					"size": 93
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:54edb0a9c7fee47e8e0619d5bfe08b4fea0c5a3577143e999fdd397eadc45e70",
+					"size": 10811
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4b9477bdb14868274ad56a1b4af3b3b7cf0c219571c133822172059c4a319161",
+					"size": 98195
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:2497d276ba0e1ae48c7f81a726961df5bea4f771ae85bf7a559b253944a00bf8",
+					"size": 3280503882
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+					"size": 32
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+					"size": 32
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:b83a9a93d4039e248298b7ed374237444935549fe01ba9034709452df07f2b18",
+					"size": 598964653
+				},
+				{
+					"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+					"digest": "sha256:2ffa2dc21240e77665db14ceb674befa373c29c12ea03aa04981cf820d6706f8",
+					"size": 599080188
+				}
+			]
+		}
+	},
+	{
+		"Ref": "docker.1ms.run/chaitin/decis:laya-multilingual-v0.4.0@sha256:682e02e727325adf450ffb6affcdcca67589f98a65633ce33096cae14d8d11d3",
+		"Descriptor": {
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"digest": "sha256:682e02e727325adf450ffb6affcdcca67589f98a65633ce33096cae14d8d11d3",
+			"size": 1112,
+			"platform": {
+				"architecture": "unknown",
+				"os": "unknown"
+			}
+		},
+		"Raw": "ewogICJzY2hlbWFWZXJzaW9uIjogMiwKICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuaW1hZ2UubWFuaWZlc3QudjEranNvbiIsCiAgImFydGlmYWN0VHlwZSI6ICJhcHBsaWNhdGlvbi92bmQuZG9ja2VyLmF0dGVzdGF0aW9uLm1hbmlmZXN0LnYxK2pzb24iLAogICJjb25maWciOiB7CiAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5vY2kuZW1wdHkudjEranNvbiIsCiAgICAiZGlnZXN0IjogInNoYTI1Njo0NDEzNmZhMzU1YjM2NzhhMTE0NmFkMTZmN2U4NjQ5ZTk0ZmI0ZmMyMWZlNzdlODMxMGMwNjBmNjFjYWFmZjhhIiwKICAgICJzaXplIjogMiwKICAgICJkYXRhIjogImUzMD0iCiAgfSwKICAibGF5ZXJzIjogWwogICAgewogICAgICAibWVkaWFUeXBlIjogImFwcGxpY2F0aW9uL3ZuZC5pbi10b3RvK2pzb24iLAogICAgICAiZGlnZXN0IjogInNoYTI1NjowZWRlMGZjMDc1YzM0OGMwNDA2OWJhODFlYzFlODYzZTA3MTVmZDhmMjk0NmUyOTIzNTE2OTNkMjM1ZmIzNDc1IiwKICAgICAgInNpemUiOiA1MTY5NTEzLAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImluLXRvdG8uaW8vcHJlZGljYXRlLXR5cGUiOiAiaHR0cHM6Ly9zcGR4LmRldi9Eb2N1bWVudCIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQuaW4tdG90bytqc29uIiwKICAgICAgImRpZ2VzdCI6ICJzaGEyNTY6M2Q1ZGEwMDcyMjMwZjZiMjAwNjk5ZDNlNmVhNGVkOGMxMjIyZDFkMTQzZjE5NGI1YTYzNmJlZDc5YTE1ZWRkYiIsCiAgICAgICJzaXplIjogNDYyNzEsCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiaW4tdG90by5pby9wcmVkaWNhdGUtdHlwZSI6ICJodHRwczovL3Nsc2EuZGV2L3Byb3ZlbmFuY2UvdjEiCiAgICAgIH0KICAgIH0KICBdLAogICJzdWJqZWN0IjogewogICAgIm1lZGlhVHlwZSI6ICJhcHBsaWNhdGlvbi92bmQub2NpLmltYWdlLm1hbmlmZXN0LnYxK2pzb24iLAogICAgImRpZ2VzdCI6ICJzaGEyNTY6NmY5OWI1MWNiMjRhODI5YTBlZjEzYzNlMDFlMTkwODBmZWMxOWVhODhjNDcxYjg1MGY0YmMxN2YyYWQzODEyYiIsCiAgICAic2l6ZSI6IDI3NzMKICB9Cn0=",
+		"OCIManifest": {
+			"schemaVersion": 2,
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"artifactType": "application/vnd.docker.attestation.manifest.v1+json",
+			"config": {
+				"mediaType": "application/vnd.oci.empty.v1+json",
+				"digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+				"size": 2,
+				"data": "e30="
+			},
+			"layers": [
+				{
+					"mediaType": "application/vnd.in-toto+json",
+					"digest": "sha256:0ede0fc075c348c04069ba81ec1e863e0715fd8f2946e292351693d235fb3475",
+					"size": 5169513,
+					"annotations": {
+						"in-toto.io/predicate-type": "https://spdx.dev/Document"
+					}
+				},
+				{
+					"mediaType": "application/vnd.in-toto+json",
+					"digest": "sha256:3d5da0072230f6b200699d3e6ea4ed8c1222d1d143f194b5a636bed79a15eddb",
+					"size": 46271,
+					"annotations": {
+						"in-toto.io/predicate-type": "https://slsa.dev/provenance/v1"
+					}
+				}
+			],
+			"subject": {
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"digest": "sha256:6f99b51cb24a829a0ef13c3e01e19080fec19ea88c471b850f4bc17f2ad3812b",
+				"size": 2773
+			}
+		}
+	}
+]

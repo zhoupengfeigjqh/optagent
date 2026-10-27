@@ -40,7 +40,10 @@ describe('readToolFile —— `.html`（2026-10-20）', () => {
 
     const result = await readToolFile(fa, '共享空间/看板.html');
 
-    expect(read).toHaveBeenCalledWith('共享空间/看板.html', { offset: undefined, limit: undefined });
+    expect(read).toHaveBeenCalledWith('共享空间/看板.html', {
+      offset: undefined,
+      limit: undefined,
+    });
     expect(readBuffer).not.toHaveBeenCalled();
     expect(result.text).toBe(HTML);
     expect(result.truncated).toBe(false);

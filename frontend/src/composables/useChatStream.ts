@@ -166,6 +166,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     attachments: FileReference[]
     /** 本轮隐藏指引（004：问题实例关联工具引导）；只进本轮系统提示词，不落盘 */
     guidance?: string
+    /** 013：本轮跳过意图聚焦（预置动作入口）；只影响本次判定，不落历史 */
+    skipIntentFocus?: boolean
   }): Promise<void> {
     // 进行中直接忽略，不重复发起（FR-006）
     if (phase.value === RUN_PHASE.STREAMING) {
@@ -201,6 +203,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       model: deps.getModel(),
       attachments: payload.attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
+      ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
     })
 
     controller = new AbortController()

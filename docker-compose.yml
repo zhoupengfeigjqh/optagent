@@ -100,6 +100,40 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # Laya 决策模型服务（013 意图聚焦）：TypeSafe System One 线协议，**CPU 可跑**、权重烤进镜像。
+  # 判定由 backend **直接 HTTP 调用** `POST http://laya:8000/v1/systemone`
+  # ——不经 MCP、不注册为工具、不发布到网关（启动器看不到它）。
+  # 宿主端口 8103：8100/8101/8102 已被 ocr/jev/bom 占用；容器内固定 8000。
+  # 注意：本服务**不**设为 backend 的 depends_on——意图聚焦是可选能力，
+  # 强制拉起近 3GB 的推理镜像会让"只想起 backend"的既有部署变慢/失败；缺失时按未配置降级。
+  laya:
+    # **本地自建镜像**（2026-10-25）：官方 `chaitin/decis:laya-multilingual-v0.4.0` 在本
+    # 网络拉不下来（六个镜像站全部 403 / 层数据被改写），改为「拉源码 + 本地构建」：
+    # `laya-service/Dockerfile` 从 GitHub `chaitin/Decis` 源码装 `decis` + `laya`，
+    # 权重取自 ModelScope 的 `convaiinnovations/laya-multilingual`，烤进镜像。
+    # 构建：docker build -t laya-service laya-service（compose 会自动构建同名镜像）
+    build:
+      context: ./laya-service
+      dockerfile: Dockerfile
+    image: laya-service
+    container_name: optagent-laya
+    ports:
+      - "8103:8000"
+    # 本机私产放 .env.local（gitignore，缺失不报错）：DECIS_API_KEY 必填——
+    # 非 loopback 且未设 token 时服务会**拒绝启动**，这是官方口径。
+    # 首次：mkdir -p laya-service && echo "DECIS_API_KEY=<同 config.yaml 的 intent_focus.api_key>" > laya-service/.env.local
+    env_file:
+      - path: ./laya-service/.env.local
+        required: false
+    environment:
+      # 与 backend 的 stop_grace_period: 25s 同口径（引擎加载/卸载都要时间）
+      - DECIS_SHUTDOWN_GRACE_MS=25000
+      # 不设 DECIS_ALLOW_NO_AUTH（保持鉴权）；不设 DECIS_PLAYGROUND_HOST_PORT（不启用 playground）
+    # 官方建议：3Gi 请求 / 6Gi 上限（引擎加载后常驻内存，峰值为权重数倍）；按实测调整
+    mem_limit: 6g
+    restart: unless-stopped
+    logging: *default-logging
+
   backend:
     build: ./agent-backend
     container_name: optagent-backend

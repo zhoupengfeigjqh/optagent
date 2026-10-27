@@ -1,0 +1,17 @@
+{
+  "message_id": "m_mvpf395b_g6xj",
+  "agent_name": "BOM数字人",
+  "created_at": "2026-10-26T15:34:25.947Z",
+  "actions": [
+    {
+      "prompt": "对子BOM压缩包和总BOM表格执行格式校验",
+      "tools": [
+        {
+          "kind": "builtin",
+          "name": "read_file"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：read_file（读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

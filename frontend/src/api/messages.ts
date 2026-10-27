@@ -24,6 +24,13 @@ export interface SendMessageInput {
   attachments: FileReference[]
   /** 本轮隐藏指引（004）；空串 / 缺省表示不提交该字段 */
   guidance?: string
+  /**
+   * 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+   *
+   * 仅 `true` 时提交。跳过必须是**服务端可校验**的标记，所以它走请求体，
+   * 而不是"前端少发一次请求"；标记不落历史、不出现在消息内容里。
+   */
+  skipIntentFocus?: boolean
 }
 
 /**
@@ -33,7 +40,9 @@ export interface SendMessageInput {
  * 且 `model` / `attachments` 有 `minLength` / `maxItems` 约束。
  */
 export function buildSendMessageBody(input: SendMessageInput): SendMessageRequest {
-  const body: SendMessageRequest = {
+  // `send_intent_focus` 是 013 新增字段；`SendMessageRequest` 在 api/types.ts（本特性约定
+  // 不动该文件），故用交叉类型表达"比契约多一个可选字段"，返回值仍可赋给 `SendMessageRequest`。
+  const body: SendMessageRequest & { skip_intent_focus?: boolean } = {
     content: input.content,
     thinking: input.thinking,
   }
@@ -48,6 +57,10 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
   }
   if (input.guidance) {
     body.guidance = input.guidance
+  }
+  // 013：只在需要跳过时携带（后端 Schema 为 additionalProperties:false）
+  if (input.skipIntentFocus === true) {
+    body.skip_intent_focus = true
   }
   return body
 }

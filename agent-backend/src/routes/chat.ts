@@ -48,6 +48,9 @@ const messageBodySchema = {
     // 004：问题实例关联工具生成的隐藏引导。只追加到本轮系统提示词，
     // 不落盘、不进历史 —— 用户气泡里看不到它。
     guidance: { type: 'string', maxLength: 500 },
+    // 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+    // 服务端据此不发起判定——放在请求体而不是"前端少发一次请求"，因为跳过必须是可校验的。
+    skip_intent_focus: { type: 'boolean' },
     attachments: {
       type: 'array',
       maxItems: MAX_ATTACHMENTS,
@@ -63,6 +66,38 @@ const messageBodySchema = {
     },
   },
 } as const;
+
+/** 允许出现的请求体字段（与 `messageBodySchema.properties` 同源，避免两处清单漂移） */
+const MESSAGE_BODY_KEYS = new Set(Object.keys(messageBodySchema.properties));
+
+/**
+ * 013：请求体的**严格校验**（`preValidation`，此时 body 刚解析、schema 尚未改写它）。
+ *
+ * 为什么不能只靠 Fastify 的 JSON Schema：默认 ajv 配置是
+ * `coerceTypes: true` + `removeAdditional: true`——`"true"` 会被悄悄转成 `true`，
+ * 拼错的字段（`skipIntentFocus`）会被静默丢掉。对"跳过意图聚焦"这种
+ * **服务端可校验标记**来说，这两种静默都不可接受：错配只会表现为
+ * "该跳过的没跳过 / 不该跳过的跳过了"，没有任何报错可循。
+ *
+ * 作用域仅限本路由（不全局改 ajv 选项，避免影响其余端点）。
+ */
+function assertStrictMessageBody(body: unknown): void {
+  // 非对象交给 schema 报"类型不符"，这里不重复造错
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
+  const raw = body as Record<string, unknown>;
+
+  const unknown = Object.keys(raw).filter((key) => !MESSAGE_BODY_KEYS.has(key));
+  if (unknown.length > 0) {
+    throw new ApiError(400, 'VALIDATION_FAILED', `不支持的请求字段: ${unknown.join(', ')}`);
+  }
+  if (raw.skip_intent_focus !== undefined && typeof raw.skip_intent_focus !== 'boolean') {
+    throw new ApiError(
+      400,
+      'VALIDATION_FAILED',
+      `skip_intent_focus 须为布尔值（当前：${JSON.stringify(raw.skip_intent_focus)}）`,
+    );
+  }
+}
 
 /**
  * 人工确认提交/拒绝（HITL）：action=submit 必须带 args（服务端按挂起时的
@@ -119,7 +154,10 @@ function validateAttachments(
 export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post(
     '/api/threads/:id/messages',
-    { schema: { body: messageBodySchema } },
+    {
+      schema: { body: messageBodySchema },
+      preValidation: async (req) => assertStrictMessageBody(req.body),
+    },
     async (req, reply) => {
       const userId = getCurrentUser().userId;
       const { id: threadId } = req.params as { id: string };
@@ -129,6 +167,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         model?: string;
         guidance?: string;
         attachments?: FileReference[];
+        skip_intent_focus?: boolean;
       };
 
       // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
@@ -214,6 +253,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           ...(model ? { model } : {}),
           // 004：问题实例的隐藏工具引导（只影响本轮系统提示词，不落盘）
           ...(body.guidance ? { guidance: body.guidance } : {}),
+          // 013：预置动作入口跳过意图聚焦（只影响本轮判定，不落历史、不改 SSE 序列）
+          ...(body.skip_intent_focus === true ? { skipIntentFocus: true } : {}),
         });
       } catch (err) {
         releaseQuota();

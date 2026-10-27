@@ -196,7 +196,9 @@ describe('buildMcpServerEntry', () => {
         'svc-open': { name: 'svc-open', description: 'x', transport: 'http', url: OCR_URL },
       },
     });
-    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills, ontologies })).not.toHaveProperty('allowed_tools');
+    expect(buildMcpServerEntry('svc-open', { mcpConfigs, skills, ontologies })).not.toHaveProperty(
+      'allowed_tools',
+    );
   });
 
   it('async_tools（2026-10-17 移除）：存量文档里的该键 MUST NOT 物化进 MCP.json', () => {
@@ -212,16 +214,20 @@ describe('buildMcpServerEntry', () => {
         },
       },
     });
-    expect(
-      buildMcpServerEntry('svc-async', { mcpConfigs, skills, ontologies }),
-    ).not.toHaveProperty('async_tools');
+    expect(buildMcpServerEntry('svc-async', { mcpConfigs, skills, ontologies })).not.toHaveProperty(
+      'async_tools',
+    );
   });
 });
 
 describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一致', () => {
   it('产出四件套（SOUL.md / TOOL.json / MCP.json / scenario.json）', () => {
     configure('ocr');
-    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills, ontologies });
+    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), {
+      mcpConfigs,
+      skills,
+      ontologies,
+    });
 
     expect(artifact.files.map((f) => f.relPath).sort()).toEqual([
       'MCP.json',
@@ -366,7 +372,11 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       { overwrite: false, source: 'a.zip' },
     );
 
-    const artifact = buildAgentArtifact(design({ skills: ['pdf-parse'] }), { mcpConfigs, skills, ontologies });
+    const artifact = buildAgentArtifact(design({ skills: ['pdf-parse'] }), {
+      mcpConfigs,
+      skills,
+      ontologies,
+    });
     const paths = artifact.files.map((f) => f.relPath);
     expect(paths).toContain('skills/pdf-parse/SKILL.md');
     expect(paths).toContain('skills/pdf-parse/ref/helper.md');
@@ -387,9 +397,7 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     });
     const dir = 'ontology/生产调度/原材料采购和库存';
     expect(artifact.files.find((f) => f.relPath === `${dir}/ontology.yaml`)?.content).toBe(ONTO_YAML);
-    expect(artifact.files.find((f) => f.relPath === `${dir}/securities.yaml`)?.content).toBe(
-      ONTO_SECURITIES,
-    );
+    expect(artifact.files.find((f) => f.relPath === `${dir}/securities.yaml`)?.content).toBe(ONTO_SECURITIES);
   });
 
   it('形状非法的存量引用被跳过：不拼出三段路径，也不凭空造目录', () => {
@@ -408,7 +416,11 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
 
   it('产物条目顺序稳定（SOUL → TOOL → MCP → scenario → skills）', () => {
     configure('ocr');
-    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), { mcpConfigs, skills, ontologies });
+    const artifact = buildAgentArtifact(design({ mcp_services: ['ocr'] }), {
+      mcpConfigs,
+      skills,
+      ontologies,
+    });
     expect(artifact.files.slice(0, 4).map((f) => f.relPath)).toEqual([
       'SOUL.md',
       'TOOL.json',

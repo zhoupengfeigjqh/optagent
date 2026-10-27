@@ -45,7 +45,9 @@ describe('toUserMessage - 基础映射', () => {
       '整理目录',
     )
     // 与同上下文的其他码互不串味
-    expect(toUserMessage({ code: 'VALIDATION_FAILED', message: '' }, 'upload')).toBe('文件格式不支持')
+    expect(toUserMessage({ code: 'VALIDATION_FAILED', message: '' }, 'upload')).toBe(
+      '文件格式不支持',
+    )
   })
 
   it('null / undefined / 无 code → 通用兜底文案', () => {

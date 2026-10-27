@@ -611,7 +611,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - **该键可省略**（请求体与响应体皆然）；历史文档缺该键时按"全部目录使用平台默认"处理，客户端无需迁移。
 - 该配置仅约束**数据准备空间**的**用户上传**；共享空间与临时空间的可上传类型不由此字段影响。
 
-**`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增）：
+**`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增，`intent_focus` 为 **013** 新增）：
 
 | 字段 | 类型 | 必填 | 归属 | 说明 |
 |---|---|---|---|---|
@@ -624,11 +624,13 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `prompt_extra` | string | ➖ | 进提示词 | 补充说明（≤4000 字） |
 | `next_action_hints` | boolean | ➖ | **运行环境开关** | 下一步动作提示（007）：开启后该数字人每轮回答下方出现可点击卡片。缺省 `false`；**仅 `true` 时**物化进 `SOUL.md` 的 frontmatter |
 | `next_action_hints_count` | number | ➖ | **运行环境开关（参数）** | 开关开启时**每轮最多几条**提示（007）：`1~6` 的整数，缺省 `3`；**与开关同进同出**——仅开关开启时物化进 frontmatter，关闭态不写该键 |
+| `intent_focus` | boolean | ➖ | **运行环境开关** | 意图聚焦（013）：开启后该数字人每轮对话在调主模型**之前**先做一次意图判定。缺省 `false`；**仅 `true` 时**物化进 frontmatter；与 `next_action_hints` **互相独立** |
 
 - `next_action_hints` 为**拒绝式校验**：键缺失 = `false`（不写该键的老表单 / 004 期存档照常保存）；键在但非布尔（`"true"` / `1` / `null` / `{}`…）→ `VALIDATION_FAILED`，MUST NOT 做隐式转换（"显示关闭、运行环境却已开启"是最难排查的错配）；
 - `next_action_hints_count` 同样**拒绝式**：键缺失 = `3`；`null` / 小数 / 越界 / 非数字 → `VALIDATION_FAILED`（不做 round / clamp）；开关关闭时**数值仍被保留**（管理台输入框置灰、不回退），只是不写进产物；
-- 响应中**恒有这两个键**（读取归一化时缺省补 `false` / `3`）；
-- **对模型行为零影响**：它们只进 frontmatter，正文（System Prompt）在开 / 关两态逐字一致（`FR-035`）。运行环境侧的读取、生成与端点口径见 `runtime-api-delta.md` §16。
+- `intent_focus` 与 `next_action_hints` **同一口径**：键缺失 = `false`（013 之前的存档照常打开与保存）；非布尔 → `VALIDATION_FAILED`；关闭态不写该键（部署零残留）；
+- 响应中**恒有这三个键**（读取归一化时缺省补 `false` / `3` / `false`）；
+- **对模型行为零影响**：它们只进 frontmatter，正文（System Prompt）在开 / 关两态逐字一致（`FR-035` / `FR-034`）。运行环境侧的读取、生成与端点口径见 `runtime-api-delta.md` §16、§21。
 
 **错误码**：`ADM_AGENT_NOT_FOUND`（复用 `AGENT_NOT_FOUND` 语义，因属平台自有命名空间故加前缀；**同名不同义的情况在本契约中不存在**）
 

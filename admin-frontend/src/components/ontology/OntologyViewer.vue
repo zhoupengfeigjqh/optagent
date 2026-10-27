@@ -21,11 +21,7 @@
 import { computed, ref } from 'vue'
 import { deleteOntology, type OntologyDetail } from '../../api/ontologies'
 import type { ErrorInfo } from '../../api/types'
-import {
-  ontologyDisplayName,
-  ontologyNameOf,
-  ontologyScenarioOf,
-} from '../../utils/ontology-name'
+import { ontologyDisplayName, ontologyNameOf, ontologyScenarioOf } from '../../utils/ontology-name'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import FileTree from '../common/FileTree.vue'

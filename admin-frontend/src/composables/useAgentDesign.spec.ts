@@ -30,6 +30,7 @@ const SOUL = {
   prompt_extra: '',
   next_action_hints: false,
   next_action_hints_count: 3,
+  intent_focus: false,
 }
 
 const DESIGN = {
@@ -70,6 +71,7 @@ describe('emptyDraft', () => {
         prompt_extra: '',
         next_action_hints: false,
         next_action_hints_count: 3,
+        intent_focus: false,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -358,6 +360,20 @@ describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，202
     await editor.resetToCopy('副本', 'demo')
 
     expect(editor.draft.value.soul.next_action_hints_count).toBe(3)
+  })
+
+  it('带复制源：意图聚焦开关一并带走（013）；老存档缺该键 → 归一为关', async () => {
+    getAgent.mockResolvedValue({ ...DESIGN, soul: { ...SOUL, intent_focus: true } })
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+    expect(editor.draft.value.soul.intent_focus).toBe(true)
+
+    const legacy = { ...SOUL } as Partial<typeof SOUL>
+    delete legacy.intent_focus
+    getAgent.mockResolvedValue({ ...DESIGN, soul: legacy })
+    const legacyEditor = useAgentDesign()
+    await legacyEditor.resetToCopy('副本', 'demo')
+    expect(legacyEditor.draft.value.soul.intent_focus).toBe(false)
   })
 
   it('问题实例（starters）逐层深拷贝：改草稿的提示文本与关联工具都不污染源', async () => {

@@ -65,14 +65,20 @@ describe('useNextStepPrompt —— 点卡片（2026-10-16）', () => {
 })
 
 describe('useNextStepPrompt —— 确认发送（2026-10-16）', () => {
-  it('确认：走唯一发送链路，载荷只有提示词与隐藏引导，且不等本轮结束', async () => {
+  it('确认：走唯一发送链路，载荷只有提示词、隐藏引导与跳过标记，且不等本轮结束', async () => {
     const { prompt, send } = setup()
     prompt.onPickNextStep(CARD)
 
     await prompt.onConfirmSuggestion()
 
     expect(send).toHaveBeenCalledWith(
-      { content: '看看产能瓶颈', attachments: [], guidance: 'ocr_image' },
+      {
+        content: '看看产能瓶颈',
+        attachments: [],
+        guidance: 'ocr_image',
+        // 013：卡片发送一律跳过意图聚焦（FR-008/FR-044）
+        skipIntentFocus: true,
+      },
       { settleBeforeReturn: false },
     )
     expect(prompt.pendingSuggestion.value).toBeNull()

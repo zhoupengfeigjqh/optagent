@@ -8,6 +8,7 @@
  * soul_version: 1
  * next_action_hints: true    ← 仅开启时出现（007：运行期开关，不是给模型看的内容）
  * next_action_hints_count: 3 ← 与开关同进同出：开启时每轮最多几条提示
+ * intent_focus: true         ← 仅开启时出现（013：运行期开关，与上面的开关互相独立）
  * intro: 角色简介
  * welcome: 首屏欢迎语
  * starters: [ { prompt, tools } ]
@@ -29,6 +30,15 @@
 import { stringify as stringifyYaml } from 'yaml';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
+import {
+  readBool,
+  readOptionalText,
+  readPositiveInt,
+  readRequiredText,
+  readTextList,
+  truncate,
+} from './soul-fields.js';
+import { SOUL_LIMITS } from './soul-limits.js';
 
 /** 问题实例关联的工具引用 */
 export interface SoulStarterTool {
@@ -79,43 +89,21 @@ export interface SoulDesign {
    * - 与开关同一失败口径：缺省取默认值，非法值（小数 / 0 / 负数 / 越界 / 非数字）**拒绝**保存。
    */
   next_action_hints_count?: number;
+  /**
+   * 意图聚焦开关（013，2026-10-25）：**运行期开关**，控制"每轮对话前是否先做一次意图判定"。
+   *
+   * - **可选 + 缺省 `false`**：与 `next_action_hints` 同一口径——存量设计态文档没有该键，
+   *   读取时照常可用（`isSoulDesign` 不参与判定），缺省即"关"，fail-closed；
+   * - 物化时**仅在 `true` 时**写进 frontmatter（`renderSoulMd`）：关闭态产物与 013 之前
+   *   逐字一致，不给运行环境留下任何新键（"平台是唯一权威源、未搭配的不残留"）；
+   * - **不改人格提示词**：该键不进正文，System Prompt 开 / 关逐字一致（规格 FR-034）。
+   */
+  intent_focus?: boolean;
 }
 
-/**
- * 字段上限。
- *
- * 集中一处定义：**前端输入框的 maxlength / 计数与后端校验共用同一组数字**，
- * 避免"前端允许输入、后端保存失败"的割裂体验。
- */
-export const SOUL_LIMITS = {
-  /** 角色简介字数 */
-  intro: 100,
-  /** 首屏欢迎语字数 */
-  welcome: 100,
-  /** 单条问题内容字数 */
-  starterPrompt: 150,
-  /** 问题实例条数 */
-  starters: 12,
-  /** 单条问题实例可关联的工具数 */
-  toolsPerStarter: 10,
-  /** 主要使命字数 */
-  mission: 4000,
-  /** 补充说明字数 */
-  promptExtra: 4000,
-  /**
-   * 下一步动作提示条数（007）：下限、上限与缺省。
-   * 开关关闭时**保留**管理员填写的数字（只是不物化进产物），再次打开即恢复，不必重填。
-   */
-  nextActionHintsMin: 1,
-  nextActionHintsMax: 6,
-  nextActionHintsDefault: 3,
-  /** 能力标签 / 绝对禁止的条数 */
-  listItems: 20,
-  /** 绝对禁止单项字数 */
-  listItemLength: 100,
-  /** 能力标签单项字数 */
-  capabilityTagLength: 20,
-} as const;
+// 字段上限已外移到 `soul-limits.ts`（渲染 / 读取器 / 前端计数共用同一组数字）；
+// 这里保持原导出名，调用方与本文件的既有 import 均不受影响
+export { SOUL_LIMITS } from './soul-limits.js';
 
 /** 空结构（新建数字人初值 / 缺省填充） */
 export function emptySoulDesign(): SoulDesign {
@@ -132,6 +120,8 @@ export function emptySoulDesign(): SoulDesign {
     next_action_hints: false,
     // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与前端初值不等
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
+    // 013：同理显式落 `false`（新建数字人默认不聚焦，存量数字人经 withSoulDefaults 补齐）
+    intent_focus: false,
   };
 }
 
@@ -194,6 +184,8 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     next_action_hints: readBool(record.next_action_hints, '下一步动作提示开关'),
     // 007：键缺失 = 缺省 3；非整数 / 越界 = 拒绝（不做 round / clamp：静默改数字最难排查）
     next_action_hints_count: readPositiveInt(record.next_action_hints_count),
+    // 013：键缺失 = 关；键在但类型不对 = 拒绝（与 next_action_hints 同一 readBool 口径）
+    intent_focus: readBool(record.intent_focus, '意图聚焦开关'),
   };
 }
 
@@ -212,6 +204,11 @@ export function renderSoulMd(soul: SoulDesign): string {
   if (soul.next_action_hints === true) {
     frontmatter.next_action_hints = true;
     frontmatter.next_action_hints_count = soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault;
+  }
+  // 013：与 007 开关**独立**（FR-035：两者互不影响），同样只在开启时写键；
+  // 关闭态产物里连"intent_focus: false"都不出现（部署零残留，FR-033）
+  if (soul.intent_focus === true) {
+    frontmatter.intent_focus = true;
   }
   if (soul.intro !== '') frontmatter.intro = soul.intro;
   if (soul.welcome !== '') frontmatter.welcome = soul.welcome;
@@ -264,106 +261,7 @@ export function describeSoul(soul: SoulDesign): string {
   );
 }
 
-/* ---------- 内部：逐字段校验 ---------- */
-
-function readRequiredText(raw: unknown, label: string, max: number): string {
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  if (text === '') {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}必填且不能为空`);
-  }
-  assertLength(text, label, max);
-  return text;
-}
-
-/**
- * 布尔字段（007）。
- *
- * 三态口径与其它字段一致（**拒绝式校验**）：
- * - 键**缺失**（`undefined`）→ 缺省 `false`：老表单 / 存量文档不带这个键，照常保存；
- * - `true` / `false` → 原样；
- * - 其余（字符串 `"true"`、数字 `1`、`null`…）→ **拒绝**，不做隐式转换——
- *   `"false"` 这类值一旦被当成真值，界面显示关闭而运行环境已开启，属于最难排查的错配。
- */
-function readBool(raw: unknown, label: string): boolean {
-  if (raw === undefined) return false;
-  if (typeof raw !== 'boolean') {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `${label}须为布尔值（true / false，当前：${JSON.stringify(raw)}）`,
-    );
-  }
-  return raw;
-}
-
-/**
- * 提示条数（007）：正整数，1~`SOUL_LIMITS.nextActionHintsMax`，缺省 `SOUL_LIMITS.nextActionHintsDefault`。
- *
- * **拒绝式**，不做自动纠正（不四舍五入、不 clamp、不把 `"3"` 当 `3`）：
- * 管理员填错时应当立刻看到"保存被拒"，而不是存下一个与界面显示不一致的数字——
- * 这个数字直接决定后台生成几条提示、以及多花多少 token，静默改写属于最难的错配。
- */
-function readPositiveInt(raw: unknown): number {
-  const { nextActionHintsMin: min, nextActionHintsMax: max, nextActionHintsDefault: fallback } = SOUL_LIMITS;
-  // **只有键缺失**才落缺省（与 `readBool` 的开关口径一致）；`null` 是"显式给了个空值"，
-  // 按非法拒绝——静默当成缺省会让界面显示的 `null` 与产物里的 `3` 对不上
-  if (raw === undefined) return fallback;
-  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `下一步动作提示条数须为 ${min}~${max} 的整数（当前：${JSON.stringify(raw)}）`,
-    );
-  }
-  return raw;
-}
-
-function readOptionalText(raw: unknown, label: string, max: number): string {
-  if (raw === undefined || raw === null) return '';
-  if (typeof raw !== 'string') {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}须为字符串`);
-  }
-  const text = raw.trim();
-  if (text === '') return '';
-  assertLength(text, label, max);
-  return text;
-}
-
-function assertLength(text: string, label: string, max: number): void {
-  if (text.length > max) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}不得超过 ${max} 字（当前 ${text.length} 字）`);
-  }
-}
-
-/** 字符串数组：非空、限长、去重（重复即拒，避免"配了两遍"的隐性错误） */
-function readTextList(raw: unknown, label: string, maxItemLength: number): string[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}须为字符串数组`);
-  }
-  if (raw.length > SOUL_LIMITS.listItems) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `${label}最多 ${SOUL_LIMITS.listItems} 项（当前 ${raw.length} 项）`,
-    );
-  }
-  const out: string[] = [];
-  for (const item of raw) {
-    if (typeof item !== 'string' || item.trim() === '') {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}含空值或非字符串项`);
-    }
-    const text = item.trim();
-    if (text.length > maxItemLength) {
-      throw new ApiError(
-        ERROR_CODES.VALIDATION_FAILED,
-        `${label}单项不得超过 ${maxItemLength} 字：「${truncate(text)}」`,
-      );
-    }
-    if (out.includes(text)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}含重复项：${text}`);
-    }
-    out.push(text);
-  }
-  return out;
-}
+/* ---------- 内部：实例级校验（逐字段读取器见 soul-fields.ts） ---------- */
 
 function readStarters(raw: unknown, options: SoulNormalizeOptions): SoulStarter[] {
   if (raw === undefined || raw === null) return [];
@@ -482,8 +380,4 @@ function readStarterTools(raw: unknown, label: string, options: SoulNormalizeOpt
 
 function bulletList(items: readonly string[]): string {
   return items.map((item) => `- ${item}`).join('\n');
-}
-
-function truncate(text: string, max = 20): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text;
 }

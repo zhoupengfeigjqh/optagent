@@ -198,6 +198,34 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-10-25（013）：判定纯函数（命题构造 / 概率筛选 / 提示铸造 / 处置判定）
+        'src/domain/intent-focus.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-25（013）：判定编排（开关 → 跳过 → 配置 → 判定 → 五态留档）
+        'src/domain/intent-focus-runner.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-25（013）：留档存储（串行追加 / 有界滚动 / 原子替换）
+        'src/domain/intent-focus-store.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-10-25（013）：Laya 协议适配器（唯一网络出口；失败原因判别）
+        'src/infra/laya-client.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

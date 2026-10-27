@@ -145,6 +145,8 @@ function onStarterClick(starter: AgentStarter): void {
     content: starter.prompt,
     attachments: [],
     ...(starter.guidance ? { guidance: starter.guidance } : {}),
+    // 013：首屏问题实例卡片与下一步动作卡片同口径——跳过意图聚焦（FR-043）
+    skipIntentFocus: true,
   })
 }
 

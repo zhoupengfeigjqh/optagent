@@ -74,12 +74,7 @@ let market: string;
 let dataDir: string;
 let ontologies: OntologyStore;
 
-function writeMarket(
-  ontologyDir: string,
-  content: string,
-  scenario = SCENARIO,
-  withSecurities = true,
-): void {
+function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO, withSecurities = true): void {
   const dir = path.join(market, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ONTOLOGY_FILE), content);
@@ -221,9 +216,9 @@ describe('导入 / 更新 / 删除', () => {
 
   it('index.json 只落 metadata + 两个内容指纹 + 时间戳（身份不重复落盘）', () => {
     importOntoMarketOntology(market, ontologies, REF);
-    const index = JSON.parse(
-      fs.readFileSync(path.join(dataDir, ONTO_MARKET_DIR, 'index.json'), 'utf8'),
-    ) as { items: Array<Record<string, unknown>> };
+    const index = JSON.parse(fs.readFileSync(path.join(dataDir, ONTO_MARKET_DIR, 'index.json'), 'utf8')) as {
+      items: Array<Record<string, unknown>>;
+    };
     const stored = index.items[0]!;
 
     expect(Object.keys(stored).sort()).toEqual([

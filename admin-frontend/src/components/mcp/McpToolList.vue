@@ -78,7 +78,8 @@ function declaresResultUrl(parameters: unknown): boolean {
  * 谈"能不能回写"没有意义。
  */
 const asyncTools = computed(
-  () => new Set(props.tools.filter((tool) => declaresResultUrl(tool.parameters)).map((t) => t.name)),
+  () =>
+    new Set(props.tools.filter((tool) => declaresResultUrl(tool.parameters)).map((t) => t.name)),
 )
 </script>
 
@@ -139,11 +140,14 @@ const asyncTools = computed(
             v-if="props.missingTools.includes(toolName)"
             class="mcp-tool-list__warn"
             aria-hidden="true"
-          >⚠</span>{{ toolName }}<span
+            >⚠</span
+          >{{ toolName
+          }}<span
             v-if="asyncTools.has(toolName)"
             class="mcp-tool-list__flag"
             :title="ASYNC_TOOL_HINT"
-          >（可回写结果）</span>
+            >（可回写结果）</span
+          >
           <span v-if="props.missingTools.includes(toolName)" class="mcp-tool-list__badge">
             已不存在
           </span>

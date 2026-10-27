@@ -193,6 +193,8 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
       guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+      // 013：预置动作入口一律跳过意图聚焦（FR-008/FR-044）
+      skipIntentFocus: true,
     })
     expect(panel.pendingSuggestion.value).toBeNull()
     expect(toast.push).not.toHaveBeenCalled()

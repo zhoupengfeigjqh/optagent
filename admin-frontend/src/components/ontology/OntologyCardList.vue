@@ -12,11 +12,7 @@
  */
 import type { OntologyListItem, OntologyMetadata } from '../../api/ontologies'
 import type { ErrorInfo } from '../../api/types'
-import {
-  ontologyDisplayName,
-  ontologyNameOf,
-  ontologyScenarioOf,
-} from '../../utils/ontology-name'
+import { ontologyDisplayName, ontologyNameOf, ontologyScenarioOf } from '../../utils/ontology-name'
 import EntityCardList from '../common/EntityCardList.vue'
 
 defineProps<{

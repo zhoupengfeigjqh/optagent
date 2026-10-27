@@ -348,7 +348,9 @@ describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与�
 
     expect(result).toMatchObject({ status: 'no-source', ownerAgent: null, movedCount: 0 });
     // 数据留在自己的数据域里（撤销不撤数据）
-    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe('revoked');
+    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe(
+      'revoked',
+    );
     // MUST NOT 出现在当前选中的数字人目录下
     expect(fs.existsSync(path.join(userDataDir(root, userId, 'BOM数字人'), '柯昆BOM数字人'))).toBe(
       false,
@@ -372,7 +374,9 @@ describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与�
       failed: [],
     });
     // 撤销目录未被搬动，也没被当成"目标冲突"参与判定
-    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe('revoked');
+    expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe(
+      'revoked',
+    );
     expect(fs.existsSync(path.join(userDataDir(root, userId, 'BOM数字人'), '柯昆BOM数字人'))).toBe(
       false,
     );

@@ -31,7 +31,11 @@ import {
 } from '../domain/dirs.js';
 import { checkUploadBuffer, supportsFieldCheck } from '../domain/field-check.js';
 import { removeFileSafe } from '../domain/fs-safe.js';
-import { UploadNameConflictError, UploadNameTooLongError, claimName } from '../domain/upload-name.js';
+import {
+  UploadNameConflictError,
+  UploadNameTooLongError,
+  claimName,
+} from '../domain/upload-name.js';
 import { ApiError } from '../server.js';
 import { checkDir, currentAgentFor } from './files-scope.js';
 
@@ -180,11 +184,7 @@ export function registerFileUploadRoute(app: FastifyInstance, ctx: AppContext): 
           throw new ApiError(409, 'FILE_NAME_CONFLICT', err.message);
         }
         if (err instanceof UploadNameTooLongError) {
-          throw new ApiError(
-            400,
-            'VALIDATION_FAILED',
-            '文件名过长，无法落盘，请缩短文件名后重试',
-          );
+          throw new ApiError(400, 'VALIDATION_FAILED', '文件名过长，无法落盘，请缩短文件名后重试');
         }
         throw err;
       }

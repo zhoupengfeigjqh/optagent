@@ -58,12 +58,7 @@ async function setup(): Promise<void> {
   fx = await createFixture({ env: { ONTO_MARKET_DIR: marketDir } });
 }
 
-function writeMarket(
-  ontologyDir: string,
-  content: string,
-  scenario = SCENARIO,
-  withSecurities = true,
-): void {
+function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO, withSecurities = true): void {
   const dir = path.join(marketDir!, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), content);

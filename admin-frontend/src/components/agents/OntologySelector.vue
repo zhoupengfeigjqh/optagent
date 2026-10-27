@@ -11,11 +11,7 @@
  */
 import { computed } from 'vue'
 import type { OntologyCandidate } from '../../api/ontologies'
-import {
-  ontologyDisplayName,
-  ontologyNameOf,
-  ontologyScenarioOf,
-} from '../../utils/ontology-name'
+import { ontologyDisplayName, ontologyNameOf, ontologyScenarioOf } from '../../utils/ontology-name'
 import CheckboxList from '../common/CheckboxList.vue'
 import type { CheckboxOption } from '../common/checkbox-option'
 

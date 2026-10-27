@@ -162,6 +162,8 @@ export function useChatPanel() {
       attachments: FileReference[]
       /** 本轮隐藏指引（004）；由问题实例与下一步动作卡片携带，用户气泡里看不到 */
       guidance?: string
+      /** 013：预置动作入口携带——本轮跳过意图聚焦（服务端可校验） */
+      skipIntentFocus?: boolean
     },
     options: { settleBeforeReturn?: boolean } = {},
   ): Promise<boolean> {
@@ -211,6 +213,7 @@ export function useChatPanel() {
       content,
       attachments: payload.attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
+      ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
     })
     if (options.settleBeforeReturn === false) {
       // 007：卡片确认——本地校验已过、请求已发出即视为成功，**不等待本轮结束**，

@@ -29,12 +29,13 @@ import type {
 import type { HistoryStore } from './history.js';
 import type { InteractionSink, InteractionSnapshot } from './interaction-gate.js';
 import { validateInteractionArgs } from './interaction-schema.js';
-import { formatCurrentTime, genMessageId, toSeconds } from './message-format.js';
+import { genMessageId } from './message-format.js';
 import type { NextActionsStore } from './next-actions.js';
-import { buildPromptMessages } from './prompt-builder.js';
 import type { ResolveInteractionResult, RunState, SsePayload } from './run-events.js';
-import { type FinalizeTurn, RunFinalizer } from './run-finalize.js';
+import { RunFinalizer } from './run-finalize.js';
 import { RunImpl, type Run } from './run-impl.js';
+import { consumeTurn } from './run-consume.js';
+import type { IntentFocusPort } from './intent-focus-runner.js';
 import type { ToolEventStore } from './tool-events.js';
 
 // 类型迁移到 run-events / run-impl 后仍从本模块转出：既有引用路径（routes、测试）不变
@@ -65,6 +66,16 @@ export interface AgentRunRequest {
    * （工具目录取本轮真实装配清单）；缺省 = 不追加（模型不感知该协议）。
    */
   nextActionsMax?: number;
+  /**
+   * 013：意图聚焦判定口。
+   *
+   * 存在 = 该数字人开关开启且判定模型已配置；由 `agent-factory` 在**工具装配之后、
+   * 模型调用之前**回调，返回的非空提示追加到本轮 `systemExtra` 末尾。
+   *
+   * 为什么在装配期回调：候选工具清单（`runtime.availableTools`）只有装配方才拿得到，
+   * 它是"本轮模型真实可用工具"的唯一权威来源；域层另算一份必然与真实工具漂移。
+   */
+  focusJudge?: (tools: ReadonlyArray<{ name: string; description: string }>) => Promise<string>;
 }
 
 /** run-manager 视角的 Agent 实例（PoolStore 的 PooledInstance 超集，由 infra 装配） */
@@ -106,6 +117,13 @@ export interface StartRunOptions {
    * 只进本轮 System Prompt 追加段，**不落盘、不进历史**——用户消息气泡因此保持干净。
    */
   guidance?: string;
+  /**
+   * 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+   *
+   * 由请求体 `skip_intent_focus` 透传；服务端可校验，不依赖前端"少发一次请求"。
+   * 只影响本轮判定，不落历史、不改变 SSE 序列。
+   */
+  skipIntentFocus?: boolean;
 }
 
 export interface RunManagerDeps {
@@ -147,6 +165,12 @@ export interface RunManagerDeps {
    * 缺省 = 失败日志少记这两列（收尾与落盘不受影响）。
    */
   llmInfo?: () => { provider: string; model: string };
+  /**
+   * 013：意图聚焦判定口（可选）。
+   * 缺省 = 未装配（等同功能不可用）；是否存在由装配处按配置决定，
+   * 每轮是否真正判定还要看该数字人 SOUL 开关（开关判定在 runner 内部完成）。
+   */
+  intentFocus?: IntentFocusPort;
 }
 
 export class RunManager {
@@ -322,217 +346,17 @@ export class RunManager {
     return run;
   }
 
-  /** 读素材并交给纯函数拼装本轮 prompt（拼装规则与理由见 `prompt-builder.ts`） */
-  private async buildPrompt(
-    opts: StartRunOptions,
-    userMessage: HistoryMessage,
-  ): Promise<{ messages: HistoryMessage[]; systemExtra?: string }> {
-    const { userId, threadId } = opts;
-    // 009：本轮数据的归属数字人＝执行本轮的实例（会话归属不可变更，故恒等于会话归属）
-    const { agentName } = opts.agent.key;
-    return buildPromptMessages({
-      threadId,
-      summaryData: this.deps.summary?.read(userId, agentName, threadId) ?? {
-        summary: '',
-        coveredCount: 0,
-      },
-      allMessages: this.deps.history.readAll(userId, agentName, threadId),
-      userMessage,
-      records: this.deps.toolEvents?.readAll(userId, agentName, threadId) ?? [],
-      producedText: (await this.deps.produced?.(userId, agentName, threadId)) ?? '',
-      // R18：当前时间（每轮现算；纯函数层不读时钟，故在此注入）
-      nowText: formatCurrentTime(new Date()),
-      // 004：问题实例的隐藏工具引导（请求级，不落盘）
-      ...(opts.guidance ? { guidance: opts.guidance } : {}),
-    });
-  }
-
+  /** 单轮执行（013 拆到 `run-consume.ts`；本文件只留编排） */
   private async consume(run: RunImpl, opts: StartRunOptions): Promise<void> {
-    const { userId, threadId, agent, thinking } = opts;
-    const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
-    if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
-    const { messages, systemExtra } = await this.buildPrompt(opts, userMessage);
-    /**
-     * 007：本轮运行期事实（工具清单由 `agent-factory` 在装配工具后**回填**）。
-     *
-     * 为什么用一个可变对象传下去：装配发生在 `agent.run` 内部（跑起来之后），
-     * 而收尾在流结束时——两者之间的传递只有这一个引用。**必须整体传对象**，
-     * 装配方是"整体替换数组"（`runtime.availableTools = [...]`），提前解构出数组会读到空。
-     */
-    const runtime: RunRuntime = { availableTools: [] };
-    // 007 修订：SOUL 开关判定（逐次现读）——开关开启时条数上限同时驱动
-    // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
-    const naConfig = this.deps.nextActionsConfig?.(userId, agent.key.agentName) ?? null;
-    // 供收尾（run-finalize）装配素材：运行期事实 + 卡片条数上限
-    const turn: FinalizeTurn = {
-      userId,
-      threadId,
-      runtime,
-      ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
-    };
-    /**
-     * 本轮结局：供收尾日志使用（任务 2026-09-16）。
-     *
-     * 为什么要有这一条：关闭逐请求访问日志后，agent 侧只剩"崩溃"能查到，
-     * **正常/失败的一轮在日志里没有任何痕迹**——"回答很慢""这轮失败了"
-     * 只能靠复现。`run.end` 每轮一行（含 ok / duration_ms / error_code），
-     * 既是排障入口，也是"业务是否正常"的最直接信号。
-     */
-    let outcome: { ok: boolean; error_code?: string } = { ok: false, error_code: 'INTERNAL_ERROR' };
-    try {
-      for await (const ev of agent.run({
-        threadId,
-        messages,
-        ...(systemExtra ? { systemExtra } : {}),
-        thinking,
-        ...(opts.model ? { model: opts.model } : {}),
-        signal: run.controller.signal,
-        interactionSink: run.gate,
-        runtime,
-        ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
-      })) {
-        switch (ev.type) {
-          case 'thinking_delta':
-            run.emit({ type: 'thinking', data: { delta: ev.delta } });
-            break;
-          case 'content_delta': {
-            // 007 修订（Tail Protocol）：增量先过尾部块捕获状态机——
-            // 命中 `<next_actions>` 后的内容只进缓冲不下发，正文部分照常累积与广播
-            const visible = run.tailCapture.push(ev.delta);
-            if (visible !== '') {
-              run.buffer += visible;
-              run.emit({ type: 'content', data: { delta: visible } });
-            }
-            break;
-          }
-          case 'tool_call_start': {
-            const startedAtMs = this.now();
-            const startedAt = new Date(startedAtMs).toISOString();
-            run.toolCalls.set(ev.callId, { name: ev.name, startedAt, startedAtMs });
-            // 007：另记一份"本轮调用过哪些工具"（去重）——`toolCalls` 在 end 即删、轮末为空，
-            // 轮末生成「下一步动作提示」需要它（见 types.RunRuntime 与 next-actions.ts）
-            run.calledTools.add(ev.name);
-            // 007 修订：另记一份"本轮调用过哪些工具"（去重）——`toolCalls` 在 end 即删、轮末为空，
-            // 快照溯源与日志需要它（见 types.RunRuntime 与 next-actions.ts）
-            // 落 tool-events.jsonl（写盘失败只告警，不影响对话，见 appendStart 内部兜底）
-            this.deps.toolEvents?.appendStart(userId, agent.key.agentName, threadId, {
-              callId: ev.callId,
-              messageId: run.assistantMessageId,
-              name: ev.name,
-              startedAt,
-              ...(ev.argsDigest ? { argsDigest: ev.argsDigest } : {}),
-            });
-            run.emit({
-              type: 'tool_call',
-              data: { call_id: ev.callId, name: ev.name, status: 'running' },
-            });
-            break;
-          }
-          case 'tool_call_end': {
-            const meta = run.toolCalls.get(ev.callId);
-            run.toolCalls.delete(ev.callId);
-            const endedAtMs = this.now();
-            // fire-and-forget：落盘不阻塞 SSE，失败也不影响本轮回答（原则九）
-            void this.deps.toolEvents?.appendEnd(userId, agent.key.agentName, threadId, {
-              callId: ev.callId,
-              messageId: run.assistantMessageId,
-              name: meta?.name ?? ev.name,
-              startedAt: meta?.startedAt ?? new Date(endedAtMs).toISOString(),
-              status: ev.status,
-              durationMs: meta ? Math.max(0, endedAtMs - meta.startedAtMs) : 0,
-              resultText: ev.resultText ?? '',
-            });
-            run.emit({ type: 'tool_call_end', data: { call_id: ev.callId, status: ev.status } });
-            break;
-          }
-          case 'done': {
-            // 007 修订（Tail Protocol）：流已终结，冲刷暂扣的"疑似开标签前缀"——
-            // 确认为普通正文，先于 done 事件补发（保持"用户所见 = 落盘正文"逐字一致）
-            const held = run.tailCapture.flush();
-            if (held !== '') {
-              run.buffer += held;
-              run.emit({ type: 'content', data: { delta: held } });
-            }
-            // 归档尾部块原文，供 run-finalize 定稿卡片（损坏丢弃时为空串 = 本轮无卡片）
-            run.nextActionsTail = run.tailCapture.captured;
-            if (run.tailCapture.overflowed) {
-              this.deps.logger?.warn(
-                {
-                  event: 'next-actions.tail.overflow',
-                  thread_id: threadId,
-                  agent_name: agent.key.agentName,
-                },
-                '下一步动作提示尾部块超过大小上限，本轮按无卡片处理',
-              );
-            }
-            await this.finalizer.done(run, turn, userMessage, ev.usage);
-            outcome = { ok: true };
-            return;
-          }
-          case 'error':
-            if (ev.code === 'ABORTED') {
-              this.finalizer.aborted(run, turn, ev.usage);
-              outcome = { ok: false, error_code: 'ABORTED' };
-              return;
-            }
-            await this.finalizer.error(run, turn, userMessage, ev);
-            outcome = { ok: false, error_code: ev.code };
-            return;
-        }
-      }
-      // 流无终结事件而结束 → 视为错误
-      run.state = 'error';
-      outcome = { ok: false, error_code: 'LLM_ERROR' };
-      run.emit({
-        type: 'error',
-        data: {
-          error: { code: 'LLM_ERROR', message: 'LLM 流异常结束' },
-          duration_seconds: toSeconds(this.now() - run.startedAt),
-          agent_name: run.agentName,
-        },
-      });
-    } catch (err) {
-      // 未知异常：疑似实例崩溃 → 销毁实例（FR-030），下条消息自动重建
-      run.state = 'error';
-      outcome = { ok: false, error_code: 'INTERNAL_ERROR' };
-      this.deps.logger?.error(
-        {
-          err,
-          alert: true,
-          event: 'agent.crashed',
-          user_id: userId,
-          thread_id: threadId,
-          agent_name: agent.key.agentName,
-        },
-        'Agent 实例崩溃，已销毁',
-      );
-      this.deps.onCrash?.(agent.key, err);
-      run.emit({
-        type: 'error',
-        data: {
-          error: { code: 'INTERNAL_ERROR', message: '内部错误，请重试' },
-          duration_seconds: toSeconds(this.now() - run.startedAt),
-          agent_name: run.agentName,
-        },
-      });
-    } finally {
-      this.active.delete(threadId);
-      // HITL：run 结束清理全部挂起状态（含 expired 留档与排队等待者）
-      run.gate.dispose();
-      const durationMs = this.now() - run.startedAt;
-      this.deps.logger?.[outcome.ok ? 'info' : 'warn'](
-        {
-          event: 'run.end',
-          scope: 'run',
-          ok: outcome.ok,
-          duration_ms: durationMs,
-          ...(outcome.error_code ? { error_code: outcome.error_code } : {}),
-          user_id: userId,
-          thread_id: threadId,
-          agent_name: run.agentName,
-        },
-        `对话轮次结束：${outcome.ok ? '成功' : `失败（${outcome.error_code ?? '未知'}）`}，耗时 ${durationMs}ms`,
-      );
-    }
+    return consumeTurn(
+      {
+        deps: this.deps,
+        now: this.now,
+        finalizer: this.finalizer,
+        onSettled: (threadId) => this.active.delete(threadId),
+      },
+      run,
+      opts,
+    );
   }
 }

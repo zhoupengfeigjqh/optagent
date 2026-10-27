@@ -342,6 +342,72 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
   });
 });
 
+describe('intent_focus —— 意图聚焦开关（013）', () => {
+  it('缺省口径：键缺失 → false（存量文档 / 老表单照常保存）', () => {
+    expect(normalizeSoulDesign(validRaw(), OPTIONS).intent_focus).toBe(false);
+    expect(emptySoulDesign().intent_focus).toBe(false);
+    expect(fromLegacySoul('你是助手').intent_focus).toBe(false);
+    expect(renderSoulMd(fromLegacySoul('你是助手'))).not.toContain('intent_focus');
+  });
+
+  it('true / false 原样通过（拒绝式，不做隐式转换）', () => {
+    expect(normalizeSoulDesign({ ...validRaw(), intent_focus: true }, OPTIONS).intent_focus).toBe(true);
+    expect(normalizeSoulDesign({ ...validRaw(), intent_focus: false }, OPTIONS).intent_focus).toBe(false);
+  });
+
+  it('非布尔（字符串 / 数字 / null / 对象）→ VALIDATION_FAILED', () => {
+    for (const value of ['true', 'false', 1, 0, null, {}]) {
+      expectCode(
+        () => normalizeSoulDesign({ ...validRaw(), intent_focus: value }, OPTIONS),
+        ERROR_CODES.VALIDATION_FAILED,
+      );
+    }
+  });
+
+  it('渲染：仅 `true` 时写 frontmatter 键；`false` / 缺省不写键（部署零残留）', () => {
+    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: true }, OPTIONS));
+    expect(on).toContain('intent_focus: true');
+
+    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: false }, OPTIONS));
+    expect(off).not.toContain('intent_focus');
+
+    const missing = renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS));
+    expect(missing).not.toContain('intent_focus');
+    expect(off).toBe(missing);
+  });
+
+  it('开 / 关两态只有 frontmatter 多一行，正文逐字一致（System Prompt 恒等，FR-034）', () => {
+    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: true }, OPTIONS));
+    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: false }, OPTIONS));
+
+    const body = (md: string) => md.slice(md.indexOf('---', 3) + 3);
+    expect(body(on)).toBe(body(off));
+    expect(on.split('\n').length - off.split('\n').length).toBe(1);
+  });
+
+  it('与 007 开关互相独立：4 种组合各写各的键（FR-035）', () => {
+    const render = (hints: boolean, focus: boolean) =>
+      renderSoulMd(
+        normalizeSoulDesign({ ...validRaw(), next_action_hints: hints, intent_focus: focus }, OPTIONS),
+      );
+
+    expect(render(true, true)).toContain('intent_focus: true');
+    expect(render(true, true)).toContain('next_action_hints: true');
+    expect(render(true, false)).not.toContain('intent_focus');
+    expect(render(true, false)).toContain('next_action_hints: true');
+    expect(render(false, true)).toContain('intent_focus: true');
+    expect(render(false, true)).not.toContain('next_action_hints');
+    expect(render(false, false)).not.toContain('intent_focus');
+    expect(render(false, false)).not.toContain('next_action_hints');
+  });
+
+  it('isSoulDesign：新键在 / 不在都不影响"已结构化"判定', () => {
+    expect(isSoulDesign({ mission: '你是助手', intent_focus: true })).toBe(true);
+    expect(isSoulDesign({ mission: '你是助手', intent_focus: false })).toBe(true);
+    expect(isSoulDesign({ mission: '你是助手' })).toBe(true);
+  });
+});
+
 describe('renderSoulMd', () => {
   it('frontmatter 只装展示数据，正文只装提示词', () => {
     const soul = normalizeSoulDesign(validRaw(), OPTIONS);

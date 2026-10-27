@@ -99,3 +99,7 @@ test-results/
 
 # ===== 编辑器 =====
 .idea/
+
+# 013：本地自建的 Laya 服务（上游源码 + 权重，均不入库）
+laya-service/upstream/
+laya-service/models/

@@ -96,7 +96,9 @@ describe('candidateName：原名 / 原名(n).ext', () => {
     const long = `${'长'.repeat(MAX_BASE_CHARS + 50)}.csv`;
     const name = candidateName(long, 1);
     expect(Array.from(name).indexOf('(')).toBeGreaterThanOrEqual(0);
-    expect(Array.from(name).length).toBeLessThanOrEqual(MAX_BASE_CHARS + '(9999)'.length + '.csv'.length);
+    expect(Array.from(name).length).toBeLessThanOrEqual(
+      MAX_BASE_CHARS + '(9999)'.length + '.csv'.length,
+    );
     expect(name.endsWith('(1).csv')).toBe(true);
   });
 });

@@ -30,11 +30,7 @@ import { scenarioFields, scenarioUploads, type AgentScenario } from '../config-c
 import { renderSoulMd } from '../config-center/soul-design.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
-import {
-  ONTOLOGY_FILE,
-  SECURITIES_FILE,
-  type OntologyStore,
-} from '../ontology/store.js';
+import { ONTOLOGY_FILE, SECURITIES_FILE, type OntologyStore } from '../ontology/store.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
 
 export interface MaterializeContext {

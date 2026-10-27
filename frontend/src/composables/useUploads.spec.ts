@@ -135,11 +135,7 @@ describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => 
 
     const inFlight = store.upload('临时空间', [file('slow.csv')], ['.csv'])
     await store.upload('临时空间', [file('ok.csv'), file('bad.csv')], ['.csv'])
-    expect(store.items.value.map((item) => item.status)).toEqual([
-      'uploading',
-      'success',
-      'failed',
-    ])
+    expect(store.items.value.map((item) => item.status)).toEqual(['uploading', 'success', 'failed'])
 
     store.clear()
 
@@ -155,9 +151,7 @@ describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => 
   })
 
   it('清空后再上传 ⇒ 从空列表开始，localId 与上一轮不同（FR-012）', async () => {
-    const upload = vi
-      .fn()
-      .mockResolvedValue({ dir: '临时空间', filename: 'a.csv', size: 1 })
+    const upload = vi.fn().mockResolvedValue({ dir: '临时空间', filename: 'a.csv', size: 1 })
     const { store } = makeStore(upload)
 
     await store.upload('临时空间', [file('a.csv')], ['.csv'])

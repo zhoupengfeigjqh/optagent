@@ -127,3 +127,29 @@ describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
     expect('guidance' in buildSendMessageBody({ ...base, guidance: '' })).toBe(false)
   })
 })
+
+describe('buildSendMessageBody —— 意图聚焦跳过标记（013）', () => {
+  const base = {
+    content: '按交付日期梳理这批订单的风险',
+    thinking: false,
+    model: null,
+    attachments: [],
+  }
+
+  it('预置动作入口：仅在 true 时写 skip_intent_focus', () => {
+    const body = buildSendMessageBody({ ...base, skipIntentFocus: true }) as unknown as Record<
+      string,
+      unknown
+    >
+    expect(body.skip_intent_focus).toBe(true)
+    // 正文保持干净：标记绝不拼进 content，也不落历史
+    expect(body.content).toBe('按交付日期梳理这批订单的风险')
+  })
+
+  it('缺省 / false 时不写该键', () => {
+    expect('skip_intent_focus' in buildSendMessageBody(base)).toBe(false)
+    expect('skip_intent_focus' in buildSendMessageBody({ ...base, skipIntentFocus: false })).toBe(
+      false,
+    )
+  })
+})

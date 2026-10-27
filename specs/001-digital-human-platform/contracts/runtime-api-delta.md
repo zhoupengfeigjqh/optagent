@@ -33,6 +33,7 @@
 | R19 | 新增内置工具 **`grep_skill`**：补齐 SKILL 内容的**检索**通道（`read_skill` 只解决"读得到"），内置工具目录由 6 项增至 7 项（2026-10-17） | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
 | R20 | **LLM 调用的有界重试与失败可诊断**（特性 `002-conversation-runtime` 增量，2026-10-15）：重试复用 `pi-ai`；`error` 对象新增三个可选诊断字段；新增流级错误码 | 新增可选字段 + 错误码 | 否（SSE 事件集合不变，旧前端忽略未知字段） |
 | R21 | **MCP 预热与发送前就绪门**（2026-10-18）：新增 `POST /api/agents/current/mcp/warm`（幂等预热，返回与 `GET .../mcp` 同形快照）；建连新增有界超时 `MCP_CONNECT_TIMEOUT_MS`（10s）；发消息前有界等待建连落定 | 新增端点 + 新环境变量 + 时序变更 | 否（`GET .../mcp` 仍纯只读；稳态首字延迟零变化；超时降级继续） |
+| R22 | **意图聚焦**（特性 `013-intent-focus`，2026-10-25）：SOUL.md frontmatter 新增 `intent_focus` 开关；`POST /api/threads/{id}/messages` 请求体新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`（只写、无运行期读取方）；主模型调用前新增一次有界判定（独立 Laya 服务，直连 HTTP） | 新增配置字段 + 请求字段 + 侧车文件 + 时序变更 | 否（开关缺省**关闭**；SSE 事件集合、会话详情、`next-actions` 端点、数字人详情、工具清单**零变更**） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1404,3 +1405,93 @@ POST /api/agents/current/mcp/warm
 
 - **兼容**：不新增/不修改任何既有响应字段与 SSE 事件；不落盘、不改历史行；`api/types.ts` 零新增类型（复用 `CurrentMcpResponse`）；
 - **回滚**：前端不再调用 `warm` 即回到"发消息才激活"（端点保留无副作用）；把 `MCP_CONNECT_TIMEOUT_MS` 调大可放宽建连等待（但不得低于 1000ms），发消息前的等待同理。
+
+---
+
+## §21 R22 — 意图聚焦（2026-10-25，特性 `013-intent-focus`）
+
+**规格**：[`specs/013-intent-focus/spec.md`](../../013-intent-focus/spec.md) | **契约**：[`contracts/intent-focus-api.md`](../../013-intent-focus/contracts/intent-focus-api.md)
+
+**背景**：工具变多后，主模型常把"本轮该用哪个工具"和"怎么回答"混在一次推理里，导致该用的工具没被选中。本特性在主模型调用**之前**用一个独立的轻量决策模型（Laya，System One 线协议）做一次意图判定，把高置信工具作为**本轮补充素材**追加，不改人格提示词、不改工具权限、不落历史。
+
+### 21.1 SOUL.md frontmatter 新增键
+
+```markdown
+---
+soul_version: 1
+intent_focus: true      # 仅开启时写入；关闭态整键不出现
+---
+```
+
+| 项 | 口径 |
+|---|---|
+| 写入条件 | 平台勾选「意图聚焦」（`soul.intent_focus === true`） |
+| 读取 | 运行环境**逐轮现读**、异常 / 非布尔一律按关闭（fail-closed） |
+| 与 007 开关 | **互相独立**：四种组合各自生效，互不写对方的键 |
+| 正文 | 逐字不变（该键不进 System Prompt，`FR-034`） |
+
+### 21.2 `POST /api/threads/{id}/messages` 请求体新增字段
+
+```jsonc
+{ "content": "…", "skip_intent_focus": true }
+```
+
+| 输入 | 行为 |
+|---|---|
+| 缺省 / `false` | 按 SOUL 开关决定是否判定 |
+| `true` | **本轮跳过**（不调用判定模型），仅留档 `disposition=skipped` |
+| 非布尔 / 拼错的字段名（`skipIntentFocus`） | **400 `VALIDATION_FAILED`** |
+
+> **严格校验的落点**：Fastify 默认 ajv 是 `coerceTypes: true` + `removeAdditional: true`
+> （`"true"` 会被悄悄转成 `true`、未知字段被静默丢弃）。本路由因此在 `preValidation`
+> 里再做一次严格校验——跳过标记必须是**可校验**的，静默错配只会表现为
+> "该跳过的没跳过"，无任何报错可循。作用域仅限本路由，不全局改 ajv 选项。
+
+### 21.3 线程目录新增侧车文件
+
+路径：`users/{uid}/user-data/{agentName}/threads/{threadId}/intent-focus.jsonl`
+
+| 项 | 口径 |
+|---|---|
+| 写入 | 每轮判定后追加 1 行；per-thread 串行；失败只告警（不影响对话） |
+| 读取 | **运行期无读取方**（仅离线分析与测试） |
+| 上限 | > 256KB 或 > 200 行 → 临时文件 + 原子改名，保留最近 100 条 |
+| 不进历史 | `history.jsonl` / 摘要 / 后续轮次素材中 MUST NOT 出现聚焦提示原文 |
+| 处置枚举 | `focused` / `empty` / `skipped` / `degraded` / `unconfigured`（开关关闭的轮次**不留档**） |
+
+### 21.4 判定模型接入（配置 + 环境变量）
+
+```yaml
+intent_focus:
+  base_url: http://laya:8000    # 只到主机端口，MUST NOT 带路径
+  model: laya-multilingual
+  api_key: $DECIS_API_KEY       # 不回落到 DEEPSEEK_API_KEY
+  timeout_ms: 3000              # 300~5000 的整数
+  threshold: 0.5                # 0~1
+  max_actions: 3                # 1~3 的整数
+```
+
+| 情形 | 结果 |
+|---|---|
+| 整块缺失 | 启动成功，功能不可用（`unconfigured`） |
+| `base_url` / `api_key` 缺失或格式非法 | **启动失败**，报错指名 YAML 路径与当前值 |
+| `timeout_ms` / `threshold` / `max_actions` 越界 | **启动失败**（即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
+| 块内出现未知键（`timeout` 之类拼错） | **启动失败**（`strict`，不静默跑缺省） |
+| `INTENT_FOCUS_THRESHOLD ∈ [0,1]` | 覆盖配置块的 `threshold`（环境变量优先） |
+| `INTENT_FOCUS_THRESHOLD` **为空串** | 视为未设置（**不会**隐式变成 `0`——阈值 0 会让所有工具入选且毫无报错） |
+| `INTENT_FOCUS_THRESHOLD` 越界 / 非数字 | **启动失败** |
+
+### 21.5 降级与零变更
+
+- 判定超时 / HTTP 非 200 / 响应形状非法 / 未配置 → 本轮**不追加**聚焦提示，回答照常，状态码与 SSE 事件序列不变（`FR-009` / `FR-052`）；
+- **零变更**：SSE 事件集合、`GET /api/threads/{id}`、`GET /api/threads/{id}/next-actions`、数字人详情、工具清单（内置 + MCP）；
+- **回滚**：平台取消勾选 → 部署后产物无该键、运行环境零调用；或整块删除 `intent_focus` 配置（功能不可用，启动照常）。
+
+### 21.6 不变式（MUST 由测试守住）
+
+1. 判定 MUST 先于主模型调用，且**从不重试**；
+2. 预置动作入口（下一步动作卡片 / 首屏问题实例卡片）的轮次判定调用次数为 **0**，仅留档 `skipped`；
+3. 开关关闭的轮次：零调用、零留档；
+4. 聚焦提示 MUST NOT 出现在 `history.jsonl`、消息气泡与后续轮次素材中；
+5. 记录文件 MUST NOT 有运行期读取方；写入失败不影响本轮回答；
+6. 与 007 开关的四组合各自生效。

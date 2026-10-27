@@ -431,6 +431,37 @@ describe('AgentDesignService', () => {
     expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax);
   });
 
+  it('读取归一化（013）：结构化 SOUL 缺 intent_focus → 补齐 false；手改坏的值按关处理', () => {
+    const writeFocus = (value: unknown): void => {
+      const soul: Record<string, unknown> = { ...soulDesign('你是助手') };
+      if (value === undefined) delete soul.intent_focus;
+      else soul.intent_focus = value;
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul,
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-10-25T00:00:00.000Z',
+      });
+    };
+
+    // 键缺失（本字段引入前的存档）→ 补齐 false，对外契约恒有该键
+    writeFocus(undefined);
+    expect(service.read('stale').soul.intent_focus).toBe(false);
+
+    // 手改坏成非布尔 → 一律按关处理（fail-closed，与运行侧 parseSoulMeta 同口径）
+    for (const broken of ['true', 1, null, {}]) {
+      writeFocus(broken);
+      expect(service.read('stale').soul.intent_focus).toBe(false);
+    }
+
+    // 合法值原样保留
+    writeFocus(true);
+    expect(service.read('stale').soul.intent_focus).toBe(true);
+  });
+
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision());
     service.remove('demo');
