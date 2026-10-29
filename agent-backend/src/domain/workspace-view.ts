@@ -15,6 +15,7 @@ import {
   SPACE_PREP,
   SPACE_SHARED,
   SPACE_TMP,
+  isPredefinedDataPrepDir,
   uploadExtensionsOf,
   type Scenario,
   type ScenarioField,
@@ -36,6 +37,13 @@ export interface WorkspaceDirItem {
   fields: ScenarioField[];
   /** 该目录允许上传的扩展名（目录级；与上传路由共用 `uploadExtensionsOf`） */
   upload_extensions: string[];
+  /**
+   * 是否为平台预定义二级目录（2026-10-29，014）：仅「数据准备/算法规则」为 `true`，
+   * 其余二级目录与扁平空间（共享/临时）恒为 `false`。
+   *
+   * 由运行端派生而非前端硬编码：前端据它区分"参与空数据判定的目录"（宪章原则七）。
+   */
+  predefined: boolean;
 }
 
 export interface WorkspaceSpaceItem {
@@ -79,6 +87,8 @@ export async function buildWorkspaceView(
         fields: scenario.dataPrepFields[sub ?? ''] ?? [],
         // 与上传校验**共用** uploadExtensionsOf ⇒ "界面允许的"与"服务端放行的"单一口径
         upload_extensions: [...uploadExtensionsOf(scenario, space, sub)],
+        // 预定义标记只对「数据准备」的二级目录有意义：扁平空间（sub 为 undefined）恒为 false
+        predefined: sub !== undefined && isPredefinedDataPrepDir(sub),
       });
     }
     spaces.push({

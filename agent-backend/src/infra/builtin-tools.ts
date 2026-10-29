@@ -2,10 +2,18 @@
  * 内置工具 → pi-agent-core AgentTool 适配（T037/T038 装配，T041 降级策略）。
  *
  * domain/tools 是纯业务函数（不依赖 pi）；这里包成 AgentTool 并把异常翻译成
- * 工具结果文本返回给模型——对话不中断（FR-022）：
- * - PermissionError → 自然语言"没有权限"，写操作记日志 file.write.denied（alert）
- * - CalculatorError 等业务错误 → 错误说明文本
- * - 未知异常 → 通用失败文本（并记 error 日志）
+ * 工具结果**返回给模型**（不抛——对话不中断，FR-022）。失败分支一律走
+ * `toolErrorResult` 打上 `details.toolError` 标记（2026-10-29）：
+ * - PermissionError → "没有权限"文案，写操作记日志 file.write.denied（alert）
+ * - SkillAccessError → 技能目录越权文案
+ * - CalculatorError → "表达式无法计算"
+ * - 未知内置工具（目录错配）→ "未知内置工具"
+ * - 其他异常 → 通用失败文本（并记 error 日志）
+ *
+ * 标记的实际作用只有一处：`infra/agent-loop.ts` 的 `afterToolCall` 把它翻成
+ * `isError: true`，让前端工具卡片标红。正文与模型读到的内容**逐字不变**
+ * （DeepSeek 的 OpenAI 兼容转换不读 `isError`，所以标红不影响模型行为）。
+ * 业务失败（如"目录为空"）不走标记——那是正常返回。
  *
  * **R1 改造后**：元数据不再内联于本文件，改为**消费**
  * `domain/builtin-tool-catalog.ts` 的单一来源目录；说明与入参模板在装配时
@@ -35,6 +43,7 @@ import { listToolDir } from '../domain/tools/list-dir.js';
 import { readToolFile } from '../domain/tools/read-file.js';
 import { readSkillFile, SkillAccessError } from '../domain/tools/read-skill.js';
 import { writeToolFile } from '../domain/tools/write-file.js';
+import { toolErrorResult } from '../domain/tool-error.js';
 
 export interface BuiltinToolsOptions {
   fileAccess: FileAccess;
@@ -61,12 +70,27 @@ function textResult(text: string): AgentToolResult<unknown> {
   return { content: [{ type: 'text', text }], details: {} };
 }
 
+/**
+ * 配置里的工具名在目录里找不到（TOOL.json 与服务端目录错配）。
+ *
+ * 不静默、不降级成"正常返回"：模型会以为自己拿到了一个能用的工具，
+ * 而用户看到的是一张绿色的卡片——真正的问题（配置错）被藏起来了。
+ */
+class UnknownBuiltinToolError extends Error {}
+
 function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
   return async (_toolCallId: string, rawParams: unknown): Promise<AgentToolResult<unknown>> => {
     const params = (rawParams ?? {}) as Record<string, unknown>;
     try {
       return textResult(await fn(params));
     } catch (err) {
+      if (err instanceof UnknownBuiltinToolError) {
+        opts.logger.error(
+          { alert: true, event: 'tool.not_implemented', thread_id: opts.threadId, tool: name },
+          `内置工具未实现（配置错配）：${name}`,
+        );
+        return toolErrorResult(`未知内置工具：${name}`, 'TOOL_NOT_IMPLEMENTED');
+      }
       if (err instanceof PermissionError) {
         // FR-022：越权不中断对话；写违规按契约记 file.write.denied
         const event = name === 'write_file' ? 'file.write.denied' : 'file.access.denied';
@@ -74,8 +98,11 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
           { alert: true, event, thread_id: opts.threadId, tool: name },
           `工具 ${name} 越权被拒绝：${err.message}`,
         );
-        return textResult(
+        // 标记失败（2026-10-29）：越权是用户该感知的"没做成"，卡片必须红；
+        // 引导语原样保留——DeepSeek 侧不读 isError，模型仍会按它自我纠正
+        return toolErrorResult(
           `没有权限执行该操作：${err.message}。请向用户说明该目录为只读，可改为写入临时空间 tmp/。`,
+          'FILE_ACCESS_DENIED',
         );
       }
       if (err instanceof SkillAccessError) {
@@ -85,16 +112,19 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
           { alert: true, event: 'file.access.denied', thread_id: opts.threadId, tool: name },
           `工具 ${name} 越权被拒绝：${err.message}`,
         );
-        return textResult(`技能文件访问被拒绝：${err.message}`);
+        return toolErrorResult(`技能文件访问被拒绝：${err.message}`, 'SKILL_ACCESS_DENIED');
       }
       if (err instanceof CalculatorError) {
-        return textResult(`表达式无法计算：${err.message}`);
+        return toolErrorResult(`表达式无法计算：${err.message}`, 'CALCULATION_FAILED');
       }
       opts.logger.error(
         { err, thread_id: opts.threadId, tool: name, event: 'tool.failed' },
         `工具 ${name} 执行失败`,
       );
-      return textResult(`工具执行失败：${err instanceof Error ? err.message : String(err)}`);
+      return toolErrorResult(
+        `工具执行失败：${err instanceof Error ? err.message : String(err)}`,
+        'TOOL_EXECUTION_FAILED',
+      );
     }
   };
 }
@@ -145,7 +175,10 @@ function domainExecute(
     case 'grep_skill':
       return (p) => grepSkillFiles(opts.skillsDir, p.pattern, p.skill);
     default:
-      return async () => `未知内置工具：${name}`;
+      // 目录里查不到的启用项：抛给 wrap 统一转成标记失败（不能伪装成正常返回）
+      return async () => {
+        throw new UnknownBuiltinToolError(name);
+      };
   }
 }
 

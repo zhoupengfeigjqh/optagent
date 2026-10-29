@@ -25,6 +25,7 @@ import {
   type RuntimeContext,
 } from '../../src/infra/mcp/mcp-tool-adapter.js';
 import type { FileArgMode } from '../../src/domain/file-arg-path.js';
+import { readToolError } from '../../src/domain/tool-error.js';
 import type { McpCallEvent } from '../../src/types.js';
 
 interface Call {
@@ -183,13 +184,17 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     expect(events[0]!.errorKind).toBeUndefined();
   });
 
-  it('失败：带 ok=false 与错误分类，且原错误仍上抛（埋点不吞异常）', async () => {
+  it('失败：带 ok=false 与错误分类，原错误文案进结果并标红（不抛，2026-10-29）', async () => {
     const events: McpCallEvent[] = [];
     const tool = build(events, async () => {
       throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
     });
 
-    await expect(exec(tool, { image: 'a.png' })).rejects.toThrow('ECONNREFUSED');
+    const result = await exec(tool, { image: 'a.png' });
+
+    // 不抛：pi 的 catch 会覆盖 result（文案/details 全丢），改由 afterToolCall 翻 isError
+    expect(result.content[0]?.text).toContain('ECONNREFUSED');
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_CALL_FAILED' });
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -236,6 +241,8 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     const result = await exec(tool!, { image: '不存在/a.png' });
 
     expect(result.content[0]?.text).toContain('文件参数校验失败');
+    // 标记失败（2026-10-29）：调用未发出也要让用户看见卡片标红
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_FILE_ARGS_DENIED' });
     expect(calls).toHaveLength(0);
     expect(events).toEqual([]);
   });
@@ -631,6 +638,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     expect(result.content[0]?.text).toContain('文件参数校验失败');
     expect(result.content[0]?.text).toContain('items 应为数组');
     expect(result.content[0]?.text).toContain('实际是 string');
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_FILE_ARGS_DENIED' });
   });
 
   it('形状不符（元素不是对象）→ 报错里带元素下标，长清单里能直接定位', async () => {

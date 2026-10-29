@@ -187,7 +187,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 |---|---|
 | `/api/files/*`（`upload`/`list`/`download`/`preview`/`DELETE`/`workspace`） | 目录合法性改为按**当前选中数字人**的场景清单判定；未选中数字人时 `409 AGENT_NOT_SELECTED` |
 | `POST /api/files/upload` | 数据准备目录带字段约束时，暂存后落盘前校验上传表（`400 FILE_SCHEMA_INVALID` + `details[]` 逐条问题，失败不落盘），详见 §3.1；单文件上限 **5MB**（413 `FILE_TOO_LARGE`，与平台 SKILL ZIP 导入同一全局约束） |
-| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定 |
+| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定；**`predefined`（2026-10-29，014 新增，必填布尔）**：`true` 仅表示平台预定义二级目录（当前仅「算法规则」），共享/临时空间与管理员自定义目录恒为 `false`——供前端区分"参与空数据引导判定的目录"，前端 MUST NOT 硬编码目录名（详见 `specs/014-chat-onboarding-hint/contracts/workspace-dir-predefined.md`） |
 | `POST /api/threads/:id/messages` 的 `attachments` 校验 | 同一引用在不同数字人下可能合法/非法，按**本轮数字人**判定 |
 | `SCENARIO_NOT_CONFIGURED`（503） | 错误码不变，message 改为指名数字人 |
 
@@ -488,6 +488,8 @@ location /admin/ {
 
 被平台声明为"需人工确认"的 MCP 工具，在**执行前挂起**：运行环境经 SSE 下发该工具的参数 Schema 与模型提议值，用户在前端**确认/修改/拒绝**后，工具以用户确认的入参执行；拒绝或超时按"工具返回结构化错误"收尾，模型自行组织话术，**对话轮次正常完结**（业界惯例：LangGraph `interrupt`/resume、Claude Desktop 批准交互）。弹窗 UI 由工具自带的 `inputSchema` **动态驱动**，与具体 MCP 服务零绑定——新增需确认工具 = 平台改配置 + 部署，零代码。
 
+**工具失败标记口径（2026-10-29，跨内置/MCP/HITL 三者统一）**：工具**正常返回**时（无论业务成功还是业务不如人意，如库存不足、无匹配）一律不标记，卡片为"已完成"；工具**catch 到异常**，以及 HITL 拒绝/超时/本轮中断，MUST 在结果 `details` 上打 `toolError: { code, message }` 标记，由运行时 `afterToolCall` 统一翻成 `isError: true` → SSE `tool_call_end.status='error'` → 卡片标红（历史记录同样落 `status='error'`，刷新后一致）。**MUST NOT 用 throw 表达失败**：SDK 捕获异常后会覆盖整个结果（`content` 只剩一行 message、`details` 清空），结构化信息与既定文案都会丢。标记**不影响模型**：DeepSeek 走 pi-ai 的 OpenAI 兼容转换，该转换不读 `isError`，模型见到的正文逐字不变。
+
 ### 9.2 配置面（平台权威源）
 
 MCP 服务调用配置新增 `confirmation` 字段（缺省 `never`，**存量行为零变化**）：
@@ -554,7 +556,7 @@ data: {
 
 1. `confirmation` 缺省/`never` 时行为与改造前**完全一致**（无事件、无挂起、无端点依赖）；
 2. 提交终验在**服务端**（JSON Schema 子集校验器 `domain/interaction-schema.ts`），前端校验只做体验；
-3. run 被 stop/中断时全部挂起点按拒绝收尾，**不泄漏悬挂 promise**；超时同拒绝语义；
+3. run 被 stop/中断时全部挂起点按拒绝收尾，**不泄漏悬挂 promise**；超时同拒绝语义；**2026-10-29 起三者归因可分辨**（`InteractionOutcome.reject.reason` = `user` / `aborted`），工具结果文案分别为「用户拒绝了本次调用」「本轮已中断，调用未执行」「等待超时，调用未执行」，MUST NOT 把中断写成用户拒绝（宪章原则九）；
 4. 并发上限 3：单 run 同时等待的挂起点超过 3 个时 FIFO 排队，落定一个放行一个；
 5. 交互全生命周期（挂起/提交/拒绝/超时/中断收尾）落结构化运行日志（`event: 'interaction'`），**不落敏感参数值**；
 6. 该机制**不绕过**文件安全层：确认后的 args 仍走既有 `file_args` 铸造与沙箱校验。

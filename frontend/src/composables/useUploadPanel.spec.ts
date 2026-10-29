@@ -38,6 +38,7 @@ function workspaceResponse(): WorkspaceResponse {
             files: [],
             fields: [],
             upload_extensions: ['.csv', '.xlsx'],
+            predefined: false,
           },
         ],
       },

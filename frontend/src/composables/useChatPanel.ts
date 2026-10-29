@@ -25,6 +25,7 @@ import { usePreview } from './usePreview'
 import { useSessionSearch } from './useSessionSearch'
 import { useThreads } from './useThreads'
 import { useThrottledText } from './useThrottledText'
+import { useSession } from './useAppSession'
 import { useToast } from './useToast'
 import { useUploadPanel } from './useUploadPanel'
 import { useUploads } from './useUploads'
@@ -39,6 +40,8 @@ export function useChatPanel() {
   const uploads = useUploads()
   const mention = useFileMention()
   const workspace = useWorkspace()
+  // 014：引导判定已在 `useAppSession.onSwitched` 内完成，这里只取用装配好的状态（不加逻辑）
+  const emptyHint = useSession().emptyHint
   const agents = useAgents()
   // 发送前的 MCP 就绪门（2026-10-18）：灰 → 有连接结果再提交，见该模块头注释
   const mcpReady = useMcpReadyGate()
@@ -437,6 +440,7 @@ export function useChatPanel() {
     uploads,
     mention,
     workspace,
+    emptyHint,
     agents,
     uploadOpen,
     agentPanelOpen,

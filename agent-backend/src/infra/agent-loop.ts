@@ -14,6 +14,7 @@ import {
 } from '@earendil-works/pi-agent-core';
 import type { LlmRetryOptions } from '../config.js';
 import { classifyLlmFailure } from '../domain/llm-error.js';
+import { markToolError } from '../domain/tool-error.js';
 import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
@@ -179,6 +180,17 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         msgs.filter(
           (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
         ) as never,
+      /**
+       * 工具失败的唯一翻牌点（2026-10-29）。
+       *
+       * 工具层不抛异常，只在 `details.toolError` 打标记；这里统一翻成 `isError: true`，
+       * 下游 `tool_execution_end.isError` → SSE `tool_call_end.status='error'` →
+       * 卡片红色 + `tool-events.jsonl` 记 error（刷新后历史卡片口径一致）。
+       *
+       * 不用工具自己 throw 的原因见 `domain/tool-error.ts` 头部：pi 的 catch 会覆盖
+       * 整个 result（content 只剩 message、details 置空），结构化信息全丢。
+       */
+      afterToolCall: async (ctx) => markToolError(ctx.result),
     },
     emit,
     opts.signal,

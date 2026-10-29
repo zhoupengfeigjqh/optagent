@@ -1,0 +1,18 @@
+{
+  "message_id": "m_mvt3lqvr_3k4g",
+  "agent_name": "BOM数字人",
+  "created_at": "2026-10-29T05:24:03.661Z",
+  "actions": [
+    {
+      "prompt": "确认后重新对架构图执行文字识别；若图与物料清单无关，可直接上传子物料清单压缩包和总物料清单表",
+      "tools": [
+        {
+          "kind": "mcp",
+          "service": "ocr",
+          "name": "ocr_image"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：ocr__ocr_image（识别图片中的文字。\n\n    image：传用户消息 [引用文件] 中的相对路径（如 临时空间/a.png）即可，\n    backend 会自动铸成下载直链…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

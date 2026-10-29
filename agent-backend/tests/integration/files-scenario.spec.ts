@@ -36,6 +36,8 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
   alpha: { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价'] },
   beta: { scenario: '精简', data_prep_dirs: ['产线电价'] },
   gamma: null,
+  // 014：含平台预定义目录的场景，用于断言 workspace 的 `predefined` 标记
+  theta: { scenario: '含预定义目录', data_prep_dirs: ['算法规则', '生产计划'] },
   delta: {
     scenario: '带约束',
     data_prep_dirs: ['生产计划'],
@@ -229,6 +231,29 @@ describe('文件空间视角＝当前选中数字人', () => {
     ]);
     const tmp = spaces.find((s) => s.name === '临时空间')!;
     expect(tmp.dirs[0]!.fields).toEqual([]);
+  });
+
+  it('workspace 下发 predefined：仅平台预定义二级目录为 true（014）', async () => {
+    await select('theta');
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    const spaces = (
+      res.json() as {
+        spaces: Array<{ name: string; dirs: Array<{ dir: string; predefined: boolean }> }>;
+      }
+    ).spaces;
+    const prep = spaces.find((s) => s.name === '数据准备')!;
+    expect(prep.dirs).toEqual([
+      expect.objectContaining({ dir: '数据准备/算法规则', predefined: true }),
+      expect.objectContaining({ dir: '数据准备/生产计划', predefined: false }),
+    ]);
+    // 扁平空间（空间自身即目录）恒为 false
+    for (const name of ['共享空间', '临时空间']) {
+      const space = spaces.find((s) => s.name === name)!;
+      expect(space.dirs[0]!.predefined).toBe(false);
+    }
   });
 });
 

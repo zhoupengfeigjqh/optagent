@@ -31,13 +31,13 @@ describe('InteractionGate：挂起与恢复', () => {
     expect(gate.snapshot()).toBeNull();
   });
 
-  it('reject：挂起点以 reject 收尾', async () => {
+  it('reject：挂起点以 reject 收尾，原因为用户主动拒绝', async () => {
     const gate = new InteractionGate();
     const req = gate.request(INPUT);
     const id = gate.snapshot()!.interaction_id;
 
     gate.settle(id, 'reject');
-    await expect(req).resolves.toEqual({ kind: 'reject' });
+    await expect(req).resolves.toEqual({ kind: 'reject', reason: 'user' });
   });
 
   it('settle 幂等：重复提交返回首次结果', async () => {
@@ -163,20 +163,20 @@ describe('InteractionGate：超时', () => {
 });
 
 describe('InteractionGate：drain / dispose / 并发上限', () => {
-  it('drain：全部挂起点按 reject 收尾（run 被 stop 场景）', async () => {
+  it('drain：全部挂起点按 reject 收尾，归因为中断而非用户拒绝（run 被 stop 场景）', async () => {
     const gate = new InteractionGate();
     const r1 = gate.request(INPUT);
     const r2 = gate.request({ ...INPUT, callId: 'call_2' });
 
     gate.drain();
-    await expect(r1).resolves.toEqual({ kind: 'reject' });
-    await expect(r2).resolves.toEqual({ kind: 'reject' });
+    await expect(r1).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
+    await expect(r2).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
   });
 
-  it('dispose 后 request 立即 reject，不新建挂起点', async () => {
+  it('dispose 后 request 立即 reject（归因为中断），不新建挂起点', async () => {
     const gate = new InteractionGate();
     gate.dispose();
-    await expect(gate.request(INPUT)).resolves.toEqual({ kind: 'reject' });
+    await expect(gate.request(INPUT)).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
     expect(gate.snapshot()).toBeNull();
   });
 

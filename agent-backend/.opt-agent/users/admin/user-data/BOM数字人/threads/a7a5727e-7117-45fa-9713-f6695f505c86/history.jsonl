@@ -1,0 +1,2 @@
+{"role":"user","content":"ocr解析一下","attachments":[{"dir":"临时空间","filename":"架构图.png"}],"id":"m_mvt3lxho_ze5t","ts":"2026-10-29T05:24:03.660Z","agent_name":"BOM数字人"}
+{"id":"m_mvt3lqvr_3k4g","role":"assistant","content":"我现在来用 OCR 解析这张架构图。你拒绝了本次 OCR 解析调用，因此我没有读取到「临时空间/架构图.png」中的任何内容，也不会推测或编造图中的文字。\n\n需要说明的是：图片解析不在我的核心职责范围内；我的专长是 **BOM 文件校验与总 BOM 生成**。如果这张架构图与 BOM 工作相关，你也可以直接把内容告诉我，或者提供 BOM 文件。\n\n","ts":"2026-10-29T05:24:03.660Z","status":"completed","usage":{"input_tokens":3688,"output_tokens":202},"duration_ms":8565,"agent_name":"BOM数字人"}

@@ -41,6 +41,7 @@ function makeSpaces(): WorkspaceSpace[] {
           ],
           // 目录级白名单（2026-10-13）：与本空间另一个目录不同 ⇒ 证明粒度是目录
           upload_extensions: ['.csv', '.xlsx', '.txt'],
+          predefined: false,
         },
         {
           dir: '数据准备/产线电价',
@@ -49,6 +50,7 @@ function makeSpaces(): WorkspaceSpace[] {
           files: [],
           fields: [],
           upload_extensions: ['.json'],
+          predefined: false,
         },
       ],
     },
@@ -64,6 +66,7 @@ function makeSpaces(): WorkspaceSpace[] {
           files: [],
           fields: [],
           upload_extensions: ['.csv', '.xlsx', '.txt', '.pdf'],
+          predefined: false,
         },
       ],
     },
@@ -79,6 +82,7 @@ function makeSpaces(): WorkspaceSpace[] {
           files: [],
           fields: [],
           upload_extensions: ['.csv', '.xlsx', '.txt'],
+          predefined: false,
         },
       ],
     },

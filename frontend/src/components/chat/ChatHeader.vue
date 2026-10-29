@@ -2,8 +2,13 @@
 /**
  * 聊天区头部（T067）
  *
- * 左侧：数字人切换按钮 + 数字人概要（名称 + MCP 状态，未选定 → 提示且 MCP 区域为空），
- *       切换入口与身份信息同列，呈现为「切换按钮 + 数字人名称」；
+ * 左侧纵向两段（2026-10-29，014）：
+ * 1. 身份行：「切换」按钮 + 数字人名称（未选定 → "请选择数字人"提示）；
+ * 2. 状态行：MCP 服务连接状态，作为身份容器的直接子项 ⇒ 左边缘与「切换」按钮对齐（FR-001）。
+ *
+ * 之所以拆两行而不是让状态留在名称下方：状态嵌在名称列里时起点被按钮宽度推右，
+ * 再怎么调间距都对不齐；拆行后左边缘＝容器起点＝按钮左边缘，且信息顺序不变（FR-002）。
+ *
  * 右侧：搜索 / 工作空间两个按钮位（工作空间抽屉由 US8 接入，此处先维护开关状态）。
  */
 import { computed } from 'vue'
@@ -11,6 +16,7 @@ import { computed } from 'vue'
 import type { DigitalHuman, McpServiceStatus } from '../../api/types'
 import BaseIcon from '../common/BaseIcon.vue'
 import AgentSummary from './AgentSummary.vue'
+import McpStatusList from './McpStatusList.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -49,21 +55,26 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
 
 <template>
   <header class="chat-header">
-    <!-- 最左：切换按钮 + 数字人名称（未选定时回落为"请选择数字人"提示），
-         切换入口紧贴身份信息，避免在右上角二次寻找 -->
+    <!-- 最左：两行结构。第一行是「切换 + 名称」，第二行是 MCP 状态；
+         状态行是身份容器的直接子项，因此左边缘与切换按钮严格对齐（014 FR-001） -->
     <div class="chat-header__identity">
-      <button
-        type="button"
-        class="chat-header__switch"
-        aria-label="切换数字人"
-        :aria-pressed="agentPanelOpen ? 'true' : 'false'"
-        @click="emit('toggle-agent')"
-      >
-        <BaseIcon name="agent" :size="16" />
-        <span class="chat-header__switch-label">切换</span>
-      </button>
+      <div class="chat-header__identity-row">
+        <button
+          type="button"
+          class="chat-header__switch"
+          aria-label="切换数字人"
+          :aria-pressed="agentPanelOpen ? 'true' : 'false'"
+          @click="emit('toggle-agent')"
+        >
+          <BaseIcon name="agent" :size="16" />
+          <span class="chat-header__switch-label">切换</span>
+        </button>
 
-      <AgentSummary :agent-name="agentName" :mcp-servers="visibleMcpServers" />
+        <AgentSummary :agent-name="agentName" />
+      </div>
+
+      <!-- 未选定数字人时 servers 为空，列表自身不渲染（FR-004，无空容器） -->
+      <McpStatusList :servers="visibleMcpServers" />
     </div>
 
     <div class="chat-header__actions">
@@ -105,7 +116,16 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
   background: var(--color-surface);
 }
 
+/* 身份容器：纵向两段，`stretch` 让状态行与身份行同宽、同起点 ⇒ 左对齐 */
 .chat-header__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.chat-header__identity-row {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);

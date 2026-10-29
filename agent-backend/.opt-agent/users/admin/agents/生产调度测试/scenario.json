@@ -1,7 +1,8 @@
 {
   "scenario": "海大计划",
   "data_prep_dirs": [
-    "算法规则"
+    "算法规则",
+    "调度文件"
   ],
   "data_prep_fields": {
     "算法规则": [

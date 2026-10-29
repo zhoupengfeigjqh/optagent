@@ -72,9 +72,17 @@ export interface InteractionSnapshot extends InteractionRequestPayload {
   remaining_seconds: number;
 }
 
-/** 挂起解除时的结局 */
+/**
+ * 挂起解除时的结局。
+ *
+ * `reject.reason`（2026-10-29）：区分"用户主动拒绝"与"本轮被中断/收尾"。
+ * 两者的工具结果都要标红，但**文案必须不同**——中断不是用户的决定，
+ * 写"用户拒绝了本次调用"是错误归因（宪章原则九：不假装正常）。
+ */
 export type InteractionOutcome =
-  { kind: 'submit'; args: Record<string, unknown> } | { kind: 'reject' } | { kind: 'expired' };
+  | { kind: 'submit'; args: Record<string, unknown> }
+  | { kind: 'reject'; reason: 'user' | 'aborted' }
+  | { kind: 'expired' };
 
 /** 工具包装器经 AgentRunRequest 拿到的交互口（run-manager 每 run 装配一个） */
 export interface InteractionSink {
@@ -132,10 +140,11 @@ export class InteractionGate {
    * 会拿到 null（微任务让出导致的时序坑，测试首轮即暴露）。
    */
   async request(input: InteractionRequestInput): Promise<InteractionOutcome> {
-    if (this.disposed) return { kind: 'reject' };
+    // 已收尾的 run 不再接受新挂起：按"中断"归因（不是用户拒绝）
+    if (this.disposed) return { kind: 'reject', reason: 'aborted' };
     if (this.waitingSize() >= this.maxPending) {
       await this.acquireSlot();
-      if (this.disposed) return { kind: 'reject' };
+      if (this.disposed) return { kind: 'reject', reason: 'aborted' };
     }
 
     const createdAt = this.now();
@@ -196,7 +205,9 @@ export class InteractionGate {
       return { result: 'already-resolved', outcome: entry.outcome! };
     }
     const outcome: InteractionOutcome =
-      action === 'submit' ? { kind: 'submit', args: args ?? {} } : { kind: 'reject' };
+      action === 'submit'
+        ? { kind: 'submit', args: args ?? {} }
+        : { kind: 'reject', reason: 'user' };
     this.resolveEntry(entry, outcome);
     this.deps.onLog?.(
       `interaction ${outcome.kind === 'submit' ? '已提交' : '被拒绝'}：${entry.payload.tool_name}（${interactionId}）`,
@@ -208,7 +219,7 @@ export class InteractionGate {
   drain(): void {
     for (const entry of this.pending.values()) {
       if (entry.state === 'waiting') {
-        this.resolveEntry(entry, { kind: 'reject' });
+        this.resolveEntry(entry, { kind: 'reject', reason: 'aborted' });
         this.deps.onLog?.(
           `interaction 因中断收尾：${entry.payload.tool_name}（${entry.payload.interaction_id}）`,
         );

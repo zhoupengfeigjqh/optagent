@@ -12,8 +12,15 @@ import path from 'node:path';
 
 import * as XLSX from 'xlsx';
 
-/** 「数据准备」下的预定义规则子目录（平台预定义，与 admin-backend 常量同步） */
-export const RULES_SUBDIR = '算法规则';
+import { PREDEFINED_DATA_PREP_DIRS } from './dirs.js';
+
+/**
+ * 「数据准备」下的预定义规则子目录（平台预定义）。
+ *
+ * 由 `domain/dirs.ts` 的 `PREDEFINED_DATA_PREP_DIRS` 派生：清单只保留一处定义，
+ * 本常量仅为既有导入点保留名称（files 路由等处继续使用）。
+ */
+export const RULES_SUBDIR = PREDEFINED_DATA_PREP_DIRS[0];
 
 /** 单文件规则行数上限（有界返回；超出即拒，防止一张巨型表格拖垮确认弹窗） */
 export const MAX_RULE_ROWS = 1000;

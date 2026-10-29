@@ -1,0 +1,2 @@
+{"call_id":"call_00_tr6OarD5HoG1Hy8vnx2p6313","message_id":"m_mvt3lqvr_3k4g","name":"ocr__ocr_image","label":"图片识别","status":"running","started_at":"2026-10-29T05:23:59.352Z","args_digest":{"image":"临时空间/架构图.png"}}
+{"call_id":"call_00_tr6OarD5HoG1Hy8vnx2p6313","message_id":"m_mvt3lqvr_3k4g","name":"ocr__ocr_image","label":"图片识别","status":"error","started_at":"2026-10-29T05:23:59.352Z","duration_ms":2794,"size":44,"inline_content":"用户拒绝了本次调用：ocr__ocr_image"}

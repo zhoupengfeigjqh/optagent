@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
+import { EMPTY_DATA_HINT_TEXT } from '../../utils/empty-data-hint'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import AgentPanel from './AgentPanel.vue'
@@ -24,6 +25,7 @@ import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
 import SessionSearch from './SessionSearch.vue'
 import SuggestionCard from './SuggestionCard.vue'
+import UploadHintBubble from './UploadHintBubble.vue'
 import UploadMenu from './UploadMenu.vue'
 
 const props = withDefaults(
@@ -42,6 +44,7 @@ const {
   uploads,
   mention,
   workspace,
+  emptyHint,
   agents,
   uploadOpen,
   agentPanelOpen,
@@ -345,7 +348,16 @@ onBeforeUnmount(() => {
           @send="onSendFromToolbar"
           @stop="onStop"
           @toggle-upload="onToggleUpload"
-        />
+        >
+          <!-- 014：切换数字人后「数据准备」全空 ⇒ 在「+」上提示上传；文案是界面常量 -->
+          <template #upload-hint>
+            <UploadHintBubble
+              v-if="emptyHint.visible.value"
+              :text="EMPTY_DATA_HINT_TEXT"
+              @close="emptyHint.dismiss"
+            />
+          </template>
+        </ComposerToolbar>
       </template>
     </Composer>
 

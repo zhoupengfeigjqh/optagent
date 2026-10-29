@@ -36,6 +36,21 @@ export const SPACE_TMP = '临时空间';
 export const SPACES = [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const;
 export type SpaceName = (typeof SPACES)[number];
 
+/**
+ * 「数据准备」下的**平台预定义**二级目录（平台硬编码，恒存在、不可移除）。
+ *
+ * 与 `admin-backend` `PREDEFINED_DATA_PREP_DIRS`、`admin-frontend` 的同名常量
+ * **三处 MUST 同步**：平台侧拒绝缺失该目录的场景，运行端只据此标记目录性质，
+ * 不参与场景校验。`domain/rule-file.ts` 的 `RULES_SUBDIR` 由本常量派生，
+ * 避免"预定义目录"出现第二份清单。
+ */
+export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const;
+
+/** 是否为平台预定义的「数据准备」二级目录（唯一判定实现） */
+export function isPredefinedDataPrepDir(name: string): boolean {
+  return (PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(name);
+}
+
 export const THREADS_DIR = 'threads';
 
 /**
