@@ -450,7 +450,8 @@ export function blockColor(block) {
  * 时间字符串 → 时间戳
  * 'YYYY-MM-DD HH:mm:ss' 以空格分隔，Safari 的 Date.parse 无法解析，统一转 ISO 后再解析
  */
-function toTimestamp(value) {
+// 导出供页面拖拽落点计算复用（与数据构建同一套时间解析口径）
+export function toTimestamp(value) {
   if (value === null || value === undefined || value === '') return undefined
   if (typeof value === 'number') return value
   const ts = Date.parse(String(value).replace(' ', 'T'))
@@ -481,6 +482,8 @@ export function toTaskGanttData(lines) {
         color: blockColor(block),
         borderColor: isSwitch ? '' : undefined,
         borderWidth: isSwitch ? 1 : undefined,
+        // 切换准备块不可拖动：点级 dragDrop 覆盖系列级配置（双 false 即排除）
+        dragDrop: isSwitch ? { draggableX: false, draggableY: false } : undefined,
         // ---- 以下为 tooltip 自定义透传字段 ----
         isSwitch,
         typetitle: blockTypeLabel(block),
@@ -490,6 +493,8 @@ export function toTaskGanttData(lines) {
         processTime: block.processTime,
         changeTime: block.changeTime,
         productionLineName: block.productionLineName || line.productionLineName,
+        productionLineId: line.productionLineId,
+        productionLinePlanId:block.id || '',
       })
     })
   })
@@ -562,7 +567,12 @@ export function buildTaskGanttOption(categories = []) {
     plotOptions: {
       gantt: { turboThreshold: 0, animation: false, pointPadding: 0.1 },
       series: {
-        dragDrop: { draggableX: false, draggableY: false },
+        dragDrop: {
+          draggableX: true, // 是否可以左右拖动
+          draggableY: true, // 是否可以上下拖动
+          draggableStart: false, // 不允许拖拽起点，禁止伸长/缩短图块
+          draggableEnd: false, // 不允许拖拽终点，禁止伸长/缩短图块
+        },
       },
     },
     rangeSelector: { enabled: false },

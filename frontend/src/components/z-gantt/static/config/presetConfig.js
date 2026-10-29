@@ -139,13 +139,19 @@ export const getPresetOptions = (context) => {
               handleTriggerEvent(context, 'PointDblclick', event);
             },
             // 进度条拖拽开始
+            // Highcharts 以当前点为 this 调用 point 事件，dragStart 的载荷
+            // 只是归一化鼠标事件（不含 point），转发前需把 this 挂到事件上，
+            // 否则下游（z-gantt-table / 业务页）拿不到被拖的数据点
             dragStart: function (event) {
+              event.point = this;
               handleTriggerEvent(context, 'PointDragStart', event);
             },
             drag: function (event) {
+              event.point = this;
               handleTriggerEvent(context, 'PointDraging', event);
             },
             drop: function (event) {
+              event.point = this;
               handleTriggerEvent(context, 'PointDragEnd', event);
             },
           },

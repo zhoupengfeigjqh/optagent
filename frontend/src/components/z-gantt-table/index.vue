@@ -16,7 +16,7 @@ const props = defineProps<{
   tableData: any[]
 }>()
 
-const emit = defineEmits(['update:cols'])
+const emit = defineEmits(['update:cols', 'handlePointDragStart', 'handlePointDragEnd', 'handlePointDraging'])
 
 const navPaddingTop = 160
 const normalPaddingTop = props.ganttOption.rangeSelector.enabled ? 90 : 55
@@ -238,6 +238,25 @@ const handleVisibleTable = () => {
   }
 }
 
+/**
+ * 拖拽进度条开始事件
+ */
+const handlePointDragStart = (event: any) => {
+  emit('handlePointDragStart', event)
+}
+/**
+ * 拖拽中事件
+ */
+const handlePointDraging = (event: any) => {
+  emit('handlePointDraging', event)
+}
+/**
+ * 拖拽结束事件
+ */
+const handlePointDragEnd = (event: any) => {
+  emit('handlePointDragEnd', event)
+}
+
 onMounted(() => {
   if (tableSectionRef.value) {
     tableWidth.value = `${tableSectionRef.value.offsetWidth}px`
@@ -273,6 +292,9 @@ const steps = [
 
 defineExpose({
   updateGantt,
+  handlePointDragStart,
+  handlePointDragEnd,
+  handlePointDraging,
 })
 </script>
 
@@ -334,6 +356,9 @@ defineExpose({
           :data="ganttChartData"
           :context="ganttCtx"
           :nav-position="props.navPosition"
+          @handlePointDragStart="handlePointDragStart"
+          @handlePointDragEnd="handlePointDragEnd"
+          @handlePointDraging="handlePointDraging"
         />
       </div>
     </main>

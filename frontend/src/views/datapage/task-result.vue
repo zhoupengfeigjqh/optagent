@@ -8,7 +8,9 @@
  * 另兼容 taskId / taskNo（两者互为兜底，随公共参数传入所有接口）。
 -->
 <template>
-  <div class="min-h-full bg-[#f5f6fa] p-4">
+  <!-- 页面级滚动容器：全局 body 为 overflow:hidden（工作台固定视口布局），
+       本页内容超出视口时由根节点自身滚动 -->
+  <div class="h-full overflow-x-hidden overflow-y-auto bg-[#f5f6fa] p-4">
     <!-- 1. 标题栏：标题 + 排产时间范围 + 任务概览 -->
     <header class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-white px-5 py-4">
       <h1 class="m-0 text-lg font-bold">排产任务结果</h1>
@@ -52,6 +54,14 @@
     <ExpandSection title="排产结果甘特图" class="mb-4 overflow-hidden rounded-lg">
       <template #extra>
         <a-button :loading="loading.export" @click="handleExport">导出</a-button>
+        <a-button type="primary" @click="handleRollbackVersion">
+          <template #icon><RollbackOutlined /></template>
+          回滚
+        </a-button>
+        <a-button type="primary" @click="handleSaveVersion" >
+          <template #icon><SaveOutlined /></template>
+          保存
+        </a-button>
       </template>
 
       <a-spin :spinning="loading.gantt">
@@ -74,6 +84,8 @@
           :table-data="ganttRows"
           row-key="id"
           :is-fixed-btn="true"
+          @handlePointDragStart="handlePointDragStart"
+          @handlePointDragEnd="handlePointDragEnd"
         >
           <!-- 设备列：产线名称在上、编号在下两行展示 -->
           <template #device="{ record }">
@@ -167,6 +179,7 @@ import type { Ref } from 'vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
+import { SaveOutlined, RollbackOutlined } from '@ant-design/icons-vue'
 
 import ExpandSection from '#/components/expand-section/expand-section.vue'
 import ZGanttTable from '#/components/z-gantt-table/index.vue'
@@ -178,6 +191,9 @@ import {
   getLineUsageRateListApi,
   getMetricsApi,
   getOverallPlanListApi,
+  schedulingAdjustApi,
+  schedulingSaveVersionApi,
+  schedulingRollbackVersionApi,
 } from '@/api/datapage'
 import {
   buildTaskGanttOption,
@@ -190,6 +206,7 @@ import {
   productionPlanGantt,
   productionPlanMetrics,
   toTaskGanttData,
+  toTimestamp,
 } from './task-result.data'
 
 /* ---------- 后端载荷类型（axios 拦截器返回的是 response.data 业务体） ---------- */
@@ -361,6 +378,116 @@ const ganttCols = ref<GanttCol[]>([
 ])
 
 const ganttOption = computed(() => buildTaskGanttOption(ganttCategories.value))
+
+/** 拖动起点信息：drop 时用于组装排产调整参数（目标行取不到 y 时兜底） */
+let dragOrigin: {
+  y: number
+  productionLineId: string
+  productionLinePlanId: string
+} | null = null
+
+// 甘特图数据点拖动开始：dragStart 尚无新值，从 event.point 取拖动块原始数据
+const handlePointDragStart = (event: any) => {
+  const point = event.point
+  // 记录拖动块的业务标识（toTaskGanttData 已透传 productionLineId / productionLinePlanId）
+  dragOrigin = {
+    y: point?.y ?? 0,
+    productionLineId: String(point?.options?.productionLineId ?? ''),
+    productionLinePlanId: String(point?.options?.productionLinePlanId ?? ''),
+  }
+  // 置顶被拖块：Highcharts 中色块在「系列分组」、文字标签在独立的
+  // 「dataLabels 分组」，且标签分组整体绘制在系列分组之上——仅对色块
+  // toFront 仍会压在其他块的文字下。把色块元素临时移入标签分组末尾
+  // （高于所有色块和文字），再对自身标签 toFront（移到色块之后）
+  const graphicEl = point?.graphic?.element
+  const labelsGroupEl = point?.series?.dataLabelsGroup?.element
+  if (graphicEl && labelsGroupEl) {
+    graphicEl.__hcOriginParent = graphicEl.parentNode // drop 时还原分组用
+    labelsGroupEl.appendChild(graphicEl)
+  }
+  point?.dataLabel?.toFront()
+}
+
+// 甘特图数据点拖动结束：组装调整参数调后端；newPoint 为定格后的 { start, end, y }
+const handlePointDragEnd = async (event: any) => {
+  // 还原被拖块所在分组（拖动置顶用），失败或成功后都会重新拉数据重建图元
+  const graphicEl = event?.point?.graphic?.element
+  if (graphicEl?.__hcOriginParent) {
+    graphicEl.__hcOriginParent.appendChild(graphicEl)
+    delete graphicEl.__hcOriginParent
+  }
+
+  const { newPointId, newPoint } = event
+  const origin = dragOrigin
+  dragOrigin = null
+  if (!origin) return
+
+  // 目标产线行：drop 载荷的 y（category 轴已按精度 1 取整），异常时兜底为原行
+  const targetY = Number.isInteger(newPoint?.y) ? newPoint.y : origin.y
+  const targetLine = ganttLines.value[targetY]
+
+  // 目标行内位于落点之前的最后一个块 = 插入位置的前一个块
+  // （当前甘特数据里被拖块仍在原位，按 blockId 排除自身）
+  const dropStart = newPoint?.start ?? 0
+  let movePreProductionLinePlanId = ''
+  for (const block of targetLine?.blocks || []) {
+    if (block.blockId === newPointId) continue
+    const blockStart = toTimestamp(block.blockStartTime || block.changeStartTime) ?? 0
+    if (blockStart <= dropStart) {
+      movePreProductionLinePlanId = String(block.id ?? '')
+    }
+  }
+
+  // 调用后端接口更新排产
+  try {
+    const res: ApiResult = await schedulingAdjustApi({
+      jobId: baseQuery.taskId,
+      planAdjustmentList: [
+        {
+          productionLineId: origin.productionLineId, // 当前块所在产线ID
+          productionLinePlanId: origin.productionLinePlanId, // 当前块 planId
+          moveProductionLineId: String(targetLine?.productionLineId ?? ''), // 目标产线ID
+          movePreProductionLinePlanId, // 目标位置前一个块的 planId（落点最前时为空串）
+        },
+      ],
+    })
+    if (res.code === 200) {
+      message.success('排产调整成功')
+      // 后端已重算排产，甘特图与指标、三张表格一并刷新
+      fetchMetrics()
+      fetchGantt()
+      fetchOverall()
+      fetchUsage()
+      fetchLinePlan()
+    }else{
+      fetchGantt()
+    }
+  } catch {
+    // 请求异常：同上弹回原位（业务错误已由 axios 拦截器统一提示）
+    fetchGantt()
+  }
+}
+// 保存最新版本排产结果
+const handleSaveVersion = async () => {
+    const res: ApiResult = await schedulingSaveVersionApi({
+      taskNo: baseQuery.taskId,
+    })
+    if (res.code === 200) {
+      message.success('保存最新版本成功')
+    }
+}
+// 回滚最新版本排产结果
+const handleRollbackVersion = async () => {
+    const res: ApiResult = await schedulingRollbackVersionApi({
+      taskNo: baseQuery.taskId,
+    })
+    if (res.code === 200) {
+      message.success('回滚最新版本成功')
+      fetchGantt()
+    }
+}
+
+
 
 /* ---------- 4/5/6. 三张分页表格 ---------- */
 

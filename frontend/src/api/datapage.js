@@ -150,3 +150,19 @@ export function getGanttApi(data) {
 export function exportSchedulingApi(data) {
   return axios.get(API_PREFIX + '/scheduling/export', { params: data, responseType: 'blob' })
 }
+/**============================排产结果调整============================== */
+
+//排产结果调整
+export function schedulingAdjustApi(data) {
+  return axios.post(API_PREFIX + '/scheduling/adjust', data)
+}
+
+//保存最新版本排产结果
+export function schedulingSaveVersionApi(data) {
+  return axios.post(API_PREFIX + '/scheduling/version/save', data)
+}
+
+//排产结果版本回滚
+export function schedulingRollbackVersionApi(data) {
+  return axios.post(API_PREFIX + '/scheduling/version/rollback', data)
+}
