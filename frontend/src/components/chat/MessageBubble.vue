@@ -44,6 +44,8 @@ import TypingIndicator from './TypingIndicator.vue'
 interface ToolCallView {
   call_id: string
   name: string
+  /** 人读名称（`tool_call` 事件随带）；缺省 → 卡片回退 `name` */
+  label?: string
   status: 'running' | 'success' | 'error'
 }
 

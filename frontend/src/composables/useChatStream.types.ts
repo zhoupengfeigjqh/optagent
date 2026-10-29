@@ -31,6 +31,8 @@ import type { ToastStore } from './useToast'
 export interface ToolCallState {
   call_id: string
   name: string
+  /** 人读名称（随 `tool_call` 事件下发）；缺省 = 无中文名，卡片回退 `name` */
+  label?: string
   status: ToolStatus
 }
 

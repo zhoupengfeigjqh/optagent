@@ -79,15 +79,21 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
     case SSE_EVENT.CONTENT:
       return { type: 'content', data: { delta: asString(payload.delta) } }
 
-    case SSE_EVENT.TOOL_CALL:
+    case SSE_EVENT.TOOL_CALL: {
+      // 可选字段"有才写"：后端缺 `label` 表示该工具无中文名（展示方回退 `name`）。
+      // 2026-10-29 修复——此处曾漏映射 `label`，工具卡片在"进行中"只能显示英文调用名，
+      // 直到本轮结束刷新历史（历史接口是整体透传，带 `label`）才变中文。
+      const label = asString(payload.label)
       return {
         type: 'tool_call',
         data: {
           call_id: asString(payload.call_id),
           name: asString(payload.name),
+          ...(label !== '' ? { label } : {}),
           status: 'running',
         },
       }
+    }
 
     case SSE_EVENT.TOOL_CALL_END:
       return {

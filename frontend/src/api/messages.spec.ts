@@ -158,6 +158,33 @@ describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推
   })
 })
 
+/**
+ * 工具调用卡片标题（2026-10-29 修复）
+ *
+ * `tool_call` 分支同样是逐字段构造：`label` 漏映射时，流式期卡片只能显示英文调用名，
+ * 直到本轮结束刷新历史（历史接口整体透传、带 `label`）才变中文——"先英文后中文"即此。
+ */
+describe('decodeStreamEvent —— tool_call 人读名称', () => {
+  function toolCallData(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const event = decodeStreamEvent({
+      event: 'tool_call',
+      data: JSON.stringify({ call_id: 'c_1', name: 'jev__noul', status: 'running', ...extra }),
+    })
+    if (event?.type !== 'tool_call') throw new Error('预期 tool_call')
+    return event.data as unknown as Record<string, unknown>
+  }
+
+  it('透传 label（调用当刻即可显示中文）', () => {
+    expect(toolCallData({ label: '命题真假判断' }).label).toBe('命题真假判断')
+  })
+
+  it('缺省 / 空串 / 脏数据时不写该键（展示方回退 name）', () => {
+    expect('label' in toolCallData()).toBe(false)
+    expect('label' in toolCallData({ label: '' })).toBe(false)
+    expect('label' in toolCallData({ label: 42 })).toBe(false)
+  })
+})
+
 describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
   const base = {
     content: '帮我梳理昨天订单的交付风险',
