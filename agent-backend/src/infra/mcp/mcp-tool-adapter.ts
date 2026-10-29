@@ -3,8 +3,10 @@
  *
  * - 工具名 `{server}__{tool}`，避免多 server 重名冲突
  * - 调用经 McpManager（30s 超时 + 重试 1 次）
- * - McpUnavailableError 不抛出：以自然语言降级提示作为工具结果返回，
- *   Agent 在 content 中说明"当前服务不可用，请稍后尝试"（FR-024，不走 SSE error）
+ * - 失败一律**不抛**：以自然语言文案作为工具结果返回（FR-024，对话不中断），
+ *   但打上 `details.toolError` 标记（2026-10-29）——前端工具卡片据此标红，
+ *   用户能看见"这次调用没做成"，而不是一张绿色的失败卡片。
+ *   标记的翻牌点是 `infra/agent-loop.ts` 的 `afterToolCall`，本文件不负责 isError。
  * - file_args 声明（可选）：LLM 传 user-data 相对路径，经 FileAccess 沙箱校验后
  *   **按声明的取值路径**（如 `image`，或对象数组里的 `items[].excelFileUrl`）
  *   原位替换为签名直链发给服务（远程/跨容器服务无磁盘访问权）；
@@ -22,6 +24,7 @@ import {
   type FileArgStep,
 } from '../../domain/file-arg-path.js';
 import type { McpCallEvent } from '../../types.js';
+import { toolErrorResult } from '../../domain/tool-error.js';
 import {
   ASYNC_RESULT_URL_PARAM,
   declaresResultUrl,
@@ -84,6 +87,11 @@ export function mcpToolsAsAgentTools(
    * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）。
    */
   asyncCtx?: AsyncToolContext,
+  /**
+   * 工具显示名（2026-10-27）：`{ 原始工具名: 人读名称 }`，来自平台 `tool_labels`。
+   * 优先级：本映射 > 服务端 `Tool.title` > `server: tool` 英文拼接。
+   */
+  toolLabels?: Record<string, string>,
 ): AgentTool[] {
   return tools.map((t) => {
     // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
@@ -110,7 +118,9 @@ export function mcpToolsAsAgentTools(
       : [];
     return {
       name: `${serverName}__${t.name}`,
-      label: `${serverName}: ${t.name}`,
+      // 显示名三级（2026-10-27）：平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`。
+      // 它进意图聚焦命题（中文判定更准），调用名恒为 `name`，模型读不到 label。
+      label: toolLabels?.[t.name]?.trim() || t.title?.trim() || `${serverName}: ${t.name}`,
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
       // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
@@ -140,15 +150,11 @@ export function mcpToolsAsAgentTools(
             { alert: true, event: 'mcp.fileargs.denied', service: serverName, tool: t.name },
             `MCP 文件参数校验失败，调用未发出：${err instanceof Error ? err.message : String(err)}`,
           );
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `文件参数校验失败：${err instanceof Error ? err.message : String(err)}`,
-              },
-            ],
-            details: {},
-          };
+          // 标记失败：调用**未发出**，用户必须看到这次没做成（此前是一张绿色卡片）
+          return toolErrorResult(
+            `文件参数校验失败：${err instanceof Error ? err.message : String(err)}`,
+            'MCP_FILE_ARGS_DENIED',
+          );
         }
         // 计时口径：`callTool` 内部最多尝试 2 次（30s 超时 + 重试 1 次），故从调用前
         // 开始计，得到的是**含重试的用户感知耗时**，不是单次尝试耗时。
@@ -187,12 +193,17 @@ export function mcpToolsAsAgentTools(
             `MCP 工具调用失败：${serverName}.${t.name}`,
           );
           if (err instanceof McpUnavailableError) {
-            return {
-              content: [{ type: 'text', text: `外部服务 ${serverName} 当前不可用，请稍后尝试` }],
-              details: {},
-            };
+            return toolErrorResult(
+              `外部服务 ${serverName} 当前不可用，请稍后尝试`,
+              'MCP_UNAVAILABLE',
+            );
           }
-          throw err;
+          // 不抛（2026-10-29）：pi 的 catch 会覆盖整个 result，文案与 details 全丢；
+          // 改为带标记返回，正文对模型**逐字不变**，只是卡片会红
+          return toolErrorResult(
+            `外部服务 ${serverName} 调用失败：${err instanceof Error ? err.message : String(err)}`,
+            'MCP_CALL_FAILED',
+          );
         }
       },
     };

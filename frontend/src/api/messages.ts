@@ -24,6 +24,13 @@ export interface SendMessageInput {
   attachments: FileReference[]
   /** 本轮隐藏指引（004）；空串 / 缺省表示不提交该字段 */
   guidance?: string
+  /**
+   * 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+   *
+   * 仅 `true` 时提交。跳过必须是**服务端可校验**的标记，所以它走请求体，
+   * 而不是"前端少发一次请求"；标记不落历史、不出现在消息内容里。
+   */
+  skipIntentFocus?: boolean
 }
 
 /**
@@ -33,7 +40,9 @@ export interface SendMessageInput {
  * 且 `model` / `attachments` 有 `minLength` / `maxItems` 约束。
  */
 export function buildSendMessageBody(input: SendMessageInput): SendMessageRequest {
-  const body: SendMessageRequest = {
+  // `send_intent_focus` 是 013 新增字段；`SendMessageRequest` 在 api/types.ts（本特性约定
+  // 不动该文件），故用交叉类型表达"比契约多一个可选字段"，返回值仍可赋给 `SendMessageRequest`。
+  const body: SendMessageRequest & { skip_intent_focus?: boolean } = {
     content: input.content,
     thinking: input.thinking,
   }
@@ -48,6 +57,10 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
   }
   if (input.guidance) {
     body.guidance = input.guidance
+  }
+  // 013：只在需要跳过时携带（后端 Schema 为 additionalProperties:false）
+  if (input.skipIntentFocus === true) {
+    body.skip_intent_focus = true
   }
   return body
 }
@@ -137,12 +150,22 @@ export function decodeStreamEvent(raw: RawSseEvent): StreamEvent | null {
 
     case SSE_EVENT.ERROR: {
       const error = asRecord(payload.error)
+      // 诊断字段（2026-10-27）：后端 `HistoryErrorInfo` 会带 `upstream_status` /
+      // `upstream_type` / `request_id`，前端 `formatErrorDiagnostics` 专门渲染它们。
+      // 此前逐字段构造时漏映射 → 流式失败永远没有诊断行，而刷新后同一条失败却有。
+      // 沿用"有才写"口径：缺省即不出现（与后端不写空壳一致）。
+      const upstreamStatus = error?.upstream_status
+      const upstreamType = asString(error?.upstream_type)
+      const requestId = asString(error?.request_id)
       return {
         type: 'error',
         data: {
           error: {
             code: asString(error?.code, 'INTERNAL_ERROR'),
             message: asString(error?.message),
+            ...(typeof upstreamStatus === 'number' ? { upstream_status: upstreamStatus } : {}),
+            ...(upstreamType !== '' ? { upstream_type: upstreamType } : {}),
+            ...(requestId !== '' ? { request_id: requestId } : {}),
           },
           duration_seconds:
             payload.duration_seconds === undefined ? undefined : asNumber(payload.duration_seconds),

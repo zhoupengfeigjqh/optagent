@@ -62,6 +62,61 @@ describe('decodeStreamEvent —— interaction_request（HITL）', () => {
   })
 })
 
+/**
+ * 诊断字段透传（2026-10-27）
+ *
+ * `error` 事件同样是逐字段构造：`upstream_status` / `upstream_type` / `request_id`
+ * 漏映射时，流式失败没有诊断行，而刷新后同一条失败却有——同一事实两种展示。
+ */
+describe('decodeStreamEvent —— error 诊断字段（2026-10-27）', () => {
+  function errorFields(error: Record<string, unknown>): Record<string, unknown> {
+    const event = decodeStreamEvent({
+      event: 'error',
+      data: JSON.stringify({ error, duration_seconds: 1.2, agent_name: 'demo' }),
+    })
+    if (event?.type !== 'error') throw new Error('预期 error')
+    return (event.data as unknown as { error: Record<string, unknown> }).error
+  }
+
+  it('透传上游状态码 / 类型 / 请求 ID', () => {
+    const error = errorFields({
+      code: 'LLM_UNAVAILABLE',
+      message: '上游模型不可用',
+      upstream_status: 503,
+      upstream_type: 'server_error',
+      request_id: 'rid-1',
+    })
+
+    expect(error).toMatchObject({
+      upstream_status: 503,
+      upstream_type: 'server_error',
+      request_id: 'rid-1',
+    })
+  })
+
+  it('缺省时不写该键（不产生空壳）', () => {
+    const error = errorFields({ code: 'INTERNAL_ERROR', message: '' })
+
+    expect('upstream_status' in error).toBe(false)
+    expect('upstream_type' in error).toBe(false)
+    expect('request_id' in error).toBe(false)
+  })
+
+  it('脏数据（非数字 / 非字符串）不写入、不抛错', () => {
+    const error = errorFields({
+      code: 'X',
+      message: '',
+      upstream_status: '503',
+      upstream_type: 42,
+      request_id: null,
+    })
+
+    expect('upstream_status' in error).toBe(false)
+    expect('upstream_type' in error).toBe(false)
+    expect('request_id' in error).toBe(false)
+  })
+})
+
 describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推）', () => {
   function doneData(extra: Record<string, unknown> = {}): Record<string, unknown> {
     const event = decodeStreamEvent({
@@ -125,5 +180,31 @@ describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
   it('空串 / 缺省时不写该键（后端 Schema 为 additionalProperties:false）', () => {
     expect('guidance' in buildSendMessageBody(base)).toBe(false)
     expect('guidance' in buildSendMessageBody({ ...base, guidance: '' })).toBe(false)
+  })
+})
+
+describe('buildSendMessageBody —— 意图聚焦跳过标记（013）', () => {
+  const base = {
+    content: '按交付日期梳理这批订单的风险',
+    thinking: false,
+    model: null,
+    attachments: [],
+  }
+
+  it('预置动作入口：仅在 true 时写 skip_intent_focus', () => {
+    const body = buildSendMessageBody({ ...base, skipIntentFocus: true }) as unknown as Record<
+      string,
+      unknown
+    >
+    expect(body.skip_intent_focus).toBe(true)
+    // 正文保持干净：标记绝不拼进 content，也不落历史
+    expect(body.content).toBe('按交付日期梳理这批订单的风险')
+  })
+
+  it('缺省 / false 时不写该键', () => {
+    expect('skip_intent_focus' in buildSendMessageBody(base)).toBe(false)
+    expect('skip_intent_focus' in buildSendMessageBody({ ...base, skipIntentFocus: false })).toBe(
+      false,
+    )
   })
 })

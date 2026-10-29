@@ -11,7 +11,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import type { Usage } from '../../api/types'
-import { formatDuration, formatTokens } from '../../utils/format'
+import { formatDurationSec, formatTokens } from '../../utils/format'
 import BaseIcon from '../common/BaseIcon.vue'
 
 /** 复制成功反馈的展示时长。 */
@@ -42,7 +42,7 @@ const copied = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const tokenText = computed(() => formatTokens(props.usage))
-const durationText = computed(() => formatDuration(props.durationSeconds))
+const durationText = computed(() => formatDurationSec(props.durationSeconds))
 
 function clearTimer(): void {
   if (timer !== null) {

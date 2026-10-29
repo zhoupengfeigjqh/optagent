@@ -143,7 +143,8 @@ describe('GET /api/admin/mcp/services/{name}', () => {
     expect(body.permission_scope).toBeUndefined();
     // 编排原始声明已下架
     expect(body.compose_declaration).toBeUndefined();
-    expect(body.tools).toEqual(TOOLS);
+    // 2026-10-27：详情里的每项多一个 `label`（平台配置的显示名；未配置即空串）
+    expect(body.tools).toEqual(TOOLS.map((t) => ({ ...t, label: '' })));
     expect(body.tools_truncated).toBe(false);
   });
 
@@ -211,6 +212,62 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
     // 表现就是"保存成功、勾选却被清空"（2026-09-26 实测缺陷）
     const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
     expect(after.rules_fields).toEqual({ ocr_image: 'input.rules' });
+  });
+
+  it('tool_labels：保存后回显、清单项带 label；不携带时沿用存量（不被清空）', async () => {
+    await createService();
+    const detail = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
+
+    const saved = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/mcp/services/ocr',
+      payload: {
+        description: 'OCR 识别服务',
+        transport: 'http',
+        url: OCR_URL,
+        tool_labels: { ocr_image: '识别图片文字' },
+        revision: detail.revision,
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().tool_labels).toEqual({ ocr_image: '识别图片文字' });
+
+    const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
+    expect(after.tool_labels).toEqual({ ocr_image: '识别图片文字' });
+    // 清单项合并显示名（详情把配置投影到每个工具上）
+    expect(after.tools).toEqual([{ ...TOOLS[0], label: '识别图片文字' }]);
+
+    // 再次保存调用配置且**不携带** tool_labels：沿用存量（与 headers 同一口径）
+    const resaved = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/mcp/services/ocr',
+      payload: {
+        description: 'OCR 识别服务',
+        transport: 'http',
+        url: OCR_URL,
+        revision: after.revision,
+      },
+    });
+    expect(resaved.statusCode).toBe(200);
+    expect(resaved.json().tool_labels).toEqual({ ocr_image: '识别图片文字' });
+  });
+
+  it('tool_labels 非法（空串）→ VALIDATION_FAILED（空串与"不配"必须区分）', async () => {
+    await createService();
+    const detail = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
+    const res = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/mcp/services/ocr',
+      payload: {
+        description: 'OCR 识别服务',
+        transport: 'http',
+        url: OCR_URL,
+        tool_labels: { ocr_image: '   ' },
+        revision: detail.revision,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
   });
 
   it('旧客户端仍提交 async_tools：安全忽略（不报错、不回显、不物化）', async () => {

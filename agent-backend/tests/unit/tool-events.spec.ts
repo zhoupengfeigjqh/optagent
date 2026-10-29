@@ -70,6 +70,45 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+describe('tool-events —— 工具人读名称（2026-10-27）', () => {
+  it('start/end 两行都带 label，按 call_id 合并后仍保留；name 不受影响', async () => {
+    const store = makeStore();
+    store.appendStart('admin', AGENT, 'th1', {
+      callId: 'call_l',
+      messageId: 'm_a1',
+      name: 'jev__noul',
+      label: '命题真假判断',
+      startedAt: '2026-09-23T00:00:00.000Z',
+    });
+    await store.appendEnd('admin', AGENT, 'th1', {
+      callId: 'call_l',
+      messageId: 'm_a1',
+      name: 'jev__noul',
+      label: '命题真假判断',
+      startedAt: '2026-09-23T00:00:00.000Z',
+      status: 'success',
+      durationMs: 5,
+      resultText: 'ok',
+    });
+
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
+    expect(record.label).toBe('命题真假判断');
+    expect(record.name).toBe('jev__noul');
+  });
+
+  it('无 label 时字段缺席（旧数据与"无中文名"同形），读回为 undefined', async () => {
+    const store = makeStore();
+    await appendEnd(store, { callId: 'call_n', resultText: 'ok' });
+
+    expect(store.readAll('admin', AGENT, 'th1')[0]!.label).toBeUndefined();
+    const raw = fs.readFileSync(
+      path.join(dataRoot(), 'threads', 'th1', 'tool-events.jsonl'),
+      'utf8',
+    );
+    expect(raw).not.toContain('"label"');
+  });
+});
+
 describe('tool-events —— 体积分流', () => {
   it('小结果内联进 JSONL，且不产生临时空间文件', async () => {
     const store = makeStore();

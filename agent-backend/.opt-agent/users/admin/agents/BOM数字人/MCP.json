@@ -23,6 +23,35 @@
         "bom_validate",
         "bom_merge"
       ]
+    },
+    {
+      "name": "jev",
+      "transport": "http",
+      "url": "http://localhost:8101/mcp",
+      "file_args": {
+        "noul": {
+          "state_file": "url"
+        }
+      },
+      "allowed_tools": [
+        "noul",
+        "choice",
+        "score"
+      ]
+    },
+    {
+      "name": "ocr",
+      "transport": "http",
+      "url": "http://localhost:8100/mcp",
+      "file_args": {
+        "ocr_image": {
+          "image": "url"
+        }
+      },
+      "confirmation": "always",
+      "allowed_tools": [
+        "ocr_image"
+      ]
     }
   ]
 }

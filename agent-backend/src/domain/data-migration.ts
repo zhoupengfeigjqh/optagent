@@ -24,13 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listAgents } from './agent-catalog.js';
-import {
-  SPACES,
-  THREADS_DIR,
-  ensureAgentDataDirs,
-  userDataDir,
-  userDataRoot,
-} from './dirs.js';
+import { SPACES, THREADS_DIR, ensureAgentDataDirs, userDataDir, userDataRoot } from './dirs.js';
 
 /** 迁移日志（结构同 pino：`logger.info(obj, msg)`） */
 export interface MigrationLogger {

@@ -2,8 +2,8 @@
  * 后台产出的展示格式化（纯函数，便于单测）
  *
  * 口径与后端 `agent-backend/src/domain/produced.ts` 的 `formatProducedList` / `relativeTime`
- * 以及 `tool-result.ts` 的 `formatBytes` **保持一致**：同一条产出在「提示词清单」与
- * 「铃铛面板」里应给出同样的人类可读描述，否则同一个东西在两处说法不一。
+ * **保持一致**：同一条产出在「提示词清单」与「铃铛面板」里应给出同样的人类可读描述，
+ * 否则同一个东西在两处说法不一。
  *
  * 2026-10-09 追加**标题两段**（`producedSummary` / `producedTag`，见各自注释）：
  * 摘要（服务给，可缺省）与标识（平台字段，永不缺省）分开成段，不再拼成一根字符串——
@@ -23,30 +23,11 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
 }
 
 /**
- * 绝对时间（**本地时区**）：`YYYY-MM-DD HH:mm:ss`。
- *
- * 与 `relativeTime` 分工：相对时间回答"多久前"，绝对时间回答"具体哪一刻"。
- * 铃铛需要**创建与完成两个时刻**，相对时间给不出先后与跨天信息。
- * 无法解析给可读占位，不留空白（与 `relativeTime` 同口径）。
+ * 绝对时间与体积**不在这里**：绝对时间用 `utils/format` 的 `formatTimestamp`
+ * （`{ withSeconds: true, fallback: '时间未知' }`），体积用 `formatBytes(bytes, '—')`。
+ * 2026-10-27 收敛时删掉了本文件里的两份同名实现——同一个"KB/时间戳"能力有两个出处，
+ * 只会让两边文案各自漂移。
  */
-export function formatDateTime(iso: string): string {
-  const at = Date.parse(iso)
-  if (!Number.isFinite(at)) return '时间未知'
-  const d = new Date(at)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  )
-}
-
-/** 人类可读体积（B / KB / MB），与后端 `formatBytes` 同档 */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
 
 /**
  * 拆产出路径（`临时空间/后台产出/th_1_j_2.txt`）→ 预览接口要的 `dir` + `filename`。

@@ -261,8 +261,7 @@ export class Deployer {
     const all: PrecheckUser[] = this.deps.users
       .listAll()
       .map((user) => ({ user_id: user.user_id, agents: [...user.agents] }));
-    const targets =
-      userIds === undefined ? all : all.filter((user) => userIds.includes(user.user_id));
+    const targets = userIds === undefined ? all : all.filter((user) => userIds.includes(user.user_id));
 
     if (userIds) {
       const unknown = userIds.filter((id) => !all.some((user) => user.user_id === id));

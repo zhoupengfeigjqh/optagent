@@ -77,7 +77,7 @@ const DONE_SCRIPT = [
  *
  * 记录每一次请求（URL + method），逐条断言"切换后做了什么 / 没做什么"。
  */
-function makeSwitchSession() {
+function makeSwitchSession(workspaceSpaces: unknown[] = []) {
   const requests: Array<{ url: string; method: string }> = []
   // 服务端唯一选中态：select 之后 current 返回新的那一个（固定返回值会让"切换生效"看不出区别）
   let selectedName = 'agent-a'
@@ -107,7 +107,7 @@ function makeSwitchSession() {
         })
       }
       if (url.includes('/api/threads')) return respond([])
-      if (url.includes('/api/files/workspace')) return respond({ spaces: [] })
+      if (url.includes('/api/files/workspace')) return respond({ spaces: workspaceSpaces })
       if (url.includes('/api/produced')) return respond({ items: [] })
       return respond({})
     }) as unknown as typeof fetch,
@@ -249,5 +249,89 @@ describe('轮末刷新会话列表（首句完成后新会话带标题进入侧�
     expect(
       requests.filter((r) => r.method === 'GET' && r.url.endsWith('/api/threads')),
     ).toHaveLength(2)
+  })
+})
+
+/**
+ * 014：空数据引导的唯一触发点是"切换成功之后"。
+ *
+ * 用真实装配验证三件事：首次加载不判定、切换成功后判定、切换失败不判定。
+ */
+describe('切换数字人 → 空数据引导判定（014 FR-005/FR-006）', () => {
+  /** 数据准备：预定义目录为空 + 自定义目录为空 ⇒ 满足提示条件 */
+  const EMPTY_PREP_SPACES = [
+    {
+      name: '数据准备',
+      agent_writable: false,
+      upload_extensions: ['.csv'],
+      dirs: [
+        {
+          dir: '数据准备/算法规则',
+          label: '算法规则',
+          deletable: true,
+          files: [],
+          fields: [],
+          upload_extensions: ['.csv'],
+          predefined: true,
+        },
+        {
+          dir: '数据准备/生产计划',
+          label: '生产计划',
+          deletable: true,
+          files: [],
+          fields: [],
+          upload_extensions: ['.csv'],
+          predefined: false,
+        },
+      ],
+    },
+  ]
+
+  it('首次加载不弹；切换成功后按新清单判定并弹出', async () => {
+    const { session } = makeSwitchSession(EMPTY_PREP_SPACES)
+
+    await session.agents.loadCurrent()
+    expect(session.emptyHint.visible.value).toBe(false)
+
+    await session.agents.switchTo('agent-b')
+    await settle()
+    await settle()
+
+    expect(session.emptyHint.visible.value).toBe(true)
+  })
+
+  it('切换到清单不满足条件的数字人 → 不弹', async () => {
+    const { session } = makeSwitchSession([])
+
+    await session.agents.loadCurrent()
+    await session.agents.switchTo('agent-b')
+    await settle()
+    await settle()
+
+    expect(session.emptyHint.visible.value).toBe(false)
+  })
+
+  it('切换失败 → 保持不弹（不拿旧清单误判）', async () => {
+    const session = createAppSession({
+      storage: memoryStorage(),
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const url = String(input)
+        // 选中失败：switchTo 会 catch 并 toast，不会触发 onSwitched
+        if (url.endsWith('/select')) throw new Error('数字人不可用')
+        if (url.includes('/api/agents/current/mcp'))
+          return respond({ agent_name: 'agent-a', mcp_servers: [] })
+        if (url.includes('/api/agents/current')) return respond({ agent_name: 'agent-a' })
+        if (url.includes('/api/files/workspace')) return respond({ spaces: EMPTY_PREP_SPACES })
+        return respond({})
+      }) as unknown as typeof fetch,
+    })
+
+    await session.agents.loadCurrent()
+    expect(session.emptyHint.visible.value).toBe(false)
+
+    await session.agents.switchTo('agent-b').catch(() => undefined)
+    await settle()
+
+    expect(session.emptyHint.visible.value).toBe(false)
   })
 })

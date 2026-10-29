@@ -22,11 +22,11 @@ import { ensureRootDirs, userAgentsDir } from './domain/dirs.js';
 import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
-import { NextActionsStore } from './domain/next-actions.js';
+
 import { ProducedEvents } from './domain/produced-events.js';
 import { formatProducedList, listProduced } from './domain/produced.js';
 import { RunManager } from './domain/run-manager.js';
-import { isNextActionsEnabled, nextActionHintsCount } from './domain/soul.js';
+
 import { SummaryStore } from './domain/summary.js';
 import { ThreadStore } from './domain/thread-store.js';
 import { cleanupAllAgentTmpDirs } from './domain/tmp-cleanup.js';
@@ -37,7 +37,8 @@ import type { LlmProvider } from './infra/llm/llm-provider.js';
 import { PiAiLlmProvider } from './infra/llm/pi-ai-provider.js';
 import { IntervalScheduler } from './infra/scheduler.js';
 import { UsageDb } from './infra/usage-db.js';
-import { createLoggers, createThrottledWarn } from './logging.js';
+import { createLoggers } from './logging.js';
+import { buildAttachments } from './server-attachments.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerChatRoutes } from './routes/chat.js';
@@ -246,16 +247,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
   );
 
   /**
-   * 下一步动作提示（007 修订 · Tail Protocol）。
+   * 侧车能力装配（007 下一步动作提示 / 013 意图聚焦）。
    *
-   * 卡片与回答同流产出：开关与条数在**提示词装配时**逐次现读（SOUL.md frontmatter，
-   * fail-closed 见 `soul.ts`），驱动尾部块指令；轮末同步定稿入快照、随 `done` 直推。
-   * 读取侧不再判"当前选中数字人"——卡片持久化与恢复跟数字人切换无关（修订 G4）。
-   *
-   * 告警经 `createThrottledWarn` 合并：开关文件读不出来时，每个请求都会命中同一条消息。
+   * 外移到 `server-attachments.ts`：本文件已贴近 500 行硬门禁，且这两项都只是"构造"。
+   * 两者都由 SOUL 开关逐次现读门控（fail-closed），未配置/未开启时整体不生效。
    */
-  const nextActionsWarn = createThrottledWarn(loggers.logger, 'next-actions.failed');
-  const nextActions = new NextActionsStore(root, { logger: nextActionsWarn });
+  const attachments = buildAttachments({ root, config, logger: loggers.logger });
 
   const runManager = new RunManager({
     history,
@@ -263,15 +260,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
     logger: loggers.logger,
     summary,
     toolEvents,
-    nextActions,
+    nextActions: attachments.nextActions,
     // 007 修订：开关与条数逐次现读（SOUL.md frontmatter）；开启时条数上限同时驱动
     // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
     // 2026-10-15：LLM 失败日志要有"哪个 provider / 哪个模型"（请求级覆盖由 run.modelId 提供）
     llmInfo: () => ({ provider: 'deepseek', model: config.defaultModel.model }),
-    nextActionsConfig: (userId, agentName) => {
-      if (!isNextActionsEnabled(root, userId, agentName, nextActionsWarn)) return null;
-      return { enabled: true, max: nextActionHintsCount(root, userId, agentName, nextActionsWarn) };
-    },
+    nextActionsConfig: attachments.nextActionsConfig,
+    // 013：意图聚焦判定口（未配置判定模型时缺省不注入 = 功能不可用）
+    ...(attachments.intentFocus ? { intentFocus: attachments.intentFocus } : {}),
     // FR-030：实例崩溃 → 销毁（下一条消息经 getOrCreateAgent 自动重建）
     onCrash: (key) => pool.remove(key),
     // R11：后台计算结果清单 —— 只注入**当前会话**（`sid === threadId`）的产出，
@@ -308,7 +304,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     history,
     summary,
     toolEvents,
-    nextActions,
+    nextActions: attachments.nextActions,
     runManager,
     usage: usageDb,
     mcpEvents,

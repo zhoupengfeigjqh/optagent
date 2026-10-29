@@ -123,5 +123,7 @@ export function emptySoulDesign(): SoulDesign {
     next_action_hints: false,
     // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与后端 `emptySoulDesign()` 不等
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
+    // 013：同上，必须显式——与后端 `emptySoulDesign()` 同形，脏检查才不会一进页面就报"有修改"
+    intent_focus: false,
   }
 }

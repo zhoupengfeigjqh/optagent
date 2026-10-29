@@ -61,6 +61,7 @@ function clearAll(): void {
             :checked="selected.includes(tool.name)"
             @change="toggle(tool.name, ($event.target as HTMLInputElement).checked)"
           />
+          <span v-if="tool.label" class="mcp-tool-picker__title">{{ tool.label }}</span>
           <span class="mono mcp-tool-picker__name">{{ tool.name }}</span>
           <span v-if="tool.description" class="mcp-tool-picker__desc">{{ tool.description }}</span>
         </label>
@@ -107,6 +108,12 @@ function clearAll(): void {
 
 .mcp-tool-picker__name {
   flex-shrink: 0;
+}
+
+/* 平台配置的中文显示名（2026-10-27）：勾选时先看中文，英文工具名仍在旁可对照 */
+.mcp-tool-picker__title {
+  flex-shrink: 0;
+  font-weight: 600;
 }
 
 .mcp-tool-picker__desc {

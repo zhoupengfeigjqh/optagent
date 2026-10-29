@@ -34,6 +34,7 @@ const SOUL: AgentDesign['soul'] = {
   prompt_extra: '',
   next_action_hints: false,
   next_action_hints_count: 3,
+  intent_focus: false,
 }
 
 const ONTOLOGY_CANDIDATE: OntologyCandidate = {

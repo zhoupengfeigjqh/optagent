@@ -14,6 +14,7 @@ import {
 } from '@earendil-works/pi-agent-core';
 import type { LlmRetryOptions } from '../config.js';
 import { classifyLlmFailure } from '../domain/llm-error.js';
+import { markToolError } from '../domain/tool-error.js';
 import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
@@ -82,6 +83,19 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     return { role: m.role, content: m.content, timestamp: now() };
   });
 
+  /**
+   * 工具名 → 人读名称（2026-10-27）。
+   *
+   * `label` 在装配时已算好（平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`），
+   * 这里只做一张查表，随 `tool_call_start` 一起上行——工具卡片与 HITL 弹窗都要显示中文名，
+   * 而 pi 的 `tool_execution_start` 只给 `toolName`。
+   */
+  const labels = new Map<string, string>();
+  for (const tool of opts.tools) {
+    const label = typeof tool.label === 'string' ? tool.label.trim() : '';
+    if (label !== '') labels.set(tool.name, label);
+  }
+
   const emit = (event: AgentEvent): void => {
     if (event.type === 'message_update') {
       const ev = event.assistantMessageEvent;
@@ -90,11 +104,13 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     } else if (event.type === 'tool_execution_start') {
       // 入参只带**短标量摘要**（供展示"查了什么"）；原文永不下发（spec 002 FR-001）
       const argsDigest = digestArgs(event.args);
+      const label = labels.get(event.toolName);
       push({
         type: 'tool_call_start',
         callId: event.toolCallId,
         name: event.toolName,
         ...(argsDigest ? { argsDigest } : {}),
+        ...(label !== undefined ? { label } : {}),
       });
     } else if (event.type === 'tool_execution_end') {
       // 结果拍平成文本上行（由 run-manager 落 tool-events.jsonl）；
@@ -164,6 +180,17 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         msgs.filter(
           (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
         ) as never,
+      /**
+       * 工具失败的唯一翻牌点（2026-10-29）。
+       *
+       * 工具层不抛异常，只在 `details.toolError` 打标记；这里统一翻成 `isError: true`，
+       * 下游 `tool_execution_end.isError` → SSE `tool_call_end.status='error'` →
+       * 卡片红色 + `tool-events.jsonl` 记 error（刷新后历史卡片口径一致）。
+       *
+       * 不用工具自己 throw 的原因见 `domain/tool-error.ts` 头部：pi 的 catch 会覆盖
+       * 整个 result（content 只剩 message、details 置空），结构化信息全丢。
+       */
+      afterToolCall: async (ctx) => markToolError(ctx.result),
     },
     emit,
     opts.signal,

@@ -11,7 +11,9 @@ import path from 'node:path';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { BUILTIN_TOOL_CATALOG } from '../../src/domain/builtin-tool-catalog.js';
 import { FileAccess } from '../../src/domain/file-access.js';
+import { readToolError } from '../../src/domain/tool-error.js';
 import { extractViewLinks } from '../../src/domain/view-links.js';
 import { buildBuiltinTools } from '../../src/infra/builtin-tools.js';
 
@@ -175,5 +177,57 @@ describe('buildBuiltinTools —— write_file 的结果结构化（2026-10-21）
       expect.objectContaining({ alert: true, event: 'file.write.denied', tool: 'write_file' }),
       expect.stringContaining('越权被拒绝'),
     );
+  });
+});
+
+/**
+ * 失败标记（2026-10-29）：内置工具的 catch 分支一律在 `details.toolError` 打标记，
+ * 由 `agent-loop` 的 `afterToolCall` 翻成 `isError` → 前端卡片标红。
+ * 正文（模型读到的）**逐字不变**，标记只影响 UI。
+ */
+describe('buildBuiltinTools —— 失败标记（工具卡片标红的唯一依据）', () => {
+  /** 取完整结果（`run` 只回正文字符串，标记要看 details） */
+  async function runFull(
+    tools: ReadonlyArray<{ execute: (...args: never[]) => Promise<unknown> }>,
+    params: unknown,
+  ) {
+    return (await tools[0]!.execute('call_1' as never, params as never)) as {
+      content: Array<{ text: string }>;
+      details?: unknown;
+    };
+  }
+
+  it('越权：正文与告警不变，另带 FILE_ACCESS_DENIED 标记', async () => {
+    const result = await runFull(build(['write_file']), { filename: '看板.html', content: 'x' });
+
+    expect(result.content[0]?.text).toContain('没有权限执行该操作');
+    expect(readToolError(result.details)).toMatchObject({ code: 'FILE_ACCESS_DENIED' });
+  });
+
+  it('计算失败：带 CALCULATION_FAILED 标记', async () => {
+    const result = await runFull(build(['calculator']), { expression: '1+' });
+
+    expect(result.content[0]?.text).toContain('表达式无法计算');
+    expect(readToolError(result.details)).toMatchObject({ code: 'CALCULATION_FAILED' });
+  });
+
+  it('目录里的每个工具名都有实现：没有一个落到「未知内置工具」兜底', async () => {
+    // 目录是唯一来源，`enabled` 里查不到的名字根本不会装配，
+    // 所以"未知工具"只可能来自**目录有、实现没有**的错配——这里全量守一遍
+    const names = BUILTIN_TOOL_CATALOG.map((entry) => entry.name);
+    const tools = build(names);
+    expect(tools.map((tool) => tool.name).sort()).toEqual([...names].sort());
+
+    for (const tool of tools) {
+      const result = await runFull([tool], {});
+      expect(readToolError(result.details)?.code).not.toBe('TOOL_NOT_IMPLEMENTED');
+    }
+  });
+
+  it('正常返回（业务结果"算出来了"）：**不带**标记，卡片保持绿', async () => {
+    const result = await runFull(build(['calculator']), { expression: '1+1' });
+
+    expect(result.content[0]?.text).toContain('2');
+    expect(readToolError(result.details)).toBeUndefined();
   });
 });

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmEvent } from '../types.js';
+import { disposeChain } from './chain.js';
 import { ARCHIVE_BATCH_MESSAGES, POOL_MAX_MESSAGES } from './context-window.js';
 import { threadDir } from './dirs.js';
 import type { HistoryStore } from './history.js';
@@ -97,6 +98,14 @@ export class SummaryStore {
     const next = prev.then(() => this.maybeArchive(userId, agentName, threadId)).catch(() => {});
     this.chains.set(key, next);
     return next;
+  }
+
+  /**
+   * 释放该会话的串行链内存（2026-10-27）：删会话时调用，等链排空后删键。
+   * 安全性见 `disposeChain`（期间有新触发则保留不动）。
+   */
+  disposeThread(userId: string, agentName: string, threadId: string): Promise<void> {
+    return disposeChain(this.chains, `${userId}/${agentName}/${threadId}`);
   }
 
   private async maybeArchive(userId: string, agentName: string, threadId: string): Promise<void> {

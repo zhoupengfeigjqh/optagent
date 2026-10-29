@@ -150,7 +150,16 @@ describe('AgentArea —— 设计器候选目录（§5.6，2026-10-17）', () =>
     getAgentCatalog.mockResolvedValue({
       builtin_tools: [],
       builtin_tools_error: '运行环境不可达（测试桩）',
-      mcp_services: [{ name: 'ocr', description: '', transport: 'http', url: null, has_headers: false, allowed_tools: [] }],
+      mcp_services: [
+        {
+          name: 'ocr',
+          description: '',
+          transport: 'http',
+          url: null,
+          has_headers: false,
+          allowed_tools: [],
+        },
+      ],
       skills: [],
       ontologies: [],
     })

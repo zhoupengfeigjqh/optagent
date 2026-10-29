@@ -41,8 +41,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     try {
       builtinTools = await ctx.catalog.builtinTools();
     } catch (err) {
-      builtinToolsError =
-        err instanceof ApiError ? err.message : `运行环境不可达：${(err as Error).message}`;
+      builtinToolsError = err instanceof ApiError ? err.message : `运行环境不可达：${(err as Error).message}`;
     }
 
     const [mcpServices, skills] = await Promise.all([

@@ -132,6 +132,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 | `allowed_tools` | array | ✅ | **新建必填且非空**（trim + 同服务内去重）；保存（`PUT`）**可选**——**缺省 = 沿用存量，提供 = 全量替换且必须非空**（空数组或形状非法即 `VALIDATION_FAILED`）；缺省 = `[]`（存量记录） | **工具白名单**（2026-10-03；**2026-10-15 起可调整**）：该服务**可见**的原始工具名清单。语义三点：①**空数组 = 不限制**（白名单上线前的存量记录，物化时不写该字段）；②平台详情只呈现白名单里的工具（`tools`），缺失项进 `missing_tools` 供界面标异常；③运行环境装配时按它过滤工具表（**清单外的工具对模型不可见**，见 `contracts/runtime-api-delta.md` §11）。**调整入口**：详情页「工具清单」点「重新探测」，探测成功后弹工具范围窗（勾选基准是 §3.2 的 `available_tools`），保存走 `PUT`。原"创建后不可改"（`PUT` 携带即 `ADM_MCP_TOOL_SCOPE_LOCKED`）已下架——工具改版/下架后只能删服务重建，代价过大 |
 
+| `tool_labels` | object | ✅ | 可为空对象；键为原始工具名（trim 非空），值为 1~40 字单行非空字符串；空串/超长/含控制字符即 `VALIDATION_FAILED`；**缺省 = 沿用存量，提供 = 全量替换**（`{}` 即清空） | **工具显示名**（2026-10-27）：`{原始工具名: 人读名称}`，供平台工具清单展示与运行环境**意图聚焦命题**（`是否需要使用 BOM 校验 ？`）——中文名的判定准确率显著高于 `server: tool` 英文拼接。与 `allowed_tools` **不强制对齐**（允许先命名后勾选），物化时按白名单过滤孤儿键；**非空才写**进 `MCP.json`（见 `contracts/runtime-api-delta.md` §22）。平台是唯一权威源，服务端 `Tool.title` 仅作运行侧兜底 |
+
 | `headers` | object | ✅ | 可为空对象；形状 `{头名: 值}`：头名须为合法 HTTP 头名（RFC 7230 token，两端空白 trim、**大小写不敏感下不重复**），值为**单行非空字符串**（trim），**MUST NOT 是掩码形态**；`transport=stdio` 时恒为 `{}`（丢弃）；**缺省 = 沿用存量**，提供 = 全量替换（`{}` 即清空） | **请求头 / 访问令牌**（2026-10-08）：部分 MCP 服务（本体侧「自建发布」的动态容器）要求调用方带 `X-MCP-Token`，**缺了直接 401**——服务本身是好的，只看得到"连不上"。三条纪律：①**存明文**（服务要按原样发送），信任边界与 `agent-backend/.env.local` 同级；②**响应只回掩码**（`maskHeaders`，形如 `6UuE…F3Z`；列表只给 `has_headers` 布尔量），MUST NOT 把掩码提交回来做连接或保存（保存期直接拒）；③**可改**（令牌会轮换；与白名单同为"缺省 = 沿用存量、提供 = 全量替换"的口径），但"不携带"必须沿用存量——保存调用配置 MUST NOT 顺手清空令牌。物化进 `MCP.json` 的键同名、**空对象不写**（见 `contracts/runtime-api-delta.md` §12） |
 
 > **2026-09-15 变更**：`writable` / `permission_scope` 已从本实体移除（产品决定）；读取历史存档时 MUST 收敛掉这两个字段。
@@ -145,6 +147,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 5. **异步工具无配置项**（2026-10-17 起 `async_tools` 已移除）：判据 = 工具自己的入参 schema 是否声明 `resultUrl`，由运行环境自动注入回写地址（契约 §10）。
 6. **`allowed_tools`（工具白名单，2026-10-03；2026-10-15 起可调整）**：**新建必填且非空**（漏传/空数组 → `VALIDATION_FAILED`）；`PUT` **缺省即沿用存量**、提供即全量替换且**必须非空**（空数组/形状非法 → `VALIDATION_FAILED`——空 = 不限制，与"一个都不给"语义相反，静默接受恰恰就是当初要防的风险）。只校验语法，**不校验名字是否存在于当前清单**（名字漂移由详情页的 `missing_tools` 核对呈现）。平台详情只呈现白名单里的工具；运行环境只把白名单里的工具挂给数字人；**改完 MUST 重新部署**受影响的数字人才生效。
 7. **`headers`（请求头，2026-10-08）**：逐项判据见上表（头名合法且不重复、值为单行非空、非掩码），违反即 `VALIDATION_FAILED`；`PUT` **不携带即沿用存量**、携带即全量替换（`{}` 清空）；`stdio` 丢弃。**新建/保存响应与详情只回掩码**，明文不进任何响应。
+8. **`tool_labels`（工具显示名，2026-10-27）**：逐项判据见上表（值 1~40 字单行非空、键非空），违反即 `VALIDATION_FAILED`；`PUT` **不携带即沿用存量**、携带即全量替换（`{}` 清空）；与传输方式无关。**平台是唯一权威源**：运行环境按「`tool_labels[原始工具名]` > 服务端 `Tool.title` > `server: tool`」取显示名，用于**意图聚焦命题**（不影响工具调用名）。物化时非空才写、并按 `allowed_tools` 过滤孤儿键；**改完 MUST 重新部署**受影响的数字人才生效。
 
 **引用关系**：数字人经 `MCP.json` 的 `servers[].name` 按名称引用；引用关系**不落库**（规格关键实体「引用关系」），按需从数字人设计态推导。
 
@@ -350,7 +353,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 |---|---|---|
 | `soul` | `SOUL.md` | 原样写入（utf8，保留换行与标点） |
 | `enabled_tools` | `TOOL.json` 的 `enabled` | 原样写入；未配置写 `[]` |
-| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `allowed_tools`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
+| `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `allowed_tools` / `tool_labels`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
 | `ontologies[]`（`{场景名}/{本体名}`） | `ontology/{场景}/{本体}/ontology.yaml` + `securities.yaml` | 从本体库**整包复制这两个必需文件**（原样字节，2026-10-17，`FR-064`）；与 `skills/` 平级，不混进四件套；库内缺任一文件即**预检失败**（`ADM_ONTOLOGY_NOT_FOUND`，零写入） |
 | `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`）；`data_prep_uploads`（2026-10-13 新增）同样**仅在非空时写入**（未配置的目录不出现键），产物随数字人目录**整体覆盖**，平台侧未配置则无该键，运行环境据此回落平台默认 `.csv` + `.xlsx` |

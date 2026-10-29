@@ -25,6 +25,7 @@ import {
   type RuntimeContext,
 } from '../../src/infra/mcp/mcp-tool-adapter.js';
 import type { FileArgMode } from '../../src/domain/file-arg-path.js';
+import { readToolError } from '../../src/domain/tool-error.js';
 import type { McpCallEvent } from '../../src/types.js';
 
 interface Call {
@@ -86,6 +87,49 @@ function buildTools(
   );
 }
 
+describe('工具显示名（tool_labels，2026-10-27）', () => {
+  /** 平台配置优先：中文名会进意图聚焦命题，调用名仍必须是 `{server}__{tool}` */
+  it('平台配置的显示名优先于服务端 title 与英文拼接', () => {
+    const tools = mcpToolsAsAgentTools(
+      fakeManager([]),
+      'bom-service',
+      [{ ...TOOL_WITHOUT_CONTEXT, title: '服务端标题' }] as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { ocr_image: '识别图片文字' },
+    );
+    expect(tools[0]?.name).toBe('bom-service__ocr_image');
+    expect(tools[0]?.label).toBe('识别图片文字');
+  });
+
+  it('平台未配置时回退服务端 Tool.title（兜底，不强制服务端声明）', () => {
+    const tools = mcpToolsAsAgentTools(
+      fakeManager([]),
+      'bom-service',
+      [{ ...TOOL_WITHOUT_CONTEXT, title: '服务端标题' }] as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { other_tool: '别的工具' },
+    );
+    expect(tools[0]?.label).toBe('服务端标题');
+  });
+
+  it('都没有时回退 `server: tool`（存量行为零变化）', () => {
+    const tools = mcpToolsAsAgentTools(fakeManager([]), 'bom-service', [
+      TOOL_WITHOUT_CONTEXT,
+    ] as never);
+    expect(tools[0]?.label).toBe('bom-service: ocr_image');
+  });
+});
+
 /** 取工具执行结果（适配 pi-agent-core 的 execute 签名） */
 async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, params: unknown) {
   return (await tool.execute('call_1' as never, params as never)) as {
@@ -140,13 +184,17 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     expect(events[0]!.errorKind).toBeUndefined();
   });
 
-  it('失败：带 ok=false 与错误分类，且原错误仍上抛（埋点不吞异常）', async () => {
+  it('失败：带 ok=false 与错误分类，原错误文案进结果并标红（不抛，2026-10-29）', async () => {
     const events: McpCallEvent[] = [];
     const tool = build(events, async () => {
       throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
     });
 
-    await expect(exec(tool, { image: 'a.png' })).rejects.toThrow('ECONNREFUSED');
+    const result = await exec(tool, { image: 'a.png' });
+
+    // 不抛：pi 的 catch 会覆盖 result（文案/details 全丢），改由 afterToolCall 翻 isError
+    expect(result.content[0]?.text).toContain('ECONNREFUSED');
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_CALL_FAILED' });
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -193,6 +241,8 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     const result = await exec(tool!, { image: '不存在/a.png' });
 
     expect(result.content[0]?.text).toContain('文件参数校验失败');
+    // 标记失败（2026-10-29）：调用未发出也要让用户看见卡片标红
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_FILE_ARGS_DENIED' });
     expect(calls).toHaveLength(0);
     expect(events).toEqual([]);
   });
@@ -588,6 +638,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     expect(result.content[0]?.text).toContain('文件参数校验失败');
     expect(result.content[0]?.text).toContain('items 应为数组');
     expect(result.content[0]?.text).toContain('实际是 string');
+    expect(readToolError(result.details)).toMatchObject({ code: 'MCP_FILE_ARGS_DENIED' });
   });
 
   it('形状不符（元素不是对象）→ 报错里带元素下标，长清单里能直接定位', async () => {

@@ -55,6 +55,8 @@ function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = 
       back: noop,
     },
     workspace: { spaces: ref([]), loading: ref(false) },
+    // 014：空数据引导状态（默认不出气泡）
+    emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref({ agent_name: 'demo' }),
       candidates: ref([]),

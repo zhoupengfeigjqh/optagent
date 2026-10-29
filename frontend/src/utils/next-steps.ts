@@ -34,6 +34,8 @@ export interface NextStepSendPayload {
   attachments: FileReference[]
   /** 隐藏引导：非空才携带（空串 MUST NOT 出现在请求里） */
   guidance?: string
+  /** 013：卡片已自带工具引导，本轮跳过意图聚焦（服务端据 `skip_intent_focus` 判定） */
+  skipIntentFocus: true
 }
 
 /** 卡片 → 下一轮请求载荷：正文只有提示词；关联工具仅经 `guidance` 的隐藏通道回传。 */
@@ -42,5 +44,7 @@ export function nextStepSendPayload(action: AgentStarter): NextStepSendPayload {
     content: action.prompt,
     attachments: [],
     ...(action.guidance ? { guidance: action.guidance } : {}),
+    // 013：卡片自带工具引导，避免"两套规划指令打架"（FR-008/FR-044）
+    skipIntentFocus: true,
   }
 }

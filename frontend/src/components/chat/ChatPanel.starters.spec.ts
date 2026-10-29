@@ -64,6 +64,8 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
       back: noop,
     },
     workspace: { spaces: ref([]), loading: ref(false) },
+    // 014：空数据引导状态（默认不出气泡）
+    emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(options.agent ?? null),
       candidates: ref([]),
@@ -195,6 +197,8 @@ describe('ChatPanel —— 新建对话页的首屏引导（004）', () => {
       content: '帮我梳理昨天订单的交付风险',
       attachments: [],
       guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+      // 013：首屏问题实例卡片同样跳过意图聚焦（FR-043/FR-044）
+      skipIntentFocus: true,
     })
   })
 
@@ -242,6 +246,8 @@ describe('ChatPanel —— 新建对话页的首屏引导（004）', () => {
     expect(onSend).toHaveBeenCalledWith({
       content: '这个月哪些订单可能延期？',
       attachments: [],
+      // 013：无引导也不影响跳过意图聚焦
+      skipIntentFocus: true,
     })
   })
 

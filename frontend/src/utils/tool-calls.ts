@@ -13,6 +13,8 @@ import type { Message, ToolCallRecord, ViewLink } from '../api/types'
 export interface ToolCallItem {
   callId: string
   name: string
+  /** 人读名称（2026-10-27）：卡片标题显示它；缺省 = 无中文名，回退 `name` */
+  label?: string
   /**
    * `running` = 结果还没到。两种语境文案不同（见 `toolStatusLabel`）：
    * 流式进行中 → `进行中`；非流式（中断/失败轮、历史里只有开始行的记录）→ `未完成`
@@ -35,10 +37,12 @@ export interface ToolCallItem {
   viewLinks?: ViewLink[]
 }
 
-/** 流式瞬态工具项（SSE 只给名称与状态）。 */
+/** 流式瞬态工具项（SSE 只给名称、人读名称与状态）。 */
 export interface StreamingToolCall {
   call_id: string
   name: string
+  /** 人读名称（2026-10-27 起随事件下发；缺省回退 `name`） */
+  label?: string
   status: 'running' | 'success' | 'error'
 }
 
@@ -52,6 +56,7 @@ export function toToolCallItem(record: ToolCallRecord): ToolCallItem {
   return {
     callId: record.call_id,
     name: record.name,
+    ...(record.label !== undefined && record.label !== '' ? { label: record.label } : {}),
     status: record.status,
     ...(record.duration_ms !== undefined ? { durationMs: record.duration_ms } : {}),
     ...(record.size !== undefined ? { size: record.size } : {}),
@@ -81,7 +86,22 @@ export function collectToolViewLinks(items: readonly ToolCallItem[]): ViewLink[]
 
 /** 流式瞬态 → 展示模型。 */
 export function streamingToolCallItem(call: StreamingToolCall): ToolCallItem {
-  return { callId: call.call_id, name: call.name, status: call.status }
+  return {
+    callId: call.call_id,
+    name: call.name,
+    ...(call.label !== undefined && call.label !== '' ? { label: call.label } : {}),
+    status: call.status,
+  }
+}
+
+/**
+ * 卡片标题用的工具名（2026-10-27）：人读名称优先，缺失回退调用名。
+ *
+ * 两条显示路径（工具卡片、HITL 弹窗）共用同一条回退规则——`label` 缺失时显示
+ * `jev__noul` 这类调用名，仍然能对上后端日志；有中文名时原始名退到 `title` 悬停。
+ */
+export function toolDisplayName(item: { name: string; label?: string }): string {
+  return item.label !== undefined && item.label !== '' ? item.label : item.name
 }
 
 /**
@@ -134,19 +154,6 @@ export function summarizeToolCalls(items: ToolCallItem[]): ToolCallStats {
  */
 export function toolGroupKey(items: ToolCallItem[]): string {
   return items[0]?.callId ?? ''
-}
-
-/** 体积的人类可读形式（与后端 `formatBytes` 同口径，便于前后端文案一致）。 */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 耗时的紧凑形式（毫秒 → `84ms` / `1.6s`）。 */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
 }
 
 /** 入参摘要 → 一行可读文本（`path=数据准备/x.csv`）。 */

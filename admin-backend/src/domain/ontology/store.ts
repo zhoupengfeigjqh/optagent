@@ -184,12 +184,7 @@ export class OntologyStore {
   ): Pick<OntologyIdentity, 'scenario_name' | 'ontology_name'> | null {
     const scenario = stored.metadata?.scenario_name;
     const ontology = stored.metadata?.ontology_name;
-    if (
-      typeof scenario !== 'string' ||
-      scenario === '' ||
-      typeof ontology !== 'string' ||
-      ontology === ''
-    ) {
+    if (typeof scenario !== 'string' || scenario === '' || typeof ontology !== 'string' || ontology === '') {
       return null;
     }
     return { scenario_name: scenario, ontology_name: ontology };
@@ -239,8 +234,7 @@ export class OntologyStore {
     assertSafeSegment('本体名', ontologyDir);
     return (
       this.listAll().find(
-        (item) =>
-          item.metadata.scenario_name === scenario && item.metadata.ontology_name === ontologyDir,
+        (item) => item.metadata.scenario_name === scenario && item.metadata.ontology_name === ontologyDir,
       ) ?? null
     );
   }
@@ -329,11 +323,7 @@ export class OntologyStore {
   }
 
   /** 落盘记录的持久身份（落盘无独立身份字段，只能从 metadata 读） */
-  private static sameIdentity(
-    stored: OntologyStoredRecord,
-    scenario: string,
-    ontologyDir: string,
-  ): boolean {
+  private static sameIdentity(stored: OntologyStoredRecord, scenario: string, ontologyDir: string): boolean {
     return stored.metadata?.scenario_name === scenario && stored.metadata?.ontology_name === ontologyDir;
   }
 

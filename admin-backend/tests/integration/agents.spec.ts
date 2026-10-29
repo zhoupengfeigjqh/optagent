@@ -365,9 +365,9 @@ describe('GET /api/admin/agents/catalog（§5.6，2026-10-17）', () => {
 
     // 候选就是 `{ metadata }`：身份只有一份来源，不再下发 scenario / ontology_dir / name
     const metaOf = (item: Record<string, unknown>) => item.metadata as Record<string, unknown>;
-    expect(items.map((item) => `${metaOf(item).scenario_name as string}/${metaOf(item).ontology_name as string}`)).toEqual(
-      expect.arrayContaining(['生产调度/原材料采购和库存', '生产调度/工艺路线']),
-    );
+    expect(
+      items.map((item) => `${metaOf(item).scenario_name as string}/${metaOf(item).ontology_name as string}`),
+    ).toEqual(expect.arrayContaining(['生产调度/原材料采购和库存', '生产调度/工艺路线']));
 
     const picked = items.find((item) => metaOf(item).ontology_name === '原材料采购和库存');
     expect(metaOf(picked!).scenario_name).toBe('生产调度');

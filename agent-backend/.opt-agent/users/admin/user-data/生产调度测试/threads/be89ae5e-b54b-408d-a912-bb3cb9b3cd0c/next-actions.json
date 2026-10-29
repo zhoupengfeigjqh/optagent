@@ -1,0 +1,17 @@
+{
+  "message_id": "m_mvq1214n_jgo3",
+  "agent_name": "生产调度测试",
+  "created_at": "2026-10-27T01:49:19.740Z",
+  "actions": [
+    {
+      "prompt": "查看当前原材料库存整体情况",
+      "tools": [
+        {
+          "kind": "builtin",
+          "name": "read_skill"
+        }
+      ],
+      "guidance": "本轮请调用以下工具完成用户上一条消息要求的任务：read_skill（读取本数字人所配置技能内的文件：path 省略时读该技能的 SKILL.md（技能入口说明），也可读 references/ 等其他文档（如 \"referen…）。请按用户消息与已知上下文补全参数；不要改用其它工具。"
+    }
+  ]
+}

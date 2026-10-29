@@ -10,6 +10,7 @@
  * | 首屏欢迎语 / 问题实例 | **只给前台**：新建对话页的引导（经「快速上手」弹窗编辑） |
  * | 主要使命 / 能力标签 / 绝对禁止 / 补充说明 | **进系统提示词** |
  * | 下一步动作提示（007） | **运行环境开关**：只写进 SOUL.md 的 frontmatter，由运行环境读取 |
+ * | 意图聚焦（013） | **运行环境开关**：同上，与 007 开关互相独立 |
  *
  * 这么分是因为运行环境只把 SOUL.md 的**正文**当作系统提示词
  * （frontmatter 承载展示数据），界面上说清归属，管理员才不会把展示文案
@@ -232,6 +233,30 @@ function onHintCountChange(event: Event): void {
       </p>
     </fieldset>
 
+    <!-- 013：同样是运行期开关（只进 frontmatter），但与上面的「下一步动作提示」**互相独立**：
+         四种组合各自生效，勾一个不影响另一个 -->
+    <fieldset class="soul-editor__intent-focus">
+      <legend class="field__label">
+        意图聚焦
+        <span class="soul-editor__scope">运行环境开关</span>
+      </legend>
+      <label class="soul-editor__switch">
+        <input
+          type="checkbox"
+          data-test="intent-focus"
+          :checked="soul.intent_focus === true"
+          @change="patch({ intent_focus: ($event.target as HTMLInputElement).checked })"
+        />
+        是否开启意图聚焦
+      </label>
+      <p class="field__hint" data-test="intent-focus-hint">
+        开启后，每一轮对话在生成回答**之前**先做一次意图判定，把最相关的工具作为本轮规划重点。
+        关闭则部署后该功能消失：<strong>产物里不会写这个键</strong>，运行环境不会为此多做一次判定调用。
+        与「下一步动作提示」互不影响；由预置卡片（问题实例 /
+        下一步动作卡片）发起的轮次一律跳过判定。
+      </p>
+    </fieldset>
+
     <QuickStartDialog
       v-model:open="quickStartOpen"
       :welcome="soul.welcome"
@@ -273,7 +298,8 @@ function onHintCountChange(event: Event): void {
   padding: var(--space-3);
 }
 
-.soul-editor__next-steps {
+.soul-editor__next-steps,
+.soul-editor__intent-focus {
   border: 1px solid var(--color-border, #dfe3ea);
   border-radius: var(--radius-md);
   padding: var(--space-3);

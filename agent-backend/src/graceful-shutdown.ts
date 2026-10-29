@@ -57,9 +57,15 @@ export async function gracefulShutdown(
   return 'aborted';
 }
 
-/** 轮询至无活跃 run（run 的 done/abort 收尾在 consume 的 finally 中完成） */
+/**
+ * 轮询至无在途请求（run 的 done/abort 收尾在 consume 的 finally 中完成）。
+ *
+ * 口径含"启动中占位"（2026-10-27）：占位横跨「取实例 + 等 MCP 就绪」最长数秒，
+ * 只看 `activeRunCount` 会在占位转正的瞬间判定"已排空"，与新一轮开跑赛跑。
+ * 关闭期间的新请求由路由按 `isDraining()` 直接 503，占位会很快消失，不会拖长 drain。
+ */
 async function waitUntilDrained(runManager: RunManager): Promise<void> {
-  while (runManager.activeRunCount() > 0) await sleep(20);
+  while (runManager.inFlightCount() > 0) await sleep(20);
 }
 
 function sleep(ms: number): Promise<void> {

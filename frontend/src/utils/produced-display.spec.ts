@@ -7,8 +7,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   badgeText,
-  formatBytes,
-  formatDateTime,
   middleEllipsis,
   producedSummary,
   producedTag,
@@ -33,32 +31,6 @@ describe('relativeTime', () => {
 
   it('未来时刻不出现负数（按"刚刚"处理）', () => {
     expect(relativeTime('2026-09-25T12:05:00.000Z', NOW)).toBe('刚刚')
-  })
-})
-
-describe('formatDateTime', () => {
-  it('按本地时区格式化为 YYYY-MM-DD HH:mm:ss，月/日/时/分/秒补零', () => {
-    // 先构造本地时刻再转 ISO，保证断言不随运行机器时区变化
-    const iso = new Date(2026, 8, 25, 9, 5, 3).toISOString()
-    expect(formatDateTime(iso)).toBe('2026-09-25 09:05:03')
-  })
-
-  it('无法解析的时间给可读占位，不留空白', () => {
-    expect(formatDateTime('not-a-time')).toBe('时间未知')
-  })
-})
-
-describe('formatBytes', () => {
-  it('B / KB / MB 三档，与后端一致（KB/MB 保留一位小数）', () => {
-    expect(formatBytes(0)).toBe('0 B')
-    expect(formatBytes(1023)).toBe('1023 B')
-    expect(formatBytes(1536)).toBe('1.5 KB')
-    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB')
-  })
-
-  it('非法输入给占位而不是 NaN', () => {
-    expect(formatBytes(Number.NaN)).toBe('—')
-    expect(formatBytes(-1)).toBe('—')
   })
 })
 

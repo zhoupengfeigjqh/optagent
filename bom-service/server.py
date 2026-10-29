@@ -249,23 +249,47 @@ def _run(kind, kwargs, *, filename: str = "",
     return public, (xlsx or b""), result
 
 
-@mcp.tool(structured_output=False)
+@mcp.tool(title="BOM 校验", structured_output=False)
 async def bom_validate(
-    sub_bom_zip_path: Annotated[str, Field(description=f"子BOM 打包 zip，{_PATH_DOC}")],
-    total_bom_path: Annotated[str, Field(description=f"总BOM（顶层总成表）excel，{_PATH_DOC}")],
-    schema_path: Annotated[str, Field(description=f"总BOM标准字段.json，{_PATH_DOC}")],
-    mapping_path: Annotated[str, Field(description=f"子BOM字段映射.json，{_PATH_DOC}")],
+    sub_bom_zip_path: Annotated[
+        str,
+        Field(title="子BOM 压缩包", description=f"子BOM 打包 zip，{_PATH_DOC}"),
+    ],
+    total_bom_path: Annotated[
+        str,
+        Field(title="总BOM 表格", description=f"总BOM（顶层总成表）excel，{_PATH_DOC}"),
+    ],
+    schema_path: Annotated[
+        str,
+        Field(title="标准字段文件", description=f"总BOM标准字段.json，{_PATH_DOC}"),
+    ],
+    mapping_path: Annotated[
+        str,
+        Field(title="字段映射文件", description=f"子BOM字段映射.json，{_PATH_DOC}"),
+    ],
     total_bom_sheet: Annotated[
         str | None,
-        Field(description='总BOM 的工作表名（如 "WCCMT-00000B0570-B包"）。留空取第一个工作表；'
-                          "指定的表不存在时报错并列出全部可用表名"),
+        Field(
+            title="总BOM 工作表名",
+            description='总BOM 的工作表名（如 "WCCMT-00000B0570-B包"）。留空取第一个工作表；'
+            "指定的表不存在时报错并列出全部可用表名",
+        ),
     ] = None,
     root: Annotated[
         str | None,
-        Field(description="根组件编码（如 WCCMT-00000B0570）。留空则由总BOM 文件名去掉版本后缀推断"),
+        Field(
+            title="根组件编码",
+            description="根组件编码（如 WCCMT-00000B0570）。留空则由总BOM 文件名去掉版本后缀推断",
+        ),
     ] = None,
-    order_units: Annotated[float, Field(description="订单台数；累计用量 total_qty 的连乘基数，默认 1")] = 1.0,
-    max_issues: Annotated[int, Field(description="返回的问题条目上限（默认 200），超出只给前 N 条并注明总数")] = 200,
+    order_units: Annotated[
+        float,
+        Field(title="订单台数", description="订单台数；累计用量 total_qty 的连乘基数，默认 1"),
+    ] = 1.0,
+    max_issues: Annotated[
+        int,
+        Field(title="问题条目上限", description="返回的问题条目上限（默认 200），超出只给前 N 条并注明总数"),
+    ] = 200,
 ) -> str:
     """校验一批子BOM 能否合并成一棵完整的多级总BOM（**dry-run，不产出 BOM 文件**）。
 
@@ -295,31 +319,55 @@ async def bom_validate(
     return result_json(public)
 
 
-@mcp.tool(structured_output=False)
+@mcp.tool(title="BOM 合并", structured_output=False)
 async def bom_merge(
-    sub_bom_zip_path: Annotated[str, Field(description=f"子BOM 打包 zip，{_PATH_DOC}")],
-    total_bom_path: Annotated[str, Field(description=f"总BOM（顶层总成表）excel，{_PATH_DOC}")],
-    schema_path: Annotated[str, Field(description=f"总BOM标准字段.json，{_PATH_DOC}")],
-    mapping_path: Annotated[str, Field(description=f"子BOM字段映射.json，{_PATH_DOC}")],
+    sub_bom_zip_path: Annotated[
+        str,
+        Field(title="子BOM 压缩包", description=f"子BOM 打包 zip，{_PATH_DOC}"),
+    ],
+    total_bom_path: Annotated[
+        str,
+        Field(title="总BOM 表格", description=f"总BOM（顶层总成表）excel，{_PATH_DOC}"),
+    ],
+    schema_path: Annotated[
+        str,
+        Field(title="标准字段文件", description=f"总BOM标准字段.json，{_PATH_DOC}"),
+    ],
+    mapping_path: Annotated[
+        str,
+        Field(title="字段映射文件", description=f"子BOM字段映射.json，{_PATH_DOC}"),
+    ],
     total_bom_sheet: Annotated[
         str | None,
-        Field(description="总BOM 的工作表名。留空取第一个工作表；指定不存在时报错并列出全部可用表名"),
+        Field(
+            title="总BOM 工作表名",
+            description="总BOM 的工作表名。留空取第一个工作表；指定不存在时报错并列出全部可用表名",
+        ),
     ] = None,
     root: Annotated[
         str | None,
-        Field(description="根组件编码。留空则由总BOM 文件名去掉版本后缀推断"),
+        Field(title="根组件编码", description="根组件编码。留空则由总BOM 文件名去掉版本后缀推断"),
     ] = None,
-    order_units: Annotated[float, Field(description="订单台数；累计用量 total_qty 的连乘基数，默认 1")] = 1.0,
+    order_units: Annotated[
+        float,
+        Field(title="订单台数", description="订单台数；累计用量 total_qty 的连乘基数，默认 1"),
+    ] = 1.0,
     max_issues: Annotated[
         int,
-        Field(description="返回的问题条目上限（默认 20）。更完整的清单见合并报告与 xlsx 的 `校验汇总` sheet"),
+        Field(
+            title="问题条目上限",
+            description="返回的问题条目上限（默认 20）。更完整的清单见合并报告与 xlsx 的 `校验汇总` sheet",
+        ),
     ] = 20,
     resultUrl: Annotated[
         str | None,
-        Field(description=(
-            "产出回写地址。**由运行环境自动注入，请勿自行填写**；"
-            "留空（默认）时只返回统计、不交付文件"
-        )),
+        Field(
+            title="结果回写地址",
+            description=(
+                "产出回写地址。**由运行环境自动注入，请勿自行填写**；"
+                "留空（默认）时只返回统计、不交付文件"
+            ),
+        ),
     ] = None,
 ) -> str:
     """把一批子BOM 合并成一棵多级总BOM，按 schema_path 输出 xlsx，并**写入调用者的文件空间**。

@@ -2,6 +2,7 @@
 soul_version: 1
 next_action_hints: true
 next_action_hints_count: 1
+intent_focus: true
 intro: 我是BOM数字人，专门负责BOM数据的解析和对齐等操作
 welcome: 您好，我是一位BOM合成助手！
 starters:

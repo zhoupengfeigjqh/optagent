@@ -92,10 +92,7 @@ describe('`user_ids: []` 必须被拒绝（2026-10-20）', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect((res.json().users as Array<{ user_id: string }>).map((u) => u.user_id)).toEqual([
-      'admin',
-      'ops',
-    ]);
+    expect((res.json().users as Array<{ user_id: string }>).map((u) => u.user_id)).toEqual(['admin', 'ops']);
   });
 });
 

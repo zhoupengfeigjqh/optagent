@@ -285,6 +285,7 @@ export class AgentDesignService {
    *
    * **2026-10-12（007）**：已结构化的存档文档补齐 `next_action_hints: false`
    * 与 `next_action_hints_count` 的缺省值。
+   * **2026-10-25（013）**：同上补齐 `intent_focus: false`（存量数字人默认不聚焦）。
    * 与 `data_prep_fields` 同理——目的是**对外契约恒有该键**，界面不必判空、
    * 部署物化不依赖 `undefined`（`renderSoulMd` 只在 `true` 时写 frontmatter，
    * 故补齐不会让关闭态产物多出任何键）。
@@ -299,8 +300,19 @@ export class AgentDesignService {
     const soul = doc.soul;
     const hints = typeof soul.next_action_hints === 'boolean' ? soul.next_action_hints : false;
     const count = readStoredHintCount(soul.next_action_hints_count);
-    if (hints === soul.next_action_hints && count === soul.next_action_hints_count) return doc;
-    return { ...doc, soul: { ...soul, next_action_hints: hints, next_action_hints_count: count } };
+    // 013：开关同样收敛到 `false`（非布尔按关处理，与运行侧 `parseSoulMeta` 同一 fail-closed 口径）
+    const focus = typeof soul.intent_focus === 'boolean' ? soul.intent_focus : false;
+    if (
+      hints === soul.next_action_hints &&
+      count === soul.next_action_hints_count &&
+      focus === soul.intent_focus
+    ) {
+      return doc;
+    }
+    return {
+      ...doc,
+      soul: { ...soul, next_action_hints: hints, next_action_hints_count: count, intent_focus: focus },
+    };
   }
 
   /**

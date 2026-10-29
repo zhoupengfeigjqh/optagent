@@ -33,6 +33,8 @@
 | R19 | 新增内置工具 **`grep_skill`**：补齐 SKILL 内容的**检索**通道（`read_skill` 只解决"读得到"），内置工具目录由 6 项增至 7 项（2026-10-17） | 新增工具 + 目录项 | 否（须在 `TOOL.json` 的 `enabled` 里显式声明；存量数字人不声明即零变化） |
 | R20 | **LLM 调用的有界重试与失败可诊断**（特性 `002-conversation-runtime` 增量，2026-10-15）：重试复用 `pi-ai`；`error` 对象新增三个可选诊断字段；新增流级错误码 | 新增可选字段 + 错误码 | 否（SSE 事件集合不变，旧前端忽略未知字段） |
 | R21 | **MCP 预热与发送前就绪门**（2026-10-18）：新增 `POST /api/agents/current/mcp/warm`（幂等预热，返回与 `GET .../mcp` 同形快照）；建连新增有界超时 `MCP_CONNECT_TIMEOUT_MS`（10s）；发消息前有界等待建连落定 | 新增端点 + 新环境变量 + 时序变更 | 否（`GET .../mcp` 仍纯只读；稳态首字延迟零变化；超时降级继续） |
+| R22 | **意图聚焦**（特性 `013-intent-focus`，2026-10-25）：SOUL.md frontmatter 新增 `intent_focus` 开关；`POST /api/threads/{id}/messages` 请求体新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`（只写、无运行期读取方）；主模型调用前新增一次有界判定（独立 Laya 服务，直连 HTTP） | 新增配置字段 + 请求字段 + 侧车文件 + 时序变更 | 否（开关缺省**关闭**；SSE 事件集合、会话详情、`next-actions` 端点、数字人详情、工具清单**零变更**） |
+| R23 | **MCP 工具显示名**（2026-10-27）：MCP 服务配置新增 `tool_labels`（`{原始工具名: 人读名称}`）；部署物化进 `MCP.json`（非空才写、按白名单过滤孤儿键）；运行环境据此取 `AgentTool.label`（优先级：平台配置 > 服务端 `Tool.title` > `server: tool`），用于**意图聚焦命题**与平台工具清单展示 | 新增配置字段 + 物化键 + 展示名来源 | 否（缺省不写键：存量 `MCP.json` 字节不变、英文拼接行为零变化；工具调用名不变） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -185,7 +187,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 |---|---|
 | `/api/files/*`（`upload`/`list`/`download`/`preview`/`DELETE`/`workspace`） | 目录合法性改为按**当前选中数字人**的场景清单判定；未选中数字人时 `409 AGENT_NOT_SELECTED` |
 | `POST /api/files/upload` | 数据准备目录带字段约束时，暂存后落盘前校验上传表（`400 FILE_SCHEMA_INVALID` + `details[]` 逐条问题，失败不落盘），详见 §3.1；单文件上限 **5MB**（413 `FILE_TOO_LARGE`，与平台 SKILL ZIP 导入同一全局约束） |
-| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定 |
+| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定；**`predefined`（2026-10-29，014 新增，必填布尔）**：`true` 仅表示平台预定义二级目录（当前仅「算法规则」），共享/临时空间与管理员自定义目录恒为 `false`——供前端区分"参与空数据引导判定的目录"，前端 MUST NOT 硬编码目录名（详见 `specs/014-chat-onboarding-hint/contracts/workspace-dir-predefined.md`） |
 | `POST /api/threads/:id/messages` 的 `attachments` 校验 | 同一引用在不同数字人下可能合法/非法，按**本轮数字人**判定 |
 | `SCENARIO_NOT_CONFIGURED`（503） | 错误码不变，message 改为指名数字人 |
 
@@ -486,6 +488,8 @@ location /admin/ {
 
 被平台声明为"需人工确认"的 MCP 工具，在**执行前挂起**：运行环境经 SSE 下发该工具的参数 Schema 与模型提议值，用户在前端**确认/修改/拒绝**后，工具以用户确认的入参执行；拒绝或超时按"工具返回结构化错误"收尾，模型自行组织话术，**对话轮次正常完结**（业界惯例：LangGraph `interrupt`/resume、Claude Desktop 批准交互）。弹窗 UI 由工具自带的 `inputSchema` **动态驱动**，与具体 MCP 服务零绑定——新增需确认工具 = 平台改配置 + 部署，零代码。
 
+**工具失败标记口径（2026-10-29，跨内置/MCP/HITL 三者统一）**：工具**正常返回**时（无论业务成功还是业务不如人意，如库存不足、无匹配）一律不标记，卡片为"已完成"；工具**catch 到异常**，以及 HITL 拒绝/超时/本轮中断，MUST 在结果 `details` 上打 `toolError: { code, message }` 标记，由运行时 `afterToolCall` 统一翻成 `isError: true` → SSE `tool_call_end.status='error'` → 卡片标红（历史记录同样落 `status='error'`，刷新后一致）。**MUST NOT 用 throw 表达失败**：SDK 捕获异常后会覆盖整个结果（`content` 只剩一行 message、`details` 清空），结构化信息与既定文案都会丢。标记**不影响模型**：DeepSeek 走 pi-ai 的 OpenAI 兼容转换，该转换不读 `isError`，模型见到的正文逐字不变。
+
 ### 9.2 配置面（平台权威源）
 
 MCP 服务调用配置新增 `confirmation` 字段（缺省 `never`，**存量行为零变化**）：
@@ -552,7 +556,7 @@ data: {
 
 1. `confirmation` 缺省/`never` 时行为与改造前**完全一致**（无事件、无挂起、无端点依赖）；
 2. 提交终验在**服务端**（JSON Schema 子集校验器 `domain/interaction-schema.ts`），前端校验只做体验；
-3. run 被 stop/中断时全部挂起点按拒绝收尾，**不泄漏悬挂 promise**；超时同拒绝语义；
+3. run 被 stop/中断时全部挂起点按拒绝收尾，**不泄漏悬挂 promise**；超时同拒绝语义；**2026-10-29 起三者归因可分辨**（`InteractionOutcome.reject.reason` = `user` / `aborted`），工具结果文案分别为「用户拒绝了本次调用」「本轮已中断，调用未执行」「等待超时，调用未执行」，MUST NOT 把中断写成用户拒绝（宪章原则九）；
 4. 并发上限 3：单 run 同时等待的挂起点超过 3 个时 FIFO 排队，落定一个放行一个；
 5. 交互全生命周期（挂起/提交/拒绝/超时/中断收尾）落结构化运行日志（`event: 'interaction'`），**不落敏感参数值**；
 6. 该机制**不绕过**文件安全层：确认后的 args 仍走既有 `file_args` 铸造与沙箱校验。
@@ -1404,3 +1408,151 @@ POST /api/agents/current/mcp/warm
 
 - **兼容**：不新增/不修改任何既有响应字段与 SSE 事件；不落盘、不改历史行；`api/types.ts` 零新增类型（复用 `CurrentMcpResponse`）；
 - **回滚**：前端不再调用 `warm` 即回到"发消息才激活"（端点保留无副作用）；把 `MCP_CONNECT_TIMEOUT_MS` 调大可放宽建连等待（但不得低于 1000ms），发消息前的等待同理。
+
+---
+
+## §21 R22 — 意图聚焦（2026-10-25，特性 `013-intent-focus`）
+
+**规格**：[`specs/013-intent-focus/spec.md`](../../013-intent-focus/spec.md) | **契约**：[`contracts/intent-focus-api.md`](../../013-intent-focus/contracts/intent-focus-api.md)
+
+**背景**：工具变多后，主模型常把"本轮该用哪个工具"和"怎么回答"混在一次推理里，导致该用的工具没被选中。本特性在主模型调用**之前**用一个独立的轻量决策模型（Laya，System One 线协议）做一次意图判定，把高置信工具作为**本轮补充素材**追加，不改人格提示词、不改工具权限、不落历史。
+
+### 21.1 SOUL.md frontmatter 新增键
+
+```markdown
+---
+soul_version: 1
+intent_focus: true      # 仅开启时写入；关闭态整键不出现
+---
+```
+
+| 项 | 口径 |
+|---|---|
+| 写入条件 | 平台勾选「意图聚焦」（`soul.intent_focus === true`） |
+| 读取 | 运行环境**逐轮现读**、异常 / 非布尔一律按关闭（fail-closed） |
+| 与 007 开关 | **互相独立**：四种组合各自生效，互不写对方的键 |
+| 正文 | 逐字不变（该键不进 System Prompt，`FR-034`） |
+
+### 21.2 `POST /api/threads/{id}/messages` 请求体新增字段
+
+```jsonc
+{ "content": "…", "skip_intent_focus": true }
+```
+
+| 输入 | 行为 |
+|---|---|
+| 缺省 / `false` | 按 SOUL 开关决定是否判定 |
+| `true` | **本轮跳过**（不调用判定模型），仅留档 `disposition=skipped` |
+| 非布尔 / 拼错的字段名（`skipIntentFocus`） | **400 `VALIDATION_FAILED`** |
+
+> **严格校验的落点**：Fastify 默认 ajv 是 `coerceTypes: true` + `removeAdditional: true`
+> （`"true"` 会被悄悄转成 `true`、未知字段被静默丢弃）。本路由因此在 `preValidation`
+> 里再做一次严格校验——跳过标记必须是**可校验**的，静默错配只会表现为
+> "该跳过的没跳过"，无任何报错可循。作用域仅限本路由，不全局改 ajv 选项。
+
+### 21.3 线程目录新增侧车文件
+
+路径：`users/{uid}/user-data/{agentName}/threads/{threadId}/intent-focus.jsonl`
+
+| 项 | 口径 |
+|---|---|
+| 写入 | 每轮判定后追加 1 行；per-thread 串行；失败只告警（不影响对话） |
+| 读取 | **运行期无读取方**（仅离线分析与测试） |
+| 上限 | > 256KB 或 > 200 行 → 临时文件 + 原子改名，保留最近 100 条 |
+| 不进历史 | `history.jsonl` / 摘要 / 后续轮次素材中 MUST NOT 出现聚焦提示原文 |
+| 处置枚举 | `focused` / `empty` / `skipped` / `degraded` / `unconfigured`（开关关闭的轮次**不留档**） |
+
+### 21.4 判定模型接入（配置 + 环境变量）
+
+```yaml
+intent_focus:
+  base_url: http://laya:8000    # 只到主机端口，MUST NOT 带路径
+  model: laya-multilingual
+  api_key: $DECIS_API_KEY       # 不回落到 DEEPSEEK_API_KEY
+  timeout_ms: 3000              # 300~5000 的整数
+  threshold: 0.5                # 0~1
+  max_actions: 3                # 1~3 的整数
+```
+
+| 情形 | 结果 |
+|---|---|
+| 整块缺失 | 启动成功，功能不可用（`unconfigured`） |
+| `base_url` / `api_key` 缺失或格式非法 | **启动失败**，报错指名 YAML 路径与当前值 |
+| `timeout_ms` / `threshold` / `max_actions` 越界 | **启动失败**（即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
+| 块内出现未知键（`timeout` 之类拼错） | **启动失败**（`strict`，不静默跑缺省） |
+| `INTENT_FOCUS_THRESHOLD ∈ [0,1]` | 覆盖配置块的 `threshold`（环境变量优先） |
+| `INTENT_FOCUS_THRESHOLD` **为空串** | 视为未设置（**不会**隐式变成 `0`——阈值 0 会让所有工具入选且毫无报错） |
+| `INTENT_FOCUS_THRESHOLD` 越界 / 非数字 | **启动失败** |
+
+### 21.5 降级与零变更
+
+- 判定超时 / HTTP 非 200 / 响应形状非法 / 未配置 → 本轮**不追加**聚焦提示，回答照常，状态码与 SSE 事件序列不变（`FR-009` / `FR-052`）；
+- **零变更**：SSE 事件集合、`GET /api/threads/{id}`、`GET /api/threads/{id}/next-actions`、数字人详情、工具清单（内置 + MCP）；
+- **回滚**：平台取消勾选 → 部署后产物无该键、运行环境零调用；或整块删除 `intent_focus` 配置（功能不可用，启动照常）。
+
+### 21.6 不变式（MUST 由测试守住）
+
+1. 判定 MUST 先于主模型调用，且**从不重试**；
+2. 预置动作入口（下一步动作卡片 / 首屏问题实例卡片）的轮次判定调用次数为 **0**，仅留档 `skipped`；
+3. 开关关闭的轮次：零调用、零留档；
+4. 聚焦提示 MUST NOT 出现在 `history.jsonl`、消息气泡与后续轮次素材中；
+5. 记录文件 MUST NOT 有运行期读取方；写入失败不影响本轮回答；
+6. 与 007 开关的四组合各自生效。
+
+---
+
+## §22 R23 — MCP 工具显示名（2026-10-27）
+
+**背景**：MCP `tools/list` 只给英文 `name`（如 `bom_validate`），而运行环境会把工具显示名放进**意图聚焦的命题文本**——`server: tool` 形式的英文拼接在中文语境下判定准确率明显偏低。显示名属于"展示/运营配置"，按"平台是 MCP 服务配置的唯一权威源"，因此落在平台配置、随部署物化。
+
+### 22.1 配置字段 `tool_labels`
+
+平台 `mcp-services.json` 与 `PUT /api/admin/mcp/services/{name}` 请求体新增可选字段：
+
+```jsonc
+{ "tool_labels": { "bom_validate": "BOM 校验", "bom_merge": "BOM 合并" } }
+```
+
+| 项 | 口径 |
+|---|---|
+| 形状 | `{ 原始工具名: 人读名称 }`（键不含 `{server}__` 前缀），键 trim 非空 |
+| 值 | 1~40 字单行字符串；空串 / 超长 / 含控制字符 → `VALIDATION_FAILED` |
+| 保存语义 | **缺省 = 沿用存量，提供 = 全量替换**（`{}` 即清空） |
+| 与白名单 | **不强制对齐**（允许先命名后勾选）；物化时按 `allowed_tools` 过滤孤儿键 |
+| 回显 | 详情与保存响应 MUST 回显 `tool_labels`；`tools[]` / `available_tools[]` 每项带 `label`（未配置为空串） |
+| 存量 | 无该字段的记录读取期收敛为 `{}`，行为零变化 |
+
+### 22.2 物化进 `MCP.json`
+
+```jsonc
+{
+  "name": "bom-service",
+  "transport": "http",
+  "url": "http://…/mcp",
+  "allowed_tools": ["bom_validate", "bom_merge"],
+  "tool_labels": { "bom_validate": "BOM 校验", "bom_merge": "BOM 合并" }
+}
+```
+
+- **非空才写**：未配置时不出现该键，存量数字人重新部署后 `MCP.json` 字节不变；
+- 白名单为空（不限制）时全部保留；否则只写白名单内的键。
+
+### 22.3 运行环境读取与优先级
+
+`servers[].tool_labels` 由 `domain/agent-instance.ts` 解析（与平台同一判据，非法即配置错误），装配为 `AgentTool.label`：
+
+```
+tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${server}: ${tool}`
+```
+
+| 项 | 口径 |
+|---|---|
+| 用途 | 意图聚焦命题文本、平台工具清单展示 |
+| 不影响 | 工具调用名（恒为 `{server}__{tool}`）、工具权限、模型可见的 `name`/`description` |
+| 缺省 | 不写键 → 回退英文拼接（与改动前逐字一致） |
+
+### 22.4 兼容与回滚
+
+- **兼容**：新增可选字段，旧客户端不感知；旧运行环境对未知键静默忽略；
+- **回滚**：清空 `tool_labels`（`{}`）→ 部署后 `MCP.json` 无该键 → 命题回到英文拼接，无需发版；
+- **测试**：平台 `normalizeToolLabels`（空串/超长/沿用存量）、物化（非空才写/白名单过滤）、运行侧 `label` 三优先级、前端清单渲染（有/无 label）。

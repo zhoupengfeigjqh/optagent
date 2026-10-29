@@ -52,6 +52,7 @@ const WORKSPACE_RESPONSE = {
           files: [{ filename: 'plan.csv', size: 2048, updated_at: '2026-09-18 10:00' }],
           fields: [],
           upload_extensions: ['.csv', '.xlsx'],
+          predefined: false,
         },
       ],
     },
@@ -67,6 +68,7 @@ const WORKSPACE_RESPONSE = {
           files: [{ filename: 'note.txt', size: 12, updated_at: '2026-09-18 11:00' }],
           fields: [],
           upload_extensions: ['.csv', '.xlsx', '.txt'],
+          predefined: false,
         },
       ],
     },
@@ -217,21 +219,21 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
     expect(wrapper.find('.interaction-dialog__file-card').exists()).toBe(false)
   })
 
-  it('label 中文短标签：title 为参数名大小写变体时忽略，取 description 首句', async () => {
+  it('label 主标签：title 优先，同义 title 与缺失 title 都回退参数名（方案 A）', async () => {
     const request = makeRequest({
       schema: {
         type: 'object',
         properties: {
-          // FastMCP 自动生成的 title（与参数名同义）→ 忽略，应落到 description 首句
+          // FastMCP 自动生成的 title（与参数名同义）→ 当作无 title，显示参数名
           image: {
             type: 'string',
             title: 'Image',
             description: '要识别的图片：填相对路径。图片不超过 2MB',
           },
-          // 有意义的 title → 直接用
+          // 有意义的 title → 直接顶替参数名
           line: { type: 'string', title: '产线' },
-          // 既无 title 也无 description → 只有参数名
-          qty: { type: 'integer' },
+          // 无 title → 参数名（不再退到 description 首句）
+          qty: { type: 'integer', description: '数量：正整数' },
         },
         required: [],
       },
@@ -240,30 +242,24 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
     })
     const wrapper = mountWithSession(request).wrapper
 
-    const labels = wrapper.findAll('.interaction-dialog__label')
-    expect(labels[0]!.text()).toContain('image')
-    expect(labels[0]!.find('.interaction-dialog__label-hint').text()).toBe(
-      '要识别的图片：填相对路径',
-    )
-    expect(labels[1]!.find('.interaction-dialog__label-hint').text()).toBe('产线')
-    expect(labels[2]!.find('.interaction-dialog__label-hint').exists()).toBe(false)
+    const labels = wrapper.findAll('.interaction-dialog__label').map((item) => item.text())
+    expect(labels[0]).toBe('image')
+    expect(labels[1]).toBe('产线')
+    expect(labels[2]).toBe('qty')
+    // 方案 A：不再有右侧短标签
+    expect(wrapper.find('.interaction-dialog__label-hint').exists()).toBe(false)
   })
 
-  it('工具级描述收进「?」：默认不展示，点开才看；缺省时不渲染「?」', async () => {
-    const withDesc = makeRequest({ tool_description: '识别图片中的文字，返回按行拼接的文本' })
-    const wrapper = mountWithSession(withDesc).wrapper
+  it('工具级描述不再渲染「?」入口：头部只留标题与倒计时', () => {
+    const withDesc = mountWithSession(
+      makeRequest({ tool_description: '识别图片中的文字，返回按行拼接的文本' }),
+    ).wrapper
 
-    // 默认不占版面（字段行自己也可能带「?」，故按无障碍名精确定位到工具说明那个）
-    expect(wrapper.text()).not.toContain('识别图片中的文字')
-    const button = wrapper.find('[aria-label="查看工具说明"]')
-    expect(button.exists()).toBe(true)
-
-    await button.trigger('click')
-    expect(wrapper.find('.hint-tip__pop').text()).toContain('识别图片中的文字')
-
-    // 老快照无 tool_description → 连「?」都不渲染
-    const withoutDesc = mountWithSession(makeRequest()).wrapper
-    expect(withoutDesc.find('[aria-label="查看工具说明"]').exists()).toBe(false)
+    // 省掉「?」后，工具说明（写给模型看的技术文案）整段不进用户视野
+    expect(withDesc.find('[aria-label="查看工具说明"]').exists()).toBe(false)
+    expect(withDesc.text()).not.toContain('识别图片中的文字')
+    // 倒计时不受影响：它是超时可见性的唯一来源，仍在头部
+    expect(withDesc.find('.base-dialog__header').text()).toContain('剩余')
   })
 
   it('多行 textarea：@ 引用同样可用，且提交携带输入值（绑定回归）', async () => {

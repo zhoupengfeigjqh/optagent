@@ -136,9 +136,13 @@ describe('POST /api/admin/deploy —— 本体物化', () => {
     expect(fs.readFileSync(path.join(dir, 'ontology.yaml'), 'utf8')).toBe(ONTO_YAML);
     expect(fs.readFileSync(path.join(dir, 'securities.yaml'), 'utf8')).toBe(ONTO_SECURITIES);
     // 与 skills/ 平级，不混进数字人的四份配置文件
-    expect(
-      fs.readdirSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'onto')).sort(),
-    ).toEqual(['MCP.json', 'SOUL.md', 'TOOL.json', 'ontology', 'scenario.json']);
+    expect(fs.readdirSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'onto')).sort()).toEqual([
+      'MCP.json',
+      'SOUL.md',
+      'TOOL.json',
+      'ontology',
+      'scenario.json',
+    ]);
   });
 });
 

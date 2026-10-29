@@ -222,6 +222,8 @@ export class AgentInstanceFactory {
           this.deps.onMcpCall,
           logger,
           asyncToolContext(server, inst.key.userId, inst.key.agentName, req.threadId, this.deps),
+          // 工具显示名（2026-10-27）：平台配置优先，进意图聚焦命题；缺省回退英文拼接
+          server.toolLabels,
         );
         // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
         // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
@@ -267,10 +269,30 @@ export class AgentInstanceFactory {
         ? this.deps.providerFor(req.model)
         : new PiAiLlmProvider(req.model, this.deps.llmRetry ?? NO_LLM_RETRY)
       : this.deps.llm();
+    /**
+     * 013：意图聚焦。
+     *
+     * 放在工具装配**之后**：候选工具必须是"本轮模型真实可用工具"（`tools` 已过白名单、
+     * 已剔除不可用 MCP），否则判定会推荐模型根本调不到的工具。
+     * 放在模型调用**之前**（FR-001）；返回空串 = 本轮不聚焦。
+     * 提示追加到本轮 `systemExtra` 末尾（不进历史、不进后续轮次）。
+     */
+    let extra = req.systemExtra;
+    if (req.focusJudge) {
+      const focusPrompt = await req.focusJudge(
+        tools.map((t) => ({
+          name: t.name,
+          description: t.description ?? '',
+          // 中文展示名：内置工具是目录里的 `读取文件`；MCP 工具来自平台 `tool_labels`
+          // （缺省回退服务端 `Tool.title` 再到 `server: tool`）。判定准确率显著高于
+          // 纯英文名，故命题一律用展示名。
+          label: t.label,
+        })),
+      );
+      if (focusPrompt !== '') extra = extra ? `${extra}\n\n${focusPrompt}` : focusPrompt;
+    }
     // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
-    let systemPrompt = req.systemExtra
-      ? `${inst.config.systemPrompt}\n\n${req.systemExtra}`
-      : inst.config.systemPrompt;
+    let systemPrompt = extra ? `${inst.config.systemPrompt}\n\n${extra}` : inst.config.systemPrompt;
     // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
     // 必须放在工具装配之后：指令里的工具目录取 `tools`（本轮模型真实可见的清单），
     // 与轮末引用裁剪的判据同源；放在最末尾也让"输出格式要求"最贴近生成位置、最易被遵循。

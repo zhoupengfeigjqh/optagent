@@ -36,8 +36,11 @@ export class RunImpl implements Run {
    * 而工具调用发生在收尾之前，所以 id 必须提前存在。
    */
   assistantMessageId = '';
-  /** 本轮进行中的工具调用（call_id → 开始信息），供结束行计算耗时 */
-  readonly toolCalls = new Map<string, { name: string; startedAt: string; startedAtMs: number }>();
+  /** 本轮进行中的工具调用（call_id → 开始信息），供结束行计算耗时与带上人读名称 */
+  readonly toolCalls = new Map<
+    string,
+    { name: string; label?: string; startedAt: string; startedAtMs: number }
+  >();
   /**
    * 本轮**实际使用**的模型 id（仅请求级覆盖时有值）。
    *

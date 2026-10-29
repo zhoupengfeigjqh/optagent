@@ -21,14 +21,14 @@ import {
   columnKeysOf,
   controlOf,
   descriptionOf,
+  fieldLabelOf,
   isTextControl,
   itemSchemaOf,
-  labelHintOf,
   propertiesOf,
   requiredSetOf,
   type FieldSchema,
 } from '../../utils/arg-schema'
-import { formatFileSize } from '../../utils/format'
+import { formatBytes } from '../../utils/format'
 import { formatPath, pathKey, type NodePath } from '../../utils/json-path'
 import BaseIcon from '../common/BaseIcon.vue'
 import HintTip from '../common/HintTip.vue'
@@ -57,7 +57,8 @@ const props = withDefaults(
 const context = inject<InteractionFormContext | null>(INTERACTION_FORM_KEY, null)
 
 const control = computed(() => controlOf(props.schema))
-const hint = computed(() => labelHintOf(props.name, props.schema))
+/** 主标签：`title` 优先，缺失或只是参数名的排版变体时回退参数名（2026-10-27） */
+const labelText = computed(() => fieldLabelOf(props.name, props.schema))
 const description = computed(() => descriptionOf(props.schema))
 const mentionable = computed(() => isTextControl(control.value))
 
@@ -195,10 +196,10 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
         :class="{ required }"
         :for="domId"
       >
-        {{ name }}<span v-if="hint" class="interaction-dialog__label-hint">{{ hint }}</span>
+        {{ labelText }}
       </label>
       <div v-else class="interaction-dialog__label" :class="{ required }">
-        {{ name }}<span v-if="hint" class="interaction-dialog__label-hint">{{ hint }}</span>
+        {{ labelText }}
       </div>
       <!-- 说明性文案收进「?」：默认不占版面，点开才看 -->
       <HintTip v-if="hints" :text="hints" label="查看参数说明" />
@@ -294,7 +295,7 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       <BaseIcon name="file" :size="14" />
       <span class="interaction-dialog__file-card-name">{{ cardOf()!.file.filename }}</span>
       <span class="interaction-dialog__file-card-meta">
-        {{ cardOf()!.dir }} · {{ formatFileSize(cardOf()!.file.size) }}
+        {{ cardOf()!.dir }} · {{ formatBytes(cardOf()!.file.size) }}
       </span>
       <button
         type="button"
@@ -337,13 +338,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
 .interaction-dialog__label {
   font-size: var(--font-size-sm);
   font-weight: 600;
-}
-
-/* 参数名旁的中文短标签（来自 schema 的 title/description 提炼） */
-.interaction-dialog__label-hint {
-  margin-left: var(--space-2);
-  color: var(--color-text-secondary);
-  font-weight: 400;
 }
 
 .interaction-dialog__label.required::after {

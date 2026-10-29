@@ -49,6 +49,13 @@ export function classifyMcpError(err: unknown): McpCallErrorKind {
 
 export interface McpToolInfo {
   name: string;
+  /**
+   * 服务端声明的**人读标题**（MCP `tools/list` 的 `Tool.title`）。
+   *
+   * 仅作**兜底**：平台配置的 `tool_labels` 优先；服务端没声明时才用它，
+   * 再没有才回退 `server: tool` 英文拼接（见 `mcp-tool-adapter.ts`）。
+   */
+  title?: string;
   description?: string;
   inputSchema?: unknown;
 }
@@ -118,6 +125,7 @@ async function defaultCreateClient(cfg: McpServerConfig): Promise<McpClientLike>
       return {
         tools: res.tools.map((t): McpToolInfo => {
           const info: McpToolInfo = { name: t.name };
+          if (t.title !== undefined) info.title = t.title;
           if (t.description !== undefined) info.description = t.description;
           info.inputSchema = t.inputSchema;
           return info;

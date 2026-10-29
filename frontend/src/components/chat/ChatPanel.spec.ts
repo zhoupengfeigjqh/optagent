@@ -73,6 +73,8 @@ function makePanel(
       back: noop,
     },
     workspace: { spaces: ref([]), loading: ref(false) },
+    // 014：空数据引导状态（默认不出气泡；需要时由用例置为 true）
+    emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(null),
       candidates: ref<Array<{ agent_name: string }>>([]),
@@ -426,5 +428,42 @@ describe('ChatPanel —— Esc 中断本轮（2026-10-16）', () => {
     pressEscape()
 
     expect((panel as Panel).onStop).not.toHaveBeenCalled()
+  })
+})
+
+describe('ChatPanel —— 空数据引导气泡（014）', () => {
+  it('visible 为真时气泡挂在「+」所在分组内，展示固定文案且不遮住上传入口', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).emptyHint.visible.value = true
+    await nextTick()
+
+    const bubble = wrapper.find('.upload-hint')
+    expect(bubble.exists()).toBe(true)
+    expect(bubble.text()).toContain('当前您还没有准备数据，请点击 “+” 上传吧。')
+    // 锚点：与「+」同一分组，而不是飘在别处
+    expect(bubble.element.closest('.composer-toolbar__left')).not.toBeNull()
+    expect(wrapper.find('[aria-label="上传文件"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('visible 为假时不渲染任何提示 DOM', () => {
+    const { wrapper } = setup()
+
+    expect(wrapper.find('.upload-hint').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('点「×」只上抛 dismiss', async () => {
+    const { wrapper, panel } = setup()
+    ;(panel as Panel).emptyHint.visible.value = true
+    await nextTick()
+
+    await wrapper.get('.upload-hint__close').trigger('click')
+
+    expect((panel as Panel).emptyHint.dismiss).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
   })
 })

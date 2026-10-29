@@ -24,12 +24,12 @@ import { computed, useId } from 'vue'
 
 import type { ToolCallResult } from '../../api/types'
 import { useToolPanels, type ToolPanelState } from '../../composables/useToolPanels'
+import { formatBytes, formatDurationMs } from '../../utils/format'
 import {
   formatArgsDigest,
-  formatBytes,
-  formatDuration,
   isToolCallFinished,
   summarizeToolCalls,
+  toolDisplayName,
   toolGroupKey,
   toolStatusLabel,
   type ToolCallItem,
@@ -198,12 +198,13 @@ function toggleRaw(item: ToolCallItem): void {
       @click="toggleDetails"
     >
       <span class="tool-calls__latest">最新</span>
-      <span class="tool-call__name">{{ latest.name }}</span>
+      <!-- 显示人读名称，原始调用名放 title 悬停（核对后端日志时用） -->
+      <span class="tool-call__name" :title="latest.name">{{ toolDisplayName(latest) }}</span>
       <span class="tool-call__status" :class="`tool-call__status--${latest.status}`">
         {{ statusLabel(latest) }}
       </span>
       <span v-if="latest.durationMs !== undefined" class="tool-call__meta">
-        {{ formatDuration(latest.durationMs) }}
+        {{ formatDurationMs(latest.durationMs) }}
       </span>
       <span class="tool-call__toggle">{{ detailsOpen ? '收起明细' : '查看明细' }}</span>
     </button>
@@ -220,12 +221,12 @@ function toggleRaw(item: ToolCallItem): void {
           :aria-controls="canExpand(item) ? bodyId(index) : undefined"
           @click="onToggle(item)"
         >
-          <span class="tool-call__name">{{ item.name }}</span>
+          <span class="tool-call__name" :title="item.name">{{ toolDisplayName(item) }}</span>
           <span class="tool-call__status" :class="`tool-call__status--${item.status}`">
             {{ statusLabel(item) }}
           </span>
           <span v-if="item.durationMs !== undefined" class="tool-call__meta">
-            {{ formatDuration(item.durationMs) }}
+            {{ formatDurationMs(item.durationMs) }}
           </span>
           <span v-if="item.size !== undefined" class="tool-call__meta">
             {{ formatBytes(item.size) }}

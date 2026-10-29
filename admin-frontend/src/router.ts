@@ -80,7 +80,9 @@ export function parseLocation(fullPath: string, base = ''): AdminRoute {
   const restSegments = first && isRouteName(first) ? segments.slice(1) : []
   const detailSegments = name === 'ontology' ? restSegments : restSegments.slice(0, 1)
   const decodedDetail =
-    detailSegments.length > 0 ? detailSegments.map((segment) => safeDecode(segment)).join('/') : null
+    detailSegments.length > 0
+      ? detailSegments.map((segment) => safeDecode(segment)).join('/')
+      : null
   const tab = query.tab ?? null
 
   return {

@@ -24,6 +24,7 @@ import { createNextStepsApi } from '../api/next-steps'
 import { createProducedApi } from '../api/produced'
 import { createThreadsApi } from '../api/threads'
 import { createAgentsStore, type AgentsStore } from './useAgents'
+import { useEmptyDataHint, type EmptyDataHint } from './useEmptyDataHint'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
 import { createModelsStore, type ModelsStore } from './useModels'
@@ -64,6 +65,11 @@ export interface AppSession {
   readonly uploads: UploadsStore
   readonly mention: FileMentionStore
   readonly workspace: WorkspaceStore
+  /**
+   * 空数据新手引导（014）：只在切换数字人成功后判定，气泡挂在输入区「+」上。
+   * 状态仅存活于内存，不写存储（见 `spec.md` 假设）。
+   */
+  readonly emptyHint: EmptyDataHint
   readonly search: SessionSearchStore
   readonly preview: PreviewStore
   /** 后台产出（R11）：列表 + 未读数 + 标记已读 + 信号订阅 */
@@ -171,6 +177,14 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   const preview = createPreviewStore({ files: filesApi })
   // 删除动作需要提示成功/失败原因，故 workspace 依赖 toast
   const workspace = createWorkspaceStore({ files: filesApi, toast })
+
+  /**
+   * 空数据引导（014）：依赖 workspace 的清单与错误。
+   *
+   * 只在切换数字人成功后判定（`onSwitched` 内），因此首次加载 / 刷新恢复不会误弹（FR-005）；
+   * 判定时机在新清单加载完成之后，避免用上一个数字人的数据误判（FR-006）。
+   */
+  const emptyHint = useEmptyDataHint({ spaces: workspace.spaces, error: workspace.error })
   const models = createModelsStore({ models: modelsApi, storage })
   const uploads = createUploadsStore({ files: filesApi, toast })
   const mention = createFileMentionStore({ workspace, toast })
@@ -237,6 +251,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()
+      // 014：清单就绪后判定空数据引导（加载失败时内部自查 error，不会误弹）
+      emptyHint.onAgentSwitched()
       await produced.refresh()
     },
   })
@@ -249,6 +265,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     uploads,
     mention,
     workspace,
+    emptyHint,
     search,
     preview,
     produced,

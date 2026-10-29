@@ -63,6 +63,10 @@ function onSelectModel(model: string): void {
       >
         <BaseIcon name="plus" :size="16" />
       </BaseButton>
+
+      <!-- 014：上传入口的引导气泡由调用方注入（锚点由本分组提供）；
+           组件只负责锚定，是否展示、何时关闭都属于装配层的业务状态 -->
+      <slot name="upload-hint" />
     </div>
 
     <div class="composer-toolbar__right">
@@ -92,6 +96,14 @@ function onSelectModel(model: string): void {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+/* 「+」所在分组同时是引导气泡的定位锚点（014）：气泡向上展开，不遮挡按钮 */
+.composer-toolbar__left {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .composer-toolbar__right {

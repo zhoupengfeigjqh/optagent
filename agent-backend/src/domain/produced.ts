@@ -85,6 +85,23 @@ export function producedFilename(prefix: string, rawFilename: string): string {
   return `${prefix}_${rawFilename}`;
 }
 
+/**
+ * 落盘名是否合法（2026-10-27 加固）：**只接受单段文件名**。
+ *
+ * 为什么必须校验：sidecar 里的 `filename` 会被拼成 `临时空间/后台产出/{filename}` 再交给
+ * `FileAccess.readBuffer`。`path.resolve` 会把 `..` 归一化掉——`../../共享空间/x.xlsx`
+ * 归一化后仍落在同一个 dataRoot 内、顶层目录也命中白名单，于是"读产出"可以变成
+ * "读该用户数据域内任意文件"。故此处只认单段名：分隔符 / 盘符 / 冒号（NTFS ADS）/
+ * `..` / 控制字符一律非法。
+ */
+export function isSafeProducedName(name: string): boolean {
+  if (name === '' || name === '.' || name === '..') return false;
+  if (name.includes('..')) return false;
+  // eslint-disable-next-line no-control-regex -- 控制字符正是要拦的
+  if (/[\u0000-\u001f]/u.test(name)) return false;
+  return !/[\\/:*?"<>|]/u.test(name);
+}
+
 /** 结果文件对应的 sidecar 名：`{prefix}_j_1.json` → `{prefix}_j_1.meta.json` */
 export function metaFilename(resultFilename: string): string {
   return `${stripExt(resultFilename)}${META_SUFFIX}`;
@@ -126,7 +143,15 @@ export async function writeProduced(
 ): Promise<{ filename: string; relPath: string; size: number }> {
   const at = input.now ?? new Date();
   const prefix = producedPrefix(input.sid, input.userId);
+  if (!isSafeProducedName(input.filename)) {
+    throw new Error(`服务提供的产出文件名非法: ${input.filename}`);
+  }
   const filename = producedFilename(prefix, input.filename);
+  // 正文 MUST NOT 长得像 sidecar（2026-10-27）：`scanProduced` 按后缀识别元数据，
+  // 一条内容为 JSON 的"正文"会被当成元数据解析，其中的 `filename` 再被当作路径使用。
+  if (filename.toLowerCase().endsWith(META_SUFFIX)) {
+    throw new Error(`产出文件名不得以 ${META_SUFFIX} 结尾: ${input.filename}`);
+  }
   const relPath = await input.access.writeProduced(PRODUCED_DIR, filename, input.content);
 
   const meta: ProducedMeta = {
@@ -249,6 +274,9 @@ async function readMeta(access: FileAccess, relPath: string): Promise<ProducedMe
     if (truncated) return null; // 元数据不该大到被截断；宁可跳过也不返回半截信息
     const raw = JSON.parse(content) as Partial<ProducedMeta>;
     if (typeof raw.job_id !== 'string' || typeof raw.filename !== 'string') return null;
+    // 2026-10-27 加固：sidecar 的 `filename` 会被当路径读（列表项 `relPath`、raw 正文下载），
+    // 不是单段文件名就整条跳过——宁可这条产出不可见，也不让"读产出"变成"读任意文件"。
+    if (!isSafeProducedName(raw.filename)) return null;
     return {
       job_id: raw.job_id,
       uid: typeof raw.uid === 'string' ? raw.uid : '',

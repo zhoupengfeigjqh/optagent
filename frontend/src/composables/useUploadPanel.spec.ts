@@ -38,6 +38,7 @@ function workspaceResponse(): WorkspaceResponse {
             files: [],
             fields: [],
             upload_extensions: ['.csv', '.xlsx'],
+            predefined: false,
           },
         ],
       },
@@ -189,14 +190,12 @@ describe('useUploadPanel —— 成功即回写 @（FR-001 / FR-003 / FR-004）'
 
   it('批量 3 个 ⇒ 按**完成顺序**回写 3 次（FR-005）', async () => {
     const resolvers: Array<() => void> = []
-    const uploadImpl = vi
-      .fn()
-      .mockImplementation(
-        (_dir: string, _file: File, filename: string) =>
-          new Promise((resolve) => {
-            resolvers.push(() => resolve({ dir: DIR, filename, size: 8 }))
-          }),
-      )
+    const uploadImpl = vi.fn().mockImplementation(
+      (_dir: string, _file: File, filename: string) =>
+        new Promise((resolve) => {
+          resolvers.push(() => resolve({ dir: DIR, filename, size: 8 }))
+        }),
+    )
     const { panel, acceptUpload } = await setup(uploadImpl)
 
     panel.onPickFiles({

@@ -37,4 +37,16 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    /**
+     * 标定脚本（Node 20 直跑的 ESM，不经 TS 编译）。
+     *
+     * flat config 不预置 Node 运行时全局，而 `no-undef` 只认显式声明的 global；
+     * 这里只补脚本实际用到的三个，不引入 `globals` 依赖（宪章原则六：不新增非必要依赖）。
+     */
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { fetch: 'readonly', AbortSignal: 'readonly', process: 'readonly' },
+    },
+  },
 );

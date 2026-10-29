@@ -68,6 +68,8 @@ function cloneSoul(soul: SoulDesign): SoulDesign {
     next_action_hints: soul.next_action_hints === true,
     // 缺省兜底：接口应当恒有该键，旧存档万一没有也不至于让输入框显示 `undefined`
     next_action_hints_count: soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault,
+    // 013：同样显式列出——`=== true` 同时完成布尔归一（旧存档缺键 / 脏数据 → 关）
+    intent_focus: soul.intent_focus === true,
     capability_tags: [...soul.capability_tags],
     forbidden: [...soul.forbidden],
     starters: soul.starters.map((starter) => ({

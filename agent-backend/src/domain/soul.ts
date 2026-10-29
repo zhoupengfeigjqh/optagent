@@ -73,6 +73,13 @@ export interface SoulMeta {
    * 多花多少 token"，读不出来时按缺省走即可，不必像开关那样 fail-closed 到关闭。
    */
   nextActionHintsCount: number;
+  /**
+   * 013：是否开启「意图聚焦」（frontmatter `intent_focus`）。
+   *
+   * 同样是**功能开关**：缺键 / 非布尔一律 `false`（fail-closed）。
+   * 它不进 System Prompt 正文，只决定运行环境要不要在主模型调用前多发一次判定。
+   */
+  intentFocus: boolean;
 }
 
 /** 空值工厂（每次返回新对象，避免调用方误改共享引用）。 */
@@ -83,6 +90,7 @@ export function emptySoulMeta(): SoulMeta {
     starters: [],
     nextActionHints: false,
     nextActionHintsCount: NEXT_ACTION_HINTS_DEFAULT,
+    intentFocus: false,
   };
 }
 
@@ -125,6 +133,8 @@ export function parseSoulMeta(raw: string): SoulMeta {
     nextActionHints: record.next_action_hints === true,
     // 007：缺省 / 非整数 / 越界一律收敛到缺省（见 SoulMeta.nextActionHintsCount）
     nextActionHintsCount: readHintCount(record.next_action_hints_count),
+    // 013：非布尔一律 false（fail-closed，见 SoulMeta.intentFocus）
+    intentFocus: record.intent_focus === true,
   };
 }
 
@@ -153,6 +163,32 @@ export function isNextActionsEnabled(
   } catch (err) {
     logger?.warn(
       `读取数字人开关失败按关闭处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * 013：读取某数字人「是否开启意图聚焦」。
+ *
+ * 与 `isNextActionsEnabled` 同口径：**fail-closed**（读不出来一律按关闭），且**逐次读盘**——
+ * 开关随部署整体覆盖，缓存会让"部署后不生效"难以解释；SOUL.md 体积极小，读盘成本可忽略。
+ */
+export function isIntentFocusEnabled(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  logger?: { warn(msg: string): void },
+): boolean {
+  try {
+    const raw = fs.readFileSync(
+      path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'),
+      'utf8',
+    );
+    return parseSoulMeta(raw).intentFocus;
+  } catch (err) {
+    logger?.warn(
+      `读取意图聚焦开关失败按关闭处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }

@@ -10,13 +10,12 @@ import type { Message, ToolCallRecord } from '../api/types'
 import {
   collectToolViewLinks,
   formatArgsDigest,
-  formatBytes,
-  formatDuration,
   isToolCallFinished,
   streamingToolCallItem,
   summarizeToolCalls,
   toToolCallItem,
   toolCallItemsOf,
+  toolDisplayName,
   toolGroupKey,
   toolStatusLabel,
   type ToolCallItem,
@@ -25,6 +24,34 @@ import {
 function item(over: Partial<ToolCallItem> = {}): ToolCallItem {
   return { callId: 'c1', name: 'read_file', status: 'success', ...over }
 }
+
+describe('tool-calls —— 工具标题（2026-10-27）', () => {
+  it('人读名称优先；缺失或空串回退调用名', () => {
+    expect(toolDisplayName({ name: 'jev__noul', label: '命题真假判断' })).toBe('命题真假判断')
+    expect(toolDisplayName({ name: 'jev__noul' })).toBe('jev__noul')
+    expect(toolDisplayName({ name: 'jev__noul', label: '' })).toBe('jev__noul')
+  })
+
+  it('记录与流式瞬态两条来源都映射 label', () => {
+    expect(
+      toToolCallItem({
+        call_id: 'c1',
+        name: 'jev__noul',
+        label: '命题真假判断',
+        status: 'success',
+        started_at: '',
+      }).label,
+    ).toBe('命题真假判断')
+    expect(
+      streamingToolCallItem({
+        call_id: 'c2',
+        name: 'ocr_image',
+        label: '表格识别',
+        status: 'running',
+      }).label,
+    ).toBe('表格识别')
+  })
+})
 
 describe('tool-calls —— 视图链接（TR-44 / TR-45）', () => {
   it('记录里的 view_links 透传为展示模型（snake_case 转换集中在此）', () => {
@@ -177,17 +204,8 @@ describe('tool-calls —— 契约映射', () => {
 })
 
 describe('tool-calls —— 格式化', () => {
-  it('体积按 B / KB / MB 分档', () => {
-    expect(formatBytes(120)).toBe('120 B')
-    expect(formatBytes(2048)).toBe('2.0 KB')
-    expect(formatBytes(1843200)).toBe('1.8 MB')
-  })
-
-  it('耗时按 ms / s 分档', () => {
-    expect(formatDuration(84)).toBe('84ms')
-    expect(formatDuration(1620)).toBe('1.6s')
-  })
-
+  // 体积 / 耗时已收敛到 `utils/format`（`formatBytes` / `formatDurationMs`），其口径由
+  // `format.spec.ts` 守；这里只保留本模块自己的展示拼装。
   it('入参摘要拼成一行可读文本', () => {
     expect(formatArgsDigest({ path: 'a.xlsx', sheet: '产能' })).toBe('path=a.xlsx  sheet=产能')
   })

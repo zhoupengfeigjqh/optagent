@@ -66,9 +66,10 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['path'],
       properties: {
-        path: { type: 'string', description: '相对路径，如 "{示例路径}"' },
-        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
-        limit: { type: 'number', description: '本次最多返回字节数' },
+        // title = 弹窗里的字段短标签（前端 `labelHintOf` 优先取它）；description 仍进「?」气泡全文
+        path: { type: 'string', title: '文件路径', description: '相对路径，如 "{示例路径}"' },
+        offset: { type: 'number', title: '起始偏移', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', title: '读取字节数', description: '本次最多返回字节数' },
       },
     },
     writable: false,
@@ -85,8 +86,12 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['filename', 'content'],
       properties: {
-        filename: { type: 'string', description: '文件名，必须以 {会话标识}_ 开头' },
-        content: { type: 'string', description: '文件内容（utf8 文本）' },
+        filename: {
+          type: 'string',
+          title: '文件名',
+          description: '文件名，必须以 {会话标识}_ 开头',
+        },
+        content: { type: 'string', title: '文件内容', description: '文件内容（utf8 文本）' },
       },
     },
     writable: true,
@@ -99,7 +104,7 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['dir'],
       properties: {
-        dir: { type: 'string', description: '目录路径，如 "{首个目录}"' },
+        dir: { type: 'string', title: '目录', description: '目录路径，如 "{首个目录}"' },
       },
     },
     writable: false,
@@ -114,8 +119,8 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['pattern'],
       properties: {
-        pattern: { type: 'string', description: '检索词或正则表达式' },
-        dir: { type: 'string', description: '限定目录（可选）' },
+        pattern: { type: 'string', title: '检索词', description: '检索词或正则表达式' },
+        dir: { type: 'string', title: '限定目录', description: '限定目录（可选）' },
       },
     },
     writable: false,
@@ -129,7 +134,7 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['expression'],
       properties: {
-        expression: { type: 'string', description: '数学表达式，如 "(1+2)*3"' },
+        expression: { type: 'string', title: '表达式', description: '数学表达式，如 "(1+2)*3"' },
       },
     },
     writable: false,
@@ -145,10 +150,14 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['skill'],
       properties: {
-        skill: { type: 'string', description: '技能名，如 "调度算法"' },
-        path: { type: 'string', description: '技能内相对路径，省略则为 SKILL.md' },
-        offset: { type: 'number', description: '字节偏移（续读截断内容时用）' },
-        limit: { type: 'number', description: '本次最多返回字节数' },
+        skill: { type: 'string', title: '技能名', description: '技能名，如 "调度算法"' },
+        path: {
+          type: 'string',
+          title: '技能内路径',
+          description: '技能内相对路径，省略则为 SKILL.md',
+        },
+        offset: { type: 'number', title: '起始偏移', description: '字节偏移（续读截断内容时用）' },
+        limit: { type: 'number', title: '读取字节数', description: '本次最多返回字节数' },
       },
     },
     writable: false,
@@ -164,8 +173,12 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['pattern'],
       properties: {
-        pattern: { type: 'string', description: '检索词或正则表达式' },
-        skill: { type: 'string', description: '限定技能名（可选，省略则检索全部技能）' },
+        pattern: { type: 'string', title: '检索词', description: '检索词或正则表达式' },
+        skill: {
+          type: 'string',
+          title: '限定技能名',
+          description: '限定技能名（可选，省略则检索全部技能）',
+        },
       },
     },
     writable: false,

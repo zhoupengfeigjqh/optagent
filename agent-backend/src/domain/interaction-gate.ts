@@ -24,6 +24,12 @@ export interface InteractionRequestInput {
   callId: string;
   /** AgentTool 全名（server__tool 形式） */
   toolName: string;
+  /**
+   * 工具的人读名称（2026-10-27）：装配时已算好的 `AgentTool.label`
+   * （平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`）。
+   * 缺省 = 无中文名，快照与标题回退 `toolName`。
+   */
+  toolLabel?: string;
   /** 工具级描述（schema 的 description；弹窗头部一句话说明用） */
   toolDescription?: string;
   /** 工具入参 JSON Schema（经 exposeSchema 处理后的可见形态） */
@@ -45,6 +51,11 @@ export interface InteractionRequestPayload {
   interaction_id: string;
   call_id: string;
   tool_name: string;
+  /**
+   * 工具的人读名称（2026-10-27）：弹窗"工具："一行与窗口标题都用它。
+   * **恒为字符串**（无中文名时等于 `tool_name`），前端仍保留 `|| tool_name` 兼容旧快照。
+   */
+  tool_label: string;
   /** 工具级描述（可空串：老调用方/无描述工具不阻断主流程） */
   tool_description: string;
   title: string;
@@ -61,9 +72,17 @@ export interface InteractionSnapshot extends InteractionRequestPayload {
   remaining_seconds: number;
 }
 
-/** 挂起解除时的结局 */
+/**
+ * 挂起解除时的结局。
+ *
+ * `reject.reason`（2026-10-29）：区分"用户主动拒绝"与"本轮被中断/收尾"。
+ * 两者的工具结果都要标红，但**文案必须不同**——中断不是用户的决定，
+ * 写"用户拒绝了本次调用"是错误归因（宪章原则九：不假装正常）。
+ */
 export type InteractionOutcome =
-  { kind: 'submit'; args: Record<string, unknown> } | { kind: 'reject' } | { kind: 'expired' };
+  | { kind: 'submit'; args: Record<string, unknown> }
+  | { kind: 'reject'; reason: 'user' | 'aborted' }
+  | { kind: 'expired' };
 
 /** 工具包装器经 AgentRunRequest 拿到的交互口（run-manager 每 run 装配一个） */
 export interface InteractionSink {
@@ -121,20 +140,27 @@ export class InteractionGate {
    * 会拿到 null（微任务让出导致的时序坑，测试首轮即暴露）。
    */
   async request(input: InteractionRequestInput): Promise<InteractionOutcome> {
-    if (this.disposed) return { kind: 'reject' };
+    // 已收尾的 run 不再接受新挂起：按"中断"归因（不是用户拒绝）
+    if (this.disposed) return { kind: 'reject', reason: 'aborted' };
     if (this.waitingSize() >= this.maxPending) {
       await this.acquireSlot();
-      if (this.disposed) return { kind: 'reject' };
+      if (this.disposed) return { kind: 'reject', reason: 'aborted' };
     }
 
     const createdAt = this.now();
     const timeoutSeconds = input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+    // 人读名称：缺省/空白一律回退调用名，保证快照里这个字段恒有值（前端不必再判空）
+    const toolLabel =
+      typeof input.toolLabel === 'string' && input.toolLabel.trim() !== ''
+        ? input.toolLabel.trim()
+        : input.toolName;
     const payload: InteractionRequestPayload = {
       interaction_id: genInteractionId(createdAt),
       call_id: input.callId,
       tool_name: input.toolName,
+      tool_label: toolLabel,
       tool_description: typeof input.toolDescription === 'string' ? input.toolDescription : '',
-      title: `确认调用参数：${input.toolName}`,
+      title: `确认调用参数：${toolLabel}`,
       schema: input.schema,
       proposed_args: input.proposedArgs,
       required: extractRequired(input.schema),
@@ -179,7 +205,9 @@ export class InteractionGate {
       return { result: 'already-resolved', outcome: entry.outcome! };
     }
     const outcome: InteractionOutcome =
-      action === 'submit' ? { kind: 'submit', args: args ?? {} } : { kind: 'reject' };
+      action === 'submit'
+        ? { kind: 'submit', args: args ?? {} }
+        : { kind: 'reject', reason: 'user' };
     this.resolveEntry(entry, outcome);
     this.deps.onLog?.(
       `interaction ${outcome.kind === 'submit' ? '已提交' : '被拒绝'}：${entry.payload.tool_name}（${interactionId}）`,
@@ -191,7 +219,7 @@ export class InteractionGate {
   drain(): void {
     for (const entry of this.pending.values()) {
       if (entry.state === 'waiting') {
-        this.resolveEntry(entry, { kind: 'reject' });
+        this.resolveEntry(entry, { kind: 'reject', reason: 'aborted' });
         this.deps.onLog?.(
           `interaction 因中断收尾：${entry.payload.tool_name}（${entry.payload.interaction_id}）`,
         );

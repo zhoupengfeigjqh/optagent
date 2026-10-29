@@ -13,3 +13,27 @@ models:
   # - model: deepseek-chat
   #   api_key: sk-xxxx
   #   base_url: https://api.deepseek.com
+
+# ===== 意图聚焦（013）：判定模型接入（可选块）=====
+#
+# 整块缺失 = 该功能不可用（不判定、不追加聚焦提示、每轮留档一条 unconfigured），**不影响启动**；
+# 块存在但字段不全/越界 = 启动失败（半配置最容易被误读成运行期故障）。
+#
+# 判定模型是独立部署的 Laya 决策模型（System One 线协议，CPU 可跑）：
+#   docker compose up -d laya     # 镜像 chaitin/decis:laya-multilingual-v0.4.0，容器内 8000
+# backend 直接 HTTP 调用 `/v1/systemone`，**不经 MCP、不注册为工具**。
+#
+# 六个字段之外的键一律拒绝启动（拼错 `timeout` 不会被静默忽略成缺省值）。
+# 取值方式：本文件给"部署形态共用值"，只有 threshold 建议走环境变量（现场调参不必改挂载文件）。
+#
+# intent_focus:
+#   base_url: http://laya:8000      # 必填；只填到主机端口，**不要带 /v1 或其它路径**
+#                                   #   容器内用服务名；本地直跑用 http://127.0.0.1:8103
+#   model: laya-multilingual        # 缺省即此值；需与 GET /v1/models 返回的标识一致
+#   api_key: $DECIS_API_KEY         # 必填；支持 $ENV_VAR 引用；**不**回落到 DEEPSEEK_API_KEY
+#                                   #   $ENV 由 **backend 进程**的环境提供（agent-backend/.env.local），
+#                                   #   与 laya 容器的 DECIS_API_KEY 必须是同一个值
+#   timeout_ms: 10000               # 300~10000 的整数（毫秒）；超时即降级（不重试）
+#   threshold: 0.6                  # 0~1；可被环境变量 INTENT_FOCUS_THRESHOLD 覆盖（环境变量优先）
+#                                   #   环境变量留空（`INTENT_FOCUS_THRESHOLD=`）视为未设置，不会变成 0
+#                                   #   0.6 是 2026-10-26 命题改版后的标定拐点（0.5 噪声偏多）

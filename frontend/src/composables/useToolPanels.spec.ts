@@ -23,12 +23,15 @@ describe('useToolPanels', () => {
     expect(panels.panelOf('c1')).toBe(panels.panelOf('c1'))
 
     const seen: boolean[] = []
-    watchEffect(() => {
+    const stop = watchEffect(() => {
       seen.push(panels.panelOf('c1').loading)
     })
     panels.panelOf('c1').loading = true
     await nextTick()
     expect(seen).toEqual([false, true])
+    // 必须停掉：模块级单例上的 effect 不会随组件卸载，留着会在后续用例插入新键时
+    // 反复重建 `c1`（曾导致"FIFO 淘汰"用例单独跑绿、组内跑红）
+    stop()
   })
 
   it('新 call_id 的初始态：收起、未加载、无降级标记、正文按结构化展示', () => {
@@ -66,5 +69,28 @@ describe('useToolPanels', () => {
 
   it('是同一份共享实例（跨组件调用者拿到同一个存取口）', () => {
     expect(useToolPanels()).toBe(useToolPanels())
+  })
+
+  /**
+   * 上限（2026-10-27）：模板对每张工具卡片都会 `panelOf`，量级 = 本页出现过的调用数；
+   * `content` 可达数百 KB 且切会话不清，必须有硬上限，否则长会话无界增长。
+   */
+  it('条目态按插入顺序 FIFO 淘汰：超 200 条后最旧的被清掉，最新的仍在', () => {
+    const panels = useToolPanels()
+    for (let index = 0; index < 201; index += 1) panels.panelOf(`c${index}`).content = 'x'
+
+    // 最旧的一条已被淘汰：重新取到的是全新初始态（正文丢失 = 内存已释放）
+    expect(panels.panelOf('c0').content).toBeNull()
+    // 最新的一条仍在记忆里
+    panels.panelOf('c200').open = true
+    expect(panels.panelOf('c200').open).toBe(true)
+  })
+
+  it('明细展开态同样有上限（不随分组键无限增长）', () => {
+    const panels = useToolPanels()
+    for (let index = 0; index < 201; index += 1) panels.setDetailsOpen(`g${index}`, true)
+
+    expect(panels.isDetailsOpen('g0')).toBe(false)
+    expect(panels.isDetailsOpen('g200')).toBe(true)
   })
 })

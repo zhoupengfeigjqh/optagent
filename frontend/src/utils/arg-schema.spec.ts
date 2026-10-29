@@ -10,10 +10,11 @@ import {
   asSchema,
   columnKeysOf,
   controlOf,
+  dedupeTitles,
+  fieldLabelOf,
   isPlainObject,
   isScalarControl,
   itemSchemaOf,
-  labelHintOf,
   optionsOf,
   propertiesOf,
   requiredSetOf,
@@ -220,19 +221,96 @@ describe('rulesAnchorOf —— 「从算法规则选择」的落点', () => {
   })
 })
 
-describe('labelHintOf —— 参数名旁的中文短标签', () => {
-  it('title 与参数名同义（大小写变体）时忽略，退到 description 首句', () => {
-    expect(
-      labelHintOf('image', {
-        title: 'Image',
-        description: '要识别的图片：填相对路径。图片不超过 2MB',
-      }),
-    ).toBe('要识别的图片：填相对路径')
+describe('fieldLabelOf —— 字段主标签（title 优先，参数名兜底）', () => {
+  it('中文 title 直接作为主标签', () => {
+    expect(fieldLabelOf('line', { title: '产线' })).toBe('产线')
+    expect(fieldLabelOf('path', { title: '文件路径', description: '相对路径' })).toBe('文件路径')
   })
 
-  it('有意义的 title 直接用；都没有 → 空串；首句超长按 24 字截断', () => {
-    expect(labelHintOf('line', { title: '产线' })).toBe('产线')
-    expect(labelHintOf('qty', { type: 'integer' })).toBe('')
-    expect(labelHintOf('x', { description: '一'.repeat(30) })).toBe(`${'一'.repeat(24)}…`)
+  it('title 只是参数名的排版变体（大小写 / 空格 / 下划线 / 连字符）→ 回退参数名', () => {
+    expect(fieldLabelOf('image', { title: 'Image' })).toBe('image')
+    expect(fieldLabelOf('state_file', { title: 'State File' })).toBe('state_file')
+    expect(fieldLabelOf('state-file', { title: 'state_file' })).toBe('state-file')
+  })
+
+  it('无 title / 空白 title → 参数名（方案 A：不再用 description 首句）', () => {
+    expect(fieldLabelOf('qty', { type: 'integer' })).toBe('qty')
+    expect(fieldLabelOf('qty', { title: '   ' })).toBe('qty')
+    expect(fieldLabelOf('image', { description: '要识别的图片：填相对路径' })).toBe('image')
+  })
+
+  it('title 非字符串 → 参数名', () => {
+    expect(fieldLabelOf('qty', { title: 42 })).toBe('qty')
+  })
+})
+
+describe('dedupeTitles —— 同层 title 唯一性兜底', () => {
+  it('同层重名只保留先出现的，其余删 title 回退参数名', () => {
+    const cleaned = dedupeTitles({
+      type: 'object',
+      properties: {
+        line: { type: 'string', title: '产线' },
+        line2: { type: 'string', title: '产线' },
+      },
+    })
+    const props = cleaned.properties as Record<string, { title?: unknown }>
+    expect(props.line.title).toBe('产线')
+    expect(props.line2.title).toBeUndefined()
+  })
+
+  it('重名判据同样归一（尾随空格 / 大小写视为同名）', () => {
+    const cleaned = dedupeTitles({
+      type: 'object',
+      properties: {
+        a: { type: 'string', title: '产线' },
+        b: { type: 'string', title: '  产线  ' },
+      },
+    })
+    const props = cleaned.properties as Record<string, { title?: unknown }>
+    expect(props.a.title).toBe('产线')
+    expect(props.b.title).toBeUndefined()
+  })
+
+  it('数组元素 schema 递归去重', () => {
+    const cleaned = dedupeTitles({
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ruleId: { type: 'string', title: '编号' },
+          ruleName: { type: 'string', title: '编号' },
+        },
+      },
+    })
+    const items = cleaned.items as { properties: Record<string, { title?: unknown }> }
+    expect(items.properties.ruleId.title).toBe('编号')
+    expect(items.properties.ruleName.title).toBeUndefined()
+  })
+
+  it('跨层同名不算冲突', () => {
+    const cleaned = dedupeTitles({
+      type: 'object',
+      properties: {
+        line: { type: 'string', title: '产线' },
+        detail: { type: 'object', properties: { line: { type: 'string', title: '产线' } } },
+      },
+    })
+    const props = cleaned.properties as Record<string, { properties?: Record<string, unknown> }>
+    expect((props.line as { title?: unknown }).title).toBe('产线')
+    const detail = props.detail.properties as Record<string, { title?: unknown }>
+    expect(detail.line.title).toBe('产线')
+  })
+
+  it('不修改入参（纯函数）', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        a: { type: 'string', title: '甲' },
+        b: { type: 'string', title: '甲' },
+      },
+    }
+    dedupeTitles(schema)
+    const props = schema.properties as Record<string, { title?: string }>
+    expect(props.b.title).toBe('甲')
   })
 })

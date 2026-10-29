@@ -214,16 +214,69 @@ export function rulesAnchorOf(
   return { anchor, exact: anchor.length === rulesPath.length }
 }
 
-/** 参数名旁的中文短标签（title 或 description 首句提炼；无信息 → 空串）。 */
-export function labelHintOf(name: string, schema: FieldSchema): string {
+/** title 与参数名的「同义」归一：忽略大小写与分隔符（`State File` ≡ `state_file` ≡ `state-file`）。 */
+function labelKeyOf(text: string): string {
+  return text.toLowerCase().replace(/[\s_-]/g, '')
+}
+
+/**
+ * 字段的**主标签**（2026-10-27）：`title` 优先，缺失 / 空白 / 只是参数名的排版变体时回退参数名。
+ *
+ * 主标签只能是「一个名字」。此前的做法是「参数名 + 右侧灰色短标签」，中文 title 一多就会出现
+ * `path 文件路径` 这种一行两个名字的读法；现在 title 直接替代参数名，`description` 仍完整收在
+ * 「?」气泡里，信息不丢。
+ *
+ * 回退判据用 `labelKeyOf` 而不是 `toLowerCase`：MCP 服务端 SDK 自动生成的 title 常见
+ * `Image` / `State File`，它们不是人写的名字，直接顶上去会让弹窗比参数名更难懂。
+ */
+export function fieldLabelOf(name: string, schema: FieldSchema): string {
   if (typeof schema.title === 'string') {
     const title = schema.title.trim()
-    // 自动生成的大小写变体（FastMCP 的 "Image"）与参数名同义，视为无信息
-    if (title !== '' && title.toLowerCase() !== name.toLowerCase()) return title
+    if (title !== '' && labelKeyOf(title) !== labelKeyOf(name)) return title
   }
-  const description = descriptionOf(schema)
-  if (description === '') return ''
-  const first = /^[^。；;.;\n\r]+/.exec(description.trim())?.[0]?.trim() ?? ''
-  if (first === '') return ''
-  return first.length > 24 ? `${first.slice(0, 24)}…` : first
+  return name
+}
+
+/**
+ * 同层 `title` 去重（`title` 唯一性约束的运行时兜底）：同一对象 / 同一张表内重复的 title
+ * 只保留**先出现**的那个，其余删除 title 回退参数名。
+ *
+ * 为什么需要兜底：title 由 MCP 服务端（或内置工具目录）提供，平台侧不改写它；两个字段同叫
+ * 「名称」时弹窗会出现两行同名，用户无法区分，而回退参数名至少可区分。去重只作用于**同一层**
+ * （`properties` 与 `items` 各自独立），跨层同名不算冲突。
+ */
+export function dedupeTitles<T extends FieldSchema>(schema: T): T {
+  const next: FieldSchema = { ...schema }
+
+  const properties = schema.properties
+  if (properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
+    const seen = new Set<string>()
+    const cleaned: Record<string, FieldSchema> = {}
+    for (const [key, raw] of Object.entries(properties as Record<string, FieldSchema>)) {
+      let child = dedupeTitles(raw)
+      const title = typeof child.title === 'string' ? child.title.trim() : ''
+      if (title !== '' && labelKeyOf(title) !== labelKeyOf(key)) {
+        const labelKey = labelKeyOf(title)
+        if (seen.has(labelKey)) {
+          const rest: FieldSchema = { ...child }
+          delete rest.title
+          child = rest
+        } else {
+          seen.add(labelKey)
+        }
+      }
+      cleaned[key] = child
+    }
+    next.properties = cleaned
+  }
+
+  const items = schema.items
+  if (Array.isArray(items)) {
+    next.items = items.map((item) => dedupeTitles(item as FieldSchema))
+  } else if (items !== null && typeof items === 'object') {
+    next.items = dedupeTitles(items as FieldSchema)
+  }
+
+  // 结构不变，只可能删掉 title：断言回入参类型，调用方无需再收窄
+  return next as unknown as T
 }

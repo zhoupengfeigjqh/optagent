@@ -195,9 +195,9 @@ import {
   schedulingSaveVersionApi,
   schedulingRollbackVersionApi,
 } from '@/api/datapage'
+import { formatMinutesCompact } from '../../utils/format'
 import {
   buildTaskGanttOption,
-  formatDuration,
   legendItems,
   linePlanColumns,
   lineUsageRateColumns,
@@ -347,7 +347,7 @@ const timeRange = computed(() => {
   return `${start || '--'} ~ ${end || '--'}`
 })
 
-const totalDurationText = computed(() => formatDuration(metrics.value.totalDurationMinutes))
+const totalDurationText = computed(() => formatMinutesCompact(metrics.value.totalDurationMinutes))
 
 /* ---------- 3. 排产结果甘特图 ---------- */
 

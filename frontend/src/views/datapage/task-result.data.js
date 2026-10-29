@@ -612,15 +612,5 @@ export function buildTaskGanttOption(categories = []) {
   }
 }
 
-/**
- * 分钟 → 「XhYmin」/「Ymin」，无有效值时展示 --
- * @param minutes 总时长（分钟）
- */
-export function formatDuration(minutes) {
-  const m = Number(minutes)
-  if (!Number.isFinite(m) || m <= 0) return '--'
-  const h = Math.floor(m / 60)
-  const rest = Math.round(m % 60)
-  if (h <= 0) return `${rest}min`
-  return rest > 0 ? `${h}h${rest}min` : `${h}h`
-}
+// 总时长的「XhYmin」格式化已收敛到 `src/utils/format.ts` 的 `formatMinutesCompact`
+// （入参是**分钟**；此处原先也有一份同名 `formatDuration`，与吃秒/吃毫秒的两份同名函数并存）。

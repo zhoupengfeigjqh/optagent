@@ -31,13 +31,13 @@ describe('InteractionGate：挂起与恢复', () => {
     expect(gate.snapshot()).toBeNull();
   });
 
-  it('reject：挂起点以 reject 收尾', async () => {
+  it('reject：挂起点以 reject 收尾，原因为用户主动拒绝', async () => {
     const gate = new InteractionGate();
     const req = gate.request(INPUT);
     const id = gate.snapshot()!.interaction_id;
 
     gate.settle(id, 'reject');
-    await expect(req).resolves.toEqual({ kind: 'reject' });
+    await expect(req).resolves.toEqual({ kind: 'reject', reason: 'user' });
   });
 
   it('settle 幂等：重复提交返回首次结果', async () => {
@@ -105,6 +105,26 @@ describe('InteractionGate：挂起与恢复', () => {
     gate.settle(id2, 'reject');
     await req2;
   });
+
+  it('工具人读名称进 tool_label 与标题；缺省/空白回退调用名（恒有值）', async () => {
+    const created: InteractionRequestPayload[] = [];
+    const gate = new InteractionGate({ onCreated: (p) => created.push(p) });
+
+    const req = gate.request({ ...INPUT, toolLabel: '查询电价' });
+    const id = gate.snapshot()!.interaction_id;
+    expect(created[0]!.tool_label).toBe('查询电价');
+    expect(created[0]!.title).toBe('确认调用参数：查询电价');
+    gate.settle(id, 'reject');
+    await req;
+
+    // 无中文名的工具 / 空白值：快照字段仍是字符串，前端无需判空
+    const req2 = gate.request({ ...INPUT, toolLabel: '   ' });
+    const id2 = gate.snapshot()!.interaction_id;
+    expect(created[1]!.tool_label).toBe('pricing__query_price');
+    expect(created[1]!.title).toBe('确认调用参数：pricing__query_price');
+    gate.settle(id2, 'reject');
+    await req2;
+  });
 });
 
 describe('InteractionGate：超时', () => {
@@ -143,20 +163,20 @@ describe('InteractionGate：超时', () => {
 });
 
 describe('InteractionGate：drain / dispose / 并发上限', () => {
-  it('drain：全部挂起点按 reject 收尾（run 被 stop 场景）', async () => {
+  it('drain：全部挂起点按 reject 收尾，归因为中断而非用户拒绝（run 被 stop 场景）', async () => {
     const gate = new InteractionGate();
     const r1 = gate.request(INPUT);
     const r2 = gate.request({ ...INPUT, callId: 'call_2' });
 
     gate.drain();
-    await expect(r1).resolves.toEqual({ kind: 'reject' });
-    await expect(r2).resolves.toEqual({ kind: 'reject' });
+    await expect(r1).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
+    await expect(r2).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
   });
 
-  it('dispose 后 request 立即 reject，不新建挂起点', async () => {
+  it('dispose 后 request 立即 reject（归因为中断），不新建挂起点', async () => {
     const gate = new InteractionGate();
     gate.dispose();
-    await expect(gate.request(INPUT)).resolves.toEqual({ kind: 'reject' });
+    await expect(gate.request(INPUT)).resolves.toEqual({ kind: 'reject', reason: 'aborted' });
     expect(gate.snapshot()).toBeNull();
   });
 

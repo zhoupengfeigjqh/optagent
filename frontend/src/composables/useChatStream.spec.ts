@@ -124,10 +124,11 @@ describe('useChatStream —— 乐观用户气泡（十七次调整）', () => {
     store.reset()
     await pending
 
-    // 不变式是"气泡清除、不泄漏到新会话"；相位由在途流的 AbortError 收口为
-    // ABORTED（reset 只负责同步清态，不等待在途流）——此为既有语义，不在本调整范围
+    // 不变式是"气泡清除、不泄漏到新会话"，相位停在 reset() 显式设置的 IDLE。
+    // 2026-10-27 起在途流被 `runToken` 判为过期，其 AbortError 收尾**不再**把相位改成
+    // ABORTED：切到别的会话后显示"已中断"本身就是错的（那个会话里什么都没中断过）。
     expect(store.pendingUserMessage.value).toBeNull()
-    expect(store.phase.value).toBe(RUN_PHASE.ABORTED)
+    expect(store.phase.value).toBe(RUN_PHASE.IDLE)
   })
 })
 
@@ -245,5 +246,65 @@ describe('useChatStream —— 按会话分桶的草稿（2026-10-16）', () => 
     activeThreadId.value = 'th_50'
     await nextTick()
     expect(store.draft.value).toBe('草稿 50')
+  })
+})
+
+/**
+ * 跨轮隔离（2026-10-27 回归）
+ *
+ * `reset()` 只 abort 旧流、**不等**旧 `send()` 退出（切会话 / 新建会话 / 删会话都走它）。
+ * 修复前旧流的 `catch` / `finally` 会无条件写共享状态：把新一轮打成 `aborted`/`failed`
+ * （输入区解锁 → 可并发发出第二个 run → 撞 409）、把新一轮的 `controller` 置 null
+ * （此后无法终止）、清空本轮 `toolCalls`。这里用"第一轮 fetch 挂起、第二轮正常跑完、
+ * 再放行第一轮"的时序钉住它。
+ */
+describe('useChatStream —— 跨轮隔离（2026-10-27）', () => {
+  it('reset() 之后迟到的旧流不得改写新一轮状态', async () => {
+    let releaseFirst!: (response: Response) => void
+    let calls = 0
+    const fetchImpl = (() => {
+      calls += 1
+      if (calls === 1) {
+        return new Promise<Response>((resolve) => {
+          releaseFirst = resolve
+        })
+      }
+      return Promise.resolve(
+        new Response(DONE_SCRIPT, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      )
+    }) as unknown as typeof fetch
+
+    const store = createChatStreamStore(makeDeps({ fetchImpl }))
+    const first = store.send({ content: '第一句', attachments: [] })
+    // 旧流会被 reset() abort，可能以 AbortError 拒绝：属预期，先挂上 catch 免得 vitest 报未处理拒绝
+    const settled = first.catch(() => undefined)
+    await flush()
+    expect(store.phase.value).toBe(RUN_PHASE.STREAMING)
+
+    // 用户切会话 / 点「新建会话」：只 abort 旧流，不等它退出
+    store.reset()
+    await flush()
+    expect(store.phase.value).toBe(RUN_PHASE.IDLE)
+
+    // 第二轮正常跑完
+    await store.send({ content: '第二句', attachments: [] })
+    await flush()
+    expect(store.phase.value).toBe(RUN_PHASE.COMPLETED)
+
+    // 旧流此刻才收尾，而且带一个终局 error：修复前会把已完成的新一轮打成 FAILED
+    releaseFirst(
+      new Response('event: error\ndata: {"error":{"code":"LLM_ERROR","message":"旧轮已失效"}}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    await settled
+    await flush()
+
+    expect(store.phase.value).toBe(RUN_PHASE.COMPLETED)
+    expect(store.error.value).toBeNull()
   })
 })

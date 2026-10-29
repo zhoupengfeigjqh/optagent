@@ -45,6 +45,7 @@ describe('nextStepSendPayload', () => {
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
       guidance: '本轮请优先使用以下工具完成任务：read_file',
+      skipIntentFocus: true,
     })
   })
 
@@ -52,7 +53,12 @@ describe('nextStepSendPayload', () => {
     expect(nextStepSendPayload(action({ guidance: '' }))).toEqual({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
+      skipIntentFocus: true,
     })
     expect('guidance' in nextStepSendPayload(action())).toBe(false)
+  })
+
+  it('013：卡片发送一律跳过意图聚焦（FR-008/FR-044）', () => {
+    expect(nextStepSendPayload(action()).skipIntentFocus).toBe(true)
   })
 })

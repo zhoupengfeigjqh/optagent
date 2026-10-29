@@ -2,20 +2,17 @@
 /**
  * 数字人概要（T065，FR-032 / FR-033）
  *
- * - 未选定数字人 → 提示"请选择数字人"，且 **不渲染 MCP 列表容器**（避免空容器）
- * - 列表以服务名作为稳定 `key`：轮询刷新状态时仅更新对应项，不重挂载其余项（SC-010）
+ * 职责只有"身份"：数字人名称，或未选定时的"请选择数字人"提示。
+ *
+ * 2026-10-29（014）：MCP 状态列表已拆出为 `McpStatusList.vue` —— 它必须与「切换」按钮
+ * 左边缘对齐，而嵌在名称下方时起点会被按钮宽度推右，因此不能再挂在本组件内。
  */
-import type { McpServiceStatus } from '../../api/types'
-import McpStatusItem from './McpStatusItem.vue'
-
 withDefaults(
   defineProps<{
     /** 当前数字人名称；`null` 表示未选定 */
     agentName?: string | null
-    /** 当前数字人的 MCP 服务状态 */
-    mcpServers?: McpServiceStatus[]
   }>(),
-  { agentName: null, mcpServers: () => [] },
+  { agentName: null },
 )
 </script>
 
@@ -23,16 +20,6 @@ withDefaults(
   <div class="agent-summary">
     <p v-if="agentName === null" class="agent-summary__hint">请选择数字人</p>
     <p v-else class="agent-summary__name">{{ agentName }}</p>
-
-    <ul
-      v-if="agentName !== null && mcpServers.length > 0"
-      class="agent-summary__mcp"
-      aria-label="MCP 服务状态"
-    >
-      <li v-for="server in mcpServers" :key="server.name" class="agent-summary__mcp-item">
-        <McpStatusItem :name="server.name" :status="server.status" />
-      </li>
-    </ul>
   </div>
 </template>
 
@@ -52,11 +39,5 @@ withDefaults(
 .agent-summary__hint {
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-}
-
-.agent-summary__mcp {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
 }
 </style>
