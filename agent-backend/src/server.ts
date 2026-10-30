@@ -16,9 +16,8 @@ import { AgentPool } from './domain/agent-pool.js';
 import { listAgents } from './domain/agent-catalog.js';
 import { CurrentAgentStore } from './domain/current-agent.js';
 import { getCurrentUser } from './domain/current-user.js';
-import { computeConfigFingerprint } from './domain/config-fingerprint.js';
 import { listUserIds, migrateAllUsers } from './domain/data-migration.js';
-import { ensureRootDirs, userAgentsDir } from './domain/dirs.js';
+import { ensureRootDirs } from './domain/dirs.js';
 import { FileAccess } from './domain/file-access.js';
 import { HistoryStore } from './domain/history.js';
 import { McpStatusEvents } from './domain/mcp-events.js';
@@ -38,7 +37,9 @@ import { PiAiLlmProvider } from './infra/llm/pi-ai-provider.js';
 import { IntervalScheduler } from './infra/scheduler.js';
 import { UsageDb } from './infra/usage-db.js';
 import { createLoggers } from './logging.js';
+import { createAgentProvider } from './server-agents.js';
 import { buildAttachments } from './server-attachments.js';
+import { buildScheduledTasks } from './server-schedule.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerChatRoutes } from './routes/chat.js';
@@ -48,6 +49,7 @@ import { registerMcpCallStatsRoutes } from './routes/mcp-call-stats.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerProducedRoutes } from './routes/produced.js';
+import { registerScheduledTaskRoutes } from './routes/scheduled-tasks.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
 
@@ -75,6 +77,11 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   POOL_EXHAUSTED: 409,
   THREAD_NOT_FOUND: 404,
   AGENT_NOT_FOUND: 404,
+  // 015 定时任务：任务不存在 → 404；名称冲突 / 启用中删除 / 已终止 → 409
+  SCHEDULED_TASK_NOT_FOUND: 404,
+  SCHEDULED_TASK_NAME_CONFLICT: 409,
+  SCHEDULED_TASK_ENABLED: 409,
+  SCHEDULED_TASK_EXHAUSTED: 409,
 };
 
 export interface BuildServerOptions {
@@ -286,14 +293,19 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
-  /**
-   * 在途创建表（2026-10-18 单飞）：同一 `(userId, agentName)` 并发取用只创建一次。
-   *
-   * 起因：预热端点（`POST /api/agents/current/mcp/warm`）与发消息会并发命中"池未命中"，
-   * 各自 `agentFactory.create()` 会建出两套 McpManager，后入池者覆盖前者 →
-   * 被覆盖实例的 MCP 连接/stdio 子进程**无人关闭**。键与 `AgentPool` 同口径。
-   */
-  const creating = new Map<string, Promise<ChatAgent>>();
+  // 实例取用口（池命中 / 单飞 / 配置换代）：实现搬到 `server-agents.ts`（行数门禁）
+  const getOrCreateAgent = createAgentProvider({ root, pool, factory: agentFactory });
+
+  // 定时任务装配（015）：任务存储 / 运行记录 / 信号 / 执行器 / 心跳一次建好，
+  // 派发器在此注册（心跳不 import 执行器，执行器也不 import 心跳）
+  const scheduled = buildScheduledTasks({
+    root,
+    mcpConnectTimeoutMs: config.mcpConnectTimeoutMs,
+    logger: loggers.logger,
+    threadStore,
+    runManager,
+    getOrCreateAgent,
+  });
 
   const ctx: AppContext = {
     config,
@@ -309,41 +321,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     usage: usageDb,
     mcpEvents,
     producedEvents,
-    async getOrCreateAgent(key) {
-      const existing = pool.get(key);
-      if (existing) {
-        // R7 / FR-034：取用前比对配置指纹
-        // ① 配置未变 → 命中同一实例（池化收益不被破坏）
-        // ② 配置已变 → 换代：空闲实例立即销毁；仍有在途轮次的转入退休表，
-        //    既不中断进行中的回答，又让"其后的新对话"立刻用上新配置
-        const current = existing as unknown as ChatAgent;
-        const diskFingerprint = computeConfigFingerprint(
-          path.join(userAgentsDir(root, key.userId), key.agentName),
-        );
-        if (current.configFingerprint === diskFingerprint) return existing as never;
-        pool.retire(current);
-      }
-      const flightId = `${key.userId}\u0000${key.agentName}`;
-      const inflight = creating.get(flightId);
-      if (inflight) return inflight;
-      const creatingNow = (async (): Promise<ChatAgent> => {
-        const instance = await agentFactory.create(key);
-        try {
-          pool.put(instance);
-        } catch (err) {
-          await instance.dispose();
-          throw err;
-        }
-        return instance;
-      })();
-      creating.set(flightId, creatingNow);
-      try {
-        return await creatingNow;
-      } finally {
-        // 只在仍是自己时删除：换代期间可能有新的在途创建覆盖本表项
-        if (creating.get(flightId) === creatingNow) creating.delete(flightId);
-      }
-    },
+    scheduled,
+    getOrCreateAgent,
   };
 
   const app = Fastify({
@@ -419,6 +398,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerMcpCallStatsRoutes(routeApp, ctx);
   // R11：后台产出（列表 + 变更信号）
   registerProducedRoutes(routeApp, ctx);
+  // 015：定时任务（6 个端点，含 SSE 信号；作用域＝当前选中数字人）
+  registerScheduledTaskRoutes(routeApp, ctx);
+
+  // 015 定时任务心跳：启动即规整"错过的计划时刻"（不补跑），此后按秒巡检
+  scheduled.start();
 
   app.addHook('onClose', async () => {
     // 顺序要点（都是实测踩出来的）：
@@ -427,6 +411,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // ③ 关闭日志流要 await：否则 `process.exit` 会截断最后几条日志。
     loggers.logger.info({ event: 'shutdown.closed', scope: 'system' }, 'HTTP 服务已关闭');
     try {
+      // 先关心跳：之后不再派发新任务（在途 run 由 gracefulShutdown 的 drain 收尾）
+      scheduled.stop();
       scheduler.stopAll();
       usageDb.close();
     } catch (err) {

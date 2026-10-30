@@ -34,7 +34,12 @@ import {
 import type { McpManager, McpToolInfo } from './mcp-manager.js';
 import { classifyMcpError, McpUnavailableError } from './mcp-manager.js';
 import { mcpResultText } from './mcp-result-text.js';
-import { exposeSchema, hideSchemaPaths, type InputSchemaLike } from './mcp-schema-view.js';
+import {
+  exposeSchema,
+  hideSchemaPaths,
+  withServerTitleX,
+  type InputSchemaLike,
+} from './mcp-schema-view.js';
 
 /** 文件参数转换依赖（按 server 声明启用；agent-factory 按当前用户注入） */
 export interface FileArgContext {
@@ -124,10 +129,12 @@ export function mcpToolsAsAgentTools(
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
       // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
-      parameters: exposeSchema(hideSchemaPaths(t.inputSchema, derivedPaths), [
-        ...injected,
-        ...asyncInjected,
-      ]) as never,
+      parameters: exposeSchema(
+        // 根标题（2026-10-30）：服务端 `Tool.title` → `x-title`，删掉 SDK 生成的类名 `title`；
+        // 服务端没声明就原样透传（见 `withServerTitleX`）。字段级 `title` 不受影响。
+        withServerTitleX(hideSchemaPaths(t.inputSchema, derivedPaths), t.title),
+        [...injected, ...asyncInjected],
+      ) as never,
       execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
         let finalParams: unknown;
         try {

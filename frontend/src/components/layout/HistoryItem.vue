@@ -137,7 +137,14 @@ function onRemove(): void {
       @click="onClick"
       @dblclick="startEditing"
     >
-      <span class="history-item__title">{{ displayTitle }}</span>
+      <span class="history-item__line">
+        <!-- 015：定时任务会话的闪电标记。与「进行中」徽标共存（两个通道互不替代），
+             图标带可读名称，读屏会把它念进条目名（"定时任务会话 …"） -->
+        <span v-if="thread.source" class="history-item__source">
+          <BaseIcon name="schedule" :size="12" label="定时任务会话" />
+        </span>
+        <span class="history-item__title">{{ displayTitle }}</span>
+      </span>
       <span class="history-item__meta">
         <span v-if="running" class="history-item__running">进行中</span>
         <span class="history-item__time">{{ formattedTime }}</span>
@@ -272,6 +279,20 @@ function onRemove(): void {
 .history-item__button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* 图标与标题同一行：按钮是纵向 flex，不包一层会把图标顶成独立一行 */
+.history-item__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.history-item__source {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-primary);
 }
 
 .history-item__title {

@@ -23,6 +23,7 @@ import type {
   ErrorInfo,
   FileReference,
   Message,
+  ThreadSource,
   ToolCallResult,
 } from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
@@ -33,6 +34,7 @@ import { countMatches } from '../../utils/segments'
 import type { ViewLinkTarget } from '../../utils/view-link'
 import BaseIcon from '../common/BaseIcon.vue'
 import EmptyState from '../common/EmptyState.vue'
+import ThreadSourceNotice from '../schedule/ThreadSourceNotice.vue'
 import MessageBubble from './MessageBubble.vue'
 
 interface ToolCallView {
@@ -90,6 +92,8 @@ const props = withDefaults(
      * `null` = 视图态新对话，没有稳定身份，不存档。
      */
     threadId?: string | null
+    /** 会话来源标记（015）：定时任务会话在消息流顶部显示来源提示；`null` = 普通会话 */
+    source?: ThreadSource | null
   }>(),
   {
     messages: () => [],
@@ -101,6 +105,7 @@ const props = withDefaults(
     loadToolResult: undefined,
     nextSteps: null,
     threadId: null,
+    source: null,
   },
 )
 
@@ -294,12 +299,7 @@ function onOpenFile(reference: FileReference): void {
 function onOpenView(item: ViewLinkTarget): void {
   emit('open-view', item)
 }
-/**
- * 只把卡片透传给**归属的那一条**消息（其余传 `null`）。
- *
- * 这样历史气泡连"判断要不要渲染"这一步都不必走，`v-memo` 也只需盯住
- * `nextStepsMessageId` 一个标量（数组里多一个对象会频繁打断记忆化）。
- */
+/** 只把卡片透传给**归属的那一条**消息（其余 `null`）：历史气泡不用自行判断，`v-memo` 也只需盯一个标量（传整个数组会打断记忆化） */
 function nextStepsOf(message: Message): ThreadNextSteps | null {
   return props.nextSteps && props.nextSteps.message_id === message.id ? props.nextSteps : null
 }
@@ -319,6 +319,9 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
       aria-live="off"
       @scroll="onScroll"
     >
+      <!-- 015：定时任务会话的来源提示（无来源时不渲染、不留占位） -->
+      <ThreadSourceNotice v-if="source" :source="source" />
+
       <button v-if="hasMore" type="button" class="message-list__more" @click="emit('load-more')">
         加载更早的消息
       </button>

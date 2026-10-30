@@ -27,10 +27,39 @@ import type { HistoryStore } from './history.js';
 /** 默认标题截取长度（首条 user 消息前 20 字） */
 const TITLE_LEN = 20;
 
+/** 判定 meta 里的 `source` 是否可用（缺字段/类型不符一律视为"无来源"） */
+function isValidSource(
+  source: MetaFile['source'] | undefined,
+): source is NonNullable<MetaFile['source']> {
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    source.type === 'scheduled_task' &&
+    typeof source.task_id === 'string' &&
+    typeof source.task_name === 'string' &&
+    typeof source.triggered_at === 'string'
+  );
+}
+
 /** 默认标题：首条 user 消息前 20 字（按 Unicode 码点计）；无 user 消息 → null */
 export function defaultTitleOf(messages: HistoryMessage[]): string | null {
   const first = messages.find((m) => m.role === 'user');
   return first ? [...first.content].slice(0, TITLE_LEN).join('') : null;
+}
+
+/**
+ * 会话来源标记（015）：目前只有"定时任务"一种，字段保留为可扩展枚举。
+ *
+ * 缺省不写、不写 `null`：普通会话的 meta 里 MUST NOT 出现该键，
+ * 旧前端与旧数据因此完全不受影响（见 `contracts/thread-source.md`）。
+ */
+export interface ThreadSource {
+  type: 'scheduled_task';
+  taskId: string;
+  /** 任务名快照：任务改名/删除后仍可读 */
+  taskName: string;
+  /** 触发时刻（ISO UTC）；复用模式下为**首次**触发时刻 */
+  triggeredAt: string;
 }
 
 export interface ThreadMeta {
@@ -40,6 +69,8 @@ export interface ThreadMeta {
   title: string | null;
   createdAt: string;
   updatedAt: string;
+  /** 来源（仅定时任务会话有值） */
+  source?: ThreadSource;
 }
 
 export class ThreadNotFoundError extends Error {
@@ -56,6 +87,13 @@ interface MetaFile {
   title: string | null;
   created_at: string;
   updated_at: string;
+  /** 可选：仅定时任务产生的会话有值（缺省不写） */
+  source?: {
+    type: 'scheduled_task';
+    task_id: string;
+    task_name: string;
+    triggered_at: string;
+  };
 }
 
 export class ThreadStore {
@@ -85,15 +123,26 @@ export class ThreadStore {
     return path.join(userDataDir(this.root, userId, agentName), THREADS_DIR);
   }
 
-  /** 创建会话：归属＝调用方给出的**当前作用域**（服务端判定，见 `agent-scope.ts`） */
-  create(userId: string, agentName: string): ThreadMeta {
+  /**
+   * 创建会话：归属＝调用方给出的**当前作用域**（服务端判定，见 `agent-scope.ts`）。
+   *
+   * `opts` 是 015 新增的可选项，既有调用点（路由创建会话）不受影响：
+   * - `title`：定时任务会话按「任务名 + 触发时刻」预置，不再回落"首条消息前 20 字"；
+   * - `source`：来源标记，只有定时任务执行器会传。
+   */
+  create(
+    userId: string,
+    agentName: string,
+    opts: { title?: string | null; source?: ThreadSource } = {},
+  ): ThreadMeta {
     const now = new Date().toISOString();
     const meta: ThreadMeta = {
       threadId: randomUUID(),
       agentName,
-      title: null,
+      title: opts.title ?? null,
       createdAt: now,
       updatedAt: now,
+      ...(opts.source ? { source: opts.source } : {}),
     };
     const dir = threadDir(this.root, userId, agentName, meta.threadId);
     fs.mkdirSync(dir, { recursive: true });
@@ -109,18 +158,45 @@ export class ThreadStore {
     } catch {
       throw new ThreadNotFoundError(threadId);
     }
+    let m: MetaFile;
     try {
-      const m = JSON.parse(raw) as MetaFile;
-      return {
-        threadId: m.thread_id,
-        // 归属以**目录作用域**为准（meta 里的历史值不作为第二份真相）
-        agentName,
-        title: m.title ?? null,
-        createdAt: m.created_at,
-        updatedAt: m.updated_at,
-      };
+      m = JSON.parse(raw) as MetaFile;
     } catch {
       throw new ThreadNotFoundError(threadId);
+    }
+    return {
+      threadId: m.thread_id,
+      // 归属以**目录作用域**为准（meta 里的历史值不作为第二份真相）
+      agentName,
+      title: m.title ?? null,
+      createdAt: m.created_at,
+      updatedAt: m.updated_at,
+      // 损坏的 source 按"无来源"处理：一条坏字段不该毁掉整个会话列表
+      ...(isValidSource(m.source)
+        ? {
+            source: {
+              type: 'scheduled_task',
+              taskId: m.source.task_id,
+              taskName: m.source.task_name,
+              triggeredAt: m.source.triggered_at,
+            },
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * 会话是否存在（015）：运行记录的"会话已删除"判定。
+   *
+   * 放在 domain 层而不是路由里：接口层 MUST NOT 直接访问文件系统（宪章原则二）；
+   * 且"存在"的判据（meta.json 可解析）与 `get` 必须同源，不能各写一套。
+   */
+  exists(userId: string, agentName: string, threadId: string): boolean {
+    try {
+      this.get(userId, agentName, threadId);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -250,6 +326,17 @@ export class ThreadStore {
       title: meta.title,
       created_at: meta.createdAt,
       updated_at: meta.updatedAt,
+      // 有值才写：普通会话的 meta MUST NOT 出现 `source` 键（契约 thread-source.md §1）
+      ...(meta.source
+        ? {
+            source: {
+              type: meta.source.type,
+              task_id: meta.source.taskId,
+              task_name: meta.source.taskName,
+              triggered_at: meta.source.triggeredAt,
+            },
+          }
+        : {}),
     };
     fs.writeFileSync(
       this.metaPath(userId, agentName, meta.threadId),

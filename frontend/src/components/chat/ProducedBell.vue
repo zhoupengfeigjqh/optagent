@@ -131,6 +131,16 @@ onBeforeUnmount(() => {
 const buttonLabel = computed(() =>
   unread.value > 0 ? `后台记录，${unread.value} 条未读` : '后台记录',
 )
+/**
+ * 悬停说明（2026-10-30）：与左侧定时任务入口（闪电）同一手法——原生 `title`。
+ *
+ * 同一排的两个图标按钮，悬停反馈必须一致：闪电有说明而铃铛没有，用户只能靠猜。
+ * 文案与读屏名称同源（`buttonLabel` 的信息 + "点击查看"这个动作），
+ * 有未读时把条数带上，避免为了看条数还得点开。
+ */
+const buttonTitle = computed(() =>
+  unread.value > 0 ? `后台记录：${unread.value} 条未读，点击查看` : '后台记录',
+)
 const dialogTitle = computed(() => (view.value === 'list' ? '后台记录' : '后台结果'))
 
 /**
@@ -254,6 +264,7 @@ function onOpenView(item: ViewLinkTarget): void {
     type="button"
     class="produced-bell"
     :aria-label="buttonLabel"
+    :title="buttonTitle"
     :aria-pressed="open ? 'true' : 'false'"
     @click="open = true"
   >

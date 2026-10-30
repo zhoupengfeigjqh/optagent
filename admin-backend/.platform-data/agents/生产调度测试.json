@@ -28,10 +28,7 @@
     "grep_skill",
     "grep_files"
   ],
-  "mcp_services": [
-    "raw_inventory_purchase_action",
-    "raw_inventory_purchase_function"
-  ],
+  "mcp_services": [],
   "skills": [
     "raw-material-inventory"
   ],
@@ -71,5 +68,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-29T03:58:01.149Z"
+  "updated_at": "2026-10-30T15:21:37.694Z"
 }

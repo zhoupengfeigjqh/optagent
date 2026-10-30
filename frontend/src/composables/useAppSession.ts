@@ -7,7 +7,7 @@
  * - 测试通过 `createAppSession({ fetchImpl, now, storage })` 注入 `fetch` 桩、假时钟与内存存储
  *
  * 装配顺序即依赖方向（无环）：
- * `client/toast → preview/workspace/models/uploads/mention → threads → chat → agents`
+ * `client/toast → preview/workspace/models/uploads/mention → threads → schedule → chat → agents`
  *
  * ⚠️ 各领域模块会 `import { useSession } from './useAppSession'`，与本模块 `import { createXxxStore }`
  * 形成 ESM 循环引用。该循环是安全的：所有跨模块引用都只出现在**函数体内部**（延迟求值），
@@ -22,6 +22,7 @@ import { createHttpClient } from '../api/http'
 import { createModelsApi } from '../api/models'
 import { createNextStepsApi } from '../api/next-steps'
 import { createProducedApi } from '../api/produced'
+import { createScheduledTasksApi } from '../api/scheduled-tasks'
 import { createThreadsApi } from '../api/threads'
 import { createAgentsStore, type AgentsStore } from './useAgents'
 import { useEmptyDataHint, type EmptyDataHint } from './useEmptyDataHint'
@@ -31,6 +32,7 @@ import { createModelsStore, type ModelsStore } from './useModels'
 import { createNextStepsStore, type NextStepsStore } from './useNextSteps'
 import { createPreviewStore, type PreviewStore } from './usePreview'
 import { createProducedStore, type ProducedStore } from './useProduced'
+import { createScheduledTasksStore, type ScheduledTasksStore } from './useScheduledTasks'
 import { createSessionSearchStore, type SessionSearchStore } from './useSessionSearch'
 import { createThreadsStore, type ThreadsStore } from './useThreads'
 import { createToastStore, type ToastStore } from './useToast'
@@ -60,6 +62,13 @@ export interface AppSessionOptions {
 export interface AppSession {
   readonly agents: AgentsStore
   readonly threads: ThreadsStore
+  /**
+   * 定时任务（015）：设置页覆盖层的全部状态。
+   *
+   * 装配位置刻意在 `threads` 之后、`agents` 之前——它要读会话列表（信号到达后刷新左栏），
+   * 又要在切换数字人时被 `agents.onSwitched` 清空重拉；这一顺序即依赖方向（无环）。
+   */
+  readonly schedule: ScheduledTasksStore
   readonly chat: ChatStreamStore
   readonly models: ModelsStore
   readonly uploads: UploadsStore
@@ -199,6 +208,17 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     toast,
   })
 
+  /**
+   * 定时任务（015）：任务属于数字人数据域，故装配在 `threads` 之后（要它刷新左栏）、
+   * `agents` 之前（切人要清空重拉）。**不在这里 `start()`**：SSE 连接只由真正展示
+   * 任务的视图（工作台）建立/断开，避免数据页、甘特图页白开一条长连接。
+   */
+  const schedule = createScheduledTasksStore({
+    scheduled: createScheduledTasksApi(client),
+    reloadThreads: () => threads.loadList(),
+    toast,
+  })
+
   const search = createSessionSearchStore({ messages: () => threads.messages.value })
 
   // 下一步动作提示（007 修订 · Tail Protocol）：与 `threads` 共享同一个 `activeThreadId` ——
@@ -248,6 +268,9 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
       // 后台产出同样是数字人级的（后端按当前作用域定位产出目录）：先清旧条目/旧未读数，
       // 再按新作用域重拉。铃铛是常驻组件、只在挂载时拉一次，这里不补就一直是上一个数字人的。
       produced.clear()
+      // 015：任务归属也是数字人级的——旧任务一律不再成立，清空后按新作用域重拉
+      // （内部自带代际，切人瞬间在途的旧响应不会覆盖回来）
+      schedule.onAgentSwitched()
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()
@@ -260,6 +283,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   return {
     agents,
     threads,
+    schedule,
     chat,
     models,
     uploads,

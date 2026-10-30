@@ -54,6 +54,24 @@ export function isPredefinedDataPrepDir(name: string): boolean {
 export const THREADS_DIR = 'threads';
 
 /**
+ * 定时任务（015）的落点：`users/{userId}/user-data/{agentName}/scheduled-tasks/`。
+ *
+ * 为什么放在 `user-data/{数字人}/` 而不是 `agents/{数字人}/`：后者是**平台下发的配置目录**，
+ * 部署时按数字人整体覆盖；定时任务是用户在运行环境里产生的资产，必须与 `threads/` 同域
+ * （部署不触碰 `user-data/`）。同时"归属某个数字人"由目录位置承载，跨数字人访问天然解析不到。
+ */
+export const SCHEDULED_TASKS_DIR = 'scheduled-tasks';
+
+/** 定时任务数据目录：`users/{userId}/user-data/{agentName}/scheduled-tasks` */
+export function scheduledTasksDir(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+): string {
+  return path.join(userDataDir(optAgentRoot, userId, agentName), SCHEDULED_TASKS_DIR);
+}
+
+/**
  * 后台产出目录（R11）：MCP 异步工具回写结果的落点，**相对数字人数据根**的路径。
  *
  * 为 `临时空间` 的二级目录 —— 刻意**不是**第四个空间：它是临时产物，

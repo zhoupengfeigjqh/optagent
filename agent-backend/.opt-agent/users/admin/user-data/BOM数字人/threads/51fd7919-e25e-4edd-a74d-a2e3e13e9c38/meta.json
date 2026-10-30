@@ -1,0 +1,13 @@
+{
+  "thread_id": "51fd7919-e25e-4edd-a74d-a2e3e13e9c38",
+  "agent_name": "BOM数字人",
+  "title": "测试一下 2026-10-30 11:59:00",
+  "created_at": "2026-10-30T03:59:00.349Z",
+  "updated_at": "2026-10-30T03:59:02.451Z",
+  "source": {
+    "type": "scheduled_task",
+    "task_id": "2a55a0bf-b48f-4221-8677-49385bab7ddf",
+    "task_name": "测试一下",
+    "triggered_at": "2026-10-30T03:59:00.000Z"
+  }
+}

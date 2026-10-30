@@ -11,15 +11,21 @@
  * 打请求，且"记住当前会话"会双写地址栏）。同理，"首屏拉列表 + 刷新恢复会话"这两件
  * **工作台专属**的事也归本视图，见下方 `onMounted`。
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { Conversation, FileReference } from '@/api/types'
+import type {
+  Conversation,
+  CreateScheduledTaskRequest,
+  FileReference,
+  UpdateScheduledTaskRequest,
+} from '@/api/types'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import ToastHost from '@/components/common/ToastHost.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import HistorySidebar from '@/components/layout/HistorySidebar.vue'
 import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
+import SchedulePanel from '@/components/schedule/SchedulePanel.vue'
 
 import { useSession } from '@/composables/useAppSession'
 import { RUN_PHASE } from '@/constants/events'
@@ -42,6 +48,13 @@ const busy = computed(
 onMounted(async () => {
   await session.threads.loadList()
   await restoreThread()
+  // 015：变更信号只在**真正展示定时任务的视图**订阅（数据页/甘特图页白开一条长连接无意义）；
+  // 离开本视图即断开，重回时重新建连（`start()` 幂等）
+  session.schedule.start()
+})
+
+onBeforeUnmount(() => {
+  session.schedule.stop()
 })
 
 /**
@@ -218,6 +231,37 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
     session.preview.onFileRemoved(reference)
   }
 }
+
+/* ---------- 定时任务（015） ---------- */
+
+/** 创建：返回值决定创建弹窗是否收起（失败保留已填内容） */
+function onCreateTask(input: CreateScheduledTaskRequest): Promise<boolean> {
+  return session.schedule.create(input)
+}
+
+function onRemoveTask(taskId: string): Promise<boolean> {
+  return session.schedule.remove(taskId)
+}
+
+/** 编辑：整份替换 7 项可编辑字段（启用中服务端 409，界面已先置灰） */
+function onUpdateTask(taskId: string, input: UpdateScheduledTaskRequest): Promise<boolean> {
+  return session.schedule.update(taskId, input)
+}
+
+/** 启停：乐观更新在 store 内完成，这里只转发 */
+function onToggleTask(payload: { taskId: string; enabled: boolean }): void {
+  void session.schedule.setEnabled(payload.taskId, payload.enabled)
+}
+
+function onLoadRuns(taskId: string | null): void {
+  void session.schedule.loadRuns(taskId === null ? {} : { taskId })
+}
+
+/** 点运行记录 → 关覆盖层并跳到那次会话；会话已删的行不可点（见 `ScheduleRunsDialog`） */
+async function onOpenRunThread(threadId: string): Promise<void> {
+  session.schedule.closePanel()
+  await session.threads.select(threadId)
+}
 </script>
 
 <template>
@@ -269,6 +313,33 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
       />
     </template>
   </AppShell>
+
+  <!--
+    定时任务设置覆盖层（015）：原生 `<dialog>` 铺满视口——Tab 收敛、Esc 关闭、背景不可交互
+    都由浏览器提供；`ChatPanel` 的"Esc 中断本轮"判据是 `dialog[open]`，因此不会误伤回答。
+  -->
+  <SchedulePanel
+    :open="session.schedule.panelOpen.value"
+    :tasks="session.schedule.tasks.value"
+    :loading="session.schedule.loading.value"
+    :error="session.schedule.error.value"
+    :degraded="session.schedule.degraded.value"
+    :pending-ids="session.schedule.pendingIds.value"
+    :submitting="session.schedule.creating.value"
+    :default-thinking="session.chat.thinkingEnabled.value"
+    :runs="session.schedule.runs.value"
+    :runs-total="session.schedule.runsTotal.value"
+    :runs-loading="session.schedule.runsLoading.value"
+    :runs-error="session.schedule.runsError.value"
+    :create-task="onCreateTask"
+    :update-task="onUpdateTask"
+    :remove-task="onRemoveTask"
+    @close="session.schedule.closePanel"
+    @toggle="onToggleTask"
+    @reload="session.schedule.load"
+    @load-runs="onLoadRuns"
+    @open-thread="onOpenRunThread"
+  />
 
   <ToastHost
     :items="session.toast.items.value"

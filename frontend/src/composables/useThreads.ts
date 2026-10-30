@@ -23,6 +23,7 @@ import type {
   FeedbackValue,
   InteractionSnapshot,
   Message,
+  ThreadSource,
   ToolCallResult,
 } from '../api/types'
 import {
@@ -56,6 +57,8 @@ export interface ThreadsStore {
   list: Readonly<Ref<Conversation[]>>
   /** 当前切片后用于展示的会话 */
   visible: ComputedRef<Conversation[]>
+  /** 当前会话的来源标记（015）；普通会话 / 视图态新对话为 `null` */
+  activeSource: ComputedRef<ThreadSource | null>
   activeId: Readonly<Ref<string | null>>
   messages: Readonly<Ref<Message[]>>
   total: Readonly<Ref<number>>
@@ -123,6 +126,19 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
 
   const visible = computed(() => list.value.slice(0, limit.value))
   const hasMore = computed(() => messages.value.length < total.value)
+
+  /**
+   * 当前会话的来源标记（015）：由**列表项**承载，不在列表里（视图态新对话）即 `null`。
+   *
+   * 为什么不从详情接口取：`GET /api/threads/{id}` 与列表同源下发 `source`，
+   * 但中栏在"刚发首条消息、列表尚未刷新"的瞬间会拿不到——而来源提示的价值正是
+   * 打开会话的第一眼。列表是判定归属的唯一轻量来源，详情不再多存一份。
+   */
+  const activeSource = computed<ThreadSource | null>(() => {
+    const activeId = deps.activeThreadId.value
+    if (!activeId) return null
+    return list.value.find((item) => item.thread_id === activeId)?.source ?? null
+  })
 
   async function loadList(): Promise<void> {
     loading.value = true
@@ -345,6 +361,7 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
   return {
     list,
     visible,
+    activeSource,
     activeId: deps.activeThreadId,
     messages,
     total,

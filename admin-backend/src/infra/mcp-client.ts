@@ -13,6 +13,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ApiError } from '../domain/api-error.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
+import { withServerTitleX } from '../domain/mcp/tool-schema-title.js';
 
 export interface McpConnectionTarget {
   transport: 'http' | 'stdio';
@@ -143,7 +144,13 @@ async function defaultCreateClient(target: McpConnectionTarget): Promise<McpClie
       return res.tools.map((tool) => ({
         name: tool.name,
         description: tool.description ?? '',
-        parameters: (tool.inputSchema ?? { type: 'object', properties: {} }) as Record<string, unknown>,
+        // 根标题（2026-10-30，方案 A）：服务端 `@mcp.tool(title=...)` → `x-title`，
+        // 删掉 SDK 生成的类名 `title`；服务端没声明就原样透传（见 `withServerTitleX`）。
+        // 字段级 `title` 不受影响——它是运行环境 HITL 表单的字段标签。
+        parameters: withServerTitleX(
+          tool.inputSchema ?? { type: 'object', properties: {} },
+          tool.title,
+        ) as Record<string, unknown>,
       }));
     },
     // `ping` 是 MCP 协议内建的**只读**方法：能返回即证明协议层真的通了，

@@ -218,7 +218,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `tool_labels` | object | **工具显示名**（2026-10-27）：`{原始工具名: 人读名称}`，空对象 = 未配置（清单与意图聚焦命题回退英文工具名）。值 1~40 字单行字符串，空串/超长/含控制字符即 `VALIDATION_FAILED`。**语义与 `headers` 同口径：缺省 = 沿用存量，提供 = 全量替换**（`{}` 即清空）。MUST 回显（详情会覆盖表单，漏登等于"保存一次就清空"）。物化时**非空才写**进 `MCP.json`，且按 `allowed_tools` 过滤孤儿键 |
 | `headers` | object | **请求头（值已掩码）**（2026-10-08）：`{头名: 掩码值}`，空对象 = 未配置。用于需要访问令牌的服务（本体侧「自建发布」要求 `X-MCP-Token`，缺了直接 401）。**明文令牌 MUST NOT 出现在任何响应里**：每个值都掩码（长值 `6UuE…3F`，短值整串掩掉）。界面 MUST NOT 把掩码提交回来做连接或保存（保存期直接拒，见 §3.3）。完整语义见 `runtime-api-delta.md` §12 |
 | `missing_tools` | array | 白名单里**当前服务清单中已不存在**的工具名（下架/改名）——界面据此在该条目上标异常。**只在探测成功时才有意义**：服务不可达时恒为 `[]`（核对不了由 `tools_error` 表达，MUST NOT 把它呈现成"工具不存在"） |
-| `tools` | array | 每项：`{ name, label, description, parameters }`（`FR-045`；`label` 为 2026-10-27 新增的**工具显示名**，未配置即空串）。**只含白名单里的工具**（顺序与 `allowed_tools` 一致）；白名单为空（不限制）时即服务全量 |
+| `tools` | array | 每项：`{ name, label, description, parameters }`（`FR-045`；`label` 为 2026-10-27 新增的**工具显示名**，未配置即空串）。**只含白名单里的工具**（顺序与 `allowed_tools` 一致）；白名单为空（不限制）时即服务全量。`parameters` 的根标题按 `runtime-api-delta.md` §23：服务端 `Tool.title` 以 `x-title` 表达（服务端未声明则原样透传） |
 | `tools_truncated` | boolean | `tools` 是否被截断（**先按白名单过滤、后截断**——反过来的话，白名单里排在截断线之后的工具会被误判成"不存在"） |
 | `tools_error` | string \| null | 工具清单不可得时的可读原因（`null` = 可得） |
 | `available_tools` | array | **本次探测到的全部工具**（2026-10-15）：形状同 `tools`，顺序 = 服务返回顺序，有界同 `TOOLS_LIMIT`（100）。**用途只有一个**——工具范围弹窗的勾选基准（§3.3 界面口径）：`tools` 是白名单投影，拿它做基准就永远加不进一个当前不在白名单里的工具。探测成功时 `tools ⊆ available_tools`。不含任何凭据 |
@@ -354,7 +354,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `ok` | boolean | 是否探测成功 |
-| `tools` | array | `[{ name, description, parameters }]`（**有界**：最多 `TOOLS_LIMIT`=100 项） |
+| `tools` | array | `[{ name, description, parameters }]`（**有界**：最多 `TOOLS_LIMIT`=100 项；`parameters` 根标题口径同 `runtime-api-delta.md` §23 —— 服务端 `Tool.title` → `x-title`） |
 | `tools_truncated` | boolean | 是否因超过上限而截断 |
 | `error` | string \| null | `ok=false` 时的可读原因；`ok=true` 时为 `null` |
 | `error_code` | string \| null | `ok=false` 时的错误码（如 `ADM_RUNTIME_UNREACHABLE`） |

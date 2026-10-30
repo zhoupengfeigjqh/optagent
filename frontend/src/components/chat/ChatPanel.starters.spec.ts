@@ -38,7 +38,8 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
   const noop = vi.fn()
   return {
     chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
-    threads: { activeId: ref(null), messages: ref([]), hasMore: ref(false) },
+    // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
+    threads: { activeId: ref(null), activeSource: ref(null), messages: ref([]), hasMore: ref(false) },
     search: {
       isOpen: ref(false),
       keyword: ref(''),
@@ -75,6 +76,8 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
       switching: ref(false),
       loadCandidates: vi.fn(),
     },
+    // 015：头部入口按钮读它（本组用例不涉及定时任务，取"未展开"即可）
+    schedule: { panelOpen: ref(false), openPanel: noop },
     uploadOpen: ref(false),
     agentPanelOpen: ref(false),
     workspaceOpen: ref(false),

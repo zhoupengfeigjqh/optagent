@@ -12,7 +12,8 @@
  *    读取失败给**局部降级文案**而不是把整面板变成错误态；
  * 6. **元信息**：工具名 / 数字人名称 / 状态 / 创建与完成时间；缺数字人或工具名时
  *    给可读兜底（`未知数字人` / `未知工具`），不留白；
- * 7. **弹窗宽度**（2026-10-09）：结构化正文（表格/嵌套对象）用宽版，列表与原始文本用默认宽度。
+ * 7. **弹窗宽度**（2026-10-09）：结构化正文（表格/嵌套对象）用宽版，列表与原始文本用默认宽度；
+ * 8. **悬停说明**（2026-10-30）：与定时任务入口（闪电）同一手法——原生 `title`，随未读数变化。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, ref, type ComputedRef } from 'vue'
@@ -128,6 +129,8 @@ describe('ProducedBell —— 未读角标', () => {
 
     expect(wrapper.find('.produced-bell__badge').exists()).toBe(false)
     expect(wrapper.find('.produced-bell').attributes('aria-label')).toBe('后台记录')
+    // 2026-10-30：悬停说明（与定时任务入口同一手法：原生 title）
+    expect(wrapper.find('.produced-bell').attributes('title')).toBe('打开后台记录')
   })
 
   it('有未读：角标显示条数，且按钮的**无障碍名称**里带上条数（不只靠视觉）', () => {
@@ -140,6 +143,8 @@ describe('ProducedBell —— 未读角标', () => {
     expect(badge.text()).toBe('2')
     expect(badge.attributes('aria-hidden')).toBe('true') // 角标对读屏隐藏，避免重复播报
     expect(wrapper.find('.produced-bell').attributes('aria-label')).toBe('后台记录，2 条未读')
+    // 悬停说明带上条数：不点开也知道有几条
+    expect(wrapper.find('.produced-bell').attributes('title')).toBe('后台记录：2 条未读，点击查看')
   })
 })
 

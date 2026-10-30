@@ -41,7 +41,10 @@ export function useChatPanel() {
   const mention = useFileMention()
   const workspace = useWorkspace()
   // 014：引导判定已在 `useAppSession.onSwitched` 内完成，这里只取用装配好的状态（不加逻辑）
-  const emptyHint = useSession().emptyHint
+  const session = useSession()
+  const emptyHint = session.emptyHint
+  // 015：定时任务设置页的开合也是"聊天区头部入口"的一部分，与会话上下文同一通道取用
+  const schedule = session.schedule
   const agents = useAgents()
   // 发送前的 MCP 就绪门（2026-10-18）：灰 → 有连接结果再提交，见该模块头注释
   const mcpReady = useMcpReadyGate()
@@ -442,6 +445,7 @@ export function useChatPanel() {
     workspace,
     emptyHint,
     agents,
+    schedule,
     uploadOpen,
     agentPanelOpen,
     workspaceOpen,

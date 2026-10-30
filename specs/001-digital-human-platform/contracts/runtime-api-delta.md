@@ -35,6 +35,7 @@
 | R21 | **MCP 预热与发送前就绪门**（2026-10-18）：新增 `POST /api/agents/current/mcp/warm`（幂等预热，返回与 `GET .../mcp` 同形快照）；建连新增有界超时 `MCP_CONNECT_TIMEOUT_MS`（10s）；发消息前有界等待建连落定 | 新增端点 + 新环境变量 + 时序变更 | 否（`GET .../mcp` 仍纯只读；稳态首字延迟零变化；超时降级继续） |
 | R22 | **意图聚焦**（特性 `013-intent-focus`，2026-10-25）：SOUL.md frontmatter 新增 `intent_focus` 开关；`POST /api/threads/{id}/messages` 请求体新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`（只写、无运行期读取方）；主模型调用前新增一次有界判定（独立 Laya 服务，直连 HTTP） | 新增配置字段 + 请求字段 + 侧车文件 + 时序变更 | 否（开关缺省**关闭**；SSE 事件集合、会话详情、`next-actions` 端点、数字人详情、工具清单**零变更**） |
 | R23 | **MCP 工具显示名**（2026-10-27）：MCP 服务配置新增 `tool_labels`（`{原始工具名: 人读名称}`）；部署物化进 `MCP.json`（非空才写、按白名单过滤孤儿键）；运行环境据此取 `AgentTool.label`（优先级：平台配置 > 服务端 `Tool.title` > `server: tool`），用于**意图聚焦命题**与平台工具清单展示 | 新增配置字段 + 物化键 + 展示名来源 | 否（缺省不写键：存量 `MCP.json` 字节不变、英文拼接行为零变化；工具调用名不变） |
+| R24 | **MCP 工具入参 schema 的根标题**（2026-10-30，方案 A）：下发给模型 / HITL / 管理端工具清单的 `parameters`，根节点 `title`（SDK 生成的类名）改为 `x-title`，值取服务端 `Tool.title`（`@mcp.tool(title=...)`）；服务端未声明则**原样透传** | 数据形状变更（仅根节点键名） | 否（字段级 `title` 一字不动；未声明标题的工具 schema 逐字不变） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1556,3 +1557,32 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 - **兼容**：新增可选字段，旧客户端不感知；旧运行环境对未知键静默忽略；
 - **回滚**：清空 `tool_labels`（`{}`）→ 部署后 `MCP.json` 无该键 → 命题回到英文拼接，无需发版；
 - **测试**：平台 `normalizeToolLabels`（空串/超长/沿用存量）、物化（非空才写/白名单过滤）、运行侧 `label` 三优先级、前端清单渲染（有/无 label）。
+
+## §23 R24 — MCP 工具入参 schema 的根标题（2026-10-30，方案 A）
+
+**背景**：MCP 服务端 SDK（FastMCP / Pydantic）会为入参模型自动生成根 `title`，值是一个类名（`ocr_imageArguments`）——对人没有意义，却占着"标题"这个位置。真正的标题是服务端在 `@mcp.tool(title="图片识别")` 里声明的 `Tool.title`。管理端「工具清单 · 入参说明」原样展示 `parameters`，于是这个类名被当成了"标题"。
+
+**口径（方案 A）**：只取**服务端**标题，不用平台 `tool_labels`——保持参数 schema 的服务端原始信息，平台不做二次命名。
+
+### 23.1 规则
+
+| 情形 | 处理 |
+|---|---|
+| 服务端声明了 `Tool.title` | 删根 `title`，写 `x-title`（trim 后的值） |
+| 未声明 / 空白 | **原样透传**（不改名、不删键）：此时根 `title` 是唯一信息，改名会让"`x-title` = 人读标题"失真 |
+| 字段级 `title`（`properties[*]` / `items[*]`） | **一律不动**：运行环境 HITL 的字段标签（`fieldLabelOf`）与同层去重（`dedupeTitles`）依赖它；管理端映射表也只递归 `properties` / `items` / `$ref` |
+| 幂等性 | 幂等；只浅拷贝根，不修改入参对象 |
+
+### 23.2 生效面
+
+| 面 | 位置 | 表现 |
+|---|---|---|
+| 模型工具定义 | `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`（`hideSchemaPaths` 之后、`exposeSchema` 之前） | `parameters['x-title']` |
+| HITL 确认弹窗 | 同一份 `tool.parameters` 作为 `schema` 下发 | 同左；弹窗标题仍取 `确认调用参数：<label>`（`label` 口径见 §22.3） |
+| 管理端工具清单 / 探测 | `admin-backend/src/infra/mcp-client.ts` | 同左（独立部署，各自一份同语义纯函数） |
+
+### 23.3 兼容与回滚
+
+- **兼容**：`x-` 前缀是 JSON Schema 的扩展约定，模型与校验器均忽略；不改调用名（`{server}__{tool}`）、权限与 `description`；
+- **回滚**：撤掉两处 `withServerTitleX` 调用即回到 SDK 原样，无需数据迁移；
+- **测试**：运行侧 `agent-backend/tests/unit/mcp-schema-view.spec.ts`、管理侧 `admin-backend/tests/unit/tool-schema-title.spec.ts`（同一组用例：有标题 / 无标题 / 字段级标题不动 / 幂等 / 不改入参）。

@@ -24,7 +24,7 @@ import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { userAgentsDir } from '../domain/dirs.js';
-import { defaultTitleOf } from '../domain/thread-store.js';
+import { defaultTitleOf, type ThreadSource } from '../domain/thread-store.js';
 import type { ToolCallRecord } from '../domain/tool-events.js';
 import { ApiError } from '../server.js';
 
@@ -63,6 +63,7 @@ function metaJson(m: {
   title: string | null;
   createdAt: string;
   updatedAt: string;
+  source?: ThreadSource;
 }) {
   return {
     thread_id: m.threadId,
@@ -70,6 +71,17 @@ function metaJson(m: {
     title: m.title,
     created_at: m.createdAt,
     updated_at: m.updatedAt,
+    // 015：来源标记随列表/详情下发，左栏据此画闪电图标（缺省不出现该键）
+    ...(m.source
+      ? {
+          source: {
+            type: m.source.type,
+            task_id: m.source.taskId,
+            task_name: m.source.taskName,
+            triggered_at: m.source.triggeredAt,
+          },
+        }
+      : {}),
   };
 }
 

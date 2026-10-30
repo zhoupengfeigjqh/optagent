@@ -14,6 +14,7 @@ import { useChatPanel } from '../../composables/useChatPanel'
 import { EMPTY_DATA_HINT_TEXT } from '../../utils/empty-data-hint'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
+import ScheduleEntryButton from '../schedule/ScheduleEntryButton.vue'
 import AgentPanel from './AgentPanel.vue'
 import ChatHeader from './ChatHeader.vue'
 import Composer from './Composer.vue'
@@ -98,6 +99,8 @@ const {
   onConfirmMention,
   onMentionKey,
   onRemoveReference,
+  // 015：定时任务设置页的开合状态（入口按钮在本组件，覆盖层由 `WorkbenchView` 渲染）
+  schedule,
 } = useChatPanel()
 
 /**
@@ -201,6 +204,13 @@ onBeforeUnmount(() => {
     >
       <!-- 后台产出铃铛（R11）：自带数据与面板，故不走上面对三个按钮的 toggle 通道 -->
       <template #actions-extra>
+        <!-- 015：定时任务入口放在铃铛之前（次级入口，先于"产出提醒"） -->
+        <ScheduleEntryButton
+          :open="schedule.panelOpen.value"
+          :disabled="!agentSelected"
+          disabled-reason="请先选择数字人"
+          @open="schedule.openPanel()"
+        />
         <ProducedBell @open-view="onOpenView" />
       </template>
     </ChatHeader>
@@ -219,6 +229,7 @@ onBeforeUnmount(() => {
     <div v-if="showList" class="chat-panel__body">
       <MessageList
         :thread-id="threads.activeId.value"
+        :source="threads.activeSource.value"
         :messages="threads.messages.value"
         :streaming="streaming"
         :pending-user="pendingUserMessage"

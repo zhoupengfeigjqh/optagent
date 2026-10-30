@@ -75,6 +75,8 @@ const stubs = {
   },
   ToastHost: true,
   ConfirmDialog: true,
+  // 015：覆盖层是铺满视口的原生 dialog，与本视图的接线无关 → 打桩
+  SchedulePanel: true,
 }
 
 /** 只造本视图会触碰的字段；其余由 `useSession()` 的消费方（子组件）负责，这里已打桩 */
@@ -111,7 +113,33 @@ function makeSession(initialThreadId: string | null, threadIds: string[]) {
         activeThreadId.value = null
       }),
     },
-    chat: { phase: ref<string>(RUN_PHASE.IDLE) },
+    chat: { phase: ref<string>(RUN_PHASE.IDLE), thinkingEnabled: ref(false) },
+    // 015：覆盖层的全部状态（本视图只做接线；弹窗本体已打桩，但 props 仍会被求值）
+    schedule: {
+      panelOpen: ref(false),
+      tasks: ref([]),
+      loading: ref(false),
+      error: ref(null),
+      degraded: ref(false),
+      pendingIds: ref([]),
+      creating: ref(false),
+      runs: ref([]),
+      runsTotal: ref(0),
+      runsLoading: ref(false),
+      runsError: ref(null),
+      create: vi.fn().mockResolvedValue(true),
+      // 2026-10-30：编辑接线（表单打桩，props 求值时只取引用）
+      update: vi.fn().mockResolvedValue(true),
+      remove: vi.fn().mockResolvedValue(true),
+      setEnabled: vi.fn(),
+      loadRuns: vi.fn(),
+      load: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      openPanel: vi.fn(),
+      closePanel: vi.fn(),
+      onAgentSwitched: vi.fn(),
+    },
     preview: {
       open: ref(false),
       // 右栏插槽现在会被渲染（011 的接线要经它回来），故列表态 / 内容态字段也要齐

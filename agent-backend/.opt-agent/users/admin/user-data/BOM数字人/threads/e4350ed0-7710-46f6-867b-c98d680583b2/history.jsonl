@@ -1,0 +1,6 @@
+{"role":"user","content":"今天哪一年？","id":"m_mvugijja_ch6d","ts":"2026-10-30T04:13:06.790Z","agent_name":"BOM数字人"}
+{"id":"m_mvugiezw_yps5","role":"assistant","content":"今天是 2026 年（2026 年 10 月 30 日，星期五）。\n\n","ts":"2026-10-30T04:13:06.790Z","status":"completed","usage":{"input_tokens":3517,"output_tokens":88},"duration_ms":5882,"agent_name":"BOM数字人"}
+{"role":"user","content":"今天哪一年？","id":"m_mvugjpxp_b7dr","ts":"2026-10-30T04:14:01.741Z","agent_name":"BOM数字人"}
+{"id":"m_mvugjoy1_3ld7","role":"assistant","content":"今天是 **2026 年**（2026 年 10 月 30 日，星期五，UTC+08:00）。\n\n","ts":"2026-10-30T04:14:01.741Z","status":"completed","usage":{"input_tokens":3548,"output_tokens":72},"duration_ms":1284,"agent_name":"BOM数字人"}
+{"role":"user","content":"今天哪一年？","id":"m_mvugl047_cnfa","ts":"2026-10-30T04:15:01.591Z","agent_name":"BOM数字人"}
+{"id":"m_mvugkyx4_xsm9","role":"assistant","content":"今天是 **2026 年**（2026 年 10 月 30 日，星期五，UTC+08:00）。\n\n","ts":"2026-10-30T04:15:01.591Z","status":"completed","usage":{"input_tokens":3586,"output_tokens":65},"duration_ms":1551,"agent_name":"BOM数字人"}

@@ -47,6 +47,34 @@ export function exposeSchema(schema: unknown, injected: readonly string[]): unkn
 }
 
 /**
+ * 工具入参 schema 的**根标题视图**（2026-10-30，方案 A）。
+ *
+ * 背景：MCP 服务端（FastMCP / Pydantic）会给入参模型自动生成根 `title`，值是一个类名
+ * （`ocr_imageArguments`）——对人没有意义，却占着"标题"这个位置。真正的标题是服务端
+ * 在 `@mcp.tool(title="图片识别")` 里声明的 `Tool.title`。
+ *
+ * 三条规则（**只动根节点**）：
+ * 1. 服务端声明了 `Tool.title` → 删根 `title`，写 `x-title` 为该值；
+ *    用 `x-` 前缀是因为 JSON Schema 允许未知关键字，而"平台不伪造标准关键字"，
+ *    模型与校验器都不会把它当约束。
+ * 2. 服务端**未声明** `Tool.title` → **原样透传**：此时根 `title` 是唯一信息，
+ *    改名成 `x-title: xxxArguments` 会让"`x-title` = 人读标题"的约定失真。
+ * 3. `properties` / `items` 里的 `title` **一律不动**：HITL 表单的字段标签
+ *    （`fieldLabelOf`）与同层去重（`dedupeTitles`）全靠它。
+ *
+ * 幂等、不改入参对象（只浅拷贝根）。
+ */
+export function withServerTitleX(schema: unknown, serverTitle?: string): unknown {
+  const title = typeof serverTitle === 'string' ? serverTitle.trim() : '';
+  if (title === '') return schema;
+  if (typeof schema !== 'object' || schema === null || Array.isArray(schema)) return schema;
+  const next = { ...(schema as InputSchemaLike) };
+  delete next.title;
+  next['x-title'] = title;
+  return next;
+}
+
+/**
  * 从呈现给 LLM 的 JSON Schema 中**按取值路径剔除派生目标字段**（含嵌套）。
  *
  * 路径上的某层在 schema 里不存在（如服务方没声明该字段）时跳过——运行期注入仍会发生，

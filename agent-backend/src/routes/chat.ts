@@ -30,11 +30,11 @@ import {
   parseSpaceDir,
   userDataDir,
 } from '../domain/dirs.js';
+import { MAX_ACTIVE_THREADS_PER_USER } from '../domain/run-limits.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
 import { ApiError } from '../server.js';
 import type { FileReference } from '../types.js';
 
-const MAX_ACTIVE_THREADS_PER_USER = 3;
 const MAX_ATTACHMENTS = 10;
 
 const messageBodySchema = {

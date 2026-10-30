@@ -130,6 +130,53 @@ describe('工具显示名（tool_labels，2026-10-27）', () => {
   });
 });
 
+/**
+ * 入参 schema 根标题（2026-10-30，方案 A）：服务端 `@mcp.tool(title=...)` → `x-title`。
+ *
+ * 与显示名解耦：这里取的是**服务端**标题，平台 `tool_labels` 不参与（保持参数原始信息）。
+ */
+describe('入参 schema 根标题（方案 A）', () => {
+  it('服务端声明 Tool.title → 根 title 改名 x-title；与平台显示名解耦（方案 A）', () => {
+    const schema = {
+      title: 'ocr_imageArguments',
+      type: 'object',
+      properties: { image: { type: 'string', title: '待识别图片' } },
+      required: ['image'],
+    };
+    const [tool] = mcpToolsAsAgentTools(
+      fakeManager([]),
+      'bom-service',
+      [{ ...TOOL_WITHOUT_CONTEXT, title: '图片识别', inputSchema: schema }] as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      // 平台配了中文显示名：label 用它，但根标题 MUST 仍取服务端（方案 A）
+      { ocr_image: '平台中文名' },
+    );
+
+    const parameters = tool!.parameters as Record<string, unknown>;
+    expect(tool!.label).toBe('平台中文名');
+    expect(parameters).not.toHaveProperty('title');
+    expect(parameters['x-title']).toBe('图片识别');
+    // 字段级 title 是 HITL 表单标签的唯一来源，不能被改名波及
+    expect((parameters.properties as Record<string, { title?: string }>).image?.title).toBe(
+      '待识别图片',
+    );
+  });
+
+  it('服务端未声明 Tool.title → 原样透传（对象未改写、不加 x-title）', () => {
+    const [tool] = mcpToolsAsAgentTools(fakeManager([]), 'bom-service', [
+      TOOL_WITHOUT_CONTEXT,
+    ] as never);
+
+    expect(tool!.parameters).toBe(TOOL_WITHOUT_CONTEXT.inputSchema);
+    expect(tool!.parameters).not.toHaveProperty('x-title');
+  });
+});
+
 /** 取工具执行结果（适配 pi-agent-core 的 execute 签名） */
 async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, params: unknown) {
   return (await tool.execute('call_1' as never, params as never)) as {

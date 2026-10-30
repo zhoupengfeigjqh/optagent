@@ -44,56 +44,6 @@
       "headers": {},
       "updated_at": "2026-10-27T04:02:20.010Z"
     },
-    "raw_inventory_purchase_function": {
-      "name": "raw_inventory_purchase_function",
-      "description": "本体侧自建发布（原材料采购）",
-      "transport": "http",
-      "url": "http://localhost:8021/mcp",
-      "command": null,
-      "args": null,
-      "file_args": {},
-      "confirmation": "never",
-      "rules_fields": {},
-      "async_tools": [],
-      "allowed_tools": [
-        "sumRawNotArrivalQty",
-        "checkRawMaterialUnit",
-        "checkArrivalTimeValidity",
-        "checkSupplierExistence",
-        "checkRelatedOrderExistence",
-        "inferPurchasePurpose"
-      ],
-      "headers": {
-        "X-MCP-Token": "6UuE8_4nY683gZ13rNQbHDCfxgMgEF3Z"
-      },
-      "updated_at": "2026-10-08T02:53:13.646Z"
-    },
-    "raw_inventory_purchase_action": {
-      "name": "raw_inventory_purchase_action",
-      "description": "采购库存本体行为",
-      "transport": "http",
-      "url": "http://localhost:8022/mcp",
-      "command": null,
-      "args": null,
-      "file_args": {},
-      "confirmation": "never",
-      "rules_fields": {},
-      "async_tools": [],
-      "allowed_tools": [
-        "CreatePurchaseRecord",
-        "CancelPurchaseRecord",
-        "ReceiveRawMaterial",
-        "QueryInventory",
-        "QueryRawMaterials",
-        "QueryPurchaseRecords",
-        "QuerySuppliers",
-        "QuerySupplierCapability"
-      ],
-      "headers": {
-        "X-MCP-Token": "ZmeYwSB6_APUf54aJbGJl27u7_G5Cjo5"
-      },
-      "updated_at": "2026-10-08T04:40:23.120Z"
-    },
     "hd-algorithm": {
       "name": "hd-algorithm",
       "description": "海大生产调度工具包",
@@ -156,6 +106,26 @@
       ],
       "headers": {},
       "updated_at": "2026-10-23T05:56:19.504Z"
+    },
+    "test001": {
+      "name": "test001",
+      "description": "test001",
+      "transport": "http",
+      "url": "http://localhost:8025/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": "never",
+      "rules_fields": {},
+      "allowed_tools": [
+        "sumRawNotArrivalQty",
+        "checkRawMaterialUnit"
+      ],
+      "tool_labels": {},
+      "headers": {
+        "X-MCP-Token": "aU_8jNuf8HcWxZzT-NIdGPnaV1qJ9bdw"
+      },
+      "updated_at": "2026-10-30T15:30:57.798Z"
     }
   }
 }

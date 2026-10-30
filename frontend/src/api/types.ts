@@ -282,6 +282,19 @@ export interface Message {
   error?: ErrorInfo
 }
 
+/**
+ * 会话来源标记（015，`contracts/thread-source.md`）：目前只有"定时任务"一种，
+ * 字段保留为可扩展枚举。**缺省不写**——普通会话不带该键，界面据此不渲染任何标记。
+ */
+export interface ThreadSource {
+  type: 'scheduled_task'
+  task_id: string
+  /** 任务名快照：任务改名/删除后仍可读 */
+  task_name: string
+  /** 触发时刻（ISO UTC）；复用模式下为**首次**触发时刻 */
+  triggered_at: string
+}
+
 /** `GET /api/threads` 元素与 `POST /api/threads` 的列表视图。 */
 export interface Conversation {
   thread_id: string
@@ -290,6 +303,8 @@ export interface Conversation {
   title: string | null
   created_at: string
   updated_at: string
+  /** 定时任务会话的来源标记；普通会话为 `undefined`（不是 `null`） */
+  source?: ThreadSource
 }
 
 /** `GET /api/threads/{thread_id}` 响应。 */
@@ -540,4 +555,121 @@ export interface WorkspaceResponse {
   /** 场景名（users/{userId}/scenario.json 定义） */
   scenario: string
   spaces: WorkspaceSpace[]
+}
+
+/* ============================================================
+ * §6 定时任务（015）
+ * ============================================================ */
+
+/** 任务状态（派生字段，服务端现算；前端 MUST NOT 自行推导）。 */
+export type ScheduledTaskStatus = 'idle' | 'running'
+
+/** 系统自动停用的原因；用户手动停用为 `null`。 */
+export type ScheduledTaskDisabledReason = 'agent_unavailable'
+
+/** 一条定时任务（`GET /api/scheduled-tasks` 的 `tasks` 元素）。 */
+export interface ScheduledTask {
+  task_id: string
+  name: string
+  /** 每轮执行作为该会话的首条 user 消息 */
+  prompt: string
+  /** 思考开关（只作用于本任务） */
+  thinking: boolean
+  /** ISO 8601 UTC，创建时必晚于当时 */
+  start_at: string
+  /** 执行频率（间隔秒数，≥1） */
+  interval_seconds: number
+  /** 执行次数上限（≥1） */
+  max_runs: number
+  /** ISO 8601 UTC，严格晚于 `start_at` */
+  deadline_at: string
+  /** `true` = 每轮新建会话（缺省）；`false` = 复用同一会话（创建后不可改） */
+  new_thread_per_run: boolean
+  enabled: boolean
+  /** 已执行次数：只有真正开跑的一轮（`success` / `failed`）计入 */
+  executed_count: number
+  /** 派生：`enabled && !terminated && next_run_at !== null` */
+  status: ScheduledTaskStatus
+  /** 派生：次数用尽或已过截止 */
+  terminated: boolean
+  /** 派生：启动按钮是否可用 */
+  can_start: boolean
+  /** 系统自动停用的原因；用户手动停用为 `null` */
+  disabled_reason: ScheduledTaskDisabledReason | null
+  /** `null` = 无待执行时刻 */
+  next_run_at: string | null
+  last_run_at: string | null
+  agent_name: string
+  created_at: string
+  updated_at: string
+}
+
+/** `GET /api/scheduled-tasks` 响应。 */
+export interface ScheduledTaskListResponse {
+  tasks: ScheduledTask[]
+}
+
+/** `POST /api/scheduled-tasks` 请求体（`additionalProperties: false`）。 */
+export interface CreateScheduledTaskRequest {
+  name: string
+  prompt: string
+  thinking?: boolean
+  start_at: string
+  interval_seconds: number
+  max_runs: number
+  deadline_at: string
+  /** 缺省 `true`；`false` = 复用同一会话 */
+  new_thread_per_run?: boolean
+}
+
+/**
+ * `PATCH /api/scheduled-tasks/{task_id}` 请求体（编辑，2026-10-30 增补）。
+ *
+ * 整份替换 7 项可编辑字段；刻意不含 `new_thread_per_run`——会话模式创建后不可改
+ * （`FR-060`），服务端按"未声明字段"直接 400。
+ */
+export type UpdateScheduledTaskRequest = Omit<CreateScheduledTaskRequest, 'new_thread_per_run'>
+
+/** 单个任务的响应体（创建 / 编辑 / 启停共用）。 */
+export interface ScheduledTaskResponse {
+  task: ScheduledTask
+}
+
+/** 一次执行的结果。 */
+export type ScheduleRunResult = 'success' | 'failed' | 'skipped'
+
+/** 执行结果的原因（`success` 时为 `null`）。 */
+export type ScheduleRunReason =
+  | 'previous_run_active'
+  | 'busy_limit'
+  | 'agent_unavailable'
+  | 'run_failed'
+
+/** 一条执行记录（`GET /api/scheduled-tasks/runs` 的 `runs` 元素）。 */
+export interface ScheduleRun {
+  run_id: string
+  task_id: string
+  /** 触发时刻的任务名快照（任务改名/删除后仍可读） */
+  task_name: string
+  /** 计划触发时刻（ISO UTC） */
+  triggered_at: string
+  finished_at: string | null
+  result: ScheduleRunResult
+  reason: ScheduleRunReason | null
+  /** 面向用户的原因摘要（失败时为错误消息） */
+  reason_text: string | null
+  /** 执行产生的会话；`skipped` 时为 `null` */
+  thread_id: string | null
+  /** 会话名快照 */
+  thread_title: string | null
+  /** 复用模式下本次因原会话已删除而重建 */
+  rebuilt: boolean
+  /** 读取时回填：会话已不存在（不可跳转） */
+  thread_deleted: boolean
+}
+
+/** `GET /api/scheduled-tasks/runs` 响应（`total` 为筛选后的总数）。 */
+export interface ScheduleRunListResponse {
+  runs: ScheduleRun[]
+  total: number
 }

@@ -1,0 +1,2 @@
+{"role":"user","content":"今天星期几","id":"m_mvug0g1b_vxq8","ts":"2026-10-30T03:59:02.447Z","agent_name":"BOM数字人"}
+{"id":"m_mvug0ef2_gdaw","role":"assistant","content":"今天是 2026 年 10 月 30 日，星期五。\n\n需要处理 BOM 的话，请上传子BOM压缩包和总BOM目录文件，我来为您做格式校验并生成总BOM。\n\n","ts":"2026-10-30T03:59:02.447Z","status":"completed","usage":{"input_tokens":3520,"output_tokens":296},"duration_ms":2097,"agent_name":"BOM数字人"}
