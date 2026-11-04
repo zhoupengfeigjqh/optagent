@@ -123,3 +123,27 @@
 | `specs/001-digital-human-platform/data-model.md` | §「三类数据边界」：补入数字人级数据目录归属（平台写入范围不变，仍限于 `agents/**`） |
 | `specs/002-conversation-runtime/spec.md` | §5.1／§5.2 落点路径加数字人一级；顺带登记 §5 中 `users/{uid}/threads/` 与实现不一致的既有漂移 |
 | `frontend/src/api/types.ts` | 无需新增字段（接口形状不变）；仅错误码文案表新增一行 |
+
+---
+
+## 9. 2026-11-02 追加：路径判据收敛（模型侧与浏览侧同一张表）
+
+`agent-backend/src/domain/space-path.ts` 成为"哪条路径合法"的**唯一实现**（落实 FR-023），
+模型内置工具（`FileAccess`）与 HTTP 文件接口（`parseSpaceDir`）共用。此前两份实现已漂移：
+模型侧只判一级目录名、数据准备只验"磁盘上是否存在"，于是出现"前端看不到、agent 读得到"。
+
+| 空间 | `model-read` | `model-write` | `browse` | `browse-produced` |
+|---|---|---|---|---|
+| 数据准备 | 清单内二级目录及其子树 | 禁止 | 恰好二级（清单内） | 同 `browse` |
+| 共享空间 | 一层 | 禁止 | 空间根 | 空间根 |
+| 临时空间 | 一层 + `后台产出/**` | 仅顶层扁平名 | 空间根 | 空间根 + `后台产出` |
+| 其他 | 禁止 | 禁止 | 禁止 | 禁止 |
+
+**对客户端的可见影响：无。** 端点、状态码、错误码、字段形状全部不变；前端无需改调用。
+
+| 场景 | 行为 |
+|---|---|
+| 场景清单收缩后访问已下线目录 | 模型工具返回 `FILE_ACCESS_DENIED` 工具结果（对话不中断）；HTTP 仍 `403 DIR_VALIDATION`；并落 `prepdir.orphaned.denied` 告警（磁盘仍有内容时，供运维决定迁移或清除） |
+| 磁盘上存在扁平空间的深层目录 | 模型读不到（`not-flat`）；`GET /api/files/download/preview?dir=临时空间/别处` 仍 `400` |
+| `临时空间/后台产出` | 模型可读整棵子树；`download`/`preview` 放行该目录本身；`upload`/`list`/`delete` 仍拒（不改 `.meta.json` 索引口径） |
+| `write_file` / 产出回写 | **零变化**：仍为 `临时空间/{thread_id}_*` 与 `临时空间/后台产出/` |

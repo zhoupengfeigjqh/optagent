@@ -1,0 +1,2 @@
+{"role":"user","content":"今天星期几？","id":"m_mvz0fx9n_z2dm","ts":"2026-11-02T08:42:01.643Z","agent_name":"生产计划助手"}
+{"id":"m_mvz0fwat_43tj","role":"assistant","content":"今天是 2026 年 11 月 2 日，星期一（UTC+08:00）。\n\n如需进行数据解析入库或排产计算，请上传或告知待处理的文件。\n\n","ts":"2026-11-02T08:42:01.643Z","status":"completed","usage":{"input_tokens":5200,"output_tokens":55},"duration_ms":1254,"agent_name":"生产计划助手"}

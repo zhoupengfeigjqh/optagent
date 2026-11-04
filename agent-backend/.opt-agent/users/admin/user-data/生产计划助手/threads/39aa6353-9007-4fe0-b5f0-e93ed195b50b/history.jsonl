@@ -1,0 +1,2 @@
+{"role":"user","content":"hi","id":"m_mvyznwcv_wyvn","ts":"2026-11-02T08:20:14.095Z","agent_name":"生产计划助手"}
+{"id":"m_mvyznuom_rpnp","role":"assistant","content":"你好！我是排产计算专家，可以帮你完成两件事：\n\n1. **数据解析入库**：把产能信息、产线信息、产线电价信息、排产计划、工单切换时间这五类 Excel 文件解析入库。\n2. **排产计算**：基于已入库的数据版本，提交单工序排产任务，并查询任务状态与结果。\n\n需要先看一下你空间里的文件情况吗？还是你已经准备好某几个文件，想直接解析入库 / 提交排产？\n\n","ts":"2026-11-02T08:20:14.095Z","status":"completed","usage":{"input_tokens":5197,"output_tokens":153},"duration_ms":2169,"agent_name":"生产计划助手"}

@@ -24,6 +24,8 @@ import {
   userDataDir,
 } from './dirs.js';
 import type { SpaceName } from './dirs.js';
+import { judgeSpacePath } from './space-path.js';
+import type { BrowseCapability, SpacePathDeny } from './space-path.js';
 
 export class ScenarioNotConfiguredError extends Error {
   readonly code = 'SCENARIO_NOT_CONFIGURED';
@@ -345,44 +347,74 @@ export class DirValidationError extends Error {
 }
 
 /**
- * 解析并校验目录参数（`dir` 为相对**数字人数据根**的路径）：
+ * 解析并校验目录参数（`dir` 为相对**数字人数据根**的路径）。
+ *
+ * 合法性判据的**唯一来源**是 `domain/space-path.ts`（2026-11-02 收敛，与模型工具共用）：
  * - 穿越/绝对路径/反斜杠 → DirValidationError(400)
- * - 一级必须是三空间之一；仅数据准备允许（且必须）带二级目录，二级须在**该数字人**的
- *   scenario 清单内 → 403（清单随数字人不同而不同）
- * - scenario 未配置 → ScenarioNotConfiguredError（上层映射 503）
+ * - 一级必须是三空间之一；扁平空间（共享/临时）不许子目录；数据准备必须带二级目录，
+ *   且该二级目录在**该数字人**的 scenario 清单内 → 403（清单随数字人不同而不同）
+ * - `capability='browse-produced'` 只用于**读方向**（download / preview），额外放行
+ *   `临时空间/后台产出` 这一个目录；上传 / 列表 / 删除仍走默认口径
+ * - scenario 未配置 → ScenarioNotConfiguredError（上层映射 503），且**只在判定到数据准备
+ *   时才读取**——共享空间/临时空间不因场景缺失而整体不可用
  */
 export function parseSpaceDir(
   optAgentRoot: string,
   userId: string,
   agentName: string,
   dir: string,
+  capability: BrowseCapability = 'browse',
 ): SpaceDirTarget {
-  if (!dir || path.isAbsolute(dir) || dir.includes('..') || dir.includes('\\')) {
+  // 反斜杠属**参数格式**判据（查询串里不该出现），与路径合法性分开：判据内部把 `\` 视作
+  // 分隔符（模型可能给 Windows 分隔符），HTTP 侧则直接判非法
+  if (typeof dir !== 'string' || dir.includes('\\')) {
     throw new DirValidationError(400, `非法目录参数: ${dir}`);
   }
-  const segments = dir.split('/').filter((s) => s.length > 0);
-  const space = segments[0] as SpaceName | undefined;
-  if (!space || !(SPACES as readonly string[]).includes(space)) {
-    throw new DirValidationError(403, `目录 ${dir} 不开放，允许的空间：${SPACES.join('、')}`);
+  const verdict = judgeSpacePath(dir, capability, {
+    dataPrepDirs: () => loadScenario(optAgentRoot, userId, agentName).dataPrepDirs,
+  });
+  if (verdict.ok) {
+    return {
+      space: verdict.space,
+      ...(verdict.sub !== undefined ? { sub: verdict.sub } : {}),
+      relPath: verdict.relPath,
+    };
   }
-  if (space === SPACE_PREP) {
-    const sub = segments[1];
-    if (!sub || segments.length > 2) {
-      throw new DirValidationError(400, `数据准备需指定二级目录（如 数据准备/生产计划）: ${dir}`);
-    }
-    const scenario = loadScenario(optAgentRoot, userId, agentName);
-    if (!scenario.dataPrepDirs.includes(sub)) {
-      throw new DirValidationError(
+  throw dirError(verdict, dir, optAgentRoot, userId, agentName);
+}
+
+/**
+ * 判据 → HTTP 状态码与文案。
+ *
+ * 与 `FileAccess.explain` 是**同一 `kind` 的两种措辞**：那边面向模型（可自我纠正），
+ * 这边面向运维（要指出允许的清单）。两处都 MUST NOT 再补"某种情况下放行"的分支。
+ */
+function dirError(
+  v: SpacePathDeny,
+  dir: string,
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+): DirValidationError {
+  switch (v.kind) {
+    case 'bad-input':
+      return new DirValidationError(400, `非法目录参数: ${dir}`);
+    case 'space-forbidden':
+      return new DirValidationError(403, `目录 ${dir} 不开放，允许的空间：${SPACES.join('、')}`);
+    case 'missing-sub':
+    case 'too-deep':
+      return new DirValidationError(400, `数据准备需指定二级目录（如 数据准备/生产计划）: ${dir}`);
+    case 'not-in-scenario': {
+      const allowed = loadScenario(optAgentRoot, userId, agentName).dataPrepDirs;
+      return new DirValidationError(
         403,
-        `目录 ${dir} 不在场景清单内，允许：${scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`).join('、')}`,
+        `目录 ${dir} 不在场景清单内，允许：${allowed.map((d) => `${SPACE_PREP}/${d}`).join('、')}`,
       );
     }
-    return { space, sub, relPath: `${SPACE_PREP}/${sub}` };
+    case 'not-flat':
+      return new DirValidationError(400, `${v.space} 不支持子目录: ${dir}`);
   }
-  if (segments.length > 1) {
-    throw new DirValidationError(400, `${space} 不支持子目录: ${dir}`);
-  }
-  return { space, relPath: space };
+  return new DirValidationError(400, `非法目录参数: ${dir}`);
 }
 
 /* ---------- 模型可用目录清单 ---------- */
@@ -394,14 +426,15 @@ export function parseSpaceDir(
  *
  * **产出目录为什么进清单**（契约 §10.8）：产出清单只注入**发起会话**，换会话后模型既看不到
  * 清单也不知道落点。把它写进 `list_dir` 的说明，模型即可自行列目录、按路径取回——这是
- * **纯"告知"**：该目录本就在 `FileAccess` 白名单内（顶层 `临时空间`，不限二级目录），
- * 此前就能读，本清单不参与任何权限校验。
+ * **纯"告知"**：该目录在 `domain/space-path.ts` 的规则表里是扁平空间的**唯一登记例外**
+ * （`model-read` 放行其整棵子树），本清单不参与任何权限校验。
  *
  * **MUST 追加在末尾**：`{示例路径}` / `{首个目录}` 取首项，末尾追加才能保证那两处取值不变。
  *
- * **与 `parseSpaceDir` 的口径差异是有意的**：文件浏览 API 对非数据准备空间拒绝二级目录
- * （`临时空间/后台产出` 判 400）。两者消费者不同（模型内置工具 vs 管理端浏览），
- * MUST NOT 为"看起来一致"而放宽 `parseSpaceDir`。
+ * **与浏览侧的口径差异是有意的**：文件浏览 API（`browse`）对非数据准备空间拒绝二级目录
+ * （`临时空间/后台产出` 判 400，读方向 `browse-produced` 才放行该目录本身）。
+ * 两者消费者不同（模型内置工具 vs 管理端浏览），差异只由规则表的 capability 表达，
+ * MUST NOT 为"看起来一致"而放宽浏览侧。
  *
  * 场景未配置时退化为三空间根（不含数据准备子目录），产出目录同样在末尾。
  */

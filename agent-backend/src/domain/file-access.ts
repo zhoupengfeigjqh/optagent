@@ -2,8 +2,10 @@
  * FileAccess 文件访问代理层（FR-022 核心安全策略）。
  *
  * 所有 Agent 侧文件读写必须经此层：
- * - 路径规范化：拒绝绝对路径与 `..` 穿越；已存在路径做 realpath 校验防符号链接穿越
- * - 目录白名单：三空间（数据准备/共享空间/临时空间）；数据准备的二级目录须真实存在
+ * - 路径合法性：**唯一判据在 `domain/space-path.ts`**（与 HTTP 文件接口共用同一张表，
+ *   2026-11-02 收敛）——三空间白名单、扁平空间限深、数据准备二级目录须在场景清单内
+ * - 物理兜底：拒绝绝对路径与 `..` 穿越；已存在路径做 realpath 校验防符号链接穿越；
+ *   数据准备二级目录须真实存在（清单目录由 `loadScenario` 惰性创建）
  * - 权限矩阵：数据准备/共享空间只读；临时空间可写但强制 `{thread_id}_` 前缀
  * - 违规抛 PermissionError 并记日志（对话不中断由上层保证）
  *
@@ -14,8 +16,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
-import { PRODUCED_DIR, SPACE_PREP, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
+import { PRODUCED_DIR, SPACE_PREP, SPACE_SHARED, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
+import { loadScenario } from './scenario.js';
+import { judgeSpacePath } from './space-path.js';
+import type { SpaceCapability, SpacePathDeny, SpacePathRules } from './space-path.js';
 
 export class PermissionError extends Error {
   readonly code = 'PERMISSION_DENIED';
@@ -60,6 +65,12 @@ export interface FileAccessOptions {
 
 export class FileAccess {
   private readonly dataRoot: string;
+  private readonly optAgentRoot: string;
+  private readonly userId: string;
+  private readonly agentName: string;
+  /** 路径判据的入参（唯一判据在 `domain/space-path.ts`；这里只提供场景清单） */
+  private readonly rules: SpacePathRules;
+  private prepDirsCache?: readonly string[];
   private readonly logger?: Logger;
   /** 读截断上限（字节），工具层做 xlsx/pdf 解析后文本截断时使用 */
   get truncateBytes(): number {
@@ -69,11 +80,39 @@ export class FileAccess {
   private readonly truncateBytesInternal: number;
   constructor(opts: FileAccessOptions) {
     this.dataRoot = userDataDir(opts.optAgentRoot, opts.userId, opts.agentName);
+    this.optAgentRoot = opts.optAgentRoot;
+    this.userId = opts.userId;
+    this.agentName = opts.agentName;
+    this.rules = { dataPrepDirs: () => this.dataPrepDirs() };
     if (opts.logger) this.logger = opts.logger;
     this.truncateBytesInternal = (opts.truncateKb ?? 32) * 1024;
   }
 
-  /** 公开的路径白名单校验（工具层在任何格式分派前先过权限关） */
+  /**
+   * 该数字人的数据准备二级目录清单（2026-11-02：**可见性的唯一权威**）。
+   *
+   * 此前只验"磁盘上目录是否存在"，于是场景清单收缩后（部署不清理文件空间），
+   * 已下线的目录与文件仍在磁盘上，模型照样能读——清单形同虚设。
+   *
+   * `loadScenario` 自带 mtime 缓存并会惰性创建清单目录；本实例再 memo 一次，
+   * 避免 `grep` 逐文件调用时反复 stat。未配置场景 → 空清单（数据准备整体不可达，
+   * 与 `listAvailableDirs` 的退化口径一致）。
+   */
+  private dataPrepDirs(): readonly string[] {
+    if (this.prepDirsCache) return this.prepDirsCache;
+    try {
+      this.prepDirsCache = loadScenario(
+        this.optAgentRoot,
+        this.userId,
+        this.agentName,
+      ).dataPrepDirs;
+    } catch {
+      this.prepDirsCache = [];
+    }
+    return this.prepDirsCache;
+  }
+
+  /** 公开的路径白名单校验（工具层在任何格式分派前先过权限关；默认按模型只读口径） */
   assertPathAllowed(relPath: string): void {
     this.resolveSafe(relPath);
   }
@@ -97,32 +136,26 @@ export class FileAccess {
     return { relPath: rel, abs };
   }
 
-  /** 路径规范化 + 白名单校验，返回绝对路径；越权抛 PermissionError */
-  private resolveSafe(relPath: string): string {
-    // 盘符前缀一律拒（2026-10-21）：`C:foo`（无分隔符）在 win32 下 `path.isAbsolute` 为
-    // false，是"盘符相对路径"，解析结果取决于进程 cwd。此前靠后面的 `path.relative`
-    // 兜住（会以 `..` 或绝对路径出现），属"依赖第二道判定"——这里直接判死。
-    if (!relPath || path.isAbsolute(relPath) || /^[a-zA-Z]:/.test(relPath)) {
-      throw this.deny(`拒绝绝对路径: ${relPath}`);
-    }
-    const resolved = path.resolve(this.dataRoot, relPath);
+  /**
+   * 路径规范化 + 合法性校验，返回绝对路径；越权抛 PermissionError。
+   *
+   * 合法性判据的**唯一来源**是 `domain/space-path.ts`（与 HTTP 文件接口共用同一张表）；
+   * 本方法只补三件物理层面的事：落点归一、数据准备二级目录真实存在、realpath 防符号链接。
+   */
+  private resolveSafe(relPath: string, capability: SpaceCapability = 'model-read'): string {
+    const verdict = judgeSpacePath(relPath, capability, this.rules);
+    if (!verdict.ok) throw this.deny(this.explain(verdict, capability));
+    const resolved = path.resolve(this.dataRoot, verdict.relPath);
+    // 纵深防御：判据已收敛路径，这里仍确认落点没被 path.resolve 带到域外
     const rel = path.relative(this.dataRoot, resolved);
     if (rel.startsWith('..') || path.isAbsolute(rel)) {
       throw this.deny(`路径穿越被拒绝: ${relPath}`);
     }
-    const top = rel.split(path.sep)[0] ?? '';
-    if (!(READABLE_DIRS as readonly string[]).includes(top)) {
-      throw this.deny(`目录不在白名单: ${top}`);
-    }
     // 数据准备的二级目录必须是磁盘上真实存在的目录（scenario 定义的清单会惰性创建）
-    if (top === SPACE_PREP) {
-      const sub = rel.split(path.sep)[1];
-      if (!sub) {
-        throw this.deny(`数据准备需指定二级目录: ${relPath}`);
-      }
-      const subAbs = path.join(this.dataRoot, SPACE_PREP, sub);
+    if (verdict.space === SPACE_PREP && verdict.sub) {
+      const subAbs = path.join(this.dataRoot, SPACE_PREP, verdict.sub);
       if (!fs.existsSync(subAbs) || !fs.statSync(subAbs).isDirectory()) {
-        throw this.deny(`数据准备子目录不存在: ${SPACE_PREP}/${sub}`);
+        throw this.deny(`数据准备子目录不存在: ${SPACE_PREP}/${verdict.sub}`);
       }
     }
     // 符号链接穿越校验：已存在路径必须 realpath 后仍在 dataRoot 内
@@ -146,6 +179,62 @@ export class FileAccess {
       }
     }
     return resolved;
+  }
+
+  /**
+   * 判据 → 给模型**可自我纠正**的中文文案。
+   *
+   * 文案属消费者（HTTP 要 400/403，模型要引导语），但合法性只由 `judgeSpacePath` 决定：
+   * 这里 MUST NOT 再加任何"某种情况下放行"的分支。
+   */
+  private explain(v: SpacePathDeny, capability: SpaceCapability): string {
+    switch (v.kind) {
+      case 'bad-input':
+        if (
+          /^[a-zA-Z]:/.test(v.relPath) ||
+          v.relPath.startsWith('/') ||
+          v.relPath.startsWith('\\')
+        ) {
+          return `拒绝绝对路径: ${v.relPath}`;
+        }
+        return v.relPath === '' ? '非法路径: 空' : `路径穿越被拒绝: ${v.relPath}`;
+      case 'space-forbidden':
+        return capability === 'model-write'
+          ? `写入仅允许 临时空间: ${v.relPath}`
+          : `目录不在白名单: ${v.space ?? v.relPath}`;
+      case 'missing-sub':
+        return `数据准备需指定二级目录: ${v.relPath}`;
+      case 'too-deep':
+        return `数据准备不支持更深层级: ${v.relPath}`;
+      case 'not-in-scenario':
+        this.warnOrphanedPrepDir(v);
+        return `数据准备子目录不在场景清单: ${v.space}/${v.sub}`;
+      case 'not-flat':
+        return `${v.space} 不支持子目录: ${v.relPath}`;
+    }
+    return `路径被拒绝: ${v.relPath}`;
+  }
+
+  /**
+   * 场景清单外的数据准备目录若**磁盘上仍存在**，说明清单被收缩过而文件空间不清理
+   * （部署只覆盖数字人配置，不动 `user-data/`）。
+   *
+   * 这条日志让运维能主动决定"迁走还是留着"，而不是让数据静默变成
+   * "前端看不到、agent 也读不到、却还占着盘"的中间态。
+   */
+  private warnOrphanedPrepDir(v: SpacePathDeny): void {
+    if (!v.sub) return;
+    if (!fs.existsSync(path.join(this.dataRoot, SPACE_PREP, v.sub))) return;
+    this.logger?.warn(
+      {
+        alert: true,
+        event: 'prepdir.orphaned.denied',
+        user_id: this.userId,
+        agent_name: this.agentName,
+        sub: v.sub,
+      },
+      `数据准备/${v.sub} 已不在场景清单内，但磁盘上仍有内容（部署不清理文件空间）`,
+    );
   }
 
   private deny(message: string): PermissionError {
@@ -219,7 +308,7 @@ export class FileAccess {
       throw this.deny(`临时空间写入文件名必须以 "${threadId}_" 前缀开头: ${base}`);
     }
     const relPath = `${SPACE_TMP}/${base}`;
-    const abs = this.resolveSafe(relPath);
+    const abs = this.resolveSafe(relPath, 'model-write');
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content, 'utf8');
     return relPath;
@@ -249,6 +338,7 @@ export class FileAccess {
       throw this.deny(`后台产出文件名非法: ${filename}`);
     }
     const relPath = `${PRODUCED_DIR}/${base}`;
+    // 落点已由上面的 `dir !== PRODUCED_DIR` 锁死；判据走 model-read（该子树是登记例外）
     const abs = this.resolveSafe(relPath);
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content);
@@ -275,9 +365,22 @@ export class FileAccess {
     await removeFileSafeAsync(abs); // 不用 fs.promises.rm：Windows 非 ASCII 路径静默失效（见 fs-safe）
   }
 
-  /** 列目录（仅白名单顶层目录） */
+  /**
+   * 列目录。
+   *
+   * 扁平空间（共享/临时）**不可下钻**：`共享空间/2026`、`临时空间/别处` 本身就是子目录，
+   * 一律不可列。这条判据必须在 stat 之后才成立（词法分不清"一层文件"与"同名目录"），
+   * 故落在本实现而非 `space-path.ts`；例外子树 `临时空间/后台产出` 不受限。
+   */
   async list(dir: string): Promise<FileEntry[]> {
     const abs = this.resolveSafe(dir);
+    const baseRel = path.relative(this.dataRoot, abs).split(path.sep).join('/');
+    const top = baseRel.split('/')[0] ?? '';
+    const inProduced = baseRel === PRODUCED_DIR || baseRel.startsWith(`${PRODUCED_DIR}/`);
+    const flatSpace = top === SPACE_SHARED || top === SPACE_TMP;
+    if (flatSpace && !inProduced && baseRel !== top) {
+      throw this.deny(`${top} 不支持子目录: ${dir}`);
+    }
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(abs, { withFileTypes: true });
@@ -286,6 +389,14 @@ export class FileAccess {
     }
     const result: FileEntry[] = [];
     for (const e of entries) {
+      // 扁平空间根目录只列文件：目录条目在扁平模型里不可达（前端同样 filter 掉），
+      // 留着会让模型"看得见点不开"
+      if (flatSpace && baseRel === top && e.isDirectory()) continue;
+      // 与前端口径一致：不可达的子目录**不返回**，避免"看得见点不开"
+      // （模型会去 list 一遍再被拒，用户看到的是一张注定失败的卡片）
+      if (e.isDirectory() && !judgeSpacePath(`${baseRel}/${e.name}`, 'model-read', this.rules).ok) {
+        continue;
+      }
       const stat = await fs.promises.stat(path.join(abs, e.name)).catch(() => null);
       if (!stat) continue;
       result.push({
@@ -351,7 +462,12 @@ export class FileAccess {
         .readdir(prepAbs, { withFileTypes: true })
         .catch(() => [] as fs.Dirent[]);
       for (const sub of subs) {
-        if (sub.isDirectory()) dirs.push(`${SPACE_PREP}/${sub.name}`);
+        if (!sub.isDirectory()) continue;
+        const rel = `${SPACE_PREP}/${sub.name}`;
+        // 与 read_file 同一判据：场景清单外的残留目录不纳入检索范围，
+        // 否则"read_file 被拒、grep 却把内容漏给模型"，收紧会被一键绕过
+        if (!judgeSpacePath(rel, 'model-read', this.rules).ok) continue;
+        dirs.push(rel);
       }
     }
     return dirs;

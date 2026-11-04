@@ -1,4 +1,25 @@
 {
   "version": 1,
-  "tasks": []
+  "tasks": [
+    {
+      "taskId": "ea532c26-3d5f-40d5-8187-04c27ee5b11c",
+      "name": "test1",
+      "prompt": "今天星期几？",
+      "thinking": false,
+      "startAt": "2026-11-02T08:42:00.000Z",
+      "intervalSeconds": 60,
+      "maxRuns": 1,
+      "deadlineAt": "2026-11-09T08:45:00.000Z",
+      "newThreadPerRun": true,
+      "reusedThreadId": null,
+      "enabled": true,
+      "executedCount": 1,
+      "nextRunAt": null,
+      "lastRunAt": "2026-11-02T08:42:00.000Z",
+      "disabledReason": null,
+      "agentName": "生产计划助手",
+      "createdAt": "2026-11-02T08:40:14.361Z",
+      "updatedAt": "2026-11-02T14:39:35.150Z"
+    }
+  ]
 }

@@ -22,6 +22,17 @@ let root: string;
 let dataRoot: string;
 let access: FileAccess;
 
+/** 写入该数字人的场景清单（数据准备的可见性唯一权威） */
+function writeScenario(dirs: string[]): void {
+  const agentDir = path.join(root, 'users', 'admin', 'agents', 'demo');
+  fs.mkdirSync(agentDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(agentDir, 'scenario.json'),
+    JSON.stringify({ scenario: '文件访问测试', data_prep_dirs: dirs }),
+    'utf8',
+  );
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'file-access-'));
   dataRoot = path.join(root, 'users', 'admin', 'user-data', 'demo');
@@ -31,6 +42,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(dataRoot, '数据准备', '生产计划'), { recursive: true });
   fs.writeFileSync(path.join(dataRoot, '共享空间', '说明.txt'), '共享内容', 'utf8');
   fs.writeFileSync(path.join(dataRoot, 'threads', 'th_1.jsonl'), 'SECRET', 'utf8');
+  writeScenario(['生产计划']);
   access = new FileAccess({ optAgentRoot: root, userId: 'admin', agentName: 'demo' });
 });
 
@@ -86,16 +98,71 @@ describe('FileAccess —— 既有边界回归', () => {
     await expect(access.read('skills/SKILL.md')).rejects.toThrow('目录不在白名单');
   });
 
-  it('数据准备仍需真实二级目录；共享空间只读由写入路径锁定', async () => {
-    await expect(access.read('数据准备/不存在的目录/x.csv')).rejects.toThrow(
-      '数据准备子目录不存在',
-    );
+  it('数据准备：缺二级目录 / 清单外目录被拒，清单内可读', async () => {
     await expect(access.list('数据准备')).rejects.toBeInstanceOf(PermissionError);
+    await expect(access.list('数据准备')).rejects.toThrow('数据准备需指定二级目录');
+    await expect(access.read('数据准备/已下线/x.csv')).rejects.toThrow('不在场景清单');
+
+    fs.writeFileSync(path.join(dataRoot, '数据准备', '生产计划', 'x.csv'), 'a,b', 'utf8');
+    await expect(access.read('数据准备/生产计划/x.csv')).resolves.toMatchObject({ content: 'a,b' });
   });
 
   it('`writeProduced` 只允许 `临时空间/后台产出`（落点锁死）', async () => {
     await expect(access.writeProduced('共享空间', 'x.json', Buffer.from('{}'))).rejects.toThrow(
       '后台产出只允许写入',
     );
+  });
+});
+
+describe('FileAccess —— 判据收敛后与浏览接口同口径（2026-11-02）', () => {
+  it('场景清单收缩后：磁盘仍在的旧目录读不到（部署不清理文件空间）', async () => {
+    const legacy = path.join(dataRoot, '数据准备', '已下线');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, '2026-10计划.csv'), '旧数据', 'utf8');
+
+    // 清单里没有它 ⇒ 与前端一致地拒（此前只看"磁盘上存在"，故能读到）
+    await expect(access.read('数据准备/已下线/2026-10计划.csv')).rejects.toThrow('不在场景清单');
+    await expect(access.list('数据准备/已下线')).rejects.toThrow('不在场景清单');
+  });
+
+  it('共享空间深层目录读不到，且 `list_dir` 不再列出（不留"看得见点不开"）', async () => {
+    const deep = path.join(dataRoot, '共享空间', '2026');
+    fs.mkdirSync(deep, { recursive: true });
+    fs.writeFileSync(path.join(deep, '报价单.xlsx'), 'x', 'utf8');
+
+    await expect(access.read('共享空间/2026/报价单.xlsx')).rejects.toThrow('不支持子目录');
+    // 词法上 `共享空间/2026` 是"一层条目"，但它是目录 ⇒ 不可下钻（stat 之后判）
+    await expect(access.list('共享空间/2026')).rejects.toThrow('不支持子目录');
+
+    const names = (await access.list('共享空间')).map((e) => e.name);
+    expect(names).toContain('说明.txt');
+    expect(names).not.toContain('2026');
+  });
+
+  it('`临时空间/后台产出` 仍可被模型取回（登记例外，产出功能不受影响）', async () => {
+    await access.writeProduced('临时空间/后台产出', 'ocr_7f3a.json', Buffer.from('{"ok":true}'));
+
+    await expect(access.read('临时空间/后台产出/ocr_7f3a.json')).resolves.toMatchObject({
+      content: '{"ok":true}',
+    });
+    await expect(access.list('临时空间/后台产出')).resolves.toHaveLength(1);
+  });
+
+  it('`grep_files` 不把清单外目录纳入检索（否则收紧会被一键绕过）', async () => {
+    const legacy = path.join(dataRoot, '数据准备', '已下线');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, '旧.csv'), '排产冲突', 'utf8');
+    fs.writeFileSync(path.join(dataRoot, '数据准备', '生产计划', '新.csv'), '排产冲突', 'utf8');
+
+    const { matches } = await access.grep('排产');
+
+    expect(matches.map((m) => m.file)).toEqual(['数据准备/生产计划/新.csv']);
+  });
+
+  it('写入仍只能落 `临时空间` 顶层（写方向零变化）', async () => {
+    const rel = await access.write('th_1', 'th_1_a.csv', 'x');
+
+    expect(rel).toBe('临时空间/th_1_a.csv');
+    expect(fs.existsSync(path.join(dataRoot, '临时空间', 'th_1_a.csv'))).toBe(true);
   });
 });
