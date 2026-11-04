@@ -134,14 +134,14 @@ describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推
     return event.data as unknown as Record<string, unknown>
   }
 
-  it('带合法卡片 → 解码并归一形状（tools / guidance 缺失补齐，与快照端点同一条校验）', () => {
+  it('带合法卡片 → 解码并归一形状（tool_tips 缺失补齐，与快照端点同一条校验）', () => {
     const data = doneData({
       next_actions: { message_id: 'm-1', actions: [{ prompt: '整理表格' }] },
     })
 
     expect(data.next_actions).toEqual({
       message_id: 'm-1',
-      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+      actions: [{ prompt: '整理表格', tool_tips: [] }],
     })
   })
 

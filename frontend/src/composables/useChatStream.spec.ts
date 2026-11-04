@@ -139,7 +139,7 @@ describe('useChatStream —— done 直推卡片（007 修订 · Tail Protocol�
     'data: {"delta":"你好"}',
     '',
     'event: done',
-    'data: {"finish_reason":"completed","usage":{"input_tokens":1,"output_tokens":2},"duration_seconds":1.2,"message_id":"m_1","agent_name":"demo","next_actions":{"message_id":"m_1","actions":[{"prompt":"整理表格","tools":[],"guidance":""}]}}',
+    'data: {"finish_reason":"completed","usage":{"input_tokens":1,"output_tokens":2},"duration_seconds":1.2,"message_id":"m_1","agent_name":"demo","next_actions":{"message_id":"m_1","actions":[{"prompt":"整理表格","tool_tips":[{"name":"QueryPurchaseRecords","title":"查询采购订单信息","ontology_id":"1","ontology_name":"采购管理"}]}]}}',
     '',
     '',
   ].join('\n')
@@ -155,7 +155,19 @@ describe('useChatStream —— done 直推卡片（007 修订 · Tail Protocol�
     expect(applyNextActions).toHaveBeenCalledTimes(1)
     expect(applyNextActions).toHaveBeenCalledWith({
       message_id: 'm_1',
-      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+      actions: [
+        {
+          prompt: '整理表格',
+          tool_tips: [
+            {
+              name: 'QueryPurchaseRecords',
+              title: '查询采购订单信息',
+              ontology_id: '1',
+              ontology_name: '采购管理',
+            },
+          ],
+        },
+      ],
     })
   })
 

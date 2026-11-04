@@ -10,7 +10,13 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult } from '../api/types'
+import type {
+  ErrorInfo,
+  FeedbackValue,
+  FileReference,
+  ToolCallResult,
+  ToolTip,
+} from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
@@ -166,9 +172,11 @@ export function useChatPanel() {
     payload: {
       content: string
       attachments: FileReference[]
-      /** 本轮隐藏指引（004）；由问题实例与下一步动作卡片携带，用户气泡里看不到 */
+      /** 本轮隐藏指引（004）；由首屏问题实例携带，用户气泡里看不到 */
       guidance?: string
-      /** 013：预置动作入口携带——本轮跳过意图聚焦（服务端可校验） */
+      /** 016：下一步动作卡片携带的隐藏工具提示（结构化，不落历史） */
+      toolTips?: ToolTip[]
+      /** 013：首屏问题实例携带——本轮跳过意图聚焦（服务端可校验） */
       skipIntentFocus?: boolean
     },
     options: { settleBeforeReturn?: boolean } = {},
@@ -219,6 +227,7 @@ export function useChatPanel() {
       content,
       attachments: payload.attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
+      ...(payload.toolTips && payload.toolTips.length > 0 ? { toolTips: payload.toolTips } : {}),
       ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
     })
     if (options.settleBeforeReturn === false) {

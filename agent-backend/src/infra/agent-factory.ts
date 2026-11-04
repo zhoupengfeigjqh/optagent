@@ -269,41 +269,22 @@ export class AgentInstanceFactory {
         ? this.deps.providerFor(req.model)
         : new PiAiLlmProvider(req.model, this.deps.llmRetry ?? NO_LLM_RETRY)
       : this.deps.llm();
-    /**
-     * 013：意图聚焦。
-     *
-     * 放在工具装配**之后**：候选工具必须是"本轮模型真实可用工具"（`tools` 已过白名单、
-     * 已剔除不可用 MCP），否则判定会推荐模型根本调不到的工具。
-     * 放在模型调用**之前**（FR-001）；返回空串 = 本轮不聚焦。
-     * 提示追加到本轮 `systemExtra` 末尾（不进历史、不进后续轮次）。
-     */
-    let extra = req.systemExtra;
-    if (req.focusJudge) {
-      const focusPrompt = await req.focusJudge(
-        tools.map((t) => ({
-          name: t.name,
-          description: t.description ?? '',
-          // 中文展示名：内置工具是目录里的 `读取文件`；MCP 工具来自平台 `tool_labels`
-          // （缺省回退服务端 `Tool.title` 再到 `server: tool`）。判定准确率显著高于
-          // 纯英文名，故命题一律用展示名。
-          label: t.label,
-        })),
-      );
-      if (focusPrompt !== '') extra = extra ? `${extra}\n\n${focusPrompt}` : focusPrompt;
-    }
+    // 016：聚焦提示由 `run-consume` 在 prompt 组装后直接追加进 `req.systemExtra`，
+    // 装配期不再回调判定（本特性与工具清单无关，且入口卡片轮次不应扫目录）。
+    const extra = req.systemExtra;
     // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
     let systemPrompt = extra ? `${inst.config.systemPrompt}\n\n${extra}` : inst.config.systemPrompt;
     // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
-    // 必须放在工具装配之后：指令里的工具目录取 `tools`（本轮模型真实可见的清单），
-    // 与轮末引用裁剪的判据同源；放在最末尾也让"输出格式要求"最贴近生成位置、最易被遵循。
+    // 候选目录取**本轮意图聚焦选出的本体能力**（`req.focusToolTips`）：卡片的 `tool_tips`
+    // 只能从这份清单抄写，与"无 Laya 结果就不产卡片"的门控同源。
+    // 放在最末尾让"输出格式要求"最贴近生成位置、最易被遵循。
     //
-    // 2026-10-14（卡片强制绑定工具）：**本轮没有可用工具时不再追加指令**——新口径下每条建议
-    // 都必须绑定工具，无工具必然产不出卡片；追加指令只会白耗 token，并让轮末每次都按
-    // "条目全部被丢弃"告警（等价于该轮关闭了该功能）。判据见 `effectiveNextActionsMax`。
-    const nextActionTools = req.runtime?.availableTools ?? [];
-    const tailMax = effectiveNextActionsMax(req.nextActionsMax, nextActionTools);
+    // 开关关闭 / 本轮能力为空 → 不追加指令（`effectiveNextActionsMax` 返回 undefined），
+    // 模型因此不感知该协议，本轮必然无卡片。
+    const focusToolTips = req.focusToolTips ?? [];
+    const tailMax = effectiveNextActionsMax(req.nextActionsMax, focusToolTips);
     if (tailMax !== undefined) {
-      systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(nextActionTools, tailMax)}`;
+      systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(focusToolTips, tailMax)}`;
     }
     if (tools.length === 0 || !(llm instanceof PiAiLlmProvider)) {
       if (tools.length > 0) {

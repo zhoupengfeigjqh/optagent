@@ -228,8 +228,21 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / 外部 MCP 服务
 
 ### 4.7 意图聚焦（可选能力）
 
-每轮对话前用 Laya 判定「这句话是否指向某个工具」，命中则追加聚焦提示，减少多工具场景下的误选。
-`config.yaml` 的 `intent_focus` 整块缺失 = 功能关闭（不影响启动）；块存在但字段不全 = 启动失败（防半配置）。
+每轮对话前用 Laya 判定「这句话是否需要某个技能」，命中则把该技能（本体技能还带出所关联本体的**行为 /
+函数**，以及 `rules[].data_supplements` 声明的**数据补充行为**）铸成一条中文提示，追加到本轮
+`systemExtra` 末尾——减少技能与本体能力全量展开带来的上下文膨胀与误选。
+
+- **只读头部**：非本体技能只读 `skills/*/SKILL.md` 的 frontmatter；本体技能才读
+  `ontology/*/*/ontology.yaml`（只取 `metadata` / `functions` / `behaviors` / `rules`）。
+- **能力依附技能**：没有技能入选就不读本体能力，否则等同于全量展开。
+- **失败只降级**：未配置、超时、不可达、响应非法、目录不可读——一律折成「本轮无提示」，
+  不改变对话主链路；每次判定按五态（`focused` / `empty` / `skipped` / `degraded` / `unconfigured`）
+  留档，便于事后归因。
+
+控制流见 `agent-backend/src/domain/intent-focus-runner.ts`，判定细节见
+`agent-backend/src/domain/ontology-focus/`。`config.yaml` 的 `intent_focus` 整块缺失 = 功能关闭
+（不影响启动）；块存在但字段不全或越界 = 启动失败（防半配置）。开关是 SOUL frontmatter 的
+`intent_focus`，逐次现读、读不出来按关闭（fail-closed）。
 
 ---
 
@@ -280,9 +293,16 @@ intent_focus:
   base_url: http://laya:8000       # 本地直跑 backend 时用 http://127.0.0.1:8103
   model: laya-multilingual
   api_key: $DECIS_API_KEY          # 与 laya 容器的 DECIS_API_KEY 必须同值
-  timeout_ms: 10000                # 300~10000，超时即降级
-  threshold: 0.6                   # 可被环境变量 INTENT_FOCUS_THRESHOLD 覆盖
+  timeout_ms: 10000                # 整轮预算 300~10000，超时即降级（不重试）
+  threshold: 0.6                   # 技能入选阈值，可被 INTENT_FOCUS_THRESHOLD 覆盖
+  ontology_threshold: 0.6          # 本体行为 / 函数阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
+  max_skills: 32                   # 单轮技能候选上限（1~256）
+  max_capabilities: 96             # 单轮能力候选上限（1~256；3 批 × 32）
 ```
+
+- 阈值口径是**严格大于**（`score > threshold`，等于阈值丢弃）；环境变量优先于 `config.yaml`。
+- 整块缺失 = 功能不可用（不判定、不追加提示、启动不受影响）；块存在但字段缺失 / 越界 = 启动失败。
+- 完整字段说明见 `config.example.yaml`，判定与留档细节见 `specs/016-ontology-skill-focus/`。
 
 ---
 
@@ -485,7 +505,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<宿主 IP>:82/admin/
 - 覆盖率是两层阈值：全局「防倒退地板」（只可上调）+ 受门禁约束模块的 80%。新增或改动模块必须配同名测试。
 - 开发前先读 `.specify/memory/constitution.md`：它约束两侧同改、单文件 ≤500 行、测试完备、优雅降级等九条原则。
 - 需求与设计细节在 `specs/`：001 平台、002 运行端，以及 004 灵魂设计、006 @引用浮层、007 下一步提示、
-  008 上传类型、009 数据隔离、010 消息渲染、011 预览放大、012 上传命名、013 意图聚焦。
+  008 上传类型、009 数据隔离、010 消息渲染、011 预览放大、012 上传命名、013 意图聚焦、016 本体技能聚焦。
 
 ---
 

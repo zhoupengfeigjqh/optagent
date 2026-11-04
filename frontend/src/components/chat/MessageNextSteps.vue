@@ -10,14 +10,14 @@
  * - **引导句由界面固定渲染**（FR-011）：`您接下来可以操作以下动作，请选择` 是 UI 常量，
  *   MUST NOT 取自模型输出——模型说什么都改不了它。
  */
-import type { AgentStarter } from '../../api/types'
+import type { NextStepAction } from '../../api/types'
 import { NEXT_STEPS_GUIDE_TEXT } from '../../utils/next-steps'
 import SuggestionCard from './SuggestionCard.vue'
 
 withDefaults(
   defineProps<{
     /** 归属于本轮的卡片（空数组 = 整块不渲染） */
-    actions?: AgentStarter[]
+    actions?: NextStepAction[]
     /** 本轮进行中 / 不可发送时置灰卡片 */
     disabled?: boolean
   }>(),
@@ -26,7 +26,7 @@ withDefaults(
 
 const emit = defineEmits<{
   /** 点选某张卡片；确认与发送由上层（ChatPanel）决定 */
-  select: [action: AgentStarter]
+  select: [action: NextStepAction]
 }>()
 </script>
 

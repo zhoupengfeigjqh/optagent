@@ -6,24 +6,19 @@
  */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import type { AgentStarter, AgentStarterTool } from '../../api/types'
+import type { NextStepAction, ToolTip } from '../../api/types'
 import { NEXT_STEPS_GUIDE_TEXT } from '../../utils/next-steps'
 import MessageNextSteps from './MessageNextSteps.vue'
 
-const TOOL: AgentStarterTool = {
-  kind: 'mcp',
-  service: 'erp',
-  name: 'query_order',
-  exposed_name: 'erp__query_order',
+const TIP: ToolTip = {
+  name: 'QueryPurchaseRecords',
+  title: '查询采购订单信息',
+  ontology_id: '1',
+  ontology_name: '采购管理',
 }
 
-function action(prompt: string, overrides: Partial<AgentStarter> = {}): AgentStarter {
-  return {
-    prompt,
-    tools: [TOOL],
-    guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
-    ...overrides,
-  }
+function action(prompt: string, overrides: Partial<NextStepAction> = {}): NextStepAction {
+  return { prompt, tool_tips: [TIP], ...overrides }
 }
 
 describe('MessageNextSteps', () => {
@@ -51,15 +46,15 @@ describe('MessageNextSteps', () => {
     ])
   })
 
-  it('不出现任何工具信息（服务名 / 工具名 / 暴露名一律不上界面）', () => {
+  it('不出现任何工具信息（`tool_tips` 一律不上界面）', () => {
     const wrapper = mount(MessageNextSteps, {
       props: { actions: [action('按交付日期梳理订单风险')] },
     })
 
-    expect(wrapper.text()).not.toContain('erp__query_order')
-    expect(wrapper.text()).not.toContain('query_order')
-    expect(wrapper.text()).not.toContain('erp')
-    expect(wrapper.html()).not.toContain('guidance')
+    expect(wrapper.text()).not.toContain('QueryPurchaseRecords')
+    expect(wrapper.text()).not.toContain('查询采购订单信息')
+    expect(wrapper.text()).not.toContain('采购管理')
+    expect(wrapper.html()).not.toContain('tool_tips')
   })
 
   it('点选某张卡片 → 上抛该卡片（含隐藏引导），由上层决定确认与发送', async () => {

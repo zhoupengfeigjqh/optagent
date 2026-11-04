@@ -11,7 +11,7 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentStarter } from '../api/types'
+import type { NextStepAction, ToolTip } from '../api/types'
 import { emptyNextSteps } from '../api/next-steps'
 import { RUN_PHASE } from '../constants/events'
 import { nextStepSendPayload } from '../utils/next-steps'
@@ -23,10 +23,16 @@ vi.mock('./useAppSession', () => ({ useSession: () => h_state.session }))
 
 const { useChatPanel } = await import('./useChatPanel')
 
-const ACTION: AgentStarter = {
+const TIP: ToolTip = {
+  name: 'QueryPurchaseRecords',
+  title: '查询采购订单信息',
+  ontology_id: '1',
+  ontology_name: '采购管理',
+}
+
+const ACTION: NextStepAction = {
   prompt: '按交付日期梳理这批订单的风险',
-  tools: [{ kind: 'mcp', service: 'erp', name: 'query_order', exposed_name: 'erp__query_order' }],
-  guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+  tool_tips: [TIP],
 }
 
 interface Harness {
@@ -192,9 +198,8 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
     expect(send.send).toHaveBeenCalledWith({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
-      guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
-      // 013：预置动作入口一律跳过意图聚焦（FR-008/FR-044）
-      skipIntentFocus: true,
+      // 016：tool_tips 走结构化通道；卡片点击仍会触发意图聚焦
+      toolTips: [TIP],
     })
     expect(panel.pendingSuggestion.value).toBeNull()
     expect(toast.push).not.toHaveBeenCalled()

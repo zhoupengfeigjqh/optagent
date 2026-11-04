@@ -58,6 +58,14 @@ function makeRun(): RunImpl {
   return run;
 }
 
+/** 016：卡片候选范围的本体能力 */
+const TOOL_TIP = {
+  name: 'QueryPurchaseRecords',
+  title: '查询采购订单信息',
+  ontology_id: '1',
+  ontology_name: '采购管理',
+};
+
 function turn(
   runtime: FinalizeTurn['runtime'] = { availableTools: [] },
   nextActionsMax?: number,
@@ -66,7 +74,7 @@ function turn(
     userId: 'admin',
     threadId: 'th_1',
     runtime,
-    ...(nextActionsMax === undefined ? {} : { nextActionsMax }),
+    ...(nextActionsMax === undefined ? {} : { nextActionsMax, focusToolTips: [TOOL_TIP] }),
   };
 }
 
@@ -126,7 +134,7 @@ describe('RunFinalizer.done', () => {
     const finalizeInputs: NextActionsFinalizeInput[] = [];
     const view: NextActionsView = {
       message_id: 'm-assistant',
-      actions: [{ prompt: '整理表格', tools: [], guidance: '' }],
+      actions: [{ prompt: '整理表格', tool_tips: [TOOL_TIP] }],
     };
     const finalizer = new RunFinalizer({
       history: history.store,
@@ -150,7 +158,7 @@ describe('RunFinalizer.done', () => {
 
     expect(flush).toHaveBeenCalledWith('admin', 'demo', 'th_1');
     expect(summaryTrigger).toHaveBeenCalledWith('admin', 'demo', 'th_1');
-    // 素材取自本轮真相：捕获的尾部块原文 + 本轮可用工具；条数上限与提示词装配同源
+    // 素材取自本轮真相：捕获的尾部块原文 + 本轮 Laya 能力；条数上限与提示词装配同源
     expect(finalizeInputs).toHaveLength(1);
     expect(finalizeInputs[0]).toMatchObject({
       userId: 'admin',
@@ -158,7 +166,7 @@ describe('RunFinalizer.done', () => {
       messageId: 'm-assistant',
       agentName: 'demo',
       tailText: '{"actions":[{"prompt":"整理表格"}]}',
-      availableTools: [{ name: 'read_file', description: '读取文件' }],
+      focusToolTips: [TOOL_TIP],
       max: 3,
     });
     // 定稿后归档清空（同一 run 不会被二次定稿）

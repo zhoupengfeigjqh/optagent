@@ -1,50 +1,52 @@
 /**
- * 单元测试：下一步动作提示（007 修订 · Tail Protocol）。
+ * 单元测试：下一步动作提示（007 修订 · Tail Protocol + 016 能力驱动）。
  *
  * 分五组守住五条硬约束（口径见 `src/domain/next-actions.ts` 文件头）：
- * - **解析与合规**：模型输出脏（代码块围栏 / 裸数组 / 超长 / 夹工具名）时逐条丢弃，绝不透出工具标识符；
- * - **工具引用与引导**（2026-10-14 修订）：卡片**强制绑定工具**——白名单裁剪后无有效引用的条目
- *   **整条丢弃**；引导由 `buildActionGuidance` 铸造（含工具名 + 用途摘要），超 500 字**截断**而非置空；
+ * - **解析与合规**：模型输出脏（代码块围栏 / 裸数组 / 超长 / 夹工具名 / 非祈使句 / 指代）时逐条丢弃；
+ * - **`tool_tips` 不校验**：只读字段与截断到 5 条，不比对运行时工具、不查名字是否在目录、不去重、不改写；
  * - **尾部块捕获**：`<next_actions>` 块对用户完全不可见，正文逐字无损（跨增量 / 误前缀 / 块后正文）；
- * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出与"全无工具"告警附归因；
- * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取侧不按当前选中数字人过滤
- *   （009：作用域由路径承载）、读取侧按同一判据过滤存量"无工具卡片"。
- *
- * 全链路（含 done 直推）见 `tests/integration/next-actions-rounds.spec.ts`。
+ * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出与"全部不合规"告警附归因；
+ * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取侧按新形状过滤旧口径快照。
  */
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_ACTIONS,
+  MAX_TOOL_TIPS_PER_ACTION,
   NextActionsStore,
   PROMPT_MAX_CHARS,
   buildTailInstruction,
   effectiveNextActionsMax,
   isCompliantPrompt,
   parseActions,
+  renderToolTipsInstruction,
   sanitizeActions,
   sanitizeActionsWithStats,
   type NextActionsFinalizeInput,
 } from '../../src/domain/next-actions.js';
 import { TailCapture } from '../../src/domain/next-actions-tail.js';
-import { GUIDANCE_MAX_CHARS, buildActionGuidance } from '../../src/domain/soul.js';
 import { threadDir } from '../../src/domain/dirs.js';
-import type { RuntimeToolBrief } from '../../src/types.js';
+import type { FocusToolTip } from '../../src/domain/ontology-focus/types.js';
 
-const TOOLS: RuntimeToolBrief[] = [
-  { name: 'read_file', description: '读取文件' },
-  { name: 'erp__query_order', description: '查询订单' },
+const TOOL_TIPS: FocusToolTip[] = [
+  {
+    name: 'QueryPurchaseRecords',
+    title: '查询采购订单信息',
+    ontology_id: '1',
+    ontology_name: '采购管理',
+  },
+  { name: 'QueryInventory', title: '查询库存数量', ontology_id: '1', ontology_name: '采购管理' },
 ];
 
-function action(prompt: string, tools?: unknown[]): Record<string, unknown> {
-  return { prompt, ...(tools === undefined ? {} : { tools }) };
+function action(prompt: string, toolTips?: unknown[]): Record<string, unknown> {
+  return { prompt, ...(toolTips === undefined ? {} : { tool_tips: toolTips }) };
 }
 
-/** 合法绑定：`read_file` 恒在 `TOOLS` 清单内，用来构造"带工具"的合规条目 */
-const bound = (prompt: string): Record<string, unknown> =>
-  action(prompt, [{ kind: 'builtin', name: 'read_file' }]);
+/** 合法绑定：模型从目录里照抄的第一条 */
+const bound = (prompt: string): Record<string, unknown> => action(prompt, [TOOL_TIPS[0]]);
 
 describe('parseActions —— 输出容错解析', () => {
   it('顶层裸数组 / 对象包裹 / 代码块围栏三种形态都能解析', () => {
@@ -64,20 +66,20 @@ describe('parseActions —— 输出容错解析', () => {
 });
 
 describe('isCompliantPrompt —— 合规判定（唯一实现）', () => {
-  const toolNames = new Set(['read_file', 'erp__query_order']);
+  const toolNames = new Set(['QueryPurchaseRecords']);
 
-  it('全中文且不超过 50 字 → 通过；51 字 / 空串 → 丢弃', () => {
+  it('祈使句且不超过 50 字 → 通过；51 字 / 空串 → 丢弃', () => {
     expect(isCompliantPrompt('甲'.repeat(PROMPT_MAX_CHARS), toolNames)).toBe(true);
     expect(isCompliantPrompt('甲'.repeat(PROMPT_MAX_CHARS + 1), toolNames)).toBe(false);
     expect(isCompliantPrompt('', toolNames)).toBe(false);
   });
 
-  it('命中可用工具名（含 MCP 暴露名，大小写不敏感）→ 丢弃', () => {
-    expect(isCompliantPrompt('先用 read_file 看一下文件', toolNames)).toBe(false);
-    expect(isCompliantPrompt('调用 ERP__QUERY_ORDER 查订单', toolNames)).toBe(false);
+  it('命中本体能力名（大小写不敏感）→ 丢弃', () => {
+    expect(isCompliantPrompt('先用 QueryPurchaseRecords 看一下', toolNames)).toBe(false);
+    expect(isCompliantPrompt('调用 QUERYPURCHASERECORDS 查订单', toolNames)).toBe(false);
   });
 
-  it('含 snake_case / kebab-case / CamelCase 形态 token → 丢弃（即便不在工具清单里）', () => {
+  it('含 snake_case / kebab-case / CamelCase 形态 token → 丢弃（即便不在目录里）', () => {
     expect(isCompliantPrompt('先做 query_order 再汇报', toolNames)).toBe(false);
     expect(isCompliantPrompt('看看 data-prep 里的表', toolNames)).toBe(false);
     expect(isCompliantPrompt('用 QueryOrder 查订单', toolNames)).toBe(false);
@@ -87,119 +89,78 @@ describe('isCompliantPrompt —— 合规判定（唯一实现）', () => {
     expect(isCompliantPrompt('整理 Excel 文件的表头', toolNames)).toBe(true);
     expect(isCompliantPrompt('把结果导出为 CSV 清单', toolNames)).toBe(true);
   });
+
+  it('016：陈述 / 疑问 / 条件 / 建议式开头一律不是祈使句', () => {
+    expect(isCompliantPrompt('你可以先查一下订单', toolNames)).toBe(false);
+    expect(isCompliantPrompt('建议核对这批发票', toolNames)).toBe(false);
+    expect(isCompliantPrompt('是否需要看看库存', toolNames)).toBe(false);
+    expect(isCompliantPrompt('如果缺料就补货', toolNames)).toBe(false);
+  });
+
+  it('016：含指代 / 占位表述（信息不明确）→ 丢弃', () => {
+    expect(isCompliantPrompt('查询这个订单', toolNames)).toBe(false);
+    expect(isCompliantPrompt('梳理相关数据', toolNames)).toBe(false);
+  });
 });
 
-describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
-  it('合法引用保留，并生成"指明工具 + 用途"的隐藏引导', () => {
-    const ref = { kind: 'mcp', service: 'erp', name: 'query_order' };
-    const out = sanitizeActions([action('按交付日期梳理这批订单的风险', [ref])], TOOLS);
+describe('sanitizeActions —— 只校验 prompt；tool_tips 原样透传', () => {
+  it('tool_tips 原样保留（不补字段、不改写、不比对运行时工具）', () => {
+    const raw = action('查询高强度钢板的采购单记录', [
+      { name: 'QueryPurchaseRecords', title: '查询采购订单信息', ontology_id: '1', ontology_name: '采购管理' },
+    ]);
+    const out = sanitizeActions([raw], TOOL_TIPS);
 
     expect(out).toHaveLength(1);
-    expect(out[0]!.tools).toEqual([ref]);
-    expect(out[0]!.guidance).toBe(buildActionGuidance([ref], TOOLS));
-    expect(out[0]!.guidance).toContain('erp__query_order');
-    expect(out[0]!.guidance).toContain('查询订单');
+    expect(out[0]!.tool_tips).toEqual([
+      { name: 'QueryPurchaseRecords', title: '查询采购订单信息', ontology_id: '1', ontology_name: '采购管理' },
+    ]);
   });
 
-  it('模型把 MCP 工具写成 builtin + 暴露名 → 落盘为规范引用（kind=mcp + 服务名）', () => {
-    // 线上实测：清单只给暴露名，模型照抄时 `kind` 靠猜
+  it('016：目录外的名字照旧保留（不校验存在性）', () => {
     const out = sanitizeActions(
-      [action('按交付日期梳理订单风险', [{ kind: 'builtin', name: 'erp__query_order' }])],
-      TOOLS,
+      [action('核对这批发票的金额', [{ name: 'NotInCatalog', title: '随便写的', ontology_id: '999', ontology_name: null }])],
+      TOOL_TIPS,
     );
 
-    expect(out[0]!.tools).toEqual([{ kind: 'mcp', service: 'erp', name: 'query_order' }]);
-    // `tools` 与 `guidance` 同源：任何消费方重建引导都得到同一串
-    expect(out[0]!.guidance).toBe(
-      buildActionGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }], TOOLS),
-    );
+    expect(out[0]!.tool_tips[0]!.name).toBe('NotInCatalog');
   });
 
-  it('FR-009：越界引用被裁空 → **整条丢弃**（不再保留卡片文本）', () => {
-    const out = sanitizeActions(
-      [action('整理一下共享空间的表格', [{ kind: 'builtin', name: 'not_enabled' }])],
-      TOOLS,
-    );
-
-    expect(out).toEqual([]);
-  });
-
-  it('FR-009：完全没给 `tools` → 整条丢弃', () => {
-    const out = sanitizeActions([action('整理一下共享空间的表格')], TOOLS);
-
-    expect(out).toEqual([]);
-  });
-
-  it('FR-009：可用工具清单为空 → 一切条目都无处可指，整轮 0 条', () => {
-    const out = sanitizeActions(
-      [action('整理一下表格', [{ kind: 'mcp', service: 'erp', name: 'query_order' }])],
-      [],
-    );
-
-    expect(out).toEqual([]);
-  });
-
-  it('FR-009 验收③：混合输入（1 条有效 + 2 条无/越界）→ 只下发 1 条', () => {
-    const out = sanitizeActions(
-      [
-        bound('按交付日期梳理订单风险'),
-        action('整理共享空间的表格'),
-        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
-      ],
-      TOOLS,
-    );
-
-    expect(out.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
-  });
-
-  it('丢弃归因可分辨：没给工具 vs 给了但引用越界（原则九）', () => {
-    const { actions, stats } = sanitizeActionsWithStats(
-      [
-        bound('按交付日期梳理订单风险'),
-        action('整理共享空间的表格'),
-        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
-      ],
-      TOOLS,
-    );
-
-    expect(actions.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
-    expect(stats.droppedNoTools).toBe(1);
-    expect(stats.droppedToolsOutOfScope).toBe(1);
-    expect(stats.droppedOther).toBe(0);
-  });
-
-  it('引导超 500 字 → **截断**到上限内且仍含工具名（MUST NOT 置空，否则绑定失效）', () => {
-    const longName = 'x'.repeat(600);
-    const out = sanitizeActions(
-      [action('整理一下表格', [{ kind: 'builtin', name: longName }])],
-      [{ name: longName, description: '' }],
-    );
+  it('016：字段缺失 / 元素非对象 → 字段留空，条目照留（卡片不消失）', () => {
+    const out = sanitizeActions([action('核对这批发票的金额', [{}, 'oops'])], TOOL_TIPS);
 
     expect(out).toHaveLength(1);
-    expect(out[0]!.tools).toHaveLength(1);
-    expect(out[0]!.guidance.length).toBeLessThanOrEqual(GUIDANCE_MAX_CHARS);
-    expect(out[0]!.guidance).toContain('x'.repeat(100)); // 工具名在前，未被截掉
-    expect(out[0]!.guidance.endsWith('…')).toBe(true);
+    expect(out[0]!.tool_tips).toEqual([
+      { name: '', title: '', ontology_id: '', ontology_name: null },
+      { name: '', title: '', ontology_id: '', ontology_name: null },
+    ]);
   });
 
-  it('单工具用途摘要单独限长（长描述不会吃光整个预算）', () => {
-    const desc = '描'.repeat(200);
-    const out = sanitizeActions(
-      [action('整理共享空间的表格', [{ kind: 'builtin', name: 'read_file' }])],
-      [{ name: 'read_file', description: desc }],
-    );
+  it('016：`tool_tips` 缺失 → 空数组，卡片照常下发', () => {
+    const out = sanitizeActions([action('核对这批发票的金额')], TOOL_TIPS);
 
-    expect(out[0]!.guidance).toContain('描'.repeat(79));
-    expect(out[0]!.guidance).not.toContain('描'.repeat(81));
-    expect(out[0]!.guidance.length).toBeLessThanOrEqual(GUIDANCE_MAX_CHARS);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.tool_tips).toEqual([]);
+  });
+
+  it('016：单卡 `tool_tips` 超过 5 条 → 截断到 5 条（唯一的数据处理）', () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      name: `T${i}`,
+      title: `能力${i}`,
+      ontology_id: '1',
+      ontology_name: '采购管理',
+    }));
+    const out = sanitizeActions([action('核对这批发票的金额', many)], TOOL_TIPS);
+
+    expect(out[0]!.tool_tips).toHaveLength(MAX_TOOL_TIPS_PER_ACTION);
+    expect(out[0]!.tool_tips.map((t) => t.name)).toEqual(['T0', 'T1', 'T2', 'T3', 'T4']);
   });
 
   it('不合规条目只丢自己；重复提示词去重；条数超上限取前 N 条', () => {
     const raw = [
-      action('甲'.repeat(PROMPT_MAX_CHARS + 1), [{ kind: 'builtin', name: 'read_file' }]), // 超长 → 丢
+      bound('甲'.repeat(PROMPT_MAX_CHARS + 1)), // 超长 → 丢
       bound(''), // 空 → 丢
-      action('先做 query_order', [{ kind: 'builtin', name: 'read_file' }]), // 夹标识符 → 丢
-      { prompt: 123, tools: [{ kind: 'builtin', name: 'read_file' }] }, // 类型错 → 丢
+      bound('先做 query_order'), // 夹标识符 → 丢
+      { prompt: 123, tool_tips: [TOOL_TIPS[0]] }, // 类型错 → 丢
       'not-an-object',
       bound('整理共享空间的表格'),
       bound('整理共享空间的表格'), // 重复 → 丢
@@ -208,7 +169,7 @@ describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
       bound('第四条应当被条数上限截掉'),
     ];
 
-    const out = sanitizeActions(raw, TOOLS);
+    const out = sanitizeActions(raw, TOOL_TIPS);
 
     expect(out.map((a) => a.prompt)).toEqual([
       '整理共享空间的表格',
@@ -218,22 +179,15 @@ describe('sanitizeActions —— 逐条校验、裁剪与引导铸造', () => {
     expect(out).toHaveLength(MAX_ACTIONS);
   });
 
-  it('kind 非法 / MCP 缺服务名 / 重名引用 → 该引用丢弃（有效引用非空则条目保留）', () => {
-    const out = sanitizeActions(
-      [
-        action('整理一下共享空间的表格', [
-          { kind: 'unknown', name: 'read_file' },
-          { kind: 'mcp', name: 'query_order' },
-          { kind: 'builtin', name: 'read_file' },
-          { kind: 'builtin', name: 'read_file' },
-          { name: 'read_file' },
-        ]),
-      ],
-      TOOLS,
+  it('丢弃归因可分辨（原则九）：只统计 prompt 不合规与超上限', () => {
+    const { actions, stats } = sanitizeActionsWithStats(
+      [bound('按交付日期梳理订单风险'), action('建议核对这批发票'), 'not-an-object'],
+      TOOL_TIPS,
     );
 
-    expect(out).toHaveLength(1);
-    expect(out[0]!.tools).toEqual([{ kind: 'builtin', name: 'read_file' }]);
+    expect(actions.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
+    expect(stats.droppedOther).toBe(2);
+    expect(stats.droppedOverLimit).toBe(0);
   });
 });
 
@@ -258,12 +212,9 @@ function finInput(overrides: Partial<NextActionsFinalizeInput> = {}): NextAction
     messageId: 'm-1',
     agentName: 'demo',
     tailText: JSON.stringify({
-      actions: [
-        bound('按交付日期梳理订单风险'),
-        action('按月汇总这批订单的数量', [{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
-      ],
+      actions: [bound('按交付日期梳理订单风险'), bound('按月汇总这批订单的数量')],
     }),
-    availableTools: TOOLS,
+    focusToolTips: TOOL_TIPS,
     max: MAX_ACTIONS,
     ...overrides,
   };
@@ -340,7 +291,7 @@ describe('TailCapture —— 尾部块捕获状态机（用户永不可见块内
 });
 
 describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）', () => {
-  it('合法尾部 → 写快照 + 返回下发形态（卡片与回答同轮产出）', () => {
+  it('合法尾部 → 写快照 + 返回下发形态（prompt + tool_tips）', () => {
     const view = store().finalize(finInput());
 
     expect(view?.message_id).toBe('m-1');
@@ -352,14 +303,13 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
       message_id: string;
       agent_name: string;
       created_at: string;
-      actions: Array<{ prompt: string; guidance: string }>;
+      actions: Array<{ prompt: string; tool_tips: FocusToolTip[] }>;
     };
     expect(snapshot.message_id).toBe('m-1');
     expect(snapshot.agent_name).toBe('demo');
     expect(snapshot.created_at).toBeTruthy();
-    expect(snapshot.actions[0]!.guidance).toContain('read_file');
-    // 部分条目被丢时仍照常下发其余卡片，但必须留痕（见下条用例）
-    expect(warns.filter((w) => w.includes('未绑定可用工具'))).toEqual([]);
+    expect(snapshot.actions[0]!.tool_tips).toEqual([TOOL_TIPS[0]]);
+    expect(warns.filter((w) => w.includes('下一步动作提示'))).toEqual([]);
   });
 
   it('空尾部（开关关闭 / 模型省略）→ 不写快照、不告警', () => {
@@ -372,7 +322,6 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
     expect(store().finalize(finInput({ tailText: '{"actions":[]}' }))).toBeUndefined();
 
     expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
-    // 闲聊轮次不该刷日志：这是"模型选择 0 条"，不是降级
     expect(warns.filter((w) => w.includes('下一步动作提示'))).toEqual([]);
   });
 
@@ -386,9 +335,9 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
     expect(warned).toContain('我觉得可以先看看订单');
   });
 
-  it('有候选条目但全部不合规 → 不写快照，且告警给出候选条数（FR-041）', () => {
+  it('有候选条目但 prompt 全不合规 → 不写快照，且告警给出候选条数（FR-041）', () => {
     const tail = JSON.stringify({
-      actions: [bound('先做 query_order'), bound('再看 read_file 的结果')],
+      actions: [bound('建议核对这批发票'), bound('你可以先查一下订单')],
     });
 
     expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
@@ -397,38 +346,20 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
     const warned = warns.find((w) => w.includes('全部被丢弃'));
     expect(warned).toBeDefined();
     expect(warned).toContain('候选 2 条');
-    expect(warned).toContain('其它 2');
+    expect(warned).toContain('prompt 不合规 2');
   });
 
-  it('候选条目全部因"未绑定可用工具"被丢弃 → 告警给出归因计数（FR-009 + 原则九）', () => {
+  it('部分条目 prompt 不合规 → 其余照常下发，并留痕可归因', () => {
     const tail = JSON.stringify({
-      actions: [
-        action('整理共享空间的表格'),
-        action('汇总这批订单的数量', [{ kind: 'builtin', name: 'not_enabled' }]),
-      ],
-    });
-
-    expect(store().finalize(finInput({ tailText: tail }))).toBeUndefined();
-
-    expect(fs.existsSync(file('admin', AGENT, 'th_1'))).toBe(false);
-    const warned = warns.find((w) => w.includes('全部被丢弃'));
-    expect(warned).toBeDefined();
-    expect(warned).toContain('候选 2 条');
-    expect(warned).toContain('无工具 1');
-    expect(warned).toContain('引用越界 1');
-  });
-
-  it('部分条目未绑定工具被丢弃 → 其余照常下发，并留痕可归因（FR-009）', () => {
-    const tail = JSON.stringify({
-      actions: [bound('按交付日期梳理订单风险'), action('整理共享空间的表格')],
+      actions: [bound('按交付日期梳理订单风险'), bound('建议核对这批发票')],
     });
 
     const view = store().finalize(finInput({ tailText: tail }));
 
     expect(view?.actions.map((a) => a.prompt)).toEqual(['按交付日期梳理订单风险']);
-    const warned = warns.find((w) => w.includes('未绑定可用工具'));
+    const warned = warns.find((w) => w.includes('部分条目 prompt 不合规'));
     expect(warned).toBeDefined();
-    expect(warned).toContain('无工具 1');
+    expect(warned).toContain('不合规 1');
     expect(warned).toContain('保留 1 条');
   });
 
@@ -459,38 +390,24 @@ describe('NextActionsStore.finalize —— 轮末同步定稿（永不抛错）'
 });
 
 describe('NextActionsStore —— 读取与清空', () => {
-  it('read 下发形态：message_id + 动作（tools 带 exposed_name、guidance 指明工具）', () => {
-    const tail = JSON.stringify({
-      actions: [
-        action('按交付日期梳理订单风险', [{ kind: 'mcp', service: 'erp', name: 'query_order' }]),
-      ],
-    });
-    store().finalize(finInput({ tailText: tail }));
+  it('read 下发形态：message_id + 动作（tool_tips 原样）', () => {
+    store().finalize(finInput());
 
     const view = store().read('admin', AGENT, 'th_1');
 
     expect(view?.message_id).toBe('m-1');
     expect(view?.actions[0]).toMatchObject({
       prompt: '按交付日期梳理订单风险',
-      tools: [
-        { kind: 'mcp', name: 'query_order', service: 'erp', exposed_name: 'erp__query_order' },
-      ],
-      guidance: buildActionGuidance([{ kind: 'mcp', service: 'erp', name: 'query_order' }], TOOLS),
+      tool_tips: [TOOL_TIPS[0]],
     });
-    expect(view?.actions[0]!.guidance).toContain('erp__query_order');
   });
 
   it('读取侧不按"当前选中数字人"过滤——快照在即下发（作用域由路径承载，009）', () => {
-    // 独立生成链时代的两条读取判据（归属开关 / 归属数字人 = 当前选中）已删除：
-    // 生成侧由提示词装配期的开关门控（关着开关就不会产出快照），读取侧再判只会
-    // 造成"切换数字人后卡片消失"。009 后跨数字人越权已由**目录位置**挡住（读的是
-    // user-data/{数字人}/threads/{tid}/，压根取不到别的数字人的快照），
-    // 因此这里只断言：快照在 → 下发。
     store().finalize(finInput());
     expect(store().read('admin', AGENT, 'th_1')?.message_id).toBe('m-1');
   });
 
-  it('存量快照：无有效工具引用的条目在读取侧被过滤（同一判据，MUST NOT 继续下发）', () => {
+  it('存量快照：旧口径（tools / guidance）条目在读取侧被过滤', () => {
     const target = file('admin', AGENT, 'th_1');
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(
@@ -501,37 +418,13 @@ describe('NextActionsStore —— 读取与清空', () => {
         created_at: new Date().toISOString(),
         actions: [
           { prompt: '旧口径的无工具卡片', tools: [], guidance: '' },
-          {
-            prompt: '有工具的卡片',
-            tools: [{ kind: 'builtin', name: 'read_file' }],
-            guidance: 'x',
-          },
+          { prompt: '旧口径的有工具卡片', tools: [{ kind: 'builtin', name: 'read_file' }], guidance: 'x' },
         ],
       }),
       'utf8',
     );
 
-    const view = store().read('admin', AGENT, 'th_1');
-
-    expect(view?.actions.map((a) => a.prompt)).toEqual(['有工具的卡片']);
-  });
-
-  it('存量快照全部无工具 → 等同无提示（undefined），不告警（不是损坏）', () => {
-    const target = file('admin', AGENT, 'th_1');
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(
-      target,
-      JSON.stringify({
-        message_id: 'm-old',
-        agent_name: 'demo',
-        created_at: new Date().toISOString(),
-        actions: [{ prompt: '旧口径的无工具卡片', tools: [], guidance: '' }],
-      }),
-      'utf8',
-    );
-
     expect(store().read('admin', AGENT, 'th_1')).toBeUndefined();
-    expect(warns.some((w) => w.includes('损坏'))).toBe(false);
   });
 
   it('无快照 / 损坏 JSON / 超 64KB / actions 为空 → undefined，且仅损坏与超限告警', () => {
@@ -590,44 +483,62 @@ describe('NextActionsStore —— 读取与清空', () => {
 });
 
 describe('buildTailInstruction —— 尾部块指令装配（System Prompt 末尾追加）', () => {
-  it('含协议样例、条数上限与工具目录（模型只能引用它看得到的清单）', () => {
-    const text = buildTailInstruction(TOOLS, 2);
+  it('含协议样例、条数上限与能力目录（模型只能从这里抄）', () => {
+    const text = buildTailInstruction(TOOL_TIPS, 2);
 
     expect(text).toContain('<next_actions>');
     expect(text).toContain('0~2');
-    expect(text).toContain('read_file');
-    expect(text).toContain('erp__query_order');
+    expect(text).toContain('QueryPurchaseRecords');
+    expect(text).toContain('查询采购订单信息');
+    expect(text).toContain("ontology_id=1");
     expect(text).toContain('50 字');
   });
 
-  it('FR-009：明示"每条建议都必须绑定工具"且关联不到就不要输出', () => {
-    const text = buildTailInstruction(TOOLS, MAX_ACTIONS);
+  it('016：祈使句 / 单一任务 / 信息明确 / 宁缺毋滥 / tool_tips ≤5', () => {
+    const text = buildTailInstruction(TOOL_TIPS, MAX_ACTIONS);
 
-    expect(text).toContain('每条建议都必须绑定工具');
-    expect(text).toContain('1~2 个元素');
-    expect(text).toContain('不要输出');
-    expect(text).toContain('不要为了凑数');
+    expect(text).toContain('祈使句');
+    expect(text).toContain('一次只描述一个任务');
+    expect(text).toContain('已明确、已知的事实');
+    expect(text).toContain('1~5 个元素');
+    expect(text).toContain('宁缺毋滥');
+    expect(text).toContain('输出 {"actions":[]}');
   });
 
-  it('无可用工具 → 目录提示直接输出空 actions（不再引导"留空数组"的卡片）', () => {
+  it('无 capability → 目录提示直接输出空 actions', () => {
     const text = buildTailInstruction([], MAX_ACTIONS);
 
-    expect(text).toContain('没有可用工具');
+    expect(text).toContain('本轮没有可提示的本体能力');
     expect(text).toContain('{"actions":[]}');
+  });
+});
+
+describe('renderToolTipsInstruction —— 卡片点击轮的隐藏提示段', () => {
+  it('空数组 → 空串（不追加任何内容）', () => {
+    expect(renderToolTipsInstruction([])).toBe('');
+  });
+
+  it('非空 → 逐条渲染 name/title/ontology，并注明"不要改用其它能力"', () => {
+    const text = renderToolTipsInstruction(TOOL_TIPS);
+
+    expect(text).toContain('name=QueryPurchaseRecords');
+    expect(text).toContain('title=查询采购订单信息');
+    expect(text).toContain("ontology_name=采购管理");
+    expect(text).toContain('不要改用其它能力');
   });
 });
 
 describe('effectiveNextActionsMax —— 本轮是否追加尾部指令的唯一判据', () => {
   it('开关关闭（max 为 undefined）→ 不追加', () => {
-    expect(effectiveNextActionsMax(undefined, TOOLS)).toBeUndefined();
+    expect(effectiveNextActionsMax(undefined, TOOL_TIPS)).toBeUndefined();
   });
 
-  it('FR-009：开关开启但本轮无可用工具 → 不追加（等价于该轮关闭该功能）', () => {
+  it('016：开关开启但本轮无 Laya 能力 → 不追加（无能力就不产卡片）', () => {
     expect(effectiveNextActionsMax(MAX_ACTIONS, [])).toBeUndefined();
   });
 
-  it('开关开启且本轮有可用工具 → 返回本轮上限（照常追加）', () => {
-    expect(effectiveNextActionsMax(MAX_ACTIONS, TOOLS)).toBe(MAX_ACTIONS);
-    expect(effectiveNextActionsMax(2, TOOLS)).toBe(2);
+  it('开关开启且本轮有能力 → 返回本轮上限（照常追加）', () => {
+    expect(effectiveNextActionsMax(MAX_ACTIONS, TOOL_TIPS)).toBe(MAX_ACTIONS);
+    expect(effectiveNextActionsMax(2, TOOL_TIPS)).toBe(2);
   });
 });

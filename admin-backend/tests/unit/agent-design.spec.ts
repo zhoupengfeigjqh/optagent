@@ -462,6 +462,31 @@ describe('AgentDesignService', () => {
     expect(service.read('stale').soul.intent_focus).toBe(true);
   });
 
+  it('读取归一化（门控）：意图聚焦关闭时 next_action_hints 收敛为关（存量数据生效）', () => {
+    const writeSoul = (soul: Record<string, unknown>): void => {
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul,
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-10-25T00:00:00.000Z',
+      });
+    };
+
+    // 存量：next_action_hints 开着，但 intent_focus 缺失（013 之前的存档）→ hints 收敛为关
+    const legacy: Record<string, unknown> = { ...soulDesign('你是助手'), next_action_hints: true };
+    delete legacy.intent_focus;
+    writeSoul(legacy);
+    expect(service.read('stale').soul.next_action_hints).toBe(false);
+    expect(service.read('stale').soul.intent_focus).toBe(false);
+
+    // 双开 → hints 保留
+    writeSoul({ ...soulDesign('你是助手'), intent_focus: true, next_action_hints: true });
+    expect(service.read('stale').soul.next_action_hints).toBe(true);
+  });
+
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision());
     service.remove('demo');

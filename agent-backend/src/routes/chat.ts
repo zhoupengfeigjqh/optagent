@@ -30,6 +30,7 @@ import {
   parseSpaceDir,
   userDataDir,
 } from '../domain/dirs.js';
+import type { FocusToolTip } from '../domain/ontology-focus/types.js';
 import { MAX_ACTIVE_THREADS_PER_USER } from '../domain/run-limits.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
 import { ApiError } from '../server.js';
@@ -48,9 +49,15 @@ const messageBodySchema = {
     // 004：问题实例关联工具生成的隐藏引导。只追加到本轮系统提示词，
     // 不落盘、不进历史 —— 用户气泡里看不到它。
     guidance: { type: 'string', maxLength: 500 },
-    // 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+    // 013：本轮跳过意图聚焦（仅首屏问题实例卡片携带；下一步动作卡片点击**不跳过**）。
     // 服务端据此不发起判定——放在请求体而不是"前端少发一次请求"，因为跳过必须是可校验的。
     skip_intent_focus: { type: 'boolean' },
+    // 016：下一步动作卡片回传的隐藏工具提示（结构化）。
+    // 只渲染进本轮系统提示词，**不落盘、不进历史**；内容**不做校验**（服务端只透传）。
+    tool_tips: {
+      type: 'array',
+      items: { type: 'object' },
+    },
     attachments: {
       type: 'array',
       maxItems: MAX_ATTACHMENTS,
@@ -168,6 +175,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         guidance?: string;
         attachments?: FileReference[];
         skip_intent_focus?: boolean;
+        /** 卡片回传的隐藏工具提示（结构透传，不校验） */
+        tool_tips?: FocusToolTip[];
       };
 
       // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
@@ -270,6 +279,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           ...(body.guidance ? { guidance: body.guidance } : {}),
           // 013：预置动作入口跳过意图聚焦（只影响本轮判定，不落历史、不改 SSE 序列）
           ...(body.skip_intent_focus === true ? { skipIntentFocus: true } : {}),
+          // 016：卡片回传的隐藏工具提示（只进本轮系统提示词；不落历史）
+          ...(body.tool_tips && body.tool_tips.length > 0 ? { toolTips: body.tool_tips } : {}),
         });
       } catch (err) {
         releaseQuota();

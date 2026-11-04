@@ -1,10 +1,10 @@
 ---
-name: raw-material-inventory-new
-description: 原材料采购和库存本体技能
+name: raw-material-inventory
+description: 包括原材料、库存、采购单和供应商的相关技能
 metadata:
-  ontology_id: 1
+  ontology_id: '1'
   ontology_name: 原材料采购和库存
-  scenario_id: 1
+  scenario_id: '1'
   scenario_name: 生产调度
 ---
 
@@ -24,8 +24,8 @@ metadata:
 | RawMaterial | 原材料 | 生产过程中消耗的外部输入物料，是采购和库存管理的核心对象。 | 物料；原料 |
 | Supplier | 供应商 | 原材料的供应方，可以供应一种或多种原材料。 | 供货商 |
 | PurchaseRecord | 原材料采购记录 | 一次具体的原材料采购行为，关联了采购的原材料、供应商以及驱动采购的客户订单。 | 采购单；采购记录 |
-| RawMaterialInventory | 原材料库存 | 特定原材料在当前时刻的库存状态快照，包括待入库、可用和累计库存量。 | 库存快照；库存 |
-| CustomerOrder | 客户订单 | 客户下达的销售订单或询单，是驱动原材料采购的源头需求。 | 销售订单；客单 |
+| RawMaterialInventory | 原材料库存 | 特定原材料在当前时刻的库存状态快照，包括待入库、可用和累计库存量。 | 库存；库存快照 |
+| CustomerOrder | 客户订单 | 客户下达的销售订单或询单，是驱动原材料采购的源头需求。 | 客单；销售订单 |
 | DeliveryCapability | 交货能力 | 供应商的交货能力，包括交货周期、最低交货数量等 | 供货能力；供应能力 |
 
 ## 2 概念间的关系
@@ -38,7 +38,7 @@ metadata:
 | ContainsPurchaseRecord | 包含采购记录 | CustomerOrder → PurchaseRecord | 1:N | CustomerOrder.customerOrderId = PurchaseRecord.relatedOrderId | 一个客户订单可以包含多个采购记录，但一个采购记录最多只能关联一个客户订单。 |
 | HasCapability | 拥有供应能力 | Supplier → DeliveryCapability | 1:N | Supplier.supplierId = DeliveryCapability.supplierId | 一个供应商可以包含多个原材料的供应能力，但一个交货能力只对应一个供应商 |
 
-关系体系逻辑说明：以原材料（RawMaterial）为核心，通过 HasRawInventory 关联其最新库存快照（RawMaterialInventory），通过 RecordsRawMaterial 关联采购记录（PurchaseRecord）；采购记录再通过 OrderedFromSupplier 指向供应商（Supplier），供应商通过 HasCapability 关联其交货能力（DeliveryCapability）；同时客户订单（CustomerOrder）通过 ContainsPurchaseRecord 驱动并串联采购记录，形成「客户订单 → 采购记录 → 原材料/供应商 → 库存/交货能力」的完整业务逻辑链条。
+关系体系以原材料（RawMaterial）为核心：原材料通过 HasRawInventory 关联其唯一的库存快照（RawMaterialInventory），通过 RecordsRawMaterial 被多条采购记录（PurchaseRecord）引用；采购记录通过 OrderedFromSupplier 指向供应商（Supplier），并通过 ContainsPurchaseRecord 由客户订单（CustomerOrder）驱动；供应商通过 HasCapability 拥有多条交货能力（DeliveryCapability）。由此形成「客户订单 → 采购记录 → 原材料/供应商 → 库存」的完整业务逻辑链条。
 
 ## 3 概念属性及约束
 
@@ -118,10 +118,10 @@ metadata:
 
 原材料采购到入库（ProcureAndReceiveRawMaterial）：完成从库存查询到采购、入库的完整流程。
 
-1. QueryInventory（用户或系统查询原材料库存，判断是否需要采购。）衔接=串行
-2. CreatePurchaseRecord（根据库存情况或客户订单需求，创建原材料采购单。）衔接=串行
-3. QueryPurchaseRecords（定期或主动按需查询采购记录，跟踪已创建的采购单状态。）衔接=串行
-4. ReceiveRawMaterial（确认原材料到货，执行入库操作，更新库存。）衔接=串行
+- step: QueryInventory（用户或系统查询原材料库存，判断是否需要采购。）衔接=串行
+- step: CreatePurchaseRecord（根据库存情况或客户订单需求，创建原材料采购单。）衔接=串行
+- step: QueryPurchaseRecords（定期或主动按需查询采购记录，跟踪已创建的采购单状态。）衔接=串行
+- step: ReceiveRawMaterial（确认原材料到货，执行入库操作，更新库存。）衔接=串行
 
 ## 5 行为
 
@@ -216,7 +216,7 @@ metadata:
   }
 }
 ```
-- **相关概念**: 原材料采购记录（PurchaseRecord）、原材料（RawMaterial）、原材料库存（RawMaterialInventory）
+- **相关概念**: 原材料采购记录（PurchaseRecord）、原材料库存（RawMaterialInventory）、原材料（RawMaterial）
 - **执行方式**: 行为已 facade 化为 MCP 工具——**工具名即行为名**，直接调用工具 `ReceiveRawMaterial`，参数即上述输入参数。
 
 ### 5.4 QueryInventory
@@ -290,7 +290,7 @@ metadata:
   }
 }
 ```
-- **相关概念**: 原材料采购记录（PurchaseRecord）、原材料（RawMaterial）、客户订单（CustomerOrder）
+- **相关概念**: 原材料采购记录（PurchaseRecord）、原材料（RawMaterial）、供应商（Supplier）、客户订单（CustomerOrder）
 - **执行方式**: 行为已 facade 化为 MCP 工具——**工具名即行为名**，直接调用工具 `QueryPurchaseRecords`，参数即上述输入参数。
 
 ### 5.6 QueryRawMaterials
@@ -326,7 +326,7 @@ metadata:
 
 ### 5.7 QuerySuppliers
 - **类型**: query（查询）
-- **行为描述**: 根据供应商名或原材料名查询供应商
+- **行为描述**: 根据供应商名或原材料名查询供应商。
 - **输入参数**:
 ```json
 {
@@ -358,7 +358,7 @@ metadata:
 
 ### 5.8 QuerySupplierCapability
 - **类型**: query（查询）
-- **行为描述**: 根据供应商名或原材料名，查询供应商供货能力
+- **行为描述**: 根据供应商名或原材料名，查询供应商供货能力。
 - **输入参数**:
 ```json
 {

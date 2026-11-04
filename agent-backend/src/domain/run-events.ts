@@ -6,6 +6,7 @@
  * `run-manager.ts` 仍会 re-export 本模块的导出，既有引用路径不变。
  */
 import type { InteractionRequestPayload } from './interaction-gate.js';
+import type { NextActionsView } from './next-actions.js';
 import type { HistoryErrorInfo } from '../types.js';
 
 export type RunState = 'running' | 'draining' | 'done' | 'aborted' | 'error';
@@ -45,21 +46,12 @@ export type SsePayload =
         /**
          * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
          * 卡片与回答同流产出，`done` 时已就绪，故随事件直推（前端不再轮询拉取）。
-         * 无卡片（开关关闭 / 模型未输出块 / 解析失败）时字段缺省。
+         * 无卡片（开关关闭 / 本轮无 Laya 能力 / 模型未输出块 / 解析失败）时字段缺省。
+         *
+         * 016：形状收敛到 `NextActionsView`（`prompt` + 结构化 `tool_tips`），
+         * 与 `GET /next-actions` 的下发形态同源。
          */
-        next_actions?: {
-          message_id: string;
-          actions: Array<{
-            prompt: string;
-            tools: Array<{
-              kind: 'builtin' | 'mcp';
-              name: string;
-              service?: string;
-              exposed_name: string;
-            }>;
-            guidance: string;
-          }>;
-        };
+        next_actions?: NextActionsView;
       };
     }
   | {

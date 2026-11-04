@@ -21,10 +21,10 @@ export default defineConfig({
   test: {
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json-summary'],
+      reporter: ['text', 'json', 'json-summary'],
       include: ['src/**/*.ts'],
       // 纯类型声明文件无运行期语句，计入分母无意义
-      exclude: ['src/types.ts', '**/*.d.ts'],
+      exclude: ['src/types.ts', 'src/domain/ontology-focus/types.ts', '**/*.d.ts'],
       thresholds: {
         // ① 全局地板（防倒退）。2026-10-12 实测：stmts 69.04 / branch 64.59 / funcs 68.88 / lines 70.77
         //    2026-10-14（009）复测：stmts 73.33 / branch 67.31 / funcs 73.28 / lines 75.29（只上不下，
@@ -214,6 +214,48 @@ export default defineConfig({
         },
         // 2026-10-25（013）：留档存储（串行追加 / 有界滚动 / 原子替换）
         'src/domain/intent-focus-store.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：技能头部读取与解析（有界读取 / 归一化 / 逐技能容错）
+        'src/domain/skill-header.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：本体加载（只读所需字段 / 索引 / 容错）
+        'src/domain/ontology-focus/ontology-loader.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：候选构造与题面（qid / 分批 / 上限）
+        'src/domain/ontology-focus/candidates.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：选择 / 数据补充 / 去重（严格阈值 / 不级联 / 上限）
+        'src/domain/ontology-focus/selection.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：提示铸造（分类段 / 1200 截断 / 单行）
+        'src/domain/ontology-focus/prompt.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        // 2026-11-04（016）：留档铸造（明细截断 / 计数保留）
+        'src/domain/ontology-focus/record.ts': {
           statements: 80,
           branches: 80,
           functions: 80,

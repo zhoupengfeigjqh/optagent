@@ -13,7 +13,7 @@ import { LayaClient, type SystemOneQuestion } from '../../src/infra/laya-client.
 const QUESTIONS: Record<string, SystemOneQuestion> = {
   order_query: {
     type: 'noul',
-    instructions: '本轮用户发起的任务是否需要使用 查询订单 ？',
+    instructions: '本轮任务是否需要使用 查询订单 ？',
     criteria: { true: '需要', false: '不需要' },
   },
 };

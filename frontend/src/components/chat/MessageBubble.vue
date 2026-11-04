@@ -15,10 +15,10 @@
 import { computed } from 'vue'
 
 import type {
-  AgentStarter,
   ErrorInfo,
   FileReference,
   Message,
+  NextStepAction,
   ToolCallResult,
 } from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
@@ -130,8 +130,8 @@ const emit = defineEmits<{
    * 其余 → 同源预检后进面板 / 异源直跳新窗口。
    */
   'open-view': [item: ViewLinkTarget]
-  /** 点选下一步动作卡片（007）：确认与发送由装配层（ChatPanel）承担 */
-  'send-suggestion': [action: AgentStarter]
+  /** 点选下一步动作卡片（007/016）：确认与发送由装配层（ChatPanel）承担 */
+  'send-suggestion': [action: NextStepAction]
 }>()
 
 const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)

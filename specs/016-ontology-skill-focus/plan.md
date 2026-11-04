@@ -215,11 +215,11 @@ consumeTurn
   - 本体技能 → 仅当 `ontology_id` 命中索引时可聚焦；
   - 未命中本体技能 → 不生成候选、不评分，但返回 `excluded` 列表，由 runner 写成
     `selected:false / score:null / reason:'no_matching_ontology'` 的记录项；
-  - 题面：`本轮用户发起的任务是否需要使用技能「{name}：{description 摘要}」？`（≤ 40 字）；
+  - 题面：`需要技能「{description 摘要}」`（≤ 40 字）；
   - 上限 32，原序截断。
 - `buildCapabilityCandidates(selectedSkills, limits)`：
   - 仅对入选本体技能引用的本体，按本体原序收集行为与函数；
-  - 题面：`...是否需要使用行为「{title or name}（{name}）」？` / `...函数「...」？`；
+  - 题面：`需要行为/函数「{title or name}」`；
   - 上限 96，原序截断；同一本体只收集一次（按路径去重）。
 - 所有题均为 `{ type: 'noul', instructions, criteria: { true: '需要', false: '不需要' } }`；`qid` 使用 `s1..sN` / `c1..cN`，与候选一一映射，避免中文 / 重名 qid 对齐问题。
 

@@ -25,7 +25,7 @@
  */
 export interface SystemOneQuestion {
   type: 'noul';
-  /** 命题正文（问句形式；实测越长越糟，控制在 25 字以内） */
+  /** 命题正文（实测越长越糟，控制在 25 字以内） */
   instructions: string;
   /** 真/假判据文案（`{type:'noul'}` 的可选字段） */
   criteria?: { true: string; false: string };

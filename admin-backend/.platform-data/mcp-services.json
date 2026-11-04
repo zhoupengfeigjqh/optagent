@@ -109,9 +109,9 @@
     },
     "test001": {
       "name": "test001",
-      "description": "test001",
+      "description": "本体函数",
       "transport": "http",
-      "url": "http://localhost:8025/mcp",
+      "url": "http://localhost:8021/mcp",
       "command": null,
       "args": null,
       "file_args": {},
@@ -119,13 +119,43 @@
       "rules_fields": {},
       "allowed_tools": [
         "sumRawNotArrivalQty",
-        "checkRawMaterialUnit"
+        "checkRawMaterialUnit",
+        "checkArrivalTimeValidity",
+        "checkSupplierExistence",
+        "checkRelatedOrderExistence",
+        "inferPurchasePurpose"
       ],
       "tool_labels": {},
       "headers": {
-        "X-MCP-Token": "aU_8jNuf8HcWxZzT-NIdGPnaV1qJ9bdw"
+        "X-MCP-Token": "P1DHfpkfyw801dQjrm6HdTzfWQODDFAL"
       },
-      "updated_at": "2026-10-30T15:30:57.798Z"
+      "updated_at": "2026-11-04T07:29:10.985Z"
+    },
+    "test002": {
+      "name": "test002",
+      "description": "本体行为",
+      "transport": "http",
+      "url": "http://localhost:8022/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": "never",
+      "rules_fields": {},
+      "allowed_tools": [
+        "CreatePurchaseRecord",
+        "CancelPurchaseRecord",
+        "ReceiveRawMaterial",
+        "QueryInventory",
+        "QueryPurchaseRecords",
+        "QueryRawMaterials",
+        "QuerySuppliers",
+        "QuerySupplierCapability"
+      ],
+      "tool_labels": {},
+      "headers": {
+        "X-MCP-Token": "B2r3zfRupt05ZZ4fJoSx5OUG3FGW_PKV"
+      },
+      "updated_at": "2026-11-04T07:29:43.287Z"
     }
   }
 }

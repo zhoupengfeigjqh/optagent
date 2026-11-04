@@ -10,12 +10,12 @@
 
 import type { HttpClient } from './http'
 import type {
-  AgentStarter,
   Conversation,
   FeedbackResponse,
   FeedbackValue,
   InteractionSubmitRequest,
   InteractionSubmitResponse,
+  NextStepAction,
   StopResponse,
   ThreadCreateResponse,
   ThreadDetail,
@@ -31,14 +31,14 @@ export interface ThreadDetailQuery {
 /**
  * 会话最新一轮的下一步动作提示（007，`getNextActions` 契约 §1.2）。
  *
- * 刻意**复用 `AgentStarter`**：卡片与首屏问题实例同形同语义（FR-012），
- * 连隐藏引导的通道也是同一个（`guidance`，空串 = 无关联工具）。
+ * 016 起卡片**不再复用 `AgentStarter`**：隐藏工具提示改为结构化 `tool_tips`，
+ * 与首屏问题实例（`tools` + `guidance`）是两条独立通道。
  */
 export interface ThreadNextSteps {
   /** 归属的 assistant 消息 id；`null` = 无建议（不渲染，且不是错误态） */
   message_id: string | null
-  /** 1~3 条；有内容才下发，不存在 0 条的下发形态 */
-  actions: AgentStarter[]
+  /** 0~N 条；有内容才下发，不存在 0 条的下发形态 */
+  actions: NextStepAction[]
 }
 
 /** 会话 API 接口。 */

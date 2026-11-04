@@ -94,6 +94,32 @@ export interface AgentStarter {
   guidance: string
 }
 
+/**
+ * 下一步动作卡片的隐藏工具提示（016）。
+ *
+ * 字段由模型从本轮本体能力清单抄写，**只在本轮请求里回传**：
+ * 不展示、不落历史（用户消息里只有卡片的 `prompt`）。
+ */
+export interface ToolTip {
+  name: string
+  title: string
+  ontology_id: string
+  ontology_name: string | null
+}
+
+/**
+ * 下一步动作卡片（007 + 016）。
+ *
+ * 与首屏问题实例（`AgentStarter`）**不再同形**：卡片的工具提示是结构化的 `tool_tips`，
+ * 点击时作为请求体字段回传；`prompt` 是唯一进入历史的部分。
+ */
+export interface NextStepAction {
+  /** 卡片正文（祈使句、单一任务、信息明确），点击后作为下一轮用户消息原文 */
+  prompt: string
+  /** 隐藏工具提示（≤5），随请求回传、不进历史 */
+  tool_tips: ToolTip[]
+}
+
 /** `GET /api/agents/{agent_name}` 响应。 */
 export interface DigitalHuman {
   agent_name: string
@@ -356,6 +382,12 @@ export interface SendMessageRequest {
    * 只追加到本轮系统提示词，**不落盘、不进历史**——用户气泡里看不到它。
    */
   guidance?: string
+  /**
+   * 下一步动作卡片回传的隐藏工具提示（016，结构化）。
+   *
+   * 只追加到本轮系统提示词，**不落盘、不进历史**；服务端不做内容校验。
+   */
+  tool_tips?: ToolTip[]
 }
 
 /** `done.finish_reason`：`completed` 正常落盘；`stop` 本轮被中断丢弃、不落盘。 */

@@ -7,11 +7,18 @@
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AgentStarter } from '../api/types'
+import type { NextStepAction, ToolTip } from '../api/types'
 import { createToastStore } from './useToast'
 import { useNextStepPrompt } from './useNextStepPrompt'
 
-const CARD: AgentStarter = { prompt: '看看产能瓶颈', tools: [], guidance: 'ocr_image' }
+const TIP: ToolTip = {
+  name: 'QueryCapacity',
+  title: '查询产能瓶颈',
+  ontology_id: '7',
+  ontology_name: '生产计划',
+}
+
+const CARD: NextStepAction = { prompt: '看看产能瓶颈', tool_tips: [TIP] }
 
 function setup(options: { streaming?: boolean; agent?: boolean } = {}) {
   const streaming = ref<unknown | null>(options.streaming === true ? { phase: 'streaming' } : null)
@@ -65,7 +72,7 @@ describe('useNextStepPrompt —— 点卡片（2026-10-16）', () => {
 })
 
 describe('useNextStepPrompt —— 确认发送（2026-10-16）', () => {
-  it('确认：走唯一发送链路，载荷只有提示词、隐藏引导与跳过标记，且不等本轮结束', async () => {
+  it('确认：走唯一发送链路，载荷只有提示词 + 结构化 tool_tips，且不等本轮结束', async () => {
     const { prompt, send } = setup()
     prompt.onPickNextStep(CARD)
 
@@ -75,9 +82,8 @@ describe('useNextStepPrompt —— 确认发送（2026-10-16）', () => {
       {
         content: '看看产能瓶颈',
         attachments: [],
-        guidance: 'ocr_image',
-        // 013：卡片发送一律跳过意图聚焦（FR-008/FR-044）
-        skipIntentFocus: true,
+        // 016：隐藏工具提示走结构化字段；卡片点击**不再跳过**意图聚焦
+        toolTips: [TIP],
       },
       { settleBeforeReturn: false },
     )

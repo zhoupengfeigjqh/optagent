@@ -75,6 +75,16 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.coerce.number().min(0).max(1).optional(),
   ),
+  /**
+   * 016：本体能力（行为 / 函数）判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_threshold`。
+   *
+   * 技能与能力共用一个"意图"问题，但候选粒度不同（技能是几十条描述，能力是成百个短标题），
+   * 分数分布会偏移；因此保留独立旋钮，允许现场分别标定。空串同样按未设置处理。
+   */
+  INTENT_FOCUS_ONTOLOGY_THRESHOLD: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.coerce.number().min(0).max(1).optional(),
+  ),
 });
 
 const modelEntrySchema = z.object({
@@ -99,6 +109,12 @@ export const INTENT_FOCUS_LIMITS = {
   /** 分数阈值 */
   thresholdMin: 0,
   thresholdMax: 1,
+  /** 单轮技能候选上限 */
+  maxSkillsMin: 1,
+  maxSkillsMax: 256,
+  /** 单轮能力候选上限 */
+  maxCapabilitiesMin: 1,
+  maxCapabilitiesMax: 256,
 } as const;
 
 /**
@@ -111,7 +127,14 @@ export const INTENT_FOCUS_LIMITS = {
 export const INTENT_FOCUS_DEFAULTS = {
   model: 'laya-multilingual',
   timeoutMs: 10_000,
-  threshold: 0.6,
+  /**
+   * 技能与本体能力**同阈值**（2026-11 产品口径：两者都是"本轮要不要用"的同一判断，
+   * 分开标定会让"技能入选但能力全空"变成常态）。
+   */
+  threshold: 0.8,
+  ontologyThreshold: 0.8,
+  maxSkills: 32,
+  maxCapabilities: 96,
 } as const;
 
 /**
@@ -132,6 +155,9 @@ const intentFocusYamlSchema = z
     api_key: z.unknown(),
     timeout_ms: z.unknown().optional(),
     threshold: z.unknown().optional(),
+    ontology_threshold: z.unknown().optional(),
+    max_skills: z.unknown().optional(),
+    max_capabilities: z.unknown().optional(),
   })
   .strict();
 
@@ -165,7 +191,8 @@ export interface LlmRetryOptions {
  * 六个字段与 `contracts/intent-focus-api.md §5.1` 一一对应；除 `threshold` 外**只有一个来源**
  * （`config.yaml` 的 `intent_focus` 块），避免"改了 A 没改 B"的错配。
  *
- * `threshold` 的取值来源优先级：环境变量 `INTENT_FOCUS_THRESHOLD` > `config.yaml` > 0.5。
+ * `threshold` / `ontology_threshold` 的取值优先级：
+ * 环境变量（`INTENT_FOCUS_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_THRESHOLD`）> `config.yaml` > 0.8。
  */
 export interface IntentFocusConfig {
   /** 形如 `http://laya:8000`（只到主机端口，不要带 `/v1`；请求路径由客户端拼） */
@@ -176,8 +203,14 @@ export interface IntentFocusConfig {
   apiKey: string;
   /** 整轮判定总预算（毫秒）：分批时按批数均分，到时即降级，**不重试** */
   timeoutMs: number;
-  /** 入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
+  /** 技能入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
   threshold: number;
+  /** 本体能力（行为 / 函数）入选分数阈值（0~1） */
+  ontologyThreshold: number;
+  /** 单轮技能候选上限 */
+  maxSkills: number;
+  /** 单轮能力候选上限 */
+  maxCapabilities: number;
 }
 
 export interface AppConfig {
@@ -315,6 +348,7 @@ function resolveIntentFocus(
   entry: z.infer<typeof intentFocusYamlSchema> | undefined,
   env: EnvSource,
   envThreshold: number | undefined,
+  envOntologyThreshold: number | undefined,
 ): IntentFocusConfig | undefined {
   if (!entry) return undefined;
 
@@ -350,6 +384,25 @@ function resolveIntentFocus(
     'intent_focus.threshold',
     INTENT_FOCUS_DEFAULTS.threshold,
   );
+  const yamlOntologyThreshold = readRatio(
+    entry.ontology_threshold,
+    'intent_focus.ontology_threshold',
+    INTENT_FOCUS_DEFAULTS.ontologyThreshold,
+  );
+  const maxSkills = readIntInRange(
+    entry.max_skills,
+    'intent_focus.max_skills',
+    INTENT_FOCUS_LIMITS.maxSkillsMin,
+    INTENT_FOCUS_LIMITS.maxSkillsMax,
+    INTENT_FOCUS_DEFAULTS.maxSkills,
+  );
+  const maxCapabilities = readIntInRange(
+    entry.max_capabilities,
+    'intent_focus.max_capabilities',
+    INTENT_FOCUS_LIMITS.maxCapabilitiesMin,
+    INTENT_FOCUS_LIMITS.maxCapabilitiesMax,
+    INTENT_FOCUS_DEFAULTS.maxCapabilities,
+  );
 
   return Object.freeze({
     baseUrl,
@@ -357,6 +410,9 @@ function resolveIntentFocus(
     apiKey,
     timeoutMs,
     threshold: envThreshold ?? yamlThreshold,
+    ontologyThreshold: envOntologyThreshold ?? yamlOntologyThreshold,
+    maxSkills,
+    maxCapabilities,
   });
 }
 
@@ -406,6 +462,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     yamlParsed.data.intent_focus,
     env,
     e.INTENT_FOCUS_THRESHOLD,
+    e.INTENT_FOCUS_ONTOLOGY_THRESHOLD,
   );
 
   // 签名直链的对外基址与部署形态强相关，必须显式声明：

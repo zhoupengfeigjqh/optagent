@@ -70,7 +70,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('勾选 → `update:modelValue` 携带 `next_action_hints: true`（布尔，不是字符串）', async () => {
-    const wrapper = mountEditor()
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
     const input = checkbox(wrapper)
 
     await input.setValue(true)
@@ -82,7 +82,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('已开启的设计态回显为勾选；取消勾选回传 `false`', async () => {
-    const wrapper = mountEditor({ ...emptySoulDesign(), next_action_hints: true })
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
     const input = checkbox(wrapper)
     expect(input.element.checked).toBe(true)
 
@@ -144,7 +144,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('取消勾选开关 → 条数输入变灰且不能填；重新勾选即恢复', async () => {
-    const wrapper = mountEditor({ ...emptySoulDesign(), next_action_hints: true })
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
 
     expect(countInput(wrapper).element.disabled).toBe(false)
     expect(wrapper.find('.soul-editor__count').classes()).not.toContain('soul-editor__count--off')
@@ -154,7 +154,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(countInput(wrapper).element.disabled).toBe(true)
     expect(wrapper.find('.soul-editor__count').classes()).toContain('soul-editor__count--off')
 
-    await wrapper.setProps({ modelValue: { ...emptySoulDesign(), next_action_hints: true } })
+    await wrapper.setProps({ modelValue: { ...emptySoulDesign(), intent_focus: true, next_action_hints: true } })
     expect(countInput(wrapper).element.disabled).toBe(false)
   })
 
@@ -167,12 +167,12 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(countInput(off).element.disabled).toBe(true)
     expect(countInput(off).element.value).toBe('5')
 
-    const on = mountEditor({ ...emptySoulDesign(), next_action_hints: true })
+    const on = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
     expect(countInput(on).element.disabled).toBe(false)
   })
 
   it('改条数为 1~6 的整数 → `update:modelValue` 携带新数值（其余字段原样带出）', async () => {
-    const wrapper = mountEditor({ ...emptySoulDesign(), next_action_hints: true })
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
 
     await setCount(wrapper, '6')
 
@@ -183,7 +183,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 
   it('条数与当前值相同 → 不产生改动（不制造无谓的 dirty）', async () => {
-    const wrapper = mountEditor({ ...emptySoulDesign(), next_action_hints: true })
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
 
     await setCount(wrapper, '3')
 
@@ -193,6 +193,7 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   it('越界 / 小数 / 空 → 拒绝式：不上抛，输入框弹回当前值', async () => {
     const wrapper = mountEditor({
       ...emptySoulDesign(),
+      intent_focus: true,
       next_action_hints: true,
       next_action_hints_count: 5,
     })
@@ -249,7 +250,7 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
     expect(emitted.intent_focus).toBe(false)
   })
 
-  it('与 007 开关互相独立：勾意图聚焦不会顺带打开下一步动作提示', async () => {
+  it('开启意图聚焦不会顺带打开下一步动作提示（仍须手动开启）', async () => {
     const wrapper = mountEditor()
 
     await checkbox(wrapper).setValue(true)
@@ -261,6 +262,24 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
     expect(wrapper.find<HTMLInputElement>('[data-test="next-action-hints"]').element.checked).toBe(
       false,
     )
+  })
+
+  it('关闭意图聚焦会顺带关闭下一步动作提示（依赖关系，不是互相独立）', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, next_action_hints: true })
+
+    await checkbox(wrapper).setValue(false)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(false)
+    expect(emitted.next_action_hints).toBe(false)
+  })
+
+  it('意图聚焦关闭时下一步动作提示复选框置灰；开启时可用', () => {
+    const off = mountEditor()
+    expect(off.find<HTMLInputElement>('[data-test="next-action-hints"]').element.disabled).toBe(true)
+
+    const on = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    expect(on.find<HTMLInputElement>('[data-test="next-action-hints"]').element.disabled).toBe(false)
   })
 
   it('界面说明开关的去向与关闭后果（关闭即产物无该键、预置卡片轮次跳过）', () => {

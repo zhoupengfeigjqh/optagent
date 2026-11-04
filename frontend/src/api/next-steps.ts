@@ -15,7 +15,7 @@
  */
 
 import type { HttpClient } from './http'
-import type { AgentStarter } from './types'
+import type { NextStepAction, ToolTip } from './types'
 import type { ThreadNextSteps } from './threads'
 
 /** 下一步动作提示 API。 */
@@ -58,7 +58,7 @@ export function normalizeNextSteps(raw: unknown): ThreadNextSteps {
   if (typeof record.message_id !== 'string' || !Array.isArray(record.actions)) {
     return emptyNextSteps()
   }
-  const actions: AgentStarter[] = []
+  const actions: NextStepAction[] = []
   for (const item of record.actions) {
     const action = toAction(item)
     if (action) actions.push(action)
@@ -68,14 +68,29 @@ export function normalizeNextSteps(raw: unknown): ThreadNextSteps {
   return { message_id: record.message_id, actions }
 }
 
-/** 单条卡片：文本必填；`tools` / `guidance` 缺失时补齐，保证下发形态与 `AgentStarter` 完全一致 */
-function toAction(value: unknown): AgentStarter | null {
+/** 单条卡片：`prompt` 必填（唯一进入历史的部分）；`tool_tips` 结构化透传 */
+function toAction(value: unknown): NextStepAction | null {
   if (value === null || typeof value !== 'object') return null
-  const record = value as { prompt?: unknown; tools?: unknown; guidance?: unknown }
+  const record = value as { prompt?: unknown; tool_tips?: unknown }
   if (typeof record.prompt !== 'string' || record.prompt === '') return null
-  return {
-    prompt: record.prompt,
-    tools: Array.isArray(record.tools) ? (record.tools as AgentStarter['tools']) : [],
-    guidance: typeof record.guidance === 'string' ? record.guidance : '',
-  }
+  return { prompt: record.prompt, tool_tips: toToolTips(record.tool_tips) }
+}
+
+/**
+ * `tool_tips` 读取：**只防崩溃、不校验**（与服务端同一口径）。
+ *
+ * 非数组 → 空数组；字段缺失 → 留空值；条目不删、不改写。
+ */
+function toToolTips(raw: unknown): ToolTip[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    const record =
+      item !== null && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+    return {
+      name: typeof record.name === 'string' ? record.name : '',
+      title: typeof record.title === 'string' ? record.title : '',
+      ontology_id: typeof record.ontology_id === 'string' ? record.ontology_id : '',
+      ontology_name: typeof record.ontology_name === 'string' ? record.ontology_name : null,
+    }
+  })
 }

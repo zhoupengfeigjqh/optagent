@@ -15,7 +15,7 @@
  */
 import { ref, type Ref } from 'vue'
 
-import type { AgentStarter, FileReference } from '../api/types'
+import type { FileReference, NextStepAction, ToolTip } from '../api/types'
 import { nextStepSendPayload } from '../utils/next-steps'
 import type { ToastStore } from './useToast'
 
@@ -30,7 +30,7 @@ export interface NextStepPromptDeps {
    * `false` = 在本地被拦下（未发出）。
    */
   send(
-    payload: { content: string; attachments: FileReference[]; guidance?: string },
+    payload: { content: string; attachments: FileReference[]; toolTips?: ToolTip[] },
     options: { settleBeforeReturn?: boolean },
   ): Promise<boolean>
   toast: ToastStore
@@ -39,10 +39,10 @@ export interface NextStepPromptDeps {
 /** 卡片确认弹窗状态机。 */
 export interface NextStepPrompt {
   /** 待确认的卡片（`null` = 弹窗关闭）；点卡片只**打开弹窗**，不发消息 */
-  pendingSuggestion: Ref<AgentStarter | null>
+  pendingSuggestion: Ref<NextStepAction | null>
   /** 发送进行中：弹窗两个按钮均禁用（连点只发一次） */
   suggestionSending: Ref<boolean>
-  onPickNextStep(action: AgentStarter): void
+  onPickNextStep(action: NextStepAction): void
   onCancelSuggestion(): void
   onConfirmSuggestion(): Promise<void>
 }
@@ -50,10 +50,10 @@ export interface NextStepPrompt {
 export function useNextStepPrompt(deps: NextStepPromptDeps): NextStepPrompt {
   const { streaming, currentAgent, send, toast } = deps
 
-  const pendingSuggestion = ref<AgentStarter | null>(null)
+  const pendingSuggestion = ref<NextStepAction | null>(null)
   const suggestionSending = ref(false)
 
-  function onPickNextStep(action: AgentStarter): void {
+  function onPickNextStep(action: NextStepAction): void {
     if (streaming.value !== null) return
     if (currentAgent.value === null) {
       toast.push('error', '请先选择数字人再发送')

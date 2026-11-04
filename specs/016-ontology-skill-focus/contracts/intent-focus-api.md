@@ -150,12 +150,12 @@ rules:
   "questions": {
     "s1": {
       "type": "noul",
-      "instructions": "本轮用户发起的任务是否需要使用技能「raw-material-inventory-new：原材料采购和库存本体技能」？",
+      "instructions": "需要技能「原材料采购和库存本体技能」",
       "criteria": { "true": "需要", "false": "不需要" }
     },
     "c1": {
       "type": "noul",
-      "instructions": "本轮用户发起的任务是否需要使用行为「创建原材料采购单（CreatePurchaseRecord）」？",
+      "instructions": "需要行为「创建原材料采购单」",
       "criteria": { "true": "需要", "false": "不需要" }
     }
   }

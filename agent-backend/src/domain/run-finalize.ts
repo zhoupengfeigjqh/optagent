@@ -32,6 +32,7 @@ import type {
   NextActionsStore,
   NextActionsView,
 } from './next-actions.js';
+import type { FocusToolTip } from './ontology-focus/types.js';
 import type { RunImpl } from './run-impl.js';
 import type { ToolEventStore } from './tool-events.js';
 
@@ -46,6 +47,12 @@ export interface FinalizeTurn {
    * `undefined` = 该数字人未开启下一步动作提示 → 收尾时跳过卡片定稿。
    */
   nextActionsMax?: number;
+  /**
+   * 本轮意图聚焦选出的本体能力（卡片候选范围的唯一来源）。
+   *
+   * 空 = 本轮不产卡片（与提示词装配侧"不追加尾部块指令"同一判据）。
+   */
+  focusToolTips?: readonly FocusToolTip[];
 }
 
 export interface RunFinalizeDeps {
@@ -332,13 +339,16 @@ export class RunFinalizer {
   ): NextActionsView | undefined {
     const store = this.deps.nextActions;
     if (!store || turn.nextActionsMax === undefined) return undefined;
+    // 无 Laya 能力 = 不产卡片（与"未追加尾部块指令"同源，模型本来也不会给块）
+    const focusToolTips = turn.focusToolTips ?? [];
+    if (focusToolTips.length === 0) return undefined;
     const input: NextActionsFinalizeInput = {
       userId: turn.userId,
       threadId: turn.threadId,
       messageId: assistantMessageId,
       agentName: run.agentName,
       tailText: run.nextActionsTail,
-      availableTools: [...turn.runtime.availableTools],
+      focusToolTips,
       max: turn.nextActionsMax,
     };
     run.nextActionsTail = '';

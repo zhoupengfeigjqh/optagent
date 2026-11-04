@@ -1,29 +1,64 @@
 /**
- * 意图聚焦（013）编排：开关 → 跳过 → 配置 → 候选 → 分批判定 → 筛选 → 留档 → 返回提示。
+ * 意图聚焦（016）编排：
+ * 开关 → 跳过 → 配置 → 技能头部 → 本体索引 → 技能判定 → 能力判定 → 数据补充
+ * → 去重 → 提示铸造 → 留档 → 返回提示。
  *
- * 为什么单独成模块（而不是写进 `consumeTurn`）：
- * - 它依赖**本轮真实可用工具清单**，而清单只有在 `agent-factory` 装配完工具后才可得；
- *   故以"判定口"（`IntentFocusPort`）的形式注入，由装配方在装配后、模型调用前回调；
- * - 编排逻辑（五类处置、分批、留档字段、降级）需要独立单测，不宜绑在流消费的大函数里。
+ * 三个刻意的顺序约束：
+ * 1. **开关最先**：关闭轮次零读取、零调用、零留档（FR-060）；`skip` 与"未配置"都排在
+ *    读文件之前，避免入口卡片也去扫目录；
+ * 2. **能力依附技能**：没有任何技能入选就不读本体能力（FR-020），否则等于全量展开；
+ * 3. **失败只降级**：任何异常都折成"本轮无提示"，绝不冒泡到对话主链路（FR-054）。
  *
- * 所有失败都**降级为"本轮无聚焦提示"**，绝不抛错（规格 FR-009/FR-052）。
- * 分批时采用**部分降级**：某批失败只丢那批候选，其余批的结果照常参与筛选。
+ * 分批判定见 `ontology-focus/batch-decider.ts`，留档写入见 `ontology-focus/run-record.ts`
+ * ——runner 只保留"顺序与决策"，不再承载 IO 细节。
  */
 import type { IntentFocusConfig } from '../config.js';
-import type { LayaDecideResult } from '../infra/laya-client.js';
+import { agentDir } from './dirs.js';
+import { prepareState } from './intent-focus.js';
 import {
-  buildQuestionBatches,
-  decideDisposition,
-  prepareState,
-  selectActions,
-  selectCandidates,
-  type QuestionBatch,
-  type ToolCandidate,
-} from './intent-focus.js';
-import type { IntentFocusRecordDraft } from './intent-focus-store.js';
+  batchQuestions,
+  buildCapabilityCandidates,
+  buildCapabilityQuestions,
+  buildSkillCandidates,
+  buildSkillQuestions,
+  orderedOntologies,
+} from './ontology-focus/candidates.js';
+import { BatchDecider, type DecideClient } from './ontology-focus/batch-decider.js';
+import { loadOntologyIndex } from './ontology-focus/ontology-loader.js';
+import { composeFocusPrompt, type PromptOntology, type PromptSkill } from './ontology-focus/prompt.js';
+import { FocusRecordWriter, type RecordFields } from './ontology-focus/run-record.js';
+import { selectCapabilities, selectSkills } from './ontology-focus/selection.js';
+import type {
+  CapabilitySelection,
+  FocusToolTip,
+  SkillCandidate,
+  SkillDecision,
+} from './ontology-focus/types.js';
+import { loadSkillHeaders } from './skill-header.js';
 
-/** 单批超时的下限（毫秒）：更低会把正常的前向计算误伤成超时 */
-const MIN_BATCH_TIMEOUT_MS = 300;
+const EMPTY_SELECTION: CapabilitySelection = {
+  behaviors: [],
+  functions: [],
+  supplements: [],
+  truncated: false,
+};
+
+/**
+ * 一轮意图聚焦的产出。
+ *
+ * 除「追加到 `systemExtra` 的提示」外，还要把本轮入选的行为 / 函数带出去：
+ * 下一步动作卡片的候选范围**只**来自这份清单（`toolTips`），而 runner 算完即丢
+ * 会让轮末无从判断"本轮有没有可提示的能力"。
+ */
+export interface IntentFocusResult {
+  /** 要追加到本轮 `systemExtra` 的提示；空串 = 不追加 */
+  prompt: string;
+  /** 本轮入选的行为 + 函数（顺序与判定结果一致；字段值原样透传，不做校验） */
+  toolTips: FocusToolTip[];
+}
+
+/** 统一空态：开关关闭 / 跳过 / 未配置 / 降级 / 无可用能力 */
+const EMPTY_RESULT: IntentFocusResult = { prompt: '', toolTips: [] };
 
 /** 一次判定的上下文（由 `consumeTurn` 提供） */
 export interface IntentFocusInput {
@@ -36,34 +71,16 @@ export interface IntentFocusInput {
   userInput: string;
   /** 预置动作入口（下一步动作卡片 / 首屏问题实例卡片）→ 跳过判定 */
   skip: boolean;
-  /** 本轮模型真实可用工具（装配期回填；`label` 为内置工具的中文名） */
-  tools: ReadonlyArray<{ name: string; description: string; label?: string }>;
 }
 
 /** 域层对意图聚焦的唯一依赖口 */
 export interface IntentFocusPort {
-  /** 返回要追加到本轮 `systemExtra` 的提示；空串 = 不追加 */
-  judge(input: IntentFocusInput): Promise<string>;
+  /** 返回本轮聚焦结果（提示 + 入选能力）；空态 = 不追加提示、不产卡片 */
+  judge(input: IntentFocusInput): Promise<IntentFocusResult>;
 }
 
-/** 判定客户端（`LayaClient` 的结构子集，便于测试注入） */
-export interface IntentFocusClient {
-  decide(
-    state: string,
-    questions: QuestionBatch['questions'],
-    timeoutMs?: number,
-  ): Promise<LayaDecideResult>;
-}
-
-/** 留档存储（`IntentFocusStore` 的结构子集） */
-export interface IntentFocusRecorder {
-  append(
-    userId: string,
-    agentName: string,
-    threadId: string,
-    draft: IntentFocusRecordDraft,
-  ): Promise<void>;
-}
+/** 判定客户端（保留旧名，测试与装配方无需感知内部拆分） */
+export type IntentFocusClient = DecideClient;
 
 export interface IntentFocusRunnerLogger {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -71,12 +88,21 @@ export interface IntentFocusRunnerLogger {
 }
 
 export interface IntentFocusRunnerDeps {
+  /** 运行数据根目录（`OPT_AGENT_ROOT`），用于定位技能与本体 */
+  root: string;
   /** 缺省 = 判定模型未配置（功能不可用，fail-closed） */
   config?: IntentFocusConfig;
   /** 缺省 = 未装配 → 视为不可用 */
   client?: IntentFocusClient;
   /** 缺省 = 未装配 → 不落记录 */
-  store?: IntentFocusRecorder;
+  store?: {
+    append(
+      userId: string,
+      agentName: string,
+      threadId: string,
+      draft: import('./intent-focus-store.js').IntentFocusRecordDraft,
+    ): Promise<void>;
+  };
   /** SOUL 开关（逐次现读，fail-closed） */
   isEnabled: (userId: string, agentName: string) => boolean;
   logger?: IntentFocusRunnerLogger;
@@ -85,58 +111,65 @@ export interface IntentFocusRunnerDeps {
 
 export class IntentFocusRunner implements IntentFocusPort {
   private readonly now: () => number;
+  private readonly recorder: FocusRecordWriter;
 
   constructor(private readonly deps: IntentFocusRunnerDeps) {
     this.now = deps.now ?? Date.now;
+    this.recorder = new FocusRecordWriter({
+      ...(deps.store ? { store: deps.store } : {}),
+      ...(deps.logger ? { logger: deps.logger } : {}),
+    });
   }
 
-  async judge(input: IntentFocusInput): Promise<string> {
-    // 开关关闭：零副作用（不判定、不落档，规格 FR-032）
-    if (!this.deps.isEnabled(input.userId, input.agentName)) return '';
+  async judge(input: IntentFocusInput): Promise<IntentFocusResult> {
+    // 开关关闭：零副作用（不读取、不判定、不落档，FR-060）
+    if (!this.deps.isEnabled(input.userId, input.agentName)) return EMPTY_RESULT;
 
     const prepared = prepareState(input.userInput);
-    const { candidates, truncated } = selectCandidates(normalizeTools(input.tools));
-    const batches = buildQuestionBatches(candidates);
     const startedAt = this.now();
-    const base = {
-      thread_id: input.threadId,
-      agent_name: input.agentName,
-      message_id: input.messageId,
-      input: prepared.state,
-      input_truncated: prepared.truncated,
-      candidates: candidates.length,
-      batches: batches.length,
-      truncated,
+    const target = {
+      userId: input.userId,
+      agentName: input.agentName,
+      threadId: input.threadId,
+      messageId: input.messageId,
     };
 
-    // 预置动作入口：跳过（优先于"未配置"，因为这是确定的业务行为而非故障）
     if (input.skip) {
-      await this.record(input, {
-        ...base,
+      await this.recorder.write(target, prepared.state, prepared.truncated, {
         disposition: 'skipped',
         reason: 'skip:preset_action',
         model: null,
-        round_ms: null,
-        probabilities: null,
-        actions: [],
-        focus_prompt: '',
+        roundMs: null,
+        candidateCount: 0,
+        batches: 0,
+        truncated: false,
+        skills: [],
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings: [],
         error: null,
       });
-      return '';
+      this.log(input, 'skipped', 'skip:preset_action', 0, 0, this.now() - startedAt);
+      return EMPTY_RESULT;
     }
 
     const config = this.deps.config;
     const client = this.deps.client;
     if (!config || !client) {
-      await this.record(input, {
-        ...base,
+      await this.recorder.write(target, prepared.state, prepared.truncated, {
         disposition: 'unconfigured',
         reason: 'no_config',
         model: null,
-        round_ms: null,
-        probabilities: null,
-        actions: [],
-        focus_prompt: '',
+        roundMs: null,
+        candidateCount: 0,
+        batches: 0,
+        truncated: false,
+        skills: [],
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings: [],
         error: null,
       });
       this.deps.logger?.warn(
@@ -144,229 +177,378 @@ export class IntentFocusRunner implements IntentFocusPort {
           event: 'intent-focus.unconfigured',
           thread_id: input.threadId,
           agent_name: input.agentName,
+          stage: 'config',
+          reason: 'no_config',
         },
         '意图聚焦已开启但判定模型未配置，本轮按不聚焦处理',
       );
-      return '';
+      return EMPTY_RESULT;
     }
 
-    // 无可用工具：不发起调用（题量为 0 时调用没有意义）
-    if (candidates.length === 0) {
-      await this.record(input, {
-        ...base,
+    const dir = agentDir(this.deps.root, input.userId, input.agentName);
+    const deadline = startedAt + config.timeoutMs;
+    const decider = new BatchDecider({
+      client,
+      ...(this.deps.logger ? { logger: this.deps.logger } : {}),
+      now: this.now,
+    });
+
+    try {
+      return await this.run(input, prepared.state, prepared.truncated, dir, config, decider, deadline, startedAt);
+    } catch (err) {
+      // 兜底：目录不可读、YAML 结构异常等未预期错误一律降级（FR-054）
+      const message = (err as Error)?.message ?? String(err);
+      await this.fail(input, prepared.state, prepared.truncated, config, 'unexpected_error', message, startedAt);
+      return EMPTY_RESULT;
+    }
+  }
+
+  private async run(
+    input: IntentFocusInput,
+    state: string,
+    inputTruncated: boolean,
+    dir: string,
+    config: IntentFocusConfig,
+    decider: BatchDecider,
+    deadline: number,
+    startedAt: number,
+  ): Promise<IntentFocusResult> {
+    const target = {
+      userId: input.userId,
+      agentName: input.agentName,
+      threadId: input.threadId,
+      messageId: input.messageId,
+    };
+    const headers = loadSkillHeaders(dir);
+    const index = loadOntologyIndex(dir);
+    const warnings = [...headers.warnings, ...index.warnings];
+    const skillResult = buildSkillCandidates(headers.skills, index, config.maxSkills);
+
+    // 没有任何技能：不发起调用（题量为 0 时调用没有意义）
+    if (headers.skills.length === 0) {
+      await this.recorder.write(target, state, inputTruncated, {
         disposition: 'empty',
-        reason: 'no_tools',
+        reason: 'no_skills',
         model: config.model,
-        round_ms: 0,
-        probabilities: null,
-        actions: [],
-        focus_prompt: '',
+        roundMs: 0,
+        candidateCount: 0,
+        batches: 0,
+        truncated: false,
+        skills: [],
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings,
         error: null,
       });
-      return '';
+      this.log(input, 'done', 'no_skills', 0, 0, this.now() - startedAt);
+      return EMPTY_RESULT;
     }
 
-    const decided = await this.decideAll(client, prepared.state, batches, config.timeoutMs);
-    const roundMs = this.now() - startedAt;
+    // 全是"该聚焦但本体没物化"的本体技能：不发起调用（FR-014）
+    if (skillResult.candidates.length === 0) {
+      await this.recorder.write(target, state, inputTruncated, {
+        disposition: 'empty',
+        reason: 'no_focusable_skills',
+        model: config.model,
+        roundMs: 0,
+        candidateCount: 0,
+        batches: 1,
+        truncated: skillResult.truncated,
+        skills: skillResult.excluded,
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings,
+        error: null,
+      });
+      this.log(input, 'done', 'no_focusable_skills', 0, 0, this.now() - startedAt);
+      return EMPTY_RESULT;
+    }
 
-    if (Object.keys(decided.scores).length === 0) {
-      const detail = decided.failures.join('; ') || 'no_scores';
-      // 根因优先（`timeout` / `http_503`），多因归一时退回 `all_batches_failed`（data-model §6.1）
-      const reason = decided.failureReason ?? 'all_batches_failed';
-      await this.record(input, {
-        ...base,
+    const skillBatches = batchQuestions(
+      skillResult.candidates,
+      buildSkillQuestions(skillResult.candidates),
+      32,
+    );
+    const skillDecided = await decider.decideAll(state, skillBatches, deadline, 'skill');
+
+    if (Object.keys(skillDecided.scores).length === 0) {
+      const reason = skillDecided.failureReason ?? 'all_batches_failed';
+      await this.recorder.write(target, state, inputTruncated, {
         disposition: 'degraded',
         reason,
         model: config.model,
-        round_ms: roundMs,
-        probabilities: null,
-        actions: [],
-        focus_prompt: '',
-        error: detail,
+        roundMs: this.now() - startedAt,
+        candidateCount: skillResult.candidates.length,
+        batches: skillBatches.length,
+        truncated: skillResult.truncated,
+        skills: skillResult.excluded,
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings,
+        error: skillDecided.failures.join('; ') || null,
       });
-      this.deps.logger?.warn(
-        {
-          event: 'intent-focus.failed',
-          alert: true,
+      this.degradedLog(input, 'skill', reason, skillDecided.failures);
+      return EMPTY_RESULT;
+    }
+
+    const skillDecisions = selectSkills(skillResult.candidates, skillDecided.scores, config.threshold);
+    const allSkillDecisions: SkillDecision[] = [...skillResult.excluded, ...skillDecisions];
+    const selectedNames = new Set(
+      skillDecisions.filter((decision) => decision.selected).map((decision) => decision.header.name),
+    );
+    const selectedCandidates = skillResult.candidates.filter((candidate) =>
+      selectedNames.has(candidate.header.name),
+    );
+
+    if (selectedCandidates.length === 0) {
+      await this.recorder.write(target, state, inputTruncated, {
+        disposition: 'empty',
+        reason: 'below_threshold',
+        model: config.model,
+        roundMs: this.now() - startedAt,
+        candidateCount: skillResult.candidates.length,
+        batches: skillBatches.length,
+        truncated: skillResult.truncated,
+        skills: allSkillDecisions,
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings,
+        error: skillDecided.failures.join('; ') || null,
+      });
+      this.log(
+        input,
+        'done',
+        'below_threshold',
+        skillResult.candidates.length,
+        skillBatches.length,
+        this.now() - startedAt,
+      );
+      return EMPTY_RESULT;
+    }
+
+    const ontologies = orderedOntologies(selectedCandidates, index);
+    const capabilityResult = buildCapabilityCandidates(
+      selectedCandidates,
+      index,
+      config.maxCapabilities,
+    );
+    const capabilityBatches = batchQuestions(
+      capabilityResult.candidates,
+      buildCapabilityQuestions(capabilityResult.candidates),
+      32,
+    );
+
+    let capabilitySelection: CapabilitySelection = EMPTY_SELECTION;
+    let capabilityFailures: string[] = [];
+    if (capabilityBatches.length > 0) {
+      const capabilityDecided = await decider.decideAll(state, capabilityBatches, deadline, 'capability');
+      // 能力全批失败：技能已经选出来了，但本轮不给提示（FR-043：全部失败即降级）
+      if (Object.keys(capabilityDecided.scores).length === 0) {
+        const reason = capabilityDecided.failureReason ?? 'all_batches_failed';
+        await this.recorder.write(target, state, inputTruncated, {
+          disposition: 'degraded',
           reason,
-          // 原始错误文案（含服务端响应体摘要）：只记状态码无法定位 422 这类 schema 拒绝
-          detail,
-          thread_id: input.threadId,
-          agent_name: input.agentName,
-          batches: batches.length,
-          round_ms: roundMs,
-        },
-        `意图聚焦判定失败，本轮按不聚焦处理：${detail}`,
+          model: config.model,
+          roundMs: this.now() - startedAt,
+          candidateCount: skillResult.candidates.length + capabilityResult.candidates.length,
+          batches: skillBatches.length + capabilityBatches.length,
+          truncated: skillResult.truncated || capabilityResult.truncated,
+          skills: allSkillDecisions,
+          capabilities: EMPTY_SELECTION,
+          prompt: '',
+          promptTruncated: false,
+          warnings,
+          error: capabilityDecided.failures.join('; ') || null,
+        });
+        this.degradedLog(input, 'capability', reason, capabilityDecided.failures);
+        return EMPTY_RESULT;
+      }
+      capabilitySelection = selectCapabilities(
+        capabilityResult.candidates,
+        capabilityDecided.scores,
+        config.ontologyThreshold,
+        ontologies,
       );
-      return '';
+      capabilityFailures = capabilityDecided.failures;
     }
 
-    const selection = selectActions({
-      candidates,
-      scores: decided.scores,
-      threshold: config.threshold,
-    });
-    const disposition = decideDisposition({
-      kind: 'ok',
-      candidates: candidates.length,
-      selected: selection.actions.length,
-    });
+    const scoreByName = new Map(skillDecisions.map((decision) => [decision.header.name, decision.score]));
+    const promptSkills: PromptSkill[] = selectedCandidates.map((candidate, order) => ({
+      name: candidate.header.name,
+      isOntology: candidate.isOntologySkill,
+      ontology: pickOntology(candidate),
+      score: scoreByName.get(candidate.header.name) ?? null,
+      order,
+    }));
+    const composed = composeFocusPrompt(promptSkills, capabilitySelection);
+    const roundMs = this.now() - startedAt;
 
-    await this.record(input, {
-      ...base,
-      disposition: disposition.disposition,
-      reason: disposition.reason,
+    await this.recorder.write(target, state, inputTruncated, {
+      disposition: 'focused',
+      reason: null,
       model: config.model,
-      round_ms: roundMs,
-      probabilities: selection.scores,
-      actions: selection.actions.map((a) => a.tools[0]!).filter(Boolean),
-      focus_prompt: selection.focusPrompt,
-      error: decided.failures.length > 0 ? decided.failures.join('; ') : null,
+      roundMs,
+      candidateCount: skillResult.candidates.length + capabilityResult.candidates.length,
+      batches: skillBatches.length + capabilityBatches.length,
+      truncated: skillResult.truncated || capabilityResult.truncated,
+      skills: allSkillDecisions,
+      capabilities: capabilitySelection,
+      prompt: composed.prompt,
+      promptTruncated: composed.truncated,
+      warnings,
+      error: [...skillDecided.failures, ...capabilityFailures].join('; ') || null,
     });
-
-    if (decided.failures.length > 0) {
-      this.deps.logger?.warn(
-        {
-          event: 'intent-focus.partial',
-          alert: true,
-          thread_id: input.threadId,
-          agent_name: input.agentName,
-          batches: batches.length,
-          failed: decided.failures.length,
-          detail: decided.failures.join('; '),
-          round_ms: roundMs,
-        },
-        `意图聚焦部分批次失败，已用剩余 ${Object.keys(decided.scores).length} 个工具的结果继续`,
-      );
-    }
 
     this.deps.logger?.info(
       {
-        event: selection.focusPrompt === '' ? 'intent-focus.empty' : 'intent-focus.ok',
+        event: 'intent-focus.done',
         thread_id: input.threadId,
         agent_name: input.agentName,
-        candidates: candidates.length,
-        batches: batches.length,
-        actions: selection.actions.length,
+        stage: 'prompt',
+        reason: null,
+        skills_selected: selectedCandidates.length,
+        behaviors: capabilitySelection.behaviors.length,
+        functions: capabilitySelection.functions.length,
+        supplements: capabilitySelection.supplements.length,
+        prompt_chars: composed.prompt.length,
         round_ms: roundMs,
-        threshold: config.threshold,
       },
-      selection.focusPrompt === ''
-        ? '意图聚焦：本轮无需聚焦'
-        : `意图聚焦：本轮聚焦 ${selection.actions.length} 个工具`,
+      `意图聚焦：入选 ${selectedCandidates.length} 个技能、${capabilitySelection.behaviors.length} 个行为、${capabilitySelection.functions.length} 个函数`,
     );
 
-    return selection.focusPrompt;
+    return {
+      prompt: composed.prompt,
+      toolTips: toToolTips(capabilitySelection),
+    };
   }
 
-  /**
-   * 逐批串行判定并合并分数。
-   *
-   * 串行而非并行：判定服务是单实例 CPU，并发只会在其内部排队，墙钟时间并不减少，
-   * 反而让超时归因变模糊。单批超时按"总预算 ÷ 批数"分配，保证整体有界。
-   */
-  private async decideAll(
-    client: IntentFocusClient,
+  private async fail(
+    input: IntentFocusInput,
     state: string,
-    batches: readonly QuestionBatch[],
-    totalTimeoutMs: number,
-  ): Promise<{ scores: Record<string, number>; failures: string[]; failureReason: string | null }> {
-    const perBatch = Math.max(
-      MIN_BATCH_TIMEOUT_MS,
-      Math.floor(totalTimeoutMs / Math.max(batches.length, 1)) - 100,
+    inputTruncated: boolean,
+    config: IntentFocusConfig,
+    reason: string,
+    message: string,
+    startedAt: number,
+  ): Promise<void> {
+    await this.recorder.write(
+      {
+        userId: input.userId,
+        agentName: input.agentName,
+        threadId: input.threadId,
+        messageId: input.messageId,
+      },
+      state,
+      inputTruncated,
+      {
+        disposition: 'degraded',
+        reason,
+        model: config.model,
+        roundMs: this.now() - startedAt,
+        candidateCount: 0,
+        batches: 0,
+        truncated: false,
+        skills: [],
+        capabilities: EMPTY_SELECTION,
+        prompt: '',
+        promptTruncated: false,
+        warnings: [],
+        error: message,
+      },
     );
-    const scores: Record<string, number> = {};
-    const failures: string[] = [];
-    /** 各批失败的根因去重（如 `timeout` / `http_422`）；只有全批失败时才有意义 */
-    const reasons = new Set<string>();
-    let failureReason: string | null = null;
-
-    for (const [index, batch] of batches.entries()) {
-      const batchStarted = this.now();
-      const result = await client.decide(state, batch.questions, perBatch).catch(
-        (err: unknown): LayaDecideResult => ({
-          ok: false,
-          reason: 'network',
-          message: (err as Error)?.message ?? String(err),
-        }),
-      );
-      const ms = this.now() - batchStarted;
-
-      if (!result.ok) {
-        failures.push(`batch_${index}:${result.reason}${result.status ? `:${result.status}` : ''}`);
-        // 根因口径与 data-model 一致：无状态码用 `timeout`/`network`，有状态码用 `http_503`
-        reasons.add(`${result.reason}${result.status !== undefined ? `_${result.status}` : ''}`);
-        this.deps.logger?.warn(
-          {
-            event: 'intent-focus.batch.failed',
-            alert: true,
-            batch_index: index,
-            batch_size: batch.candidates.length,
-            reason: result.reason,
-            ...(result.status !== undefined ? { status: result.status } : {}),
-            detail: result.message,
-            ms,
-          },
-          `意图聚焦第 ${index + 1} 批判定失败：${result.message}`,
-        );
-        continue;
-      }
-
-      Object.assign(scores, result.scores);
-      this.deps.logger?.info(
-        {
-          event: 'intent-focus.batch.ok',
-          batch_index: index,
-          batch_size: batch.candidates.length,
-          ms,
-        },
-        `意图聚焦第 ${index + 1} 批判定完成`,
-      );
-    }
-
-    // 全批失败才算"没有可用分数"；去重后只剩一个根因就用它（`timeout` / `http_422`），
-    // 多个根因无法归一时退回笼统的 `all_batches_failed`，避免记下似是而非的单一原因
-    if (failures.length === batches.length && batches.length > 0) {
-      failureReason = reasons.size === 1 ? [...reasons][0]! : 'all_batches_failed';
-    }
-
-    return { scores, failures, failureReason };
+    this.deps.logger?.warn(
+      {
+        event: 'intent-focus.degraded',
+        alert: true,
+        stage: 'run',
+        reason,
+        thread_id: input.threadId,
+        agent_name: input.agentName,
+        detail: message,
+      },
+      `意图聚焦异常，本轮按不聚焦处理：${message}`,
+    );
   }
 
-  private async record(input: IntentFocusInput, draft: IntentFocusRecordDraft): Promise<void> {
-    const store = this.deps.store;
-    if (!store) return;
-    try {
-      await store.append(input.userId, input.agentName, input.threadId, draft);
-    } catch (err) {
-      // store 内部已兜底；这里是第二道防线（记录失败绝不影响对话）
-      this.deps.logger?.warn(
-        {
-          event: 'intent-focus.record.failed',
-          alert: true,
-          thread_id: input.threadId,
-          agent_name: input.agentName,
-        },
-        `意图聚焦记录写入失败：${(err as Error).message}`,
-      );
-    }
+  private log(
+    input: IntentFocusInput,
+    stage: string,
+    reason: string | null,
+    candidates: number,
+    batches: number,
+    roundMs: number,
+  ): void {
+    this.deps.logger?.info(
+      {
+        event: 'intent-focus.done',
+        thread_id: input.threadId,
+        agent_name: input.agentName,
+        stage,
+        reason,
+        candidates,
+        batches,
+        round_ms: roundMs,
+      },
+      reason === null ? '意图聚焦完成' : `意图聚焦：${reason}`,
+    );
+  }
+
+  private degradedLog(
+    input: IntentFocusInput,
+    stage: string,
+    reason: string,
+    failures: readonly string[],
+  ): void {
+    this.deps.logger?.warn(
+      {
+        event: 'intent-focus.degraded',
+        alert: true,
+        stage,
+        reason,
+        thread_id: input.threadId,
+        agent_name: input.agentName,
+        failed: failures.length,
+        detail: failures.join('; '),
+      },
+      `意图聚焦（${stage}）失败，本轮按不聚焦处理`,
+    );
   }
 }
 
-/** 工具清单去空名、去重复（MCP 与内置可能同名：保留首个，避免同一工具两条命题） */
-function normalizeTools(
-  tools: ReadonlyArray<{ name: string; description: string; label?: string }>,
-): ToolCandidate[] {
-  const seen = new Set<string>();
-  const result: ToolCandidate[] = [];
-  for (const tool of tools) {
-    if (tool.name.length === 0 || seen.has(tool.name)) continue;
-    seen.add(tool.name);
-    result.push({
-      name: tool.name,
-      description: tool.description,
-      ...(tool.label !== undefined ? { label: tool.label } : {}),
-    });
-  }
-  return result;
+/**
+ * 入选能力 → 卡片的 `tool_tips`。
+ *
+ * **纯搬运**：顺序沿用判定结果（行为按分数降序，函数按分数降序），
+ * 不做去重 / 不查本体是否存在 / 不裁剪条数——条数上限（5）是卡片铸造侧的硬约束，
+ * 不在这里提前砍。
+ */
+function toToolTips(selection: CapabilitySelection): FocusToolTip[] {
+  return [...selection.behaviors, ...selection.functions].map((decision) => ({
+    name: decision.name,
+    title: decision.title,
+    ontology_id: decision.ontologyId,
+    ontology_name: decision.ontologyName,
+  }));
 }
+
+/**
+ * 一个本体技能恒只有**一个**本体（`SKILL.md` 的单个 `ontology_id`）。
+ *
+ * 同一 `ontology_id` 被物化成多份文件时只取首份（本体文件枚举序），
+ * 提示里不重复输出；本体名优先取 `ontology.yaml`，缺失时回落到技能头部。
+ */
+function pickOntology(candidate: SkillCandidate): PromptOntology | null {
+  const first = candidate.matchedOntologies[0];
+  if (!first) return null;
+  return {
+    id: first.ontologyId,
+    name: first.ontologyName ?? candidate.header.metadata.ontologyName,
+  };
+}
+
+/** 仅用于类型导出的占位（避免 `RecordFields` 被 tree-shake 误判为未使用） */
+export type { RecordFields };

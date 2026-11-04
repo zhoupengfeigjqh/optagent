@@ -60,9 +60,7 @@
     "jev",
     "ocr"
   ],
-  "skills": [
-    "raw-material-inventory-new"
-  ],
+  "skills": [],
   "ontologies": [
     "生产调度/原材料采购和库存"
   ],
@@ -88,5 +86,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-04T02:57:03.411Z"
+  "updated_at": "2026-11-04T07:47:28.404Z"
 }

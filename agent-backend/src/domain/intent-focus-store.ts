@@ -21,7 +21,39 @@ export const MAX_RECORD_LINES = 200;
 /** 触发重写后保留的条数 */
 export const KEEP_RECORD_LINES = 100;
 
-/** 一条判定记录（字段口径见 `data-model.md §6.1`） */
+/** 技能决策留档（含未入选者） */
+export interface SkillFocusRecord {
+  name: string;
+  description: string;
+  is_ontology: boolean;
+  /** 关联本体 id；一个本体技能恒只有一个本体，非本体技能为 null */
+  ontology_id: string | null;
+  score: number | null;
+  selected: boolean;
+  reason: string | null;
+}
+
+/** 能力决策留档（行为 / 函数共用形状） */
+export interface CapabilityFocusRecord {
+  kind: 'behavior' | 'function';
+  name: string;
+  title: string;
+  ontology_id: string;
+  ontology_name: string | null;
+  score: number | null;
+  selected: boolean;
+  source: 'direct' | 'supplement' | 'direct+supplement';
+}
+
+/** 数据补充明细：`found=false` 表示声明了但同本体找不到，已丢弃 */
+export interface DataSupplementRecord {
+  ontology_id: string;
+  behavior: string;
+  supplement: string;
+  found: boolean;
+}
+
+/** 一条判定记录（字段口径见 `data-model.md §5`） */
 export interface IntentFocusRecord {
   at: string;
   thread_id: string;
@@ -34,14 +66,19 @@ export interface IntentFocusRecord {
   reason: string | null;
   model: string | null;
   round_ms: number | null;
+  /** 候选总数（技能 + 能力） */
   candidates: number;
   /** 本次判定实际发出的批数（`noul` 分批后：1 批 ≈ 32 题） */
   batches: number;
+  /** 候选明细是否被截断 */
   truncated: boolean;
-  /** `noul` 分数表（工具名 → 分数）；判定失败或跳过时为 null */
-  probabilities: Record<string, number> | null;
-  actions: string[];
-  focus_prompt: string;
+  skills: SkillFocusRecord[];
+  behaviors: CapabilityFocusRecord[];
+  functions: CapabilityFocusRecord[];
+  data_supplements: DataSupplementRecord[];
+  prompt: string;
+  prompt_truncated: boolean;
+  warnings: string[];
   error: string | null;
 }
 

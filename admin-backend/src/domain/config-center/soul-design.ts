@@ -172,6 +172,10 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     );
   }
   const record = raw as Record<string, unknown>;
+  // 013 修订（意图聚焦门控下一步动作提示）：先读两个开关，再施加
+  // 「下一步动作提示依赖意图聚焦」的门控——intent_focus 关闭时 hints 一律按关处理
+  // （fail-closed，与运行侧「无聚焦能力即无卡片」同口径）。
+  const intentFocus = readBool(record.intent_focus, '意图聚焦开关');
   return {
     intro: readRequiredText(record.intro, '角色简介', SOUL_LIMITS.intro),
     welcome: readRequiredText(record.welcome, '首屏欢迎语', SOUL_LIMITS.welcome),
@@ -180,12 +184,13 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     capability_tags: readTextList(record.capability_tags, '能力标签', SOUL_LIMITS.capabilityTagLength),
     forbidden: readTextList(record.forbidden, '绝对禁止', SOUL_LIMITS.listItemLength),
     prompt_extra: readOptionalText(record.prompt_extra, '补充说明', SOUL_LIMITS.promptExtra),
-    // 007：键缺失 = 关（老表单不带这个键照常保存）；键在但类型不对 = 拒绝
-    next_action_hints: readBool(record.next_action_hints, '下一步动作提示开关'),
+    // 007：键缺失 = 关（老表单不带这个键照常保存）；键在但类型不对 = 拒绝；
+    // 门控：意图聚焦关闭时，即便提交了 true 也收敛为关
+    next_action_hints: readBool(record.next_action_hints, '下一步动作提示开关') && intentFocus,
     // 007：键缺失 = 缺省 3；非整数 / 越界 = 拒绝（不做 round / clamp：静默改数字最难排查）
     next_action_hints_count: readPositiveInt(record.next_action_hints_count),
     // 013：键缺失 = 关；键在但类型不对 = 拒绝（与 next_action_hints 同一 readBool 口径）
-    intent_focus: readBool(record.intent_focus, '意图聚焦开关'),
+    intent_focus: intentFocus,
   };
 }
 
@@ -198,17 +203,15 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
  */
 export function renderSoulMd(soul: SoulDesign): string {
   const frontmatter: Record<string, unknown> = { soul_version: 1 };
-  // 007：**仅 `true` 时写**（`false` / 缺省都不写键）——关闭态的 SOUL.md 与 007 之前逐字一致，
-  // 运行环境也就不会读到"开关存在但为关"的中间形态（未搭配的内容不残留）。
-  // 条数紧随其后，**同样只在开启时写**：关闭态产物里连"条数"都不该出现
-  if (soul.next_action_hints === true) {
-    frontmatter.next_action_hints = true;
-    frontmatter.next_action_hints_count = soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault;
-  }
-  // 013：与 007 开关**独立**（FR-035：两者互不影响），同样只在开启时写键；
-  // 关闭态产物里连"intent_focus: false"都不出现（部署零残留，FR-033）
+  // 013：同样只在开启时写键；关闭态产物里连"intent_focus: false"都不出现（部署零残留，FR-033）
   if (soul.intent_focus === true) {
     frontmatter.intent_focus = true;
+  }
+  // 007：下一步动作提示**依赖意图聚焦**——意图聚焦开启 + 该开关开启才写键；
+  // 条数紧随其后，同样只在开启时写：关闭态产物里连"条数"都不该出现（未搭配的内容不残留）
+  if (soul.intent_focus === true && soul.next_action_hints === true) {
+    frontmatter.next_action_hints = true;
+    frontmatter.next_action_hints_count = soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault;
   }
   if (soul.intro !== '') frontmatter.intro = soul.intro;
   if (soul.welcome !== '') frontmatter.welcome = soul.welcome;

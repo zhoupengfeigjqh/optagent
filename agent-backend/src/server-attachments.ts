@@ -47,28 +47,37 @@ export function buildAttachments(deps: ServerAttachmentsDeps): ServerAttachments
     return { enabled: true, max: nextActionHintsCount(root, userId, agentName, nextActionsWarn) };
   };
 
-  // 013：判定模型整块未配置 → 不装配（等效功能不可用，启动照常）
+  /**
+   * 016：runner **始终装配**，判定模型配置只决定是否带 client。
+   *
+   * 为什么不再"未配置就整体不装配"：开关开启但模型未配置时，需要留一条
+   * `unconfigured` 记录（否则"为什么这轮没聚焦"在日志与侧车里都没有痕迹）。
+   * client 缺省时 runner 在读完配置后立即以 `unconfigured` 收尾，不发起任何网络调用。
+   */
   const focusConfig = config.intentFocus;
   const focusSwitchWarn = createThrottledWarn(logger, 'intent-focus.switch.failed');
-  const intentFocus: IntentFocusPort | undefined = focusConfig
-    ? new IntentFocusRunner({
-        config: focusConfig,
-        client: new LayaClient({
-          baseUrl: focusConfig.baseUrl,
-          model: focusConfig.model,
-          apiKey: focusConfig.apiKey,
-          timeoutMs: focusConfig.timeoutMs,
-        }),
-        store: new IntentFocusStore(
-          root,
-          createThrottledWarn(logger, 'intent-focus.record.failed'),
-        ),
-        // 开关逐次现读；读不出来按关闭（fail-closed，见 soul.ts）
-        isEnabled: (userId, agentName) =>
-          isIntentFocusEnabled(root, userId, agentName, focusSwitchWarn),
-        logger,
-      })
-    : undefined;
+  const intentFocus: IntentFocusPort = new IntentFocusRunner({
+    root,
+    ...(focusConfig ? { config: focusConfig } : {}),
+    ...(focusConfig
+      ? {
+          client: new LayaClient({
+            baseUrl: focusConfig.baseUrl,
+            model: focusConfig.model,
+            apiKey: focusConfig.apiKey,
+            timeoutMs: focusConfig.timeoutMs,
+          }),
+        }
+      : {}),
+    store: new IntentFocusStore(
+      root,
+      createThrottledWarn(logger, 'intent-focus.record.failed'),
+    ),
+    // 开关逐次现读；读不出来按关闭（fail-closed，见 soul.ts）
+    isEnabled: (userId, agentName) =>
+      isIntentFocusEnabled(root, userId, agentName, focusSwitchWarn),
+    logger,
+  });
 
   return {
     nextActions,

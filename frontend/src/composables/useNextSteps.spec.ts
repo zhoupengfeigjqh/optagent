@@ -15,7 +15,7 @@ import { createNextStepsStore, useNextSteps, type NextStepsStore } from './useNe
 
 const HIT: ThreadNextSteps = {
   message_id: 'm-1',
-  actions: [{ prompt: '按交付日期梳理这批订单的风险', tools: [], guidance: '' }],
+  actions: [{ prompt: '按交付日期梳理这批订单的风险', tool_tips: [] }],
 }
 
 /**

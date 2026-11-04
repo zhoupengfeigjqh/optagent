@@ -3,7 +3,18 @@
   "soul": {
     "intro": "库存和原材料专家",
     "welcome": "您好，我是库存和原材料专家，请输入您的问题！",
-    "starters": [],
+    "starters": [
+      {
+        "prompt": "查询钢板库存",
+        "tools": [
+          {
+            "kind": "mcp",
+            "service": "test002",
+            "name": "QueryInventory"
+          }
+        ]
+      }
+    ],
     "mission": "你是一名库存和原材料专家，负责库存查询、采购单创建等工作",
     "capability_tags": [
       "查询库存",
@@ -17,8 +28,8 @@
     ],
     "prompt_extra": "",
     "next_action_hints": true,
-    "next_action_hints_count": 2,
-    "intent_focus": false
+    "next_action_hints_count": 1,
+    "intent_focus": true
   },
   "enabled_tools": [
     "list_dir",
@@ -28,8 +39,13 @@
     "grep_skill",
     "grep_files"
   ],
-  "mcp_services": [],
-  "skills": [],
+  "mcp_services": [
+    "test002",
+    "test001"
+  ],
+  "skills": [
+    "raw-material-inventory"
+  ],
   "ontologies": [
     "生产调度/原材料采购和库存"
   ],
@@ -66,5 +82,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-04T02:16:54.902Z"
+  "updated_at": "2026-11-04T14:09:52.698Z"
 }

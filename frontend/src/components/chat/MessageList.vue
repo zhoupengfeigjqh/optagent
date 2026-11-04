@@ -19,10 +19,10 @@
 import { computed, nextTick, ref, watch } from 'vue'
 
 import type {
-  AgentStarter,
   ErrorInfo,
   FileReference,
   Message,
+  NextStepAction,
   ThreadSource,
   ToolCallResult,
 } from '../../api/types'
@@ -127,8 +127,8 @@ const emit = defineEmits<{
   'open-file': [reference: FileReference]
   /** 跳转入口点击（`viewUrl` / `filePath` 归一化后；打开方式由装配层按 `kind` 判定） */
   'open-view': [item: ViewLinkTarget]
-  /** 下一步动作卡片点选（007，向上透传；确认与发送由 ChatPanel 执行） */
-  'send-suggestion': [action: AgentStarter]
+  /** 下一步动作卡片点选（007/016，向上透传；确认与发送由 ChatPanel 执行） */
+  'send-suggestion': [action: NextStepAction]
 }>()
 
 const listRef = ref<HTMLElement | null>(null)

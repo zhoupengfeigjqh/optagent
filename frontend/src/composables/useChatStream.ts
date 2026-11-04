@@ -26,6 +26,7 @@ import type {
   FileReference,
   InteractionSnapshot,
   StreamEvent,
+  ToolTip,
   Usage,
 } from '../api/types'
 import { RUN_PHASE, type RunPhase } from '../constants/events'
@@ -178,7 +179,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     attachments: FileReference[]
     /** 本轮隐藏指引（004：问题实例关联工具引导）；只进本轮系统提示词，不落盘 */
     guidance?: string
-    /** 013：本轮跳过意图聚焦（预置动作入口）；只影响本次判定，不落历史 */
+    /** 016：卡片回传的隐藏工具提示（结构化）；只进本轮系统提示词，不落历史 */
+    toolTips?: ToolTip[]
+    /** 013：本轮跳过意图聚焦（仅首屏问题实例卡片）；只影响本次判定，不落历史 */
     skipIntentFocus?: boolean
   }): Promise<void> {
     // 进行中直接忽略，不重复发起（FR-006）
@@ -219,6 +222,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       model: deps.getModel(),
       attachments: payload.attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
+      ...(payload.toolTips && payload.toolTips.length > 0 ? { toolTips: payload.toolTips } : {}),
       ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
     })
 

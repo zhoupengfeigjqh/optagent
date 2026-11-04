@@ -1,0 +1,2 @@
+{"role":"user","content":"查询高强度钢板供应商","id":"m_mw20t3q5_9xrq","ts":"2026-11-04T11:15:35.069Z","agent_name":"生产调度测试"}
+{"id":"m_mw20t1ux_1ulv","role":"assistant","content":"I'll query the supplier information for 高强度钢板.已查到「高强度钢板」的供应商信息：\n\n| 供应商名称 | 地址 | 联系人 | 联系电话 |\n|---|---|---|---|\n| 宝钢钢铁集团 | 上海市宝山区宝钢路1号 | 张建国 | 13800131001 |\n\n如需进一步查询该供应商的供货能力，或为其创建采购单，请告诉我。","ts":"2026-11-04T11:15:35.069Z","status":"completed","usage":{"input_tokens":6140,"output_tokens":143},"duration_ms":2420,"agent_name":"生产调度测试"}

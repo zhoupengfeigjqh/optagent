@@ -141,7 +141,7 @@
 |---|---|---|
 | `header` | SkillHeader | 技能头部（记录时扁平化） |
 | `isOntology` | boolean | 是否本体技能 |
-| `matchedOntologyIds` | string[] | 匹配的本体 ID |
+| `ontologyId` | string \| null | 关联本体 id（一个本体技能恒只有一个本体；非本体 / 未匹配为 null） |
 | `score` | number \| null | 无效 / 未评分时为 null |
 | `selected` | boolean | 是否 `score > skillThreshold` |
 | `reason` | string \| null | `below_threshold` / `no_matching_ontology` / `not_scored` |
@@ -237,13 +237,9 @@ interface IntentFocusRecord {
   batches: number;
   truncated: boolean;
   skills: SkillFocusRecord[];
-  ontology_files: OntologyFileRecord[];
   behaviors: CapabilityFocusRecord[];
   functions: CapabilityFocusRecord[];
   data_supplements: DataSupplementRecord[];
-  selected_skills: string[];
-  selected_behaviors: string[];
-  selected_functions: string[];
   prompt: string;
   prompt_truncated: boolean;
   warnings: string[];           // 坏文件 / 无效技能 / 符号链接跳过等，不含用户可见错误
@@ -254,26 +250,17 @@ interface SkillFocusRecord {
   name: string;
   description: string;
   is_ontology: boolean;
-  ontology_id: string | null;
-  ontology_name: string | null;
-  matched_ontology_ids: string[];
+  ontology_id: string | null;   // 一个本体技能恒只有一个本体；非本体技能为 null
   score: number | null;
   selected: boolean;
   reason: string | null;
-}
-
-interface OntologyFileRecord {
-  path: string;
-  ontology_id: string;
-  ontology_name: string | null;
 }
 
 interface CapabilityFocusRecord {
   kind: 'behavior' | 'function';
   name: string;
   title: string;
-  ontology_id: string;        // 主来源（首次）
-  ontology_ids: string[];     // 全部来源（FR-035）
+  ontology_id: string;        // 归属本体（去重键的一部分）
   ontology_name: string | null;
   score: number | null;
   selected: boolean;
@@ -331,18 +318,9 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "description": "原材料采购和库存本体技能",
       "is_ontology": true,
       "ontology_id": "1",
-      "ontology_name": "原材料采购和库存",
-      "matched_ontology_ids": ["1"],
       "score": 0.91,
       "selected": true,
       "reason": null
-    }
-  ],
-  "ontology_files": [
-    {
-      "path": "ontology/生产调度/原材料采购和库存/ontology.yaml",
-      "ontology_id": "1",
-      "ontology_name": "原材料采购和库存"
     }
   ],
   "behaviors": [
@@ -351,7 +329,6 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "name": "CreatePurchaseRecord",
       "title": "创建原材料采购单",
       "ontology_id": "1",
-      "ontology_ids": ["1"],
       "ontology_name": "原材料采购和库存",
       "score": 0.88,
       "selected": true,
@@ -362,7 +339,6 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "name": "QueryPurchaseRecords",
       "title": "查询原材料采购单信息",
       "ontology_id": "1",
-      "ontology_ids": ["1"],
       "ontology_name": "原材料采购和库存",
       "score": null,
       "selected": true,
@@ -373,7 +349,6 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "name": "QueryRawMaterials",
       "title": "查询原材料基本信息",
       "ontology_id": "1",
-      "ontology_ids": ["1"],
       "ontology_name": "原材料采购和库存",
       "score": null,
       "selected": true,
@@ -386,7 +361,6 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "name": "checkRawMaterialUnit",
       "title": "校验采购原材料单位一致性",
       "ontology_id": "1",
-      "ontology_ids": ["1"],
       "ontology_name": "原材料采购和库存",
       "score": 0.71,
       "selected": true,
@@ -407,10 +381,7 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "found": true
     }
   ],
-  "selected_skills": ["raw-material-inventory-new"],
-  "selected_behaviors": ["CreatePurchaseRecord", "QueryPurchaseRecords", "QueryRawMaterials"],
-  "selected_functions": ["checkRawMaterialUnit"],
-  "prompt": "本轮可优先参考以下聚焦结果（仅供参考，不必局限）：技能：raw-material-inventory-new（原材料采购和库存本体技能）；本体能力：行为：创建原材料采购单（CreatePurchaseRecord），查询原材料采购单信息（QueryPurchaseRecords），查询原材料基本信息（QueryRawMaterials），函数：校验采购原材料单位一致性（checkRawMaterialUnit）",
+  "prompt": "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords）、查询原材料基本信息（QueryRawMaterials）；关联函数：校验采购原材料单位一致性（checkRawMaterialUnit））",
   "prompt_truncated": false,
   "warnings": [],
   "error": null
@@ -422,29 +393,37 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
 ### 6.1 产生式
 
 ```text
-prompt        = prefix, segment, { "；", segment }
-prefix        = "本轮可优先参考以下聚焦结果（仅供参考，不必局限）："
-segment       = skill_text | capability_text
-skill_text    = "技能：", skill_name, [ "（", description, "）" ]
-capability_text = "本体能力：", [ behavior_part ], [ function_part ]
-behavior_part = "行为：", entry, { "，", entry }
-function_part = "函数：", entry, { "，", entry }
+prompt        = prefix, "\n", item, { "\n", item }
+prefix        = "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）"
+item          = index, "）", item_body
+index         = "1" | "2" | ...            // 截断后重新连续编号
+item_body     = non_ontology_body | ontology_body
+non_ontology_body = skill_name, "（非本体技能）"
+ontology_body = skill_name, "（", "本体技能", "；", ontology_ref,
+                [ "；关联行为：", entry, { "、", entry } ],
+                [ "；关联函数：", entry, { "、", entry } ], "）"
+ontology_ref  = [ "ontology_name='", ontology_name, "'，"], "ontology_id='", ontology_id, "'"
 entry         = title, "（", name, "）"
 ```
 
 **约束**：
-- 单行；段间中文分号 `；`；条目中文逗号 `，`。
-- `description` 去换行、压缩空白，截断至 80 字；为空则省略括号。
-- `title` / `name` 保留原文；`title` 缺失时 `title = name`。
-- 非本体技能不产生 `capability_block`。
-- 本体技能无任何入选能力时不产生空 `本体能力：`。
+- 首行固定前缀；其后每个入选技能一行，行号从 `1` 连续编号（截断后重新编号）。
+- 片段内中文分号 `；`、条目中文 `、`；片段内换行压成空格，不产生额外行。
+- `description` 不进入提示（技能只出现 `name`）。
+- `title` / `name` 保留原文；`title` 缺失时 `title = name`；本体无 `ontology_name` 时只写 `ontology_id='X'`。
+- 关联本体写成一组显式字段：`ontology_name='…'，ontology_id='…'`。
+- **一个本体技能恒只有一个本体**（`SKILL.md` 的单个 `ontology_id`）：每行至多一组本体字段；同一 `ontology_id` 被物化成多份文件时只取首份，不重复输出。
+- 非本体技能不产生本体/能力部分。
+- 本体技能无任何入选能力时不产生空的 `关联行为：` / `关联函数：`。
 - 同一本体只出现一次能力块；归属分数最高的入选技能。
-- 总长 ≤ 1200 字符；超限先删能力条目、再删末尾技能段，保持完整条目。
+- 总长 ≤ 1200 字符；超限依次删末尾技能的函数条目 → 行为条目 → 整个末尾技能行，保持完整条目。
 
 ### 6.2 示例
 
 ```text
-本轮可优先参考以下聚焦结果（仅供参考，不必局限）：技能：raw-material-inventory-new（原材料采购和库存本体技能）；本体能力：行为：创建原材料采购单（CreatePurchaseRecord），查询原材料采购单信息（QueryPurchaseRecords），函数：校验采购原材料单位一致性（checkRawMaterialUnit），校验采购供应商存在性（checkSupplierExistence）
+本轮请优先聚焦以下技能或工具（仅供参考，不必局限）
+1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords）；关联函数：校验采购原材料单位一致性（checkRawMaterialUnit））
+2）plain-skill（非本体技能）
 ```
 
 ## 7. 规则与算法约束
@@ -470,11 +449,13 @@ normalizeId(v) = v == null ? null : String(v).trim() || null
 
 | 类别 | 键 | 合并 |
 |---|---|---|
-| 行为 | `behavior + name` | 最高分、`ontologyIds` 并集、`title` 首次、`source` 合并；直接 + 补充 → `direct+supplement` |
-| 函数 | `function + name` | 最高分、`ontologyIds` 并集、`title` 首次；函数类不含补充项 |
+| 行为 | `ontology_id + name` | 最高分、`title` 首次、`source` 合并；直接 + 补充 → `direct+supplement` |
+| 函数 | `ontology_id + name` | 最高分、`title` 首次；函数类不含补充项 |
 
-- 去重后名称在各自类别内唯一。
-- 跨本体同名视为同一项；`ontologyIds` 取并集，`ontologyId` 取首次出现（提示归属该本体的最高分技能）。
+- 去重后「本体 + 名称」在各自类别内唯一；**跨本体同名各自保留**（各自归属自己的本体）。
+- 去重分两处：**候选构造阶段**按 `kind + ontology_id + name` 先去重（同一题不重复送判定、不挤占 `max_capabilities`）；**选择阶段**再做一次来源合并（`direct+supplement`、分数取高）。
+- 不再保留来源本体集合（`ontology_ids` 已移除），`ontology_id` 恒为该项唯一归属。
+- 函数与行为使用同一去重逻辑（FR-035）。
 - 去重不改变 `selected`（合并后仍为 true）。
 - 去重后行为类总数 MUST ≤ 96（`FR-027`）；超限按本体原序截断补充项，`truncated = true`。
 

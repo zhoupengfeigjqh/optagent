@@ -70,8 +70,7 @@ function writeSoul(userId: string, agentName: string, frontmatter: string): void
 
 interface Action {
   prompt: string;
-  tools: Array<{ kind: string; name: string; service?: string; exposed_name: string }>;
-  guidance: string;
+  tool_tips: Array<{ name: string; title: string; ontology_id: string; ontology_name: string | null }>;
 }
 
 /** 按落盘格式写一份快照 */
@@ -102,13 +101,14 @@ function get(threadId: string) {
 const ONE_ACTION = [
   {
     prompt: '按交付日期梳理这批订单的风险',
-    tools: [{ kind: 'mcp', service: 'erp', name: 'query_order' }],
-    guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
+    tool_tips: [
+      { name: 'QueryPurchaseRecords', title: '查询采购订单信息', ontology_id: '1', ontology_name: '采购管理' },
+    ],
   },
 ];
 
 describe('GET /api/threads/:id/next-actions', () => {
-  it('命中：200 + message_id + actions（tools 带 exposed_name，guidance 始终出现）', async () => {
+  it('命中：200 + message_id + actions（tool_tips 原样下发）', async () => {
     const thread = ctx().threadStore.create('admin', 'demo');
     writeSoul('admin', 'demo', 'next_action_hints: true');
     writeSnapshot('admin', thread.threadId, 'demo', ONE_ACTION);
@@ -122,8 +122,8 @@ describe('GET /api/threads/:id/next-actions', () => {
     expect(body.message_id).toBe('m-1');
     expect(body.actions).toHaveLength(1);
     expect(body.actions[0]!.prompt).toBe('按交付日期梳理这批订单的风险');
-    expect(body.actions[0]!.tools[0]!.exposed_name).toBe('erp__query_order');
-    expect(body.actions[0]!.guidance).toContain('erp__query_order');
+    expect(body.actions[0]!.tool_tips[0]!.name).toBe('QueryPurchaseRecords');
+    expect(body.actions[0]!.tool_tips[0]!.ontology_name).toBe('采购管理');
   });
 
   it('009：会话不属于当前选中数字人 → 404（跨数字人不可达，与"不存在"不可区分）', async () => {

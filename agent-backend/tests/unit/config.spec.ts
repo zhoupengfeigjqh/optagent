@@ -138,7 +138,7 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect('intentFocus' in config).toBe(false);
   });
 
-  it('可省略项走缺省：model / timeout_ms / threshold', () => {
+  it('可省略项走缺省：model / timeout_ms / threshold / ontology_threshold / 上限', () => {
     const config = loadConfig({ env: okEnv, configPath: writeConfig(minimal) });
 
     expect(config.intentFocus).toEqual({
@@ -146,8 +146,30 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       model: 'laya-multilingual',
       apiKey: 'laya-dev-key',
       timeoutMs: 10000,
-      threshold: 0.6,
+      threshold: 0.8,
+      ontologyThreshold: 0.8,
+      maxSkills: 32,
+      maxCapabilities: 96,
     });
+  });
+
+  it('016：能力阈值与候选上限可配置，环境变量优先于 YAML', () => {
+    const config = loadConfig({
+      env: { ...okEnv, INTENT_FOCUS_ONTOLOGY_THRESHOLD: '0.72' },
+      configPath: writeConfig(
+        `${minimal}  ontology_threshold: 0.65\n  max_skills: 16\n  max_capabilities: 48\n`,
+      ),
+    });
+
+    expect(config.intentFocus?.ontologyThreshold).toBe(0.72);
+    expect(config.intentFocus?.maxSkills).toBe(16);
+    expect(config.intentFocus?.maxCapabilities).toBe(48);
+  });
+
+  it('016：能力阈值越界 / 上限非整数时拒绝启动', () => {
+    expect(messageOf(`${minimal}  ontology_threshold: 1.5\n`)).toContain('intent_focus.ontology_threshold');
+    expect(messageOf(`${minimal}  max_skills: 0\n`)).toContain('intent_focus.max_skills');
+    expect(messageOf(`${minimal}  max_capabilities: 2.5\n`)).toContain('intent_focus.max_capabilities');
   });
 
   it('各项全配时逐项生效，且对象被冻结（装配后不得改）', () => {

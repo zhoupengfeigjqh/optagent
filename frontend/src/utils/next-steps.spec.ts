@@ -1,19 +1,26 @@
 /**
- * 单元测试：下一步动作提示的纯函数与常量（007 修订）。
+ * 单元测试：下一步动作提示的纯函数与常量（007 修订 + 016）。
  *
  * 断言各自钉住一件容易"顺手改坏"的事：
  * 1. 固定引导句逐字固定（界面渲染，不随模型输出变化）；
  * 2. 卡片**只属于**快照归属的那条消息（历史轮不展示，切换会话不残留）；
- * 3. 点击后的载荷与首屏问题实例**同款**（正文干净、引导走隐藏通道）。
- * （修订前的拉取窗口时刻表已废除——卡片随 `done` 直推，无时刻表可测。）
+ * 3. 点击后的载荷：正文只有 `prompt`，`tool_tips` 走结构化字段，
+ *    **不再跳过意图聚焦**（016 口径）。
  */
 import { describe, expect, it } from 'vitest'
-import type { AgentStarter } from '../api/types'
+import type { NextStepAction, ToolTip } from '../api/types'
 import type { ThreadNextSteps } from '../api/threads'
 import { NEXT_STEPS_GUIDE_TEXT, nextStepSendPayload, visibleActions } from './next-steps'
 
-function action(overrides: Partial<AgentStarter> = {}): AgentStarter {
-  return { prompt: '按交付日期梳理这批订单的风险', tools: [], guidance: '', ...overrides }
+const TIP: ToolTip = {
+  name: 'QueryPurchaseRecords',
+  title: '查询采购订单信息',
+  ontology_id: '1',
+  ontology_name: '采购管理',
+}
+
+function action(overrides: Partial<NextStepAction> = {}): NextStepAction {
+  return { prompt: '按交付日期梳理这批订单的风险', tool_tips: [TIP], ...overrides }
 }
 
 function steps(overrides: Partial<ThreadNextSteps> = {}): ThreadNextSteps {
@@ -38,27 +45,23 @@ describe('visibleActions', () => {
 })
 
 describe('nextStepSendPayload', () => {
-  it('正文只有提示词、引用为空、引导原样回传（与问题实例同款）', () => {
-    expect(
-      nextStepSendPayload(action({ guidance: '本轮请优先使用以下工具完成任务：read_file' })),
-    ).toEqual({
+  it('正文只有提示词、引用为空、tool_tips 原样回传（结构化通道）', () => {
+    expect(nextStepSendPayload(action())).toEqual({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
-      guidance: '本轮请优先使用以下工具完成任务：read_file',
-      skipIntentFocus: true,
+      toolTips: [TIP],
     })
   })
 
-  it('无引导时不带 `guidance` 键（后端 Schema 为 additionalProperties:false）', () => {
-    expect(nextStepSendPayload(action({ guidance: '' }))).toEqual({
+  it('无 tool_tips 时不带该键（后端 Schema 为 additionalProperties:false）', () => {
+    expect(nextStepSendPayload(action({ tool_tips: [] }))).toEqual({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
-      skipIntentFocus: true,
     })
-    expect('guidance' in nextStepSendPayload(action())).toBe(false)
+    expect('toolTips' in nextStepSendPayload(action({ tool_tips: [] }))).toBe(false)
   })
 
-  it('013：卡片发送一律跳过意图聚焦（FR-008/FR-044）', () => {
-    expect(nextStepSendPayload(action()).skipIntentFocus).toBe(true)
+  it('016：卡片点击**不再**跳过意图聚焦', () => {
+    expect('skipIntentFocus' in nextStepSendPayload(action())).toBe(false)
   })
 })

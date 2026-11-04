@@ -9,6 +9,8 @@
  */
 import type { HistoryMessage, RunRuntime } from '../types.js';
 import { formatCurrentTime, toSeconds } from './message-format.js';
+import { renderToolTipsInstruction } from './next-actions.js';
+import type { FocusToolTip } from './ontology-focus/types.js';
 import { buildPromptMessages } from './prompt-builder.js';
 import type { FinalizeTurn, RunFinalizer } from './run-finalize.js';
 import type { RunImpl } from './run-impl.js';
@@ -84,41 +86,19 @@ export async function consumeTurn(
    */
   const intentFocus = ctx.deps.intentFocus;
   /**
-   * 013 加固：`guidance`（问题实例卡片 / 下一步动作卡片自带的工具引导）非空白时，
-   * 本轮**必然**跳过聚焦——两套工具建议不该共存（聚焦提示在 systemExtra 里位置更靠后、
-   * 权重更大，会把卡片指定的工具挤掉，症状是"点了卡片却用了别的工具"，且无任何报错）。
+   * 013/016：是否跳过本轮意图聚焦。
    *
    * 归一放在域层而不是路由：任何调用方（直接 `startRun` 的内部调用、测试、将来新增的入口）
    * 都受同一约束，不依赖"前端记得带 skip_intent_focus"。
+   *
+   * 两条跳过来源：
+   * - 显式标记 `skip_intent_focus`（首屏问题实例卡片携带）；
+   * - `guidance` 非空白（首屏问题实例关联工具引导，与聚焦提示不共存）。
+   *
+   * 2026-11 修订：**下一步动作卡片点击不跳过**——它走结构化的 `tool_tips` 字段而非
+   * `guidance`，聚焦在本轮照常重判（`tool_tips` 段与聚焦提示同轮共存）。
    */
   const skipFocus = opts.skipIntentFocus === true || (opts.guidance ?? '').trim() !== '';
-  const focusJudge = intentFocus
-    ? async (tools: ReadonlyArray<{ name: string; description: string }>): Promise<string> => {
-        try {
-          return await intentFocus.judge({
-            userId,
-            agentName: agent.key.agentName,
-            threadId,
-            messageId: run.assistantMessageId,
-            userInput: opts.userMessage,
-            skip: skipFocus,
-            tools,
-          });
-        } catch (err) {
-          ctx.deps.logger?.warn(
-            {
-              event: 'intent-focus.failed',
-              alert: true,
-              reason: 'judge_threw',
-              thread_id: threadId,
-              agent_name: agent.key.agentName,
-            },
-            `意图聚焦判定异常，本轮按不聚焦处理：${(err as Error).message}`,
-          );
-          return '';
-        }
-      }
-    : undefined;
   /**
    * 本轮结局：供收尾日志使用（任务 2026-09-16）。
    *
@@ -168,17 +148,71 @@ export async function consumeTurn(
       });
       return;
     }
+    /**
+     * 016：聚焦提示在本轮 prompt 组装成功之后、模型调用之前铸造，追加到 `systemExtra` 末尾。
+     *
+     * 放在这里而不是 `agent-factory`：提示只与"本轮输入 + 本地技能 / 本体文件"有关，
+     * 与工具装配无关；提前到装配期会让入口卡片也去扫目录。任何异常都在此收敛为空串
+     * ——判定失败绝不改变本轮响应（FR-054）。
+     */
+    let systemExtra = prompt.systemExtra;
+    /**
+     * 本轮聚焦结果：`prompt` 进系统提示词，`toolTips` 交给两处——
+     * 尾部块指令的候选目录（`focusToolTips`）与轮末卡片定稿（`turn.focusToolTips`）。
+     */
+    let focusToolTips: readonly FocusToolTip[] = [];
+    if (intentFocus) {
+      try {
+        const focus = await intentFocus.judge({
+          userId,
+          agentName: agent.key.agentName,
+          threadId,
+          messageId: run.assistantMessageId,
+          userInput: opts.userMessage,
+          skip: skipFocus,
+        });
+        focusToolTips = focus.toolTips;
+        if (focus.prompt !== '') {
+          systemExtra = systemExtra ? `${systemExtra}\n\n${focus.prompt}` : focus.prompt;
+        }
+      } catch (err) {
+        ctx.deps.logger?.warn(
+          {
+            event: 'intent-focus.degraded',
+            alert: true,
+            stage: 'judge',
+            reason: 'judge_threw',
+            thread_id: threadId,
+            agent_name: agent.key.agentName,
+          },
+          `意图聚焦判定异常，本轮按不聚焦处理：${(err as Error).message}`,
+        );
+      }
+    }
+    /**
+     * 卡片点击轮：`tool_tips` 走**结构化请求字段**，在这里渲染成本轮指令。
+     *
+     * 只进系统提示词、不进历史（`history.jsonl` 的 user 行只有卡片 `prompt` 原文），
+     * 且刻意排在聚焦提示**之后**——用户点了这张卡，卡片指定的能力应权重更高。
+     */
+    const toolTipsText = renderToolTipsInstruction(opts.toolTips ?? []);
+    if (toolTipsText !== '') {
+      systemExtra = systemExtra ? `${systemExtra}\n\n${toolTipsText}` : toolTipsText;
+    }
+    // 轮末定稿卡片需要它（空 = 本轮不产卡片）
+    turn.focusToolTips = focusToolTips;
+
     for await (const ev of agent.run({
       threadId,
       messages: prompt.messages,
-      ...(prompt.systemExtra ? { systemExtra: prompt.systemExtra } : {}),
+      ...(systemExtra ? { systemExtra } : {}),
       thinking,
       ...(opts.model ? { model: opts.model } : {}),
       signal: run.controller.signal,
       interactionSink: run.gate,
       runtime,
       ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
-      ...(focusJudge ? { focusJudge } : {}),
+      ...(focusToolTips.length > 0 ? { focusToolTips } : {}),
     })) {
       switch (ev.type) {
         case 'thinking_delta':

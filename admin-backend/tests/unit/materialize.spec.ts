@@ -345,9 +345,12 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
   });
 
   it('007：下一步动作提示开关**只影响 SOUL.md 的两行 frontmatter**（开关 + 条数），正文与其余三件套逐字一致', () => {
-    const off = buildAgentArtifact(design(), { mcpConfigs, skills, ontologies });
+    const off = buildAgentArtifact(
+      design({ soul: soulDesign('你是助手\n第二行', { intent_focus: true }) }),
+      { mcpConfigs, skills, ontologies },
+    );
     const on = buildAgentArtifact(
-      design({ soul: soulDesign('你是助手\n第二行', { next_action_hints: true }) }),
+      design({ soul: soulDesign('你是助手\n第二行', { intent_focus: true, next_action_hints: true }) }),
       { mcpConfigs, skills, ontologies },
     );
 

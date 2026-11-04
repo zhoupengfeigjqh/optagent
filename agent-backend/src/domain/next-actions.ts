@@ -8,38 +8,43 @@
  *
  * 保留的三块职责：
  *
- * 1. **纯函数合规层**（TR-02）：解析、逐条校验、工具引用裁剪——与旧版逐字同口径；
+ * 1. **纯函数合规层**（TR-02）：解析、`prompt` 合规判定、条数裁剪；
  * 2. **快照存储**：会话级单份 `next-actions.json`，轮开始 `clear`、轮末覆盖写（FR-015/017/018）；
  *    只保留最新一轮 = 历史轮次天然不保留（不落盘历史卡片）；
- * 3. **尾部指令装配**：SOUL 开关开启时追加到 System Prompt 末尾的协议指令
- *    （含条数上限与工具目录），是"模型到底被要求怎么输出"的唯一事实源。
+ * 3. **尾部指令装配**：SOUL 开关开启且本轮有 Laya 能力时追加到 System Prompt 末尾的协议指令
+ *    （含条数上限与**能力目录**），是"模型到底被要求怎么输出"的唯一事实源。
  *
  * 读取路径**不在读取侧再判数字人**（修订 G4）：卡片的存在与否只由轮末是否产出快照决定，
  * 读取侧不按"归属数字人 = 当前选中数字人"过滤（那会造成"切换后卡片消失"）。
- * **009 修订**：不再需要在读取侧判定的真正原因是**归属已由路径承载**——
- * 快照落在 `user-data/{数字人}/threads/{tid}/`，跨数字人在路径层就取不到；
- * 因此数字人只作为**路径入参**贯穿（`filePath(uid, agent, threadId)`），不是过滤条件。
+ * **009 修订**：归属已由路径承载——快照落在 `user-data/{数字人}/threads/{tid}/`，
+ * 数字人只作为**路径入参**贯穿（`filePath(uid, agent, threadId)`），不是过滤条件。
  *
- * 2026-10-14 修订（契约 §6：卡片**强制绑定工具**）：白名单裁剪后无有效工具引用的条目
- * **整条丢弃**（`sanitizeActionsWithStats`），引导文案改由 `buildActionGuidance` 铸造
- * （指明要调用的工具 + 用途摘要，超 500 字**截断**而非置空）。无工具绑定的建议会退化成
- * 开放式闲聊指令，故不再下发。
+ * **2026-11 修订（016：能力驱动的 tool_tips）**：
+ * - 候选范围只来自本轮意图聚焦选出的本体行为 / 函数（`focusToolTips`），
+ *   无能力 → 不追加指令 → 本轮不产卡片；
+ * - 卡片形状改为 `{ prompt, tool_tips: [{ name, title, ontology_id, ontology_name }] }`，
+ *   `tool_tips` 由模型从能力目录抄写，后端**不做校验**：只读取字段、只截断到 5 条；
+ * - `prompt` 收紧为祈使句 + 单一任务 + 信息明确，否则整条丢弃；
+ * - 点击卡片时 `tool_tips` 走请求级结构化字段（只进本轮系统提示词，**不落历史**），
+ *   本轮仍照常触发意图聚焦。
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RuntimeToolBrief } from '../types.js';
 import { threadDir } from './dirs.js';
 import { removeFileSafe } from './fs-safe.js';
-import {
-  buildActionGuidance,
-  NEXT_ACTION_HINTS_DEFAULT,
-  parseExposedName,
-  toolExposedName,
-  type SoulToolRef,
-} from './soul.js';
+import type { FocusToolTip } from './ontology-focus/types.js';
+import { NEXT_ACTION_HINTS_DEFAULT } from './soul.js';
 
 /** 卡片提示词长度上限（FR-003） */
 export const PROMPT_MAX_CHARS = 50;
+
+/**
+ * 单张卡片的 `tool_tips` 条数上限。
+ *
+ * 这是**唯一**对 `tool_tips` 施加的处理：超出直接截断，不检查来源、不比对运行时工具、
+ * 不改写字段值、不因字段缺失丢条目。
+ */
+export const MAX_TOOL_TIPS_PER_ACTION = 5;
 /**
  * 单轮卡片条数上限（FR-004）。
  *
@@ -52,15 +57,20 @@ const SNAPSHOT_MAX_BYTES = 64 * 1024;
 /* 隐藏引导的长度上限（`GUIDANCE_MAX_CHARS`）随文案铸造一起落在 `soul.ts`：
    `buildActionGuidance` 生成时即按上限**截断**（MUST NOT 置空），本模块不再自行判长。 */
 
-/** 一条下一步动作提示（内部形态；下发时补 `exposed_name`） */
+/** 一条下一步动作提示（卡片形态：快照与下发同形） */
 export interface NextAction {
-  prompt: string;
-  tools: SoulToolRef[];
   /**
-   * 隐藏工具引导：点击卡片发送时随请求回传，**对用户不可见**、不落历史。
-   * **始终存在**（无关联工具或超 500 字时为空串），与 `AgentStarterView.guidance` 逐字同形。
+   * 卡片正文：祈使句、一次只描述一个任务、信息明确。
+   * 点击后作为**下一轮用户消息原文**落盘（历史里只有它）。
    */
-  guidance: string;
+  prompt: string;
+  /**
+   * 隐藏的工具提示：点击卡片时随结构化字段回传，只进下一轮系统提示词。
+   *
+   * **不落历史**：`history.jsonl` 的 user 行只有 `prompt`，看不到这里的内容。
+   * 字段值由模型从本轮本体能力清单抄写，后端原样透传（仅截断到 5 条）。
+   */
+  tool_tips: FocusToolTip[];
 }
 
 /** 会话级单份快照（`users/{uid}/user-data/{数字人}/threads/{tid}/next-actions.json`，009 归属） */
@@ -76,11 +86,7 @@ export interface NextActionsSnapshot {
 /** 下发形态（契约见 `specs/007-next-action-hints/contracts/next-actions-api.md` §1.2） */
 export interface NextActionsView {
   message_id: string;
-  actions: Array<{
-    prompt: string;
-    tools: Array<{ kind: 'builtin' | 'mcp'; name: string; service?: string; exposed_name: string }>;
-    guidance: string;
-  }>;
+  actions: NextAction[];
 }
 
 /** 轮末同步定稿的输入（由 `run-finalize` 从本轮 run 的事实装配） */
@@ -92,8 +98,13 @@ export interface NextActionsFinalizeInput {
   agentName: string;
   /** 回答流中捕获的尾部块原文（不含哨兵标签；空串 = 本轮无块 → 无卡片） */
   tailText: string;
-  /** 本轮可用工具摘要（`runWith` 装配期回填，引用裁剪据此判定） */
-  availableTools: readonly RuntimeToolBrief[];
+  /**
+   * 本轮 Laya 入选的本体能力（卡片候选范围的唯一来源）。
+   *
+   * 只用于**卡片是否允许产出**（空 = 不产卡片，调用方已拦）与 `prompt` 合规判定，
+   * 不参与 `tool_tips` 的任何校验——后者是模型输出，原样透传。
+   */
+  focusToolTips: readonly FocusToolTip[];
   /** 条数上限（与提示词装配同源的 SOUL 配置） */
   max: number;
 }
@@ -141,32 +152,33 @@ export class NextActionsStore {
       }
       return undefined;
     }
-    const { actions, stats } = sanitizeActionsWithStats(raw, input.availableTools, input.max);
+    // `tool_tips` 不做校验：这里只按 `prompt` 合规性与条数上限筛选
+    const { actions, stats } = sanitizeActionsWithStats(raw, input.focusToolTips, input.max);
     if (actions.length === 0) {
-      // 归因（原则九）：卡片变少必须看得出是"模型没给工具"还是"工具名越界被裁空"
+      // 归因（原则九）：卡片变少必须看得出是"prompt 不合规"还是"超条数上限"
       this.warn(
         input.userId,
         input.threadId,
         `下一步动作提示尾部块条目全部被丢弃（msg=${input.messageId}，候选 ${raw.length} 条；` +
-          `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope} / 其它 ${stats.droppedOther}；` +
+          `prompt 不合规 ${stats.droppedOther} / 超上限 ${stats.droppedOverLimit}；` +
           `原文节选：${excerptOf(text)}）`,
         input.agentName,
       );
       return undefined;
     }
-    if (stats.droppedNoTools + stats.droppedToolsOutOfScope > 0) {
-      // 部分条目因"未绑定可用工具"被丢（FR-009）：其余卡片照常下发，但必须留痕，
-      // 否则"这一轮怎么少了两张卡"无从解释。稳定后可评估降为 info 级。
+    if (stats.droppedOther > 0) {
+      // 部分条目因 prompt 不合规被丢：其余卡片照常下发，但必须留痕，
+      // 否则"这一轮怎么少了两张卡"无从解释。
       this.warn(
         input.userId,
         input.threadId,
-        `下一步动作提示部分条目未绑定可用工具被丢弃（msg=${input.messageId}；` +
-          `无工具 ${stats.droppedNoTools} / 引用越界 ${stats.droppedToolsOutOfScope}；保留 ${actions.length} 条）`,
+        `下一步动作提示部分条目 prompt 不合规被丢弃（msg=${input.messageId}；` +
+          `不合规 ${stats.droppedOther} / 超上限 ${stats.droppedOverLimit}；保留 ${actions.length} 条）`,
         input.agentName,
       );
     }
     if (!this.writeSnapshot(input, actions)) return undefined;
-    return { message_id: input.messageId, actions: actions.map(toView) };
+    return { message_id: input.messageId, actions };
   }
 
   /**
@@ -182,7 +194,7 @@ export class NextActionsStore {
     if (!snapshot) return undefined;
     return {
       message_id: snapshot.message_id,
-      actions: snapshot.actions.map(toView),
+      actions: snapshot.actions,
     };
   }
 
@@ -283,50 +295,74 @@ export class NextActionsStore {
 /**
  * 尾部块指令（SOUL 开关开启时追加到 System Prompt 末尾，`agent-factory` 调用）。
  *
- * 工具目录取**本轮真实装配的工具清单**（`runWith` 在工具装配完成后调用），
- * 与引用裁剪的判据同源——模型只能引用它真正看得到的工具。
+ * 候选目录取**本轮意图聚焦选出的本体能力**（行为 + 函数）：卡片的 `tool_tips`
+ * 只能从这份清单里抄写。清单为空时不追加指令（见 `effectiveNextActionsMax`）。
  */
 /**
- * 本轮**生效**的提示条数上限：SOUL 开关开启（`max !== undefined`）**且**本轮有可用工具时才生效。
+ * 本轮**生效**的提示条数上限：SOUL 开关开启（`max !== undefined`）**且**本轮有 Laya 能力时才生效。
  *
- * 后半条是 2026-10-14 修订的前提（FR-009）：卡片必须绑定工具，本轮没有工具就必然产不出卡片，
- * 这时仍追加收尾指令只会白耗 token，并让轮末每次都按"条目全部被丢弃"告警 ⇒ 等价于该轮关闭。
- * 返回值即"是否追加指令"的判据（`undefined` = 不追加），避免调用方用非空断言。
+ * 后半条是本次修订的前提：卡片候选范围只来自意图聚焦，没有能力就必然产不出卡片，
+ * 这时仍追加收尾指令只会白耗 token。返回值即"是否追加指令"的判据（`undefined` = 不追加）。
  */
 export function effectiveNextActionsMax(
   max: number | undefined,
-  availableTools: readonly unknown[],
+  focusToolTips: readonly unknown[],
 ): number | undefined {
-  return max !== undefined && availableTools.length > 0 ? max : undefined;
+  return max !== undefined && focusToolTips.length > 0 ? max : undefined;
 }
 
 export function buildTailInstruction(
-  availableTools: readonly RuntimeToolBrief[],
+  focusToolTips: readonly FocusToolTip[],
   max: number,
 ): string {
   const catalog =
-    availableTools.length === 0
-      ? '（本数字人当前没有可用工具——没有工具就**不要输出任何建议**，直接输出 {"actions":[]}）'
-      : availableTools.map((t) => `- ${t.name}：${t.description || '无说明'}`).join('\n');
+    focusToolTips.length === 0
+      ? '（本轮没有可提示的本体能力——不要输出任何建议，直接输出 {"actions":[]}）'
+      : focusToolTips.map(renderCatalogLine).join('\n');
   return [
     '## 回答收尾要求：下一步动作建议',
     '',
     '在回答正文全部结束后，**另起一行**输出一个收尾块（这是给系统的结构化数据，不是回答内容）：',
     '',
-    '<next_actions>{"actions":[{"prompt":"用一句中文说明用户接下来要做什么","tools":[{"kind":"builtin","name":"工具名"}]}]}</next_actions>',
+    '<next_actions>{"actions":[{"prompt":"查询高强度钢板的采购单记录","tool_tips":[{"name":"QueryPurchaseRecords","title":"查询采购订单信息","ontology_id":"1","ontology_name":"采购管理"}]}]}</next_actions>',
     '',
     '硬性要求：',
     '1. 收尾块只输出一次，必须在整条回答的**最末尾**，块前后不要加 ``` 等代码围栏；',
-    '2. `prompt` 必须是**全中文**、意图清晰简洁、**不超过 50 字**；',
-    '   严禁出现工具名、英文单词、下划线或驼峰式标识符；',
-    '3. **每条建议都必须绑定工具**：`tools` 为 1~2 个元素（不允许空数组），',
-    '   元素只能取自下方清单，且**只能出现在 `tools` 里**',
-    `4. 数量 0~${max} 个：用户目标已达成、只是闲聊、或没有能关联工具的下一步时，`,
-    '   输出 {"actions":[]}，不要硬凑；',
-    '5. 关键要求：操作建议只能为**陈述句**，且最多只能描述一个动作或对象，并且与用户目标密切相关。例如：调用查询工具查询计算结果；',
+    '2. `prompt` 必须是**祈使句**：以动词开头（查询 / 统计 / 导出 / 对比 / 生成 …），',
+    '   **一次只描述一个任务**，不超过 50 字；',
+    '   不得使用"你可以…""建议…""是否需要…""如果…"等陈述、疑问或条件句式；',
+    '3. `prompt` 里的对象、范围、时间必须是**本轮对话中已明确、已知的事实**，',
+    '   不得使用"这个""那些""相关数据""等信息"之类的指代或占位表述，不得自行假设；',
+    '4. `tool_tips` 是 1~5 个元素，每个元素只能从下方清单**原样抄写**四个字段，',
+    '   不得改写、不得编造；`name` 只能出现在 `tool_tips` 里，不得出现在 `prompt` 中；',
+    `5. 数量 0~${max} 个，**宁缺毋滥**：用户目标已达成、只是闲聊、任务不明确、`,
+    '   或缺少关键信息（对象 / 范围 / 时间任一不明）时，输出 {"actions":[]}，不要硬凑；',
     '',
-    '本数字人当前可调用的工具（`tools` 只能取自这里）：',
+    '本轮可选的本体能力（`tool_tips` 只能取自这里）：',
     catalog,
+  ].join('\n');
+}
+
+/** 目录行：四个字段一次给全，模型照抄即可（不做任何裁剪） */
+function renderCatalogLine(tip: FocusToolTip): string {
+  const parts = [`name=${tip.name}`, `title=${tip.title}`, `ontology_id=${tip.ontology_id}`];
+  if (tip.ontology_name) parts.push(`ontology_name=${tip.ontology_name}`);
+  return `- ${parts.join('｜')}`;
+}
+
+/**
+ * 卡片点击轮的隐藏工具提示段（追加到本轮 `systemExtra`）。
+ *
+ * 与 `guidance` 的区别：这里只有结构化字段，渲染在**聚焦提示之后**（卡片指定的能力
+ * 权重更高）；由于走请求级注入，`tool_tips` 不会出现在 `history.jsonl` 的 user 行里。
+ */
+export function renderToolTipsInstruction(toolTips: readonly FocusToolTip[]): string {
+  if (toolTips.length === 0) return '';
+  const lines = toolTips.map(renderCatalogLine);
+  return [
+    '本轮请优先使用以下本体能力完成用户消息要求的任务（来自上一轮卡片）：',
+    ...lines,
+    '请按用户消息与已知上下文补全参数；不要改用其它能力。',
   ].join('\n');
 }
 
@@ -377,11 +413,7 @@ function excerptOf(raw: string, max = 200): string {
 
 /** 丢弃原因统计（宪章原则九：卡片变少 MUST 可归因，MUST NOT 静默） */
 export interface SanitizeStats {
-  /** 模型**压根没给**工具 → 整条丢弃的条数（FR-009） */
-  droppedNoTools: number;
-  /** 模型**给过**工具、但引用全部越界或形态非法（被白名单裁空）→ 整条丢弃的条数（FR-009） */
-  droppedToolsOutOfScope: number;
-  /** 其它原因：提示词不合规 / 重复 / 条目类型错（FR-003 / FR-043） */
+  /** prompt 不合规：空 / 超长 / 含工具标识符 / 疑问句或指代句式 / 重复（FR-003） */
   droppedOther: number;
   /** 合规但因条数上限未收录（FR-004） */
   droppedOverLimit: number;
@@ -394,52 +426,38 @@ export interface SanitizeResult {
 }
 
 /**
- * 逐条校验并裁剪（FR-003/FR-004/FR-009/FR-043）：不合规条目只丢自己，条数超限取前 N 条。
+ * 逐条校验并裁剪（FR-003/FR-004/FR-043）：不合规条目只丢自己，条数超限取前 N 条。
  *
- * **2026-10-14 修订（卡片强制绑定工具）**：白名单裁剪**之后**若已无有效工具引用，
- * **整条丢弃**——不再沿用旧口径"只丢引用、保留卡片文本"（无工具绑定的建议会退化成
- * 开放式闲聊指令）。判据顺序是"先裁剪、再判空"，所以模型把工具名写错同样会整条消失，
- * 这是有意的；两种情况分别计入 `stats`，供定稿告警区分。
+ * **`tool_tips` 不做任何校验**：只有两处处理——读取（读不到的字段留空，条目照留）
+ * 与条数截断（`MAX_TOOL_TIPS_PER_ACTION`）。不比对运行时工具、不检查名字是否在目录里、
+ * 不去重、不改写。卡片是否产出由调用方按 `focusToolTips` 非空先行门控。
  */
 export function sanitizeActionsWithStats(
   raw: readonly unknown[],
-  availableTools: readonly RuntimeToolBrief[],
+  focusToolTips: readonly FocusToolTip[],
   max: number = MAX_ACTIONS,
 ): SanitizeResult {
-  const allowed = new Set(availableTools.map((t) => t.name));
+  // 仅用于"prompt 里不许出现工具名"的判定（prompt 合规，不是 tool_tips 校验）
+  const toolNames = new Set(focusToolTips.map((tip) => tip.name));
   const out: NextAction[] = [];
   const seen = new Set<string>();
-  const stats: SanitizeStats = {
-    droppedNoTools: 0,
-    droppedToolsOutOfScope: 0,
-    droppedOther: 0,
-    droppedOverLimit: 0,
-  };
+  const stats: SanitizeStats = { droppedOther: 0, droppedOverLimit: 0 };
   for (const item of raw) {
-    if (out.length >= max) {
-      stats.droppedOverLimit++;
-      continue;
-    }
     if (!isRecord(item)) {
       stats.droppedOther++;
       continue;
     }
     const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
-    if (!isCompliantPrompt(prompt, allowed) || seen.has(prompt)) {
+    if (!isCompliantPrompt(prompt, toolNames) || seen.has(prompt)) {
       stats.droppedOther++;
       continue;
     }
-    // `declared` 用于区分"压根没给"与"给了但全被裁掉"：两者都整条丢弃，但归因不同
-    const declared = Array.isArray(item.tools) ? item.tools : [];
-    const tools = filterTools(declared, allowed);
-    if (tools.length === 0) {
-      if (declared.length === 0) stats.droppedNoTools++;
-      else stats.droppedToolsOutOfScope++;
+    seen.add(prompt);
+    if (out.length >= max) {
+      stats.droppedOverLimit++;
       continue;
     }
-    seen.add(prompt);
-    // 引导在铸造处即截断到上限内（超长截断、MUST NOT 置空，否则"绑定"会在下一轮静默失效）
-    out.push({ prompt, tools, guidance: buildActionGuidance(tools, availableTools) });
+    out.push({ prompt, tool_tips: readToolTips(item.tool_tips) });
   }
   return { actions: out, stats };
 }
@@ -447,10 +465,10 @@ export function sanitizeActionsWithStats(
 /** 只要保留条目（既有调用口径）；需要丢弃归因时用 `sanitizeActionsWithStats` */
 export function sanitizeActions(
   raw: readonly unknown[],
-  availableTools: readonly RuntimeToolBrief[],
+  focusToolTips: readonly FocusToolTip[],
   max: number = MAX_ACTIONS,
 ): NextAction[] {
-  return sanitizeActionsWithStats(raw, availableTools, max).actions;
+  return sanitizeActionsWithStats(raw, focusToolTips, max).actions;
 }
 
 /**
@@ -467,57 +485,49 @@ export function isCompliantPrompt(prompt: string, toolNames: ReadonlySet<string>
   for (const name of toolNames) {
     if (name !== '' && lower.includes(name.toLowerCase())) return false;
   }
-  return !IDENTIFIER_RE.test(prompt);
+  if (IDENTIFIER_RE.test(prompt)) return false;
+  // 祈使句 / 信息明确（FR-003）：两项都是轻量启发式，宁松不严——
+  // 真正的风格约束在尾部指令里，这里只拦最典型的两类退化。
+  if (NON_IMPERATIVE_START_RE.test(prompt)) return false;
+  return !VAGUE_RE.test(prompt);
 }
 
 /** `snake_case` / `kebab-case` / `CamelCase` 形态（"工具英文名"的可判定形态） */
 const IDENTIFIER_RE =
   /[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+|[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/;
 
+/** 陈述 / 疑问 / 条件 / 建议式开头：一律不是祈使句 */
+const NON_IMPERATIVE_START_RE = /^(你|您|建议|可以|是否|如果|若|需要|可能|或许|要不要)/;
+
+/** 指代 / 占位表述：信息不明确（"查询这个"、"梳理相关数据"） */
+const VAGUE_RE = /(这个|那个|这些|那些|相关|之类|等等|一些|某些)/;
+
 /* ---------- 内部 ---------- */
 
-function filterTools(raw: unknown, allowed: ReadonlySet<string>): SoulToolRef[] {
+/**
+ * 读 `tool_tips`：**只防崩溃，不校验**。
+ *
+ * - 非数组 → 空数组（卡片照常下发，`prompt` 本身仍可执行）；
+ * - 元素非对象 / 字段缺失 → 该字段留空值，条目保留；
+ * - 超出 `MAX_TOOL_TIPS_PER_ACTION` → 截断（需求硬约束）。
+ */
+function readToolTips(raw: unknown): FocusToolTip[] {
   if (!Array.isArray(raw)) return [];
-  const out: SoulToolRef[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    if (!isRecord(item)) continue;
-    const name = typeof item.name === 'string' ? item.name.trim() : '';
-    if (name === '') continue;
-    let ref: SoulToolRef | undefined;
-    if (item.kind === 'builtin') {
-      ref = { kind: 'builtin', name };
-    } else if (
-      item.kind === 'mcp' &&
-      typeof item.service === 'string' &&
-      item.service.trim() !== ''
-    ) {
-      ref = { kind: 'mcp', service: item.service.trim(), name };
-    }
-    if (!ref) continue;
-    const exposed = toolExposedName(ref);
-    // 越界引用（不在本轮装配出来的清单里）一律丢弃该引用，卡片文本保留
-    if (!allowed.has(exposed) || seen.has(exposed)) continue;
-    seen.add(exposed);
-    // 以**暴露名**为准还原成规范引用：模型只会照抄清单里的名字，`kind` 常写错
-    // （实测把 MCP 写成 `builtin`）。这样 `tools` 与 `guidance` 才是同源的一对。
-    out.push(parseExposedName(exposed));
-  }
-  return out;
+  return raw.slice(0, MAX_TOOL_TIPS_PER_ACTION).map(readToolTip);
 }
 
-/** 快照 → 下发形态；与 `agent-catalog.toStarterView` 同口径（命名规则来自 `toolExposedName`） */
-function toView(action: NextAction): NextActionsView['actions'][number] {
+function readToolTip(value: unknown): FocusToolTip {
+  const record = isRecord(value) ? value : {};
   return {
-    prompt: action.prompt,
-    tools: action.tools.map((t) => ({
-      kind: t.kind,
-      name: t.name,
-      ...(t.kind === 'mcp' ? { service: t.service } : {}),
-      exposed_name: toolExposedName(t),
-    })),
-    guidance: action.guidance,
+    name: asText(record.name),
+    title: asText(record.title),
+    ontology_id: asText(record.ontology_id),
+    ontology_name: typeof record.ontology_name === 'string' ? record.ontology_name : null,
   };
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -527,13 +537,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * 快照条目的形状校验（读取侧）。
  *
- * 除字段形状外**必判 `tools` 非空**：2026-10-14 起"卡片必须绑定工具"，而存量快照里
- * 可能还留着旧口径产出的"无工具卡片"——读取时按同一判据过滤，避免它们继续下发。
+ * 只要求 `prompt` 非空且 `tool_tips` 是数组：**不判内容**（空数组也照常下发），
+ * 旧口径快照（只有 `tools` / `guidance`）因缺 `tool_tips` 被丢弃——快照每轮开始即清空，
+ * 无需迁移。
  */
 function isStoredAction(value: unknown): value is NextAction {
   if (!isRecord(value)) return false;
   if (typeof value.prompt !== 'string' || value.prompt === '') return false;
-  if (typeof value.guidance !== 'string') return false;
-  if (!Array.isArray(value.tools) || value.tools.length === 0) return false;
-  return true;
+  return Array.isArray(value.tool_tips);
 }

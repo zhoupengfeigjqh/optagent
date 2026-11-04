@@ -7,7 +7,14 @@
  * - `attachments`：结构化 `{dir, filename}[]`，`maxItems: 10`（FR-016、SC-019）
  */
 
-import type { FileReference, RawSseEvent, SendMessageRequest, StreamEvent, Usage } from './types'
+import type {
+  FileReference,
+  RawSseEvent,
+  SendMessageRequest,
+  StreamEvent,
+  ToolTip,
+  Usage,
+} from './types'
 import { SSE_EVENT } from '../constants/events'
 import { normalizeNextSteps } from './next-steps'
 import { postSseStream, type SseRequestOptions } from './sse'
@@ -24,6 +31,8 @@ export interface SendMessageInput {
   attachments: FileReference[]
   /** 本轮隐藏指引（004）；空串 / 缺省表示不提交该字段 */
   guidance?: string
+  /** 卡片回传的隐藏工具提示（016）；空数组 / 缺省表示不提交该字段 */
+  toolTips?: ToolTip[]
   /**
    * 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
    *
@@ -57,6 +66,10 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
   }
   if (input.guidance) {
     body.guidance = input.guidance
+  }
+  // 016：卡片回传的结构化工具提示（不落历史，服务端不做内容校验）
+  if (input.toolTips && input.toolTips.length > 0) {
+    body.tool_tips = input.toolTips
   }
   // 013：只在需要跳过时携带（后端 Schema 为 additionalProperties:false）
   if (input.skipIntentFocus === true) {

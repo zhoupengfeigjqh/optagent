@@ -95,8 +95,10 @@ export function buildPromptMessages(sources: PromptSources): {
   // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 仍是最末段（本轮指令紧邻用户消息）
   if (sources.nowText) parts.push(sources.nowText);
   // 004：问题实例的隐藏工具引导。放最后——本轮指令紧邻用户消息，更容易被遵循
-  // 013：意图聚焦提示由 `agent-factory` 在工具装配后追加到本轮 systemExtra 末尾
-  //      （候选工具清单只有在装配期才可得，见 research.md D8 的修订）
+  // 016：意图聚焦提示与卡片 `tool_tips` 段**不在这里**——它们在 `run-consume` 组装成功后
+  //      追加到 `systemExtra` 末尾（聚焦提示在前、卡片 tool_tips 段在后）。
+  //      2026-11 起 guidance 非空**不再**跳过聚焦（只有首屏问题实例显式携带
+  //      `skip_intent_focus`），故 guidance 与聚焦提示可以同轮并存。
   if (sources.guidance) parts.push(sources.guidance);
   return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
 }

@@ -21,16 +21,20 @@ function apiWith(body: unknown, init: { ok?: boolean; status?: number } = {}) {
 }
 
 describe('createNextStepsApi', () => {
-  it('命中：原样下发 `message_id` 与卡片（tools / guidance 保留）', async () => {
+  it('命中：原样下发 `message_id` 与卡片（`tool_tips` 保留）', async () => {
     const { api, fetchImpl } = apiWith({
       message_id: 'm-1',
       actions: [
         {
           prompt: '按交付日期梳理这批订单的风险',
-          tools: [
-            { kind: 'mcp', service: 'erp', name: 'query_order', exposed_name: 'erp__query_order' },
+          tool_tips: [
+            {
+              name: 'QueryPurchaseRecords',
+              title: '查询采购订单信息',
+              ontology_id: '1',
+              ontology_name: '采购管理',
+            },
           ],
-          guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
         },
       ],
     })
@@ -39,7 +43,7 @@ describe('createNextStepsApi', () => {
 
     expect(result.message_id).toBe('m-1')
     expect(result.actions).toHaveLength(1)
-    expect(result.actions[0]!.guidance).toContain('erp__query_order')
+    expect(result.actions[0]!.tool_tips[0]!.name).toBe('QueryPurchaseRecords')
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/threads/th_1/next-actions')
   })
 
@@ -73,20 +77,20 @@ describe('createNextStepsApi', () => {
     }
   })
 
-  it('逐条校验：缺 prompt 的条目被丢弃；`tools` / `guidance` 缺失时补齐为空值', async () => {
+  it('逐条校验：缺 prompt 的条目被丢弃；`tool_tips` 缺失时补齐为空数组', async () => {
     const { api } = apiWith({
       message_id: 'm-1',
       actions: [
         { prompt: '整理共享空间的表格' },
         { prompt: '' },
-        { guidance: '没有提示词' },
+        { tool_tips: [] },
         'not-an-object',
       ],
     })
 
     const result = await api.fetch('th_1')
 
-    expect(result.actions).toEqual([{ prompt: '整理共享空间的表格', tools: [], guidance: '' }])
+    expect(result.actions).toEqual([{ prompt: '整理共享空间的表格', tool_tips: [] }])
   })
 
   it('全部条目都不合法 → 空形态（不留下"有 message_id 却没有卡片"的半截状态）', async () => {

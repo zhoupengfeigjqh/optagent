@@ -27,7 +27,7 @@ function message(overrides: Partial<Message> = {}): Message {
 function nextSteps(overrides: Partial<ThreadNextSteps> = {}): ThreadNextSteps {
   return {
     message_id: 'm-2',
-    actions: [{ prompt: '按交付日期梳理订单风险', tools: [], guidance: '' }],
+    actions: [{ prompt: '按交付日期梳理订单风险', tool_tips: [] }],
     ...overrides,
   }
 }

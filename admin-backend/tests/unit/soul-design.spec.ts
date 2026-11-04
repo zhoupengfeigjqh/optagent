@@ -225,11 +225,17 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     ).toBe(false);
   });
 
-  it('true / false 原样通过（拒绝式，不做隐式转换）', () => {
+  it('true / false 原样通过；但意图聚焦关闭时 true 收敛为 false（门控）', () => {
+    expect(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: true }, OPTIONS)
+        .next_action_hints,
+    ).toBe(true);
+    expect(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: false }, OPTIONS)
+        .next_action_hints,
+    ).toBe(false);
+    // 门控：意图聚焦关闭时，即便提交 true 也收敛为 false
     expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS).next_action_hints).toBe(
-      true,
-    );
-    expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS).next_action_hints).toBe(
       false,
     );
   });
@@ -243,22 +249,30 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     }
   });
 
-  it('渲染：仅 `true` 时写 frontmatter 键；`false` / 缺省不写键（不残留未搭配的配置）', () => {
-    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
+  it('渲染：意图聚焦开启且 `next_action_hints: true` 才写键；否则不写（不残留未搭配的配置）', () => {
+    const on = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: true }, OPTIONS),
+    );
     expect(on).toContain('next_action_hints: true');
 
-    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS));
+    const off = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: false }, OPTIONS),
+    );
     expect(off).not.toContain('next_action_hints');
 
-    const missing = renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS));
+    const missing = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: true }, OPTIONS));
     expect(missing).not.toContain('next_action_hints');
     // 关闭态与缺省态产物**逐字一致**（同一份文档，不再有第三种形态）
     expect(off).toBe(missing);
   });
 
   it('开 / 关两态产物只差 frontmatter 那两行（开关 + 条数），正文逐字一致（System Prompt 恒等）', () => {
-    const on = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
-    const off = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: false }, OPTIONS));
+    const on = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: true }, OPTIONS),
+    );
+    const off = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: false }, OPTIONS),
+    );
 
     const body = (md: string) => md.slice(md.indexOf('---', 3) + 3);
     expect(body(on)).toBe(body(off));
@@ -298,7 +312,10 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     );
 
     const on = renderSoulMd(
-      normalizeSoulDesign({ ...validRaw(), next_action_hints: true, next_action_hints_count: 5 }, OPTIONS),
+      normalizeSoulDesign(
+        { ...validRaw(), intent_focus: true, next_action_hints: true, next_action_hints_count: 5 },
+        OPTIONS,
+      ),
     );
     expect(on).toContain('next_action_hints: true');
     expect(on).toContain('next_action_hints_count: 5');
@@ -311,7 +328,9 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     expect(off).toBe(renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS)));
 
     // 开启但未给条数 → 落缺省值，产物仍是显式的
-    const onDefault = renderSoulMd(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS));
+    const onDefault = renderSoulMd(
+      normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: true }, OPTIONS),
+    );
     expect(onDefault).toContain(`next_action_hints_count: ${SOUL_LIMITS.nextActionHintsDefault}`);
   });
 
@@ -385,18 +404,22 @@ describe('intent_focus —— 意图聚焦开关（013）', () => {
     expect(on.split('\n').length - off.split('\n').length).toBe(1);
   });
 
-  it('与 007 开关互相独立：4 种组合各写各的键（FR-035）', () => {
+  it('下一步动作提示依赖意图聚焦：意图聚焦关闭时不写 next_action_hints 键', () => {
     const render = (hints: boolean, focus: boolean) =>
       renderSoulMd(
         normalizeSoulDesign({ ...validRaw(), next_action_hints: hints, intent_focus: focus }, OPTIONS),
       );
 
+    // 双开：两个键都写
     expect(render(true, true)).toContain('intent_focus: true');
     expect(render(true, true)).toContain('next_action_hints: true');
+    // 意图聚焦关（即便 hints 提交 true）：收敛为关，两个键都不写
     expect(render(true, false)).not.toContain('intent_focus');
-    expect(render(true, false)).toContain('next_action_hints: true');
+    expect(render(true, false)).not.toContain('next_action_hints');
+    // 意图聚焦开 + hints 关：只写 intent_focus
     expect(render(false, true)).toContain('intent_focus: true');
     expect(render(false, true)).not.toContain('next_action_hints');
+    // 双关：都不写
     expect(render(false, false)).not.toContain('intent_focus');
     expect(render(false, false)).not.toContain('next_action_hints');
   });

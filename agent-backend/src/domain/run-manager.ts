@@ -36,6 +36,7 @@ import { RunFinalizer } from './run-finalize.js';
 import { RunImpl, type Run } from './run-impl.js';
 import { consumeTurn } from './run-consume.js';
 import type { IntentFocusPort } from './intent-focus-runner.js';
+import type { FocusToolTip } from './ontology-focus/types.js';
 import type { ToolEventStore } from './tool-events.js';
 
 // 类型迁移到 run-events / run-impl 后仍从本模块转出：既有引用路径（routes、测试）不变
@@ -63,19 +64,16 @@ export interface AgentRunRequest {
   /**
    * 007 修订（Tail Protocol）：本轮「下一步动作提示」的条数上限。
    * 存在 = 该数字人开关已开启，`agent-factory` 据此在 System Prompt 末尾追加尾部块指令
-   * （工具目录取本轮真实装配清单）；缺省 = 不追加（模型不感知该协议）。
+   * （候选目录取 `focusToolTips`）；缺省 = 不追加（模型不感知该协议）。
    */
   nextActionsMax?: number;
   /**
-   * 013：意图聚焦判定口。
+   * 016：本轮意图聚焦选出的本体能力（行为 + 函数）。
    *
-   * 存在 = 该数字人开关开启且判定模型已配置；由 `agent-factory` 在**工具装配之后、
-   * 模型调用之前**回调，返回的非空提示追加到本轮 `systemExtra` 末尾。
-   *
-   * 为什么在装配期回调：候选工具清单（`runtime.availableTools`）只有装配方才拿得到，
-   * 它是"本轮模型真实可用工具"的唯一权威来源；域层另算一份必然与真实工具漂移。
+   * 既是尾部块指令里的**唯一候选目录**（卡片的 `tool_tips` 只能从这份清单抄），
+   * 也是"本轮能不能产卡片"的判据（空 = 不追加指令、不产卡片）。
    */
-  focusJudge?: (tools: ReadonlyArray<{ name: string; description: string }>) => Promise<string>;
+  focusToolTips?: readonly FocusToolTip[];
 }
 
 /** run-manager 视角的 Agent 实例（PoolStore 的 PooledInstance 超集，由 infra 装配） */
@@ -124,6 +122,13 @@ export interface StartRunOptions {
    * 只影响本轮判定，不落历史、不改变 SSE 序列。
    */
   skipIntentFocus?: boolean;
+  /**
+   * 卡片点击回传的隐藏工具提示（结构化数组）。
+   *
+   * 只追加到本轮 System Prompt，**不落盘、不进历史**——历史里的 user 行只有卡片
+   * `prompt` 的原文。缺省 = 普通消息。
+   */
+  toolTips?: readonly FocusToolTip[];
 }
 
 export interface RunManagerDeps {

@@ -54,7 +54,7 @@ const DETAIL = {
 
 const CARDS: ThreadNextSteps = {
   message_id: 'm-1',
-  actions: [{ prompt: '继续看看', tools: [], guidance: '' }],
+  actions: [{ prompt: '继续看看', tool_tips: [] }],
 }
 
 function settle(): Promise<void> {
