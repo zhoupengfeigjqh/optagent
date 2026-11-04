@@ -7,7 +7,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 - **特性标识**：`013-intent-focus`
 - **输入**：[spec.md](./spec.md)（4 个用户故事）｜[plan.md](./plan.md)（P1~P4 分期）｜[research.md](./research.md)（D1~D13）｜[data-model.md](./data-model.md)｜[contracts/intent-focus-api.md](./contracts/intent-focus-api.md)｜[quickstart.md](./quickstart.md)
 - **测试口径**：本项目宪章原则三为 **NON-NEGOTIABLE**，故测试任务不是可选项——新增模块、每个新组件/composable/纯函数、每个端点改动 MUST 有对应测试，且**全部在宿主机本地执行**（容器不参与）。
-- **用户补充口径（2026-10-25）**：镜像固定 `chaitin/decis:laya-multilingual-v0.4.0`；判定阈值 MUST 支持环境变量 `INTENT_FOCUS_THRESHOLD`（**优先于** `config.yaml`）。
+- **用户补充口径（2026-10-25）**：镜像固定 `chaitin/decis:laya-multilingual-v0.4.0`；判定阈值 MUST 支持环境变量 `INTENT_FOCUS_SKILL_THRESHOLD`（**优先于** `config.yaml`）。
 - **路径约定**：本仓库为多子项目布局，任务中出现 `agent-backend/`、`frontend/`、`admin-backend/`、`admin-frontend/` 前缀即仓库根下的真实目录。
 
 ## 格式
@@ -38,8 +38,8 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 
 ### 配置与协议
 
-- [x] T004 [P] 在 `agent-backend/src/config.ts` 新增 `intentFocusSchema`（`base_url`/`model`/`api_key`/`timeout_ms`/`threshold`/`max_actions`，整块可选）与冻结字段 `AppConfig.intentFocus?`；`base_url` MUST 以 `http(s)://` 开头；`timeout_ms ∉ [300,5000]`、`threshold ∉ [0,1]`、`max_actions ∉ [1,3]` 一律 `ConfigError` 启动失败；`api_key` 支持 `$ENV` 引用但**不**回落到 `DEEPSEEK_API_KEY`
-- [x] T005 在 `agent-backend/src/config.ts` 的 `envSchema` 新增 `INTENT_FOCUS_THRESHOLD`（**与 T004 同一文件，串行执行**）（`z.coerce.number().min(0).max(1).optional()`），并在 `loadConfig()` 中用它**覆盖**配置块的 `threshold`（环境变量优先；两者都缺则 `0.5`）；越界即启动失败
+- [x] T004 [P] 在 `agent-backend/src/config.ts` 新增 `intentFocusSchema`（`base_url`/`model`/`api_key`/`timeout_ms`/`skill_threshold`/`max_actions`，整块可选）与冻结字段 `AppConfig.intentFocus?`；`base_url` MUST 以 `http(s)://` 开头；`timeout_ms ∉ [300,5000]`、`skill_threshold ∉ [0,1]`、`max_actions ∉ [1,3]` 一律 `ConfigError` 启动失败；`api_key` 支持 `$ENV` 引用但**不**回落到 `DEEPSEEK_API_KEY`
+- [x] T005 在 `agent-backend/src/config.ts` 的 `envSchema` 新增 `INTENT_FOCUS_SKILL_THRESHOLD`（**与 T004 同一文件，串行执行**）（`z.coerce.number().min(0).max(1).optional()`），并在 `loadConfig()` 中用它**覆盖**配置块的 `skill_threshold`（环境变量优先；两者都缺则 `0.5`）；越界即启动失败
 - [x] T006 [P] 新增 `agent-backend/src/infra/laya-client.ts`：`SystemOneClient`（构造入参 `{ baseUrl, model, apiKey, timeoutMs }`），`decide(state, questions)` 用平台原生 `fetch` + `AbortSignal.timeout(timeoutMs)` 向 `{baseUrl}/v1/systemone` 发 `POST`（`Authorization: Bearer`），**不重试**；把 401/超时/非 JSON/非对象/缺 `answers` 归为可区分的失败原因（返回 discriminated union，不抛错给上层）
 - [x] T007 [P] 新增 `agent-backend/tests/unit/laya-client.spec.ts`：注入桩 `fetch`，覆盖 200 正常、401、503、非 JSON、缺 `answers`、某题缺 `noul`、`noul` 非数字、超时（Abort）八种情形；断言**只发一次请求**（无重试）
 
@@ -66,7 +66,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 ### 容器编排与配置样例
 
 - [x] T016 [P] 在 `docker-compose.yml` 新增 `laya` 服务：`image: chaitin/decis:laya-multilingual-v0.4.0`、`container_name: optagent-laya`、`ports: ["8103:8000"]`、`mem_limit: 6g`、`environment` 含 `DECIS_API_KEY`、`DECIS_SHUTDOWN_GRACE_MS=25000`（**不设** `DECIS_ALLOW_NO_AUTH` 与 `DECIS_PLAYGROUND_HOST_PORT`）、`restart: unless-stopped`、`logging: *default-logging`；`backend` 加 `depends_on: laya`；注释写明"固定版本 tag，勿用 latest"
-- [x] T017 [P] 在 `agent-backend/config.example.yaml` 末尾新增带注释的 `intent_focus` 示例块（含"整块缺失 = 功能不可用"、"`INTENT_FOCUS_THRESHOLD` 可覆盖 threshold"两句说明）
+- [x] T017 [P] 在 `agent-backend/config.example.yaml` 末尾新增带注释的 `intent_focus` 示例块（含"整块缺失 = 功能不可用"、"`INTENT_FOCUS_SKILL_THRESHOLD` 可覆盖 skill_threshold"两句说明）
 
 **检查点**：`cd agent-backend && npm run test` 全绿；`npm run typecheck` 绿；容器冒烟通过；三份新模块（`intent-focus.ts` / `intent-focus-store.ts` / `laya-client.ts`）均有同名 spec。
 
@@ -162,7 +162,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 - [x] T048 [P] 回写 `specs/001-digital-human-platform/contracts/admin-api.md`：§5 SOUL 字段表新增 `intent_focus`（布尔、可选、缺省 false）+ 拒绝式校验口径
 - [x] T049 [P] 回写 `specs/001-digital-human-platform/contracts/runtime-api-delta.md`：`SOUL.md` frontmatter 新键；`POST /api/threads/{id}/messages` 新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`；**显式声明** SSE / 会话详情 / `next-actions` / 数字人详情零变更（若 `specs/001-.../data-model.md` 维护 SOUL 字段表，同步一行）
 - [x] T050 [P] 在 `agent-backend/vitest.config.ts` 把 `src/domain/intent-focus.ts`、`src/domain/intent-focus-store.ts`、`src/infra/laya-client.ts` 加入逐模块 80% 清单；若 `frontend/vite.config.ts` 需要，按改动文件补清单（该文件未新增模块则不动）
-- [x] T051 [US1] 阈值标定：按 `quickstart.md §7` 用 `INTENT_FOCUS_THRESHOLD`（0.35/0.5/0.65）在 10 条真实输入上各跑一遍，记录入选合理性与 `round_ms` P90，把结论写入本节"验收证据"（不达标则回到 T008/T009 调整命题措辞）——**实测后已按结论改写命题形态（noul → choice），见"验收证据"与"收尾补充"**
+- [x] T051 [US1] 阈值标定：按 `quickstart.md §7` 用 `INTENT_FOCUS_SKILL_THRESHOLD`（0.35/0.5/0.65）在 10 条真实输入上各跑一遍，记录入选合理性与 `round_ms` P90，把结论写入本节"验收证据"（不达标则回到 T008/T009 调整命题措辞）——**实测后已按结论改写命题形态（noul → choice），见"验收证据"与"收尾补充"**
 - [x] T052 四侧门禁全量跑一遍并按 `plan.md §6` 复测行数：`agent-backend`（lint/typecheck/test/test:integration/test:coverage/build）、`frontend`、`admin-backend`、`admin-frontend`；四项复测（`run-manager.ts`/`server.ts`/`soul-design.ts`/`useChatPanel.ts`）全部 ≤500
 - [x] T053 执行 `quickstart.md §6` 非交互冒烟：`/api/models`、Laya `/v1/models`、带 `skip_intent_focus` 的发送打点、历史文件不含聚焦提示；结论记入"验收证据"（该步骤**不作为测试结论**）
 - [x] T054 文档一致性收口：`spec.md` 修订记录、`plan.md` 复杂度跟踪、本文件勾选状态与"验收证据"同步；确认 `.specify/feature.json` 指向 `specs/013-intent-focus`
@@ -193,7 +193,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 ### 关键提醒
 
 - **T018 与 T022 是硬门禁任务，不是可选重构**：`run-manager.ts` 539 行、`server.ts` 498 行，改完必须复测 ≤500，且抽取 MUST 为纯搬运（先跑一遍既有单测再改，改完再跑对比）。
-- **T005 的优先级**：`INTENT_FOCUS_THRESHOLD` 必须**覆盖**配置块而非"二选一"，且越界即启动失败（避免线上静默用了错的灵敏度）。
+- **T005 的优先级**：`INTENT_FOCUS_SKILL_THRESHOLD` 必须**覆盖**配置块而非"二选一"，且越界即启动失败（避免线上静默用了错的灵敏度）。
 - **集成测试文件被四个故事共用**：`agent-backend/tests/integration/chat-intent-focus.spec.ts` 由 T024（US1 创建）、T033（US2）、T042（US3）、T046（US4）分阶段追加。**跨故事并行时必须串行追加同一文件**，禁两人同时改它。
 - **红线三条**（`plan.md §7`）：判定必须先于主模型调用且**从不重试**；记录文件**无运行期读取方**；两处拆分必须纯搬运。
 
@@ -330,7 +330,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 | T003 依赖基线 | `git diff --stat -- '*package.json' '*package-lock.json'` 为空：四侧**零新增依赖** |
 | T023 / T034 / T052 行数复测 | 同上；`chat.ts` 因新增严格校验 +32 行，仍在 500 门禁内 |
 | T047 记录无读取方 | `Select-String -Path agent-backend/src/**/*.ts -Pattern "intent-focus.jsonl"` 仅命中 `src/domain/intent-focus-store.ts` 两处（文件头注释 + `filePathOf`），**生产代码零读取方** |
-| T051 阈值标定 | **已完成，并据此改了命题形态**。原 `noul`（每工具一条真值命题）实测不可用：8 题并行时互不竞争，"今天北京天气" 也让 `erp__query_bom` 拿到 0.910、`read_file` 0.868，阈值 0.5/0.7/0.85 均切不开；top1 仅对 1/10，入选集合几乎全为无关工具。改为**一条 `choice`**（工具名 + `__none__` 作选项）后，同一批 10 条业务输入：top1 对 7/10、入选集合精确率 **7/8**、两条"无需工具"轮次（天气 / 写邮件）**均正确返回空**，单轮 123~248ms（远低于 SC-002 的 2s）。据此保留 `threshold=0.5`、`max_actions=3`。**同时发现**上游每题 256 token 上限：6 工具 × 120 字说明 ≈ 320 token ⇒ `422 too_long` ⇒ 整轮 `degraded`，故选项说明改为**总预算 160 字均分**（`min(40, max(6, 160/(N+1)))`） |
+| T051 阈值标定 | **已完成，并据此改了命题形态**。原 `noul`（每工具一条真值命题）实测不可用：8 题并行时互不竞争，"今天北京天气" 也让 `erp__query_bom` 拿到 0.910、`read_file` 0.868，阈值 0.5/0.7/0.85 均切不开；top1 仅对 1/10，入选集合几乎全为无关工具。改为**一条 `choice`**（工具名 + `__none__` 作选项）后，同一批 10 条业务输入：top1 对 7/10、入选集合精确率 **7/8**、两条"无需工具"轮次（天气 / 写邮件）**均正确返回空**，单轮 123~248ms（远低于 SC-002 的 2s）。据此保留 `skill_threshold=0.5`、`max_actions=3`。**同时发现**上游每题 256 token 上限：6 工具 × 120 字说明 ≈ 320 token ⇒ `422 too_long` ⇒ 整轮 `degraded`，故选项说明改为**总预算 160 字均分**（`min(40, max(6, 160/(N+1)))`） |
 | T052 四侧门禁 | `agent-backend`：lint 0 / typecheck 绿 / unit **775** / integration **168** / coverage **943 且 80% 模块门禁通过（含四个新模块）** / build 绿；`frontend`：lint 0 / typecheck 绿 / coverage **1069** / build 绿；`admin-backend`：lint 0 / typecheck 绿 / coverage **637** / `check:lines`+`check:deps` 绿 / build 绿；`admin-frontend`：lint 0 / typecheck 绿 / coverage **615** / `check:lines`+`check:deps` 绿 / build 绿 |
 | T053 非交互冒烟 | **已完成（真实进程 + 真实模型）**：① `GET /api/models` 200；② Laya `/v1/models` 200；③ 带 `skip_intent_focus: true` 发送（真实 DeepSeek 主模型）→ `200 text/event-stream`，事件仅 `content / tool_call / tool_call_end / done`；该数字人开关关闭 ⇒ **零判定、零留档**（`intent-focus.jsonl` 不存在），`history.jsonl` 不含聚焦提示；④ 临时打开该数字人开关后再发一条 → 留档 `disposition: focused`、`probabilities` 为真实概率（`read_skill 0.9396`）、`actions:["read_skill"]`、`round_ms: 237`，`history.jsonl`（3726B）**仍不含**聚焦提示；随后已还原 SOUL（开关复位）。⑤ 校验层：`skipIntentFocus` → 400「不支持的请求字段」、`"true"` → 400「须为布尔值」 |
 | T054 文档一致性 | 已回写：`admin-api.md` §5 SOUL 字段表新增 `intent_focus`；`runtime-api-delta.md` 新增 R22 / §21（含严格校验、配置矩阵、不变式与回滚）；`contracts/intent-focus-api.md` §5.1 补齐「带路径 / 未知键 / 空串环境变量」三条口径 |
@@ -339,7 +339,7 @@ description: "意图聚焦（Intent Focus）实施任务清单"
 
 - **配置严谨化**：`config.ts` 抽出 `INTENT_FOCUS_LIMITS` / `INTENT_FOCUS_DEFAULTS`（区间与缺省单一来源）、
   `resolveEnvRef`（模型与判定模型共用 `$ENV` 解析）、四个中文报错读取器（指名 YAML 路径 + 区间 + 当前值）；
-  `intent_focus` 块改为 `strict()`，拼错键即启动失败；`INTENT_FOCUS_THRESHOLD` 空串视为未设置
+  `intent_focus` 块改为 `strict()`，拼错键即启动失败；`INTENT_FOCUS_SKILL_THRESHOLD` 空串视为未设置
   （否则 `z.coerce.number` 会把它变成 `0`，全部工具入选且无任何报错）；`base_url` 带路径即拒绝
   （避免拼出 `/v1/v1/systemone`）。覆盖：`tests/unit/config.spec.ts` 新增 15 例。
 - **请求体严格化**：`routes/chat.ts` 在 `preValidation` 里拒绝未知字段与非布尔 `skip_intent_focus`

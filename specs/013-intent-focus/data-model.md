@@ -69,7 +69,7 @@ intent_focus:
   model: laya-multilingual         # 缺省即此值
   api_key: $DECIS_API_KEY          # 必填（启用时）；支持 $ENV 引用，MUST NOT 走 DEEPSEEK_API_KEY 兜底
   timeout_ms: 10000                # 300~10000，越界拒绝启动
-  threshold: 0.6                   # 0~1，越界拒绝启动；可被 INTENT_FOCUS_THRESHOLD 环境变量覆盖
+  skill_threshold: 0.6             # 0~1，越界拒绝启动；可被 INTENT_FOCUS_SKILL_THRESHOLD 环境变量覆盖
                                    #   0.6 = 2026-10-26 命题改版后的标定拐点（入选不设条数上限，故无 max_actions）
 ```
 
@@ -78,7 +78,7 @@ intent_focus:
 | 整块缺失 | **不报错**，功能不可用（`unconfigured`），启动日志一条 `info` |
 | 部分缺失（有 `base_url` 无 `api_key`） | 视为配置错误：**启动失败并给出可读原因**（半配置最易被误读成"功能故障"） |
 | `api_key` 引用未设置的环境变量 | 启动失败（复用既有 `$ENV` 解析口径，但**不兜底**） |
-| `timeout_ms` / `threshold` 越界 | 启动失败（与 `models` 的严格校验同风格，不做静默收敛） |
+| `timeout_ms` / `skill_threshold` 越界 | 启动失败（与 `models` 的严格校验同风格，不做静默收敛） |
 | 出现 `max_actions` | 启动失败（该键 2026-10-26 已移除；入选按阈值全量筛选，不设条数上限） |
 | 端点地址 | MUST 以 `http(s)://` 开头（否则容器内解析成 scheme 会静默失效——与 `PUBLIC_BASE_URL` 同一道防线） |
 
@@ -86,12 +86,12 @@ intent_focus:
 
 | 环境变量 | 类型 / 范围 | 缺省 | 优先级 | 说明 |
 |---|---|---|---|---|
-| `INTENT_FOCUS_THRESHOLD` | `number`，`0 ≤ x ≤ 1` | 取配置块的 `threshold`；两者都缺则 `0.6` | **高于** `config.yaml` | 容器部署时不必改挂载的配置文件即可调整判定灵敏度；越界 → **启动失败**（不静默收敛） |
+| `INTENT_FOCUS_SKILL_THRESHOLD` | `number`，`0 ≤ x ≤ 1` | 取配置块的 `skill_threshold`；两者都缺则 `0.6` | **高于** `config.yaml` | 容器部署时不必改挂载的配置文件即可调整判定灵敏度；越界 → **启动失败**（不静默收敛） |
 
 **为什么只有阈值双源**：工具数量与问法差异会让概率分布整体偏移，阈值是最需要现场调的参数；
 其余参数（地址 / 模型 / 令牌 / 超时 / 动作上限）改动频率低，单源（仅配置块）避免"两份口径"。
 
-> 实现落点：`config.ts` 的 `envSchema` 新增该键，`loadConfig()` 在解析配置块后用环境变量**覆盖** `threshold`。
+> 实现落点：`config.ts` 的 `envSchema` 新增该键，`loadConfig()` 在解析配置块后用环境变量**覆盖** `skill_threshold`。
 > `process.env` 仍只在 `config.ts` 一处读取（既有模块注释的硬约束）。
 
 **对外冻结**：装配后 `AppConfig.intentFocus?: IntentFocusConfig`，整对象 `Object.freeze`。
@@ -186,7 +186,7 @@ interface ToolCandidate {
 interface SelectionInput {
   candidates: readonly ToolCandidate[]              // 本轮真实可用清单（已截断到 96）
   scores: Readonly<Record<string, number>>          // 工具名 → noul 真值分数
-  threshold?: number                                // 默认 0.6
+  skillThreshold?: number                           // 默认 0.6
 }
 
 interface FocusAction { tools: string[]; score: number }   // 每个动作含 1~N 个工具标识

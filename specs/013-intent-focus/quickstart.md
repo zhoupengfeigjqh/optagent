@@ -113,7 +113,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000      # 300~10000
-  threshold: 0.6         # 0~1；2026-10-26 命题改版后的标定拐点
+  skill_threshold: 0.6   # 0~1；2026-10-26 命题改版后的标定拐点
                          # 注意：不再有 max_actions（入选按阈值全量筛选，留着该键会启动失败）
 ```
 
@@ -121,11 +121,11 @@ intent_focus:
 
 ```ini
 DECIS_API_KEY=dev-laya-key
-# 判定阈值（可选）：0~1，优先于 config.yaml 的 intent_focus.threshold
-INTENT_FOCUS_THRESHOLD=0.6
+# 判定阈值（可选）：0~1，优先于 config.yaml 的 intent_focus.skill_threshold
+INTENT_FOCUS_SKILL_THRESHOLD=0.6
 ```
 
-> 阈值是唯一支持"环境变量 + 配置文件"双源的参数，**环境变量优先**；改 `INTENT_FOCUS_THRESHOLD`
+> 阈值是唯一支持"环境变量 + 配置文件"双源的参数，**环境变量优先**；改 `INTENT_FOCUS_SKILL_THRESHOLD`
 > 后重启 backend 即生效，无需改挂载的 `config.yaml`。
 
 > 未配置整块也能启动：功能按"未配置"降级（不判定、不追加提示、留档标注）。
@@ -212,7 +212,7 @@ Laya 的真值概率在"多题同批"下是否仍可比较，需要一次标定�
 |---|---|---|
 | B1 | 取 10 条真实输入 × 该数字人真实工具清单（N≈8） | — |
 | B2 | 用 `node scripts/calibrate-intent-focus.mjs --prompt current --threshold 0.6` 跑一遍，看 top1 / 入选精确率 / 召回 / 误选最高分 | 相关工具入选、无关工具不入选 |
-| B3 | 调 `--threshold`（0.5 / 0.55 / 0.6 / 0.65）扫一遍，看召回与误选最高分的变化拐点；定下来的值再写进**环境变量** `INTENT_FOCUS_THRESHOLD`（改完重启 backend，无需动 `config.yaml`） | 找到召回与噪声的平衡点（现行 0.6） |
+| B3 | 调 `--threshold`（0.5 / 0.55 / 0.6 / 0.65）扫一遍，看召回与误选最高分的变化拐点；定下来的值再写进**环境变量** `INTENT_FOCUS_SKILL_THRESHOLD`（改完重启 backend，无需动 `config.yaml`） | 找到召回与噪声的平衡点（现行 0.6） |
 | B4 | 记录 P90 判定耗时（`round_ms`）与 N 的关系 | P90 ≤ 2s（规格 SC-002） |
 | B5 | 把结论写入 `research.md` 附录或 `tasks.md` 验收记录 | 可复现 |
 

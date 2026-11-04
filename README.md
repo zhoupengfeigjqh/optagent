@@ -294,7 +294,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY          # 与 laya 容器的 DECIS_API_KEY 必须同值
   timeout_ms: 10000                # 整轮预算 300~10000，超时即降级（不重试）
-  threshold: 0.6                   # 技能入选阈值，可被 INTENT_FOCUS_THRESHOLD 覆盖
+  skill_threshold: 0.6             # 技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
   ontology_threshold: 0.6          # 本体行为 / 函数阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
   max_skills: 32                   # 单轮技能候选上限（1~256）
   max_capabilities: 96             # 单轮能力候选上限（1~256；3 批 × 32）

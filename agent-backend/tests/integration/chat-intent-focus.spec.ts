@@ -44,7 +44,7 @@ const CONFIG: IntentFocusConfig = {
   model: 'laya-multilingual',
   apiKey: 'dev-key',
   timeoutMs: 10_000,
-  threshold: 0.6,
+  skillThreshold: 0.6,
   ontologyThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,

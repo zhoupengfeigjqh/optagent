@@ -62,16 +62,16 @@ const envSchema = z.object({
   /** 签名直链 HMAC 密钥（≥16 字符；缺省启动时随机生成——重启后未过期 URL 失效） */
   FILE_SIGN_SECRET: z.string().min(16).optional(),
   /**
-   * 013：意图聚焦判定阈值（0~1）。设置后**覆盖** `config.yaml` 的 `intent_focus.threshold`。
+   * 013：技能入选分数阈值（0~1）。设置后**覆盖** `config.yaml` 的 `intent_focus.skill_threshold`。
    *
-   * 为什么允许双源：工具数量与问法差异会让概率分布整体偏移，阈值是最需要现场调的参数；
+   * 为什么允许双源：技能数量与问法差异会让概率分布整体偏移，阈值是最需要现场调的参数；
    * 容器部署时可只改环境变量、不必改挂载的配置文件。越界即启动失败（不静默收敛）。
    *
-   * **空串 = 未设置**：`.env` 里写了 `INTENT_FOCUS_THRESHOLD=` 很常见（模板没删干净），
-   * 而 `z.coerce.number()` 会把 `''` 变成 `0` —— 阈值 0 意味着**所有工具都入选**，
-   * 症状是"回答突然变慢、什么工具都被拉着用"，却没有任何报错。宁可回落到配置文件。
+   * **空串 = 未设置**：`.env` 里写了 `INTENT_FOCUS_SKILL_THRESHOLD=` 很常见（模板没删干净），
+   * 而 `z.coerce.number()` 会把 `''` 变成 `0` —— 阈值 0 意味着**所有技能都入选**，
+   * 症状是"回答突然变慢、什么技能都被拉着用"，却没有任何报错。宁可回落到配置文件。
    */
-  INTENT_FOCUS_THRESHOLD: z.preprocess(
+  INTENT_FOCUS_SKILL_THRESHOLD: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.coerce.number().min(0).max(1).optional(),
   ),
@@ -120,7 +120,7 @@ export const INTENT_FOCUS_LIMITS = {
 /**
  * 013：可省略字段的缺省值（缺省即"照默认跑"，不是"功能关闭"）。
  *
- * `threshold` 与 `domain/intent-focus.ts` 的 `DEFAULT_THRESHOLD` 同口径：0.6 是
+ * `skillThreshold` 与 `domain/intent-focus.ts` 的 `DEFAULT_THRESHOLD` 同口径：0.6 是
  * 2026-10-26 命题改版（任务式问法 + 极简判据）后重新标定的拐点——0.5 下平均每轮
  * 入选 2.4 个工具且噪声大，0.6 压到 1.2 个而召回不变。
  */
@@ -131,7 +131,7 @@ export const INTENT_FOCUS_DEFAULTS = {
    * 技能与本体能力**同阈值**（2026-11 产品口径：两者都是"本轮要不要用"的同一判断，
    * 分开标定会让"技能入选但能力全空"变成常态）。
    */
-  threshold: 0.8,
+  skillThreshold: 0.8,
   ontologyThreshold: 0.8,
   maxSkills: 32,
   maxCapabilities: 96,
@@ -154,7 +154,7 @@ const intentFocusYamlSchema = z
     model: z.unknown().optional(),
     api_key: z.unknown(),
     timeout_ms: z.unknown().optional(),
-    threshold: z.unknown().optional(),
+    skill_threshold: z.unknown().optional(),
     ontology_threshold: z.unknown().optional(),
     max_skills: z.unknown().optional(),
     max_capabilities: z.unknown().optional(),
@@ -188,11 +188,11 @@ export interface LlmRetryOptions {
 /**
  * 013：意图聚焦判定模型的接入参数（装配后冻结）。
  *
- * 六个字段与 `contracts/intent-focus-api.md §5.1` 一一对应；除 `threshold` 外**只有一个来源**
+ * 六个字段与 `contracts/intent-focus-api.md §5.1` 一一对应；除 `skill_threshold` 外**只有一个来源**
  * （`config.yaml` 的 `intent_focus` 块），避免"改了 A 没改 B"的错配。
  *
- * `threshold` / `ontology_threshold` 的取值优先级：
- * 环境变量（`INTENT_FOCUS_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_THRESHOLD`）> `config.yaml` > 0.8。
+ * `skill_threshold` / `ontology_threshold` 的取值优先级：
+ * 环境变量（`INTENT_FOCUS_SKILL_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_THRESHOLD`）> `config.yaml` > 0.8。
  */
 export interface IntentFocusConfig {
   /** 形如 `http://laya:8000`（只到主机端口，不要带 `/v1`；请求路径由客户端拼） */
@@ -204,7 +204,7 @@ export interface IntentFocusConfig {
   /** 整轮判定总预算（毫秒）：分批时按批数均分，到时即降级，**不重试** */
   timeoutMs: number;
   /** 技能入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
-  threshold: number;
+  skillThreshold: number;
   /** 本体能力（行为 / 函数）入选分数阈值（0~1） */
   ontologyThreshold: number;
   /** 单轮技能候选上限 */
@@ -341,13 +341,13 @@ function describe(value: unknown): string {
  * - `api_key` 仅支持字面量或 `$ENV` 引用，**不**回落到 `DEEPSEEK_API_KEY`
  *   （落到主模型密钥会表现为 401，而不是"未配置"，极难定位）；
  * - `base_url` 必须是 http(s) 绝对地址（`laya:8000` 这类在 WHATWG 解析下"合法"但不可用）；
- * - `threshold` 环境变量优先（唯一允许双源的参数）；但配置文件里的取值**照样校验**——
+ * - `skill_threshold` 环境变量优先（唯一允许双源的参数）；但配置文件里的取值**照样校验**——
  *   留着越界值不报错，下次撤掉环境变量就会静默生效。
  */
 function resolveIntentFocus(
   entry: z.infer<typeof intentFocusYamlSchema> | undefined,
   env: EnvSource,
-  envThreshold: number | undefined,
+  envSkillThreshold: number | undefined,
   envOntologyThreshold: number | undefined,
 ): IntentFocusConfig | undefined {
   if (!entry) return undefined;
@@ -379,10 +379,10 @@ function resolveIntentFocus(
     INTENT_FOCUS_DEFAULTS.timeoutMs,
     '（毫秒）',
   );
-  const yamlThreshold = readRatio(
-    entry.threshold,
-    'intent_focus.threshold',
-    INTENT_FOCUS_DEFAULTS.threshold,
+  const yamlSkillThreshold = readRatio(
+    entry.skill_threshold,
+    'intent_focus.skill_threshold',
+    INTENT_FOCUS_DEFAULTS.skillThreshold,
   );
   const yamlOntologyThreshold = readRatio(
     entry.ontology_threshold,
@@ -409,7 +409,7 @@ function resolveIntentFocus(
     model,
     apiKey,
     timeoutMs,
-    threshold: envThreshold ?? yamlThreshold,
+    skillThreshold: envSkillThreshold ?? yamlSkillThreshold,
     ontologyThreshold: envOntologyThreshold ?? yamlOntologyThreshold,
     maxSkills,
     maxCapabilities,
@@ -461,7 +461,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const intentFocus = resolveIntentFocus(
     yamlParsed.data.intent_focus,
     env,
-    e.INTENT_FOCUS_THRESHOLD,
+    e.INTENT_FOCUS_SKILL_THRESHOLD,
     e.INTENT_FOCUS_ONTOLOGY_THRESHOLD,
   );
 

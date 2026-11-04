@@ -140,7 +140,7 @@ Promise 链范式）；文件超过 **256KB 或 200 行**时重写保留最近 *
 **理由**：`guidance` 是"本轮指令"，既有设计刻意让它紧邻用户消息、处于最末段（F10）；聚焦提示是
 "本轮规划范围"，属于较粗的约束，放在它前面既保住既有口径，又让模型先看范围再看具体工具。
 
-### D9 阈值与上限：`threshold=0.5`、`max_actions=3`、候选上限 24
+### D9 阈值与上限：`skill_threshold=0.5`、`max_actions=3`、候选上限 24
 
 **决策**：三项均可配置；默认如上。筛出顺序：概率降序 → 同概率按工具清单原序（保证确定性）。
 
@@ -157,7 +157,7 @@ intent_focus:
   model: laya-multilingual        # 缺省即此值
   api_key: $DECIS_API_KEY         # 必填（启用时），支持 $ENV 引用
   timeout_ms: 3000                # 上限 5000
-  threshold: 0.5                  # 0~1
+  skill_threshold: 0.5            # 0~1
   max_actions: 3                  # 1~3
 ```
 

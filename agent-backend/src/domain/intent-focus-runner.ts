@@ -294,7 +294,7 @@ export class IntentFocusRunner implements IntentFocusPort {
       return EMPTY_RESULT;
     }
 
-    const skillDecisions = selectSkills(skillResult.candidates, skillDecided.scores, config.threshold);
+    const skillDecisions = selectSkills(skillResult.candidates, skillDecided.scores, config.skillThreshold);
     const allSkillDecisions: SkillDecision[] = [...skillResult.excluded, ...skillDecisions];
     const selectedNames = new Set(
       skillDecisions.filter((decision) => decision.selected).map((decision) => decision.header.name),

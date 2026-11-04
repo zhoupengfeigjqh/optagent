@@ -24,7 +24,7 @@ models:
 # backend 直接 HTTP 调用 `/v1/systemone`，**不经 MCP、不注册为工具**。
 #
 # 八个字段之外的键一律拒绝启动（拼错 `timeout` 不会被静默忽略成缺省值）。
-# 取值方式：本文件给"部署形态共用值"；两个 threshold 建议走环境变量（现场调参不必改挂载文件）。
+# 取值方式：本文件给"部署形态共用值"；两个 *_threshold 建议走环境变量（现场调参不必改挂载文件）。
 #
 # intent_focus:
 #   base_url: http://laya:8000      # 必填；只填到主机端口，**不要带 /v1 或其它路径**
@@ -34,8 +34,8 @@ models:
 #                                   #   $ENV 由 **backend 进程**的环境提供（agent-backend/.env.local），
 #                                   #   与 laya 容器的 DECIS_API_KEY 必须是同一个值
 #   timeout_ms: 10000               # 300~10000 的整数（毫秒）；整轮预算，超时即降级（不重试）
-#   threshold: 0.6                  # 0~1；技能入选阈值，可被 INTENT_FOCUS_THRESHOLD 覆盖（环境变量优先）
-#                                   #   环境变量留空（`INTENT_FOCUS_THRESHOLD=`）视为未设置，不会变成 0
+#   skill_threshold: 0.6            # 0~1；技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖（环境变量优先）
+#                                   #   环境变量留空（`INTENT_FOCUS_SKILL_THRESHOLD=`）视为未设置，不会变成 0
 #                                   #   0.6 是 2026-10-26 命题改版后的标定拐点（0.5 噪声偏多）
 #   ontology_threshold: 0.6         # 0~1；本体行为 / 函数入选阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
 #                                   #   与技能阈值分开：能力候选是短标题，分数分布与技能描述不同

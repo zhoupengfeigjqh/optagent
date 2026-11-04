@@ -35,7 +35,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
-  threshold: 0.6
+  skill_threshold: 0.6
   ontology_threshold: 0.6
   max_skills: 32
   max_capabilities: 96
@@ -47,7 +47,7 @@ intent_focus:
 | `model` | 否 | string | `laya-multilingual` | 与 `GET /v1/models` 一致 |
 | `api_key` | 是 | string / `$ENV` | — | 不回落 `DEEPSEEK_API_KEY` |
 | `timeout_ms` | 否 | 整数 300~10000 | 10000 | 单轮总预算 |
-| `threshold` | 否 | 0~1 | 0.6 | **技能**阈值 |
+| `skill_threshold` | 否 | 0~1 | 0.6 | **技能**阈值 |
 | `ontology_threshold` | 否 | 0~1 | 0.6 | **本体能力**阈值 |
 | `max_skills` | 否 | 整数 1~256 | 32 | 技能候选上限 |
 | `max_capabilities` | 否 | 整数 1~256 | 96 | 行为 + 函数候选上限 |
@@ -55,14 +55,14 @@ intent_focus:
 **规则**：
 - 整块缺失 → 功能不可用；开关开启时记录 `unconfigured`，启动不失败。
 - 块存在但必填缺失 / 越界 / 未知键 → 启动失败。
-- `threshold` / `ontology_threshold` 可由环境变量覆盖；YAML 值仍校验。
+- `skill_threshold` / `ontology_threshold` 可由环境变量覆盖；YAML 值仍校验。
 - 环境变量留空视为未设置，不变成 0。
 
 ### 2.2 环境变量
 
 | 变量 | 作用 | 优先级 |
 |---|---|---|
-| `INTENT_FOCUS_THRESHOLD` | 技能阈值 | 高于 YAML `threshold` |
+| `INTENT_FOCUS_SKILL_THRESHOLD` | 技能阈值 | 高于 YAML `skill_threshold` |
 | `INTENT_FOCUS_ONTOLOGY_THRESHOLD` | 本体能力阈值 | 高于 YAML `ontology_threshold` |
 | `DECIS_API_KEY` | 由 `api_key: $DECIS_API_KEY` 引用 | — |
 
@@ -256,7 +256,7 @@ rules:
 ## 8. 兼容与版本
 
 - 本契约 v1 起生效；013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用。
-- 新增配置键全部可选；旧 `intent_focus` 块可直接启动（`threshold` 语义变为技能阈值）。
+- 新增配置键全部可选；旧 `intent_focus` 块可直接启动（`skill_threshold` 语义变为技能阈值）。
 - 公开 HTTP 无版本变更；前端 / 管理端无需发版。
 - 后续若调整提示格式或记录字段，必须同时更新本契约与 `data-model.md`，并保留旧记录可读。
 

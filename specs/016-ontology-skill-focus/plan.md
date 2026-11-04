@@ -17,7 +17,7 @@
 5. 铸造一条中文本轮提示（技能说明 + 本体能力），追加到 `systemExtra` 末尾，进入主模型；
 6. 原工具候选构造、工具评分与原工具提示全部停用，不保留双链路。
 
-所有判定均为 `noul`（逐候选真值命题），不是 `choice`；技能阈值沿用 `INTENT_FOCUS_THRESHOLD`，本体能力阈值新增 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`。
+所有判定均为 `noul`（逐候选真值命题），不是 `choice`；技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`，本体能力阈值新增 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`。
 
 ## 技术上下文
 

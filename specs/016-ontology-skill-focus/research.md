@@ -182,7 +182,7 @@
 ### R11：配置复用与新增
 
 **决策**：
-- 技能阈值：沿用 `INTENT_FOCUS_THRESHOLD`（环境变量优先于 YAML `threshold`）；
+- 技能阈值：沿用 `INTENT_FOCUS_SKILL_THRESHOLD`（环境变量优先于 YAML `skill_threshold`）；
 - 能力阈值：新增 YAML `ontology_threshold` + 环境变量 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`；
 - 候选上限：新增 YAML `max_skills`（32）/ `max_capabilities`（96），不新增环境变量；
 - `timeout_ms` 不变（300~10000）。
@@ -192,7 +192,7 @@
 - 能力阈值是新语义，必须有独立键，不能复用技能阈值；
 - 候选上限属于部署级防御参数，YAML 足够，避免环境变量碎片化。
 
-**替代方案**：全部用新环境变量。放弃：会破坏现有运维习惯，且 `INTENT_FOCUS_THRESHOLD` 已存在。
+**替代方案**：全部用新环境变量。放弃：会破坏现有运维习惯，且 `INTENT_FOCUS_SKILL_THRESHOLD` 已存在。
 
 ### R12：记录复用 013 侧车文件，schema 替换但不迁移
 

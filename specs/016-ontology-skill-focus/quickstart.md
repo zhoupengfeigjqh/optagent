@@ -110,7 +110,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
-  threshold: 0.6
+  skill_threshold: 0.6
   ontology_threshold: 0.6
   max_skills: 32
   max_capabilities: 96
@@ -174,7 +174,7 @@ node -e "const fs=require('fs');const p=process.argv[1];const rows=fs.readFileSy
 | `disposition=unconfigured` | `config.yaml` 缺少 `intent_focus` 块，或 `api_key` / `base_url` 未解析；检查 `DECIS_API_KEY` 是否在**后端进程**环境 |
 | `disposition=empty / no_skills` | 数字人 `skills/` 为空或 `SKILL.md` 头部非法；检查 frontmatter 与目录 |
 | `disposition=empty / no_focusable_skills` | 只有本体技能且 `ontology_id` 都匹配不到本体；检查 `ontology/{scenario}/{ontology}/ontology.yaml` 的 `metadata.ontology_id` |
-| `disposition=empty / below_threshold` | 技能分数未超过 `threshold`；可临时降低 `INTENT_FOCUS_THRESHOLD` 复测 |
+| `disposition=empty / below_threshold` | 技能分数未超过 `skill_threshold`；可临时降低 `INTENT_FOCUS_SKILL_THRESHOLD` 复测 |
 | `disposition=degraded` | 看 `error`：`timeout` / `laya_unreachable` / `invalid_response` / `all_batches_failed`；检查 Laya 与预算 |
 | 本体技能提示没有能力段 | 行为 / 函数全部低于 `ontology_threshold`，或本体无 `behaviors` / `functions` |
 | 提示出现英文行为名 | 该行为条目确实缺 `title`（或 YAML 解析未取到）；按规格回退 `name`，先检查 `behaviors[].title` |

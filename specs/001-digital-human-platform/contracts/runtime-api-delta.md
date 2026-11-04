@@ -1471,7 +1471,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY       # 不回落到 DEEPSEEK_API_KEY
   timeout_ms: 3000              # 300~5000 的整数
-  threshold: 0.5                # 0~1
+  skill_threshold: 0.5          # 0~1
   max_actions: 3                # 1~3 的整数
 ```
 
@@ -1479,11 +1479,11 @@ intent_focus:
 |---|---|
 | 整块缺失 | 启动成功，功能不可用（`unconfigured`） |
 | `base_url` / `api_key` 缺失或格式非法 | **启动失败**，报错指名 YAML 路径与当前值 |
-| `timeout_ms` / `threshold` / `max_actions` 越界 | **启动失败**（即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
+| `timeout_ms` / `skill_threshold` / `max_actions` 越界 | **启动失败**（即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
 | 块内出现未知键（`timeout` 之类拼错） | **启动失败**（`strict`，不静默跑缺省） |
-| `INTENT_FOCUS_THRESHOLD ∈ [0,1]` | 覆盖配置块的 `threshold`（环境变量优先） |
-| `INTENT_FOCUS_THRESHOLD` **为空串** | 视为未设置（**不会**隐式变成 `0`——阈值 0 会让所有工具入选且毫无报错） |
-| `INTENT_FOCUS_THRESHOLD` 越界 / 非数字 | **启动失败** |
+| `INTENT_FOCUS_SKILL_THRESHOLD ∈ [0,1]` | 覆盖配置块的 `skill_threshold`（环境变量优先） |
+| `INTENT_FOCUS_SKILL_THRESHOLD` **为空串** | 视为未设置（**不会**隐式变成 `0`——阈值 0 会让所有工具入选且毫无报错） |
+| `INTENT_FOCUS_SKILL_THRESHOLD` 越界 / 非数字 | **启动失败** |
 
 ### 21.5 降级与零变更
 

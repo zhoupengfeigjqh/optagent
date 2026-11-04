@@ -38,7 +38,7 @@
     **本体技能需在提示中补充技能聚焦说明**。
   - 已回写规格：`## Clarifications`、技能 / 提示相关 FR、SC-013 / SC-014、假设、非目标、
     影响面与 D1~D7；新增 FR-019、FR-047、FR-048、TR-11。
-- 尚未经用户逐项确认的默认口径：D2（`INTENT_FOCUS_THRESHOLD` 改为技能阈值）、
+- 尚未经用户逐项确认的默认口径：D2（`INTENT_FOCUS_SKILL_THRESHOLD` 改为技能阈值）、
   D4（不新增开关）、D5（类别 + name 去重）、D7（未匹配本体的本体技能不选中）。
 - 技术侧已取证事实（供后续 `plan` 直接使用）：
   - 技能 `SKILL.md` frontmatter 已含 `name`、`description` 与 `metadata.ontology_id` / `ontology_name`；

@@ -199,7 +199,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000      # 缺省；区间 300~10000
-  threshold: 0.6         # 缺省；可被 INTENT_FOCUS_THRESHOLD 覆盖
+  skill_threshold: 0.6   # 缺省；可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
 ```
 
 | 情形 | 结果 |
@@ -207,12 +207,12 @@ intent_focus:
 | 整块缺失 | 启动成功，功能不可用（`unconfigured`），一条 `info` 日志 |
 | `base_url` 与 `api_key` 任一缺失 | **启动失败**（可读报错：半配置会被误读成运行期故障） |
 | `$ENV` 引用未设置或为**空串** | **启动失败**（MUST NOT 落到 `DEEPSEEK_API_KEY` 兜底；空串按"未设置"处理） |
-| `timeout_ms ∉ [300,10000]` / `threshold ∉ [0,1]` | **启动失败**（报错指名 `intent_focus.<字段>` 与合法区间、当前值；即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
+| `timeout_ms ∉ [300,10000]` / `skill_threshold ∉ [0,1]` | **启动失败**（报错指名 `intent_focus.<字段>` 与合法区间、当前值；即使阈值被环境变量覆盖，配置文件里的坏值照样拒绝） |
 | 出现 `max_actions` | **启动失败**（该键 2026-10-26 起已移除：入选不设条数上限；留着旧键会静默失效） |
 | 块内出现**未知键**（如把 `timeout_ms` 写成 `timeout`） | **启动失败**（`strict`，MUST NOT 静默跑缺省） |
-| 设了 `INTENT_FOCUS_THRESHOLD` 且 ∈ `[0,1]` | 覆盖配置块的 `threshold`（**环境变量优先**） |
-| `INTENT_FOCUS_THRESHOLD` 为**空串**（`INTENT_FOCUS_THRESHOLD=`） | 视为**未设置**，回落配置文件（`z.coerce.number` 会把 `''` 变成 `0` ⇒ 所有工具都入选且零报错，故必须显式拦掉） |
-| `INTENT_FOCUS_THRESHOLD` 越界或非数字 | **启动失败**（不静默收敛） |
+| 设了 `INTENT_FOCUS_SKILL_THRESHOLD` 且 ∈ `[0,1]` | 覆盖配置块的 `skill_threshold`（**环境变量优先**） |
+| `INTENT_FOCUS_SKILL_THRESHOLD` 为**空串**（`INTENT_FOCUS_SKILL_THRESHOLD=`） | 视为**未设置**，回落配置文件（`z.coerce.number` 会把 `''` 变成 `0` ⇒ 所有工具都入选且零报错，故必须显式拦掉） |
+| `INTENT_FOCUS_SKILL_THRESHOLD` 越界或非数字 | **启动失败**（不静默收敛） |
 | `base_url` 非 `http(s)://` 开头 | **启动失败** |
 | `base_url` 带路径（如 `http://laya:8000/v1`） | **启动失败**（请求路径由客户端拼 `/v1/systemone`，带路径会变成 `/v1/v1/systemone`） |
 

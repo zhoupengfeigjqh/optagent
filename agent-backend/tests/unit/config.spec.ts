@@ -138,7 +138,7 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect('intentFocus' in config).toBe(false);
   });
 
-  it('可省略项走缺省：model / timeout_ms / threshold / ontology_threshold / 上限', () => {
+  it('可省略项走缺省：model / timeout_ms / skill_threshold / ontology_threshold / 上限', () => {
     const config = loadConfig({ env: okEnv, configPath: writeConfig(minimal) });
 
     expect(config.intentFocus).toEqual({
@@ -146,7 +146,7 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       model: 'laya-multilingual',
       apiKey: 'laya-dev-key',
       timeoutMs: 10000,
-      threshold: 0.8,
+      skillThreshold: 0.8,
       ontologyThreshold: 0.8,
       maxSkills: 32,
       maxCapabilities: 96,
@@ -176,14 +176,14 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     const config = loadConfig({
       env: okEnv,
       configPath: writeConfig(
-        `${minimal}  model: laya-multilingual-v0.4.0\n  timeout_ms: 4500\n  threshold: 0.65\n`,
+        `${minimal}  model: laya-multilingual-v0.4.0\n  timeout_ms: 4500\n  skill_threshold: 0.65\n`,
       ),
     });
 
     expect(config.intentFocus).toMatchObject({
       model: 'laya-multilingual-v0.4.0',
       timeoutMs: 4500,
-      threshold: 0.65,
+      skillThreshold: 0.65,
     });
     expect(Object.isFrozen(config.intentFocus)).toBe(true);
   });
@@ -244,11 +244,11 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect(messageOf(`${minimal}  timeout_ms: 300.5\n`)).toContain('intent_focus.timeout_ms');
   });
 
-  it('threshold 越界时拒绝启动（即使设了环境变量也不放过坏值）', () => {
-    expect(messageOf(`${minimal}  threshold: 1.5\n`)).toContain('intent_focus.threshold');
+  it('skill_threshold 越界时拒绝启动（即使设了环境变量也不放过坏值）', () => {
+    expect(messageOf(`${minimal}  skill_threshold: 1.5\n`)).toContain('intent_focus.skill_threshold');
     expect(
-      messageOf(`${minimal}  threshold: 1.5\n`, { ...okEnv, INTENT_FOCUS_THRESHOLD: '0.5' }),
-    ).toContain('intent_focus.threshold');
+      messageOf(`${minimal}  skill_threshold: 1.5\n`, { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '0.5' }),
+    ).toContain('intent_focus.skill_threshold');
   });
 
   it('已移除的 max_actions 仍被拒绝（strict 键校验），避免旧配置静默失效', () => {
@@ -259,27 +259,27 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect(messageOf(`${minimal}  timeout: 3000\n`)).toContain('intent_focus');
   });
 
-  it('INTENT_FOCUS_THRESHOLD 覆盖配置文件里的 threshold', () => {
+  it('INTENT_FOCUS_SKILL_THRESHOLD 覆盖配置文件里的 skill_threshold', () => {
     const config = loadConfig({
-      env: { ...okEnv, INTENT_FOCUS_THRESHOLD: '0.8' },
-      configPath: writeConfig(`${minimal}  threshold: 0.4\n`),
+      env: { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '0.8' },
+      configPath: writeConfig(`${minimal}  skill_threshold: 0.4\n`),
     });
 
-    expect(config.intentFocus?.threshold).toBe(0.8);
+    expect(config.intentFocus?.skillThreshold).toBe(0.8);
   });
 
-  it('INTENT_FOCUS_THRESHOLD 为空串时视为未设置（不静默变成 0）', () => {
+  it('INTENT_FOCUS_SKILL_THRESHOLD 为空串时视为未设置（不静默变成 0）', () => {
     const config = loadConfig({
-      env: { ...okEnv, INTENT_FOCUS_THRESHOLD: '' },
-      configPath: writeConfig(`${minimal}  threshold: 0.4\n`),
+      env: { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '' },
+      configPath: writeConfig(`${minimal}  skill_threshold: 0.4\n`),
     });
 
-    expect(config.intentFocus?.threshold).toBe(0.4);
+    expect(config.intentFocus?.skillThreshold).toBe(0.4);
   });
 
-  it('INTENT_FOCUS_THRESHOLD 越界时拒绝启动，文案指名该变量', () => {
-    const message = messageOf(minimal, { ...okEnv, INTENT_FOCUS_THRESHOLD: '1.5' });
+  it('INTENT_FOCUS_SKILL_THRESHOLD 越界时拒绝启动，文案指名该变量', () => {
+    const message = messageOf(minimal, { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '1.5' });
 
-    expect(message).toContain('INTENT_FOCUS_THRESHOLD');
+    expect(message).toContain('INTENT_FOCUS_SKILL_THRESHOLD');
   });
 });

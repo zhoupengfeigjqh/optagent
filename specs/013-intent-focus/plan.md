@@ -13,7 +13,7 @@
 - **影响范围**：`agent-backend`、`frontend`、`admin-backend`、`admin-frontend`（四侧，宪章原则七）+ 根编排新增一个模型服务
 - **技术栈**：沿用四侧既有栈（Node ≥20 / TS 6 / Fastify 5 / Vue 3.5 + Vite），**零新增第三方依赖**（宪章原则六）
 - **用户补充口径**（2026-10-25，进入 `/speckit.tasks` 前）：模型镜像固定 **`chaitin/decis:laya-multilingual-v0.4.0`**；
-  判定阈值 MUST 支持环境变量 **`INTENT_FOCUS_THRESHOLD`**（优先于配置文件）
+  判定阈值 MUST 支持环境变量 **`INTENT_FOCUS_SKILL_THRESHOLD`**（优先于配置文件）
 - **门禁**：本地执行（宪章原则三/八），容器不参与
 - **设计产物**：[research.md](./research.md)（F1~F11 取证 + D1~D13 决策 + 12 项被否决方案）、
   [data-model.md](./data-model.md)、[contracts/intent-focus-api.md](./contracts/intent-focus-api.md)、[quickstart.md](./quickstart.md)
@@ -24,7 +24,7 @@
 
 开启「意图聚焦」的数字人，用户每提交一条消息（`POST /api/threads/{id}/messages`），运行环境在**主对话模型调用之前**，
 用**独立容器部署的 Laya 多语言决策模型（`laya-multilingual`）**做一次结构化判定：发**一条 `choice` 命题**
-（选项 = 各候选工具 + `__none__`"无需工具"），拿回**互斥概率**；按 `threshold`（默认 0.5）+ `maxActions`（默认 3）筛出**工具组合**，铸成固定文案
+（选项 = 各候选工具 + `__none__`"无需工具"），拿回**互斥概率**；按 `skill_threshold`（默认 0.5）+ `maxActions`（默认 3）筛出**工具组合**，铸成固定文案
 「请将当前规划重点聚焦于：<工具英文名>，<工具英文名>」追加到**本轮** `systemExtra`（`guidance` 之前）。
 
 判定**只作用于本轮的规划范围**：不进历史、不进摘要、不进后续轮次素材、不在界面出现。每轮判定（含空结果、跳过、降级、未配置）
@@ -44,7 +44,7 @@
 **Storage**：文件系统
 - 线程记录：`users/{uid}/user-data/{agentName}/threads/{threadId}/intent-focus.jsonl`（新增，独立于 `history.jsonl` / `next-actions.json`）
 - 配置：既有 `SOUL.md` frontmatter（新增键 `intent_focus`）；`config.yaml` 新增可选块 `intent_focus`；
-  **判定阈值另可由环境变量 `INTENT_FOCUS_THRESHOLD` 覆盖（优先于配置文件）**
+  **判定阈值另可由环境变量 `INTENT_FOCUS_SKILL_THRESHOLD` 覆盖（优先于配置文件）**
 
 **Testing**：Vitest 5。后端 `tests/unit`（纯逻辑：筛选/铸造/记录）+ `tests/integration`（发送端点、判定链路、降级）；前端与源码同目录 `*.spec.ts`。**不依赖真实 Laya 与真实 LLM**（一律桩：注入 `fetch` 或注入判定端口实现）。
 
@@ -178,7 +178,7 @@ specs/001-digital-human-platform/contracts/
 | D6 | 开关走 `SOUL.md` frontmatter `intent_focus`（仅 true 时写，运行侧 fail-closed 逐次读盘） |
 | D7 | 跳过标记 `skip_intent_focus` 走请求体（服务端可校验），两个预置动作入口置位 |
 | D8 | 聚焦提示插在 `systemExtra` 的 `guidance` **之前**（保住"本轮指令最末段"的既有口径） |
-| D9 | `threshold=0.5`（**可由 `INTENT_FOCUS_THRESHOLD` 环境变量覆盖，优先于配置文件**）/ `max_actions=3` / 候选上限 24；概率降序 + 同概率按清单原序（确定性） |
+| D9 | `skill_threshold=0.5`（**可由 `INTENT_FOCUS_SKILL_THRESHOLD` 环境变量覆盖，优先于配置文件**）/ `max_actions=3` / 候选上限 24；概率降序 + 同概率按清单原序（确定性） |
 | D10 | `config.yaml` 新增可选块 `intent_focus`；令牌**独立解析**，不走 `DEEPSEEK_API_KEY` 兜底；阈值两源（env 优先），其余参数单源（仅配置块） |
 | D11 | 镜像 `chaitin/decis:laya-multilingual-v0.4.0`（**固定版本**），env 按模型要求注入 |
 | D12 | `run-manager.ts` 539 → 拆出 `run-consume.ts` |
@@ -216,7 +216,7 @@ specs/001-digital-human-platform/contracts/
 | `src/domain/prompt-builder.ts` | 101 | `PromptSources.focusPrompt?`；在 `guidance` 之前插入（有内容才占位） | L88-99 |
 | `src/routes/chat.ts` | 295 | schema 加 `skip_intent_focus: {type:'boolean'}`；body 类型同步；传给 `startRun` | L40-65 / L126-132 / 调用处 |
 | `src/context.ts` | 41 | **不改动**：判定端口只经 `RunManagerDeps.intentFocus` 注入，`routes/chat.ts` 不直接判定 | — |
-| `src/config.ts` | 224 | `intentFocusSchema`（optional）+ 冻结字段；`base_url` http(s) 校验；`envSchema` 新增 `INTENT_FOCUS_THRESHOLD`（0~1，可选）并**覆盖**配置块里的 `threshold`；越界即启动失败 | `envSchema` / `yamlSchema` / `AppConfig` / `loadConfig` |
+| `src/config.ts` | 224 | `intentFocusSchema`（optional）+ 冻结字段；`base_url` http(s) 校验；`envSchema` 新增 `INTENT_FOCUS_SKILL_THRESHOLD`（0~1，可选）并**覆盖**配置块里的 `skill_threshold`；越界即启动失败 | `envSchema` / `yamlSchema` / `AppConfig` / `loadConfig` |
 | `config.example.yaml` | 16 | 新增带注释的 `intent_focus` 示例（含"缺失即功能不可用"说明） | 文件末尾 |
 | `vitest.config.ts` | 205 | 逐模块 80% 清单追加三个新模块 | 清单末尾 |
 
@@ -314,7 +314,7 @@ specs/001-digital-human-platform/contracts/
 | **平台差异（Windows 本地 / Linux 容器）** | 已登记：① 记录重写走"临时文件 + `fs.renameSync` 原子替换"，Windows 上目标被占用时可能 `EPERM` ⇒ 失败保留原文件 + 告警（MUST NOT 抛错）；② `fetch` 超时统一用 `AbortSignal.timeout`，两平台一致；③ 配置地址在容器内必须是服务名 `http://laya:8000`，本地直跑是 `http://127.0.0.1:8103`（与既有 `PUBLIC_BASE_URL` 同一类坑，`quickstart` 显式标注）。 |
 | **契约面控制（本次决定）** | **不新增公开端点**：只给既有发送端点加一个可选布尔字段。SSE、会话详情、`next-actions`、数字人详情、工具清单**显式零变更**（写进契约 §7，避免后人误加）。 |
 | **请求体严格校验（本次决定）** | `skip_intent_focus` 是**服务端可校验标记**，错配只会表现为"该跳过的没跳过"，无报错可循。Fastify 默认 ajv 是 `coerceTypes: true` + `removeAdditional: true`（`"true"` → `true`、`skipIntentFocus` 被静默丢弃）⇒ 在 `routes/chat.ts` 的 `preValidation` 加严格校验（未知字段 400、非布尔 400）。**作用域仅本路由**，不全局改 ajv 选项（避免波及其余端点）。 |
-| **判定模型参数的配置严谨化（本次决定）** | 区间与缺省值单处定义（`INTENT_FOCUS_LIMITS` / `INTENT_FOCUS_DEFAULTS`）；`intent_focus` 块 `strict()`（拼错键即启动失败）；`INTENT_FOCUS_THRESHOLD` **空串视为未设置**（`z.coerce.number('')` → `0` 会让全部工具入选且零报错）；`base_url` 带路径即拒绝（否则拼出 `/v1/v1/systemone`）；报错一律"指名 YAML 路径 + 区间 + 当前值"。 |
+| **判定模型参数的配置严谨化（本次决定）** | 区间与缺省值单处定义（`INTENT_FOCUS_LIMITS` / `INTENT_FOCUS_DEFAULTS`）；`intent_focus` 块 `strict()`（拼错键即启动失败）；`INTENT_FOCUS_SKILL_THRESHOLD` **空串视为未设置**（`z.coerce.number('')` → `0` 会让全部工具入选且零报错）；`base_url` 带路径即拒绝（否则拼出 `/v1/v1/systemone`）；报错一律"指名 YAML 路径 + 区间 + 当前值"。 |
 | **判定能力与工具清单的隔离（必须守住）** | 判定**不注册为工具、不经 MCP**（FR-054）。否则主模型会在工具循环里自行决定"要不要聚焦"，破坏"每次必先判定"的确定性，且会让 007 的 Tail Protocol 指令多一项无关工具。 |
 | **记录文件的存储决策** | 独立 `intent-focus.jsonl`（不复用 `history.jsonl` / `next-actions.json` / `meta.json`）。**理由**：FR-011（不进历史）必须在存储层成立，任何"读历史即组装上下文"的实现路径都不该有机会带上它。 |
 | **已知存量观察（不在本次范围）** | `admin-backend` 等子项目 `package.json` 的 `description` 含非法 UTF-8 字节问题（007 已登记）——本特性不触碰、不修。 |

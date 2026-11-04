@@ -440,7 +440,7 @@ normalizeId(v) = v == null ? null : String(v).trim() || null
 
 ### 7.2 阈值
 
-- 技能：`score > config.threshold`。
+- 技能：`score > config.skillThreshold`。
 - 能力：`score > config.ontologyThreshold`。
 - 分数先 clamp 到 `[0, 1]`；非有限数、缺失、越界（clamp 前非数字）→ 不入选。
 - 数据补充行为：`score = null`，`selected = true`，不参与阈值；只在主行为直接入选时产生。
@@ -487,7 +487,7 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000          # 300~10000
-  threshold: 0.6             # 技能阈值；环境变量 INTENT_FOCUS_THRESHOLD 优先
+  skill_threshold: 0.6       # 技能阈值；环境变量 INTENT_FOCUS_SKILL_THRESHOLD 优先
   ontology_threshold: 0.6    # 能力阈值；环境变量 INTENT_FOCUS_ONTOLOGY_THRESHOLD 优先
   max_skills: 32             # 可选，1~256
   max_capabilities: 96       # 可选，1~256
@@ -497,13 +497,13 @@ intent_focus:
 - `intent_focus` 整块缺失 → 功能不可用；开关开启时记录 `unconfigured`，启动不失败。
 - 块存在但字段不全 / 越界 → 启动失败（与 013 一致）。
 - 未知键 → 启动失败（`strict()`），避免拼写错误被静默忽略。
-- `threshold` / `ontology_threshold` 环境变量优先，但 YAML 值仍校验。
+- `skill_threshold` / `ontology_threshold` 环境变量优先，但 YAML 值仍校验。
 - `timeout_ms` 上限 10000；`max_*` 上限 256。
 
 ## 9. 兼容性
 
 - **013 记录**：旧字段 `probabilities` / `actions` / `focus_prompt` 不再写入；`readAll` 仍可读旧行，不做迁移。
-- **013 配置**：`intent_focus` 块保留；`threshold` 语义从工具阈值改为技能阈值，值域不变；新增键均可选。
+- **013 配置**：`intent_focus` 块保留；`skill_threshold` 语义从工具阈值改为技能阈值，值域不变；新增键均可选。
 - **公开 HTTP**：`skip_intent_focus` 字段、SSE 事件、历史 schema 不变；无新增请求 / 响应字段。
 - **前端 / 管理端**：无字段、无页面改动。
 - **平台数据**：只读部署物；不反向写回；不修改 `SKILL.md` / `ontology.yaml`。
