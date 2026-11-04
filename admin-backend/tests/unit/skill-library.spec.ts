@@ -302,15 +302,19 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
     expect(skills.listAll()[0]?.files.find((f) => f.path === 'references/手册.md')?.size).toBe(result.size);
   });
 
-  it('正向：改 SKILL.md → 索引 description 按新正文重新解析（卡片描述不脱节）', () => {
+  it('正向：改 SKILL.md → 索引 description 与展示名按新正文重新解析（卡片不脱节）', () => {
     const before = skills.readFile('pdf-parse', 'SKILL.md');
     skills.writeFile(
       'pdf-parse',
       'SKILL.md',
-      '---\nname: pdf-parse\ndescription: 解析 PDF 与 OCR\n---\n\n新正文\n',
+      '---\nname: pdf-parse\ndescription: 解析 PDF 与 OCR\n' +
+        'metadata:\n  display_name: 文档解析\n---\n\n新正文\n',
       before.hash,
     );
     expect(skills.read('pdf-parse').description).toBe('解析 PDF 与 OCR');
+    // 展示名跟着 SKILL.md 走；身份名（name）不因编辑而变化
+    expect(skills.read('pdf-parse').display_name).toBe('文档解析');
+    expect(skills.read('pdf-parse').name).toBe('pdf-parse');
     expect(skills.read('pdf-parse').content).toContain('新正文');
   });
 

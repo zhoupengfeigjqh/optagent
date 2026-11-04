@@ -59,6 +59,23 @@ describe('POST /api/admin/skills/install', () => {
     });
   });
 
+  it('展示名优先取 metadata.*；身份名（目录名 / 接口路径）仍是顶层 name（2026-11-04）', async () => {
+    const md =
+      '---\nname: pdf-parse\ndescription: 解析 PDF 文本层\n' +
+      'metadata:\n  title: 文档解析\n  ontology_name: 文档\n---\n\n正文\n';
+    const res = await install(zipFixture({ 'SKILL.md': md }));
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ name: 'pdf-parse', display_name: '文档解析' });
+
+    const list = await fx.app.inject({ method: 'GET', url: '/api/admin/skills?page=1' });
+    expect(list.json().items[0]).toMatchObject({ name: 'pdf-parse', display_name: '文档解析' });
+
+    const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/skills/pdf-parse' });
+    expect(detail.json()).toMatchObject({ name: 'pdf-parse', display_name: '文档解析' });
+    // 目录名与 URL 都用身份名，展示名不参与
+    expect(fs.existsSync(path.join(skillsRoot(), 'pdf-parse'))).toBe(true);
+  });
+
   it('缺少 SKILL.md → ADM_SKILL_ARCHIVE_INVALID，且无任何残留', async () => {
     const before = fs.existsSync(skillsRoot()) ? fs.readdirSync(skillsRoot()) : [];
     const res = await install(zipFixture({ 'readme.md': '没有技能说明' }));

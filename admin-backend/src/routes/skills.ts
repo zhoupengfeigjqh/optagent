@@ -29,6 +29,8 @@ export function registerSkillRoutes(app: FastifyInstance, ctx: AppContext): void
       ...paged,
       items: paged.items.map((item) => ({
         name: item.name,
+        // 展示名（2026-11-04）：界面标题用它，`name` 降为副标题——两者用途严格分离
+        display_name: item.display_name,
         description: item.description,
         installed_at: item.installed_at,
         updated_at: item.updated_at,

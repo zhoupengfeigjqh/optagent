@@ -29,9 +29,7 @@
     "grep_files"
   ],
   "mcp_services": [],
-  "skills": [
-    "raw-material-inventory"
-  ],
+  "skills": [],
   "ontologies": [
     "生产调度/原材料采购和库存"
   ],
@@ -68,5 +66,5 @@
       ]
     }
   },
-  "updated_at": "2026-10-30T15:21:37.694Z"
+  "updated_at": "2026-11-04T02:16:54.902Z"
 }

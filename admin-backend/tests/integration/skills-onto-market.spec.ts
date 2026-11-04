@@ -93,6 +93,30 @@ describe('GET /api/admin/skills/onto-market', () => {
     expect(res.json().items[0]!.status).toBe('changed');
   });
 
+  it('展示名取 metadata.*（回落 name）：市场列表与导入结果都带 display_name，目录名不变', async () => {
+    await setup(true);
+    fs.writeFileSync(
+      path.join(marketSkillDir(), 'SKILL.md'),
+      '---\nname: raw-material-inventory\ndescription: 原材料与库存本体技能\n' +
+        'metadata:\n  ontology_name: 原材料采购和库存\n---\n\n正文\n',
+    );
+
+    const market = await fx.app.inject({ method: 'GET', url: '/api/admin/skills/onto-market' });
+    expect(market.json().items[0]).toMatchObject({
+      name: 'raw-material-inventory',
+      display_name: '原材料采购和库存',
+    });
+
+    const installed = await install('生产调度', '原材料采购和库存', 'raw-material-inventory');
+    expect(installed.statusCode).toBe(201);
+    expect(installed.json()).toMatchObject({
+      name: 'raw-material-inventory',
+      display_name: '原材料采购和库存',
+    });
+    // 身份名未变：库内目录仍是 frontmatter 的 name
+    expect(fs.existsSync(path.join(fx.platformDataDir, 'skills', 'raw-material-inventory'))).toBe(true);
+  });
+
   it('未配置 ONTO_MARKET_DIR → configured=false（功能不可用但不报错）', async () => {
     await setup(false);
 

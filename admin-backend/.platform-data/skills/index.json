@@ -1,33 +1,12 @@
 {
   "items": [
     {
-      "name": "调度算法",
-      "description": "提供调度算法选型与实现指引：覆盖先来先服务、优先级、最短作业优先、轮询、加权公平、贪心与启发式排程，含适用场景、复杂度与实现要点。",
+      "name": "raw-material-inventory-new",
+      "description": "原材料采购和库存本体技能",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 2511
-        },
-        {
-          "path": "references/算法详解.md",
-          "size": 3264
-        },
-        {
-          "path": "references/选型决策树.md",
-          "size": 2190
-        }
-      ],
-      "source": "skill-1.zip",
-      "installed_at": "2026-09-15T15:23:58.671Z",
-      "updated_at": "2026-09-25T04:14:55.859Z"
-    },
-    {
-      "name": "raw-material-inventory",
-      "description": "原材料采购和库存本体技能，涵盖原材料、供应商、采购记录、库存等核心概念，支持采购单创建、取消、入库、库存查询、采购记录查询、原材料查询、供应商查询及供货能力查询等行为，并定义了从库存查询到采购入库的完整业务流程。",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "size": 17799
+          "size": 18783
         }
       ],
       "source": "onto_market:生产调度/原材料采购和库存",
@@ -35,10 +14,11 @@
         "kind": "onto_market",
         "scenario": "生产调度",
         "ontology": "原材料采购和库存",
-        "hash": "9512d6e3d37b34e7af433e063d47f91fd3a66546def790601647e1944e08c02b"
+        "hash": "5b1fe51aaa087472b380d567f7c389565a68b818d0d090714276109ebf1711c9"
       },
-      "installed_at": "2026-10-13T02:09:20.792Z",
-      "updated_at": "2026-10-13T02:09:20.792Z"
+      "installed_at": "2026-11-04T02:16:58.249Z",
+      "updated_at": "2026-11-04T02:16:58.249Z",
+      "display_name": "原材料采购和库存"
     }
   ]
 }

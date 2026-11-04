@@ -12,6 +12,11 @@ import type { SkillOrigin } from './onto-market'
 
 export interface SkillListItem {
   name: string
+  /**
+   * 界面展示名（2026-11-04）：`SKILL.md` 的 `metadata.name/title/ontology_name/display_name`，
+   * 缺失时后端回落为 `name`。**只用于展示**，请求与引用仍用 `name`。
+   */
+  display_name?: string | null
   description: string
   installed_at: string
   updated_at: string
@@ -22,6 +27,8 @@ export interface SkillListItem {
 
 export interface SkillDetail {
   name: string
+  /** 界面展示名（口径同 `SkillListItem.display_name`） */
+  display_name?: string | null
   description: string
   content: string
   /** `SKILL.md` 的内容哈希：详情页直接改正文时的乐观锁基准 */
@@ -67,6 +74,8 @@ export interface SkillFileSaved {
 
 export interface SkillInstallResult {
   name: string
+  /** 界面展示名（口径同 `SkillListItem.display_name`） */
+  display_name?: string | null
   description: string
   files: Array<{ path: string; size: number }>
   installed_at: string

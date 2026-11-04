@@ -4,9 +4,13 @@
  *
  * 数字人**按名称引用** SKILL，MUST NOT 内嵌技能正文——正文由共享技能库物化，
  * 因此"库中改了正文 → 下次部署同步生效"（`SC-009`），无需逐个改数字人。
+ *
+ * 选项**label 用展示名、value 用身份名**（2026-11-04）：选择结果与已存设计里的引用
+ * 都必须是 `name`，展示名只影响可读性；搜索仍能按 `name` 命中（`CheckboxList` 匹配 value）。
  */
 import { computed } from 'vue'
 import type { SkillListItem } from '../../api/types'
+import { skillDisplayName } from '../../utils/skill-name'
 import CheckboxList from '../common/CheckboxList.vue'
 import type { CheckboxOption } from '../common/checkbox-option'
 
@@ -22,7 +26,7 @@ const emit = defineEmits<{
 const options = computed<CheckboxOption[]>(() =>
   props.skills.map((skill) => ({
     value: skill.name,
-    label: skill.name,
+    label: skillDisplayName(skill),
     description: skill.description,
   })),
 )

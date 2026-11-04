@@ -419,13 +419,15 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **查询参数**：`page`
 
-**响应 200**：`items` 每项：`{ name, description, installed_at, updated_at, source, origin? }`（`origin` 为本体市场导入的溯源与内容指纹，见 §4.6；缺省 = 外部安装）
+**响应 200**：`items` 每项：`{ name, display_name, description, installed_at, updated_at, source, origin? }`（`origin` 为本体市场导入的溯源与内容指纹，见 §4.6；缺省 = 外部安装）
+
+**展示名（2026-11-04）**：`display_name` 按 `SKILL.md` 的 `metadata.name` → `metadata.title` → `metadata.ontology_name` → `metadata.display_name` → 顶层 `name` 取第一个非空字符串（缺失即等于 `name`）。界面以它为标题、`name` 降为副标题。**它只用于展示**——技能库目录名、接口路径参数与数字人引用键一律仍是 `name`（改名会打断引用与已部署副本）。
 
 ### 4.2 `GET /api/admin/skills/{name}`
 
 **用途**：查看单个 SKILL 的元数据与**正文全文**（`FR-036`）。
 
-**响应 200**：`{ name, description, content, content_hash, files, source, origin?, installed_at, updated_at, revision }`（`content_hash` 为 `SKILL.md` 内容哈希，供详情页直接改正文时作乐观锁基准；`revision` 为平台全局版本；`origin` 见 §4.6）
+**响应 200**：`{ name, display_name, description, content, content_hash, files, source, origin?, installed_at, updated_at, revision }`（`display_name` 口径同 §4.1；`content_hash` 为 `SKILL.md` 内容哈希，供详情页直接改正文时作乐观锁基准；`revision` 为平台全局版本；`origin` 见 §4.6）
 
 **错误码**：`ADM_SKILL_NOT_FOUND`
 
@@ -492,7 +494,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `file` | file | ✅ | ZIP 压缩包 |
 | `overwrite` | string | 可选 | `"true"` 表示名称冲突时**显式选择覆盖**（`FR-040`）；缺省时冲突即返回 `ADM_SKILL_NAME_TAKEN` |
 
-**响应 201**：`{ name, description, files, installed_at, overwritten: boolean }`
+**响应 201**：`{ name, display_name, description, files, installed_at, overwritten: boolean }`（`display_name` 口径同 §4.1）
 
 **错误码**：`ADM_SKILL_ARCHIVE_INVALID`（`FR-038`）、`ADM_SKILL_ARCHIVE_UNSAFE`（`FR-039`）、`ADM_SKILL_NAME_TAKEN`（`FR-040`）、`VALIDATION_FAILED`
 
@@ -517,7 +519,8 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `configured` | 是否配置了 `ONTO_MARKET_DIR`；`false` 时功能不可用（**不报错**） |
 | `reason` | 无法列出时的可读原因（未配置 / 目录不存在 / 不可读）；正常为 `null` |
 | `items[].scenario` / `ontology` / `skill_dir` | 市场侧三级路径（导入请求参数） |
-| `items[].name` / `description` | 来自 SKILL.md frontmatter；解析失败为 `null` 并置 `invalid_reason`（该条不可导入） |
+| `items[].name` / `description` | 来自 SKILL.md frontmatter（`name` 为**身份键**，导入后的目录名与重名判定都用它）；解析失败为 `null` 并置 `invalid_reason`（该条不可导入） |
+| `items[].display_name` | 展示名（口径同 §4.1：`metadata.*` 优先，缺失回落 `name`）；解析失败为 `null` |
 | `items[].files` / `hash` | 文件清单与**整包内容指纹**（sha256，路径参与哈希） |
 | `items[].status` | `new`（可导入）/ `unchanged`（已导入且市场无变化）/ `changed`（已导入但市场文件已变化，**可经 §4.8 更新**）/ `conflict`（库内同名但非市场来源）/ `invalid`（市场侧格式无效） |
 
@@ -529,7 +532,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **请求体**：`{ "scenario": "生产调度", "ontology": "原材料采购和库存", "skill": "raw-material-inventory" }`
 
-**响应 201**：`{ name, description, files, installed_at, overwritten: false }`
+**响应 201**：`{ name, display_name, description, files, installed_at, overwritten: false }`
 
 **错误码**：`ADM_SKILL_NAME_TAKEN`（**重名直接拒绝**——`install` 不提供覆盖；市场文件的更新走 §4.8）、`VALIDATION_FAILED`（未配置 `ONTO_MARKET_DIR`、路径越界、缺 `SKILL.md`、frontmatter 无效、超限等）
 
@@ -543,7 +546,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **覆盖边界**（四重校验，缺一不可）：①库内存在同名技能（不存在 → `VALIDATION_FAILED`，提示走 §4.7 导入）；②该技能 `origin` 为 `onto_market` 且 `scenario`/`ontology` 与本次一致（非市场来源 → `ADM_SKILL_NAME_TAKEN`，市场里挪过位置 → `VALIDATION_FAILED`）；③库内**当前内容**哈希仍等于 `origin.hash`，否则必须 `confirm: true` 显式确认（人工修改随更新被丢弃，**MUST NOT 静默覆盖**）。
 
-**响应 200**：`{ name, description, files, installed_at, overwritten: true, locally_modified, affected_agents }`
+**响应 200**：`{ name, display_name, description, files, installed_at, overwritten: true, locally_modified, affected_agents }`
 
 | 字段 | 说明 |
 |---|---|

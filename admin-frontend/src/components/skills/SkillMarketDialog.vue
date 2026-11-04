@@ -54,6 +54,17 @@ function canSelect(item: OntoMarketItem): boolean {
   return item.status === 'new' || item.status === 'changed'
 }
 
+/** 展示名：后端按 `metadata.name/title/ontology_name/display_name` 算好，缺失回落 `name`/目录名 */
+function marketDisplayName(item: OntoMarketItem): string {
+  return item.display_name ?? item.name ?? item.skill_dir
+}
+
+/** 身份名小字：展示名与 `name` 不同才返回（导入请求仍用 `skill_dir`，不受影响） */
+function marketAlias(item: OntoMarketItem): string {
+  const name = item.name
+  return name !== null && name !== marketDisplayName(item) ? name : ''
+}
+
 function statusText(item: OntoMarketItem): string {
   return item.invalid_reason ?? STATUS_TEXT[item.status]
 }
@@ -243,9 +254,16 @@ onBeforeUnmount(() => {
             @click="select(item)"
           >
             <span class="skill-market__main">
-              <span class="mono">{{ item.name ?? item.skill_dir }}</span>
-              <span class="skill-market__desc">{{ item.description ?? item.invalid_reason }}</span>
-              <span class="skill-market__path">{{ item.scenario }} / {{ item.ontology }}</span>
+              <span class="skill-market__name">{{ marketDisplayName(item) }}</span>
+              <span v-if="marketAlias(item)" class="skill-market__alias mono">{{
+                marketAlias(item)
+              }}</span>
+              <span class="skill-market__desc"
+                >描述：{{ item.description ?? item.invalid_reason }}</span
+              >
+              <span class="skill-market__path"
+                >来源：{{ item.scenario }} / {{ item.ontology }}</span
+              >
             </span>
             <span class="skill-market__status" :data-status="item.status">{{
               statusText(item)
@@ -255,7 +273,8 @@ onBeforeUnmount(() => {
       </ul>
 
       <p v-if="selected" class="skill-market__selected" role="status">
-        已选择：{{ selected.name }}（{{ selected.scenario }} / {{ selected.ontology }}）——
+        已选择：{{ marketDisplayName(selected) }}（{{ selected.scenario }} /
+        {{ selected.ontology }}）——
         {{ selected.status === 'changed' ? '将以市场现版本更新库内技能' : '将整包导入共享技能库' }}
       </p>
 
@@ -368,14 +387,20 @@ li + li .skill-market__item {
   min-width: 0;
 }
 
-.skill-market__desc {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+.skill-market__name {
+  font-weight: 500;
 }
 
+/* 身份名小字与来源路径：同一档小字（`alias` 仅在 `name` 与展示名不同时渲染） */
+.skill-market__alias,
 .skill-market__path {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+.skill-market__desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
 .skill-market__status {

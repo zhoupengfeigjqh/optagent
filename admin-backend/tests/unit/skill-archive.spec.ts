@@ -88,11 +88,42 @@ describe('纯函数：条目安全判定', () => {
 });
 
 describe('parseSkillMetadata', () => {
-  it('正向：解析 name / description（容忍 CRLF）', () => {
+  it('正向：解析 name / description（容忍 CRLF）；无 metadata 段时展示名回落 name', () => {
     expect(parseSkillMetadata('---\r\nname: x\r\ndescription: y\r\n---\r\n正文')).toEqual({
       name: 'x',
       description: 'y',
+      display_name: 'x',
     });
+  });
+
+  it('展示名优先级：metadata.name → title → ontology_name → display_name → 顶层 name', () => {
+    const cases: Array<[string, string]> = [
+      ['metadata:\n  name: 甲\ntitle: 乙\nontology_name: 丙\ndisplay_name: 丁\n', '甲'],
+      ['metadata:\n  title: 乙\nontology_name: 丙\ndisplay_name: 丁\n', '乙'],
+      ['metadata:\n  ontology_name: 丙\ndisplay_name: 丁\n', '丙'],
+      ['metadata:\n  display_name: 丁\n', '丁'],
+      ['metadata:\n  source_file: 说明.md\n', 'x'],
+    ];
+    for (const [block, expected] of cases) {
+      const raw = `---\nname: x\ndescription: y\n${block}---\n`;
+      const meta = parseSkillMetadata(raw);
+      expect(meta.display_name).toBe(expected);
+      // 身份键永远是顶层 name，不随展示名变化
+      expect(meta.name).toBe('x');
+    }
+  });
+
+  it('展示名容错：空串/纯空白/非字符串视为缺失，继续往后取；metadata 非对象也回落 name', () => {
+    const blanks = parseSkillMetadata(
+      '---\nname: x\ndescription: y\nmetadata:\n  name: "  "\n  title: 42\n  ontology_name: 丙\n---\n',
+    );
+    expect(blanks.display_name).toBe('丙');
+
+    const notObject = parseSkillMetadata('---\nname: x\ndescription: y\nmetadata: 不是对象\n---\n');
+    expect(notObject.display_name).toBe('x');
+
+    const arrayBlock = parseSkillMetadata('---\nname: x\ndescription: y\nmetadata:\n  - a\n---\n');
+    expect(arrayBlock.display_name).toBe('x');
   });
 
   it('异常：缺 frontmatter / 缺字段 / 空字段 → ADM_SKILL_ARCHIVE_INVALID', () => {

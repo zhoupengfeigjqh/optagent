@@ -22,7 +22,10 @@ export interface OntoMarketItem {
   ontology: string
   /** `skills/` 下的技能目录名（导入请求的 skill 参数） */
   skill_dir: string
+  /** `SKILL.md` 顶层 `name`：**身份键**（导入后的目录名与重名判定都用它） */
   name: string | null
+  /** 界面展示名（`metadata.name/title/ontology_name/display_name`，缺失回落 `name`） */
+  display_name?: string | null
   description: string | null
   /** 市场侧文件格式无效时的可读原因；非 null 不可导入 */
   invalid_reason: string | null
@@ -42,6 +45,8 @@ export interface OntoMarketListing {
 /** 本体市场更新结果（§4.8）：安装结果 + 传播面信息 */
 export interface OntoMarketUpdateResult {
   name: string
+  /** 界面展示名（口径同 `OntoMarketItem.display_name`） */
+  display_name?: string | null
   description: string
   files: Array<{ path: string; size: number }>
   /** 首次导入时间（更新不改变它） */

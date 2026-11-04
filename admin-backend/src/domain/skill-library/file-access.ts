@@ -59,6 +59,8 @@ export interface SkillFileWriteOutcome {
   path: string;
   size: number;
   hash: string;
+  /** 改的是 `SKILL.md` 时为按新正文解析出的展示名；其他文件为 `null` */
+  display_name: string | null;
   /** 改的是 `SKILL.md` 时为按新正文解析出的描述；其他文件为 `null` */
   description: string | null;
 }
@@ -248,6 +250,7 @@ export function writeSkillFile(
     );
   }
 
+  let displayName: string | null = null;
   let description: string | null = null;
   if (normalized === 'SKILL.md') {
     const metadata = parseSkillMetadata(content);
@@ -258,12 +261,19 @@ export function writeSkillFile(
           '改名请重新打包 ZIP 覆盖安装（数字人按名称引用，改名会打断引用）',
       );
     }
+    displayName = metadata.display_name;
     description = metadata.description;
   }
 
   writeAtomicFile(deps, abs, bytes);
 
-  return { path: normalized, size: bytes.length, hash: contentHash(bytes), description };
+  return {
+    path: normalized,
+    size: bytes.length,
+    hash: contentHash(bytes),
+    display_name: displayName,
+    description,
+  };
 }
 
 /**

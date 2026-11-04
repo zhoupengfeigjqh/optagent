@@ -23,6 +23,7 @@ import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 import { removeTree } from '../../infra/fs-remove.js';
 import { extractSkillArchive, type ArchiveLimits, type SkillArchive } from './archive.js';
+import { withDisplayNames } from './display-name.js';
 import {
   SKILLS_DIR,
   contentHash,
@@ -52,6 +53,11 @@ export interface SkillFileInfo {
 
 export interface SkillRecord {
   name: string;
+  /**
+   * 界面展示名（2026-11-04）：取自 `SKILL.md` 的 `metadata.name/title/ontology_name/display_name`，
+   * 缺失即回落 `name`。**不参与**目录名与任何引用键（见 `metadata.ts`）。
+   */
+  display_name: string;
   description: string;
   files: SkillFileInfo[];
   source: string;
@@ -70,6 +76,7 @@ export interface SkillDetail extends SkillRecord {
 
 export interface SkillInstallResult {
   name: string;
+  display_name: string;
   description: string;
   files: SkillFileInfo[];
   installed_at: string;
@@ -102,13 +109,23 @@ export class SkillLibraryService {
     this.logger = options.logger;
   }
 
-  /** 全部 SKILL 元数据（按名称排序，保证分页稳定） */
+  /**
+   * 全部 SKILL 元数据（按名称排序，保证分页稳定）。
+   *
+   * 存量索引缺 `display_name`（2026-11-04 新增字段）时**回读 `SKILL.md` 补一次并写回索引**
+   * （见 `display-name.ts`）：市场技能早在 frontmatter 里带了 `metadata`，只回落 `name`
+   * 会让卡片停在英文名。
+   */
   listAll(): SkillRecord[] {
     const doc = this.store.readJson<SkillIndexDocument>(INDEX_REL);
     const items = Array.isArray(doc?.items) ? doc.items : [];
     // 以磁盘实际存在的目录为准，剔除索引里已无实体的残留项（防止"幽灵卡片"）
     const live = items.filter((item) => this.store.exists(this.dirRel(item.name)));
-    return [...live].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+    const { items: named, backfilled } = withDisplayNames(this.store, live);
+    const sorted = named.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+    // 只在真的补到旧记录时写盘（补完即不再进入本分支）
+    if (backfilled) this.writeIndex(sorted);
+    return sorted;
   }
 
   /** 名称集合（供统一清单判定，`FR-019`） */
@@ -203,6 +220,8 @@ export class SkillLibraryService {
         {
           ...record,
           files,
+          // 改的是 SKILL.md 时展示名也要跟着正文走（metadata 段可能被一起改掉）
+          display_name: outcome.display_name ?? record.display_name,
           description: outcome.description ?? record.description,
           updated_at: updatedAt,
         },
@@ -254,6 +273,7 @@ export class SkillLibraryService {
     const now = new Date().toISOString();
     const record: SkillRecord = {
       name: metadata.name,
+      display_name: metadata.display_name,
       description: metadata.description,
       files: archive.entries,
       source: options.source,
@@ -269,6 +289,7 @@ export class SkillLibraryService {
 
     return {
       name: record.name,
+      display_name: record.display_name,
       description: record.description,
       files: record.files,
       installed_at: record.installed_at,
@@ -309,6 +330,7 @@ export class SkillLibraryService {
       .sort((a, b) => a.path.localeCompare(b.path));
     const record: SkillRecord = {
       name: metadata.name,
+      display_name: metadata.display_name,
       description: metadata.description,
       files: entries,
       source: options.source,
@@ -332,6 +354,7 @@ export class SkillLibraryService {
 
     return {
       name: record.name,
+      display_name: record.display_name,
       description: record.description,
       files: entries,
       installed_at: record.installed_at,
@@ -373,6 +396,7 @@ export class SkillLibraryService {
       .sort((a, b) => a.path.localeCompare(b.path));
     const record: SkillRecord = {
       name: metadata.name,
+      display_name: metadata.display_name,
       description: metadata.description,
       files: entries,
       source: options.source,
@@ -396,6 +420,7 @@ export class SkillLibraryService {
 
     return {
       name: record.name,
+      display_name: record.display_name,
       description: record.description,
       files: entries,
       installed_at: record.installed_at,

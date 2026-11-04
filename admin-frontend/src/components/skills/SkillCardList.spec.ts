@@ -29,6 +29,46 @@ describe('SkillCardList', () => {
     expect(wrapper.text()).toContain('解析 PDF 文本层')
   })
 
+  it('展示名优先：标题用 display_name，并在下方补一行小字 name（2026-11-04）', () => {
+    const wrapper = mountList({
+      items: [{ ...ITEMS[0]!, display_name: '文档解析' }],
+    })
+    expect(wrapper.find('.card__title').text()).toContain('文档解析')
+    expect(wrapper.find('.card__name').text()).toBe('pdf-parse')
+  })
+
+  it('无 display_name（旧索引）→ 标题回落 name，且不渲染重复小字', () => {
+    const wrapper = mountList()
+    expect(wrapper.find('.card__title').text()).toContain('pdf-parse')
+    expect(wrapper.find('.card__name').exists()).toBe(false)
+  })
+
+  it('固定四段：展示名 / name / 描述： / 来源：（2026-11-04）', () => {
+    const wrapper = mountList({
+      items: [
+        {
+          ...ITEMS[0]!,
+          display_name: '文档解析',
+          origin: {
+            kind: 'onto_market',
+            scenario: '生产调度',
+            ontology: '原材料采购和库存',
+            hash: 'h1',
+          },
+        },
+      ],
+    })
+    expect(wrapper.find('.card__title').text()).toContain('文档解析')
+    expect(wrapper.find('.card__name').text()).toBe('pdf-parse')
+    expect(wrapper.find('.card__description').text()).toBe('描述：解析 PDF 文本层')
+    expect(wrapper.find('.card__meta').text()).toBe('来源：生产调度 / 原材料采购和库存')
+  })
+
+  it('外部安装（无 origin）不渲染来源行（来源可缺省）', () => {
+    const wrapper = mountList()
+    expect(wrapper.find('.card__meta').exists()).toBe(false)
+  })
+
   it('点击「查看与编辑」发出 open(name)', async () => {
     const wrapper = mountList()
     await wrapper

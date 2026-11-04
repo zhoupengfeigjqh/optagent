@@ -35,8 +35,10 @@ export interface OntoMarketItem {
   ontology: string;
   /** `skills/` 下的技能目录名（导入请求的 `skill` 参数） */
   skill_dir: string;
-  /** frontmatter 的 `name`；解析失败为 null */
+  /** frontmatter 的 `name`（身份键：目录名与导入后的重名判定都用它）；解析失败为 null */
   name: string | null;
+  /** 界面展示名（`metadata.name/title/ontology_name/display_name`，缺失回落 `name`） */
+  display_name: string | null;
   description: string | null;
   /** 解析失败原因；非 null 时不可导入 */
   invalid_reason: string | null;
@@ -173,6 +175,7 @@ function scanMarketSkills(root: string): OntoMarketItem[] {
           items.push({
             ...base,
             name: meta.name,
+            display_name: meta.display_name,
             description: meta.description,
             invalid_reason: null,
             files: toEntries(collected),
@@ -184,6 +187,7 @@ function scanMarketSkills(root: string): OntoMarketItem[] {
           items.push({
             ...base,
             name: null,
+            display_name: null,
             description: null,
             invalid_reason: err instanceof Error ? err.message : String(err),
             files: [],
@@ -240,13 +244,13 @@ export function listOntoMarket(root: string | null, skills: SkillLibraryService)
   };
 }
 
-/** 读取市场上一个技能包：文件内容 + 元数据 + 整包哈希（导入与列表共用） */
+/** 读取市场上一个技能包：文件内容 + 身份名 + 整包哈希（导入与更新共用） */
 export function readMarketSkillPackage(
   root: string,
   ref: OntoMarketRef,
 ): {
+  /** frontmatter 的 `name`：更新时用来定位库内同名技能（展示名走 `listAll()` 的记录） */
   name: string;
-  description: string;
   files: Map<string, Buffer>;
   entries: Array<{ path: string; size: number }>;
   hash: string;
@@ -268,7 +272,6 @@ export function readMarketSkillPackage(
   const meta = parseSkillMetadata(skillMd.toString('utf8'));
   return {
     name: meta.name,
-    description: meta.description,
     files,
     entries: toEntries(collected),
     hash: packageHash(collected),

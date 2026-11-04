@@ -19,6 +19,7 @@ import type {
   SkillFileContent,
   SkillFileSaved,
 } from '../../api/types'
+import { skillDisplayName, skillHasAlias } from '../../utils/skill-name'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import FileTree from '../common/FileTree.vue'
@@ -54,6 +55,11 @@ const confirmDelete = ref(false)
  * 这里只是不给编辑入口——**两层都要有**，界面不渲染编辑器，服务端才是权威。
  */
 const readOnly = computed(() => props.skill?.origin?.kind === 'onto_market')
+
+/** 标题用展示名（`metadata.*` 优先，缺失回落 `name`） */
+const title = computed(() => skillDisplayName(props.skill) || '加载中…')
+/** 展示名与身份名不同 → 标题下方补一行小字 `name`（它是目录名与引用键） */
+const hasAlias = computed(() => skillHasAlias(props.skill))
 
 /** 编辑区是否有未保存的修改（由 `SkillFileEditor` 回传） */
 const dirty = ref(false)
@@ -175,7 +181,10 @@ async function doDelete(): Promise<void> {
   <section class="skill-viewer" aria-labelledby="skill-viewer-title">
     <header class="skill-viewer__header">
       <button type="button" class="btn" @click="requestBack">← 返回列表</button>
-      <h2 id="skill-viewer-title">{{ props.skill?.name ?? '加载中…' }}</h2>
+      <div class="skill-viewer__title">
+        <h2 id="skill-viewer-title">{{ title }}</h2>
+        <p v-if="hasAlias" class="skill-viewer__alias mono">{{ props.skill?.name }}</p>
+      </div>
       <button type="button" class="btn" :disabled="!props.skill" @click="requestDelete">
         删除
       </button>
@@ -288,10 +297,21 @@ async function doDelete(): Promise<void> {
   margin-bottom: var(--space-3);
 }
 
-.skill-viewer__header h2 {
+.skill-viewer__title {
   flex: 1;
+  min-width: 0;
+}
+
+.skill-viewer__header h2 {
   margin: 0;
   font-size: var(--font-size-lg);
+}
+
+/* 身份名小字：展示名与 `name` 不同时才渲染 */
+.skill-viewer__alias {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .skill-viewer__meta {

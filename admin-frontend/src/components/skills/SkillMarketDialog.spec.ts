@@ -70,6 +70,30 @@ describe('SkillMarketDialog —— 扫描与状态', () => {
     expect(btn.attributes('disabled')).toBeUndefined()
   })
 
+  it('展示名优先（2026-11-04）：列表显示 metadata 展示名，并补一行小字 name', async () => {
+    fetchOntoMarket.mockResolvedValue(listing([item({ display_name: '原材料采购和库存' })]))
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const btn = wrapper.find('.skill-market__item')
+    expect(btn.find('.skill-market__name').text()).toBe('原材料采购和库存')
+    expect(btn.find('.skill-market__alias').text()).toBe('raw-material-inventory')
+
+    // 第三、四条：描述与来源路径（口径与 SKILL 卡片一致）
+    expect(btn.find('.skill-market__desc').text()).toBe('描述：原材料与库存本体技能')
+    expect(btn.find('.skill-market__path').text()).toBe('来源：生产调度 / 原材料采购和库存')
+
+    // 选中后的文本与导入请求都用身份名 / 目录名，展示名不参与请求
+    await btn.trigger('click')
+    expect(wrapper.find('.skill-market__selected').text()).toContain('原材料采购和库存')
+    await wrapper.find('[data-test="import"]').trigger('click')
+    expect(installOntoMarketSkill).toHaveBeenCalledWith(
+      '生产调度',
+      '原材料采购和库存',
+      'raw-material-inventory',
+    )
+  })
+
   it('changed → "市场文件已变化 · 可更新"且可选；conflict → 不可选', async () => {
     fetchOntoMarket.mockResolvedValue(
       listing([
