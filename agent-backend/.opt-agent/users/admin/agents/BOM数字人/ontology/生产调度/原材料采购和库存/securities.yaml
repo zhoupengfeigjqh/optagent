@@ -1,0 +1,57 @@
+securities:
+- action_name: CreatePurchaseRecord
+  title: 创建原材料采购单
+  op_type: command
+  scope:
+  - everyone
+  confirm: true
+  confirm_content: 确认采购信息正确性：请再次确认该采购信息，例如关联的客户订单是否真实有效，采购数量和到位时间是否合理。
+- action_name: CancelPurchaseRecord
+  title: 取消原材料采购单
+  op_type: command
+  scope:
+  - everyone
+  confirm: true
+  confirm_content: 确认采购取消的原因：确认取消采购单是否合理，是否存在违约风险。
+- action_name: ReceiveRawMaterial
+  title: 入库原材料
+  op_type: command
+  scope:
+  - everyone
+  confirm: true
+  confirm_content: 确认入库的准确性：请确认到货的原材料、数量、供应商是否与采购单一致。
+- action_name: QueryInventory
+  title: 查询原材料库存信息
+  op_type: query
+  scope:
+  - everyone
+  confirm: false
+  confirm_content: ''
+- action_name: QueryPurchaseRecords
+  title: 查询原材料采购单信息
+  op_type: query
+  scope:
+  - everyone
+  confirm: false
+  confirm_content: ''
+- action_name: QueryRawMaterials
+  title: 查询原材料基本信息
+  op_type: query
+  scope:
+  - everyone
+  confirm: false
+  confirm_content: ''
+- action_name: QuerySuppliers
+  title: 查询供应商信息
+  op_type: query
+  scope:
+  - everyone
+  confirm: false
+  confirm_content: ''
+- action_name: QuerySupplierCapability
+  title: 查询供应商供货能力
+  op_type: query
+  scope:
+  - everyone
+  confirm: false
+  confirm_content: ''

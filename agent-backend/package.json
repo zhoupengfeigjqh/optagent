@@ -19,6 +19,7 @@
     "test:integration": "vitest run tests/integration",
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "gate": "npm run typecheck && npm run lint && npm run test:coverage && npm run build",
     "smoke": "tsx scripts/smoke.ts",
     "perf": "tsx scripts/perf.ts",
     "db:inspect": "tsx scripts/clear-db.ts inspect",

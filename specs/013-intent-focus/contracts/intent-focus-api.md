@@ -10,6 +10,12 @@
 > 本文覆盖四段契约：**配置（设计态/物化）**、**公开 HTTP（消息发送）**、
 > **内部 HTTP（backend → Laya）**、**线程目录文件（记录）**。
 > 结论先行：**SSE、会话详情、`next-actions` 端点、数字人详情、工具清单三处零变更**（§7）。
+>
+> **2026-11-04 废止说明（016）**：`specs/016-ontology-skill-focus` 已**整体替换**本契约中的
+> 工具候选口径。自 016 起：不再构造工具候选、不做工具评分、不再写 `probabilities` /
+> `actions` / `focus_prompt`；`intent_focus` 开关与 `skip_intent_focus` 保留，语义由
+> 「工具聚焦」改为「技能聚焦 + 本体能力聚焦」。本文件仅作为 013 历史契约保留，新实现以
+> `specs/016-ontology-skill-focus/contracts/intent-focus-api.md` 为准。
 
 ---
 
