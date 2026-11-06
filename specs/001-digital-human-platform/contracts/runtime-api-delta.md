@@ -36,6 +36,7 @@
 | R22 | **意图聚焦**（特性 `013-intent-focus`，2026-10-25）：SOUL.md frontmatter 新增 `intent_focus` 开关；`POST /api/threads/{id}/messages` 请求体新增 `skip_intent_focus`；线程目录新增 `intent-focus.jsonl`（只写、无运行期读取方）；主模型调用前新增一次有界判定（独立 Laya 服务，直连 HTTP） | 新增配置字段 + 请求字段 + 侧车文件 + 时序变更 | 否（开关缺省**关闭**；SSE 事件集合、会话详情、`next-actions` 端点、数字人详情、工具清单**零变更**） |
 | R23 | **MCP 工具显示名**（2026-10-27）：MCP 服务配置新增 `tool_labels`（`{原始工具名: 人读名称}`）；部署物化进 `MCP.json`（非空才写、按白名单过滤孤儿键）；运行环境据此取 `AgentTool.label`（优先级：平台配置 > 服务端 `Tool.title` > `server: tool`），用于**意图聚焦命题**与平台工具清单展示 | 新增配置字段 + 物化键 + 展示名来源 | 否（缺省不写键：存量 `MCP.json` 字节不变、英文拼接行为零变化；工具调用名不变） |
 | R24 | **MCP 工具入参 schema 的根标题**（2026-10-30，方案 A）：下发给模型 / HITL / 管理端工具清单的 `parameters`，根节点 `title`（SDK 生成的类名）改为 `x-title`，值取服务端 `Tool.title`（`@mcp.tool(title=...)`）；服务端未声明则**原样透传** | 数据形状变更（仅根节点键名） | 否（字段级 `title` 一字不动；未声明标题的工具 schema 逐字不变） |
+| R25 | **聊天流首帧与心跳**（2026-11-06）：`POST /api/threads/{id}/messages` 建连即写注释帧 `: connected`，此后每 15s 写 `: ping`；响应头补 `x-accel-buffering: no`（详见 §24） | 连接层行为（新增注释帧 + 响应头） | 否（注释帧按 SSE 规范被客户端忽略；事件集合 / 载荷 / 终结语义零变更，前端零改动） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1586,3 +1587,42 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 - **兼容**：`x-` 前缀是 JSON Schema 的扩展约定，模型与校验器均忽略；不改调用名（`{server}__{tool}`）、权限与 `description`；
 - **回滚**：撤掉两处 `withServerTitleX` 调用即回到 SDK 原样，无需数据迁移；
 - **测试**：运行侧 `agent-backend/tests/unit/mcp-schema-view.spec.ts`、管理侧 `admin-backend/tests/unit/tool-schema-title.spec.ts`（同一组用例：有标题 / 无标题 / 字段级标题不动 / 幂等 / 不改入参）。
+
+---
+
+## §24 R25 — 聊天流（SSE）的首帧与心跳（2026-11-06）
+
+### 24.1 语义
+
+`POST /api/threads/{id}/messages` 的响应是长连接 SSE。此前**首个字节要等到本轮第一个业务事件**才写出，而本轮在写出前要依次经过：MCP 就绪有界等待 → 意图聚焦判定（预算 10s）→ 模型首 token。这段静默对中间设备而言就是"空闲"，代理 / 负载均衡会按空闲时长掐连接（Nginx `proxy_read_timeout` 默认 60s，云 LB 常见 15~60s），表现为"用户看到网络失败，而后端其实跑完并落盘"。
+
+本次为**连接层加固**，不改任何业务语义：
+
+| 帧 | 时机 | 形态 | 客户端行为 |
+|---|---|---|---|
+| 首帧 | 建连即写（`writeHead` 之后、订阅之前） | `: connected\n\n` | 注释行，按 SSE 规范忽略 |
+| 心跳 | 每 **15s**（`SSE_HEARTBEAT_MS`） | `: ping\n\n` | 同上 |
+| 业务事件 | 原有节奏 | `event: <type>\ndata: <json>\n\n` | 不变（`thinking` / `content` / `tool_call` / `tool_call_end` / `interaction_request` / `done` / `error`） |
+
+**MUST**：
+
+1. 首帧与心跳 MUST 是注释行（以 `:` 开头），MUST NOT 引入新事件名——否则前端 `decodeStreamEvent` 会把未知事件当噪音丢弃，白白占用带宽且污染"事件集合零变更"的既有口径；
+2. 客户端 MUST 容忍注释帧（前端 `utils/sse-parser.ts` 的 `parseBlock` 已按规范跳过 `:` 行）；
+3. 心跳定时器 MUST 在 `done` / `error`（正常终结）与连接 `close`（客户端断开）两处清理，且终结时**先清后 `end()`**；
+4. 释放之后 MUST NOT 再写任何字节（避免 `write after end`）；
+5. 首帧 MUST NOT 依赖 `flushHeaders`——`app.inject`（`light-my-request`）的假 Response 没有该方法，写首帧本身即冲刷响应头。
+
+### 24.2 生效面
+
+| 面 | 位置 | 表现 |
+|---|---|---|
+| 连接实现 | `agent-backend/src/infra/sse.ts`（`openSseConnection`） | 首帧 + 15s 心跳 + 幂等 `dispose` / `finish` |
+| 路由接线 | `agent-backend/src/routes/chat.ts`（`POST /api/threads/:id/messages`） | 建连即写首帧；`done` / `error` 时 `finish`；`req.raw.on('close')` 时 `dispose` + 退订 |
+| 响应头 | 同处 | 对齐既有三处 SSE：`cache-control: no-cache, no-transform`、`x-accel-buffering: no` |
+
+### 24.3 兼容与回滚
+
+- **兼容**：事件集合、载荷字段、终结语义、断连"仅退订、run 照跑并落盘"全部不变；前端零改动；历史与卡片零影响；
+- **可观测收益**：首字节时间（TTFB）不再等于首 token 时间，慢轮次可直接区分"判定慢"与"模型慢"；
+- **回滚**：删除 `openSseConnection` 的调用、恢复内联订阅即可，无数据迁移；
+- **测试**：`agent-backend/tests/unit/sse-connection.spec.ts`（首帧先行 / 心跳间隔 / 释放后静默 / `finish` 幂等）、`agent-backend/tests/integration/chat-sse.spec.ts`（真实监听端口：闸门挡住业务事件时仍能读到 `: connected`，放开后 `content` / `done` 照常到达）。

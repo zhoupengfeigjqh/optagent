@@ -15,7 +15,7 @@
 import {
   IntentFocusRunner,
   type IntentFocusClient,
-} from '../src/domain/intent-focus-runner.js';
+} from '../src/domain/intent-focus/runner.js';
 import { loadFocusEnv } from './lib/focus-fixture.js';
 
 const { root, user, agent, config: focus, client: real } = loadFocusEnv();

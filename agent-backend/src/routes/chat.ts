@@ -30,9 +30,10 @@ import {
   parseSpaceDir,
   userDataDir,
 } from '../domain/dirs.js';
-import type { FocusToolTip } from '../domain/ontology-focus/types.js';
+import type { FocusToolTip } from '../domain/intent-focus/types.js';
 import { MAX_ACTIVE_THREADS_PER_USER } from '../domain/run-limits.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
+import { openSseConnection } from '../infra/sse.js';
 import { ApiError } from '../server.js';
 import type { FileReference } from '../types.js';
 
@@ -58,6 +59,9 @@ const messageBodySchema = {
       type: 'array',
       items: { type: 'object' },
     },
+    // 018：术语替换前的用户原话 —— **已停用**（2026-11-07 展示与提交同源，前端不再发送）。
+    // 服务端保留解析以兼容旧客户端：收到时仍按"`content` 给模型、本字段落盘"处理。
+    original_content: { type: 'string', minLength: 1 },
     attachments: {
       type: 'array',
       maxItems: MAX_ATTACHMENTS,
@@ -177,6 +181,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         skip_intent_focus?: boolean;
         /** 卡片回传的隐藏工具提示（结构透传，不校验） */
         tool_tips?: FocusToolTip[];
+        /** 018：术语替换前的原话（已停用，仅为旧客户端兼容；模型仍看 `content`） */
+        original_content?: string;
       };
 
       // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
@@ -281,6 +287,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           ...(body.skip_intent_focus === true ? { skipIntentFocus: true } : {}),
           // 016：卡片回传的隐藏工具提示（只进本轮系统提示词；不落历史）
           ...(body.tool_tips && body.tool_tips.length > 0 ? { toolTips: body.tool_tips } : {}),
+          // 018：术语替换后，模型看替换文、历史与气泡留原话
+          ...(body.original_content && body.original_content !== body.content
+            ? { displayContent: body.original_content }
+            : {}),
         });
       } catch (err) {
         releaseQuota();
@@ -299,15 +309,24 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
       reply.hijack();
       reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        // 关掉 Nginx 的响应缓冲：否则注释帧/增量会被攒着不发，"流式"退化为一次性返回
+        'x-accel-buffering': 'no',
       });
+      // 首帧注释 + 15s 心跳（见 `infra/sse.ts`）：建连即写首个字节，避免本轮在
+      // "MCP 就绪 + 意图聚焦判定 + 首 token" 的静默期被代理/LB 判为空闲而掐断。
+      // 注释行按 SSE 规范由客户端忽略，前端解析器已跳过 ⇒ 事件集合与载荷零变化。
+      const sse = openSseConnection(reply.raw);
       const unsubscribe = run.subscribe((e) => {
-        reply.raw.write(`event: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`);
-        if (e.type === 'done' || e.type === 'error') reply.raw.end();
+        sse.event(e.type, e.data);
+        if (e.type === 'done' || e.type === 'error') sse.finish();
       });
-      reply.raw.on('close', unsubscribe);
+      req.raw.on('close', () => {
+        sse.dispose();
+        unsubscribe();
+      });
       return reply;
     },
   );

@@ -84,6 +84,8 @@ describe('useNextStepPrompt —— 确认发送（2026-10-16）', () => {
         attachments: [],
         // 016：隐藏工具提示走结构化字段；卡片点击**不再跳过**意图聚焦
         toolTips: [TIP],
+        // 018：卡片正文是模型产出的定型提示词，不参与术语替换预检
+        skipTermCheck: true,
       },
       { settleBeforeReturn: false },
     )

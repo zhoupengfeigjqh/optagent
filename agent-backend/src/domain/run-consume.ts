@@ -10,7 +10,7 @@
 import type { HistoryMessage, RunRuntime } from '../types.js';
 import { formatCurrentTime, toSeconds } from './message-format.js';
 import { renderToolTipsInstruction } from './next-actions.js';
-import type { FocusToolTip } from './ontology-focus/types.js';
+import type { FocusToolTip } from './intent-focus/types.js';
 import { buildPromptMessages } from './prompt-builder.js';
 import type { FinalizeTurn, RunFinalizer } from './run-finalize.js';
 import type { RunImpl } from './run-impl.js';
@@ -60,6 +60,19 @@ export async function consumeTurn(
   const { userId, threadId, agent, thinking } = opts;
   const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
   if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
+  /**
+   * 018：**提交给模型的是替换后文本，落进历史的是用户原话**。
+   *
+   * 这两者只在"用户确认使用替换"这一种情况下不同；`displayContent` 缺省时复用同一个对象，
+   * 保证未替换的轮次行为逐字不变（含 attachments 等字段）。
+   *
+   * **现状**（2026-11-07 二次拍板：展示与提交同源）：前端不再送 `original_content`，
+   * 故 `displayContent` 恒缺省、两部分是同一个对象；分支保留以兼容旧客户端。
+   */
+  const storedUserMessage: HistoryMessage =
+    opts.displayContent === undefined
+      ? userMessage
+      : { ...userMessage, content: opts.displayContent };
   /**
    * 007：本轮运行期事实（工具清单由 `agent-factory` 在装配工具后**回填**）。
    *
@@ -300,7 +313,7 @@ export async function consumeTurn(
           }
           // 落盘失败时 finalizer 已广播 HISTORY_WRITE_FAILED：本轮按失败记账，
           // 不能记成成功（否则 run.end 日志与用户所见相反）
-          outcome = (await ctx.finalizer.done(run, turn, userMessage, ev.usage))
+          outcome = (await ctx.finalizer.done(run, turn, storedUserMessage, ev.usage))
             ? { ok: true }
             : { ok: false, error_code: 'HISTORY_WRITE_FAILED' };
           return;
@@ -311,7 +324,7 @@ export async function consumeTurn(
             outcome = { ok: false, error_code: 'ABORTED' };
             return;
           }
-          await ctx.finalizer.error(run, turn, userMessage, ev);
+          await ctx.finalizer.error(run, turn, storedUserMessage, ev);
           outcome = { ok: false, error_code: ev.code };
           return;
       }
@@ -323,7 +336,7 @@ export async function consumeTurn(
      * 凭空消失（历史里根本没有）——同一件事三套行为的其中一套。
      */
     outcome = { ok: false, error_code: 'LLM_ERROR' };
-    await ctx.finalizer.error(run, turn, userMessage, {
+    await ctx.finalizer.error(run, turn, storedUserMessage, {
       code: 'LLM_ERROR',
       message: 'LLM 流异常结束',
     });
@@ -347,7 +360,7 @@ export async function consumeTurn(
     ctx.deps.onCrash?.(agent.key, err);
     // 崩溃同样落盘（2026-10-27）：用户消息与本轮失败留痕，避免"刷新后消息凭空出现"
     if (!alreadySettled) {
-      await ctx.finalizer.error(run, turn, userMessage, {
+      await ctx.finalizer.error(run, turn, storedUserMessage, {
         code: 'INTERNAL_ERROR',
         message: '内部错误，请重试',
       });

@@ -78,6 +78,22 @@ describe('useChatStream —— 乐观用户气泡（十七次调整）', () => {
     await pending
   })
 
+  it('术语替换后：气泡显示的就是实际提交的替换文本（2026-11-07 展示与提交同源）', async () => {
+    const store = createChatStreamStore(makeDeps({ fetchImpl: PENDING_FETCH }))
+
+    const pending = store.send({
+      content: '看下供应商或供应商编号的库存',
+      attachments: [],
+    })
+    await flush()
+
+    // 用户点了"使用替换后"，聊天区必须看到替换结果，而不是他最初的原话
+    expect(store.pendingUserMessage.value?.content).toBe('看下供应商或供应商编号的库存')
+
+    void store.stop()
+    await pending
+  })
+
   it('流完成：pendingUserMessage 清除（历史真身经 onTurnFinished 接管，不重复渲染）', async () => {
     const onTurnFinished = vi.fn()
     const store = createChatStreamStore(makeDeps({ onTurnFinished }))
@@ -308,10 +324,13 @@ describe('useChatStream —— 跨轮隔离（2026-10-27）', () => {
 
     // 旧流此刻才收尾，而且带一个终局 error：修复前会把已完成的新一轮打成 FAILED
     releaseFirst(
-      new Response('event: error\ndata: {"error":{"code":"LLM_ERROR","message":"旧轮已失效"}}\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      }),
+      new Response(
+        'event: error\ndata: {"error":{"code":"LLM_ERROR","message":"旧轮已失效"}}\n\n',
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        },
+      ),
     )
     await settled
     await flush()

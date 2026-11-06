@@ -46,10 +46,10 @@ npm test
 | 文件 | 验证点 |
 |---|---|
 | `tests/unit/skill-header.spec.ts` | 只读头部、metadata 类型归一化、缺字段、非法 frontmatter |
-| `tests/unit/ontology-loader.spec.ts` | 多本体同 ID、缺 title、`data_supplements` 缺失 / 空 / 悬空行为名、坏 YAML、符号链接 |
-| `tests/unit/ontology-candidates.spec.ts` | 非本体技能进入、未匹配本体不进入、qid 唯一、上限截断 |
-| `tests/unit/ontology-selection.spec.ts` | **严格大于**阈值、数据补充只进行为类且不级联、补充后行为类 ≤96 截断、跨本体去重、来源合并 |
-| `tests/unit/ontology-prompt.spec.ts` | 非本体无能力段、本体技能说明在前、同本体多技能不重复、1200 截断 |
+| `tests/unit/ontology-loader.spec.ts` | 多本体同 ID、缺 title、`functions` / `rules` 不解析、坏 YAML、符号链接 |
+| `tests/unit/ontology-candidates.spec.ts` | 非本体技能进入、未匹配本体不进入、qid 唯一、上限截断、无 `kind` |
+| `tests/unit/ontology-selection.spec.ts` | **严格大于**阈值、规则不补入、行为 ≤96 截断、跨本体去重 |
+| `tests/unit/ontology-prompt.spec.ts` | 非本体无本体段、无「关联函数」、同本体多技能不重复、1200 截断 |
 | `tests/unit/intent-focus.spec.ts` | `prepareState` 200 字符、处置五态、`no_skills` / `below_threshold` |
 
 ## 4. 集成测试（临时目录 + 桩 Laya）
@@ -64,8 +64,9 @@ npm run test:integration
 1. 开关关闭：零文件读取、零 Laya 调用、零记录。
 2. 卡片 / `guidance`：零读取、零调用、一条 `skipped`。
 3. Laya 未配置：一条 `unconfigured`，回答正常。
-4. 只有非本体技能入选：提示只有 `技能：...`；本体读取 / 能力评分 / 工具评分 = 0。
-5. 本体技能入选：`技能：...；本体能力：行为：...，函数：...`；`data_supplements` 声明的查询行为出现在行为段且来源为「数据补充」；同名去重。
+4. 只有非本体技能入选：提示只有 `n）{name}（非本体技能）`；本体读取 / 行为评分 / 工具评分 = 0。
+5. 本体技能入选：`n）{name}（本体技能；ontology_name='…'，ontology_id='…'；关联行为：…）`；
+   `data_supplements` 声明的低分查询行为**不出现**；同名去重。
 6. 部分批次失败：有可用结果则继续；无结果 `degraded`；用户无可见错误。
 7. 两轮独立：第二轮不携带第一轮提示；`history.jsonl` / 摘要 / 记忆中无聚焦文本。
 8. 旧工具聚焦：工具候选构造、工具评分、旧提示出现次数均为 0。
@@ -110,8 +111,8 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
-  skill_threshold: 0.6
-  ontology_threshold: 0.6
+  skill_threshold: 0.8
+  ontology_threshold: 0.8
   max_skills: 32
   max_capabilities: 96
 ```

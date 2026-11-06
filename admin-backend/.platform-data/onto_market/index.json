@@ -9,10 +9,10 @@
         "ontology_name": "原材料采购和库存",
         "ontology_id": "1"
       },
-      "ontology_hash": "6624bc44468f8526966c119afb21c3a380f1f4b0926eba23619bb9ce482d605d",
-      "securities_hash": "bb55b3fa799b604c799b0eddeecd216a46b75e2eb0a554b8331e05ee1098aa3f",
+      "ontology_hash": "0b4ad45ed836c21d7a0ab5a8e899da26a13ac2db7ba70bea8c5b8aaa78350abd",
+      "securities_hash": "8619e229df4cf9395eac24be4ea77c6dc336a0772a2d899c439c421480af0a76",
       "installed_at": "2026-10-13T02:09:16.541Z",
-      "updated_at": "2026-11-04T02:41:08.070Z"
+      "updated_at": "2026-11-06T13:59:43.071Z"
     }
   ]
 }

@@ -35,8 +35,8 @@ import type { ResolveInteractionResult, RunState, SsePayload } from './run-event
 import { RunFinalizer } from './run-finalize.js';
 import { RunImpl, type Run } from './run-impl.js';
 import { consumeTurn } from './run-consume.js';
-import type { IntentFocusPort } from './intent-focus-runner.js';
-import type { FocusToolTip } from './ontology-focus/types.js';
+import type { IntentFocusPort } from './intent-focus/runner.js';
+import type { FocusToolTip } from './intent-focus/types.js';
 import type { ToolEventStore } from './tool-events.js';
 
 // 类型迁移到 run-events / run-impl 后仍从本模块转出：既有引用路径（routes、测试）不变
@@ -105,6 +105,16 @@ export interface StartRunOptions {
   threadId: string;
   agent: RunAgentLike;
   userMessage: string;
+  /**
+   * 018：落盘/展示用的用户原话（术语替换前）。
+   *
+   * 本轮提交给模型的仍是 `userMessage`（替换后），但历史与用户气泡 MUST 保留原话——
+   * 否则用户看到的是"自己没说过的话"。缺省 = 不做替换，两者同一文本。
+   *
+   * **已停用**（2026-11-07 二次拍板：展示与提交同源）：本项目前端不再送本字段，
+   * 聊天区与历史显示的就是实际发出的文本；保留该能力只为兼容旧客户端。
+   */
+  displayContent?: string;
   thinking: boolean;
   /** @ 文件引用（随 user 消息落盘；提交 LLM 时追加引用段） */
   attachments?: FileReference[];

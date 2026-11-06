@@ -1,7 +1,7 @@
-# 数据模型：意图聚焦（技能与本体能力聚焦）
+# 数据模型：意图聚焦（技能与本体行为聚焦）
 
 - **特性**：`016-ontology-skill-focus`
-- **日期**：2026-11-04
+- **日期**：2026-11-04（2026-11-06 修订：能力只到行为；删除函数、规则与数据补充；记录只写入选行为）
 - **输入**：[spec.md](./spec.md)、[research.md](./research.md)
 - **范围**：运行环境侧（`agent-backend`）的只读领域模型、判定中间态、提示语法与线程侧车记录。无数据库、无表、无迁移。
 
@@ -10,13 +10,14 @@
 | # | 不变量 |
 |---|---|
 | **DM-1** | 技能判定只使用 `SKILL.md` 头部（`name`、`description`、`metadata`），不读正文。 |
-| **DM-2** | 本体判定只使用 `ontology.yaml` 的 `metadata`、`functions`、`behaviors`、`rules`，不读 `concepts` / `relations` / 参数 / 代码文件。 |
-| **DM-3** | 非本体技能只产生技能决策；不产生本体文件、行为、函数决策。 |
+| **DM-2** | 本体判定只使用 `ontology.yaml` 的 `metadata` 与 `behaviors`；不读 `functions` / `rules` / `concepts` / `relations` / 参数 / 代码文件。 |
+| **DM-3** | 非本体技能只产生技能决策；不产生本体文件、行为决策。 |
 | **DM-4** | 未匹配到任何 `ontology.yaml` 的本体技能不产生技能候选（按需求第 3 条不选中）。 |
-| **DM-5** | 技能与能力判定均为 `noul`；入选条件为 `score > threshold`，等于阈值即丢弃。 |
-| **DM-6** | 去重键为 `kind + name`；行为、函数分别去重；跨本体同名合并。 |
+| **DM-5** | 技能与行为判定均为 `noul`；入选条件为 `score > threshold`，等于阈值即丢弃。 |
+| **DM-6** | 去重键为 `ontology_id + name`；跨本体同名不合并。 |
 | **DM-7** | 记录只写线程侧车 `intent-focus.jsonl`，不写历史 / 摘要 / 记忆；运行期无读取方。 |
 | **DM-8** | 每轮判定独立；本体解析只在本轮内缓存，不跨轮复用。 |
+| **DM-9** | 记录中的行为明细**只含入选行为**，不写恒定字段（类别 / 是否入选 / 入选来源）。 |
 
 ## 2. 输入实体
 
@@ -55,44 +56,25 @@
 | `path` | string | 是 | 相对数字人目录的路径（POSIX 分隔符，用于留档） |
 | `ontologyId` | string | 是 | `metadata.ontology_id` 归一化值 |
 | `ontologyName` | string \| null | 否 | `metadata.ontology_name` |
-| `scenarioId` | string \| null | 否 | `metadata.scenario_id` |
-| `scenarioName` | string \| null | 否 | `metadata.scenario_name` |
-| `functions` | OntologyFunction[] | 是 | 缺失按空数组 |
+| `scenarioId` | string \| null | 否 | `metadata.scenario_id`（仅解析，不参与判定） |
+| `scenarioName` | string \| null | 否 | `metadata.scenario_name`（仅解析，不参与判定） |
 | `behaviors` | OntologyBehavior[] | 是 | 缺失按空数组 |
-| `rules` | OntologyRule[] | 是 | 缺失按空数组 |
 
 **校验 / 归一化**：
 - `metadata.ontology_id` 空白 → 该文件丢弃并记录 `missing_ontology_id`。
-- `functions[].name` / `behaviors[].name` 空白 → 该条目丢弃并记录。
-- `title` 非字符串或空白 → 视为缺失；`displayTitle = title ?? name`。
-- `rules[].behavior` 非字符串 / 空白 → 该规则丢弃。
-- `rules[].data_supplements` 非数组 → 按空数组；非字符串项丢弃；空列表视为无补充。
+- `behaviors[].name` 空白 → 该条目丢弃并记录。
+- `title` 非字符串或空白 → 视为缺失；`title ?? name`。
+- `functions` / `rules` 出现时**忽略**：不解析、不告警、不进入任何下游结构。
 
-### 2.4 OntologyFunction
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `name` | string | 是 | 函数标识 |
-| `title` | string \| null | 否 | 中文标题 |
-| `displayTitle` | string | 是 | `title ?? name` |
-
-### 2.5 OntologyBehavior
+### 2.4 OntologyBehavior
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `name` | string | 是 | 行为标识 |
-| `title` | string \| null | 否 | 中文标题；通常存在，缺失时回退 `name` |
-| `description` | string \| null | 否 | 行为说明；本期只用于留档，不参与题面 |
-| `opType` | string \| null | 否 | `command` / `query` 等 |
-| `displayTitle` | string | 是 | `title ?? name`（本期按规格回退 name） |
+| `title` | string | 是 | 中文标题；缺失时回退 `name`（解析期即兜底） |
+| `opType` | string \| null | 否 | `command` / `query` 等；仅解析，不参与题面 |
 
-### 2.6 OntologyRule
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `name` | string \| null | 否 | 规则名（仅留档） |
-| `behavior` | string | 是 | 被关联的行为 `name` |
-| `dataSupplements` | string[] | 是 | 该规则声明的查询行为 `name` 列表；缺失 / 非数组按空数组 |
+> 2026-11-06：`OntologyFunction` 与 `OntologyRule` 类型已删除；`description` 从未建模。
 
 ## 3. 判定实体
 
@@ -100,9 +82,8 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `qid` | string | 不透明题号：技能 `s1..sN`，能力 `c1..cN` |
-| `kind` | `'skill' \| 'behavior' \| 'function'` | 候选类别 |
-| `name` | string | 技能 / 行为 / 函数标识 |
+| `qid` | string | 不透明题号：技能 `s1..sN`，行为 `c1..cN` |
+| `name` | string | 技能 / 行为标识 |
 | `label` | string | 题面展示文本，≤ 40 字 |
 | `index` | number | 原序下标，用于同分稳定排序 |
 
@@ -126,14 +107,14 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `kind` | `'behavior' \| 'function'` | 类别 |
-| `name` | string | 行为 / 函数名 |
-| `title` | string | `displayTitle` |
+| `qid` | string | 不透明题号 `c1..cN` |
+| `name` | string | 行为名 |
+| `title` | string | 展示标题（解析期已用 `name` 兜底） |
 | `ontologyId` | string | 来源本体 ID |
 | `ontologyName` | string \| null | 来源本体名 |
-| `ontologyPath` | string | 来源本体路径 |
-| `ownerSkillNames` | string[] | 引用该本体的入选技能名（用于提示归属） |
 | `index` | number | 原序下标 |
+
+> 2026-11-06：候选只剩行为一类，`kind` 已删除；`ontologyPath` / `ownerSkillNames` 从未落地。
 
 ### 3.4 SkillDecision
 
@@ -150,25 +131,19 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `kind` | `'behavior' \| 'function'` | 类别 |
-| `name` | string | 行为 / 函数名 |
-| `title` | string | `displayTitle` |
-| `ontologyId` | string | 主来源本体 ID（首次出现，用于提示归属） |
-| `ontologyIds` | string[] | 全部来源本体 ID（去重合并后保留，FR-035） |
-| `ontologyName` | string \| null | 主来源本体名 |
-| `score` | number \| null | 直接入选为分数；数据补充为 null |
-| `selected` | boolean | 是否入选 |
-| `source` | `'direct' \| 'supplement' \| 'direct+supplement'` | 入选来源 |
-| `reason` | string \| null | `below_threshold` / `missing_supplement_behavior` / `data_supplement` |
+| `name` | string | 行为名 |
+| `title` | string | 展示标题 |
+| `ontologyId` | string | 归属本体 ID（去重键的一部分） |
+| `ontologyName` | string \| null | 归属本体名 |
+| `score` | number | 入选分数（恒 > 阈值） |
+| `index` | number | 原序下标（同分稳定） |
 
-### 3.6 DataSupplement
+> 2026-11-06：`kind` / `selected` / `source` / `reason` / `ontologyIds` 已删除——
+> 决策集合只表达入选行为，其余字段恒为常量或可由分数推导。
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `ontologyId` | string | 本体 ID |
-| `behavior` | string | 直接入选的主行为 |
-| `supplement` | string | 被声明的查询行为 `name` |
-| `found` | boolean | 是否在同本体 `behaviors[]` 中找到；false 表示悬空并已丢弃 |
+### 3.6 DataSupplement（已删除）
+
+2026-11-06 起不再存在：规则不解析、查询行为不再补入。
 
 ### 3.7 IntentFocusOutcome
 
@@ -178,12 +153,7 @@
 | `reason` | string \| null | 具体原因 |
 | `prompt` | string | 提示原文；无提示为空串 |
 | `skills` | SkillDecision[] | 全部已解析关联技能决策（含未匹配本体的本体技能） |
-| `behaviors` | CapabilityDecision[] | 全部行为决策 |
-| `functions` | CapabilityDecision[] | 全部函数决策 |
-| `supplements` | DataSupplement[] | 数据补充明细（含悬空名） |
-| `selectedSkills` | string[] | 入选技能名 |
-| `selectedBehaviors` | string[] | 入选行为名 |
-| `selectedFunctions` | string[] | 入选函数名 |
+| `behaviors` | CapabilityDecision[] | 入选行为（只有入选集合） |
 | `truncated` | boolean | 候选是否被上限截断 |
 | `promptTruncated` | boolean | 提示是否被 1200 字符截断 |
 | `batches` | number | 实际提交批数 |
@@ -233,13 +203,11 @@ interface IntentFocusRecord {
   reason: string | null;
   model: string | null;
   round_ms: number | null;
-  candidates: number;           // 技能 + 能力候选总数
+  candidates: number;           // 技能 + 行为候选总数
   batches: number;
   truncated: boolean;
   skills: SkillFocusRecord[];
-  behaviors: CapabilityFocusRecord[];
-  functions: CapabilityFocusRecord[];
-  data_supplements: DataSupplementRecord[];
+  behaviors: CapabilityFocusRecord[];   // 只写入选行为
   prompt: string;
   prompt_truncated: boolean;
   warnings: string[];           // 坏文件 / 无效技能 / 符号链接跳过等，不含用户可见错误
@@ -257,21 +225,11 @@ interface SkillFocusRecord {
 }
 
 interface CapabilityFocusRecord {
-  kind: 'behavior' | 'function';
   name: string;
   title: string;
   ontology_id: string;        // 归属本体（去重键的一部分）
   ontology_name: string | null;
-  score: number | null;
-  selected: boolean;
-  source: 'direct' | 'supplement' | 'direct+supplement';
-}
-
-interface DataSupplementRecord {
-  ontology_id: string;
-  behavior: string;
-  supplement: string;
-  found: boolean;
+  score: number;              // 恒 > 阈值（明细只含入选行为）
 }
 
 interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
@@ -289,9 +247,10 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
 - 旧行（含 `probabilities` / `actions` / `focus_prompt`）可被 `readAll` 读出；新代码不写这些字段，不强制旧 schema。
 - `input` 为 `prepareState` 后的文本；`input_truncated` 标记是否截断。
 - `prompt` 为最终追加文本；跳过 / 未配置 / 空结果时为空串。
-- `candidates` 计数包含技能与能力候选；`batches` 只计实际调用的批数。
+- `candidates` 计数包含技能与行为候选；`batches` 只计实际调用的批数。
 - `skipped` / `unconfigured` 不读取技能与本体：`candidates=0`、`batches=0`、`round_ms` 接近 0；
-  `skills` / `behaviors` / `functions` 为空数组，`warnings` 可为空。
+  `skills` / `behaviors` 为空数组，`warnings` 可为空。
+- `behaviors` 只写入选行为；不写 `kind` / `selected` / `source`，记录不出现 `functions` / `data_supplements`。
 - `warnings` 最多 50 条（超出的尾部丢弃），避免坏文件很多时单条记录失控。
 
 ### 5.3 记录示例
@@ -325,63 +284,21 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
   ],
   "behaviors": [
     {
-      "kind": "behavior",
       "name": "CreatePurchaseRecord",
       "title": "创建原材料采购单",
       "ontology_id": "1",
       "ontology_name": "原材料采购和库存",
-      "score": 0.88,
-      "selected": true,
-      "source": "direct"
+      "score": 0.88
     },
     {
-      "kind": "behavior",
       "name": "QueryPurchaseRecords",
       "title": "查询原材料采购单信息",
       "ontology_id": "1",
       "ontology_name": "原材料采购和库存",
-      "score": null,
-      "selected": true,
-      "source": "supplement"
-    },
-    {
-      "kind": "behavior",
-      "name": "QueryRawMaterials",
-      "title": "查询原材料基本信息",
-      "ontology_id": "1",
-      "ontology_name": "原材料采购和库存",
-      "score": null,
-      "selected": true,
-      "source": "supplement"
+      "score": 0.67
     }
   ],
-  "functions": [
-    {
-      "kind": "function",
-      "name": "checkRawMaterialUnit",
-      "title": "校验采购原材料单位一致性",
-      "ontology_id": "1",
-      "ontology_name": "原材料采购和库存",
-      "score": 0.71,
-      "selected": true,
-      "source": "direct"
-    }
-  ],
-  "data_supplements": [
-    {
-      "ontology_id": "1",
-      "behavior": "CreatePurchaseRecord",
-      "supplement": "QueryPurchaseRecords",
-      "found": true
-    },
-    {
-      "ontology_id": "1",
-      "behavior": "CreatePurchaseRecord",
-      "supplement": "QueryRawMaterials",
-      "found": true
-    }
-  ],
-  "prompt": "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords）、查询原材料基本信息（QueryRawMaterials）；关联函数：校验采购原材料单位一致性（checkRawMaterialUnit））",
+  "prompt": "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））",
   "prompt_truncated": false,
   "warnings": [],
   "error": null
@@ -394,14 +311,13 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
 
 ```text
 prompt        = prefix, "\n", item, { "\n", item }
-prefix        = "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）"
+prefix        = "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）"
 item          = index, "）", item_body
 index         = "1" | "2" | ...            // 截断后重新连续编号
 item_body     = non_ontology_body | ontology_body
 non_ontology_body = skill_name, "（非本体技能）"
 ontology_body = skill_name, "（", "本体技能", "；", ontology_ref,
-                [ "；关联行为：", entry, { "、", entry } ],
-                [ "；关联函数：", entry, { "、", entry } ], "）"
+                [ "；关联行为：", entry, { "、", entry } ], "）"
 ontology_ref  = [ "ontology_name='", ontology_name, "'，"], "ontology_id='", ontology_id, "'"
 entry         = title, "（", name, "）"
 ```
@@ -413,16 +329,17 @@ entry         = title, "（", name, "）"
 - `title` / `name` 保留原文；`title` 缺失时 `title = name`；本体无 `ontology_name` 时只写 `ontology_id='X'`。
 - 关联本体写成一组显式字段：`ontology_name='…'，ontology_id='…'`。
 - **一个本体技能恒只有一个本体**（`SKILL.md` 的单个 `ontology_id`）：每行至多一组本体字段；同一 `ontology_id` 被物化成多份文件时只取首份，不重复输出。
-- 非本体技能不产生本体/能力部分。
-- 本体技能无任何入选能力时不产生空的 `关联行为：` / `关联函数：`。
-- 同一本体只出现一次能力块；归属分数最高的入选技能。
-- 总长 ≤ 1200 字符；超限依次删末尾技能的函数条目 → 行为条目 → 整个末尾技能行，保持完整条目。
+- 非本体技能不产生本体/行为部分。
+- 本体技能无任何入选行为时不产生空的 `关联行为：` 段。
+- MUST NOT 出现 `关联函数：` 段。
+- 同一本体只出现一次行为块；归属分数最高的入选技能。
+- 总长 ≤ 1200 字符；超限依次删末尾技能的行为条目 → 整个末尾技能行，保持完整条目。
 
 ### 6.2 示例
 
 ```text
-本轮请优先聚焦以下技能或工具（仅供参考，不必局限）
-1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords）；关联函数：校验采购原材料单位一致性（checkRawMaterialUnit））
+本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））
 2）plain-skill（非本体技能）
 ```
 
@@ -441,37 +358,33 @@ normalizeId(v) = v == null ? null : String(v).trim() || null
 ### 7.2 阈值
 
 - 技能：`score > config.skillThreshold`。
-- 能力：`score > config.ontologyThreshold`。
+- 行为：`score > config.ontologyThreshold`。
 - 分数先 clamp 到 `[0, 1]`；非有限数、缺失、越界（clamp 前非数字）→ 不入选。
-- 数据补充行为：`score = null`，`selected = true`，不参与阈值；只在主行为直接入选时产生。
+- 规则不再提供任何"免疫阈值"的入选项：所有行为一视同仁。
 
 ### 7.3 去重
 
 | 类别 | 键 | 合并 |
 |---|---|---|
-| 行为 | `ontology_id + name` | 最高分、`title` 首次、`source` 合并；直接 + 补充 → `direct+supplement` |
-| 函数 | `ontology_id + name` | 最高分、`title` 首次；函数类不含补充项 |
+| 行为 | `ontology_id + name` | 最高分、`title` 首次 |
 
-- 去重后「本体 + 名称」在各自类别内唯一；**跨本体同名各自保留**（各自归属自己的本体）。
-- 去重分两处：**候选构造阶段**按 `kind + ontology_id + name` 先去重（同一题不重复送判定、不挤占 `max_capabilities`）；**选择阶段**再做一次来源合并（`direct+supplement`、分数取高）。
-- 不再保留来源本体集合（`ontology_ids` 已移除），`ontology_id` 恒为该项唯一归属。
-- 函数与行为使用同一去重逻辑（FR-035）。
-- 去重不改变 `selected`（合并后仍为 true）。
-- 去重后行为类总数 MUST ≤ 96（`FR-027`）；超限按本体原序截断补充项，`truncated = true`。
+- 去重后「本体 + 名称」唯一；**跨本体同名各自保留**（各自归属自己的本体）。
+- 去重分两处：**候选构造阶段**按 `ontology_id + name` 先去重（同一题不重复送判定、不挤占 `max_capabilities`）；**选择阶段**再做一次同键去重（保留最高分）。
+- `ontology_id` 恒为该项唯一归属。
+- 去重后行为总数 MUST ≤ 96（`FR-027`）；超限按分数序截断，`truncated = true`。
 
 ### 7.4 排序
 
-1. 直接入选：`score` 降序；同分按候选原序（技能目录序 / 本体原序 / 数组序）。
-2. 数据补充：按本体枚举序、行为数组序追加（恒排在直接入选项之后）。
-3. 提示：技能按分数降序；能力按上述顺序。
+1. 行为：`score` 降序；同分按候选原序（本体枚举序 / 行为数组序）。
+2. 提示：技能按分数降序；行为按上述顺序。
 
 ### 7.5 截断
 
 | 对象 | 上限 | 行为 |
 |---|---|---|
 | 技能候选 | 32 | 原序截断，`truncated=true` |
-| 能力候选 | 96 | 原序截断，`truncated=true` |
-| 行为类结果（含数据补充） | 96 | 去重后超限按本体原序截断补充项，`truncated=true` |
+| 行为候选 | 96 | 原序截断，`truncated=true` |
+| 行为结果 | 96 | 去重后超限按分数序截断，`truncated=true` |
 | 单批题数 | 32 | 分批；批数计入 `batches` |
 | 判定输入 | 200 字符 | 取尾部、对齐句首，`input_truncated=true` |
 | 技能题面标签 | 40 字 | 截断 |
@@ -487,10 +400,10 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000          # 300~10000
-  skill_threshold: 0.6       # 技能阈值；环境变量 INTENT_FOCUS_SKILL_THRESHOLD 优先
-  ontology_threshold: 0.6    # 能力阈值；环境变量 INTENT_FOCUS_ONTOLOGY_THRESHOLD 优先
+  skill_threshold: 0.8       # 技能阈值；环境变量 INTENT_FOCUS_SKILL_THRESHOLD 优先
+  ontology_threshold: 0.8    # 行为阈值；环境变量 INTENT_FOCUS_ONTOLOGY_THRESHOLD 优先
   max_skills: 32             # 可选，1~256
-  max_capabilities: 96       # 可选，1~256
+  max_capabilities: 96       # 可选，1~96；键名保留，语义为「行为候选上限」
 ```
 
 **约束**：
@@ -504,7 +417,8 @@ intent_focus:
 
 - **013 记录**：旧字段 `probabilities` / `actions` / `focus_prompt` 不再写入；`readAll` 仍可读旧行，不做迁移。
 - **013 配置**：`intent_focus` 块保留；`skill_threshold` 语义从工具阈值改为技能阈值，值域不变；新增键均可选。
-- **公开 HTTP**：`skip_intent_focus` 字段、SSE 事件、历史 schema 不变；无新增请求 / 响应字段。
+- **016 旧记录行**：可能含 `functions` / `data_supplements` / `kind` / `source`，`readAll` 原样读出；新代码不再写这些字段，不做迁移。
+- **公开 HTTP**：`skip_intent_focus` 字段、SSE 事件、历史 schema 不变；无新增请求 / 响应字段；`tool_tips` 结构不变。
 - **前端 / 管理端**：无字段、无页面改动。
 - **平台数据**：只读部署物；不反向写回；不修改 `SKILL.md` / `ontology.yaml`。
 
@@ -514,8 +428,8 @@ intent_focus:
 |---|---|
 | FR-011 / FR-012 | `SkillHeader.metadata`、`OntologyDefinition.ontologyId`、`SkillCandidate.matchedOntologies` |
 | FR-016 / FR-021 | `SkillDecision.score` / `CapabilityDecision.score`；`noul` 题面 |
-| FR-019 | 非本体技能无 `OntologyDefinition` / 能力决策 |
-| FR-030~FR-035 | `OntologyRule.dataSupplements`、`DataSupplement`、去重键 `kind+name` |
+| FR-019 | 非本体技能无 `OntologyDefinition` / 行为决策 |
+| FR-030~FR-035 | 规则不建模（无落点）；去重键 `ontology_id+name`；记录无 `functions` / `data_supplements` |
 | FR-041 / FR-047 / FR-048 | 提示语法 §6、`SkillFocusRecord` / `CapabilityFocusRecord` |
 | FR-050 / FR-051 | `IntentFocusRecord` |
 | FR-061 / FR-062 | 配置模型 §8 |

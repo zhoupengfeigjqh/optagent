@@ -34,10 +34,10 @@ models:
 #                                   #   $ENV 由 **backend 进程**的环境提供（agent-backend/.env.local），
 #                                   #   与 laya 容器的 DECIS_API_KEY 必须是同一个值
 #   timeout_ms: 10000               # 300~10000 的整数（毫秒）；整轮预算，超时即降级（不重试）
-#   skill_threshold: 0.6            # 0~1；技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖（环境变量优先）
+#   skill_threshold: 0.8            # 0~1；技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖（环境变量优先）
 #                                   #   环境变量留空（`INTENT_FOCUS_SKILL_THRESHOLD=`）视为未设置，不会变成 0
-#                                   #   0.6 是 2026-10-26 命题改版后的标定拐点（0.5 噪声偏多）
-#   ontology_threshold: 0.6         # 0~1；本体行为 / 函数入选阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
-#                                   #   与技能阈值分开：能力候选是短标题，分数分布与技能描述不同
+#                                   #   0.8 是 2026-11 产品口径（技能与行为同阈值；0.6 下噪声明显偏多）
+#   ontology_threshold: 0.8         # 0~1；本体行为入选阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
+#                                   #   与技能阈值分开：行为候选是短标题，分数分布与技能描述不同
 #   max_skills: 32                  # 1~256；单轮技能候选上限（超出按技能目录原序截断并留档 truncated）
-#   max_capabilities: 96            # 1~256；单轮能力候选上限（3 批 × 32，仍在 10s 预算内）
+#   max_capabilities: 96            # 1~96；单轮行为候选上限（规格硬界：3 批 × 32，仍在 10s 预算内）

@@ -30,7 +30,13 @@ export interface NextStepPromptDeps {
    * `false` = 在本地被拦下（未发出）。
    */
   send(
-    payload: { content: string; attachments: FileReference[]; toolTips?: ToolTip[] },
+    payload: {
+      content: string
+      attachments: FileReference[]
+      toolTips?: ToolTip[]
+      /** 018：卡片 prompt 是模型产出的定型文本，不参与术语替换预检 */
+      skipTermCheck?: boolean
+    },
     options: { settleBeforeReturn?: boolean },
   ): Promise<boolean>
   toast: ToastStore
@@ -73,7 +79,11 @@ export function useNextStepPrompt(deps: NextStepPromptDeps): NextStepPrompt {
     suggestionSending.value = true
     try {
       // 正文只有提示词；关联工具经 `guidance` 的隐藏通道回传（与问题实例同款）
-      const sent = await send(nextStepSendPayload(action), { settleBeforeReturn: false })
+      const sent = await send(
+        // 018：卡片正文是模型产出的定型提示词，不参与术语替换（否则"卡片"会被悄悄改写）
+        { ...nextStepSendPayload(action), skipTermCheck: true },
+        { settleBeforeReturn: false },
+      )
       // 只有真发出去了才关弹窗：被拦下（会话不可用 / 发送失败）时保留提示词，用户可重试或取消；
       // 一旦发出即关（不等本轮答完）——弹窗不能陪着输出一起挂到结束
       if (sent) pendingSuggestion.value = null

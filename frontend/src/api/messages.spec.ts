@@ -210,6 +210,22 @@ describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
   })
 })
 
+describe('buildSendMessageBody —— 术语替换（018，2026-11-07 改判）', () => {
+  const base = {
+    content: '看下供应商或供应商编号的库存',
+    thinking: false,
+    model: null,
+    attachments: [],
+  }
+
+  it('不再构造 original_content：提交什么，聊天区与历史就显示什么', () => {
+    const body = buildSendMessageBody(base) as unknown as Record<string, unknown>
+
+    expect(body.content).toBe('看下供应商或供应商编号的库存')
+    expect('original_content' in body).toBe(false)
+  })
+})
+
 describe('buildSendMessageBody —— 意图聚焦跳过标记（013）', () => {
   const base = {
     content: '按交付日期梳理这批订单的风险',

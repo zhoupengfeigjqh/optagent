@@ -130,7 +130,8 @@ describe('ProducedBell —— 未读角标', () => {
     expect(wrapper.find('.produced-bell__badge').exists()).toBe(false)
     expect(wrapper.find('.produced-bell').attributes('aria-label')).toBe('后台记录')
     // 2026-10-30：悬停说明（与定时任务入口同一手法：原生 title）
-    expect(wrapper.find('.produced-bell').attributes('title')).toBe('打开后台记录')
+    // 2026-11-07：两个分支统一为"读屏名称 + 点击动作"，此处不再是 打开后台记录
+    expect(wrapper.find('.produced-bell').attributes('title')).toBe('后台记录，点击查看')
   })
 
   it('有未读：角标显示条数，且按钮的**无障碍名称**里带上条数（不只靠视觉）', () => {

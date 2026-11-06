@@ -61,9 +61,7 @@
     "ocr"
   ],
   "skills": [],
-  "ontologies": [
-    "生产调度/原材料采购和库存"
-  ],
+  "ontologies": [],
   "scenario": {
     "scenario": "柯昆BOM合成",
     "data_prep_dirs": [
@@ -86,5 +84,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-04T07:47:28.404Z"
+  "updated_at": "2026-11-06T05:46:13.616Z"
 }

@@ -76,9 +76,9 @@ const envSchema = z.object({
     z.coerce.number().min(0).max(1).optional(),
   ),
   /**
-   * 016：本体能力（行为 / 函数）判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_threshold`。
+   * 016：本体行为判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_threshold`。
    *
-   * 技能与能力共用一个"意图"问题，但候选粒度不同（技能是几十条描述，能力是成百个短标题），
+   * 技能与行为共用一个"意图"问题，但候选粒度不同（技能是几十条描述，行为是成百个短标题），
    * 分数分布会偏移；因此保留独立旋钮，允许现场分别标定。空串同样按未设置处理。
    */
   INTENT_FOCUS_ONTOLOGY_THRESHOLD: z.preprocess(
@@ -112,24 +112,30 @@ export const INTENT_FOCUS_LIMITS = {
   /** 单轮技能候选上限 */
   maxSkillsMin: 1,
   maxSkillsMax: 256,
-  /** 单轮能力候选上限 */
+  /**
+   * 单轮行为候选上限。
+   *
+   * 上限 96 是**规格硬界**（FR-027），不是运维偏好：96 = 3 批 × 32，按 32 题
+   * 约 1.8~2.2s 估算正好落在 10s 预算内；放宽到 256 会退化成 8 批串行，
+   * 大概率在最后几批超时降级，反而让配置项看起来"改大了却没效果"。
+   */
   maxCapabilitiesMin: 1,
-  maxCapabilitiesMax: 256,
+  maxCapabilitiesMax: 96,
 } as const;
 
 /**
  * 013：可省略字段的缺省值（缺省即"照默认跑"，不是"功能关闭"）。
  *
- * `skillThreshold` 与 `domain/intent-focus.ts` 的 `DEFAULT_THRESHOLD` 同口径：0.6 是
- * 2026-10-26 命题改版（任务式问法 + 极简判据）后重新标定的拐点——0.5 下平均每轮
- * 入选 2.4 个工具且噪声大，0.6 压到 1.2 个而召回不变。
+ * 阈值缺省 **0.8**（2026-11 产品口径：技能与本体行为同阈值，两者是"本轮要不要用"
+ * 的同一个判断）。阈值不在此收敛也不在 domain 层兜底：环境变量 / 配置文件越界
+ * 一律启动失败，避免"写错却静默跑默认值"。
  */
 export const INTENT_FOCUS_DEFAULTS = {
   model: 'laya-multilingual',
   timeoutMs: 10_000,
   /**
-   * 技能与本体能力**同阈值**（2026-11 产品口径：两者都是"本轮要不要用"的同一判断，
-   * 分开标定会让"技能入选但能力全空"变成常态）。
+   * 技能与本体行为**同阈值**（2026-11 产品口径：两者都是"本轮要不要用"的同一判断，
+   * 分开标定会让"技能入选但行为全空"变成常态）。
    */
   skillThreshold: 0.8,
   ontologyThreshold: 0.8,
@@ -205,11 +211,11 @@ export interface IntentFocusConfig {
   timeoutMs: number;
   /** 技能入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
   skillThreshold: number;
-  /** 本体能力（行为 / 函数）入选分数阈值（0~1） */
+  /** 本体行为入选分数阈值（0~1） */
   ontologyThreshold: number;
   /** 单轮技能候选上限 */
   maxSkills: number;
-  /** 单轮能力候选上限 */
+  /** 单轮行为候选上限（2026-11-06 起只装行为，键名保留以兼容存量配置） */
   maxCapabilities: number;
 }
 

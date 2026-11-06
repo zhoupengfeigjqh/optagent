@@ -423,6 +423,8 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     const dir = 'ontology/生产调度/原材料采购和库存';
     expect(artifact.files.find((f) => f.relPath === `${dir}/ontology.yaml`)?.content).toBe(ONTO_YAML);
     expect(artifact.files.find((f) => f.relPath === `${dir}/securities.yaml`)?.content).toBe(ONTO_SECURITIES);
+    // 017：术语字典与两个必需文件同目录；`terms` 为空的本体产出空字典而不是空文件
+    expect(artifact.files.find((f) => f.relPath === `${dir}/term_mapping.json`)?.content).toBe('{}\n');
   });
 
   it('形状非法的存量引用被跳过：不拼出三段路径，也不凭空造目录', () => {

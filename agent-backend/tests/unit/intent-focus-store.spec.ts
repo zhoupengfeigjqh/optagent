@@ -12,8 +12,8 @@ import {
   IntentFocusStore,
   MAX_RECORD_BYTES,
   type IntentFocusRecordDraft,
-} from '../../src/domain/intent-focus-store.js';
-import type { IntentFocusDisposition } from '../../src/domain/intent-focus.js';
+} from '../../src/domain/intent-focus/store.js';
+import type { IntentFocusDisposition } from '../../src/domain/intent-focus/state.js';
 
 const UID = 'u1';
 const AGENT = '生产计划助手';
@@ -62,33 +62,22 @@ function draft(overrides: Partial<IntentFocusRecordDraft> = {}): IntentFocusReco
     ],
     behaviors: [
       {
-        kind: 'behavior',
         name: 'CreatePurchaseRecord',
         title: '创建原材料采购单',
         ontology_id: '1',
         ontology_name: '原材料采购和库存',
         score: 0.88,
-        selected: true,
-        source: 'direct',
       },
       {
-        kind: 'behavior',
         name: 'QueryPurchaseRecords',
         title: '查询原材料采购单信息',
         ontology_id: '1',
         ontology_name: '原材料采购和库存',
-        score: null,
-        selected: true,
-        source: 'supplement',
+        score: 0.81,
       },
     ],
-    functions: [],
-    data_supplements: [
-      { ontology_id: '1', behavior: 'CreatePurchaseRecord', supplement: 'QueryPurchaseRecords', found: true },
-      { ontology_id: '1', behavior: 'CreatePurchaseRecord', supplement: 'QueryRawMaterials', found: false },
-    ],
     prompt:
-      "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
+      "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
     prompt_truncated: false,
     warnings: [],
     error: null,
@@ -126,17 +115,21 @@ describe('追加与序号', () => {
 });
 
 describe('记录 schema', () => {
-  it('含技能 / 能力 / 数据补充明细与选中名单，不含旧工具字段', async () => {
+  it('只写技能与入选行为；不写函数 / 数据补充 / 恒定字段', async () => {
     const store = newStore();
     await store.append(UID, AGENT, THREAD, draft());
     const record = store.readAll(UID, AGENT, THREAD)[0]!;
 
     expect(record.skills[0]!.name).toBe('raw-material-inventory-new');
-    expect(record.behaviors.map((item) => item.source)).toEqual(['direct', 'supplement']);
-    expect(record.data_supplements).toEqual([
-      { ontology_id: '1', behavior: 'CreatePurchaseRecord', supplement: 'QueryPurchaseRecords', found: true },
-      { ontology_id: '1', behavior: 'CreatePurchaseRecord', supplement: 'QueryRawMaterials', found: false },
+    expect(record.behaviors.map((item) => item.name)).toEqual([
+      'CreatePurchaseRecord',
+      'QueryPurchaseRecords',
     ]);
+    expect(record.behaviors[0]).not.toHaveProperty('kind');
+    expect(record.behaviors[0]).not.toHaveProperty('selected');
+    expect(record.behaviors[0]).not.toHaveProperty('source');
+    expect(record).not.toHaveProperty('functions');
+    expect(record).not.toHaveProperty('data_supplements');
     expect(record).not.toHaveProperty('selected_behaviors');
     expect(record).not.toHaveProperty('ontology_files');
     expect(record).not.toHaveProperty('probabilities');

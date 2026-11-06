@@ -1,7 +1,11 @@
-# 实施计划：意图聚焦（技能与本体能力聚焦）
+# 实施计划：意图聚焦（技能与本体行为聚焦）
+
+> **2026-11-06 修订**：能力聚焦只到本体行为，`functions` 与 `rules` / `data_supplements` 整体取消，
+> 记录只写入选行为。本文件下方涉及"函数 / 数据补充 / 能力分类"的描述为历史实施记录，
+> 现行口径以 [spec.md](./spec.md)（Session 2026-11-06）与 [data-model.md](./data-model.md) 为准。
 
 - **分支**：`016-ontology-skill-focus`
-- **日期**：2026-11-04
+- **日期**：2026-11-04（2026-11-06 修订）
 - **规格**：[spec.md](./spec.md)
 - **输入**：`specs/016-ontology-skill-focus/spec.md`
 - **说明**：本计划基于现有 `agent-backend`、`laya-client`、SOUL 开关与线程侧车留档范式；不新增前端 / 管理台页面，不新增外部服务。

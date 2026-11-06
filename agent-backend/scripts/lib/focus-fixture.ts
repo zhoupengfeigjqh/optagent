@@ -11,9 +11,9 @@ import { agentDir } from '../../src/domain/dirs.js';
 import {
   buildSkillCandidates,
   type SkillCandidateResult,
-} from '../../src/domain/ontology-focus/candidates.js';
-import { loadOntologyIndex } from '../../src/domain/ontology-focus/ontology-loader.js';
-import type { OntologyIndex } from '../../src/domain/ontology-focus/types.js';
+} from '../../src/domain/intent-focus/candidates.js';
+import { loadOntologyIndex } from '../../src/domain/intent-focus/ontology-loader.js';
+import type { OntologyIndex } from '../../src/domain/intent-focus/types.js';
 import { loadSkillHeaders, type SkillHeaderLoadResult } from '../../src/domain/skill-header.js';
 import { LayaClient } from '../../src/infra/laya-client.js';
 

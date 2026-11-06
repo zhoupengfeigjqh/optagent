@@ -344,7 +344,8 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 ├── skills/{name}/SKILL.md
 └── ontology/{场景}/{本体}/
     ├── ontology.yaml
-    └── securities.yaml
+    ├── securities.yaml
+    └── term_mapping.json   ← 派生件（2026-11-06，specs/017）：concepts[].terms → title
 ```
 
 **字段映射（设计态 → 物化）**：
@@ -356,6 +357,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `mcp_services[].name` | `MCP.json` 的 `servers[]` | **只写 `name`**；`transport` / `url` / `headers` / `file_args` / `confirmation` / `rules_fields` / `allowed_tools` 取自**调用配置**（`FR-044`、`SC-011`），`url` 直接取调用配置的**唯一 `url`**（2026-09-27：不再有运行形态维度）；非空才写的键：`args` / `headers` / `file_args` / `confirmation`(≠never) / `rules_fields` / `allowed_tools` / `tool_labels`。**`headers` 是唯一的"明文凭据"出平台通道**（`FR-064`）：平台响应只回掩码，物化写原文 |
 | `skills[].name` | `skills/{name}/SKILL.md` | 从共享技能库**物化**一份副本（`FR-026`）；下次部署按库中版本覆盖 |
 | `ontologies[]`（`{场景名}/{本体名}`） | `ontology/{场景}/{本体}/ontology.yaml` + `securities.yaml` | 从本体库**整包复制这两个必需文件**（原样字节，2026-10-17，`FR-064`）；与 `skills/` 平级，不混进四件套；库内缺任一文件即**预检失败**（`ADM_ONTOLOGY_NOT_FOUND`，零写入） |
+| `ontologies[]` | `ontology/{场景}/{本体}/term_mapping.json` | **派生件**（2026-11-06，`specs/017`）：由同一份 `ontology.yaml` 的 `concepts[].terms` 生成 `{term: title}`，同 term 多义用 `或` 合并、空 terms 跳过；每次部署重算覆盖；生成失败只降级为 `{}` 并记 `deploy.term_mapping.degraded`，**不阻断部署** |
 | `scenario` | `scenario.json` | 原样写入；`data_prep_dirs` 与各目录的字段条目均**保持顺序**；`data_prep_fields` **仅在非空时写入**（无约束的目录不出现键）——"缺失"与"空对象"对运行环境同义（该目录无约束），故不留空壳（`FR-026`、`SC-018`）；`data_prep_uploads`（2026-10-13 新增）同样**仅在非空时写入**（未配置的目录不出现键），产物随数字人目录**整体覆盖**，平台侧未配置则无该键，运行环境据此回落平台默认 `.csv` + `.xlsx` |
 
 **已实现示例（现状对照）**：`.opt-agent/users/admin/agents/demo/` 下即为本格式的真实样例（`TOOL.json` / `MCP.json` / `scenario.json` / `SOUL.md` 四件套齐全，`MCP.json` 中 `servers[0].url` 即平台侧调用配置里登记的唯一连接地址）。

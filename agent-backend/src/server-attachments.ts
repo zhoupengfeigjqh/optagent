@@ -9,8 +9,8 @@
  */
 import type { Logger } from 'pino';
 import type { AppConfig } from './config.js';
-import { IntentFocusRunner, type IntentFocusPort } from './domain/intent-focus-runner.js';
-import { IntentFocusStore } from './domain/intent-focus-store.js';
+import { IntentFocusRunner, type IntentFocusPort } from './domain/intent-focus/runner.js';
+import { IntentFocusStore } from './domain/intent-focus/store.js';
 import { NextActionsStore } from './domain/next-actions.js';
 import { isIntentFocusEnabled, isNextActionsEnabled, nextActionHintsCount } from './domain/soul.js';
 import { LayaClient } from './infra/laya-client.js';

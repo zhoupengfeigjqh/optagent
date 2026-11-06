@@ -139,7 +139,7 @@ const buttonLabel = computed(() =>
  * 有未读时把条数带上，避免为了看条数还得点开。
  */
 const buttonTitle = computed(() =>
-  unread.value > 0 ? `后台记录：${unread.value} 条未读，点击查看` : '后台记录',
+  unread.value > 0 ? `后台记录：${unread.value} 条未读，点击查看` : '后台记录，点击查看',
 )
 const dialogTitle = computed(() => (view.value === 'list' ? '后台记录' : '后台结果'))
 

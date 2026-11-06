@@ -10,13 +10,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type {
-  ErrorInfo,
-  FeedbackValue,
-  FileReference,
-  ToolCallResult,
-  ToolTip,
-} from '../api/types'
+import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult, ToolTip } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
@@ -29,6 +23,7 @@ import { useNextStepPrompt } from './useNextStepPrompt'
 import { useNextSteps } from './useNextSteps'
 import { usePreview } from './usePreview'
 import { useSessionSearch } from './useSessionSearch'
+import { useTermNormalize } from './useTermNormalize'
 import { useThreads } from './useThreads'
 import { useThrottledText } from './useThrottledText'
 import { useSession } from './useAppSession'
@@ -178,6 +173,8 @@ export function useChatPanel() {
       toolTips?: ToolTip[]
       /** 013：首屏问题实例携带——本轮跳过意图聚焦（服务端可校验） */
       skipIntentFocus?: boolean
+      /** 018：内部标记——已确认过替换，不再预检 */
+      skipTermCheck?: boolean
     },
     options: { settleBeforeReturn?: boolean } = {},
   ): Promise<boolean> {
@@ -197,6 +194,14 @@ export function useChatPanel() {
       toast.push('error', `引用的文件已不存在：${missing.map((item) => item.filename).join('、')}`)
       return false
     }
+
+    // 018：只有**手动输入**做术语替换预检（弹窗打开即返回，不建会话、不清草稿）
+    const manual =
+      payload.skipTermCheck !== true &&
+      !payload.guidance &&
+      !payload.toolTips &&
+      payload.skipIntentFocus !== true
+    if (manual && (await termGate.review({ content, payload, options }))) return false
 
     if (!threads.activeId.value) {
       await threads.create()
@@ -247,6 +252,12 @@ export function useChatPanel() {
     return true
   }
 
+  /**
+   * 018：术语替换确认。实例化放在 `onSend` 之后——`onSend` 只在被调用时引用它，
+   * 不构成 TDZ；`review` 的返回值就是"是否打开了弹窗"。
+   */
+  const termGate = useTermNormalize({ api: session.termNormalize, send: onSend })
+
   function onStop(): void {
     void chat.stop()
   }
@@ -264,7 +275,8 @@ export function useChatPanel() {
     if (!turn) {
       return
     }
-    await onSend({ content: turn.content, attachments: turn.attachments })
+    // 018：重发的是历史里已确认过的文本，不再过替换预检（否则会二次弹窗）
+    await onSend({ content: turn.content, attachments: turn.attachments, skipTermCheck: true })
   }
 
   /**
@@ -282,7 +294,8 @@ export function useChatPanel() {
     if (sending.value) {
       return
     }
-    void onSend(payload)
+    // 018：历史消息已是确认后的文本，重试不再预检
+    void onSend({ ...payload, skipTermCheck: true })
   }
 
   /**
@@ -478,6 +491,8 @@ export function useChatPanel() {
     // 卡片确认弹窗的出口（2 个状态 + 3 个动作）全部来自 `useNextStepPrompt`：
     // 展开而非逐条重列，避免"清单两处各维护一份"这种最容易漏的漂移
     ...prompt,
+    // 018：替换确认弹窗（状态 + 3 个出口）来自 `useTermNormalize`，同样展开避免清单两处维护
+    ...termGate,
     onLoadMore,
     onLoadToolResult,
     onRecover,

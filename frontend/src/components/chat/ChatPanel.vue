@@ -26,6 +26,7 @@ import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
 import SessionSearch from './SessionSearch.vue'
 import SuggestionCard from './SuggestionCard.vue'
+import TermNormalizeDialog from './TermNormalizeDialog.vue'
 import UploadHintBubble from './UploadHintBubble.vue'
 import UploadMenu from './UploadMenu.vue'
 
@@ -72,6 +73,11 @@ const {
   onPickNextStep,
   onCancelSuggestion,
   onConfirmSuggestion,
+  // 018：术语替换确认弹窗（状态 + 两个出口）
+  pendingTerm,
+  termSending,
+  onUseReplacement,
+  onKeepOriginal,
   onLoadMore,
   onLoadToolResult,
   onFeedback,
@@ -390,6 +396,18 @@ onBeforeUnmount(() => {
       :server-error="interactionError"
       @submit="onSubmitInteraction"
       @reject="onRejectInteraction"
+    />
+
+    <!-- 018：术语替换确认（只有手动输入且真的发生替换时才打开） -->
+    <TermNormalizeDialog
+      v-if="pendingTerm"
+      :open="true"
+      :original="pendingTerm?.original ?? ''"
+      :normalized="pendingTerm?.normalized ?? ''"
+      :matches="pendingTerm?.matches ?? []"
+      :busy="termSending"
+      @use-replacement="onUseReplacement"
+      @keep-original="onKeepOriginal"
     />
 
     <!-- 007 US2：点卡片先经二次确认（正文为提示词全文），确认后才经既有链路发送 -->

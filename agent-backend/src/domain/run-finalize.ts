@@ -32,7 +32,7 @@ import type {
   NextActionsStore,
   NextActionsView,
 } from './next-actions.js';
-import type { FocusToolTip } from './ontology-focus/types.js';
+import type { FocusToolTip } from './intent-focus/types.js';
 import type { RunImpl } from './run-impl.js';
 import type { ToolEventStore } from './tool-events.js';
 

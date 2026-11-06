@@ -18,8 +18,8 @@ import { loadConfig, type IntentFocusConfig } from '../../src/config';
 import type { AppContext } from '../../src/context.js';
 import { agentDir, threadDir } from '../../src/domain/dirs.js';
 import { HistoryStore } from '../../src/domain/history.js';
-import { IntentFocusRunner } from '../../src/domain/intent-focus-runner.js';
-import { IntentFocusStore } from '../../src/domain/intent-focus-store.js';
+import { IntentFocusRunner } from '../../src/domain/intent-focus/runner.js';
+import { IntentFocusStore } from '../../src/domain/intent-focus/store.js';
 import {
   RunManager,
   type AgentRunRequest,
@@ -37,7 +37,7 @@ import type { LlmEvent } from '../../src/types.js';
 
 const USER = 'admin';
 const AGENT = 'demo';
-const PREFIX = '本轮请优先聚焦以下技能或工具（仅供参考，不必局限）';
+const PREFIX = '本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）';
 
 const CONFIG: IntentFocusConfig = {
   baseUrl: 'http://laya:8000',
@@ -317,7 +317,7 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     expect(client.calls[0]!.state).toBe('帮我创建一笔原材料采购单');
     expect(recorder.extras).toHaveLength(1);
     expect(recorder.extras[0]).toContain(
-      `${PREFIX}\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1）、查询采购记录（Q1）、查询原材料（Q2）；关联函数：校验采购单位一致性（F1））`,
+      `${PREFIX}\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1））`,
     );
     // 提示不进 messages，也不进历史
     expect(historyText()).not.toContain(PREFIX);
@@ -336,11 +336,10 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
       error: null,
     });
     expect(record!.skills.find((skill) => skill.name === 'onto-skill')!.selected).toBe(true);
-    expect(record!.behaviors.map((item) => item.name)).toEqual(['B1', 'Q1', 'Q2']);
-    expect(record!.data_supplements).toEqual([
-      { ontology_id: '1', behavior: 'B1', supplement: 'Q1', found: true },
-      { ontology_id: '1', behavior: 'B1', supplement: 'Q2', found: true },
-    ]);
+    // 只写入选行为：Q1/Q2 分数 0.05，规则不再补入
+    expect(record!.behaviors.map((item) => item.name)).toEqual(['B1']);
+    expect(record).not.toHaveProperty('functions');
+    expect(record).not.toHaveProperty('data_supplements');
   });
 
   it('预置动作入口（skipIntentFocus）→ 判定 0 次、不追加、仅留档 skipped', async () => {

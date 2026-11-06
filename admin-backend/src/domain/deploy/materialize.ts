@@ -12,8 +12,9 @@
  * ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": [...] }
  * ├── skills/{name}/…  ← 从共享技能库物化的整包副本
  * └── ontology/{场景}/{本体}/
- *     ├── ontology.yaml   ← 本体正文（从平台本体库原样复制，2026-10-17）
- *     └── securities.yaml ← 行为安全管控（两个文件均为必需）
+ *     ├── ontology.yaml     ← 本体正文（从平台本体库原样复制，2026-10-17）
+ *     ├── securities.yaml   ← 行为安全管控（两个文件均为必需）
+ *     └── term_mapping.json ← 术语字典（由 concepts[].terms 派生，2026-11-06）
  * ```
  *
  * **整体覆盖**：本模块产出的是"该数字人应当具有的**完整**内容清单"，
@@ -28,9 +29,11 @@
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { scenarioFields, scenarioUploads, type AgentScenario } from '../config-center/scenario.js';
 import { renderSoulMd } from '../config-center/soul-design.js';
+import type { Logger } from 'pino';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import { ONTOLOGY_FILE, SECURITIES_FILE, type OntologyStore } from '../ontology/store.js';
+import { TERM_MAPPING_FILE, buildTermMapping } from '../ontology/term-mapping.js';
 import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-writer.js';
 
 export interface MaterializeContext {
@@ -38,6 +41,8 @@ export interface MaterializeContext {
   skills: SkillLibraryService;
   /** 本体库（2026-10-17）：按引用把两个必需文件复制进数字人目录 */
   ontologies: OntologyStore;
+  /** 017：术语字典降级时记一条结构化 warning（缺省不记，纯函数结果本身仍可测） */
+  logger?: Logger;
 }
 
 /** 构造 `MCP.json` 中的一条 server 声明（字段与运行环境的读取口径对齐） */
@@ -142,6 +147,21 @@ export function buildAgentArtifact(design: AgentDesignDocument, ctx: Materialize
     const dir = `ontology/${scenario}/${ontologyName}`;
     files.push({ relPath: `${dir}/${ONTOLOGY_FILE}`, content: detail.content });
     files.push({ relPath: `${dir}/${SECURITIES_FILE}`, content: detail.securities_content });
+    // 017：术语字典随本体一并物化。派生件，任何解析问题都只降级为 `{}`，
+    // 不阻断部署（`term_mapping.ts` 的失败语义），只留一条可定位的 warning。
+    const mapping = buildTermMapping(detail.content);
+    files.push({ relPath: `${dir}/${TERM_MAPPING_FILE}`, content: mapping.json });
+    if (mapping.warnings.length > 0) {
+      ctx.logger?.warn(
+        {
+          event: 'deploy.term_mapping.degraded',
+          agent_name: design.name,
+          ontology: ref,
+          warnings: mapping.warnings,
+        },
+        '术语字典生成降级（本体与安全管控照常物化）',
+      );
+    }
   }
 
   return { name: design.name, files };

@@ -1,7 +1,7 @@
-# 运行期契约：意图聚焦（技能与本体能力聚焦）
+# 运行期契约：意图聚焦（技能与本体行为聚焦）
 
 - **特性**：`016-ontology-skill-focus`
-- **版本**：2026-11-04 / v1
+- **版本**：2026-11-04 / v1（2026-11-06 / v1.1：能力只到行为，删除函数、规则与数据补充；记录只写入选行为）
 - **替代关系**：本契约**整体替换** `specs/013-intent-focus/contracts/intent-focus-api.md` 的工具候选口径；013 的工具候选字段与配置自本特性起废弃。
 - **读者**：`agent-backend` 实现与测试、运维配置、后续排障。
 
@@ -35,8 +35,8 @@ intent_focus:
   model: laya-multilingual
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
-  skill_threshold: 0.6
-  ontology_threshold: 0.6
+  skill_threshold: 0.8
+  ontology_threshold: 0.8
   max_skills: 32
   max_capabilities: 96
 ```
@@ -47,10 +47,10 @@ intent_focus:
 | `model` | 否 | string | `laya-multilingual` | 与 `GET /v1/models` 一致 |
 | `api_key` | 是 | string / `$ENV` | — | 不回落 `DEEPSEEK_API_KEY` |
 | `timeout_ms` | 否 | 整数 300~10000 | 10000 | 单轮总预算 |
-| `skill_threshold` | 否 | 0~1 | 0.6 | **技能**阈值 |
-| `ontology_threshold` | 否 | 0~1 | 0.6 | **本体能力**阈值 |
+| `skill_threshold` | 否 | 0~1 | 0.8 | **技能**阈值 |
+| `ontology_threshold` | 否 | 0~1 | 0.8 | **本体行为**阈值 |
 | `max_skills` | 否 | 整数 1~256 | 32 | 技能候选上限 |
-| `max_capabilities` | 否 | 整数 1~256 | 96 | 行为 + 函数候选上限 |
+| `max_capabilities` | 否 | 整数 1~96 | 96 | **行为候选**上限（键名保留，勿改名；上限即 FR-027 规格硬界） |
 
 **规则**：
 - 整块缺失 → 功能不可用；开关开启时记录 `unconfigured`，启动不失败。
@@ -111,9 +111,6 @@ metadata:
   ontology_name: 原材料采购和库存
   scenario_id: '1'
   scenario_name: 生产调度
-functions:
-  - name: checkRawMaterialUnit
-    title: 校验采购原材料单位一致性
 behaviors:
   - name: CreatePurchaseRecord
     title: 创建原材料采购单
@@ -123,17 +120,13 @@ behaviors:
     title: 查询原材料采购单信息
     description: 根据采购单/原材料/关联客单来查询采购记录列表。
     op_type: query
-rules:
-  - name: V01_UnitConsistency_Purchase
-    behavior: CreatePurchaseRecord
-    data_supplements:
-      - QueryPurchaseRecords
-      - QueryRawMaterials
+functions: [...]   # 2026-11-06 起忽略
+rules: [...]      # 2026-11-06 起忽略
 ```
 
-**只读字段**：`metadata.ontology_id` / `ontology_name` / `scenario_id` / `scenario_name`；`functions[].name` / `title`；`behaviors[].name` / `title` / `description` / `op_type`；`rules[].behavior` / `data_supplements`。
+**只读字段**：`metadata.ontology_id` / `ontology_name` / `scenario_id` / `scenario_name`；`behaviors[].name` / `title` / `op_type`。
 
-**明确不读**：`concepts`、`relations`、`processes`、参数 `params`、`response`、`code_file`、`rule_design`、规则表达式。`related_functions` 不提取、不用于任何补全（仅 `data_supplements` 参与）。
+**明确不读**：`functions`、`rules`（含 `data_supplements` / `related_functions`）、`concepts`、`relations`、`processes`、参数 `params`、`response`、`code_file`、`rule_design`、规则表达式。读取后 MUST 不产生任何候选、告警或记录字段。
 
 **文件枚举**：`ontology/{scenario}/{ontology}/ontology.yaml`；只接受真实目录 / 真实文件；符号链接跳过；不接受来自 `SKILL.md` 的路径拼接。
 
@@ -166,9 +159,9 @@ rules:
 |---|---|
 | 路径 | `POST {base_url}/v1/systemone` |
 | `state` | 当前用户输入，`prepareState` 后 ≤200 字符；取尾部、对齐句首 |
-| `questions` | 每个候选一条；技能 `s1..sN`，能力 `c1..cN` |
+| `questions` | 每个候选一条；技能 `s1..sN`，行为 `c1..cN` |
 | 题型 | **只允许 `noul`**；禁止 `choice` |
-| `instructions` | 中文；技能含 name + description 摘要；行为 / 函数含 title（缺失回退 name）+ name；标签 ≤40 字 |
+| `instructions` | 中文；技能为 `需要技能「description」`；行为为 `需要行为「title（缺失回退 name）」`；标签 ≤40 字 |
 | `criteria` | 固定 `{ true: '需要', false: '不需要' }` |
 | 批量 | ≤32 题 / 批；技能 1 批（≤32）；能力 ≤96（≤3 批） |
 | 超时 | 总预算 10000ms；按批数均分；单批下限 300ms |
@@ -199,29 +192,34 @@ rules:
 ### 5.1 格式
 
 ```text
-本轮可优先参考以下聚焦结果（仅供参考，不必局限）：技能：{name}（{description ≤80 字}）；本体能力：行为：{title}（{name}），函数：{title}（{name}）；技能：{name}
+本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）{name}（非本体技能）
+2）{name}（本体技能；ontology_name='…'，ontology_id='…'；关联行为：{title}（{name}）、…）
 ```
 
-- 前缀逐字固定；
-- 非本体技能只有 `技能：...`；
-- 本体技能先技能说明、后 `本体能力`；
-- 空类别省略；无入选时返回空串，不追加；
-- 单行；段间 `；`，条目 `，`；
-- 总长 ≤1200 字符；
+- 前缀逐字固定；编号清单，每技能一行，行号从 `1` 连续编号（截断后重排）；
+- 非本体技能只有技能名与「非本体技能」标注；
+- 本体技能先写本体字段（`ontology_name='…'，ontology_id='…'`，缺名时只写 id），再写「关联行为」；无入选行为时整段省略；
+- MUST NOT 出现「关联函数」段；
+- 无入选技能时返回空串，调用方不追加；
+- 技能按分数降序、同分按原序；段间 `；`，条目 `、`，单条形态 `title（name）`；
+- 总长 ≤1200 字符，超限删除完整条目；
 - 只追加一次，位置在本轮 `systemExtra` 末尾；不进入用户消息、历史、摘要、记忆、下一轮。
 
 ### 5.2 示例
 
-**本体技能入选（含数据补充）** —— 行为段内直接入选在前、补充行为按本体原序紧随：
+**本体技能入选**：
 
 ```text
-本轮可优先参考以下聚焦结果（仅供参考，不必局限）：技能：raw-material-inventory-new（原材料采购和库存本体技能）；本体能力：行为：创建原材料采购单（CreatePurchaseRecord），查询原材料采购单信息（QueryPurchaseRecords），查询原材料基本信息（QueryRawMaterials），函数：校验采购原材料单位一致性（checkRawMaterialUnit），校验采购供应商存在性（checkSupplierExistence）
+本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））
 ```
 
-**非本体技能入选** —— 只有技能段，无 `本体能力：`：
+**非本体技能入选**：
 
 ```text
-本轮可优先参考以下聚焦结果（仅供参考，不必局限）：技能：调度算法（提供调度算法选型与实现指引：覆盖先来先服务、优先级、最短作业优先、轮询、加权公平、贪心与启发式排程，含适用场景、复杂度与实现要点）
+本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）plain-skill（非本体技能）
 ```
 
 ## 6. 记录契约
@@ -234,7 +232,9 @@ rules:
 3. 单文件 >256KB 或 >200 行 → 重写保留最近 100 行；
 4. 写失败只告警，不影响对话；
 5. 旧 013 行（`probabilities` / `actions` / `focus_prompt`）可读，不迁移；
-6. 五态必留档（`focused` / `empty` / `skipped` / `degraded` / `unconfigured`），开关关闭不留档。
+6. 五态必留档（`focused` / `empty` / `skipped` / `degraded` / `unconfigured`），开关关闭不留档；
+7. `behaviors` **只写入选行为**，每项仅 `name` / `title` / `ontology_id` / `ontology_name` / `score`；
+8. MUST NOT 出现 `functions` / `data_supplements`，MUST NOT 出现 `kind` / `selected` / `source`。
 
 ## 7. 处置与降级
 
@@ -245,8 +245,8 @@ rules:
 | Laya 未配置 | `unconfigured` | `laya_not_configured` | 正常 |
 | 无可聚焦技能 | `empty` | `no_skills` / `no_focusable_skills` | 正常 |
 | 技能全部低于阈值 | `empty` | `below_threshold` | 正常 |
-| 技能入选、能力为空 | `focused` | null | 正常（只有技能段） |
-| 技能 / 能力入选 | `focused` | null | 正常（有提示） |
+| 技能入选、无入选行为 | `focused` | null | 正常（只有技能段） |
+| 技能 / 行为入选 | `focused` | null | 正常（有提示） |
 | Laya 超时 / 全部批次失败 | `degraded` | `timeout` / `laya_unreachable` / `invalid_response` / `all_batches_failed` | 正常 |
 | 部分批次失败但有结果 | `focused` / `degraded` | 见 data-model §4 | 正常 |
 | 记录写失败 | 记录缺失 | `record_write_failed`（日志） | 正常 |
@@ -255,20 +255,21 @@ rules:
 
 ## 8. 兼容与版本
 
-- 本契约 v1 起生效；013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用。
-- 新增配置键全部可选；旧 `intent_focus` 块可直接启动（`skill_threshold` 语义变为技能阈值）。
-- 公开 HTTP 无版本变更；前端 / 管理端无需发版。
+- 本契约 v1 起生效；v1.1（2026-11-06）起能力只到行为：013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用；`functions` / `rules` 口径作废。
+- 新增配置键全部可选；旧 `intent_focus` 块可直接启动（`skill_threshold` 语义变为技能阈值，`max_capabilities` 语义变为行为上限）。
+- 公开 HTTP 无版本变更；`tool_tips` 结构不变；前端 / 管理端无需发版。
+- 旧记录行（含 `functions` / `data_supplements` / `kind` / `source`）仍可被 `readAll` 读出，不做迁移。
 - 后续若调整提示格式或记录字段，必须同时更新本契约与 `data-model.md`，并保留旧记录可读。
 
 ## 9. 验收断言（契约级）
 
-1. 技能题、能力题均为 `type: 'noul'`，请求中不存在 `choice`。
-2. 技能题 qid 为 `s1..sN`，能力题 qid 为 `c1..cN`，与候选一一对应。
+1. 技能题、行为题均为 `type: 'noul'`，请求中不存在 `choice`。
+2. 技能题 qid 为 `s1..sN`，行为题 qid 为 `c1..cN`，与候选一一对应（`functions` 不产生 qid）。
 3. 阈值边界：0.60 / 0.61 / 0.82（阈值 0.6）只保留后两个。
-4. 非本体技能入选时，提示无 `本体能力`，本体读取 / 能力评分 / 工具评分均为 0。
-5. 本体技能入选时，提示中技能说明在能力之前；`data_supplements` 声明的查询行为出现在 `behaviors` 且 `source='supplement'`，函数类不因补充增加。
-6. 去重后行为 / 函数同名项各 ≤1。
+4. 非本体技能入选时，提示无本体段，本体读取 / 行为评分 / 工具评分均为 0。
+5. 本体技能入选时，提示中技能名在关联行为之前；含 `rules` / `data_supplements` 的本体不产生额外行为，提示无「关联函数」。
+6. 去重后行为同名项（同 `ontology_id`）≤1；跨本体同名各自保留。
 7. 提示只出现一次，长度 ≤1200，位置在 `systemExtra` 末尾。
-8. 记录含 `skills` / `behaviors` / `functions` / `data_supplements` / `prompt`；不含 `probabilities` / `actions`。
+8. 记录含 `skills` / `behaviors` / `prompt`；`behaviors` 只含入选行为；不含 `functions` / `data_supplements` / `kind` / `source` / `probabilities` / `actions`。
 9. 开关关闭 / 跳过 / 未配置 / 空结果 / 降级五态可区分。
 10. 旧工具聚焦的工具候选构造与评分调用次数为 0。

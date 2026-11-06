@@ -61,7 +61,10 @@ concepts:
       pattern: ''
   title: 原材料
   instance_label: rawMaterialName
-  terms: []
+  terms:
+  - 原料
+  - 基础材料
+  - 辅料
   attribute_restrictions: {}
 - name: Supplier
   description: 原材料的供应方，可以供应一种或多种原材料。
@@ -103,7 +106,10 @@ concepts:
     example: '13800138000'
   title: 供应商
   instance_label: supplierName
-  terms: []
+  terms:
+  - 供货商
+  - 商家
+  - 卖家
   attribute_restrictions: {}
 - name: PurchaseRecord
   description: 一次具体的原材料采购行为，关联了采购的原材料、供应商以及驱动采购的客户订单。
@@ -170,7 +176,10 @@ concepts:
     example: 客户A-项目X订单
   title: 原材料采购记录
   instance_label: purchaseRecordId
-  terms: []
+  terms:
+  - 原材料采购表
+  - 原材料采购单
+  - 原材料订单
   attribute_restrictions: {}
 - name: RawMaterialInventory
   description: 特定原材料在当前时刻的库存状态快照，包括待入库、可用和累计库存量。
@@ -222,7 +231,9 @@ concepts:
     example: 吨
   title: 原材料库存
   instance_label: availableStock
-  terms: []
+  terms:
+  - 原材料存货
+  - 原材料存量
   attribute_restrictions: {}
 - name: CustomerOrder
   description: 客户下达的销售订单或询单，是驱动原材料采购的源头需求。
@@ -264,7 +275,8 @@ concepts:
     example: 有效
   title: 客户订单
   instance_label: customerOrderName
-  terms: []
+  terms:
+  - 产品订单
   attribute_restrictions: {}
 - name: DeliveryCapability
   description: 供应商的交货能力，包括交货周期、最低交货数量等

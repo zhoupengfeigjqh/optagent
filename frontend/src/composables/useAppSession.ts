@@ -29,6 +29,8 @@ import { useEmptyDataHint, type EmptyDataHint } from './useEmptyDataHint'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
 import { createModelsStore, type ModelsStore } from './useModels'
+import type { TermNormalizeApi } from '../api/term-normalize'
+import { createTermNormalizeApi } from '../api/term-normalize'
 import { createNextStepsStore, type NextStepsStore } from './useNextSteps'
 import { createPreviewStore, type PreviewStore } from './usePreview'
 import { createProducedStore, type ProducedStore } from './useProduced'
@@ -88,6 +90,11 @@ export interface AppSession {
   readonly toast: ToastStore
   /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
   readonly files: FilesApi
+  /**
+   * 术语替换预检（018）：发送前的一次性调用，由 `useChatPanel` 的确认弹窗消费。
+   * 只做传输，不含业务判断（开关/字典/降级全在服务端）。
+   */
+  readonly termNormalize: TermNormalizeApi
   /** 注入的时钟（供需要本地计时的场景使用） */
   readonly now: () => number
   /**
@@ -296,6 +303,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     nextSteps,
     toast,
     files: filesApi,
+    termNormalize: createTermNormalizeApi(client),
     now,
     initialThreadId,
     rememberActiveThread,

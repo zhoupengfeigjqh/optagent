@@ -107,9 +107,9 @@
       "headers": {},
       "updated_at": "2026-10-23T05:56:19.504Z"
     },
-    "test001": {
-      "name": "test001",
-      "description": "本体函数",
+    "test1": {
+      "name": "test1",
+      "description": "原料库存本体函数",
       "transport": "http",
       "url": "http://localhost:8021/mcp",
       "command": null,
@@ -127,13 +127,13 @@
       ],
       "tool_labels": {},
       "headers": {
-        "X-MCP-Token": "P1DHfpkfyw801dQjrm6HdTzfWQODDFAL"
+        "X-MCP-Token": "qHA_Npky2R8TRF41-QFOG0O4twrX0A-F"
       },
-      "updated_at": "2026-11-04T07:29:10.985Z"
+      "updated_at": "2026-11-06T15:08:49.405Z"
     },
-    "test002": {
-      "name": "test002",
-      "description": "本体行为",
+    "test2": {
+      "name": "test2",
+      "description": "原料库存本体行为",
       "transport": "http",
       "url": "http://localhost:8022/mcp",
       "command": null,
@@ -146,16 +146,16 @@
         "CancelPurchaseRecord",
         "ReceiveRawMaterial",
         "QueryInventory",
-        "QueryPurchaseRecords",
         "QueryRawMaterials",
+        "QueryPurchaseRecords",
         "QuerySuppliers",
         "QuerySupplierCapability"
       ],
       "tool_labels": {},
       "headers": {
-        "X-MCP-Token": "B2r3zfRupt05ZZ4fJoSx5OUG3FGW_PKV"
+        "X-MCP-Token": "Y9gtXqzgndtjVF4RPWnqb989TgOzjfpu"
       },
-      "updated_at": "2026-11-04T07:29:43.287Z"
+      "updated_at": "2026-11-06T15:09:26.459Z"
     }
   }
 }

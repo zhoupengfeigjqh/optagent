@@ -50,6 +50,7 @@ import { registerModelRoutes } from './routes/models.js';
 import { registerMonitorRoutes } from './routes/monitor.js';
 import { registerProducedRoutes } from './routes/produced.js';
 import { registerScheduledTaskRoutes } from './routes/scheduled-tasks.js';
+import { registerTermNormalizeRoutes } from './routes/term-normalize.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
 
@@ -386,6 +387,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const routeApp = app as unknown as FastifyInstance;
   registerChatRoutes(routeApp, ctx);
   registerThreadRoutes(routeApp, ctx);
+  // 018：术语替换预检（发送前一次性调用，结果由用户确认）
+  registerTermNormalizeRoutes(routeApp, ctx);
   registerAgentRoutes(routeApp, ctx);
   registerFileRoutes(routeApp, ctx);
   registerMonitorRoutes(routeApp, ctx);

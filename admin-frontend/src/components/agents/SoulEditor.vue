@@ -213,9 +213,7 @@ function onIntentFocusChange(event: Event): void {
         是否开启意图聚焦
       </label>
       <p class="field__hint" data-test="intent-focus-hint">
-        开启后，每一轮对话在生成回答**之前**先做一次意图判定，把最相关的工具作为本轮规划重点。
-        关闭则部署后该功能消失：<strong>产物里不会写这个键</strong>，运行环境不会为此多做一次判定调用。
-        由预置卡片（问题实例 / 下一步动作卡片）发起的轮次一律跳过判定。
+        每一轮对话在生成回答**之前**先做一次意图判定，把最相关的工具作为本轮规划重点。注意，只有关联了本体技能才生效！！！
       </p>
     </fieldset>
 
@@ -264,7 +262,6 @@ function onIntentFocusChange(event: Event): void {
       <p class="field__hint" data-test="next-action-hints-hint">
         需先开启「意图聚焦」。开启后，该数字人每一轮回答的下方会出现最多
         {{ soul.next_action_hints_count }} 条可点击的下一步动作卡片（点击即经确认发起下一轮）。
-        关闭则部署后该功能消失：<strong>产物里不会写这个键</strong>，运行环境不会为此多做一次模型调用。
       </p>
     </fieldset>
 

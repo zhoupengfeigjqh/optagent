@@ -49,9 +49,11 @@ export interface SendMessageInput {
  * 且 `model` / `attachments` 有 `minLength` / `maxItems` 约束。
  */
 export function buildSendMessageBody(input: SendMessageInput): SendMessageRequest {
-  // `send_intent_focus` 是 013 新增字段；`SendMessageRequest` 在 api/types.ts（本特性约定
-  // 不动该文件），故用交叉类型表达"比契约多一个可选字段"，返回值仍可赋给 `SendMessageRequest`。
-  const body: SendMessageRequest & { skip_intent_focus?: boolean } = {
+  // `skip_intent_focus`（013）是增量字段；`SendMessageRequest` 在 api/types.ts
+  // （约定不动该文件），故用交叉类型表达"比契约多一个可选字段"。
+  const body: SendMessageRequest & {
+    skip_intent_focus?: boolean
+  } = {
     content: input.content,
     thinking: input.thinking,
   }

@@ -20,7 +20,7 @@
  * 数字人只作为**路径入参**贯穿（`filePath(uid, agent, threadId)`），不是过滤条件。
  *
  * **2026-11 修订（016：能力驱动的 tool_tips）**：
- * - 候选范围只来自本轮意图聚焦选出的本体行为 / 函数（`focusToolTips`），
+ * - 候选范围只来自本轮意图聚焦选出的本体行为（`focusToolTips`），
  *   无能力 → 不追加指令 → 本轮不产卡片；
  * - 卡片形状改为 `{ prompt, tool_tips: [{ name, title, ontology_id, ontology_name }] }`，
  *   `tool_tips` 由模型从能力目录抄写，后端**不做校验**：只读取字段、只截断到 5 条；
@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { threadDir } from './dirs.js';
 import { removeFileSafe } from './fs-safe.js';
-import type { FocusToolTip } from './ontology-focus/types.js';
+import type { FocusToolTip } from './intent-focus/types.js';
 import { NEXT_ACTION_HINTS_DEFAULT } from './soul.js';
 
 /** 卡片提示词长度上限（FR-003） */
@@ -99,7 +99,7 @@ export interface NextActionsFinalizeInput {
   /** 回答流中捕获的尾部块原文（不含哨兵标签；空串 = 本轮无块 → 无卡片） */
   tailText: string;
   /**
-   * 本轮 Laya 入选的本体能力（卡片候选范围的唯一来源）。
+   * 本轮 Laya 入选的本体行为（卡片候选范围的唯一来源）。
    *
    * 只用于**卡片是否允许产出**（空 = 不产卡片，调用方已拦）与 `prompt` 合规判定，
    * 不参与 `tool_tips` 的任何校验——后者是模型输出，原样透传。
@@ -360,7 +360,7 @@ export function renderToolTipsInstruction(toolTips: readonly FocusToolTip[]): st
   if (toolTips.length === 0) return '';
   const lines = toolTips.map(renderCatalogLine);
   return [
-    '本轮请优先使用以下本体能力完成用户消息要求的任务（来自上一轮卡片）：',
+    '本轮请首先使用以下本体能力完成用户消息要求的任务（来自上一轮卡片）：',
     ...lines,
     '请按用户消息与已知上下文补全参数；不要改用其它能力。',
   ].join('\n');

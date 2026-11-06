@@ -3,7 +3,7 @@
  *
  * 用真实临时目录（技能头部 + ontology.yaml）+ 桩判定客户端，覆盖：
  * - 开关关闭零动作；跳过 / 未配置 / 无技能 / 无可用本体 / 全低于阈值 的无调用路径；
- * - 成功链路：技能 → 能力 → 数据补充 → 提示；记录字段与批数；
+ * - 成功链路：技能 → 行为 → 提示；记录字段与批数；
  * - 分批：33 个技能切 2 批；首批失败仍用剩余结果继续（部分降级）；
  * - 能力全批失败 → degraded + 空结果；记录写入抛错不影响返回值。
  *
@@ -19,8 +19,8 @@ import {
   IntentFocusRunner,
   type IntentFocusClient,
   type IntentFocusInput,
-} from '../../src/domain/intent-focus-runner.js';
-import type { IntentFocusRecordDraft } from '../../src/domain/intent-focus-store.js';
+} from '../../src/domain/intent-focus/runner.js';
+import type { IntentFocusRecordDraft } from '../../src/domain/intent-focus/store.js';
 
 const USER = 'u1';
 const AGENT = '生产计划助手';
@@ -132,7 +132,7 @@ function input(overrides: Partial<IntentFocusInput> = {}): IntentFocusInput {
   };
 }
 
-/** 按题面里的名字给分：技能用「技能「description」，能力用「行为/函数「title」」。 */
+/** 按题面里的名字给分：技能用「技能「description」，行为用「行为「title」」。 */
 function scoreOf(instructions: string): number {
   if (instructions.includes('原材料采购和库存本体技能')) return 0.9;
   if (instructions.includes('普通技能')) return 0.3;
@@ -140,6 +140,7 @@ function scoreOf(instructions: string): number {
   if (instructions.includes('取消采购单')) return 0.1;
   if (instructions.includes('查询采购记录')) return 0.05;
   if (instructions.includes('查询原材料')) return 0.05;
+  // 本体里的函数即使存在也不该出题（2026-11-06：能力只到行为）
   if (instructions.includes('校验采购单位一致性')) return 0.7;
   return 0.05;
 }
@@ -262,29 +263,27 @@ describe('空结果', () => {
 });
 
 describe('成功链路', () => {
-  it('技能 + 能力 + 数据补充：提示按格式铸造，记录完整', async () => {
+  it('技能 + 行为：提示按格式铸造，记录只写入选行为', async () => {
     const { root } = fixture();
     const { runner, records } = harness(root);
     const { prompt, toolTips } = await runner.judge(input());
 
     expect(prompt).toBe(
-      "本轮请优先聚焦以下技能或工具（仅供参考，不必局限）\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1）、查询采购记录（Q1）、查询原材料（Q2）；关联函数：校验采购单位一致性（F1））",
+      "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1））",
     );
-    // 卡片候选范围＝入选行为 + 函数（顺序沿判定结果，字段原样透传）
+    // 卡片候选范围＝入选行为（顺序沿判定结果，字段原样透传）
     expect(toolTips).toEqual([
       { name: 'B1', title: '创建采购单', ontology_id: '1', ontology_name: '原材料采购和库存' },
-      { name: 'Q1', title: '查询采购记录', ontology_id: '1', ontology_name: '原材料采购和库存' },
-      { name: 'Q2', title: '查询原材料', ontology_id: '1', ontology_name: '原材料采购和库存' },
-      { name: 'F1', title: '校验采购单位一致性', ontology_id: '1', ontology_name: '原材料采购和库存' },
     ]);
     expect(records).toHaveLength(1);
     const record = records[0]!;
     expect(record.disposition).toBe('focused');
     expect(record.batches).toBe(2);
-    expect(record.candidates).toBe(2 + 5);
-    expect(record.behaviors.map((item) => item.name)).toEqual(['B1', 'Q1', 'Q2']);
-    expect(record.behaviors.find((item) => item.name === 'Q2')!.source).toBe('supplement');
-    expect(record).not.toHaveProperty('ontology_files');
+    // 技能 2 个 + 行为候选 4 个（F1 与 rules 不参与）
+    expect(record.candidates).toBe(2 + 4);
+    expect(record.behaviors.map((item) => item.name)).toEqual(['B1']);
+    expect(record).not.toHaveProperty('functions');
+    expect(record).not.toHaveProperty('data_supplements');
     expect(record.prompt).toBe(prompt);
   });
 
@@ -296,12 +295,14 @@ describe('成功链路', () => {
     expect(prompt.match(/ontology_name='/g)).toHaveLength(1);
   });
 
-  it('补充项不级联：Q1 自身的规则不再补 Q2（但 Q2 已由 B1 直接声明）', async () => {
+  it('规则不再补入低于阈值的行为：Q1/Q2 得分 0.05，仍不出现', async () => {
     const { root } = fixture();
     const { runner, records } = harness(root);
     await runner.judge(input());
-    const pairs = records[0]!.data_supplements.map((item) => `${item.behavior}->${item.supplement}`);
-    expect(pairs).toEqual(['B1->Q1', 'B1->Q2']);
+    const names = records[0]!.behaviors.map((item) => item.name);
+    expect(names).toEqual(['B1']);
+    expect(names).not.toContain('Q1');
+    expect(names).not.toContain('Q2');
   });
 
   it('本体只有技能、没有能力：提示只有技能段，仍算 focused', async () => {
@@ -419,5 +420,41 @@ describe('分批与降级', () => {
     await expect(runner.judge(input())).resolves.toMatchObject({
       prompt: expect.stringContaining('1）onto-skill（本体技能'),
     });
+  });
+});
+
+describe('日志与本体名回退', () => {
+  it('注入 logger 时：成功 / 空结果 / 降级各写一条日志', async () => {
+    const info = vi.fn();
+    const warn = vi.fn();
+    const logger = { info, warn };
+
+    await harness(fixture().root, { logger }).runner.judge(input());
+    expect(info).toHaveBeenCalled();
+
+    const empty = harness(fixture().root, {
+      logger,
+      decide: async () => ({ ok: true, scores: { s1: 0.1, s2: 0.1 }, model: 'm' }),
+    });
+    await empty.runner.judge(input());
+
+    const degraded = harness(fixture().root, {
+      logger,
+      decide: async () => ({ ok: false, reason: 'timeout', message: 'timeout' }),
+    });
+    await degraded.runner.judge(input());
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('本体文件缺 ontology_name：提示回落到技能头部的本体名', async () => {
+    const { root, dir } = fixture();
+    fs.writeFileSync(
+      path.join(dir, 'ontology', '生产调度', '原材料采购和库存', 'ontology.yaml'),
+      ['metadata:', '  ontology_id: 1', 'behaviors:', '  - name: B1', '    title: 创建采购单'].join('\n'),
+      'utf8',
+    );
+    const { runner } = harness(root);
+    const { prompt } = await runner.judge(input());
+    expect(prompt).toContain("ontology_name='原材料采购和库存'");
   });
 });

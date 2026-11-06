@@ -239,8 +239,8 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / 外部 MCP 服务
   不改变对话主链路；每次判定按五态（`focused` / `empty` / `skipped` / `degraded` / `unconfigured`）
   留档，便于事后归因。
 
-控制流见 `agent-backend/src/domain/intent-focus-runner.ts`，判定细节见
-`agent-backend/src/domain/ontology-focus/`。`config.yaml` 的 `intent_focus` 整块缺失 = 功能关闭
+控制流见 `agent-backend/src/domain/intent-focus/runner.ts`，判定细节见
+`agent-backend/src/domain/intent-focus/`。`config.yaml` 的 `intent_focus` 整块缺失 = 功能关闭
 （不影响启动）；块存在但字段不全或越界 = 启动失败（防半配置）。开关是 SOUL frontmatter 的
 `intent_focus`，逐次现读、读不出来按关闭（fail-closed）。
 

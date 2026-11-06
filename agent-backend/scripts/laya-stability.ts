@@ -7,7 +7,7 @@
  *
  * 运行：`npx tsx --env-file=.env.local scripts/laya-stability.ts`
  */
-import { buildSkillQuestions } from '../src/domain/ontology-focus/candidates.js';
+import { buildSkillQuestions } from '../src/domain/intent-focus/candidates.js';
 import { loadFocusEnv, loadFocusFixture } from './lib/focus-fixture.js';
 
 const INPUT = '高强度钢板的供应商是谁';

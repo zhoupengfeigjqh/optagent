@@ -1,29 +1,29 @@
 {
   "servers": [
     {
-      "name": "test002",
+      "name": "test2",
       "transport": "http",
       "url": "http://localhost:8022/mcp",
       "headers": {
-        "X-MCP-Token": "B2r3zfRupt05ZZ4fJoSx5OUG3FGW_PKV"
+        "X-MCP-Token": "Y9gtXqzgndtjVF4RPWnqb989TgOzjfpu"
       },
       "allowed_tools": [
         "CreatePurchaseRecord",
         "CancelPurchaseRecord",
         "ReceiveRawMaterial",
         "QueryInventory",
-        "QueryPurchaseRecords",
         "QueryRawMaterials",
+        "QueryPurchaseRecords",
         "QuerySuppliers",
         "QuerySupplierCapability"
       ]
     },
     {
-      "name": "test001",
+      "name": "test1",
       "transport": "http",
       "url": "http://localhost:8021/mcp",
       "headers": {
-        "X-MCP-Token": "P1DHfpkfyw801dQjrm6HdTzfWQODDFAL"
+        "X-MCP-Token": "qHA_Npky2R8TRF41-QFOG0O4twrX0A-F"
       },
       "allowed_tools": [
         "sumRawNotArrivalQty",

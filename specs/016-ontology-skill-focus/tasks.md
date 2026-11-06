@@ -1,8 +1,12 @@
 ---
-description: "本体技能聚焦（技能 / 本体能力 / 数据补充）实施任务清单"
+description: "本体技能聚焦（技能 / 本体行为）实施任务清单"
 ---
 
 # 任务清单：本体技能聚焦（Ontology Skill Focus）
+
+> **2026-11-06 修订**：T002 / T007 / T011 / T013 / T020 / T021 / T025~T029 / T030 / T031
+> 等条目中的"函数 / 规则 / 数据补充"已作废——能力聚焦只到本体行为，记录只写入选行为。
+> 现行口径以 [spec.md](./spec.md)（Session 2026-11-06）与 [data-model.md](./data-model.md) 为准。
 
 - **特性标识**：`016-ontology-skill-focus`
 - **输入**：[spec.md](./spec.md)（4 个用户故事，P1~P3）｜[plan.md](./plan.md)（模块职责、实施顺序）｜[research.md](./research.md)（R1~R12）｜[data-model.md](./data-model.md)（实体 / 记录 schema / 提示语法）｜[contracts/intent-focus-api.md](./contracts/intent-focus-api.md)｜[quickstart.md](./quickstart.md)

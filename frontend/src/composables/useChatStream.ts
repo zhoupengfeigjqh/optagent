@@ -213,7 +213,11 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     streamingAgentName.value = deps.getAgentName?.() ?? null
     // 乐观用户气泡（十七次调整）：历史刷新只在完成后触发，发送即先本地呈现，
     // 避免"AI 答完才看到自己的消息"
-    pendingUserMessage.value = { content: payload.content, attachments: payload.attachments }
+    // 018：气泡就是**实际提交的正文**（术语替换确认后为替换/编辑结果），与历史同源
+    pendingUserMessage.value = {
+      content: payload.content,
+      attachments: payload.attachments,
+    }
     phase.value = RUN_PHASE.STREAMING
 
     const body = buildSendMessageBody({

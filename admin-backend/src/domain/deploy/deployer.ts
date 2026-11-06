@@ -93,6 +93,8 @@ export class Deployer {
       mcpConfigs: this.deps.mcpConfigs,
       skills: this.deps.skills,
       ontologies: this.deps.ontologies,
+      // 017：术语字典降级告警与部署其余告警同一出口
+      logger: this.deps.logger,
     };
 
     const results: DeployUserRecord[] = [];

@@ -29,7 +29,7 @@ import {
 } from '../../src/domain/next-actions.js';
 import { TailCapture } from '../../src/domain/next-actions-tail.js';
 import { threadDir } from '../../src/domain/dirs.js';
-import type { FocusToolTip } from '../../src/domain/ontology-focus/types.js';
+import type { FocusToolTip } from '../../src/domain/intent-focus/types.js';
 
 const TOOL_TIPS: FocusToolTip[] = [
   {
