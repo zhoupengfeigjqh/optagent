@@ -6,15 +6,19 @@
  * 2026-11-08（019）：新增 `concepts` 与 `relations` 的**只读**建模，供一阶发散使用；
  * 参数正文、函数代码、`rules` 仍然不进来。
  *
+ * 2026-11-08（020）：目录枚举与 YAML 读取移到 `../ontology-files.js`——本体行为权限闸门
+ * 需要同一条"安全枚举 + 坏文件降级"规则，两处各写一套必然漂移（宪章原则二）。
+ * 本文件只保留**字段建模**，告警文案与跳过策略保持原样。
+ *
  * 三条约束：
  * 1. **只读真实文件**：目录与文件都过 `lstat`，符号链接一律跳过（FR/TR：禁止逃逸）；
  * 2. **坏文件不中断**：解析失败只记 warning，其他本体照常——一个坏文件不该让整轮失效；
  * 3. **只建模发散所需字段**：`concepts` 只取 name/title，`relations` 只取
  *    name/source/target/relation_type/cardinality；方向判定不在本层做（见 `expansion.ts`）。
  */
-import fs from 'node:fs';
 import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
+
+import { listOntologyDirs, readYamlObject } from '../ontology-files.js';
 import type {
   OntologyBehavior,
   OntologyConcept,
@@ -26,49 +30,25 @@ import type {
 /** 枚举入口：`{agentDir}/ontology` */
 export function loadOntologyIndex(agentDir: string): OntologyIndex {
   const index: OntologyIndex = { byId: new Map(), all: [], warnings: [] };
-  const root = path.join(agentDir, 'ontology');
-  for (const scenario of safeReadDirs(root, index.warnings, 'ontology')) {
-    const scenarioDir = path.join(root, scenario);
-    for (const ontology of safeReadDirs(scenarioDir, index.warnings, `ontology/${scenario}`)) {
-      const file = path.join(scenarioDir, ontology, 'ontology.yaml');
-      const parsed = loadOntologyFile(file, index.warnings);
-      if (!parsed) continue;
-      index.all.push(parsed);
-      const bucket = index.byId.get(parsed.ontologyId);
-      if (bucket) bucket.push(parsed);
-      else index.byId.set(parsed.ontologyId, [parsed]);
-    }
+  for (const ref of listOntologyDirs(agentDir, index.warnings, 'ontology')) {
+    const file = path.join(ref.dir, 'ontology.yaml');
+    const parsed = loadOntologyFile(file, index.warnings);
+    if (!parsed) continue;
+    index.all.push(parsed);
+    const bucket = index.byId.get(parsed.ontologyId);
+    if (bucket) bucket.push(parsed);
+    else index.byId.set(parsed.ontologyId, [parsed]);
   }
   return index;
 }
 
 /** 解析单个 ontology.yaml；失败返回 null 并写 warning（内部实现，无需对模块外暴露） */
 function loadOntologyFile(file: string, warnings: string[]): OntologyDefinition | null {
-  let stat: fs.Stats;
-  try {
-    stat = fs.lstatSync(file);
-  } catch {
-    return null;
-  }
-  // 符号链接文件同样拒绝：物化产物应是普通文件
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    warnings.push(`${file}:not_regular_file`);
-    return null;
-  }
+  // 读取/解析统一走 `ontology-files.ts`（020 收敛的唯一来源）：符号链接、坏 YAML、
+  // 非对象根三类降级与告警口径都在那里，本文件只做字段建模
+  const record = readYamlObject(file, warnings);
+  if (!record) return null;
 
-  let data: unknown;
-  try {
-    data = parseYaml(fs.readFileSync(file, 'utf8'));
-  } catch (err) {
-    warnings.push(`${file}:invalid_yaml:${(err as Error).message}`);
-    return null;
-  }
-  if (typeof data !== 'object' || data === null) {
-    warnings.push(`${file}:not_object`);
-    return null;
-  }
-
-  const record = data as Record<string, unknown>;
   const metadata =
     typeof record.metadata === 'object' && record.metadata !== null
       ? (record.metadata as Record<string, unknown>)
@@ -166,23 +146,6 @@ function normalizeList(value: unknown): string[] {
     if (text) out.push(text);
   }
   return out;
-}
-
-/** 读子目录名（只保留真实目录；不存在返回空数组，不记 warning） */
-function safeReadDirs(dir: string, warnings: string[], label: string): string[] {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      warnings.push(`${label}:unreadable:${(err as Error).message}`);
-    }
-    return [];
-  }
-  return entries
-    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
-    .map((entry) => entry.name)
-    .sort();
 }
 
 function asArray(value: unknown): unknown[] {

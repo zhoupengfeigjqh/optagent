@@ -10,6 +10,7 @@ import path from 'node:path';
 import type { Logger } from 'pino';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { loadAgentConfig } from '../domain/agent-instance.js';
+import { createScopeGuard, type ScopeGuardPort } from '../domain/scope-guard/index.js';
 import type { PooledInstance } from '../domain/agent-pool.js';
 import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
@@ -33,6 +34,7 @@ import { buildBuiltinTools } from './builtin-tools.js';
 import { agentScopedPath, mintPutUrl, mintSignedUrl } from './file-sign.js';
 import { scopeToolsByAllowlist } from './mcp-tool-scope.js';
 import { wrapToolWithInteraction } from './tool-intercept.js';
+import { guardTools } from './tool-scope-guard.js';
 import type { LlmProvider } from './llm/llm-provider.js';
 import { PiAiLlmProvider } from './llm/pi-ai-provider.js';
 import type { AsyncToolContext } from './mcp/async-result-url.js';
@@ -123,6 +125,24 @@ export class AgentInstanceFactory {
     // 但把落定 Promise 留下，发消息前可 `mcpReady()` 有界等待（见 ChatAgent.mcpReady）
     void mcp.connectAndTrack(config.mcpServers);
 
+    // 020：本体行为权限闸门。与实例同生命周期（部署换代即重建），
+    // 目录签名变化时内部自行重载；加载告警走 alert 通道，不阻断实例创建。
+    const scopeGuard = createScopeGuard({
+      agentDir,
+      username: key.userId,
+      warn: (warnings) =>
+        logger.warn(
+          {
+            alert: true,
+            user_id: key.userId,
+            agent_name: key.agentName,
+            event: 'scope_guard.catalog.degraded',
+            warnings: warnings.slice(0, 20),
+          },
+          '本体行为权限闸门：授权配置加载告警',
+        ),
+    });
+
     const instance: ChatAgent = {
       key,
       config,
@@ -135,7 +155,7 @@ export class AgentInstanceFactory {
       probeMcp: () => mcp.probe(),
       mcpReady: (timeoutMs) => mcp.waitSettled(timeoutMs),
       dispose: () => mcp.closeAll(),
-      run: (req) => this.runWith(instance, mcp, req),
+      run: (req) => this.runWith(instance, mcp, req, scopeGuard),
     };
     return instance;
   }
@@ -144,6 +164,7 @@ export class AgentInstanceFactory {
     inst: ChatAgent,
     mcp: McpManager,
     req: AgentRunRequest,
+    scopeGuard: ScopeGuardPort,
   ): AsyncIterable<LlmEvent> {
     // 每次运行的日志绑定用户/数字人/线程（任务 2026-09-15：日志必须可归属到用户）
     const logger = this.deps.logger.child({
@@ -253,11 +274,21 @@ export class AgentInstanceFactory {
       }
     }
 
+    // 020：统一在装配**末端**套一层权限闸门（内置工具与 MCP 工具一视同仁）。
+    // 套在 HITL 包装之外 ⇒ 判定先于人工确认，被拒不弹确认框（FR-002）；
+    // 非本体工具在闸门内直接透传，故这里不按工具来源分流。
+    const guarded = guardTools(tools, scopeGuard, {
+      logger,
+      userId: inst.key.userId,
+      agentName: inst.key.agentName,
+      threadId: req.threadId,
+    });
+
     // 007：把"本轮模型真正能用的工具"回填给域层（轮末生成「下一步动作提示」要据此裁剪引用）。
     // 放在工具装配**之后、降级判定之前**：直聊分支（tools 为空）同样回填空数组，
-    // 语义即"本轮模型没有任何工具"。
+    // 语义即"本轮模型没有任何工具"。包装不改名称与描述，回填内容与包装前一致。
     if (req.runtime) {
-      req.runtime.availableTools = tools.map((t) => ({
+      req.runtime.availableTools = guarded.map((t) => ({
         name: t.name,
         description: t.description ?? '',
       }));
@@ -294,8 +325,8 @@ export class AgentInstanceFactory {
     if (tailMax !== undefined) {
       systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(focusToolTips, tailMax)}`;
     }
-    if (tools.length === 0 || !(llm instanceof PiAiLlmProvider)) {
-      if (tools.length > 0) {
+    if (guarded.length === 0 || !(llm instanceof PiAiLlmProvider)) {
+      if (guarded.length > 0) {
         logger.warn(
           { agent_name: inst.key.agentName, event: 'tools.noLoopProvider' },
           '非 pi provider，工具不可用，降级直聊',
@@ -317,7 +348,7 @@ export class AgentInstanceFactory {
       streamFn,
       systemPrompt,
       messages: req.messages,
-      tools,
+      tools: guarded,
       thinking: req.thinking,
       signal: req.signal,
     });

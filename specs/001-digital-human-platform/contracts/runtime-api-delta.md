@@ -39,6 +39,7 @@
 | R24 | **MCP 工具入参 schema 的根标题**（2026-10-30，方案 A）：下发给模型 / HITL / 管理端工具清单的 `parameters`，根节点 `title`（SDK 生成的类名）改为 `x-title`，值取服务端 `Tool.title`（`@mcp.tool(title=...)`）；服务端未声明则**原样透传** | 数据形状变更（仅根节点键名） | 否（字段级 `title` 一字不动；未声明标题的工具 schema 逐字不变） |
 | R25 | **聊天流首帧与心跳**（2026-11-06）：`POST /api/threads/{id}/messages` 建连即写注释帧 `: connected`，此后每 15s 写 `: ping`；响应头补 `x-accel-buffering: no`（详见 §24） | 连接层行为（新增注释帧 + 响应头） | 否（注释帧按 SSE 规范被客户端忽略；事件集合 / 载荷 / 终结语义零变更，前端零改动） |
 | R26 | **意图聚焦一阶发散**（特性 `019-intent-focus-expansion`，2026-11-08）：SOUL.md frontmatter 新增 `intent_focus_depth`（0~2，仅开启且非 0 时写入）；聚焦提示升级为分行块（新增概念段与上游段）、长度上限按阶数分档 1200/1600/2000；`tool_tips` 候选扩为「直接命中 + 下游发散」（wire 四字段不变） | 新增配置字段 + 提示格式/长度变更 + 候选来源扩展 | 否（阶数缺省 0 = 只聚焦本身，提示内容等于 016 口径；`tool_tips` 结构不变、前端零改动；判分调用数不变） |
+| R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 3 个工具失败错误码与 2 个结构化日志事件（详见 §25） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1638,3 +1639,72 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 - **可观测收益**：首字节时间（TTFB）不再等于首 token 时间，慢轮次可直接区分"判定慢"与"模型慢"；
 - **回滚**：删除 `openSseConnection` 的调用、恢复内联订阅即可，无数据迁移；
 - **测试**：`agent-backend/tests/unit/sse-connection.spec.ts`（首帧先行 / 心跳间隔 / 释放后静默 / `finish` 幂等）、`agent-backend/tests/integration/chat-sse.spec.ts`（真实监听端口：闸门挡住业务事件时仍能读到 `: connected`，放开后 `content` / `done` 照常到达）。
+
+---
+
+## §25 R27 — 本体行为权限闸门（2026-11-08，特性 `020-ontology-scope-guard`）
+
+### 25.1 语义
+
+工具**真实执行前**增加一次授权判定，判定单位是"本体行为"而不是工具或服务：
+
+1. **归属识别**：工具名归一化（去首尾空白、小写）后，同时尝试两种形态——**完整工具名**与**去掉首个 `__` 前缀之后的名字**（MCP 装配形态 `{服务名}__{工具名}`），与已部署本体的 `behaviors[].name` 比对；都匹配不到 → **非本体行为，放行**。
+2. **授权判定**：读该本体 `securities.yaml`，按 `action_name` 取条目与 `scope`。
+3. **结论**：
+
+| # | 条件 | 结论 | 错误码 |
+|---|---|---|---|
+| 1 | 非本体行为 / 无本体数字人 | 放行（原样执行） | — |
+| 2 | `scope` 含 `disable`（即使同时含 `everyone`） | 拒绝 | `ONTOLOGY_BEHAVIOR_DISABLED` |
+| 3 | `scope` 含 `everyone` | 放行 | — |
+| 4 | 当前数字人归属用户名在 `scope` 中 | 放行 | — |
+| 5 | 用户名不在 `scope` / `scope` 为空 | 拒绝 | `ONTOLOGY_SCOPE_DENIED` |
+| 6 | 缺条目 / 缺文件 / 坏文件 / 结构非法 | 拒绝（fail-closed） | `ONTOLOGY_SCOPE_UNAVAILABLE` |
+| 7 | 同名行为跨多个本体 | 拒绝优先，全部放行才执行 | 取该拒绝条目的码 |
+
+**用户名口径**：`users/{用户名}/` 路径段（平台用户标识），由服务端从实例归属读取，模型与前端无法指定。
+
+### 25.2 拒绝的工具结果
+
+拒绝**不是异常**，而是一次工具执行失败：真实 `execute` 零调用、MCP 请求零发出、业务副作用为零；返回 `toolErrorResult(message, code)` → `afterToolCall` 翻 `isError` → SSE `tool_call_end.status = 'error'` → 卡片标红；本轮对话继续（模型收到可读文案）。判定**先于**人工确认：被拒的调用不产生 `interaction_request`。被拒调用不计入 MCP 调用统计。
+
+文案模板（唯一来源 `agent-backend/src/domain/scope-guard/guard.ts`，**不含** `scope` 名单）：
+
+| 场景 | 文案 |
+|---|---|
+| 未授权 | `本体行为「{本体}/{行为}」未授权给当前用户，已拒绝执行。` |
+| 已停用 | `本体行为「{本体}/{行为}」当前已被停用，已拒绝执行。` |
+| 管控不可用 | `本体行为「{本体}/{行为}」的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。` |
+| 归属不可知（仅 `internal_error`） | `本体的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。` |
+
+### 25.3 日志事件
+
+| 事件 | 级别 | 触发 | 字段 |
+|---|---|---|---|
+| `scope_guard.denied` | `warn`（`ONTOLOGY_SCOPE_UNAVAILABLE` 为 `error`） | 每次拒绝 | `ts`、`code`、`reason`、`user_id`、`agent_name`、`thread_id`、`tool_name`、`ontology`、`behavior`、`scope_kind`、`scope_size` |
+| `scope_guard.catalog.degraded` | `warn`（`alert: true`） | 每次重载有告警时聚合一条 | `user_id`、`agent_name`、`warnings`（截断 20 条） |
+| `scope_guard.evaluator_error` | `error` | 端口违约（判定抛错，实现缺陷） | `err`、`user_id`、`agent_name`、`thread_id`、`tool_name` |
+
+**禁止落盘**：工具入参、`scope` 具体名单、两份 yaml 原文、用户提问内容。
+
+### 25.4 生效时机与数据源
+
+- 数据源唯一：部署产物 `ontology/{场景}/{本体}/{ontology.yaml,securities.yaml}`；平台侧**零改动**（仍原样下发、不解析 `scope`）。
+- 失效判据：`ontology` 根目录 `mtimeMs`（单次 `stat`）。因此**只换本体**的部署也会在下一次工具调用生效（配置指纹不含 `ontology/**`，不能作为判据）。
+- 缓存：实例内快照，签名变化整份重载；读到的是替换前或替换后的完整文件（部署为目录级原子改名）。
+- 实测开销：已缓存 P95 ≈ 0.02~0.03ms，未缓存首次 6.2~17.6ms（5 本体 × 8 行为）。
+
+### 25.5 生效面
+
+| 面 | 位置 | 表现 |
+|---|---|---|
+| 判定实现 | `agent-backend/src/domain/scope-guard/**` | 纯策略 + 只读加载 + 缓存 + 文案；不依赖 infra / MCP / HITL / HTTP |
+| 唯一来源 | `agent-backend/src/domain/ontology-files.ts` | 本体目录枚举 + YAML 读取（与意图聚焦共用，符号链接拒绝、坏文件降级） |
+| 工具包装 | `agent-backend/src/infra/tool-scope-guard.ts` | 唯一 `AgentTool` 包装器 + 拒绝日志；套在 HITL 包装之外 |
+| 装配 | `agent-backend/src/infra/agent-factory.ts` | 构造 guard（`username = key.userId`）+ 装配末端包装一次 |
+
+### 25.6 兼容与回滚
+
+- **兼容**：无端点 / SSE 事件 / 持久化字段变更；前端零改动（只消费 `isError` 与正文）；HITL 语义不变（仅顺序前置）；白名单语义不变（"看得见什么"与"能否执行"分层）。
+- **回滚**：删除 `domain/scope-guard/**` 与 `infra/tool-scope-guard.ts`，还原 `agent-factory.ts` 三处装配行；无数据迁移、无平台侧改动。策略级回滚：把该行为 `scope` 改为 `everyone` 并重新部署。
+- **测试**：`agent-backend/tests/unit/ontology-files.spec.ts`、`scope-guard-policy.spec.ts`、`scope-guard-catalog.spec.ts`、`tool-scope-guard.spec.ts`、`scope-guard-loop.spec.ts`（拒绝 → `isError` 接线）；端到端"MCP 工具被拒"依赖真实服务，由 `specs/020-ontology-scope-guard/quickstart.md` 场景 B/C/E 手验。
