@@ -84,6 +84,28 @@ function onIntentFocusChange(event: Event): void {
   if (!checked) patch({ intent_focus: false, next_action_hints: false })
   else patch({ intent_focus: true })
 }
+
+/**
+ * 聚焦阶数（019）：`0~2` 的整数。
+ *
+ * 与条数输入同一口径——**拒绝式**：越界 / 非整数一律不上抛（单选控件本身也只给三个值），
+ * 关闭意图聚焦时控件置灰但**数值保留**，再次打开即恢复，不必重选。
+ */
+const FOCUS_DEPTH_OPTIONS = [
+  { value: SOUL_LIMITS.focusDepthMin, label: '0 阶（只聚焦本身）' },
+  { value: 1, label: '1 阶（向上一跳 / 向下一跳）' },
+  { value: SOUL_LIMITS.focusDepthMax, label: '2 阶（向上两跳 / 向下两跳）' },
+] as const
+
+function onFocusDepthChange(event: Event): void {
+  const value = Number((event.target as HTMLInputElement).value)
+  const valid =
+    Number.isInteger(value) &&
+    value >= SOUL_LIMITS.focusDepthMin &&
+    value <= SOUL_LIMITS.focusDepthMax
+  if (!valid || value === soul.value.intent_focus_depth) return
+  patch({ intent_focus_depth: value })
+}
 </script>
 
 <template>
@@ -215,6 +237,36 @@ function onIntentFocusChange(event: Event): void {
       <p class="field__hint" data-test="intent-focus-hint">
         每一轮对话在生成回答**之前**先做一次意图判定，把最相关的工具作为本轮规划重点。注意，只有关联了本体技能才生效！！！
       </p>
+      <!-- 019：聚焦阶数是意图聚焦的**参数**——关闭时置灰且不可选，但数值保留（不回退） -->
+      <div
+        class="soul-editor__depth"
+        :class="{ 'soul-editor__depth--off': soul.intent_focus !== true }"
+        role="radiogroup"
+        aria-labelledby="soul-focus-depth-label"
+      >
+        <span id="soul-focus-depth-label" class="soul-editor__depth-label">聚焦阶数</span>
+        <label
+          v-for="option in FOCUS_DEPTH_OPTIONS"
+          :key="option.value"
+          class="soul-editor__depth-option"
+        >
+          <input
+            type="radio"
+            name="soul-focus-depth"
+            :data-test="`intent-focus-depth-${option.value}`"
+            :value="option.value"
+            :checked="soul.intent_focus_depth === option.value"
+            :disabled="soul.intent_focus !== true"
+            @change="onFocusDepthChange"
+          />
+          {{ option.label }}
+        </label>
+        <p class="field__hint" data-test="intent-focus-depth-hint">
+          以命中的本体行为所属概念为起点，**上游**方向（主数据 / 父项）进聚焦提示，
+          **下游**方向（明细 / 事实）进下一步动作提示；两侧各自最多走该阶数跳。
+          缺省 0 阶 = 只聚焦本身。
+        </p>
+      </div>
     </fieldset>
 
     <!-- 007：运行期开关。它既不属于"只给前台"也不属于"进系统提示词"，而是**只写进
@@ -350,6 +402,42 @@ function onIntentFocusChange(event: Event): void {
 }
 
 .soul-editor__count .field__hint {
+  flex-basis: 100%;
+}
+
+/* 019：聚焦阶数（单选组）——与条数参数同区，关闭开关时整组弱化 */
+.soul-editor__depth {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.soul-editor__depth-label {
+  color: var(--color-text-secondary);
+}
+
+.soul-editor__depth-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+}
+
+.soul-editor__depth-option input:disabled {
+  cursor: not-allowed;
+}
+
+.soul-editor__depth--off {
+  color: var(--color-text-muted);
+}
+
+.soul-editor__depth--off .soul-editor__depth-option {
+  cursor: default;
+}
+
+.soul-editor__depth .field__hint {
   flex-basis: 100%;
 }
 

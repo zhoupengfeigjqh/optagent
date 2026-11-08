@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IntentFocusDisposition } from './state.js';
+import type { BehaviorSource } from './types.js';
 import { threadDir } from '../dirs.js';
 
 /** 单线程记录上限：字节 */
@@ -36,15 +37,33 @@ export interface SkillFocusRecord {
 /**
  * 行为决策留档（**只写入选行为**，2026-11-06 口径）。
  *
- * 不再带 `kind` / `selected` / `source`：能力只剩行为一类，且明细即入选集合，
- * 这三个字段恒为常量或可推导。
+ * 2026-11-08（019）在"只写入选行为"之上补了三件事，用于解释"这条为什么会出现"：
+ * - `source`：直接命中 / 上游发散 / 下游发散（发散项没有分数，`score` 为 null）；
+ * - `hop`：距 direct 概念的跳数（direct 恒为 0）；
+ * - `via_concept`：经哪个概念发散而来（direct 为自身概念或 null）。
  */
 export interface CapabilityFocusRecord {
   name: string;
   title: string;
   ontology_id: string;
   ontology_name: string | null;
-  score: number;
+  /** 直接命中 = Laya 分数；发散项 = null（不再判分） */
+  score: number | null;
+  source: BehaviorSource;
+  hop: number;
+  via_concept: string | null;
+}
+
+/** 概念留档（019）：只有提示通道有概念，卡片通道没有 */
+export interface ConceptFocusRecord {
+  name: string;
+  title: string;
+  ontology_id: string;
+  ontology_name: string | null;
+  /** 直接命中 / 上游发散（下游概念不进提示，因此不落这个概念表） */
+  source: 'direct' | 'upstream';
+  hop: number;
+  via_concept: string | null;
 }
 
 /** 一条判定记录（字段口径见 `data-model.md §5`） */
@@ -66,9 +85,15 @@ export interface IntentFocusRecord {
   batches: number;
   /** 候选明细是否被截断 */
   truncated: boolean;
+  /** 019：本轮生效的聚焦阶数（0 = 只聚焦本身） */
+  depth: number;
   skills: SkillFocusRecord[];
-  /** 本轮入选的本体行为（2026-11-06 起唯一的能力明细，且只含入选项） */
+  /** 019：提示通道的概念（直接命中 + 上游），不设上限 */
+  concepts: ConceptFocusRecord[];
+  /** 提示通道的行为（直接命中 + 上游发散） */
   behaviors: CapabilityFocusRecord[];
+  /** 卡片通道的行为（直接命中 + 下游发散）；`next_action_hints` 关闭时只有直接命中 */
+  tool_tip_behaviors: CapabilityFocusRecord[];
   prompt: string;
   prompt_truncated: boolean;
   warnings: string[];

@@ -37,7 +37,7 @@ import type { LlmEvent } from '../../src/types.js';
 
 const USER = 'admin';
 const AGENT = 'demo';
-const PREFIX = '本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）';
+const PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
 
 const CONFIG: IntentFocusConfig = {
   baseUrl: 'http://laya:8000',
@@ -317,8 +317,9 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     expect(client.calls[0]!.state).toBe('帮我创建一笔原材料采购单');
     expect(recorder.extras).toHaveLength(1);
     expect(recorder.extras[0]).toContain(
-      `${PREFIX}\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1））`,
+      `${PREFIX}\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）`,
     );
+    expect(recorder.extras[0]).toContain('   直接命中：创建采购单（B1）');
     // 提示不进 messages，也不进历史
     expect(historyText()).not.toContain(PREFIX);
 

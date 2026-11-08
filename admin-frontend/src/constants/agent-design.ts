@@ -102,6 +102,13 @@ export const SOUL_LIMITS = {
   nextActionHintsMin: 1,
   nextActionHintsMax: 6,
   nextActionHintsDefault: 3,
+  /**
+   * 聚焦阶数（019）：`0~2`，缺省 `0`。
+   * 与后端 `readFocusDepth` 同一区间；阶数 0 = 只聚焦 Laya 命中的技能与行为（016 行为）。
+   */
+  focusDepthMin: 0,
+  focusDepthMax: 2,
+  focusDepthDefault: 0,
   listItems: 20,
   listItemLength: 100,
   capabilityTagLength: 20,
@@ -125,5 +132,7 @@ export function emptySoulDesign(): SoulDesign {
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
     // 013：同上，必须显式——与后端 `emptySoulDesign()` 同形，脏检查才不会一进页面就报"有修改"
     intent_focus: false,
+    // 019：阶数同样显式落缺省 0（新建数字人不发散），与后端同形
+    intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
   }
 }

@@ -65,6 +65,24 @@ export function readPositiveInt(raw: unknown): number {
   return raw;
 }
 
+/**
+ * 聚焦阶数（019）：`0~SOUL_LIMITS.focusDepthMax` 的整数，缺省 `0`。
+ *
+ * **拒绝式**（与 `readPositiveInt` 同口径）：`null` / 小数 / 越界 / 非数字一律拒绝，
+ * 不做 round / clamp——阶数直接决定"发散几跳"，静默改写会让管理员看到的与运行的不一致。
+ */
+export function readFocusDepth(raw: unknown): number {
+  const { focusDepthMin: min, focusDepthMax: max, focusDepthDefault: fallback } = SOUL_LIMITS;
+  if (raw === undefined) return fallback;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
+    throw new ApiError(
+      ERROR_CODES.VALIDATION_FAILED,
+      `聚焦阶数须为 ${min}~${max} 的整数（当前：${JSON.stringify(raw)}）`,
+    );
+  }
+  return raw;
+}
+
 /** 可选文本：缺省 / `null` → `''`；非字符串拒绝；超长拒绝 */
 export function readOptionalText(raw: unknown, label: string, max: number): string {
   if (raw === undefined || raw === null) return '';

@@ -149,6 +149,8 @@ export function buildCapabilityCandidates(
         description: behavior.description,
         ontologyId: ontology.ontologyId,
         ontologyName: ontology.ontologyName,
+        // 019：概念随候选一起带下去，选中后才能作为发散的起点
+        concept: behavior.concept,
         index: order++,
       });
     }

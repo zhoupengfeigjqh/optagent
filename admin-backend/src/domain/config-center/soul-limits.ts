@@ -29,6 +29,16 @@ export const SOUL_LIMITS = {
   nextActionHintsMin: 1,
   nextActionHintsMax: 6,
   nextActionHintsDefault: 3,
+  /**
+   * 聚焦阶数（019）：`0~2`，缺省 `0`。
+   *
+   * 与运行侧 `INTENT_FOCUS_DEPTH_*`（`agent-backend/src/domain/soul.ts`）**MUST 同步**：
+   * 平台保存时拒绝越界值，运行侧读到坏值只收敛到 0。
+   * 关闭意图聚焦时**保留**管理员选的阶数（只是不物化进产物），再次打开即恢复。
+   */
+  focusDepthMin: 0,
+  focusDepthMax: 2,
+  focusDepthDefault: 0,
   /** 能力标签 / 绝对禁止的条数 */
   listItems: 20,
   /** 绝对禁止单项字数 */

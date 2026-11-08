@@ -12,7 +12,12 @@ import type { AppConfig } from './config.js';
 import { IntentFocusRunner, type IntentFocusPort } from './domain/intent-focus/runner.js';
 import { IntentFocusStore } from './domain/intent-focus/store.js';
 import { NextActionsStore } from './domain/next-actions.js';
-import { isIntentFocusEnabled, isNextActionsEnabled, nextActionHintsCount } from './domain/soul.js';
+import {
+  intentFocusDepth,
+  isIntentFocusEnabled,
+  isNextActionsEnabled,
+  nextActionHintsCount,
+} from './domain/soul.js';
 import { LayaClient } from './infra/laya-client.js';
 import { createThrottledWarn } from './logging.js';
 
@@ -76,6 +81,8 @@ export function buildAttachments(deps: ServerAttachmentsDeps): ServerAttachments
     // 开关逐次现读；读不出来按关闭（fail-closed，见 soul.ts）
     isEnabled: (userId, agentName) =>
       isIntentFocusEnabled(root, userId, agentName, focusSwitchWarn),
+    // 019：聚焦阶数同样逐次现读；读不出来按 0（不发散）
+    getDepth: (userId, agentName) => intentFocusDepth(root, userId, agentName, focusSwitchWarn),
     logger,
   });
 

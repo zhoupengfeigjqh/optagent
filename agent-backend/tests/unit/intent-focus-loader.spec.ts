@@ -1,13 +1,16 @@
 /**
- * 单元测试：本体加载与索引（016）。
+ * 单元测试：本体加载与索引（016 / 019）。
  *
  * 守住的边界：
- * - 只提取 metadata / behaviors（concepts / functions / rules 等字段**不进入模型**）；
+ * - 只提取 metadata / behaviors / concepts / relations（`functions` / `rules` 与参数正文
+ *   **不进入模型**）；
  * - `title` 缺失回退 `name`；`description` 缺失为空串（是否降级由题面构造裁决）；
  * - 坏 YAML 只告警；
  * - 同一 `ontology_id` 的多个文件全部保留（同 ID 多本体）。
  *
  * 2026-11-06：能力聚焦只到行为，`functions` / `rules` 不再解析。
+ * 2026-11-08（019）：新增 `concepts` / `relations` 与 `behaviors[].concept` 的只读建模；
+ * 方向判定**不在本层**（见 `expansion.ts`）。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -50,9 +53,11 @@ const VALID = [
   '    title: 创建原材料采购单',
   '    description: 创建一笔新的原材料采购记录。',
   '    op_type: command',
+  '    concept: PurchaseRecord',
   '  - name: QueryPurchaseRecords',
   '    title: 查询原材料采购单信息',
   '    op_type: query',
+  '    concept: PurchaseRecord',
   '  - name: NoTitleBehavior',
   'rules:',
   '  - name: V01',
@@ -60,7 +65,15 @@ const VALID = [
   '    data_supplements:',
   '      - QueryPurchaseRecords',
   'concepts:',
-  '  - name: 不应被建模',
+  '  - name: PurchaseRecord',
+  '    title: 原材料采购记录',
+  '  - name: RawMaterial',
+  'relations:',
+  '  - name: RecordsRawMaterial',
+  '    source: PurchaseRecord',
+  '    target: RawMaterial',
+  '    cardinality: N:1',
+  '    relation_type: Functional',
 ].join('\n');
 
 afterEach(() => {
@@ -84,16 +97,37 @@ describe('loadOntologyIndex', () => {
         title: '创建原材料采购单',
         description: '创建一笔新的原材料采购记录。',
         opType: 'command',
+        concept: 'PurchaseRecord',
       },
       // description 缺失 → 空串（题面构造时再降级到 title）
-      { name: 'QueryPurchaseRecords', title: '查询原材料采购单信息', description: '', opType: 'query' },
-      // title 缺失 → 回退 name
-      { name: 'NoTitleBehavior', title: 'NoTitleBehavior', description: '', opType: null },
+      {
+        name: 'QueryPurchaseRecords',
+        title: '查询原材料采购单信息',
+        description: '',
+        opType: 'query',
+        concept: 'PurchaseRecord',
+      },
+      // title 缺失 → 回退 name；concept 缺失 → null（不参与发散）
+      { name: 'NoTitleBehavior', title: 'NoTitleBehavior', description: '', opType: null, concept: null },
+    ]);
+    // 019：概念与关系只取发散所需字段（title 缺失回退 name）
+    expect(ontology.concepts).toEqual([
+      { name: 'PurchaseRecord', title: '原材料采购记录' },
+      { name: 'RawMaterial', title: 'RawMaterial' },
+    ]);
+    expect(ontology.relations).toEqual([
+      {
+        name: 'RecordsRawMaterial',
+        source: 'PurchaseRecord',
+        target: 'RawMaterial',
+        relationType: ['Functional'],
+        cardinality: 'N:1',
+      },
     ]);
     expect(index.byId.get('1')).toHaveLength(1);
   });
 
-  it('functions / rules 不再解析：字段不存在且不产生告警', () => {
+  it('functions / rules 不再解析；concepts / relations 只建模不产生告警', () => {
     const agent = tmpAgentDir();
     writeOntology(agent, '生产调度', '原材料采购和库存', VALID);
     const index = loadOntologyIndex(agent);
@@ -101,8 +135,42 @@ describe('loadOntologyIndex', () => {
 
     expect(ontology).not.toHaveProperty('functions');
     expect(ontology).not.toHaveProperty('rules');
-    // `functions` / `rules` / `concepts` 都是合法 YAML，不应触发任何告警
     expect(index.warnings).toEqual([]);
+  });
+
+  it('关系缺端点被丢弃并告警；relation_type 支持单值与数组两种写法', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      'S',
+      'O',
+      [
+        'metadata:',
+        '  ontology_id: 8',
+        'concepts:',
+        '  - name: A',
+        '  - name: B',
+        'relations:',
+        '  - name: Half',
+        '    source: A',
+        '  - name: Pair',
+        '    source: A',
+        '    target: B',
+        '    relation_type:',
+        '      - Functional',
+        '      - InverseFunctional',
+      ].join('\n'),
+    );
+
+    const index = loadOntologyIndex(agent);
+    const relations = index.all[0]!.relations;
+    expect(relations).toHaveLength(1);
+    expect(relations[0]).toMatchObject({
+      name: 'Pair',
+      relationType: ['Functional', 'InverseFunctional'],
+      cardinality: null,
+    });
+    expect(index.warnings.some((warning) => warning.includes('relation_missing_endpoint'))).toBe(true);
   });
 
   it('同一 ontology_id 的多个文件全部保留', () => {

@@ -60,6 +60,7 @@ export function selectCapabilities(
       title: candidate.title,
       ontologyId: candidate.ontologyId,
       ontologyName: candidate.ontologyName,
+      concept: candidate.concept,
       score,
       index: candidate.index,
     });

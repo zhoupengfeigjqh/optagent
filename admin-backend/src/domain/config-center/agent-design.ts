@@ -27,6 +27,7 @@ import {
   fromLegacySoul,
   isSoulDesign,
   normalizeSoulDesign,
+  readStoredFocusDepth,
   readStoredHintCount,
   type SoulDesign,
 } from './soul-design.js';
@@ -302,18 +303,27 @@ export class AgentDesignService {
     const count = readStoredHintCount(soul.next_action_hints_count);
     // 013：开关同样收敛到 `false`（非布尔按关处理，与运行侧 `parseSoulMeta` 同一 fail-closed 口径）
     const focus = typeof soul.intent_focus === 'boolean' ? soul.intent_focus : false;
+    // 019：聚焦阶数收敛到 0~2（坏值 → 缺省 0，与运行侧 `parseSoulMeta` 同一收敛口径）
+    const depth = readStoredFocusDepth(soul.intent_focus_depth);
     // 013 修订：下一步动作提示依赖意图聚焦——意图聚焦关闭时，hints 收敛到关（存量数据生效）
     const effectiveHints = hints && focus;
     if (
       effectiveHints === soul.next_action_hints &&
       count === soul.next_action_hints_count &&
-      focus === soul.intent_focus
+      focus === soul.intent_focus &&
+      depth === soul.intent_focus_depth
     ) {
       return doc;
     }
     return {
       ...doc,
-      soul: { ...soul, next_action_hints: effectiveHints, next_action_hints_count: count, intent_focus: focus },
+      soul: {
+        ...soul,
+        next_action_hints: effectiveHints,
+        next_action_hints_count: count,
+        intent_focus: focus,
+        intent_focus_depth: depth,
+      },
     };
   }
 

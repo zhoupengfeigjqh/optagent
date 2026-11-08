@@ -9,6 +9,7 @@
  * next_action_hints: true    ← 仅开启时出现（007：运行期开关，不是给模型看的内容）
  * next_action_hints_count: 3 ← 与开关同进同出：开启时每轮最多几条提示
  * intent_focus: true         ← 仅开启时出现（013：运行期开关，与上面的开关互相独立）
+ * intent_focus_depth: 1      ← 仅开启且非 0 时出现（019：聚焦阶数，0~2）
  * intro: 角色简介
  * welcome: 首屏欢迎语
  * starters: [ { prompt, tools } ]
@@ -32,6 +33,7 @@ import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import {
   readBool,
+  readFocusDepth,
   readOptionalText,
   readPositiveInt,
   readRequiredText,
@@ -99,6 +101,17 @@ export interface SoulDesign {
    * - **不改人格提示词**：该键不进正文，System Prompt 开 / 关逐字一致（规格 FR-034）。
    */
   intent_focus?: boolean;
+  /**
+   * 聚焦阶数（019，2026-11-08）：意图聚焦开启后，按本体对象关系做几跳**单向**发散。
+   *
+   * - 取值 `0~2` 的整数，缺省 `0`（= 只聚焦 Laya 命中的技能与行为，与 016 行为逐字一致）；
+   * - 语义：以入选行为所属概念为起点，**上游**方向进聚焦提示（模型该参考什么），
+   *   **下游**方向进下一步动作提示（模型能建议用户做什么），两侧各自最多走 N 跳；
+   * - 与 `intent_focus` 是"开关 + 参数"的关系：关闭时数值仍被保留（管理台置灰），
+   *   物化时**仅在开启且非 0** 时写键——未搭配的内容不残留；
+   * - 校验为**拒绝式**（越界 / 非整数 / `null` 一律 `VALIDATION_FAILED`，不 clamp）。
+   */
+  intent_focus_depth?: number;
 }
 
 // 字段上限已外移到 `soul-limits.ts`（渲染 / 读取器 / 前端计数共用同一组数字）；
@@ -122,6 +135,8 @@ export function emptySoulDesign(): SoulDesign {
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
     // 013：同理显式落 `false`（新建数字人默认不聚焦，存量数字人经 withSoulDefaults 补齐）
     intent_focus: false,
+    // 019：阶数显式落 `0`（新建数字人不发散，与运行侧缺省同口径；存量同样补 0）
+    intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
   };
 }
 
@@ -191,6 +206,9 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     next_action_hints_count: readPositiveInt(record.next_action_hints_count),
     // 013：键缺失 = 关；键在但类型不对 = 拒绝（与 next_action_hints 同一 readBool 口径）
     intent_focus: intentFocus,
+    // 019：键缺失 = 0；越界 / 非整数 / null → 拒绝（不 clamp）。
+    // 不随开关收敛为 0：关闭时数值要保留，再次打开即恢复，不必重填（与条数同口径）
+    intent_focus_depth: readFocusDepth(record.intent_focus_depth),
   };
 }
 
@@ -206,6 +224,12 @@ export function renderSoulMd(soul: SoulDesign): string {
   // 013：同样只在开启时写键；关闭态产物里连"intent_focus: false"都不出现（部署零残留，FR-033）
   if (soul.intent_focus === true) {
     frontmatter.intent_focus = true;
+  }
+  // 019：阶数是"开关 + 参数"——开启且非 0 才写；阶数 0 与关闭态一样不写键
+  // （0 = 只聚焦本身 = 016 行为，产物里不出现任何新键）
+  const depth = soul.intent_focus_depth ?? SOUL_LIMITS.focusDepthDefault;
+  if (soul.intent_focus === true && depth > 0) {
+    frontmatter.intent_focus_depth = depth;
   }
   // 007：下一步动作提示**依赖意图聚焦**——意图聚焦开启 + 该开关开启才写键；
   // 条数紧随其后，同样只在开启时写：关闭态产物里连"条数"都不该出现（未搭配的内容不残留）
@@ -250,6 +274,17 @@ export function renderSoulMd(soul: SoulDesign): string {
  */
 export function readStoredHintCount(raw: unknown): number {
   const { nextActionHintsMin: min, nextActionHintsMax: max, nextActionHintsDefault: fallback } = SOUL_LIMITS;
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= min && raw <= max ? raw : fallback;
+}
+
+/**
+ * **读取期容错**取聚焦阶数（019）。
+ *
+ * 与 `readStoredHintCount` 同口径：键缺失（本字段引入前的存档）或被人手改坏
+ * 一律收敛到 `0`（= 不发散，退回 016 行为），不让一个坏数字把整个数字人变成打不开。
+ */
+export function readStoredFocusDepth(raw: unknown): number {
+  const { focusDepthMin: min, focusDepthMax: max, focusDepthDefault: fallback } = SOUL_LIMITS;
   return typeof raw === 'number' && Number.isInteger(raw) && raw >= min && raw <= max ? raw : fallback;
 }
 

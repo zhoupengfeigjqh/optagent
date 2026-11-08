@@ -88,6 +88,8 @@ function fixture(options: {
   ontology?: boolean;
   /** 同一 ontology_id 再物化一份（不同目录），用于验证提示不重复输出本体字段 */
   duplicateOntology?: boolean;
+  /** 覆盖物化的本体文件内容（019 的阶数用例需要 concepts / relations） */
+  ontologyYaml?: string;
 } = {}): Fixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'optagent-focus-'));
   tmpDirs.push(root);
@@ -110,7 +112,11 @@ function fixture(options: {
   if (options.ontology !== false) {
     const ontoDir = path.join(dir, 'ontology', '生产调度', '原材料采购和库存');
     fs.mkdirSync(ontoDir, { recursive: true });
-    fs.writeFileSync(path.join(ontoDir, 'ontology.yaml'), ONTOLOGY_YAML, 'utf8');
+    fs.writeFileSync(
+      path.join(ontoDir, 'ontology.yaml'),
+      options.ontologyYaml ?? ONTOLOGY_YAML,
+      'utf8',
+    );
   }
   if (options.duplicateOntology) {
     const copyDir = path.join(dir, 'ontology', '生产调度', '原材料采购和库存副本');
@@ -152,6 +158,8 @@ interface HarnessOptions {
   decide?: IntentFocusClient['decide'];
   withStore?: boolean;
   storeThrows?: boolean;
+  /** 019：聚焦阶数（缺省 0） */
+  depth?: number;
   logger?: { info: (obj: Record<string, unknown>, msg: string) => void; warn: (obj: Record<string, unknown>, msg: string) => void };
 }
 
@@ -181,6 +189,7 @@ function harness(root: string, options: HarnessOptions = {}) {
           },
         }),
     isEnabled: () => options.enabled ?? true,
+    getDepth: () => options.depth ?? 0,
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => 1_000,
   });
@@ -269,7 +278,9 @@ describe('成功链路', () => {
     const { prompt, toolTips } = await runner.judge(input());
 
     expect(prompt).toBe(
-      "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建采购单（B1））",
+      "本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）\n" +
+        "1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）\n" +
+        '   直接命中：创建采购单（B1）',
     );
     // 卡片候选范围＝入选行为（顺序沿判定结果，字段原样透传）
     expect(toolTips).toEqual([
@@ -332,6 +343,150 @@ describe('成功链路', () => {
     await runner.judge(input({ userInput: `${'材料'.repeat(300)}创建采购单` }));
     expect(records[0]!.input_truncated).toBe(true);
     expect(records[0]!.input.endsWith('创建采购单')).toBe(true);
+  });
+});
+
+/** 019 用例本体：3 个概念 / 2 条关系 / 3 条行为（与真实文件同形） */
+const FOCUS_ONTOLOGY_YAML = [
+  'metadata:',
+  '  ontology_id: 7',
+  '  ontology_name: 原材料采购和库存',
+  '  scenario_id: 2',
+  '  scenario_name: 生产调度',
+  'concepts:',
+  '  - name: RawMaterial',
+  '    title: 原材料',
+  '  - name: RawMaterialInventory',
+  '    title: 原材料库存',
+  '  - name: PurchaseRecord',
+  '    title: 原材料采购记录',
+  'relations:',
+  '  - name: HasRawInventory',
+  '    source: RawMaterial',
+  '    target: RawMaterialInventory',
+  '    cardinality: 1:1',
+  '    relation_type: [Functional, InverseFunctional]',
+  '  - name: RecordsRawMaterial',
+  '    source: PurchaseRecord',
+  '    target: RawMaterial',
+  '    cardinality: N:1',
+  '    relation_type: [Functional]',
+  'behaviors:',
+  '  - name: QueryInventory',
+  '    title: 查询原材料库存信息',
+  '    op_type: query',
+  '    concept: RawMaterialInventory',
+  '  - name: QueryRawMaterials',
+  '    title: 查询原材料基本信息',
+  '    op_type: query',
+  '    concept: RawMaterial',
+  '  - name: CreatePurchaseRecord',
+  '    title: 创建原材料采购单',
+  '    op_type: command',
+  '    concept: PurchaseRecord',
+].join('\n');
+
+const FOCUS_PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
+
+function focusFixture(): Fixture {
+  return fixture({
+    skills: [
+      { dir: 'inv', name: 'inventory-skill', description: '库存本体技能', ontologyId: '7' },
+    ],
+    ontologyYaml: FOCUS_ONTOLOGY_YAML,
+  });
+}
+
+/** 只让「查询原材料库存信息」过阈值；可按需放开其它行为 */
+function focusDecide(allow: readonly string[]): IntentFocusClient['decide'] {
+  return async (_state, questions) => {
+    const scores: Record<string, number> = {};
+    for (const [qid, question] of Object.entries(questions)) {
+      const text = (question as { instructions: string }).instructions;
+      if (text.includes('库存本体技能')) scores[qid] = 0.9;
+      else if (allow.some((keyword) => text.includes(keyword))) scores[qid] = 0.9;
+      else scores[qid] = 0.05;
+    }
+    return { ok: true, scores, model: 'm' };
+  };
+}
+
+describe('聚焦阶数（019）', () => {
+  it('阶数 0：只有直接命中的概念与行为，卡片也只有直接命中', async () => {
+    const { root } = focusFixture();
+    const { runner, records } = harness(root, { decide: focusDecide(['查询原材料库存信息']) });
+    const { prompt, toolTips } = await runner.judge(input());
+
+    expect(prompt).toBe(
+      `${FOCUS_PREFIX}\n1）inventory-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='7'）\n` +
+        '   关联概念：原材料库存（RawMaterialInventory）\n' +
+        '   直接命中：查询原材料库存信息（QueryInventory）',
+    );
+    expect(toolTips).toEqual([
+      { name: 'QueryInventory', title: '查询原材料库存信息', ontology_id: '7', ontology_name: '原材料采购和库存' },
+    ]);
+    expect(records[0]!.depth).toBe(0);
+    expect(records[0]!.concepts.map((item) => [item.name, item.source, item.hop])).toEqual([
+      ['RawMaterialInventory', 'direct', 0],
+    ]);
+    expect(records[0]!.behaviors.map((item) => item.name)).toEqual(['QueryInventory']);
+    expect(records[0]!.tool_tip_behaviors.map((item) => item.name)).toEqual(['QueryInventory']);
+  });
+
+  it('阶数 1：上游发散只进提示（概念 + 上游参考），卡片保持直接命中', async () => {
+    const { root } = focusFixture();
+    const { runner, records } = harness(root, {
+      decide: focusDecide(['查询原材料库存信息']),
+      depth: 1,
+    });
+    const { prompt, toolTips } = await runner.judge(input());
+
+    expect(prompt).toContain('   关联概念：原材料库存（RawMaterialInventory）');
+    expect(prompt).toContain('   上游概念：原材料（RawMaterial）');
+    expect(prompt).toContain('   上游参考：查询原材料基本信息（QueryRawMaterials）');
+    // 下游：库存是 1:1 的明细端，没有更下游的对象
+    expect(toolTips.map((item) => item.name)).toEqual(['QueryInventory']);
+
+    const record = records[0]!;
+    expect(record.depth).toBe(1);
+    expect(record.concepts.map((item) => [item.name, item.source, item.hop])).toEqual([
+      ['RawMaterialInventory', 'direct', 0],
+      ['RawMaterial', 'upstream', 1],
+    ]);
+    // 提示通道：直接命中 + 上游
+    expect(record.behaviors.map((item) => [item.name, item.source, item.score])).toEqual([
+      ['QueryInventory', 'direct', 0.9],
+      ['QueryRawMaterials', 'upstream', null],
+    ]);
+    // 卡片通道：只有直接命中
+    expect(record.tool_tip_behaviors.map((item) => item.name)).toEqual(['QueryInventory']);
+  });
+
+  it('阶数 1：下游发散只进卡片（含写行为），提示不多一行', async () => {
+    const { root } = focusFixture();
+    const { runner, records } = harness(root, {
+      decide: focusDecide(['查询原材料库存信息', '查询原材料基本信息']),
+      depth: 1,
+    });
+    const { prompt, toolTips } = await runner.judge(input());
+
+    // 两个直接命中概念把「原材料」变成锚点 → 上游无从发散
+    expect(prompt).not.toContain('上游概念：');
+    expect(prompt).not.toContain('上游参考：');
+
+    // 下游：原材料 → 原材料采购记录（采购单）→ 创建采购单进卡片
+    expect(toolTips.map((item) => item.name)).toEqual([
+      'QueryInventory',
+      'QueryRawMaterials',
+      'CreatePurchaseRecord',
+    ]);
+    const record = records[0]!;
+    expect(record.behaviors.map((item) => item.name)).toEqual(['QueryInventory', 'QueryRawMaterials']);
+    expect(record.tool_tip_behaviors.map((item) => [item.name, item.source, item.score, item.via_concept])).toEqual([
+      ['QueryInventory', 'direct', 0.9, 'RawMaterialInventory'],
+      ['QueryRawMaterials', 'direct', 0.9, 'RawMaterial'],
+      ['CreatePurchaseRecord', 'downstream', null, 'PurchaseRecord'],
+    ]);
   });
 });
 

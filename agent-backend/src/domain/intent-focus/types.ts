@@ -1,11 +1,12 @@
 /**
- * 本体技能聚焦（016）的共享类型。
+ * 本体技能聚焦（016 / 019）的共享类型。
  *
  * 2026-11-06 调整：能力聚焦**只保留本体行为**，本体函数与规则数据补充整体移除；
  * `rules` / `data_supplements` 不再解析、不再留档。
  *
- * 只建模本特性用到的字段：`metadata` / `behaviors`。
- * `concepts` / `relations` / 参数 / 代码一律不建模——不建模才不会被误用。
+ * 2026-11-08（019）调整：聚焦阶数开启时，需要按**对象关系**做同向一阶发散，
+ * 因此新增 `concepts` / `relations` 与 `behaviors[].concept` 三处只读建模。
+ * 参数正文、函数代码、`rules` 仍然不建模。
  */
 import type { SystemOneQuestion } from '../../infra/laya-client.js';
 
@@ -19,6 +20,35 @@ export interface OntologyBehavior {
   /** 行为描述；缺失为空串（不在此处回退，降级顺序在题面构造时统一裁决） */
   description: string;
   opType: string | null;
+  /**
+   * 行为所属概念（`behaviors[].concept`，单值）。
+   *
+   * 019：概念是"行为 → 概念 → 关系 → 邻居概念 → 邻居行为"这条发散链的唯一入口，
+   * 缺失即为断链（该行为照常参与判定，只是不参与发散）。
+   */
+  concept: string | null;
+}
+
+/** 本体概念（019）：只取发散所需的展示与关联字段 */
+export interface OntologyConcept {
+  name: string;
+  title: string;
+}
+
+/**
+ * 对象关系（019）：`concepts[]` 之间的有向连接。
+ *
+ * **不在此处判定上下游**——方向是 `expansion.ts` 的唯一职责（同一事实只有一处解释），
+ * 这里只保留判定所需的原始信号。
+ */
+export interface OntologyRelation {
+  name: string;
+  source: string;
+  target: string;
+  /** `relation_type` 原样（`Functional` / `InverseFunctional`） */
+  relationType: string[];
+  /** `cardinality` 原样（`'1:1'` / `'N:1'` / `'1:N'` …），缺省 null */
+  cardinality: string | null;
 }
 
 /** 一份 ontology.yaml 中与本特性相关的部分 */
@@ -29,6 +59,8 @@ export interface OntologyDefinition {
   scenarioId: string | null;
   scenarioName: string | null;
   behaviors: OntologyBehavior[];
+  concepts: OntologyConcept[];
+  relations: OntologyRelation[];
 }
 
 /** 按归一化 `ontology_id` 建索引；同一 ID 的多个文件全部保留 */
@@ -71,6 +103,8 @@ export interface CapabilityCandidate {
   description: string;
   ontologyId: string;
   ontologyName: string | null;
+  /** 所属概念（019 发散起点）；缺失为 null */
+  concept: string | null;
   /** 同一本体内的原序（用于同分稳定排序） */
   index: number;
 }
@@ -92,6 +126,8 @@ export interface CapabilityDecision {
   title: string;
   ontologyId: string;
   ontologyName: string | null;
+  /** 所属概念（019 发散起点）；缺失为 null */
+  concept: string | null;
   score: number;
   index: number;
 }
@@ -120,4 +156,52 @@ export interface FocusToolTip {
   title: string;
   ontology_id: string;
   ontology_name: string | null;
+}
+
+/* ---------- 019：一阶发散（上游进提示 / 下游进卡片） ---------- */
+
+/** 发散通道：上游（进提示词） / 下游（进下一步动作卡片） */
+export type ExpansionSide = 'upstream' | 'downstream';
+
+/** 行为来源：直接命中 / 上游发散 / 下游发散（留档与提示分段共用） */
+export type BehaviorSource = 'direct' | 'upstream' | 'downstream';
+
+/** 发散得到的概念（`hop ≥ 1`；direct 概念不进本结构） */
+export interface ExpandedConcept {
+  ontologyId: string;
+  ontologyName: string | null;
+  name: string;
+  title: string;
+  /** 距离 direct 概念的跳数（1..depth） */
+  hop: number;
+  /** 由哪个概念扩展而来（BFS 首次命中的路径） */
+  viaConcept: string;
+  /** 经由哪条关系扩展而来 */
+  viaRelation: string;
+}
+
+/** 发散得到的行为（`score` 恒为 null：不再判分，见 019 FR） */
+export interface ExpandedBehavior {
+  ontologyId: string;
+  ontologyName: string | null;
+  name: string;
+  title: string;
+  /** 所属概念（即 `viaConcept`），用于留档溯源 */
+  concept: string | null;
+  hop: number;
+  viaConcept: string;
+}
+
+/** 单个通道的发散产出（概念 + 行为，各自独立上限） */
+export interface ExpansionChannel {
+  concepts: ExpandedConcept[];
+  behaviors: ExpandedBehavior[];
+}
+
+/** 一次发散的总产出；`truncated` 表示行为候选触达上限 */
+export interface ExpansionResult {
+  upstream: ExpansionChannel;
+  downstream: ExpansionChannel;
+  warnings: string[];
+  truncated: boolean;
 }

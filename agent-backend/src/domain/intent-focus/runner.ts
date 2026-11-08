@@ -1,9 +1,11 @@
 /**
- * 意图聚焦（016）编排：
+ * 意图聚焦（016 / 019）编排：
  * 开关 → 跳过 → 配置 → 技能头部 → 本体索引 → 技能判定 → 行为判定
- * → 去重 → 提示铸造 → 留档 → 返回提示。
+ * → 一阶发散（上游进提示 / 下游进卡片）→ 提示铸造 → 留档 → 返回提示。
  *
  * 2026-11-06：能力判定只到**本体行为**，函数与规则数据补充已移除。
+ * 2026-11-08（019）：新增聚焦阶数（0~2）与方向发散；发散**不判分**，纯内存遍历，
+ * 因此不增加任何 Laya 调用，也不改变本轮首字节时间。
  *
  * 三个刻意的顺序约束：
  * 1. **开关最先**：关闭轮次零读取、零调用、零留档（FR-060）；`skip` 与"未配置"都排在
@@ -11,8 +13,8 @@
  * 2. **能力依附技能**：没有任何技能入选就不读本体能力（FR-020），否则等于全量展开；
  * 3. **失败只降级**：任何异常都折成"本轮无提示"，绝不冒泡到对话主链路（FR-054）。
  *
- * 分批判定见 `batch-decider.ts`，留档写入见 `run-record.ts`
- * ——runner 只保留"顺序与决策"，不再承载 IO 细节。
+ * 分批判定见 `batch-decider.ts`，发散见 `expansion.ts`，留档写入见 `run-record.ts`
+ * ——runner 只保留"顺序与决策"，不承载 IO 与图遍历细节。
  */
 import type { IntentFocusConfig } from '../../config.js';
 import { agentDir } from '../dirs.js';
@@ -25,19 +27,39 @@ import {
   buildSkillQuestions,
 } from './candidates.js';
 import { BatchDecider, type DecideClient } from './batch-decider.js';
+import { clampDepth, expandNeighborhood } from './expansion.js';
 import { loadOntologyIndex } from './ontology-loader.js';
-import { composeFocusPrompt, type PromptOntology, type PromptSkill } from './prompt.js';
+import {
+  composeFocusPrompt,
+  maxPromptChars,
+  type PromptConcept,
+  type PromptOntology,
+  type PromptSkill,
+} from './prompt.js';
+import type { ConceptEntry } from './record.js';
 import { FocusRecordWriter } from './run-record.js';
 import { selectCapabilities, selectSkills } from './selection.js';
 import type {
   CapabilitySelection,
+  ExpandedBehavior,
+  ExpansionResult,
   FocusToolTip,
+  OntologyDefinition,
+  OntologyIndex,
   SkillCandidate,
   SkillDecision,
 } from './types.js';
 import { loadSkillHeaders } from '../skill-header.js';
 
 const EMPTY_SELECTION: CapabilitySelection = { behaviors: [] };
+
+/** 无发散（阶数 0 / 非本体技能）：提示只有直接命中，卡片也只有直接命中 */
+const EMPTY_EXPANSION: ExpansionResult = {
+  upstream: { concepts: [], behaviors: [] },
+  downstream: { concepts: [], behaviors: [] },
+  warnings: [],
+  truncated: false,
+};
 
 /**
  * 一轮意图聚焦的产出。
@@ -101,6 +123,12 @@ export interface IntentFocusRunnerDeps {
   };
   /** SOUL 开关（逐次现读，fail-closed） */
   isEnabled: (userId: string, agentName: string) => boolean;
+  /**
+   * 019：SOUL 聚焦阶数（逐次现读；缺省 = 0 → 不发散）。
+   *
+   * 与开关同口径：**不缓存**——阶数随部署整体覆盖，缓存会让"部署后不生效"难以解释。
+   */
+  getDepth?: (userId: string, agentName: string) => number;
   logger?: IntentFocusRunnerLogger;
   now?: () => number;
 }
@@ -186,9 +214,21 @@ export class IntentFocusRunner implements IntentFocusPort {
       ...(this.deps.logger ? { logger: this.deps.logger } : {}),
       now: this.now,
     });
+    // 019：阶数只影响"发散多少跳"，读不出来按 0（不发散）——判定链路照常
+    const depth = clampDepth(this.deps.getDepth?.(input.userId, input.agentName) ?? 0);
 
     try {
-      return await this.run(input, prepared.state, prepared.truncated, dir, config, decider, deadline, startedAt);
+      return await this.run(
+        input,
+        prepared.state,
+        prepared.truncated,
+        dir,
+        config,
+        decider,
+        deadline,
+        startedAt,
+        depth,
+      );
     } catch (err) {
       // 兜底：目录不可读、YAML 结构异常等未预期错误一律降级（FR-054）
       const message = (err as Error)?.message ?? String(err);
@@ -206,6 +246,7 @@ export class IntentFocusRunner implements IntentFocusPort {
     decider: BatchDecider,
     deadline: number,
     startedAt: number,
+    depth: number,
   ): Promise<IntentFocusResult> {
     const target = {
       userId: input.userId,
@@ -388,8 +429,44 @@ export class IntentFocusRunner implements IntentFocusPort {
       score: scoreByName.get(candidate.header.name) ?? null,
       order,
     }));
-    const composed = composeFocusPrompt(promptSkills, capabilitySelection);
+
+    // 019：发散起点＝入选行为所属概念；阶数 0 时整段短路（零解析、零遍历）
+    const selectedOntologies = collectSelectedOntologies(index, selectedCandidates);
+    const directConcepts = directConceptEntries(capabilitySelection, selectedOntologies);
+    const expansion =
+      depth > 0
+        ? expandNeighborhood({
+            behaviors: capabilitySelection.behaviors.map((decision) => ({
+              ontologyId: decision.ontologyId,
+              name: decision.name,
+              concept: decision.concept,
+            })),
+            ontologies: selectedOntologies,
+            depth,
+          })
+        : EMPTY_EXPANSION;
+
+    const promptConcepts: PromptConcept[] = [
+      ...directConcepts.map((entry) => ({
+        ontologyId: entry.ontologyId,
+        name: entry.name,
+        title: entry.title,
+        hop: 0,
+      })),
+      ...expansion.upstream.concepts.map((concept) => ({
+        ontologyId: concept.ontologyId,
+        name: concept.name,
+        title: concept.title,
+        hop: concept.hop,
+      })),
+    ];
+    const composed = composeFocusPrompt(promptSkills, capabilitySelection, {
+      concepts: promptConcepts,
+      upstreamBehaviors: expansion.upstream.behaviors,
+      maxChars: maxPromptChars(depth),
+    });
     const roundMs = this.now() - startedAt;
+    const allWarnings = [...warnings, ...expansion.warnings];
 
     await this.recorder.write(target, state, inputTruncated, {
       ...decideDisposition({
@@ -402,12 +479,27 @@ export class IntentFocusRunner implements IntentFocusPort {
       roundMs,
       candidateCount: skillResult.candidates.length + capabilityResult.candidates.length,
       batches: skillBatches.length + capabilityBatches.length,
-      truncated: skillResult.truncated || capabilityResult.truncated,
+      truncated: skillResult.truncated || capabilityResult.truncated || expansion.truncated,
+      depth,
       skills: allSkillDecisions,
       capabilities: capabilitySelection,
+      concepts: [
+        ...directConcepts,
+        ...expansion.upstream.concepts.map((concept) => ({
+          ontologyId: concept.ontologyId,
+          ontologyName: concept.ontologyName,
+          name: concept.name,
+          title: concept.title,
+          source: 'upstream' as const,
+          hop: concept.hop,
+          viaConcept: concept.viaConcept,
+        })),
+      ],
+      upstreamBehaviors: expansion.upstream.behaviors,
+      downstreamBehaviors: expansion.downstream.behaviors,
       prompt: composed.prompt,
       promptTruncated: composed.truncated,
-      warnings,
+      warnings: allWarnings,
       error: [...skillDecided.failures, ...capabilityFailures].join('; ') || null,
     });
 
@@ -418,17 +510,22 @@ export class IntentFocusRunner implements IntentFocusPort {
         agent_name: input.agentName,
         stage: 'prompt',
         reason: null,
+        depth,
         skills_selected: selectedCandidates.length,
+        concepts: promptConcepts.length,
         behaviors: capabilitySelection.behaviors.length,
+        upstream_behaviors: expansion.upstream.behaviors.length,
+        downstream_behaviors: expansion.downstream.behaviors.length,
         prompt_chars: composed.prompt.length,
         round_ms: roundMs,
       },
-      `意图聚焦：入选 ${selectedCandidates.length} 个技能、${capabilitySelection.behaviors.length} 个行为`,
+      `意图聚焦：入选 ${selectedCandidates.length} 个技能、${capabilitySelection.behaviors.length} 个行为` +
+        `（阶数 ${depth}：上游 +${expansion.upstream.behaviors.length}，下游 +${expansion.downstream.behaviors.length}）`,
     );
 
     return {
       prompt: composed.prompt,
-      toolTips: toToolTips(capabilitySelection),
+      toolTips: buildToolTips(capabilitySelection, expansion.downstream.behaviors),
     };
   }
 
@@ -525,18 +622,84 @@ export class IntentFocusRunner implements IntentFocusPort {
 }
 
 /**
- * 入选行为 → 卡片的 `tool_tips`。
+ * 卡片候选 = 直接命中 + 下游发散（019）。
  *
- * **纯搬运**：顺序沿用判定结果（分数降序），不做去重 / 不查本体是否存在 / 不裁剪条数
- * ——条数上限（5）是卡片铸造侧的硬约束，不在这里提前砍。
+ * **纯搬运**：顺序沿用"判定结果（分数降序）→ 下游发散序"，不做去重 / 不查本体是否存在 /
+ * 不裁剪条数——条数上限（5）是卡片铸造侧的硬约束，不在这里提前砍。
+ *
+ * 上游发散**不进**这里：它是"模型该参考什么"，与"能建议用户做什么"是两件事。
  */
-function toToolTips(selection: CapabilitySelection): FocusToolTip[] {
-  return selection.behaviors.map((decision) => ({
-    name: decision.name,
-    title: decision.title,
-    ontology_id: decision.ontologyId,
-    ontology_name: decision.ontologyName,
-  }));
+function buildToolTips(
+  selection: CapabilitySelection,
+  downstream: readonly ExpandedBehavior[],
+): FocusToolTip[] {
+  return [
+    ...selection.behaviors.map((decision) => ({
+      name: decision.name,
+      title: decision.title,
+      ontology_id: decision.ontologyId,
+      ontology_name: decision.ontologyName,
+    })),
+    ...downstream.map((behavior) => ({
+      name: behavior.name,
+      title: behavior.title,
+      ontology_id: behavior.ontologyId,
+      ontology_name: behavior.ontologyName,
+    })),
+  ];
+}
+
+/**
+ * 已入选技能引用的本体（本体文件枚举序）。
+ *
+ * 顺序决定发散输出序，因此 MUST 沿用 `index.all` 的枚举序，不能用 Set 的插入序。
+ */
+function collectSelectedOntologies(
+  index: OntologyIndex,
+  selectedCandidates: readonly SkillCandidate[],
+): OntologyDefinition[] {
+  const ids = new Set<string>();
+  for (const candidate of selectedCandidates) {
+    if (!candidate.isOntologySkill) continue;
+    for (const ontology of candidate.matchedOntologies) ids.add(ontology.ontologyId);
+  }
+  return index.all.filter((ontology) => ids.has(ontology.ontologyId));
+}
+
+/**
+ * 直接命中的概念（发散起点）——按行为顺序去重，标题取本体 `concepts[]`。
+ *
+ * 概念在 `concepts[]` 里找不到时以 name 兜底（提示不留空；断链已由发散 warning 记录）。
+ */
+function directConceptEntries(
+  selection: CapabilitySelection,
+  ontologies: readonly OntologyDefinition[],
+): ConceptEntry[] {
+  const titles = new Map<string, string>();
+  for (const ontology of ontologies) {
+    for (const concept of ontology.concepts) {
+      titles.set(`${ontology.ontologyId}\u0000${concept.name}`, concept.title);
+    }
+  }
+
+  const seen = new Set<string>();
+  const entries: ConceptEntry[] = [];
+  for (const decision of selection.behaviors) {
+    if (!decision.concept) continue;
+    const key = `${decision.ontologyId}\u0000${decision.concept}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({
+      ontologyId: decision.ontologyId,
+      ontologyName: decision.ontologyName,
+      name: decision.concept,
+      title: titles.get(key) ?? decision.concept,
+      source: 'direct',
+      hop: 0,
+      viaConcept: null,
+    });
+  }
+  return entries;
 }
 
 /**

@@ -97,7 +97,8 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     const hint = wrapper.find('[data-test="next-action-hints-hint"]').text()
 
     expect(hint).toContain('可点击的下一步动作卡片')
-    expect(hint).toContain('产物里不会写这个键')
+    // 依赖关系必须写在界面上：不先开意图聚焦，这个开关不可用
+    expect(hint).toContain('需先开启「意图聚焦」')
     // 文案里的条数与输入框当前值同源（管理员看到的提示不会与实际参数脱节）
     expect(hint).toContain(`最多 ${emptySoulDesign().next_action_hints_count} 条`)
   })
@@ -287,8 +288,8 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
     const hint = wrapper.find('[data-test="intent-focus-hint"]').text()
 
     expect(hint).toContain('意图判定')
-    expect(hint).toContain('产物里不会写这个键')
-    expect(hint).toContain('预置卡片')
+    // 生效前提：只有关联了本体技能才有可聚焦的对象
+    expect(hint).toContain('只有关联了本体技能才生效')
   })
 
   it('存量设计态缺该键 → 按关闭渲染，不报错', () => {
@@ -298,5 +299,70 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
     const wrapper = mountEditor(legacy as SoulDesign)
 
     expect(checkbox(wrapper).element.checked).toBe(false)
+  })
+})
+
+/**
+ * 019：聚焦阶数。
+ *
+ * 守四件事：**三个选项 + 默认 0**、**关闭时整组置灰但数值保留**、
+ * **选值即上抛数字（不是字符串）**、**关闭开关不会把阶数清零**。
+ */
+describe('SoulEditor —— 聚焦阶数（019）', () => {
+  function radio(wrapper: ReturnType<typeof mountEditor>, depth: number) {
+    return wrapper.find<HTMLInputElement>(`[data-test="intent-focus-depth-${depth}"]`)
+  }
+
+  it('渲染 0 / 1 / 2 三个单选，默认选中 0', () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+
+    for (const depth of [0, 1, 2]) {
+      expect(radio(wrapper, depth).exists()).toBe(true)
+      expect(radio(wrapper, depth).element.type).toBe('radio')
+    }
+    expect(radio(wrapper, 0).element.checked).toBe(true)
+    expect(radio(wrapper, 2).element.checked).toBe(false)
+  })
+
+  it('选中 2 → `update:modelValue` 携带数字 2', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+
+    await radio(wrapper, 2).setValue(true)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus_depth).toBe(2)
+    // 其余字段原样带出
+    expect(emitted.intent_focus).toBe(true)
+    expect(emitted.mission).toBe('')
+  })
+
+  it('意图聚焦关闭时整组置灰；开启时可用', () => {
+    const off = mountEditor()
+    for (const depth of [0, 1, 2]) expect(radio(off, depth).element.disabled).toBe(true)
+
+    const on = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    for (const depth of [0, 1, 2]) expect(radio(on, depth).element.disabled).toBe(false)
+  })
+
+  it('关闭状态下数值保留：仍回显选中项（再次打开即恢复）', () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: false, intent_focus_depth: 2 })
+    expect(radio(wrapper, 2).element.checked).toBe(true)
+  })
+
+  it('关闭意图聚焦只改开关，不动已选阶数', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, intent_focus_depth: 1 })
+
+    await wrapper.find<HTMLInputElement>('[data-test="intent-focus"]').setValue(false)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(false)
+    expect(emitted.intent_focus_depth).toBe(1)
+  })
+
+  it('界面说明上下游去向（上游进提示、下游进动作提示）', () => {
+    const hint = mountEditor().find('[data-test="intent-focus-depth-hint"]').text()
+    expect(hint).toContain('上游')
+    expect(hint).toContain('下游')
+    expect(hint).toContain('缺省 0 阶')
   })
 })

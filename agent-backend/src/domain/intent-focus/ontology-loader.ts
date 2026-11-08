@@ -1,18 +1,27 @@
 /**
- * 本体文件加载（016）：枚举已物化的 `ontology/{场景}/{本体}/ontology.yaml`，
- * 只提取 `metadata` / `behaviors`，按 `ontology_id` 建索引。
+ * 本体文件加载（016 / 019）：枚举已物化的 `ontology/{场景}/{本体}/ontology.yaml`，
+ * 提取 `metadata` / `behaviors` / `concepts` / `relations`，按 `ontology_id` 建索引。
  *
  * 2026-11-06：`functions` 与 `rules` 不再读取（能力聚焦只到行为）。
+ * 2026-11-08（019）：新增 `concepts` 与 `relations` 的**只读**建模，供一阶发散使用；
+ * 参数正文、函数代码、`rules` 仍然不进来。
  *
  * 三条约束：
  * 1. **只读真实文件**：目录与文件都过 `lstat`，符号链接一律跳过（FR/TR：禁止逃逸）；
  * 2. **坏文件不中断**：解析失败只记 warning，其他本体照常——一个坏文件不该让整轮失效；
- * 3. **不建模 concepts/relations**：字段不进来，就不会被下游误用（TR-04）。
+ * 3. **只建模发散所需字段**：`concepts` 只取 name/title，`relations` 只取
+ *    name/source/target/relation_type/cardinality；方向判定不在本层做（见 `expansion.ts`）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { OntologyBehavior, OntologyDefinition, OntologyIndex } from './types.js';
+import type {
+  OntologyBehavior,
+  OntologyConcept,
+  OntologyDefinition,
+  OntologyIndex,
+  OntologyRelation,
+} from './types.js';
 
 /** 枚举入口：`{agentDir}/ontology` */
 export function loadOntologyIndex(agentDir: string): OntologyIndex {
@@ -77,6 +86,8 @@ function loadOntologyFile(file: string, warnings: string[]): OntologyDefinition 
     scenarioId: normalizeId(metadata.scenario_id),
     scenarioName: normalizeText(metadata.scenario_name),
     behaviors: parseBehaviors(record.behaviors, warnings, file),
+    concepts: parseConcepts(record.concepts, warnings, file),
+    relations: parseRelations(record.relations, warnings, file),
   };
 }
 
@@ -95,9 +106,66 @@ function parseBehaviors(value: unknown, warnings: string[], file: string): Ontol
       title: normalizeText(record.title) ?? name,
       description: normalizeText(record.description) ?? '',
       opType: normalizeText(record.op_type),
+      // 019：发散入口；缺失照常参与判定，只是这条行为不参与发散
+      concept: normalizeText(record.concept),
     });
   }
   return result;
+}
+
+/** 概念：只取 name/title（title 缺失以 name 兜底，展示不留空） */
+function parseConcepts(value: unknown, warnings: string[], file: string): OntologyConcept[] {
+  const result: OntologyConcept[] = [];
+  if (value !== undefined && !Array.isArray(value)) warnings.push(`${file}:concepts_not_array`);
+  for (const item of asArray(value)) {
+    const record = (item ?? {}) as Record<string, unknown>;
+    const name = normalizeText(record.name);
+    if (!name) {
+      warnings.push(`${file}:concept_missing_name`);
+      continue;
+    }
+    result.push({ name, title: normalizeText(record.title) ?? name });
+  }
+  return result;
+}
+
+/** 关系：`source` / `target` 缺失即整条丢弃（没有端点的边无法参与发散） */
+function parseRelations(value: unknown, warnings: string[], file: string): OntologyRelation[] {
+  const result: OntologyRelation[] = [];
+  if (value !== undefined && !Array.isArray(value)) warnings.push(`${file}:relations_not_array`);
+  for (const item of asArray(value)) {
+    const record = (item ?? {}) as Record<string, unknown>;
+    const name = normalizeText(record.name) ?? '';
+    const source = normalizeText(record.source);
+    const target = normalizeText(record.target);
+    if (!source || !target) {
+      warnings.push(`${file}:relation_missing_endpoint:${name || '?'}`);
+      continue;
+    }
+    result.push({
+      name: name === '' ? `${source}->${target}` : name,
+      source,
+      target,
+      // `relation_type` 允许写成单值字符串或数组，统一成数组
+      relationType: normalizeList(record.relation_type),
+      cardinality: normalizeId(record.cardinality),
+    });
+  }
+  return result;
+}
+
+function normalizeList(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text === '' ? [] : [text];
+  }
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const text = normalizeText(item);
+    if (text) out.push(text);
+  }
+  return out;
 }
 
 /** 读子目录名（只保留真实目录；不存在返回空数组，不记 warning） */

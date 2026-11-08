@@ -31,6 +31,7 @@ const SOUL = {
   next_action_hints: false,
   next_action_hints_count: 3,
   intent_focus: false,
+  intent_focus_depth: 0,
 }
 
 const DESIGN = {
@@ -72,6 +73,7 @@ describe('emptyDraft', () => {
         next_action_hints: false,
         next_action_hints_count: 3,
         intent_focus: false,
+        intent_focus_depth: 0,
       },
       enabled_tools: [],
       mcp_services: [],

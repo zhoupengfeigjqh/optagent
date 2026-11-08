@@ -54,6 +54,16 @@ export const NEXT_ACTION_HINTS_MIN = 1;
 export const NEXT_ACTION_HINTS_MAX = 6;
 export const NEXT_ACTION_HINTS_DEFAULT = 3;
 
+/**
+ * 「聚焦阶数」的取值范围与缺省（frontmatter `intent_focus_depth`，019）。
+ *
+ * 与 `admin-backend` `SOUL_LIMITS.focusDepth*` **MUST 同步**：平台侧拒绝越界值，
+ * 运行侧对坏值只做**收敛**（收敛到 0 = 不发散），口径与 `readHintCount` 同构。
+ */
+export const INTENT_FOCUS_DEPTH_MIN = 0;
+export const INTENT_FOCUS_DEPTH_MAX = 2;
+export const INTENT_FOCUS_DEPTH_DEFAULT = 0;
+
 /** 只给前台的展示/引导数据。 */
 export interface SoulMeta {
   intro: string;
@@ -80,6 +90,14 @@ export interface SoulMeta {
    * 它不进 System Prompt 正文，只决定运行环境要不要在主模型调用前多发一次判定。
    */
   intentFocus: boolean;
+  /**
+   * 019：聚焦阶数（frontmatter `intent_focus_depth`），`0~2`。
+   *
+   * 语义：以 Laya 命中的本体行为所属概念为起点，**单向**向上/向下各走 N 跳
+   * （上游进提示词、下游进下一步动作卡片）。缺省 / 坏值一律收敛到 `0`（只聚焦本身），
+   * 与 `016` 的既有行为逐字一致。
+   */
+  intentFocusDepth: number;
 }
 
 /** 空值工厂（每次返回新对象，避免调用方误改共享引用）。 */
@@ -91,6 +109,7 @@ export function emptySoulMeta(): SoulMeta {
     nextActionHints: false,
     nextActionHintsCount: NEXT_ACTION_HINTS_DEFAULT,
     intentFocus: false,
+    intentFocusDepth: INTENT_FOCUS_DEPTH_DEFAULT,
   };
 }
 
@@ -135,6 +154,8 @@ export function parseSoulMeta(raw: string): SoulMeta {
     nextActionHintsCount: readHintCount(record.next_action_hints_count),
     // 013：非布尔一律 false（fail-closed，见 SoulMeta.intentFocus）
     intentFocus: record.intent_focus === true,
+    // 019：缺省 / 坏值收敛到 0（见 SoulMeta.intentFocusDepth）
+    intentFocusDepth: readDepth(record.intent_focus_depth),
   };
 }
 
@@ -191,6 +212,32 @@ export function isIntentFocusEnabled(
       `读取意图聚焦开关失败按关闭处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
+  }
+}
+
+/**
+ * 019：读取某数字人的「聚焦阶数」。
+ *
+ * 与 `isIntentFocusEnabled` 同口径（**逐次读盘、不缓存**），但失败语义不同：
+ * 读不出来返回缺省 `0`（= 不发散）而不是"关闭功能"——开关仍然生效，只是退回 016 行为。
+ */
+export function intentFocusDepth(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  logger?: { warn(msg: string): void },
+): number {
+  try {
+    const raw = fs.readFileSync(
+      path.join(agentDir(optAgentRoot, userId, agentName), 'SOUL.md'),
+      'utf8',
+    );
+    return parseSoulMeta(raw).intentFocusDepth;
+  } catch (err) {
+    logger?.warn(
+      `读取聚焦阶数失败按缺省 ${INTENT_FOCUS_DEPTH_DEFAULT} 处理（user=${userId} agent=${agentName}）：${err instanceof Error ? err.message : String(err)}`,
+    );
+    return INTENT_FOCUS_DEPTH_DEFAULT;
   }
 }
 
@@ -336,6 +383,25 @@ function readHintCount(raw: unknown): number {
     return raw;
   }
   return NEXT_ACTION_HINTS_DEFAULT;
+}
+
+/**
+ * 聚焦阶数：**收敛式**读取（与 `readHintCount` 同口径）。
+ *
+ * 平台侧是拒绝式（越界值存不下去）；这里面对磁盘上可能被手改的文件，
+ * 收敛到 0（不发散）比抛错或放大都安全——阶数只影响"多带几条上下文"，
+ * 读错时宁可退回 016 的既有行为。
+ */
+function readDepth(raw: unknown): number {
+  if (
+    typeof raw === 'number' &&
+    Number.isInteger(raw) &&
+    raw >= INTENT_FOCUS_DEPTH_MIN &&
+    raw <= INTENT_FOCUS_DEPTH_MAX
+  ) {
+    return raw;
+  }
+  return INTENT_FOCUS_DEPTH_DEFAULT;
 }
 
 function readStarters(raw: unknown): SoulStarter[] {

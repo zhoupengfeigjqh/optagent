@@ -8,8 +8,12 @@
  */
 import type { IntentFocusDisposition } from './state.js';
 import type { IntentFocusRecordDraft } from './store.js';
-import { buildRecordDraft } from './record.js';
-import type { CapabilitySelection, SkillDecision } from './types.js';
+import { buildRecordDraft, type ConceptEntry } from './record.js';
+import type {
+  CapabilitySelection,
+  ExpandedBehavior,
+  SkillDecision,
+} from './types.js';
 
 /** 一条记录的字段（避免每个分支都重复写十余个键） */
 export interface RecordFields {
@@ -26,6 +30,14 @@ export interface RecordFields {
   promptTruncated: boolean;
   warnings: readonly string[];
   error: string | null;
+  /**
+   * 019：以下四项缺省即可——空结果 / 降级 / 跳过分支没有发散，
+   * 让调用方只在"已聚焦"分支里补写，避免每个早退分支都抄一遍。
+   */
+  depth?: number;
+  concepts?: readonly ConceptEntry[];
+  upstreamBehaviors?: readonly ExpandedBehavior[];
+  downstreamBehaviors?: readonly ExpandedBehavior[];
 }
 
 export interface FocusRecordWriterLogger {
@@ -77,8 +89,12 @@ export class FocusRecordWriter {
       candidateCount: fields.candidateCount,
       batches: fields.batches,
       truncated: fields.truncated,
+      depth: fields.depth ?? 0,
       skills: fields.skills,
       capabilities: fields.capabilities,
+      concepts: fields.concepts ?? [],
+      upstreamBehaviors: fields.upstreamBehaviors ?? [],
+      downstreamBehaviors: fields.downstreamBehaviors ?? [],
       prompt: fields.prompt,
       promptTruncated: fields.promptTruncated,
       warnings: fields.warnings,
