@@ -124,7 +124,7 @@ functions: [...]   # 2026-11-06 起忽略
 rules: [...]      # 2026-11-06 起忽略
 ```
 
-**只读字段**：`metadata.ontology_id` / `ontology_name` / `scenario_id` / `scenario_name`；`behaviors[].name` / `title` / `op_type`。
+**只读字段**：`metadata.ontology_id` / `ontology_name` / `scenario_id` / `scenario_name`；`behaviors[].name` / `title` / `description` / `op_type`。
 
 **明确不读**：`functions`、`rules`（含 `data_supplements` / `related_functions`）、`concepts`、`relations`、`processes`、参数 `params`、`response`、`code_file`、`rule_design`、规则表达式。读取后 MUST 不产生任何候选、告警或记录字段。
 
@@ -148,7 +148,7 @@ rules: [...]      # 2026-11-06 起忽略
     },
     "c1": {
       "type": "noul",
-      "instructions": "需要行为「创建原材料采购单」",
+      "instructions": "需要行为「创建一笔新的原材料采购记录。」",
       "criteria": { "true": "需要", "false": "不需要" }
     }
   }
@@ -161,7 +161,7 @@ rules: [...]      # 2026-11-06 起忽略
 | `state` | 当前用户输入，`prepareState` 后 ≤200 字符；取尾部、对齐句首 |
 | `questions` | 每个候选一条；技能 `s1..sN`，行为 `c1..cN` |
 | 题型 | **只允许 `noul`**；禁止 `choice` |
-| `instructions` | 中文；技能为 `需要技能「description」`；行为为 `需要行为「title（缺失回退 name）」`；标签 ≤40 字 |
+| `instructions` | 中文；技能为 `需要技能「description」`；行为为 `需要行为「description（空则 title，再空则 name）」`；标签 ≤40 字 |
 | `criteria` | 固定 `{ true: '需要', false: '不需要' }` |
 | 批量 | ≤32 题 / 批；技能 1 批（≤32）；能力 ≤96（≤3 批） |
 | 超时 | 总预算 10000ms；按批数均分；单批下限 300ms |

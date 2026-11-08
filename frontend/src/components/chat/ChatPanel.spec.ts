@@ -46,7 +46,12 @@ function makePanel(
   return {
     chat: { draft: ref(options.draft ?? ''), thinkingEnabled: ref(false), canSend: ref(true) },
     // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
-    threads: { activeId: ref(null), activeSource: ref(null), messages: ref([]), hasMore: ref(false) },
+    threads: {
+      activeId: ref(null),
+      activeSource: ref(null),
+      messages: ref([]),
+      hasMore: ref(false),
+    },
     search: {
       isOpen: ref(false),
       keyword: ref(''),
@@ -115,7 +120,6 @@ function makePanel(
     onCancelSuggestion: noop,
     onConfirmSuggestion: noop,
     onLoadMore: noop,
-    onLoadToolResult: noop,
     onRecover: noop,
     onFeedback: noop,
     onToggleThinking: noop,
@@ -141,6 +145,22 @@ function makePanel(
     onConfirmMention: noop,
     onMentionKey: noop,
     onRemoveReference: options.onRemoveReference ?? noop,
+    // 2026-11-07：`/技能名` 的状态与输入区出口（本组用例不涉及技能，取空选择）
+    skill: {
+      selected: ref<string | null>(null),
+      open: ref(false),
+      caret: ref(0),
+      filtered: ref([]),
+      loading: ref(false),
+      error: ref(''),
+      activeIndex: ref(0),
+      close: noop,
+      move: noop,
+    },
+    onPickSkill: noop,
+    onConfirmSkill: noop,
+    onSkillKey: noop,
+    onRemoveSkill: noop,
   }
 }
 

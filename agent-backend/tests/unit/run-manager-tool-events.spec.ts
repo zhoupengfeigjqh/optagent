@@ -3,8 +3,8 @@
  *
  * 这是本特性的**主链路**验证：
  * 1. 工具调用 → 落 `tool-events.jsonl`，且 `message_id` 与该轮 assistant 消息一致
- * 2. 下一轮的 prompt 里能"看到"上一轮的工具结果（内联小结果按预算回灌）
- * 3. 外置大结果：正文不进 messages，只在 systemExtra 留一行索引（带路径）
+ * 2. 下一轮的 prompt 里能"看到"上一轮的工具结果（`inline_content` 按预算回灌）
+ * 3. 外置大结果：截断版进 messages（尾注带副本路径），**不进** systemExtra（2026-11-07）
  * 4. 未装配 toolEvents 时行为与既有完全一致（回灌与落盘都不发生）
  */
 import fs from 'node:fs';
@@ -51,17 +51,17 @@ function recordingAgent(
   };
 }
 
-async function* toolTurn(resultText: string): AsyncIterable<LlmEvent> {
+async function* toolTurn(resultText: string, name = 'read_file'): AsyncIterable<LlmEvent> {
   yield {
     type: 'tool_call_start',
     callId: 'call_1',
-    name: 'read_file',
+    name,
     argsDigest: { path: '数据准备/x.csv' },
   };
   yield {
     type: 'tool_call_end',
     callId: 'call_1',
-    name: 'read_file',
+    name,
     status: 'success',
     resultText,
   };
@@ -202,7 +202,7 @@ describe('下一轮回灌', () => {
     expect(messages[messages.length - 1]).toMatchObject({ role: 'user', content: '再确认下' });
   });
 
-  it('外置大结果：正文不进 messages，systemExtra 只留一行索引（含可读路径）', async () => {
+  it('内置工具大结果：回灌截断版 + 说明"完整内容未保存"（2026-11-07）', async () => {
     const unit = '车间,计划量\n冲压,1200\n';
     const big = unit.repeat(
       Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
@@ -222,14 +222,42 @@ describe('下一轮回灌', () => {
     ).settled;
 
     const req = captured[0]!;
-    // 正文一个字节都不进 messages
+    const assistant = req.messages.find((m) => m.role === 'assistant');
+    // 原文没进（被截断），但"记录已截断 + 怎么再看"的说明进了
+    expect(assistant?.content).not.toContain(big);
+    expect(assistant?.content).toContain('记录已截断');
+    expect(assistant?.content).toContain('要查看更多请重新调用该工具');
+    expect(assistant?.content).not.toContain('临时空间/');
+  });
+
+  it('外部来源（MCP）大结果：截断版进 messages 且带副本路径；systemExtra 无工具段', async () => {
+    const unit = '车间,计划量\n冲压,1200\n';
+    const big = unit.repeat(
+      Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
+    ); // > 内联阈值
+    const manager = new RunManager({ history, usage, toolEvents });
+    await runTurn(
+      manager,
+      recordingAgent([], () => toolTurn(big, 'mcp_sql_query')),
+      '看下计划',
+    ).settled;
+
+    const captured: AgentRunRequest[] = [];
+    await runTurn(
+      manager,
+      recordingAgent(captured, () => plainTurn()),
+      '第 3 页呢',
+    ).settled;
+
+    const req = captured[0]!;
     const joined = req.messages.map((m) => m.content).join('\n');
+    // 全文没进（截断版），但截断说明与副本路径进了
     expect(joined).not.toContain(big);
-    expect(joined).not.toContain('冲压,1200\n冲压,1200');
-    // 索引段给出名称、体积与路径
-    expect(req.systemExtra).toContain('【可用的工具结果原文】');
-    expect(req.systemExtra).toContain('read_file');
-    expect(req.systemExtra).toContain('临时空间/th1_toolresult_call_1.txt');
+    expect(joined).toContain('记录已截断');
+    expect(joined).toContain('临时空间/th1_toolresult_call_1.txt');
+    expect(joined).toContain('可用 read_file 读取');
+    // 工具结果不进系统提示词（索引段已删除）
+    expect(req.systemExtra ?? '').not.toContain('临时空间/th1_toolresult_call_1.txt');
   });
 
   it('未装配 toolEvents：不落盘也不回灌（既有行为零变化）', async () => {
@@ -247,8 +275,8 @@ describe('下一轮回灌', () => {
       '再确认下',
     ).settled;
 
-    // R18 起 `systemExtra` 恒含【当前时间】段 ⇒ 断言"外置索引段长度为 0"
-    expect(captured[0]!.systemExtra ?? '').not.toContain('【可用的工具结果原文】');
+    // 工具结果只进 messages：systemExtra 里连截断说明都不该出现
+    expect(captured[0]!.systemExtra ?? '').not.toContain('记录已截断');
     const joined = captured[0]!.messages.map((m) => m.content).join('\n');
     expect(joined).not.toContain('内部结果');
     expect(

@@ -71,7 +71,6 @@ function makeSession() {
       refresh: vi.fn(async () => undefined),
       create: vi.fn(async () => undefined),
       loadMore: noop,
-      toolCallResult: noop,
     },
     search: {
       isOpen: ref(false),
@@ -143,6 +142,15 @@ function makeSession() {
       openLink: noop,
     },
     nextSteps: { steps: ref(emptyNextSteps()), start: vi.fn(), reset: vi.fn() },
+    // 2026-11-07：`/技能名` 的状态同样由会话上下文提供；草稿被改写时会 `sync`，
+    // 发送成功后 `reset`。两者各用独立 spy——与上面的 `recover` 同理，
+    // 共用一个会让"发一次却调到两次"这类断言失真
+    skillMention: {
+      selected: ref<string | null>(null),
+      open: ref(false),
+      sync: vi.fn(),
+      reset: vi.fn(),
+    },
     produced: { unreadCount: ref(0) },
     toast: { push: vi.fn() },
     files: {},

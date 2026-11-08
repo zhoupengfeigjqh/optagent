@@ -3,7 +3,8 @@
  *
  * 读取 agents/{name}/ 下：
  * - SOUL.md（必填；**正文**追加到 System Prompt，frontmatter 只供前台展示/引导，见 soul.ts）
- * - skills/{name}/SKILL.md（仅 YAML frontmatter 的 name/description，追加到 System Prompt）
+ * - skills/{name}/SKILL.md（仅 YAML frontmatter 的 name/description，追加到 System Prompt；
+ *   有技能时在小节末尾附一句「按需读取正文」引导，无技能则不写）
  * - TOOL.json（{"enabled": [...]}，从内置工具白名单过滤）
  * - MCP.json（{"servers": [...]}，stdio/http；写能力必须声明 permission_boundary，FR-024）
  *
@@ -14,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { builtinToolNames } from './builtin-tool-catalog.js';
+import { composeSystemPrompt } from './skill-prompt.js';
 import { stripFrontmatter } from './soul.js';
 import {
   FILE_ARG_PATH_HINT,
@@ -39,8 +41,12 @@ const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
  *
  * **R1 改造后从 `builtin-tool-catalog.ts` 派生**——此前这里与
  * `infra/builtin-tools.ts` 各维护一份、无机制保证一致（改一处漏一处）。
+ * 本模块私有：外部需要工具名时请直接用目录的 `builtinToolNames()`，别再复制一份。
  */
-export const BUILTIN_TOOL_NAMES: readonly string[] = builtinToolNames();
+const BUILTIN_TOOL_NAMES: readonly string[] = builtinToolNames();
+
+/** TOOL.json 白名单判定用的已知集合（模块级一次构造，不随每次数字人配置加载重复建 Set） */
+const KNOWN_BUILTIN_TOOLS: ReadonlySet<string> = new Set(BUILTIN_TOOL_NAMES);
 
 export class AgentConfigError extends Error {
   readonly code = 'AGENT_CONFIG_INVALID';
@@ -77,10 +83,11 @@ export function loadAgentConfig(
   const mcpServers = loadMcpServers(agentDir, agentName);
   const skills = loadSkills(agentDir, agentName, logger);
 
-  const skillSections = skills.map((s) => `## 技能：${s.name}\n${s.description}`).join('\n\n');
-  const systemPrompt = skillSections ? `${soulBody}\n\n${skillSections}` : soulBody;
+  // 默认拼装（全部技能索引 + 通用引导）唯一实现见 `skill-prompt.ts`：
+  // 请求级"只插入选中技能"复用同一函数，避免两条路径各写一份拼法而漂移。
+  const systemPrompt = composeSystemPrompt({ soulBody, skills });
 
-  return { agentName, systemPrompt, enabledTools, mcpServers, skills };
+  return { agentName, soulBody, systemPrompt, enabledTools, mcpServers, skills };
 }
 
 function readRequired(dir: string, name: string): string {
@@ -106,10 +113,9 @@ function loadEnabledTools(dir: string, agentName: string, logger?: LoadLogger): 
   if (!Array.isArray(data.enabled) || data.enabled.some((t) => typeof t !== 'string')) {
     throw new AgentConfigError(`数字人 ${agentName} 的 TOOL.json 须为 {"enabled": string[]}`);
   }
-  const known = new Set<string>([...BUILTIN_TOOL_NAMES]);
   const enabled: string[] = [];
   for (const tool of data.enabled as string[]) {
-    if (known.has(tool)) enabled.push(tool);
+    if (KNOWN_BUILTIN_TOOLS.has(tool)) enabled.push(tool);
     else logger?.warn(`数字人 ${agentName} 声明了未知内置工具 ${tool}，已忽略`);
   }
   return enabled;

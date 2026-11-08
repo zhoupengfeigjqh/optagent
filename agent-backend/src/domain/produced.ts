@@ -17,7 +17,7 @@ import { formatBytes } from './tool-result.js';
 export const META_SUFFIX = '.meta.json';
 /** 产出列表一次最多返回几条（有界返回） */
 export const PRODUCED_LIST_MAX = 50;
-/** 提示词段最多列几条（与「可用的工具结果原文」同一量级） */
+/** 提示词段最多列几条 */
 export const PRODUCED_PROMPT_MAX = 10;
 
 /**
@@ -297,7 +297,8 @@ async function readMeta(access: FileAccess, relPath: string): Promise<ProducedMe
 }
 
 /**
- * 提示词段（契约 §10.5 ③）：与「可用的工具结果原文」并列、措辞一致。
+ * 提示词段（契约 §10.5 ③）：`systemExtra` 里的产出清单（与工具结果回灌无关，
+ * 后者 2026-11-07 起只进 messages）。
  *
  * **无产出时返回空串**（不占一个字符，不变式 5）；正文 MUST NOT 被注入——
  * 结果可能数 MB，模型需要内容时自己按路径 `read_file`。

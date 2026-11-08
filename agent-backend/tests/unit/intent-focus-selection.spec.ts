@@ -24,11 +24,11 @@ function ontology(): OntologyDefinition {
     scenarioId: '2',
     scenarioName: '生产调度',
     behaviors: [
-      { name: 'B1', title: '创建采购单', opType: 'command' },
-      { name: 'B2', title: '取消采购单', opType: 'command' },
-      { name: 'Q1', title: '查询采购记录', opType: 'query' },
-      { name: 'Q2', title: '查询原材料', opType: 'query' },
-      { name: 'Q3', title: '查询供应商', opType: 'query' },
+      { name: 'B1', title: '创建采购单', description: '', opType: 'command' },
+      { name: 'B2', title: '取消采购单', description: '', opType: 'command' },
+      { name: 'Q1', title: '查询采购记录', description: '', opType: 'query' },
+      { name: 'Q2', title: '查询原材料', description: '', opType: 'query' },
+      { name: 'Q3', title: '查询供应商', description: '', opType: 'query' },
     ],
   };
 }
@@ -46,6 +46,7 @@ function candidates(names: string[], ontologyId = '1', ontologyName = '原材料
     qid: `c${index + 1}`,
     name,
     title: TITLES[name] ?? name,
+    description: '',
     ontologyId,
     ontologyName,
     index,
@@ -104,6 +105,7 @@ describe('selectCapabilities · 上限', () => {
     const behaviors = Array.from({ length: 100 }, (_, i) => ({
       name: `X${i}`,
       title: `行为${i}`,
+      description: '',
       opType: 'command' as const,
     }));
     const big: OntologyDefinition = { ...ontology(), behaviors: [...ontology().behaviors, ...behaviors] };

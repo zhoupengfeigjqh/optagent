@@ -3,7 +3,7 @@
  *
  * 守住的边界：
  * - 只提取 metadata / behaviors（concepts / functions / rules 等字段**不进入模型**）；
- * - `title` 缺失回退 `name`；
+ * - `title` 缺失回退 `name`；`description` 缺失为空串（是否降级由题面构造裁决）；
  * - 坏 YAML 只告警；
  * - 同一 `ontology_id` 的多个文件全部保留（同 ID 多本体）。
  *
@@ -48,6 +48,7 @@ const VALID = [
   'behaviors:',
   '  - name: CreatePurchaseRecord',
   '    title: 创建原材料采购单',
+  '    description: 创建一笔新的原材料采购记录。',
   '    op_type: command',
   '  - name: QueryPurchaseRecords',
   '    title: 查询原材料采购单信息',
@@ -78,10 +79,16 @@ describe('loadOntologyIndex', () => {
     expect(ontology.ontologyId).toBe('1');
     expect(ontology.ontologyName).toBe('原材料采购和库存');
     expect(ontology.behaviors).toEqual([
-      { name: 'CreatePurchaseRecord', title: '创建原材料采购单', opType: 'command' },
-      { name: 'QueryPurchaseRecords', title: '查询原材料采购单信息', opType: 'query' },
+      {
+        name: 'CreatePurchaseRecord',
+        title: '创建原材料采购单',
+        description: '创建一笔新的原材料采购记录。',
+        opType: 'command',
+      },
+      // description 缺失 → 空串（题面构造时再降级到 title）
+      { name: 'QueryPurchaseRecords', title: '查询原材料采购单信息', description: '', opType: 'query' },
       // title 缺失 → 回退 name
-      { name: 'NoTitleBehavior', title: 'NoTitleBehavior', opType: null },
+      { name: 'NoTitleBehavior', title: 'NoTitleBehavior', description: '', opType: null },
     ]);
     expect(index.byId.get('1')).toHaveLength(1);
   });

@@ -253,7 +253,8 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
       expect(store.mcpPending.value).toBe(true)
 
       const running = store.ensureMcpReady(10_000)
-      await vi.advanceTimersByTimeAsync(600)
+      // 兜底轮询间隔 2s（2026-11-07）：推进略多于一个间隔即取到结果
+      await vi.advanceTimersByTimeAsync(2_100)
 
       await expect(running).resolves.toBe(true)
       expect(store.mcpPending.value).toBe(false)
@@ -274,7 +275,8 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
       await store.loadCurrent()
 
       const running = store.ensureMcpReady(1_000)
-      await vi.advanceTimersByTimeAsync(1_200)
+      // 一次 2s 睡眠已越过 1s 截止时刻 → 下一轮循环即退出
+      await vi.advanceTimersByTimeAsync(2_200)
 
       await expect(running).resolves.toBe(false)
     } finally {

@@ -1,2 +1,0 @@
-{"call_id":"call_00_zsF3qFJtPB8wxGVNM8Vh3534","message_id":"m_mw54xnmi_085k","name":"ocr__ocr_image","label":"图片识别","status":"running","started_at":"2026-11-06T15:34:25.272Z","args_digest":{"image":"临时空间/架构图.png"}}
-{"call_id":"call_00_zsF3qFJtPB8wxGVNM8Vh3534","message_id":"m_mw54xnmi_085k","name":"ocr__ocr_image","label":"图片识别","status":"success","started_at":"2026-11-06T15:34:25.272Z","duration_ms":9144,"size":182,"inline_content":"{\"job_id\": \"ocr_1793979274251_33be2496\", \"status\": \"accepted\", \"message\": \"已受理，正在后台识别；完成后结果会自动出现在后续对话里，无需重复提交。\"}"}

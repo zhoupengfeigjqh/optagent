@@ -251,3 +251,24 @@ describe('buildSendMessageBody —— 意图聚焦跳过标记（013）', () => 
     )
   })
 })
+
+describe('buildSendMessageBody —— 显式技能（2026-11-07）', () => {
+  const base = {
+    content: '查一下 S-1024 的账期',
+    thinking: false,
+    model: null,
+    attachments: [],
+  }
+
+  it('有技能时随请求体下发（服务端据此只插该技能并跳过聚焦）', () => {
+    const body = buildSendMessageBody({ ...base, skill: 'supplier-query' })
+
+    expect(body.skill).toBe('supplier-query')
+    expect(body.content).toBe('查一下 S-1024 的账期')
+  })
+
+  it('缺省 / 空串时不写该键（后端 Schema 为 additionalProperties:false）', () => {
+    expect('skill' in buildSendMessageBody(base)).toBe(false)
+    expect('skill' in buildSendMessageBody({ ...base, skill: '' })).toBe(false)
+  })
+})

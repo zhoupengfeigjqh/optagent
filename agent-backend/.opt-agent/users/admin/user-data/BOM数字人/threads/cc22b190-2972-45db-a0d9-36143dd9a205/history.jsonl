@@ -1,0 +1,2 @@
+{"role":"user","content":"ocr解析一下","attachments":[{"dir":"临时空间","filename":"架构图.png"}],"id":"m_mw5wjg0n_968v","ts":"2026-11-07T04:27:10.679Z","agent_name":"BOM数字人"}
+{"id":"m_mw5wjc3m_9tp8","role":"assistant","content":"OCR 任务已提交（任务号 ocr_1794025629149_be95ed8d），正在后台识别，完成后结果会自动返回。\n\n另外提醒一下：我的职责范围是 BOM 数据校验与总 BOM 合并（bom_validate / bom_merge），图片 OCR 不属于该流程。如果这张「架构图」是 BOM 相关的内容，识别完成后你可以把结果或对应的 BOM 文件给我，我再来做格式校验和合并。","ts":"2026-11-07T04:27:10.679Z","status":"completed","usage":{"input_tokens":2692,"output_tokens":145},"duration_ms":5077,"agent_name":"BOM数字人"}

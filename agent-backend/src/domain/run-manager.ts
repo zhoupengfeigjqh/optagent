@@ -5,8 +5,8 @@
  * - 断连 = 仅退订，run 照跑落盘；stop = AbortController 中断，丢弃本轮但记 usage
  * - 工具调用：SSE 仅转发工具名与状态；**结果落 `tool-events.jsonl`**
  *   （入参只留短标量摘要）供刷新后展示与下一轮受控回灌
- * - 下一轮：按预算把内联结果回灌进对应轮次的 assistant 消息，
- *   外置结果只在 systemExtra 留一行索引（见 domain/tool-context.ts）
+ * - 下一轮：按预算把 `inline_content`（含外部来源的截断版）回灌进对应轮次的
+ *   assistant 消息；工具结果不进 systemExtra（见 domain/tool-context.ts）
  * - done：整轮耗时 + message_id + agent_name 广播；user+assistant 带元数据落盘（先落盘后广播）+ usage 记录
  * - error：失败轮落 status='failed' 消息行（含错误信息与已消耗 usage/耗时）
  * - 思考内容仅实时广播，不落历史（FR-006/009）
@@ -51,6 +51,13 @@ export interface AgentRunRequest {
   /** 请求级模型覆盖（缺省用实例默认模型） */
   model?: ModelSelection;
   signal: AbortSignal;
+  /**
+   * 2026-11-07：本轮用户显式选中的技能名（`/技能名`）。
+   *
+   * 给了它，System Prompt 只插入该技能并追加"先读正文"引导；缺省走默认全量索引。
+   * 存在性由对话路由在开跑前校验，装配层不再读盘。
+   */
+  skill?: string;
   /** 人工确认交互口（HITL）：给声明了 confirmation 策略的 MCP 工具包交互门；缺省则直跑 */
   interactionSink?: InteractionSink;
   /**
@@ -118,6 +125,13 @@ export interface StartRunOptions {
   thinking: boolean;
   /** @ 文件引用（随 user 消息落盘；提交 LLM 时追加引用段） */
   attachments?: FileReference[];
+  /**
+   * 2026-11-07：本轮用户显式选中的技能名（`/技能名`）。
+   *
+   * 两件事：①本轮 System Prompt 只插入该技能；②自动跳过意图聚焦（技能已由用户指定，
+   * 再让 Laya 判一次既慢又可能引入"选中技能之外的技能"）。随 user 消息落盘，供回放复原。
+   */
+  skill?: string;
   /** 请求级模型覆盖 */
   model?: ModelSelection;
   /**

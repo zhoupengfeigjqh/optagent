@@ -7,17 +7,16 @@
  *    只有 1 次时不设折叠层
  * 3. **可展开性**（TR-33）：只有终态可展开；运行中不可展开且不出现"展开"字样；
  *    `running` 文案按 live 分流（进行中 / 未完成）
- * 4. **结果展示与降级**（TR-15 / TR-16）：内联结果展开即见；外置结果点开才拉取；
- *    已清理（410）降级为"已清理"而非错误；加载失败可重试；截断有明确提示
+ * 4. **结果展示**（TR-15）：记录里的正文展开即见，**不发起任何请求**（2026-11-08 起
+ *    卡片不再拉取临时空间副本）；截断时的说明见 `ToolCallList.truncated.spec.ts`
  * 5. **查看态跨"流式 → 历史"交接保持**（TR-36）
  * 6. **结果正文的结构化展示**（2026-10-10）：JSON 结果按结构化渲染（`viewUrl` 成链接）、
  *    非 JSON 仍按原文、超限回落原文并说明原因；「按原始 JSON 查看」逃生舱可用且跨重挂载保持
  */
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { h } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
-import type { ToolCallResult } from '../../api/types'
 import { useToolPanels } from '../../composables/useToolPanels'
 import { PRODUCED_JSON_MAX_CHARS } from '../../utils/produced-content'
 import type { ToolCallItem } from '../../utils/tool-calls'
@@ -31,7 +30,7 @@ const READ: ToolCallItem = {
   size: 120,
   argsDigest: { path: '数据准备/生产计划/9月计划.xlsx' },
 }
-/** 外置结果 + 失败：用于"报错数"与"懒加载"两类断言 */
+/** 外置结果 + 失败：用于"报错数"与"结果正文"两类断言 */
 const QUERY: ToolCallItem = {
   callId: 'c2',
   name: 'sql_query',
@@ -43,17 +42,9 @@ const QUERY: ToolCallItem = {
 }
 const OCR: ToolCallItem = { callId: 'c3', name: 'ocr_image', status: 'running' }
 
-function mountList(
-  items: ToolCallItem[],
-  loadResult?: (callId: string) => Promise<ToolCallResult>,
-  live?: boolean,
-) {
+function mountList(items: ToolCallItem[], live?: boolean) {
   return mount(ToolCallList, {
-    props: {
-      items,
-      ...(loadResult ? { loadResult } : {}),
-      ...(live === undefined ? {} : { live }),
-    },
+    props: { items, ...(live === undefined ? {} : { live }) },
   })
 }
 
@@ -192,7 +183,7 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
 
 describe('ToolCallList —— 可展开性（TR-33）', () => {
   it('运行中的调用不可展开：无"展开"字样、按钮禁用、点了也不出结果体', async () => {
-    const wrapper = mountList([OCR], undefined, true)
+    const wrapper = mountList([OCR], true)
 
     const head = wrapper.find('.tool-call__head')
     expect(head.text()).toContain('进行中')
@@ -205,7 +196,7 @@ describe('ToolCallList —— 可展开性（TR-33）', () => {
   })
 
   it('running 文案分流：流式=进行中；历史里中途退出（不会再动）=未完成', () => {
-    const streaming = mountList([OCR], undefined, true)
+    const streaming = mountList([OCR], true)
     expect(streaming.text()).toContain('进行中')
 
     // 历史态（非 live）：进程中途退出，只有开始行——不许说成"进行中"
@@ -215,7 +206,7 @@ describe('ToolCallList —— 可展开性（TR-33）', () => {
   })
 
   it('明细里运行中的条目同样不可展开（规则不分位置）', async () => {
-    const wrapper = mountList([READ, OCR], undefined, true)
+    const wrapper = mountList([READ, OCR], true)
     await wrapper.find('[data-test="tool-summary"]').trigger('click')
 
     const rows = wrapper.findAll('.tool-call__head')
@@ -249,140 +240,53 @@ describe('ToolCallList —— 卡片展示', () => {
   })
 })
 
-describe('ToolCallList —— 内联结果', () => {
-  it('内联结果展开即见，且不发起任何加载请求', async () => {
-    const loadResult = vi.fn()
-    const wrapper = mountList(
-      [{ callId: 'c1', name: 'read_file', status: 'success', content: '车间,计划量\n冲压,1200' }],
-      loadResult,
-    )
+describe('ToolCallList —— 结果正文', () => {
+  it('展开即见记录里的正文（不依赖任何加载器）', async () => {
+    const wrapper = mountList([
+      { callId: 'c1', name: 'read_file', status: 'success', content: '车间,计划量\n冲压,1200' },
+    ])
 
     expect(wrapper.text()).not.toContain('冲压,1200')
     await wrapper.find('.tool-call__head').trigger('click')
     expect(wrapper.text()).toContain('冲压,1200')
-    expect(loadResult).not.toHaveBeenCalled()
   })
-})
 
-describe('ToolCallList —— 外置结果懒加载与降级', () => {
-  it('外置结果：点开才拉取，拉到后展示正文', async () => {
-    const loadResult = vi.fn((_callId: string): Promise<ToolCallResult> =>
-      Promise.resolve({
-        call_id: 'c1',
+  it('有临时空间副本也只展示记录里的截断版（不拉全文）', async () => {
+    const wrapper = mountList([
+      {
+        callId: 'c1',
         name: 'ocr_image',
         status: 'success',
+        content: '前半部分',
+        artifactSize: 1843200,
         size: 1843200,
-        content: '识别到 12 页产能表',
-      }),
-    )
-    const wrapper = mountList(
-      [
-        {
-          callId: 'c1',
-          name: 'ocr_image',
-          status: 'success',
-          artifactSize: 1843200,
-          summary: '识别到 12 页产能表',
-        },
-      ],
-      loadResult,
-    )
-
-    expect(loadResult).not.toHaveBeenCalled()
-    await wrapper.find('.tool-call__head').trigger('click')
-    expect(loadResult).toHaveBeenCalledWith('c1')
-    await flushPromises()
-    expect(wrapper.text()).toContain('识别到 12 页产能表')
-  })
-
-  it('正文已被临时空间清理（410）：降级为"已清理"，不当成错误', async () => {
-    const loadResult = vi.fn(() =>
-      Promise.reject(Object.assign(new Error('已被清理'), { code: 'TOOL_RESULT_EXPIRED' })),
-    )
-    const wrapper = mountList(
-      [{ callId: 'c1', name: 'ocr_image', status: 'success', artifactSize: 1843200 }],
-      loadResult,
-    )
-
-    await wrapper.find('.tool-call__head').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('内容已被临时空间清理')
-    expect(wrapper.text()).toContain('1.8 MB')
-  })
-
-  it('其他加载失败：提示可重试（与"已清理"区分）', async () => {
-    const loadResult = vi.fn(() => Promise.reject(new Error('网络错误')))
-    const wrapper = mountList(
-      [{ callId: 'c1', name: 'ocr_image', status: 'success', artifactSize: 2048 }],
-      loadResult,
-    )
-
-    await wrapper.find('.tool-call__head').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('内容加载失败')
-  })
-
-  it('重复展开不重复请求（同一卡片只拉一次）', async () => {
-    const loadResult = vi.fn(() =>
-      Promise.resolve({
-        call_id: 'c1',
-        name: 'ocr',
-        status: 'success' as const,
-        size: 4096,
-        content: '正文',
-      }),
-    )
-    const wrapper = mountList(
-      [{ callId: 'c1', name: 'ocr', status: 'success', artifactSize: 4096 }],
-      loadResult,
-    )
-
-    await wrapper.find('.tool-call__head').trigger('click')
-    await flushPromises()
-    await wrapper.find('.tool-call__head').trigger('click') // 收起
-    await wrapper.find('.tool-call__head').trigger('click') // 再展开
-    await flushPromises()
-    expect(loadResult).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('ToolCallList —— 未完成的调用', () => {
-  it('结果被落盘上限截断：给出明确提示', async () => {
-    const wrapper = mountList([
-      { callId: 'c1', name: 'ocr', status: 'success', content: '前半部分', truncated: true },
+        summary: '识别到 12 页产能表',
+        truncated: true,
+      },
     ])
 
     await wrapper.find('.tool-call__head').trigger('click')
-    expect(wrapper.text()).toContain('结果过大，仅保留了前一部分')
+    expect(wrapper.text()).toContain('前半部分')
+    expect(wrapper.text()).toContain('完整正文 1.8 MB 存于临时空间')
   })
 })
 
-describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-36）', () => {
-  it('展开明细与正文后重挂载（组件实例重建）：仍保持展开，且不重复请求', async () => {
-    const loadResult = vi.fn((_callId: string): Promise<ToolCallResult> =>
-      Promise.resolve({
-        call_id: 'c2',
-        name: 'sql_query',
-        status: 'error',
-        size: 8192,
-        content: '连接排产库失败：timeout',
-      }),
-    )
-    const items = [READ, QUERY]
+// 截断说明的文案判定见 `utils/tool-result-hint.spec.ts`，组件接线见 `ToolCallList.truncated.spec.ts`
 
-    const streaming = mountList(items, loadResult, true)
+describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-36）', () => {
+  it('展开明细与正文后重挂载（组件实例重建）：仍保持展开与正文', async () => {
+    const items = [READ, { ...QUERY, content: '连接排产库失败：timeout' }]
+
+    const streaming = mountList(items, true)
     await streaming.find('[data-test="tool-summary"]').trigger('click')
     await streaming.findAll('.tool-call__head')[1]!.trigger('click')
-    await flushPromises()
-    expect(loadResult).toHaveBeenCalledTimes(1)
     expect(streaming.text()).toContain('连接排产库失败：timeout')
     streaming.unmount()
 
     // 交接：流式气泡卸载、历史消息挂载 → 全新的组件实例、同一轮数据
-    const history = mountList(items, loadResult)
+    const history = mountList(items)
     expect(history.find('[data-test="tool-details"]').exists()).toBe(true)
     expect(history.text()).toContain('连接排产库失败：timeout')
-    expect(loadResult).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -14,13 +14,7 @@
  */
 import { computed } from 'vue'
 
-import type {
-  ErrorInfo,
-  FileReference,
-  Message,
-  NextStepAction,
-  ToolCallResult,
-} from '../../api/types'
+import type { ErrorInfo, FileReference, Message, NextStepAction } from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
 import { formatTimestamp } from '../../utils/format'
@@ -75,11 +69,6 @@ const props = withDefaults(
     /** 本轮瞬态；`null` 表示非流式气泡 */
     streaming?: StreamingView | null
     /**
-     * 工具卡片懒加载外置结果正文（002 特性）；仅历史气泡使用。
-     * 缺省时卡片只展示随详情下发的内联内容与摘要。
-     */
-    loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
-    /**
      * 会话最新一轮的下一步动作提示（007）。
      *
      * 由上层原样传入即可：**只有 id 命中 `message_id` 的那条气泡会渲染卡片**
@@ -100,7 +89,6 @@ const props = withDefaults(
     activeMatchIndex: -1,
     matchIndexBase: 0,
     streaming: null,
-    loadToolResult: undefined,
     nextSteps: null,
     retryLabel: '重试本轮',
   },
@@ -150,6 +138,8 @@ const roleLabel = computed(() => {
 })
 const formattedTime = computed(() => formatTimestamp(props.message.ts))
 const attachments = computed(() => props.message.attachments ?? [])
+/** 2026-11-07：本轮显式技能（`/技能名`）——用户气泡里还原成胶囊，与输入区同款语义 */
+const skill = computed(() => props.message.skill ?? '')
 
 const thinkingText = computed(() => props.streaming?.thinking ?? '')
 /**
@@ -162,8 +152,6 @@ const toolItems = computed(() =>
     ? props.streaming.toolCalls.map(streamingToolCallItem)
     : toolCallItemsOf(props.message),
 )
-/** 外置正文只存在于历史记录，流式轮次不触发懒加载 */
-const toolLoader = computed(() => (props.streaming ? undefined : props.loadToolResult))
 /**
  * 本条回答的视图入口（2026-10-10，`TR-45`）：该条消息**全部**工具调用的
  * `view_links` 并集，交给 `MessageViewLinks` 归一化与去重。
@@ -243,6 +231,9 @@ const containsActiveMatch = computed(() => {
       <time class="message-bubble__time">{{ formattedTime }}</time>
     </header>
 
+    <!-- 显式技能：与输入区胶囊同款外观；纯展示，不可点（技能正文由模型按需读取） -->
+    <p v-if="skill" class="message-bubble__skill">/{{ skill }}</p>
+
     <!-- 引用由 attachments 还原（不依赖 content 文本）；点击打开右侧内联预览（FR-046） -->
     <ul v-if="attachments.length" class="message-bubble__refs">
       <li v-for="reference in attachments" :key="`${reference.dir}/${reference.filename}`">
@@ -265,7 +256,6 @@ const containsActiveMatch = computed(() => {
       v-if="toolItems.length"
       class="message-bubble__tools"
       :items="toolItems"
-      :load-result="toolLoader"
       :live="isStreaming"
       @open-view="emit('open-view', $event)"
     />
@@ -357,6 +347,17 @@ const containsActiveMatch = computed(() => {
 
 .message-bubble__role {
   font-weight: 600;
+}
+
+.message-bubble__skill {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
 }
 
 .message-bubble__refs {

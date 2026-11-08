@@ -1,7 +1,8 @@
 # 特性规格：对话运行时 · 工具调用记录（002）
 
 - **特性标识**：`002-conversation-runtime`
-- **状态**：已实现（2026-09-23）
+- **状态**：已实现（2026-09-23）；**2026-11-07 增量**：`POST /api/threads/{id}/messages` 新增可选请求字段
+  `skill`（用户显式选中的 `/技能名`，见 `TR-64`），历史 user 行随之新增可选 `skill`
 - **影响范围**：`agent-backend`、`frontend`
 - **上游依据**：本文件替代此前代码注释中引用但**在仓库中缺失**的 "spec 002"；
   原引用点（`FR-001`/`FR-002`/`FR-006`/`FR-009`、`V-04`/`V-05`）的语义修订见 §7
@@ -40,10 +41,9 @@
 | 术语 | 含义 |
 |---|---|
 | **记录** | `tool-events.jsonl` 中的一行事件（元数据 + 可选内联结果） |
-| **内联结果** | 体积 ≤ 内联阈值的结果，正文直接存在记录行里 |
-| **外置结果** | 体积 > 内联阈值的结果，正文存于临时空间，记录行只留体积与摘要 |
-| **回灌** | 组 prompt 时把工具结果投影进 messages（**不落盘**） |
-| **索引** | 组 prompt 时注入 systemPrompt 的外置结果清单（名称·体积·摘要·路径） |
+| **内联结果** | 记录行里的 `inline_content`：≤ 阈值的完整正文，或超阈值后的前 32 KB 截断版（末尾带截断说明） |
+| **外置结果** | 超阈值且**留有副本**的结果（外部来源）：全文存于临时空间，记录行另记 `artifact_size` + `summary` |
+| **回灌** | 组 prompt 时把 `inline_content` 投影进 messages（**不落盘**；工具结果不进系统提示词） |
 | **视图链接** | 产出正文里**字段名**为 `viewUrl`（或 `filePath`）的字符串值：服务给出的"可跳转页面地址"（`TR-40`） |
 | **归一化** | 把 `viewUrl` 值转成可点地址：已带 `http(s)://` 前缀则**原样**，根相对路径（单个 `/`）则补**当前页面入口**（`TR-41`） |
 | **视图入口** | 由**工具结果正文**里的 `viewUrl` / `filePath` 抽出的 sidecar 字段（`view_links` = `{ url, name?, kind? }[]`；`kind:'file'` 表示空间相对路径，缺省 `'url'`），随工具记录落盘与下发，在**回答正文之后**渲染为可点入口（`TR-44`~`TR-48`） |
@@ -58,11 +58,11 @@
 | **TR-01** | 每次工具调用在 `threads/{thread_id}/tool-events.jsonl` 追加事件行：开始记 `running`、结束记终态，读取时按 `call_id` 合并（后者覆盖前者） | 一次调用后有 2 行且合并为 1 条记录 |
 | **TR-02** | 记录行含 `call_id` / `message_id` / `name` / `status` / `started_at`，终态行含 `duration_ms` / `size` | 字段类型校验通过；`message_id` 等于该轮 assistant 消息 id |
 | **TR-03** | `message_id` 在 **run 启动时**生成（而非收尾时），供工具事件归属 | 工具记录与 `done` 事件的 `message_id` 一致 |
-| **TR-04** | 结果 ≤ **64 KB**：原文内联 `inline_content`；> 阈值：正文外置为 `临时空间/{thread_id}_toolresult_{call_id}.txt`，记录行只记 `artifact_size` + `summary` | 两个分支各有单测；外置时记录行无 `inline_content` |
-| **TR-05** | 单条外置正文落盘上限 **2 MB**，超限截断并标 `truncated: true` | 超限用例：`artifact_size` 恰为上限且标记为真 |
+| **TR-04** | 结果 ≤ **内联阈值**（`TOOL_INLINE_MAX_BYTES`，当前 32 KB）：原文内联 `inline_content`。**超阈值时任何来源都只内联前 32 KB**（`truncated: true`），末尾附截断说明，说明的**去向分两种**：① **内置工具**不落副本（结果可用原工具按更小范围/offset 重取），说明写「完整内容未保存，要查看更多请重新调用该工具」；② **MCP 等外部来源**正文外置为 `临时空间/{thread_id}_toolresult_{call_id}.txt`，说明写出该路径（「完整正文在 …，可用 read_file 读取」），记录行另记 `artifact_size` + `summary`（外部结果可能无法复现，必须留存） | 三条分支单测：≤ 阈值原文；内置工具超阈值时临时空间**无文件**、`artifact_size` 缺席、说明不含路径；外部来源时 `inline_content` 只含前 32 KB 且说明含副本路径，副本可全量读回 |
+| **TR-05** | **外部来源**单条外置副本落盘上限 **2 MB**，超限截断；内置工具不落盘，不受此上限约束。`size` 恒为**原始结果**字节数，`size > artifact_size` 即副本被上限截断（不另设布尔字段） | 超限用例：`artifact_size` 恰为上限且 `size` 更大 |
 | **TR-06** | 入参只落**短标量摘要**（`args_digest`）：单值 ≤120 字符，最多 8 键，数组/对象只留形状 | 长字符串被截断；嵌套结构显示为 `<数组 N 项>` / `<对象>` |
 | **TR-07** | 结果为图片内容块时只落 `[图片 mime ~体积]` 占位，**绝不落 base64** | 图片块不增加记录行体积 |
-| **TR-08** | 外置写入失败（或未装配外置能力）时退化为**截断内联**，不丢记录 | 单测覆盖；记录仍可读 |
+| **TR-08** | 外置写入失败（或未装配外置能力）时退化为**截断内联**，不丢记录；说明改为「完整内容未保存」并 **MUST NOT** 给出不存在的路径，`summary` 随之不落（摘要只服务真实副本） | 单测覆盖；记录仍可读、无 `artifact_size`、说明不含 `临时空间/` |
 | **TR-09** | 记录生命周期 = 会话；删除会话时随 `threads/{thread_id}/` 一并删除；外置正文另随临时空间 `{thread_id}_` 前缀清理与"30 天未访问"策略回收 | 删除后目录与文件均不存在 |
 | **TR-10** | 追加经 per-thread Promise 链串行化；单行一次 append 保证原子性 | 并发追加后行数与内容正确 |
 | **TR-11** | 坏行跳过并告警；整体损坏（无一条合法行）→ 备份后重建并告警 | 与 `history.jsonl` 同口径 |
@@ -72,9 +72,9 @@
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **TR-12** | `GET /api/threads/{id}` 的消息可附 `tool_calls`：元数据 + 内联结果 + 摘要，**不含外置正文** | 响应体积不随外置结果大小变化 |
-| **TR-13** | 新增 `GET /api/threads/{id}/tool-calls/{call_id}` 返回外置正文；正文已被清理返回 **410 `TOOL_RESULT_EXPIRED`**；记录存在但未外置返回 404 | 三种分支各有集成测试 |
+| ~~**TR-13**~~ | **2026-11-08 作废**：`GET /api/threads/{id}/tool-calls/{call_id}` 端点已删除——卡片只展示记录里的 `inline_content`（`TR-15`），模型需要全文时按截断说明里的路径用 `read_file` 取（`TR-04`），没有任何消费方还需要后端代读副本。随之删除 `ToolEventStore.readArtifact()` 与 `ToolArtifactAccess.resolveVerified()` | 路由表无此路径；`readArtifact` / `resolveVerified` 零残留引用（`npm run lint` + `typecheck` 守护） |
 | **TR-14** | 正文路径由 `{thread_id, call_id}` **重新推导**，不读记录行里的任何路径；读取前过 `FileAccess.resolveVerified` 白名单与符号链接校验 | 恶意 `call_id` 无法越权；跨用户访问被拒 |
-| **TR-15** | 前端工具卡片：内联结果展开即见（不发请求）；外置结果展开才懒加载；已清理显示"内容已被临时空间清理（原 X）"；其他失败提示可重试 | 组件测试覆盖四种展示态 |
+| **TR-15** | 前端工具卡片：正文**只展示记录里的 `inline_content`**（≤阈值原文，或前 32 KB 截断版），展开即见、**不发起任何请求**。截断时正文下方占一行说明，按**有无副本**分叉：无 `artifact_size`（内置工具）「结果过大，仅保留了前一部分（完整内容未保存，可让助手重新读取）」；有 `artifact_size`（外部来源）「结果过大，仅显示前一部分（完整正文 X 存于临时空间，可让助手读取）」 | 组件测试覆盖两种来源（`ToolCallList.truncated.spec.ts`）+ 纯函数逐条（`utils/tool-result-hint.spec.ts`） |
 | **TR-16** | 流式态与历史态**复用同一卡片组件**；`tool_call_end` 到达后保留卡片并标记终态，不再即时移除 | 卡片渲染与刷新后一致 |
 | **TR-17** | `status === 'running'`（只有开始事件）渲染为"进行中/未完成"，不假装有内容 | 组件测试覆盖 |
 
@@ -82,10 +82,9 @@
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **TR-18** | 组 prompt 时按**预算**回灌内联结果原文：从最近往前填，总量 **128 KB**（预算即单条上限，不另设单条阈值）；预算耗尽的内联结果降级为一行占位 | 预算分配用例（3 档体积） |
+| **TR-18** | 组 prompt 时按**预算**回灌 `inline_content`（含外部来源的截断版，两者同一路径）：从最近往前填，总量 **128 KB**（预算即单条上限，不另设单条阈值）；预算耗尽的降级为一行占位，**外置结果的占位 MUST 带副本路径**（`完整正文在 …，可用 read_file 读取`）——索引段已删除（2026-11-07），这是模型知道"能取回"的唯一来源 | 预算分配用例（3 档体积）+ 外置占位含路径 / 内置占位不含路径 |
 | **TR-19** | 回灌内容**只拼进 messages**（对应轮次的 assistant 消息），不写回 `history.jsonl` | `history.jsonl` 内容与改动前一致 |
-| **TR-20** | 外置结果在 `systemExtra` 注入索引行（名称 · 体积 · 摘要 · 临时空间路径），最多 **10 条**；无外置结果时该段长度为 0 | 空索引返回空串 |
-| **TR-21** | **工具结果正文永不整体自动注入**；`running` 记录不参与回灌 | 大结果正文在 messages 中出现次数为 0 |
+| **TR-21** | **工具结果正文永不整体自动注入**，也 **MUST NOT** 出现在 `systemExtra`（工具结果只进 messages，2026-11-07 起无索引段）；`running` 记录不参与回灌 | 大结果正文在 messages 中出现次数为 0；`systemExtra` 不含工具结果与截断说明 |
 | **TR-22** | 投影为**确定性**（同历史 → 同结果），不破坏 prompt 前缀缓存。**唯一例外：`【当前时间】` 段**（见 TR-29，每轮现算）——其变化**只波及该段之后仍存在的段（`guidance`）**，且不改动其之前任何段的字节，"稳定前缀 + 末尾追加"的整体性质不变 | 同输入（固定时钟）两次组装字节一致；真实时钟下**除该段外**逐字节一致 |
 | **TR-23** | 未装配 `toolEvents` 时（既有单元测试场景）不落盘、不回灌，行为与改动前完全一致 | 回归用例 |
 | **TR-29** | 每轮 `systemExtra` MUST 注入 `【当前时间】` 段，格式 `YYYY-MM-DD HH:mm:ss（周X，UTC±HH:MM）`，**精确到秒**、按运行环境本地时区并**显式标注偏移**；位置固定在 **`guidance` 之前**（`guidance` 仍为最后一段，保持"本轮指令紧邻用户消息"）；MUST NOT 进 messages、MUST NOT 落盘、MUST NOT 进历史；时钟由调用方注入（纯函数层不读系统时钟） | 固定时钟用例断言格式与位置；`history.jsonl` 与用户气泡不含该段 |
@@ -139,10 +138,10 @@
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **TR-32** | 计数常显：`本轮 N 次调用 · 报错 M 次`。口径为**次数**（同一工具调两次算 2 次）；`M` = `status === 'error'` 的次数，`running` 不计入。**报错数 MUST 在折叠态可见**——只要有失败，不展开就能看出来 | 组件测试：失败项不是"最新一条"时，折叠态仍显示 `报错 1 次` |
-| **TR-33** | **只有终态（`success` / `error`）的调用可展开**看结果；`running` 不可展开，且**不出现"展开"字样**（避免"点开却是空的"）。`running` 徽标**按语境分流**：流式进行中 → `进行中`；非流式（中断/失败轮、历史里只有开始行的记录）→ `未完成`（宪章原则九：MUST NOT 假装正常）。语境由 `live` 显式传入，**MUST NOT** 用"是否可懒加载"之类的间接信号推断 | 组件测试各覆盖一次；`live` 由 `MessageBubble` 从 `streaming.phase` 传入 |
+| **TR-33** | **只有终态（`success` / `error`）的调用可展开**看结果；`running` 不可展开，且**不出现"展开"字样**（避免"点开却是空的"）。`running` 徽标**按语境分流**：流式进行中 → `进行中`；非流式（中断/失败轮、历史里只有开始行的记录）→ `未完成`（宪章原则九：MUST NOT 假装正常）。语境由 `live` 显式传入，**MUST NOT** 用"有无结果正文"之类的间接信号推断 | 组件测试各覆盖一次；`live` 由 `MessageBubble` 从 `streaming.phase` 传入 |
 | **TR-34** | 一轮内 **≥2 次**调用时折叠为**一行摘要**：左侧只读显示最新一次调用（`最新` + 名称 + 状态 + 耗时），右侧为明细开关；**整行是一个按钮**（原生 `<button>` + `aria-expanded` + `aria-controls`），点击开合明细。明细区 MUST 是摘要行的**兄弟节点**（MUST NOT 嵌进按钮内） | 组件测试：折叠态明细区不存在；点击后出现 |
 | **TR-35** | 明细区列出**本轮全部**调用，**时间正序（最早在上）**，每条仍可展开自己的结果。**只有 1 次**调用时**不设折叠层**——该卡片即全部，保持"一次点击看结果"（否则单工具从 1 次点击退化为 2 次） | 组件测试：单条行为与改版前一致 |
-| **TR-36** | **查看态跨"流式 → 历史"交接保持**：明细是否展开、各条结果是否展开、已懒加载的正文。理由：流式气泡的合成消息 `id` 为空串、列表按 `key=message.id` 渲染，交接时组件重建，组件内状态必丢——表现为"刚展开的明细与正文在回答结束瞬间自己收回去"。故查看态提升为**页面级、按 `call_id` 记忆**；**不持久化**（刷新即回到收起态），切换会话不清空（键唯一，不会串味） | 组件测试：展开 → 卸载 → 同数据重新挂载 → 仍展开，且**不重复请求**外置正文 |
+| **TR-36** | **查看态跨"流式 → 历史"交接保持**：明细是否展开、各条结果是否展开与是否按原始 JSON 展示。理由：流式气泡的合成消息 `id` 为空串、列表按 `key=message.id` 渲染，交接时组件重建，组件内状态必丢——表现为"刚展开的明细与正文在回答结束瞬间自己收回去"。故查看态提升为**页面级、按 `call_id` 记忆**；**不持久化**（刷新即回到收起态），切换会话不清空（键唯一，不会串味） | 组件测试：展开 → 卸载 → 同数据重新挂载 → 仍展开且正文仍可见 |
 
 ### 4.7 产出正文的视图链接（2026-10-10 补充）
 
@@ -180,7 +179,7 @@
 **问题**：`viewUrl`（`TR-40`）不只出现在异步产出（R11）的正文里，**同步工具结果**里同样有——例如解析数据源后返回的表格预览页地址。但 §4.7 的处置在这条链路上够不着，三个原因：
 
 1. **可见性**：值在工具卡片的结果正文里，用户要先展开卡片才知道"有没有能点开的地址"；
-2. **拿不到**：结果 >64KB 会被**外置**（`TR-04`），`tool_calls` 里只有 `artifact_size` + `summary`，前端**根本没有那段值**；
+2. **拿不到**：结果超过内联阈值会被**外置**（`TR-04`，仅 MCP 等外部来源），`tool_calls` 里只有 `artifact_size` + `summary`，前端**根本没有那段值**；
 3. **不可靠**：让模型在回答里把地址转写一遍，既可能抄错，也与记录**没有绑定**（模型可以不写、可以改写）。
 
 **处置**（**两侧同改**）：运行时把结果里的 `viewUrl` **抬成 sidecar 字段**（`view_links`）随工具记录落盘、随 `tool_calls` 下发，前端在**回答正文之后**渲染成入口行。归一化仍只在前端（`TR-42` 的"唯一实现"不变，后端**不拼前缀**）。
@@ -272,13 +271,14 @@
 | **TR-61** | **建连 MUST 有界**：新增 `MCP_CONNECT_TIMEOUT_MS`（默认 **10s**，与工具调用上限 `MCP_TIMEOUT_MS`=60s **刻意分开**）。超时即判该服务 `failed`（有连接结果，不再永久 `unknown`）并交给既有退避重连接管；**超时后迟到的连接 MUST 主动关闭**（不得留下无人管理的客户端/进程） | 单测：挂起建连 → 到点 `failed` 并推送；迟到连接被 `close()`；状态**不会**永久停在 `unknown` |
 | **TR-62** | **开跑前 MUST 有界等待落定**：`POST /api/threads/{id}/messages` 在 `getOrCreateAgent` 之后、`startRun` 之前 MUST `await agent.mcpReady(MCP_CONNECT_TIMEOUT_MS)`（已落定 → **立即返回**，稳态首字延迟零影响）；超时 MUST 降级继续（不阻断本轮）+ 记结构化 `mcp.ready.timeout` | 单测/集成：已落定路径不额外等待；未落定路径等到结果后工具**齐全**；超时仍开跑且日志有 `event`/`timeout_ms` |
 | **TR-63** | **前端发送前就绪门**：`onSend`（**唯一发送链路**）在 `chat.send` 之前，若仍有 `unknown` MUST 先调预热并**有界等待**（≤10s）到每个服务都有结果（`connected` / `failed`，红色同样放行）；超时 MUST **放行**并给用户可感知提示（"MCP 服务连接超时，本轮可能缺少相关工具"），**MUST NOT** 因单个服务挂掉而阻断聊天（原则九）。等待期间 MUST 有可见状态（"正在连接 MCP 服务…"）并禁用输入与两个发送入口（防重复提交）。快照 MUST 校验 `agent_name` 归属（旧数字人的绿不得被采用），切换数字人时 MUST 先清空旧结果。挂载与切换时 SHOULD 主动预热（把等待前移到用户打字期间） | 单测：有灰 → `ensureMcpReady` 先于 `chat.send`；无灰 → **零等待**；等待中重复点击只发一次；超时 → 仍提交 + 提示；SSE 推来他人快照被丢弃；切换后不残留旧结果 |
+| **TR-64** | **显式技能 MUST 只影响本轮、且只有一条落盘路径**（2026-11-07）：请求体可选 `skill`（1–64 字符）；MUST 命中该数字人 `skills/` 目录清单，否则 `400 VALIDATION_FAILED`（不占并发额度、不开 SSE）；命中后 System Prompt **只插入该技能**、本轮**跳过意图聚焦**、并随 user 行落盘为可选 `skill`。前端 MUST 由输入区 `/技能名` 落标记，提交时**剥离标记**并把技能走结构化字段（展示与提交同源） | 集成：非法/越界技能名 400；合法技能名 → 提示词只含该技能、聚焦记录 1 条 `skipped`；历史 user 行回放出 `skill`；前端单测：请求体带 `skill` 且乐观气泡同带 |
 
 **明确不做**（本次）：
 
 - **不新增 `connecting` 状态值**：`unknown` 仍表示"尚无连接结果"（建连进行中也算），前端用本地 `preparing` 表达"正在连接"，避免动三值枚举（后端 `statusOf`、前端类型、配色与一批测试）；
 - **不做"红色就不许发送"**：红色 = 已有明确结论，阻塞没有收益（且会让服务一挂就完全不能聊天）；
 - **不改"建连不阻断实例就绪"的既有口径**：`connectAll` 仍是 fire-and-forget，本次只是**增加可等待的落定信号**，不让创建实例本身变慢；
-- **不恢复常驻轮询**：仅在"点击发送且仍有灰"的窗口内按 500ms 兜底拉取（上限 10s），SSE 仍是常态通道。
+- **不恢复常驻轮询**：仅在"点击发送且仍有灰"的窗口内兜底拉取（上限 10s），SSE 仍是常态通道。**（2026-11-07 调整：兜底间隔 500ms → 2s）** 轮询只是 SSE 订阅不上时的兜底，不是主通道；一次 10s 窗口的请求数由约 20 次降到 ≤6 次。代价是 SSE 已推送结果、但等待循环正处于 sleep 时，最多再多等一个间隔才提交（≤2s）。
 
 ## 5. 数据模型
 
@@ -289,7 +289,7 @@
 ```jsonl
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"running","started_at":"2026-09-23T09:12:03.120Z","args_digest":{"path":"数据准备/生产计划/9月计划.xlsx"}}
 {"call_id":"call_a1","message_id":"m_abc_0001","name":"read_file","status":"success","started_at":"2026-09-23T09:12:03.120Z","duration_ms":84,"size":120,"inline_content":"车间,计划量\n冲压,1200"}
-{"call_id":"call_b2","message_id":"m_abc_0001","name":"ocr_image","status":"success","started_at":"2026-09-23T09:12:05.400Z","duration_ms":1620,"size":1843200,"truncated":false,"summary":"识别到 12 页产能表（共 480 行）","artifact_size":1843200,"view_links":[{"url":"/datasource/ds1/dst1/t9/xlsx","name":"产能表预览"}]}
+{"call_id":"call_b2","message_id":"m_abc_0001","name":"ocr_image","status":"success","started_at":"2026-09-23T09:12:05.400Z","duration_ms":1620,"size":1843200,"truncated":true,"inline_content":"车间,计划量\n冲压,1200 …\n\n（记录已截断：原文 1.8 MB，仅保留前 32.0 KB；完整正文在 临时空间/{thread}_toolresult_call_b2.txt，可用 read_file 读取）","summary":"识别到 12 页产能表（共 480 行）","artifact_size":1843200,"view_links":[{"url":"/datasource/ds1/dst1/t9/xlsx","name":"产能表预览"}]}
 ```
 
 - `view_links`（2026-10-10，`TR-44`/`TR-45`）：结果正文里 `viewUrl`（+ 同层可选 `viewUrlName`）抽出的 **sidecar**，值是服务给的**原值**（未拼前缀、未归一化）。它与正文**分离**：所以上面这行正文已外置、`inline_content` 缺席，入口仍然可用；也不进回灌预算。
@@ -311,10 +311,9 @@
 
 | 参数 | 默认值 | 位置 |
 |---|---|---|
-| 内联阈值 | 64 KB | `TOOL_INLINE_MAX_BYTES` |
+| 内联阈值 | 32 KB | `TOOL_INLINE_MAX_BYTES` |
 | 单条落盘上限 | 2 MB | `TOOL_ARTIFACT_MAX_BYTES` |
 | 回灌总预算 | 128 KB | `TOOL_REPLAY_BUDGET_BYTES` |
-| 索引条数上限 | 10 | `TOOL_INDEX_MAX_ITEMS` |
 | 占位条数上限 | 20 | `TOOL_PLACEHOLDER_MAX_ITEMS` |
 | 摘要字符上限 | 200 | `TOOL_SUMMARY_MAX_CHARS` |
 | 视图链接条数上限 | 50 | `VIEW_LINK_MAX_ITEMS`（`domain/view-links.ts`） |
@@ -333,8 +332,8 @@
 | 接口 | 变更 |
 |---|---|
 | `GET /api/threads/{id}` | 消息新增可选字段 `tool_calls: ToolCallRecord[]`（仅该轮确有调用时返回）；**2026-10-10**：`ToolCallRecord` 再新增可选字段 `view_links: ViewLink[]`（结果里的视图链接；仅确有链接时返回，`TR-45`） |
-| `GET /api/threads/{id}/tool-calls/{call_id}` | **新增**。200 → `{ call_id, name, status, size, content, truncated? }`；410 → `TOOL_RESULT_EXPIRED`；404 → `TOOL_CALL_NOT_FOUND` |
-| `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发。**2026-10-15**：`error` 事件的 `error` 对象新增**可选**诊断字段（见下，`TR-55`） |
+| ~~`GET /api/threads/{id}/tool-calls/{call_id}`~~ | **2026-11-08 删除**（原为"200 返回副本全文 / 410 `TOOL_RESULT_EXPIRED` / 404 `TOOL_CALL_NOT_FOUND`"）。理由：卡片不再拉取副本（`TR-15`），模型需要全文时按截断说明里的路径用 `read_file` 取——没有任何消费方还需要后端代读副本 |
+| `POST /api/threads/{id}/messages`（SSE） | **无变化**：`tool_call` / `tool_call_end` 仍只透出工具名与状态，结果不经事件总线外发。**2026-10-15**：`error` 事件的 `error` 对象新增**可选**诊断字段（见下，`TR-55`）。**2026-11-07**：请求体新增**可选** `skill` 字段（见下，`TR-64`） |
 | `GET /api/agents/current/mcp` | **不变**：仍为纯只读快照（实例未创建时 `unknown`）。**2026-10-18**：明确"查询 MUST NOT 产生建实例副作用" |
 | `POST /api/agents/current/mcp/warm` | **新增**（2026-10-18，`TR-59`）。预热：建实例 + 有界等建连落定；200 → 与 `GET .../mcp` **同形**的快照（未选中 → `{ agent_name: null, mcp_servers: [] }`）；幂等；池满/配置损坏/超时不抛错，返回当前快照 |
 
@@ -354,6 +353,8 @@
 **2026-10-10 的契约增量（`TR-44`~`TR-48`）**：`tool_calls[].view_links` 是本次**唯一**的接口字段变化——`GET /api/threads/{id}/tool-calls/{call_id}` 与 SSE 均**零变更**（结果正文仍不经事件总线外发，故入口只在终态后的详情里出现）；`view_links` 与结果正文分离，因此**正文外置时仍随详情下发**。
 
 **2026-10-15 的契约增量（`TR-54` / `TR-55`）**：SSE `error` 事件与 `GET /api/threads/{id}` 消息项的 `error` 对象 MAY 携带三个**可选**诊断字段——`upstream_status`（上游 HTTP 状态码）/ `upstream_type`（上游错误类型，如 `service_unavailable_error`）/ `request_id`（上游请求 id）；同时新增一批**流级错误码**（`LLM_UNAVAILABLE` / `LLM_RATE_LIMITED` / `LLM_INSUFFICIENT_BALANCE` / `LLM_UNAUTHORIZED` / `LLM_CONTEXT_TOO_LONG`），**既有 `LLM_ERROR` 保留为兜底**（语义不变）。权威表与字段定义见 [`runtime-api-delta.md` §19 R20](../../001-digital-human-platform/contracts/runtime-api-delta.md)（运行环境侧契约的登记处；`contracts/backend-api.md` 并不存在，见本节前的落点说明）。前端 `api/types.ts` 的 `ErrorInfo` **同批**新增这三个可选字段（宪章原则七：契约、类型、后端 schema、测试四处同步）。
+
+**2026-11-07 的契约增量（`TR-64`）**：`POST /api/threads/{id}/messages` 的请求体新增**可选** `skill`（用户用输入区 `/技能名` 显式选中的技能名，1–64 字符）；终态历史里 user 行随之新增**可选** `skill`，`GET /api/threads/{id}` 原样回放。前端同一批改：`useChatStream` 在**请求体与乐观气泡**同时带该字段（刷新前即可见），`MessageBubble` 按 `skill` 渲染 `/技能名` 胶囊。断言落点：`agent-backend/tests`（端点集成）与 `frontend/src/composables/useChatStream.spec.ts`、`frontend/src/components/chat/MessageBubble.skill.spec.ts`。
 
 ## 7. 对既有规格的修订
 
@@ -388,7 +389,7 @@
 | 既有条目 | 原语义 | 修订后 | 理由 |
 |---|---|---|---|
 | §4.7「明确不做」第 1 条 | 「**不新增接口字段、不改 `api/types.ts`、不改后端**」 | **收窄到异步产出链路**：异步产出侧仍"正文里解析、平台不解析"；**同步工具结果侧**改为 sidecar 下发（新增 `view_links` 字段、新增 `ViewLink` 类型、`tool-events.ts` 写/读该字段） | 两条链路的**可获取性不同**：异步产出的正文由前端主动整段拉取；同步结果的外置正文前端拿不到 |
-| §4.7「明确不做」第 3 条 | 「**不在铃铛列表行上给入口**：需要后端把 `viewUrl` 由正文提升为 sidecar 字段并由列表下发（两侧同改），不在本次范围」 | **该手段已实施，但落点不是铃铛列表，而是同步工具结果**：`viewUrl` 由运行时抽成 sidecar（`view_links`）随工具记录落盘与下发，在**回答正文之后**渲染入口行 | 同步结果 >64KB 会外置（`TR-04`），前端**根本拿不到那段值**；入口因此不能靠"展示层解析正文"实现 |
+| §4.7「明确不做」第 3 条 | 「**不在铃铛列表行上给入口**：需要后端把 `viewUrl` 由正文提升为 sidecar 字段并由列表下发（两侧同改），不在本次范围」 | **该手段已实施，但落点不是铃铛列表，而是同步工具结果**：`viewUrl` 由运行时抽成 sidecar（`view_links`）随工具记录落盘与下发，在**回答正文之后**渲染入口行 | 同步结果超过内联阈值会外置（`TR-04`，仅外部来源），前端**根本拿不到那段值**；入口因此不能靠"展示层解析正文"实现 |
 | §4.7「明确不做」第 4 条 | 「**同步侧（工具结果的对话内入口）不做**：值将经过模型转写，需要提示词约定与标记解析，另立增量」 | **本次实施**（`TR-44`~`TR-48`），但**不采用"模型转写"方案**：值由运行时从结果文本直接搬运，模型不参与 | 模型转写可能抄错，且正文与记录**没有绑定**（模型可以不写、可以改写）；sidecar 与记录天然同源 |
 | `TR-40`~`TR-43` | §4.7 的字段判定与值归一化 | **不变，且复用**：§4.8 只做"搬运"（后端不拼前缀、不判 scheme），归一化唯一实现仍是 `frontend/src/utils/view-link.ts`（`TR-42`） | 保持"唯一实现"，避免后端再判一遍变成第二个漂移点 |
 | `TR-02`（记录行字段） | 行含 `call_id` / `message_id` / `name` / `status` / `started_at`，终态行含 `duration_ms` / `size` | **扩展**：行可再含 `view_links`（sidecar，与正文分离） | 入口必须在正文外置时也可用（见 §5.1 示例） |
@@ -459,6 +460,36 @@
 | `TR-44` / `TR-48`（`kind` 口径未登记，实为缺陷） | 抽取产出 `kind:'file'`，但读回白名单只认 `{url, name?}`，**`kind` 被丢弃**；`filePath` 也未登记 | **修正**：`TR-44` 补登记 `filePath`/`filePathName`；读回**透传** `kind`（未知值视同 `url`）。修复后**存量记录**（落盘 JSON 里本来就有 `kind`）无需回填即可恢复入口 | 单测里 file 入口能开、真实链路永远不出现：入口在 `resolveViewUrl` 处被当成非法地址丢掉 |
 
 **接口与数据变更**：无新端点、无前端类型变更；`tool-events.jsonl` 行内 `view_links[].kind` 为**可选**（缺省 = `url`，向后兼容），经 `GET /api/threads/{id}` 原样下发。契约登记在 [`runtime-api-delta.md`](../../001-digital-human-platform/contracts/runtime-api-delta.md) 的内置工具表。
+
+### 7.9 修订记录（2026-11-07）：就绪门兜底轮询间隔 500ms → 2s
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| §4.11「明确不做」第 4 条 | 发送前就绪门在"仍有灰"的窗口内按 **500ms** 兜底拉取（上限 10s） | **修订**：兜底间隔改为 **2s**（上限与降级语义不变） | 轮询只是 SSE 订阅不上时的兜底；一次窗口内请求数由约 20 次降到 ≤6 次。代价是 SSE 已推送结果、等待循环正在 sleep 时最多多等一个间隔（≤2s） |
+
+**接口与数据零变更**：`GET /api/agents/current/mcp`、`POST /api/agents/current/mcp/warm`、SSE 与后端代码全部不动；改动仅 `frontend/src/composables/useAgents.ts` 的常量与注释，以及对应单测的假时钟推进量。
+
+### 7.10 修订记录（2026-11-07）：工具结果的体积分流（超阈值只内联前一段；外部来源另存副本；回灌只走 messages）
+
+**来源**：同日的两条反馈。① 内置工具（`read_file` / `grep_files` / `list_dir`…）读到大文件时，旧口径一律把正文外置——一份既能用原工具按 `offset` 重取、又没人会去第二轮翻的副本；② 外部来源（MCP）虽必须留存副本，但记录里一个字节都不留，模型下一轮只能靠系统提示词里的索引段知道"有这么个结果"，而它与 messages 里的正文是**两套口径**。
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| `TR-04`（超阈值一律外置） | 结果 > 内联阈值 → 正文外置，记录行只留 `artifact_size` + `summary` | **任何来源超阈值都只内联前 32 KB**（`truncated: true`）+ 截断说明：内置工具**不落副本**、说明写"完整内容未保存，要查看更多请重新调用该工具"；外部来源**另存副本**、说明写出副本路径（`read_file` 可取回），记录行再记 `artifact_size` + `summary` | 内置工具结果可**原样重取**，副本只污染临时空间；外部结果重取可能产生副作用或无法复现，**必须**留存，且模型应能在 messages 里就近看到路径 |
+| `TR-05`（2 MB 落盘上限） | 所有超阈值结果受此上限约束 | **收窄为"外部来源的副本"**；`size` 恒为原始结果字节数，`size > artifact_size` 即副本被截断（不另设布尔字段） | 上限的作用是防病态大文件落盘；内置工具已无落盘动作 |
+| `TR-08`（外置失败退化截断内联） | 仅"外置写失败"时截断内联 | **扩展为**「内置工具 / 外置能力缺失 / 外置写失败」共用同一路径；写失败时说明改回"未保存"并 **MUST NOT** 给出不存在的路径，`summary` 不落 | 三种情形对模型是同一件事（记录里只有前 32 KB）；写失败还给路径等于让模型去读一个不存在的文件 |
+| `TR-20`（外置索引段，10 条） | 外置结果在 `systemExtra` 注入索引行（名称 · 体积 · 摘要 · 路径），最多 10 条 | **整条作废**：索引段删除，`TOOL_INDEX_MAX_ITEMS` / `ArtifactIndexItem` / `formatArtifactIndex` 一并移除 | 截断版已进 messages 且自带路径，索引段是同一事实的**第二套口径**；预算耗尽的结果改由占位行带路径（见 `TR-18`） |
+| `TR-18`（预算回灌） | 只回灌内联结果原文 | **扩展**：外部来源的截断版走同一路径；被预算挤出的**占位行 MUST 带副本路径** | 删掉索引段后，占位行是模型唯一还能知道"可以 `read_file` 取回"的来源 |
+| `TR-15`（卡片展示） | 外置结果展开才懒加载、已清理显示"已清理" | **改为**只展示记录里的 `inline_content`，**不拉取副本**；截断说明按有无副本分叉（未保存 / 副本在临时空间） | 记录里已有正文，拉 2 MB 全文只为看一眼既慢又重；摘要卡 + 一行说明足够，全文需要时让助手 `read_file` 分段读（2026-11-08 定稿） |
+| §5.3 内联阈值 64 KB | 64 KB | **32 KB** | 128 KB 回灌预算下，64 KB 的两条大结果就能吃掉全部预算；32 KB 让预算覆盖更多条 |
+
+**接口净减一个端点**：本次先让 `GET /api/threads/{id}/tool-calls/{call_id}` 失去前端调用方，随后在同日二次定稿中**删除该端点**（`TR-13` 作废，见 §6）。SSE 仍只透工具名与状态；`tool-events.jsonl` 无新字段（`inline_content` 在外部来源上也开始出现，属**语义扩展**，存量行无需迁移）。
+
+**同日二次定稿（2026-11-08）**：卡片不再拉取副本——`TR-15` 收敛为"只展示记录里的正文"。前端删除整条装配链（`ChatPanel` / `MessageList` / `MessageBubble` / `ToolCallList` 的 `loadToolResult` 透传、`useChatPanel.onLoadToolResult`、`useThreads.toolCallResult`、`api/threads.toolCallResult` 与 `ToolCallResult` 类型），`useToolPanels` 的 `content` / `loading` / `expired` / `error` 四个字段一并移除（正文完全由 props 决定，不再有第二种来源）；后端删除该端点、`ToolEventStore.readArtifact()` 与 `ToolArtifactAccess.resolveVerified()`（写口 `write()` 保留，落盘行为不变）。**结果**：副本只有两个读者——模型（`read_file`）与临时空间清理策略，后端不再代读。
+
+**代码结构（高内聚-低耦合）**：分流策略自 `tool-events.ts` 抽为纯函数 `domain/tool-result-split.ts`（`planSplit` / `planTruncatedInline`，不做 IO）；截断说明的**唯一实现**在 `tool-result.ts` 的 `withRecordTruncationNote`（有副本给路径 / 无副本说未保存）；`tool-context.ts` 只做"记录 → messages 片段"的投影，不再拼任何系统提示词段；同时移除已无引用的 `isArtifactFileName()`（路径推导与校验已由 `artifactRelPath()` + `FileAccess.resolveVerified` 承担）。
+
+**未做（登记）**：① 不回溯重算存量记录——历史内置工具结果仍以副本形式留在临时空间，按既有清理策略自然回收；存量"外置但无 `inline_content`"的记录，前端仍走原「内容已被临时空间清理（原 X）」降级；② 不新增接口字段（`truncated` / `artifact_size` / `size` 已有，副本是否被上限截断由 `size > artifact_size` 推断）；③ 不调整 `READ_TRUNCATE_KB`（模型当轮拿到的仍是完整结果，本次只动**记录/回灌**这条线）；④ 回灌预算由此只能容纳约 4 条 32 KB 结果——接受该后果（`TOOL_REPLAY_BUDGET_BYTES` 可配置，需要时调大）。
 
 ## 8. 宪章符合性
 
@@ -569,7 +600,7 @@
 
 - [x] 刷新页面后，历史消息展示工具卡片（内联内容可直接展开）
 - [x] 大结果点开才拉取；正文被清理时卡片降级不报错
-- [x] 下一轮 prompt 含上一轮短结果原文；大结果只在 systemPrompt 留下一行索引
+- [x] 下一轮 prompt 含上一轮短结果原文（2026-11-07 前的口径是"大结果只在 systemPrompt 留一行索引"，该索引段已于同日删除，见 §7.10 / §9.8）
 - [x] `history.jsonl` 内容与改动前一致（无工具痕迹、无回灌痕迹）
 - [x] 多用户/多会话隔离：路径从鉴权身份推导，恶意 `call_id` 无法越权
 - [x] 刷新后自动回到原会话；会话已删除时静默回空态
@@ -698,6 +729,30 @@
 - [x] 组件测试：`ProducedJsonView` +3（点击派发 / 修饰键放行 / 表格单元格）、`ProducedBell` +1（先关弹窗再上报）、`ToolCallList` +1（透传）、`MessageBubble` +1（工具卡片链路）
 - [x] 后端零改动（`viewUrl` 抽取、落盘、下发、`api/types.ts` 均不动）；**零新增依赖**
 - [x] 改动文件 ≤500 行；前端 `lint` / `typecheck` / `test` 全绿
+
+### 9.8 验收清单（2026-11-07 增量：工具结果的体积分流）
+
+**功能（`TR-04` / `TR-05` / `TR-08` / `TR-15` / `TR-18` / `TR-20` 作废 / `TR-21`，见 §7.10）**
+
+- [x] 结果 ≤ 内联阈值 → 原文内联；**恰好等于阈值**仍内联（判据是 `≤`）
+- [x] 内置工具超阈值 → 截断版内联 + 说明「完整内容未保存，要查看更多请重新调用该工具」，`truncated: true`，临时空间**无文件**、`artifact_size` 缺席、说明不含路径（`tool-result-split.spec.ts` / `tool-events.spec.ts`）
+- [x] MCP 等外部来源超阈值 → 截断版内联（**说明含副本路径**）+ 副本外置，`size` 为原始字节、`artifact_size` 为落盘字节、`summary` 齐备；副本可全量读回（`tool-events.spec.ts`）
+- [x] 副本超 2 MB → `artifact_size` 恰为上限且 `size` 更大（前端据此提示"已按单条上限截断"）
+- [x] 外置能力未装配 / 写失败 → 截断内联且说明改为「未保存」、**不含** `临时空间/` 路径、`summary` 不落（`tool-result-split.spec.ts` / `tool-events.spec.ts`）
+- [x] 回灌只走 messages：外部来源的截断版与内置工具同路径；被预算挤出的外置占位**带副本路径**，内置占位不带（`tool-context.spec.ts`）
+- [x] `systemExtra` 不含任何工具结果段（索引段删除）：主链路用例断言截断说明与副本路径都不出现在 `systemExtra`（`run-manager-tool-events.spec.ts`）
+- [x] 前端：卡片**只展示记录里的正文**，展开不发起任何请求；内置与外部来源各一例（`ToolCallList.truncated.spec.ts` 2 例）；有副本的旧数据（无 `inline_content`）显示"无结果内容"，不报错
+- [x] 提示文案的唯一判据是纯函数 `utils/tool-result-hint.ts`，三种情形逐条单测（未截断 / 未保存 / 副本在临时空间）
+- [x] 前端装配链不再有"结果加载器"：`ChatPanel` → `MessageList` → `MessageBubble` → `ToolCallList` 均无 `loadToolResult`；`useToolPanels` 只剩 `open` / `raw`
+- [x] `TOOL_INLINE_MAX_BYTES ≤ TOOL_REPLAY_BUDGET_BYTES` 不变式仍成立（`tool-context.spec.ts`）
+
+**门禁（宪章原则八 + 硬门禁）**
+
+- [x] 后端 `npm run typecheck` / `lint` / `test:all` 全绿（92 个测试文件 / 1195 例）
+- [x] 前端 `npm run lint`（0 error，5 条既有 warning 属甘特图）/ `typecheck` / `test` 全绿（114 个文件 / 1310 例）
+- [x] Prettier 格式检查全绿（两侧改动文件）
+- [x] 改动文件均 ≤500 行（`ToolCallList.vue` 480；提示判定抽为 `utils/tool-result-hint.ts` 后回到门禁内）；**零新增依赖**
+- [x] 接口**净减一个端点**：`GET /tool-calls/{call_id}` 删除（`TR-13` 作废），无新字段（`inline_content` 在外部来源开始出现属语义扩展）；`routes/threads.ts` 已无该路由，`readArtifact` / `resolveVerified` 零残留（lint + typecheck 守护），后端测试随之少 1 例
 
 ## 10. 增量登记（2026-10-08）：运行可恢复与跨服务追溯（**未实施**）
 

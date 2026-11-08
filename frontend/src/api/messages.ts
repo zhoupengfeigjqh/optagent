@@ -40,6 +40,8 @@ export interface SendMessageInput {
    * 而不是"前端少发一次请求"；标记不落历史、不出现在消息内容里。
    */
   skipIntentFocus?: boolean
+  /** 2026-11-07：用户显式选中的技能（`/技能名`）；缺省表示未选择 */
+  skill?: string
 }
 
 /**
@@ -49,11 +51,9 @@ export interface SendMessageInput {
  * 且 `model` / `attachments` 有 `minLength` / `maxItems` 约束。
  */
 export function buildSendMessageBody(input: SendMessageInput): SendMessageRequest {
-  // `skip_intent_focus`（013）是增量字段；`SendMessageRequest` 在 api/types.ts
-  // （约定不动该文件），故用交叉类型表达"比契约多一个可选字段"。
-  const body: SendMessageRequest & {
-    skip_intent_focus?: boolean
-  } = {
+  // `skip_intent_focus`（013）与 `skill`（2026-11-07）都是增量字段，已在
+  // `SendMessageRequest` 上登记为可选——契约与实现同源，不再用交叉类型旁路。
+  const body: SendMessageRequest = {
     content: input.content,
     thinking: input.thinking,
   }
@@ -76,6 +76,10 @@ export function buildSendMessageBody(input: SendMessageInput): SendMessageReques
   // 013：只在需要跳过时携带（后端 Schema 为 additionalProperties:false）
   if (input.skipIntentFocus === true) {
     body.skip_intent_focus = true
+  }
+  // 2026-11-07：显式技能（服务端据此只插该技能 + 自动跳过聚焦）
+  if (input.skill) {
+    body.skill = input.skill
   }
   return body
 }

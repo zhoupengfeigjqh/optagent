@@ -1,2 +1,0 @@
-{"role":"user","content":"用ocr解析一下","attachments":[{"dir":"临时空间","filename":"架构图.png"}],"id":"m_mw54xw8i_lmxh","ts":"2026-11-06T15:34:35.634Z","agent_name":"BOM数字人"}
-{"id":"m_mw54xnmi_085k","role":"assistant","content":"我现在对这张图片进行 OCR 识别。OCR 任务已提交，正在后台识别，识别完成后结果会自动返回。\n\n另外说明一下：我的职责是 BOM 数据校验与总 BOM 合并。如果您这次的目标是处理 BOM 文件（子 BOM zip 和总 BOM 目录 Excel），可以直接把文件路径发给我，我会先调用 bom_validate 做格式校验，再调用 bom_merge 生成总 BOM。","ts":"2026-11-06T15:34:35.634Z","status":"completed","usage":{"input_tokens":2712,"output_tokens":139},"duration_ms":11160,"agent_name":"BOM数字人"}

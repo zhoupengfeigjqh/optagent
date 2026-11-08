@@ -346,3 +346,40 @@ describe('MCP.json 的请求头 headers（2026-10-08）', () => {
     expect(bundle.mcpServers[0]?.headers).toEqual({});
   });
 });
+
+describe('System Prompt 的技能小节与按需读取引导（2026-11-07）', () => {
+  const HINT =
+    '如果需求与上述技能相关，请调用【read_skill】读取技能正文，或用【grep_skill】检索关键词定位，再回到【read_skill】进行精读。';
+
+  /** 在最小可加载目录上补 skills/{name}/SKILL.md */
+  function withSkills(name: string, skills: Record<string, string>): string {
+    const dir = writeAgent(name, []);
+    for (const [skillName, description] of Object.entries(skills)) {
+      const skillDir = path.join(dir, 'skills', skillName);
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        `---\nname: ${skillName}\ndescription: ${description}\n---\n正文\n`,
+        'utf8',
+      );
+    }
+    return dir;
+  }
+
+  it('有技能：索引之后追加一句按需读取引导（引导位于 System Prompt 末尾）', () => {
+    const bundle = loadAgentConfig(
+      withSkills('demo', { 'supplier-query': '当用户需要查询供应商信息时使用' }),
+    );
+
+    expect(bundle.systemPrompt).toContain('## 技能：supplier-query');
+    expect(bundle.systemPrompt).toContain('当用户需要查询供应商信息时使用');
+    expect(bundle.systemPrompt.endsWith(HINT)).toBe(true);
+  });
+
+  it('无技能：System Prompt 逐字等于 SOUL 正文，不追加任何引导', () => {
+    const bundle = loadAgentConfig(writeAgent('demo', []));
+
+    expect(bundle.systemPrompt).toBe('你是 demo。');
+    expect(bundle.systemPrompt).not.toContain(HINT);
+  });
+});

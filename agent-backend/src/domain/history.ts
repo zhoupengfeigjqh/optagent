@@ -2,7 +2,7 @@
  * history.jsonl 读写（FR-009/019/029 + 002 特性：消息元数据与反馈）。
  *
  * - 行格式两类：消息行（HistoryMessage：role/content + 可选元数据 id/ts/status/usage/
- *   duration_ms/attachments/error）与反馈行（{type:'feedback', message_id, value, ts}）
+ *   duration_ms/attachments/error/skill）与反馈行（{type:'feedback', message_id, value, ts}）
  * - 不落思考内容与工具调用信息：解析时白名单复制字段，未知字段一律丢弃
  * - 旧格式行（仅 role/content）兼容可读；反馈行不出现在 readAll/readRecent 结果中
  * - 追加经 per-thread Promise 链串行化，并发安全；单行一次 append 保证原子性
@@ -221,6 +221,8 @@ function parseLine(line: string): ParsedLine | undefined {
     if (atts.length > 0) msg.attachments = atts;
   }
   if (isErrorMeta(obj.error)) msg.error = { code: obj.error.code, message: obj.error.message };
+  // 2026-11-07：显式技能（`/技能名`，仅 user 行）——回放时据此复原"只含该技能"的提示词
+  if (typeof obj.skill === 'string' && obj.skill !== '') msg.skill = obj.skill;
   return { kind: 'message', message: msg };
 }
 

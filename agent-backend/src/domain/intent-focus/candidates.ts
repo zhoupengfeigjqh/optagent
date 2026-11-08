@@ -4,8 +4,9 @@
  * 题号用**不透明下标**（`s1..sN` / `c1..cN`）而不是 `name`：本体的行为名可能含空格、
  * 中文标点，甚至与技能名重名；用下标做键，响应 `answers[qid]` 的对齐永远成立。
  *
- * 题面只用 `title`（`title` 缺失/为空时降级为 `name`）：`op_type` 与描述长文都不进题面
- * （FR-022）——描述长文会把题面推到模型单题上限附近，且对"是否切题"没有增量信息。
+ * 行为题面按 `description → title → name` 降级（FR-022），统一截断到 40 字：
+ * 描述最能说明"这轮要做什么"，标题次之，标识符（英文 name）最后。
+ * `op_type` 与参数正文不进题面。
  *
  * 2026-11-06：能力候选**只来自 `behaviors[]`**；`functions[]` 与 `rules[]` 不再读取。
  */
@@ -145,6 +146,7 @@ export function buildCapabilityCandidates(
         qid: '',
         name: behavior.name,
         title: behavior.title,
+        description: behavior.description,
         ontologyId: ontology.ontologyId,
         ontologyName: ontology.ontologyName,
         index: order++,
@@ -160,16 +162,27 @@ export function buildCapabilityCandidates(
   };
 }
 
-/** 行为命题：键为 `qid`，题面只用 `title`（title 缺失/为空时降级为 `name`），极简命题式 */
+/** 行为命题：键为 `qid`，题面按 `description → title → name` 降级，极简命题式 */
 export function buildCapabilityQuestions(candidates: readonly CapabilityCandidate[]): QuestionMap {
   const questions: QuestionMap = {};
   for (const candidate of candidates) {
-    // 只留展示名：title 优先（更贴近"这轮要做什么"的语义），空则降级为 name。
-    // `name` 是英文标识符，对判定的区分度远不如中文 title，故能省则省。
-    const display = candidate.title.trim() !== '' ? candidate.title : candidate.name;
-    questions[candidate.qid] = noulQuestion(`需要行为「${trim(display)}」`);
+    questions[candidate.qid] = noulQuestion(`需要行为「${capabilityLabel(candidate)}」`);
   }
   return questions;
+}
+
+/**
+ * 行为题面的展示文本：**description → title → name** 逐级降级。
+ *
+ * 描述最能表达"这轮要做什么"，其次标题；`name` 是英文标识符，区分度最差，
+ * 只在前两者都为空时兜底。统一按 40 字截断（FR-022）。
+ */
+function capabilityLabel(candidate: CapabilityCandidate): string {
+  for (const text of [candidate.description, candidate.title, candidate.name]) {
+    const trimmed = text.trim();
+    if (trimmed !== '') return trim(trimmed);
+  }
+  return '';
 }
 
 /** 按 `batchSize` 切批（题号随候选固定，切批只影响请求体大小） */

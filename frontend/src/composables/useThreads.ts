@@ -24,7 +24,6 @@ import type {
   InteractionSnapshot,
   Message,
   ThreadSource,
-  ToolCallResult,
 } from '../api/types'
 import {
   HISTORY_DEFAULT_LIMIT,
@@ -82,13 +81,6 @@ export interface ThreadsStore {
   select(id: string): Promise<void>
   loadMore(): Promise<void>
   refresh(): Promise<void>
-  /**
-   * 拉取某次工具调用的**外置结果正文**（002 特性，卡片点开时才调用）。
-   *
-   * 内容已被临时空间清理时后端回 410，此处**不吞错**：由卡片把它渲染成
-   * "内容已清理"的降级态（TR-16），而不是错误提示。
-   */
-  toolCallResult(callId: string): Promise<ToolCallResult>
   /**
    * 清空当前选中并回到空态（002 特性）。
    *
@@ -342,15 +334,6 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     }
   }
 
-  async function toolCallResult(callId: string): Promise<ToolCallResult> {
-    const threadId = deps.activeThreadId.value
-    if (!threadId) {
-      // 未选中会话时不应触发懒加载（卡片只在详情渲染后才存在）
-      throw new Error('未选中会话，无法读取工具结果')
-    }
-    return deps.threads.toolCallResult(threadId, callId)
-  }
-
   /** 本地改写反馈：仅替换目标消息对象以触发最小范围重渲染（配合 `v-memo`）。 */
   function patchFeedback(messageId: string, value: FeedbackValue): void {
     messages.value = messages.value.map((message) =>
@@ -378,7 +361,6 @@ export function createThreadsStore(deps: ThreadsDeps): ThreadsStore {
     select,
     loadMore,
     refresh,
-    toolCallResult,
     clearActive,
     remove,
     rename,

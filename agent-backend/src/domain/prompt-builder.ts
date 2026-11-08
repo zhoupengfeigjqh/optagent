@@ -11,7 +11,7 @@
 import type { HistoryMessage } from '../types.js';
 import { POOL_MAX_MESSAGES } from './context-window.js';
 import { toLlmContent } from './message-format.js';
-import { formatArtifactIndex, formatReplayBlock, selectReplay } from './tool-context.js';
+import { formatReplayBlock, selectReplay } from './tool-context.js';
 import type { ToolCallRecord } from './tool-events.js';
 
 export interface PromptSources {
@@ -47,9 +47,10 @@ export interface PromptSources {
 /**
  * 组本轮 prompt。
  *
- * 工具结果**不整体注入**：内联结果按预算回灌到**对应轮次**的 assistant 消息
- * （历史侧，带位置感）；外置结果只在 systemExtra 留一行索引，模型按需
- * `read_file` 自取。投影每次现算、不落盘，故 `history.jsonl` 保持纯净，
+ * 工具结果**不整体注入**，且**只进 messages、不进 systemExtra**（2026-11-07）：
+ * `inline_content`（含外部来源的截断版）按预算回灌到**对应轮次**的 assistant 消息
+ * （历史侧，带位置感）；被预算挤出的降级为占位。截断版的末尾自带副本路径，
+ * 模型需要全文时 `read_file` 自取。投影每次现算、不落盘，故 `history.jsonl` 保持纯净，
  * 前端展示不受影响（原则五：单一权威源）。
  */
 export function buildPromptMessages(sources: PromptSources): {
@@ -81,16 +82,15 @@ export function buildPromptMessages(sources: PromptSources): {
     return { role: m.role, content };
   });
 
-  // FR-017：滚动摘要；002：外置工具结果索引；R11：后台计算结果清单。
-  // 这三者是"有内容才占位"——无内容时不占一个字符。
+  // FR-017：滚动摘要；R11：后台计算结果清单。
+  // 二者是"有内容才占位"——无内容时不占一个字符。
+  // 002 的工具结果**不在这里**：2026-11-07 起全部走 messages（见上），无索引段。
   // R18：当前时间——**恒占位**（每轮必注入），是唯一"一定有内容"的段
   //   ⇒ `systemExtra` 在正常轮次不再可能是 `undefined`（契约 R18 §17.2）。
   const parts: string[] = [];
   if (sources.summaryData.summary !== '') {
     parts.push(`以下是对话早期内容的摘要：\n${sources.summaryData.summary}`);
   }
-  const indexText = formatArtifactIndex(selection.index);
-  if (indexText !== '') parts.push(indexText);
   if (sources.producedText !== '') parts.push(sources.producedText);
   // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 仍是最末段（本轮指令紧邻用户消息）
   if (sources.nowText) parts.push(sources.nowText);

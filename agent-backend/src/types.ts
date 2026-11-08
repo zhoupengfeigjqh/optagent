@@ -40,7 +40,14 @@ export interface HistoryMessage {
   /** 整轮耗时（毫秒） */
   duration_ms?: number;
   /** @ 文件引用（仅 user） */
-  attachments?: FileReference[];
+  attachments?: FileReference[]
+  /**
+   * 本轮用户显式选中的技能名（`/技能名`，仅 user）。
+   *
+   * 落盘是为了**回放确定性**：刷新/重新生成时按它重新组装"只含该技能"的提示词，
+   * 而不是依赖历史里存一份展开后的文本。缺省 = 普通消息（走默认技能索引）。
+   */
+  skill?: string;
   /**
    * 本轮对话使用的数字人（user 与 assistant 成对写入，取自当轮实例）。
    * 一个会话可跨多个数字人（切换后在下一轮生效），旧格式行缺省。
@@ -291,6 +298,14 @@ export interface PoolKey {
 /** 数字人配置包（agent-instance 产出） */
 export interface AgentConfigBundle {
   agentName: string;
+  /**
+   * SOUL 正文（剥离 frontmatter、trim 后），**不含技能段**。
+   *
+   * 2026-11-07：显式技能轮次需要"SOUL + 仅选中技能"的请求级拼装，
+   * 因此把 SOUL 与技能块拆开保留；`systemPrompt` 仍是默认拼装结果（全部技能），
+   * 供未指定技能的轮次与既有断言使用。
+   */
+  soulBody: string;
   systemPrompt: string;
   enabledTools: string[];
   mcpServers: McpServerConfig[];

@@ -1,9 +1,10 @@
 /**
  * 意图聚焦实验脚本的公共装配：config + Laya 客户端 + 技能/本体加载。
  *
- * `intent-focus-experiment.ts` / `laya-stability.ts` / `capability-experiment.ts`
- * 三个脚本之前各自重复这段 bootstrap（`loadConfig` → `new LayaClient` → `agentDir` →
+ * `intent-focus-experiment.ts` / `capability-experiment.ts`
+ * 两个脚本之前各自重复这段 bootstrap（`loadConfig` → `new LayaClient` → `agentDir` →
  * `loadSkillHeaders` → `loadOntologyIndex` → `buildSkillCandidates`），抽到这里避免改一处漏两处。
+ * （原 `laya-stability.ts` 已于 2026-11-08 并入 `intent-focus-experiment.ts --runs N`。）
  */
 import path from 'node:path';
 import { loadConfig, type IntentFocusConfig } from '../../src/config.js';

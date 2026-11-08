@@ -78,7 +78,6 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
       refresh: vi.fn(async () => undefined),
       create,
       loadMore: noop,
-      toolCallResult: noop,
     },
     search: {
       isOpen: ref(false),

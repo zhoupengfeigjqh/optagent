@@ -15,8 +15,10 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { FileReference } from '../../api/types'
 import { mentionToken } from '../../composables/useFileMention'
+import { skillToken, stripSkillToken } from '../../composables/useSkillMention'
 import {
   MENTION_FILENAME_ATTR,
+  SKILL_NAME_ATTR,
   caretTextOffset,
   placeCaretAtEnd,
   serializeComposerText,
@@ -35,35 +37,45 @@ const props = withDefaults(
     sending?: boolean
     /** 已选引用（决定正文里哪些 `@文件名` 渲染成胶囊） */
     references?: FileReference[]
+    /** 已选技能名（决定正文里哪个 `/技能名` 渲染成胶囊；2026-11-07） */
+    skill?: string | null
     /** 占位文案 */
     placeholder?: string
     /** `@` 面板是否展开（展开时 Enter / 方向键 / Esc 交给上层处理，扩展属性） */
     mentionOpen?: boolean
+    /** `/技能` 面板是否展开（与 `mentionOpen` 互斥，优先处理） */
+    skillOpen?: boolean
   }>(),
   {
     disabled: false,
     sending: false,
     references: () => [],
-    placeholder: '输入消息：打 @ 可引用文件空间里的文件',
+    skill: null,
+    placeholder: '输入消息：打 @ 可引用文件，打 / 可选择技能',
     mentionOpen: false,
+    skillOpen: false,
   },
 )
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  send: [payload: { content: string; attachments: FileReference[] }]
+  send: [payload: { content: string; attachments: FileReference[]; skill: string | null }]
   stop: []
   'remove-reference': [reference: FileReference]
+  /** 点技能胶囊的 x（2026-11-07） */
+  'remove-skill': []
   /** US4：引用达上限时由面板上报 */
   'mention-limit': []
-  /** 文本与光标位置（供上层做 `@` 触发检测，扩展事件） */
+  /** 文本与光标位置（供上层做 `@` / `/` 触发检测，扩展事件） */
   'input-text': [payload: { value: string; caret: number }]
   /** `@` 面板展开时被拦截的按键（扩展事件） */
   'mention-key': [key: string]
+  /** `/技能` 面板展开时被拦截的按键（2026-11-07） */
+  'skill-key': [key: string]
 }>()
 
-/** `@` 面板展开时需要让位的按键。 */
-const MENTION_KEYS: ReadonlySet<string> = new Set([
+/** 面板展开时需要让位的按键（`@` 与 `/` 同款）。 */
+const PICKER_KEYS: ReadonlySet<string> = new Set([
   'ArrowDown',
   'ArrowUp',
   'ArrowLeft',
@@ -78,7 +90,13 @@ const CLOSE_ICON =
   'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" ' +
   'aria-hidden="true"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>'
 
-const canSend = computed(() => props.modelValue.trim() !== '' && !props.disabled && !props.sending)
+// 只选技能不写正文不算可发送（与服务端"content 非空"同口径）
+const canSend = computed(
+  () =>
+    stripSkillToken(props.modelValue, props.skill).trim() !== '' &&
+    !props.disabled &&
+    !props.sending,
+)
 
 /** 输入框实例（自适应高度测量、选区换算、插槽锚点） */
 const editorRef = ref<HTMLDivElement | null>(null)
@@ -130,7 +148,7 @@ function createMentionChip(reference: FileReference): HTMLElement {
   remove.addEventListener('click', (event) => {
     event.preventDefault()
     event.stopPropagation()
-    removeChip(chip, reference)
+    removeChip(chip)
   })
 
   chip.appendChild(remove)
@@ -143,10 +161,19 @@ function renderDraft(text: string): void {
   if (!editor) return
 
   const tokens = props.references.map(mentionToken)
+  const skillTokens = props.skill ? [skillToken(props.skill)] : []
   const fragment = document.createDocumentFragment()
-  for (const segment of splitComposerSegments(text, tokens)) {
+  for (const segment of splitComposerSegments(text, tokens, skillTokens)) {
     if (segment.kind === 'text') {
       fragment.appendChild(document.createTextNode(segment.text))
+      continue
+    }
+    if (segment.kind === 'skill') {
+      fragment.appendChild(
+        props.skill && segment.token === skillToken(props.skill)
+          ? createSkillChip(props.skill)
+          : document.createTextNode(segment.token),
+      )
       continue
     }
     const reference = referenceOfToken(segment.token)
@@ -158,11 +185,40 @@ function renderDraft(text: string): void {
   autosize()
 }
 
-/** 点胶囊的 x：删节点 → 光标落回原位 → 交回文本层（引用由 `handleInput` 反向同步）。 */
-function removeChip(chip: HTMLElement, reference: FileReference): void {
+/**
+ * 造一枚技能胶囊（2026-11-07）：与引用胶囊**同款样式**，差异只在属性与文案。
+ * 文本即 `/技能名` 标记，移除按钮不参与序列化。
+ */
+function createSkillChip(name: string): HTMLElement {
+  const chip = document.createElement('span')
+  chip.className = 'composer__mention'
+  chip.setAttribute('contenteditable', 'false')
+  chip.setAttribute(SKILL_NAME_ATTR, name)
+  chip.textContent = skillToken(name)
+
+  const remove = document.createElement('button')
+  remove.type = 'button'
+  remove.className = 'composer__mention-remove'
+  remove.setAttribute('aria-label', `移除技能 ${name}`)
+  remove.innerHTML = CLOSE_ICON
+  remove.addEventListener('mousedown', (event) => event.preventDefault())
+  remove.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    removeChip(chip)
+  })
+
+  chip.appendChild(remove)
+  return chip
+}
+
+/** 点胶囊的 x：删节点 → 光标落回原位 → 交回文本层（引用/技能由上层反向同步）。 */
+function removeChip(chip: HTMLElement): void {
   const editor = editorRef.value
   if (!editor) return
 
+  const skillName = chip.getAttribute(SKILL_NAME_ATTR)
+  const filename = chip.getAttribute(MENTION_FILENAME_ATTR)
   const parent = chip.parentNode
   const index = parent ? Array.from(parent.childNodes).indexOf(chip) : 0
   chip.remove()
@@ -178,7 +234,12 @@ function removeChip(chip: HTMLElement, reference: FileReference): void {
 
   editor.focus()
   onInput()
-  emit('remove-reference', reference)
+  if (skillName !== null) {
+    emit('remove-skill')
+    return
+  }
+  const reference = filename === null ? null : referenceOfToken(`@${filename}`)
+  if (reference) emit('remove-reference', reference)
 }
 
 function onInput(): void {
@@ -234,12 +295,22 @@ function onSend(): void {
   if (!canSend.value) {
     return
   }
-  emit('send', { content: props.modelValue.trim(), attachments: [...props.references] })
+  emit('send', {
+    content: props.modelValue.trim(),
+    attachments: [...props.references],
+    skill: props.skill ?? null,
+  })
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // 两个面板互斥；`/技能` 优先（它只会由最近一次输入打开）
+  if (props.skillOpen && PICKER_KEYS.has(event.key)) {
+    event.preventDefault()
+    emit('skill-key', event.key)
+    return
+  }
   // `@` 面板展开时，方向键/Enter/Esc 优先用于面板导航（US4）
-  if (props.mentionOpen && MENTION_KEYS.has(event.key)) {
+  if (props.mentionOpen && PICKER_KEYS.has(event.key)) {
     event.preventDefault()
     emit('mention-key', event.key)
     return
@@ -267,11 +338,16 @@ onMounted(() => {
 // 外部改写草稿（插入标记、点 x、清空、切换会话）才重建 DOM；
 // 用户敲字的回环（DOM 文本 === 草稿）一律跳过，避免销毁光标与输入法组合态。
 watch(
-  () => [props.modelValue, props.references] as const,
+  () => [props.modelValue, props.references, props.skill] as const,
   () => {
     const editor = editorRef.value
     if (!editor) return
-    if (serializeComposerText(editor) === props.modelValue) {
+    const renderedSkill =
+      editor.querySelector(`[${SKILL_NAME_ATTR}]`)?.getAttribute(SKILL_NAME_ATTR) ?? null
+    if (
+      serializeComposerText(editor) === props.modelValue &&
+      renderedSkill === (props.skill ?? null)
+    ) {
       void nextTick(autosize)
       return
     }
@@ -289,6 +365,8 @@ watch(
       渲染位置不影响布局，所以这里不再让它参与流内排版（原先它会把输入框顶下去）。
     -->
     <slot name="mention" :references="references" :anchor="editorRef" />
+    <!-- `/技能` 与 `@` 同款：插槽只出数据与锚点，面板本体是 fixed 浮层 -->
+    <slot name="skill" :anchor="editorRef" />
 
     <div
       ref="editorRef"

@@ -28,6 +28,7 @@ import { createAgentsStore, type AgentsStore } from './useAgents'
 import { useEmptyDataHint, type EmptyDataHint } from './useEmptyDataHint'
 import { createChatStreamStore, type ChatStreamStore } from './useChatStream'
 import { createFileMentionStore, type FileMentionStore } from './useFileMention'
+import { createSkillMentionStore, type SkillMentionStore } from './useSkillMention'
 import { createModelsStore, type ModelsStore } from './useModels'
 import type { TermNormalizeApi } from '../api/term-normalize'
 import { createTermNormalizeApi } from '../api/term-normalize'
@@ -75,6 +76,11 @@ export interface AppSession {
   readonly models: ModelsStore
   readonly uploads: UploadsStore
   readonly mention: FileMentionStore
+  /**
+   * `/技能名` 选择（2026-11-07）：与 `mention` 同层装配——两者都只服务输入区的标记落字，
+   * 不参与会话/运行态；清单按"当前数字人"懒加载，切换时清空。
+   */
+  readonly skillMention: SkillMentionStore
   readonly workspace: WorkspaceStore
   /**
    * 空数据新手引导（014）：只在切换数字人成功后判定，气泡挂在输入区「+」上。
@@ -204,6 +210,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   const models = createModelsStore({ models: modelsApi, storage })
   const uploads = createUploadsStore({ files: filesApi, toast })
   const mention = createFileMentionStore({ workspace, toast })
+  // `/技能` 只依赖数字人接口（清单作用域由服务端"当前选中"决定），与文件空间无关
+  const skillMention = createSkillMentionStore({ agents: agentsApi })
 
   // 惰性 computed：`agents` 在下方才创建，getter 仅在首次访问时求值（打破声明顺序，无环）
   const currentAgentName = computed(() => agents.currentAgent.value?.agent_name ?? null)
@@ -272,6 +280,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
       threads.startNew()
       // 012：上传记录属于上一个数字人的数据域，切换即清（终态清空，进行中的按 FR-013 保留）
       uploads.clear()
+      // 2026-11-07：技能清单与已选技能同样属于上一个数字人——清空缓存，下次打开面板再拉
+      skillMention.reset()
       // 后台产出同样是数字人级的（后端按当前作用域定位产出目录）：先清旧条目/旧未读数，
       // 再按新作用域重拉。铃铛是常驻组件、只在挂载时拉一次，这里不补就一直是上一个数字人的。
       produced.clear()
@@ -295,6 +305,7 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     models,
     uploads,
     mention,
+    skillMention,
     workspace,
     emptyHint,
     search,

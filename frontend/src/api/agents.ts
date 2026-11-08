@@ -10,6 +10,7 @@ import type {
   AgentListItem,
   CurrentAgentResponse,
   CurrentMcpResponse,
+  CurrentSkillsResponse,
   DigitalHuman,
   ExitAgentResponse,
   SelectAgentResponse,
@@ -29,6 +30,12 @@ export interface AgentsApi {
   current(): Promise<CurrentAgentResponse>
   /** `GET /api/agents/current/mcp` → 实例未创建时全部为 `unknown`（尚无连接结果） */
   currentMcp(): Promise<CurrentMcpResponse>
+  /**
+   * `GET /api/agents/current/skills`（2026-11-07）→ 当前数字人的技能清单。
+   *
+   * 输入区 `/` 面板的数据源；作用域恒为服务端"当前选中数字人"，前端不传 agent_name。
+   */
+  skills(): Promise<CurrentSkillsResponse>
   /**
    * `POST /api/agents/current/mcp/warm`（2026-10-18）→ 显式预热：
    * 让后端为当前数字人**建实例并开始建连**，有界等到落定后返回同形快照（幂等）。
@@ -53,6 +60,7 @@ export function createAgentsApi(client: HttpClient): AgentsApi {
     exit: () => client.post<ExitAgentResponse>('/api/agents/current/exit'),
     current: () => client.get<CurrentAgentResponse>('/api/agents/current'),
     currentMcp: () => client.get<CurrentMcpResponse>('/api/agents/current/mcp'),
+    skills: () => client.get<CurrentSkillsResponse>('/api/agents/current/skills'),
     warmMcp: () => client.post<CurrentMcpResponse>('/api/agents/current/mcp/warm'),
     subscribeMcp: (onSnapshot) => {
       const source = new EventSource(`${client.baseUrl}/api/agents/current/mcp/events`)

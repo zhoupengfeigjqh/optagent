@@ -42,6 +42,13 @@ describe('serializeComposerText —— DOM 转草稿文本', () => {
   it('块级包裹（浏览器兜底路径）按行补换行', () => {
     expect(serializeComposerText(editor('<div>甲</div><div>乙</div>'))).toBe('甲\n乙\n')
   })
+
+  it('技能胶囊还原为 `/技能名` 标记（2026-11-07）', () => {
+    const html =
+      '<span contenteditable="false" data-skill-name="supplier-query">/supplier-query' +
+      '<button aria-label="移除技能 supplier-query"></button></span> 查一下'
+    expect(serializeComposerText(editor(html))).toBe('/supplier-query 查一下')
+  })
 })
 
 describe('splitComposerSegments —— 按标记切段', () => {
@@ -62,6 +69,23 @@ describe('splitComposerSegments —— 按标记切段', () => {
   it('没有标记时整段返回；空文本返回空段列表', () => {
     expect(splitComposerSegments('纯文本', [])).toEqual([{ kind: 'text', text: '纯文本' }])
     expect(splitComposerSegments('', ['@plan.csv'])).toEqual([])
+  })
+
+  it('技能标记落成 skill 段，与 mention 段各自独立（2026-11-07）', () => {
+    expect(
+      splitComposerSegments('/supplier-query 查一下 @plan.csv 的账期', ['@plan.csv'], ['/supplier-query']),
+    ).toEqual([
+      { kind: 'skill', token: '/supplier-query' },
+      { kind: 'text', text: ' 查一下 ' },
+      { kind: 'mention', token: '@plan.csv' },
+      { kind: 'text', text: ' 的账期' },
+    ])
+  })
+
+  it('技能标记缺省时行为与只有 `@` 时逐字一致（存量调用点不受影响）', () => {
+    expect(splitComposerSegments('看下 @plan.csv', ['@plan.csv'])).toEqual(
+      splitComposerSegments('看下 @plan.csv', ['@plan.csv'], []),
+    )
   })
 })
 

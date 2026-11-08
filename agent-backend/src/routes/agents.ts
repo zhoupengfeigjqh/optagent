@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import type { AppContext } from '../context.js';
 import { getAgentDetail, listAgents } from '../domain/agent-catalog.js';
+import { resolveAgentScope } from '../domain/agent-scope.js';
 import { AgentConfigError, loadAgentConfig } from '../domain/agent-instance.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { migrateUserDataLayout } from '../domain/data-migration.js';
@@ -55,6 +56,31 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
   app.get('/api/agents', async () => {
     const userId = getCurrentUser().userId;
     return listAgents(ctx.config.optAgentRoot, userId, catalogLogger);
+  });
+
+  /**
+   * 当前数字人的技能清单（2026-11-07）：输入区 `/` 面板的数据源。
+   *
+   * 只读、作用域恒为服务端"当前选中数字人"（前端不传 agent_name，与其余端点同一纪律）；
+   * 与对话侧校验同源（`getAgentDetail` → `loadSkills`），因此"面板里能选到"与
+   * "发送时能通过校验"不会漂移。
+   */
+  app.get('/api/agents/current/skills', async () => {
+    const userId = getCurrentUser().userId;
+    const { agentName } = resolveAgentScope(ctx, userId, {
+      notSelectedMessage: '请先选定数字人再查看技能',
+      route: 'GET /api/agents/current/skills',
+    });
+    const detail = getAgentDetail(ctx.config.optAgentRoot, userId, agentName, catalogLogger);
+    if (!detail)
+      throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${agentName}`);
+    return {
+      agent_name: detail.agent_name,
+      skills: detail.skills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+      })),
+    };
   });
 
   app.get('/api/agents/:name', async (req) => {

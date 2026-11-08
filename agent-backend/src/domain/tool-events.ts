@@ -4,10 +4,15 @@
  * 落点与生命周期（与 history.jsonl 同层的**会话私有数据**）：
  * - `user-data/{数字人}/threads/{thread_id}/tool-events.jsonl`：一行一次事件（start 记 running、
  *   end 记终态），读取时按 `call_id` 合并（后者覆盖前者，与反馈行同语义）
- * - 结果 ≤ 内联阈值：原文存本行 `inline_content`
- * - 结果 > 内联阈值：正文外置到「**该数字人**的 临时空间/{thread_id}_toolresult_{call_id}.txt」，
- *   本行只记 `artifact_size` + `summary`（**不记路径**，读取时按同一函数重算）
- * - 009 归属：数字人是**必填入参**（`threadDir` 唯一解析），外置正文读写口亦按（用户，数字人）取用
+ * - `inline_content` **任何分支都只存前 `TOOL_INLINE_MAX_BYTES`**（超阈值时末尾附截断说明）
+ * - **内置工具**超阈值：截断内联，**不落副本**——这类结果能用原工具按更小范围/offset 重取
+ * - **MCP 等外部来源**超阈值：截断内联（尾注给出副本路径）+ 正文外置到「**该数字人**的
+ *   临时空间/{thread_id}_toolresult_{call_id}.txt」，另记 `artifact_size` + `summary`
+ *   （**不记路径**，展示/回灌时按同一函数重算）——外部结果可能无法复现，必须留存
+ * - 副本**只写不代读**（2026-11-08）：模型要全文时用 `read_file` 走文件工具，前端只展示
+ *   记录里的正文，故本模块没有读口
+ * - `size` 恒为**原始结果**字节数；`size > artifact_size` 即落盘正文被 2MB 上限截断
+ * - 009 归属：数字人是**必填入参**（`threadDir` 唯一解析），外置正文写口亦按（用户，数字人）取用
  * - 结果里的视图链接（2026-10-10）：抽成 `view_links` sidecar 存本行，
  *   **与正文分离**——不进回灌预算，且正文外置时入口照样可用（见 `view-links.ts`）
  *
@@ -17,29 +22,17 @@
  * - 读取白名单复制字段，未知字段丢弃
  *
  * 与 history.jsonl 不同的口径：
- * - 本文件**参与上下文回灌**（见 tool-context）：短结果原文按预算拼进 messages，
- *   外置结果只在 systemPrompt 留一行索引——因此它不属于"不落历史"的范畴
+ * - 本文件**参与上下文回灌**（见 tool-context）：`inline_content`（含截断版）按预算
+ *   拼进 messages，故它不属于"不落历史"的范畴
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { disposeChain } from './chain.js';
-import { SPACE_TMP, threadDir } from './dirs.js';
-import {
-  TOOL_ARTIFACT_MAX_BYTES,
-  TOOL_INLINE_MAX_BYTES,
-  artifactFileName,
-  summarizeResult,
-  truncateToBytes,
-} from './tool-result.js';
+import { threadDir } from './dirs.js';
+import { planSplit, planTruncatedInline, type ToolArtifactAccess } from './tool-result-split.js';
 import { extractViewLinks, type ViewLink } from './view-links.js';
 
-/** 外置正文的读写口（装配层用 FileAccess 实现；缺省时超阈值结果退化为截断内联） */
-export interface ToolArtifactAccess {
-  /** 写临时空间文件（文件名须 `{threadId}_` 前缀，由 FileAccess 强制） */
-  write(threadId: string, filename: string, content: string): Promise<string>;
-  /** 校验并定位（白名单 + 符号链接 + 存在性）；读取方自行 readFile */
-  resolveVerified(relPath: string): { relPath: string; abs: string };
-}
+export type { ToolArtifactAccess } from './tool-result-split.js';
 
 export interface ToolEventsLogger {
   warn(msg: string): void;
@@ -63,14 +56,15 @@ export interface ToolCallRecord {
   status: 'running' | 'success' | 'error';
   startedAt: string;
   durationMs?: number;
-  /** 结果字节数（结果产生后才有） */
+  /** 原始结果字节数（结果产生后才有；与落盘尺寸无关） */
   size?: number;
-  /** 内联正文（结果未外置时） */
+  /** 记录内联正文（超阈值时为**截断版**，末尾带截断说明，见 `truncated`） */
   content?: string;
-  /** 外置正文的字节数（有值 = 正文在临时空间，需按需拉取） */
+  /** 外置正文的字节数（有值 = 临时空间里有副本，需按需拉取）。**仅外部来源（MCP）**会出现 */
   artifactSize?: number;
+  /** 记录正文被截断（只保存了一部分）；`size > artifactSize` 表示副本本身也被上限截断 */
   truncated?: boolean;
-  /** 规则提取的摘要（外置结果的索引行与卡片标题用） */
+  /** 规则提取的摘要（仅外置结果的卡片标题用） */
   summary?: string;
   /** 入参短标量摘要（原文不落盘） */
   argsDigest?: Record<string, string>;
@@ -78,7 +72,7 @@ export interface ToolCallRecord {
    * 结果里的视图链接（2026-10-10，同步侧视图入口）：服务给的地址 + 可选名称。
    *
    * 与结果正文**分离存放**：正文会进上下文回灌预算（`tool-context`），
-   * sidecar 不进；正文外置（>64KB）时入口也照样可用（随详情下发）。
+   * sidecar 不进；正文外置时入口也照样可用（随详情下发）。
    */
   viewLinks?: ViewLink[];
 }
@@ -205,7 +199,7 @@ export class ToolEventStore {
     });
   }
 
-  /** 体积分流：≤ 内联阈值存原文；> 阈值外置正文（外置失败则退化为截断内联） */
+  /** 体积分流：策略在 `tool-result-split.ts`，这里只把计划落到事件行并写盘。 */
   private async splitResult(
     userId: string,
     agentName: string,
@@ -213,37 +207,37 @@ export class ToolEventStore {
     input: AppendEndInput,
     line: ToolEventLine,
   ): Promise<void> {
-    if (line.size !== undefined && line.size <= TOOL_INLINE_MAX_BYTES) {
-      line.inline_content = input.resultText;
-      return;
-    }
-    const bounded = truncateToBytes(input.resultText, TOOL_ARTIFACT_MAX_BYTES);
-    line.truncated = bounded.truncated;
-    line.summary = summarizeResult(bounded.text);
+    const size = line.size ?? Buffer.byteLength(input.resultText, 'utf8');
     const access = this.access(userId, agentName);
-    if (!access) {
-      // 未装配外置能力：降级为截断内联（不丢记录，只丢超长部分）
-      const fallback = truncateToBytes(input.resultText, TOOL_INLINE_MAX_BYTES);
-      line.inline_content = fallback.text;
-      line.truncated = true;
-      line.size = Buffer.byteLength(fallback.text, 'utf8');
-      return;
-    }
+    const plan = planSplit({
+      name: line.name,
+      resultText: input.resultText,
+      size,
+      canArtifact: access !== undefined,
+      threadId,
+      callId: input.callId,
+    });
+
+    if (plan.inlineContent !== undefined) line.inline_content = plan.inlineContent;
+    if (plan.truncated !== undefined) line.truncated = plan.truncated;
+    if (plan.summary !== undefined) line.summary = plan.summary;
+    if (!plan.artifact || !access) return;
+
     try {
-      const filename = artifactFileName(threadId, input.callId);
-      await access.write(threadId, filename, bounded.text);
-      line.artifact_size = Buffer.byteLength(bounded.text, 'utf8');
-      line.size = line.artifact_size;
+      await access.write(threadId, plan.artifact.filename, plan.artifact.content);
+      // `size` 不随后改动：它恒为原始结果字节数（落盘尺寸另记 `artifact_size`）
+      line.artifact_size = plan.artifact.size;
     } catch (err: unknown) {
       this.opts.logger?.warn(
         `tool-events 外置正文写入失败，退化为截断内联（agent=${agentName} thread=${threadId} call=${input.callId}）：${
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      const fallback = truncateToBytes(input.resultText, TOOL_INLINE_MAX_BYTES);
-      line.inline_content = fallback.text;
+      // 副本没写成：正文换成"未保存"版（不能给一个不存在的路径），摘要随之无意义
+      const fallback = planTruncatedInline(input.resultText, size);
+      if (fallback.inlineContent !== undefined) line.inline_content = fallback.inlineContent;
       line.truncated = true;
-      line.size = Buffer.byteLength(fallback.text, 'utf8');
+      delete line.summary;
     }
   }
 
@@ -325,39 +319,6 @@ export class ToolEventStore {
       else grouped.set(record.messageId, [record]);
     }
     return grouped;
-  }
-
-  /**
-   * 读取外置正文全文。
-   *
-   * 路径由 `{threadId, callId}` **重新推导**（不读事件行里的任何路径），
-   * 因此数据被篡改也无法越权；`resolveVerified` 再兜一层白名单校验。
-   * 返回 undefined 表示文件已不存在（过期清理或用户删除）。
-   */
-  async readArtifact(
-    userId: string,
-    agentName: string,
-    threadId: string,
-    callId: string,
-  ): Promise<{ content: string; size: number } | undefined> {
-    const access = this.access(userId, agentName);
-    if (!access) return undefined;
-    const relPath = `${SPACE_TMP}/${artifactFileName(threadId, callId)}`;
-    let abs: string;
-    try {
-      abs = access.resolveVerified(relPath).abs;
-    } catch {
-      return undefined;
-    }
-    try {
-      const buf = await fs.promises.readFile(abs);
-      // 读取即刷新访问时间：临时空间 30 天清理以"最近访问"为准，看过的结果不会被误回收
-      const now = new Date();
-      await fs.promises.utimes(abs, now, now).catch(() => {});
-      return { content: buf.toString('utf8'), size: buf.length };
-    } catch {
-      return undefined;
-    }
   }
 
   /** 读取文件全部合法行；坏行跳过告警，整体损坏备份重建（与 history.jsonl 同口径） */

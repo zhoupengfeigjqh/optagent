@@ -4,7 +4,7 @@
  * 守住的边界：
  * - 非本体技能一律可聚焦；本体技能只有 `ontology_id` 命中索引才可聚焦（否则不评分）；
  * - 行为只来自入选技能引用的本体，同本体多技能只收集一次；
- * - 题面只用 `title`（缺失降级 `name`），不含 `op_type`；题号 `s1..` / `c1..` 唯一且连续；
+ * - 行为题面按 `description → title → name` 降级，不含 `op_type`；题号 `s1..` / `c1..` 唯一且连续；
  * - 总数与单批上限都按配置生效。
  *
  * 2026-11-06：候选只来自 `behaviors[]`，题面标签固定为「行为」。
@@ -45,8 +45,18 @@ function ontology(overrides: Partial<OntologyDefinition> = {}): OntologyDefiniti
     scenarioId: '2',
     scenarioName: '生产调度',
     behaviors: [
-      { name: 'CreatePurchaseRecord', title: '创建原材料采购单', opType: 'command' },
-      { name: 'QueryPurchaseRecords', title: '查询原材料采购单信息', opType: 'query' },
+      {
+        name: 'CreatePurchaseRecord',
+        title: '创建原材料采购单',
+        description: '创建一笔新的原材料采购记录',
+        opType: 'command',
+      },
+      {
+        name: 'QueryPurchaseRecords',
+        title: '查询原材料采购单信息',
+        description: '',
+        opType: 'query',
+      },
     ],
     ...overrides,
   };
@@ -127,17 +137,43 @@ describe('buildCapabilityCandidates', () => {
     expect(result.candidates[0]).not.toHaveProperty('kind');
   });
 
-  it('题面只用 title，不含 name 与 op_type；title 缺失时降级为 name', () => {
+  it('题面按 description → title → name 降级，不含 op_type', () => {
     const result = buildCapabilityCandidates(skills, index([ontology()]), 96);
     const questions = buildCapabilityQuestions(result.candidates);
-    expect(questions.c1!.instructions).toBe('需要行为「创建原材料采购单」');
-    // op_type（command）不进题面
+    // 有描述 → 用描述
+    expect(questions.c1!.instructions).toBe('需要行为「创建一笔新的原材料采购记录」');
+    // 描述为空 → 用 title
+    expect(questions.c2!.instructions).toBe('需要行为「查询原材料采购单信息」');
+    // op_type（command / query）不进题面
     expect(JSON.stringify(questions)).not.toContain('command');
-    // title 缺失 → 降级为 name（英文标识符）
-    const noTitle = buildCapabilityQuestions([
-      { qid: 'x1', name: 'DoThing', title: '', ontologyId: '1', ontologyName: null, index: 0 },
+    // description 与 title 都空 → 用 name（英文标识符）
+    const onlyName = buildCapabilityQuestions([
+      {
+        qid: 'x1',
+        name: 'DoThing',
+        title: '',
+        description: '',
+        ontologyId: '1',
+        ontologyName: null,
+        index: 0,
+      },
     ]);
-    expect(noTitle.x1!.instructions).toBe('需要行为「DoThing」');
+    expect(onlyName.x1!.instructions).toBe('需要行为「DoThing」');
+  });
+
+  it('题面文本统一截断到 40 字', () => {
+    const questions = buildCapabilityQuestions([
+      {
+        qid: 'x1',
+        name: 'N',
+        title: 'T',
+        description: '描'.repeat(60),
+        ontologyId: '1',
+        ontologyName: null,
+        index: 0,
+      },
+    ]);
+    expect(questions.x1!.instructions).toBe(`需要行为「${'描'.repeat(40)}」`);
   });
 
   it('非本体技能不贡献行为候选', () => {

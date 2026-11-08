@@ -116,7 +116,7 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 
 | 取舍 | 必要性 | 被否决的更简方案 |
 |---|---|---|
-| sidecar 存 `tool-events.jsonl` 行（与正文分离） | 正文外置时入口仍可用；不挤占回灌预算 | 只在前端解析正文（正文 >64KB 外置后**拿不到值**——正是本次要解决的问题） |
+| sidecar 存 `tool-events.jsonl` 行（与正文分离） | 正文外置时入口仍可用；不挤占回灌预算 | 只在前端解析正文（正文外置后**拿不到值**——正是本次要解决的问题） |
 | 后端只做"形态卫生"，scheme 合法性只在前端判 | 单一漂移点（`TR-42`） | 后端也判一遍（前端改规则后，记录里还留着按老规则挑出的值） |
 | 名称缺省 = 显示地址，不推断、不编号 | 不假装有名字（原则九）；地址永远可核对 | 从 URL 末段取名 / 「视图 1/2」占位（顺序一漂就变假） |
 | 入口行放正文之后、操作区之前 | 它是"正文的附件"，不是"对消息的操作" | 并入 `MessageActions`（语义错位） |
@@ -196,6 +196,7 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T056 `agent-backend/src/infra/mcp/mcp-tool-adapter.ts`：成功分支接线 `mcpResultText(result, { logger, service, tool })`，删除 `JSON.stringify(result)`（**净 +3 行**：1 行 import + 2 行接线）
 - [x] T057 `agent-backend/src/domain/tool-result.ts`：注释明确它是"模型可见 + 落盘"的**唯一实现**（无行为变化）
 - [x] T058 新增 `agent-backend/scripts/backfill-view-links.ts`（199 行）：干跑默认 / `--apply` 写盘 / 临时文件 + 原子改名 / 幂等 / 复用运行时判据 / 失败非零退出码
+  - **2026-11-08 修订：该脚本已删除。** 009（数字人数据隔离）把落点从 `user-data/threads/{tid}` 改为 `user-data/{agent}/threads/{tid}` 后，脚本仍按旧参数调用 `userDataDir` / `threadDir`，干跑即 `ERR_INVALID_ARG_TYPE`（`path.join` 收到 `undefined`）；且存量 `tool-events.jsonl` 中仅 4/196 行含 `view_links`，回填价值已消失。`unwrapMcpEnvelopeText()` 与 `mcp-result-text.spec.ts` 的历史信封用例**保留**（当前无生产调用），将来需处理存量记录时可直接复用。
 
 ## Phase 3: 测试（宪章原则三）
 
@@ -296,4 +297,36 @@ MUST 同名同目录测试，覆盖属性传递、事件触发、边界条件（
 - [x] T088 后端测试：`tests/unit/mcp-manager.spec.ts` +5 例（挂起超时判 failed / 迟到连接关闭 / 未发起立即 true / 飞行中落定 true / 超时 false 且不改状态）；新增 `tests/integration/agent-mcp-warm.spec.ts` 5 例（未选中 / 只读不建实例 / 预热出结果 / 幂等同一实例 / GET 与 POST 同形）
 - [x] T089 前端：`api/agents.ts` 新增 `warmMcp()`（复用 `CurrentMcpResponse`，`types.ts` 零新增）；`useAgents.ts` 新增 `mcpPending` / `warmMcp` / `ensureMcpReady`，快照统一走 `applyMcpSnapshot()` 做 `agent_name` 归属校验，切换时先清空，`loadCurrent` 末尾预热；新增 `composables/useMcpReadyGate.ts`（工厂 + 注入包装，10s 上限、超时提示）；`useChatPanel.ts` 在 `chat.send` 前 `await mcpReady.waitMcpReady()` 并加 `preparing` 幂等锁（文件 499 行）；`ChatPanel.vue` 等待态文案（`role="status"`）+ 禁用输入与两个发送入口
 - [x] T090 前端测试与门禁：新增 `useMcpReadyGate.spec.ts` 5 例；`useAgents.spec.ts` +5 例（预热入口 / `mcpPending` / 他人快照丢弃 / 切换不残留 / 轮询就绪 / 超时 false）；`useChatPanel.retry.spec.ts` +4 例（先等后发 / 无灰零等待 / 等待中重复点击只发一次 / 超时放行 + 提示）；`useMcpReadyGate.ts` 登记 `vite.config.ts` 模块阈值；门禁实测：后端 `typecheck` / `lint` / `test:all`（58 文件）全绿，前端 `lint` / `typecheck` / `test`（80 文件）/ `test:coverage` 全绿
+
+---
+
+## 增量（2026-11-07）：工具结果的体积分流（`TR-04` / `TR-05` / `TR-08` / `TR-15` / `TR-18` 修订，`TR-20` 作废）
+
+**来源**：同日的两条用户反馈。① 内置工具（`read_file` / `grep_files` / `list_dir`）读大文件时，正文被一律外置，堆出一批"能用原工具按 `offset` 重取、却没人会翻"的副本；② 外部来源（MCP）虽必须留存副本，但记录里不留任何正文，模型下一轮只能靠系统提示词里的索引段知道路径——要求外部结果同样截断保存并在末尾给出副本位置，且回灌只进 messages、删掉提示词里那一段。
+
+**设计取舍**
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 内置工具超阈值**只截断内联**，不落副本 | 结果可用同一工具按更小范围 / `offset` 重取；副本无信息增量且污染临时空间 | 一律外置（旧行为，即本次要修的现状） |
+| 外部来源**既留副本、也留截断正文** | 重取可能有副作用或无法复现（副本必须留）；只留 `summary` 则模型在 messages 里既看不到内容也看不到路径 | 只留索引行（旧行为，模型要多跳一步） |
+| 删除 `systemExtra` 的索引段，回灌只走 messages | 截断正文已就近进 messages 且自带路径；索引段是同一事实的第二套口径 | 保留索引段（两处维护、可能不一致） |
+| 被预算挤出的**占位行带副本路径** | 索引段删除后，这是模型唯一还能知道"可 `read_file` 取回"的来源 | 占位只报体积（外置结果彻底失联） |
+| 截断说明由 `withRecordTruncationNote` 唯一实现 | 有副本给路径 / 无副本说"未保存"，两种去向同一处收口，避免文案分叉 | 三条分支各写一句 |
+| 内联阈值 64 KB → 32 KB | 128 KB 回灌预算下，64 KB 时两条大结果即吃光预算 | 保持 64 KB |
+| 分流策略抽成 `domain/tool-result-split.ts` | `tool-events.ts` 逼近 500 行且混着"算什么"与"写什么"（原则二） | 继续写在 `tool-events.ts` 里 |
+| 前端**先显示截断版**再拉全文 | 记录里已有正文，没必要让用户盯着空白等副本；410 时也还剩前 32 KB | 保持"有副本就空白加载" |
+| **被否决**：回溯迁移存量副本 | 存量按"30 天未访问"策略自然回收；重算要动历史文件且可能误删 MCP 副本 | 一次性删除/搬迁 |
+
+**任务**
+
+- [x] T091 规格回写：`spec.md` `TR-04` / `TR-05` / `TR-08` / `TR-15` / `TR-18` / `TR-21` + `TR-20` 作废 + §5.1 事件行示例 + §5.3 参数表 + §7.10 修订记录 + §9.8 验收清单；`plan.md` §21；本文件本增量
+- [x] T092 后端分流：新增 `agent-backend/src/domain/tool-result-split.ts`（`planSplit` / `planTruncatedInline` / `ToolArtifactAccess`，纯函数无 IO，内置工具名单取自 `builtinToolNames()`）；`tool-result.ts` 阈值 64 → 32 KB + `withRecordTruncationNote()` 支持两种去向 + `TOOL_SUMMARY_MAX_CHARS` 收为私有 + 删除无引用的 `isArtifactFileName()`；`tool-events.ts` 消费计划、`size` 恒为原始字节、写盘失败改说明并删 `summary`
+- [x] T093 后端回灌：`tool-context.ts` 删除索引段（`TOOL_INDEX_MAX_ITEMS` / `ArtifactIndexItem` / `formatArtifactIndex` / `selectReplay().index`），外部来源截断版与内置工具走同一预算路径，占位行按有无副本给路径；`prompt-builder.ts` 移除索引段拼装
+- [x] T094 后端测试：`tool-result-split.spec.ts`（`≤` 边界 / 内置无副本 / 外部截断+路径 / 无外置能力 / 副本超 2 MB）、`tool-events.spec.ts`（三分支 + 写盘失败）、`tool-context.spec.ts`（重写：无索引、外置占位带路径、内置占位不带）、`run-manager-tool-events.spec.ts`（外部截断版进 messages、`systemExtra` 无工具段）
+- [x] T095 前端：`ToolCallList.vue` 有 `artifact_size` 时展开先渲染截断版、同时拉全文并原位替换；提示文案抽为纯函数 `utils/tool-result-hint.ts`（`ToolCallList.vue` 因此从 518 回到 480 行，守 500 行门禁）；`api/types.ts` 与 `utils/tool-calls.ts` 注释同步
+- [x] T096 前端测试：新增 `utils/tool-result-hint.spec.ts`（6 组 11 例：无正文三态 / 已清理 / 失败 / 未保存 / 仅前一部分 / 副本被上限截断 / 不提示）；`ToolCallList.truncated.spec.ts` 只守接线 3 例（内置不发请求 / 受控 Promise 验证"先显示后替换" / 410 保留截断版）
+- [x] T097 门禁实测：后端 `typecheck` / `lint` / `test:all`（92 文件 / 1196 例）全绿；前端 `lint`（0 error，5 条既有 warning 属甘特图）/ `typecheck` / `test` 全绿；两侧 Prettier 全绿；改动文件 ≤500 行
+- [x] T098 卡片不再拉全文（2026-11-08）：`ToolCallList` 只展示 `inline_content`（展开零请求）；删除 `loadToolResult` 装配链（`ChatPanel` → `MessageList` → `MessageBubble`）、`useChatPanel.onLoadToolResult`、`useThreads.toolCallResult`、`api/threads.toolCallResult` 与 `ToolCallResult` 类型；`useToolPanels` 收敛为 `open` / `raw`；`utils/tool-result-hint.ts` 精简为三态；门禁：前端 `typecheck` / `lint`（0 error）/ `test`（114 文件 / 1310 例）全绿
+- [x] T099 清理随之孤立的代码（2026-11-08）：后端删除 `GET /api/threads/:id/tool-calls/:callId` 路由、`ToolEventStore.readArtifact()`、`ToolArtifactAccess.resolveVerified()`（写口 `write()` 保留）与对应单测；`specs/009` 契约表删该行；`spec.md` `TR-13` 作废 + §6 契约表标注删除；门禁：后端 `typecheck` / `lint` / `test:all`（92 文件 / 1195 例）全绿
 

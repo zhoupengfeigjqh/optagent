@@ -420,7 +420,7 @@ functions:
   type: CALCULATION
 - name: checkRawMaterialUnit
   title: 校验采购原材料单位一致性
-  description: 校验采购单的 rawMaterialId 存在于原材料主数据，且 unit 与原材料定义单位一致。服务于前置规则 V01。
+  description: 校验采购单的 rawMaterialId 存在于原材料主数据，且 unit 与原材料定义单位一致。
   related_concepts:
   - PurchaseRecord
   - RawMaterial
@@ -462,7 +462,7 @@ functions:
   type: VALIDATION
 - name: checkArrivalTimeValidity
   title: 校验采购到位时间合理性
-  description: 校验采购单的到位时间（arrivalTime）晚于采购发生日（当前日期）。服务于前置规则 V03。
+  description: 校验采购单的到位时间（arrivalTime）晚于采购发生日（当前日期）
   related_concepts:
   - PurchaseRecord
   params:
@@ -488,7 +488,7 @@ functions:
   type: VALIDATION
 - name: checkSupplierExistence
   title: 校验采购供应商存在性
-  description: 校验采购单的供应商名称存在于供应商主数据。服务于前置规则 V05。
+  description: 校验采购单的供应商名称存在于供应商主数据
   related_concepts:
   - PurchaseRecord
   - Supplier
@@ -521,7 +521,7 @@ functions:
   type: VALIDATION
 - name: checkRelatedOrderExistence
   title: 校验采购关联订单存在性
-  description: 校验采购单的关联客户订单：未填写通过，填写时必须存在于客户订单集合（客户订单数据需跨本体提供）。服务于前置规则 I04。
+  description: 校验采购单的关联客户订单：未填写通过，填写时必须存在于客户订单集合（客户订单数据需跨本体提供）
   related_concepts:
   - PurchaseRecord
   params:
@@ -553,7 +553,7 @@ functions:
   type: VALIDATION
 - name: inferPurchasePurpose
   title: 推导采购目的
-  description: 根据关联客户订单推导采购目的（未关联→补充库存；否则→生产订单备料）。服务于后置规则 I03（推导型，不阻断）。
+  description: 根据关联客户订单推导采购目的（未关联→补充库存；否则→生产订单备料）
   related_concepts:
   - PurchaseRecord
   params:
@@ -574,7 +574,7 @@ functions:
   type: CALCULATION
 behaviors:
 - name: CreatePurchaseRecord
-  description: 创建一笔新的原材料采购记录。
+  description: 创建一笔新的原材料采购记录
   op_type: command
   params:
     rawMaterialId:
@@ -677,7 +677,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: CancelPurchaseRecord
-  description: 取消一笔已创建但尚未入库的采购记录。
+  description: 取消一笔已创建但尚未入库的采购记录
   op_type: command
   params:
     purchaseRecordId:
@@ -709,7 +709,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: ReceiveRawMaterial
-  description: 将原材料采购入库。
+  description: 将采购的原材料入库
   op_type: command
   params:
     purchaseRecordId:
@@ -741,7 +741,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QueryInventory
-  description: 根据原材料ID或名称查询其最新的库存快照。
+  description: 获取原材料的可用库存、累计库存和待入库等信息
   op_type: query
   params:
     rawMaterialId:
@@ -800,7 +800,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QueryPurchaseRecords
-  description: 根据采购单/原材料/关联客单来查询采购记录列表。
+  description: 获取原材料采购的明细信息，如关联客户订单、到位信息等
   op_type: query
   params:
     purchaseRecordId:
@@ -876,7 +876,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QueryRawMaterials
-  description: 根据原材料ID或名称查询原材料的基础信息。
+  description: 获取原材料名称、编号、单位和安全库存等基本信息
   op_type: query
   params:
     rawMaterialId:
@@ -919,7 +919,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QuerySuppliers
-  description: 根据供应商名或原材料名查询供应商
+  description: 获取供应商编号、名称、地址和联系方式等基本信息
   op_type: query
   params:
     supplierName:
@@ -966,7 +966,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QuerySupplierCapability
-  description: 根据供应商名或原材料名，查询供应商供货能力
+  description: 获取供应商的供货能力，如可提供的原材料、交货周期等
   op_type: query
   params:
     supplierName:

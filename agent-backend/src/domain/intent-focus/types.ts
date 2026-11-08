@@ -9,10 +9,15 @@
  */
 import type { SystemOneQuestion } from '../../infra/laya-client.js';
 
-/** 本体行为；`opType` 仅留档，不参与题面（FR-022） */
+/**
+ * 本体行为；题面按 `description → title → name` 降级（FR-022），
+ * `opType` 仅留档，不参与题面。
+ */
 export interface OntologyBehavior {
   name: string;
   title: string;
+  /** 行为描述；缺失为空串（不在此处回退，降级顺序在题面构造时统一裁决） */
+  description: string;
   opType: string | null;
 }
 
@@ -62,6 +67,8 @@ export interface CapabilityCandidate {
   qid: string;
   name: string;
   title: string;
+  /** 题面首选的描述文本；空串表示该行为没有描述 */
+  description: string;
   ontologyId: string;
   ontologyName: string | null;
   /** 同一本体内的原序（用于同分稳定排序） */

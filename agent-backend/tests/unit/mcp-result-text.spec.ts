@@ -7,7 +7,8 @@
  *    （本次修复的点：解析类工具结果里的 `viewUrl` 必须能被 `extractViewLinks` 抽到）
  * 3. **认不出就 JSON 兜底** —— 宁可多一层字符串，也不丢信息（含空 `content` / 非块形状）
  * 4. **可观测** —— 被跳过的块类型上报成结构化 warn，不静默（宪章原则九）
- * 5. **历史信封解包**（`unwrapMcpEnvelopeText`）—— 判据收窄，仅供回填脚本
+ * 5. **历史信封解包**（`unwrapMcpEnvelopeText`）—— 判据收窄，当前无生产调用
+ *    （原使用者 `scripts/backfill-view-links.ts` 已于 2026-11-08 删除）
  *
  * 适配器接线在本文件末尾用真（假 manager）端到端验证：口径只有一处实现
  * （`domain/tool-result.ts`），这里守的是"模型看到的 == 记录里的"这条结构保证。
@@ -150,7 +151,7 @@ describe('mcpResultText —— 被跳过的块必须可观测（原则九）', (
   });
 });
 
-describe('unwrapMcpEnvelopeText —— 历史信封解包（仅供回填脚本）', () => {
+describe('unwrapMcpEnvelopeText —— 历史信封解包（当前无生产调用）', () => {
   it('标准信封 → 内层正文（不再是字符串里的 JSON）', () => {
     const payload = '[{"viewUrl":"/datapage/x","success":true}]';
     const stored = JSON.stringify({ content: [{ type: 'text', text: payload }], isError: false });

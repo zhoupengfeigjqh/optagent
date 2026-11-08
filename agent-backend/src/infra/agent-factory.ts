@@ -15,6 +15,7 @@ import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
 import { buildTailInstruction, effectiveNextActionsMax } from '../domain/next-actions.js';
+import { composeSystemPrompt } from '../domain/skill-prompt.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
 import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
@@ -272,8 +273,15 @@ export class AgentInstanceFactory {
     // 016：聚焦提示由 `run-consume` 在 prompt 组装后直接追加进 `req.systemExtra`，
     // 装配期不再回调判定（本特性与工具清单无关，且入口卡片轮次不应扫目录）。
     const extra = req.systemExtra;
+    // 2026-11-07：本轮用户显式选中的技能（`/技能名`）只插入该技能；缺省走默认全量索引。
+    // 组装是纯函数（`skill-prompt.ts`），实例本身不重建、不指纹换代。
+    const basePrompt = composeSystemPrompt({
+      soulBody: inst.config.soulBody,
+      skills: inst.config.skills,
+      ...(req.skill ? { explicitSkill: req.skill } : {}),
+    });
     // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
-    let systemPrompt = extra ? `${inst.config.systemPrompt}\n\n${extra}` : inst.config.systemPrompt;
+    let systemPrompt = extra ? `${basePrompt}\n\n${extra}` : basePrompt;
     // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
     // 候选目录取**本轮意图聚焦选出的本体能力**（`req.focusToolTips`）：卡片的 `tool_tips`
     // 只能从这份清单抄写，与"无 Laya 结果就不产卡片"的门控同源。

@@ -1,22 +1,27 @@
 /**
  * 聊天区装配 view-model（T081：自 `ChatPanel.vue` 拆分）
  *
- * 中栏的"接线"（跨 composable 的事件编排、纯 UI 开关、生命周期）集中在这里，
- * `ChatPanel.vue` 只保留 props、模板与"是否渲染列表"这一条与 props 相关的派生，
+ * 中栏的"接线"（跨 composable 的事件编排、纯 UI 开关、生命周期）集中在这里；
+ * `ChatPanel.vue` 只保留 props 相关的布局/首屏派生、模板与键盘语义（Esc 瀑布），
+ * 大块的低层装配继续下放到 `useChatInteraction` / `useChatHeaderActions` / `useUploadPanel` 等，
  * 从而满足"单文件 ≤500 行"（宪章原则二）。
  *
  * 状态来源不变：一律取自 `provide/inject` 的会话上下文，本模块不新增字段来源、不持有业务数据。
  */
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
-import type { ErrorInfo, FeedbackValue, FileReference, ToolCallResult, ToolTip } from '../api/types'
+import type { ErrorInfo, FeedbackValue, FileReference, ToolTip } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
+import { useChatHeaderActions } from './useChatHeaderActions'
+import { useChatInteraction } from './useChatInteraction'
 import { useChatStream } from './useChatStream'
 import { stripMentionTokens, useFileMention } from './useFileMention'
 import { useMentionComposer } from './useMentionComposer'
+import { useSkillComposer } from './useSkillComposer'
+import { skillToken, stripSkillToken, useSkillMention } from './useSkillMention'
 import { useMcpReadyGate } from './useMcpReadyGate'
 import { useModels } from './useModels'
 import { useNextStepPrompt } from './useNextStepPrompt'
@@ -40,6 +45,8 @@ export function useChatPanel() {
   const models = useModels()
   const uploads = useUploads()
   const mention = useFileMention()
+  // 2026-11-07：`/技能名` 单选（面板、选择、剥离都在这一层；输入区只负责落字）
+  const skill = useSkillMention()
   const workspace = useWorkspace()
   // 014：引导判定已在 `useAppSession.onSwitched` 内完成，这里只取用装配好的状态（不加逻辑）
   const session = useSession()
@@ -52,14 +59,6 @@ export function useChatPanel() {
   const preview = usePreview()
   const nextSteps = useNextSteps()
   const toast = useToast()
-
-  /** 数字人面板展开状态 */
-  const agentPanelOpen = ref(false)
-  /**
-   * 文件空间是否正停在列表态（用于工具栏按钮高亮与"再点一次收起"）。
-   * 面板可能被消息内的文件引用打开在内容态，此时按钮不高亮。
-   */
-  const workspaceOpen = computed(() => preview.open.value && preview.view.value === 'list')
 
   onMounted(async () => {
     // 工具栏需要模型清单：仅在本轮尚未取到时拉取（失败由 `useModels` 自行降级，不阻断聊天）
@@ -119,35 +118,10 @@ export function useChatPanel() {
    */
   const pendingUserMessage = computed(() => chat.pendingUserMessage.value)
 
-  /* ---------- HITL：工具调用人工确认 ---------- */
+  /* ---------- HITL：工具调用人工确认（接线在 `useChatInteraction`） ---------- */
 
-  /** 弹窗渲染源：等待确认的工具调用（SSE 事件或断连恢复快照） */
-  const pendingInteraction = computed(() => chat.pendingInteraction.value)
-  /** 服务端终验失败的逐字段错误（提交失败后回写弹窗） */
-  const interactionError = ref('')
-
-  // 断连恢复：线程详情带有等待中的确认快照（页面刷新/重连）→ 重建弹窗
-  watch(
-    () => threads.pendingInteraction.value,
-    (snapshot) => {
-      if (snapshot) {
-        chat.restoreInteraction(snapshot)
-      }
-    },
-  )
-
-  async function onSubmitInteraction(args: Record<string, unknown>): Promise<void> {
-    interactionError.value = ''
-    const result = await chat.submitInteraction(args)
-    if (!result.close && result.message) {
-      interactionError.value = result.message
-    }
-  }
-
-  function onRejectInteraction(): void {
-    interactionError.value = ''
-    void chat.rejectInteraction()
-  }
+  /** 等待确认的请求、逐字段错误与提交/拒绝两个出口 */
+  const hitl = useChatInteraction(chat, threads)
 
   /* ---------- 发送与回合（US1 / US2） ---------- */
 
@@ -175,14 +149,22 @@ export function useChatPanel() {
       skipIntentFocus?: boolean
       /** 018：内部标记——已确认过替换，不再预检 */
       skipTermCheck?: boolean
+      /** 2026-11-07：用户在本轮显式选中的技能（`/技能名`） */
+      skill?: string | null
     },
     options: { settleBeforeReturn?: boolean } = {},
   ): Promise<boolean> {
     // 正在等 MCP 就绪：直接忽略重复点击（否则会排队发两轮）
     if (mcpReady.preparing.value) return false
 
-    // 展示层 → 提交层：正文去掉 `@文件名` 标记，引用以结构化 `attachments` 提交（FR-016）
-    const content = stripMentionTokens(payload.content, payload.attachments)
+    // 展示层 → 提交层：正文去掉 `@文件名` / `/技能名` 标记，分别以结构化字段提交。
+    // 技能只在标记确实在正文里时才提交（胶囊被删而选区残留的极端情况按"未选"处理）。
+    const selectedSkill =
+      payload.skill && payload.content.includes(skillToken(payload.skill)) ? payload.skill : null
+    const content = stripSkillToken(
+      stripMentionTokens(payload.content, payload.attachments),
+      selectedSkill,
+    )
     if (content === '') {
       toast.push('error', '请输入消息内容')
       return false
@@ -234,6 +216,7 @@ export function useChatPanel() {
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
       ...(payload.toolTips && payload.toolTips.length > 0 ? { toolTips: payload.toolTips } : {}),
       ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
+      ...(selectedSkill ? { skill: selectedSkill } : {}),
     })
     if (options.settleBeforeReturn === false) {
       // 007：卡片确认——本地校验已过、请求已发出即视为成功，**不等待本轮结束**，
@@ -249,6 +232,7 @@ export function useChatPanel() {
       return false
     }
     mention.reset()
+    skill.reset()
     return true
   }
 
@@ -332,16 +316,6 @@ export function useChatPanel() {
     void threads.loadMore()
   }
 
-  /**
-   * 工具卡片懒加载外置结果正文（002 特性）。
-   *
-   * 仅做"装配层转发"：错误不在此处理——卡片按 `code === 'TOOL_RESULT_EXPIRED'`
-   * 区分"内容已清理"（降级展示）与其他失败（提示可重试）。
-   */
-  function onLoadToolResult(callId: string): Promise<ToolCallResult> {
-    return threads.toolCallResult(callId)
-  }
-
   function onRecover(): void {
     void chat.recover()
   }
@@ -361,56 +335,11 @@ export function useChatPanel() {
     models.select(model)
   }
 
-  /* ---------- 头部与数字人（US6） ---------- */
+  /* ---------- 头部与数字人（US6；接线在 `useChatHeaderActions`） ---------- */
 
-  /** 搜索栏开关：搜索状态已在 `useSessionSearch` */
-  function onToggleSearch(): void {
-    if (search.isOpen.value) {
-      search.close()
-    } else {
-      search.open()
-    }
-  }
-
-  function onToggleWorkspace(): void {
-    // 已停在列表态 → 再点即收起；否则展开并停在列表态（从内容态点也会退回列表）
-    if (workspaceOpen.value) {
-      preview.close()
-      return
-    }
-    preview.openList()
-    // 打开时刷新 9 个目录的文件清单（FR-031）
-    void workspace.load()
-  }
-
-  /** 搜索关键词受控：高亮与定位由 `useSessionSearch` + 列表共同完成（FR-029/030） */
-  function onSearchKeyword(value: string): void {
-    search.keyword.value = value
-  }
-
-  function onToggleAgent(): void {
-    void toggleAgentPanel()
-  }
-
-  async function toggleAgentPanel(): Promise<void> {
-    const next = !agentPanelOpen.value
-    agentPanelOpen.value = next
-    if (next) {
-      await agents.loadCandidates()
-    }
-  }
-
-  function onCloseAgentPanel(): void {
-    agentPanelOpen.value = false
-  }
-
-  /** 切换数字人：成功才收起面板，失败保持展开便于重试（FR-037） */
-  async function onSwitchAgent(name: string): Promise<void> {
-    await agents.switchTo(name)
-    if (agents.currentAgent.value?.agent_name === name) {
-      agentPanelOpen.value = false
-    }
-  }
+  // 「搜索栏 / 文件空间 / 数字人面板」四个入口的开关与切换动作整体外置，
+  // 这里只交出它们的状态源；展开而非逐条重列，避免出口清单两处维护。
+  const headerActions = useChatHeaderActions({ agents, preview, search, workspace })
 
   /* ---------- 跳转与预览（US7） ---------- */
 
@@ -433,15 +362,37 @@ export function useChatPanel() {
     chat.draft.value = value
   }
 
-  /** 工具栏发送：正文取输入区文本，附件取当前引用（FR-016）。 */
+  /** 工具栏发送：正文取输入区文本，附件取当前引用，技能取当前单选（FR-016 / 2026-11-07）。 */
   function onSendFromToolbar(): void {
-    void onSend({ content: chat.draft.value.trim(), attachments: mention.buildAttachments() })
+    void onSend({
+      content: chat.draft.value.trim(),
+      attachments: mention.buildAttachments(),
+      skill: skill.selected.value,
+    })
   }
 
   /* ---------- `@` 引用（US4；输入区接线在 `useMentionComposer`） ---------- */
 
   /** 文本与引用必须同步的那条不变式写在该模块头部；这里只交出浮层状态与输入区文本。 */
   const mentionComposer = useMentionComposer({ mention, draft: chat.draft })
+
+  /* ---------- `/技能名`（2026-11-07；输入区接线在 `useSkillComposer`） ---------- */
+
+  /**
+   * 两个标记共用同一条输入事件：`@` 与 `/` 的触发正则互斥（一个要求 `@`，
+   * 一个要求行首/空白后的 `/`），各自持有自己的浮层开合；这里只做转发。
+   */
+  const skillComposer = useSkillComposer({ skill, draft: chat.draft })
+
+  /** 输入事件总入口：`@` 与 `/` 各自判定，互不干扰。 */
+  function onInputText(payload: { value: string; caret: number }): void {
+    mentionComposer.onInputText(payload)
+    skillComposer.onInputText(payload)
+  }
+
+  // 外部改写草稿（切会话、发送后清空、失败还原）时让"已选技能"跟着文本走：
+  // 标记没了 → 选择没了；不做这层，残留的 `selected` 会在下一次发送时凭空带上 skill。
+  watch(chat.draft, (text) => skill.sync(text))
 
   /* ---------- 上传面板（US3 / 012） ---------- */
 
@@ -469,8 +420,8 @@ export function useChatPanel() {
     agents,
     schedule,
     uploadOpen,
-    agentPanelOpen,
-    workspaceOpen,
+    // 头部四个入口的状态与动作（`agentPanelOpen` / `workspaceOpen` + 6 个出口）
+    ...headerActions,
     streaming,
     isFailed,
     errorInfo,
@@ -478,10 +429,8 @@ export function useChatPanel() {
     preparing: mcpReady.preparing,
     hasMessages,
     pendingUserMessage,
-    pendingInteraction,
-    interactionError,
-    onSubmitInteraction,
-    onRejectInteraction,
+    // HITL：等待确认的请求、逐字段错误与提交/拒绝两个出口
+    ...hitl,
     onSend,
     onStop,
     onRegenerate,
@@ -494,7 +443,6 @@ export function useChatPanel() {
     // 018：替换确认弹窗（状态 + 3 个出口）来自 `useTermNormalize`，同样展开避免清单两处维护
     ...termGate,
     onLoadMore,
-    onLoadToolResult,
     onRecover,
     onFeedback,
     onToggleThinking,
@@ -503,12 +451,6 @@ export function useChatPanel() {
     onCloseUpload,
     onPickFiles,
     onRetryUpload,
-    onToggleSearch,
-    onToggleWorkspace,
-    onSearchKeyword,
-    onToggleAgent,
-    onCloseAgentPanel,
-    onSwitchAgent,
     onOpenLink,
     onOpenFile,
     onOpenView,
@@ -516,5 +458,9 @@ export function useChatPanel() {
     onSendFromToolbar,
     // `@` 引用的 7 个出口来自 `useMentionComposer`（同上：展开而非逐条重列）
     ...mentionComposer,
+    // `/技能` 的 5 个出口同理由 `useSkillComposer` 提供；`onInputText` 在其后显式覆盖为总入口
+    ...skillComposer,
+    onInputText,
+    skill,
   }
 }

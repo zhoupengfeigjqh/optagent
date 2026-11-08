@@ -2,7 +2,8 @@
  * 单元测试：工具调用记录存储（002 特性）
  *
  * 守住五件事：
- * 1. **体积分流** —— 小结果内联进行、大结果外置成临时空间文件（且不双写）
+ * 1. **体积分流** —— `inline_content` 任何分支都只存前 32 KB；内置工具超阈值**截断内联且不落副本**，
+ *    MCP 等外部来源超阈值**截断内联（尾注给副本路径）+ 外置**（2026-11-07）
  * 2. **合并语义** —— start(running) + end(终态) 按 call_id 合并，后者覆盖前者
  * 3. **降级不丢记录** —— 外置写入失败 / 未装配外置能力 → 退化为截断内联
  * 4. **路径不信任数据** —— 正文路径按 `{threadId, callId}` 重算，恶意 call_id 不越权
@@ -17,7 +18,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SPACE_TMP, userDataDir } from '../../src/domain/dirs.js';
 import { FileAccess } from '../../src/domain/file-access.js';
-import { removeFileSafe } from '../../src/domain/fs-safe.js';
 import { ToolEventStore } from '../../src/domain/tool-events.js';
 import {
   TOOL_ARTIFACT_MAX_BYTES,
@@ -47,14 +47,24 @@ function makeStore(withArtifacts = true): ToolEventStore {
   });
 }
 
+/** 外置写盘必失败的 store（守"副本没写成 → 说未保存、不给路径"） */
+function makeFailingStore(): ToolEventStore {
+  return new ToolEventStore({
+    root,
+    artifacts: () => ({
+      write: () => Promise.reject(new Error('磁盘满')),
+    }),
+  });
+}
+
 function appendEnd(
   store: ToolEventStore,
-  input: { callId: string; resultText: string; status?: 'success' | 'error' },
+  input: { callId: string; resultText: string; status?: 'success' | 'error'; name?: string },
 ): Promise<void> {
   return store.appendEnd('admin', AGENT, 'th1', {
     callId: input.callId,
     messageId: 'm_a1',
-    name: 'read_file',
+    name: input.name ?? 'read_file',
     startedAt: '2026-09-23T00:00:00.000Z',
     status: input.status ?? 'success',
     durationMs: 12,
@@ -130,50 +140,93 @@ describe('tool-events —— 体积分流', () => {
     expect(files).toHaveLength(0);
   });
 
-  it('大结果外置到临时空间：事件行只留体积与摘要，正文可全量读回', async () => {
+  it('内置工具超阈值：截断内联 + 末尾截断说明，且不产生临时空间文件', async () => {
+    const store = makeStore();
+    const big = 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
+    await appendEnd(store, { callId: 'call_builtin_big', resultText: big });
+
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
+    // 不落副本：没有 artifact_size、没有摘要（摘要只服务有副本的外置结果）
+    expect(record.artifactSize).toBeUndefined();
+    expect(record.summary).toBeUndefined();
+    expect(record.truncated).toBe(true);
+    // 末尾说明告诉模型怎么看更多
+    expect(record.content).toContain('记录已截断');
+    expect(record.content).toContain('要查看更多请重新调用该工具');
+    // 正文部分仍截断在内联阈值内
+    const body = (record.content ?? '').split('\n\n（记录已截断')[0]!;
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(TOOL_INLINE_MAX_BYTES);
+    // size 记的是**原始**结果字节数
+    expect(record.size).toBe(Buffer.byteLength(big, 'utf8'));
+
+    const tmpDir = path.join(dataRoot(), SPACE_TMP);
+    const files = fs.existsSync(tmpDir) ? fs.readdirSync(tmpDir) : [];
+    expect(files).toHaveLength(0);
+  });
+
+  it('外部来源（MCP）大结果：截断内联（尾注给副本路径）+ 外置，副本可全量读回', async () => {
     const store = makeStore();
     const unit = '车间,计划量\n冲压,1200\n';
     const big = unit.repeat(
       Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
     );
-    await appendEnd(store, { callId: 'call_big', resultText: big });
+    await appendEnd(store, { callId: 'call_big', resultText: big, name: 'mcp_sql_query' });
 
     const records = store.readAll('admin', AGENT, 'th1');
     const record = records[0]!;
-    expect(record.content).toBeUndefined();
-    expect(record.artifactSize).toBeGreaterThan(TOOL_INLINE_MAX_BYTES);
+    // 记录内联的是截断版：正文在阈值内，尾注给出副本路径
+    expect(record.truncated).toBe(true);
+    expect(record.content).toContain('记录已截断');
+    expect(record.content).toContain(artifactFileName('th1', 'call_big'));
+    const body = (record.content ?? '').split('\n\n（记录已截断')[0]!;
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(TOOL_INLINE_MAX_BYTES);
+    // size = 原始字节；artifact_size = 落盘字节（未超 2MB 时两者相等）
+    expect(record.size).toBe(Buffer.byteLength(big, 'utf8'));
+    expect(record.artifactSize).toBe(record.size);
     expect(record.summary).toContain('共');
-    expect(record.truncated).toBe(false);
 
     const abs = path.join(dataRoot(), SPACE_TMP, artifactFileName('th1', 'call_big'));
     expect(fs.existsSync(abs)).toBe(true);
     expect(fs.readFileSync(abs, 'utf8')).toBe(big);
-
-    const artifact = await store.readArtifact('admin', AGENT, 'th1', 'call_big');
-    expect(artifact?.content).toBe(big);
   });
 
-  it('超过单条落盘上限：截断并标记 truncated', async () => {
+  it('外部来源超过单条落盘上限：副本按 2MB 截断（size > artifact_size 即判据）', async () => {
     const store = makeStore();
     const huge = 'x'.repeat(TOOL_ARTIFACT_MAX_BYTES + 1024); // 略超 2MB 上限
-    await appendEnd(store, { callId: 'call_huge', resultText: huge });
+    await appendEnd(store, { callId: 'call_huge', resultText: huge, name: 'mcp_sql_query' });
 
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.truncated).toBe(true);
     expect(record.artifactSize).toBe(TOOL_ARTIFACT_MAX_BYTES);
+    expect(record.size).toBe(Buffer.byteLength(huge, 'utf8'));
+    expect(record.size!).toBeGreaterThan(record.artifactSize!);
   });
 
-  it('未装配外置能力：超阈值结果退化为截断内联（不丢记录）', async () => {
+  it('未装配外置能力：超阈值结果退化为截断内联（不丢记录，说明改为"未保存"）', async () => {
     const store = makeStore(false);
     const big = 'y'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
-    await appendEnd(store, { callId: 'call_c', resultText: big });
+    await appendEnd(store, { callId: 'call_c', resultText: big, name: 'mcp_sql_query' });
 
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
     expect(record.artifactSize).toBeUndefined();
     expect(record.truncated).toBe(true);
-    expect(Buffer.byteLength(record.content ?? '', 'utf8')).toBeLessThanOrEqual(
-      TOOL_INLINE_MAX_BYTES,
-    );
+    expect(record.content).toContain('记录已截断');
+    expect(record.content).toContain('完整内容未保存');
+    const body = (record.content ?? '').split('\n\n（记录已截断')[0]!;
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(TOOL_INLINE_MAX_BYTES);
+  });
+
+  it('外置写盘失败：退化为截断内联（说明不说路径）、不留摘要与 artifact_size', async () => {
+    const store = makeFailingStore();
+    const big = 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
+    await appendEnd(store, { callId: 'call_w', resultText: big, name: 'mcp_sql_query' });
+
+    const record = store.readAll('admin', AGENT, 'th1')[0]!;
+    expect(record.artifactSize).toBeUndefined();
+    expect(record.summary).toBeUndefined();
+    expect(record.truncated).toBe(true);
+    expect(record.content).toContain('完整内容未保存');
+    expect(record.content).not.toContain(artifactFileName('th1', 'call_w'));
   });
 });
 
@@ -225,21 +278,6 @@ describe('tool-events —— 合并与容错', () => {
     expect(records).toHaveLength(1);
     expect(records[0]!.callId).toBe('call_ok');
   });
-
-  it('外置正文被清理后：readArtifact 返回 undefined（路由据此回 410）', async () => {
-    const store = makeStore();
-    await appendEnd(store, {
-      callId: 'call_gone',
-      resultText: 'z'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
-    });
-    const abs = path.join(dataRoot(), SPACE_TMP, artifactFileName('th1', 'call_gone'));
-    // 必须走安全删除原语：Windows 下 fs.rmSync 对含中文的路径静默失效（见 fs-safe）
-    removeFileSafe(abs);
-
-    // 元数据仍在（卡片不消失），只是正文取不到
-    expect(store.readAll('admin', AGENT, 'th1')[0]!.artifactSize).toBeGreaterThan(0);
-    expect(await store.readArtifact('admin', AGENT, 'th1', 'call_gone')).toBeUndefined();
-  });
 });
 
 describe('tool-events —— 路径与归属', () => {
@@ -248,6 +286,7 @@ describe('tool-events —— 路径与归属', () => {
     await appendEnd(store, {
       callId: '../../evil',
       resultText: 'w'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
+      name: 'mcp_sql_query',
     });
 
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
@@ -307,10 +346,16 @@ describe('tool-events —— 视图链接 sidecar（TR-44）', () => {
       viewUrl: '/datasource/big/xlsx',
       pad: 'x'.repeat(TOOL_INLINE_MAX_BYTES + 1024),
     };
-    await appendEnd(store, { callId: 'call_bigview', resultText: JSON.stringify(payload) });
+    await appendEnd(store, {
+      callId: 'call_bigview',
+      resultText: JSON.stringify(payload),
+      name: 'mcp_sql_query',
+    });
 
     const record = store.readAll('admin', AGENT, 'th1')[0]!;
-    expect(record.content).toBeUndefined(); // 正文已外置
+    // 正文只剩截断版（2026-11-07）；入口不必加载副本即可用
+    expect(record.content).toContain('记录已截断');
+    expect(record.content).not.toContain(payload.pad);
     expect(record.artifactSize).toBeGreaterThan(0);
     expect(record.viewLinks).toEqual([{ url: '/datasource/big/xlsx' }]);
   });

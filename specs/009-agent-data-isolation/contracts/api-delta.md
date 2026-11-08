@@ -46,7 +46,6 @@
 | `GET /api/threads/:id` | **作用域变更** | 无 | `200`：仅当该会话属于当前数字人；否则 `404 THREAD_NOT_FOUND` |
 | `PATCH /api/threads/:id`（改名） | **作用域变更** | body 不变 | 同上（跨数字人 → `404`） |
 | `DELETE /api/threads/:id` | **作用域变更** | 无 | 同上；删除仍连带清理该数字人 `临时空间` 下 `{threadId}_` 前缀的外置正文（路径随归属） |
-| `GET /api/threads/:id/tool-calls/:callId` | **路径随归属** | 无 | 不变（`404` / `410 TOOL_RESULT_EXPIRED`）；结果文件位于该数字人临时空间 |
 | `GET /api/threads/:id/next-actions` | **作用域变更** | 无 | 同上口径 |
 
 ---

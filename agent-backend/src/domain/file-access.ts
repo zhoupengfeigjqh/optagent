@@ -59,7 +59,11 @@ export interface FileAccessOptions {
   /** 数据域所属数字人（009 必填）：决定 `dataRoot = user-data/{数字人}` */
   agentName: string;
   logger?: Logger;
-  /** read 截断上限（KB），默认 32 */
+  /**
+   * read 截断上限（KB）。**运行期默认是 128**（`READ_TRUNCATE_KB`，经 `server.ts` 注入），
+   * `read_file` 与 `read_skill` 共用这一份口径。下面构造函数里的 `?? 32` 只是"未注入"时的兜底
+   * （测试等直调场景），不是生产默认值。
+   */
   truncateKb?: number | undefined;
 }
 
@@ -85,6 +89,7 @@ export class FileAccess {
     this.agentName = opts.agentName;
     this.rules = { dataPrepDirs: () => this.dataPrepDirs() };
     if (opts.logger) this.logger = opts.logger;
+    // 32 是"未注入"兜底：生产恒由 `server.ts` 注入 `READ_TRUNCATE_KB`（缺省 128）
     this.truncateBytesInternal = (opts.truncateKb ?? 32) * 1024;
   }
 

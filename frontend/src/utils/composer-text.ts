@@ -17,8 +17,14 @@
 /** 胶囊上的文件名属性：序列化与定位都读它，MUST NOT 改用 `textContent`（胶囊里还有按钮）。 */
 export const MENTION_FILENAME_ATTR = 'data-mention-filename'
 
-/** 正文的一段：普通文本，或一条完整的 `@文件名` 标记。 */
-export type ComposerSegment = { kind: 'text'; text: string } | { kind: 'mention'; token: string }
+/** 技能胶囊上的技能名属性（2026-11-07）；与 `@` 胶囊互斥，同一枚只带一个。 */
+export const SKILL_NAME_ATTR = 'data-skill-name'
+
+/** 正文的一段：普通文本、`@文件名` 标记，或 `/技能名` 标记。 */
+export type ComposerSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'mention'; token: string }
+  | { kind: 'skill'; token: string }
 
 /** 浏览器回车产生的块级包裹（正常路径已拦截 Enter，这里只兜住输入法/粘贴的漏网）。 */
 const BLOCK_TAGS: ReadonlySet<string> = new Set(['DIV', 'P', 'LI'])
@@ -45,6 +51,9 @@ function nodeText(node: Node): string {
 
   const filename = element.getAttribute(MENTION_FILENAME_ATTR)
   if (filename !== null) return `@${filename}`
+
+  const skillName = element.getAttribute(SKILL_NAME_ATTR)
+  if (skillName !== null) return `/${skillName}`
 
   const inner = Array.from(element.childNodes).map(nodeText).join('')
   // 块级包裹是浏览器回车/粘贴的兜底产物：按行处理，否则两行会粘成一行
@@ -96,25 +105,38 @@ export function placeCaretAtEnd(root: HTMLElement): void {
 }
 
 /**
- * 按 `@文件名` 标记把文本切成「普通文本 / 引用」片段。
+ * 按标记把文本切成「普通文本 / `@文件名` / `/技能名`」片段。
  *
- * 标记拼写由调用方给出（`mentionToken` 是唯一来源）；长的优先匹配，
- * 避免 `@a.csv` 把 `@a.csv.bak` 吃掉一半。
+ * 标记拼写由调用方给出（`mentionToken` / `skillToken` 是唯一来源）；长的优先匹配，
+ * 避免 `@a.csv` 把 `@a.csv.bak` 吃掉一半。技能标记作为可选参数，
+ * 缺省时行为与只有 `@` 引用时逐字一致（存量调用点无需改动）。
  */
-export function splitComposerSegments(text: string, tokens: readonly string[]): ComposerSegment[] {
-  const list = [...new Set(tokens.filter((token) => token !== ''))].sort(
+export function splitComposerSegments(
+  text: string,
+  tokens: readonly string[],
+  skillTokens: readonly string[] = [],
+): ComposerSegment[] {
+  const mentions = [...new Set(tokens.filter((token) => token !== ''))].sort(
     (left, right) => right.length - left.length,
   )
-  if (list.length === 0) return text === '' ? [] : [{ kind: 'text', text }]
+  const skills = [...new Set(skillTokens.filter((token) => token !== ''))].sort(
+    (left, right) => right.length - left.length,
+  )
+  const all = [...mentions, ...skills].sort((left, right) => right.length - left.length)
+  if (all.length === 0) return text === '' ? [] : [{ kind: 'text', text }]
 
-  const pattern = new RegExp(list.map(escapeRegExp).join('|'), 'g')
+  const mentionSet = new Set(mentions)
+  const pattern = new RegExp(all.map(escapeRegExp).join('|'), 'g')
   const segments: ComposerSegment[] = []
   let cursor = 0
 
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0
     if (index > cursor) segments.push({ kind: 'text', text: text.slice(cursor, index) })
-    segments.push({ kind: 'mention', token: match[0] })
+    segments.push({
+      kind: mentionSet.has(match[0]) ? 'mention' : 'skill',
+      token: match[0],
+    })
     cursor = index + match[0].length
   }
   if (cursor < text.length) segments.push({ kind: 'text', text: text.slice(cursor) })

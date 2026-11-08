@@ -20,6 +20,7 @@ import type {
   FileReference,
   InteractionSnapshot,
   InteractionSubmitResponse,
+  ToolTip,
   Usage,
 } from '../api/types'
 import type { ThreadNextSteps } from '../api/threads'
@@ -46,6 +47,8 @@ export interface PendingUserMessage {
   content: string
   /** 结构化引用（用户气泡用它还原文件引用区） */
   attachments: FileReference[]
+  /** 2026-11-07：本轮显式选中的技能（气泡里还原 `/技能名` 胶囊） */
+  skill?: string
 }
 
 /** 构造参数。 */
@@ -138,7 +141,15 @@ export interface ChatStreamStore {
   submitInteraction(args: Record<string, unknown>): Promise<{ close: boolean; message?: string }>
   /** 拒绝本次调用（弹窗始终关闭；后端把拒绝作为工具结果交给模型收尾） */
   rejectInteraction(): Promise<void>
-  send(payload: { content: string; attachments: FileReference[] }): Promise<void>
+  send(payload: {
+    content: string
+    attachments: FileReference[]
+    guidance?: string
+    toolTips?: ToolTip[]
+    skipIntentFocus?: boolean
+    /** 2026-11-07：显式技能（`/技能名`）——服务端只插入该技能并自动跳过聚焦 */
+    skill?: string
+  }): Promise<void>
   /** 用 `lastRetryableTurn` 重发上一轮（中断气泡「重新生成」/ 失败块「重试本轮」，复用 `send` 全链路） */
   regenerate(): Promise<void>
   /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */

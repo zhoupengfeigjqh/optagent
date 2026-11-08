@@ -1,2 +1,0 @@
-{"call_id":"call_00_qYUgoJRCe1QKLXtco9kn8585","message_id":"m_mw56lato_89ll","name":"ocr__ocr_image","label":"图片识别","status":"running","started_at":"2026-11-06T16:20:48.347Z","args_digest":{"image":"临时空间/架构图.png"}}
-{"call_id":"call_00_qYUgoJRCe1QKLXtco9kn8585","message_id":"m_mw56lato_89ll","name":"ocr__ocr_image","label":"图片识别","status":"error","started_at":"2026-11-06T16:20:48.347Z","duration_ms":1515,"size":44,"inline_content":"用户拒绝了本次调用：ocr__ocr_image"}

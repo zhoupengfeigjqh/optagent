@@ -7,8 +7,7 @@
  * - GET /api/threads：列表（**只含当前数字人**、updated_at 倒序、默认标题；查询参数
  *   `agent_name` 保留但不再参与作用域，传了忽略）
  * - GET /api/threads/:id：详情 + 历史分页（limit≤200 默认 50、offset 从最新往前数、total、running）
- *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联小结果）
- * - GET /api/threads/:id/tool-calls/:call_id：外置结果正文（懒加载；过期 → 410）
+ *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联正文，超阈值者是截断版）
  * - GET /api/threads/:id/next-actions：该会话最新一轮的「下一步动作提示」（007；四类空态一律 200 空）
  * - PATCH /api/threads/:id：重命名（≤100 字）
  * - DELETE /api/threads/:id：删除连带清理（进行中 run 先 abort）
@@ -88,9 +87,10 @@ function metaJson(m: {
 /**
  * 工具调用记录 → HTTP 契约。
  *
- * `content` = 内联结果正文（小结果，随详情一起下发）；
- * `artifact_size` 有值 = 正文在临时空间，前端按需拉 `…/tool-calls/{call_id}`。
- * **不下发路径**：路径由后端按 `{threadId, callId}` 重算，避免数据被篡改成越权读。
+ * `content` = 记录里的正文（≤阈值原文，或前 32 KB 截断版，随详情一起下发）；
+ * `artifact_size` 有值 = 临时空间另有完整副本（仅供提示，前端不拉取；2026-11-08）。
+ * **不下发路径**：副本路径只出现在截断说明里，由后端按 `{threadId, callId}` 现算，
+ * 模型要全文时用 `read_file` 走文件工具（同样过白名单校验）。
  * `view_links` = 结果里的视图链接（地址 + 可选名称）：正文外置时它仍在详情里，
  * 因此前端不必先加载正文就能给出入口（见 `view-links.ts`）。
  */
@@ -193,6 +193,8 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
           ? { duration_seconds: Math.round(m.duration_ms) / 1000 }
           : {}),
         ...(m.attachments ? { attachments: m.attachments } : {}),
+        // 2026-11-07：显式技能（`/技能名`）——前端据此在气泡里还原技能胶囊
+        ...(m.skill ? { skill: m.skill } : {}),
         ...(m.error ? { error: m.error } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(toolCallJson) } : {}),
         feedback: feedback.get(id) ?? null,
@@ -207,40 +209,6 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
       running: ctx.runManager.hasActive(threadId),
       // HITL 断连恢复：若当前有等待用户确认的工具调用，附快照让前端重建弹窗
       pending_interaction: ctx.runManager.pendingInteractionOf(threadId),
-    };
-  });
-
-  /**
-   * 外置工具结果正文（懒加载）：前端点开卡片才请求。
-   *
-   * - 记录不存在 / 该调用结果未外置（已随详情内联下发）→ 404
-   * - 外置文件已被临时空间清理或用户删除 → **410**（前端降级为"内容已过期"，
-   *   卡片元数据仍在，不视为错误）
-   */
-  app.get('/api/threads/:id/tool-calls/:callId', async (req) => {
-    const userId = getCurrentUser().userId;
-    const { id: threadId, callId } = req.params as { id: string; callId: string };
-    const { agentName } = resolveAgentScope(ctx, userId, {
-      route: 'GET /api/threads/:id/tool-calls',
-    });
-    ctx.threadStore.get(userId, agentName, threadId); // 404
-    const record = ctx.toolEvents
-      .readAll(userId, agentName, threadId)
-      .find((r) => r.callId === callId);
-    if (!record || record.artifactSize === undefined) {
-      throw new ApiError(404, 'TOOL_CALL_NOT_FOUND', `工具调用结果不存在或未外置: ${callId}`);
-    }
-    const artifact = await ctx.toolEvents.readArtifact(userId, agentName, threadId, callId);
-    if (!artifact) {
-      throw new ApiError(410, 'TOOL_RESULT_EXPIRED', '工具结果内容已被临时空间清理');
-    }
-    return {
-      call_id: record.callId,
-      name: record.name,
-      status: record.status,
-      size: artifact.size,
-      content: artifact.content,
-      ...(record.truncated === true ? { truncated: true } : {}),
     };
   });
 

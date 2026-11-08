@@ -102,7 +102,7 @@ describe('Composer —— 文本输入', () => {
     const wrapper = mountComposer()
 
     expect(editorOf(wrapper).attributes('data-placeholder')).toBe(
-      '输入消息：打 @ 可引用文件空间里的文件',
+      '输入消息：打 @ 可引用文件，打 / 可选择技能',
     )
     expect(wrapper.find('.composer__hint').text()).toBe('Enter 发送 · Shift + Enter 换行')
   })
@@ -111,7 +111,9 @@ describe('Composer —— 文本输入', () => {
     const wrapper = mountComposer({ modelValue: '你好' })
 
     await editorOf(wrapper).trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('send')?.at(-1)).toEqual([{ content: '你好', attachments: [] }])
+    expect(wrapper.emitted('send')?.at(-1)).toEqual([
+      { content: '你好', attachments: [], skill: null },
+    ])
 
     await editorOf(wrapper).trigger('keydown', { key: 'Enter', shiftKey: true })
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['你好\n'])
@@ -144,5 +146,59 @@ describe('Composer —— mention 插槽', () => {
     await editorOf(wrapper).trigger('keydown', { key: 'ArrowDown' })
 
     expect(wrapper.emitted('mention-key')).toBeUndefined()
+  })
+})
+
+describe('Composer —— `/技能名` 胶囊（2026-11-07）', () => {
+  const SKILL = 'supplier-query'
+
+  it('选中的技能落成与引用同款的胶囊，文本是 `/技能名`', () => {
+    const wrapper = mountComposer({
+      modelValue: `/${SKILL} 查一下 S-1024 的账期`,
+      skill: SKILL,
+    })
+
+    const chip = wrapper.find(`[data-skill-name="${SKILL}"]`)
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toBe(`/${SKILL}`)
+    expect(chip.attributes('contenteditable')).toBe('false')
+    expect(chip.find('.composer__mention-remove').attributes('aria-label')).toBe(
+      `移除技能 ${SKILL}`,
+    )
+  })
+
+  it('点 x：上报 remove-skill，并把去掉标记后的草稿交回上层', async () => {
+    const wrapper = mountComposer({
+      modelValue: `/${SKILL} 查一下 S-1024 的账期`,
+      skill: SKILL,
+    })
+
+    await wrapper.find(`[data-skill-name="${SKILL}"] .composer__mention-remove`).trigger('click')
+
+    expect(wrapper.emitted('remove-skill')).toEqual([[]])
+    const text = (wrapper.emitted('update:modelValue')?.at(-1)?.[0] ?? '') as string
+    expect(text).not.toContain(`/${SKILL}`)
+    expect(text).toContain('查一下 S-1024 的账期')
+  })
+
+  it('发送载荷携带 skill（正文仍含标记，由上层剥离）', async () => {
+    const wrapper = mountComposer({
+      modelValue: `/${SKILL} 查一下`,
+      skill: SKILL,
+    })
+
+    await editorOf(wrapper).trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('send')?.at(-1)).toEqual([
+      { content: `/${SKILL} 查一下`, attachments: [], skill: SKILL },
+    ])
+  })
+
+  it('只选技能不写正文：发送按钮置灰（与服务端 content 非空同口径）', () => {
+    const wrapper = mountComposer({ modelValue: `/${SKILL} `, skill: SKILL })
+    const buttons = wrapper.findAll('button')
+    const send = buttons.find((button) => button.text() === '发送')
+
+    expect(send?.attributes('disabled')).toBeDefined()
   })
 })

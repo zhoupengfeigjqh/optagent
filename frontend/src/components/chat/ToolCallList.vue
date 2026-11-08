@@ -3,8 +3,8 @@
  * 工具调用卡片列表（002 特性）
  *
  * 一个组件同时服务两种场景（TR-10）：
- * - **历史态**：`Message.tool_calls` 下发元数据；内联小结果展开即见，
- *   外置大结果展开时才拉 `/tool-calls/{call_id}`
+ * - **历史态**：`Message.tool_calls` 下发元数据 + `inline_content`（超阈值时是截断版）；
+ *   展开即见——2026-11-08 起**不再拉取临时空间副本**，卡片展示的就是记录里那段正文
  * - **流式态**：SSE 只给名称与状态，结果尚未产生（也不外显结果）
  *
  * 展示分两层（2026-10-08 改版，spec §4.6 / TR-32~TR-36）：
@@ -12,8 +12,9 @@
  * - **摘要行**（≥2 次调用时）：最新一次调用 + 明细开关，**整行一个按钮**
  * - **明细区**（展开后）：本轮全部调用、时间正序；每条仍可展开自己的结果
  *
- * 降级（TR-16）：外置正文已被临时空间清理时接口返回 410，卡片显示
- * "内容已被清理"而**不是**错误态——元数据仍然完整。
+ * 截断（TR-04 / TR-15）：结果超内联阈值时记录里只有前 32 KB，卡片如实展示这段，
+ * 正文下方一行说明"完整的那份在哪"（内置工具没有副本，外部来源有临时空间副本）——
+ * 卡片 MUST NOT 自行拼装全文，避免与记录口径分叉。
  *
  * 结果正文的**结构化展示**（2026-10-10）：能解析成对象/数组就按与产出弹窗同构的规则渲染
  * （`ProducedJsonView`），并可一键切回**原始 JSON**。这是**展示层**的选择——平台仍
@@ -22,7 +23,6 @@
  */
 import { computed, useId } from 'vue'
 
-import type { ToolCallResult } from '../../api/types'
 import { useToolPanels, type ToolPanelState } from '../../composables/useToolPanels'
 import { formatBytes, formatDurationMs } from '../../utils/format'
 import {
@@ -34,6 +34,7 @@ import {
   toolStatusLabel,
   type ToolCallItem,
 } from '../../utils/tool-calls'
+import { NO_HINT, resultHint } from '../../utils/tool-result-hint'
 import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
 import type { ViewLinkTarget } from '../../utils/view-link'
 import ProducedJsonView from './ProducedJsonView.vue'
@@ -42,17 +43,12 @@ const props = withDefaults(
   defineProps<{
     items: ToolCallItem[]
     /**
-     * 外置正文加载器（历史态注入）。缺省 = 不发起请求，只展示摘要与体积。
-     * 抛出的错误若 `code === 'TOOL_RESULT_EXPIRED'` 视为"内容已清理"而非失败。
-     */
-    loadResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
-    /**
      * 本轮是否**仍在流式进行中**（TR-33）：只决定 `running` 的文案是"进行中"还是"未完成"。
-     * 由 `MessageBubble` 从 `streaming.phase` 显式传入——MUST NOT 用"能否懒加载"之类的间接信号推断。
+     * 由 `MessageBubble` 从 `streaming.phase` 显式传入——MUST NOT 用"有无结果正文"之类的间接信号推断。
      */
     live?: boolean
   }>(),
-  { loadResult: undefined, live: false },
+  { live: false },
 )
 
 const emit = defineEmits<{
@@ -99,42 +95,16 @@ function panelOf(item: ToolCallItem): ToolPanelState {
   return panels.panelOf(item.callId)
 }
 
-/** 展开/收起；首次展开且结果为外置时懒加载正文。运行中没有结果可看，直接不响应（TR-33）。 */
-async function onToggle(item: ToolCallItem): Promise<void> {
+/** 展开/收起。运行中没有结果可看，直接不响应（TR-33）。 */
+function onToggle(item: ToolCallItem): void {
   if (!canExpand(item)) return
   const panel = panelOf(item)
-  if (panel.open) {
-    panel.open = false
-    return
-  }
-  panel.open = true
-  const alreadyLoaded = panel.content !== null || panel.expired || panel.error !== null
-  if (item.content !== undefined || item.artifactSize === undefined || alreadyLoaded) {
-    return
-  }
-  if (!props.loadResult) return
-
-  panel.loading = true
-  try {
-    const result = await props.loadResult(item.callId)
-    panel.content = result.content
-  } catch (cause) {
-    if (isExpired(cause)) panel.expired = true
-    else panel.error = '内容加载失败，请稍后重试'
-  } finally {
-    panel.loading = false
-  }
+  panel.open = !panel.open
 }
 
-/** 展开后展示的正文：懒加载结果优先，其次内联正文。 */
+/** 展开后展示的正文：就是记录里的 `inline_content`（超阈值时是截断版，2026-11-08） */
 function displayContent(item: ToolCallItem): string {
-  const loaded = panelOf(item).content
-  if (loaded !== null && loaded !== undefined) return loaded
   return item.content ?? ''
-}
-
-function isExpired(cause: unknown): boolean {
-  return (cause as { code?: string } | null)?.code === 'TOOL_RESULT_EXPIRED'
 }
 
 /** 结果正文的展示视图（结构化解析 + 降级提示） */
@@ -176,6 +146,23 @@ function parsedOf(item: ToolCallItem): ResultView {
 function toggleRaw(item: ToolCallItem): void {
   const panel = panelOf(item)
   panel.raw = !panel.raw
+}
+
+/**
+ * 各条调用的**截断说明**（`call_id` → 一句），一次算完供模板读取（宪章原则五）。
+ * 文案判定在 `utils/tool-result-hint.ts`（纯函数，可穷举单测）。
+ */
+const bodyHints = computed(() => {
+  const hints = new Map<string, string>()
+  for (const item of props.items) {
+    const hint = resultHint(item)
+    if (hint !== '') hints.set(item.callId, hint)
+  }
+  return hints
+})
+
+function bodyHintOf(item: ToolCallItem): string {
+  return bodyHints.value.get(item.callId) ?? NO_HINT
 }
 </script>
 
@@ -247,14 +234,8 @@ function toggleRaw(item: ToolCallItem): void {
             入参：{{ formatArgsDigest(item.argsDigest) }}
           </p>
 
-          <p v-if="panelOf(item).loading" class="tool-call__hint">加载中…</p>
-          <p v-else-if="panelOf(item).expired" class="tool-call__hint">
-            内容已被临时空间清理（原 {{ formatBytes(item.artifactSize ?? 0) }}）
-          </p>
-          <p v-else-if="panelOf(item).error" class="tool-call__hint tool-call__hint--error">
-            {{ panelOf(item).error }}
-          </p>
-          <template v-else-if="displayContent(item)">
+          <!-- 正文：有就立刻渲染——外置结果是**截断版先显示**，全文拉到后原位替换（2026-11-07） -->
+          <template v-if="displayContent(item)">
             <!-- 逃生舱在**上方**：结构化视图里的截断提示写的就是"点上方"（两处口径一致） -->
             <button
               v-if="parsedOf(item).structured"
@@ -277,9 +258,10 @@ function toggleRaw(item: ToolCallItem): void {
             <p v-if="parsedOf(item).hint" class="tool-call__hint">{{ parsedOf(item).hint }}</p>
           </template>
           <!-- running 不可展开，故此处只剩"终态但无内容"一种情况 -->
-          <p v-else class="tool-call__hint">无结果内容</p>
+          <p v-else-if="!bodyHintOf(item)" class="tool-call__hint">无结果内容</p>
 
-          <p v-if="item.truncated" class="tool-call__hint">结果过大，仅保留了前一部分</p>
+          <!-- 正文下方一行说明：这是不是截断版、完整的那份在哪（判定见 `utils/tool-result-hint.ts`） -->
+          <p v-if="bodyHintOf(item)" class="tool-call__hint">{{ bodyHintOf(item) }}</p>
         </div>
       </div>
     </div>
@@ -405,10 +387,6 @@ function toggleRaw(item: ToolCallItem): void {
 .tool-call__hint {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
-}
-
-.tool-call__hint--error {
-  color: var(--color-status-error);
 }
 
 .tool-call__content {

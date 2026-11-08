@@ -17,6 +17,7 @@ import ErrorNotice from '../common/ErrorNotice.vue'
 import ScheduleEntryButton from '../schedule/ScheduleEntryButton.vue'
 import AgentPanel from './AgentPanel.vue'
 import ChatHeader from './ChatHeader.vue'
+import ChatHero from './ChatHero.vue'
 import Composer from './Composer.vue'
 import ComposerToolbar from './ComposerToolbar.vue'
 import MentionPicker from './MentionPicker.vue'
@@ -24,8 +25,8 @@ import MentionPopup from './MentionPopup.vue'
 import InteractionDialog from './InteractionDialog.vue'
 import MessageList from './MessageList.vue'
 import ProducedBell from './ProducedBell.vue'
+import SkillPicker from './SkillPicker.vue'
 import SessionSearch from './SessionSearch.vue'
-import SuggestionCard from './SuggestionCard.vue'
 import TermNormalizeDialog from './TermNormalizeDialog.vue'
 import UploadHintBubble from './UploadHintBubble.vue'
 import UploadMenu from './UploadMenu.vue'
@@ -45,6 +46,7 @@ const {
   models,
   uploads,
   mention,
+  skill,
   workspace,
   emptyHint,
   agents,
@@ -79,7 +81,6 @@ const {
   onUseReplacement,
   onKeepOriginal,
   onLoadMore,
-  onLoadToolResult,
   onFeedback,
   onToggleThinking,
   onSelectModel,
@@ -105,6 +106,11 @@ const {
   onConfirmMention,
   onMentionKey,
   onRemoveReference,
+  // 2026-11-07：`/技能名` 的选择与落字（接线在 `useSkillComposer`）
+  onPickSkill,
+  onConfirmSkill,
+  onSkillKey,
+  onRemoveSkill,
   // 015：定时任务设置页的开合状态（入口按钮在本组件，覆盖层由 `WorkbenchView` 渲染）
   schedule,
 } = useChatPanel()
@@ -180,7 +186,7 @@ function onStarterClick(starter: AgentStarter): void {
 function onEscapeKey(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || event.defaultPrevented) return
   if (document.querySelector('dialog[open]')) return
-  if (mention.open.value || search.isOpen.value) return
+  if (mention.open.value || skill.open.value || search.isOpen.value) return
   if (!sending.value) return
   event.preventDefault()
   onStop()
@@ -242,7 +248,6 @@ onBeforeUnmount(() => {
         :search-keyword="search.keyword.value"
         :active-match-index="search.activeIndex.value"
         :has-more="threads.hasMore.value"
-        :load-tool-result="onLoadToolResult"
         :next-steps="nextSteps.steps.value"
         @load-more="onLoadMore"
         @feedback="onFeedback"
@@ -255,31 +260,15 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div v-else class="chat-panel__hero">
-      <div class="chat-panel__hero-inner">
-        <h1 class="chat-panel__hero-title">{{ heroWelcome || '开始新的对话' }}</h1>
-        <p v-if="!agentSelected" class="chat-panel__hero-desc">
-          请先选择数字人，再使用下方的问题快速开始。
-        </p>
-        <p v-else-if="heroStarters.length === 0" class="chat-panel__hero-desc">
-          在下方输入消息，即可开始本轮求解。
-        </p>
-
-        <ul v-if="heroStarters.length > 0" class="chat-panel__starters">
-          <li v-for="(starter, index) in heroStarters" :key="index">
-            <!-- 与回答下方的下一步动作卡片**同一枚卡片**（FR-012）：两处必须同源同形，
-                 否则就是引入了第二套视觉体系。关联工具不在此展示（它只用于生成隐藏引导，
-                 `exposed_name` 亦是内部实现细节，对业务用户无意义） -->
-            <SuggestionCard
-              :text="starter.prompt"
-              :disabled="!agentSelected || streaming !== null"
-              :data-test="`chat-starter-${index}`"
-              @select="onStarterClick(starter)"
-            />
-          </li>
-        </ul>
-      </div>
-    </div>
+    <!-- 首屏引导（004）：欢迎语与问题卡片全部来自当前数字人，本体在 `ChatHero.vue` -->
+    <ChatHero
+      v-else
+      :welcome="heroWelcome"
+      :starters="heroStarters"
+      :agent-selected="agentSelected"
+      :busy="streaming !== null"
+      @select="onStarterClick"
+    />
 
     <!--
       本轮失败提示（TR-58 分流）：本轮用户消息还在缓存里（服务端已终局）→「重试本轮」真正重发；
@@ -316,10 +305,14 @@ onBeforeUnmount(() => {
       :disabled="sending || preparing"
       :references="mention.references.value"
       :mention-open="mention.open.value"
+      :skill="skill.selected.value"
+      :skill-open="skill.open.value"
       @update:model-value="onUpdateDraft"
       @input-text="onInputText"
       @mention-key="onMentionKey"
       @remove-reference="onRemoveReference"
+      @skill-key="onSkillKey"
+      @remove-skill="onRemoveSkill"
       @send="onSend"
       @stop="onStop"
     >
@@ -348,6 +341,29 @@ onBeforeUnmount(() => {
             @move="mention.move"
             @confirm="onConfirmMention"
             @back="mention.back"
+          />
+        </MentionPopup>
+      </template>
+
+      <template #skill="{ anchor }">
+        <MentionPopup
+          class="chat-panel__mention"
+          :open="skill.open.value"
+          :anchor="anchor"
+          :caret="skill.caret.value"
+          @close="skill.close"
+        >
+          <SkillPicker
+            :open="skill.open.value"
+            :skills="skill.filtered.value"
+            :active-index="skill.activeIndex.value"
+            :loading="skill.loading.value"
+            :error="skill.error.value"
+            :selected="skill.selected.value"
+            @pick="onPickSkill"
+            @close="skill.close"
+            @move="skill.move"
+            @confirm="onConfirmSkill"
           />
         </MentionPopup>
       </template>
@@ -442,53 +458,7 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.chat-panel__hero {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  text-align: center;
-  padding: var(--space-4);
-  /* 问题实例全部平铺，可能很多：超出时整块滚动，不挤压输入区 */
-  overflow-y: auto;
-}
-
-.chat-panel__hero-inner {
-  width: 100%;
-  max-width: 720px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.chat-panel__hero-title {
-  font-size: var(--font-size-xl);
-  font-weight: 600;
-}
-
-.chat-panel__hero-desc {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-
-/* 卡片本体（`.suggestion-card`）由 `SuggestionCard.vue` 自带：首屏与回答下方共用同一枚卡片，
-   样式也必须在同一处（FR-012），故这里只留栅格 */
-.chat-panel__starters {
-  width: 100%;
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  /* 首屏**多列紧凑**（2026-10-12 产品口径）：一行可放多张、按内容自动铺满整行，
-     纵向高度随列数成比例下降。与回答下方的下一步动作卡片（单列）**刻意不同**——
-     两处共用同一枚卡片（FR-012），但栅格各自定义 */
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: var(--space-2);
-}
-
+/* 首屏引导（`.chat-hero`）的样式随 `ChatHero.vue` 走：那块布局只属于它 */
 .chat-panel__error {
   flex: none;
   margin: 0 var(--space-5) var(--space-2);

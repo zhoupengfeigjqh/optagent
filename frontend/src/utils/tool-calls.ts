@@ -21,15 +21,15 @@ export interface ToolCallItem {
    */
   status: 'running' | 'success' | 'error'
   durationMs?: number
-  /** 结果字节数 */
+  /** 原始结果字节数 */
   size?: number
-  /** 内联结果正文（小结果，随详情下发，展开即可见） */
+  /** 记录内联正文（展开即可见；超阈值时是截断版） */
   content?: string
-  /** 外置正文大小（有值 = 展开时才拉取） */
+  /** 外置副本大小（有值 = 展开时另拉全文，截断版先显示） */
   artifactSize?: number
   /** 规则提取的摘要（外置结果的卡片说明） */
   summary?: string
-  /** 结果被落盘上限截断 */
+  /** 记录正文被截断；`size > artifactSize` 表示副本本身也被上限截断 */
   truncated?: boolean
   /** 入参短标量摘要（原文不下发） */
   argsDigest?: Record<string, string>

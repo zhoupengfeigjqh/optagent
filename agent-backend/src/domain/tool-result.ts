@@ -4,19 +4,19 @@
  * 本模块只做**纯函数**转换，不碰磁盘，便于单测边界：
  * - `serializeToolResult`：把 provider 的 AgentToolResult 拍平成文本
  *   （`content` 块数组 → 文本拼接；图片块只留占位，**绝不落 base64**）
- * - 体积阈值：超过内联阈值才外置为临时空间文件（见 tool-events）
+ * - 体积阈值：超过内联阈值的**外部来源**结果才外置为临时空间文件（见 tool-result-split）
  * - `summarizeResult`：**规则提取**，不调 LLM（否则每轮多一次模型调用）
- * - `artifactFileName`：外置文件名的唯一推导入口（路径不从数据里读，防注入）
+ * - `artifactFileName` / `artifactRelPath`：外置文件路径的唯一推导入口（路径不从数据里读，防注入）
+ * - `withRecordTruncationNote`：截断说明的唯一实现（有副本给路径，无副本说未保存）
  * - `digestArgs`：入参只留**短标量摘要**，长字段/嵌套结构替换为占位符
  */
-import path from 'node:path';
 
 /** 结果 ≤ 该字节数：原文内联进 tool-events.jsonl 的 `inline_content` */
-export const TOOL_INLINE_MAX_BYTES = 64 * 1024;
+export const TOOL_INLINE_MAX_BYTES = 32 * 1024;
 /** 外置正文的落盘上限 2MB（超出截断并标 truncated） */
 export const TOOL_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024;
-/** 摘要字符上限（外置结果的索引行展示用） */
-export const TOOL_SUMMARY_MAX_CHARS = 200;
+/** 摘要字符上限（外置结果的卡片说明用） */
+const TOOL_SUMMARY_MAX_CHARS = 200;
 /** 入参摘要：单值字符上限 */
 const DIGEST_VALUE_MAX_CHARS = 120;
 /** 入参摘要：最多保留几个键 */
@@ -86,6 +86,34 @@ export function truncateToBytes(
   return { text: sliced, truncated: true };
 }
 
+export interface TruncationNoteOptions {
+  /** 完整正文所在的临时空间相对路径（有值 = 已落盘，模型可按路径 `read_file` 取回） */
+  artifactPath?: string;
+}
+
+/**
+ * **记录截断说明**（附在 `inline_content` 末尾）——唯一实现，两种去向。
+ *
+ * 记录里的正文只有前 `TOOL_INLINE_MAX_BYTES`，末尾必须告诉模型"完整的那份在哪"：
+ * - **有副本**（外部来源已落盘）→ 给临时空间路径，`read_file` 可取回；
+ * - **无副本**（内置工具可原样重取 / 外置写盘失败）→ 明说未保存，按更小范围重新调用。
+ *
+ * 注意：截断只发生在**记录/回灌**这条线上——模型当轮拿到的仍是完整结果
+ * （`read_file` 受 `READ_TRUNCATE_KB` 控制），因此提示语写"重新调用"而非"本轮已少给"。
+ */
+export function withRecordTruncationNote(
+  text: string,
+  totalBytes: number,
+  options: TruncationNoteOptions = {},
+): string {
+  const head =
+    `${text}\n\n（记录已截断：原文 ${formatBytes(totalBytes)}，` +
+    `仅保留前 ${formatBytes(TOOL_INLINE_MAX_BYTES)}；`;
+  return options.artifactPath
+    ? `${head}完整正文在 ${options.artifactPath}，可用 read_file 读取）`
+    : `${head}完整内容未保存，要查看更多请重新调用该工具，用更小范围或 offset 分段获取）`;
+}
+
 /**
  * 规则提取摘要（首个非空行 + 总行数）。
  *
@@ -110,7 +138,7 @@ export function artifactFileName(threadId: string, callId: string): string {
   return `${threadId}_toolresult_${sanitizeCallId(callId)}.txt`;
 }
 
-/** 外置正文的 user-data 相对路径（供索引行展示与内部读取） */
+/** 外置正文的 user-data 相对路径（供截断说明、占位行与内部读取） */
 export function artifactRelPath(threadId: string, callId: string, tmpSpace: string): string {
   return `${tmpSpace}/${artifactFileName(threadId, callId)}`;
 }
@@ -159,12 +187,6 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** 文件名是否为本模块推导出的外置正文（读取前的二次校验） */
-export function isArtifactFileName(filename: string, threadId: string): boolean {
-  if (path.basename(filename) !== filename) return false;
-  return filename.startsWith(`${threadId}_toolresult_`) && filename.endsWith('.txt');
 }
 
 function safeJson(value: unknown): string {

@@ -27,9 +27,11 @@ import { getCurrentUser } from '../domain/current-user.js';
 import {
   DirValidationError,
   ScenarioNotConfiguredError,
+  agentDir,
   parseSpaceDir,
   userDataDir,
 } from '../domain/dirs.js';
+import { listSkillNames } from '../domain/tools/skill-access.js';
 import type { FocusToolTip } from '../domain/intent-focus/types.js';
 import { MAX_ACTIVE_THREADS_PER_USER } from '../domain/run-limits.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
@@ -62,6 +64,9 @@ const messageBodySchema = {
     // 018：术语替换前的用户原话 —— **已停用**（2026-11-07 展示与提交同源，前端不再发送）。
     // 服务端保留解析以兼容旧客户端：收到时仍按"`content` 给模型、本字段落盘"处理。
     original_content: { type: 'string', minLength: 1 },
+    // 2026-11-07：用户显式选中的技能（`/技能名`）。只影响本轮 System Prompt（只插入该技能）
+    // 与聚焦判定（自动跳过），并随 user 行落盘供回放。
+    skill: { type: 'string', minLength: 1, maxLength: 64 },
     attachments: {
       type: 'array',
       maxItems: MAX_ATTACHMENTS,
@@ -106,6 +111,13 @@ function assertStrictMessageBody(body: unknown): void {
       400,
       'VALIDATION_FAILED',
       `skip_intent_focus 须为布尔值（当前：${JSON.stringify(raw.skip_intent_focus)}）`,
+    );
+  }
+  if (raw.skill !== undefined && (typeof raw.skill !== 'string' || raw.skill.trim() === '')) {
+    throw new ApiError(
+      400,
+      'VALIDATION_FAILED',
+      `skill 须为非空技能名（当前：${JSON.stringify(raw.skill)}）`,
     );
   }
 }
@@ -183,6 +195,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         tool_tips?: FocusToolTip[];
         /** 018：术语替换前的原话（已停用，仅为旧客户端兼容；模型仍看 `content`） */
         original_content?: string;
+        /** 2026-11-07：用户显式选中的技能（`/技能名`） */
+        skill?: string;
       };
 
       // 归属唯一来源＝服务端当前选中数字人；不可用（已被移除/配置损坏）→ 409 AGENT_NOT_AVAILABLE
@@ -190,6 +204,27 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         notSelectedMessage: '请先选定数字人再发送消息',
         route: 'POST /api/threads/:id/messages',
       });
+      // 2026-11-07：显式技能校验（存在性）。先于会话/配额/建实例——纯请求体校验，
+      // 失败即普通 JSON 错误、不开 SSE，也不占用并发额度。
+      // 名称安全由"必须命中目录清单"天然覆盖（`../x`、含分隔符的串都不可能出现在清单里）。
+      const skill = body.skill?.trim();
+      if (body.skill !== undefined && skill !== undefined) {
+        const available = listSkillNames(
+          path.join(agentDir(ctx.config.optAgentRoot, userId, agentName), 'skills'),
+        );
+        if (!available.includes(skill)) {
+          const hint =
+            available.length > 0
+              ? `；可用技能：${available.join('、')}`
+              : '；该数字人当前没有配置任何技能';
+          throw new ApiError(
+            400,
+            'VALIDATION_FAILED',
+            `当前数字人没有名为「${skill}」的技能${hint}`,
+          );
+        }
+      }
+
       // 会话不属于当前数字人 → 404（与"不存在"不可区分，FR-021）
       ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404（全局映射）
 
@@ -287,6 +322,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           ...(body.skip_intent_focus === true ? { skipIntentFocus: true } : {}),
           // 016：卡片回传的隐藏工具提示（只进本轮系统提示词；不落历史）
           ...(body.tool_tips && body.tool_tips.length > 0 ? { toolTips: body.tool_tips } : {}),
+          // 2026-11-07：显式技能 —— 只插入该技能 + 自动跳过意图聚焦 + 随 user 行落盘
+          ...(skill ? { skill } : {}),
           // 018：术语替换后，模型看替换文、历史与气泡留原话
           ...(body.original_content && body.original_content !== body.content
             ? { displayContent: body.original_content }

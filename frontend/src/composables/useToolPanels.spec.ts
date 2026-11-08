@@ -2,10 +2,12 @@
  * 工具查看态测试（002 特性 / TR-36）
  *
  * 守三件事：
- * 1. `panelOf` 返回的必须是**同一个 reactive 对象**（否则组件里改 `loading` 不触发更新，
- *    卡片会永远停在"加载中"——这是本模块文档注释里点明的坑）
+ * 1. `panelOf` 返回的必须是**同一个 reactive 对象**（否则组件里改展开态不触发更新，
+ *    卡片会永远停在"刚展开"的样子——这是本模块文档注释里点明的坑）
  * 2. 明细展开态按分组键读写
  * 3. `reset()` 能清空（模块级单例，测试之间必须隔离）
+ *
+ * 2026-11-08：卡片不再按需拉取外置正文，状态里只剩 `open` / `raw` 两个字段。
  */
 import { nextTick, watchEffect } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -24,9 +26,9 @@ describe('useToolPanels', () => {
 
     const seen: boolean[] = []
     const stop = watchEffect(() => {
-      seen.push(panels.panelOf('c1').loading)
+      seen.push(panels.panelOf('c1').open)
     })
-    panels.panelOf('c1').loading = true
+    panels.panelOf('c1').open = true
     await nextTick()
     expect(seen).toEqual([false, true])
     // 必须停掉：模块级单例上的 effect 不会随组件卸载，留着会在后续用例插入新键时
@@ -34,15 +36,8 @@ describe('useToolPanels', () => {
     stop()
   })
 
-  it('新 call_id 的初始态：收起、未加载、无降级标记、正文按结构化展示', () => {
-    expect(useToolPanels().panelOf('c9')).toEqual({
-      open: false,
-      loading: false,
-      content: null,
-      expired: false,
-      error: null,
-      raw: false,
-    })
+  it('新 call_id 的初始态：收起、正文按结构化展示', () => {
+    expect(useToolPanels().panelOf('c9')).toEqual({ open: false, raw: false })
   })
 
   it('明细展开态：默认收起，可读写', () => {
@@ -57,13 +52,13 @@ describe('useToolPanels', () => {
   it('reset 清空条目态与明细态（测试隔离依赖它）', () => {
     const panels = useToolPanels()
     panels.panelOf('c1').open = true
-    panels.panelOf('c1').content = '正文'
+    panels.panelOf('c1').raw = true
     panels.setDetailsOpen('g1', true)
 
     panels.reset()
 
     expect(panels.panelOf('c1').open).toBe(false)
-    expect(panels.panelOf('c1').content).toBeNull()
+    expect(panels.panelOf('c1').raw).toBe(false)
     expect(panels.isDetailsOpen('g1')).toBe(false)
   })
 
@@ -72,17 +67,16 @@ describe('useToolPanels', () => {
   })
 
   /**
-   * 上限（2026-10-27）：模板对每张工具卡片都会 `panelOf`，量级 = 本页出现过的调用数；
-   * `content` 可达数百 KB 且切会话不清，必须有硬上限，否则长会话无界增长。
+   * 上限（2026-10-27）：模板对**每张**工具卡片都会 `panelOf`，量级 = 本页出现过的调用数；
+   * 长会话切来切去会无界增长，必须有硬上限。
    */
   it('条目态按插入顺序 FIFO 淘汰：超 200 条后最旧的被清掉，最新的仍在', () => {
     const panels = useToolPanels()
-    for (let index = 0; index < 201; index += 1) panels.panelOf(`c${index}`).content = 'x'
+    for (let index = 0; index < 201; index += 1) panels.panelOf(`c${index}`).open = true
 
-    // 最旧的一条已被淘汰：重新取到的是全新初始态（正文丢失 = 内存已释放）
-    expect(panels.panelOf('c0').content).toBeNull()
+    // 最旧的一条已被淘汰：重新取到的是全新初始态（展开态丢失 = 内存已释放）
+    expect(panels.panelOf('c0').open).toBe(false)
     // 最新的一条仍在记忆里
-    panels.panelOf('c200').open = true
     expect(panels.panelOf('c200').open).toBe(true)
   })
 

@@ -183,6 +183,12 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     toolTips?: ToolTip[]
     /** 013：本轮跳过意图聚焦（仅首屏问题实例卡片）；只影响本次判定，不落历史 */
     skipIntentFocus?: boolean
+    /**
+     * 2026-11-07：用户显式选中的技能（`/技能名`）。
+     *
+     * 服务端据此"只插入该技能 + 自动跳过聚焦"，并随 user 行落盘；前端只负责结构化提交。
+     */
+    skill?: string
   }): Promise<void> {
     // 进行中直接忽略，不重复发起（FR-006）
     if (phase.value === RUN_PHASE.STREAMING) {
@@ -217,6 +223,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     pendingUserMessage.value = {
       content: payload.content,
       attachments: payload.attachments,
+      ...(payload.skill ? { skill: payload.skill } : {}),
     }
     phase.value = RUN_PHASE.STREAMING
 
@@ -228,6 +235,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
       ...(payload.toolTips && payload.toolTips.length > 0 ? { toolTips: payload.toolTips } : {}),
       ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
+      ...(payload.skill ? { skill: payload.skill } : {}),
     })
 
     controller = new AbortController()
@@ -333,7 +341,11 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     if (!turn || phase.value === RUN_PHASE.STREAMING) {
       return
     }
-    await send({ content: turn.content, attachments: turn.attachments })
+    await send({
+      content: turn.content,
+      attachments: turn.attachments,
+      ...(turn.skill ? { skill: turn.skill } : {}),
+    })
   }
 
   /**

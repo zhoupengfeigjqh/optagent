@@ -60,6 +60,8 @@ export async function consumeTurn(
   const { userId, threadId, agent, thinking } = opts;
   const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
   if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
+  // 2026-11-07：显式技能随 user 行落盘——刷新/重新生成时据此复原"只含该技能"的提示词
+  if (opts.skill) userMessage.skill = opts.skill;
   /**
    * 018：**提交给模型的是替换后文本，落进历史的是用户原话**。
    *
@@ -104,14 +106,19 @@ export async function consumeTurn(
    * 归一放在域层而不是路由：任何调用方（直接 `startRun` 的内部调用、测试、将来新增的入口）
    * 都受同一约束，不依赖"前端记得带 skip_intent_focus"。
    *
-   * 两条跳过来源：
+   * 三条跳过来源：
    * - 显式标记 `skip_intent_focus`（首屏问题实例卡片携带）；
-   * - `guidance` 非空白（首屏问题实例关联工具引导，与聚焦提示不共存）。
+   * - `guidance` 非空白（首屏问题实例关联工具引导，与聚焦提示不共存）；
+   * - `skill` 非空（2026-11-07：用户已用 `/技能名` 指定技能，"再判一次该用什么技能"
+   *   既无意义又可能与"只插入该技能"冲突）。
    *
    * 2026-11 修订：**下一步动作卡片点击不跳过**——它走结构化的 `tool_tips` 字段而非
    * `guidance`，聚焦在本轮照常重判（`tool_tips` 段与聚焦提示同轮共存）。
    */
-  const skipFocus = opts.skipIntentFocus === true || (opts.guidance ?? '').trim() !== '';
+  const skipFocus =
+    opts.skipIntentFocus === true ||
+    (opts.guidance ?? '').trim() !== '' ||
+    (opts.skill ?? '') !== '';
   /**
    * 本轮结局：供收尾日志使用（任务 2026-09-16）。
    *
@@ -219,6 +226,7 @@ export async function consumeTurn(
       threadId,
       messages: prompt.messages,
       ...(systemExtra ? { systemExtra } : {}),
+      ...(opts.skill ? { skill: opts.skill } : {}),
       thinking,
       ...(opts.model ? { model: opts.model } : {}),
       signal: run.controller.signal,

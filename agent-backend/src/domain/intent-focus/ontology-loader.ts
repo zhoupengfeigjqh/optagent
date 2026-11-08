@@ -93,6 +93,7 @@ function parseBehaviors(value: unknown, warnings: string[], file: string): Ontol
     result.push({
       name,
       title: normalizeText(record.title) ?? name,
+      description: normalizeText(record.description) ?? '',
       opType: normalizeText(record.op_type),
     });
   }

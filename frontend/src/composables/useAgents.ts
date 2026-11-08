@@ -31,8 +31,12 @@ import type { ToastStore } from './useToast'
  *
  * 只在前端"点击发送且仍有灰"的窗口内轮询，上限 10s，不是常驻轮询
  * （常驻的 5s 轮询早已被 SSE 取代，勿恢复）。
+ *
+ * 2026-11-07：500ms → 2s。轮询只是 **SSE 订阅不上时的兜底**，不是主通道；
+ * 一次 10s 等待窗口的请求数从约 20 次降到 ≤6 次。代价是 SSE 已把状态推成
+ * 绿/红、但本轮正在 sleep 时，最多再多等一个间隔才提交（≤2s）。
  */
-const MCP_READY_POLL_MS = 500
+const MCP_READY_POLL_MS = 2_000
 
 /** 构造参数。 */
 export interface AgentsDeps {
@@ -152,7 +156,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
    * 有界等待"灰色消失"（2026-10-18）。
    *
    * 三重驱动：先发一次预热（实例不存在时后端不会自己建），随后 SSE 会推落定结果；
-   * 同时每 500ms 兜底拉一次 GET——SSE 在极端环境（代理/禁用）可能根本订阅不上，
+   * 同时每 2s 兜底拉一次 GET——SSE 在极端环境（代理/禁用）可能根本订阅不上，
    * 只等推送会必然超时。
    *
    * @returns `true` = 每个服务都有连接结果（connected / failed，含"没有 MCP 服务"）；

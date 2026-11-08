@@ -72,9 +72,11 @@
 |---|---|---|---|
 | `name` | string | 是 | 行为标识 |
 | `title` | string | 是 | 中文标题；缺失时回退 `name`（解析期即兜底） |
+| `description` | string | 是 | 行为描述；缺失为空串（题面降级顺序 `description → title → name` 在此之后统一裁决） |
 | `opType` | string \| null | 否 | `command` / `query` 等；仅解析，不参与题面 |
 
-> 2026-11-06：`OntologyFunction` 与 `OntologyRule` 类型已删除；`description` 从未建模。
+> 2026-11-06：`OntologyFunction` 与 `OntologyRule` 类型已删除。
+> 2026-11-07：`description` 纳入建模（此前未解析），作为行为题面的首选展示文本。
 
 ## 3. 判定实体
 
@@ -110,6 +112,7 @@
 | `qid` | string | 不透明题号 `c1..cN` |
 | `name` | string | 行为名 |
 | `title` | string | 展示标题（解析期已用 `name` 兜底） |
+| `description` | string | 行为描述；题面首选（空则降级 `title`，再降级 `name`），≤40 字截断 |
 | `ontologyId` | string | 来源本体 ID |
 | `ontologyName` | string \| null | 来源本体名 |
 | `index` | number | 原序下标 |

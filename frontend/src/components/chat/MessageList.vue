@@ -24,7 +24,6 @@ import type {
   Message,
   NextStepAction,
   ThreadSource,
-  ToolCallResult,
 } from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
 import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
@@ -76,11 +75,6 @@ const props = withDefaults(
     /** 是否还有更早的历史可加载 */
     hasMore?: boolean
     /**
-     * 工具卡片懒加载外置结果正文（002 特性）；缺省 = 卡片只展示已下发的内联内容与摘要。
-     * 仅历史气泡使用（流式轮次尚无结果）。
-     */
-    loadToolResult?: ((callId: string) => Promise<ToolCallResult>) | undefined
-    /**
      * 会话最新一轮的下一步动作提示（007）。
      *
      * 只在 `message.id === message_id` 的那条气泡上透传（`visibleActions` 也守同一判据）：
@@ -102,7 +96,6 @@ const props = withDefaults(
     searchKeyword: '',
     activeMatchIndex: -1,
     hasMore: false,
-    loadToolResult: undefined,
     nextSteps: null,
     threadId: null,
     source: null,
@@ -213,6 +206,7 @@ const pendingUserMessage = computed<Message | null>(() => {
     ts: '',
     feedback: null,
     attachments: pending.attachments,
+    ...(pending.skill ? { skill: pending.skill } : {}),
   }
 })
 
@@ -346,7 +340,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
           :search-keyword="searchKeyword"
           :active-match-index="activeMatchIndex"
           :match-index-base="matchStats.bases[index]"
-          :load-tool-result="loadToolResult"
           :next-steps="nextStepsOf(message)"
           :retry-label="retryLabels[index]"
           @feedback="onFeedback"

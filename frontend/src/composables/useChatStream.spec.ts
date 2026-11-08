@@ -78,6 +78,27 @@ describe('useChatStream —— 乐观用户气泡（十七次调整）', () => {
     await pending
   })
 
+  it('显式技能：请求体带 skill，乐观气泡也带（刷新前即可见）', async () => {
+    let body: Record<string, unknown> = {}
+    const inner = sseFetch(DONE_SCRIPT)
+    const fetchImpl = ((url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+      return inner(url, init)
+    }) as unknown as typeof fetch
+    const store = createChatStreamStore(makeDeps({ fetchImpl }))
+
+    const pending = store.send({
+      content: '查一下 S-1024 的账期',
+      attachments: [],
+      skill: 'supplier-query',
+    })
+    await flush()
+
+    expect(body.skill).toBe('supplier-query')
+    expect(store.pendingUserMessage.value?.skill).toBe('supplier-query')
+    await pending
+  })
+
   it('术语替换后：气泡显示的就是实际提交的替换文本（2026-11-07 展示与提交同源）', async () => {
     const store = createChatStreamStore(makeDeps({ fetchImpl: PENDING_FETCH }))
 

@@ -120,7 +120,7 @@ npm run lint && npm run typecheck && npm run test:coverage && npm run build
 
 **为什么"搬运"放后端、"能不能点"留前端**：值本身是服务给的（后端拿得到，正文外置时更是**只有后端**拿得到）；而前缀 = 用户**当前访问入口**，只有浏览器知道。若把 scheme 合法性判定也搬到后端，就会出现**第二个漂移点**：前端改了拒绝规则，记录里还留着按老规则挑出来的值。
 
-**为什么 sidecar 与正文分离**：① 正文外置（>64KB）时入口仍可用；② 不挤占模型上下文回灌预算（`tool-context.ts` 根本不读 `viewLinks`）。
+**为什么 sidecar 与正文分离**：① 正文外置时入口仍可用（外部来源超内联阈值会落临时空间）；② 不挤占模型上下文回灌预算（`tool-context.ts` 根本不读 `viewLinks`）。
 
 ## 9. 文件清单（本增量）
 
@@ -152,7 +152,7 @@ npm run lint && npm run typecheck && npm run test:coverage && npm run build
 | 项 | 内容 |
 |---|---|
 | 取舍：sidecar 存 `tool-events.jsonl` 行（与正文分离） | 正文外置时入口仍可用、不占回灌预算 |
-| 被否决：只在前端解析正文（上一增量做法） | 结果 >64KB 外置后前端**拿不到值**——这是本次要解决的核心问题 |
+| 被否决：只在前端解析正文（上一增量做法） | 结果外置后前端**拿不到值**——这是本次要解决的核心问题 |
 | 被否决：由模型在回答里转写地址 | 可能抄错、与记录**无绑定**（模型可漏写、改写）；需提示词约定与标记解析 |
 | 被否决：后端也判 scheme 合法性 | 制造第二个漂移点（前端改规则后，记录里留着按老规则挑出的值） |
 | 被否决：名称缺失时从 URL 末段取名 / "视图 1/2" 占位 | 等于**假装有名字**（原则九）；编号会随顺序漂移；地址永远可核对，比假名字可信 |
@@ -354,3 +354,62 @@ export function classifyLlmFailure(input: { message?: string; status?: number })
 ## 20. 验收
 
 见 [spec.md](./spec.md) §9.5；任务与勾选状态见 [tasks.md](./tasks.md)。
+
+---
+
+## 21. 技术方案（2026-11-07 增量：工具结果的体积分流）
+
+### 21.1 分流判据
+
+策略收在纯函数模块 `agent-backend/src/domain/tool-result-split.ts`（自 `tool-events.ts` 拆出，原则二）：
+
+| 条件（按序短路） | `inline_content` | 落盘 |
+|---|---|---|
+| `size ≤ TOOL_INLINE_MAX_BYTES` | 原文 | 无 |
+| 内置工具（`builtinToolNames()` 命中）**或** 未装配外置能力 | 前 32 KB + 说明「完整内容未保存，要查看更多请重新调用该工具」，`truncated: true` | **无** |
+| 其余（MCP 等外部来源） | 前 32 KB + 说明「完整正文在 `临时空间/…txt`，可用 read_file 读取」，`truncated: true` | 临时空间 `{thread_id}_toolresult_{call_id}.txt`，成功后补 `artifact_size` + `summary` |
+
+- 「内置工具」名单取自 `builtin-tool-catalog.ts` 的 `builtinToolNames()`——工具目录是唯一来源，新增内置工具自动归位，不需要第二份名单（原则二）。
+- 纯函数只算"事件行该写什么、要不要落盘"，不做 IO：写盘口 `ToolArtifactAccess` 仍由装配层（`FileAccess`）注入，缺省即退化为截断内联。
+- 三种"没有可用副本"的情形（内置工具 / 外置未装配 / 外置写失败）共用 `planTruncatedInline()` 与**同一句**说明（对模型是同一件事）；只有真落了盘才给路径。
+- 回灌侧（`tool-context.ts`）只看 `inline_content`：外部来源的截断版与内置工具走**同一条**预算逻辑，`systemExtra` 里不再有工具段。
+
+### 21.2 取舍
+
+| 取舍 | 必要性 | 被否决的更简方案 |
+|---|---|---|
+| 内置工具超阈值**不落副本**，只截断内联 | `read_file` / `grep_files` 的结果能用同一工具按更小范围 / `offset` 重取；副本既污染临时空间又无信息增量（用户实测:临时空间堆满 `*_toolresult_*.txt`） | 一律外置（旧行为）——每读一次大文件就在临时空间留一份无人再看的副本 |
+| 外部来源（MCP）**必须**留存副本，同时**也留截断正文** | 外部调用的重取可能产生副作用（写库 / 触发流程）或根本无法复现，丢掉即不可恢复；而只留 `summary` 等于让模型在 messages 里看不到任何内容与路径 | 一视同仁不落盘（丢数据）/ 只留索引行（旧行为，模型要多跳一步才知道路径） |
+| 截断说明写进 `inline_content` | 模型只读到事件行/messages 内容，说明必须与正文同处；写在别处（日志 / 新字段）它读不到 | 只标 `truncated` 不解释——模型会把截断当完整结果 |
+| 文案说"重新调用该工具，用更小范围或 offset" | 截断只发生在**记录/回灌**这条线，模型当轮拿到的是完整结果（`read_file` 属 `READ_TRUNCATE_KB` 管辖）；提示"本轮已少给"是假话 | 写"内容已被截断，无法查看"（等于让模型放弃） |
+| 删除 `systemExtra` 的工具结果索引段，回灌**只走 messages** | 截断正文已就近进 messages 且自带路径；索引段是同一事实的第二套口径（两处维护、两处测试）。被预算挤出的结果由**占位行带路径**兜底 | 保留索引段（同一事实两处维护，且与 messages 内容可能不一致） |
+| 卡片**不拉取**副本全文（2026-11-08） | 记录里已有正文；为看一眼 2 MB 副本付出的网络与 DOM 代价换不来信息（结构化解析也只在前 256K 内有意义）；全文需要时让助手 `read_file` 分段读，口径与回灌一致 | 展开即拉全文（旧行为）——响应体几 MB、`<pre>` 渲染数 MB 文本会顿 |
+| 内联阈值 64 KB → **32 KB** | 128 KB 回灌总预算下，64 KB 时代两条大结果就吃光预算，其余全变占位行 | 保持 64 KB（预算被单条挤占） |
+| **被否决**：为截断新增 SSE / 接口字段 | `truncated` / `size` / `artifact_size` 早已存在，前端只需按三者组合分流；新增字段要动契约与旧前端 | 新增 `truncation_reason` 字段（重复表达同一信息） |
+| **被否决**：回溯重算存量记录 | 存量内置工具结果仍以副本形式留在临时空间，按既有"30 天未访问"策略自然回收即可；重算要动历史文件、风险大于收益 | 一次性迁移脚本删除所有内置工具副本（可能误删 MCP 副本，且不可回滚） |
+
+### 21.3 文件清单（本增量）
+
+| 侧 | 文件 | 变更 |
+|---|---|---|
+| 后端 | `src/domain/tool-result-split.ts` | **新增**：`planSplit` / `planTruncatedInline` / `ToolArtifactAccess`（自 `tool-events.ts` 迁入）；外置分支同时产出截断正文 |
+| 后端 | `src/domain/tool-result.ts` | `TOOL_INLINE_MAX_BYTES` 64 → 32 KB；`withRecordTruncationNote()` 支持"有副本给路径 / 无副本说未保存"；`TOOL_SUMMARY_MAX_CHARS` 收为模块私有；删除无引用的 `isArtifactFileName()` |
+| 后端 | `src/domain/tool-events.ts` | 改为消费 `planSplit()`；`size` 恒为原始字节（不再被落盘尺寸覆盖）；写盘失败时改说明、删 `summary` |
+| 后端 | `src/domain/tool-context.ts` | **删除**索引段（`TOOL_INDEX_MAX_ITEMS` / `ArtifactIndexItem` / `formatArtifactIndex` / `selectReplay().index`）；占位行按"有无副本"给路径 |
+| 后端 | `src/domain/prompt-builder.ts` | 移除索引段拼装；工具结果只经 messages（含外部来源截断版） |
+| 后端 | `src/routes/threads.ts` | 删除 `GET /api/threads/:id/tool-calls/:callId`（2026-11-08，无消费方） |
+| 后端 | `src/domain/tool-result-split.ts` | `ToolArtifactAccess` 去掉 `resolveVerified`（只保留写口） |
+| 后端 | `src/domain/tool-events.ts` | 删除 `readArtifact()`（后端不再代读副本） |
+| 前端 | `src/components/chat/ToolCallList.vue` | 正文只读 `inline_content`，展开不请求；提示收敛为 `bodyHints` 一处 |
+| 前端 | `src/utils/tool-result-hint.ts` | **新增**：截断说明的唯一判据（纯函数，三种情形可穷举单测）；组件只负责渲染 |
+| 前端 | `src/components/chat/{ChatPanel,MessageList,MessageBubble}.vue`、`composables/useChatPanel.ts`、`composables/useThreads.ts`、`api/threads.ts`、`api/types.ts` | 删除 `loadToolResult` 装配链与 `ToolCallResult` 类型（2026-11-08：卡片不拉全文）；字段注释同步 |
+| 前端 | `src/composables/useToolPanels.ts` | 状态收敛为 `open` / `raw`（去掉 `content` / `loading` / `expired` / `error`） |
+
+### 21.4 覆盖率与平台差异（本增量）
+
+- **覆盖率**：`src/domain/tool-result-split.ts` 由 `tests/unit/tool-result-split.spec.ts` 全分支覆盖（含 `≤` 边界、内置 / 外部 / 无外置能力 / 副本超 2 MB）；`tool-context.ts` 的占位分支（带路径 / 不带路径）由同名 spec 覆盖；全局地板不下调。
+- **平台差异**：无新增风险。截断按 `Buffer.byteLength(..., 'utf8')` 计字节，不改路径与大小写逻辑；测试全部宿主机本地执行。
+
+### 21.5 验收
+
+见 [spec.md](./spec.md) §9.8；任务与勾选状态见 [tasks.md](./tasks.md)。

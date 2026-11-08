@@ -19,7 +19,6 @@ import type {
   StopResponse,
   ThreadCreateResponse,
   ThreadDetail,
-  ToolCallResult,
 } from './types'
 
 /** 会话详情分页参数。 */
@@ -49,13 +48,6 @@ export interface ThreadsApi {
   list(agentName?: string): Promise<Conversation[]>
   /** `GET /api/threads/{id}` → 详情（含 `total` / `messages` / `running`） */
   detail(threadId: string, query?: ThreadDetailQuery): Promise<ThreadDetail>
-  /**
-   * `GET /api/threads/{id}/tool-calls/{call_id}` → 外置结果正文（卡片点开时才调用）。
-   *
-   * 正文已被临时空间清理（或用户删除）时返回 **410 `TOOL_RESULT_EXPIRED`**：
-   * 卡片应降级为"内容已过期"，**不是**错误态。
-   */
-  toolCallResult(threadId: string, callId: string): Promise<ToolCallResult>
   /** `PATCH /api/threads/{id}` → 重命名（本期无 UI 入口，接口保留） */
   rename(threadId: string, title: string): Promise<{ thread_id: string; title: string }>
   /** `DELETE /api/threads/{id}` → 204（服务端先 stop 进行中的 run） */
@@ -91,9 +83,6 @@ export function createThreadsApi(client: HttpClient): ThreadsApi {
         limit: query?.limit,
         offset: query?.offset,
       }),
-
-    toolCallResult: (threadId, callId) =>
-      client.get<ToolCallResult>(`${base(threadId)}/tool-calls/${encodeURIComponent(callId)}`),
 
     rename: (threadId, title) =>
       client.patch<{ thread_id: string; title: string }>(base(threadId), { title }),
