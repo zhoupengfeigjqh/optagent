@@ -40,6 +40,7 @@
 | R25 | **聊天流首帧与心跳**（2026-11-06）：`POST /api/threads/{id}/messages` 建连即写注释帧 `: connected`，此后每 15s 写 `: ping`；响应头补 `x-accel-buffering: no`（详见 §24） | 连接层行为（新增注释帧 + 响应头） | 否（注释帧按 SSE 规范被客户端忽略；事件集合 / 载荷 / 终结语义零变更，前端零改动） |
 | R26 | **意图聚焦一阶发散**（特性 `019-intent-focus-expansion`，2026-11-08）：SOUL.md frontmatter 新增 `intent_focus_depth`（0~2，仅开启且非 0 时写入）；聚焦提示升级为分行块（新增概念段与上游段）、长度上限按阶数分档 1200/1600/2000；`tool_tips` 候选扩为「直接命中 + 下游发散」（wire 四字段不变） | 新增配置字段 + 提示格式/长度变更 + 候选来源扩展 | 否（阶数缺省 0 = 只聚焦本身，提示内容等于 016 口径；`tool_tips` 结构不变、前端零改动；判分调用数不变） |
 | R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 3 个工具失败错误码与 2 个结构化日志事件（详见 §25） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
+| R28 | **本体行为规则闸门**（特性 `021-ontology-rule-gate`，2026-11-09）：本体行为执行前按 `ontology.yaml` 的 `rules`（`position: 前置`）做**确定性规则求值**（硬编码解析 `rule_design`，不经过 LLM）——所需函数未执行则暂停并反馈规则全文，求值 `false` 或规则不可用则拒绝并**中止整轮**；执行成功后把 `position: 后置` 的规则全文附加到工具结果。新增 1 个工具失败错误码、1 个失败轮错误码（`ONTOLOGY_RULE_DENIED`）、`error` 对象新增可选 `details`、6 个结构化日志事件（详见 §26） | 行为变更（工具可能被暂停 / 拒绝）+ `error` 载荷可选增量 | 否（无端点 / 无新增 SSE 事件类型；`details` 为可选字段，旧前端忽略；无规则的本体与非本体工具走原路径；前端仅新增一条错误码文案映射） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1708,3 +1709,84 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 - **兼容**：无端点 / SSE 事件 / 持久化字段变更；前端零改动（只消费 `isError` 与正文）；HITL 语义不变（仅顺序前置）；白名单语义不变（"看得见什么"与"能否执行"分层）。
 - **回滚**：删除 `domain/scope-guard/**` 与 `infra/tool-scope-guard.ts`，还原 `agent-factory.ts` 三处装配行；无数据迁移、无平台侧改动。策略级回滚：把该行为 `scope` 改为 `everyone` 并重新部署。
 - **测试**：`agent-backend/tests/unit/ontology-files.spec.ts`、`scope-guard-policy.spec.ts`、`scope-guard-catalog.spec.ts`、`tool-scope-guard.spec.ts`、`scope-guard-loop.spec.ts`（拒绝 → `isError` 接线）；端到端"MCP 工具被拒"依赖真实服务，由 `specs/020-ontology-scope-guard/quickstart.md` 场景 B/C/E 手验。
+
+---
+
+## §26 R28 — 本体行为规则闸门（2026-11-09，特性 `021-ontology-rule-gate`）
+
+### 26.1 语义
+
+本体行为（`query` 与 `command` 一视同仁）在**权限闸门通过之后、真正执行之前**，增加一次**确定性规则判定**；
+判定输入是「轮内函数执行记录」与「`ontology.yaml` 的 `rules[].rule_design`」，**不经过 LLM**：
+
+1. **轮内函数记录**：每轮对话新建一份 `函数名 → 最后一次成功调用的业务数据` 的内存映射。
+   只记"函数"（非平台内置工具、非本体行为），失败不记、同名覆盖（取最新一次成功）、轮末丢弃（不落盘）。
+2. **前置规则**（`position: 前置`，同一行为可多条，逻辑与）：
+   - `related_functions` 未全部记录 → **暂停**：行为不执行，返回规则全文 + 缺失函数清单，本轮继续；
+   - 齐备 → 用记录对 `rule_design` 做两级 AND/OR 求值（`rule_design.combine` 组合组、组 `combine` 组合条件；
+     算子全集 16 个；`field` 支持 `.` 路径与 `[]` 数组元素层；`values` 恒为字符串数组，按字段声明类型强制）；
+   - `true` → 执行；`false` → **拒绝并中止整轮**（失败轮留痕 + 逐条原因）；
+   - 规则结构非法（`rules` 段不可解析、`related_functions` 非数组、`rule_design` 结构非法）→
+     **拒绝并中止** + error 级告警（fail-closed）；缺 `rule_design` 的前置规则不阻断、只告警。
+3. **后置规则**（`position: 后置`）：行为**执行成功**后，把规则全文以明确分界附着在结果之后，
+   提示模型继续调用相关函数完成推导；执行失败不追加。
+
+### 26.2 工具结果与错误码
+
+| 场景 | 通道 | 码 | 前端 |
+|---|---|---|---|
+| 前置规则缺函数（暂停） | 工具失败结果（`details.toolError`） | `ONTOLOGY_RULE_FUNCTIONS_MISSING` | 卡片按失败态展示正文，无需新增映射 |
+| 求值不成立 / 规则不可用（中止） | SSE `error` + 失败轮 `error.code` | `ONTOLOGY_RULE_DENIED` | 需新增一条文案映射 + `details` 受控透传 |
+
+两个码全局唯一，与 R27 的三码（`ONTOLOGY_SCOPE_DENIED` / `ONTOLOGY_BEHAVIOR_DISABLED` /
+`ONTOLOGY_SCOPE_UNAVAILABLE`）互不复用。
+
+### 26.3 `error` 载荷的可选增量
+
+```jsonc
+{
+  "code": "ONTOLOGY_RULE_DENIED",
+  "message": "本体行为「原材料采购和库存/CreatePurchaseRecord」未通过前置规则校验，本轮已中止。",
+  "details": [
+    "行为：原材料采购和库存/CreatePurchaseRecord",
+    "规则：采购-供应商名称一致（V05_SupplierExistence）",
+    "结论：供应商名称不存在，禁止创建采购单",
+    "未成立条件：checkSupplierExistence.pass eq \"true\""
+  ]
+}
+```
+
+- `details: string[]`，3~6 条，**只在 `ONTOLOGY_RULE_DENIED` 时出现**；同时进入 SSE `error.data.error`
+  与 `history.jsonl` 失败行（沿用"同形"不变式）；其他错误码不写。
+- 前端消费：`error-message.ts` 对该码做一次**受控原文透传**（与 `FILE_SCHEMA_INVALID` 同口径的例外），
+  仍不展示后端 `message`。
+
+### 26.4 日志事件
+
+`rule_gate.paused` / `rule_gate.denied` / `rule_gate.unavailable` / `rule_gate.catalog.degraded` /
+`rule_gate.record.dropped` / `rule_gate.posted`（字段见
+`specs/021-ontology-rule-gate/data-model.md` §7）。`unavailable` 为 `error` 级 + `alert: true`。
+
+### 26.5 数据源与生效
+
+- 数据源唯一：部署产物 `ontology/{场景}/{本体}/ontology.yaml` 的 `behaviors[]` / `rules[]` / `functions[].response`；
+  平台侧**零改动**（`rules` 仍整包下发、不解析语义）。
+- 失效判据：`ontology` 根目录 `mtimeMs`（与 R27 同口径），因此只换本体的部署下一次调用即生效。
+- 缓存：实例内快照，签名变化整份重载；函数记录是**轮内**状态，不跨轮、不落盘。
+
+### 26.6 生效面与回滚
+
+| 面 | 位置 |
+|---|---|
+| 规则解析 / 求值 / 记录 / 文案 | `agent-backend/src/domain/rule-gate/**`（纯领域包，零 infra / pi / fastify / pino / `node:fs`） |
+| 共用解析 | `agent-backend/src/domain/ontology-doc.ts`（与 R27 共用"什么算一个本体行为"） |
+| 工具包装 | `agent-backend/src/infra/tool-rule-gate.ts`（位于 R27 包装器**内侧**） |
+| 中止接线 | `run-manager.ts`（`AgentRunRequest.abortRun?`）、`run-consume.ts`（写 `run.ruleAbort` + `run.stop()`）、`run-impl.ts`、`llm-error.ts`、`types.ts`（`details?`） |
+
+- **兼容**：无端点变更、无新增 SSE 事件类型；`details` 为可选字段（旧前端忽略）；无规则的本体与非本体工具
+  走原路径（零日志噪声）；HITL 语义不变（暂停 / 拒绝不会弹确认框）。
+- **回滚**：删除 `domain/rule-gate/**` 与 `infra/tool-rule-gate.ts`，还原 `agent-factory.ts` 约 7 行装配与
+  中止接线；无数据迁移、无平台侧改动。策略级回滚：删除该行为的规则并重新部署。
+- **测试**：`agent-backend/tests/unit/rule-gate-*.spec.ts`（7 个）、`tool-rule-gate.spec.ts`、
+  `rule-gate-loop.spec.ts`、`ontology-doc.spec.ts`；前端 `frontend/src/utils/error-message.spec.ts`；
+  端到端"真模型 + 真 MCP"由 `specs/021-ontology-rule-gate/quickstart.md` 场景 A~F 手验。
