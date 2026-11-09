@@ -140,6 +140,20 @@ export function toUserMessage(
     return '上传表不符合该目录的字段约束'
   }
 
+  // 021：本体行为规则闸门中止。与 FILE_SCHEMA_INVALID 同口径的「受控原文透传」例外——
+  // 展示的是后端生成的**逐条原因**（details），不是后端 `message`；缺失时给固定兜底。
+  if (code === 'ONTOLOGY_RULE_DENIED') {
+    const details = error.details
+    if (
+      Array.isArray(details) &&
+      details.length > 0 &&
+      details.every((item) => typeof item === 'string')
+    ) {
+      return (details as string[]).join('\n')
+    }
+    return '本体行为未通过规则校验，本轮已中止'
+  }
+
   const scoped = CONTEXT_MESSAGES[context]?.[code]
   if (scoped) {
     return scoped

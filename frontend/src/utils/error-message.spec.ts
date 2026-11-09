@@ -243,6 +243,63 @@ describe('toUserMessage - FILE_SCHEMA_INVALID（D13 例外，透传 details）',
   })
 })
 
+describe('toUserMessage - ONTOLOGY_RULE_DENIED（021，受控透传 details）', () => {
+  it('details 为非空字符串数组 → 逐条换行拼接', () => {
+    const message = toUserMessage(
+      {
+        code: 'ONTOLOGY_RULE_DENIED',
+        message: '后端原始文案不展示',
+        details: [
+          '行为：原材料采购和库存/采购单/CreatePurchaseRecord',
+          '规则：采购-供应商名称一致',
+          '结论：供应商名称不存在，禁止创建采购单',
+        ],
+      },
+      'send-message',
+    )
+
+    expect(message).toBe(
+      '行为：原材料采购和库存/采购单/CreatePurchaseRecord\n规则：采购-供应商名称一致\n结论：供应商名称不存在，禁止创建采购单',
+    )
+    expect(message).not.toContain('后端原始文案不展示')
+  })
+
+  it('details 缺失 / 空数组 / 非字符串数组 → 固定兜底文案', () => {
+    const fallback = '本体行为未通过规则校验，本轮已中止'
+    expect(toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: '' }, 'send-message')).toBe(
+      fallback,
+    )
+    expect(
+      toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: '', details: [] }, 'send-message'),
+    ).toBe(fallback)
+    expect(
+      toUserMessage(
+        { code: 'ONTOLOGY_RULE_DENIED', message: '', details: [{ x: 1 }] },
+        'send-message',
+      ),
+    ).toBe(fallback)
+  })
+
+  it('reason 不影响文案（前端不展示 reason）', () => {
+    const details = ['行为：A/B', '规则：R']
+    expect(
+      toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: 'x', details, reason: 'unregistered' }),
+    ).toBe('行为：A/B\n规则：R')
+    expect(
+      toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: 'x', details, reason: 'condition_false' }),
+    ).toBe('行为：A/B\n规则：R')
+  })
+
+  it('其他错误码文案逐字不变', () => {
+    expect(toUserMessage({ code: 'FILE_NOT_FOUND', message: 'x' }, 'send-message')).toBe(
+      '文件不存在或已被清理',
+    )
+    expect(toUserMessage({ code: 'ONTOLOGY_SCOPE_DENIED', message: 'x' }, 'send-message')).toBe(
+      `${GENERIC}（ONTOLOGY_SCOPE_DENIED）`,
+    )
+  })
+})
+
 describe('toErrorInfo', () => {
   it('带 code 的对象 → 原样保留后端错误码与文案', () => {
     expect(toErrorInfo({ code: 'FILE_NOT_FOUND', message: 'not found' })).toEqual({

@@ -10,6 +10,9 @@
  *
  * 顺序约定（`FR-002`）：本包装器在装配末端套在**最外层**，因此权限判定天然先于
  * HITL 确认——被拒的调用不会向用户弹出确认框。
+ *
+ * 本轮挂起（2026-11-09）由 `domain/tool-suspension.ts` 承载：状态由装配层**每轮**创建一次，
+ * 与 021 规则闸门共享同一份实例（021 在内侧，必须看到同一份挂起状态）。
  */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Logger } from 'pino';
@@ -18,8 +21,16 @@ import type { ScopeDecision, ScopeGuardPort } from '../domain/scope-guard/index.
 import {
   SCOPE_GUARD_FALLBACK_CODE,
   SCOPE_GUARD_FALLBACK_MESSAGE,
+  SCOPE_TERMINAL_NOTICE,
 } from '../domain/scope-guard/index.js';
-import { toolErrorResult } from '../domain/tool-error.js';
+import { appendToolText, toolErrorResult } from '../domain/tool-error.js';
+import {
+  SUSPENDED_MESSAGE,
+  createToolSuspension,
+  interceptSuspended,
+  suspendTools,
+  type ToolSuspension,
+} from '../domain/tool-suspension.js';
 
 /** 拒绝日志需要的归属上下文（装配层提供） */
 export interface ScopeGuardLogContext {
@@ -31,23 +42,41 @@ export interface ScopeGuardLogContext {
 
 type DenyDecision = Extract<ScopeDecision, { kind: 'deny' }>;
 
-/** 逐工具包装（每工具仅一次）；空数组原样返回 */
+/**
+ * 逐工具包装（每工具仅一次）；空数组原样返回。挂起状态在**本轮装配内**共享。
+ *
+ * `suspension` 由装配层传入时与 021 规则闸门共用一份；不传则新建（单独使用本包装器时
+ * 退化为"只影响自身"，且没有兜底中止出口）。
+ */
 export function guardTools(
   tools: AgentTool[],
   guard: ScopeGuardPort,
   ctx: ScopeGuardLogContext,
+  suspension?: ToolSuspension,
 ): AgentTool[] {
-  return tools.map((tool) => wrapToolWithScopeGuard(tool, guard, ctx));
+  const state = suspension ?? createToolSuspension();
+  return tools.map((tool) => wrapToolWithScopeGuard(tool, guard, ctx, state));
 }
 
 export function wrapToolWithScopeGuard(
   tool: AgentTool,
   guard: ScopeGuardPort,
   ctx: ScopeGuardLogContext,
+  state?: ToolSuspension,
 ): AgentTool {
+  const local: ToolSuspension = state ?? createToolSuspension();
+
   return {
     ...tool,
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+      // 0. 本轮已挂起：不判定、不执行。
+      //    注：同一批次的并发兄弟调用无法撤回（`parallel` 模式下已同时发起），
+      //    这里拦的是**后续批次**——这正是契约 §2 写明的边界。
+      if (interceptSuspended(local)) {
+        logSuspended(ctx, tool.name, local.attempts, local.code);
+        return toolErrorResult(SUSPENDED_MESSAGE, local.code);
+      }
+
       let decision: ScopeDecision;
       try {
         decision = guard.check(tool.name);
@@ -57,8 +86,15 @@ export function wrapToolWithScopeGuard(
         return toolErrorResult(SCOPE_GUARD_FALLBACK_MESSAGE, SCOPE_GUARD_FALLBACK_CODE);
       }
       if (decision.kind !== 'deny') return tool.execute(toolCallId, params);
+
+      // 首次拒绝：挂起本轮，并在结果里追加"停止调工具、直接收尾"的终局指令。
+      // 指令只进 content（模型可见），`details.toolError.message` 保持纯拒绝原因。
+      suspendTools(local, decision.code);
       logDenied(ctx, tool.name, decision);
-      return toolErrorResult(decision.message, decision.code);
+      return appendToolText(
+        toolErrorResult(decision.message, decision.code),
+        SCOPE_TERMINAL_NOTICE,
+      );
     },
   };
 }
@@ -83,6 +119,36 @@ function logDenied(ctx: ScopeGuardLogContext, toolName: string, decision: DenyDe
     else ctx.logger.warn(fields, decision.message);
   } catch {
     // 日志故障不影响拒绝结果（原则九：可观测性不能反过来制造故障）
+  }
+}
+
+/**
+ * 挂起后的每次工具调用：只记"被拦了几次"（判定字段已由上一条 `denied` 记录）。
+ *
+ * `attempts` 是兜底阈值的唯一依据：`>1` 即调用 `onExhausted`
+ * （软收尾只给一次机会，避免红卡片堆积与无效 token 消耗）。
+ */
+function logSuspended(
+  ctx: ScopeGuardLogContext,
+  toolName: string,
+  attempts: number,
+  code: string,
+): void {
+  try {
+    ctx.logger.warn(
+      {
+        event: 'scope_guard.suspended',
+        code,
+        user_id: ctx.userId,
+        agent_name: ctx.agentName,
+        ...(ctx.threadId !== undefined ? { thread_id: ctx.threadId } : {}),
+        tool_name: toolName,
+        attempts,
+      },
+      '权限拒绝后本轮已挂起：工具调用被直接拒绝',
+    );
+  } catch {
+    // 日志故障不影响拒绝结果（原则九）
   }
 }
 

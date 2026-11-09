@@ -151,15 +151,21 @@
 
 ---
 
-## D9 三个专用错误码
+## D9 两个专用错误码
 
-**Decision**：`ONTOLOGY_SCOPE_DENIED`（未授权）、`ONTOLOGY_BEHAVIOR_DISABLED`（已停用）、
+**Decision**：`ONTOLOGY_SCOPE_DENIED`（未授权，**含 `scope` 含 `disable`**）、
 `ONTOLOGY_SCOPE_UNAVAILABLE`（管控配置不可用）。
 
-**Rationale**：三类原因对应三种处置动作（找管理员授权 / 找本体负责人确认停用 / 重新部署），合并成一个码会让排障与产品提示都退化；
+**Rationale**：两类原因对应两种处置动作（找管理员授权 / 重新部署本体），合并成一个码会让排障与产品提示都退化；
 命名沿用既有"领域前缀 + 语义"风格（`HITL_REJECTED` / `HITL_EXPIRED` / `HITL_ABORTED`）。
 
-**Alternatives considered**：单一 `SCOPE_DENIED`（无法区分"停用"与"未授权"，日志与用户提示都变糊）；沿用 HTTP 错误码体系（工具层不是 HTTP）；否决。
+> **修订（2026-11-09）**：原设计有第三个码 `ONTOLOGY_BEHAVIOR_DISABLED`（"已停用"）。实践发现
+> "被停用"与"没被授权"对用户是同一个动作（找管理员），分两个码反而让前端多一条映射、产品多一句难解释的话。
+> 判定优先级不变，区分下沉到 `reason: 'disabled'` / `scope_kind: 'disable'`。
+
+**Alternatives considered**：~~单一 `SCOPE_DENIED`~~（原判：无法区分"停用"与"未授权"，日志与用户提示都变糊；
+2026-11-09 修订：该顾虑由 `reason` / `scope_kind` 内部字段解决，故对**外**合并为单一"未授权"码）；
+沿用 HTTP 错误码体系（工具层不是 HTTP）；否决。
 
 ---
 

@@ -157,9 +157,8 @@ function buildMessage(ref: BehaviorRef | null, reason: DenyReason): string {
     return '本体的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。';
   }
   const label = `${ref.ontologyName}/${ref.behaviorName}`;
-  if (reason === 'disabled') {
-    return `本体行为「${label}」当前已被停用，已拒绝执行。`;
-  }
+  // 2026-11-09：`reason === 'disabled'` 与 `not_in_scope` 共用同一句「未授权」文案
+  // （不再区分"已停用"）；差异只留在日志的 `reason` / `scope_kind` 里。
   if (reason === 'no_entry' || reason === 'no_securities') {
     return `本体行为「${label}」的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。`;
   }
@@ -175,10 +174,21 @@ export const SCOPE_GUARD_FALLBACK_MESSAGE =
   '本体的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。';
 export const SCOPE_GUARD_FALLBACK_CODE: ScopeDenyCode = 'ONTOLOGY_SCOPE_UNAVAILABLE';
 
+/**
+ * 权限拒绝后的**终局指令**（2026-11-09）。
+ *
+ * 追加在拒绝文案之后、**不进** `details.toolError.message`：结构化字段保持"拒绝原因"的原样，
+ * 这段话只给模型看，用来把"继续换工具试"引导成"总结收尾"。
+ */
+export const SCOPE_TERMINAL_NOTICE =
+  '本轮已因权限不足停止执行工具，后续工具调用不再执行；请向用户说明原因并结束本轮回答。';
+
+// 本轮已挂起后再次被调用时的短文案由 `domain/tool-suspension.ts` 的 `SUSPENDED_MESSAGE`
+// 统一提供（020 / 021 共用同一句，避免两处手写同一段话）。
+
 /** 供测试与日志断言使用的错误码字面量（避免各处手写字符串） */
 export const SCOPE_DENY_CODES: readonly ScopeDenyCode[] = [
   'ONTOLOGY_SCOPE_DENIED',
-  'ONTOLOGY_BEHAVIOR_DISABLED',
   'ONTOLOGY_SCOPE_UNAVAILABLE',
 ];
 

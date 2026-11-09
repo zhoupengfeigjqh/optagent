@@ -26,6 +26,20 @@ export interface OntologyDirRef {
 }
 
 /**
+ * 目录签名：`{agentDir}/ontology` 根目录的 `mtimeMs`；目录不存在为 `missing`。
+ *
+ * 单次 `stat`。本体的部署是目录级原子改名，会改变 `mtime`，因此可作为
+ * "是否需要用新配置"的判据（020 权限闸门与 021 规则闸门共用）。
+ */
+export function ontologyDirSignature(agentDir: string): string {
+  try {
+    return String(fs.statSync(path.join(agentDir, 'ontology')).mtimeMs);
+  } catch {
+    return 'missing';
+  }
+}
+
+/**
  * 枚举 `{agentDir}/ontology/{场景}/{本体}/`。
  *
  * - `agentDir` 下没有 `ontology` 目录 → 空数组且**不记 warning**（常态，不是异常）；

@@ -1,0 +1,2 @@
+{"call_id":"call_00_VCuEmBrbiTpyEsJW72490755","message_id":"m_mw9cfk9r_3clq","name":"test2__QueryInventory","label":"查询原材料库存信息","status":"running","started_at":"2026-11-09T14:15:25.129Z","args_digest":{"ontology_id":"1","rawMaterialName":"高强度钢板"}}
+{"call_id":"call_00_VCuEmBrbiTpyEsJW72490755","message_id":"m_mw9cfk9r_3clq","name":"test2__QueryInventory","label":"查询原材料库存信息","status":"error","started_at":"2026-11-09T14:15:25.129Z","duration_ms":1,"size":253,"inline_content":"本体行为「原材料采购和库存/QueryInventory」未授权给当前用户，已拒绝执行。\n【本轮终止】已出现权限拒绝，本轮不再执行任何工具。请不要继续调用工具，直接向用户说明原因并结束回答。"}

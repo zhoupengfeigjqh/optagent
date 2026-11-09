@@ -111,7 +111,7 @@ export type ScopeDecision =
   | { kind: 'deny'; behavior: BehaviorRef | null; code: ScopeDenyCode; reason: DenyReason; message: string };
 ```
 
-- `ScopeDenyCode` ∈ `ONTOLOGY_SCOPE_DENIED` / `ONTOLOGY_BEHAVIOR_DISABLED` / `ONTOLOGY_SCOPE_UNAVAILABLE`；
+- `ScopeDenyCode` ∈ `ONTOLOGY_SCOPE_DENIED`（含 `disable`）/ `ONTOLOGY_SCOPE_UNAVAILABLE`；
 - `message` 是**唯一**中文拒绝文案来源（包装器不拼文案）；
 - 工厂入参只有一个对象：`{ agentDir, username, warn? }`，不接收 logger、fastify、MCP。
 
@@ -231,7 +231,7 @@ specs/001-digital-human-platform/contracts/
        │    ├─ 命中多条（多本体同名）→ 逐条判定，任一拒绝即拒绝优先
        │    ├─ 单条：找 securities 条目
        │    │    ├─ 无条目 / 文件不可用 → deny(ONTOLOGY_SCOPE_UNAVAILABLE)
-       │    │    ├─ scope 含 disable → deny(ONTOLOGY_BEHAVIOR_DISABLED)
+       │    │    ├─ scope 含 disable → deny(ONTOLOGY_SCOPE_DENIED, reason=disabled)
        │    │    ├─ scope 含 everyone → allow(rule=everyone)
        │    │    ├─ 用户名 ∈ scope → allow(rule=user)
        │    │    └─ 否则 → deny(ONTOLOGY_SCOPE_DENIED)
@@ -288,8 +288,7 @@ specs/001-digital-human-platform/contracts/
     - 单条 deny → 生成中文文案（`message.ts` 内联于本文件，唯一来源）。
   - 全函数 `try/catch` 兜底：任何异常 → `deny(ONTOLOGY_SCOPE_UNAVAILABLE)` + `warn`，**永不抛**。
 - 文案模板（不含授权清单）：
-  - 未授权：`本体行为「{本体}/{行为}」未授权给当前用户，已拒绝执行。`
-  - 停用：`本体行为「{本体}/{行为}」当前已被停用，已拒绝执行。`
+  - 未授权（含 `disable`，2026-11-09 合并）：`本体行为「{本体}/{行为}」未授权给当前用户，已拒绝执行。`
   - 管控不可用：`本体行为「{本体}/{行为}」的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。`
 
 ### 5. `infra/tool-scope-guard.ts`（新增，约 65 行）

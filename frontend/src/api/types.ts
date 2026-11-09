@@ -30,8 +30,20 @@ export interface ApiErrorBody {
 export interface ErrorInfo {
   code: string
   message: string
-  /** 后端结构化问题清单（仅 `FILE_SCHEMA_INVALID` 使用；D13 例外，透传展示） */
+  /**
+   * 后端结构化问题清单。
+   *
+   * - `FILE_SCHEMA_INVALID`：D13 例外，透传展示；
+   * - 2026-11-09（021）`ONTOLOGY_RULE_DENIED`：`string[]` 逐条原因，换行展示。
+   */
   details?: unknown
+  /**
+   * 2026-11-09（021）：本体行为规则闸门的中止原因分类（仅 `ONTOLOGY_RULE_DENIED`）。
+   *
+   * 取值 `unregistered` / `condition_false` / `config_unavailable`；
+   * 前端**不展示**，只用于排障检索。
+   */
+  reason?: string
   /**
    * 2026-10-15（`TR-55` / 契约 §19.3）：`error` 对象的三个**可选**诊断字段，
    * 连同 `code` 一起由后端 `domain/llm-error.ts` 的 `classifyLlmFailure()` 一次构造。

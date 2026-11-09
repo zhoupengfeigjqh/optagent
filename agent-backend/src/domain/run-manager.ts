@@ -52,6 +52,14 @@ export interface AgentRunRequest {
   model?: ModelSelection;
   signal: AbortSignal;
   /**
+   * 2026-11-09（020 / 021 共用）：**纯中止**本轮，不写业务失败原因。
+   *
+   * 与用户点"停止"同路径（`ABORTED` 收尾，前端显示"已停止"）；只用于"闸门已拒绝、
+   * 模型仍反复调工具"的兜底——这类情况不是业务错误，不该在历史里留下一个错误码。
+   * 正常拒绝走软收尾：模型总结后本轮正常 `done`（见 `domain/tool-suspension.ts`）。
+   */
+  interruptRun?: () => void;
+  /**
    * 2026-11-07：本轮用户显式选中的技能名（`/技能名`）。
    *
    * 给了它，System Prompt 只插入该技能并追加"先读正文"引导；缺省走默认全量索引。

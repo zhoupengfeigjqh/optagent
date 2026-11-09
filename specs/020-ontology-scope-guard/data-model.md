@@ -114,7 +114,7 @@ normalize(name) = trim(name).toLowerCase()
 | # | 行为命中 | 本体 `status` | 条目 | `scope` 内容 | 结论 | 错误码 |
 |---|---|---|---|---|---|---|
 | 1 | 否 | — | — | — | 放行（非本体行为） | — |
-| 2 | 是（1 个） | `ok` | 有 | 含 `disable` | 拒绝（停用优先） | `ONTOLOGY_BEHAVIOR_DISABLED` |
+| 2 | 是（1 个） | `ok` | 有 | 含 `disable` | 拒绝（停用优先；对外并入"未授权"） | `ONTOLOGY_SCOPE_DENIED`（`reason='disabled'`、`scope_kind='disable'`） |
 | 3 | 是（1 个） | `ok` | 有 | 含 `everyone`（无 `disable`） | 放行 | — |
 | 4 | 是（1 个） | `ok` | 有 | 含当前用户名 | 放行 | — |
 | 5 | 是（1 个） | `ok` | 有 | 不含当前用户名 | 拒绝 | `ONTOLOGY_SCOPE_DENIED` |
@@ -142,6 +142,29 @@ normalize(name) = trim(name).toLowerCase()
 用于日志与单测断言（不进入用户文案）。
 
 `message` 是**唯一**的中文拒绝文案来源，模板见 `contracts/scope-guard.md` §4。
+
+### 3.5 拒绝后的本轮状态（`SuspendState`，2026-11-09）
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `suspended` | `boolean` | 本轮是否已出现过拒绝（置位后**不再判定、不再执行**） |
+| `code` | `ScopeDenyCode` | 触发挂起的码；后续软拒绝沿用同一码（不新增错误码） |
+| `attempts` | `number` | 挂起后被调用次数：`1` = 软拒；`>1` = 触发兜底 |
+| `exhausted` | `boolean` | 兜底出口是否已触发（**每次装配最多一次**） |
+
+**生命周期**：`guardTools(tools, guard, ctx)` 在每次装配（= 每轮 `runWith`）内新建一份，随工具数组一起丢弃——
+**按轮隔离**，不需显式清理，也不会跨轮污染。
+
+**时间线**：
+
+| 事件 | 真实工具执行 | 返回 |
+|---|---|---|
+| 第 1 次拒绝 | 否 | `content = [拒绝原因, 终局指令]`（`details.toolError` 只含拒绝原因） |
+| 挂起后第 1 次调用 | 否 | 「本轮已停止执行工具，请直接结束回答。」+ `scope_guard.suspended` |
+| 挂起后第 2 次调用 | 否 | 同上 + 触发 `onSuspendedExhausted()`（装配层 ⇒ `run.stop()`，`ABORTED` 收尾） |
+| 第 3 次及以后 | 否 | 同上，但**不再**触发兜底出口 |
+
+**并发边界**：`parallel` 模式下同一 batch 的工具已同时发起，无法撤回；挂起只对**后续批次**生效。
 
 ---
 

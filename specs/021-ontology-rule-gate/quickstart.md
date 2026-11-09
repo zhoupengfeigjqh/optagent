@@ -43,13 +43,13 @@ npx vitest run tests/unit/rule-gate-design.spec.ts tests/unit/rule-gate-operator
 |---|---|
 | 缺函数 → `pause` 且**原 `execute` 零调用** | 行为不执行、无副作用 |
 | 缺 2 条规则的函数 → 反馈**两条**规则全文 | 一次补齐 |
-| 求值 `false` → `deny` + `onDeny` 被调 1 次 | 中止整轮 |
+| 求值 `false` → `deny` + 挂起状态置位 + 卡片含结论/明细/终局指令 | 软收尾（不产生 error 轮） |
 | 无 `rule_design` 的前置规则 → 放行 + 告警 | 存量数据兼容 |
 | `design` 结构非法 → `deny` + `rule_gate.unavailable` | fail-closed |
 | 函数成功 → 记录 1 条；失败 → 不记录、不覆盖 | 只记成功 |
 | 后置规则 → 原文逐字保留 + 追加块；失败 → 不追加 | 只追加、不改写 |
 | 内置工具 / 非本体工具 → 零变化（含"内置与函数同名 → 内置优先"） | `SC-006` |
-| 暂停后记录仍在、补调即放行；中止后无新模型调用 | `FR-008` / `FR-032` |
+| 暂停后记录仍在、补调即放行；拒绝后其余工具零执行 → 模型总结后 `done`；固执重试兜底只触发 1 次 | `FR-008` / `FR-032` / `FR-045`~`FR-047` |
 | 每条日志含 `ts`；`denyDetails` 3~6 条且含 `fail_message` | `FR-035` / `SC-005` |
 
 ---

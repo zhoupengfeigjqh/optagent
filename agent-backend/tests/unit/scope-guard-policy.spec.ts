@@ -61,15 +61,17 @@ describe('decideScope', () => {
     });
   });
 
-  it('含 disable → 拒绝，且优先于 everyone', () => {
+  it('含 disable → 拒绝，且优先于 everyone（对外按未授权码）', () => {
     expect(decideScope(entry(['disable']), 'admin')).toMatchObject({
       kind: 'deny',
-      code: 'ONTOLOGY_BEHAVIOR_DISABLED',
+      // 2026-11-09：对外统一「未授权」，不再单列"已停用"码；reason/scopeKind 仍区分
+      code: 'ONTOLOGY_SCOPE_DENIED',
       reason: 'disabled',
       scopeKind: 'disable',
     });
     expect(decideScope(entry(['everyone', 'disable']), 'admin')).toMatchObject({
-      code: 'ONTOLOGY_BEHAVIOR_DISABLED',
+      code: 'ONTOLOGY_SCOPE_DENIED',
+      reason: 'disabled',
     });
   });
 

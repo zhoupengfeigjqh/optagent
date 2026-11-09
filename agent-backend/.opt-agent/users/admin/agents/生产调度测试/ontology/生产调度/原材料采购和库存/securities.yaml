@@ -24,7 +24,7 @@ securities:
   title: 查询原材料库存信息
   op_type: query
   scope:
-  - everyone
+  - disable
   confirm: false
   confirm_content: ''
 - action_name: QueryPurchaseRecords

@@ -1,0 +1,2 @@
+{"role":"user","content":"查询高强度钢板库存","id":"m_mw9cfnxj_4ftw","ts":"2026-11-09T14:15:26.695Z","agent_name":"生产调度测试"}
+{"id":"m_mw9cfk9r_3clq","role":"assistant","content":"我先查询高强度钢板的库存信息。抱歉，本次无法完成查询：执行「原材料采购和库存 / 查询原材料库存信息（QueryInventory）」时被系统拒绝，当前账号未获得该行为的授权。\n\n建议处理方式：\n- 请联系系统管理员，为你的账号开通「查询原材料库存信息」的行为权限；\n- 授权开通后，再次发起「查询高强度钢板库存」即可。\n\n在获得授权前，我无法读取或代替你查询任何库存数据，也不会编造库存数值。\n\n","ts":"2026-11-09T14:15:26.695Z","status":"completed","usage":{"input_tokens":6836,"output_tokens":178},"duration_ms":4744,"agent_name":"生产调度测试"}

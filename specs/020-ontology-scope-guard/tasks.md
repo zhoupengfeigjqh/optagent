@@ -40,7 +40,7 @@ description: "本体行为权限闸门（020）实现任务清单"
 - [X] T004 新增 `agent-backend/src/domain/ontology-files.ts`：`listOntologyDirs(agentDir, warnings)`（只接受真实目录、跳过符号链接、按名称排序）与 `readYamlObject(file, warnings)`（`lstat` 拒绝符号链接、`invalid_yaml` / `not_object` / `not_regular_file` 告警、永不抛错）
 - [X] T005 新增 `agent-backend/tests/unit/ontology-files.spec.ts`：覆盖正常枚举、缺目录（空数组且零告警）、不可读目录、符号链接目录/文件被跳过、坏 YAML、非对象根、中文路径
 - [X] T006 改 `agent-backend/src/domain/intent-focus/ontology-loader.ts` 改为复用 T004 的两个函数（字段建模与告警关键片段保持不变），并跑 `agent-backend/tests/unit/intent-focus-loader.spec.ts` 与 `agent-backend/tests/unit/intent-focus-expansion.spec.ts` 确认零回归
-- [X] T007 [P] 定型 `agent-backend/src/domain/scope-guard/types.ts`：`ScopeGuardPort`、`ScopeDecision` 三变体、`ScopeDenyCode`（`ONTOLOGY_SCOPE_DENIED` / `ONTOLOGY_BEHAVIOR_DISABLED` / `ONTOLOGY_SCOPE_UNAVAILABLE`）、`DenyReason`、`BehaviorRef`、`GuardSnapshot` / `OntologyEntry` / `SecurityEntry`（字段口径严格对齐 `data-model.md` §2）
+- [X] T007 [P] 定型 `agent-backend/src/domain/scope-guard/types.ts`：`ScopeGuardPort`、`ScopeDecision` 三变体、`ScopeDenyCode`（`ONTOLOGY_SCOPE_DENIED` / `ONTOLOGY_SCOPE_UNAVAILABLE`；**2026-11-09 起 `disable` 并入前者**）、`DenyReason`、`BehaviorRef`、`GuardSnapshot` / `OntologyEntry` / `SecurityEntry`（字段口径严格对齐 `data-model.md` §2）
 
 **Checkpoint**：共享底层就绪；`intent-focus` 既有测试全绿；决策类型可作为后续测试的编译依据。
 

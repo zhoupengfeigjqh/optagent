@@ -800,7 +800,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QueryPurchaseRecords
-  description: 获取原材料采购的明细信息，如关联客户订单、到位信息等
+  description: 获取原材料采购明细，如关联客户订单、到位信息等
   op_type: query
   params:
     purchaseRecordId:
@@ -966,7 +966,7 @@ behaviors:
   from_status: ''
   to_status: ''
 - name: QuerySupplierCapability
-  description: 获取供应商的供货能力，如可提供的原材料、交货周期等
+  description: 获取供应商的供货能力，如可供原材料、交货周期等
   op_type: query
   params:
     supplierName:

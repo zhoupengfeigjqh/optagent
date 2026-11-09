@@ -12,8 +12,13 @@ import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { InteractionOutcome } from '../../src/domain/interaction-gate.js';
-import type { ScopeDecision, ScopeGuardPort } from '../../src/domain/scope-guard/index.js';
+import {
+  SCOPE_TERMINAL_NOTICE,
+  type ScopeDecision,
+  type ScopeGuardPort,
+} from '../../src/domain/scope-guard/index.js';
 import { readToolError } from '../../src/domain/tool-error.js';
+import { SUSPENDED_MESSAGE, createToolSuspension } from '../../src/domain/tool-suspension.js';
 import { wrapToolWithInteraction } from '../../src/infra/tool-intercept.js';
 import { guardTools, wrapToolWithScopeGuard } from '../../src/infra/tool-scope-guard.js';
 
@@ -91,7 +96,7 @@ describe('wrapToolWithScopeGuard', () => {
     expect(tool.executeMock).toHaveBeenCalledTimes(1);
   });
 
-  it('拒绝：真实 execute 零调用，返回带失败标记的结果', async () => {
+  it('拒绝：真实 execute 零调用，返回失败标记 + 终局指令（指令不进结构化字段）', async () => {
     const tool = makeTool();
     const guard = makeGuard(DENY);
     const wrapped = wrapToolWithScopeGuard(tool, guard, makeCtx());
@@ -100,7 +105,10 @@ describe('wrapToolWithScopeGuard', () => {
 
     expect(tool.executeMock).not.toHaveBeenCalled();
     expect(readToolError(result.details)).toEqual({ code: 'ONTOLOGY_SCOPE_DENIED', message: DENY.message });
-    expect(result.content).toEqual([{ type: 'text', text: DENY.message }]);
+    expect(result.content).toEqual([
+      { type: 'text', text: DENY.message },
+      { type: 'text', text: SCOPE_TERMINAL_NOTICE },
+    ]);
   });
 
   it('包装保形：name/label/description/parameters/executionMode 不变', () => {
@@ -197,6 +205,78 @@ describe('wrapToolWithScopeGuard', () => {
       event: 'scope_guard.evaluator_error',
       tool_name: 'mes__CreatePurchaseRecord',
     });
+  });
+});
+
+describe('拒绝后挂起本轮（2026-11-09）', () => {
+  it('拒绝后同轮的其他工具零执行，且不再重复判定', async () => {
+    const guard = makeGuard(DENY);
+    const first = makeTool('mes__CreatePurchaseRecord');
+    const second = makeTool('mes__DeletePurchaseRecord');
+    const [a, b] = guardTools([first, second], guard, makeCtx());
+
+    await a!.execute('c1', {});
+    const result = await b!.execute('c2', {});
+
+    expect(second.executeMock).not.toHaveBeenCalled();
+    // 挂起后直接拒绝 ⇒ 不再走判定（避免重复判定与重复日志）
+    expect(guard.check).toHaveBeenCalledTimes(1);
+    expect(result.content).toEqual([{ type: 'text', text: SUSPENDED_MESSAGE }]);
+    expect(readToolError(result.details)?.code).toBe('ONTOLOGY_SCOPE_DENIED');
+  });
+
+  it('挂起后第 2 次调用触发兜底中止，且只触发一次', async () => {
+    const onExhausted = vi.fn();
+    const suspension = createToolSuspension(onExhausted);
+    const tools = guardTools(
+      [makeTool('a'), makeTool('b'), makeTool('c')],
+      makeGuard(DENY),
+      makeCtx(),
+      suspension,
+    );
+
+    await tools[0]!.execute('c1', {}); // 首次拒绝 → 挂起
+    await tools[1]!.execute('c2', {}); // attempts=1 → 软拒，不中止
+    expect(onExhausted).not.toHaveBeenCalled();
+
+    await tools[2]!.execute('c3', {}); // attempts=2 → 兜底中止
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+
+    await tools[2]!.execute('c4', {}); // attempts=3 → 出口已用过，不再重复触发
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+  });
+
+  it('挂起状态按轮隔离：两次装配互不影响', async () => {
+    const guard = makeGuard(DENY);
+    const round1 = guardTools([makeTool('a')], guard, makeCtx());
+    const round2 = guardTools([makeTool('b')], guard, makeCtx());
+
+    await round1[0]!.execute('c1', {});
+    const result = await round2[0]!.execute('c2', {});
+
+    // 新一轮仍走判定（而不是"已挂起"的短文案）
+    expect(guard.check).toHaveBeenCalledTimes(2);
+    expect(result.content[1]).toEqual({ type: 'text', text: SCOPE_TERMINAL_NOTICE });
+  });
+
+  it('挂起日志：scope_guard.suspended 记 attempts，不重复记判定字段', async () => {
+    const logger: FakeLogger = { warn: vi.fn(), error: vi.fn() };
+    const tools = guardTools([makeTool('a'), makeTool('b')], makeGuard(DENY), makeCtx(logger));
+
+    await tools[0]!.execute('c1', {});
+    await tools[1]!.execute('c2', {});
+
+    const suspended = logger.warn.mock.calls.find(
+      (call) => (call[0] as Record<string, unknown>).event === 'scope_guard.suspended',
+    );
+    expect(suspended![0]).toMatchObject({
+      code: 'ONTOLOGY_SCOPE_DENIED',
+      tool_name: 'b',
+      attempts: 1,
+      user_id: 'admin',
+      agent_name: '采购助手',
+    });
+    expect(suspended![0]).not.toHaveProperty('scope_kind');
   });
 });
 

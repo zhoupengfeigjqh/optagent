@@ -231,6 +231,9 @@ export async function consumeTurn(
       ...(opts.model ? { model: opts.model } : {}),
       signal: run.controller.signal,
       interactionSink: run.gate,
+      // 020 / 021 共用的兜底中止：纯中断，不写业务原因（走 ABORTED 收尾）。
+      // 正常拒绝是软收尾（模型总结后 done），只有模型反复调工具才走到这里。
+      interruptRun: () => run.stop(),
       runtime,
       ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
       ...(focusToolTips.length > 0 ? { focusToolTips } : {}),

@@ -79,11 +79,18 @@ export function toHistoryErrorInfo(source: {
   upstream_status?: number;
   upstream_type?: string;
   request_id?: string;
+  details?: string[];
+  reason?: 'unregistered' | 'condition_false' | 'config_unavailable';
 }): HistoryErrorInfo {
   const info: HistoryErrorInfo = { code: source.code, message: source.message };
   if (source.upstream_status !== undefined) info.upstream_status = source.upstream_status;
   if (source.upstream_type !== undefined) info.upstream_type = source.upstream_type;
   if (source.request_id !== undefined) info.request_id = source.request_id;
+  // 021：规则闸门中止的明细与原因分类（同样"有才写"，其他码不带）。
+  // 2026-11-09 起规则拒绝改为软收尾、不再产生失败轮；这两个字段保留只为
+  // 兼容改动前已落盘的失败行（前端仍按 `details` 展示旧记录）。
+  if (source.details !== undefined) info.details = source.details;
+  if (source.reason !== undefined) info.reason = source.reason;
   return info;
 }
 

@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createScopeGuard } from '../../src/domain/scope-guard/index.js';
 import { runAgentLoopEvents } from '../../src/infra/agent-loop.js';
-import { wrapToolWithScopeGuard } from '../../src/infra/tool-scope-guard.js';
+import { guardTools, wrapToolWithScopeGuard } from '../../src/infra/tool-scope-guard.js';
 import type { LlmEvent } from '../../src/types.js';
 
 const USAGE = {
@@ -105,6 +105,42 @@ async function runOnce(tool: AgentTool): Promise<LlmEvent[]> {
   return events;
 }
 
+/** 多跳脚本：模型"固执地"继续调工具时的真实 loop 行为 */
+async function runScript(tools: AgentTool[], steps: AssistantMessage[]): Promise<LlmEvent[]> {
+  let hop = 0;
+  const events: LlmEvent[] = [];
+  for await (const event of runAgentLoopEvents({
+    model: {} as never,
+    streamFn: (() => {
+      hop += 1;
+      return fakeStream(steps[Math.min(hop - 1, steps.length - 1)]!);
+    }) as never,
+    systemPrompt: 'test',
+    messages: [{ role: 'user', content: 'hi' }],
+    tools,
+    thinking: false,
+    signal: new AbortController().signal,
+  })) {
+    events.push(event);
+  }
+  return events;
+}
+
+function makeTool(name: string) {
+  const executeMock = vi.fn(async () => ({
+    content: [{ type: 'text', text: 'executed' }],
+    details: {},
+  }));
+  const tool: AgentTool = {
+    name,
+    label: name,
+    description: '测试用',
+    parameters: { type: 'object', properties: {} } as never,
+    execute: executeMock as never,
+  };
+  return Object.assign(tool, { executeMock });
+}
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
@@ -171,5 +207,48 @@ describe('权限闸门 → loop 接线', () => {
     expect(executeMock).toHaveBeenCalledTimes(1);
     const end = events.find((event) => event.type === 'tool_call_end');
     expect(end).toMatchObject({ type: 'tool_call_end', callId: 'call_1', status: 'success' });
+  });
+});
+
+describe('拒绝 → 本轮挂起 → 软收尾（2026-11-09）', () => {
+  it('拒绝后模型改调其他工具：该工具零执行，本轮仍产出正文并以 done 结束', async () => {
+    const agentDir = tmpAgentDir();
+    writeOntology(agentDir, 'zpf'); // probe_tool 只授权给 zpf，admin 会被拒
+    const guard = createScopeGuard({ agentDir, username: 'admin' });
+
+    const denied = makeTool('probe_tool');
+    const other = makeTool('other_tool');
+
+    const tools = guardTools([denied, other], guard, {
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+      userId: 'admin',
+      agentName: '采购助手',
+      threadId: 't_1',
+    });
+
+    const events = await runScript(tools, [
+      assistant([{ type: 'toolCall', id: 'c1', name: 'probe_tool', arguments: {} }], 'toolUse'),
+      assistant([{ type: 'toolCall', id: 'c2', name: 'other_tool', arguments: {} }], 'toolUse'),
+      assistant([{ type: 'text', text: '抱歉，我没有这个操作的权限，已停止。' }], 'stop'),
+    ]);
+
+    // 两个工具都零执行：第一个被拒，第二个被"本轮挂起"直接拦下
+    expect(denied.executeMock).not.toHaveBeenCalled();
+    expect(other.executeMock).not.toHaveBeenCalled();
+
+    const ends = events.filter((event) => event.type === 'tool_call_end') as Array<{
+      status: string;
+      resultText?: string;
+    }>;
+    expect(ends).toHaveLength(2);
+    expect(ends[0]!.status).toBe('error');
+    expect(ends[0]!.resultText).toContain('未授权给当前用户');
+    expect(ends[0]!.resultText).toContain('因权限不足停止执行工具');
+    expect(ends[1]!.status).toBe('error');
+    expect(ends[1]!.resultText).toContain('本轮已停止执行工具');
+
+    // 软收尾：以 done 正常结束，不是 error / ABORTED（模型拿到了第 3 步的收尾文本）
+    expect(events.some((event) => event.type === 'done')).toBe(true);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
   });
 });

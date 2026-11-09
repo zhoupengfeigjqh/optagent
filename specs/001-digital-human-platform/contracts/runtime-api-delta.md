@@ -39,8 +39,8 @@
 | R24 | **MCP 工具入参 schema 的根标题**（2026-10-30，方案 A）：下发给模型 / HITL / 管理端工具清单的 `parameters`，根节点 `title`（SDK 生成的类名）改为 `x-title`，值取服务端 `Tool.title`（`@mcp.tool(title=...)`）；服务端未声明则**原样透传** | 数据形状变更（仅根节点键名） | 否（字段级 `title` 一字不动；未声明标题的工具 schema 逐字不变） |
 | R25 | **聊天流首帧与心跳**（2026-11-06）：`POST /api/threads/{id}/messages` 建连即写注释帧 `: connected`，此后每 15s 写 `: ping`；响应头补 `x-accel-buffering: no`（详见 §24） | 连接层行为（新增注释帧 + 响应头） | 否（注释帧按 SSE 规范被客户端忽略；事件集合 / 载荷 / 终结语义零变更，前端零改动） |
 | R26 | **意图聚焦一阶发散**（特性 `019-intent-focus-expansion`，2026-11-08）：SOUL.md frontmatter 新增 `intent_focus_depth`（0~2，仅开启且非 0 时写入）；聚焦提示升级为分行块（新增概念段与上游段）、长度上限按阶数分档 1200/1600/2000；`tool_tips` 候选扩为「直接命中 + 下游发散」（wire 四字段不变） | 新增配置字段 + 提示格式/长度变更 + 候选来源扩展 | 否（阶数缺省 0 = 只聚焦本身，提示内容等于 016 口径；`tool_tips` 结构不变、前端零改动；判分调用数不变） |
-| R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 3 个工具失败错误码与 2 个结构化日志事件（详见 §25） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
-| R28 | **本体行为规则闸门**（特性 `021-ontology-rule-gate`，2026-11-09）：本体行为执行前按 `ontology.yaml` 的 `rules`（`position: 前置`）做**确定性规则求值**（硬编码解析 `rule_design`，不经过 LLM）——所需函数未执行则暂停并反馈规则全文，求值 `false` 或规则不可用则拒绝并**中止整轮**；执行成功后把 `position: 后置` 的规则全文附加到工具结果。新增 1 个工具失败错误码、1 个失败轮错误码（`ONTOLOGY_RULE_DENIED`）、`error` 对象新增可选 `details`、6 个结构化日志事件（详见 §26） | 行为变更（工具可能被暂停 / 拒绝）+ `error` 载荷可选增量 | 否（无端点 / 无新增 SSE 事件类型；`details` 为可选字段，旧前端忽略；无规则的本体与非本体工具走原路径；前端仅新增一条错误码文案映射） |
+| R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 2 个工具失败错误码与 3 个结构化日志事件（详见 §25；2026-11-09 起 `disable` 并入未授权，且拒绝后本轮挂起、软收尾） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
+| R28 | **本体行为规则闸门**（特性 `021-ontology-rule-gate`，2026-11-09）：本体行为执行前按 `ontology.yaml` 的 `rules`（`position: 前置`）做**确定性规则求值**（硬编码解析 `rule_design`，不经过 LLM）——所需函数未执行则暂停并反馈规则全文，求值 `false` 或规则不可用则拒绝并**中止整轮**；执行成功后把 `position: 后置` 的规则全文附加到工具结果。新增 1 个工具失败错误码、1 个失败轮错误码（`ONTOLOGY_RULE_DENIED`）、`error` 对象新增可选 `details` / `reason`、6 个结构化日志事件（详见 §26） | 行为变更（工具可能被暂停 / 拒绝）+ `error` 载荷可选增量 | 否（无端点 / 无新增 SSE 事件类型；`details` 为可选字段，旧前端忽略；无规则的本体与非本体工具走原路径；前端仅新增一条错误码文案映射） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1656,12 +1656,21 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 | # | 条件 | 结论 | 错误码 |
 |---|---|---|---|
 | 1 | 非本体行为 / 无本体数字人 | 放行（原样执行） | — |
-| 2 | `scope` 含 `disable`（即使同时含 `everyone`） | 拒绝 | `ONTOLOGY_BEHAVIOR_DISABLED` |
+| 2 | `scope` 含 `disable`（即使同时含 `everyone`） | 拒绝（对外同"未授权"） | `ONTOLOGY_SCOPE_DENIED`（`reason='disabled'`、`scope_kind='disable'`） |
 | 3 | `scope` 含 `everyone` | 放行 | — |
 | 4 | 当前数字人归属用户名在 `scope` 中 | 放行 | — |
 | 5 | 用户名不在 `scope` / `scope` 为空 | 拒绝 | `ONTOLOGY_SCOPE_DENIED` |
 | 6 | 缺条目 / 缺文件 / 坏文件 / 结构非法 | 拒绝（fail-closed） | `ONTOLOGY_SCOPE_UNAVAILABLE` |
 | 7 | 同名行为跨多个本体 | 拒绝优先，全部放行才执行 | 取该拒绝条目的码 |
+
+4. **拒绝之后（2026-11-09）**：本轮进入**已挂起**状态——
+   - 首次拒绝返回 `content = [拒绝原因, 终局指令]` 两块正文；`details.toolError.message` 仍是拒绝原因原文
+     （终局指令只给模型看，不进结构化字段）；
+   - 本轮**其余工具调用不再执行**（既不判定也不调用），返回「本轮已停止执行工具」；
+   - 挂起后**第 2 次**调用触发兜底中止：走 `run.stop()`（与用户点"停止"同路径，`ABORTED` 收尾），
+     **不写业务错误码**、不制造失败轮原因；该出口每轮最多触发一次；
+   - 软收尾成立：模型收到终局指令后产出文本并正常 `done`，**不硬切断**本轮；
+   - 边界：同一批次的并发调用无法撤回（`parallel` 已同时发起），本约束只覆盖**后续批次**。
 
 **用户名口径**：`users/{用户名}/` 路径段（平台用户标识），由服务端从实例归属读取，模型与前端无法指定。
 
@@ -1673,8 +1682,7 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 
 | 场景 | 文案 |
 |---|---|
-| 未授权 | `本体行为「{本体}/{行为}」未授权给当前用户，已拒绝执行。` |
-| 已停用 | `本体行为「{本体}/{行为}」当前已被停用，已拒绝执行。` |
+| 未授权（**含 `scope` 含 `disable`**） | `本体行为「{本体}/{行为}」未授权给当前用户，已拒绝执行。` |
 | 管控不可用 | `本体行为「{本体}/{行为}」的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。` |
 | 归属不可知（仅 `internal_error`） | `本体的授权配置不可用，已按安全默认拒绝执行；请联系管理员重新部署该本体。` |
 
@@ -1683,6 +1691,7 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 | 事件 | 级别 | 触发 | 字段 |
 |---|---|---|---|
 | `scope_guard.denied` | `warn`（`ONTOLOGY_SCOPE_UNAVAILABLE` 为 `error`） | 每次拒绝 | `ts`、`code`、`reason`、`user_id`、`agent_name`、`thread_id`、`tool_name`、`ontology`、`behavior`、`scope_kind`、`scope_size` |
+| `scope_guard.suspended` | `warn` | 挂起后每次工具调用 | `ts`、`code`、`user_id`、`agent_name`、`thread_id`、`tool_name`、`attempts`（不重复判定字段） |
 | `scope_guard.catalog.degraded` | `warn`（`alert: true`） | 每次重载有告警时聚合一条 | `user_id`、`agent_name`、`warnings`（截断 20 条） |
 | `scope_guard.evaluator_error` | `error` | 端口违约（判定抛错，实现缺陷） | `err`、`user_id`、`agent_name`、`thread_id`、`tool_name` |
 
@@ -1719,15 +1728,21 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 本体行为（`query` 与 `command` 一视同仁）在**权限闸门通过之后、真正执行之前**，增加一次**确定性规则判定**；
 判定输入是「轮内函数执行记录」与「`ontology.yaml` 的 `rules[].rule_design`」，**不经过 LLM**：
 
-1. **轮内函数记录**：每轮对话新建一份 `函数名 → 最后一次成功调用的业务数据` 的内存映射。
-   只记"函数"（非平台内置工具、非本体行为），失败不记、同名覆盖（取最新一次成功）、轮末丢弃（不落盘）。
+1. **轮内函数记录**：每轮对话新建一份 `函数名 → 最后一次调用的业务数据` 的内存映射。
+   只记"函数"（非平台内置工具、非本体行为）；**成败都记**（失败 / 超时 / 无结果记 `null`）、
+   最后一次覆盖（失败也覆盖成功）、轮末丢弃（不落盘）；单条 ≤256KB、条目 ≤64，超限丢弃并告警。
+   读取必须 `has` / `get` 分离——`null` 表示"已执行但无结果"，其条件一律不成立。
 2. **前置规则**（`position: 前置`，同一行为可多条，逻辑与）：
-   - `related_functions` 未全部记录 → **暂停**：行为不执行，返回规则全文 + 缺失函数清单，本轮继续；
+   - `related_functions` 未全部记录 → **先做注册校验**：缺失函数里只要有一个不在本轮挂载给模型的
+     工具集合里（含被工具白名单过滤的情形），直接**拒绝并挂起本轮工具**（`reason: unregistered`，不可自愈；
+    2026-11-09 起为软收尾，不产生失败轮）；
+     全部已注册才进入**暂停**（可自愈）：行为不执行，返回规则全文 + 缺失函数清单，本轮继续；
    - 齐备 → 用记录对 `rule_design` 做两级 AND/OR 求值（`rule_design.combine` 组合组、组 `combine` 组合条件；
      算子全集 16 个；`field` 支持 `.` 路径与 `[]` 数组元素层；`values` 恒为字符串数组，按字段声明类型强制）；
-   - `true` → 执行；`false` → **拒绝并中止整轮**（失败轮留痕 + 逐条原因）；
+   - `true` → 执行；`false` → **拒绝并挂起本轮工具**（2026-11-09 起为软收尾：卡片含结论 + 明细 +
+     终局指令，模型总结后正常 `done`，不产生失败轮）；
    - 规则结构非法（`rules` 段不可解析、`related_functions` 非数组、`rule_design` 结构非法）→
-     **拒绝并中止** + error 级告警（fail-closed）；缺 `rule_design` 的前置规则不阻断、只告警。
+     **拒绝并挂起** + error 级告警（fail-closed）；缺 `rule_design` 的前置规则不阻断、只告警。
 3. **后置规则**（`position: 后置`）：行为**执行成功**后，把规则全文以明确分界附着在结果之后，
    提示模型继续调用相关函数完成推导；执行失败不追加。
 
@@ -1736,16 +1751,17 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 | 场景 | 通道 | 码 | 前端 |
 |---|---|---|---|
 | 前置规则缺函数（暂停） | 工具失败结果（`details.toolError`） | `ONTOLOGY_RULE_FUNCTIONS_MISSING` | 卡片按失败态展示正文，无需新增映射 |
-| 求值不成立 / 规则不可用（中止） | SSE `error` + 失败轮 `error.code` | `ONTOLOGY_RULE_DENIED` | 需新增一条文案映射 + `details` 受控透传 |
+| 求值不成立 / 函数未注册 / 规则不可用（拒绝） | **工具失败结果**（`details.toolError`，2026-11-09 起；此前为 SSE `error` + 失败轮） | `ONTOLOGY_RULE_DENIED`（日志 `reason` 区分 `condition_false` / `unregistered` / `config_unavailable`） | 卡片按失败态展示三段式正文，无需新增映射；既有映射与 `details` 透传保留给历史失败行 |
 
-两个码全局唯一，与 R27 的三码（`ONTOLOGY_SCOPE_DENIED` / `ONTOLOGY_BEHAVIOR_DISABLED` /
+两个码全局唯一，与 R27 的两码（`ONTOLOGY_SCOPE_DENIED`（含 `disable`）/
 `ONTOLOGY_SCOPE_UNAVAILABLE`）互不复用。
 
-### 26.3 `error` 载荷的可选增量
+### 26.3 `error` 载荷的可选增量（**历史兼容**：2026-11-09 起不再产生新记录）
 
 ```jsonc
 {
   "code": "ONTOLOGY_RULE_DENIED",
+  "reason": "condition_false",
   "message": "本体行为「原材料采购和库存/CreatePurchaseRecord」未通过前置规则校验，本轮已中止。",
   "details": [
     "行为：原材料采购和库存/CreatePurchaseRecord",
@@ -1758,14 +1774,17 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 
 - `details: string[]`，3~6 条，**只在 `ONTOLOGY_RULE_DENIED` 时出现**；同时进入 SSE `error.data.error`
   与 `history.jsonl` 失败行（沿用"同形"不变式）；其他错误码不写。
+- `reason: 'unregistered' | 'condition_false' | 'config_unavailable'`，**只在 `ONTOLOGY_RULE_DENIED` 时出现**，
+  同样 SSE 与 `history.jsonl` 同形；前端**不展示**，仅用于日志与排障检索。
 - 前端消费：`error-message.ts` 对该码做一次**受控原文透传**（与 `FILE_SCHEMA_INVALID` 同口径的例外），
   仍不展示后端 `message`。
 
 ### 26.4 日志事件
 
-`rule_gate.paused` / `rule_gate.denied` / `rule_gate.unavailable` / `rule_gate.catalog.degraded` /
-`rule_gate.record.dropped` / `rule_gate.posted`（字段见
-`specs/021-ontology-rule-gate/data-model.md` §7）。`unavailable` 为 `error` 级 + `alert: true`。
+`rule_gate.paused` / `rule_gate.denied` / `rule_gate.suspended` / `rule_gate.blocked` /
+`rule_gate.unavailable` / `rule_gate.catalog.degraded` / `rule_gate.record.dropped` / `rule_gate.posted`
+（字段见 `specs/021-ontology-rule-gate/data-model.md` §7）。`unavailable` 为 `error` 级 + `alert: true`；
+`rule_gate.suspended`（2026-11-09 新增）在挂起后每次拦截记一条，只带 `attempts` 与拦截码。
 
 ### 26.5 数据源与生效
 
@@ -1781,10 +1800,12 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 | 规则解析 / 求值 / 记录 / 文案 | `agent-backend/src/domain/rule-gate/**`（纯领域包，零 infra / pi / fastify / pino / `node:fs`） |
 | 共用解析 | `agent-backend/src/domain/ontology-doc.ts`（与 R27 共用"什么算一个本体行为"） |
 | 工具包装 | `agent-backend/src/infra/tool-rule-gate.ts`（位于 R27 包装器**内侧**） |
-| 中止接线 | `run-manager.ts`（`AgentRunRequest.abortRun?`）、`run-consume.ts`（写 `run.ruleAbort` + `run.stop()`）、`run-impl.ts`、`llm-error.ts`、`types.ts`（`details?`） |
+| 本轮挂起（2026-11-09） | `agent-backend/src/domain/tool-suspension.ts`（020/021 共享；装配层每轮新建） |
+| 拒绝收尾（2026-11-09） | **软收尾**：工具失败结果 + 三段式卡片，模型总结后正常 `done`；`abortRun` / `run.ruleAbort` 已删除，`interruptRun` 仅作"模型固执重试"的兜底纯中止 |
 
-- **兼容**：无端点变更、无新增 SSE 事件类型；`details` 为可选字段（旧前端忽略）；无规则的本体与非本体工具
-  走原路径（零日志噪声）；HITL 语义不变（暂停 / 拒绝不会弹确认框）。
+- **兼容**：无端点变更、无新增 SSE 事件类型；**2026-11-09 起规则拒绝不再产生失败轮**，
+  `error.details` / `error.reason` 只为读取改动前的历史失败行而保留（`llm-error.ts` / `types.ts`）；
+  无规则的本体与非本体工具走原路径（零日志噪声）；HITL 语义不变（暂停 / 拒绝不会弹确认框）。
 - **回滚**：删除 `domain/rule-gate/**` 与 `infra/tool-rule-gate.ts`，还原 `agent-factory.ts` 约 7 行装配与
   中止接线；无数据迁移、无平台侧改动。策略级回滚：删除该行为的规则并重新部署。
 - **测试**：`agent-backend/tests/unit/rule-gate-*.spec.ts`（7 个）、`tool-rule-gate.spec.ts`、

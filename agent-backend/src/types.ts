@@ -74,6 +74,16 @@ export interface HistoryErrorInfo {
   upstream_type?: string;
   /** 上游请求 id（向 provider 报障用）；报文里没有时缺省 */
   request_id?: string;
+  /**
+   * 逐条失败原因（2026-11-09，特性 021）：**仅** `ONTOLOGY_RULE_DENIED` 时出现，
+   * 3~6 条中文文案，前端按条换行展示（不展示 `message`）。
+   */
+  details?: string[];
+  /**
+   * 中止原因分类（2026-11-09，特性 021）：**仅** `ONTOLOGY_RULE_DENIED` 时出现；
+   * 前端不展示，供日志与排障检索（`unregistered` = 函数未注册导致的阻断）。
+   */
+  reason?: 'unregistered' | 'condition_false' | 'config_unavailable';
 }
 
 /** LLM 流式事件（LlmProvider / agent-loop 输出） */

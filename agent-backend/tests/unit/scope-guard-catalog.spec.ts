@@ -305,8 +305,9 @@ describe('createScopeGuard', () => {
     const first = guard.check(BEHAVIOR);
     expect(first).toMatchObject({
       kind: 'deny',
-      code: 'ONTOLOGY_BEHAVIOR_DISABLED',
+      code: 'ONTOLOGY_SCOPE_DENIED',
       reason: 'disabled',
+      scopeKind: 'disable',
     });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0].join('\n')).toContain('behavior_conflict');

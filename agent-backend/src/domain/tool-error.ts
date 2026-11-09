@@ -43,6 +43,22 @@ export function toolErrorResult(message: string, code: string): AgentToolResult<
 }
 
 /**
+ * 在既有结果后**追加一个文本块**（2026-11-09，020 / 021 共用）。
+ *
+ * 为什么不改 `details.toolError.message`：那是结构化字段（日志 / 历史 / 前端判据），
+ * 追加的"话术"只该给模型看；拒绝原因的单一来源仍是 content 首块与 `details`。
+ *
+ * 原始 `content` 的顺序与内容逐字保留（不复制、不合并、不重排）。
+ */
+export function appendToolText(
+  result: AgentToolResult<unknown>,
+  text: string,
+): AgentToolResult<unknown> {
+  const content = Array.isArray(result.content) ? result.content : [];
+  return { ...result, content: [...content, { type: 'text', text }] };
+}
+
+/**
  * 从 `details` 里读标记；任何不符合形状的输入一律 `undefined`。
  *
  * 防御是必须的：`details` 是 `unknown`，历史版本/第三方工具可能塞任意值，

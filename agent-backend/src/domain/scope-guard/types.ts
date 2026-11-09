@@ -5,11 +5,14 @@
  * `contracts/scope-guard.md` §1。本文件只有类型与常量，无逻辑、无 IO。
  */
 
-/** 三个拒绝错误码（全局唯一，语义稳定；见契约 §3） */
-export type ScopeDenyCode =
-  | 'ONTOLOGY_SCOPE_DENIED'
-  | 'ONTOLOGY_BEHAVIOR_DISABLED'
-  | 'ONTOLOGY_SCOPE_UNAVAILABLE';
+/**
+ * 两个拒绝错误码（全局唯一，语义稳定；见契约 §3）。
+ *
+ * 2026-11-09：`disable` 不再单列错误码——对外统一按「未授权」表述（`ONTOLOGY_SCOPE_DENIED`）。
+ * 判定优先级与 `reason: 'disabled'` / `scopeKind: 'disable'` 保留，供日志与排障区分
+ * "显式停用"与"该用户没被授权"。
+ */
+export type ScopeDenyCode = 'ONTOLOGY_SCOPE_DENIED' | 'ONTOLOGY_SCOPE_UNAVAILABLE';
 
 /** 拒绝原因（进日志与单测断言，不进用户文案） */
 export type DenyReason =

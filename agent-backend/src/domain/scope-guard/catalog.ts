@@ -8,11 +8,10 @@
  * 因为 `computeConfigFingerprint` 只覆盖 SOUL/TOOL/MCP/scenario 与 skills，
  * **不含 `ontology/**`**；只换本体的部署不会换代，靠指纹会静默用旧策略。
  */
-import fs from 'node:fs';
 import path from 'node:path';
 
+import { normalizeName, ontologySignature, parseOntologyDoc } from '../ontology-doc.js';
 import { listOntologyDirs, readYamlObject } from '../ontology-files.js';
-import { normalizeName } from './policy.js';
 import type {
   BehaviorBinding,
   GuardSnapshot,
@@ -25,14 +24,13 @@ import type {
 const WARNING_LABEL = 'scope_guard';
 const SECURITIES_FILE = 'securities.yaml';
 
-/** 目录签名：`ontology` 根目录 mtimeMs；不存在为 `missing`（不告警，属常态） */
-export function catalogSignature(agentDir: string): string {
-  try {
-    return String(fs.statSync(path.join(agentDir, 'ontology')).mtimeMs);
-  } catch {
-    return 'missing';
-  }
-}
+/**
+ * 目录签名：`ontology` 根目录 mtimeMs；不存在为 `missing`（不告警，属常态）。
+ *
+ * 实现已下沉到 `ontology-doc.ts`（与 021 规则闸门共用同一口径）；
+ * 这里保留同名导出，既有调用方与测试无需改动。
+ */
+export const catalogSignature: (agentDir: string) => string = ontologySignature;
 
 /**
  * 加载一次完整快照。
@@ -53,29 +51,14 @@ export function loadGuardCatalog(agentDir: string, signature?: string): GuardSna
     // （工具按非本体行为放行；与"已识别行为但管控不可用→拒绝"是两种情形）
     if (!parsed) continue;
 
-    const metadata = asRecord(parsed.metadata);
-    const scenarioName = text(metadata?.scenario_name) ?? ref.scenario;
-    const ontologyName = text(metadata?.ontology_name) ?? ref.ontology;
-
-    const behaviors: BehaviorBinding[] = [];
-    const seen = new Set<string>();
-    if (parsed.behaviors !== undefined && !Array.isArray(parsed.behaviors)) {
-      warnings.push(`${ontologyFile}:behaviors_not_array`);
-    }
-    for (const item of asArray(parsed.behaviors)) {
-      const name = text(asRecord(item)?.name);
-      if (name === undefined) {
-        warnings.push(`${ontologyFile}:behavior_missing_name`);
-        continue;
-      }
-      const norm = normalizeName(name);
-      if (seen.has(norm)) {
-        warnings.push(`${ontologyFile}:behavior_duplicated:${name}`);
-        continue;
-      }
-      seen.add(norm);
-      behaviors.push({ behaviorName: name, ontologyKey: key });
-    }
+    // 行为解析与名称归一只有一处实现（`ontology-doc.ts`）：告警片段逐字不变，
+    // 因此既有的 `scope-guard-catalog.spec.ts` 是本次重构的零回归门槛。
+    const doc = parseOntologyDoc(parsed, warnings, key, ontologyFile);
+    const { scenarioName, ontologyName } = doc;
+    const behaviors: BehaviorBinding[] = doc.behaviors.map((behavior) => ({
+      behaviorName: behavior.name,
+      ontologyKey: key,
+    }));
 
     const securitiesFile = path.join(ref.dir, SECURITIES_FILE);
     const warningsBefore = warnings.length;
@@ -167,10 +150,6 @@ function normalizeScope(value: unknown): { scope: string[]; ignored: number } {
     if (!scope.includes(norm)) scope.push(norm);
   }
   return { scope, ignored };
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

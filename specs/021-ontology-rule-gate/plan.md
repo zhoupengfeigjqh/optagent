@@ -15,14 +15,19 @@
 在 020 权限闸门**通过之后**、本体行为**真正执行之前**，插入一次**完全确定性的规则判定**
 （硬编码解析 `rule_design`，绝不交给 LLM）：
 
-1. **轮内函数记录**：每轮对话新建一份 `函数名 → 最后一次成功的业务数据` 的内存映射；
-   只记"函数"（非内置工具、非本体行为），失败不记、同名覆盖、轮末丢弃。
-2. **前置闸门**：读该行为所属本体 `ontology.yaml` 的 `rules`（`position: 前置`）——
-   ① 规则的 `related_functions` 未全部记录 → **暂停**（不执行；把规则全文 + 缺失函数清单返回给模型，
-   本轮继续，模型补齐后可重试）；② 齐备 → 用记录对 `rule_design` 做**两级 AND/OR** 机械求值；
+1. **轮内函数记录**：每轮对话新建一份 `函数名 → 最后一次调用的结果` 的内存映射；
+   只记"函数"（非内置工具、非本体行为），**成败都记**（失败/无结果记 `null`），同名**最后一次覆盖**、轮末丢弃。
+   键存在 = 本轮已执行过；未真正发出的调用（被权限拒绝 / 被暂停 / 未执行）不写。
+2. **前置闸门**：读该行为所属本体 `ontology.yaml` 的 `rules`（`position: 前置`），顺序固定为
+   「缺函数 → **注册校验** → 暂停/阻断 → 求值」：
+   ① `related_functions` 未全部记录 → 先查这些函数是否**已注册**（本轮挂载给模型的工具集合）；
+   全部已注册 → **暂停**（不执行；规则全文 + 缺失函数清单返回模型，本轮继续）；
+   任一未注册 → **阻断**（不执行、直接中止整轮，`reason=unregistered`）；
+   ② 齐备 → 用记录对 `rule_design` 做**两级 AND/OR** 机械求值；
    ③ `true` → 执行；`false` → 拒绝并**中止整轮**（失败轮留痕 + 逐条原因）。
-3. **后置提示**：行为执行**成功**后，把 `position: 后置` 的规则全文附着在结果后面，
-   提示模型继续调用相关函数完成推导。
+3. **后置提示**：行为执行**成功之后**，先对 `position: 后置` 规则的 `related_functions` 做**注册校验**：
+   全部已注册 → 把规则全文附着在结果后面，提示模型继续推导；任一未注册 → **不追加**、中止整轮，
+   文案声明"该行为已执行成功、业务数据已写入"（`reason=unregistered`）。
 
 **解耦形态**（本次硬约束）：
 
@@ -45,6 +50,7 @@ frontend/utils/error-message.ts  一条错误码映射 + 受控 details 透传
 - 复用 `domain/tool-error.ts` 的失败标记通道（020 与 HITL 已在用）
 - 复用 020 的 `domain/ontology-files.ts`（目录枚举 + 安全 YAML 读取）
 - **不引入** JSONPath / JSON Schema / 表达式求值库（见 `research.md` D3、D6）
+- **不新增**"函数注册表"：注册判据直接复用装配层已有的 `availableTools` 名字集合（`research.md` D15）
 
 **Storage**：只读（无新增存储、无迁移、无写回）
 - `{agentDir}/ontology/{场景}/{本体}/ontology.yaml`：`behaviors[]`（识别）、`rules[]`（判定）、
@@ -130,32 +136,48 @@ agent-factory.ts（装配，4 行）
 
 ```ts
 export interface RuleGatePort {
-  prepare(toolName: string, record: FunctionRecord): PrepareResult;   // 永不抛
-  postHint(toolName: string): { text: string; rules: string[] } | null; // 永不抛
+  prepare(input: PrepareInput): PrepareResult;        // 永不抛
+  postHint(input: PostHintInput): PostHintResult;      // 永不抛
   invalidate(): void;
 }
 
+export interface PrepareInput {
+  toolName: string;
+  record: FunctionRecord;
+  available: ReadonlySet<string>;   // 本轮挂载给模型的工具名（已归一）——注册判据
+}
+
 export type PrepareResult =
-  | { kind: 'function' }                                    // 非本体行为（非内置）→ 执行 + 记录
-  | { kind: 'behavior' }                                    // 本体行为，无前置规则 → 执行 + 后置
-  | { kind: 'pause'; message: string; details: string[] }    // 缺函数 → 不执行，本轮继续
-  | { kind: 'deny';  message: string; details: string[] };   // 不成立/不可用 → 不执行 + 中止
+  | { kind: 'function' }                                     // 非本体行为（非内置）→ 执行 + 记录
+  | { kind: 'behavior' }                                     // 本体行为，可执行
+  | { kind: 'pause'; message: string; details: string[] }     // 缺函数但已注册 → 不执行，本轮继续
+  | { kind: 'deny'; message: string; details: string[]
+      reason: 'unregistered' | 'condition_false' | 'config_unavailable' };
+                                                             // 不执行 + 中止（共用中止码）
+
+export type PostHintResult =
+  | null                                                      // 无后置规则
+  | { kind: 'append'; text: string; rules: string[] }          // 函数全部已注册 → 追加
+  | { kind: 'blocked'; message: string; details: string[]; rules: string[] };
+                                                             // 存在未注册 → 不追加 + 中止
 
 export function createFunctionRecord(): FunctionRecord;       // 每轮一个
 ```
 
 - 工厂入参只有 `{ agentDir, warn? }`，不接收 logger / fastify / MCP / run 状态；
+  "本轮可用工具集合"通过 `PrepareInput.available` 传入，**由装配层从最终工具数组生成**，闸门不自建清单；
 - `message` 与 `details` 是**唯一**的中文文案来源（包装器不拼字）；
 - 规则本体的归一结构（`RuleSpec` / `RuleDesign` / `RuleCondition`）全部从 `index.ts` 出，
-  外部（含测试）只经这个面。
+  外部（含测试）只经这个面；
+- `deny.reason` 与 `postHint.blocked` 是**判定语义的一部分**（不是日志细节）：包装器据此选文案与日志事件。
 
 ### 装配点最小改动
 
 | 位置 | 改动 | 行数 |
 |---|---|---|
 | `agent-factory.create()` | `const ruleGate = createRuleGate({ agentDir, warn })`（与 `scopeGuard` 并列） | +2 |
-| `agent-factory.runWith()` | `const record = createFunctionRecord()`（每轮新建）、`builtinNames` 取自 `buildBuiltinTools` 产物 | +2 |
-| `agent-factory.runWith()` 装配末尾 | `const ruled = ruleGateTools(tools, { gate, record, builtinNames, onDeny: (r) => req.abortRun?.(r), ... })`，随后 `guardTools(ruled, …)` | +3 / 改 2 行 |
+| `agent-factory.runWith()` | `const record = createFunctionRecord()`（每轮新建）、`builtinNames` 取自 `buildBuiltinTools` 产物、`availableNames` 由最终工具数组经 `normalizeName` 生成 | +3 |
+| `agent-factory.runWith()` 装配末尾 | `const ruled = ruleGateTools(tools, { gate, record, builtinNames, availableNames, onDeny: (r) => req.abortRun?.(r), ... })`，随后 `guardTools(ruled, …)` | +3 / 改 2 行 |
 | `run-manager.ts` | `AgentRunRequest` 新增可选 `abortRun?` | +6（含注释） |
 | `run-consume.ts` | 传入 `abortRun`（写 `run.ruleAbort` + `run.stop()`）；`error` 分支先看 `run.ruleAbort` | +8 / 改 4 行 |
 | `run-impl.ts` | 新增 `ruleAbort?: RuleAbortReason` 字段 | +5 |
@@ -177,7 +199,7 @@ export function createFunctionRecord(): FunctionRecord;       // 每轮一个
 | 020 权限闸门（`tool-scope-guard.ts`） | **在外**：先判权限，通过后才判规则；两者互不引用，只共享 `ontology-doc` 的识别口径 |
 | HITL 人工确认（`tool-intercept.ts`） | 规则闸门在权限闸门内侧、HITL 外侧 ⇒ 暂停/拒绝**不会**弹确认框 |
 | 工具失败标记（`tool-error.ts`） | **复用**：暂停走同一通道；"是否成功"也用它判定（`details.toolError`） |
-| 工具白名单（`mcp-tool-scope.ts`） | 不变：白名单决定"模型看得见什么"，规则闸门决定"看见了能不能跑" |
+| 工具白名单（`mcp-tool-scope.ts`） | 不变，但**成为注册判据的来源**：白名单过滤后的集合就是"已注册"（被过滤掉 = 未注册 → 阻断，`research.md` D15） |
 | 意图聚焦（016/019） | 完全独立：不判分、不调 Laya；只共用 `ontology-files` 的目录枚举 |
 | 会话历史 / 回灌 | 不变：记录不落盘；后置提示随工具结果落 `tool-events`（模型看到的 == 记录的） |
 
@@ -198,7 +220,10 @@ export function createFunctionRecord(): FunctionRecord;       // 每轮一个
   10. **D10** 成败判据：`details.toolError`（否决：看 `isError` / 看文案）；
   11. **D11** 两个错误码分两条通道（暂停走工具结果、中止走失败轮）；
   12. **D12** 资源边界：单条结果 256KB、条目 64、`matches` 文本 4096（丢弃 = 未记录 → 暂停）；
-  13. **D13** 测试分层：领域单测 + 包装器单测 + 进程内 loop 端到端；无 MCP 桩，手验补位。
+  13. **D13** 测试分层：领域单测 + 包装器单测 + 进程内 loop 端到端；无 MCP 桩，手验补位；
+  14. **D14** 记录值可为 `null`（成败都记、最后一次覆盖、键存在 = 已执行）；
+  15. **D15** 注册校验判据 = 本轮挂载给模型的工具集合（非服务全集、非 `functions[]`）；
+  16. **D16** 阻断复用中止码，靠 `reason`（`unregistered` / `condition_false` / `config_unavailable`）分类。
 - 无 `NEEDS CLARIFICATION` 残留；无新增依赖。
 
 ## Phase 1：设计与契约
@@ -296,30 +321,35 @@ specs/001-digital-human-platform/contracts/
        ├─ deny → 拒绝（不进入规则闸门）
        └─ allow / not_ontology → 进入 021 infra/tool-rule-gate.ts（内层）
             ├─ 内置工具？→ 原样执行（不判定、不记录）
-            ├─ gate.prepare(name, record)
+            ├─ gate.prepare({ toolName, record, available })
             │    ├─ 目录签名变化？→ 重读 ontology/**（首次或部署后）
             │    ├─ 工具名归一 + 两形态匹配 behaviors[] → 未命中 ⇒ { kind:'function' }
             │    ├─ 收集该行为的**前置规则**（多本体合并）
             │    ├─ 无前置规则 ⇒ { kind:'behavior' }
-            │    ├─ 有规则缺 related_functions ⇒ { kind:'pause', message, details }
+            │    ├─ 有规则缺 related_functions：
+            │    │    ├─ 缺失函数**全部已注册**（∈ available）⇒ { kind:'pause' }
+            │    │    └─ 存在**未注册**函数 ⇒ { kind:'deny', reason:'unregistered' }
             │    ├─ 逐条求值（记录 + design）：
-            │    │    ├─ 任一 false ⇒ { kind:'deny' }（附全部不成立规则与条件）
-            │    │    ├─ 结构非法/求值异常 ⇒ { kind:'deny' }（unavailable + 告警）
+            │    │    ├─ 任一 false ⇒ { kind:'deny', reason:'condition_false' }
+            │    │    ├─ 结构非法/求值异常 ⇒ { kind:'deny', reason:'config_unavailable' }
             │    │    └─ 全部 true ⇒ { kind:'behavior' }
             │    └─ 无 design 的前置规则：不阻断 + 告警
             ├─ pause → 不执行；返回 toolErrorResult(message, ONTOLOGY_RULE_FUNCTIONS_MISSING)
-            ├─ deny  → 不执行；onDeny({code:'ONTOLOGY_RULE_DENIED', message, details})
+            ├─ deny  → 不执行；onDeny({code:'ONTOLOGY_RULE_DENIED', message, details, reason})
             │           → run.ruleAbort = reason; run.stop()（中断本轮）
             │           → 返回 toolErrorResult(message, ONTOLOGY_RULE_DENIED)
             ├─ 真实执行（含 HITL 在内的内层包装不变）
             └─ 执行后：
-                 ├─ role='function' 且成功 ⇒ record.add(name, 业务数据)
-                 └─ role='behavior' 且成功 ⇒ 追加 gate.postHint(name) 文本块后返回
+                 ├─ role='function' ⇒ record.add(name, 结果或 null)（**成败都记**）
+                 └─ role='behavior' 且成功 ⇒ gate.postHint({ toolName, record, available })：
+                      ├─ append  ⇒ 追加文本块后返回
+                      ├─ blocked ⇒ 不追加、结果原样返回；onDeny(reason:'unregistered') 中止
+                      └─ null    ⇒ 原样返回
 ```
 
 **中止的事件链**：`run.stop()` → loop 报 `error(ABORTED)` → `run-consume` 见 `run.ruleAbort`
-→ `finalizer.error(run, …, { code:'ONTOLOGY_RULE_DENIED', message, details })`
-→ SSE `error` + 失败轮落盘 → 前端按码渲染逐条原因。
+→ `finalizer.error(run, …, { code:'ONTOLOGY_RULE_DENIED', message, details, reason })`
+→ SSE `error` + 失败轮落盘 → 前端复用既有失败提示块渲染 `details` 逐条原因。
 
 ## 模块职责与接口
 
@@ -379,40 +409,47 @@ specs/001-digital-human-platform/contracts/
   - 行为名 → 规则的索引按 `normalizeName` 归一键，值按"本体键升序 + 文件内顺序"稳定排序；
 - `catalogSignature(agentDir)`：复用 `ontology-doc`（020 同口径）。
 
-### 7. `domain/rule-gate/format.ts`（新增，约 130 行）
+### 7. `domain/rule-gate/format.ts`（新增，约 170 行）
 
 唯一的中文文案来源：
 - `pauseMessage(behaviorRef, rules, missing)`：`「{本体}/{行为}」的前置规则校验未通过：规则「{名}」所需的
   【{缺失函数，顿号分隔}】尚未执行，规则校验无法通过，请先执行完善后再重试该行为。`
-- `denyMessage(behaviorRef, hits)`：`本体行为「{本体}/{行为}」未通过前置规则校验，本轮已中止。`
+- `denyMessage(behaviorRef, hits, reason)`：三种原因三句文案（求值不成立 / 规则不可用 / 函数未注册）；
+- `blockedPostMessage(behaviorRef, rules, unregistered)`：**后置阻断专用**，必须含
+  "该行为已执行成功、业务数据已写入"，并列出未注册函数与"检查白名单/函数声明"的建议；
 - `ruleBlock(rule): string`：把 `RuleSpec` 渲染成"全部内容"块（名称/标题/描述/行为/位置/关联函数/
   数据补充/判定结论/规则设计摘要），供暂停反馈与后置提示复用；
-- `denyDetails(behaviorRef, hits)`：3~6 条中文列表（供 `error.details`）。
+- `denyDetails(behaviorRef, hits, reason)`：3~6 条中文列表（供 `error.details`；未注册时含
+  `未注册函数：…` 与建议行）。
 
-### 8. `domain/rule-gate/record.ts`（新增，约 90 行，纯内存）
+### 8. `domain/rule-gate/record.ts`（新增，约 110 行，纯内存）
 
 - `createFunctionRecord(): FunctionRecord`
-  - `add(toolName, result)`：先判成败（`readToolError`）、再抽业务数据（`research.md` D2）、
-    再算序列化体积（>256KB 丢弃 + 告警）、再判条目上限（>64 丢弃 + 告警），最后按归一键覆盖；
-  - `has` / `get` 用同一归一键；`size` 只读；
-  - 记录不含入参、不含原始 `CallToolResult`。
+  - `add(toolName, result)`：**成败都写**——先判成败（`readToolError` / 异常标记），失败写 `null`；
+    成功则抽业务数据（`research.md` D2）；再算序列化体积（>256KB 丢弃 + 告警）、
+    再判条目上限（>64 丢弃 + 告警），最后按归一键**覆盖（最后一次调用胜出）**；
+  - `has` / `get` 用同一归一键；**`has` 判键存在，`get` 可能返回 `null`**（禁止用真值判断代替 `has`）；
+  - `size` 只读；记录不含入参、不含原始 `CallToolResult`。
 
-### 9. `domain/rule-gate/gate.ts`（新增，约 180 行）
+### 9. `domain/rule-gate/gate.ts`（新增，约 230 行）
 
 - `createRuleGate({ agentDir, warn? }): RuleGatePort`
-  - 惰性加载 + 签名重载（与 020 同法）；`prepare` 全函数 `try/catch` 兜底 →
-    `deny(unavailable)` + 告警（**永不抛**）；
-  - `prepare` 合成：识别（`matchKeys`）→ 无前置规则 → `behavior`；
-    有规则 → 缺函数检查（**先于求值**）→ 求值（多规则 AND）→ `deny` / `behavior`；
-  - `postHint`：收集后置规则（多本体合并）→ `format.ruleBlock` 拼接；
+  - 惰性加载 + 签名重载（与 020 同法）；全函数 `try/catch` 兜底 → `deny(reason:'config_unavailable')`
+    + 告警（**永不抛**）；
+  - `prepare` 合成顺序（`FR-013`）：识别（`matchKeys`）→ 无前置规则 → `behavior`；
+    有规则 → 缺函数检查 → **注册校验**（`available` 成员测试）→ `pause` / `deny('unregistered')`
+    → 求值（多规则 AND）→ `deny('condition_false')` / `behavior`；
+  - `postHint` 三态：无后置 → `null`；有后置且函数全部已注册 → `append`（`format.postBlock`）；
+    存在未注册 → `blocked`（**不追加**，附文案）；
   - 未命中任何行为 → `function`（是否内置由包装器先过滤）。
 
-### 10. `infra/tool-rule-gate.ts`（新增，约 130 行）
+### 10. `infra/tool-rule-gate.ts`（新增，约 150 行）
 
 - `ruleGateTools(tools, ctx)`：逐工具包装（每工具一次），保留全部非 `execute` 字段；
-- `execute` 六步语义见 `contracts/rule-gate.md` §2；
-- 日志：`rule_gate.paused` / `denied` / `unavailable` / `posted` / `record.dropped`（字段见
-  `data-model.md` §7），**不含**结果正文与入参；
+- `execute` 六步语义见 `contracts/rule-gate.md` §2（含"成败都记"与后置 `blocked` 分支）；
+- 日志：`rule_gate.paused` / `denied`（带 `reason`）/ `blocked`（带 `phase`、`unregistered_functions`、
+  后置时 `executed:true`）/ `unavailable` / `posted` / `record.dropped`（字段见 `data-model.md` §7），
+  **不含**结果正文与入参；
 - 本文件不含任何本体名、工具名、YAML 字段或求值逻辑（解耦红线）。
 
 ### 11. 中止接线（`run-manager` / `run-consume` / `run-impl` / `llm-error` / `types`）
@@ -428,16 +465,19 @@ specs/001-digital-human-platform/contracts/
    跑 020 的两个既有单测，必须逐字不变地全绿（回归门槛）。
 2. **纯计算**：新增 `rule-gate/types.ts`、`design.ts`、`field-path.ts`、`operators.ts`、`evaluate.ts`；
    先补 4 个纯函数单测（算子矩阵 / 路径 / 归一 / 合成），此时**不碰任何 IO**。
-3. **记录**：新增 `rule-gate/record.ts` + `rule-gate-record.spec.ts`（只记成功、覆盖、上限）。
+3. **记录**：新增 `rule-gate/record.ts` + `rule-gate-record.spec.ts`（**成败都记**、失败记 `null`、
+   最后一次覆盖、上限）。
 4. **目录与闸门**：新增 `catalog.ts`、`format.ts`、`gate.ts`、`index.ts`；补目录/文案/prepare 四结局单测。
-5. **包装器**：新增 `infra/tool-rule-gate.ts` + 单测（暂停/拒绝/记录/追加/保形/日志）。
-6. **中止接线**：`types.ts` → `llm-error.ts` → `run-impl.ts` → `run-manager.ts` → `run-consume.ts`；
-   补 `rule-gate-loop.spec.ts`（暂停→补齐→放行；拒绝→`error` + `details`）。
-7. **装配**：`agent-factory.ts` 约 7 行改动；跑 `npm run gate` 确认零回归。
-8. **前端**：`error-message.ts` 一条映射 + `details` 受控透传 + 单测；跑前端门禁。
-9. **契约与文档**：`contracts/rule-gate.md`（已产出）；`runtime-api-delta.md` 登记 R28 + §26；
-   回写 `spec.md` 修订记录（如实现期出现口径变化）；`SC-004` 实测值回填。
-10. **手验**：按 `quickstart.md` 的场景 A~F 在真实数字人上走一遍。
+5. **注册校验与阻断**：`gate.ts` 加 `available` 成员测试（前置 `deny('unregistered')`、后置 `blocked`），
+   `format.ts` 补三套文案（求值不成立 / 规则不可用 / 函数未注册，后置另含"已写入"声明）。
+6. **包装器**：新增 `infra/tool-rule-gate.ts` + 单测（暂停/拒绝/阻断/记录/追加/保形/日志）。
+7. **中止接线**：`types.ts` → `llm-error.ts` → `run-impl.ts` → `run-manager.ts` → `run-consume.ts`；
+   补 `rule-gate-loop.spec.ts`（暂停→补齐→放行；求值拒绝；前置未注册阻断；后置未注册阻断）。
+8. **装配**：`agent-factory.ts` 约 8 行改动（含 `availableNames` 生成）；跑 `npm run gate` 确认零回归。
+9. **前端**：`error-message.ts` 一条映射 + `details` 受控透传 + 单测；跑前端门禁。
+10. **契约与文档**：`contracts/rule-gate.md`（已产出）；`runtime-api-delta.md` 登记 R28 + §26；
+    回写 `spec.md` 修订记录（如实现期出现口径变化）；`SC-004` 实测值回填。
+11. **手验**：按 `quickstart.md` 场景 A~G 在真实数字人上走一遍（新增 G：未注册阻断）。
 
 ## 测试策略
 
@@ -451,11 +491,11 @@ specs/001-digital-human-platform/contracts/
 | `rule-gate-operators.spec.ts` | 16 算子 × {boolean, integer, number, string, 未声明}；`between` 闭区间；`contains` 字符串/数组；`matches` 非法正则与超长；`empty`/`not_empty` 六种"空" |
 | `rule-gate-evaluate.spec.ts` | 组内 and/or × 组间 and/or；两条规则合成；失败条件收集（不短路）；记录缺函数 |
 | `rule-gate-catalog.spec.ts` | 规则归一（位置/行为非法忽略 + 告警）；行为索引稳定顺序；函数 response 索引；签名重载与不重读（读取计数桩） |
-| `rule-gate-record.spec.ts` | 只记成功；失败不覆盖；同名覆盖；名称归一；256KB 与 64 条上限；业务数据抽取四形态 |
-| `rule-gate-gate.spec.ts` | `prepare` 四结局 × {无规则 / 有规则 / 多规则 / 多本体 / 无 design / 坏 design / 公共函数无声明};`postHint` 无/单/多；`invalidate` |
-| `rule-gate-format.spec.ts` | `pauseMessage` 含行为与规则名 + 缺失函数；`denyMessage` / `denyDetails`（3~6 条，含 `fail_message` 与未成立条件）；`ruleBlock` 覆盖规则全部字段（含 `pass_message` / `fail_message`） |
-| `tool-rule-gate.spec.ts` | 内置透传；`function` 记录；`behavior` 追加；`pause`/`deny` 时**原 execute 零调用**；`onDeny` 调用一次；保形；日志字段；`prepare` 抛错时不崩 |
-| `rule-gate-loop.spec.ts` | 假 `streamFn` 两跳：首次暂停 → 补函数 → 二次成功；拒绝 → `error(code=ONTOLOGY_RULE_DENIED)` + `details` 且无 `done` |
+| `rule-gate-record.spec.ts` | **成败都记**（失败 `null`）；同名**最后一次覆盖**（失败覆盖成功）；键存在≠值为真（`has` 与 `get` 分离）；名称归一；256KB 与 64 条上限；业务数据抽取四形态 |
+| `rule-gate-gate.spec.ts` | `prepare` 四结局 × {无规则 / 有规则 / 多规则 / 多本体 / 无 design / 坏 design / 公共函数无声明 / **缺函数且已注册 → pause** / **缺函数但未注册 → deny(unregistered)** / **服务有但白名单过滤 → 未注册**}；`postHint` 三态（无 / append / **blocked**）；`invalidate` |
+| `rule-gate-format.spec.ts` | `pauseMessage` 含行为与规则名 + 缺失函数；`denyMessage` / `denyDetails` 三种 `reason` 文案（含 `fail_message`、未注册函数名与建议）；`blockedPostMessage` 含"已执行成功/数据已写入"；`ruleBlock` 覆盖规则全部字段 |
+| `tool-rule-gate.spec.ts` | 内置透传；`function` 成败都记录（失败 `null`）；`behavior` append；`pause`/`deny` 时**原 execute 零调用**；**后置 blocked 时 execute 已调用且结果原样不变**；`onDeny` 调用一次且 `reason` 正确；保形；日志字段（含 `ts` / `reason` / `phase`）；`prepare` 抛错时不崩 |
+| `rule-gate-loop.spec.ts` | 假 `streamFn`：首次暂停 → 补函数 → 二次成功；求值 false → `error` + `details`、无 `done`；**未注册 → `error(reason=unregistered)` 且行为零执行**；**后置未注册 → 行为已执行 + `error` 文案含"已写入"** |
 
 ### 集成测试
 
@@ -508,9 +548,12 @@ cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm
 | fail-closed 放大配置错误 | 坏规则会让该行为不可执行 | `rule_gate.unavailable` 为 `error` + `alert`；文案指明"规则配置不可用，请联系管理员" |
 | 规则求值阻塞事件循环 | 工具时延抖动 | 条件是纯内存比较（≤25 条）；稳态只多一次 `statSync`；`SC-004` 量化门禁 |
 | 020 解析重构引入回归 | 权限判定行为改变 | 只搬移归一与行为解析，判定语义零改动；020 两个既有单测全绿是验收条件 |
-| 记录体积与条目膨胀 | 单轮内存增长 | 单条 256KB、条目 64、超限丢弃 + 告警（丢弃 = 未记录 → 暂停，不会静默放行） |
+| 记录体积与条目膨胀 | 单轮内存增长 | 单条 256KB、条目 64、超限丢弃 + 告警（丢弃 = 键不存在 = 未执行 → 暂停/注册校验，不会静默放行） |
+| **白名单过滤导致误阻断**（最需警惕） | 函数在服务里存在但没挂载给模型 → 判"未注册" → 整轮中止，表现为"以前能跑的行为突然不可用" | 文案点名函数并提示"检查工具白名单与本体函数声明"；`rule_gate.blocked` 为 `error` 级；`quickstart.md` 场景 G 手验；上线前对齐一次"本体 `functions[]` ↔ 实际挂载工具"清单 |
+| **后置阻断造成半截状态** | 行为已落库但本轮报错，用户可能重复下单 | 文案强制声明"已执行成功、数据已写入"；`details` 与日志带 `executed:true`；手验场景 G 覆盖 |
+| 记录 `null` 语义被实现成"未执行" | 失败被误判为待办 → 模型空转补调 | `has` 与 `get` 分离（禁止真值判断）；单测专列"失败覆盖成功"与"键存在值为 `null`"两例 |
 | 中止被误用成"用户中断" | 失败轮丢失留痕 | `run.ruleAbort` 优先级高于 `ABORTED`，走 `finalizer.error`；loop 用例断言"无 `done` 且有失败行" |
-| 无 MCP 端到端自动化 | 接线错误可能只在手验暴露 | 进程中 loop 端到端覆盖两条主链路；装配仅 7 行由包装器单测覆盖透传语义 |
+| 无 MCP 端到端自动化 | 接线错误可能只在手验暴露 | 进程中 loop 端到端覆盖四条主链路（暂停/求值拒绝/前置阻断/后置阻断）；装配仅 8 行由包装器单测覆盖透传语义 |
 
 ## 复杂度跟踪
 
@@ -538,17 +581,59 @@ cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm
    `FILE_SCHEMA_INVALID` 同口径的例外）。
 6. 以上均已回写 `spec.md` 修订记录（2026-11-09 plan 阶段）；`SC` 编号与其余语义保持原样。
 
+### clarify 阶段同步（2026-11-09，**语义变更**）
+
+- **记录语义**：`FR-003`/`FR-005` 由"只记成功、失败不覆盖"改为"**成败都记**、失败记 `null`、
+  **最后一次覆盖**"；键存在 = 已执行。对应 `research.md` D14、`data-model.md` §4。
+- **新增注册校验**：`FR-041`~`FR-044`（新 F 节）。判据 = 本轮挂载给模型的工具集合（`research.md` D15）；
+  前置未注册 → `deny(reason:'unregistered')`；后置未注册 → `postHint.blocked`（执行成功后，`D16` 与用户选择 B）。
+- **端口变化**：`prepare(input)` / `postHint(input)` 改为接收 `{ toolName, record, available }`；
+  `deny` 增 `reason`，`postHint` 变三态（`null` / `append` / `blocked`）。
+- **错误码**：仍为 2 个；阻断复用 `ONTOLOGY_RULE_DENIED`，靠 `reason` 分类（`research.md` D16）。
+- **呈现**：中断原因复用既有失败提示块（`FR-034`），不新增消息类型。
+- 新增验收 `SC-009`（未注册阻断）/ `SC-010`（`null` 语义）。受影响的实现落点与测试矩阵已在
+  §模块职责、§数据流、§测试策略、§完成定义中同步。
+
 ## 完成定义
 
-- [ ] `spec.md` 的 `FR-001`~`FR-040`、`SC-001`~`SC-008` 均有实现或测试对应，逐条可勾。
+- [ ] `spec.md` 的 `FR-001`~`FR-044`、`SC-001`~`SC-010` 均有实现或测试对应，逐条可勾。
 - [ ] `domain/rule-gate/**` 的 import 清单不含 infra / scope-guard / intent-focus / mcp / pi / fastify / pino / `node:fs`（可用 grep 断言）。
 - [ ] `rule_design` 的求值是**纯函数**：无 LLM 调用、无网络、无时钟；同输入同输出（单测穷举）。
-- [ ] 16 行判定矩阵（`data-model.md` §8）全部在单测中覆盖且全绿。
-- [ ] 暂停路径：行为零执行、零副作用、卡片失败态、文案点名缺失函数。
-- [ ] 拒绝路径：行为零执行、整轮中止、`error.code = ONTOLOGY_RULE_DENIED`、`details` 3~6 条。
-- [ ] 后置提示：原文逐字保留 + 追加块；执行失败不追加；无规则零变化。
+- [ ] 22 行判定矩阵（`data-model.md` §8）全部在单测中覆盖且全绿。
+- [ ] 记录语义：成败都记、失败记 `null`、最后一次覆盖；`has` 与 `get` 分离（`null` 不被当成"未执行"）。
+- [ ] 暂停路径：行为零执行、零副作用、卡片失败态、文案点名缺失函数（且函数**已注册**）。
+- [ ] 前置阻断路径：函数未注册 → 行为零执行、整轮中止、`reason='unregistered'`、`details` 点名未注册函数。
+- [ ] 后置阻断路径：行为已执行并落库、**不追加**提示、整轮中止、文案含"已执行成功、数据已写入"。
+- [ ] 拒绝路径：行为零执行、整轮中止、`error.code = ONTOLOGY_RULE_DENIED`、`details` 3~6 条、`reason='condition_false'`。
+- [ ] 后置提示：原文逐字保留 + 追加块；执行失败不追加；无规则零变化；函数全部已注册才追加。
 - [ ] 非本体工具、内置工具、"未部署本体/无规则"的数字人零行为变化（既有单测与集成测试全绿）。
 - [ ] 020 的既有单测全绿（解析重构零回归）。
 - [ ] `contracts/rule-gate.md` 与 `runtime-api-delta.md` R28 已登记；前端 `error-message` 用例覆盖新码。
 - [ ] 本地门禁全绿；新增模块覆盖率 ≥ 80%；`SC-004` 实测值已回填 `spec.md`。
-- [ ] `quickstart.md` 场景 A~F 手验通过并记录结论。
+- [ ] `quickstart.md` 场景 A~G 手验通过并记录结论（G = 未注册阻断，含前置与后置两种）。
+
+---
+
+## 软收尾改造（2026-11-09，用户决策；本文件前文的中止设计以本节为准）
+
+> 前文出现的 `abortRun` / `run.ruleAbort` / `onDeny` / "失败轮收尾"均为改造前设计，**已删除**。
+> 现行方案见 `spec.md` `FR-032`~`FR-034`、`FR-045`~`FR-047` 与 `research.md` D17。
+
+**改动落点**
+
+| 文件 | 变更 |
+|---|---|
+| `domain/tool-suspension.ts` | **新增**：本轮挂起状态 + 拦截 + 兜底出口 + `SUSPENDED_MESSAGE` |
+| `infra/tool-rule-gate.ts` | `RuleGateContext.onDeny` → `suspension`；拦截前置；`deny`/`blocked` 改软收尾 + 三段式卡片 |
+| `infra/tool-scope-guard.ts` | 内部 `SuspendState` → 共享 `ToolSuspension`（可选第 4 参）；文案改用 `SUSPENDED_MESSAGE` |
+| `infra/agent-factory.ts` | 每轮 `createToolSuspension(() => req.interruptRun?.())`，同时传给 020/021 |
+| `domain/rule-gate/format.ts` | 新增 `RULE_TERMINAL_NOTICE` / `denyCardBody`；拒绝文案由"本轮已中止"改为"本次调用已拒绝" |
+| `domain/run-manager.ts` / `run-impl.ts` / `run-consume.ts` | 删除 `abortRun` / `ruleAbort` / `finalizeRuleAbort` 与两处失败轮分支 |
+
+**完成定义（本节覆盖前文对应条目）**
+
+- [x] 拒绝路径：行为零执行、**挂起本轮工具**、卡片含结论/明细/终局指令、`toolError.code = ONTOLOGY_RULE_DENIED`。
+- [x] 拒绝**不产生 error 失败轮**：模型总结后正常 `done`；挂起后其余工具零执行。
+- [x] 有界退出：第 2 次拦截触发一次纯中止（`ABORTED`），单轮至多一次。
+- [x] 配置类拒绝仍 `error` 级 + `alert: true`；挂起后每次拦截记 `rule_gate.suspended`。
+- [x] 前端零改动（复用既有工具卡片；`ONTOLOGY_RULE_DENIED` 映射保留给历史失败行）。

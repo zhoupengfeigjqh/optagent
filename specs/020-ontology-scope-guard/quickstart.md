@@ -75,8 +75,9 @@ Copy-Item "$dir/securities.yaml" "$dir/securities.yaml.bak" -Force
    ```
 
 2. 请求取消一张采购单。
-3. **期望**：拒绝，`code=ONTOLOGY_BEHAVIOR_DISABLED`、`reason=disabled`；
-   文案为 `…当前已被停用，已拒绝执行。`（`disable` 优先于 `everyone`）。
+3. **期望**：拒绝，`code=ONTOLOGY_SCOPE_DENIED`、`reason=disabled`、`scope_kind=disable`；
+   文案为 `…未授权给当前用户，已拒绝执行。`（`disable` 优先于 `everyone`；
+   2026-11-09 起"已停用"不再单列错误码与文案，只保留内部 `reason` 区分）。
 
 ### 场景 D：`everyone` 全放开
 

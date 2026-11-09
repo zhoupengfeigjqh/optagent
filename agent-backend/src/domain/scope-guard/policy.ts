@@ -9,35 +9,21 @@
  *
  * 本文件不碰文件、不碰工具、不碰日志——因此可以用纯数据把矩阵跑到 100%。
  */
+import { normalizeName } from '../ontology-doc.js';
 import type { ScopeVerdict, SecurityEntry } from './types.js';
 
 /** 保留标记：不参与用户名比较 */
 export const RESERVED_EVERYONE = 'everyone';
 export const RESERVED_DISABLE = 'disable';
 
-/** 名称归一化：去首尾空白 + 小写（漏拦代价高于误拦，故大小写不敏感） */
-export function normalizeName(raw: string): string {
-  return raw.trim().toLowerCase();
-}
-
 /**
- * 工具名 → 候选匹配键（1~2 个）。
+ * 名称归一与匹配键的**唯一来源**是 `../ontology-doc.ts`（020/021 共用）。
  *
- * 同时给"完整名"与"去掉首个 `__` 前缀后的名字"：装配层给 MCP 工具加了
- * `{服务名}__` 前缀（现状），但"工具名本身就是行为名"的服务同样存在，
- * 只试一种会产生无解释的漏拦（`FR-003`）。
+ * 这里只做再导出，保证既有调用方（本文件、`catalog.ts`、`guard.ts` 与测试）
+ * 的 import 路径与语义不变——把口径搬走而不是复制一份。
  */
-export function matchKeys(toolName: string): string[] {
-  const full = normalizeName(toolName);
-  if (full === '') return [];
-  const keys = [full];
-  const sep = toolName.indexOf('__');
-  if (sep >= 0) {
-    const stripped = normalizeName(toolName.slice(sep + 2));
-    if (stripped !== '' && stripped !== full) keys.push(stripped);
-  }
-  return keys;
-}
+export { matchKeys } from '../ontology-doc.js';
+export { normalizeName };
 
 /**
  * 对一条管控条目做判定。
@@ -58,10 +44,12 @@ export function decideScope(entry: SecurityEntry | undefined, username: string):
   const { scope } = entry;
   const size = scope.length;
 
+  // `disable` 优先级最高（即使同时含 `everyone`），但对外**不再单列"已停用"码**：
+  // 统一按「未授权」表述，`reason` / `scopeKind` 仍区分，日志可查是被显式停用还是没授权。
   if (scope.includes(RESERVED_DISABLE)) {
     return {
       kind: 'deny',
-      code: 'ONTOLOGY_BEHAVIOR_DISABLED',
+      code: 'ONTOLOGY_SCOPE_DENIED',
       reason: 'disabled',
       scopeKind: 'disable',
       scopeSize: size,
