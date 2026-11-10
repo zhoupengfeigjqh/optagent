@@ -182,14 +182,6 @@ async function confirmWithdraw(): Promise<void> {
 
     <ErrorNotice v-if="localError" :error="localError" title="操作未完成" />
 
-    <UserEditor
-      v-model:open="editorOpen"
-      :user="editing"
-      :agents="agents"
-      :busy="busy"
-      @submit="submit"
-    />
-
     <EntityCardList
       title="用户与关联数字人"
       :items="items"
@@ -285,8 +277,18 @@ async function confirmWithdraw(): Promise<void> {
       </template>
     </EntityCardList>
 
+    <!-- 编辑关联 / 新建用户：一次完整的编辑会话，走弹窗（2026-11-10） -->
+    <UserEditor
+      v-model:open="editorOpen"
+      :user="editing"
+      :agents="agents"
+      :busy="busy"
+      @submit="submit"
+    />
+
     <ConfirmDialog
       :open="pendingDelete !== null"
+      data-test="delete-dialog"
       title="删除该用户？"
       message="删除平台侧用户记录，并撤回该用户在运行环境中的数字人（这些数字人随即失去能力）；用户文件空间的内容一律保留。"
       confirm-label="删除"

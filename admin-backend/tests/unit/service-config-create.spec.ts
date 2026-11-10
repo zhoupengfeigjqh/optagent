@@ -64,7 +64,9 @@ describe('新建与删除（2026-09-27）', () => {
   });
 
   it('服务名非法 → VALIDATION_FAILED（该名称会成为运行环境的工具前缀）', () => {
-    for (const bad of ['', 'a b', 'a/b', '中文', 'a'.repeat(65)]) {
+    // `__` 单独列出（2026-11-10）：运行环境按 `__` 切分还原裸工具名，
+    // 服务名自带 `__` 会让一个暴露名出现两段分隔 ⇒ 权限/规则判定静默失效
+    for (const bad of ['', 'a b', 'a/b', '中文', 'a'.repeat(65), 'my__server', 'a__b', 'a__', '__a']) {
       expect(() =>
         configs.create({
           name: bad,

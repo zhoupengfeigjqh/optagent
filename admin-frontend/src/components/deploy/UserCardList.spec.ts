@@ -128,7 +128,8 @@ describe('UserCardList', () => {
     await del?.trigger('click')
     await wrapper.vm.$nextTick()
 
-    const dialog = wrapper.find('dialog')
+    // 页面里有多个弹窗（编辑关联 / 删除 / 撤回），按 `data-test` 精确定位
+    const dialog = wrapper.find('[data-test="delete-dialog"]')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('撤回该用户在运行环境中的数字人')
     expect(dialog.text()).toContain('文件空间的内容一律保留')

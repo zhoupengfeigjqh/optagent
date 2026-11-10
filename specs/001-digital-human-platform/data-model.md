@@ -106,7 +106,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 | 字段 | 类型 | 来源 | 说明 |
 |---|---|---|---|
-| `name` | string | 管理员填写 | 唯一标识；`^[A-Za-z0-9_-]{1,64}$`（会成为运行环境的工具前缀） |
+| `name` | string | 管理员填写 | 唯一标识；`^(?!.*__)[A-Za-z0-9_-]{1,64}$`（会成为运行环境的工具前缀；2026-11-10 起禁止 `__`） |
 | `description` | string | 管理员填写 | 用途描述（可为空串），供卡片展示 |
 | `transport` | string | 管理员填写 | `http` / `stdio` |
 | `url` | string \| null | 管理员填写 | **连接地址**（`http` 必填且须为 http(s) 绝对地址；`stdio` 恒为 `null`） |
@@ -122,7 +122,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 |---|---|---|---|---|
-| `name` | string | ✅ | **唯一**；`^[A-Za-z0-9_-]{1,64}$`（首尾空白自动去除） | 服务名（**新建时由管理员指定**，编辑时不可改）；同时是运行环境的工具前缀 |
+| `name` | string | ✅ | **唯一**；`^(?!.*__)[A-Za-z0-9_-]{1,64}$`（首尾空白自动去除；2026-11-10 起禁止 `__`） | 服务名（**新建时由管理员指定**，编辑时不可改）；同时是运行环境的工具前缀 |
 | `description` | string | ✅ | 可为空串 | **用途描述**，供卡片展示（`FR-006`、`FR-043`） |
 | `transport` | enum | ✅ | `http` \| `stdio`（**读写均接受别名 `streamable-http`**，入口归一为 `http`） | `http` 即 MCP 的 **Streamable HTTP** 传输；界面文案显示为 `streamable-http`，落盘与物化统一用规范值 `http`（2026-09-16） |
 | `url` | string | 条件 | `transport=http` 时**必填**且须为 `http(s)://` 绝对地址；`stdio` 时恒为 `null`（丢弃） | **唯一连接地址**（2026-09-27：取消按运行形态分形态声明） |

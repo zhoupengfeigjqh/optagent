@@ -28,6 +28,12 @@ describe('isValidMcpServiceName', () => {
     ['中文名', false],
     ['a/b', false],
     ['a.b', false],
+    // 2026-11-10：禁止 `__`——运行环境按 `__` 切分还原裸工具名，服务名自带 `__`
+    // 会让权限/规则判定静默失效（裸名匹配不上 ⇒ 直接放行）
+    ['my__server', false],
+    ['a__b', false],
+    ['a__', false],
+    ['__a', false],
   ])('%s → %s', (name, expected) => {
     expect(isValidMcpServiceName(name)).toBe(expected)
   })

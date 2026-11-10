@@ -11,9 +11,14 @@
 import { MCP_NAME_HINT, MCP_URL_HINT } from '../constants/mcp'
 import type { McpServiceConfigInput, McpServiceDetail } from '../api/types'
 
-/** 服务名判据（与后端 `isValidMcpServiceName` 同口径；它同时是运行环境的工具前缀） */
+/**
+ * 服务名判据（与后端 `isValidMcpServiceName` 同口径；它同时是运行环境的工具前缀）。
+ *
+ * **禁止 `__`**：运行环境按 `__` 切分把暴露名还原成裸工具名，服务名自带 `__` 会让
+ * 裸名匹配不上 ⇒ 权限与规则两层管控静默失效（详见后端 `service-config-fields.ts`）。
+ */
 export function isValidMcpServiceName(name: string): boolean {
-  return /^[A-Za-z0-9_-]{1,64}$/.test(name)
+  return /^(?!.*__)[A-Za-z0-9_-]{1,64}$/.test(name)
 }
 
 export interface McpBasicsInput {

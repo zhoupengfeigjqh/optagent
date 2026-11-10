@@ -22,14 +22,20 @@ import type { McpConfirmation, McpServiceConfig } from './service-config.js';
 
 /** 服务名判据提示（新建表单与报错共用） */
 export const MCP_SERVICE_NAME_HINT =
-  '由字母、数字、下划线或连字符组成，1~64 字符（会成为运行环境的工具前缀）';
+  '由字母、数字、单个下划线或连字符组成（不得出现连续两个下划线），1~64 字符（会成为运行环境的工具前缀）';
 
 /**
  * 服务名判据：它同时是运行环境里的工具前缀（`{server}__{tool}`），
  * 故不允许空白、路径分隔符与中文等会污染工具名的字符。
+ *
+ * **禁止 `__`（2026-11-10）**：运行环境靠"按 `__` 切分"把暴露名还原成裸工具名
+ * （`domain/ontology-doc.ts` 的 `matchKeys` / `stripServicePrefix`）。服务名自带 `__`
+ * 会让一个暴露名出现两段分隔（`my__server__query`），裸名匹配不上 ⇒ 权限闸门判成
+ * "非本体行为"直接放行、规则闸门当普通函数执行，两层管控同时静默失效。
+ * 该前提必须由**写入侧**保证，运行侧不猜边界。
  */
 export function isValidMcpServiceName(name: string): boolean {
-  return /^[A-Za-z0-9_-]{1,64}$/.test(name);
+  return /^(?!.*__)[A-Za-z0-9_-]{1,64}$/.test(name);
 }
 
 /** 连接地址判据提示 */
@@ -310,10 +316,7 @@ function toolLabelProblem(tool: string, raw: unknown): string | null {
  * 保存期归一：`undefined`/`null` → **沿用 `fallback`**（保存调用配置 MUST NOT
  * 顺手清空已配好的显示名）；其余必须为对象且逐项合法（键非空、值为 1~40 字单行）。
  */
-export function normalizeToolLabels(
-  raw: unknown,
-  fallback: Record<string, string>,
-): Record<string, string> {
+export function normalizeToolLabels(raw: unknown, fallback: Record<string, string>): Record<string, string> {
   if (raw === undefined || raw === null) return fallback;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ApiError(
