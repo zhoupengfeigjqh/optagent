@@ -19,6 +19,20 @@
       },
       "installed_at": "2026-11-04T07:47:34.676Z",
       "updated_at": "2026-11-04T11:18:09.809Z"
+    },
+    {
+      "name": "qitao-bom-validation",
+      "display_name": "qitao-bom-validation",
+      "description": "针对订单BOM进行物料齐套校验：按BOM层级展开需求、扣减可用库存、处理替代料与在途，输出缺料清单、齐套率与齐套判定结论。当用户提出\"齐套校验\"\"齐套率\"\"缺料分析\"\"订单能不能开工\"\"物料满足率\"\"BOM备料检查\"等请求时使用。",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "size": 4578
+        }
+      ],
+      "source": "齐套校验逻辑.zip",
+      "installed_at": "2026-11-10T01:23:33.520Z",
+      "updated_at": "2026-11-10T01:23:33.520Z"
     }
   ]
 }
