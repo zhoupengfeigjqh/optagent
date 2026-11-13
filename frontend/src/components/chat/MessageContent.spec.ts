@@ -53,6 +53,34 @@ describe('MessageContent —— 最小 Markdown 渲染', () => {
     expect(wrapper.find('a.message-content__link').attributes('href')).toBe('https://a.b/c')
   })
 
+  it('表格单元格里的红字强调渲染成红色片段，标记本身不出现', () => {
+    const wrapper = mount(MessageContent, {
+      props: {
+        content: [
+          '| 原始行 | 推荐商品 | SKU编码 |',
+          '| --- | --- | --- |',
+          '| 蕃茄3斤 | ==番茄== | ==VEG-001== |',
+          '| 洋芋2斤 | 土豆 | VEG-002 |',
+        ].join('\n'),
+      },
+    })
+
+    const cells = wrapper.findAll('td')
+    expect(cells.map((cell) => cell.text())).toEqual([
+      '蕃茄3斤',
+      '番茄',
+      'VEG-001',
+      '洋芋2斤',
+      '土豆',
+      'VEG-002',
+    ])
+    expect(wrapper.findAll('.message-content__red').map((node) => node.text())).toEqual([
+      '番茄',
+      'VEG-001',
+    ])
+    expect(wrapper.text()).not.toContain('==')
+  })
+
   it('段落之间的空行切段，手动换行保留', () => {
     const wrapper = mount(MessageContent, { props: { content: '第一行\n第二行\n\n另起一段' } })
 

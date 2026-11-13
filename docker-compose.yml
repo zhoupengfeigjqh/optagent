@@ -100,6 +100,28 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # 生鲜订货解析 MCP 服务：FastMCP（streamable-http），单一工具 `fresh_order_parse`
+  # 输入四个 http/https 直链：订单图片 + SKU清单 / 映射表 / 噪声词表 三个 xlsx；
+  # 输出三表解析结果 JSON（高度匹配 / 候选审核 / 异常记录）。
+  # 2026-11-13：声明 `resultUrl` 后另产出 **HTML 解析报告 + 三表 xlsx**，经平台回写落进
+  # `临时空间/后台产出/`，返回两条入口（`filePath`=报告、`excelFile`=xlsx）；本服务仍
+  # **不写本地磁盘**（落盘点由平台锁死）。报告是沙箱页，故页面内无导出按钮。
+  # 镜像内装 paddleocr + paddlepaddle，并把 PP-OCRv6 small 权重烤进构建期（容器运行时不联网下载）。
+  fresh:
+    build: ./fresh-service
+    container_name: optagent-fresh
+    # 向宿主机发布 8104 → 容器 8000：给**宿主机上直跑的 backend** 连 MCP 用
+    # （容器形态走 `http://fresh:8000/mcp`）。8100/8101/8102/8103 已分别被 ocr/jev/bom/laya 占用。
+    ports:
+      - "8104:8000"
+    # 本机私产放 .env.local（gitignore，缺失不报错）：匹配阈值（T_HIGH/T_LOW/TOP_N）、
+    # 数据表缓存（DATA_CACHE_TTL_SECONDS/DATA_CACHE_MAX_ENTRIES）、HTTP 超时；全部有代码缺省值。
+    env_file:
+      - path: ./fresh-service/.env.local
+        required: false
+    restart: unless-stopped
+    logging: *default-logging
+
   # Laya 决策模型服务（013 意图聚焦）：TypeSafe System One 线协议，**CPU 可跑**、权重烤进镜像。
   # 判定由 backend **直接 HTTP 调用** `POST http://laya:8000/v1/systemone`
   # ——不经 MCP、不注册为工具、不发布到网关（启动器看不到它）。

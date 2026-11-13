@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生鲜订单解析报告 · raw</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#f5f6f8;color:#1f2329;
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:28px 24px 56px}
+h1{font-size:20px;margin:0 0 6px;letter-spacing:.2px}
+h2{font-size:14px;font-weight:600;color:#475467;margin:26px 0 10px;
+  padding-bottom:8px;border-bottom:1px solid #e4e7ec}
+.head{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:20px 22px}
+.head .sub{color:#667085;font-size:12.5px;margin:0}
+.head .concl{margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#f0f7ff;
+  border:1px solid #d6e6ff;color:#1d4ed8;font-size:13px}
+.head .concl--bad{background:#fef3f2;border-color:#fecdca;color:#b42318}
+.cards{display:grid;gap:10px;margin-top:14px;
+  grid-template-columns:repeat(auto-fit,minmax(118px,1fr))}
+.card{background:#fff;border:1px solid #e4e7ec;border-radius:10px;padding:12px 14px}
+.card .k{color:#667085;font-size:12px}
+.card .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.panel{background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:14px 16px;
+  overflow-x:auto}
+.file{font-size:13.5px;margin:0}
+.file b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+.hint{color:#667085;font-size:12.5px;margin:8px 0 0}
+.more{color:#667085;font-size:12.5px;margin:10px 0 0}
+.empty{color:#98a2b3;font-size:13px;margin:0}
+.muted{color:#98a2b3}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-top:1px solid #eaecf0}
+th{background:#f9fafb;color:#475467;font-weight:600;white-space:nowrap}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.cand{display:inline-block;margin:0 10px 0 0;white-space:nowrap}
+.cand .sc{color:#98a2b3;margin-left:4px;font-variant-numeric:tabular-nums}
+.rec{display:inline-block;margin-left:6px;padding:0 6px;border-radius:5px;
+  background:#ecfdf3;color:#067647;border:1px solid #abefc6;font-size:11.5px}
+.tag{display:inline-block;padding:0 6px;border-radius:5px;font-size:11.5px;
+  background:#f2f4f7;color:#475467;font-variant-numeric:tabular-nums}
+.tag--warn{background:#fffaeb;color:#b54708;border:1px solid #fedf89}
+.tag--bad{background:#fef3f2;color:#b42318;border:1px solid #fecdca}
+@media print{body{background:#fff}.panel,.head,.card{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+  <header class="head">
+    <h1>生鲜订单解析报告</h1>
+    <p class="sub">来源 raw · 生成于 2026-11-13 03:45</p>
+    <p class="concl concl--bad">高度匹配 1 行；1 行需人工确认。请按下方清单核对后导出。</p>
+  </header>
+
+  <section class="cards"><div class="card"><div class="k">高度匹配</div><div class="v">1</div></div><div class="card"><div class="k">候选审核</div><div class="v">1</div></div><div class="card"><div class="k">异常记录</div><div class="v">0</div></div><div class="card"><div class="k">合计</div><div class="v">2</div></div></section>
+
+  <h2>高度匹配</h2>
+  <div class="panel"><table><thead><tr><th scope="col">原始行</th><th scope="col">标准化名称</th><th scope="col">数量</th><th scope="col">匹配商品</th><th scope="col">SKU编码</th><th scope="col">置信度</th></tr></thead><tbody><tr><td>洋芋2斤</td><td>土豆</td><td class="num">2斤</td><td>土豆</td><td class="num"><code>VEG-002</code></td><td class="num">100.0</td></tr></tbody></table></div>
+
+  <h2>候选审核</h2>
+  <div class="panel"><table><thead><tr><th scope="col">原始行</th><th scope="col">标准化名称</th><th scope="col">数量</th><th scope="col">最高分</th><th scope="col">候选（首个为推荐）</th></tr></thead><tbody><tr><td>蕃茄3斤</td><td>蕃茄</td><td class="num">3斤</td><td class="num">60.0</td><td><span class="cand"><b>小番茄</b><span class="rec">推荐</span><span class="sc">60.0</span></span><span class="cand">番茄<span class="sc">50.0</span></span><span class="cand">茄子<span class="sc">50.0</span></span></td></tr></tbody></table></div>
+
+  <h2>异常记录</h2>
+  <div class="panel"><p class="empty">没有异常记录。</p></div>
+
+  <h2>导出</h2>
+  <div class="panel">
+    <p class="file">三表工作簿：<b>生鲜订单_raw_20261113_034523.xlsx</b></p>
+    <p class="hint">本报告在平台内以沙箱页打开（脚本与下载被平台关闭），因此这里只写文件名、
+      不放下载按钮。导出请点聊天区下方的入口行，或右上角铃铛「后台记录」——
+      数据以那份三表 xlsx 为准，本报告只是摘要视图。</p>
+  </div>
+</main>
+</body>
+</html>

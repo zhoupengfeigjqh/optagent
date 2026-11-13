@@ -38,6 +38,8 @@ const emit = defineEmits<{ 'open-link': [href: string] }>()
 interface ViewRun {
   tag: string
   code: boolean
+  /** 红字强调（`==文本==`，推荐结论专用） */
+  red: boolean
   segments: ContentSegment[]
 }
 
@@ -53,8 +55,8 @@ interface ViewBlock {
   items: ViewRun[][]
   language: string
   code: ContentSegment[]
-  header: ContentSegment[][]
-  rows: ContentSegment[][][]
+  header: ViewRun[][]
+  rows: ViewRun[][][]
 }
 
 /** 原文中的全部命中（升序）：用来把"片段偏移"换算成全局命中序号 */
@@ -107,8 +109,14 @@ function viewRuns(runs: InlineRun[]): ViewRun[] {
   return runs.map((run) => ({
     tag: runTag(run),
     code: run.kind === 'code',
+    red: run.kind === 'red',
     segments: segmentsOf(run, run.kind === 'link' ? run.href : undefined),
   }))
+}
+
+/** 行内片段/单元格的类名（正文、列表、表格共用一份口径） */
+function runClass(run: ViewRun): Record<string, boolean> {
+  return { 'message-content__code': run.code, 'message-content__red': run.red }
 }
 
 function emptyBlock(kind: ViewBlock['kind']): ViewBlock {
@@ -148,8 +156,8 @@ const blocks = computed<ViewBlock[]>(() =>
         view.code = segmentsOf(block.piece)
         break
       case 'table':
-        view.header = block.header.map((cell) => segmentsOf(cell))
-        view.rows = block.rows.map((row) => row.map((cell) => segmentsOf(cell)))
+        view.header = block.header.map(viewRuns)
+        view.rows = block.rows.map((row) => row.map(viewRuns))
         break
       default:
         break
@@ -190,20 +198,34 @@ function blockClass(block: ViewBlock): string {
 
       <hr v-else-if="block.kind === 'rule'" class="message-content__rule" />
 
-      <!-- 表格：单元格不做行内解析（故意的取舍，见 `utils/markdown.ts` 头部说明） -->
+      <!-- 表格：单元格同样走行内解析（`==推荐==` 标红、`**粗**` 生效，见 `utils/markdown.ts`） -->
       <div v-else-if="block.kind === 'table'" class="message-content__table-wrap">
         <table class="message-content__table">
           <thead>
             <tr>
               <th v-for="(cell, cellIndex) in block.header" :key="cellIndex" scope="col">
-                <MessageSegments :segments="cell" @open-link="emit('open-link', $event)" />
+                <template v-for="(run, runIndex) in cell" :key="runIndex">
+                  <component :is="run.tag" :class="runClass(run)">
+                    <MessageSegments
+                      :segments="run.segments"
+                      @open-link="emit('open-link', $event)"
+                    />
+                  </component>
+                </template>
               </th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, rowIndex) in block.rows" :key="rowIndex">
               <td v-for="(cell, cellIndex) in row" :key="cellIndex">
-                <MessageSegments :segments="cell" @open-link="emit('open-link', $event)" />
+                <template v-for="(run, runIndex) in cell" :key="runIndex">
+                  <component :is="run.tag" :class="runClass(run)">
+                    <MessageSegments
+                      :segments="run.segments"
+                      @open-link="emit('open-link', $event)"
+                    />
+                  </component>
+                </template>
               </td>
             </tr>
           </tbody>
@@ -213,7 +235,7 @@ function blockClass(block: ViewBlock): string {
       <ul v-else-if="block.kind === 'list' && !block.ordered" class="message-content__list">
         <li v-for="(item, itemIndex) in block.items" :key="itemIndex" class="message-content__item">
           <template v-for="(run, runIndex) in item" :key="runIndex">
-            <component :is="run.tag" :class="{ 'message-content__code': run.code }">
+            <component :is="run.tag" :class="runClass(run)">
               <MessageSegments :segments="run.segments" @open-link="emit('open-link', $event)" />
             </component>
           </template>
@@ -223,7 +245,7 @@ function blockClass(block: ViewBlock): string {
       <ol v-else-if="block.kind === 'list'" class="message-content__list">
         <li v-for="(item, itemIndex) in block.items" :key="itemIndex" class="message-content__item">
           <template v-for="(run, runIndex) in item" :key="runIndex">
-            <component :is="run.tag" :class="{ 'message-content__code': run.code }">
+            <component :is="run.tag" :class="runClass(run)">
               <MessageSegments :segments="run.segments" @open-link="emit('open-link', $event)" />
             </component>
           </template>
@@ -233,7 +255,7 @@ function blockClass(block: ViewBlock): string {
       <!-- 段落 / 标题 / 引用：同一套行内渲染，标签与类名由 `blockTag`/`blockClass` 决定 -->
       <component :is="blockTag(block)" v-else :class="blockClass(block)">
         <template v-for="(run, runIndex) in block.runs" :key="runIndex">
-          <component :is="run.tag" :class="{ 'message-content__code': run.code }">
+          <component :is="run.tag" :class="runClass(run)">
             <MessageSegments :segments="run.segments" @open-link="emit('open-link', $event)" />
           </component>
         </template>
@@ -326,5 +348,11 @@ function blockClass(block: ViewBlock): string {
   background: var(--color-bg-subtle);
   font-family: var(--font-family-mono);
   font-size: 0.92em;
+}
+
+/* 红字强调（`==文本==`）：颜色 + 字重双通道，避免"仅靠颜色传达信息"（宪章原则四） */
+.message-content__red {
+  color: #cf1322;
+  font-weight: 600;
 }
 </style>

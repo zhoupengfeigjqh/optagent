@@ -66,8 +66,8 @@ curl -o /dev/null -w '%{http_code}\n' http://localhost:5174/admin/
 ### 1.3 MCP / 推理服务（Docker，按需）
 
 ```bash
-docker compose up -d ocr jev bom     # 表格识别 / Jev 决策 / BOM 校验合并
-docker compose up -d laya            # 意图聚焦判定模型（013，可选；镜像近 3GB）
+docker compose up -d ocr jev bom fresh   # 表格识别 / Jev 决策 / BOM 校验合并 / 生鲜订货解析
+docker compose up -d laya                # 意图聚焦判定模型（013，可选；镜像近 3GB）
 ```
 
 | 服务 | 宿主端口 | 容器内 | 说明 |
@@ -76,14 +76,15 @@ docker compose up -d laya            # 意图聚焦判定模型（013，可选�
 | jev | 8101 | 8000 | Jev 决策（需 `TYPESAFE_API_KEY`） |
 | bom | 8102 | 8000 | BOM 校验 / 合并（产出回写平台） |
 | laya | 8103 | 8000 | Laya 判定模型（需 `DECIS_API_KEY`） |
+| fresh | 8104 | 8000 | 生鲜订货解析（图片 → SKU 匹配三表，镜像含 OCR 模型） |
 
-首次运行前按各目录 `.env.example` 建 `.env.local`：ocr / bom 可调项都有代码缺省值，缺失不影响启动；
+首次运行前按各目录 `.env.example` 建 `.env.local`：ocr / bom / fresh 可调项都有代码缺省值，缺失不影响启动；
 `jev` 缺 `TYPESAFE_API_KEY` 时三个工具返回可读错误；`laya` 缺 `DECIS_API_KEY` 会**拒绝启动**（非 loopback 必须带 token）。
 
 ### 1.4 全 Docker 形态（联调 / 生产）
 
 ```bash
-docker compose up -d --build          # 9 个服务：gateway + 4 个应用 + 4 个 MCP/推理
+docker compose up -d --build          # 10 个服务：gateway + 4 个应用 + 5 个 MCP/推理
 ```
 
 前置只有两份配置：`agent-backend/config.yaml`（模型，挂载进容器）与
@@ -125,6 +126,7 @@ docker compose up -d --build          # 9 个服务：gateway + 4 个应用 + 4 
 | `jev` | Python / FastMCP | 8101 → 8000 | Jev 决策 MCP（state + 类型化问题 → 结构化决策） |
 | `bom` | Python / FastMCP | 8102 → 8000 | BOM 校验 / 合并 MCP（唯一产出文件的工具） |
 | `laya` | Docker 推理镜像 | 8103 → 8000 | 意图聚焦判定（backend 直调 HTTP，**不经 MCP**） |
+| `fresh` | Python / FastMCP | 8104 → 8000 | 生鲜订货解析 MCP（图片 → SKU 匹配三表，含 OCR） |
 | 排产数据服务 | 外部 | `192.168.0.188:8080` | 排产页面与 `hd-algorithm` MCP 的数据/求解上游 |
 
 ```text
@@ -133,7 +135,7 @@ docker compose up -d --build          # 9 个服务：gateway + 4 个应用 + 4 
                         ├─► agent-backend   /api/     运行端
                         ├─► admin-backend   /api/admin/  设计态与部署
                         └─► hd-algorithm 数据服务 /dataApi/
-agent-backend ──MCP(HTTP)──► ocr / jev / bom / 外部 MCP 服务
+agent-backend ──MCP(HTTP)──► ocr / jev / bom / fresh / 外部 MCP 服务
               ──HTTP──────► laya（意图聚焦，可选）
               ──文件直链──► MCP 服务回源下载（签名 URL，本机 LAN IP）
 ```
@@ -208,15 +210,18 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / 外部 MCP 服务
 五个导航：**MCP 服务 · 本体管理 · SKILL 管理 · 数字人设计 · 数字人部署**。构建 `base: '/admin/'`，
 生产由网关按前缀分发静态资源。
 
-### 4.5 三个 MCP 服务
+### 4.5 四个 MCP 服务
 
 | 服务 | 工具 | 形态 | 特点 |
 |---|---|---|---|
 | ocr | `ocr_image` 等 | 同步 | 回源下载签名直链 → 识别 → 结构化输出 |
 | jev | `noul` / `choice` / `score` | 同步 | state 可来自 LLM 文本或引用文件；有界指数退避 |
 | bom | `bom_validate` / `bom_merge` | 同步 | 递归展开多级 BOM，产出 xlsx + HTML 报告并**回写平台**，自身不写磁盘 |
+| fresh | `fresh_order_parse` | 同步 | 订单图片 OCR → 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；纯只读、不产文件 |
 
-三者的共同点：**不共享用户磁盘**，只接受 http/https 直链、限时限大小、不跟随重定向。
+四者的共同点：**不共享用户磁盘**，只接受 http/https 直链。
+差异：ocr / jev / bom 不跟随重定向且限下载体积；`fresh` 有 `HTTP_TIMEOUT_SECONDS`（默认 30s）超时，
+但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service/README.md` §4）。
 
 ### 4.6 外部集成
 
@@ -257,7 +262,7 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / 外部 MCP 服务
 | `agent-backend/config.yaml` | 运行端 | 直接读 cwd | 只读挂载进容器 |
 | `admin-backend/.env.local` | 管理端私产 | 唯一读取 | — |
 | `admin-backend/.env` | 入库 | 不读 | 注入容器形态路径 |
-| `<服务>/.env.local`（ocr/jev/bom/laya） | 各服务私产 | 各自读 | compose 注入，缺失不报错 |
+| `<服务>/.env.local`（ocr/jev/bom/laya/fresh） | 各服务私产 | 各自读 | compose 注入，缺失不报错 |
 
 两种形态从不同文件出发**不混用**：本地是源码树相对路径 + `127.0.0.1`，容器是 `/app/...` + 服务名。
 

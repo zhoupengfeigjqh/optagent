@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+exports/
+order_list_test/
+tests/
+商品数据.xlsx
+订单识别结果.xlsx
+~$*.xlsx
+README.md
+cli_runner.py
+Dockerfile
+.dockerignore

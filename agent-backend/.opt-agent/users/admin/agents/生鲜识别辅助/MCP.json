@@ -1,0 +1,20 @@
+{
+  "servers": [
+    {
+      "name": "fresh-parse",
+      "transport": "http",
+      "url": "http://localhost:8104/mcp",
+      "file_args": {
+        "fresh_order_parse": {
+          "image_path": "url",
+          "sku_path": "url",
+          "noise_path": "url",
+          "synonyms_path": "url"
+        }
+      },
+      "allowed_tools": [
+        "fresh_order_parse"
+      ]
+    }
+  ]
+}

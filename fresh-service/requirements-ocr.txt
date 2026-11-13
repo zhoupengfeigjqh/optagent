@@ -1,0 +1,4 @@
+# 图片 OCR 依赖（单独成文件：镜像构建时按需安装，本地纯文本开发可不装）
+# 与 core/ocr.py 的 PP-OCRv6 配置配套，装完后 mcp_server 才能识别图片地址
+paddleocr>=3.0
+paddlepaddle>=3.0

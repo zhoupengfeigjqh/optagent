@@ -156,6 +156,30 @@
         "X-MCP-Token": "Y9gtXqzgndtjVF4RPWnqb989TgOzjfpu"
       },
       "updated_at": "2026-11-06T15:09:26.459Z"
+    },
+    "fresh-parse": {
+      "name": "fresh-parse",
+      "description": "生鲜名称解析服务",
+      "transport": "http",
+      "url": "http://localhost:8104/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {
+        "fresh_order_parse": {
+          "image_path": "url",
+          "sku_path": "url",
+          "noise_path": "url",
+          "synonyms_path": "url"
+        }
+      },
+      "confirmation": "never",
+      "rules_fields": {},
+      "allowed_tools": [
+        "fresh_order_parse"
+      ],
+      "tool_labels": {},
+      "headers": {},
+      "updated_at": "2026-11-13T01:35:40.642Z"
     }
   }
 }

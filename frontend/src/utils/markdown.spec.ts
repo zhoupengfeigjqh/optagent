@@ -64,11 +64,23 @@ describe('parseMarkdown —— 块级', () => {
     expect(table).toHaveLength(1)
     const block = table[0]
     if (block.kind !== 'table') throw new Error('应为表格块')
-    expect(block.header.map((cell) => cell.text)).toEqual(['工序', '工时'])
-    expect(block.rows.map((row) => row.map((cell) => cell.text))).toEqual([['冲压', '3.2']])
+    const cellText = (cell: { text: string }[]): string => cell.map((run) => run.text).join('')
+    expect(block.header.map(cellText)).toEqual(['工序', '工时'])
+    expect(block.rows.map((row) => row.map(cellText))).toEqual([['冲压', '3.2']])
 
     const sentence = parseMarkdown('产线 A | 产线 B 都在跑')
     expect(sentence[0]?.kind).toBe('paragraph')
+  })
+
+  it('表格单元格走行内解析：红字强调与粗体在表格里同样成片段', () => {
+    const blocks = parseMarkdown('| 原始行 | 推荐商品 |\n| --- | --- |\n| 蕃茄3斤 | ==番茄== |')
+    const block = blocks[0]
+    if (block.kind !== 'table') throw new Error('应为表格块')
+
+    const recommended = block.rows[0]?.[1] ?? []
+    expect(recommended.map((run) => run.kind)).toEqual(['red'])
+    expect(recommended[0]?.text).toBe('番茄')
+    expect(recommended[0]?.start).toBeGreaterThan(0)
   })
 
   it('引用与分隔线', () => {
@@ -97,6 +109,22 @@ describe('parseInline —— 行内', () => {
     expect(runs[0]?.text).toBe('可以')
     expect(runs[4]?.text).toBe('code')
     expect(runs[6]?.href).toBe('https://a.b/c')
+  })
+
+  it('红字强调 `==文本==` 自成一类，标记本身不出现在文本里', () => {
+    const runs = parseInline('推荐：==番茄== 请确认', 0)
+
+    expect(runs.map((run) => run.kind)).toEqual(['text', 'red', 'text'])
+    expect(runs[1]?.text).toBe('番茄')
+    expect(runs.map((run) => run.text).join('')).toBe('推荐：番茄 请确认')
+  })
+
+  it('散文里的比较表达式不被吃成红字（标记内侧必须紧贴非空白字符）', () => {
+    const source = '当 a == b == c 时'
+    const runs = parseInline(source, 0)
+
+    expect(runs.some((run) => run.kind === 'red')).toBe(false)
+    expect(runs.map((run) => run.text).join('')).toBe(source)
   })
 
   it('偏移是**原文**坐标：搜索高亮靠它换算全局序号', () => {

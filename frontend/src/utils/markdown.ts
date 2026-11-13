@@ -3,9 +3,13 @@
  *
  * 为什么自研而不引库：① 宪章原则六（依赖治理）——渲染器 + XSS 净化器是**两个**新依赖，
  * 要把评审走一遍；② 本项目的既有风格就是零第三方（图标、分段、文件类型全都自研）；
- * ③ agent 的输出高度收敛：标题、列表、表格、代码块、引用、粗体/斜体、行内代码、链接。
+ * ③ agent 的输出高度收敛：标题、列表、表格、代码块、引用、粗体/斜体、行内代码、链接、红字强调。
  * 其余语法（嵌套列表、图片、HTML、脚注、`_` 斜体）**原样当文本输出**——宁可少渲染，
  * 不可渲染错，更不可引入注入面。
+ *
+ * 「红字强调」`==文本==` 是为生鲜订单复核这类「必须一眼看到推荐结论」的场景加的（2026-11-13）：
+ * 沿用 Obsidian/Typora 的高亮标记写法，渲染成红色加粗（不只是颜色，兼作字重强调，
+ * 避免"仅靠颜色传达信息"，宪章原则四）。**表格单元格同样走行内解析**，否则推荐列没法标红。
  *
  * **可测不变式**：解析只丢掉"标记本身"，不改变正文可见字符的顺序；每个可高亮片段都带
  * `start`（在原文中的起始偏移），供搜索高亮换算全局命中序号
@@ -25,7 +29,7 @@ export interface Piece {
 }
 
 /** 行内片段类型 */
-export type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'link'
+export type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'link' | 'red'
 
 /** 行内片段（`text` 片段之外的种类渲染成对应的行内元素） */
 export interface InlineRun extends Piece {
@@ -41,7 +45,7 @@ export type MarkdownBlock =
   | { kind: 'list'; start: number; ordered: boolean; items: InlineRun[][] }
   | { kind: 'quote'; start: number; runs: InlineRun[] }
   | { kind: 'code'; start: number; language: string; piece: Piece }
-  | { kind: 'table'; start: number; header: Piece[]; rows: Piece[][] }
+  | { kind: 'table'; start: number; header: InlineRun[][]; rows: InlineRun[][][] }
   | { kind: 'rule'; start: number }
 
 /** 带原文偏移的一行 */
@@ -60,8 +64,11 @@ const ORDERED = /^\s*\d+[.)]\s+(.*)$/
 /**
  * 行内标记。**顺序即优先级**：`**` 必须排在 `*` 前面，否则粗体会被吃成"斜体 + 残留星号"。
  * 刻意不支持 `_` 变体：本项目的正文里 `snake_case` 标识符很常见，误判代价高于收益。
+ * `==` 红字强调内部**不得再出现 `=`、且首尾紧贴非空白字符**（`==番茄==` 认，`a == b == c` 不认），
+ * 否则散文里的比较表达式会被整段染红。
  */
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]*\]\([^)\s]*\))/g
+const INLINE =
+  /(`[^`\n]+`)|(==\S(?:[^\n=]*?\S)?==)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]*\]\([^)\s]*\))/g
 
 /** 解析正文为块级序列 */
 export function parseMarkdown(source: string): MarkdownBlock[] {
@@ -124,15 +131,16 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       index + 1 < lines.length &&
       isDividerRow(lines[index + 1].text)
     ) {
-      const header = splitCells(lines[index])
+      // 单元格按行内片段解析（而非整格纯文本）：`==推荐==` 标红、`**粗**` 等标记在表格里同样生效
+      const header = parseCells(lines[index])
       index += 2
-      const rows: Piece[][] = []
+      const rows: InlineRun[][][] = []
       while (
         index < lines.length &&
         lines[index].text.trim() !== '' &&
         lines[index].text.includes('|')
       ) {
-        rows.push(splitCells(lines[index]))
+        rows.push(parseCells(lines[index]))
         index += 1
       }
       blocks.push({ kind: 'table', start: line.start, header, rows })
@@ -209,8 +217,10 @@ export function parseInline(text: string, start: number): InlineRun[] {
     if (matched[1] !== undefined) {
       runs.push({ kind: 'code', text: raw.slice(1, -1), start: offset + 1 })
     } else if (matched[2] !== undefined) {
-      runs.push({ kind: 'strong', text: raw.slice(2, -2), start: offset + 2 })
+      runs.push({ kind: 'red', text: raw.slice(2, -2), start: offset + 2 })
     } else if (matched[3] !== undefined) {
+      runs.push({ kind: 'strong', text: raw.slice(2, -2), start: offset + 2 })
+    } else if (matched[4] !== undefined) {
       runs.push({ kind: 'em', text: raw.slice(1, -1), start: offset + 1 })
     } else {
       runs.push(parseLink(raw, offset) ?? { kind: 'text', text: raw, start: offset })
@@ -281,6 +291,11 @@ function isFenceClose(text: string, marker: string): boolean {
 function isDividerRow(text: string): boolean {
   const cells = splitCells({ text, start: 0 }).map((cell) => cell.text)
   return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell))
+}
+
+/** 拆单元格并按行内语法解析（每格都保留原文偏移，搜索高亮口径不变） */
+function parseCells(line: SourceLine): InlineRun[][] {
+  return splitCells(line).map((cell) => parseInline(cell.text, cell.start))
 }
 
 /** 拆单元格（保留每格在原文中的偏移，供高亮换算） */
