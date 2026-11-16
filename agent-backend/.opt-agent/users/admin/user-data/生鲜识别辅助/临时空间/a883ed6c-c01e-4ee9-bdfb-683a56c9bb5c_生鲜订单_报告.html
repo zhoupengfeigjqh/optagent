@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>生鲜订单解析报告</title>
+<style>
+  :root {
+    --ink: #1f2328;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --head-bg: #f6f7f9;
+    --hl-bg: #ffe8e8;
+    --hl-ink: #b42318;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px 32px 40px;
+    color: var(--ink);
+    background: #fff;
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 12px; margin-bottom: 20px; }
+  h1 { margin: 0 0 8px; font-size: 22px; line-height: 1.3; }
+  h2 { margin: 28px 0 10px; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .meta span + span::before { content: " · "; }
+
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 4px; }
+  .card {
+    flex: 1 1 150px; min-width: 130px;
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; background: var(--head-bg);
+  }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 22px; font-weight: 700; line-height: 1.2; }
+
+  table { width: 100%; border-collapse: collapse; margin: 0 0 6px; font-size: 13px; }
+  caption { text-align: left; color: var(--muted); font-size: 12px; padding: 4px 0 6px; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  thead th { background: var(--head-bg); font-weight: 600; white-space: nowrap; }
+  tbody tr:nth-child(even) { background: #fbfbfc; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  td.mono { font-family: Consolas, "SFMono-Regular", monospace; font-size: 12px; }
+  .hl { background: var(--hl-bg); color: var(--hl-ink); font-weight: 700; }
+  .empty { color: var(--muted); font-style: italic; }
+  .note { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .total { font-weight: 600; }
+
+  .evidence { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin: 0 0 14px; }
+  .evidence .row { margin: 0 0 6px; }
+  .evidence .lbl { color: var(--muted); font-size: 12px; }
+
+  footer { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>生鲜订单解析报告</h1>
+  <div class="meta">
+    <span>来源图片：order6.png</span>
+    <span>订单编号：1</span>
+    <span>生成时间：2026-11-16 21:47</span>
+    <span>SKU 清单：数据准备/生鲜sku表/SKU清单.xlsx</span>
+  </div>
+</header>
+
+<section class="cards">
+  <div class="card"><div class="k">高度匹配</div><div class="v">1</div></div>
+  <div class="card"><div class="k">候选审核</div><div class="v">0</div></div>
+  <div class="card"><div class="k">异常记录</div><div class="v">0</div></div>
+  <div class="card"><div class="k">合计</div><div class="v">1</div></div>
+</section>
+
+<h2>一、高度匹配（auto_rows）</h2>
+<table>
+  <caption>score ≥ 高阈值，直接采用工具结果。</caption>
+  <thead>
+    <tr>
+      <th class="num">#</th>
+      <th>原始行</th>
+      <th>标准化名称</th>
+      <th>数量</th>
+      <th>匹配商品</th>
+      <th>SKU编码</th>
+      <th class="num">置信度</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="num">1</td>
+      <td>猪牛肉各10斤</td>
+      <td>猪牛肉各</td>
+      <td class="num">10斤</td>
+      <td>牛肉</td>
+      <td class="mono">MEA-006</td>
+      <td class="num">90</td>
+    </tr>
+  </tbody>
+</table>
+<p class="note">共 1 行。</p>
+
+<h2>二、候选审核（review_rows）</h2>
+<table>
+  <caption>分数处于中段，需人工/模型复核；候选列按「名称（分数）」连接，最多 3 个。</caption>
+  <thead>
+    <tr>
+      <th class="num">#</th>
+      <th>原始行</th>
+      <th>标准化名称</th>
+      <th>数量</th>
+      <th class="num">最高分</th>
+      <th>候选列表</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td colspan="6" class="empty">无</td></tr>
+  </tbody>
+</table>
+<p class="note">共 0 行。</p>
+
+<h2>三、异常记录（error_rows）</h2>
+<table>
+  <caption>OCR 失败 / 无匹配 / 低置信度无候选等，逐条给出说明。</caption>
+  <thead>
+    <tr>
+      <th class="num">#</th>
+      <th>原始行</th>
+      <th>标准化名称</th>
+      <th>数量</th>
+      <th>异常类型</th>
+      <th>最高候选</th>
+      <th class="num">最高分</th>
+      <th>说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td colspan="8" class="empty">无</td></tr>
+  </tbody>
+</table>
+<p class="note">共 0 行。</p>
+
+<h2>四、异常与存疑复核</h2>
+
+<div class="evidence">
+  <div class="row"><span class="lbl">订单行：</span>猪牛肉各10斤（标准化：猪牛肉各，数量 10斤）</div>
+  <div class="row"><span class="lbl">工具结论：</span>自动匹配 牛肉（MEA-006），分数 90，仅命中「牛肉」一个品种，无候选列表</div>
+  <div class="row"><span class="lbl">推荐：</span>牛肉（MEA-006）保留；猪肉一路需用户确认具体部位后单独成行，清单内无「猪肉」通用 SKU</div>
+  <div class="row"><span class="lbl">证据：</span>SKU清单 —— MEA-006 / 牛肉 / 别名：无 / 规格：500g / 单位：斤 / 启用：是；猪肉侧可选 MEA-001 五花肉、MEA-002 梅花肉、MEA-003 里脊、MEA-004 排骨、MEA-005 猪蹄(只)、MEA-020 猪肚(个)；MEA-019 猪肝为「否」未启用</div>
+  <div class="row"><span class="lbl">判断依据：</span>「猪牛肉」为猪肉 + 牛肉的并列写法，「各10斤」指两种各 10 斤；工具将「猪牛肉」整体归一为「牛肉」，丢失猪肉一路，且总数量不等于 10 斤</div>
+  <div class="row"><span class="lbl">待确认：</span>猪肉具体部位（五花肉 / 里脊 / 梅花肉 / 排骨）确认后才能落到唯一 SKU 编码</div>
+</div>
+
+<h2>五、最终推荐表</h2>
+<table>
+  <caption>覆盖前三表全部行；模型推荐与待确认的单元格用浅红底加粗标出。</caption>
+  <thead>
+    <tr>
+      <th class="num">序号</th>
+      <th>原始行</th>
+      <th>数量</th>
+      <th>最终商品</th>
+      <th>SKU编码</th>
+      <th>判定</th>
+      <th>依据</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="num">1</td>
+      <td>猪牛肉各10斤（牛肉部分）</td>
+      <td class="num">10斤</td>
+      <td>牛肉</td>
+      <td class="mono">MEA-006</td>
+      <td>直接匹配</td>
+      <td>工具结果，分数 90；名称完全一致，规格 500g/斤，SKU 已启用</td>
+    </tr>
+    <tr>
+      <td class="num">2</td>
+      <td>猪牛肉各10斤（猪肉部分）</td>
+      <td class="num">10斤</td>
+      <td class="hl">待确认：猪肉（部位待定）</td>
+      <td class="mono hl">—</td>
+      <td>待确认</td>
+      <td>已检索「猪肉」「猪」「五花肉」「里脊」「梅花肉」「排骨」，清单无「猪肉」通用 SKU，仅有具体部位</td>
+    </tr>
+  </tbody>
+</table>
+<p class="note total">合计 2 行：直接匹配 1、模型推荐 0、待确认 1。</p>
+
+<footer>
+  数据来源：fresh_order_parse（工具返回 auto_rows / review_rows / error_rows）；SKU 与别名取自 数据准备/生鲜sku表/SKU清单.xlsx。
+  本页为只读视图，导出与下载入口由平台在对话中提供。
+</footer>
+
+</body>
+</html>

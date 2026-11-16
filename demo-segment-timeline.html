@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>方案 A 演示：按时间线交错渲染（左=现状，右=方案 A）</title>
+<style>
+  :root { --ink:#1f2328; --muted:#6b7280; --line:#e5e7eb; --card:#f6f7f9; --accent:#2563eb; --ok:#0f9960; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 28px 40px; color:var(--ink); background:#fff;
+         font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif; }
+  h1 { font-size:19px; margin:0 0 6px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 18px; }
+  .bar { display:flex; gap:10px; align-items:center; margin:0 0 18px; }
+  button { font:inherit; padding:6px 14px; border:1px solid var(--line); border-radius:8px;
+           background:#fff; cursor:pointer; }
+  button:hover { border-color:#c9ccd1; }
+  .clock { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+  .stage { display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start; }
+  .col h2 { font-size:13px; font-weight:600; margin:0 0 8px; color:var(--muted); }
+  .col.right h2 { color:var(--accent); }
+  .bubble { border:1px solid var(--line); border-radius:12px; padding:14px 16px; min-height:360px;
+            display:flex; flex-direction:column; gap:10px; background:#fff; }
+  .bubble.done { border-color:#cdd5e1; }
+  .text { white-space:pre-wrap; }
+  .text.streaming::after { content:"▍"; color:var(--accent); animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .tool { border:1px solid var(--line); border-radius:8px; background:var(--card); padding:7px 11px;
+          display:flex; gap:9px; align-items:center; font-size:13px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#c4c9d1; flex:none; }
+  .tool.running .dot { background:var(--accent); animation:pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  .tool.success .dot { background:var(--ok); }
+  .tool .name { font-weight:600; }
+  .tool .meta { color:var(--muted); font-size:12px; margin-left:auto; }
+  .thinking { color:var(--muted); font-size:12.5px; display:flex; gap:8px; align-items:center; }
+  .spinner { width:11px; height:11px; border:2px solid var(--line); border-top-color:var(--muted);
+             border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .hint { margin:20px 0 0; padding:12px 14px; border-left:3px solid var(--line); color:var(--muted); font-size:13px; }
+  .hint b { color:var(--ink); }
+</style>
+</head>
+<body>
+
+<h1>方案 A 演示：消息气泡按「事件时间线」交错渲染</h1>
+<p class="sub">数据取自一次真实对话（18.1s，5 次工具调用）。左：现状（工具卡片全部堆在正文上方）；右：方案 A（文字与工具卡片按到达顺序交替）。</p>
+
+<div class="bar">
+  <button id="play">▶ 播放</button>
+  <button id="reset">↺ 重来</button>
+  <span class="clock" id="clock">+0.0s</span>
+</div>
+
+<div class="stage">
+  <div class="col left">
+    <h2>现状：全部工具在上，正文在下</h2>
+    <div class="bubble" id="old"></div>
+  </div>
+  <div class="col right">
+    <h2>方案 A：按时间线交错</h2>
+    <div class="bubble" id="next"></div>
+  </div>
+</div>
+
+<p class="hint">
+  <b>为什么观感差很多：</b>现状下，第 2、3、4 轮的工具卡片会不断<b>插入到已流出的正文上方</b>，把正文一路往下推——
+  用户盯着增长的工具区，自然觉得“工具跑完才出字”。方案 A 里，正文一旦出现就<b>固定在原地</b>，
+  后续工具卡片出现在它下方，形成“说话 → 干活 → 说话”的真实时间线。
+</p>
+
+<script>
+/* ===== 真实事件序列（毫秒取自实测；文本为节选） ===== */
+const EVENTS = [
+  { at: 700,  kind: 'text',  delta: '好的，我先读一下技能说明，确认解析流程。' },
+  { at: 1600, kind: 'tool',  id: 't1', name: '读取技能', label: 'read_skill' },
+  { at: 1600, kind: 'tool',  id: 't2', name: '生鲜订单解析', label: 'fresh_order_parse' },
+  { at: 1620, kind: 'end',   id: 't1', status: 'success' },
+  { at: 3400, kind: 'end',   id: 't2', status: 'success', note: 'OCR + 匹配 1.8s' },
+  { at: 4300, kind: 'text',  delta: '工具返回了三张表：高度匹配 12 行、候选审核 3 行、异常 1 行。我先核对一下 SKU 清单里的别名。' },
+  { at: 5000, kind: 'tool',  id: 't3', name: '读取文件', label: 'read_file' },
+  { at: 5060, kind: 'end',   id: 't3', status: 'success' },
+  { at: 5400, kind: 'text',  delta: '核对完了：洋芋→土豆（VEG-002）命中；蕃茄→番茄 需要按别名确认；西蓝花在清单里查无此品，标记为待确认。' },
+  { at: 8900, kind: 'tool',  id: 't4', name: '读取技能', label: 'read_skill' },
+  { at: 8940, kind: 'end',   id: 't4', status: 'success' },
+  /* 实测此处静默 7.5s：模型在推理并生成报告 HTML */
+  { at: 16400, kind: 'tool', id: 't5', name: '写入文件', label: 'write_file' },
+  { at: 16420, kind: 'end',  id: 't5', status: 'success' },
+  { at: 16900, kind: 'text', delta: '报告已生成并存入临时空间，可在右侧面板查看；下面是要点汇总。' },
+  { at: 18100, kind: 'done' },
+];
+
+const SPEED = 3;             // 3 倍速：18.1s → 约 6s
+const THINK_AFTER = 2500;    // 与本仓库 TR-66 一致：>2.5s 无事件才显示「模型正在思考…」
+
+const oldEl = document.getElementById('old');
+const newEl = document.getElementById('next');
+const clock = document.getElementById('clock');
+const playBtn = document.getElementById('play');
+
+let timer = null;
+let startTs = 0;
+
+/* 两套模型（互不共享状态） */
+let state = null;
+function resetState() {
+  state = {
+    /* 现状：一份正文 + 一个工具列表（渲染时工具全部在上） */
+    text: '',
+    tools: [],
+    /* 方案 A：有序段数组 */
+    segments: [],
+    lastEventAt: 0,
+    stalled: false,
+    done: false,
+    lastTool: null,
+    lastText: null,
+  };
+}
+
+function apply(ev) {
+  state.lastEventAt = ev.at;
+  state.stalled = false;
+  if (ev.kind === 'text') {
+    state.text += ev.delta;
+    /* A：优先续写"当前仍在流"的文本段，否则新建一段 */
+    const seg = state.segments[state.segments.length - 1];
+    if (seg && seg.kind === 'text' && seg.open) seg.text += ev.delta;
+    else state.segments.push({ kind: 'text', text: ev.delta, open: true });
+    /* 开新文本段时，关闭上一个工具段的"进行中"归属 */
+    state.lastText = state.segments[state.segments.length - 1];
+    return;
+  }
+  if (ev.kind === 'tool') {
+    const tool = { id: ev.id, name: ev.name, label: ev.label, status: 'running', note: '' };
+    state.tools.push(tool);
+    state.segments.push({ kind: 'tool', tool, open: true });
+    /* 文本段到此为止：后续文字必须另起一段（这是 A 的核心） */
+    const lastText = state.segments.findLast?.((s) => s.kind === 'text');
+    if (lastText) lastText.open = false;
+    return;
+  }
+  if (ev.kind === 'end') {
+    const tool = state.tools.find((t) => t.id === ev.id);
+    if (tool) { tool.status = ev.status; tool.note = ev.note || ''; }
+    return;
+  }
+  if (ev.kind === 'done') {
+    state.done = true;
+    state.segments.forEach((s) => { s.open = false; });
+  }
+}
+
+function toolHtml(t) {
+  return `<div class="tool ${t.status}">
+    <span class="dot"></span>
+    <span class="name">${t.name}</span>
+    <span class="meta">${t.label || ''}${t.note ? ' · ' + t.note : (t.status === 'running' ? ' · 进行中' : '')}</span>
+  </div>`;
+}
+
+function render() {
+  /* 现状：工具全部在上，正文在下 */
+  const oldBody = state.tools.map(toolHtml).join('') +
+    (state.text ? `<div class="text${!state.done ? ' streaming' : ''}">${escapeHtml(state.text)}</div>` : '');
+  oldEl.innerHTML = oldBody + typing(state);
+
+  /* 方案 A：按段顺序 */
+  const nextBody = state.segments.map((s) => {
+    if (s.kind === 'tool') return toolHtml(s.tool);
+    const live = s.open && !state.done;
+    return `<div class="text${live ? ' streaming' : ''}">${escapeHtml(s.text)}</div>`;
+  }).join('');
+  newEl.innerHTML = nextBody + typing(state);
+
+  oldEl.classList.toggle('done', state.done);
+  newEl.classList.toggle('done', state.done);
+}
+
+function typing(s) {
+  if (s.done) return '';
+  const running = s.tools.some((t) => t.status === 'running');
+  if (running) {
+    const t = s.tools.filter((t) => t.status === 'running').slice(-1)[0];
+    return `<div class="thinking"><span class="spinner"></span>正在执行 ${t.name}…</div>`;
+  }
+  if (s.stalled) return `<div class="thinking"><span class="spinner"></span>模型正在思考…</div>`;
+  return `<div class="thinking"><span class="spinner"></span>思考中</div>`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+function play() {
+  stop();
+  resetState();
+  render();
+  startTs = performance.now();
+  let i = 0;
+  const tick = () => {
+    const elapsed = (performance.now() - startTs) * SPEED;
+    clock.textContent = `+${(elapsed / 1000).toFixed(1)}s`;
+    while (i < EVENTS.length && EVENTS[i].at <= elapsed) apply(EVENTS[i++]);
+    /* 静默兜底：与 TR-66 同口径 */
+    const running = state.tools.some((t) => t.status === 'running');
+    state.stalled = !state.done && !running && elapsed - state.lastEventAt > THINK_AFTER;
+    render();
+    if (i < EVENTS.length || !state.done) timer = setTimeout(tick, 60);
+    else clock.textContent = `+18.1s（结束）`;
+  };
+  tick();
+}
+
+function stop() {
+  if (timer) clearTimeout(timer);
+  timer = null;
+}
+
+playBtn.addEventListener('click', play);
+document.getElementById('reset').addEventListener('click', () => {
+  stop();
+  resetState();
+  clock.textContent = '+0.0s';
+  render();
+});
+
+resetState();
+render();
+setTimeout(play, 400);
+</script>
+</body>
+</html>
