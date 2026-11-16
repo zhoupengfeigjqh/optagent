@@ -97,6 +97,8 @@ export function useChatPanel() {
       text: streamingTextView.value,
       thinking: streamingThinkingView.value,
       toolCalls: chat.toolCalls.value,
+      // A-lite（2026-11-16）：文字与工具按到达顺序交错渲染（只服务流式，历史无段序）
+      segments: chat.segments.value,
       // 静默兜底（TR-66）：超过 2.5s 没有任何业务事件时，气泡底部改说「模型正在思考…」
       stalled: chat.stalled.value,
       error: chat.error.value,

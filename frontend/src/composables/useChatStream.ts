@@ -29,7 +29,7 @@ import type {
   ToolTip,
   Usage,
 } from '../api/types'
-import { RUN_PHASE, type RunPhase } from '../constants/events'
+import { RUN_PHASE, type RunPhase, type ToolStatus } from '../constants/events'
 import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { isAbortError } from '../api/sse'
 import {
@@ -42,6 +42,7 @@ import type {
   ChatStreamDeps,
   ChatStreamStore,
   PendingUserMessage,
+  StreamSegment,
   ToolCallState,
 } from './useChatStream.types'
 import { useInteractionGate } from './useInteractionGate'
@@ -55,6 +56,7 @@ export type {
   ChatStreamDeps,
   ChatStreamStore,
   PendingUserMessage,
+  StreamSegment,
   ToolCallState,
 } from './useChatStream.types'
 
@@ -66,6 +68,14 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const streamingText = ref('')
   const streamingThinking = ref('')
   const toolCalls = ref<ToolCallState[]>([])
+  /**
+   * 本轮渲染段（A-lite，2026-11-16）：文字与工具按事件到达顺序排列。
+   *
+   * 与 `toolCalls` 的分工：`toolCalls` 是**本轮全部工具**的扁平列表（下一步卡片、
+   * 静默判据、`toolItems` 仍用它）；`segments` 只服务**渲染顺序**——多轮工具时
+   * 让气泡按"说话 → 干活 → 再说"的时间线展示，而不是"工具全堆在正文上方"。
+   */
+  const segments = ref<StreamSegment[]>([])
   const thinkingEnabled = ref(readStoredThinking(storage))
   const draft = ref('')
 
@@ -102,6 +112,34 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const lastEventAt = ref(0)
   const stalled = ref(false)
   let heartbeat: ReturnType<typeof setInterval> | null = null
+
+  /**
+   * 追加正文增量：仍落在末尾的文字段就续写，否则另起一段。
+   *
+   * "工具之后的文字必须另起一段"正是 A-lite 的全部含义——没有这条，多轮工具的内容
+   * 又会被合并进同一段，渲染顺序回退成"工具在上、正文在下"。
+   */
+  function appendSegmentText(delta: string): void {
+    const items = segments.value
+    const last = items[items.length - 1]
+    if (last !== undefined && last.kind === 'text') {
+      segments.value = [...items.slice(0, -1), { kind: 'text', text: last.text + delta }]
+      return
+    }
+    segments.value = [...items, { kind: 'text', text: delta }]
+  }
+
+  function pushSegmentTool(call: ToolCallState): void {
+    segments.value = [...segments.value, { kind: 'tool', call }]
+  }
+
+  function settleSegmentTool(callId: string, status: ToolStatus): void {
+    segments.value = segments.value.map((segment) =>
+      segment.kind === 'tool' && segment.call.call_id === callId
+        ? { kind: 'tool', call: { ...segment.call, status } }
+        : segment,
+    )
+  }
 
   /** 收到任一业务事件：清零静默计时（`done` / `error` 也走这里，无害） */
   function markEvent(): void {
@@ -172,6 +210,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     streamingText.value = ''
     streamingThinking.value = ''
     toolCalls.value = []
+    segments.value = []
     error.value = null
     usage.value = null
     durationSeconds.value = null
@@ -253,6 +292,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     streamingText.value = ''
     streamingThinking.value = ''
     toolCalls.value = []
+    segments.value = []
     error.value = null
     usage.value = null
     durationSeconds.value = null
@@ -303,18 +343,21 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
               break
             case 'content':
               streamingText.value += event.data.delta
+              // A-lite：正文增量同时落到渲染段（工具之后的文字另起一段）
+              appendSegmentText(event.data.delta)
               break
-            case 'tool_call':
-              toolCalls.value = [
-                ...toolCalls.value,
-                {
-                  call_id: event.data.call_id,
-                  name: event.data.name,
-                  ...(event.data.label !== undefined ? { label: event.data.label } : {}),
-                  status: 'running',
-                },
-              ]
+            case 'tool_call': {
+              const call: ToolCallState = {
+                call_id: event.data.call_id,
+                name: event.data.name,
+                ...(event.data.label !== undefined ? { label: event.data.label } : {}),
+                status: 'running',
+              }
+              toolCalls.value = [...toolCalls.value, call]
+              // 渲染段：工具卡片在此刻插入时间线，后续正文必然排在它下方
+              pushSegmentTool(call)
               break
+            }
             case 'tool_call_end':
               // 002 特性（V-05 修订）：结束**不再立即移除**，而是标记为终态——
               // 这样一轮跑完前后的展示与"刷新后的历史卡片"一致；
@@ -322,6 +365,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
               toolCalls.value = toolCalls.value.map((item) =>
                 item.call_id === event.data.call_id ? { ...item, status: event.data.status } : item,
               )
+              settleSegmentTool(event.data.call_id, event.data.status)
               break
             case 'interaction_request':
               // HITL：模型发起需确认的工具调用 → 弹窗（倒计时从全量超时起算）
@@ -367,6 +411,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         // 收口即停表：`completed`/`failed`/`aborted` 都不该再显示"还在思考"
         stopHeartbeat()
         toolCalls.value = []
+        // 段序只服务流式渲染：收口后交给历史消息（历史没有段序，按旧顺序展示）
+        segments.value = []
         // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
         // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
         // 断连/传输层失败不缓存——后端那一轮可能仍在跑，重发会撞上 409（见该字段注释）
@@ -476,6 +522,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     streamingText,
     streamingThinking,
     toolCalls,
+    segments,
     thinkingEnabled,
     draft,
     error,

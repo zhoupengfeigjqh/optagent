@@ -295,9 +295,12 @@
 | **TR-65** | **等待提示 MUST 覆盖工具执行空档**：判据由「正文为空」扩展为「正文为空 **或** 本轮存在 `status==='running'` 的工具调用」。文案 MUST 点名工具（取 `label`，缺省回退 `name`；单个 → `正在执行 <名称>…`，多个去重后 → `正在执行 N 个工具…`），无 running 时回落缺省 `思考中`。MUST 仅在 `phase==='streaming'` 生效——已终结轮次即使残留 running 记录也不提示。工具全部结束且正文非空时 **MUST NOT** 补提示（正文本身在长，再叠一行是噪音）。提示保持 `role="status"` + `aria-live="polite"`，读屏可获知 | 组件测试 8 例（`MessageBubble.typing.spec.ts`）：空正文无工具 → 「思考中」；正文非空 + 1 个 running → 点名；2 个 running → 计数；同名去重；无 `label` 回退 `name`；全结束 + 正文非空 → 不提示；空正文 + 已结束 → 仍「思考中」；`completed` 阶段残留 running → 不提示 |
 | **TR-66** | **静默心跳兜底**：实测一轮 16s 的真实对话（SSE 时间线：`+8.0s content(1201字)` → `+14.7s tool_call write_file`），两次事件之间**6.6s 没有任何业务事件**——thinking 关闭时没有思考增量，`infra/sse.ts` 的 15s 心跳又是注释帧（前端解析器直接丢弃），界面只能被判成卡死。本轮 `streaming` 期间 MUST 每 500ms 检查「距上一个业务事件」的时长，**≥2.5s 置 `stalled`**，气泡底部改显「模型正在思考…」；任一业务事件到达 MUST **立即回落**（不残留）。HITL 挂起（`pendingInteraction` 非空）**MUST NOT** 视为静默（界面上有确认弹窗）。本轮终结 / `reset()` MUST 停表（定时器不得跨轮存活） | `useChatStream.stalled.spec.ts` 5 例（超时置位 / 事件到达回落 / done 停表 / reset 停表 / HITL 不置位）+ `MessageBubble.typing.spec.ts` 3 例（静默文案 / 工具名优先于泛化文案 / 回落即不显示） |
 
+| **TR-67** | **渲染段（A-lite）**：气泡原先把「全部工具卡片 → 整段正文」固定成两段，多轮工具时后到的卡片会插到已流出正文**上方**，观感变成"工具跑完才出字"（实测一轮 5 次工具、18s，正文其实 18→53→1121→1391 分数批到达）。流式轮 MUST 按事件到达顺序记录「文字段 / 工具段」（`content` 续写当前文字段，`tool_call` 开新工具段，其后的 `content` **必须另起文字段**；`tool_call_end` 只改段内状态、不移位），气泡 MUST 按段数组顺序渲染。段序**只服务流式**：历史消息无段序（`history.jsonl` 仍只存整段 `content` + `tool_calls`），按旧顺序渲染；`segments` 为空时 MUST 回退旧顺序。段序为流式瞬态，`reset()` 与 `finally` MUST 清空 | `useChatStream.segments.spec.ts` 6 例（段序/续写/结束不移位/收口清空/reset 清空/新一轮清空）+ `MessageBubble.segments.spec.ts` 4 例（交错顺序/缺 segments 回退/历史顺序/单段无空卡片） |
+
 **明确不做**（本次）：
 
 - **不改 SSE 契约**：不新增"工具进度"事件、不给 `tool_call_end` 补 `name`/`duration`（属独立增量，需同时改 §6 接口契约与契约文档）；
+- **不改 `history.jsonl` 与历史接口**：段序不落盘（A-full 才需要新增段序/字符偏移字段 + 契约 + 存量兼容），因此刷新后历史仍按旧顺序渲染；
 - **不加计时器**：无 `started_at` 下发，前端计时只能凭本地收包时刻，跨刷新不可复现，留待与上一项一起做；
 - **不做百分比/顶部全局进度条**：没有进度来源，只能表达"仍在处理"，气泡底部一行足够。
 

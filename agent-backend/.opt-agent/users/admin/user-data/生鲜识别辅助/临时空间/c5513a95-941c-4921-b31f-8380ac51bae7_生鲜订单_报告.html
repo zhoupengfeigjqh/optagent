@@ -60,16 +60,16 @@
 <header>
   <h1>生鲜订单解析报告</h1>
   <div class="meta">
-    <span>来源图片：order1.png</span>
+    <span>来源图片：order6.png</span>
     <span>订单编号：1</span>
-    <span>生成时间：2026-11-16 21:32</span>
+    <span>生成时间：2026-11-16 22:02</span>
     <span>SKU 清单：数据准备/生鲜sku表/SKU清单.xlsx</span>
   </div>
 </header>
 
 <section class="cards">
   <div class="card"><div class="k">高度匹配</div><div class="v">1</div></div>
-  <div class="card"><div class="k">候选审核</div><div class="v">1</div></div>
+  <div class="card"><div class="k">候选审核</div><div class="v">0</div></div>
   <div class="card"><div class="k">异常记录</div><div class="v">0</div></div>
   <div class="card"><div class="k">合计</div><div class="v">2</div></div>
 </section>
@@ -91,12 +91,12 @@
   <tbody>
     <tr>
       <td class="num">1</td>
-      <td>洋芋2斤</td>
-      <td>土豆</td>
-      <td class="num">2斤</td>
-      <td>土豆</td>
-      <td class="mono">VEG-002</td>
-      <td class="num">100</td>
+      <td>猪牛肉各10斤</td>
+      <td>猪牛肉各</td>
+      <td class="num">10斤</td>
+      <td>牛肉</td>
+      <td class="mono">MEA-006</td>
+      <td class="num">90</td>
     </tr>
   </tbody>
 </table>
@@ -116,17 +116,10 @@
     </tr>
   </thead>
   <tbody>
-    <tr>
-      <td class="num">1</td>
-      <td>蕃茄3斤</td>
-      <td>蕃茄</td>
-      <td class="num">3斤</td>
-      <td class="num">60</td>
-      <td>小番茄（60） / 番茄（50） / 茄子（50）</td>
-    </tr>
+    <tr><td colspan="6" class="empty">无</td></tr>
   </tbody>
 </table>
-<p class="note">共 1 行。</p>
+<p class="note">共 0 行。</p>
 
 <h2>三、异常记录（error_rows）</h2>
 <table>
@@ -152,12 +145,11 @@
 <h2>四、异常与存疑复核</h2>
 
 <div class="evidence">
-  <div class="row"><span class="lbl">订单行：</span>蕃茄3斤（标准化：蕃茄，数量 3斤）</div>
-  <div class="row"><span class="lbl">工具结论：</span>候选 小番茄（60） / 番茄（50） / 茄子（50），无高分命中</div>
-  <div class="row"><span class="lbl">推荐：</span>番茄（SKU编码 VEG-001）</div>
-  <div class="row"><span class="lbl">证据：</span>SKU清单 —— VEG-001 / 番茄 / 别名：西红柿|洋柿子 / 品类：蔬菜 / 规格：500g / 单位：斤 / 启用：是</div>
-  <div class="row"><span class="lbl">判断依据：</span>「蕃茄」为「番茄」的常见异写，蔬菜品类且 500g＝1斤与订单「3斤」吻合；不采纳 小番茄（FRU-021，水果、别名圣女果、按盒计价）与 茄子（VEG-010，仅共享末字）。</div>
-  <div class="row"><span class="lbl">待确认：</span>若客户实际要的是水果小番茄（圣女果），需改按 FRU-021 下单，单位由斤改为盒。</div>
+  <div class="row"><span class="lbl">订单行：</span>猪牛肉各10斤（标准化：猪牛肉各，数量 10斤）</div>
+  <div class="row"><span class="lbl">工具结论：</span>自动匹配 牛肉 MEA-006，置信度 90，未标记异常</div>
+  <div class="row"><span class="lbl">推荐：</span>牛肉（SKU编码 MEA-006）；猪肉部分 SKU 清单中未找到</div>
+  <div class="row"><span class="lbl">证据：</span>SKU清单 —— MEA-006 / 牛肉 / 别名：无 / 规格：500g / 单位：斤 / 启用：是；肉禽类仅有部位肉 MEA-001 五花肉、MEA-002 梅花肉、MEA-003 里脊、MEA-004 排骨、MEA-019 猪肝（停用）、MEA-020 猪肚，无“猪肉”整肉条目</div>
+  <div class="row"><span class="lbl">待确认：</span>“各”表示各自 10 斤，猪肉部分需确认具体部位（五花肉 / 梅花肉 / 里脊 / 排骨 / 猪肚），并确认合计是否 20 斤。已检索关键词：猪、猪肉、五花肉、梅花肉、里脊、排骨、猪蹄、猪肝、猪肚。</div>
 </div>
 
 <h2>五、最终推荐表</h2>
@@ -177,25 +169,25 @@
   <tbody>
     <tr>
       <td class="num">1</td>
-      <td>洋芋2斤</td>
-      <td class="num">2斤</td>
-      <td>土豆</td>
-      <td class="mono">VEG-002</td>
+      <td>猪牛肉各10斤（牛肉部分）</td>
+      <td class="num">10斤</td>
+      <td>牛肉</td>
+      <td class="mono">MEA-006</td>
       <td>直接匹配</td>
-      <td>工具结果，分数 100，别名「洋芋」命中</td>
+      <td>工具结果，分数 90，名称命中 MEA-006</td>
     </tr>
     <tr>
       <td class="num">2</td>
-      <td>蕃茄3斤</td>
-      <td class="num">3斤</td>
-      <td class="hl">番茄</td>
-      <td class="mono hl">VEG-001</td>
-      <td>模型推荐</td>
-      <td>「蕃茄」为番茄异写，蔬菜品类、500g/斤与订单一致；候选小番茄属水果、按盒计价不符</td>
+      <td>猪牛肉各10斤（猪肉部分）</td>
+      <td class="num">10斤</td>
+      <td class="hl">待确认：猪肉（部位待定）</td>
+      <td class="mono hl">—</td>
+      <td>待确认</td>
+      <td>已检索「猪」「猪肉」「五花肉」「梅花肉」「里脊」「排骨」「猪蹄」「猪肝」「猪肚」，SKU 清单无“猪肉”整肉条目</td>
     </tr>
   </tbody>
 </table>
-<p class="note total">合计 2 行：直接匹配 1、模型推荐 1、待确认 0。</p>
+<p class="note total">合计 2 行：直接匹配 1、模型推荐 0、待确认 1。</p>
 
 <footer>
   数据来源：fresh_order_parse（工具返回 auto_rows / review_rows / error_rows）；SKU 与别名取自 数据准备/生鲜sku表/SKU清单.xlsx。

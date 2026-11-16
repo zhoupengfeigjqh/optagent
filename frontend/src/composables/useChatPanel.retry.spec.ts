@@ -51,6 +51,7 @@ function makeSession() {
       streamingAgentName: ref(null),
       toolCalls: ref([]),
       stalled: ref(false),
+      segments: ref([]),
       error: ref(null),
       lastRetryableTurn: ref(null),
       pendingInteraction: ref(null),

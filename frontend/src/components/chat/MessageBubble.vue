@@ -43,6 +43,11 @@ interface ToolCallView {
   status: 'running' | 'success' | 'error'
 }
 
+/** 流式渲染段（A-lite）：文字段与工具段按事件到达顺序排列 */
+type StreamSegmentView =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; call: ToolCallView }
+
 /** 本轮瞬态（不落历史）：思考、工具、阶段与错误。 */
 interface StreamingView {
   phase: RunPhase
@@ -56,6 +61,8 @@ interface StreamingView {
   canRegenerate?: boolean
   /** 长时间无业务事件（TR-66）：>2.5s 没有 content/thinking/tool 事件时为 true */
   stalled?: boolean
+  /** 渲染段（A-lite）：仅流式轮非空；缺省（历史/旧桩）走"工具在上、正文在下"的顺序 */
+  segments?: StreamSegmentView[]
 }
 
 const props = withDefaults(
@@ -230,6 +237,20 @@ const showTyping = computed(
 )
 
 /**
+ * 流式轮的渲染段（A-lite，2026-11-16）：文字与工具卡片按事件到达顺序交错。
+ *
+ * 空数组 ⇒ 走旧渲染（工具全部在上、正文在下）。两种情况下会为空：
+ * 历史消息（`history.jsonl` 只存整段 `content`，没有段序）；以及尚未收到任何事件。
+ * 这样"流式期间交错、刷新后回退旧顺序"的取舍被显式写在一处，不散落在模板里。
+ */
+const streamSegments = computed<StreamSegmentView[]>(() => {
+  if (!isStreaming.value) {
+    return []
+  }
+  return props.streaming?.segments ?? []
+})
+
+/**
  * 只处理**已落盘的失败轮**（`status === 'failed'`）。
  * 本轮（刚失败、尚未落盘到列表）的提示由 `ChatPanel` 统一负责——TR-58 分流：
  * 可重发时「重试本轮」，否则「重新获取」；两处各管一段生命周期，避免重复告警。
@@ -308,22 +329,41 @@ const containsActiveMatch = computed(() => {
 
     <ThinkingBlock v-if="showThinking" :text="thinkingText" :streaming="isStreaming" />
 
-    <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件。
-         `live` 只表达"本轮是否仍在跑"——决定 running 显示"进行中"还是"未完成"（TR-33） -->
-    <ToolCallList
-      v-if="toolItems.length"
-      class="message-bubble__tools"
-      :items="toolItems"
-      :live="isStreaming"
-      @open-view="emit('open-view', $event)"
-    />
+    <!-- 流式轮（A-lite，2026-11-16）：正文与工具卡片按事件到达顺序交错，
+         形成"说话 → 干活 → 再说"的时间线；否则后到的卡片会插到已流出的正文上方 -->
+    <template v-if="streamSegments.length > 0">
+      <template v-for="(segment, index) in streamSegments" :key="index">
+        <ToolCallList
+          v-if="segment.kind === 'tool'"
+          class="message-bubble__tools"
+          :items="[streamingToolCallItem(segment.call)]"
+          :live="true"
+          @open-view="emit('open-view', $event)"
+        />
+        <!-- 段内正文不接搜索高亮：流式气泡不在搜索结果里，接了会让全局匹配序号错位 -->
+        <MessageContent v-else :content="segment.text" @open-link="emit('open-link', $event)" />
+      </template>
+    </template>
 
-    <MessageContent
-      :content="message.content"
-      :keyword="searchKeyword"
-      :match-index-base="matchIndexBase"
-      @open-link="emit('open-link', $event)"
-    />
+    <!-- 历史消息（无段序）与尚未收到事件：工具卡片在上、整段正文在下 -->
+    <template v-else>
+      <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件。
+           `live` 只表达"本轮是否仍在跑"——决定 running 显示"进行中"还是"未完成"（TR-33） -->
+      <ToolCallList
+        v-if="toolItems.length"
+        class="message-bubble__tools"
+        :items="toolItems"
+        :live="isStreaming"
+        @open-view="emit('open-view', $event)"
+      />
+
+      <MessageContent
+        :content="message.content"
+        :keyword="searchKeyword"
+        :match-index-base="matchIndexBase"
+        @open-link="emit('open-link', $event)"
+      />
+    </template>
 
     <!-- 视图入口行（2026-10-10，TR-45）：紧跟回答正文之后、状态提示与操作区之前。
          无合法链接时组件整行不渲染（TR-48），因此不必在这里再判空 -->

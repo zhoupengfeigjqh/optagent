@@ -38,6 +38,21 @@ export interface ToolCallState {
 }
 
 /**
+ * 流式轮的**渲染段**（2026-11-16，A-lite）：按事件到达顺序记录「文字段 / 工具段」。
+ *
+ * 为什么需要：气泡原先固定渲染成"全部工具卡片 → 整段正文"，多轮工具时后出现
+ * 的工具卡片会插到已流出的正文**上方**，观感变成"工具跑完才出字"（实测一轮 5 次
+ * 工具、18s，正文其实是 18→53→1121→1391 分数批到达的）。
+ *
+ * 段序**全部来自 SSE 事件顺序**（`content` 与 `tool_call` 的先后），因此：
+ * - 不需要后端任何改动，也不改 `history.jsonl`（它仍只存整段 `content` + `tool_calls`）；
+ * - 只在**流式期间**生效；刷新后从历史加载的消息没有段序，仍按旧顺序渲染（工具在上）。
+ */
+export type StreamSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; call: ToolCallState }
+
+/**
  * 本轮乐观用户消息（十七次调整）：发送即出现，流终结时清除——
  * 完成/失败/中断后由历史刷新（成功轮）或既有降级语义（失败还原草稿）接管，
  * MUST NOT 在终结后残留（否则与历史里的真身重复渲染）。
@@ -93,6 +108,11 @@ export interface ChatStreamStore {
   streamingText: Readonly<Ref<string>>
   streamingThinking: Readonly<Ref<string>>
   toolCalls: Readonly<Ref<ToolCallState[]>>
+  /**
+   * 流式轮的渲染段（A-lite）：文字与工具按到达顺序交错，供气泡按时间线渲染。
+   * 与 `streamingText` / `toolCalls` 同生命周期（`send()` 清空、`reset()` / `finally` 收口）。
+   */
+  segments: Readonly<Ref<StreamSegment[]>>
   thinkingEnabled: Ref<boolean>
   /**
    * 输入区文本（发送前保留、失败时保留，FR-013 相关场景）。
