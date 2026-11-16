@@ -45,6 +45,11 @@ export interface OntologyRelation {
   name: string;
   source: string;
   target: string;
+  /**
+   * 关系中文名（`relations[].title`），五元组展示用；缺省 null 表示本体文件没写，
+   * 展示层回退 `name`（升版兼容：老本体不写 title 也不会让提示出现空槽）。
+   */
+  title?: string | null;
   /** `relation_type` 原样（`Functional` / `InverseFunctional`） */
   relationType: string[];
   /** `cardinality` 原样（`'1:1'` / `'N:1'` / `'1:N'` …），缺省 null */
@@ -190,6 +195,14 @@ export interface ExpandedBehavior {
   concept: string | null;
   hop: number;
   viaConcept: string;
+  /**
+   * 这一跳的**起点概念**（2026-11-13）＝ `viaConcept` 那条发散概念的 `viaConcept`。
+   *
+   * 留档为什么需要它：上游能由 `viaConcept` 反推（概念表里记的就是起点），但**下游概念不落档**，
+   * 而下游是多源汇聚的（原材料 / 供应商 / 客户订单 都可以发散到采购单），只记自身概念
+   * 无法判断"这条卡片项是从哪个概念发散来的"。
+   */
+  fromConcept: string;
 }
 
 /** 单个通道的发散产出（概念 + 行为，各自独立上限） */

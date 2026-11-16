@@ -197,6 +197,13 @@ describe('expandNeighborhood', () => {
 
     expect(result.upstream.concepts.map((item) => item.name)).toEqual(['RawMaterial']);
     expect(result.upstream.behaviors.map((item) => item.name)).toEqual(['QueryRawMaterials']);
+    expect(result.upstream.behaviors[0]).toMatchObject({
+      hop: 1,
+      // 所属概念 = 这一跳的终点（原材料）；起点是出发的库存
+      concept: 'RawMaterial',
+      viaConcept: 'RawMaterial',
+      fromConcept: 'RawMaterialInventory',
+    });
     expect(result.upstream.concepts[0]).toMatchObject({
       hop: 1,
       viaConcept: 'RawMaterialInventory',
@@ -231,6 +238,8 @@ describe('expandNeighborhood', () => {
       hop: 1,
       viaConcept: 'PurchaseRecord',
       concept: 'PurchaseRecord',
+      // 2026-11-13：起点概念 = 发散的那个概念（下游多源汇聚时靠它分辨来路）
+      fromConcept: 'RawMaterial',
     });
   });
 

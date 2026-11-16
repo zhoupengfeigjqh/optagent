@@ -14,7 +14,8 @@
  * 1. **只读真实文件**：目录与文件都过 `lstat`，符号链接一律跳过（FR/TR：禁止逃逸）；
  * 2. **坏文件不中断**：解析失败只记 warning，其他本体照常——一个坏文件不该让整轮失效；
  * 3. **只建模发散所需字段**：`concepts` 只取 name/title，`relations` 只取
- *    name/source/target/relation_type/cardinality；方向判定不在本层做（见 `expansion.ts`）。
+ *    name/title/source/target/relation_type/cardinality；方向判定不在本层做（见 `expansion.ts`）。
+ *    2026-11-13：关系补 `title`——五元组要展示「行为—概念—关系—概念—行为」的关系语义。
  */
 import path from 'node:path';
 
@@ -122,10 +123,13 @@ function parseRelations(value: unknown, warnings: string[], file: string): Ontol
       warnings.push(`${file}:relation_missing_endpoint:${name || '?'}`);
       continue;
     }
+    const displayName = name === '' ? `${source}->${target}` : name;
     result.push({
-      name: name === '' ? `${source}->${target}` : name,
+      name: displayName,
       source,
       target,
+      // 五元组展示用；缺失回退 `name`（老本体不写 title 也不留空槽）
+      title: normalizeText(record.title) ?? displayName,
       // `relation_type` 允许写成单值字符串或数组，统一成数组
       relationType: normalizeList(record.relation_type),
       cardinality: normalizeId(record.cardinality),

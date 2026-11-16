@@ -54,6 +54,8 @@ interface StreamingView {
   agentName: string | null
   /** 本轮是否有可重发的用户消息缓存（中断轮 / 服务端已终局的失败轮）→「重新生成」按钮渲染条件 */
   canRegenerate?: boolean
+  /** 长时间无业务事件（TR-66）：>2.5s 没有 content/thinking/tool 事件时为 true */
+  stalled?: boolean
 }
 
 const props = withDefaults(
@@ -169,7 +171,63 @@ const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMIN
 const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
 
 const showThinking = computed(() => thinkingText.value.trim() !== '')
-const showTyping = computed(() => isStreaming.value && props.message.content === '')
+/**
+ * 正在执行的工具人读名称（本轮 `running` 项，去重保序）。
+ *
+ * 工具执行可能持续数秒到数十秒，这段空档 MUST 有可见的"活着"信号。旧判据
+ * （`content === ''`）覆盖不到最常见的形态——模型先说一句「我来查一下 SKU 清单」
+ * 再调工具，此时 `content` 已非空，「思考中」整轮消失，界面只剩卡片上一行静态
+ * 「进行中」（2026-11-16）。
+ */
+const runningToolNames = computed(() => {
+  if (!isStreaming.value) {
+    return []
+  }
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const item of props.streaming?.toolCalls ?? []) {
+    if (item.status !== 'running') {
+      continue
+    }
+    const name = item.label ?? item.name
+    if (name === '' || seen.has(name)) {
+      continue
+    }
+    seen.add(name)
+    names.push(name)
+  }
+  return names
+})
+/** 等待提示文案：工具执行期点名工具，否则回落到 `TypingIndicator` 的缺省「思考中」 */
+const typingLabel = computed(() => {
+  const names = runningToolNames.value
+  const first = names[0]
+  if (names.length === 1 && first !== undefined) {
+    return `正在执行 ${first}…`
+  }
+  if (names.length > 1) {
+    return `正在执行 ${names.length} 个工具…`
+  }
+  // 静默段（TR-66）：模型在决定调哪个工具 / 长推理，这段时间没有任何事件可展示。
+  // 措辞说"模型"而不是"工具"，因为实测静默主要发生在 LLM 侧，工具执行期有上面的分支。
+  if (props.streaming?.stalled === true) {
+    return '模型正在思考…'
+  }
+  return '思考中'
+})
+/**
+ * 等待提示的显示条件（2026-11-16 修订）：首个 `content` 到达前，或**仍有工具在跑**。
+ *
+ * 只加"有 running 工具"这一条：工具全部结束、模型继续生成正文时不补提示——
+ * 那是正常流式输出，气泡本身在长，再叠一行反而噪音。
+ */
+const showTyping = computed(
+  () =>
+    isStreaming.value &&
+    (runningToolNames.value.length > 0 ||
+      props.streaming?.stalled === true ||
+      props.message.content === ''),
+)
 
 /**
  * 只处理**已落盘的失败轮**（`status === 'failed'`）。
@@ -279,7 +337,8 @@ const containsActiveMatch = computed(() => {
       @select="emit('send-suggestion', $event)"
     />
 
-    <TypingIndicator v-if="showTyping" />
+    <!-- 等待提示：首个 token 前是「思考中」，工具执行期点名工具（2026-11-16） -->
+    <TypingIndicator v-if="showTyping" :label="typingLabel" />
 
     <!-- 失败轮的重试入口：文案由列表层决定（`null` = 该轮的用户消息不在窗口内，不给入口） -->
     <ErrorNotice

@@ -85,6 +85,49 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const startedAt = ref<number | null>(null)
 
   const now = deps.now ?? ((): number => Date.now())
+  /**
+   * 静默心跳兜底（2026-11-16，TR-66）
+   *
+   * 实测一轮 16s 的真实生鲜解析：正文流式间隔 < 0.5s，但模型在「决定调哪个工具 /
+   * 生成工具参数」以及「长段落之间的推理」会**静默 3~15s**——这段时间没有任何业务事件
+   * （`thinking` 关闭时连思考增量都没有；`infra/sse.ts` 的 15s 心跳是注释帧 `: ping`，
+   * 前端解析器按 SSE 规范直接丢弃）。界面因此被判成卡死，与 §4.11 / §4.12 同理。
+   *
+   * 处置：本轮 streaming 期间每 500ms 检查「距上一个业务事件多久」，超过 2.5s 置
+   * `stalled`，由 `MessageBubble` 显示「模型正在思考…」。HITL 挂起期不算静默
+   * （等用户操作，界面上本来就有弹窗）。
+   */
+  const SILENT_AFTER_MS = 2500
+  const HEARTBEAT_TICK_MS = 500
+  const lastEventAt = ref(0)
+  const stalled = ref(false)
+  let heartbeat: ReturnType<typeof setInterval> | null = null
+
+  /** 收到任一业务事件：清零静默计时（`done` / `error` 也走这里，无害） */
+  function markEvent(): void {
+    lastEventAt.value = now()
+    stalled.value = false
+  }
+
+  function stopHeartbeat(): void {
+    if (heartbeat !== null) {
+      clearInterval(heartbeat)
+      heartbeat = null
+    }
+    stalled.value = false
+  }
+
+  function startHeartbeat(): void {
+    stopHeartbeat()
+    heartbeat = setInterval(() => {
+      if (phase.value !== RUN_PHASE.STREAMING || pendingInteraction.value !== null) {
+        stalled.value = false
+        return
+      }
+      stalled.value = now() - lastEventAt.value >= SILENT_AFTER_MS
+    }, HEARTBEAT_TICK_MS)
+  }
+
   let controller: AbortController | null = null
   /**
    * 本轮令牌（2026-10-27）：每次 `send()` 取号，`reset()` 也递增。
@@ -137,6 +180,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     lastRetryableTurn.value = null
     pendingInteraction.value = null
     startedAt.value = null
+    // 静默心跳必须随本轮一起停：否则切会话后旧定时器仍按新一轮的 `lastEventAt` 判断
+    stopHeartbeat()
   }
 
   function setThinking(value: boolean): void {
@@ -226,6 +271,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       ...(payload.skill ? { skill: payload.skill } : {}),
     }
     phase.value = RUN_PHASE.STREAMING
+    // 静默计时从"发出请求"起算：首个 token 之前也算一轮，超时同样要给"还在跑"的提示
+    markEvent()
+    startHeartbeat()
 
     const body = buildSendMessageBody({
       content: payload.content,
@@ -247,6 +295,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         (event) => {
           // 过期轮的事件一律丢弃：否则切会话后旧流的增量会写进新一轮的正文
           if (stale()) return
+          // 任一业务事件都算"活着"：静默计时清零（`done`/`error` 也走到这里，无害）
+          markEvent()
           switch (event.type) {
             case 'thinking':
               streamingThinking.value += event.data.delta
@@ -314,6 +364,8 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       // 过期轮不得清共享状态：`toolCalls`/`pendingUserMessage` 已属于新一轮，
       // `controller` 也可能已是新一轮的（置 null 会让「终止」彻底失效）
       if (!stale()) {
+        // 收口即停表：`completed`/`failed`/`aborted` 都不该再显示"还在思考"
+        stopHeartbeat()
         toolCalls.value = []
         // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
         // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
@@ -433,6 +485,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     pendingUserMessage,
     lastRetryableTurn,
     startedAt,
+    stalled,
     canSend,
     hasThinking,
     pendingInteraction,

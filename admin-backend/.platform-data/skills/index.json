@@ -37,16 +37,20 @@
     {
       "name": "fresh-order-parse",
       "display_name": "生鲜订单识别",
-      "description": "生鲜订货单据的图片解析技能：用户上传订单图片与 SKU 清单后，调用 MCP 工具 fresh_order_parse 一次性完成 OCR 识别、名称标准化与 SKU 匹配，把结果按「自动匹配 / 待审核 / 异常」三张表展示；对异常或存疑的品类再用 read_file 读 SKU 清单求证，给出推荐品种与证据；最后用一张最终推荐表收口，并把推荐的商品与 SKU 编码标红。当用户提出\"解析订单\"\"识别这张订单\"\"订单图片转 SKU\"\"生鲜订单识别\"\"核对一下 sku\"等请求时使用。",
+      "description": "生鲜订单图片解析技能：用户上传订单图片清单后，调用工具解析订单信息，从sku中找到对应的正式品种。",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 8973
+          "size": 10531
+        },
+        {
+          "path": "references/report-template.html",
+          "size": 9024
         }
       ],
       "source": "fresh-order-parse.zip",
       "installed_at": "2026-11-13T02:24:36.910Z",
-      "updated_at": "2026-11-13T10:40:00.000Z"
+      "updated_at": "2026-11-16T12:17:43.763Z"
     }
   ]
 }

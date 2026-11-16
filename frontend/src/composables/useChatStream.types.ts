@@ -128,6 +128,15 @@ export interface ChatStreamStore {
   /** 本轮是否处于思考模式且已产生思考内容（决定是否渲染思考块） */
   hasThinking: ComputedRef<boolean>
   /**
+   * 本轮是否处于「长时间无业务事件」的静默段（2026-11-16，TR-66）。
+   *
+   * 模型在决定调工具 / 长推理段落之间会静默 3~15s，期间没有任何 SSE 业务事件
+   * （心跳只是注释帧），界面若不提示就会被当成卡死。由 `send()` 期间每 500ms 的
+   * 本地心跳置位，阈值 2.5s；HITL 挂起（等用户确认）不计入静默。
+   * 消费方：`useChatPanel.streaming` → `MessageBubble` 的等待提示文案。
+   */
+  stalled: Readonly<Ref<boolean>>
+  /**
    * HITL：当前等待用户确认的工具调用（弹窗渲染源）。随本轮终结/中断/切会话清除；
    * 断连后由线程详情的 `pending_interaction` 快照经 `restoreInteraction` 重建。
    */

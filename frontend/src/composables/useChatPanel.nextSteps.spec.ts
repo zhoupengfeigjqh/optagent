@@ -55,6 +55,7 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
       streamingThinking: ref(''),
       streamingAgentName: ref(null),
       toolCalls: ref([]),
+      stalled: ref(false),
       error: ref(null),
       lastRetryableTurn: ref(null),
       pendingInteraction: ref(null),

@@ -50,6 +50,7 @@ function makeSession() {
       streamingThinking: ref(''),
       streamingAgentName: ref(null),
       toolCalls: ref([]),
+      stalled: ref(false),
       error: ref(null),
       lastRetryableTurn: ref(null),
       pendingInteraction: ref(null),

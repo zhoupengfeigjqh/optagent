@@ -309,6 +309,8 @@ function collectBehaviors(
         concept: behavior.concept,
         hop: concept.hop,
         viaConcept: concept.name,
+        // 这一跳的起点概念：留档据此回答"这条行为是从哪个概念发散来的"
+        fromConcept: concept.viaConcept,
       } satisfies ExpandedBehavior);
     }
   }

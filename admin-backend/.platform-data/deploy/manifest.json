@@ -4,11 +4,10 @@
       "user_id": "admin",
       "agent_names": [
         "BOM数字人",
-        "生产计划助手",
         "生产调度测试",
         "生鲜识别辅助"
       ],
-      "last_deployed_at": "2026-11-13T03:44:55.183Z"
+      "last_deployed_at": "2026-11-16T12:29:45.706Z"
     },
     {
       "user_id": "zpf",

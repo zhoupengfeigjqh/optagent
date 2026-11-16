@@ -63,8 +63,8 @@ X 的下游邻居 = { Y | 存在关系 e：e 的上游端 = X，Y = e 的下游�
 | **FR-002** | 阶数 MUST 取数字人设计态参数 `intent_focus_depth`（0~2，缺省 0）；阶数 0 MUST NOT 遍历 `concepts` / `relations` | 阶数 0 的产物与 `016` 语义一致；0 阶不解析关系 |
 | **FR-003** | 上游发散 MUST 只进聚焦提示（概念 + 行为）；下游发散 MUST 只进 `focusToolTips` | 两通道互不串台（提示无下游、卡片无上游） |
 | **FR-004** | 发散行为 MUST NOT 再判分（`score = null`）；被判分否决过的行为可以经发散复活 | 记录中发散项 `score` 为 `null`，`source` 标 `upstream` / `downstream` |
-| **FR-005** | 概念 MUST 全量进入提示与留档，**不设上限、不截断** | 200 个概念仍全部出现，且不触发 `truncated` |
-| **FR-006** | 提示长度上限 MUST 按阶数分档（0→1200 / 1→1600 / 2→2000）；超限 MUST 先丢上游行为、再丢直接命中行为，概念段永不丢 | 三档超限用例：概念全量保留、无半截条目 |
+| **FR-005** | 概念 MUST 全量进入**留档**，不设上限、不截断；提示中概念 MUST 随**五元组**出现（2026-11-13 起不再单独成段：概念单独成段会在五元组里重复一遍，白占预算） | 200 个概念仍全部落留档，且不触发 `truncated`；提示 MUST NOT 出现 `关联概念：` / `上游概念：` 段 |
+| **FR-006** | 提示长度上限 MUST 按阶数分档（0→1200 / 1→1600 / 2→2000）；超限 MUST **按整行丢五元组**（顺序：链尾无行为 → 跳数大 → 起点得分低），且每个入选行为的**第 1 跳行至少保留一条**；路径行丢完后才丢 `直接命中` 行为 | 三档超限用例：整行丢弃、无半截五元组、每起点行为至少一行 |
 | **FR-007** | 发散行为单通道 MUST 有上限（`MAX_EXPANDED_BEHAVIORS = 32`），超限按「概念序 → 行为原序」截断并记 `truncated` | 超限用例：条数等于上限、记录标注 |
 | **FR-008** | 同一 `ontology_id + name` MUST 去重；direct 行为 MUST 优先（不重复以发散身份出现）；direct 概念 MUST NOT 再作为发散概念 | 去重断言 |
 | **FR-009** | 断链 MUST 只告警不猜测：概念未在 `concepts[]` 定义、行为缺 `concept`、关系缺端点 | warning 断言 |
@@ -89,9 +89,17 @@ X 的下游邻居 = { Y | 存在关系 e：e 的上游端 = X，Y = e 的下游�
 ## 5. 数据结构
 
 - `OntologyBehavior.concept: string | null`
-- `OntologyConcept { name, title }`、`OntologyRelation { name, source, target, relationType[], cardinality }`
+- `OntologyConcept { name, title }`、`OntologyRelation { name, title, source, target, relationType[], cardinality }`
+  （`title` 缺失回退 `name`；2026-11-13 新增，五元组要展示关系语义）
 - `ExpandedConcept { ontologyId, ontologyName, name, title, hop, viaConcept, viaRelation }`
-- `ExpandedBehavior { ontologyId, ontologyName, name, title, concept, hop, viaConcept }`
+- `ExpandedBehavior { ontologyId, ontologyName, name, title, concept, hop, viaConcept, fromConcept }`
+  （`concept` = `viaConcept` = 这一跳的**终点**概念；`fromConcept` = 这一跳的**起点**概念，2026-11-13 新增）
+- 记录：`behaviors[]` / `tool_tip_behaviors[]` 各项新增 `from_concept`（`direct` 为 `null`）。
+  **关系名不落档**：以「同一对概念之间恒有一条关系」为前提，`(from_concept, via_concept)`
+  唯一确定关系与方向；该前提被打破（同一对概念出现平行关系）时必须补 `via_relation`。
+- `FocusPath { ontologyId, behavior, fromConcept, relation, direction, readability, toConcept, toBehavior|null, hop, score|null }`
+  （2026-11-13 新增：一条五元组；`direction` = `upstream` / `downstream`，`readability` = `forward`（顺
+  `source→target` 读）/ `reverse`（反读），两者分开表达方向与关系名读向）
 - 记录新增 `depth`、`concepts[]`、`tool_tip_behaviors[]`；行为记录新增 `source` / `hop` / `via_concept`，
   `score` 变为 `number | null`
 
@@ -112,12 +120,14 @@ X 的下游邻居 = { Y | 存在关系 e：e 的上游端 = X，Y = e 的下游�
 
 ## 7. 验收标准
 
-1. 阶数 0 → 提示只有「关联概念 + 直接命中」，卡片只有 direct；
-2. 阶数 1 上游（库存 → 原材料）→ 提示多出「上游概念 + 上游参考」，卡片不变；
+1. 阶数 0 → 提示只有「直接命中」，卡片只有 direct；
+2. 阶数 1 上游（库存 → 原材料）→ 提示多出「上游路径：」段，且只有一行五元组
+   `查询原材料库存信息（QueryInventory）—〔原材料库存(RawMaterialInventory)〕—[上游]…←〔原材料(RawMaterial)〕—→查询原材料基本信息（QueryRawMaterials）`，卡片不变；
 3. 阶数 1 下游（原材料 → 采购记录）→ 卡片多出下游行为（含 command），提示不变；
-4. 二跳同向链（采购记录 → 入库单 → 结算单）在阶数 2 才出现结算单；
-5. 概念 200 个仍全量输出，且 `truncated = false`；
-6. 三档提示长度上限生效，截断只发生在行为段；
+4. 二跳同向链（采购记录 → 入库单 → 结算单）在阶数 2 才出现结算单，且**每跳各一行五元组**（不是一行七元组），
+   第 2 跳的起点行为 = 第 1 跳的终点行为；
+5. 概念 200 个仍全量落留档，且 `truncated = false`；提示里无独立概念段；
+6. 三档提示长度上限生效，截断只发生在**整行五元组**（先链尾无行为、再跳数大），`直接命中` 最后才丢；
 7. 平台侧：阶数越界保存被拒；关闭或 0 阶时产物无 `intent_focus_depth` 键；
 8. 三侧 lint / typecheck / 测试门禁全绿。
 
@@ -135,10 +145,27 @@ X 的下游邻居 = { Y | 存在关系 e：e 的上游端 = X，Y = e 的下游�
 | 6 | 新增数字人设计态参数「聚焦阶数」（0~2），新建取 0 |
 | 7 | 方向口径：箭头即上下游，`Functional` 单独反向，`1:1` / `M:N` 按箭头 |
 
+### 8.1 2026-11-13 补充决策（聚焦提示形态）
+
+| # | 决策（用户拍板） |
+|---|---|
+| 8 | 提示改为**一行一条五元组**：`行为—概念—关系—概念—行为`；排版取紧凑元组（每条链一行），不取缩进树 |
+| 9 | 起点行为**每行重复**（严格五元组，读者不必跨行拼）；链尾无行为写 `—→（无可用行为）`，**保留整行** |
+| 10 | 多跳**逐跳提取**：第 N 跳的起点行为 = 第 N-1 跳的终点行为（行为接续）；中间概念无行为即断链，不向下展开 |
+| 11 | 方向与读向分开：`[上游]` / `[下游]` 表方向，关系名后的 `→` / `←` 只表"关系名要不要反读"（N:1 反向时正读） |
+| 12 | 概念不再单独成段；只保留 `直接命中` + `上游路径` 两段 |
+
 ---
 
 ## 9. 修订记录
 
+- 2026-11-13：**聚焦提示改为五元组路径**（`行为—概念—关系—概念—行为`，一行一条，逐跳提取）。
+  改动面：新增 `paths.ts`（`buildFocusPaths` + `FocusPath`）与同名单测；`prompt.ts` 去掉
+  `关联概念` / `上游概念` / `上游参考` 三段、改行级截断；`OntologyRelation` 补 `title`（缺失回退 `name`）；
+  `runner` 日志新增 `focus_paths`。**同轮补 `from_concept`**：发散行为记录带上这一跳的起点概念
+  （下游概念不落概念表且下游多源汇聚，缺它无法回答"这条卡片项从哪发散来"）；关系名不落档，
+  以"同一对概念之间恒有一条关系"为前提。同步改写 `016` 的 FR-041 / FR-045 / FR-051 与 `001` 契约
+  `runtime-api-delta.md` R29。判定逻辑（`expansion.ts#relationEnds`）、留档字段、卡片与前端零变更。
 - 2026-11-08：初稿并实现。定位：`016` 的能力聚焦之后追加一次**同向发散**，两通道分开；
   同步改写 `016` 的 FR-020 / FR-041 / FR-045 / FR-051 / FR-060、TR-04、I-5、非目标、关键实体、
   影响面，新增 `016` D9；同步 `001` 契约（`admin-api.md` §5.3 的 `soul` 字段表与校验口径、

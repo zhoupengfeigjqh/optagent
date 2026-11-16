@@ -81,6 +81,8 @@ describe('buildRecordDraft', () => {
       source: 'direct',
       hop: 0,
       via_concept: null,
+      // direct 没有发散起点（2026-11-13）
+      from_concept: null,
     });
     // 无发散时三个新增字段取缺省（早退分支不必补字段）
     expect(draft.depth).toBe(0);
@@ -125,6 +127,7 @@ describe('buildRecordDraft', () => {
           concept: 'C1',
           hop: 1,
           viaConcept: 'C1',
+          fromConcept: 'C0',
         },
       ],
       downstreamBehaviors: [
@@ -136,6 +139,7 @@ describe('buildRecordDraft', () => {
           concept: 'C2',
           hop: 1,
           viaConcept: 'C2',
+          fromConcept: 'C0',
         },
       ],
     });
@@ -152,6 +156,16 @@ describe('buildRecordDraft', () => {
     expect(draft.tool_tip_behaviors.map((item) => [item.name, item.source, item.score])).toEqual([
       ['B0', 'direct', 0.9],
       ['D1', 'downstream', null],
+    ]);
+    // 2026-11-13：`from_concept` = 这一跳的起点概念（direct 为 null）。
+    // 下游概念不落概念表，且下游是多源汇聚的，只有它能回答"这条卡片项从哪发散来"
+    expect(draft.behaviors.map((item) => [item.name, item.from_concept])).toEqual([
+      ['B0', null],
+      ['U1', 'C0'],
+    ]);
+    expect(draft.tool_tip_behaviors.map((item) => [item.name, item.from_concept])).toEqual([
+      ['B0', null],
+      ['D1', 'C0'],
     ]);
   });
 

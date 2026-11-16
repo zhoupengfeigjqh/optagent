@@ -417,9 +417,9 @@ describe('聚焦阶数（019）', () => {
     const { runner, records } = harness(root, { decide: focusDecide(['查询原材料库存信息']) });
     const { prompt, toolTips } = await runner.judge(input());
 
+    // 2026-11-13：概念不再单独成段（它在五元组里出现），阶数 0 没有路径段
     expect(prompt).toBe(
       `${FOCUS_PREFIX}\n1）inventory-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='7'）\n` +
-        '   关联概念：原材料库存（RawMaterialInventory）\n' +
         '   直接命中：查询原材料库存信息（QueryInventory）',
     );
     expect(toolTips).toEqual([
@@ -433,7 +433,7 @@ describe('聚焦阶数（019）', () => {
     expect(records[0]!.tool_tip_behaviors.map((item) => item.name)).toEqual(['QueryInventory']);
   });
 
-  it('阶数 1：上游发散只进提示（概念 + 上游参考），卡片保持直接命中', async () => {
+  it('阶数 1：上游发散只进提示（一条五元组），卡片保持直接命中', async () => {
     const { root } = focusFixture();
     const { runner, records } = harness(root, {
       decide: focusDecide(['查询原材料库存信息']),
@@ -441,9 +441,16 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    expect(prompt).toContain('   关联概念：原材料库存（RawMaterialInventory）');
-    expect(prompt).toContain('   上游概念：原材料（RawMaterial）');
-    expect(prompt).toContain('   上游参考：查询原材料基本信息（QueryRawMaterials）');
+    // 一行读完：行为 → 概念 → 关系 → 概念 → 行为；关系名在 yaml 里没写 title ⇒ 回退 name，
+    // 且这一跳是逆着箭头走的（库存 ← 原材料），所以关系名要反读 `←`
+    expect(prompt).toContain(
+      '   查询原材料库存信息（QueryInventory）—〔原材料库存(RawMaterialInventory)〕' +
+        '—[上游]HasRawInventory←〔原材料(RawMaterial)〕—→查询原材料基本信息（QueryRawMaterials）',
+    );
+    // 概念不再单独成段
+    expect(prompt).not.toContain('关联概念：');
+    expect(prompt).not.toContain('上游概念：');
+    expect(prompt).not.toContain('上游参考：');
     // 下游：库存是 1:1 的明细端，没有更下游的对象
     expect(toolTips.map((item) => item.name)).toEqual(['QueryInventory']);
 
@@ -470,9 +477,8 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 两个直接命中概念把「原材料」变成锚点 → 上游无从发散
-    expect(prompt).not.toContain('上游概念：');
-    expect(prompt).not.toContain('上游参考：');
+    // 两个直接命中概念把「原材料」变成锚点 → 上游无从发散（连路径段都不该出现）
+    expect(prompt).not.toContain('上游路径：');
 
     // 下游：原材料 → 原材料采购记录（采购单）→ 创建采购单进卡片
     expect(toolTips.map((item) => item.name)).toEqual([
@@ -482,10 +488,20 @@ describe('聚焦阶数（019）', () => {
     ]);
     const record = records[0]!;
     expect(record.behaviors.map((item) => item.name)).toEqual(['QueryInventory', 'QueryRawMaterials']);
-    expect(record.tool_tip_behaviors.map((item) => [item.name, item.source, item.score, item.via_concept])).toEqual([
-      ['QueryInventory', 'direct', 0.9, 'RawMaterialInventory'],
-      ['QueryRawMaterials', 'direct', 0.9, 'RawMaterial'],
-      ['CreatePurchaseRecord', 'downstream', null, 'PurchaseRecord'],
+    expect(
+      record.tool_tip_behaviors.map((item) => [
+        item.name,
+        item.source,
+        item.score,
+        item.via_concept,
+        item.from_concept,
+      ]),
+    ).toEqual([
+      // direct：via_concept 是自身概念，没有起点
+      ['QueryInventory', 'direct', 0.9, 'RawMaterialInventory', null],
+      ['QueryRawMaterials', 'direct', 0.9, 'RawMaterial', null],
+      // 下游：via_concept 是终点（采购单），from_concept 才说明"因为问的是原材料"
+      ['CreatePurchaseRecord', 'downstream', null, 'PurchaseRecord', 'RawMaterial'],
     ]);
   });
 });

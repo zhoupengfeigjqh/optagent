@@ -40,7 +40,12 @@ export interface SkillFocusRecord {
  * 2026-11-08（019）在"只写入选行为"之上补了三件事，用于解释"这条为什么会出现"：
  * - `source`：直接命中 / 上游发散 / 下游发散（发散项没有分数，`score` 为 null）；
  * - `hop`：距 direct 概念的跳数（direct 恒为 0）；
- * - `via_concept`：经哪个概念发散而来（direct 为自身概念或 null）。
+ * - `via_concept`：**所属概念**（发散项即这一跳的终点概念；direct 为行为自己的概念或 null）。
+ *
+ * 2026-11-13 补 `from_concept`：这一跳的**起点概念**（direct 为 null）。下游概念不落概念表，
+ * 而下游多源汇聚（原材料 / 供应商 / 客户订单 都能发散到采购单），只看 `via_concept`
+ * 无法判断"这条卡片项是从哪个概念发散来的"。关系名不落档：以"同一对概念之间恒有一条关系"
+ * 为前提，`(from_concept, via_concept)` 唯一确定关系；该前提被打破时须补 `via_relation`。
  */
 export interface CapabilityFocusRecord {
   name: string;
@@ -52,6 +57,8 @@ export interface CapabilityFocusRecord {
   source: BehaviorSource;
   hop: number;
   via_concept: string | null;
+  /** 这一跳的起点概念；`direct` 为 null */
+  from_concept: string | null;
 }
 
 /** 概念留档（019）：只有提示通道有概念，卡片通道没有 */

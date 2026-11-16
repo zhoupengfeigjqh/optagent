@@ -70,10 +70,14 @@ const VALID = [
   '  - name: RawMaterial',
   'relations:',
   '  - name: RecordsRawMaterial',
+  '    title: 记录原材料',
   '    source: PurchaseRecord',
   '    target: RawMaterial',
   '    cardinality: N:1',
   '    relation_type: Functional',
+  '  - name: NoTitleRelation',
+  '    source: PurchaseRecord',
+  '    target: RawMaterial',
 ].join('\n');
 
 afterEach(() => {
@@ -120,8 +124,19 @@ describe('loadOntologyIndex', () => {
         name: 'RecordsRawMaterial',
         source: 'PurchaseRecord',
         target: 'RawMaterial',
+        // 2026-11-13：五元组要展示关系语义，title 必须读进来
+        title: '记录原材料',
         relationType: ['Functional'],
         cardinality: 'N:1',
+      },
+      // 没写 title → 回退 name（展示不留空槽）
+      {
+        name: 'NoTitleRelation',
+        source: 'PurchaseRecord',
+        target: 'RawMaterial',
+        title: 'NoTitleRelation',
+        relationType: [],
+        cardinality: null,
       },
     ]);
     expect(index.byId.get('1')).toHaveLength(1);

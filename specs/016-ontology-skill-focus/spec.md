@@ -260,7 +260,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **FR-020** | 对每个**入选本体技能**关联的本体 MUST 提取 `behaviors[]` 的 `name`、`title`、`description` 与 `concept`；`title` 缺失时解析期用 `name` 兜底，`description` 缺失记空串；聚焦阶数 > 0 时 MUST 另提取 `concepts[]`（`name` / `title`）与 `relations[]`（`name` / `source` / `target` / `relation_type` / `cardinality`）用于一阶发散（019）；MUST NOT 读取 `functions[]`、`rules[]`、行为参数正文或代码文件 | 提取断言：字段仅 name / title / description / op_type / concept；阶数为 0 时 `concepts` / `relations` 不参与遍历；非本体技能触发次数为 0；含 `functions` / `rules` 的本体产出不变 |
+| **FR-020** | 对每个**入选本体技能**关联的本体 MUST 提取 `behaviors[]` 的 `name`、`title`、`description` 与 `concept`；`title` 缺失时解析期用 `name` 兜底，`description` 缺失记空串；聚焦阶数 > 0 时 MUST 另提取 `concepts[]`（`name` / `title`）与 `relations[]`（`name` / `title` / `source` / `target` / `relation_type` / `cardinality`）用于一阶发散与五元组展示（019；`title` 缺失回退 `name`）；MUST NOT 读取 `functions[]`、`rules[]`、行为参数正文或代码文件 | 提取断言：字段仅 name / title / description / op_type / concept；阶数为 0 时 `concepts` / `relations` 不参与遍历；非本体技能触发次数为 0；含 `functions` / `rules` 的本体产出不变 |
 | **FR-021** | 行为 MUST 使用 **`noul` 模式**（每个候选一条真值命题，MUST NOT 使用 `choice`），**逐候选**提交 Laya 判定，保留分数**严格大于**本体阈值的条目；等于或小于阈值即丢弃 | 阈值边界用例：等于阈值的条目被丢弃；请求中每题类型为 `noul` |
 | **FR-022** | 行为判定素材 MUST 为用户输入 + 候选展示文本；展示文本 MUST 按 **`description` → `title` → `name`** 降级取值（取第一个非空者，统一截断 40 字）；`op_type` MUST NOT 参与题面（仅可用于留档与排查）；MUST NOT 使用参数正文或代码 | 题面断言：有描述取描述、描述空取标题、两者皆空取 name；不含 `op_type`、参数正文或代码 |
 | **FR-023** | 同一本体在本轮内 MUST 只解析一次、只评分一次；多个技能共享该本体时复用结果 | 计数断言：解析次数与评分批次数不随技能数增长 |
@@ -286,11 +286,11 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-040** | 仅当入选技能**非空**时 MUST 铸造意图聚焦提示；全空时 MUST NOT 追加任何内容 | 空结果用例：素材与改造前逐字一致 |
-| **FR-041** | 提示 MUST 为固定中文格式（019 起为**分行块**）：首行 `本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）`，其后每个入选技能一个编号块——块首行 `{n}）{name}（非本体技能）` 或 `{n}）{name}（本体技能；ontology_name='{ontology_name}'，ontology_id='{ontology_id}'）`，其后按来源分段缩进：`关联概念：{title}（{name}）、…`（直接命中概念）/ `上游概念：…`（上游发散概念）/ `直接命中：…`（Laya 命中的行为）/ `上游参考：…`（上游发散行为）；空段整行省略，段序固定；行号从 `1` 连续编号（截断后重新编号）；技能按分数降序，同分按原序；本体信息 MUST 以显式字段给出 `ontology_name='…'` 与 `ontology_id='…'`（`ontology_name` 缺失时只写 `ontology_id='…'`）；**一个本体技能恒只有一个本体**，每块至多一组本体字段（同一 `ontology_id` 物化成多份文件时只取首份）；MUST NOT 出现「关联函数」段；同一本体被多个入选技能引用时，概念与行为只归属于分数最高的技能；片段内换行 MUST 压成空格 | 格式断言：前缀逐字固定、编号连续、段序固定、本体 id 与 name 齐全、非本体技能无本体段、无「关联函数」、同本体概念与行为不重复 |
+| **FR-041** | 提示 MUST 为固定中文格式（2026-11-13 起为**分行块 + 五元组路径**）：首行 `本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）`，其后每个入选技能一个编号块——块首行 `{n}）{name}（非本体技能）` 或 `{n}）{name}（本体技能；ontology_name='{ontology_name}'，ontology_id='{ontology_id}'）`；本体技能其后至多两段：`直接命中：{title}（{name}）、…`（Laya 命中的行为）与 `上游路径：`（段头独占一行，其后**每条路径一行五元组** `{行为title}（{name}）—〔{概念title}({name})〕—[上游]{关系title}{→|←}〔{概念title}({name})〕—→{行为title}（{name}）`；链尾概念无行为时写 `—→（无可用行为）` 且 MUST 保留整行）；概念 MUST NOT 再单独成段（概念已在五元组内）；`[上游]` 表发散方向、关系名后的 `→`（顺 `source→target` 读）/ `←`（反读）只表关系名读向，两者 MUST NOT 混用；空段整行省略，段序固定；行号从 `1` 连续编号（截断后重新编号）；技能按分数降序，同分按原序；本体信息 MUST 以显式字段给出 `ontology_name='…'` 与 `ontology_id='…'`（`ontology_name` 缺失时只写 `ontology_id='…'`）；**一个本体技能恒只有一个本体**，每块至多一组本体字段（同一 `ontology_id` 物化成多份文件时只取首份）；MUST NOT 出现「关联函数」段；同一本体被多个入选技能引用时，行为与路径只归属于分数最高的技能；片段内换行 MUST 压成空格 | 格式断言：前缀逐字固定、编号连续、段序固定、五元组五元素齐全、方向与读向分离、链尾占位、本体 id 与 name 齐全、非本体技能无本体段、无「关联函数」、同本体不重复 |
 | **FR-042** | 提示 MUST 只追加**一次**，位置在本轮补充素材**末尾**；MUST NOT 拼接进用户消息正文，MUST NOT 插入历史消息之间 | 素材结构断言：用户消息逐字等于输入；提示仅 1 处且在末尾 |
 | **FR-043** | 提示与聚焦结果 MUST NOT 写入会话历史、滚动摘要、记忆或任何后续轮次素材；MUST NOT 出现在用户可见界面、回答正文或错误提示中 | 三轮用例 + 界面文本断言：零出现 |
 | **FR-044** | 聚焦 MUST NOT 改变工具权限、工具清单与 SOUL 正文语义；MUST NOT 再执行原工具聚焦，MUST NOT 出现"新提示 + 旧工具提示"并存 | 快照测试：工具清单与 SOUL 正文逐字不变；旧提示零出现 |
-| **FR-045** | 提示 MUST 有长度上限，且上限按**聚焦阶数**分档：阶数 0 ≤ **1200** 字符、1 ≤ **1600**、2 ≤ **2000**；超限时 MUST 先丢「上游参考」段的行为、再丢「直接命中」段的行为，按尾部整条丢弃（不出现半截条目）；**概念段 MUST NOT 被截断**（019 用户口径：概念不设上限）并记录「已截断」 | 超限用例：三档长度合规、概念全量保留、无半截项、记录标注 |
+| **FR-045** | 提示 MUST 有长度上限，且上限按**聚焦阶数**分档：阶数 0 ≤ **1200** 字符、1 ≤ **1600**、2 ≤ **2000**；超限时 MUST **按整行丢弃五元组**（行是原子，不出现半截路径），顺序为「链尾无行为的行 → 跳数大的行 → 起点得分低的行」，且每个入选行为的**第 1 跳行至少保留一条**；路径行丢尽后才丢 `直接命中` 段的行为（尾部整条丢弃）；并记录「已截断」 | 超限用例：三档长度合规、每起点行为至少一行、无半截五元组、记录标注 |
 | **FR-046** | 提示语言 MUST 为中文；技能 `name`、行为 `name` 保留原文，MUST NOT 翻译或改写；技能 `description` 保留原文语义 | 提示样例审阅 |
 | **FR-047** | 每个入选的本体技能 MUST 在提示中**先出现技能 `name`**，其后（同一行内）给出 `本体技能`、关联本体（`ontology_name` 与 `ontology_id`）与关联行为；同一本体被多个入选技能引用时，行为只归属于分数最高的技能，其余技能只出现技能名与本体信息；MUST NOT 只出现行为而不出现技能 | 本体技能提示断言：技能名在行为之前、本体信息齐全、同本体行为不重复 |
 | **FR-048** | 非本体技能的提示条目 MUST 只含技能 `name` 与「非本体技能」标注，MUST NOT 出现行为 / 本体信息 | 非本体技能提示断言：无本体段 |
@@ -300,7 +300,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-050** | 每轮意图聚焦 MUST 在当前对话线程目录留档，复用 `013` 的线程侧车记录文件与滚动上限；记录主体改为**技能聚焦 + 本体行为聚焦**，原工具聚焦字段 MUST NOT 再写入，MUST 与会话历史、消息、工具记录分离 | 断言：线程目录存在该轮记录，且不是历史文件；记录中无工具候选字段 |
-| **FR-051** | 记录 MUST 至少包含：线程标识、数字人标识、轮次线索、时间、处置结论（已聚焦 / 空结果 / 跳过 / 降级 / 未配置）、原因、技能决策与分数、**聚焦阶数**、**概念**（`name` / `title` / `ontology_id` / `source` / `hop` / `via_concept`）、**提示通道行为**（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `source` / `hop` / `via_concept`）、**卡片通道行为**（同上字段）、提示原文、耗时；发散项 `score` MUST 为 `null`；MUST NOT 包含 `functions`、`data_supplements`、`kind`、`selected`（019 起 `source` 恢复写入，语义为「直接命中 / 上游发散 / 下游发散」） | 五种处置各 1 例 + 字段完整性断言 + 两通道各自完整断言 + 冗余字段不存在断言 |
+| **FR-051** | 记录 MUST 至少包含：线程标识、数字人标识、轮次线索、时间、处置结论（已聚焦 / 空结果 / 跳过 / 降级 / 未配置）、原因、技能决策与分数、**聚焦阶数**、**概念**（`name` / `title` / `ontology_id` / `source` / `hop` / `via_concept`）、**提示通道行为**（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `source` / `hop` / `via_concept` / `from_concept`）、**卡片通道行为**（同上字段）、提示原文、耗时；发散项 `score` MUST 为 `null`；MUST NOT 包含 `functions`、`data_supplements`、`kind`、`selected`（019 起 `source` 恢复写入，语义为「直接命中 / 上游发散 / 下游发散」） | 五种处置各 1 例 + 字段完整性断言 + 两通道各自完整断言 + 冗余字段不存在断言 |
 | **FR-052** | 记录 MUST 只用于事后分析，MUST NOT 被任何上下文组装路径读取 | 代码审阅 + 断言：组装不读该段 |
 | **FR-053** | 记录 MUST 有界：沿用线程侧车记录的滚动上限（条数 / 体积）；单轮明细规模由候选上限（技能 ≤32、行为 ≤96）天然约束，MUST NOT 再引入第二层截断 | 上限用例：记录条数与体积在既有上限内 |
 | **FR-054** | 记录写入失败 MUST NOT 影响本轮对话；原始错误 MUST 进入结构化日志（含线程标识与原因） | 磁盘异常注入：回答正常、日志有记录 |
@@ -338,7 +338,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 ### 关键实体
 
 - **技能头部（Skill Header）**：`SKILL.md` frontmatter 的判定用字段。属性：`name`、`description`、`metadata.ontology_id`、`metadata.ontology_name`、`metadata.scenario_id`、`metadata.scenario_name`。
-- **本体定义（Ontology Definition）**：一份 `ontology.yaml` 中与本特性相关的部分。属性：`metadata.ontology_id`、`metadata.ontology_name`、`behaviors[]`（`name`/`title`/`description`/`op_type`/`concept`）、`concepts[]`（`name`/`title`）、`relations[]`（`name`/`source`/`target`/`relation_type`/`cardinality`）。**`functions[]` / `rules[]` 不建模；方向判定不在本层。**
+- **本体定义（Ontology Definition）**：一份 `ontology.yaml` 中与本特性相关的部分。属性：`metadata.ontology_id`、`metadata.ontology_name`、`behaviors[]`（`name`/`title`/`description`/`op_type`/`concept`）、`concepts[]`（`name`/`title`）、`relations[]`（`name`/`title`/`source`/`target`/`relation_type`/`cardinality`）。**`functions[]` / `rules[]` 不建模；方向判定不在本层。**
 - **技能聚焦结果（Skill Focus Result）**：单个可聚焦技能的判定结论。属性：技能 `name`、`description`、分数、是否本体技能、是否匹配本体、匹配的本体引用、是否入选、未入选原因。
 - **本体行为项（Behavior Item）**：一条行为聚焦结果。属性：`name`、`title`、分数、所属概念、来源本体。
 - **发散概念 / 发散行为（Expanded Concept / Behavior，019）**：一阶（或 N 阶）发散产出的概念与行为。属性：`name`、`title`、`hop`（距 direct 概念的跳数）、`via_concept`（首次命中的上游/下游概念）、`via_relation`（仅概念有）、`source`（`upstream` / `downstream`）。
@@ -578,3 +578,16 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
     同步 `019` 规格与 `001` 契约（`admin-api.md` §5.3、`runtime-api-delta.md` §21.1 与 R26）。
   - 验证：`agent-backend` 93 文件 / `admin-backend` 50 文件 / `admin-frontend` 54 文件全通过，
     三侧 lint 与 typecheck 干净。
+- 2026-11-13（用户拍板：提示改「五元组路径」，属 019 的形态修订）：
+  - **形态**：`关联概念` / `上游概念` / `上游参考` 三段取消，改为 `直接命中` + `上游路径` 两段；
+    路径段**一行一条五元组** `行为—概念—关系—概念—行为`，起点行为每行重复，链尾无行为写
+    `—→（无可用行为）` 并保留整行；概念不再单独成段（已在五元组内）。
+  - **语义**：`[上游]` 表方向、关系名后的 `→` / `←` 表读向（N:1 反向走时正读），两者不混用。
+  - **截断**：改为**整行丢弃**（链尾无行为 → 跳数大 → 得分低），每个入选行为第一跳行至少留一条；
+    路径丢尽后再丢 `直接命中`。改写 FR-041 / FR-045。
+  - **数据**：`OntologyRelation` 补 `title`（缺失回退 `name`）；新增 `FocusPath`；记录新增日志字段
+    `focus_paths`；留档行为项新增 `from_concept`（这一跳的起点概念，`direct` 为 `null`），
+    关系名不落档（前提：同一对概念之间恒有一条关系）。判定逻辑、卡片 wire 与前端零改动。
+  - 同步 `019` 规格 FR-005 / FR-006 / §5 / §7 / §8.1 / 修订记录，与 `001` 契约 `runtime-api-delta.md` R29。
+  - 验证：`agent-backend` 91 文件 / 1247 单测 + 22 文件 / 230 集成全绿；`typecheck` / `lint` 干净；
+    用真实本体（`生产调度/原材料采购和库存`）实跑，阶数 1 产出 3 行五元组、提示 500 字符。

@@ -2,7 +2,9 @@
 
 面向生鲜配送「文员接单」场景的订单识别与审核系统：手写单据图片 / 对话文本→ 标准化 + RapidFuzz 模糊匹配 → 按置信度分流为三张表（高度匹配 / 候选审核 / 异常记录）→ 人工审核（本地 CLI 或 Dify Chatflow Human Input）→ 导出三工作表 Excel。
 核心逻辑全部是无状态纯函数，本地 CLI 与 FastMCP 两个入口复用同一套 `core/` 代码。
-MCP 侧另产出**一份自包含 HTML 解析报告**与**三表 xlsx**，经平台注入的 `resultUrl` 回写文件空间（见 §4.1）。
+MCP 工具 `fresh_order_parse` **只返回三表 JSON**（高度匹配 / 候选审核 / 异常记录），**不产出任何文件**：
+`resultUrl` 参数与「HTML 报告 + 三表 xlsx」回写链路已于 2026-11-16 移除。
+需要可读报告时，由数字人按技能文档把结果写成 HTML 存入临时空间（见 `admin-backend/.platform-data/skills/fresh-order-parse/`）。
 
 ---
 
@@ -17,10 +19,9 @@ fresh_order_review
 	|——matcher.py  # RapidFuzz 匹配 + 三档分流
 	|——ocr.py # PP-OCRv6 图片识别（按 y 坐标排序）
 	|——pipeline.py # analyze_order / analyze_batch / apply_decisions / finalize_order / resolve_manual_product
-	|——excel_export.py  # 三工作表 Excel 导出
-	|——html_report.py  # 解析报告 HTML 渲染（自包含、无脚本、无外链）
-|——mcp_server.py # FastMCP 服务（工具 fresh_order_parse）+ resultUrl 产出回写
-|——tests/  # pytest：报告渲染 + 产出回写/降级链
+	|——excel_export.py  # 三工作表 Excel 导出（本地 CLI 用，MCP 工具不再导出）
+|——mcp_server.py # FastMCP 服务（工具 fresh_order_parse，只返回三表 JSON）
+|——tests/  # pytest：工具契约（无 resultUrl、只返三表、相对路径拒收）
 |——requirements.txt # 基础依赖
 |——requirements-ocr.txt # 图片 OCR 依赖（paddleocr/paddlepaddle）
 |——Dockerfile # 单镜像打包（含 OCR 模型预热）
@@ -98,14 +99,13 @@ fresh_order_review
 | `sku_path` | SKU清单 | SKU清单 xlsx 的相对路径 | 是 |
 | `noise_path` | 噪声词表 | 噪声词表的相对路径 | 否，留空用镜像内默认 `噪声词表.xlsx` |
 | `synonyms_path` | 映射表 | 映射表的相对路径 | 否，留空用镜像内默认 `映射表.xlsx` |
-| `resultUrl` | 结果回写地址 | **模型不填**（运行环境自动注入；声明即开启产出交付） | 否 |
 
 - **两段语义要分清**：模型侧填相对路径（`description` 已按此措辞，并明确「请勿自行填写 http 地址」）；
   服务侧实际收到的是平台铸造的 `http(s)` 直链。若服务收到相对路径，说明平台侧漏配 `file_args`，
   报错文案会直接指出这一点；
 - 三个数据表地址的解析结果在进程内缓存：同一组地址 `DATA_CACHE_TTL_SECONDS`（默认 300 秒）内复用，不重复下载解析；`DATA_CACHE_TTL_SECONDS=0` 关闭缓存，`DATA_CACHE_MAX_ENTRIES`（默认 8）控制缓存组数。
 
-返回值**始终**包含三表解析结果（下面是 `order1.png` 的一次真实调用，非示意）；回写成功时末尾再多三个入口字段（见 §4.1）：
+返回值**只有**三表解析结果（下面是 `order1.png` 的一次真实调用，非示意），不含任何文件入口字段：
 
 ```json
 {
@@ -151,40 +151,12 @@ fresh_order_review
   **当前没有下载体积上限**——大图 / 超大 xlsx 会整体读进内存；要设上限时加一个 `MAX_DOWNLOAD_BYTES` 配置即可；
 - 返回 `dict` 时 FastMCP 把 JSON 直接放进 `content` 文本块（实测 `structuredContent` 为空），平台按正文读取即可。
 
-### 4.1 产出交付：HTML 解析报告 + 三表工作簿
+### 4.1 产出交付（已移除，2026-11-16）
 
-回写开关**只在工具自己的 `inputSchema` 里声明 `resultUrl`**（平台据此自动注入，模型看不到、也填不了，
-平台侧无需任何配置；2026-10-17 起 `async_tools` 白名单已移除）。收到地址后本服务产出两份文件：
-
-| 产出 | 文件名 | 返回字段 | 点开行为 |
-|---|---|---|---|
-| HTML 解析报告（顶层，第一入口） | `生鲜订单_{订单图名}_{时间戳}_报告.html` | `filePath` / `filePathName` | 平台沙箱 iframe 内联渲染（可读、可打印） |
-| 三表工作簿（高度匹配 / 候选审核 / 异常记录） | `生鲜订单_{订单图名}_{时间戳}.xlsx` | `excelFile: {filePath, filePathName}` | 下载 |
-
-```json
-{
-  "auto_rows": ["…"], "auto_count": 1,
-  "review_rows": ["…"], "review_count": 1,
-  "error_rows": [], "error_count": 0,
-  "filePath": "临时空间/后台产出/th_1_生鲜订单_order1_20261113_153012_报告.html",
-  "filePathName": "生鲜订单_order1_20261113_153012_报告.html",
-  "excelFile": {
-    "filePath": "临时空间/后台产出/th_1_生鲜订单_order1_20261113_153012.xlsx",
-    "filePathName": "生鲜订单_order1_20261113_153012.xlsx"
-  }
-}
-```
-
-- **`filePath` 是平台回写响应里的 `path` 原样回传**，服务不自己拼（拼出来的多半点不开）；
-- **键序即界面入口顺序**：报告在前、xlsx 在后（平台按 JSON 键顺序深度优先抽取 `filePath`）；
-- **报告里没有导出按钮**：文件空间的 `.html` 以 `sandbox=""` + `CSP: sandbox` 打开，脚本与下载都被平台
-  关掉。报告只写 xlsx 文件名与指路文案，**真正的导出入口是聊天区那两行入口 + 铃铛「后台记录」**
-  （同一取舍见 `bom-service/report.py` 的三条硬约束）；
-- **降级链**（原则九：解析结果永远照给）：xlsx 回写失败 → 报告照交；报告失败 → 顶层退回 xlsx 且不再给
-  `excelFile`（同一文件不给两条入口）；两份都失败 → 无入口，原因写进返回值的 `delivery_note`；
-- **单次回写上限 5MB**（平台 `UPLOAD_MAX_MB` bodyLimit）：先判大小再 POST，超限不白传一遍；
-  报告另有 `FRESH_REPORT_MAX_ROWS`（默认 200 行/表）截断，全量数据以 xlsx 为准；
-- 产出落点由平台锁死为 `临时空间/后台产出/`，**30 天未访问清理**，过期后入口点开 404。
+本服务**不再产出任何文件**：`resultUrl` 入参与「HTML 解析报告 + 三表 xlsx」回写链路已整体删除，
+返回值只有三表 JSON。原因：产出由服务端回写带来 5MB 上限、落点锁定、降级链三层状态，
+而报告本质是**视图**——交给数字人按技能文档自行写 HTML 更灵活（`write_file` 落临时空间，
+平台对 `.html` 以沙箱 iframe 内联渲染）。历史契约见仓库根 `异步MCP服务接入约定.md` §4.7.1。
 
 ### 4.2 数字人管理平台侧配置要点
 
@@ -197,7 +169,7 @@ fresh_order_review
 | `tool_labels` | `{"fresh_order_parse": "生鲜订单解析"}`（进意图聚焦命题文本与工具清单主标题） |
 | `file_args`（**必需**） | `{"fresh_order_parse": {"image_path": "url", "sku_path": "url", "noise_path": "url", "synonyms_path": "url"}}`——模型填相对路径，平台按此声明铸成签名直链；漏配则服务收到相对路径并报错 |
 | `confirmation` | 只读解析、无副作用，可设 `never` |
-| 产出回写 | **无需配置**：工具 schema 已声明 `resultUrl`，运行环境自动注入（**不要**写进 `file_args`，那是"相对路径 → 签名直链"的入参口径） |
+| 产出回写 | **不适用**：工具 schema 已不再声明 `resultUrl`，运行环境不会注入（2026-11-16 移除） |
 
 > 工具的**名字**会进入 `allowed_tools`、`confirmation.tools`、数字人 starter 的 `{kind:'mcp', name}` 与 `MCP.json`，
 > 改名后这些位置 MUST 同步更新，否则工具对模型不可见（`allowed_tools` 按名字精确匹配）。
@@ -220,7 +192,7 @@ docker build -t fresh_food_mcp_v1 .
 docker run -d --name fresh_food_mcp_v1 -p 8104:8000 fresh_food_mcp_v1
 ```
 
-环境变量（可覆盖 `core/config.py` 默认值）：`MCP_HOST`、`MCP_PORT`、`MCP_PATH`、`T_HIGH`、`T_LOW`、`TOP_N`、`HTTP_TIMEOUT_SECONDS`、`DATA_CACHE_TTL_SECONDS`、`DATA_CACHE_MAX_ENTRIES`、`OCR_DET_MODEL`、`OCR_REC_MODEL`；
-产出交付相关（默认值见 `mcp_server.py` / `core/html_report.py`）：`FRESH_PUT_TIMEOUT_S`（回写超时，默认 30s）、`FRESH_RESULT_MAX_BYTES`（单次回写上限，默认 5MB，与平台 `UPLOAD_MAX_MB` 对齐）、`FRESH_REPORT_MAX_ROWS`（报告单表行数上限，默认 200）、`FRESH_REPORT_MAX_CANDIDATES`（报告候选展示上限，默认 5）。
+环境变量（可覆盖 `core/config.py` 默认值）：`MCP_HOST`、`MCP_PORT`、`MCP_PATH`、`T_HIGH`、`T_LOW`、`TOP_N`、`HTTP_TIMEOUT_SECONDS`、`DATA_CACHE_TTL_SECONDS`、`DATA_CACHE_MAX_ENTRIES`、`OCR_DET_MODEL`、`OCR_REC_MODEL`。
+产出交付相关的 `FRESH_*` 变量已随回写链路一并移除（2026-11-16）。
 
 注意：镜像体积约 2–3 GB（paddle 依赖所致）；首次构建需要联网下载 `paddlepaddle` 与 OCR 模型。

@@ -97,6 +97,8 @@ export function useChatPanel() {
       text: streamingTextView.value,
       thinking: streamingThinkingView.value,
       toolCalls: chat.toolCalls.value,
+      // 静默兜底（TR-66）：超过 2.5s 没有任何业务事件时，气泡底部改说「模型正在思考…」
+      stalled: chat.stalled.value,
       error: chat.error.value,
       // 本轮气泡标注"谁在回答"（009 起会话归属固定，标注用于如实还原存量历史）
       agentName: chat.streamingAgentName.value,

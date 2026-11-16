@@ -1,6 +1,7 @@
 ---
 soul_version: 1
 intent_focus: true
+intent_focus_depth: 1
 next_action_hints: true
 next_action_hints_count: 1
 intro: 库存和原材料专家

@@ -29,10 +29,10 @@ import {
 import { BatchDecider, type DecideClient } from './batch-decider.js';
 import { clampDepth, expandNeighborhood } from './expansion.js';
 import { loadOntologyIndex } from './ontology-loader.js';
+import { buildFocusPaths } from './paths.js';
 import {
   composeFocusPrompt,
   maxPromptChars,
-  type PromptConcept,
   type PromptOntology,
   type PromptSkill,
 } from './prompt.js';
@@ -446,23 +446,23 @@ export class IntentFocusRunner implements IntentFocusPort {
           })
         : EMPTY_EXPANSION;
 
-    const promptConcepts: PromptConcept[] = [
-      ...directConcepts.map((entry) => ({
-        ontologyId: entry.ontologyId,
-        name: entry.name,
-        title: entry.title,
-        hop: 0,
-      })),
-      ...expansion.upstream.concepts.map((concept) => ({
-        ontologyId: concept.ontologyId,
-        name: concept.name,
-        title: concept.title,
-        hop: concept.hop,
-      })),
-    ];
+    // 2026-11-13：提示改为「一行一条五元组」，概念不再单独成段（概念已在路径里出现）
+    const focusPaths =
+      depth > 0
+        ? buildFocusPaths({
+            behaviors: capabilitySelection.behaviors.map((decision) => ({
+              ontologyId: decision.ontologyId,
+              name: decision.name,
+              title: decision.title,
+              concept: decision.concept,
+              score: decision.score,
+            })),
+            ontologies: selectedOntologies,
+            expansion,
+          })
+        : [];
     const composed = composeFocusPrompt(promptSkills, capabilitySelection, {
-      concepts: promptConcepts,
-      upstreamBehaviors: expansion.upstream.behaviors,
+      paths: focusPaths,
       maxChars: maxPromptChars(depth),
     });
     const roundMs = this.now() - startedAt;
@@ -512,8 +512,10 @@ export class IntentFocusRunner implements IntentFocusPort {
         reason: null,
         depth,
         skills_selected: selectedCandidates.length,
-        concepts: promptConcepts.length,
+        concepts: directConcepts.length + expansion.upstream.concepts.length,
         behaviors: capabilitySelection.behaviors.length,
+        // 五元组行数（= 提示里"上游路径"的行数），排障时看它与 prompt_chars 的对照
+        focus_paths: focusPaths.length,
         upstream_behaviors: expansion.upstream.behaviors.length,
         downstream_behaviors: expansion.downstream.behaviors.length,
         prompt_chars: composed.prompt.length,

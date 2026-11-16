@@ -7,7 +7,8 @@
  * - `behaviors` = 提示通道（直接命中 + 上游发散）；
  * - `tool_tip_behaviors` = 卡片通道（直接命中 + 下游发散）。
  * 两条通道都含直接命中（各自完整），这样"为什么提示里有它、卡片里没有它"可以单独对账；
- * 发散项 `score` 恒为 `null`（不再判分），`via_concept` / `hop` 用于回溯发散路径。
+ * 发散项 `score` 恒为 `null`（不再判分），`hop` / `via_concept`（所属概念）/ `from_concept`
+ * （这一跳的起点概念）用于回溯发散路径：`from_concept → via_concept` 就是那一跳的边。
  */
 import type { IntentFocusDisposition } from './state.js';
 import type {
@@ -118,6 +119,8 @@ function toDirectRecord(decision: CapabilityDecision): CapabilityFocusRecord {
     source: 'direct',
     hop: 0,
     via_concept: decision.concept,
+    // direct 没有"发散起点"：它本身就是用户意图命中的那条
+    from_concept: null,
   };
 }
 
@@ -134,6 +137,7 @@ function toExpandedRecord(
     source,
     hop: behavior.hop,
     via_concept: behavior.viaConcept,
+    from_concept: behavior.fromConcept,
   });
 }
 

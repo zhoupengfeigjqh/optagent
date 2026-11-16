@@ -1,23 +1,27 @@
 /**
- * 聚焦提示铸造（016 / 019）。
+ * 聚焦提示铸造（016 / 019，2026-11-13 修订）。
  *
- * 形态：首行固定前缀，其后每个入选技能一个编号块——第一行是技能本身，
- * 后续缩进行按**来源分段**（概念 / 上游概念 / 直接命中 / 上游参考）。
- * 分段的意义：模型要能区分"用户意图直接相关的"与"因对象关系带出来的"，
- * 否则发散项会与直接命中混成一锅，等于把阈值的结果抹平。
+ * 形态：首行固定前缀，其后每个入选技能一个编号块——第一行是技能本身，其后两段：
+ * 1. `直接命中：` 用户意图命中的行为（一行，顿号分隔）；
+ * 2. `上游路径：` **一行一条五元组**（`行为—概念—关系—概念—行为`），见 `paths.ts`。
  *
- * 三处与 016 的差异（2026-11-08 019）：
- * 1. 概念成为提示的一等条目（`关联概念` / `上游概念`），**不设上限、不截断**；
- * 2. 上游发散行为单独成段（`上游参考`），与 `直接命中` 分开；
- * 3. 总长度上限按**聚焦阶数**分档（0→1200 / 1→1600 / 2→2000），超限**只从行为段尾部丢**，
- *    概念段永不截断（用户口径）。
+ * 为什么把"关联概念 / 上游概念 / 上游参考"三段换成五元组（用户 2026-11-13 拍板）：
+ * 分段列表只给出元素集合，**连接关系要靠模型自己猜**；五元组把一条推理的最小单元压成一行，
+ * 起点行为挂在哪个概念、经哪条关系到了哪个概念、那个概念下能调什么，一行读完。
+ * 概念不再单独成段（它在五元组里已经出现），避免同一概念在提示里重复两遍白占预算。
  *
- * **一个本体技能恒只有一个本体**（`SKILL.md` frontmatter 的单个 `ontology_id`），
- * 所以每个技能块最多出现一组本体字段；同一本体被多个技能引用时，概念与行为只归属于
- * 分数最高的那个技能，避免重复输出。
+ * 语义清晰的两条硬规矩：
+ * - 方向与读向分开写：`[上游]` 表示这一跳走向主数据；关系名后的 `→` / `←` 只表示
+ *   "关系名要不要反读"（例：`N:1` 的 `记录原材料` 从采购单走向原材料时要正读）；
+ * - 链尾没有行为时写 `（无可用行为）`，不省略整行——模型需要知道"这条上游到此为止"。
+ *
+ * 截断改成**行级**（这是与 016 最大的实现差异）：五元组是一行一个原子，不能再按"段尾 pop"。
+ * 顺序：先丢链尾无行为的行 → 再丢跳数大的行 → 再丢起点得分低的行；**每个起点行为至少留一行**，
+ * 全部路径行丢完后才动 `直接命中`（与旧口径一致：直接命中最后才丢）。
  *
  * 只描述"能做什么 / 该看什么"，不带阈值、分数、工具名或执行指令。
  */
+import type { FocusPath } from './paths.js';
 import type { CapabilitySelection } from './types.js';
 
 /** 提示长度上限（阶数 0 的基准值，字符） */
@@ -48,38 +52,31 @@ export interface PromptSkill {
   order: number;
 }
 
-/** 提示里的概念条目：`hop = 0` 为直接命中，`≥ 1` 为上游发散 */
-export interface PromptConcept {
-  ontologyId: string;
-  name: string;
-  title: string;
-  hop: number;
-}
-
-/** 提示里的上游发散行为 */
-export interface PromptBehavior {
-  ontologyId: string;
-  name: string;
-  title: string;
-}
-
 export interface ComposeOptions {
-  /** 概念（直接命中 + 上游），按本体归属到技能块 */
-  concepts?: readonly PromptConcept[];
-  /** 上游发散行为（下游不进提示） */
-  upstreamBehaviors?: readonly PromptBehavior[];
+  /** 五元组路径（只含**上游**；下游只进卡片，不进提示） */
+  paths?: readonly FocusPath[];
   /** 总长度上限；缺省按阶数 0 的 1200（调用方负责按阶数传入） */
   maxChars?: number;
+}
+
+/** 渲染后的一条路径行 + 截断所需的排序信息 */
+interface PathLine {
+  text: string;
+  /** 起点行为键：同一键至少保留一行 */
+  behaviorKey: string;
+  hop: number;
+  deadEnd: boolean;
+  score: number;
+  /** 稳定序：全局路径下标 */
+  order: number;
 }
 
 interface PromptItem {
   name: string;
   /** 关联本体展示串（`ontology_name='X'，ontology_id='1'`），非本体技能为 null */
   ontology: string | null;
-  directConcepts: string[];
-  upstreamConcepts: string[];
   behaviors: string[];
-  upstreamBehaviors: string[];
+  paths: PathLine[];
 }
 
 export interface ComposedPrompt {
@@ -106,7 +103,7 @@ export function composeFocusPrompt(
     });
   if (selected.length === 0) return { prompt: '', truncated: false };
 
-  // 同一本体被多个入选技能引用时，概念与行为只归属于分数最高的那个技能
+  // 同一本体被多个入选技能引用时，行为与路径只归属于分数最高的那个技能
   const ownerByOntology = new Map<string, string>();
   for (const skill of selected) {
     if (!skill.isOntology || !skill.ontology) continue;
@@ -117,22 +114,11 @@ export function composeFocusPrompt(
     name: clean(skill.name),
     // 本体技能恒有且仅有 1 个本体：提示里只出现一组字段
     ontology: skill.isOntology && skill.ontology ? renderOntologyRef(skill.ontology) : null,
-    directConcepts: [],
-    upstreamConcepts: [],
     behaviors: [],
-    upstreamBehaviors: [],
+    paths: [],
   }));
 
   const byName = new Map(items.map((item) => [item.name, item] as const));
-
-  for (const concept of options.concepts ?? []) {
-    const owner = ownerByOntology.get(concept.ontologyId);
-    const item = owner ? byName.get(owner) : undefined;
-    if (!item) continue;
-    const label = `${clean(concept.title || concept.name)}（${clean(concept.name)}）`;
-    if (concept.hop <= 0) item.directConcepts.push(label);
-    else item.upstreamConcepts.push(label);
-  }
 
   for (const decision of capabilities.behaviors) {
     const owner = ownerByOntology.get(decision.ontologyId);
@@ -141,19 +127,26 @@ export function composeFocusPrompt(
     item.behaviors.push(`${clean(decision.title || decision.name)}（${clean(decision.name)}）`);
   }
 
-  for (const behavior of options.upstreamBehaviors ?? []) {
-    const owner = ownerByOntology.get(behavior.ontologyId);
+  (options.paths ?? []).forEach((path, order) => {
+    const owner = ownerByOntology.get(path.ontologyId);
     const item = owner ? byName.get(owner) : undefined;
-    if (!item) continue;
-    item.upstreamBehaviors.push(`${clean(behavior.title || behavior.name)}（${clean(behavior.name)}）`);
-  }
+    if (!item) return;
+    item.paths.push({
+      text: renderPath(path),
+      behaviorKey: `${path.ontologyId}\u0000${path.behavior.name}`,
+      hop: path.hop,
+      deadEnd: path.toBehavior === null,
+      score: path.score ?? 0,
+      order,
+    });
+  });
 
   const maxChars = options.maxChars ?? MAX_PROMPT_CHARS;
   let prompt = render(items);
   let truncated = false;
-  // 截断顺序：先丢「上游参考」（发散项），再丢「直接命中」；概念段永不丢
+  // 截断顺序：路径行（行级，见 `dropWorstPathLine`）→ 直接命中（尾部 pop，与 016 一致）
   while (prompt.length > maxChars) {
-    if (!dropLast(items, 'upstreamBehaviors') && !dropLast(items, 'behaviors')) break;
+    if (!dropWorstPathLine(items) && !dropLastBehavior(items)) break;
     truncated = true;
     prompt = render(items);
   }
@@ -170,17 +163,82 @@ function render(items: readonly PromptItem[]): string {
 function renderItem(item: PromptItem): string {
   if (item.ontology === null) return `${item.name}（非本体技能）`;
   const lines = [`${item.name}（本体技能；${item.ontology}）`];
-  if (item.directConcepts.length > 0) lines.push(`   关联概念：${item.directConcepts.join('、')}`);
-  if (item.upstreamConcepts.length > 0) lines.push(`   上游概念：${item.upstreamConcepts.join('、')}`);
   if (item.behaviors.length > 0) lines.push(`   直接命中：${item.behaviors.join('、')}`);
-  if (item.upstreamBehaviors.length > 0) lines.push(`   上游参考：${item.upstreamBehaviors.join('、')}`);
+  // 段头单独一行：这不是"参考列表"，而是"若干条推理路径"，先说清再逐行给
+  if (item.paths.length > 0) {
+    lines.push('   上游路径：');
+    for (const path of item.paths) lines.push(`     ${path.text}`);
+  }
   return lines.join('\n');
 }
 
-/** 从**尾部**丢一条行为（先扫全部条目的指定段，保证上游整段先被消耗完） */
-function dropLast(items: PromptItem[], key: 'upstreamBehaviors' | 'behaviors'): boolean {
-  for (let index = items.length - 1; index >= 0; index--) {
-    const list = items[index]![key];
+/**
+ * 一条五元组：
+ * `行为（name）—〔概念(title)name〕—[上游]关系名→〔概念(title)name〕—→行为（name）`
+ *
+ * 括号形态刻意分工：行为用全角括号（与 `直接命中` 行一致），概念用半角括号并套 `〔〕`
+ * （表示"这是本体里的类型名"），模型不会把两者混读。
+ */
+export function renderPath(path: FocusPath): string {
+  const behavior = `${clean(path.behavior.title || path.behavior.name)}（${clean(path.behavior.name)}）`;
+  const from = `${clean(path.fromConcept.title || path.fromConcept.name)}(${clean(path.fromConcept.name)})`;
+  const to = `${clean(path.toConcept.title || path.toConcept.name)}(${clean(path.toConcept.name)})`;
+  const direction = path.direction === 'upstream' ? '上游' : '下游';
+  // 箭头只表示关系名的读向，不表示上下游（上下游由 [上游]/[下游] 表达）
+  const arrow = path.readability === 'forward' ? '→' : '←';
+  const relation = `${clean(path.relation.title || path.relation.name)}${arrow}`;
+  const tail =
+    path.toBehavior === null
+      ? '—→（无可用行为）'
+      : `—→${clean(path.toBehavior.title || path.toBehavior.name)}（${clean(path.toBehavior.name)}）`;
+  return `${behavior}—〔${from}〕—[${direction}]${relation}〔${to}〕${tail}`;
+}
+
+/**
+ * 丢掉"最该丢"的一条路径行（**行级原子**，不会留下半截五元组）。
+ *
+ * 排序：链尾无行为 → 跳数大 → 起点得分低 → 靠后。
+ *
+ * 唯一保护：**入选行为的第一跳行**至少留一条（否则模型会以为这个行为没有任何上下文，
+ * 比不出现更糟）。保护只对 `hop === 1` 生效——第 2 跳起的起点行为是接续出来的，
+ * 它的行被清空不影响"用户意图命中了什么"；若也保护它，会出现"每条链都只有一行、
+ * 谁都删不掉"的死局，最后只能去砍直接命中。
+ */
+function dropWorstPathLine(items: readonly PromptItem[]): boolean {
+  let victim: { item: PromptItem; index: number; rank: number[] } | null = null;
+
+  for (const item of items) {
+    const protectedCounts = new Map<string, number>();
+    for (const line of item.paths) {
+      if (line.hop !== 1) continue;
+      protectedCounts.set(line.behaviorKey, (protectedCounts.get(line.behaviorKey) ?? 0) + 1);
+    }
+    for (let index = 0; index < item.paths.length; index += 1) {
+      const line = item.paths[index]!;
+      if (line.hop === 1 && (protectedCounts.get(line.behaviorKey) ?? 0) <= 1) continue;
+      const rank = [line.deadEnd ? 0 : 1, -line.hop, line.score, -line.order];
+      if (victim === null || compareRank(rank, victim.rank) < 0) victim = { item, index, rank };
+    }
+  }
+
+  if (victim === null) return false;
+  victim.item.paths.splice(victim.index, 1);
+  return true;
+}
+
+/** 字典序比较（数值已按"越小越先丢"编码好） */
+function compareRank(left: readonly number[], right: readonly number[]): number {
+  for (let index = 0; index < left.length; index += 1) {
+    const diff = left[index]! - right[index]!;
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** 从**尾部**丢一条直接命中行为（先扫全部条目，保证靠后的技能先被消耗） */
+function dropLastBehavior(items: readonly PromptItem[]): boolean {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const list = items[index]!.behaviors;
     if (list.length > 0) {
       list.pop();
       return true;

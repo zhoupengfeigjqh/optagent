@@ -78,22 +78,6 @@ def _write_sheets(writer, auto_rows, approved_rows, error_rows) -> None:
     _error_df(error_rows).to_excel(writer, sheet_name=config.SHEET_ERROR, index=False)
 
 
-def build_review_workbook(auto_rows, review_rows, error_rows) -> bytes:
-    """单工作簿三表（高度匹配 / 候选审核 / 异常记录）的字节内容。
-
-    fresh_order_parse 专用：解析工具没有人工审核环节，``review_rows`` 直接进
-    「候选审核」表，因此不能复用 ``build_combined_workbook``（那张表的第三列是
-    「审核通过」，需要 decisions 合成后的 confirmed 行）。
-    一次调用只回写**一个**文件，界面上也就只有一条下载入口。
-    """
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        _auto_df(auto_rows).to_excel(writer, sheet_name=config.SHEET_AUTO, index=False)
-        _review_df(review_rows).to_excel(writer, sheet_name=config.SHEET_REVIEW, index=False)
-        _error_df(error_rows).to_excel(writer, sheet_name=config.SHEET_ERROR, index=False)
-    return buf.getvalue()
-
-
 def build_combined_workbook(auto_rows, approved_rows, error_rows) -> bytes:
     """生成单工作簿（三工作表）的字节内容。"""
     buf = io.BytesIO()
