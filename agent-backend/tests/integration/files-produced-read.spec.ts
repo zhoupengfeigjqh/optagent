@@ -6,8 +6,8 @@
  * `parseSpaceDir` 对非「数据准备」空间拒绝二级目录 —— 不放行就等于"入口行存在、点开必 400"。
  *
  * 覆盖口径（只放行这一个目录，且**只读**）：
- * - `download` / `preview` 可读到产出（`.xlsx` 自 2026-11-16 起在 preview 里转 CSV 内联，
- *   无法解析时明确 400，不再静默回退成附件）；
+ * - `download` / `preview` 可读到产出（`.xlsx` 自 2026-11-17 起在 preview 里返回**结构化 JSON**，
+ *   供前端直接画表；无法解析时明确 400，不再静默回退成附件）；
  * - `upload` / `list` / `delete` 仍按原规则拒绝（写进去会打乱 `.meta.json` 索引）；
  * - 其它二级目录（`临时空间/别处`）**不受影响**，仍判 400。
  */
@@ -30,7 +30,7 @@ const SCENARIO = { scenario: '产出读入口', data_prep_dirs: ['生产计划']
 const NAME = 'th_1_总BOM_bom_1_ab.xlsx';
 /** 内容不必是合法 xlsx：本层只验"能不能读出来"，不看格式（预览会明确 400） */
 const BYTES = Buffer.from('PK\u0003\u0004fake-xlsx-bytes', 'latin1');
-/** 另备一份**可解析**的产出：验 `.xlsx` 预览转 CSV 内联（2026-11-16） */
+/** 另备一份**可解析**的产出：验 `.xlsx` 预览返回结构化 JSON（2026-11-17） */
 const NAME_OK = 'th_1_总BOM_bom_2_cd.xlsx';
 const BYTES_OK = XLSX.write(
   (() => {
@@ -39,7 +39,7 @@ const BYTES_OK = XLSX.write(
       wb,
       XLSX.utils.aoa_to_sheet([
         ['物料', '数量'],
-        ['A', '10'],
+        ['A', 10],
       ]),
       '物料',
     );
@@ -97,16 +97,26 @@ describe('后台产出目录的读入口', () => {
     expect(res.rawPayload.equals(BYTES)).toBe(true);
   });
 
-  it('preview 对可解析的 `.xlsx` 内联为 CSV 文本（2026-11-16：不再回退下载）', async () => {
+  it('preview 对可解析的 `.xlsx` 返回结构化 JSON（2026-11-17：前端零解析）', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/files/preview?${q(PRODUCED_DIR, NAME_OK)}`,
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
     expect(String(res.headers['content-disposition'])).toContain('inline');
-    expect(res.body).toContain('### Sheet: 物料');
+
+    const body = res.json() as {
+      sheets: Array<{ name: string; rows: string[][]; numericCols: number[] }>;
+    };
+    expect(body.sheets.map((sheet) => sheet.name)).toEqual(['物料']);
+    expect(body.sheets[0]?.rows).toEqual([
+      ['物料', '数量'],
+      ['A', '10'],
+    ]);
+    // 「数量」列全是数字 ⇒ 前端据此右对齐；文本列不在此列
+    expect(body.sheets[0]?.numericCols).toEqual([1]);
   });
 
   it('preview 对**无法解析**的 `.xlsx` 明确 400（不静默回退成附件）', async () => {

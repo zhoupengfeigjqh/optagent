@@ -203,7 +203,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 |---|---|
 | `/api/files/*`（`upload`/`list`/`download`/`preview`/`DELETE`/`workspace`） | 目录合法性改为按**当前选中数字人**的场景清单判定；未选中数字人时 `409 AGENT_NOT_SELECTED` |
 | `POST /api/files/upload` | 数据准备目录带字段约束时，暂存后落盘前校验上传表（`400 FILE_SCHEMA_INVALID` + `details[]` 逐条问题，失败不落盘），详见 §3.1；单文件上限 **5MB**（413 `FILE_TOO_LARGE`，与平台 SKILL ZIP 导入同一全局约束） |
-| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定；**`predefined`（2026-10-29，014 新增，必填布尔）**：`true` 仅表示平台预定义二级目录（当前仅「算法规则」），共享/临时空间与管理员自定义目录恒为 `false`——供前端区分"参与空数据引导判定的目录"，前端 MUST NOT 硬编码目录名（详见 `specs/014-chat-onboarding-hint/contracts/workspace-dir-predefined.md`） |
+| `GET /api/files/workspace` | **空间对象**：`upload_extensions`（该空间允许上传的扩展名，**本次起正式登记**——实现早已存在，属既往契约缺口）；**目录项（dirs）**：`fields`（字段约束，无约束为 `[]`）与 **`upload_extensions`（2026-10-13 新增，**目录级**）**：供前端上传入口做**只读提示**与文件选择器类型过滤；权威校验在上传路由，前端 MUST NOT 自行判定；**`predefined`（2026-10-29，014 新增，必填布尔）**：`true` 仅表示平台预定义二级目录（当前仅「算法规则」），共享/临时空间与管理员自定义目录恒为 `false`——供前端区分"参与空数据引导判定的目录"，前端 MUST NOT 硬编码目录名（详见 `specs/014-chat-onboarding-hint/contracts/workspace-dir-predefined.md`）；**2026-11-17**：预定义目录可被平台屏蔽，屏蔽后该目录**不进入 `dirs`**（`data_prep_dirs` 为可见范围的唯一权威，可全部屏蔽），本字段只表示"预定义且已启用"，取值与结构不变 |
 | `POST /api/threads/:id/messages` 的 `attachments` 校验 | 同一引用在不同数字人下可能合法/非法，按**本轮数字人**判定 |
 | `SCENARIO_NOT_CONFIGURED`（503） | 错误码不变，message 改为指名数字人 |
 
@@ -235,6 +235,18 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 **可上传类型**：数据准备的**每个二级目录**可有各自的允许类型（由数字人配置 `scenario.data_prep_uploads` 下发，缺省为 `.csv` / `.xlsx`）；共享空间与临时空间仍取 `SPACE_POLICIES`（与改造前一致）。
 
 **内联预览（2026-10-20 补登 `.html`）**：`GET /api/files/preview` 的 Content-Type 映射新增 `.html` → `text/html; charset=utf-8`（`inline`），前端在右侧面板以 `<iframe>` 呈现，形态与 `.pdf` 一致。**安全约束（MUST）**：`.html` 是用户上传的可执行内容，预览响应 MUST 带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`（脚本不执行、不共享平台源），前端 iframe MUST 加 `sandbox=""`；签名直链 `GET /api/files/raw` 对 `.html` 同样处理。因为无法内联的复杂页面会白屏，`.html` 预览失败（404 / 413）仍按错误态给下载入口。
+
+**表格预览（2026-11-17 修订，取代 2026-11-16 的「转 CSV 文本」口径）**：`GET /api/files/preview` 对 `.xlsx` 返回**结构化 JSON**（`content-type: application/json; charset=utf-8`，`inline`），响应体：
+
+```
+{ "sheets": [ { "name": string, "rows": string[][], "numericCols": number[], "merges": [{ "r", "c", "rowSpan", "colSpan" }], "truncated": boolean } ] }
+```
+
+- `rows` 是**显示文本**（按原簿的数字/日期格式渲染，如 `1,200.00`、`11/1/26`），空缺为 `''`；服务端读文件时 MUST 带 `cellNF: true`，否则日期会退化成序列号；
+- `numericCols` 是需要右对齐的列下标，**表头行（第 0 行）不参与统计**（否则「一行表头 + 一两行数据」的小表判不出数字列）；
+- 单 sheet 超过 `SHEET_MAX_ROWS`（1000 行）/ `SHEET_MAX_COLS`（100 列）时截断并置 `truncated: true`；解析失败仍为 `400 VALIDATION_FAILED`；
+- 前端 MUST 直接渲染，**MUST NOT** 引入 xlsx / CSV 解析库；渲染侧另有更小的 DOM 上限（400 行 / 60 列）并提示下载；
+- **模型侧口径不变**：`read_file` 仍读 `xlsxToText` 的 CSV 文本（多 sheet 带 `### Sheet: 名称` 分段），两条通路共用同一个 SheetJS。
 
 **字段约束适用范围**：**仅对 `.csv` 与 `.xlsx` 生效**；其他类型（含经白名单允许的 `.txt` / `.pdf` / `.json` / `.zip` / 图片）与**未声明字段约束的目录**一律**跳过表结构校验**——避免用"缺少必填表头"去描述一个本没有表头的文件。判定落点为 `agent-backend/src/domain/field-check.ts` 的 `supportsFieldCheck(ext)`（唯一判据）。
 
@@ -619,7 +631,7 @@ data: {
 
 | 错误码 | 状态 | 语义 |
 |---|---|---|
-| `FILE_NOT_FOUND` | 404 | 目录暂无文件 / 目录不可读 / 文件已被清理 |
+| `FILE_NOT_FOUND` | 404 | 目录暂无文件 / 目录不可读 / 文件已被清理；**2026-11-17** 起还包括「目录被管理员屏蔽」（文案写明"该数字人未开放…"，MUST NOT 借机列出其他可见目录） |
 | `FILE_TOO_LARGE` | 413 | 超过预览上限（与预览同一上限） |
 | `FILE_SCHEMA_INVALID` | 422 | 解析失败：损坏、空表头/重复列名、行数超上限（1000） |
 

@@ -554,6 +554,33 @@ export interface WorkspaceFile {
   updated_at: string
 }
 
+/** 合并单元格（`GET /api/files/preview` 对 `.xlsx` 的响应，2026-11-17）。 */
+export interface PreviewMerge {
+  /** 起点行下标（0 基） */
+  r: number
+  /** 起点列下标（0 基） */
+  c: number
+  rowSpan: number
+  colSpan: number
+}
+
+/** 单个工作表的预览数据（服务端已解析好，前端零解析直接画表）。 */
+export interface PreviewSheet {
+  name: string
+  /** 行 × 列的**显示文本**（千分位、日期等按原簿格式），空缺为 `''` */
+  rows: string[][]
+  /** 需要右对齐的列下标（数字列） */
+  numericCols: number[]
+  merges: PreviewMerge[]
+  /** 是否因服务端行/列上限被截断（完整内容请下载） */
+  truncated: boolean
+}
+
+/** `.xlsx` 预览响应体。 */
+export interface PreviewWorkbook {
+  sheets: PreviewSheet[]
+}
+
 /**
  * 数据准备目录的字段约束（`scenario.json` 的 `data_prep_fields` 随 workspace 接口下发）。
  *
@@ -585,6 +612,9 @@ export interface WorkspaceDir {
   /**
    * 是否为平台预定义二级目录（2026-10-29，014）：仅「数据准备/算法规则」为 `true`，
    * 其余二级目录与扁平空间（共享 / 临时）恒为 `false`。
+   *
+   * 2026-11-17：预定义目录可被管理员**屏蔽**，屏蔽后该目录不进入 `dirs`——本字段
+   * 只表示"预定义且已启用"（前端无需为屏蔽写特判，空清单按"无目录"处理）。
    *
    * 由运行端下发——前端 MUST NOT 硬编码预定义目录名（宪章原则七）。
    */

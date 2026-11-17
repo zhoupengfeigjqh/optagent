@@ -28,7 +28,13 @@ export interface MentionComposer {
   onInputText(payload: { value: string; caret: number }): void
   onPickSpace(space: string): void
   onPickDir(dir: string): void
-  onPickFile(reference: FileReference): void
+  /**
+   * 选中一个文件：登记引用 + 写 `@标记`。
+   *
+   * @returns 是否真的收下（`false` = 超上限或已在引用中，文本不变）。粘贴待发批次
+   *   要据此决定"这份内存文件还要不要留着"，故不能只是 void。
+   */
+  onPickFile(reference: FileReference): boolean
   /** Enter/→ 确认当前高亮项：空间/目录列下钻，文件列完成引用 */
   onConfirmMention(): void
   /** `@` 面板展开时的按键路由（Composer 已拦截并 preventDefault） */
@@ -58,12 +64,13 @@ export function useMentionComposer(deps: MentionComposerDeps): MentionComposer {
     mention.pickDir(dir)
   }
 
-  function onPickFile(reference: FileReference): void {
+  function onPickFile(reference: FileReference): boolean {
     if (!mention.pickFile(reference)) {
-      return
+      return false
     }
     insertToken(reference)
     mention.close()
+    return true
   }
 
   function onConfirmMention(): void {

@@ -31,6 +31,7 @@ export interface ManifestDiffEntry {
     | 'missing_in_runtime'
     | 'unexpected_in_runtime'
     | 'agent_missing_in_runtime'
+    | 'agent_new_in_runtime'
     | 'agent_unexpected_in_runtime';
   detail: string;
 }
@@ -71,26 +72,37 @@ export class DeployManifestService {
   /**
    * 与运行环境的差异（`FR-032`）。
    *
-   * - 清单里有、运行环境没有 → 被手工删除过；
-   * - 运行环境有、清单里没有 → 非本平台分发的内容（**下次部署会被整体覆盖清掉**，
+   * - 期望有、运行环境缺、清单里**分发过** → 被手工删除/下架（`agent_missing_in_runtime`）；
+   * - 期望有、运行环境缺、清单里**没有** → 本次新增（`agent_new_in_runtime`，2026-11-17）；
+   * - 运行环境有、清单里分发过、本次不再需要 → 将被移除（`agent_unexpected_in_runtime`）；
+   * - 运行环境有、清单里没有 → 非本平台分发的内容（不报出，但下次部署会被整体覆盖清掉，
    *   因为 `agents/` 现在以本次产物为准，见 `infra/opt-agent-writer.ts`）。
    */
   diff(userId: string, desiredAgents: string[], runtimeAgents: string[]): ManifestDiffEntry[] {
     const runtime = new Set(runtimeAgents);
     const desired = new Set(desiredAgents);
+    const managed = new Set(this.get(userId)?.agent_names ?? []);
     const out: ManifestDiffEntry[] = [];
 
     for (const agent of desired) {
-      if (!runtime.has(agent)) {
+      if (runtime.has(agent)) continue;
+      // "期望有、运行环境缺"再按清单归属细分：清单分发过 → 被删/下架；否则 → 本次新增
+      if (managed.has(agent)) {
         out.push({
           user_id: userId,
           target: agent,
           kind: 'agent_missing_in_runtime',
           detail: `用户 ${userId} 的运行环境中缺少数字人目录 ${agent}（可能被手工删除）`,
         });
+      } else {
+        out.push({
+          user_id: userId,
+          target: agent,
+          kind: 'agent_new_in_runtime',
+          detail: `用户 ${userId} 本次将新增数字人 ${agent}`,
+        });
       }
     }
-    const managed = new Set(this.get(userId)?.agent_names ?? []);
     for (const agent of runtimeAgents) {
       if (managed.has(agent) && !desired.has(agent)) {
         out.push({

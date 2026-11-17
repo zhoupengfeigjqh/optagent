@@ -6,7 +6,8 @@
  * - GET /api/files/list?dir=：列目录
  * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
- *   按扩展名映射 Content-Type；.xlsx/.xls 回退附件下载；超过预览上限 → 413）
+ *   按扩展名映射 Content-Type；`.xlsx` 返回结构化 JSON（见 `domain/preview/xlsx-sheets.ts`），
+ *   `.xls` 回退附件下载；超过预览上限 → 413）
  * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略 +
  *   目录级可上传类型 `upload_extensions`）
  * - GET /api/files/rules：HITL「从算法规则选择」数据源——「数据准备/算法规则」最新
@@ -37,7 +38,7 @@ import {
 } from '../domain/dirs.js';
 import { buildWorkspaceView } from '../domain/workspace-view.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
-import { xlsxToText } from '../domain/preview/xlsx-text.js';
+import { xlsxToSheets, type PreviewWorkbook } from '../domain/preview/xlsx-sheets.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { splitAgentScopedPath, verifyRef } from '../infra/file-sign.js';
@@ -207,19 +208,20 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         );
       }
       const ext = path.extname(filename).toLowerCase();
-      // `.xlsx`（2026-11-16）：服务端转 CSV 文本内联——前端不引解析库，
-      // 且"预览看到的 sheet 分段"与"模型 read_file 读到的"完全同构（共用 xlsxToText）
+      // `.xlsx`（2026-11-17）：服务端解析成**结构化 JSON**（每个 sheet 的 rows / numericCols /
+      // merges），前端拿到直接画表——不引前端解析库，也不必写 RFC4180 解析器。
+      // 与模型侧解耦：`read_file` 仍走 `xlsxToText` 的 CSV 文本（两条通路共用同一个 SheetJS）。
       if (ext === '.xlsx') {
-        let text: string;
+        let workbook: PreviewWorkbook;
         try {
-          text = xlsxToText(buf);
+          workbook = xlsxToSheets(buf);
         } catch {
           throw new ApiError(400, 'VALIDATION_FAILED', `无法解析 Excel 文件: ${filename}`);
         }
         return reply
-          .header('content-type', 'text/csv; charset=utf-8')
+          .header('content-type', 'application/json; charset=utf-8')
           .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
-          .send(text);
+          .send(workbook);
       }
       const contentType = PREVIEW_CONTENT_TYPES[ext];
       if (!contentType) {
@@ -246,6 +248,9 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get('/api/files/rules', async (_req) => {
     const userId = getCurrentUser().userId;
     const agent = currentAgentFor(ctx, userId);
+    // 2026-11-17：预定义目录可被屏蔽——先判一次，屏蔽按"能力不可用"（404）呈现，
+    // 不把面向运维的"不在场景清单内，允许：…"甩给用户，也不借机暴露其他目录清单
+    assertRulesDirOpen(ctx, userId, agent);
     const target = checkDir(ctx, userId, agent, `${SPACE_PREP}/${RULES_SUBDIR}`);
     const access = fileAccessFor(ctx, userId, agent);
 
@@ -374,4 +379,30 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
 
     return buildWorkspaceView(scenario, fileAccessFor(ctx, userId, agent));
   });
+}
+
+/**
+ * 「数据准备/算法规则」是否对该数字人开放（2026-11-17：预定义目录可被平台屏蔽）。
+ *
+ * 屏蔽后该目录不在场景清单内。若直接交给 `checkDir`，用户会收到 403 与面向运维的
+ * "不在场景清单内，允许：…"（还会把其他目录清单暴露给业务用户）。规则选择是**用户侧**
+ * 入口，故按"这条能力不可用"返回 404，与"目录暂无文件"同码同口径。
+ *
+ * 场景未配置时**不在这里判定**：仍由 `checkDir` 走既有的 503 映射，保持唯一出口。
+ */
+function assertRulesDirOpen(ctx: AppContext, userId: string, agentName: string): void {
+  let dirs: readonly string[];
+  try {
+    dirs = loadScenario(ctx.config.optAgentRoot, userId, agentName).dataPrepDirs;
+  } catch (err) {
+    if (err instanceof ScenarioNotConfiguredError) return;
+    throw err;
+  }
+  if (!dirs.includes(RULES_SUBDIR)) {
+    throw new ApiError(
+      404,
+      'FILE_NOT_FOUND',
+      `该数字人未开放「${SPACE_PREP}/${RULES_SUBDIR}」目录（管理员已在文件空间场景中屏蔽）`,
+    );
+  }
 }

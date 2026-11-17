@@ -37,11 +37,11 @@
     {
       "name": "fresh-order-parse",
       "display_name": "生鲜订单识别",
-      "description": "生鲜订单图片解析技能：用户上传订单图片清单后，调用工具解析订单信息，从sku中找到对应的正式品种。",
+      "description": "生鲜订单图片解析：调用工具解析订单信息，并给出分析结论。",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 10531
+          "size": 7966
         },
         {
           "path": "references/report-template.html",
@@ -50,7 +50,7 @@
       ],
       "source": "fresh-order-parse.zip",
       "installed_at": "2026-11-13T02:24:36.910Z",
-      "updated_at": "2026-11-16T12:17:43.763Z"
+      "updated_at": "2026-11-17T08:02:19.982Z"
     }
   ]
 }

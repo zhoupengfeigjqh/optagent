@@ -83,10 +83,26 @@ function saveUploads(extensions: string[]): void {
   emit('update:modelValue', { ...props.modelValue, data_prep_uploads: next })
 }
 
-/** 预定义目录（平台硬编码）：始终存在、不可移除，但**不强制**字段约束 */
+/**
+ * 预定义目录（平台硬编码）：不可**删除**，但可**屏蔽**（2026-11-17）。
+ *
+ * 屏蔽 = 从 `data_prep_dirs` 移除（清单即数字人的可见范围），不强制字段约束。
+ */
 function isPredefined(dir: string): boolean {
   return (PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir)
 }
+
+/**
+ * 已屏蔽的预定义目录 = 预定义全集 − 当前清单。
+ *
+ * 屏蔽状态**不落字段**：清单里有没有它就是唯一事实，因此不需要后端新增键，
+ * 也不会与"清单"出现两份真相。
+ */
+const blockedDirs = computed(() =>
+  (PREDEFINED_DATA_PREP_DIRS as readonly string[]).filter(
+    (dir) => !props.modelValue.data_prep_dirs.includes(dir),
+  ),
+)
 
 function openFieldDialog(dir: string): void {
   fieldDialogDir.value = dir
@@ -152,7 +168,7 @@ function addDir(): void {
  * 移除目录：**同时移除其字段约束与可上传类型配置**（键是目录名，不清理会留下孤儿键）。
  *
  * 只动配置，**不动文件系统**——被移除目录下的既有文件仍保留在用户空间。
- * 预定义目录不可移除（后端保存时同样拒绝缺失预定义目录的清单）。
+ * 预定义目录不走这里：它不可删除，只能「屏蔽」（见 `blockPredefined`）。
  */
 function removeDir(index: number): void {
   const dir = props.modelValue.data_prep_dirs[index]
@@ -169,6 +185,43 @@ function removeDir(index: number): void {
     data_prep_dirs: nextDirs,
     data_prep_fields: nextFields,
     data_prep_uploads: nextUploads,
+  })
+}
+
+/**
+ * 屏蔽预定义目录（2026-11-17）：从清单移除，**同时清掉**该目录的字段约束与可上传类型。
+ *
+ * 为什么清键：平台把"清单外目录的配置"判为孤儿键（保存与部署预检都会拒绝），
+ * 保留就会让设计态保存不过。代价是重新启用后需重配——界面文案已写明。
+ * 只动配置，**不动文件系统**：已上传的文件仍保留，重新启用即恢复可见。
+ */
+function blockPredefined(dir: string): void {
+  if (!isPredefined(dir)) return
+  const nextFields: Record<string, ScenarioField[]> = {
+    ...(props.modelValue.data_prep_fields ?? {}),
+  }
+  delete nextFields[dir]
+  const nextUploads: Record<string, string[]> = { ...(props.modelValue.data_prep_uploads ?? {}) }
+  delete nextUploads[dir]
+  emit('update:modelValue', {
+    ...props.modelValue,
+    data_prep_dirs: props.modelValue.data_prep_dirs.filter((item) => item !== dir),
+    data_prep_fields: nextFields,
+    data_prep_uploads: nextUploads,
+  })
+}
+
+/**
+ * 启用（恢复）被屏蔽的预定义目录：追加到清单末尾，配置从零开始。
+ *
+ * 追加在末尾，是为了让"界面顺序"与"落盘的 `data_prep_dirs` 顺序"保持一致
+ * （清单顺序就是 `scenario.json` 的数组顺序，运行端按它装配）。
+ */
+function enablePredefined(dir: string): void {
+  if (!isPredefined(dir) || props.modelValue.data_prep_dirs.includes(dir)) return
+  emit('update:modelValue', {
+    ...props.modelValue,
+    data_prep_dirs: [...props.modelValue.data_prep_dirs, dir],
   })
 }
 </script>
@@ -197,8 +250,9 @@ function removeDir(index: number): void {
     <fieldset class="scenario-editor__dirs">
       <legend class="field__label">「数据准备」二级目录清单</legend>
       <p class="field__hint">
-        仅这些子目录对数字人可见。「算法规则」为平台预定义目录，始终存在、不可移除，但字段约束可自由配置（可为
-        0 条）。 **收缩清单不会删除已有文件**——被移除的目录及其内容仍保留在用户空间。
+        仅这些子目录对数字人可见。「算法规则」为平台预定义目录，不可删除但可屏蔽：屏蔽后该目录
+        不会出现在用户文件空间，也不会被数字人读取；已上传的文件仍保留，随时可重新启用。
+        「移除」自定义目录同样不删除已有文件。
       </p>
 
       <ul v-if="modelValue.data_prep_dirs.length > 0" class="scenario-editor__list">
@@ -239,12 +293,46 @@ function removeDir(index: number): void {
             >
               移除
             </button>
+            <button
+              v-else
+              type="button"
+              class="btn"
+              :data-test="`block-${dir}`"
+              :aria-label="`屏蔽目录 ${dir}`"
+              @click="blockPredefined(dir)"
+            >
+              屏蔽
+            </button>
           </span>
         </li>
       </ul>
       <p v-else class="field__hint">
-        当前清单为空——缺少预定义目录「算法规则」，保存时会被后端拒绝。
+        当前清单为空：数字人的「数据准备」空间不会显示任何二级目录（已上传的文件仍保留）。
       </p>
+
+      <div v-if="blockedDirs.length > 0" class="scenario-editor__blocked">
+        <p class="field__label">已屏蔽的预定义目录</p>
+        <ul class="scenario-editor__list">
+          <li v-for="dir in blockedDirs" :key="`blocked-${dir}`">
+            <span class="mono scenario-editor__blocked-name">{{ dir }}</span>
+            <span class="scenario-editor__badge" data-test="blocked-badge">已屏蔽</span>
+            <span class="scenario-editor__row-actions">
+              <button
+                type="button"
+                class="btn"
+                :data-test="`enable-${dir}`"
+                :aria-label="`启用目录 ${dir}`"
+                @click="enablePredefined(dir)"
+              >
+                启用
+              </button>
+            </span>
+          </li>
+        </ul>
+        <p class="field__hint">
+          启用后重新出现在数字人的文件空间；屏蔽时已清空的字段约束与可上传类型需重新配置。
+        </p>
+      </div>
 
       <div class="scenario-editor__add">
         <label class="visually-hidden" for="scenario-new-dir">新增二级目录名</label>
@@ -335,5 +423,16 @@ function removeDir(index: number): void {
 
 .scenario-editor__error {
   color: var(--color-status-error);
+}
+
+/* 已屏蔽的预定义目录：与启用项用分隔线拉开，名字灰显表示"当前不生效" */
+.scenario-editor__blocked {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.scenario-editor__blocked-name {
+  color: var(--color-text-muted);
 }
 </style>

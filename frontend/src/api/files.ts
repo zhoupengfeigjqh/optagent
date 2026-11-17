@@ -8,11 +8,19 @@
  * - §5.3 下载**无大小上限** → 以 `<a download>` 直链触发，不经 `fetch`
  * - §5.4 预览**有大小上限**（默认 10MB）→ 文本类按需 `fetch`（便于展示错误态），`.pdf` / `.html` 用 `<iframe>`
  *   （`.html` 为用户上传内容，iframe MUST 沙箱化，见 `WorkspacePanel.vue`）
+ * - §5.4 补充（2026-11-17）：`.xlsx` 返回**结构化 JSON**（`{ sheets: [...] }`），走
+ *   `fetchPreviewWorkbook`；不再是 CSV 文本，前端不做表格解析
  * - §5.5 删除走 REST `DELETE /api/files`（`shared` 为共享只读目录，后端 403 `FILE_READONLY`）
  */
 
 import { parseErrorResponse, type HttpClient } from './http'
-import type { RuleFileResponse, UploadResponse, WorkspaceFile, WorkspaceResponse } from './types'
+import type {
+  PreviewWorkbook,
+  RuleFileResponse,
+  UploadResponse,
+  WorkspaceFile,
+  WorkspaceResponse,
+} from './types'
 
 /** 文件 API 接口。 */
 export interface FilesApi {
@@ -26,6 +34,13 @@ export interface FilesApi {
   previewUrl(dir: string, filename: string): string
   /** `GET /api/files/preview` 文本内容（`.txt` / `.csv` / `.json`），失败时抛出结构化错误 */
   fetchPreviewText(dir: string, filename: string, signal?: AbortSignal): Promise<string>
+  /**
+   * `GET /api/files/preview` 的 `.xlsx` 结构化内容（2026-11-17）。
+   *
+   * 服务端已把工作簿解析成 `{ sheets: [{ name, rows, numericCols, merges }] }`，
+   * 前端不做 CSV 解析、不引解析库；超限 / 不存在仍抛结构化错误（含 `code`）。
+   */
+  fetchPreviewWorkbook(dir: string, filename: string, signal?: AbortSignal): Promise<PreviewWorkbook>
   /**
    * 预检预览可用性（只探状态，不消费响应体）。
    *
@@ -79,6 +94,14 @@ export function createFilesApi(client: HttpClient): FilesApi {
         throw await parseErrorResponse(response)
       }
       return response.text()
+    },
+
+    fetchPreviewWorkbook: async (dir, filename, signal) => {
+      const response = await client.fetchImpl(previewUrl(dir, filename), { signal })
+      if (!response.ok) {
+        throw await parseErrorResponse(response)
+      }
+      return (await response.json()) as PreviewWorkbook
     },
 
     probePreview: async (dir, filename, signal) => {

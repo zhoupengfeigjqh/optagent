@@ -16,12 +16,13 @@
  * - 发送前校验引用仍存在（`missingReferences()`），不存在则提示且不发送（FR-018、V-15）
  */
 
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import type { FileReference, WorkspaceDir, WorkspaceSpace } from '../api/types'
 import { MAX_REFERENCES_PER_MESSAGE } from '../constants/limits'
 import { isFlatSpace, spaceSubDirs } from '../utils/space'
 import { useSession } from './useAppSession'
+import { useThreadBuckets } from './useThreadBuckets'
 import type { WorkspaceStore } from './useWorkspace'
 import type { ToastStore } from './useToast'
 
@@ -32,6 +33,14 @@ export type MentionColumn = 'space' | 'dir' | 'file'
 export interface MentionDeps {
   workspace: WorkspaceStore
   toast?: ToastStore
+  /**
+   * 当前会话（`null` = 视图态新对话，尚未建会话）。
+   *
+   * 2026-11-17（023 v1.4）：引用**按会话分桶**。原先引用是全局单例、草稿却是按会话的，
+   * 于是"在会话 1 粘了文件没发、切到会话 2 再粘同名文件"会被已不可见的旧引用占名，
+   * 硬生生多出一个 `(1)`；更糟的是那个看不见的引用还会跟着下一条消息发出去。
+   */
+  thread?: () => string | null
 }
 
 /** `@` 引用 composable 契约。 */
@@ -115,6 +124,32 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   const activeDir = ref<string | null>(null)
   const activeIndex = ref(0)
   const references = ref<FileReference[]>([])
+
+  /**
+   * 引用的会话桶（与草稿同构，见 `useThreadBuckets`）。
+   *
+   * 只在给了 `thread` 依赖时才装：单测直接构造 store 时没有会话概念，不需要 watcher。
+   */
+  if (deps.thread !== undefined) {
+    const buckets = useThreadBuckets(
+      references,
+      () => [] as FileReference[],
+      (value) => value.length === 0,
+    )
+    watch(
+      () => deps.thread?.() ?? null,
+      (next, previous) => {
+        // 自动建会话（首条消息 `null → 真 id`）不是"换会话"：这批引用属于正在发送的这条消息，
+        // 直接接管给新会话，别当成切换抹掉（否则发送失败时胶囊会凭空消失）
+        if (previous === null && next !== null) {
+          buckets.move(null, next)
+          return
+        }
+        buckets.stash(previous)
+        references.value = buckets.take(next)
+      },
+    )
+  }
 
   const spaces = computed<WorkspaceSpace[]>(() => deps.workspace.spaces.value)
 

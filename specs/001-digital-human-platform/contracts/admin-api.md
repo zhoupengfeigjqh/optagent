@@ -615,6 +615,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - 为空数组、含非法项、或引用 `data_prep_dirs` 清单外的目录 ⇒ **拒绝保存**（`VALIDATION_FAILED`）。
 - **该键可省略**（请求体与响应体皆然）；历史文档缺该键时按"全部目录使用平台默认"处理，客户端无需迁移。
 - 该配置仅约束**数据准备空间**的**用户上传**；共享空间与临时空间的可上传类型不由此字段影响。
+- **`data_prep_dirs` 可为空数组，且 MUST NOT 强制包含平台预定义目录**（2026-11-17 修订）：预定义目录（当前仅「算法规则」）可被管理员**屏蔽**——屏蔽即该目录不在清单内（清单是可见范围的唯一权威），对其不出现、不可访问；屏蔽**不删除**磁盘文件，重新启用即恢复可见。管理界面据「预定义全集 − 清单」推导"已屏蔽"状态，**不新增字段、不改响应结构**；屏蔽时该目录的 `data_prep_fields` / `data_prep_uploads` 键一并清除（避免清单外孤儿键）。
 
 **`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增，`intent_focus` 为 **013** 新增，`intent_focus_depth` 为 **019** 新增）：
 
@@ -773,7 +774,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `users` | array | 每用户：`{ user_id, ok, agents: [{ name, action: "written"|"removed", ok }], error? }` |
-| `manifest_diff` | array | **部署前**与运行环境的差异（agent 级，`FR-032`）：`agent_missing_in_runtime`（期望有、运行环境缺，可能被手工删除）、`agent_unexpected_in_runtime`（曾由平台分发、本次不再需要，将被清掉）。差异是写入前快照，部署后即为一致；失败用户**不产生**差异条目（原因见 `users[].error`） |
+| `manifest_diff` | array | **部署前**与运行环境的差异（agent 级，`FR-032`）：`agent_new_in_runtime`（期望有、运行环境缺、且清单从未分发 → 本次新增）、`agent_missing_in_runtime`（期望有、运行环境缺、但清单分发过 → 可能被手工删除/下架）、`agent_unexpected_in_runtime`（曾由平台分发、本次不再需要，将被清掉）。差异是写入前快照，部署后即为一致；失败用户**不产生**差异条目（原因见 `users[].error`） |
 | `history_id` | string | 对应 `§6.7` 的一条记录 |
 
 **错误码**：`ADM_DEPLOY_VALIDATION_FAILED`（`details.errors` 列出全部错误项；**运行环境写入次数 MUST 为 0**，`SC-020`）、`ADM_DEPLOY_TARGET_NOT_WRITABLE`、`ADM_AGENT_INVALID_REF`（单因同码时直接返回该码）、`ADM_CONFIG_REVISION_CONFLICT`

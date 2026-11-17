@@ -310,4 +310,81 @@ describe('useMessageScroll —— ResizeObserver（2026-10-16）', () => {
     harness.wrapper.unmount()
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
   })
+
+  /**
+   * 可控的滚动尺寸：重排时 `scrollHeight` 会变化，而 `scrollTop` 的存取器要跨变更保留
+   * （`installScrollMetrics` 每次调用都会重置 scrollTop，模拟不了"同一容器换了高度"）。
+   */
+  function installFluidMetrics(
+    element: HTMLElement,
+    clientHeight: number,
+  ): { setScrollHeight(value: number): void; readScrollTop(): number } {
+    let scrollHeight = clientHeight
+    let scrollTop = 0
+    Object.defineProperty(element, 'scrollHeight', {
+      get: () => scrollHeight,
+      configurable: true,
+    })
+    Object.defineProperty(element, 'clientHeight', { value: clientHeight, configurable: true })
+    Object.defineProperty(element, 'scrollTop', {
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      },
+      configurable: true,
+    })
+    return {
+      setScrollHeight: (value: number) => {
+        scrollHeight = value
+      },
+      readScrollTop: () => scrollTop,
+    }
+  }
+
+  it('贴底时尺寸变化：重新贴到底（拖窄后不丢跟随）', async () => {
+    FakeResizeObserver.instances = []
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+    const harness = mountScroll({ messages: [msg('m_1')], threadId: 'th_a' })
+    await flushPromises()
+    const observer = FakeResizeObserver.instances[0]
+
+    const metrics = installFluidMetrics(harness.element(), 300)
+    metrics.setScrollHeight(2000)
+    harness.element().scrollTop = 2000
+    harness.api.onScroll()
+    expect(harness.api.atBottom.value).toBe(true)
+
+    // 中栏变窄 → 正文重排变高。视口必须跟到底，否则后续流式增量也会停下
+    metrics.setScrollHeight(2600)
+    observer.trigger()
+
+    expect(metrics.readScrollTop()).toBe(2600)
+    expect(harness.api.atBottom.value).toBe(true)
+
+    harness.wrapper.unmount()
+  })
+
+  it('上翻时尺寸变化：不拽视口，只按新高度重判', async () => {
+    FakeResizeObserver.instances = []
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+
+    const harness = mountScroll({ messages: [msg('m_1')], threadId: 'th_a' })
+    await flushPromises()
+    const observer = FakeResizeObserver.instances[0]
+
+    const metrics = installFluidMetrics(harness.element(), 300)
+    metrics.setScrollHeight(2000)
+    harness.element().scrollTop = 500 // 距底 1200 → 非贴底
+    harness.api.onScroll()
+    expect(harness.api.atBottom.value).toBe(false)
+
+    metrics.setScrollHeight(2600)
+    observer.trigger()
+
+    expect(metrics.readScrollTop()).toBe(500)
+    expect(harness.api.atBottom.value).toBe(false)
+
+    harness.wrapper.unmount()
+  })
 })

@@ -37,11 +37,14 @@ export const SPACES = [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const;
 export type SpaceName = (typeof SPACES)[number];
 
 /**
- * 「数据准备」下的**平台预定义**二级目录（平台硬编码，恒存在、不可移除）。
+ * 「数据准备」下的**平台预定义**二级目录（平台硬编码）。
+ *
+ * 2026-11-17 起平台允许**屏蔽**预定义目录：屏蔽 = 该目录不出现在 `data_prep_dirs`，
+ * 运行端不做特殊判断（清单即可见范围的唯一权威）——它自然不出现、不可达。
  *
  * 与 `admin-backend` `PREDEFINED_DATA_PREP_DIRS`、`admin-frontend` 的同名常量
- * **三处 MUST 同步**：平台侧拒绝缺失该目录的场景，运行端只据此标记目录性质，
- * 不参与场景校验。`domain/rule-file.ts` 的 `RULES_SUBDIR` 由本常量派生，
+ * **三处 MUST 同步**：运行端只据此标记目录性质，不参与场景校验。
+ * `domain/rule-file.ts` 的 `RULES_SUBDIR` 由本常量派生，
  * 避免"预定义目录"出现第二份清单。
  */
 export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const;

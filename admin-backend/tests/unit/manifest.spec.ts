@@ -66,11 +66,28 @@ describe('DeployManifestService', () => {
 });
 
 describe('diff —— 与运行环境的差异（FR-032）', () => {
-  it('清单要求但运行环境缺失 → agent_missing_in_runtime', () => {
+  it('清单分发过、但运行环境缺失 → agent_missing_in_runtime（可能被手工删除）', () => {
+    manifest.updateUser('admin', ['demo', 'demo2'], 'now');
     const diffs = manifest.diff('admin', ['demo', 'demo2'], ['demo']);
     expect(diffs).toHaveLength(1);
     expect(diffs[0]).toMatchObject({ kind: 'agent_missing_in_runtime', target: 'demo2' });
     expect(diffs[0]?.detail).toContain('被手工删除');
+  });
+
+  it('清单从未分发、运行环境缺失 → agent_new_in_runtime（本次新增）', () => {
+    const diffs = manifest.diff('admin', ['demo', 'demo2'], ['demo']);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]).toMatchObject({ kind: 'agent_new_in_runtime', target: 'demo2' });
+    expect(diffs[0]?.detail).toContain('新增');
+  });
+
+  it('缺失目录按清单归属区分：分发过 → 被删；未分发 → 新增', () => {
+    manifest.updateUser('admin', ['managed', 'gone'], 'now');
+    const diffs = manifest.diff('admin', ['managed', 'gone', 'fresh'], ['managed']);
+    expect(diffs.map((d) => [d.target, d.kind])).toEqual([
+      ['gone', 'agent_missing_in_runtime'],
+      ['fresh', 'agent_new_in_runtime'],
+    ]);
   });
 
   it('运行环境多出、且**由本平台分发过**（在清单内）→ 报出将移除', () => {

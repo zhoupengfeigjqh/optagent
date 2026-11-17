@@ -190,15 +190,8 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
       : [...expandedDirs.value, dir]
   }
 
-  async function remove(reference: FileReference): Promise<boolean> {
-    try {
-      await deps.files.remove(reference.dir, reference.filename)
-    } catch (cause) {
-      deps.toast.push('error', toUserMessage(toErrorInfo(cause)))
-      return false
-    }
-
-    // 就地移除即可：删除只影响单个目录，重拉全量反而会丢掉折叠状态之外的滚动位置
+  /** 就地摘掉缓存条目：删除只影响单个目录，重拉全量反而会丢掉折叠状态之外的滚动位置 */
+  function dropFromCache(reference: FileReference): void {
     spaces.value = spaces.value.map((space) => ({
       ...space,
       dirs: space.dirs.map((item) =>
@@ -207,6 +200,16 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
           : item,
       ),
     }))
+  }
+
+  async function remove(reference: FileReference): Promise<boolean> {
+    try {
+      await deps.files.remove(reference.dir, reference.filename)
+    } catch (cause) {
+      deps.toast.push('error', toUserMessage(toErrorInfo(cause)))
+      return false
+    }
+    dropFromCache(reference)
     deps.toast.push('success', `已删除 ${reference.filename}`)
     return true
   }

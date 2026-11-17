@@ -58,6 +58,22 @@ function cloneUploads(uploads: Record<string, string[]> | undefined): Record<str
   return out
 }
 
+/** 预定义目录全集（新建初值恰为"全部启用"，可直接作为比较基准） */
+const PREDEFINED_DIRS = PREDEFINED_DATA_PREP_DIRS as readonly string[]
+
+/**
+ * 新建态下目录清单是否被改过：多出非预定义目录，或**少了**某个预定义目录（= 已屏蔽）。
+ *
+ * 2026-11-17：屏蔽预定义目录也是一种改动。旧判据只看"多出来的自定义目录"，
+ * 于是"新建时只把算法规则屏蔽掉"会被误判为没有输入。
+ */
+function hasScenarioDirChanged(dirs: readonly string[]): boolean {
+  return (
+    dirs.some((dir) => !PREDEFINED_DIRS.includes(dir)) ||
+    PREDEFINED_DIRS.some((dir) => !dirs.includes(dir))
+  )
+}
+
 /** 结构化 SOUL 深拷贝（问题实例与工具引用都是嵌套结构，浅拷贝会串改） */
 function cloneSoul(soul: SoulDesign): SoulDesign {
   return {
@@ -124,10 +140,8 @@ export function useAgentDesign() {
         // 结构化 SOUL 的"是否有输入"判据：与空结构逐字段比较
         JSON.stringify(draft.value.soul) !== JSON.stringify(emptySoulDesign()) ||
         draft.value.scenario.scenario !== '' ||
-        // 预定义目录（算法规则）是新建初值自带的，不算"有输入"
-        draft.value.scenario.data_prep_dirs.some(
-          (dir) => !(PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir),
-        ) ||
+        // 预定义目录（算法规则）默认全启用、不算"有输入"；新增目录或**屏蔽**预定义目录都算
+        hasScenarioDirChanged(draft.value.scenario.data_prep_dirs) ||
         Object.keys(draft.value.scenario.data_prep_fields).length > 0 ||
         Object.keys(draft.value.scenario.data_prep_uploads ?? {}).length > 0
       )

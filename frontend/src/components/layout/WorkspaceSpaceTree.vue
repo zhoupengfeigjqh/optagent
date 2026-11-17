@@ -89,37 +89,44 @@ function isDirExpanded(dir: string): boolean {
         </template>
 
         <!-- 数据准备：展开二级子目录，子目录再展开出文件 -->
-        <ul v-else class="workspace-tree__dirs">
-          <li v-for="dir in spaceSubDirs(space)" :key="dir.dir" class="workspace-tree__dir">
-            <button
-              type="button"
-              class="workspace-tree__dir-toggle"
-              :aria-expanded="isDirExpanded(dir.dir)"
-              @click="emit('toggle-dir', dir.dir)"
-            >
-              <BaseIcon
-                :name="isDirExpanded(dir.dir) ? 'chevron-down' : 'chevron-right'"
-                :size="14"
-              />
-              <BaseIcon name="folder" :size="14" />
-              <span class="workspace-tree__name">{{ dir.label }}</span>
-              <span class="workspace-tree__count">{{ dir.files.length }}</span>
-            </button>
+        <!-- 2026-11-17：管理员可屏蔽预定义目录（甚至全部屏蔽）→ 空清单要有明确空态，
+             不能让用户看成"没加载出来" -->
+        <template v-else-if="spaceSubDirs(space).length > 0">
+          <ul class="workspace-tree__dirs">
+            <li v-for="dir in spaceSubDirs(space)" :key="dir.dir" class="workspace-tree__dir">
+              <button
+                type="button"
+                class="workspace-tree__dir-toggle"
+                :aria-expanded="isDirExpanded(dir.dir)"
+                @click="emit('toggle-dir', dir.dir)"
+              >
+                <BaseIcon
+                  :name="isDirExpanded(dir.dir) ? 'chevron-down' : 'chevron-right'"
+                  :size="14"
+                />
+                <BaseIcon name="folder" :size="14" />
+                <span class="workspace-tree__name">{{ dir.label }}</span>
+                <span class="workspace-tree__count">{{ dir.files.length }}</span>
+              </button>
 
-            <div v-if="isDirExpanded(dir.dir)" class="workspace-tree__nest">
-              <WorkspaceFileList
-                v-if="dir.files.length > 0"
-                :dir="dir.dir"
-                :files="dir.files"
-                :deletable="dir.deletable"
-                @preview="emit('preview', $event)"
-                @download="emit('download', $event)"
-                @remove="emit('remove', $event)"
-              />
-              <p v-else class="workspace-tree__hint workspace-tree__empty">该目录暂无文件</p>
-            </div>
-          </li>
-        </ul>
+              <div v-if="isDirExpanded(dir.dir)" class="workspace-tree__nest">
+                <WorkspaceFileList
+                  v-if="dir.files.length > 0"
+                  :dir="dir.dir"
+                  :files="dir.files"
+                  :deletable="dir.deletable"
+                  @preview="emit('preview', $event)"
+                  @download="emit('download', $event)"
+                  @remove="emit('remove', $event)"
+                />
+                <p v-else class="workspace-tree__hint workspace-tree__empty">该目录暂无文件</p>
+              </div>
+            </li>
+          </ul>
+        </template>
+        <p v-else class="workspace-tree__hint workspace-tree__empty">
+          该数字人未开放「数据准备」目录
+        </p>
       </div>
     </li>
   </ul>

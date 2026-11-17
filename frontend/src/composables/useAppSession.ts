@@ -209,7 +209,9 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   const emptyHint = useEmptyDataHint({ spaces: workspace.spaces, error: workspace.error })
   const models = createModelsStore({ models: modelsApi, storage })
   const uploads = createUploadsStore({ files: filesApi, toast })
-  const mention = createFileMentionStore({ workspace, toast })
+  // 引用按会话分桶（023 v1.4）：与草稿同一套"切走存、切回取"，否则旧会话的不可见引用
+  // 会在新会话里占名（多出 `(1)`），甚至被当成附件发出去
+  const mention = createFileMentionStore({ workspace, toast, thread: () => activeThreadId.value })
   // `/技能` 只依赖数字人接口（清单作用域由服务端"当前选中"决定），与文件空间无关
   const skillMention = createSkillMentionStore({ agents: agentsApi })
 

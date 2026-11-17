@@ -1,12 +1,19 @@
 /**
- * 单元测试：上传面板接线（`useUploadPanel`，012 新建）
+ * 单元测试：上传面板接线（`useUploadPanel`，012 新建 / 023 v1.3 重做粘贴侧）
  *
- * 钉住三条接线（对应 012 FR-001 / FR-003 / FR-004 / FR-005 / FR-006 / FR-007 / FR-010 / FR-013）：
+ * `+` 上传（012）钉三条接线：
  * 1. **成功即回写**：每个成功项调用 `acceptUpload({dir, filename})` 恰好一次，且**先**登记清单
  *    （`workspace.exists` 立刻为真），失败项零调用；
  * 2. **收起即清空终态**：`+` 收起与关闭入口都调 `uploads.clear()`，但不动文件与引用；
  * 3. **回写复用唯一入口**：`acceptUpload` 就是 `mentionComposer.onPickFile`，因此引用上限、
  *    去重与"删标记后同步移除"这些口径**不需要**在本模块重写（这里只验证转发与顺序）。
+ *
+ * 粘贴（v1.3）钉四件事：
+ * 4. **粘进来不落盘**：零请求、零上传记录，只把文件挂在内存并写进胶囊；
+ * 5. **发送才落盘**：`flushPending` 传到临时空间，名字按"临时空间现存 + 本条消息已有 + 本批内部"
+ *    预演，最终名以服务端返回为准；
+ * 6. **失败即中止**：返回 `null`（调用方不发消息），已落盘的复用名字不重复写；
+ * 7. **丢弃零成本**：删胶囊 / 换作用域都只清内存，不发任何删除请求。
  */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
@@ -21,6 +28,7 @@ import { createUploadsStore } from './useUploads'
 import { createWorkspaceStore } from './useWorkspace'
 
 const DIR = '数据准备/生产计划'
+const TMP = '临时空间'
 
 function workspaceResponse(): WorkspaceResponse {
   return {
@@ -42,6 +50,23 @@ function workspaceResponse(): WorkspaceResponse {
           },
         ],
       },
+      // 2026-11-17：粘贴文件的落点（扁平空间，dir 即空间名）
+      {
+        name: TMP,
+        agent_writable: true,
+        upload_extensions: ['.csv', '.png'],
+        dirs: [
+          {
+            dir: TMP,
+            label: TMP,
+            deletable: true,
+            files: [],
+            fields: [],
+            upload_extensions: ['.csv', '.png'],
+            predefined: false,
+          },
+        ],
+      },
     ],
   }
 }
@@ -50,21 +75,76 @@ function file(name: string): File {
   return new File([new Uint8Array(8)], name, { type: 'text/csv' })
 }
 
-async function setup(uploadImpl: ReturnType<typeof vi.fn> = vi.fn()) {
+/** 默认实现：按请求名落盘（模拟"不重名用原名"的服务端） */
+function echoUpload() {
+  return vi
+    .fn()
+    .mockImplementation((_dir: string, _file: File, filename: string) =>
+      Promise.resolve({ dir: TMP, filename, size: 8 }),
+    )
+}
+
+async function setup(
+  uploadImpl: ReturnType<typeof vi.fn> = vi.fn(),
+  options: {
+    referenceCount?: () => number
+    toast?: ToastStore
+    /** 粘贴前已挂在输入区的引用（判"消息内重名"与名额用） */
+    initialReferences?: FileReference[]
+    /** 当前会话（缺省 `null` = 视图态新对话） */
+    thread?: string | null
+    /** 临时空间现存文件名（发送时算重名用） */
+    existing?: string[]
+    /** 引用登记是否成功（缺省恒成功） */
+    accept?: (reference: FileReference) => boolean
+    /** 空间清单（缺省用 `workspaceResponse`） */
+    workspace?: WorkspaceResponse
+    /** 覆盖草稿文本（缺省 = 所有引用都在草稿里，即胶囊可见） */
+    draft?: string
+  } = {},
+) {
+  const toast = options.toast ?? ({ push: vi.fn() } as unknown as ToastStore)
   const uploads = createUploadsStore({
     files: { upload: uploadImpl } as unknown as FilesApi,
     toast: { push: vi.fn() } as unknown as ToastStore,
   })
   const workspace = createWorkspaceStore({
-    files: { workspace: vi.fn().mockResolvedValue(workspaceResponse()) } as unknown as FilesApi,
-    toast: { push: vi.fn() } as unknown as ToastStore,
+    files: {
+      workspace: vi.fn().mockResolvedValue(options.workspace ?? workspaceResponse()),
+    } as unknown as FilesApi,
+    toast,
   })
-  await workspace.load()
+  if (options.workspace === undefined) {
+    await workspace.load()
+  }
 
-  const acceptUpload = vi.fn()
-  const panel = useUploadPanel({ uploads, workspace, acceptUpload })
+  const references = ref<FileReference[]>([...(options.initialReferences ?? [])])
+  const acceptUpload = vi.fn((reference: FileReference) => {
+    const ok = options.accept ? options.accept(reference) : true
+    if (ok) references.value = [...references.value, reference]
+    return ok
+  })
+  const agent = ref<string | null>('生产计划辅助')
+  const thread = ref<string | null>(options.thread ?? null)
+  const panel = useUploadPanel({
+    uploads,
+    workspace,
+    acceptUpload,
+    toast,
+    referenceCount: options.referenceCount ?? (() => references.value.length),
+    listFiles: options.existing
+      ? vi.fn().mockResolvedValue(options.existing.map((filename) => ({ filename })))
+      : undefined,
+    references: () => references.value,
+    agent: () => agent.value,
+    thread: () => thread.value,
+    // 缺省把引用都当成"草稿里看得见"（真实场景里胶囊就在文本里）
+    draft: options.draft === undefined
+      ? () => references.value.map((item) => mentionToken(item)).join(' ')
+      : () => options.draft as string,
+  })
 
-  return { uploads, workspace, acceptUpload, panel, upload: uploadImpl }
+  return { uploads, workspace, acceptUpload, panel, upload: uploadImpl, toast, references, agent, thread }
 }
 
 /** 让挂起的异步（watch / 上传）走完一轮 */
@@ -149,6 +229,7 @@ describe('useUploadPanel —— 成功即回写 @（FR-001 / FR-003 / FR-004）'
     let existsAtAccept: boolean | null = null
     acceptUpload.mockImplementation((reference: FileReference) => {
       existsAtAccept = workspace.exists(reference)
+      return true
     })
 
     panel.onPickFiles({ dir: DIR, files: [file('报告.csv')] as unknown as FileList })
@@ -277,7 +358,7 @@ describe('useUploadPanel —— 回写复用唯一入口（FR-005 / FR-006 / FR-
     return { draft, mention, acceptUpload: composer.onPickFile }
   }
 
-  async function panelWith(acceptUpload: (reference: FileReference) => void, filename: string) {
+  async function panelWith(acceptUpload: (reference: FileReference) => boolean, filename: string) {
     const uploads = createUploadsStore({
       files: {
         upload: vi.fn().mockResolvedValue({ dir: DIR, filename, size: 8 }),
@@ -322,5 +403,376 @@ describe('useUploadPanel —— 回写复用唯一入口（FR-005 / FR-006 / FR-
     panel.onCloseUpload()
 
     expect(draft.value).toBe('帮我分析一下 ')
+  })
+})
+
+/**
+ * 2026-11-17 v1.3：粘贴**不落盘**。
+ *
+ * 顺序是硬要求：
+ * ① 白名单未加载先补 load（空名单会让格式校验失效）；
+ * ② 逐文件取舍：合格的进胶囊、不合格的记原因（不再整批作废）；
+ * ③ 名额有限：超出单条消息引用上限的同样跳过并说明；
+ * ④ 胶囊名就地消解"本条消息内重名"，磁盘重名留到发送。
+ */
+describe('useUploadPanel —— 粘贴只入胶囊，不落盘（v1.3）', () => {
+  it('全部合格 ⇒ 零请求、零上传记录，胶囊挂在临时空间', async () => {
+    const upload = echoUpload()
+    const { panel, uploads, acceptUpload, toast } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv'), file('b.png')])
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(uploads.items.value).toEqual([])
+    expect(panel.uploadOpen.value).toBe(false)
+    expect(acceptUpload.mock.calls.map(([reference]) => reference)).toEqual([
+      { dir: TMP, filename: 'a.csv' },
+      { dir: TMP, filename: 'b.png' },
+    ])
+    expect(toast.push).not.toHaveBeenCalled()
+  })
+
+  it('部分不合格 ⇒ 合格的收下、不合格的跳过并由 toast 说明（不再整批作废）', async () => {
+    const upload = echoUpload()
+    const { panel, acceptUpload, toast } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv'), file('b.exe')])
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(acceptUpload.mock.calls.map(([reference]) => reference.filename)).toEqual(['a.csv'])
+    expect(toast.push).toHaveBeenCalledWith(
+      'info',
+      expect.stringContaining('已附加 1 个文件，1 个未附加'),
+    )
+  })
+
+  it('全部不合格 ⇒ 一个胶囊都不挂，toast 用 error 级', async () => {
+    const { panel, acceptUpload, toast } = await setup(echoUpload())
+
+    await panel.onPasteFiles([file('a.exe')])
+
+    expect(acceptUpload).not.toHaveBeenCalled()
+    expect(toast.push).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining('1 个未附加'),
+    )
+  })
+
+  it('名额不足 ⇒ 只收下装得下的，其余跳过并说明', async () => {
+    const initialReferences: FileReference[] = Array.from({ length: 9 }, (_item, index) => ({
+      dir: TMP,
+      filename: `old-${index}.csv`,
+    }))
+    const { panel, acceptUpload, toast } = await setup(echoUpload(), { initialReferences })
+
+    await panel.onPasteFiles([file('a.csv'), file('b.csv'), file('c.csv')])
+
+    // 只剩 1 个名额：收下 a.csv，b/c 跳过
+    expect(acceptUpload.mock.calls.map(([reference]) => reference.filename)).toEqual(['a.csv'])
+    expect(toast.push).toHaveBeenCalledWith('info', expect.stringContaining('2 个未附加'))
+  })
+
+  it('引用数已达上限 ⇒ 一个都不收，且零请求', async () => {
+    const upload = echoUpload()
+    const full: FileReference[] = Array.from({ length: 10 }, (_item, index) => ({
+      dir: TMP,
+      filename: `old-${index}.csv`,
+    }))
+    const { panel, acceptUpload, toast } = await setup(upload, { initialReferences: full })
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(acceptUpload).not.toHaveBeenCalled()
+    expect(toast.push).toHaveBeenCalledWith('error', expect.stringContaining('上限'))
+  })
+
+  it('同一批内部重名 ⇒ 第二个改成 a(1).csv（两个同名标记会互相牵连）', async () => {
+    const { panel, acceptUpload } = await setup(echoUpload())
+
+    await panel.onPasteFiles([file('a.csv'), file('a.csv')])
+
+    expect(acceptUpload.mock.calls.map(([reference]) => reference.filename)).toEqual([
+      'a.csv',
+      'a(1).csv',
+    ])
+  })
+
+  it('与本条消息已有胶囊重名 ⇒ 粘贴件让位成 a(1).csv（盘上重名仍不查）', async () => {
+    const { panel, acceptUpload, upload } = await setup(echoUpload(), {
+      initialReferences: [{ dir: DIR, filename: 'a.csv' }],
+    })
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(acceptUpload).toHaveBeenCalledWith({ dir: TMP, filename: 'a(1).csv' })
+    // 名字撞的是"消息里已引用的真实文件"，磁盘上有没有同名的根本还没查
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('草稿里看不见的引用不占名（会话残留的幽灵引用）', async () => {
+    // 引用集合里还留着会话 1 的 a.csv，但草稿里没有它的标记 ⇒ 用户根本看不见它
+    const { panel, acceptUpload } = await setup(echoUpload(), {
+      initialReferences: [{ dir: TMP, filename: 'a.csv' }],
+      draft: '帮我看看这个 ',
+    })
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(acceptUpload).toHaveBeenCalledWith({ dir: TMP, filename: 'a.csv' })
+  })
+
+  it('工作空间未加载 ⇒ 先 load 再校验（不能拿空白名单放行）', async () => {
+    const upload = echoUpload()
+    const uploads = createUploadsStore({
+      files: { upload } as unknown as FilesApi,
+      toast: { push: vi.fn() } as unknown as ToastStore,
+    })
+    const loadSpy = vi.fn().mockResolvedValue(workspaceResponse())
+    const workspace = createWorkspaceStore({
+      files: { workspace: loadSpy } as unknown as FilesApi,
+      toast: { push: vi.fn() } as unknown as ToastStore,
+    })
+    const toast = { push: vi.fn() } as unknown as ToastStore
+    const acceptUpload = vi.fn(() => true)
+    const panel = useUploadPanel({ uploads, workspace, acceptUpload, toast })
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(loadSpy).toHaveBeenCalledTimes(1)
+    expect(acceptUpload).toHaveBeenCalledTimes(1)
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('临时空间缺失（空间未就绪）⇒ 提示且不挂胶囊', async () => {
+    const uploads = createUploadsStore({
+      files: { upload: vi.fn() } as unknown as FilesApi,
+      toast: { push: vi.fn() } as unknown as ToastStore,
+    })
+    const workspace = createWorkspaceStore({
+      // 只返回数据准备：没有临时空间
+      files: {
+        workspace: vi.fn().mockResolvedValue({
+          scenario: '生产计划',
+          spaces: workspaceResponse().spaces.slice(0, 1),
+        }),
+      } as unknown as FilesApi,
+      toast: { push: vi.fn() } as unknown as ToastStore,
+    })
+    await workspace.load()
+    const toast = { push: vi.fn() } as unknown as ToastStore
+    const acceptUpload = vi.fn(() => true)
+    const panel = useUploadPanel({ uploads, workspace, acceptUpload, toast })
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(acceptUpload).not.toHaveBeenCalled()
+    expect(toast.push).toHaveBeenCalledWith('error', expect.stringContaining('尚未就绪'))
+  })
+})
+
+/**
+ * 2026-11-17 v1.3：发送那一刻才落盘。
+ *
+ * 三条不变式：
+ * 1. 名字按"临时空间现存 + 本条消息已有胶囊 + 本批内部"预演，**服务端返回名才是权威**；
+ * 2. 有文件没传上去 ⇒ 返回 `null`（调用方中止发送），已落盘的记住真名、重试不重复写；
+ * 3. 删胶囊 / 换作用域只清内存（磁盘上从来没有这些文件，因此零请求、零提示）。
+ */
+describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
+  it('没有待发件 ⇒ 原样返回，零请求', async () => {
+    const upload = echoUpload()
+    const { panel } = await setup(upload, {
+      initialReferences: [{ dir: DIR, filename: 'a.csv' }],
+    })
+
+    const result = await panel.flushPending([{ dir: DIR, filename: 'a.csv' }])
+
+    expect(result).toEqual([{ dir: DIR, filename: 'a.csv' }])
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('待发件 ⇒ 传到临时空间，且附件换成服务端返回名', async () => {
+    const upload = echoUpload()
+    const { panel, references, workspace } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv')])
+    const result = await panel.flushPending(references.value)
+
+    expect(upload).toHaveBeenCalledWith(TMP, expect.any(File), 'a.csv')
+    expect(result).toEqual([{ dir: TMP, filename: 'a.csv' }])
+    // 落盘后立刻登记清单：后续 `exists` 与临时空间列表都要能看见
+    expect(workspace.exists({ dir: TMP, filename: 'a.csv' })).toBe(true)
+  })
+
+  it('与临时空间现存文件重名 ⇒ 自动加 (1)（发送前现取清单）', async () => {
+    const upload = echoUpload()
+    const { panel, references } = await setup(upload, { existing: ['a.csv', 'a(1).csv'] })
+
+    await panel.onPasteFiles([file('a.csv')])
+    const result = await panel.flushPending(references.value)
+
+    expect(upload).toHaveBeenCalledWith(TMP, expect.any(File), 'a(2).csv')
+    expect(result).toEqual([{ dir: TMP, filename: 'a(2).csv' }])
+  })
+
+  it('本条消息里已引用的同名真实文件也占名（两个 @a.csv 分不清）', async () => {
+    const upload = echoUpload()
+    const real: FileReference = { dir: DIR, filename: 'a.csv' }
+    const { panel, references } = await setup(upload, { initialReferences: [real] })
+
+    await panel.onPasteFiles([file('a.csv')])
+    const result = await panel.flushPending(references.value)
+
+    // 粘贴件的胶囊已经是 a(1).csv（粘贴时就地让位），发送时再确认一次不与引用撞名
+    expect(result).toEqual([
+      { dir: DIR, filename: 'a.csv' },
+      { dir: TMP, filename: 'a(1).csv' },
+    ])
+  })
+
+  it('服务端再套一层序号时，界面用服务端的真名（前端只是预演）', async () => {
+    // 模拟竞态：前端预演 a.csv，但落盘瞬间名字被占，后端改成 a(1).csv
+    const upload = vi.fn().mockResolvedValue({ dir: TMP, filename: 'a(1).csv', size: 8 })
+    const { panel, references } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv')])
+    const result = await panel.flushPending(references.value)
+
+    expect(result).toEqual([{ dir: TMP, filename: 'a(1).csv' }])
+  })
+
+  it('有文件传失败 ⇒ 返回 null 并提示，不发消息的那一侧由调用方负责', async () => {
+    const upload = vi
+      .fn()
+      .mockImplementation((_dir: string, _file: File, filename: string) =>
+        filename === 'b.csv'
+          ? Promise.reject({ code: 'NETWORK_ERROR', message: 'x' })
+          : Promise.resolve({ dir: TMP, filename, size: 8 }),
+      )
+    const { panel, references, toast } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv'), file('b.csv')])
+    const result = await panel.flushPending(references.value)
+
+    expect(result).toBeNull()
+    expect(toast.push).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining('1 个文件上传失败，消息未发送'),
+    )
+  })
+
+  it('重试：已落盘的文件复用真名，不会在临时空间留下第二份', async () => {
+    let failB = true
+    const upload = vi
+      .fn()
+      .mockImplementation((_dir: string, _file: File, filename: string) =>
+        filename === 'b.csv' && failB
+          ? Promise.reject({ code: 'NETWORK_ERROR', message: 'x' })
+          : Promise.resolve({ dir: TMP, filename, size: 8 }),
+      )
+    const { panel, references } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv'), file('b.csv')])
+    expect(await panel.flushPending(references.value)).toBeNull()
+
+    failB = false
+    upload.mockClear()
+    const result = await panel.flushPending(references.value)
+
+    // 只补传失败的 b.csv；a.csv 复用上次的真名
+    expect(upload.mock.calls.map(([, , filename]) => filename)).toEqual(['b.csv'])
+    expect(result).toEqual([
+      { dir: TMP, filename: 'a.csv' },
+      { dir: TMP, filename: 'b.csv' },
+    ])
+  })
+
+  it('删除胶囊后不再上传（内存已丢，磁盘本来就没有）', async () => {
+    const upload = echoUpload()
+    const { panel, references } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv')])
+    const stale = [...references.value]
+    references.value = []
+    await flush()
+
+    const result = await panel.flushPending(stale)
+
+    expect(upload).not.toHaveBeenCalled()
+    expect(result).toEqual(stale)
+  })
+
+  it('换数字人 ⇒ 丢弃待发件且不删任何东西', async () => {
+    const upload = echoUpload()
+    const { panel, references, uploads, agent } = await setup(upload, { thread: 'th-1' })
+
+    await panel.onPasteFiles([file('a.csv')])
+    const stale = [...references.value]
+    agent.value = '另一个数字人'
+    await flush()
+
+    expect(await panel.flushPending(stale)).toEqual(stale)
+    expect(upload).not.toHaveBeenCalled()
+    expect(uploads.items.value).toEqual([])
+  })
+
+  it('切到别的会话再回来 ⇒ 待发件还在（按会话分桶，互不串台）', async () => {
+    const upload = echoUpload()
+    const { panel, references, thread } = await setup(upload, { thread: 'th-1' })
+
+    await panel.onPasteFiles([file('a.csv')])
+    const stale = [...references.value]
+
+    thread.value = 'th-2'
+    await flush()
+    // 在另一个会话里发送：不该把 th-1 的文件传上去
+    expect(await panel.flushPending(stale)).toEqual(stale)
+    expect(upload).not.toHaveBeenCalled()
+
+    thread.value = 'th-1'
+    await flush()
+    expect(await panel.flushPending(stale)).toEqual([{ dir: TMP, filename: 'a.csv' }])
+    expect(upload).toHaveBeenCalledTimes(1)
+  })
+
+  it('自动建会话（null → 真 id）⇒ 待发件被接管，仍能落盘', async () => {
+    const upload = echoUpload()
+    const { panel, references, thread } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv')])
+    const stale = [...references.value]
+
+    // 首条消息发送时 `threads.create()` 把 id 从 null 改成真 id
+    thread.value = 'th-new'
+    await flush()
+
+    expect(await panel.flushPending(stale)).toEqual([{ dir: TMP, filename: 'a.csv' }])
+    expect(upload).toHaveBeenCalledTimes(1)
+  })
+
+  it('isPending 只认"临时空间 + 待发表"', async () => {
+    const { panel } = await setup(echoUpload())
+
+    await panel.onPasteFiles([file('a.csv')])
+
+    expect(panel.isPending({ dir: TMP, filename: 'a.csv' })).toBe(true)
+    // 同名但在别的目录：那是磁盘上的真文件，不属于待发
+    expect(panel.isPending({ dir: DIR, filename: 'a.csv' })).toBe(false)
+  })
+
+  it('commitPending：只摘本轮真的发出去的项，未发送的胶囊原样留着', async () => {
+    const upload = echoUpload()
+    const { panel, references } = await setup(upload)
+
+    await panel.onPasteFiles([file('a.csv'), file('b.csv')])
+    // 模拟卡片发送：只带 a.csv
+    const sent = await panel.flushPending([references.value[0]!])
+    expect(sent).toEqual([{ dir: TMP, filename: 'a.csv' }])
+
+    panel.commitPending(sent ?? [])
+
+    expect(panel.isPending({ dir: TMP, filename: 'a.csv' })).toBe(false)
+    expect(panel.isPending({ dir: TMP, filename: 'b.csv' })).toBe(true)
   })
 })

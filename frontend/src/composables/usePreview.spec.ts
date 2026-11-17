@@ -29,6 +29,9 @@ function filesStub(over: Partial<FilesApi> = {}): FilesApi {
     previewUrl: (dir: string, filename: string) =>
       `/api/files/preview?dir=${dir}&filename=${filename}`,
     fetchPreviewText: vi.fn().mockResolvedValue('一车间 120 件'),
+    fetchPreviewWorkbook: vi.fn().mockResolvedValue({
+      sheets: [{ name: '工作表1', rows: [['物料']], numericCols: [], merges: [], truncated: false }],
+    }),
     probePreview: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn(),
     workspace: vi.fn(),
@@ -134,8 +137,14 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
     })
   })
 
-  it('.xlsx → 表格文本内联（2026-11-16：服务端转 CSV，按扩展名分派而非响应头）', async () => {
-    const files = filesStub()
+  it('.xlsx → 结构化工作簿内联（2026-11-17：服务端返回 JSON，前端零解析）', async () => {
+    const files = filesStub({
+      fetchPreviewWorkbook: vi.fn().mockResolvedValue({
+        sheets: [
+          { name: '物料', rows: [['物料', '数量'], ['A', '10']], numericCols: [1], merges: [], truncated: false },
+        ],
+      }),
+    })
     const store = createPreviewStore({ files })
 
     await store.openView({
@@ -151,8 +160,11 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
       dir: '数据准备/生产计划',
       filename: '9月计划.xlsx',
     })
-    expect(files.fetchPreviewText).toHaveBeenCalledWith('数据准备/生产计划', '9月计划.xlsx')
+    // 走结构化通路，不再拉 CSV 文本
+    expect(files.fetchPreviewText).not.toHaveBeenCalled()
+    expect(files.fetchPreviewWorkbook).toHaveBeenCalledWith('数据准备/生产计划', '9月计划.xlsx')
     expect(store.content.value?.renderMode).toBe('sheet')
+    expect(store.content.value?.workbook?.sheets[0]?.name).toBe('物料')
   })
 
   it('.pdf → 先探预览可用性（后端结构化错误）再进 iframe', async () => {
@@ -393,12 +405,13 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
     expect(store.maximizable.value).toBe(false)
   })
 
-  it('⑤b 表格文本（`.xlsx`）→ 内联可见但**不可**放大（与纯文本同档）', async () => {
+  it('⑤b 表格（`.xlsx`）→ **可**放大（2026-11-17：列多时 1/3 面板读不全，放大是真收益）', async () => {
     const store = createPreviewStore({ files: filesStub() })
     await store.openFile({ dir: '数据准备', filename: '9月计划.xlsx' })
 
     expect(store.content.value?.renderMode).toBe('sheet')
-    expect(store.maximizable.value).toBe(false)
+    expect(store.maximizable.value).toBe(true)
+    expect(store.maximizeToggleVisible.value).toBe(true)
   })
 
   it('⑥ 错误态（读取失败）→ **不可**放大', async () => {

@@ -39,16 +39,11 @@
   "scenario": {
     "scenario": "生鲜订单解析",
     "data_prep_dirs": [
-      "算法规则",
       "生鲜sku表",
       "生鲜订单图片"
     ],
     "data_prep_fields": {},
     "data_prep_uploads": {
-      "算法规则": [
-        ".txt",
-        ".json"
-      ],
       "生鲜订单图片": [
         ".jpg",
         ".png",
@@ -56,5 +51,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-16T12:29:10.829Z"
+  "updated_at": "2026-11-17T07:50:25.308Z"
 }

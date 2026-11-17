@@ -71,7 +71,12 @@ export interface ScenarioField {
 export interface Scenario {
   /** 场景名（展示用） */
   name: string;
-  /** 数据准备空间的二级子目录清单 */
+  /**
+   * 数据准备空间的二级子目录清单（**可见范围的唯一权威**）。
+   *
+   * 空数组是合法状态（2026-11-17）：平台允许把预定义目录一并屏蔽，
+   * 此时「数据准备」空间存在但没有任何可见子目录。
+   */
   dataPrepDirs: string[];
   /**
    * 目录 → 字段约束（`scenario.json` 的 `data_prep_fields`）。
@@ -97,6 +102,8 @@ const DIR_NAME_PATTERN = /^[^/\\..][^/\\]{0,63}$/;
  * 读取**该数字人**的场景配置（mtime 缓存 + 惰性建目录）。
  *
  * - 文件缺失/损坏/字段非法 → ScenarioNotConfiguredError（接口层映射 503）
+ * - **清单为空合法**（2026-11-17）：平台允许屏蔽全部二级目录，此时只是没有可见子目录，
+ *   不视为"场景未配置"
  * - 成功时确保数据准备下的子目录存在（惰性创建，支持运行期改配置即生效）
  * - 单个非法目录名跳过并计入 `skipped`（不阻断其余目录）
  * - 缓存键含数字人名：同一用户的不同数字人各自缓存，互不串味
@@ -147,9 +154,8 @@ export function loadScenario(
       }
       if (!dirs.includes(item)) dirs.push(item);
     }
-    if (dirs.length === 0) {
-      throw new Error('data_prep_dirs 无有效目录');
-    }
+    // 空清单是**合法状态**（2026-11-17）：管理员把全部二级目录都屏蔽了。
+    // 这不等于"场景未配置"——场景名仍在，只是「数据准备」空间没有可见子目录。
     scenario = {
       name: obj.scenario.trim(),
       dataPrepDirs: dirs,

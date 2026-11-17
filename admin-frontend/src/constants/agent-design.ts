@@ -43,7 +43,8 @@ export type AgentDesignTab = (typeof AGENT_DESIGN_TABS)[number]['id']
  * 「数据准备」预定义二级目录（平台硬编码）。
  *
  * 与 `admin-backend` `domain/config-center/scenario.ts` 的同名常量 MUST 同步。
- * 场景清单必须完整包含这组目录；预定义目录不强制字段约束（0 条 = 无约束）。
+ * 2026-11-17 起**可被屏蔽**：屏蔽 = 该目录不在场景清单里（清单即可见范围），
+ * 编辑器据此渲染「已屏蔽 + 启用」行；预定义目录不强制字段约束（0 条 = 无约束）。
  */
 export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const
 

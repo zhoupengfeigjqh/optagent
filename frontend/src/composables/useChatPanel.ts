@@ -174,8 +174,11 @@ export function useChatPanel() {
       return false
     }
 
-    // 发送前校验引用仍存在，不存在则提示且不发送（FR-018 / V-15）
-    const missing = payload.attachments.filter((reference) => !workspace.exists(reference))
+    // 发送前校验引用仍存在，不存在则提示且不发送（FR-018 / V-15）。
+    // 粘贴待发件豁免：它们本来就还没落盘，紧接着会被 `flushPending` 写进临时空间。
+    const missing = payload.attachments.filter(
+      (reference) => !workspace.exists(reference) && !uploadPanel.isPending(reference),
+    )
     if (missing.length > 0) {
       toast.push('error', `引用的文件已不存在：${missing.map((item) => item.filename).join('、')}`)
       return false
@@ -189,6 +192,21 @@ export function useChatPanel() {
       payload.skipIntentFocus !== true
     if (manual && (await termGate.review({ content, payload, options }))) return false
 
+    // MCP 就绪门（2026-10-18）：仍有灰色 → 先唤醒并等出连接结果，再提交。
+    // 放在 `chat.send` 之前、草稿清空之前：等待期间用户仍能看到自己的输入。
+    await mcpReady.waitMcpReady()
+
+    /**
+     * 023：粘贴件**此刻才落盘**（临时空间，重名自动加序号）。放在所有拦阻性检查之后
+     * （正文非空 / 引用有效 / 018 术语替换确认 / MCP 就绪）：中途取消，磁盘上一个字节都不留。
+     * 失败即整条中止，草稿与胶囊全留，再点发送整批重试（已落盘的复用名字）。
+     *
+     * **必须在 `threads.create()` 之前**（v1.4）：待发表按会话分桶，建会话把 id 由 `null`
+     * 变成真 id 后就不在同一个桶里了——那正是"首条消息文件没上传、却带着同名旧文件发出去"。
+     */
+    const attachments = await uploadPanel.flushPending(payload.attachments)
+    if (attachments === null) return false
+
     if (!threads.activeId.value) {
       await threads.create()
       if (!threads.activeId.value) {
@@ -196,10 +214,6 @@ export function useChatPanel() {
         return false
       }
     }
-
-    // MCP 就绪门（2026-10-18）：仍有灰色 → 先唤醒并等出连接结果，再提交。
-    // 放在 `chat.send` 之前、草稿清空之前：等待期间用户仍能看到自己的输入。
-    await mcpReady.waitMcpReady()
 
     const previous = payload.content
     chat.draft.value = ''
@@ -216,7 +230,7 @@ export function useChatPanel() {
     nextSteps.reset()
     const run = chat.send({
       content,
-      attachments: payload.attachments,
+      attachments,
       ...(payload.guidance ? { guidance: payload.guidance } : {}),
       ...(payload.toolTips && payload.toolTips.length > 0 ? { toolTips: payload.toolTips } : {}),
       ...(payload.skipIntentFocus === true ? { skipIntentFocus: true } : {}),
@@ -235,6 +249,8 @@ export function useChatPanel() {
       chat.draft.value = previous
       return false
     }
+    // 已发送成功：摘掉这些待发项（失败时不清，重试要复用已落盘的名字）
+    uploadPanel.commitPending(attachments)
     mention.reset()
     skill.reset()
     return true
@@ -409,8 +425,20 @@ export function useChatPanel() {
     uploads,
     workspace,
     acceptUpload: mentionComposer.onPickFile,
+    toast,
+    // 粘贴是"一批"进来的：先判引用上限，再决定要不要传（避免传了却只引用得了一半）
+    referenceCount: () => mention.references.value.length,
+    // 重名检查取最新清单：workspace 缓存可能是几十秒前的（agent 也会往临时空间写文件）
+    listFiles: (dir) => session.files.list(dir),
+    // 待发件按会话分桶（023 v1.4）：引用消失（删胶囊）或换数字人就丢弃；同一个 `null` 会话
+    // 在自动建会话后被接管，不再被误判成"换了会话"而清空（那会导致文件没上传却照发消息）
+    references: () => mention.references.value,
+    agent: () => agents.currentAgent.value?.agent_name ?? null,
+    thread: () => threads.activeId.value,
+    draft: () => chat.draft.value,
   })
-  const { uploadOpen, onToggleUpload, onCloseUpload, onPickFiles, onRetryUpload } = uploadPanel
+  const { uploadOpen, onToggleUpload, onCloseUpload, onPickFiles, onPasteFiles, onRetryUpload } =
+    uploadPanel
 
   return {
     chat,
@@ -454,6 +482,7 @@ export function useChatPanel() {
     onToggleUpload,
     onCloseUpload,
     onPickFiles,
+    onPasteFiles,
     onRetryUpload,
     onOpenLink,
     onOpenFile,

@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>档 A 演示 — xlsx 预览从「文本流」到「表格」</title>
+    <style>
+      /* 纯静态演示，不依赖任何构建产物；配色对齐 ant-design-vue 默认主题 */
+      :root {
+        --primary: #1677ff;
+        --primary-weak: #e6f0ff;
+        --border: #e5e7eb;
+        --border-strong: #d9d9d9;
+        --text: #1f2329;
+        --text-2: #8a919f;
+        --bg: #f5f6f8;
+        --bg-panel: #ffffff;
+        --bg-thead: #fafafa;
+        --bg-zebra: #fafbfc;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      /* ---------- 顶部说明 ---------- */
+      .intro {
+        max-width: 1120px;
+        margin: 0 auto 16px;
+      }
+
+      .intro h1 {
+        margin: 0 0 4px;
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      .intro p {
+        margin: 0;
+        color: var(--text-2);
+      }
+
+      /* ---------- 两栏对比 ---------- */
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+        max-width: 1120px;
+        margin: 0 auto;
+        align-items: start;
+      }
+
+      @media (max-width: 900px) {
+        .compare {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+
+      .card__head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .tag--now {
+        color: #8c8c8c;
+        background: #f0f0f0;
+      }
+
+      .tag--next {
+        color: var(--primary);
+        background: var(--primary-weak);
+      }
+
+      .card__title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .card__actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .btn {
+        height: 26px;
+        padding: 0 10px;
+        color: var(--text);
+        background: #fff;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          color 0.15s;
+      }
+
+      .btn:hover {
+        color: var(--primary);
+        border-color: var(--primary);
+      }
+
+      .btn:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 1px;
+      }
+
+      /* ---------- 左：现状 <pre> ---------- */
+      .pre {
+        height: 400px;
+        margin: 0;
+        padding: 12px 14px;
+        overflow: auto;
+        color: #4b5563;
+        background: #fcfcfd;
+        font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+        font-size: 12px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      /* ---------- 右：档 A ---------- */
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+      }
+
+      .tab {
+        position: relative;
+        height: 34px;
+        padding: 0 12px;
+        color: var(--text-2);
+        background: none;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        font-size: 13px;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .tab:hover {
+        color: var(--text);
+      }
+
+      .tab:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: -2px;
+      }
+
+      .tab[aria-selected='true'] {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        font-weight: 500;
+      }
+
+      .sheet {
+        height: 400px;
+        overflow: auto;
+      }
+
+      table {
+        border-collapse: separate;
+        border-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      th,
+      td {
+        padding: 0 12px;
+        height: 34px;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        color: var(--text-2);
+        background: var(--bg-thead);
+        font-weight: 500;
+      }
+
+      th:first-child,
+      td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background: var(--bg-panel);
+      }
+
+      th:first-child {
+        z-index: 3;
+        background: var(--bg-thead);
+      }
+
+      tbody tr:nth-child(even) td {
+        background: var(--bg-zebra);
+      }
+
+      tbody tr:hover td {
+        background: var(--primary-weak);
+      }
+
+      td.num {
+        text-align: right;
+      }
+
+      td.state {
+        color: #389e0d;
+      }
+
+      td.state--wait {
+        color: #d46b08;
+      }
+
+      .sheet__hint {
+        padding: 10px 12px;
+        color: var(--text-2);
+        border-top: 1px solid var(--border);
+        font-size: 12px;
+      }
+
+      .sheet__hint kbd {
+        padding: 1px 5px;
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
+        background: #fafafa;
+        font-family: inherit;
+        font-size: 11px;
+      }
+
+      /* ---------- 放大态（档 A 要放开 sheet 的 maximizable） ---------- */
+      .is-max {
+        position: fixed;
+        inset: 20px;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
+      }
+
+      .is-max .sheet {
+        flex: 1;
+        height: auto;
+      }
+
+      .scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 99;
+        background: rgb(0 0 0 / 32%);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="intro">
+      <h1>档 A：只解决「看得清」，不解决「改得了」</h1>
+      <p>同一份 订单数据.xlsx，三种 sheet。左侧是当前实现，右侧是档 A 目标形态。</p>
+    </div>
+
+    <div class="compare">
+      <!-- ============ 左：现状 ============ -->
+      <section class="card">
+        <div class="card__head">
+          <span class="tag tag--now">现状</span>
+          <span class="card__title">订单数据.xlsx</span>
+        </div>
+        <pre class="pre">### Sheet: 订单明细
+订单号,客户,物料,数量,金额,状态
+SO-20261101,杭州远洋贸易,冷轧板 SPCC 1.0×1250,120,144000.00,已发货
+SO-20261102,宁波恒信机械,热轧板 Q235B 3.0×1500,80,67200.00,已发货
+SO-20261103,苏州立成钢构,镀锌板 DX51D 0.8×1000,200,186000.00,待发货
+SO-20261104,无锡华工装备,冷轧板 SPCC 1.2×1250,60,80400.00,已发货
+SO-20261105,常州金源制造,热轧板 Q235B 5.0×1800,45,58500.00,备料中
+SO-20261106,南京中远重工,镀锌板 DX51D 1.0×1250,150,142500.00,待发货
+SO-20261107,杭州远洋贸易,冷轧板 SPCC 1.0×1250,90,108000.00,已发货
+SO-20261108,上海海隆机械,热轧板 Q235B 3.0×1500,110,92400.00,已发货
+SO-20261109,南通盛达钢构,镀锌板 DX51D 0.8×1000,180,167400.00,备料中
+SO-20261110,嘉兴万向精工,冷轧板 SPCC 1.2×1250,70,93800.00,待发货
+
+### Sheet: 库存
+物料,规格,库存量,安全库存,库位
+冷轧板 SPCC,1.0×1250,860,300,A-01-03
+热轧板 Q235B,3.0×1500,1240,400,B-02-01
+镀锌板 DX51D,0.8×1000,510,250,C-01-02
+冷轧板 SPCC,1.2×1250,720,300,A-01-04
+热轧板 Q235B,5.0×1800,380,150,B-03-02
+镀锌板 DX51D,1.0×1250,640,250,C-02-01
+
+### Sheet: 汇总
+区域,客户数,订单数,金额
+华东,5,10,1139700.00</pre>
+        <div class="sheet__hint">
+          三个 sheet 挤在一个滚动区里，没有表头、没有列宽、看不出哪列是数字。
+        </div>
+      </section>
+
+      <!-- ============ 右：档 A ============ -->
+      <section class="card" id="after">
+        <div class="card__head">
+          <span class="tag tag--next">档 A</span>
+          <span class="card__title">订单数据.xlsx</span>
+          <div class="card__actions">
+            <button
+              class="btn"
+              type="button"
+              id="maxBtn"
+              aria-pressed="false"
+              aria-controls="after"
+            >
+              放大
+            </button>
+          </div>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="工作表">
+          <button
+            class="tab"
+            type="button"
+            role="tab"
+            id="tab-orders"
+            aria-controls="panel-orders"
+            aria-selected="true"
+          >
+            订单明细
+          </button>
+          <button
+            class="tab"
+            type="button"
+            role="tab"
+            id="tab-stock"
+            aria-controls="panel-stock"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            库存
+          </button>
+          <button
+            class="tab"
+            type="button"
+            role="tab"
+            id="tab-sum"
+            aria-controls="panel-sum"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            汇总
+          </button>
+        </div>
+
+        <!-- sheet 1 -->
+        <div class="sheet" id="panel-orders" role="tabpanel" aria-labelledby="tab-orders">
+          <table>
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>客户</th>
+                <th>物料</th>
+                <th>数量</th>
+                <th>金额</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>SO-20261101</td>
+                <td>杭州远洋贸易</td>
+                <td>冷轧板 SPCC 1.0×1250</td>
+                <td class="num">120</td>
+                <td class="num">144,000.00</td>
+                <td class="state">已发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261102</td>
+                <td>宁波恒信机械</td>
+                <td>热轧板 Q235B 3.0×1500</td>
+                <td class="num">80</td>
+                <td class="num">67,200.00</td>
+                <td class="state">已发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261103</td>
+                <td>苏州立成钢构</td>
+                <td>镀锌板 DX51D 0.8×1000</td>
+                <td class="num">200</td>
+                <td class="num">186,000.00</td>
+                <td class="state state--wait">待发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261104</td>
+                <td>无锡华工装备</td>
+                <td>冷轧板 SPCC 1.2×1250</td>
+                <td class="num">60</td>
+                <td class="num">80,400.00</td>
+                <td class="state">已发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261105</td>
+                <td>常州金源制造</td>
+                <td>热轧板 Q235B 5.0×1800</td>
+                <td class="num">45</td>
+                <td class="num">58,500.00</td>
+                <td class="state state--wait">备料中</td>
+              </tr>
+              <tr>
+                <td>SO-20261106</td>
+                <td>南京中远重工</td>
+                <td>镀锌板 DX51D 1.0×1250</td>
+                <td class="num">150</td>
+                <td class="num">142,500.00</td>
+                <td class="state state--wait">待发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261107</td>
+                <td>杭州远洋贸易</td>
+                <td>冷轧板 SPCC 1.0×1250</td>
+                <td class="num">90</td>
+                <td class="num">108,000.00</td>
+                <td class="state">已发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261108</td>
+                <td>上海海隆机械</td>
+                <td>热轧板 Q235B 3.0×1500</td>
+                <td class="num">110</td>
+                <td class="num">92,400.00</td>
+                <td class="state">已发货</td>
+              </tr>
+              <tr>
+                <td>SO-20261109</td>
+                <td>南通盛达钢构</td>
+                <td>镀锌板 DX51D 0.8×1000</td>
+                <td class="num">180</td>
+                <td class="num">167,400.00</td>
+                <td class="state state--wait">备料中</td>
+              </tr>
+              <tr>
+                <td>SO-20261110</td>
+                <td>嘉兴万向精工</td>
+                <td>冷轧板 SPCC 1.2×1250</td>
+                <td class="num">70</td>
+                <td class="num">93,800.00</td>
+                <td class="state state--wait">待发货</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- sheet 2 -->
+        <div class="sheet" id="panel-stock" role="tabpanel" aria-labelledby="tab-stock" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>物料</th>
+                <th>规格</th>
+                <th>库存量</th>
+                <th>安全库存</th>
+                <th>库位</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>冷轧板 SPCC</td>
+                <td>1.0×1250</td>
+                <td class="num">860</td>
+                <td class="num">300</td>
+                <td>A-01-03</td>
+              </tr>
+              <tr>
+                <td>热轧板 Q235B</td>
+                <td>3.0×1500</td>
+                <td class="num">1,240</td>
+                <td class="num">400</td>
+                <td>B-02-01</td>
+              </tr>
+              <tr>
+                <td>镀锌板 DX51D</td>
+                <td>0.8×1000</td>
+                <td class="num">510</td>
+                <td class="num">250</td>
+                <td>C-01-02</td>
+              </tr>
+              <tr>
+                <td>冷轧板 SPCC</td>
+                <td>1.2×1250</td>
+                <td class="num">720</td>
+                <td class="num">300</td>
+                <td>A-01-04</td>
+              </tr>
+              <tr>
+                <td>热轧板 Q235B</td>
+                <td>5.0×1800</td>
+                <td class="num">380</td>
+                <td class="num">150</td>
+                <td>B-03-02</td>
+              </tr>
+              <tr>
+                <td>镀锌板 DX51D</td>
+                <td>1.0×1250</td>
+                <td class="num">640</td>
+                <td class="num">250</td>
+                <td>C-02-01</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- sheet 3：合并单元格 -->
+        <div class="sheet" id="panel-sum" role="tabpanel" aria-labelledby="tab-sum" hidden>
+          <table>
+            <thead>
+              <tr>
+                <th>区域</th>
+                <th>客户</th>
+                <th>客户数</th>
+                <th>订单数</th>
+                <th>金额</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td rowspan="3">华东</td>
+                <td>杭州远洋贸易</td>
+                <td class="num">1</td>
+                <td class="num">2</td>
+                <td class="num">252,000.00</td>
+              </tr>
+              <tr>
+                <td>宁波恒信机械</td>
+                <td class="num">1</td>
+                <td class="num">1</td>
+                <td class="num">67,200.00</td>
+              </tr>
+              <tr>
+                <td>苏州立成钢构</td>
+                <td class="num">1</td>
+                <td class="num">2</td>
+                <td class="num">353,400.00</td>
+              </tr>
+              <tr>
+                <td rowspan="2">苏南</td>
+                <td>无锡华工装备</td>
+                <td class="num">1</td>
+                <td class="num">1</td>
+                <td class="num">80,400.00</td>
+              </tr>
+              <tr>
+                <td>常州金源制造</td>
+                <td class="num">1</td>
+                <td class="num">1</td>
+                <td class="num">58,500.00</td>
+              </tr>
+              <tr>
+                <td colspan="2">合计</td>
+                <td class="num">5</td>
+                <td class="num">7</td>
+                <td class="num">811,500.00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sheet__hint">
+          表头吸顶 / 首列吸顶 / 数字右对齐 / 斑马纹 — 纯 CSS，
+          <kbd>Esc</kbd> 退出放大。
+        </div>
+      </section>
+    </div>
+
+    <div class="scrim" id="scrim" hidden></div>
+
+    <script>
+      // ---- Tab 切换（键盘左右方向键可用，遵循 tablist 语义）----
+      const tabs = Array.from(document.querySelectorAll('.tab'))
+      const panels = Array.from(document.querySelectorAll('.sheet'))
+
+      function activate(index) {
+        tabs.forEach((tab, i) => {
+          const on = i === index
+          tab.setAttribute('aria-selected', String(on))
+          tab.tabIndex = on ? 0 : -1
+          panels[i].hidden = !on
+        })
+      }
+
+      tabs.forEach((tab, i) => {
+        tab.addEventListener('click', () => activate(i))
+        tab.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+          event.preventDefault()
+          const next = (i + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+          activate(next)
+          tabs[next].focus()
+        })
+      })
+
+      // ---- 放大态（对应 usePreview 里把 sheet 纳入 maximizable）----
+      const card = document.getElementById('after')
+      const btn = document.getElementById('maxBtn')
+      const scrim = document.getElementById('scrim')
+
+      function setMax(on) {
+        card.classList.toggle('is-max', on)
+        scrim.hidden = !on
+        btn.textContent = on ? '缩小' : '放大'
+        btn.setAttribute('aria-pressed', String(on))
+      }
+
+      btn.addEventListener('click', () => setMax(!card.classList.contains('is-max')))
+      scrim.addEventListener('click', () => setMax(false))
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && card.classList.contains('is-max')) setMax(false)
+      })
+    </script>
+  </body>
+</html>

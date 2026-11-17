@@ -14,13 +14,15 @@
  * 按宪章「治理 § 适用范围与不追溯」，不为存量模块发起覆盖率补齐专项。
  */
 import { describe, expect, it, vi } from 'vitest'
+import { nextTick, ref } from 'vue'
 
 import type { FilesApi } from '../api/files'
+import type { FileReference } from '../api/types'
 import type { ToastStore } from './useToast'
 import { createWorkspaceStore } from './useWorkspace'
 import { createFileMentionStore } from './useFileMention'
 
-function makeStore() {
+function makeStore(thread?: () => string | null) {
   const files = {
     workspace: vi.fn().mockResolvedValue({
       scenario: 's1',
@@ -47,8 +49,66 @@ function makeStore() {
     files: files as unknown as FilesApi,
     toast: { push: vi.fn() } as unknown as ToastStore,
   })
-  return createFileMentionStore({ workspace })
+  return createFileMentionStore(thread === undefined ? { workspace } : { workspace, thread })
 }
+
+/**
+ * 引用按会话分桶（023 v1.4）：修的是"会话 1 粘了文件没发、切到会话 2 再粘同名文件会多出
+ * `(1)`，且那个看不见的引用还会跟着下一条消息发出去"。
+ */
+describe('useFileMention —— 引用按会话分桶', () => {
+  const plan: FileReference = { dir: '数据准备/生产计划', filename: 'plan.csv' }
+
+  it('切走存、切回取', async () => {
+    const thread = ref<string | null>('th-1')
+    const mention = makeStore(() => thread.value)
+    mention.pickFile(plan)
+    expect(mention.references.value).toEqual([plan])
+
+    thread.value = 'th-2'
+    await nextTick()
+    expect(mention.references.value).toEqual([])
+
+    thread.value = 'th-1'
+    await nextTick()
+    expect(mention.references.value).toEqual([plan])
+  })
+
+  it('自动建会话（null → 真 id）是接管，不是清空', async () => {
+    const thread = ref<string | null>(null)
+    const mention = makeStore(() => thread.value)
+    mention.pickFile(plan)
+
+    thread.value = 'th-new'
+    await nextTick()
+
+    expect(mention.references.value).toEqual([plan])
+  })
+
+  it('点「新建对话」（→ null）⇒ 视图态不带任何引用', async () => {
+    const thread = ref<string | null>('th-1')
+    const mention = makeStore(() => thread.value)
+    mention.pickFile(plan)
+
+    thread.value = null
+    await nextTick()
+
+    expect(mention.references.value).toEqual([])
+  })
+
+  it('不同会话互不影响：会话 2 里 pick 同名文件仍按原名（不再凭空出现 (1)）', async () => {
+    const thread = ref<string | null>('th-1')
+    const mention = makeStore(() => thread.value)
+    mention.pickFile(plan)
+
+    thread.value = 'th-2'
+    await nextTick()
+
+    expect(mention.references.value).toEqual([])
+    expect(mention.pickFile(plan)).toBe(true)
+    expect(mention.references.value).toEqual([plan])
+  })
+})
 
 describe('useFileMention —— 光标记录（浮层定位的输入）', () => {
   it('触发时记录本次光标位置（面板据此紧贴 `@` 右侧）', () => {

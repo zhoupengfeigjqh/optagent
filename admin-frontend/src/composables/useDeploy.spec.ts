@@ -104,6 +104,20 @@ describe('useDeploy', () => {
     expect(deployApi).toHaveBeenCalledWith(['admin'], 7)
   })
 
+  it('2026-11-17：部署前总是取最新 revision（别处改过配置不再被陈旧版本卡住）', async () => {
+    // 先加载到旧版本 5
+    fetchManifest.mockResolvedValueOnce({ items: [], total: 0, revision: 5 })
+    const d = useDeploy()
+    await d.loadRevision()
+    // 期间别处改了配置：清单端点现在返回 6
+    fetchManifest.mockResolvedValue({ items: [], total: 0, revision: 6 })
+    deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h' })
+
+    expect(await d.deploy(['admin'])).toBe(true)
+    // 部署用的是最新 6，而非本页缓存的 5
+    expect(deployApi).toHaveBeenCalledWith(['admin'], 6)
+  })
+
   it('deploy 失败：把 details.errors 一次列全（SC-020）', async () => {
     deployApi.mockRejectedValue({
       code: 'ADM_DEPLOY_VALIDATION_FAILED',

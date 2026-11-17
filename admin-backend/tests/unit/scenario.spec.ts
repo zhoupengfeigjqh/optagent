@@ -57,12 +57,13 @@ describe('normalizeScenario —— 场景名与目录清单', () => {
     }
   });
 
-  it('异常：缺少预定义二级目录（清单必须完整包含预定义目录）', () => {
-    expectCode(() => normalizeScenario({ scenario: 'x', data_prep_dirs: [] }), ERROR_CODES.VALIDATION_FAILED);
-    expectCode(
-      () => normalizeScenario({ scenario: 'x', data_prep_dirs: ['生产计划'] }),
-      ERROR_CODES.VALIDATION_FAILED,
-    );
+  it('正向：预定义目录可被屏蔽（清单里没有它不再是错误，2026-11-17）', () => {
+    // 只屏蔽预定义目录：清单只剩自定义目录
+    expect(normalizeScenario({ scenario: 'x', data_prep_dirs: ['生产计划'] }).data_prep_dirs).toEqual([
+      '生产计划',
+    ]);
+    // 全部屏蔽：空清单合法（数据准备空间无可用于目录）
+    expect(normalizeScenario({ scenario: 'x', data_prep_dirs: [] }).data_prep_dirs).toEqual([]);
   });
 });
 
@@ -192,10 +193,9 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
     expect(scenarioFieldIssues(null)).toEqual([]);
   });
 
-  it('异常：缺少预定义二级目录时列出缺失项（手工改过的文档兜底）', () => {
-    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['生产计划'] })).toEqual([
-      '缺少预定义二级目录：算法规则',
-    ]);
+  it('预定义目录缺失不再报问题（屏蔽是合法状态，2026-11-17）', () => {
+    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['生产计划'] })).toEqual([]);
+    expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: [] })).toEqual([]);
     // 预定义目录本身不强制字段约束：存在即无问题
     expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['算法规则'] })).toEqual([]);
   });

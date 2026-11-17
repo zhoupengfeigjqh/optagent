@@ -178,17 +178,18 @@ describe('`.md` 内联预览（2026-11-16）', () => {
     expect(String(res.headers['content-disposition'])).toContain('attachment');
   });
 
-  it('`.xlsx`（2026-11-16）：服务端转 CSV 文本内联，多 sheet 带 `### Sheet:` 分段', async () => {
+  it('`.xlsx`（2026-11-17）：返回结构化 JSON（多 sheet + 数字列），前端零解析', async () => {
     mkdirSync(tmpDir(), { recursive: true });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
         ['物料', '数量'],
-        ['A', '10'],
+        ['A', 10],
       ]),
       '物料',
     );
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['区域'], ['华东']]), '汇总');
     writeFileSync(
       path.join(tmpDir(), '汇总.xlsx'),
       XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
@@ -197,13 +198,21 @@ describe('`.md` 内联预览（2026-11-16）', () => {
     const res = await preview('临时空间', '汇总.xlsx');
 
     expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(res.headers['content-type']).toBe('application/json; charset=utf-8');
     expect(String(res.headers['content-disposition'])).toContain('inline');
-    expect(res.body).toContain('### Sheet: 物料');
-    expect(res.body).toContain('物料,数量');
+
+    const body = res.json() as {
+      sheets: Array<{ name: string; rows: string[][]; numericCols: number[] }>;
+    };
+    expect(body.sheets.map((sheet) => sheet.name)).toEqual(['物料', '汇总']);
+    expect(body.sheets[0]?.rows).toEqual([
+      ['物料', '数量'],
+      ['A', '10'],
+    ]);
+    expect(body.sheets[0]?.numericCols).toEqual([1]);
   });
 
-  it('`.xls`（BIFF 容器）仍回退附件下载（只有 `.xlsx` 转文本）', async () => {
+  it('`.xls`（BIFF 容器）仍回退附件下载（只有 `.xlsx` 结构化内联）', async () => {
     mkdirSync(tmpDir(), { recursive: true });
     // 内容不要求是真 BIFF：本用例只验"扩展名不进转换分支、走附件"
     writeFileSync(path.join(tmpDir(), '旧表.xls'), Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));

@@ -203,7 +203,7 @@ describe('validateAgentInput', () => {
     }
   });
 
-  it('边界：清单仅含预定义目录（合法）；缺预定义目录即拒', () => {
+  it('边界：清单仅含预定义目录合法（屏蔽与否由清单表达，见 scenario.spec）', () => {
     expect(() =>
       validateAgentInput(
         { ...validRaw, scenario: { scenario: 'x', data_prep_dirs: ['算法规则'] } },

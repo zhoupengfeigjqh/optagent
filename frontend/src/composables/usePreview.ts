@@ -11,8 +11,8 @@
  * - **同源地址**：先 `probeRenderable` 预检响应头——可内联 → 面板 iframe；
  *   需下载 → 面板给下载入口；预检失败 → 收起面板并降级外部跳转
  * - **本地文件**（空间目录点击 / 消息里的 `filePath` 入口）：打开面板并按**扩展名**分派
- *   （文本 `<pre>` / PDF / 图片 / HTML 沙箱 iframe / 下载引导，V-11）——同一份文件从不同入口进来，
- *   判据与渲染口径 MUST 一致
+ *   （文本 `<pre>` / 表格 / PDF / 图片 / HTML 沙箱 iframe / 下载引导，V-11）——同一份文件
+ *   从不同入口进来，判据与渲染口径 MUST 一致
  *
  * **放大态**（2026-10-16，`specs/011-preview-maximize`）：内容"平铺整个视口"的瞬态状态。
  * 它是**呈现层**的状态，不改变 `target` / `content`、不发请求、不落盘（FR-006 / FR-007）。
@@ -23,7 +23,7 @@
 import { computed, ref, type Ref } from 'vue'
 
 import type { FilesApi } from '../api/files'
-import type { ErrorInfo, FileReference } from '../api/types'
+import type { ErrorInfo, FileReference, PreviewWorkbook } from '../api/types'
 import { resolvePreviewKind } from '../utils/file-kind'
 import { toErrorInfo } from '../utils/error-message'
 import { splitProducedPath } from '../utils/produced-display'
@@ -49,12 +49,19 @@ export type PreviewTarget =
 /** 预览内容（加载结果）。 */
 export interface PreviewContent {
   /**
-   * `sheet` = 表格文本（`.xlsx`，服务端已转 CSV）；与 `text` 的区别只在展示样式
-   * （等宽表体 vs 纯文本），数据通路完全一致（同走 `fetchPreviewText`）。
+   * `sheet` = 结构化工作簿（`.xlsx`，2026-11-17 起服务端返回 JSON）；
+   * 它与 `text` 走**不同**的通路：`sheet` 用 `fetchPreviewWorkbook`，`text` 用 `fetchPreviewText`。
    */
   renderMode: 'text' | 'sheet' | 'pdf' | 'image' | 'html' | 'download' | 'error'
-  /** 文本类内容（`.txt` / `.csv` / `.json` / `.md` / `.xlsx` 转换后） */
+  /** 文本类内容（`.txt` / `.csv` / `.json` / `.md`）；`sheet` 时为 `null` */
   text: string | null
+  /**
+   * 表格内容（仅 `renderMode === 'sheet'`）。
+   *
+   * 结构由服务端给全（`rows` / `numericCols` / `merges`），前端只渲染——不解析 CSV、
+   * 不判断数字列，避免两套口径。
+   */
+  workbook?: PreviewWorkbook | null
   /** `.pdf` / `.html` 的 `<iframe>` 地址、图片的 `<img>` 地址，或下载直链 */
   url: string | null
   error: ErrorInfo | null
@@ -131,9 +138,13 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
   /**
    * 可放大判据（唯一实现，FR-010）。
    *
-   * 只看"有版面"的几类：① 同源 `viewUrl` 的内联 iframe；② 本地 PDF / 图片 / HTML。
+   * 只看"有版面"的几类：① 同源 `viewUrl` 的内联 iframe；② 本地 PDF / 图片 / HTML；
+   * ③ 表格（`.xlsx` 结构化预览，2026-11-17 起）。
    * 其余（文本流、「需下载」引导、错误态、空内容态、列表态）一律不可放大——
    * 文本不因变宽而更可读，另几类的出口是"下载完整文件"，加了只是无效按钮（FR-013）。
+   *
+   * 表格纳入的理由与文本相反：列一多就必须横向滚动，1/3 面板里只能看到三四列；
+   * 变宽对它是**真收益**，不是无效按钮。
    */
   const maximizable = computed<boolean>(() => {
     if (view.value !== 'content') {
@@ -147,7 +158,7 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       return false
     }
     const mode = content.value?.renderMode
-    return mode === 'pdf' || mode === 'image' || mode === 'html'
+    return mode === 'pdf' || mode === 'image' || mode === 'html' || mode === 'sheet'
   })
 
   /** 入口可见性：放大态必须始终留出口（见接口注释）。 */
@@ -214,7 +225,7 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
 
     const kind = resolvePreviewKind(filename)
 
-    // `.xlsx` 与未知类型：不内联，回退下载引导（V-11）
+    // `.xls` / `.zip` / 未知类型：不内联，回退下载引导（V-11）
     if (kind === 'download' || kind === 'unsupported') {
       content.value = {
         renderMode: 'download',
@@ -261,6 +272,43 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       return
     }
 
+    // `.xlsx`（2026-11-17）：走结构化通路，服务端给全 rows / numericCols / merges。
+    // 失败（413 / 404 / 解析失败）与文本同口径：进错误态并给下载引导（FR-048）。
+    if (kind === 'sheet') {
+      const sheetRequest = (requestId += 1)
+      loading.value = true
+      content.value = null
+
+      try {
+        const workbook = await deps.files.fetchPreviewWorkbook(dir, filename)
+        if (sheetRequest !== requestId) {
+          return
+        }
+        content.value = {
+          renderMode: 'sheet',
+          text: null,
+          workbook,
+          url: null,
+          error: null,
+        }
+      } catch (cause) {
+        if (sheetRequest !== requestId) {
+          return
+        }
+        content.value = {
+          renderMode: 'error',
+          text: null,
+          url: deps.files.downloadUrl(dir, filename),
+          error: toErrorInfo(cause),
+        }
+      } finally {
+        if (sheetRequest === requestId) {
+          loading.value = false
+        }
+      }
+      return
+    }
+
     const current = (requestId += 1)
     loading.value = true
     content.value = null
@@ -270,9 +318,8 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       if (current !== requestId) {
         return
       }
-      // `.xlsx` 与纯文本同一条拉取通路，只是展示样式不同（表格形态）
       content.value = {
-        renderMode: kind === 'sheet' ? 'sheet' : 'text',
+        renderMode: 'text',
         text,
         url: null,
         error: null,

@@ -223,7 +223,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `ontologies` | `{场景名}/{本体名}[]` | ✅ | 可为空数组；每项**恰好一个 `/`**、两段非空、无重复；每项 MUST 在本体库中 | **以两段引用**本体（2026-10-17，`FR-064`），MUST NOT 内嵌 `ontology.yaml` / `securities.yaml` 正文；清单外引用 → `ADM_AGENT_INVALID_REF`。部署时按此键物化到 `ontology/{场景}/{本体}/` |
 | `scenario` | object | ✅ | — | 文件空间搭配（`FR-020`） |
 | `scenario.scenario` | string | ✅ | 非空 | 场景名 |
-| `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..`；**MUST 完整包含预定义目录 `算法规则`**（2026-09-19 新增：平台硬编码、不可移除） | "数据准备"二级目录清单 |
+| `scenario.data_prep_dirs` | string[] | ✅ | 每项拒绝空值、重复值、含路径分隔符或 `..`；**可为空数组**；预定义目录 `算法规则`（2026-09-19 平台硬编码）**可被屏蔽**（2026-11-17 修订：屏蔽 = 不在本清单内，不强制包含、不删除文件，重新启用即恢复） | "数据准备"二级目录清单（可见范围的唯一权威） |
 | `scenario.data_prep_fields` | object | ➖ | 键 MUST 在 `data_prep_dirs` 内；值为数组，每项 `{name, type, required}` | **上传表字段约束**（2026-09-17 新增）：目录名 → 字段清单。空清单的目录**不出现**（缺失即"无约束"）；缺省按 `{}` 处理（兼容本字段引入前的文档与请求） |
 | `scenario.data_prep_fields[dir][].name` | string | ✅ | 非空、≤64 字符、不含路径分隔符 / `..`、**同目录内唯一** | 字段名＝上传表的表头名 |
 | `scenario.data_prep_fields[dir][].type` | string | ✅ | ∈ `string` / `integer` / `number` / `boolean` / `object` / `array` | JSON Schema 基本类型的子集（与运行环境同一枚举） |
@@ -315,7 +315,7 @@ MUST NOT 读取 `docker-compose.yml`、MUST NOT 读取 Docker 容器状态。
 | `operator` | string | 固定 `zyw_admin`（`research.md` D11） |
 | `users` | array | 每个用户：成功/失败、涉及数字人、失败原因 |
 | `validation` | object | 校验结果摘要（含错误项数） |
-| `manifest_diff` | array | **部署前**与运行环境的 agent 级差异（写入前快照，`FR-032`）：`agent_missing_in_runtime` / `agent_unexpected_in_runtime`；部署后即一致，失败用户不产生条目 |
+| `manifest_diff` | array | **部署前**与运行环境的 agent 级差异（写入前快照，`FR-032`）：`agent_new_in_runtime`（本次新增）/ `agent_missing_in_runtime`（分发过但被删/下架）/ `agent_unexpected_in_runtime`（本次不再需要，将被移除）；部署后即一致，失败用户不产生条目 |
 
 ### 7.4 部署执行语义
 

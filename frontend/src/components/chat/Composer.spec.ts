@@ -202,3 +202,84 @@ describe('Composer —— `/技能名` 胶囊（2026-11-07）', () => {
     expect(send?.attributes('disabled')).toBeDefined()
   })
 })
+
+/**
+ * 2026-11-17：粘贴上传的**输入侧**出口。
+ *
+ * 输入区只负责"把剪贴板里的文件捞出来交给上层"，校验与上传都在 `useUploadPanel`——
+ * 因此这里只钉两件事：①有文件时不把内容当文本塞进正文、并阻止默认粘贴；
+ * ②纯文字粘贴的既有行为一字不变。
+ */
+describe('Composer —— 粘贴文件（2026-11-17）', () => {
+  /** jsdom 没有真实剪贴板：手工造一个带 `items` 的粘贴事件 */
+  function pasteEvent(files: File[], text = ''): Event {
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        items: files.map((file) => ({ kind: 'file', getAsFile: () => file })),
+        files,
+        getData: (type: string) => (type === 'text/plain' ? text : ''),
+      },
+    })
+    return event
+  }
+
+  function png(name: string): File {
+    return new File([new Uint8Array(4)], name, { type: 'image/png' })
+  }
+
+  it('粘贴图片：上报文件、阻止默认粘贴、正文不插入任何文本', async () => {
+    const wrapper = mountComposer()
+    const editor = wrapper.find('.composer__input')
+
+    const event = pasteEvent([png('screenshot.png')])
+    editor.element.dispatchEvent(event)
+    await nextTick()
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(wrapper.emitted('paste-files')).toHaveLength(1)
+    expect((wrapper.emitted('paste-files')![0]![0] as File[])[0]!.name).toBe('screenshot.png')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('没有扩展名的截图：发出前补好名字（否则会被"格式不支持"拒掉）', async () => {
+    const wrapper = mountComposer()
+
+    wrapper.find('.composer__input').element.dispatchEvent(pasteEvent([png('blob')]))
+    await nextTick()
+
+    const files = wrapper.emitted('paste-files')![0]![0] as File[]
+    expect(files[0]!.name).toMatch(/^粘贴-\d+-1\.png$/)
+  })
+
+  it('图文混贴：只处理文件，不把文字也插进正文', async () => {
+    const wrapper = mountComposer()
+
+    wrapper.find('.composer__input').element.dispatchEvent(
+      pasteEvent([png('a.png')], '一段被复制的文字'),
+    )
+    await nextTick()
+
+    expect(wrapper.emitted('paste-files')).toHaveLength(1)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('纯文本粘贴：行为不变（仍按纯文本插入，不上报文件）', async () => {
+    const wrapper = mountComposer()
+
+    wrapper.find('.composer__input').element.dispatchEvent(pasteEvent([], '纯文字'))
+    await nextTick()
+
+    expect(wrapper.emitted('paste-files')).toBeUndefined()
+    expect(wrapper.emitted('update:modelValue')!.at(-1)).toEqual(['纯文字'])
+  })
+
+  it('发送中（disabled）：不处理粘贴文件', async () => {
+    const wrapper = mountComposer({ disabled: true })
+
+    wrapper.find('.composer__input').element.dispatchEvent(pasteEvent([png('a.png')]))
+    await nextTick()
+
+    expect(wrapper.emitted('paste-files')).toBeUndefined()
+  })
+})

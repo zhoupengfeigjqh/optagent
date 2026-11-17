@@ -421,6 +421,8 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 同上：宽度跟随中栏轨道，不被消息内容的 min-content 反推 */
+  min-width: 0;
 }
 
 .message-list {

@@ -194,8 +194,11 @@ export function useMessageScroll(options: MessageScrollOptions): MessageScroll {
   })
 
   /**
-   * 容器尺寸变化（右侧工作区面板开合、窗口缩放）会让正文重排，`scrollHeight` 随之改变，
-   * 却**不会**派发 scroll 事件——缺这一手，按钮会一直停在旧状态上。
+   * 容器尺寸变化（拖动右侧分隔条、左右面板开合、窗口缩放）会让正文重排，
+   * `scrollHeight` 随之改变，却**不会**派发 scroll 事件。两种状态分别处理：
+   * - 原本贴底：重新写到最底。缺这一手时，一旦变窄导致正文变高，视口就被留在半截，
+   *   而 `atBottom` 也会在同一刻被判成 false，后续流式增量不再跟随——表现为"聊天区不跟上"；
+   * - 原本上翻：只重判状态，绝不把正在读的内容拽走（与流式增量的口径一致）。
    *
    * jsdom 无 `ResizeObserver`，故做存在性守卫（与 Composer 里"scrollHeight 恒为 0
    * 就不写高度"同理：测试环境不参与布局，状态由显式触发驱动）。
@@ -206,7 +209,13 @@ export function useMessageScroll(options: MessageScrollOptions): MessageScroll {
     void nextTick(scrollToLatest)
     if (typeof ResizeObserver === 'undefined' || !listRef.value) return
     resizeObserver = new ResizeObserver(() => {
-      atBottom.value = isNearBottom()
+      const element = listRef.value
+      if (!element) return
+      if (atBottom.value) {
+        element.scrollTop = element.scrollHeight
+      } else {
+        atBottom.value = isNearBottom()
+      }
     })
     resizeObserver.observe(listRef.value)
   })

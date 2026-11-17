@@ -132,6 +132,15 @@ describe('loadScenario - 按数字人各自读取', () => {
 
     expect(loadScenario(root, userId, 'agent-filter').dataPrepDirs).toEqual(['产线信息']);
   });
+
+  it('清单为空是**合法**状态（2026-11-17：全部二级目录被屏蔽），不按未配置处理', () => {
+    writeScenario('agent-all-blocked', { scenario: '全部屏蔽', data_prep_dirs: [] });
+
+    const scenario = loadScenario(root, userId, 'agent-all-blocked');
+
+    expect(scenario.name).toBe('全部屏蔽');
+    expect(scenario.dataPrepDirs).toEqual([]);
+  });
 });
 
 describe('loadScenario - 字段约束（data_prep_fields）', () => {
@@ -219,6 +228,17 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
     );
 
     const error = capture(() => parseSpaceDir(root, userId, 'agent-narrow', '数据准备/生产计划'));
+
+    expect(error).toBeInstanceOf(DirValidationError);
+    expect((error as DirValidationError).statusCode).toBe(403);
+  });
+
+  it('被屏蔽的预定义目录与清单外目录同判据 → 403（2026-11-17）', () => {
+    writeScenario('agent-blocked-predefined', { scenario: '屏蔽预定义', data_prep_dirs: ['生产计划'] });
+
+    const error = capture(() =>
+      parseSpaceDir(root, userId, 'agent-blocked-predefined', '数据准备/算法规则'),
+    );
 
     expect(error).toBeInstanceOf(DirValidationError);
     expect((error as DirValidationError).statusCode).toBe(403);
@@ -328,6 +348,16 @@ describe('listAvailableDirs - 模型可用目录清单（契约 §10.8）', () =
 
     expect(dirs[0]).toBe('数据准备/生产计划');
     expect(dirs[dirs.length - 1]).toBe('临时空间/后台产出');
+  });
+
+  it('全部屏蔽（清单为空）：退化为共享/临时/产出，不按未配置处理（2026-11-17）', () => {
+    writeScenario('agent-dirs-empty', { scenario: '全部屏蔽', data_prep_dirs: [] });
+
+    expect(listAvailableDirs(root, userId, 'agent-dirs-empty')).toEqual([
+      '共享空间',
+      '临时空间',
+      '临时空间/后台产出',
+    ]);
   });
 
   it('场景未配置：退化为三空间根（不含数据准备子目录），产出目录仍在末尾', () => {

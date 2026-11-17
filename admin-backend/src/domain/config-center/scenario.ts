@@ -56,17 +56,14 @@ export type DataPrepUploadExt = (typeof DATA_PREP_UPLOAD_EXTS)[number];
 /**
  * 「数据准备」预定义二级目录（平台硬编码）。
  *
- * 场景清单 MUST 包含该目录：保存时缺失即拒（`normalizeScenario`），部署前校验对
- * **手工改过的设计态文档**兜底（`scenarioFieldIssues`）。界面渲染为锁定行
- * （不可移除），见 `admin-frontend` `constants/agent-design.ts` 的同名常量
- * （两处 MUST 同步）。预定义目录**不强制字段约束**——0 条字段 = 无约束。
+ * **2026-11-17 起可被屏蔽**：屏蔽 = 该目录不在 `data_prep_dirs` 里（清单是可见范围的
+ * 唯一权威），保存与部署前校验对"清单里没有它"一律**放行**；屏蔽**不删除**磁盘上的
+ * 目录与文件，重新启用即恢复可见（`specs/001` FR-020 修订记录）。
+ *
+ * 界面据此渲染「启用中 / 已屏蔽」两类行，见 `admin-frontend` `constants/agent-design.ts`
+ * 的同名常量（两处 MUST 同步）。预定义目录**不强制字段约束**——0 条字段 = 无约束。
  */
 export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const;
-
-/** 清单缺失的预定义目录（两个校验出口共用同一判据） */
-export function missingPredefinedDirs(dirs: readonly string[]): string[] {
-  return PREDEFINED_DATA_PREP_DIRS.filter((dir) => !dirs.includes(dir));
-}
 
 /** 数据准备目录的上传表字段约束 */
 export interface ScenarioField {
@@ -157,13 +154,8 @@ export function normalizeScenario(raw: unknown): AgentScenario {
     }
     dirs.push(item);
   }
-  const missing = missingPredefinedDirs(dirs);
-  if (missing.length > 0) {
-    throw new ApiError(
-      ERROR_CODES.VALIDATION_FAILED,
-      `缺少预定义二级目录：${missing.join('、')}（预定义目录不可移除）`,
-    );
-  }
+  // 预定义目录**可被屏蔽**（2026-11-17）：清单里没有它 = 该目录对数字人不可见，
+  // 不是错误。屏蔽不删磁盘文件，重新启用即恢复。
   return {
     scenario,
     data_prep_dirs: dirs,
@@ -302,8 +294,9 @@ function normalizeScenarioFields(raw: unknown, dirs: readonly string[]): Record<
 export function scenarioFieldIssues(scenario: AgentScenario | null | undefined): string[] {
   if (!scenario || !Array.isArray(scenario.data_prep_dirs)) return [];
   const dirs = scenario.data_prep_dirs;
-  // 预定义目录缺失是独立判据：fields 缺省的历史文档也必须报告（先于 fields 的缺省早退）
-  const issues: string[] = missingPredefinedDirs(dirs).map((dir) => `缺少预定义二级目录：${dir}`);
+  // 预定义目录缺失**不是**问题（2026-11-17：屏蔽即"清单里没有它"），
+  // 这里只收集字段约束自身的问题。
+  const issues: string[] = [];
   const fields = scenario.data_prep_fields;
   if (fields === undefined || fields === null) return issues;
   if (typeof fields !== 'object' || Array.isArray(fields)) {

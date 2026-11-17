@@ -83,7 +83,9 @@ export function useDeploy() {
       error.value = NO_TARGET
       return false
     }
-    if (revision.value === null) await loadRevision()
+    // 部署前**总是**取最新版本（而非仅在未加载时）：用户在别处改过配置后，
+    // 本页缓存的旧 revision 已过期，用它提交必被 409 拒绝（2026-11-17）
+    await loadRevision()
     deploying.value = true
     error.value = null
     unknownUserIds.value = []

@@ -256,6 +256,9 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
     panel.onPickNextStep(ACTION)
     void panel.onConfirmSuggestion()
     await panel.onConfirmSuggestion() // 第二次：仍在发送中
+    // 023 v1.3：发送链路里多了一步"粘贴件此时才落盘"（`flushPending`），是异步的；
+    // 让第一条链路跑完再断言"只发一次"，否则断言早于 `chat.send`
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(chat.send).toHaveBeenCalledTimes(1)
   })

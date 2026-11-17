@@ -267,6 +267,16 @@ describe('useAgentDesign', () => {
     expect(editor.dirty.value).toBe(true)
   })
 
+  it('dirty：新建态下**屏蔽**预定义目录即视为已修改（2026-11-17）', () => {
+    const editor = useAgentDesign()
+    // 新建初值 = 预定义目录全部启用，此时不算有输入
+    expect(editor.dirty.value).toBe(false)
+
+    editor.draft.value.scenario.data_prep_dirs = []
+
+    expect(editor.dirty.value).toBe(true)
+  })
+
   it('save 带上可上传类型（深副本，避免草稿后续改动污染载荷）', async () => {
     createAgent.mockResolvedValue({ ...DESIGN, name: 'demo2', revision: 1 })
     const editor = useAgentDesign()

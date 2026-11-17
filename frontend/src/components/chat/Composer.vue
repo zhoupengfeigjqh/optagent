@@ -24,6 +24,8 @@ import {
   serializeComposerText,
   splitComposerSegments,
 } from '../../utils/composer-text'
+import { createComposerChip } from '../../utils/composer-chip'
+import { withPastedName } from '../../utils/upload-batch'
 import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
 
@@ -72,6 +74,8 @@ const emit = defineEmits<{
   'mention-key': [key: string]
   /** `/技能` 面板展开时被拦截的按键（2026-11-07） */
   'skill-key': [key: string]
+  /** 粘贴进来的文件/图片（2026-11-17）：交给上层做整批校验与上传 */
+  'paste-files': [files: File[]]
 }>()
 
 /** 面板展开时需要让位的按键（`@` 与 `/` 同款）。 */
@@ -83,12 +87,6 @@ const PICKER_KEYS: ReadonlySet<string> = new Set([
   'Enter',
   'Escape',
 ])
-
-/** 胶囊里的关闭图标：与 `BaseIcon` 的 `close` 同形（contenteditable 子节点只能手工造）。 */
-const CLOSE_ICON =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" ' +
-  'aria-hidden="true"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>'
 
 // 只选技能不写正文不算可发送（与服务端"content 非空"同口径）
 const canSend = computed(
@@ -130,29 +128,15 @@ function referenceOfToken(token: string): FileReference | null {
 
 /** 造一枚引用胶囊：文本即标记，移除按钮不参与序列化。 */
 function createMentionChip(reference: FileReference): HTMLElement {
-  const chip = document.createElement('span')
-  chip.className = 'composer__mention'
-  // 用属性而不是 `contentEditable` 属性赋值：胶囊的不可编辑性必须落在 DOM 属性上
-  chip.setAttribute('contenteditable', 'false')
-  chip.setAttribute(MENTION_FILENAME_ATTR, reference.filename)
-  chip.setAttribute('data-mention-dir', reference.dir)
-  chip.textContent = mentionToken(reference)
-
-  const remove = document.createElement('button')
-  remove.type = 'button'
-  remove.className = 'composer__mention-remove'
-  remove.setAttribute('aria-label', `移除引用 ${reference.filename}`)
-  remove.innerHTML = CLOSE_ICON
-  // 按下时不让焦点/光标交给按钮：删完仍要在原位继续输入
-  remove.addEventListener('mousedown', (event) => event.preventDefault())
-  remove.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    removeChip(chip)
+  return createComposerChip({
+    text: mentionToken(reference),
+    removeLabel: `移除引用 ${reference.filename}`,
+    attrs: {
+      [MENTION_FILENAME_ATTR]: reference.filename,
+      'data-mention-dir': reference.dir,
+    },
+    onRemove: removeChip,
   })
-
-  chip.appendChild(remove)
-  return chip
 }
 
 /** 按草稿重建正文（只用于外部改写草稿：插入标记、点 x、发送后清空、切换会话）。 */
@@ -190,26 +174,12 @@ function renderDraft(text: string): void {
  * 文本即 `/技能名` 标记，移除按钮不参与序列化。
  */
 function createSkillChip(name: string): HTMLElement {
-  const chip = document.createElement('span')
-  chip.className = 'composer__mention'
-  chip.setAttribute('contenteditable', 'false')
-  chip.setAttribute(SKILL_NAME_ATTR, name)
-  chip.textContent = skillToken(name)
-
-  const remove = document.createElement('button')
-  remove.type = 'button'
-  remove.className = 'composer__mention-remove'
-  remove.setAttribute('aria-label', `移除技能 ${name}`)
-  remove.innerHTML = CLOSE_ICON
-  remove.addEventListener('mousedown', (event) => event.preventDefault())
-  remove.addEventListener('click', (event) => {
-    event.preventDefault()
-    event.stopPropagation()
-    removeChip(chip)
+  return createComposerChip({
+    text: skillToken(name),
+    removeLabel: `移除技能 ${name}`,
+    attrs: { [SKILL_NAME_ATTR]: name },
+    onRemove: removeChip,
   })
-
-  chip.appendChild(remove)
-  return chip
 }
 
 /** 点胶囊的 x：删节点 → 光标落回原位 → 交回文本层（引用/技能由上层反向同步）。 */
@@ -283,9 +253,35 @@ function insertPlainText(text: string): void {
   onInput()
 }
 
+/**
+ * 从剪贴板取文件（2026-11-17）。
+ *
+ * 优先 `items`：截图与"复制文件"在 Chrome/Edge/Firefox 上都只保证这里拿得到 `File`；
+ * `files` 只作兜底。截图常没有扩展名，交给 `withPastedName` 按 MIME 补——
+ * 补名只覆盖白名单内的类型，不会变相放行 `.svg` 之类。
+ */
+function pastedFiles(data: DataTransfer): File[] {
+  const fromItems: File[] = []
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (file) fromItems.push(file)
+  }
+  const files = fromItems.length > 0 ? fromItems : Array.from(data.files ?? [])
+  return files.map((file, index) => withPastedName(file, index))
+}
+
 function onPaste(event: ClipboardEvent): void {
   if (props.disabled) return
-  const text = event.clipboardData?.getData('text/plain') ?? ''
+  const data = event.clipboardData
+  // 剪贴板里有文件（截图 / 复制的文件）→ 交给上层整批校验后上传，不再当文本塞进正文
+  const files = data ? pastedFiles(data) : []
+  if (files.length > 0) {
+    event.preventDefault()
+    emit('paste-files', files)
+    return
+  }
+  const text = data?.getData('text/plain') ?? ''
   // 一律按纯文本插入：否则 Word/网页会把字体、颜色、表格结构一起带进来
   event.preventDefault()
   if (text !== '') insertPlainText(text)

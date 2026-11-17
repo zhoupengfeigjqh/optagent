@@ -153,3 +153,45 @@ describe('useWorkspace.registerFile（012 FR-004）', () => {
     expect(store.exists({ dir: '临时空间', filename: 'a.csv' })).toBe(false)
   })
 })
+
+/**
+ * 删除文件：成功即提示并同步缓存；失败必须说话，否则用户会以为文件没了（宪章原则九）。
+ *
+ * 2026-11-17 v1.3 起只剩这一个删除出口——粘贴不再产生"静默回收"这种路径。
+ */
+describe('useWorkspace.remove', () => {
+  const REF = { dir: '临时空间', filename: '粘贴.csv' }
+
+  function storeForRemove(remove: ReturnType<typeof vi.fn>) {
+    const toast = { push: vi.fn() }
+    const store = createWorkspaceStore({
+      files: { workspace: vi.fn().mockResolvedValue(makeResponse()), remove },
+      toast,
+    } as never)
+    return { store, toast }
+  }
+
+  it('成功：删除并同步缓存，提示一次', async () => {
+    const { store, toast } = storeForRemove(vi.fn().mockResolvedValue(undefined))
+    await store.load()
+    store.registerFile({ dir: REF.dir, filename: REF.filename, size: 8 })
+
+    await expect(store.remove(REF)).resolves.toBe(true)
+
+    expect(store.exists(REF)).toBe(false)
+    expect(toast.push).toHaveBeenCalledWith('success', expect.stringContaining('已删除'))
+  })
+
+  it('失败：提示原因、缓存保留、返回 false', async () => {
+    const { store, toast } = storeForRemove(
+      vi.fn().mockRejectedValue({ code: 'FILE_NOT_FOUND', message: 'x' }),
+    )
+    await store.load()
+    store.registerFile({ dir: REF.dir, filename: REF.filename, size: 8 })
+
+    await expect(store.remove(REF)).resolves.toBe(false)
+
+    expect(store.exists(REF)).toBe(true)
+    expect(toast.push).toHaveBeenCalledWith('error', expect.any(String))
+  })
+})

@@ -23,6 +23,7 @@ import BaseIcon from '../common/BaseIcon.vue'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import LoadingDots from '../common/LoadingDots.vue'
+import SheetPreview from './SheetPreview.vue'
 import WorkspaceSpaceTree from './WorkspaceSpaceTree.vue'
 
 const props = withDefaults(
@@ -304,11 +305,13 @@ useMaximizeEscape({
           content.text
         }}</pre>
 
-        <!-- 表格（`.xlsx`，2026-11-16）：服务端已把工作簿转成 CSV 文本（多 sheet 带
-             `### Sheet: 名称` 分段），这里与文本同款 `<pre>` 呈现，不引前端解析库 -->
-        <pre v-else-if="content.renderMode === 'sheet'" class="workspace-panel__text">{{
-          content.text
-        }}</pre>
+        <!-- 表格（`.xlsx`，2026-11-17）：服务端返回结构化工作簿（rows / numericCols / merges），
+             交给 `SheetPreview` 画成真表格——前端零解析、零解析库依赖 -->
+        <SheetPreview
+          v-else-if="content.renderMode === 'sheet'"
+          class="workspace-panel__sheet"
+          :workbook="content.workbook ?? null"
+        />
 
         <!-- PDF -->
         <iframe
@@ -441,6 +444,11 @@ useMaximizeEscape({
   overflow-wrap: anywhere;
   font-size: var(--font-size-sm);
   line-height: 1.7;
+}
+
+/* 表格占满内容区：`SheetPreview` 内部只有表格区滚动，工作表 Tab 与截断提示不动 */
+.workspace-panel__sheet {
+  height: 100%;
 }
 
 .workspace-panel__frame {

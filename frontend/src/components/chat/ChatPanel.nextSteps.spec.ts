@@ -106,6 +106,8 @@ function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = 
     onToggleUpload: noop,
     onCloseUpload: noop,
     onPickFiles: noop,
+    // 2026-11-17：粘贴上传（v1.3 起不再有重名弹窗，失败只走 toast）
+    onPasteFiles: noop,
     onRetryUpload: noop,
     onToggleSearch: noop,
     onToggleWorkspace: noop,

@@ -71,6 +71,10 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
       生产计划: ['.csv', '.xlsx', '.txt', '.pdf', '.json', '.zip'],
     },
   },
+  // 2026-11-17：预定义目录被平台屏蔽——屏蔽 = 不在清单里（运行端不加特殊判断）
+  iota: { scenario: '屏蔽预定义', data_prep_dirs: ['生产计划'] },
+  // 2026-11-17：全部屏蔽——空清单合法，不再视为"场景未配置"
+  kappa: { scenario: '全部屏蔽', data_prep_dirs: [] },
   // 2026-10-14：`.xls` 三空间可用——数据准备按目录配置（这里同时声明字段约束，
   // 用来验证"`.xls` 不再跳过表结构校验"）
   eta: {
@@ -254,6 +258,81 @@ describe('文件空间视角＝当前选中数字人', () => {
       const space = spaces.find((s) => s.name === name)!;
       expect(space.dirs[0]!.predefined).toBe(false);
     }
+  });
+});
+
+/* ---------- 2026-11-17：预定义目录可屏蔽（屏蔽 = 不在场景清单） ---------- */
+
+describe('预定义目录屏蔽（清单即可见范围的唯一权威）', () => {
+  it('屏蔽后 workspace 不出现该目录，数据准备空间仍在且 200', async () => {
+    await select('iota');
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(prepDirs(res.json())).toEqual(['数据准备/生产计划']);
+    const prep = (
+      res.json() as {
+        spaces: Array<{ name: string; dirs: Array<{ dir: string; predefined: boolean }> }>;
+      }
+    ).spaces.find((s) => s.name === '数据准备')!;
+    expect(prep.dirs.every((dir) => dir.predefined === false)).toBe(true);
+  });
+
+  it('屏蔽后访问该目录 → 403（与"清单外目录"同判据，不另开口子）', async () => {
+    await select('iota');
+
+    const res = await app.inject({ method: 'GET', url: listUrl('数据准备/算法规则') });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } });
+  });
+
+  it('屏蔽后 /api/files/rules → 404，文案说明"未开放"且不暴露其他目录清单', async () => {
+    await select('iota');
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/rules' });
+
+    expect(res.statusCode).toBe(404);
+    const err = (res.json() as { error: { code: string; message: string } }).error;
+    expect(err.code).toBe('FILE_NOT_FOUND');
+    expect(err.message).toContain('未开放');
+    expect(err.message).toContain('算法规则');
+    // 面向用户的文案 MUST NOT 借机列出其他可见目录
+    expect(err.message).not.toContain('生产计划');
+  });
+
+  it('未屏蔽但目录为空：/api/files/rules 仍是"暂无文件"（既有行为不变）', async () => {
+    await select('theta');
+
+    const res = await app.inject({ method: 'GET', url: '/api/files/rules' });
+
+    expect(res.statusCode).toBe(404);
+    const err = (res.json() as { error: { code: string; message: string } }).error;
+    expect(err.code).toBe('FILE_NOT_FOUND');
+    expect(err.message).toContain('暂无文件');
+  });
+
+  it('全部屏蔽：workspace 200 且数据准备 dirs 为空（不再 503），扁平空间照常', async () => {
+    await select('kappa');
+
+    const workspace = await app.inject({ method: 'GET', url: '/api/files/workspace' });
+    expect(workspace.statusCode).toBe(200);
+    expect((workspace.json() as { scenario: string }).scenario).toBe('全部屏蔽');
+    expect(prepDirs(workspace.json())).toEqual([]);
+
+    for (const dir of ['共享空间', '临时空间']) {
+      expect((await app.inject({ method: 'GET', url: listUrl(dir) })).statusCode).toBe(200);
+    }
+  });
+
+  it('全部屏蔽：数据准备下任何路径都是 403（空间存在但无可见子目录）', async () => {
+    await select('kappa');
+
+    const res = await app.inject({ method: 'GET', url: listUrl('数据准备/算法规则') });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } });
   });
 });
 

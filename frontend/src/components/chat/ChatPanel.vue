@@ -87,6 +87,7 @@ const {
   onToggleUpload,
   onCloseUpload,
   onPickFiles,
+  onPasteFiles,
   onRetryUpload,
   onToggleSearch,
   onToggleWorkspace,
@@ -313,6 +314,7 @@ onBeforeUnmount(() => {
       @remove-reference="onRemoveReference"
       @skill-key="onSkillKey"
       @remove-skill="onRemoveSkill"
+      @paste-files="onPasteFiles"
       @send="onSend"
       @stop="onStop"
     >
@@ -436,6 +438,7 @@ onBeforeUnmount(() => {
       @confirm="onConfirmSuggestion"
       @cancel="onCancelSuggestion"
     />
+
   </section>
 </template>
 
@@ -445,17 +448,24 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* 中栏宽度只由栅格轨道决定：不许被子内容的 min-content 反推撑宽。
+     否则拖动右侧分隔条时，含代码块 / nowrap 表格的消息会把整列顶在旧宽度上，
+     文字不再重排，多出来的部分被 `.app-shell__main` 裁掉（看着像被右栏盖住）。 */
+  min-width: 0;
 }
 
 .chat-panel__body {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
 }
 
 .chat-panel__body > * {
   flex: 1;
   min-height: 0;
+  /* 横向 flex 项默认 `min-width: auto` = 内容最小宽，必须显式归零才能跟着轨道收缩 */
+  min-width: 0;
 }
 
 /* 首屏引导（`.chat-hero`）的样式随 `ChatHero.vue` 走：那块布局只属于它 */

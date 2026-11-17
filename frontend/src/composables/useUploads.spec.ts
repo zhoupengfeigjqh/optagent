@@ -175,3 +175,62 @@ describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => 
     expect(store.items.value).toEqual([])
   })
 })
+
+/**
+ * 2026-11-17 v1.3：粘贴待发批次的落盘出口。
+ *
+ * 与 `upload()` 的两点差别都要钉住：
+ * 1. **不建记录**——粘贴从来不开面板，建了行只会在下次展开时冒出来；
+ * 2. **名字由调用方给**（前端预演），但返回的是**服务端真名**，界面取后者。
+ */
+describe('useUploads.uploadNamed —— 带名上传、不建记录', () => {
+  it('逐文件发起（后端一次只收一个），按入参顺序回传服务端真名', async () => {
+    const upload = vi
+      .fn()
+      .mockImplementation((_dir: string, _file: File, filename: string) =>
+        Promise.resolve({ dir: '临时空间', filename: `${filename}(1)`, size: 8 }),
+      )
+    const { store } = makeStore(upload)
+
+    const results = await store.uploadNamed('临时空间', [
+      { file: file('a.csv'), name: 'a(1).csv' },
+      { file: file('b.csv'), name: 'b.csv' },
+    ])
+
+    expect(upload).toHaveBeenCalledTimes(2)
+    expect(upload).toHaveBeenNthCalledWith(1, '临时空间', expect.any(File), 'a(1).csv')
+    expect(results).toEqual([
+      { name: 'a(1).csv', ok: true, serverFilename: 'a(1).csv(1)', error: null },
+      { name: 'b.csv', ok: true, serverFilename: 'b.csv(1)', error: null },
+    ])
+    // 不建上传记录：面板没开，记录一旦出现就是"自己没点过的成功行"
+    expect(store.items.value).toEqual([])
+  })
+
+  it('个别失败 ⇒ 该项 ok:false 并带上结构化错误，其余照常成功', async () => {
+    const upload = vi
+      .fn()
+      .mockResolvedValueOnce({ dir: '临时空间', filename: 'a.csv', size: 8 })
+      .mockRejectedValueOnce({ code: 'NETWORK_ERROR', message: 'boom' })
+    const { store, toast } = makeStore(upload)
+
+    const results = await store.uploadNamed('临时空间', [
+      { file: file('a.csv'), name: 'a.csv' },
+      { file: file('b.csv'), name: 'b.csv' },
+    ])
+
+    expect(results.map((item) => item.ok)).toEqual([true, false])
+    expect(results[1]!.serverFilename).toBeNull()
+    expect(results[1]!.error?.code).toBe('NETWORK_ERROR')
+    // 提示由调用方统一给（整条消息中止），store 自己不再弹一条重复的
+    expect(toast.push).not.toHaveBeenCalled()
+  })
+
+  it('空批次 ⇒ 零请求', async () => {
+    const upload = vi.fn()
+    const { store } = makeStore(upload)
+
+    expect(await store.uploadNamed('临时空间', [])).toEqual([])
+    expect(upload).not.toHaveBeenCalled()
+  })
+})
