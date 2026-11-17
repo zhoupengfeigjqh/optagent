@@ -37,9 +37,13 @@ const envSchema = z.object({
    */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   /**
-   * 内联预览大小上限（MB）。**防御性上限**：文件进入文件空间的每条路径（上传 / 产出回写 /
-   * 模型 `write_file`）都被 `UPLOAD_MAX_MB` 卡在 5MB，故实际不存在超过它的文件，
-   * 413 分支当前恒不触发（`routes/files.ts` / `routes/produced.ts`）；取值与上传上限对齐，保留兜底。
+   * 内联预览大小上限（MB）。
+   *
+   * 2026-11-16 更正：此前注释称"模型 `write_file` 也被 `UPLOAD_MAX_MB` 卡在 5MB"，
+   * 与实现不符——`UPLOAD_MAX_MB` 只作用于 HTTP 请求体（`server.ts` 的 `bodyLimit`），
+   * 而 `write_file` 走 agent loop、不经过它。现在该值**同时**是 `write_file` 的落盘上限
+   * （`server.ts` 注入 `writeMaxBytes`），因此 413 分支仍然只在"改造前的存量文件"上可能触发。
+   * 上传（`UPLOAD_MAX_MB`）/ 产出回写（同 `UPLOAD_MAX_MB`）/ 模型写入（本值）三处口径一致。
    */
   PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(5),
   READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(128),

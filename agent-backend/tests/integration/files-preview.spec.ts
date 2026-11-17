@@ -17,6 +17,7 @@ import path from 'node:path';
 
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as XLSX from 'xlsx';
 
 import { loadConfig } from '../../src/config';
 import { agentScopedPath, signRef } from '../../src/infra/file-sign';
@@ -141,5 +142,75 @@ describe('`.html` 内联预览（2026-10-20）', () => {
     const res = await uploadHtml('数据准备/生产计划', '看板.html');
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
+  });
+});
+
+/**
+ * `.md` 内联预览（2026-11-16，`specs/022-write-file-format-routing`）。
+ *
+ * `.md` 不在上传白名单（`DOCUMENT_EXTS` 无此项），所以直接用 `writeFileSync` 落盘——
+ * 与 `write_file` 写临时空间同一结果形态，验的是**预览映射**而不是上传链路。
+ */
+describe('`.md` 内联预览（2026-11-16）', () => {
+  const tmpDir = (): string => path.join(root, 'users', userId, 'user-data', AGENT, '临时空间');
+
+  it('`preview` 以 `text/markdown` 内联返回，且不加脚本沙箱头', async () => {
+    mkdirSync(tmpDir(), { recursive: true });
+    writeFileSync(path.join(tmpDir(), '分析.md'), '# 结论\n\n正文\n', 'utf8');
+
+    const res = await preview('临时空间', '分析.md');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/markdown; charset=utf-8');
+    expect(String(res.headers['content-disposition'])).toContain('inline');
+    // 与 `.txt` 同口径：纯文本，没有可执行内容，不需要沙箱头
+    expect(res.headers['content-security-policy']).toBeUndefined();
+    expect(res.body).toContain('# 结论');
+  });
+
+  it('未登记扩展名（`.log`）仍回退附件下载：写读都通，但不内联', async () => {
+    mkdirSync(tmpDir(), { recursive: true });
+    writeFileSync(path.join(tmpDir(), 'th_1_日志.log'), 'a: 1\n', 'utf8');
+
+    const res = await preview('临时空间', 'th_1_日志.log');
+
+    expect(res.statusCode).toBe(200);
+    expect(String(res.headers['content-disposition'])).toContain('attachment');
+  });
+
+  it('`.xlsx`（2026-11-16）：服务端转 CSV 文本内联，多 sheet 带 `### Sheet:` 分段', async () => {
+    mkdirSync(tmpDir(), { recursive: true });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['物料', '数量'],
+        ['A', '10'],
+      ]),
+      '物料',
+    );
+    writeFileSync(
+      path.join(tmpDir(), '汇总.xlsx'),
+      XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
+    );
+
+    const res = await preview('临时空间', '汇总.xlsx');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(String(res.headers['content-disposition'])).toContain('inline');
+    expect(res.body).toContain('### Sheet: 物料');
+    expect(res.body).toContain('物料,数量');
+  });
+
+  it('`.xls`（BIFF 容器）仍回退附件下载（只有 `.xlsx` 转文本）', async () => {
+    mkdirSync(tmpDir(), { recursive: true });
+    // 内容不要求是真 BIFF：本用例只验"扩展名不进转换分支、走附件"
+    writeFileSync(path.join(tmpDir(), '旧表.xls'), Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));
+
+    const res = await preview('临时空间', '旧表.xls');
+
+    expect(res.statusCode).toBe(200);
+    expect(String(res.headers['content-disposition'])).toContain('attachment');
   });
 });

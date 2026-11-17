@@ -99,7 +99,7 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `name` | `label` | `writable` | `description_template` |
 |---|---|---|---|
 | `read_file` | 读取文件 | `false` | 读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；xlsx/xls 自动转 CSV，pdf 提取文本层，html 按原文读取（不渲染、不执行脚本）。大文件返回截断内容，可用 offset 继续分段读取。参数 path 为相对空间的路径，如 "{示例路径}"。 |
-| `write_file` | 写入临时文件 | **`true`** | 把内容写入临时空间，文件名会自动要求以 "{会话标识}_" 开头。数据准备与共享空间为只读，写入会被拒绝。成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；不要在正文里重复路径或拼链接。**结果形状**：成功为 JSON `{message, filePath, filePathName, bytes}`（`filePath` 是空间相对路径，运行时抽成 `view_links[].kind:'file'`）；失败/越权仍为纯文本（2026-10-21）。 |
+| `write_file` | 写入临时文件 | **`true`** | 把内容写入临时空间，文件名必须以 "{会话标识}_" 开头；**扩展名决定落盘格式**：.txt/.md/.html/.csv 按 UTF-8 文本原样写入（.csv 需引号配对）；.json 必须是完整合法的 JSON；.xlsx 用 CSV 行数据，可用 "# Sheet: 名称" 行分出多个工作表；.pdf 用受限 Markdown（# 标题、- 列表、\| a \| b \| 表格、空行分段）；其他扩展名一律按文本写入，但界面只能下载、不能内联查看。数据准备与共享空间为只读，写入会被拒绝。.html 在沙箱中预览，页面脚本不会执行。成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；不要在正文里重复路径或拼链接。**结果形状**：成功为 JSON `{message, filePath, filePathName, bytes, mode}`（`filePath` 是空间相对路径，运行时抽成 `view_links[].kind:'file'`；`bytes` 是**落盘字节数**、`mode` 是命中的输出模式，均于 2026-11-16 增补）；失败/越权仍为纯文本。**失败码**：`CONTENT_FORMAT_MISMATCH` / `FILE_TOO_LARGE` / `FILE_ACCESS_DENIED`（`FORMAT_NOT_IMPLEMENTED` 随着 `.xlsx`/`.pdf` 编码器落地已删除；见 `specs/022-write-file-format-routing/spec.md`）。 |
 | `list_dir` | 列目录 | `false` | 列出指定目录的文件（名称/大小/更新时间）。目录限：{可用目录}。 |
 | `grep_files` | 检索文件内容 | `false` | 在文本类文件（.csv/.txt/.json/.md/.log/.html）中按正则检索关键词；xlsx/xls/pdf 会被跳过（请改用 read_file）。可指定目录，缺省检索全部开放目录。 |
 | `calculator` | 计算器 | `false` | 计算数学表达式。支持 + - * / % ^、括号、sqrt/abs/round/floor/ceil/min/max/pow 函数与常量 pi/e。 |
@@ -107,6 +107,8 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 | `grep_skill` | 检索技能内容 | `false` | 在本数字人所配置技能的文件（SKILL.md 与 references/ 等）中按正则检索关键词，返回「技能名/文件路径:行号: 内容」，路径可直接回填给 read_skill；省略 skill 则检索全部技能。技能名取自系统提示中的「技能」小节。xlsx/pdf 等二进制会被跳过（请改用 read_skill）。 |
 
 **不变式（MUST 由单测守住）**：`renderTemplate` 用现状的运行期取值渲染后，**前 5 项**的结果 MUST 与改造前 `buildBuiltinTools` 产出的 `description` **逐字相等**。这是本重构的安全性保证——改造**只改变元数据的组织方式，不改变任何对模型可见的文本**；`read_skill`（2026-09-23）与 `grep_skill`（2026-10-17）均为新增项，不在此不变式内（其 golden 文本单独断言）。
+
+> **2026-11-16 例外记录**：`write_file` 的说明文本**有意变更**（按扩展名路由输出格式，见 `specs/022-write-file-format-routing/spec.md` 的 `FR-001`~`FR-007`）。因此 `builtin-tool-catalog.spec.ts` 中该项的逐字断言已同步改为新口径；其余四项仍守原不变式。此变更属需求驱动，不是元数据重组的副作用。
 
 **2026-10-21 的显式例外**：`write_file` 的说明按新口径改写（结构化返回 + 自动入口 + 不要转抄路径），**不再**与改造前逐字相等；它是"产出文件"的工具，说明必须与新结果形状一致。其余 4 项的逐字不变式**继续有效**。
 

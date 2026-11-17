@@ -297,8 +297,18 @@ export class FileAccess {
     return buf;
   }
 
-  /** 写文件：仅允许 tmp/ 且文件名强制 `{threadId}_` 前缀；返回**数字人数据域**相对路径 */
+  /** 写文本文件：仅允许 tmp/ 且文件名强制 `{threadId}_` 前缀；返回**数字人数据域**相对路径 */
   async write(threadId: string, filename: string, content: string): Promise<string> {
+    return this.writeBytes(threadId, filename, Buffer.from(content, 'utf8'));
+  }
+
+  /**
+   * 写原始字节（2026-11-16）：与 `write` 共用同一套路径判据，只是不做 utf8 编码。
+   *
+   * 供 `write_file` 的二进制模式（后续 `.xlsx` / `.pdf`）使用；本层**不含任何格式知识**——
+   * 扩展名路由在 `domain/tools/write-modes.ts`，权限层只管"能不能写、写到哪里"。
+   */
+  async writeBytes(threadId: string, filename: string, data: Buffer): Promise<string> {
     const base = path.basename(filename);
     if (base !== filename || base.includes('..')) {
       throw this.deny(`写入仅允许 临时空间/ 下的扁平文件名: ${filename}`);
@@ -315,7 +325,7 @@ export class FileAccess {
     const relPath = `${SPACE_TMP}/${base}`;
     const abs = this.resolveSafe(relPath, 'model-write');
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
-    await fs.promises.writeFile(abs, content, 'utf8');
+    await fs.promises.writeFile(abs, data);
     return relPath;
   }
 

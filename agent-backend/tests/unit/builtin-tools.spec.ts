@@ -4,7 +4,7 @@
  * 领域逻辑已在 `read-skill.spec.ts` 单测；这里只守 **接线**：
  * 目录项 → 领域实现 → 交给模型的文本，以及**越权映射**（拒绝文案 + alert 日志）。
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -177,6 +177,100 @@ describe('buildBuiltinTools —— write_file 的结果结构化（2026-10-21）
       expect.objectContaining({ alert: true, event: 'file.write.denied', tool: 'write_file' }),
       expect.stringContaining('越权被拒绝'),
     );
+  });
+});
+
+/**
+ * 按扩展名路由输出格式（2026-11-16，`specs/022-write-file-format-routing`）。
+ *
+ * 守三件事：
+ * 1. `.json` / `.csv` 内容不合规 → 标红失败码，且**磁盘上不出现文件**；
+ * 2. `.xlsx` / `.pdf` 一期未接编码器 → `FORMAT_NOT_IMPLEMENTED`，不写假文件；
+ * 3. 未登记扩展名写进去的文本，`read_file` **一定读得回来**（写读对称）。
+ */
+describe('buildBuiltinTools —— write_file 按扩展名路由（2026-11-16）', () => {
+  const tmpFile = (name: string): string =>
+    path.join(root, 'users', 'admin', 'user-data', AGENT, '临时空间', name);
+
+  async function runFull(
+    tools: ReadonlyArray<{ execute: (...args: never[]) => Promise<unknown> }>,
+    params: unknown,
+  ) {
+    return (await tools[0]!.execute('call_1' as never, params as never)) as {
+      content: Array<{ text: string }>;
+      details?: unknown;
+    };
+  }
+
+  it('成功结果带 mode（文本类）', async () => {
+    const text = await run(build(['write_file'])[0]!, {
+      filename: 'th_1_分析.md',
+      content: '# 结论',
+    });
+
+    expect(JSON.parse(text)).toMatchObject({
+      filePath: '临时空间/th_1_分析.md',
+      mode: 'markdown',
+      bytes: Buffer.byteLength('# 结论', 'utf8'),
+    });
+  });
+
+  it('非法 JSON → CONTENT_FORMAT_MISMATCH 标记，且不落盘', async () => {
+    const result = await runFull(build(['write_file']), {
+      filename: 'th_1_坏.json',
+      content: '{rows: 42}',
+    });
+
+    expect(result.content[0]?.text).toContain('内容与扩展名不匹配');
+    expect(readToolError(result.details)).toMatchObject({ code: 'CONTENT_FORMAT_MISMATCH' });
+    expect(existsSync(tmpFile('th_1_坏.json'))).toBe(false);
+  });
+
+  it('CSV 引号未闭合 → CONTENT_FORMAT_MISMATCH，且不落盘', async () => {
+    const result = await runFull(build(['write_file']), {
+      filename: 'th_1_坏.csv',
+      content: 'a,b\n"未闭合\n',
+    });
+
+    expect(readToolError(result.details)).toMatchObject({ code: 'CONTENT_FORMAT_MISMATCH' });
+    expect(existsSync(tmpFile('th_1_坏.csv'))).toBe(false);
+  });
+
+  it('`.xlsx`：表格源 → 真实工作簿落盘，且能被 read_file 读回', async () => {
+    const tools = build(['write_file', 'read_file']);
+    const write = tools.find((tool) => tool.name === 'write_file')!;
+    const read = tools.find((tool) => tool.name === 'read_file')!;
+
+    const text = await run(write, { filename: 'th_1_汇总.xlsx', content: '物料,数量\nA,10\n' });
+    expect(JSON.parse(text)).toMatchObject({ mode: 'xlsx' });
+    expect(existsSync(tmpFile('th_1_汇总.xlsx'))).toBe(true);
+
+    const back = await run(read, { path: '临时空间/th_1_汇总.xlsx' });
+    expect(back).toContain('### Sheet: Sheet1');
+    expect(back).toContain('物料,数量');
+  });
+
+  it('`.pdf`：受限 Markdown → PDF 落盘（不再写假文件）', async () => {
+    const result = await runFull(build(['write_file']), {
+      filename: 'th_1_报告.pdf',
+      content: '# 月报\n\n产量 1200 件\n',
+    });
+
+    expect(readToolError(result.details)).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ mode: 'pdf' });
+    expect(existsSync(tmpFile('th_1_报告.pdf'))).toBe(true);
+  });
+
+  it('未登记扩展名：写得进去，就一定能用 read_file 读回来', async () => {
+    const tools = build(['write_file', 'read_file']);
+    const write = tools.find((tool) => tool.name === 'write_file')!;
+    const read = tools.find((tool) => tool.name === 'read_file')!;
+    const content = '# 日志\n2026-11-16 start\n';
+
+    await run(write, { filename: 'th_1_日志.log', content });
+    const back = await run(read, { path: '临时空间/th_1_日志.log' });
+
+    expect(back).toBe(content);
   });
 });
 

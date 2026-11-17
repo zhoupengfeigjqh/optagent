@@ -47,8 +47,16 @@ const props = withDefaults(
      * 由 `MessageBubble` 从 `streaming.phase` 显式传入——MUST NOT 用"有无结果正文"之类的间接信号推断。
      */
     live?: boolean
+    /**
+     * 隐藏顶部计数行（`本轮 N 次调用 · 报错 M 次`）。
+     *
+     * 2026-11-16 起流式气泡按「渲染段」逐张渲染（A-lite）：每段只带 1 次调用，
+     * 若继续渲染计数行，一轮 5 次工具会重复出现 5 行"本轮 1 次调用"。
+     * 段渲染传 `true`；历史消息与整轮渲染保持默认（`false`）。
+     */
+    hideHead?: boolean
   }>(),
-  { live: false },
+  { live: false, hideHead: false },
 )
 
 const emit = defineEmits<{
@@ -168,8 +176,9 @@ function bodyHintOf(item: ToolCallItem): string {
 
 <template>
   <div v-if="items.length" class="tool-calls">
-    <!-- 计数行（常显）：报错数 MUST 在折叠态可见——失败绝不能被折叠隐藏（TR-32） -->
-    <p class="tool-calls__head" data-test="tool-counts">
+    <!-- 计数行（常显）：报错数 MUST 在折叠态可见——失败绝不能被折叠隐藏（TR-32）。
+         段渲染（`hideHead`）时不出：每段只有 1 次调用，重复统计反而干扰阅读 -->
+    <p v-if="!hideHead" class="tool-calls__head" data-test="tool-counts">
       本轮 {{ stats.total }} 次调用 · 报错 {{ stats.errors }} 次
     </p>
 
@@ -287,10 +296,10 @@ function bodyHintOf(item: ToolCallItem): string {
   gap: var(--space-2);
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-tool-border);
   border-radius: var(--radius-md);
-  background: var(--color-bg-subtle);
-  color: inherit;
+  background: var(--color-tool-bg);
+  color: var(--color-tool-text);
   font: inherit;
   font-size: var(--font-size-sm);
   text-align: left;
@@ -298,11 +307,11 @@ function bodyHintOf(item: ToolCallItem): string {
 }
 
 .tool-calls__summary:hover {
-  background: var(--color-surface);
+  background: var(--color-tool-bg-hover);
 }
 
 .tool-calls__latest {
-  color: var(--color-text-muted);
+  color: var(--color-tool-text-muted);
   font-size: var(--font-size-xs);
 }
 
@@ -312,10 +321,13 @@ function bodyHintOf(item: ToolCallItem): string {
   gap: var(--space-2);
 }
 
+/* 深灰卡片（2026-11-16）：白气泡里的对比块，`color` 让 `color: inherit` 的子元素
+   （`.tool-call__head`）自动取反白，无需逐个声明 */
 .tool-call {
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-tool-border);
   border-radius: var(--radius-md);
-  background: var(--color-bg-subtle);
+  background: var(--color-tool-bg);
+  color: var(--color-tool-text);
   overflow: hidden;
 }
 
@@ -335,7 +347,7 @@ function bodyHintOf(item: ToolCallItem): string {
 }
 
 .tool-call__head:hover {
-  background: var(--color-surface);
+  background: var(--color-tool-bg-hover);
 }
 
 /* 运行中：没有结果可看，故不给可点暗示（不是"静默无反应"，是明确不可点，TR-33） */
@@ -352,25 +364,30 @@ function bodyHintOf(item: ToolCallItem): string {
 }
 
 .tool-call__status {
-  color: var(--color-text-muted);
+  color: var(--color-tool-text-muted);
+}
+
+/* 深灰底上的状态色：全局状态色（#1f9d55 等）在 #4f5760 上对比不足，改用亮色配套 */
+.tool-call__status--running {
+  color: var(--color-tool-status-running);
 }
 
 .tool-call__status--success {
-  color: var(--color-status-success);
+  color: var(--color-tool-status-success);
 }
 
 .tool-call__status--error {
-  color: var(--color-status-error);
+  color: var(--color-tool-status-error);
 }
 
 .tool-call__meta {
-  color: var(--color-text-muted);
+  color: var(--color-tool-text-muted);
   font-size: var(--font-size-xs);
 }
 
 .tool-call__toggle {
   margin-left: auto;
-  color: var(--color-primary);
+  color: var(--color-tool-link);
   font-size: var(--font-size-xs);
 }
 
@@ -379,13 +396,13 @@ function bodyHintOf(item: ToolCallItem): string {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3) var(--space-3);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-tool-border);
 }
 
 .tool-call__summary,
 .tool-call__args,
 .tool-call__hint {
-  color: var(--color-text-muted);
+  color: var(--color-tool-text-muted);
   font-size: var(--font-size-xs);
 }
 
@@ -395,20 +412,34 @@ function bodyHintOf(item: ToolCallItem): string {
   padding: var(--space-2);
   overflow: auto;
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  background: var(--color-tool-body-bg);
+  color: var(--color-tool-body-text);
   font-family: var(--font-family-mono, monospace);
   font-size: var(--font-size-xs);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* 结构化结果正文：与产出弹窗同观感（可滚动），等宽字形便于读键值 */
+/**
+ * 结构化结果正文：与外层深灰卡片同色系（比卡片再深一档）。
+ *
+ * 这里**局部重定义令牌**而不是给每个子元素加类：`ProducedJsonView` 内部用的是
+ * `--color-text-muted`（空值）/ `--color-border`（对象竖线、表格线）/ `--color-primary`
+ * （视图链接）/ `--color-bg-subtle`（原始 JSON 底），在深底上这些值全都不达标。
+ * 在容器上换掉它们，子组件无需知情即自动跟随——组件边界不变，只有作用域内的取值变。
+ */
 .tool-call__structured {
+  --color-bg-subtle: var(--color-tool-body-bg);
+  --color-border: var(--color-tool-border);
+  --color-text-muted: var(--color-tool-text-muted);
+  --color-primary: var(--color-tool-link);
+
   max-height: 320px;
   padding: var(--space-2);
   overflow: auto;
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  background: var(--color-tool-body-bg);
+  color: var(--color-tool-body-text);
   font-family: var(--font-family-mono, monospace);
   font-size: var(--font-size-xs);
 }
@@ -418,7 +449,7 @@ function bodyHintOf(item: ToolCallItem): string {
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-primary);
+  color: var(--color-tool-link);
   font: inherit;
   font-size: var(--font-size-xs);
   text-decoration: underline;

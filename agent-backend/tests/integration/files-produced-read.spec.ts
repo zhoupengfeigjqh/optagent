@@ -6,7 +6,8 @@
  * `parseSpaceDir` 对非「数据准备」空间拒绝二级目录 —— 不放行就等于"入口行存在、点开必 400"。
  *
  * 覆盖口径（只放行这一个目录，且**只读**）：
- * - `download` / `preview` 可读到产出（`.xlsx` 在 preview 里回退为附件下载）；
+ * - `download` / `preview` 可读到产出（`.xlsx` 自 2026-11-16 起在 preview 里转 CSV 内联，
+ *   无法解析时明确 400，不再静默回退成附件）；
  * - `upload` / `list` / `delete` 仍按原规则拒绝（写进去会打乱 `.meta.json` 索引）；
  * - 其它二级目录（`临时空间/别处`）**不受影响**，仍判 400。
  */
@@ -16,6 +17,7 @@ import path from 'node:path';
 
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as XLSX from 'xlsx';
 
 import { loadConfig } from '../../src/config';
 import { PRODUCED_DIR, userDataDir } from '../../src/domain/dirs';
@@ -26,8 +28,25 @@ const userId = 'admin';
 const AGENT = 'alpha';
 const SCENARIO = { scenario: '产出读入口', data_prep_dirs: ['生产计划'] };
 const NAME = 'th_1_总BOM_bom_1_ab.xlsx';
-/** 内容不必是合法 xlsx：本层只验"能不能读出来"，不看格式 */
+/** 内容不必是合法 xlsx：本层只验"能不能读出来"，不看格式（预览会明确 400） */
 const BYTES = Buffer.from('PK\u0003\u0004fake-xlsx-bytes', 'latin1');
+/** 另备一份**可解析**的产出：验 `.xlsx` 预览转 CSV 内联（2026-11-16） */
+const NAME_OK = 'th_1_总BOM_bom_2_cd.xlsx';
+const BYTES_OK = XLSX.write(
+  (() => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['物料', '数量'],
+        ['A', '10'],
+      ]),
+      '物料',
+    );
+    return wb;
+  })(),
+  { type: 'buffer', bookType: 'xlsx' },
+) as Buffer;
 
 let app: FastifyInstance;
 
@@ -43,6 +62,7 @@ beforeAll(async () => {
   const produced = path.join(userDataDir(root, userId, AGENT), PRODUCED_DIR);
   mkdirSync(produced, { recursive: true });
   writeFileSync(path.join(produced, NAME), BYTES);
+  writeFileSync(path.join(produced, NAME_OK), BYTES_OK);
 
   const configPath = path.join(root, 'config.yaml');
   writeFileSync(configPath, 'models:\n  - model: test-model\n    api_key: test-key\n', 'utf8');
@@ -77,15 +97,26 @@ describe('后台产出目录的读入口', () => {
     expect(res.rawPayload.equals(BYTES)).toBe(true);
   });
 
-  it('preview 对 `.xlsx` 回退成附件下载（与文件空间里的行为一致）', async () => {
+  it('preview 对可解析的 `.xlsx` 内联为 CSV 文本（2026-11-16：不再回退下载）', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/files/preview?${q(PRODUCED_DIR, NAME_OK)}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(String(res.headers['content-disposition'])).toContain('inline');
+    expect(res.body).toContain('### Sheet: 物料');
+  });
+
+  it('preview 对**无法解析**的 `.xlsx` 明确 400（不静默回退成附件）', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/files/preview?${q(PRODUCED_DIR, NAME)}`,
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toBe('application/octet-stream');
-    expect(String(res.headers['content-disposition'])).toContain('attachment');
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
   });
 
   it('读不到不存在的文件：404（不是把目录参数当越权）', async () => {

@@ -48,8 +48,12 @@ export type PreviewTarget =
 
 /** 预览内容（加载结果）。 */
 export interface PreviewContent {
-  renderMode: 'text' | 'pdf' | 'image' | 'html' | 'download' | 'error'
-  /** 文本类内容（`.txt` / `.csv` / `.json`） */
+  /**
+   * `sheet` = 表格文本（`.xlsx`，服务端已转 CSV）；与 `text` 的区别只在展示样式
+   * （等宽表体 vs 纯文本），数据通路完全一致（同走 `fetchPreviewText`）。
+   */
+  renderMode: 'text' | 'sheet' | 'pdf' | 'image' | 'html' | 'download' | 'error'
+  /** 文本类内容（`.txt` / `.csv` / `.json` / `.md` / `.xlsx` 转换后） */
   text: string | null
   /** `.pdf` / `.html` 的 `<iframe>` 地址、图片的 `<img>` 地址，或下载直链 */
   url: string | null
@@ -266,7 +270,13 @@ export function createPreviewStore(deps: PreviewDeps): PreviewStore {
       if (current !== requestId) {
         return
       }
-      content.value = { renderMode: 'text', text, url: null, error: null }
+      // `.xlsx` 与纯文本同一条拉取通路，只是展示样式不同（表格形态）
+      content.value = {
+        renderMode: kind === 'sheet' ? 'sheet' : 'text',
+        text,
+        url: null,
+        error: null,
+      }
     } catch (cause) {
       if (current !== requestId) {
         return

@@ -60,11 +60,54 @@ describe('readToolFile —— `.html`（2026-10-20）', () => {
   });
 
   it('不支持类型的提示含 `.html`（说明与实现同源）', async () => {
-    const { fa } = stubAccess('');
+    const { fa } = stubAccess('MZ\u0000\u0000二进制');
 
     const result = await readToolFile(fa, '共享空间/程序.exe');
 
     expect(result.text).toContain('不支持的文件格式');
     expect(result.text).toContain('.html');
+  });
+});
+
+/**
+ * 未知扩展名的文本嗅探兜底（2026-11-16）：与 `write_file` 的"未登记扩展名回落文本"对齐——
+ * 模型写得进去的必须读得回来，判据是**内容**（有无 NUL）而不是扩展名名分。
+ */
+describe('readToolFile —— 未知扩展名按内容嗅探', () => {
+  it('无 NUL → 按 utf8 文本读，走 readBuffer 而非 read', async () => {
+    const { fa, read, readBuffer } = stubAccess('a: 1\nb: 2\n');
+
+    const result = await readToolFile(fa, '临时空间/th_1.yaml');
+
+    expect(readBuffer).toHaveBeenCalledWith('临时空间/th_1.yaml');
+    expect(read).not.toHaveBeenCalled();
+    expect(result.text).toBe('a: 1\nb: 2\n');
+    expect(result.totalSize).toBe(Buffer.byteLength('a: 1\nb: 2\n', 'utf8'));
+  });
+
+  it('含 NUL → 判定为二进制并拒绝（不看扩展名名分）', async () => {
+    const { fa } = stubAccess(`PK\u0000\u0003\u0004`);
+
+    const result = await readToolFile(fa, '共享空间/归档.bin');
+
+    expect(result.text).toContain('不支持的文件格式 ".bin"');
+  });
+
+  it('NUL 出现在远端（第 100 字节之后）同样拒绝——判据是全缓冲', async () => {
+    const { fa } = stubAccess(`${'x'.repeat(100)}\u0000`);
+
+    const result = await readToolFile(fa, '临时空间/th_1.未知');
+
+    expect(result.text).toContain('不支持的文件格式 ".未知"');
+  });
+
+  it('偏移与截断沿用同一口径', async () => {
+    const { fa } = stubAccess('0123456789');
+
+    const result = await readToolFile(fa, '临时空间/th_1.dat', { offset: 2, limit: 3 });
+
+    expect(result.text).toContain('234');
+    expect(result.truncated).toBe(true);
+    expect(result.totalSize).toBe(10);
   });
 });

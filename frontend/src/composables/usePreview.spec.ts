@@ -134,8 +134,9 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
     })
   })
 
-  it('.xlsx → 下载引导（按扩展名，而不是按响应头）', async () => {
-    const store = createPreviewStore({ files: filesStub() })
+  it('.xlsx → 表格文本内联（2026-11-16：服务端转 CSV，按扩展名分派而非响应头）', async () => {
+    const files = filesStub()
+    const store = createPreviewStore({ files })
 
     await store.openView({
       url: `${ORIGIN}/api/files/preview?dir=a&filename=b`,
@@ -150,7 +151,8 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
       dir: '数据准备/生产计划',
       filename: '9月计划.xlsx',
     })
-    expect(store.content.value?.renderMode).toBe('download')
+    expect(files.fetchPreviewText).toHaveBeenCalledWith('数据准备/生产计划', '9月计划.xlsx')
+    expect(store.content.value?.renderMode).toBe('sheet')
   })
 
   it('.pdf → 先探预览可用性（后端结构化错误）再进 iframe', async () => {
@@ -391,11 +393,11 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
     expect(store.maximizable.value).toBe(false)
   })
 
-  it('⑤b 不支持内联的文件类型（`.xlsx`）→ **不可**放大', async () => {
+  it('⑤b 表格文本（`.xlsx`）→ 内联可见但**不可**放大（与纯文本同档）', async () => {
     const store = createPreviewStore({ files: filesStub() })
     await store.openFile({ dir: '数据准备', filename: '9月计划.xlsx' })
 
-    expect(store.content.value?.renderMode).toBe('download')
+    expect(store.content.value?.renderMode).toBe('sheet')
     expect(store.maximizable.value).toBe(false)
   })
 

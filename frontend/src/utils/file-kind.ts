@@ -3,8 +3,14 @@
  *
  * 预览分派与后端 `GET /api/files/preview` 的 Content-Type 映射一一对应
  * （`contracts/backend-api.md` §5.4、`research.md` D12）：
- * `.txt` / `.csv` / `.json` → 文本内联；`.pdf` → iframe 内联；`.html` → **沙箱** iframe 内联；
- * `.xlsx` / `.xls` / `.zip` → 回退下载；其余不支持。
+ * `.txt` / `.csv` / `.json` / `.md` → 文本内联；`.pdf` → iframe 内联；`.html` → **沙箱** iframe 内联；
+ * `.xlsx` → 表格内联（服务端转 CSV）；`.xls` / `.zip` / `.tif` / `.tiff` → 回退下载；其余不支持。
+ *
+ * 2026-11-16：`.md` 归入 `text`（`write_file` 输出格式路由一期，`specs/022-write-file-format-routing`）。
+ * `read_file` 一直支持 `.md`，但预览缺映射导致只能下载——属于遗漏；后端同批补
+ * `text/markdown` Content-Type，两侧口径保持一致。
+ * `.xlsx` 从 `download` 改为新 kind `sheet`（二期）：后端把工作簿转成 CSV 文本内联返回，
+ * 前端不需要引解析库；`.xls`（BIFF 容器）保持下载。
  *
  * 2026-10-13：`.zip` 归入 `download`（数据准备目录现允许 `scenario.data_prep_uploads` 配置 `.zip`，
  * 压缩包无内联预览形态，归下载而非 `unsupported`）。
@@ -15,10 +21,17 @@
 import { MAX_UPLOAD_BYTES } from '../constants/limits'
 
 /** 预览渲染方式。 */
-export type PreviewKind = 'text' | 'pdf' | 'image' | 'html' | 'download' | 'unsupported'
+export type PreviewKind =
+  | 'text'
+  | 'pdf'
+  | 'image'
+  | 'html'
+  | 'sheet'
+  | 'download'
+  | 'unsupported'
 
 /** 可内联展示为文本的扩展名。 */
-const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json'])
+const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(['.txt', '.csv', '.json', '.md'])
 
 /** 可内联展示的 PDF 扩展名。 */
 const PDF_EXTENSION = '.pdf'
@@ -36,8 +49,11 @@ const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   '.gif',
 ])
 
+/** 服务端转 CSV 文本后内联展示的表格扩展名（前端不引解析库）。 */
+const SHEET_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx'])
+
 /** 需回退下载的扩展名。 */
-const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xlsx', '.xls', '.zip', '.tif', '.tiff'])
+const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['.xls', '.zip', '.tif', '.tiff'])
 
 /** 上传预校验结果。 */
 export interface UploadPrecheckResult {
@@ -75,6 +91,9 @@ export function resolvePreviewKind(filename: string): PreviewKind {
   }
   if (IMAGE_EXTENSIONS.has(extension)) {
     return 'image'
+  }
+  if (SHEET_EXTENSIONS.has(extension)) {
+    return 'sheet'
   }
   if (DOWNLOAD_EXTENSIONS.has(extension)) {
     return 'download'

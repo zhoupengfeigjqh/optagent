@@ -95,6 +95,11 @@ export interface AgentFactoryDeps {
   llmRetry?: LlmRetryOptions;
   /** read_file 截断上限（KB） */
   truncateKb?: number;
+  /**
+   * `write_file` 落盘字节上限（2026-11-16）：生产由 `server.ts` 注入
+   * `PREVIEW_MAX_MB`——与预览上限同源，避免写出"能下载、点开即 413"的文件。
+   */
+  writeMaxBytes?: number;
   /** 签名直链对外基址（file_args 转换用） */
   publicBaseUrl: string;
   /** 签名直链 HMAC 密钥（file_args 转换用） */
@@ -244,6 +249,10 @@ export class AgentInstanceFactory {
           inst.key.agentName,
           'skills',
         ),
+        // 2026-11-16：写入上限与预览上限同源（encode 后按字节判定）
+        ...(this.deps.writeMaxBytes === undefined
+          ? {}
+          : { maxWriteBytes: this.deps.writeMaxBytes }),
         logger,
       });
       for (const builtinTool of builtinTools) builtinNames.add(builtinTool.name);

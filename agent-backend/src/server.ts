@@ -157,6 +157,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // 2026-10-15：请求级模型覆盖的临时 provider 用同一份重试口径（与默认模型单例同源）
     llmRetry: config.llmRetry,
     truncateKb: config.readTruncateKb,
+    // 2026-11-16：write_file 的落盘上限与预览上限同源（超限在写入前拒绝，
+    // 而不是写出一个"能下载、点开即 413"的文件）
+    writeMaxBytes: config.previewMaxMb * 1024 * 1024,
     publicBaseUrl: config.publicBaseUrl,
     fileSignSecret: config.fileSignSecret,
     // 建连落定 → 事件总线 → SSE 路由推送最新快照（替代前端轮询）

@@ -333,11 +333,13 @@ const containsActiveMatch = computed(() => {
          形成"说话 → 干活 → 再说"的时间线；否则后到的卡片会插到已流出的正文上方 -->
     <template v-if="streamSegments.length > 0">
       <template v-for="(segment, index) in streamSegments" :key="index">
+        <!-- `hide-head`：每段只有 1 次调用，不重复渲染「本轮 N 次调用」计数行 -->
         <ToolCallList
           v-if="segment.kind === 'tool'"
           class="message-bubble__tools"
           :items="[streamingToolCallItem(segment.call)]"
           :live="true"
+          :hide-head="true"
           @open-view="emit('open-view', $event)"
         />
         <!-- 段内正文不接搜索高亮：流式气泡不在搜索结果里，接了会让全局匹配序号错位 -->

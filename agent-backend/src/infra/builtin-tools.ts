@@ -43,6 +43,7 @@ import { listToolDir } from '../domain/tools/list-dir.js';
 import { readToolFile } from '../domain/tools/read-file.js';
 import { readSkillFile, SkillAccessError } from '../domain/tools/read-skill.js';
 import { writeToolFile } from '../domain/tools/write-file.js';
+import { ContentFormatError, WriteTooLargeError } from '../domain/tools/write-modes.js';
 import { toolErrorResult } from '../domain/tool-error.js';
 
 export interface BuiltinToolsOptions {
@@ -61,6 +62,11 @@ export interface BuiltinToolsOptions {
    * 提供"只读 + 只能落在该技能目录内"的共享校验（两条技能访问通道共用一份判据）。
    */
   skillsDir: string;
+  /**
+   * `write_file` 落盘字节上限（2026-11-16）。生产由 `server.ts` 注入
+   * `PREVIEW_MAX_MB`，与预览上限同源；未注入时取 `DEFAULT_WRITE_MAX_BYTES`。
+   */
+  maxWriteBytes?: number;
   logger: Logger;
 }
 
@@ -105,6 +111,32 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
           'FILE_ACCESS_DENIED',
         );
       }
+      // 2026-11-16：write_file 的三种"内容/格式"失败——都属可自我纠正的用法问题
+      // （不是越权、不是程序缺陷），文案直接给模型下一步怎么做，日志不带 alert。
+      if (err instanceof ContentFormatError) {
+        opts.logger.warn(
+          {
+            event: 'file.write.rejected',
+            thread_id: opts.threadId,
+            tool: name,
+            code: err.code,
+          },
+          `工具 ${name} 内容与扩展名不匹配：${err.message}`,
+        );
+        return toolErrorResult(`内容与扩展名不匹配：${err.message}`, err.code);
+      }
+      if (err instanceof WriteTooLargeError) {
+        opts.logger.warn(
+          {
+            event: 'file.write.rejected',
+            thread_id: opts.threadId,
+            tool: name,
+            code: err.code,
+          },
+          `工具 ${name} 写入超限：${err.message}`,
+        );
+        return toolErrorResult(`写入失败：${err.message}`, err.code);
+      }
       if (err instanceof SkillAccessError) {
         // 技能内的越权/越界访问：与文件越权同口径记 alert，但文案不同——
         // 技能目录恒只读，且"改写临时空间"这类建议与技能无关
@@ -146,16 +178,21 @@ function domainExecute(
         ).text;
     case 'write_file':
       return async (p) => {
-        const r = await writeToolFile(fa, opts.threadId, String(p.filename), String(p.content));
+        const r = await writeToolFile(fa, opts.threadId, String(p.filename), String(p.content), {
+          maxBytes: opts.maxWriteBytes,
+        });
         // 结构化结果（2026-10-21）：`filePath` / `filePathName` 是视图链接协议的字段名，
         // 由 `extractViewLinks()` 抬成 `view_links` sidecar → 前端在回答下方渲染可点入口。
         // 只给**空间相对路径**（不在后端拼 URL/前缀），归一化仍由前端唯一负责（`TR-42`）。
         // `message` 保留人话，模型与日志都能直接读懂；工具说明要求模型不要转抄 JSON。
+        // `bytes` 恒为**落盘字节数**（2026-11-16 起对有编码的格式不再等于 content 长度），
+        // `mode` 是该扩展名命中的输出模式，便于日志回溯"写的是哪种格式"。
         return JSON.stringify({
           message: `已写入 ${r.path}（${r.bytes} 字节）`,
           filePath: r.path,
           filePathName: path.basename(r.path),
           bytes: r.bytes,
+          mode: r.mode,
         });
       };
     case 'list_dir':

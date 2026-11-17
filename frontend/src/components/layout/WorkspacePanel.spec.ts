@@ -89,6 +89,23 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
     expect(wrapper.find('.workspace-panel__text').text()).toBe('一车间 120 件')
     expect(wrapper.find('.workspace-panel__name').text()).toBe('产能.txt')
   })
+
+  it('`renderMode: sheet`（`.xlsx`）→ 表格文本内联，不进 iframe（2026-11-16）', () => {
+    const wrapper = mountContent(
+      { kind: 'file', dir: '临时空间', filename: '汇总.xlsx' },
+      {
+        renderMode: 'sheet',
+        text: '### Sheet: 物料\n物料,数量\nA,10',
+        url: null,
+        error: null,
+      },
+    )
+
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.find('.workspace-panel__text').text()).toContain('### Sheet: 物料')
+    expect(wrapper.find('.workspace-panel__text').text()).toContain('物料,数量')
+    expect(wrapper.find('.workspace-panel__name').text()).toBe('汇总.xlsx')
+  })
 })
 
 /**

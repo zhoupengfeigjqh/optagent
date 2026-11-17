@@ -35,8 +35,13 @@ describe('fileExtension', () => {
 })
 
 describe('resolvePreviewKind', () => {
-  it.each(['a.txt', 'a.csv', 'a.json'])('%s → 文本内联', (filename) => {
+  it.each(['a.txt', 'a.csv', 'a.json', 'a.md'])('%s → 文本内联', (filename) => {
     expect(resolvePreviewKind(filename)).toBe('text')
+  })
+
+  it('2026-11-16：`.md` 与后端 text/markdown 映射同源（此前只能下载）', () => {
+    expect(resolvePreviewKind('分析.md')).toBe('text')
+    expect(resolvePreviewKind('REPORT.MD')).toBe('text')
   })
 
   it('pdf → iframe 内联', () => {
@@ -52,11 +57,16 @@ describe('resolvePreviewKind', () => {
     expect(resolvePreviewKind(filename)).toBe('image')
   })
 
-  it.each(['a.xlsx', 'a.tif', 'a.tiff'])('%s → 回退下载', (filename) => {
+  it.each(['a.tif', 'a.tiff'])('%s → 回退下载', (filename) => {
     expect(resolvePreviewKind(filename)).toBe('download')
   })
 
-  it('2026-10-14：.xls → 回退下载（与 .xlsx 同口径，不再落到 unsupported）', () => {
+  it('2026-11-16：.xlsx → 表格内联（服务端转 CSV，前端不引解析库）', () => {
+    expect(resolvePreviewKind('汇总.xlsx')).toBe('sheet')
+    expect(resolvePreviewKind('SUMMARY.XLSX')).toBe('sheet')
+  })
+
+  it('2026-10-14：.xls 仍回退下载（BIFF 容器不转文本，只有 .xlsx 走表格内联）', () => {
     expect(resolvePreviewKind('总BOM.xls')).toBe('download')
     expect(resolvePreviewKind('ARCHIVE.XLS')).toBe('download')
   })

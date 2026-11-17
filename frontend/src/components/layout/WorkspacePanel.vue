@@ -304,6 +304,12 @@ useMaximizeEscape({
           content.text
         }}</pre>
 
+        <!-- 表格（`.xlsx`，2026-11-16）：服务端已把工作簿转成 CSV 文本（多 sheet 带
+             `### Sheet: 名称` 分段），这里与文本同款 `<pre>` 呈现，不引前端解析库 -->
+        <pre v-else-if="content.renderMode === 'sheet'" class="workspace-panel__text">{{
+          content.text
+        }}</pre>
+
         <!-- PDF -->
         <iframe
           v-else-if="content.renderMode === 'pdf'"

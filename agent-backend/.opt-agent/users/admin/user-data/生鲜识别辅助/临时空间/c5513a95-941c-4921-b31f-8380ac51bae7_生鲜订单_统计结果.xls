@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+  <Title>生鲜订单解析统计结果</Title>
+  <Author>fresh-order-parse</Author>
+  <Created>2026-11-16T22:53:59Z</Created>
+ </DocumentProperties>
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+   <Font ss:FontName="Microsoft YaHei" ss:Size="10"/>
+  </Style>
+  <Style ss:ID="sHead">
+   <Alignment ss:Vertical="Center" ss:Horizontal="Center" ss:WrapText="1"/>
+   <Font ss:FontName="Microsoft YaHei" ss:Size="10" ss:Bold="1" ss:Color="#1F2328"/>
+   <Interior ss:Color="#F6F7F9" ss:Pattern="Solid"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+   </Borders>
+  </Style>
+  <Style ss:ID="sCell">
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+   </Borders>
+  </Style>
+  <Style ss:ID="sHl">
+   <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+   <Font ss:FontName="Microsoft YaHei" ss:Size="10" ss:Bold="1" ss:Color="#B42318"/>
+   <Interior ss:Color="#FFE8E8" ss:Pattern="Solid"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/>
+   </Borders>
+  </Style>
+  <Style ss:ID="sTitle">
+   <Alignment ss:Vertical="Center"/>
+   <Font ss:FontName="Microsoft YaHei" ss:Size="14" ss:Bold="1"/>
+  </Style>
+ </Styles>
+
+ <Worksheet ss:Name="总览">
+  <Table>
+   <Column ss:Width="160"/>
+   <Column ss:Width="320"/>
+   <Row ss:Height="26"><Cell ss:StyleID="sTitle"><Data ss:Type="String">生鲜订单解析统计总览</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">项目</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">内容</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">来源图片</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">order6.png</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">SKU清单</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">数据准备/生鲜sku表/SKU清单.xlsx</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">生成时间</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">2026-11-16 22:53:59</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">高度匹配(auto_rows)</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="Number">1</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">候选审核(review_rows)</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="Number">0</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">异常记录(error_rows)</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="Number">0</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">最终推荐表行数</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="Number">2</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">最终表判定分布</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">直接匹配 1、模型推荐 0、待确认 1</Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+ <Worksheet ss:Name="高度匹配">
+  <Table>
+   <Column ss:Width="40"/><Column ss:Width="120"/><Column ss:Width="110"/><Column ss:Width="70"/><Column ss:Width="110"/><Column ss:Width="90"/><Column ss:Width="70"/>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">#</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">原始行</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">标准化名称</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">数量</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">匹配商品</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">SKU编码</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">置信度</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="Number">1</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪牛肉各10斤</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪牛肉各</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">10斤</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">牛肉</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">MEA-006</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="Number">90</Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+ <Worksheet ss:Name="候选审核">
+  <Table>
+   <Column ss:Width="40"/><Column ss:Width="120"/><Column ss:Width="110"/><Column ss:Width="70"/><Column ss:Width="70"/><Column ss:Width="240"/>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">#</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">原始行</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">标准化名称</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">数量</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">最高分</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">候选列表</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">无</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">无（0 行）</Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+ <Worksheet ss:Name="异常记录">
+  <Table>
+   <Column ss:Width="40"/><Column ss:Width="120"/><Column ss:Width="110"/><Column ss:Width="70"/><Column ss:Width="110"/><Column ss:Width="100"/><Column ss:Width="70"/><Column ss:Width="220"/>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">#</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">原始行</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">标准化名称</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">数量</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">异常类型</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">最高候选</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">最高分</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">说明</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">无</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">无（0 行）</Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+ <Worksheet ss:Name="异常与存疑复核">
+  <Table>
+   <Column ss:Width="110"/><Column ss:Width="560"/>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">项目</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">内容</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">订单行</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪牛肉各10斤（标准化：猪牛肉各，数量 10斤）</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">工具结论</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">自动匹配 牛肉（MEA-006），置信度 90，无异常标记</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">推荐（牛肉）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">牛肉（SKU编码 MEA-006）</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">推荐（猪肉）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">SKU 清单中未找到“猪肉”</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">证据（牛肉）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">SKU清单 —— MEA-006 / 牛肉 / 别名：空 / 规格：500g / 单位：斤 / 启用：是</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">证据（猪肉）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">清单肉禽类无“猪肉”整肉条目，仅部位肉 MEA-001 五花肉、MEA-002 梅花肉、MEA-003 里脊、MEA-004 排骨、MEA-019 猪肝（停用）、MEA-020 猪肚</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">判断依据</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">“猪牛肉各”是两种肉合并写法，“各”表示各自10斤；工具只取了“牛肉”，猪肉部分被丢掉</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">已检索关键词</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪、猪肉、五花肉、梅花肉、里脊、排骨、猪蹄、猪肝、猪肚</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">待确认</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪肉具体部位（五花肉/梅花肉/里脊/排骨/猪肚）？是否确认共计20斤（各10斤）？</Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+ <Worksheet ss:Name="最终推荐表">
+  <Table>
+   <Column ss:Width="40"/><Column ss:Width="200"/><Column ss:Width="70"/><Column ss:Width="150"/><Column ss:Width="100"/><Column ss:Width="80"/><Column ss:Width="300"/>
+   <Row><Cell ss:StyleID="sHead"><Data ss:Type="String">序号</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">原始行</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">数量</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">最终商品</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">SKU编码</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">判定</Data></Cell><Cell ss:StyleID="sHead"><Data ss:Type="String">依据</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="Number">1</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪牛肉各10斤（牛肉部分）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">10斤</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">牛肉</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">MEA-006</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">直接匹配</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">分数 90，名称命中 MEA-006</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="Number">2</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">猪牛肉各10斤（猪肉部分）</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">10斤</Data></Cell><Cell ss:StyleID="sHl"><Data ss:Type="String">待确认：猪肉（部位待定）</Data></Cell><Cell ss:StyleID="sHl"><Data ss:Type="String">—</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">待确认</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">已检索“猪肉/五花肉/梅花肉/里脊/排骨/猪蹄/猪肚”，清单无“猪肉”条目</Data></Cell></Row>
+   <Row><Cell ss:StyleID="sCell"><Data ss:Type="String">合计</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">2 行</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String"></Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String">直接匹配 1、模型推荐 0、待确认 1</Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String"></Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String"></Data></Cell><Cell ss:StyleID="sCell"><Data ss:Type="String"></Data></Cell></Row>
+  </Table>
+ </Worksheet>
+
+</Workbook>

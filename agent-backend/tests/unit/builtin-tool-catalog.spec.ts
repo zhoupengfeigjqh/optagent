@@ -114,10 +114,16 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
     });
   });
 
-  it('write_file 的说明与入参（含字面量 {filename} 不被替换，2026-10-21 改为结构化返回口径）', () => {
+  it('write_file 的说明与入参（含字面量 {filename} 不被替换；2026-11-16 改为按扩展名路由格式）', () => {
     expect(rendered.get('write_file')?.description).toBe(
-      `把内容写入临时空间，文件名会自动要求以 "${THREAD_ID}_" 开头。` +
+      `把内容写入临时空间，文件名必须以 "${THREAD_ID}_" 开头；**扩展名决定落盘格式**：` +
+        '.txt/.md/.html/.csv 按 UTF-8 文本原样写入（.csv 需引号配对）；' +
+        '.json 必须是完整合法的 JSON；' +
+        '.xlsx 用 CSV 行数据，可用 "# Sheet: 名称" 行分出多个工作表；' +
+        '.pdf 用受限 Markdown（# 标题、- 列表、| a | b | 表格、空行分段）；' +
+        '其他扩展名一律按文本写入，但界面只能下载、不能内联查看。' +
         '数据准备与共享空间为只读，写入会被拒绝。' +
+        '.html 在沙箱中预览，页面脚本不会执行。' +
         '成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；' +
         '不要在正文里重复路径或拼链接。',
     );
@@ -128,9 +134,13 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
         filename: {
           type: 'string',
           title: '文件名',
-          description: `文件名，必须以 ${THREAD_ID}_ 开头`,
+          description: `文件名，必须以 ${THREAD_ID}_ 开头；扩展名决定格式（.txt/.md/.html/.csv/.json/.xlsx/.pdf），其他扩展名按文本写入`,
         },
-        content: { type: 'string', title: '文件内容', description: '文件内容（utf8 文本）' },
+        content: {
+          type: 'string',
+          title: '文件内容',
+          description: '文件内容（utf8 文本；.json 需为合法 JSON，.xlsx 为 CSV 行数据，.pdf 为受限 Markdown）',
+        },
       },
     });
   });

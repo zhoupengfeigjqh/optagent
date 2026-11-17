@@ -97,6 +97,23 @@ describe('ToolCallList —— 计数与报错数（TR-32）', () => {
   })
 })
 
+describe('ToolCallList —— 段渲染隐藏计数行（2026-11-16）', () => {
+  it('hideHead：不渲染「本轮 N 次调用」，卡片本身照常可见', () => {
+    const wrapper = mount(ToolCallList, {
+      props: { items: [{ ...READ, content: '车间,计划量' }], hideHead: true },
+    })
+
+    expect(wrapper.find('[data-test="tool-counts"]').exists()).toBe(false)
+    expect(wrapper.find('.tool-call__head').text()).toContain('read_file')
+  })
+
+  it('默认（不传）仍渲染计数行：历史与整轮渲染的口径不变', () => {
+    const wrapper = mountList([READ])
+
+    expect(wrapper.find('[data-test="tool-counts"]').text()).toContain('本轮 1 次调用')
+  })
+})
+
 describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
   it('≥2 次调用时折叠为一行摘要：只露最新一条，明细区不存在', () => {
     const wrapper = mountList([READ, QUERY, OCR])

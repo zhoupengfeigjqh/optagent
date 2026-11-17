@@ -42,6 +42,33 @@
   --color-status-pending: #8b93a3;
   --color-status-pending-bg: #f1f3f7;
 
+  /**
+   * ---------- 颜色：工具卡片（2026-11-16 改版：深灰块） ----------
+   *
+   * 为什么要单独成组：工具卡片原先用 `--color-bg-subtle`（#f7f8fa）做底色，在白色
+   * 气泡里几乎"看不见"，多轮工具时也分不清"哪一步在跑"。改成深灰块后与白底形成对比，
+   * 卡片本身的重量也能表达"这里发生了实际操作"。
+   *
+   * 为什么不能复用全局文本/状态色：深灰底（#4f5760）上直接用 `--color-text`（#1f2430）
+   * 对比不足 2:1，`--color-status-success`（#1f9d55）也只有 2.4:1。故这一组是**深灰专用**
+   * 的亮色配套，语义与全局一致、取值不同。
+   *
+   * 取值与白字对比度：bg 6.7 : 1（AA 通过）；四档方案里这是中间档，
+   * 更浅会跌破 4.5（见 `demo-segment-timeline.html` 的评估记录）。
+   */
+  --color-tool-bg: #4f5760;
+  --color-tool-bg-hover: #575f69;
+  --color-tool-border: #5d6670;
+  --color-tool-text: #f8fafb;
+  --color-tool-text-muted: #d6dce2;
+  --color-tool-link: #9ac7ff;
+  --color-tool-status-running: #9ac7ff;
+  --color-tool-status-success: #7fdcab;
+  --color-tool-status-error: #ffaea5;
+  /* 展开后的结果区：比卡片再深一档，避免"深色卡片头 + 白色结果体"的割裂 */
+  --color-tool-body-bg: #454c55;
+  --color-tool-body-text: #e7ecf1;
+
   /* ---------- 颜色：搜索高亮（FR-029 黄色高亮 / 当前命中） ---------- */
   --color-highlight: #ffe066;
   --color-highlight-active: #ffb020;

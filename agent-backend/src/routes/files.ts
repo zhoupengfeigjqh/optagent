@@ -37,6 +37,7 @@ import {
 } from '../domain/dirs.js';
 import { buildWorkspaceView } from '../domain/workspace-view.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
+import { xlsxToText } from '../domain/preview/xlsx-text.js';
 import { parseRuleFile, RULES_SUBDIR } from '../domain/rule-file.js';
 import { ApiError } from '../server.js';
 import { splitAgentScopedPath, verifyRef } from '../infra/file-sign.js';
@@ -44,11 +45,14 @@ import { checkDir, checkDirRead, currentAgentFor } from './files-scope.js';
 import { registerFileUploadRoute } from './files-upload.js';
 import { registerFilePutRoute } from './files-put.js';
 
-/** 内联预览 Content-Type 映射；.xlsx/.xls 前端无法内联渲染，回退附件下载 */
+/** 内联预览 Content-Type 映射；`.xls`（BIFF 容器）前端无法内联渲染，回退附件下载 */
 const PREVIEW_CONTENT_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // 2026-11-16：`.md` 与 `.txt` 同形态内联（`read_file` 一直支持 `.md`，
+  // 但预览缺映射导致只能下载——属于遗漏，不是设计决策；本期补齐）
+  '.md': 'text/markdown; charset=utf-8',
   '.pdf': 'application/pdf',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -203,9 +207,23 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         );
       }
       const ext = path.extname(filename).toLowerCase();
+      // `.xlsx`（2026-11-16）：服务端转 CSV 文本内联——前端不引解析库，
+      // 且"预览看到的 sheet 分段"与"模型 read_file 读到的"完全同构（共用 xlsxToText）
+      if (ext === '.xlsx') {
+        let text: string;
+        try {
+          text = xlsxToText(buf);
+        } catch {
+          throw new ApiError(400, 'VALIDATION_FAILED', `无法解析 Excel 文件: ${filename}`);
+        }
+        return reply
+          .header('content-type', 'text/csv; charset=utf-8')
+          .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`)
+          .send(text);
+      }
       const contentType = PREVIEW_CONTENT_TYPES[ext];
       if (!contentType) {
-        // 不可内联类型（如 .xlsx/.xls）回退附件下载
+        // 不可内联类型（如 .xls）回退附件下载
         return reply
           .header('content-type', 'application/octet-stream')
           .header(
