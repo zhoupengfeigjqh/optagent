@@ -24,6 +24,7 @@ const ALLOWED_DEPENDENCIES = new Set([
   '@modelcontextprotocol/sdk',
   'yauzl', // D7：SKILL ZIP 安全解压
   'yaml', // D2（2026-10-03 重新引入）：只读解析本体市场 ontology.yaml 的 metadata
+  'jose', // 024：JWT 签发/验签（登录凭据）；纯 JS、无原生模块
 ]);
 
 /** D2 登记的开发依赖 */

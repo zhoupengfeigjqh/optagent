@@ -16,8 +16,8 @@ import {
 } from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 27 个码，且与 HTTP 状态映射一一对应（契约 §0.4；26 → 25 是 2026-10-15 下架 ADM_MCP_TOOL_SCOPE_LOCKED，25 → 27 是同日补登 §11 的 401/403 两码）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(27);
+  it('共 28 个码，且与 HTTP 状态映射一一对应（27 → 28 是 024 登录鉴权新增 ADM_INVALID_CREDENTIALS）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(28);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }
@@ -34,9 +34,10 @@ describe('错误码总表', () => {
     expect(ERROR_STATUS[ERROR_CODES.SERVICE_UNAVAILABLE]).toBe(503);
   });
 
-  it('§11 预登记码的状态码已冻结（401/403，功能未实施）', () => {
+  it('§11 码的状态码（401/403；024 起 ADM_UNAUTHENTICATED/ADM_INVALID_CREDENTIALS 已启用）', () => {
     expect(ERROR_STATUS[ERROR_CODES.ADM_UNAUTHENTICATED]).toBe(401);
     expect(ERROR_STATUS[ERROR_CODES.ADM_FORBIDDEN]).toBe(403);
+    expect(ERROR_STATUS[ERROR_CODES.ADM_INVALID_CREDENTIALS]).toBe(401);
   });
 
   it('ADM_ 前缀码与既有码零碰撞', () => {

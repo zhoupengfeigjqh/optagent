@@ -14,6 +14,8 @@ import { loadConfig, type AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { ApiError } from './domain/api-error.js';
 import { auditOf } from './domain/audit.js';
+import { AuthService } from './domain/auth/service.js';
+import { SessionStore } from './domain/auth/session-store.js';
 import { AgentDesignService } from './domain/config-center/agent-design.js';
 import { agentsReferencingService, expandToPairs } from './domain/config-center/references.js';
 import { UnifiedCatalog } from './domain/config-center/unified-catalog.js';
@@ -33,6 +35,7 @@ import { PlatformStore } from './infra/platform-store.js';
 import { RuntimeClient } from './infra/runtime-client.js';
 import { createLoggers } from './logging.js';
 import { registerAgentRoutes } from './routes/agents.js';
+import { registerAuthRoutes } from './routes/auth.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerDeployRoutes } from './routes/deploy.js';
 import { registerMcpRoutes } from './routes/mcp.js';
@@ -75,6 +78,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const ontologies = new OntologyStore(store, { logger: loggers.logger });
   const agents = new AgentDesignService(store);
   const users = new UserLinkService(store);
+  // 024：登录鉴权（会话登记 + 登录编排）
+  const sessionStore = new SessionStore(store);
+  const auth = new AuthService(users, sessionStore, {
+    secret: config.authSecret,
+    ttlSeconds: config.authTokenTtlSeconds,
+  });
   const mcpConfigs = new McpServiceConfigService(store);
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
@@ -123,6 +132,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     history,
     writer,
     catalog,
+    sessionStore,
+    auth,
     deployer: new Deployer({
       optAgentRoot: config.optAgentRoot,
       store,
@@ -241,6 +252,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerOntologyRoutes(routeApp, ctx);
   registerReferenceRoutes(routeApp, ctx);
   registerDeployRoutes(routeApp, ctx, ctx.deployer);
+  // 024：登录鉴权（login/me/logout/session/valid）
+  registerAuthRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {
     await loggers.close();

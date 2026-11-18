@@ -12,7 +12,13 @@
  */
 
 import { parseSseChunk } from '../utils/sse-parser'
-import { ApiError, CLIENT_ERROR_CODE, parseErrorResponse, type QueryValue } from './http'
+import {
+  ApiError,
+  CLIENT_ERROR_CODE,
+  notifyUnauthorized,
+  parseErrorResponse,
+  type QueryValue,
+} from './http'
 import type { RawSseEvent } from './types'
 
 /** 流式请求参数。 */
@@ -86,7 +92,9 @@ export async function postSseStream(
   }
 
   if (!response.ok) {
-    throw await parseErrorResponse(response)
+    const error = await parseErrorResponse(response)
+    notifyUnauthorized(error)
+    throw error
   }
 
   const stream = response.body

@@ -146,6 +146,7 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
       OPT_AGENT_ROOT: optAgentRoot,
       OPT_AGENT_BACKEND_URL: 'http://127.0.0.1:1',
       RUNTIME_TIMEOUT_MS: '200',
+      AUTH_SECRET: 'test-secret-0123456789',
       ...options.env,
     },
   });

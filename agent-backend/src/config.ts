@@ -18,6 +18,13 @@ const envSchema = z.object({
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   OPT_AGENT_ROOT: z.string().min(1).default('.opt-agent'),
+  /**
+   * 024：登录凭据验签密钥（**可选**）。与 admin-backend 同值。
+   * 缺省 = 鉴权未启用，运行环境回退 legacy 单用户（可回滚，`research.md` D9）。
+   */
+  AUTH_SECRET: z.string().min(16).optional(),
+  /** 024：平台（admin-backend）基址，供会话内省调用。 */
+  ADMIN_BACKEND_URL: z.string().min(1).default('http://127.0.0.1:3001'),
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
   IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_800_000),
   /** 单次 MCP 工具调用超时（毫秒）；同步型算法工具（如 hd_scheduling_submit）依赖此上限，勿再调小 */
@@ -248,6 +255,10 @@ export interface AppConfig {
   defaultModel: ModelEntry;
   /** 013：意图聚焦判定模型；缺省 = 该功能不可用（不判定、不追加聚焦提示） */
   intentFocus?: IntentFocusConfig;
+  /** 024：登录凭据验签密钥；缺省 = 鉴权未启用（回退 legacy 单用户） */
+  authSecret?: string;
+  /** 024：平台（admin-backend）基址，供会话内省 */
+  adminBackendUrl: string;
 }
 
 export class ConfigError extends Error {
@@ -509,6 +520,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     models,
     defaultModel: models[0]!,
     ...(intentFocus ? { intentFocus } : {}),
+    ...(e.AUTH_SECRET ? { authSecret: e.AUTH_SECRET } : {}),
+    adminBackendUrl: e.ADMIN_BACKEND_URL.replace(/\/+$/, ''),
   };
   return Object.freeze(config);
 }

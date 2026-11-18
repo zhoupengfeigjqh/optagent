@@ -12,8 +12,12 @@ export function listUsers(page = 1, expandSummary = true): Promise<Paged<UserLis
   })
 }
 
-export function createUser(userId: string, agents: string[]): Promise<UserDetail> {
-  return http.post<UserDetail>('/api/admin/users', { user_id: userId, agents })
+export function createUser(userId: string, agents: string[], password?: string): Promise<UserDetail> {
+  return http.post<UserDetail>('/api/admin/users', {
+    user_id: userId,
+    agents,
+    ...(password ? { password } : {}),
+  })
 }
 
 export function updateUser(
@@ -24,6 +28,18 @@ export function updateUser(
   return http.put<UserDetail>(`/api/admin/users/${encodeURIComponent(userId)}`, {
     agents,
     revision,
+  })
+}
+
+/**
+ * 重置密码（契约 §6.4.1，2026-11-18）。
+ *
+ * 专用子资源、**不带 `revision`**：密码不属于部署/配置快照，若占版本会把别人正在
+ * 编辑的数字人关联无谓地打成 409。成功后该用户的既有登录会话由服务端一并注销。
+ */
+export function resetUserPassword(userId: string, password: string): Promise<UserDetail> {
+  return http.post<UserDetail>(`/api/admin/users/${encodeURIComponent(userId)}/password`, {
+    password,
   })
 }
 

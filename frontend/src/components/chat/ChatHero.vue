@@ -38,7 +38,7 @@ const emit = defineEmits<{ select: [starter: AgentStarter] }>()
         请先选择数字人，再使用下方的问题快速开始。
       </p>
       <p v-else-if="starters.length === 0" class="chat-hero__desc">
-        在下方输入消息，即可开始本轮求解。
+        在下方输入消息，即可开启新的会话。
       </p>
 
       <ul v-if="starters.length > 0" class="chat-hero__starters">

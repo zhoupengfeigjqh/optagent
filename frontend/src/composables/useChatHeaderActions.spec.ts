@@ -108,23 +108,27 @@ describe('useChatHeaderActions —— 文件空间面板', () => {
 })
 
 describe('useChatHeaderActions —— 数字人面板', () => {
-  it('展开才拉候选清单，关闭不拉', async () => {
+  it('打开才拉候选清单；已展开再打开不重复拉、也不关闭（幂等）', async () => {
     const deps = makeDeps()
     const actions = mountActions(deps)
 
-    await actions.onToggleAgent()
+    await actions.onOpenAgentPanel()
+    expect(actions.agentPanelOpen.value).toBe(true)
+    expect(deps.agents.loadCandidates).toHaveBeenCalledTimes(1)
+
+    // 账号菜单再次选「切换数字人」：语义是打开，不得把面板关掉、也不重复拉清单
+    await actions.onOpenAgentPanel()
     expect(actions.agentPanelOpen.value).toBe(true)
     expect(deps.agents.loadCandidates).toHaveBeenCalledTimes(1)
 
     actions.onCloseAgentPanel()
     expect(actions.agentPanelOpen.value).toBe(false)
-    expect(deps.agents.loadCandidates).toHaveBeenCalledTimes(1)
   })
 
   it('切换成功才收起面板；切换失败保持展开便于重试（FR-037）', async () => {
     const deps = makeDeps()
     const actions = mountActions(deps)
-    await actions.onToggleAgent()
+    await actions.onOpenAgentPanel()
 
     // 失败：当前数字人没变
     await actions.onSwitchAgent('demo-a')

@@ -15,6 +15,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
+import {
+  isPasswordLengthValid,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from '../domain/auth/password.js';
 import { anomalyReason, detectAnomalies } from '../domain/config-center/references.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage } from '../domain/paging.js';
@@ -61,10 +66,30 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 
   app.post('/api/admin/users', async (req, reply) => {
-    const body = (req.body ?? {}) as { user_id?: unknown; agents?: unknown; revision?: unknown };
+    const body = (req.body ?? {}) as {
+      user_id?: unknown;
+      agents?: unknown;
+      revision?: unknown;
+      password?: unknown;
+    };
     assertAgentsExist(ctx, body.agents);
+    // 024：新建用户可设初始密码（缺省 = 不设，视为不可登录的存量口径）
+    let password: string | undefined;
+    if (body.password !== undefined && body.password !== null && body.password !== '') {
+      if (
+        typeof body.password !== 'string' ||
+        body.password.length < PASSWORD_MIN_LENGTH ||
+        body.password.length > PASSWORD_MAX_LENGTH
+      ) {
+        throw new ApiError(
+          ERROR_CODES.VALIDATION_FAILED,
+          `密码长度须为 ${PASSWORD_MIN_LENGTH}~${PASSWORD_MAX_LENGTH} 个字符`,
+        );
+      }
+      password = body.password;
+    }
     const revision = typeof body.revision === 'number' ? body.revision : undefined;
-    const view = ctx.users.create(body.user_id, body.agents, revision);
+    const view = ctx.users.create(body.user_id, body.agents, revision, password);
     return reply.status(201).send(view);
   });
 
@@ -78,6 +103,30 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     return ctx.users.update(userId, body.agents, body.revision);
   });
 
+  /**
+   * 重置密码（2026-11-18，契约 §6.4.1）。
+   *
+   * 独立子资源而非并入 `PUT /api/admin/users/{uid}`：后者带 `revision` 且语义是
+   * "替换关联数字人"，把密码塞进去会让两条无关的写入互相拖累版本。这里**不带**乐观锁。
+   *
+   * 重置成功即撤销该用户的会话（`FR-012` 同口径）：旧凭据里登记的是旧会话，
+   * 不改密码就换会话等于没收回，故必须先清登记再返回。
+   */
+  app.post('/api/admin/users/:user_id/password', async (req) => {
+    const { user_id: userId } = req.params as { user_id: string };
+    const body = (req.body ?? {}) as { password?: unknown };
+    const password = body.password;
+    if (typeof password !== 'string' || !isPasswordLengthValid(password)) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        `密码长度须为 ${PASSWORD_MIN_LENGTH}~${PASSWORD_MAX_LENGTH} 个字符`,
+      );
+    }
+    const view = ctx.users.setPassword(userId, password);
+    ctx.auth.revokeUser(userId);
+    return view;
+  });
+
   app.delete('/api/admin/users/:user_id', async (req, reply) => {
     const { user_id: userId } = req.params as { user_id: string };
     // 不存在 → 404（先读一次，避免对未知目录做写操作）
@@ -85,6 +134,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
     ctx.deployer.purgeUser(userId);
     ctx.users.remove(userId);
+    // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
+    ctx.auth.revokeUser(userId);
     return reply.status(204).send();
   });
 }

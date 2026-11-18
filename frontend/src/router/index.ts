@@ -1,36 +1,40 @@
-/*
- * @Author: Nose陈建
- * @LastEditTime: 2026-09-28 11:37:51
- */
 /**
- * 路由配置
+ * 路由配置（024）
  *
- * 当前仅有工作台一个路由；`App.vue` 只承载 `<RouterView />`，
- * 页面级组件统一放在 `src/views/` 下，新增页面时在此登记路由即可。
+ * 登录态以 HttpOnly Cookie + `/api/admin/auth/me` 探针为准（前端不读 Cookie）。
+ * 守卫对 `meta.requiresAuth` 的业务路由异步探针，未登录跳 `/login`。
  */
 import { createRouter, createWebHistory } from 'vue-router'
-import { getToken } from '@/utils/cookie'
+import { getAuthStore } from '@/composables/useAuth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+      meta: { requiresAuth: false },
+    },
+    {
       path: '/',
       name: 'workbench',
-      // 懒加载：路由级组件按需分包，不进首屏关键路径
       component: () => import('@/views/WorkbenchView.vue'),
+      meta: { requiresAuth: true },
     },
-    //数据展示页面
+    // 数据展示页面
     {
       path: '/datapage/:pageid',
       name: 'datapage',
       component: () => import('@/views/datapage/datapage.vue'),
+      meta: { requiresAuth: true },
     },
-    //排产任务结果页面
+    // 排产任务结果页面
     {
       path: '/taskresult',
       name: 'taskResult',
       component: () => import('@/views/datapage/task-result.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/ganttdemo',
@@ -44,34 +48,21 @@ const router = createRouter({
       component: () => import('@/views/demo/gantt.vue'),
       meta: { title: 'DataEvoluter · Gantt', requiresAuth: false },
     },
-    // {
-    //     path: '/:pathMatch(.*)*',
-    //     redirect: '/'
-    // }
   ],
 })
 
-//全局前置守卫：必须登录后才能进入问答页面
-router.beforeEach((to, _from, next) => {
-  //标题
-  // if (to.meta.title) {
-  //     document.title = to.meta.title
-  // }
-  //需要登录的页面
+// 全局前置守卫：必须登录后才能进入业务页面
+router.beforeEach(async (to) => {
+  const auth = getAuthStore()
   if (to.meta.requiresAuth) {
-    if (!getToken()) {
-      //未登录，跳转登录页
-      next('/login')
-      return
-    }
+    const ok = await auth.ensureAuthenticated()
+    if (!ok) return { path: '/login', query: { redirect: to.fullPath } }
   } else if (to.path === '/login') {
-    //已登录访问登录页，直接进入问答页
-    if (getToken()) {
-      next('/')
-      return
-    }
+    // 已登录访问登录页 → 直接进入工作台
+    const ok = await auth.ensureAuthenticated()
+    if (ok) return { path: '/' }
   }
-  next()
+  return true
 })
 
 export default router

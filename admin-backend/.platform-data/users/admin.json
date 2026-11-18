@@ -2,5 +2,15 @@
   "user_id": "admin",
   "agents": [
     "生鲜识别辅助"
-  ]
+  ],
+  "password": {
+    "algo": "scrypt",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1
+    },
+    "salt": "WukxCbyM8K+a+qd3KG4agw==",
+    "hash": "sBaL67xsd+bD2fwAY4M4+hEjw5rKTgpJ3ZVI5uiI75k9j7TVKVZe33vCxpf17Kcni2RNEa0YZ28dPM1CGQ00XA=="
+  }
 }

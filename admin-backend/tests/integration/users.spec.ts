@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { verifyPassword } from '../../src/domain/auth/password.js';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 import { soulDesign } from '../helpers/soul.js';
 
@@ -155,6 +156,77 @@ describe('PUT /api/admin/users/{user_id}', () => {
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ADM_CONFIG_REVISION_CONFLICT');
+  });
+});
+
+describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）', () => {
+  it('重置成功：替换密码摘要，关联数字人不变', async () => {
+    fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision(), 'old-secret');
+
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/users/ops/password',
+      payload: { password: 'new-secret' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ user_id: 'ops', agents: ['demo'] });
+    const doc = fx.ctx.users.read('ops');
+    expect(verifyPassword('new-secret', doc.password)).toBe(true);
+    expect(verifyPassword('old-secret', doc.password)).toBe(false);
+  });
+
+  it('存量无密码的用户可借此首次设置密码', async () => {
+    fx.ctx.users.create('ops', [], fx.ctx.store.revision());
+
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/users/ops/password',
+      payload: { password: 'first-secret' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(verifyPassword('first-secret', fx.ctx.users.read('ops').password)).toBe(true);
+  });
+
+  it('重置后该用户既有会话立即失效（FR-012 同口径）', async () => {
+    fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
+    fx.ctx.sessionStore.setCurrentSession('ops', 'session-before');
+
+    await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/users/ops/password',
+      payload: { password: 'new-secret' },
+    });
+
+    expect(fx.ctx.sessionStore.getCurrentSession('ops')).toBeNull();
+    expect(fx.ctx.auth.introspect('ops', 'session-before')).toBe(false);
+  });
+
+  it('密码过短 / 非字符串 / 缺失 → 400 VALIDATION_FAILED，且原密码不变', async () => {
+    fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
+
+    for (const payload of [{ password: '12345' }, { password: 123456 }, {}]) {
+      const res = await fx.app.inject({
+        method: 'POST',
+        url: '/api/admin/users/ops/password',
+        payload,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    }
+
+    expect(verifyPassword('old-secret', fx.ctx.users.read('ops').password)).toBe(true);
+  });
+
+  it('用户不存在 → 404 ADM_USER_NOT_FOUND', async () => {
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/users/ghost/password',
+      payload: { password: 'new-secret' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe('ADM_USER_NOT_FOUND');
   });
 });
 

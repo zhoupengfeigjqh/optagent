@@ -8,6 +8,8 @@
  * 也不再持有"目标运行形态"。
  */
 import type { AppConfig } from './config.js';
+import type { AuthService } from './domain/auth/service.js';
+import type { SessionStore } from './domain/auth/session-store.js';
 import type { AgentDesignService } from './domain/config-center/agent-design.js';
 import type { UnifiedCatalog } from './domain/config-center/unified-catalog.js';
 import type { UserLinkService } from './domain/config-center/user-links.js';
@@ -59,4 +61,8 @@ export interface AppContext {
   catalog: UnifiedCatalog;
   /** 部署编排（`FR-026`~`FR-034`） */
   deployer: Deployer;
+  /** 024：会话登记（单会话，后登踢前登） */
+  sessionStore: SessionStore;
+  /** 024：登录鉴权编排（登录/登出/内省） */
+  auth: AuthService;
 }

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
+import { verifyPassword } from '../../src/domain/auth/password.js';
 import { UserLinkService } from '../../src/domain/config-center/user-links.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
@@ -119,6 +120,33 @@ describe('UserLinkService', () => {
     let caught: unknown;
     try {
       users.remove('ops');
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_USER_NOT_FOUND);
+  });
+
+  it('setPassword：替换密码摘要并保留关联数字人（2026-11-18）', () => {
+    users.create('ops', ['demo'], store.revision(), 'old-secret');
+    users.setPassword('ops', 'new-secret');
+
+    const doc = users.read('ops');
+    expect(doc.agents).toEqual(['demo']);
+    expect(verifyPassword('new-secret', doc.password)).toBe(true);
+    expect(verifyPassword('old-secret', doc.password)).toBe(false);
+  });
+
+  it('setPassword：不占用 revision（密码不属于配置快照，避免误打 409）', () => {
+    users.create('ops', [], store.revision());
+    const before = store.revision();
+    users.setPassword('ops', 'new-secret');
+    expect(store.revision()).toBe(before);
+  });
+
+  it('setPassword：用户不存在 → ADM_USER_NOT_FOUND', () => {
+    let caught: unknown;
+    try {
+      users.setPassword('ghost', 'new-secret');
     } catch (err) {
       caught = err;
     }

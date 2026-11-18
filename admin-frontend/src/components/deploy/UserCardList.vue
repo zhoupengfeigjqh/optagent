@@ -13,11 +13,12 @@ import { computed, ref } from 'vue'
 import type { AgentListItem, ErrorInfo, UserListItem } from '../../api/types'
 import { listAgents } from '../../api/agents'
 import { fetchManifest, withdrawDeploy } from '../../api/deploy'
-import { createUser, deleteUser, updateUser } from '../../api/users'
+import { createUser, deleteUser, resetUserPassword, updateUser } from '../../api/users'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import EntityCardList from '../common/EntityCardList.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
+import ResetPasswordDialog from './ResetPasswordDialog.vue'
 import UserEditor from './UserEditor.vue'
 
 const props = defineProps<{
@@ -49,6 +50,14 @@ const pendingDelete = ref<UserListItem | null>(null)
 /** 撤回部署（把该用户的数字人从运行环境下架）的确认对象 */
 const pendingWithdraw = ref<UserListItem | null>(null)
 const withdrawing = ref(false)
+/** 重置密码的弹窗对象（2026-11-18） */
+const pendingReset = ref<UserListItem | null>(null)
+const resetting = ref(false)
+/**
+ * 重置密码失败的提示**只在弹窗内**展示（不复用 `localError`）：
+ * 弹窗是模态的，页面顶部的提示会被遮罩挡住；同一个错误也不该出现两次。
+ */
+const resetError = ref<ErrorInfo | null>(null)
 
 /**
  * 卡片列表区域只承载**加载**失败（`props.error` 由父级的数据请求给出）。
@@ -96,7 +105,11 @@ async function openEdit(user: UserListItem): Promise<void> {
   editorOpen.value = true
 }
 
-async function submit(payload: { user_id: string; agents: string[] }): Promise<void> {
+async function submit(payload: {
+  user_id: string
+  agents: string[]
+  password?: string
+}): Promise<void> {
   busy.value = true
   localError.value = null
   try {
@@ -108,7 +121,7 @@ async function submit(payload: { user_id: string; agents: string[] }): Promise<v
       await updateUser(editing.value.user_id, payload.agents, revision)
       emit('announce', `用户 ${editing.value.user_id} 的关联已更新`)
     } else {
-      await createUser(payload.user_id, payload.agents)
+      await createUser(payload.user_id, payload.agents, payload.password)
       emit('announce', `用户 ${payload.user_id} 已创建`)
     }
     editorOpen.value = false
@@ -164,6 +177,34 @@ async function confirmWithdraw(): Promise<void> {
   } finally {
     withdrawing.value = false
     pendingWithdraw.value = null
+  }
+}
+
+/** 打开重置密码弹窗（每次打开都清掉上一次的失败提示） */
+function openReset(user: UserListItem): void {
+  resetError.value = null
+  pendingReset.value = user
+}
+
+/**
+ * 提交新密码（2026-11-18）：成功后关闭弹窗并播报"会话已失效"。
+ *
+ * 失败时**保持弹窗打开**，把错误就地展示，管理员可直接改密码重试——
+ * 关掉弹窗会连带丢掉刚输入的内容，等于让他从头再来一遍。
+ */
+async function submitReset(password: string): Promise<void> {
+  const target = pendingReset.value
+  if (!target || resetting.value) return
+  resetting.value = true
+  resetError.value = null
+  try {
+    await resetUserPassword(target.user_id, password)
+    emit('announce', `用户 ${target.user_id} 的密码已重置，其原有登录会话已失效`)
+    pendingReset.value = null
+  } catch (err) {
+    resetError.value = err as ErrorInfo
+  } finally {
+    resetting.value = false
   }
 }
 </script>
@@ -266,6 +307,9 @@ async function confirmWithdraw(): Promise<void> {
             >
               撤回
             </button>
+            <button type="button" class="btn" @click="openReset(item as UserListItem)">
+              重置密码
+            </button>
             <button type="button" class="btn" @click="openEdit(item as UserListItem)">
               编辑关联
             </button>
@@ -284,6 +328,21 @@ async function confirmWithdraw(): Promise<void> {
       :agents="agents"
       :busy="busy"
       @submit="submit"
+    />
+
+    <!-- 重置密码：独立弹窗（后端也是独立子资源，不带 revision） -->
+    <ResetPasswordDialog
+      data-test="reset-password-dialog"
+      :open="pendingReset !== null"
+      :user-id="pendingReset?.user_id ?? ''"
+      :busy="resetting"
+      :error="resetError"
+      @update:open="
+        (value) => {
+          if (!value) pendingReset = null
+        }
+      "
+      @submit="submitReset"
     />
 
     <ConfirmDialog

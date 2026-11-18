@@ -34,6 +34,7 @@ import { gracefulShutdown } from './graceful-shutdown.js';
 import { AgentInstanceFactory, type ChatAgent } from './infra/agent-factory.js';
 import type { LlmProvider } from './infra/llm/llm-provider.js';
 import { PiAiLlmProvider } from './infra/llm/pi-ai-provider.js';
+import { createAuthHook, createIntrospector } from './infra/auth.js';
 import { IntervalScheduler } from './infra/scheduler.js';
 import { UsageDb } from './infra/usage-db.js';
 import { createLoggers } from './logging.js';
@@ -83,6 +84,9 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   SCHEDULED_TASK_NAME_CONFLICT: 409,
   SCHEDULED_TASK_ENABLED: 409,
   SCHEDULED_TASK_EXHAUSTED: 409,
+  // 024 鉴权：未认证 / 会话被新登录取代
+  UNAUTHENTICATED: 401,
+  SESSION_REVOKED: 401,
 };
 
 export interface BuildServerOptions {
@@ -354,6 +358,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
     ['application/octet-stream', 'text/plain'],
     { parseAs: 'buffer' },
     (_req, body, done) => done(null, body),
+  );
+
+  // 024：鉴权钩子（须在路由注册前；未配 AUTH_SECRET 时放行回退 legacy 单用户）
+  app.addHook(
+    'onRequest',
+    createAuthHook({
+      ...(config.authSecret ? { secret: config.authSecret } : {}),
+      ...(config.authSecret ? { introspect: createIntrospector(config.adminBackendUrl) } : {}),
+    }),
   );
 
   app.setErrorHandler((err: unknown, req, reply) => {

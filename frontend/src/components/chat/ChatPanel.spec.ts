@@ -133,7 +133,7 @@ function makePanel(
     onToggleSearch: noop,
     onToggleWorkspace: noop,
     onSearchKeyword: noop,
-    onToggleAgent: noop,
+    onOpenAgentPanel: noop,
     onCloseAgentPanel: noop,
     onSwitchAgent: noop,
     onOpenLink: noop,

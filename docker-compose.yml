@@ -174,6 +174,11 @@ services:
       # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件。
       # env_file 之后的显式覆盖，保证容器内一定是服务名口径（本机 LAN IP 只留在 .env.local）
       - PUBLIC_BASE_URL=http://192.168.0.130:82
+      # 会话内省地址（2026-11-18）：`.env.local` 里是 `http://127.0.0.1:3001`（宿主机口径），
+      # 而 compose 先注 .env 再注 .env.local ⇒ **后者覆盖前者**，容器内 127.0.0.1 指向 backend
+      # 自己。症状不是登录失败（内省不可达会降级放行），而是「后登踢前登」与
+      # 「重置密码后旧会话失效」静默不生效。故在此显式钉死服务名口径。
+      - ADMIN_BACKEND_URL=http://admin-backend:3001
     volumes:
       # 模型配置（必需，缺省启动失败）
       - ./agent-backend/config.yaml:/app/config.yaml:ro

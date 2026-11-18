@@ -20,6 +20,14 @@ export default defineConfig({
     // 一旦浏览器走 IPv4 回环，本机要 ~2s 丢包超时才回退（实测 127.0.0.1:5173 → 2.04s 失败）
     host: '::',
     proxy: {
+      // 平台侧接口（登录/登出/会话探针，`contracts/auth-api.md`）**必须**转给管理服务，
+      // 不能落进下面那条 `/api` → 3000：运行侧（agent-backend）的全局鉴权钩子会把
+      // 未携带 Cookie 的登录请求直接拒成 401 `UNAUTHENTICATED`，于是"密码没错也登不进去"。
+      // 顺序有意义：Vite 按声明顺序匹配，`/api/admin` 必须排在 `/api` 之前。
+      '/api/admin': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
       // 开发期把 /api 转发到后端，前端代码只使用同源相对路径（research.md D3）
       // target 直接写 IPv4：后端监听 IPv4，避免 Node 先解析到 ::1 再回退（实测 205ms~2s）
       '/api': {

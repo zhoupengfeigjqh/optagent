@@ -1826,3 +1826,10 @@ tool_labels[原始工具名]  >  MCP Tool.title（服务端声明）  >  `${serv
 - **测试**：`agent-backend/tests/unit/rule-gate-*.spec.ts`（7 个）、`tool-rule-gate.spec.ts`、
   `rule-gate-loop.spec.ts`、`ontology-doc.spec.ts`；前端 `frontend/src/utils/error-message.spec.ts`；
   端到端"真模型 + 真 MCP"由 `specs/021-ontology-rule-gate/quickstart.md` 场景 A~F 手验。
+
+## 024 运行侧鉴权（2026-11-18）
+
+- 除白名单（/api/monitor/health、/api/monitor/agents、/api/builtin-tools、/api/mcp-call-stats）外的 /api/* 均要求有效登录凭据；缺失/无效 → 401 UNAUTHENTICATED。
+- 单会话：凭据 jti 非当前会话 → 401 SESSION_REVOKED（已在其它设备登录）。
+- 会话内省：运行侧调平台 GET /api/admin/auth/session/valid；不可达时"放行 + 告警"降级。
+- 未配置 AUTH_SECRET → 鉴权未启用，getCurrentUser() 回退 admin（legacy 单用户）。

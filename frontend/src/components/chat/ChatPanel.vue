@@ -92,7 +92,7 @@ const {
   onToggleSearch,
   onToggleWorkspace,
   onSearchKeyword,
-  onToggleAgent,
+  onOpenAgentPanel,
   onCloseAgentPanel,
   onSwitchAgent,
   onOpenLink,
@@ -204,18 +204,17 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="chat-panel">
-    <!-- 头部：数字人名称 + MCP 状态 + 右上角按钮位（US6） -->
+    <!-- 头部：账号菜单 + 数字人名称 + MCP 状态 + 右上角按钮位（US6） -->
     <ChatHeader
       :agent="agents.currentAgent.value"
       :mcp-servers="agents.mcpServers.value"
       :search-open="search.isOpen.value"
       :workspace-open="workspaceOpen"
-      :agent-panel-open="agentPanelOpen"
       @toggle-search="onToggleSearch"
       @toggle-workspace="onToggleWorkspace"
-      @toggle-agent="onToggleAgent"
+      @open-agent="onOpenAgentPanel"
     >
-      <!-- 后台产出铃铛（R11）：自带数据与面板，故不走上面对三个按钮的 toggle 通道 -->
+      <!-- 后台产出铃铛（R11）：自带数据与面板，故不走上面对动作位的 toggle / open 通道 -->
       <template #actions-extra>
         <!-- 015：定时任务入口放在铃铛之前（次级入口，先于"产出提醒"） -->
         <ScheduleEntryButton

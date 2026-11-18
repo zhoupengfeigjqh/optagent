@@ -83,6 +83,7 @@
 | `ADM_RUNTIME_UNREACHABLE` | 503 | 运行环境只读依赖不可达（工具目录／调用统计） | `FR-011`、`FR-050` |
 | `ADM_UNAUTHENTICATED` | 401 | 未认证：凭据缺失或验签失败（§11；**预登记，未实施**） | `FR-065` |
 | `ADM_FORBIDDEN` | 403 | 越权：已认证但角色非管理员访问 `/api/admin/*`（§11；**预登记，未实施**） | `FR-066` |
+| `ADM_INVALID_CREDENTIALS` | 401 | 登录失败：账号不存在或密码错误（**不枚举**；024 登录鉴权，见 §12） | `FR-011` |
 
 > **2026-09-27 变更**：随 MCP 服务改为平台内全人工配置，**移除四个码**——
 > 启停白名单类、运行形态缺地址类、Docker 不可达类、编排声明不可读类（正文提及处已一并清理，
@@ -751,6 +752,22 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：`ADM_USER_NOT_FOUND`、`ADM_DEPLOY_TARGET_NOT_WRITABLE`（撤回失败，删除未发生）
 
+### 6.4.1 `POST /api/admin/users/{user_id}/password`（2026-11-18）
+
+**用途**：重置该用户的密码（`FR-003` 的运维入口）。对**从未设过密码**的存量用户即"首次设置"；对已有密码的用户即"替换，旧密码立即失效"。卡片按钮统一叫「重置密码」，两种意图由弹窗文案覆盖，列表响应**不新增** `has_password` 之类的字段。
+
+**请求体**：`{ "password": "new-secret" }`（6~128 字符，仅校验长度与空值，不强制字符集复杂度）
+
+**响应 200**：`{ user_id, agents, revision }`（`agents` 原样保留；`revision` 为当前全局版本，本次**不递增**）
+
+**关键约束**
+
+- **不带 `revision`（无乐观锁）**：密码不属于部署/配置快照，若占版本会把他人正在编辑的"关联数字人"无谓打成 `ADM_CONFIG_REVISION_CONFLICT`。这也是它独立于 §6.3 的原因——§6.3 的语义是"替换关联数字人"。
+- **成功后 MUST 注销该用户既有会话**（与 §6.4 删除用户同口径，`FR-012`）：不清会话登记等于旧凭据继续可用，改密码就没收回任何东西。
+- 关联数字人与文件空间一律不动。
+
+**错误码**：`VALIDATION_FAILED`（长度不符 / 非字符串 / 缺失）、`ADM_USER_NOT_FOUND`
+
 ### 6.5 `POST /api/admin/deploy/validate`
 
 **用途**：**只读**预检，让管理员在真正部署前看到全部错误项（`FR-027` 的界面化）。与 `6.6` 的校验逻辑**同一实现**，MUST NOT 形成两套判定。
@@ -1016,3 +1033,13 @@ MUST NOT 读取容器编排声明或容器运行状态。
 **与既有章节的关系**：本节**不改变**任何既有端点的请求/响应结构（只新增 401/403 两种拒绝），故 §8「契约与前端类型的映射」与 §9「与既有接口的一致性声明」无需修订；唯一受影响的是前端必须新增"登录态与 401/403 处理"这一条链路，属实施阶段的前端契约增量。
 
 **错误码登记状态（2026-10-15）**：上表的 `ADM_UNAUTHENTICATED` / `ADM_FORBIDDEN` 已补登进 §0.4 总表（及后端 `domain/error-codes.ts`、前端 `constants/error-messages.ts` 两处码表），故 `npm run check:contract` 恢复通过；两码当前**不可达**（本节仍未实施、无边界的校验钩子），登记只冻结命名与状态码。
+
+## §12 登录鉴权（024，2026-11-18）
+
+登录/鉴权端点与凭据契约见 specs/024-user-login-auth/contracts/auth-api.md（本文件的权威补充）。
+
+- §6.2 POST /api/admin/users：请求体新增可选 password（6~128 字符）；新建用户可设初始密码；编辑(PUT)不改密码。
+- §9 鉴权：由"无"更新为"聊天前台登录鉴权已落地；管理台自身保护仍在本期范围外"。
+- §11 身份与分权：ADM_UNAUTHENTICATED(401) 已启用（/me 探针）；ADM_INVALID_CREDENTIALS(401) 为登录失败（不枚举）；ADM_FORBIDDEN(403) 仍预留。
+- 新增端点：POST /api/admin/auth/login、GET /api/admin/auth/me、POST /api/admin/auth/logout、GET /api/admin/auth/session/valid（会话内省）。
+- §6.4.1 新增端点 POST /api/admin/users/{user_id}/password（2026-11-18）：管理员手动重置密码，不带 `revision`，成功后注销该用户既有会话。

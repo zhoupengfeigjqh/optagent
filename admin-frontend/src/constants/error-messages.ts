@@ -59,9 +59,10 @@ export const ADMIN_ERROR_CODES = {
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
 
-  // §11 预登记（未实施）
+  // §11 身份与分权（024 起 ADM_UNAUTHENTICATED/ADM_INVALID_CREDENTIALS 已启用）
   ADM_UNAUTHENTICATED: 'ADM_UNAUTHENTICATED',
   ADM_FORBIDDEN: 'ADM_FORBIDDEN',
+  ADM_INVALID_CREDENTIALS: 'ADM_INVALID_CREDENTIALS',
 } as const
 
 /** 通用兜底文案 */
@@ -105,7 +106,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可用（写入或删除失败），请检查 .platform-data 目录',
   ADM_RUNTIME_UNREACHABLE: '运行环境不可达（内置工具目录／调用统计读取失败）',
 
-  // §11 预登记（未实施）：功能落地前不会真的出现；文案先按"管理员视角可行动"写好
+  // §11 身份与分权（024 起 ADM_UNAUTHENTICATED/ADM_INVALID_CREDENTIALS 已启用）
   ADM_UNAUTHENTICATED: '登录状态已失效，请重新登录',
   ADM_FORBIDDEN: '当前账号没有管理员权限，请联系管理员授权',
+  ADM_INVALID_CREDENTIALS: '账号或密码错误，请重试',
 }

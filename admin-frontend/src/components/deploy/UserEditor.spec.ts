@@ -85,18 +85,31 @@ describe('UserEditor —— 内容与事件', () => {
     )
   })
 
-  it('新建态：展示用户标识输入框，保存时带上输入值与勾选的数字人', async () => {
+  it('新建态：展示用户标识与初始密码输入框，保存时带上输入值、勾选的数字人与密码', async () => {
     const wrapper = mountEditor(true, null)
     expect(wrapper.find('h2').text()).toBe('新建用户')
 
     await wrapper.find('#user-id').setValue('alice')
+    await wrapper.find('#user-password').setValue('123456')
     const extraItem = wrapper
       .findAll('.checkbox-list__item')
       .find((li) => li.text().includes('extra'))
     await extraItem!.find('input[type="checkbox"]').setValue(true)
 
     await buttonByText(wrapper, '保存')!.trigger('click')
-    expect(wrapper.emitted('submit')?.[0]).toEqual([{ user_id: 'alice', agents: ['extra'] }])
+    expect(wrapper.emitted('submit')?.[0]).toEqual([
+      { user_id: 'alice', agents: ['extra'], password: '123456' },
+    ])
+  })
+
+  it('新建态：初始密码过短 → 不发出 submit（并提示）', async () => {
+    const wrapper = mountEditor(true, null)
+    await wrapper.find('#user-id').setValue('alice')
+    await wrapper.find('#user-password').setValue('123')
+
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('密码长度须为 6~128 个字符')
   })
 
   it('取消：回写 update:open=false，不发出 submit', async () => {

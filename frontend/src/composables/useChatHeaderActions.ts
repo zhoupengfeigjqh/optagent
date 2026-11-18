@@ -53,13 +53,17 @@ export function useChatHeaderActions({ agents, preview, search, workspace }: Cha
     search.keyword.value = value
   }
 
-  /** 展开时才拉候选清单（候选只在面板里用，闭合态没有拉取的理由） */
-  async function onToggleAgent(): Promise<void> {
-    const next = !agentPanelOpen.value
-    agentPanelOpen.value = next
-    if (next) {
-      await agents.loadCandidates()
-    }
+  /**
+   * 打开数字人面板（**幂等**，2026-11-18）。
+   *
+   * 入口已从「头部开关按钮」改为账号菜单的「切换数字人」，菜单项语义是**打开**而非开关：
+   * 已展开时不关闭、也不重复拉候选（候选只在面板里用，闭合态没有拉取的理由）。
+   * 面板自身的关闭走 `onCloseAgentPanel`，两条意图不共用同一个函数。
+   */
+  async function onOpenAgentPanel(): Promise<void> {
+    if (agentPanelOpen.value) return
+    agentPanelOpen.value = true
+    await agents.loadCandidates()
   }
 
   function onCloseAgentPanel(): void {
@@ -80,7 +84,7 @@ export function useChatHeaderActions({ agents, preview, search, workspace }: Cha
     onToggleSearch,
     onToggleWorkspace,
     onSearchKeyword,
-    onToggleAgent,
+    onOpenAgentPanel,
     onCloseAgentPanel,
     onSwitchAgent,
   }

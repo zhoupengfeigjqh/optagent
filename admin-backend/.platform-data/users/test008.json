@@ -1,0 +1,16 @@
+{
+  "user_id": "test008",
+  "agents": [
+    "生鲜识别辅助"
+  ],
+  "password": {
+    "algo": "scrypt",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1
+    },
+    "salt": "bzYMYeyD6KweED5jz3JR6g==",
+    "hash": "G2V+JkKEqhsZZ2fOjIv3S3nWYusI34AFtqMyb1jXOLBlkGtzQumSND73hPB+t//nsLsMnKvIZ1XayzR2yrSqwQ=="
+  }
+}

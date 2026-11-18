@@ -35,6 +35,19 @@ export class ApiError extends Error implements ErrorInfo {
   }
 }
 
+/** 全局 401 处理（由 `useAuth` 注册；登录失败等非认证类 401 自行忽略）。 */
+type UnauthorizedHandler = (error: ApiError) => void
+let unauthorizedHandler: UnauthorizedHandler | null = null
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler
+}
+
+/** 请求返回 401 时通知全局处理器（`request` 与 SSE 共用）。 */
+export function notifyUnauthorized(error: ApiError): void {
+  if (error.status === 401) unauthorizedHandler?.(error)
+}
+
 /** 查询参数取值（`undefined` 的键会被省略）。 */
 export type QueryValue = string | number | boolean | undefined | null
 
@@ -123,7 +136,9 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     }
 
     if (!response.ok) {
-      throw await parseErrorResponse(response)
+      const error = await parseErrorResponse(response)
+      notifyUnauthorized(error)
+      throw error
     }
 
     if (response.status === 204) {

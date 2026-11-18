@@ -67,7 +67,7 @@
 
 | 项 | 规定 |
 |---|---|
-| 白名单（免鉴权，不注入身份） | `GET /api/monitor/health`、`GET /api/monitor/agents`、`GET /api/builtin-tools`、`GET /api/mcp-call-stats` |
+| 白名单（免鉴权，不注入身份） | `GET /api/monitor/health`、`GET /api/monitor/agents`、`GET /api/builtin-tools`、`GET /api/mcp-call-stats`；**签名直链** `GET /api/files/raw`、`POST /api/files/put`（2026-11-18 补登：URL 即凭证，HMAC 绑定 u/p/exp，调用方是 MCP 服务容器、不带 Cookie；放行不降低安全性——签名校验在 handler 内独立完成。新增签名直链类端点 MUST 同步加入白名单） |
 | 其余 `/api/*` | MUST 验签 Cookie `optagent_auth`（提取 `sub`/`jti`）→ 会话内省（1~2s 缓存）→ 仍为当前会话则注入 `sub`；缺失/无效/过期 → 401，响应 MUST NOT 含任何业务数据 |
 | 被踢 | `jti` 非当前会话 → 401 `SESSION_REVOKED`（"已在其它设备登录"） |
 | 内省不可达 | 放行 + 结构化告警（降级，单会话保证在平台故障窗口内临时放宽） |

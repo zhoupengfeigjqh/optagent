@@ -120,7 +120,7 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     onToggleSearch: noop,
     onToggleWorkspace: noop,
     onSearchKeyword: noop,
-    onToggleAgent: noop,
+    onOpenAgentPanel: noop,
     onCloseAgentPanel: noop,
     onSwitchAgent: noop,
     onOpenLink: noop,

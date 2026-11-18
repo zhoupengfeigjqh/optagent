@@ -112,7 +112,7 @@ function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = 
     onToggleSearch: noop,
     onToggleWorkspace: noop,
     onSearchKeyword: noop,
-    onToggleAgent: noop,
+    onOpenAgentPanel: noop,
     onCloseAgentPanel: noop,
     onSwitchAgent: noop,
     onOpenLink: noop,

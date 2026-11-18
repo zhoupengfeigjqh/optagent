@@ -45,6 +45,13 @@ const envSchema = z.object({
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
   /** 平台容器是否可管理：缺省仅在容器内可用；测试可注入 */
   LOG_LEVEL: z.string().default('info'),
+  /**
+   * 024：登录凭据签名密钥（`AUTH_SECRET`，≥16 字符）。
+   * 必须与运行环境（agent-backend）同值；缺失即拒绝启动（签发方不能静默失败）。
+   */
+  AUTH_SECRET: z.string().min(16),
+  /** 024：登录凭据有效期（秒），默认 7 天。 */
+  AUTH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(604_800),
 });
 
 export interface AppConfig {
@@ -58,6 +65,10 @@ export interface AppConfig {
   /** 本体市场根目录（绝对路径）；未配置为 null = 导入功能不可用 */
   ontoMarketDir: string | null;
   logLevel: string;
+  /** 024：登录凭据签名密钥（与运行环境同值） */
+  authSecret: string;
+  /** 024：登录凭据有效期（秒） */
+  authTokenTtlSeconds: number;
 }
 
 export class ConfigError extends Error {
@@ -100,6 +111,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     uploadMaxMb: e.UPLOAD_MAX_MB,
     ontoMarketDir: e.ONTO_MARKET_DIR ? path.resolve(cwd, e.ONTO_MARKET_DIR) : null,
     logLevel: e.LOG_LEVEL,
+    authSecret: e.AUTH_SECRET,
+    authTokenTtlSeconds: e.AUTH_TOKEN_TTL_SECONDS,
   };
   return Object.freeze(config);
 }

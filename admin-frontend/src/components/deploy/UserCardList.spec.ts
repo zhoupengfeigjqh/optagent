@@ -14,6 +14,7 @@ const listAgents = vi
   .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 8, total_pages: 0 })
 const deleteUser = vi.fn()
 const updateUser = vi.fn()
+const resetUserPassword = vi.fn()
 const withdrawDeploy = vi.fn()
 const fetchManifest = vi.fn()
 
@@ -42,6 +43,7 @@ vi.mock('../../api/users', () => ({
   createUser: vi.fn(),
   updateUser: (...args: unknown[]) => updateUser(...args),
   deleteUser: (...args: unknown[]) => deleteUser(...args),
+  resetUserPassword: (...args: unknown[]) => resetUserPassword(...args),
 }))
 
 vi.mock('../../api/http', () => ({
@@ -88,6 +90,7 @@ function mountList(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   deleteUser.mockReset()
   updateUser.mockReset()
+  resetUserPassword.mockReset()
   withdrawDeploy.mockReset()
   // 乐观锁版本：由部署清单端点给出（当前 revision = 1）
   fetchManifest.mockReset().mockResolvedValue({ items: [], total: 0, revision: 1 })
@@ -358,6 +361,78 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
 
     expect(wrapper.text()).toContain('操作未完成')
     expect(wrapper.text()).toContain('内容已被他处修改，请刷新后重试')
+    expect(wrapper.text()).not.toContain('用户与关联数字人加载失败')
+    expect(wrapper.emitted('changed')).toBeUndefined()
+  })
+})
+
+/**
+ * 重置密码（2026-11-18，契约 §6.4.1）。
+ *
+ * 卡片按钮统一叫「重置密码」，不区分"已设过/从未设过"——两种意图由弹窗文案覆盖，
+ * 避免为措辞给列表接口加字段（Q5 结论）。
+ */
+describe('UserCardList —— 重置密码（2026-11-18）', () => {
+  async function openReset(
+    wrapper: ReturnType<typeof mountList>,
+    index = 0,
+  ): Promise<void> {
+    await wrapper
+      .findAll('article.card')
+      [index]!.findAll('button')
+      .find((b) => b.text() === '重置密码')
+      ?.trigger('click')
+    await flushPromises()
+  }
+
+  function dialog(wrapper: ReturnType<typeof mountList>) {
+    return wrapper.find('[data-test="reset-password-dialog"]')
+  }
+
+  it('每张卡片都有「重置密码」入口，点击打开对应用户的弹窗', async () => {
+    const wrapper = mountList()
+    const buttons = wrapper.findAll('button').filter((b) => b.text() === '重置密码')
+    expect(buttons).toHaveLength(2) // admin / ops
+
+    await openReset(wrapper, 1)
+    expect(dialog(wrapper).attributes('open')).toBeDefined()
+    expect(dialog(wrapper).text()).toContain('重置密码：ops')
+    expect(resetUserPassword).not.toHaveBeenCalled()
+  })
+
+  it('提交新密码：调接口（不带 revision），播报会话失效并关闭弹窗', async () => {
+    resetUserPassword.mockResolvedValue({ user_id: 'admin', agents: [], revision: 7 })
+    const wrapper = mountList()
+    await openReset(wrapper)
+
+    await dialog(wrapper).find('#reset-password').setValue('new-secret')
+    await dialog(wrapper).find('#reset-password-confirm').setValue('new-secret')
+    await dialog(wrapper)
+      .findAll('button')
+      .find((b) => b.text() === '确认重置')
+      ?.trigger('click')
+    await flushPromises()
+
+    expect(resetUserPassword).toHaveBeenCalledWith('admin', 'new-secret')
+    expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('原有登录会话已失效')
+    expect(dialog(wrapper).attributes('open')).toBeUndefined()
+  })
+
+  it('失败：弹窗保持打开、错误就地展示，且不冒充列表加载失败', async () => {
+    resetUserPassword.mockRejectedValue({ code: 'ADM_USER_NOT_FOUND', message: 'x' })
+    const wrapper = mountList()
+    await openReset(wrapper)
+
+    await dialog(wrapper).find('#reset-password').setValue('new-secret')
+    await dialog(wrapper).find('#reset-password-confirm').setValue('new-secret')
+    await dialog(wrapper)
+      .findAll('button')
+      .find((b) => b.text() === '确认重置')
+      ?.trigger('click')
+    await flushPromises()
+
+    expect(dialog(wrapper).attributes('open')).toBeDefined()
+    expect(dialog(wrapper).text()).toContain('密码未重置')
     expect(wrapper.text()).not.toContain('用户与关联数字人加载失败')
     expect(wrapper.emitted('changed')).toBeUndefined()
   })

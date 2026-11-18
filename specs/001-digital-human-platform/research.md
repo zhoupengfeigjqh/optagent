@@ -45,6 +45,7 @@
 | `pino` / `pino-pretty` | `^10.3.1` / `^13.1.3` | 日志 | 复用 |
 | ~~`yaml`~~ | ~~`^2.9.0`~~ | ~~只读解析 `docker-compose.yml`（`FR-043`）~~（2026-09-27 移除：平台不再解析编排文件） | 已移除 |
 | **`yaml`** | `^2.9.0`（实装 `^2.9.1`） | **（2026-10-03 重新引入）** 只读解析本体市场 `ontology.yaml` 的 `metadata` 段（`FR-058`~`FR-060`）：卡片要展示的 6 个字段只存在于该文件，市场侧 `meta.json` 并不包含 `deployed_version`/`scenario_name`/`ontology_name` 等项 | **新增（已论证）** |
+| **`jose`** | `^6.2.12` | **（2026-11-18，024 登录鉴权）** 登录凭据 JWT 签发/验签（HS256）；纯 JS、零原生模块、无平台差异 | **新增（已论证，见 `specs/024-user-login-auth/research.md` D2）** |
 | `@modelcontextprotocol/sdk` | `^1.30.0` | MCP 客户端：列工具、连通性与能力测试（`FR-045/047`） | 复用 |
 | **`yauzl`** | 见 D7 | SKILL ZIP 安全解压 | **新增（已论证）** |
 

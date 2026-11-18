@@ -26,11 +26,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
-  (e: 'submit', payload: { user_id: string; agents: string[] }): void
+  (e: 'submit', payload: { user_id: string; agents: string[]; password?: string }): void
 }>()
 
 const userId = ref('')
 const selected = ref<string[]>([])
+/** 024：新建时的初始密码（编辑态不显示、不改密码） */
+const password = ref('')
+const passwordError = ref('')
 
 // `immediate`：允许"挂载即打开"（如从别的入口直接唤起），否则初始值不会被灌入
 watch(
@@ -39,6 +42,8 @@ watch(
     if (!open) return
     userId.value = props.user?.user_id ?? ''
     selected.value = props.user?.agents.map((a) => a.name) ?? []
+    password.value = ''
+    passwordError.value = ''
   },
   { immediate: true },
 )
@@ -55,7 +60,19 @@ const options = computed<CheckboxOption[]>(() =>
 )
 
 function submit(): void {
-  emit('submit', { user_id: userId.value, agents: [...selected.value] })
+  passwordError.value = ''
+  if (!isEdit.value) {
+    // 新建时必填初始密码（否则该账号无法登录，见 FR-001/FR-013）
+    if (password.value.length < 6 || password.value.length > 128) {
+      passwordError.value = '密码长度须为 6~128 个字符'
+      return
+    }
+  }
+  emit('submit', {
+    user_id: userId.value,
+    agents: [...selected.value],
+    ...(isEdit.value ? {} : { password: password.value }),
+  })
 }
 </script>
 
@@ -70,6 +87,23 @@ function submit(): void {
         <span class="field__hint">对应运行环境的 users/ 目录名，不得含路径分隔符或 “..”。</span>
       </label>
       <p v-else class="field__hint">用户标识不可修改（它是运行环境数据目录的划分依据）。</p>
+
+      <label v-if="!isEdit" class="field user-editor__field" for="user-password">
+        <span class="field__label">
+          初始密码<span class="field__required" aria-hidden="true">*</span>
+        </span>
+        <input
+          id="user-password"
+          v-model="password"
+          type="password"
+          autocomplete="new-password"
+          placeholder="至少 6 个字符"
+        />
+        <span class="field__hint">用户用它登录聊天前台；仅在新建时设置。</span>
+        <span v-if="passwordError" class="field__hint" role="alert" style="color: #c00">
+          {{ passwordError }}
+        </span>
+      </label>
 
       <CheckboxList
         class="user-editor__list"
