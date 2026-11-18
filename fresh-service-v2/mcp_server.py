@@ -1,9 +1,12 @@
 """
 生鲜订货识别 MCP 服务（fresh_food_mcp_v1）。
 
-单一工具 fresh_order_parse：四个入参（订单图片 + SKU清单 / 映射表 / 噪声词表），
-一次完成「加载商品数据 → 图片 OCR 识别 → 标准化/匹配三档分流」，直接返回三表解析结果；
-声明了 resultUrl 时，再把「HTML 解析报告 + 三表 xlsx」**回写文件空间**（服务不写本地磁盘）。
+单一工具 fresh_order_parse：四个文件入参（订单图片 + SKU清单 / 映射表 / 噪声词表）+ 版面模式，
+一次完成「加载商品数据 → 图片 OCR 识别 → 版面归一 → 标准化/匹配三档分流」，**只返回三表解析结果**。
+
+产出交付（HTML 解析报告 + 三表 xlsx 回写）当前**已屏蔽**（2026-11-18）：签名不再声明 `resultUrl`
+（平台据此判据才注入）、`OUTPUT_DELIVERY_ENABLED = False`，因此既不会注入回写地址，也不会发那两次
+POST；整条实现一行未删，恢复步骤见 `OUTPUT_DELIVERY_ENABLED` 处的注释。
 
 设计约定：
 - 一次调用只处理一张图片订单（image_path 单值，不接收数组）；
@@ -11,11 +14,12 @@
   声明原位铸造成签名直链后发给本服务 ⇒ **服务实际收到的必须是 http/https 直链**，
   因此 _check_http_url 拒绝相对路径（收到相对路径＝平台侧漏配 file_args）；
 - 解析结果始终以 JSON 返回；产出交付是**附加**能力，失败只降级（`delivery_note` 说明原因），
-  不让已经算好的解析结果跟着交不出去；
+  不让已经算好的解析结果跟着交不出去 —— 该能力**当前屏蔽**（见 `OUTPUT_DELIVERY_ENABLED`）；
 - image_path、sku_path 必填；noise_path、synonyms_path 留空时用镜像内默认文件；
 - 三个数据表地址的解析结果按 TTL 缓存在进程内（见 core/cache.py）。
 
-产出回写（2026-11-13，契约见仓库根 `异步MCP服务接入约定.md` §4.7.1，范本 `bom-service`）：
+产出回写（2026-11-13，契约见仓库根 `异步MCP服务接入约定.md` §4.7.1，范本 `bom-service`）
+—— **2026-11-18 起整体屏蔽，代码保留**，本节描述的是恢复后的行为：
 - 开关＝本工具 inputSchema 里声明 `resultUrl`：平台据此**自动注入**（模型看不到、也填不了），
   平台侧无需任何配置；
 - 回写落点由平台锁死为 `临时空间/后台产出/`，`filePath` 必须回传平台响应里的 `path`
@@ -44,6 +48,21 @@ from core.html_report import build_report, report_filename
 from core.pipeline import analyze_batch
 
 mcp = FastMCP(config.MCP_NAME)
+
+# ---------------------------------------------------------------- 产出交付开关
+#: 产出交付（HTML 报告 + 三表 xlsx 回写）的**总闸门**。当前 `False`＝屏蔽。
+#:
+#: 为什么两个动作都要做（只翻常量不够）：
+#: 1. 平台注入 `resultUrl` 的**唯一判据**是"本工具 inputSchema 里声明了该参数"
+#:    （`agent-backend/src/infra/mcp/async-result-url.ts`，2026-10-17 起已无 `async_tools` 白名单），
+#:    所以参数只要留在签名里，注入就一定会发生、服务只能"收到不用" ⇒ 必须**从签名摘掉**；
+#: 2. 常量负责让回写块**整段不执行**（`build_report` / `build_review_workbook` 也不会白算一遍）。
+#:
+#: 恢复三步（缺一不可）：
+#: ① 把 `resultUrl: Annotated[str, Field(...)] = ""` 加回 `fresh_order_parse` 签名；
+#: ② 本常量改成 `True`；
+#: ③ `fresh_order_parse` 里 `_maybe_deliver(..., result_url="")` 的 `""` 换成 `resultUrl`。
+OUTPUT_DELIVERY_ENABLED = False
 
 #: 回写的整体超时（秒）：平台在本机/同网段，落盘是写文件，正常几十毫秒
 _PUT_TIMEOUT_S = float(os.getenv("FRESH_PUT_TIMEOUT_S", "30"))
@@ -269,12 +288,49 @@ def _deliver_outputs(
     return report_entry, "；".join(notes)
 
 
+def _maybe_deliver(
+    result: dict,
+    *,
+    result_url: str,
+    source_name: str,
+    auto_rows,
+    review_rows,
+    error_rows,
+) -> dict:
+    """产出交付的唯一入口（**当前被 `OUTPUT_DELIVERY_ENABLED` 屏蔽**）。
+
+    闸门关着时**第一行就返回**：既不发 POST，也不会先把 HTML / xlsx 两个 bytes 造出来再丢掉。
+    恢复交付后（常量 `True` + 签名声明 `resultUrl`）行为与改造前一致：拿不到合法回写地址
+    就只返回解析结果；拿到才两次回写，并在结果末尾追加 `filePath` / `excelFile` 等入口字段。
+    """
+    if not OUTPUT_DELIVERY_ENABLED:
+        return result
+
+    # 回写是附加能力：拿不到合法地址就只返回解析结果（服务也能被直接调用）
+    put_url = _valid_result_url(result_url)
+    if not put_url:
+        return result
+
+    entries, note = _deliver_outputs(
+        put_url,
+        base=_job_base(source_name),
+        source_name=source_name,
+        auto_rows=auto_rows,
+        review_rows=review_rows,
+        error_rows=error_rows,
+    )
+    result.update(entries)
+    if note:
+        result["delivery_note"] = note
+    return result
+
+
 # ---------------------------------------------------------------- 工具
 
 def _analyze_image(image_url: str, source_name: str, data, layout: str):
     """优先走**版面归一层**（表格截图 / 手写分栏单都能还原成行），失败退回旧的逐行 OCR。
 
-    平台侧无需感知：入参仍是"图片地址 + 三张表"，出参仍是三表 + 报告。
+    平台侧无需感知：入参仍是"图片地址 + 三张表"，出参仍是三表。
     """
     mode = (layout or "auto").strip().lower()
     if mode not in ("auto", "table", "list", "off"):
@@ -328,16 +384,6 @@ def fresh_order_parse(
             description="映射表 xlsx 的文件空间相对路径（平台铸成下载直链）；留空（推荐）时使用服务内置的默认映射表",
         ),
     ] = "",
-    resultUrl: Annotated[
-        str,
-        Field(
-            title="结果回写地址",
-            description=(
-                "产出回写地址。**由运行环境自动注入，请勿自行填写**；"
-                "留空（默认）时只返回解析结果、不交付报告与 xlsx"
-            ),
-        ),
-    ] = "",
     layout: Annotated[
         str,
         Field(
@@ -350,7 +396,7 @@ def fresh_order_parse(
     ] = "auto",
 ) -> dict:
     """
-    解析一张生鲜订货单据图片，产出 SKU 匹配三表，并可交付一份可读的 HTML 报告。
+    解析一张生鲜订货单据图片，产出 SKU 匹配三表（**不产出任何文件**）。
 
     四个文件入参在工具声明里都是**文件空间相对路径**（如 `临时空间/订单1.png`）：
     平台按 `file_args` 声明把它们原位铸造成签名直链再发给本服务，模型不必、也不应填 http 地址。
@@ -360,10 +406,9 @@ def fresh_order_parse(
         sku_path: SKU清单 xlsx 的文件空间相对路径（必填）。
         noise_path: 噪声词表 xlsx 的相对路径（留空用服务内置默认表）。
         synonyms_path: 映射表 xlsx 的相对路径（留空用服务内置默认表）。
-        resultUrl: 产出回写地址（平台自动注入；模型不填）。
         layout: 版面模式（auto/table/list/off），默认 auto；平台侧无需填写。
 
-    返回 JSON（每行均带 order_no / source）：
+    返回 JSON（每行均带 order_no / source，键恰好 6 个）：
         auto_rows    —— 高度匹配行：raw_line、normalized_name、quantity、unit、
                         matched_name、sku_id、score 等
         review_rows  —— 候选审核行：raw_line、normalized_name、quantity、
@@ -372,10 +417,8 @@ def fresh_order_parse(
                         top_score、candidates、message 等
         auto_count / review_count / error_count —— 三表行数
 
-    产出交付（收到 resultUrl 且回写成功时，末尾多出这些字段）：
-        filePath / filePathName —— HTML 解析报告（文件空间相对路径，点开即读）
-        excelFile: {filePath, filePathName} —— 三表工作簿 xlsx（点开即下载）
-        delivery_note —— 仅在某份产出没交付时出现，说明原因（解析结果不受影响）
+    产出交付**当前已屏蔽**（`OUTPUT_DELIVERY_ENABLED = False`、签名无 `resultUrl`）：
+    不会追加 `filePath` / `excelFile` / `delivery_note`，恢复步骤见模块顶部常量处注释。
     """
     image_url = _check_http_url("image_path", image_path)
     sku_url = _check_http_url("sku_path", sku_path)
@@ -397,23 +440,16 @@ def fresh_order_parse(
         "error_rows": error, "error_count": len(error),
     }
 
-    # 回写是附加能力：拿不到合法地址就只返回解析结果（服务也能被直接调用）
-    put_url = _valid_result_url(resultUrl)
-    if not put_url:
-        return result
-
-    entries, note = _deliver_outputs(
-        put_url,
-        base=_job_base(source_name),
+    # 产出交付统一走闸门：当前 `OUTPUT_DELIVERY_ENABLED = False` ⇒ 直接返回三表，
+    # 不生成 HTML/xlsx、不发任何 POST。恢复交付时把这里的 `""` 换成签名里的 `resultUrl`。
+    return _maybe_deliver(
+        result,
+        result_url="",
         source_name=source_name,
         auto_rows=auto,
         review_rows=review,
         error_rows=error,
     )
-    result.update(entries)
-    if note:
-        result["delivery_note"] = note
-    return result
 
 
 if __name__ == "__main__":

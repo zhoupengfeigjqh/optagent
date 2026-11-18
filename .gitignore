@@ -103,3 +103,11 @@ test-results/
 # 013：本地自建的 Laya 服务（上游源码 + 权重，均不入库）
 laya-service/upstream/
 laya-service/models/
+
+# ===== 生鲜解析服务 v2 的本地评估素材（不入库）=====
+# 只放"本地跑单 / 口径评估"用的样单图与来源报价表：运行时与服务镜像都不需要它们
+# （Dockerfile 只 COPY sku.xlsx / map.xlsx / noise.xlsx 三张默认表）。约 9MB 的二进制，
+# 且每轮评估都会新增样单，入库只会让仓库持续膨胀。
+fresh-service-v2/actual_orders/
+fresh-service-v2/餐料报价.xlsx
+fresh-service-v2/导入模板-销货单413.xlsx

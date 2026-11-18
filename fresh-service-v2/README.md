@@ -2,7 +2,9 @@
 
 面向生鲜配送「文员接单」场景的订单识别与审核系统：手写单据图片 / 对话文本→ 标准化 + RapidFuzz 模糊匹配 → 按置信度分流为三张表（高度匹配 / 候选审核 / 异常记录）→ 人工审核（本地 CLI 或 Dify Chatflow Human Input）→ 导出三工作表 Excel。
 核心逻辑全部是无状态纯函数，本地 CLI 与 FastMCP 两个入口复用同一套 `core/` 代码。
-MCP 侧另产出**一份自包含 HTML 解析报告**与**三表 xlsx**，经平台注入的 `resultUrl` 回写文件空间（见 §4.1）。
+MCP 侧**只返回三表 JSON，当前不产出任何文件**：产出交付（HTML 解析报告 + 三表 xlsx 回写）已于
+2026-11-18 **屏蔽，实现保留**（签名不声明 `resultUrl`、`OUTPUT_DELIVERY_ENABLED=False`），
+恢复步骤见 §4.1 的「停用说明」。
 
 ---
 
@@ -19,8 +21,8 @@ fresh_order_review
 	|——pipeline.py # analyze_order / analyze_batch / apply_decisions / finalize_order / resolve_manual_product
 	|——excel_export.py  # 三工作表 Excel 导出
 	|——html_report.py  # 解析报告 HTML 渲染（自包含、无脚本、无外链）
-|——mcp_server.py # FastMCP 服务（工具 fresh_order_parse）+ resultUrl 产出回写
-|——tests/  # pytest：报告渲染 + 产出回写/降级链
+|——mcp_server.py # FastMCP 服务（工具 fresh_order_parse）+ 产出回写实现（当前屏蔽）
+|——tests/  # pytest：工具契约 / 屏蔽证明 / 版面归一层
 |——requirements.txt # 基础依赖
 |——requirements-ocr.txt # 图片 OCR 依赖（paddleocr/paddlepaddle）
 |——Dockerfile # 单镜像打包（含 OCR 模型预热）
@@ -104,14 +106,16 @@ fresh_order_review
 | `sku_path` | SKU清单 | SKU清单 xlsx 的相对路径 | 是 |
 | `noise_path` | 噪声词表 | 噪声词表的相对路径 | 否，留空用镜像内默认 `noise.xlsx` |
 | `synonyms_path` | 映射表 | 映射表的相对路径 | 否，留空用镜像内默认 `map.xlsx` |
-| `resultUrl` | 结果回写地址 | **模型不填**（运行环境自动注入；声明即开启产出交付） | 否 |
+| `layout` | 版面模式 | `auto`（默认）/ `table` / `list` / `off`；通常不必填 | 否 |
+| ~~`resultUrl`~~ | ~~结果回写地址~~ | **已停用（不出现在签名里）**：产出交付于 2026-11-18 屏蔽，见 §4.1 | — |
 
 - **两段语义要分清**：模型侧填相对路径（`description` 已按此措辞，并明确「请勿自行填写 http 地址」）；
   服务侧实际收到的是平台铸造的 `http(s)` 直链。若服务收到相对路径，说明平台侧漏配 `file_args`，
   报错文案会直接指出这一点；
 - 三个数据表地址的解析结果在进程内缓存：同一组地址 `DATA_CACHE_TTL_SECONDS`（默认 300 秒）内复用，不重复下载解析；`DATA_CACHE_TTL_SECONDS=0` 关闭缓存，`DATA_CACHE_MAX_ENTRIES`（默认 8）控制缓存组数。
 
-返回值**始终**包含三表解析结果（下面是 `order1.png` 的一次真实调用，非示意）；回写成功时末尾再多三个入口字段（见 §4.1）：
+返回值**只有**三表解析结果，键恰好 6 个（下面是 `order1.png` 的一次真实调用，非示意）；原本回写成功时追加的
+`filePath` / `excelFile` / `delivery_note` 三个入口字段**当前不会出现**（产出交付已屏蔽，见 §4.1）：
 
 ```json
 {
@@ -157,7 +161,16 @@ fresh_order_review
   **当前没有下载体积上限**——大图 / 超大 xlsx 会整体读进内存；要设上限时加一个 `MAX_DOWNLOAD_BYTES` 配置即可；
 - 返回 `dict` 时 FastMCP 把 JSON 直接放进 `content` 文本块（实测 `structuredContent` 为空），平台按正文读取即可。
 
-### 4.1 产出交付：HTML 解析报告 + 三表工作簿
+### 4.1 产出交付：HTML 解析报告 + 三表工作簿（**当前已屏蔽**）
+
+> **停用说明（2026-11-18）**：本节描述的交付能力**整条屏蔽，实现一行未删**。
+> 现状＝签名不声明 `resultUrl` ⇒ 平台不注入、服务不发那两次 `POST`；`OUTPUT_DELIVERY_ENABLED = False`
+> ⇒ 报告与 xlsx 连字节都不会生成。返回值因此**恒为 6 键**。
+>
+> **恢复三步**（缺一不可，改完 `tests/` 里的 `test_no_delivery.py` 会立刻提醒你）：
+> ① 把 `resultUrl: Annotated[str, Field(...)] = ""` 加回 `fresh_order_parse` 签名；
+> ② `mcp_server.OUTPUT_DELIVERY_ENABLED` 改成 `True`；
+> ③ `fresh_order_parse` 里 `_maybe_deliver(..., result_url="")` 的 `""` 换成 `resultUrl`。
 
 回写开关**只在工具自己的 `inputSchema` 里声明 `resultUrl`**（平台据此自动注入，模型看不到、也填不了，
 平台侧无需任何配置；2026-10-17 起 `async_tools` 白名单已移除）。收到地址后本服务产出两份文件：
@@ -203,7 +216,7 @@ fresh_order_review
 | `tool_labels` | `{"fresh_order_parse": "生鲜订单解析"}`（进意图聚焦命题文本与工具清单主标题） |
 | `file_args`（**必需**） | `{"fresh_order_parse": {"image_path": "url", "sku_path": "url", "noise_path": "url", "synonyms_path": "url"}}`——模型填相对路径，平台按此声明铸成签名直链；漏配则服务收到相对路径并报错 |
 | `confirmation` | 只读解析、无副作用，可设 `never` |
-| 产出回写 | **无需配置**：工具 schema 已声明 `resultUrl`，运行环境自动注入（**不要**写进 `file_args`，那是"相对路径 → 签名直链"的入参口径） |
+| 产出回写 | **当前不适用**（已屏蔽，平台不会注入）：恢复后也无需配置——工具 schema 声明 `resultUrl` 即自动注入（**不要**写进 `file_args`，那是"相对路径 → 签名直链"的入参口径） |
 
 > 工具的**名字**会进入 `allowed_tools`、`confirmation.tools`、数字人 starter 的 `{kind:'mcp', name}` 与 `MCP.json`，
 > 改名后这些位置 MUST 同步更新，否则工具对模型不可见（`allowed_tools` 按名字精确匹配）。
@@ -227,7 +240,7 @@ docker run -d --name fresh_food_mcp_v1 -p 8104:8000 fresh_food_mcp_v1
 ```
 
 环境变量（可覆盖 `core/config.py` 默认值）：`MCP_HOST`、`MCP_PORT`、`MCP_PATH`、`T_HIGH`、`T_LOW`、`TOP_N`、`HTTP_TIMEOUT_SECONDS`、`DATA_CACHE_TTL_SECONDS`、`DATA_CACHE_MAX_ENTRIES`、`OCR_DET_MODEL`、`OCR_REC_MODEL`；
-产出交付相关（默认值见 `mcp_server.py` / `core/html_report.py`）：`FRESH_PUT_TIMEOUT_S`（回写超时，默认 30s）、`FRESH_RESULT_MAX_BYTES`（单次回写上限，默认 5MB，与平台 `UPLOAD_MAX_MB` 对齐）、`FRESH_REPORT_MAX_ROWS`（报告单表行数上限，默认 200）、`FRESH_REPORT_MAX_CANDIDATES`（报告候选展示上限，默认 5）。
+产出交付相关（**仅恢复交付后生效**，默认值见 `mcp_server.py` / `core/html_report.py`）：`FRESH_PUT_TIMEOUT_S`（回写超时，默认 30s）、`FRESH_RESULT_MAX_BYTES`（单次回写上限，默认 5MB，与平台 `UPLOAD_MAX_MB` 对齐）、`FRESH_REPORT_MAX_ROWS`（报告单表行数上限，默认 200）、`FRESH_REPORT_MAX_CANDIDATES`（报告候选展示上限，默认 5）。
 
 注意：镜像体积约 2–3 GB（paddle 依赖所致）；首次构建需要联网下载 `paddlepaddle` 与 OCR 模型。
 
