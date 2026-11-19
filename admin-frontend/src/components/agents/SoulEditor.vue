@@ -235,7 +235,7 @@ function onFocusDepthChange(event: Event): void {
         是否开启意图聚焦
       </label>
       <p class="field__hint" data-test="intent-focus-hint">
-        每一轮对话在生成回答**之前**先做一次意图判定，把最相关的工具或技能作为本轮规划重点（注意：阶数只针对本体技能生效！）。
+        每一轮对话在生成回答之前先做一次意图判定，把最相关的工具或技能作为本轮规划重点（注意：有本体技能时阶数配置才生效！）。
       </p>
       <!-- 019：聚焦阶数是意图聚焦的**参数**——关闭时置灰且不可选，但数值保留（不回退） -->
       <div
@@ -262,8 +262,8 @@ function onFocusDepthChange(event: Event): void {
           {{ option.label }}
         </label>
         <p class="field__hint" data-test="intent-focus-depth-hint">
-          以命中的本体行为所属概念为起点，**上游**方向（主数据 / 父项）进聚焦提示，
-          **下游**方向（明细 / 事实）进下一步动作提示；两侧各自最多走该阶数跳。
+          以命中的本体行为所属概念为起点，上游方向进聚焦提示，
+          下游方向进下一步动作提示；两侧各自最多走该阶数跳。
           缺省 0 阶 = 只聚焦本身。
         </p>
       </div>

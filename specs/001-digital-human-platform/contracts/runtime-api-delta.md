@@ -51,6 +51,7 @@
 | R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 2 个工具失败错误码与 3 个结构化日志事件（详见 §25；2026-11-09 起 `disable` 并入未授权，且拒绝后本轮挂起、软收尾） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
 | R28 | **本体行为规则闸门**（特性 `021-ontology-rule-gate`，2026-11-09）：本体行为执行前按 `ontology.yaml` 的 `rules`（`position: 前置`）做**确定性规则求值**（硬编码解析 `rule_design`，不经过 LLM）——所需函数未执行则暂停并反馈规则全文，求值 `false` 或规则不可用则拒绝并**中止整轮**；执行成功后把 `position: 后置` 的规则全文附加到工具结果。新增 1 个工具失败错误码、1 个失败轮错误码（`ONTOLOGY_RULE_DENIED`）、`error` 对象新增可选 `details` / `reason`、6 个结构化日志事件（详见 §26） | 行为变更（工具可能被暂停 / 拒绝）+ `error` 载荷可选增量 | 否（无端点 / 无新增 SSE 事件类型；`details` 为可选字段，旧前端忽略；无规则的本体与非本体工具走原路径；前端仅新增一条错误码文案映射） |
 | R29 | **聚焦提示改五元组路径**（特性 `019-intent-focus-expansion` 修订，2026-11-13）：`systemExtra` 里的聚焦提示不再有 `关联概念` / `上游概念` / `上游参考` 三段，改为 `直接命中` + `上游路径`；路径段一行一条五元组 `行为—概念—关系—概念—行为`（`[上游]` 表方向、`→`/`←` 表关系名读向，链尾无行为写 `（无可用行为）`）；长度上限与分档不变，截断改为整行丢弃；本体 `relations[].title` 参与展示（缺失回退 `name`） | 提示词形态变更（纯文本，等价替换一段） | 否（无端点 / SSE / 持久化字段变更；`tool_tips` 与前端零改动；阶数 0 时提示与改前一致） |
+| R30 | **指代改写与术语替换开关**（特性 `027-intent-focus-query-rewrite`，2026-11-19）：SOUL.md frontmatter 新增 `input_rewrite` / `term_normalize`（均缺省关闭、均与 `intent_focus` 逻辑与、仅两者皆真时写键）；意图聚焦前新增一次单条 `noul` 指代判断，命中则用本轮模型改写输入（≤100 字、无工具、不落历史），**改写结果只用于聚焦评分**；`intent-focus.jsonl` 追加 7 个字段；`POST /api/term-normalize` 闸门由"意图聚焦"改为"意图聚焦 + 术语替换"（详见 §21.7） | 新增配置字段 + 时序变更 + 侧车字段 + 既有端点闸门收紧 | 否（两开关缺省关闭：不判定、不改写、术语替换保持 018 行为的前提是显式开启；SSE 事件集合 / 会话详情 / 消息接口字段 / 工具清单零变更；`frontend` 零改动） |
 
 > **R12 / R13 / R14~R16 的登记说明**：R12 / R13 此前未列入本表，本次补登（内容以 §11 / §12 为准）。R14~R16 来自 2026-10-08 的[架构复盘](../../../docs/architecture/review-2026-10-08.md)，**已登记但尚未实施**，对应 `FR-067`~`FR-072` 与 `SC-025`~`SC-029`。
 
@@ -1463,6 +1464,8 @@ POST /api/agents/current/mcp/warm
 soul_version: 1
 intent_focus: true      # 仅开启时写入；关闭态整键不出现
 intent_focus_depth: 1   # 019：仅开启且非 0 时写入；0 阶与关闭态都不出现
+input_rewrite: true     # 027：仅 intent_focus 与它皆为真时写入
+term_normalize: true    # 027：仅 intent_focus 与它皆为真时写入
 ---
 ```
 
@@ -1470,10 +1473,12 @@ intent_focus_depth: 1   # 019：仅开启且非 0 时写入；0 阶与关闭态�
 |---|---|
 | 写入条件（开关） | 平台勾选「意图聚焦」（`soul.intent_focus === true`） |
 | 写入条件（阶数） | 开关开启**且** `soul.intent_focus_depth > 0`；0 阶与关闭态产物逐字一致 |
+| 写入条件（输入重写 / 术语替换） | **027**：两者各自与 `intent_focus` 逻辑与；任一为假即整键不出现（关闭态产物逐字不变） |
 | 读取（开关） | 运行环境**逐轮现读**、异常 / 非布尔一律按关闭（fail-closed） |
 | 读取（阶数） | 逐轮现读；缺失 / 坏值 / 越界一律**收敛到 0**（= 不发散，退回 016 行为）并告警 |
+| 读取（输入重写 / 术语替换） | 逐轮现读；缺键 / 非布尔 / 读取异常一律按 `false`（fail-closed）并告警 |
 | 与 007 开关 | **互相独立**：四种组合各自生效，互不写对方的键 |
-| 正文 | 逐字不变（两个键都不进 System Prompt，`FR-034`） |
+| 正文 | 逐字不变（这些键都不进 System Prompt，`FR-034`） |
 
 ### 21.2 `POST /api/threads/{id}/messages` 请求体新增字段
 
@@ -1539,7 +1544,30 @@ intent_focus:
 3. 开关关闭的轮次：零调用、零留档；
 4. 聚焦提示 MUST NOT 出现在 `history.jsonl`、消息气泡与后续轮次素材中；
 5. 记录文件 MUST NOT 有运行期读取方；写入失败不影响本轮回答；
-6. 与 007 开关的四组合各自生效。
+6. 与 007 开关的四组合各自生效；
+7. （**027**）指代判断与改写 MUST 在「无技能 / 无可聚焦技能」短路**之后**、技能评分**之前**；短路轮零判定零改写；
+8. （**027**）改写结果 MUST NOT 出现在消息数组、`systemExtra` 的用户可见段落、`history.jsonl`、SSE 事件与下一步动作卡片中；
+9. （**027**）术语替换 MUST 只在 `intent_focus && term_normalize` 时读表与替换，且闸门只在 `POST /api/term-normalize` 一处。
+
+### 21.7 指代改写与术语替换开关（027，2026-11-19）
+
+**开关**：`input_rewrite` 控制"指代判断 + 改写"；`term_normalize` 控制术语替换预检。两者都与 `intent_focus` 逻辑与，缺省关闭，仅满足 AND 时物化（见 §21.1）。
+
+**执行链**（每轮，仅在「意图聚焦 + 输入重写」皆开、且存在可聚焦技能时）：
+
+```text
+术语替换（发送前预检，闸门：intent_focus && term_normalize）
+  → 指代判断（Laya 单条 noul，素材 = 本轮输入尾部 200 字）
+  → 判定为真：取最近 3 个完整问答轮 + 本轮输入 → 本轮模型改写（无工具、≤100 字）
+  → 技能评分 / 本体行为评分 / 发散（素材 = 改写结果；未改写成因回退原文）
+  → 留档（intent-focus.jsonl 追加字段）
+```
+
+**留档新增字段**：`need_rewrite`、`rewrite_score`、`rewrite_query`、`rewrite_truncated`、`rewrite_ms`、`rewrite_history_turns`、`rewrite_reason`（口径见 [027 数据模型](../../../027-intent-focus-query-rewrite/data-model.md)）。
+
+**预算**：判定与改写共享 `intent_focus.timeout_ms`（缺省 10s）；改写另受 `rewrite_timeout_ms`（缺省 5s）约束；剩余预算不足 300ms 时放弃改写并回退原文。
+
+**降级**：判定失败按"不改写"，改写失败回退原文；均只记结构化日志与留档，不改变本轮回答与 SSE 事件序列。完整契约见 [`specs/027-intent-focus-query-rewrite/contracts/intent-focus-rewrite.md`](../../../027-intent-focus-query-rewrite/contracts/intent-focus-rewrite.md)。
 
 ---
 

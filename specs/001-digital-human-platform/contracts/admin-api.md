@@ -618,7 +618,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - 该配置仅约束**数据准备空间**的**用户上传**；共享空间与临时空间的可上传类型不由此字段影响。
 - **`data_prep_dirs` 可为空数组，且 MUST NOT 强制包含平台预定义目录**（2026-11-17 修订）：预定义目录（当前仅「算法规则」）可被管理员**屏蔽**——屏蔽即该目录不在清单内（清单是可见范围的唯一权威），对其不出现、不可访问；屏蔽**不删除**磁盘文件，重新启用即恢复可见。管理界面据「预定义全集 − 清单」推导"已屏蔽"状态，**不新增字段、不改响应结构**；屏蔽时该目录的 `data_prep_fields` / `data_prep_uploads` 键一并清除（避免清单外孤儿键）。
 
-**`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增，`intent_focus` 为 **013** 新增，`intent_focus_depth` 为 **019** 新增）：
+**`soul` 的结构**（004 起为结构化对象；`next_action_hints` 为 **007** 新增，`intent_focus` 为 **013** 新增，`intent_focus_depth` 为 **019** 新增，`input_rewrite` / `term_normalize` 为 **027** 新增）：
 
 | 字段 | 类型 | 必填 | 归属 | 说明 |
 |---|---|---|---|---|
@@ -633,13 +633,17 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `next_action_hints_count` | number | ➖ | **运行环境开关（参数）** | 开关开启时**每轮最多几条**提示（007）：`1~6` 的整数，缺省 `3`；**与开关同进同出**——仅开关开启时物化进 frontmatter，关闭态不写该键 |
 | `intent_focus` | boolean | ➖ | **运行环境开关** | 意图聚焦（013）：开启后该数字人每轮对话在调主模型**之前**先做一次意图判定。缺省 `false`；**仅 `true` 时**物化进 frontmatter；与 `next_action_hints` **互相独立** |
 | `intent_focus_depth` | number | ➖ | **运行环境开关（参数）** | 聚焦阶数（**019**）：意图聚焦开启后按本体对象关系做几跳**单向**发散（上游进聚焦提示、下游进下一步动作卡片）。`0~2` 的整数，缺省 `0`（= 只聚焦本身，等价于 016 行为）；**仅开启且非 0 时**物化进 frontmatter；关闭时数值保留但不写键 |
+| `input_rewrite` | boolean | ➖ | **运行环境开关** | 输入重写（**027**）：与「意图聚焦」逻辑与——两者皆开时，每轮先做一次指代判断，命中则用本轮模型把输入改写为自洽文本（≤100 字）**仅用于意图聚焦计算**，发给模型的仍是原话。缺省 `false`；**仅 `intent_focus === true && input_rewrite === true` 时**物化进 frontmatter |
+| `term_normalize` | boolean | ➖ | **运行环境开关** | 术语替换（**027**，位置在意图聚焦配置区）：与「意图聚焦」逻辑与——两者皆开时才执行 `POST /api/term-normalize` 的替换预检。缺省 `false`；**仅 `intent_focus === true && term_normalize === true` 时**物化进 frontmatter |
 
 - `next_action_hints` 为**拒绝式校验**：键缺失 = `false`（不写该键的老表单 / 004 期存档照常保存）；键在但非布尔（`"true"` / `1` / `null` / `{}`…）→ `VALIDATION_FAILED`，MUST NOT 做隐式转换（"显示关闭、运行环境却已开启"是最难排查的错配）；
 - `next_action_hints_count` 同样**拒绝式**：键缺失 = `3`；`null` / 小数 / 越界 / 非数字 → `VALIDATION_FAILED`（不做 round / clamp）；开关关闭时**数值仍被保留**（管理台输入框置灰、不回退），只是不写进产物；
 - `intent_focus` 与 `next_action_hints` **同一口径**：键缺失 = `false`（013 之前的存档照常打开与保存）；非布尔 → `VALIDATION_FAILED`；关闭态不写该键（部署零残留）；
 - `intent_focus_depth` **同样拒绝式**：键缺失 = `0`（019 之前的存档照常打开与保存）；`null` / 小数 / 越界（`<0` 或 `>2`）/ 非数字 → `VALIDATION_FAILED`（不做 round / clamp）；意图聚焦关闭时**数值仍被保留**（管理台置灰、不回退），只是不写进产物；阶数为 `0` 与关闭态产物**逐字一致**（都不写键）；
-- 响应中**恒有这四个键**（读取归一化时缺省补 `false` / `3` / `false` / `0`）；
-- **对模型行为零影响**：它们只进 frontmatter，正文（System Prompt）在开 / 关两态逐字一致（`FR-035` / `FR-034`）。运行环境侧的读取、生成与端点口径见 `runtime-api-delta.md` §16、§21。
+- `input_rewrite` / `term_normalize`（**027**）与 `intent_focus` **同一口径**：键缺失 = `false`（027 之前的存档照常打开与保存）；非布尔 → `VALIDATION_FAILED`；**意图聚焦关闭时值仍被保留**（管理台复选框置灰、不清空，再次开启即恢复），只是不写进产物；物化条件为"聚焦开关与该开关**皆为真**"，其余组合**不写键**（部署零残留）；
+- 「术语替换」控件旁 MUST 提供**固定说明文案**（含义：仅当该数字人拥有本体术语映射集时，开启本功能才会生效）；平台不做实时检测、不因缺失映射而禁用控件（**027** / `018` 契约）；
+- 响应中**恒有这六个键**（读取归一化时缺省补 `false` / `3` / `false` / `0` / `false` / `false`）；
+- **对模型行为零影响**：它们只进 frontmatter，正文（System Prompt）在开 / 关两态逐字一致（`FR-035` / `FR-034`）。运行环境侧的读取、生成与端点口径见 `runtime-api-delta.md` §16、§21；指代改写的运行期契约见 `specs/027-intent-focus-query-rewrite/contracts/intent-focus-rewrite.md`。
 
 **错误码**：`ADM_AGENT_NOT_FOUND`（复用 `AGENT_NOT_FOUND` 语义，因属平台自有命名空间故加前缀；**同名不同义的情况在本契约中不存在**）
 

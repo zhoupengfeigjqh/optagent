@@ -44,8 +44,8 @@
 
 ### 行为口径
 
-- 意图聚焦开关关闭 → **不读任何字典**，直接返回 `applied:false`。
-- 无字典文件 → `applied:false`（不是错误）。
+- **闸门（2026-11-19 起，027）**：「意图聚焦」与「术语替换」（SOUL `term_normalize`）**同时开启**才执行；任一关闭 → **不读任何字典**，直接返回 `applied:false`，前端不弹确认。
+- 无字典文件 → `applied:false`（不是错误；界面固定说明"拥有本体术语映射集才生效"即为此情形）。
 - 部分字典损坏 → 跳过该本体 + `warn`（`event: term_normalize.degraded`），其余照常。
 - 开关读取失败 → `warn`（`event: term_normalize.gate`），按关闭处理（fail-closed）。
 
