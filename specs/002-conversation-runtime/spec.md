@@ -327,6 +327,8 @@
 
 > **（2026-10-14 修订，`009-agent-data-isolation`）** 上文的 `临时空间` 与 §5.1 的 `threads/` 多了一层**数字人目录**：数据域由用户级收敛到数字人级（`users/{uid}/user-data/{数字人}/{数据准备|共享空间|临时空间|threads}`）。
 >
+> 〔**2026-11-18 起上文空间枚举部分作废**（`specs/025-remove-shared-space`）：`共享空间` 已下线，数据域为 `users/{uid}/user-data/{数字人}/{数据准备|临时空间|threads}`。本特性的产物落点（`临时空间`）与"落在文件空间之内"的判断不受影响。〕
+>
 > **既有漂移登记**：本规格此前若写作 `users/{uid}/threads/`（无 `user-data/` 一层，见 `TR-37`），该写法与实现始终不一致——真实落点一直是 `user-data/` 之下；本次一并更正为数据域口径，`TR-37` 的实施 MUST 以 `users/{uid}/user-data/{数字人}/threads/{thread_id}/run.jsonl` 为准。
 >
 > 另：会话的**归属与作用域**由「平台当前选中的数字人」决定（服务端权威）：跨数字人取会话一律 `404`（与不存在同形）；「新建对话」是视图态、会话由首条消息创建。契约见 `specs/001-digital-human-platform/contracts/runtime-api-delta.md` §18。

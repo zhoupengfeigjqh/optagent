@@ -369,12 +369,14 @@ onBeforeUnmount(() => {
         </MentionPopup>
       </template>
 
+      <!-- 026：`chat.canSend` 只认草稿正文，只有附件时要并上引用集合；
+           但流式中必须保持禁用，故显式再与 `!sending` -->
       <template #toolbar>
         <ComposerToolbar
           :thinking="chat.thinkingEnabled.value"
           :model="models.current.value"
           :models="models.models.value"
-          :can-send="chat.canSend.value && !preparing"
+          :can-send="(chat.canSend.value || mention.references.value.length > 0) && !sending && !preparing"
           :streaming="sending"
           :upload-disabled="sending"
           @toggle-thinking="onToggleThinking"

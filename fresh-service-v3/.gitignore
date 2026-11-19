@@ -1,0 +1,11 @@
+# 本地密钥/环境文件，不要提交、不要打进镜像
+.env
+.env.local
+.env.*.local
+*.pyc
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+输出/
+.work/

@@ -81,7 +81,7 @@ describe('createNextStepsApi', () => {
     const { api } = apiWith({
       message_id: 'm-1',
       actions: [
-        { prompt: '整理共享空间的表格' },
+        { prompt: '整理临时空间的表格' },
         { prompt: '' },
         { tool_tips: [] },
         'not-an-object',
@@ -90,7 +90,7 @@ describe('createNextStepsApi', () => {
 
     const result = await api.fetch('th_1')
 
-    expect(result.actions).toEqual([{ prompt: '整理共享空间的表格', tool_tips: [] }])
+    expect(result.actions).toEqual([{ prompt: '整理临时空间的表格', tool_tips: [] }])
   })
 
   it('全部条目都不合法 → 空形态（不留下"有 message_id 却没有卡片"的半截状态）', async () => {

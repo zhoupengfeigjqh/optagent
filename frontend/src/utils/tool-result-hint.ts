@@ -17,6 +17,33 @@ import type { ToolCallItem } from './tool-calls'
 export const NO_HINT = ''
 
 /**
+ * 流式期「已有终态、正文却还没到」的说明（2026-11-18）。
+ *
+ * 措辞刻意只承诺**时间点**（本轮结束后），不承诺"一定有内容"——工具真返回空正文时，
+ * 轮末会回落成「无结果内容」，两者不冲突。
+ */
+export const LIVE_PENDING_HINT = '结果将在本轮结束后可查看'
+
+/**
+ * 取该条**无正文**时的说明；`NO_HINT` = 交由模板兜底「无结果内容」。
+ *
+ * 为什么需要它：流式期 SSE 的 `tool_call_end` 只带 `{call_id, status}`（见
+ * `agent-backend/src/domain/run-consume.ts`），正文只在轮末落盘并随历史下发。于是"已完成"
+ * 的卡片在流式期必然可展开、必然为空 —— 此时说「无结果内容」等于谎报"工具没有结果"。
+ *
+ * 三种情形**保持原样**（这是本函数唯一的边界）：
+ * - 有截断说明时以截断说明为准（`resultHint` 已负责，这里不抢它的位置）；
+ * - 历史态（`live=false`）：正文确实为空，就是「无结果内容」；
+ * - 工具本身报错（`status='error'`）：空正文即失败本身，不是"还没送到"，别误导。
+ */
+export function emptyBodyHint(item: ToolCallItem, live: boolean): string {
+  if (item.truncated === true) return NO_HINT
+  if (!live) return NO_HINT
+  if (item.status === 'error') return NO_HINT
+  return LIVE_PENDING_HINT
+}
+
+/**
  * 取该条结果的截断说明；`''` = 不需要提示。
  *
  * 两种文案的差别是**磁盘上有没有那份完整正文**——这决定了用户/助手下一步能做什么。

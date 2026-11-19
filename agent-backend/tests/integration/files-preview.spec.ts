@@ -2,7 +2,7 @@
  * 内联预览集成测试（2026-10-20）：`.html` 可点开渲染，且**必须沙箱化**。
  *
  * 覆盖口径：
- * - 上传到共享空间 / 临时空间的 `.html` 可被 `GET /api/files/preview` 内联返回
+ * - 上传到临时空间的 `.html` 可被 `GET /api/files/preview` 内联返回
  *   （`text/html` + `inline`），并带 `CSP: sandbox` 与 `nosniff`；
  * - 非 HTML 的内联类型（`.txt`）**不加**这两条头（避免误伤既有行为）；
  * - `/api/files/raw` 签名直链同样沙箱化——它可被浏览器直接打开，不加就是同源 XSS；
@@ -94,10 +94,12 @@ function signedRawUrl(relPath: string): string {
 }
 
 describe('`.html` 内联预览（2026-10-20）', () => {
-  it('共享空间：`preview` 以 `text/html` 内联返回，且带 CSP sandbox + nosniff', async () => {
-    expect((await uploadHtml('共享空间', '看板.html')).statusCode).toBe(201);
+  // 2026-11-18（025）：共享空间下线后，扁平空间只剩临时空间；原先"共享空间 + 临时空间"
+  // 两条同构用例合并为一条，断言只保留一份（含 inline）。
+  it('临时空间：`preview` 以 `text/html` 内联返回，且带 CSP sandbox + nosniff', async () => {
+    expect((await uploadHtml('临时空间', '看板.html')).statusCode).toBe(201);
 
-    const res = await preview('共享空间', '看板.html');
+    const res = await preview('临时空间', '看板.html');
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(String(res.headers['content-disposition'])).toContain('inline');
@@ -106,17 +108,10 @@ describe('`.html` 内联预览（2026-10-20）', () => {
     expect(res.body).toContain('<h1>看板</h1>');
   });
 
-  it('临时空间：同样可内联（空间级白名单已放开 `.html`）', async () => {
-    expect((await uploadHtml('临时空间', '报表.html')).statusCode).toBe(201);
-
-    const res = await preview('临时空间', '报表.html');
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
-    expect(res.headers['content-security-policy']).toBe('sandbox');
-  });
-
   it('签名直链 `raw` 也沙箱化（可被浏览器直接打开，不加就是同源 XSS）', async () => {
-    const res = await app.inject({ method: 'GET', url: signedRawUrl('共享空间/看板.html') });
+    // 自给自足：不依赖上一条用例的落盘顺序
+    expect((await uploadHtml('临时空间', '直链.html')).statusCode).toBe(201);
+    const res = await app.inject({ method: 'GET', url: signedRawUrl('临时空间/直链.html') });
 
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
@@ -125,13 +120,13 @@ describe('`.html` 内联预览（2026-10-20）', () => {
   });
 
   it('非 HTML 的内联类型不加沙箱头（`.txt` 行为不变）', async () => {
-    const { body, headers } = multipart('共享空间', '说明.txt', '纯文本', 'text/plain');
+    const { body, headers } = multipart('临时空间', '说明.txt', '纯文本', 'text/plain');
     expect(
       (await app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers }))
         .statusCode,
     ).toBe(201);
 
-    const res = await preview('共享空间', '说明.txt');
+    const res = await preview('临时空间', '说明.txt');
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
     expect(res.headers['content-security-policy']).toBeUndefined();

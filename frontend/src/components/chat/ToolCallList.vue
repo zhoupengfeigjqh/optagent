@@ -5,7 +5,8 @@
  * 一个组件同时服务两种场景（TR-10）：
  * - **历史态**：`Message.tool_calls` 下发元数据 + `inline_content`（超阈值时是截断版）；
  *   展开即见——2026-11-08 起**不再拉取临时空间副本**，卡片展示的就是记录里那段正文
- * - **流式态**：SSE 只给名称与状态，结果尚未产生（也不外显结果）
+ * - **流式态**：SSE 只给名称与状态，结果尚未产生（也不外显结果）；此时展开只能看到一行
+ *   "结果将在本轮结束后可查看"（2026-11-18），不谎报「无结果内容」
  *
  * 展示分两层（2026-10-08 改版，spec §4.6 / TR-32~TR-36）：
  * - **计数行**（常显）：`本轮 N 次调用 · 报错 M 次`——报错数**不藏在展开后**
@@ -34,7 +35,7 @@ import {
   toolStatusLabel,
   type ToolCallItem,
 } from '../../utils/tool-calls'
-import { NO_HINT, resultHint } from '../../utils/tool-result-hint'
+import { emptyBodyHint, NO_HINT, resultHint } from '../../utils/tool-result-hint'
 import { fallbackHint, parseProducedContent } from '../../utils/produced-content'
 import type { ViewLinkTarget } from '../../utils/view-link'
 import ProducedJsonView from './ProducedJsonView.vue'
@@ -172,6 +173,23 @@ const bodyHints = computed(() => {
 function bodyHintOf(item: ToolCallItem): string {
   return bodyHints.value.get(item.callId) ?? NO_HINT
 }
+
+/**
+ * 各条调用的**无正文说明**（`call_id` → 一句），一次算完供模板读取（宪章原则五）。
+ * 判定同在 `utils/tool-result-hint.ts`：流式期说"本轮结束后可查看"，历史态才说"无结果内容"。
+ */
+const emptyHints = computed(() => {
+  const hints = new Map<string, string>()
+  for (const item of props.items) {
+    const hint = emptyBodyHint(item, props.live)
+    if (hint !== '') hints.set(item.callId, hint)
+  }
+  return hints
+})
+
+function emptyHintOf(item: ToolCallItem): string {
+  return emptyHints.value.get(item.callId) ?? NO_HINT
+}
 </script>
 
 <template>
@@ -266,7 +284,9 @@ function bodyHintOf(item: ToolCallItem): string {
             <pre v-else class="tool-call__content">{{ displayContent(item) }}</pre>
             <p v-if="parsedOf(item).hint" class="tool-call__hint">{{ parsedOf(item).hint }}</p>
           </template>
-          <!-- running 不可展开，故此处只剩"终态但无内容"一种情况 -->
+          <!-- running 不可展开，故此处只剩"终态但无内容"：流式期正文还没送到，说清"什么时候能看到"，
+               不谎报"没有内容"（2026-11-18）；历史态/工具报错仍回落「无结果内容」 -->
+          <p v-else-if="emptyHintOf(item)" class="tool-call__hint">{{ emptyHintOf(item) }}</p>
           <p v-else-if="!bodyHintOf(item)" class="tool-call__hint">无结果内容</p>
 
           <!-- 正文下方一行说明：这是不是截断版、完整的那份在哪（判定见 `utils/tool-result-hint.ts`） -->

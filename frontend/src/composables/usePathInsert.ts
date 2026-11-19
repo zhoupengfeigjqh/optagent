@@ -34,7 +34,7 @@ export interface PathInsertStore {
   /** 当前聚焦列 */
   column: Ref<MentionColumn>
   activeSpace: Ref<string | null>
-  /** 已选目录（相对路径，如 数据准备/生产计划、共享空间） */
+  /** 已选目录（相对路径，如 数据准备/生产计划、临时空间） */
   activeDir: Ref<string | null>
   /** 当前列的键盘高亮索引 */
   activeIndex: Ref<number>

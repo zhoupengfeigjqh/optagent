@@ -3,10 +3,10 @@
  *
  * 所有 Agent 侧文件读写必须经此层：
  * - 路径合法性：**唯一判据在 `domain/space-path.ts`**（与 HTTP 文件接口共用同一张表，
- *   2026-11-02 收敛）——三空间白名单、扁平空间限深、数据准备二级目录须在场景清单内
+ *   2026-11-02 收敛）——空间白名单、扁平空间限深、数据准备二级目录须在场景清单内
  * - 物理兜底：拒绝绝对路径与 `..` 穿越；已存在路径做 realpath 校验防符号链接穿越；
  *   数据准备二级目录须真实存在（清单目录由 `loadScenario` 惰性创建）
- * - 权限矩阵：数据准备/共享空间只读；临时空间可写但强制 `{thread_id}_` 前缀
+ * - 权限矩阵：数据准备只读；临时空间可写但强制 `{thread_id}_` 前缀
  * - 违规抛 PermissionError 并记日志（对话不中断由上层保证）
  *
  * **009 归属**：`dataRoot` 是**数字人数据域**（`user-data/{数字人}`），`agentName` 为必填入参；
@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
-import { PRODUCED_DIR, SPACE_PREP, SPACE_SHARED, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
+import { PRODUCED_DIR, SPACE_PREP, SPACE_TMP, SPACES, userDataDir } from './dirs.js';
 import { removeFileSafeAsync } from './fs-safe.js';
 import { loadScenario } from './scenario.js';
 import { judgeSpacePath } from './space-path.js';
@@ -383,7 +383,7 @@ export class FileAccess {
   /**
    * 列目录。
    *
-   * 扁平空间（共享/临时）**不可下钻**：`共享空间/2026`、`临时空间/别处` 本身就是子目录，
+   * 扁平空间（临时空间）**不可下钻**：`临时空间/别处` 本身就是子目录，
    * 一律不可列。这条判据必须在 stat 之后才成立（词法分不清"一层文件"与"同名目录"），
    * 故落在本实现而非 `space-path.ts`；例外子树 `临时空间/后台产出` 不受限。
    */
@@ -392,7 +392,7 @@ export class FileAccess {
     const baseRel = path.relative(this.dataRoot, abs).split(path.sep).join('/');
     const top = baseRel.split('/')[0] ?? '';
     const inProduced = baseRel === PRODUCED_DIR || baseRel.startsWith(`${PRODUCED_DIR}/`);
-    const flatSpace = top === SPACE_SHARED || top === SPACE_TMP;
+    const flatSpace = top === SPACE_TMP;
     if (flatSpace && !inProduced && baseRel !== top) {
       throw this.deny(`${top} 不支持子目录: ${dir}`);
     }

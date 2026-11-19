@@ -560,12 +560,12 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
       { decls: { upload_many: { 'files[]': 'url' } }, ctx: sandbox() },
     );
 
-    await exec(tool!, { files: ['临时空间/a.png', '共享空间/b.png'] });
+    await exec(tool!, { files: ['临时空间/a.png', '数据准备/b.png'] });
 
     expect(sentArgs(calls)).toEqual({
       files: [
         'https://signed.example/demo/临时空间/a.png',
-        'https://signed.example/demo/共享空间/b.png',
+        'https://signed.example/demo/数据准备/b.png',
       ],
     });
   });
@@ -586,7 +586,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     await exec(tool!, {
       groups: [
         { label: 'A', files: [{ url: '临时空间/a.png', size: 1 }] },
-        { label: 'B', files: [{ url: '共享空间/b.png', size: 2 }] },
+        { label: 'B', files: [{ url: '数据准备/b.png', size: 2 }] },
       ],
     });
 
@@ -598,7 +598,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
         },
         {
           label: 'B',
-          files: [{ url: 'https://signed.example/demo/共享空间/b.png', size: 2 }],
+          files: [{ url: 'https://signed.example/demo/数据准备/b.png', size: 2 }],
         },
       ],
     });

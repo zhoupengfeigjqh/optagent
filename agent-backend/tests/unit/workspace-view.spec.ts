@@ -4,7 +4,7 @@
  * 为什么需要：前端靠该标记区分"参与空数据判定的目录"，而"预定义目录"是平台业务常量，
  * 前端 MUST NOT 硬编码（宪章原则七）。这里钉住运行端的派生口径：
  * - 只有「数据准备」下、且属于 `PREDEFINED_DATA_PREP_DIRS` 的二级目录为 `true`；
- * - 扁平空间（共享 / 临时）与管理员自定义目录恒为 `false`；
+ * - 扁平空间（临时空间）与管理员自定义目录恒为 `false`；
  * - 空目录不改变标记（"目录性质"与"目录里有没有文件"是两件事）。
  */
 import { describe, expect, it } from 'vitest';
@@ -45,6 +45,22 @@ async function viewOf(accessImpl: FileAccess) {
   return { view, dir };
 }
 
+describe('buildWorkspaceView —— 空间清单（2026-11-18 / 025：共享空间下线）', () => {
+  it('只回数据准备与临时空间两个空间，且顺序固定', async () => {
+    const { view } = await viewOf(access());
+
+    expect(view.spaces.map((space) => space.name)).toEqual(['数据准备', '临时空间']);
+  });
+
+  it('不再存在只读空间：所有目录项 deletable 恒为 true', async () => {
+    const { view } = await viewOf(access());
+
+    const all = view.spaces.flatMap((space) => space.dirs);
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((item) => item.deletable)).toBe(true);
+  });
+});
+
 describe('buildWorkspaceView —— predefined 标记（014）', () => {
   it('数据准备：预定义目录为 true，自定义目录为 false', async () => {
     const { dir } = await viewOf(access());
@@ -53,10 +69,9 @@ describe('buildWorkspaceView —— predefined 标记（014）', () => {
     expect(dir('数据准备/生产计划').predefined).toBe(false);
   });
 
-  it('扁平空间（共享 / 临时）恒为 false', async () => {
+  it('扁平空间（临时空间）恒为 false', async () => {
     const { dir } = await viewOf(access());
 
-    expect(dir('共享空间').predefined).toBe(false);
     expect(dir('临时空间').predefined).toBe(false);
   });
 

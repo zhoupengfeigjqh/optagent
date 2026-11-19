@@ -262,7 +262,7 @@ useMaximizeEscape({
       </div>
     </header>
 
-    <!-- 列表态：三个空间（默认全部收起；数据准备下钻二级子目录） -->
+    <!-- 列表态：两个空间（默认全部收起；数据准备下钻二级子目录） -->
     <div v-if="!isContent" class="workspace-panel__body workspace-panel__body--inset">
       <WorkspaceSpaceTree
         :spaces="spaces"

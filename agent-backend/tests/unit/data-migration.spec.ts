@@ -30,8 +30,8 @@ import {
 } from '../../src/domain/dirs.js';
 
 const userId = 'admin';
-/** 迁移的四类一级条目（改前布局） */
-const LEGACY_ENTRIES = ['共享空间', '临时空间', '数据准备', THREADS_DIR];
+/** 迁移的三类一级条目（改前布局；2026-11-18 / 025：共享空间已下线，不再纳入迁移） */
+const LEGACY_ENTRIES = ['临时空间', '数据准备', THREADS_DIR];
 
 let root: string;
 
@@ -172,7 +172,7 @@ describe('migrateUserDataLayout —— 正常迁移', () => {
     });
   });
 
-  it('迁移同时在**该数字人**下建齐三空间 + threads（与迁移内容合并，不覆盖）', () => {
+  it('迁移同时在**该数字人**下建齐两空间 + threads（与迁移内容合并，不覆盖）', () => {
     seedLegacyLayout();
     seedAgent('only-数字人');
 
@@ -181,8 +181,23 @@ describe('migrateUserDataLayout —— 正常迁移', () => {
     const dst = userDataDir(root, userId, 'only-数字人');
     expect(fs.existsSync(path.join(dst, '数据准备'))).toBe(true);
     expect(fs.existsSync(path.join(dst, '临时空间'))).toBe(true);
-    expect(fs.existsSync(path.join(dst, '共享空间'))).toBe(true);
     expect(fs.existsSync(path.join(dst, THREADS_DIR))).toBe(true);
+    // 2026-11-18（025）：共享空间已下线，迁移不会再把它建出来
+    expect(fs.existsSync(path.join(dst, '共享空间'))).toBe(false);
+  });
+
+  it('用户级遗留的「共享空间」残留**不搬不删**（已下线，不再属于迁移条目）', () => {
+    seedLegacyLayout();
+    const legacyShared = path.join(userDataRoot(root, userId), '共享空间');
+    fs.mkdirSync(legacyShared, { recursive: true });
+    fs.writeFileSync(path.join(legacyShared, 'old.txt'), 'old', 'utf8');
+    seedAgent('only-数字人');
+
+    const result = migrateUserDataLayout(root, userId);
+
+    expect(result.movedCount).toBe(LEGACY_ENTRIES.length);
+    // 原样留在用户级（清理属一次性脚本职责，见 specs/025 与 scripts/remove-shared-space.ts）
+    expect(fs.existsSync(path.join(legacyShared, 'old.txt'))).toBe(true);
   });
 });
 
@@ -221,21 +236,21 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     seedLegacyLayout();
     seedAgent('only-数字人');
     const dst = userDataDir(root, userId, 'only-数字人');
-    fs.mkdirSync(path.join(dst, '共享空间'), { recursive: true });
-    fs.writeFileSync(path.join(dst, '共享空间', 'existing.txt'), 'existing', 'utf8');
+    fs.mkdirSync(path.join(dst, '临时空间'), { recursive: true });
+    fs.writeFileSync(path.join(dst, '临时空间', 'existing.txt'), 'existing', 'utf8');
 
     const logs: RecordedLog[] = [];
     const result = migrateUserDataLayout(root, userId, { logger: makeLogger(logs) });
 
-    expect(result.skipped).toEqual(['共享空间']);
+    expect(result.skipped).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
     // 目标内容原样保留（不合并、不覆盖）
-    expect(fs.readFileSync(path.join(dst, '共享空间', 'existing.txt'), 'utf8')).toBe('existing');
-    expect(fs.existsSync(path.join(dst, '共享空间', 'marker-共享空间.txt'))).toBe(false);
+    expect(fs.readFileSync(path.join(dst, '临时空间', 'existing.txt'), 'utf8')).toBe('existing');
+    expect(fs.existsSync(path.join(dst, '临时空间', 'marker-临时空间.txt'))).toBe(false);
     // 源目录仍有跳过项 → 不清掉（下次触发继续尝试）
-    expect(fs.existsSync(path.join(userDataRoot(root, userId), '共享空间'))).toBe(true);
+    expect(fs.existsSync(path.join(userDataRoot(root, userId), '临时空间'))).toBe(true);
     expect(logs.find((l) => l.fields.event === 'data.migration.skipped')?.fields).toMatchObject({
-      entry: '共享空间',
+      entry: '临时空间',
       reason: 'target_exists',
     });
   });
@@ -246,21 +261,21 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     seedAgent('z-数字人');
     // z 已有数据域（新布局），且里面有内容
     const zDir = userDataDir(root, userId, 'z-数字人');
-    fs.mkdirSync(path.join(zDir, '共享空间'), { recursive: true });
-    fs.writeFileSync(path.join(zDir, '共享空间', 'z.txt'), 'z', 'utf8');
+    fs.mkdirSync(path.join(zDir, '临时空间'), { recursive: true });
+    fs.writeFileSync(path.join(zDir, '临时空间', 'z.txt'), 'z', 'utf8');
 
     const result = migrateUserDataLayout(root, userId); // ③ → a-数字人
 
     expect(result.ownerAgent).toBe('a-数字人');
     expect(result.skipped).toEqual([]);
-    expect(fs.readFileSync(path.join(zDir, '共享空间', 'z.txt'), 'utf8')).toBe('z');
+    expect(fs.readFileSync(path.join(zDir, '临时空间', 'z.txt'), 'utf8')).toBe('z');
     expect(fs.existsSync(path.join(userDataDir(root, userId, 'a-数字人'), 'z-数字人'))).toBe(false);
   });
 
   it('目标同名项是**空目录**（骨架先被建出来 / 上次中断的空壳）→ 搬进去，不把数据留在旧位', async () => {
     seedLegacyLayout();
     seedAgent('only-数字人');
-    // 模拟"半成品"：骨架（三空间 + threads）先被建出来，但里面什么都没有
+    // 模拟"半成品"：骨架（两空间 + threads）先被建出来，但里面什么都没有
     ensureAgentDataDirs(root, userId, 'only-数字人');
     const logs: RecordedLog[] = [];
 
@@ -281,18 +296,18 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     seedLegacyLayout();
     seedAgent('only-数字人');
     const dst = userDataDir(root, userId, 'only-数字人');
-    fs.mkdirSync(path.join(dst, '共享空间'), { recursive: true });
-    fs.writeFileSync(path.join(dst, '共享空间', 'existing.txt'), 'existing', 'utf8');
+    fs.mkdirSync(path.join(dst, '临时空间'), { recursive: true });
+    fs.writeFileSync(path.join(dst, '临时空间', 'existing.txt'), 'existing', 'utf8');
 
     const result = migrateUserDataLayout(root, userId);
 
-    expect(result.skipped).toEqual(['共享空间']);
+    expect(result.skipped).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
     // 冲突项原样留在旧位，等人工处理；目标里的既有内容一字未改
     expect(
-      fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt')),
+      fs.existsSync(path.join(userDataRoot(root, userId), '临时空间', 'marker-临时空间.txt')),
     ).toBe(true);
-    expect(fs.readFileSync(path.join(dst, '共享空间', 'existing.txt'), 'utf8')).toBe('existing');
+    expect(fs.readFileSync(path.join(dst, '临时空间', 'existing.txt'), 'utf8')).toBe('existing');
   });
 
   it('清单为空 → blocked：数据原地保留、不建目录、落 warn', () => {
@@ -413,7 +428,7 @@ describe('migrateUserDataLayout —— 失败保持原状（EXDEV）', () => {
 
     const realRename = fs.renameSync;
     vi.spyOn(fs, 'renameSync').mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
-      if (String(from).endsWith('共享空间')) {
+      if (String(from).endsWith('临时空间')) {
         const err = new Error('EXDEV: cross-device link not permitted') as NodeJS.ErrnoException;
         err.code = 'EXDEV';
         throw err;
@@ -423,15 +438,15 @@ describe('migrateUserDataLayout —— 失败保持原状（EXDEV）', () => {
 
     const result = migrateUserDataLayout(root, userId, { logger: makeLogger(logs) });
 
-    expect(result.failed).toEqual(['共享空间']);
+    expect(result.failed).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
     // 保持原状：源里的内容没被动过，也没有被"复制"到目标
     expect(
-      fs.existsSync(path.join(userDataRoot(root, userId), '共享空间', 'marker-共享空间.txt')),
+      fs.existsSync(path.join(userDataRoot(root, userId), '临时空间', 'marker-临时空间.txt')),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(userDataDir(root, userId, 'only-数字人'), '共享空间', 'marker-共享空间.txt'),
+        path.join(userDataDir(root, userId, 'only-数字人'), '临时空间', 'marker-临时空间.txt'),
       ),
     ).toBe(false);
 
@@ -440,7 +455,7 @@ describe('migrateUserDataLayout —— 失败保持原状（EXDEV）', () => {
       alert: true,
       event: 'data.migration.error',
       uid: userId,
-      entry: '共享空间',
+      entry: '临时空间',
       reason: 'EXDEV',
     });
   });
@@ -458,7 +473,7 @@ describe('listUserIds / migrateAllUsers', () => {
 
   it('migrateAllUsers 逐用户独立迁移，结果逐条返回（无数据的用户为 no-source）', () => {
     for (const uid of ['u1', 'u2']) {
-      fs.mkdirSync(path.join(root, 'users', uid, 'user-data', '共享空间'), { recursive: true });
+      fs.mkdirSync(path.join(root, 'users', uid, 'user-data', '临时空间'), { recursive: true });
       const agentDir = path.join(root, 'users', uid, 'agents', 'only');
       fs.mkdirSync(agentDir, { recursive: true });
       fs.writeFileSync(path.join(agentDir, 'SOUL.md'), '你是助手。\n', 'utf8');

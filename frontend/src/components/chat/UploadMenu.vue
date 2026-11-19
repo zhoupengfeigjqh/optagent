@@ -4,7 +4,7 @@
  *
  * 目录树一律来自 workspace 接口（空间 → 子目录），前端不保留目录常量：
  * - 数据准备：列出 scenario 定义的子目录，允许类型按**目录**配置（缺省 csv/xlsx）
- * - 共享空间 / 临时空间：空间自身即目标目录，支持 csv/xlsx/txt/json/pdf/图片
+ * - 临时空间：空间自身即目标目录，支持 csv/xlsx/txt/json/pdf/图片
  * 文件选择的 `accept` 按**目标目录**自身的 `upload_extensions` 动态设置
  * （与 `useWorkspace.uploadExtensionsOf` 共用同一实现 `uploadExtensionsOfDir`，MUST NOT 自行反查空间级）。
  *
@@ -296,7 +296,7 @@ function fieldHint(fields: readonly ScenarioField[]): string {
   /*
    * 不设 `flex-wrap`：目录名 +「?」+ 类型始终在**同一条 flex 行**上，
    * 类型过长时在自身盒内折行（`min-width: 0`），从而第一段类型紧贴名字右侧，
-   * 而不会整段被挤到下一行（那会让「共享空间」这种无「?」的目录看起来是两段）。
+   * 而不会整段被挤到下一行（那会让「临时空间」这种无「?」的目录看起来是两段）。
    */
 }
 

@@ -401,3 +401,55 @@ describe('ToolCallList —— 结果正文的结构化展示（2026-10-10）', (
     expect(again.find('.produced-json').exists()).toBe(false)
   })
 })
+
+/**
+ * 流式期「已完成但正文未到」（2026-11-18）
+ *
+ * 背景：SSE 的 `tool_call_end` 只带 `{call_id, status}`，正文要等轮末落盘后随历史下发。
+ * 于是流式期点开一张"已完成"的卡片必然为空 —— 此时说「无结果内容」等于谎报"工具没有结果"。
+ * 这一组守住三种分流：流式期 → 说清何时可看；历史态 → 照旧；工具报错 → 照旧。
+ */
+describe('ToolCallList —— 流式期无正文的说明（2026-11-18）', () => {
+  const DONE_NO_CONTENT: ToolCallItem = { callId: 'c1', name: 'fresh_order_parse', status: 'success' }
+
+  async function expand(wrapper: ReturnType<typeof mountList>): Promise<void> {
+    await wrapper.find('.tool-call__head').trigger('click')
+  }
+
+  it('流式期已完成但正文未到：说清"本轮结束后可查看"，不谎报没有内容', async () => {
+    const wrapper = mountList([DONE_NO_CONTENT], true)
+    await expand(wrapper)
+
+    const body = wrapper.find('.tool-call__body').text()
+    expect(body).toContain('结果将在本轮结束后可查看')
+    expect(body).not.toContain('无结果内容')
+  })
+
+  it('历史态无正文：仍是「无结果内容」（刷新后确实没内容，不能承诺后续）', async () => {
+    const wrapper = mountList([DONE_NO_CONTENT])
+    await expand(wrapper)
+
+    const body = wrapper.find('.tool-call__body').text()
+    expect(body).toContain('无结果内容')
+    expect(body).not.toContain('结果将在本轮结束后可查看')
+  })
+
+  it('流式期工具报错且无正文：保持「无结果内容」（失败本身，不是"还没送到"）', async () => {
+    const wrapper = mountList([{ ...QUERY, artifactSize: undefined }], true)
+    await expand(wrapper)
+
+    const body = wrapper.find('.tool-call__body').text()
+    expect(body).toContain('无结果内容')
+    expect(body).not.toContain('结果将在本轮结束后可查看')
+  })
+
+  it('流式期有正文：照常展示正文，两句提示都不出现（新分支不抢正文）', async () => {
+    const wrapper = mountList([{ ...READ, content: '车间,计划量' }], true)
+    await expand(wrapper)
+
+    const body = wrapper.find('.tool-call__body').text()
+    expect(body).toContain('车间,计划量')
+    expect(body).not.toContain('结果将在本轮结束后可查看')
+    expect(body).not.toContain('无结果内容')
+  })
+})

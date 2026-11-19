@@ -244,9 +244,17 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
     expect((error as DirValidationError).statusCode).toBe(403);
   });
 
-  it('共享空间与临时空间不受场景清单限制', () => {
-    expect(parseSpaceDir(root, userId, 'agent-narrow', '共享空间').relPath).toBe('共享空间');
+  it('临时空间不受场景清单限制', () => {
     expect(parseSpaceDir(root, userId, 'agent-narrow', '临时空间').relPath).toBe('临时空间');
+  });
+
+  // 2026-11-18（025）：共享空间已下线 ⇒ 与"清单外目录"同判据（403）。
+  // 历史会话里指向该目录的旧引用就落在这条路径上（HTTP 侧映射为 403 UPLOAD_DIR_FORBIDDEN），故必须钉住。
+  it('已下线的「共享空间」与清单外目录同判 403', () => {
+    const error = capture(() => parseSpaceDir(root, userId, 'agent-narrow', '共享空间'));
+
+    expect(error).toBeInstanceOf(DirValidationError);
+    expect((error as DirValidationError).statusCode).toBe(403);
   });
 
   it('路径穿越仍为 400（与场景无关的既有防线）', () => {
@@ -256,7 +264,7 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
     expect((error as DirValidationError).statusCode).toBe(400);
   });
 
-  it('非三空间的一级目录为 403', () => {
+  it('非已知空间的一级目录为 403', () => {
     const error = capture(() => parseSpaceDir(root, userId, 'agent-narrow', '别的目录'));
 
     expect(error).toBeInstanceOf(DirValidationError);
@@ -294,11 +302,9 @@ describe('路径工厂 - 数据域归到数字人一级（009）', () => {
     );
   });
 
-  it('ensureAgentDataDirs 建齐三空间 + threads，且幂等（重复调用不报错、已有内容不动）', () => {
+  it('ensureAgentDataDirs 建齐两空间 + threads，且幂等（重复调用不报错、已有内容不动）', () => {
     ensureAgentDataDirs(root, userId, 'agent-skel');
-    expect(userDataChildNames(userId, 'agent-skel')).toEqual(
-      ['共享空间', '临时空间', '数据准备', 'threads'].sort(),
-    );
+    expect(userDataChildNames(userId, 'agent-skel')).toEqual(['临时空间', '数据准备', 'threads'].sort());
 
     const marker = path.join(userDataDir(root, userId, 'agent-skel'), '临时空间', 'keep.txt');
     writeFileSync(marker, 'x', 'utf8');
@@ -307,7 +313,7 @@ describe('路径工厂 - 数据域归到数字人一级（009）', () => {
     expect(existsSync(marker)).toBe(true);
   });
 
-  it('ensureUserDirs **只**建 agents/：不再预建用户级三空间与 threads（009）', () => {
+  it('ensureUserDirs **只**建 agents/：不再预建用户级空间与 threads（009）', () => {
     // 用独立用户，避免与其他用例已建的数据目录互相干扰
     const onlyUser = 'dirs-only-user';
     ensureUserDirs(root, onlyUser);
@@ -326,7 +332,7 @@ describe('路径工厂 - 数据域归到数字人一级（009）', () => {
 });
 
 describe('listAvailableDirs - 模型可用目录清单（契约 §10.8）', () => {
-  it('顺序固定：数据准备子目录 → 共享空间 → 临时空间 → 临时空间/后台产出', () => {
+  it('顺序固定：数据准备子目录 → 临时空间 → 临时空间/后台产出', () => {
     writeScenario('agent-dirs-full', {
       scenario: '生产调度',
       data_prep_dirs: ['生产计划', '产线信息'],
@@ -335,7 +341,6 @@ describe('listAvailableDirs - 模型可用目录清单（契约 §10.8）', () =
     expect(listAvailableDirs(root, userId, 'agent-dirs-full')).toEqual([
       '数据准备/生产计划',
       '数据准备/产线信息',
-      '共享空间',
       '临时空间',
       '临时空间/后台产出',
     ]);
@@ -350,21 +355,19 @@ describe('listAvailableDirs - 模型可用目录清单（契约 §10.8）', () =
     expect(dirs[dirs.length - 1]).toBe('临时空间/后台产出');
   });
 
-  it('全部屏蔽（清单为空）：退化为共享/临时/产出，不按未配置处理（2026-11-17）', () => {
+  it('全部屏蔽（清单为空）：退化为临时/产出，不按未配置处理（2026-11-17）', () => {
     writeScenario('agent-dirs-empty', { scenario: '全部屏蔽', data_prep_dirs: [] });
 
     expect(listAvailableDirs(root, userId, 'agent-dirs-empty')).toEqual([
-      '共享空间',
       '临时空间',
       '临时空间/后台产出',
     ]);
   });
 
-  it('场景未配置：退化为三空间根（不含数据准备子目录），产出目录仍在末尾', () => {
+  it('场景未配置：退化为空间根（不含数据准备子目录），产出目录仍在末尾', () => {
     writeScenario('agent-dirs-missing', null);
 
     expect(listAvailableDirs(root, userId, 'agent-dirs-missing')).toEqual([
-      '共享空间',
       '临时空间',
       '临时空间/后台产出',
     ]);

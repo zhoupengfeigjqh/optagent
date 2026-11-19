@@ -78,7 +78,8 @@ docker compose up -d laya                # 意图聚焦判定模型（013，可�
 | laya | 8103 | 8000 | Laya 判定模型（需 `DECIS_API_KEY`） |
 | fresh | 8104 | 8000 | 生鲜订货解析（图片 → SKU 匹配三表，镜像含 OCR 模型） |
 
-首次运行前按各目录 `.env.example` 建 `.env.local`：ocr / bom / fresh 可调项都有代码缺省值，缺失不影响启动；
+首次运行前按各目录 `.env.example` 建 `.env.local`：ocr / bom / fresh 可调项都有代码缺省值，缺失不影响启动
+（`fresh` 的 LLM Key 同样可选——缺失时手写单自动按 OCR 处理，表格单不需要 Key）；
 `jev` 缺 `TYPESAFE_API_KEY` 时三个工具返回可读错误；`laya` 缺 `DECIS_API_KEY` 会**拒绝启动**（非 loopback 必须带 token）。
 
 ### 1.4 全 Docker 形态（联调 / 生产）
@@ -217,11 +218,11 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / fresh / 外部 MCP 服�
 | ocr | `ocr_image` 等 | 同步 | 回源下载签名直链 → 识别 → 结构化输出 |
 | jev | `noul` / `choice` / `score` | 同步 | state 可来自 LLM 文本或引用文件；有界指数退避 |
 | bom | `bom_validate` / `bom_merge` | 同步 | 递归展开多级 BOM，产出 xlsx + HTML 报告并**回写平台**，自身不写磁盘 |
-| fresh | `fresh_order_parse` | 同步 | 订单图片 OCR → 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；纯只读、不产文件 |
+| fresh | `fresh_order_parse` | 同步 | 订单图片 → 读图路由（**表格走 OCR、手写走 LLM**，未配 Key 自动回退 OCR）→ 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；纯只读、不产文件 |
 
 四者的共同点：**不共享用户磁盘**，只接受 http/https 直链。
 差异：ocr / jev / bom 不跟随重定向且限下载体积；`fresh` 有 `HTTP_TIMEOUT_SECONDS`（默认 30s）超时，
-但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service/README.md` §4）。
+但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service-v3/README.md` §4）。
 
 ### 4.6 外部集成
 
@@ -327,7 +328,6 @@ agent-backend/.opt-agent/
     │   └── ontology/{场景}/{本体}/        ontology.yaml + securities.yaml
     └── user-data/{数字人}/                ← 用户数据，部署不动
         ├── 数据准备/                      Agent 只读；二级目录由 scenario.json 决定
-        ├── 共享空间/                      Agent 只读
         ├── 临时空间/                      Agent 可读写；产出强制 `{thread_id}_` 前缀
         │   └── 后台产出/                  异步 MCP 回写落点
         └── threads/{会话}/                消息、工具记录、摘要

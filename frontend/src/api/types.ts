@@ -596,12 +596,17 @@ export interface ScenarioField {
   required: boolean
 }
 
-/** 工作空间目录分组（dir 为相对空间路径，如 数据准备/生产计划、共享空间）。 */
+/** 工作空间目录分组（dir 为相对空间路径，如 数据准备/生产计划、临时空间）。 */
 export interface WorkspaceDir {
   dir: string
   /** 展示名（数据准备子目录为子目录名，其余为空间名） */
   label: string
-  /** 用户是否可删除其中文件（共享空间只读为 false） */
+  /**
+   * 用户是否可删除其中文件。
+   *
+   * 2026-11-18（025）：只读空间（原共享空间）下线后**恒为 true**；字段保留在契约内，
+   * 界面侧不再据此分叉（见 `WorkspaceFileList`）。
+   */
   deletable: boolean
   /** 空目录为 `[]` */
   files: WorkspaceFile[]
@@ -621,7 +626,7 @@ export interface WorkspaceDir {
   predefined: boolean
 }
 
-/** 工作空间空间分组（一级：数据准备/共享空间/临时空间）。 */
+/** 工作空间空间分组（一级：数据准备/临时空间）。 */
 export interface WorkspaceSpace {
   /** 空间名（即一级目录名） */
   name: string

@@ -6,7 +6,8 @@
  * | 入口 | 顺序约束 |
  * |---|---|
  * | `done` | 先定稿卡片（解析尾部块 + 写快照）→ 落盘（用户 + assistant + 工具记录，正文**不含尾部块**）→ 广播 `done`（负载带 `next_actions` 直推）→ fire-and-forget 摘要 |
- * | `error` | 同 `done`：失败轮也要留痕（FR-011），工具记录同样先落盘；失败轮无卡片 |
+ * | `error` | 同 `done`：失败轮也要留痕（FR-011），工具记录同样先落盘；assistant 行沿用 run 启动时
+ * 预生成的 id，故失败轮的工具卡片同样能挂上（2026-11-18） |
  * | `aborted` | 只广播 + 记账：本轮消息**丢弃不落盘**，但已消耗 token 照记（FR-027） |
  *
  * 007 修订（Tail Protocol）：卡片与回答**同流产出**，`done` 时刻已就绪——
@@ -164,8 +165,12 @@ export class RunFinalizer {
     // 原则九：原始错误落结构化日志（上游状态码 / 请求 id / 截断原文 + 关联线索）
     this.logLlmFailure(run, turn, error, durationMs);
     // FR-011：失败轮留痕（assistant 行 content 为空，错误信息在 error 字段）
+    // 2026-11-18：id 沿用 run 启动时**预生成**的那个——工具事件行已按它归属（见 `done()` 注释）；
+    // 在这里另生成新 id 会让失败轮的工具记录变成孤儿，历史里那张卡片永远点不开结果。
+    // `|| genMessageId`：仅防御"run 未走 run-manager 装配"的测试替身，正常情况下恒有值。
+    const assistantId = run.assistantMessageId || genMessageId(nowMs)
     const assistantMessage: HistoryMessage = {
-      id: genMessageId(nowMs),
+      id: assistantId,
       role: 'assistant',
       content: run.buffer,
       ts,

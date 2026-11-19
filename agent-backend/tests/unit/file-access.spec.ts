@@ -36,11 +36,11 @@ function writeScenario(dirs: string[]): void {
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'file-access-'));
   dataRoot = path.join(root, 'users', 'admin', 'user-data', 'demo');
-  for (const dir of ['数据准备', '共享空间', '临时空间', 'threads']) {
+  for (const dir of ['数据准备', '临时空间', 'threads']) {
     fs.mkdirSync(path.join(dataRoot, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(dataRoot, '数据准备', '生产计划'), { recursive: true });
-  fs.writeFileSync(path.join(dataRoot, '共享空间', '说明.txt'), '共享内容', 'utf8');
+  fs.writeFileSync(path.join(dataRoot, '临时空间', '说明.txt'), '临时内容', 'utf8');
   fs.writeFileSync(path.join(dataRoot, 'threads', 'th_1.jsonl'), 'SECRET', 'utf8');
   writeScenario(['生产计划']);
   access = new FileAccess({ optAgentRoot: root, userId: 'admin', agentName: 'demo' });
@@ -108,7 +108,7 @@ describe('FileAccess —— 既有边界回归', () => {
   });
 
   it('`writeProduced` 只允许 `临时空间/后台产出`（落点锁死）', async () => {
-    await expect(access.writeProduced('共享空间', 'x.json', Buffer.from('{}'))).rejects.toThrow(
+    await expect(access.writeProduced('临时空间', 'x.json', Buffer.from('{}'))).rejects.toThrow(
       '后台产出只允许写入',
     );
   });
@@ -125,18 +125,25 @@ describe('FileAccess —— 判据收敛后与浏览接口同口径（2026-11-02
     await expect(access.list('数据准备/已下线')).rejects.toThrow('不在场景清单');
   });
 
-  it('共享空间深层目录读不到，且 `list_dir` 不再列出（不留"看得见点不开"）', async () => {
-    const deep = path.join(dataRoot, '共享空间', '2026');
+  it('临时空间深层目录读不到，且 `list_dir` 不再列出（不留"看得见点不开"）', async () => {
+    const deep = path.join(dataRoot, '临时空间', '2026');
     fs.mkdirSync(deep, { recursive: true });
     fs.writeFileSync(path.join(deep, '报价单.xlsx'), 'x', 'utf8');
 
-    await expect(access.read('共享空间/2026/报价单.xlsx')).rejects.toThrow('不支持子目录');
-    // 词法上 `共享空间/2026` 是"一层条目"，但它是目录 ⇒ 不可下钻（stat 之后判）
-    await expect(access.list('共享空间/2026')).rejects.toThrow('不支持子目录');
+    await expect(access.read('临时空间/2026/报价单.xlsx')).rejects.toThrow('不支持子目录');
+    // 词法上 `临时空间/2026` 是"一层条目"，但它是目录 ⇒ 不可下钻（stat 之后判）
+    await expect(access.list('临时空间/2026')).rejects.toThrow('不支持子目录');
 
-    const names = (await access.list('共享空间')).map((e) => e.name);
+    const names = (await access.list('临时空间')).map((e) => e.name);
     expect(names).toContain('说明.txt');
     expect(names).not.toContain('2026');
+  });
+
+  // 2026-11-18（025）：共享空间已下线 ⇒ 任何读写都先被一级目录白名单拒，
+  // 与"别的目录"同口径（历史会话里的旧引用就走这条）。
+  it('已下线的「共享空间」一律读不到', async () => {
+    await expect(access.read('共享空间/说明.txt')).rejects.toThrow();
+    await expect(access.list('共享空间')).rejects.toThrow();
   });
 
   it('`临时空间/后台产出` 仍可被模型取回（登记例外，产出功能不受影响）', async () => {

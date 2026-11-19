@@ -11,10 +11,9 @@
  * 两者都**只是提示**：权威校验在上传路由，前端 MUST NOT 自行判定（契约 `runtime-api-delta.md` §3.1）。
  */
 import {
+  SPACES,
   SPACE_POLICIES,
   SPACE_PREP,
-  SPACE_SHARED,
-  SPACE_TMP,
   isPredefinedDataPrepDir,
   uploadExtensionsOf,
   type Scenario,
@@ -39,7 +38,7 @@ export interface WorkspaceDirItem {
   upload_extensions: string[];
   /**
    * 是否为平台预定义二级目录（2026-10-29，014）：仅「数据准备/算法规则」为 `true`，
-   * 其余二级目录与扁平空间（共享/临时）恒为 `false`。
+   * 其余二级目录与扁平空间（临时空间）恒为 `false`。
    *
    * 由运行端派生而非前端硬编码：前端据它区分"参与空数据判定的目录"（宪章原则七）。
    */
@@ -58,7 +57,7 @@ export interface WorkspaceView {
   spaces: WorkspaceSpaceItem[];
 }
 
-/** 装配三空间视图：空间 → 子目录 → 文件 */
+/** 装配文件空间视图：空间 → 子目录 → 文件 */
 export async function buildWorkspaceView(
   scenario: Scenario,
   access: FileAccess,
@@ -72,7 +71,7 @@ export async function buildWorkspaceView(
   };
 
   const spaces: WorkspaceSpaceItem[] = [];
-  for (const space of [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const) {
+  for (const space of SPACES) {
     const policy = SPACE_POLICIES[space];
     const subDirs =
       space === SPACE_PREP ? scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`) : [space];
@@ -82,7 +81,8 @@ export async function buildWorkspaceView(
       dirs.push({
         dir: relPath,
         label: sub ?? space,
-        deletable: space !== SPACE_SHARED,
+        // 2026-11-18（025）：共享空间下线后不再存在只读空间，字段保留在契约里但恒为 true
+        deletable: true,
         files: await listFiles(relPath),
         fields: scenario.dataPrepFields[sub ?? ''] ?? [],
         // 与上传校验**共用** uploadExtensionsOf ⇒ "界面允许的"与"服务端放行的"单一口径

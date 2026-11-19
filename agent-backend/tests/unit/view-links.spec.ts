@@ -118,10 +118,10 @@ describe('extractViewLinks —— filePath（本地文件空间相对路径，20
 
   it('字段名大小写不敏感、忽略首尾空白（FilePath / FILEPATHNAME）', () => {
     const links = extractViewLinks(
-      JSON.stringify({ ' FilePath ': '共享空间/x.csv', FILEPATHNAME: '共享表' }),
+      JSON.stringify({ ' FilePath ': '临时空间/x.csv', FILEPATHNAME: '共享表' }),
     );
 
-    expect(links).toEqual([{ url: '共享空间/x.csv', kind: 'file', name: '共享表' }]);
+    expect(links).toEqual([{ url: '临时空间/x.csv', kind: 'file', name: '共享表' }]);
   });
 
   it('名称与路径跨层不配对：有路径、无名字', () => {

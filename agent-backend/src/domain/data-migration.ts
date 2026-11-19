@@ -2,7 +2,8 @@
  * 存量数据一次性迁移（009 US4 / FR-040~042）：把"用户级共享"的数据搬到**归属数字人**目录下。
  *
  * ```text
- * 改前：users/{uid}/user-data/{数据准备|共享空间|临时空间|threads}
+ * 改前：users/{uid}/user-data/{数据准备|临时空间|threads}（改造当时还有 `共享空间`，
+ *        2026-11-18 / `specs/025-remove-shared-space` 已下线，故不再纳入迁移条目）
  * 改后：users/{uid}/user-data/{归属数字人}/{同上}
  * ```
  *

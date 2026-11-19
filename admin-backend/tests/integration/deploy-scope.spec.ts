@@ -1,7 +1,7 @@
 /**
  * 集成测试：部署作用域守卫（T071，`FR-028`、`SC-012`、`SC-009`、`SC-019`）
  *
- * ① 部署前后三个文件空间（数据准备／共享空间／临时空间）下既有文件与二级目录
+ * ① 部署前后两个文件空间（数据准备／临时空间）下既有文件与二级目录
  *    **数量与内容 100% 不变**，含"场景目录清单收缩"场景；
  * ② `SC-009`：改库中一个被 N 个数字人引用的 SKILL 后部署一次，
  *    这 N 个数字人的技能目录内容与库中版本一致；
@@ -32,12 +32,12 @@ function seedSpaces(): void {
   const data = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
   fs.mkdirSync(path.join(data, '数据准备', '生产计划'), { recursive: true });
   fs.mkdirSync(path.join(data, '数据准备', '产线电价', '子目录'), { recursive: true });
-  fs.mkdirSync(path.join(data, '共享空间', '资料'), { recursive: true });
+  fs.mkdirSync(path.join(data, '临时空间', '资料'), { recursive: true });
   fs.mkdirSync(path.join(data, '临时空间'), { recursive: true });
 
   fs.writeFileSync(path.join(data, '数据准备', '生产计划', 'a.csv'), 'x,y\n1,2\n', 'utf8');
   fs.writeFileSync(path.join(data, '数据准备', '产线电价', '子目录', 'b.txt'), '内容B\n', 'utf8');
-  fs.writeFileSync(path.join(data, '共享空间', '资料', 'c.md'), '# C\n', 'utf8');
+  fs.writeFileSync(path.join(data, '临时空间', '资料', 'c.md'), '# C\n', 'utf8');
   fs.writeFileSync(path.join(data, '临时空间', 'th_1_out.txt'), '产出\n', 'utf8');
 }
 
@@ -132,8 +132,8 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
   it('部署与撤回都不触碰 user-data/**：未关联数字人的数据目录原样保留', async () => {
     const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
     // 平台侧**从未纳管**的数字人（移除后遗留 / 手工存在）：数据必须原样保留
-    fs.mkdirSync(path.join(dataRoot, '历史数字人', '共享空间'), { recursive: true });
-    fs.writeFileSync(path.join(dataRoot, '历史数字人', '共享空间', 'keep.csv'), 'x,y\n1,2\n', 'utf8');
+    fs.mkdirSync(path.join(dataRoot, '历史数字人', '临时空间'), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, '历史数字人', '临时空间', 'keep.csv'), 'x,y\n1,2\n', 'utf8');
     fs.mkdirSync(path.join(dataRoot, '历史数字人', '数据准备', '生产计划'), { recursive: true });
     fs.writeFileSync(path.join(dataRoot, '历史数字人', '数据准备', '生产计划', 'plan.csv'), 'a\n', 'utf8');
     // 已关联数字人的数据域：部署也不得覆盖
@@ -155,7 +155,7 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
     });
     expect(withdraw.statusCode).toBe(200);
     expect(snapshotTree(dataRoot)).toEqual(before);
-    expect(fs.existsSync(path.join(dataRoot, '历史数字人', '共享空间', 'keep.csv'))).toBe(true);
+    expect(fs.existsSync(path.join(dataRoot, '历史数字人', '临时空间', 'keep.csv'))).toBe(true);
   });
 
   it('平台对数据目录零创建：新用户部署后 `user-data` 一个目录都不出现', async () => {

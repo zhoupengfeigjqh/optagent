@@ -37,20 +37,20 @@
     {
       "name": "fresh-order-parse",
       "display_name": "生鲜订单识别",
-      "description": "生鲜订单图片解析：调用工具解析订单信息，并给出分析结论。",
+      "description": "生鲜订单图片解析：调用工具解析订单信息，AI 审查待审核/异常行后输出 Excel。对话只给一句总览与最终推荐表，Excel 只有一张「识别结果」表（序号、商品名称、数量、SKU编码、是否需要审核），覆盖全部识别行。",
       "files": [
         {
           "path": "SKILL.md",
-          "size": 7966
+          "size": 6912
         },
         {
           "path": "references/report-template.html",
-          "size": 9024
+          "size": 6364
         }
       ],
       "source": "fresh-order-parse.zip",
       "installed_at": "2026-11-13T02:24:36.910Z",
-      "updated_at": "2026-11-17T08:02:19.982Z"
+      "updated_at": "2026-11-18T14:30:27.418Z"
     }
   ]
 }

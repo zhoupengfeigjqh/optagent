@@ -13,7 +13,7 @@ import { mentionToken, type FileMentionStore, type MentionColumn } from './useFi
 import { useMentionComposer } from './useMentionComposer'
 
 const PLAN: FileReference = { dir: '生产计划', filename: 'plan.csv' }
-const BOM: FileReference = { dir: '共享空间', filename: 'bom.csv' }
+const BOM: FileReference = { dir: '临时空间', filename: 'bom.csv' }
 
 /** 只实现本模块用到的出口；未用到的状态给最小合法值（避免为一个接线测试拉起整棵空间树）。 */
 function makeMention(overrides: Partial<FileMentionStore> = {}): FileMentionStore {

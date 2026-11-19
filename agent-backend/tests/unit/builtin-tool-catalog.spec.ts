@@ -20,7 +20,7 @@ import {
 } from '../../src/domain/builtin-tool-catalog.js';
 
 /** 现状的一组运行期取值（取真实形态：中文目录名 + thread_id） */
-const DIRS = ['数据准备/生产计划', '共享空间', '临时空间'];
+const DIRS = ['数据准备/生产计划', '临时空间'];
 const THREAD_ID = 'th_abc123';
 const values: Partial<TemplateValues> = {
   可用目录: DIRS.join('、'),
@@ -94,7 +94,7 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
   it('read_file 的说明与入参', () => {
     expect(rendered.get('read_file')?.description).toBe(
       // 2026-10-14：支持类型增 `.xls`；2026-10-20：增 `.html`（按原文读，不渲染）
-      '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；' +
+      '读取用户空间（数据准备/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；' +
         'xlsx/xls 自动转 CSV，pdf 提取文本层，html 按原文读取（不渲染、不执行脚本）。' +
         '大文件返回截断内容，可用 offset 继续分段读取。' +
         `参数 path 为相对空间的路径，如 "${DIRS[0]}/示例.csv"。`,
@@ -122,7 +122,7 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
         '.xlsx 用 CSV 行数据，可用 "# Sheet: 名称" 行分出多个工作表；' +
         '.pdf 用受限 Markdown（# 标题、- 列表、| a | b | 表格、空行分段）；' +
         '其他扩展名一律按文本写入，但界面只能下载、不能内联查看。' +
-        '数据准备与共享空间为只读，写入会被拒绝。' +
+        '数据准备为只读，写入会被拒绝。' +
         '.html 在沙箱中预览，页面脚本不会执行。' +
         '成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；' +
         '不要在正文里重复路径或拼链接。',
@@ -232,8 +232,8 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
   it('可用目录为空时回退默认示例（与改造前的 ?? 兜底一致）', () => {
     const empty: Partial<TemplateValues> = {
       可用目录: '',
-      示例路径: '共享空间/示例.csv',
-      首个目录: '共享空间',
+      示例路径: '临时空间/示例.csv',
+      首个目录: '临时空间',
       会话标识: THREAD_ID,
     };
     const listDir = findBuiltinTool('list_dir')!;
@@ -244,7 +244,7 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
       type: 'object',
       required: ['dir'],
       properties: {
-        dir: { type: 'string', title: '目录', description: '目录路径，如 "共享空间"' },
+        dir: { type: 'string', title: '目录', description: '目录路径，如 "临时空间"' },
       },
     });
   });

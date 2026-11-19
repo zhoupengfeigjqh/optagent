@@ -89,7 +89,7 @@ export function producedFilename(prefix: string, rawFilename: string): string {
  * 落盘名是否合法（2026-10-27 加固）：**只接受单段文件名**。
  *
  * 为什么必须校验：sidecar 里的 `filename` 会被拼成 `临时空间/后台产出/{filename}` 再交给
- * `FileAccess.readBuffer`。`path.resolve` 会把 `..` 归一化掉——`../../共享空间/x.xlsx`
+ * `FileAccess.readBuffer`。`path.resolve` 会把 `..` 归一化掉——`../../数据准备/生产计划/x.xlsx`
  * 归一化后仍落在同一个 dataRoot 内、顶层目录也命中白名单，于是"读产出"可以变成
  * "读该用户数据域内任意文件"。故此处只认单段名：分隔符 / 盘符 / 冒号（NTFS ADS）/
  * `..` / 控制字符一律非法。

@@ -74,6 +74,25 @@ async function* plainTurn(): AsyncIterable<LlmEvent> {
   yield { type: 'done', usage: { inputTokens: 3, outputTokens: 1 } };
 }
 
+/** 工具跑过之后 LLM 报错：用于验证"失败轮的工具卡片同样能挂上" */
+async function* toolThenErrorTurn(resultText: string): AsyncIterable<LlmEvent> {
+  yield {
+    type: 'tool_call_start',
+    callId: 'call_1',
+    name: 'read_file',
+    argsDigest: { path: '数据准备/x.csv' },
+  };
+  yield {
+    type: 'tool_call_end',
+    callId: 'call_1',
+    name: 'read_file',
+    status: 'success',
+    resultText,
+  };
+  yield { type: 'content_delta', delta: '半截回答' };
+  yield { type: 'error', code: 'LLM_ERROR', message: '上游模型不可用' };
+}
+
 function runTurn(
   manager: RunManager,
   agent: RunAgentLike,
@@ -160,6 +179,23 @@ describe('工具记录落盘', () => {
       argsDigest: { path: '数据准备/x.csv' },
     });
     expect(records[0]!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('失败轮：failed 行的 id 与工具记录的 message_id 一致（卡片同样能挂上，2026-11-18）', async () => {
+    const manager = new RunManager({ history, usage, toolEvents });
+    const { settled } = runTurn(
+      manager,
+      recordingAgent([], () => toolThenErrorTurn('车间,计划量')),
+      '看下计划',
+    );
+    await settled;
+
+    const failed = history.readAll('admin', AGENT, 'th1').find((m) => m.status === 'failed');
+    const records = toolEvents.readAll('admin', AGENT, 'th1');
+    expect(records).toHaveLength(1);
+    // 两处 id 必须同源：否则详情接口按消息分组时找不到这条记录，失败轮的卡片永远点不开结果
+    expect(failed?.id).toBe(records[0]!.messageId);
+    expect(toolEvents.readByMessage('admin', AGENT, 'th1').get(failed!.id)).toHaveLength(1);
   });
 
   it('工具记录按归属消息分组可查（详情接口挂卡片的入口）', async () => {

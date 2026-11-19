@@ -1,5 +1,5 @@
 /**
- * 工作空间文件（003 三空间改造）
+ * 工作空间文件（003 三空间改造；2026-11-18 / 025 起为两空间）
  *
  * 后端 `GET /api/files/workspace` 返回三级树：空间 → 子目录 → 文件，
  * 附场景名与每空间策略（agent_writable / upload_extensions）。
@@ -11,7 +11,7 @@
  *
  * 另外承载文件空间的**列表侧状态与动作**：
  * - 两级折叠展开（空间 → 数据准备子目录；默认全部收起，本次会话内保持——面板收起再打开不重置）
- * - 删除文件（共享空间只读由后端兜底拒绝；目录项 `deletable` 供界面隐藏入口）
+ * - 删除文件（2026-11-18 / 025：只读空间下线，两个空间内的文件均可删）
  */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
@@ -38,7 +38,7 @@ export interface WorkspaceDeps {
  * 目录级可上传类型的**唯一实现**（2026-10-13）。
  *
  * 从目录列表里取**该目录自身**的 `upload_extensions`（后端下发：数据准备 = 该目录配置，
- * 未配置 = 平台默认；共享/临时空间恒等于空间值）。由本 composable 的 `uploadExtensionsOf`
+ * 未配置 = 平台默认；临时空间恒等于空间值）。由本 composable 的 `uploadExtensionsOf`
  * 与 `UploadMenu` 的文件选择器 `accept` **共用**，消除"按空间反查"这第二套口径。
  */
 export function uploadExtensionsOfDir(
@@ -70,8 +70,6 @@ export interface WorkspaceStore {
   labelOf(dir: string): string
   /** 取**该目录**允许的上传扩展名（2026-10-13 起为目录级；未知目录返回空数组） */
   uploadExtensionsOf(dir: string): readonly string[]
-  /** 目录内文件是否可删除（共享空间只读） */
-  deletableOf(dir: string): boolean
   /** 引用存在性校验（FR-018、V-15） */
   exists(reference: FileReference): boolean
   /**
@@ -89,7 +87,7 @@ export interface WorkspaceStore {
   /** 折叠 / 展开某个二级目录分组 */
   toggleDir(dir: string): void
   /**
-   * 删除文件。共享空间为只读，由后端拒绝（403 `FILE_READONLY`）。
+   * 删除文件（2026-11-18 / 025：只读空间下线，所有空间均可删）。
    *
    * 成功后就地移除该条目并提示；失败提示原因并返回 `false`（由调用方决定是否收敛面板）。
    */
@@ -142,10 +140,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
    */
   function uploadExtensionsOf(dir: string): readonly string[] {
     return uploadExtensionsOfDir(dirs.value, dir)
-  }
-
-  function deletableOf(dir: string): boolean {
-    return dirs.value.find((item) => item.dir === dir)?.deletable ?? false
   }
 
   function exists(reference: FileReference): boolean {
@@ -226,7 +220,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
     filesOf,
     labelOf,
     uploadExtensionsOf,
-    deletableOf,
     exists,
     registerFile,
     toggleSpace,

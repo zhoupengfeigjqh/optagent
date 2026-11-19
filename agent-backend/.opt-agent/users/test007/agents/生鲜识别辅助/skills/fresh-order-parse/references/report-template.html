@@ -11,12 +11,13 @@
   1. 本页在平台内以 sandbox="" + CSP: sandbox 打开：**没有脚本、没有下载、没有外链**。
      因此 CSS 必须内联在本文件里，禁止 <script>、禁止 href/src 指向外部资源（CDN / 图片 / 字体）。
   2. 只替换占位内容（{{...}} 与示例行），不要改版式、不要加侧边栏或图表库。
-  3. 每张表最多 100 行；超出时只保留前 100 行，并在该表下方加一行
-     「仅展示前 100 行，完整数据见对话表格」。
+  3. 最终推荐表最多 100 行；超出时只保留前 100 行，并在表下方加一行
+     「仅展示前 100 行，完整数据见对话中的最终推荐表」。
   4. 数字来自 fresh_order_parse 的返回：auto_rows / review_rows / error_rows；
-     复核结论、最终推荐与依据来自技能第四、五节的输出，两者必须一致。
-  5. 「判定」只允许三种取值：直接匹配 / 模型推荐 / 待确认；
-     模型推荐与待确认两行的「最终商品」「SKU编码」用 class="hl"（浅红底 + 加粗）标出。
+     AI 审查结论、最终推荐与依据来自技能第四、五节的输出，两者必须一致。
+  5. 最终推荐表固定五列（序号 / 商品名称 / 数量 / SKU编码 / 是否需要审核），
+     「是否需要审核」只允许两种取值：是 / 否；值为「是」的行**整行五个单元格**都加
+     class="hl"（浅红底 + 加粗）。商品名称只写名称本身，不加任何符号或前缀。
 -->
 <style>
   :root {
@@ -88,94 +89,7 @@
   <div class="card"><div class="k">合计</div><div class="v">{{合计行数}}</div></div>
 </section>
 
-<h2>一、高度匹配（auto_rows）</h2>
-<table>
-  <caption>score ≥ 高阈值，直接采用工具结果。</caption>
-  <thead>
-    <tr>
-      <th class="num">#</th>
-      <th>原始行</th>
-      <th>标准化名称</th>
-      <th>数量</th>
-      <th>匹配商品</th>
-      <th>SKU编码</th>
-      <th class="num">置信度</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td class="num">1</td>
-      <td>洋芋2斤</td>
-      <td>土豆</td>
-      <td class="num">2斤</td>
-      <td>土豆</td>
-      <td class="mono">VEG-002</td>
-      <td class="num">100</td>
-    </tr>
-    <!-- 继续追加行；无数据时整段替换为：<tr><td colspan="7" class="empty">无</td></tr> -->
-  </tbody>
-</table>
-<p class="note">共 {{auto_count}} 行{{；仅展示前 100 行，完整数据见对话表格（超过 100 行时才写这句）}}。</p>
-
-<h2>二、候选审核（review_rows）</h2>
-<table>
-  <caption>分数处于中段，需人工/模型复核；候选列按「名称（分数）」连接，最多 3 个。</caption>
-  <thead>
-    <tr>
-      <th class="num">#</th>
-      <th>原始行</th>
-      <th>标准化名称</th>
-      <th>数量</th>
-      <th class="num">最高分</th>
-      <th>候选列表</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td class="num">1</td>
-      <td>蕃茄3斤</td>
-      <td>蕃茄</td>
-      <td class="num">3斤</td>
-      <td class="num">60</td>
-      <td>小番茄（60） / 番茄（50） / 茄子（50）</td>
-    </tr>
-    <!-- 无数据时：<tr><td colspan="6" class="empty">无</td></tr> -->
-  </tbody>
-</table>
-<p class="note">共 {{review_count}} 行。</p>
-
-<h2>三、异常记录（error_rows）</h2>
-<table>
-  <caption>OCR 失败 / 无匹配 / 低置信度无候选等，逐条给出说明。</caption>
-  <thead>
-    <tr>
-      <th class="num">#</th>
-      <th>原始行</th>
-      <th>标准化名称</th>
-      <th>数量</th>
-      <th>异常类型</th>
-      <th>最高候选</th>
-      <th class="num">最高分</th>
-      <th>说明</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td class="num">1</td>
-      <td>西蓝花5斤</td>
-      <td>西蓝花</td>
-      <td class="num">5斤</td>
-      <td class="mono">NO_SKU_MATCH</td>
-      <td class="empty">—</td>
-      <td class="num empty">—</td>
-      <td>SKU 清单中未找到，「西蓝花」「西兰花」均未命中</td>
-    </tr>
-    <!-- 无数据时：<tr><td colspan="8" class="empty">无</td></tr> -->
-  </tbody>
-</table>
-<p class="note">共 {{error_count}} 行。</p>
-
-<h2>四、异常与存疑复核</h2>
+<h2>一、AI 审查要点（仅待审核与异常行）</h2>
 
 <!-- 每条异常/存疑复制一段 .evidence；SKU 清单中查无时如实写「未找到」并列出检索关键词，不得臆造 SKU -->
 <div class="evidence">
@@ -186,51 +100,43 @@
   <div class="row"><span class="lbl">待确认：</span>无</div>
 </div>
 
-<h2>五、最终推荐表</h2>
+<h2>二、最终推荐表</h2>
 <table>
-  <caption>覆盖前三表全部行；模型推荐与待确认的单元格用浅红底加粗标出。</caption>
+  <caption>覆盖全部识别行，固定五列；需要审核的行整行用浅红底加粗标出。</caption>
   <thead>
     <tr>
       <th class="num">序号</th>
-      <th>原始行</th>
-      <th>数量</th>
-      <th>最终商品</th>
+      <th>商品名称</th>
+      <th class="num">数量</th>
       <th>SKU编码</th>
-      <th>判定</th>
-      <th>依据</th>
+      <th>是否需要审核</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td class="num">1</td>
-      <td>洋芋2斤</td>
-      <td class="num">2斤</td>
       <td>土豆</td>
+      <td class="num">2斤</td>
       <td class="mono">VEG-002</td>
-      <td>直接匹配</td>
-      <td>工具结果，分数 100</td>
+      <td>否</td>
     </tr>
     <tr>
-      <td class="num">2</td>
-      <td>蕃茄3斤</td>
-      <td class="num">3斤</td>
+      <td class="num hl">2</td>
       <td class="hl">番茄</td>
+      <td class="num hl">3斤</td>
       <td class="mono hl">VEG-001</td>
-      <td>模型推荐</td>
-      <td>别名「蕃茄」命中，SKU 已启用</td>
+      <td class="hl">是</td>
     </tr>
     <tr>
-      <td class="num">3</td>
-      <td>西蓝花5斤</td>
-      <td class="num">5斤</td>
-      <td class="hl">待确认：西兰花</td>
+      <td class="num hl">3</td>
+      <td class="hl">西兰花</td>
+      <td class="num hl">5斤</td>
       <td class="mono hl">—</td>
-      <td>待确认</td>
-      <td>已检索「西蓝花」「西兰花」「花菜」，SKU 清单未命中</td>
+      <td class="hl">是</td>
     </tr>
   </tbody>
 </table>
-<p class="note total">合计 {{N}} 行：直接匹配 {{a}}、模型推荐 {{b}}、待确认 {{c}}。</p>
+<p class="note total">合计 {{N}} 行：无需审核 {{a}}、需审核 {{b}}。</p>
 
 <footer>
   数据来源：fresh_order_parse（工具返回 auto_rows / review_rows / error_rows）；SKU 与别名取自 {{sku_path}}。

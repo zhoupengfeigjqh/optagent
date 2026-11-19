@@ -57,18 +57,18 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
 
   it('2026-10-20：`.html` → 与 PDF 同形态的 iframe，但 MUST 带 `sandbox=""`', () => {
     const wrapper = mountContent(
-      { kind: 'file', dir: '共享空间', filename: '看板.html' },
+      { kind: 'file', dir: '临时空间', filename: '看板.html' },
       {
         renderMode: 'html',
         text: null,
-        url: '/api/files/preview?dir=共享空间&filename=看板.html',
+        url: '/api/files/preview?dir=临时空间&filename=看板.html',
         error: null,
       },
     )
 
     const frame = wrapper.find('iframe')
     expect(frame.exists()).toBe(true)
-    expect(frame.attributes('src')).toBe('/api/files/preview?dir=共享空间&filename=看板.html')
+    expect(frame.attributes('src')).toBe('/api/files/preview?dir=临时空间&filename=看板.html')
     // 空值 = 全限制：脚本不执行、不共享本站源（用户上传内容不能获得平台权限）
     expect(frame.attributes('sandbox')).toBe('')
     expect(frame.attributes('referrerpolicy')).toBe('no-referrer')
@@ -149,7 +149,7 @@ describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
     return mount(WorkspacePanel, {
       props: {
         view: 'content',
-        target: { kind: 'file', dir: '共享空间', filename: '图纸.pdf' },
+        target: { kind: 'file', dir: '临时空间', filename: '图纸.pdf' },
         content: { renderMode: 'pdf', text: null, url: '/api/files/x', error: null },
         maximizeVisible: true,
         maximized: false,

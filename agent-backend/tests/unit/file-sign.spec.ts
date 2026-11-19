@@ -23,12 +23,12 @@ const PRODUCED_DIR = '临时空间/后台产出';
 
 describe('读方向（既有行为，本次 MUST NOT 变化）', () => {
   it('签名 → 验签通过', () => {
-    const sig = signRef(SECRET, 'admin', '共享空间/a.xlsx', NOW + 1000);
-    expect(verifyRef(SECRET, 'admin', '共享空间/a.xlsx', NOW + 1000, sig, NOW)).toBe(true);
+    const sig = signRef(SECRET, 'admin', '临时空间/a.xlsx', NOW + 1000);
+    expect(verifyRef(SECRET, 'admin', '临时空间/a.xlsx', NOW + 1000, sig, NOW)).toBe(true);
   });
 
   it('铸造的 URL 仍是 `/api/files/raw` 三段形态（不含写方向参数）', () => {
-    const url = mintSignedUrl('http://backend:3000', SECRET, 'admin', '共享空间/a.xlsx', 1000, NOW);
+    const url = mintSignedUrl('http://backend:3000', SECRET, 'admin', '临时空间/a.xlsx', 1000, NOW);
     const parsed = new URL(url);
     expect(parsed.pathname).toBe('/api/files/raw');
     expect([...parsed.searchParams.keys()].sort()).toEqual(['exp', 'p', 'sig', 'u']);
@@ -48,7 +48,7 @@ describe('写方向', () => {
 
   it('目录被篡改 → 失败（目录在签名内，决定"写到哪个子目录"）', () => {
     const sig = signPutRef(SECRET, 'admin', PRODUCED_DIR, NOW + 1000);
-    expect(verifyPutRef(SECRET, 'admin', '共享空间', NOW + 1000, sig, NOW)).toBe(false);
+    expect(verifyPutRef(SECRET, 'admin', '数据准备', NOW + 1000, sig, NOW)).toBe(false);
   });
 
   it('用户被篡改 → 失败（用户决定"写到谁的空间"）', () => {
@@ -70,8 +70,8 @@ describe('读写形状隔离（§10.6 不变式 3）', () => {
   });
 
   it('写签名不能用于读', () => {
-    const putSig = signPutRef(SECRET, 'admin', '共享空间/a.xlsx', NOW + 1000);
-    expect(verifyRef(SECRET, 'admin', '共享空间/a.xlsx', NOW + 1000, putSig, NOW)).toBe(false);
+    const putSig = signPutRef(SECRET, 'admin', '临时空间/a.xlsx', NOW + 1000);
+    expect(verifyRef(SECRET, 'admin', '临时空间/a.xlsx', NOW + 1000, putSig, NOW)).toBe(false);
   });
 
   it('同样入参下两种签名值不同（编码了不同 payload）', () => {

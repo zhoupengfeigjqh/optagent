@@ -18,13 +18,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as dirs from '../../src/domain/dirs.js';
 import * as scenarioModule from '../../src/domain/scenario.js';
-import {
-  DATA_PREP_UPLOAD_EXTS,
-  SPACE_PREP,
-  SPACE_POLICIES,
-  SPACE_SHARED,
-  SPACE_TMP,
-} from '../../src/domain/dirs.js';
+import { DATA_PREP_UPLOAD_EXTS, SPACE_PREP, SPACE_POLICIES, SPACE_TMP } from '../../src/domain/dirs.js';
 
 const userId = 'admin';
 const agentName = 'demo';
@@ -77,10 +71,7 @@ describe('拆分后的导出契约（dirs.ts re-export ⇒ 同一实现）', () 
 });
 
 describe('uploadExtensionsOf —— 空间策略与场景覆盖的合成', () => {
-  it('共享空间/临时空间恒取空间策略（与场景无关，scenario 可缺省）', () => {
-    expect(dirs.uploadExtensionsOf(null, SPACE_SHARED)).toEqual(
-      SPACE_POLICIES[SPACE_SHARED].uploadExtensions,
-    );
+  it('临时空间恒取空间策略（与场景无关，scenario 可缺省）', () => {
     expect(dirs.uploadExtensionsOf(null, SPACE_TMP)).toEqual(
       SPACE_POLICIES[SPACE_TMP].uploadExtensions,
     );

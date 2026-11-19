@@ -42,7 +42,7 @@
 | `iat` | 签发时间（Unix 秒） | — |
 | `exp` | 过期时间（Unix 秒） | `iat + TTL`，默认 7 天，可配置 |
 
-- 签名：HS256，共享密钥 `AUTH_SECRET`（compose/.env 单一来源，两侧一致）。
+- 签名：HS256，共享密钥 `AUTH_SECRET`。**真源按形态各一处、两侧必须同值**（2026-11-18 收敛，方案 A）：容器形态 = `admin-backend/.env` ↔ `agent-backend/.env.local`；本地形态 = 两份 `.env.local`。`agent-backend/.env` 不再承载该变量（compose 的 env_file 顺序会让 `.env.local` 覆盖它，写在那里等于没写）。
 - 载体：HttpOnly Cookie `optagent_auth`，`Path=/`，`SameSite=Lax`，`Max-Age=TTL`；不设 `Secure`（内网明文 HTTP）。
 - 每账号"当前唯一会话标识"登记于 `.platform-data/sessions/{user_id}.json`；新登录覆盖旧会话（后登踢前登），登出/删除用户清除之，旧凭据随即失效。
 

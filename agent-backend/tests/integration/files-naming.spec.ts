@@ -37,7 +37,7 @@ import { buildServer } from '../../src/server';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-naming-'));
 const userId = 'admin';
 const AGENT = 'alpha';
-/** 数据准备（带二级目录，用于跨目录同名）+ 三个空间 */
+/** 数据准备（带二级目录，用于跨目录同名）+ 两个空间 */
 const SCENARIO = { scenario: '命名', data_prep_dirs: ['生产计划'] };
 
 let app: FastifyInstance;
@@ -169,8 +169,10 @@ describe('并发与冲突域（012 FR-022 / FR-023 / FR-025 / SC-004）', () => 
   });
 
   it('跨目录同名互不影响（冲突域只在目标目录）', async () => {
-    expect(await uploadExpect201('临时空间', 'n12-cross.txt', 'tmp')).toBe('n12-cross.txt');
-    // 同一数字人的另一个空间：同名照用原名
-    expect(await uploadExpect201('共享空间', 'n12-cross.txt', 'shared')).toBe('n12-cross.txt');
+    expect(await uploadExpect201('临时空间', 'n12-cross.csv', 'tmp')).toBe('n12-cross.csv');
+    // 同一数字人的另一个空间：同名照用原名（数据准备默认白名单只有 csv/xlsx）
+    expect(await uploadExpect201('数据准备/生产计划', 'n12-cross.csv', 'prep')).toBe(
+      'n12-cross.csv',
+    );
   });
 });

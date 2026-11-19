@@ -175,10 +175,10 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
       url: `${ORIGIN}/api/files/preview?dir=a&filename=b`,
       name: 'x.pdf',
       kind: 'file',
-      filePath: '共享空间/x.pdf',
+      filePath: '临时空间/x.pdf',
     })
 
-    expect(files.probePreview).toHaveBeenCalledWith('共享空间', 'x.pdf')
+    expect(files.probePreview).toHaveBeenCalledWith('临时空间', 'x.pdf')
     expect(store.content.value?.renderMode).toBe('pdf')
     expect(store.content.value?.error).toBeNull()
   })
@@ -208,10 +208,10 @@ describe('openFile —— 内容态分派与错误态（FR-048 / V-11）', () =>
     const files = filesStub()
     const store = createPreviewStore({ files })
 
-    await store.openFile({ dir: '共享空间', filename: 'a.png' })
+    await store.openFile({ dir: '临时空间', filename: 'a.png' })
 
-    expect(files.probePreview).toHaveBeenCalledWith('共享空间', 'a.png')
-    expect(store.target.value).toEqual({ kind: 'file', dir: '共享空间', filename: 'a.png' })
+    expect(files.probePreview).toHaveBeenCalledWith('临时空间', 'a.png')
+    expect(store.target.value).toEqual({ kind: 'file', dir: '临时空间', filename: 'a.png' })
     expect(store.content.value?.renderMode).toBe('image')
     expect(store.content.value?.url).toContain('/api/files/preview')
   })
@@ -236,7 +236,7 @@ describe('openFile —— 内容态分派与错误态（FR-048 / V-11）', () =>
     })
     const store = createPreviewStore({ files })
 
-    await store.openFile({ dir: '共享空间', filename: 'big.pdf' })
+    await store.openFile({ dir: '临时空间', filename: 'big.pdf' })
 
     expect(store.content.value?.renderMode).toBe('error')
     expect(store.content.value?.url).toContain('/api/files/download')
@@ -246,9 +246,9 @@ describe('openFile —— 内容态分派与错误态（FR-048 / V-11）', () =>
     const files = filesStub()
     const store = createPreviewStore({ files })
 
-    await store.openFile({ dir: '共享空间', filename: '看板.html' })
+    await store.openFile({ dir: '临时空间', filename: '看板.html' })
 
-    expect(files.probePreview).toHaveBeenCalledWith('共享空间', '看板.html')
+    expect(files.probePreview).toHaveBeenCalledWith('临时空间', '看板.html')
     expect(store.content.value?.renderMode).toBe('html')
     expect(store.content.value?.url).toContain('/api/files/preview')
   })
@@ -259,7 +259,7 @@ describe('openFile —— 内容态分派与错误态（FR-048 / V-11）', () =>
     })
     const store = createPreviewStore({ files })
 
-    await store.openFile({ dir: '共享空间', filename: 'big.html' })
+    await store.openFile({ dir: '临时空间', filename: 'big.html' })
 
     expect(store.content.value?.renderMode).toBe('error')
     expect(store.content.value?.url).toContain('/api/files/download')
@@ -367,21 +367,21 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
 
   it('② 本地 PDF → 可放大', async () => {
     const store = createPreviewStore({ files: filesStub() })
-    await store.openFile({ dir: '共享空间', filename: '图纸.pdf' })
+    await store.openFile({ dir: '临时空间', filename: '图纸.pdf' })
 
     expect(store.maximizable.value).toBe(true)
   })
 
   it('③ 本地图片 → 可放大', async () => {
     const store = createPreviewStore({ files: filesStub() })
-    await store.openFile({ dir: '共享空间', filename: '现场.png' })
+    await store.openFile({ dir: '临时空间', filename: '现场.png' })
 
     expect(store.maximizable.value).toBe(true)
   })
 
   it('③b 本地 HTML → 可放大（有版面，与 PDF 同口径，2026-10-20）', async () => {
     const store = createPreviewStore({ files: filesStub() })
-    await store.openFile({ dir: '共享空间', filename: '看板.html' })
+    await store.openFile({ dir: '临时空间', filename: '看板.html' })
 
     expect(store.content.value?.renderMode).toBe('html')
     expect(store.maximizable.value).toBe(true)
@@ -488,19 +488,19 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
 
   it('`close` / `backToList` / `openList` 三条路径一律退出放大（I2 / FR-007 / FR-032）', async () => {
     const closed = createPreviewStore({ files: filesStub() })
-    await closed.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    await closed.openFile({ dir: '临时空间', filename: 'a.pdf' })
     closed.toggleMaximize()
     closed.close()
     expect(closed.maximized.value).toBe(false)
 
     const back = createPreviewStore({ files: filesStub() })
-    await back.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    await back.openFile({ dir: '临时空间', filename: 'a.pdf' })
     back.toggleMaximize()
     back.backToList()
     expect(back.maximized.value).toBe(false)
 
     const list = createPreviewStore({ files: filesStub() })
-    await list.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    await list.openFile({ dir: '临时空间', filename: 'a.pdf' })
     list.toggleMaximize()
     list.openList()
     expect(list.maximized.value).toBe(false)
@@ -508,10 +508,10 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
 
   it('正在看的文件被删除（`onFileRemoved`）→ 连同放大态一起退出（FR-032）', async () => {
     const store = createPreviewStore({ files: filesStub() })
-    await store.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    await store.openFile({ dir: '临时空间', filename: 'a.pdf' })
     store.toggleMaximize()
 
-    store.onFileRemoved({ dir: '共享空间', filename: 'a.pdf' })
+    store.onFileRemoved({ dir: '临时空间', filename: 'a.pdf' })
 
     expect(store.view.value).toBe('list')
     expect(store.maximized.value).toBe(false)
@@ -520,7 +520,7 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
   it('放大 / 缩小 MUST NOT 产生任何请求（FR-006 的零副作用侧面）', async () => {
     const files = filesStub()
     const store = createPreviewStore({ files })
-    await store.openFile({ dir: '共享空间', filename: 'a.pdf' })
+    await store.openFile({ dir: '临时空间', filename: 'a.pdf' })
 
     const before = [
       vi.mocked(files.probePreview).mock.calls.length,

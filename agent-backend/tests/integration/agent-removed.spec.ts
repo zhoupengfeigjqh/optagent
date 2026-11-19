@@ -28,7 +28,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config';
 import type { AppContext } from '../../src/context.js';
-import { SPACE_SHARED, agentDir, userDataDir } from '../../src/domain/dirs.js';
+import { SPACE_TMP, agentDir, userDataDir } from '../../src/domain/dirs.js';
 import { removeDirRecursiveAsync } from '../../src/domain/fs-safe.js';
 import { buildServer } from '../../src/server';
 
@@ -105,7 +105,7 @@ describe('数字人被移除：数据保留但不可用（FR-030/031/032）', ()
     expect((await select(AGENT)).statusCode).toBe(200);
 
     // 造一份"有内容"的数据域：文件 + 会话目录
-    putFile(SPACE_SHARED, '订单.csv', '订单号,数量\nA1,10\n');
+    putFile(SPACE_TMP, '订单.csv', '订单号,数量\nA1,10\n');
     putFile('临时空间', 'th_1_产出.json', '{"ok":true}');
     const created = await app.inject({
       method: 'POST',
@@ -136,7 +136,7 @@ describe('数字人被移除：数据保留但不可用（FR-030/031/032）', ()
     ctx().currentAgent.select(USER, AGENT);
     const files = await app.inject({
       method: 'GET',
-      url: `/api/files/list?dir=${encodeURIComponent(SPACE_SHARED)}`,
+      url: `/api/files/list?dir=${encodeURIComponent(SPACE_TMP)}`,
     });
     expect(files.statusCode).toBe(409);
     expect((files.json() as { error: { code: string } }).error.code).toBe('AGENT_NOT_AVAILABLE');
@@ -155,7 +155,7 @@ describe('数字人被移除：数据保留但不可用（FR-030/031/032）', ()
     // 数据自动恢复可见可用：文件读得到、会话详情取得到（复用既有数据，无需人工干预）
     const back = await app.inject({
       method: 'GET',
-      url: `/api/files/download?dir=${encodeURIComponent(SPACE_SHARED)}&filename=${encodeURIComponent('订单.csv')}`,
+      url: `/api/files/download?dir=${encodeURIComponent(SPACE_TMP)}&filename=${encodeURIComponent('订单.csv')}`,
     });
     expect(back.statusCode).toBe(200);
     expect(back.body).toBe('订单号,数量\nA1,10\n');

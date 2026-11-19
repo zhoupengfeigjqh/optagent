@@ -6,7 +6,8 @@
  * 故抽成本组件，保证两处入口与样式完全一致：
  * 查看（进内容态）、下载、删除。
  *
- * 只读目录（`deletable=false`，如共享空间）**不渲染删除入口**（后端另有 403 兜底）。
+ * 2026-11-18（025）：只读空间下线后所有文件均可删，故不再有 `deletable` 开关
+ * （响应里的 `deletable` 字段仍在契约内，值恒为 `true`，界面侧不再据此分叉）。
  * 纯展示：不发起请求；删除的二次确认由 `WorkspacePanel` 承担，本组件只上报意图。
  */
 import type { FileReference, WorkspaceFile } from '../../api/types'
@@ -19,10 +20,8 @@ const props = withDefaults(
     dir: string
     /** 文件清单（空数组时由调用方渲染空态文案） */
     files?: WorkspaceFile[]
-    /** 该目录内文件是否可删除 */
-    deletable?: boolean
   }>(),
-  { files: () => [], deletable: false },
+  { files: () => [] },
 )
 
 const emit = defineEmits<{
@@ -62,7 +61,6 @@ function referenceOf(filename: string): FileReference {
       </button>
 
       <button
-        v-if="deletable"
         type="button"
         class="workspace-files__action workspace-files__action--danger"
         :aria-label="`删除 ${file.filename}`"

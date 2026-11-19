@@ -50,7 +50,7 @@ function flatSpace(name: string, files: WorkspaceFile[] = []): WorkspaceSpace {
 describe('needsDataUpload', () => {
   it('没有非扁平空间（数据准备缺失）→ 不提示', () => {
     expect(needsDataUpload([])).toBe(false)
-    expect(needsDataUpload([flatSpace('共享空间'), flatSpace('临时空间')])).toBe(false)
+    expect(needsDataUpload([flatSpace('临时空间')])).toBe(false)
     expect(needsDataUpload(undefined)).toBe(false)
   })
 

@@ -38,9 +38,9 @@ describe('readToolFile —— `.html`（2026-10-20）', () => {
   it('走文本直读并原样返回（不解析 DOM、不执行脚本、不剥标签）', async () => {
     const { fa, read, readBuffer } = stubAccess(HTML);
 
-    const result = await readToolFile(fa, '共享空间/看板.html');
+    const result = await readToolFile(fa, '临时空间/看板.html');
 
-    expect(read).toHaveBeenCalledWith('共享空间/看板.html', {
+    expect(read).toHaveBeenCalledWith('临时空间/看板.html', {
       offset: undefined,
       limit: undefined,
     });
@@ -62,7 +62,7 @@ describe('readToolFile —— `.html`（2026-10-20）', () => {
   it('不支持类型的提示含 `.html`（说明与实现同源）', async () => {
     const { fa } = stubAccess('MZ\u0000\u0000二进制');
 
-    const result = await readToolFile(fa, '共享空间/程序.exe');
+    const result = await readToolFile(fa, '临时空间/程序.exe');
 
     expect(result.text).toContain('不支持的文件格式');
     expect(result.text).toContain('.html');
@@ -88,7 +88,7 @@ describe('readToolFile —— 未知扩展名按内容嗅探', () => {
   it('含 NUL → 判定为二进制并拒绝（不看扩展名名分）', async () => {
     const { fa } = stubAccess(`PK\u0000\u0003\u0004`);
 
-    const result = await readToolFile(fa, '共享空间/归档.bin');
+    const result = await readToolFile(fa, '临时空间/归档.bin');
 
     expect(result.text).toContain('不支持的文件格式 ".bin"');
   });

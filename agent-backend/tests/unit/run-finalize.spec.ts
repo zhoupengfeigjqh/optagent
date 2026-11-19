@@ -225,6 +225,9 @@ describe('RunFinalizer.error', () => {
       error: { code: 'LLM_ERROR', message: '上游模型不可用' },
       usage: { input_tokens: 11, output_tokens: 22 },
     });
+    // 2026-11-18：失败行沿用 run 启动时预生成的 id —— 工具事件行按该 id 归属，
+    // 在这里另生成新 id 会让失败轮的工具卡片变成孤儿（历史里永远点不开结果）
+    expect(history.appended[1]!.message.id).toBe('m-assistant');
     expect(usage.rows).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'error',

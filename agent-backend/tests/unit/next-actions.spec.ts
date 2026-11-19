@@ -162,8 +162,8 @@ describe('sanitizeActions —— 只校验 prompt；tool_tips 原样透传', () 
       bound('先做 query_order'), // 夹标识符 → 丢
       { prompt: 123, tool_tips: [TOOL_TIPS[0]] }, // 类型错 → 丢
       'not-an-object',
-      bound('整理共享空间的表格'),
-      bound('整理共享空间的表格'), // 重复 → 丢
+      bound('整理临时空间的表格'),
+      bound('整理临时空间的表格'), // 重复 → 丢
       bound('按交付日期梳理订单风险'),
       bound('按月汇总这批订单的数量'),
       bound('第四条应当被条数上限截掉'),
@@ -172,7 +172,7 @@ describe('sanitizeActions —— 只校验 prompt；tool_tips 原样透传', () 
     const out = sanitizeActions(raw, TOOL_TIPS);
 
     expect(out.map((a) => a.prompt)).toEqual([
-      '整理共享空间的表格',
+      '整理临时空间的表格',
       '按交付日期梳理订单风险',
       '按月汇总这批订单的数量',
     ]);

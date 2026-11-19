@@ -1099,15 +1099,13 @@ rules:
         field: date
         operator: not_empty
         values: []
-    - combine: and
-      conditions:
       - function: filterData
         field: count
         operator: gt
         values:
         - '0'
-    pass_message: 采购已到位，提示启动入库操作
-    fail_message: 采购未到期，无需入库预警
+    pass_message: 上述采购已到位，你可以启动入库操作
+    fail_message: 目前并无超期原材料
 - name: I03_PurchasePurposeInference
   description: IF 采购单的关联客户订单ID（relatedOrderId）为空 THEN 该采购目的可视为“补充库存”。
   behavior: CreatePurchaseRecord

@@ -17,7 +17,6 @@ import {
   PRODUCED_DIR,
   SPACE_POLICIES,
   SPACE_PREP,
-  SPACE_SHARED,
   SPACE_TMP,
   SPACES,
   scenarioPath,
@@ -337,7 +336,7 @@ export interface SpaceDirTarget {
   space: SpaceName;
   /** 数据准备的二级目录名（其余空间为 undefined） */
   sub?: string;
-  /** 相对**数字人数据根**的 posix 路径（如 数据准备/生产计划、共享空间） */
+  /** 相对**数字人数据根**的 posix 路径（如 数据准备/生产计划、临时空间） */
   relPath: string;
 }
 
@@ -357,12 +356,12 @@ export class DirValidationError extends Error {
  *
  * 合法性判据的**唯一来源**是 `domain/space-path.ts`（2026-11-02 收敛，与模型工具共用）：
  * - 穿越/绝对路径/反斜杠 → DirValidationError(400)
- * - 一级必须是三空间之一；扁平空间（共享/临时）不许子目录；数据准备必须带二级目录，
+ * - 一级必须是已知空间之一；扁平空间（临时）不许子目录；数据准备必须带二级目录，
  *   且该二级目录在**该数字人**的 scenario 清单内 → 403（清单随数字人不同而不同）
  * - `capability='browse-produced'` 只用于**读方向**（download / preview），额外放行
  *   `临时空间/后台产出` 这一个目录；上传 / 列表 / 删除仍走默认口径
  * - scenario 未配置 → ScenarioNotConfiguredError（上层映射 503），且**只在判定到数据准备
- *   时才读取**——共享空间/临时空间不因场景缺失而整体不可用
+ *   时才读取**——临时空间不因场景缺失而整体不可用
  */
 export function parseSpaceDir(
   optAgentRoot: string,
@@ -428,7 +427,7 @@ function dirError(
 /**
  * 模型可用目录清单（`read_file` / `list_dir` / `grep_files` 的说明与示例取值来源）。
  *
- * = 数据准备子目录（**该数字人** scenario 定义）+ 共享空间 + 临时空间 + `临时空间/后台产出`。
+ * = 数据准备子目录（**该数字人** scenario 定义）+ 临时空间 + `临时空间/后台产出`。
  *
  * **产出目录为什么进清单**（契约 §10.8）：产出清单只注入**发起会话**，换会话后模型既看不到
  * 清单也不知道落点。把它写进 `list_dir` 的说明，模型即可自行列目录、按路径取回——这是
@@ -442,7 +441,7 @@ function dirError(
  * 两者消费者不同（模型内置工具 vs 管理端浏览），差异只由规则表的 capability 表达，
  * MUST NOT 为"看起来一致"而放宽浏览侧。
  *
- * 场景未配置时退化为三空间根（不含数据准备子目录），产出目录同样在末尾。
+ * 场景未配置时退化为空间根（不含数据准备子目录），产出目录同样在末尾。
  */
 export function listAvailableDirs(
   optAgentRoot: string,
@@ -451,14 +450,9 @@ export function listAvailableDirs(
 ): string[] {
   try {
     const scenario = loadScenario(optAgentRoot, userId, agentName);
-    return [
-      ...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`),
-      SPACE_SHARED,
-      SPACE_TMP,
-      PRODUCED_DIR,
-    ];
+    return [...scenario.dataPrepDirs.map((d) => `${SPACE_PREP}/${d}`), SPACE_TMP, PRODUCED_DIR];
   } catch (err) {
-    if (err instanceof ScenarioNotConfiguredError) return [SPACE_SHARED, SPACE_TMP, PRODUCED_DIR];
+    if (err instanceof ScenarioNotConfiguredError) return [SPACE_TMP, PRODUCED_DIR];
     throw err;
   }
 }

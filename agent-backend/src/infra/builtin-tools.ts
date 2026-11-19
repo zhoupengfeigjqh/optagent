@@ -52,7 +52,7 @@ export interface BuiltinToolsOptions {
   threadId: string;
   /** TOOL.json 启用的工具名 */
   enabled: string[];
-  /** 可供 list_dir 的目录清单（建 run 时按 scenario 动态生成，如 ['数据准备/生产计划', …, '共享空间', '临时空间']） */
+  /** 可供 list_dir 的目录清单（建 run 时按 scenario 动态生成，如 ['数据准备/生产计划', …, '临时空间']） */
   availableDirs: string[];
   /**
    * 本数字人的技能目录（`users/{uid}/agents/{agent}/skills`），
@@ -225,8 +225,8 @@ export function buildBuiltinTools(opts: BuiltinToolsOptions): AgentTool[] {
   // 运行期取值：与改造前逐一对应（dirsText / examplePath / firstDir / threadId / 临时空间）
   const values: Partial<TemplateValues> = {
     可用目录: availableDirs.join('、'),
-    示例路径: availableDirs[0] ? `${availableDirs[0]}/示例.csv` : '共享空间/示例.csv',
-    首个目录: availableDirs[0] ?? '共享空间',
+    示例路径: availableDirs[0] ? `${availableDirs[0]}/示例.csv` : '临时空间/示例.csv',
+    首个目录: availableDirs[0] ?? '临时空间',
     会话标识: opts.threadId,
     临时空间: '临时空间',
   };

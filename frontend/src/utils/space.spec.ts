@@ -27,11 +27,7 @@ function makeSpace(name: string, dirs: WorkspaceDir[]): WorkspaceSpace {
 }
 
 describe('isFlatSpace', () => {
-  it('共享空间（dirs 仅含自身一项）判为扁平空间', () => {
-    const space = makeSpace('共享空间', [makeDir('共享空间', [makeFile('a.pdf')])])
-    expect(isFlatSpace(space)).toBe(true)
-  })
-
+  // 2026-11-18（025）：共享空间下线后，扁平空间只剩临时空间（原"共享空间"用例已并入本条）
   it('临时空间（dirs 仅含自身一项）判为扁平空间', () => {
     expect(isFlatSpace(makeSpace('临时空间', [makeDir('临时空间')]))).toBe(true)
   })
@@ -47,13 +43,13 @@ describe('isFlatSpace', () => {
   })
 
   it('dirs 为空 → 不是扁平空间', () => {
-    expect(isFlatSpace(makeSpace('共享空间', []))).toBe(false)
+    expect(isFlatSpace(makeSpace('临时空间', []))).toBe(false)
   })
 })
 
 describe('spaceSubDirs', () => {
   it('扁平空间返回空数组（不下钻，直接出文件）', () => {
-    const space = makeSpace('共享空间', [makeDir('共享空间', [makeFile('a.pdf')])])
+    const space = makeSpace('临时空间', [makeDir('临时空间', [makeFile('a.pdf')])])
     expect(spaceSubDirs(space)).toEqual([])
   })
 
@@ -81,6 +77,6 @@ describe('spaceFileCount', () => {
   })
 
   it('dirs 为空 = 0', () => {
-    expect(spaceFileCount(makeSpace('共享空间', []))).toBe(0)
+    expect(spaceFileCount(makeSpace('临时空间', []))).toBe(0)
   })
 })

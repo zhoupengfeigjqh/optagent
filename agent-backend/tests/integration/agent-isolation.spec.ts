@@ -4,10 +4,10 @@
  * 一条主线：**作用域＝服务端当前选中数字人**，客户端指定的作用域一律无效。
  * 用户故事 1 的验收场景逐条钉在这里：
  *
- * - 同一用户的两个数字人各自一份三空间：列表互不可见、同名文件互不串内容；
+ * - 同一用户的两个数字人各自一份文件空间：列表互不可见、同名文件互不串内容；
  * - 甲创建的会话，切到乙后**在列表里查不到**，按 id 取 → `404 THREAD_NOT_FOUND`
  *   （与"不存在"不可区分，不泄露存在性）；
- * - 跨数字人路径（`../{另一个数字人}/...`）→ `403 DIR_VALIDATION`；
+ * - 跨数字人路径（`../{另一个数字人}/...`）→ `403 UPLOAD_DIR_FORBIDDEN`；
  * - 未选中 → `409 AGENT_NOT_SELECTED`；选中已移除的数字人 → `409 AGENT_NOT_AVAILABLE`。
  *
  * 运行方式（本地执行）：npm run test:integration
@@ -19,7 +19,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config';
 import type { AppContext } from '../../src/context.js';
-import { SPACE_SHARED, SPACE_TMP, agentDir, userDataDir } from '../../src/domain/dirs.js';
+import { SPACE_TMP, agentDir, userDataDir } from '../../src/domain/dirs.js';
 import { buildServer } from '../../src/server';
 
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-isolation-'));
@@ -120,38 +120,39 @@ describe('作用域来源：只能是服务端当前选中数字人', () => {
 });
 
 describe('文件空间：两数字人各自一份，互不可见', () => {
-  it('同一用户两个数字人的三空间内容互不可见；同名文件内容互不串', async () => {
+  it('同一用户两个数字人的空间内容互不可见；同名文件内容互不串', async () => {
     expect((await select(AGENT_A)).statusCode).toBe(200);
-    const aFile = putFile(AGENT_A, SPACE_SHARED, '同名文档.csv', '甲的正文');
+    const aFile = putFile(AGENT_A, SPACE_TMP, '同名文档.csv', '甲的正文');
     const aTmp = putFile(AGENT_A, SPACE_TMP, 'th_x_产出.json', '甲产出');
 
     // 甲看得见自己的（list 返回数组：[{ filename, size, updated_at }]）
-    const aList = await listFiles(SPACE_SHARED);
+    const aList = await listFiles(SPACE_TMP);
     expect(aList.statusCode).toBe(200);
-    expect((aList.json() as Array<{ filename: string }>).map((e) => e.filename)).toEqual([
-      '同名文档.csv',
-    ]);
+    expect(
+      (aList.json() as Array<{ filename: string }>)
+        .map((e) => e.filename)
+        .slice()
+        .sort(),
+    ).toEqual(['th_x_产出.json', '同名文档.csv'].sort());
 
     // 切到乙：乙的空间是空的（甲的目录压根不在作用域内）
     expect((await select(AGENT_B)).statusCode).toBe(200);
-    const bList = await listFiles(SPACE_SHARED);
+    const bList = await listFiles(SPACE_TMP);
     expect(bList.statusCode).toBe(200);
     expect(bList.json() as unknown[]).toEqual([]);
-    const bTmp = await listFiles(SPACE_TMP);
-    expect(bTmp.json() as unknown[]).toEqual([]);
 
     // 乙放同名文件：两边内容互不污染
-    const bFile = putFile(AGENT_B, SPACE_SHARED, '同名文档.csv', '乙的正文');
+    const bFile = putFile(AGENT_B, SPACE_TMP, '同名文档.csv', '乙的正文');
     const bDownload = await app.inject({
       method: 'GET',
-      url: `/api/files/download?dir=${encodeURIComponent(SPACE_SHARED)}&filename=${encodeURIComponent('同名文档.csv')}`,
+      url: `/api/files/download?dir=${encodeURIComponent(SPACE_TMP)}&filename=${encodeURIComponent('同名文档.csv')}`,
     });
     expect(bDownload.body).toBe('乙的正文');
 
     expect((await select(AGENT_A)).statusCode).toBe(200);
     const aDownload = await app.inject({
       method: 'GET',
-      url: `/api/files/download?dir=${encodeURIComponent(SPACE_SHARED)}&filename=${encodeURIComponent('同名文档.csv')}`,
+      url: `/api/files/download?dir=${encodeURIComponent(SPACE_TMP)}&filename=${encodeURIComponent('同名文档.csv')}`,
     });
     expect(aDownload.body).toBe('甲的正文');
 
@@ -164,16 +165,16 @@ describe('文件空间：两数字人各自一份，互不可见', () => {
     expect((await select(AGENT_B)).statusCode).toBe(200);
 
     // `..` 上跳：连目录参数本身都不合法（400 VALIDATION_FAILED）
-    const up = await listFiles(`../${AGENT_A}/${SPACE_SHARED}`);
+    const up = await listFiles(`../${AGENT_A}/${SPACE_TMP}`);
     expect(up.statusCode).toBe(400);
     expect((up.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
 
     // 绝对路径：同样非法（400）
-    const abs = await listFiles(path.join(root, 'users', USER, 'user-data', AGENT_A, SPACE_SHARED));
+    const abs = await listFiles(path.join(root, 'users', USER, 'user-data', AGENT_A, SPACE_TMP));
     expect(abs.statusCode).toBe(400);
 
-    // 把对方数字人当作一级目录点名：一级必须是三空间之一 → 403（契约 §1 的既有映射）
-    const named = await listFiles(`${AGENT_A}/${SPACE_SHARED}`);
+    // 把对方数字人当作一级目录点名：一级必须是两空间之一 → 403（契约 §1 的既有映射）
+    const named = await listFiles(`${AGENT_A}/${SPACE_TMP}`);
     expect(named.statusCode).toBe(403);
     expect((named.json() as { error: { code: string } }).error.code).toBe('UPLOAD_DIR_FORBIDDEN');
   });

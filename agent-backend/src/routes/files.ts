@@ -8,15 +8,15 @@
  * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
  *   按扩展名映射 Content-Type；`.xlsx` 返回结构化 JSON（见 `domain/preview/xlsx-sheets.ts`），
  *   `.xls` 回退附件下载；超过预览上限 → 413）
- * - GET /api/files/workspace：三空间工作空间汇总（空间 → 子目录 → 文件 + 每空间策略 +
+ * - GET /api/files/workspace：文件空间汇总（空间 → 子目录 → 文件 + 每空间策略 +
  *   目录级可上传类型 `upload_extensions`）
  * - GET /api/files/rules：HITL「从算法规则选择」数据源——「数据准备/算法规则」最新
  *   规则文件（updated_at 最大）解析成结构化行（columns/rows/priority_column）
- * - DELETE /api/files?dir=&filename=：删除文件（共享空间只读 → 403 FILE_READONLY）
+ * - DELETE /api/files?dir=&filename=：删除文件（2026-11-18 / 025：只读空间下线后全部可删）
  * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
  *
  * **归属（009）**：文件空间视角＝**当前选中的数字人**，且路径根是**该数字人的数据域**
- * （`user-data/{数字人}/`）。相对路径语义不变（`数据准备/生产计划`、`共享空间`…），
+ * （`user-data/{数字人}/`）。相对路径语义不变（`数据准备/生产计划`、`临时空间`…），
  * 但解析结果随数字人而异 ⇒ 跨数字人访问在路径层不可达（403 DIR_VALIDATION / 404）。
  * 场景（scenario.json）随数字人存放，故同一用户的不同数字人可见的目录清单不同。
  * 未选中数字人 → 409 AGENT_NOT_SELECTED；选中但不可用 → 409 AGENT_NOT_AVAILABLE；
@@ -30,12 +30,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { getCurrentUser } from '../domain/current-user.js';
-import {
-  ScenarioNotConfiguredError,
-  SPACE_PREP,
-  SPACE_SHARED,
-  loadScenario,
-} from '../domain/dirs.js';
+import { ScenarioNotConfiguredError, SPACE_PREP, loadScenario } from '../domain/dirs.js';
 import { buildWorkspaceView } from '../domain/workspace-view.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
 import { xlsxToSheets, type PreviewWorkbook } from '../domain/preview/xlsx-sheets.js';
@@ -309,15 +304,12 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     };
   });
 
-  // 文件空间删除（002 US8 / FR-031）：共享空间为只读，其余空间可删
+  // 文件空间删除（002 US8 / FR-031）：2026-11-18（025）只读空间下线，两个空间均可删
   app.delete('/api/files', { schema: { querystring: downloadQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { dir, filename } = req.query as { dir: string; filename: string };
     const agent = currentAgentFor(ctx, userId);
     const target = checkDir(ctx, userId, agent, dir);
-    if (target.space === SPACE_SHARED) {
-      throw new ApiError(403, 'FILE_READONLY', `共享空间为只读目录，不支持删除: ${dir}`);
-    }
     if (filename !== path.basename(filename) || filename.includes('..')) {
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
     }

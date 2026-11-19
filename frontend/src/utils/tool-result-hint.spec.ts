@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ToolCallItem } from './tool-calls'
-import { NO_HINT, resultHint } from './tool-result-hint'
+import { emptyBodyHint, LIVE_PENDING_HINT, NO_HINT, resultHint } from './tool-result-hint'
 
 function item(partial: Partial<ToolCallItem> = {}): ToolCallItem {
   return { callId: 'c1', name: 'read_file', status: 'success', ...partial }
@@ -44,5 +44,31 @@ describe('resultHint', () => {
 
   it('无提示的哨兵值为空串', () => {
     expect(NO_HINT).toBe('')
+  })
+})
+
+/**
+ * 无正文时的说明（2026-11-18）：流式期只是"还没送到"，历史态才是"真的没有"。
+ * 四条边界逐一穷举，避免把"失败"或"截断"误说成"稍后可见"。
+ */
+describe('emptyBodyHint', () => {
+  it('流式期、成功、无正文：说清本轮结束后可查看', () => {
+    expect(emptyBodyHint(item({ content: undefined }), true)).toBe(LIVE_PENDING_HINT)
+  })
+
+  it('历史态、无正文：不提示（模板兜底「无结果内容」）', () => {
+    expect(emptyBodyHint(item({ content: undefined }), false)).toBe(NO_HINT)
+  })
+
+  it('工具报错、无正文：不提示（空的正文就是失败本身，别让用户等一个不会来的结果）', () => {
+    expect(emptyBodyHint(item({ status: 'error' }), true)).toBe(NO_HINT)
+  })
+
+  it('有截断说明时让位：截断说明比"稍后可看"更具体', () => {
+    expect(emptyBodyHint(item({ truncated: true, status: 'success' }), true)).toBe(NO_HINT)
+  })
+
+  it('运行中不参与：canExpand 已挡住，这里只保证不返回误导文案', () => {
+    expect(emptyBodyHint(item({ status: 'running' }), true)).toBe(LIVE_PENDING_HINT)
   })
 })

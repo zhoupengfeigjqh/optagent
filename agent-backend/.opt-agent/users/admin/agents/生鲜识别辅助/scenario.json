@@ -1,14 +1,11 @@
 {
   "scenario": "生鲜订单解析",
   "data_prep_dirs": [
-    "生鲜sku表",
-    "生鲜订单图片"
+    "生鲜sku表"
   ],
   "data_prep_uploads": {
-    "生鲜订单图片": [
-      ".jpg",
-      ".png",
-      ".jpeg"
+    "生鲜sku表": [
+      ".xlsx"
     ]
   }
 }

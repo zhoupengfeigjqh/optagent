@@ -6,6 +6,15 @@
 
 > **契约落点说明**：本特性新增的两个运行环境端点登记在**本文件**，而非 `contracts/backend-api.md`——因为**该文件并不存在**（`specs/` 下只有本特性目录，全仓库搜索命中 0）。该缺口已登记为 `plan.md` 待办 1。
 
+> **⚠ 2026-11-18 起部分条款作废（`specs/025-remove-shared-space`）**：「共享空间」作为第三个文件空间已下线，本文以下位置**保留原文作为历史记录**，实际口径已变——
+> - §1.4 工具表 `read_file` / `write_file` 的描述原文：空间枚举由"数据准备/共享空间/临时空间"变为"数据准备/临时空间"，只读范围由"数据准备与共享空间"变为"数据准备"；
+> - §1.4.1 `read_skill` 的动机段中"用户三空间"的表述（历史背景，不是当值契约）；
+> - 工具描述 JSON 示例里的 `"数据准备/共享空间/临时空间"`；
+> - §…「可上传类型」段：共享空间已不存在，`SPACE_POLICIES` 只剩 `数据准备` 与 `临时空间` 两项；
+> - §…「数据布局」表首行：迁移条目由三空间降为两空间，`共享空间` 不再被迁移与创建。
+>
+> 文件空间现为**两项**（数据准备 / 临时空间）；只读空间概念随之消失，`DELETE /api/files` 的 `403 FILE_READONLY` 已下线。
+
 ---
 
 ## §0 改动总览
@@ -233,6 +242,8 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
 **字段取值类型**：`string` / `integer` / `number` / `boolean` / `object` / `array`（JSON Schema 基本类型子集；与平台设计态、管理界面**同一枚举**，三处 MUST 同步）。
 
 **可上传类型**：数据准备的**每个二级目录**可有各自的允许类型（由数字人配置 `scenario.data_prep_uploads` 下发，缺省为 `.csv` / `.xlsx`）；共享空间与临时空间仍取 `SPACE_POLICIES`（与改造前一致）。
+
+> **2026-11-18 起作废（`specs/025-remove-shared-space`）**：共享空间下线，`SPACE_POLICIES` 只剩 `数据准备`（`.csv`/`.xlsx`）与 `临时空间`（文档 + 图片）。原"共享空间与临时空间仍取 `SPACE_POLICIES`"中共享空间部分不再适用。
 
 **内联预览（2026-10-20 补登 `.html`）**：`GET /api/files/preview` 的 Content-Type 映射新增 `.html` → `text/html; charset=utf-8`（`inline`），前端在右侧面板以 `<iframe>` 呈现，形态与 `.pdf` 一致。**安全约束（MUST）**：`.html` 是用户上传的可执行内容，预览响应 MUST 带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`（脚本不执行、不共享平台源），前端 iframe MUST 加 `sandbox=""`；签名直链 `GET /api/files/raw` 对 `.html` 同样处理。因为无法内联的复杂页面会白屏，`.html` 预览失败（404 / 413）仍按错误态给下载入口。
 
@@ -1253,7 +1264,7 @@ MCP 服务调用配置新增 `headers` 字段（`{头名: 值}`）：
 
 | 类别 | 改前 | 改后 |
 |---|---|---|
-| 数据准备 / 共享空间 / 临时空间 | `users/{uid}/user-data/{空间}` | `users/{uid}/user-data/{数字人}/{空间}` |
+| 数据准备 / 共享空间 / 临时空间 | `users/{uid}/user-data/{空间}` | `users/{uid}/user-data/{数字人}/{空间}` |<!-- 2026-11-18 起作废（025）：共享空间下线，迁移条目只剩 数据准备 / 临时空间 -->
 | 会话 | `users/{uid}/user-data/threads/{tid}` | `users/{uid}/user-data/{数字人}/threads/{tid}` |
 | 数字人配置（不变） | `users/{uid}/agents/{agent}/` | `users/{uid}/agents/{agent}/`（平台唯一写入位置） |
 

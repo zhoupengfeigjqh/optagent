@@ -61,21 +61,22 @@ cd ..\frontend;      npm run dev          # 聊天前台（:5173，dev 期 Vite 
 ## 3. 验收场景 A —— 文件空间按数字人隔离（用户故事 1 / FR-001~004）
 
 ```powershell
-# ① 选中 A，上传一个文件到「共享空间」，并列出该空间
+# ① 选中 A，上传一个文件到「临时空间」，并列出该空间
+#    （2026-11-18 / specs/025-remove-shared-space：「共享空间」已下线，示例改用临时空间）
 curl.exe -s -X POST "http://localhost:3000/api/agents/{A}/select"
-curl.exe -s -X POST "http://localhost:3000/api/files/upload" -F "dir=共享空间" -F "file=@./tmp/a1.csv"
-curl.exe -s "http://localhost:3000/api/files/list?dir=共享空间"
+curl.exe -s -X POST "http://localhost:3000/api/files/upload" -F "dir=临时空间" -F "file=@./tmp/a1.csv"
+curl.exe -s "http://localhost:3000/api/files/list?dir=临时空间"
 
 # ② 切换到 B，再列同一空间
 curl.exe -s -X POST "http://localhost:3000/api/agents/{B}/select"
-curl.exe -s "http://localhost:3000/api/files/list?dir=共享空间"     # ← MUST NOT 出现 a1.csv
+curl.exe -s "http://localhost:3000/api/files/list?dir=临时空间"     # ← MUST NOT 出现 a1.csv
 ```
 
 **通过判据**
 
 1. 步骤①列表含 `a1.csv`；步骤②列表**不含** `a1.csv`（跨数字人出现次数为 0）。
-2. 磁盘上分别落在两个目录：`users/admin/user-data/{A}/共享空间/a1.csv` 与 `users/admin/user-data/{B}/共享空间/`（后者无该文件）。
-3. 在 B 下请求 A 的目录参数（如构造 `dir=共享空间` 之外的越界相对路径）→ `403 DIR_VALIDATION` 或 `400 VALIDATION_FAILED`。
+2. 磁盘上分别落在两个目录：`users/admin/user-data/{A}/临时空间/a1.csv` 与 `users/admin/user-data/{B}/临时空间/`（后者无该文件）。
+3. 在 B 下请求 A 的目录参数（构造越界相对路径）→ `403 UPLOAD_DIR_FORBIDDEN` 或 `400 VALIDATION_FAILED`。
 4. 同名二级目录（如两边都有 `数据准备/生产计划`）分别上传同名文件 → 互不覆盖。
 
 ---
@@ -142,10 +143,10 @@ $root = Join-Path $env:TEMP "mig-$(Get-Random)"
 New-Item -ItemType Directory -Force "$root\users\admin\agents\A"  | Out-Null
 New-Item -ItemType Directory -Force "$root\users\admin\agents\B"  | Out-Null
 # scenario.json / SOUL.md 等按既有格式写入（可直接复制真实数字人目录）
-New-Item -ItemType Directory -Force "$root\users\admin\user-data\共享空间" | Out-Null
+New-Item -ItemType Directory -Force "$root\users\admin\user-data\临时空间" | Out-Null
 New-Item -ItemType Directory -Force "$root\users\admin\user-data\数据准备\生产计划" | Out-Null
 New-Item -ItemType Directory -Force "$root\users\admin\user-data\threads\t1" | Out-Null
-"keep" | Set-Content "$root\users\admin\user-data\共享空间\keep.txt"
+"keep" | Set-Content "$root\users\admin\user-data\临时空间\keep.txt"
 
 # ② 以该根启动运行环境
 $env:OPT_AGENT_ROOT = $root; cd .\agent-backend; npm run dev
@@ -155,7 +156,7 @@ $env:OPT_AGENT_ROOT = $root; cd .\agent-backend; npm run dev
 
 | 情形 | 期望 |
 |---|---|
-| 清单有多个、无选中态（默认） | 数据迁到**名称升序第一**的数字人目录；日志含 `data.migration.owner`（reason=名称升序第一）；迁移后 `user-data/` 下只剩数字人目录（`数据准备`/`共享空间`/`临时空间`/`threads` 不再直接存在） |
+| 清单有多个、无选中态（默认） | 数据迁到**名称升序第一**的数字人目录；日志含 `data.migration.owner`（reason=名称升序第一）；迁移后 `user-data/` 下只剩数字人目录（`数据准备`/`临时空间`/`threads` 不再直接存在；`共享空间` 已下线且不在迁移条目内，不会被搬） |
 | 清单只有一个数字人 | 迁到该数字人目录（reason=唯一） |
 | 清单为空 | 数据**原地保留**（不删除）+ `warn` 告警；随后部署一个数字人并调用 `POST /api/agents/{name}/select` ⇒ 数据迁到**该数字人**目录（FR-040 的①） |
 | 重复启动（幂等） | 无重复条目、无报错、日志为"已完成/无待迁移" |

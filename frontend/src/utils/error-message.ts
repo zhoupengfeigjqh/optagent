@@ -45,7 +45,7 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   FILE_REF_NOT_FOUND: '引用的文件不存在，请重新选择',
   FILE_TOO_LARGE: '文件超过 5MB',
   FILE_NOT_FOUND: '文件不存在或已被清理',
-  FILE_READONLY: '共享空间为只读目录，不支持删除',
+  // 2026-11-18（025）：只读空间下线，`FILE_READONLY` 码随之删除
   // 012：候选名用尽（同名文件过多）——后端 409，属"能力边界"而非系统故障，文案要可操作
   FILE_NAME_CONFLICT: '同名文件过多，请先整理目录后重试',
   UPLOAD_DIR_FORBIDDEN: '该目录不允许访问',

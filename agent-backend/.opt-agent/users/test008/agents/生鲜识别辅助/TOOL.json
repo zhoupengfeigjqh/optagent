@@ -4,6 +4,7 @@
     "read_file",
     "write_file",
     "read_skill",
-    "grep_skill"
+    "grep_skill",
+    "grep_files"
   ]
 }

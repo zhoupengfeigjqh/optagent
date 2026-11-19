@@ -10,7 +10,7 @@
  *   （`.html` 为用户上传内容，iframe MUST 沙箱化，见 `WorkspacePanel.vue`）
  * - §5.4 补充（2026-11-17）：`.xlsx` 返回**结构化 JSON**（`{ sheets: [...] }`），走
  *   `fetchPreviewWorkbook`；不再是 CSV 文本，前端不做表格解析
- * - §5.5 删除走 REST `DELETE /api/files`（`shared` 为共享只读目录，后端 403 `FILE_READONLY`）
+ * - §5.5 删除走 REST `DELETE /api/files`（2026-11-18 / 025：两个空间内的文件均可删）
  */
 
 import { parseErrorResponse, type HttpClient } from './http'
@@ -52,11 +52,11 @@ export interface FilesApi {
   /**
    * `DELETE /api/files?dir=&filename=` 删除文件。
    *
-   * `shared` 为共享只读目录（后端 403 `FILE_READONLY`），其余 8 个目录可删。
+   * 两个空间内的文件均可删（2026-11-18 / 025：只读空间下线）。
    * 文件不存在（404 `FILE_NOT_FOUND`）与目录越权（403 `UPLOAD_DIR_FORBIDDEN`）均抛结构化错误。
    */
   remove(dir: string, filename: string): Promise<void>
-  /** `GET /api/files/workspace` → 固定 9 个目录 */
+  /** `GET /api/files/workspace` → 空间树（数据准备子目录数随场景，另加临时空间自身） */
   workspace(): Promise<WorkspaceResponse>
   /**
    * `GET /api/files/rules` → 「数据准备/算法规则」最新规则文件的结构化行

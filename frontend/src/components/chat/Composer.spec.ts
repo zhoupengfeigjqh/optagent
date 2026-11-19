@@ -204,6 +204,32 @@ describe('Composer —— `/技能名` 胶囊（2026-11-07）', () => {
 })
 
 /**
+ * 026（2026-11-18）：只有附件、没有正文也能发送。
+ * 输入区只负责"放行"；正文由上层（`useChatPanel.onSend`）合成「请查看这个/这些文件」。
+ */
+describe('Composer —— 只有附件时的可发送性（026）', () => {
+  it('只有引用、正文为空：发送按钮可用，回车发出空正文 + 引用（由上层合成话术）', async () => {
+    const wrapper = mountComposer({ modelValue: '', references: [REFERENCE] })
+    const send = wrapper.findAll('button').find((button) => button.text() === '发送')
+
+    expect(send?.attributes('disabled')).toBeUndefined()
+
+    await editorOf(wrapper).trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('send')?.at(-1)).toEqual([
+      { content: '', attachments: [REFERENCE], skill: null },
+    ])
+  })
+
+  it('既无正文也无引用：发送按钮仍置灰（空白字符不算正文）', () => {
+    const wrapper = mountComposer({ modelValue: '   ', references: [] })
+    const send = wrapper.findAll('button').find((button) => button.text() === '发送')
+
+    expect(send?.attributes('disabled')).toBeDefined()
+  })
+})
+
+/**
  * 2026-11-17：粘贴上传的**输入侧**出口。
  *
  * 输入区只负责"把剪贴板里的文件捞出来交给上层"，校验与上传都在 `useUploadPanel`——

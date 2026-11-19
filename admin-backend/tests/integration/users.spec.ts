@@ -243,7 +243,7 @@ describe('DELETE /api/admin/users/{user_id}', () => {
     expect(fx.ctx.manifest.get('ops')).not.toBeNull();
 
     // 文件空间里有内容：删除用户后必须原样保留
-    const space = path.join(fx.optAgentRoot, 'users', 'ops', 'user-data', '共享空间');
+    const space = path.join(fx.optAgentRoot, 'users', 'ops', 'user-data', '临时空间');
     fs.mkdirSync(space, { recursive: true });
     fs.writeFileSync(path.join(space, '说明.txt'), '保留', 'utf8');
 

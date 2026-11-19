@@ -124,27 +124,35 @@ describe('space-path —— 数据准备（目录空间，清单是唯一权威�
   });
 });
 
-describe('space-path —— 扁平空间（共享空间/临时空间只允许一层）', () => {
+describe('space-path —— 扁平空间（临时空间只允许一层）', () => {
   it('空间根对两侧都放行；直属文件只对模型放行（浏览侧传的是目录）', () => {
     for (const cap of ['model-read', 'browse'] as SpaceCapability[]) {
-      expectOk('共享空间', cap, '共享空间');
       expectOk('临时空间', cap, '临时空间');
     }
-    expectOk('共享空间/说明.txt', 'model-read', '共享空间/说明.txt');
     expectOk('临时空间/th_1_汇总.csv', 'model-read', '临时空间/th_1_汇总.csv');
-    expectDeny('共享空间/说明.txt', 'browse', 'not-flat');
+    expectDeny('临时空间/th_1_汇总.csv', 'browse', 'not-flat');
     expectDeny('临时空间/别处', 'browse-produced', 'not-flat');
   });
 
+  // 2026-11-18（025）：共享空间下线 ⇒ 在词法判据的第一道（一级目录白名单）就被拒，
+  // 与"别的目录"同 kind。历史会话里的旧引用、旧客户端都落在这条路径上。
+  it('已下线的「共享空间」在一级白名单处即被拒（两侧同判 space-forbidden）', () => {
+    for (const cap of ['model-read', 'browse'] as SpaceCapability[]) {
+      expectDeny('共享空间', cap, 'space-forbidden');
+    }
+    expectDeny('共享空间/说明.txt', 'model-read', 'space-forbidden');
+    expectDeny('共享空间/2026/报价单.xlsx', 'model-read', 'space-forbidden');
+  });
+
   it('深层子目录 → not-flat（与前端"看不到"对齐，堵住 UI 外直读）', () => {
-    expectDeny('共享空间/2026/报价单.xlsx', 'model-read', 'not-flat');
+    expectDeny('临时空间/2026/报价单.xlsx', 'model-read', 'not-flat');
     expectDeny('临时空间/别处/x.csv', 'model-read', 'not-flat');
     expectDeny('临时空间/后台产出/子目录', 'browse', 'not-flat');
   });
 
-  it('词法上无法区分"一层文件"与"同名目录"：`共享空间/2026` 形状合法，目录级拒绝在 stat 之后', () => {
+  it('词法上无法区分"一层文件"与"同名目录"：`临时空间/2026` 形状合法，目录级拒绝在 stat 之后', () => {
     // 判据只管路径形状（"空间下的一层条目"），是否目录由 `FileAccess.list` 在 readdir 前判定
-    expectOk('共享空间/2026', 'model-read', '共享空间/2026');
+    expectOk('临时空间/2026', 'model-read', '临时空间/2026');
   });
 
   it('`临时空间/后台产出` = 唯一登记例外：模型可读整棵子树', () => {
@@ -167,9 +175,9 @@ describe('space-path —— 写方向（model-write：仅临时空间顶层）',
     expectOk('临时空间/th_1_汇总.csv', 'model-write', '临时空间/th_1_汇总.csv');
   });
 
-  it('共享空间 / 数据准备 → space-forbidden（只读）', () => {
-    expectDeny('共享空间/说明.txt', 'model-write', 'space-forbidden');
+  it('数据准备（及已下线的共享空间）→ space-forbidden（非临时空间一律不可写）', () => {
     expectDeny('数据准备/生产计划/x.csv', 'model-write', 'space-forbidden');
+    expectDeny('共享空间/说明.txt', 'model-write', 'space-forbidden');
   });
 
   it('临时空间子目录 / 后台产出 → not-flat（模型写不进去）', () => {
@@ -196,8 +204,8 @@ describe('space-path —— 规范化与惰性清单', () => {
       },
     };
 
-    expectOk('共享空间', 'browse', '共享空间', boom);
-    expectOk('共享空间/说明.txt', 'model-read', '共享空间/说明.txt', boom);
+    expectOk('临时空间', 'browse', '临时空间', boom);
+    expectOk('临时空间/th_1_说明.txt', 'model-read', '临时空间/th_1_说明.txt', boom);
     expectOk('临时空间/后台产出/x.json', 'model-read', '临时空间/后台产出/x.json', boom);
     expectOk('临时空间/后台产出', 'browse-produced', '临时空间/后台产出', boom);
     // 数据准备才会触发；这里只钉"不抛错就说明没被调用"，故不在此断言其行为

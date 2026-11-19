@@ -6,7 +6,7 @@
  * - **提交层**：`references` 为结构化 `{dir, filename}[]`，发送时作为 `attachments` 提交（FR-016）
  *
  * 级联导航（三空间，**点击**下钻，悬停不展开）：
- * - 一级：数据准备 / 共享空间 / 临时空间（来自 workspace 接口，前端无目录常量）
+ * - 一级：数据准备 / 临时空间（来自 workspace 接口，前端无目录常量）
  * - 点击数据准备 → 二级 scenario 子目录；点击子目录 → 三级文件
  * - 点击共享/临时空间 → 直接出文件列
  *
@@ -57,7 +57,7 @@ export interface FileMentionStore {
   column: Ref<MentionColumn>
   /** 已选空间名（数据准备展开二级后/扁平空间选中后有值） */
   activeSpace: Ref<string | null>
-  /** 已选目录（相对路径，如 数据准备/生产计划、共享空间） */
+  /** 已选目录（相对路径，如 数据准备/生产计划、临时空间） */
   activeDir: Ref<string | null>
   /** 当前列的键盘高亮索引 */
   activeIndex: Ref<number>

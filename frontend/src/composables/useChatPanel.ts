@@ -13,6 +13,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 import type { ErrorInfo, FeedbackValue, FileReference, ToolTip } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
+import { attachmentOnlyPrompt } from '../utils/attachment-only-prompt'
 import type { ViewLinkTarget } from '../utils/view-link'
 import { useAgents } from './useAgents'
 import { useChatHeaderActions } from './useChatHeaderActions'
@@ -165,11 +166,21 @@ export function useChatPanel() {
     // 技能只在标记确实在正文里时才提交（胶囊被删而选区残留的极端情况按"未选"处理）。
     const selectedSkill =
       payload.skill && payload.content.includes(skillToken(payload.skill)) ? payload.skill : null
-    const content = stripSkillToken(
+    let content = stripSkillToken(
       stripMentionTokens(payload.content, payload.attachments),
       selectedSkill,
     )
-    if (content === '') {
+    /**
+     * 026（2026-11-18）：正文剥完标记后为空（只有空格 / 只剩 `@文件` 标记）+ 带了附件
+     * → 补一句默认话术「请查看这个/这些文件」再发。
+     *
+     * 放在**唯一发送链路**上而不是 `Composer`：手输、重试、卡片、重新生成都过这里，
+     * 旧历史里"空正文"轮次的重试也能一并覆盖。合成后 `content` 恒非空，故服务端
+     * `content` 必填契约、会话标题、气泡渲染、意图聚焦全部按现状工作（零后端改动）。
+     */
+    const attachmentOnly = content.trim() === '' && payload.attachments.length > 0
+    if (attachmentOnly) content = attachmentOnlyPrompt(payload.attachments.length)
+    if (content.trim() === '') {
       toast.push('error', '请输入消息内容')
       return false
     }
@@ -185,7 +196,9 @@ export function useChatPanel() {
     }
 
     // 018：只有**手动输入**做术语替换预检（弹窗打开即返回，不建会话、不清草稿）
+    // 026：合成话术是机器生成的，不对它弹术语替换确认（否则"文件/查看"这类词会莫名弹窗）
     const manual =
+      !attachmentOnly &&
       payload.skipTermCheck !== true &&
       !payload.guidance &&
       !payload.toolTips &&

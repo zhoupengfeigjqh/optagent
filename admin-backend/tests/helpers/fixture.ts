@@ -130,7 +130,7 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
   fs.mkdirSync(optAgentRoot, { recursive: true });
 
   for (const userId of options.userIds ?? []) {
-    for (const space of ['数据准备', '共享空间', '临时空间']) {
+    for (const space of ['数据准备', '临时空间']) {
       fs.mkdirSync(path.join(optAgentRoot, 'users', userId, 'user-data', space), {
         recursive: true,
       });

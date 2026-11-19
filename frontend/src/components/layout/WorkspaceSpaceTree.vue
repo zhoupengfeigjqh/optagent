@@ -3,11 +3,11 @@
  * 文件空间树（US8，三空间分层）
  *
  * 结构以后端 `GET /api/files/workspace` 下发为准，与加号上传入口、`@` 引用面板同构：
- * - 一级：**三个空间**（数据准备 / 共享空间 / 临时空间）
+ * - 一级：**两个空间**（数据准备 / 临时空间）
  * - 二级：仅**数据准备**有（scenario 定义的子目录）
  * - 三级：文件行（`WorkspaceFileList`）
  *
- * 共享空间 / 临时空间为**扁平空间**（`dirs` 仅含空间自身），展开空间即直接出文件；
+ * 临时空间为**扁平空间**（`dirs` 仅含空间自身），展开空间即直接出文件；
  * 该判定与 `@` 面板共用 `utils/space.ts`，避免两处各写一套。
  *
  * **默认全部收起**（FR-031）；一级/二级展开状态由 `useWorkspace` 经 props 注入
@@ -57,7 +57,7 @@ function isDirExpanded(dir: string): boolean {
 
   <ul v-else class="workspace-tree__spaces" aria-label="文件空间">
     <li v-for="space in spaces" :key="space.name" class="workspace-tree__space">
-      <!-- 一级：空间（数据准备 / 共享空间 / 临时空间） -->
+      <!-- 一级：空间（数据准备 / 临时空间） -->
       <button
         type="button"
         class="workspace-tree__toggle"
@@ -74,13 +74,12 @@ function isDirExpanded(dir: string): boolean {
       </button>
 
       <div v-if="isSpaceExpanded(space.name)" class="workspace-tree__nest">
-        <!-- 扁平空间（共享空间 / 临时空间）：展开空间直接出文件 -->
+        <!-- 扁平空间（临时空间）：展开空间直接出文件 -->
         <template v-if="isFlatSpace(space)">
           <WorkspaceFileList
             v-if="space.dirs.length > 0 && space.dirs[0].files.length > 0"
             :dir="space.dirs[0].dir"
             :files="space.dirs[0].files"
-            :deletable="space.dirs[0].deletable"
             @preview="emit('preview', $event)"
             @download="emit('download', $event)"
             @remove="emit('remove', $event)"
@@ -114,7 +113,6 @@ function isDirExpanded(dir: string): boolean {
                   v-if="dir.files.length > 0"
                   :dir="dir.dir"
                   :files="dir.files"
-                  :deletable="dir.deletable"
                   @preview="emit('preview', $event)"
                   @download="emit('download', $event)"
                   @remove="emit('remove', $event)"

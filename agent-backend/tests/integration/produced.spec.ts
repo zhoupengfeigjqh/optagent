@@ -229,7 +229,7 @@ describe('POST /api/files/put —— 回写通道', () => {
 
   it('读签名不能用于写（§10.6 不变式 3 的端到端证据）', async () => {
     // 形状隔离：读方向三段 payload 的签名，放到写端点上验签必然失败
-    const readUrl = mintSignedUrl('http://backend:3000', SECRET, 'admin', '共享空间/a.xlsx');
+    const readUrl = mintSignedUrl('http://backend:3000', SECRET, 'admin', '临时空间/a.xlsx');
     const sig = new URL(readUrl).searchParams.get('sig')!;
     const exp = new URL(readUrl).searchParams.get('exp')!;
     const forged = `http://backend:3000/api/files/put?u=admin&d=${encodeURIComponent(PRODUCED_DIR)}&exp=${exp}&sig=${sig}&filename=j_evil.json`;
@@ -239,7 +239,7 @@ describe('POST /api/files/put —— 回写通道', () => {
   });
 
   it('目录越权（签名合法但 d 不是产出目录）→ 400，且不落盘', async () => {
-    const res = await post(`${putUrl({ dir: '共享空间' })}&filename=j_1.json`);
+    const res = await post(`${putUrl({ dir: '临时空间' })}&filename=j_1.json`);
     expect(res.statusCode).toBe(400);
 
     const items = await list();

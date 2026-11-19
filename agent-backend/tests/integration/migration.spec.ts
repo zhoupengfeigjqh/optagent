@@ -10,7 +10,7 @@
  * - 判定①：`select` 成功后触发（覆盖"启动时清单为空、后来才有数字人"的收口）
  * - **可中断续跑**：只搬了一半的状态再跑一次，剩下的继续搬
  * - **幂等**：再启动一次，数据一动不动
- * - 数据逐项一致：三空间 + threads 的条目数、文件名、内容在迁移前后完全相同
+ * - 数据逐项一致：两空间 + threads 的条目数、文件名、内容在迁移前后完全相同
  *
  * 运行方式（本地执行）：npm run test:integration
  */
@@ -32,12 +32,12 @@ import { THREADS_DIR, userDataDir, userDataRoot } from '../../src/domain/dirs.js
 import { removeDirRecursiveAsync } from '../../src/domain/fs-safe.js';
 import { buildServer } from '../../src/server';
 
-const SPACES = ['数据准备', '共享空间', '临时空间'] as const;
+const SPACES = ['数据准备', '临时空间'] as const;
 
 let app: FastifyInstance | undefined;
 let root: string;
 
-/** 搭一份"改前"布局：user-data/ 下直接放三空间 + threads，各带可辨认内容 */
+/** 搭一份"改前"布局：user-data/ 下直接放两空间 + threads，各带可辨认内容 */
 function seedLegacyLayout(userId: string, marker: string): void {
   const base = userDataRoot(root, userId);
   for (const space of SPACES) {
@@ -115,7 +115,7 @@ describe('启动期迁移（判定②：清单唯一）', () => {
     seedAgent('admin', '唯一数字人');
     const legacyBefore = snapshot('admin');
     // 迁移前：用户级落点直接是四类条目
-    expect(Object.keys(legacyBefore)).toContain('共享空间/old-共享空间.txt');
+    expect(Object.keys(legacyBefore)).toContain('临时空间/old-临时空间.txt');
 
     await startServer();
 
@@ -140,9 +140,9 @@ describe('启动期迁移（判定②：清单唯一）', () => {
     await startServer();
 
     expect(
-      existsSync(path.join(userDataDir(root, 'admin', 'a-数字人'), '共享空间', 'old-共享空间.txt')),
+      existsSync(path.join(userDataDir(root, 'admin', 'a-数字人'), '临时空间', 'old-临时空间.txt')),
     ).toBe(true);
-    expect(existsSync(path.join(userDataDir(root, 'admin', 'b-数字人'), '共享空间'))).toBe(false);
+    expect(existsSync(path.join(userDataDir(root, 'admin', 'b-数字人'), '临时空间'))).toBe(false);
   });
 
   it('无可用数字人的用户：原地保留 + 不报错（服务照常起来）', async () => {
@@ -154,8 +154,8 @@ describe('启动期迁移（判定②：清单唯一）', () => {
     await expect(startServer()).resolves.toBeUndefined();
 
     // admin 迁走，bob（无数字人）原地保留
-    expect(existsSync(path.join(userDataRoot(root, 'admin'), '共享空间'))).toBe(false);
-    expect(existsSync(path.join(userDataRoot(root, 'bob'), '共享空间', 'bob-共享空间.txt'))).toBe(
+    expect(existsSync(path.join(userDataRoot(root, 'admin'), '临时空间'))).toBe(false);
+    expect(existsSync(path.join(userDataRoot(root, 'bob'), '临时空间', 'bob-临时空间.txt'))).toBe(
       true,
     );
   });
@@ -168,7 +168,7 @@ describe('select 触发的补判（判定①）', () => {
     await startServer();
 
     // 启动期无从归属：原地保留
-    expect(existsSync(path.join(userDataRoot(root, 'admin'), '共享空间'))).toBe(true);
+    expect(existsSync(path.join(userDataRoot(root, 'admin'), '临时空间'))).toBe(true);
 
     // 平台随后部署数字人（目录出现）→ 用户显式选中 → 迁移收口
     seedAgent('admin', '迟到数字人');
@@ -180,7 +180,7 @@ describe('select 触发的补判（判定①）', () => {
 
     expect(
       existsSync(
-        path.join(userDataDir(root, 'admin', '迟到数字人'), '共享空间', 'old-共享空间.txt'),
+        path.join(userDataDir(root, 'admin', '迟到数字人'), '临时空间', 'old-临时空间.txt'),
       ),
     ).toBe(true);
     expect(readdirSync(userDataRoot(root, 'admin'))).toEqual(['迟到数字人']);
@@ -198,11 +198,11 @@ describe('select 触发的补判（判定①）', () => {
 
     const list = await app!.inject({
       method: 'GET',
-      url: `/api/files/list?dir=${encodeURIComponent('共享空间')}`,
+      url: `/api/files/list?dir=${encodeURIComponent('临时空间')}`,
     });
     expect(list.statusCode).toBe(200);
     expect((list.json() as Array<{ filename: string }>).map((f) => f.filename)).toEqual([
-      'old-共享空间.txt',
+      'old-临时空间.txt',
     ]);
   });
 });
@@ -213,13 +213,13 @@ describe('可中断续跑与幂等（FR-041）', () => {
     seedLegacyLayout('admin', 'old');
     seedAgent('admin', '唯一数字人');
 
-    // 手工制造"中断"：共享空间已经搬过去了，其余三项目还在旧位。
+    // 手工制造"中断"：临时空间已经搬过去了，其余三项目还在旧位。
     // 删除**必须**走 fs-safe 原语：Windows 下 fs.rmSync 对含中文的路径会静默失效
     const dst = userDataDir(root, 'admin', '唯一数字人');
-    mkdirSync(path.join(dst, '共享空间'), { recursive: true });
-    writeFileSync(path.join(dst, '共享空间', 'old-共享空间.txt'), 'old/共享空间', 'utf8');
-    await removeDirRecursiveAsync(path.join(userDataRoot(root, 'admin'), '共享空间'));
-    expect(existsSync(path.join(userDataRoot(root, 'admin'), '共享空间'))).toBe(false);
+    mkdirSync(path.join(dst, '临时空间'), { recursive: true });
+    writeFileSync(path.join(dst, '临时空间', 'old-临时空间.txt'), 'old/临时空间', 'utf8');
+    await removeDirRecursiveAsync(path.join(userDataRoot(root, 'admin'), '临时空间'));
+    expect(existsSync(path.join(userDataRoot(root, 'admin'), '临时空间'))).toBe(false);
     const movedOnce = snapshot('admin', '唯一数字人');
 
     await startServer();

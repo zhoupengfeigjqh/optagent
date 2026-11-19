@@ -94,7 +94,7 @@ describe('OptAgentWriter', () => {
   it('撤回：清空全部数字人目录，用户文件空间与其余内容原样保留', () => {
     const writer = new OptAgentWriter({ optAgentRoot: root });
     writer.commitUser('admin', [artifact('a', '1'), artifact('b', '2')]);
-    const shared = path.join(root, 'users', 'admin', 'user-data', '共享空间');
+    const shared = path.join(root, 'users', 'admin', 'user-data', '临时空间');
     fs.mkdirSync(shared, { recursive: true });
     fs.writeFileSync(path.join(shared, 'keep.txt'), 'keep', 'utf8');
 

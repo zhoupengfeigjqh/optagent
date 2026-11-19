@@ -55,22 +55,6 @@ function makeSpaces(): WorkspaceSpace[] {
       ],
     },
     {
-      name: '共享空间',
-      agent_writable: false,
-      upload_extensions: ['.csv', '.xlsx', '.txt', '.pdf'],
-      dirs: [
-        {
-          dir: '共享空间',
-          label: '共享空间',
-          deletable: false,
-          files: [],
-          fields: [],
-          upload_extensions: ['.csv', '.xlsx', '.txt', '.pdf'],
-          predefined: false,
-        },
-      ],
-    },
-    {
       name: '临时空间',
       agent_writable: true,
       upload_extensions: ['.csv', '.xlsx', '.txt'],
@@ -123,7 +107,7 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
     expect(dirs[1]!.find('.upload-menu__dir-exts').text()).toBe('.json')
   })
 
-  it('类型的左间距随「?」有无切换：有「?」留气口，无「?」（共享/临时空间）紧贴文件名', () => {
+  it('类型的左间距随「?」有无切换：有「?」留气口，无「?」（临时空间）紧贴文件名', () => {
     const wrapper = mountMenu()
     const dirs = wrapper.findAll('.upload-menu__dir')
 
@@ -135,11 +119,8 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
     expect(dirs[1]!.find('.upload-menu__dir-exts').classes()).not.toContain(
       'upload-menu__dir-exts--after-hint',
     )
-    // 共享空间 / 临时空间：同样无「?」⇒ 类型紧贴空间名右侧
+    // 临时空间：同样无「?」⇒ 类型紧贴空间名右侧
     expect(dirs[2]!.find('.upload-menu__dir-exts').classes()).not.toContain(
-      'upload-menu__dir-exts--after-hint',
-    )
-    expect(dirs[3]!.find('.upload-menu__dir-exts').classes()).not.toContain(
       'upload-menu__dir-exts--after-hint',
     )
   })
@@ -210,10 +191,9 @@ describe('UploadMenu - 文件选择器 accept 的粒度', () => {
     expect(await acceptAfterClick(wrapper, '数据准备/产线电价')).toBe('.json')
   })
 
-  it('共享空间与临时空间的目录：accept 恒等于所属空间的白名单', async () => {
+  it('临时空间的目录：accept 恒等于所属空间的白名单', async () => {
     const wrapper = mountMenu()
 
-    expect(await acceptAfterClick(wrapper, '共享空间')).toBe('.csv,.xlsx,.txt,.pdf')
     expect(await acceptAfterClick(wrapper, '临时空间')).toBe('.csv,.xlsx,.txt')
   })
 })

@@ -51,7 +51,7 @@ function producedAbs(name: string): string {
 
 describe('FileAccess.writeProduced —— 受控子目录写入（§10.6 不变式 4）', () => {
   it('只允许写入产出目录：其它目录一律拒绝（回写签名被伪造也写不到别处）', async () => {
-    for (const dir of ['共享空间', '临时空间', '数据准备/生产计划', '']) {
+    for (const dir of ['别的目录', '临时空间', '数据准备/生产计划', '']) {
       await expect(access.writeProduced(dir, 'x.json', Buffer.from('x'))).rejects.toThrow(
         PermissionError,
       );
@@ -352,7 +352,7 @@ describe('落盘名加固 —— 读不出产出目录（2026-10-27）', () => {
       writeProduced({
         access,
         filename: 'evil.meta.json',
-        content: Buffer.from('{"filename":"../../../共享空间/客户合同.xlsx"}', 'utf8'),
+        content: Buffer.from('{"filename":"../../../数据准备/客户合同.xlsx"}', 'utf8'),
         userId: 'admin',
       }),
     ).rejects.toThrow(/meta\.json/);
@@ -374,7 +374,7 @@ describe('落盘名加固 —— 读不出产出目录（2026-10-27）', () => {
       path.join(dir, 'admin_evil.meta.json'),
       JSON.stringify({
         job_id: 'evil',
-        filename: '../../../共享空间/客户合同.xlsx',
+        filename: '../../../数据准备/客户合同.xlsx',
         status: 'done',
         created_at: '2026-10-27T00:00:00.000Z',
         finished_at: '2026-10-27T00:00:00.000Z',

@@ -88,10 +88,12 @@ const PICKER_KEYS: ReadonlySet<string> = new Set([
   'Escape',
 ])
 
-// 只选技能不写正文不算可发送（与服务端"content 非空"同口径）
+// 只选技能不写正文不算可发送（与服务端"content 非空"同口径）；
+// 2026-11-18（026）：只有附件（上传胶囊 / `@` 引用）也算可发送——正文由发送链路合成默认话术
 const canSend = computed(
   () =>
-    stripSkillToken(props.modelValue, props.skill).trim() !== '' &&
+    (stripSkillToken(props.modelValue, props.skill).trim() !== '' ||
+      props.references.length > 0) &&
     !props.disabled &&
     !props.sending,
 )

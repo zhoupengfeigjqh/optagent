@@ -10,6 +10,10 @@
  * 2026-11-18：字号提到 `--font-size-md`（与账号菜单触发器同一字号）。此前用 `sm`(13px)，
  * 与 14px 的菜单文字并排时"名称小一号、又与按钮顶边齐平"，视觉上很别扭；行内居中对齐
  * 由 `ChatHeader` 的 `.chat-header__identity-row` 负责。
+ *
+ * 2026-11-18：登录后仍未选择数字人时，「请选择数字人」改用失败态红色（`--color-status-error`）。
+ * 语义是"待处理的状态缺失"而不是普通说明文字；文案本身已表达含义，颜色只是强化，
+ * 不依赖颜色单通道传达信息。
  */
 withDefaults(
   defineProps<{
@@ -42,9 +46,11 @@ withDefaults(
   line-height: var(--line-height-base);
 }
 
+/* 未选择数字人＝待处理的状态缺失，用失败态红色提示，而不是弱化的说明文字灰 */
 .agent-summary__hint {
-  color: var(--color-text-muted);
+  color: var(--color-status-error);
   font-size: var(--font-size-md);
   line-height: var(--line-height-base);
+  font-weight: 600;
 }
 </style>

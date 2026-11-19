@@ -160,7 +160,7 @@ describe('文件空间视角＝当前选中数字人', () => {
   it('未选中数字人时列目录 → 409 AGENT_NOT_SELECTED', async () => {
     await deselect();
 
-    const res = await app.inject({ method: 'GET', url: listUrl('共享空间') });
+    const res = await app.inject({ method: 'GET', url: listUrl('临时空间') });
 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: { code: 'AGENT_NOT_SELECTED' } });
@@ -197,13 +197,17 @@ describe('文件空间视角＝当前选中数字人', () => {
     expect(denied.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } });
   });
 
-  it('共享空间不受场景清单限制（beta 下照样可列）', async () => {
+  // 2026-11-18（025）：共享空间已下线。原「共享空间不受场景清单限制（照样可列）」的用例
+  // 断的行为已不存在，改为钉住**降级表现**：请求被拒（403），而不是返回一个空目录。
+  it('已下线的「共享空间」→ 403 UPLOAD_DIR_FORBIDDEN（不是空目录）', async () => {
     await select('beta');
 
     const res = await app.inject({ method: 'GET', url: listUrl('共享空间') });
 
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.json())).toBe(true);
+    expect(res.statusCode).toBe(403);
+    const body = res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('UPLOAD_DIR_FORBIDDEN');
+    expect(body.error.message).toContain('不开放');
   });
 
   it('数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED，且文案指名该数字人', async () => {
@@ -254,7 +258,7 @@ describe('文件空间视角＝当前选中数字人', () => {
       expect.objectContaining({ dir: '数据准备/生产计划', predefined: false }),
     ]);
     // 扁平空间（空间自身即目录）恒为 false
-    for (const name of ['共享空间', '临时空间']) {
+    for (const name of ['临时空间']) {
       const space = spaces.find((s) => s.name === name)!;
       expect(space.dirs[0]!.predefined).toBe(false);
     }
@@ -321,7 +325,7 @@ describe('预定义目录屏蔽（清单即可见范围的唯一权威）', () =
     expect((workspace.json() as { scenario: string }).scenario).toBe('全部屏蔽');
     expect(prepDirs(workspace.json())).toEqual([]);
 
-    for (const dir of ['共享空间', '临时空间']) {
+    for (const dir of ['临时空间']) {
       expect((await app.inject({ method: 'GET', url: listUrl(dir) })).statusCode).toBe(200);
     }
   });
@@ -547,7 +551,7 @@ describe('上传早验（dir 先到时目录校验前置，拒绝省带宽）', 
 
   it('dir 先到 + 未选中数字人 → 409 在文件上传前返回，不留暂存', async () => {
     await deselect();
-    const { body, headers } = multipartOrdered([{ name: 'dir', content: '共享空间' }, FILE_CSV]);
+    const { body, headers } = multipartOrdered([{ name: 'dir', content: '临时空间' }, FILE_CSV]);
 
     const res = await app.inject({
       method: 'POST',
@@ -684,7 +688,7 @@ describe('目录级可上传类型（data_prep_uploads 权威判定）', () => {
     expect(plan.upload_extensions).toEqual(['.csv', '.xlsx', '.txt', '.json']);
     expect(price.upload_extensions).toEqual(['.csv']);
 
-    // 共享空间 / 临时空间：目录级恒等于空间级（与改造前一致）
+    // 临时空间：目录级恒等于空间级（与改造前一致）
     for (const space of spaces.filter((s) => s.name !== '数据准备')) {
       for (const dir of space.dirs) {
         expect(dir.upload_extensions).toEqual(space.upload_extensions);
@@ -731,7 +735,7 @@ async function postUpload(
   return app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers });
 }
 
-/** 共享空间 / 临时空间的空间级白名单（2026-10-14 增 `.xls`；2026-10-20 增 `.html`） */
+/** 临时空间的空间级白名单（2026-10-14 增 `.xls`；2026-10-20 增 `.html`） */
 const SPACE_LEVEL_EXTS = [
   '.csv',
   '.xlsx',
@@ -750,35 +754,29 @@ const SPACE_LEVEL_EXTS = [
   '.tiff',
 ];
 
-/* ---------- US3：共享空间与临时空间行为不变（P1） ---------- */
+/* ---------- US3：临时空间判定逐项不变（P1） ---------- */
 
-describe('US3 共享空间与临时空间的判定逐项不变（FR-013）', () => {
-  it('即便配了 data_prep_uploads：共享空间仍接受全部文档与图片类型，且拒绝未知类型', async () => {
-    await select('epsilon');
-
-    expect((await postUpload('共享空间', 'a.json', '{"a":1}', 'application/json')).statusCode).toBe(
-      201,
-    );
-    expect((await postUpload('共享空间', 'b.pdf', '%PDF-1.4', 'application/pdf')).statusCode).toBe(
-      201,
-    );
-    expect((await postUpload('共享空间', 'c.jpg', 'jpeg-ish', 'image/jpeg')).statusCode).toBe(201);
-
-    const denied = await postUpload('共享空间', 'd.exe', 'MZ', 'application/octet-stream');
-    expect(denied.statusCode).toBe(400);
-    expect((denied.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
-  });
-
-  it('临时空间同样不受数据准备白名单影响', async () => {
+// 2026-11-18（025）：原「US3 共享空间与临时空间」的两条用例合并——共享空间下线后，
+// "不受 data_prep_uploads 影响 + 拒绝未知类型"这组断言只在临时空间上验证一次。
+describe('US3 临时空间的判定逐项不变（FR-013）', () => {
+  it('即便配了 data_prep_uploads：临时空间仍接受全部文档与图片类型，且拒绝未知类型', async () => {
     await select('epsilon');
 
     expect((await postUpload('临时空间', 'a.json', '{"a":1}', 'application/json')).statusCode).toBe(
       201,
     );
+    expect((await postUpload('临时空间', 'b.pdf', '%PDF-1.4', 'application/pdf')).statusCode).toBe(
+      201,
+    );
+    expect((await postUpload('临时空间', 'c.jpg', 'jpeg-ish', 'image/jpeg')).statusCode).toBe(201);
     expect((await postUpload('临时空间', 'b.tif', 'tiff-ish', 'image/tiff')).statusCode).toBe(201);
+
+    const denied = await postUpload('临时空间', 'd.exe', 'MZ', 'application/octet-stream');
+    expect(denied.statusCode).toBe(400);
+    expect((denied.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
   });
 
-  it('下发口径：共享/临时空间的目录项恒等于所属空间的白名单（逐项比对）', async () => {
+  it('下发口径：临时空间的目录项恒等于所属空间的白名单（逐项比对）', async () => {
     await select('epsilon');
     const res = await app.inject({ method: 'GET', url: '/api/files/workspace' });
     const spaces = (
@@ -791,7 +789,7 @@ describe('US3 共享空间与临时空间的判定逐项不变（FR-013）', () 
       }
     ).spaces;
 
-    for (const name of ['共享空间', '临时空间']) {
+    for (const name of ['临时空间']) {
       const space = spaces.find((s) => s.name === name)!;
       expect(space.upload_extensions).toEqual(SPACE_LEVEL_EXTS);
       for (const dir of space.dirs) {
@@ -803,9 +801,9 @@ describe('US3 共享空间与临时空间的判定逐项不变（FR-013）', () 
   });
 });
 
-/* ---------- 2026-10-14：`.xls`（旧版 Excel）三个空间都可用 ---------- */
+/* ---------- 2026-10-14：`.xls`（旧版 Excel）空间级与目录级都可用 ---------- */
 
-describe('`.xls` 三空间可用（2026-10-14 新增类型）', () => {
+describe('`.xls` 两空间可用（2026-10-14 新增类型）', () => {
   /** 真实 `.xls`（OLE2/BIFF8）：SheetJS 写入，避免手搓二进制 fixture */
   function xlsBuffer(rows: unknown[][]): Buffer {
     const wb = XLSX.utils.book_new();
@@ -815,11 +813,10 @@ describe('`.xls` 三空间可用（2026-10-14 新增类型）', () => {
 
   const XLS_TYPE = 'application/vnd.ms-excel';
 
-  it('共享空间 / 临时空间：空间级白名单含 .xls ⇒ 上传成功（201）', async () => {
+  it('临时空间：空间级白名单含 .xls ⇒ 上传成功（201）', async () => {
     await select('epsilon');
     const xls = xlsBuffer([['产线编号'], ['A1']]);
 
-    expect((await postUpload('共享空间', '总BOM.xls', xls, XLS_TYPE)).statusCode).toBe(201);
     expect((await postUpload('临时空间', '总BOM.xls', xls, XLS_TYPE)).statusCode).toBe(201);
   });
 

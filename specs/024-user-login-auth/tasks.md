@@ -263,4 +263,34 @@ T018→T019→T020 后端登录服务+端点+装配  |  T021→T023→T025 前�
 - **已完成**：四侧生产代码 + 后端单元/集成测试 + 前端 api/useAuth 测试 + 契约登记 + 依赖白名单 + 部署密钥配置。
 - **待环境执行（非阻塞）**：T040 性能实测（需压测）、T042 live 端到端（需启动前后端）；核心行为已由 29 个后端新测 + 7 个前端新测覆盖。
 - **存量红灯（与 024 无关，未修）**：`admin-frontend/src/components/*/SoulEditor.spec.ts` 文本断言过期；`admin-backend/src/domain/mcp/service-config-fields.ts` 506 行超 `check:lines` 500 阈值。
-- **安全待办**：`.env` 中的 `AUTH_SECRET` 为 dev 占位值，**生产 MUST 覆盖**并轮换。
+- **安全待办**：`AUTH_SECRET` 为 dev 占位值（现位于 `agent-backend/.env.local` 与 `admin-backend/.env`/`.env.local`），**生产 MUST 覆盖**并轮换。
+
+## 配置来源收敛（2026-11-18，方案 A）
+
+**问题**：T003 当时要求在 `admin-backend/.env(.local)` 与 `agent-backend/.env(.local)` 四处注入同值 `AUTH_SECRET`，形成无机制保障的四方一致；且 `agent-backend` 的 compose `env_file` 顺序为 `.env` → `.env.local`（后者覆盖前者），导致两个服务看起来同构的配置**修改效果相反**：改 admin 的 `.env` 真生效、改 agent 的 `.env` 假生效。`ADMIN_BACKEND_URL` 已因此发生过一次静默故障（本地口径 `127.0.0.1` 盖掉服务名，表现「后登踢前登 / 重置密码旧会话不失效」不生效），此前靠 compose `environment` 硬钉兜底。
+
+**本次处置（只动配置，未改代码）**：
+
+| 文件 | 变更 |
+|---|---|
+| `agent-backend/.env` | 删 `AUTH_SECRET`（会被 `.env.local` 覆盖）；`ADMIN_BACKEND_URL` 保留为**兜底**（见下「修订」） |
+| `agent-backend/.env.local` | 删 `ADMIN_BACKEND_URL`（本地走 `config.ts` 默认值 `127.0.0.1:3001`，语义不变）；`AUTH_SECRET` 保留并注明为容器形态唯一真源 |
+| `admin-backend/.env` | 值不变，注明为平台侧（容器形态）唯一真源 |
+| `admin-backend/.env.local` | 值不变，注明为平台侧本地形态真源 |
+
+**结论**：每个变量在其所属形态文件里恰好一处，容器 ↔ 本地两组真源不再交叉覆盖；留存的约束只有「`admin-backend/.env` ≡ `agent-backend/.env.local`（容器）、两份 `.env.local` 互为同值（本地）」。
+
+**未解决（待独立任务）**：密钥仍随部署包分发（`agent-backend/.env.local` 内含 `DEEPSEEK_API_KEY` / `FILE_SIGN_SECRET` / `AUTH_SECRET`）；且 `FILE_SIGN_SECRET` 泄露即可绕过登录读任意用户文件（`/api/files/raw`、`/api/files/put` 在免鉴权白名单）。收敛密钥分发方式（产物只带模板、服务器侧生成写入）需另行评估。
+
+### 修订（2026-11-18，`ADMIN_BACKEND_URL` 归属澄清）
+
+上表"唯一声明处"的表述与事实不符：compose `environment` 已硬钉 `ADMIN_BACKEND_URL=http://admin-backend:3001`，且 `environment` **恒压过 `env_file`**，故 compose 形态下 `.env` 的同名行**从不生效**。本次只改注释，不动任何值与代码：
+
+| 位置 | 角色 |
+|---|---|
+| `docker-compose.yml` backend `environment` | **compose 形态的生效值**，改值只改这里 |
+| `agent-backend/.env` | **兜底**，仅供不经 compose 的容器运行（`docker run --env-file ...`）使用 |
+| `agent-backend/.env.local` | 不声明（已删），本地形态走 `config.ts` 默认值 |
+| `agent-backend/src/config.ts` | 默认值 `http://127.0.0.1:3001`，仅前两者都缺失时生效 |
+
+保留兜底而非删除的理由：默认值 `127.0.0.1:3001` 在容器内指向 backend 自己，故障是**静默降级**（内省不可达放行 → 「后登踢前登 / 重置密码旧会话失效」不生效），故对非 compose 路径保留服务名口径。代价是同一变量存在两处声明，靠注释约定优先级，无机制强制——若后续引入配置校验，宜在此增加「compose 形态下两者不一致即告警」的检查。

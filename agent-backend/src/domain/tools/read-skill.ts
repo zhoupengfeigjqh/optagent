@@ -3,14 +3,14 @@
  *
  * **补的是一个真实缺口**：SKILL 此前只把 frontmatter 的 `name`/`description` 注入
  * System Prompt（见 `agent-instance.ts`），**正文与 `references/` 附件没有任何读取通道**——
- * 内置文件的沙箱 `FileAccess` 只覆盖用户三空间（`users/{uid}/user-data/{数据准备|共享空间|临时空间}`），
+ * 内置文件的沙箱 `FileAccess` 只覆盖用户文件空间（`users/{uid}/user-data/{数据准备|临时空间}`），
  * 而技能在 `users/{uid}/agents/{agent}/skills/` 下，是**另一个子树**，`read_file` 一律被拒。
  *
  * 安全口径（与平台侧的 `resolveInsideSkill` 同一判据，**只读**）已抽到
  * `./skill-access.ts`——2026-10-17 新增 `grep_skill` 时抽出，两条技能访问通道
  * 共用同一份校验，避免安全判据出现第二份实现。
  *
- * 与 `read_file` 的分工：那条服务于**用户数据**（三空间、支持 xlsx/pdf 解析）；
+ * 与 `read_file` 的分工：那条服务于**用户数据**（文件空间、支持 xlsx/pdf 解析）；
  * 这条服务于**技能文档**（技能根、纯文本，不做格式解析）。
  */
 import fs from 'node:fs';

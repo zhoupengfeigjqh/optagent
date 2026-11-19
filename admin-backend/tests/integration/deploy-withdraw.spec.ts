@@ -81,7 +81,7 @@ afterEach(async () => {
 
 describe('部署产物留存：`agents/` 整体覆盖（SC-007、FR-028）', () => {
   it('既有数字人／SKILL／用户数量不减少，用户文件空间一律不触碰', async () => {
-    const shared = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data', '共享空间');
+    const shared = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data', '临时空间');
     fs.mkdirSync(shared, { recursive: true });
     fs.writeFileSync(path.join(shared, 'keep.txt'), '业务数据', 'utf8');
 
@@ -121,7 +121,7 @@ describe('撤回部署（§6.9）', () => {
     const agentDir = path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo');
     expect(fs.existsSync(agentDir)).toBe(true);
 
-    const shared = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data', '共享空间');
+    const shared = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data', '临时空间');
     fs.mkdirSync(shared, { recursive: true });
     fs.writeFileSync(path.join(shared, 'keep.txt'), 'keep', 'utf8');
 

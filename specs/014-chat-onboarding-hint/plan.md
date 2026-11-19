@@ -57,7 +57,7 @@
 
 - `agent-backend/src/domain/workspace-view.ts` 的目录项增加 `predefined: boolean`：
   - 数据准备二级目录：属于平台预定义目录（当前仅 `算法规则`）→ `true`，其余管理员配置目录 → `false`；
-  - 共享空间 / 临时空间（空间自身即目录）→ `false`。
+  - 共享空间 / 临时空间（空间自身即目录）→ `false`。〔2026-11-18（025）：共享空间已下线，只剩临时空间命中此分支〕
 - 预定义目录清单在运行端只保留**一处定义**：`domain/dirs.ts` 导出 `PREDEFINED_DATA_PREP_DIRS`，`rule-file.ts` 的 `RULES_SUBDIR` 由它派生（既有导入路径不变），`workspace-view.ts` 只消费该常量。
 - 前端 `api/types.ts` 的 `WorkspaceDir` 增加同名必填字段；所有测试夹具同步补齐。
 

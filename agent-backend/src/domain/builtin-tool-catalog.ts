@@ -48,17 +48,17 @@ export interface TemplateValues {
  *
  * 前 5 项与改造前等价（顺序不变）；`read_skill` 为 **2026-09-23 新增**——
  * 此前 SKILL 只有"frontmatter 摘要进 System Prompt"这一条通道，正文与 `references/`
- * 附件没有任何读取入口（技能在 `agents/{agent}/skills/`，不在 `FileAccess` 的三空间沙箱内）。
+ * 附件没有任何读取入口（技能在 `agents/{agent}/skills/`，不在 `FileAccess` 的空间沙箱内）。
  *
  * `grep_skill` 为 **2026-10-17 新增**——`read_skill` 只解决"读得到"，技能内容的
- * **检索**仍无入口（`grep_files` 只覆盖用户三空间），技能一多就只能逐个文件人工翻。
+ * **检索**仍无入口（`grep_files` 只覆盖用户文件空间），技能一多就只能逐个文件人工翻。
  */
 export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
   {
     name: 'read_file',
     label: '读取文件',
     description_template:
-      '读取用户空间（数据准备/共享空间/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；' +
+      '读取用户空间（数据准备/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；' +
       'xlsx/xls 自动转 CSV，pdf 提取文本层，html 按原文读取（不渲染、不执行脚本）。' +
       '大文件返回截断内容，可用 offset 继续分段读取。' +
       '参数 path 为相对空间的路径，如 "{示例路径}"。',
@@ -84,7 +84,7 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       '.xlsx 用 CSV 行数据，可用 "# Sheet: 名称" 行分出多个工作表；' +
       '.pdf 用受限 Markdown（# 标题、- 列表、| a | b | 表格、空行分段）；' +
       '其他扩展名一律按文本写入，但界面只能下载、不能内联查看。' +
-      '数据准备与共享空间为只读，写入会被拒绝。' +
+      '数据准备为只读，写入会被拒绝。' +
       '.html 在沙箱中预览，页面脚本不会执行。' +
       '成功后返回 filePath（临时空间/{filename}），系统会在回答下方自动生成可点入口；' +
       '不要在正文里重复路径或拼链接。',

@@ -6,13 +6,16 @@
  * 互不可见；用户级 `users/{userId}/user-data/` 只作为**迁移的源**存在（见
  * `domain/data-migration.ts`），业务代码 MUST NOT 直接按它拼路径。
  *
- * 文件空间固定 3 个一级目录（空间）：
+ * 文件空间固定 2 个一级目录（空间）：
  * - `数据准备/`：Agent 只读；二级子目录由**该数字人**的
  *   `users/{userId}/agents/{agentName}/scenario.json` 预定义（改文件即生效，
  *   运行期按 mtime 惰性重读）。场景属**数字人级**，故同一用户的不同数字人
  *   可有各自的可见目录清单，互不干扰
- * - `共享空间/`：Agent 只读
  * - `临时空间/`：Agent 可读写（写产出强制 `{thread_id}_` 前缀，30 天未访问清理）
+ *
+ * 2026-11-18（`specs/025-remove-shared-space`）：原第三个空间 `共享空间/`（Agent 只读）
+ * 已下线，其上传白名单与临时空间完全一致，故"可上传什么"不受影响；存量目录由一次性
+ * 脚本 `scripts/remove-shared-space.ts` 清理。
  *
  * `threads/`：会话记录（001 会话持久化）——**会话同样按数字人隔离**，落点
  * `users/{userId}/user-data/{agentName}/threads/{threadId}/`。
@@ -29,11 +32,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** 三个固定空间目录 */
+/** 两个固定空间目录（2026-11-18，025：共享空间下线） */
 export const SPACE_PREP = '数据准备';
-export const SPACE_SHARED = '共享空间';
 export const SPACE_TMP = '临时空间';
-export const SPACES = [SPACE_PREP, SPACE_SHARED, SPACE_TMP] as const;
+export const SPACES = [SPACE_PREP, SPACE_TMP] as const;
 export type SpaceName = (typeof SPACES)[number];
 
 /**
@@ -87,7 +89,7 @@ export const PRODUCED_DIR = `${SPACE_TMP}/${PRODUCED_SUBDIR}`;
 /**
  * 各空间允许上传的扩展名（小写含点）。
  *
- * `共享空间` / `临时空间` 取它（空间级、不可按目录配置）。`.xls` 于 2026-10-14 加入：
+ * `临时空间` 取它（空间级、不可按目录配置）。`.xls` 于 2026-10-14 加入：
  * 客户侧总BOM 等既有资料是 `.xls`（BIFF），与 `.xlsx` 同为 Excel 表格，不应因容器格式不同被拒。
  */
 const DOCUMENT_EXTS = ['.csv', '.xlsx', '.xls', '.txt', '.json', '.html', '.pdf'] as const;
@@ -102,7 +104,6 @@ export interface SpacePolicy {
 
 export const SPACE_POLICIES: Record<SpaceName, SpacePolicy> = {
   [SPACE_PREP]: { agentWritable: false, uploadExtensions: ['.csv', '.xlsx'] },
-  [SPACE_SHARED]: { agentWritable: false, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
   [SPACE_TMP]: { agentWritable: true, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
 };
 

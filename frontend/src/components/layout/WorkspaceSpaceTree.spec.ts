@@ -29,7 +29,7 @@ function prepSpace(dirs: WorkspaceDir[]): WorkspaceSpace {
   return { name: '数据准备', agent_writable: false, upload_extensions: ['.csv', '.xlsx'], dirs }
 }
 
-function flatSpace(name: '共享空间' | '临时空间', dirs: WorkspaceDir[]): WorkspaceSpace {
+function flatSpace(name: '临时空间', dirs: WorkspaceDir[]): WorkspaceSpace {
   return { name, agent_writable: name === '临时空间', upload_extensions: ['.csv'], dirs }
 }
 
@@ -59,8 +59,8 @@ describe('WorkspaceSpaceTree —— 「数据准备」空清单（全部屏蔽�
     expect(wrapper.text()).not.toContain('该数字人未开放「数据准备」目录')
   })
 
-  it('扁平空间的空态口径不变：共享空间无文件 → "该空间暂无文件"', () => {
-    const wrapper = mountTree([flatSpace('共享空间', [dir('共享空间')])], ['共享空间'])
+  it('扁平空间的空态口径不变：临时空间无文件 → "该空间暂无文件"', () => {
+    const wrapper = mountTree([flatSpace('临时空间', [dir('临时空间')])], ['临时空间'])
 
     expect(wrapper.text()).toContain('该空间暂无文件')
     expect(wrapper.text()).not.toContain('未开放「数据准备」目录')

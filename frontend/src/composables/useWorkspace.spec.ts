@@ -30,26 +30,10 @@ function makeResponse(): WorkspaceResponse {
           {
             dir: '数据准备/算法规则',
             label: '算法规则',
-            deletable: false,
+            deletable: true,
             files: [],
             fields: [],
             upload_extensions: ['.csv', '.xlsx'],
-            predefined: false,
-          },
-        ],
-      },
-      {
-        name: '共享空间',
-        agent_writable: false,
-        upload_extensions: ['.csv', '.xlsx', '.txt', '.pdf'],
-        dirs: [
-          {
-            dir: '共享空间',
-            label: '共享空间',
-            deletable: false,
-            files: [],
-            fields: [],
-            upload_extensions: ['.csv', '.xlsx', '.txt', '.pdf'],
             predefined: false,
           },
         ],
@@ -107,9 +91,8 @@ describe('useWorkspace.uploadExtensionsOf（2026-10-13：粒度由空间级下�
     expect(store.uploadExtensionsOf('数据准备/生产计划')).toEqual([])
   })
 
-  it('共享空间与临时空间：取该目录下发的空间级白名单（与改造前逐字一致）', async () => {
+  it('临时空间：取该目录下发的空间级白名单（与改造前逐字一致）', async () => {
     const store = await loadedStore()
-    expect(store.uploadExtensionsOf('共享空间')).toEqual(['.csv', '.xlsx', '.txt', '.pdf'])
     expect(store.uploadExtensionsOf('临时空间')).toEqual(['.csv', '.xlsx', '.txt'])
   })
 })
