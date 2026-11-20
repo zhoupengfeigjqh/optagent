@@ -9,23 +9,39 @@
  */
 import type { Logger } from 'pino';
 import type { AppConfig } from './config.js';
+import type { ReadHistory } from './domain/intent-focus/rewrite.js';
 import { IntentFocusRunner, type IntentFocusPort } from './domain/intent-focus/runner.js';
 import { IntentFocusStore } from './domain/intent-focus/store.js';
 import { NextActionsStore } from './domain/next-actions.js';
 import {
   intentFocusDepth,
+  isInputRewriteEnabled,
   isIntentFocusEnabled,
   isNextActionsEnabled,
   nextActionHintsCount,
 } from './domain/soul.js';
+import type { LlmProvider } from './infra/llm/llm-provider.js';
 import { LayaClient } from './infra/laya-client.js';
+import { createRewriteLlm } from './infra/rewrite-llm.js';
 import { createThrottledWarn } from './logging.js';
+import type { ModelSelection } from './types.js';
 
 export interface ServerAttachmentsDeps {
   /** `.opt-agent` 根目录（绝对路径） */
   root: string;
   config: AppConfig;
   logger: Logger;
+  /**
+   * 027：默认模型 provider（与主对话共用同一份惰性单例；测试注入 fake）。
+   *
+   * 改写**必须**走与主对话同源的 provider：另建一份会绕过既有的重试口径与
+   * 测试注入点，"测试里改了模型、线上没改"这类差异最难排查。
+   */
+  llm: () => LlmProvider;
+  /** 027：请求级模型覆盖的 provider 构造（缺省 = 不支持请求级覆盖） */
+  providerFor?: (entry: ModelSelection) => LlmProvider;
+  /** 027：读该线程全部消息（只读正文；缺省 = 改写素材只有当前输入） */
+  readHistory?: ReadHistory;
 }
 
 export interface ServerAttachments {
@@ -83,6 +99,16 @@ export function buildAttachments(deps: ServerAttachmentsDeps): ServerAttachments
       isIntentFocusEnabled(root, userId, agentName, focusSwitchWarn),
     // 019：聚焦阶数同样逐次现读；读不出来按 0（不发散）
     getDepth: (userId, agentName) => intentFocusDepth(root, userId, agentName, focusSwitchWarn),
+    // 027：输入改写开关逐次现读（fail-closed）：读不出来就按关，绝不因配置读不出多发一次模型调用
+    isRewriteEnabled: (userId, agentName) =>
+      isInputRewriteEnabled(root, userId, agentName, focusSwitchWarn),
+    // 027：改写素材只读 history.jsonl 正文；历史读取失败在阶段内部降级为"只有当前输入"
+    ...(deps.readHistory ? { readHistory: deps.readHistory } : {}),
+    // 027：改写端口始终装配——开关是唯一闸门，端口缺失会让"开了却不生效"无法解释
+    rewriteLlm: createRewriteLlm({
+      llm: deps.llm,
+      ...(deps.providerFor ? { providerFor: deps.providerFor } : {}),
+    }),
     logger,
   });
 

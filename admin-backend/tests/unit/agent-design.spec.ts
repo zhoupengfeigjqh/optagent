@@ -487,6 +487,64 @@ describe('AgentDesignService', () => {
     expect(service.read('stale').soul.next_action_hints).toBe(true);
   });
 
+  it('读取归一化（027）：缺 input_rewrite / term_normalize → 补齐 false，且不清空聚焦配置', () => {
+    const writeSoul = (soul: Record<string, unknown>): void => {
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul,
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-11-19T00:00:00.000Z',
+      });
+    };
+
+    // 键缺失（本字段引入前的存档）→ 补齐 false，对外契约恒有这两个键
+    const missing: Record<string, unknown> = {
+      ...soulDesign('你是助手'),
+      intent_focus: true,
+      intent_focus_depth: 2,
+    };
+    delete missing.input_rewrite;
+    delete missing.term_normalize;
+    writeSoul(missing);
+
+    const normalized = service.read('stale').soul;
+    expect(normalized.input_rewrite).toBe(false);
+    expect(normalized.term_normalize).toBe(false);
+    // 收敛只针对新键：聚焦开关与阶数原样保留
+    expect(normalized.intent_focus).toBe(true);
+    expect(normalized.intent_focus_depth).toBe(2);
+  });
+
+  it('读取归一化（027）：手改坏成非布尔 → 收敛 false（不抛错、不删键）', () => {
+    const writeSoul = (soul: Record<string, unknown>): void => {
+      store.writeJson('agents/stale.json', {
+        name: 'stale',
+        soul,
+        enabled_tools: [],
+        mcp_services: [],
+        skills: [],
+        scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
+        updated_at: '2026-11-19T00:00:00.000Z',
+      });
+    };
+
+    for (const broken of ['true', 1, 0, null, {}]) {
+      writeSoul({ ...soulDesign('你是助手'), intent_focus: true, input_rewrite: broken, term_normalize: broken });
+      const soul = service.read('stale').soul;
+      expect(soul.input_rewrite).toBe(false);
+      expect(soul.term_normalize).toBe(false);
+      expect('input_rewrite' in soul).toBe(true);
+    }
+
+    // 合法值原样保留（两个开关互不牵连）
+    writeSoul({ ...soulDesign('你是助手'), intent_focus: true, input_rewrite: true });
+    expect(service.read('stale').soul.input_rewrite).toBe(true);
+    expect(service.read('stale').soul.term_normalize).toBe(false);
+  });
+
   it('删除后不再出现在列表与读取结果中', () => {
     service.create(validRaw, index, store.revision());
     service.remove('demo');

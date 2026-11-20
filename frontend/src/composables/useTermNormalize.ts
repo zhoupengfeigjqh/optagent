@@ -15,15 +15,21 @@
  * - **只有真发出去了才关弹窗**（`send` 返回 `false` 时保留，用户可重试或改选）；
  *   发出即关，**不等本轮答完**——`send` 必须带 `settleBeforeReturn: false`（2026-11-06 修）。
  *
- * 降级：预检超时（1.5s）或请求失败一律按**原话**继续发送——它是增强件，绝不能卡住对话。
+ * 降级：预检超时（3s）或请求失败一律按**原话**继续发送——它是增强件，绝不能卡住对话。
  */
 import { ref, type Ref } from 'vue'
 
 import type { TermMatch, TermNormalizeApi, TermNormalizeResult } from '../api/term-normalize'
 import type { FileReference, ToolTip } from '../api/types'
 
-/** 预检等待上限：超过即按原话发送（原则九：有界等待 + 不阻断） */
-export const REVIEW_TIMEOUT_MS = 1500
+/**
+ * 预检等待上限：超过即按原话发送（原则九：有界等待 + 不阻断）。
+ *
+ * 2026-11-20：1500 → 3000。术语替换要读本体术语表再走一遍字典，首次请求
+ * （冷启动 + 术语表未进页缓存）在 1.5s 内完不成时会被判超时，用户看到的是
+ * "替换没生效"而不是"超时"；放宽到 3s 仍远低于用户感知卡顿的阈值。
+ */
+export const REVIEW_TIMEOUT_MS = 3000
 
 /** 发送载荷（与 `useChatPanel.onSend` 的入参同形，只多一个内部跳过标记） */
 export interface TermReviewPayload {

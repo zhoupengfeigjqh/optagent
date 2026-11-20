@@ -8,7 +8,7 @@
  * - 五元组一行一条，方向写 `[上游]`、读向写 `→`/`←`，链尾无行为写 `（无可用行为）`；
  * - 空段整行省略；同本体多技能时行为与路径只挂到分数最高的技能下；
  * - `name` 保留原文不翻译，片段内换行压成空格；
- * - 长度上限按阶数分档（0→1200 / 1→1600 / 2→2000）；超限**先丢整行路径**
+ * - 长度上限按阶数分档（0→2000 / 1→3000 / 2→4000）；超限**先丢整行路径**
  *   （链尾无行为 → 跳数大 → 得分低，每个起点行为至少留一行），路径丢完才丢直接命中。
  */
 import { describe, expect, it } from 'vitest';
@@ -203,13 +203,13 @@ describe('composeFocusPrompt', () => {
     expect(result.prompt.split('\n')).toHaveLength(2);
   });
 
-  it('阶数分档：0 → 1200，1 → 1600，2 → 2000', () => {
+  it('阶数分档：0 → 2000，1 → 3000，2 → 4000', () => {
     expect(maxPromptChars(0)).toBe(MAX_PROMPT_CHARS);
-    expect(maxPromptChars(1)).toBe(1600);
-    expect(maxPromptChars(2)).toBe(2000);
+    expect(maxPromptChars(1)).toBe(3000);
+    expect(maxPromptChars(2)).toBe(4000);
     // 越界/负数按最保守的一档处理
     expect(maxPromptChars(-1)).toBe(MAX_PROMPT_CHARS);
-    expect(maxPromptChars(9)).toBe(2000);
+    expect(maxPromptChars(9)).toBe(4000);
   });
 });
 

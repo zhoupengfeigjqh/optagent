@@ -112,6 +112,23 @@ export interface SoulDesign {
    * - 校验为**拒绝式**（越界 / 非整数 / `null` 一律 `VALIDATION_FAILED`，不 clamp）。
    */
   intent_focus_depth?: number;
+  /**
+   * 输入重写开关（027，2026-11-19）：意图聚焦开启后，是否允许"先指代判定、再改写"。
+   *
+   * - **可选 + 缺省 `false`**：与 013 / 019 同一口径——存量文档没有该键，读取时补齐为 `false`；
+   * - 与 `intent_focus` 是**逻辑与**：聚焦关闭时本值**保留**（管理台置灰），
+   *   物化时只有两个都为 `true` 才写键（关闭态产物零残留）；
+   * - 代价是"每轮多一次判定 + 可能的模型调用"，因此缺省必须关。
+   */
+  input_rewrite?: boolean;
+  /**
+   * 术语替换开关（027，2026-11-19）：意图聚焦配置区内的独立开关。
+   *
+   * 018 原本"意图聚焦即替换"，本键把它拆出来（缺省关）：替换会改写用户输入，
+   * 属于"用户可见"的行为变化，必须由管理员显式开启并重新部署。
+   * 与 `intent_focus` 同样是逻辑与；关闭时值保留、产物不写键。
+   */
+  term_normalize?: boolean;
 }
 
 // 字段上限已外移到 `soul-limits.ts`（渲染 / 读取器 / 前端计数共用同一组数字）；
@@ -137,6 +154,9 @@ export function emptySoulDesign(): SoulDesign {
     intent_focus: false,
     // 019：阶数显式落 `0`（新建数字人不发散，与运行侧缺省同口径；存量同样补 0）
     intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
+    // 027：两个新开关同样显式落 `false`——脏检查比对整个对象，少一个键就与前端初值不等
+    input_rewrite: false,
+    term_normalize: false,
   };
 }
 
@@ -209,6 +229,10 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     // 019：键缺失 = 0；越界 / 非整数 / null → 拒绝（不 clamp）。
     // 不随开关收敛为 0：关闭时数值要保留，再次打开即恢复，不必重填（与条数同口径）
     intent_focus_depth: readFocusDepth(record.intent_focus_depth),
+    // 027：键缺失 = 关；类型不对 = 拒绝。**不随意图聚焦清空**——聚焦关闭只影响物化，
+    // 值要留着：管理台置灰、再次开启即恢复（与阶数同口径）
+    input_rewrite: readBool(record.input_rewrite, '输入重写开关'),
+    term_normalize: readBool(record.term_normalize, '术语替换开关'),
   };
 }
 
@@ -230,6 +254,14 @@ export function renderSoulMd(soul: SoulDesign): string {
   const depth = soul.intent_focus_depth ?? SOUL_LIMITS.focusDepthDefault;
   if (soul.intent_focus === true && depth > 0) {
     frontmatter.intent_focus_depth = depth;
+  }
+  // 027：两个新开关同样是"意图聚焦的从属能力"——只有 AND 为真才写键；
+  // 聚焦关闭或本开关关闭时键整个不出现（部署零残留，运行环境退回改造前行为）
+  if (soul.intent_focus === true && soul.input_rewrite === true) {
+    frontmatter.input_rewrite = true;
+  }
+  if (soul.intent_focus === true && soul.term_normalize === true) {
+    frontmatter.term_normalize = true;
   }
   // 007：下一步动作提示**依赖意图聚焦**——意图聚焦开启 + 该开关开启才写键；
   // 条数紧随其后，同样只在开启时写：关闭态产物里连"条数"都不该出现（未搭配的内容不残留）

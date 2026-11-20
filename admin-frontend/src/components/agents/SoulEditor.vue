@@ -10,11 +10,18 @@
  * | 首屏欢迎语 / 问题实例 | **只给前台**：新建对话页的引导（经「快速上手」弹窗编辑） |
  * | 主要使命 / 能力标签 / 绝对禁止 / 补充说明 | **进系统提示词** |
  * | 意图聚焦（013） | **运行环境开关**：只写进 SOUL.md 的 frontmatter，由运行环境读取 |
+ * | 输入重写 / 术语替换（027） | **运行环境开关**：同上，是意图聚焦输入侧的从属能力 |
  * | 下一步动作提示（007） | **运行环境开关**：同上，**依赖意图聚焦**（意图聚焦关闭则本开关失效） |
  *
  * 这么分是因为运行环境只把 SOUL.md 的**正文**当作系统提示词
  * （frontmatter 承载展示数据），界面上说清归属，管理员才不会把展示文案
  * 误当提示词写、或反之。
+ *
+ * **界面归属（2026-11-20）**：上面三个开关都由 SOUL.md frontmatter 承载、都由
+ * 运行环境读取，且都以意图聚焦为前提，因此在界面上**合并为同一个区块、同级展示**
+ * ——管理员看到的是一整条"聚焦管线"（前置改写 → 聚焦判定 → 输出侧提示），
+ * 不必在两个框之间来回对照。数据层未变：六个字段仍是同级扁平键，
+ * 物化产物的写键条件与字节一律不变。
  */
 import { computed, ref } from 'vue'
 import type { BuiltinTool, McpServiceListItem, SoulDesign, SoulStarter } from '../../api/types'
@@ -218,13 +225,19 @@ function onFocusDepthChange(event: Event): void {
       </button>
     </fieldset>
 
-    <!-- 013：运行期开关。同样只写进 SOUL.md 的 frontmatter 由运行环境读取。
-         它放在「下一步动作提示」**之前**：下一步动作提示依赖它（意图聚焦关闭则下一步动作提示失效） -->
+    <!-- 013 / 019 / 027 / 007：运行期开关区。
+         2026-11-20 起四个开关**合并为同一区块、同级展示**——它们都只写进 SOUL.md 的
+         frontmatter、都由运行环境读取，且都以意图聚焦为前提；分两个框会让管理员
+         在两个区块之间来回对照才能看清一条完整管线。 -->
     <fieldset class="soul-editor__intent-focus">
       <legend class="field__label">
         意图聚焦
         <span class="soul-editor__scope">运行环境开关</span>
       </legend>
+      <p class="field__hint" data-test="intent-focus-group-hint">
+        本区四项都是运行环境开关，且都以「开启意图聚焦」为前提。关闭意图聚焦时：
+        输入重写与术语替换的已选值保留（重新开启即恢复），下一步动作提示则会被一并关闭。
+      </p>
       <label class="soul-editor__switch">
         <input
           type="checkbox"
@@ -267,16 +280,39 @@ function onFocusDepthChange(event: Event): void {
           缺省 0 阶 = 只聚焦本身。
         </p>
       </div>
-    </fieldset>
+      <!-- 027：两个从属开关。意图聚焦关闭时**置灰但保留勾选值**（与阶数同口径：
+           关掉再开回来不必重设；后端归一化也不会清空这两个值） -->
+      <label class="soul-editor__switch">
+        <input
+          type="checkbox"
+          data-test="input-rewrite"
+          :checked="soul.input_rewrite === true"
+          :disabled="soul.intent_focus !== true"
+          @change="patch({ input_rewrite: ($event.target as HTMLInputElement).checked })"
+        />
+        输入重写
+      </label>
+      <p class="field__hint" data-test="input-rewrite-hint">
+        出现"上述结果 / 它 / 该单据"这类指代时，先据上文把它改写成语义自足的一句话，
+        再用改写结果做技能与本体聚焦。改写只影响本轮聚焦，用户消息与历史仍是原话。
+      </p>
+      <label class="soul-editor__switch">
+        <input
+          type="checkbox"
+          data-test="term-normalize"
+          :checked="soul.term_normalize === true"
+          :disabled="soul.intent_focus !== true"
+          @change="patch({ term_normalize: ($event.target as HTMLInputElement).checked })"
+        />
+        术语替换
+      </label>
+      <p class="field__hint" data-test="term-normalize-hint">
+        仅当该数字人拥有本体术语映射集时，开启本功能才会生效
+      </p>
 
-    <!-- 007：运行期开关。它既不属于"只给前台"也不属于"进系统提示词"，而是**只写进
-         SOUL.md 的 frontmatter**、由运行环境当作功能开关读取。
-         依赖上面的「意图聚焦」：意图聚焦关闭时本开关置灰、强制关闭 -->
-    <fieldset class="soul-editor__next-steps">
-      <legend class="field__label">
-        下一步动作提示
-        <span class="soul-editor__scope">运行环境开关</span>
-      </legend>
+      <!-- 007：输出侧的延伸开关。同样只写进 SOUL.md 的 frontmatter、由运行环境当作功能
+           开关读取；依赖意图聚焦——关闭时本开关置灰并被强制关闭（与上面两项不同：
+           输入重写 / 术语替换的已选值会保留）。 -->
       <label class="soul-editor__switch">
         <input
           type="checkbox"
@@ -308,13 +344,9 @@ function onFocusDepthChange(event: Event): void {
         />
         <span class="field__hint">
           可填 {{ SOUL_LIMITS.nextActionHintsMin }}~{{ SOUL_LIMITS.nextActionHintsMax }} 的整数，
-          缺省 {{ SOUL_LIMITS.nextActionHintsDefault }} 条；关闭开关时该数值保留、不写进产物。
+          缺省 {{ SOUL_LIMITS.nextActionHintsDefault }} 条。
         </span>
       </label>
-      <p class="field__hint" data-test="next-action-hints-hint">
-        需先开启「意图聚焦」。开启后，该数字人每一轮回答的下方会出现最多
-        {{ soul.next_action_hints_count }} 条可点击的下一步动作卡片（点击即经确认发起下一轮）。
-      </p>
     </fieldset>
 
     <QuickStartDialog
@@ -358,7 +390,6 @@ function onFocusDepthChange(event: Event): void {
   padding: var(--space-3);
 }
 
-.soul-editor__next-steps,
 .soul-editor__intent-focus {
   border: 1px solid var(--color-border, #dfe3ea);
   border-radius: var(--radius-md);

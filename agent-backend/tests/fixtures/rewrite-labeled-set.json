@@ -1,0 +1,231 @@
+{
+  "$comment": "027 指代判定标注集（SC-001）。字段：id / category / text / expect_need_rewrite / note。category 取 anaphora（代指型）/ standalone（独立问句）/ short（短句）/ long_paste（长粘贴）。expect_need_rewrite=true 只给真正依赖上文才能理解的输入；'简短'、'模糊'、'不完整'一律为 false（FR-012）。",
+  "version": 1,
+  "threshold_default": 0.8,
+  "items": [
+    {
+      "id": "a01",
+      "category": "anaphora",
+      "text": "请根据上述结果分析",
+      "expect_need_rewrite": true,
+      "note": "典型指代：上述"
+    },
+    {
+      "id": "a02",
+      "category": "anaphora",
+      "text": "这个怎么计算",
+      "expect_need_rewrite": true,
+      "note": "规格原文例子（FR-012）"
+    },
+    {
+      "id": "a03",
+      "category": "anaphora",
+      "text": "把它的交期再往后推两天",
+      "expect_need_rewrite": true,
+      "note": "代词「它」指代上文单据"
+    },
+    {
+      "id": "a04",
+      "category": "anaphora",
+      "text": "那张单子现在到哪一步了",
+      "expect_need_rewrite": true,
+      "note": "指示代词「那张单子」"
+    },
+    {
+      "id": "a05",
+      "category": "anaphora",
+      "text": "该结果和上次相比差多少",
+      "expect_need_rewrite": true,
+      "note": "「该结果」「上次」双重指代"
+    },
+    {
+      "id": "a06",
+      "category": "anaphora",
+      "text": "上文中提到的供应商有没有超期记录",
+      "expect_need_rewrite": true,
+      "note": "「上文」显式指代"
+    },
+    {
+      "id": "a07",
+      "category": "anaphora",
+      "text": "这些物料哪个最贵",
+      "expect_need_rewrite": true,
+      "note": "「这些物料」指代上一条查询结果"
+    },
+    {
+      "id": "a08",
+      "category": "anaphora",
+      "text": "那按刚才的方案执行吧",
+      "expect_need_rewrite": true,
+      "note": "「刚才的方案」指代上文方案"
+    },
+    {
+      "id": "s01",
+      "category": "standalone",
+      "text": "查询原材料库存",
+      "expect_need_rewrite": false,
+      "note": "规格原文例子（FR-012）：语义自足"
+    },
+    {
+      "id": "s02",
+      "category": "standalone",
+      "text": "帮我创建一张原材料采购单",
+      "expect_need_rewrite": false,
+      "note": "完整指令"
+    },
+    {
+      "id": "s03",
+      "category": "standalone",
+      "text": "列出本周所有延期交付的订单",
+      "expect_need_rewrite": false,
+      "note": "完整查询"
+    },
+    {
+      "id": "s04",
+      "category": "standalone",
+      "text": "BOM 里 A 型号的物料用量是多少",
+      "expect_need_rewrite": false,
+      "note": "自带主语"
+    },
+    {
+      "id": "s05",
+      "category": "standalone",
+      "text": "把生产计划的开工日期改成明天",
+      "expect_need_rewrite": false,
+      "note": "完整指令（含明确对象）"
+    },
+    {
+      "id": "s06",
+      "category": "standalone",
+      "text": "统计上个月各产线的用电成本",
+      "expect_need_rewrite": false,
+      "note": "完整统计需求"
+    },
+    {
+      "id": "s07",
+      "category": "standalone",
+      "text": "供应商档案里有哪些是一级供应商",
+      "expect_need_rewrite": false,
+      "note": "完整查询"
+    },
+    {
+      "id": "s08",
+      "category": "standalone",
+      "text": "为什么这批订单的交期被推迟了",
+      "expect_need_rewrite": false,
+      "note": "含指代性词但对象已在句内限定（这批订单）"
+    },
+    {
+      "id": "t01",
+      "category": "short",
+      "text": "继续",
+      "expect_need_rewrite": false,
+      "note": "短句但**不是**代指：属流程控制词，不应触发改写"
+    },
+    {
+      "id": "t02",
+      "category": "short",
+      "text": "查库存",
+      "expect_need_rewrite": false,
+      "note": "简短但语义自足"
+    },
+    {
+      "id": "t03",
+      "category": "short",
+      "text": "导出",
+      "expect_need_rewrite": false,
+      "note": "不完整 ≠ 代指（FR-012 明确禁止误判）"
+    },
+    {
+      "id": "t04",
+      "category": "short",
+      "text": "报表",
+      "expect_need_rewrite": false,
+      "note": "单词名词"
+    },
+    {
+      "id": "t05",
+      "category": "short",
+      "text": "交期",
+      "expect_need_rewrite": false,
+      "note": "单词名词"
+    },
+    {
+      "id": "t06",
+      "category": "short",
+      "text": "重新生成",
+      "expect_need_rewrite": false,
+      "note": "流程控制词"
+    },
+    {
+      "id": "t07",
+      "category": "short",
+      "text": "不要了",
+      "expect_need_rewrite": false,
+      "note": "否定控制词"
+    },
+    {
+      "id": "t08",
+      "category": "short",
+      "text": "好",
+      "expect_need_rewrite": false,
+      "note": "应答词"
+    },
+    {
+      "id": "l01",
+      "category": "long_paste",
+      "text": "把下面这段会议纪要整理成待办清单：一、下周一之前完成原材料采购单的复核，采购部负责；二、产线 A 的换型方案需要在周四评审，工艺部准备材料；三、供应商交付准时率的月度统计本周五发出，由计划部汇总。另外请把第三项的负责人改成计划部张三。",
+      "expect_need_rewrite": false,
+      "note": "长粘贴但语义自足"
+    },
+    {
+      "id": "l02",
+      "category": "long_paste",
+      "text": "以下是我从系统里导出的订单明细（订单号、客户、型号、数量、交期）：SO-2026-0011，华东机械，A 型，120 件，2026-12-05；SO-2026-0012，南方重工，B 型，80 件，2026-12-08；SO-2026-0013，华东机械，A 型，60 件，2026-12-12。请按交期排序并标出可能延期的订单。",
+      "expect_need_rewrite": false,
+      "note": "长粘贴 + 明确指令"
+    },
+    {
+      "id": "l03",
+      "category": "long_paste",
+      "text": "生产计划说明：本周排产以 A 型为主，B 型只在周四排一条小批量试产。原材料方面，A 型的主料库存足够支撑到月底，辅料需要在周三前补货。电价方面，谷段集中在凌晨 0 点到 6 点，建议把高耗能工序挪到谷段。请据此给出下周的排产建议。",
+      "expect_need_rewrite": false,
+      "note": "长上下文但自身完整"
+    },
+    {
+      "id": "l04",
+      "category": "long_paste",
+      "text": "问题描述：近三个月供应商交付准时率从 92% 下降到 78%，其中 A 型主料的延迟最明显，平均延迟 3.5 天。采购部反馈是上游产能紧张，计划部认为是我们下单太晚。请分析可能原因并给出改善措施。",
+      "expect_need_rewrite": false,
+      "note": "长文本，问题自带背景"
+    },
+    {
+      "id": "l05",
+      "category": "long_paste",
+      "text": "请把下面这条规则改成 YAML：当订单数量大于 500 且交期在一周内时，标记为紧急订单，并自动通知计划部；当订单数量小于等于 100 时，归入常规订单，不通知。",
+      "expect_need_rewrite": false,
+      "note": "长指令"
+    },
+    {
+      "id": "l06",
+      "category": "long_paste",
+      "text": "统计口径确认：交付准时率 = 实际交付日期不晚于承诺交付日期的订单数 / 总订单数，按自然月统计，剔除已取消订单。请按这个口径重新计算 2026 年 9 月的准时率，并按客户拆分。",
+      "expect_need_rewrite": false,
+      "note": "自带口径定义"
+    },
+    {
+      "id": "l07",
+      "category": "long_paste",
+      "text": "这是产线 A 最近五天的设备停机记录：周一 2 小时（换型），周二 0 小时，周三 4 小时（主轴报警），周四 1 小时（换型），周五 3 小时（主轴报警）。请判断是否需要安排预防性维护，并说明依据。",
+      "expect_need_rewrite": false,
+      "note": "长数据粘贴 + 明确问题"
+    },
+    {
+      "id": "l08",
+      "category": "long_paste",
+      "text": "客户投诉记录：华东机械反馈 A 型产品外观划痕；南方重工反馈 B 型尺寸超差；华东机械再次反馈包装破损。请按客户汇总投诉次数并给出处理优先级建议。",
+      "expect_need_rewrite": false,
+      "note": "长粘贴，对象明确"
+    }
+  ]
+}

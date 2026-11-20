@@ -17,7 +17,14 @@
  * ——runner 只保留"顺序与决策"，不承载 IO 与图遍历细节。
  */
 import type { IntentFocusConfig } from '../../config.js';
+import type { ModelSelection } from '../../types.js';
 import { agentDir } from '../dirs.js';
+import {
+  runRewriteStage,
+  toRewriteRecordFields,
+  type ReadHistory,
+  type RewriteLlm,
+} from './rewrite.js';
 import { MAX_QUESTIONS_PER_BATCH, decideDisposition, prepareState } from './state.js';
 import {
   batchQuestions,
@@ -89,6 +96,10 @@ export interface IntentFocusInput {
   userInput: string;
   /** 预置动作入口（下一步动作卡片 / 首屏问题实例卡片）→ 跳过判定 */
   skip: boolean;
+  /** 027：本轮生效模型（请求级覆盖优先），用于改写调用取 provider */
+  model?: ModelSelection;
+  /** 027：本轮中止信号（用户停止 / 关机），透传给改写调用 */
+  signal?: AbortSignal;
 }
 
 /** 域层对意图聚焦的唯一依赖口 */
@@ -129,6 +140,17 @@ export interface IntentFocusRunnerDeps {
    * 与开关同口径：**不缓存**——阶数随部署整体覆盖，缓存会让"部署后不生效"难以解释。
    */
   getDepth?: (userId: string, agentName: string) => number;
+  /**
+   * 027：输入改写开关（逐次现读）；缺省 = 改写不可用。
+   *
+   * 调用方（`server-attachments`）已保证"意图聚焦关闭则本开关不生效"，
+   * 因此这里只读 `input_rewrite` 一个键即可。
+   */
+  isRewriteEnabled?: (userId: string, agentName: string) => boolean;
+  /** 027：读该线程历史（只读 `history.jsonl` 正文）；缺省 = 改写素材只有当前输入 */
+  readHistory?: ReadHistory;
+  /** 027：一次性文本生成端口；缺省 = 改写不可用（本轮按原文聚焦） */
+  rewriteLlm?: RewriteLlm;
   logger?: IntentFocusRunnerLogger;
   now?: () => number;
 }
@@ -309,12 +331,43 @@ export class IntentFocusRunner implements IntentFocusPort {
       return EMPTY_RESULT;
     }
 
+    /**
+     * 027：指代改写阶段——**「无技能 / 无可聚焦技能」短路之后、技能评分之前**。
+     *
+     * 位置是契约 O-3 的硬要求：短路轮零判定零改写（用户点了卡片、或该数字人没配技能时，
+     * 多一次模型调用既无收益也无法解释）。改写结果**只**作为评分素材往下走，
+     * 留档的 `input` 仍是 `state`（用户原话尾部 200 字）。
+     */
+    const rewrite = await runRewriteStage(
+      {
+        config,
+        enabled: this.deps.isRewriteEnabled?.(input.userId, input.agentName) === true,
+        ...(this.deps.client ? { client: this.deps.client } : {}),
+        ...(this.deps.rewriteLlm ? { rewriteLlm: this.deps.rewriteLlm } : {}),
+        ...(this.deps.readHistory ? { readHistory: this.deps.readHistory } : {}),
+        ...(this.deps.logger ? { logger: this.deps.logger } : {}),
+        now: this.now,
+      },
+      {
+        userId: input.userId,
+        agentName: input.agentName,
+        threadId: input.threadId,
+        userInput: input.userInput,
+        deadline,
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
+    );
+    const rewriteFields = toRewriteRecordFields(rewrite);
+    /** 送入评分 / 发散的素材：改写成功即改写文本，否则与改造前逐字一致 */
+    const focusState = rewrite.state;
+
     const skillBatches = batchQuestions(
       skillResult.candidates,
       buildSkillQuestions(skillResult.candidates),
       MAX_QUESTIONS_PER_BATCH,
     );
-    const skillDecided = await decider.decideAll(state, skillBatches, deadline, 'skill');
+    const skillDecided = await decider.decideAll(focusState, skillBatches, deadline, 'skill');
 
     if (Object.keys(skillDecided.scores).length === 0) {
       const reason = skillDecided.failureReason ?? 'all_batches_failed';
@@ -330,6 +383,7 @@ export class IntentFocusRunner implements IntentFocusPort {
         prompt: '',
         promptTruncated: false,
         warnings,
+        rewrite: rewriteFields,
         // 走到这里必然是全批失败，失败清单不可能为空
         error: skillDecided.failures.join('; '),
       });
@@ -364,6 +418,7 @@ export class IntentFocusRunner implements IntentFocusPort {
         prompt: '',
         promptTruncated: false,
         warnings,
+        rewrite: rewriteFields,
         error: skillDecided.failures.join('; ') || null,
       });
       this.log(
@@ -391,7 +446,12 @@ export class IntentFocusRunner implements IntentFocusPort {
     let capabilitySelection: CapabilitySelection = EMPTY_SELECTION;
     let capabilityFailures: string[] = [];
     if (capabilityBatches.length > 0) {
-      const capabilityDecided = await decider.decideAll(state, capabilityBatches, deadline, 'capability');
+      const capabilityDecided = await decider.decideAll(
+        focusState,
+        capabilityBatches,
+        deadline,
+        'capability',
+      );
       // 能力全批失败：技能已经选出来了，但本轮不给提示（FR-043：全部失败即降级）
       if (Object.keys(capabilityDecided.scores).length === 0) {
         const reason = capabilityDecided.failureReason ?? 'all_batches_failed';
@@ -407,6 +467,7 @@ export class IntentFocusRunner implements IntentFocusPort {
           prompt: '',
           promptTruncated: false,
           warnings,
+          rewrite: rewriteFields,
           // 同上：全批失败时失败清单非空
           error: capabilityDecided.failures.join('; '),
         });
@@ -500,6 +561,7 @@ export class IntentFocusRunner implements IntentFocusPort {
       prompt: composed.prompt,
       promptTruncated: composed.truncated,
       warnings: allWarnings,
+      rewrite: rewriteFields,
       error: [...skillDecided.failures, ...capabilityFailures].join('; ') || null,
     });
 

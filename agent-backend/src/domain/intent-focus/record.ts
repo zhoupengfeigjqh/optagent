@@ -11,11 +11,13 @@
  * （这一跳的起点概念）用于回溯发散路径：`from_concept → via_concept` 就是那一跳的边。
  */
 import type { IntentFocusDisposition } from './state.js';
-import type {
-  CapabilityFocusRecord,
-  ConceptFocusRecord,
-  IntentFocusRecordDraft,
-  SkillFocusRecord,
+import {
+  REWRITE_RECORD_DEFAULTS,
+  type CapabilityFocusRecord,
+  type ConceptFocusRecord,
+  type IntentFocusRecordDraft,
+  type RewriteFocusRecord,
+  type SkillFocusRecord,
 } from './store.js';
 import type {
   BehaviorSource,
@@ -66,6 +68,14 @@ export interface RecordInput {
   promptTruncated: boolean;
   warnings: readonly string[];
   error: string | null;
+  /**
+   * 027：指代改写的留档字段。
+   *
+   * **可选**：早退分支（跳过 / 未配置 / 无技能 / 无可用技能）根本没进改写阶段，
+   * 让它们逐项补 `null` 只会制造噪音；缺省值由本文件统一补齐
+   * （契约要求"新记录恒有七个键"，但不要求调用方逐一手写）。
+   */
+  rewrite?: Partial<RewriteFocusRecord>;
 }
 
 export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
@@ -106,6 +116,16 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
     prompt_truncated: input.promptTruncated,
     warnings: [...input.warnings],
     error: input.error,
+    // 027：**恒写七个键**——早退分支也走这里，因此"未执行"与"失败"在记录里可分：
+    // 未执行 = `need_rewrite: null` 且 `rewrite_reason: null`（见契约 §8）
+    need_rewrite: input.rewrite?.need_rewrite ?? REWRITE_RECORD_DEFAULTS.need_rewrite,
+    rewrite_score: input.rewrite?.rewrite_score ?? REWRITE_RECORD_DEFAULTS.rewrite_score,
+    rewrite_query: input.rewrite?.rewrite_query ?? REWRITE_RECORD_DEFAULTS.rewrite_query,
+    rewrite_truncated: input.rewrite?.rewrite_truncated ?? REWRITE_RECORD_DEFAULTS.rewrite_truncated,
+    rewrite_ms: input.rewrite?.rewrite_ms ?? REWRITE_RECORD_DEFAULTS.rewrite_ms,
+    rewrite_history_turns:
+      input.rewrite?.rewrite_history_turns ?? REWRITE_RECORD_DEFAULTS.rewrite_history_turns,
+    rewrite_reason: input.rewrite?.rewrite_reason ?? REWRITE_RECORD_DEFAULTS.rewrite_reason,
   };
 }
 

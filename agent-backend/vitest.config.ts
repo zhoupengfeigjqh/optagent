@@ -268,6 +268,28 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        // 2026-11-19（027）：指代改写的三块新代码（实测值见各条注释，均 ≥ 80%）
+        //   纯函数层：文案 / 素材取材 / 七步归一（含码点截断）—— 实测 100%
+        'src/domain/intent-focus/rewrite-prompt.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        //   编排层：开关 → 判定 → 改写 → 归一 → 降级 → 计时 —— 实测 stmts 94.33 / branch 91.89
+        'src/domain/intent-focus/rewrite.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        //   LLM 适配：tools 空 / thinking 关 / 超时与中止可区分 / 请求级模型 —— 实测 stmts 95.45 / branch 84.61
+        'src/infra/rewrite-llm.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

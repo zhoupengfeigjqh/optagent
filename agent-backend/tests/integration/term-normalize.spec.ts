@@ -25,8 +25,16 @@ import type { LlmEvent } from '../../src/types.js';
 const USER = 'admin';
 const AGENT = 'demo';
 
-const SOUL_ON = '---\nsoul_version: 1\nintent_focus: true\n---\n\n## 主要使命\n\n你是助手。\n';
-const SOUL_OFF = '---\nsoul_version: 1\n---\n\n## 主要使命\n\n你是助手。\n';
+/**
+ * 027：术语替换从"意图聚焦即替换"拆成独立开关，闸门是**逻辑与**。
+ * 这里用四份产物覆盖真值表（坏字典是"是否真的读了盘"的探针）。
+ */
+function soulOf(focus: boolean, term: boolean): string {
+  const lines = ['soul_version: 1'];
+  if (focus) lines.push('intent_focus: true');
+  if (term) lines.push('term_normalize: true');
+  return `---\n${lines.join('\n')}\n---\n\n## 主要使命\n\n你是助手。\n`;
+}
 
 /** 与 017 产物同形：跨本体已由生成端合成为 `或` */
 const TABLE = {
@@ -36,12 +44,18 @@ const TABLE = {
 
 function writeAgent(root: string, name: string, options: {
   focus: boolean;
+  /** 027：术语替换开关（缺省 = 跟随 focus，保持老用例语义） */
+  term?: boolean;
   tables?: Record<string, Record<string, string>>;
   broken?: boolean;
 }): void {
   const dir = agentDir(root, USER, name);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'SOUL.md'), options.focus ? SOUL_ON : SOUL_OFF, 'utf8');
+  fs.writeFileSync(
+    path.join(dir, 'SOUL.md'),
+    soulOf(options.focus, options.term ?? options.focus),
+    'utf8',
+  );
   fs.writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
   fs.writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
   for (const [ref, table] of Object.entries(options.tables ?? {})) {
@@ -86,6 +100,20 @@ describe('POST /api/term-normalize', () => {
     // 坏 JSON：降级为未替换 + warning
     writeAgent(root, 'broken', {
       focus: true,
+      tables: { '生产调度/供应商档案': { 供应商信息: '供应方' } },
+      broken: true,
+    });
+    // 027 真值表：只开意图聚焦（术语替换缺省关）；字典故意写坏，用来证明"没读盘"
+    writeAgent(root, 'focus-only', {
+      focus: true,
+      term: false,
+      tables: { '生产调度/供应商档案': { 供应商信息: '供应方' } },
+      broken: true,
+    });
+    // 027 真值表：只开术语替换（意图聚焦关）；同样是坏字典探针
+    writeAgent(root, 'term-only', {
+      focus: false,
+      term: true,
       tables: { '生产调度/供应商档案': { 供应商信息: '供应方' } },
       broken: true,
     });
@@ -141,6 +169,37 @@ describe('POST /api/term-normalize', () => {
     await select('off');
     const res = await normalize('帮我看下供应商信息的物料');
     expect(res.json()).toMatchObject({ applied: false, normalized: '帮我看下供应商信息的物料' });
+  });
+
+  it('027：意图聚焦开、术语替换关 → 原文返回，且**不读字典**（坏字典也不告警）', async () => {
+    await select('focus-only');
+    const warn = vi.spyOn((app as unknown as { ctx: AppContext }).ctx.loggers.logger, 'warn');
+    try {
+      const res = await normalize('帮我看下供应商信息');
+      expect(res.json()).toMatchObject({ applied: false, normalized: '帮我看下供应商信息' });
+      // 一旦读了坏字典就会触发 term_normalize.degraded —— 没有它就是"闸门前就返回了"
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'term_normalize.degraded' }),
+        expect.any(String),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('027：术语替换开、意图聚焦关 → 仍不替换（两个开关是逻辑与）', async () => {
+    await select('term-only');
+    const warn = vi.spyOn((app as unknown as { ctx: AppContext }).ctx.loggers.logger, 'warn');
+    try {
+      const res = await normalize('帮我看下供应商信息');
+      expect(res.json()).toMatchObject({ applied: false, normalized: '帮我看下供应商信息' });
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'term_normalize.degraded' }),
+        expect.any(String),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('没有任何字典文件 → 原文返回（不是错误）', async () => {

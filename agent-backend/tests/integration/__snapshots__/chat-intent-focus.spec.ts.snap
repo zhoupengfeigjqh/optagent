@@ -1,0 +1,41 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭时留档与提示与改造前逐字一致（快照） 1`] = `
+{
+  "agent_name": "demo",
+  "batches": 2,
+  "behaviors": [],
+  "candidates": 4,
+  "concepts": [],
+  "depth": 0,
+  "disposition": "focused",
+  "error": null,
+  "input": "帮我创建一笔原材料采购单",
+  "input_truncated": false,
+  "model": "laya-multilingual",
+  "prompt": "本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
+  "prompt_truncated": false,
+  "reason": null,
+  "skills": [
+    {
+      "description": "原材料采购和库存本体技能",
+      "is_ontology": true,
+      "name": "onto-skill",
+      "ontology_id": "1",
+      "reason": null,
+      "score": 0.9,
+      "selected": true,
+    },
+  ],
+  "thread_id": "th_1",
+  "tool_tip_behaviors": [],
+  "truncated": false,
+  "warnings": [],
+}
+`;
+
+exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭时留档与提示与改造前逐字一致（快照） 2`] = `
+"本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）
+1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）"
+`;

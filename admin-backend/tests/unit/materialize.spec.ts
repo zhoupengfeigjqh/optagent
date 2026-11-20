@@ -381,6 +381,65 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     }
   });
 
+  it('027：两个新开关只影响 SOUL.md 的 frontmatter，关闭态产物与改造前逐字一致', () => {
+    const soulOf = (artifact: ReturnType<typeof buildAgentArtifact>) =>
+      String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+    const build = (extra: Parameters<typeof soulDesign>[1]) =>
+      buildAgentArtifact(design({ soul: soulDesign('你是助手\n第二行', { intent_focus: true, ...extra }) }), {
+        mcpConfigs,
+        skills,
+        ontologies,
+      });
+
+    const off = build({});
+    const on = build({ input_rewrite: true, term_normalize: true });
+    const offMd = soulOf(off);
+    const onMd = soulOf(on);
+
+    // 关闭（含未配置）→ 两个键都不出现；开启 → 各写一行
+    expect(offMd).not.toContain('input_rewrite');
+    expect(offMd).not.toContain('term_normalize');
+    expect(onMd).toContain('input_rewrite: true');
+    expect(onMd).toContain('term_normalize: true');
+
+    // 差异恰好两行
+    expect(onMd.split('\n').length - offMd.split('\n').length).toBe(2);
+    const stripSwitch = (md: string) =>
+      md
+        .split('\n')
+        .filter((line) => !line.startsWith('input_rewrite') && !line.startsWith('term_normalize'))
+        .join('\n');
+    expect(stripSwitch(onMd)).toBe(stripSwitch(offMd));
+
+    // 正文（模型看到的 System Prompt）逐字一致
+    expect(onMd.slice(onMd.indexOf('## 主要使命'))).toBe(offMd.slice(offMd.indexOf('## 主要使命')));
+
+    // 配置面变更不得扩散到别的产物
+    for (const relPath of ['TOOL.json', 'MCP.json', 'scenario.json']) {
+      expect(on.files.find((f) => f.relPath === relPath)?.content).toBe(
+        off.files.find((f) => f.relPath === relPath)?.content,
+      );
+    }
+  });
+
+  it('027：意图聚焦关闭时两个新开关不物化（即使设计态值仍为 true）', () => {
+    const artifact = buildAgentArtifact(
+      design({
+        soul: soulDesign('你是助手', {
+          intent_focus: false,
+          input_rewrite: true,
+          term_normalize: true,
+        }),
+      }),
+      { mcpConfigs, skills, ontologies },
+    );
+    const md = String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
+
+    expect(md).not.toContain('intent_focus');
+    expect(md).not.toContain('input_rewrite');
+    expect(md).not.toContain('term_normalize');
+  });
+
   it('未配置任何 MCP 服务时写空 servers 数组（MUST NOT 缺字段）', () => {
     const artifact = buildAgentArtifact(design(), { mcpConfigs, skills, ontologies });
     expect(JSON.parse(String(artifact.files.find((f) => f.relPath === 'MCP.json')?.content))).toEqual({

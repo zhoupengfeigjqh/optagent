@@ -68,7 +68,8 @@ describe('FileAccess —— `write_file` 拒绝 NTFS 备用数据流（2026-10-2
 
     // 冒号若被放行，Windows 会建出 `th_1_a.txt` 的流：文件列表看不见、内容却可读
     expect(fs.existsSync(path.join(dataRoot, '临时空间', 'th_1_a.txt'))).toBe(false);
-    expect(fs.readdirSync(path.join(dataRoot, '临时空间'))).toEqual([]);
+    // `说明.txt` 是 beforeEach 预置的既有文件，这里断言的是"没有新增任何落盘"
+    expect(fs.readdirSync(path.join(dataRoot, '临时空间'))).toEqual(['说明.txt']);
   });
 
   it('正常扁平文件名不受影响：写入后可原样读回', async () => {

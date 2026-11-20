@@ -7,7 +7,7 @@
  * 写入失败只告警，绝不影响对话（FR-054）；store 内部已有兜底，这里是第二道防线。
  */
 import type { IntentFocusDisposition } from './state.js';
-import type { IntentFocusRecordDraft } from './store.js';
+import type { IntentFocusRecordDraft, RewriteFocusRecord } from './store.js';
 import { buildRecordDraft, type ConceptEntry } from './record.js';
 import type {
   CapabilitySelection,
@@ -38,6 +38,11 @@ export interface RecordFields {
   concepts?: readonly ConceptEntry[];
   upstreamBehaviors?: readonly ExpandedBehavior[];
   downstreamBehaviors?: readonly ExpandedBehavior[];
+  /**
+   * 027：指代改写的留档字段（可选；缺省由 `buildRecordDraft` 补齐）。
+   * 早退分支不传 = "未执行"，与"失败但原因非空"在记录里可区分。
+   */
+  rewrite?: Partial<RewriteFocusRecord>;
 }
 
 export interface FocusRecordWriterLogger {
@@ -99,6 +104,7 @@ export class FocusRecordWriter {
       promptTruncated: fields.promptTruncated,
       warnings: fields.warnings,
       error: fields.error,
+      ...(fields.rewrite ? { rewrite: fields.rewrite } : {}),
     });
     try {
       await store.append(target.userId, target.agentName, target.threadId, draft);

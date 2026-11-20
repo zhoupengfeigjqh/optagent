@@ -54,8 +54,6 @@ export const MAX_TOOL_TIPS_PER_ACTION = 5;
 export const MAX_ACTIONS = NEXT_ACTION_HINTS_DEFAULT;
 /** 快照文件大小上限：超限视为损坏（脏文件防护） */
 const SNAPSHOT_MAX_BYTES = 64 * 1024;
-/* 隐藏引导的长度上限（`GUIDANCE_MAX_CHARS`）随文案铸造一起落在 `soul.ts`：
-   `buildActionGuidance` 生成时即按上限**截断**（MUST NOT 置空），本模块不再自行判长。 */
 
 /** 一条下一步动作提示（卡片形态：快照与下发同形） */
 export interface NextAction {

@@ -5,9 +5,9 @@
  * （`intro` / `welcome` / `mission`）。集中在这里，避免几十处各自拼一个对象、
  * 后续加必填字段时又要改一遍。
  *
- * **007 / 013 / 019**：`next_action_hints` / `intent_focus` / `intent_focus_depth` 也放在这里
- * 并显式给缺省值——接口对外**恒有这些键**（读取归一化会补），夹具与服务端形态一致，
- * 用例才能直接 `toEqual` 整个 soul。
+ * **007 / 013 / 019 / 027**：`next_action_hints` / `intent_focus` / `intent_focus_depth` /
+ * `input_rewrite` / `term_normalize` 也放在这里并显式给缺省值——接口对外**恒有这些键**
+ * （读取归一化会补），夹具与服务端形态一致，用例才能直接 `toEqual` 整个 soul。
  */
 import { SOUL_LIMITS, type SoulDesign } from '../../src/domain/config-center/soul-design.js';
 
@@ -24,6 +24,8 @@ export function soulDesign(mission: string, extra: Partial<SoulDesign> = {}): So
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
     intent_focus: false,
     intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
+    input_rewrite: false,
+    term_normalize: false,
     ...extra,
   };
 }

@@ -143,13 +143,62 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / fresh / 外部 MCP 服�
 
 ### 3.2 一次对话发生了什么
 
-1. 前端发 `POST /api/chat`，后端以 **SSE** 逐帧回推（文本增量、工具调用、用量、错误）。
+1. 前端发 `POST /api/threads/{id}/messages`，后端以 **SSE** 逐帧回推（文本增量、工具调用、用量、错误）。
 2. 模型决定调用工具 → 运行端按平台物化的 `MCP.json` 装配工具表（`{服务名}__{工具名}`），执行前按
    `confirmation` 决定是否**挂起等人工确认**（HITL 表单由入参 schema 递归生成）。
 3. 工具入参里的文件相对路径按 `file_args` 铸成**签名直链**，MCP 服务回源下载（服务不在用户磁盘上）。
 4. 长耗时工具改用**异步**：服务立即回受理，算完 `POST resultUrl` 回写 → 落 `临时空间/后台产出/` →
    铃铛出条目，后续轮次模型可 `read_file`。
 5. 所有工具调用记录、会话、用量落盘（`threads/` + SQLite），刷新页面仍可见。
+
+### 3.2.1 六种输入动作各自触发哪些判断
+
+用户能发起的输入只有六种，判断链条**互不相同**——尤其"跳过意图聚焦"与"跳过术语预检"是两组
+**不同的**条件，很容易记混。下表假设 `intent_focus` / `input_rewrite` / `term_normalize` /
+`next_action_hints` 全部开启。
+
+| # | 动作 | 实际发出的正文 | 附加字段 | 术语预检 | 意图判定 | 改写判断 | 本轮聚焦提示 | 可再产卡片 |
+|---|---|---|---|---|---|---|---|---|
+| ① | 首屏「问题实例」卡片 | 卡片配的问题文本 | `guidance` + `skip_intent_focus` | 跳过 | 跳过 | 不可能 | 无 | 无（结构上不可能） |
+| ② | 下一步动作卡片 | 卡片配的祈使句 | `tool_tips` + `skipTermCheck` | 跳过 | 执行 | 会，几乎不命中 | 命中时有 | 可能 |
+| ③ | 手输 / 回车 | 原话 | — | 执行 | 执行 | 会 | 命中时有 | 可能 |
+| ④ | `/技能名` | 剥掉 `/技能名` 后的文本 | `skill` | 执行 | 跳过 | 不可能 | 无 | 无 |
+| ⑤ | `@引用` + 文本 | 剥掉 `@标记` 后的文本 | 附件引用 | 执行 | 执行 | 会 | 命中时有 | 可能 |
+| ⑥ | `@引用` 无文本 | 合成「请查看这个文件 / 这些文件」 | 附件引用 | 跳过 | 执行 | 会，且可能误判 | 命中时有 | 可能 |
+
+**前端决定"要不要预检术语"的条件**（`frontend/src/composables/useChatPanel.ts`）：
+
+```ts
+const manual =
+  !attachmentOnly &&              // ⑥ 被排除：合成话术是机器生成的
+  payload.skipTermCheck !== true && // ②⑤ 的重试/确认重发被排除
+  !payload.guidance &&            // ① 被排除
+  !payload.toolTips &&            // ② 被排除
+  payload.skipIntentFocus !== true // ① 被排除
+```
+
+注意 ④ **不在**任何排除项里——`/技能名` 后的正文照样会预检。
+
+**后端决定"要不要跳过意图聚焦"的条件**（`agent-backend/src/domain/run-consume.ts`）：
+
+```ts
+const skipFocus =
+  opts.skipIntentFocus === true ||   // ① 命中
+  (opts.guidance ?? '').trim() !== '' || // ① 命中（与上一条重复，属防御）
+  (opts.skill ?? '') !== '';         // ④ 命中
+```
+
+②③⑤⑥ 三条全不命中 ⇒ **真的会跑一遍判定**。这与 016 之前的旧口径不同：卡片点击曾被
+一并跳过，016 起只有首屏卡片跳过（因为它本来就是"管理员预置的固定入口"，任务范围在配置时就定了）。
+
+两个容易踩的点：
+
+- **⑥ 的合成话术自带指代词**（「这个 / 这些」）。首轮只拖文件不写字时，指代判定可能命中并真的
+  发起一次改写调用；由于没有上文可依，改写素材为空，留档记 `no_history`。不会出错，但属于
+  "不该改写却改写了"。合成话术定义在 `frontend/src/utils/attachment-only-prompt.ts`。
+- **`[引用文件]` 段不进系统提示词**。⑤⑥ 的附件路径由 `refsText()` 追加在 **user 消息末尾**
+  （`agent-backend/src/domain/message-format.ts`），历史行本体保持纯净；因此这两行的
+  `systemExtra` 与 ③ 完全一致，差别只在 `messages`。
 
 ### 3.3 配置单向流（核心约束）
 
@@ -250,6 +299,17 @@ agent-backend ──MCP(HTTP)──► ocr / jev / bom / fresh / 外部 MCP 服�
 （不影响启动）；块存在但字段不全或越界 = 启动失败（防半配置）。开关是 SOUL frontmatter 的
 `intent_focus`，逐次现读、读不出来按关闭（fail-closed）。
 
+**与意图聚焦联动、但各自独立开关的三条支线**（在 SOUL 配置页同一个「意图聚焦」区块里同级展示）：
+
+| 支线 | SOUL 开关 | 作用位置 | 失败时 |
+|---|---|---|---|
+| 术语替换 | `term_normalize` | **发送前**独立预检（前端 3s 超时）；Trie 字典替换，**不调模型**；命中才弹窗让用户确认 | 按原话发送 |
+| 输入重写 | `input_rewrite` | 判定阶段内部：指代判定 `noul` 严格大于 `rewrite_threshold` 才改写；改写结果**只进评分素材**，不进用户消息 / 历史 / 留档 `input` | 回退原话 |
+| 下一步动作提示 | `next_action_hints` | 回答末尾追加 `<next_actions>` 协议；`done` 时定稿卡片（还要求本轮 `focusToolTips` 非空） | 本轮 0 条 |
+
+三者都以 `intent_focus` 为前提（逻辑与）：意图聚焦关闭时一律不生效（前端置灰，后端再收敛一次）。
+六种输入动作分别触发哪条支线，见 §3.2.1；预算与阈值参数见 §5.4。
+
 ---
 
 ## 5. 配置
@@ -299,16 +359,22 @@ intent_focus:
   base_url: http://laya:8000       # 本地直跑 backend 时用 http://127.0.0.1:8103
   model: laya-multilingual
   api_key: $DECIS_API_KEY          # 与 laya 容器的 DECIS_API_KEY 必须同值
-  timeout_ms: 10000                # 整轮预算 300~10000，超时即降级（不重试）
+  timeout_ms: 10000                # 整轮判定预算 300~20000（缺省 10000），超时即降级（不重试）
   skill_threshold: 0.6             # 技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
   ontology_threshold: 0.6          # 本体行为 / 函数阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
   max_skills: 32                   # 单轮技能候选上限（1~256）
   max_capabilities: 96             # 单轮能力候选上限（1~256；3 批 × 32）
+  # 027 输入改写：以下两项只做「标定」，不控制开关（开关在 SOUL 的 input_rewrite）
+  rewrite_threshold: 0.8           # 指代判定严格大于才改写；可被 INTENT_FOCUS_REWRITE_THRESHOLD 覆盖
+  rewrite_timeout_ms: 5000         # 单次改写上限 300~10000，且不得大于 timeout_ms
 ```
 
 - 阈值口径是**严格大于**（`score > threshold`，等于阈值丢弃）；环境变量优先于 `config.yaml`。
+- `timeout_ms` 是**整轮判定**的总预算，同一个 deadline 覆盖：指代判定 + 输入改写 + 技能评分 +
+  能力评分；**不含**主模型回答与发送前的术语预检。单批超时 = `max(300, ⌊剩余 ÷ 剩余批数⌋ − 100)`。
 - 整块缺失 = 功能不可用（不判定、不追加提示、启动不受影响）；块存在但字段缺失 / 越界 = 启动失败。
-- 完整字段说明见 `config.example.yaml`，判定与留档细节见 `specs/016-ontology-skill-focus/`。
+- 完整字段说明见 `config.example.yaml`，判定与留档细节见 `specs/016-ontology-skill-focus/`
+  与 `specs/027-intent-focus-query-rewrite/`。
 
 ---
 
@@ -510,7 +576,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<宿主 IP>:82/admin/
 - 覆盖率是两层阈值：全局「防倒退地板」（只可上调）+ 受门禁约束模块的 80%。新增或改动模块必须配同名测试。
 - 开发前先读 `.specify/memory/constitution.md`：它约束两侧同改、单文件 ≤500 行、测试完备、优雅降级等九条原则。
 - 需求与设计细节在 `specs/`：001 平台、002 运行端，以及 004 灵魂设计、006 @引用浮层、007 下一步提示、
-  008 上传类型、009 数据隔离、010 消息渲染、011 预览放大、012 上传命名、013 意图聚焦、016 本体技能聚焦。
+  008 上传类型、009 数据隔离、010 消息渲染、011 预览放大、012 上传命名、013 意图聚焦、016 本体技能聚焦、
+  017 本体术语映射、018 术语替换、019 意图聚焦发散、023 粘贴上传、026 只有附件、027 输入改写。
 
 ---
 

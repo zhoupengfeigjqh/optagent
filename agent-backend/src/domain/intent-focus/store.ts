@@ -73,8 +73,49 @@ export interface ConceptFocusRecord {
   via_concept: string | null;
 }
 
-/** 一条判定记录（字段口径见 `data-model.md §5`） */
-export interface IntentFocusRecord {
+/**
+ * 指代改写留档字段（027）。
+ *
+ * 独立成一组是为了让 **`IntentFocusRecordDraft` 能把它声明为可选**：
+ * 存量调用方（测试、历史早退分支）不必为了编译期齐全而逐个补七个键，
+ * 而 `buildRecordDraft` 保证**新记录恒有这七个键**（缺省见 data-model §4.1）。
+ */
+export interface RewriteFocusRecord {
+  /** 判定结论；`null` = 未执行（开关关 / 跳过 / 短路 / 未配置 / 判定失败） */
+  need_rewrite: boolean | null;
+  /** 单条 `noul` 分数（未执行或失败为 `null`） */
+  rewrite_score: number | null;
+  /** 实际送进评分的改写文本（≤100 码点）；空串 = 未改写 */
+  rewrite_query: string;
+  /** 改写结果是否因超 100 字被截断 */
+  rewrite_truncated: boolean;
+  /** 改写耗时（毫秒）；未执行为 `null` */
+  rewrite_ms: number | null;
+  /** 参与改写的历史问答轮数（0~3） */
+  rewrite_history_turns: number;
+  /** 原因枚举（见 data-model §3.1 / §3.2）；未执行且未失败为 `null` */
+  rewrite_reason: string | null;
+}
+
+/**
+ * 改写字段的缺省值（**唯一来源**）。
+ *
+ * 两处共用：`record.ts` 铸造新记录时逐项兜底；`store.append` 面对调用方
+ * 自带的 Partial draft（测试 / 分析工具）时补齐成完整记录——写入端保证
+ * "落盘的每一行都有这七个键"，读取端（仅分析与测试）才不必判空。
+ */
+export const REWRITE_RECORD_DEFAULTS: Readonly<RewriteFocusRecord> = Object.freeze({
+  need_rewrite: null,
+  rewrite_score: null,
+  rewrite_query: '',
+  rewrite_truncated: false,
+  rewrite_ms: null,
+  rewrite_history_turns: 0,
+  rewrite_reason: null,
+});
+
+/** 一条判定记录（字段口径见 `data-model.md §4.1`） */
+export interface IntentFocusRecord extends RewriteFocusRecord {
   at: string;
   thread_id: string;
   agent_name: string;
@@ -107,8 +148,17 @@ export interface IntentFocusRecord {
   error: string | null;
 }
 
-/** 调用方提供的字段（`at` / `seq` 由存储补齐） */
-export type IntentFocusRecordDraft = Omit<IntentFocusRecord, 'at' | 'seq'> & { at?: string };
+/**
+ * 调用方提供的字段（`at` / `seq` 由存储补齐）。
+ *
+ * 027：改写相关的七个键在这里**可选**——只有 `buildRecordDraft` 是权威铸造点，
+ * 其它直接构造 draft 的调用方（测试、将来的分析工具）不必关心它们；
+ * 由 `buildRecordDraft` 写入的记录则恒有这七个键。
+ */
+export type IntentFocusRecordDraft = Omit<
+  IntentFocusRecord,
+  'at' | 'seq' | keyof RewriteFocusRecord
+> & { at?: string } & Partial<RewriteFocusRecord>;
 
 export interface IntentFocusStoreLogger {
   warn(msg: string): void;
@@ -177,6 +227,7 @@ export class IntentFocusStore {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const seq = this.bumpSeq(key, file);
       const record: IntentFocusRecord = {
+        ...REWRITE_RECORD_DEFAULTS,
         ...draft,
         at: draft.at ?? new Date().toISOString(),
         seq,

@@ -49,7 +49,7 @@ describe('createTermNormalizeApi', () => {
     })
   })
 
-  it('可传入 signal（调用方用于 1.5s 超时取消）', async () => {
+  it('可传入 signal（调用方用于 3s 超时取消）', async () => {
     const { api, calls } = apiWith({ applied: false, original: 'a', normalized: 'a', matches: [] })
     const controller = new AbortController()
     await api.review('a', controller.signal)

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 组件测试：SOUL 编辑器（`FR-016`、`FR-019`）。
  *
  * 这里守的是**必填项的可辨识性**：角色简介、主要使命、以及「快速上手」入口
@@ -66,7 +66,12 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(input.exists()).toBe(true)
     expect(input.element.type).toBe('checkbox')
     expect(input.element.checked).toBe(false)
-    expect(wrapper.find('.soul-editor__next-steps').text()).toContain('是否开启下一步动作提示')
+    // 2026-11-20：四个运行期开关合并进同一「意图聚焦」区块、同级展示，
+    // 断言它们确实在**同一个** fieldset 内（不再有独立的下一步动作提示区块）
+    const block = wrapper.find('.soul-editor__intent-focus')
+    expect(block.text()).toContain('是否开启下一步动作提示')
+    expect(block.text()).toContain('输入重写')
+    expect(block.text()).toContain('术语替换')
   })
 
   it('勾选 → `update:modelValue` 携带 `next_action_hints: true`（布尔，不是字符串）', async () => {
@@ -289,7 +294,8 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
 
     expect(hint).toContain('意图判定')
     // 生效前提：只有关联了本体技能才有可聚焦的对象
-    expect(hint).toContain('只有关联了本体技能才生效')
+    // （界面文案为「有本体技能时阶数配置才生效！」，与本断言同义）
+    expect(hint).toContain('有本体技能时阶数配置才生效')
   })
 
   it('存量设计态缺该键 → 按关闭渲染，不报错', () => {
@@ -364,5 +370,90 @@ describe('SoulEditor —— 聚焦阶数（019）', () => {
     expect(hint).toContain('上游')
     expect(hint).toContain('下游')
     expect(hint).toContain('缺省 0 阶')
+  })
+})
+
+/**
+ * 027：输入重写 / 术语替换开关。
+ *
+ * 守四件事（与 007/019 同一套口径）：
+ * - 缺省关闭（新建数字人不多花一次模型调用）；
+ * - 意图聚焦关闭时**置灰但保留勾选值**（再开即恢复，不必重设）；
+ * - 勾选上抛的是**布尔**，且不动另一个开关；
+ * - 界面文案把"替换的前提"说清（没有术语映射集时开了也不生效）。
+ */
+describe('SoulEditor —— 输入重写 / 术语替换开关（027）', () => {
+  function checkbox(wrapper: ReturnType<typeof mountEditor>, key: string) {
+    return wrapper.find<HTMLInputElement>(`[data-test="${key}"]`)
+  }
+
+  it('缺省两个开关都不勾选（新建数字人不多花模型调用）', () => {
+    const wrapper = mountEditor()
+
+    expect(checkbox(wrapper, 'input-rewrite').element.checked).toBe(false)
+    expect(checkbox(wrapper, 'term-normalize').element.checked).toBe(false)
+  })
+
+  it('意图聚焦关闭时置灰；开启时可用', () => {
+    const off = mountEditor()
+    expect(checkbox(off, 'input-rewrite').element.disabled).toBe(true)
+    expect(checkbox(off, 'term-normalize').element.disabled).toBe(true)
+
+    const on = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    expect(checkbox(on, 'input-rewrite').element.disabled).toBe(false)
+    expect(checkbox(on, 'term-normalize').element.disabled).toBe(false)
+  })
+
+  it('关闭态数值保留：置灰但仍回显勾选（再次打开即恢复）', () => {
+    const wrapper = mountEditor({
+      ...emptySoulDesign(),
+      intent_focus: false,
+      input_rewrite: true,
+      term_normalize: true,
+    })
+
+    expect(checkbox(wrapper, 'input-rewrite').element.checked).toBe(true)
+    expect(checkbox(wrapper, 'term-normalize').element.checked).toBe(true)
+    expect(checkbox(wrapper, 'input-rewrite').element.disabled).toBe(true)
+  })
+
+  it('勾选上抛布尔值，且不影响另一个开关', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+
+    await checkbox(wrapper, 'input-rewrite').setValue(true)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.input_rewrite).toBe(true)
+    expect(emitted.term_normalize).toBe(false)
+    expect(typeof emitted.input_rewrite).toBe('boolean')
+  })
+
+  it('关闭意图聚焦只改开关，不动两个新开关的值', async () => {
+    const wrapper = mountEditor({
+      ...emptySoulDesign(),
+      intent_focus: true,
+      input_rewrite: true,
+      term_normalize: true,
+    })
+
+    await wrapper.find<HTMLInputElement>('[data-test="intent-focus"]').setValue(false)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(false)
+    expect(emitted.input_rewrite).toBe(true)
+    expect(emitted.term_normalize).toBe(true)
+  })
+
+  it('术语替换的前提在界面上写清（没有术语映射集时开启也不生效）', () => {
+    const hint = mountEditor().find('[data-test="term-normalize-hint"]').text()
+
+    expect(hint).toContain('仅当该数字人拥有本体术语映射集时，开启本功能才会生效')
+  })
+
+  it('输入重写说明只影响聚焦（用户消息与历史仍是原话）', () => {
+    const hint = mountEditor().find('[data-test="input-rewrite-hint"]').text()
+
+    expect(hint).toContain('改写只影响本轮聚焦')
+    expect(hint).toContain('原话')
   })
 })

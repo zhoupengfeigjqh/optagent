@@ -96,6 +96,17 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.coerce.number().min(0).max(1).optional(),
   ),
+  /**
+   * 027：指代判定阈值（0~1）。设置后**覆盖** `intent_focus.rewrite_threshold`。
+   *
+   * 与 `skill_threshold` 同一取径（阈值是最需要现场调的参数），但**上限更严**：
+   * 只有 `score 严格大于` 该值才发起改写，"多调一次模型"的代价比"少聚焦一个技能"高。
+   * 空串同样按未设置处理（`.env` 模板留空键很常见）。
+   */
+  INTENT_FOCUS_REWRITE_THRESHOLD: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.coerce.number().min(0).max(1).optional(),
+  ),
 });
 
 const modelEntrySchema = z.object({
@@ -112,11 +123,14 @@ const modelEntrySchema = z.object({
  */
 export const INTENT_FOCUS_LIMITS = {
   /**
-   * 单次判定超时（毫秒）：低于下限会被冷启动/长题面误伤；
-   * 上限 10s 是因为 `noul` 按批发送——32 题一批约 1.8~2.2s，最多 3 批仍在预算内。
+   * 整轮判定预算（毫秒）：低于下限会被冷启动/长题面误伤。
+   *
+   * 上限 **20s**（2026-11-20 由 10s 放宽）：`noul` 按批发送，32 题一批约 1.8~2.2s，
+   * 3 批 + 一次改写正常情况下仍在 10s 内；放宽是为极慢网络 / 大批量候选留配置余量，
+   * 缺省仍是 10s——判定再久也不会让回答更早出现，不主动拖长用户等待。
    */
   timeoutMsMin: 300,
-  timeoutMsMax: 10_000,
+  timeoutMsMax: 20_000,
   /** 分数阈值 */
   thresholdMin: 0,
   thresholdMax: 1,
@@ -132,6 +146,15 @@ export const INTENT_FOCUS_LIMITS = {
    */
   maxCapabilitiesMin: 1,
   maxCapabilitiesMax: 96,
+  /**
+   * 027：单次改写的超时区间（毫秒）。
+   *
+   * 下限 300 与判定批次的 `MIN_BATCH_TIMEOUT_MS` 同口径（再低会把正常前向计算误伤成超时）；
+   * 上限 10s 是**单次改写**的绝对上限（一次非流式聚合调用，再长也不会有额外收益），
+   * 与整轮预算解耦；校验时仍要求 `rewrite_timeout_ms <= timeout_ms`。
+   */
+  rewriteTimeoutMsMin: 300,
+  rewriteTimeoutMsMax: 10_000,
 } as const;
 
 /**
@@ -152,6 +175,10 @@ export const INTENT_FOCUS_DEFAULTS = {
   ontologyThreshold: 0.8,
   maxSkills: 32,
   maxCapabilities: 96,
+  /** 027：指代判定阈值，缺省 0.8（与技能 / 行为同值，2026-11 产品口径） */
+  rewriteThreshold: 0.8,
+  /** 027：单次改写超时，缺省 5s（受整轮预算约束，实际取 `min(该值, 剩余-100)`） */
+  rewriteTimeoutMs: 5000,
 } as const;
 
 /**
@@ -175,6 +202,9 @@ const intentFocusYamlSchema = z
     ontology_threshold: z.unknown().optional(),
     max_skills: z.unknown().optional(),
     max_capabilities: z.unknown().optional(),
+    // 027：输入改写（指代判定阈值 / 单次改写超时）
+    rewrite_threshold: z.unknown().optional(),
+    rewrite_timeout_ms: z.unknown().optional(),
   })
   .strict();
 
@@ -228,6 +258,18 @@ export interface IntentFocusConfig {
   maxSkills: number;
   /** 单轮行为候选上限（2026-11-06 起只装行为，键名保留以兼容存量配置） */
   maxCapabilities: number;
+  /**
+   * 027：指代判定阈值（0~1）：`score > 该值` 才发起改写（严格大于）。
+   *
+   * 与技能阈值刻意独立：改写多一次模型调用（延迟 + 费用），
+   * 现场需要能把"多改一次"和"少聚焦一个技能"分别标定。
+   */
+  rewriteThreshold: number;
+  /**
+   * 027：单次改写的超时上限（毫秒）。实际取值还会被阶段剩余预算进一步收紧
+   * （`min(rewriteTimeoutMs, 剩余 - 100)`，剩余 < 300ms 直接放弃）。
+   */
+  rewriteTimeoutMs: number;
 }
 
 export interface AppConfig {
@@ -370,6 +412,7 @@ function resolveIntentFocus(
   env: EnvSource,
   envSkillThreshold: number | undefined,
   envOntologyThreshold: number | undefined,
+  envRewriteThreshold: number | undefined,
 ): IntentFocusConfig | undefined {
   if (!entry) return undefined;
 
@@ -424,6 +467,28 @@ function resolveIntentFocus(
     INTENT_FOCUS_LIMITS.maxCapabilitiesMax,
     INTENT_FOCUS_DEFAULTS.maxCapabilities,
   );
+  // 027：改写阈值同技能阈值口径（配置文件里的坏值照样校验，撤掉环境变量不静默生效）
+  const yamlRewriteThreshold = readRatio(
+    entry.rewrite_threshold,
+    'intent_focus.rewrite_threshold',
+    INTENT_FOCUS_DEFAULTS.rewriteThreshold,
+  );
+  // 027：缺省值随 `timeout_ms` 收紧——存量部署若把整轮预算调到 4.5s 以下，
+  // 5s 的缺省改写超时会直接让服务起不来；这不是用户写错配置，不该拒绝启动
+  const rewriteTimeoutMs = readIntInRange(
+    entry.rewrite_timeout_ms,
+    'intent_focus.rewrite_timeout_ms',
+    INTENT_FOCUS_LIMITS.rewriteTimeoutMsMin,
+    INTENT_FOCUS_LIMITS.rewriteTimeoutMsMax,
+    Math.min(INTENT_FOCUS_DEFAULTS.rewriteTimeoutMs, timeoutMs),
+    '（毫秒）',
+  );
+  // 半配置不静默收敛：改写比整轮预算还长 ⇒ 必然赶不上，宁可启动就报
+  if (rewriteTimeoutMs > timeoutMs) {
+    throw new ConfigError(
+      `intent_focus.rewrite_timeout_ms 不得大于 timeout_ms（当前 ${rewriteTimeoutMs} > ${timeoutMs}）`,
+    );
+  }
 
   return Object.freeze({
     baseUrl,
@@ -434,6 +499,8 @@ function resolveIntentFocus(
     ontologyThreshold: envOntologyThreshold ?? yamlOntologyThreshold,
     maxSkills,
     maxCapabilities,
+    rewriteThreshold: envRewriteThreshold ?? yamlRewriteThreshold,
+    rewriteTimeoutMs,
   });
 }
 
@@ -484,6 +551,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     env,
     e.INTENT_FOCUS_SKILL_THRESHOLD,
     e.INTENT_FOCUS_ONTOLOGY_THRESHOLD,
+    e.INTENT_FOCUS_REWRITE_THRESHOLD,
   );
 
   // 签名直链的对外基址与部署形态强相关，必须显式声明：

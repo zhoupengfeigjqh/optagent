@@ -74,11 +74,17 @@ starters: …
 
 ## 3. 下一步动作提示（NextAction）
 
+> **本节是 007 期形态，已被 016 取代。**
+>
+> 016 起卡片不再携带 `tools[]` 与 `guidance`：工具引用改为结构化 `tool_tips[]`（`name` / `title` / `ontology_id` / `ontology_name?`，四字段口径见 `specs/016-ontology-skill-focus/spec.md` 的"不变项"，实现以 `agent-backend/src/domain/next-actions.ts` 为准），隐藏引导由服务端 `renderToolTipsInstruction` 现渲染，前端只回传结构化字段、不再回传文本。下面保留 007 期（2026-10-14）的设计记录，仅供追溯。
+>
+> **2026-11-20 勘误**：其中 `buildActionGuidance` 自 2026-11-04（提交 `3f2cae1`，016 改通道）起失去唯一调用方，其实现已于本次删除；`GUIDANCE_MAX_CHARS` / `GUIDANCE_USAGE_MAX_CHARS` / `clip` 随之移除。`guidance` 通道仍保留，但只剩**首屏问题实例卡片**一个生产者（`buildStarterGuidance`）。
+
 | 字段 | 类型 | 必填 | 约束（生成期校验，违反即丢弃该条） |
 |---|---|---|---|
 | `prompt` | string | 是 | 中文自然语言指令；trim 后非空；**≤ 50 字**（Unicode 码点）；MUST NOT 命中任何工具标识符；MUST NOT 含 `snake_case`/`kebab-case`/`CamelCase` 形态 token；同一轮内不重复 |
-| `tools[]` | `SoulToolRef[]` | **是（≥1）** | `{ kind: 'builtin', name }` 或 `{ kind: 'mcp', service, name }`；`toolExposedName(ref)` MUST ∈ 本轮可用工具清单，越界即丢弃**该引用**；**裁剪后引用为空 → 整条丢弃**（FR-009：MUST NOT 下发"无工具卡片"） |
-| `guidance` | string | **是（恒非空）** | 由运行环境按关联工具铸造：下一步卡片用 `buildActionGuidance(tools, briefs)` —— **指明本轮要调用的工具 + 其用途摘要**；首屏问题实例仍用 `buildStarterGuidance`（文案口径不变，本特性不强制 starters 绑定工具）。长度 MUST ≤ **500 字**，**超长按上限截断、MUST NOT 置空**（上限来自既有 `POST .../messages` 的 `guidance` 约束；置空会让 FR-009 的绑定在下一轮失效） |
+| `tools[]` | `SoulToolRef[]` | **是（≥1）** | `{ kind: 'builtin', name }` 或 `{ kind: 'mcp', service, name }`；`toolExposedName(ref)` MUST ∈ 本轮可用工具清单，越界即丢弃**该引用**；**裁剪后引用为空 → 整条丢弃**（FR-009：MUST NOT 下发"无工具卡片"）。**016 起改为 `tool_tips[]`** |
+| `guidance` | string | **是（恒非空）** | ~~由运行环境按关联工具铸造：下一步卡片用 `buildActionGuidance(tools, briefs)`~~ **已废止（016）**：卡片改走 `tool_tips[]`，文本引导由服务端现渲染。首屏问题实例仍用 `buildStarterGuidance`（文案口径不变、不强制 starters 绑定工具）。长度 MUST ≤ **500 字**（`POST .../messages` 的 `guidance` 约束，首屏卡片仍适用） |
 
 **条数上限**：单轮 0~3 条（超出取前 3 条）；0 条等价于"本轮无需下一步"。
 
@@ -87,8 +93,8 @@ starters: …
 | 内容 | 用户可见 | 进模型上下文 | 进历史 |
 |---|---|---|---|
 | `prompt` | ✅（卡片文本 / 确认弹窗 / 发送后的用户消息） | ✅（作为用户消息） | ✅（作为用户消息） |
-| `tools[].exposed_name` | ❌ | ❌（不注入） | ❌ |
-| `guidance` | ❌ | ✅（本轮 `systemExtra`，请求级） | ❌ |
+| `tools[].exposed_name` | ❌ | ❌（不注入）。**016 起改为 `tool_tips[]`，经 `renderToolTipsInstruction` 注入本轮 `systemExtra`** | ❌ |
+| `guidance` | ❌ | ✅（本轮 `systemExtra`，请求级）。**016 起卡片不再产生该字段，仅首屏问题实例使用** | ❌ |
 
 ---
 

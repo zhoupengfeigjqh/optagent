@@ -220,6 +220,12 @@ frontend/                                      # 零改动（预检 applied:fals
 | 手工端到端 + 性能采样 | 三开关组合、指代轮次、重新生成、降级；20 轮指代输入采样 `rewrite_ms` 的 P90 | [quickstart.md](./quickstart.md) |
 | 评测（离线，人工执行） | `tests/fixtures/rewrite-labeled-set.json`（≥30 条）+ `scripts/eval-need-rewrite.mjs` 逐条打真实 Laya，输出准确率 / 误判率并记录 | `node scripts/eval-need-rewrite.mjs`（需真实 Laya 配置） |
 
+**实测（2026-11-19 实施，`npm run test:coverage`）**：`rewrite-prompt.ts` stmts 100 / branch 100；
+`rewrite.ts` stmts 94.33 / branch 91.89；`rewrite-llm.ts` stmts 95.45 / branch 84.61。
+三项均已登记进 `agent-backend/vitest.config.ts` 的模块阈值清单（按 80% 校验）。
+标注集评测脚本以 `--dry-run` 校验了标注集完备性与"命题与实现同源"；**真实 Laya 评测与 20 轮
+P90 采样未在本环境执行**（无 Laya 服务与模型 key），结论待现场补跑，见 quickstart §7。
+
 ## Phase 1 复核
 
 - 未新增依赖 / 容器 / 外部服务 / 公开端点；

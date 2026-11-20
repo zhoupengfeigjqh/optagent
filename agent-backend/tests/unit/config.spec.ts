@@ -150,6 +150,9 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       ontologyThreshold: 0.8,
       maxSkills: 32,
       maxCapabilities: 96,
+      // 027：输入改写的两个新参数同样有缺省，且**整块缺失不阻断启动**（上面已断言）
+      rewriteThreshold: 0.8,
+      rewriteTimeoutMs: 5000,
     });
   });
 
@@ -238,9 +241,9 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
   it('timeout_ms 越界 / 非整数时拒绝启动，并给出区间与当前值', () => {
     const tooSmall = messageOf(`${minimal}  timeout_ms: 299\n`);
     expect(tooSmall).toContain('intent_focus.timeout_ms');
-    expect(tooSmall).toContain('300~10000');
+    expect(tooSmall).toContain('300~20000');
 
-    expect(messageOf(`${minimal}  timeout_ms: 10001\n`)).toContain('intent_focus.timeout_ms');
+    expect(messageOf(`${minimal}  timeout_ms: 20001\n`)).toContain('intent_focus.timeout_ms');
     expect(messageOf(`${minimal}  timeout_ms: 300.5\n`)).toContain('intent_focus.timeout_ms');
   });
 
@@ -281,5 +284,109 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     const message = messageOf(minimal, { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '1.5' });
 
     expect(message).toContain('INTENT_FOCUS_SKILL_THRESHOLD');
+  });
+});
+
+/**
+ * 027：输入改写的两个配置项。
+ *
+ * 这一组守四件事：
+ * - 缺省（0.8 / 5000）在整块存在但没写这两键时生效；
+ * - 越界 / 非整数一律**拒绝启动**（不 clamp、不静默收敛）；
+ * - `rewrite_timeout_ms` 不得超过 `timeout_ms`（半配置不接受）；
+ * - 阈值可被 `INTENT_FOCUS_REWRITE_THRESHOLD` 覆盖，但配置文件里的坏值照样校验。
+ */
+describe('loadConfig - 027 输入改写参数', () => {
+  let seq = 0;
+
+  function writeConfig(block: string): string {
+    seq += 1;
+    const file = path.join(workDir, `rewrite-${seq}.yaml`);
+    writeFileSync(file, `models:\n  - model: test-model\n    api_key: test-key\nintent_focus:\n${block}`, 'utf8');
+    return file;
+  }
+
+  function messageOf(block: string, env: Record<string, string | undefined> = okEnv): string {
+    try {
+      loadConfig({ env, configPath: writeConfig(block) });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      return (error as Error).message;
+    }
+    throw new Error('期望拒绝启动，但 loadConfig 成功了');
+  }
+
+  const minimal = '  base_url: http://laya:8000\n  api_key: laya-dev-key\n';
+
+  it('缺省：阈值 0.8、改写超时 5000ms', () => {
+    const config = loadConfig({ env: okEnv, configPath: writeConfig(minimal) });
+
+    expect(config.intentFocus?.rewriteThreshold).toBe(0.8);
+    expect(config.intentFocus?.rewriteTimeoutMs).toBe(5000);
+  });
+
+  it('可配置且逐项生效（受 timeout_ms 上限约束）', () => {
+    const config = loadConfig({
+      env: okEnv,
+      configPath: writeConfig(`${minimal}  timeout_ms: 8000\n  rewrite_threshold: 0.65\n  rewrite_timeout_ms: 3000\n`),
+    });
+
+    expect(config.intentFocus?.rewriteThreshold).toBe(0.65);
+    expect(config.intentFocus?.rewriteTimeoutMs).toBe(3000);
+  });
+
+  it('阈值越界（>1 / <0）拒绝启动，文案指名 YAML 路径', () => {
+    expect(messageOf(`${minimal}  rewrite_threshold: 1.5\n`)).toContain('intent_focus.rewrite_threshold');
+    expect(messageOf(`${minimal}  rewrite_threshold: -0.1\n`)).toContain('intent_focus.rewrite_threshold');
+  });
+
+  it('改写超时越界 / 非整数拒绝启动，并给出区间与当前值', () => {
+    const tooSmall = messageOf(`${minimal}  rewrite_timeout_ms: 299\n`);
+    expect(tooSmall).toContain('intent_focus.rewrite_timeout_ms');
+    expect(tooSmall).toContain('300~10000');
+
+    expect(messageOf(`${minimal}  rewrite_timeout_ms: 10001\n`)).toContain(
+      'intent_focus.rewrite_timeout_ms',
+    );
+    expect(messageOf(`${minimal}  rewrite_timeout_ms: 300.5\n`)).toContain(
+      'intent_focus.rewrite_timeout_ms',
+    );
+  });
+
+  it('改写超时大于整轮预算时拒绝启动（半配置不静默收敛）', () => {
+    const message = messageOf(`${minimal}  timeout_ms: 3000\n  rewrite_timeout_ms: 5000\n`);
+
+    expect(message).toContain('intent_focus.rewrite_timeout_ms');
+    expect(message).toContain('timeout_ms');
+  });
+
+  it('INTENT_FOCUS_REWRITE_THRESHOLD 覆盖配置文件，空串视为未设置', () => {
+    const overridden = loadConfig({
+      env: { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '0.9' },
+      configPath: writeConfig(`${minimal}  rewrite_threshold: 0.5\n`),
+    });
+    expect(overridden.intentFocus?.rewriteThreshold).toBe(0.9);
+
+    const empty = loadConfig({
+      env: { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '' },
+      configPath: writeConfig(`${minimal}  rewrite_threshold: 0.5\n`),
+    });
+    expect(empty.intentFocus?.rewriteThreshold).toBe(0.5);
+  });
+
+  it('INTENT_FOCUS_REWRITE_THRESHOLD 越界时拒绝启动，文案指名该变量', () => {
+    expect(messageOf(minimal, { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '1.2' })).toContain(
+      'INTENT_FOCUS_REWRITE_THRESHOLD',
+    );
+  });
+
+  it('整块 intent_focus 缺失时不影响启动（改写随整块一起不可用）', () => {
+    const file = path.join(workDir, 'rewrite-none.yaml');
+    writeFileSync(file, 'models:\n  - model: test-model\n    api_key: test-key\n', 'utf8');
+
+    const config = loadConfig({ env: okEnv, configPath: file });
+
+    expect(config.intentFocus).toBeUndefined();
+    expect('intentFocus' in config).toBe(false);
   });
 });

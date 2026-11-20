@@ -287,6 +287,7 @@ export class AgentDesignService {
    * **2026-10-12（007）**：已结构化的存档文档补齐 `next_action_hints: false`
    * 与 `next_action_hints_count` 的缺省值。
    * **2026-10-25（013）**：同上补齐 `intent_focus: false`（存量数字人默认不聚焦）。
+   * **2026-11-19（027）**：同上补齐 `input_rewrite` / `term_normalize` 两个布尔键。
    * 与 `data_prep_fields` 同理——目的是**对外契约恒有该键**，界面不必判空、
    * 部署物化不依赖 `undefined`（`renderSoulMd` 只在 `true` 时写 frontmatter，
    * 故补齐不会让关闭态产物多出任何键）。
@@ -305,13 +306,19 @@ export class AgentDesignService {
     const focus = typeof soul.intent_focus === 'boolean' ? soul.intent_focus : false;
     // 019：聚焦阶数收敛到 0~2（坏值 → 缺省 0，与运行侧 `parseSoulMeta` 同一收敛口径）
     const depth = readStoredFocusDepth(soul.intent_focus_depth);
+    // 027：两个新开关同样收敛到 `false`（非布尔按关，与运行侧 fail-closed 同口径）。
+    // **不随意图聚焦收敛**：聚焦关闭只影响物化，值要保留（管理台置灰、再开即恢复）
+    const inputRewrite = typeof soul.input_rewrite === 'boolean' ? soul.input_rewrite : false;
+    const termNormalize = typeof soul.term_normalize === 'boolean' ? soul.term_normalize : false;
     // 013 修订：下一步动作提示依赖意图聚焦——意图聚焦关闭时，hints 收敛到关（存量数据生效）
     const effectiveHints = hints && focus;
     if (
       effectiveHints === soul.next_action_hints &&
       count === soul.next_action_hints_count &&
       focus === soul.intent_focus &&
-      depth === soul.intent_focus_depth
+      depth === soul.intent_focus_depth &&
+      inputRewrite === soul.input_rewrite &&
+      termNormalize === soul.term_normalize
     ) {
       return doc;
     }
@@ -323,6 +330,8 @@ export class AgentDesignService {
         next_action_hints_count: count,
         intent_focus: focus,
         intent_focus_depth: depth,
+        input_rewrite: inputRewrite,
+        term_normalize: termNormalize,
       },
     };
   }

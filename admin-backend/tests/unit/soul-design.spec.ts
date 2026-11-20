@@ -484,4 +484,44 @@ describe('fromLegacySoul / describeSoul', () => {
     expect(describeSoul(fromLegacySoul('你是助手'))).toBe('你是助手');
     expect(describeSoul(normalizeSoulDesign({ ...validRaw(), intro: '简介优先' }, OPTIONS))).toBe('简介优先');
   });
+
+  it('027：四个意图聚焦开关在「保存 → 重新保存 → 物化 → 回读」四条链路上都不丢', () => {
+    const saved = normalizeSoulDesign(
+      {
+        ...validRaw(),
+        intent_focus: true,
+        intent_focus_depth: 2,
+        input_rewrite: true,
+        term_normalize: true,
+        next_action_hints: true,
+        next_action_hints_count: 2,
+      },
+      OPTIONS,
+    );
+
+    // 1) 保存：四个开关按真值落库
+    expect(saved).toMatchObject({
+      intent_focus: true,
+      intent_focus_depth: 2,
+      input_rewrite: true,
+      term_normalize: true,
+      next_action_hints: true,
+      next_action_hints_count: 2,
+    });
+
+    // 2) 重新保存：管理台二次提交整份 soul，归一化必须幂等（不然"没改也变脏"）
+    const resaved = normalizeSoulDesign(saved as unknown as Record<string, unknown>, OPTIONS);
+    expect(resaved).toEqual(saved);
+
+    // 3) 物化：四个开关写进 frontmatter
+    const md = renderSoulMd(resaved);
+    expect(md).toContain('intent_focus: true');
+    expect(md).toContain('intent_focus_depth: 2');
+    expect(md).toContain('input_rewrite: true');
+    expect(md).toContain('term_normalize: true');
+
+    // 4) 回读：落盘对象经过一次 JSON 往返再归一化，仍然一致
+    const reread = JSON.parse(JSON.stringify(resaved)) as Record<string, unknown>;
+    expect(normalizeSoulDesign(reread, OPTIONS)).toEqual(saved);
+  });
 });

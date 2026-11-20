@@ -34,6 +34,9 @@ const CONFIG: IntentFocusConfig = {
   ontologyThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
+  // 027：改写参数（缺省关闭时不会被用到，但类型上必需）
+  rewriteThreshold: 0.8,
+  rewriteTimeoutMs: 5000,
 };
 
 const tmpDirs: string[] = [];
@@ -161,6 +164,23 @@ interface HarnessOptions {
   /** 019：聚焦阶数（缺省 0） */
   depth?: number;
   logger?: { info: (obj: Record<string, unknown>, msg: string) => void; warn: (obj: Record<string, unknown>, msg: string) => void };
+  /**
+   * 027：输入改写。缺省 = 开关关闭 / 端口未装配（与改造前行为一致），
+   * 因此既有用例不需要任何改动。
+   */
+  rewrite?: {
+    enabled?: boolean;
+    /** 改写产物（缺省「改写后的意图」） */
+    text?: string;
+    /** 历史素材 */
+    history?: ReadonlyArray<{
+      role: 'user' | 'assistant';
+      content: string;
+      status?: 'completed' | 'failed';
+    }>;
+    /** 让改写调用抛错 */
+    fail?: boolean;
+  };
 }
 
 function harness(root: string, options: HarnessOptions = {}) {
@@ -190,6 +210,19 @@ function harness(root: string, options: HarnessOptions = {}) {
         }),
     isEnabled: () => options.enabled ?? true,
     getDepth: () => options.depth ?? 0,
+    // 027：缺省不开启改写（既有 013/016/019 用例不受影响）
+    isRewriteEnabled: () => options.rewrite?.enabled === true,
+    ...(options.rewrite
+      ? {
+          readHistory: () => options.rewrite!.history ?? [],
+          rewriteLlm: {
+            complete: async () => {
+              if (options.rewrite!.fail) throw new Error('改写模型不可用');
+              return options.rewrite!.text ?? '改写后的意图';
+            },
+          },
+        }
+      : {}),
     ...(options.logger ? { logger: options.logger } : {}),
     now: () => 1_000,
   });
@@ -627,5 +660,126 @@ describe('日志与本体名回退', () => {
     const { runner } = harness(root);
     const { prompt } = await runner.judge(input());
     expect(prompt).toContain("ontology_name='原材料采购和库存'");
+  });
+});
+
+/**
+ * 027：指代改写在编排里的接入位置。
+ *
+ * 两件事必须能测出来：
+ * - **短路先于改写**：无技能 / 无可聚焦技能轮次零判定零改写（契约 O-3）；
+ * - **评分素材已切换**：改写成功后，技能与行为判定收到的 `state` 是改写文本，
+ *   而留档的 `input` 仍是原文（C-1 / O-5）。
+ */
+describe('027 指代改写接入', () => {
+  /** 判定桩：改写命题给 0.95，其余按题面打分（与默认桩同口径） */
+  const decideWithRewrite: IntentFocusClient['decide'] = async (_state, questions) => {
+    const scores: Record<string, number> = {};
+    for (const [qid, question] of Object.entries(questions)) {
+      scores[qid] =
+        qid === 'need_rewrite' ? 0.95 : scoreOf((question as { instructions: string }).instructions);
+    }
+    return { ok: true, scores, model: 'laya-multilingual' };
+  };
+
+  it('无技能短路：零判定零改写，记录里 need_rewrite=null', async () => {
+    const { root } = fixture({ skills: [] });
+    const calls: Array<{ state: string }> = [];
+    const { runner, records } = harness(root, {
+      rewrite: { enabled: true },
+      decide: async (state, questions) => {
+        calls.push({ state });
+        return decideWithRewrite(state, questions);
+      },
+    });
+
+    await runner.judge(input());
+
+    expect(calls).toHaveLength(0);
+    expect(records[0]).toMatchObject({
+      disposition: 'empty',
+      reason: 'no_skills',
+      need_rewrite: null,
+      rewrite_query: '',
+      rewrite_reason: null,
+    });
+  });
+
+  it('无可聚焦技能短路：同样零判定零改写', async () => {
+    const { root } = fixture({
+      skills: [{ dir: 'orphan', name: 'orphan-skill', description: '孤儿本体技能', ontologyId: '404' }],
+      ontology: false,
+    });
+    const calls: Array<{ state: string }> = [];
+    const { runner, records } = harness(root, {
+      rewrite: { enabled: true },
+      decide: async (state, questions) => {
+        calls.push({ state });
+        return decideWithRewrite(state, questions);
+      },
+    });
+
+    await runner.judge(input());
+
+    expect(calls).toHaveLength(0);
+    expect(records[0]).toMatchObject({ need_rewrite: null, rewrite_query: '' });
+  });
+
+  it('改写成功后：技能 / 行为评分用改写文本，留档 input 仍是原文', async () => {
+    const { root } = fixture();
+    const states: string[] = [];
+    const { runner, records } = harness(root, {
+      rewrite: {
+        enabled: true,
+        text: '分析上批原材料采购单的到货延迟',
+        history: [{ role: 'user', content: '上一轮问的采购单', status: 'completed' }],
+      },
+      decide: async (state, questions) => {
+        states.push(state);
+        return decideWithRewrite(state, questions);
+      },
+    });
+
+    await runner.judge(input());
+
+    // 第 1 次是改写命题（素材仍是原文），之后是技能 / 行为（素材已切换）
+    expect(states[0]).toBe('帮我创建一笔原材料采购单');
+    expect(states.slice(1).every((state) => state === '分析上批原材料采购单的到货延迟')).toBe(true);
+
+    const [record] = records;
+    expect(record).toMatchObject({
+      disposition: 'focused',
+      input: '帮我创建一笔原材料采购单',
+      need_rewrite: true,
+      rewrite_score: 0.95,
+      rewrite_query: '分析上批原材料采购单的到货延迟',
+      rewrite_truncated: false,
+      // 只有 user 一条历史、没有成对 assistant ⇒ 不构成完整轮
+      rewrite_history_turns: 0,
+      rewrite_reason: 'no_history',
+    });
+  });
+
+  it('改写失败：评分退回原文，记录带原因，仍然完成聚焦', async () => {
+    const { root } = fixture();
+    const states: string[] = [];
+    const { runner, records } = harness(root, {
+      rewrite: { enabled: true, fail: true },
+      decide: async (state, questions) => {
+        states.push(state);
+        return decideWithRewrite(state, questions);
+      },
+    });
+
+    const result = await runner.judge(input());
+
+    expect(result.prompt).toContain('onto-skill');
+    expect(states.slice(1).every((state) => state === '帮我创建一笔原材料采购单')).toBe(true);
+    expect(records[0]).toMatchObject({
+      disposition: 'focused',
+      need_rewrite: true,
+      rewrite_query: '',
+      rewrite_reason: 'llm_failed',
+    });
   });
 });

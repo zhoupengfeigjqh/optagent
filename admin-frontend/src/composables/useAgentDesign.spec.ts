@@ -32,6 +32,8 @@ const SOUL = {
   next_action_hints_count: 3,
   intent_focus: false,
   intent_focus_depth: 0,
+  input_rewrite: false,
+  term_normalize: false,
 }
 
 const DESIGN = {
@@ -74,6 +76,8 @@ describe('emptyDraft', () => {
         next_action_hints_count: 3,
         intent_focus: false,
         intent_focus_depth: 0,
+        input_rewrite: false,
+        term_normalize: false,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -386,6 +390,28 @@ describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，202
     const legacyEditor = useAgentDesign()
     await legacyEditor.resetToCopy('副本', 'demo')
     expect(legacyEditor.draft.value.soul.intent_focus).toBe(false)
+  })
+
+  it('复制源带输入重写 / 术语替换开关（027）：一并带走；老存档缺键 → 归一为关', async () => {
+    getAgent.mockResolvedValue({
+      ...DESIGN,
+      soul: { ...SOUL, intent_focus: true, input_rewrite: true, term_normalize: true },
+    })
+    const editor = useAgentDesign()
+    await editor.resetToCopy('副本', 'demo')
+
+    expect(editor.draft.value.soul.input_rewrite).toBe(true)
+    expect(editor.draft.value.soul.term_normalize).toBe(true)
+
+    const legacy = { ...SOUL } as Partial<typeof SOUL>
+    delete legacy.input_rewrite
+    delete legacy.term_normalize
+    getAgent.mockResolvedValue({ ...DESIGN, soul: legacy })
+    const legacyEditor = useAgentDesign()
+    await legacyEditor.resetToCopy('副本', 'demo')
+
+    expect(legacyEditor.draft.value.soul.input_rewrite).toBe(false)
+    expect(legacyEditor.draft.value.soul.term_normalize).toBe(false)
   })
 
   it('问题实例（starters）逐层深拷贝：改草稿的提示文本与关联工具都不污染源', async () => {

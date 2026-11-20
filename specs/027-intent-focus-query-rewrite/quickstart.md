@@ -152,10 +152,29 @@ docker compose ps            # 全部 healthy / running
 
 ---
 
-## 6. 回滚
+## 6. 回滚与升级注意
+
+**升级注意（必读）**：「输入重写」与「术语替换」**默认都关闭**。
+
+- 升级到 027 后，**术语替换不再随「意图聚焦」自动生效**：018 时期已开启意图聚焦的存量数字人，需要管理员在「意图聚焦」配置区显式勾选「术语替换」并**重新部署**，否则表现为"替换不见了"（`POST /api/term-normalize` 在读取术语表之前就返回 `applied:false`，零 IO、零弹窗）；
+- 「输入重写」同理：不勾选 = 零判定、零改写、零读历史，行为与 016 / 019 逐字一致；
+- 判断依据只有一个：`SOUL.md` frontmatter 里有没有 `term_normalize: true` / `input_rewrite: true`（且 `intent_focus: true`）。
 
 无需数据回滚：
 
 1. 管理台取消「输入重写」「术语替换」并重新部署 → 运行期零新增调用，行为回到 016 / 019 口径；
 2. 关闭「意图聚焦」→ 本特性与术语替换整体不生效（含管理台置灰）；
 3. 留档新增字段对旧读取方是可选字段，无需删除历史记录。
+
+---
+
+## 7. 验证记录（2026-11-19 实施）
+
+| 项 | 命令 / 方式 | 结果 |
+|---|---|---|
+| 三侧门禁 | `cd agent-backend && npm run gate`；`cd admin-backend && npm test`；`cd admin-frontend && npm test` | 后端 1697 passed / 127 files（typecheck + lint + coverage + build 全过）；管理服务 717 passed / 57 files（单测 + 集成）；管理前端 683 passed / 57 files；三侧 `package.json` 与 lockfile 均无变化 |
+| 新增模块覆盖率 | `npm run test:coverage` | `rewrite-prompt.ts` 100%；`rewrite.ts` stmts 94.33 / branch 91.89；`rewrite-llm.ts` stmts 95.45 / branch 84.61（均 ≥ 80%，已登记进 `vitest.config.ts` 阈值清单） |
+| 指代判定标注集 | `node scripts/eval-need-rewrite.mjs --dry-run` | 32 条（代指 / 独立问句 / 短句 / 长粘贴各 8 条）；命题与实现同源校验通过；类别覆盖达标 |
+| 真实 Laya 评测（SC-001） | `LAYA_BASE_URL=... node scripts/eval-need-rewrite.mjs` | **未执行**：本次实施环境无可用 Laya 服务与 key，需现场按 §2 起服务后补跑并把准确率 / 误判率回填本表 |
+| 手工端到端（§2.1~§2.4） | 本地起 backend + 真实模型 | **未执行**：同上（无真实 Laya / 模型 key）；自动化端到端已覆盖同路径（`tests/integration/chat-rewrite*.spec.ts`，含降级与预算） |
+| P90 采样（SC-005） | 20 轮指代输入取 `rewrite_ms` | **未执行**：依赖真实模型链路，随上两项一并补跑 |

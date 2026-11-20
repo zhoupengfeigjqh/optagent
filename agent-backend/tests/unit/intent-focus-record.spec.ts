@@ -179,6 +179,56 @@ describe('buildRecordDraft', () => {
     expect(draft.behaviors).toHaveLength(96);
   });
 
+  it('027：早退分支（不传 rewrite）也恒有七个改写字段，取缺省', () => {
+    const draft = buildRecordDraft({
+      ...BASE,
+      skills: [],
+      capabilities: selection(),
+    });
+
+    expect(draft).toMatchObject({
+      need_rewrite: null,
+      rewrite_score: null,
+      rewrite_query: '',
+      rewrite_truncated: false,
+      rewrite_ms: null,
+      rewrite_history_turns: 0,
+      rewrite_reason: null,
+    });
+    // "未执行"与"失败"必须可分：未执行时两个键都是 null（契约 §8）
+    expect(draft.need_rewrite).toBeNull();
+    expect(draft.rewrite_reason).toBeNull();
+  });
+
+  it('027：改写字段原样落档（含截断标记与原因）', () => {
+    const draft = buildRecordDraft({
+      ...BASE,
+      skills: [skill(true)],
+      capabilities: selection(),
+      rewrite: {
+        need_rewrite: true,
+        rewrite_score: 0.92,
+        rewrite_query: '分析上批原材料采购单的到货延迟',
+        rewrite_truncated: true,
+        rewrite_ms: 812,
+        rewrite_history_turns: 2,
+        rewrite_reason: null,
+      },
+    });
+
+    expect(draft).toMatchObject({
+      need_rewrite: true,
+      rewrite_score: 0.92,
+      rewrite_query: '分析上批原材料采购单的到货延迟',
+      rewrite_truncated: true,
+      rewrite_ms: 812,
+      rewrite_history_turns: 2,
+      rewrite_reason: null,
+    });
+    // 既有字段语义不变：`input` 仍是**原文**，便于对照"用户说了什么"
+    expect(draft.input).toBe('创建采购单');
+  });
+
   it('输入截断标记与错误原样带出', () => {
     const draft = buildRecordDraft({
       ...BASE,

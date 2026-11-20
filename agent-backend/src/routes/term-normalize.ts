@@ -7,7 +7,10 @@
  *
  * 本端点职责很薄——**只做编排**：开关判定、读表、调匹配、组响应。
  * 口径与算法分别在 `domain/term-normalize/{tables,matcher}.ts`：
- * - 开关 = 意图聚焦开关，且只有 `isIntentFocusEnabled` 一个判定源（fail-closed、逐次读盘）；
+ * - 027：闸门 = 「意图聚焦」**且**「术语替换」两个 SOUL 开关（都在 `soul.ts`，
+ *   fail-closed、逐次读盘）。018 时期"意图聚焦即替换"已废止：升级后需管理员
+ *   显式开启术语替换并重新部署，否则表现为"替换不见了"（见部署说明）；
+ * - 本路由是该闸门的**唯一**判定点（前端零改动）；
  * - 关闭 / 无字典 / 读表失败 → `applied:false`，前端直接按原话发送，用户无感。
  *
  * 归属数字人取服务端"当前选中数字人"（与其余请求同源），客户端不能指定。
@@ -17,7 +20,7 @@ import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { agentDir } from '../domain/dirs.js';
-import { isIntentFocusEnabled } from '../domain/soul.js';
+import { isIntentFocusEnabled, isTermNormalizeEnabled } from '../domain/soul.js';
 import { normalizeByTerms, type TermMatch } from '../domain/term-normalize/matcher.js';
 import { loadTermTable } from '../domain/term-normalize/tables.js';
 import { ApiError } from '../server.js';
@@ -77,14 +80,18 @@ export function registerTermNormalizeRoutes(app: FastifyInstance, ctx: AppContex
         matches: [],
       };
 
-      // 开关唯一判定源：与意图聚焦同一函数，关闭时不读任何术语文件
-      const enabled = isIntentFocusEnabled(ctx.config.optAgentRoot, userId, agentName, {
-        warn: (msg) =>
+      // 027：闸门改为「意图聚焦 && 术语替换」——任一关闭都不读术语文件（零 IO、零弹窗）。
+      // 顺序刻意先读意图聚焦：它关闭时绝大多数请求在这一步就返回，省掉第二次读盘。
+      const gateLogger = {
+        warn: (msg: string) =>
           ctx.loggers.logger.warn(
             { event: 'term_normalize.gate', user_id: userId, agent_name: agentName },
             msg,
           ),
-      });
+      };
+      const enabled =
+        isIntentFocusEnabled(ctx.config.optAgentRoot, userId, agentName, gateLogger) &&
+        isTermNormalizeEnabled(ctx.config.optAgentRoot, userId, agentName, gateLogger);
       if (!enabled) return unchanged;
 
       const loaded = loadTermTable(agentDir(ctx.config.optAgentRoot, userId, agentName));

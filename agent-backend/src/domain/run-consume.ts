@@ -190,6 +190,10 @@ export async function consumeTurn(
           messageId: run.assistantMessageId,
           userInput: opts.userMessage,
           skip: skipFocus,
+          // 027：改写用**本轮生效的模型**（请求级覆盖优先），并用本轮信号做中止，
+          // 用户点"停止"时改写调用随之取消（不得在后台继续烧 token）。
+          ...(opts.model ? { model: opts.model } : {}),
+          signal: run.controller.signal,
         });
         focusToolTips = focus.toolTips;
         if (focus.prompt !== '') {

@@ -15,7 +15,9 @@ import { AgentConfigError, loadAgentConfig } from '../../src/domain/agent-instan
 import {
   buildStarterGuidance,
   emptySoulMeta,
+  isInputRewriteEnabled,
   isNextActionsEnabled,
+  isTermNormalizeEnabled,
   nextActionHintsCount,
   parseExposedName,
   parseSoulMeta,
@@ -318,5 +320,88 @@ describe('loadAgentConfig —— frontmatter 不进 System Prompt（004）', () 
   it('仅有 frontmatter、正文为空 → 配置错误（不给模型一个空提示词）', () => {
     const dir = writeAgent('empty-body', '---\nintro: x\n---\n');
     expect(() => loadAgentConfig(dir)).toThrow(AgentConfigError);
+  });
+});
+
+/**
+ * 027：两个新开关（`input_rewrite` / `term_normalize`）。
+ *
+ * 口径与 007 / 013 完全一致——**缺键或非布尔即 false**（fail-closed），
+ * 读取失败返回 false 并告警，且两者都不进 System Prompt 正文。
+ */
+describe('parseSoulMeta —— 输入重写 / 术语替换开关（027）', () => {
+  it('true 时开启，false / 缺键 / 非布尔一律关闭', () => {
+    const on = parseSoulMeta('---\ninput_rewrite: true\nterm_normalize: true\n---\n正文');
+    expect(on.inputRewrite).toBe(true);
+    expect(on.termNormalize).toBe(true);
+
+    expect(parseSoulMeta('---\ninput_rewrite: false\n---\n正文').inputRewrite).toBe(false);
+    expect(parseSoulMeta('---\nintro: 无开关\n---\n正文').inputRewrite).toBe(false);
+    expect(parseSoulMeta('---\ninput_rewrite: "yes"\n---\n正文').inputRewrite).toBe(false);
+    expect(parseSoulMeta('---\ninput_rewrite: 1\n---\n正文').inputRewrite).toBe(false);
+    expect(parseSoulMeta('---\nterm_normalize: null\n---\n正文').termNormalize).toBe(false);
+  });
+
+  it('空结构里两个开关都是 false（新建 / 旧文档的缺省）', () => {
+    expect(emptySoulMeta().inputRewrite).toBe(false);
+    expect(emptySoulMeta().termNormalize).toBe(false);
+  });
+
+  it('两个开关都不进 System Prompt 正文（开关只影响运行期行为）', () => {
+    const raw = '---\nintent_focus: true\ninput_rewrite: true\nterm_normalize: true\n---\n你是交付助理';
+    expect(stripFrontmatter(raw)).toBe('你是交付助理');
+  });
+});
+
+describe('isInputRewriteEnabled / isTermNormalizeEnabled —— 读盘口径（027）', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'soul-rewrite-switch-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeSoul(name: string, soul: string): void {
+    const dir = path.join(root, 'users', 'u1', 'agents', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SOUL.md'), soul, 'utf8');
+  }
+
+  it('逐次读盘取各自的值（互不串味）', () => {
+    writeSoul('both', '---\nintent_focus: true\ninput_rewrite: true\nterm_normalize: true\n---\n正文');
+    writeSoul('rewrite-only', '---\nintent_focus: true\ninput_rewrite: true\n---\n正文');
+    writeSoul('none', '---\nintent_focus: true\n---\n正文');
+
+    expect(isInputRewriteEnabled(root, 'u1', 'both')).toBe(true);
+    expect(isTermNormalizeEnabled(root, 'u1', 'both')).toBe(true);
+    expect(isInputRewriteEnabled(root, 'u1', 'rewrite-only')).toBe(true);
+    expect(isTermNormalizeEnabled(root, 'u1', 'rewrite-only')).toBe(false);
+    expect(isInputRewriteEnabled(root, 'u1', 'none')).toBe(false);
+    expect(isTermNormalizeEnabled(root, 'u1', 'none')).toBe(false);
+  });
+
+  it('SOUL.md 缺失 → false 且各告警一次', () => {
+    const warnings: string[] = [];
+    const logger = { warn: (msg: string) => warnings.push(msg) };
+
+    expect(isInputRewriteEnabled(root, 'u1', 'missing', logger)).toBe(false);
+    expect(isTermNormalizeEnabled(root, 'u1', 'missing', logger)).toBe(false);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('u1');
+  });
+
+  it('YAML 非法 / 键类型不对 → false，且不产生告警噪音', () => {
+    const warnings: string[] = [];
+    const logger = { warn: (msg: string) => warnings.push(msg) };
+    writeSoul('broken', '---\ninput_rewrite: [未闭合\n---\n正文');
+    writeSoul('wrongtype', '---\ninput_rewrite: yes\nterm_normalize: 0\n---\n正文');
+
+    expect(isInputRewriteEnabled(root, 'u1', 'broken', logger)).toBe(false);
+    expect(isInputRewriteEnabled(root, 'u1', 'wrongtype', logger)).toBe(false);
+    expect(isTermNormalizeEnabled(root, 'u1', 'wrongtype', logger)).toBe(false);
+    expect(warnings).toHaveLength(0);
   });
 });

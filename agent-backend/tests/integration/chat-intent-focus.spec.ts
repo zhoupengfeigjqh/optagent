@@ -25,7 +25,9 @@ import {
   type AgentRunRequest,
   type RunAgentLike,
 } from '../../src/domain/run-manager.js';
+import type { ReadHistory, RewriteLlm } from '../../src/domain/intent-focus/rewrite.js';
 import {
+  isInputRewriteEnabled,
   isIntentFocusEnabled,
   isNextActionsEnabled,
   nextActionHintsCount,
@@ -48,6 +50,9 @@ const CONFIG: IntentFocusConfig = {
   ontologyThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
+  // 027：改写参数（本文件里改写端口缺省不装配，故实际不会被调用）
+  rewriteThreshold: 0.8,
+  rewriteTimeoutMs: 5000,
 };
 
 const ONTOLOGY_YAML = [
@@ -223,12 +228,19 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
   }
 
   /** 按部署产物形态写数字人：SOUL 开关 + TOOL/MCP + 技能 + 本体 */
-  function writeAgent(focus: boolean, hints = false, withOntology = true): void {
+  function writeAgent(
+    focus: boolean,
+    hints = false,
+    withOntology = true,
+    /** 027：写入 `input_rewrite: true`（只在聚焦同时开启时才有意义） */
+    rewrite = false,
+  ): void {
     const dir = agentDir(root, USER, AGENT);
     fs.mkdirSync(dir, { recursive: true });
     const lines = ['soul_version: 1'];
     if (hints) lines.push('next_action_hints: true', 'next_action_hints_count: 3');
     if (focus) lines.push('intent_focus: true');
+    if (focus && rewrite) lines.push('input_rewrite: true');
     fs.writeFileSync(
       path.join(dir, 'SOUL.md'),
       `---\n${lines.join('\n')}\n---\n\n## 主要使命\n\n你是助手。\n`,
@@ -259,13 +271,23 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     }
   }
 
-  function makeRunner(client: { decide: ReturnType<typeof makeClient>['decide'] }, withConfig = true) {
+  function makeRunner(
+    client: { decide: ReturnType<typeof makeClient>['decide'] },
+    withConfig = true,
+    /** 027：改写端口（缺省不传 = 改写不可用，因此既有用例零新增调用） */
+    rewrite?: { llm?: RewriteLlm; history?: ReadHistory },
+  ) {
     return new IntentFocusRunner({
       root,
       ...(withConfig ? { config: CONFIG } : {}),
       client,
       store,
       isEnabled: (userId, agentName) => isIntentFocusEnabled(root, userId, agentName),
+      // 027：开关照常逐次现读（SOUL 里没有该键 → false，既有用例行为不变）
+      isRewriteEnabled: (userId, agentName) =>
+        isInputRewriteEnabled(root, userId, agentName),
+      ...(rewrite?.llm ? { rewriteLlm: rewrite.llm } : {}),
+      ...(rewrite?.history ? { readHistory: rewrite.history } : {}),
     });
   }
 
@@ -568,5 +590,245 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     const raw = historyText();
     expect(raw).not.toContain(PREFIX);
     expect(raw).toContain('帮我创建一笔原材料采购单');
+  });
+});
+
+/**
+ * 027：**零调用组合**——改写阶段不得在"本来就不该花模型调用"的轮次里冒出来。
+ *
+ * 五条短路（契约 O-3 / C-3）逐个钉住；同时验证"开关关闭时留档与提示与改造前逐字一致"
+ * （快照，避免后续迭代偷偷改动存量产物）。
+ */
+describe('027 输入重写：零调用组合与存量产物快照', () => {
+  let root: string;
+  let usage: UsageDb;
+  let history: HistoryStore;
+  let store: IntentFocusStore;
+
+  beforeAll(() => {
+    usage = new UsageDb(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'optagent-rewrite-zero-')), 'usage.db'));
+  });
+
+  afterAll(() => {
+    usage.close();
+  });
+
+  function freshRoot(): void {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'optagent-rewrite-zero-'));
+    history = new HistoryStore(root);
+    store = new IntentFocusStore(root);
+  }
+
+  function writeAgent(rewrite: boolean, withOntology = true, withSkills = true): void {
+    const dir = agentDir(root, USER, AGENT);
+    fs.mkdirSync(dir, { recursive: true });
+    const lines = ['soul_version: 1', 'intent_focus: true'];
+    if (rewrite) lines.push('input_rewrite: true');
+    fs.writeFileSync(
+      path.join(dir, 'SOUL.md'),
+      `---\n${lines.join('\n')}\n---\n\n## 主要使命\n\n你是助手。\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(dir, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
+    fs.writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
+    if (!withSkills) return;
+    const skillDir = path.join(dir, 'skills', 'onto');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: onto-skill\ndescription: 原材料采购和库存本体技能\nmetadata:\n  ontology_id: 1\n  ontology_name: 原材料采购和库存\n  scenario_id: 2\n  scenario_name: 生产调度\n---\n',
+      'utf8',
+    );
+    if (withOntology) {
+      const ontoDir = path.join(dir, 'ontology', '生产调度', '原材料采购和库存');
+      fs.mkdirSync(ontoDir, { recursive: true });
+      fs.writeFileSync(path.join(ontoDir, 'ontology.yaml'), ONTOLOGY_YAML, 'utf8');
+    }
+  }
+
+  interface Counters {
+    judge: number;
+    rewrite: number;
+    historyReads: number;
+  }
+
+  /** 判定桩：改写命题给 0.95（判为需要改写），其余按技能名给分 */
+  function setup(options: { withConfig?: boolean } = {}) {
+    const counters: Counters = { judge: 0, rewrite: 0, historyReads: 0 };
+    const client = {
+      decide: async (state: string, questions: Record<string, { instructions: string }>) => {
+        counters.judge += 1;
+        const scores: Record<string, number> = {};
+        for (const [qid, question] of Object.entries(questions)) {
+          scores[qid] = qid === 'need_rewrite' ? 0.95 : question.instructions.includes('本体技能') ? 0.9 : 0.05;
+        }
+        return { ok: true as const, scores, model: 'laya-multilingual' };
+      },
+    };
+    const llm: RewriteLlm = {
+      complete: async () => {
+        counters.rewrite += 1;
+        return '分析上批原材料采购单的到货延迟';
+      },
+    };
+    const readHistory: ReadHistory = () => {
+      counters.historyReads += 1;
+      return [
+        { role: 'user', content: '帮我创建一笔原材料采购单' },
+        { role: 'assistant', content: '已创建' },
+      ];
+    };
+    const runner = new IntentFocusRunner({
+      root,
+      ...(options.withConfig === false ? {} : { config: CONFIG }),
+      client,
+      store,
+      isEnabled: (userId, agentName) => isIntentFocusEnabled(root, userId, agentName),
+      isRewriteEnabled: (userId, agentName) => isInputRewriteEnabled(root, userId, agentName),
+      rewriteLlm: llm,
+      readHistory,
+    });
+    const manager = new RunManager({ history, usage, intentFocus: runner });
+    const recorder: Recorder = { extras: [], messageCounts: [] };
+    return { counters, manager, recorder };
+  }
+
+  function run(manager: RunManager, recorder: Recorder, options: { skip?: boolean; guidance?: string } = {}) {
+    return manager.startRun({
+      userId: USER,
+      threadId: 'th_1',
+      agent: stubAgent(recorder),
+      userMessage: '帮我创建一笔原材料采购单',
+      thinking: false,
+      ...(options.skip ? { skipIntentFocus: true } : {}),
+      ...(options.guidance !== undefined ? { guidance: options.guidance } : {}),
+    });
+  }
+
+  it('预置动作入口：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true);
+    const { counters, manager, recorder } = setup();
+
+    await run(manager, recorder, { skip: true }).settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+    expect(store.readAll(USER, AGENT, 'th_1')[0]).toMatchObject({
+      disposition: 'skipped',
+      need_rewrite: null,
+      rewrite_query: '',
+    });
+  });
+
+  it('显式技能（输入区 `/技能名` 选中）：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true);
+    const { counters, manager, recorder } = setup();
+
+    await manager
+      .startRun({
+        userId: USER,
+        threadId: 'th_1',
+        agent: stubAgent(recorder),
+        userMessage: '帮我创建一笔原材料采购单',
+        thinking: false,
+        skill: 'onto-skill',
+      })
+      .settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+  });
+
+  it('guidance 覆盖：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true);
+    const { counters, manager, recorder } = setup();
+
+    await run(manager, recorder, { guidance: '本轮请优先使用以下工具完成任务：read_file' }).settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+  });
+
+  it('无技能：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true, true, false);
+    const { counters, manager, recorder } = setup();
+
+    await run(manager, recorder).settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+    expect(store.readAll(USER, AGENT, 'th_1')[0]).toMatchObject({ reason: 'no_skills' });
+  });
+
+  it('无可聚焦技能（本体未物化）：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true, false);
+    const { counters, manager, recorder } = setup();
+
+    await run(manager, recorder).settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+    expect(store.readAll(USER, AGENT, 'th_1')[0]).toMatchObject({ reason: 'no_focusable_skills' });
+  });
+
+  it('判定模型未配置：判定 0 / 改写 0 / 读历史 0', async () => {
+    freshRoot();
+    writeAgent(true);
+    const { counters, manager, recorder } = setup({ withConfig: false });
+
+    await run(manager, recorder).settled;
+
+    expect(counters).toEqual({ judge: 0, rewrite: 0, historyReads: 0 });
+  });
+
+  it('输入重写开关关闭（聚焦开启）：照常聚焦，但零改写、零读历史', async () => {
+    freshRoot();
+    writeAgent(false);
+    const { counters, manager, recorder } = setup();
+
+    await run(manager, recorder).settled;
+
+    // 技能 + 行为两批，没有第三批改写命题
+    expect(counters.judge).toBe(2);
+    expect(counters.rewrite).toBe(0);
+    expect(counters.historyReads).toBe(0);
+    expect(store.readAll(USER, AGENT, 'th_1')[0]).toMatchObject({
+      disposition: 'focused',
+      need_rewrite: null,
+      rewrite_score: null,
+      rewrite_query: '',
+      rewrite_reason: null,
+    });
+  });
+
+  it('开关关闭时留档与提示与改造前逐字一致（快照）', async () => {
+    freshRoot();
+    writeAgent(false);
+    const { manager, recorder } = setup();
+
+    await run(manager, recorder).settled;
+
+    const [record] = store.readAll(USER, AGENT, 'th_1');
+    expect(typeof record!.round_ms).toBe('number');
+    // 剔除时间戳 / 自增号 / 消息 id / 耗时与本特性新增的七个字段，
+    // 剩下的部分必须与 016~019 时期完全一致（快照守住"零残留"）
+    const {
+      at: _at,
+      seq: _seq,
+      message_id: _messageId,
+      round_ms: _roundMs,
+      need_rewrite: _needRewrite,
+      rewrite_score: _rewriteScore,
+      rewrite_query: _rewriteQuery,
+      rewrite_truncated: _rewriteTruncated,
+      rewrite_ms: _rewriteMs,
+      rewrite_history_turns: _rewriteHistoryTurns,
+      rewrite_reason: _rewriteReason,
+      ...legacy
+    } = record!;
+
+    expect(legacy).toMatchSnapshot();
+    // 时间戳每轮都变，快照里剔掉（"提示逐字不变"验的是内容与结构）
+    expect(recorder.extras[0]!.replace(/^【当前时间】[^\n]*\n+/, '')).toMatchSnapshot();
   });
 });

@@ -72,4 +72,19 @@ export interface SoulDesign {
    * 关闭意图聚焦时数值保留（控件置灰）但**不写进产物**，再次打开即恢复。
    */
   intent_focus_depth: number
+  /**
+   * 是否开启「输入重写」（027）：意图聚焦之前先做一次指代判定，判为真则改写输入
+   * 再用于技能 / 本体评分（改写结果不落历史、不进用户气泡）。
+   *
+   * **由接口保证恒有该键**（后端读取归一化补 `false`），故声明为必填；
+   * 与 `intent_focus` 是逻辑与：聚焦关闭时控件置灰、值保留，产物不写键。
+   */
+  input_rewrite: boolean
+  /**
+   * 是否开启「术语替换」（027）：把 018 的"意图聚焦即替换"拆成独立开关。
+   *
+   * 同上恒有该键、缺省 `false`；关闭态产物不含该键，`/api/term-normalize`
+   * 在**读取术语表之前**就返回 `applied:false`（零 IO、零弹窗）。
+   */
+  term_normalize: boolean
 }

@@ -135,5 +135,8 @@ export function emptySoulDesign(): SoulDesign {
     intent_focus: false,
     // 019：阶数同样显式落缺省 0（新建数字人不发散），与后端同形
     intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
+    // 027：两个新开关同样显式落 false——脏检查比对整个对象，少一个键就会与后端不等
+    input_rewrite: false,
+    term_normalize: false,
   }
 }

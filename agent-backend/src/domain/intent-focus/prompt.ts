@@ -24,13 +24,19 @@
 import type { FocusPath } from './paths.js';
 import type { CapabilitySelection } from './types.js';
 
-/** 提示长度上限（阶数 0 的基准值，字符） */
-export const MAX_PROMPT_CHARS = 1200;
+/**
+ * 提示长度上限（阶数 0 的基准值，字符）。
+ *
+ * 2026-11-20：1200 → 2000。原值按"每个入选行为一行、最多 32 个技能"估的，
+ * 实测发散发到二阶时经常在 `直接命中` 段就被截断，路径行几乎全被丢掉——
+ * 而截断是**整行丢弃**，一次截断就丢掉一整条五元组，信息损失比多花 token 严重。
+ */
+export const MAX_PROMPT_CHARS = 2000;
 
-/** 阶数 → 提示总长度上限：越深的发散允许越长的上下文 */
+/** 阶数 → 提示总长度上限：越深的发散允许越长的上下文（2000 / 3000 / 4000） */
 export function maxPromptChars(depth: number): number {
   if (depth <= 0) return MAX_PROMPT_CHARS;
-  return depth === 1 ? 1600 : 2000;
+  return depth === 1 ? 3000 : 4000;
 }
 
 const PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
@@ -55,7 +61,7 @@ export interface PromptSkill {
 export interface ComposeOptions {
   /** 五元组路径（只含**上游**；下游只进卡片，不进提示） */
   paths?: readonly FocusPath[];
-  /** 总长度上限；缺省按阶数 0 的 1200（调用方负责按阶数传入） */
+  /** 总长度上限；缺省按阶数 0 的 2000（调用方负责按阶数传入） */
   maxChars?: number;
 }
 

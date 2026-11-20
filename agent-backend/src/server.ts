@@ -54,6 +54,7 @@ import { registerScheduledTaskRoutes } from './routes/scheduled-tasks.js';
 import { registerTermNormalizeRoutes } from './routes/term-normalize.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
+import type { ModelSelection } from './types.js';
 
 /** 统一错误 envelope：{ error: { code, message, details? } }（details 为可选的逐条问题清单） */
 export class ApiError extends Error {
@@ -141,6 +142,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // LlmProvider 惰性单例：测试注入 fake 时不触碰 pi-ai/真 key
   let llmInstance: LlmProvider | undefined = options.llmProvider;
   const llm = () => (llmInstance ??= new PiAiLlmProvider(config.defaultModel, config.llmRetry));
+  /**
+   * 027：请求级模型覆盖的 provider 构造（**唯一实现**）。
+   *
+   * 同一份逻辑既给 `agent-factory`（主对话）也给改写端口：两处各写一份会造出
+   * "主对话用本轮所选模型、改写偷偷用默认模型"的静默差异，且测试注入点会漏一个。
+   */
+  const providerFor = (entry: ModelSelection): LlmProvider =>
+    options.llmProvider ?? new PiAiLlmProvider(entry, config.llmRetry);
 
   const summary = new SummaryStore(root, history, {
     llm,
@@ -154,7 +163,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     root,
     llm,
     // 测试注入 fake provider 时，请求级模型覆盖同样落到 fake（不触碰真 key）
-    ...(options.llmProvider ? { providerFor: () => options.llmProvider! } : {}),
+    providerFor,
     logger: loggers.logger,
     mcpTimeoutMs: config.mcpTimeoutMs,
     mcpConnectTimeoutMs: config.mcpConnectTimeoutMs,
@@ -267,7 +276,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
    * 外移到 `server-attachments.ts`：本文件已贴近 500 行硬门禁，且这两项都只是"构造"。
    * 两者都由 SOUL 开关逐次现读门控（fail-closed），未配置/未开启时整体不生效。
    */
-  const attachments = buildAttachments({ root, config, logger: loggers.logger });
+  const attachments = buildAttachments({
+    root,
+    config,
+    logger: loggers.logger,
+    llm,
+    providerFor,
+    // 027：改写素材只读历史正文（`history.jsonl` 结构子集；不读工具事件 / 摘要 / 记忆）
+    readHistory: (userId, agentName, threadId) => history.readAll(userId, agentName, threadId),
+  });
 
   const runManager = new RunManager({
     history,
