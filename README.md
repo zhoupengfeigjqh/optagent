@@ -361,9 +361,10 @@ intent_focus:
   api_key: $DECIS_API_KEY          # 与 laya 容器的 DECIS_API_KEY 必须同值
   timeout_ms: 10000                # 整轮判定预算 300~20000（缺省 10000），超时即降级（不重试）
   skill_threshold: 0.6             # 技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
-  ontology_threshold: 0.6          # 本体行为 / 函数阈值，可被 INTENT_FOCUS_ONTOLOGY_THRESHOLD 覆盖
+  ontology_behavior_threshold: 0.6 # 本体行为阈值，可被 INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD 覆盖
+  ontology_function_threshold: 0.6 # 本体函数阈值，可被 INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD 覆盖
   max_skills: 32                   # 单轮技能候选上限（1~256）
-  max_capabilities: 96             # 单轮能力候选上限（1~256；3 批 × 32）
+  max_capabilities: 96             # 单轮「行为 + 函数」候选合计上限（1~96；3 批 × 32）
   # 027 输入改写：以下两项只做「标定」，不控制开关（开关在 SOUL 的 input_rewrite）
   rewrite_threshold: 0.8           # 指代判定严格大于才改写；可被 INTENT_FOCUS_REWRITE_THRESHOLD 覆盖
   rewrite_timeout_ms: 5000         # 单次改写上限 300~10000，且不得大于 timeout_ms

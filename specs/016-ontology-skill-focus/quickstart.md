@@ -112,7 +112,8 @@ intent_focus:
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
   skill_threshold: 0.8
-  ontology_threshold: 0.8
+  ontology_behavior_threshold: 0.8
+  ontology_function_threshold: 0.8
   max_skills: 32
   max_capabilities: 96
 ```
@@ -177,7 +178,7 @@ node -e "const fs=require('fs');const p=process.argv[1];const rows=fs.readFileSy
 | `disposition=empty / no_focusable_skills` | 只有本体技能且 `ontology_id` 都匹配不到本体；检查 `ontology/{scenario}/{ontology}/ontology.yaml` 的 `metadata.ontology_id` |
 | `disposition=empty / below_threshold` | 技能分数未超过 `skill_threshold`；可临时降低 `INTENT_FOCUS_SKILL_THRESHOLD` 复测 |
 | `disposition=degraded` | 看 `error`：`timeout` / `laya_unreachable` / `invalid_response` / `all_batches_failed`；检查 Laya 与预算 |
-| 本体技能提示没有能力段 | 行为 / 函数全部低于 `ontology_threshold`，或本体无 `behaviors` / `functions` |
+| 本体技能提示没有能力段 | 行为 / 函数全部低于各自阈值（`ontology_behavior_threshold` / `ontology_function_threshold`），或本体无 `behaviors` / `functions` |
 | 提示出现英文行为名 | 该行为条目确实缺 `title`（或 YAML 解析未取到）；按规格回退 `name`，先检查 `behaviors[].title` |
 | 卡片轮次没有记录 | 开关关闭时不记录；卡片 / guidance 应记录 `skipped`；检查 `skip_intent_focus` 与 `guidance` |
 | 旧工具提示仍出现 | 旧链路未完全移除；断言 `tools` 评分调用为 0，检查 `agent-factory` / `run-manager` 的 `focusJudge` 残留 |

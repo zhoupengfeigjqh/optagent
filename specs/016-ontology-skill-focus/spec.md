@@ -52,6 +52,30 @@
 - Q: 非本体技能的处理是否变化？ → A: **不变**：仍只做技能级聚焦，只读 `SKILL.md` 头部，
   不读本体、不进入能力聚焦。
 
+### Session 2026-11-20
+
+- Q: 是否恢复本体**函数**聚焦？ → A: **恢复，但只做直接命中**。`functions[]` 与 `behaviors[]`
+  进同一批候选、共用 `max_capabilities`、同一套 `noul` 题面；函数按**独立阈值**
+  `ontology_function_threshold`（缺省 0.8，严格大于）筛选。**不**恢复 2026-11-06 取消的
+  `rules[]` / `data_supplements` / `related_functions`。
+- Q: 函数命中后补什么？ → A: 取该函数的 `related_concepts[]`，在同本体内找
+  `concept` 等于这些概念且 `op_type === 'query'` 的行为，作为**取数行为**并入提示的
+  `直接命中` 行。**不判分、不发散**（`intent_focus_depth` 对函数链路零影响）。
+- Q: 取数行为与函数是否进下一步动作卡片？ → A: **都不进**。`toolTips` 仍只来自
+  「行为直接命中 + 下游发散」；函数名与取数行为不得出现在尾部块候选目录里。
+- Q: 提示里如何区分函数 / 取数行为？ → A: **不加类型后缀**（2026-11-20 用户拍板）。
+  函数条目后挂其 `related_concepts`，取数条目后挂其所属概念，统一用 019 已有的
+  `〔中文名(name)〕` 语法；行为条目维持原样。
+- Q: 配置键与阈值语义？ → A: `ontology_threshold` **改名** `ontology_behavior_threshold`，
+  环境变量同步为 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`，语义明确为「本体**行为**阈值」；
+  新增 `ontology_function_threshold` / `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`（缺省 0.8，0~1）。
+  旧键**不再接受**：`intent_focus` 块是 `.strict()`，升级需同步改 `config.yaml`（启动即报错，
+  避免两套键并存导致"改了名却没生效"）。
+- Q: 留档是否记录函数？ → A: **记录**，与行为聚焦同口径「只写生效项」：`functions[]` 只写入选
+  函数（含 `score` / `related_concepts`）；取数行为写进 `behaviors[]` 并标
+  `source: 'concept_query'`（`score: null`）；`tool_tip_behaviors[]` 不含函数与取数行为。
+  未入选的函数与行为一样**不落档**。
+
 ---
 
 ## 术语与口径
@@ -260,14 +284,14 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **FR-020** | 对每个**入选本体技能**关联的本体 MUST 提取 `behaviors[]` 的 `name`、`title`、`description` 与 `concept`；`title` 缺失时解析期用 `name` 兜底，`description` 缺失记空串；聚焦阶数 > 0 时 MUST 另提取 `concepts[]`（`name` / `title`）与 `relations[]`（`name` / `title` / `source` / `target` / `relation_type` / `cardinality`）用于一阶发散与五元组展示（019；`title` 缺失回退 `name`）；MUST NOT 读取 `functions[]`、`rules[]`、行为参数正文或代码文件 | 提取断言：字段仅 name / title / description / op_type / concept；阶数为 0 时 `concepts` / `relations` 不参与遍历；非本体技能触发次数为 0；含 `functions` / `rules` 的本体产出不变 |
+| **FR-020** | 对每个**入选本体技能**关联的本体 MUST 提取 `behaviors[]` 的 `name`、`title`、`description` 与 `concept`，以及 `functions[]` 的 `name`、`title`、`description` 与 `related_concepts[]`（2026-11-20 恢复函数聚焦）；`title` 缺失时解析期用 `name` 兜底，`description` 缺失记空串；聚焦阶数 > 0 时 MUST 另提取 `concepts[]`（`name` / `title`）与 `relations[]`（`name` / `title` / `source` / `target` / `relation_type` / `cardinality`）用于一阶发散与五元组展示（019；`title` 缺失回退 `name`）；MUST NOT 读取 `rules[]`、`functions[].params`、`functions[].response`、行为参数正文或代码文件 | 提取断言：行为字段仅 name / title / description / op_type / concept，函数字段仅 name / title / description / related_concepts；阶数为 0 时 `concepts` / `relations` 不参与遍历；非本体技能触发次数为 0；含 `rules` 的本体产出不变 |
 | **FR-021** | 行为 MUST 使用 **`noul` 模式**（每个候选一条真值命题，MUST NOT 使用 `choice`），**逐候选**提交 Laya 判定，保留分数**严格大于**本体阈值的条目；等于或小于阈值即丢弃 | 阈值边界用例：等于阈值的条目被丢弃；请求中每题类型为 `noul` |
-| **FR-022** | 行为判定素材 MUST 为用户输入 + 候选展示文本；展示文本 MUST 按 **`description` → `title` → `name`** 降级取值（取第一个非空者，统一截断 40 字）；`op_type` MUST NOT 参与题面（仅可用于留档与排查）；MUST NOT 使用参数正文或代码 | 题面断言：有描述取描述、描述空取标题、两者皆空取 name；不含 `op_type`、参数正文或代码 |
-| **FR-023** | 同一本体在本轮内 MUST 只解析一次、只评分一次；多个技能共享该本体时复用结果 | 计数断言：解析次数与评分批次数不随技能数增长 |
-| **FR-024** | 结果 MUST 只包含**行为**一类；每项至少含 `name`、`title`、分数、来源本体；MUST NOT 出现函数项或数据补充项 | 结构断言：结果无类别字段、无补充项 |
+| **FR-022** | 行为判定素材 MUST 为用户输入 + 候选展示文本；展示文本 MUST 按 **`description` → `title` → `name`** 降级取值（取第一个非空者，统一截断 40 字）；`op_type` MUST NOT 参与题面（仅可用于留档与排查）；MUST NOT 使用参数正文或代码。函数题面 MUST 遵循同一降级与截断口径，措辞为 `需要函数「…」` | 题面断言：有描述取描述、描述空取标题、两者皆空取 name；不含 `op_type`、参数正文或代码；函数题面与行为题面同规则 |
+| **FR-023** | 同一本体在本轮内 MUST 只解析一次、只评分一次；多个技能共享该本体时复用结果；行为与函数 MUST 进同一批候选、同一轮判定（MUST NOT 另起判定阶段） | 计数断言：解析次数与评分批次数不随技能数增长；含函数的本体批次数与仅含行为时一致 |
+| **FR-024** | 结果 MUST 按**类别**分离保存：行为一集、函数一集；每项至少含 `name`、`title`、分数、来源本体；函数项另含 `related_concepts`；两类 MUST NOT 混入彼此的集合 | 结构断言：结果为 `{ behaviors, functions }` 两个数组；同一入选项不会同时出现在两侧 |
 | **FR-025** | 行为顺序 MUST 稳定：分数降序、同分按本体原序 | 顺序断言 |
 | **FR-026** | 本体无 `behaviors`（或为空）时 MUST 视为该本体零产出，不视为失败，其他本体照常 | 空本体用例：无异常、无提示 |
-| **FR-027** | 候选 MUST 有界：可聚焦技能候选 ≤ **32**；行为候选 ≤ **96**，单批判定 ≤ **32** 项；超限按本体原序截断并记录「已截断」与批数 | 97 个行为 → 提交 96 个且标注；33 个可聚焦技能 → 提交 32 个且标注 |
+| **FR-027** | 候选 MUST 有界：可聚焦技能候选 ≤ **32**；**行为与函数候选合计** ≤ **96**（共用 `max_capabilities`），单批判定 ≤ **32** 项；收集序为「本体枚举序 → `behaviors[]` → `functions[]`」；超限按该顺序截断并记录「已截断」与批数 | 97 个能力（行为+函数）→ 提交 96 个且标注；33 个可聚焦技能 → 提交 32 个且标注；行为占满 96 时函数零候选且 `truncated=true` |
 | **FR-028** | 单个候选题面 MUST 落在模型单题上限内（≤ 256 token）；超限该批降级，MUST NOT 无界重试 | 超长 description / title 用例：该批降级并记录 |
 
 #### 规则与数据补充（已取消）
@@ -277,7 +301,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | **FR-030** | `rules[]` MUST NOT 被解析：MUST NOT 读取 `rules[].behavior` / `data_supplements`，MUST NOT 因规则补入任何行为 | 含 `rules` 与不含 `rules` 的本体产出逐字一致 |
 | **FR-031** | 行为入选 MUST **只**由自身分数与阈值决定；未过阈值的查询行为 MUST NOT 因规则被兜底纳入 | 主行为入选 + 查询行为低分：查询行为不出现 |
 | **FR-032** | 记录与提示 MUST NOT 出现 `data_supplements` / `source` / 补充项相关字段 | 记录字段断言：无 `data_supplements` |
-| **FR-033** | `related_functions` MUST NOT 被提取或使用（与 `functions[]` 一并停用） | 含 `related_functions` 的本体不产生任何附加项 |
+| **FR-033** | `rules[].related_functions` MUST NOT 被提取或使用（2026-11-20 恢复的函数聚焦**不**经由规则关联）；`functions[].related_concepts` 只用于「关联概念的 query 行为」取数，MUST NOT 用于发散或卡片 | 含 `related_functions` 的本体不产生任何附加项；函数取数只按 `related_concepts` 解析 |
 | **FR-034** | 去重 MUST 以 `ontology_id + name` 为键，且 MUST 在**候选构造阶段先做一次**（同一 `ontology_id + name` 只出一题，不重复判定、不挤占 `max_capabilities` 预算） | 同 id 双文件用例：候选数与题目数一致、无重复 qid |
 | **FR-035** | 跨本体同名项 MUST NOT 合并：去重键含 `ontology_id`，同名但属于不同本体的行为各自保留、各自归属自己的本体；合并后总数仍受 `FR-027` 上限约束 | 双本体同名用例：两项都在、`ontology_id` 各不相同 |
 
@@ -286,7 +310,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-040** | 仅当入选技能**非空**时 MUST 铸造意图聚焦提示；全空时 MUST NOT 追加任何内容 | 空结果用例：素材与改造前逐字一致 |
-| **FR-041** | 提示 MUST 为固定中文格式（2026-11-13 起为**分行块 + 五元组路径**）：首行 `本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）`，其后每个入选技能一个编号块——块首行 `{n}）{name}（非本体技能）` 或 `{n}）{name}（本体技能；ontology_name='{ontology_name}'，ontology_id='{ontology_id}'）`；本体技能其后至多两段：`直接命中：{title}（{name}）、…`（Laya 命中的行为）与 `上游路径：`（段头独占一行，其后**每条路径一行五元组** `{行为title}（{name}）—〔{概念title}({name})〕—[上游]{关系title}{→|←}〔{概念title}({name})〕—→{行为title}（{name}）`；链尾概念无行为时写 `—→（无可用行为）` 且 MUST 保留整行）；概念 MUST NOT 再单独成段（概念已在五元组内）；`[上游]` 表发散方向、关系名后的 `→`（顺 `source→target` 读）/ `←`（反读）只表关系名读向，两者 MUST NOT 混用；空段整行省略，段序固定；行号从 `1` 连续编号（截断后重新编号）；技能按分数降序，同分按原序；本体信息 MUST 以显式字段给出 `ontology_name='…'` 与 `ontology_id='…'`（`ontology_name` 缺失时只写 `ontology_id='…'`）；**一个本体技能恒只有一个本体**，每块至多一组本体字段（同一 `ontology_id` 物化成多份文件时只取首份）；MUST NOT 出现「关联函数」段；同一本体被多个入选技能引用时，行为与路径只归属于分数最高的技能；片段内换行 MUST 压成空格 | 格式断言：前缀逐字固定、编号连续、段序固定、五元组五元素齐全、方向与读向分离、链尾占位、本体 id 与 name 齐全、非本体技能无本体段、无「关联函数」、同本体不重复 |
+| **FR-041** | 提示 MUST 为固定中文格式（2026-11-13 起为**分行块 + 五元组路径**）：首行 `本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）`（2026-11-20 起含「本体函数」），其后每个入选技能一个编号块——块首行 `{n}）{name}（非本体技能）` 或 `{n}）{name}（本体技能；ontology_name='{ontology_name}'，ontology_id='{ontology_id}'）`；本体技能其后至多两段：`直接命中：{title}（{name}）、…`（Laya 命中的行为，以及命中的函数与关联概念取数行为，2026-11-20 起并入本段：函数条目后挂 `〔{概念title}({name})、…〕` 标明其 `related_concepts`，取数条目后挂 `〔{概念title}({name})〕` 标明所属概念，**不加**类型后缀）与 `上游路径：`（段头独占一行，其后**每条路径一行五元组** `{行为title}（{name}）—〔{概念title}({name})〕—[上游]{关系title}{→|←}〔{概念title}({name})〕—→{行为title}（{name}）`；链尾概念无行为时写 `—→（无可用行为）` 且 MUST 保留整行）；概念 MUST NOT 再单独成段（概念已在五元组内）；`[上游]` 表发散方向、关系名后的 `→`（顺 `source→target` 读）/ `←`（反读）只表关系名读向，两者 MUST NOT 混用；空段整行省略，段序固定；行号从 `1` 连续编号（截断后重新编号）；技能按分数降序，同分按原序；本体信息 MUST 以显式字段给出 `ontology_name='…'` 与 `ontology_id='…'`（`ontology_name` 缺失时只写 `ontology_id='…'`）；**一个本体技能恒只有一个本体**，每块至多一组本体字段（同一 `ontology_id` 物化成多份文件时只取首份）；MUST NOT 出现「关联函数」段；同一本体被多个入选技能引用时，行为与路径只归属于分数最高的技能；片段内换行 MUST 压成空格 | 格式断言：前缀逐字固定、编号连续、段序固定、五元组五元素齐全、方向与读向分离、链尾占位、本体 id 与 name 齐全、非本体技能无本体段、无「关联函数」、同本体不重复 |
 | **FR-042** | 提示 MUST 只追加**一次**，位置在本轮补充素材**末尾**；MUST NOT 拼接进用户消息正文，MUST NOT 插入历史消息之间 | 素材结构断言：用户消息逐字等于输入；提示仅 1 处且在末尾 |
 | **FR-043** | 提示与聚焦结果 MUST NOT 写入会话历史、滚动摘要、记忆或任何后续轮次素材；MUST NOT 出现在用户可见界面、回答正文或错误提示中 | 三轮用例 + 界面文本断言：零出现 |
 | **FR-044** | 聚焦 MUST NOT 改变工具权限、工具清单与 SOUL 正文语义；MUST NOT 再执行原工具聚焦，MUST NOT 出现"新提示 + 旧工具提示"并存 | 快照测试：工具清单与 SOUL 正文逐字不变；旧提示零出现 |
@@ -300,9 +324,9 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-050** | 每轮意图聚焦 MUST 在当前对话线程目录留档，复用 `013` 的线程侧车记录文件与滚动上限；记录主体改为**技能聚焦 + 本体行为聚焦**，原工具聚焦字段 MUST NOT 再写入，MUST 与会话历史、消息、工具记录分离 | 断言：线程目录存在该轮记录，且不是历史文件；记录中无工具候选字段 |
-| **FR-051** | 记录 MUST 至少包含：线程标识、数字人标识、轮次线索、时间、处置结论（已聚焦 / 空结果 / 跳过 / 降级 / 未配置）、原因、技能决策与分数、**聚焦阶数**、**概念**（`name` / `title` / `ontology_id` / `source` / `hop` / `via_concept`）、**提示通道行为**（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `source` / `hop` / `via_concept` / `from_concept`）、**卡片通道行为**（同上字段）、提示原文、耗时；发散项 `score` MUST 为 `null`；MUST NOT 包含 `functions`、`data_supplements`、`kind`、`selected`（019 起 `source` 恢复写入，语义为「直接命中 / 上游发散 / 下游发散」） | 五种处置各 1 例 + 字段完整性断言 + 两通道各自完整断言 + 冗余字段不存在断言 |
+| **FR-051** | 记录 MUST 至少包含：线程标识、数字人标识、轮次线索、时间、处置结论（已聚焦 / 空结果 / 跳过 / 降级 / 未配置）、原因、技能决策与分数、**聚焦阶数**、**概念**（`name` / `title` / `ontology_id` / `source` / `hop` / `via_concept`）、**提示通道行为**（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `source` / `hop` / `via_concept` / `from_concept`）、**卡片通道行为**（同上字段）、**入选函数**（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `related_concepts`，2026-11-20）、提示原文、耗时；发散项与取数项 `score` MUST 为 `null`；`source` 语义为「直接命中 / 上游发散 / 下游发散 / 关联概念取数」；MUST NOT 包含 `data_supplements`、`kind`、`selected` | 五种处置各 1 例 + 字段完整性断言 + 两通道各自完整断言 + 函数与取数项各 1 例 + 冗余字段不存在断言 |
 | **FR-052** | 记录 MUST 只用于事后分析，MUST NOT 被任何上下文组装路径读取 | 代码审阅 + 断言：组装不读该段 |
-| **FR-053** | 记录 MUST 有界：沿用线程侧车记录的滚动上限（条数 / 体积）；单轮明细规模由候选上限（技能 ≤32、行为 ≤96）天然约束，MUST NOT 再引入第二层截断 | 上限用例：记录条数与体积在既有上限内 |
+| **FR-053** | 记录 MUST 有界：沿用线程侧车记录的滚动上限（条数 / 体积）；单轮明细规模由候选上限（技能 ≤32、行为+函数 ≤96）天然约束，MUST NOT 再引入第二层截断 | 上限用例：记录条数与体积在既有上限内 |
 | **FR-054** | 记录写入失败 MUST NOT 影响本轮对话；原始错误 MUST 进入结构化日志（含线程标识与原因） | 磁盘异常注入：回答正常、日志有记录 |
 | **FR-055** | Laya 未配置、不可达、超时、响应结构非法、分数缺失时 MUST 静默降级：不追加提示、正常回答、不重试；MUST NOT 回退主对话模型 | 五种失败各 1 例：无用户可见异常、处置为「降级 / 未配置」 |
 | **FR-056** | 聚焦阶段 MUST 有独立总预算（缺省 ≤ **10 秒**，可配）与单批超时（沿用既有口径）；总预算耗尽即降级，MUST NOT 拖长本轮首字节时间 | 超时用例：阶段在预算内结束、回答不受影响 |
@@ -314,10 +338,21 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 需求 | 验收 |
 |---|---|---|
 | **FR-060** | 本期 MUST **复用**既有数字人「意图聚焦」开关；019 追加**唯一**一处数字人粒度配置项「聚焦阶数」（`intent_focus_depth`，0~2，缺省 0），MUST NOT 再新增其它开关或配置项；阶数 MUST 随 SOUL 物化到运行环境，且仅在开关开启且非 0 时写键 | 管理台组件测试：意图聚焦区只有开关 + 阶数两个控件；阶数 0 / 关闭态产物无该键 |
-| **FR-061** | 技能阈值 MUST 沿用既有环境变量 `INTENT_FOCUS_SKILL_THRESHOLD`（语义改为技能阈值），本体行为阈值 MUST 支持 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`；两者环境变量均优先于配置文件，缺省均为 **0.8**（2026-11 产品口径：技能与行为同阈值）；越界值 MUST 启动失败而非静默收敛 | 覆写生效且优先；缺省 0.8；越界启动失败 |
-| **FR-062** | 候选上限与阶段总预算 MUST 可配（可选），缺省为 32 / 96 / 10000ms，且 `max_capabilities` 上限 MUST NOT 超过 **96**（FR-027 的规格硬界，超出即启动失败）；`max_capabilities` **保留键名**，语义为「行为候选上限」；配置缺省时 MUST NOT 阻断启动 | 旧配置键可直接启动、行为候选上限生效；`max_capabilities: 97` 启动失败 |
+| **FR-061** | 技能阈值 MUST 沿用既有环境变量 `INTENT_FOCUS_SKILL_THRESHOLD`；本体**行为**阈值 MUST 支持 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`（YAML `ontology_behavior_threshold`，2026-11-20 由 `ontology_threshold` 改名，语义明确为「行为阈值」）；本体**函数**阈值 MUST 支持 `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`（YAML `ontology_function_threshold`）；三者环境变量均优先于配置文件，缺省均为 **0.8**（2026-11 产品口径：同一"本轮要不要用"的判断，分开会让某类全空变成常态）；越界值 MUST 启动失败而非静默收敛；旧键与旧环境变量 MUST NOT 再被接受（`.strict()` 直接报错，报错文案 MUST 指出新键名） | 覆写生效且优先；缺省 0.8；越界启动失败；旧键启动失败 |
+| **FR-062** | 候选上限与阶段总预算 MUST 可配（可选），缺省为 32 / 96 / 10000ms，且 `max_capabilities` 上限 MUST NOT 超过 **96**（FR-027 的规格硬界，超出即启动失败）；`max_capabilities` **保留键名**，语义为「行为与函数候选**合计**上限」；配置缺省时 MUST NOT 阻断启动 | 存量配置可直接启动、合计上限生效；`max_capabilities: 97` 启动失败 |
 | **FR-063** | 原工具聚焦相关配置（工具候选上限、动作上限等）MUST 停止使用且 MUST NOT 再被读取；`INTENT_FOCUS_SKILL_THRESHOLD` MUST NOT 再用于工具评分 | 配置断言：工具候选上限改动不影响任何行为；工具评分调用为 0 |
 | **FR-064** | 平台侧 MUST 保持现状：数字人设计态的 `skills[]` / `ontologies[]` 关联与部署物化 MUST NOT 改变格式；运行环境 MUST NOT 反向写回平台 | 部署产物字节对比：格式不变 |
+
+#### 本体函数聚焦（2026-11-20）
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **FR-065** | 函数候选 MUST 与行为候选进**同一批**、共用 `max_capabilities` 上限、共用 `noul` 题面规则；入选判定 MUST 为 `score > ontology_function_threshold`（严格大于），等于或小于即丢弃；MUST NOT 因函数命中而改变行为侧的阈值或上限 | 双阈值用例：同一分数在 0.7 函数阈值下入选、在 0.85 行为阈值下不入选；等于阈值被丢弃；批次数与仅含行为时一致 |
+| **FR-066** | 每个入选函数 MUST 解析 `related_concepts[]`，在同本体内取 `concept` 命中且 `op_type` 为 `query` 的行为作为**取数行为**；一个概念下有多个 query 行为时 MUST 全取（本体原序）；取数 MUST NOT 判分（`score = null`）、MUST NOT 触发发散、MUST NOT 级联（取数行为自身不再引出新的取数） | 取数用例：query 命中、command 不命中、空 `related_concepts` 零取数、同概念 2 个 query 全取、阶数 0/2 产物相同 |
+| **FR-067** | 取数去重 MUST 满足：同一 `ontology_id + name` 只出现一次；已被行为直接命中（过阈值）的 query 行为 MUST NOT 作为取数项重复出现（以直接命中为准） | 去重用例：两函数共享概念只出 1 条；已直接命中的 query 行为不重复 |
+| **FR-068** | 函数与取数行为 MUST 并入提示的 `直接命中` 行（不新增段头）；函数条目后 MUST 挂其 `related_concepts`、取数条目后 MUST 挂其所属概念，均用 `〔{title}({name})〕`；MUST NOT 加「函数 / 取数」等类型后缀；提示总长度上限 MUST 维持 2000 / 3000 / 4000 不变，超限时剪枝顺序 MUST 为「路径行 → 取数条目 → 函数条目 → 行为条目」 | 渲染断言：并入同一行、概念括号齐全、无类型后缀；剪枝断言：逐级丢弃且行为条目最后丢 |
+| **FR-069** | 函数与取数行为 MUST NOT 进入下一步动作卡片：`toolTips` 仍只由「行为直接命中 + 下游发散」构成；尾部块候选目录 MUST NOT 出现函数名或取数行为名 | 回归断言：加函数前后 `toolTips` 与候选目录逐项一致 |
+| **FR-070** | 留档 MUST 与行为同口径「只写生效项」：`functions[]` 只写入选函数（`name` / `title` / `ontology_id` / `ontology_name` / `score` / `related_concepts`）；取数行为写入 `behaviors[]` 并标 `source: 'concept_query'`、`score: null`、`via_concept` 为其所属概念；`tool_tip_behaviors[]` MUST NOT 含函数或取数行为 | 记录断言：字段齐全、`concept_query` 存在、卡片通道零函数 |
 
 ### 关键技术需求
 
@@ -389,7 +424,7 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 - **可聚焦口径**：非本体技能一律可聚焦；本体技能以 `ontology_id` 归一化后相等为门槛（需求第 3 条），匹配不到任何本体文件的按原始需求不选中、不评分。`ontology_name` 与 `scenario_name` 用于定位本体文件与展示，不额外收紧门槛。定位失败时允许在该数字人 `ontology/` 目录内按 `ontology_id` 查找。
 - **ID 类型差异**：`SKILL.md` 中的 `ontology_id: 1` 与 `ontology.yaml` 中的 `ontology_id: '1'` 视为相同，一律字符串归一化比较。
 - **候选来源**：只读该数字人**已关联并物化**的技能；技能头部的 `name`、`description` 与 `metadata` 参与技能评分，技能正文不参与；非本体技能不构造本体字段。
-- **阈值**：技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`（语义由工具阈值改为技能阈值），本体行为阈值使用 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`，两者缺省均为 **0.8**（2026-11 产品口径，替换原先的 0.6 标定）；阈值区间校验只在 `config.ts` 一处，domain 层不再做归一；本期不新增管理台开关。
+- **阈值**：技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`（语义由工具阈值改为技能阈值），本体**行为**阈值使用 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`（2026-11-20 由 `INTENT_FOCUS_ONTOLOGY_THRESHOLD` 改名），本体**函数**阈值使用 `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`，三者缺省均为 **0.8**（2026-11 产品口径，替换原先的 0.6 标定）；阈值区间校验只在 `config.ts` 一处，domain 层不再做归一；本期不新增管理台开关。
 - **评分方式**：技能判定与本体行为判定**都使用 `noul` 模式**——每个候选（技能 / 行为）各一条真值命题，题与题互不竞争，可同时命中多个；按绝对阈值筛选，不使用 `choice`，不依赖模型生成自然语言；候选按批串行提交。
 - **提示格式**：中文编号清单（首行前缀 `本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）`，其后每个入选技能一行 `n）…`）。本体技能为 `{name}（本体技能；ontology_name='…'，ontology_id='…'；关联行为：{title}（{name}）、…）`，非本体技能为 `{name}（非本体技能）`；无入选行为时省略该段，最多 2000 字符（0 阶；1/2 阶见 FR-045，2026-11-20 上调）；`name` / `title` 保留原文不翻译，`description` 不进入提示；MUST NOT 出现「关联函数」。
 - **失败语义**：任一阶段失败等价于该阶段零产出，用户不可见，原始错误进结构化日志；与 `013` 的静默降级同口径。
@@ -436,15 +471,17 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
 | 编号 | 问题 | 默认结论 | 理由 | 落点 |
 |---|---|---|---|---|
 | **D1** | 与既有工具聚焦的关系 | **全部替换**：原工具聚焦不再执行，开关语义改为技能聚焦 + 本体行为聚焦（2026-11-04 用户确认） | 用户明确"原有功能不再使用"；避免两套建议竞争 | FR-004、FR-044、FR-060、I-1、假设·与既有工具聚焦的关系 |
-| **D2** | 阈值是否复用 | 技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`；本体行为阈值沿用 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`；缺省均 **0.8**（2026-11 产品口径），环境变量优先 | 沿用既有环境变量可避免运维配置失效；两类候选数量差异大，仍分开 | FR-061、假设·阈值 |
+| **D2** | 阈值是否复用 | 技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`；本体行为阈值 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`（2026-11-20 改名）；本体函数阈值 `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`；缺省均 **0.8**（2026-11 产品口径），环境变量优先 | 沿用既有环境变量可避免运维配置失效；三类候选数量差异大，仍分开 | FR-061、假设·阈值 |
 | **D3** | 提示条目形态 | 编号清单：每条 `n）{name}（…）`；本体技能为 `本体技能；ontology_name='…'，ontology_id='…'；关联行为：{title}（{name}）、…`，非本体技能为 `{name}（非本体技能）`；无入选行为时省略该段；MUST NOT 出现「关联函数」（2026-11-06） | 用户要求"以技能为入口、给出关联本体与本体行为"；`title（name）` 兼顾可读与可追溯 | FR-041、FR-047、FR-048、假设·提示格式 |
 | **D4** | 是否新增开关 | **不新增**，复用「意图聚焦」开关 | 需求第 1 条已把触发条件绑定到该开关；避免配置碎片化 | FR-060、非目标 |
 | **D5** | 去重范围 | **ontology_id + name** 为键（只剩行为一类）；候选层先去重，跨本体同名不合并，title 取首次出现 | 需求第 8 条要求对行为去重；一个本体技能只对应一个本体，同名跨本体是两件不同的事 | FR-034、FR-035、假设·可聚焦口径 |
 | **D6** | 非本体技能如何处理 | **仅技能聚焦**：只读 `SKILL.md` 头部，不读本体、不做行为聚焦、不做工具聚焦（2026-11-04 用户确认；2026-11-06 复核不变） | 用户明确"非本体技能仅聚焦于技能文件即可，不再聚焦工具" | FR-011、FR-019、FR-048、假设·非本体技能口径 |
 | **D7** | 本体技能未匹配本体 | 按原始需求第 3 条**不选中、不评分**；非本体技能不受此限 | 原始需求把"`ontology_id` 相同"作为选中条件；无本体时无法做能力聚焦 | FR-014、假设·可聚焦口径 |
-| **D8** | 能力聚焦范围与规则（2026-11-06 用户拍板） | **只聚焦行为**：`functions[]` 与 `rules[]` / `data_supplements` 全部取消；记录只写入选行为；`max_capabilities` 键名保留、语义改为行为上限 | 用户明确"只聚焦本体行为，函数与规则关联提取全部取消"；记录中的函数、来源、类别字段已恒为常量或空值 | FR-020~FR-024、FR-030~FR-035、FR-051、TR-04、SC-003/004/005 |
+| **D8** | 能力聚焦范围与规则（2026-11-06 用户拍板；**2026-11-20 部分推翻**：函数恢复聚焦，`rules[]` / `data_supplements` 仍取消） | **只聚焦行为**：`functions[]` 与 `rules[]` / `data_supplements` 全部取消；记录只写入选行为；`max_capabilities` 键名保留、语义改为行为上限 | 用户明确"只聚焦本体行为，函数与规则关联提取全部取消"；记录中的函数、来源、类别字段已恒为常量或空值 | FR-020~FR-024、FR-030~FR-035、FR-051、TR-04、SC-003/004/005 |
 
 | **D9** | 一阶发散与聚焦阶数（2026-11-08 用户拍板，详见 `019`） | 以入选行为所属**概念**为起点，`relations[]` **同向**发散：**上游**（主数据 / 父项）只进提示词，**下游**（明细 / 事实）只进下一步动作卡片；发散**不判分**（`score = null`）；阶数 `0~2` 由「聚焦阶数」参数控制；方向口径：箭头即上下游，唯 `Functional` 单独（N:1）反向，`1:1` / `M:N` 按箭头 | 用户明确"不判分、直接使用""概念不设上限、不截断""提示 = 本身 + 上游，卡片 = 本身 + 下游"；本体文件不声明方向，只能由基数推导（本仓 5/5 关系验证成立） | FR-020 / FR-041 / FR-045 / FR-051 / FR-060、TR-04、I-5、非目标、关键实体 |
+
+| **D10** | 本体函数聚焦（2026-11-20 用户拍板） | **恢复函数直接命中**：`functions[]` 与行为同批同阈值机制（独立阈值 `ontology_function_threshold`）；命中后取其 `related_concepts`，把同本体 `op_type: query` 的行为作为取数项；函数与取数都并入提示的 `直接命中` 行、都**不进卡片**、都**不参与发散**；无类型后缀，概念用 `〔title(name)〕` 标注 | 用户明确"同样的方式，laya 逐条判分""直接命中后找到关联概念及其 query 行为即可，不用发散""toolTips 依旧不变"；`rules` / `data_supplements` / `related_functions` 仍不恢复 | FR-033、FR-051、FR-061、FR-065~FR-070、data-model §5、contracts §5.1 |
 
 > D1、D3、D6 已由 2026-11-04 用户澄清确认；D2、D4、D5、D7 为撰写时按合理默认收敛，可在后续 clarify 中调整并回写本节。
 
@@ -602,3 +639,20 @@ A 与 B 入选时，提示中 A 只有技能条目、B 有技能说明与本体�
     全部降级口径均不变。
   - 同步修订本文件「性能预算」段与 `config.ts` 注释；`tests/unit/config.spec.ts` 的区间断言改为
     `300~20000`，越界样本改为 `20001`。
+- 2026-11-20（用户拍板：**恢复本体函数聚焦**，窄口径）：
+  - 能力候选改为「行为 + 函数」两类共用 `max_capabilities`（96）、共用一批 `noul` 判分；
+    函数用独立阈值 `ontology_function_threshold`（缺省 0.8，严格大于）。改写 FR-020、
+    FR-022、FR-023、FR-024、FR-027、FR-033、FR-051、FR-053、FR-061、FR-062、FR-041，
+    新增 FR-065~FR-070 与 D10，并在 Clarifications 追加 `Session 2026-11-20`。
+  - **不恢复** 2026-11-06 取消的 `rules[]` / `data_supplements` / `related_functions`：
+    函数只按 `functions[].related_concepts` 取「关联概念的 query 行为」一跳，不判分、不发散、
+    不级联；`intent_focus_depth` 对函数链路零影响。
+  - 提示形态：函数与取数行为**并入** `直接命中` 行，不加类型后缀，概念统一用
+    `〔{title}({name})〕`；首行前缀加入「本体函数」；总长度上限不变，剪枝顺序改为
+    「路径行 → 取数条目 → 函数条目 → 行为条目」。
+  - 卡片不变：`toolTips` / 尾部块候选目录仍只来自「行为直接命中 + 下游发散」。
+  - 配置改名：`ontology_threshold` → `ontology_behavior_threshold`、`INTENT_FOCUS_ONTOLOGY_THRESHOLD`
+    → `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`，旧键不再接受（`.strict()` 启动即报错）；
+    新增 `ontology_function_threshold` / `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`。
+  - 留档：`functions[]` 只写入选函数；取数行为写入 `behaviors[]` 且 `source: 'concept_query'`、
+    `score: null`；`tool_tip_behaviors[]` 不含两者。

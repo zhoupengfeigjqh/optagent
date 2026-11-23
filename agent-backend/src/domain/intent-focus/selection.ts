@@ -9,11 +9,14 @@
  *
  * 2026-11-06：能力聚焦只保留本体行为；本体函数与规则数据补充整体移除，本模块不再
  * 读取 `rules`、不再产生补充项。
+ * 2026-11-20：函数窄口径恢复——行为与函数各自阈值、各自结果集，互不影响；
+ * 三集（行为 / 函数 / 取数）必须彼此独立，`toolTips` 只认 `behaviors`。
  */
 import type {
   CapabilityCandidate,
   CapabilityDecision,
   CapabilitySelection,
+  FunctionDecision,
   SkillCandidate,
   SkillDecision,
 } from './types.js';
@@ -39,39 +42,67 @@ export function selectSkills(
   });
 }
 
+/** 行为与函数各自的入选阈值（2026-11-20：两类分开标定） */
+export interface CapabilityThresholds {
+  behavior: number;
+  function: number;
+}
+
 /**
- * 行为选择：阈值筛选 + 去重。
+ * 能力选择：按 `kind` 分派阈值 + 类内去重。
  *
- * 只返回**入选**行为（2026-11-06 口径：记录与提示都只写入选结果，不再保留候选明细）。
+ * 只返回**入选**项（2026-11-06 口径：记录与提示都只写入选结果，不再保留候选明细）。
  * **不做二次截断**：候选上限已在 `buildCapabilityCandidates` 由 `max_capabilities`
  * 唯一施加（FR-053），这里再砍一刀会让配置上限的上半段失效。
+ *
+ * `conceptQueries` 在此恒为空数组：取数要读本体行为表，由调用方用
+ * `resolveConceptQueries` 补齐——选择层不该同时承担"选"和"展开"两件事。
  */
 export function selectCapabilities(
   candidates: readonly CapabilityCandidate[],
   scores: Readonly<Record<string, number | undefined>>,
-  threshold: number,
+  thresholds: CapabilityThresholds,
 ): CapabilitySelection {
-  const selected: CapabilityDecision[] = [];
+  const behaviors: CapabilityDecision[] = [];
+  const functions: FunctionDecision[] = [];
+
   for (const candidate of candidates) {
     const score = scores[candidate.qid];
+    const threshold = candidate.kind === 'function' ? thresholds.function : thresholds.behavior;
     if (typeof score !== 'number' || score <= threshold) continue;
-    selected.push({
-      name: candidate.name,
-      title: candidate.title,
-      ontologyId: candidate.ontologyId,
-      ontologyName: candidate.ontologyName,
-      concept: candidate.concept,
-      score,
-      index: candidate.index,
-    });
+    if (candidate.kind === 'function') {
+      functions.push({
+        name: candidate.name,
+        title: candidate.title,
+        ontologyId: candidate.ontologyId,
+        ontologyName: candidate.ontologyName,
+        score,
+        relatedConcepts: candidate.relatedConcepts,
+        index: candidate.index,
+      });
+    } else {
+      behaviors.push({
+        name: candidate.name,
+        title: candidate.title,
+        ontologyId: candidate.ontologyId,
+        ontologyName: candidate.ontologyName,
+        concept: candidate.concept,
+        score,
+        index: candidate.index,
+      });
+    }
   }
 
-  return { behaviors: dedupe(selected.sort(byScoreThenIndex)) };
+  return {
+    behaviors: dedupe(behaviors.sort(byScoreThenIndex)),
+    functions: dedupe(functions.sort(byScoreThenIndex)),
+    conceptQueries: [],
+  };
 }
 
 /** 去重键：本体 ID + 名称（跨本体同名视为不同项） */
-function keyOf(decision: CapabilityDecision): string {
-  return `${decision.ontologyId}\u0000${decision.name}`;
+function keyOf(item: { ontologyId: string; name: string }): string {
+  return `${item.ontologyId}\u0000${item.name}`;
 }
 
 /**
@@ -79,9 +110,9 @@ function keyOf(decision: CapabilityDecision): string {
  *
  * 入参已按分数降序，因此同键首次出现即最高分项——保留首次即可，后续同键直接丢弃。
  */
-function dedupe(items: readonly CapabilityDecision[]): CapabilityDecision[] {
+function dedupe<T extends { ontologyId: string; name: string }>(items: readonly T[]): T[] {
   const seen = new Set<string>();
-  const result: CapabilityDecision[] = [];
+  const result: T[] = [];
   for (const item of items) {
     const key = keyOf(item);
     if (seen.has(key)) continue;
@@ -91,7 +122,7 @@ function dedupe(items: readonly CapabilityDecision[]): CapabilityDecision[] {
   return result;
 }
 
-function byScoreThenIndex(a: CapabilityDecision, b: CapabilityDecision): number {
+function byScoreThenIndex<T extends { score: number; index: number }>(a: T, b: T): number {
   if (a.score !== b.score) return b.score - a.score;
   return a.index - b.index;
 }

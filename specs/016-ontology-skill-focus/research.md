@@ -187,6 +187,8 @@
 - 候选上限：新增 YAML `max_skills`（32）/ `max_capabilities`（96），不新增环境变量；
 - `timeout_ms` 不变（300~10000）。
 
+> 2026-11-20 修订：能力阈值最终拆为两项——行为阈值 `ontology_behavior_threshold` / `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` 与函数阈值 `ontology_function_threshold` / `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`，缺省均 0.8；原单一 `ontology_threshold` 键作废（`.strict()` 下启动即失败）。
+
 **理由**：
 - 现场调技能阈值不必改挂载文件，沿用既有环境变量；
 - 能力阈值是新语义，必须有独立键，不能复用技能阈值；

@@ -40,7 +40,7 @@ function behavior(index: number): CapabilityDecision {
 }
 
 function selection(overrides: Partial<CapabilitySelection> = {}): CapabilitySelection {
-  return { behaviors: [behavior(0)], ...overrides };
+  return { behaviors: [behavior(0)], functions: [], conceptQueries: [], ...overrides };
 }
 
 const BASE = {
@@ -63,7 +63,7 @@ const BASE = {
 };
 
 describe('buildRecordDraft', () => {
-  it('映射技能与入选行为；不再写函数 / 数据补充 / 恒定字段', () => {
+  it('映射技能与入选行为；不写数据补充 / 恒定字段', () => {
     const draft = buildRecordDraft({
       ...BASE,
       skills: [skill(true), skill(false)],
@@ -88,8 +88,66 @@ describe('buildRecordDraft', () => {
     expect(draft.depth).toBe(0);
     expect(draft.concepts).toEqual([]);
     expect(draft.tool_tip_behaviors.map((item) => item.name)).toEqual(['B0', 'B1']);
-    expect(draft).not.toHaveProperty('functions');
+    // 2026-11-20：functions 以"只写入选函数"的口径恢复，无入选时为空数组
+    expect(draft.functions).toEqual([]);
     expect(draft).not.toHaveProperty('data_supplements');
+  });
+
+  it('函数与取数：functions 只写入选函数，取数项进提示通道且标 concept_query', () => {
+    const draft = buildRecordDraft({
+      ...BASE,
+      skills: [skill(true)],
+      capabilities: selection({
+        behaviors: [behavior(0)],
+        functions: [
+          {
+            name: 'sumRawNotArrivalQty',
+            title: '原材料未到位数',
+            ontologyId: '1',
+            ontologyName: '本体',
+            score: 0.88,
+            relatedConcepts: ['PurchaseRecord'],
+            index: 0,
+          },
+        ],
+        conceptQueries: [
+          {
+            name: 'QuerySuppliers',
+            title: '查询供应商信息',
+            ontologyId: '1',
+            ontologyName: '本体',
+            concept: 'Supplier',
+            index: 1,
+          },
+        ],
+      }),
+    });
+
+    expect(draft.functions).toEqual([
+      {
+        name: 'sumRawNotArrivalQty',
+        title: '原材料未到位数',
+        ontology_id: '1',
+        ontology_name: '本体',
+        score: 0.88,
+        related_concepts: ['PurchaseRecord'],
+      },
+    ]);
+    // 取数项进提示通道，不判分，via_concept = 所属概念
+    const query = draft.behaviors.find((item) => item.source === 'concept_query');
+    expect(query).toEqual({
+      name: 'QuerySuppliers',
+      title: '查询供应商信息',
+      ontology_id: '1',
+      ontology_name: '本体',
+      score: null,
+      source: 'concept_query',
+      hop: 0,
+      via_concept: 'Supplier',
+      from_concept: null,
+    });
+    // 卡片通道一条都不能有（函数与取数都不进 toolTips）
+    expect(draft.tool_tip_behaviors.map((item) => item.name)).toEqual(['B0']);
   });
 
   it('两通道分账：提示＝direct+上游，卡片＝direct+下游；发散项 score 恒为 null', () => {

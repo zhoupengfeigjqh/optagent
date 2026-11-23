@@ -138,7 +138,7 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect('intentFocus' in config).toBe(false);
   });
 
-  it('可省略项走缺省：model / timeout_ms / skill_threshold / ontology_threshold / 上限', () => {
+  it('可省略项走缺省：model / timeout_ms / 三个阈值 / 上限', () => {
     const config = loadConfig({ env: okEnv, configPath: writeConfig(minimal) });
 
     expect(config.intentFocus).toEqual({
@@ -147,7 +147,8 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       apiKey: 'laya-dev-key',
       timeoutMs: 10000,
       skillThreshold: 0.8,
-      ontologyThreshold: 0.8,
+      ontologyBehaviorThreshold: 0.8,
+      ontologyFunctionThreshold: 0.8,
       maxSkills: 32,
       maxCapabilities: 96,
       // 027：输入改写的两个新参数同样有缺省，且**整块缺失不阻断启动**（上面已断言）
@@ -156,23 +157,38 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     });
   });
 
-  it('016：能力阈值与候选上限可配置，环境变量优先于 YAML', () => {
+  it('016：行为/函数阈值与候选上限可配置，环境变量优先于 YAML', () => {
     const config = loadConfig({
-      env: { ...okEnv, INTENT_FOCUS_ONTOLOGY_THRESHOLD: '0.72' },
+      env: {
+        ...okEnv,
+        INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD: '0.72',
+        INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD: '0.66',
+      },
       configPath: writeConfig(
-        `${minimal}  ontology_threshold: 0.65\n  max_skills: 16\n  max_capabilities: 48\n`,
+        `${minimal}  ontology_behavior_threshold: 0.65\n  ontology_function_threshold: 0.55\n` +
+          `  max_skills: 16\n  max_capabilities: 48\n`,
       ),
     });
 
-    expect(config.intentFocus?.ontologyThreshold).toBe(0.72);
+    expect(config.intentFocus?.ontologyBehaviorThreshold).toBe(0.72);
+    expect(config.intentFocus?.ontologyFunctionThreshold).toBe(0.66);
     expect(config.intentFocus?.maxSkills).toBe(16);
     expect(config.intentFocus?.maxCapabilities).toBe(48);
   });
 
-  it('016：能力阈值越界 / 上限非整数时拒绝启动', () => {
-    expect(messageOf(`${minimal}  ontology_threshold: 1.5\n`)).toContain('intent_focus.ontology_threshold');
+  it('016：阈值越界 / 上限非整数时拒绝启动', () => {
+    expect(messageOf(`${minimal}  ontology_behavior_threshold: 1.5\n`)).toContain(
+      'intent_focus.ontology_behavior_threshold',
+    );
+    expect(messageOf(`${minimal}  ontology_function_threshold: -0.1\n`)).toContain(
+      'intent_focus.ontology_function_threshold',
+    );
     expect(messageOf(`${minimal}  max_skills: 0\n`)).toContain('intent_focus.max_skills');
     expect(messageOf(`${minimal}  max_capabilities: 2.5\n`)).toContain('intent_focus.max_capabilities');
+  });
+
+  it('2026-11-20：旧键 ontology_threshold 不再接受（严格校验，启动即失败）', () => {
+    expect(messageOf(`${minimal}  ontology_threshold: 0.8\n`)).toContain('ontology_threshold');
   });
 
   it('各项全配时逐项生效，且对象被冻结（装配后不得改）', () => {

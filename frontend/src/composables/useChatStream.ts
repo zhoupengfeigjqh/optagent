@@ -5,7 +5,7 @@
  * `thinking*` → `content*`（可穿插成对 `tool_call` / `tool_call_end`）→ 恰好一个 `done` / `error`。
  *
  * 关键不变式：
- * - `tool_call` 入队、`tool_call_end` 出队 → 工具项**结束后立即消失**（V-05、SC-011）
+ * - `tool_call` 入队、`tool_call_end` **标记终态**（002 起不再立即移除，收口时统一清空；V-05 修订）
  * - `done.message_id === null` ⇒ `aborted`（中断轮不落盘，不展示操作与用量）
  * - 收尾时 `aborted` / **服务端已终局的 `error`** ⇒ `lastRetryableTurn` 置位（可安全重发）；
  *   断连与传输层失败不置位（后端那一轮可能仍在跑，重发会撞 409 → 应走 `recover()`）
@@ -183,7 +183,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
    */
   let terminalFailure = false
 
-  const canSend = computed(() => phase.value !== RUN_PHASE.STREAMING && draft.value.trim() !== '')
   const hasThinking = computed(() => thinkingEnabled.value && streamingThinking.value.trim() !== '')
 
   watch(thinkingEnabled, (value) => writeStoredThinking(storage, value))
@@ -428,23 +427,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     }
   }
 
-  /**
-   * 「重新生成」/「重试本轮」：用 `lastRetryableTurn` 重发上一轮。
-   *
-   * 内容在缓存前已去除 `@文件名` 标记（发的就是净化后正文），原样重发即可；
-   * 全部复用 `send()`——乐观气泡、并发校验、终结事件收口等既有不变式天然成立。
-   */
-  async function regenerate(): Promise<void> {
-    const turn = lastRetryableTurn.value
-    if (!turn || phase.value === RUN_PHASE.STREAMING) {
-      return
-    }
-    await send({
-      content: turn.content,
-      attachments: turn.attachments,
-      ...(turn.skill ? { skill: turn.skill } : {}),
-    })
-  }
 
   /**
    * 提交消息反馈（FR-027、V-08）。
@@ -533,14 +515,12 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     lastRetryableTurn,
     startedAt,
     stalled,
-    canSend,
     hasThinking,
     pendingInteraction,
     restoreInteraction: gate.restoreInteraction,
     submitInteraction: gate.submitInteraction,
     rejectInteraction: gate.rejectInteraction,
     send,
-    regenerate,
     submitFeedback,
     stop,
     recover,

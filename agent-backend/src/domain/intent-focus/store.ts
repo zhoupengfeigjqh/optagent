@@ -37,6 +37,9 @@ export interface SkillFocusRecord {
 /**
  * 行为决策留档（**只写入选行为**，2026-11-06 口径）。
  *
+ * 2026-11-20：`functions` 按**入选函数**重新写入（2026-11-06 删掉的是"只写不读的常量"，
+ * 这里写的是判分结果，性质不同）；取数行为并入 `behaviors` 并标 `source: 'concept_query'`。
+ *
  * 2026-11-08（019）在"只写入选行为"之上补了三件事，用于解释"这条为什么会出现"：
  * - `source`：直接命中 / 上游发散 / 下游发散（发散项没有分数，`score` 为 null）；
  * - `hop`：距 direct 概念的跳数（direct 恒为 0）；
@@ -59,6 +62,22 @@ export interface CapabilityFocusRecord {
   via_concept: string | null;
   /** 这一跳的起点概念；`direct` 为 null */
   from_concept: string | null;
+}
+
+/**
+ * 函数留档（2026-11-20）：只写**入选**函数（与行为同口径）。
+ *
+ * 未入选的函数不落档——记录解释的是"这轮为什么是这些内容"，不是候选明细。
+ */
+export interface FunctionFocusRecord {
+  name: string;
+  title: string;
+  ontology_id: string;
+  ontology_name: string | null;
+  /** 恒 > 函数阈值 */
+  score: number;
+  /** 依赖的概念名（取数入口） */
+  related_concepts: string[];
 }
 
 /** 概念留档（019）：只有提示通道有概念，卡片通道没有 */
@@ -91,7 +110,7 @@ export interface RewriteFocusRecord {
   rewrite_truncated: boolean;
   /** 改写耗时（毫秒）；未执行为 `null` */
   rewrite_ms: number | null;
-  /** 参与改写的历史问答轮数（0~3） */
+  /** 参与改写的历史问答轮数（0~2） */
   rewrite_history_turns: number;
   /** 原因枚举（见 data-model §3.1 / §3.2）；未执行且未失败为 `null` */
   rewrite_reason: string | null;
@@ -138,10 +157,12 @@ export interface IntentFocusRecord extends RewriteFocusRecord {
   skills: SkillFocusRecord[];
   /** 019：提示通道的概念（直接命中 + 上游），不设上限 */
   concepts: ConceptFocusRecord[];
-  /** 提示通道的行为（直接命中 + 上游发散） */
+  /** 提示通道的行为（直接命中 + 上游发散 + 关联概念取数） */
   behaviors: CapabilityFocusRecord[];
-  /** 卡片通道的行为（直接命中 + 下游发散）；`next_action_hints` 关闭时只有直接命中 */
+  /** 卡片通道的行为（直接命中 + 下游发散）；**不含**函数与取数 */
   tool_tip_behaviors: CapabilityFocusRecord[];
+  /** 2026-11-20：入选函数（只写入选项） */
+  functions: FunctionFocusRecord[];
   prompt: string;
   prompt_truncated: boolean;
   warnings: string[];

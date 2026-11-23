@@ -28,6 +28,7 @@ import type {
 import { isAlertLlmFailure, toHistoryErrorInfo } from './llm-error.js';
 import type { HistoryStore } from './history.js';
 import { genMessageId, toSeconds } from './message-format.js';
+import { effectiveNextActionsMax } from './next-actions.js';
 import type {
   NextActionsFinalizeInput,
   NextActionsStore,
@@ -343,10 +344,11 @@ export class RunFinalizer {
     assistantMessageId: string,
   ): NextActionsView | undefined {
     const store = this.deps.nextActions;
-    if (!store || turn.nextActionsMax === undefined) return undefined;
-    // 无 Laya 能力 = 不产卡片（与"未追加尾部块指令"同源，模型本来也不会给块）
     const focusToolTips = turn.focusToolTips ?? [];
-    if (focusToolTips.length === 0) return undefined;
+    // 判据唯一实现：与提示词装配同源（`effectiveNextActionsMax`），
+    // 避免两处漂移成"提示词要求产卡片、收尾却静默丢弃"
+    const max = effectiveNextActionsMax(turn.nextActionsMax, focusToolTips);
+    if (!store || max === undefined) return undefined;
     const input: NextActionsFinalizeInput = {
       userId: turn.userId,
       threadId: turn.threadId,
@@ -354,7 +356,7 @@ export class RunFinalizer {
       agentName: run.agentName,
       tailText: run.nextActionsTail,
       focusToolTips,
-      max: turn.nextActionsMax,
+      max,
     };
     run.nextActionsTail = '';
     return store.finalize(input);

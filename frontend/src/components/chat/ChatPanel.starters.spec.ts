@@ -37,7 +37,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn> } = {}) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
+    chat: { draft: ref(''), thinkingEnabled: ref(false) },
     // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
     threads: {
       activeId: ref(null),

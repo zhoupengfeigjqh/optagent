@@ -9,6 +9,9 @@
  * `op_type` 与参数正文不进题面。
  *
  * 2026-11-06：能力候选**只来自 `behaviors[]`**；`functions[]` 与 `rules[]` 不再读取。
+ * 2026-11-20：函数**窄口径恢复**——`functions[]` 与 `behaviors[]` 进同一候选序列
+ * （同一批题、共用 `max_capabilities` 合计上限），候选只多一个 `kind` 用于分派阈值与措辞。
+ * 题号仍统一为 `c1..cN`：两类混在一批里，用两套前缀反而会出现"同号不同项"的隐患。
  */
 import { MAX_QUESTIONS_PER_BATCH } from './state.js';
 import type {
@@ -112,14 +115,15 @@ export interface CapabilityCandidateResult {
 }
 
 /**
- * 构造本体行为候选（仅入选本体技能引用的本体）。
+ * 构造本体能力候选（行为 + 函数，仅入选本体技能引用的本体）。
  *
- * 顺序固定为「本体文件枚举序 → 行为数组序」：这是"本体原序"的唯一含义，
- * 不能改成 Map/Set 的迭代顺序。
+ * 顺序固定为「本体文件枚举序 → 行为数组序 → 函数数组序」：这是"本体原序"的唯一含义，
+ * 不能改成 Map/Set 的迭代顺序；也是 96 上限被截断时的取舍依据（行为先占、函数后占）。
  *
- * **候选层就按 `ontology_id + name` 去重**：同一 `ontology_id` 可能被物化成多份
- * 文件（或多个技能引用同一本体），若在候选层不去重，同一行为会被当作两道题重复判定、
- * 并挤占 `maxCapabilities` 预算。同名同本体只保留首次出现（即枚举序在前的那份）。
+ * **候选层就按 `ontology_id + kind + name` 去重**：同一 `ontology_id` 可能被物化成多份
+ * 文件（或多个技能引用同一本体），若在候选层不去重，同一项会被当作两道题重复判定、
+ * 并挤占 `maxCapabilities` 预算。同名同本体同类别只保留首次出现（即枚举序在前的那份）；
+ * 带上 `kind` 是为了让同名的行为与函数各自成题（二者是不同东西，不能互相覆盖）。
  */
 export function buildCapabilityCandidates(
   selectedSkills: readonly SkillCandidate[],
@@ -139,11 +143,12 @@ export function buildCapabilityCandidates(
 
   for (const ontology of ordered) {
     for (const behavior of ontology.behaviors) {
-      const key = `${ontology.ontologyId}\u0000${behavior.name}`;
+      const key = `${ontology.ontologyId}\u0000behavior\u0000${behavior.name}`;
       if (seen.has(key)) continue;
       seen.add(key);
       collected.push({
         qid: '',
+        kind: 'behavior',
         name: behavior.name,
         title: behavior.title,
         description: behavior.description,
@@ -151,6 +156,26 @@ export function buildCapabilityCandidates(
         ontologyName: ontology.ontologyName,
         // 019：概念随候选一起带下去，选中后才能作为发散的起点
         concept: behavior.concept,
+        relatedConcepts: [],
+        index: order++,
+      });
+    }
+    // 2026-11-20：函数排在同本体的行为之后，共用上限与批次
+    for (const fn of ontology.functions) {
+      const key = `${ontology.ontologyId}\u0000function\u0000${fn.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push({
+        qid: '',
+        kind: 'function',
+        name: fn.name,
+        title: fn.title,
+        description: fn.description,
+        ontologyId: ontology.ontologyId,
+        ontologyName: ontology.ontologyName,
+        // 函数不是发散起点（019 只认行为的概念），概念位恒空
+        concept: null,
+        relatedConcepts: fn.relatedConcepts,
         index: order++,
       });
     }
@@ -164,11 +189,17 @@ export function buildCapabilityCandidates(
   };
 }
 
-/** 行为命题：键为 `qid`，题面按 `description → title → name` 降级，极简命题式 */
+/**
+ * 能力命题：键为 `qid`，题面按 `description → title → name` 降级，极简命题式。
+ *
+ * 措辞按 `kind` 分派（`需要行为` / `需要函数`）：函数不是"能做的事"，而是"算得出什么"，
+ * 同一句话套在两类上会让 Laya 的判定口径漂移。
+ */
 export function buildCapabilityQuestions(candidates: readonly CapabilityCandidate[]): QuestionMap {
   const questions: QuestionMap = {};
   for (const candidate of candidates) {
-    questions[candidate.qid] = noulQuestion(`需要行为「${capabilityLabel(candidate)}」`);
+    const need = candidate.kind === 'function' ? '需要函数' : '需要行为';
+    questions[candidate.qid] = noulQuestion(`${need}「${capabilityLabel(candidate)}」`);
   }
   return questions;
 }

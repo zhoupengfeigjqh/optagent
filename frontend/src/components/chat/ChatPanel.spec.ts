@@ -6,6 +6,8 @@
  *    坐标由脚本写死（`fixed` 语义的落点），打开前后锚点（输入框）的矩形完全一致；
  * 2. **引用胶囊回归**（不变量 I-1，2026-10-18 起为正文内联）：`草稿 + mention.references`
  *    → `.composer__mention` 的结构与"移除由上层决定"的上报口径不变。
+ * 3. **发送判据的接线**（2026-11-20 收敛后）：`ChatPanel` 是否真的把 `canSendContent`
+ *    接到了工具栏的 `:can-send`（判据算得对而模板接错，`vue-tsc` 抓不到，见文末用例组）。
  *
  * `useChatPanel()` 整体打桩（与 `ChatPanel.starters.spec.ts` 同口径）：事件编排已收敛在
  * 该组合式函数里（另有其自身用例覆盖），本测试只关心"插槽 + 面板 + 芯片"这段渲染接线。
@@ -18,6 +20,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyNextSteps } from '../../api/next-steps'
 import type { ErrorInfo, Message } from '../../api/types'
 import ChatPanel from './ChatPanel.vue'
+import ComposerToolbar from './ComposerToolbar.vue'
 
 const h = vi.hoisted(() => ({ panel: null as unknown }))
 
@@ -44,7 +47,7 @@ function makePanel(
 ) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(options.draft ?? ''), thinkingEnabled: ref(false), canSend: ref(true) },
+    chat: { draft: ref(options.draft ?? ''), thinkingEnabled: ref(false) },
     // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
     threads: {
       activeId: ref(null),
@@ -101,6 +104,8 @@ function makePanel(
     isFailed: ref(false),
     errorInfo: ref<ErrorInfo | null>(null),
     sending: ref(false),
+    // 发送判据读它（MCP 就绪等待中禁用发送）：缺了 `toolbarCanSend` 会抛 `undefined.value`
+    preparing: ref(false),
     hasMessages: ref(false),
     pendingUserMessage: ref(null),
     pendingInteraction: ref(null),
@@ -490,5 +495,62 @@ describe('ChatPanel —— 空数据引导气泡（014）', () => {
     expect((panel as Panel).emptyHint.dismiss).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
+  })
+})
+
+/**
+ * 工具栏发送判据的**接线**（2026-11-20 收敛后）。
+ *
+ * `utils/can-send.spec.ts` 只证明判据函数算得对；这里证明 `ChatPanel` 真的把它接到了
+ * `ComposerToolbar` 的 `:can-send`。分工是必要的：判据写对、模板接错（例如改回只看
+ * `draft` 非空，或漏掉 MCP 就绪门）时，类型仍是 `boolean`，`vue-tsc` 与判据单测
+ * 都不会报——只有这一层会红。
+ */
+describe('ChatPanel —— 工具栏发送判据接线', () => {
+  /** 工具栏实际收到的 `canSend`（= 判据 + 流式门 + MCP 就绪门） */
+  function canSendOf(wrapper: ReturnType<typeof setup>['wrapper']): boolean {
+    return wrapper.getComponent(ComposerToolbar).props('canSend') === true
+  }
+
+  it('正文非空 → 可发（基线）', async () => {
+    const { wrapper } = setup({ draft: '看看华东区的交付风险' })
+    await nextTick()
+
+    expect(canSendOf(wrapper)).toBe(true)
+  })
+
+  it('只选技能、正文只剩 `/技能名` → 不可发（剥标记后为空）', async () => {
+    const { wrapper, panel } = setup({ draft: '/demo ' })
+    panel.skill.selected.value = 'demo'
+    await nextTick()
+
+    expect(canSendOf(wrapper)).toBe(false)
+  })
+
+  it('同一草稿 + 一条 `@` 引用 → 可发（引用独立放行）', async () => {
+    const { wrapper, panel } = setup({
+      draft: '/demo ',
+      references: [{ dir: '数据准备', filename: 'a.csv' }],
+    })
+    panel.skill.selected.value = 'demo'
+    await nextTick()
+
+    expect(canSendOf(wrapper)).toBe(true)
+  })
+
+  it('本轮流式中 → 发送位换成「中断本轮」', async () => {
+    const { wrapper, panel } = setup({ draft: '你好' })
+    panel.sending.value = true
+    await nextTick()
+
+    expect(wrapper.find('[aria-label="中断本轮"]').exists()).toBe(true)
+  })
+
+  it('MCP 就绪等待中 → 不可发（`preparing` 也进了同一判据）', async () => {
+    const { wrapper, panel } = setup({ draft: '你好' })
+    panel.preparing.value = true
+    await nextTick()
+
+    expect(canSendOf(wrapper)).toBe(false)
   })
 })

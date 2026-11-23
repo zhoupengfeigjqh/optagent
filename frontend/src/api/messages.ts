@@ -1,10 +1,13 @@
 /**
  * 发消息（SSE 流式）与流事件解码（`contracts/backend-api.md` §4）
  *
- * 请求体字段（`additionalProperties: false`）：`content` / `thinking` / `model` / `attachments`。
+ * 请求体字段（`additionalProperties: false`）。基础四字段：
  * - `content`：**去掉 `@文件名` 引用文本后**的正文，`minLength: 1`
  * - `model`：未选择时**不传该字段**，由后端使用默认模型（FR-013）
  * - `attachments`：结构化 `{dir, filename}[]`，`maxItems: 10`（FR-016、SC-019）
+ *
+ * 增量可选字段（缺省即不写，见下方 `SendMessageInput`）：`guidance`（首屏问题实例卡片）、
+ * `tool_tips`（下一步动作卡片）、`skip_intent_focus`（仅首屏卡片）、`skill`（`/技能名`）。
  */
 
 import type {
@@ -34,9 +37,10 @@ export interface SendMessageInput {
   /** 卡片回传的隐藏工具提示（016）；空数组 / 缺省表示不提交该字段 */
   toolTips?: ToolTip[]
   /**
-   * 013：本轮跳过意图聚焦（预置动作入口：下一步动作卡片 / 首屏问题实例卡片）。
+   * 013：本轮跳过意图聚焦。**当前唯一来源是首屏「问题实例」卡片**（`ChatPanel.onStarterClick`）。
    *
-   * 仅 `true` 时提交。跳过必须是**服务端可校验**的标记，所以它走请求体，
+   * 016 起下一步动作卡片**不再**跳过——它带 `toolTips` 走正常判定（点卡片后任务范围往往已变，
+   * 重新判定更准）。仅 `true` 时提交；跳过必须是**服务端可校验**的标记，所以它走请求体，
    * 而不是"前端少发一次请求"；标记不落历史、不出现在消息内容里。
    */
   skipIntentFocus?: boolean

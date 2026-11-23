@@ -143,7 +143,7 @@ signal?: AbortSignal;
     '你是输入改写助手。把用户给的“当前输入”改写成一段简洁、清晰、可独立理解的表述，' +
     '不要解释、不要加引号、不要输出多余内容，不超过 100 字。' +
     '改写结果可以是陈述句、指令或问句，不要强行改成问句。',
-  messages: [{ role: 'user', content: '<见 §6 素材拼装：最近 3 轮 + 当前输入>' }],
+  messages: [{ role: 'user', content: '<见 §6 素材拼装：最近 2 轮 + 当前输入>' }],
   tools: [],
   thinking: false,
   signal: <AbortSignal：超时 ∪ 本轮中止>,
@@ -158,8 +158,6 @@ signal?: AbortSignal;
 助手：<第 1 轮 assistant>
 用户：<第 2 轮 user>
 助手：<第 2 轮 assistant>
-用户：<第 3 轮 user>
-助手：<第 3 轮 assistant>
 
 【当前输入】
 <本轮输入>
@@ -169,8 +167,8 @@ signal?: AbortSignal;
 
 | 规则 | 口径 |
 |---|---|
-| 轮数 | 0~3 组；无历史时整个【最近对话】段省略 |
-| 顺序 | 时间正序；不足 3 组按实际 |
+| 轮数 | 0~2 组；无历史时整个【最近对话】段省略 |
+| 顺序 | 时间正序；不足 2 组按实际 |
 | 排除 | `status=failed`、空正文、附件路径、工具信息、思考内容、系统补充素材、聚焦提示、摘要 |
 | 模型 | `input.model`（缺省默认模型）；不降级到其它模型 |
 | 超时 | `min(rewriteTimeoutMs, deadline - now - 100)`；剩余 < 300ms 不发起（原因 `budget_exhausted`） |
@@ -270,7 +268,7 @@ normalizeRewrite(raw: string): { text: string; truncated: boolean }
 | 改写返回空白 / 只有引号 | `empty_output`；回退原文 |
 | 改写返回 120 字 | 截到 100；`rewrite_truncated=true`；仍只用于评分 |
 | 改写返回陈述句 | 正常采用（不因非问句失败） |
-| 历史含失败轮 / 附件轮 / 工具记录 | 过滤正确；素材只含正文；最多 3 组 |
+| 历史含失败轮 / 附件轮 / 工具记录 | 过滤正确；素材只含正文；最多 2 组 |
 | 首轮无历史 | 判定照常；改写素材只有当前输入；`history_turns=0` |
 | 预算不足（总预算耗尽） | 不发起改写；`budget_exhausted`；阶段在预算内结束 |
 | 重新生成 | 新一轮独立判定 / 改写 / 留档 |

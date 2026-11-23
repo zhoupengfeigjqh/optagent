@@ -84,7 +84,7 @@ export interface RewriteOutcome {
   rewrite: string;
   rewriteTruncated: boolean;
   rewriteMs: number | null;
-  /** 参与的历史轮数（0~3） */
+  /** 参与的历史轮数（0~2） */
   historyTurns: number;
   /**
    * 说明性原因：`null` = 未执行或"改写成功且素材完整"。
@@ -198,7 +198,7 @@ export async function runRewriteStage(
     return { ...original(), needRewrite: true, score, reason: 'budget_exhausted' };
   }
 
-  // 5. 素材：最近 3 个完整问答轮 + 本轮输入（只读正文，不追加附件段）
+  // 5. 素材：最近 2 个完整问答轮 + 本轮输入（只读正文，不追加附件段）
   let turns = [] as ReturnType<typeof pickRecentTurns>;
   if (deps.readHistory) {
     try {

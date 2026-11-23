@@ -36,7 +36,8 @@ intent_focus:
   api_key: $DECIS_API_KEY
   timeout_ms: 10000
   skill_threshold: 0.8
-  ontology_threshold: 0.8
+  ontology_behavior_threshold: 0.8
+  ontology_function_threshold: 0.8
   max_skills: 32
   max_capabilities: 96
 ```
@@ -48,22 +49,25 @@ intent_focus:
 | `api_key` | 是 | string / `$ENV` | — | 不回落 `DEEPSEEK_API_KEY` |
 | `timeout_ms` | 否 | 整数 300~10000 | 10000 | 单轮总预算 |
 | `skill_threshold` | 否 | 0~1 | 0.8 | **技能**阈值 |
-| `ontology_threshold` | 否 | 0~1 | 0.8 | **本体行为**阈值 |
+| `ontology_behavior_threshold` | 否 | 0~1 | 0.8 | **本体行为**阈值（2026-11-20 由 `ontology_threshold` 改名，旧键不再接受） |
+| `ontology_function_threshold` | 否 | 0~1 | 0.8 | **本体函数**阈值（2026-11-20 新增） |
 | `max_skills` | 否 | 整数 1~256 | 32 | 技能候选上限 |
-| `max_capabilities` | 否 | 整数 1~96 | 96 | **行为候选**上限（键名保留，勿改名；上限即 FR-027 规格硬界） |
+| `max_capabilities` | 否 | 整数 1~96 | 96 | **行为与函数候选合计**上限（键名保留，勿改名；上限即 FR-027 规格硬界） |
 
 **规则**：
 - 整块缺失 → 功能不可用；开关开启时记录 `unconfigured`，启动不失败。
 - 块存在但必填缺失 / 越界 / 未知键 → 启动失败。
-- `skill_threshold` / `ontology_threshold` 可由环境变量覆盖；YAML 值仍校验。
+- `skill_threshold` / `ontology_behavior_threshold` / `ontology_function_threshold` 可由环境变量覆盖；YAML 值仍校验。
 - 环境变量留空视为未设置，不变成 0。
+- 旧键 `ontology_threshold` 属未知键 → 启动失败（`strict()`），报错文案须指出新键名。
 
 ### 2.2 环境变量
 
 | 变量 | 作用 | 优先级 |
 |---|---|---|
 | `INTENT_FOCUS_SKILL_THRESHOLD` | 技能阈值 | 高于 YAML `skill_threshold` |
-| `INTENT_FOCUS_ONTOLOGY_THRESHOLD` | 本体能力阈值 | 高于 YAML `ontology_threshold` |
+| `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` | 本体行为阈值 | 高于 YAML `ontology_behavior_threshold` |
+| `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD` | 本体函数阈值 | 高于 YAML `ontology_function_threshold` |
 | `DECIS_API_KEY` | 由 `api_key: $DECIS_API_KEY` 引用 | — |
 
 `max_skills` / `max_capabilities` 不提供环境变量，避免配置碎片化。
@@ -255,17 +259,19 @@ rules: [...]      # 2026-11-06 起忽略
 
 ## 8. 兼容与版本
 
-- 本契约 v1 起生效；v1.1（2026-11-06）起能力只到行为：013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用；`functions` / `rules` 口径作废。
-- 新增配置键全部可选；旧 `intent_focus` 块可直接启动（`skill_threshold` 语义变为技能阈值，`max_capabilities` 语义变为行为上限）。
+- 本契约 v1 起生效；v1.1（2026-11-06）起能力只到行为：013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用；`rules` 口径作废。
+- v1.2（2026-11-20）：**函数窄口径恢复**——`functions[]` 与行为同批判分、共用 `max_capabilities`、各自阈值；函数命中取 `related_concepts` 的 `op_type: query` 行为并入提示 `直接命中`，不判分、不发散、不进 `tool_tips`。
+- 配置：`ontology_threshold` 更名 `ontology_behavior_threshold`（**旧键不再接受**），新增 `ontology_function_threshold`；`max_capabilities` 语义改为「行为与函数合计上限」。
 - 公开 HTTP 无版本变更；`tool_tips` 结构不变；前端 / 管理端无需发版。
-- 旧记录行（含 `functions` / `data_supplements` / `kind` / `source`）仍可被 `readAll` 读出，不做迁移。
+- 旧记录行（含旧形态 `functions` / `data_supplements` / `kind` / `source`）仍可被 `readAll` 读出，不做迁移。
 - 后续若调整提示格式或记录字段，必须同时更新本契约与 `data-model.md`，并保留旧记录可读。
 
 ## 9. 验收断言（契约级）
 
 1. 技能题、行为题均为 `type: 'noul'`，请求中不存在 `choice`。
-2. 技能题 qid 为 `s1..sN`，行为题 qid 为 `c1..cN`，与候选一一对应（`functions` 不产生 qid）。
-3. 阈值边界：0.60 / 0.61 / 0.82（阈值 0.6）只保留后两个。
+2. 技能题 qid 为 `s1..sN`，行为与函数题共用 `c1..cN`，与候选一一对应（`kind` 区分类别）。
+3. 阈值边界：0.60 / 0.61 / 0.82（阈值 0.6）只保留后两个；函数按 `ontology_function_threshold` 独立判定，同一分数可一侧入选、另一侧落选。
+4. 取数行为只来自函数的 `related_concepts`（同本体、`op_type: query`），不判分、不进 `tool_tips`。
 4. 非本体技能入选时，提示无本体段，本体读取 / 行为评分 / 工具评分均为 0。
 5. 本体技能入选时，提示中技能名在关联行为之前；含 `rules` / `data_supplements` 的本体不产生额外行为，提示无「关联函数」。
 6. 去重后行为同名项（同 `ontology_id`）≤1；跨本体同名各自保留。

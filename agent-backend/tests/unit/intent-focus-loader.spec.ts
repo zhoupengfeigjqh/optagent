@@ -142,15 +142,81 @@ describe('loadOntologyIndex', () => {
     expect(index.byId.get('1')).toHaveLength(1);
   });
 
-  it('functions / rules 不再解析；concepts / relations 只建模不产生告警', () => {
+  it('functions 只解析四字段（params / response 不进模型）；rules 不解析；无告警', () => {
     const agent = tmpAgentDir();
-    writeOntology(agent, '生产调度', '原材料采购和库存', VALID);
+    writeOntology(
+      agent,
+      '生产调度',
+      '原材料采购和库存',
+      [
+        'metadata:',
+        '  ontology_id: 1',
+        'functions:',
+        '  - name: checkRawMaterialUnit',
+        '    title: 校验采购原材料单位一致性',
+        '  - name: sumRawNotArrivalQty',
+        '    title: 原材料未到位数',
+        '    description: 汇总未到位数量',
+        '    related_concepts:',
+        '      - PurchaseRecord',
+        '    params:',
+        '      - name: purchase',
+        '    response:',
+        '      type: number',
+        'behaviors:',
+        '  - name: QueryPurchaseRecords',
+        '    title: 查询原材料采购单信息',
+        '    op_type: query',
+        '    concept: PurchaseRecord',
+        'rules:',
+        '  - name: V01',
+        '    behavior: QueryPurchaseRecords',
+      ].join('\n'),
+    );
     const index = loadOntologyIndex(agent);
     const ontology = index.all[0]!;
 
-    expect(ontology).not.toHaveProperty('functions');
+    expect(ontology.functions).toEqual([
+      // 2026-11-20：只留四字段，`params` / `response` 不进模型
+      {
+        name: 'checkRawMaterialUnit',
+        title: '校验采购原材料单位一致性',
+        description: '',
+        relatedConcepts: [],
+      },
+      {
+        name: 'sumRawNotArrivalQty',
+        title: '原材料未到位数',
+        description: '汇总未到位数量',
+        relatedConcepts: ['PurchaseRecord'],
+      },
+    ]);
     expect(ontology).not.toHaveProperty('rules');
+    expect(JSON.stringify(ontology)).not.toContain('params');
     expect(index.warnings).toEqual([]);
+  });
+
+  it('函数缺 name 被丢弃并告警；related_concepts 坏形状按空数组处理', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      'S',
+      'O',
+      [
+        'metadata:',
+        '  ontology_id: 9',
+        'functions:',
+        '  - title: 没有名字',
+        '  - name: ok',
+        '    related_concepts: 42',
+      ].join('\n'),
+    );
+    const index = loadOntologyIndex(agent);
+
+    expect(index.all[0]!.functions).toEqual([
+      { name: 'ok', title: 'ok', description: '', relatedConcepts: [] },
+    ]);
+    expect(index.warnings.some((warning) => warning.endsWith(':function_missing_name'))).toBe(true);
   });
 
   it('关系缺端点被丢弃并告警；relation_type 支持单值与数组两种写法', () => {

@@ -20,9 +20,15 @@ import {
   renderPath,
   type PromptSkill,
 } from '../../src/domain/intent-focus/prompt.js';
-import type { CapabilityDecision, CapabilitySelection } from '../../src/domain/intent-focus/types.js';
+import type {
+  CapabilityDecision,
+  CapabilitySelection,
+  ConceptQueryDecision,
+  FunctionDecision,
+} from '../../src/domain/intent-focus/types.js';
 
-const PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
+const PREFIX =
+  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
 
 function skill(overrides: Partial<PromptSkill> = {}): PromptSkill {
   return {
@@ -47,12 +53,41 @@ function behavior(name: string, title: string, ontologyId = '1', score = 0.8): C
   };
 }
 
+function fnDecision(
+  name: string,
+  title: string,
+  relatedConcepts: string[] = ['PurchaseRecord'],
+): FunctionDecision {
+  return {
+    name,
+    title,
+    ontologyId: '1',
+    ontologyName: '原材料采购和库存',
+    score: 0.85,
+    relatedConcepts,
+    index: 0,
+  };
+}
+
+function queryDecision(name: string, title: string, concept = 'Supplier'): ConceptQueryDecision {
+  return {
+    name,
+    title,
+    ontologyId: '1',
+    ontologyName: '原材料采购和库存',
+    concept,
+    index: 0,
+  };
+}
+
 function selection(overrides: Partial<CapabilitySelection> = {}): CapabilitySelection {
   return {
     behaviors: [
       behavior('CreatePurchaseRecord', '创建原材料采购单'),
       behavior('QueryPurchaseRecords', '查询原材料采购单信息'),
     ],
+    functions: [],
+    conceptQueries: [],
     ...overrides,
   };
 }
@@ -302,5 +337,85 @@ describe('composeFocusPrompt 截断（行级）', () => {
     for (const line of result.prompt.split('\n').slice(1)) {
       expect(line.endsWith('）') || line.endsWith('：')).toBe(true);
     }
+  });
+});
+
+describe('composeFocusPrompt · 函数与取数并入直接命中（2026-11-20）', () => {
+  const conceptTitle = (ontologyId: string, name: string): string | null => {
+    if (ontologyId !== '1') return null;
+    if (name === 'PurchaseRecord') return '原材料采购记录';
+    if (name === 'Supplier') return '供应商';
+    return null;
+  };
+
+  const mixed = (): CapabilitySelection =>
+    selection({
+      behaviors: [behavior('CreatePurchaseRecord', '创建原材料采购单')],
+      functions: [fnDecision('sumRawNotArrivalQty', '原材料未到位数')],
+      conceptQueries: [queryDecision('QuerySuppliers', '查询供应商信息')],
+    });
+
+  it('三类条目并入同一「直接命中」行，不新增段头', () => {
+    const result = composeFocusPrompt([skill()], mixed(), { conceptTitle });
+    const lines = result.prompt.split('\n');
+
+    expect(lines.filter((line) => line.includes('直接命中：'))).toHaveLength(1);
+    expect(result.prompt).not.toContain('命中函数');
+    expect(result.prompt).not.toContain('关联取数');
+    expect(lines.at(-1)).toBe(
+      '   直接命中：创建原材料采购单（CreatePurchaseRecord）、原材料未到位数（sumRawNotArrivalQty）〔原材料采购记录(PurchaseRecord)〕、查询供应商信息（QuerySuppliers）〔供应商(Supplier)〕',
+    );
+  });
+
+  it('不加类型后缀（模型不该把函数当成可调用工具）', () => {
+    const result = composeFocusPrompt([skill()], mixed(), { conceptTitle });
+
+    expect(result.prompt).not.toContain('，函数');
+    expect(result.prompt).not.toContain('，取数');
+  });
+
+  it('概念没有中文名时只写 name，不留空槽', () => {
+    const result = composeFocusPrompt([skill()], mixed(), {});
+
+    expect(result.prompt).toContain('原材料未到位数（sumRawNotArrivalQty）〔PurchaseRecord〕');
+    expect(result.prompt).toContain('查询供应商信息（QuerySuppliers）〔Supplier〕');
+  });
+
+  it('函数没有 related_concepts 时不输出空括号', () => {
+    const result = composeFocusPrompt(
+      [skill()],
+      selection({ behaviors: [], functions: [fnDecision('F1', '孤立函数', [])] }),
+      { conceptTitle },
+    );
+
+    expect(result.prompt).toContain('孤立函数（F1）');
+    expect(result.prompt).not.toContain('〔〕');
+  });
+
+  it('剪枝顺序：取数先丢 → 函数次之 → 行为最后', () => {
+    const full = composeFocusPrompt([skill()], mixed(), { conceptTitle }).prompt.length;
+
+    const dropQuery = composeFocusPrompt([skill()], mixed(), {
+      conceptTitle,
+      maxChars: full - 1,
+    });
+    expect(dropQuery.prompt).not.toContain('QuerySuppliers');
+    expect(dropQuery.prompt).toContain('sumRawNotArrivalQty');
+    expect(dropQuery.prompt).toContain('CreatePurchaseRecord');
+
+    const withoutQuery = composeFocusPrompt(
+      [skill()],
+      selection({
+        behaviors: [behavior('CreatePurchaseRecord', '创建原材料采购单')],
+        functions: [fnDecision('sumRawNotArrivalQty', '原材料未到位数')],
+      }),
+      { conceptTitle },
+    ).prompt.length;
+    const dropFunction = composeFocusPrompt([skill()], mixed(), {
+      conceptTitle,
+      maxChars: withoutQuery - 1,
+    });
+    expect(dropFunction.prompt).not.toContain('sumRawNotArrivalQty');
+    expect(dropFunction.prompt).toContain('CreatePurchaseRecord');
   });
 });

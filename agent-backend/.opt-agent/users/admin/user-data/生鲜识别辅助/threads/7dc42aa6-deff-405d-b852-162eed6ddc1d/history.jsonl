@@ -1,0 +1,4 @@
+{"role":"user","content":"你好","id":"m_mwokgwgn_k6l1","ts":"2026-11-20T05:56:53.975Z","agent_name":"生鲜识别辅助"}
+{"id":"m_mwokgvjt_3xi7","role":"assistant","content":"你好！我是生鲜订单图片解析助手 🌱\n\n我可以帮你：\n1. **解析订单图片**：从你上传的生鲜订单图片/文件中提取文本信息\n2. **匹配正式品种**：根据提取内容到 SKU 表中匹配对应的正式品种名称和编码\n3. **输出识别结果表**：生成一张包含序号、商品名称、数量、SKU编码、是否需要审核的 Excel 表\n\n请上传你的订单文件（图片或表格），我这就开始解析。若文件涉及非生鲜品类，我也会先确认范畴再处理。","ts":"2026-11-20T05:56:53.975Z","status":"completed","usage":{"input_tokens":1702,"output_tokens":120},"duration_ms":1182,"agent_name":"生鲜识别辅助"}
+{"role":"user","content":"hi","id":"m_mwolwpaj_02pc","ts":"2026-11-20T06:37:10.795Z","agent_name":"生鲜识别辅助"}
+{"id":"m_mwolwobx_08wa","role":"assistant","content":"你好呀 👋 随时可以开始～\n\n把生鲜订单图片（或表格文件）发给我就行，我会：\n- 提取其中的商品名称、数量\n- 到 SKU 表里匹配正式品种和编码\n- 输出一张「识别结果」Excel 表，并标出需要人工审核的行\n\n期待你的文件 📄🥬","ts":"2026-11-20T06:37:10.795Z","status":"completed","usage":{"input_tokens":1827,"output_tokens":75},"duration_ms":1246,"agent_name":"生鲜识别辅助"}

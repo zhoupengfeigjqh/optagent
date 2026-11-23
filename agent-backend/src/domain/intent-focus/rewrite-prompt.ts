@@ -16,8 +16,13 @@ export const NEED_REWRITE_QID = 'need_rewrite';
 /** 改写结果字符上限（按 **Unicode 码点**计数，不是 UTF-16 长度） */
 export const REWRITE_MAX_CHARS = 100;
 
-/** 参与改写的历史问答轮数上限（3 组 = 至多 6 条消息） */
-export const REWRITE_HISTORY_TURNS = 3;
+/**
+ * 参与改写的历史问答轮数上限（2 组 = 至多 4 条消息）。
+ *
+ * 2026-11-20 由 3 收紧为 2：更早的轮次对指代消解的边际收益很低，
+ * 却按"每条正文全量"占用改写请求的输入长度；收紧后改写请求更短、更快。
+ */
+export const REWRITE_HISTORY_TURNS = 2;
 
 /**
  * 改写助手的系统提示词（契约 §6 逐字口径）。

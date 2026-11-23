@@ -31,7 +31,8 @@ const CONFIG: IntentFocusConfig = {
   apiKey: 'k',
   timeoutMs: 10_000,
   skillThreshold: 0.6,
-  ontologyThreshold: 0.6,
+  ontologyBehaviorThreshold: 0.6,
+  ontologyFunctionThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
   // 027：改写参数（缺省关闭时不会被用到，但类型上必需）
@@ -149,7 +150,7 @@ function scoreOf(instructions: string): number {
   if (instructions.includes('取消采购单')) return 0.1;
   if (instructions.includes('查询采购记录')) return 0.05;
   if (instructions.includes('查询原材料')) return 0.05;
-  // 本体里的函数即使存在也不该出题（2026-11-06：能力只到行为）
+  // 2026-11-20：函数恢复出题（题面措辞为「需要函数」），0.7 高于函数阈值 0.6
   if (instructions.includes('校验采购单位一致性')) return 0.7;
   return 0.05;
 }
@@ -305,17 +306,17 @@ describe('空结果', () => {
 });
 
 describe('成功链路', () => {
-  it('技能 + 行为：提示按格式铸造，记录只写入选行为', async () => {
+  it('技能 + 行为 + 函数：函数进提示但不进卡片（FR-069 回归）', async () => {
     const { root } = fixture();
     const { runner, records } = harness(root);
     const { prompt, toolTips } = await runner.judge(input());
 
     expect(prompt).toBe(
-      "本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）\n" +
+      "本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）\n" +
         "1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）\n" +
-        '   直接命中：创建采购单（B1）',
+        '   直接命中：创建采购单（B1）、校验采购单位一致性（F1）',
     );
-    // 卡片候选范围＝入选行为（顺序沿判定结果，字段原样透传）
+    // 卡片候选范围＝入选行为（顺序沿判定结果，字段原样透传）；函数 F1 不得出现
     expect(toolTips).toEqual([
       { name: 'B1', title: '创建采购单', ontology_id: '1', ontology_name: '原材料采购和库存' },
     ]);
@@ -323,10 +324,21 @@ describe('成功链路', () => {
     const record = records[0]!;
     expect(record.disposition).toBe('focused');
     expect(record.batches).toBe(2);
-    // 技能 2 个 + 行为候选 4 个（F1 与 rules 不参与）
-    expect(record.candidates).toBe(2 + 4);
+    // 技能 2 个 + 能力候选 5 个（4 个行为 + 1 个函数；rules 不参与）
+    expect(record.candidates).toBe(2 + 5);
     expect(record.behaviors.map((item) => item.name)).toEqual(['B1']);
-    expect(record).not.toHaveProperty('functions');
+    expect(record.functions).toEqual([
+      {
+        name: 'F1',
+        title: '校验采购单位一致性',
+        ontology_id: '1',
+        ontology_name: '原材料采购和库存',
+        score: 0.7,
+        related_concepts: [],
+      },
+    ]);
+    // 卡片通道不含函数
+    expect(record.tool_tip_behaviors.map((item) => item.name)).toEqual(['B1']);
     expect(record).not.toHaveProperty('data_supplements');
     expect(record.prompt).toBe(prompt);
   });
@@ -419,7 +431,8 @@ const FOCUS_ONTOLOGY_YAML = [
   '    concept: PurchaseRecord',
 ].join('\n');
 
-const FOCUS_PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
+const FOCUS_PREFIX =
+  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
 
 function focusFixture(): Fixture {
   return fixture({

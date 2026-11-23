@@ -3,7 +3,7 @@
  *
  * 这些函数是"可逐字断言"的部分，因此测试按**契约 §5~§7 的步骤逐条钉住**：
  * - 命题恒 1 条 `noul`（不拆题、不用 `choice`）；
- * - 素材恒 1 条 user 消息，最近 3 组完整问答轮，失败轮 / 空正文 / 孤立消息被过滤；
+ * - 素材恒 1 条 user 消息，最近 2 组完整问答轮，失败轮 / 空正文 / 孤立消息被过滤；
  * - 阈值**严格大于**才改写；
  * - 归一化七步顺序固定，100 字按**码点**截断（不能切开代理对）。
  */
@@ -67,7 +67,7 @@ describe('shouldRewrite —— 严格大于阈值', () => {
   });
 });
 
-describe('pickRecentTurns —— 最近 3 组完整问答轮', () => {
+describe('pickRecentTurns —— 最近 2 组完整问答轮', () => {
   it('无历史 → 空数组', () => {
     expect(pickRecentTurns([])).toEqual([]);
   });
@@ -78,7 +78,7 @@ describe('pickRecentTurns —— 最近 3 组完整问答轮', () => {
     ]);
   });
 
-  it('超过 3 组时只取最近 3 组，且保持时间正序', () => {
+  it('超过 2 组时只取最近 2 组，且保持时间正序', () => {
     const messages = [
       msg('user', 'u1'),
       msg('assistant', 'a1'),
@@ -91,7 +91,6 @@ describe('pickRecentTurns —— 最近 3 组完整问答轮', () => {
     ];
 
     expect(pickRecentTurns(messages)).toEqual([
-      { user: 'u2', assistant: 'a2' },
       { user: 'u3', assistant: 'a3' },
       { user: 'u4', assistant: 'a4' },
     ]);

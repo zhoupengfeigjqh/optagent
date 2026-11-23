@@ -2,6 +2,8 @@
  * 留档铸造（016 / 019）：把技能决策、概念、两通道行为映射为 `IntentFocusRecordDraft`。
  *
  * 2026-11-06 精简：只写**入选行为**，删除 `functions` / `data_supplements`。
+ * 2026-11-20：`functions` 以"只写入选函数"的口径恢复；取数行为进 `behaviors` 并标
+ * `source: 'concept_query'`（`score: null`），`tool_tip_behaviors` 仍不含函数与取数。
  *
  * 2026-11-08（019）：发散让"同一条行为可能只出现在一个通道"，因此记录按**通道**分两份：
  * - `behaviors` = 提示通道（直接命中 + 上游发散）；
@@ -15,6 +17,7 @@ import {
   REWRITE_RECORD_DEFAULTS,
   type CapabilityFocusRecord,
   type ConceptFocusRecord,
+  type FunctionFocusRecord,
   type IntentFocusRecordDraft,
   type RewriteFocusRecord,
   type SkillFocusRecord,
@@ -23,7 +26,9 @@ import type {
   BehaviorSource,
   CapabilityDecision,
   CapabilitySelection,
+  ConceptQueryDecision,
   ExpandedBehavior,
+  FunctionDecision,
   SkillDecision,
 } from './types.js';
 
@@ -90,6 +95,8 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
   }));
 
   const direct: CapabilityFocusRecord[] = input.capabilities.behaviors.map(toDirectRecord);
+  // 2026-11-20：取数行为只进提示通道；函数单独一列（不混进 behaviors）
+  const conceptQueryRecords = input.capabilities.conceptQueries.map(toConceptQueryRecord);
 
   return {
     thread_id: input.threadId,
@@ -107,11 +114,16 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
     depth: input.depth ?? 0,
     skills,
     concepts: (input.concepts ?? []).map(toConceptRecord),
-    behaviors: [...direct, ...(input.upstreamBehaviors ?? []).map(toExpandedRecord('upstream'))],
+    behaviors: [
+      ...direct,
+      ...conceptQueryRecords,
+      ...(input.upstreamBehaviors ?? []).map(toExpandedRecord('upstream')),
+    ],
     tool_tip_behaviors: [
       ...direct,
       ...(input.downstreamBehaviors ?? []).map(toExpandedRecord('downstream')),
     ],
+    functions: input.capabilities.functions.map(toFunctionRecord),
     prompt: input.prompt,
     prompt_truncated: input.promptTruncated,
     warnings: [...input.warnings],
@@ -159,6 +171,36 @@ function toExpandedRecord(
     via_concept: behavior.viaConcept,
     from_concept: behavior.fromConcept,
   });
+}
+
+/** 函数项：只写入选函数（`score` 恒 > 函数阈值） */
+function toFunctionRecord(fn: FunctionDecision): FunctionFocusRecord {
+  return {
+    name: fn.name,
+    title: fn.title,
+    ontology_id: fn.ontologyId,
+    ontology_name: fn.ontologyName,
+    score: fn.score,
+    related_concepts: [...fn.relatedConcepts],
+  };
+}
+
+/**
+ * 取数项：`score` 恒 null（没有判分），`via_concept` 记它所属的概念——
+ * 也就是"哪条关联概念把它带进来的"，事后能直接对账。
+ */
+function toConceptQueryRecord(query: ConceptQueryDecision): CapabilityFocusRecord {
+  return {
+    name: query.name,
+    title: query.title,
+    ontology_id: query.ontologyId,
+    ontology_name: query.ontologyName,
+    score: null,
+    source: 'concept_query',
+    hop: 0,
+    via_concept: query.concept,
+    from_concept: null,
+  };
 }
 
 function toConceptRecord(entry: ConceptEntry): ConceptFocusRecord {

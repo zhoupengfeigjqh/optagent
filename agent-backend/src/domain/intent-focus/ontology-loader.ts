@@ -5,6 +5,8 @@
  * 2026-11-06：`functions` 与 `rules` 不再读取（能力聚焦只到行为）。
  * 2026-11-08（019）：新增 `concepts` 与 `relations` 的**只读**建模，供一阶发散使用；
  * 参数正文、函数代码、`rules` 仍然不进来。
+ * 2026-11-20：`functions` **窄口径恢复**——只读 `name` / `title` / `description` /
+ * `related_concepts`；`params` / `response` 与 `rules` 仍不进来（FR-020）。
  *
  * 2026-11-08（020）：目录枚举与 YAML 读取移到 `../ontology-files.js`——本体行为权限闸门
  * 需要同一条"安全枚举 + 坏文件降级"规则，两处各写一套必然漂移（宪章原则二）。
@@ -24,6 +26,7 @@ import type {
   OntologyBehavior,
   OntologyConcept,
   OntologyDefinition,
+  OntologyFunction,
   OntologyIndex,
   OntologyRelation,
 } from './types.js';
@@ -67,9 +70,37 @@ function loadOntologyFile(file: string, warnings: string[]): OntologyDefinition 
     scenarioId: normalizeId(metadata.scenario_id),
     scenarioName: normalizeText(metadata.scenario_name),
     behaviors: parseBehaviors(record.behaviors, warnings, file),
+    functions: parseFunctions(record.functions, warnings, file),
     concepts: parseConcepts(record.concepts, warnings, file),
     relations: parseRelations(record.relations, warnings, file),
   };
+}
+
+/**
+ * 函数（2026-11-20）：只取四字段。
+ *
+ * `params` / `response` 一律不读——它们与"本轮要不要用这个函数"无关，
+ * 读进来只会让后来者误以为它们参与判定（FR-020）。
+ */
+function parseFunctions(value: unknown, warnings: string[], file: string): OntologyFunction[] {
+  const result: OntologyFunction[] = [];
+  if (value !== undefined && !Array.isArray(value)) warnings.push(`${file}:functions_not_array`);
+  for (const item of asArray(value)) {
+    const record = (item ?? {}) as Record<string, unknown>;
+    const name = normalizeText(record.name);
+    if (!name) {
+      warnings.push(`${file}:function_missing_name`);
+      continue;
+    }
+    result.push({
+      name,
+      title: normalizeText(record.title) ?? name,
+      description: normalizeText(record.description) ?? '',
+      // 坏形状（非数组 / 混入非字符串）按空数组处理：取数少一条不该让整轮降级
+      relatedConcepts: normalizeList(record.related_concepts),
+    });
+  }
+  return result;
 }
 
 function parseBehaviors(value: unknown, warnings: string[], file: string): OntologyBehavior[] {

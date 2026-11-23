@@ -18,15 +18,9 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 
-import type {
-  ErrorInfo,
-  FileReference,
-  Message,
-  NextStepAction,
-  ThreadSource,
-} from '../../api/types'
+import type { FileReference, Message, NextStepAction, ThreadSource } from '../../api/types'
 import type { ThreadNextSteps } from '../../api/threads'
-import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE, type RunPhase } from '../../constants/events'
+import { MESSAGE_ROLE, MESSAGE_STATUS, RUN_PHASE } from '../../constants/events'
 import type { PendingUserMessage } from '../../composables/useChatStream'
 import { useMessageScroll } from '../../composables/useMessageScroll'
 import { countMatches } from '../../utils/segments'
@@ -35,27 +29,7 @@ import BaseIcon from '../common/BaseIcon.vue'
 import EmptyState from '../common/EmptyState.vue'
 import ThreadSourceNotice from '../schedule/ThreadSourceNotice.vue'
 import MessageBubble from './MessageBubble.vue'
-
-interface ToolCallView {
-  call_id: string
-  name: string
-  /** 人读名称（`tool_call` 事件随带）；缺省 → 卡片回退 `name` */
-  label?: string
-  status: 'running' | 'success' | 'error'
-}
-
-/** 本轮瞬态（与 `MessageBubble.streaming` 同构）。 */
-interface StreamingView {
-  phase: RunPhase
-  text: string
-  thinking: string
-  toolCalls: ToolCallView[]
-  error: ErrorInfo | null
-  /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
-  agentName: string | null
-  /** 本轮是否有可重发的用户消息缓存（中断轮 / 服务端已终局的失败轮）→「重新生成」按钮渲染条件 */
-  canRegenerate?: boolean
-}
+import type { StreamingView } from './types'
 
 const props = withDefaults(
   defineProps<{

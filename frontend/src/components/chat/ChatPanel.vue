@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
 import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
+import { canSendContent } from '../../utils/can-send'
 import { EMPTY_DATA_HINT_TEXT } from '../../utils/empty-data-hint'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -122,6 +123,19 @@ const {
  */
 const showList = computed(() => props.expanded || hasMessages.value || streaming.value !== null)
 
+/**
+ * 工具栏「发送」是否可用：与 `Composer` 的 Enter 判据**同源**（`utils/can-send.ts`）。
+ *
+ * 2026-11-20 收敛：此前这里用 `chat.canSend`（只看草稿非空、不剥 `/技能名`），
+ * 导致"只选技能不写正文"时按钮可点、点下去只得到「请输入消息内容」。
+ */
+const toolbarCanSend = computed(
+  () =>
+    canSendContent(chat.draft.value, skill.selected.value, mention.references.value.length) &&
+    !sending.value &&
+    !preparing.value,
+)
+
 /* ---------- 首屏引导（004） ---------- */
 
 /** 当前数字人的首屏欢迎语；旧版 SOUL 无结构化数据时为空 → 退回原空状态文案 */
@@ -164,7 +178,7 @@ function onStarterClick(starter: AgentStarter): void {
     content: starter.prompt,
     attachments: [],
     ...(starter.guidance ? { guidance: starter.guidance } : {}),
-    // 013：首屏问题实例卡片与下一步动作卡片同口径——跳过意图聚焦（FR-043）
+    // 013：首屏问题实例卡片跳过意图聚焦（FR-043）。016 起下一步卡片**不再**跳过，两者已不同口径
     skipIntentFocus: true,
   })
 }
@@ -369,14 +383,14 @@ onBeforeUnmount(() => {
         </MentionPopup>
       </template>
 
-      <!-- 026：`chat.canSend` 只认草稿正文，只有附件时要并上引用集合；
-           但流式中必须保持禁用，故显式再与 `!sending` -->
+      <!-- 026 / 2026-11-20：发送判据统一走 `toolbarCanSend`（与 `Composer` 的 Enter 同源），
+           不再出现"Enter 被拦、按钮可点"的分裂 -->
       <template #toolbar>
         <ComposerToolbar
           :thinking="chat.thinkingEnabled.value"
           :model="models.current.value"
           :models="models.models.value"
-          :can-send="(chat.canSend.value || mention.references.value.length > 0) && !sending && !preparing"
+          :can-send="toolbarCanSend"
           :streaming="sending"
           :upload-disabled="sending"
           @toggle-thinking="onToggleThinking"

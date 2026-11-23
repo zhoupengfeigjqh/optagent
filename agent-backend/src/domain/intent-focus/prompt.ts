@@ -2,8 +2,13 @@
  * 聚焦提示铸造（016 / 019，2026-11-13 修订）。
  *
  * 形态：首行固定前缀，其后每个入选技能一个编号块——第一行是技能本身，其后两段：
- * 1. `直接命中：` 用户意图命中的行为（一行，顿号分隔）；
+ * 1. `直接命中：` 用户意图命中的行为，以及（2026-11-20 起）命中的函数与由函数带出的
+ *    关联概念取数行为（仍是一行，顿号分隔）；
  * 2. `上游路径：` **一行一条五元组**（`行为—概念—关系—概念—行为`），见 `paths.ts`。
+ *
+ * 函数与取数为什么不单独成段：一段一行会让提示多出两个段头，而它们与「直接命中」是
+ * 同一个含义——"这轮该看这些"。类型区分靠 `〔概念(name)〕` 的归属标注，不加类型后缀
+ * （2026-11-20 用户拍板：条目形态越统一，模型越不容易把函数当成可调用的工具）。
  *
  * 为什么把"关联概念 / 上游概念 / 上游参考"三段换成五元组（用户 2026-11-13 拍板）：
  * 分段列表只给出元素集合，**连接关系要靠模型自己猜**；五元组把一条推理的最小单元压成一行，
@@ -39,7 +44,15 @@ export function maxPromptChars(depth: number): number {
   return depth === 1 ? 3000 : 4000;
 }
 
-const PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
+const PREFIX =
+  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
+
+/**
+ * 「直接命中」段条目的剪枝优先级（数值越小越先丢）。
+ *
+ * 取数条目只是"顺手能查什么"，函数次之，行为是用户意图本身——最后才动。
+ */
+const ENTRY_PRIORITY = { conceptQuery: 0, function: 1, behavior: 2 } as const;
 
 /** 提示里的本体引用（id 用于归属，name 用于展示） */
 export interface PromptOntology {
@@ -63,6 +76,22 @@ export interface ComposeOptions {
   paths?: readonly FocusPath[];
   /** 总长度上限；缺省按阶数 0 的 2000（调用方负责按阶数传入） */
   maxChars?: number;
+  /**
+   * 概念中文名查询（2026-11-20）：函数与取数条目要在 `〔〕` 里写 `中文名(name)`。
+   * 返回 null 时只写 `name`——老本体可能没有 `concepts[].title`，不能因此留空槽。
+   */
+  conceptTitle?: (ontologyId: string, conceptName: string) => string | null;
+}
+
+/**
+ * 「直接命中」段里的一个条目。
+ *
+ * `priority` 是剪枝顺序：数值小的**先被丢**。取数条目最先丢（它只是"顺手能查什么"），
+ * 函数次之，行为最后丢（那是用户意图本身）。
+ */
+interface DirectEntry {
+  text: string;
+  priority: number;
 }
 
 /** 渲染后的一条路径行 + 截断所需的排序信息 */
@@ -81,7 +110,8 @@ interface PromptItem {
   name: string;
   /** 关联本体展示串（`ontology_name='X'，ontology_id='1'`），非本体技能为 null */
   ontology: string | null;
-  behaviors: string[];
+  /** `直接命中` 段（行为 / 函数 / 取数混排，按优先级剪枝） */
+  behaviors: DirectEntry[];
   paths: PathLine[];
 }
 
@@ -126,11 +156,43 @@ export function composeFocusPrompt(
 
   const byName = new Map(items.map((item) => [item.name, item] as const));
 
+  // 概念括号：`中文名(name)` 与五元组一致；没有 title 时只写 name（老本体不留空槽）
+  const conceptRef = (ontologyId: string, concept: string): string => {
+    const title = options.conceptTitle?.(ontologyId, concept) ?? null;
+    return title ? `${clean(title)}(${clean(concept)})` : clean(concept);
+  };
+
   for (const decision of capabilities.behaviors) {
     const owner = ownerByOntology.get(decision.ontologyId);
     const item = owner ? byName.get(owner) : undefined;
     if (!item) continue;
-    item.behaviors.push(`${clean(decision.title || decision.name)}（${clean(decision.name)}）`);
+    item.behaviors.push({
+      text: `${clean(decision.title || decision.name)}（${clean(decision.name)}）`,
+      priority: ENTRY_PRIORITY.behavior,
+    });
+  }
+
+  // 2026-11-20：函数与其关联概念的 query 行为并入「直接命中」，段头不新增
+  for (const fn of capabilities.functions) {
+    const owner = ownerByOntology.get(fn.ontologyId);
+    const item = owner ? byName.get(owner) : undefined;
+    if (!item) continue;
+    const concepts = fn.relatedConcepts.map((concept) => conceptRef(fn.ontologyId, concept));
+    const suffix = concepts.length > 0 ? `〔${concepts.join('、')}〕` : '';
+    item.behaviors.push({
+      text: `${clean(fn.title || fn.name)}（${clean(fn.name)}）${suffix}`,
+      priority: ENTRY_PRIORITY.function,
+    });
+  }
+
+  for (const query of capabilities.conceptQueries) {
+    const owner = ownerByOntology.get(query.ontologyId);
+    const item = owner ? byName.get(owner) : undefined;
+    if (!item) continue;
+    item.behaviors.push({
+      text: `${clean(query.title || query.name)}（${clean(query.name)}）〔${conceptRef(query.ontologyId, query.concept)}〕`,
+      priority: ENTRY_PRIORITY.conceptQuery,
+    });
   }
 
   (options.paths ?? []).forEach((path, order) => {
@@ -150,9 +212,9 @@ export function composeFocusPrompt(
   const maxChars = options.maxChars ?? MAX_PROMPT_CHARS;
   let prompt = render(items);
   let truncated = false;
-  // 截断顺序：路径行（行级，见 `dropWorstPathLine`）→ 直接命中（尾部 pop，与 016 一致）
+  // 截断顺序：路径行（行级，见 `dropWorstPathLine`）→ 直接命中（按条目优先级，见 `dropLowestEntry`）
   while (prompt.length > maxChars) {
-    if (!dropWorstPathLine(items) && !dropLastBehavior(items)) break;
+    if (!dropWorstPathLine(items) && !dropLowestEntry(items)) break;
     truncated = true;
     prompt = render(items);
   }
@@ -169,7 +231,9 @@ function render(items: readonly PromptItem[]): string {
 function renderItem(item: PromptItem): string {
   if (item.ontology === null) return `${item.name}（非本体技能）`;
   const lines = [`${item.name}（本体技能；${item.ontology}）`];
-  if (item.behaviors.length > 0) lines.push(`   直接命中：${item.behaviors.join('、')}`);
+  if (item.behaviors.length > 0) {
+    lines.push(`   直接命中：${item.behaviors.map((entry) => entry.text).join('、')}`);
+  }
   // 段头单独一行：这不是"参考列表"，而是"若干条推理路径"，先说清再逐行给
   if (item.paths.length > 0) {
     lines.push('   上游路径：');
@@ -241,13 +305,27 @@ function compareRank(left: readonly number[], right: readonly number[]): number 
   return 0;
 }
 
-/** 从**尾部**丢一条直接命中行为（先扫全部条目，保证靠后的技能先被消耗） */
-function dropLastBehavior(items: readonly PromptItem[]): boolean {
+/**
+ * 丢掉一条「直接命中」条目：**先丢优先级最低的，同级从尾部开始**。
+ *
+ * 2026-11-20 起这一段混了三种条目（行为 / 函数 / 取数）。若无优先级、只按尾部 pop，
+ * 排在后面的取数条目会先被丢掉、排在末尾的函数也可能先于取数被丢——预算紧张时
+ * "用户要做什么"反而不稳。同级从尾部丢是为了保留"靠前技能更可能相关"的既有序感。
+ */
+function dropLowestEntry(items: readonly PromptItem[]): boolean {
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const item of items) {
+    for (const entry of item.behaviors) lowest = Math.min(lowest, entry.priority);
+  }
+  if (!Number.isFinite(lowest)) return false;
+
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const list = items[index]!.behaviors;
-    if (list.length > 0) {
-      list.pop();
-      return true;
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (list[i]!.priority === lowest) {
+        list.splice(i, 1);
+        return true;
+      }
     }
   }
   return false;

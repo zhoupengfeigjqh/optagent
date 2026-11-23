@@ -78,7 +78,7 @@ export function useNextStepPrompt(deps: NextStepPromptDeps): NextStepPrompt {
     if (!action || suggestionSending.value) return
     suggestionSending.value = true
     try {
-      // 正文只有提示词；关联工具经 `guidance` 的隐藏通道回传（与问题实例同款）
+      // 正文只有提示词；关联工具经**结构化** `tool_tips` 回传（016 起，不再是 guidance 文本通道）
       const sent = await send(
         // 018：卡片正文是模型产出的定型提示词，不参与术语替换（否则"卡片"会被悄悄改写）
         { ...nextStepSendPayload(action), skipTermCheck: true },

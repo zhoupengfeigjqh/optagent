@@ -160,7 +160,7 @@ export class HistoryStore {
    * 最近 N 条消息（时间正序，不含反馈行）。
    *
    * 注意：**这不再是 prompt 组装的入口**——正文注入必须按归档游标切片
-   * （`readAll().slice(coveredCount)`，见 `run-manager.buildPrompt` 与 `context-window`）。
+   * （`readAll().slice(coveredCount)`，见 `run-consume.buildPrompt` 与 `context-window`）。
    * "取末尾 N 条"的窗口起点与摘要边界是两个独立指针，会在二者之间留下
    * 既不在正文、也不在摘要的空洞。保留本方法供测试与临时取数使用。
    */

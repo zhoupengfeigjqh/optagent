@@ -22,7 +22,8 @@ const CONFIG: IntentFocusConfig = {
   apiKey: 'k',
   timeoutMs: 10_000,
   skillThreshold: 0.6,
-  ontologyThreshold: 0.6,
+  ontologyBehaviorThreshold: 0.6,
+  ontologyFunctionThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
   rewriteThreshold: 0.8,
@@ -307,7 +308,7 @@ describe('runRewriteStage —— 预算与素材', () => {
     expect(h.rewriteCalls[0]!.timeoutMs).toBe(CONFIG.rewriteTimeoutMs);
   });
 
-  it('改写素材：最近 3 轮（时间正序）+ 当前输入，且只含正文', async () => {
+  it('改写素材：最近 2 轮（时间正序）+ 当前输入，且只含正文', async () => {
     const h = harness({
       history: () => [
         { role: 'user', content: 'u1' },
@@ -324,12 +325,14 @@ describe('runRewriteStage —— 预算与素材', () => {
     const outcome = await runRewriteStage(h.deps, input());
 
     // 失败轮（u2/a2）整组不进素材；u2 因此变成孤立 user，被跳过，
-    // 剩下 u1/a1、u3/a3、u4/a4 —— 恰好 3 组
-    expect(outcome.historyTurns).toBe(3);
+    // 剩下 u1/a1、u3/a3、u4/a4 —— 上限 2 组，只保留最近的 u3/a3、u4/a4
+    expect(outcome.historyTurns).toBe(2);
     const content = h.rewriteCalls[0]!.content;
-    expect(content.indexOf('用户：u1')).toBeLessThan(content.indexOf('用户：u3'));
+    expect(content.indexOf('用户：u3')).toBeLessThan(content.indexOf('用户：u4'));
     expect(content).toContain('【当前输入】\n请根据上述结果分析');
+    expect(content).not.toContain('a1');
     expect(content).not.toContain('a2');
+    expect(content).not.toContain('用户：u1');
     expect(content).not.toContain('用户：u2');
   });
 

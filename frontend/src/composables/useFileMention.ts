@@ -13,7 +13,7 @@
  * 关键规则：
  * - 单条消息 ≤ 10 个引用，超限拒绝并提示（FR-017、V-02）
  * - 文本中的 `@文件名` 被删除 → 面板收起且引用同步移除
- * - 发送前校验引用仍存在（`missingReferences()`），不存在则提示且不发送（FR-018、V-15）
+ * - 发送前校验引用仍存在 → 唯一校验点在 `useChatPanel.onSend`（`workspace.exists` + `uploadPanel.isPending`）
  */
 
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
@@ -89,8 +89,6 @@ export interface FileMentionStore {
   reset(): void
   /** 提交载荷（结构化数组，FR-016） */
   buildAttachments(): FileReference[]
-  /** 已失效的引用（发送前校验用，V-15） */
-  missingReferences(): FileReference[]
 }
 
 /** `@` 触发检测：光标前紧邻的 `@` 且其后无空白。HITL 弹窗的路径插入（usePathInsert）同款复用。 */
@@ -301,10 +299,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
     return references.value.map((item) => ({ dir: item.dir, filename: item.filename }))
   }
 
-  function missingReferences(): FileReference[] {
-    return references.value.filter((reference) => !deps.workspace.exists(reference))
-  }
-
   return {
     open,
     caret,
@@ -328,7 +322,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
     remove,
     reset,
     buildAttachments,
-    missingReferences,
   }
 }
 

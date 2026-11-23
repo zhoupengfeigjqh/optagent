@@ -23,6 +23,8 @@
 
 所有判定均为 `noul`（逐候选真值命题），不是 `choice`；技能阈值沿用 `INTENT_FOCUS_SKILL_THRESHOLD`，本体能力阈值新增 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`。
 
+> 2026-11-20 修订：本体单一阈值已拆为**行为**阈值 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD`（由 `INTENT_FOCUS_ONTOLOGY_THRESHOLD` 改名）与**函数**阈值 `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`，缺省均 0.8；本条为当时方案记录，现行口径见 `spec.md` 修订记录。
+
 ## 技术上下文
 
 **Language/Version**：TypeScript 6 / Node.js >= 20（`agent-backend/package.json`），ESM。
@@ -290,6 +292,8 @@ consumeTurn
 - `config.example.yaml` 更新注释与示例；不新增环境变量以外的配置来源。
 - 顺手修正 `IntentFocusConfig` 注释中的旧值（`0.5` → `0.6`），与 `INTENT_FOCUS_DEFAULTS` 一致；
   该修正不改变运行行为，只消除文档与代码的偏差。
+
+> 2026-11-20 修订：本节描述的单一 `ontologyThreshold` / `ontology_threshold` 已拆为 `ontologyBehaviorThreshold` + `ontologyFunctionThreshold`（`intent_focus.ontology_behavior_threshold` / `intent_focus.ontology_function_threshold`），缺省由 0.6 改为 0.8，对应环境变量 `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`；旧键与环境变量名均不再接受。
 
 ### 10. 日志与观测
 

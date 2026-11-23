@@ -79,6 +79,18 @@ export type DispositionInput =
       selectedCount: number;
     };
 
+/**
+ * 空结果的三个原因字面量（**唯一来源**）。
+ *
+ * `runner.ts` 写结构化日志时同样引用它们：两处各自硬编码字符串时，
+ * 改一个忘一个就会出现"留档写 `no_skills`、日志写 `no_skill`"。
+ */
+export const EMPTY_REASON = {
+  noSkills: 'no_skills',
+  noFocusableSkills: 'no_focusable_skills',
+  belowThreshold: 'below_threshold',
+} as const;
+
 /** 判定结论（唯一形态：处置 + 原因） */
 export interface DispositionResult {
   disposition: IntentFocusDisposition;
@@ -106,9 +118,13 @@ export function decideDisposition(input: DispositionInput): DispositionResult | 
     case 'failed':
       return { disposition: 'degraded', reason: input.reason };
     case 'ok':
-      if (input.skillCount === 0) return { disposition: 'empty', reason: 'no_skills' };
-      if (input.focusableCount === 0) return { disposition: 'empty', reason: 'no_focusable_skills' };
-      if (input.selectedCount === 0) return { disposition: 'empty', reason: 'below_threshold' };
+      if (input.skillCount === 0) return { disposition: 'empty', reason: EMPTY_REASON.noSkills };
+      if (input.focusableCount === 0) {
+        return { disposition: 'empty', reason: EMPTY_REASON.noFocusableSkills };
+      }
+      if (input.selectedCount === 0) {
+        return { disposition: 'empty', reason: EMPTY_REASON.belowThreshold };
+      }
       return { disposition: 'focused', reason: null };
   }
 }

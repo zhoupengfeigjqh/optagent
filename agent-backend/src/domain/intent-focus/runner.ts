@@ -25,7 +25,12 @@ import {
   type ReadHistory,
   type RewriteLlm,
 } from './rewrite.js';
-import { MAX_QUESTIONS_PER_BATCH, decideDisposition, prepareState } from './state.js';
+import {
+  EMPTY_REASON,
+  MAX_QUESTIONS_PER_BATCH,
+  decideDisposition,
+  prepareState,
+} from './state.js';
 import {
   batchQuestions,
   buildCapabilityCandidates,
@@ -34,6 +39,7 @@ import {
   buildSkillQuestions,
 } from './candidates.js';
 import { BatchDecider, type DecideClient } from './batch-decider.js';
+import { resolveConceptQueries } from './concept-queries.js';
 import { clampDepth, expandNeighborhood } from './expansion.js';
 import { loadOntologyIndex } from './ontology-loader.js';
 import { buildFocusPaths } from './paths.js';
@@ -58,7 +64,7 @@ import type {
 } from './types.js';
 import { loadSkillHeaders } from '../skill-header.js';
 
-const EMPTY_SELECTION: CapabilitySelection = { behaviors: [] };
+const EMPTY_SELECTION: CapabilitySelection = { behaviors: [], functions: [], conceptQueries: [] };
 
 /** 无发散（阶数 0 / 非本体技能）：提示只有直接命中，卡片也只有直接命中 */
 const EMPTY_EXPANSION: ExpansionResult = {
@@ -302,7 +308,7 @@ export class IntentFocusRunner implements IntentFocusPort {
         warnings,
         error: null,
       });
-      this.log(input, 'done', 'no_skills', 0, 0, this.now() - startedAt);
+      this.log(input, 'done', EMPTY_REASON.noSkills, 0, 0, this.now() - startedAt);
       return EMPTY_RESULT;
     }
 
@@ -327,7 +333,7 @@ export class IntentFocusRunner implements IntentFocusPort {
         warnings,
         error: null,
       });
-      this.log(input, 'done', 'no_focusable_skills', 0, 0, this.now() - startedAt);
+      this.log(input, 'done', EMPTY_REASON.noFocusableSkills, 0, 0, this.now() - startedAt);
       return EMPTY_RESULT;
     }
 
@@ -424,7 +430,7 @@ export class IntentFocusRunner implements IntentFocusPort {
       this.log(
         input,
         'done',
-        'below_threshold',
+        EMPTY_REASON.belowThreshold,
         skillResult.candidates.length,
         skillBatches.length,
         this.now() - startedAt,
@@ -442,6 +448,9 @@ export class IntentFocusRunner implements IntentFocusPort {
       buildCapabilityQuestions(capabilityResult.candidates),
       MAX_QUESTIONS_PER_BATCH,
     );
+
+    // 019：发散起点与函数取数都要读本体行为表；提前算好，选择阶段即可复用
+    const selectedOntologies = collectSelectedOntologies(index, selectedCandidates);
 
     let capabilitySelection: CapabilitySelection = EMPTY_SELECTION;
     let capabilityFailures: string[] = [];
@@ -474,11 +483,15 @@ export class IntentFocusRunner implements IntentFocusPort {
         this.degradedLog(input, 'capability', reason, capabilityDecided.failures);
         return EMPTY_RESULT;
       }
-      capabilitySelection = selectCapabilities(
-        capabilityResult.candidates,
-        capabilityDecided.scores,
-        config.ontologyThreshold,
-      );
+      // 2026-11-20：行为与函数各自阈值；取数在选完之后由函数带出（不判分）
+      const picked = selectCapabilities(capabilityResult.candidates, capabilityDecided.scores, {
+        behavior: config.ontologyBehaviorThreshold,
+        function: config.ontologyFunctionThreshold,
+      });
+      capabilitySelection = {
+        ...picked,
+        conceptQueries: resolveConceptQueries(picked.functions, selectedOntologies, picked.behaviors),
+      };
       capabilityFailures = capabilityDecided.failures;
     }
 
@@ -492,7 +505,6 @@ export class IntentFocusRunner implements IntentFocusPort {
     }));
 
     // 019：发散起点＝入选行为所属概念；阶数 0 时整段短路（零解析、零遍历）
-    const selectedOntologies = collectSelectedOntologies(index, selectedCandidates);
     const directConcepts = directConceptEntries(capabilitySelection, selectedOntologies);
     const expansion =
       depth > 0
@@ -525,6 +537,7 @@ export class IntentFocusRunner implements IntentFocusPort {
     const composed = composeFocusPrompt(promptSkills, capabilitySelection, {
       paths: focusPaths,
       maxChars: maxPromptChars(depth),
+      conceptTitle: conceptTitleLookup(selectedOntologies),
     });
     const roundMs = this.now() - startedAt;
     const allWarnings = [...warnings, ...expansion.warnings];
@@ -576,6 +589,8 @@ export class IntentFocusRunner implements IntentFocusPort {
         skills_selected: selectedCandidates.length,
         concepts: directConcepts.length + expansion.upstream.concepts.length,
         behaviors: capabilitySelection.behaviors.length,
+        functions: capabilitySelection.functions.length,
+        concept_queries: capabilitySelection.conceptQueries.length,
         // 五元组行数（= 提示里"上游路径"的行数），排障时看它与 prompt_chars 的对照
         focus_paths: focusPaths.length,
         upstream_behaviors: expansion.upstream.behaviors.length,
@@ -583,7 +598,8 @@ export class IntentFocusRunner implements IntentFocusPort {
         prompt_chars: composed.prompt.length,
         round_ms: roundMs,
       },
-      `意图聚焦：入选 ${selectedCandidates.length} 个技能、${capabilitySelection.behaviors.length} 个行为` +
+      `意图聚焦：入选 ${selectedCandidates.length} 个技能、${capabilitySelection.behaviors.length} 个行为、` +
+        `${capabilitySelection.functions.length} 个函数、${capabilitySelection.conceptQueries.length} 个取数行为` +
         `（阶数 ${depth}：上游 +${expansion.upstream.behaviors.length}，下游 +${expansion.downstream.behaviors.length}）`,
     );
 
@@ -728,6 +744,25 @@ function collectSelectedOntologies(
     for (const ontology of candidate.matchedOntologies) ids.add(ontology.ontologyId);
   }
   return index.all.filter((ontology) => ids.has(ontology.ontologyId));
+}
+
+/**
+ * 概念中文名查询（2026-11-20）：函数与取数条目要在 `〔〕` 里写 `中文名(name)`。
+ *
+ * 同一 ID 多份文件时以枚举序首份为准（与 `directConceptEntries` 同口径）；
+ * 概念不存在时返回 null，由提示层只写 `name`——老本体没有 `concepts[]` 也不该留空槽。
+ */
+function conceptTitleLookup(
+  ontologies: readonly OntologyDefinition[],
+): (ontologyId: string, conceptName: string) => string | null {
+  const titles = new Map<string, string>();
+  for (const ontology of ontologies) {
+    for (const concept of ontology.concepts) {
+      const key = `${ontology.ontologyId}\u0000${concept.name}`;
+      if (!titles.has(key)) titles.set(key, concept.title);
+    }
+  }
+  return (ontologyId, conceptName) => titles.get(`${ontologyId}\u0000${conceptName}`) ?? null;
 }
 
 /**

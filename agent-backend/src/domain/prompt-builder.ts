@@ -5,7 +5,8 @@
  * 500 行硬门禁；而"把素材拼成发给模型的 messages / systemExtra"本来就是与
  * "run 生命周期管理"不同的职责。
  *
- * 本模块是**纯函数**：不做 IO、不落盘，素材全部由调用方（run-manager）读好后传入
+ * 本模块是**纯函数**：不做 IO、不落盘，素材全部由调用方（`run-consume.ts`，2026-10-25 起从
+ * `run-manager.ts` 拆出）读好后传入
  * ⇒ 同样的历史得到同样的拼装结果（确定性，不破坏 prompt 前缀缓存）。
  */
 import type { HistoryMessage } from '../types.js';
@@ -92,13 +93,15 @@ export function buildPromptMessages(sources: PromptSources): {
     parts.push(`以下是对话早期内容的摘要：\n${sources.summaryData.summary}`);
   }
   if (sources.producedText !== '') parts.push(sources.producedText);
-  // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 仍是最末段（本轮指令紧邻用户消息）
+  // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 是本函数产出的最后一段
+  //      （本轮指令紧邻用户消息；聚焦提示在其后才由 `run-consume` 追加）
   if (sources.nowText) parts.push(sources.nowText);
   // 004：问题实例的隐藏工具引导。放最后——本轮指令紧邻用户消息，更容易被遵循
   // 016：意图聚焦提示与卡片 `tool_tips` 段**不在这里**——它们在 `run-consume` 组装成功后
   //      追加到 `systemExtra` 末尾（聚焦提示在前、卡片 tool_tips 段在后）。
-  //      2026-11 起 guidance 非空**不再**跳过聚焦（只有首屏问题实例显式携带
-  //      `skip_intent_focus`），故 guidance 与聚焦提示可以同轮并存。
+  //      注意：`guidance` 非空白时 `run-consume` 仍会跳过聚焦（`skipFocus` 第三条判据）；
+  //      当前唯一生产者是首屏问题实例，它同时携带 `skip_intent_focus`，两条判据重复命中，
+  //      故实际行为是"首屏卡片轮不会出现聚焦提示"。
   if (sources.guidance) parts.push(sources.guidance);
   return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
 }

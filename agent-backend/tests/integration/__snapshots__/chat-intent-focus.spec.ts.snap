@@ -5,15 +5,16 @@ exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭�
   "agent_name": "demo",
   "batches": 2,
   "behaviors": [],
-  "candidates": 4,
+  "candidates": 5,
   "concepts": [],
   "depth": 0,
   "disposition": "focused",
   "error": null,
+  "functions": [],
   "input": "帮我创建一笔原材料采购单",
   "input_truncated": false,
   "model": "laya-multilingual",
-  "prompt": "本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）
+  "prompt": "本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）
 1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
   "prompt_truncated": false,
   "reason": null,
@@ -36,6 +37,6 @@ exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭�
 `;
 
 exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭时留档与提示与改造前逐字一致（快照） 2`] = `
-"本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）
+"本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）
 1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）"
 `;

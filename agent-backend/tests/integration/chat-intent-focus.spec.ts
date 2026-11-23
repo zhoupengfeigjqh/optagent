@@ -39,7 +39,8 @@ import type { LlmEvent } from '../../src/types.js';
 
 const USER = 'admin';
 const AGENT = 'demo';
-const PREFIX = '本轮的任务与以下技能、本体概念与本体行为密切相关，请重点关注（仅供参考，不必局限）';
+const PREFIX =
+  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
 
 const CONFIG: IntentFocusConfig = {
   baseUrl: 'http://laya:8000',
@@ -47,7 +48,8 @@ const CONFIG: IntentFocusConfig = {
   apiKey: 'dev-key',
   timeoutMs: 10_000,
   skillThreshold: 0.6,
-  ontologyThreshold: 0.6,
+  ontologyBehaviorThreshold: 0.6,
+  ontologyFunctionThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
   // 027：改写参数（本文件里改写端口缺省不装配，故实际不会被调用）
@@ -361,7 +363,8 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     expect(record!.skills.find((skill) => skill.name === 'onto-skill')!.selected).toBe(true);
     // 只写入选行为：Q1/Q2 分数 0.05，规则不再补入
     expect(record!.behaviors.map((item) => item.name)).toEqual(['B1']);
-    expect(record).not.toHaveProperty('functions');
+    // 2026-11-20：函数 F1 同批判定（0.7 > 0.6），只写入选函数
+    expect(record!.functions.map((item) => item.name)).toEqual(['F1']);
     expect(record).not.toHaveProperty('data_supplements');
   });
 

@@ -50,14 +50,26 @@ function ontology(overrides: Partial<OntologyDefinition> = {}): OntologyDefiniti
         title: '创建原材料采购单',
         description: '创建一笔新的原材料采购记录',
         opType: 'command',
+        concept: 'PurchaseRecord',
       },
       {
         name: 'QueryPurchaseRecords',
         title: '查询原材料采购单信息',
         description: '',
         opType: 'query',
+        concept: 'PurchaseRecord',
       },
     ],
+    functions: [
+      {
+        name: 'sumRawNotArrivalQty',
+        title: '原材料未到位数',
+        description: '按采购单汇总未到位数量',
+        relatedConcepts: ['PurchaseRecord'],
+      },
+    ],
+    concepts: [],
+    relations: [],
     ...overrides,
   };
 }
@@ -126,15 +138,24 @@ describe('buildCapabilityCandidates', () => {
     32,
   ).candidates;
 
-  it('只收集入选本体技能引用的本体，且只收行为', () => {
+  it('行为与函数一并收集，函数排在同本体的行为之后（2026-11-20）', () => {
     const result = buildCapabilityCandidates(skills, index([ontology()]), 96);
     expect(result.candidates.map((candidate) => candidate.name)).toEqual([
       'CreatePurchaseRecord',
       'QueryPurchaseRecords',
+      'sumRawNotArrivalQty',
     ]);
-    expect(result.candidates.map((candidate) => candidate.qid)).toEqual(['c1', 'c2']);
-    // 2026-11-06：候选不再带类别字段
-    expect(result.candidates[0]).not.toHaveProperty('kind');
+    // 共用一套题号：两类混批，不能出现同号不同项
+    expect(result.candidates.map((candidate) => candidate.qid)).toEqual(['c1', 'c2', 'c3']);
+    expect(result.candidates.map((candidate) => candidate.kind)).toEqual([
+      'behavior',
+      'behavior',
+      'function',
+    ]);
+    // 函数候选带取数入口，行为候选不带
+    expect(result.candidates[2]!.relatedConcepts).toEqual(['PurchaseRecord']);
+    expect(result.candidates[0]!.relatedConcepts).toEqual([]);
+    expect(result.candidates[2]!.concept).toBeNull();
   });
 
   it('题面按 description → title → name 降级，不含 op_type', () => {
@@ -144,17 +165,22 @@ describe('buildCapabilityCandidates', () => {
     expect(questions.c1!.instructions).toBe('需要行为「创建一笔新的原材料采购记录」');
     // 描述为空 → 用 title
     expect(questions.c2!.instructions).toBe('需要行为「查询原材料采购单信息」');
+    // 函数同规则降级，但措辞是「需要函数」
+    expect(questions.c3!.instructions).toBe('需要函数「按采购单汇总未到位数量」');
     // op_type（command / query）不进题面
     expect(JSON.stringify(questions)).not.toContain('command');
     // description 与 title 都空 → 用 name（英文标识符）
     const onlyName = buildCapabilityQuestions([
       {
         qid: 'x1',
+        kind: 'behavior',
         name: 'DoThing',
         title: '',
         description: '',
         ontologyId: '1',
         ontologyName: null,
+        concept: null,
+        relatedConcepts: [],
         index: 0,
       },
     ]);
@@ -165,11 +191,14 @@ describe('buildCapabilityCandidates', () => {
     const questions = buildCapabilityQuestions([
       {
         qid: 'x1',
+        kind: 'behavior',
         name: 'N',
         title: 'T',
         description: '描'.repeat(60),
         ontologyId: '1',
         ontologyName: null,
+        concept: null,
+        relatedConcepts: [],
         index: 0,
       },
     ]);
@@ -181,14 +210,43 @@ describe('buildCapabilityCandidates', () => {
     expect(buildCapabilityCandidates(plain, index([ontology()]), 96).candidates).toEqual([]);
   });
 
-  it('候选层按 ontology_id + name 去重：同本体多文件不重复出题', () => {
+  it('候选层按 ontology_id + kind + name 去重：同本体多文件不重复出题', () => {
     const copy = ontology({ filePath: '/o/1-copy.yaml' });
     const result = buildCapabilityCandidates(skills, index([ontology(), copy]), 96);
+    expect(result.candidates.map((candidate) => candidate.qid)).toEqual(['c1', 'c2', 'c3']);
+    expect(result.candidates.map((candidate) => candidate.name)).toEqual([
+      'CreatePurchaseRecord',
+      'QueryPurchaseRecords',
+      'sumRawNotArrivalQty',
+    ]);
+  });
+
+  it('同名的行为与函数各自成题（去重键带 kind）', () => {
+    const sameName: OntologyDefinition = ontology({
+      behaviors: [
+        { name: 'X', title: '行为 X', description: '', opType: 'query', concept: 'C' },
+      ],
+      functions: [{ name: 'X', title: '函数 X', description: '', relatedConcepts: ['C'] }],
+    });
+    const only = buildSkillCandidates(
+      [header({ name: 'a', ontologyId: '1', ontologyName: '原材料采购和库存' })],
+      index([sameName]),
+      32,
+    ).candidates;
+    const result = buildCapabilityCandidates(only, index([sameName]), 96);
+
+    expect(result.candidates.map((candidate) => candidate.kind)).toEqual(['behavior', 'function']);
     expect(result.candidates.map((candidate) => candidate.qid)).toEqual(['c1', 'c2']);
+  });
+
+  it('共用 max_capabilities：行为先占，函数被截断并标 truncated', () => {
+    const result = buildCapabilityCandidates(skills, index([ontology()]), 2);
+
     expect(result.candidates.map((candidate) => candidate.name)).toEqual([
       'CreatePurchaseRecord',
       'QueryPurchaseRecords',
     ]);
+    expect(result.truncated).toBe(true);
   });
 
   it('同名但不同本体各自保留（去重键含 ontology_id）', () => {

@@ -87,12 +87,25 @@ const envSchema = z.object({
     z.coerce.number().min(0).max(1).optional(),
   ),
   /**
-   * 016：本体行为判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_threshold`。
+   * 016：本体**行为**判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_behavior_threshold`。
    *
    * 技能与行为共用一个"意图"问题，但候选粒度不同（技能是几十条描述，行为是成百个短标题），
    * 分数分布会偏移；因此保留独立旋钮，允许现场分别标定。空串同样按未设置处理。
+   *
+   * 2026-11-20：由 `INTENT_FOCUS_ONTOLOGY_THRESHOLD` 改名（语义本就说的是行为），旧名不再接受。
    */
-  INTENT_FOCUS_ONTOLOGY_THRESHOLD: z.preprocess(
+  INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.coerce.number().min(0).max(1).optional(),
+  ),
+  /**
+   * 016（2026-11-20）：本体**函数**判定阈值（0~1）。设置后**覆盖**
+   * `intent_focus.ontology_function_threshold`。
+   *
+   * 与行为阈值分开：函数描述是"这段计算在算什么"，与"用户想做什么"的分布不同，
+   * 同一分值在两侧的含义并不等价。空串同样按未设置处理。
+   */
+  INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.coerce.number().min(0).max(1).optional(),
   ),
@@ -168,11 +181,12 @@ export const INTENT_FOCUS_DEFAULTS = {
   model: 'laya-multilingual',
   timeoutMs: 10_000,
   /**
-   * 技能与本体行为**同阈值**（2026-11 产品口径：两者都是"本轮要不要用"的同一判断，
-   * 分开标定会让"技能入选但行为全空"变成常态）。
+   * 技能、本体行为、本体函数**同阈值缺省 0.8**（2026-11 产品口径：三者都是"本轮要不要用"
+   * 的同一个判断，分开标定会让某一类全空变成常态）；三个旋钮仍各自独立，允许现场分别标定。
    */
   skillThreshold: 0.8,
-  ontologyThreshold: 0.8,
+  ontologyBehaviorThreshold: 0.8,
+  ontologyFunctionThreshold: 0.8,
   maxSkills: 32,
   maxCapabilities: 96,
   /** 027：指代判定阈值，缺省 0.8（与技能 / 行为同值，2026-11 产品口径） */
@@ -199,7 +213,10 @@ const intentFocusYamlSchema = z
     api_key: z.unknown(),
     timeout_ms: z.unknown().optional(),
     skill_threshold: z.unknown().optional(),
-    ontology_threshold: z.unknown().optional(),
+    // 2026-11-20：`ontology_threshold` 更名为 `ontology_behavior_threshold`（旧键不再接受）
+    ontology_behavior_threshold: z.unknown().optional(),
+    // 2026-11-20：函数阈值
+    ontology_function_threshold: z.unknown().optional(),
     max_skills: z.unknown().optional(),
     max_capabilities: z.unknown().optional(),
     // 027：输入改写（指代判定阈值 / 单次改写超时）
@@ -238,8 +255,9 @@ export interface LlmRetryOptions {
  * 六个字段与 `contracts/intent-focus-api.md §5.1` 一一对应；除 `skill_threshold` 外**只有一个来源**
  * （`config.yaml` 的 `intent_focus` 块），避免"改了 A 没改 B"的错配。
  *
- * `skill_threshold` / `ontology_threshold` 的取值优先级：
- * 环境变量（`INTENT_FOCUS_SKILL_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_THRESHOLD`）> `config.yaml` > 0.8。
+ * `skill_threshold` / `ontology_behavior_threshold` / `ontology_function_threshold` 的取值优先级：
+ * 环境变量（`INTENT_FOCUS_SKILL_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` /
+ * `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`）> `config.yaml` > 0.8。
  */
 export interface IntentFocusConfig {
   /** 形如 `http://laya:8000`（只到主机端口，不要带 `/v1`；请求路径由客户端拼） */
@@ -252,11 +270,13 @@ export interface IntentFocusConfig {
   timeoutMs: number;
   /** 技能入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
   skillThreshold: number;
-  /** 本体行为入选分数阈值（0~1） */
-  ontologyThreshold: number;
+  /** 本体**行为**入选分数阈值（0~1）；2026-11-20 由 `ontologyThreshold` 改名 */
+  ontologyBehaviorThreshold: number;
+  /** 本体**函数**入选分数阈值（0~1）；2026-11-20 新增 */
+  ontologyFunctionThreshold: number;
   /** 单轮技能候选上限 */
   maxSkills: number;
-  /** 单轮行为候选上限（2026-11-06 起只装行为，键名保留以兼容存量配置） */
+  /** 单轮**行为 + 函数**候选合计上限（键名保留以兼容存量配置） */
   maxCapabilities: number;
   /**
    * 027：指代判定阈值（0~1）：`score > 该值` 才发起改写（严格大于）。
@@ -411,7 +431,8 @@ function resolveIntentFocus(
   entry: z.infer<typeof intentFocusYamlSchema> | undefined,
   env: EnvSource,
   envSkillThreshold: number | undefined,
-  envOntologyThreshold: number | undefined,
+  envOntologyBehaviorThreshold: number | undefined,
+  envOntologyFunctionThreshold: number | undefined,
   envRewriteThreshold: number | undefined,
 ): IntentFocusConfig | undefined {
   if (!entry) return undefined;
@@ -448,10 +469,15 @@ function resolveIntentFocus(
     'intent_focus.skill_threshold',
     INTENT_FOCUS_DEFAULTS.skillThreshold,
   );
-  const yamlOntologyThreshold = readRatio(
-    entry.ontology_threshold,
-    'intent_focus.ontology_threshold',
-    INTENT_FOCUS_DEFAULTS.ontologyThreshold,
+  const yamlOntologyBehaviorThreshold = readRatio(
+    entry.ontology_behavior_threshold,
+    'intent_focus.ontology_behavior_threshold',
+    INTENT_FOCUS_DEFAULTS.ontologyBehaviorThreshold,
+  );
+  const yamlOntologyFunctionThreshold = readRatio(
+    entry.ontology_function_threshold,
+    'intent_focus.ontology_function_threshold',
+    INTENT_FOCUS_DEFAULTS.ontologyFunctionThreshold,
   );
   const maxSkills = readIntInRange(
     entry.max_skills,
@@ -496,7 +522,8 @@ function resolveIntentFocus(
     apiKey,
     timeoutMs,
     skillThreshold: envSkillThreshold ?? yamlSkillThreshold,
-    ontologyThreshold: envOntologyThreshold ?? yamlOntologyThreshold,
+    ontologyBehaviorThreshold: envOntologyBehaviorThreshold ?? yamlOntologyBehaviorThreshold,
+    ontologyFunctionThreshold: envOntologyFunctionThreshold ?? yamlOntologyFunctionThreshold,
     maxSkills,
     maxCapabilities,
     rewriteThreshold: envRewriteThreshold ?? yamlRewriteThreshold,
@@ -550,7 +577,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     yamlParsed.data.intent_focus,
     env,
     e.INTENT_FOCUS_SKILL_THRESHOLD,
-    e.INTENT_FOCUS_ONTOLOGY_THRESHOLD,
+    e.INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD,
+    e.INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD,
     e.INTENT_FOCUS_REWRITE_THRESHOLD,
   );
 

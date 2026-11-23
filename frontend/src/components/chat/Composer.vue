@@ -15,7 +15,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { FileReference } from '../../api/types'
 import { mentionToken } from '../../composables/useFileMention'
-import { skillToken, stripSkillToken } from '../../composables/useSkillMention'
+import { skillToken } from '../../composables/useSkillMention'
 import {
   MENTION_FILENAME_ATTR,
   SKILL_NAME_ATTR,
@@ -24,6 +24,7 @@ import {
   serializeComposerText,
   splitComposerSegments,
 } from '../../utils/composer-text'
+import { canSendContent } from '../../utils/can-send'
 import { createComposerChip } from '../../utils/composer-chip'
 import { withPastedName } from '../../utils/upload-batch'
 import BaseButton from '../common/BaseButton.vue'
@@ -66,8 +67,6 @@ const emit = defineEmits<{
   'remove-reference': [reference: FileReference]
   /** 点技能胶囊的 x（2026-11-07） */
   'remove-skill': []
-  /** US4：引用达上限时由面板上报 */
-  'mention-limit': []
   /** 文本与光标位置（供上层做 `@` / `/` 触发检测，扩展事件） */
   'input-text': [payload: { value: string; caret: number }]
   /** `@` 面板展开时被拦截的按键（扩展事件） */
@@ -88,12 +87,11 @@ const PICKER_KEYS: ReadonlySet<string> = new Set([
   'Escape',
 ])
 
-// 只选技能不写正文不算可发送（与服务端"content 非空"同口径）；
-// 2026-11-18（026）：只有附件（上传胶囊 / `@` 引用）也算可发送——正文由发送链路合成默认话术
+// 判据唯一实现见 `utils/can-send.ts`（2026-11-20 收敛，此前与工具栏各算一套）：
+// 只选技能不写正文不算可发送；只有附件（上传胶囊 / `@` 引用）算可发送（026）。
 const canSend = computed(
   () =>
-    (stripSkillToken(props.modelValue, props.skill).trim() !== '' ||
-      props.references.length > 0) &&
+    canSendContent(props.modelValue, props.skill ?? null, props.references.length) &&
     !props.disabled &&
     !props.sending,
 )

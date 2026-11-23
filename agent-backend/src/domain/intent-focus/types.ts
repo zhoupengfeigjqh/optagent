@@ -7,6 +7,10 @@
  * 2026-11-08（019）调整：聚焦阶数开启时，需要按**对象关系**做同向一阶发散，
  * 因此新增 `concepts` / `relations` 与 `behaviors[].concept` 三处只读建模。
  * 参数正文、函数代码、`rules` 仍然不建模。
+ *
+ * 2026-11-20 调整：**函数窄口径恢复**——只读 `functions[]` 的
+ * `name` / `title` / `description` / `related_concepts` 四字段（`params` / `response` 仍不进来）；
+ * 函数与行为进同一批候选、共用 `max_capabilities`，但各自阈值与各自结果集。
  */
 import type { SystemOneQuestion } from '../../infra/laya-client.js';
 
@@ -27,6 +31,21 @@ export interface OntologyBehavior {
    * 缺失即为断链（该行为照常参与判定，只是不参与发散）。
    */
   concept: string | null;
+}
+
+/**
+ * 本体函数（2026-11-20）：只取判分与取数所需的四个字段。
+ *
+ * **不建模** `params` / `response`——它们可能很大，而且与"本轮要不要用这个函数"无关；
+ * 读进来只会让人误以为它们参与判定。
+ */
+export interface OntologyFunction {
+  name: string;
+  title: string;
+  /** 函数描述；缺失为空串（题面降级顺序与行为一致） */
+  description: string;
+  /** `functions[].related_concepts` 归一化后的概念名；缺失为空数组 */
+  relatedConcepts: string[];
 }
 
 /** 本体概念（019）：只取发散所需的展示与关联字段 */
@@ -64,6 +83,8 @@ export interface OntologyDefinition {
   scenarioId: string | null;
   scenarioName: string | null;
   behaviors: OntologyBehavior[];
+  /** 2026-11-20 恢复解析；缺失按空数组 */
+  functions: OntologyFunction[];
   concepts: OntologyConcept[];
   relations: OntologyRelation[];
 }
@@ -99,17 +120,26 @@ export interface SkillHeaderLike {
   };
 }
 
-/** 行为候选（2026-11-06 起唯一的候选形态） */
+/**
+ * 能力候选类别（2026-11-20）：行为与函数共用同一候选序列与同一批 `noul` 判定，
+ * 类别只影响阈值（行为 / 函数各一）与题面措辞。
+ */
+export type CapabilityKind = 'behavior' | 'function';
+
+/** 能力候选：行为与函数共用（2026-11-20 起不再只有行为） */
 export interface CapabilityCandidate {
   qid: string;
+  kind: CapabilityKind;
   name: string;
   title: string;
-  /** 题面首选的描述文本；空串表示该行为没有描述 */
+  /** 题面首选的描述文本；空串表示该项没有描述 */
   description: string;
   ontologyId: string;
   ontologyName: string | null;
-  /** 所属概念（019 发散起点）；缺失为 null */
+  /** 行为：所属概念（019 发散起点）；函数恒 null */
   concept: string | null;
+  /** 函数：依赖的概念名（取数入口）；行为恒空数组 */
+  relatedConcepts: string[];
   /** 同一本体内的原序（用于同分稳定排序） */
   index: number;
 }
@@ -137,14 +167,48 @@ export interface CapabilityDecision {
   index: number;
 }
 
+/** 函数决策：只表达"已入选"的函数（2026-11-20） */
+export interface FunctionDecision {
+  name: string;
+  title: string;
+  ontologyId: string;
+  ontologyName: string | null;
+  /** 入选分数（恒 > 函数阈值） */
+  score: number;
+  /** 依赖的概念名（取数入口） */
+  relatedConcepts: string[];
+  index: number;
+}
+
 /**
- * 行为聚焦结果（唯一能力类别）。
+ * 关联概念取数行为（2026-11-20）。
+ *
+ * 由入选函数的 `related_concepts` 带出：同本体内 `op_type: query` 的行为。
+ * **不判分**（没有 `score` 字段），也不参与发散与卡片——它只是"要用这个函数，先取这些数"。
+ */
+export interface ConceptQueryDecision {
+  name: string;
+  title: string;
+  ontologyId: string;
+  ontologyName: string | null;
+  /** 该行为所属概念（即触发取数的关联概念） */
+  concept: string;
+  index: number;
+}
+
+/**
+ * 能力聚焦结果：行为、函数、取数三集分开。
+ *
+ * 三集必须彼此独立——`toolTips` 只吃 `behaviors` + 下游发散，
+ * 函数与取数一旦混进 `behaviors` 就会漏进卡片目录（FR-069 的机制保证）。
  *
  * 不带 `truncated`：候选上限在构造阶段由 `max_capabilities` 唯一决定，
  * 选择阶段不再有第二层截断（FR-053），该标志恒为假，属冗余字段。
  */
 export interface CapabilitySelection {
   behaviors: CapabilityDecision[];
+  functions: FunctionDecision[];
+  conceptQueries: ConceptQueryDecision[];
 }
 
 /** 一批 noul 命题：键为 `qid` */
@@ -165,11 +229,11 @@ export interface FocusToolTip {
 
 /* ---------- 019：一阶发散（上游进提示 / 下游进卡片） ---------- */
 
-/** 发散通道：上游（进提示词） / 下游（进下一步动作卡片） */
-export type ExpansionSide = 'upstream' | 'downstream';
-
-/** 行为来源：直接命中 / 上游发散 / 下游发散（留档与提示分段共用） */
-export type BehaviorSource = 'direct' | 'upstream' | 'downstream';
+/**
+ * 行为来源（留档与提示分段共用）：
+ * 直接命中 / 上游发散 / 下游发散 / 关联概念取数（2026-11-20，由函数带出，不判分）
+ */
+export type BehaviorSource = 'direct' | 'upstream' | 'downstream' | 'concept_query';
 
 /** 发散得到的概念（`hop ≥ 1`；direct 概念不进本结构） */
 export interface ExpandedConcept {

@@ -352,7 +352,6 @@ describe('useUploadPanel —— 回写复用唯一入口（FR-005 / FR-006 / FR-
       remove: vi.fn(),
       reset: vi.fn(),
       buildAttachments: vi.fn(() => []),
-      missingReferences: vi.fn(() => []),
     }
     const composer = useMentionComposer({ mention, draft })
     return { draft, mention, acceptUpload: composer.onPickFile }

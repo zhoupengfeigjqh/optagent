@@ -291,12 +291,6 @@ export class NextActionsStore {
 /* ---------- 纯函数层（TR-02：合规判定与解析各自唯一实现，全部可测） ---------- */
 
 /**
- * 尾部块指令（SOUL 开关开启时追加到 System Prompt 末尾，`agent-factory` 调用）。
- *
- * 候选目录取**本轮意图聚焦选出的本体能力**（行为 + 函数）：卡片的 `tool_tips`
- * 只能从这份清单里抄写。清单为空时不追加指令（见 `effectiveNextActionsMax`）。
- */
-/**
  * 本轮**生效**的提示条数上限：SOUL 开关开启（`max !== undefined`）**且**本轮有 Laya 能力时才生效。
  *
  * 后半条是本次修订的前提：卡片候选范围只来自意图聚焦，没有能力就必然产不出卡片，
@@ -309,6 +303,12 @@ export function effectiveNextActionsMax(
   return max !== undefined && focusToolTips.length > 0 ? max : undefined;
 }
 
+/**
+ * 尾部块指令（SOUL 开关开启时追加到 System Prompt 末尾，`agent-factory` 调用）。
+ *
+ * 候选目录取**本轮意图聚焦选出的本体能力**（行为；016 起已不含"函数"）：卡片的 `tool_tips`
+ * 只能从这份清单里抄写。清单为空时不追加指令（见 `effectiveNextActionsMax`）。
+ */
 export function buildTailInstruction(
   focusToolTips: readonly FocusToolTip[],
   max: number,

@@ -28,7 +28,7 @@ const ACTION: AgentStarter = {
 function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = {}) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(''), thinkingEnabled: ref(false), canSend: ref(true) },
+    chat: { draft: ref(''), thinkingEnabled: ref(false) },
     // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
     threads: {
       activeId: ref(null),

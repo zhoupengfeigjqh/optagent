@@ -18,8 +18,10 @@
     "prompt_extra": "",
     "next_action_hints": false,
     "next_action_hints_count": 1,
-    "intent_focus": true,
-    "intent_focus_depth": 0
+    "intent_focus": false,
+    "intent_focus_depth": 0,
+    "input_rewrite": false,
+    "term_normalize": false
   },
   "enabled_tools": [
     "list_dir",
@@ -48,5 +50,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-18T14:12:46.989Z"
+  "updated_at": "2026-11-20T05:56:24.822Z"
 }

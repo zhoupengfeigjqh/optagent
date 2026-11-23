@@ -33,6 +33,8 @@ description: "本体技能聚焦（技能 / 本体行为）实施任务清单"
 - [x] T003 在 `agent-backend/src/config.ts` 的 `intentFocusYamlSchema` 增加可选键 `ontology_threshold`（0~1）、`max_skills`（1~256）、`max_capabilities`（1~256），扩展 `INTENT_FOCUS_DEFAULTS`（`0.6` / `32` / `96`），并支持 `INTENT_FOCUS_ONTOLOGY_THRESHOLD` 覆盖；越界仍启动失败
 - [x] T004 [P] 在 `agent-backend/config.example.yaml` 补 `intent_focus.ontology_threshold` / `max_skills` / `max_capabilities` 注释示例，注明"整块缺失即功能不可用、环境变量优先"
 
+> 2026-11-20 修订：T003/T004 中的 `ontology_threshold`（环境变量 `INTENT_FOCUS_ONTOLOGY_THRESHOLD`）已拆分为行为阈值 `ontology_behavior_threshold` / `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` 与函数阈值 `ontology_function_threshold` / `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`，缺省 0.8；旧键在 `.strict()` 下启动即失败。任务条目保留原文以留存当时记录。
+
 **检查点**：`npm run typecheck` 通过；`config.example.yaml` 可被现有配置加载路径解析。
 
 ---

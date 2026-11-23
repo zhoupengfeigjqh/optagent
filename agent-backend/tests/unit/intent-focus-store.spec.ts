@@ -60,6 +60,7 @@ function draft(overrides: Partial<IntentFocusRecordDraft> = {}): IntentFocusReco
         reason: null,
       },
     ],
+    functions: [],
     behaviors: [
       {
         name: 'CreatePurchaseRecord',
@@ -115,7 +116,7 @@ describe('追加与序号', () => {
 });
 
 describe('记录 schema', () => {
-  it('只写技能与入选行为；不写函数 / 数据补充 / 恒定字段', async () => {
+  it('只写技能与入选项；不写数据补充 / 恒定字段', async () => {
     const store = newStore();
     await store.append(UID, AGENT, THREAD, draft());
     const record = store.readAll(UID, AGENT, THREAD)[0]!;
@@ -128,7 +129,7 @@ describe('记录 schema', () => {
     expect(record.behaviors[0]).not.toHaveProperty('kind');
     expect(record.behaviors[0]).not.toHaveProperty('selected');
     expect(record.behaviors[0]).not.toHaveProperty('source');
-    expect(record).not.toHaveProperty('functions');
+    expect(record.functions).toEqual([]);
     expect(record).not.toHaveProperty('data_supplements');
     expect(record).not.toHaveProperty('selected_behaviors');
     expect(record).not.toHaveProperty('ontology_files');

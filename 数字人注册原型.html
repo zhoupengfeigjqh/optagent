@@ -1,0 +1,1834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字人注册原型</title>
+<style>
+/* SECTION: base tokens */
+:root{
+  --blue:#2f6fed;
+  --blue-dark:#1d5bd6;
+  --blue-soft:#eef3fe;
+  --ink:#1f2329;
+  --ink-2:#4b5158;
+  --ink-3:#646a73;
+  --ink-4:#8f959e;
+  --line:#e8e9eb;
+  --line-2:#dee0e3;
+  --bg:#f7f8fa;
+  --white:#fff;
+  --red:#e5484d;
+  --red-soft:#fdf0f0;
+  --green:#18a058;
+  --green-soft:#edf7f1;
+  --radius:8px;
+  --shadow-1:0 1px 2px rgba(31,35,41,.06);
+  --shadow-2:0 6px 24px rgba(31,35,41,.14);
+  --shadow-3:0 18px 60px rgba(31,35,41,.22);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:14px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;font-size:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+input,textarea{font-family:inherit;}
+a{color:var(--blue);text-decoration:none;}
+.view{display:none;min-height:100vh;}
+.view.is-active{display:block;}
+
+/* SECTION: top strip + admin header */
+.topbar{height:34px;background:#20242a;}
+.wrap{max-width:1440px;margin:0 auto;padding:0 24px;}
+.crumb{color:var(--ink-4);font-size:13px;padding-top:18px;}
+.page-title{font-size:26px;font-weight:700;margin:6px 0 16px;letter-spacing:.5px;}
+.tabs{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  background:#f2f3f5;border-bottom:1px solid var(--line);
+  padding:0 24px;margin:0 -24px 22px;
+}
+.tab{
+  padding:15px 18px;color:var(--ink-3);font-size:15px;position:relative;
+  border-bottom:2px solid transparent;white-space:nowrap;
+}
+.tab:hover{color:var(--ink);}
+.tab.is-active{color:var(--blue);font-weight:600;border-bottom-color:var(--blue);}
+
+/* SECTION: admin toolbar + cards */
+.list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+.list-head h2{font-size:17px;font-weight:700;margin:0;}
+.list-meta{color:var(--ink-4);font-size:13px;}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:34px;padding:0 14px;border-radius:6px;font-size:14px;
+  border:1px solid var(--line-2);background:var(--white);color:var(--ink-2);
+  transition:.16s;
+}
+.btn:hover{border-color:var(--blue);color:var(--blue);}
+.btn-primary{background:var(--blue);border-color:var(--blue);color:#fff;}
+.btn-primary:hover{background:var(--blue-dark);border-color:var(--blue-dark);color:#fff;}
+.btn-link{background:var(--blue-soft);border-color:#cfe0fd;color:var(--blue);}
+.btn-link:hover{background:#e2ecfe;border-color:var(--blue);color:var(--blue);}
+.btn-lg{height:44px;padding:0 20px;font-size:15px;}
+.btn-block{width:100%;}
+.btn:disabled{opacity:.55;cursor:not-allowed;}
+.grid{
+  display:grid;gap:16px;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+}
+.card{
+  background:var(--white);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 18px 20px;display:flex;flex-direction:column;gap:8px;
+  box-shadow:var(--shadow-1);transition:.18s;min-width:0;
+}
+.card:hover{box-shadow:var(--shadow-2);transform:translateY(-1px);}
+.card h3{font-size:16px;font-weight:700;margin:0;color:var(--ink);}
+.card .desc{color:var(--ink-3);font-size:13.5px;margin:0;flex:1;}
+.card .upd{color:var(--ink-4);font-size:12.5px;}
+.card .ops{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;}
+.tag-row{display:flex;gap:8px;flex-wrap:wrap;}
+.tag{font-size:12px;color:var(--ink-3);background:#f2f3f5;border-radius:4px;padding:1px 7px;}
+.tag.is-green{color:var(--green);background:var(--green-soft);}
+
+/* SECTION: modal */
+.mask{
+  position:fixed;inset:0;background:rgba(15,18,22,.45);
+  display:none;align-items:center;justify-content:center;padding:20px;z-index:60;
+}
+.mask.is-open{display:flex;}
+.modal{
+  background:#fff;border-radius:12px;width:min(520px,100%);
+  box-shadow:var(--shadow-3);overflow:hidden;
+  animation:pop .18s ease-out;
+}
+@keyframes pop{from{transform:translateY(8px) scale(.98);opacity:.4;}to{transform:none;opacity:1;}}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line);}
+.modal-head h3{margin:0;font-size:17px;font-weight:700;}
+.modal-close{width:30px;height:30px;border-radius:6px;color:var(--ink-4);font-size:20px;line-height:1;}
+.modal-close:hover{background:#f2f3f5;color:var(--ink);}
+.modal-body{padding:20px;}
+.modal-foot{padding:16px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;background:#fafbfc;}
+.field-label{font-size:13px;color:var(--ink-3);margin:0 0 6px;}
+.link-box{display:flex;gap:8px;align-items:stretch;}
+.link-input{
+  flex:1;min-width:0;height:38px;padding:0 12px;border:1px solid var(--line-2);
+  border-radius:6px;background:#f7f8fa;color:var(--ink-2);font-size:13px;
+}
+.link-input:focus{outline:none;border-color:var(--blue);background:#fff;}
+/* 二维码示意区块暂时隐藏（原型阶段先不展示）；恢复展示时把 display:none 改回 flex 即可 */
+.qr-row{display:none;gap:18px;align-items:center;margin-top:18px;flex-wrap:wrap;}
+.qr-frame{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;}
+.qr-note{color:var(--ink-4);font-size:12.5px;flex:1;min-width:180px;}
+.kv{display:flex;gap:10px;font-size:13px;margin-top:6px;}
+.kv span:first-child{color:var(--ink-4);min-width:72px;}
+.hint{
+  margin-top:16px;background:var(--blue-soft);border:1px solid #d8e5fd;border-radius:6px;
+  padding:10px 12px;color:#33507e;font-size:12.5px;line-height:1.7;
+}
+
+/* SECTION: switch robot modal */
+.switch-list{display:flex;flex-direction:column;gap:8px;}
+.switch-item{
+  display:flex;align-items:center;gap:12px;text-align:left;
+  border:1px solid var(--line-2);border-radius:8px;padding:10px 12px;background:#fff;
+  transition:.16s;width:100%;
+}
+.switch-item:hover{border-color:var(--blue);background:var(--blue-soft);}
+.switch-item.is-current{border-color:var(--blue);background:var(--blue-soft);}
+.switch-item .avatar{width:36px;height:36px;font-size:13px;}
+.switch-item .s-name{font-size:14.5px;font-weight:600;color:var(--ink);}
+.switch-item .s-desc{font-size:12.5px;color:var(--ink-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.switch-item .s-cur{margin-left:auto;flex:none;font-size:12px;color:var(--blue);background:#dce8fd;border-radius:4px;padding:1px 8px;}
+
+/* SECTION: authorization */
+.s-badge{margin-left:auto;flex:none;font-size:12px;border-radius:4px;padding:1px 8px;}
+.s-badge.ok{color:var(--green);background:var(--green-soft);}
+.s-badge.wait{color:#b26a00;background:#fdf3e3;}
+.switch-item .s-cur{margin-left:8px;}
+.switch-item .btn{flex:none;height:28px;padding:0 12px;font-size:12.5px;margin-left:auto;}
+.switch-item.is-locked{cursor:default;}
+.switch-item.is-locked:hover{border-color:var(--line-2);background:#fff;}
+#approve-list{display:flex;flex-direction:column;gap:8px;}
+.approve-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;}
+.approve-row .a-info{flex:1;min-width:0;}
+.approve-row .a-name{font-size:14px;font-weight:600;}
+.approve-row .a-sub{font-size:12.5px;color:var(--ink-4);}
+.approve-empty{color:var(--ink-4);font-size:13px;text-align:center;padding:18px 0;}
+.chat-banner{display:none;margin:14px auto 0;max-width:900px;width:calc(100% - 48px);background:#fdf3e3;border:1px solid #f3ddb0;border-radius:8px;padding:11px 14px;color:#8a5a00;font-size:13px;line-height:1.7;}
+.chat-banner.is-open{display:block;}
+.chat-banner .b-act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
+
+/* SECTION: account management */
+.btn-danger{background:var(--red);border-color:var(--red);color:#fff;}
+.btn-danger:hover{background:#cf3b40;border-color:#cf3b40;color:#fff;}
+.btn-sm{height:28px;padding:0 10px;font-size:12.5px;}
+.acc-filter{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;}
+.acc-filter .f-item{display:flex;flex-direction:column;gap:5px;min-width:0;}
+.acc-filter .f-item span{font-size:12.5px;color:var(--ink-3);}
+.f-ctrl{height:36px;font-size:14px;min-width:190px;max-width:100%;padding:0 10px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--ink);}
+.f-ctrl:focus{outline:none;border-color:var(--blue);}
+.acc-scope{display:none;margin-bottom:12px;background:var(--blue-soft);border:1px solid #d8e5fd;border-radius:6px;padding:8px 12px;color:#33507e;font-size:13px;}
+.acc-scope.is-open{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.table-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow-x:auto;}
+.acc-table{width:100%;border-collapse:collapse;min-width:900px;}
+.acc-table th,.acc-table td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle;}
+.acc-table th{background:#fafbfc;color:var(--ink-3);font-weight:600;font-size:12.5px;white-space:nowrap;}
+.acc-table tr:last-child td{border-bottom:none;}
+.acc-table tbody tr:hover{background:#fafcff;}
+.acc-table .ops-cell{white-space:nowrap;}
+.acc-table .ops-cell .btn{margin-right:6px;}
+.acc-table .ops-cell .btn:last-child{margin-right:0;}
+.cell-link{color:var(--blue);cursor:pointer;}
+.cell-link:hover{text-decoration:underline;}
+.pill{display:inline-block;font-size:12px;border-radius:4px;padding:1px 8px;}
+.pill.ok{color:var(--green);background:var(--green-soft);}
+.pill.wait{color:#b26a00;background:#fdf3e3;}
+.pill.none{color:var(--ink-4);background:#f2f3f5;}
+.acc-auth-list{display:flex;flex-direction:column;gap:8px;}
+.acc-auth-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;flex-wrap:wrap;}
+.acc-auth-row .r-info{flex:1;min-width:150px;}
+.acc-auth-row .r-name{font-size:14px;font-weight:600;}
+.acc-auth-row .r-sub{font-size:12.5px;color:var(--ink-4);}
+.acc-auth-row .r-ops{display:flex;gap:8px;flex-wrap:wrap;}
+.modal-wide{width:min(620px,100%);}
+.modal-body-scroll{max-height:60vh;overflow-y:auto;}
+
+/* SECTION: auth page */
+.auth-shell{min-height:100vh;display:flex;flex-direction:column;background:linear-gradient(160deg,#f4f7fd 0%,#eef2f8 46%,#f7f8fa 100%);}
+.auth-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;flex-wrap:wrap;}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;}
+.brand-mark{
+  width:30px;height:30px;border-radius:8px;background:var(--blue);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+}
+.auth-body{flex:1;display:flex;align-items:center;justify-content:center;padding:12px 24px 48px;}
+.auth-card{
+  width:min(460px,100%);background:#fff;border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow-2);padding:28px 30px 30px;
+}
+.robot-chip{display:flex;align-items:center;gap:12px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:20px;}
+.avatar{
+  width:42px;height:42px;border-radius:50%;flex:none;color:#fff;font-size:15px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#4b8bff,#2f6fed);
+}
+.robot-chip .r-name{font-size:16px;font-weight:700;}
+.robot-chip .r-sub{font-size:12.5px;color:var(--ink-4);}
+.seg{display:flex;background:#f2f3f5;border-radius:8px;padding:4px;margin-bottom:22px;}
+.seg button{flex:1;height:34px;border-radius:6px;color:var(--ink-3);font-size:14.5px;}
+.seg button.is-active{background:#fff;color:var(--blue);font-weight:600;box-shadow:var(--shadow-1);}
+.form-item{margin-bottom:16px;}
+.form-item label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:6px;}
+.ctrl{
+  width:100%;height:44px;padding:0 14px;border:1px solid var(--line-2);border-radius:8px;
+  font-size:16px;color:var(--ink);background:#fff;transition:.16s;
+}
+.ctrl::placeholder{color:#b6bbc2;font-size:14px;}
+.ctrl:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,111,237,.12);}
+.ctrl.has-err{border-color:var(--red);background:var(--red-soft);}
+.pwd-wrap{position:relative;}
+.pwd-wrap .ctrl{padding-right:52px;}
+.eye{position:absolute;right:6px;top:6px;height:32px;width:42px;color:var(--ink-4);font-size:12px;border-radius:6px;}
+.eye:hover{background:#f2f3f5;color:var(--ink-2);}
+.err{color:var(--red);font-size:12.5px;min-height:18px;margin-top:4px;}
+.alert{border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.7;margin-bottom:16px;display:none;}
+.alert.is-open{display:block;}
+.alert-warn{background:var(--red-soft);border:1px solid #f7d4d5;color:#a8323a;}
+.alert-ok{background:var(--green-soft);border:1px solid #cfeadb;color:#157a45;}
+.alert .alert-act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
+.auth-foot{margin-top:18px;padding-top:16px;border-top:1px dashed var(--line);color:var(--ink-4);font-size:12.5px;line-height:1.8;}
+.auth-foot code{background:#f2f3f5;border-radius:4px;padding:1px 6px;color:var(--ink-2);font-size:12px;}
+.agree{display:flex;align-items:flex-start;gap:8px;color:var(--ink-4);font-size:12.5px;margin:2px 0 18px;}
+.agree input{margin-top:3px;accent-color:var(--blue);}
+
+/* SECTION: admin login + role bar */
+.login-cap{padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:20px;}
+.login-cap .r-name{font-size:18px;font-weight:700;}
+.login-cap .r-sub{font-size:12.5px;color:var(--ink-4);margin-top:4px;}
+.admin-head-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.admin-head-row .crumb{padding-top:18px;}
+.admin-who{display:flex;align-items:center;gap:10px;padding-top:14px;font-size:12.5px;color:var(--ink-3);}
+/* 注册链接登录页：不展示平台品牌/logo；头部仅在管理员预览注册页时显示（靠右的返回按钮） */
+#view-auth .auth-head{justify-content:flex-end;}
+#view-auth .auth-head .brand{display:none;}
+
+/* SECTION: chat page */
+.chat-shell{display:flex;flex-direction:column;height:100vh;background:var(--bg);}
+.chat-top{
+  height:58px;flex:none;background:#fff;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;padding:0 18px;
+}
+.chat-top .spacer{flex:1;}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;margin-right:6px;}
+.chat-main{flex:1;display:flex;min-height:0;}
+.chat-side{
+  width:238px;flex:none;background:#fff;border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:14px;gap:10px;
+}
+.side-title{font-size:12.5px;color:var(--ink-4);letter-spacing:.4px;}
+.conv{
+  text-align:left;border-radius:8px;padding:9px 11px;color:var(--ink-2);font-size:13.5px;
+  border:1px solid transparent;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.conv:hover{background:#f5f7fa;}
+.conv.is-active{background:var(--blue-soft);color:var(--blue);border-color:#d6e4fd;font-weight:600;}
+.chat-stream{flex:1;min-width:0;display:flex;flex-direction:column;}
+.msg-scroll{flex:1;overflow-y:auto;padding:22px 24px;}
+.msg-list{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:18px;}
+.msg{display:flex;gap:10px;align-items:flex-start;min-width:0;}
+.msg .avatar{width:34px;height:34px;font-size:12.5px;}
+.msg.me{flex-direction:row-reverse;}
+.msg.me .avatar{background:#5b6472;}
+.bubble{
+  max-width:min(640px,78%);background:#fff;border:1px solid var(--line);border-radius:10px;
+  padding:11px 14px;font-size:14.5px;color:var(--ink);box-shadow:var(--shadow-1);
+  white-space:pre-wrap;word-break:break-word;min-width:0;
+}
+.msg.me .bubble{background:var(--blue);border-color:var(--blue);color:#fff;}
+.msg-meta{font-size:11.5px;color:var(--ink-4);margin-bottom:4px;}
+.msg.me .msg-meta{text-align:right;}
+.typing .bubble{color:var(--ink-3);}
+.dots span{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ink-4);margin-right:4px;animation:blink 1.2s infinite;}
+.dots span:nth-child(2){animation-delay:.2s;}
+.dots span:nth-child(3){animation-delay:.4s;margin-right:0;}
+@keyframes blink{0%,60%,100%{opacity:.25;}30%{opacity:1;}}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 24px 10px;max-width:948px;margin:0 auto;width:100%;}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:16px;padding:5px 13px;font-size:13px;color:var(--ink-2);}
+.chip:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-soft);}
+.composer{flex:none;background:#fff;border-top:1px solid var(--line);padding:14px 24px 18px;}
+.composer-inner{max-width:900px;margin:0 auto;display:flex;gap:10px;align-items:flex-end;}
+.composer textarea{
+  flex:1;min-width:0;min-height:46px;max-height:140px;resize:none;border:1px solid var(--line-2);
+  border-radius:10px;padding:12px 14px;font-size:15px;line-height:1.5;color:var(--ink);
+}
+.composer textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,111,237,.12);}
+.composer .tip{max-width:900px;margin:8px auto 0;color:var(--ink-4);font-size:12px;}
+
+/* SECTION: toast */
+.toast{
+  position:fixed;left:50%;top:26px;transform:translate(-50%,-24px);
+  background:#20242a;color:#fff;border-radius:8px;padding:10px 18px;font-size:13.5px;
+  box-shadow:var(--shadow-3);opacity:0;pointer-events:none;transition:.22s;z-index:90;max-width:88%;
+}
+.toast.is-show{opacity:1;transform:translate(-50%,0);}
+.toast.is-ok{background:#118a4c;}
+.toast.is-err{background:#c93b40;}
+
+/* SECTION: responsive */
+@media (max-width:960px){
+  .chat-side{display:none;}
+}
+@media (max-width:640px){
+  .wrap{padding:0 16px;}
+  .tabs{padding:0 16px;gap:0;}
+  .tab{padding:13px 12px;font-size:14px;}
+  .page-title{font-size:21px;}
+  .auth-card{padding:22px 18px 24px;border-radius:12px;}
+  .msg-scroll{padding:16px 14px;}
+  .bubble{max-width:84%;}
+  .composer{padding:12px 14px 16px;}
+  .grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- SECTION: view = 管理员专属登录页 -->
+<section id="view-admin-login" class="view is-active">
+  <div class="auth-shell">
+    <div class="auth-head">
+      <div class="brand"><span class="brand-mark">DH</span><span>数字人管理平台</span></div>
+      <span class="tag">管理员入口</span>
+    </div>
+    <div class="auth-body">
+      <div class="auth-card">
+        <div class="login-cap">
+          <div class="r-name">管理员登录</div>
+          <div class="r-sub">登录后可操作数字人设计、注册链接、授权审批、账户管理等全部功能</div>
+        </div>
+        <div class="alert alert-warn" id="admin-login-alert"><div id="admin-login-alert-text">账号或密码不正确，请重新输入。</div></div>
+        <form id="form-admin-login" novalidate>
+          <div class="form-item">
+            <label for="a-account">管理员账号</label>
+            <input class="ctrl" id="a-account" type="text" autocomplete="username" placeholder="请输入管理员账号">
+            <div class="err" id="e-a-account"></div>
+          </div>
+          <div class="form-item">
+            <label for="a-pwd">密码</label>
+            <div class="pwd-wrap">
+              <input class="ctrl" id="a-pwd" type="password" autocomplete="current-password" placeholder="请输入密码">
+              <button class="eye" type="button" id="eye-a">显示</button>
+            </div>
+            <div class="err" id="e-a-pwd"></div>
+          </div>
+          <button class="btn btn-primary btn-lg btn-block" type="submit">登录管理后台</button>
+        </form>
+        <div class="auth-foot">
+          演示账号：<code>admin</code> / 密码 <code>admin123</code><br>
+          普通用户请通过数字人的「专属注册链接」进入注册/登录页，登录后仅可使用聊天对话功能。
+        </div>
+        <div class="hint">原型说明：本页为管理员专属入口。管理员登录后可操作全部功能；通过注册链接注册/登录的用户直接进入对话窗口，无法访问管理后台与授权审批。</div>
+        <div style="margin-top:14px;text-align:center;">
+          <button class="btn btn-link" id="btn-adminlogin-to-reg">以普通用户身份体验（打开注册链接示例）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: view = 管理后台 · 数字人设计 -->
+<section id="view-admin" class="view">
+  <div class="topbar"></div>
+  <div class="wrap">
+    <div class="admin-head-row">
+      <div class="crumb">数字人管理平台</div>
+      <div class="admin-who">
+        <span class="tag" id="admin-who">管理员 · 全功能</span>
+        <button class="btn" id="btn-admin-chat">进入对话演示</button>
+        <button class="btn" id="btn-admin-logout">退出登录</button>
+      </div>
+    </div>
+    <h1 class="page-title" id="admin-title">数字人设计</h1>
+    <nav class="tabs" id="admin-tabs">
+      <button class="tab">MCP 服务</button>
+      <button class="tab">本体管理</button>
+      <button class="tab">SKILL 管理</button>
+      <button class="tab is-active" data-tab="design">数字人设计</button>
+      <button class="tab">数字人部署</button>
+      <button class="tab" data-tab="accounts">账户管理</button>
+    </nav>
+    <div id="pane-design">
+    <div class="list-head">
+      <h2>数字人设计</h2>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <span class="list-meta" id="list-meta">共 5 项，第 1 / 1 页</span>
+        <button class="btn" id="btn-approve-open">授权审批</button>
+        <button class="btn btn-primary" id="btn-new">新建数字人</button>
+      </div>
+    </div>
+
+    <!-- SECTION: static sample cards（照截图示例数据，脚本失效时也可见） -->
+    <div class="grid" id="robot-grid">
+      <div class="card" data-robot-id="kekun-bom">
+        <h3>柯昆BOM数字人</h3>
+        <p class="desc">柯昆BOM数字人，专门负责BOM数据的解析和对齐等操作</p>
+        <div class="tag-row"><span class="tag">编码 DH-KKB0M7</span><span class="tag is-green" data-count>注册用户 0 人</span></div>
+        <div class="upd">更新于 2026-10-14T05:38:36.410Z</div>
+        <div class="ops">
+          <button class="btn" data-act="design">打开设计</button>
+          <button class="btn btn-link" data-act="link">生成注册链接</button>
+        </div>
+      </div>
+      <div class="card" data-robot-id="sched-test">
+        <h3>生产调度测试</h3>
+        <p class="desc">库存和原材料专家</p>
+        <div class="tag-row"><span class="tag">编码 DH-SCHED2</span><span class="tag is-green" data-count>注册用户 0 人</span></div>
+        <div class="upd">更新于 2026-11-13T07:37:47.833Z</div>
+        <div class="ops">
+          <button class="btn" data-act="design">打开设计</button>
+          <button class="btn btn-link" data-act="link">生成注册链接</button>
+        </div>
+      </div>
+      <div class="card" data-robot-id="plan-helper">
+        <h3>生产计划助手</h3>
+        <p class="desc">我是一名专业的计划排产专家</p>
+        <div class="tag-row"><span class="tag">编码 DH-PLAN5</span><span class="tag is-green" data-count>注册用户 0 人</span></div>
+        <div class="upd">更新于 2026-11-04T01:52:17.099Z</div>
+        <div class="ops">
+          <button class="btn" data-act="design">打开设计</button>
+          <button class="btn btn-link" data-act="link">生成注册链接</button>
+        </div>
+      </div>
+      <div class="card" data-robot-id="fresh-rec">
+        <h3>生鲜识别辅助</h3>
+        <p class="desc">我是生鲜订单分析专家，专门解析图片订单信息，并从sku表中找到对应的正式品种。</p>
+        <div class="tag-row"><span class="tag">编码 DH-FRESH9</span><span class="tag is-green" data-count>注册用户 0 人</span></div>
+        <div class="upd">更新于 2026-11-18T05:35:53.702Z</div>
+        <div class="ops">
+          <button class="btn" data-act="design">打开设计</button>
+          <button class="btn btn-link" data-act="link">生成注册链接</button>
+        </div>
+      </div>
+      <div class="card" data-robot-id="bom">
+        <h3>BOM数字人</h3>
+        <p class="desc">我是BOM数字人，专门负责BOM数据的解析和对齐等操作</p>
+        <div class="tag-row"><span class="tag">编码 DH-BOM001</span><span class="tag is-green" data-count>注册用户 1 人</span></div>
+        <div class="upd">更新于 2026-11-06T05:46:13.616Z</div>
+        <div class="ops">
+          <button class="btn" data-act="design">打开设计</button>
+          <button class="btn btn-link" data-act="link">生成注册链接</button>
+        </div>
+      </div>
+    </div>
+    <div style="height:48px;"></div>
+    </div>
+
+    <!-- SECTION: pane = 账户管理 -->
+    <div id="pane-accounts" style="display:none;">
+      <div class="list-head">
+        <h2>账户管理</h2>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <span class="list-meta" id="acc-meta">共 0 个账户</span>
+          <button class="btn" id="btn-acc-approve">授权审批</button>
+        </div>
+      </div>
+      <div class="acc-filter">
+        <label class="f-item"><span>搜索账户</span><input class="f-ctrl" id="acc-search" type="text" placeholder="手机号 / 用户名"></label>
+        <label class="f-item"><span>授权状态</span>
+          <select class="f-ctrl" id="acc-state">
+            <option value="all">全部</option>
+            <option value="approved">含已授权</option>
+            <option value="pending">含申请中</option>
+          </select>
+        </label>
+      </div>
+      <div class="acc-scope" id="acc-scope">
+        <span id="acc-scope-text"></span>
+        <button class="btn btn-sm" id="btn-acc-scope-clear">清除筛选</button>
+      </div>
+      <div class="table-wrap">
+        <table class="acc-table">
+          <thead>
+            <tr>
+              <th>手机号</th><th>用户名</th><th>注册来源服务</th><th>注册时间</th>
+              <th>授权概况</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="acc-tbody"></tbody>
+        </table>
+      </div>
+      <div class="hint">账户维护说明：可修改用户名、重置密码、删除账户；在「授权详情」中查看该账户的全部申请与已授权服务，并进行授权或关闭授权。<br>权限规则：通过专属注册链接注册成功后，用户自动获得该数字人权限，无需后台审批；只有在对话界面「切换数字人」中申请的其他数字人权限才进入授权审批。</div>
+      <div style="height:48px;"></div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: modal = 注册链接 -->
+<div class="mask" id="mask-link">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="link-title">
+    <div class="modal-head">
+      <h3 id="link-title">生成注册链接</h3>
+      <button class="modal-close" id="link-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="kv"><span>数字人</span><span id="link-robot-name">—</span></div>
+      <div class="kv"><span>链接标识</span><span id="link-code">—</span></div>
+      <div class="kv"><span>有效期</span><span id="link-expire">—</span></div>
+      <div style="height:14px;"></div>
+      <p class="field-label">专属注册链接</p>
+      <div class="link-box">
+        <input class="link-input" id="link-input" readonly value="">
+        <button class="btn btn-primary" id="btn-copy">复制</button>
+      </div>
+      <div class="qr-row">
+        <div class="qr-frame"><canvas id="qr-canvas" width="104" height="104"></canvas></div>
+        <p class="qr-note">扫码打开注册页（原型示意图）。用户通过该链接进入的注册页会自动绑定当前数字人，注册成功即默认获得该数字人的使用权限，无需后台审批，登录后可直接对话。</p>
+      </div>
+      <div class="hint">原型说明：链接域名为示意地址，注册数据仅保存在当前浏览器本地，用于演示「生成链接 → 注册（自动授权）→ 已注册改走登录 → 进入对话」流程。用户通过链接注册成功即默认获得当前数字人权限，无需后台审批，登录后可直接对话；仅「切换数字人」中提交的其他数字人申请才需要后台审批。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="btn-copy-2">复制链接</button>
+      <button class="btn btn-link" id="btn-open-register">打开注册页面</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 切换数字人 -->
+<div class="mask" id="mask-switch">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="switch-title">
+    <div class="modal-head">
+      <h3 id="switch-title">切换数字人</h3>
+      <button class="modal-close" id="switch-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="field-label">选择要对话的数字人（切换后开启新会话）。注册链接对应的数字人已自动授权；其他数字人需在此提交申请，经后台审批通过后可用。</p>
+      <div class="switch-list" id="switch-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 后台授权审批 -->
+<div class="mask" id="mask-approve">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approve-title">
+    <div class="modal-head">
+      <h3 id="approve-title">授权审批（后台演示）</h3>
+      <button class="modal-close" id="approve-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="field-label">待审批的服务授权申请（仅来自对话界面的申请）</p>
+      <div id="approve-list"></div>
+      <div class="hint">原型说明：此处模拟后台管理员操作。通过注册链接注册成功的用户已默认获得对应数字人权限，不进入此列表；只有在对话界面「切换数字人」中提交的申请才需要审批。点击「通过授权」后，对应账户即可切换并使用该数字人服务。</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-link" id="btn-approve-back-chat">返回对话窗口</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 账户授权详情 -->
+<div class="mask" id="mask-acc-auth">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="acc-auth-title">
+    <div class="modal-head">
+      <h3 id="acc-auth-title">授权详情</h3>
+      <button class="modal-close" id="acc-auth-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body modal-body-scroll">
+      <div class="kv"><span>账户</span><span id="acc-auth-user">—</span></div>
+      <div class="kv"><span>已授权服务</span><span id="acc-auth-services">—</span></div>
+      <div style="height:14px;"></div>
+      <p class="field-label">全部授权申请与状态</p>
+      <div class="acc-auth-list" id="acc-auth-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 修改账户 -->
+<div class="mask" id="mask-acc-edit">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="acc-edit-title">
+    <div class="modal-head">
+      <h3 id="acc-edit-title">修改账户</h3>
+      <button class="modal-close" id="acc-edit-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="kv"><span>手机号</span><span id="acc-edit-phone">—</span></div>
+      <div style="height:14px;"></div>
+      <div class="form-item">
+        <label for="acc-edit-name">用户名</label>
+        <input class="ctrl" id="acc-edit-name" type="text" maxlength="20" placeholder="请输入用户名，2-20 个字符">
+        <div class="err" id="e-acc-edit-name"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="acc-edit-cancel">取消</button>
+      <button class="btn btn-primary" id="acc-edit-save">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 重置密码 -->
+<div class="mask" id="mask-acc-pwd">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="acc-pwd-title">
+    <div class="modal-head">
+      <h3 id="acc-pwd-title">重置密码</h3>
+      <button class="modal-close" id="acc-pwd-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="kv"><span>账户</span><span id="acc-pwd-user">—</span></div>
+      <div style="height:14px;"></div>
+      <div class="form-item">
+        <label for="acc-pwd-new">新密码</label>
+        <div class="pwd-wrap">
+          <input class="ctrl" id="acc-pwd-new" type="password" maxlength="20" placeholder="请输入 6-20 位新密码">
+          <button class="eye" type="button" id="eye-acc-pwd">显示</button>
+        </div>
+        <div class="err" id="e-acc-pwd-new"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="acc-pwd-cancel">取消</button>
+      <button class="btn btn-primary" id="acc-pwd-save">确认重置</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: modal = 删除账户确认 -->
+<div class="mask" id="mask-acc-del">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="acc-del-title">
+    <div class="modal-head">
+      <h3 id="acc-del-title">删除账户</h3>
+      <button class="modal-close" id="acc-del-close" aria-label="关闭">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-warn is-open" style="margin-bottom:0;">
+        <div id="acc-del-text">确认删除该账户？删除后其注册信息与全部授权申请将一并移除。</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="acc-del-cancel">取消</button>
+      <button class="btn btn-danger" id="acc-del-confirm">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: view = 注册 / 登录 -->
+<section id="view-auth" class="view">
+  <div class="auth-shell">
+    <div class="auth-head" id="auth-head">
+      <div class="brand"><span class="brand-mark">DH</span><span>数字人管理平台</span></div>
+      <button class="btn" id="btn-back-admin">返回管理后台</button>
+    </div>
+    <div class="auth-body">
+      <div class="auth-card">
+        <div class="robot-chip">
+          <div class="avatar" id="auth-avatar">智</div>
+          <div style="min-width:0;">
+            <div class="r-name" id="auth-robot-name">数字人</div>
+            <div class="r-sub" id="auth-robot-sub">专属注册链接 · 注册成功即自动获得权限</div>
+          </div>
+        </div>
+
+        <div class="seg">
+          <button id="tab-register" class="is-active">注册</button>
+          <button id="tab-login">登录</button>
+        </div>
+
+        <div class="alert alert-warn" id="alert-exist">
+          <div>该手机号已注册，无需重复注册。设置过密码可直接登录。</div>
+          <div class="alert-act">
+            <button class="btn btn-primary" id="btn-goto-login" style="height:30px;">直接登录</button>
+            <button class="btn" id="btn-change-phone" style="height:30px;">换个手机号</button>
+          </div>
+        </div>
+        <div class="alert alert-ok" id="alert-ok">
+          <div id="alert-ok-text">注册成功，已自动获得该数字人使用权限，登录后即可直接对话。</div>
+        </div>
+
+        <!-- 注册表单 -->
+        <form id="form-register" novalidate>
+          <div class="form-item">
+            <label for="r-phone">手机号</label>
+            <input class="ctrl" id="r-phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位手机号">
+            <div class="err" id="e-r-phone"></div>
+          </div>
+          <div class="form-item">
+            <label for="r-name">用户名</label>
+            <input class="ctrl" id="r-name" type="text" maxlength="20" autocomplete="nickname" placeholder="请输入用户名，2-20 个字符">
+            <div class="err" id="e-r-name"></div>
+          </div>
+          <div class="form-item">
+            <label for="r-pwd">密码</label>
+            <div class="pwd-wrap">
+              <input class="ctrl" id="r-pwd" type="password" maxlength="20" autocomplete="new-password" placeholder="请输入 6-20 位密码">
+              <button class="eye" type="button" id="eye-r">显示</button>
+            </div>
+            <div class="err" id="e-r-pwd"></div>
+          </div>
+          <label class="agree"><input type="checkbox" id="r-agree"><span>我已阅读并同意《用户服务协议》与《隐私政策》（原型示意）</span></label>
+          <button class="btn btn-primary btn-lg btn-block" type="submit">点击注册</button>
+        </form>
+
+        <!-- 登录表单 -->
+        <form id="form-login" novalidate style="display:none;">
+          <div class="form-item">
+            <label for="l-phone">手机号</label>
+            <input class="ctrl" id="l-phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入已注册的手机号">
+            <div class="err" id="e-l-phone"></div>
+          </div>
+          <div class="form-item">
+            <label for="l-pwd">密码</label>
+            <div class="pwd-wrap">
+              <input class="ctrl" id="l-pwd" type="password" maxlength="20" autocomplete="current-password" placeholder="请输入密码">
+              <button class="eye" type="button" id="eye-l">显示</button>
+            </div>
+            <div class="err" id="e-l-pwd"></div>
+          </div>
+          <button class="btn btn-primary btn-lg btn-block" type="submit">点击登录</button>
+        </form>
+
+        <div class="auth-foot">
+          权限规则：通过本链接注册成功后，自动获得该数字人权限，无需后台审批。<br>
+          演示账号（已注册）：<code>13800138000</code> / 用户名 <code>张明</code> / 密码 <code>123456</code><br>
+          可用其他手机号体验新注册流程。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: view = 数字人对话窗口 -->
+<section id="view-chat" class="view">
+  <div class="chat-shell">
+    <div class="chat-top">
+      <div class="avatar" id="chat-avatar" style="width:36px;height:36px;font-size:13px;">智</div>
+      <div style="min-width:0;">
+        <div style="font-weight:700;font-size:15px;" id="chat-title">数字人对话</div>
+        <div style="font-size:12px;color:var(--ink-4);"><span class="status-dot"></span>在线 · 会话已就绪</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-link" id="btn-switch-robot">切换数字人</button>
+      <span class="tag" id="chat-user">未登录</span>
+      <button class="btn" id="btn-logout">退出登录</button>
+      <button class="btn" id="btn-to-admin">返回管理后台</button>
+    </div>
+    <div class="chat-main">
+      <aside class="chat-side">
+        <button class="btn btn-primary btn-block" id="btn-new-conv">新建对话</button>
+        <div class="side-title">历史会话</div>
+        <div id="conv-list"></div>
+      </aside>
+      <div class="chat-stream">
+        <div class="chat-banner" id="chat-auth-banner">
+          <div id="chat-auth-text">服务授权申请审核中，后台授权通过后即可正常对话。</div>
+          <div class="b-act">
+            <button class="btn" id="btn-auth-refresh" style="height:30px;">刷新授权状态</button>
+            <button class="btn btn-link" id="btn-auth-goto-approve" style="height:30px;">去后台审批（演示）</button>
+          </div>
+        </div>
+        <div class="msg-scroll" id="msg-scroll">
+          <div class="msg-list" id="msg-list"></div>
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="composer">
+          <div class="composer-inner">
+            <textarea id="chat-input" rows="1" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
+            <button class="btn btn-primary btn-lg" id="btn-send">发送</button>
+          </div>
+          <div class="tip">原型演示：回复内容由内置示例话术生成，未接入真实模型服务。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* SECTION: data */
+var ROBOTS = [
+  { id:'kekun-bom', code:'DH-KKB0M7', name:'柯昆BOM数字人', desc:'柯昆BOM数字人，专门负责BOM数据的解析和对齐等操作' },
+  { id:'sched-test', code:'DH-SCHED2', name:'生产调度测试', desc:'库存和原材料专家' },
+  { id:'plan-helper', code:'DH-PLAN5', name:'生产计划助手', desc:'我是一名专业的计划排产专家' },
+  { id:'fresh-rec', code:'DH-FRESH9', name:'生鲜识别辅助', desc:'我是生鲜订单分析专家，专门解析图片订单信息，并从sku表中找到对应的正式品种。' },
+  { id:'bom', code:'DH-BOM001', name:'BOM数字人', desc:'我是BOM数字人，专门负责BOM数据的解析和对齐等操作' }
+];
+
+var REPLIES = {
+  'kekun-bom': [
+    '已读取柯昆 BOM 表，共 326 行物料记录。发现 4 条物料编码与名称不一致，需要我逐条列出吗？',
+    '对齐结果：成功匹配 318 条，待人工确认 8 条。差异集中在单位换算和版本后缀，我已生成对照清单。',
+    'BOM 层级已展开到第 4 级，最深层为包装辅材。建议把 3 项长周期物料单独标记，方便排产。'
+  ],
+  'sched-test': [
+    '当前库存可用天数：原料 A 6.5 天，原料 B 2.1 天。原料 B 需要提前补货。',
+    '已按交期倒排 12 个工单，其中 2 个工单存在产能冲突，冲突时段为周四下午。',
+    '原材料在途 3 批，预计明日到货。要不要我把到货计划同步到调度看板？'
+  ],
+  'plan-helper': [
+    '本周排产建议：优先安排 A 线满负荷，B 线预留 20% 产能应对插单。',
+    '按订单优先级排产后，预计准交率 94.2%，主要瓶颈在热处理工序。',
+    '已生成三日滚动计划，插单 1 笔（数量 400）会影响 2 个既有工单，需要确认是否接受顺延。'
+  ],
+  'fresh-rec': [
+    '图片订单已识别：共 17 行，13 行匹配到正式 SKU，4 行为门店自定义简称。',
+    '"精品红富士（箱）"建议匹配 SKU-10231 红富士苹果 75# 20kg/箱，置信度 0.91，是否确认？',
+    '订单合计 486kg，其中叶菜类 121kg。有 2 行单位缺失，我按历史习惯默认填了"份"，请复核。'
+  ],
+  'bom': [
+    'BOM 解析完成：58 个父项、214 个子项，发现 3 处重复子件。',
+    '已对齐到最新物料主数据，版本差异 1 处：V2.3 与 V2.4 的用量差 0.02。',
+    '需要我按成本口径重算 BOM 汇总吗？当前物料价格有效期到本月底。'
+  ]
+};
+
+var CHIPS = ['帮我解析一份 BOM 表', '最近的差异有哪些？', '给出下一步建议'];
+
+/* SECTION: storage */
+var STORE_KEY = 'dh_reg_proto_v1';
+var memoryStore = null;
+
+/* 历史数据迁移：注册来源数字人改为「注册即授权」，旧的 pending 记录统一纠正为 approved。
+   后台主动关闭授权（none / 删除）不会被覆盖。*/
+function normalizeUsers(obj){
+  if(!obj || typeof obj !== 'object') return obj;
+  for(var ph in obj){
+    var u = obj[ph];
+    if(!u || typeof u !== 'object') continue;
+    /* 无 auth 字段的老数据：注册来源数字人按「注册即授权」补齐 */
+    if(!u.auth){ u.auth = {}; if(u.robot) u.auth[u.robot] = 'approved'; }
+    /* 历史 pending（旧规则下注册产生的待审批）统一纠正为已授权 */
+    else if(u.robot && u.auth[u.robot] === 'pending') u.auth[u.robot] = 'approved';
+  }
+  return obj;
+}
+function loadUsers(){
+  var raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); } catch(e){ raw = memoryStore; }
+  if(!raw) return seedUsers();
+  try {
+    var obj = JSON.parse(raw);
+    if(obj && typeof obj === 'object') return normalizeUsers(obj);
+  } catch(e){}
+  return seedUsers();
+}
+function seedUsers(){
+  /* 演示账号：bom 为注册来源 → 注册即自动授权；fresh-rec 为对话界面提交 → 待后台审批 */
+  return normalizeUsers({ '13800138000': { name:'张明', pwd:'123456', robot:'bom', regAt:'2026-11-01 09:12', auth:{ bom:'approved', 'fresh-rec':'pending' } } });
+}
+function saveUsers(u){
+  var s = JSON.stringify(u);
+  memoryStore = s;
+  try { localStorage.setItem(STORE_KEY, s); } catch(e){}
+}
+
+/* 管理员演示账号（原型内置，无后端） */
+var ADMIN_ACCOUNTS = { admin: { pwd:'admin123', name:'平台管理员' } };
+
+var state = {
+  users: loadUsers(), robot: ROBOTS[4], user: null, linkRobot: null, replyIdx: 0,
+  accFilterRobot: null, accTarget: null,
+  role: null,   /* 'admin' | 'user' | null —— 决定可访问的页面与功能 */
+  admin: null
+};
+
+/* SECTION: role & permission */
+function requireAdmin(){
+  if(state.role === 'admin') return true;
+  toast('仅管理员可操作后台功能', 'err');
+  return false;
+}
+function canUse(robotId){
+  /* 管理员全功能放行；普通用户按授权状态判断 */
+  if(state.role === 'admin') return true;
+  var u = state.user ? state.users[state.user.phone] : null;
+  return authOf(u, robotId) === 'approved';
+}
+function meName(){
+  if(state.role === 'admin') return '管理员';
+  return state.user ? state.user.name : '我';
+}
+function applyRoleUI(){
+  var isAdmin = state.role === 'admin';
+  $('admin-who').textContent = isAdmin ? ('管理员 · ' + (state.admin ? state.admin.name : '平台管理员') + ' · 全功能') : '未登录';
+  /* 对话窗口：仅管理员可见「返回管理后台」与「去后台审批」 */
+  $('btn-to-admin').style.display = isAdmin ? '' : 'none';
+  $('btn-auth-goto-approve').style.display = isAdmin ? '' : 'none';
+  $('chat-user').textContent = isAdmin
+    ? '管理员 · 全功能'
+    : (state.user ? (state.user.name + '（' + state.user.phone + '）') : '未登录');
+  /* 注册链接页：不显示「管理员登录」入口；仅管理员预览注册页时保留返回后台通道 */
+  $('auth-head').style.display = isAdmin ? '' : 'none';
+  $('btn-back-admin').style.display = isAdmin ? '' : 'none';
+}
+function submitAdminLogin(ev){
+  ev.preventDefault();
+  $('admin-login-alert').classList.remove('is-open');
+  setErr('a-account','e-a-account','');
+  setErr('a-pwd','e-a-pwd','');
+  var acc = $('a-account').value.trim();
+  var pwd = $('a-pwd').value;
+  if(!acc){ setErr('a-account','e-a-account','请输入管理员账号'); return; }
+  if(!pwd){ setErr('a-pwd','e-a-pwd','请输入密码'); return; }
+  var a = ADMIN_ACCOUNTS[acc];
+  if(!a || a.pwd !== pwd){
+    $('admin-login-alert-text').textContent = '账号或密码不正确，请重新输入。';
+    $('admin-login-alert').classList.add('is-open');
+    return;
+  }
+  state.role = 'admin';
+  state.admin = { account: acc, name: a.name };
+  state.user = null;
+  applyRoleUI();
+  showView('view-admin');
+  try { location.hash = ''; } catch(e){}
+  updateCounts();
+  toast('管理员登录成功，已解锁全部功能', 'ok');
+}
+function logout(){
+  var wasAdmin = state.role === 'admin';
+  state.user = null; state.admin = null; state.role = null;
+  applyRoleUI();
+  if(wasAdmin){
+    try { location.hash = ''; } catch(e){}
+    showView('view-admin-login');
+  } else {
+    /* 普通用户退出后回到该数字人的注册/登录页，仍处于链接入口，不会看到管理后台 */
+    openAuth(state.robot || ROBOTS[4]);
+  }
+  toast('已退出登录');
+}
+
+/* SECTION: helpers */
+function $(id){ return document.getElementById(id); }
+function findRobot(id){
+  for(var i=0;i<ROBOTS.length;i++){ if(ROBOTS[i].id === id) return ROBOTS[i]; }
+  return null;
+}
+function showView(id){
+  /* 权限守卫：普通用户只允许访问聊天对话窗口；管理后台仅管理员可进入 */
+  if(state.role === 'user' && id !== 'view-chat'){
+    toast('普通用户仅可使用聊天对话功能', 'err');
+    id = 'view-chat';
+  }
+  if(id === 'view-admin' && state.role !== 'admin'){
+    toast('请先登录管理员账号', 'err');
+    id = 'view-admin-login';
+  }
+  if(id === 'view-chat' && !state.role){
+    id = 'view-admin-login';
+  }
+  var views = document.querySelectorAll('.view');
+  for(var i=0;i<views.length;i++) views[i].classList.remove('is-active');
+  $(id).classList.add('is-active');
+  window.scrollTo(0,0);
+}
+var toastTimer = null;
+function toast(msg, kind){
+  var t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast is-show' + (kind ? ' is-' + kind : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.className = 'toast'; }, 2100);
+}
+function timeHm(){
+  var d = new Date(), p = function(n){ return (n<10?'0':'') + n; };
+  return p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function now(){
+  var d = new Date(), p = function(n){ return (n<10?'0':'') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function firstChar(name){ return name ? name.slice(0,1) : '智'; }
+function setErr(inputId, errId, msg){
+  var box = $(errId), input = $(inputId);
+  box.textContent = msg || '';
+  if(msg) input.classList.add('has-err'); else input.classList.remove('has-err');
+}
+function clearErrs(prefix){
+  var ids = prefix === 'r' ? ['e-r-phone','e-r-name','e-r-pwd'] : ['e-l-phone','e-l-pwd'];
+  for(var i=0;i<ids.length;i++) $(ids[i]).textContent = '';
+  var inputs = $('form-' + (prefix === 'r' ? 'register' : 'login')).querySelectorAll('.ctrl');
+  for(var j=0;j<inputs.length;j++) inputs[j].classList.remove('has-err');
+}
+function isPhone(v){ return /^1[3-9]\d{9}$/.test(v); }
+function authOf(u, robotId){
+  if(!u) return 'none';
+  /* 兼容旧数据：注册来源数字人默认视为已授权（注册成功即获权，无需审批） */
+  if(!u.auth){ u.auth = {}; if(u.robot) u.auth[u.robot] = 'approved'; }
+  return u.auth[robotId] || 'none';
+}
+function buildLink(robot){
+  return 'https://dh-platform.example.com/register?code=' + robot.code + '&robot=' + robot.id;
+}
+
+/* SECTION: admin list wiring (REQ-001) */
+function wireGrid(){
+  var cards = document.querySelectorAll('#robot-grid .card');
+  for(var i=0;i<cards.length;i++){
+    (function(card){
+      var robot = findRobot(card.getAttribute('data-robot-id'));
+      if(!robot) return;
+      var designBtn = card.querySelector('[data-act="design"]');
+      var linkBtn = card.querySelector('[data-act="link"]');
+      if(designBtn) designBtn.addEventListener('click', function(){ toast('「' + robot.name + '」设计页为既有功能，本原型聚焦注册链路'); });
+      if(linkBtn) linkBtn.addEventListener('click', function(){ openLinkModal(robot); });
+      var countTag = card.querySelector('[data-count]');
+      if(countTag){
+        countTag.style.cursor = 'pointer';
+        countTag.title = '查看该服务的注册用户';
+        countTag.addEventListener('click', function(){ openAccounts(robot.id); });
+      }
+    })(cards[i]);
+  }
+  updateCounts();
+}
+function updateCounts(){
+  var cards = document.querySelectorAll('#robot-grid .card');
+  for(var i=0;i<cards.length;i++){
+    var id = cards[i].getAttribute('data-robot-id');
+    var n = 0;
+    for(var k in state.users){ if(state.users[k].robot === id) n++; }
+    var tag = cards[i].querySelector('[data-count]');
+    if(tag) tag.textContent = '注册用户 ' + n + ' 人';
+  }
+  $('list-meta').textContent = '共 ' + ROBOTS.length + ' 项，第 1 / 1 页';
+}
+
+/* SECTION: link modal (REQ-002) */
+function openLinkModal(robot){
+  if(!requireAdmin()) return;
+  state.linkRobot = robot;
+  $('link-robot-name').textContent = robot.name;
+  $('link-code').textContent = robot.code;
+  $('link-expire').textContent = '7 天（至 ' + expireDate() + '）';
+  $('link-input').value = buildLink(robot);
+  drawQr(robot.code);
+  $('mask-link').classList.add('is-open');
+}
+function expireDate(){
+  var d = new Date(Date.now() + 7*86400000), p = function(n){ return (n<10?'0':'') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+}
+function closeLinkModal(){ $('mask-link').classList.remove('is-open'); }
+
+function drawQr(seedText){
+  var cv = $('qr-canvas');
+  if(!cv || !cv.getContext) return;
+  var ctx = cv.getContext('2d');
+  var n = 21, cell = Math.floor(cv.width / n);
+  var h = 0;
+  for(var i=0;i<seedText.length;i++) h = (h * 31 + seedText.charCodeAt(i)) >>> 0;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = '#20242a';
+  function finder(x,y){
+    ctx.fillRect(x*cell,y*cell,7*cell,7*cell);
+    ctx.fillStyle='#fff';
+    ctx.fillRect((x+1)*cell,(y+1)*cell,5*cell,5*cell);
+    ctx.fillStyle='#20242a';
+    ctx.fillRect((x+2)*cell,(y+2)*cell,3*cell,3*cell);
+  }
+  for(var yy=0;yy<n;yy++){
+    for(var xx=0;xx<n;xx++){
+      var inFinder = (xx<8 && yy<8) || (xx>n-9 && yy<8) || (xx<8 && yy>n-9);
+      if(inFinder) continue;
+      h = (h * 1103515245 + 12345) >>> 0;
+      if(((h >> 16) & 1) === 1) ctx.fillRect(xx*cell, yy*cell, cell, cell);
+    }
+  }
+  finder(0,0); finder(n-7,0); finder(0,n-7);
+}
+
+function copyLink(){
+  var val = $('link-input').value;
+  function fallback(){
+    var ta = document.createElement('textarea');
+    ta.value = val;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch(e){ ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  var done = function(){ toast('注册链接已复制', 'ok'); };
+  var fail = function(){ if(fallback()) done(); else toast('已选中链接，可用 Ctrl+C 复制'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(val).then(done, fail);
+  } else { fail(); }
+}
+
+/* SECTION: auth page (REQ-003 / REQ-004) */
+function openAuth(robot){
+  state.robot = robot;
+  $('auth-avatar').textContent = firstChar(robot.name);
+  $('auth-robot-name').textContent = robot.name;
+  $('auth-robot-sub').textContent = '专属注册链接 · ' + robot.code;
+  $('alert-exist').classList.remove('is-open');
+  $('alert-ok').classList.remove('is-open');
+  clearErrs('r');
+  clearErrs('l');
+  switchTab('register');
+  applyRoleUI();
+  showView('view-auth');
+  try { location.hash = 'reg=' + robot.id; } catch(e){}
+}
+function switchTab(which){
+  var reg = which === 'register';
+  $('tab-register').classList.toggle('is-active', reg);
+  $('tab-login').classList.toggle('is-active', !reg);
+  $('form-register').style.display = reg ? 'block' : 'none';
+  $('form-login').style.display = reg ? 'none' : 'block';
+  if(!reg){
+    var phone = $('r-phone').value.trim();
+    if(isPhone(phone) && !$('l-phone').value) $('l-phone').value = phone;
+    $('alert-exist').classList.remove('is-open');
+  }
+}
+
+function submitRegister(ev){
+  ev.preventDefault();
+  clearErrs('r');
+  $('alert-exist').classList.remove('is-open');
+  $('alert-ok').classList.remove('is-open');
+  var phone = $('r-phone').value.trim();
+  var name = $('r-name').value.trim();
+  var pwd = $('r-pwd').value;
+  var bad = false;
+  if(!phone){ setErr('r-phone','e-r-phone','请输入手机号'); bad = true; }
+  else if(!isPhone(phone)){ setErr('r-phone','e-r-phone','手机号格式不正确，需为 11 位有效号码'); bad = true; }
+  if(!name){ setErr('r-name','e-r-name','请输入用户名'); bad = true; }
+  else if(name.length < 2){ setErr('r-name','e-r-name','用户名至少 2 个字符'); bad = true; }
+  if(!pwd){ setErr('r-pwd','e-r-pwd','请输入密码'); bad = true; }
+  else if(pwd.length < 6){ setErr('r-pwd','e-r-pwd','密码至少 6 位'); bad = true; }
+  if(bad) return;
+  if(!$('r-agree').checked){ toast('请先阅读并同意用户协议'); return; }
+
+  if(state.users[phone]){
+    /* REQ-004：手机号已注册 → 提示并切换到登录表单 */
+    $('alert-exist').classList.add('is-open');
+    $('btn-goto-login').setAttribute('data-phone', phone);
+    toast('该手机号已注册', 'err');
+    return;
+  }
+  /* 规则：通过注册链接注册成功 → 直接获得该数字人权限（approved），无需后台审批。
+     只有在对话界面「切换数字人」中提交的申请才置为 pending，进入后台审批队列。*/
+  state.users[phone] = { name: name, pwd: pwd, robot: state.robot.id, regAt: now(), auth: {} };
+  state.users[phone].auth[state.robot.id] = 'approved';
+  saveUsers(state.users);
+  $('alert-ok-text').textContent = '注册成功！已自动获得「' + state.robot.name + '」的使用权限，无需后台审批，登录后即可直接对话。';
+  $('alert-ok').classList.add('is-open');
+  toast('注册成功', 'ok');
+  switchTab('login');
+  $('l-phone').value = phone;
+  $('l-pwd').value = '';
+  $('r-pwd').value = '';
+  updateCounts();
+}
+
+function submitLogin(ev){
+  ev.preventDefault();
+  clearErrs('l');
+  var phone = $('l-phone').value.trim();
+  var pwd = $('l-pwd').value;
+  var bad = false;
+  if(!phone){ setErr('l-phone','e-l-phone','请输入手机号'); bad = true; }
+  else if(!isPhone(phone)){ setErr('l-phone','e-l-phone','手机号格式不正确'); bad = true; }
+  if(!pwd){ setErr('l-pwd','e-l-pwd','请输入密码'); bad = true; }
+  if(bad) return;
+
+  var u = state.users[phone];
+  if(!u){
+    setErr('l-phone','e-l-phone','该手机号尚未注册，请先注册');
+    toast('手机号未注册', 'err');
+    return;
+  }
+  if(u.pwd !== pwd){
+    setErr('l-pwd','e-l-pwd','密码错误，请重新输入');
+    toast('密码错误', 'err');
+    return;
+  }
+  state.user = { phone: phone, name: u.name };
+  /* 通过注册链接登录 → 普通用户角色，仅可访问聊天对话窗口 */
+  state.role = 'user';
+  state.admin = null;
+  /* REQ-005：登录成功 → 进入数字人对话窗口 */
+  enterChat(findRobot(u.robot) || state.robot);
+}
+
+/* SECTION: chat page (REQ-005) */
+var convs = [{ id:'c1', title:'当前会话', active:true }];
+
+function enterChat(robot){
+  state.robot = robot;
+  state.replyIdx = 0;
+  $('chat-avatar').textContent = firstChar(robot.name);
+  $('chat-title').textContent = robot.name + ' · 对话窗口';
+  applyRoleUI();
+  $('msg-list').textContent = '';
+  renderConvs();
+  renderChips();
+  addMsg('bot', '你好，我是' + robot.name + '。' + robot.desc + '\n你可以直接把任务描述给我，或点击下方快捷提问开始。');
+  showView('view-chat');
+  refreshAuthBanner();
+  try { location.hash = 'chat=' + robot.id; } catch(e){}
+  $('chat-input').focus();
+}
+
+function addMsg(who, text){
+  var wrap = document.createElement('div');
+  wrap.className = 'msg' + (who === 'me' ? ' me' : '');
+  var av = document.createElement('div');
+  av.className = 'avatar';
+  av.textContent = who === 'me' ? firstChar(meName()) : firstChar(state.robot.name);
+  var col = document.createElement('div');
+  col.style.minWidth = '0';
+  var meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = (who === 'me' ? meName() : state.robot.name) + ' · ' + timeHm();
+  var bub = document.createElement('div');
+  bub.className = 'bubble';
+  bub.textContent = text;
+  col.appendChild(meta);
+  col.appendChild(bub);
+  wrap.appendChild(av);
+  wrap.appendChild(col);
+  $('msg-list').appendChild(wrap);
+  scrollBottom();
+  return wrap;
+}
+function addTyping(){
+  var node = addMsg('bot', '');
+  node.classList.add('typing');
+  var b = node.querySelector('.bubble');
+  var d = document.createElement('span');
+  d.className = 'dots';
+  for(var i=0;i<3;i++) d.appendChild(document.createElement('span'));
+  b.appendChild(d);
+  return node;
+}
+function scrollBottom(){
+  var s = $('msg-scroll');
+  s.scrollTop = s.scrollHeight;
+}
+function send(){
+  if(!canUse(state.robot.id)){
+    refreshAuthBanner();
+    toast('该数字人服务尚未授权，请在「切换数字人」中提交申请并等待后台审批', 'err');
+    return;
+  }
+  var input = $('chat-input');
+  var text = input.value.trim();
+  if(!text){ toast('请输入内容'); return; }
+  addMsg('me', text);
+  input.value = '';
+  var typing = addTyping();
+  var pool = REPLIES[state.robot.id] || ['已收到，我这边继续处理。'];
+  var reply = pool[state.replyIdx % pool.length];
+  state.replyIdx++;
+  setTimeout(function(){
+    if(typing.parentNode) typing.parentNode.removeChild(typing);
+    addMsg('bot', reply);
+    var c = convs[0];
+    if(c.title === '当前会话' || c.title === '新对话') c.title = text.slice(0, 14);
+    renderConvs();
+  }, 700);
+}
+function renderConvs(){
+  var box = $('conv-list');
+  box.textContent = '';
+  for(var i=0;i<convs.length;i++){
+    var c = convs[i];
+    var b = document.createElement('button');
+    b.className = 'conv' + (c.active ? ' is-active' : '');
+    b.textContent = c.title;
+    box.appendChild(b);
+  }
+}
+function renderChips(){
+  var box = $('chips');
+  box.textContent = '';
+  for(var i=0;i<CHIPS.length;i++){
+    var b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = CHIPS[i];
+    b.addEventListener('click', (function(t){ return function(){ $('chat-input').value = t; $('chat-input').focus(); }; })(CHIPS[i]));
+    box.appendChild(b);
+  }
+}
+
+/* SECTION: switch robot + authorization (REQ-006 / REQ-007) */
+function openSwitchModal(){
+  var box = $('switch-list');
+  box.textContent = '';
+  var u = state.user ? state.users[state.user.phone] : null;
+  var stOf = function(rid){ return state.role === 'admin' ? 'approved' : authOf(u, rid); };
+  var ordered = ROBOTS.slice().sort(function(a,b){
+    return (stOf(a.id) === 'approved' ? 0 : 1) - (stOf(b.id) === 'approved' ? 0 : 1);
+  });
+  for(var i=0;i<ordered.length;i++){
+    (function(r){
+      var st = stOf(r.id);
+      var item = document.createElement('div');
+      item.className = 'switch-item' + (r.id === state.robot.id ? ' is-current' : '') + (st === 'approved' ? '' : ' is-locked');
+      var av = document.createElement('div');
+      av.className = 'avatar';
+      av.textContent = firstChar(r.name);
+      var txt = document.createElement('div');
+      txt.style.minWidth = '0';
+      txt.style.flex = '1';
+      var nm = document.createElement('div');
+      nm.className = 's-name';
+      nm.textContent = r.name;
+      var ds = document.createElement('div');
+      ds.className = 's-desc';
+      ds.textContent = r.desc;
+      txt.appendChild(nm);
+      txt.appendChild(ds);
+      item.appendChild(av);
+      item.appendChild(txt);
+      if(r.id === state.robot.id){
+        var cur = document.createElement('span');
+        cur.className = 's-cur';
+        cur.textContent = '当前';
+        item.appendChild(cur);
+      }
+      if(st === 'approved'){
+        var badge = document.createElement('span');
+        badge.className = 's-badge ok';
+        badge.textContent = (u && r.id === u.robot) ? '已授权 · 注册默认' : '已授权';
+        item.appendChild(badge);
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', function(){
+          closeSwitchModal();
+          if(r.id !== state.robot.id){
+            enterChat(r);
+            toast('已切换到「' + r.name + '」', 'ok');
+          }
+        });
+      } else if(st === 'pending'){
+        var wait = document.createElement('span');
+        wait.className = 's-badge wait';
+        wait.textContent = '申请中';
+        item.appendChild(wait);
+      } else {
+        var apply = document.createElement('button');
+        apply.className = 'btn btn-link';
+        apply.textContent = '申请';
+        apply.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          if(!u){ toast('请先登录'); return; }
+          u.auth[r.id] = 'pending';
+          saveUsers(state.users);
+          toast('已提交「' + r.name + '」授权申请（对话界面申请），等待后台审批', 'ok');
+          openSwitchModal();
+        });
+        item.appendChild(apply);
+      }
+      box.appendChild(item);
+    })(ordered[i]);
+  }
+  $('mask-switch').classList.add('is-open');
+}
+function closeSwitchModal(){ $('mask-switch').classList.remove('is-open'); }
+
+/* SECTION: auth banner + backend approval */
+function refreshAuthBanner(){
+  var banner = $('chat-auth-banner');
+  /* 管理员全功能放行，不显示授权横幅 */
+  if(state.role === 'admin'){
+    banner.classList.remove('is-open');
+    $('chat-input').disabled = false;
+    $('btn-send').disabled = false;
+    return;
+  }
+  var u = state.user ? state.users[state.user.phone] : null;
+  var st = authOf(u, state.robot.id);
+  if(st === 'approved'){
+    banner.classList.remove('is-open');
+    $('chat-input').disabled = false;
+    $('btn-send').disabled = false;
+  } else {
+    $('chat-auth-text').textContent = st === 'pending'
+      ? '「' + state.robot.name + '」服务授权申请审核中，后台授权通过后即可正常对话。'
+      : '当前账户尚未获得「' + state.robot.name + '」服务授权，请先在切换数字人中提交申请。';
+    banner.classList.add('is-open');
+    $('chat-input').disabled = true;
+    $('btn-send').disabled = true;
+  }
+}
+function openApproveModal(){
+  if(!requireAdmin()) return;
+  var box = $('approve-list');
+  box.textContent = '';
+  var count = 0;
+  for(var phone in state.users){
+    (function(ph){
+      var u = state.users[ph];
+      if(!u.auth) return;
+      for(var rid in u.auth){
+        if(u.auth[rid] !== 'pending') continue;
+        var r = findRobot(rid);
+        if(!r) continue;
+        count++;
+        var row = document.createElement('div');
+        row.className = 'approve-row';
+        var info = document.createElement('div');
+        info.className = 'a-info';
+        var nm = document.createElement('div');
+        nm.className = 'a-name';
+        nm.textContent = u.name + '（' + ph + '）';
+        var sub = document.createElement('div');
+        sub.className = 'a-sub';
+        sub.textContent = '申请服务：' + r.name + ' · 来源：对话界面申请 · 账号注册于 ' + (u.regAt || '—');
+        info.appendChild(nm);
+        info.appendChild(sub);
+        var ok = document.createElement('button');
+        ok.className = 'btn btn-primary';
+        ok.style.height = '30px';
+        ok.textContent = '通过授权';
+        ok.addEventListener('click', function(){
+          u.auth[rid] = 'approved';
+          saveUsers(state.users);
+          toast('已通过 ' + u.name + ' 的「' + r.name + '」授权', 'ok');
+          openApproveModal();
+          refreshAuthBanner();
+        });
+        row.appendChild(info);
+        row.appendChild(ok);
+        box.appendChild(row);
+      }
+    })(phone);
+  }
+  if(count === 0){
+    var empty = document.createElement('div');
+    empty.className = 'approve-empty';
+    empty.textContent = '暂无待审批的授权申请（注册链接产生的权限默认生效，无需审批）';
+    box.appendChild(empty);
+  }
+  $('btn-approve-back-chat').style.display = state.role ? 'inline-flex' : 'none';
+  $('mask-approve').classList.add('is-open');
+}
+function closeApproveModal(){ $('mask-approve').classList.remove('is-open'); }
+
+/* SECTION: account management (REQ-008) */
+function switchAdminTab(which){
+  var tabs = document.querySelectorAll('#admin-tabs .tab');
+  for(var i=0;i<tabs.length;i++){
+    tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-tab') === which);
+  }
+  $('pane-design').style.display = which === 'design' ? 'block' : 'none';
+  $('pane-accounts').style.display = which === 'accounts' ? 'block' : 'none';
+  $('admin-title').textContent = which === 'accounts' ? '账户管理' : '数字人设计';
+  if(which === 'accounts') renderAccounts();
+}
+function openAccounts(robotId){
+  if(!requireAdmin()) return;
+  state.accFilterRobot = robotId || null;
+  showView('view-admin');
+  switchAdminTab('accounts');
+  try { location.hash = ''; } catch(e){}
+}
+function authSummary(u){
+  var ok = 0, wait = 0;
+  if(u.auth){ for(var k in u.auth){ if(u.auth[k] === 'approved') ok++; else if(u.auth[k] === 'pending') wait++; } }
+  return { ok: ok, wait: wait };
+}
+function makePill(cls, text){
+  var s = document.createElement('span');
+  s.className = 'pill ' + cls;
+  s.textContent = text;
+  return s;
+}
+function renderAccounts(){
+  var tbody = $('acc-tbody');
+  tbody.textContent = '';
+  var q = $('acc-search').value.trim().toLowerCase();
+  var st = $('acc-state').value;
+  var scopeRobot = state.accFilterRobot ? findRobot(state.accFilterRobot) : null;
+  if(scopeRobot){
+    $('acc-scope-text').textContent = '当前筛选：「' + scopeRobot.name + '」的注册用户';
+    $('acc-scope').classList.add('is-open');
+  } else {
+    $('acc-scope').classList.remove('is-open');
+  }
+  var total = 0, shown = 0;
+  for(var ph in state.users){
+    total++;
+    var u = state.users[ph];
+    if(scopeRobot && u.robot !== scopeRobot.id) continue;
+    if(q && ph.indexOf(q) < 0 && u.name.toLowerCase().indexOf(q) < 0) continue;
+    var sum = authSummary(u);
+    if(st === 'approved' && sum.ok === 0) continue;
+    if(st === 'pending' && sum.wait === 0) continue;
+    shown++;
+    var tr = document.createElement('tr');
+    var c1 = document.createElement('td'); c1.textContent = ph;
+    var c2 = document.createElement('td'); c2.textContent = u.name;
+    var c3 = document.createElement('td');
+    var src = findRobot(u.robot);
+    c3.textContent = src ? src.name : '—';
+    var c4 = document.createElement('td'); c4.textContent = u.regAt || '—';
+    var c5 = document.createElement('td');
+    c5.appendChild(makePill('ok', '已授权 ' + sum.ok));
+    c5.appendChild(document.createTextNode(' '));
+    c5.appendChild(makePill(sum.wait ? 'wait' : 'none', '申请中 ' + sum.wait));
+    var c6 = document.createElement('td');
+    c6.className = 'ops-cell';
+    var bAuth = document.createElement('button'); bAuth.className = 'btn btn-sm btn-link'; bAuth.textContent = '授权详情';
+    var bEdit = document.createElement('button'); bEdit.className = 'btn btn-sm'; bEdit.textContent = '修改';
+    var bPwd = document.createElement('button'); bPwd.className = 'btn btn-sm'; bPwd.textContent = '重置密码';
+    var bDel = document.createElement('button'); bDel.className = 'btn btn-sm'; bDel.textContent = '删除';
+    bDel.style.color = 'var(--red)';
+    (function(phone){
+      bAuth.addEventListener('click', function(){ openAccAuth(phone); });
+      bEdit.addEventListener('click', function(){ openAccEdit(phone); });
+      bPwd.addEventListener('click', function(){ openAccPwd(phone); });
+      bDel.addEventListener('click', function(){ openAccDel(phone); });
+    })(ph);
+    c6.appendChild(bAuth); c6.appendChild(bEdit); c6.appendChild(bPwd); c6.appendChild(bDel);
+    tr.appendChild(c1); tr.appendChild(c2); tr.appendChild(c3); tr.appendChild(c4); tr.appendChild(c5); tr.appendChild(c6);
+    tbody.appendChild(tr);
+  }
+  if(shown === 0){
+    var tr0 = document.createElement('tr');
+    var td0 = document.createElement('td');
+    td0.colSpan = 6;
+    td0.style.textAlign = 'center';
+    td0.style.color = 'var(--ink-4)';
+    td0.style.padding = '26px 14px';
+    td0.textContent = scopeRobot ? '该服务暂无注册用户' : '暂无符合条件的账户';
+    tr0.appendChild(td0);
+    tbody.appendChild(tr0);
+  }
+  $('acc-meta').textContent = '共 ' + total + ' 个账户' + (shown !== total ? '，当前显示 ' + shown + ' 个' : '');
+}
+function setAuth(ph, rid, st){
+  var u = state.users[ph];
+  if(!u) return;
+  if(!u.auth) u.auth = {};
+  if(st === 'none') delete u.auth[rid]; else u.auth[rid] = st;
+  saveUsers(state.users);
+  renderAccounts();
+  updateCounts();
+  if(state.user && state.user.phone === ph) refreshAuthBanner();
+}
+function openAccAuth(ph){
+  state.accTarget = ph;
+  renderAccAuth();
+  $('mask-acc-auth').classList.add('is-open');
+}
+function renderAccAuth(){
+  var ph = state.accTarget;
+  var u = state.users[ph];
+  if(!u){ closeAccAuth(); return; }
+  $('acc-auth-user').textContent = u.name + '（' + ph + '）';
+  var names = [];
+  if(u.auth){ for(var k in u.auth){ if(u.auth[k] === 'approved'){ var rr = findRobot(k); if(rr) names.push(rr.name); } } }
+  $('acc-auth-services').textContent = names.length ? names.join('、') : '暂无已授权服务';
+  var box = $('acc-auth-list');
+  box.textContent = '';
+  var has = false;
+  for(var i=0;i<ROBOTS.length;i++){
+    (function(r){
+      var st = u.auth ? (u.auth[r.id] || 'none') : 'none';
+      if(st === 'none') return;
+      has = true;
+      var row = document.createElement('div');
+      row.className = 'acc-auth-row';
+      var info = document.createElement('div');
+      info.className = 'r-info';
+      var nm = document.createElement('div'); nm.className = 'r-name'; nm.textContent = r.name;
+      var sub = document.createElement('div'); sub.className = 'r-sub'; sub.textContent = '编码 ' + r.code + (r.id === u.robot ? ' · 注册默认授权（无需审批）' : ' · 对话界面申请');
+      info.appendChild(nm); info.appendChild(sub);
+      row.appendChild(info);
+      row.appendChild(makePill(st === 'approved' ? 'ok' : 'wait', st === 'approved' ? '已授权' : '申请中'));
+      var ops = document.createElement('div');
+      ops.className = 'r-ops';
+      if(st === 'pending'){
+        var ok = document.createElement('button'); ok.className = 'btn btn-sm btn-primary'; ok.textContent = '通过授权';
+        ok.addEventListener('click', function(){ setAuth(ph, r.id, 'approved'); toast('已通过「' + r.name + '」授权', 'ok'); renderAccAuth(); });
+        var no = document.createElement('button'); no.className = 'btn btn-sm'; no.textContent = '关闭申请';
+        no.addEventListener('click', function(){ setAuth(ph, r.id, 'none'); toast('已关闭「' + r.name + '」申请'); renderAccAuth(); });
+        ops.appendChild(ok); ops.appendChild(no);
+      } else {
+        var off = document.createElement('button'); off.className = 'btn btn-sm'; off.textContent = '关闭授权';
+        off.style.color = 'var(--red)';
+        off.addEventListener('click', function(){ setAuth(ph, r.id, 'none'); toast('已关闭「' + r.name + '」授权', 'err'); renderAccAuth(); });
+        ops.appendChild(off);
+      }
+      row.appendChild(ops);
+      box.appendChild(row);
+    })(ROBOTS[i]);
+  }
+  if(!has){
+    var empty = document.createElement('div');
+    empty.className = 'approve-empty';
+    empty.textContent = '该账户暂无授权申请';
+    box.appendChild(empty);
+  }
+}
+function closeAccAuth(){ $('mask-acc-auth').classList.remove('is-open'); }
+function openAccEdit(ph){
+  state.accTarget = ph;
+  var u = state.users[ph];
+  $('acc-edit-phone').textContent = ph;
+  $('acc-edit-name').value = u ? u.name : '';
+  $('e-acc-edit-name').textContent = '';
+  $('acc-edit-name').classList.remove('has-err');
+  $('mask-acc-edit').classList.add('is-open');
+}
+function closeAccEdit(){ $('mask-acc-edit').classList.remove('is-open'); }
+function saveAccEdit(){
+  var ph = state.accTarget;
+  var u = state.users[ph];
+  if(!u){ closeAccEdit(); return; }
+  var name = $('acc-edit-name').value.trim();
+  if(name.length < 2){
+    $('e-acc-edit-name').textContent = '用户名至少 2 个字符';
+    $('acc-edit-name').classList.add('has-err');
+    return;
+  }
+  u.name = name;
+  saveUsers(state.users);
+  if(state.user && state.user.phone === ph){
+    state.user.name = name;
+    $('chat-user').textContent = name + '（' + ph + '）';
+  }
+  renderAccounts();
+  closeAccEdit();
+  toast('账户信息已修改', 'ok');
+}
+function openAccPwd(ph){
+  state.accTarget = ph;
+  var u = state.users[ph];
+  $('acc-pwd-user').textContent = (u ? u.name : '') + '（' + ph + '）';
+  $('acc-pwd-new').value = '';
+  $('e-acc-pwd-new').textContent = '';
+  $('acc-pwd-new').classList.remove('has-err');
+  $('mask-acc-pwd').classList.add('is-open');
+}
+function closeAccPwd(){ $('mask-acc-pwd').classList.remove('is-open'); }
+function saveAccPwd(){
+  var ph = state.accTarget;
+  var u = state.users[ph];
+  if(!u){ closeAccPwd(); return; }
+  var pwd = $('acc-pwd-new').value;
+  if(pwd.length < 6){
+    $('e-acc-pwd-new').textContent = '新密码至少 6 位';
+    $('acc-pwd-new').classList.add('has-err');
+    return;
+  }
+  u.pwd = pwd;
+  saveUsers(state.users);
+  closeAccPwd();
+  toast('密码已重置', 'ok');
+}
+function openAccDel(ph){
+  state.accTarget = ph;
+  var u = state.users[ph];
+  $('acc-del-text').textContent = '确认删除账户 ' + (u ? u.name : '') + '（' + ph + '）？删除后其注册信息与全部授权申请将一并移除，该手机号可重新注册。';
+  $('mask-acc-del').classList.add('is-open');
+}
+function closeAccDel(){ $('mask-acc-del').classList.remove('is-open'); }
+function confirmAccDel(){
+  var ph = state.accTarget;
+  if(state.users[ph]){
+    delete state.users[ph];
+    saveUsers(state.users);
+    if(state.user && state.user.phone === ph) state.user = null;
+  }
+  closeAccDel();
+  renderAccounts();
+  updateCounts();
+  toast('账户已删除', 'ok');
+}
+
+/* SECTION: wiring */
+$('link-close').addEventListener('click', closeLinkModal);
+$('mask-link').addEventListener('click', function(e){ if(e.target === this) closeLinkModal(); });
+$('btn-copy').addEventListener('click', copyLink);
+$('btn-copy-2').addEventListener('click', copyLink);
+$('btn-open-register').addEventListener('click', function(){
+  var r = state.linkRobot || ROBOTS[0];
+  closeLinkModal();
+  openAuth(r);
+});
+$('btn-new').addEventListener('click', function(){ toast('新建数字人为既有功能，本原型聚焦注册链路'); });
+$('admin-tabs').addEventListener('click', function(e){
+  var t = e.target;
+  if(!t.classList.contains('tab') || t.classList.contains('is-active')) return;
+  var which = t.getAttribute('data-tab');
+  if(which === 'design' || which === 'accounts') switchAdminTab(which);
+  else toast('该模块不在本原型范围内');
+});
+
+$('tab-register').addEventListener('click', function(){ switchTab('register'); });
+$('tab-login').addEventListener('click', function(){ switchTab('login'); });
+$('btn-goto-login').addEventListener('click', function(){
+  switchTab('login');
+  var p = this.getAttribute('data-phone') || $('r-phone').value.trim();
+  if(p) $('l-phone').value = p;
+  $('l-pwd').focus();
+});
+$('btn-change-phone').addEventListener('click', function(){
+  $('alert-exist').classList.remove('is-open');
+  $('r-phone').value = '';
+  $('r-phone').focus();
+});
+$('btn-back-admin').addEventListener('click', function(){
+  if(state.role === 'admin'){
+    showView('view-admin');
+    try { location.hash = ''; } catch(e){}
+    updateCounts();
+  } else {
+    showView('view-admin-login');
+  }
+});
+$('btn-to-admin').addEventListener('click', function(){
+  showView('view-admin');
+  try { location.hash = ''; } catch(e){}
+  updateCounts();
+  renderAccounts();
+});
+$('btn-logout').addEventListener('click', logout);
+$('btn-admin-logout').addEventListener('click', logout);
+$('btn-admin-chat').addEventListener('click', function(){
+  if(!requireAdmin()) return;
+  enterChat(state.robot || ROBOTS[4]);
+});
+$('btn-adminlogin-to-reg').addEventListener('click', function(){
+  openAuth(ROBOTS[4]);
+});
+$('form-admin-login').addEventListener('submit', submitAdminLogin);
+$('btn-new-conv').addEventListener('click', function(){
+  var id = 'c' + (Date.now() % 100000);
+  for(var i=0;i<convs.length;i++) convs[i].active = false;
+  convs.unshift({ id:id, title:'新对话', active:true });
+  if(convs.length > 5) convs.pop();
+  state.replyIdx = 0;
+  $('msg-list').textContent = '';
+  renderConvs();
+  addMsg('bot', '已开启新会话。' + state.robot.desc);
+});
+$('btn-switch-robot').addEventListener('click', openSwitchModal);
+$('switch-close').addEventListener('click', closeSwitchModal);
+$('mask-switch').addEventListener('click', function(e){ if(e.target === this) closeSwitchModal(); });
+$('btn-approve-open').addEventListener('click', openApproveModal);
+$('approve-close').addEventListener('click', closeApproveModal);
+$('mask-approve').addEventListener('click', function(e){ if(e.target === this) closeApproveModal(); });
+$('btn-auth-refresh').addEventListener('click', function(){
+  refreshAuthBanner();
+  var u = state.user ? state.users[state.user.phone] : null;
+  if(authOf(u, state.robot.id) === 'approved') toast('授权已通过，可以正常对话', 'ok');
+  else toast('授权仍在审核中');
+});
+$('btn-auth-goto-approve').addEventListener('click', openApproveModal);
+$('btn-approve-back-chat').addEventListener('click', function(){
+  closeApproveModal();
+  if(state.role){ refreshAuthBanner(); showView('view-chat'); }
+});
+$('acc-search').addEventListener('input', renderAccounts);
+$('acc-state').addEventListener('change', renderAccounts);
+$('btn-acc-scope-clear').addEventListener('click', function(){ state.accFilterRobot = null; renderAccounts(); });
+$('btn-acc-approve').addEventListener('click', openApproveModal);
+$('acc-auth-close').addEventListener('click', closeAccAuth);
+$('mask-acc-auth').addEventListener('click', function(e){ if(e.target === this) closeAccAuth(); });
+$('acc-edit-close').addEventListener('click', closeAccEdit);
+$('acc-edit-cancel').addEventListener('click', closeAccEdit);
+$('mask-acc-edit').addEventListener('click', function(e){ if(e.target === this) closeAccEdit(); });
+$('acc-edit-save').addEventListener('click', saveAccEdit);
+$('acc-pwd-close').addEventListener('click', closeAccPwd);
+$('acc-pwd-cancel').addEventListener('click', closeAccPwd);
+$('mask-acc-pwd').addEventListener('click', function(e){ if(e.target === this) closeAccPwd(); });
+$('acc-pwd-save').addEventListener('click', saveAccPwd);
+$('acc-del-close').addEventListener('click', closeAccDel);
+$('acc-del-cancel').addEventListener('click', closeAccDel);
+$('mask-acc-del').addEventListener('click', function(e){ if(e.target === this) closeAccDel(); });
+$('acc-del-confirm').addEventListener('click', confirmAccDel);
+togglePwd('eye-acc-pwd','acc-pwd-new');
+$('btn-send').addEventListener('click', send);
+$('chat-input').addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+function togglePwd(btnId, inputId){
+  var btn = $(btnId), input = $(inputId);
+  btn.addEventListener('click', function(){
+    if(input.type === 'password'){ input.type = 'text'; btn.textContent = '隐藏'; }
+    else { input.type = 'password'; btn.textContent = '显示'; }
+  });
+}
+togglePwd('eye-r','r-pwd');
+togglePwd('eye-l','l-pwd');
+togglePwd('eye-a','a-pwd');
+$('form-register').addEventListener('submit', submitRegister);
+$('form-login').addEventListener('submit', submitLogin);
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){ closeLinkModal(); closeSwitchModal(); closeApproveModal(); closeAccAuth(); closeAccEdit(); closeAccPwd(); closeAccDel(); }
+});
+
+/* SECTION: boot */
+(function boot(){
+  saveUsers(state.users); /* 持久化历史数据迁移结果（注册来源权限纠正为已授权） */
+  wireGrid();
+  applyRoleUI();
+  var h = (location.hash || '').replace('#','');
+  if(h.indexOf('reg=') === 0){
+    /* 从专属注册链接进入 → 走普通用户注册/登录路径，不经过管理员登录页 */
+    var r = findRobot(h.slice(4));
+    if(r){ openAuth(r); return; }
+  } else if(h.indexOf('chat=') === 0){
+    toast('会话已失效，请重新登录');
+  }
+  /* 默认落地页：管理员专属登录页 */
+  showView('view-admin-login');
+})();
+</script>
+</body>
+</html>

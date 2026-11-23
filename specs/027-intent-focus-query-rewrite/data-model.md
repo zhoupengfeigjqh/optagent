@@ -98,7 +98,7 @@ next_action_hints_count: 3
 | `text` | `string` | ≤100 字符（码点）；归一化后的纯文本；空串 = 未改写 |
 | `truncated` | `boolean` | 是否因超 100 字被截断 |
 | `source` | `'model' \| 'fallback_original'` | 来源；回退时 `text` 为空串 |
-| `historyTurns` | `number` | 实际参与的历史轮次数（0~3） |
+| `historyTurns` | `number` | 实际参与的历史轮次数（0~2） |
 | `ms` | `number \| null` | 改写耗时（含判定结束到改写完成） |
 | `reason` | `string \| null` | `llm_failed` / `empty_output` / `budget_exhausted` / `no_history` |
 
@@ -121,7 +121,7 @@ next_action_hints_count: 3
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `turns` | `{ user: string; assistant: string }[]` | 最近 3 个完整问答轮，时间正序，0~3 组 |
+| `turns` | `{ user: string; assistant: string }[]` | 最近 2 个完整问答轮，时间正序，0~2 组 |
 | `current` | `string` | 本轮输入（术语替换确认后） |
 | `model` | `ModelSelection \| undefined` | 本轮生效模型（用于取 provider） |
 
@@ -129,7 +129,7 @@ next_action_hints_count: 3
 1. 只读 `history.jsonl`（该用户 / 数字人 / 线程）；
 2. 过滤 `status === 'failed'`、`role === 'user'` 但 `content.trim() === ''`、附件在 content 中的路径（只取正文，不追加附件段）；
 3. 从尾部向前配对 user + assistant（assistant 无对应 user 时丢弃）；
-4. 取最多 3 组后反转成正序；
+4. 取最多 2 组后反转成正序；
 5. MUST NOT 读 `tool-events.jsonl` / 摘要 / 记忆。
 
 ---
@@ -235,7 +235,7 @@ next_action_hints_count: 3
 |---|---|
 | 200 字符截断 | `domain/intent-focus/state.ts#prepareState`（复用，不复制） |
 | 100 字符截断与归一化 | `domain/intent-focus/rewrite-prompt.ts#normalizeRewrite` |
-| 最近 3 轮取材 | `domain/intent-focus/rewrite-prompt.ts#pickRecentTurns` |
+| 最近 2 轮取材 | `domain/intent-focus/rewrite-prompt.ts#pickRecentTurns` |
 | 阈值与超时缺省 | `src/config.ts`（`INTENT_FOCUS_REWRITE_*`） |
 | 开关读取 | `domain/soul.ts`（`isInputRewriteEnabled` / `isTermNormalizeEnabled`） |
 | 物化写键条件 | `admin-backend/.../soul-design.ts#renderSoulMd` |

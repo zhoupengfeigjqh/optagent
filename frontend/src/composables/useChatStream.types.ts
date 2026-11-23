@@ -144,7 +144,6 @@ export interface ChatStreamStore {
   lastRetryableTurn: Readonly<Ref<PendingUserMessage | null>>
   /** 本轮本地计时起点（毫秒；仅用于兜底展示） */
   startedAt: Readonly<Ref<number | null>>
-  canSend: ComputedRef<boolean>
   /** 本轮是否处于思考模式且已产生思考内容（决定是否渲染思考块） */
   hasThinking: ComputedRef<boolean>
   /**
@@ -179,8 +178,6 @@ export interface ChatStreamStore {
     /** 2026-11-07：显式技能（`/技能名`）——服务端只插入该技能并自动跳过聚焦 */
     skill?: string
   }): Promise<void>
-  /** 用 `lastRetryableTurn` 重发上一轮（中断气泡「重新生成」/ 失败块「重试本轮」，复用 `send` 全链路） */
-  regenerate(): Promise<void>
   /** 提交消息反馈：乐观更新 + 失败回滚；同值重复提交 = 取消（V-08） */
   submitFeedback(messageId: string, value: FeedbackValue): Promise<void>
   stop(): Promise<void>

@@ -40,7 +40,6 @@ function makeMention(overrides: Partial<FileMentionStore> = {}): FileMentionStor
     remove: vi.fn(),
     reset: vi.fn(),
     buildAttachments: vi.fn(() => []),
-    missingReferences: vi.fn(() => []),
     ...overrides,
   }
 }
