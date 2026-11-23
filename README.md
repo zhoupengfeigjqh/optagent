@@ -267,11 +267,11 @@ const skipFocus =
 | ocr | `ocr_image` 等 | 同步 | 回源下载签名直链 → 识别 → 结构化输出 |
 | jev | `noul` / `choice` / `score` | 同步 | state 可来自 LLM 文本或引用文件；有界指数退避 |
 | bom | `bom_validate` / `bom_merge` | 同步 | 递归展开多级 BOM，产出 xlsx + HTML 报告并**回写平台**，自身不写磁盘 |
-| fresh | `fresh_order_parse` | 同步 | 订单图片 → 读图路由（**表格走 OCR、手写走 LLM**，未配 Key 自动回退 OCR）→ 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；纯只读、不产文件 |
+| fresh | `fresh_order_parse` | 同步 | 订单图片 → 读图路由（**表格走 OCR、手写走 LLM**，未配 Key 自动回退 OCR）→ 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；产出**三表 xlsx 并回写平台**（顶层 `filePath`），自身不写磁盘、**不产 HTML 报告** |
 
 四者的共同点：**不共享用户磁盘**，只接受 http/https 直链。
 差异：ocr / jev / bom 不跟随重定向且限下载体积；`fresh` 有 `HTTP_TIMEOUT_SECONDS`（默认 30s）超时，
-但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service-v3/README.md` §4）。
+但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service-v4/README.md` §4）。
 
 ### 4.6 外部集成
 

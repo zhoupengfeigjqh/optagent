@@ -102,26 +102,28 @@ services:
 
   # 生鲜订货解析 MCP 服务：FastMCP（streamable-http），单一工具 `fresh_order_parse`
   # 输入四个 http/https 直链：订单图片 + SKU清单 / 映射表 / 噪声词表 三个 xlsx；
-  # 输出三表解析结果 JSON（高度匹配 / 候选审核 / 异常记录）+ `reader`，**不产文件、不回写平台**。
-  # 2026-11-18：改用 `fresh-service-v3`（读图路由：表格走 OCR、手写走 LLM；新版三张默认表）。
-  # 该版的产出回写（HTML 报告 + 三表 xlsx）**已屏蔽、代码保留**：签名不声明 `resultUrl`
-  # ⇒ 平台不注入、服务不发 POST ⇒ 服务**只返回三表 JSON、不产出任何文件**；可读报告仍由
-  # 数字人按技能 `fresh-order-parse` 第七节写 HTML 到临时空间（模板
-  # skills/fresh-order-parse/references/report-template.html）。恢复步骤见该目录 README §4.1。
+  # 输出三表解析结果 JSON（高度匹配 / 候选审核 / 异常记录）+ `reader`；
+  # 2026-11-23：改用 `fresh-service-v4`（读图路由：表格走 OCR、手写走 LLM；版面层防串列；
+  # 新版三张默认表）。该版签名声明了 `resultUrl` ⇒ 平台自动注入，服务把**三表 xlsx**
+  # 回写到 `临时空间/后台产出/`，返回顶层 `filePath` / `filePathName`
+  # ⇒ 聊天区多一条下载入口。**不再产出 HTML 报告**（报告若需要由数字人按技能写）。
   # 镜像内装 paddleocr + paddlepaddle，并把 PP-OCRv6 small 权重烤进构建期（容器运行时不联网下载）。
   fresh:
-    build: ./fresh-service-v3
+    build: ./fresh-service-v4
     container_name: optagent-fresh
     # 向宿主机发布 8104 → 容器 8000：给**宿主机上直跑的 backend** 连 MCP 用
     # （容器形态走 `http://fresh:8000/mcp`）。8100/8101/8102/8103 已分别被 ocr/jev/bom/laya 占用。
     ports:
       - "8104:8000"
-    # 本机私产放 .env.local（gitignore，缺失不报错）：
-    #   匹配阈值（T_HIGH/T_LOW/TOP_N）、数据表缓存、HTTP 超时——全部有代码缺省值；
-    #   手写通道的 LLM Key（LLM_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY）
-    #   ——缺失时手写单自动按 OCR 处理（表格单不需要 Key）。
+    # 配置来源（都可缺省，全部有代码缺省值）：
+    #   .env       —— 默认值（匹配阈值 T_HIGH/T_LOW/TOP_N、数据表缓存、HTTP 超时、LLM 模型名）；
+    #   .env.local —— 本机私产（gitignore，优先于 .env）：手写通道的 LLM Key
+    #                 （LLM_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY）。
+    #   缺 Key 时手写单自动按 OCR 处理（表格单不需要 Key）。
     env_file:
-      - path: ./fresh-service-v3/.env.local
+      - path: ./fresh-service-v4/.env
+        required: false
+      - path: ./fresh-service-v4/.env.local
         required: false
     restart: unless-stopped
     logging: *default-logging

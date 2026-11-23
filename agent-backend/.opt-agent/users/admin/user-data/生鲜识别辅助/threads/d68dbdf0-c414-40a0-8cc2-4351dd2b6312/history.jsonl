@@ -1,2 +1,0 @@
-{"role":"user","content":"hi","id":"m_mwokf8c4_otum","ts":"2026-11-20T05:55:36.052Z","agent_name":"生鲜识别辅助"}
-{"id":"m_mwokf728_fg7z","role":"assistant","content":"你好！我是生鲜订单图片解析助手 🥬\n\n我可以帮你：\n1. 解析生鲜订单图片/文件，提取商品名称、数量等信息\n2. 匹配 SKU 表，找到对应的正式品种名称\n3. 标出需要人工审核的异常行，最终输出 Excel 结果表\n\n你可以把订单图片或文件上传给我，也可以告诉我文件路径，我就开始处理～\n\n（注：如果是非生鲜范畴的内容，我可能就帮不上忙啦😄）","ts":"2026-11-20T05:55:36.052Z","status":"completed","usage":{"input_tokens":1707,"output_tokens":106},"duration_ms":1652,"agent_name":"生鲜识别辅助"}

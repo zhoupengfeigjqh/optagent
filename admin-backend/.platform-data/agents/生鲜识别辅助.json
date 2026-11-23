@@ -34,9 +34,7 @@
   "mcp_services": [
     "fresh-parse"
   ],
-  "skills": [
-    "fresh-order-parse"
-  ],
+  "skills": [],
   "ontologies": [],
   "scenario": {
     "scenario": "生鲜订单解析",
@@ -50,5 +48,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-20T05:56:24.822Z"
+  "updated_at": "2026-11-23T12:21:29.734Z"
 }
