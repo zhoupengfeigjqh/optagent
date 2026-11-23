@@ -3,12 +3,15 @@
  * 数字人部署功能区（US2）。
  *
  * 承载：用户与关联数字人（**部署对象就在这些卡片上勾选**）、部署触发与结果、
- * 部署历史、**异常项汇总**（`FR-055`，作为本功能区内分区）。
+ * 部署历史。
  *
- * 勾选状态由**本组件**持有：勾选发生在下分区的用户卡片上，而"校验／部署"按钮在
+ * 勾选状态由**本组件**持有：勾选发生在下分区的用户卡片上，而部署按钮在
  * 上分的部署面板里——跨分区的状态归共同父级（2026-09-16 十一次调整）。
  * 勾选**跨分页保留**（翻页继续勾会累加），因此不做"按当前页收敛"，
  * 只提供显式的「清空勾选」。
+ *
+ * **2026-11-23**：「异常项汇总」页签随功能下架，失效引用仍在用户卡片/数字人卡片上
+ * 以「异常」标记呈现（`detectAnomalies`），不再提供全局汇总分区。
  */
 import { onMounted, ref, watch } from 'vue'
 import { DEPLOY_HISTORY_FETCH_LIMIT, fetchDeployHistory } from '../../api/deploy'
@@ -17,7 +20,6 @@ import type { DeployHistoryItem, Paged, UserListItem } from '../../api/types'
 import UserCardList from './UserCardList.vue'
 import DeployPanel from './DeployPanel.vue'
 import DeployHistoryList from './DeployHistoryList.vue'
-import AnomalySummary from './AnomalySummary.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
 const emit = defineEmits<{
@@ -135,15 +137,6 @@ watch(
       <button
         type="button"
         class="btn"
-        :class="{ 'btn--primary': tab === 'anomalies' }"
-        :aria-current="tab === 'anomalies' ? 'true' : undefined"
-        @click="tab = 'anomalies'"
-      >
-        异常项汇总
-      </button>
-      <button
-        type="button"
-        class="btn"
         :class="{ 'btn--primary': tab === 'history' }"
         :aria-current="tab === 'history' ? 'true' : undefined"
         @click="tab = 'history'"
@@ -173,7 +166,6 @@ watch(
         @changed="() => void loadUsers()"
         @announce="emit('announce', $event)"
       />
-      <AnomalySummary v-else-if="tab === 'anomalies'" @navigate="emit('navigate', $event)" />
       <DeployHistoryList
         v-else
         :items="history"

@@ -10,7 +10,7 @@
  *  - `/admin/agents/demo`       → 数字人 demo 的设计态
  *  - `/admin/agents/demo?tab=mcp` → 设计态内 MCP 页签
  *  - `/admin/ontology/生产调度/原材料采购和库存` → 本体详情（身份两段：场景名在前、本体名在后，与 API 与部署路径同一顺序）
- *  - `/admin/deploy?tab=anomalies` → 部署区内的异常项汇总分区
+ *  - `/admin/deploy?tab=history` → 部署区内的部署历史分区
  *
  * 自建路由属"自研基础设施"，故 MUST 有单元测试（原则三、D5）。
  */

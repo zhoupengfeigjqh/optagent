@@ -20,10 +20,8 @@ const fetchManifest = vi.fn()
 
 vi.mock('../../api/deploy', () => ({
   withdrawDeploy: (...a: unknown[]) => withdrawDeploy(...a),
-  validateDeploy: vi.fn(),
   deploy: vi.fn(),
   fetchReferences: vi.fn(),
-  fetchAnomalies: vi.fn(),
   fetchDeployHistory: vi.fn(),
   // 乐观锁版本的**唯一**来源（2026-09-27「目标运行形态」下架后
   // `/api/admin/platform/settings` 已不存在，取版本会 404 → 保存必失败）
@@ -373,10 +371,7 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
  * 避免为措辞给列表接口加字段（Q5 结论）。
  */
 describe('UserCardList —— 重置密码（2026-11-18）', () => {
-  async function openReset(
-    wrapper: ReturnType<typeof mountList>,
-    index = 0,
-  ): Promise<void> {
+  async function openReset(wrapper: ReturnType<typeof mountList>, index = 0): Promise<void> {
     await wrapper
       .findAll('article.card')
       [index]!.findAll('button')

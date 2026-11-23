@@ -16,8 +16,8 @@ import {
 } from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 28 个码，且与 HTTP 状态映射一一对应（27 → 28 是 024 登录鉴权新增 ADM_INVALID_CREDENTIALS）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(28);
+  it('共 27 个码，且与 HTTP 状态映射一一对应（2026-11-23 部署前校验下架，撤销 1 个）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(27);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }
@@ -55,11 +55,11 @@ describe('错误码总表', () => {
 
 describe('ApiError', () => {
   it('按码自动取状态码，并携带 details', () => {
-    const err = new ApiError(ERROR_CODES.ADM_DEPLOY_VALIDATION_FAILED, '校验未通过', {
+    const err = new ApiError(ERROR_CODES.ADM_DEPLOY_TARGET_NOT_WRITABLE, '写入失败', {
       errors: [{ message: 'x' }],
     });
     expect(err.statusCode).toBe(409);
-    expect(err.code).toBe('ADM_DEPLOY_VALIDATION_FAILED');
+    expect(err.code).toBe('ADM_DEPLOY_TARGET_NOT_WRITABLE');
     expect(err.details).toEqual({ errors: [{ message: 'x' }] });
     expect(err).toBeInstanceOf(Error);
   });

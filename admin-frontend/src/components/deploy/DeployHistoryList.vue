@@ -12,7 +12,8 @@
  *   「明细」操作列置于**最右**（失败数之后，2026-09-16 十四次调整）。
  */
 import { computed, ref, watch } from 'vue'
-import type { DeployHistoryItem, DeployManifestDiffEntry, DeployUserResult } from '../../api/types'
+import type { DeployHistoryItem, DeployUserResult } from '../../api/types'
+import { diffText } from '../../utils/deploy-diff'
 import { toErrorInfo } from '../../utils/error-message'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -102,18 +103,6 @@ function go(target: number): void {
 function agentNames(user: DeployUserResult, action: 'written' | 'removed'): string[] {
   return (user.agents ?? []).filter((agent) => agent.action === action).map((agent) => agent.name)
 }
-
-/** 校验结论：`passed` 为假时**带上错误项数**，只说"未通过"无法定位问题规模 */
-function validationText(item: DeployHistoryItem): string {
-  if (!item.validation) return '校验结果未记录'
-  return item.validation.passed ? '校验通过' : `校验未通过（${item.validation.error_count} 项）`
-}
-
-/** 差异项一行文字：用户 / 数字人：可读说明（缺说明时回退到差异类型） */
-function diffText(diff: DeployManifestDiffEntry): string {
-  const target = diff.target ? ` / ${diff.target}` : ''
-  return `${diff.user_id}${target}：${diff.detail || diff.kind}`
-}
 </script>
 
 <template>
@@ -197,9 +186,8 @@ function diffText(diff: DeployManifestDiffEntry): string {
               <td colspan="6">
                 <div :id="`deploy-history-detail-${item.id}`" class="deploy-history__detail">
                   <p class="deploy-history__detail-summary">
-                    涉及 {{ item.user_count }} 个用户（失败 {{ item.error_count }} 个）；{{
-                      validationText(item)
-                    }}；本次差异 {{ (item.manifest_diff ?? []).length }} 条
+                    涉及 {{ item.user_count }} 个用户（失败 {{ item.error_count }} 个）；本次差异
+                    {{ (item.manifest_diff ?? []).length }} 条
                   </p>
 
                   <p v-if="!item.users || item.users.length === 0" class="card__meta">

@@ -31,9 +31,7 @@ vi.mock('../../api/mcp', () => ({
 
 vi.mock('../../api/deploy', () => ({
   fetchReferences: (...a: unknown[]) => fetchReferences(...a),
-  validateDeploy: vi.fn(),
   deploy: vi.fn(),
-  fetchAnomalies: vi.fn(),
   fetchDeployHistory: vi.fn(),
   fetchManifest: vi.fn(),
   withdrawDeploy: vi.fn(),

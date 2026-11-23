@@ -48,7 +48,7 @@
 ```
 
 - `message` MUST 可读且**可定位**（具体的字段/文件/条目），MUST NOT 只返回"操作失败"。
-- 校验类错误 MAY 附带 `details`，形如 `{ "errors": [ { "user_id", "agent_name", "category", "code", "message" } ] }`，用于**一次性列出全部错误项**（`FR-027`、`SC-020`）。
+- 校验类错误 MAY 附带 `details`，用于让界面定位**具体对象**（如未知用户 `{ "user_ids": ["ghost"] }`、SKILL 冲突清单等）。**（2026-11-23 修订）** 原"部署前校验一次性列出全部错误项"的 `details.errors` 用法随 `FR-027` 废止——部署不再有整批错误清单，逐用户失败原因在响应 `users[].error` 里。
 
 ### 0.4 错误码总表
 
@@ -74,8 +74,7 @@
 | `ADM_ONTOLOGY_EXISTS` | 409 | 本体库中已存在同一「场景 + 本体目录名」的本体，重复导入被拒 | — |
 | `ADM_MCP_SERVICE_NOT_FOUND` | 404 | MCP 服务不存在 | — |
 | `ADM_MCP_SERVICE_EXISTS` | 409 | MCP 服务名称已存在（新建重名，2026-09-27） | `FR-043` |
-| `ADM_DEPLOY_VALIDATION_FAILED` | 409 | 部署前校验不通过（阻止部署，`details.errors` 列出全部错误项） | `FR-027`、`SC-020` |
-| `ADM_DEPLOY_TARGET_NOT_WRITABLE` | 409 | 目标位置不可写 | `FR-027` |
+| `ADM_DEPLOY_TARGET_NOT_WRITABLE` | 409 | 目标位置不可写（写入失败即时回滚，该用户零写入） | `FR-029` |
 | `ADM_USER_ID_TAKEN` | 409 | 用户标识已存在或非法 | `FR-024` |
 | `ADM_USER_NOT_FOUND` | 404 | 用户不存在 | — |
 | `ADM_CONFIG_REVISION_CONFLICT` | 409 | 并发编辑冲突（`revision` 不符） | `FR-008` |
@@ -772,21 +771,11 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：`VALIDATION_FAILED`（长度不符 / 非字符串 / 缺失）、`ADM_USER_NOT_FOUND`
 
-### 6.5 `POST /api/admin/deploy/validate`
-
-**用途**：**只读**预检，让管理员在真正部署前看到全部错误项（`FR-027` 的界面化）。与 `6.6` 的校验逻辑**同一实现**，MUST NOT 形成两套判定。
-
-**请求体**：`{ "user_ids": ["admin"] }`（**省略字段**表示全部用户；**空数组 MUST 被拒绝**（`VALIDATION_FAILED`），`[]` 与"未指定"不得同义；未知用户 → `ADM_USER_NOT_FOUND`，`details.user_ids` 列出具体标识，2026-10-20）
-
-**响应 200**：`{ "passed": boolean, "errors": [ { user_id, agent_name, category, code, message, detail } ] }`
-
-`category` ∈ `config_integrity` \| `reference_validity` \| `name_path_safety` \| `target_writable`（四类；原第五类 `runtime_form` 随运行形态下架，2026-09-27）。
-
-**关键约束**：校验 MUST 一次性列出**全部**错误项（不是发现一个就停）；错误读取不到即按失败处理。
-
 ### 6.6 `POST /api/admin/deploy`
 
-**用途**：**部署生效**（`FR-026`）。流程 MUST 为：**只读预校验（`FR-027`）→ 全部通过才写入**。
+**用途**：**部署生效**（`FR-026`）。流程为：**解析部署对象 → 逐用户整体覆盖写入**。
+
+**（2026-11-23 修订）** 原 §6.5 的只读预检端点已删除：设计态在保存时已完成同口径校验（名称安全与唯一、SOUL 必填、四类引用存在性、场景字段与可上传类型），部署前再判一遍属重复判定，且会让"运行环境内置工具目录不可达"阻断与本次部署无关的整批操作。部署因此**不再有"整批零写入"承诺**：某用户失败即跳过该用户（其自身仍零写入），其余用户继续，接口仍返回 200，失败原因在 `users[].error`。
 
 **请求体**：`{ "user_ids": ["admin"], "revision": 13 }`（**省略字段**表示全部用户；空数组 MUST 被拒绝，未知用户 `details.user_ids` 列出具体标识；2026-10-20）
 
@@ -798,7 +787,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `manifest_diff` | array | **部署前**与运行环境的差异（agent 级，`FR-032`）：`agent_new_in_runtime`（期望有、运行环境缺、且清单从未分发 → 本次新增）、`agent_missing_in_runtime`（期望有、运行环境缺、但清单分发过 → 可能被手工删除/下架）、`agent_unexpected_in_runtime`（曾由平台分发、本次不再需要，将被清掉）。差异是写入前快照，部署后即为一致；失败用户**不产生**差异条目（原因见 `users[].error`） |
 | `history_id` | string | 对应 `§6.7` 的一条记录 |
 
-**错误码**：`ADM_DEPLOY_VALIDATION_FAILED`（`details.errors` 列出全部错误项；**运行环境写入次数 MUST 为 0**，`SC-020`）、`ADM_DEPLOY_TARGET_NOT_WRITABLE`、`ADM_AGENT_INVALID_REF`（单因同码时直接返回该码）、`ADM_CONFIG_REVISION_CONFLICT`
+**错误码**（均为**请求级**拒绝，发生在任何写入之前）：`VALIDATION_FAILED`（`revision` 非整数／`user_ids` 非法或为空数组）、`ADM_USER_NOT_FOUND`（未知用户，`details.user_ids` 列出标识）、`ADM_CONFIG_REVISION_CONFLICT`（版本不符）。
+
+**逐用户失败**：写入阶段的失败**不改变 HTTP 状态码**（仍为 200），以 `users[].ok=false` + `error` 呈现，例如目标不可写（`ADM_DEPLOY_TARGET_NOT_WRITABLE` 文案）、引用的 SKILL 或本体在保存后被删除。
 
 **关键约束**（`SC-004`、`SC-012`、`SC-018`）：
 - 原子性：以**用户为最小单位**，失败即该用户零写入；实现为"临时目录构建 → 校验 → 目录级原子改名"（`research.md` D8）。
@@ -849,7 +840,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 ---
 
-## §7 派生信息（引用关系与异常汇总）
+## §7 派生信息（引用关系）
 
 > 规格关键实体「引用关系」明确：引用关系**不落库**、**不做常驻浏览视图**；其呈现时机**仅限**破坏性操作的确认环节、部署前校验与全局异常项汇总。因此本节的接口 MUST NOT 被任何常驻页面轮询调用。
 
@@ -868,22 +859,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：`VALIDATION_FAILED`
 
-### 7.2 `GET /api/admin/anomalies`
-
-**用途**：**全局异常项汇总视图**（`FR-055`，落在数字人部署功能区内作为分区/页签）：一次列出全平台所有引用了失效对象的数字人及其所属用户，并可跳转到对应编辑位置。**有界返回。**
-
-**查询参数**：`limit`（默认 50，1~200）
-
-**响应 200**
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `items` | array | 每条：`{ user_id, agent_name, category, target_name, detail }`；`category` ∈ `builtin_tool` \| `mcp_service` \| `skill` |
-| `total` | integer | 总数 |
-| `truncated` | boolean | 是否被截断 |
-| `edit_path` | string | 前端可直接使用的编辑跳转路径模板（避免前端硬编码路由，原则七） |
-
-**关键约束**：MUST 一次视图内可见全部受影响数字人，MUST NOT 要求管理员逐个翻查（`SC-016`）。
+**（2026-11-23 修订）** 原 §7.2「全局异常项汇总」端点已删除（见 `FR-055` 废止说明）：失效引用在设计态读取时即被标记（`§5.1` 列表与 `§5.3` 详情的 `abnormal` / `abnormal_reason`），无需第二个聚合出口。
 
 ---
 

@@ -1,20 +1,19 @@
 /**
  * 引用推导（`references.ts`）的**反向查询与可读文案**。
  *
- * 为什么单独成文件：破坏性操作确认清单、全局异常汇总要回答的都是
- * "这个工具 / 服务 / SKILL / 本体被**谁**用了"，以及"异常怎么用一句话说清"。
- * 此前这些函数只被 `deploy-precheck.spec.ts` 顺带带入，函数覆盖率停在 77.77%，
- * 低于本项目"新增/触及模块 ≥80%"的门禁（宪章原则三）。
+ * 破坏性操作确认清单与数字人卡片「异常」标记要回答的都是
+ * "这个工具 / 服务 / SKILL 被**谁**用了"，以及"异常怎么用一句话说清"。
+ *
+ * **2026-11-23**：`agentsReferencingOntology()` 与 `categoryLabel()` 随部署前校验 /
+ * 全局异常项汇总下架后成为孤儿导出，已从源码与本文件一并删除。
  */
 import { describe, expect, it } from 'vitest';
 
 import {
-  agentsReferencingOntology,
   agentsReferencingService,
   agentsReferencingSkill,
   agentsReferencingTool,
   anomalyReason,
-  categoryLabel,
   expandToPairs,
   type AgentRefSource,
   type Anomaly,
@@ -58,11 +57,6 @@ describe('反向查询：谁引用了某个对象', () => {
     expect(agentsReferencingSkill(AGENTS, 'risk-analysis')).toEqual(['排程助手']);
     expect(agentsReferencingSkill(AGENTS, 'doc-parse')).toEqual(['文档助手']);
   });
-
-  it('本体：按「场景/本体」全名匹配（同名本体不串场景）', () => {
-    expect(agentsReferencingOntology(AGENTS, '生产/排程本体')).toEqual(['排程助手']);
-    expect(agentsReferencingOntology(AGENTS, '研发/排程本体')).toEqual([]);
-  });
 });
 
 describe('异常文案：一次说清是哪几类对象失效', () => {
@@ -82,13 +76,6 @@ describe('异常文案：一次说清是哪几类对象失效', () => {
       '内置工具「old_tool」已失效；MCP 服务「erp」已失效；SKILL「gone-skill」已失效；本体「生产/旧本体」已失效',
     );
   });
-
-  it('categoryLabel 与异常文案共用同一份中文名（不出现两套叫法）', () => {
-    expect(categoryLabel('builtin_tool')).toBe('内置工具');
-    expect(categoryLabel('mcp_service')).toBe('MCP 服务');
-    expect(categoryLabel('skill')).toBe('SKILL');
-    expect(categoryLabel('ontology')).toBe('本体');
-  });
 });
 
 describe('影响面展开：数字人 → 「用户 × 数字人」对', () => {
@@ -105,7 +92,7 @@ describe('影响面展开：数字人 → 「用户 × 数字人」对', () => {
     ]);
   });
 
-  it('未被任何用户关联的数字人不产生对（另有全局汇总负责列出）', () => {
+  it('未被任何用户关联的数字人不产生对', () => {
     expect(expandToPairs(['孤兒助手'], users)).toEqual([]);
   });
 

@@ -1,9 +1,11 @@
 /**
  * 组件测试：部署功能区——**勾选部署对象的跨分区联动**（2026-09-16 十一次调整）
  *
- * 勾选发生在下分区的用户卡片上，而「校验预检／部署生效」按钮在上分的部署面板里，
+ * 勾选发生在下分区的用户卡片上，而「部署生效」按钮在上分的部署面板里，
  * 状态由共同父级（`DeployArea`）持有。这条链路一旦断开，界面就会出现
  * "勾了却按不动"或"没勾却能部署"（后者会误动全平台），所以必须锁住。
+ *
+ * **2026-11-23**：预检下架，勾选后直接部署；「异常项汇总」页签删除。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +14,6 @@ import UserCardList from './UserCardList.vue'
 import type { UserListItem } from '../../api/types'
 
 const httpGet = vi.fn()
-const validateDeploy = vi.fn()
 const deployApi = vi.fn()
 const fetchDeployHistoryMock = vi.fn()
 const fetchManifestMock = vi.fn()
@@ -29,9 +30,7 @@ vi.mock('../../api/http', () => ({
 vi.mock('../../api/deploy', () => ({
   // 历史走 api 模块（带 `DEPLOY_HISTORY_FETCH_LIMIT`），不再直接拼 URL
   DEPLOY_HISTORY_FETCH_LIMIT: 100,
-  validateDeploy: (...a: unknown[]) => validateDeploy(...a),
   deploy: (...a: unknown[]) => deployApi(...a),
-  fetchAnomalies: vi.fn(),
   fetchReferences: vi.fn(),
   fetchDeployHistory: (...a: unknown[]) => fetchDeployHistoryMock(...a),
   fetchManifest: (...a: unknown[]) => fetchManifestMock(...a),
@@ -72,7 +71,6 @@ beforeEach(() => {
     }
     return Promise.resolve({})
   })
-  validateDeploy.mockReset()
   deployApi.mockReset()
   fetchDeployHistoryMock.mockReset().mockResolvedValue({ items: [], truncated: false })
   // 部署的乐观锁版本取自清单端点（2026-09-27：不再有 /platform/settings）
@@ -80,22 +78,20 @@ beforeEach(() => {
 })
 
 describe('DeployArea —— 勾选部署对象', () => {
-  it('未勾选：不能校验、不能部署；勾选后按钮可用', async () => {
+  it('未勾选：不能部署；勾选后按钮可用', async () => {
     const wrapper = mountArea()
     await flushPromises()
 
-    expect(byText(wrapper, '校验预检')?.attributes('disabled')).toBeDefined()
     expect(byText(wrapper, '部署生效')?.attributes('disabled')).toBeDefined()
 
     await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true)
     await flushPromises()
 
-    expect(byText(wrapper, '校验预检')?.attributes('disabled')).toBeUndefined()
+    expect(byText(wrapper, '部署生效')?.attributes('disabled')).toBeUndefined()
     expect(wrapper.text()).toContain('已选用户：admin')
   })
 
-  it('预检与部署只带**勾选的那些**用户（多勾多带）', async () => {
-    validateDeploy.mockResolvedValue({ passed: true, errors: [] })
+  it('部署只带**勾选的那些**用户（多勾多带）', async () => {
     deployApi.mockResolvedValue({
       users: [],
       manifest_diff: [],
@@ -109,27 +105,23 @@ describe('DeployArea —— 勾选部署对象', () => {
     await boxes[1]!.setValue(true)
     await flushPromises()
 
-    await byText(wrapper, '校验预检')?.trigger('click')
-    await flushPromises()
-    expect(validateDeploy).toHaveBeenCalledWith(['admin', 'ops'])
-
     await byText(wrapper, '部署生效')?.trigger('click')
     await flushPromises()
     expect(deployApi).toHaveBeenCalledWith(['admin', 'ops'], 7)
   })
 
-  it('取消勾选后：重新回到"不能校验、不能部署"', async () => {
+  it('取消勾选后：重新回到"不能部署"', async () => {
     const wrapper = mountArea()
     await flushPromises()
 
     const box = wrapper.findAll('input[type="checkbox"]')[0]!
     await box.setValue(true)
     await flushPromises()
-    expect(byText(wrapper, '校验预检')?.attributes('disabled')).toBeUndefined()
+    expect(byText(wrapper, '部署生效')?.attributes('disabled')).toBeUndefined()
 
     await box.setValue(false)
     await flushPromises()
-    expect(byText(wrapper, '校验预检')?.attributes('disabled')).toBeDefined()
+    expect(byText(wrapper, '部署生效')?.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('尚未选择用户')
   })
 
@@ -143,12 +135,11 @@ describe('DeployArea —— 勾选部署对象', () => {
     await byText(wrapper, '清空勾选')?.trigger('click')
     await flushPromises()
 
-    expect(byText(wrapper, '校验预检')?.attributes('disabled')).toBeDefined()
+    expect(byText(wrapper, '部署生效')?.attributes('disabled')).toBeDefined()
     expect(wrapper.emitted('announce')?.at(-1)).toEqual(['已清空勾选的部署对象'])
   })
 
   it('部署成功后重新拉取用户列表（卡片要显示"已部署 + 最近一次时间"）', async () => {
-    validateDeploy.mockResolvedValue({ passed: true, errors: [] })
     deployApi.mockResolvedValue({
       users: [{ user_id: 'admin', ok: true, agents: [] }],
       manifest_diff: [],
@@ -159,8 +150,6 @@ describe('DeployArea —— 勾选部署对象', () => {
     const callsBefore = httpGet.mock.calls.filter((c) => c[0] === '/api/admin/users').length
 
     await wrapper.findAll('input[type="checkbox"]')[0]!.setValue(true)
-    await flushPromises()
-    await byText(wrapper, '校验预检')?.trigger('click')
     await flushPromises()
     await byText(wrapper, '部署生效')?.trigger('click')
     await flushPromises()
@@ -174,6 +163,14 @@ describe('DeployArea —— 勾选部署对象', () => {
     await flushPromises()
 
     expect(fetchDeployHistoryMock).toHaveBeenCalledWith(100)
+  })
+
+  it('2026-11-23：只保留「用户与关联」「部署历史」两个分区（异常项汇总已下架）', async () => {
+    const wrapper = mountArea()
+    await flushPromises()
+
+    const tabs = wrapper.findAll('nav[aria-label="数字人部署功能区分区"] button')
+    expect(tabs.map((t) => t.text())).toEqual(['用户与关联', '部署历史'])
   })
 })
 

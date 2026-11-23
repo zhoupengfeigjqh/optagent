@@ -148,7 +148,7 @@ description: "任务清单：数字人管理平台"
 - [x] T061 [US2] 实现 `admin-backend/src/domain/mcp/service-config.ts`（MCP **服务级配置**的读写：按运行形态分别声明的 `endpoints`、`writable`、`permission_scope`、`file_args`；`data-model.md` §3.2）
 - [x] T062 [US2] 实现 `admin-backend/src/infra/opt-agent-writer.ts`（**临时目录构建在同挂载点内 → 目录级原子 `rename`**；`EXDEV` 时降级为逐文件替换 + 回滚；`research.md` D8）
 - [x] T063 [P] [US2] 单元测试 `admin-backend/tests/unit/opt-agent-writer.spec.ts`（原子替换、失败零残留、`EXDEV` 降级路径——**该降级路径 MUST 被测试覆盖**）
-- [x] T064 [US2] 实现 `admin-backend/src/domain/deploy/precheck.ts`（**只读**部署前校验：①配置完整性 ②引用有效性 ③命名与路径安全 ④目标可写；**一次性列出全部错误项**；信息读取不到即按失败处理；`FR-027`、`SC-020`。**2026-09-27 修订**：原第 ⑤ 类"运行形态地址齐备"随运行形态下架删除，其覆盖面由 ② 引用有效性承担）
+- [x] ~~T064~~ [US2] **（2026-11-23 废止，文件已删除）** 原实现 `admin-backend/src/domain/deploy/precheck.ts`（只读部署前校验四类项）。废止理由见 `FR-027`：四类校验项在保存时已被同口径拒绝，部署改为直接写入；测试 `deploy-precheck.spec.ts` 同批删除。
 - [x] T065 [US2] 实现 `admin-backend/src/domain/deploy/materialize.ts`（**整体覆盖**物化：五类配置 + SKILL 从库物化 + `MCP.json` 的 `url` **取该服务的单一连接地址**；`FR-026`。**写入 MUST 以目录级原子替换完成**，MUST NOT 原地逐文件改写正在被读取的文件——这是 `FR-034`「不中断进行中的回答」在平台侧的落地，落地方式见 T062。**2026-09-27 修订**：原"按目标运行形态取值"随运行形态下架删除）
 - [x] T066 [US2] 实现 `admin-backend/src/domain/deploy/manifest.ts` 与 `history.ts`（部署清单、部署历史、与清单的差异报告；`FR-031`、`FR-032`、`FR-033`）
 - [x] T067 [US2] 实现 `admin-backend/src/domain/config-center/user-links.ts`（用户与其关联数字人的读写；`FR-024`、`FR-025`）
@@ -157,23 +157,23 @@ description: "任务清单：数字人管理平台"
 
 > **编号说明**：T129／T130 为 `/speckit.analyze` 修复阶段新增（`FR-034` 的实例池缺口），为避免重排既有 128 条 ID 而接续末号，**逻辑上属本阶段（US2）**，执行顺序按其在阶段内的位置。
 - [x] T068 [US2] 实现 `admin-backend/src/domain/references.ts` 的路由层 `admin-backend/src/routes/references.ts`（`contracts/admin-api.md` §7.1，**仅供确认环节调用**）
-- [x] T069 [US2] 实现 `admin-backend/src/routes/users.ts`（§6.1~§6.4）与 `admin-backend/src/routes/deploy.ts`（§6.5~§6.8）
-- [x] T070 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy.spec.ts`——**MUST 覆盖 `contracts/admin-api.md §6.5`~`§6.8` 与 `§7.1` 的每一个端点**（原则三：每个接口端点 MUST 有集成测试）。用例 MUST 至少包含：①**核心负向**——校验不过 → 运行环境**零写入**且**一次性列出全部错误项**（`SC-020`）；②**引用失效**——数字人引用了已被删除的 MCP 服务 → 部署被拦截并在错误清单中给出该条（`ADM_AGENT_INVALID_REF`，**2026-09-27 修订**：原"运行形态缺地址"随运行形态下架）；③单用户失败零写入、其余用户不受影响（`FR-029`）；④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；⑥**单一地址来源**（**2026-09-27 修订**：取代原"双形态对比 `SC-024`"）——同一数字人部署一次，断言物化的 `MCP.json` 中该服务的 `url` 与该服务在平台登记的**唯一连接地址**一致，且**全程未修改宿主机 hosts 文件、未手工编辑数字人配置文件**；⑦**既有数据零破坏（`SC-007`）**——部署前后清点既有数字人／SKILL／用户数量，断言不减少；⑧`§7.1` 的 `references` 各 `target_type` 返回的受影响清单与数字人配置中的引用**一致**
+- [x] T069 [US2] 实现 `admin-backend/src/routes/users.ts`（§6.1~§6.4）与 `admin-backend/src/routes/deploy.ts`（§6.6~§6.9；**2026-11-23**：原 §6.5 的 `deploy/validate` 端点已删除）
+- [x] T070 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy.spec.ts`——**MUST 覆盖 `contracts/admin-api.md §6.6`~`§6.9` 与 `§7.1` 的每一个端点**（原则三：每个接口端点 MUST 有集成测试）。用例 MUST 至少包含：①**请求层拒绝**——`user_ids` 空数组 400、未知用户 404（**2026-11-23 修订**：原"校验不过 → 整批零写入 + 一次性列全"随 `SC-020` 废止）；②**失效引用在写入阶段暴露**——引用已删 SKILL → 该用户失败（跳过）、其余用户成功；引用已删 MCP → 部署成功但 `MCP.json` 不含该服务（**2026-11-23 新增**）；③单用户失败零写入、其余用户不受影响（`FR-029`）；④幂等（`FR-030`）；⑤**单一地址来源**（**2026-09-27 修订**：取代原"双形态对比 `SC-024`"）——同一数字人部署一次，断言物化的 `MCP.json` 中该服务的 `url` 与该服务在平台登记的**唯一连接地址**一致，且**全程未修改宿主机 hosts 文件、未手工编辑数字人配置文件**；⑥**既有数据零破坏（`SC-007`）**——部署前后清点既有数字人／SKILL／用户数量，断言不减少；⑦`§7.1` 的 `references` 各 `target_type` 返回的受影响清单与数字人配置中的引用**一致**
 - [x] T071 [P] [US2] 集成测试 `admin-backend/tests/integration/deploy-scope.spec.ts`——**作用域守卫**：部署前后三个文件空间（数据准备／共享空间／临时空间）下既有文件与二级目录**数量与内容 100% 不变**，含"场景目录清单收缩"场景（`FR-028`、`SC-012`）。**并补两项**：①**`SC-009`**——在库中修改一个被 N 个数字人引用的 SKILL 后部署一次，断言这 N 个数字人技能目录中的内容 100% 与库中版本一致；②**`SC-019`**——同一用户关联 N 个数字人且场景各不相同时，部署后各数字人按**各自**场景加载，且改其中一个的场景不影响其余数字人的可见范围
 - [x] T072 [P] [US2] 集成测试 `admin-backend/tests/integration/users.spec.ts`（新建/重复/非法标识/关联与解除/删除）
-- [x] T073 [P] [US2] 单元测试 `admin-backend/tests/unit/deploy-precheck.spec.ts`（五类校验项各自的正/异/边界 + "信息读取不到按失败处理"）
+- [x] ~~T073~~ [P] [US2] **（2026-11-23 废止）** 原单元测试 `admin-backend/tests/unit/deploy-precheck.spec.ts` 随被测模块删除；其中"失效引用判定"的覆盖面由 `tests/unit/references.spec.ts`（`detectAnomalies` / `anomalyReason`）与集成用例承接。
 
 ### 前端（平台）
 
 - [x] T074 [P] [US2] 实现 `admin-frontend/src/api/users.ts` 与 `admin-frontend/src/api/deploy.ts`
-- [x] T075 [P] [US2] 实现 `admin-frontend/src/composables/useDeploy.ts`（校验预检、部署、结果与历史）
+- [x] T075 [P] [US2] 实现 `admin-frontend/src/composables/useDeploy.ts`（部署、结果与历史；**2026-11-23**：校验预检相关状态与 `validate()` 已删除）
 - [x] T076 [US2] 实现 `admin-frontend/src/components/deploy/UserCardList.vue`（用户名 + 已关联数字人角色名清单；可展开搭配摘要与异常标记，作为**部署前核对总账**；`FR-023`）
 - [x] T077 [US2] 实现 `admin-frontend/src/components/deploy/UserEditor.vue`（新建/编辑用户、增加或移除关联数字人；`FR-024`、`FR-025`）
-- [x] T078 [US2] 实现 `admin-frontend/src/components/deploy/DeployPanel.vue`（目标运行形态可见 + 校验预检结果 + 部署触发 + 结果明细 + 与清单的差异；`FR-032`、`FR-057`）
+- [x] T078 [US2] 实现 `admin-frontend/src/components/deploy/DeployPanel.vue`（部署触发 + 结果明细 + 与清单的差异；`FR-032`；**2026-11-23**：校验预检按钮与错误清单表已删除，勾选后直接部署）
 - [x] T079 [US2] 实现 `admin-frontend/src/components/deploy/RuntimeFormSwitch.vue`（切换目标运行形态，**提示"既有部署产物将按新形态重新物化"并二次确认**；`FR-057`、`FR-007`）
 - [x] T080 [P] [US2] 实现 `admin-frontend/src/components/deploy/DeployHistoryList.vue`（有界返回 + 分页/条数上限）
-- [x] T081 [P] [US2] 实现 `admin-frontend/src/components/deploy/AnomalySummary.vue`（**全局异常项汇总**，一次列出全部受影响数字人及所属用户，可跳转编辑位置；`FR-055`、`SC-016`）
-- [x] T082 [P] [US2] 组件测试：`UserCardList.spec.ts`、`DeployPanel.spec.ts`、`RuntimeFormSwitch.spec.ts`、`AnomalySummary.spec.ts`
+- [x] ~~T081~~ [P] [US2] **（2026-11-23 废止，组件已删除）** 原实现 `admin-frontend/src/components/deploy/AnomalySummary.vue`（全局异常项汇总）。失效引用改由数字人/用户卡片上的「异常」标记呈现（`FR-052`、`detectAnomalies()`）。
+- [x] T082 [P] [US2] 组件测试：`UserCardList.spec.ts`、`DeployPanel.spec.ts`（**2026-11-23**：`AnomalySummary.spec.ts` 随组件删除；`DeployPanel.spec.ts` 改守"勾选后无需预检即可部署"）
 - [x] T083 [US2] 无障碍验证：部署区的破坏性操作确认框（原生 `<dialog>`）Esc 关闭、焦点归还；部署结果 `aria-live` 播报；切换运行形态需二次确认
 
 **Checkpoint**: US1 + US2 合起来即完整的"设计 → 部署"闭环（平台的核心价值）。

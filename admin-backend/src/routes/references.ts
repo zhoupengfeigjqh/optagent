@@ -1,10 +1,13 @@
 /**
- * 派生信息路由（`contracts/admin-api.md` §7.1、§7.2）。
+ * 派生信息路由（`contracts/admin-api.md` §7.1）。
  *
  * 规格关键实体「引用关系」明确：引用关系**不落库**、**不做常驻浏览视图**；
- * 呈现时机**仅限**破坏性操作的确认环节、部署前校验与全局异常项汇总。
- * 因此本节接口 MUST NOT 被任何常驻页面轮询调用——§7.1 只在管理员
- * **触发删除/关闭之后**才由界面调用。
+ * 呈现时机**仅限**破坏性操作的确认环节。因此本接口 MUST NOT 被任何常驻页面
+ * 轮询调用——只在管理员**触发删除/关闭之后**才由界面调用。
+ *
+ * **2026-11-23**：原 §7.2「全局异常项汇总」（`GET /api/admin/anomalies`）随部署前
+ * 校验一并下架——它的数据源与数字人卡片「异常」标记同源（`detectAnomalies`），
+ * 后者仍在，异常态依旧在卡片上可见。
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -14,7 +17,6 @@ import {
   agentsReferencingService,
   agentsReferencingSkill,
   agentsReferencingTool,
-  collectAnomalies,
   expandToPairs,
 } from '../domain/config-center/references.js';
 import type { AgentRefSource } from '../domain/config-center/references.js';
@@ -46,34 +48,6 @@ export function registerReferenceRoutes(app: FastifyInstance, ctx: AppContext): 
     return { target_type: targetType, target_name: targetName, affected };
   });
 
-  /** §7.2 全局异常项汇总（落在部署功能区内；有界返回） */
-  app.get('/api/admin/anomalies', async (req) => {
-    const query = (req.query ?? {}) as { limit?: unknown };
-    const limit = normalizeAnomalyLimit(query.limit);
-
-    const snapshot = await ctx.catalog.snapshot();
-    const sources = ctx.agents.refSources();
-    const users = ctx.users.listAll().map((user) => ({ user_id: user.user_id, agents: [...user.agents] }));
-    const all = collectAnomalies(sources, users, snapshot.index);
-    const items = all.slice(0, limit);
-
-    return {
-      items,
-      total: all.length,
-      truncated: items.length < all.length,
-      // 前端可直接使用的编辑跳转路径模板，避免前端硬编码路由（原则七）
-      edit_path: '/agents/{agent_name}?tab={category}',
-    };
-  });
-}
-
-function normalizeAnomalyLimit(raw: unknown): number {
-  if (raw === undefined || raw === null || raw === '') return 50;
-  const value = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `limit 须为 ≥1 的整数（当前：${String(raw)}）`);
-  }
-  return Math.min(value, 200);
 }
 
 /**

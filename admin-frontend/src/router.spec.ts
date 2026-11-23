@@ -59,9 +59,9 @@ describe('parseLocation', () => {
   })
 
   it('tab 来自查询串', () => {
-    const r = parseLocation('/admin/deploy?tab=anomalies', '/admin')
+    const r = parseLocation('/admin/deploy?tab=history', '/admin')
     expect(r.name).toBe('deploy')
-    expect(r.tab).toBe('anomalies')
+    expect(r.tab).toBe('history')
     expect(r.detail).toBeNull()
   })
 

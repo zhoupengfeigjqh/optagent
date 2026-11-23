@@ -359,16 +359,15 @@ describe('DELETE /api/admin/mcp/services/{name}', () => {
     expect(list.json().items).toEqual([]);
   });
 
-  it('删除被引用的服务后，该数字人的引用变为失效（由引用有效性判定）', async () => {
+  it('删除被引用的服务后，该数字人的卡片标记为「异常」并给出失效原因', async () => {
     await createService();
     await createAgent('a1', ['ocr']);
     await fx.app.inject({ method: 'DELETE', url: '/api/admin/mcp/services/ocr' });
 
-    const anomalies = await fx.app.inject({ method: 'GET', url: '/api/admin/anomalies' });
-    expect(anomalies.json().items[0]).toMatchObject({
-      category: 'mcp_service',
-      target_name: 'ocr',
-    });
+    // 2026-11-23：全局异常项汇总下架，异常态的出口是设计态读取（列表/详情）
+    const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/a1' });
+    expect(detail.json()).toMatchObject({ abnormal: true });
+    expect(detail.json().abnormal_reason).toContain('ocr');
   });
 
   it('不存在 → 404 ADM_MCP_SERVICE_NOT_FOUND', async () => {

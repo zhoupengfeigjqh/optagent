@@ -1,22 +1,27 @@
 /**
- * 部署编排（`FR-026`~`FR-034`，`contracts/admin-api.md` §6.5~§6.8）。
+ * 部署编排（`FR-026`~`FR-034`，`contracts/admin-api.md` §6.6~§6.9）。
  *
- * 流程固定为：**只读预校验 → 全部通过才写入**（`FR-027`）。
- * 校验不通过时**运行环境写入次数为 0**（`SC-020`），并**一次性列出全部错误项**。
+ * 流程固定为：**解析部署对象 → 逐用户整体覆盖写入**。
  *
- * 错误码选择规则（使各类具体原因都能被直接看到，而不是一律压在通用码下）：
- * - 全部错误项**同码** → 直接返回该码（如 `ADM_DEPLOY_TARGET_NOT_WRITABLE`、
- *   `ADM_AGENT_INVALID_REF`），便于界面与合作方按码处理；
- * - 混合原因 → 返回 `ADM_DEPLOY_VALIDATION_FAILED`，`details.errors` 含全部错误项。
- * 两种情况下 `details.errors` 都完整——"一次性列出全部"不被这条规则削弱。
+ * **2026-11-23：部署前只读预检整体下架。** 数字人设计态在**保存时**已完成同口径
+ * 校验——名称安全与唯一（`agent-design.ts` / `user-links.ts`）、SOUL 必填字段
+ * （`soul-design.ts`）、四类引用存在于统一清单（`rejectUnknown`）、场景字段与
+ * 可上传类型（`scenario.ts`），部署前再判一遍是重复计算。
+ *
+ * 随之改变的语义（产品已确认）：
+ * - 不再有"整批零写入"承诺：某用户失败即**跳过该用户**，其余用户继续；
+ *   该用户自身仍零写入，由 `OptAgentWriter.commitUser` 的临时目录 + 回滚保证；
+ * - 失效引用不再提前拦，而是在 `buildUserArtifacts` 阶段抛出可读错误；
+ * - 部署不再依赖运行环境内置工具目录（原 `catalog.snapshot()`），运行环境短暂
+ *   不可达不再阻断整批部署。
+ *
+ * 仍然保留的**请求层**检查（不是配置校验）：乐观锁版本、`user_ids` 类型与空数组、
+ * 未知用户；以及写盘层的路径安全断言（见 `opt-agent-writer.ts`）。
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Logger } from 'pino';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import type { AgentDesignDocument, AgentDesignService } from '../config-center/agent-design.js';
-import type { UnifiedCatalog } from '../config-center/unified-catalog.js';
 import type { UserLinkService } from '../config-center/user-links.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
@@ -24,29 +29,27 @@ import type { OntologyStore } from '../ontology/store.js';
 import type { DeployHistoryService, DeployUserRecord } from './history.js';
 import type { DeployManifestService, ManifestDiffEntry } from './manifest.js';
 import { buildUserArtifacts, type MaterializeContext } from './materialize.js';
-import { runPrecheck, type PrecheckError, type PrecheckUser } from './precheck.js';
 import type { OptAgentWriter } from '../../infra/opt-agent-writer.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 
+/** 部署对象：一个用户与其关联的数字人名（写入以用户为单位整体覆盖） */
+export interface DeployTarget {
+  user_id: string;
+  agents: string[];
+}
+
 export interface DeployerDeps {
-  optAgentRoot: string;
   store: PlatformStore;
   agents: AgentDesignService;
   users: UserLinkService;
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
-  /** 本体库（2026-10-17）：物化与预检共用 */
+  /** 本体库：物化时读取快照（文件缺失即抛可读错误） */
   ontologies: OntologyStore;
-  catalog: UnifiedCatalog;
   writer: OptAgentWriter;
   manifest: DeployManifestService;
   history: DeployHistoryService;
   logger: Logger;
-}
-
-export interface DeployValidationResult {
-  passed: boolean;
-  errors: PrecheckError[];
 }
 
 export interface DeployRunResult {
@@ -75,19 +78,15 @@ export class Deployer {
     return this.deps.history;
   }
 
-  /** 只读预检（§6.5）；与 `deploy` 的校验**同一实现**，MUST NOT 形成两套判定 */
-  async validate(userIds?: string[]): Promise<DeployValidationResult> {
-    const { errors } = await this.collect(userIds);
-    return { passed: errors.length === 0, errors };
-  }
-
-  /** 部署生效（§6.6） */
+  /**
+   * 部署生效（§6.6）。
+   *
+   * 乐观锁先于一切：版本不符即拒，避免基于陈旧配置部署。
+   * 之后**直接逐用户写入**，不再有任何只读预检（2026-11-23）。
+   */
   async deploy(userIds: string[] | undefined, revision: number): Promise<DeployRunResult> {
-    // 乐观锁先于一切：版本不符即拒，避免基于陈旧配置部署
     this.deps.store.assertRevision(revision);
-
-    const { errors, targets, snapshot } = await this.collect(userIds);
-    if (errors.length > 0) throw validationError(errors);
+    const targets = this.resolveTargets(userIds);
 
     const context: MaterializeContext = {
       mcpConfigs: this.deps.mcpConfigs,
@@ -140,8 +139,9 @@ export class Deployer {
         });
         this.deps.manifest.updateUser(target.user_id, target.agents, new Date().toISOString());
       } catch (err) {
-        // FR-029：单用户失败即该用户零写入，其余用户不受影响。
-        // 2026-10-20：失败不再塞进 `manifest_diff`——差异报告只描述"运行环境与期望不一致"，
+        // FR-029：单用户失败即该用户零写入，**其余用户不受影响**（2026-11-23 起
+        // 这是部署失败的唯一处理方式——没有预检，失败只能在写入阶段发现）。
+        // 2026-10-20：失败不塞进 `manifest_diff`——差异报告只描述"运行环境与期望不一致"，
         // 失败原因在 `users[].error` 与日志里，混进差异项会让"差异"失去可解释性。
         results.push({
           user_id: target.user_id,
@@ -151,7 +151,7 @@ export class Deployer {
         });
         this.deps.logger.error(
           { err, event: 'deploy.user.failed', user_id: target.user_id },
-          `用户 ${target.user_id} 部署失败`,
+          `用户 ${target.user_id} 部署失败（已跳过，其余用户继续）`,
         );
       }
     }
@@ -171,12 +171,10 @@ export class Deployer {
     const historyId = this.deps.history.append({
       result: errorCount === 0 ? 'succeeded' : errorCount === results.length ? 'failed' : 'partial',
       users: results,
-      validation: { passed: true, error_count: 0 },
       manifest_diff: diffs,
       user_count: results.length,
       error_count: errorCount,
     });
-    void snapshot;
 
     return { users: results, manifest_diff: diffs, history_id: historyId };
   }
@@ -225,9 +223,11 @@ export class Deployer {
   /**
    * 部署时**严格**读取设计态（2026-10-20）。
    *
-   * 此前是 `.filter(doc => doc !== null)`：预检通过后若设计态恰好读不到（被删除/损坏），
+   * 此前是 `.filter(doc => doc !== null)`：若设计态恰好读不到（被删除/损坏），
    * 该数字人会被静默剔出产物，而清单仍记它"已部署"——表现为"部署成功，但少了一个"。
    * 现在改为整用户失败（零写入），原因直接落到 `users[].error`。
+   *
+   * **2026-11-23**：预检下架后，这是"设计态不可用"的唯一防线，MUST 保留。
    */
   private readDesignsStrictly(agentNames: string[]): AgentDesignDocument[] {
     const designs: AgentDesignDocument[] = [];
@@ -235,7 +235,7 @@ export class Deployer {
       const design = this.deps.agents.readOrNull(name);
       if (!design) {
         throw new Error(
-          `数字人 ${name} 的设计态在部署时读取失败（预检后可能被删除或损坏），本用户未写入任何内容`,
+          `数字人 ${name} 的设计态在部署时读取失败（可能已被删除或损坏），本用户未写入任何内容`,
         );
       }
       designs.push(design);
@@ -243,14 +243,13 @@ export class Deployer {
     return designs;
   }
 
-  /** 组装预检输入（校验与实际部署共用，保证判定一致） */
-  private async collect(userIds?: string[]): Promise<{
-    errors: PrecheckError[];
-    targets: PrecheckUser[];
-    snapshot: Awaited<ReturnType<UnifiedCatalog['snapshot']>>;
-  }> {
-    // 2026-10-20：空数组**明确拒绝**——`undefined`（省略字段）才是"全部用户"，
-    // 两者混同会让脚本里的 `user_ids: []`（意为"没有对象"）静默变成全平台覆盖部署。
+  /**
+   * 解析部署对象（**请求合法性**，不是配置校验）。
+   *
+   * 2026-10-20：空数组**明确拒绝**——`undefined`（省略字段）才是"全部用户"，
+   * 两者混同会让脚本里的 `user_ids: []`（意为"没有对象"）静默变成全平台覆盖部署。
+   */
+  private resolveTargets(userIds?: string[]): DeployTarget[] {
     if (userIds !== undefined && userIds.length === 0) {
       throw new ApiError(
         ERROR_CODES.VALIDATION_FAILED,
@@ -258,9 +257,7 @@ export class Deployer {
       );
     }
 
-    const snapshot = await this.deps.catalog.snapshot();
-
-    const all: PrecheckUser[] = this.deps.users
+    const all: DeployTarget[] = this.deps.users
       .listAll()
       .map((user) => ({ user_id: user.user_id, agents: [...user.agents] }));
     const targets = userIds === undefined ? all : all.filter((user) => userIds.includes(user.user_id));
@@ -276,55 +273,6 @@ export class Deployer {
       }
     }
 
-    const errors = runPrecheck({
-      users: targets,
-      readDesign: (name) => this.deps.agents.readOrNull(name),
-      index: snapshot.index,
-      toolsUnavailableReason: snapshot.toolsUnavailableReason,
-      isWritable: (userId) => this.isUserTargetWritable(userId),
-      // 本体快照完整性：`read()` 会校验两个必需文件，缺失即返回可读原因
-      ontologyIssue: (ref) => {
-        const parts = ref.split('/');
-        if (parts.length !== 2) {
-          return `本体引用形状非法（应为「场景名/本体名」）：${ref}`;
-        }
-        try {
-          this.deps.ontologies.read(parts[0]!, parts[1]!);
-          return null;
-        } catch (err) {
-          return err instanceof Error ? err.message : String(err);
-        }
-      },
-    });
-    return { errors, targets, snapshot };
+    return targets;
   }
-
-  /** 目标可写：`users/{uid}/agents`（不存在时向上找最近的可写祖先） */
-  private isUserTargetWritable(userId: string): boolean {
-    let current = path.join(this.deps.optAgentRoot, 'users', userId, 'agents');
-    for (let depth = 0; depth < 32; depth += 1) {
-      if (fs.existsSync(current)) {
-        try {
-          fs.accessSync(current, fs.constants.W_OK);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      const parent = path.dirname(current);
-      if (parent === current) return false;
-      current = parent;
-    }
-    return false;
-  }
-}
-
-/** 见文件头注释：同码直接返回该码，混合原因用通用码；两种情况下 details.errors 都完整 */
-export function validationError(errors: PrecheckError[]): ApiError {
-  const codes = [...new Set(errors.map((e) => e.code))];
-  const code = codes.length === 1 ? codes[0]! : ERROR_CODES.ADM_DEPLOY_VALIDATION_FAILED;
-  return new ApiError(code, `部署前校验未通过（共 ${errors.length} 项），已阻止部署`, {
-    errors,
-    codes,
-  });
 }

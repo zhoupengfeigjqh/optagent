@@ -21,8 +21,6 @@ vi.mock('../../api/skills', () => ({
 
 vi.mock('../../api/deploy', () => ({
   fetchReferences: (...a: unknown[]) => fetchReferences(...a),
-  fetchAnomalies: vi.fn(),
-  validateDeploy: vi.fn(),
   deploy: vi.fn(),
   fetchDeployHistory: vi.fn(),
   fetchManifest: vi.fn(),

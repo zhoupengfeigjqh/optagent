@@ -316,14 +316,8 @@ describe('api/users 与 api/deploy', () => {
     expect(lastCall().init.method).toBe('DELETE')
   })
 
-  it('部署：validate 在无 user_ids 时不发送该字段（缺省＝全部用户）', async () => {
+  it('部署：无 user_ids 时不发送该字段（缺省＝全部用户）', async () => {
     const deploy = await import('./deploy')
-
-    await deploy.validateDeploy()
-    expect(bodyOf(lastCall())).toEqual({})
-
-    await deploy.validateDeploy(['admin'])
-    expect(bodyOf(lastCall())).toEqual({ user_ids: ['admin'] })
 
     await deploy.deploy(undefined, 9)
     expect(bodyOf(lastCall())).toEqual({ revision: 9 })
@@ -332,7 +326,7 @@ describe('api/users 与 api/deploy', () => {
     expect(bodyOf(lastCall())).toEqual({ user_ids: ['admin'], revision: 9 })
   })
 
-  it('部署：历史（有界）/ 清单 / 引用关系（§7.1）/ 异常汇总（§7.2）路径正确', async () => {
+  it('部署：历史（有界）/ 清单 / 撤回 / 引用关系（§7.1）路径正确', async () => {
     const deploy = await import('./deploy')
 
     await deploy.fetchDeployHistory(20)
@@ -346,8 +340,5 @@ describe('api/users 与 api/deploy', () => {
 
     await deploy.fetchReferences('skill', 'pdf-parse')
     expect(lastCall().url).toBe('/api/admin/references?target_type=skill&target_name=pdf-parse')
-
-    await deploy.fetchAnomalies(50)
-    expect(lastCall().url).toBe('/api/admin/anomalies?limit=50')
   })
 })

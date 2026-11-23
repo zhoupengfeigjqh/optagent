@@ -1,8 +1,7 @@
 /**
- * 部署路由（`contracts/admin-api.md` §6.5~§6.9）。
+ * 部署路由（`contracts/admin-api.md` §6.6~§6.9）。
  *
- * - `POST /api/admin/deploy/validate` — **只读**预检，让管理员在真正部署前看到全部错误项
- * - `POST /api/admin/deploy`          — 部署生效（预校验 → 全部通过才写入）
+ * - `POST /api/admin/deploy`          — 部署生效（解析目标 → 逐用户整体覆盖写入）
  * - `GET  /api/admin/deploy/history`  — 部署历史（有界返回）
  * - `GET  /api/admin/deploy/manifest` — 部署清单（部署状态与差异报告的基准）
  * - `POST /api/admin/deploy/withdraw` — 撤回：清空该用户在运行环境中的数字人目录
@@ -19,12 +18,6 @@ import { normalizeLimit } from '../domain/paging.js';
 import type { Deployer } from '../domain/deploy/deployer.js';
 
 export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, deployer: Deployer): void {
-  app.post('/api/admin/deploy/validate', async (req) => {
-    const body = (req.body ?? {}) as { user_ids?: unknown };
-    const userIds = parseUserIds(body.user_ids);
-    return deployer.validate(userIds);
-  });
-
   app.post('/api/admin/deploy', async (req) => {
     const body = (req.body ?? {}) as { user_ids?: unknown; revision?: unknown };
     if (typeof body.revision !== 'number' || !Number.isInteger(body.revision)) {
@@ -70,7 +63,7 @@ export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, depl
   });
 }
 
-/** `user_ids` 缺省表示全部用户（契约 §6.5/§6.6） */
+/** `user_ids` 缺省表示全部用户（契约 §6.6） */
 function parseUserIds(raw: unknown): string[] | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw)) {

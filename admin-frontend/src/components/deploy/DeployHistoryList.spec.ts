@@ -27,7 +27,6 @@ function record(index: number, overrides: Partial<DeployHistoryItem> = {}): Depl
     users: [
       { user_id: 'admin', ok: true, agents: [{ name: 'demo', action: 'written', ok: true }] },
     ],
-    validation: { passed: true, error_count: 0 },
     manifest_diff: [],
     ...overrides,
   }
@@ -192,10 +191,9 @@ describe('DeployHistoryList —— 展开行看明细', () => {
     expect(wrapper.findAll('tr.deploy-history__detail-row')).toHaveLength(0)
   })
 
-  it('校验未通过与差异项同样要能看见（只说"部分成功"无法定位问题）', async () => {
+  it('差异项要能看见（只说"部分成功"无法定位问题）', async () => {
     const wrapper = mountList([
       record(1, {
-        validation: { passed: false, error_count: 3 },
         manifest_diff: [
           { user_id: 'admin', target: '', kind: 'missing_in_runtime', detail: '部署失败：boom' },
         ],
@@ -205,9 +203,10 @@ describe('DeployHistoryList —— 展开行看明细', () => {
     await byText(wrapper, '展开')?.trigger('click')
 
     const text = detailText(wrapper)
-    expect(text).toContain('校验未通过（3项）')
     expect(text).toContain('差异项（1条）')
     expect(text).toContain('admin：部署失败：boom')
+    // 2026-11-23：校验结论随部署前校验下架，不再出现在明细里
+    expect(text).not.toContain('校验')
   })
 
   it('缺逐用户明细的记录：明确说明"没有明细"，不显示空白', async () => {

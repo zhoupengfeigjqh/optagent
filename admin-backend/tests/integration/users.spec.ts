@@ -265,30 +265,4 @@ describe('DELETE /api/admin/users/{user_id}', () => {
   });
 });
 
-describe('GET /api/admin/anomalies（§7.2）', () => {
-  it('一次视图内列出全部失效引用及所属用户（FR-055、SC-016）', async () => {
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
-    fx.runtime.tools = [];
-    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/anomalies' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
-    expect(body.total).toBeGreaterThan(0);
-    expect(body.items[0]).toMatchObject({
-      user_id: 'admin',
-      agent_name: 'demo',
-      category: 'builtin_tool',
-    });
-    expect(body.edit_path).toContain('{agent_name}');
-  });
 
-  it('未关联任何用户的异常数字人也出现在汇总中（user_id 为空串）', async () => {
-    fx.runtime.tools = [];
-    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/anomalies' });
-    expect(res.json().items[0].user_id).toBe('');
-  });
-
-  it('limit 非法 → VALIDATION_FAILED', async () => {
-    const res = await fx.app.inject({ method: 'GET', url: '/api/admin/anomalies?limit=-1' });
-    expect(res.statusCode).toBe(400);
-  });
-});

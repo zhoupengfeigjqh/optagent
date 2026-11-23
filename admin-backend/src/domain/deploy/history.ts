@@ -26,8 +26,12 @@ export interface DeployHistoryRecord {
   operator: string;
   result: 'succeeded' | 'partial' | 'failed';
   users: DeployUserRecord[];
-  validation: { passed: boolean; error_count: number };
-  /** 与部署清单不一致的差异（`FR-032`）；结构见 `manifest.ts` 的 `ManifestDiffEntry` */
+  /**
+   * 与部署清单不一致的差异（`FR-032`）；结构见 `manifest.ts` 的 `ManifestDiffEntry`。
+   *
+   * **2026-11-23**：原 `validation: { passed, error_count }` 字段随部署前校验下架删除；
+   * 存量 JSONL 记录里仍带该键，读取时被忽略（与 `target_runtime_form` 同一容错口径）。
+   */
   manifest_diff: unknown[];
   user_count: number;
   error_count: number;

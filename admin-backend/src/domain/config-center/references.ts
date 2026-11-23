@@ -1,10 +1,13 @@
 /**
- * 引用推导与异常判定（`FR-013`、`FR-019`、`FR-042`、`FR-051`、`FR-052`、`FR-055`）。
+ * 引用推导与异常判定（`FR-013`、`FR-019`、`FR-042`、`FR-051`、`FR-052`）。
  *
  * 规格关键实体「引用关系」明确：引用关系**不落库**、**不做常驻浏览视图**，
  * 一律**按需从数字人设计态推导**。本模块即该推导的**唯一实现**——
- * 破坏性操作的确认清单、部署前校验、全局异常项汇总三处复用同一份逻辑，
- * 避免出现"三处各算一遍、结果不一致"。
+ * 破坏性操作的确认清单与数字人卡片「异常」标记复用同一份逻辑。
+ *
+ * **2026-11-23**：部署前校验与全局异常项汇总两处消费点随功能下架删除，
+ * `collectAnomalies()` 一并移除；`detectAnomalies()` / `anomalyReason()` 保留——
+ * 设计态读取（列表/详情/复制对话框）仍靠它标出失效引用。
  */
 import type { ReferenceIndex } from './reference-index.js';
 
@@ -111,13 +114,8 @@ export function agentsReferencingSkill(agents: AgentRefSource[], skillName: stri
   return agents.filter((a) => a.skills.includes(skillName)).map((a) => a.name);
 }
 
-/** 引用了某本体（`"场景名/本体名"`）的数字人名 */
-export function agentsReferencingOntology(agents: AgentRefSource[], ontologyRef: string): string[] {
-  return agents.filter((a) => a.ontologies.includes(ontologyRef)).map((a) => a.name);
-}
-
 /**
- * 把数字人名清单展开为「用户 × 数字人」对（`FR-042`、`FR-051`、`SC-016`）。
+ * 把数字人名清单展开为「用户 × 数字人」对（`FR-042`、`FR-051`）。
  *
  * 破坏性操作的确认环节需要的是"**哪些用户的哪个数字人**会受影响"，
  * 只给数字人名不足以让管理员判断影响面。
@@ -131,56 +129,4 @@ export function expandToPairs(agentNames: string[], users: UserAgentLink[]): Ref
     }
   }
   return pairs;
-}
-
-/** 全局异常项汇总的一条（`FR-055`、`SC-016`） */
-export interface AnomalyItem {
-  user_id: string;
-  agent_name: string;
-  category: AnomalyCategory;
-  target_name: string;
-  detail: string;
-}
-
-/**
- * 全平台异常项汇总：**一次视图内**列出全部引用了失效对象的数字人及其所属用户。
- *
- * 未被任何用户关联的数字人也一并列出（`user_id` 为空串）——
- * 否则"已设计但尚未分配"的异常数字人会从汇总里消失，与 `SC-016` 相悖。
- */
-export function collectAnomalies(
-  agents: AgentRefSource[],
-  users: UserAgentLink[],
-  index: ReferenceIndex,
-): AnomalyItem[] {
-  const ownersOf = new Map<string, string[]>();
-  for (const user of users) {
-    for (const agent of user.agents) {
-      const list = ownersOf.get(agent);
-      if (list) list.push(user.user_id);
-      else ownersOf.set(agent, [user.user_id]);
-    }
-  }
-
-  const items: AnomalyItem[] = [];
-  for (const agent of agents) {
-    for (const anomaly of detectAnomalies(agent, index)) {
-      const owners = ownersOf.get(agent.name) ?? [''];
-      for (const user_id of owners) {
-        items.push({
-          user_id,
-          agent_name: agent.name,
-          category: anomaly.category,
-          target_name: anomaly.target_name,
-          detail: anomaly.detail,
-        });
-      }
-    }
-  }
-  return items;
-}
-
-/** 分类中文名（错误信息与界面共用） */
-export function categoryLabel(category: AnomalyCategory): string {
-  return CATEGORY_LABEL[category];
 }

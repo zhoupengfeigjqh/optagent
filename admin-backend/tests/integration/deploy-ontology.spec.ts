@@ -3,7 +3,8 @@
  *
  * 从 `deploy.spec.ts` 拆出（该文件已达 500 行门禁，宪章原则二）：本文件只守住两件事——
  * ① 部署把本体库里的**两个必需文件**按原样复制到 `ontology/{场景}/{本体}/`，与 `skills/` 平级；
- * ② 库内缺任一必需文件 → 预检失败（`ADM_ONTOLOGY_NOT_FOUND`）、运行环境**零写入**。
+ * ② 库内缺任一必需文件 → 该用户部署失败（`ADM_ONTOLOGY_NOT_FOUND`）、该用户**零写入**。
+ *    **2026-11-23**：预检下架后不再整批拦截，失败在物化阶段发现并只影响该用户。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -153,25 +154,11 @@ describe('POST /api/admin/deploy —— 本体物化', () => {
 });
 
 describe('本体库快照完整性（2026-10-17）', () => {
-  it('库内缺 securities.yaml → 预检失败并给出可读原因，部署零写入', async () => {
+  it('库内缺 securities.yaml → 该用户部署失败并给出可读原因，零写入（2026-11-23 起在写入阶段发现）', async () => {
     await linkOntologyAgent();
-    // 目录仍在（引用本身有效），但两个必需文件不齐 —— 只有快照完整性校验能发现。
+    // 目录仍在（引用本身有效），但两个必需文件不齐 —— 保存期只核对索引名字，查不出这一点。
     // 删除走 `removeTree`：中文路径下 `fs.rmSync` 会静默不删（见 `fs-remove.ts`）。
     removeTree(path.join(libraryOntologyDir(), 'securities.yaml'));
-
-    const validate = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['admin'] },
-    });
-    expect(validate.json().passed).toBe(false);
-    const errors = validate.json().errors as Array<Record<string, string>>;
-    expect(errors[0]).toMatchObject({
-      agent_name: 'onto',
-      category: 'reference_validity',
-      code: 'ADM_ONTOLOGY_NOT_FOUND',
-    });
-    expect(errors[0]!.detail).toContain('securities.yaml');
 
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
     const deploy = await fx.app.inject({
@@ -179,8 +166,13 @@ describe('本体库快照完整性（2026-10-17）', () => {
       url: '/api/admin/deploy',
       payload: { user_ids: ['admin'], revision: revision() },
     });
-    expect(deploy.json().error.code).toBe('ADM_ONTOLOGY_NOT_FOUND');
-    // 运行环境写入次数 MUST 为 0
+
+    // 预检下架：不再整批 409，而是该用户失败、接口仍返回 200
+    expect(deploy.statusCode).toBe(200);
+    const user = (deploy.json().users as Array<{ ok: boolean; error?: string }>)[0]!;
+    expect(user.ok).toBe(false);
+    expect(user.error).toContain('securities.yaml');
+    // 该用户零写入
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });
 });

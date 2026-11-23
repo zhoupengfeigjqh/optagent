@@ -1,19 +1,19 @@
 <script setup lang="ts">
 /**
- * 部署面板（`FR-027`）。
+ * 部署面板（`FR-026`）。
  *
- * 职责：**本次范围**（部署对象在「用户与关联数字人」页勾选）→ 校验预检
- * （**一次性列出全部错误项**）→ 部署触发 → 结果明细。
+ * 职责：**本次范围**（部署对象在「用户与关联数字人」页勾选）→ 部署触发 → 结果明细。
  *
- * 两条硬约束：
- * 1. **未勾选任何用户 → 既不能预检、也不能部署**（空选择绝不能落回服务端
- *    "缺省 = 全部用户"的语义，那会变成误部署全平台）；
- * 2. 勾选**变化即作废上一次预检**，避免"用 A 的结论部署 B"。
+ * 硬约束：**未勾选任何用户 → 不能部署**（空选择绝不能落回服务端
+ * "缺省 = 全部用户"的语义，那会变成误部署全平台）。
  *
  * **2026-09-27**：「目标运行形态」随 MCP 单一连接地址下架，本面板不再有形态切换。
+ * **2026-11-23**：部署前预检下架（设计态在保存时已完成同口径校验），
+ * 「校验预检」按钮与错误清单表一并移除——勾选后直接部署。
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed } from 'vue'
 import { useDeploy } from '../../composables/useDeploy'
+import { diffText } from '../../utils/deploy-diff'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
@@ -31,35 +31,10 @@ const emit = defineEmits<{
 const d = useDeploy()
 
 const hasTarget = computed(() => props.selectedUserIds.length > 0)
-const canDeploy = computed(
-  () => hasTarget.value && d.validated.value && d.validationErrors.value.length === 0,
-)
 /** 范围文案：让管理员确认"这次动的是谁" */
 const scopeLabel = computed(() =>
   hasTarget.value ? `已选用户：${nameList(props.selectedUserIds)}` : '尚未选择用户',
 )
-
-onMounted(() => {
-  void d.loadRevision()
-})
-
-// 勾选变化 → 上一次预检结论作废（服务端部署时也会重新校验，但界面不能给假承诺）
-watch(
-  () => props.selectedUserIds,
-  () => d.invalidateValidation(),
-)
-
-async function onValidate(): Promise<void> {
-  await d.validate(props.selectedUserIds)
-  const count = d.validationErrors.value.length
-  const scope = scopeLabel.value
-  emit(
-    'announce',
-    count === 0
-      ? `部署前校验通过（范围：${scope}）`
-      : `部署前校验未通过，共 ${count} 项错误（范围：${scope}）`,
-  )
-}
 
 async function onDeploy(): Promise<void> {
   const scope = scopeLabel.value
@@ -73,51 +48,29 @@ function nameList(userIds: string[]): string {
   if (userIds.length <= 3) return userIds.join('、')
   return `${userIds.slice(0, 3).join('、')} 等 ${userIds.length} 个`
 }
-
-/**
- * 差异项一行文字：优先用服务端给的 `detail`，缺失（或不是字符串）时回退到整条 JSON。
- *
- * 必须走函数而不是在插值里写类型断言：`{{ (diff as Record<string, string>).detail }}`
- * 里的尖括号会让 prettier 的 Vue 解析器把 `<Record<...>` 当成标签起始，
- * 报 `Unexpected closing tag "li"`（解析失败 ⇒ `format:check` 退出码 2，
- * 比"格式不一致"更隐蔽）。`DeployHistoryList.vue` 的 `diffText` 是同一处理方式。
- */
-function diffText(diff: Record<string, unknown>): string {
-  const detail = diff.detail
-  return typeof detail === 'string' ? detail : JSON.stringify(diff)
-}
 </script>
 
 <template>
   <section class="deploy-panel" aria-label="部署生效">
-    <!-- 本次范围：部署对象在「用户与关联数字人」页的卡片上勾选（未勾选则两个按钮都不可用） -->
+    <!-- 本次范围：部署对象在「用户与关联数字人」页的卡片上勾选（未勾选则按钮不可用） -->
     <p class="deploy-panel__scope" role="status" aria-live="polite">
       本次范围：<strong>{{ scopeLabel }}</strong>
       <span v-if="!hasTarget" class="muted">
-        （请在下方「用户与关联」中勾选要部署的用户；未勾选时不能校验、也不能部署）
+        （请在下方「用户与关联」中勾选要部署的用户；未勾选时不能部署）
       </span>
-      <span v-else class="muted">（变更勾选后需重新校验）</span>
+      <span v-else class="muted">（勾选后点击「部署生效」）</span>
     </p>
 
     <div class="deploy-panel__actions">
       <button
         type="button"
-        class="btn"
-        :disabled="!hasTarget || d.validating.value"
-        @click="onValidate"
-      >
-        {{ d.validating.value ? '校验中…' : '校验预检' }}
-      </button>
-      <button
-        type="button"
         class="btn btn--primary"
-        :disabled="d.deploying.value || !canDeploy"
+        :disabled="d.deploying.value || !hasTarget"
         @click="onDeploy"
       >
         {{ d.deploying.value ? '部署中…' : '部署生效' }}
       </button>
       <span v-if="!hasTarget" class="muted">请先勾选部署对象</span>
-      <span v-else-if="!d.validated.value" class="muted">请先执行校验预检</span>
     </div>
 
     <ErrorNotice :error="d.error.value" title="部署未完成">
@@ -126,47 +79,9 @@ function diffText(diff: Record<string, unknown>): string {
       <p v-if="d.unknownUserIds.value.length > 0" class="deploy-panel__unknown">
         勾选列表中已不存在的用户：
         <span class="mono">{{ d.unknownUserIds.value.join('、') }}</span>
-        。请取消勾选后重新校验。
+        。请取消勾选后重新部署。
       </p>
     </ErrorNotice>
-
-    <!-- 校验结果：一次性列出全部错误项（SC-020） -->
-    <div v-if="d.validated.value" class="deploy-panel__validation" role="status" aria-live="polite">
-      <p v-if="d.validationErrors.value.length === 0" class="deploy-panel__ok">
-        <StatusBadge status="ok" label="校验通过" />
-        全部用户与数字人的配置均通过部署前校验。
-      </p>
-      <template v-else>
-        <p class="deploy-panel__fail">
-          <StatusBadge
-            status="failed"
-            :label="`校验未通过（${d.validationErrors.value.length} 项）`"
-          />
-          部署已被阻止，**运行环境零写入**。以下为全部错误项：
-        </p>
-        <table class="deploy-panel__table">
-          <caption class="visually-hidden">
-            部署前校验错误清单
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">用户</th>
-              <th scope="col">数字人</th>
-              <th scope="col">类别</th>
-              <th scope="col">原因</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(item, index) in d.validationErrors.value" :key="index">
-              <td>{{ item.user_id || '—' }}</td>
-              <td>{{ item.agent_name || '—' }}</td>
-              <td>{{ item.category }}</td>
-              <td>{{ item.message }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </template>
-    </div>
 
     <!-- 部署结果 -->
     <div v-if="d.result.value" class="deploy-panel__result" aria-live="polite">
@@ -215,31 +130,8 @@ function diffText(diff: Record<string, unknown>): string {
   font-size: var(--font-size-sm);
 }
 
-.deploy-panel__validation,
 .deploy-panel__result {
   margin-top: var(--space-4);
-}
-
-.deploy-panel__ok,
-.deploy-panel__fail {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-2);
-}
-
-.deploy-panel__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-sm);
-}
-
-.deploy-panel__table th,
-.deploy-panel__table td {
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  text-align: left;
-  vertical-align: top;
 }
 
 .deploy-panel__error {

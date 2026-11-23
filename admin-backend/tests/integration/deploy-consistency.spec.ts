@@ -68,18 +68,17 @@ const agentsDir = () => path.join(fx.optAgentRoot, 'users', 'admin', 'agents');
 const demoSoul = () => path.join(agentsDir(), 'demo', 'SOUL.md');
 
 describe('`user_ids: []` 必须被拒绝（2026-10-20）', () => {
-  it('validate 与 deploy 都返回 400 VALIDATION_FAILED，且运行环境零写入', async () => {
+  it('deploy 返回 400 VALIDATION_FAILED，且运行环境零写入', async () => {
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
 
-    for (const [url, payload] of [
-      ['/api/admin/deploy/validate', { user_ids: [] }],
-      ['/api/admin/deploy', { user_ids: [], revision: revision() }],
-    ] as const) {
-      const res = await fx.app.inject({ method: 'POST', url, payload });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error.code).toBe('VALIDATION_FAILED');
-      expect(res.json().error.message).toContain('省略该字段');
-    }
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: [], revision: revision() },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    expect(res.json().error.message).toContain('省略该字段');
 
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });

@@ -33,20 +33,6 @@ export interface ErrorInfo {
   message: string
 }
 
-/**
- * 部署前校验的一条错误项（§6.5、§6.6）。
- *
- * **2026-09-27**：`runtime_form` 类别随运行形态概念下架。
- */
-export interface DeployValidationError {
-  user_id: string
-  agent_name: string
-  category: 'config_integrity' | 'reference_validity' | 'name_path_safety' | 'target_writable'
-  code: string
-  message: string
-  detail?: string
-}
-
 /* ---------- §1 平台健康 ---------- */
 
 /**
@@ -411,13 +397,9 @@ export interface DeployUserResult {
 
 export interface DeployResult {
   users: DeployUserResult[]
-  manifest_diff: Array<Record<string, unknown>>
+  /** 2026-11-23：与历史记录同构（原为 `Record<string, unknown>`，导致差异项要另写一套渲染逻辑） */
+  manifest_diff: DeployManifestDiffEntry[]
   history_id: string
-}
-
-export interface DeployValidateResult {
-  passed: boolean
-  errors: DeployValidationError[]
 }
 
 /** 部署与运行环境的差异项（契约 §6.6、`data-model.md` §7.3 的 `ManifestDiffEntry`） */
@@ -444,7 +426,7 @@ export interface DeployHistoryItem {
   error_count: number
   /** 逐用户结果；失败原因在 `error` */
   users?: DeployUserResult[]
-  validation?: { passed: boolean; error_count: number }
+  /** 2026-11-23：原 `validation` 字段随部署前校验下架，老记录里若存在该键也不再呈现 */
   manifest_diff?: DeployManifestDiffEntry[]
 }
 
@@ -460,19 +442,4 @@ export interface ReferencesResponse {
   target_type: string
   target_name: string
   affected: ReferenceItem[]
-}
-
-export interface AnomalyItem {
-  user_id: string
-  agent_name: string
-  category: 'builtin_tool' | 'mcp_service' | 'skill'
-  target_name: string
-  detail: string
-}
-
-export interface AnomalyResponse {
-  items: AnomalyItem[]
-  total: number
-  truncated: boolean
-  edit_path: string
 }

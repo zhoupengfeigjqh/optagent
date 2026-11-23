@@ -1,15 +1,17 @@
 /**
- * 集成测试：部署端点（契约 §6.5~§6.8 与 §7.1）
+ * 集成测试：部署端点（契约 §6.6~§6.8 与 §7.1）
  *
  * MUST 覆盖每个端点（宪章原则三），且至少包含：
- * ①核心负向——校验不过 → 运行环境**零写入**且一次性列出全部错误项（`SC-020`）；
- * ②被引用的 MCP 服务不存在 → 引用有效性失败（`FR-052`）；
- * ③单用户失败零写入、其余用户不受影响（`FR-029`）；
- * ④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；
- * ⑥既有数据零破坏（`SC-007`）；⑦§7.1 引用清单一致。
+ * ①单用户失败零写入、其余用户不受影响（`FR-029`）；
+ * ②幂等（`FR-030`）；③既有数据零破坏（`SC-007`）；④§7.1 引用清单一致；
+ * ⑤`user_ids` 的请求层校验（空数组 400、未知用户 404）。
  *
  * **2026-09-27**：原"运行形态缺地址"与"双形态对比"两条随运行形态概念下架
  * ——MCP 连接地址为**单一 `url`**。
+ *
+ * **2026-11-23**：部署前预检下架，`POST /api/admin/deploy/validate` 端点已删除，
+ * `SC-020`（整批零写入 + 一次性列出全部错误项）随之作废。失败只发生在写入阶段，
+ * 且以**逐用户**方式呈现：某用户失败即跳过该用户，其余继续（`users[].ok=false`）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -85,47 +87,36 @@ afterEach(async () => {
   await fx.cleanup();
 });
 
-describe('POST /api/admin/deploy/validate', () => {
-  it('通过时返回 passed=true 与空错误清单', async () => {
+describe('POST /api/admin/deploy —— 请求层校验', () => {
+  it('user_ids 含不存在的用户 → 404 ADM_USER_NOT_FOUND（不静默少部署）', async () => {
     const res = await fx.app.inject({
       method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['admin'] },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ passed: true, errors: [] });
-  });
-
-  it('信息读取不到（运行环境不可达）→ 按失败处理，不视为通过', async () => {
-    fx.runtime.unreachable = true;
-    const res = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['admin'] },
-    });
-    expect(res.json().passed).toBe(false);
-    expect(res.json().errors[0].code).toBe('ADM_RUNTIME_UNREACHABLE');
-  });
-
-  it('user_ids 含不存在的用户 → 404 ADM_USER_NOT_FOUND', async () => {
-    const res = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['ghost'] },
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['ghost'], revision: revision() },
     });
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe('ADM_USER_NOT_FOUND');
   });
 
-  it('只读：validate 不产生任何写入', async () => {
-    const before = snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'));
-    await fx.app.inject({
+  it('user_ids 为空数组 → 400（MUST NOT 退化成"全部用户"）', async () => {
+    const res = await fx.app.inject({
       method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['admin'] },
+      url: '/api/admin/deploy',
+      payload: { user_ids: [], revision: revision() },
     });
-    const after = snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'));
-    expect(after).toEqual(before);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('运行环境不可达不再阻断部署（预检下架后部署不依赖内置工具目录）', async () => {
+    fx.runtime.unreachable = true;
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/deploy',
+      payload: { user_ids: ['admin'], revision: revision() },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().users[0]).toMatchObject({ user_id: 'admin', ok: true });
   });
 });
 
@@ -192,57 +183,58 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
   });
 });
 
-describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
-  it('校验不过 → 运行环境零写入，且一次性列出全部错误项 + 指明用户与数字人', async () => {
-    // 制造两类错误：SOUL 为空（config_integrity）+ 失效引用（reference_validity）
-    // 创建成功后再手工改坏；下面写入的**字符串** soul 同时覆盖"存量文档兼容"路径
-    await createAgent(baseAgent({ name: 'broken', soul: soulDesign('x'), skills: [] }));
-    // 直接改写设计态文档以模拟"已保存但后来失效"的引用 + 被清空的 SOUL
+describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026-11-23）', () => {
+  it('引用的 SKILL 已被删除 → 该用户部署失败（跳过），其余用户正常产出', async () => {
+    // 保存期会拒绝清单外 SKILL，故直接改写设计态文档模拟"保存后被删除"
     fx.ctx.store.writeJson('agents/broken.json', {
       name: 'broken',
-      soul: '   ',
-      enabled_tools: ['ghost_tool'],
-      mcp_services: ['ocr'],
-      skills: [],
+      soul: soulDesign('x'),
+      enabled_tools: [],
+      mcp_services: [],
+      skills: ['ghost-skill'],
+      ontologies: [],
       scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
       updated_at: '2026-09-15T00:00:00.000Z',
     });
     link('ops', ['broken']);
 
-    const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',
       payload: { revision: revision() },
     });
 
-    expect(res.statusCode).toBe(409);
-    const body = res.json();
-    expect(body.error.code).toBe('ADM_DEPLOY_VALIDATION_FAILED');
-    const errors = body.error.details.errors as Array<Record<string, string>>;
-    expect(errors.length).toBeGreaterThanOrEqual(2);
-    const categories = new Set(errors.map((e) => e.category));
-    expect(categories.has('reference_validity')).toBe(true);
-    expect(categories.has('config_integrity')).toBe(true);
-    for (const err of errors) {
-      expect(typeof err.user_id).toBe('string');
-      expect(typeof err.agent_name).toBe('string');
-      expect(err.message.length).toBeGreaterThan(0);
-    }
-    // 运行环境写入次数 MUST 为 0
-    expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
+    expect(res.statusCode).toBe(200);
+    const users = res.json().users as Array<{ user_id: string; ok: boolean; error?: string }>;
+    expect(users.find((u) => u.user_id === 'admin')?.ok).toBe(true);
+    const ops = users.find((u) => u.user_id === 'ops');
+    expect(ops?.ok).toBe(false);
+    expect(ops?.error).toContain('SKILL');
+    // 失败用户零写入；成功用户正常产出
+    expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'broken'))).toBe(false);
+    expect(
+      fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md')),
+    ).toBe(true);
   });
 
-  it('被引用的 MCP 服务已被删除 → 引用有效性失败（单因同码 ADM_AGENT_INVALID_REF）', async () => {
+  it('引用的 MCP 服务已被删除 → 部署仍成功，但 MCP.json 里不再含该服务（静默降级）', async () => {
     fx.ctx.mcpConfigs.remove('ocr');
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',
       payload: { user_ids: ['admin'], revision: revision() },
     });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error.code).toBe('ADM_AGENT_INVALID_REF');
-    expect(res.json().error.details.errors[0].detail).toBe('ocr');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().users[0]).toMatchObject({ user_id: 'admin', ok: true });
+    const mcp = JSON.parse(
+      fs.readFileSync(
+        path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'MCP.json'),
+        'utf8',
+      ),
+    );
+    // 预检下架后不再拦截：物化时读不到服务配置即过滤（能力缺失，运行期才暴露）
+    expect(mcp.servers).toEqual([]);
   });
 });
 
@@ -318,16 +310,8 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
     link('ops', []);
   });
 
-  it('只选一个用户：预检与部署**只扫该用户**，其余用户零写入，且清单只记本次用户', async () => {
+  it('只选一个用户：部署**只写该用户**，其余用户零写入，且清单只记本次用户', async () => {
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'));
-
-    // ops 未关联数字人 → 预检通过（不会被 admin 那边的情况牵连）
-    const validate = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/deploy/validate',
-      payload: { user_ids: ['ops'] },
-    });
-    expect(validate.json()).toEqual({ passed: true, errors: [] });
 
     const deploy = await fx.app.inject({
       method: 'POST',

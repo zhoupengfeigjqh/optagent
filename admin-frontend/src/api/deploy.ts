@@ -1,25 +1,13 @@
 /**
- * 部署 API（`contracts/admin-api.md` §6.5~§6.8、§7.1、§7.2）。
+ * 部署 API（`contracts/admin-api.md` §6.6~§6.9、§7.1）。
+ *
+ * **2026-11-23**：部署前预检（`validateDeploy`）与全局异常项汇总（`fetchAnomalies`）
+ * 随功能下架删除——设计态在保存时已校验，部署直接写入。
  */
 import { http } from './http'
-import type {
-  AnomalyResponse,
-  DeployHistoryItem,
-  DeployResult,
-  DeployValidateResult,
-  ManifestEntry,
-  ReferencesResponse,
-} from './types'
+import type { DeployHistoryItem, DeployResult, ManifestEntry, ReferencesResponse } from './types'
 
-/** 只读预检（`FR-027`）：让管理员在真正部署前看到**全部**错误项 */
-export function validateDeploy(userIds?: string[]): Promise<DeployValidateResult> {
-  return http.post<DeployValidateResult>(
-    '/api/admin/deploy/validate',
-    userIds ? { user_ids: userIds } : {},
-  )
-}
-
-/** 部署生效（`FR-026`）；校验不通过时后端返回 409 + `details.errors` */
+/** 部署生效（`FR-026`）：逐用户整体覆盖写入，某用户失败只跳过该用户 */
 export function deploy(userIds: string[] | undefined, revision: number): Promise<DeployResult> {
   return http.post<DeployResult>('/api/admin/deploy', {
     ...(userIds && userIds.length > 0 ? { user_ids: userIds } : {}),
@@ -87,9 +75,4 @@ export function fetchReferences(
     target_type: targetType,
     target_name: targetName,
   })
-}
-
-/** `§7.2` 全局异常项汇总（`FR-055`、`SC-016`）：一次视图内可见全部受影响数字人 */
-export function fetchAnomalies(limit = 50): Promise<AnomalyResponse> {
-  return http.get<AnomalyResponse>('/api/admin/anomalies', { limit })
 }
