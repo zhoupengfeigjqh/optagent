@@ -1,0 +1,65 @@
+{
+  "servers": [
+    {
+      "name": "onto_behaviors",
+      "transport": "http",
+      "url": "http://localhost:8022/mcp",
+      "headers": {
+        "X-MCP-Token": "Tkm5LHP6J1SJ2c2RSiRuwcS6XFDNGIdj"
+      },
+      "confirmation": {
+        "tools": [
+          "CreatePurchaseRecord",
+          "CancelPurchaseRecord",
+          "ReceiveRawMaterial"
+        ]
+      },
+      "allowed_tools": [
+        "CreatePurchaseRecord",
+        "CancelPurchaseRecord",
+        "ReceiveRawMaterial",
+        "QueryInventory",
+        "QueryPurchaseRecords",
+        "QueryRawMaterials",
+        "QuerySuppliers",
+        "QuerySupplierCapability"
+      ]
+    },
+    {
+      "name": "onto_common_functions",
+      "transport": "http",
+      "url": "http://localhost:8007/mcp",
+      "allowed_tools": [
+        "getCurrentDate",
+        "dateAdd",
+        "dateDiff",
+        "getWeekday",
+        "filterData",
+        "aggregateData",
+        "groupReduce",
+        "max",
+        "min",
+        "average",
+        "median",
+        "std",
+        "lastRecord"
+      ]
+    },
+    {
+      "name": "onto_functions",
+      "transport": "http",
+      "url": "http://localhost:8021/mcp",
+      "headers": {
+        "X-MCP-Token": "rLqoBFh53uiAYOlpzGu68fiQOAjGSK7Q"
+      },
+      "allowed_tools": [
+        "sumRawNotArrivalQty",
+        "checkRawMaterialUnit",
+        "checkArrivalTimeValidity",
+        "checkSupplierExistence",
+        "checkRelatedOrderExistence",
+        "inferPurchasePurpose"
+      ]
+    }
+  ]
+}

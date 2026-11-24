@@ -1,0 +1,10 @@
+{
+  "enabled": [
+    "list_dir",
+    "write_file",
+    "read_file",
+    "read_skill",
+    "grep_skill",
+    "grep_files"
+  ]
+}

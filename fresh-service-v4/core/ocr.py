@@ -5,9 +5,11 @@ paddleocr 不可用时抛出清晰的 OcrError，提示安装依赖或改用文�
 """
 
 from __future__ import annotations
+import os
 import tempfile
+import threading
 from pathlib import Path
-from . import config
+from . import config, http_pool
 
 
 class OcrError(RuntimeError):
@@ -17,12 +19,17 @@ class OcrError(RuntimeError):
 # 订单图片后缀白名单：其余（签名 URL 无后缀等）回落 .png
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff", ".gif"}
 
+#: 进程内唯一引擎（构造一次约 0.7s，冷启含 import 约 5.7s；绝不按请求重建）
+_ENGINE = None
+_ENGINE_LOCK = threading.Lock()
+#: 推理并发上限：paddle 的 predict 线程安全没有官方承诺，默认串行最稳；
+#: 想要吞吐就调 OCR_MAX_PARALLEL（要实测不崩、结果不错位再调大）
+_PREDICT_GATE = threading.BoundedSemaphore(max(1, int(os.getenv("OCR_MAX_PARALLEL", "1"))))
+
 
 def _download(url: str) -> Path:
-    import httpx
-
     try:
-        resp = httpx.get(url, timeout=config.HTTP_TIMEOUT_SECONDS, follow_redirects=True)
+        resp = http_pool.client().get(url, timeout=config.HTTP_TIMEOUT_SECONDS)
         resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001
         raise OcrError(f"下载图片失败：{url}（{exc}）") from exc
@@ -36,7 +43,7 @@ def _download(url: str) -> Path:
 
 
 def _init_engine():
-    """懒初始化 PaddleOCR（PP-OCRv6 small det + small rec）。"""
+    """真正构造 PaddleOCR（PP-OCRv6 small det + small rec）；只应由 ``_engine`` 调用一次。"""
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except ImportError as exc:
@@ -56,6 +63,28 @@ def _init_engine():
     )
 
 
+def _engine():
+    """取进程内唯一引擎（双检锁；并发首次调用只会构造一次）。"""
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:
+                _ENGINE = _init_engine()
+    return _ENGINE
+
+
+def warmup() -> None:
+    """启动预热：把模型加载从「第一个请求」挪到「服务启动」。
+
+    依赖缺失（slim 镜像没装 paddleocr）时只告警，不影响服务启动——
+    真正需要 OCR 时 ``_predict`` 会抛带安装提示的 OcrError。
+    """
+    try:
+        _engine()
+    except OcrError as exc:
+        print(f"[ocr] 预热跳过：{exc}", flush=True)
+
+
 def fetch_image(image_path_or_url: str) -> tuple[str, Path | None]:
     """把图片地址解析成本地路径（URL 先下载到临时文件）；返回 (路径, 需清理的临时文件)。"""
     if image_path_or_url.startswith("http://") or image_path_or_url.startswith("https://"):
@@ -71,11 +100,12 @@ def fetch_image(image_path_or_url: str) -> tuple[str, Path | None]:
 
 
 def _predict(path: str):
-    engine = _init_engine()
-    try:
-        return engine.predict(path)  # paddleocr >= 3.x
-    except AttributeError:
-        return engine.ocr(path, cls=True)  # 2.x 兼容
+    engine = _engine()
+    with _PREDICT_GATE:
+        try:
+            return engine.predict(path)  # paddleocr >= 3.x
+        except AttributeError:
+            return engine.ocr(path, cls=True)  # 2.x 兼容
 
 
 def ocr_lines(image_path_or_url: str) -> list[str]:

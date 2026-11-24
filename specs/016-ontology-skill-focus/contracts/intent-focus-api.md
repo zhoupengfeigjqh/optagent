@@ -196,34 +196,60 @@ rules: [...]      # 2026-11-06 起忽略
 ### 5.1 格式
 
 ```text
-本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
-1）{name}（非本体技能）
-2）{name}（本体技能；ontology_name='…'，ontology_id='…'；关联行为：{title}（{name}）、…）
+［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 {name} → 本体 {ontology_name}（ontology_id={id}）
+
+关键行为
+· {title} {name} @{concept}
+· {title} {name} @{concept}
+
+关键函数
+· {title} {name} @{concept} → {取数行为name}
+
+图路径（上游 {N} 跳；→/← 为本体边方向，按从左到右即本轮路径）
+{行为title} {name} @{起点概念} —〔{关系title}〕→ {终点概念} → {终点行为title} {name}
 ```
 
-- 前缀逐字固定；编号清单，每技能一行，行号从 `1` 连续编号（截断后重排）；
-- 非本体技能只有技能名与「非本体技能」标注；
-- 本体技能先写本体字段（`ontology_name='…'，ontology_id='…'`，缺名时只写 id），再写「关联行为」；无入选行为时整段省略；
-- MUST NOT 出现「关联函数」段；
+- 首行逐字固定；每个入选技能一块，块首行 `技能 {name} → 本体 …（ontology_id=…）`
+  （`ontology_name` 缺失时 `本体（ontology_id=…）`）；非本体技能为 `技能 {name}（非本体技能）`；
+- 本体技能块内至多三段，段间空行、段序固定、空段整段省略：
+  `关键行为` / `关键函数` / `图路径（…）`；
+- `关键行为` **同时包含判分命中的行为与函数关联概念的取数行为**，两类条目形态一致
+  （`· {title} {name} @{concept}`），同一 `ontology_id + name` 只出现一次；
+- `关键函数` 每条 `· {title} {name} @{concept} → {取数行为name}`：多关联概念逐个 `@`
+  并各挂自己的取数行为；概念下无取数时只写 `@概念`；无关联概念时只写名字；
+- `图路径` 一行一跳：边 `—〔关系title〕→` 表示顺本体边的书写方向，`←〔关系title〕—`
+  表示逆着写；阅读顺序（左→右）恒为本轮行走顺序；链尾无行为写 `→（无可用行为）`；
+  起点 MUST 只来自判分命中的行为（取数行为不判分、不参与发散）；
+- 技能按分数降序、同分按原序；同一本体被多个入选技能引用时能力与路径只归属分数最高的技能；
 - 无入选技能时返回空串，调用方不追加；
-- 技能按分数降序、同分按原序；段间 `；`，条目 `、`，单条形态 `title（name）`；
-- 总长 ≤1200 字符，超限删除完整条目；
+- 总长按阶数分档（0→2000 / 1→3000 / 2→4000），超限整行丢弃（路径行 → 取数条目 → 函数 → 行为）；
 - 只追加一次，位置在本轮 `systemExtra` 末尾；不进入用户消息、历史、摘要、记忆、下一轮。
 
 ### 5.2 示例
 
-**本体技能入选**：
+**本体技能入选（行为 + 函数 + 取数 + 图路径）**：
 
 ```text
-本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
-1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））
+［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 raw-material-inventory → 本体 原材料采购和库存（ontology_id=1）
+
+关键行为
+· 查询原材料库存信息 QueryInventory @RawMaterialInventory
+· 查询原材料采购单信息 QueryPurchaseRecords @PurchaseRecord
+
+关键函数
+· 原材料未到位数 sumRawNotArrivalQty @PurchaseRecord → QueryPurchaseRecords
+
+图路径（上游 1 跳；→/← 为本体边方向，按从左到右即本轮路径）
+查询原材料库存信息 QueryInventory @RawMaterialInventory ←〔拥有库存〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials
 ```
 
 **非本体技能入选**：
 
 ```text
-本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
-1）plain-skill（非本体技能）
+［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 plain-skill（非本体技能）
 ```
 
 ## 6. 记录契约
@@ -262,6 +288,10 @@ rules: [...]      # 2026-11-06 起忽略
 - 本契约 v1 起生效；v1.1（2026-11-06）起能力只到行为：013 契约中的 `ToolCandidate` / `probabilities` / `actions` / 工具提示前缀不再适用；`rules` 口径作废。
 - v1.2（2026-11-20）：**函数窄口径恢复**——`functions[]` 与行为同批判分、共用 `max_capabilities`、各自阈值；函数命中取 `related_concepts` 的 `op_type: query` 行为并入提示 `直接命中`，不判分、不发散、不进 `tool_tips`。
 - 配置：`ontology_threshold` 更名 `ontology_behavior_threshold`（**旧键不再接受**），新增 `ontology_function_threshold`；`max_capabilities` 语义改为「行为与函数合计上限」。
+- v1.3（2026-11-24）：**提示形态改为「技能块 + 关键行为 / 关键函数 / 图路径」**——首行改为边界声明；
+  取数行为并入 `关键行为`、函数用 `@概念 → 取数行为名` 引用；图路径的 `→/←` 只表本体边方向
+  （取代 `[上游]` + 读向双箭头）。判分、阈值、候选上限、留档字段与 `tool_tips` 均不变；
+  旧版提示文本（`1）…（本体技能；…）` / `直接命中：` / `上游路径：`）不再产生，历史记录仍可原样读出。
 - 公开 HTTP 无版本变更；`tool_tips` 结构不变；前端 / 管理端无需发版。
 - 旧记录行（含旧形态 `functions` / `data_supplements` / `kind` / `source`）仍可被 `readAll` 读出，不做迁移。
 - 后续若调整提示格式或记录字段，必须同时更新本契约与 `data-model.md`，并保留旧记录可读。

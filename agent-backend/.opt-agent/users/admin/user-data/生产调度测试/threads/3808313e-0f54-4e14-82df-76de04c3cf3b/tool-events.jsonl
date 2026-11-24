@@ -1,2 +1,0 @@
-{"call_id":"call_00_tP965gXC1IHXZL3lOV7f2159","message_id":"m_mwemtpjy_wnqi","name":"test2__QueryInventory","label":"查询原材料库存信息","status":"running","started_at":"2026-11-13T07:05:10.352Z","args_digest":{"ontology_id":"1","rawMaterialName":"铜板"}}
-{"call_id":"call_00_tP965gXC1IHXZL3lOV7f2159","message_id":"m_mwemtpjy_wnqi","name":"test2__QueryInventory","label":"查询原材料库存信息","status":"error","started_at":"2026-11-13T07:05:10.352Z","duration_ms":1,"size":229,"inline_content":"本体行为「原材料采购和库存/QueryInventory」未授权给当前用户，已拒绝执行。\n本轮已因权限不足停止执行工具，后续工具调用不再执行；请向用户说明原因并结束本轮回答。"}

@@ -2,7 +2,10 @@
 description: "本体行为规则闸门（021）实现任务清单"
 ---
 
-# 任务清单：本体行为规则闸门（前置规则判定与后置规则提示）
+# 任务清单：本体行为规则闸门（前置规则判定）
+
+> **2026-11-24（用户决策）**：后置规则整体移除、待重新设计。本文件为历史任务清单：
+> Phase 5（US3）与 T037 ~ T042 已作废，对应实现与测试已删除；其余任务记录保持原样。
 
 **输入**：`specs/021-ontology-rule-gate/` 下的 [spec.md](./spec.md)、[plan.md](./plan.md)、[research.md](./research.md)、[data-model.md](./data-model.md)、[contracts/rule-gate.md](./contracts/rule-gate.md)、[quickstart.md](./quickstart.md)
 
@@ -90,7 +93,7 @@ description: "本体行为规则闸门（021）实现任务清单"
 - [X] T027 [US1] 实现 `agent-backend/src/infra/tool-rule-gate.ts` 的 prepare 路径：`ruleGateTools` / 单工具包装（内置过滤 → `prepare` → `pause` 返回 `toolErrorResult(message, 'ONTOLOGY_RULE_FUNCTIONS_MISSING')` / `deny` 调 `onDeny({code, message, details, reason})` 后返回 `toolErrorResult(message, 'ONTOLOGY_RULE_DENIED')`），日志 `rule_gate.paused` / `denied`（含 `reason`）/ `blocked` / `unavailable`（均含 `ts`）
 - [X] T028 [US1] 中止接线：`agent-backend/src/types.ts` 加 `HistoryErrorInfo.details?: string[]` 与 `reason?`；`agent-backend/src/domain/llm-error.ts` 的 `toHistoryErrorInfo` "有才写"透传两者；`agent-backend/src/domain/run-impl.ts` 加 `ruleAbort`；`agent-backend/src/domain/run-manager.ts` 的 `AgentRunRequest` 加 `abortRun?`；`agent-backend/src/domain/run-consume.ts` 传入实现（写 `ruleAbort` + `run.stop()`）并让 `error` 分支优先按 `ONTOLOGY_RULE_DENIED` 走 `finalizer.error`
 - [X] T029 [US1] 在 `agent-backend/src/infra/agent-factory.ts` 接线：`create()` 构造 `ruleGate`（与 `scopeGuard` 并列）；`runWith()` 内 `createFunctionRecord()` + `builtinNames`（取自 `buildBuiltinTools`）+ `availableNames`（最终工具数组经 `matchKeys` **同时登记完整名与去服务前缀名**，**含内置**；只登记完整名会让裸名规则全部误判"未注册"）+ `ruleGateTools(...)` 后**再** `guardTools(...)`（021 在内、020 在外），`availableTools` 与 `runAgentLoopEvents` 使用最终数组
-- [X] T030 [US1] 新增 `agent-backend/tests/integration/rule-gate-loop.spec.ts`（集成用例，允许在 T027~T029 之后写）：①暂停 → 补调函数 → 二次调用放行，并**显式断言"暂停未清空记录"**（`FR-008`）；②求值 false → `error(code='ONTOLOGY_RULE_DENIED', reason='condition_false')` 且 `details` 3~6 条、**无 `done`**、`onMcpCall` 未计数、后续无新模型调用；③**前置未注册** → `error(reason='unregistered')` 且行为**零执行**；④后置未注册的端到端断言在 T042
+- [X] T030 [US1] 新增 `agent-backend/tests/integration/rule-gate-loop.spec.ts`（集成用例，允许在 T027~T029 之后写）：①暂停 → 补调函数 → 二次调用放行，并**显式断言"暂停未清空记录"**（`FR-008`）；②求值 false → `error(code='ONTOLOGY_RULE_DENIED', reason='condition_false')` 且 `details` 3~6 条、**无 `done`**、`onMcpCall` 未计数、后续无新模型调用；③**前置未注册** → `error(reason='unregistered')` 且行为**零执行**
 
 ### 实现（前端）
 
@@ -118,7 +121,9 @@ description: "本体行为规则闸门（021）实现任务清单"
 
 ---
 
-## Phase 5: User Story 3 - 后置规则：行为做完，把推导提示递到模型手上（Priority: P3）
+## Phase 5: ~~User Story 3 - 后置规则~~（2026-11-24 已移除，待重新设计）
+
+> 本 Phase 的 T037 ~ T042 与下方 Checkpoint 已作废；保留原文仅作历史记录。
 
 **目标**：本体行为**执行成功**后，先做注册校验：函数全部已注册 → 把 `position: 后置` 的规则全文附着在结果之后；存在未注册 → **不追加**并阻断（说明"已写入"）。无后置规则时结果逐字不变。
 
@@ -131,7 +136,7 @@ description: "本体行为规则闸门（021）实现任务清单"
 - [X] T041 [US3] 在 `agent-backend/src/infra/tool-rule-gate.ts` 实现执行后分支（仅 `role='behavior'` 且成功）：`append` → 追加文本块；`blocked` → **不追加**、调用 `onDeny`、记 `rule_gate.blocked`（`phase:'post'`、`executed:true`）；`null` → 原样；`rule_gate.posted` 日志含 `ts`；确认 `details` 与其他字段原样保留
 - [X] T042 [US3] 在 `agent-backend/tests/integration/rule-gate-loop.spec.ts` 增端到端用例（**集成用例**，允许在 T039~T041 之后写）：①成功后结果文本以原始正文开头、以后置块结尾，且该行为不被记入函数记录；②**后置引用未注册函数** → 行为已执行（业务结果保留）、无追加块、`error(reason='unregistered')` 且文案含"已写入"
 
-**Checkpoint**：三个故事各自独立可验证；后置提示与阻断都不影响前置判定路径。
+**Checkpoint**（已失效）：三个故事各自独立可验证；后置提示与阻断都不影响前置判定路径。
 
 ---
 
@@ -141,9 +146,9 @@ description: "本体行为规则闸门（021）实现任务清单"
 
 - [X] T043 [P] 解耦红线自检：对 `agent-backend/src/domain/rule-gate/**` 与 `agent-backend/src/domain/ontology-doc.ts` 执行 grep 断言，确认不含 `infra/`、`scope-guard`、`intent-focus`、`mcp/`、`@earendil-works`、`fastify`、`pino`、`node:fs` 的 import（`ontology-doc.ts` 经 `ontology-files.ts` 读文件，允许间接依赖）
 - [X] T044 [P] `SC-004` 实测：按 [spec.md](./spec.md) 的测量口径表（5 本体 × 8 行为 × 2 条前置规则，各 50 次、丢前 5 次、取增量 P95）测"已缓存"与"未缓存首次"两档，把结果回填 `spec.md` 的 `SC-004` 表与本文件「基线记录」
-- [X] T045 文档一致性复核：`contracts/rule-gate.md` 与实现逐项对齐（`PrepareInput.available`、`deny.reason`、`PostHintResult` 三态、两个错误码与其通道、`details`/`reason` 形状、日志含 `ts` 与 `blocked`）；`runtime-api-delta.md` 的 R28/§26 与 `reason` 一致；`spec.md` 修订记录已含 plan 阶段、analyze 阶段与 clarify 阶段三组校正；逐条勾 `plan.md`「完成定义」
+- [X] T045 文档一致性复核：`contracts/rule-gate.md` 与实现逐项对齐（`PrepareInput.available`、`deny.reason`、两个错误码与其通道、`details`/`reason` 形状、日志含 `ts` 与 `blocked`）；`runtime-api-delta.md` 的 R28/§26 与 `reason` 一致；`spec.md` 修订记录已含 plan 阶段、analyze 阶段与 clarify 阶段三组校正；逐条勾 `plan.md`「完成定义」
 - [X] T046 全量门禁（本地）：`cd agent-backend && npm run gate`（typecheck → lint → test:coverage → build）与 `cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm run build` 全绿；新增模块覆盖率 ≥ 80%；确认 `agent-backend/package.json` 零依赖变化
-- [ ] T047 按 [quickstart.md](./quickstart.md) §3（真实数字人手工联调）与 §6（部署后冒烟）覆盖全部判定路径——暂停 / 自愈 / 求值拒绝中止 / 后置提示 / 跨轮 / 无规则本体 / **未注册阻断（前置 + 后置）**——把证据与结论写入本文件末尾「手验记录」
+- [ ] T047 按 [quickstart.md](./quickstart.md) §3（真实数字人手工联调）与 §6（部署后冒烟）覆盖全部判定路径——暂停 / 自愈 / 求值拒绝中止 / 跨轮 / 无规则本体 / **未注册阻断（前置）**——把证据与结论写入本文件末尾「手验记录」
 - [X] T048 [P] 复核既有回归面：`agent-backend/tests/unit/` 下 `scope-guard-*`、`tool-scope-guard`、`intent-focus-*` 全绿（解析重构 + 装配顺序变更的回归门槛）
 
 ---
@@ -161,11 +166,11 @@ description: "本体行为规则闸门（021）实现任务清单"
 | FR-017 / FR-018 / FR-019 / FR-020 / FR-021（纯计算求值、语义、16 算子、比较口径、缺值含 `null`、公共函数类型） | T008~T013、T016、T018、T022 |
 | FR-022（缺 `rule_design` 不阻断 + 告警） | T018、T025 |
 | FR-023 / FR-024 / FR-025（true 放行、false 拒绝并中止、结构非法 fail-closed） | T018、T025、T027、T028、T030 |
-| FR-026 ~ FR-031（后置提示全套） | T037、T038、T039、T040、T041、T042 |
+| ~~FR-026 ~ FR-031（后置提示全套）~~（已删除） | ~~T037 ~ T042~~（已作废） |
 | FR-032 ~ FR-036（中止语义含并行批次、错误码、文案、日志含 `ts`、统计口径） | T021、T024、T027、T028、T030、T036 |
 | FR-037 / FR-038 / FR-039（数据源、缓存与生效、无旁路开关） | T004、T015、T025 |
 | **FR-041（前置注册校验 → 阻断）** | T007、T018、T025、T027、T030 |
-| **FR-042（后置注册校验 → 执行成功后阻断）** | T007、T037、T039、T040、T041、T042 |
+| ~~FR-042（后置注册校验）~~（已删除） | ~~T007、T037、T039 ~ T042~~（已作废） |
 | **FR-043（注册判据 = 本轮挂载工具集，确定性集合判断）** | T018、T025、T029、T043 |
 | **FR-044（阻断复用中止码 + `reason` 分类）** | T027、T028、T045 |
 | SC-001（判定矩阵一致率） | T016、T008~T010 |
@@ -173,7 +178,7 @@ description: "本体行为规则闸门（021）实现任务清单"
 | SC-004（性能） | T044 |
 | SC-005（文案含行为名与规则名、日志含时间） | T019、T021、T024、T027、T031 |
 | SC-006（非本体与无本体零变化） | T019、T048 |
-| SC-007（后置附加率） | T038、T042 |
+| ~~SC-007（后置附加率）~~（已删除） | ~~T038、T042~~（已作废） |
 | SC-008（门禁与覆盖率） | T046 |
 | **SC-009（未注册阻断 100% 生效 + `reason=unregistered` 可检索）** | T018、T019、T030、T037、T038、T041、T042、T047 |
 | **SC-010（`null` 语义 100% 一致）** | T017、T022、T032 |
@@ -187,7 +192,7 @@ description: "本体行为规则闸门（021）实现任务清单"
 | 记录"成败都记 + `null` + 失败覆盖成功" | T007（类型）、T017/T032（测试）、T022（求值把 `null` 视为取值失败）、T023/T033（实现） |
 | 记录"键存在 ≠ 值为真"（`has`/`get` 分离） | T007、T023、T032 |
 | 前置注册校验 → `deny(reason='unregistered')` | T018（测试矩阵）、T025（实现）、T027（包装器）、T030（端到端） |
-| 后置注册校验 → `postHint.blocked`（执行成功后） | T037（测试）、T039/T040（文案与实现）、T041（包装器）、T042（端到端） |
+| ~~后置注册校验 → `postHint.blocked`~~（2026-11-24 已移除） | ~~T037、T039、T040、T041、T042~~ |
 | `available` 集合的来源（本轮挂载工具集） | T007（类型）、T029（装配生成）、T043（禁止另建清单的 grep 断言） |
 | `reason` 三分类贯通到 `error` 载荷与日志 | T027、T028、T045 |
 | 中断原因复用失败提示块（不新增消息类型） | T020、T031 |
@@ -269,7 +274,7 @@ Task: "实现 agent-backend/src/domain/rule-gate/format.ts"
 1. Setup + Foundational → 底座就绪（不可演示）
 2. US1 → 独立验证 → 可演示（MVP）
 3. US2 → 独立验证（跨轮隔离 + `null` 语义）→ 可演示
-4. US3 → 独立验证（后置提示 + 后置阻断）→ 可演示
+4. ~~US3 → 独立验证（后置提示 + 后置阻断）→ 可演示~~（2026-11-24 已移除）
 5. 每个故事都不破坏前一个故事的用例
 
 ### 并行团队策略

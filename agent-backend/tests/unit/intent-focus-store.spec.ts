@@ -78,7 +78,8 @@ function draft(overrides: Partial<IntentFocusRecordDraft> = {}): IntentFocusReco
       },
     ],
     prompt:
-      "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
+      '［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。\n' +
+      '技能 raw-material-inventory-new → 本体 原材料采购和库存（ontology_id=1）',
     prompt_truncated: false,
     warnings: [],
     error: null,

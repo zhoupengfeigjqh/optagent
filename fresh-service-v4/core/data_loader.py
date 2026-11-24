@@ -41,11 +41,11 @@ def _url_suffix(url: str, allowed: set[str], default: str) -> str:
 
 
 def _download_to_temp(url: str, timeout: float) -> Path:
-    """下载 URL 到临时文件，返回路径，调用方负责清理"""
-    import httpx
+    """下载 URL 到临时文件，返回路径，调用方负责清理（走进程内共享连接池）"""
+    from . import http_pool
 
     try:
-        resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+        resp = http_pool.client().get(url, timeout=timeout)
         resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001
         raise DataLoadError(f"下载商品数据失败：{url}（{exc}）") from exc

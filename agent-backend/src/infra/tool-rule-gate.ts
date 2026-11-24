@@ -1,8 +1,8 @@
 /**
  * 本体行为规则闸门的**唯一** AgentTool 包装器（021）。
  *
- * 与 `tool-scope-guard.ts`（020）同形：只做"执行前拦住/放行 + 执行后追加"，
- * 不含任何业务知识。
+ * 与 `tool-scope-guard.ts`（020）同形：只做"执行前拦住/放行"，不含任何业务知识。
+ * 2026-11-24 起，执行成功后不再有任何追加或阻断（后置规则整体移除、待重新设计）。
  *
  * 解耦红线（本文件 MUST 守住）：
  * - 不出现具体工具名、MCP 服务名、本体名、yaml 字段名；
@@ -25,7 +25,6 @@ import {
   RULE_FUNCTIONS_MISSING_CODE,
   denyCardBody,
   type FunctionRecord,
-  type PostHintResult,
   type PrepareResult,
   type RuleDiagnosis,
   type RuleGatePort,
@@ -118,32 +117,10 @@ export function wrapToolWithRuleGate(tool: AgentTool, ctx: RuleGateContext): Age
         return result;
       }
 
-      // 5. 行为角色：仅成功时校验后置规则
-      if (isFailed(result)) return result;
-
-      const hint = postHintSafely(ctx, tool.name);
-      if (hint === null) return result;
-
-      if (hint.kind === 'blocked') {
-        logEvent(ctx, 'error', 'rule_gate.blocked', {
-          tool_name: tool.name,
-          ...diagnosisFields(hint.diagnosis),
-          phase: 'post',
-          executed: true,
-          unregistered_functions: hint.diagnosis?.unregisteredFunctions ?? [],
-        });
-        // 业务结果**完整保留**（不追加后置规则提示），只在其后追加阻断说明与终局指令：
-        // 软收尾下模型必须知道"业务已写入、但本轮不能再调工具"。
-        suspendTools(ctx.suspension, RULE_DENIED_CODE);
-        return appendToolText(result, denyCardBody([hint.message, ...hint.details]));
-      }
-
-      logEvent(ctx, 'info', 'rule_gate.posted', {
-        tool_name: tool.name,
-        ...diagnosisFields(hint.diagnosis),
-      });
-      // 追加一个文本块；原始 `content` 的顺序与内容逐字保留（`FR-029` / `FR-031`）
-      return appendToolText(result, hint.text);
+      // 5. 行为角色：判定已在执行前完成，结果原样返回。
+      //    2026-11-24：后置规则整体移除（待重新设计）——执行成功后不再追加任何文本、
+      //    也不再因后置规则挂起本轮。
+      return result;
     },
   };
 }
@@ -163,19 +140,6 @@ function prepareSafely(ctx: RuleGateContext, toolName: string): PrepareResult {
       details: ['原因：规则配置不可用（判定过程异常）'],
       reason: 'config_unavailable',
     };
-  }
-}
-
-/** 后置判定异常不得改变已成功的业务结果：降级为"不追加" */
-function postHintSafely(ctx: RuleGateContext, toolName: string): PostHintResult {
-  try {
-    return ctx.gate.postHint({
-      toolName,
-      record: ctx.record,
-      available: ctx.availableNames,
-    });
-  } catch {
-    return null;
   }
 }
 

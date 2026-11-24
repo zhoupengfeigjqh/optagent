@@ -103,11 +103,6 @@ function fixtureAgentDir(): string {
       '              operator: eq',
       '              values: ["true"]',
       '    fail_message: 库存不足，禁止创建采购单',
-      '  - name: 采购目的推理',
-      '    behavior: CreatePurchaseRecord',
-      '    position: 后置',
-      '    related_functions:',
-      '      - inferPurchasePurpose',
     ].join('\n'),
     'utf8',
   );
@@ -286,7 +281,7 @@ afterEach(() => {
 });
 
 describe('暂停 → 补调 → 通过（含 FR-008 记录不清空）', () => {
-  it('直接调行为先暂停；补调两个函数后重试成功，并追加后置提示', async () => {
+  it('直接调行为先暂停；补调两个函数后重试成功（执行成功后不再追加任何提示）', async () => {
     // 先执行 check（进记录）→ 调行为缺 checkStock → 暂停 → 补调 checkStock → 重试成功。
     // 若暂停清空了记录，第 4 跳会再次因为缺 check 暂停 —— 因此"成功"本身就是 FR-008 的证据。
     const harness = await runScript({
@@ -313,10 +308,10 @@ describe('暂停 → 补调 → 通过（含 FR-008 记录不清空）', () => {
     expect(harness.suspended()).toBe(false);
     expect(harness.stops).toBe(0);
 
-    // 补调后重试通过：后置提示追加在原结果之后（不覆盖）
+    // 补调后重试通过：结果原样返回（2026-11-24 起后置规则移除，不再追加提示）
     expect(ends[3]!.resultText).toContain('采购单已创建');
-    expect(ends[3]!.resultText).toContain('后置规则提示');
-    expect(ends[3]!.resultText).toContain('采购目的推理');
+    expect(ends[3]!.resultText).not.toContain('后置规则提示');
+    expect(harness.suspended()).toBe(false);
   });
 });
 
@@ -341,32 +336,6 @@ describe('求值不成立 → 软收尾（2026-11-09）', () => {
     // 软收尾：模型拿到结果后**又发起一次调用**（hop 4 = stop）并以 done 结束——没有 error 事件
     expect(hasErrorEvent(harness.events)).toBe(false);
     expect(harness.hops).toBe(4);
-    expect(harness.events.some((event) => event.type === 'done')).toBe(true);
-  });
-});
-
-describe('后置未注册 → 已执行后阻断（FR-042）', () => {
-  it('业务结果完整保留、追加阻断说明与终局指令、挂起本轮，本轮正常 done', async () => {
-    const harness = await runScript({
-      steps: [toolStep('c1', CHECK), toolStep('c2', STOCK), toolStep('c3', CREATE), stopStep()],
-      available: [CHECK, STOCK, CREATE],
-    });
-
-    const ends = toolEnds(harness.events);
-    // 行为确实执行成功：卡片仍是成功态，不改成失败
-    expect(ends.map((end) => end.status)).toEqual(['success', 'success', 'success']);
-    expect(harness.createCalls).toBe(1);
-    expect(harness.suspended()).toBe(true);
-
-    // 业务正文在、后置规则提示不在；阻断说明与终局指令追加在后
-    expect(ends[2]!.resultText).toContain('采购单已创建');
-    expect(ends[2]!.resultText).not.toContain('后置规则提示');
-    expect(ends[2]!.resultText).toContain('已执行成功');
-    expect(ends[2]!.resultText).toContain('业务数据已写入');
-    expect(ends[2]!.resultText).toContain('未注册函数：inferPurchasePurpose');
-    expect(ends[2]!.resultText).toContain(RULE_TERMINAL_NOTICE);
-
-    expect(hasErrorEvent(harness.events)).toBe(false);
     expect(harness.events.some((event) => event.type === 'done')).toBe(true);
   });
 });

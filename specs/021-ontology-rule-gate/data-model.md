@@ -32,7 +32,7 @@
 | `title` | `string` | 展示标题 |
 | `description` | `string` | 规则描述（原文） |
 | `behavior` | `string` | 绑定行为名（归一后比对；空 → 整条规则忽略 + 告警） |
-| `position` | `'前置' \| '后置'` | 其他取值 → 整条规则忽略 + 告警 |
+| `position` | `'前置'`（加载层仍解析 `'后置'`，但直接跳过、不进快照） | 其他取值 → 整条规则忽略 + 告警 |
 | `relatedFunctions` | `string[]` | 声明需要的函数名（非字符串元素丢弃） |
 | `dataSupplements` | `string[]` | 附带数据补充项（本特性只随全文反馈，不据此自动取数） |
 | `design` | `RuleDesign \| null` | `rule_design` 归一结果；缺失/空 → `null` |
@@ -154,7 +154,7 @@ segment := name ['[]']
 | `kind` | 触发 | 后续动作 |
 |---|---|---|
 | `function` | 工具不是本体行为（且非内置） | 执行 → 成功后记录 |
-| `behavior` | 是本体的行为，但**无前置规则** | 执行 → 成功后追加后置提示 |
+| `behavior` | 是本体的行为，但**无前置规则** | 执行 → 结果原样返回 |
 | `pause` | 前置规则有 `related_functions` 未记录 | **不执行**；返回失败结果（规则全文 + 缺失函数清单） |
 | `deny` | 求值 `false`、规则结构不可用、或**规则引用了未注册函数** | **不执行**；挂起本轮工具并返回三段式卡片（三者靠 `reason` 区分：`condition_false` / `config_unavailable` / `unregistered`） |
 
@@ -162,13 +162,8 @@ segment := name ['[]']
 `reason: 'unregistered' | 'condition_false' | 'config_unavailable'`（文案唯一来源
 `rule-gate/format.ts`）。
 
-**`postHint` 的三态返回**（后置规则校验在**执行成功之后**）：
-
-| 返回 | 触发 | 后续动作 |
-|---|---|---|
-| `null` | 该行为没有后置规则 | 结果原样返回 |
-| `{ kind: 'append', text, rules }` | 有后置规则且其函数**全部已注册** | 追加文本块后返回 |
-| `{ kind: 'blocked', message, details, rules }` | 有后置规则且存在**未注册**函数 | **不追加**后置提示；业务结果**完整保留**并追加阻断说明；挂起本轮 |
+> **2026-11-24**：`postHint` 三态返回已整体删除（后置规则移除、待重新设计）；
+> 执行成功后一律原样返回，不追加文本、不挂起本轮。
 
 **与规格"裁决四态"的对照**（`spec.md` §关键实体）：
 
@@ -180,7 +175,6 @@ segment := name ['[]']
 | 允许（求值通过） | `behavior` | 是 | 否 |
 | 拒绝并挂起本轮（求值不成立 / 规则不可用） | `deny`（`reason` = `condition_false` / `config_unavailable`） | 否 | 否 |
 | 阻断（前置规则引用**未注册**函数） | `deny`（`reason` = `unregistered`） | 否 | 否 |
-| 阻断（后置规则引用未注册函数，行为**已成功**） | `postHint` → `blocked` | **是（已发生）** | 否 |
 
 ### 6.2 拒绝卡片正文（2026-11-09 起）
 
@@ -202,8 +196,8 @@ segment := name ['[]']
 
 `details.toolError = { code, message }`：暂停为 `ONTOLOGY_RULE_FUNCTIONS_MISSING`，
 拒绝为 `ONTOLOGY_RULE_DENIED`。由 `agent-loop` 的 `afterToolCall` 翻成 `isError: true`
-→ 卡片失败态 + 模型可读文案。**后置阻断例外**：行为确实执行成功，结果**不带**失败标记，
-只在正文末尾追加阻断说明。
+→ 卡片失败态 + 模型可读文案。2026-11-24 起不再有"执行成功后追加阻断"的例外：
+行为成功后结果逐字原样返回，不带失败标记、不追加正文。
 
 ### 6.4 本轮工具挂起状态（`ToolSuspension`，2026-11-09）
 
@@ -223,12 +217,12 @@ segment := name ['[]']
 |---|---|---|
 | `rule_gate.paused` | `info` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules`（规则名数组） `missing_functions` |
 | `rule_gate.denied` | `warn` | 同上 + `rule` + `reason`（`condition_false` / `config_unavailable` / `unregistered`） + `failed_conditions`（`{rule, function, field, operator}` 数组，最多 10 条） |
-| `rule_gate.blocked` | `error` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules` `phase`（`pre` / `post`） `unregistered_functions` `executed`（后置阻断时 `true`） |
+| `rule_gate.blocked` | `error` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules` `phase`（恒为 `pre`） `unregistered_functions` `executed`（恒为 `false`） |
 | `rule_gate.suspended` | `warn` | `user_id` `agent_name` `thread_id` `tool_name` `code` `attempts`（**不重复**判定字段，2026-11-09 新增） |
 | `rule_gate.unavailable` | `error` | 同上 + `reason`（`bad_rules` / `bad_design` / `evaluator_error`） `warnings` |
 | `rule_gate.catalog.degraded` | `warn` | `user_id` `agent_name` `warnings`（最多 20 条） |
 | `rule_gate.record.dropped` | `warn` | `tool_name` `bytes` / `count` `reason`（`oversize` / `overflow`） |
-| `rule_gate.posted` | `info` | `user_id` `agent_name` `thread_id` `tool_name` `behavior` `rules` |
+| `rule_gate.posted` | ~~已移除~~ | 2026-11-24 随后置规则一并删除，不再产生 |
 
 **公共字段**：以上每个事件 MUST 含 `ts`（ISO 8601 时间戳，对齐 `spec.md` `FR-035` / `SC-005` 的"含时间"）
 与 `event`（事件名本身）；`unavailable` MUST 另含 `alert: true`。
@@ -241,7 +235,7 @@ segment := name ['[]']
 | # | 场景 | 期望 |
 |---|---|---|
 | 1 | 工具是内置工具 | 不判定、不记录，原样执行 |
-| 2 | 工具不是任何本体行为 | 执行 → 成功即记录；后置不追加 |
+| 2 | 工具不是任何本体行为 | 执行 → 成功即记录；结果原样返回 |
 | 3 | 本体行为，无前置规则 | 执行（记录不写） |
 | 4 | 有前置规则，`related_functions` 缺 1 个 | 暂停；文案列出缺失函数；行为不执行 |
 | 5 | 有前置规则，缺 2 条规则的函数 | 暂停；**两条**规则全文都反馈 |
@@ -249,8 +243,8 @@ segment := name ['[]']
 | 7 | 函数齐备，`design` 求值 false | 拒绝 + 挂起本轮（软收尾） |
 | 8 | 函数齐备，前置规则无 `design` | 执行（不阻断）+ 告警 |
 | 9 | `design` 结构非法 | 拒绝 + 挂起 + 告警（`rule_gate.unavailable`） |
-| 10 | 有后置规则，执行成功 | 原文完整 + 追加规则全文 |
-| 11 | 有后置规则，执行失败 | 不追加 |
+| 10 | 只有后置规则、行为执行成功 | 结果逐字原样返回（不追加、不挂起） |
+| 11 | 只有后置规则、行为执行失败 | 结果逐字原样返回 |
 | 12 | 同一函数同轮成功两次 | 记录 1 条，值取后者 |
 | 13 | 同一函数先成功后失败 | 值取 `null`（**失败覆盖成功**），键仍存在 |
 | 14 | 上一轮记录过、本轮未调 | 本轮视为缺函数 → 注册校验 → 已注册则暂停 |
@@ -260,7 +254,7 @@ segment := name ['[]']
 | 18 | 前置规则函数**已注册**但未执行 | **暂停**（不阻断），提示先执行 |
 | 19 | 服务里存在但被白名单过滤（未挂载） | 视为未注册 → 阻断（同 17） |
 | 20 | 函数执行失败（记录 `null`） | 不触发暂停/注册校验；其条件全不成立 → 拒绝 + 挂起（`condition_false`） |
-| 21 | 后置规则引用未注册函数、行为执行成功 | 行为照常执行并落库；**不追加**后置提示、业务正文保留；挂起本轮 + `reason=unregistered`，追加说明含"已执行成功、数据已写入" |
-| 22 | 后置规则函数全部已注册 | 正常追加（`postHint` → `append`） |
+| 21 | 行为只被后置规则绑定（`behaviors[]` 未声明） | 仍识别为行为（不记录成函数），规则不装载、不告警 |
+| 22 | 后置规则被加载 | 静默跳过，不进快照，不产生任何运行时效果 |
 
 > 第 4~8 行默认"函数全部已注册"，用于隔离前置判定本身的语义；注册校验的矩阵在 17~19 行。

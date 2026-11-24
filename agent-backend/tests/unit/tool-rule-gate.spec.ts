@@ -6,6 +6,7 @@
  * - `deny` 即挂起本轮（与 020 共享状态），卡片含「结论 + 明细 + 终局指令」，不制造失败轮；
  * - 挂起后其余工具（含内置）一律不执行，返回挂起码；
  * - `function` 角色**成败都记录**（失败传 `null`），结果原样返回；
+ * - `behavior` 角色判定通过后结果原样返回：2026-11-24 起执行成功后不再追加任何文本；
  * - 内置工具不判定、不记录，且与函数同名时仍按内置优先；
  * - 包装保持 name/label/description/parameters/executionMode 不变（模型侧无感）；
  * - 暂停/拒绝日志字段齐全且**含 `ts`**，不含结果正文与入参。
@@ -15,11 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { RULE_TERMINAL_NOTICE, denyCardBody } from '../../src/domain/rule-gate/format.js';
 import { createFunctionRecord } from '../../src/domain/rule-gate/record.js';
-import type {
-  PostHintResult,
-  PrepareResult,
-  RuleGatePort,
-} from '../../src/domain/rule-gate/types.js';
+import type { PrepareResult, RuleGatePort } from '../../src/domain/rule-gate/types.js';
 import { readToolError } from '../../src/domain/tool-error.js';
 import {
   SUSPENDED_MESSAGE,
@@ -60,15 +57,13 @@ function makeTool(name = 'erp__CreatePurchaseRecord') {
   return Object.assign(tool, { executeMock });
 }
 
-function makeGate(prepareResult: PrepareResult, postResult: PostHintResult = null) {
+function makeGate(prepareResult: PrepareResult) {
   const gate = {
     prepare: vi.fn(() => prepareResult),
-    postHint: vi.fn(() => postResult),
     invalidate: vi.fn(),
   };
   return gate as unknown as RuleGatePort & {
     prepare: ReturnType<typeof vi.fn>;
-    postHint: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -259,94 +254,40 @@ describe('function 角色', () => {
     expect(record.get('checkSupplierExistence')).toBeNull();
   });
 
-  it('永不追加后置提示', async () => {
+  it('function 角色永不追加任何文本', async () => {
     const tool = makeTool('erp__checkSupplierExistence');
-    const gate = makeGate({ kind: 'function' }, {
-      kind: 'append',
-      text: '不应出现',
-      rules: ['R'],
-    });
-    const { ctx } = makeContext(gate);
+    const { ctx } = makeContext(makeGate({ kind: 'function' }));
     const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
 
-    expect(gate.postHint).not.toHaveBeenCalled();
-    expect(JSON.stringify(result.content)).not.toContain('不应出现');
+    expect(result.content).toEqual([{ type: 'text', text: '{"ok":true}' }]);
   });
 });
 
 describe('behavior 角色', () => {
-  it('成功后追加后置提示，且行为本身不写记录', async () => {
+  it('判定通过后结果原样返回（2026-11-24 起不再追加后置提示），且行为本身不写记录', async () => {
     const tool = makeTool();
-    const gate = makeGate({ kind: 'behavior' }, {
-      kind: 'append',
-      text: '—— 后置规则提示 ——',
-      rules: ['采购目的推理'],
-    });
-    const { ctx, record } = makeContext(gate);
+    const { ctx, record, suspension } = makeContext(makeGate({ kind: 'behavior' }));
     const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
 
-    expect(gate.postHint).toHaveBeenCalledTimes(1);
-    expect(result.content).toEqual([
-      { type: 'text', text: '{"ok":true}' },
-      { type: 'text', text: '—— 后置规则提示 ——' },
-    ]);
-    expect(record.size).toBe(0);
-  });
-
-  it('后置 blocked：业务结果完整保留 + 追加阻断说明与终局指令、挂起本轮', async () => {
-    const tool = makeTool();
-    const BLOCKED = {
-      kind: 'blocked' as const,
-      message: '已执行成功（业务数据已写入），但后置规则引用了未注册函数',
-      details: ['未注册函数：inferPurchasePurpose'],
-      rules: ['采购目的推理'],
-      diagnosis: {
-        ...DIAGNOSIS,
-        rules: ['采购目的推理'],
-        unregisteredFunctions: ['inferPurchasePurpose'],
-      },
-    };
-    const gate = makeGate({ kind: 'behavior' }, BLOCKED);
-    const { ctx, suspension, logger } = makeContext(gate);
-
-    const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
-
-    // 业务调用确实发生过，结果不改写成失败；只在正文末尾追加说明
     expect(tool.executeMock).toHaveBeenCalledTimes(1);
-    expect(readToolError(result.details)).toBeUndefined();
-    expect(suspension).toMatchObject({ suspended: true, code: 'ONTOLOGY_RULE_DENIED' });
-    expect(result.content).toEqual([
-      { type: 'text', text: '{"ok":true}' },
-      { type: 'text', text: denyCardBody([BLOCKED.message, ...BLOCKED.details]) },
-    ]);
-    const appended = JSON.stringify((result.content as unknown[]).slice(1));
-    expect(appended).toContain('已执行成功');
-    expect(appended).toContain('业务数据已写入');
-    expect(appended).toContain('未注册函数：inferPurchasePurpose');
-    expect(appended).toContain(RULE_TERMINAL_NOTICE);
-
-    const blocked = logger.error.mock.calls.find(
-      (call) => (call[0] as Record<string, unknown>).event === 'rule_gate.blocked',
-    );
-    expect(blocked![0]).toMatchObject({
-      phase: 'post',
-      executed: true,
-      unregistered_functions: ['inferPurchasePurpose'],
-    });
+    expect(result.content).toEqual([{ type: 'text', text: '{"ok":true}' }]);
+    expect(record.size).toBe(0);
+    // 没有被挂起：后置规则移除后，执行成功即正常收尾
+    expect(suspension.suspended).toBe(false);
   });
 
-  it('行为执行失败（失败标记）→ 不校验后置', async () => {
+  it('行为执行失败（失败标记）→ 结果逐字原样返回', async () => {
     const tool = makeTool();
-    tool.executeMock.mockResolvedValueOnce({
+    const failed = {
       content: [{ type: 'text', text: 'boom' }],
       details: { toolError: { code: 'MCP_CALL_FAILED', message: 'boom' } },
-    } as never);
+    };
+    tool.executeMock.mockResolvedValueOnce(failed as never);
 
-    const gate = makeGate({ kind: 'behavior' });
-    const { ctx, record } = makeContext(gate);
-    await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+    const { ctx, record } = makeContext(makeGate({ kind: 'behavior' }));
+    const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
 
-    expect(gate.postHint).not.toHaveBeenCalled();
+    expect(result).toBe(failed);
     expect(record.size).toBe(0);
   });
 });

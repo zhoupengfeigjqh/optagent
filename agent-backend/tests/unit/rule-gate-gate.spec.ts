@@ -33,7 +33,7 @@ function writeOntology(agentDir: string, yaml: string): void {
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), yaml, 'utf8');
 }
 
-/** 标准本体：两个行为（一个有前置+后置，一个无规则）+ 两个函数声明 */
+/** 标准本体：两个行为（一个有前置规则，一个无规则）+ 两个函数声明 */
 function baseYaml(extraRules: string[] = [], extraFunctions: string[] = []): string {
   return [
     'metadata:',
@@ -71,11 +71,6 @@ function baseYaml(extraRules: string[] = [], extraFunctions: string[] = []): str
     '              operator: eq',
     '              values: ["true"]',
     '    fail_message: 供应商名称不存在，禁止创建采购单',
-    '  - name: 采购目的推理',
-    '    behavior: CreatePurchaseRecord',
-    '    position: 后置',
-    '    related_functions:',
-    '      - inferPurchasePurpose',
     ...extraRules,
   ].join('\n');
 }

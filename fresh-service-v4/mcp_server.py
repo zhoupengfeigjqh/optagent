@@ -28,16 +28,16 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlsplit, urlunsplit
 
-import httpx
 from fastmcp import FastMCP
 from pydantic import Field
 
-from core import config
+from core import config, http_pool, ocr
 from core.data_loader import load_product_data_three
 from core.excel_export import build_output_workbook
 from core.pipeline import analyze_batch
@@ -53,6 +53,10 @@ _MAX_RESULT_BYTES = int(os.getenv("FRESH_RESULT_MAX_BYTES", str(5 * 1024 * 1024)
 _STEM_MAX_CHARS = 40
 #: 文件名里一律替换掉的字符（路径分隔符 / NTFS 保留字符 / 反斜杠）
 _UNSAFE_FILENAME_CHARS = set('/\\:*?"<>|')
+#: 进程内并发上限：多出来的请求最多排队 FRESH_QUEUE_TIMEOUT_S 秒，超时明确拒绝（不雪崩）
+_MAX_CONCURRENT = max(1, int(os.getenv("FRESH_MAX_CONCURRENT", "4")))
+_QUEUE_TIMEOUT_S = float(os.getenv("FRESH_QUEUE_TIMEOUT_S", "10"))
+_GATE = threading.BoundedSemaphore(_MAX_CONCURRENT)
 
 
 def _source_name(image_url: str) -> str:
@@ -166,7 +170,7 @@ def _deliver(result_url: str, filename: str, data: bytes, summary: str) -> tuple
     try:
         # content-type **必须是 octet-stream**：平台只为 `application/octet-stream` /
         # `text/plain` 注册了"原样收字节"的 parser，发 xlsx/html 自己的 MIME 会被判 415
-        resp = httpx.post(
+        resp = http_pool.client().post(
             _put_url(result_url, filename, summary),
             content=data,
             headers={"content-type": "application/octet-stream"},
@@ -353,48 +357,58 @@ def fresh_order_parse(
         filePath / filePathName —— 三表工作簿 xlsx（文件空间相对路径，点开即下载）
         delivery_note —— 仅在 xlsx 没交付时出现，说明原因（解析结果不受影响）
     """
-    image_url = _check_http_url("image_path", image_path)
-    sku_url = _check_http_url("sku_path", sku_path)
-    # 未必填的两个地址：传了就必须是合法 URL，留空则回落到镜像内默认文件
-    noise_url = _check_http_url("noise_path", noise_path) if (noise_path or "").strip() else ""
-    synonyms_url = (
-        _check_http_url("synonyms_path", synonyms_path) if (synonyms_path or "").strip() else ""
-    )
+    # 并发闸门：满员时最多排队 _QUEUE_TIMEOUT_S 秒，超时明确拒绝（而不是一起变慢到超时）
+    if not _GATE.acquire(timeout=_QUEUE_TIMEOUT_S):
+        raise ValueError(
+            f"当前解析请求已满（并发上限 {_MAX_CONCURRENT}），"
+            f"排队超过 {_QUEUE_TIMEOUT_S:g} 秒，请稍后重试"
+        )
+    try:
+        image_url = _check_http_url("image_path", image_path)
+        sku_url = _check_http_url("sku_path", sku_path)
+        # 未必填的两个地址：传了就必须是合法 URL，留空则回落到镜像内默认文件
+        noise_url = _check_http_url("noise_path", noise_path) if (noise_path or "").strip() else ""
+        synonyms_url = (
+            _check_http_url("synonyms_path", synonyms_path) if (synonyms_path or "").strip() else ""
+        )
 
-    data = load_product_data_three(sku_url, synonyms_url, noise_url)
+        data = load_product_data_three(sku_url, synonyms_url, noise_url)
 
-    # 单张图片即一个订单：(来源, 文本, 图片地址)
-    source_name = _source_name(image_url)
-    auto, review, error, read_meta = _analyze_image(image_url, source_name, data, layout, reader)
+        # 单张图片即一个订单：(来源, 文本, 图片地址)
+        source_name = _source_name(image_url)
+        auto, review, error, read_meta = _analyze_image(image_url, source_name, data, layout, reader)
 
-    result = {
-        "auto_rows": auto, "auto_count": len(auto),
-        "review_rows": review, "review_count": len(review),
-        "error_rows": error, "error_count": len(error),
-        "reader": read_meta.get("reader", ""),
-    }
+        result = {
+            "auto_rows": auto, "auto_count": len(auto),
+            "review_rows": review, "review_count": len(review),
+            "error_rows": error, "error_count": len(error),
+            "reader": read_meta.get("reader", ""),
+        }
 
-    # 回写是附加能力：拿不到合法地址就只返回解析结果（服务也能被直接调用）
-    put_url = _valid_result_url(resultUrl)
-    if not put_url:
+        # 回写是附加能力：拿不到合法地址就只返回解析结果（服务也能被直接调用）
+        put_url = _valid_result_url(resultUrl)
+        if not put_url:
+            return result
+
+        entries, note = _deliver_output(
+            put_url,
+            base=_job_base(source_name),
+            auto_rows=auto,
+            review_rows=review,
+            error_rows=error,
+        )
+        result.update(entries)
+        if note:
+            result["delivery_note"] = note
         return result
-
-    entries, note = _deliver_output(
-        put_url,
-        base=_job_base(source_name),
-        auto_rows=auto,
-        review_rows=review,
-        error_rows=error,
-    )
-    result.update(entries)
-    if note:
-        result["delivery_note"] = note
-    return result
+    finally:
+        _GATE.release()
 
 
 if __name__ == "__main__":
     import uvicorn
 
+    ocr.warmup()                                    # 模型加载挪到启动，首个请求不再等 5.7s
     app = mcp.http_app(path=config.MCP_PATH, transport="streamable-http")
 
     print(f"[{config.MCP_NAME}] MCP 端点:  http://{config.MCP_HOST}:{config.MCP_PORT}{config.MCP_PATH}")

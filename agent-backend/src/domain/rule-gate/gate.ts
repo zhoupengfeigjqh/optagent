@@ -1,5 +1,5 @@
 /**
- * 规则闸门的判定合成层：缓存 + 签名重载 + 四种结局 + 后置三态。
+ * 规则闸门的判定合成层：缓存 + 签名重载 + 四种结局。
  *
  * 三条硬约束：
  * 1. **永不抛**：任何异常都收敛成 `deny(config_unavailable)`（fail-closed）；
@@ -8,28 +8,21 @@
  *
  * 判定顺序（`FR-013`，不可调换）：
  * `识别 → 无前置规则 → 缺函数 → 注册校验 → 暂停 / 阻断 → 求值 → 拒绝`。
+ *
+ * 2026-11-24：后置规则整体移除（待重新设计）；本模块只做执行**前**的判定，
+ * 执行成功后不再有任何追加或阻断。
  */
 import { matchKeys, normalizeName } from '../ontology-doc.js';
 import { catalogSignature, loadGateCatalog } from './catalog.js';
 import { evaluateRules } from './evaluate.js';
 import { declaredTypeOf } from './field-path.js';
-import {
-  blockedPostDetails,
-  blockedPostMessage,
-  denyDetails,
-  denyMessage,
-  pauseDetails,
-  pauseMessage,
-  postBlock,
-} from './format.js';
+import { denyDetails, denyMessage, pauseDetails, pauseMessage } from './format.js';
 import type {
   BehaviorRuleBucket,
   DenyReason,
   EvaluateContext,
   FailedCondition,
   GateSnapshot,
-  PostHintInput,
-  PostHintResult,
   PrepareInput,
   PrepareResult,
   RuleGateInput,
@@ -166,51 +159,6 @@ export function createRuleGate(input: RuleGateInput): RuleGatePort {
       }
     },
 
-    postHint(postInput: PostHintInput): PostHintResult {
-      try {
-        const snap = ensureSnapshot();
-        const bucket = findBucket(snap, postInput.toolName);
-        if (bucket === null || bucket.post.length === 0) return null;
-
-        // 后置注册校验：行为**已经执行成功**，这里只决定"提不提示"
-        const unregistered = collectRuleUnregistered(bucket.post, postInput.available);
-        if (unregistered.length > 0) {
-          const rules = bucket.post.map((rule) => rule.name);
-          return {
-            kind: 'blocked',
-            message: blockedPostMessage(bucket.ref),
-            details: blockedPostDetails(bucket.ref, bucket.post, unregistered),
-            rules,
-            diagnosis: {
-              ontologyKey: bucket.ref.ontologyKey,
-              behaviorName: bucket.ref.behaviorName,
-              rules,
-              unregisteredFunctions: unregistered,
-            },
-          };
-        }
-
-        const rules = bucket.post.map((rule) => rule.name);
-        return {
-          kind: 'append',
-          text: postBlock(bucket.post),
-          rules,
-          diagnosis: {
-            ontologyKey: bucket.ref.ontologyKey,
-            behaviorName: bucket.ref.behaviorName,
-            rules,
-          },
-        };
-      } catch {
-        return {
-          kind: 'blocked',
-          message: FALLBACK_MESSAGE,
-          details: FALLBACK_DETAILS,
-          rules: [],
-        };
-      }
-    },
-
     invalidate(): void {
       snapshot = null;
       warnedUndeclared.clear();
@@ -251,15 +199,6 @@ function collectUnregistered(
   const all = new Set<string>();
   for (const item of missing) {
     for (const fn of item.functions) all.add(fn);
-  }
-  return [...all].filter((fn) => !available.has(normalizeName(fn)));
-}
-
-/** 后置规则的全部函数里谁未注册（不要求"未执行"，只查可用性） */
-function collectRuleUnregistered(rules: RuleSpec[], available: ReadonlySet<string>): string[] {
-  const all = new Set<string>();
-  for (const rule of rules) {
-    for (const fn of rule.relatedFunctions) all.add(fn);
   }
   return [...all].filter((fn) => !available.has(normalizeName(fn)));
 }

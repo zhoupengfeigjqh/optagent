@@ -22,7 +22,7 @@ from pathlib import Path
 
 import httpx
 
-from . import config
+from . import config, http_pool
 from .cache import TTLCache
 
 
@@ -131,7 +131,7 @@ def _load_image(image_path_or_url: str) -> tuple[bytes, str]:
     url = (image_path_or_url or "").strip()
     if url.startswith(("http://", "https://")):
         try:
-            resp = httpx.get(url, timeout=timeout_s(), follow_redirects=True)
+            resp = http_pool.client().get(url, timeout=timeout_s())
             resp.raise_for_status()
         except Exception as exc:                            # noqa: BLE001
             raise LLMError(f"下载图片失败：{exc.__class__.__name__}: {exc}") from exc
@@ -169,9 +169,14 @@ def _post(payload: dict, transport: httpx.BaseTransport | None = None) -> dict:
     if not is_configured():
         raise LLMError("未配置 LLM Key（LLM_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY 任一即可）")
     headers = {"Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"}
+    url = f"{base_url()}/chat/completions"
     try:
-        with httpx.Client(timeout=timeout_s(), transport=transport) as client:
-            resp = client.post(f"{base_url()}/chat/completions", json=payload, headers=headers)
+        if transport is not None:                       # 测试注入假响应：一次性客户端
+            with httpx.Client(timeout=timeout_s(), transport=transport) as client:
+                resp = client.post(url, json=payload, headers=headers)
+        else:
+            resp = http_pool.client().post(url, json=payload, headers=headers,
+                                           timeout=timeout_s())
     except Exception as exc:                                # noqa: BLE001
         raise LLMError(f"调用 LLM 失败：{exc.__class__.__name__}: {exc}") from exc
     if resp.status_code != 200:

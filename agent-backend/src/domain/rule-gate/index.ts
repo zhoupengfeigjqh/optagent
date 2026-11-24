@@ -21,8 +21,6 @@ export type {
   FunctionRecord,
   GateSnapshot,
   OperatorCode,
-  PostHintInput,
-  PostHintResult,
   PrepareInput,
   PrepareResult,
   RuleCondition,

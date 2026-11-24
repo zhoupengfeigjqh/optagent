@@ -1,11 +1,11 @@
 /**
  * 中文文案与"规则全文"块的**唯一来源**（包装器与装配层不拼字）。
  *
- * 三条硬口径：
+ * 两条硬口径：
  * 1. `SC-005`：文案必须含**行为名**与**规则名**，日志另含时间；
- * 2. `FR-015` / `FR-028`：暂停与后置提示都要给**规则全文**（不是摘要）；
- * 3. 后置阻断（`FR-042`）必须声明"该行为已执行成功、业务数据已写入"，
- *    MUST NOT 让用户以为整轮什么都没发生。
+ * 2. `FR-015`：暂停要给**规则全文**（不是摘要），模型据此补调函数后重试。
+ *
+ * 2026-11-24：后置规则整体移除（待重新设计），本文件不再产出后置提示 / 后置阻断文案。
  */
 import type { BehaviorRef, DenyReason, FailedCondition, RuleSpec } from './types.js';
 
@@ -136,33 +136,6 @@ export function denyDetails(input: DenyDetailInput): string[] {
     (item) => `未成立条件：${item.function}.${item.field} ${item.operator}`,
   );
   return [...head, `结论：${failMessage || '规则未通过'}`, ...failed].slice(0, 6);
-}
-
-/** 后置提示块：明确分界 + 规则全文 + 继续推导的引导 */
-export function postBlock(rules: RuleSpec[]): string {
-  return [
-    '—— 后置规则提示（行为已执行，请继续调用相关函数完成推导）——',
-    rules.map(ruleBlock).join('\n\n'),
-  ].join('\n');
-}
-
-/** 后置阻断：必须说明"已执行成功、数据已写入" */
-export function blockedPostMessage(ref: BehaviorRef): string {
-  return `本体行为「${behaviorLabel(ref)}」已执行成功（业务数据已写入），但后置规则引用了未注册函数，本轮不再执行其他工具。`;
-}
-
-/** 后置阻断的逐条原因 */
-export function blockedPostDetails(
-  ref: BehaviorRef,
-  rules: RuleSpec[],
-  unregistered: string[],
-): string[] {
-  return [
-    `行为：${behaviorLabel(ref)}`,
-    `规则：${ruleNames(rules)}`,
-    `未注册函数：${unregistered.join('、')}`,
-    '状态：该行为已执行成功、业务数据已写入，后置提示未追加。',
-  ];
 }
 
 function ruleName(rule: RuleSpec): string {

@@ -5,6 +5,9 @@
  * （`FR-010`：不读平台配置、不读其他本体的同名规则）。
  *
  * 失效判据与 020 完全一致：`ontology` 根目录 `mtimeMs`（目录级原子改名会改变它）。
+ *
+ * 2026-11-24：只装载**前置**规则；`position: 后置` 静默跳过（本版移除、待重新设计），
+ * 但仍登记其绑定的行为名，避免该行为被误判为普通函数。
  */
 import { loadOntologyDocs, normalizeName, ontologySignature, type OntologyDoc } from '../ontology-doc.js';
 import { normalizeDesign } from './design.js';
@@ -60,7 +63,6 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
           behaviorName: behavior.name,
         },
         pre: [],
-        post: [],
       });
     }
   }
@@ -69,24 +71,12 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
     for (const raw of doc.rules) {
       const rule = normalizeRule(raw, doc, warnings);
       if (rule === null) continue;
-      const behaviorKey = normalizeName(rule.behavior);
-      let bucket = behaviorIndex.get(behaviorKey);
-      if (bucket === undefined) {
-        // 规则绑定了 `behaviors[]` 未声明的行为：仍按行为入口登记（规则即声明）
-        bucket = {
-          ref: {
-            ontologyKey: doc.key,
-            scenarioName: doc.scenarioName,
-            ontologyName: doc.ontologyName,
-            behaviorName: rule.behavior,
-          },
-          pre: [],
-          post: [],
-        };
-        behaviorIndex.set(behaviorKey, bucket);
-      }
-      if (rule.position === '前置') bucket.pre.push(rule);
-      else bucket.post.push(rule);
+      const bucket = ensureBucket(behaviorIndex, doc, rule.behavior);
+      // 2026-11-24：后置规则整体移除（待重新设计）。这里只登记行为、不进桶——
+      // 登记是必要的：否则"仅被后置规则绑定的行为"会被当成普通函数记录，
+      // 语义从"本体行为"退化成"函数"，是比"少一条提示"更大的偏差。
+      if (rule.position === '后置') continue;
+      bucket.pre.push(rule);
     }
   }
 
@@ -96,6 +86,33 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
     functionResponses,
     warnings,
   };
+}
+
+/**
+ * 取（或补建）某行为的规则桶。
+ *
+ * 规则可以绑定 `behaviors[]` 未声明的行为：此时按"规则即声明"登记，
+ * 保证它仍走行为通道（不被记录成函数）。
+ */
+function ensureBucket(
+  behaviorIndex: Map<string, BehaviorRuleBucket>,
+  doc: OntologyDoc,
+  behaviorName: string,
+): BehaviorRuleBucket {
+  const key = normalizeName(behaviorName);
+  const existing = behaviorIndex.get(key);
+  if (existing !== undefined) return existing;
+  const bucket: BehaviorRuleBucket = {
+    ref: {
+      ontologyKey: doc.key,
+      scenarioName: doc.scenarioName,
+      ontologyName: doc.ontologyName,
+      behaviorName,
+    },
+    pre: [],
+  };
+  behaviorIndex.set(key, bucket);
+  return bucket;
 }
 
 /** 单条规则归一：`behavior` 空或 `position` 非"前置/后置"→ 整条忽略 + 告警 */

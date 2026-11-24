@@ -2,7 +2,8 @@
  * 单元测试：规则视图加载（021）。
  *
  * 守住的口径：
- * - 规则只认 `position: 前置 / 后置`，`behavior` 空或 `position` 非法 → 整条忽略 + 告警；
+ * - 只装载 `position: 前置`；后置规则（2026-11-24 移除、待重新设计）**静默跳过**且不告警；
+ *   `behavior` 空或 `position` 非法 → 整条忽略 + 告警；
  * - 按行为归一索引，同一行为的规则保持文件内顺序；
  * - 多本体同名行为 → 规则合并（按本体键升序，顺序可复现）；
  * - `functions[].response` 建索引（归一函数名）；
@@ -69,7 +70,7 @@ afterEach(() => {
 });
 
 describe('loadGateCatalog', () => {
-  it('前置 / 后置分桶，按行为归一索引，保持文件内顺序', () => {
+  it('只装载前置规则；后置静默跳过（不告警），按行为归一索引，保持文件内顺序', () => {
     const agent = tmpAgentDir();
     writeOntology(
       agent,
@@ -95,7 +96,6 @@ describe('loadGateCatalog', () => {
 
     expect(snapshot.warnings).toEqual([]);
     expect(bucket!.pre.map((r) => r.name)).toEqual(['R-前置-1', 'R-前置-2']);
-    expect(bucket!.post.map((r) => r.name)).toEqual(['R-后置']);
     expect(bucket!.pre[0]).toMatchObject({
       behavior: 'CreatePurchaseRecord',
       position: '前置',
@@ -103,6 +103,27 @@ describe('loadGateCatalog', () => {
       title: '供应商必须已存在',
     });
     expect(bucket!.pre[0]!.design!.groups).toHaveLength(1);
+  });
+
+  it('后置规则绑定了未声明的行为：只登记行为、不装载规则，且不告警', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      '采购单',
+      [
+        'behaviors:',
+        '  - name: QueryStock',
+        'rules:',
+        ...ruleLines({ name: 'R-后置', behavior: 'CreatePurchaseRecord', position: '后置' }),
+      ].join('\n'),
+    );
+
+    const snapshot = loadGateCatalog(agent);
+    const bucket = snapshot.behaviorIndex.get('createpurchaserecord');
+
+    expect(snapshot.warnings).toEqual([]);
+    expect(bucket).toBeDefined();
+    expect(bucket!.pre).toEqual([]);
   });
 
   it('behavior 空 / position 非法 → 整条忽略并告警', () => {

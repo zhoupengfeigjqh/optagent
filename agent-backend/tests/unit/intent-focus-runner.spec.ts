@@ -312,9 +312,12 @@ describe('成功链路', () => {
     const { prompt, toolTips } = await runner.judge(input());
 
     expect(prompt).toBe(
-      "本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）\n" +
-        "1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）\n" +
-        '   直接命中：创建采购单（B1）、校验采购单位一致性（F1）',
+      `${FOCUS_PREFIX}\n` +
+        '技能 onto-skill → 本体 原材料采购和库存（ontology_id=1）\n\n' +
+        '关键行为\n' +
+        '· 创建采购单 B1\n\n' +
+        '关键函数\n' +
+        '· 校验采购单位一致性 F1',
     );
     // 卡片候选范围＝入选行为（顺序沿判定结果，字段原样透传）；函数 F1 不得出现
     expect(toolTips).toEqual([
@@ -347,8 +350,8 @@ describe('成功链路', () => {
     const { root } = fixture({ duplicateOntology: true });
     const { runner } = harness(root);
     const { prompt } = await runner.judge(input());
-    expect(prompt.match(/ontology_id='/g)).toHaveLength(1);
-    expect(prompt.match(/ontology_name='/g)).toHaveLength(1);
+    expect(prompt.match(/ontology_id=/g)).toHaveLength(1);
+    expect(prompt.match(/本体 原材料采购和库存/g)).toHaveLength(1);
   });
 
   it('规则不再补入低于阈值的行为：Q1/Q2 得分 0.05，仍不出现', async () => {
@@ -375,8 +378,9 @@ describe('成功链路', () => {
       },
     });
     const { prompt, toolTips } = await runner.judge(input());
-    expect(prompt).toContain('1）plain-skill（非本体技能）');
-    expect(prompt).not.toContain('ontology_name=');
+    expect(prompt).toContain('技能 plain-skill（非本体技能）');
+    expect(prompt).not.toContain('→ 本体');
+    expect(prompt).not.toContain('ontology_id');
     // 非本体技能没有能力：卡片范围为空的（调用方据此不产出卡片）
     expect(toolTips).toEqual([]);
     expect(records[0]!.disposition).toBe('focused');
@@ -431,8 +435,7 @@ const FOCUS_ONTOLOGY_YAML = [
   '    concept: PurchaseRecord',
 ].join('\n');
 
-const FOCUS_PREFIX =
-  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
+const FOCUS_PREFIX = '［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。';
 
 function focusFixture(): Fixture {
   return fixture({
@@ -463,10 +466,11 @@ describe('聚焦阶数（019）', () => {
     const { runner, records } = harness(root, { decide: focusDecide(['查询原材料库存信息']) });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 2026-11-13：概念不再单独成段（它在五元组里出现），阶数 0 没有路径段
+    // 阶数 0：只有关键行为段，没有图路径段
     expect(prompt).toBe(
-      `${FOCUS_PREFIX}\n1）inventory-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='7'）\n` +
-        '   直接命中：查询原材料库存信息（QueryInventory）',
+      `${FOCUS_PREFIX}\n技能 inventory-skill → 本体 原材料采购和库存（ontology_id=7）\n\n` +
+        '关键行为\n' +
+        '· 查询原材料库存信息 QueryInventory @RawMaterialInventory',
     );
     expect(toolTips).toEqual([
       { name: 'QueryInventory', title: '查询原材料库存信息', ontology_id: '7', ontology_name: '原材料采购和库存' },
@@ -487,11 +491,11 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 一行读完：行为 → 概念 → 关系 → 概念 → 行为；关系名在 yaml 里没写 title ⇒ 回退 name，
-    // 且这一跳是逆着箭头走的（库存 ← 原材料），所以关系名要反读 `←`
+    // 一行读完：行为 @起点概念 ←〔关系〕— 终点概念 → 终点概念下的行为；
+    // 关系名在 yaml 里没写 title ⇒ 回退 name，且这一跳逆着本体边写，所以边方向朝左
     expect(prompt).toContain(
-      '   查询原材料库存信息（QueryInventory）—〔原材料库存(RawMaterialInventory)〕' +
-        '—[上游]HasRawInventory←〔原材料(RawMaterial)〕—→查询原材料基本信息（QueryRawMaterials）',
+      '查询原材料库存信息 QueryInventory @RawMaterialInventory ' +
+        '←〔HasRawInventory〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials',
     );
     // 概念不再单独成段
     expect(prompt).not.toContain('关联概念：');
@@ -524,7 +528,7 @@ describe('聚焦阶数（019）', () => {
     const { prompt, toolTips } = await runner.judge(input());
 
     // 两个直接命中概念把「原材料」变成锚点 → 上游无从发散（连路径段都不该出现）
-    expect(prompt).not.toContain('上游路径：');
+    expect(prompt).not.toContain('图路径');
 
     // 下游：原材料 → 原材料采购记录（采购单）→ 创建采购单进卡片
     expect(toolTips.map((item) => item.name)).toEqual([
@@ -577,7 +581,7 @@ describe('分批与降级', () => {
     const { prompt } = await runner.judge(input());
     expect(calls).toEqual([32, 1]);
     // 第二批只有一个候选入选（具体名字取决于目录枚举序，不写死）
-    expect(prompt).toContain('1）skill-');
+    expect(prompt).toContain('技能 skill-');
     expect(prompt).toContain('（非本体技能）');
     expect(records[0]!.disposition).toBe('focused');
     expect(records[0]!.error).toContain('batch_0:timeout');
@@ -627,7 +631,7 @@ describe('分批与降级', () => {
     const { root } = fixture();
     const { runner } = harness(root, { storeThrows: true });
     await expect(runner.judge(input())).resolves.toMatchObject({
-      prompt: expect.stringContaining('1）onto-skill（本体技能'),
+      prompt: expect.stringContaining('技能 onto-skill'),
     });
   });
 
@@ -635,7 +639,7 @@ describe('分批与降级', () => {
     const { root } = fixture();
     const { runner } = harness(root, { withStore: false });
     await expect(runner.judge(input())).resolves.toMatchObject({
-      prompt: expect.stringContaining('1）onto-skill（本体技能'),
+      prompt: expect.stringContaining('技能 onto-skill'),
     });
   });
 });
@@ -672,7 +676,7 @@ describe('日志与本体名回退', () => {
     );
     const { runner } = harness(root);
     const { prompt } = await runner.judge(input());
-    expect(prompt).toContain("ontology_name='原材料采购和库存'");
+    expect(prompt).toContain('本体 原材料采购和库存');
   });
 });
 

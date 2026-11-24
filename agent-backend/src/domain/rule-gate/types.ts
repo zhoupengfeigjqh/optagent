@@ -23,13 +23,19 @@ export type RuleGateCode = (typeof RULE_GATE_CODES)[number];
 /**
  * 中止原因三分类（进 `details` 与日志，**不新增错误码**）。
  *
- * - `unregistered`：规则引用的函数未注册（前置不执行 / 后置已执行后放弃提示）
+ * - `unregistered`：规则引用的函数未注册
  * - `condition_false`：`rule_design` 求值为 `false`
  * - `config_unavailable`：`rules` 段或 `rule_design` 结构非法、求值器异常
  */
 export type DenyReason = 'unregistered' | 'condition_false' | 'config_unavailable';
 
-/** 规则的出现时机（与 `ontology.yaml` 原文一致，仅认这两个值） */
+/**
+ * 规则的出现时机（与 `ontology.yaml` 原文一致）。
+ *
+ * 2026-11-24：**只实现前置**。后置规则本版整体移除、待重新设计——
+ * 加载时 `position: 后置` 静默跳过（只保留"该名字是本体行为"这一事实，
+ * 避免它被误当普通函数记录），既不求值也不追加提示，见 `catalog.ts`。
+ */
 export type RulePosition = '前置' | '后置';
 
 /** 条件组合方式 */
@@ -142,8 +148,6 @@ export interface PrepareInput {
   available: ReadonlySet<string>;
 }
 
-/** 后置判定的输入与前置同形 */
-export type PostHintInput = PrepareInput;
 
 /**
  * 判定诊断（包装器写结构化日志用）。
@@ -172,22 +176,9 @@ export type PrepareResult =
       diagnosis?: RuleDiagnosis;
     };
 
-/** 后置判定的三种结局 */
-export type PostHintResult =
-  | null
-  | { kind: 'append'; text: string; rules: string[]; diagnosis?: RuleDiagnosis }
-  | {
-      kind: 'blocked';
-      message: string;
-      details: string[];
-      rules: string[];
-      diagnosis?: RuleDiagnosis;
-    };
-
-/** 闸门端口：`prepare` / `postHint` **永不抛错** */
+/** 闸门端口：`prepare` **永不抛错** */
 export interface RuleGatePort {
   prepare(input: PrepareInput): PrepareResult;
-  postHint(input: PostHintInput): PostHintResult;
   invalidate(): void;
 }
 
@@ -207,8 +198,8 @@ export interface RuleGateInput {
 export interface BehaviorRuleBucket {
   /** 行为引用（取合并顺序第一条所属本体，用于文案） */
   ref: BehaviorRef;
+  /** 前置规则（2026-11-24 起只有前置；后置规则加载时跳过） */
   pre: RuleSpec[];
-  post: RuleSpec[];
 }
 
 /** 一次加载得到的不可变快照（测试与诊断用） */

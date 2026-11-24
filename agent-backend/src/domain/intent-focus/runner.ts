@@ -537,7 +537,6 @@ export class IntentFocusRunner implements IntentFocusPort {
     const composed = composeFocusPrompt(promptSkills, capabilitySelection, {
       paths: focusPaths,
       maxChars: maxPromptChars(depth),
-      conceptTitle: conceptTitleLookup(selectedOntologies),
     });
     const roundMs = this.now() - startedAt;
     const allWarnings = [...warnings, ...expansion.warnings];
@@ -744,25 +743,6 @@ function collectSelectedOntologies(
     for (const ontology of candidate.matchedOntologies) ids.add(ontology.ontologyId);
   }
   return index.all.filter((ontology) => ids.has(ontology.ontologyId));
-}
-
-/**
- * 概念中文名查询（2026-11-20）：函数与取数条目要在 `〔〕` 里写 `中文名(name)`。
- *
- * 同一 ID 多份文件时以枚举序首份为准（与 `directConceptEntries` 同口径）；
- * 概念不存在时返回 null，由提示层只写 `name`——老本体没有 `concepts[]` 也不该留空槽。
- */
-function conceptTitleLookup(
-  ontologies: readonly OntologyDefinition[],
-): (ontologyId: string, conceptName: string) => string | null {
-  const titles = new Map<string, string>();
-  for (const ontology of ontologies) {
-    for (const concept of ontology.concepts) {
-      const key = `${ontology.ontologyId}\u0000${concept.name}`;
-      if (!titles.has(key)) titles.set(key, concept.title);
-    }
-  }
-  return (ontologyId, conceptName) => titles.get(`${ontologyId}\u0000${conceptName}`) ?? null;
 }
 
 /**

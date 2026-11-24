@@ -1,24 +1,22 @@
 /**
  * 单元测试：文案与"规则全文"块（021）。
  *
- * 守住的口径（`SC-005` / `FR-015` / `FR-028` / `FR-042`）：
+ * 守住的口径（`SC-005` / `FR-015`）：
  * - 文案必须含行为名与规则名；
- * - 暂停与后置提示给**规则全文**（全部字段），不是摘要；
+ * - 暂停给**规则全文**（全部字段），不是摘要；
  * - 三种中止原因的 `details` 各自可辨认（未注册 / 求值不成立 / 配置不可用）；
- * - 后置阻断必须说明"已执行成功、数据已写入"；
  * - 同一输入渲染稳定（可作快照断言）。
+ *
+ * 2026-11-24：后置规则整体移除（待重新设计），后置提示 / 后置阻断文案的用例一并删除。
  */
 import { describe, expect, it } from 'vitest';
 
 import { normalizeDesign } from '../../src/domain/rule-gate/design.js';
 import {
-  blockedPostDetails,
-  blockedPostMessage,
   denyDetails,
   denyMessage,
   pauseDetails,
   pauseMessage,
-  postBlock,
   ruleBlock,
 } from '../../src/domain/rule-gate/format.js';
 import type { BehaviorRef, RuleSpec } from '../../src/domain/rule-gate/types.js';
@@ -176,27 +174,5 @@ describe('deny', () => {
       failed: [],
     });
     expect(details).toContain('结论：规则未通过');
-  });
-});
-
-describe('后置提示与后置阻断', () => {
-  it('postBlock 有明确分界并附规则全文', () => {
-    const text = postBlock([ruleOf({ position: '后置', name: '采购目的推理' })]);
-    expect(text).toContain('后置规则提示');
-    expect(text).toContain('采购目的推理');
-    expect(text).toContain('判定设计：');
-  });
-
-  it('后置阻断：message 明确"已执行成功、数据已写入"', () => {
-    const message = blockedPostMessage(REF);
-    expect(message).toContain('已执行成功');
-    expect(message).toContain('业务数据已写入');
-    expect(message).toContain('CreatePurchaseRecord');
-  });
-
-  it('后置阻断 details 点名未注册函数并声明结果保留', () => {
-    const details = blockedPostDetails(REF, [ruleOf({ position: '后置' })], ['inferPurchasePurpose']);
-    expect(details.join('\n')).toContain('未注册函数：inferPurchasePurpose');
-    expect(details.join('\n')).toContain('后置提示未追加');
   });
 });

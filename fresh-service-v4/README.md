@@ -232,6 +232,11 @@ docker run -d --name fresh_food_mcp_v1 -p 8104:8000 fresh_food_mcp_v1
 这些也可以写在项目根 `.env`（`.env.local` 可覆盖，真实环境变量优先级最高）；**API Key 只放 `.env`，不要写进 `core/config.py`**。
 产出交付相关（默认值见 `mcp_server.py`）：`FRESH_PUT_TIMEOUT_S`（回写超时，默认 30s）、`FRESH_RESULT_MAX_BYTES`（单次回写上限，默认 5MB，与平台 `UPLOAD_MAX_MB` 对齐）。
 
+并发与性能相关：
+`FRESH_MAX_CONCURRENT`（进程内并发上限，默认 4）、`FRESH_QUEUE_TIMEOUT_S`（满员时排队上限，默认 10s，超时明确报错）、`OCR_MAX_PARALLEL`（进程内 OCR 推理并发，默认 1 = 串行最稳；调大前先压测确认不崩）。
+模型在服务启动时预热一次（不再按请求重建），每次请求省约 0.7s；HTTP 走进程内共享连接池。
+压测：`python scripts/bench_local.py -c 1,3,5 -n 2`（镜像里没有 paddle 之外的样例图，需先把图 `docker cp` 进容器）；自检：`python scripts/verify_a.py`。
+
 注意：镜像体积主要来自 `paddlepaddle`（约 400–600 MB）与 `opencv-contrib-python`（约 90 MB）；首次构建需要联网下载依赖与 OCR 模型。
 
 **API Key 怎么进容器**（`.env` 不会被打进镜像，`.dockerignore` 已排除）：

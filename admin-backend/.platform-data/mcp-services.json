@@ -107,56 +107,6 @@
       "headers": {},
       "updated_at": "2026-10-23T05:56:19.504Z"
     },
-    "test1": {
-      "name": "test1",
-      "description": "原料库存本体函数",
-      "transport": "http",
-      "url": "http://localhost:8021/mcp",
-      "command": null,
-      "args": null,
-      "file_args": {},
-      "confirmation": "never",
-      "rules_fields": {},
-      "allowed_tools": [
-        "sumRawNotArrivalQty",
-        "checkRawMaterialUnit",
-        "checkArrivalTimeValidity",
-        "checkSupplierExistence",
-        "checkRelatedOrderExistence",
-        "inferPurchasePurpose"
-      ],
-      "tool_labels": {},
-      "headers": {
-        "X-MCP-Token": "qHA_Npky2R8TRF41-QFOG0O4twrX0A-F"
-      },
-      "updated_at": "2026-11-06T15:08:49.405Z"
-    },
-    "test2": {
-      "name": "test2",
-      "description": "原料库存本体行为",
-      "transport": "http",
-      "url": "http://localhost:8022/mcp",
-      "command": null,
-      "args": null,
-      "file_args": {},
-      "confirmation": "never",
-      "rules_fields": {},
-      "allowed_tools": [
-        "CreatePurchaseRecord",
-        "CancelPurchaseRecord",
-        "ReceiveRawMaterial",
-        "QueryInventory",
-        "QueryRawMaterials",
-        "QueryPurchaseRecords",
-        "QuerySuppliers",
-        "QuerySupplierCapability"
-      ],
-      "tool_labels": {},
-      "headers": {
-        "X-MCP-Token": "Y9gtXqzgndtjVF4RPWnqb989TgOzjfpu"
-      },
-      "updated_at": "2026-11-06T15:09:26.459Z"
-    },
     "fresh-parse": {
       "name": "fresh-parse",
       "description": "生鲜名称解析服务",
@@ -180,6 +130,91 @@
       "tool_labels": {},
       "headers": {},
       "updated_at": "2026-11-18T05:34:15.886Z"
+    },
+    "onto_common_functions": {
+      "name": "onto_common_functions",
+      "description": "本体公共函数",
+      "transport": "http",
+      "url": "http://localhost:8007/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": "never",
+      "rules_fields": {},
+      "allowed_tools": [
+        "getCurrentDate",
+        "dateAdd",
+        "dateDiff",
+        "getWeekday",
+        "filterData",
+        "aggregateData",
+        "groupReduce",
+        "max",
+        "min",
+        "average",
+        "median",
+        "std",
+        "lastRecord"
+      ],
+      "tool_labels": {},
+      "headers": {},
+      "updated_at": "2026-11-24T08:40:57.355Z"
+    },
+    "onto_functions": {
+      "name": "onto_functions",
+      "description": "本体函数",
+      "transport": "http",
+      "url": "http://localhost:8021/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": "never",
+      "rules_fields": {},
+      "allowed_tools": [
+        "sumRawNotArrivalQty",
+        "checkRawMaterialUnit",
+        "checkArrivalTimeValidity",
+        "checkSupplierExistence",
+        "checkRelatedOrderExistence",
+        "inferPurchasePurpose"
+      ],
+      "tool_labels": {},
+      "headers": {
+        "X-MCP-Token": "rLqoBFh53uiAYOlpzGu68fiQOAjGSK7Q"
+      },
+      "updated_at": "2026-11-24T08:42:18.953Z"
+    },
+    "onto_behaviors": {
+      "name": "onto_behaviors",
+      "description": "本体行为工具，包括查询和写入动作",
+      "transport": "http",
+      "url": "http://localhost:8022/mcp",
+      "command": null,
+      "args": null,
+      "file_args": {},
+      "confirmation": {
+        "tools": [
+          "CreatePurchaseRecord",
+          "CancelPurchaseRecord",
+          "ReceiveRawMaterial"
+        ]
+      },
+      "rules_fields": {},
+      "allowed_tools": [
+        "CreatePurchaseRecord",
+        "CancelPurchaseRecord",
+        "ReceiveRawMaterial",
+        "QueryInventory",
+        "QueryPurchaseRecords",
+        "QueryRawMaterials",
+        "QuerySuppliers",
+        "QuerySupplierCapability"
+      ],
+      "tool_labels": {},
+      "headers": {
+        "X-MCP-Token": "Tkm5LHP6J1SJ2c2RSiRuwcS6XFDNGIdj"
+      },
+      "updated_at": "2026-11-24T09:01:43.827Z"
     }
   }
 }

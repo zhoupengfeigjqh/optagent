@@ -14,8 +14,8 @@ exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭�
   "input": "帮我创建一笔原材料采购单",
   "input_truncated": false,
   "model": "laya-multilingual",
-  "prompt": "本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）
-1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）",
+  "prompt": "［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 onto-skill → 本体 原材料采购和库存（ontology_id=1）",
   "prompt_truncated": false,
   "reason": null,
   "skills": [
@@ -37,6 +37,6 @@ exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭�
 `;
 
 exports[`027 输入重写：零调用组合与存量产物快照 > 开关关闭时留档与提示与改造前逐字一致（快照） 2`] = `
-"本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）
-1）onto-skill（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'）"
+"［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 onto-skill → 本体 原材料采购和库存（ontology_id=1）"
 `;
