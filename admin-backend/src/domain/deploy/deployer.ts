@@ -22,7 +22,7 @@ import type { Logger } from 'pino';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import type { AgentDesignDocument, AgentDesignService } from '../config-center/agent-design.js';
-import type { UserLinkService } from '../config-center/user-links.js';
+import type { UserLinkPort } from '../config-center/user-links.js';
 import type { McpServiceConfigService } from '../mcp/service-config.js';
 import type { SkillLibraryService } from '../skill-library/install.js';
 import type { OntologyStore } from '../ontology/store.js';
@@ -41,7 +41,7 @@ export interface DeployTarget {
 export interface DeployerDeps {
   store: PlatformStore;
   agents: AgentDesignService;
-  users: UserLinkService;
+  users: UserLinkPort;
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
   /** 本体库：物化时读取快照（文件缺失即抛可读错误） */

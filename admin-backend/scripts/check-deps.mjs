@@ -25,6 +25,7 @@ const ALLOWED_DEPENDENCIES = new Set([
   'yauzl', // D7：SKILL ZIP 安全解压
   'yaml', // D2（2026-10-03 重新引入）：只读解析本体市场 ontology.yaml 的 metadata
   'jose', // 024：JWT 签发/验签（登录凭据）；纯 JS、无原生模块
+  'mysql2', // 028 阶段 1：账号域 MySQL 化（连接池，仅 STORAGE_DRIVER=mysql 使用）
 ]);
 
 /** D2 登记的开发依赖 */

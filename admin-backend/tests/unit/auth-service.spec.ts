@@ -39,7 +39,7 @@ function tokenFromCookie(cookie: string): string {
 
 describe('AuthService', () => {
   it('登录成功：返回 user_id + 可验签 Cookie，并登记会话', async () => {
-    users.create('zpf', [], undefined, '123456');
+    await users.create('zpf', [], undefined, '123456');
     const res = await auth.login('zpf', '123456');
     expect(res.userId).toBe('zpf');
     expect(res.cookie).toContain('optagent_auth=');
@@ -49,8 +49,8 @@ describe('AuthService', () => {
   });
 
   it('密码错 / 账号不存在 / 存量无密码 → 同码 ADM_INVALID_CREDENTIALS', async () => {
-    users.create('zpf', [], undefined, '123456');
-    users.create('nopw', []);
+    await users.create('zpf', [], undefined, '123456');
+    await users.create('nopw', []);
     const cases: Array<[string, string]> = [
       ['zpf', 'wrong'],
       ['ghost', 'x'],
@@ -64,7 +64,7 @@ describe('AuthService', () => {
   });
 
   it('二次登录覆盖旧会话（后登踢前登）', async () => {
-    users.create('zpf', [], undefined, '123456');
+    await users.create('zpf', [], undefined, '123456');
     const first = await auth.login('zpf', '123456');
     const firstSession = (await verifySession(tokenFromCookie(first.cookie), SECRET)).sessionId;
     await auth.login('zpf', '123456');
@@ -72,15 +72,15 @@ describe('AuthService', () => {
   });
 
   it('登出清除会话并返回清 Cookie 头', async () => {
-    users.create('zpf', [], undefined, '123456');
+    await users.create('zpf', [], undefined, '123456');
     await auth.login('zpf', '123456');
-    const cookie = auth.logout('zpf');
+    const cookie = await auth.logout('zpf');
     expect(cookie).toContain('Max-Age=0');
     expect(sessions.getCurrentSession('zpf')).toBeNull();
   });
 
   it('内省判定当前会话', async () => {
-    users.create('zpf', [], undefined, '123456');
+    await users.create('zpf', [], undefined, '123456');
     const res = await auth.login('zpf', '123456');
     const claims = await verifySession(tokenFromCookie(res.cookie), SECRET);
     expect(auth.introspect('zpf', claims.sessionId)).toBe(true);

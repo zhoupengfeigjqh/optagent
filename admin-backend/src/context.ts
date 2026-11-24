@@ -9,10 +9,10 @@
  */
 import type { AppConfig } from './config.js';
 import type { AuthService } from './domain/auth/service.js';
-import type { SessionStore } from './domain/auth/session-store.js';
+import type { SessionPort } from './domain/auth/session-store.js';
 import type { AgentDesignService } from './domain/config-center/agent-design.js';
 import type { UnifiedCatalog } from './domain/config-center/unified-catalog.js';
-import type { UserLinkService } from './domain/config-center/user-links.js';
+import type { UserLinkPort } from './domain/config-center/user-links.js';
 import type { Deployer } from './domain/deploy/deployer.js';
 import type { DeployHistoryService } from './domain/deploy/history.js';
 import type { DeployManifestService } from './domain/deploy/manifest.js';
@@ -39,8 +39,8 @@ export interface AppContext {
   /* ---- domain：业务服务 ---- */
   /** 数字人设计态（`FR-014`~`FR-022`） */
   agents: AgentDesignService;
-  /** 用户与关联数字人（`FR-023`~`FR-025`） */
-  users: UserLinkService;
+  /** 用户与关联数字人（`FR-023`~`FR-025`）；028：file / mysql 双驱动的端口 */
+  users: UserLinkPort;
   /** 共享技能库（`FR-035`~`FR-042`） */
   skills: SkillLibraryService;
   /** 本体库（`FR-058`~`FR-061`，2026-10-03）：只读浏览 + 市场导入/更新/删除 */
@@ -61,8 +61,8 @@ export interface AppContext {
   catalog: UnifiedCatalog;
   /** 部署编排（`FR-026`~`FR-034`） */
   deployer: Deployer;
-  /** 024：会话登记（单会话，后登踢前登） */
-  sessionStore: SessionStore;
+  /** 024：会话登记（单会话，后登踢前登）；028：file / mysql 双驱动的端口 */
+  sessionStore: SessionPort;
   /** 024：登录鉴权编排（登录/登出/内省） */
   auth: AuthService;
 }

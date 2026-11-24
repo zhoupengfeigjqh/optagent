@@ -47,7 +47,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     if (token) {
       try {
         const claims = await verifySession(token, ctx.config.authSecret);
-        cookie = ctx.auth.logout(claims.userId);
+        cookie = await ctx.auth.logout(claims.userId);
       } catch {
         /* 凭据无效：仍清除客户端 Cookie，登出保持幂等 */
       }

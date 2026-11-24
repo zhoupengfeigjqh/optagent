@@ -15,11 +15,13 @@ import type { AppContext } from './context.js';
 import { ApiError } from './domain/api-error.js';
 import { auditOf } from './domain/audit.js';
 import { AuthService } from './domain/auth/service.js';
-import { SessionStore } from './domain/auth/session-store.js';
+import { SessionStore, type SessionPort } from './domain/auth/session-store.js';
+import { MysqlSessionStore } from './domain/auth/mysql-session-store.js';
 import { AgentDesignService } from './domain/config-center/agent-design.js';
 import { agentsReferencingService, expandToPairs } from './domain/config-center/references.js';
 import { UnifiedCatalog } from './domain/config-center/unified-catalog.js';
-import { UserLinkService } from './domain/config-center/user-links.js';
+import { UserLinkService, type UserLinkPort } from './domain/config-center/user-links.js';
+import { MysqlUserLinkService, MysqlUserRepository } from './domain/config-center/mysql-user-link-service.js';
 import { ERROR_CODES } from './domain/error-codes.js';
 import { Deployer } from './domain/deploy/deployer.js';
 import { DeployHistoryService } from './domain/deploy/history.js';
@@ -30,6 +32,7 @@ import { McpServiceListService } from './domain/mcp/service-list.js';
 import { OntologyStore } from './domain/ontology/store.js';
 import { SkillLibraryService } from './domain/skill-library/install.js';
 import { McpClientService } from './infra/mcp-client.js';
+import { MysqlConnection } from './infra/mysql.js';
 import { OptAgentWriter } from './infra/opt-agent-writer.js';
 import { PlatformStore } from './infra/platform-store.js';
 import { RuntimeClient } from './infra/runtime-client.js';
@@ -77,9 +80,37 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // 本体库（2026-10-03）：只读浏览 + 本体市场导入/更新/删除（FR-058~FR-061）
   const ontologies = new OntologyStore(store, { logger: loggers.logger });
   const agents = new AgentDesignService(store);
-  const users = new UserLinkService(store);
+
+  // ---- 028 阶段 1：账号域存储按 STORAGE_DRIVER 选择（默认 file，可回滚）----
+  // mysql 驱动：启动即验证连通（不可达 = 拒绝启动，不静默回退文件存储），
+  // 并全量加载内存投影——读路径保持同步，Deployer/references/MCP 引用零改动。
+  let users: UserLinkPort;
+  let sessionStore: SessionPort;
+  let mysqlConn: MysqlConnection | undefined;
+  if (config.storageDriver === 'mysql' && config.mysql) {
+    mysqlConn = new MysqlConnection({ ...config.mysql, logger: loggers.logger });
+    await mysqlConn.ping();
+    const mysqlUsers = new MysqlUserLinkService(new MysqlUserRepository(mysqlConn), store);
+    await mysqlUsers.init();
+    const mysqlSessions = new MysqlSessionStore(mysqlConn);
+    await mysqlSessions.init();
+    users = mysqlUsers;
+    sessionStore = mysqlSessions;
+    loggers.logger.info(
+      {
+        event: 'storage.driver',
+        driver: 'mysql',
+        database: config.mysql.database,
+        host: config.mysql.host,
+        port: config.mysql.port,
+      },
+      `账号域存储：MySQL ${config.mysql.database}@${config.mysql.host}:${config.mysql.port}`,
+    );
+  } else {
+    users = new UserLinkService(store);
+    sessionStore = new SessionStore(store);
+  }
   // 024：登录鉴权（会话登记 + 登录编排）
-  const sessionStore = new SessionStore(store);
   const auth = new AuthService(users, sessionStore, {
     secret: config.authSecret,
     ttlSeconds: config.authTokenTtlSeconds,
@@ -254,6 +285,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerAuthRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {
+    // 028：mysql 驱动时关闭连接池（file 驱动无资源需要释放）
+    if (mysqlConn) await mysqlConn.close();
     await loggers.close();
   });
 

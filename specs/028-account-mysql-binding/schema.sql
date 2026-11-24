@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS agent_services (
 -- 账号
 --   user_id  = JWT sub / 运行端 .opt-agent/users/{uid} 目录名（不是手机号）
 --   phone    = 登录标识；允许 NULL 且唯一索引允许多 NULL，兼容 024 存量无手机号用户
+--   agents   = 部署关联数字人清单（.platform-data/users/{uid}.json 的 agents[] 投影）。
+--              注意与 user_agent_grants 语义不同：本列决定「部署什么」（§6），
+--              user_agent_grants 决定「能使用什么」——阶段 1 实施补充（初版遗漏）。
 --   password_record = scrypt 记录 {algo,params,salt,hash}，与 domain/auth/password.ts 一一对应
 --                     NULL = 不可登录（024 FR-013 口径）
 -- -----------------------------------------------------------------------------
@@ -45,6 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id            VARCHAR(64)     NOT NULL                COMMENT '内部主键，JWT sub',
   phone              VARCHAR(20)     DEFAULT NULL            COMMENT '11 位手机号；存量用户可为 NULL',
+  agents             JSON            NOT NULL DEFAULT (JSON_ARRAY()) COMMENT '部署关联数字人清单（users.agents[] 投影）',
   display_name       VARCHAR(64)     NOT NULL DEFAULT ''     COMMENT '用户名',
   password_record    JSON            DEFAULT NULL            COMMENT 'scrypt 摘要；NULL = 不可登录',
   role               ENUM('admin','user') NOT NULL DEFAULT 'user',

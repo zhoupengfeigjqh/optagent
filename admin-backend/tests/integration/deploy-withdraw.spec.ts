@@ -72,7 +72,7 @@ beforeEach(async () => {
     allowed_tools: ['ocr_image'],
   });
   await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: AGENT });
-  fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+  await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
 });
 
 afterEach(async () => {
@@ -146,7 +146,7 @@ describe('撤回部署（§6.9）', () => {
   });
 
   it('只影响该用户：其他用户的目录不受影响', async () => {
-    fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
     await deploy(['admin', 'ops']);
     const opsDir = path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'demo');
     expect(fs.existsSync(opsDir)).toBe(true);

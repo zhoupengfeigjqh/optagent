@@ -65,8 +65,8 @@ function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unkn
 }
 
 /** 关联用户与数字人 */
-function link(userId: string, agents: string[]): void {
-  fx.ctx.users.create(userId, agents, fx.ctx.store.revision());
+async function link(userId: string, agents: string[]): Promise<void> {
+  await fx.ctx.users.create(userId, agents, fx.ctx.store.revision());
 }
 
 /* 本体物化与快照完整性用例见同目录 `deploy-ontology.spec.ts`（本文件触 500 行门禁，故分居） */
@@ -80,7 +80,7 @@ beforeEach(async () => {
   fx.runtime.tools = TOOL_FIXTURE;
   configureMcp();
   await createAgent(baseAgent());
-  link('admin', ['demo']);
+  await link('admin', ['demo']);
 });
 
 afterEach(async () => {
@@ -196,7 +196,7 @@ describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026
       scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
       updated_at: '2026-09-15T00:00:00.000Z',
     });
-    link('ops', ['broken']);
+    await link('ops', ['broken']);
 
     const res = await fx.app.inject({
       method: 'POST',
@@ -247,7 +247,7 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
       force: true,
     });
     fs.writeFileSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), 'blocked', 'utf8');
-    link('ops', ['demo2']);
+    await link('ops', ['demo2']);
 
     const res = await fx.app.inject({
       method: 'POST',
@@ -305,9 +305,9 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
 });
 
 describe('只选一部分用户部署（部署对象由用户卡片勾选，2026-09-16）', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     // 第二个用户（未关联任何数字人）
-    link('ops', []);
+    await link('ops', []);
   });
 
   it('只选一个用户：部署**只写该用户**，其余用户零写入，且清单只记本次用户', async () => {
@@ -347,7 +347,7 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
 
 describe('GET /api/admin/references（§7.1）', () => {
   it('各 target_type 返回的受影响清单与数字人配置中的引用一致', async () => {
-    link('ops', ['demo']);
+    await link('ops', ['demo']);
 
     const cases: Array<[string, string, number]> = [
       ['builtin_tool', 'read_file', 2],

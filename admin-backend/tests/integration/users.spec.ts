@@ -42,7 +42,7 @@ afterEach(async () => {
 
 describe('GET /api/admin/users', () => {
   it('卡片展示用户名与其已关联数字人角色名清单（FR-023）', async () => {
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
     expect(res.statusCode).toBe(200);
     expect(res.json().page_size).toBe(8);
@@ -54,7 +54,7 @@ describe('GET /api/admin/users', () => {
   });
 
   it('expand=summary 返回搭配摘要，作为部署前核对总账（FR-023）', async () => {
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     const res = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/users?page=1&expand=summary',
@@ -65,7 +65,7 @@ describe('GET /api/admin/users', () => {
   });
 
   it('关联了失效引用的数字人在卡片上标记异常并给出原因', async () => {
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     fx.runtime.tools = []; // 工具下线 → demo 变异常
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
     expect(res.json().items[0].agents[0].abnormal).toBe(true);
@@ -85,7 +85,7 @@ describe('POST /api/admin/users', () => {
   });
 
   it('重复标识 → 409 ADM_USER_ID_TAKEN', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', [], fx.ctx.store.revision());
     const res = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/users',
@@ -126,7 +126,7 @@ describe('PUT /api/admin/users/{user_id}', () => {
       url: '/api/admin/agents',
       payload: { ...AGENT, name: 'demo2' },
     });
-    const created = fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
+    const created = await fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
 
     const res = await fx.app.inject({
       method: 'PUT',
@@ -148,7 +148,7 @@ describe('PUT /api/admin/users/{user_id}', () => {
   });
 
   it('版本不符 → 409 ADM_CONFIG_REVISION_CONFLICT', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', [], fx.ctx.store.revision());
     const res = await fx.app.inject({
       method: 'PUT',
       url: '/api/admin/users/ops',
@@ -161,7 +161,7 @@ describe('PUT /api/admin/users/{user_id}', () => {
 
 describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）', () => {
   it('重置成功：替换密码摘要，关联数字人不变', async () => {
-    fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision(), 'old-secret');
+    await fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision(), 'old-secret');
 
     const res = await fx.app.inject({
       method: 'POST',
@@ -177,7 +177,7 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
   });
 
   it('存量无密码的用户可借此首次设置密码', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', [], fx.ctx.store.revision());
 
     const res = await fx.app.inject({
       method: 'POST',
@@ -190,7 +190,7 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
   });
 
   it('重置后该用户既有会话立即失效（FR-012 同口径）', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
+    await fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
     fx.ctx.sessionStore.setCurrentSession('ops', 'session-before');
 
     await fx.app.inject({
@@ -204,7 +204,7 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
   });
 
   it('密码过短 / 非字符串 / 缺失 → 400 VALIDATION_FAILED，且原密码不变', async () => {
-    fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
+    await fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
 
     for (const payload of [{ password: '12345' }, { password: 123456 }, {}]) {
       const res = await fx.app.inject({
@@ -232,7 +232,7 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
 
 describe('DELETE /api/admin/users/{user_id}', () => {
   it('删除用户：撤回运行环境中的数字人并移出清单，文件空间一律保留（FR-028，2026-10-20）', async () => {
-    fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', ['demo'], fx.ctx.store.revision());
     const deployed = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy',

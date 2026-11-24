@@ -42,9 +42,9 @@ beforeEach(async () => {
     },
   });
   if (created.statusCode !== 201) throw new Error(`创建数字人失败：${created.body}`);
-  fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+  await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
   // 第二个平台内用户（未关联数字人）：用于验证"省略 user_ids = 全部平台用户"
-  fx.ctx.users.create('ops', [], fx.ctx.store.revision());
+  await fx.ctx.users.create('ops', [], fx.ctx.store.revision());
 });
 
 afterEach(async () => {

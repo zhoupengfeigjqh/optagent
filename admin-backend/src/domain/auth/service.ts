@@ -3,14 +3,18 @@
  *
  * 只做编排：读用户记录、验密码、登记会话、签发/清除凭据、会话内省。
  * 不感知 HTTP（Cookie 头由 routes 下发），不感知运行侧实现（运行侧只认契约）。
+ *
+ * **028 阶段 1**：依赖类型放宽为端口（`UserLinkPort` / `SessionPort`），
+ * file / mysql 两驱动通用；会话登记与清除为异步（mysql 驱动落库），
+ * `introspect` 保持**同步**（运行侧内省契约不变）。
  */
 import { randomUUID } from 'node:crypto';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import type { UserLinkService } from '../config-center/user-links.js';
+import type { UserLinkPort } from '../config-center/user-links.js';
 import { verifyPassword } from './password.js';
 import { signSession, cookieHeader, clearCookieHeader } from './token.js';
-import type { SessionStore } from './session-store.js';
+import type { SessionPort } from './session-store.js';
 
 export interface AuthServiceConfig {
   /** 凭据签名密钥（与运行侧同值） */
@@ -21,8 +25,8 @@ export interface AuthServiceConfig {
 
 export class AuthService {
   constructor(
-    private readonly users: UserLinkService,
-    private readonly sessions: SessionStore,
+    private readonly users: UserLinkPort,
+    private readonly sessions: SessionPort,
     private readonly config: AuthServiceConfig,
   ) {}
 
@@ -44,7 +48,7 @@ export class AuthService {
     if (!doc || !verifyPassword(password, doc.password)) throw invalid();
 
     const sessionId = randomUUID();
-    this.sessions.setCurrentSession(userId, sessionId);
+    await this.sessions.setCurrentSession(userId, sessionId);
     const token = await signSession(userId, sessionId, this.config.secret, this.config.ttlSeconds);
     return { userId, cookie: cookieHeader(token, this.config.ttlSeconds) };
   }
@@ -55,13 +59,13 @@ export class AuthService {
   }
 
   /** 登出：清除会话登记并返回清 Cookie 头。 */
-  logout(userId: string): string {
-    this.sessions.clearSession(userId);
+  async logout(userId: string): Promise<string> {
+    await this.sessions.clearSession(userId);
     return clearCookieHeader();
   }
 
   /** 删除用户时清除其会话（`FR-012`：旧凭据即时失效）。 */
-  revokeUser(userId: string): void {
-    this.sessions.clearSession(userId);
+  async revokeUser(userId: string): Promise<void> {
+    await this.sessions.clearSession(userId);
   }
 }

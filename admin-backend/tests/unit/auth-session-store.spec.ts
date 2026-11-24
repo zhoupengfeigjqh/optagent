@@ -1,5 +1,6 @@
 /**
  * 单元测试：单会话登记（`FR-014`）
+ * 028 阶段 1：写方法 async 化后补 `await`（file 驱动行为断言不变）
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,25 +24,25 @@ afterEach(() => {
 });
 
 describe('SessionStore', () => {
-  it('登记→读取→判定', () => {
+  it('登记→读取→判定', async () => {
     expect(sessions.getCurrentSession('zpf')).toBeNull();
-    sessions.setCurrentSession('zpf', 's1');
+    await sessions.setCurrentSession('zpf', 's1');
     expect(sessions.getCurrentSession('zpf')).toBe('s1');
     expect(sessions.isCurrentSession('zpf', 's1')).toBe(true);
     expect(sessions.isCurrentSession('zpf', 's2')).toBe(false);
   });
 
-  it('覆盖旧会话（后登踢前登）', () => {
-    sessions.setCurrentSession('zpf', 's1');
-    sessions.setCurrentSession('zpf', 's2');
+  it('覆盖旧会话（后登踢前登）', async () => {
+    await sessions.setCurrentSession('zpf', 's1');
+    await sessions.setCurrentSession('zpf', 's2');
     expect(sessions.isCurrentSession('zpf', 's1')).toBe(false);
     expect(sessions.isCurrentSession('zpf', 's2')).toBe(true);
   });
 
-  it('清除会话且幂等', () => {
-    sessions.setCurrentSession('zpf', 's1');
-    sessions.clearSession('zpf');
+  it('清除会话且幂等', async () => {
+    await sessions.setCurrentSession('zpf', 's1');
+    await sessions.clearSession('zpf');
     expect(sessions.getCurrentSession('zpf')).toBeNull();
-    expect(() => sessions.clearSession('zpf')).not.toThrow();
+    await expect(sessions.clearSession('zpf')).resolves.toBeUndefined();
   });
 });

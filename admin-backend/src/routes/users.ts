@@ -89,7 +89,7 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
       password = body.password;
     }
     const revision = typeof body.revision === 'number' ? body.revision : undefined;
-    const view = ctx.users.create(body.user_id, body.agents, revision, password);
+    const view = await ctx.users.create(body.user_id, body.agents, revision, password);
     return reply.status(201).send(view);
   });
 
@@ -100,7 +100,7 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'revision 必填且须为整数（乐观锁）');
     }
     assertAgentsExist(ctx, body.agents);
-    return ctx.users.update(userId, body.agents, body.revision);
+    return await ctx.users.update(userId, body.agents, body.revision);
   });
 
   /**
@@ -122,8 +122,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
         `密码长度须为 ${PASSWORD_MIN_LENGTH}~${PASSWORD_MAX_LENGTH} 个字符`,
       );
     }
-    const view = ctx.users.setPassword(userId, password);
-    ctx.auth.revokeUser(userId);
+    const view = await ctx.users.setPassword(userId, password);
+    await ctx.auth.revokeUser(userId);
     return view;
   });
 
@@ -133,9 +133,9 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     ctx.users.read(userId);
     // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
     ctx.deployer.purgeUser(userId);
-    ctx.users.remove(userId);
+    await ctx.users.remove(userId);
     // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
-    ctx.auth.revokeUser(userId);
+    await ctx.auth.revokeUser(userId);
     return reply.status(204).send();
   });
 }

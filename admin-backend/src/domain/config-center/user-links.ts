@@ -4,6 +4,11 @@
  * **注意区分两个"用户"概念**（`research.md` D11）：本实体是**平台的业务使用者**
  * （如 `admin`，会被分配数字人），与平台操作者 `zyw_admin`（仅用于审计字段）
  * 是**两个不同概念**，MUST NOT 混用。
+ *
+ * **028 阶段 1**：写方法 async 化并提取 `UserLinkPort` 端口，供
+ * `mysql-user-link-service.ts` 以同一契约接入 MySQL；本类保持 `file` 驱动
+ * （`.platform-data/users/*.json`）实现，编排与语义与 024 完全一致。
+ * 读方法保持**同步**——`Deployer`、`references.ts`、MCP 引用查询等零改动（方案 §8.3）。
  */
 import { ApiError } from '../api-error.js';
 import { hashPassword, type PasswordRecord } from '../auth/password.js';
@@ -28,7 +33,31 @@ export interface UserView {
   revision: number;
 }
 
-export class UserLinkService {
+/**
+ * 账号域端口（028）：`file`（本文件的 `UserLinkService`）与 `mysql`
+ * （`MysqlUserLinkService`）共同实现。
+ *
+ * - 读方法同步（内存投影 / 文件直读）；
+ * - 写方法异步（MySQL 网络落盘）；
+ * - `revision` 口径：file = 设计态乐观锁（024 原行为）；mysql = 只读设计态版本
+ *   （D4：账号域写不占设计态 revision，由数据库约束保证一致性）。
+ */
+export interface UserLinkPort {
+  listAll(): UserLinkDocument[];
+  exists(userId: string): boolean;
+  readOrNull(userId: string): UserLinkDocument | null;
+  read(userId: string): UserLinkDocument;
+  /** 关联了该数字人的用户标识清单（`FR-021` 阻止删除与 `§7.1` 引用查询） */
+  usersOfAgent(agentName: string): string[];
+  /** 列表（卡片：用户名 + 已关联数字人角色名清单，`FR-023`） */
+  list(page: number, toItem: (user: UserLinkDocument) => unknown): Paged<unknown>;
+  create(userIdRaw: unknown, agentsRaw: unknown, revision?: number, passwordRaw?: unknown): Promise<UserView>;
+  update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView>;
+  setPassword(userIdRaw: unknown, password: string): Promise<UserView>;
+  remove(userIdRaw: unknown): Promise<void>;
+}
+
+export class UserLinkService implements UserLinkPort {
   constructor(private readonly store: PlatformStore) {}
 
   static relPath(userId: string): string {
@@ -71,17 +100,17 @@ export class UserLinkService {
     return paginate(this.listAll().map(toItem), page);
   }
 
-  create(
+  async create(
     userIdRaw: unknown,
     agentsRaw: unknown,
     revision?: number,
     passwordRaw?: unknown,
-  ): UserView {
-    const userId = this.requireUserId(userIdRaw);
+  ): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
     if (this.exists(userId)) {
       throw new ApiError(ERROR_CODES.ADM_USER_ID_TAKEN, `用户标识已存在：${userId}`);
     }
-    const agents = this.normalizeAgents(agentsRaw);
+    const agents = normalizeAgents(agentsRaw);
     const password =
       typeof passwordRaw === 'string' && passwordRaw !== '' ? hashPassword(passwordRaw) : undefined;
     const doc: UserLinkDocument = password
@@ -98,11 +127,11 @@ export class UserLinkService {
     return { user_id: userId, agents, revision: this.store.withRevision(revision, write).revision };
   }
 
-  update(userIdRaw: unknown, agentsRaw: unknown, revision: number): UserView {
-    const userId = this.requireUserId(userIdRaw);
+  async update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
     // 保留既有密码摘要：编辑关联数字人 MUST NOT 清空密码
     const current = this.read(userId);
-    const agents = this.normalizeAgents(agentsRaw);
+    const agents = normalizeAgents(agentsRaw);
     const next: UserLinkDocument = current.password
       ? { user_id: userId, agents, password: current.password }
       : { user_id: userId, agents };
@@ -121,8 +150,8 @@ export class UserLinkService {
    *
    * 明文长度由调用方（路由）校验；用户不存在 → `ADM_USER_NOT_FOUND`（`read` 负责）。
    */
-  setPassword(userIdRaw: unknown, password: string): UserView {
-    const userId = this.requireUserId(userIdRaw);
+  async setPassword(userIdRaw: unknown, password: string): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
     const current = this.read(userId);
     this.store.writeJson(UserLinkService.relPath(userId), {
       user_id: userId,
@@ -132,43 +161,44 @@ export class UserLinkService {
     return { user_id: userId, agents: current.agents, revision: this.store.revision() };
   }
 
-  remove(userIdRaw: unknown): void {
-    const userId = this.requireUserId(userIdRaw);
+  async remove(userIdRaw: unknown): Promise<void> {
+    const userId = requireUserId(userIdRaw);
     this.read(userId);
     this.store.remove(UserLinkService.relPath(userId));
     this.store.bumpRevision();
   }
+}
 
-  private requireUserId(raw: unknown): string {
-    const userId = typeof raw === 'string' ? raw : '';
-    if (!isSafeName(userId)) {
-      throw new ApiError(
-        ERROR_CODES.ADM_USER_ID_TAKEN,
-        `用户标识非法：${JSON.stringify(raw)}（不得为空、不得含路径分隔符或 ".."）`,
-      );
-    }
-    return userId;
+/** 校验并规范化用户标识（file / mysql 两实现共用，028 提取） */
+export function requireUserId(raw: unknown): string {
+  const userId = typeof raw === 'string' ? raw : '';
+  if (!isSafeName(userId)) {
+    throw new ApiError(
+      ERROR_CODES.ADM_USER_ID_TAKEN,
+      `用户标识非法：${JSON.stringify(raw)}（不得为空、不得含路径分隔符或 ".."）`,
+    );
   }
+  return userId;
+}
 
-  /**
-   * 关联数字人校验：可关联的 MUST 是**平台内已存在**的数字人（`FR-025`）。
-   * 由调用方注入 `existsAgent`，避免本模块反向依赖设计态服务。
-   */
-  private normalizeAgents(raw: unknown): string[] {
-    if (raw === undefined || raw === null) return [];
-    if (!Array.isArray(raw)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 须为字符串数组');
-    }
-    const out: string[] = [];
-    for (const item of raw) {
-      if (typeof item !== 'string' || item.trim() === '') {
-        throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 含空值或非字符串项');
-      }
-      if (out.includes(item)) {
-        throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `agents 含重复项：${item}`);
-      }
-      out.push(item);
-    }
-    return out;
+/**
+ * 关联数字人校验：可关联的 MUST 是**平台内已存在**的数字人（`FR-025`）。
+ * 存在性由调用方（路由）另行校验（`assertAgentsExist`），本函数只做形态校验。
+ */
+export function normalizeAgents(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 须为字符串数组');
   }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 含空值或非字符串项');
+    }
+    if (out.includes(item)) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `agents 含重复项：${item}`);
+    }
+    out.push(item);
+  }
+  return out;
 }
