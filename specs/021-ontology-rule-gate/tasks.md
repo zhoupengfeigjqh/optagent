@@ -342,3 +342,17 @@ Task: "实现 agent-backend/src/domain/rule-gate/format.ts"
   "固执重试兜底只触发一次"）；**T030 / T038 / T042** 的断言随之更新。
   ⑤ 门禁（宿主机本地）：后端 `typecheck` 0 / `lint` 0；`test` **90 文件 / 1230 用例**通过；
   `test:integration` **22 文件 / 230 用例**通过。前端零改动（拒绝复用既有工具卡片，见契约 §6）。
+- 2026-11-24（**行为类型收敛 + command 写后失效**，任务数仍为 48，实现与规格同步变更）：
+  ① `behaviors[].op_type` 三态裁决（`command` / `query` / 非法），多本体同名行为必须一致，
+     被规则绑定但未声明 → 非法；三类统一 **fatal**（拒绝 + 立即结束本轮，复用 `ONTOLOGY_RULE_DENIED`）；
+  ② 规则闸门**只在意图聚焦开启时装配**（`agent-factory` 逐次读盘，关闭轮次不建记录、不包装工具）；
+  ③ `query` 不判规则、规则忽略（不装载、不告警）、不推进世代；
+  ④ 记录引入**世代号**：command 执行返回（成功/业务失败/抛错）后 `+1`，旧条目过期不删除，
+     `hasEver` 保留可观测性；函数条目按**派发世代**打戳；暂停文案区分"缺失"与"已过期"；
+  ⑤ 新增 `abortRunFatal`（复用 `onExhausted` → `interruptRun`）与 `rule_gate.fatal` /
+     `rule_gate.record.invalidated` 两类日志；
+  ⑥ 新增用例：`tests/integration/rule-gate-command-invalidation.spec.ts`（6 条端到端）；
+     `rule-gate-catalog` / `rule-gate-gate` / `tool-rule-gate` / `rule-gate-format` /
+     `rule-gate-record` 各自补齐新口径用例；
+  ⑦ 门禁（宿主机本地）：`typecheck` 0 / `lint` 0；`vitest run` **128 文件 / 1749 用例**通过。<br>
+  前端 / 管理平台零改动。

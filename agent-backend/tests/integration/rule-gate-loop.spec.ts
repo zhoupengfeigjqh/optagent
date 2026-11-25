@@ -61,6 +61,7 @@ function fixtureAgentDir(): string {
       'behaviors:',
       '  - name: CreatePurchaseRecord',
       '    title: 创建采购单',
+      '    op_type: command',
       'functions:',
       '  - name: checkSupplierExistence',
       '    type: query',

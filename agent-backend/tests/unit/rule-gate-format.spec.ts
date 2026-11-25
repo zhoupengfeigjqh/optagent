@@ -15,6 +15,8 @@ import { normalizeDesign } from '../../src/domain/rule-gate/design.js';
 import {
   denyDetails,
   denyMessage,
+  fatalDetails,
+  fatalMessage,
   pauseDetails,
   pauseMessage,
   ruleBlock,
@@ -174,5 +176,80 @@ describe('deny', () => {
       failed: [],
     });
     expect(details).toContain('结论：规则未通过');
+  });
+});
+
+describe('pause：过期函数（2026-11-24）', () => {
+  it('只有过期函数时，结论句说"结果已过期"而不是"尚未执行"', () => {
+    const message = pauseMessage(REF, [ruleOf()], [], [['checkSupplierExistence']]);
+
+    expect(message).toContain('结果已过期（产生于上一次写操作之前）');
+    expect(message).toContain('已过期函数：checkSupplierExistence（结果产生于上一次写操作之前，必须重新计算）');
+    expect(message).not.toContain('缺失函数：');
+  });
+
+  it('缺失与过期同时存在：两句都出现，且同一函数不重复（缺失优先）', () => {
+    const message = pauseMessage(
+      REF,
+      [ruleOf()],
+      [['fnA', 'fnB']],
+      [['fnB', 'fnC']],
+    );
+
+    expect(message).toContain('缺失函数：fnA、fnB');
+    expect(message).toContain('已过期函数：fnC');
+  });
+
+  it('details 逐条可读，且未传过期时与旧口径一致（4 条）', () => {
+    expect(pauseDetails(REF, [ruleOf()], [['fnA']])).toHaveLength(4);
+
+    const withStale = pauseDetails(REF, [ruleOf()], [], [['fnA']]);
+    expect(withStale).toHaveLength(5);
+    expect(withStale[2]).toContain('缺失函数：（无）');
+    expect(withStale[3]).toContain('已过期函数：fnA');
+  });
+});
+
+describe('fatal：非法本体行为文案（2026-11-24）', () => {
+  const invalidOf = (
+    reason: 'bad_op_type' | 'op_type_conflict' | 'undeclared',
+    sources: Array<{ ontologyKey: string; opType: string }> = [],
+  ) => ({ ref: REF, reason, sources });
+
+  it('三种成因各自可辨认', () => {
+    expect(fatalMessage(invalidOf('bad_op_type'))).toContain('op_type 不是 query 或 command');
+    expect(fatalMessage(invalidOf('op_type_conflict'))).toContain('op_type 不一致');
+    expect(fatalMessage(invalidOf('undeclared'))).toContain('未在 behaviors[] 中声明');
+  });
+
+  it('bad_op_type：指出每个来源的实际值（缺失显示占位）', () => {
+    const details = fatalDetails(
+      invalidOf('bad_op_type', [
+        { ontologyKey: '原材料采购和库存/采购单', opType: '' },
+        { ontologyKey: '原材料采购和库存/库存', opType: 'write' },
+      ]),
+    );
+
+    expect(details.join('\n')).toContain('原材料采购和库存/采购单: （缺失）');
+    expect(details.join('\n')).toContain('原材料采购和库存/库存: write');
+    expect(details.join('\n')).toContain('修正为 command 或 query');
+  });
+
+  it('op_type_conflict：点名冲突双方', () => {
+    const details = fatalDetails(
+      invalidOf('op_type_conflict', [
+        { ontologyKey: 'A本体', opType: 'command' },
+        { ontologyKey: 'B本体', opType: 'query' },
+      ]),
+    );
+
+    expect(details.join('\n')).toContain('A本体: command，B本体: query');
+    expect(details.join('\n')).toContain('统一各本体');
+  });
+
+  it('undeclared：给补齐声明或删除规则两条建议', () => {
+    const details = fatalDetails(invalidOf('undeclared'));
+    expect(details.join('\n')).toContain('未在 behaviors[] 中声明');
+    expect(details.join('\n')).toContain('补齐声明');
   });
 });

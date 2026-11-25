@@ -218,6 +218,110 @@ describe('pause / deny', () => {
   });
 });
 
+describe('fatal：非法本体行为（2026-11-24）', () => {
+  const FATAL: PrepareResult = {
+    kind: 'fatal',
+    message: '本体行为「原材料采购和库存/采购单/CreatePurchaseRecord」的 op_type 不是 query 或 command，本次调用已拒绝，本轮已中止。',
+    details: ['行为：原材料采购和库存/采购单/CreatePurchaseRecord', '原因：op_type 非法'],
+    reason: 'config_unavailable',
+    cause: 'bad_op_type',
+    diagnosis: { ...DIAGNOSIS, rules: [] },
+  };
+
+  it('execute 零调用，立即触发收尾（不等第 2 次），并记 alert 日志', async () => {
+    const tool = makeTool();
+    const onExhausted = vi.fn();
+    const { ctx, logger, suspension } = makeContext(makeGate(FATAL), {
+      suspension: createToolSuspension(onExhausted),
+    });
+
+    const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+
+    expect(tool.executeMock).not.toHaveBeenCalled();
+    expect(readToolError(result.details)?.code).toBe('ONTOLOGY_RULE_DENIED');
+    expect(result.content).toEqual([
+      { type: 'text', text: FATAL.kind === 'fatal' ? FATAL.message : '' },
+      { type: 'text', text: denyCardBody(FATAL.details) },
+    ]);
+    // 立即收尾：挂起 + 兜底出口在同一次调用内触发
+    expect(suspension).toMatchObject({ suspended: true, exhausted: true });
+    expect(onExhausted).toHaveBeenCalledTimes(1);
+
+    const fatalLog = logger.error.mock.calls.find(
+      (call) => (call[0] as Record<string, unknown>).event === 'rule_gate.fatal',
+    );
+    expect(fatalLog).toBeDefined();
+    expect(fatalLog![0]).toMatchObject({ alert: true, cause: 'bad_op_type' });
+  });
+});
+
+describe('command 写后失效（2026-11-24）', () => {
+  it('command 执行成功：既有函数结果过期（保留历史），结果原样返回', async () => {
+    const tool = makeTool();
+    const { ctx, record, logger } = makeContext(makeGate({ kind: 'behavior', command: true }));
+    record.add('checkSupplierExistence', { pass: true });
+
+    const result = await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+
+    expect(result.content).toEqual([{ type: 'text', text: '{"ok":true}' }]);
+    expect(record.epoch).toBe(1);
+    expect(record.has('checkSupplierExistence')).toBe(false);
+    expect(record.hasEver('checkSupplierExistence')).toBe(true);
+
+    const log = logger.info.mock.calls.find(
+      (call) => (call[0] as Record<string, unknown>).event === 'rule_gate.record.invalidated',
+    );
+    expect(log![0]).toMatchObject({ tool_name: tool.name, epoch: 1, stale_count: 1 });
+  });
+
+  it('command 抛错：调用已发出，同样失效后上抛', async () => {
+    const tool = makeTool();
+    tool.executeMock.mockRejectedValueOnce(new Error('network down'));
+    const { ctx, record } = makeContext(makeGate({ kind: 'behavior', command: true }));
+    record.add('f', { a: 1 });
+
+    await expect(wrapToolWithRuleGate(tool, ctx).execute('call-1', {})).rejects.toThrow('network down');
+    expect(record.epoch).toBe(1);
+    expect(record.has('f')).toBe(false);
+  });
+
+  it('query（不带 command 标记）执行成功：不失效', async () => {
+    const tool = makeTool('erp__QueryPurchaseRecords');
+    const { ctx, record } = makeContext(makeGate({ kind: 'behavior' }));
+    record.add('f', { a: 1 });
+
+    await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+
+    expect(record.epoch).toBe(0);
+    expect(record.has('f')).toBe(true);
+  });
+
+  it('函数在 command 之后返回：按派发世代打戳 → 视为过期（不伪装成写后结果）', async () => {
+    const tool = makeTool('erp__checkSupplierExistence');
+    const { ctx, record } = makeContext(makeGate({ kind: 'function' }));
+    // 模拟并行：函数派发（世代 0）后，command 先完成并推进世代，函数随后返回
+    tool.executeMock.mockImplementationOnce(async () => {
+      record.invalidate();
+      return { content: [{ type: 'text', text: '{"ok":true}' }], details: {} };
+    });
+
+    await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+
+    expect(record.epoch).toBe(1);
+    expect(record.has('checkSupplierExistence')).toBe(false);
+    expect(record.hasEver('checkSupplierExistence')).toBe(true);
+  });
+
+  it('被暂停 / 拒绝的 command：不失效（行为未执行）', async () => {
+    const tool = makeTool();
+    const { ctx, record } = makeContext(makeGate(PAUSE));
+
+    await wrapToolWithRuleGate(tool, ctx).execute('call-1', {});
+
+    expect(record.epoch).toBe(0);
+  });
+});
+
 describe('function 角色', () => {
   it('成功：记录结果并原样返回（不追加）', async () => {
     const tool = makeTool('erp__checkSupplierExistence');

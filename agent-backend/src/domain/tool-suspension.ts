@@ -45,6 +45,26 @@ export function suspendTools(state: ToolSuspension, code: string): void {
 }
 
 /**
+ * 配置类**致命错误**的收尾（2026-11-24）：立即挂起并触发收尾，不等第 2 次拦截。
+ *
+ * 为什么复用 `onExhausted` 而不是新增中止通道：装配层已把该出口接到
+ * `req.interruptRun`（与用户点"停止"同路径，`ABORTED` 收尾、不写业务错误码）。
+ * 配置错误不可自愈，让模型再调一次只是把错误多暴露一遍。
+ *
+ * 兜底回调抛错被吞掉——可观测性出口不得反过来制造故障。
+ */
+export function abortRunFatal(state: ToolSuspension, code: string): void {
+  suspendTools(state, code);
+  if (state.exhausted) return;
+  state.exhausted = true;
+  try {
+    state.onExhausted?.();
+  } catch {
+    // 收尾出口故障不影响本次拒绝结果
+  }
+}
+
+/**
  * 挂起后的拦截：返回 `true` 表示"本次调用直接拒绝"。
  *
  * 副作用：累加 `attempts`；第 2 次起触发一次兜底（模型不配合时的有界退出）。

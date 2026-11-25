@@ -1,12 +1,14 @@
 /**
  * 轮内函数执行记录（纯内存，轮结束即丢）。
  *
- * 四条口径（`data-model.md` §4 / `FR-003` / `FR-005`）：
+ * 五条口径（`data-model.md` §4 / `FR-003` / `FR-005`）：
  * 1. **成败都记**：正常返回记业务数据，执行报错/超时/无结果记 `null`；
  * 2. **最后一次覆盖**：同名多次调用只留最后一条（失败同样覆盖成功）；
- * 3. **键存在 = 本轮已执行过**：值可能是 `null`，读取必须用 `has` / `get` 分离，
+ * 3. **键存在 = 本世代执行过**：值可能是 `null`，读取必须用 `has` / `get` 分离，
  *    禁止 `if (value)` 真值判断；
- * 4. **有界**：单条 ≤ 256 KB、条目 ≤ 64，超限丢弃并告警（丢弃 = 键不存在）。
+ * 4. **有界**：单条 ≤ 256 KB、条目 ≤ 64，超限丢弃并告警（丢弃 = 键不存在）；
+ * 5. **写后失效（2026-11-24）**：本体 command 执行完成后 `invalidate()` 递增世代，
+ *    旧条目**保留但不可见**（`hasEver` 仍可见），因此文案能区分"没算"与"算过但过期"。
  *
  * 本文件不含任何工具名、服务名或本体名（解耦红线）。
  */
@@ -32,12 +34,19 @@ export interface FunctionRecordOptions {
   warn?: (info: RecordDropInfo) => void;
 }
 
+/** 一条记录：值 + 写入时刻的世代号 */
+interface RecordEntry {
+  value: unknown;
+  epoch: number;
+}
+
 /** 创建一个空记录（**每轮一个**） */
 export function createFunctionRecord(options: FunctionRecordOptions = {}): FunctionRecord {
-  const entries = new Map<string, unknown>();
+  const entries = new Map<string, RecordEntry>();
+  let epoch = 0;
 
   return {
-    add(toolName: string, result: unknown): void {
+    add(toolName: string, result: unknown, at?: number): void {
       const key = recordKey(toolName);
       if (key === '') return;
 
@@ -46,7 +55,7 @@ export function createFunctionRecord(options: FunctionRecordOptions = {}): Funct
       if (value !== null) {
         const bytes = utf8Bytes(safeJson(value));
         if (bytes > MAX_ENTRY_BYTES) {
-          // 丢弃该条：键不存在 = 未执行（下一轮判定会重新要求补调）
+          // 丢弃该条：键不存在 = 本世代未执行（下一轮判定会重新要求补调）
           entries.delete(key);
           options.warn?.({ toolName: key, reason: 'oversize', bytes });
           return;
@@ -58,19 +67,42 @@ export function createFunctionRecord(options: FunctionRecordOptions = {}): Funct
         return;
       }
 
-      entries.set(key, value);
+      // 派发世代：缺省用当前世代；显式传入时按传入值打戳（并行批次的保守降级）
+      entries.set(key, { value, epoch: at ?? epoch });
     },
 
     has(toolName: string): boolean {
-      return entries.has(recordKey(toolName));
+      const entry = entries.get(recordKey(toolName));
+      return entry !== undefined && entry.epoch === epoch;
     },
 
     get(toolName: string): unknown {
-      return entries.get(recordKey(toolName));
+      const entry = entries.get(recordKey(toolName));
+      return entry !== undefined && entry.epoch === epoch ? entry.value : undefined;
+    },
+
+    hasEver(toolName: string): boolean {
+      return entries.has(recordKey(toolName));
+    },
+
+    invalidate(): void {
+      epoch += 1;
+    },
+
+    get epoch(): number {
+      return epoch;
     },
 
     get size(): number {
       return entries.size;
+    },
+
+    get activeSize(): number {
+      let count = 0;
+      for (const entry of entries.values()) {
+        if (entry.epoch === epoch) count += 1;
+      }
+      return count;
     },
   };
 }

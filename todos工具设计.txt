@@ -1,0 +1,41 @@
+todos工具设计
+{
+  "todos": [
+    {
+      "content": "提取8篇PDF全文文本",
+      "id": "1",
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "content": "精读核心三篇并摘录关键段落与页码",
+      "id": "2",
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "content": "精读近邻文献定位可引用段落",
+      "id": "3",
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "content": "核对旧稿引用，记录勘误",
+      "id": "4",
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "content": "数值复现三项分解恒等式",
+      "id": "5",
+      "priority": "high",
+      "status": "completed"
+    },
+    {
+      "content": "撰写theory_new.md",
+      "id": "6",
+      "priority": "high",
+      "status": "in_progress"
+    }
+  ]
+}

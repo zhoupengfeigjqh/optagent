@@ -15,11 +15,15 @@ export {
   RULE_GATE_CODES,
 } from './types.js';
 export type {
+  BehaviorOpType,
+  BehaviorOpTypeSource,
   BehaviorRef,
   DeclaredType,
   DenyReason,
   FunctionRecord,
   GateSnapshot,
+  InvalidBehavior,
+  InvalidBehaviorReason,
   OperatorCode,
   PrepareInput,
   PrepareResult,

@@ -32,6 +32,16 @@ export function normalizeName(raw: string): string {
 }
 
 /**
+ * `op_type` 归一（2026-11-24）：去首尾空白 + 小写。
+ *
+ * 唯一口径：规则闸门（三态裁决）与意图聚焦（`op_type: query` 取数）共用，
+ * 避免"同一字段两套比较规则"。非字符串 → 空串（缺失）。
+ */
+export function normalizeOpType(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+}
+
+/**
  * 去掉首个 `__` 前缀（保留原大小写与首尾空白，仅用于展示/记录键）。
  *
  * MCP 工具名现状是 `{服务名}__{工具名}`；本体 `related_functions` 写的是裸名。

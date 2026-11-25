@@ -12,6 +12,7 @@
  * 4. **不重复**：已被行为直接命中（过阈值）的 query 行为不再作为取数项出现，
  *    以直接命中为准（保留分数，语义也更准确）。
  */
+import { normalizeOpType } from '../ontology-doc.js';
 import type {
   ConceptQueryDecision,
   FunctionDecision,
@@ -19,7 +20,7 @@ import type {
   OntologyDefinition,
 } from './types.js';
 
-/** 取数只认这个 `op_type`（大小写与空白都已归一，见 `ontology-loader`) */
+/** 取数只认这个 `op_type`（归一与比较同源于 `ontology-doc.normalizeOpType`） */
 const QUERY_OP_TYPE = 'query';
 
 /**
@@ -86,7 +87,7 @@ function queryBehaviorsOf(
 }
 
 function isQuery(behavior: OntologyBehavior): boolean {
-  return (behavior.opType ?? '').trim().toLowerCase() === QUERY_OP_TYPE;
+  return normalizeOpType(behavior.opType) === QUERY_OP_TYPE;
 }
 
 function behaviorKey(ontologyId: string, name: string): string {

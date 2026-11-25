@@ -1,11 +1,14 @@
 /**
  * 单元测试：规则视图加载（021）。
  *
- * 守住的口径：
- * - 只装载 `position: 前置`；后置规则（2026-11-24 移除、待重新设计）**静默跳过**且不告警；
- *   `behavior` 空或 `position` 非法 → 整条忽略 + 告警；
- * - 按行为归一索引，同一行为的规则保持文件内顺序；
- * - 多本体同名行为 → 规则合并（按本体键升序，顺序可复现）；
+ * 守住的口径（2026-11-24 收敛）：
+ * - `behaviors[].op_type` 三态：`command` / `query` / 非法（缺失或其它值 → 非法行为索引）；
+ * - 多本体同名行为：`op_type` 必须一致；`query` 与 `command` 混用 → 非法（冲突）；
+ * - 被规则绑定但未在 `behaviors[]` 声明 → 非法（`undeclared`）；
+ * - **只有 `command` 装载前置规则**；`query` 的规则静默忽略；
+ * - 只装载 `position: 前置`；后置规则在行为解析**之前**静默跳过（不产生运行时效果）；
+ * - `behavior` 空或 `position` 非法 → 整条忽略 + 告警；
+ * - 按行为归一索引，同一行为的规则保持文件内顺序；多本体按本体键升序合并；
  * - `functions[].response` 建索引（归一函数名）；
  * - `rule_design` 缺失 → `design=null` 且**不算**非法；非对象 → `designInvalid`（fail-closed）；
  * - 坏文件不抛、不中断其他本体。
@@ -65,20 +68,24 @@ function ruleLines(options: {
   return lines;
 }
 
+/** 一个可参与判定的本体行为声明 */
+function behaviorLines(name: string, opType = 'command'): string[] {
+  return [`  - name: ${name}`, `    title: ${name}`, `    op_type: ${opType}`];
+}
+
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe('loadGateCatalog', () => {
-  it('只装载前置规则；后置静默跳过（不告警），按行为归一索引，保持文件内顺序', () => {
+  it('command 只装载前置规则；后置静默跳过（不告警），按行为归一索引，保持文件内顺序', () => {
     const agent = tmpAgentDir();
     writeOntology(
       agent,
       '采购单',
       [
         'behaviors:',
-        '  - name: CreatePurchaseRecord',
-        '    title: 创建采购单',
+        ...behaviorLines('CreatePurchaseRecord'),
         'functions:',
         '  - name: checkSupplierExistence',
         '    type: query',
@@ -95,6 +102,7 @@ describe('loadGateCatalog', () => {
     const bucket = snapshot.behaviorIndex.get('createpurchaserecord');
 
     expect(snapshot.warnings).toEqual([]);
+    expect(bucket!.command).toBe(true);
     expect(bucket!.pre.map((r) => r.name)).toEqual(['R-前置-1', 'R-前置-2']);
     expect(bucket!.pre[0]).toMatchObject({
       behavior: 'CreatePurchaseRecord',
@@ -105,25 +113,24 @@ describe('loadGateCatalog', () => {
     expect(bucket!.pre[0]!.design!.groups).toHaveLength(1);
   });
 
-  it('后置规则绑定了未声明的行为：只登记行为、不装载规则，且不告警', () => {
+  it('后置规则在行为解析之前跳过：不登记行为、不判未声明、零告警', () => {
     const agent = tmpAgentDir();
     writeOntology(
       agent,
       '采购单',
       [
         'behaviors:',
-        '  - name: QueryStock',
+        ...behaviorLines('QueryStock', 'query'),
         'rules:',
         ...ruleLines({ name: 'R-后置', behavior: 'CreatePurchaseRecord', position: '后置' }),
       ].join('\n'),
     );
 
     const snapshot = loadGateCatalog(agent);
-    const bucket = snapshot.behaviorIndex.get('createpurchaserecord');
 
     expect(snapshot.warnings).toEqual([]);
-    expect(bucket).toBeDefined();
-    expect(bucket!.pre).toEqual([]);
+    expect(snapshot.behaviorIndex.has('createpurchaserecord')).toBe(false);
+    expect(snapshot.invalidBehaviors.size).toBe(0);
   });
 
   it('behavior 空 / position 非法 → 整条忽略并告警', () => {
@@ -132,6 +139,8 @@ describe('loadGateCatalog', () => {
       agent,
       '采购单',
       [
+        'behaviors:',
+        ...behaviorLines('CreatePurchaseRecord'),
         'rules:',
         ...ruleLines({ name: '缺行为', behavior: '  ' }),
         ...ruleLines({ name: '坏位置', position: '执行前' }),
@@ -147,16 +156,125 @@ describe('loadGateCatalog', () => {
     expect(snapshot.warnings.join('\n')).toContain('rule_bad_position:执行前');
   });
 
-  it('多本体同名行为 → 规则合并，顺序按本体键升序', () => {
+  it('多本体同名行为（同为 command）→ 规则合并，顺序按本体键升序', () => {
     const agent = tmpAgentDir();
-    writeOntology(agent, 'A本体', ['rules:', ...ruleLines({ name: '来自A' })].join('\n'));
-    writeOntology(agent, 'B本体', ['rules:', ...ruleLines({ name: '来自B' })].join('\n'));
+    writeOntology(
+      agent,
+      'A本体',
+      ['behaviors:', ...behaviorLines('CreatePurchaseRecord'), 'rules:', ...ruleLines({ name: '来自A' })].join('\n'),
+    );
+    writeOntology(
+      agent,
+      'B本体',
+      ['behaviors:', ...behaviorLines('CreatePurchaseRecord'), 'rules:', ...ruleLines({ name: '来自B' })].join('\n'),
+    );
 
     const snapshot = loadGateCatalog(agent);
     expect(snapshot.behaviorIndex.get('createpurchaserecord')!.pre.map((r) => r.name)).toEqual([
       '来自A',
       '来自B',
     ]);
+    expect(snapshot.invalidBehaviors.size).toBe(0);
+  });
+
+  it('query 行为：规则静默忽略（pre 为空、无告警），行为仍被识别', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      '采购单',
+      [
+        'behaviors:',
+        ...behaviorLines('QueryPurchaseRecords', 'query'),
+        'rules:',
+        ...ruleLines({ name: '查询-供应商存在', behavior: 'QueryPurchaseRecords' }),
+      ].join('\n'),
+    );
+
+    const snapshot = loadGateCatalog(agent);
+    const bucket = snapshot.behaviorIndex.get('querypurchaserecords');
+
+    expect(bucket).toBeDefined();
+    expect(bucket!.command).toBe(false);
+    expect(bucket!.pre).toEqual([]);
+    expect(snapshot.warnings).toEqual([]);
+  });
+
+  it('op_type 大小写与空白归一（" Command " → command）', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      '采购单',
+      [
+        'behaviors:',
+        '  - name: CreatePurchaseRecord',
+        '    op_type: "  Command  "',
+        'rules:',
+        ...ruleLines({ name: 'R1' }),
+      ].join('\n'),
+    );
+
+    const snapshot = loadGateCatalog(agent);
+    expect(snapshot.behaviorIndex.get('createpurchaserecord')!.command).toBe(true);
+    expect(snapshot.invalidBehaviors.size).toBe(0);
+  });
+
+  it('op_type 缺失 / 其它值 → 非法行为（bad_op_type），不装载规则', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      '采购单',
+      [
+        'behaviors:',
+        '  - name: BrokenBehavior',
+        '  - name: WeirdBehavior',
+        '    op_type: write',
+        'rules:',
+        ...ruleLines({ name: 'R-缺类型', behavior: 'BrokenBehavior' }),
+      ].join('\n'),
+    );
+
+    const snapshot = loadGateCatalog(agent);
+
+    expect(snapshot.behaviorIndex.size).toBe(0);
+    expect(snapshot.invalidBehaviors.get('brokenbehavior')).toMatchObject({ reason: 'bad_op_type' });
+    expect(snapshot.invalidBehaviors.get('weirdbehavior')).toMatchObject({ reason: 'bad_op_type' });
+    expect(snapshot.warnings.join('\n')).toContain('behavior_bad_op_type:BrokenBehavior');
+    expect(snapshot.warnings.join('\n')).toContain('behavior_bad_op_type:WeirdBehavior');
+  });
+
+  it('多本体同名行为 op_type 冲突（query vs command）→ 非法（op_type_conflict），点名来源', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      'A本体',
+      ['behaviors:', ...behaviorLines('SyncInventory', 'command'), 'rules:', ...ruleLines({ name: '来自A', behavior: 'SyncInventory' })].join('\n'),
+    );
+    writeOntology(agent, 'B本体', ['behaviors:', ...behaviorLines('SyncInventory', 'query')].join('\n'));
+
+    const snapshot = loadGateCatalog(agent);
+    const invalid = snapshot.invalidBehaviors.get('syncinventory');
+
+    expect(snapshot.behaviorIndex.has('syncinventory')).toBe(false);
+    expect(invalid).toMatchObject({ reason: 'op_type_conflict' });
+    expect(invalid!.sources.map((source) => source.opType).sort()).toEqual(['command', 'query']);
+    expect(snapshot.warnings.join('\n')).toContain('behavior_op_type_conflict:SyncInventory');
+  });
+
+  it('被规则绑定但未在 behaviors[] 声明 → 非法（undeclared），不建桶', () => {
+    const agent = tmpAgentDir();
+    writeOntology(
+      agent,
+      '采购单',
+      ['behaviors:', ...behaviorLines('QueryStock', 'query'), 'rules:', ...ruleLines({ name: '幽灵规则' })].join('\n'),
+    );
+
+    const snapshot = loadGateCatalog(agent);
+
+    expect(snapshot.behaviorIndex.has('createpurchaserecord')).toBe(false);
+    expect(snapshot.invalidBehaviors.get('createpurchaserecord')).toMatchObject({
+      reason: 'undeclared',
+    });
+    expect(snapshot.warnings.join('\n')).toContain('behavior_undeclared:CreatePurchaseRecord');
   });
 
   it('functions[].response 建索引：键为归一函数名', () => {
@@ -185,7 +303,11 @@ describe('loadGateCatalog', () => {
 
   it('rule_design 缺失 → design=null 且不算非法（不阻断，FR-022）', () => {
     const agent = tmpAgentDir();
-    writeOntology(agent, '采购单', ['rules:', ...ruleLines({ design: false })].join('\n'));
+    writeOntology(
+      agent,
+      '采购单',
+      ['behaviors:', ...behaviorLines('CreatePurchaseRecord'), 'rules:', ...ruleLines({ design: false })].join('\n'),
+    );
 
     const snapshot = loadGateCatalog(agent);
     const rule = snapshot.behaviorIndex.get('createpurchaserecord')!.pre[0]!;
@@ -198,7 +320,13 @@ describe('loadGateCatalog', () => {
     writeOntology(
       agent,
       '采购单',
-      ['rules:', ...ruleLines({ design: false }), '    rule_design: "oops"'].join('\n'),
+      [
+        'behaviors:',
+        ...behaviorLines('CreatePurchaseRecord'),
+        'rules:',
+        ...ruleLines({ design: false }),
+        '    rule_design: "oops"',
+      ].join('\n'),
     );
 
     const snapshot = loadGateCatalog(agent);
@@ -214,6 +342,8 @@ describe('loadGateCatalog', () => {
       agent,
       '采购单',
       [
+        'behaviors:',
+        ...behaviorLines('CreatePurchaseRecord'),
         'rules:',
         '  - name: R1',
         '    behavior: CreatePurchaseRecord',
@@ -235,7 +365,11 @@ describe('loadGateCatalog', () => {
   it('坏 ontology.yaml 不抛、不中断其他本体', () => {
     const agent = tmpAgentDir();
     writeOntology(agent, '坏本体', 'rules: [\n');
-    writeOntology(agent, '好本体', ['rules:', ...ruleLines({ name: '好规则' })].join('\n'));
+    writeOntology(
+      agent,
+      '好本体',
+      ['behaviors:', ...behaviorLines('CreatePurchaseRecord'), 'rules:', ...ruleLines({ name: '好规则' })].join('\n'),
+    );
 
     const snapshot = loadGateCatalog(agent);
     expect([...snapshot.behaviorIndex.keys()]).toEqual(['createpurchaserecord']);
@@ -246,6 +380,7 @@ describe('loadGateCatalog', () => {
     const agent = tmpAgentDir();
     const snapshot = loadGateCatalog(agent);
     expect(snapshot.behaviorIndex.size).toBe(0);
+    expect(snapshot.invalidBehaviors.size).toBe(0);
     expect(snapshot.functionResponses.size).toBe(0);
     expect(snapshot.warnings).toEqual([]);
     expect(snapshot.signature).toBe('missing');
@@ -258,6 +393,8 @@ describe('loadGateCatalog', () => {
       agent,
       '采购单',
       [
+        'behaviors:',
+        ...behaviorLines('CreatePurchaseRecord'),
         'rules:',
         '  - name: R1',
         '    behavior: CreatePurchaseRecord',

@@ -111,14 +111,16 @@ segment := name ['[]']
 |---|---|
 | 生命周期 | 一轮对话一个实例；轮结束即丢弃（不落盘、不进历史） |
 | 键 | 去 MCP 服务前缀 + 去首尾空白 + 小写后的工具名（`stripServicePrefix` 后归一） |
-| 值 | 该函数**最后一次调用**的结果：成功 → 业务数据（§5）；执行报错 / 超时 / 无结果 → `null` |
-| 写入时机 | 每次**真正发出**的调用返回后（成功与失败都写）；未发出的调用（被权限闸门拒绝、被前置规则暂停、中止后未执行）**不写** |
+| 值 | 该函数**最后一次调用**的结果：成功 → 业务数据（§5）；执行报错 / 超时 / 无结果 → `null`；外加**写入时的世代号** |
+| 世代 | 初始 0；每完成一次本体 **command** 执行（成功 / 业务失败 / 抛错）**+1**；只有当前世代的条目参与判定 |
+| 写入时机 | 每次**真正发出**的调用返回后（成功与失败都写）；按**派发时刻**的世代打戳（并行批次保守降级）；未发出的调用（被权限闸门拒绝、被前置规则暂停、中止后未执行）**不写** |
 | 覆盖 | 同名多次调用 → **最后一次覆盖**（失败以 `null` 覆盖成功值）；同一函数只有一条 |
-| 语义 | **键存在 = 本轮已执行过**（值可能为 `null`）；`null` 不触发暂停与注册校验，但其一切条件判不成立 |
+| 语义 | **键在且世代为当前 = 本世代已执行过**（值可能为 `null`）；键在但世代更早 = **已过期**（`hasEver` 可见，`has`/`get` 不可见）；`null` 不触发暂停与注册校验，但其一切条件判不成立 |
 | 上限 | 单条序列化 ≤256 KB；条目 ≤64；超限丢弃 + 告警（丢弃 = 键不存在 = 未执行 → 触发暂停 / 注册校验） |
-| 查询 | `has(name)` / `get(name)`；比对同样走归一 |
+| 查询 | `has` / `get`（仅当前世代）、`hasEver`（含过期）、`epoch`、`size`（总数）、`activeSize`（当前世代有效数）；比对同样走归一 |
 
 > `null` 与"键不存在"是**两种不同状态**，实现里不得用 `null` 表示"没调过"，也不得用 `undefined` 与 `null` 混用。
+> 2026-11-24：command 写后失效只改变"可见世代"，**不删除条目**——`hasEver` 因此能区分"没算"与"算过但过期"。
 
 **为什么键要剥前缀**：`related_functions` 写的是裸函数名（`checkRawMaterialUnit`），
 而模型看到的 MCP 工具名是 `{服务名}__checkRawMaterialUnit`。
@@ -153,9 +155,11 @@ segment := name ['[]']
 
 | `kind` | 触发 | 后续动作 |
 |---|---|---|
-| `function` | 工具不是本体行为（且非内置） | 执行 → 成功后记录 |
-| `behavior` | 是本体的行为，但**无前置规则** | 执行 → 结果原样返回 |
-| `pause` | 前置规则有 `related_functions` 未记录 | **不执行**；返回失败结果（规则全文 + 缺失函数清单） |
+| `fatal` | 非法本体行为（`op_type` 坏 / 同名冲突 / 未声明却被规则绑定） | **不执行**、不看规则；拒绝 + **立即结束本轮**（复用 `ABORTED`） |
+| `function` | 工具不是本体行为（且非内置） | 执行 → 成功后记录（按派发世代） |
+| `behavior`（无 `command` 字段） | 本体 `query` 行为 | 执行 → 结果原样返回；不判规则、不失效 |
+| `behavior`（`command: true`） | 本体 `command` 行为，无前置规则或求值通过 | 执行 → 结果原样返回 → **使既有函数结果过期** |
+| `pause` | 前置规则有函数不在当前世代（缺失或过期） | **不执行**；返回失败结果（规则全文 + 缺失 / 过期两组清单） |
 | `deny` | 求值 `false`、规则结构不可用、或**规则引用了未注册函数** | **不执行**；挂起本轮工具并返回三段式卡片（三者靠 `reason` 区分：`condition_false` / `config_unavailable` / `unregistered`） |
 
 `pause` / `deny` 的载荷：`{ message: string; details: string[] }`，`deny` 另带
@@ -169,12 +173,14 @@ segment := name ['[]']
 
 | 规格裁决 | 实现变体 | 是否执行行为 | 是否记录 |
 |---|---|---|---|
-| 直接执行（无前置规则，且是本体行为） | `behavior` | 是 | 否 |
-| 直接执行（非本体行为，即"函数"） | `function` | 是 | **是**（成功与失败都记，失败记 `null`） |
-| 暂停（缺函数，且函数**已注册**） | `pause` | 否 | 否 |
-| 允许（求值通过） | `behavior` | 是 | 否 |
+| 直接执行（`query`，规则忽略） | `behavior`（无 `command`） | 是 | 否 |
+| 直接执行（`command` 无前置规则） | `behavior` + `command: true` | 是 | 否（执行后**使既有条目过期**） |
+| 直接执行（非本体行为，即"函数"） | `function` | 是 | **是**（成功与失败都记，失败记 `null`；按派发世代） |
+| 暂停（缺失 / 过期，且函数**已注册**） | `pause` | 否 | 否 |
+| 允许（求值通过） | `behavior` + `command: true` | 是 | 否（执行后**使既有条目过期**） |
 | 拒绝并挂起本轮（求值不成立 / 规则不可用） | `deny`（`reason` = `condition_false` / `config_unavailable`） | 否 | 否 |
 | 阻断（前置规则引用**未注册**函数） | `deny`（`reason` = `unregistered`） | 否 | 否 |
+| 非法本体行为（`bad_op_type` / `op_type_conflict` / `undeclared`） | `fatal`（`cause` 区分三类） | 否（并**立即结束本轮**） | 否 |
 
 ### 6.2 拒绝卡片正文（2026-11-09 起）
 
@@ -215,7 +221,9 @@ segment := name ['[]']
 
 | 事件 | 级别 | 字段 |
 |---|---|---|
-| `rule_gate.paused` | `info` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules`（规则名数组） `missing_functions` |
+| `rule_gate.paused` | `info` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules`（规则名数组） `missing_functions`（可选） `stale_functions`（可选，2026-11-24） |
+| `rule_gate.fatal` | `error` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `reason`（恒 `config_unavailable`） `cause`（`bad_op_type` / `op_type_conflict` / `undeclared`） `alert: true` |
+| `rule_gate.record.invalidated` | `info` | `tool_name` `epoch`（推进后的世代） `stale_count`（过期条目数；不记正文） |
 | `rule_gate.denied` | `warn` | 同上 + `rule` + `reason`（`condition_false` / `config_unavailable` / `unregistered`） + `failed_conditions`（`{rule, function, field, operator}` 数组，最多 10 条） |
 | `rule_gate.blocked` | `error` | `user_id` `agent_name` `thread_id` `tool_name` `ontology` `behavior` `rules` `phase`（恒为 `pre`） `unregistered_functions` `executed`（恒为 `false`） |
 | `rule_gate.suspended` | `warn` | `user_id` `agent_name` `thread_id` `tool_name` `code` `attempts`（**不重复**判定字段，2026-11-09 新增） |
@@ -254,7 +262,14 @@ segment := name ['[]']
 | 18 | 前置规则函数**已注册**但未执行 | **暂停**（不阻断），提示先执行 |
 | 19 | 服务里存在但被白名单过滤（未挂载） | 视为未注册 → 阻断（同 17） |
 | 20 | 函数执行失败（记录 `null`） | 不触发暂停/注册校验；其条件全不成立 → 拒绝 + 挂起（`condition_false`） |
-| 21 | 行为只被后置规则绑定（`behaviors[]` 未声明） | 仍识别为行为（不记录成函数），规则不装载、不告警 |
+| 21 | 行为只被后置规则绑定（`behaviors[]` 未声明） | 后置规则在行为解析前跳过：**不登记行为、不判未声明、零告警**、零运行时效果（2026-11-24 改写） |
 | 22 | 后置规则被加载 | 静默跳过，不进快照，不产生任何运行时效果 |
+| 23 | 同一轮内先 command 成功、再调同名前置函数的另一个 command | 第二次 **pause**，文案点名"已过期函数"；重算后重试通过（`FR-048` / `SC-011`） |
+| 24 | command 无前置规则，执行成功 | 仍使既有条目过期；不暂停、不追加文案 |
+| 25 | `query` 绑定前置规则 | 规则被忽略，直接执行；不推进世代（`FR-051`） |
+| 26 | `op_type` 缺失 / 非 command\|query | **fatal**：行为零执行、立即结束本轮（`FR-053`） |
+| 27 | 多本体同名行为 query/command 混用 | **fatal**（`op_type_conflict`），文案点名冲突双方 |
+| 28 | 被规则绑定但 `behaviors[]` 未声明 | **fatal**（`undeclared`），不建桶、不装载规则 |
+| 29 | 意图聚焦关闭 | 规则闸门不装配：任何工具按普通工具执行（`FR-052`） |
 
 > 第 4~8 行默认"函数全部已注册"，用于隔离前置判定本身的语义；注册校验的矩阵在 17~19 行。

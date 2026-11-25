@@ -7,7 +7,13 @@
  *
  * 2026-11-24：后置规则整体移除（待重新设计），本文件不再产出后置提示 / 后置阻断文案。
  */
-import type { BehaviorRef, DenyReason, FailedCondition, RuleSpec } from './types.js';
+import type {
+  BehaviorRef,
+  DenyReason,
+  FailedCondition,
+  InvalidBehavior,
+  RuleSpec,
+} from './types.js';
 
 const UNNAMED_RULE = '（未命名规则）';
 const EMPTY = '（无）';
@@ -33,21 +39,44 @@ export function ruleBlock(rule: RuleSpec): string {
   ].join('\n');
 }
 
-/** 暂停：一句话结论 + 缺失函数 + 规则全文（模型据此补调后重试） */
+/**
+ * 暂停：一句话结论 + 函数缺口 + 规则全文（模型据此补调后重试）。
+ *
+ * 2026-11-24：缺口分两类——`missing`（本世代从未执行）与
+ * `stale`（执行过，但结果产生于上一次 command 之前）。两者文案必须不同，
+ * 否则模型会以为"系统说我没算过，但我明明算过"而原地重试。
+ */
 export function pauseMessage(
   ref: BehaviorRef,
   rules: RuleSpec[],
   missing: ReadonlyArray<readonly string[]>,
+  stale: ReadonlyArray<readonly string[]> = [],
 ): string {
-  const functions = uniqueMissing(missing);
-  return [
-    `本体行为「${behaviorLabel(ref)}」的前置规则所需函数尚未执行，本次调用已暂停（该行为未执行）。`,
-    `缺失函数：${functions.join('、')}`,
-    '请先执行上述函数，然后重试该行为。',
-    '',
-    '—— 规则全文 ——',
-    rules.map(ruleBlock).join('\n\n'),
-  ].join('\n');
+  const missingFunctions = uniqueMissing(missing);
+  const staleFunctions = uniqueMissing(stale).filter((fn) => !missingFunctions.includes(fn));
+
+  const lines: string[] = [];
+  if (missingFunctions.length === 0) {
+    lines.push(
+      `本体行为「${behaviorLabel(ref)}」的前置规则所需函数的结果已过期（产生于上一次写操作之前），本次调用已暂停（该行为未执行）。`,
+    );
+  } else if (staleFunctions.length > 0) {
+    lines.push(
+      `本体行为「${behaviorLabel(ref)}」的前置规则所需函数尚未执行或结果已过期，本次调用已暂停（该行为未执行）。`,
+    );
+  } else {
+    lines.push(
+      `本体行为「${behaviorLabel(ref)}」的前置规则所需函数尚未执行，本次调用已暂停（该行为未执行）。`,
+    );
+  }
+
+  if (missingFunctions.length > 0) lines.push(`缺失函数：${missingFunctions.join('、')}`);
+  if (staleFunctions.length > 0) {
+    lines.push(`已过期函数：${staleFunctions.join('、')}（结果产生于上一次写操作之前，必须重新计算）`);
+  }
+  lines.push('请先执行上述函数，然后重试该行为。', '', '—— 规则全文 ——');
+  lines.push(rules.map(ruleBlock).join('\n\n'));
+  return lines.join('\n');
 }
 
 /** 暂停的明细（进日志与卡片展开；正文在 `message` 里） */
@@ -55,12 +84,68 @@ export function pauseDetails(
   ref: BehaviorRef,
   rules: RuleSpec[],
   missing: ReadonlyArray<readonly string[]>,
+  stale: ReadonlyArray<readonly string[]> = [],
 ): string[] {
-  return [
+  const missingFunctions = uniqueMissing(missing);
+  const staleFunctions = uniqueMissing(stale).filter((fn) => !missingFunctions.includes(fn));
+  const details = [
     `行为：${behaviorLabel(ref)}`,
     `规则：${ruleNames(rules)}`,
-    `缺失函数：${uniqueMissing(missing).join('、')}`,
-    '请先执行上述函数，再重试该行为。',
+    `缺失函数：${missingFunctions.length > 0 ? missingFunctions.join('、') : EMPTY}`,
+  ];
+  if (staleFunctions.length > 0) {
+    details.push(`已过期函数：${staleFunctions.join('、')}（上一次写操作之前的结果，必须重新计算）`);
+  }
+  details.push('请先执行上述函数，再重试该行为。');
+  return details;
+}
+
+/**
+ * 致命配置错误的一句话结论（2026-11-24）。
+ *
+ * 三类成因各自点名：`op_type` 非法 / 多名本体同名行为冲突 / 未声明却被规则绑定。
+ */
+export function fatalMessage(invalid: InvalidBehavior): string {
+  const label = behaviorLabel(invalid.ref);
+  if (invalid.reason === 'undeclared') {
+    return `本体行为「${label}」被规则绑定但未在 behaviors[] 中声明，本次调用已拒绝，本轮已中止。`;
+  }
+  if (invalid.reason === 'op_type_conflict') {
+    return `本体行为「${label}」在多个本体中的 op_type 不一致，规则闸门无法判定，本次调用已拒绝，本轮已中止。`;
+  }
+  return `本体行为「${label}」的 op_type 不是 query 或 command，规则闸门无法判定，本次调用已拒绝，本轮已中止。`;
+}
+
+/** 致命配置错误的逐条原因与修复建议（进卡片正文与结构化日志） */
+export function fatalDetails(invalid: InvalidBehavior): string[] {
+  const head = [`行为：${behaviorLabel(invalid.ref)}`];
+
+  if (invalid.reason === 'undeclared') {
+    return [
+      ...head,
+      '原因：该行为被某条规则的 behavior 绑定，但未在 behaviors[] 中声明',
+      '建议：在该本体 ontology.yaml 的 behaviors[] 补齐声明并标注 op_type，或删除规则的 behavior 绑定，然后重新部署',
+    ];
+  }
+
+  if (invalid.reason === 'op_type_conflict') {
+    const sources = invalid.sources
+      .map((source) => `${source.ontologyKey}: ${source.opType === '' ? '（缺失）' : source.opType}`)
+      .join('，');
+    return [
+      ...head,
+      `原因：多个本体对该行为的 op_type 不一致——${sources || '（未知来源）'}`,
+      '建议：统一各本体 behaviors[] 中该行为的 op_type（command 或 query），然后重新部署',
+    ];
+  }
+
+  const raw = invalid.sources
+    .map((source) => `${source.ontologyKey}: ${source.opType === '' ? '（缺失）' : source.opType}`)
+    .join('，');
+  return [
+    ...head,
+    `原因：behaviors[].op_type 只能是 query 或 command（当前：${raw || '（缺失）'}）`,
+    '建议：把该行为的 op_type 修正为 command 或 query，然后重新部署',
   ];
 }
 

@@ -15,6 +15,7 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
+import { isIntentFocusEnabled } from '../domain/soul.js';
 import { buildTailInstruction, effectiveNextActionsMax } from '../domain/next-actions.js';
 import { composeSystemPrompt } from '../domain/skill-prompt.js';
 import { matchKeys } from '../domain/ontology-doc.js';
@@ -207,22 +208,15 @@ export class AgentInstanceFactory {
     /** 平台内置工具名：规则闸门据此跳过判定与记录（内置与函数同名时仍按内置优先） */
     const builtinNames = new Set<string>();
     /**
-     * 021：轮内函数执行记录——**每轮新建**，轮结束即丢（`FR-001`）。
-     * MUST NOT 提到实例级：上一轮的函数结果不能算作本轮已执行（`SC-003`）。
+     * 2026-11-24（产品口径）：本体规则闸门**只在意图聚焦开启时生效**。
+     *
+     * 与 013 的开关同源、逐次读盘且 fail-closed（读不出来按关闭）：
+     * 关闭轮次不建函数记录、不包装工具——零开销、零日志噪声。
+     * 开关属于部署配置，请求方无法按轮绕过（`skip_intent_focus` 只是"本轮不判定技能"，
+     * 不能顺带绕开规则校验，否则会变成一条提权通道）。
      */
-    const record = createFunctionRecord({
-      warn: (info) =>
-        logger.warn(
-          {
-            event: 'rule_gate.record.dropped',
-            ts: new Date().toISOString(),
-            tool_name: info.toolName,
-            reason: info.reason,
-            ...(info.bytes !== undefined ? { bytes: info.bytes } : {}),
-            ...(info.count !== undefined ? { count: info.count } : {}),
-          },
-          '规则闸门：函数记录条目被丢弃',
-        ),
+    const ruleGateEnabled = isIntentFocusEnabled(this.deps.root, inst.key.userId, inst.key.agentName, {
+      warn: (msg: string) => logger.warn({ alert: true, agent_name: inst.key.agentName }, msg),
     });
 
     // 内置工具（Phase 5）：按 TOOL.json 启用项装配，全部经 FileAccess 代理；
@@ -339,17 +333,39 @@ export class AgentInstanceFactory {
     // 因此既不会被判定，也不会进入函数记录（`FR-009` / `FR-003`）。
     // `availableNames` 由**本轮最终工具数组**生成（含内置），用 `matchKeys` 同时登记
     // "完整名"与"去服务前缀名"——规则的 `related_functions` 写的是裸名，只有裸名可命中（`FR-043`）。
-    const ruled = ruleGateTools(tools, {
-      gate: ruleGate,
-      record,
-      builtinNames,
-      availableNames: collectAvailableNames(tools),
-      suspension,
-      logger,
-      userId: inst.key.userId,
-      agentName: inst.key.agentName,
-      threadId: req.threadId,
-    });
+    // 2026-11-24：意图聚焦关闭时不包装（规则闸门整体不生效）。
+    let ruled = tools;
+    if (ruleGateEnabled) {
+      /**
+       * 021：轮内函数执行记录——**每轮新建**，轮结束即丢（`FR-001`）。
+       * MUST NOT 提到实例级：上一轮的函数结果不能算作本轮已执行（`SC-003`）。
+       */
+      const record = createFunctionRecord({
+        warn: (info) =>
+          logger.warn(
+            {
+              event: 'rule_gate.record.dropped',
+              ts: new Date().toISOString(),
+              tool_name: info.toolName,
+              reason: info.reason,
+              ...(info.bytes !== undefined ? { bytes: info.bytes } : {}),
+              ...(info.count !== undefined ? { count: info.count } : {}),
+            },
+            '规则闸门：函数记录条目被丢弃',
+          ),
+      });
+      ruled = ruleGateTools(tools, {
+        gate: ruleGate,
+        record,
+        builtinNames,
+        availableNames: collectAvailableNames(tools),
+        suspension,
+        logger,
+        userId: inst.key.userId,
+        agentName: inst.key.agentName,
+        threadId: req.threadId,
+      });
+    }
 
     // 020：统一在装配**末端**套一层权限闸门（内置工具与 MCP 工具一视同仁）。
     // 套在 HITL 包装之外 ⇒ 判定先于人工确认，被拒不弹确认框（FR-002）；

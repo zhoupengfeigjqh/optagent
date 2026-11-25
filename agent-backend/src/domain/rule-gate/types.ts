@@ -38,6 +38,39 @@ export type DenyReason = 'unregistered' | 'condition_false' | 'config_unavailabl
  */
 export type RulePosition = '前置' | '后置';
 
+/**
+ * 本体行为的操作类型（2026-11-24 规则闸门收敛）。
+ *
+ * - `command`：写操作，走前置规则闸门 + 执行后使既有函数结果失效；
+ * - `query`：读操作，**不判规则**、不失效；
+ * - 其余任何值（含缺失）都是配置错误 → 致命错误（拒绝 + 立即结束本轮）。
+ */
+export type BehaviorOpType = 'command' | 'query';
+
+/** 非法本体行为的成因（三者都收敛到同一个错误码，靠这里区分文案与日志） */
+export type InvalidBehaviorReason = 'bad_op_type' | 'op_type_conflict' | 'undeclared';
+
+/** 一条 `behaviors[]` 声明的来源（冲突文案要点名"谁说的"） */
+export interface BehaviorOpTypeSource {
+  /** `{场景}/{本体}` */
+  ontologyKey: string;
+  /** 归一后的 `op_type`；缺失为空串 */
+  opType: string;
+}
+
+/**
+ * 无法参与判定的本体行为（2026-11-24）。
+ *
+ * 命中即 **fatal**：不执行行为、不看规则、立即结束本轮。
+ * 与 `pause`（可自愈）和 `deny`（软收尾）都不同，见 `gate.ts` 的判定顺序。
+ */
+export interface InvalidBehavior {
+  ref: BehaviorRef;
+  reason: InvalidBehaviorReason;
+  /** 声明来源（`undeclared` 时为空数组） */
+  sources: readonly BehaviorOpTypeSource[];
+}
+
 /** 条件组合方式 */
 export type CombineMode = 'and' | 'or';
 
@@ -130,13 +163,42 @@ export interface BehaviorRef {
   behaviorName: string;
 }
 
-/** 轮内函数执行记录：键存在 = 本轮已执行过（值可能为 `null`） */
+/**
+ * 轮内函数执行记录：键存在 = **本世代**已执行过（值可能为 `null`）。
+ *
+ * 2026-11-24（command 写后失效）：条目带世代号。本体 command 执行完成后
+ * `invalidate()` 递增世代，此前的条目自动降级为"过期"（不是删除）：
+ * - `has` / `get` 只认当前世代 → 下一个 command 的前置规则必须重算；
+ * - `hasEver` 仍能看到历史条目 → 文案可区分"从未执行"与"已过期"。
+ */
 export interface FunctionRecord {
-  /** 写入（成败都写；失败传 `null`）；不抛 */
-  add(toolName: string, result: unknown): void;
+  /**
+   * 写入（成败都写；失败传 `null`）；不抛。
+   *
+   * @param epoch 派发时刻的世代号（缺省 = 当前世代）。
+   *   **并行批次必须传**：函数在 command 之前派发、在 command 之后返回时，
+   *   按提交时的世代打戳会把它伪装成"写后计算"，必须按派发世代降级为过期。
+   */
+  add(toolName: string, result: unknown, epoch?: number): void;
+  /** 当前世代内是否执行过（值可能是 `null`） */
   has(toolName: string): boolean;
+  /** 当前世代内的结果（过期或不存在均为 `undefined`） */
   get(toolName: string): unknown;
+  /** 本轮任何世代是否执行过（含已过期）；用于区分缺失成因 */
+  hasEver(toolName: string): boolean;
+  /**
+   * 使既有条目过期：世代 +1。
+   *
+   * 只由本体 **command** 调用返回后触发（成功、业务失败、抛错都算），
+   * `query` / 内置工具 / 被暂停拒绝的调用都不触发。
+   */
+  invalidate(): void;
+  /** 当前世代号（从 0 开始） */
+  readonly epoch: number;
+  /** 总键数（含过期条目；上限判据） */
   readonly size: number;
+  /** 当前世代的有效条目数（诊断/日志用） */
+  readonly activeSize: number;
 }
 
 /** 前置判定的输入（纯数据，不含 logger / MCP / run 状态） */
@@ -158,21 +220,48 @@ export interface RuleDiagnosis {
   ontologyKey: string;
   behaviorName: string;
   rules: string[];
+  /** 本世代从未执行过的函数 */
   missingFunctions?: string[];
+  /**
+   * 执行过、但结果产生于上一次 command 之前的函数（2026-11-24）。
+   *
+   * 与 `missingFunctions` 分开：文案必须让模型知道"不是没算，是算过但过期了"。
+   */
+  staleFunctions?: string[];
   unregisteredFunctions?: string[];
   failedConditions?: FailedCondition[];
 }
 
-/** 前置判定的四种结局 */
+/** 前置判定的五种结局 */
 export type PrepareResult =
   | { kind: 'function' }
-  | { kind: 'behavior' }
+  | {
+      kind: 'behavior';
+      /** 本体命令（写操作）：执行后使既有函数结果失效；`query` 不带此字段 */
+      command?: true;
+    }
   | { kind: 'pause'; message: string; details: string[]; diagnosis?: RuleDiagnosis }
   | {
       kind: 'deny';
       message: string;
       details: string[];
       reason: DenyReason;
+      diagnosis?: RuleDiagnosis;
+    }
+  | {
+      /**
+       * 致命配置错误（2026-11-24）：`op_type` 非法 / 同名行为 `op_type` 冲突 /
+       * 被规则绑定但未在 `behaviors[]` 声明。
+       *
+       * 与 `deny` 分开：`deny` 是软收尾（模型解释后正常结束），
+       * `fatal` 是**立即结束本轮**（不等模型再发起调用）。
+       */
+      kind: 'fatal';
+      message: string;
+      details: string[];
+      reason: 'config_unavailable';
+      /** 三类成因（日志/排障用，不新增错误码） */
+      cause: InvalidBehaviorReason;
       diagnosis?: RuleDiagnosis;
     };
 
@@ -198,6 +287,13 @@ export interface RuleGateInput {
 export interface BehaviorRuleBucket {
   /** 行为引用（取合并顺序第一条所属本体，用于文案） */
   ref: BehaviorRef;
+  /**
+   * 是否写操作（`op_type: command`）。
+   *
+   * 只有 `command` 有前置规则、只有 `command` 执行后使函数结果失效；
+   * `query` 恒为 `false`，且它的 `pre` 恒为空（规则被忽略）。
+   */
+  command: boolean;
   /** 前置规则（2026-11-24 起只有前置；后置规则加载时跳过） */
   pre: RuleSpec[];
 }
@@ -206,8 +302,15 @@ export interface BehaviorRuleBucket {
 export interface GateSnapshot {
   /** 目录签名（`ontology` 根目录 mtimeMs，或 `missing`） */
   signature: string;
-  /** 归一行为名 → 规则分组 */
+  /** 归一行为名 → 规则分组（只含可判定的行为） */
   behaviorIndex: Map<string, BehaviorRuleBucket>;
+  /**
+   * 归一行为名 → 非法成因（2026-11-24）。
+   *
+   * 命中即 fatal，必须**先于**"不是本体行为"判定：否则非法行为会落到
+   * `function` 分支被照常执行并写进记录，配置错误变成静默放行。
+   */
+  invalidBehaviors: Map<string, InvalidBehavior>;
   /** 归一函数名 → `functions[].response` 声明 */
   functionResponses: Map<string, unknown>;
   warnings: string[];

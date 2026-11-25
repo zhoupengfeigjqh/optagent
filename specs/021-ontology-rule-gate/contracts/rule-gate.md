@@ -17,9 +17,9 @@ export { createRuleGate, createFunctionRecord } from './…';
 export { RULE_TERMINAL_NOTICE, denyCardBody } from './format.js';   // 拒绝卡片正文（2026-11-09）
 export type {
   RuleGatePort,          // prepare（2026-11-24 起不再有 postHint）
-  FunctionRecord,        // add / has / get / size
-  PrepareResult,         // function | behavior | pause | deny
-  GateSnapshot,          // 只读快照（测试与诊断用）
+  FunctionRecord,        // add / has / get / hasEver / invalidate / epoch / size / activeSize
+  PrepareResult,         // fatal | function | behavior | pause | deny
+  GateSnapshot,          // 只读快照（测试与诊断用；含 invalidBehaviors）
   RuleGateInput,         // { agentDir, warn? }
   RuleSpec, RuleDesign, RuleCondition, OperatorCode,
 } from './…';
@@ -45,19 +45,26 @@ export interface PrepareInput {
 }
 
 export type PrepareResult =
+  | { kind: 'fatal'; message: string; details: string[]      // 非法本体行为：拒绝 + 立即结束本轮
+      reason: 'config_unavailable'
+      cause: 'bad_op_type' | 'op_type_conflict' | 'undeclared' }
   | { kind: 'function' }                                    // 非本体行为（且非内置）
-  | { kind: 'behavior' }                                    // 本体行为，可执行
-  | { kind: 'pause'; message: string; details: string[] }    // 缺函数但**已注册**：不执行，本轮继续
+  | { kind: 'behavior'; command?: true }                     // 本体行为，可执行；command 执行后失效记录
+  | { kind: 'pause'; message: string; details: string[] }    // 缺失/过期但**已注册**：不执行，本轮继续
   | { kind: 'deny'; message: string; details: string[]
       reason: 'unregistered' | 'condition_false' | 'config_unavailable' };
                                                             // 不执行 + 挂起本轮（共用拒绝码，靠 reason 区分）
 
 
 export interface FunctionRecord {
-  add(toolName: string, result: unknown): void;             // 内部判成败与上限
-  has(toolName: string): boolean;
-  get(toolName: string): unknown;
-  readonly size: number;
+  add(toolName: string, result: unknown, epoch?: number): void;  // 内部判成败与上限；epoch = 派发世代
+  has(toolName: string): boolean;                            // 仅当前世代
+  get(toolName: string): unknown;                            // 仅当前世代
+  hasEver(toolName: string): boolean;                        // 含已过期（区分"没算"与"算过但过期"）
+  invalidate(): void;                                        // 世代 +1（command 返回后由包装器调用）
+  readonly epoch: number;
+  readonly size: number;                                     // 总键数（含过期）
+  readonly activeSize: number;                               // 当前世代有效条目数
 }
 ```
 
@@ -99,12 +106,14 @@ export function ruleGateTools(tools: AgentTool[], ctx: RuleGateContext): AgentTo
 | 步 | 条件 | 动作 |
 |---|---|---|
 | 0 | `interceptSuspended(suspension)` 为真 | **不判定、不执行**；累加 `attempts`，第 2 次触发一次兜底纯中止；返回 `toolErrorResult(SUSPENDED_MESSAGE, suspension.code)` |
-| 1 | `builtinNames.has(name)` | **原样执行**；不判定、不记录、不追加 |
-| 2 | `prepare` → `function` | 执行；返回后**无论成败**都 `record.add`（失败记 `null`；未真正发出的调用不会走到这里） |
-| 3 | `prepare` → `behavior` | 执行；结果**原样返回**（2026-11-24 起执行成功后不追加任何文本、不挂起本轮） |
-| 4 | `prepare` → `pause` | **不执行**；返回 `toolErrorResult(message, 'ONTOLOGY_RULE_FUNCTIONS_MISSING')` |
-| 5 | `prepare` → `deny` | **不执行**；`suspendTools(suspension, 'ONTOLOGY_RULE_DENIED')` 挂起本轮；返回「结论 + 明细 + 终局指令」三段式卡片（`ONTOLOGY_RULE_DENIED`） |
-| 6 | 执行抛异常（**仅步骤 2 的 `function` 角色**） | 异常上抛（由 pi loop 兜底）；**记 `null`**（该次调用已发出）；不追加。`behavior` 角色无论成败**都不记录**（规格 `FR-002`：本体行为 MUST NOT 进函数记录） |
+| 1 | `builtinNames.has(name)` | **原样执行**；不判定、不记录、不追加、**不失效** |
+| 2 | `prepare` → `fatal` | **不执行**；`abortRunFatal(suspension, 'ONTOLOGY_RULE_DENIED')`（挂起 + **立即**触发收尾，不等第 2 次）；记 `error` 级 `rule_gate.fatal`（`alert: true`）；返回失败卡片 |
+| 3 | `prepare` → `function` | 执行；返回后**无论成败**都 `record.add(name, value, dispatchedEpoch)`（失败记 `null`） |
+| 4 | `prepare` → `behavior`（`query`） | 执行；结果**原样返回**；不判规则、不失效 |
+| 5 | `prepare` → `behavior` + `command: true` | 执行；结果**原样返回**；随后 `record.invalidate()` + `rule_gate.record.invalidated` |
+| 6 | `prepare` → `pause` | **不执行**；返回 `toolErrorResult(message, 'ONTOLOGY_RULE_FUNCTIONS_MISSING')`（文案区分缺失/过期） |
+| 7 | `prepare` → `deny` | **不执行**；`suspendTools(suspension, 'ONTOLOGY_RULE_DENIED')` 挂起本轮；返回「结论 + 明细 + 终局指令」三段式卡片（`ONTOLOGY_RULE_DENIED`） |
+| 8 | 执行抛异常 | `function` → 记 `null`（按派发世代）；`command` → 同样 `invalidate()`（已发出即无法排除写入）；异常上抛（由 pi loop 兜底）。本体行为**无论成败都不写记录**（`FR-002`） |
 
 **保形**：包装只替换 `execute`，`name` / `description` / `parameters` / `label` / `executionMode` 原样保留。
 
@@ -115,11 +124,13 @@ export function ruleGateTools(tools: AgentTool[], ctx: RuleGateContext): AgentTo
 
 | 状态 | 工具是否执行 | 业务副作用 | 本轮走向 | 模型可见 |
 |---|---|---|---|---|
-| `pause`（缺函数，函数**已注册**） | 否 | 无 | 继续（模型可补调函数后重试） | 规则全文 + 缺失函数清单 + "请先执行完善" |
+| `fatal`（非法本体行为） | 否 | 无 | **立即结束本轮**（`ABORTED`，与点"停止"同路径） | 失败卡片：结论 + 成因 + 修复建议 |
+| `pause`（缺失 / 过期，函数**已注册**） | 否 | 无 | 继续（模型可补调函数后重试） | 规则全文 + 缺失函数 + 已过期函数 + "请先执行完善" |
 | `deny`（求值 false） | 否 | 无 | **挂起本轮其余工具 → 软收尾**（模型总结后 `done`） | 「结论 + 明细 + 终局指令」三段式卡片 |
 | `deny`（规则不可用） | 否 | 无 | **挂起本轮 → 软收尾** | 同上（说明"规则配置不可用"） |
 | `deny`（**函数未注册**，前置） | 否 | 无 | **挂起本轮 → 软收尾**（不可自愈） | 同上，点名未注册函数与下一步检查建议 |
-| `behavior` 成功 | 是 | 正常 | 继续 | 原结果（**不加任何东西**） |
+| `behavior`（`query`）成功 | 是 | 正常 | 继续 | 原结果（**不加任何东西**） |
+| `behavior`（`command`）成功 | 是 | 正常 | 继续；**既有函数结果失效** | 原结果（**不加任何东西**） |
 | `function` 成功或失败 | 是 | 正常 | 继续 | 原结果（**不加任何东西**）；失败时记录为 `null` |
 | 本轮已挂起后的任意调用 | 否 | 无 | 继续拦（第 2 次触发一次纯中止兜底） | `SUSPENDED_MESSAGE`（"本轮已停止执行工具，请直接结束回答"） |
 
@@ -193,9 +204,13 @@ export function ruleGateTools(tools: AgentTool[], ctx: RuleGateContext): AgentTo
 
 ## 7. 日志事件（结构化，字段见 data-model §7）
 
-`rule_gate.paused` / `rule_gate.denied` / `rule_gate.suspended` / `rule_gate.blocked` /
-`rule_gate.unavailable` / `rule_gate.catalog.degraded` / `rule_gate.record.dropped`。
+`rule_gate.paused` / `rule_gate.denied` / `rule_gate.fatal` / `rule_gate.suspended` /
+`rule_gate.blocked` / `rule_gate.unavailable` / `rule_gate.catalog.degraded` /
+`rule_gate.record.dropped` / `rule_gate.record.invalidated`。
 （`rule_gate.posted` 随后置规则于 2026-11-24 一并删除，不再产生。）
+
+> 2026-11-24：新增 `rule_gate.fatal`（`error` + `alert: true`，含 `cause` 三分类）与
+> `rule_gate.record.invalidated`（`info`，只记 `epoch` / `stale_count`，不记正文）。
 
 - 每个事件 MUST 含 `ts`（ISO 8601）与 `event`（事件名），对齐 `FR-035` / `SC-005` 的"含时间"；
 - `rule_gate.denied`（首次拒绝，`warn`）承载判定字段；`rule_gate.suspended`（挂起后每次被拦，`warn`）
@@ -211,4 +226,6 @@ export function ruleGateTools(tools: AgentTool[], ctx: RuleGateContext): AgentTo
 - 不修改 `POST /api/threads/{id}/messages` 的请求/响应形状（软收尾后连失败轮 `error` 都不再新增字段）；
 - 不在管理平台侧新增规则编辑/校验/下发逻辑（`rules` 现状已整包下发）；
 - 不消费 `data_supplements`（只随全文反馈给模型）；
-- 不提供"关闭闸门"的开关、不做规则结果的持久化或审计留存。
+- 不提供**按行为 / 按请求**关闭闸门的开关（需要放开时改本体规则）；闸门是否装配只由数字人
+  SOUL 的意图聚焦开关决定，且请求级 `skip_intent_focus` 不得影响它（`FR-052`）；
+- 不做规则结果的持久化或审计留存。

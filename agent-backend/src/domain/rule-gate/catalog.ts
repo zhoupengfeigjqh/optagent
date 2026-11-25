@@ -6,14 +6,24 @@
  *
  * 失效判据与 020 完全一致：`ontology` 根目录 `mtimeMs`（目录级原子改名会改变它）。
  *
- * 2026-11-24：只装载**前置**规则；`position: 后置` 静默跳过（本版移除、待重新设计），
- * 但仍登记其绑定的行为名，避免该行为被误判为普通函数。
+ * 2026-11-24（行为类型收敛）：
+ * 1. `behaviors[].op_type` 只接受 `command` / `query`（归一：去空白 + 小写）；
+ *    缺失或其它值 → 该行为**非法**（运行期 fatal），不进索引、不装载规则；
+ * 2. 多本体同名行为合并：`op_type` 必须**一致**；`query` 与 `command` 混用 → 非法；
+ * 3. 被规则绑定、但未在 `behaviors[]` 声明的行为 → 非法（运行期 fatal）；
+ * 4. **只有 `command` 装载前置规则**；`query` 的规则静默忽略（query 没有前置规则）。
+ *
+ * 后置规则本版仍整体移除：`position: 后置` 在任何行为解析**之前**静默跳过，
+ * 既不产生运行时效果，也不参与"未声明"判定。
  */
-import { loadOntologyDocs, normalizeName, ontologySignature, type OntologyDoc } from '../ontology-doc.js';
+import { loadOntologyDocs, normalizeName, normalizeOpType, ontologySignature, type OntologyDoc } from '../ontology-doc.js';
 import { normalizeDesign } from './design.js';
 import type {
+  BehaviorOpTypeSource,
+  BehaviorRef,
   BehaviorRuleBucket,
   GateSnapshot,
+  InvalidBehavior,
   RulePosition,
   RuleSpec,
 } from './types.js';
@@ -21,6 +31,15 @@ import type {
 /** 目录签名（与 020 共用 `ontology-doc` 的唯一实现） */
 export function catalogSignature(agentDir: string): string {
   return ontologySignature(agentDir);
+}
+
+/** `behaviors[]` 的一次声明（跨本体聚合后的形态） */
+interface DeclaredBehavior {
+  ref: BehaviorRef;
+  /** 本体键 → 归一 `op_type`（缺失为空串） */
+  opTypes: Map<string, string>;
+  /** 本体键 → 原始 `op_type`（文案展示用） */
+  raw: Map<string, string>;
 }
 
 /**
@@ -32,6 +51,7 @@ export function catalogSignature(agentDir: string): string {
 export function loadGateCatalog(agentDir: string, signature?: string): GateSnapshot {
   const warnings: string[] = [];
   const behaviorIndex = new Map<string, BehaviorRuleBucket>();
+  const invalidBehaviors = new Map<string, InvalidBehavior>();
   const functionResponses = new Map<string, unknown>();
 
   const docs = loadOntologyDocs(agentDir, warnings);
@@ -49,33 +69,77 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
     }
   }
 
-  // 行为索引：先登记 `behaviors[]`（空桶 = "是本体行为但没有规则"）。
-  // 这一步不能省：没有规则的行为也要被识别，否则它会被当成"函数"写进记录（`FR-002`）。
+  // 第一遍：跨本体聚合行为声明（必须全部收齐才能裁决 op_type 冲突）
+  const declared = new Map<string, DeclaredBehavior>();
   for (const doc of docs) {
     for (const behavior of doc.behaviors) {
       const key = normalizeName(behavior.name);
-      if (key === '' || behaviorIndex.has(key)) continue;
-      behaviorIndex.set(key, {
-        ref: {
-          ontologyKey: doc.key,
-          scenarioName: doc.scenarioName,
-          ontologyName: doc.ontologyName,
-          behaviorName: behavior.name,
-        },
-        pre: [],
-      });
+      if (key === '') continue;
+      const entry = declared.get(key) ?? {
+        ref: toRef(doc, behavior.name),
+        opTypes: new Map<string, string>(),
+        raw: new Map<string, string>(),
+      };
+      entry.opTypes.set(doc.key, normalizeOpType(behavior.opType));
+      entry.raw.set(doc.key, behavior.opType);
+      declared.set(key, entry);
     }
   }
 
+  // 第二遍：三态裁决（合法 command / 合法 query / 非法）
+  for (const [key, entry] of declared) {
+    const opTypes = [...entry.opTypes.values()];
+    const bad = opTypes.find((value) => value !== 'command' && value !== 'query');
+    if (bad !== undefined) {
+      warnings.push(`${entry.ref.ontologyKey}:behavior_bad_op_type:${entry.ref.behaviorName}`);
+      invalidBehaviors.set(key, {
+        ref: entry.ref,
+        reason: 'bad_op_type',
+        sources: sourcesOf(entry),
+      });
+      continue;
+    }
+    if (new Set(opTypes).size > 1) {
+      warnings.push(`${entry.ref.ontologyKey}:behavior_op_type_conflict:${entry.ref.behaviorName}`);
+      invalidBehaviors.set(key, {
+        ref: entry.ref,
+        reason: 'op_type_conflict',
+        sources: sourcesOf(entry),
+      });
+      continue;
+    }
+    behaviorIndex.set(key, {
+      ref: entry.ref,
+      command: opTypes[0] === 'command',
+      pre: [],
+    });
+  }
+
+  // 第三遍：装载规则（只有 command 保留；query 静默忽略）
   for (const doc of docs) {
     for (const raw of doc.rules) {
       const rule = normalizeRule(raw, doc, warnings);
       if (rule === null) continue;
-      const bucket = ensureBucket(behaviorIndex, doc, rule.behavior);
-      // 2026-11-24：后置规则整体移除（待重新设计）。这里只登记行为、不进桶——
-      // 登记是必要的：否则"仅被后置规则绑定的行为"会被当成普通函数记录，
-      // 语义从"本体行为"退化成"函数"，是比"少一条提示"更大的偏差。
+      // 后置规则：先跳过，绝不参与行为解析（不产生运行时效果，也不会把行为标成非法）
       if (rule.position === '后置') continue;
+
+      const key = normalizeName(rule.behavior);
+      // 该行为本身已非法（op_type 坏 / 冲突）：规则不再参与，运行期按 fatal 处理
+      if (invalidBehaviors.has(key)) continue;
+
+      const bucket = behaviorIndex.get(key);
+      if (bucket === undefined) {
+        // 被规则绑定但未在 behaviors[] 声明 → 非法（2026-11-24）
+        warnings.push(`${doc.key}:behavior_undeclared:${rule.behavior}`);
+        invalidBehaviors.set(key, {
+          ref: toRef(doc, rule.behavior),
+          reason: 'undeclared',
+          sources: [],
+        });
+        continue;
+      }
+      // query 没有前置规则：规则静默忽略（用户口径 2026-11-24）
+      if (!bucket.command) continue;
       bucket.pre.push(rule);
     }
   }
@@ -83,36 +147,27 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
   return {
     signature: signature ?? catalogSignature(agentDir),
     behaviorIndex,
+    invalidBehaviors,
     functionResponses,
     warnings,
   };
 }
 
-/**
- * 取（或补建）某行为的规则桶。
- *
- * 规则可以绑定 `behaviors[]` 未声明的行为：此时按"规则即声明"登记，
- * 保证它仍走行为通道（不被记录成函数）。
- */
-function ensureBucket(
-  behaviorIndex: Map<string, BehaviorRuleBucket>,
-  doc: OntologyDoc,
-  behaviorName: string,
-): BehaviorRuleBucket {
-  const key = normalizeName(behaviorName);
-  const existing = behaviorIndex.get(key);
-  if (existing !== undefined) return existing;
-  const bucket: BehaviorRuleBucket = {
-    ref: {
-      ontologyKey: doc.key,
-      scenarioName: doc.scenarioName,
-      ontologyName: doc.ontologyName,
-      behaviorName,
-    },
-    pre: [],
+function toRef(doc: OntologyDoc, behaviorName: string): BehaviorRef {
+  return {
+    ontologyKey: doc.key,
+    scenarioName: doc.scenarioName,
+    ontologyName: doc.ontologyName,
+    behaviorName,
   };
-  behaviorIndex.set(key, bucket);
-  return bucket;
+}
+
+/** 声明来源（冲突/非法文案要点名"谁说的"；`op_type` 保留原始值） */
+function sourcesOf(entry: DeclaredBehavior): BehaviorOpTypeSource[] {
+  return [...entry.opTypes.keys()].map((ontologyKey) => ({
+    ontologyKey,
+    opType: entry.raw.get(ontologyKey) ?? '',
+  }));
 }
 
 /** 单条规则归一：`behavior` 空或 `position` 非"前置/后置"→ 整条忽略 + 告警 */
