@@ -98,7 +98,8 @@ describe('UserEditor —— 内容与事件', () => {
 
     await buttonByText(wrapper, '保存')!.trigger('click')
     expect(wrapper.emitted('submit')?.[0]).toEqual([
-      { user_id: 'alice', agents: ['extra'], password: '123456' },
+      // 028：新建态恒带 role（默认 user）；phone/display_name 留空则不带
+      { user_id: 'alice', agents: ['extra'], password: '123456', role: 'user' },
     ])
   })
 
@@ -144,5 +145,35 @@ describe('UserEditor —— 内容与事件', () => {
     expect((reopened!.find('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(
       false,
     )
+  })
+})
+
+describe('UserEditor —— 028 账号扩展字段（新建态）', () => {
+  it('新建态提供手机号/用户名/角色输入；手机号非法时就地报错且不发 submit', async () => {
+    const wrapper = mountEditor(true, null)
+    expect(wrapper.find('#user-phone').exists()).toBe(true)
+    expect(wrapper.find('#user-display-name').exists()).toBe(true)
+    expect(wrapper.find('#user-role').exists()).toBe(true)
+
+    await wrapper.find('#user-id').setValue('ops2')
+    await wrapper.find('#user-password').setValue('123456')
+    await wrapper.find('#user-phone').setValue('123')
+    const save = buttonByText(wrapper, '保存')!
+    await save.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('手机号须为 1 开头的 11 位数字')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
+  it('手机号留空 + 合法输入 → submit 载荷含账号扩展字段', async () => {
+    const wrapper = mountEditor(true, null)
+    await wrapper.find('#user-id').setValue('ops2')
+    await wrapper.find('#user-password').setValue('123456')
+    await wrapper.find('#user-display-name').setValue('张三')
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    const events = wrapper.emitted('submit')
+    expect(events?.[0]).toEqual([
+      { user_id: 'ops2', agents: [], password: '123456', display_name: '张三', role: 'user' },
+    ])
   })
 })

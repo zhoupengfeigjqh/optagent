@@ -14,6 +14,13 @@ import { loadConfig, type AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { ApiError } from './domain/api-error.js';
 import { auditOf } from './domain/audit.js';
+import type { AccountStorePort } from './domain/account/account-store.js';
+import { AgentServiceCatalog } from './domain/account/agent-services.js';
+import { GrantService } from './domain/account/grants.js';
+import { RegisterLinkService } from './domain/account/register-links.js';
+import { RegistrationService } from './domain/account/registration.js';
+import { FileAccountStore } from './domain/account/file-account-store.js';
+import { MysqlAccountStore } from './domain/account/mysql-account-store.js';
 import { AuthService } from './domain/auth/service.js';
 import { SessionStore, type SessionPort } from './domain/auth/session-store.js';
 import { MysqlSessionStore } from './domain/auth/mysql-session-store.js';
@@ -38,13 +45,16 @@ import { PlatformStore } from './infra/platform-store.js';
 import { RuntimeClient } from './infra/runtime-client.js';
 import { createLoggers } from './logging.js';
 import { registerAgentRoutes } from './routes/agents.js';
+import { registerAgentServiceRoutes } from './routes/agent-services.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerDeployRoutes } from './routes/deploy.js';
+import { registerGrantRoutes } from './routes/grants.js';
 import { registerMcpRoutes } from './routes/mcp.js';
 import { registerOntologyRoutes } from './routes/ontologies.js';
 import { registerPlatformRoutes } from './routes/platform.js';
 import { registerReferenceRoutes } from './routes/references.js';
+import { registerRegisterLinkRoutes } from './routes/register-links.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerUserRoutes } from './routes/users.js';
 
@@ -115,6 +125,23 @@ export async function buildServer(options: BuildServerOptions = {}) {
     secret: config.authSecret,
     ttlSeconds: config.authTokenTtlSeconds,
   });
+
+  // ---- 028 阶段 2/3：账号域第三块（服务目录 / 注册链接 / 授权）按同一驱动装配 ----
+  let accountStore: AccountStorePort;
+  if (config.storageDriver === 'mysql' && config.mysql && mysqlConn) {
+    accountStore = new MysqlAccountStore(mysqlConn);
+  } else {
+    accountStore = new FileAccountStore(store);
+  }
+  await accountStore.init();
+  const agentServices = new AgentServiceCatalog(accountStore);
+  const registerLinks = new RegisterLinkService(accountStore, {
+    defaultTtlSeconds:
+      config.registerLinkTtlSeconds === 0 ? null : config.registerLinkTtlSeconds,
+    publicBaseUrl: config.registerLinkPublicBaseUrl,
+  });
+  const grants = new GrantService(accountStore, users);
+  const registration = new RegistrationService(users, accountStore, registerLinks);
   const mcpConfigs = new McpServiceConfigService(store);
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
@@ -165,6 +192,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     catalog,
     sessionStore,
     auth,
+    agentServices,
+    registerLinks,
+    grants,
+    registration,
     deployer: new Deployer({
       store,
       agents,
@@ -281,7 +312,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerOntologyRoutes(routeApp, ctx);
   registerReferenceRoutes(routeApp, ctx);
   registerDeployRoutes(routeApp, ctx, ctx.deployer);
-  // 024：登录鉴权（login/me/logout/session/valid）
+  // 028：账号与数字人服务绑定（注册链接 / 授权 / 服务目录）
+  registerAgentServiceRoutes(routeApp, ctx);
+  registerRegisterLinkRoutes(routeApp, ctx);
+  registerGrantRoutes(routeApp, ctx);
+  // 024：登录鉴权（login/me/logout/session/valid；028 扩展 register 与 my-agents）
   registerAuthRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {

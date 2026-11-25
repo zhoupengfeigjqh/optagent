@@ -61,6 +61,7 @@ export default defineConfig({
 
         // ② 受宪章 80% 门禁约束的模块（新增或改动时 MUST 加入本清单）
         'src/router.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/utils/clipboard.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/utils/error-message.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useAsync.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useAgentDesign.ts': {

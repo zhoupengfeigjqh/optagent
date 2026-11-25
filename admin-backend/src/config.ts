@@ -66,6 +66,15 @@ const envSchema = z.object({
   MYSQL_PASSWORD: z.string().optional(),
   MYSQL_DATABASE: z.string().min(1).optional(),
   MYSQL_POOL_SIZE: z.coerce.number().int().min(1).max(100).default(10),
+  /**
+   * 028 阶段 2：注册链接默认有效期（秒）；`0` = 长期有效。
+   */
+  REGISTER_LINK_DEFAULT_TTL_SECONDS: z.coerce.number().int().min(0).default(604_800),
+  /**
+   * 028 阶段 2：注册链接对外展示的基址（如 `http://ops.example.com/register`）。
+   * 缺省空串 → 生成的 `url` 用相对路径 `/register?link=…`（仅供前端拼接展示）。
+   */
+  REGISTER_LINK_PUBLIC_BASE_URL: z.string().default(''),
 });
 
 export interface AppConfig {
@@ -87,6 +96,10 @@ export interface AppConfig {
   storageDriver: 'file' | 'mysql';
   /** 028：MySQL 连接配置；仅 `storageDriver === 'mysql'` 时非空 */
   mysql: MysqlConfig | null;
+  /** 028 阶段 2：注册链接默认有效期（秒）；0 = 长期有效 */
+  registerLinkTtlSeconds: number;
+  /** 028 阶段 2：注册链接对外基址；空串 = 相对路径 */
+  registerLinkPublicBaseUrl: string;
 }
 
 /** 028：MySQL 连接配置（`STORAGE_DRIVER=mysql` 时由 `loadConfig` 装配） */
@@ -172,6 +185,8 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
             poolSize: e.MYSQL_POOL_SIZE,
           }
         : null,
+    registerLinkTtlSeconds: e.REGISTER_LINK_DEFAULT_TTL_SECONDS,
+    registerLinkPublicBaseUrl: e.REGISTER_LINK_PUBLIC_BASE_URL,
   };
   return Object.freeze(config);
 }

@@ -16,8 +16,8 @@ import {
 } from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 27 个码，且与 HTTP 状态映射一一对应（2026-11-23 部署前校验下架，撤销 1 个）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(27);
+  it('共 32 个码，且与 HTTP 状态映射一一对应（028 §13 新增 5 个绑定类码）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(32);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }

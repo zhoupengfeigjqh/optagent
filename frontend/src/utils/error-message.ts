@@ -59,6 +59,11 @@ const BASE_MESSAGES: Readonly<Record<string, string>> = {
   INTERNAL_ERROR: '系统繁忙，请稍后重试',
   SERVICE_UNAVAILABLE: '系统繁忙，请稍后重试',
   NETWORK_ERROR: '网络异常，请检查连接后重试',
+  // 登录与注册（024 / 028）
+  ADM_INVALID_CREDENTIALS: '账号或密码错误',
+  ADM_UNAUTHENTICATED: '登录已失效，请重新登录',
+  ADM_INVALID_LINK: '注册链接无效或已过期，请联系管理员重新获取',
+  ADM_PHONE_TAKEN: '该手机号已注册，请直接登录',
   // 2026-10-27：运行环境新增的两个"非崩溃"失败码（此前会走兜底把内部码曝给用户）
   // 读取历史/摘要/产出失败：本轮未开始，重试即可（实例未销毁）
   PROMPT_BUILD_FAILED: '读取会话上下文失败，请重试',

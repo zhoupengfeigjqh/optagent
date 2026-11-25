@@ -109,6 +109,9 @@ async function submit(payload: {
   user_id: string
   agents: string[]
   password?: string
+  phone?: string
+  display_name?: string
+  role?: 'admin' | 'user'
 }): Promise<void> {
   busy.value = true
   localError.value = null
@@ -121,7 +124,11 @@ async function submit(payload: {
       await updateUser(editing.value.user_id, payload.agents, revision)
       emit('announce', `用户 ${editing.value.user_id} 的关联已更新`)
     } else {
-      await createUser(payload.user_id, payload.agents, payload.password)
+      await createUser(payload.user_id, payload.agents, payload.password, {
+        ...(payload.phone ? { phone: payload.phone } : {}),
+        ...(payload.display_name ? { display_name: payload.display_name } : {}),
+        ...(payload.role ? { role: payload.role } : {}),
+      })
       emit('announce', `用户 ${payload.user_id} 已创建`)
     }
     editorOpen.value = false
@@ -258,6 +265,28 @@ async function submitReset(password: string): Promise<void> {
             </label>
           </p>
 
+          <p class="user-card-list__account">
+            <StatusBadge
+              :status="(item as UserListItem).role === 'admin' ? 'admin' : 'user'"
+              :label="(item as UserListItem).role === 'admin' ? '管理员' : '普通用户'"
+              :tone="(item as UserListItem).role === 'admin' ? 'warning' : 'neutral'"
+            />
+            <template v-if="(item as UserListItem).phone">
+              <span class="mono">{{ (item as UserListItem).phone }}</span>
+            </template>
+            <template v-if="(item as UserListItem).display_name">
+              {{ (item as UserListItem).display_name }}
+            </template>
+            <span
+              v-if="((item as UserListItem).grants_summary?.approved ?? 0) > 0"
+              class="user-card-list__grants"
+            >
+              已授权 {{ (item as UserListItem).grants_summary?.approved ?? 0 }} 个数字人服务<template
+                v-if="((item as UserListItem).grants_summary?.pending ?? 0) > 0"
+                >，待审批 {{ (item as UserListItem).grants_summary?.pending ?? 0 }}</template
+              >
+            </span>
+          </p>
           <p v-if="(item as UserListItem).agents.length === 0" class="card__meta">
             未关联任何数字人
           </p>
@@ -433,5 +462,19 @@ async function submitReset(password: string): Promise<void> {
   align-items: center;
   gap: var(--space-1);
   flex-wrap: wrap;
+}
+
+.user-card-list__account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.user-card-list__grants {
+  color: var(--color-text-muted);
 }
 </style>

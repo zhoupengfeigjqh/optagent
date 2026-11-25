@@ -24,6 +24,14 @@ export interface UserLinkDocument {
   agents: string[];
   /** 024：密码摘要（scrypt）；存量用户缺省 = 不可登录（`FR-013`）。对外视图不下发。 */
   password?: PasswordRecord;
+  /** 028：手机号（登录标识）；存量用户缺省 = 未绑定 */
+  phone?: string;
+  /** 028：展示名（注册/管理员指定） */
+  display_name?: string;
+  /** 028：角色（admin 管理员 / user 普通用户）；缺省按 `user` */
+  role?: 'admin' | 'user';
+  /** 028：注册来源数字人编码（注册链接创建的账号才有） */
+  source_agent_code?: string;
 }
 
 /** 对外视图：**不含**密码摘要。 */
@@ -31,6 +39,19 @@ export interface UserView {
   user_id: string;
   agents: string[];
   revision: number;
+  /** 028：账号扩展字段（存量用户无值时为 null/缺省口径） */
+  phone?: string | null;
+  display_name?: string | null;
+  role?: 'admin' | 'user';
+  source_agent_code?: string | null;
+}
+
+/** 028：账号扩展字段的创建入参（`POST /users` 与注册链路共用） */
+export interface UserProfileInput {
+  phone?: string | null | undefined;
+  display_name?: string | undefined;
+  role?: 'admin' | 'user' | undefined;
+  source_agent_code?: string | null | undefined;
 }
 
 /**
@@ -47,11 +68,19 @@ export interface UserLinkPort {
   exists(userId: string): boolean;
   readOrNull(userId: string): UserLinkDocument | null;
   read(userId: string): UserLinkDocument;
+  /** 028：按手机号查用户（登录用；无匹配返回 null） */
+  findByPhone(phone: string): UserLinkDocument | null;
   /** 关联了该数字人的用户标识清单（`FR-021` 阻止删除与 `§7.1` 引用查询） */
   usersOfAgent(agentName: string): string[];
   /** 列表（卡片：用户名 + 已关联数字人角色名清单，`FR-023`） */
   list(page: number, toItem: (user: UserLinkDocument) => unknown): Paged<unknown>;
-  create(userIdRaw: unknown, agentsRaw: unknown, revision?: number, passwordRaw?: unknown): Promise<UserView>;
+  create(
+    userIdRaw: unknown,
+    agentsRaw: unknown,
+    revision?: number,
+    passwordRaw?: unknown,
+    profile?: UserProfileInput,
+  ): Promise<UserView>;
   update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView>;
   setPassword(userIdRaw: unknown, password: string): Promise<UserView>;
   remove(userIdRaw: unknown): Promise<void>;
@@ -82,6 +111,10 @@ export class UserLinkService implements UserLinkPort {
     return this.store.readJson<UserLinkDocument>(UserLinkService.relPath(userId));
   }
 
+  findByPhone(phone: string): UserLinkDocument | null {
+    return this.listAll().find((doc) => doc.phone === phone) ?? null;
+  }
+
   read(userId: string): UserLinkDocument {
     const doc = this.readOrNull(userId);
     if (!doc) throw new ApiError(ERROR_CODES.ADM_USER_NOT_FOUND, `用户不存在：${userId}`);
@@ -105,40 +138,46 @@ export class UserLinkService implements UserLinkPort {
     agentsRaw: unknown,
     revision?: number,
     passwordRaw?: unknown,
+    profile?: UserProfileInput,
   ): Promise<UserView> {
     const userId = requireUserId(userIdRaw);
     if (this.exists(userId)) {
       throw new ApiError(ERROR_CODES.ADM_USER_ID_TAKEN, `用户标识已存在：${userId}`);
     }
+    if (profile?.phone && this.findByPhone(profile.phone)) {
+      throw new ApiError(ERROR_CODES.ADM_PHONE_TAKEN, `手机号已被注册：${profile.phone}`);
+    }
     const agents = normalizeAgents(agentsRaw);
     const password =
       typeof passwordRaw === 'string' && passwordRaw !== '' ? hashPassword(passwordRaw) : undefined;
-    const doc: UserLinkDocument = password
-      ? { user_id: userId, agents, password }
-      : { user_id: userId, agents };
+    const doc: UserLinkDocument = { user_id: userId, agents };
+    if (password) doc.password = password;
+    if (profile?.phone) doc.phone = profile.phone;
+    if (profile?.display_name) doc.display_name = profile.display_name;
+    if (profile?.role) doc.role = profile.role;
+    if (profile?.source_agent_code) doc.source_agent_code = profile.source_agent_code;
     const write = (): void => {
       this.store.writeJson(UserLinkService.relPath(userId), doc);
     };
 
     if (revision === undefined) {
       write();
-      return { user_id: userId, agents, revision: this.store.bumpRevision() };
+      return toView(userId, agents, this.store.bumpRevision(), doc);
     }
-    return { user_id: userId, agents, revision: this.store.withRevision(revision, write).revision };
+    const view = toView(userId, agents, this.store.withRevision(revision, write).revision, doc);
+    return view;
   }
 
   async update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView> {
     const userId = requireUserId(userIdRaw);
-    // 保留既有密码摘要：编辑关联数字人 MUST NOT 清空密码
+    // 保留既有密码摘要与账号扩展字段：编辑关联数字人 MUST NOT 清空它们
     const current = this.read(userId);
     const agents = normalizeAgents(agentsRaw);
-    const next: UserLinkDocument = current.password
-      ? { user_id: userId, agents, password: current.password }
-      : { user_id: userId, agents };
+    const next: UserLinkDocument = { ...current, user_id: userId, agents };
     const { revision: nextRevision } = this.store.withRevision(revision, () => {
       this.store.writeJson(UserLinkService.relPath(userId), next);
     });
-    return { user_id: userId, agents, revision: nextRevision };
+    return toView(userId, agents, nextRevision, next);
   }
 
   /**
@@ -154,11 +193,12 @@ export class UserLinkService implements UserLinkPort {
     const userId = requireUserId(userIdRaw);
     const current = this.read(userId);
     this.store.writeJson(UserLinkService.relPath(userId), {
+      ...current,
       user_id: userId,
       agents: current.agents,
       password: hashPassword(password),
     } satisfies UserLinkDocument);
-    return { user_id: userId, agents: current.agents, revision: this.store.revision() };
+    return toView(userId, current.agents, this.store.revision(), current);
   }
 
   async remove(userIdRaw: unknown): Promise<void> {
@@ -179,6 +219,55 @@ export function requireUserId(raw: unknown): string {
     );
   }
   return userId;
+}
+
+/** 文档 → 对外视图（028：补账号扩展字段；file / mysql 两实现共用） */
+export function toView(
+  userId: string,
+  agents: string[],
+  revision: number,
+  doc: Pick<UserLinkDocument, 'phone' | 'display_name' | 'role' | 'source_agent_code'>,
+): UserView {
+  return {
+    user_id: userId,
+    agents,
+    revision,
+    phone: doc.phone ?? null,
+    display_name: doc.display_name ?? null,
+    role: doc.role ?? 'user',
+    source_agent_code: doc.source_agent_code ?? null,
+  };
+}
+
+/** 028：手机号形态校验（11 位数字，与原型同一规则）；空串/null 视为未绑定 */
+export function normalizePhone(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^1\d{10}$/.test(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '手机号须为 1 开头的 11 位数字');
+  }
+  return raw;
+}
+
+/** 028：展示名校验（≥2 字符，≤64）；空值合法（未设置） */
+export function normalizeDisplayName(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw !== 'string') {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'display_name 须为字符串');
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < 2 || trimmed.length > 64) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '用户名长度须为 2~64 个字符');
+  }
+  return trimmed;
+}
+
+/** 028：角色校验；缺省 `user` */
+export function normalizeRole(raw: unknown): 'admin' | 'user' {
+  if (raw === undefined || raw === null || raw === '') return 'user';
+  if (raw !== 'admin' && raw !== 'user') {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'role 只支持 admin / user');
+  }
+  return raw;
 }
 
 /**

@@ -1,11 +1,5 @@
 <script setup lang="ts">
-/**
- * 常驻一级导航（`FR-053`）。
- *
- * - 固定 **4 项**，常驻可见，**不因内部状态禁用**；
- * - 当前项标 `aria-current="page"`，读屏可辨；
- * - 完整键盘可达（原生 `<button>` + 可见焦点环）。
- */
+/** 管理台常驻一级页签；当前项使用 `aria-current` 标记。 */
 import { NAV_ITEMS, type RouteName } from '../../router'
 
 defineProps<{
@@ -38,26 +32,29 @@ const emit = defineEmits<{
 
 <style scoped>
 .primary-nav {
-  background: var(--color-bg-subtle);
-  border-bottom: 1px solid var(--color-border);
+  margin: 0 calc(-1 * var(--space-5));
+  padding: 0 var(--space-5);
+  background: #f2f3f5;
+  border-bottom: 1px solid #e8e9eb;
+  overflow-x: auto;
 }
 
 .primary-nav__list {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
+  gap: 6px;
   margin: 0;
-  padding: 0 var(--space-4);
+  padding: 0;
   list-style: none;
+  min-width: max-content;
 }
 
 .primary-nav__item {
-  padding: var(--space-3) var(--space-4);
+  padding: 14px 18px;
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+  font-size: 15px;
   cursor: pointer;
 }
 
@@ -69,5 +66,17 @@ const emit = defineEmits<{
   color: var(--color-primary);
   border-bottom-color: var(--color-primary);
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .primary-nav {
+    margin: 0 calc(-1 * var(--space-4));
+    padding: 0 var(--space-4);
+  }
+
+  .primary-nav__item {
+    padding: 13px 12px;
+    font-size: var(--font-size-md);
+  }
 }
 </style>

@@ -379,6 +379,16 @@ export interface UserListItem {
   agents: UserAgentLink[]
   /** 部署状态（取自部署清单，§6.1）：`null` = 从未部署过 */
   deployed_at: string | null
+  /**
+   * 028 §13：账号扩展字段。标记可选以兼容旧响应/测试夹具——
+   * 组件侧一律 `?? null` / `?.` 兜底，后端（028 起）恒返回。
+   */
+  phone?: string | null
+  display_name?: string | null
+  role?: 'admin' | 'user'
+  source_agent_code?: string | null
+  /** 028 §13：使用授权摘要（与 agents[] 部署关联分开呈现） */
+  grants_summary?: { approved: number; pending: number }
   summary: UserSummaryEntry[] | null
 }
 
@@ -386,6 +396,11 @@ export interface UserDetail {
   user_id: string
   agents: string[]
   revision: number
+  /** 028 §13：账号扩展字段 */
+  phone?: string | null
+  display_name?: string | null
+  role?: 'admin' | 'user'
+  source_agent_code?: string | null
 }
 
 export interface DeployUserResult {
@@ -443,3 +458,24 @@ export interface ReferencesResponse {
   target_name: string
   affected: ReferenceItem[]
 }
+
+/* ---------- §13 账号与数字人服务绑定（028）---------- */
+
+/**
+ * §13 相关类型**定义在 `./account-types.ts`**，本文件再导出（同 skill-types /
+ * agent-types 拆件先例，原则二）。既有引用方一律从 `api/types` 取。
+ */
+export type {
+  AgentServiceCreatePayload,
+  AgentServiceItem,
+  AgentServiceUpdatePayload,
+  GrantApplyResult,
+  GrantItem,
+  GrantStatus,
+  MeProfile,
+  MyAgents,
+  RegisterLinkCreated,
+  RegisterLinkItem,
+  RegisterLinkLookup,
+  RegisterResult,
+} from './account-types'

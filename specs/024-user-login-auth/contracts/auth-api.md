@@ -30,20 +30,29 @@
 
 | 字段 | 类型 | 必填 | 约束 |
 |---|---|---|---|
-| `user_id` | string | ✅ | 非空 |
+| `user_id` | string | 与 `phone` 二选一 | 非空（028 扩展前为唯一入口） |
+| `phone` | string | 与 `user_id` 二选一 | 11 位手机号（028 扩展；命中后解析为 `user_id` 再验密码，`user_id` 优先） |
 | `password` | string | ✅ | 6~128 字符 |
 
-**响应 200**：`{ "user_id": "admin" }`，并 `Set-Cookie: optagent_auth=<jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=<ttl>`。登录成功同时登记该账号"当前会话"并覆盖旧会话（后登踢前登）。
+**响应 200**：`{ "user_id": "admin" }`，并 `Set-Cookie: optagent_auth=<jwt>; HttpOnly; Path=/; SameSite=Lax; Max-Age=<ttl>`。登录成功同时登记该账号"当前会话"并覆盖旧会话（后登踢前登）。**JWT `sub` 恒为 `user_id`**（不是手机号——028 D1，运行端目录划分依据）。
 
 **错误码**：`VALIDATION_FAILED`（400，字段形状非法）、`ADM_INVALID_CREDENTIALS`（401，账号不存在/密码错误/存量无密码，**统一同一码同一文案，不枚举**）。
+
+### 2.1.1 `POST /api/admin/auth/register`（028 扩展）
+
+专属注册链接注册：`{ link_token, phone, display_name, password }` → **201** `{ user_id, phone, display_name, granted_agent: { code, name } }`。注册即 `approved` 授权；**不自动登录、不下发 Cookie**（与注册原型一致）。错误码：`ADM_INVALID_LINK`（400，不枚举）、`ADM_PHONE_TAKEN`（409）、`VALIDATION_FAILED`（400）。详见 `specs/028-account-mysql-binding/方案与契约.md` §4.1 与 001 契约 §13。
+
+`GET /api/admin/auth/register-links/:token`（公开）：注册页渲染校验 → `{ agent: { code, name }, expired: false }`；无效统一 `ADM_INVALID_LINK`。
 
 ### 2.2 `GET /api/admin/auth/me`
 
 **用途**：登录态探针（前端路由守卫的唯一来源）。
 
-**响应 200**：`{ "user_id": "admin" }`（凭据有效）。
+**响应 200**：`{ "user_id": "admin" }`（凭据有效）。028 扩展：响应**增** `phone` / `display_name` / `role`（`user_id` 字段保留，前端兼容）。
 
 **错误码**：`ADM_UNAUTHENTICATED`（401，凭据缺失/无效）。
+
+**028 扩展**：`GET /api/admin/auth/my-agents`（登录）返回当前用户已授权数字人（`{ items, pending }`，revoked 不下发），供对话工作台「切换数字人」渲染。
 
 ### 2.3 `POST /api/admin/auth/logout`
 

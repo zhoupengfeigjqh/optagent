@@ -21,6 +21,11 @@ import {
   PASSWORD_MIN_LENGTH,
 } from '../domain/auth/password.js';
 import { anomalyReason, detectAnomalies } from '../domain/config-center/references.js';
+import {
+  normalizeDisplayName,
+  normalizePhone,
+  normalizeRole,
+} from '../domain/config-center/user-links.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { normalizePage } from '../domain/paging.js';
 
@@ -34,6 +39,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     const page = normalizePage(query.page);
     const withSummary = query.expand === 'summary';
     const index = await resolveIndex();
+    // 028：授权摘要（approved/pending 计数）——与部署关联 agents[] 分开呈现（§6）
+    const grantSummaries = await ctx.grants.summaries();
 
     return ctx.users.list(page, (user) => {
       const agents = user.agents.map((name) => {
@@ -50,6 +57,12 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
         agents,
         // 部署状态取自部署清单：`null` 表示"从未部署过"（新建用户即如此）
         deployed_at: ctx.manifest.get(user.user_id)?.last_deployed_at ?? null,
+        // 028：账号扩展字段（存量用户为 null / user）
+        phone: user.phone ?? null,
+        display_name: user.display_name ?? null,
+        role: user.role ?? 'user',
+        source_agent_code: user.source_agent_code ?? null,
+        grants_summary: grantSummaries.get(user.user_id) ?? { approved: 0, pending: 0 },
         summary: withSummary
           ? user.agents.map((name) => {
               const design = ctx.agents.readOrNull(name);
@@ -71,6 +84,9 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
       agents?: unknown;
       revision?: unknown;
       password?: unknown;
+      phone?: unknown;
+      display_name?: unknown;
+      role?: unknown;
     };
     assertAgentsExist(ctx, body.agents);
     // 024：新建用户可设初始密码（缺省 = 不设，视为不可登录的存量口径）
@@ -88,8 +104,14 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
       password = body.password;
     }
+    // 028：账号扩展字段（可选；形态不合法即 400）
+    const profile = {
+      phone: normalizePhone(body.phone),
+      display_name: normalizeDisplayName(body.display_name),
+      role: normalizeRole(body.role),
+    };
     const revision = typeof body.revision === 'number' ? body.revision : undefined;
-    const view = await ctx.users.create(body.user_id, body.agents, revision, password);
+    const view = await ctx.users.create(body.user_id, body.agents, revision, password, profile);
     return reply.status(201).send(view);
   });
 
@@ -134,6 +156,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
     ctx.deployer.purgeUser(userId);
     await ctx.users.remove(userId);
+    // 028：级联清理该用户的授权记录（file 驱动显式做；mysql 由 FK CASCADE 兜底）
+    await ctx.grants.removeAllOfUser(userId);
     // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
     await ctx.auth.revokeUser(userId);
     return reply.status(204).send();

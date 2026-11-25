@@ -296,6 +296,123 @@ describe('api/ontologies（§10，2026-10-03）', () => {
   })
 })
 
+describe('api/auth（024 §2 + 028 §13 扩展）', () => {
+  it('登录支持 user_id / phone 二选一；探针 / 登出 / my-agents 路径正确', async () => {
+    const auth = await import('./auth')
+
+    await auth.login({ user_id: 'admin', password: '123456' })
+    expect(lastCall().url).toBe('/api/admin/auth/login')
+    expect(bodyOf(lastCall())).toEqual({ user_id: 'admin', password: '123456' })
+
+    await auth.login({ phone: '13800000001', password: '123456' })
+    expect(bodyOf(lastCall())).toEqual({ phone: '13800000001', password: '123456' })
+
+    await auth.fetchMe()
+    expect(lastCall().url).toBe('/api/admin/auth/me')
+
+    await auth.fetchMyAgents()
+    expect(lastCall().url).toBe('/api/admin/auth/my-agents')
+
+    await auth.logout()
+    expect(lastCall().init.method).toBe('POST')
+    expect(lastCall().url).toBe('/api/admin/auth/logout')
+  })
+
+  it('注册与链接校验走 028 §4.1 路径', async () => {
+    const auth = await import('./auth')
+
+    await auth.register({
+      link_token: 'tok',
+      phone: '13800000001',
+      display_name: '张三',
+      password: '123456',
+    })
+    expect(lastCall().url).toBe('/api/admin/auth/register')
+    expect(bodyOf(lastCall())).toEqual({
+      link_token: 'tok',
+      phone: '13800000001',
+      display_name: '张三',
+      password: '123456',
+    })
+
+    await auth.lookupRegisterLink('tok/en')
+    expect(lastCall().url).toBe(`/api/admin/auth/register-links/${encodeURIComponent('tok/en')}`)
+  })
+})
+
+describe('api/account（028 §13）', () => {
+  it('数字人服务：列表 / 新建 / 更新 / 删除路径与载荷', async () => {
+    const account = await import('./account')
+
+    await account.listAgentServices()
+    expect(lastCall().url).toBe('/api/admin/agent-services')
+
+    await account.createAgentService({ code: 'DH-NEW01', name: '新', platform_agent_name: 'demo' })
+    expect(lastCall().init.method).toBe('POST')
+    expect(bodyOf(lastCall())).toEqual({ code: 'DH-NEW01', name: '新', platform_agent_name: 'demo' })
+
+    await account.updateAgentService('DH-NEW01', { status: 'disabled' })
+    expect(lastCall().init.method).toBe('PUT')
+    expect(lastCall().url).toBe('/api/admin/agent-services/DH-NEW01')
+
+    await account.deleteAgentService('DH-NEW01')
+    expect(lastCall().init.method).toBe('DELETE')
+    expect(lastCall().url).toBe('/api/admin/agent-services/DH-NEW01')
+  })
+
+  it('注册链接：列表过滤 / 生成（三种有效期）/ 撤销', async () => {
+    const account = await import('./account')
+
+    await account.listRegisterLinks('DH-BOM001')
+    expect(lastCall().url).toBe('/api/admin/register-links?agent_code=DH-BOM001')
+
+    await account.createRegisterLink('DH-BOM001')
+    expect(bodyOf(lastCall())).toEqual({ agent_code: 'DH-BOM001' })
+
+    await account.createRegisterLink('DH-BOM001', 30 * 86_400)
+    expect(bodyOf(lastCall())).toEqual({ agent_code: 'DH-BOM001', expires_in_seconds: 2592000 })
+
+    await account.createRegisterLink('DH-BOM001', null)
+    expect(bodyOf(lastCall())).toEqual({ agent_code: 'DH-BOM001', expires_in_seconds: null })
+
+    await account.revokeRegisterLink('tok')
+    expect(lastCall().init.method).toBe('DELETE')
+    expect(lastCall().url).toBe('/api/admin/register-links/tok')
+  })
+
+  it('授权：总账过滤 / 申请 / 通过 / 关闭', async () => {
+    const account = await import('./account')
+
+    await account.listGrants({ status: 'pending', phone: '138', page: 2 })
+    expect(lastCall().url).toBe('/api/admin/grants?page=2&status=pending&phone=138')
+
+    await account.applyGrant('DH-BOM001')
+    expect(bodyOf(lastCall())).toEqual({ agent_code: 'DH-BOM001' })
+
+    await account.approveGrant('u_1', 'DH-BOM001')
+    expect(bodyOf(lastCall())).toEqual({ user_id: 'u_1', agent_code: 'DH-BOM001' })
+
+    await account.revokeGrant('u_1', 'DH-BOM001')
+    expect(lastCall().url).toBe('/api/admin/grants/revoke')
+    expect(bodyOf(lastCall())).toEqual({ user_id: 'u_1', agent_code: 'DH-BOM001' })
+  })
+})
+
+describe('api/users（028 §13 扩展）', () => {
+  it('createUser 可携带账号扩展字段（phone/display_name/role）', async () => {
+    const users = await import('./users')
+    await users.createUser('ops', [], '123456', { phone: '13600000002', display_name: '运维', role: 'user' })
+    expect(bodyOf(lastCall())).toEqual({
+      user_id: 'ops',
+      agents: [],
+      password: '123456',
+      phone: '13600000002',
+      display_name: '运维',
+      role: 'user',
+    })
+  })
+})
+
 describe('api/users 与 api/deploy', () => {
   it('用户：列表默认带 expand=summary（部署前核对总账，FR-023）', async () => {
     const users = await import('./users')

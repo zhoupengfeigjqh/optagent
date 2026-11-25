@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
-import type { UserLinkPort } from '../config-center/user-links.js';
+import type { UserLinkDocument, UserLinkPort } from '../config-center/user-links.js';
 import { verifyPassword } from './password.js';
 import { signSession, cookieHeader, clearCookieHeader } from './token.js';
 import type { SessionPort } from './session-store.js';
@@ -33,24 +33,33 @@ export class AuthService {
   /**
    * 登录：账号不存在 / 密码错误 / 存量无密码 → **同一** `ADM_INVALID_CREDENTIALS`
    * （不枚举，`FR-011`）。成功则登记当前会话并签发凭据。
+   *
+   * 028：`user_id` 与 `phone` 二选一（`user_id` 优先）；`phone` 命中后解析为
+   * `user_id` 再验密码——JWT `sub` 恒为 `user_id`（D1），手机号只作登录标识。
    */
   async login(
     userIdRaw: unknown,
     passwordRaw: unknown,
+    phoneRaw?: unknown,
   ): Promise<{ userId: string; cookie: string }> {
     const invalid = (): ApiError =>
       new ApiError(ERROR_CODES.ADM_INVALID_CREDENTIALS, '账号或密码错误');
-    const userId = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
     const password = typeof passwordRaw === 'string' ? passwordRaw : '';
-    if (userId === '' || password === '') throw invalid();
+    if (password === '') throw invalid();
 
-    const doc = this.users.readOrNull(userId);
+    const userId = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
+    let doc: UserLinkDocument | null = null;
+    if (userId !== '') {
+      doc = this.users.readOrNull(userId);
+    } else if (typeof phoneRaw === 'string' && phoneRaw.trim() !== '') {
+      doc = this.users.findByPhone(phoneRaw.trim());
+    }
     if (!doc || !verifyPassword(password, doc.password)) throw invalid();
 
     const sessionId = randomUUID();
-    await this.sessions.setCurrentSession(userId, sessionId);
-    const token = await signSession(userId, sessionId, this.config.secret, this.config.ttlSeconds);
-    return { userId, cookie: cookieHeader(token, this.config.ttlSeconds) };
+    await this.sessions.setCurrentSession(doc.user_id, sessionId);
+    const token = await signSession(doc.user_id, sessionId, this.config.secret, this.config.ttlSeconds);
+    return { userId: doc.user_id, cookie: cookieHeader(token, this.config.ttlSeconds) };
   }
 
   /** 会话内省：供运行侧确认某会话是否仍为该账号的当前会话。 */

@@ -12,11 +12,26 @@ export function listUsers(page = 1, expandSummary = true): Promise<Paged<UserLis
   })
 }
 
-export function createUser(userId: string, agents: string[], password?: string): Promise<UserDetail> {
+/** 新建用户可携带的账号扩展字段（028 §13；全部可选） */
+export interface CreateUserOptions {
+  phone?: string
+  display_name?: string
+  role?: 'admin' | 'user'
+}
+
+export function createUser(
+  userId: string,
+  agents: string[],
+  password?: string,
+  options?: CreateUserOptions,
+): Promise<UserDetail> {
   return http.post<UserDetail>('/api/admin/users', {
     user_id: userId,
     agents,
     ...(password ? { password } : {}),
+    ...(options?.phone ? { phone: options.phone } : {}),
+    ...(options?.display_name ? { display_name: options.display_name } : {}),
+    ...(options?.role ? { role: options.role } : {}),
   })
 }
 

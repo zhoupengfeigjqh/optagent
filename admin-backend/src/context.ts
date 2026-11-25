@@ -8,6 +8,10 @@
  * 也不再持有"目标运行形态"。
  */
 import type { AppConfig } from './config.js';
+import type { AgentServiceCatalog } from './domain/account/agent-services.js';
+import type { GrantService } from './domain/account/grants.js';
+import type { RegisterLinkService } from './domain/account/register-links.js';
+import type { RegistrationService } from './domain/account/registration.js';
 import type { AuthService } from './domain/auth/service.js';
 import type { SessionPort } from './domain/auth/session-store.js';
 import type { AgentDesignService } from './domain/config-center/agent-design.js';
@@ -65,4 +69,12 @@ export interface AppContext {
   sessionStore: SessionPort;
   /** 024：登录鉴权编排（登录/登出/内省） */
   auth: AuthService;
+  /** 028：数字人服务目录（编码/名称/平台落点） */
+  agentServices: AgentServiceCatalog;
+  /** 028：专属注册链接（生成/撤销/校验） */
+  registerLinks: RegisterLinkService;
+  /** 028：用户 × 数字人服务授权（申请/审批/关闭/总账） */
+  grants: GrantService;
+  /** 028：注册编排（链接 → 建号 → 自动授权） */
+  registration: RegistrationService;
 }

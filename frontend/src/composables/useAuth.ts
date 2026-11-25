@@ -6,13 +6,23 @@
  * - 401 统一分派：仅"未认证/被踢"跳登录页，登录失败（账号密码错）不跳。
  */
 import { ref, type Ref } from 'vue'
-import { createAuthApi, type AuthApi, type AuthUser } from '../api/auth'
+import {
+  createAuthApi,
+  type AuthApi,
+  type AuthUser,
+  type RegisterInput,
+  type RegisterLinkLookup,
+  type RegisterResult,
+} from '../api/auth'
 import { ApiError, createHttpClient, setUnauthorizedHandler, type HttpClient } from '../api/http'
 
 export interface AuthStore {
   readonly currentUser: Ref<AuthUser | null>
   login(userId: string, password: string): Promise<AuthUser>
+  loginWithPhone(phone: string, password: string): Promise<AuthUser>
   logout(): Promise<void>
+  lookupRegisterLink(token: string): Promise<RegisterLinkLookup>
+  register(input: RegisterInput): Promise<RegisterResult>
   /** 已登录返回 true；否则探针一次（记忆化）并返回结果 */
   ensureAuthenticated(): Promise<boolean>
   handleUnauthorized(error: unknown): void
@@ -72,7 +82,15 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
     currentUser,
 
     async login(userId: string, password: string): Promise<AuthUser> {
-      const user = await api.login(userId, password)
+      await api.login(userId, password)
+      const user = await api.me()
+      currentUser.value = user
+      return user
+    },
+
+    async loginWithPhone(phone: string, password: string): Promise<AuthUser> {
+      await api.loginWithPhone(phone, password)
+      const user = await api.me()
       currentUser.value = user
       return user
     },
@@ -88,6 +106,14 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
         probe = null
         redirect()
       }
+    },
+
+    lookupRegisterLink(token: string): Promise<RegisterLinkLookup> {
+      return api.lookupRegisterLink(token)
+    },
+
+    register(input: RegisterInput): Promise<RegisterResult> {
+      return api.register(input)
     },
 
     async ensureAuthenticated(): Promise<boolean> {

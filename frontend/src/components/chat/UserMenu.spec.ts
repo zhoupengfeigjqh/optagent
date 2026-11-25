@@ -19,7 +19,13 @@ import UserMenu from './UserMenu.vue'
  * 组件内的 `computed` 在渲染时取值，静态值足以覆盖本组用例。
  */
 const auth = vi.hoisted(() => ({
-  currentUser: { value: null as { user_id: string } | null },
+  currentUser: {
+    value: null as {
+      user_id: string
+      phone?: string | null
+      display_name?: string | null
+    } | null,
+  },
   logout: vi.fn(async (): Promise<void> => undefined),
 }))
 
@@ -66,6 +72,20 @@ describe('UserMenu —— 触发器与菜单', () => {
     expect(trigger.text()).toContain('admin')
     expect(trigger.attributes('aria-haspopup')).toBe('menu')
     expect(trigger.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('注册用户优先显示用户名，并补充手机号信息', () => {
+    auth.currentUser.value = {
+      user_id: 'u_ab12cd34',
+      phone: '13800000000',
+      display_name: '张三',
+    }
+    const wrapper = mountMenu()
+
+    const trigger = wrapper.get('.base-dropdown__trigger')
+    expect(trigger.text()).toContain('张三')
+    expect(trigger.text()).toContain('13800000000')
+    expect(trigger.get('.user-menu__name').attributes('title')).toContain('u_ab12cd34')
   })
 
   it('登录态缺省时回落到「未登录」，不渲染空按钮', () => {

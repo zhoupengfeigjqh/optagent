@@ -2,7 +2,7 @@
 /**
  * 账号菜单（聊天页左上角，2026-11-18）
  *
- * 取代原「切换」按钮：触发器显示当前登录账号（`user_id`），点开后提供
+ * 取代原「切换」按钮：触发器显示当前登录用户信息，点开后提供
  * 「切换数字人」与「退出登录」两个动作，退出前二次确认。
  *
  * 内聚边界（不复制别人的职责）：
@@ -35,11 +35,28 @@ const confirmOpen = ref(false)
 /** 登出请求进行中：确认框两键禁用，防重复提交 */
 const loggingOut = ref(false)
 
-/**
- * 当前登录账号。正常路径下路由守卫已探针完成（`ensureAuthenticated`），此处必有值；
- * 缺省兜底为「未登录」，避免渲染出空白触发器或抛错。
- */
-const userName = computed(() => auth.currentUser.value?.user_id ?? '未登录')
+const user = computed(() => auth.currentUser.value)
+
+/** 优先展示用户名；注册用户没有用户名时再用手机号或内部 user_id。 */
+const userName = computed(
+  () => user.value?.display_name || user.value?.phone || user.value?.user_id || '未登录',
+)
+
+/** 主名称之外补一行可辨识账号信息；没有额外信息时不渲染空标签。 */
+const userAccount = computed(() => {
+  if (!user.value) return ''
+  if (user.value.display_name && user.value.phone) return user.value.phone
+  if (user.value.display_name) return user.value.user_id
+  if (user.value.phone) return user.value.user_id
+  return ''
+})
+
+const userTitle = computed(() => {
+  if (!user.value) return '未登录'
+  return [user.value.display_name, user.value.phone, user.value.user_id]
+    .filter((item): item is string => typeof item === 'string' && item !== '')
+    .join(' · ')
+})
 
 const items = [
   { key: 'switch-agent', label: '切换数字人' },
@@ -96,7 +113,8 @@ async function onConfirmLogout(): Promise<void> {
     >
       <template #trigger>
         <span class="user-menu__sr">账号菜单：</span>
-        <span class="user-menu__name" :title="userName">{{ userName }}</span>
+        <span class="user-menu__name" :title="userTitle">{{ userName }}</span>
+        <span v-if="userAccount" class="user-menu__account">{{ userAccount }}</span>
       </template>
     </BaseDropdown>
 
@@ -131,6 +149,18 @@ async function onConfirmLogout(): Promise<void> {
 .user-menu__name {
   display: inline-block;
   max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.user-menu__account {
+  display: inline-block;
+  max-width: 120px;
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

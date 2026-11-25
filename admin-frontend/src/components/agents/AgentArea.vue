@@ -6,13 +6,16 @@
  * `tab` 承载配置分区（SOUL / 内置工具 / MCP 服务 / SKILL / 本体 / 文件空间场景），
  * 不构成第三级导航。
  */
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { listAgentServices } from '../../api/account'
 import { getAgent, getAgentCatalog, listAgents } from '../../api/agents'
 import type { OntologyCandidate } from '../../api/ontologies'
 import type {
   AgentDesign,
   AgentListItem,
+  AgentServiceItem,
   BuiltinTool,
+  ErrorInfo,
   McpServiceListItem,
   Paged,
   SkillListItem,
@@ -22,6 +25,8 @@ import { NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import AgentCardList from './AgentCardList.vue'
 import AgentDesigner from './AgentDesigner.vue'
 import CreateAgentDialog from './CreateAgentDialog.vue'
+import RegisterLinkDialog from './RegisterLinkDialog.vue'
+import ErrorNotice from '../common/ErrorNotice.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
 const emit = defineEmits<{
@@ -45,6 +50,16 @@ const skills = ref<SkillListItem[]>([])
 const ontologies = ref<OntologyCandidate[]>([])
 
 const design = ref<AgentDesign | null>(null)
+const agentServices = ref<AgentServiceItem[]>([])
+const agentServicesError = ref<ErrorInfo | null>(null)
+const registerLinkOpen = ref(false)
+const registerLinkAgent = ref<AgentListItem | null>(null)
+const registerLinkService = computed(
+  () =>
+    agentServices.value.find(
+      (service) => service.platform_agent_name === registerLinkAgent.value?.name,
+    ) ?? null,
+)
 
 /** 「新建数字人」弹窗开关（`FR-015`：新建先经弹窗采集名称与可选复制源） */
 const createOpen = ref(false)
@@ -108,6 +123,21 @@ async function loadList(): Promise<void> {
   }
 }
 
+async function loadAgentServices(): Promise<void> {
+  agentServicesError.value = null
+  try {
+    agentServices.value = (await listAgentServices()).items
+  } catch (err) {
+    agentServices.value = []
+    agentServicesError.value = err as ErrorInfo
+  }
+}
+
+function openRegisterLink(agent: AgentListItem): void {
+  registerLinkAgent.value = agent
+  registerLinkOpen.value = true
+}
+
 async function loadDesign(name: string): Promise<void> {
   design.value = null
   if (name === NEW_AGENT_SENTINEL) return
@@ -120,6 +150,7 @@ async function loadDesign(name: string): Promise<void> {
 
 onMounted(() => {
   void loadCatalog()
+  void loadAgentServices()
   if (props.detail) void loadDesign(props.detail)
   else void loadList()
 })
@@ -160,8 +191,14 @@ watch(
       @error="(message) => emit('announce', message)"
     />
     <template v-else>
+      <ErrorNotice
+        v-if="agentServicesError"
+        :error="agentServicesError"
+        title="注册服务加载失败"
+      />
       <AgentCardList
         :items="list?.items ?? []"
+        :services="agentServices"
         :total="list?.total ?? 0"
         :page="page"
         :loading="listLoading"
@@ -173,10 +210,17 @@ watch(
           }
         "
         @open="(name) => emit('navigate', buildPath({ name: 'agents', detail: name }))"
+        @register-link="openRegisterLink"
         @create="createOpen = true"
       />
 
       <CreateAgentDialog v-model:open="createOpen" @confirm="onNewAgentConfirmed" />
+      <RegisterLinkDialog
+        v-model:open="registerLinkOpen"
+        :agent="registerLinkAgent"
+        :service="registerLinkService"
+        @announce="emit('announce', $event)"
+      />
     </template>
   </section>
 </template>

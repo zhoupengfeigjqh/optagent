@@ -78,6 +78,23 @@ a {
   border-color: var(--color-primary-hover);
 }
 
+.btn--link {
+  background: var(--color-primary-subtle);
+  border-color: #cfe0fd;
+  color: var(--color-primary);
+}
+
+.btn--link:hover:not(:disabled) {
+  background: #e2ecfe;
+  border-color: var(--color-primary);
+}
+
+.btn--small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--font-size-xs);
+}
+
 .btn--success {
   background: var(--color-status-success);
   border-color: var(--color-status-success);
