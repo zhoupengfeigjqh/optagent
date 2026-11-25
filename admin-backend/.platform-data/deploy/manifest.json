@@ -1,13 +1,6 @@
 {
   "entries": [
     {
-      "user_id": "admin",
-      "agent_names": [
-        "生鲜识别辅助"
-      ],
-      "last_deployed_at": "2026-11-23T04:47:26.541Z"
-    },
-    {
       "user_id": "test007",
       "agent_names": [
         "生鲜识别辅助"
