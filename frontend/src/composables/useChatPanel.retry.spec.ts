@@ -121,6 +121,7 @@ function makeSession() {
     },
     agents: {
       currentAgent: ref({ agent_name: 'demo' }),
+      accessState: ref('ready'),
       candidates: ref([]),
       mcpServers: ref([]),
       // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待

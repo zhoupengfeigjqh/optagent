@@ -114,6 +114,7 @@ function makeSession() {
     },
     agents: {
       currentAgent: ref({ agent_name: 'demo' }),
+      accessState: ref('ready'),
       candidates: ref([]),
       mcpServers: ref([]),
       mcpPending: ref(false),
@@ -136,7 +137,12 @@ function makeSession() {
       openLink: noop,
     },
     nextSteps: { steps: ref(emptyNextSteps()), start: vi.fn(), reset: vi.fn() },
-    skillMention: { selected: ref<string | null>(null), open: ref(false), sync: vi.fn(), reset: vi.fn() },
+    skillMention: {
+      selected: ref<string | null>(null),
+      open: ref(false),
+      sync: vi.fn(),
+      reset: vi.fn(),
+    },
     produced: { unreadCount: ref(0) },
     toast: { push: vi.fn() },
     /** 018：术语替换预检（源码在 `useTermNormalize`，这里只断言"有没有调"） */

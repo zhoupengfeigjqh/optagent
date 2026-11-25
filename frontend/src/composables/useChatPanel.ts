@@ -61,15 +61,21 @@ export function useChatPanel() {
   const nextSteps = useNextSteps()
   const toast = useToast()
 
-  onMounted(async () => {
+  onMounted(() => {
     // 工具栏需要模型清单：仅在本轮尚未取到时拉取（失败由 `useModels` 自行降级，不阻断聊天）
     if (models.models.value.length === 0) {
       void models.load()
     }
-    // 头部需要当前数字人与 MCP 状态；MCP 状态走后端 SSE 推送（建连落定/切换时主动下发）
-    await agents.loadCurrent()
-    agents.startMcpSubscription()
   })
+
+  watch(
+    () => agents.accessState.value,
+    (state) => {
+      if (state === 'ready') agents.startMcpSubscription()
+      else agents.stopMcpSubscription()
+    },
+    { immediate: true },
+  )
 
   onBeforeUnmount(() => {
     agents.stopMcpSubscription()

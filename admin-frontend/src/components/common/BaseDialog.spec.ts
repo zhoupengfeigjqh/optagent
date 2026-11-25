@@ -61,6 +61,18 @@ describe('BaseDialog', () => {
     expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
   })
 
+  it('showClose 为 true 时显示右上角关闭按钮并关闭弹窗', async () => {
+    const wrapper = mount(BaseDialog, {
+      props: { open: true, title: 'x', showClose: true },
+    })
+    await wrapper.vm.$nextTick()
+
+    const button = wrapper.get('.base-dialog__close')
+    expect(button.attributes('aria-label')).toBe('关闭')
+    await button.trigger('click')
+    expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
+  })
+
   it('打开后聚焦 [data-autofocus] 元素', async () => {
     const wrapper = mount(BaseDialog, {
       props: { open: false, title: 'x' },

@@ -7,6 +7,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons-vue'
 import type { RegisterResult } from '@/api/auth'
 import { getAuthStore } from '@/composables/useAuth'
 import { toErrorInfo, toUserMessage } from '@/utils/error-message'
@@ -27,11 +28,9 @@ const mode = ref<'register' | 'login'>('register')
 const rPhone = ref('')
 const rName = ref('')
 const rPwd = ref('')
-const rAgree = ref(false)
 const rPhoneErr = ref('')
 const rNameErr = ref('')
 const rPwdErr = ref('')
-const rAgreeErr = ref('')
 
 const lPhone = ref('')
 const lPwd = ref('')
@@ -82,7 +81,6 @@ function validateRegister(): boolean {
   rPhoneErr.value = ''
   rNameErr.value = ''
   rPwdErr.value = ''
-  rAgreeErr.value = ''
   let ok = true
   const phone = rPhone.value.trim()
   if (phone === '') {
@@ -107,10 +105,6 @@ function validateRegister(): boolean {
     rPwdErr.value = '密码至少 6 位'
     ok = false
   }
-  if (!rAgree.value) {
-    rAgreeErr.value = '请先阅读并同意用户协议'
-    ok = false
-  }
   return ok
 }
 
@@ -129,7 +123,6 @@ async function submitRegister(): Promise<void> {
     })
     okMessage.value = `注册成功！已自动获得「${created.granted_agent.name}」的使用权限，请登录。`
     rPwd.value = ''
-    rAgree.value = false
     lPhone.value = created.phone
     mode.value = 'login'
   } catch (err) {
@@ -297,28 +290,21 @@ async function submitLogin(): Promise<void> {
                   type="button"
                   class="register-view__eye"
                   :aria-label="rShowPwd ? '隐藏密码' : '显示密码'"
+                  :title="rShowPwd ? '隐藏密码' : '显示密码'"
                   @click="rShowPwd = !rShowPwd"
                 >
-                  {{ rShowPwd ? '隐藏' : '显示' }}
+                  <EyeInvisibleOutlined v-if="rShowPwd" />
+                  <EyeOutlined v-else />
                 </button>
               </div>
               <p class="register-view__err" aria-live="polite">{{ rPwdErr }}</p>
             </div>
-            <label class="register-view__agree">
-              <input v-model="rAgree" type="checkbox" />
-              <span>
-                我已阅读并同意《用户服务协议》与《隐私政策》
-                <span v-if="rAgreeErr !== ''" class="register-view__err" role="alert">
-                  {{ rAgreeErr }}
-                </span>
-              </span>
-            </label>
             <button
               type="submit"
               class="btn btn--primary register-view__submit"
               :disabled="submitting"
             >
-              {{ submitting ? '提交中…' : '点击注册' }}
+              {{ submitting ? '注册中…' : '注册' }}
             </button>
           </form>
 
@@ -355,9 +341,11 @@ async function submitLogin(): Promise<void> {
                   type="button"
                   class="register-view__eye"
                   :aria-label="lShowPwd ? '隐藏密码' : '显示密码'"
+                  :title="lShowPwd ? '隐藏密码' : '显示密码'"
                   @click="lShowPwd = !lShowPwd"
                 >
-                  {{ lShowPwd ? '隐藏' : '显示' }}
+                  <EyeInvisibleOutlined v-if="lShowPwd" />
+                  <EyeOutlined v-else />
                 </button>
               </div>
               <p class="register-view__err" aria-live="polite">{{ lPwdErr }}</p>
@@ -367,7 +355,7 @@ async function submitLogin(): Promise<void> {
               class="btn btn--primary register-view__submit"
               :disabled="submitting"
             >
-              {{ submitting ? '登录中…' : '登录并进入对话' }}
+              {{ submitting ? '登录中…' : '登录' }}
             </button>
           </form>
 

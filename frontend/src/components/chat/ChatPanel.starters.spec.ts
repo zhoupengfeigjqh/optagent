@@ -74,6 +74,8 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(options.agent ?? null),
+      accessState: ref('ready'),
+      error: ref(null),
       candidates: ref([]),
       mcpServers: ref([]),
       switchingDisabled: ref(false),

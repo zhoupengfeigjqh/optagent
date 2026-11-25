@@ -87,8 +87,13 @@ export interface MeProfile {
 }
 
 export interface MyAgents {
-  items: Array<{ code: string; name: string; status: 'approved' }>
-  pending: Array<{ code: string; name: string }>
+  items: Array<{
+    code: string
+    name: string
+    platform_agent_name: string
+    status: 'approved'
+  }>
+  pending: Array<{ code: string; name: string; platform_agent_name: string }>
 }
 
 export interface RegisterResult {

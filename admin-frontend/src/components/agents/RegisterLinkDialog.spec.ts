@@ -84,4 +84,13 @@ describe('RegisterLinkDialog', () => {
     expect(createRegisterLink).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('尚未配置注册服务')
   })
+
+  it('右上角关闭按钮关闭弹窗', async () => {
+    const wrapper = mount(RegisterLinkDialog, {
+      props: { open: true, agent: AGENT, service: SERVICE },
+    })
+    await flushPromises()
+    await wrapper.get('.base-dialog__close').trigger('click')
+    expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
+  })
 })

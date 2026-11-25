@@ -68,6 +68,9 @@ describe('createAuthApi', () => {
       method: 'POST',
       path: '/api/admin/auth/register',
     })
+
+    await api.fetchMyAgents()
+    expect(calls[3]?.path).toBe('/api/admin/auth/my-agents')
   })
 
   it('me / logout 路径正确', async () => {

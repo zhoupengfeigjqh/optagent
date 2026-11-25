@@ -31,8 +31,10 @@ const props = withDefaults(
     previewOpen?: boolean
     /** 预览列是否处于放大态（铺满视口；011） */
     previewMaximized?: boolean
+    /** 无可用数字人时收起历史栏，让阻断说明占满工作台 */
+    sidebarHidden?: boolean
   }>(),
-  { previewOpen: false, previewMaximized: false },
+  { previewOpen: false, previewMaximized: false, sidebarHidden: false },
 )
 
 const rootEl = ref<HTMLElement | null>(null)
@@ -60,6 +62,7 @@ const { width, resizing, style, onPointerDown, onKeydown } = useResizablePanel({
       'app-shell--preview-open': previewOpen,
       'app-shell--preview-maximized': previewMaximized,
       'app-shell--resizing': resizing,
+      'app-shell--sidebar-hidden': sidebarHidden,
     }"
     :style="style"
   >
@@ -67,7 +70,7 @@ const { width, resizing, style, onPointerDown, onKeydown } = useResizablePanel({
          与无障碍树（否则 Tab 会把焦点停在一个看不见的控件上）。
          `inert` 不改布局、不动滚动盒——中栏的草稿与消息滚动位置因此零丢失（FR-030）；
          分隔条自带 `tabindex="0"`，必须一起纳入。 -->
-    <aside class="app-shell__sidebar" :inert="hiddenByMaximize">
+    <aside v-if="!sidebarHidden" class="app-shell__sidebar" :inert="hiddenByMaximize">
       <slot name="sidebar">
         <slot name="history" />
       </slot>
@@ -117,6 +120,10 @@ const { width, resizing, style, onPointerDown, onKeydown } = useResizablePanel({
     var(--layout-sidebar-width) minmax(0, 1fr)
     var(--layout-resizer-width)
     var(--layout-preview-width, var(--layout-preview-ratio));
+}
+
+.app-shell--sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .app-shell__sidebar,

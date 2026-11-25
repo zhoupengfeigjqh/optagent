@@ -62,6 +62,10 @@ export interface AgentsStore {
   switchingDisabled: ComputedRef<boolean>
   /** 禁用**原因**（可读文案）；可切换时为 `null`（FR-015：只置灰不解释等于让用户猜） */
   switchingDisabledReason: ComputedRef<string | null>
+  /** 工作台访问状态：只有 `ready` 允许使用会话、文件、任务等能力 */
+  accessState: Readonly<Ref<AgentAccessState>>
+  /** 初始化当前用户可用数字人；优先保留有效选中项，否则选择首个绑定项 */
+  initializeAccess(preferredAgentName?: string | null): Promise<boolean>
   loadCurrent(): Promise<void>
   loadDetail(name: string): Promise<void>
   loadCandidates(): Promise<void>
@@ -78,6 +82,8 @@ export interface AgentsStore {
   stopMcpSubscription(): void
 }
 
+export type AgentAccessState = 'idle' | 'loading' | 'ready' | 'blocked' | 'error'
+
 /** 创建数字人状态。 */
 export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   const currentAgent = ref<DigitalHuman | null>(null)
@@ -86,6 +92,7 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
   const loading = ref(false)
   const switching = ref(false)
   const error = ref<ErrorInfo | null>(null)
+  const accessState = ref<AgentAccessState>('idle')
 
   let unsubscribe: (() => void) | null = null
 
@@ -200,6 +207,52 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     }
   }
 
+  /**
+   * 工作台入口初始化。
+   *
+   * 当前选中仍有效时沿用；否则优先选择授权记录对应的数字人，再退回该用户可用的第一项。
+   * 用户实际可用清单为空时进入 `blocked`，由工作台隐藏全部业务功能区。
+   */
+  async function initializeAccess(preferredAgentName: string | null = null): Promise<boolean> {
+    if (accessState.value === 'ready' && currentAgent.value !== null) return true
+    accessState.value = 'loading'
+    error.value = null
+    try {
+      const available = await deps.agents.list()
+      if (available.length === 0) {
+        currentAgent.value = null
+        mcpServers.value = []
+        accessState.value = 'blocked'
+        return false
+      }
+
+      const currentResponse = await deps.agents.current()
+      const currentName = currentResponse.agent_name
+      const availableNames = new Set(available.map((item) => item.agent_name))
+      let targetName = available[0]!.agent_name
+      if (currentName !== null && availableNames.has(currentName)) {
+        targetName = currentName
+      } else if (preferredAgentName !== null && availableNames.has(preferredAgentName)) {
+        targetName = preferredAgentName
+      }
+
+      if (currentName !== targetName) await deps.agents.select(targetName)
+      await loadCurrent()
+      if (currentAgent.value === null) {
+        accessState.value = 'error'
+        return false
+      }
+      accessState.value = 'ready'
+      return true
+    } catch (cause) {
+      error.value = toErrorInfo(cause)
+      currentAgent.value = null
+      mcpServers.value = []
+      accessState.value = 'error'
+      return false
+    }
+  }
+
   async function loadCandidates(): Promise<void> {
     try {
       const list = await deps.agents.list()
@@ -278,6 +331,8 @@ export function createAgentsStore(deps: AgentsDeps): AgentsStore {
     error,
     switchingDisabled,
     switchingDisabledReason,
+    accessState,
+    initializeAccess,
     loadCurrent,
     loadDetail,
     loadCandidates,

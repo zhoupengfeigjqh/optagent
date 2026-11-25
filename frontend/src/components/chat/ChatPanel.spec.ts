@@ -43,6 +43,7 @@ function makePanel(
     draft?: string
     references?: Array<{ dir: string; filename: string }>
     onRemoveReference?: ReturnType<typeof vi.fn>
+    accessState?: 'idle' | 'loading' | 'ready' | 'blocked' | 'error'
   } = {},
 ) {
   const noop = vi.fn()
@@ -86,6 +87,8 @@ function makePanel(
     emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(null),
+      accessState: ref(options.accessState ?? 'ready'),
+      error: ref(null),
       candidates: ref<Array<{ agent_name: string }>>([]),
       mcpServers: ref([]),
       switchingDisabled: ref(false),
@@ -191,6 +194,24 @@ function rectOf(element: Element): { left: number; top: number; width: number; h
 
 beforeEach(() => {
   h.panel = null
+})
+
+describe('ChatPanel —— 无可用数字人阻断', () => {
+  it('blocked 时只显示阻断说明，不渲染搜索、消息和输入区', () => {
+    const { wrapper } = setup({ accessState: 'blocked' })
+
+    expect(wrapper.text()).toContain('暂无可用数字人')
+    expect(wrapper.text()).toContain('尚未绑定数字人')
+    expect(wrapper.find('.composer__input').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'SessionSearch' }).exists()).toBe(false)
+  })
+
+  it('加载中时不暴露任何工作台控件', () => {
+    const { wrapper } = setup({ accessState: 'loading' })
+
+    expect(wrapper.text()).toContain('正在加载可用数字人')
+    expect(wrapper.find('.composer__input').exists()).toBe(false)
+  })
 })
 
 describe('ChatPanel —— @ 引用浮层（006）', () => {

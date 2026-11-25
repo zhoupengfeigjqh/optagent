@@ -16,15 +16,25 @@ describe('AgentSummary', () => {
     expect(wrapper.text()).toContain('生产调度助手')
   })
 
-  it('未选定时回落为「请选择数字人」提示，且走红色提示样式钩子', () => {
+  it('未选定时显示可点击的「请选择数字人」按钮', async () => {
     const wrapper = mount(AgentSummary, { props: { agentName: null } })
 
     expect(wrapper.text()).toContain('请选择数字人')
-    const hint = wrapper.get('.agent-summary__hint')
+    const hint = wrapper.get<HTMLButtonElement>('.agent-summary__hint')
     expect(hint.text()).toBe('请选择数字人')
-    // 红色由 `.agent-summary__hint` 的 scoped 样式承载（jsdom 不应用 scoped 样式，
-    // 故此处只断言类钩子存在；视觉验证见 specs/014 的 quickstart）
+    expect(hint.element.disabled).toBe(false)
+    await hint.trigger('click')
+    expect(wrapper.emitted('select')).toHaveLength(1)
     expect(wrapper.find('.agent-summary__name').exists()).toBe(false)
+  })
+
+  it('无可用数字人时按钮禁用并显示明确状态', () => {
+    const wrapper = mount(AgentSummary, {
+      props: { agentName: null, selectEnabled: false, emptyLabel: '暂无可用数字人' },
+    })
+
+    expect(wrapper.get('.agent-summary__hint').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('暂无可用数字人')
   })
 
   it('不再渲染 MCP 状态列表（职责已迁出）', () => {

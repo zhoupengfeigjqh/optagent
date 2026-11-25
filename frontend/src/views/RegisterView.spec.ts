@@ -21,15 +21,14 @@ function mountView() {
   return mount(RegisterView)
 }
 
-function button(wrapper: ReturnType<typeof mountView>, label: string) {
-  return wrapper.findAll('button').find((item) => item.text().includes(label))
+function tab(wrapper: ReturnType<typeof mountView>, label: string) {
+  return wrapper.findAll('[role="tab"]').find((item) => item.text().includes(label))
 }
 
 async function fillRegister(wrapper: ReturnType<typeof mountView>): Promise<void> {
   await wrapper.find('#register-phone').setValue('13900000001')
   await wrapper.find('#register-name').setValue('李四')
   await wrapper.find('#register-password').setValue('123456')
-  await wrapper.find('.register-view__agree input').setValue(true)
 }
 
 beforeEach(() => {
@@ -73,7 +72,7 @@ describe('RegisterView —— 注册与登录', () => {
     const wrapper = mountView()
     await flushPromises()
     await fillRegister(wrapper)
-    await button(wrapper, '点击注册')?.trigger('submit')
+    await wrapper.get('form button[type="submit"]').trigger('submit')
     await flushPromises()
 
     expect(auth.register).toHaveBeenCalledWith({
@@ -90,10 +89,10 @@ describe('RegisterView —— 注册与登录', () => {
   it('登录成功直接跳转对话窗口', async () => {
     const wrapper = mountView()
     await flushPromises()
-    await button(wrapper, '登录')?.trigger('click')
+    await tab(wrapper, '登录')?.trigger('click')
     await wrapper.find('#login-phone').setValue('13900000001')
     await wrapper.find('#login-password').setValue('123456')
-    await button(wrapper, '登录并进入对话')?.trigger('submit')
+    await wrapper.get('form button[type="submit"]').trigger('submit')
     await flushPromises()
 
     expect(auth.loginWithPhone).toHaveBeenCalledWith('13900000001', '123456')
@@ -105,11 +104,22 @@ describe('RegisterView —— 注册与登录', () => {
     const wrapper = mountView()
     await flushPromises()
     await fillRegister(wrapper)
-    await button(wrapper, '点击注册')?.trigger('submit')
+    await wrapper.get('form button[type="submit"]').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('该手机号已注册')
-    expect(button(wrapper, '直接登录')).toBeDefined()
-    expect(button(wrapper, '换个手机号')).toBeDefined()
+    expect(wrapper.findAll('button').some((item) => item.text().includes('直接登录'))).toBe(true)
+    expect(wrapper.findAll('button').some((item) => item.text().includes('换个手机号'))).toBe(true)
+  })
+
+  it('密码可见性按钮使用睁眼/闭眼图标', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const eye = wrapper.get('.register-view__eye')
+    expect(eye.attributes('aria-label')).toBe('显示密码')
+    expect(eye.text()).not.toContain('显示')
+    await eye.trigger('click')
+    expect(eye.attributes('aria-label')).toBe('隐藏密码')
+    expect(wrapper.find('#register-password').attributes('type')).toBe('text')
   })
 })

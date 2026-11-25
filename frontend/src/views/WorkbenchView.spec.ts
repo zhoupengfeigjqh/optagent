@@ -19,8 +19,12 @@ import WorkbenchView from './WorkbenchView.vue'
 
 /** 用 `vi.hoisted` 承载桩，避开 `vi.mock` 工厂的提升限制（与 `ProducedBell.spec.ts` 同一手法） */
 const h = vi.hoisted(() => ({ session: null as unknown }))
+const auth = vi.hoisted(() => ({
+  fetchMyAgents: vi.fn(async () => ({ items: [], pending: [] })),
+}))
 
 vi.mock('@/composables/useAppSession', () => ({ useSession: () => h.session }))
+vi.mock('@/composables/useAuth', () => ({ getAuthStore: () => auth }))
 
 /** 中栏桩的挂载次数：012 的"不打扰"要求放大 / 缩回**不重建**中栏（草稿与滚动位置在它里面） */
 let chatMounts = 0
@@ -86,9 +90,18 @@ function makeSession(initialThreadId: string | null, threadIds: string[]) {
   // 011：放大态的三个派生值与两个动作，按真实 `usePreview` 的语义模拟（懒切换、退出幂等）
   const maximized = ref(false)
   const maximizable = ref(false)
+  const accessState = ref('idle')
   return {
     initialThreadId,
     rememberActiveThread: vi.fn(),
+    agents: {
+      accessState,
+      error: ref(null),
+      initializeAccess: vi.fn(async () => {
+        accessState.value = 'ready'
+        return true
+      }),
+    },
     threads: {
       list: ref(threadIds.map((id) => ({ thread_id: id, title: id }))),
       activeId: activeThreadId,
@@ -181,6 +194,7 @@ function mountView() {
 
 beforeEach(() => {
   h.session = null
+  auth.fetchMyAgents.mockReset().mockResolvedValue({ items: [], pending: [] })
 })
 
 describe('WorkbenchView —— 会话上下文与刷新恢复', () => {
@@ -229,6 +243,22 @@ describe('WorkbenchView —— 会话上下文与刷新恢复', () => {
     await flushPromises()
 
     expect(session.rememberActiveThread).toHaveBeenCalledWith('t1')
+  })
+})
+
+describe('WorkbenchView —— 数字人访问闸门', () => {
+  it('没有可用数字人时不拉会话、不启动定时任务订阅', async () => {
+    const session = makeSession(null, [])
+    session.agents.initializeAccess.mockResolvedValue(false)
+    session.agents.accessState.value = 'blocked'
+    h.session = session
+
+    mountView()
+    await flushPromises()
+
+    expect(session.agents.initializeAccess).toHaveBeenCalledTimes(1)
+    expect(session.threads.loadList).not.toHaveBeenCalled()
+    expect(session.schedule.start).not.toHaveBeenCalled()
   })
 })
 

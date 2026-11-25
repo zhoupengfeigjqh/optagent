@@ -8,6 +8,7 @@ interface Handlers {
   logout?: () => Promise<unknown>
   lookupLink?: (token: string) => Promise<unknown>
   register?: (body: unknown) => Promise<unknown>
+  myAgents?: () => Promise<unknown>
 }
 
 function fakeClient(handlers: Handlers): HttpClient {
@@ -20,6 +21,7 @@ function fakeClient(handlers: Handlers): HttpClient {
     request: unused,
     get: (path: string) => {
       if (path.includes('/me')) return (handlers.me ?? unused)()
+      if (path.includes('/my-agents')) return (handlers.myAgents ?? unused)()
       if (path.includes('/register-links/')) {
         const token = decodeURIComponent(path.split('/').pop() ?? '')
         return (handlers.lookupLink ?? unused)(token)
@@ -120,6 +122,28 @@ describe('createAuthStore', () => {
         password: '123456',
       }),
     ).resolves.toMatchObject({ user_id: 'u_1' })
+  })
+
+  it('读取当前用户已授权数字人', async () => {
+    const myAgents = vi.fn(async () => ({
+      items: [
+        {
+          code: 'DH-1',
+          name: '演示数字人',
+          platform_agent_name: 'demo',
+          status: 'approved',
+        },
+      ],
+      pending: [],
+    }))
+    const store = createAuthStore({
+      client: fakeClient({ myAgents }),
+      redirectToLogin: () => {},
+    })
+
+    await expect(store.fetchMyAgents()).resolves.toMatchObject({
+      items: [{ platform_agent_name: 'demo' }],
+    })
   })
 
   it('logout 清空当前用户并跳转', async () => {

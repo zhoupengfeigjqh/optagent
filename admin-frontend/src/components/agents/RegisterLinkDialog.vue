@@ -116,6 +116,7 @@ watch(
     :open="open"
     title="生成注册链接"
     :width="560"
+    show-close
     @update:open="emit('update:open', $event)"
   >
     <template v-if="open">

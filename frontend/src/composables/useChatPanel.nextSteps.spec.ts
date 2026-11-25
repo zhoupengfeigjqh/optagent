@@ -128,6 +128,7 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
     },
     agents: {
       currentAgent: ref(options.agentSelected === false ? null : { agent_name: 'demo' }),
+      accessState: ref('ready'),
       candidates: ref([]),
       mcpServers: ref([]),
       // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待

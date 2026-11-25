@@ -21,6 +21,14 @@ import { getAuthStore } from '../../composables/useAuth'
 import BaseDropdown from '../common/BaseDropdown.vue'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 
+const props = withDefaults(
+  defineProps<{
+    /** 是否提供「切换数字人」入口；无可用数字人时关闭 */
+    switchEnabled?: boolean
+  }>(),
+  { switchEnabled: true },
+)
+
 const emit = defineEmits<{
   /** 用户选择「切换数字人」：由上层打开数字人面板（本组件不碰业务状态） */
   'open-agent': []
@@ -42,26 +50,10 @@ const userName = computed(
   () => user.value?.display_name || user.value?.phone || user.value?.user_id || '未登录',
 )
 
-/** 主名称之外补一行可辨识账号信息；没有额外信息时不渲染空标签。 */
-const userAccount = computed(() => {
-  if (!user.value) return ''
-  if (user.value.display_name && user.value.phone) return user.value.phone
-  if (user.value.display_name) return user.value.user_id
-  if (user.value.phone) return user.value.user_id
-  return ''
-})
-
-const userTitle = computed(() => {
-  if (!user.value) return '未登录'
-  return [user.value.display_name, user.value.phone, user.value.user_id]
-    .filter((item): item is string => typeof item === 'string' && item !== '')
-    .join(' · ')
-})
-
-const items = [
-  { key: 'switch-agent', label: '切换数字人' },
+const items = computed(() => [
+  ...(props.switchEnabled ? [{ key: 'switch-agent', label: '切换数字人' }] : []),
   { key: 'logout', label: '退出登录' },
-]
+])
 
 function onToggle(): void {
   open.value = !open.value
@@ -113,8 +105,7 @@ async function onConfirmLogout(): Promise<void> {
     >
       <template #trigger>
         <span class="user-menu__sr">账号菜单：</span>
-        <span class="user-menu__name" :title="userTitle">{{ userName }}</span>
-        <span v-if="userAccount" class="user-menu__account">{{ userAccount }}</span>
+        <span class="user-menu__name" :title="userName">{{ userName }}</span>
       </template>
     </BaseDropdown>
 
@@ -149,18 +140,6 @@ async function onConfirmLogout(): Promise<void> {
 .user-menu__name {
   display: inline-block;
   max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.user-menu__account {
-  display: inline-block;
-  max-width: 120px;
-  margin-left: var(--space-2);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

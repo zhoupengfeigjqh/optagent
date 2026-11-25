@@ -220,6 +220,7 @@ describe('手机号注册与登录（§13 register / login 扩展）', () => {
     expect(myAgents.json().items).toContainEqual({
       code: 'DH-TST01',
       name: '测试服务',
+      platform_agent_name: 'demo',
       status: 'approved',
     });
 

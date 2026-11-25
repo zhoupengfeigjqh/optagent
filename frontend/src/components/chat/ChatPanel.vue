@@ -13,6 +13,7 @@ import type { AgentStarter } from '../../api/types'
 import { useChatPanel } from '../../composables/useChatPanel'
 import { canSendContent } from '../../utils/can-send'
 import { EMPTY_DATA_HINT_TEXT } from '../../utils/empty-data-hint'
+import { toUserMessage } from '../../utils/error-message'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import ScheduleEntryButton from '../schedule/ScheduleEntryButton.vue'
@@ -145,6 +146,14 @@ const heroWelcome = computed(() => agents.currentAgent.value?.welcome ?? '')
 const heroStarters = computed<AgentStarter[]>(() => agents.currentAgent.value?.starters ?? [])
 
 const agentSelected = computed(() => agents.currentAgent.value !== null)
+const agentAccessState = computed(() => agents.accessState.value)
+const agentAccessBlocked = computed(
+  () => agentAccessState.value === 'blocked' || agentAccessState.value === 'error',
+)
+const agentAccessMessage = computed(() => {
+  if (agentAccessState.value === 'error') return toUserMessage(agents.error.value)
+  return '当前账号尚未绑定数字人，暂时无法使用对话、文件空间和定时任务等功能。请联系管理员绑定后再试。'
+})
 
 /**
  * 陈旧的数字人上下文（已被移除/不再对该用户可用）→ 在**既有错误提示位**补一句
@@ -224,6 +233,8 @@ onBeforeUnmount(() => {
       :mcp-servers="agents.mcpServers.value"
       :search-open="search.isOpen.value"
       :workspace-open="workspaceOpen"
+      :actions-disabled="agentAccessState !== 'ready'"
+      :agent-switch-enabled="agentAccessState === 'ready'"
       @toggle-search="onToggleSearch"
       @toggle-workspace="onToggleWorkspace"
       @open-agent="onOpenAgentPanel"
@@ -241,219 +252,233 @@ onBeforeUnmount(() => {
       </template>
     </ChatHeader>
 
-    <!-- 会话内搜索栏（US8）：命中高亮由 MessageContent 经 segments 统一渲染 -->
-    <SessionSearch
-      :open="search.isOpen.value"
-      :keyword="search.keyword.value"
-      :total="search.total.value"
-      :active-index="search.activeIndex.value"
-      @update:keyword="onSearchKeyword"
-      @next="search.next"
-      @close="search.close"
-    />
+    <p
+      v-if="agentAccessState === 'idle' || agentAccessState === 'loading'"
+      class="chat-panel__access-loading"
+      role="status"
+    >
+      正在加载可用数字人…
+    </p>
 
-    <div v-if="showList" class="chat-panel__body">
-      <MessageList
-        :thread-id="threads.activeId.value"
-        :source="threads.activeSource.value"
-        :messages="threads.messages.value"
-        :streaming="streaming"
-        :pending-user="pendingUserMessage"
-        :search-keyword="search.keyword.value"
-        :active-match-index="search.activeIndex.value"
-        :has-more="threads.hasMore.value"
-        :next-steps="nextSteps.steps.value"
-        @load-more="onLoadMore"
-        @feedback="onFeedback"
-        @regenerate="onRegenerate"
-        @retry="onRetryTurn"
-        @send-suggestion="onPickNextStep"
-        @open-link="onOpenLink"
-        @open-file="onOpenFile"
-        @open-view="onOpenView"
+    <section v-else-if="agentAccessBlocked" class="chat-panel__blocked" role="alert">
+      <h2>{{ agentAccessState === 'error' ? '数字人加载失败' : '暂无可用数字人' }}</h2>
+      <p>{{ agentAccessMessage }}</p>
+    </section>
+
+    <template v-else>
+      <!-- 会话内搜索栏（US8）：命中高亮由 MessageContent 经 segments 统一渲染 -->
+      <SessionSearch
+        :open="search.isOpen.value"
+        :keyword="search.keyword.value"
+        :total="search.total.value"
+        :active-index="search.activeIndex.value"
+        @update:keyword="onSearchKeyword"
+        @next="search.next"
+        @close="search.close"
       />
-    </div>
 
-    <!-- 首屏引导（004）：欢迎语与问题卡片全部来自当前数字人，本体在 `ChatHero.vue` -->
-    <ChatHero
-      v-else
-      :welcome="heroWelcome"
-      :starters="heroStarters"
-      :agent-selected="agentSelected"
-      :busy="streaming !== null"
-      @select="onStarterClick"
-    />
+      <div v-if="showList" class="chat-panel__body">
+        <MessageList
+          :thread-id="threads.activeId.value"
+          :source="threads.activeSource.value"
+          :messages="threads.messages.value"
+          :streaming="streaming"
+          :pending-user="pendingUserMessage"
+          :search-keyword="search.keyword.value"
+          :active-match-index="search.activeIndex.value"
+          :has-more="threads.hasMore.value"
+          :next-steps="nextSteps.steps.value"
+          @load-more="onLoadMore"
+          @feedback="onFeedback"
+          @regenerate="onRegenerate"
+          @retry="onRetryTurn"
+          @send-suggestion="onPickNextStep"
+          @open-link="onOpenLink"
+          @open-file="onOpenFile"
+          @open-view="onOpenView"
+        />
+      </div>
 
-    <!--
+      <!-- 首屏引导（004）：欢迎语与问题卡片全部来自当前数字人，本体在 `ChatHero.vue` -->
+      <ChatHero
+        v-else
+        :welcome="heroWelcome"
+        :starters="heroStarters"
+        :agent-selected="agentSelected"
+        :busy="streaming !== null"
+        @select="onStarterClick"
+      />
+
+      <!--
       本轮失败提示（TR-58 分流）：本轮用户消息还在缓存里（服务端已终局）→「重试本轮」真正重发；
       缓存不可用（断连/传输层失败：后端那一轮可能仍在跑）→ 保持「重新获取」重拉历史。
       分流的**判断**在 `onRetryFailedRun` 里——模板里不能写 `@retry="a ? f : g"`（编译成语句，点了没反应）
     -->
-    <ErrorNotice
-      v-if="isFailed && errorInfo"
-      class="chat-panel__error"
-      :error="errorInfo"
-      :hint="degradedAgentHint"
-      context="send-message"
-      :retry-label="streaming?.canRegenerate ? '重试本轮' : '重新获取'"
-      @retry="onRetryFailedRun"
-    />
+      <ErrorNotice
+        v-if="isFailed && errorInfo"
+        class="chat-panel__error"
+        :error="errorInfo"
+        :hint="degradedAgentHint"
+        context="send-message"
+        :retry-label="streaming?.canRegenerate ? '重试本轮' : '重新获取'"
+        @retry="onRetryFailedRun"
+      />
 
-    <!-- 加号上传入口：目录树一律取自 workspace 接口（三空间，scenario 定义子目录） -->
-    <UploadMenu
-      class="chat-panel__upload"
-      :open="uploadOpen"
-      :spaces="workspace.spaces.value"
-      :uploads="uploads.items.value"
-      @pick="onPickFiles"
-      @retry="onRetryUpload"
-      @close="onCloseUpload"
-    />
+      <!-- 加号上传入口：目录树一律取自 workspace 接口（三空间，scenario 定义子目录） -->
+      <UploadMenu
+        class="chat-panel__upload"
+        :open="uploadOpen"
+        :spaces="workspace.spaces.value"
+        :uploads="uploads.items.value"
+        @pick="onPickFiles"
+        @retry="onRetryUpload"
+        @close="onCloseUpload"
+      />
 
-    <!-- 发送前的 MCP 就绪等待（2026-10-18）：必须可见，否则"点了没反应"会被当成卡死 -->
-    <p v-if="preparing" class="chat-panel__mcp-pending" role="status">正在连接 MCP 服务…</p>
+      <!-- 发送前的 MCP 就绪等待（2026-10-18）：必须可见，否则"点了没反应"会被当成卡死 -->
+      <p v-if="preparing" class="chat-panel__mcp-pending" role="status">正在连接 MCP 服务…</p>
 
-    <Composer
-      :model-value="chat.draft.value"
-      :sending="sending"
-      :disabled="sending || preparing"
-      :references="mention.references.value"
-      :mention-open="mention.open.value"
-      :skill="skill.selected.value"
-      :skill-open="skill.open.value"
-      @update:model-value="onUpdateDraft"
-      @input-text="onInputText"
-      @mention-key="onMentionKey"
-      @remove-reference="onRemoveReference"
-      @skill-key="onSkillKey"
-      @remove-skill="onRemoveSkill"
-      @paste-files="onPasteFiles"
-      @send="onSend"
-      @stop="onStop"
-    >
-      <template #mention="{ anchor }">
-        <MentionPopup
-          class="chat-panel__mention"
-          :open="mention.open.value"
-          :anchor="anchor"
-          :caret="mention.caret.value"
-          @close="mention.close"
-        >
-          <MentionPicker
+      <Composer
+        :model-value="chat.draft.value"
+        :sending="sending"
+        :disabled="sending || preparing"
+        :references="mention.references.value"
+        :mention-open="mention.open.value"
+        :skill="skill.selected.value"
+        :skill-open="skill.open.value"
+        @update:model-value="onUpdateDraft"
+        @input-text="onInputText"
+        @mention-key="onMentionKey"
+        @remove-reference="onRemoveReference"
+        @skill-key="onSkillKey"
+        @remove-skill="onRemoveSkill"
+        @paste-files="onPasteFiles"
+        @send="onSend"
+        @stop="onStop"
+      >
+        <template #mention="{ anchor }">
+          <MentionPopup
+            class="chat-panel__mention"
             :open="mention.open.value"
-            :spaces="mention.spaces.value"
-            :column="mention.column.value"
-            :active-space="mention.activeSpace.value"
-            :active-dir="mention.activeDir.value"
-            :dirs="mention.dirs.value"
-            :files="mention.files.value"
-            :active-index="mention.activeIndex.value"
-            :loading="workspace.loading.value"
-            @pick-space="onPickSpace"
-            @pick-dir="onPickDir"
-            @pick-file="onPickFile"
+            :anchor="anchor"
+            :caret="mention.caret.value"
             @close="mention.close"
-            @move="mention.move"
-            @confirm="onConfirmMention"
-            @back="mention.back"
-          />
-        </MentionPopup>
-      </template>
-
-      <template #skill="{ anchor }">
-        <MentionPopup
-          class="chat-panel__mention"
-          :open="skill.open.value"
-          :anchor="anchor"
-          :caret="skill.caret.value"
-          @close="skill.close"
-        >
-          <SkillPicker
-            :open="skill.open.value"
-            :skills="skill.filtered.value"
-            :active-index="skill.activeIndex.value"
-            :loading="skill.loading.value"
-            :error="skill.error.value"
-            :selected="skill.selected.value"
-            @pick="onPickSkill"
-            @close="skill.close"
-            @move="skill.move"
-            @confirm="onConfirmSkill"
-          />
-        </MentionPopup>
-      </template>
-
-      <!-- 026 / 2026-11-20：发送判据统一走 `toolbarCanSend`（与 `Composer` 的 Enter 同源），
-           不再出现"Enter 被拦、按钮可点"的分裂 -->
-      <template #toolbar>
-        <ComposerToolbar
-          :thinking="chat.thinkingEnabled.value"
-          :model="models.current.value"
-          :models="models.models.value"
-          :can-send="toolbarCanSend"
-          :streaming="sending"
-          :upload-disabled="sending"
-          @toggle-thinking="onToggleThinking"
-          @select-model="onSelectModel"
-          @send="onSendFromToolbar"
-          @stop="onStop"
-          @toggle-upload="onToggleUpload"
-        >
-          <!-- 014：切换数字人后「数据准备」全空 ⇒ 在「+」上提示上传；文案是界面常量 -->
-          <template #upload-hint>
-            <UploadHintBubble
-              v-if="emptyHint.visible.value"
-              :text="EMPTY_DATA_HINT_TEXT"
-              @close="emptyHint.dismiss"
+          >
+            <MentionPicker
+              :open="mention.open.value"
+              :spaces="mention.spaces.value"
+              :column="mention.column.value"
+              :active-space="mention.activeSpace.value"
+              :active-dir="mention.activeDir.value"
+              :dirs="mention.dirs.value"
+              :files="mention.files.value"
+              :active-index="mention.activeIndex.value"
+              :loading="workspace.loading.value"
+              @pick-space="onPickSpace"
+              @pick-dir="onPickDir"
+              @pick-file="onPickFile"
+              @close="mention.close"
+              @move="mention.move"
+              @confirm="onConfirmMention"
+              @back="mention.back"
             />
-          </template>
-        </ComposerToolbar>
-      </template>
-    </Composer>
+          </MentionPopup>
+        </template>
 
-    <AgentPanel
-      :open="agentPanelOpen"
-      :current="agents.currentAgent.value"
-      :candidates="agents.candidates.value"
-      :switching-disabled="agents.switchingDisabled.value"
-      :switching-disabled-reason="agents.switchingDisabledReason.value"
-      :busy="agents.switching.value"
-      @close="onCloseAgentPanel"
-      @switch="onSwitchAgent"
-    />
+        <template #skill="{ anchor }">
+          <MentionPopup
+            class="chat-panel__mention"
+            :open="skill.open.value"
+            :anchor="anchor"
+            :caret="skill.caret.value"
+            @close="skill.close"
+          >
+            <SkillPicker
+              :open="skill.open.value"
+              :skills="skill.filtered.value"
+              :active-index="skill.activeIndex.value"
+              :loading="skill.loading.value"
+              :error="skill.error.value"
+              :selected="skill.selected.value"
+              @pick="onPickSkill"
+              @close="skill.close"
+              @move="skill.move"
+              @confirm="onConfirmSkill"
+            />
+          </MentionPopup>
+        </template>
 
-    <!-- HITL：工具调用人工确认（Schema 驱动通用表单，与服务解耦） -->
-    <InteractionDialog
-      v-if="pendingInteraction"
-      :request="pendingInteraction"
-      :server-error="interactionError"
-      @submit="onSubmitInteraction"
-      @reject="onRejectInteraction"
-    />
+        <!-- 026 / 2026-11-20：发送判据统一走 `toolbarCanSend`（与 `Composer` 的 Enter 同源），
+           不再出现"Enter 被拦、按钮可点"的分裂 -->
+        <template #toolbar>
+          <ComposerToolbar
+            :thinking="chat.thinkingEnabled.value"
+            :model="models.current.value"
+            :models="models.models.value"
+            :can-send="toolbarCanSend"
+            :streaming="sending"
+            :upload-disabled="sending"
+            @toggle-thinking="onToggleThinking"
+            @select-model="onSelectModel"
+            @send="onSendFromToolbar"
+            @stop="onStop"
+            @toggle-upload="onToggleUpload"
+          >
+            <!-- 014：切换数字人后「数据准备」全空 ⇒ 在「+」上提示上传；文案是界面常量 -->
+            <template #upload-hint>
+              <UploadHintBubble
+                v-if="emptyHint.visible.value"
+                :text="EMPTY_DATA_HINT_TEXT"
+                @close="emptyHint.dismiss"
+              />
+            </template>
+          </ComposerToolbar>
+        </template>
+      </Composer>
 
-    <!-- 018：术语替换确认（只有手动输入且真的发生替换时才打开） -->
-    <TermNormalizeDialog
-      v-if="pendingTerm"
-      :open="true"
-      :original="pendingTerm?.original ?? ''"
-      :normalized="pendingTerm?.normalized ?? ''"
-      :matches="pendingTerm?.matches ?? []"
-      :busy="termSending"
-      @use-replacement="onUseReplacement"
-      @keep-original="onKeepOriginal"
-    />
+      <AgentPanel
+        :open="agentPanelOpen"
+        :current="agents.currentAgent.value"
+        :candidates="agents.candidates.value"
+        :switching-disabled="agents.switchingDisabled.value"
+        :switching-disabled-reason="agents.switchingDisabledReason.value"
+        :busy="agents.switching.value"
+        @close="onCloseAgentPanel"
+        @switch="onSwitchAgent"
+      />
 
-    <!-- 007 US2：点卡片先经二次确认（正文为提示词全文），确认后才经既有链路发送 -->
-    <ConfirmDialog
-      :open="pendingSuggestion !== null"
-      title="发送下一步动作"
-      :message="pendingSuggestion?.prompt ?? ''"
-      confirm-label="发送"
-      :busy="suggestionSending"
-      @confirm="onConfirmSuggestion"
-      @cancel="onCancelSuggestion"
-    />
+      <!-- HITL：工具调用人工确认（Schema 驱动通用表单，与服务解耦） -->
+      <InteractionDialog
+        v-if="pendingInteraction"
+        :request="pendingInteraction"
+        :server-error="interactionError"
+        @submit="onSubmitInteraction"
+        @reject="onRejectInteraction"
+      />
 
+      <!-- 018：术语替换确认（只有手动输入且真的发生替换时才打开） -->
+      <TermNormalizeDialog
+        v-if="pendingTerm"
+        :open="true"
+        :original="pendingTerm?.original ?? ''"
+        :normalized="pendingTerm?.normalized ?? ''"
+        :matches="pendingTerm?.matches ?? []"
+        :busy="termSending"
+        @use-replacement="onUseReplacement"
+        @keep-original="onKeepOriginal"
+      />
+
+      <!-- 007 US2：点卡片先经二次确认（正文为提示词全文），确认后才经既有链路发送 -->
+      <ConfirmDialog
+        :open="pendingSuggestion !== null"
+        title="发送下一步动作"
+        :message="pendingSuggestion?.prompt ?? ''"
+        confirm-label="发送"
+        :busy="suggestionSending"
+        @confirm="onConfirmSuggestion"
+        @cancel="onCancelSuggestion"
+      />
+    </template>
   </section>
 </template>
 
@@ -500,6 +525,34 @@ onBeforeUnmount(() => {
   margin: 0 var(--space-5) var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+
+.chat-panel__access-loading,
+.chat-panel__blocked {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.chat-panel__access-loading {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.chat-panel__blocked h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.chat-panel__blocked p {
+  max-width: 440px;
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  line-height: 1.8;
 }
 
 /* `@` 面板是 `fixed` 浮层（见 MentionPopup）：坐标由脚本写死，任何 margin

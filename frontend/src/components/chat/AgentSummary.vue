@@ -15,18 +15,34 @@
  * 语义是"待处理的状态缺失"而不是普通说明文字；文案本身已表达含义，颜色只是强化，
  * 不依赖颜色单通道传达信息。
  */
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** 当前数字人名称；`null` 表示未选定 */
     agentName?: string | null
+    /** 未选定时是否允许打开选择面板 */
+    selectEnabled?: boolean
+    /** 未选定状态的主文案 */
+    emptyLabel?: string
   }>(),
-  { agentName: null },
+  { agentName: null, selectEnabled: true, emptyLabel: '请选择数字人' },
 )
+
+const emit = defineEmits<{
+  (e: 'select'): void
+}>()
 </script>
 
 <template>
   <div class="agent-summary">
-    <p v-if="agentName === null" class="agent-summary__hint">请选择数字人</p>
+    <button
+      v-if="agentName === null"
+      type="button"
+      class="agent-summary__hint"
+      :disabled="!props.selectEnabled"
+      @click="emit('select')"
+    >
+      {{ props.emptyLabel }}
+    </button>
     <p v-else class="agent-summary__name">{{ agentName }}</p>
   </div>
 </template>
@@ -48,9 +64,23 @@ withDefaults(
 
 /* 未选择数字人＝待处理的状态缺失，用失败态红色提示，而不是弱化的说明文字灰 */
 .agent-summary__hint {
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-status-error);
   font-size: var(--font-size-md);
   line-height: var(--line-height-base);
   font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-summary__hint:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.agent-summary__hint:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
 }
 </style>

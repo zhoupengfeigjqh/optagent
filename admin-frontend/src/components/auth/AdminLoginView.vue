@@ -21,16 +21,11 @@ const session = useAuthSession()
 
 const account = ref('')
 const password = ref('')
-const showPassword = ref(false)
 const accountError = ref('')
 const passwordError = ref('')
 /** 服务端拒绝的文案（行内校验错误不进这里） */
 const alertMessage = ref('')
 const submitting = ref(false)
-
-function togglePassword(): void {
-  showPassword.value = !showPassword.value
-}
 
 async function submit(): Promise<void> {
   alertMessage.value = ''
@@ -97,34 +92,20 @@ async function submit(): Promise<void> {
 
           <div class="admin-login__item">
             <label class="admin-login__label" for="admin-password">密码</label>
-            <div class="admin-login__pwd">
-              <input
-                id="admin-password"
-                v-model="password"
-                class="admin-login__ctrl"
-                :class="{ 'admin-login__ctrl--err': passwordError !== '' }"
-                :type="showPassword ? 'text' : 'password'"
-                autocomplete="current-password"
-                placeholder="请输入密码"
-              />
-              <button
-                type="button"
-                class="admin-login__eye"
-                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
-                @click="togglePassword"
-              >
-                {{ showPassword ? '隐藏' : '显示' }}
-              </button>
-            </div>
+            <input
+              id="admin-password"
+              v-model="password"
+              class="admin-login__ctrl"
+              :class="{ 'admin-login__ctrl--err': passwordError !== '' }"
+              type="password"
+              autocomplete="current-password"
+              placeholder="请输入密码"
+            />
             <p class="admin-login__err" aria-live="polite">{{ passwordError }}</p>
           </div>
 
-          <button
-            type="submit"
-            class="btn btn--primary admin-login__submit"
-            :disabled="submitting"
-          >
-            {{ submitting ? '登录中…' : '登录管理后台' }}
+          <button type="submit" class="btn btn--primary admin-login__submit" :disabled="submitting">
+            {{ submitting ? '登录中…' : '登录' }}
           </button>
         </form>
 
@@ -268,30 +249,6 @@ async function submit(): Promise<void> {
   background: var(--color-status-error-bg);
 }
 
-.admin-login__pwd {
-  position: relative;
-}
-
-.admin-login__pwd .admin-login__ctrl {
-  padding-right: 52px;
-}
-
-.admin-login__eye {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  height: 32px;
-  width: 42px;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  border-radius: var(--radius-sm);
-}
-
-.admin-login__eye:hover {
-  background: #f2f3f5;
-  color: var(--color-text-secondary);
-}
-
 .admin-login__err {
   color: var(--color-status-error);
   font-size: var(--font-size-xs);
@@ -303,6 +260,7 @@ async function submit(): Promise<void> {
   width: 100%;
   height: 44px;
   font-size: 15px;
+  justify-content: center;
 }
 
 .admin-login__foot {

@@ -52,7 +52,7 @@
 
 **错误码**：`ADM_UNAUTHENTICATED`（401，凭据缺失/无效）。
 
-**028 扩展**：`GET /api/admin/auth/my-agents`（登录）返回当前用户已授权数字人（`{ items, pending }`，revoked 不下发），供对话工作台「切换数字人」渲染。
+**028 扩展**：`GET /api/admin/auth/my-agents`（登录）返回当前用户已授权数字人（`{ items, pending }`，revoked 不下发），其中每项包含 `code / name / platform_agent_name`；`items` 按首次授权时间升序，供对话工作台默认选择首次绑定数字人并渲染切换清单。
 
 ### 2.3 `POST /api/admin/auth/logout`
 

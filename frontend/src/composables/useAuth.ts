@@ -10,6 +10,7 @@ import {
   createAuthApi,
   type AuthApi,
   type AuthUser,
+  type MyAgents,
   type RegisterInput,
   type RegisterLinkLookup,
   type RegisterResult,
@@ -23,6 +24,7 @@ export interface AuthStore {
   logout(): Promise<void>
   lookupRegisterLink(token: string): Promise<RegisterLinkLookup>
   register(input: RegisterInput): Promise<RegisterResult>
+  fetchMyAgents(): Promise<MyAgents>
   /** 已登录返回 true；否则探针一次（记忆化）并返回结果 */
   ensureAuthenticated(): Promise<boolean>
   handleUnauthorized(error: unknown): void
@@ -114,6 +116,10 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
 
     register(input: RegisterInput): Promise<RegisterResult> {
       return api.register(input)
+    },
+
+    fetchMyAgents(): Promise<MyAgents> {
+      return api.fetchMyAgents()
     },
 
     async ensureAuthenticated(): Promise<boolean> {

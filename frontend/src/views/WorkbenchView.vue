@@ -28,11 +28,15 @@ import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
 import SchedulePanel from '@/components/schedule/SchedulePanel.vue'
 
 import { useSession } from '@/composables/useAppSession'
+import { getAuthStore } from '@/composables/useAuth'
 import { RUN_PHASE } from '@/constants/events'
 import { downloadTextFile } from '@/utils/download'
 import { exportFilename } from '@/utils/export-thread'
 
 const session = useSession()
+const auth = getAuthStore()
+
+const hasAgentAccess = computed(() => session.agents.accessState.value === 'ready')
 
 /** 有历史消息或本轮已开始 → 展开为完整对话布局（FR-003 / FR-004）。 */
 const expanded = computed(
@@ -46,6 +50,16 @@ const busy = computed(
 
 // 首屏拉取历史会话：一次性拉全量，10 / 100 条切在前端完成（V-09）
 onMounted(async () => {
+  let preferredAgentName: string | null = null
+  try {
+    const mine = await auth.fetchMyAgents()
+    preferredAgentName = mine.items[0]?.platform_agent_name ?? null
+  } catch {
+    // 授权清单只用于优先排序；运行时可用清单仍是最终判据。
+  }
+  const accessReady = await session.agents.initializeAccess(preferredAgentName)
+  if (!accessReady) return
+
   await session.threads.loadList()
   await restoreThread()
   // 015：变更信号只在**真正展示定时任务的视图**订阅（数据页/甘特图页白开一条长连接无意义）；
@@ -182,7 +196,7 @@ async function onExportThread(threadId: string): Promise<void> {
 /* ---------- 右栏工作空间面板（US7 / US8） ---------- */
 
 /** 面板展开即占位右侧 1/3（FR-001）；收起时中栏恢复满宽（FR-002）。 */
-const panelOpen = computed(() => session.preview.open.value)
+const panelOpen = computed(() => hasAgentAccess.value && session.preview.open.value)
 
 function onClosePanel(): void {
   session.preview.close()
@@ -265,7 +279,11 @@ async function onOpenRunThread(threadId: string): Promise<void> {
 </script>
 
 <template>
-  <AppShell :preview-open="panelOpen" :preview-maximized="session.preview.maximized.value">
+  <AppShell
+    :preview-open="panelOpen"
+    :preview-maximized="session.preview.maximized.value"
+    :sidebar-hidden="!hasAgentAccess"
+  >
     <!-- 左栏：历史会话（US5） -->
     <template #history>
       <HistorySidebar

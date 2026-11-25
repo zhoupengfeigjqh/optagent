@@ -32,6 +32,16 @@ export interface RegisterInput {
   password: string
 }
 
+export interface MyAgents {
+  items: Array<{
+    code: string
+    name: string
+    platform_agent_name: string
+    status: 'approved'
+  }>
+  pending: Array<{ code: string; name: string; platform_agent_name: string }>
+}
+
 export interface AuthApi {
   login(userId: string, password: string): Promise<AuthUser>
   loginWithPhone(phone: string, password: string): Promise<AuthUser>
@@ -39,6 +49,7 @@ export interface AuthApi {
   logout(): Promise<void>
   lookupRegisterLink(token: string): Promise<RegisterLinkLookup>
   register(input: RegisterInput): Promise<RegisterResult>
+  fetchMyAgents(): Promise<MyAgents>
 }
 
 export function createAuthApi(http: HttpClient): AuthApi {
@@ -52,5 +63,6 @@ export function createAuthApi(http: HttpClient): AuthApi {
     lookupRegisterLink: (token) =>
       http.get<RegisterLinkLookup>(`/api/admin/auth/register-links/${encodeURIComponent(token)}`),
     register: (input) => http.post<RegisterResult>('/api/admin/auth/register', input),
+    fetchMyAgents: () => http.get<MyAgents>('/api/admin/auth/my-agents'),
   }
 }

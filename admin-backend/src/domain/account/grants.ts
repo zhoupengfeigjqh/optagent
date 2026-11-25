@@ -13,12 +13,7 @@ import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { UserLinkPort } from '../config-center/user-links.js';
-import {
-  nowDatetime,
-  type AccountStorePort,
-  type GrantRecord,
-  type GrantStatus,
-} from './account-store.js';
+import { nowDatetime, type AccountStorePort, type GrantRecord, type GrantStatus } from './account-store.js';
 
 export interface GrantView {
   user_id: string;
@@ -34,8 +29,13 @@ export interface GrantView {
 }
 
 export interface MyAgentsView {
-  items: Array<{ code: string; name: string; status: 'approved' }>;
-  pending: Array<{ code: string; name: string }>;
+  items: Array<{
+    code: string;
+    name: string;
+    platform_agent_name: string;
+    status: 'approved';
+  }>;
+  pending: Array<{ code: string; name: string; platform_agent_name: string }>;
 }
 
 export class GrantService {
@@ -73,11 +73,7 @@ export class GrantService {
   }
 
   /** 审批通过（pending/revoked → approved；记审批人与时间） */
-  async approve(
-    userId: string,
-    agentCode: string,
-    reviewer: string | null,
-  ): Promise<GrantRecord> {
+  async approve(userId: string, agentCode: string, reviewer: string | null): Promise<GrantRecord> {
     const existing = await this.mustFind(userId, agentCode);
     const now = nowDatetime();
     const record: GrantRecord = {
@@ -92,11 +88,7 @@ export class GrantService {
   }
 
   /** 关闭授权（approved/pending → revoked；不删行，保留审计轨迹） */
-  async revoke(
-    userId: string,
-    agentCode: string,
-    reviewer: string | null,
-  ): Promise<GrantRecord> {
+  async revoke(userId: string, agentCode: string, reviewer: string | null): Promise<GrantRecord> {
     const existing = await this.mustFind(userId, agentCode);
     const now = nowDatetime();
     const record: GrantRecord = {
@@ -117,17 +109,14 @@ export class GrantService {
     phone?: string | undefined;
     page: number;
   }): Promise<Paged<GrantView>> {
-    const [grants, services] = await Promise.all([
-      this.store.listGrants(),
-      this.store.listAgentServices(),
-    ]);
+    const [grants, services] = await Promise.all([this.store.listGrants(), this.store.listAgentServices()]);
     const names = new Map(services.map((service) => [service.code, service.name]));
     const byUser = new Map(this.users.listAll().map((doc) => [doc.user_id, doc]));
 
     const phoneLower = filter.phone?.trim().toLowerCase() ?? '';
     const views = grants
-      .filter((grant) => (!filter.status || grant.status === filter.status))
-      .filter((grant) => (!filter.agentCode || grant.agent_code === filter.agentCode))
+      .filter((grant) => !filter.status || grant.status === filter.status)
+      .filter((grant) => !filter.agentCode || grant.agent_code === filter.agentCode)
       .filter((grant) => {
         if (phoneLower === '') return true;
         const doc = byUser.get(grant.user_id);
@@ -153,26 +142,32 @@ export class GrantService {
 
   /** 当前用户已授权 / 待审批清单（`revoked` 不下发） */
   async myAgents(userId: string): Promise<MyAgentsView> {
-    const [grants, services] = await Promise.all([
-      this.store.listGrants(),
-      this.store.listAgentServices(),
-    ]);
-    const names = new Map(services.map((service) => [service.code, service.name]));
+    const [grants, services] = await Promise.all([this.store.listGrants(), this.store.listAgentServices()]);
+    const byCode = new Map(services.map((service) => [service.code, service]));
     const mine = grants.filter((grant) => grant.user_id === userId);
+    const approved = mine
+      .filter((grant) => grant.status === 'approved')
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
     return {
-      items: mine
-        .filter((grant) => grant.status === 'approved')
-        .map((grant) => ({
+      items: approved.map((grant) => {
+        const service = byCode.get(grant.agent_code);
+        return {
           code: grant.agent_code,
-          name: names.get(grant.agent_code) ?? grant.agent_code,
+          name: service?.name ?? grant.agent_code,
+          platform_agent_name: service?.platform_agent_name ?? grant.agent_code,
           status: 'approved' as const,
-        })),
+        };
+      }),
       pending: mine
         .filter((grant) => grant.status === 'pending')
-        .map((grant) => ({
-          code: grant.agent_code,
-          name: names.get(grant.agent_code) ?? grant.agent_code,
-        })),
+        .map((grant) => {
+          const service = byCode.get(grant.agent_code);
+          return {
+            code: grant.agent_code,
+            name: service?.name ?? grant.agent_code,
+            platform_agent_name: service?.platform_agent_name ?? grant.agent_code,
+          };
+        }),
     };
   }
 

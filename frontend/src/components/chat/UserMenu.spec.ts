@@ -74,7 +74,7 @@ describe('UserMenu —— 触发器与菜单', () => {
     expect(trigger.attributes('aria-expanded')).toBe('false')
   })
 
-  it('注册用户优先显示用户名，并补充手机号信息', () => {
+  it('注册用户只显示用户名，优先于手机号', () => {
     auth.currentUser.value = {
       user_id: 'u_ab12cd34',
       phone: '13800000000',
@@ -84,8 +84,21 @@ describe('UserMenu —— 触发器与菜单', () => {
 
     const trigger = wrapper.get('.base-dropdown__trigger')
     expect(trigger.text()).toContain('张三')
+    expect(trigger.text()).not.toContain('13800000000')
+    expect(trigger.get('.user-menu__name').attributes('title')).toBe('张三')
+  })
+
+  it('没有用户名时只显示手机号，不暴露内部 user_id', () => {
+    auth.currentUser.value = {
+      user_id: 'u_ab12cd34',
+      phone: '13800000000',
+      display_name: null,
+    }
+    const wrapper = mountMenu()
+
+    const trigger = wrapper.get('.base-dropdown__trigger')
     expect(trigger.text()).toContain('13800000000')
-    expect(trigger.get('.user-menu__name').attributes('title')).toContain('u_ab12cd34')
+    expect(trigger.text()).not.toContain('u_ab12cd34')
   })
 
   it('登录态缺省时回落到「未登录」，不渲染空按钮', () => {
@@ -103,6 +116,15 @@ describe('UserMenu —— 触发器与菜单', () => {
       '切换数字人',
       '退出登录',
     ])
+  })
+
+  it('无可用数字人时菜单只保留退出登录', async () => {
+    const wrapper = mount(UserMenu, {
+      props: { switchEnabled: false },
+      global: { stubs: { BaseDialog: BaseDialogStub } },
+    })
+    await openMenu(wrapper)
+    expect(itemButtons(wrapper).map((item) => item.text().trim())).toEqual(['退出登录'])
   })
 
   it('选「切换数字人」→ 发出 open-agent 并收起菜单，不触发登出', async () => {

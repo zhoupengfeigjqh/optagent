@@ -1043,7 +1043,7 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `/api/admin/auth/register-links/:token` | GET | 公开 | 注册页渲染校验 → `{agent:{code,name}, expired:false}`；无效/过期/撤销/停用统一 `ADM_INVALID_LINK`（不枚举） |
 | `/api/admin/auth/login` | POST | 公开 | **扩展**：请求体 `{user_id?, phone?, password}` 二选一；失败仍统一 `ADM_INVALID_CREDENTIALS`（不枚举）；JWT `sub` 恒为 `user_id`（非手机号） |
 | `/api/admin/auth/me` | GET | 登录 | **扩展响应**：`{user_id, phone, display_name, role}` |
-| `/api/admin/auth/my-agents` | GET | 登录 | 当前用户授权清单：`{items:[{code,name,status}], pending:[{code,name}]}`（revoked 不下发） |
+| `/api/admin/auth/my-agents` | GET | 登录 | 当前用户授权清单：`{items:[{code,name,platform_agent_name,status}], pending:[{code,name,platform_agent_name}]}`（revoked 不下发；items 按首次授权时间升序） |
 | `/api/admin/grants/apply` | POST | 本人 | 申请：`{agent_code}`；`user_id` 取自会话（防越权）；approved/pending 幂等 |
 | `/api/admin/grants` | GET | 管理员 | 授权总账：query `status/agent_code/phone/page` → 卡片分页 `{items,total,page,...}` |
 | `/api/admin/grants/approve` | POST | 管理员 | 审批通过：`{user_id, agent_code}`；记录不存在 → `ADM_GRANT_NOT_FOUND` |

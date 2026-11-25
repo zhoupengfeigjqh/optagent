@@ -35,8 +35,10 @@ const props = withDefaults(
     title: string
     /** 最大宽度（px）；窄屏恒收敛为视口宽度减边距 */
     width?: number
+    /** 是否在右上角显示关闭按钮 */
+    showClose?: boolean
   }>(),
-  { width: 560 },
+  { width: 560, showClose: false },
 )
 
 const emit = defineEmits<{
@@ -106,6 +108,15 @@ onBeforeUnmount(() => {
     @cancel="onCancel"
   >
     <form method="dialog" class="base-dialog__body" @submit.prevent>
+      <button
+        v-if="showClose"
+        type="button"
+        class="base-dialog__close"
+        aria-label="关闭"
+        @click="emit('update:open', false)"
+      >
+        ×
+      </button>
       <h2 :id="titleId" class="base-dialog__title">{{ title }}</h2>
       <div class="base-dialog__content">
         <slot />
@@ -119,6 +130,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .base-dialog {
+  position: relative;
   border: none;
   border-radius: var(--radius-lg);
   padding: 0;
@@ -138,6 +150,26 @@ onBeforeUnmount(() => {
 .base-dialog__title {
   margin: 0;
   font-size: var(--font-size-lg);
+}
+
+.base-dialog__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.base-dialog__close:hover {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
 }
 
 .base-dialog__content {
