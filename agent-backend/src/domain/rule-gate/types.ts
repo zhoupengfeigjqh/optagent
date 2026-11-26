@@ -265,10 +265,33 @@ export type PrepareResult =
       diagnosis?: RuleDiagnosis;
     };
 
+/**
+ * 只读查询结果（028）。
+ *
+ * 供规划阶段推导 `type` 与 `command` 的前置函数；**不参与判定**，也不会写记录。
+ */
+export interface BehaviorLookup {
+  /** 完整工具名（原样，与查询入参一致） */
+  toolName: string;
+  /** 是否写操作 */
+  command: boolean;
+  /** 前置规则声明的函数（裸名；去重、保持规则与声明顺序） */
+  relatedFunctions: string[];
+  /** 行为引用（展示与本体归属用） */
+  ref: BehaviorRef;
+}
+
 /** 闸门端口：`prepare` **永不抛错** */
 export interface RuleGatePort {
   prepare(input: PrepareInput): PrepareResult;
   invalidate(): void;
+  /**
+   * 只读查询（028 FR-029）：按工具名返回类型与前置函数。
+   *
+   * - 不是任何已部署本体的行为 → `null`；
+   * - MUST NOT 修改判定状态、MUST NOT 写 `FunctionRecord`、MUST NOT 产生告警外的副作用。
+   */
+  lookupBehavior(toolName: string): BehaviorLookup | null;
 }
 
 /** 工厂入参：只给"数字人目录 + 告警出口" */

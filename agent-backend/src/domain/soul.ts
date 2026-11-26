@@ -113,6 +113,13 @@ export interface SoulMeta {
    * 同样只有与 `intentFocus` 逻辑与为真时才写进产物。
    */
   termNormalize: boolean;
+  /**
+   * 028：是否开启「任务规划」（frontmatter `task_planning`）。
+   *
+   * 与 `intentFocus` 是**逻辑与**关系：任一方为假即零规划调用。
+   * 同样 fail-closed（缺键 / 非布尔 → `false`），因为多开一次规划就是多一次模型往返。
+   */
+  taskPlanning: boolean;
 }
 
 /** 空值工厂（每次返回新对象，避免调用方误改共享引用）。 */
@@ -127,6 +134,7 @@ export function emptySoulMeta(): SoulMeta {
     intentFocusDepth: INTENT_FOCUS_DEPTH_DEFAULT,
     inputRewrite: false,
     termNormalize: false,
+    taskPlanning: false,
   };
 }
 
@@ -176,6 +184,8 @@ export function parseSoulMeta(raw: string): SoulMeta {
     // 027：两个新开关同为 fail-closed（非布尔一律 false，见 SoulMeta）
     inputRewrite: record.input_rewrite === true,
     termNormalize: record.term_normalize === true,
+    // 028：任务规划开关，fail-closed（逻辑与的意图聚焦一侧由调用方判）
+    taskPlanning: record.task_planning === true,
   };
 }
 
@@ -299,6 +309,29 @@ export function isTermNormalizeEnabled(
     (meta) => meta.termNormalize,
     false,
     '读取术语替换开关失败按关闭处理',
+    logger,
+  );
+}
+
+/**
+ * 028：读取某数字人「是否开启任务规划」。
+ *
+ * 与 `intentFocus` **逻辑与**（FR-001）：聚焦关闭时即使本键为真也不规划——
+ * 没有「起点」的规划只会退化成自由发挥。读盘口径与其它开关同构（fail-closed、逐次读盘）。
+ */
+export function isTaskPlanningEnabled(
+  optAgentRoot: string,
+  userId: string,
+  agentName: string,
+  logger?: { warn(msg: string): void },
+): boolean {
+  return readSoulField(
+    optAgentRoot,
+    userId,
+    agentName,
+    (meta) => meta.taskPlanning && meta.intentFocus,
+    false,
+    '读取任务规划开关失败按关闭处理',
     logger,
   );
 }

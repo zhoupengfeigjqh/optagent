@@ -181,6 +181,18 @@ export function createRuleGate(input: RuleGateInput): RuleGatePort {
       warnedUndeclared.clear();
       warnedNoDesign.clear();
     },
+    lookupBehavior(toolName) {
+      const snap = ensureSnapshot();
+      const bucket = findBucket(snap, toolName);
+      if (bucket === null) return null;
+      const relatedFunctions: string[] = [];
+      for (const rule of bucket.pre) {
+        for (const fn of rule.relatedFunctions) {
+          if (!relatedFunctions.includes(fn)) relatedFunctions.push(fn);
+        }
+      }
+      return { toolName, command: bucket.command, relatedFunctions, ref: bucket.ref };
+    },
   };
 }
 

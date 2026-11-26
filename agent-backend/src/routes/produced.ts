@@ -15,6 +15,7 @@ import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { PRODUCED_DIR } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
+import { onSseDisconnect } from '../infra/sse.js';
 import {
   PRODUCED_LIST_MAX,
   findProduced,
@@ -207,7 +208,8 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     });
     const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
 
-    req.raw.on('close', () => {
+    // 断连钩子必须挂响应：`req.raw` 的 close 在请求体读完时已触发过（见 infra/sse.ts）
+    onSseDisconnect(reply.raw, () => {
       clearInterval(heartbeat);
       unsubscribe();
       reply.raw.end();

@@ -527,8 +527,12 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 两个直接命中概念把「原材料」变成锚点 → 上游无从发散（连路径段都不该出现）
-    expect(prompt).not.toContain('图路径');
+    // 两个直接命中概念之间仍有上下游关系：库存 ←〔HasRawInventory〕— 原材料
+    // （2026-11-26 修丢边：这类边此前被整条吞掉，提示里两个命中行为毫无关系）
+    expect(prompt).toContain(
+      '查询原材料库存信息 QueryInventory @RawMaterialInventory ' +
+        '←〔HasRawInventory〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials',
+    );
 
     // 下游：原材料 → 原材料采购记录（采购单）→ 创建采购单进卡片
     expect(toolTips.map((item) => item.name)).toEqual([

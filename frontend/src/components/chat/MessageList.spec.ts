@@ -443,3 +443,45 @@ describe('MessageList —— 读屏播报（2026-10-16）', () => {
     expect(wrapper.find('[data-test="message-list-announce"]').text()).toBe('')
   })
 })
+
+/**
+ * 「对话没结束就不许有空档」（2026-11-26）。
+ *
+ * 列表层有两条会让整块内容消失的收敛：`isEmpty`（什么都没有时落空状态）与
+ * `streamingMessage`（终结态无正文时丢弃合成气泡）。前者由 `pendingUser`/`streaming`
+ * 兜住，后者必须只对**失败轮**成立——中断轮没有任何别的提示位。
+ */
+describe('MessageList —— 本轮状态的可见性（2026-11-26）', () => {
+  it('streaming 且正文为空 → 气泡照常存在并承载「思考中」', () => {
+    const wrapper = mount(MessageList, { props: { streaming: STREAMING_VIEW } })
+
+    expect(wrapper.find('.empty-state').exists()).toBe(false)
+    expect(wrapper.find('.typing-indicator').text()).toBe('思考中')
+  })
+
+  it('中断轮正文为空 → 仍保留气泡，给出「已停止生成」而不是一片空白', () => {
+    const wrapper = mount(MessageList, {
+      props: {
+        messages: HISTORICAL,
+        streaming: { ...STREAMING_VIEW, phase: RUN_PHASE.ABORTED },
+      },
+    })
+
+    expect(wrapper.find('.message-bubble__aborted').exists()).toBe(true)
+    expect(wrapper.text()).toContain('已停止生成')
+    // 已收尾的轮次不再转圈
+    expect(wrapper.find('.typing-indicator').exists()).toBe(false)
+  })
+
+  it('失败轮正文为空 → 不留空气泡（本轮错误由 ChatPanel 的 ErrorNotice 承载）', () => {
+    const wrapper = mount(MessageList, {
+      props: {
+        messages: HISTORICAL,
+        streaming: { ...STREAMING_VIEW, phase: RUN_PHASE.FAILED },
+      },
+    })
+
+    expect(wrapper.findAll('.message-bubble')).toHaveLength(1)
+    expect(wrapper.find('.message-bubble').text()).toContain('上一条消息')
+  })
+})

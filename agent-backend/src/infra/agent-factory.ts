@@ -15,7 +15,9 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
-import { isIntentFocusEnabled } from '../domain/soul.js';
+import { isIntentFocusEnabled, isTaskPlanningEnabled } from '../domain/soul.js';
+import { createOntologyFactsLoader } from '../domain/plan/ontology-facts.js';
+import { PlanStore } from '../domain/plan/store.js';
 import { buildTailInstruction, effectiveNextActionsMax } from '../domain/next-actions.js';
 import { composeSystemPrompt } from '../domain/skill-prompt.js';
 import { matchKeys } from '../domain/ontology-doc.js';
@@ -25,7 +27,7 @@ import {
   type RuleGatePort,
 } from '../domain/rule-gate/index.js';
 import type { AgentRunRequest } from '../domain/run-manager.js';
-import { createToolSuspension } from '../domain/tool-suspension.js';
+import { createToolSuspension, suspendTools } from '../domain/tool-suspension.js';
 import { PRODUCED_DIR, listAvailableDirs, userAgentsDir } from '../domain/dirs.js';
 import type {
   AgentConfigBundle,
@@ -37,7 +39,9 @@ import type {
   ModelSelection,
   PoolKey,
 } from '../types.js';
-import { runAgentLoopEvents } from './agent-loop.js';
+import { runAgentLoopEvents, type RunAgentLoopHooks } from './agent-loop.js';
+import { createPlanLlm } from './plan-llm.js';
+import { createPlanOrchestrator } from './plan-orchestrator.js';
 import { buildBuiltinTools } from './builtin-tools.js';
 import { agentScopedPath, mintPutUrl, mintSignedUrl } from './file-sign.js';
 import { scopeToolsByAllowlist } from './mcp-tool-scope.js';
@@ -109,13 +113,29 @@ export interface AgentFactoryDeps {
   onMcpStatus?: (key: PoolKey) => void;
   /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb */
   onMcpCall?: (event: McpCallEvent) => void;
+  /**
+   * 计划留档（`plan.jsonl`）：缺省按 `root` 自建一个工厂级实例。
+   *
+   * 显式注入只为测试替身；自建能保证「同线程串行写」的 Promise 链是工厂级共享，
+   * 而不是每轮新建各写各的。
+   */
+  planStore?: PlanStore;
 }
 
 /** 未注入重试口径时的缺省（= 不重试，与 pi-ai 的 `maxRetries` 默认一致；测试路径即此） */
 const NO_LLM_RETRY: LlmRetryOptions = { maxRetries: 0, maxRetryDelayMs: 0 };
 
 export class AgentInstanceFactory {
-  constructor(private readonly deps: AgentFactoryDeps) {}
+  /** 计划留档：只写不读，不参与上下文组装 */
+  private readonly planStore: PlanStore;
+
+  constructor(private readonly deps: AgentFactoryDeps) {
+    this.planStore =
+      deps.planStore ??
+      new PlanStore(deps.root, {
+        warn: (msg) => deps.logger.warn({ alert: true, event: 'plan.record.failed' }, msg),
+      });
+  }
 
   /** 创建实例：配置加载失败抛 AgentConfigError；MCP 异步并发建连，不等待 */
   async create(key: PoolKey): Promise<ChatAgent> {
@@ -215,9 +235,14 @@ export class AgentInstanceFactory {
      * 开关属于部署配置，请求方无法按轮绕过（`skip_intent_focus` 只是"本轮不判定技能"，
      * 不能顺带绕开规则校验，否则会变成一条提权通道）。
      */
-    const ruleGateEnabled = isIntentFocusEnabled(this.deps.root, inst.key.userId, inst.key.agentName, {
-      warn: (msg: string) => logger.warn({ alert: true, agent_name: inst.key.agentName }, msg),
-    });
+    const ruleGateEnabled = isIntentFocusEnabled(
+      this.deps.root,
+      inst.key.userId,
+      inst.key.agentName,
+      {
+        warn: (msg: string) => logger.warn({ alert: true, agent_name: inst.key.agentName }, msg),
+      },
+    );
 
     // 内置工具（Phase 5）：按 TOOL.json 启用项装配，全部经 FileAccess 代理；
     // 每次 run 重建以绑定当前 threadId（write_file 前缀）
@@ -335,6 +360,11 @@ export class AgentInstanceFactory {
     // "完整名"与"去服务前缀名"——规则的 `related_functions` 写的是裸名，只有裸名可命中（`FR-043`）。
     // 2026-11-24：意图聚焦关闭时不包装（规则闸门整体不生效）。
     let ruled = tools;
+    /**
+     * 028 T502：写后失效探测。由函数记录提供「算过但已被写操作打脏」的判据
+     * （`hasEver && !has`），闸门关闭时为 `undefined` —— 此时无失效概念可谈。
+     */
+    let isStaleProbe: ((toolName: string) => boolean) | undefined;
     if (ruleGateEnabled) {
       /**
        * 021：轮内函数执行记录——**每轮新建**，轮结束即丢（`FR-001`）。
@@ -354,6 +384,7 @@ export class AgentInstanceFactory {
             '规则闸门：函数记录条目被丢弃',
           ),
       });
+      isStaleProbe = (toolName) => record.hasEver(toolName) && !record.has(toolName);
       ruled = ruleGateTools(tools, {
         gate: ruleGate,
         record,
@@ -423,7 +454,30 @@ export class AgentInstanceFactory {
     if (tailMax !== undefined) {
       systemPrompt = `${systemPrompt}\n\n${buildTailInstruction(focusToolTips, tailMax)}`;
     }
+    // 028：规划开关本轮只读一次——直聊早退分支也要说清"为什么没规划"，
+    // 且避免同一轮两次读 SOUL 造成开关口径分裂。
+    const planWarn = {
+      warn: (msg: string): void => {
+        logger.warn({ alert: true, agent_name: inst.key.agentName }, msg);
+      },
+    };
+    const planEnabled = isTaskPlanningEnabled(
+      this.deps.root,
+      inst.key.userId,
+      inst.key.agentName,
+      planWarn,
+    );
     if (guarded.length === 0 || !(llm instanceof PiAiLlmProvider)) {
+      // 早退也要留痕：否则"开了规划却没反应"只能靠"日志里没有 plan.started"来推断
+      if (planEnabled) {
+        logger.info(
+          {
+            event: 'plan.skipped',
+            reason: guarded.length === 0 ? 'no_tools' : 'no_loop_provider',
+          },
+          '本轮无可用工具循环，跳过规划阶段',
+        );
+      }
       if (guarded.length > 0) {
         logger.warn(
           { agent_name: inst.key.agentName, event: 'tools.noLoopProvider' },
@@ -440,15 +494,79 @@ export class AgentInstanceFactory {
       return;
     }
 
+    // ── 028：任务规划（意图聚焦之后、agent loop 之前）──────────────────────
+    // 与意图聚焦**逻辑与**：任一关闭即零规划调用、零额外模型往返（FR-001）。
+    // 规划改动只影响「本轮跑 loop 时用什么 tools / messages / 钩子」，
+    // 不改工具装配顺序、不改 `availableNames`（FR-015）。
+    let loopTools = guarded;
+    let loopMessages = req.messages;
+    let planHooks: RunAgentLoopHooks | undefined;
+    if (!planEnabled) {
+      logger.info(
+        { event: 'plan.skipped', reason: ruleGateEnabled ? 'switch_off' : 'focus_disabled' },
+        '任务规划未开启，跳过规划阶段',
+      );
+    } else if ((req.focusPrompt ?? '').trim() === '') {
+      logger.info({ event: 'plan.skipped', reason: 'empty_focus' }, '本轮无意图聚焦结果，跳过规划');
+    } else {
+      try {
+        const agentDir = path.join(
+          userAgentsDir(this.deps.root, inst.key.userId),
+          inst.key.agentName,
+        );
+        const loader = createOntologyFactsLoader(agentDir);
+        const lastUser = [...req.messages].reverse().find((message) => message.role === 'user');
+        const userInput = lastUser?.content ?? '';
+        const orchestrator = createPlanOrchestrator({
+          goal: Array.from(userInput).slice(0, 40).join(''),
+          userInput,
+          focusPrompt: req.focusPrompt ?? '',
+          history: req.messages,
+          tools: guarded,
+          ontology: loader.getIndex(),
+          facts: loader.get(),
+          behaviorOf: (name) => ruleGate.lookupBehavior(name),
+          ...(isStaleProbe !== undefined ? { isStale: isStaleProbe } : {}),
+          plan: createPlanLlm(llm),
+          signal: req.signal,
+          logger: {
+            info: (fields, message) => logger.info(fields, message),
+            warn: (fields, message) => logger.warn(fields, message),
+          },
+          suspend: (code) => suspendTools(suspension, code),
+          // 留档：不阻塞本轮（`append` 自带串行链与失败吞掉），也不回读
+          record: (record) => {
+            void this.planStore.append(inst.key.userId, inst.key.agentName, req.threadId, record);
+          },
+        });
+        if (await orchestrator.begin()) {
+          loopTools = orchestrator.initialTools();
+          loopMessages = orchestrator.initialMessages(req.messages);
+          planHooks = orchestrator.hooks;
+        }
+      } catch (err) {
+        // 规划是增强件：装配/加载失败一律回退既有流程，本轮照常可用（NFR-006）
+        logger.warn(
+          { event: 'plan.abandoned', reason: 'init_failed', err },
+          '规划装配失败，本轮回退既有流程',
+        );
+      }
+    }
+
     const { model, streamFn } = llm.loopOptions();
     yield* runAgentLoopEvents({
       model,
       streamFn,
       systemPrompt,
-      messages: req.messages,
-      tools: guarded,
+      messages: loopMessages,
+      tools: loopTools,
+      // 展示名索引取**全量装配结果**（2026-11-26）：`loopTools` 在规划下是「首步收窄集」，
+      // 用它建索引会让第 2 步起新出现的工具查不到 label → 卡片回退显示英文调用名。
+      // label 与可见性无关，故用未收窄的 `guarded`。
+      labelTools: guarded,
       thinking: req.thinking,
       signal: req.signal,
+      ...(planHooks !== undefined ? { hooks: planHooks } : {}),
     });
   }
 }

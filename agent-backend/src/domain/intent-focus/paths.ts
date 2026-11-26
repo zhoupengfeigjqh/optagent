@@ -106,7 +106,12 @@ export function buildFocusPaths(input: BuildPathsInput): FocusPath[] {
 
     const facts = collectFacts(ontology);
     const channel = pickChannel(input.expansion, direction);
-    const maxHop = channel.concepts.reduce((max, item) => Math.max(max, item.hop), 0);
+    // 命中概念之间的直接一跳也要算：即便没有任何发散概念，它仍是有效的上下游关系
+    // （只数本本体的边：channel 是多本体累加的，同名概念不能互相借用）
+    const maxHop = Math.max(
+      channel.concepts.reduce((max, item) => Math.max(max, item.hop), 0),
+      channel.directEdges.some((link) => link.ontologyId === start.ontologyId) ? 1 : 0,
+    );
 
     let cursor: { name: string; title: string; concept: string; score: number | null } = {
       name: start.name,
@@ -117,43 +122,83 @@ export function buildFocusPaths(input: BuildPathsInput): FocusPath[] {
 
     // 逐跳推进：每一跳只产出**一跳**的五元组，绝不在行内拼多跳
     for (let hop = 1; hop <= maxHop; hop += 1) {
+      // 2026-11-26（修丢边）：按本跳的**每一条入边**取邻居，不再只认 `viaConcept`。
+      // 同一概念可由多个起点概念到达（库存 → 原材料 ← 采购单），只认首条会让
+      // 后到的起点行为整条路径消失。`hop === hop` 防止跨跳串线。
       const neighbors = channel.concepts.filter(
-        (item) => item.ontologyId === start.ontologyId && item.viaConcept === cursor.concept,
+        (item) =>
+          item.ontologyId === start.ontologyId &&
+          item.hop === hop &&
+          item.edges.some((edge) => edge.from === cursor.concept),
       );
-      if (neighbors.length === 0) break;
 
       let next: { name: string; title: string; concept: string } | null = null;
       for (const neighbor of neighbors) {
-        const relation = facts.relations.get(neighbor.viaRelation);
         const ends = facts.behaviorsByConcept.get(neighbor.name) ?? [];
-        const base: Omit<FocusPath, 'toBehavior'> = {
-          ontologyId: start.ontologyId,
-          behavior: { name: cursor.name, title: cursor.title },
-          fromConcept: { name: cursor.concept, title: facts.conceptTitle(cursor.concept) },
-          relation: {
-            name: neighbor.viaRelation,
-            title: relationTitle(relation, neighbor.viaRelation),
-          },
-          direction,
-          readability: relationReadability(relation, cursor.concept),
-          toConcept: { name: neighbor.name, title: neighbor.title },
-          hop,
-          score: cursor.score,
-        };
+        const reached = neighbor.edges.filter((edge) => edge.from === cursor.concept);
+        for (const edge of reached) {
+          const relation = facts.relations.get(edge.relation);
+          const base: Omit<FocusPath, 'toBehavior'> = {
+            ontologyId: start.ontologyId,
+            behavior: { name: cursor.name, title: cursor.title },
+            fromConcept: { name: cursor.concept, title: facts.conceptTitle(cursor.concept) },
+            relation: {
+              name: edge.relation,
+              title: relationTitle(relation, edge.relation),
+            },
+            direction,
+            readability: relationReadability(relation, cursor.concept),
+            toConcept: { name: neighbor.name, title: neighbor.title },
+            hop,
+            score: cursor.score,
+          };
 
-        if (ends.length === 0) {
-          // 断链但保留：告诉模型"这条上游到此为止，下面没有可用行为"，比整行消失更清楚
-          push({ ...base, toBehavior: null });
-          continue;
-        }
-        for (const end of ends) {
-          push({ ...base, toBehavior: { name: end.name, title: end.title } });
+          if (ends.length === 0) {
+            // 断链但保留：告诉模型"这条上游到此为止，下面没有可用行为"，比整行消失更清楚
+            push({ ...base, toBehavior: null });
+            continue;
+          }
+          for (const end of ends) {
+            push({ ...base, toBehavior: { name: end.name, title: end.title } });
+          }
         }
         // 口径：行为接续只沿**该概念的第一个行为**向外走，避免 (行为数)^(跳数) 组合爆炸
-        next ??= { name: ends[0]!.name, title: ends[0]!.title, concept: neighbor.name };
+        if (ends.length > 0) {
+          next ??= { name: ends[0]!.name, title: ends[0]!.title, concept: neighbor.name };
+        }
       }
 
-      if (!next) break;
+      // 2026-11-26（修丢边）：命中概念之间的直接上下游。这些概念已有自己的行为清单，
+      // 不进 `concepts`，但"谁和谁相连"必须出现在路径里，否则提示里两个命中行为毫无关系。
+      // 只在第 1 跳产出，不接续外扩（目的地概念本身就是起点，接续只会与它自己的路径重复）。
+      if (hop === 1) {
+        for (const link of channel.directEdges) {
+          // 只认本本体的边：不同本体可能有同名概念，串了就会凭空造出一条上下游
+          if (link.ontologyId !== start.ontologyId || link.from !== cursor.concept) continue;
+          const relation = facts.relations.get(link.relation);
+          const ends = facts.behaviorsByConcept.get(link.to) ?? [];
+          const base: Omit<FocusPath, 'toBehavior'> = {
+            ontologyId: start.ontologyId,
+            behavior: { name: cursor.name, title: cursor.title },
+            fromConcept: { name: cursor.concept, title: facts.conceptTitle(cursor.concept) },
+            relation: { name: link.relation, title: relationTitle(relation, link.relation) },
+            direction,
+            readability: relationReadability(relation, cursor.concept),
+            toConcept: { name: link.to, title: facts.conceptTitle(link.to) },
+            hop,
+            score: cursor.score,
+          };
+          if (ends.length === 0) {
+            push({ ...base, toBehavior: null });
+            continue;
+          }
+          for (const end of ends) {
+            push({ ...base, toBehavior: { name: end.name, title: end.title } });
+          }
+        }
+      }
+
+      if (next === null) break;
       cursor = { ...next, score: null };
     }
   }

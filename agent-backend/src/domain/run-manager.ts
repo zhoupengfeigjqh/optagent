@@ -89,6 +89,14 @@ export interface AgentRunRequest {
    * 也是"本轮能不能产卡片"的判据（空 = 不追加指令、不产卡片）。
    */
   focusToolTips?: readonly FocusToolTip[];
+  /**
+   * 028：本轮意图聚焦的**提示原文**（`focus.prompt`）。
+   *
+   * 与 `systemExtra` 分开传：规划的第 2 段只吃聚焦结果本身，混进 `systemExtra`
+   * 会把滚动摘要、产出清单、卡片指令一并塞进规划提示词。
+   * 空串 / 缺省 = 本轮无聚焦结果 → 规划跳过（`reason=empty_focus`）。
+   */
+  focusPrompt?: string;
 }
 
 /** run-manager 视角的 Agent 实例（PoolStore 的 PooledInstance 超集，由 infra 装配） */
@@ -343,6 +351,31 @@ export class RunManager {
       return true;
     }
     return false;
+  }
+
+  /**
+   * 等待某会话本轮收尾（2026-11-26）。
+   *
+   * 删除会话必须等这一轮**真正结束**再删目录：只 `stop()` + 排空写入链不够——abort 是
+   * 异步传播，`finalize` 之后的 tool-events 写入（fire-and-forget）仍可能在目录删掉之后
+   * `mkdirSync`，留下"没有 meta.json 的孤儿目录"（`history.doAppend` 同样如此）。
+   *
+   * 有界等待：删除接口不能被卡死的 run 挂住；超时返回 `false`，由调用方决定是否继续删。
+   */
+  async awaitIdle(threadId: string, timeoutMs: number): Promise<boolean> {
+    const run = this.active.get(threadId);
+    if (run === undefined) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        run.settled.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /**

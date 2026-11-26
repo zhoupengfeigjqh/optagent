@@ -30,6 +30,7 @@
 | `AGENT_NOT_AVAILABLE` | 409 | 已选定，但该数字人对本用户**不可用**（配置目录不存在或配置损坏——典型场景：数字人已被移除并部署） | **新增**（本特性唯一新增错误码） |
 | `AGENT_NOT_FOUND` | 404 | 目标数字人不存在或配置损坏（用于显式指定数字人的接口，如 `select`、`detail`） | **不变** |
 | `THREAD_NOT_FOUND` | 404 | 会话不存在**或不在当前数字人作用域内** | 语义口径明确（后者不泄露存在性） |
+| `THREAD_ID_INVALID` | 400 | 会话标识未通过字符集校验（`^[A-Za-z0-9_-]{1,64}$`） | **新增（2026-11-26）**：Fastify 会把 `%2F` / `%5C` 解码回分隔符，`threadDir` 拼接前必须拒绝，防跨数字人 / 跨用户路径穿越 |
 | `DIR_VALIDATION` / `UPLOAD_DIR_FORBIDDEN` / `VALIDATION_FAILED` | 403 / 403 / 400 | 目录不在空间内或不在该数字人场景清单内 | **不变** |
 | `SCENARIO_NOT_CONFIGURED` | 503 | 该数字人未配置文件空间场景 | **不变**（message 已含数字人名称） |
 
@@ -54,7 +55,7 @@
 
 | 接口 | 变更 | 说明 |
 |---|---|---|
-| `POST /api/threads/:id/messages` | **作用域 + 归属校验** | ① 未选中 → `409 AGENT_NOT_SELECTED`；② 当前数字人不可用 → **`409 AGENT_NOT_AVAILABLE`**（FR-032：陈旧上下文发消息必须失败且可读，MUST NOT 静默换用其他数字人）；③ 会话不属于当前数字人 → `404 THREAD_NOT_FOUND`；④ 附件校验按当前数字人场景判定（既有口径不变，仅路径归属变化） |
+| `POST /api/threads/:id/messages` | **作用域 + 归属校验** | ① 未选中 → `409 AGENT_NOT_SELECTED`；② 当前数字人不可用 → **`409 AGENT_NOT_AVAILABLE`**（FR-032：陈旧上下文发消息必须失败且可读，MUST NOT 静默换用其他数字人）；③ 会话不属于当前数字人 → `404 THREAD_NOT_FOUND`；④ 附件校验按当前数字人场景判定（既有口径不变，仅路径归属变化）。**2026-11-26 补**：⑤ 会话标识非法 → `400 THREAD_ID_INVALID`（在 `threadDir` 单点断言）；⑥ 关服中 → `503 SERVICE_UNAVAILABLE`（判定前移到配额之前）；⑦ `content` > 32000 字符、`tool_tips` > 5 条 → `400 VALIDATION_FAILED` |
 | `POST /api/threads/:id/stop` | 作用域同上 | 不变 |
 | `POST /api/threads/:id/interaction` | 作用域同上 | 不变 |
 

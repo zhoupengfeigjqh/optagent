@@ -9,6 +9,7 @@ import type { Model, Provider } from '@earendil-works/pi-ai';
 import {
   runAgentLoop,
   type AgentEvent,
+  type AgentLoopConfig,
   type AgentTool,
   type StreamFn,
 } from '@earendil-works/pi-agent-core';
@@ -39,14 +40,48 @@ export function createStreamFn(
     }) as never;
 }
 
+/**
+ * 计划编排（028）透传的四个可选钩子。
+ *
+ * 全部**可选**：缺省不挂，与规划关闭时的行为逐字一致（SC-006）。
+ * 本层只做转发，不解释语义——状态转移的唯一落点是编排器。
+ */
+export interface RunAgentLoopHooks {
+  prepareNextTurn?: (
+    context: Parameters<NonNullable<AgentLoopConfig['prepareNextTurn']>>[0],
+  ) => ReturnType<NonNullable<AgentLoopConfig['prepareNextTurn']>>;
+  shouldStopAfterTurn?: (
+    context: Parameters<NonNullable<AgentLoopConfig['shouldStopAfterTurn']>>[0],
+  ) => ReturnType<NonNullable<AgentLoopConfig['shouldStopAfterTurn']>>;
+  getFollowUpMessages?: NonNullable<AgentLoopConfig['getFollowUpMessages']>;
+  /** 在 `markToolError` **之前**调用，只允许记录事实（不得改写结果） */
+  afterToolCall?: (
+    context: Parameters<NonNullable<AgentLoopConfig['afterToolCall']>>[0],
+    signal?: AbortSignal,
+  ) => Promise<void>;
+}
+
 export interface RunAgentLoopOptions {
   model: Model<never>;
   streamFn: StreamFn;
   systemPrompt: string;
   messages: HistoryMessage[];
   tools: AgentTool[];
+  /**
+   * 仅用于建「工具名 → 人读名称」索引的**全量工具集**（2026-11-26）。
+   *
+   * 028 计划编排会按步收窄 `tools`（`prepareNextTurn` 每步换一份），而 label 是工具级
+   * 稳定属性、与"这一步能看见哪些工具"正交：跟着收窄后的集合建索引，第 2 步起新出现的
+   * 工具就查不到 label，卡片回退显示 `server__tool` 调用名（真实缺陷，2026-11-26 修）。
+   *
+   * **只读 label**：不参与 pi 的工具可见性判定，也不影响越界拒绝与执行。
+   * 缺省回退 `tools`（非规划路径两者同源，行为零变化）。
+   */
+  labelTools?: readonly AgentTool[];
   thinking: boolean;
   signal: AbortSignal;
+  /** 028：计划编排钩子（缺省不挂） */
+  hooks?: RunAgentLoopHooks;
 }
 
 /** 历史 assistant 消息的占位 usage（真实 token 已入 usage.db，此处仅为满足 pi 的消息结构） */
@@ -84,14 +119,17 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
   });
 
   /**
-   * 工具名 → 人读名称（2026-10-27）。
+   * 工具名 → 人读名称（2026-10-27；2026-11-26 修正来源）。
    *
    * `label` 在装配时已算好（平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`），
    * 这里只做一张查表，随 `tool_call_start` 一起上行——工具卡片与 HITL 弹窗都要显示中文名，
    * 而 pi 的 `tool_execution_start` 只给 `toolName`。
+   *
+   * 建表来源 MUST 是 `labelTools`（全量装配结果），不是 `tools`（每步收窄后的可见集）：
+   * label 与可见性正交，跟着收窄集建表会让后续步骤新出现的工具永久查不到中文名。
    */
   const labels = new Map<string, string>();
-  for (const tool of opts.tools) {
+  for (const tool of opts.labelTools ?? opts.tools) {
     const label = typeof tool.label === 'string' ? tool.label.trim() : '';
     if (label !== '') labels.set(tool.name, label);
   }
@@ -175,6 +213,23 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     { systemPrompt: opts.systemPrompt, messages: [], tools: opts.tools },
     {
       model: opts.model,
+      /**
+       * 全局工具批次串行（2026-11-25）。
+       *
+       * pi 默认 `parallel`：同批 toolCall 会并发 `execute`，使规则闸门（021）的函数
+       * 记录产生竞态——「前置函数 + 依赖它的 command」同批发出时，command 可能在函数
+       * 结果写入 `FunctionRecord` 之前就完成判定，表现为随机 `pause`
+       * （`RULE_FUNCTIONS_MISSING_CODE`）。是否复现取决于两个工具的返回快慢，
+       * 属于最难定位的偶发故障。
+       *
+       * 串行后执行顺序与模型输出顺序严格一致，闸门判定与状态推进都可预测。
+       * 代价：同批多个独立工具不再并发（延迟约等于各自耗时之和）；多数 turn 只发
+       * 1~2 个工具，实际影响有限。
+       *
+       * 注：HITL 包装器（`tool-intercept.ts`）的 per-tool `executionMode: 'sequential'`
+       * 独立保留，不管何种模式都必须串行。
+       */
+      toolExecution: 'sequential',
       ...(opts.thinking ? { reasoning: 'low' as const } : {}),
       convertToLlm: (msgs) =>
         msgs.filter(
@@ -190,7 +245,23 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
        * 不用工具自己 throw 的原因见 `domain/tool-error.ts` 头部：pi 的 catch 会覆盖
        * 整个 result（content 只剩 message、details 置空），结构化信息全丢。
        */
-      afterToolCall: async (ctx) => markToolError(ctx.result),
+      afterToolCall: async (ctx, signal) => {
+        // 028：先让计划编排记录事实（此时 isError 尚未翻牌，由编排器自行看 details），
+        // 再执行既有的失败翻牌——顺序颠倒会让计划看到"未标记"的结果。
+        if (opts.hooks?.afterToolCall !== undefined) {
+          await opts.hooks.afterToolCall(ctx, signal);
+        }
+        return markToolError(ctx.result);
+      },
+      ...(opts.hooks?.prepareNextTurn !== undefined
+        ? { prepareNextTurn: opts.hooks.prepareNextTurn }
+        : {}),
+      ...(opts.hooks?.shouldStopAfterTurn !== undefined
+        ? { shouldStopAfterTurn: opts.hooks.shouldStopAfterTurn }
+        : {}),
+      ...(opts.hooks?.getFollowUpMessages !== undefined
+        ? { getFollowUpMessages: opts.hooks.getFollowUpMessages }
+        : {}),
     },
     emit,
     opts.signal,

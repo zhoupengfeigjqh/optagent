@@ -253,7 +253,17 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     ctx.threadStore.get(userId, agentName, threadId); // 404
     // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）；仍在启动中的请求打取消标记
     ctx.runManager.stop(threadId);
-    // 先等落盘链排空再删目录（2026-10-27）：
+    // 等这一轮真正收尾再动目录（2026-11-26）：abort 是异步传播，finalize 之后的
+    // tool-events/history 写入仍可能在删除之后 `mkdirSync`，只排空"当时"的链不够。
+    // 5s 上界：删除接口不能被卡死的 run 挂住，超时记录后继续删。
+    const idle = await ctx.runManager.awaitIdle(threadId, 5_000);
+    if (!idle) {
+      ctx.loggers.logger.warn(
+        { event: 'thread.delete.timeout', thread_id: threadId, timeout_ms: 5_000 },
+        '本轮未在 5s 内收尾，仍继续删除（可能残留孤儿目录）',
+      );
+    }
+    // 再等落盘链排空（2026-10-27）：
     // 1) 在途 append 会把刚删掉的目录重新建出来（残留"没有 meta.json 的孤儿目录"）；
     // 2) 顺带释放三个 store 的串行链内存——键按会话累积且原先永不清理。
     await Promise.all([

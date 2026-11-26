@@ -1,0 +1,60 @@
+/**
+ * 集成测试共享本体（028）：两个 command + 一个共享前置函数。
+ *
+ * 与 `rule-gate-loop.spec.ts` 的夹具同形——规则表达式必须是 `operator: eq` + `values`，
+ * 且必须有 `securities.yaml`（020 权限闸门在规则闸门外侧，缺授权会安全拒绝）。
+ */
+export const ONTOLOGY_YAML = [
+  'metadata:',
+  '  scenario_name: 原材料采购和库存',
+  '  ontology_name: 采购单',
+  'behaviors:',
+  '  - name: QueryInventory',
+  '    title: 查询库存',
+  '    op_type: query',
+  '  - name: CreatePurchaseRecord',
+  '    title: 创建采购单',
+  '    op_type: command',
+  '  - name: SubmitPurchase',
+  '    title: 提交审批',
+  '    op_type: command',
+  'functions:',
+  '  - name: checkStock',
+  '    type: query',
+  '    response:',
+  '      pass: boolean',
+  'rules:',
+  '  - name: 采购-库存充足',
+  '    behavior: CreatePurchaseRecord',
+  '    position: 前置',
+  '    related_functions:',
+  '      - checkStock',
+  '    rule_design:',
+  '      groups:',
+  '        - conditions:',
+  '            - function: checkStock',
+  '              field: pass',
+  '              operator: eq',
+  '              values: ["true"]',
+  '    fail_message: 库存不足，禁止创建采购单',
+  '  - name: 提交-库存充足',
+  '    behavior: SubmitPurchase',
+  '    position: 前置',
+  '    related_functions:',
+  '      - checkStock',
+  '    rule_design:',
+  '      groups:',
+  '        - conditions:',
+  '            - function: checkStock',
+  '              field: pass',
+  '              operator: eq',
+  '              values: ["true"]',
+  '    fail_message: 库存不足，禁止提交审批',
+].join('\n');
+
+export const SECURITIES = [
+  'QueryInventory',
+  'CreatePurchaseRecord',
+  'SubmitPurchase',
+  'checkStock',
+];

@@ -138,5 +138,7 @@ export function emptySoulDesign(): SoulDesign {
     // 027：两个新开关同样显式落 false——脏检查比对整个对象，少一个键就会与后端不等
     input_rewrite: false,
     term_normalize: false,
+    // 028：同理显式落 false（后端 `emptySoulDesign()` 同形）
+    task_planning: false,
   }
 }

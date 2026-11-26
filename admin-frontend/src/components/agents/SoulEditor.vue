@@ -309,6 +309,21 @@ function onFocusDepthChange(event: Event): void {
       <p class="field__hint" data-test="term-normalize-hint">
         仅当该数字人拥有本体术语映射集时，开启本功能才会生效
       </p>
+      <!-- 028：任务规划（滚动规划阶段）。与意图聚焦逻辑与——关闭时置灰但保留已选值。 -->
+      <label class="soul-editor__switch">
+        <input
+          type="checkbox"
+          data-test="task-planning"
+          :checked="soul.task_planning === true"
+          :disabled="soul.intent_focus !== true"
+          @change="patch({ task_planning: ($event.target as HTMLInputElement).checked })"
+        />
+        任务规划
+      </label>
+      <p class="field__hint" data-test="task-planning-hint">
+        需同时开启意图聚焦。开启后本轮先产出 1~3 步计划，再逐步收窄可用工具执行；
+        未勾选即该数字人零规划调用。
+      </p>
 
       <!-- 007：输出侧的延伸开关。同样只写进 SOUL.md 的 frontmatter、由运行环境当作功能
            开关读取；依赖意图聚焦——关闭时本开关置灰并被强制关闭（与上面两项不同：

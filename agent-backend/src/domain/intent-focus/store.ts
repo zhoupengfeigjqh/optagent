@@ -90,6 +90,14 @@ export interface ConceptFocusRecord {
   source: 'direct' | 'upstream';
   hop: number;
   via_concept: string | null;
+  /**
+   * 本跳的**全部**入边（2026-11-26）。
+   *
+   * `via_concept` 只留第一条，回放"这个概念由哪几条边到达"会失真
+   * （库存 → 原材料 ← 采购单这种多入边、以及命中概念之间的直连都靠它）。
+   * `direct` 概念没有发散入边，恒为空数组。
+   */
+  via_edges: Array<{ from: string; relation: string }>;
 }
 
 /**

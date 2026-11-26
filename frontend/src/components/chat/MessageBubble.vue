@@ -176,7 +176,7 @@ const runningToolNames = computed(() => {
   }
   return names
 })
-/** 等待提示文案：工具执行期点名工具，否则回落到 `TypingIndicator` 的缺省「思考中」 */
+/** 等待提示文案：工具执行期点名工具，其余按"正文是否已开始"分档 */
 const typingLabel = computed(() => {
   const names = runningToolNames.value
   const first = names[0]
@@ -191,21 +191,22 @@ const typingLabel = computed(() => {
   if (props.streaming?.stalled === true) {
     return '模型正在思考…'
   }
-  return '思考中'
+  // 没有任何工具在跑时的两档：正文还没开始 = 在想；已经在长 = 在写。
+  // 两档都必须有，因为提示本身是**常驻**的（见 `showTyping`），文案不能停在一个会误导的说法上。
+  return props.message.content === '' ? '思考中' : '正在生成…'
 })
 /**
- * 等待提示的显示条件（2026-11-16 修订）：首个 `content` 到达前，或**仍有工具在跑**。
+ * 等待提示的显示条件（2026-11-26 修订）：**本轮没结束就一直在**。
  *
- * 只加"有 running 工具"这一条：工具全部结束、模型继续生成正文时不补提示——
- * 那是正常流式输出，气泡本身在长，再叠一行反而噪音。
+ * 用户口径：「只要对话没结束，聊天界面就必须有"正在计算中"一类的提示，不能什么都没有」。
+ * 因此判据只剩 `phase === STREAMING` 一条，不再区分"有没有 running 工具 / 正文在不在长"——
+ * 静默推理、工具收尾、正文卡顿各能持续数秒，任何一条附加条件漏掉就是一个空档
+ * （2026-11-16 版曾以"正文在长就不补提示"为由留空档，已废止）。
+ *
+ * 终结态不渲染：失败有 `ChatPanel` 的 `ErrorNotice`、中断有气泡内「已停止生成」，
+ * 此时继续转圈会让"已经停了"看起来像"还在跑"。
  */
-const showTyping = computed(
-  () =>
-    isStreaming.value &&
-    (runningToolNames.value.length > 0 ||
-      props.streaming?.stalled === true ||
-      props.message.content === ''),
-)
+const showTyping = computed(() => isStreaming.value)
 
 /**
  * 流式轮的渲染段（A-lite，2026-11-16）：文字与工具卡片按事件到达顺序交错。
@@ -350,7 +351,7 @@ const containsActiveMatch = computed(() => {
       @select="emit('send-suggestion', $event)"
     />
 
-    <!-- 等待提示：首个 token 前是「思考中」，工具执行期点名工具（2026-11-16） -->
+    <!-- 等待提示：本轮未结束就常驻（2026-11-26）；文案按工具执行 / 静默 / 生成中分档 -->
     <TypingIndicator v-if="showTyping" :label="typingLabel" />
 
     <!-- 失败轮的重试入口：文案由列表层决定（`null` = 该轮的用户消息不在窗口内，不给入口） -->

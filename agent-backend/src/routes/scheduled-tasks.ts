@@ -22,6 +22,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
+import { onSseDisconnect } from '../infra/sse.js';
 import {
   advanceToFuture,
   canStart,
@@ -373,7 +374,8 @@ export function registerScheduledTaskRoutes(app: FastifyInstance, ctx: AppContex
       if (enabled) {
         // 次数用尽 / 已过截止：拒绝启动（不产生"打开了但不执行"的假状态，FR-016）
         if (isTerminated(task, nowMs)) throw new ScheduledTaskExhaustedError(task.name);
-        const base = task.nextRunAt === null ? firstRunAt(task.startAt) : Date.parse(task.nextRunAt);
+        const base =
+          task.nextRunAt === null ? firstRunAt(task.startAt) : Date.parse(task.nextRunAt);
         const from = Number.isFinite(base) ? base : nowMs;
         // 落在过去的计划时刻推进到未来，不补跑（FR-045 同口径）
         const nextMs = advanceToFuture(from, task.intervalSeconds, nowMs);
@@ -421,41 +423,45 @@ export function registerScheduledTaskRoutes(app: FastifyInstance, ctx: AppContex
     return reply.status(204).send();
   });
 
-  app.get('/api/scheduled-tasks/runs', { schema: { querystring: runsQuerySchema } }, async (req) => {
-    const userId = getCurrentUser().userId;
-    const { agentName } = resolveAgentScope(ctx, userId, {
-      notSelectedMessage: '请先选定数字人后再查看运行记录',
-      route: 'GET /api/scheduled-tasks/runs',
-    });
-    const query = req.query as { task_id?: string; limit?: string };
-    const requested = query.limit === undefined ? RUN_LIMIT_DEFAULT : Number(query.limit);
-    const limit = Number.isFinite(requested) ? Math.floor(requested) : RUN_LIMIT_DEFAULT;
+  app.get(
+    '/api/scheduled-tasks/runs',
+    { schema: { querystring: runsQuerySchema } },
+    async (req) => {
+      const userId = getCurrentUser().userId;
+      const { agentName } = resolveAgentScope(ctx, userId, {
+        notSelectedMessage: '请先选定数字人后再查看运行记录',
+        route: 'GET /api/scheduled-tasks/runs',
+      });
+      const query = req.query as { task_id?: string; limit?: string };
+      const requested = query.limit === undefined ? RUN_LIMIT_DEFAULT : Number(query.limit);
+      const limit = Number.isFinite(requested) ? Math.floor(requested) : RUN_LIMIT_DEFAULT;
 
-    // 仍存在的任务 = 记录可见范围（`FR-022`：任务删除后其记录不再出现）
-    const tasks = listTasks(ctx, userId, agentName, 'GET /api/scheduled-tasks/runs');
-    const { runs, total } = ctx.scheduled.runs.read(userId, agentName, {
-      ...(query.task_id === undefined ? {} : { taskId: query.task_id }),
-      onlyTaskIds: tasks.map((task) => task.taskId),
-      limit,
-    });
+      // 仍存在的任务 = 记录可见范围（`FR-022`：任务删除后其记录不再出现）
+      const tasks = listTasks(ctx, userId, agentName, 'GET /api/scheduled-tasks/runs');
+      const { runs, total } = ctx.scheduled.runs.read(userId, agentName, {
+        ...(query.task_id === undefined ? {} : { taskId: query.task_id }),
+        onlyTaskIds: tasks.map((task) => task.taskId),
+        limit,
+      });
 
-    // 会话存在性：按**去重后**的 thread_id 判定，不逐条查（避免 N+1）
-    const deleted = new Map<string, boolean>();
-    const isDeleted = (threadId: string): boolean => {
-      let value = deleted.get(threadId);
-      if (value === undefined) {
-        value = !ctx.threadStore.exists(userId, agentName, threadId);
-        deleted.set(threadId, value);
-      }
-      return value;
-    };
-    return {
-      runs: runs.map((run) =>
-        runJson(run, run.threadId === null ? false : isDeleted(run.threadId)),
-      ),
-      total,
-    };
-  });
+      // 会话存在性：按**去重后**的 thread_id 判定，不逐条查（避免 N+1）
+      const deleted = new Map<string, boolean>();
+      const isDeleted = (threadId: string): boolean => {
+        let value = deleted.get(threadId);
+        if (value === undefined) {
+          value = !ctx.threadStore.exists(userId, agentName, threadId);
+          deleted.set(threadId, value);
+        }
+        return value;
+      };
+      return {
+        runs: runs.map((run) =>
+          runJson(run, run.threadId === null ? false : isDeleted(run.threadId)),
+        ),
+        total,
+      };
+    },
+  );
 
   app.get('/api/scheduled-tasks/events', (req, reply) => {
     const userId = getCurrentUser().userId;
@@ -476,7 +482,8 @@ export function registerScheduledTaskRoutes(app: FastifyInstance, ctx: AppContex
     const unsubscribe = ctx.scheduled.events.onChanged(userId, push);
     const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
 
-    req.raw.on('close', () => {
+    // 断连钩子必须挂响应：`req.raw` 的 close 在请求体读完时已触发过（见 infra/sse.ts）
+    onSseDisconnect(reply.raw, () => {
       clearInterval(heartbeat);
       unsubscribe();
       reply.raw.end();

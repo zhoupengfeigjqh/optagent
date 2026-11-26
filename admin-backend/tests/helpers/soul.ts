@@ -26,6 +26,8 @@ export function soulDesign(mission: string, extra: Partial<SoulDesign> = {}): So
     intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
     input_rewrite: false,
     term_normalize: false,
+    // 028：任务规划开关，与读取归一化后的形态保持一致（恒有该键）
+    task_planning: false,
     ...extra,
   };
 }

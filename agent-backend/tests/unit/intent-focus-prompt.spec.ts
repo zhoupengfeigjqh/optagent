@@ -9,7 +9,7 @@
  * - 图路径只由判分命中的行为出发，一行一跳，`→/←` 只表示本体边方向；
  * - 同本体多技能时能力与路径只挂到分数最高的技能下；
  * - `name` 保留原文不翻译，片段内换行压成空格；
- * - 长度上限按阶数分档（0→2000 / 1→3000 / 2→4000）；超限**先丢整行路径**
+ * - 长度上限按阶数分档（0→4000 / 1→5000 / 2→6000）；超限**先丢整行路径**
  *   （链尾无行为 → 跳数大 → 得分低，每个起点行为至少留一行），再丢取数行为、
  *   函数、判分命中的行为。
  */
@@ -276,13 +276,13 @@ describe('composeFocusPrompt', () => {
     expect(result.prompt.split('\n')).toHaveLength(2);
   });
 
-  it('阶数分档：0 → 2000，1 → 3000，2 → 4000', () => {
+  it('阶数分档：0 → 4000，1 → 5000，2 → 6000', () => {
     expect(maxPromptChars(0)).toBe(MAX_PROMPT_CHARS);
-    expect(maxPromptChars(1)).toBe(3000);
-    expect(maxPromptChars(2)).toBe(4000);
+    expect(maxPromptChars(1)).toBe(5000);
+    expect(maxPromptChars(2)).toBe(6000);
     // 越界/负数按最保守的一档处理
     expect(maxPromptChars(-1)).toBe(MAX_PROMPT_CHARS);
-    expect(maxPromptChars(9)).toBe(4000);
+    expect(maxPromptChars(9)).toBe(6000);
   });
 });
 
@@ -457,7 +457,8 @@ describe('composeFocusPrompt 截断（行级）', () => {
   });
 
   it('路径丢完后才丢行为，且仍不出现半截条目', () => {
-    const direct = Array.from({ length: 80 }, (_, i) => behavior(`QueryBehavior${i}`, `查询行为${i}`));
+    // 200 行 ≈ 5000 字，稳超 0 阶上限（4000），确保真的触发行为级剪枝
+    const direct = Array.from({ length: 200 }, (_, i) => behavior(`QueryBehavior${i}`, `查询行为${i}`));
     const result = composeFocusPrompt([skill()], selection({ behaviors: direct }), {
       paths: [path()],
       maxChars: MAX_PROMPT_CHARS,

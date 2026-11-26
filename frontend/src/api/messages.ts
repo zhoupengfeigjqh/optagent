@@ -22,6 +22,15 @@ import { SSE_EVENT } from '../constants/events'
 import { normalizeNextSteps } from './next-steps'
 import { postSseStream, type SseRequestOptions } from './sse'
 
+/**
+ * 消息正文上限（2026-11-26）。
+ *
+ * 与后端 `routes/chat.ts` 的 `MAX_CONTENT_CHARS` **同值同义**（契约两侧同改）：服务端
+ * `content` / `original_content` 的 `maxLength` 都是 32k，超出直接 400 `VALIDATION_FAILED`。
+ * 本地先拦是为了让用户在发送前就知道，而不是等完术语预检 / MCP 就绪才收到错误。
+ */
+export const MAX_MESSAGE_CHARS = 32_000
+
 /** 发消息入参（组件/composable 视角）。 */
 export interface SendMessageInput {
   /** 已去除 `@文件名` 引用文本的正文 */

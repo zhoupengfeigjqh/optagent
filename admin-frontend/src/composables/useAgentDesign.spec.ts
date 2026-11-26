@@ -34,6 +34,7 @@ const SOUL = {
   intent_focus_depth: 0,
   input_rewrite: false,
   term_normalize: false,
+  task_planning: false,
 }
 
 const DESIGN = {
@@ -78,6 +79,7 @@ describe('emptyDraft', () => {
         intent_focus_depth: 0,
         input_rewrite: false,
         term_normalize: false,
+        task_planning: false,
       },
       enabled_tools: [],
       mcp_services: [],

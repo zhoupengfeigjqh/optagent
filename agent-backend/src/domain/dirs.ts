@@ -68,11 +68,7 @@ export const THREADS_DIR = 'threads';
 export const SCHEDULED_TASKS_DIR = 'scheduled-tasks';
 
 /** 定时任务数据目录：`users/{userId}/user-data/{agentName}/scheduled-tasks` */
-export function scheduledTasksDir(
-  optAgentRoot: string,
-  userId: string,
-  agentName: string,
-): string {
+export function scheduledTasksDir(optAgentRoot: string, userId: string, agentName: string): string {
   return path.join(userDataDir(optAgentRoot, userId, agentName), SCHEDULED_TASKS_DIR);
 }
 
@@ -152,6 +148,32 @@ export function scenarioPath(optAgentRoot: string, userId: string, agentName: st
   return path.join(agentDir(optAgentRoot, userId, agentName), 'scenario.json');
 }
 
+/**
+ * 会话标识的合法字符集（2026-11-26，S1 加固）。
+ *
+ * **为什么必须是字符集而不是 uuid**：内部生成的 id 是 uuid，但测试与历史数据里存在
+ * `th_1` / `t_1` 这类短 id；强制 uuid 会连带打断几十个用例，收益为零。
+ * 字符集本身已足以阻断分隔符、`..`、盘符与 NUL。
+ */
+const THREAD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * 非法会话标识（2026-11-26）。
+ *
+ * 起因：Fastify 会把参数里的 `%2F` / `%5C` 解码回分隔符（实测 `..%2F..%2Ffoo`
+ * → `params.id = '../../foo'`），而 `path.join` 会归一化 `..` —— 未校验时可读到
+ * 并追加写其它数字人 / 其它用户的线程历史。
+ *
+ * 挂在 `threadDir()` 上是**单点防御**：34 处调用点一次覆盖，路由漏掉某个入口也不会破防。
+ */
+export class InvalidThreadIdError extends Error {
+  readonly code = 'THREAD_ID_INVALID';
+  constructor(readonly threadId: string) {
+    super('非法会话标识');
+    this.name = 'InvalidThreadIdError';
+  }
+}
+
 /** 会话目录（数字人级）：users/{userId}/user-data/{agentName}/threads/{threadId} */
 export function threadDir(
   optAgentRoot: string,
@@ -159,6 +181,7 @@ export function threadDir(
   agentName: string,
   threadId: string,
 ): string {
+  if (!THREAD_ID_RE.test(threadId)) throw new InvalidThreadIdError(threadId);
   return path.join(userDataDir(optAgentRoot, userId, agentName), THREADS_DIR, threadId);
 }
 

@@ -87,4 +87,11 @@ export interface SoulDesign {
    * 在**读取术语表之前**就返回 `applied:false`（零 IO、零弹窗）。
    */
   term_normalize: boolean
+  /**
+   * 是否开启「任务规划」（028）：意图聚焦之后先产出 1~3 步计划再执行。
+   *
+   * 恒有该键、缺省 `false`；与 `intent_focus` 逻辑与——聚焦关闭时控件置灰、值保留，
+   * 部署产物不含该键（该数字人零规划调用）。
+   */
+  task_planning: boolean
 }

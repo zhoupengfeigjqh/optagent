@@ -4,6 +4,7 @@ intent_focus: true
 intent_focus_depth: 1
 input_rewrite: true
 term_normalize: true
+task_planning: true
 intro: 库存和原材料专家
 welcome: 您好，我是库存和原材料专家，请输入您的问题！
 ---

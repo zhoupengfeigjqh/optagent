@@ -9,7 +9,7 @@
  */
 import type { HistoryMessage, RunRuntime } from '../types.js';
 import { formatCurrentTime, toSeconds } from './message-format.js';
-import { renderToolTipsInstruction } from './next-actions.js';
+import { normalizeToolTips, renderToolTipsInstruction } from './next-actions.js';
 import type { FocusToolTip } from './intent-focus/types.js';
 import { buildPromptMessages } from './prompt-builder.js';
 import type { FinalizeTurn, RunFinalizer } from './run-finalize.js';
@@ -181,6 +181,8 @@ export async function consumeTurn(
      * 尾部块指令的候选目录（`focusToolTips`）与轮末卡片定稿（`turn.focusToolTips`）。
      */
     let focusToolTips: readonly FocusToolTip[] = [];
+    /** 028：规划阶段只吃聚焦提示原文（不吃 `systemExtra` 的其余片段） */
+    let focusPrompt: string | undefined;
     if (intentFocus) {
       try {
         const focus = await intentFocus.judge({
@@ -197,6 +199,7 @@ export async function consumeTurn(
         });
         focusToolTips = focus.toolTips;
         if (focus.prompt !== '') {
+          focusPrompt = focus.prompt;
           systemExtra = systemExtra ? `${systemExtra}\n\n${focus.prompt}` : focus.prompt;
         }
       } catch (err) {
@@ -219,7 +222,9 @@ export async function consumeTurn(
      * 只进系统提示词、不进历史（`history.jsonl` 的 user 行只有卡片 `prompt` 原文），
      * 且刻意排在聚焦提示**之后**——用户点了这张卡，卡片指定的能力应权重更高。
      */
-    const toolTipsText = renderToolTipsInstruction(opts.toolTips ?? []);
+    // 归一化（2026-11-26）：请求体里的 `tool_tips` 未受 schema 约束（条数、形状），
+    // 先过公共读取器再渲染，避免客户端把 systemExtra 撑大或塞进非对象条目。
+    const toolTipsText = renderToolTipsInstruction(normalizeToolTips(opts.toolTips));
     if (toolTipsText !== '') {
       systemExtra = systemExtra ? `${systemExtra}\n\n${toolTipsText}` : toolTipsText;
     }
@@ -241,6 +246,7 @@ export async function consumeTurn(
       runtime,
       ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
       ...(focusToolTips.length > 0 ? { focusToolTips } : {}),
+      ...(focusPrompt !== undefined ? { focusPrompt } : {}),
     })) {
       switch (ev.type) {
         case 'thinking_delta':

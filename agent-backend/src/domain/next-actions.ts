@@ -309,10 +309,7 @@ export function effectiveNextActionsMax(
  * 候选目录取**本轮意图聚焦选出的本体能力**（行为；016 起已不含"函数"）：卡片的 `tool_tips`
  * 只能从这份清单里抄写。清单为空时不追加指令（见 `effectiveNextActionsMax`）。
  */
-export function buildTailInstruction(
-  focusToolTips: readonly FocusToolTip[],
-  max: number,
-): string {
+export function buildTailInstruction(focusToolTips: readonly FocusToolTip[], max: number): string {
   const catalog =
     focusToolTips.length === 0
       ? '（本轮没有可提示的本体能力——不要输出任何建议，直接输出 {"actions":[]}）'
@@ -455,7 +452,7 @@ export function sanitizeActionsWithStats(
       stats.droppedOverLimit++;
       continue;
     }
-    out.push({ prompt, tool_tips: readToolTips(item.tool_tips) });
+    out.push({ prompt, tool_tips: normalizeToolTips(item.tool_tips) });
   }
   return { actions: out, stats };
 }
@@ -503,13 +500,16 @@ const VAGUE_RE = /(这个|那个|这些|那些|相关|之类|等等|一些|某�
 /* ---------- 内部 ---------- */
 
 /**
- * 读 `tool_tips`：**只防崩溃，不校验**。
+ * 归一化 `tool_tips`：**只防崩溃，不校验**。
  *
  * - 非数组 → 空数组（卡片照常下发，`prompt` 本身仍可执行）；
  * - 元素非对象 / 字段缺失 → 该字段留空值，条目保留；
  * - 超出 `MAX_TOOL_TIPS_PER_ACTION` → 截断（需求硬约束）。
+ *
+ * 2026-11-26 起从"卡片快照私有"提升为**公共入口**：请求体里的 `tool_tips` 同样要过它，
+ * 否则客户端可用任意条数/任意形状把 systemExtra 撑大（`run-consume` 只做渲染，不设边界）。
  */
-function readToolTips(raw: unknown): FocusToolTip[] {
+export function normalizeToolTips(raw: unknown): FocusToolTip[] {
   if (!Array.isArray(raw)) return [];
   return raw.slice(0, MAX_TOOL_TIPS_PER_ACTION).map(readToolTip);
 }

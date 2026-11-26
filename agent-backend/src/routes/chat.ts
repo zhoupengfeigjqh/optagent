@@ -5,9 +5,12 @@
  *   attachments（@ 文件引用 ≤10，目录白名单 + 存在性校验 → 400 FILE_REF_NOT_FOUND）
  * - POST /api/threads/:id/stop — 幂等中断
  *
- * 409 判定链（009）：AGENT_NOT_SELECTED → AGENT_NOT_AVAILABLE → THREAD_NOT_FOUND（404，
- * 会话不属于当前数字人时与"不存在"不可区分）→ THREAD_BUSY_LIMIT
- * （并发上限，唯一的会话数量约束）→ POOL_EXHAUSTED → THREAD_RUN_ACTIVE。
+ * 判定顺序（009；2026-11-26 按实现校正）：AGENT_NOT_SELECTED / AGENT_NOT_AVAILABLE（409）
+ * → 技能存在性（400）→ THREAD_ID_INVALID（400，字符集校验，见 `dirs.threadDir`）
+ * → THREAD_NOT_FOUND（404，会话不属于当前数字人时与"不存在"不可区分）→ MODEL_NOT_FOUND（400）
+ * → 附件（400 / 403 / 503）→ SERVICE_UNAVAILABLE（503，关服中）
+ * → THREAD_BUSY_LIMIT（409）→ POOL_EXHAUSTED（409）→ RUN_CANCELLED（409）
+ * → THREAD_RUN_ACTIVE（409）。
  * THREAD_BUSY_LIMIT 由 runManager.acquireQuota 同步「检查+占位」完成：
  * 判定与 run 注册之间不再有 await 窗口，同一用户的并发请求无法同时通过。
  *
@@ -33,20 +36,30 @@ import {
 } from '../domain/dirs.js';
 import { listSkillNames } from '../domain/tools/skill-access.js';
 import type { FocusToolTip } from '../domain/intent-focus/types.js';
+import { MAX_TOOL_TIPS_PER_ACTION } from '../domain/next-actions.js';
 import { MAX_ACTIVE_THREADS_PER_USER } from '../domain/run-limits.js';
 import { ThreadRunActiveError, type Run } from '../domain/run-manager.js';
-import { openSseConnection } from '../infra/sse.js';
+import { onSseDisconnect, openSseConnection } from '../infra/sse.js';
 import { ApiError } from '../server.js';
 import type { FileReference } from '../types.js';
 
 const MAX_ATTACHMENTS = 10;
+
+/**
+ * 消息正文上限（2026-11-26）。
+ *
+ * 此前只有全局 `bodyLimit`（按 `uploadMaxMb` 计，可能 50MB）兜底：一条超长粘贴会整段
+ * 进 `history.jsonl` 与下一轮提示词，且模型侧没有第二道闸。32k 字符 ≈ 1.6 万汉字，
+ * 足以覆盖"长文档摘要"场景；前端输入框同步 `maxlength`（契约两侧同改）。
+ */
+const MAX_CONTENT_CHARS = 32_000;
 
 const messageBodySchema = {
   type: 'object',
   required: ['content'],
   additionalProperties: false,
   properties: {
-    content: { type: 'string', minLength: 1 },
+    content: { type: 'string', minLength: 1, maxLength: MAX_CONTENT_CHARS },
     thinking: { type: 'boolean' },
     model: { type: 'string', minLength: 1 },
     // 004：问题实例关联工具生成的隐藏引导。只追加到本轮系统提示词，
@@ -56,14 +69,16 @@ const messageBodySchema = {
     // 服务端据此不发起判定——放在请求体而不是"前端少发一次请求"，因为跳过必须是可校验的。
     skip_intent_focus: { type: 'boolean' },
     // 016：下一步动作卡片回传的隐藏工具提示（结构化）。
-    // 只渲染进本轮系统提示词，**不落盘、不进历史**；内容**不做校验**（服务端只透传）。
+    // 只渲染进本轮系统提示词，**不落盘、不进历史**；内容不做形状校验，
+    // 但服务端会过 `normalizeToolTips`（条数截断 + 字段兜底，2026-11-26）。
     tool_tips: {
       type: 'array',
+      maxItems: MAX_TOOL_TIPS_PER_ACTION,
       items: { type: 'object' },
     },
     // 018：术语替换前的用户原话 —— **已停用**（2026-11-07 展示与提交同源，前端不再发送）。
     // 服务端保留解析以兼容旧客户端：收到时仍按"`content` 给模型、本字段落盘"处理。
-    original_content: { type: 'string', minLength: 1 },
+    original_content: { type: 'string', minLength: 1, maxLength: MAX_CONTENT_CHARS },
     // 2026-11-07：用户显式选中的技能（`/技能名`）。只影响本轮 System Prompt（只插入该技能）
     // 与聚焦判定（自动跳过），并随 user 行落盘供回放。
     skill: { type: 'string', minLength: 1, maxLength: 64 },
@@ -168,7 +183,14 @@ function validateAttachments(
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${att.filename}`);
     }
     const abs = path.join(userDataDir(root, userId, agentName), target.relPath, att.filename);
-    if (!fs.existsSync(abs)) {
+    // 只验"存在"会把同名目录放进来，错误留到工具层才暴露（2026-11-26：要求是普通文件）
+    let isFile: boolean;
+    try {
+      isFile = fs.statSync(abs).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) {
       throw new ApiError(400, 'FILE_REF_NOT_FOUND', `引用的文件不存在: ${att.dir}/${att.filename}`);
     }
   }
@@ -242,6 +264,14 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         validateAttachments(ctx.config.optAgentRoot, userId, agentName, body.attachments);
       }
 
+      // 优雅关闭期间不再开新轮（2026-10-27）：`beginDrain()` 只给在途 run 打标记，
+      // 若这里仍放行，drain 会「排空」后又被新一轮追上（进程已退出、回答写一半）。
+      // 2026-11-26：判定前移到配额之前——否则关闭期每个请求仍要取实例、等一次 MCP 超时
+      // （默认 10s）才返回 503，期间还白占一个并发名额。
+      if (ctx.runManager.isDraining()) {
+        throw new ApiError(503, 'SERVICE_UNAVAILABLE', '服务正在关闭，请稍后重试');
+      }
+
       // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；
       // 创建接口不限制会话总数）。acquireQuota **同步**完成「检查 + 占位」，
       // 与下方 await 取实例之间没有被并发请求插队的窗口——占位已计入额度，
@@ -259,8 +289,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         releaseQuota(); // 未走到 startRun，额度必须归还，否则该用户永久少一个并发名额
         if (err instanceof PoolExhaustedError)
           throw new ApiError(409, 'POOL_EXHAUSTED', err.message);
+        // 与 resolveAgentScope 的 AGENT_NOT_AVAILABLE 同码同义（"已选中但配置坏了"），
+        // 否则同一个故障会因时序不同返回 404 或 409（2026-11-26）
         if (err instanceof AgentConfigError)
-          throw new ApiError(404, 'AGENT_NOT_FOUND', err.message);
+          throw new ApiError(409, 'AGENT_NOT_AVAILABLE', err.message);
         throw err;
       }
 
@@ -295,13 +327,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       if (ctx.runManager.takeCancel(threadId)) {
         releaseQuota();
         throw new ApiError(409, 'RUN_CANCELLED', '本轮已被停止');
-      }
-
-      // 优雅关闭期间不再开新轮（2026-10-27）：`beginDrain()` 只给在途 run 打标记，
-      // 若这里仍放行，drain 会「排空」后又被新一轮追上（进程已退出、回答写一半）。
-      if (ctx.runManager.isDraining()) {
-        releaseQuota();
-        throw new ApiError(503, 'SERVICE_UNAVAILABLE', '服务正在关闭，请稍后重试');
       }
 
       let run: Run;
@@ -345,25 +370,37 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
 
       // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
       reply.hijack();
-      reply.raw.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-cache, no-transform',
-        connection: 'keep-alive',
-        // 关掉 Nginx 的响应缓冲：否则注释帧/增量会被攒着不发，"流式"退化为一次性返回
-        'x-accel-buffering': 'no',
-      });
-      // 首帧注释 + 15s 心跳（见 `infra/sse.ts`）：建连即写首个字节，避免本轮在
-      // "MCP 就绪 + 意图聚焦判定 + 首 token" 的静默期被代理/LB 判为空闲而掐断。
-      // 注释行按 SSE 规范由客户端忽略，前端解析器已跳过 ⇒ 事件集合与载荷零变化。
-      const sse = openSseConnection(reply.raw);
-      const unsubscribe = run.subscribe((e) => {
-        sse.event(e.type, e.data);
-        if (e.type === 'done' || e.type === 'error') sse.finish();
-      });
-      req.raw.on('close', () => {
-        sse.dispose();
-        unsubscribe();
-      });
+      try {
+        reply.raw.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+          // 关掉 Nginx 的响应缓冲：否则注释帧/增量会被攒着不发，"流式"退化为一次性返回
+          'x-accel-buffering': 'no',
+        });
+        // 首帧注释 + 15s 心跳（见 `infra/sse.ts`）：建连即写首个字节，避免本轮在
+        // "MCP 就绪 + 意图聚焦判定 + 首 token" 的静默期被代理/LB 判为空闲而掐断。
+        // 注释行按 SSE 规范由客户端忽略，前端解析器已跳过 ⇒ 事件集合与载荷零变化。
+        const sse = openSseConnection(reply.raw);
+        const unsubscribe = run.subscribe((e) => {
+          sse.event(e.type, e.data);
+          if (e.type === 'done' || e.type === 'error') sse.finish();
+        });
+        // 断连钩子必须挂响应：`req.raw` 的 close 在请求体读完时已触发过（见 sse.ts）
+        onSseDisconnect(reply.raw, () => {
+          sse.dispose();
+          unsubscribe();
+        });
+      } catch (err) {
+        // hijack 之后头可能已发出，无法再改状态码：只能干净收尾 + 终止本轮，
+        // 避免"没人消费事件流"的 run 继续烧 token、占并发名额（2026-11-26）
+        ctx.loggers.logger.error(
+          { err, event: 'sse.attach.failed', thread_id: threadId },
+          'SSE 建立失败，终止本轮',
+        );
+        run.stop();
+        reply.raw.end();
+      }
       return reply;
     },
   );

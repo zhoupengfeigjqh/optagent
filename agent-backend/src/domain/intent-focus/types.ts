@@ -235,6 +235,23 @@ export interface FocusToolTip {
  */
 export type BehaviorSource = 'direct' | 'upstream' | 'downstream' | 'concept_query';
 
+/** 发散的一条入边（2026-11-26） */
+export interface ExpansionEdge {
+  /**
+   * 所属本体。**必须带**：`ExpansionChannel` 是多个入选本体累加出来的，
+   * 两个本体出现同名概念时，靠它区分"这条边属于谁"，否则路径会串到别的本体。
+   */
+  ontologyId: string;
+  /** 这一跳的起点概念 */
+  from: string;
+  /** 经由的关系名 */
+  relation: string;
+  /** 这一跳的终点概念 */
+  to: string;
+  /** 跳数 */
+  hop: number;
+}
+
 /** 发散得到的概念（`hop ≥ 1`；direct 概念不进本结构） */
 export interface ExpandedConcept {
   ontologyId: string;
@@ -243,10 +260,18 @@ export interface ExpandedConcept {
   title: string;
   /** 距离 direct 概念的跳数（1..depth） */
   hop: number;
-  /** 由哪个概念扩展而来（BFS 首次命中的路径） */
+  /** 由哪个概念扩展而来（`edges[0]`，留档用的单值口径） */
   viaConcept: string;
-  /** 经由哪条关系扩展而来 */
+  /** 经由哪条关系扩展而来（`edges[0]`） */
   viaRelation: string;
+  /**
+   * 本跳的**全部**入边（2026-11-26 修丢边）。
+   *
+   * 概念只发散一次（`visited` 去环），但"从哪几条关系过来"必须全留：
+   * 多起点共享同一上游时（库存 → 原材料 ← 采购单），只留首条入边会让后到的
+   * 起点行为整条路径消失，`record.concepts[].viaConcept` 也会指错来路。
+   */
+  edges: ExpansionEdge[];
 }
 
 /** 发散得到的行为（`score` 恒为 null：不再判分，见 019 FR） */
@@ -273,6 +298,15 @@ export interface ExpandedBehavior {
 export interface ExpansionChannel {
   concepts: ExpandedConcept[];
   behaviors: ExpandedBehavior[];
+  /**
+   * 指向**直接命中概念**的边（2026-11-26 修丢边）。
+   *
+   * 这些概念本身已在「关键行为」里，所以不再作为发散概念重复出现；但
+   * "从某个命中行为的所属概念，经哪条关系到达它"仍是有效的上下游关系。
+   * 不记这一段时，`QueryInventory →（拥有库存）→ RawMaterial` 这类
+   * 「命中概念 ↔ 命中概念」的边会整条消失（2026-11-26 实测）。
+   */
+  directEdges: ExpansionEdge[];
 }
 
 /** 一次发散的总产出；`truncated` 表示行为候选触达上限 */

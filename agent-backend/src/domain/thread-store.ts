@@ -20,7 +20,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { HistoryMessage } from '../types.js';
-import { SPACE_TMP, THREADS_DIR, threadDir, userDataDir } from './dirs.js';
+import { InvalidThreadIdError, SPACE_TMP, THREADS_DIR, threadDir, userDataDir } from './dirs.js';
 import { removeDirRecursiveAsync, removeFileSafeAsync } from './fs-safe.js';
 import type { HistoryStore } from './history.js';
 
@@ -155,7 +155,11 @@ export class ThreadStore {
     let raw: string;
     try {
       raw = fs.readFileSync(this.metaPath(userId, agentName, threadId), 'utf8');
-    } catch {
+    } catch (err) {
+      // 2026-11-26：非法标识要如实报 400，不能混进"不存在"的 404——
+      // 否则排查路径穿越/客户端拼错 id 时，日志与状态码都指向错误方向。
+      // 安全性不变：`threadDir` 先断言，非法 id 一次文件访问都不会发生。
+      if (err instanceof InvalidThreadIdError) throw err;
       throw new ThreadNotFoundError(threadId);
     }
     let m: MetaFile;

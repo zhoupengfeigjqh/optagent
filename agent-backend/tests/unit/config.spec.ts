@@ -145,7 +145,7 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       baseUrl: 'http://laya:8000',
       model: 'laya-multilingual',
       apiKey: 'laya-dev-key',
-      timeoutMs: 10000,
+      timeoutMs: 30000,
       skillThreshold: 0.8,
       ontologyBehaviorThreshold: 0.8,
       ontologyFunctionThreshold: 0.8,
@@ -184,7 +184,9 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       'intent_focus.ontology_function_threshold',
     );
     expect(messageOf(`${minimal}  max_skills: 0\n`)).toContain('intent_focus.max_skills');
-    expect(messageOf(`${minimal}  max_capabilities: 2.5\n`)).toContain('intent_focus.max_capabilities');
+    expect(messageOf(`${minimal}  max_capabilities: 2.5\n`)).toContain(
+      'intent_focus.max_capabilities',
+    );
   });
 
   it('2026-11-20：旧键 ontology_threshold 不再接受（严格校验，启动即失败）', () => {
@@ -257,16 +259,21 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
   it('timeout_ms 越界 / 非整数时拒绝启动，并给出区间与当前值', () => {
     const tooSmall = messageOf(`${minimal}  timeout_ms: 299\n`);
     expect(tooSmall).toContain('intent_focus.timeout_ms');
-    expect(tooSmall).toContain('300~20000');
+    expect(tooSmall).toContain('300~30000');
 
-    expect(messageOf(`${minimal}  timeout_ms: 20001\n`)).toContain('intent_focus.timeout_ms');
+    expect(messageOf(`${minimal}  timeout_ms: 30001\n`)).toContain('intent_focus.timeout_ms');
     expect(messageOf(`${minimal}  timeout_ms: 300.5\n`)).toContain('intent_focus.timeout_ms');
   });
 
   it('skill_threshold 越界时拒绝启动（即使设了环境变量也不放过坏值）', () => {
-    expect(messageOf(`${minimal}  skill_threshold: 1.5\n`)).toContain('intent_focus.skill_threshold');
+    expect(messageOf(`${minimal}  skill_threshold: 1.5\n`)).toContain(
+      'intent_focus.skill_threshold',
+    );
     expect(
-      messageOf(`${minimal}  skill_threshold: 1.5\n`, { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '0.5' }),
+      messageOf(`${minimal}  skill_threshold: 1.5\n`, {
+        ...okEnv,
+        INTENT_FOCUS_SKILL_THRESHOLD: '0.5',
+      }),
     ).toContain('intent_focus.skill_threshold');
   });
 
@@ -318,7 +325,11 @@ describe('loadConfig - 027 输入改写参数', () => {
   function writeConfig(block: string): string {
     seq += 1;
     const file = path.join(workDir, `rewrite-${seq}.yaml`);
-    writeFileSync(file, `models:\n  - model: test-model\n    api_key: test-key\nintent_focus:\n${block}`, 'utf8');
+    writeFileSync(
+      file,
+      `models:\n  - model: test-model\n    api_key: test-key\nintent_focus:\n${block}`,
+      'utf8',
+    );
     return file;
   }
 
@@ -344,7 +355,9 @@ describe('loadConfig - 027 输入改写参数', () => {
   it('可配置且逐项生效（受 timeout_ms 上限约束）', () => {
     const config = loadConfig({
       env: okEnv,
-      configPath: writeConfig(`${minimal}  timeout_ms: 8000\n  rewrite_threshold: 0.65\n  rewrite_timeout_ms: 3000\n`),
+      configPath: writeConfig(
+        `${minimal}  timeout_ms: 8000\n  rewrite_threshold: 0.65\n  rewrite_timeout_ms: 3000\n`,
+      ),
     });
 
     expect(config.intentFocus?.rewriteThreshold).toBe(0.65);
@@ -352,8 +365,12 @@ describe('loadConfig - 027 输入改写参数', () => {
   });
 
   it('阈值越界（>1 / <0）拒绝启动，文案指名 YAML 路径', () => {
-    expect(messageOf(`${minimal}  rewrite_threshold: 1.5\n`)).toContain('intent_focus.rewrite_threshold');
-    expect(messageOf(`${minimal}  rewrite_threshold: -0.1\n`)).toContain('intent_focus.rewrite_threshold');
+    expect(messageOf(`${minimal}  rewrite_threshold: 1.5\n`)).toContain(
+      'intent_focus.rewrite_threshold',
+    );
+    expect(messageOf(`${minimal}  rewrite_threshold: -0.1\n`)).toContain(
+      'intent_focus.rewrite_threshold',
+    );
   });
 
   it('改写超时越界 / 非整数拒绝启动，并给出区间与当前值', () => {

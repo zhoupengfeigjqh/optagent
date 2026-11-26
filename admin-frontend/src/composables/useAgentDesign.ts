@@ -89,6 +89,8 @@ function cloneSoul(soul: SoulDesign): SoulDesign {
     // 027：两个新开关也必须显式列出，否则"复制数字人"会整片丢字段（007/013 踩过同一个坑）
     input_rewrite: soul.input_rewrite === true,
     term_normalize: soul.term_normalize === true,
+    // 028：显式列出，避免"复制数字人"丢字段
+    task_planning: soul.task_planning === true,
     // 019：阶数显式兜底（接口恒有该键，旧存档万一没有也不至于把控件搞成未选中）
     intent_focus_depth: soul.intent_focus_depth ?? SOUL_LIMITS.focusDepthDefault,
     capability_tags: [...soul.capability_tags],

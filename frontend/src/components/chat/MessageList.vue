@@ -190,8 +190,14 @@ const streamingMessage = computed<Message | null>(() => {
   if (!run || run.phase === RUN_PHASE.IDLE) {
     return null
   }
-  // 终结态（失败/中断）且没有已生成内容时不留空气泡；streaming 态需承载"思考中"
-  if (run.phase !== RUN_PHASE.STREAMING && run.text === '') {
+  /**
+   * 失败轮且没有已生成内容时不留空气泡：本轮错误由 `ChatPanel` 的 `ErrorNotice` 统一承载
+   * （`TR-58` 分流点在那里），气泡留下只会是个空壳。
+   *
+   * **中断轮不适用**（2026-11-26）：它在面板层没有任何提示位，气泡里的
+   * 「已停止生成 · 内容未保存」是唯一可感知的收尾信号——空正文也留着。
+   */
+  if (run.phase === RUN_PHASE.FAILED && run.text === '') {
     return null
   }
   return {

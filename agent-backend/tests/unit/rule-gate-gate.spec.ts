@@ -449,3 +449,89 @@ describe('prepare：非法本体行为（fatal，先于一切分支）', () => {
     expect(result.kind).toBe('fatal');
   });
 });
+
+/**
+ * 028 T204：只读查询端口。
+ *
+ * 规划阶段只用它拿 `type` 与前置函数（`FR-008` / `FR-009`），
+ * 因此必须**只读**——调用前后 `prepare` 的判定结果逐字一致（FR-029）。
+ */
+describe('lookupBehavior：只读查询', () => {
+  it('command → command=true 且带前置函数裸名', () => {
+    const agent = tmpAgentDir();
+    writeOntology(agent, baseYaml());
+    const { gate } = gateFor(agent);
+
+    const lookup = gate.lookupBehavior(CREATE);
+    expect(lookup?.command).toBe(true);
+    expect(lookup?.relatedFunctions).toEqual(['checkSupplierExistence']);
+    expect(lookup?.ref.ontologyKey).toBe('原材料采购和库存/采购单');
+  });
+
+  it('query → command=false 且无前置', () => {
+    const agent = tmpAgentDir();
+    writeOntology(agent, baseYaml());
+    const { gate } = gateFor(agent);
+
+    const lookup = gate.lookupBehavior('erp__QueryStock');
+    expect(lookup?.command).toBe(false);
+    expect(lookup?.relatedFunctions).toEqual([]);
+  });
+
+  it('非本体行为 → null（交给 function 分支）', () => {
+    const agent = tmpAgentDir();
+    writeOntology(agent, baseYaml());
+    const { gate } = gateFor(agent);
+
+    expect(gate.lookupBehavior('erp__SomethingElse')).toBeNull();
+  });
+
+  it('裸名与完整名命中同一桶；跨本体同名合并前置', () => {
+    const agent = tmpAgentDir();
+    writeOntology(agent, baseYaml());
+    writeOntology(
+      agent,
+      [
+        'behaviors:',
+        '  - name: CreatePurchaseRecord',
+        '    op_type: command',
+        'rules:',
+        '  - name: 跨本体规则',
+        '    behavior: CreatePurchaseRecord',
+        '    position: 前置',
+        '    related_functions:',
+        '      - inferPurchasePurpose',
+        '    rule_design:',
+        '      groups:',
+        '        - conditions:',
+        '            - function: inferPurchasePurpose',
+        '              field: purpose',
+        '              operator: eq',
+        '              values: ["采购"]',
+      ].join('\n'),
+      '另一个本体',
+    );
+    const { gate } = gateFor(agent);
+
+    const byFull = gate.lookupBehavior(CREATE);
+    const byBare = gate.lookupBehavior('CreatePurchaseRecord');
+    expect(byFull?.command).toBe(true);
+    expect(byBare?.command).toBe(true);
+    expect(byFull?.relatedFunctions).toEqual(
+      expect.arrayContaining(['checkSupplierExistence', 'inferPurchasePurpose']),
+    );
+  });
+
+  it('调用只读查询前后 prepare 判定结果一致', () => {
+    const agent = tmpAgentDir();
+    writeOntology(agent, baseYaml());
+    const { gate } = gateFor(agent);
+    const input = { toolName: CREATE, record: recordWith(), available: ALL_AVAILABLE };
+
+    const before = gate.prepare(input);
+    gate.lookupBehavior(CREATE);
+    gate.lookupBehavior('erp__SomethingElse');
+    const after = gate.prepare(input);
+    expect(after).toEqual(before);
+  });
+});

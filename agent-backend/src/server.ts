@@ -79,6 +79,8 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   AGENT_NOT_AVAILABLE: 409,
   POOL_EXHAUSTED: 409,
   THREAD_NOT_FOUND: 404,
+  // 2026-11-26：会话标识未通过字符集校验（路径穿越防御，见 dirs.threadDir）
+  THREAD_ID_INVALID: 400,
   AGENT_NOT_FOUND: 404,
   // 015 定时任务：任务不存在 → 404；名称冲突 / 启用中删除 / 已终止 → 409
   SCHEDULED_TASK_NOT_FOUND: 404,

@@ -68,8 +68,8 @@ const EMPTY_SELECTION: CapabilitySelection = { behaviors: [], functions: [], con
 
 /** 无发散（阶数 0 / 非本体技能）：提示只有直接命中，卡片也只有直接命中 */
 const EMPTY_EXPANSION: ExpansionResult = {
-  upstream: { concepts: [], behaviors: [] },
-  downstream: { concepts: [], behaviors: [] },
+  upstream: { concepts: [], behaviors: [], directEdges: [] },
+  downstream: { concepts: [], behaviors: [], directEdges: [] },
   warnings: [],
   truncated: false,
 };
@@ -566,6 +566,8 @@ export class IntentFocusRunner implements IntentFocusPort {
           source: 'upstream' as const,
           hop: concept.hop,
           viaConcept: concept.viaConcept,
+          // 2026-11-26：留档也保留全部入边，供事后回放"这条路径凭什么出现"
+          edges: concept.edges.map((edge) => ({ from: edge.from, relation: edge.relation })),
         })),
       ],
       upstreamBehaviors: expansion.upstream.behaviors,

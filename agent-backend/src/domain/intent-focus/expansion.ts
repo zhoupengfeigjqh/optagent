@@ -24,6 +24,7 @@ import type {
   ExpandedBehavior,
   ExpandedConcept,
   ExpansionChannel,
+  ExpansionEdge,
   ExpansionResult,
   OntologyDefinition,
   OntologyRelation,
@@ -111,7 +112,7 @@ interface NeighborEdge {
   relation: string;
 }
 
-const EMPTY_CHANNEL = (): ExpansionChannel => ({ concepts: [], behaviors: [] });
+const EMPTY_CHANNEL = (): ExpansionChannel => ({ concepts: [], behaviors: [], directEdges: [] });
 
 /**
  * 同向一阶（及 N 阶）发散。
@@ -149,11 +150,12 @@ export function expandNeighborhood(input: ExpandInput): ExpansionResult {
     for (const side of ['upstream', 'downstream'] as const) {
       const channel = result[side];
       const adjacency = buildAdjacency(ontology, side);
-      const concepts = walk(ontology, direct, adjacency, depth);
-      channel.concepts.push(...concepts);
+      const walked = walk(ontology, direct, adjacency, depth);
+      channel.concepts.push(...walked.concepts);
+      channel.directEdges.push(...walked.directEdges);
       const truncated = collectBehaviors(
         ontology,
-        concepts,
+        walked.concepts,
         directNames,
         maxBehaviors,
         channel,
@@ -230,53 +232,91 @@ function buildAdjacency(
 }
 
 /**
- * 逐跳 BFS：同跳按 `concepts[]` 原序输出，首个命中路径即 `via`。
+ * 逐跳 BFS：同跳按 `concepts[]` 原序输出，**一个概念一条**，但保留本跳的**全部入边**。
  *
  * 去环靠 `visited`：图里存在自环或双向边时不会死循环，也不会重复出概念。
+ *
+ * 2026-11-26（修丢边，两处）：
+ * 1. 旧实现用 `hits.has(edge.to)` 把同一概念的入边压成一条，多起点共享同一上游时
+ *    （库存 → 原材料 ← 采购单），后到的那条边被吞掉。现在 `edges` 保留本跳全部入边，
+ *    `viaConcept/viaRelation` 取首条（留档口径不倒退）。
+ * 2. 旧实现把指向**直接命中概念**的边一律丢弃（`visited` 以 direct 为种子）。命中的
+ *    概念之间照样有上下游关系（`QueryInventory ←〔拥有库存〕— RawMaterial`），丢掉它
+ *    就会出现"命中的两个概念在提示里毫无关系"。这类边单独收进 `directEdges`，
+ *    概念清单不动（它们已在「关键行为」里，不重复列出）。
  */
 function walk(
   ontology: OntologyDefinition,
   direct: ReadonlySet<string>,
   adjacency: ReadonlyMap<string, NeighborEdge[]>,
   depth: number,
-): ExpandedConcept[] {
+): { concepts: ExpandedConcept[]; directEdges: ExpansionEdge[] } {
   const visited = new Set(direct);
   const found: ExpandedConcept[] = [];
+  const directEdges: ExpansionEdge[] = [];
+  const seenDirectEdge = new Set<string>();
   let frontier: ReadonlySet<string> = direct;
 
   for (let hop = 1; hop <= depth; hop++) {
-    // 先按"前沿概念序 → 关系序"收集本跳命中（首个命中即 via），
+    // 先按"前沿概念序 → 关系序"收集本跳全部命中（顺序即边序，首个命中仍作 via），
     // 再按 `concepts[]` 原序输出——保证同输入必得同输出，且与本体声明顺序一致
-    const hits = new Map<string, NeighborEdge & { via: string }>();
+    const inbound = new Map<string, ExpansionEdge[]>();
     for (const concept of ontology.concepts) {
       if (!frontier.has(concept.name)) continue;
       for (const edge of adjacency.get(concept.name) ?? []) {
-        if (visited.has(edge.to) || hits.has(edge.to)) continue;
-        hits.set(edge.to, { ...edge, via: concept.name });
+        if (visited.has(edge.to)) {
+          // 只收"命中概念之间的直接一跳"：更深跳回命中概念属绕行，只会与它自己的路径重复
+          if (hop === 1 && direct.has(edge.to)) {
+            const key = `${concept.name}\u0000${edge.relation}\u0000${edge.to}`;
+            if (!seenDirectEdge.has(key)) {
+              seenDirectEdge.add(key);
+              directEdges.push({
+                ontologyId: ontology.ontologyId,
+                from: concept.name,
+                relation: edge.relation,
+                to: edge.to,
+                hop: 1,
+              });
+            }
+          }
+          continue;
+        }
+        const item: ExpansionEdge = {
+          ontologyId: ontology.ontologyId,
+          from: concept.name,
+          relation: edge.relation,
+          to: edge.to,
+          hop,
+        };
+        const list = inbound.get(edge.to);
+        if (list) list.push(item);
+        else inbound.set(edge.to, [item]);
       }
     }
-    if (hits.size === 0) break;
+    if (inbound.size === 0) break;
 
     const next = new Set<string>();
     for (const concept of ontology.concepts) {
-      const hit = hits.get(concept.name);
-      if (!hit) continue;
+      const edges = inbound.get(concept.name);
+      if (edges === undefined) continue;
       visited.add(concept.name);
       next.add(concept.name);
+      const first = edges[0] as ExpansionEdge;
       found.push({
         ontologyId: ontology.ontologyId,
         ontologyName: ontology.ontologyName,
         name: concept.name,
         title: concept.title,
         hop,
-        viaConcept: hit.via,
-        viaRelation: hit.relation,
+        viaConcept: first.from,
+        viaRelation: first.relation,
+        edges,
       });
     }
     frontier = next;
   }
 
-  return found;
+  return { concepts: found, directEdges };
 }
 
 /**

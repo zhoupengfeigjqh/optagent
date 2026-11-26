@@ -21,7 +21,8 @@
     "intent_focus": true,
     "intent_focus_depth": 1,
     "input_rewrite": true,
-    "term_normalize": true
+    "term_normalize": true,
+    "task_planning": true
   },
   "enabled_tools": [
     "list_dir",
@@ -75,5 +76,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-24T09:02:19.173Z"
+  "updated_at": "2026-11-26T04:24:11.609Z"
 }

@@ -54,8 +54,12 @@ export interface QuestionBatch {
  * 截断点尽量对齐到句首，避免从词中间切开。
  */
 export function prepareState(input: string): PreparedState {
+  // 先按 UTF-16 长度做零成本快判；超长时才按**码点**切，避免把 emoji 的代理对切成半个
+  // （`slice` 按 code unit 切，孤立代理项会被序列化成 `\ud83d`，判定模型看到的是乱码）。
   if (input.length <= MAX_STATE_CHARS) return { state: input, truncated: false };
-  const tail = input.slice(-MAX_STATE_CHARS);
+  const chars = Array.from(input);
+  if (chars.length <= MAX_STATE_CHARS) return { state: input, truncated: false };
+  const tail = chars.slice(-MAX_STATE_CHARS).join('');
   const match = SENTENCE_BREAK.exec(tail);
   if (match && tail.length - (match.index + 1) >= MIN_STATE_AFTER_BREAK) {
     return { state: tail.slice(match.index + 1).trim(), truncated: true };

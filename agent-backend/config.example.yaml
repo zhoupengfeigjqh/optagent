@@ -33,9 +33,9 @@ models:
 #   api_key: $DECIS_API_KEY         # 必填；支持 $ENV_VAR 引用；**不**回落到 DEEPSEEK_API_KEY
 #                                   #   $ENV 由 **backend 进程**的环境提供（agent-backend/.env.local），
 #                                   #   与 laya 容器的 DECIS_API_KEY 必须是同一个值
-#   timeout_ms: 10000               # 300~20000 的整数（毫秒）；整轮预算（覆盖指代判定 + 改写 + 两段评分，
+#   timeout_ms: 30000               # 300~30000 的整数（毫秒）；整轮预算（覆盖指代判定 + 改写 + 两段评分，
 #                                   #   共用同一 deadline；不含主模型回答与术语预检），超时即降级（不重试）
-#                                   #   上限 2026-11-20 由 10000 放宽到 20000，缺省仍为 10000
+#                                   #   2026-11-26：上限与缺省一并提到 30000（此前上限 20000、缺省 10000）
 #   skill_threshold: 0.8            # 0~1；技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖（环境变量优先）
 #                                   #   环境变量留空（`INTENT_FOCUS_SKILL_THRESHOLD=`）视为未设置，不会变成 0
 #                                   #   0.8 是 2026-11 产品口径（技能与行为同阈值；0.6 下噪声明显偏多）

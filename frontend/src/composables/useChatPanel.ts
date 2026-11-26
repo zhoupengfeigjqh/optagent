@@ -11,6 +11,7 @@
 
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 
+import { MAX_MESSAGE_CHARS } from '../api/messages'
 import type { ErrorInfo, FeedbackValue, FileReference, ToolTip } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
 import { attachmentOnlyPrompt } from '../utils/attachment-only-prompt'
@@ -182,6 +183,16 @@ export function useChatPanel() {
     if (attachmentOnly) content = attachmentOnlyPrompt(payload.attachments.length)
     if (content.trim() === '') {
       toast.push('error', '请输入消息内容')
+      return false
+    }
+
+    // 2026-11-26：与服务端 `MAX_CONTENT_CHARS` 同值。超限在本地拦下——否则用户要等完
+    // 术语预检与 MCP 就绪，才收到一个 400。
+    if (content.length > MAX_MESSAGE_CHARS) {
+      toast.push(
+        'error',
+        `消息过长（${content.length}/${MAX_MESSAGE_CHARS} 字符），请拆分后发送`,
+      )
       return false
     }
 

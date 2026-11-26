@@ -19,6 +19,7 @@ import { getCurrentUser } from '../domain/current-user.js';
 import { migrateUserDataLayout } from '../domain/data-migration.js';
 import { ensureAgentDataDirs, userAgentsDir } from '../domain/dirs.js';
 import type { ChatAgent } from '../infra/agent-factory.js';
+import { onSseDisconnect } from '../infra/sse.js';
 import { createThrottledWarn } from '../logging.js';
 import { ApiError } from '../server.js';
 
@@ -72,8 +73,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
       route: 'GET /api/agents/current/skills',
     });
     const detail = getAgentDetail(ctx.config.optAgentRoot, userId, agentName, catalogLogger);
-    if (!detail)
-      throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${agentName}`);
+    if (!detail) throw new ApiError(404, 'AGENT_NOT_FOUND', `数字人不存在或配置损坏：${agentName}`);
     return {
       agent_name: detail.agent_name,
       skills: detail.skills.map((skill) => ({
@@ -223,7 +223,8 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     });
     const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
 
-    req.raw.on('close', () => {
+    // 断连钩子必须挂响应：`req.raw` 的 close 在请求体读完时已触发过（见 infra/sse.ts）
+    onSseDisconnect(reply.raw, () => {
       clearInterval(heartbeat);
       unsubscribe();
       reply.raw.end();

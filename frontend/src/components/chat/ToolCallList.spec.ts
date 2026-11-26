@@ -453,3 +453,49 @@ describe('ToolCallList —— 流式期无正文的说明（2026-11-18）', () =
     expect(body).not.toContain('无结果内容')
   })
 })
+
+/**
+ * 028 T805：多工具批次的渲染回归。
+ *
+ * 2026-11-25 起全局工具批次改为**串行**（`toolExecution: 'sequential'`），同一批的
+ * 事件由"start×N 后 end×N"变成"start/end 交替"。卡片侧不能假设同批只有一个在跑，
+ * 也不能因交错而打乱顺序——这里按串行到达的真实形态喂三项。
+ */
+describe('ToolCallList —— 多工具批次（028 T805）', () => {
+  it('串行到达的三项：顺序、终态与计数都按到达顺序', async () => {
+    const items: ToolCallItem[] = [
+      { callId: 's1', name: 'erp__checkStock', status: 'success', durationMs: 20 },
+      { callId: 's2', name: 'erp__CreatePurchaseRecord', status: 'success', durationMs: 40 },
+      { callId: 's3', name: 'erp__SubmitPurchase', status: 'running' },
+    ]
+    const wrapper = mountList(items, true)
+
+    // 折叠态：计数常显，末项在跑
+    expect(wrapper.find('[data-test="tool-counts"]').text()).toContain('本轮 3 次调用')
+    expect(wrapper.find('[data-test="tool-summary"]').text()).toContain('进行中')
+
+    await wrapper.find('[data-test="tool-summary"]').trigger('click')
+    const names = wrapper
+      .findAll('[data-test="tool-details"] .tool-call__name')
+      .map((node) => node.text())
+    expect(names).toHaveLength(3)
+    // 明细按时间正序（TR-35），与串行到达顺序一致
+    expect(names[0]).toBe('erp__checkStock')
+    expect(names[2]).toBe('erp__SubmitPurchase')
+  })
+
+  it('串行批次里有失败：报错数只算失败那条，不影响其它项展示', () => {
+    const wrapper = mountList(
+      [
+        { callId: 's1', name: 'erp__checkStock', status: 'success' },
+        { callId: 's2', name: 'erp__CreatePurchaseRecord', status: 'error', summary: '库存不足' },
+        { callId: 's3', name: 'erp__SubmitPurchase', status: 'success' },
+      ],
+      true,
+    )
+
+    const counts = wrapper.find('[data-test="tool-counts"]').text()
+    expect(counts).toContain('本轮 3 次调用')
+    expect(counts).toContain('报错 1 次')
+  })
+})

@@ -47,7 +47,7 @@
 | R23 | **MCP 工具显示名**（2026-10-27）：MCP 服务配置新增 `tool_labels`（`{原始工具名: 人读名称}`）；部署物化进 `MCP.json`（非空才写、按白名单过滤孤儿键）；运行环境据此取 `AgentTool.label`（优先级：平台配置 > 服务端 `Tool.title` > `server: tool`），用于**意图聚焦命题**与平台工具清单展示 | 新增配置字段 + 物化键 + 展示名来源 | 否（缺省不写键：存量 `MCP.json` 字节不变、英文拼接行为零变化；工具调用名不变） |
 | R24 | **MCP 工具入参 schema 的根标题**（2026-10-30，方案 A）：下发给模型 / HITL / 管理端工具清单的 `parameters`，根节点 `title`（SDK 生成的类名）改为 `x-title`，值取服务端 `Tool.title`（`@mcp.tool(title=...)`）；服务端未声明则**原样透传** | 数据形状变更（仅根节点键名） | 否（字段级 `title` 一字不动；未声明标题的工具 schema 逐字不变） |
 | R25 | **聊天流首帧与心跳**（2026-11-06）：`POST /api/threads/{id}/messages` 建连即写注释帧 `: connected`，此后每 15s 写 `: ping`；响应头补 `x-accel-buffering: no`（详见 §24） | 连接层行为（新增注释帧 + 响应头） | 否（注释帧按 SSE 规范被客户端忽略；事件集合 / 载荷 / 终结语义零变更，前端零改动） |
-| R26 | **意图聚焦一阶发散**（特性 `019-intent-focus-expansion`，2026-11-08）：SOUL.md frontmatter 新增 `intent_focus_depth`（0~2，仅开启且非 0 时写入）；聚焦提示升级为分行块（新增概念段与上游段）、长度上限按阶数分档 2000/3000/4000（2026-11-20 由 1200/1600/2000 上调）；`tool_tips` 候选扩为「直接命中 + 下游发散」（wire 四字段不变） | 新增配置字段 + 提示格式/长度变更 + 候选来源扩展 | 否（阶数缺省 0 = 只聚焦本身，提示内容等于 016 口径；`tool_tips` 结构不变、前端零改动；判分调用数不变） |
+| R26 | **意图聚焦一阶发散**（特性 `019-intent-focus-expansion`，2026-11-08）：SOUL.md frontmatter 新增 `intent_focus_depth`（0~2，仅开启且非 0 时写入）；聚焦提示升级为分行块（新增概念段与上游段）、长度上限按阶数分档 4000/5000/6000（2026-11-26 由 2000/3000/4000 上调，2026-11-20 曾由 1200/1600/2000 上调）；`tool_tips` 候选扩为「直接命中 + 下游发散」（wire 四字段不变） | 新增配置字段 + 提示格式/长度变更 + 候选来源扩展 | 否（阶数缺省 0 = 只聚焦本身，提示内容等于 016 口径；`tool_tips` 结构不变、前端零改动；判分调用数不变） |
 | R27 | **本体行为权限闸门**（特性 `020-ontology-scope-guard`，2026-11-08）：工具执行前按「工具名 → 已部署本体行为 → `securities.yaml` 的 `action_name` / `scope`」判定；`scope` 含 `everyone` 放行、含 `disable` 拒绝（优先于 `everyone`）、否则按数字人归属用户名判定；新增 2 个工具失败错误码与 3 个结构化日志事件（详见 §25；2026-11-09 起 `disable` 并入未授权，且拒绝后本轮挂起、软收尾） | 行为变更（工具可能被拒绝执行，返回失败结果） | 否（无端点 / SSE 事件 / 持久化字段变更；非本体工具与"未部署本体"的数字人走原路径；前端零改动） |
 | R28 | **本体行为规则闸门**（特性 `021-ontology-rule-gate`，2026-11-09）：本体行为执行前按 `ontology.yaml` 的 `rules`（`position: 前置`）做**确定性规则求值**（硬编码解析 `rule_design`，不经过 LLM）——所需函数未执行则暂停并反馈规则全文，求值 `false` 或规则不可用则拒绝并**中止整轮**（执行成功后的后置规则提示已于 2026-11-24 移除，见 R32）。新增 1 个工具失败错误码、1 个失败轮错误码（`ONTOLOGY_RULE_DENIED`）、`error` 对象新增可选 `details` / `reason`、6 个结构化日志事件（详见 §26） | 行为变更（工具可能被暂停 / 拒绝）+ `error` 载荷可选增量 | 否（无端点 / 无新增 SSE 事件类型；`details` 为可选字段，旧前端忽略；无规则的本体与非本体工具走原路径；前端仅新增一条错误码文案映射） |
 | R29 | **聚焦提示改五元组路径**（特性 `019-intent-focus-expansion` 修订，2026-11-13）：`systemExtra` 里的聚焦提示不再有 `关联概念` / `上游概念` / `上游参考` 三段，改为 `直接命中` + `上游路径`；路径段一行一条五元组 `行为—概念—关系—概念—行为`（`[上游]` 表方向、`→`/`←` 表关系名读向，链尾无行为写 `（无可用行为）`）；长度上限与分档不变，截断改为整行丢弃；本体 `relations[].title` 参与展示（缺失回退 `name`） | 提示词形态变更（纯文本，等价替换一段） | 否（无端点 / SSE / 持久化字段变更；`tool_tips` 与前端零改动；阶数 0 时提示与改前一致） |
@@ -1499,6 +1499,17 @@ term_normalize: true    # 027：仅 intent_focus 与它皆为真时写入
 > 里再做一次严格校验——跳过标记必须是**可校验**的，静默错配只会表现为
 > "该跳过的没跳过"，无任何报错可循。作用域仅限本路由，不全局改 ajv 选项。
 
+### 21.3 入口护栏（2026-11-26，S1 加固）
+
+| 项 | 口径 |
+|---|---|
+| `content` / `original_content` | `maxLength: 32000`（与前端 `MAX_MESSAGE_CHARS` 同值）；超出 → `400 VALIDATION_FAILED` |
+| `tool_tips` | `maxItems: 5`（与卡片侧 `MAX_TOOL_TIPS_PER_ACTION` 同源）；超出 → `400 VALIDATION_FAILED`；服务端另过 `normalizeToolTips`（条数截断 + 字段兜底） |
+| 会话标识 | 路由参数 MUST 满足 `^[A-Za-z0-9_-]{1,64}$`；不满足 → `400 THREAD_ID_INVALID`。断言落在 `threadDir()`（单点，34 处调用点共享），防 `%2F` / `%5C` 被解码成 `../` 后的路径穿越 |
+| 关服判定 | `503 SERVICE_UNAVAILABLE` MUST 在「配额占位 + 取实例」**之前**判定——否则关闭期每个请求都要白等一次 MCP 超时（默认 10s）才被拒 |
+| 断连钩子 | MUST 挂 `reply.raw`（`res`），**MUST NOT** 挂 `req.raw`：Node ≥16 服务端 `req` 的 `close` 在请求体读完即触发，路由挂载时事件已经过去（监听器永不执行）。见 `infra/sse.ts` 的 `onSseDisconnect` |
+| 删除会话 | MUST 先 `awaitIdle(threadId, 5000)` 等本轮真正收尾，再排空写入链、再删目录；只排空"当时"的链不够——finalize 之后的异步写会 `mkdirSync` 重建孤儿目录 |
+
 ### 21.3 线程目录新增侧车文件
 
 路径：`users/{uid}/user-data/{agentName}/threads/{threadId}/intent-focus.jsonl`
@@ -1567,7 +1578,7 @@ intent_focus:
 
 **留档新增字段**：`need_rewrite`、`rewrite_score`、`rewrite_query`、`rewrite_truncated`、`rewrite_ms`、`rewrite_history_turns`、`rewrite_reason`（口径见 [027 数据模型](../../../027-intent-focus-query-rewrite/data-model.md)）。
 
-**预算**：判定与改写共享 `intent_focus.timeout_ms`（缺省 10s）；改写另受 `rewrite_timeout_ms`（缺省 5s）约束；剩余预算不足 300ms 时放弃改写并回退原文。
+**预算**：判定与改写共享 `intent_focus.timeout_ms`（缺省 **30s**，可配上限同为 30s；2026-11-26 由缺省 10s / 上限 20s 提高）；改写另受 `rewrite_timeout_ms`（缺省 5s、上限 10s）约束；剩余预算不足 300ms 时放弃改写并回退原文。
 
 **降级**：判定失败按"不改写"，改写失败回退原文；均只记结构化日志与留档，不改变本轮回答与 SSE 事件序列。完整契约见 [`specs/027-intent-focus-query-rewrite/contracts/intent-focus-rewrite.md`](../../../027-intent-focus-query-rewrite/contracts/intent-focus-rewrite.md)。
 

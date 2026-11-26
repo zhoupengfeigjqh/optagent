@@ -41,6 +41,8 @@ export interface ConceptEntry {
   source: 'direct' | 'upstream';
   hop: number;
   viaConcept: string | null;
+  /** 本跳全部入边（2026-11-26）；`direct` 概念没有入边，可省略 */
+  edges?: ReadonlyArray<{ from: string; relation: string }>;
 }
 
 export interface RecordInput {
@@ -212,5 +214,7 @@ function toConceptRecord(entry: ConceptEntry): ConceptFocusRecord {
     source: entry.source,
     hop: entry.hop,
     via_concept: entry.viaConcept,
+    // 2026-11-26：全部入边一并落档，`via_concept` 只是其中第一条
+    via_edges: (entry.edges ?? []).map((edge) => ({ from: edge.from, relation: edge.relation })),
   };
 }

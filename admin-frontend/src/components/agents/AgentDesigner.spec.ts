@@ -38,6 +38,7 @@ const SOUL: AgentDesign['soul'] = {
   intent_focus_depth: 0,
   input_rewrite: false,
   term_normalize: false,
+  task_planning: false,
 }
 
 const ONTOLOGY_CANDIDATE: OntologyCandidate = {

@@ -18,6 +18,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MAX_MESSAGE_CHARS } from '../api/messages'
 import { emptyNextSteps } from '../api/next-steps'
 import type { FileReference } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
@@ -236,5 +237,41 @@ describe('useChatPanel —— 只有附件也能发送（026）', () => {
 
     expect(ok).toBe(false)
     expect(chat.send).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 2026-11-26：与服务端 `MAX_CONTENT_CHARS` 同值的本地拦截。
+ *
+ * 放在唯一发送链路上（`onSend`）：手输、卡片、重试都过这里；超限时**不发请求**，
+ * 也不必等术语预检与 MCP 就绪。
+ */
+describe('useChatPanel —— 正文长度上限（2026-11-26）', () => {
+  it('超过上限 → 本地拦下并提示，不发请求', async () => {
+    const { panel, session } = mountHarness(makeSession())
+    const chat = session.chat as unknown as ChatSpy
+    const toast = session.toast as unknown as ToastSpy
+
+    const ok = await panel.onSend({
+      content: 'a'.repeat(MAX_MESSAGE_CHARS + 1),
+      attachments: [],
+    })
+
+    expect(ok).toBe(false)
+    expect(chat.send).not.toHaveBeenCalled()
+    expect(toast.push).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining(String(MAX_MESSAGE_CHARS)),
+    )
+  })
+
+  it('恰好等于上限 → 正常提交', async () => {
+    const { panel, session } = mountHarness(makeSession())
+    const chat = session.chat as unknown as ChatSpy
+
+    const ok = await panel.onSend({ content: 'a'.repeat(MAX_MESSAGE_CHARS), attachments: [] })
+
+    expect(ok).toBe(true)
+    expect(chat.send).toHaveBeenCalledTimes(1)
   })
 })

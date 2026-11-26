@@ -20,8 +20,9 @@
     "next_action_hints_count": 1,
     "intent_focus": false,
     "intent_focus_depth": 0,
-    "input_rewrite": false,
-    "term_normalize": false
+    "input_rewrite": true,
+    "term_normalize": true,
+    "task_planning": true
   },
   "enabled_tools": [
     "list_dir",
@@ -48,5 +49,5 @@
       ]
     }
   },
-  "updated_at": "2026-11-23T12:21:29.734Z"
+  "updated_at": "2026-11-25T14:30:10.790Z"
 }

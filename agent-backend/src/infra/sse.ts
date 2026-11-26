@@ -31,6 +31,33 @@ export interface SseRawSink {
   write(chunk: string): boolean;
   end(...args: []): unknown;
   readonly writableEnded?: boolean;
+  /** 断连感知（可选）：`app.inject` 的假 Response 没有事件能力，故不强制要求 */
+  once?(event: 'close' | 'error', listener: () => void): unknown;
+}
+
+/**
+ * 断连钩子（2026-11-26，S1 加固）。
+ *
+ * **必须挂响应（`reply.raw`），不能挂请求（`req.raw`）**：Node ≥16 起，服务端
+ * `IncomingMessage` 的 `close` 在**请求体读完**时就触发，而路由 handler 此时才拿到
+ * 控制权——注册晚于事件，监听器永远不执行。实测（POST，体 29ms 读完，客户端 523ms 断开）：
+ *
+ * ```
+ * req end + 29 / req close + 29 / client destroy + 523 / res close + 525
+ * ```
+ *
+ * 正常 `finish()` 之后 `res` 也会 `close`，所以 `cleanup` MUST 幂等
+ * （`SseConnection.dispose` 与 `run.subscribe` 的退订函数都已幂等）。
+ */
+export function onSseDisconnect(raw: SseRawSink, cleanup: () => void): void {
+  let fired = false;
+  const once = (): void => {
+    if (fired) return;
+    fired = true;
+    cleanup();
+  };
+  raw.once?.('close', once);
+  raw.once?.('error', once);
 }
 
 export interface SseConnection {

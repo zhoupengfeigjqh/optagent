@@ -214,6 +214,51 @@ describe('expandNeighborhood', () => {
     expect(result.downstream.behaviors).toEqual([]);
   });
 
+  it('多起点共享同一上游概念：入边全留，不只第一条（2026-11-26 修丢边）', () => {
+    const result = expandNeighborhood({
+      behaviors: [
+        { ontologyId: '1', name: 'QueryPurchaseRecords', concept: 'PurchaseRecord' },
+        { ontologyId: '1', name: 'QueryInventory', concept: 'RawMaterialInventory' },
+      ],
+      ontologies: [ontology()],
+      depth: 1,
+    });
+
+    const raw = result.upstream.concepts.find((item) => item.name === 'RawMaterial')!;
+    // 两条入边都在：采购单（记录原材料）+ 库存（拥有库存）
+    expect(raw.edges.map((edge) => `${edge.from}:${edge.relation}`)).toEqual([
+      'PurchaseRecord:RecordsRawMaterial',
+      'RawMaterialInventory:HasRawInventory',
+    ]);
+    // 留档单值口径不变：仍取首条
+    expect(raw.viaConcept).toBe('PurchaseRecord');
+    expect(raw.viaRelation).toBe('RecordsRawMaterial');
+    // 概念本身仍只出现一次（visited 去环）
+    expect(result.upstream.concepts.filter((item) => item.name === 'RawMaterial')).toHaveLength(1);
+    // 行为按概念收集，不受入边条数影响
+    expect(
+      result.upstream.behaviors.filter((item) => item.concept === 'RawMaterial').map((item) => item.name),
+    ).toEqual(['QueryRawMaterials']);
+  });
+
+  it('命中概念之间的边进 directEdges，概念清单不重复（2026-11-26 修丢边）', () => {
+    const result = expandNeighborhood({
+      behaviors: [
+        { ontologyId: '1', name: 'QueryInventory', concept: 'RawMaterialInventory' },
+        { ontologyId: '1', name: 'QueryRawMaterials', concept: 'RawMaterial' },
+      ],
+      ontologies: [ontology()],
+      depth: 1,
+    });
+
+    // 库存 → 原材料（HasRawInventory）是命中概念之间的一跳：概念清单里不该重复出现
+    // （它们已在「关键行为」里），但这条边必须留着，否则 QueryInventory 没有任何上下游可写
+    expect(result.upstream.concepts).toEqual([]);
+    expect(result.upstream.directEdges).toEqual([
+      { ontologyId: '1', from: 'RawMaterialInventory', relation: 'HasRawInventory', to: 'RawMaterial', hop: 1 },
+    ]);
+  });
+
   it('下游一阶：原材料 → 库存 + 采购记录（明细），上游为空', () => {
     const result = expandNeighborhood({
       behaviors: [{ ontologyId: '1', name: 'QueryRawMaterials', concept: 'RawMaterial' }],

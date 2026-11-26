@@ -80,18 +80,30 @@ function concept(
   viaRelation: string,
   hop = 1,
   ontologyId = '1',
+  edges?: ExpandedConcept['edges'],
 ): ExpandedConcept {
-  return { ontologyId, ontologyName: '原材料采购和库存', name, title, hop, viaConcept, viaRelation };
+  return {
+    ontologyId,
+    ontologyName: '原材料采购和库存',
+    name,
+    title,
+    hop,
+    viaConcept,
+    viaRelation,
+    // 缺省 = 单入边：与 2026-11-26 之前的口径一致，老用例不用逐条改
+    edges: edges ?? [{ ontologyId, from: viaConcept, relation: viaRelation, to: name, hop }],
+  };
 }
 
 function expansion(
   upstreamConcepts: ExpandedConcept[],
   upstreamBehaviors: ExpansionResult['upstream']['behaviors'] = [],
   downstreamConcepts: ExpandedConcept[] = [],
+  upstreamDirectEdges: ExpansionResult['upstream']['directEdges'] = [],
 ): ExpansionResult {
   return {
-    upstream: { concepts: upstreamConcepts, behaviors: upstreamBehaviors },
-    downstream: { concepts: downstreamConcepts, behaviors: [] },
+    upstream: { concepts: upstreamConcepts, behaviors: upstreamBehaviors, directEdges: upstreamDirectEdges },
+    downstream: { concepts: downstreamConcepts, behaviors: [], directEdges: [] },
     warnings: [],
     truncated: false,
   };
@@ -207,6 +219,117 @@ describe('buildFocusPaths', () => {
     expect(build(duplicated)).toHaveLength(1);
   });
 
+  it('多起点共享同一上游概念：每条入边各出一条路径（2026-11-26 修丢边）', () => {
+    // 原材料的入边：采购单 —记录原材料→ 原材料、库存 ←〔拥有库存〕— 原材料
+    const shared = expansion([
+      concept('RawMaterial', '原材料', 'PurchaseRecord', 'RecordsRawMaterial', 1, '1', [
+        { ontologyId: '1', from: 'PurchaseRecord', relation: 'RecordsRawMaterial', to: 'RawMaterial', hop: 1 },
+        { ontologyId: '1', from: 'RawMaterialInventory', relation: 'HasRawInventory', to: 'RawMaterial', hop: 1 },
+      ]),
+    ]);
+    const paths = buildFocusPaths({
+      behaviors: [
+        {
+          ontologyId: '1',
+          name: 'QueryPurchaseRecords',
+          title: '查询原材料采购单信息',
+          concept: 'PurchaseRecord',
+          score: 90,
+        },
+        {
+          ontologyId: '1',
+          name: 'QueryInventory',
+          title: '查询库存信息',
+          concept: 'RawMaterialInventory',
+          score: 91,
+        },
+      ],
+      ontologies: [purchaseOntology()],
+      expansion: shared,
+    });
+
+    // 两个起点行为都拿到自己那条入边，后到的那条不再被吞
+    expect(paths.map((path) => `${path.behavior.name}:${path.relation.name}`)).toEqual([
+      'QueryPurchaseRecords:RecordsRawMaterial',
+      'QueryInventory:HasRawInventory',
+    ]);
+    expect(paths.map((path) => path.toConcept.name)).toEqual(['RawMaterial', 'RawMaterial']);
+    // 读向按各自起点判定：库存 → 原材料 是逆着箭头走
+    expect(paths[0]!.readability).toBe('forward');
+    expect(paths[1]!.readability).toBe('reverse');
+  });
+
+  it('命中概念之间也要出路径：目标不是「发散概念」≠ 没有上下游（2026-11-26 实测）', () => {
+    // 真实场景：本轮同时命中 QueryInventory（库存）与 QueryRawMaterials（原材料）。
+    // 原材料属于 direct，不再进发散概念清单，但 库存 ←〔拥有库存〕— 原材料 这条边必须出现，
+    // 否则提示里两个命中行为之间毫无关系。
+    const result = expansion(
+      [],
+      [],
+      [],
+      [{ ontologyId: '1', from: 'RawMaterialInventory', relation: 'HasRawInventory', to: 'RawMaterial', hop: 1 }],
+    );
+    const paths = buildFocusPaths({
+      behaviors: [
+        {
+          ontologyId: '1',
+          name: 'QueryInventory',
+          title: '查询库存信息',
+          concept: 'RawMaterialInventory',
+          score: 95,
+        },
+      ],
+      ontologies: [purchaseOntology()],
+      expansion: result,
+    });
+
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.behavior.name).toBe('QueryInventory');
+    expect(paths[0]!.relation).toEqual({ name: 'HasRawInventory', title: '拥有库存' });
+    expect(paths[0]!.toConcept).toEqual({ name: 'RawMaterial', title: '原材料' });
+    expect(paths[0]!.toBehavior?.name).toBe('QueryRawMaterials');
+    expect(paths[0]!.readability).toBe('reverse');
+  });
+
+  it('跨本体同名概念不串线：directEdges 只认本本体（2026-11-26）', () => {
+    // 两个本体都有 RawMaterialInventory → RawMaterial，但关系不同；
+    // 起点行为属于本体 1，就不能借用本体 2 的边
+    const other: OntologyDefinition = {
+      ...purchaseOntology(),
+      filePath: '/tmp/ontology-2.yaml',
+      ontologyId: '2',
+      ontologyName: '生产调度',
+      relations: [
+        relation('FeedsInto', '投料于', 'RawMaterialInventory', 'RawMaterial', ['Functional'], 'N:1'),
+      ],
+    };
+    const result = expansion(
+      [],
+      [],
+      [],
+      [
+        { ontologyId: '2', from: 'RawMaterialInventory', relation: 'FeedsInto', to: 'RawMaterial', hop: 1 },
+        { ontologyId: '1', from: 'RawMaterialInventory', relation: 'HasRawInventory', to: 'RawMaterial', hop: 1 },
+      ],
+    );
+    const paths = buildFocusPaths({
+      behaviors: [
+        {
+          ontologyId: '1',
+          name: 'QueryInventory',
+          title: '查询库存信息',
+          concept: 'RawMaterialInventory',
+          score: 90,
+        },
+      ],
+      ontologies: [purchaseOntology(), other],
+      expansion: result,
+    });
+
+    expect(paths).toHaveLength(1);
+    expect(paths[0]!.relation.name).toBe('HasRawInventory');
+  });
+
   it('方向可选下游（卡片通道）：只消费 downstream 的产出', () => {
     const result = expansion(
       [concept('RawMaterial', '原材料', 'PurchaseRecord', 'RecordsRawMaterial')],
@@ -282,8 +405,9 @@ describe('buildFocusPaths 多跳（口径：行为接续）', () => {
           concept('A', '甲', 'B', 'AtoB', 2, '2'),
         ],
         behaviors: [],
+        directEdges: [],
       },
-      downstream: { concepts: [], behaviors: [] },
+      downstream: { concepts: [], behaviors: [], directEdges: [] },
       warnings: [],
       truncated: false,
     };

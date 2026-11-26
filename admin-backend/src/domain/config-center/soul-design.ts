@@ -129,6 +129,15 @@ export interface SoulDesign {
    * 与 `intent_focus` 同样是逻辑与；关闭时值保留、产物不写键。
    */
   term_normalize?: boolean;
+  /**
+   * 任务规划开关（028，2026-11-25）：意图聚焦后是否先用一次模型调用产出多步计划。
+   *
+   * - **可选 + 缺省 `false`**：与 013 / 027 同一口径，存量文档读取时补齐为 `false`；
+   * - 与 `intent_focus` 是**逻辑与**：聚焦关闭时本值保留（管理台置灰），
+   *   物化时只有两个都为 `true` 才写键（关闭态产物零残留）；
+   * - 未勾选即该数字人零规划调用（FR-001）。
+   */
+  task_planning?: boolean;
 }
 
 // 字段上限已外移到 `soul-limits.ts`（渲染 / 读取器 / 前端计数共用同一组数字）；
@@ -157,6 +166,8 @@ export function emptySoulDesign(): SoulDesign {
     // 027：两个新开关同样显式落 `false`——脏检查比对整个对象，少一个键就与前端初值不等
     input_rewrite: false,
     term_normalize: false,
+    // 028：同理显式落 `false`（新建数字人默认不规划）
+    task_planning: false,
   };
 }
 
@@ -233,6 +244,8 @@ export function normalizeSoulDesign(raw: unknown, options: SoulNormalizeOptions)
     // 值要留着：管理台置灰、再次开启即恢复（与阶数同口径）
     input_rewrite: readBool(record.input_rewrite, '输入重写开关'),
     term_normalize: readBool(record.term_normalize, '术语替换开关'),
+    // 028：键缺失 = 关；类型不对 = 拒绝；聚焦关闭时值保留（同 027 口径）
+    task_planning: readBool(record.task_planning, '任务规划开关'),
   };
 }
 
@@ -262,6 +275,10 @@ export function renderSoulMd(soul: SoulDesign): string {
   }
   if (soul.intent_focus === true && soul.term_normalize === true) {
     frontmatter.term_normalize = true;
+  }
+  // 028：任务规划同样是"意图聚焦的从属能力"——AND 为真才写键
+  if (soul.intent_focus === true && soul.task_planning === true) {
+    frontmatter.task_planning = true;
   }
   // 007：下一步动作提示**依赖意图聚焦**——意图聚焦开启 + 该开关开启才写键；
   // 条数紧随其后，同样只在开启时写：关闭态产物里连"条数"都不该出现（未搭配的内容不残留）
