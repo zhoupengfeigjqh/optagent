@@ -1,31 +1,3 @@
-/**
- * 物化：把设计态 + 调用配置 + 共享技能库转成 `.opt-agent` 落盘产物
- * （`FR-026`、`FR-044`，`data-model.md` §8）。
- *
- * 落盘格式 MUST 与运行环境既有读取口径**完全一致**
- * （`agent-backend/src/domain/agent-instance.ts` / `dirs.ts`）：
- * ```text
- * users/{uid}/agents/{agent}/
- * ├── SOUL.md          ← 由结构化 soul **渲染**（frontmatter = 前台展示/引导，正文 = 提示词）
- * ├── TOOL.json        ← { "enabled": [...] }
- * ├── MCP.json         ← { "servers": [ { name, transport, url|command, headers?, … } ] }
- * ├── scenario.json    ← { "scenario": "…", "data_prep_dirs": [...] }
- * ├── skills/{name}/…  ← 从共享技能库物化的整包副本
- * └── ontology/{场景}/{本体}/
- *     ├── ontology.yaml     ← 本体正文（从平台本体库原样复制，2026-10-17）
- *     ├── securities.yaml   ← 行为安全管控（两个文件均为必需）
- *     └── term_mapping.json ← 术语字典（由 concepts[].terms 派生，2026-11-06）
- * ```
- *
- * **整体覆盖**：本模块产出的是"该数字人应当具有的**完整**内容清单"，
- * 平台侧未搭配的内容不会出现在清单里，因此不会残留（`FR-026`、`SC-018`）。
- *
- * **2026-09-27**：连接地址取消运行形态维度，`MCP.json` 的 `url` 直接取调用配置的
- * 单一 `url`（`http` 必填、保存期已保证非空）。
- *
- * **2026-10-09（004）**：`SOUL.md` 不再原样透传，改由 `renderSoulMd` 渲染——
- * 产物仍只有这一个文件；前台的展示/引导数据从 frontmatter 读，模型只读正文。
- */
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
 import { scenarioFields, scenarioUploads, type AgentScenario } from '../config-center/scenario.js';
 import { renderSoulMd } from '../config-center/soul-design.js';
@@ -39,13 +11,11 @@ import type { AgentArtifact, MaterializeFile } from '../../infra/opt-agent-write
 export interface MaterializeContext {
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
-  /** 本体库（2026-10-17）：按引用把两个必需文件复制进数字人目录 */
   ontologies: OntologyStore;
   /** 017：术语字典降级时记一条结构化 warning（缺省不记，纯函数结果本身仍可测） */
   logger?: Logger;
 }
 
-/** 构造 `MCP.json` 中的一条 server 声明（字段与运行环境的读取口径对齐） */
 export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Record<string, unknown> | null {
   const config = ctx.mcpConfigs.readOrNull(name);
   if (!config) return null;
@@ -55,26 +25,15 @@ export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Reco
     entry.command = config.command ?? '';
     if (config.args && config.args.length > 0) entry.args = config.args;
   } else {
-    // 单一连接地址：http 传输在保存期已保证非空，这里再兜一道（存量脏数据不静默下发空 url）
     if (!config.url) return null;
     entry.url = config.url;
   }
-  // 请求头（2026-10-08）：空对象是缺省语义，不写空壳（与 file_args 同一口径）。
-  // **明文落运行环境**：运行环境要按原样发送（信任边界与 `agent-backend/.env.local` 同级，
-  // 都是本机私产）；平台侧不回显明文，物化是它唯一的"出平台"通道。
   if (Object.keys(config.headers).length > 0) entry.headers = config.headers;
   if (Object.keys(config.file_args).length > 0) entry.file_args = config.file_args;
-  // HITL 调用确认策略：never 是运行环境缺省语义，不写空壳（与 file_args 同一口径）
   if (config.confirmation !== 'never') entry.confirmation = config.confirmation;
-  // 算法规则参数设置：空对象是缺省语义，不写空壳（同上）。
-  // 不改变是否走 HITL——不在确认范围内的工具的运行环境侧天然不生效（未被包装）。
   if (Object.keys(config.rules_fields).length > 0) entry.rules_fields = config.rules_fields;
-  // 工具白名单（2026-10-03）：非空才写（空 = 不限制，即白名单上线前的存量语义）。
   // 运行环境据此只把白名单里的工具挂给数字人，其余工具对模型不可见。
   if (config.allowed_tools.length > 0) entry.allowed_tools = config.allowed_tools;
-  // 工具显示名（2026-10-27）：非空才写（空 = 全部回退英文工具名，存量产物字节不变）。
-  // 按白名单过滤孤儿键——未启用的工具留着中文名没有意义，只会让 `MCP.json` 难以核对；
-  // 白名单为空是"不限制"语义，此时全部保留。
   const toolLabels = Object.fromEntries(
     Object.entries(config.tool_labels).filter(
       ([tool]) => config.allowed_tools.length === 0 || config.allowed_tools.includes(tool),
@@ -84,14 +43,6 @@ export function buildMcpServerEntry(name: string, ctx: MaterializeContext): Reco
   return entry;
 }
 
-/**
- * 构造 `scenario.json` 的落盘内容。
- *
- * `data_prep_fields` 与 `data_prep_uploads`（2026-10-13）**仅在非空时写入**：
- * 运行环境（`agent-backend/src/domain/dirs.ts`）对"缺失"与"空对象"的解读一致
- * （该目录无字段约束 / 用平台默认可上传类型），故不写空壳
- * ——与"平台侧未搭配的内容不得残留"同一口径（`FR-026`、`SC-018`）。
- */
 export function buildScenarioDocument(scenario: AgentScenario): Record<string, unknown> {
   const doc: Record<string, unknown> = {
     scenario: scenario.scenario,
@@ -104,7 +55,6 @@ export function buildScenarioDocument(scenario: AgentScenario): Record<string, u
   return doc;
 }
 
-/** 构造单个数字人的完整产物清单 */
 export function buildAgentArtifact(design: AgentDesignDocument, ctx: MaterializeContext): AgentArtifact {
   const files: MaterializeFile[] = [
     { relPath: 'SOUL.md', content: renderSoulMd(design.soul) },
@@ -136,7 +86,6 @@ export function buildAgentArtifact(design: AgentDesignDocument, ctx: Materialize
     }
   }
 
-  // 本体（2026-10-17）：两个必需文件原样复制到 `ontology/{场景}/{本体}/`，
   // 与 `skills/` 平级。形状非法的引用在保存期已拒；这里再判一次，避免拼出
   // 三段路径（存量手改文件的兜底）。
   for (const ref of design.ontologies) {
@@ -148,7 +97,6 @@ export function buildAgentArtifact(design: AgentDesignDocument, ctx: Materialize
     files.push({ relPath: `${dir}/${ONTOLOGY_FILE}`, content: detail.content });
     files.push({ relPath: `${dir}/${SECURITIES_FILE}`, content: detail.securities_content });
     // 017：术语字典随本体一并物化。派生件，任何解析问题都只降级为 `{}`，
-    // 不阻断部署（`term_mapping.ts` 的失败语义），只留一条可定位的 warning。
     const mapping = buildTermMapping(detail.content);
     files.push({ relPath: `${dir}/${TERM_MAPPING_FILE}`, content: mapping.json });
     if (mapping.warnings.length > 0) {
@@ -167,7 +115,6 @@ export function buildAgentArtifact(design: AgentDesignDocument, ctx: Materialize
   return { name: design.name, files };
 }
 
-/** 该用户全部数字人的产物清单（整体覆盖语义） */
 export function buildUserArtifacts(designs: AgentDesignDocument[], ctx: MaterializeContext): AgentArtifact[] {
   return designs.map((design) => buildAgentArtifact(design, ctx));
 }

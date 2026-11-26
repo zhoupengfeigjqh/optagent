@@ -1,52 +1,20 @@
-/**
- * 交互门（HITL，Human-in-the-loop）：工具调用执行前的人工确认挂起/恢复。
- *
- * 职责（纯领域逻辑，不依赖 Fastify/pi）：
- * - `request()`：发出 interaction_request 事件并**挂起**当前工具调用，
- *   直到用户 submit（返回确认参数）/ reject / 超时 / run 被中断
- * - `settle()`：用户提交/拒绝（幂等：重复 settle 返回首次结果）
- * - 并发上限（默认 3）：超出排 FIFO 队，前一 interaction 落定才放行下一个
- * - `drain()`：run 被 stop 时全部挂起点按 reject 收尾，杜绝泄漏
- * - `dispose()`：run 结束时清理全部状态（含 expired 留档）
- *
- * 与 run-manager 的关系：每个 RunImpl 持有一个 gate；
- * run-manager 负责把 SSE 事件广播给订阅者，gate 只管挂起语义本身。
- */
 
-/** interaction_id 生成：i_{base36时间}_{4位随机}（与 genMessageId 同风格） */
 function genInteractionId(now: number): string {
   return `i_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 发给工具包装器的挂起请求输入 */
 export interface InteractionRequestInput {
-  /** LLM 的 tool_call_id（展示与配对用） */
   callId: string;
-  /** AgentTool 全名（server__tool 形式） */
   toolName: string;
-  /**
-   * 工具的人读名称（2026-10-27）：装配时已算好的 `AgentTool.label`
-   * （平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`）。
-   * 缺省 = 无中文名，快照与标题回退 `toolName`。
-   */
   toolLabel?: string;
-  /** 工具级描述（schema 的 description；弹窗头部一句话说明用） */
   toolDescription?: string;
-  /** 工具入参 JSON Schema（经 exposeSchema 处理后的可见形态） */
   schema: Record<string, unknown>;
-  /** 模型提议的参数值（预填，用户可改） */
   proposedArgs: Record<string, unknown>;
-  /**
-   * 算法规则参数**字段名或对象路径**（可选）：服务声明了 `rules_field` 且本工具
-   * schema 里走得通时由包装层传入，原样进快照——前端据此装配「从算法规则选择」入口，
-   * 并按路径首段把它挂到对应的顶层控件上（嵌套目标由前端写回 JSON 内部）。
-   */
   rulesField?: string;
   /** 挂起超时（秒）；缺省 300 */
   timeoutSeconds?: number;
 }
 
-/** SSE interaction_request 事件的 data（HTTP 契约投影） */
 export interface InteractionRequestPayload {
   interaction_id: string;
   call_id: string;
@@ -56,18 +24,15 @@ export interface InteractionRequestPayload {
    * **恒为字符串**（无中文名时等于 `tool_name`），前端仍保留 `|| tool_name` 兼容旧快照。
    */
   tool_label: string;
-  /** 工具级描述（可空串：老调用方/无描述工具不阻断主流程） */
   tool_description: string;
   title: string;
   schema: Record<string, unknown>;
   proposed_args: Record<string, unknown>;
   required: string[];
   timeout_seconds: number;
-  /** 算法规则参数字段名（仅服务声明且工具 schema 含该字段时存在） */
   rules_field?: string;
 }
 
-/** 断连恢复用的快照：payload + 剩余等待秒数 */
 export interface InteractionSnapshot extends InteractionRequestPayload {
   remaining_seconds: number;
 }
@@ -84,7 +49,6 @@ export type InteractionOutcome =
   | { kind: 'reject'; reason: 'user' | 'aborted' }
   | { kind: 'expired' };
 
-/** 工具包装器经 AgentRunRequest 拿到的交互口（run-manager 每 run 装配一个） */
 export interface InteractionSink {
   request(input: InteractionRequestInput): Promise<InteractionOutcome>;
 }
@@ -98,11 +62,8 @@ export type SettleResult =
 export interface InteractionGateDeps {
   /** 单 run 同时挂起的上限（默认 3），超出 FIFO 排队 */
   maxPending?: number;
-  /** 注入时钟（测试用） */
   now?: () => number;
-  /** 挂起点建立时回调（run-manager 用来广播 SSE 事件） */
   onCreated?: (payload: InteractionRequestPayload) => void;
-  /** 生命周期日志（created/submitted/rejected/expired/queued） */
   onLog?: (msg: string) => void;
 }
 
@@ -130,17 +91,7 @@ export class InteractionGate {
     this.now = deps.now ?? Date.now;
   }
 
-  /**
-   * 挂起：发出事件 → 等待用户输入。
-   * resolve 值：submit=确认参数；reject/expired/run 中断 = 对应 outcome。
-   * gate 已 dispose 时立即返回 reject（防御：run 收尾后不应再有新挂起）。
-   *
-   * 有槽位时**同步**创建挂起点（不经 await）：调用方在首个 await 之前
-   * 即可见 snapshot/pendingOf/收到 SSE 事件——否则"request 返回后立刻查询"
-   * 会拿到 null（微任务让出导致的时序坑，测试首轮即暴露）。
-   */
   async request(input: InteractionRequestInput): Promise<InteractionOutcome> {
-    // 已收尾的 run 不再接受新挂起：按"中断"归因（不是用户拒绝）
     if (this.disposed) return { kind: 'reject', reason: 'aborted' };
     if (this.waitingSize() >= this.maxPending) {
       await this.acquireSlot();
@@ -149,7 +100,6 @@ export class InteractionGate {
 
     const createdAt = this.now();
     const timeoutSeconds = input.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-    // 人读名称：缺省/空白一律回退调用名，保证快照里这个字段恒有值（前端不必再判空）
     const toolLabel =
       typeof input.toolLabel === 'string' && input.toolLabel.trim() !== ''
         ? input.toolLabel.trim()
@@ -165,7 +115,6 @@ export class InteractionGate {
       proposed_args: input.proposedArgs,
       required: extractRequired(input.schema),
       timeout_seconds: timeoutSeconds,
-      // 仅当调用方声明了规则字段才下发（不写空壳，与 confirmation 同一口径）
       ...(input.rulesField ? { rules_field: input.rulesField } : {}),
     };
 
@@ -215,7 +164,6 @@ export class InteractionGate {
     return { result: 'settled', outcome };
   }
 
-  /** run 被 stop / 中断：全部挂起点按 reject 收尾（等待中的排队请求也随即放行并返回 reject） */
   drain(): void {
     for (const entry of this.pending.values()) {
       if (entry.state === 'waiting') {
@@ -227,7 +175,6 @@ export class InteractionGate {
     }
   }
 
-  /** run 结束：清理全部状态（含 expired 留档），此后 request 立即 reject */
   dispose(): void {
     this.disposed = true;
     this.drain();
@@ -238,7 +185,6 @@ export class InteractionGate {
     this.flushWaiters();
   }
 
-  /** 当前等待中的 interaction 快照（断连恢复用；无则 null） */
   snapshot(): InteractionSnapshot | null {
     for (const entry of this.pending.values()) {
       if (entry.state !== 'waiting') continue;
@@ -251,7 +197,6 @@ export class InteractionGate {
     return null;
   }
 
-  /** 等待中的数量（监控/测试用） */
   waitingCount(): number {
     let n = 0;
     for (const entry of this.pending.values()) {
@@ -260,7 +205,6 @@ export class InteractionGate {
     return n;
   }
 
-  /** 查询单个 interaction 的状态与负载（提交前取 schema 终验用） */
   pendingOf(
     interactionId: string,
   ): { state: 'waiting' | 'resolved' | 'expired'; payload: InteractionRequestPayload } | null {
@@ -318,7 +262,6 @@ export class InteractionGate {
   }
 }
 
-/** 从 schema 提取 required 列表（前端标星用；形状非法时退化为空） */
 function extractRequired(schema: Record<string, unknown>): string[] {
   const required = schema.required;
   return Array.isArray(required) ? required.filter((r): r is string => typeof r === 'string') : [];

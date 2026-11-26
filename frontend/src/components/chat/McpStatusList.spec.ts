@@ -1,9 +1,3 @@
-/**
- * 组件测试：MCP 状态列表（014）。
- *
- * 它从 `AgentSummary` 拆出的原因就是"要与切换按钮左对齐"，因此这里守住：
- * 有服务才渲染容器、空数组不留空 `<ul>`、每项以服务名作稳定 key。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

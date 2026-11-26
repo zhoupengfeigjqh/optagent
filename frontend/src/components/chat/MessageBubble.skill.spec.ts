@@ -1,8 +1,3 @@
-/**
- * 组件测试：用户气泡里的显式技能胶囊（2026-11-07）。
- *
- * 守两件事：技能只在**用户消息**上渲染成 `/技能名` 胶囊；缺省（普通消息）不出现任何空壳。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

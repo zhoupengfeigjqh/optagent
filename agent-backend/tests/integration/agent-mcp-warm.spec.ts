@@ -1,17 +1,3 @@
-/**
- * 集成测试：MCP 预热端点（2026-10-18）。
- *
- * 背景：实例是**惰性创建**的（只有发消息才建），而状态端点只读池 —— 于是新登录 /
- * 切换数字人后状态恒为 `unknown`（界面上的灰），此前唯一能变绿的方式就是发一轮对话。
- *
- * 本文件钉住预热端点的四条契约：
- * 1. 未选中 → 与 GET 同形的空快照（不建实例、不报错）；
- * 2. 未预热 → GET 仍只读（仍是 unknown，不因查询而建实例）；
- * 3. 预热 → 实例入池，且**返回时已有连接结果**（此处用不可达地址 ⇒ failed，不是 unknown）；
- * 4. 幂等 → 重复预热命中同一实例（不重复建连）。
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -63,7 +49,6 @@ const readMcp = () => app.inject({ method: 'GET', url: '/api/agents/current/mcp'
 const select = (name: string) =>
   app.inject({ method: 'POST', url: `/api/agents/${encodeURIComponent(name)}/select` });
 
-/** 池内该数字人的实例（预热是否真的建了实例） */
 function pooled(): ChatAgent | undefined {
   const selected = ctx().currentAgent.current(USER);
   if (!selected) return undefined;

@@ -1,11 +1,3 @@
-/**
- * calculator 工具（T038）：安全表达式求值。
- *
- * 自写递归下降解析器（npm 环境装不了 expr-eval，且零依赖更可控），
- * 严禁 eval/Function。支持：+ - * / % ^（幂）、括号、一元负号、
- * 函数 sqrt/abs/round/floor/ceil/min/max/pow，常量 pi/e。
- * 任何非表达式输入（标识符、分号、赋值等）一律拒绝。
- */
 
 const FUNCTIONS: Record<string, (...args: number[]) => number> = {
   sqrt: Math.sqrt,
@@ -64,7 +56,6 @@ function tokenize(src: string): Token[] {
   return tokens;
 }
 
-/** 递归下降求值器：expr → term → factor → unary → power → atom */
 class Parser {
   private pos = 0;
   constructor(private readonly tokens: Token[]) {}
@@ -116,7 +107,7 @@ class Parser {
   }
   private power(): number {
     const base = this.atom();
-    if (this.eatOp('^')) return Math.pow(base, this.unary()); // 右结合
+    if (this.eatOp('^')) return Math.pow(base, this.unary());
     return base;
   }
   private atom(): number {
@@ -173,7 +164,6 @@ export function evaluateExpression(src: string): number {
   return result;
 }
 
-/** calculator 工具入口：返回交给模型的文本 */
 export function calcTool(src: string): string {
   const v = evaluateExpression(src);
   return `${src} = ${Number.isInteger(v) ? v : Number(v.toPrecision(12))}`;

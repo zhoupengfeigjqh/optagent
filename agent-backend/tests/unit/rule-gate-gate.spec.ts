@@ -1,19 +1,3 @@
-/**
- * 单元测试：闸门判定合成（021）——`prepare` 五种结局与注册校验。
- *
- * 守住的口径（`FR-013` / `FR-041` / `FR-044` / 2026-11-24 增补）：
- * - 判定顺序固定：
- *   `非法行为(fatal) → 识别 → 非行为(function) → query(直接执行) → 无前置规则
- *    → 缺函数 → 注册校验 → 暂停/阻断 → 求值`；
- * - 缺函数但**全部已注册** → `pause`（可自愈）；存在未注册 → `deny(unregistered)`；
- * - 服务里存在但被白名单过滤 = 未注册；
- * - 求值 `false` → `deny(condition_false)`；结构非法 → `deny(config_unavailable)`；
- * - `null` 记录不触发暂停/注册校验，但其条件全不成立；
- * - **command 写后失效**：上一次 command 之前的函数结果 → `pause` 且点名"已过期"；
- * - **query 不判规则**：挂了规则也直接 `{ kind: 'behavior' }`；
- * - 非法行为（`op_type` 坏 / 冲突 / 未声明）→ `fatal`，先于其他分支；
- * - 端口**永不抛**。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,7 +22,6 @@ function writeOntology(agentDir: string, yaml: string, ontology = '采购单'): 
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), yaml, 'utf8');
 }
 
-/** 标准本体：一个命令（有前置规则）、一个查询（无规则）+ 两个函数声明 */
 function baseYaml(extraRules: string[] = [], extraFunctions: string[] = []): string {
   return [
     'metadata:',
@@ -142,7 +125,6 @@ describe('prepare：识别与五种结局', () => {
     );
     const { gate } = gateFor(agent);
 
-    // 记录为空也直接放行：query 的规则被忽略
     expect(gate.prepare({ toolName: 'erp__QueryStock', record: recordWith(), available: ALL_AVAILABLE }))
       .toEqual({ kind: 'behavior' });
   });
@@ -296,7 +278,6 @@ describe('prepare：识别与五种结局', () => {
     );
     const { gate, warn } = gateFor(agent);
 
-    // 另一条前置规则所需函数已执行且成立，只剩"无设计规则"这一条不确定因素
     const record = recordWith([[CHECK, { pass: true }]]);
     const result = gate.prepare({ toolName: CREATE, record, available: ALL_AVAILABLE });
     expect(result).toEqual({ kind: 'behavior', command: true });
@@ -357,7 +338,6 @@ describe('prepare：识别与五种结局', () => {
       reason: 'condition_false',
     });
 
-    // 目录签名不变（只改文件内容）→ 仍用旧快照
     const dir = path.join(agent, 'ontology', '原材料采购和库存', '采购单');
     fs.writeFileSync(path.join(dir, 'ontology.yaml'), baseYaml().replace('position: 前置', 'position: 前置'), 'utf8');
     expect(gate.prepare({ toolName: CREATE, record, available: ALL_AVAILABLE })).toMatchObject({
@@ -444,7 +424,6 @@ describe('prepare：非法本体行为（fatal，先于一切分支）', () => {
     writeOntology(agent, ['behaviors:', '  - name: CreatePurchaseRecord', '    op_type: weird'].join('\n'));
     const { gate } = gateFor(agent);
 
-    // available 为空也不该变成 unregistered
     const result = gate.prepare({ toolName: CREATE, record: recordWith(), available: new Set() });
     expect(result.kind).toBe('fatal');
   });

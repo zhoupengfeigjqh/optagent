@@ -1,14 +1,3 @@
-/**
- * 单元测试：数字人作用域判定（009 FR-023/032/050，`domain/agent-scope.ts`）
- *
- * 守住四件事：
- * 1. **两类拒绝分明** —— 未选中 `AGENT_NOT_SELECTED`（沿用既有码/文案）；
- *    已选中但不可用 `AGENT_NOT_AVAILABLE`（新增码，409）
- * 2. **可用性判据是"能完整加载"** —— 目录不存在、或配置损坏（缺 TOOL/MCP）都算不可用；
- *    只看"目录在不在"会让部分配置被静默加载（FR-050 禁止）
- * 3. **不自动清空选中态** —— 陈旧上下文留在内存里，由用户显式重选（前端据此提示）
- * 4. **降级可观测** —— 不可用时落结构化 warn（uid / agent_name / route / reason，FR-051）
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +29,6 @@ function writeAgent(
     writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
-/** 最小可用上下文：真实 currentAgent + 假 logger（只记录） */
 function makeCtx(): { ctx: AppContext; warn: ReturnType<typeof vi.fn> } {
   const warn = vi.fn();
   const ctx = {

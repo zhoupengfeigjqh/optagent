@@ -1,11 +1,3 @@
-/**
- * 文件路由的**共用入口解析**（012 从 `routes/files.ts` 抽出）。
- *
- * 抽出原因：上传端点迁到 `files-upload.ts`（`files.ts` 已达 500 行硬门禁，宪章原则二），
- * 两个文件都需要"归属数字人 + 目录参数校验"；复制一份会造成越界/归属判定的**双实现**（同一职责两处实现）。
- *
- * 行为与抽出前**逐字一致**（含越界拒绝的审计日志字段），迁移不得改变任何状态码或文案。
- */
 import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { DirValidationError, ScenarioNotConfiguredError, parseSpaceDir } from '../domain/dirs.js';
@@ -13,13 +5,6 @@ import type { SpaceDirTarget } from '../domain/dirs.js';
 import type { BrowseCapability } from '../domain/space-path.js';
 import { ApiError } from '../server.js';
 
-/**
- * 文件空间视角所属的数字人＝当前选中数字人（场景随数字人存放，数据域亦随数字人）。
- *
- * 判定**复用唯一入口** `resolveAgentScope`（未选中 → 409 AGENT_NOT_SELECTED；
- * 选中但不可用 → 409 AGENT_NOT_AVAILABLE）：本文件只负责沿用既有文案，MUST NOT
- * 再写一遍"查选中态"的逻辑（双实现漂移，FR-023）。
- */
 export function currentAgentFor(ctx: AppContext, userId: string): string {
   return resolveAgentScope(ctx, userId, {
     notSelectedMessage: '请先选定数字人后再操作文件空间',
@@ -27,13 +12,6 @@ export function currentAgentFor(ctx: AppContext, userId: string): string {
   }).agentName;
 }
 
-/**
- * 目录参数统一校验：穿越 → 400；空间外/清单外 → 403；scenario 缺失 → 503。
- *
- * `capability` 直通 `parseSpaceDir`（合法性判据唯一来源 `domain/space-path.ts`）：
- * 默认 `browse`（列表/上传/删除）；只有**读方向**（download / preview）用
- * `browse-produced`，多放行 `临时空间/后台产出` 这一个目录。
- */
 export function checkDir(
   ctx: AppContext,
   userId: string,
@@ -45,7 +23,6 @@ export function checkDir(
     return parseSpaceDir(ctx.config.optAgentRoot, userId, agentName, dir, capability);
   } catch (err) {
     if (err instanceof DirValidationError) {
-      // 越界拒绝 MUST 可观测（FR-051）：含用户标识、数字人标识与请求线索（被拒的目录参数）
       ctx.loggers.logger.warn(
         {
           alert: false,
@@ -71,19 +48,6 @@ export function checkDir(
   }
 }
 
-/**
- * **读方向**（预览 / 下载）的目录解析：同一判据，多放行 `临时空间/后台产出`。
- *
- * 2026-11-02 起**不再有独立分支**：例外写进 `domain/space-path.ts` 的规则表
- * （`capability='browse-produced'`），本函数只剩"换视角"这一句话——此前手工判
- * `dir === PRODUCED_DIR` 的相等判断被表取代，避免例外散落在每个调用点。
- *
- * 边界不变（改之前先读完）：
- * - **仅读**：上传 / 删除 / 列目录仍走 `checkDir`——写进去会打乱产出目录的 `.meta.json`
- *   索引（`domain/produced.ts` 的"目录即索引"），删掉会留下悬空记录；
- * - 只放行该目录**本身**，不做前缀匹配：`临时空间/后台产出/子目录` 在浏览侧仍判 400
- *   （模型侧 `read_file` 可读其子树，那是 `model-read` 的另一个视角）。
- */
 export function checkDirRead(
   ctx: AppContext,
   userId: string,

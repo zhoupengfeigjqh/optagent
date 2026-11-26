@@ -1,12 +1,3 @@
-/**
- * 单元测试：MCP 服务清单投影（`FR-043`、`FR-045`）
- *
- * **2026-09-27 改版**：清单来源为**平台侧调用配置**（不再读容器编排声明、
- * 不再读 Docker 容器状态），因此覆盖点相应变为：
- * - 列表 = 平台配置集合（名称稳定排序、单一 `url`、传输方式）；
- * - 详情 = 配置 + 工具清单（不可得时降级为可读原因，不报错）；
- * - 引用清单由注入的推导提供（不落库）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +11,6 @@ let root: string;
 let store: PlatformStore;
 let configs: McpServiceConfigService;
 
-/** 内存 MCP 客户端（单元测试不触碰真实网络） */
 function fakeClient(overrides: Partial<McpClientLike> = {}): McpClientLike {
   return {
     listTools: async () => [],
@@ -52,7 +42,6 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
     transport: 'http',
     url: `http://${name}:8000/mcp`,
     file_args: {},
-    // 工具白名单（2026-10-03）：新建必填非空；默认放开下面假客户端返回的那个工具
     allowed_tools: ['ocr_image'],
     ...overrides,
   });
@@ -122,7 +111,6 @@ describe('McpServiceListService.detail', () => {
 
     expect(detail?.tools).toEqual([]);
     expect(detail?.tools_truncated).toBe(false);
-    // 探测失败 → 全量候选也为空：界面据此**不开**工具范围弹窗（拿不到可信基准）
     expect(detail?.available_tools).toEqual([]);
     expect(detail?.tools_error).toContain('连接被拒绝');
   });
@@ -153,7 +141,6 @@ describe('McpServiceListService.detail —— 工具白名单（2026-10-03）', 
     expect(detail?.allowed_tools).toEqual(['query_price', 'ocr_image']);
     expect(detail?.tools.map((t) => t.name)).toEqual(['query_price', 'ocr_image']);
     expect(detail?.missing_tools).toEqual([]);
-    // 全量候选（2026-10-15）：工具范围弹窗的勾选基准，顺序 = 服务返回顺序
     expect(detail?.available_tools.map((t) => t.name)).toEqual(['ocr_image', 'ocr_pdf', 'query_price']);
     expect(detail?.available_tools_truncated).toBe(false);
   });
@@ -180,7 +167,6 @@ describe('McpServiceListService.detail —— 工具白名单（2026-10-03）', 
   });
 
   it('存量服务（白名单为空）= 不限制：服务全量工具都呈现', async () => {
-    // 直接写文档模拟"白名单上线前的记录"：空白名单**无法经 create 产出**（新建必填非空）
     store.writeJson('mcp-services.json', {
       items: {
         ocr: { name: 'ocr', description: 'x', transport: 'http', url: 'http://ocr:8000/mcp' },

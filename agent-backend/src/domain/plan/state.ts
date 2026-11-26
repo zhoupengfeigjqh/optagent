@@ -1,47 +1,31 @@
-/**
- * 计划状态机（028 FR-018~FR-028）。
- *
- * 两块职责，都是纯函数（无 IO、无日志、无随机）：
- * 1. **三态归类**：把一次工具结果归入 `success` / `retryable` / `failed` / `ignored`；
- * 2. **状态推演**：完成判定（A/C）、出队推进、卡死指纹、终止判据。
- *
- * 只有 `advanceBatch` 会改变状态；调用点唯一（`shouldStopAfterTurn`）。
- * `afterToolCall` 走 `recordToolCall`，只记事实。
- */
 import { RULE_DENIED_CODE, RULE_FUNCTIONS_MISSING_CODE } from '../rule-gate/types.js';
 import {
+  DEFAULT_PLAN_LIMITS,
   IDLE_TURNS_MAX,
-  REPLAN_MAX_PER_RUN,
   RETRYABLE_MAX_PER_STEP,
   SUMMARY_KEEP,
   SUMMARY_LINE_MAX,
-  TOTAL_STEPS_MAX,
   type PlanFinishReason,
+  type PlanLimits,
   type PlanState,
   type PlanStep,
   type ToolOutcome,
 } from './types.js';
 
-/** 一次工具调用的事实（由 `afterToolCall` 采集，不含判定） */
 export interface ToolCallFact {
   /** SDK 的 `toolCallId`（幂等用） */
   callId: string;
-  /** 模型发起的工具名（完整名，原样） */
   toolName: string;
   isError: boolean;
-  /** `readToolError()` 的 code；读不到为 null（SDK 侧错误 `details` 恒为 `{}`） */
   errorCode: string | null;
   /** 结果文本（仅用于 `Tool <name> not found` 兜底匹配） */
   text: string;
 }
 
-/** `ABORTED` 码（`llm-error.ts` 的既有口径） */
 const ABORTED_CODE = 'ABORTED';
 
-/** SDK 固定文案：`Tool <name> not found` */
 const TOOL_NOT_FOUND = /^Tool\s+.+\s+not found$/;
 
-/** 创建一份空计划状态 */
 export function createPlanState(goal: string): PlanState {
   return {
     goal,
@@ -60,12 +44,6 @@ export function createPlanState(goal: string): PlanState {
   };
 }
 
-/**
- * 三态归类。
- *
- * 判定顺序固定 `isError` → code → message：SDK 侧错误结果的 `details` 恒为 `{}`，
- * 所以「参数校验失败 / 执行异常 / `Tool not found`」都读不到 code。
- */
 export function classifyToolOutcome(fact: ToolCallFact): ToolOutcome {
   if (!fact.isError) return 'success';
   const code = fact.errorCode;
@@ -76,7 +54,6 @@ export function classifyToolOutcome(fact: ToolCallFact): ToolOutcome {
   return 'retryable';
 }
 
-/** 记录一次工具调用（只写事实，不改状态机） */
 export function recordToolCall(state: PlanState, fact: ToolCallFact, turnIndex: number): ToolOutcome {
   const outcome = classifyToolOutcome(fact);
   const step = state.current;
@@ -99,69 +76,39 @@ export function recordToolCall(state: PlanState, fact: ToolCallFact, turnIndex: 
   return outcome;
 }
 
-/** 一批结果处理完后的推演结论 */
 export interface BatchResult {
-  /** 当前步是否在本批完成（已完成出队） */
   stepDone: boolean;
-  /** 需要终止（`null` 表示继续） */
   finish: PlanFinishReason | null;
-  /** 是否需要失败重规划 */
   needsReplan: boolean;
-  /** 本批被判定为失败的步骤（供重规划输入）；写后失效场景为 `null` */
   failedStep: PlanStep | null;
-  /**
-   * 写后失效（T502 / FR-024）：推进到的下一步，其 `dependTools` 里存在
-   * 「本世代算过、但已被 command 的 `invalidate()` 打脏」的函数。
-   *
-   * 有值时 `failedStep` 必为 `null`——这一步**没有失败**，只是前置数据不再可信，
-   * 直接执行会撞上闸门的 `RULE_FUNCTIONS_MISSING_CODE` 并白白多耗一轮。
-   */
   staleStep?: PlanStep | null;
-  /** 触发上面那次判定的函数名（裸名，供日志；不含结果正文） */
   staleFunctions?: readonly string[];
 }
 
-/** 推演输入 */
 export interface AdvanceInput {
-  /** 本批结束后的 turn 序号（1 起） */
   turnIndex: number;
-  /** 本批中当前步 `coreAction` 的归类结果 */
   coreOutcomes: readonly ToolOutcome[];
-  /** 本批模型文本（用于 `doneSummary` 截取；缺省用 taskName） */
   summaryText?: string;
-  /**
-   * 写后失效探测（T502）：入参为工具名（计划里的原样名），返回其函数记录是否「过期」。
-   *
-   * 口径由调用方给（`hasEver && !has`），本层不认识规则闸门，只做纯判定。
-   */
   isStale?: (toolName: string) => boolean;
+  /** 028：可配置的规划上限；缺省取 `DEFAULT_PLAN_LIMITS`（单测路径零差异） */
+  limits?: PlanLimits;
 }
 
-/**
- * 本批推演：归类结果 → 完成判定 / 失败 / 推进 / 终止。
- *
- * 完成判定（FR-020）：
- * ```
- * A  current.coreActionOk === true
- * C  current.lastCoreActionTurn < turnIndex
- * B  整批已闭合（由调用时机保证）
- * ```
- */
 export function advanceBatch(state: PlanState, input: AdvanceInput): BatchResult {
+  const limits = input.limits ?? DEFAULT_PLAN_LIMITS;
   state.turnIndex = input.turnIndex;
   const step = state.current;
   if (step === null) {
     return { stepDone: false, finish: null, needsReplan: false, failedStep: null };
   }
 
-  // 1. 失败优先：本批出现 failed（仅当前步 coreAction 致命）
   if (input.coreOutcomes.includes('failed')) {
     step.status = 'failed';
     state.current = null;
     state.replanCount += 1;
     return {
       stepDone: false,
-      finish: checkReplanLimit(state),
+      finish: checkReplanLimit(state, limits),
       needsReplan: true,
       failedStep: step,
     };
@@ -174,18 +121,16 @@ export function advanceBatch(state: PlanState, input: AdvanceInput): BatchResult
     state.replanCount += 1;
     return {
       stepDone: false,
-      finish: checkReplanLimit(state),
+      finish: checkReplanLimit(state, limits),
       needsReplan: true,
       failedStep: step,
     };
   }
 
-  // 3. 完成判定（A + C；B 由调用时机保证）
   const done = step.coreActionOk && step.lastCoreActionTurn < state.turnIndex;
   if (done) {
     step.status = 'done';
     state.totalSteps += 1;
-    // 模型结论洗不出实质内容时，至少留下「做了什么」，不让该步在滚动规划里消失
     appendSummary(state, input.summaryText ?? '', `${step.taskName}（${step.coreActionLabel}）已完成`);
     state.current = state.queue.shift() ?? null;
     if (state.current !== null) {
@@ -193,15 +138,12 @@ export function advanceBatch(state: PlanState, input: AdvanceInput): BatchResult
       state.idleTurns = 0;
       state.lastFingerprint = fingerprint(state.current);
 
-      // 3a. 写后失效（T502）：下一步的依赖函数已被上一步的写操作打脏。
-      //     不把它标 failed——它还没执行过，只是前置数据不再可信；
-      //     直接跑必然被闸门判「缺前置函数」白耗一轮，故先重规划。
       const stale = staleDependencies(state.current, input.isStale);
       if (stale.length > 0) {
         state.replanCount += 1;
         return {
           stepDone: true,
-          finish: checkReplanLimit(state),
+          finish: checkReplanLimit(state, limits),
           needsReplan: true,
           failedStep: null,
           staleStep: state.current,
@@ -209,10 +151,9 @@ export function advanceBatch(state: PlanState, input: AdvanceInput): BatchResult
         };
       }
     }
-    return { stepDone: true, finish: checkStepLimit(state), needsReplan: false, failedStep: null };
+    return { stepDone: true, finish: checkStepLimit(state, limits), needsReplan: false, failedStep: null };
   }
 
-  // 4. 本批没有推进：更新卡死指纹
   const current = fingerprint(step);
   if (current === state.lastFingerprint) state.idleTurns += 1;
   else {
@@ -224,7 +165,6 @@ export function advanceBatch(state: PlanState, input: AdvanceInput): BatchResult
   return { stepDone: false, finish: null, needsReplan: false, failedStep: null };
 }
 
-/** 把新一步装入 `current`（滚动/重规划换批时调用） */
 export function startBatch(state: PlanState, steps: PlanStep[]): void {
   state.queue = steps.slice(1);
   const first = steps[0] ?? null;
@@ -235,30 +175,20 @@ export function startBatch(state: PlanState, steps: PlanStep[]): void {
   state.lastFingerprint = first === null ? '' : fingerprint(first);
 }
 
-/** 列出一批依赖里「记录已过期」的函数名（无探测器时恒为空） */
 function staleDependencies(step: PlanStep, isStale?: (toolName: string) => boolean): string[] {
   if (isStale === undefined || step.dependTools.length === 0) return [];
   return step.dependTools.filter((toolName) => isStale(toolName));
 }
 
-/** 状态指纹：`seqId:coreActionOk:attempts`（连续不变即视为无进展） */
 export function fingerprint(step: PlanStep): string {
   return `${step.seqId}:${step.coreActionOk ? 1 : 0}:${step.attempts}`;
 }
 
-/** Markdown 表格的分隔线（`|---|` / `|:--|`）：命中即认定这一段是表格 */
 const TABLE_RULE = /\|\s*:?-{3,}/;
 
 /** 断句点：截断时优先退到这些字符之后，避免切在词或半个句子中间 */
 const BREAK_POINT = /[，。；、,.;:！？!?）)\]】」』\s]/;
 
-/**
- * 剥掉 Markdown 表格，只留表格前的结论句。
- *
- * 2026-11-25 实测：模型把工具结果渲染成表格，80 字硬切后得到
- * `… | 可用库存 | 1810 | | 累`——表格断在半个单元格上，累计库存/待入库全丢。
- * 摘要只需要"做了什么"，细节本来就在最终回答里。
- */
 function stripTable(text: string): string {
   if (!TABLE_RULE.test(text)) return text;
   const cut = text.indexOf('|');
@@ -286,21 +216,13 @@ function clipSummary(text: string, max: number): string {
   return `${window.join('')}…`;
 }
 
-/** 剥掉表格后可能只剩悬空引导语（「…**结果：**」「…如下：」），视为没有实质结论 */
 const DANGLING_LEAD = /(?:\*{0,2}\s*(?:结果|结论|详情|如下)\s*[：:]\s*\*{0,2}|[：:])\s*$/;
 
-/** 模型复述式开头（与步骤名重复），剥掉后才是真正结论 */
 const BOILERPLATE_LEAD = /^当前这一步(?:已)?执行完毕\s*[：:，,]\s*/;
 
 /** 清洗后不足这个长度，视为"没有实质结论"，改用兜底句 */
 const SUMMARY_MIN_CHARS = 6;
 
-/**
- * 把一段模型正文洗成一句结论。
- *
- * 2026-11-26：旧实现只 `stripTable` + 截断，模型写「…**结果：** + 表格」时表格被剥掉、
- * 只剩悬空引导语，滚动规划拿到一条没有任何事实的"结论"。
- */
 function cleanSummary(text: string): string {
   let out = stripTable(text).replace(BOILERPLATE_LEAD, '').trim();
   while (out !== '' && DANGLING_LEAD.test(out)) {
@@ -330,12 +252,10 @@ export function appendSummary(state: PlanState, text: string, fallback = ''): vo
   }
 }
 
-/** 步数超限 → 终止（软收尾） */
-function checkStepLimit(state: PlanState): PlanFinishReason | null {
-  return state.totalSteps >= TOTAL_STEPS_MAX ? 'steps_exhausted' : null;
+function checkStepLimit(state: PlanState, limits: PlanLimits): PlanFinishReason | null {
+  return state.totalSteps >= limits.totalStepsMax ? 'steps_exhausted' : null;
 }
 
-/** 失败重规划超限 → 终止（软收尾） */
-function checkReplanLimit(state: PlanState): PlanFinishReason | null {
-  return state.replanCount >= REPLAN_MAX_PER_RUN ? 'replan_exhausted' : null;
+function checkReplanLimit(state: PlanState, limits: PlanLimits): PlanFinishReason | null {
+  return state.replanCount >= limits.replanMaxPerRun ? 'replan_exhausted' : null;
 }

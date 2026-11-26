@@ -1,16 +1,3 @@
-/**
- * 集成测试（进程内，021）：规则闸门 → 真实 pi loop → SSE 状态口径。
- *
- * 为什么必须有这一层：包装器的单测只能证明"返回了什么"，证明不了
- * 1. 暂停的失败标记真的被 pi 翻成 `tool_call_end.status='error'`（卡片标红）；
- * 2. 暂停后**记录不被清空**：补调一次函数后重试即可通过（`FR-008`）；
- * 3. 拒绝后是**软收尾**（2026-11-09）：本轮其余工具不执行，模型拿到终局指令后
- *    总结并正常 `done`，**不产生 error 失败轮**；模型固执重试时兜底纯中止一次；
- * 4. 注册校验失败时**不进入暂停**、不给模型空转补调的机会（`FR-044`）。
- *
- * 装配顺序按生产口径：`guardTools(ruleGateTools(tools))`（020 外、021 内），
- * 且两个闸门共享**同一份**本轮挂起状态。
- */
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { EventStream } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -152,14 +139,12 @@ function fakeStream(message: AssistantMessage) {
 
 interface Harness {
   events: LlmEvent[];
-  /** 模型调用次数 */
   hops: number;
   checkCalls: number;
   stockCalls: number;
   createCalls: number;
   /** 兜底出口（纯中止）触发次数：单轮内最多 1 次 */
   stops: number;
-  /** 共享挂起状态 */
   suspended: () => boolean;
 }
 
@@ -283,7 +268,6 @@ afterEach(() => {
 
 describe('暂停 → 补调 → 通过（含 FR-008 记录不清空）', () => {
   it('直接调行为先暂停；补调两个函数后重试成功（执行成功后不再追加任何提示）', async () => {
-    // 先执行 check（进记录）→ 调行为缺 checkStock → 暂停 → 补调 checkStock → 重试成功。
     // 若暂停清空了记录，第 4 跳会再次因为缺 check 暂停 —— 因此"成功"本身就是 FR-008 的证据。
     const harness = await runScript({
       steps: [
@@ -298,18 +282,15 @@ describe('暂停 → 补调 → 通过（含 FR-008 记录不清空）', () => {
     const ends = toolEnds(harness.events);
     expect(ends.map((end) => end.status)).toEqual(['success', 'error', 'success', 'success']);
 
-    // 暂停：业务工具零执行，正文含规则名、缺失函数与规则全文
     expect(harness.createCalls).toBe(1);
     expect(ends[1]!.resultText).toContain('前置规则所需函数尚未执行');
     expect(ends[1]!.resultText).toContain('采购-库存充足');
     expect(ends[1]!.resultText).toContain('缺失函数：checkStock');
     expect(ends[1]!.resultText).toContain('—— 规则全文 ——');
 
-    // 暂停不挂起：整轮正常结束
     expect(harness.suspended()).toBe(false);
     expect(harness.stops).toBe(0);
 
-    // 补调后重试通过：结果原样返回（2026-11-24 起后置规则移除，不再追加提示）
     expect(ends[3]!.resultText).toContain('采购单已创建');
     expect(ends[3]!.resultText).not.toContain('后置规则提示');
     expect(harness.suspended()).toBe(false);
@@ -329,12 +310,10 @@ describe('求值不成立 → 软收尾（2026-11-09）', () => {
     expect(harness.suspended()).toBe(true);
     expect(harness.stops).toBe(0);
 
-    // 卡片 = 结论 + 明细 + 终局指令
     expect(ends[2]!.resultText).toContain('未通过前置规则校验');
     expect(ends[2]!.resultText).toContain('供应商名称不存在，禁止创建采购单');
     expect(ends[2]!.resultText).toContain(RULE_TERMINAL_NOTICE);
 
-    // 软收尾：模型拿到结果后**又发起一次调用**（hop 4 = stop）并以 done 结束——没有 error 事件
     expect(hasErrorEvent(harness.events)).toBe(false);
     expect(harness.hops).toBe(4);
     expect(harness.events.some((event) => event.type === 'done')).toBe(true);
@@ -367,14 +346,11 @@ describe('注册校验失败 → 挂起本轮（软收尾）', () => {
     expect(harness.createCalls).toBe(0);
     expect(ends.map((end) => end.status)).toEqual(['error', 'error']);
 
-    // 首条：拒绝卡片（结论 + 明细点名未注册函数 + 终局指令）
     expect(ends[0]!.resultText).toContain('前置规则引用了未注册函数');
     expect(ends[0]!.resultText).toContain('未注册函数：');
     expect(ends[0]!.resultText).toContain(RULE_TERMINAL_NOTICE);
-    // 次条：020 读到同一份挂起状态，直接拦下
     expect(ends[1]!.resultText).toBe(SUSPENDED_MESSAGE);
 
-    // 软收尾：第 3 跳模型正常总结收尾（hop 3 = stop），没有 error 事件
     expect(hasErrorEvent(harness.events)).toBe(false);
     expect(harness.stops).toBe(0);
     expect(harness.hops).toBe(3);

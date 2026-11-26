@@ -1,11 +1,3 @@
-/**
- * 单元测试：MCP 工具白名单过滤（2026-10-03）
- *
- * 守住三条（这是"Agent 只能看到所选工具"真正生效的地方）：
- * 1. 白名单非空 → 只保留命中的工具；
- * 2. **缺省 / 空数组 = 不限制**（存量 `MCP.json` 与平台"非空才写"的物化口径）；
- * 3. 白名单里当前服务不存在的名字（下架/改名）静默跳过，不报错。
- */
 import { describe, expect, it } from 'vitest';
 import { scopeToolsByAllowlist } from '../../src/infra/mcp-tool-scope.js';
 

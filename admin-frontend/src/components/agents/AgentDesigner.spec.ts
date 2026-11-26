@@ -1,9 +1,3 @@
-/**
- * 组件测试：数字人设计器（T059）
- *
- * 覆盖 `FR-016`（五类配置以分区承载）、`FR-017`（保存后回显）、
- * `FR-015`（保存失败可读）与"未保存修改需确认"。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OntologyCandidate } from '../../api/ontologies'
@@ -137,7 +131,6 @@ describe('AgentDesigner', () => {
 
     expect(getAgent).toHaveBeenCalledWith('demo')
     expect((wrapper.find('#agent-name').element as HTMLInputElement).value).toBe('副本')
-    // 五类配置来自源（此处以角色简介与场景名为代表）
     expect((wrapper.find('#soul-intro').element as HTMLInputElement).value).toBe('简介')
   })
 
@@ -185,7 +178,6 @@ describe('AgentDesigner', () => {
     })
     await flushPromises()
 
-    // 显示名带场景：同名本体分属不同场景时才区分得开
     expect(wrapper.text()).toContain('生产调度-原材料采购和库存')
     await wrapper.find('input[type="checkbox"]').setValue(true)
 
@@ -193,7 +185,6 @@ describe('AgentDesigner', () => {
     await save?.trigger('click')
     await flushPromises()
 
-    // 提交的是两段引用值（部署时按它定位库内目录），不是显示名
     expect(createAgent.mock.calls[0]?.[0]).toMatchObject({
       ontologies: ['生产调度/原材料采购和库存'],
     })
@@ -213,7 +204,6 @@ describe('AgentDesigner', () => {
   })
 
   it('有未保存修改时返回需二次确认（不静默丢弃）', async () => {
-    // 弹窗确认后名称已预填，即"有未保存内容"
     const wrapper = mountDesigner(NEW_AGENT_SENTINEL, null, { name: '改过的名字', copyFrom: null })
 
     const back = wrapper.findAll('button').find((b) => b.text().includes('返回列表'))
@@ -221,7 +211,6 @@ describe('AgentDesigner', () => {
     await flushPromises()
 
     expect(wrapper.emitted('back')).toBeUndefined()
-    // 页面里还有「快速上手」弹窗的 `<dialog>`（常驻 DOM、未打开），按文本定位确认框
     const dialog = wrapper.findAll('dialog').find((d) => d.text().includes('放弃未保存的修改'))
     expect(dialog).toBeTruthy()
   })
@@ -261,7 +250,6 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
     expect(headerButtons.map((b) => b.text())).toEqual(['← 返回列表', '删除', '保存'])
     expect(headerButtons[1]?.classes()).toContain('btn--danger')
 
-    // 新建态没有可删除的对象：标题栏里只有返回与保存（确认弹窗的按钮不算入口）
     const newHeader = mountDesigner().find('.agent-designer__header')
     expect(newHeader.findAll('button').map((b) => b.text())).toEqual(['← 返回列表', '保存'])
   })

@@ -1,15 +1,3 @@
-/**
- * 计划编排器（028 Phase 3~6）：本特性**唯一**含 IO 与日志的层。
- *
- * 职责边界：
- * - 纯函数（解析 / 归一 / 校验 / 状态机 / 快照 / 提示词）全在 `domain/plan/*`；
- * - 这里只做「调用 LLM → 组装输入 → 把结果交给纯函数 → 把钩子挂到 pi 的 loop」。
- *
- * 三条硬边界（data-model §11）：
- * 1. `afterToolCall` **只记录事实**，一切状态转移在 `shouldStopAfterTurn`；
- * 2. `prepareNextTurn` 只换 `context.tools` 成员与快照消息，**不动 `systemPrompt`**（KV-cache）；
- * 3. 过滤对象必须是已包装的 `guarded` 数组，`availableNames` 保持全量（由装配层保证）。
- */
 import type {
   AfterToolCallContext,
   AgentLoopTurnUpdate,
@@ -50,12 +38,15 @@ import {
   type ToolCallFact,
 } from '../domain/plan/state.js';
 import {
+  DEFAULT_PLAN_LIMITS,
   HISTORY_TURNS,
   IDLE_TURNS_MAX,
   PLAN_RETRY_MAX,
-  REPLAN_MAX_PER_RUN,
   type CheckFailure,
   type PlanFinishReason,
+  type PlanLimits,
+  type PlanProgress,
+  type PlanProgressPhase,
   type PlanState,
   type PlanStep,
   type RawStep,
@@ -67,41 +58,30 @@ import { serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage } from '../types.js';
 import { callPlanWithTimeout, PlanCallTimeoutError } from './plan-llm.js';
 
-/** 规划调用（注入以便单测用桩；生产实现是 `PiAiLlmProvider.streamChat` 聚合） */
 export type PlanLlm = (request: {
   system: string;
   messages: PlanChatMessage[];
   signal: AbortSignal;
 }) => Promise<string>;
 
-/** 结构化日志口（字段名与 data-model §10 一致） */
 export interface PlanLogger {
   info(fields: Record<string, unknown>, message: string): void;
   warn(fields: Record<string, unknown>, message: string): void;
 }
 
 export interface PlanOrchestratorInput {
-  /** 本轮用户原话（已截断） */
   goal: string;
   userInput: string;
-  /** 意图聚焦提示原文；空串 = 无起点，规划跳过 */
   focusPrompt: string;
   history: readonly HistoryMessage[];
-  /** 本轮已包装工具（`guarded`），过滤对象只能是它 */
   tools: readonly AgentTool[];
   ontology: OntologyIndex;
   facts: OntologyFacts;
   behaviorOf(toolName: string): BehaviorLookup | null;
-  /**
-   * 写后失效探测（T502）：`hasEver && !has` —— 「本世代算过、但已被 command 打脏」。
-   *
-   * 缺省不探测（单测/关闭闸门时行为与之前一致）。
-   */
   isStale?(toolName: string): boolean;
   plan: PlanLlm;
   signal: AbortSignal;
   logger: PlanLogger;
-  /** 软收尾出口（②~⑤ 超限）：挂起本轮工具，模型总结后正常结束 */
   suspend?: (code: string) => void;
   /**
    * 计划留档回调（2026-11-26）：**只写不读，不参与上下文组装**。
@@ -110,6 +90,20 @@ export interface PlanOrchestratorInput {
    * 跳过 / 首轮 `[]` / 直接失败的空轮也写进留档。缺省不落盘（单测路径）。
    */
   record?: (record: PlanRunRecord) => void;
+  /**
+   * 计划进度回调（028 FR-034）：只带**当前步**的单行进度，供聊天区进度条消费。
+   *
+   * 三个发点与 FR-034 一致：装批/步推进（`running`）、重规划装批（`replanned`）、收尾（`done`）。
+   * 空轮（无步骤）一次都不发；缺省不发（单测与关闭态零差异）。
+   */
+  onProgress?: (event: PlanProgress) => void;
+  /**
+   * 028：可运维的规划上限（`config.yaml` 的 `plan` 块）。
+   *
+   * 缺省取 `DEFAULT_PLAN_LIMITS`（= 原常量），单测与未配置部署零差异；
+   * 装配层由 `server.ts` 注入，避免纯函数模块反向依赖配置。
+   */
+  limits?: PlanLimits;
 }
 
 export interface PlanHooks {
@@ -121,21 +115,17 @@ export interface PlanHooks {
 
 export interface PlanOrchestrator {
   readonly hooks: PlanHooks;
-  /** 首轮规划；`false` = 不进入规划，调用方回退既有流程 */
   begin(): Promise<boolean>;
-  /** 首轮可见工具集（`begin()` 为真时有效） */
   initialTools(): AgentTool[];
-  /** 首轮 messages：在历史末尾追加计划快照（不改入参） */
   initialMessages(messages: readonly HistoryMessage[]): HistoryMessage[];
-  /** 终止原因（未终止为 `null`） */
   finishReason(): PlanFinishReason | null;
   state(): PlanState;
 }
 
-/** 软收尾的挂起码（复用挂起通道，不新增错误码语义） */
 const SUSPEND_CODE = 'PLAN_FINISHED';
 
 export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrchestrator {
+  const limits: PlanLimits = input.limits ?? DEFAULT_PLAN_LIMITS;
   const state = createPlanState(input.goal);
   const nameIndex = buildToolNameIndex(input.tools);
   const available = collectAvailable(input.tools.map((tool) => tool.name));
@@ -151,16 +141,17 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
   const log = (fields: Record<string, unknown>, message: string): void =>
     input.logger.info(fields, message);
 
-  /**
-   * 收尾留档（2026-11-26）：只把**本轮真的产出过步骤**的事实交出去。
-   *
-   * 跳过 / 首轮 `[]` / 装配失败等空轮不写，避免留档被空噪音填满；
-   * 回调自身的失败也只告警——留档永远不得影响本轮对话。
-   *
-   * 发点唯一：`terminate()`。**用户点停止（`aborted`）的轮次可以没有 `plan.jsonl`**
-   * （2026-11-26 产品口径确认）：中止走的是 `run.stop()`，不经过状态机终止判定，
-   * 本轮历史本身也不落盘，留档同样不留。
-   */
+  /** 进度发点（唯一）：只发当前步；空轮不发（FR-034 / FR-004a） */
+  function emitProgress(step: PlanStep | null, phase: PlanProgressPhase): void {
+    if (input.onProgress === undefined || step === null) return;
+    input.onProgress({ seqId: step.seqId, label: step.taskName, phase });
+  }
+
+  /** 收尾时"最后一步"：当前步为空（已出队）时取快照末步，保证 `done` 有归属 */
+  function lastSnapshotStep(): PlanStep | null {
+    return snapshotSteps.length > 0 ? snapshotSteps[snapshotSteps.length - 1]! : null;
+  }
+
   function recordRun(reason: PlanFinishReason): void {
     if (input.record === undefined || snapshotSteps.length === 0) return;
     const record: PlanRunRecord = {
@@ -201,17 +192,16 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
         },
         '计划阶段结束',
       );
-      // 留档在挂起之前：挂起会立即中止本轮，之后没有可靠发点
       recordRun(reason);
+      // 收尾只发一次 `done`（FR-034 第三处发点）；空轮由 `emitProgress` 的 null 判据挡掉
+      emitProgress(state.current ?? lastSnapshotStep(), 'done');
       if (reason !== 'completed' && reason !== 'aborted') input.suspend?.(SUSPEND_CODE);
     }
     return true;
   }
 
-  /** 组装一次规划调用的输入（三类驱动共用同一提示词装配） */
   function promptInput(kind: PlanKind, feedback?: string): Parameters<typeof buildPlanPrompt>[0] {
     const initial = kind === 'initial';
-    // 首次规划的重试沿用完整历史 + 反馈消息；重规划把失败原因写进角色消息（FR-025）
     const retryOnly = initial && feedback !== undefined ? { retryFeedback: feedback } : {};
     return {
       focusPrompt: input.focusPrompt,
@@ -219,7 +209,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
       toolNames: input.tools.map((tool) => tool.name),
       nameIndex,
       behaviorOf: input.behaviorOf,
-      // 只有首次规划带历史；重规划只给「目标 + 已完成 + 失败原因」（FR-025）
       history: initial ? input.history : [],
       userInput: initial
         ? input.userInput
@@ -233,7 +222,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
     };
   }
 
-  /** 一次规划（含最多 `PLAN_RETRY_MAX` 次重试）；`null` = 放弃规划 */
   async function requestBatch(kind: PlanKind, failure?: string): Promise<PlanStep[] | null> {
     let feedback = failure;
     for (let attempt = 0; attempt <= PLAN_RETRY_MAX; attempt += 1) {
@@ -257,6 +245,7 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
           input.plan,
           { system: prompt.system, messages: prompt.messages },
           input.signal,
+          limits.timeoutMs,
         );
       } catch (err) {
         if (input.signal.aborted) {
@@ -264,7 +253,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
           return null;
         }
         // 超时**不重试**（2026-11-26）：超时的原因是"慢"，原样再发两次大概率还是慢，
-        // 只会让首字延迟变成 2~3 倍。直接放弃规划、回退既有流程（FR-005）。
         if (err instanceof PlanCallTimeoutError) {
           log(
             { event: 'plan.abandoned', reason: 'timeout', timeout_ms: err.timeoutMs },
@@ -342,23 +330,23 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
     return { steps: result.steps, failures: result.failures };
   }
 
-  /** 装批：入队 + 切可见工具 + 记录启动事件 */
-  function enqueue(steps: PlanStep[]): void {
+  /**
+   * 装批：入队 + 切可见工具 + 启动事件 + 进度。
+   *
+   * `phase` 只区分「正常装批」与「重规划装批」——重规划会让步骤编号跳变，
+   * 前端据此做一次"计划已调整"的提示（FR-034 / FR-035）。
+   */
+  function enqueue(steps: PlanStep[], phase: 'running' | 'replanned' = 'running'): void {
     snapshotSteps.push(...steps);
     startBatch(state, steps);
-    // 首步从 turn 1 起算；跨批不重置，保持 turn 序单调（C 判据只比较步内调用）
     if (state.turnIndex === 0) state.turnIndex = 1;
     refreshVisible();
-    if (state.current !== null) logStepStarted(state.current);
+    if (state.current !== null) {
+      logStepStarted(state.current);
+      emitProgress(state.current, phase);
+    }
   }
 
-  /**
-   * 「进入某一步」的唯一发点（2026-11-26）。
-   *
-   * 批首步由 `enqueue` 触发，同批推进由 `shouldStopAfterTurn` 触发；
-   * 只在这里发，保证 `plan.step.started` 与 `plan.step.done` 一一对应，
-   * 且 `visible_tool_count` 拿到的一定是**该步**收窄后的工具数。
-   */
   function logStepStarted(step: PlanStep): void {
     log(
       {
@@ -390,7 +378,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
     });
   }
 
-  /** 失败重规划（`replanCount` 已由状态机累加） */
   async function replanAfterFailure(failed: PlanStep | null, stale?: StaleStep): Promise<boolean> {
     log(
       {
@@ -411,7 +398,7 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
       terminate('completed');
       return false;
     }
-    enqueue(steps);
+    enqueue(steps, 'replanned');
     return true;
   }
 
@@ -431,7 +418,7 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
       terminate('completed');
       return false;
     }
-    enqueue(steps);
+    enqueue(steps, 'replanned');
     return true;
   }
 
@@ -476,13 +463,13 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
         coreOutcomes,
         summaryText: assistantText(context.message),
         ...(input.isStale !== undefined ? { isStale: input.isStale } : {}),
+        limits,
       });
       state.turnIndex = judgedTurn + 1;
       coreOutcomes = [];
 
       if (result.stepDone && active !== null) {
         // 步与步之间也要切可见工具：否则推进到第 2 步后模型仍只看到第 1 步的工具，
-        // 直接调用会得到 `Tool not found`（T403 防的就是这个死锁）
         refreshVisible();
         log(
           {
@@ -493,14 +480,14 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
           },
           '当前步完成',
         );
-        // 同批推进到下一步：补一次 started（2026-11-26）。不补的话第 2 步起既没有
-        // started 事件，也看不到 visible_tool_count 的收窄，排障只能靠 tool.call 反推。
-        // 需要重规划时这一步会被整批替换，故不发，等新批 enqueue 时再发。
-        if (!result.needsReplan && state.current !== null) logStepStarted(state.current);
+        if (!result.needsReplan && state.current !== null) {
+          logStepStarted(state.current);
+          // 步推进（FR-034 第一处发点）：与 `refreshVisible()` 同点，避免"进度跳了但工具集没切"
+          emitProgress(state.current, 'running');
+        }
       }
 
-      if (result.finish === 'stalled' && state.replanCount < REPLAN_MAX_PER_RUN) {
-        // 卡死先尝试一次失败重规划；超限才按终止处理（T603）
+      if (result.finish === 'stalled' && state.replanCount < limits.replanMaxPerRun) {
         state.replanCount += 1;
         log(
           {
@@ -514,7 +501,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
       }
       if (result.finish !== null) return terminate(result.finish);
       if (result.needsReplan) {
-        // 写后失效（T502）：这一步没失败，只是前置数据过期 —— 不记 `plan.step.failed`
         if (result.staleStep !== undefined && result.staleStep !== null) {
           return (await replanAfterFailure(null, {
             step: result.staleStep,
@@ -571,7 +557,6 @@ export function createPlanOrchestrator(input: PlanOrchestratorInput): PlanOrches
         return false;
       }
       if (steps.length === 0) {
-        // FR-004a①：首次返回 [] = 无需工具，交回主对话（不是失败）
         terminate('completed');
         return false;
       }

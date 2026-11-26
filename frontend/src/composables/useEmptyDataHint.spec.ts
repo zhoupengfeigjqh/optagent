@@ -1,9 +1,3 @@
-/**
- * 单测：空数据引导状态机（014）。
- *
- * 钉住规格里最容易回归的几条：只在"切换成功"触发、关闭后不重现、切换重置、
- * 上传后自动消失、删空文件不自动重现、加载失败不弹。
- */
 import { nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 

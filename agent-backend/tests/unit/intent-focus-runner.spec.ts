@@ -1,14 +1,3 @@
-/**
- * 单元测试：意图聚焦编排（016）。
- *
- * 用真实临时目录（技能头部 + ontology.yaml）+ 桩判定客户端，覆盖：
- * - 开关关闭零动作；跳过 / 未配置 / 无技能 / 无可用本体 / 全低于阈值 的无调用路径；
- * - 成功链路：技能 → 行为 → 提示；记录字段与批数；
- * - 分批：33 个技能切 2 批；首批失败仍用剩余结果继续（部分降级）；
- * - 能力全批失败 → degraded + 空结果；记录写入抛错不影响返回值。
- *
- * 2026-11：`judge` 返回 `{ prompt, toolTips }`——非空态同时断言入选能力集合。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,9 +24,9 @@ const CONFIG: IntentFocusConfig = {
   ontologyFunctionThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
-  // 027：改写参数（缺省关闭时不会被用到，但类型上必需）
   rewriteThreshold: 0.8,
   rewriteTimeoutMs: 5000,
+  planTimeoutMs: 2000,
 };
 
 const tmpDirs: string[] = [];
@@ -90,9 +79,7 @@ interface Fixture {
 function fixture(options: {
   skills?: Array<{ dir: string; name: string; description: string; ontologyId?: string }>;
   ontology?: boolean;
-  /** 同一 ontology_id 再物化一份（不同目录），用于验证提示不重复输出本体字段 */
   duplicateOntology?: boolean;
-  /** 覆盖物化的本体文件内容（019 的阶数用例需要 concepts / relations） */
   ontologyYaml?: string;
 } = {}): Fixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'optagent-focus-'));
@@ -142,7 +129,6 @@ function input(overrides: Partial<IntentFocusInput> = {}): IntentFocusInput {
   };
 }
 
-/** 按题面里的名字给分：技能用「技能「description」，行为用「行为「title」」。 */
 function scoreOf(instructions: string): number {
   if (instructions.includes('原材料采购和库存本体技能')) return 0.9;
   if (instructions.includes('普通技能')) return 0.3;
@@ -150,7 +136,6 @@ function scoreOf(instructions: string): number {
   if (instructions.includes('取消采购单')) return 0.1;
   if (instructions.includes('查询采购记录')) return 0.05;
   if (instructions.includes('查询原材料')) return 0.05;
-  // 2026-11-20：函数恢复出题（题面措辞为「需要函数」），0.7 高于函数阈值 0.6
   if (instructions.includes('校验采购单位一致性')) return 0.7;
   return 0.05;
 }
@@ -162,24 +147,18 @@ interface HarnessOptions {
   decide?: IntentFocusClient['decide'];
   withStore?: boolean;
   storeThrows?: boolean;
-  /** 019：聚焦阶数（缺省 0） */
   depth?: number;
+  /** 028：数字人是否开启任务规划（门禁前置） */
+  taskPlanning?: boolean;
   logger?: { info: (obj: Record<string, unknown>, msg: string) => void; warn: (obj: Record<string, unknown>, msg: string) => void };
-  /**
-   * 027：输入改写。缺省 = 开关关闭 / 端口未装配（与改造前行为一致），
-   * 因此既有用例不需要任何改动。
-   */
   rewrite?: {
     enabled?: boolean;
-    /** 改写产物（缺省「改写后的意图」） */
     text?: string;
-    /** 历史素材 */
     history?: ReadonlyArray<{
       role: 'user' | 'assistant';
       content: string;
       status?: 'completed' | 'failed';
     }>;
-    /** 让改写调用抛错 */
     fail?: boolean;
   };
 }
@@ -211,8 +190,8 @@ function harness(root: string, options: HarnessOptions = {}) {
         }),
     isEnabled: () => options.enabled ?? true,
     getDepth: () => options.depth ?? 0,
-    // 027：缺省不开启改写（既有 013/016/019 用例不受影响）
     isRewriteEnabled: () => options.rewrite?.enabled === true,
+    isTaskPlanning: () => options.taskPlanning === true,
     ...(options.rewrite
       ? {
           readHistory: () => options.rewrite!.history ?? [],
@@ -235,7 +214,11 @@ describe('开关、跳过与未配置', () => {
     const { root } = fixture();
     const { runner, records, client } = harness(root, { enabled: false });
     const spy = vi.spyOn(client, 'decide');
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(spy).not.toHaveBeenCalled();
     expect(records).toHaveLength(0);
   });
@@ -244,7 +227,11 @@ describe('开关、跳过与未配置', () => {
     const { root } = fixture();
     const { runner, records, client } = harness(root);
     const spy = vi.spyOn(client, 'decide');
-    await expect(runner.judge(input({ skip: true }))).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input({ skip: true }))).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(spy).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
     expect(records[0]!.disposition).toBe('skipped');
@@ -262,7 +249,11 @@ describe('开关、跳过与未配置', () => {
     const { root } = fixture();
     const { runner, records, client } = harness(root, { configured: false });
     const spy = vi.spyOn(client, 'decide');
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(spy).not.toHaveBeenCalled();
     expect(records[0]!.disposition).toBe('unconfigured');
     expect(records[0]!.reason).toBe('no_config');
@@ -299,7 +290,11 @@ describe('空结果', () => {
     const { runner, records } = harness(root, {
       decide: async () => ({ ok: true, scores: { s1: 0.3, s2: 0.2 }, model: 'm' }),
     });
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(records[0]!.disposition).toBe('empty');
     expect(records[0]!.reason).toBe('below_threshold');
   });
@@ -327,7 +322,6 @@ describe('成功链路', () => {
     const record = records[0]!;
     expect(record.disposition).toBe('focused');
     expect(record.batches).toBe(2);
-    // 技能 2 个 + 能力候选 5 个（4 个行为 + 1 个函数；rules 不参与）
     expect(record.candidates).toBe(2 + 5);
     expect(record.behaviors.map((item) => item.name)).toEqual(['B1']);
     expect(record.functions).toEqual([
@@ -340,7 +334,6 @@ describe('成功链路', () => {
         related_concepts: [],
       },
     ]);
-    // 卡片通道不含函数
     expect(record.tool_tip_behaviors.map((item) => item.name)).toEqual(['B1']);
     expect(record).not.toHaveProperty('data_supplements');
     expect(record.prompt).toBe(prompt);
@@ -369,7 +362,6 @@ describe('成功链路', () => {
       skills: [{ dir: 'plain', name: 'plain-skill', description: '普通技能' }],
       ontology: false,
     });
-    // 用非本体技能验证"有技能但无能力"
     const { runner, records } = harness(root, {
       decide: async (_state, questions) => {
         const scores: Record<string, number> = {};
@@ -381,7 +373,6 @@ describe('成功链路', () => {
     expect(prompt).toContain('技能 plain-skill（非本体技能）');
     expect(prompt).not.toContain('→ 本体');
     expect(prompt).not.toContain('ontology_id');
-    // 非本体技能没有能力：卡片范围为空的（调用方据此不产出卡片）
     expect(toolTips).toEqual([]);
     expect(records[0]!.disposition).toBe('focused');
   });
@@ -395,7 +386,6 @@ describe('成功链路', () => {
   });
 });
 
-/** 019 用例本体：3 个概念 / 2 条关系 / 3 条行为（与真实文件同形） */
 const FOCUS_ONTOLOGY_YAML = [
   'metadata:',
   '  ontology_id: 7',
@@ -446,7 +436,6 @@ function focusFixture(): Fixture {
   });
 }
 
-/** 只让「查询原材料库存信息」过阈值；可按需放开其它行为 */
 function focusDecide(allow: readonly string[]): IntentFocusClient['decide'] {
   return async (_state, questions) => {
     const scores: Record<string, number> = {};
@@ -466,7 +455,6 @@ describe('聚焦阶数（019）', () => {
     const { runner, records } = harness(root, { decide: focusDecide(['查询原材料库存信息']) });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 阶数 0：只有关键行为段，没有图路径段
     expect(prompt).toBe(
       `${FOCUS_PREFIX}\n技能 inventory-skill → 本体 原材料采购和库存（ontology_id=7）\n\n` +
         '关键行为\n' +
@@ -491,17 +479,13 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 一行读完：行为 @起点概念 ←〔关系〕— 终点概念 → 终点概念下的行为；
-    // 关系名在 yaml 里没写 title ⇒ 回退 name，且这一跳逆着本体边写，所以边方向朝左
     expect(prompt).toContain(
       '查询原材料库存信息 QueryInventory @RawMaterialInventory ' +
         '←〔HasRawInventory〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials',
     );
-    // 概念不再单独成段
     expect(prompt).not.toContain('关联概念：');
     expect(prompt).not.toContain('上游概念：');
     expect(prompt).not.toContain('上游参考：');
-    // 下游：库存是 1:1 的明细端，没有更下游的对象
     expect(toolTips.map((item) => item.name)).toEqual(['QueryInventory']);
 
     const record = records[0]!;
@@ -510,12 +494,10 @@ describe('聚焦阶数（019）', () => {
       ['RawMaterialInventory', 'direct', 0],
       ['RawMaterial', 'upstream', 1],
     ]);
-    // 提示通道：直接命中 + 上游
     expect(record.behaviors.map((item) => [item.name, item.source, item.score])).toEqual([
       ['QueryInventory', 'direct', 0.9],
       ['QueryRawMaterials', 'upstream', null],
     ]);
-    // 卡片通道：只有直接命中
     expect(record.tool_tip_behaviors.map((item) => item.name)).toEqual(['QueryInventory']);
   });
 
@@ -527,14 +509,11 @@ describe('聚焦阶数（019）', () => {
     });
     const { prompt, toolTips } = await runner.judge(input());
 
-    // 两个直接命中概念之间仍有上下游关系：库存 ←〔HasRawInventory〕— 原材料
-    // （2026-11-26 修丢边：这类边此前被整条吞掉，提示里两个命中行为毫无关系）
     expect(prompt).toContain(
       '查询原材料库存信息 QueryInventory @RawMaterialInventory ' +
         '←〔HasRawInventory〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials',
     );
 
-    // 下游：原材料 → 原材料采购记录（采购单）→ 创建采购单进卡片
     expect(toolTips.map((item) => item.name)).toEqual([
       'QueryInventory',
       'QueryRawMaterials',
@@ -551,7 +530,6 @@ describe('聚焦阶数（019）', () => {
         item.from_concept,
       ]),
     ).toEqual([
-      // direct：via_concept 是自身概念，没有起点
       ['QueryInventory', 'direct', 0.9, 'RawMaterialInventory', null],
       ['QueryRawMaterials', 'direct', 0.9, 'RawMaterial', null],
       // 下游：via_concept 是终点（采购单），from_concept 才说明"因为问的是原材料"
@@ -573,7 +551,6 @@ describe('分批与降级', () => {
       config: { ...CONFIG, maxSkills: 64 },
       decide: async (_state, questions) => {
         calls.push(Object.keys(questions).length);
-        // 第一批（32 题）失败，第二批（1 题）成功
         if (calls.length === 1) {
           return { ok: false as const, reason: 'timeout' as const, message: 'timeout' };
         }
@@ -584,7 +561,6 @@ describe('分批与降级', () => {
     });
     const { prompt } = await runner.judge(input());
     expect(calls).toEqual([32, 1]);
-    // 第二批只有一个候选入选（具体名字取决于目录枚举序，不写死）
     expect(prompt).toContain('技能 skill-');
     expect(prompt).toContain('（非本体技能）');
     expect(records[0]!.disposition).toBe('focused');
@@ -596,7 +572,11 @@ describe('分批与降级', () => {
     const { runner, records } = harness(root, {
       decide: async () => ({ ok: false, reason: 'timeout', message: 'timeout' }),
     });
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(records[0]!.disposition).toBe('degraded');
     expect(records[0]!.reason).toBe('timeout');
     expect(records[0]!.prompt).toBe('');
@@ -616,7 +596,11 @@ describe('分批与降级', () => {
         return { ok: false, reason: 'http', status: 503, message: 'busy' };
       },
     });
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
     expect(records[0]!.disposition).toBe('degraded');
     expect(records[0]!.skills.some((skill) => skill.selected)).toBe(true);
   });
@@ -628,7 +612,11 @@ describe('分批与降级', () => {
         throw new Error('boom');
       }) as IntentFocusClient['decide'],
     });
-    await expect(runner.judge(input())).resolves.toEqual({ prompt: '', toolTips: [] });
+    await expect(runner.judge(input())).resolves.toEqual({
+      prompt: '',
+      toolTips: [],
+      planScore: null,
+    });
   });
 
   it('记录写入抛错不影响返回值', async () => {
@@ -693,7 +681,6 @@ describe('日志与本体名回退', () => {
  *   而留档的 `input` 仍是原文（C-1 / O-5）。
  */
 describe('027 指代改写接入', () => {
-  /** 判定桩：改写命题给 0.95，其余按题面打分（与默认桩同口径） */
   const decideWithRewrite: IntentFocusClient['decide'] = async (_state, questions) => {
     const scores: Record<string, number> = {};
     for (const [qid, question] of Object.entries(questions)) {
@@ -763,7 +750,6 @@ describe('027 指代改写接入', () => {
 
     await runner.judge(input());
 
-    // 第 1 次是改写命题（素材仍是原文），之后是技能 / 行为（素材已切换）
     expect(states[0]).toBe('帮我创建一笔原材料采购单');
     expect(states.slice(1).every((state) => state === '分析上批原材料采购单的到货延迟')).toBe(true);
 
@@ -775,7 +761,6 @@ describe('027 指代改写接入', () => {
       rewrite_score: 0.95,
       rewrite_query: '分析上批原材料采购单的到货延迟',
       rewrite_truncated: false,
-      // 只有 user 一条历史、没有成对 assistant ⇒ 不构成完整轮
       rewrite_history_turns: 0,
       rewrite_reason: 'no_history',
     });
@@ -802,5 +787,93 @@ describe('027 指代改写接入', () => {
       rewrite_query: '',
       rewrite_reason: 'llm_failed',
     });
+  });
+});
+
+describe('028 规划门禁（intent_focus 内）', () => {
+  const GATE_CONFIG: IntentFocusConfig = {
+    ...CONFIG,
+    planThreshold: 0.4,
+    planTimeoutMs: 2000,
+  };
+
+  /** 技能/能力照旧按题面打分；`plan_gate` 单独给分（`null` = 让判定失败） */
+  function withGate(score: number | null, calls: string[][]): IntentFocusClient['decide'] {
+    return async (_state, questions) => {
+      const qids = Object.keys(questions);
+      calls.push(qids);
+      // 只有门禁这一批失败：技能/能力照常成功，用于验证 fail-open 不影响聚焦
+      if (qids.includes('plan_gate') && score === null) {
+        return { ok: false, reason: 'timeout', message: '判定超时' };
+      }
+      const scores: Record<string, number> = {};
+      for (const [qid, question] of Object.entries(questions)) {
+        if (qid === 'plan_gate') {
+          if (score !== null) scores[qid] = score;
+          continue;
+        }
+        scores[qid] = scoreOf((question as { instructions: string }).instructions);
+      }
+      return { ok: true, scores, model: 'laya-multilingual' };
+    };
+  }
+
+  it('开了规划且分数 >= 阈值：判定一次并落 plan_score', async () => {
+    const { root } = fixture();
+    const calls: string[][] = [];
+    const h = harness(root, {
+      config: GATE_CONFIG,
+      taskPlanning: true,
+      decide: withGate(0.82, calls),
+    });
+
+    const result = await h.runner.judge(input());
+
+    expect(result.planScore).toBe(0.82);
+    expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(true);
+    expect(h.records[0]).toMatchObject({ plan_score: 0.82 });
+  });
+
+  it('数字人未开规划：不额外判定（零成本），分数为 null', async () => {
+    const { root } = fixture();
+    const calls: string[][] = [];
+    const h = harness(root, {
+      config: GATE_CONFIG,
+      taskPlanning: false,
+      decide: withGate(0.9, calls),
+    });
+
+    const result = await h.runner.judge(input());
+
+    expect(result.planScore).toBeNull();
+    expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(false);
+  });
+
+  it('未配置 plan_threshold：门禁关闭，不判定', async () => {
+    const { root } = fixture();
+    const calls: string[][] = [];
+    const h = harness(root, { config: CONFIG, taskPlanning: true, decide: withGate(0.9, calls) });
+
+    const result = await h.runner.judge(input());
+
+    expect(result.planScore).toBeNull();
+    expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(false);
+  });
+
+  it('门禁判定失败：分数为 null（fail-open），聚焦结果不受影响', async () => {
+    const { root } = fixture();
+    const calls: string[][] = [];
+    const h = harness(root, {
+      config: GATE_CONFIG,
+      taskPlanning: true,
+      decide: withGate(null, calls),
+    });
+
+    const result = await h.runner.judge(input());
+
+    // 门禁这一批失败 → 分数为 null（消费方 fail-open 走规划），聚焦本身照常产出
+    expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(true);
+    expect(result.planScore).toBeNull();
+    expect(result.prompt).toContain('onto-skill');
   });
 });

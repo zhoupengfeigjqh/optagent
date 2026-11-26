@@ -1,24 +1,10 @@
 <script setup lang="ts">
-/**
- * 部署面板（`FR-027`）。
- *
- * 职责：**本次范围**（部署对象在「用户与关联数字人」页勾选）→ 校验预检
- * （**一次性列出全部错误项**）→ 部署触发 → 结果明细。
- *
- * 两条硬约束：
- * 1. **未勾选任何用户 → 既不能预检、也不能部署**（空选择绝不能落回服务端
- *    "缺省 = 全部用户"的语义，那会变成误部署全平台）；
- * 2. 勾选**变化即作废上一次预检**，避免"用 A 的结论部署 B"。
- *
- * **2026-09-27**：「目标运行形态」随 MCP 单一连接地址下架，本面板不再有形态切换。
- */
 import { computed, onMounted, watch } from 'vue'
 import { useDeploy } from '../../composables/useDeploy'
 import ErrorNotice from '../common/ErrorNotice.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
 const props = defineProps<{
-  /** 部署对象（在「用户与关联数字人」页勾选） */
   selectedUserIds: string[]
 }>()
 
@@ -34,7 +20,6 @@ const hasTarget = computed(() => props.selectedUserIds.length > 0)
 const canDeploy = computed(
   () => hasTarget.value && d.validated.value && d.validationErrors.value.length === 0,
 )
-/** 范围文案：让管理员确认"这次动的是谁" */
 const scopeLabel = computed(() =>
   hasTarget.value ? `已选用户：${nameList(props.selectedUserIds)}` : '尚未选择用户',
 )
@@ -74,14 +59,6 @@ function nameList(userIds: string[]): string {
   return `${userIds.slice(0, 3).join('、')} 等 ${userIds.length} 个`
 }
 
-/**
- * 差异项一行文字：优先用服务端给的 `detail`，缺失（或不是字符串）时回退到整条 JSON。
- *
- * 必须走函数而不是在插值里写类型断言：`{{ (diff as Record<string, string>).detail }}`
- * 里的尖括号会让 prettier 的 Vue 解析器把 `<Record<...>` 当成标签起始，
- * 报 `Unexpected closing tag "li"`（解析失败 ⇒ `format:check` 退出码 2，
- * 比"格式不一致"更隐蔽）。`DeployHistoryList.vue` 的 `diffText` 是同一处理方式。
- */
 function diffText(diff: Record<string, unknown>): string {
   const detail = diff.detail
   return typeof detail === 'string' ? detail : JSON.stringify(diff)
@@ -90,7 +67,6 @@ function diffText(diff: Record<string, unknown>): string {
 
 <template>
   <section class="deploy-panel" aria-label="部署生效">
-    <!-- 本次范围：部署对象在「用户与关联数字人」页的卡片上勾选（未勾选则两个按钮都不可用） -->
     <p class="deploy-panel__scope" role="status" aria-live="polite">
       本次范围：<strong>{{ scopeLabel }}</strong>
       <span v-if="!hasTarget" class="muted">
@@ -121,8 +97,6 @@ function diffText(diff: Record<string, unknown>): string {
     </div>
 
     <ErrorNotice :error="d.error.value" title="部署未完成">
-      <!-- 整批 404 的原因必须可定位：`ADM_USER_NOT_FOUND` 的文案是通用码，
-           具体是哪几个用户由服务端 `details.user_ids` 下发（2026-10-20） -->
       <p v-if="d.unknownUserIds.value.length > 0" class="deploy-panel__unknown">
         勾选列表中已不存在的用户：
         <span class="mono">{{ d.unknownUserIds.value.join('、') }}</span>
@@ -130,7 +104,6 @@ function diffText(diff: Record<string, unknown>): string {
       </p>
     </ErrorNotice>
 
-    <!-- 校验结果：一次性列出全部错误项（SC-020） -->
     <div v-if="d.validated.value" class="deploy-panel__validation" role="status" aria-live="polite">
       <p v-if="d.validationErrors.value.length === 0" class="deploy-panel__ok">
         <StatusBadge status="ok" label="校验通过" />
@@ -168,7 +141,6 @@ function diffText(diff: Record<string, unknown>): string {
       </template>
     </div>
 
-    <!-- 部署结果 -->
     <div v-if="d.result.value" class="deploy-panel__result" aria-live="polite">
       <h3>部署结果</h3>
       <p class="field__hint">已在部署历史中记录（id {{ d.result.value.history_id }}）。</p>

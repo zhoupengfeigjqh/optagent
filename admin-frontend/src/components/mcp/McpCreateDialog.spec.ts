@@ -1,16 +1,3 @@
-/**
- * 组件测试：新建 MCP 服务弹窗（2026-09-27；**2026-10-03 两步流程**）
- *
- * 守住的口径：
- * 1. 第一步只收基础字段，点「连接并获取工具」即**探测**（不创建）；
- * 2. 探测失败（连不上）→ 留在第一步、给出可读原因、**不创建任何记录**；
- * 3. 探测成功 → 进入工具勾选步：**默认不勾选、至少选一个**才能创建；
- * 4. 提交的载荷含 `allowed_tools`（trim 后的名称，`allowed_tools` 只在这一步给一次）；
- * 5. 校验判定与详情页表单**共用** `validateMcpBasics`（同一实现，不各写一套）；
- * 6. 失败（重名 409 / 连不上 / 校验失败）时**弹窗不关、输入不丢**（宪章原则九）；
- * 7. 处理中**禁止关闭**（Esc / 取消按钮皆然），避免"以为没建成"而重复创建；
- * 8. 可访问性：原生 `<dialog>` + 打开即聚焦服务名称（宪章原则四）。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpCreateDialog from './McpCreateDialog.vue'
@@ -34,7 +21,6 @@ const TOOLS = [
   { name: 'ocr_pdf', description: '识别 PDF', parameters: {} },
 ]
 
-/** 探测成功的默认结果 */
 function probeOk() {
   probeMcpTarget.mockResolvedValue({
     ok: true,
@@ -77,7 +63,6 @@ async function fillBasics(
   }
 }
 
-/** 走完第一步：填基础信息 → 探测 → 进入工具勾选步 */
 async function gotoStepTwo(
   wrapper: ReturnType<typeof mountDialog>,
   values: { name?: string; description?: string; url?: string; headers?: string } = {},
@@ -100,7 +85,6 @@ beforeEach(() => {
 
 describe('McpCreateDialog —— 打开与关闭', () => {
   it('打开时展示全部基础字段，并聚焦服务名称输入框', async () => {
-    // 焦点断言要求元素真的在文档里（`focus()` 对脱离文档的节点无效）
     const wrapper = mount(McpCreateDialog, { props: { open: true }, attachTo: document.body })
     await flushPromises()
 
@@ -193,12 +177,10 @@ describe('McpCreateDialog —— 第一步：探测', () => {
       name: 'ocr',
       transport: 'http',
       url: 'http://h:8000/mcp',
-      // 请求头（2026-10-08）：未填写即显式提交 {}（不带令牌的服务）
       headers: {},
     })
     expect(wrapper.findAll('[data-test="tool"]')).toHaveLength(2)
     expect(wrapper.text()).toContain('已连接成功')
-    // 还没创建
     expect(createMcpService).not.toHaveBeenCalled()
   })
 
@@ -274,7 +256,6 @@ describe('McpCreateDialog —— 第二步：勾选并创建', () => {
       transport: 'http',
       url: 'http://h:8000/mcp',
       allowed_tools: ['ocr_pdf'],
-      // 请求头（2026-10-08）：未填写即显式提交 {}（该服务不需要令牌）
       headers: {},
     })
   })
@@ -362,7 +343,6 @@ describe('McpCreateDialog —— 第二步：勾选并创建', () => {
     expect(wrapper.emitted('update:open')).toBeUndefined()
     expect(wrapper.find('dialog').attributes('open')).toBeDefined()
 
-    // 输入不丢：失败后停在勾选步，回上一步仍能看到原值（不必重填）
     await wrapper.find('[data-test="back"]').trigger('click')
     await flushPromises()
     expect((wrapper.find('#mcp-create-name').element as HTMLInputElement).value).toBe('new-mcp')
@@ -456,7 +436,6 @@ describe('McpCreateDialog —— 请求头（2026-10-08）', () => {
     await wrapper.find('#mcp-create-headers').setValue('X-MCP-Token: tk')
     await flushPromises()
 
-    // 就地反馈（2026-10-08）：标签后标红 + 可读原因 + 输入框描红
     expect(wrapper.find('[data-test="headers-invalid"]').text()).toContain('格式错误')
     expect(wrapper.find('[data-test="headers-input"]').classes()).toContain('invalid')
     expect(wrapper.find('[data-test="headers-error"]').text()).toContain('合法 JSON')
@@ -464,7 +443,6 @@ describe('McpCreateDialog —— 请求头（2026-10-08）', () => {
     await confirm(wrapper).trigger('click')
     await flushPromises()
     expect(probeMcpTarget).not.toHaveBeenCalled()
-    // 输入不丢：仍在第一步，基础字段可继续编辑
     expect(wrapper.find('#mcp-create-url').exists()).toBe(true)
   })
 

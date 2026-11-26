@@ -1,11 +1,3 @@
-/**
- * 组件测试：文件参数映射表格（2026-09-19，file_args 表格化编辑视图）。
- *
- * 守住两条线：
- * - **存储契约不变**——对外仍是 `{ 工具: { 路径: "url" | "url:from=<来源>" } }`；
- * - **无效行不写入**——工具/路径为空、路径语法非法、派生形状不符的行
- *   行内报错且不进入 update:modelValue 的结果。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import FileArgsMappingTable from './FileArgsMappingTable.vue'
@@ -35,7 +27,6 @@ const TOOLS = [
             properties: {
               businessType: { type: 'string' },
               excelFileUrl: { type: 'string' },
-              /** 模型填写的沙箱路径字段——派生模式的常见来源 */
               realRelativePath: { type: 'string' },
             },
           },
@@ -60,9 +51,7 @@ describe('FileArgsMappingTable', () => {
     expect((wrapper.find('[data-test="row-path-0"]').element as HTMLSelectElement).value).toBe(
       'image',
     )
-    // 直链模式没有来源字段选择
     expect(wrapper.find('[data-test="row-from-0"]').exists()).toBe(false)
-    // 派生模式回显来源字段
     expect((wrapper.find('[data-test="row-from-1"]').element as HTMLSelectElement).value).toBe(
       'items[].realRelativePath',
     )
@@ -105,7 +94,6 @@ describe('FileArgsMappingTable', () => {
     const wrapper = mountTable({ ocr_image: { image: 'url' } })
     await wrapper.find('[data-test="row-mode-0"]').setValue('derive')
 
-    // 模拟父组件 v-model 回传：把 emit 的值（此时不含该行——来源未填）写回 props
     const echoed = wrapper.emitted('update:modelValue')!.at(-1)![0] as Record<
       string,
       Record<string, string>
@@ -121,7 +109,6 @@ describe('FileArgsMappingTable', () => {
   })
 
   it('派生形状不符（存量值配置漂移）：保留项显示、行内报错且不写入序列化', async () => {
-    // 来源是顶层字段、目标在数组元素里：段数不同 → 形状不相容（纯下拉下选不到，仅存量可能出现）
     const wrapper = mountTable({
       parse_excel_files: { 'items[].excelFileUrl': 'url:from=legacyPath' },
     })
@@ -138,7 +125,6 @@ describe('FileArgsMappingTable', () => {
       .find('[data-test="row-from-0"]')
       .findAll('option')
       .map((o) => o.attributes('value'))
-    // 同为 items[].X 的字段相容，出现在选项里
     expect(values).toContain('items[].realRelativePath')
   })
 
@@ -147,7 +133,6 @@ describe('FileArgsMappingTable', () => {
     const pathSelect = wrapper.find('[data-test="row-path-0"]')
     const values = pathSelect.findAll('option').map((o) => o.attributes('value'))
     expect(values).toContain('removedField')
-    // 选中的仍是存量值，序列化原样保留
     expect((pathSelect.element as HTMLSelectElement).value).toBe('removedField')
   })
 
@@ -176,7 +161,6 @@ describe('FileArgsMappingTable', () => {
     const values = toolSelect.findAll('option').map((o) => o.attributes('value'))
     expect(values).toContain('legacy_tool')
     expect(wrapper.text()).toContain('清单外')
-    // 选中值原样保留，序列化不变
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
 
     await wrapper.find('[data-test="row-mode-0"]').setValue('derive')

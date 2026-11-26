@@ -1,20 +1,4 @@
 <script setup lang="ts">
-/**
- * 定时任务表单弹窗（015，T039 / T064；2026-10-30 增补编辑模式）
- *
- * 8 项输入：名称、提示词、思考开关、开始时间、间隔秒数、执行次数、截止时间、
- * **会话模式复选框「每次任务创建新对话」**（默认勾选）。
- *
- * 四条硬口径：
- * 1. **校验文案与后端 `data-model.md` §6 同一套**：前端先拦是为了不浪费一次往返，
- *    但服务端仍是权威（同名冲突、秒级时间比较只有它能判）。
- * 2. **思考开关的默认值由 props 注入**（来自聊天区当前值，`FR-026`）：本组件不自己去读
- *    聊天状态——弹窗不该依赖聊天 store，否则无法在设置页之外复用、也无法单测。
- * 3. **失败保留已填内容**：`submitting` 只置灰不重置；关闭后再打开才回到默认值。
- * 4. **编辑模式（`task` 非空）复用同一套表单与校验**：预填现有配置、会话模式只读
- *    （`FR-060`），并且**允许开始时间已过去**——编辑只改配置，下次生效时刻由服务端
- *    在启用时推进（`FR-045` 同口径）；否则"只改个名字"会被开始时间已过挡住。
- */
 import { computed, ref, useId, watch } from 'vue'
 
 import type { CreateScheduledTaskRequest, ScheduledTask } from '../../api/types'
@@ -24,17 +8,13 @@ import BaseDialog from '../common/BaseDialog.vue'
 const props = withDefaults(
   defineProps<{
     open?: boolean
-    /** 提交中：所有控件与按钮禁用（防重复提交），内容保留 */
     submitting?: boolean
-    /** 思考开关默认值（来自聊天区当前值） */
     defaultThinking?: boolean
-    /** 非空 = 编辑该任务；为空 = 新建（同一套表单，两种标题与文案） */
     task?: ScheduledTask | null
   }>(),
   { open: false, submitting: false, defaultThinking: false, task: null },
 )
 
-/** 编辑模式：标题、主按钮文案、会话模式只读，都从这里派生 */
 const isEdit = computed(() => props.task !== null)
 
 const emit = defineEmits<{
@@ -58,7 +38,6 @@ const deadlineAt = ref('')
 const newThreadPerRun = ref(true)
 const errors = ref<Record<string, string>>({})
 
-/** `Date` → `datetime-local` 需要的本地 `YYYY-MM-DDTHH:mm` */
 function toLocalInput(date: Date): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
@@ -66,12 +45,6 @@ function toLocalInput(date: Date): string {
   )}:${pad(date.getMinutes())}`
 }
 
-/**
- * 打开时重置表单。
- *
- * - 新建：开始时间给"5 分钟后"、截止给"7 天后"、思考开关继承聊天区、会话模式勾选；
- * - 编辑：整体预填该任务的现有配置（会话模式只读，但仍同步到本地以保持展示一致）。
- */
 function resetForm(): void {
   const editing = props.task
   if (editing) {
@@ -106,16 +79,13 @@ watch(
   { immediate: true },
 )
 
-/** 表单错误数（供无障碍播报"共 N 处需要修改"） */
 const errorCount = computed(() => Object.keys(errors.value).length)
 
 function parseLocal(value: string): number {
-  // `datetime-local` 无时区：交给 `Date` 按本地时区解析，与服务端"本地展示"口径一致
   const ms = Date.parse(value)
   return Number.isFinite(ms) ? ms : Number.NaN
 }
 
-/** 逐字段校验；返回可直接提交的请求体，或 `null`（错误已写入 `errors`） */
 function validate(): CreateScheduledTaskRequest | null {
   const next: Record<string, string> = {}
   const trimmedName = name.value.trim()
@@ -127,7 +97,6 @@ function validate(): CreateScheduledTaskRequest | null {
 
   const startMs = parseLocal(startAt.value)
   if (Number.isNaN(startMs)) next.start_at = '请选择执行开始时间'
-  // 编辑不改"生效起点"的语义：已过去的开始时间合法（启用时由服务端推进到未来）
   else if (!isEdit.value && startMs <= Date.now()) next.start_at = '开始时间必须晚于当前时间'
 
   const interval = Number(intervalSeconds.value)

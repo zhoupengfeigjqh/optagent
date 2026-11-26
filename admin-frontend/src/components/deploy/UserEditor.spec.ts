@@ -1,9 +1,3 @@
-/**
- * 组件测试：用户编辑器（2026-11-10 由内联 section 改为弹窗）。
- *
- * 覆盖：弹窗形态（原生 `<dialog>` + Esc）、新建/编辑两态的内容差异、
- * 已关联数字人预勾选、保存/取消的事件与载荷、保存中态。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { AgentListItem, UserListItem } from '../../api/types'

@@ -1,10 +1,3 @@
-/**
- * 单元测试：部署清单与差异检测（`FR-031`、`FR-032`）
- *
- * 守住两条边界：
- * ① 只有"**清单内且本次不再需要**"的数字人才允许被移除；
- * ② 运行环境里"非本平台管辖"的内容只会被**报出**，不会被删。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

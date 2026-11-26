@@ -1,18 +1,3 @@
-/**
- * 单元测试：MCP 工具结果 → 结果文本口径（2026-10-12）
- *
- * 守住五件事：
- * 1. **字符串原样** —— 旧行为不变，且不需要扫描
- * 2. **逐块挑选** —— text 块拼接、image 块转体积占位；业务正文不再被压进"字符串里的 JSON"
- *    （本次修复的点：解析类工具结果里的 `viewUrl` 必须能被 `extractViewLinks` 抽到）
- * 3. **认不出就 JSON 兜底** —— 宁可多一层字符串，也不丢信息（含空 `content` / 非块形状）
- * 4. **可观测** —— 被跳过的块类型上报成结构化 warn，不静默（宪章原则九）
- * 5. **历史信封解包**（`unwrapMcpEnvelopeText`）—— 判据收窄，当前无生产调用
- *    （原使用者 `scripts/backfill-view-links.ts` 已于 2026-11-08 删除）
- *
- * 适配器接线在本文件末尾用真（假 manager）端到端验证：口径只有一处实现
- * （`domain/tool-result.ts`），这里守的是"模型看到的 == 记录里的"这条结构保证。
- */
 import { describe, expect, it } from 'vitest';
 import type { Logger } from 'pino';
 import { extractViewLinks } from '../../src/domain/view-links.js';
@@ -20,14 +5,12 @@ import type { McpManager } from '../../src/infra/mcp/mcp-manager.js';
 import { mcpResultText, unwrapMcpEnvelopeText } from '../../src/infra/mcp/mcp-result-text.js';
 import { mcpToolsAsAgentTools } from '../../src/infra/mcp/mcp-tool-adapter.js';
 
-/** 被调工具的声明（解析类，形状无关本文件断言） */
 const TOOL = {
   name: 'hd_algorithm_input_parser',
   description: '解析排产输入文件',
   inputSchema: { type: 'object', properties: {} },
 };
 
-/** 收集日志的假 logger（与 `mcp-tool-adapter.spec.ts` 同口径：成功调用也会走 info） */
 function captureLogger(): { logger: Logger; warns: Array<Record<string, unknown>> } {
   const warns: Array<Record<string, unknown>> = [];
   const logger = {
@@ -54,7 +37,7 @@ describe('mcpResultText —— 形状分发与逐块挑选', () => {
 
     expect(text).toBe(payload);
     expect(text).not.toContain('isError');
-    expect(text).not.toContain('\\"businessType\\"'); // 不再是被转义的"字符串里的 JSON"
+    expect(text).not.toContain('\\"businessType\\"');
   });
 
   it('多块 text：按出现顺序用换行拼接', () => {
@@ -171,19 +154,18 @@ describe('unwrapMcpEnvelopeText —— 历史信封解包（当前无生产调�
   });
 
   it('不是信封形状 → undefined（判据收窄，不做通用二次解析）', () => {
-    expect(unwrapMcpEnvelopeText('[{"viewUrl":"/a"}]')).toBeUndefined(); // 顶层数组
-    expect(unwrapMcpEnvelopeText('{"ok":true}')).toBeUndefined(); // 无 content
-    expect(unwrapMcpEnvelopeText('{"content":[]}')).toBeUndefined(); // 无 text 块
-    expect(unwrapMcpEnvelopeText('{"content":"x"}')).toBeUndefined(); // content 不是数组
+    expect(unwrapMcpEnvelopeText('[{"viewUrl":"/a"}]')).toBeUndefined();
+    expect(unwrapMcpEnvelopeText('{"ok":true}')).toBeUndefined();
+    expect(unwrapMcpEnvelopeText('{"content":[]}')).toBeUndefined();
+    expect(unwrapMcpEnvelopeText('{"content":"x"}')).toBeUndefined();
     expect(unwrapMcpEnvelopeText('{"content":[{"type":"image","data":"A"}]}')).toBeUndefined();
-    expect(unwrapMcpEnvelopeText('车间,计划量')).toBeUndefined(); // 非 JSON
-    expect(unwrapMcpEnvelopeText('"just a string"')).toBeUndefined(); // JSON 但不是对象
+    expect(unwrapMcpEnvelopeText('车间,计划量')).toBeUndefined();
+    expect(unwrapMcpEnvelopeText('"just a string"')).toBeUndefined();
     expect(unwrapMcpEnvelopeText('')).toBeUndefined();
   });
 });
 
 describe('适配器接线：模型看到的 == 记录里的（端到端）', () => {
-  /** 假 manager：不触网，直接给出"服务返回的结果对象" */
   function toolReturning(result: unknown, logger?: Logger) {
     const manager = { callTool: async () => result } as unknown as McpManager;
     const [tool] = mcpToolsAsAgentTools(

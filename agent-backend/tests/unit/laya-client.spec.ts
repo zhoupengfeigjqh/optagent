@@ -1,12 +1,3 @@
-/**
- * 单元测试：Laya System One 线协议适配器（013 · noul 口径）。
- *
- * 守住四条口径：
- * - 只打 `/v1/systemone`，带 Bearer 与 JSON body，**只发一次**（不重试）；
- * - 只依赖 `answers[qid].noul`（qid = 工具名），坏形状一律归为 `invalid_response`；
- * - 单题坏掉只跳过该题，不让整批丢失；
- * - 超时 / 网络异常不外抛，返回可区分原因（上层据此降级）。
- */
 import { describe, expect, it, vi } from 'vitest';
 import { LayaClient, type SystemOneQuestion } from '../../src/infra/laya-client.js';
 

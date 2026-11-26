@@ -1,12 +1,3 @@
-/**
- * 本体事实索引（028 FR-009 的数据来源）。
- *
- * **只用意图聚焦侧的 `loadOntologyIndex`**：闸门侧 `ontology-doc.ts` 不读
- * `related_concepts`，用它推 `dependTools` 只会拿到空集。
- *
- * 该加载器目前每轮全量读盘，本模块补一层按目录签名失效的缓存：
- * 签名不变即复用上一份索引，避免每步重复解析 yaml。
- */
 import path from 'node:path';
 
 import { loadOntologyIndex } from '../intent-focus/ontology-loader.js';
@@ -14,13 +5,11 @@ import type { OntologyDefinition, OntologyIndex } from '../intent-focus/types.js
 import { normalizeName, normalizeOpType, ontologySignature } from '../ontology-doc.js';
 import type { OntologyFacts } from './normalize.js';
 
-/** 索引里的一份本体对应的闸门口径键：`{场景目录}/{本体目录}` */
 export function ontologyKeyOf(definition: OntologyDefinition): string {
   const ontologyDir = path.dirname(definition.filePath);
   return `${path.basename(path.dirname(ontologyDir))}/${path.basename(ontologyDir)}`;
 }
 
-/** 由已加载的索引构建只读事实表 */
 export function buildOntologyFacts(index: OntologyIndex): OntologyFacts {
   const conceptsByFunction = new Map<string, string[]>();
   const keysByFunction = new Map<string, string[]>();
@@ -70,9 +59,7 @@ export function buildOntologyFacts(index: OntologyIndex): OntologyFacts {
   };
 }
 
-/** 带缓存的加载器（按目录签名失效） */
 export interface OntologyFactsLoader {
-  /** 取当前事实表（必要时重新加载） */
   get(): OntologyFacts;
   /**
    * 取同一份缓存的本体索引（段 3/4 的渲染素材）。
@@ -83,7 +70,6 @@ export interface OntologyFactsLoader {
   getIndex(): OntologyIndex;
 }
 
-/** 创建加载器；每次 `get()` 只做一次 `statSync` 级的签名比较 */
 export function createOntologyFactsLoader(agentDir: string): OntologyFactsLoader {
   let cached: { signature: string; index: OntologyIndex; facts: OntologyFacts } | null = null;
 
@@ -105,7 +91,6 @@ export function createOntologyFactsLoader(agentDir: string): OntologyFactsLoader
   };
 }
 
-/** 追加去重（保持出现顺序） */
 function pushAll(target: Map<string, string[]>, key: string, values: readonly string[]): void {
   if (key === '') return;
   const bucket = target.get(key);

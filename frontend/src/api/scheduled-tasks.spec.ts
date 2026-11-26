@@ -1,12 +1,3 @@
-/**
- * 单元测试：定时任务接口封装（015）
- *
- * 两条重点：
- * 1. **请求形状**：路径、方法、请求体字段名（含 `new_thread_per_run`）、`runs` 的查询参数——
- *    这些都是与后端 `additionalProperties: false` 的硬契约，写错只会得到 400。
- * 2. **SSE 重连有界**（宪章原则九）：1/2/4/8/16s 最多 5 次，用尽报 `degraded` 且**不再重试**；
- *    任何一次成功连上都要把退避预算还回去（否则断线多次后很快就"假死"）。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHttpClient } from './http'
 import {
@@ -16,7 +7,6 @@ import {
   type ScheduleSignalState,
 } from './scheduled-tasks'
 
-/** 可控的假 `EventSource`：记录实例并手动触发事件。 */
 class FakeSource {
   readonly listeners = new Map<string, Array<() => void>>()
   closed = false
@@ -201,7 +191,6 @@ describe('SSE 信号订阅（有界重连）', () => {
       await vi.advanceTimersByTimeAsync(delay)
     }
 
-    // 第 6 次失败：没有下一次退避了
     sources[5]!.emit('error')
 
     expect(sources).toHaveLength(6)
@@ -214,7 +203,6 @@ describe('SSE 信号订阅（有界重连）', () => {
   it('成功连上即重置退避预算（断线多次也不会提前降级）', async () => {
     api.subscribe({ onSignal: () => undefined })
 
-    // 连续三次"断开 → 重连 → 连上"
     for (let i = 0; i < 3; i += 1) {
       sources[sources.length - 1]!.emit('error')
       await vi.advanceTimersByTimeAsync(SCHEDULE_SIGNAL_BACKOFF_MS[0]!)
@@ -222,7 +210,6 @@ describe('SSE 信号订阅（有界重连）', () => {
     }
 
     expect(sources).toHaveLength(4)
-    // 仍有完整预算：再断 5 次才会 degraded
     for (const delay of SCHEDULE_SIGNAL_BACKOFF_MS) {
       sources[sources.length - 1]!.emit('error')
       await vi.advanceTimersByTimeAsync(delay)

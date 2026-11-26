@@ -1,9 +1,3 @@
-/**
- * 纯函数测试：MCP 调用配置的基础字段判据（弹窗新建与详情页表单共用同一实现）。
- *
- * 覆盖三类场景（宪章原则三）：正常流程、异常流程（各类非法输入）、边界条件（空白、长度）。
- * 2026-10-08 追加**请求头**的本地解析（`parseHeaders` / `formatHeaders`）。
- */
 import { describe, expect, it } from 'vitest'
 import type { McpServiceDetail } from '../api/types'
 import {
@@ -29,7 +23,6 @@ describe('isValidMcpServiceName', () => {
     ['a/b', false],
     ['a.b', false],
     // 2026-11-10：禁止 `__`——运行环境按 `__` 切分还原裸工具名，服务名自带 `__`
-    // 会让权限/规则判定静默失效（裸名匹配不上 ⇒ 直接放行）
     ['my__server', false],
     ['a__b', false],
     ['a__', false],

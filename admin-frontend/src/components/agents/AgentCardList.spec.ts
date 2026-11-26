@@ -1,9 +1,3 @@
-/**
- * 组件测试：数字人卡片列表（T059）
- *
- * 覆盖 `FR-014` / `FR-006`：卡片含名称与用途描述；异常卡片可辨识
- * 且**不影响其余卡片**。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AgentCardList from './AgentCardList.vue'

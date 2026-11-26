@@ -1,6 +1,3 @@
-/**
- * list_dir 工具（T038）：列白名单目录内容，格式化为一行一条的文本。
- */
 import type { FileAccess } from '../file-access.js';
 
 export async function listToolDir(fa: FileAccess, dir: string): Promise<string> {

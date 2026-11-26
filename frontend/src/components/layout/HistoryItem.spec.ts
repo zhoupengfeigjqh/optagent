@@ -1,10 +1,3 @@
-/**
- * 组件测试：历史会话项的行内重命名与导出入口（2026-10-16）。
- *
- * 守住用户可见的边界：双击或点入口进入编辑、Enter / 失焦提交、Esc 取消**且不冒泡**
- * （`ChatPanel` 在 `window` 上挂着"Esc 中断本轮"，冒上去就是误伤）、
- * 空标题与未改动一律不发请求、`disabled`（有进行中会话）时一律不响应。
- */
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
@@ -20,10 +13,6 @@ const THREAD: Conversation = {
   updated_at: '2026-10-16T02:00:00Z',
 }
 
-/**
- * 挂到 `document.body`：`focus()` / `blur()` 只有真实在文档里的元素才有意义
- * （jsdom 对游离节点不派发焦点事件），本文件的焦点与失焦用例依赖这一点。
- */
 function mountItem(extra: Partial<{ active: boolean; disabled: boolean; running: boolean }> = {}) {
   return mount(HistoryItem, {
     props: { thread: THREAD, ...extra },
@@ -31,7 +20,6 @@ function mountItem(extra: Partial<{ active: boolean; disabled: boolean; running:
   })
 }
 
-/** 进入编辑态并取回输入框 */
 async function startEditing(wrapper: ReturnType<typeof mountItem>) {
   await wrapper.find('.history-item__rename').trigger('click')
   await nextTick()
@@ -94,7 +82,6 @@ describe('HistoryItem —— 行内重命名（2026-10-16）', () => {
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
     )
     document.removeEventListener('keydown', spy)
-    // 事件是直接派发的（没走 `trigger`），DOM 更新要自己等一次
     await nextTick()
 
     expect(seen).toEqual([])

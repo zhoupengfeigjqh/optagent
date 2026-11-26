@@ -1,6 +1,3 @@
-/**
- * 单元测试：登录凭据签发/验签（`contracts/auth-api.md` §1）
- */
 import { describe, expect, it } from 'vitest';
 import {
   AUTH_COOKIE_NAME,

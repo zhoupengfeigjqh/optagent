@@ -1,10 +1,3 @@
-/**
- * 集成测试共享夹具（028）：真实 pi loop + 真实闸门/权限 + 真实编排器，只桩掉两处 LLM。
- *
- * 为什么是「进程内集成」而不是 HTTP：这四个用例要验的是**装配**（钩子挂上去没有、
- * 工具收窄生效没有、状态推进对不对），HTTP + SSE 只会把断言摊薄成字符串比对。
- * 与 `rule-gate-loop.spec.ts` 同一范式。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,13 +60,9 @@ export interface HopContext {
 }
 
 export interface PlanRunOptions {
-  /** 本体 YAML（决定规则、前置函数、行为） */
   ontologyYaml: string;
-  /** 本轮全部工具（未包装） */
   tools: AgentTool[];
-  /** 规划输出脚本，按调用顺序消费；用尽后抛错（防漏脚本被静默吞掉） */
   planOutputs: string[];
-  /** 每跳 assistant 消息（hop 从 0 起） */
   loopTurn: (hop: number) => AssistantMessage;
   focusPrompt?: string;
   userInput?: string;
@@ -90,15 +79,12 @@ export interface PlanRunResult {
   events: LlmEvent[];
   state: PlanState;
   finish: PlanFinishReason | null;
-  /** 规划调用次数 */
   planCalls: number;
-  /** 每次规划的用户消息正文（用于断言重规划输入） */
   planMessages: string[];
   logs: Array<Record<string, unknown>>;
   suspends: string[];
   hops: number;
   contexts: HopContext[];
-  /** 编排器交给 loop 的初始工具名 */
   initialTools: string[];
 }
 
@@ -122,7 +108,6 @@ function fixtureAgentDir(ontologyYaml: string, securities: string[]): string {
   return agentDir;
 }
 
-/** 跑一轮完整链路：聚焦 → 规划 → pi loop（规划钩子生效） */
 export async function runPlanned(options: PlanRunOptions): Promise<PlanRunResult> {
   const agentDir = fixtureAgentDir(options.ontologyYaml, options.securities ?? []);
   const gate = createRuleGate({ agentDir });
@@ -131,10 +116,6 @@ export async function runPlanned(options: PlanRunOptions): Promise<PlanRunResult
   const suspends: string[] = [];
   const suspension = createToolSuspension((code) => suspends.push(code));
 
-  /**
-   * 编排器日志。`_state` 是**测试专用**的快照：用来断言「重规划发生时滚动计数仍为 0」
-   * 这类中间态（结束时 `rollCount` 会被最后一次滚动改写，光看终值证不了）。
-   */
   const logged: Array<Record<string, unknown>> = [];
   let stateOf: (() => PlanState) | null = null;
   const withSnapshot = (fields: Record<string, unknown>): Record<string, unknown> => {
@@ -252,7 +233,6 @@ export async function runPlanned(options: PlanRunOptions): Promise<PlanRunResult
   return result;
 }
 
-/** 工具桩：返回 JSON 信封（与真实 MCP 同形态） */
 export function jsonTool(name: string, label: string, body: Record<string, unknown> = { ok: true }): AgentTool {
   return {
     name,
@@ -266,7 +246,6 @@ export function jsonTool(name: string, label: string, body: Record<string, unkno
   } as unknown as AgentTool;
 }
 
-/** 记录调用次数的工具桩 */
 export function countingTool(
   name: string,
   label: string,

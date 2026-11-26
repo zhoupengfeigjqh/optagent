@@ -8,7 +8,6 @@
 
 import type { HttpClient } from './http'
 
-/** 单次命中（`start`/`end` 是原话的 UTF-16 下标，可直接用于切片高亮） */
 export interface TermMatch {
   term: string
   value: string
@@ -17,7 +16,6 @@ export interface TermMatch {
 }
 
 export interface TermNormalizeResult {
-  /** 是否真的发生了改变（命中即同值不算） */
   applied: boolean
   original: string
   normalized: string

@@ -1,9 +1,3 @@
-/**
- * 单元测试：LLM 失败分类（`src/domain/llm-error.ts`，契约 `runtime-api-delta.md` §19.2/§19.3）
- *
- * 这一层是**唯一**的判据实现（直聊与工具循环两条路径都用它），所以逐类钉死：
- * 每个状态码 → 错误码、诊断字段的解析与省略、以及"用今天真实发生过的报文"回归。
- */
 import { describe, expect, it } from 'vitest';
 import {
   ALERT_LLM_ERROR_CODES,
@@ -13,7 +7,6 @@ import {
   toHistoryErrorInfo,
 } from '../../src/domain/llm-error.js';
 
-/** 今天真实踩到的报文（DeepSeek 2026-10-15，request_id 写在 message 文本内部） */
 const REAL_503 =
   '503: {"message":"Service is too busy. We advise users to temporarily switch to alternative LLM API service providers. (request_id: 7eac5255-1f3b-4c2a-9d77-0a1b2c3d4e5f)","type":"service_unavailable_error","code":"service_unavailable_error"}';
 
@@ -86,7 +79,6 @@ describe('classifyLlmFailure：状态码 → 错误码', () => {
     ['429 Too Many Requests', 'LLM_RATE_LIMITED', 429],
     ['401 status code (no body)', 'LLM_UNAUTHORIZED', 401],
   ])('识别 openai SDK 自己的措辞：`%s` → %s', (message, code, status) => {
-    // 实测：桩 fetch 返回非 2xx 时，pi 会把 SDK 的这句原文当 errorMessage 透出；
     // 不识别就会把 503 退化成兜底的 LLM_ERROR（等于用户侧仍看不到原因）
     const failure = classifyLlmFailure({ message });
     expect(failure.code).toBe(code);
@@ -120,7 +112,6 @@ describe('classifyLlmFailure：诊断字段解析', () => {
     expect(failure.code).toBe('LLM_UNAVAILABLE');
     expect(failure.upstream_status).toBe(503);
     expect(failure.upstream_type).toBe('service_unavailable_error');
-    // request_id 被写在错误体的 message 文本内部，只读 JSON 字段会漏掉它
     expect(failure.request_id).toBe('7eac5255-1f3b-4c2a-9d77-0a1b2c3d4e5f');
   });
 

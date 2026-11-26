@@ -1,9 +1,3 @@
-/**
- * 单元测试：SKILL 管理状态（US3）
- *
- * 覆盖列表 / 详情 / **单文件读取与保存**（2026-09-16 起全部文件可编辑）/
- * 上传安装 / 冲突 / 删除，以及每条失败路径的错误归一。
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSkills } from './useSkills'
 

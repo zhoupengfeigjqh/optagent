@@ -1,16 +1,3 @@
-/**
- * 后台产出目录的**读**入口（2026-10-21）：`临时空间/后台产出/` 可预览 / 下载，但不可写。
- *
- * 背景：BOM 服务改为把合并出的 xlsx 回写到 `resultUrl`（落点就是该目录），聊天区的
- * `filePath` 入口点开时走 `/api/files/preview?dir=临时空间/后台产出&…`。而
- * `parseSpaceDir` 对非「数据准备」空间拒绝二级目录 —— 不放行就等于"入口行存在、点开必 400"。
- *
- * 覆盖口径（只放行这一个目录，且**只读**）：
- * - `download` / `preview` 可读到产出（`.xlsx` 自 2026-11-17 起在 preview 里返回**结构化 JSON**，
- *   供前端直接画表；无法解析时明确 400，不再静默回退成附件）；
- * - `upload` / `list` / `delete` 仍按原规则拒绝（写进去会打乱 `.meta.json` 索引）；
- * - 其它二级目录（`临时空间/别处`）**不受影响**，仍判 400。
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -30,7 +17,6 @@ const SCENARIO = { scenario: '产出读入口', data_prep_dirs: ['生产计划']
 const NAME = 'th_1_总BOM_bom_1_ab.xlsx';
 /** 内容不必是合法 xlsx：本层只验"能不能读出来"，不看格式（预览会明确 400） */
 const BYTES = Buffer.from('PK\u0003\u0004fake-xlsx-bytes', 'latin1');
-/** 另备一份**可解析**的产出：验 `.xlsx` 预览返回结构化 JSON（2026-11-17） */
 const NAME_OK = 'th_1_总BOM_bom_2_cd.xlsx';
 const BYTES_OK = XLSX.write(
   (() => {
@@ -58,7 +44,6 @@ beforeAll(async () => {
   writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
   writeFileSync(path.join(dir, 'scenario.json'), JSON.stringify(SCENARIO), 'utf8');
 
-  // 产出目录（与 `writeProduced` 的落点同构：数字人数据域下的二级目录）
   const produced = path.join(userDataDir(root, userId, AGENT), PRODUCED_DIR);
   mkdirSync(produced, { recursive: true });
   writeFileSync(path.join(produced, NAME), BYTES);
@@ -115,7 +100,6 @@ describe('后台产出目录的读入口', () => {
       ['物料', '数量'],
       ['A', '10'],
     ]);
-    // 「数量」列全是数字 ⇒ 前端据此右对齐；文本列不在此列
     expect(body.sheets[0]?.numericCols).toEqual([1]);
   });
 

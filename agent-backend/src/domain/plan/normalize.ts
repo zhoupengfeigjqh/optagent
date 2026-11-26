@@ -1,49 +1,25 @@
-/**
- * 计划归一化（028 FR-007/FR-007a/FR-008/FR-009/FR-010）。
- *
- * 职责：把 LLM 的裸名计划补全为**可执行计划**，且**只补全、不判定**。
- * 无法补全的项以 `CheckFailure` 返回，交给 `checkPlan` 统一裁决。
- *
- * 三段名字口径（混用会导致「工具全部不可见」的静默故障）：
- * 1. 裸名（`QueryInventory`）：LLM 输出与展示；
- * 2. 完整工具名（`rawmcp__QueryInventory`，原样大小写）：`coreAction` 与 `dependTools`；
- * 3. 派生键（小写、可去前缀）：只用于查集合，**不落库、不进 `coreAction`**。
- *
- * `availableNames` 只含派生键且不携带原样名，因此本模块必须现场维护
- * 「派生键 → 原样工具名[]」映射（由 `guarded` 数组构建），否则拿不回真实工具名。
- */
 import { matchKeys } from '../ontology-doc.js';
 import type { BehaviorLookup } from '../rule-gate/types.js';
 import type { CheckFailure, PlanStep, RawStep, StepType } from './types.js';
 
-/** 派生键 → 原样工具名[]（同一个键可能对应多个服务的同名工具） */
 export type ToolNameIndex = ReadonlyMap<string, readonly string[]>;
 
-/** `dependTools` 推导所需的本体事实（由 `ontology-facts.ts` 实现） */
 export interface OntologyFacts {
-  /** 归一函数名 → 关联概念名（原样） */
   relatedConceptsOf(functionName: string): readonly string[];
-  /** 归一函数名 → 所属本体键（可能多个；未知返回空数组） */
   ontologyKeysOfFunction(functionName: string): readonly string[];
-  /** 概念名（+ 可选本体限定）→ 该概念的 query 行为裸名[] */
   queryBehaviorsOf(conceptName: string, ontologyKey?: string): readonly string[];
 }
 
-/** 归一化依赖（全部只读，便于测试替身） */
 export interface NormalizeDeps {
-  /** 本轮全部工具（原样名）构建的派生键索引 */
   nameIndex: ToolNameIndex;
-  /** 规则闸门只读查询；不是本体行为返回 null */
   behaviorOf(toolName: string): BehaviorLookup | null;
   facts: OntologyFacts;
-  /** 分配 `seqId`（run 级自增，跨批连续） */
   nextSeqId(): number;
 }
 
 /** 归一化结果：成功步骤 + 不可补全项 */
 export interface NormalizeResult {
   steps: PlanStep[];
-  /** C0（coreAction 无法唯一解析）/ C3（依赖解析不到） */
   failures: CheckFailure[];
 }
 
@@ -64,7 +40,6 @@ export function buildToolNameIndex(tools: readonly { name: string }[]): ToolName
   return index;
 }
 
-/** 裸名 / 完整名 / 派生键 → 候选原样工具名（去重、保序） */
 export function resolveToolNames(name: string, index: ToolNameIndex): string[] {
   const found: string[] = [];
   for (const key of matchKeys(name)) {
@@ -75,7 +50,6 @@ export function resolveToolNames(name: string, index: ToolNameIndex): string[] {
   return found;
 }
 
-/** 归一化整批计划 */
 export function normalizePlan(raw: readonly RawStep[], deps: NormalizeDeps): NormalizeResult {
   const steps: PlanStep[] = [];
   const failures: CheckFailure[] = [];
@@ -139,7 +113,6 @@ export function normalizePlan(raw: readonly RawStep[], deps: NormalizeDeps): Nor
   return { steps, failures };
 }
 
-/** `type` 由后端推导：命中且 command → command；命中且非 command → query；未命中 → function */
 function deriveType(behavior: BehaviorLookup | null): StepType {
   if (behavior === null) return 'function';
   return behavior.command ? 'command' : 'query';
@@ -147,9 +120,7 @@ function deriveType(behavior: BehaviorLookup | null): StepType {
 
 interface DeriveInput {
   type: StepType;
-  /** LLM 给出的裸名（本体函数查关联概念时用） */
   label: string;
-  /** 本步 `coreAction` 的完整名（用于从依赖集合里排除自身） */
   self: string;
   behavior: BehaviorLookup | null;
   facts: OntologyFacts;
@@ -161,16 +132,6 @@ interface DerivedDepend {
   missing: string[];
 }
 
-/**
- * `dependTools` 推导（FR-009）。
- *
- * - `command`：前置函数**本身** + 这些函数关联概念的同本体 query 行为；
- * - `query`：空；
- * - `function`（本体函数）：其关联概念的同本体 query 行为；
- * - `function`（非本体工具）：无关联概念，自然为空。
- *
- * `coreAction` 自身不入集合（可见工具集已包含它）。
- */
 function deriveDependTools(input: DeriveInput): DerivedDepend {
   const tools: string[] = [];
   const missing: string[] = [];

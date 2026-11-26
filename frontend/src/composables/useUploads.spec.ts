@@ -1,12 +1,3 @@
-/**
- * 单元测试：上传状态机（`useUploads`，012 起补同名测试）
- *
- * 钉住四件事（对应 012 FR-003 / FR-005 / FR-010 / FR-012 / FR-013）：
- * 1. 预校验失败**不发请求**，直接 `failed`（省一次往返）；
- * 2. 逐文件各发一次请求，单个失败不影响其余项；
- * 3. 落盘名只取响应 `filename`（本次改为 `原名 / 原名(n).ext`，前端不拼接）；
- * 4. `clear()` 只清**终态**（成功 / 失败），`pending` / `uploading` 保留——关闭面板时正在传的文件不能消失。
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { FilesApi } from '../api/files'
@@ -60,7 +51,6 @@ describe('useUploads —— 上传状态机', () => {
     expect(item.status).toBe('success')
     expect(item.serverFilename).toBe('报告(1).csv')
     expect(item.error).toBeNull()
-    // 请求带原始文件名，落盘名由服务端决定
     expect(upload).toHaveBeenCalledWith('临时空间', expect.any(File), '报告.csv')
   })
 
@@ -125,7 +115,6 @@ describe('useUploads —— 上传状态机', () => {
 describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => {
   it('1 成功 + 1 失败 + 1 上传中 ⇒ 只剩上传中；其完成后再变成功且不被清掉', async () => {
     const pending = deferred<{ dir: string; filename: string; size: number }>()
-    // 调用顺序＝选择顺序：slow（挂起）→ ok → bad
     const upload = vi
       .fn()
       .mockReturnValueOnce(pending.promise)
@@ -139,7 +128,6 @@ describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => 
 
     store.clear()
 
-    // 终态被清，进行中的保留（Q2 = B：关闭面板不丢"正在传"的那一条）
     expect(store.items.value.map((item) => item.status)).toEqual(['uploading'])
 
     pending.resolve({ dir: '临时空间', filename: 'slow.csv', size: 1 })
@@ -176,13 +164,6 @@ describe('useUploads.clear —— 只清终态（012 FR-010 / FR-013）', () => 
   })
 })
 
-/**
- * 2026-11-17 v1.3：粘贴待发批次的落盘出口。
- *
- * 与 `upload()` 的两点差别都要钉住：
- * 1. **不建记录**——粘贴从来不开面板，建了行只会在下次展开时冒出来；
- * 2. **名字由调用方给**（前端预演），但返回的是**服务端真名**，界面取后者。
- */
 describe('useUploads.uploadNamed —— 带名上传、不建记录', () => {
   it('逐文件发起（后端一次只收一个），按入参顺序回传服务端真名', async () => {
     const upload = vi
@@ -203,7 +184,6 @@ describe('useUploads.uploadNamed —— 带名上传、不建记录', () => {
       { name: 'a(1).csv', ok: true, serverFilename: 'a(1).csv(1)', error: null },
       { name: 'b.csv', ok: true, serverFilename: 'b.csv(1)', error: null },
     ])
-    // 不建上传记录：面板没开，记录一旦出现就是"自己没点过的成功行"
     expect(store.items.value).toEqual([])
   })
 
@@ -222,7 +202,6 @@ describe('useUploads.uploadNamed —— 带名上传、不建记录', () => {
     expect(results.map((item) => item.ok)).toEqual([true, false])
     expect(results[1]!.serverFilename).toBeNull()
     expect(results[1]!.error?.code).toBe('NETWORK_ERROR')
-    // 提示由调用方统一给（整条消息中止），store 自己不再弹一条重复的
     expect(toast.push).not.toHaveBeenCalled()
   })
 

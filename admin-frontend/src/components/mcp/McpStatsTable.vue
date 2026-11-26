@@ -1,23 +1,10 @@
 <script setup lang="ts">
-/**
- * 调用统计表（`FR-049`、`FR-050`）。
- *
- * 2026-09-23 改版：**一行 = 一个「用户 × 服务 × 工具」组合**，四个时间窗与最近调用时间并列，
- * 单元格格式为「**总次数/成功次数**」。原「明细」展开列取消——用户已进列，分组行本身就是
- * 最细粒度，再挂一层展开没有信息增量（也少一次交互）。
- *
- * 硬要求（`FR-009`）：运行环境不可达时 MUST 显示**「未知」而非 0**——
- * 0 是"确实没调用过"的确定结论，与"读不到"是两回事。
- */
 import { computed } from 'vue'
 import type { McpStatsGroup } from '../../api/types'
 
 const props = defineProps<{
-  /** 按「用户 × 服务 × 工具」分组的调用行 */
   groups: McpStatsGroup[]
-  /** 统计是否可得；为 false 时全部数值显示为"未知" */
   available: boolean
-  /** 只显示某个服务的统计（服务详情页用） */
   only?: string
 }>()
 
@@ -56,12 +43,10 @@ function windowCell(group: McpStatsGroup, key: 'h24' | 'd7' | 'd30' | 'd365'): s
   return `${window.total}/${window.ok}`
 }
 
-/** 用户标识：`null` = 升级前的历史事件未记录归属，不静默留白 */
 function userLabel(group: McpStatsGroup): string {
   return group.user_id ?? '（未归属·升级前记录）'
 }
 
-/** 工具标识：`null` 同上（工具名自 2026-09-23 起才落库） */
 function toolLabel(group: McpStatsGroup): string {
   return group.tool_name ?? '（未归属·升级前记录）'
 }

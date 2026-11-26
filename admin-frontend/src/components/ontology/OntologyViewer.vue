@@ -1,23 +1,4 @@
 <script setup lang="ts">
-/**
- * 本体详情：元数据 + 左侧文件列表 + 右侧**只读**文件正文（2026-10-03）。
- *
- * **形态与 `SkillViewer` 逐项对齐**（用户要求"和 skill 设计里的模式一样"，故样式与结构
- * 都照抄，不做自创变体）：同一个 `common/FileTree` 做左侧列表；元数据用同样的两列 `dl`
- * （`120px 1fr`、无边框）；右侧面板照 `SkillFileEditor` 的只读形态——
- * `mono 路径 + 小字大小 + 带边框徽标`一行头部，正文 `pre` 用同一套字号/圆角/最小高度。
- *
- * 口径：
- * - 本体文件恒在根层、固定两个：`ontology.yaml` 与 `securities.yaml`
- *   （行为安全管控，自 2026-10-17 起为必需文件，两个都会出现在左侧列表）；
- * - 两个文件的全文**都随详情响应返回**（契约 §10.2），因此切换文件是纯前端行为，
- *   **不额外发请求**（与 SKILL 详情逐文件请求不同：本体没有编辑通道，无需按需取）；
- * - **只读**：本组件 MUST NOT 出现任何输入控件（`input`/`textarea`/`contenteditable`）
- *   与保存按钮——平台没有编辑本体的能力，界面也不该给出错觉；
- * - 不做语法高亮（`research.md` D5）；
- * - 删除是破坏性操作，走 `ConfirmDialog` 二次确认（目录整体移除）；本体
- *   **不被数字人引用**，故无需引用清单（区别于 SKILL 的 `FR-042`）。
- */
 import { computed, ref } from 'vue'
 import { deleteOntology, type OntologyDetail } from '../../api/ontologies'
 import type { ErrorInfo } from '../../api/types'
@@ -42,18 +23,12 @@ const SECURITIES_PATH = 'securities.yaml'
 const confirmDelete = ref(false)
 const deleting = ref(false)
 const localError = ref<ErrorInfo | null>(null)
-/** 当前选中文件（默认本体正文，与 SKILL 详情默认 `SKILL.md` 同一取向） */
 const selected = ref(ONTOLOGY_PATH)
 
-/**
- * 详情标题：与卡片同一口径 `{场景名}-{本体名}`（2026-10-17）。
- * 只显示本体名时，同名本体分属不同场景的两次查看在标题上无法区分。
- */
 const displayName = computed<string>(() =>
   props.ontology ? ontologyDisplayName(props.ontology) : '本体详情',
 )
 
-/** 左侧文件列表：两个文件恒在（均为必填文件） */
 const files = computed<Array<{ path: string; size: number }>>(() => {
   const target = props.ontology
   if (!target) return []
@@ -63,7 +38,6 @@ const files = computed<Array<{ path: string; size: number }>>(() => {
   ]
 })
 
-/** 选中文件的正文与大小（两个文件都在详情里，无需再取） */
 const current = computed<{ path: string; size: number; text: string }>(() => {
   const target = props.ontology
   if (!target) return { path: selected.value, size: 0, text: '' }
@@ -72,14 +46,12 @@ const current = computed<{ path: string; size: number; text: string }>(() => {
     : { path: ONTOLOGY_PATH, size: target.size, text: target.content }
 })
 
-/** 大小的人类可读格式（与 `SkillFileEditor` 同一函数口径） */
 function formatSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024).toFixed(1)} KB`
 }
 
-/** 元数据行（缺项显示 `—`；与 SKILL 详情同为「两列 dl」的呈现形态） */
 const metaRows = computed<Array<{ label: string; value: string }>>(() => {
   const target = props.ontology
   if (!target) return []
@@ -91,7 +63,6 @@ const metaRows = computed<Array<{ label: string; value: string }>>(() => {
     { label: '本体', value: `${text(ontologyNameOf(target))}（ID ${text(meta.ontology_id)}）` },
     { label: '创建时间', value: text(meta.created_at) },
     { label: '部署版本', value: text(meta.deployed_version) },
-    // 来源不再是服务端字段（2026-10-17）：本体只可能来自本体市场，场景名已在上方
     { label: '来源', value: '本体市场' },
     { label: '安装 / 更新', value: `${target.installed_at} / ${target.updated_at}` },
     { label: '文件', value: 'ontology.yaml + securities.yaml（均已同步）' },
@@ -104,7 +75,6 @@ async function remove(): Promise<void> {
   deleting.value = true
   localError.value = null
   try {
-    // 两个名字都从 metadata 取（服务端不再下发副本字段，2026-10-17）
     await deleteOntology(ontologyScenarioOf(target), ontologyNameOf(target))
     confirmDelete.value = false
     emit('deleted')
@@ -193,7 +163,6 @@ async function remove(): Promise<void> {
   font-size: var(--font-size-lg);
 }
 
-/* 元数据：与 SKILL 详情同一口径（两列、无边框） */
 .ontology-viewer__meta {
   display: grid;
   grid-template-columns: 120px 1fr;
@@ -210,7 +179,6 @@ async function remove(): Promise<void> {
   margin: 0;
 }
 
-/* 左侧文件列表 + 右侧文件正文（与 SKILL 详情同一栅格） */
 .ontology-viewer__body {
   display: grid;
   grid-template-columns: minmax(180px, 260px) 1fr;
@@ -224,7 +192,6 @@ async function remove(): Promise<void> {
   }
 }
 
-/* 右侧面板：照 `SkillFileEditor` 的只读形态（头一行 + 等宽正文） */
 .ontology-viewer__panel {
   min-width: 0;
 }

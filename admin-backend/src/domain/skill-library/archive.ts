@@ -1,16 +1,3 @@
-/**
- * SKILL ZIP 归档的安全解析（`FR-038`、`FR-039`，`research.md` D7）。
- *
- * 用 `yauzl` 的 `lazyEntries` 逐条读取**条目元数据**，**先校验、后解压**：
- * 全部条目通过校验之前，不会把任何不可信内容读进内存，更不会写入目标目录
- * （`FR-039` 明确要求"校验 MUST 在写入目标目录之前完成"）。
- *
- * 拒绝项（`data-model.md` §4 校验项 5~7）：
- * - 绝对路径、`..` 穿越、反斜杠路径、控制字符、盘符
- * - 符号链接（`externalFileAttributes` 高 16 位的文件类型位为 `0o120000`）
- * - 重复条目名
- * - 总解压大小 / 单文件大小 / 文件数 / 嵌套层级超限
- */
 import { Readable } from 'node:stream';
 import yauzl from 'yauzl';
 import { ApiError } from '../api-error.js';
@@ -40,13 +27,9 @@ export interface ArchiveEntryInfo {
 }
 
 export interface SkillArchive {
-  /** 被剥离的单层顶层目录名（无则为空串） */
   prefix: string;
-  /** 归一化后的文件清单（相对路径 + 字节数），供界面展示 */
   entries: ArchiveEntryInfo[];
-  /** 归一化后的相对路径 → 内容 */
   files: Map<string, Buffer>;
-  /** `SKILL.md` 全文 */
   skillMd: string;
 }
 
@@ -77,12 +60,10 @@ export function unsafeEntryReason(fileName: string): string | null {
   return null;
 }
 
-/** 目录项判定：反斜杠结尾同样视为目录 */
 export function isDirectoryEntry(fileName: string): boolean {
   return fileName.endsWith('/') || fileName.endsWith('\\');
 }
 
-/** 嵌套层级：按归一化后的 `/` 计段数 */
 export function entryDepth(fileName: string): number {
   const trimmed = normalizeEntryName(fileName).replace(/\/+$/, '');
   if (trimmed === '') return 0;
@@ -99,7 +80,6 @@ export function normalizeEntryName(fileName: string): string {
   return fileName.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
 }
 
-/** 是否为符号链接条目（ZIP 用 Unix 文件模式的高 16 位表达文件类型） */
 export function isSymlinkEntry(externalFileAttributes: number): boolean {
   const mode = (externalFileAttributes >>> 16) & 0o170000;
   return mode === 0o120000;
@@ -125,25 +105,11 @@ export function stripCommonPrefix(paths: string[]): { prefix: string; relative: 
 }
 
 interface RawEntry {
-  /** 压缩包里的原始条目名（读取内容时用于匹配 yauzl 条目） */
   fileName: string;
-  /** 归一化后的名字（反斜杠→斜杠）：去重、层级、落盘路径均以此为准 */
   name: string;
   size: number;
 }
 
-/**
- * 打开压缩包。
- *
- * **必须拿到原始条目名，不能让 yauzl 静默清洗**：yauzl 默认会**清洗**条目名
- * （把 `../x` 变成 `x`、去掉开头的 `/`）。那样一来 `FR-039` 要求的
- * "拒绝越界路径"就永远不会触发——不安全条目会被悄悄改写后照常解压。
- *
- * 但 yauzl 的 `strictFileNames` 同时会**拒绝反斜杠**（Windows 打包工具的
- * 路径分隔符），导致"Windows 上正常打包的技能"根本装不上。因此这里关闭
- * yauzl 的内置校验，由 `unsafeEntryReason` **统一承担**全部安全判定：
- * 绝对路径 / 盘符 / `..` 穿越 / 控制字符仍然全部拒绝，反斜杠则按分隔符归一。
- */
 function openZip(buffer: Buffer): Promise<yauzl.ZipFile> {
   return new Promise((resolve, reject) => {
     yauzl.fromBuffer(buffer, { lazyEntries: true, strictFileNames: false }, (err, zipfile) => {
@@ -156,7 +122,6 @@ function openZip(buffer: Buffer): Promise<yauzl.ZipFile> {
   });
 }
 
-/** 惰性遍历全部条目（不读取内容，只读元数据） */
 function walkEntries(
   zip: yauzl.ZipFile,
   onEntry: (entry: yauzl.Entry) => Promise<void> | void,
@@ -210,7 +175,6 @@ function readEntryBuffer(zip: yauzl.ZipFile, entry: yauzl.Entry): Promise<Buffer
   });
 }
 
-/** 第一遍：只校验元数据（**不读内容**） */
 async function collectValidatedEntries(buffer: Buffer, limits: ArchiveLimits): Promise<RawEntry[]> {
   const zip = await openZip(buffer);
   const raws: RawEntry[] = [];
@@ -268,7 +232,6 @@ async function collectValidatedEntries(buffer: Buffer, limits: ArchiveLimits): P
   return raws;
 }
 
-/** 第二遍：校验已全部通过，此时才读取内容 */
 async function readAllContents(buffer: Buffer, wanted: Set<string>): Promise<Map<string, Buffer>> {
   const zip = await openZip(buffer);
   const files = new Map<string, Buffer>();
@@ -309,7 +272,6 @@ export async function extractSkillArchive(
     throw invalid('压缩包内缺少 SKILL.md（需位于根级或单层目录下）');
   }
 
-  // 读取内容仍以原始条目名匹配 yauzl 条目，落盘键用归一化后的相对路径
   const contents = await readAllContents(buffer, new Set(raws.map((r) => r.fileName)));
   const files = new Map<string, Buffer>();
   raws.forEach((raw) => {

@@ -1,9 +1,3 @@
-/**
- * 集成测试：平台级端点（契约 §1.1）
- *
- * **2026-09-27**：§1.2~§1.4（平台设置与运行形态）随「MCP 服务全人工配置」下架，
- * 本文件只保留健康检查与未知路径两条。MUST 覆盖正常路径与错误码（宪章原则三）。
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 

@@ -1,12 +1,3 @@
-/**
- * 单元测试：`read_skill` 的领域实现。
- *
- * 守住三条：
- * 1. **能读到**：默认 `SKILL.md`，也能读 `references/` 等附件；目录给清单；
- * 2. **失败可读**：技能/文件不存在、二进制，都要给出可操作的说明（含可用清单），不是一句报错；
- * 3. **越不出去**：`..` 穿越、跨技能、绝对路径、符号链接、非法技能名一律拒绝——
- *    这是"本数字人只能读自己的技能"的边界。
- */
 import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SkillAccessError, readSkillFile } from '../../src/domain/tools/read-skill.js';
 
-/** 技能目录之外的越界目标 */
 const OUTSIDE = 'SECRET';
 
 let dir: string;
@@ -34,12 +24,9 @@ beforeEach(() => {
   );
   writeFileSync(path.join(skillDir, 'references', '算法详解.md'), '# 算法详解\n\n内容A\n', 'utf8');
   writeFileSync(path.join(skillDir, 'references', '选型决策树.md'), '# 决策树\n', 'utf8');
-  // 二进制（含 NUL）
   writeFileSync(path.join(skillDir, 'logo.png'), Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]));
-  // 本数字人的另一个技能
   mkdirSync(path.join(skillsRoot, '另一个技能'), { recursive: true });
   writeFileSync(path.join(skillsRoot, '另一个技能', 'SKILL.md'), '另一个技能的正文', 'utf8');
-  // 技能目录之外的文件（越界用例的目标）
   writeFileSync(path.join(dir, 'secret.txt'), OUTSIDE, 'utf8');
 });
 
@@ -154,7 +141,7 @@ describe('readSkillFile —— 越不出去（沙箱边界）', () => {
     try {
       fs.symlinkSync(dir, path.join(skillDir, 'escape'), 'dir');
     } catch {
-      return; // 同上
+      return;
     }
     expect(() => readSkillFile(skillsRoot, '调度算法', 'escape/secret.txt')).toThrow(
       SkillAccessError,

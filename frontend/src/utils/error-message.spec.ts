@@ -1,15 +1,3 @@
-/**
- * 错误码文案映射单测（`src/utils/error-message.ts`）
- *
- * 运行方式：`npm run test` / `npm run test:coverage`（本地执行）
- *
- * 覆盖两条硬约束：
- * 1. **前端不直接展示后端 message**（面向开发者且不稳定），一律按 `code` 分派（D13 / V-12）；
- * 2. **同码不同义**——`FILE_TOO_LARGE` 在上传时说"超过 5MB"、在预览时说"文件过大，请下载查看"
- *    （`contracts/backend-api.md` §7 差异 6），因此 `context` 分支必须逐个有用例；
- * 3. **D13 唯一例外**——`FILE_SCHEMA_INVALID`（上传表字段校验）透传后端 `details`
- *    逐条问题清单，不套固定文案。
- */
 import { describe, expect, it } from 'vitest'
 
 import { formatErrorDiagnostics, toErrorInfo, toUserMessage } from './error-message'
@@ -44,7 +32,6 @@ describe('toUserMessage - 基础映射', () => {
     expect(toUserMessage({ code: 'FILE_NAME_CONFLICT', message: 'raw' }, 'upload')).toContain(
       '整理目录',
     )
-    // 与同上下文的其他码互不串味
     expect(toUserMessage({ code: 'VALIDATION_FAILED', message: '' }, 'upload')).toBe(
       '文件格式不支持',
     )
@@ -91,11 +78,9 @@ describe('toUserMessage - 场景化文案（同码不同义）', () => {
   })
 
   it('场景无覆盖时回落到基础映射', () => {
-    // upload 场景未覆盖 FILE_NOT_FOUND
     expect(toUserMessage({ code: 'FILE_NOT_FOUND', message: '' }, 'upload')).toBe(
       '文件不存在或已被清理',
     )
-    // send-message 场景未覆盖 THREAD_NOT_FOUND
     expect(toUserMessage({ code: 'THREAD_NOT_FOUND', message: '' }, 'send-message')).toBe(
       '会话不存在或已被删除',
     )
@@ -155,7 +140,6 @@ describe('toUserMessage - 模型调用失败分级（2026-10-15，TR-54 / 契约
     expect(unavailable).not.toContain('503')
     expect(limited).not.toContain('429')
     expect(unavailable).not.toContain('已自动重试')
-    // 具体状态码与线索由诊断行承载，见下方 formatErrorDiagnostics
     expect(
       formatErrorDiagnostics({
         code: 'LLM_UNAVAILABLE',

@@ -1,12 +1,3 @@
-/**
- * 单元测试：下一步动作提示的纯函数与常量（007 修订 + 016）。
- *
- * 断言各自钉住一件容易"顺手改坏"的事：
- * 1. 固定引导句逐字固定（界面渲染，不随模型输出变化）；
- * 2. 卡片**只属于**快照归属的那条消息（历史轮不展示，切换会话不残留）；
- * 3. 点击后的载荷：正文只有 `prompt`，`tool_tips` 走结构化字段，
- *    **不再跳过意图聚焦**（016 口径）。
- */
 import { describe, expect, it } from 'vitest'
 import type { NextStepAction, ToolTip } from '../api/types'
 import type { ThreadNextSteps } from '../api/threads'

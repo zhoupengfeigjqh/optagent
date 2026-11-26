@@ -1,12 +1,3 @@
-/**
- * 单元测试：SOUL 结构化解析与 System Prompt 分区（004）。
- *
- * 守住四条口径：
- * - 无 frontmatter（存量旧文档）→ 正文即全文，**System Prompt 逐字不变**；
- * - 有头无尾 / YAML 非法 → 按"无 frontmatter"降级，**绝不吞配置**；
- * - 展示数据只从 frontmatter 取，正文里的同名内容不算数（避免污染进模型）；
- * - 端到端：`loadAgentConfig` 的 `systemPrompt` **不含** frontmatter 里的展示数据。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,7 +47,6 @@ describe('stripFrontmatter', () => {
     expect(body).not.toContain('intro:');
     expect(body).not.toContain('welcome:');
     expect(body).not.toContain('starters:');
-    // 正文里该进模型的部分一字不少
     expect(body).toContain('你是交付助理。');
     expect(body).toContain('- 不得编造订单号');
   });
@@ -99,11 +89,9 @@ describe('parseSoulMeta', () => {
     const withKey = (value: string) => parseSoulMeta(`---\nnext_action_hints: ${value}\n---\n正文`);
     expect(withKey('true').nextActionHints).toBe(true);
     expect(withKey('false').nextActionHints).toBe(false);
-    // 非布尔（字符串 "yes" / 数字 / null）不给"看起来像真"的机会
     expect(withKey('yes').nextActionHints).toBe(false);
     expect(withKey('1').nextActionHints).toBe(false);
     expect(withKey('null').nextActionHints).toBe(false);
-    // 键缺失
     expect(parseSoulMeta('---\nintro: x\n---\n正文').nextActionHints).toBe(false);
   });
 
@@ -114,9 +102,7 @@ describe('parseSoulMeta', () => {
     expect(withCount('1')).toBe(1);
     expect(withCount('6')).toBe(6);
     expect(withCount('3')).toBe(3);
-    // 键缺失
     expect(parseSoulMeta('---\nintro: x\n---\n正文').nextActionHintsCount).toBe(3);
-    // 越界 / 小数 / 非数字 / null / 布尔 → 缺省（收敛式，不抛错）
     expect(withCount('0')).toBe(3);
     expect(withCount('7')).toBe(3);
     expect(withCount('2.5')).toBe(3);
@@ -141,7 +127,6 @@ starters:
 正文
 `);
     expect(meta.starters.map((s) => s.prompt)).toEqual(['正常问题', '另一个问题']);
-    // MCP 缺服务名、未知 kind 都不算有效工具引用
     expect(meta.starters[1]?.tools).toEqual([]);
   });
 });
@@ -184,7 +169,6 @@ describe('parseExposedName —— toolExposedName 的逆（007 实测补齐）',
   });
 
   it('真实产物口径：模型把 MCP 写成 builtin + 暴露名，还原为 `kind: mcp`', () => {
-    // 取自线上快照 `next-actions.json`：`{ kind: 'builtin', name: 'hd-algorithm__hd_algorithm_input_parser' }`
     expect(parseExposedName('hd-algorithm__hd_algorithm_input_parser')).toEqual({
       kind: 'mcp',
       service: 'hd-algorithm',
@@ -217,7 +201,6 @@ describe('isNextActionsEnabled —— SOUL.md 开关读取（007）', () => {
     expect(isNextActionsEnabled(root, 'u1', 'on')).toBe(true);
     expect(isNextActionsEnabled(root, 'u1', 'off')).toBe(false);
     expect(isNextActionsEnabled(root, 'u1', 'legacy')).toBe(false);
-    // 不同用户互不串味（目录按用户与数字人两级定位）
     expect(isNextActionsEnabled(root, 'u2', 'on')).toBe(false);
   });
 
@@ -230,7 +213,6 @@ describe('isNextActionsEnabled —— SOUL.md 开关读取（007）', () => {
     expect(isNextActionsEnabled(root, 'u1', 'missing', logger)).toBe(false);
     expect(isNextActionsEnabled(root, 'u1', 'broken', logger)).toBe(false);
     expect(isNextActionsEnabled(root, 'u1', 'wrongtype', logger)).toBe(false);
-    // 只有"读不出来"才告警；非布尔是配置写错但读得到，不产生噪音
     expect(warns).toHaveLength(1);
     expect(warns[0]).toContain('u1');
   });
@@ -284,7 +266,6 @@ describe('loadAgentConfig —— frontmatter 不进 System Prompt（004）', () 
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  /** 写一个最小可加载的数字人目录（SOUL/TOOL/MCP 三件套） */
   function writeAgent(name: string, soul: string): string {
     const dir = path.join(root, name);
     fs.mkdirSync(dir, { recursive: true });
@@ -323,12 +304,6 @@ describe('loadAgentConfig —— frontmatter 不进 System Prompt（004）', () 
   });
 });
 
-/**
- * 027：两个新开关（`input_rewrite` / `term_normalize`）。
- *
- * 口径与 007 / 013 完全一致——**缺键或非布尔即 false**（fail-closed），
- * 读取失败返回 false 并告警，且两者都不进 System Prompt 正文。
- */
 describe('parseSoulMeta —— 输入重写 / 术语替换开关（027）', () => {
   it('true 时开启，false / 缺键 / 非布尔一律关闭', () => {
     const on = parseSoulMeta('---\ninput_rewrite: true\nterm_normalize: true\n---\n正文');

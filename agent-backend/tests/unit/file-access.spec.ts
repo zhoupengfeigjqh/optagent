@@ -1,16 +1,3 @@
-/**
- * 单元测试：`FileAccess` 的路径安全边界（2026-10-21 加固回写）。
- *
- * 本文件只钉**这次新增/改动**的两条判据与它们的回归邻域：
- * 1. **盘符前缀一律拒**（含无分隔符的 `C:foo`）——win32 下 `path.isAbsolute('C:foo')`
- *    为 false，属"盘符相对路径"，解析结果取决于进程 cwd；此前只靠后面的
- *    `path.relative` 兜住，现在第一道就判死；
- * 2. **`write_file` 的文件名不得含 `:`**——Windows 上 `a.txt:evil` 是 NTFS 备用数据流：
- *    目录没变，但 `list_dir` 看不到、`read_file` 却能读，等于绕过"文件可见性"。
- *
- * 同时保留三条既有边界作回归（`..` 穿越 / 顶层白名单 / 写入扁平化），
- * 避免以后改这里时把老防线弄丢。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +9,6 @@ let root: string;
 let dataRoot: string;
 let access: FileAccess;
 
-/** 写入该数字人的场景清单（数据准备的可见性唯一权威） */
 function writeScenario(dirs: string[]): void {
   const agentDir = path.join(root, 'users', 'admin', 'agents', 'demo');
   fs.mkdirSync(agentDir, { recursive: true });
@@ -68,7 +54,6 @@ describe('FileAccess —— `write_file` 拒绝 NTFS 备用数据流（2026-10-2
 
     // 冒号若被放行，Windows 会建出 `th_1_a.txt` 的流：文件列表看不见、内容却可读
     expect(fs.existsSync(path.join(dataRoot, '临时空间', 'th_1_a.txt'))).toBe(false);
-    // `说明.txt` 是 beforeEach 预置的既有文件，这里断言的是"没有新增任何落盘"
     expect(fs.readdirSync(path.join(dataRoot, '临时空间'))).toEqual(['说明.txt']);
   });
 
@@ -90,7 +75,6 @@ describe('FileAccess —— `write_file` 拒绝 NTFS 备用数据流（2026-10-2
 describe('FileAccess —— 既有边界回归', () => {
   it('`..` 穿越被拒（解析后判定，不靠字符串）', async () => {
     // 越出 dataRoot 才触发"穿越"；`临时空间/../threads/…` 仍在 dataRoot 内，
-    // 由顶层白名单拦（下一条用例），两道判据各管一段
     await expect(access.read('临时空间/../../secret.txt')).rejects.toThrow('路径穿越被拒绝');
   });
 
@@ -121,7 +105,6 @@ describe('FileAccess —— 判据收敛后与浏览接口同口径（2026-11-02
     fs.mkdirSync(legacy, { recursive: true });
     fs.writeFileSync(path.join(legacy, '2026-10计划.csv'), '旧数据', 'utf8');
 
-    // 清单里没有它 ⇒ 与前端一致地拒（此前只看"磁盘上存在"，故能读到）
     await expect(access.read('数据准备/已下线/2026-10计划.csv')).rejects.toThrow('不在场景清单');
     await expect(access.list('数据准备/已下线')).rejects.toThrow('不在场景清单');
   });
@@ -140,8 +123,6 @@ describe('FileAccess —— 判据收敛后与浏览接口同口径（2026-11-02
     expect(names).not.toContain('2026');
   });
 
-  // 2026-11-18（025）：共享空间已下线 ⇒ 任何读写都先被一级目录白名单拒，
-  // 与"别的目录"同口径（历史会话里的旧引用就走这条）。
   it('已下线的「共享空间」一律读不到', async () => {
     await expect(access.read('共享空间/说明.txt')).rejects.toThrow();
     await expect(access.list('共享空间')).rejects.toThrow();

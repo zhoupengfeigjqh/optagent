@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * MCP 调用配置表单（`FR-044`；2026-09-27 改版）。
- *
- * 关键点：
- * - **连接地址只有一个**（不再按"容器编排内网 / 宿主机本地"分形态声明）；
- * - 只服务**已登记的服务**（新建走 `McpCreateDialog`）：名称取自服务端且不可改；
- * - 基础字段判据与新建弹窗**共用** `utils/mcp-config.ts`（权威判据仍在服务端）。
- *
- * **请求头（2026-10-08）**：UI 与三态语义见 `McpHeadersField`（掩码回显 / 编辑 / 显式清空）；
- * 本组件只持有状态与**提交规则**——查看态不带该字段，即服务端沿用存量。
- */
 import { computed, ref, watch } from 'vue'
 import type { McpProbePayload } from '../../api/mcp'
 import type { McpConfirmation, McpServiceConfigInput, McpServiceDetail } from '../../api/types'
@@ -23,7 +12,6 @@ import RulesFieldMappingTable from './RulesFieldMappingTable.vue'
 import McpTestResultDialog from './McpTestResultDialog.vue'
 
 const props = defineProps<{
-  /** 服务详情（MUST 非空：本表单只在服务已登记时渲染） */
   service: McpServiceDetail
   busy?: boolean
   /**
@@ -47,15 +35,11 @@ const transport = ref<'http' | 'stdio'>('http')
 const url = ref('')
 const command = ref('')
 const argsText = ref('')
-/** 文件参数映射（结构化对象；表格组件只是编辑视图，存储契约不变） */
 const fileArgs = ref<Record<string, Record<string, string>>>({})
-/** 确认策略模式：never 直跑 / always 全部工具 / custom 按工具清单 */
 const confirmationMode = ref<'never' | 'always' | 'custom'>('never')
-/** custom 模式下勾选的工具名（清单多选 + 清单外遗留项都在这个数组里） */
 const confirmationTools = ref<string[]>([])
 /** custom 且服务工具清单不可得时的手填文本（每行一个） */
 const confirmationManualText = ref('')
-/** 算法规则参数设置：`{ 工具名: 字段名 }`（空对象 = 不启用「从算法规则选择」入口） */
 const rulesFields = ref<Record<string, string>>({})
 /**
  * 工具显示名（2026-10-27）：`{ 工具名: 中文名 }`。
@@ -65,18 +49,14 @@ const rulesFields = ref<Record<string, string>>({})
  */
 const toolLabels = ref<Record<string, string>>({})
 const localError = ref<string | null>(null)
-/** 请求头输入（留空 = 不修改；UI 见 `McpHeadersField`）——**不预填掩码**，真值不回显 */
 const headersText = ref('')
-/** 清空意图（显式点「清空全部请求头」；提交时发 `{}`） */
 const headersClearing = ref(false)
-/** 展示用的**掩码**请求头（来自详情，或最近一次保存响应） */
 const headersView = ref<Record<string, string>>({})
 
 /** 服务当前工具清单（来自平台对服务的最近一次探测）；不可得时为空数组 → 走手填回退 */
 const toolCatalog = computed(() => props.service.tools)
 /** 清单不可得 → 回退手填（服务未启动/探测失败时管理员仍要能改配置） */
 const manualFallback = computed(() => toolCatalog.value.length === 0)
-/** 已保存、但当前清单里已没有的工具：保留勾选展示（可能是清单截断或服务改版），不静默丢弃 */
 const orphanTools = computed(() =>
   confirmationTools.value.filter((name) => !toolCatalog.value.some((t) => t.name === name)),
 )
@@ -106,21 +86,13 @@ function loadFrom(service: McpServiceDetail): void {
     confirmationManualText.value = ''
   }
   rulesFields.value = { ...(service.rules_fields ?? {}) }
-  // 工具显示名：按服务详情原样载入（缺省 = 全部回退英文名）
   toolLabels.value = { ...(service.tool_labels ?? {}) }
-  // 请求头：只载入**掩码**；输入框与清空意图复位（切换服务 = 全新一次编辑）
   headersView.value = { ...(service.headers ?? {}) }
   headersText.value = ''
   headersClearing.value = false
-  // 载入即按当前 HITL 模式收敛一次（watch 只在模式**变化**时触发）：
-  // 存量数据里"无需确认却配了规则参数"属于脏数据，与切换语义保持一致——清掉
   pruneRulesFields()
 }
 
-/**
- * 按当前 HITL 模式收敛「算法规则参数设置」（级联口径，2026-09-19）：
- * `never` → 清空（未开 HITL 时本就不生效）；`custom` → 只留勾选清单内的行；`always` → 保留。
- */
 function pruneRulesFields(): void {
   if (confirmationMode.value === 'never') {
     rulesFields.value = {}
@@ -133,10 +105,6 @@ function pruneRulesFields(): void {
   )
 }
 
-/**
- * 当前 HITL 确认范围内的工具（算法规则参数设置「工具」下拉的选项源）：
- * never 为空；always 取清单内全部；custom 取勾选项（含清单外遗留项，同一口径）。
- */
 const hitlAllowedTools = computed<string[]>(() => {
   if (confirmationMode.value === 'never') return []
   if (confirmationMode.value === 'always') return toolCatalog.value.map((t) => t.name)
@@ -146,10 +114,8 @@ const hitlAllowedTools = computed<string[]>(() => {
 /** 无需确认 / 清单不可得：算法规则参数设置不可编辑（未开 HITL 时本就不生效） */
 const rulesDisabled = computed(() => confirmationMode.value === 'never' || manualFallback.value)
 
-/** HITL 模式切换的级联：无需确认→清空；仅指定→丢清单外；全部→保留 */
 watch(confirmationMode, pruneRulesFields)
 
-/** 勾选清单变化：仅指定工具模式下，声明里落在清单外的行随之清掉 */
 watch(confirmationTools, () => {
   if (confirmationMode.value === 'custom') pruneRulesFields()
 })
@@ -162,7 +128,6 @@ watch(confirmationTools, () => {
 watch(
   () => props.service,
   (next, prev) => {
-    // 同一服务的刷新（保存后重载、列表轮询）：不动草稿
     if (prev?.name === next.name) return
     loadFrom(next)
   },
@@ -197,7 +162,6 @@ function resolveHeadersPatch(): { headers?: Record<string, string>; error?: stri
   return { headers: parsed.headers }
 }
 
-/** 提交（页头「保存调用配置」与表单内回车同一条路径）；返回**本地校验是否通过**（页头据此在别的页签补播报） */
 function submit(): boolean {
   localError.value = null
 
@@ -212,7 +176,6 @@ function submit(): boolean {
     return false
   }
 
-  // 确认策略：custom 模式须至少勾选一个工具（保存期服务端会再校验形状）
   let confirmation: McpConfirmation = 'never'
   if (confirmationMode.value === 'always') {
     confirmation = 'always'
@@ -233,7 +196,6 @@ function submit(): boolean {
 
   const trimmedUrl = url.value.trim()
 
-  // 请求头（2026-10-08）：仅 http 有意义（stdio 由启动参数/环境变量承载，服务端也会丢弃）；
   // 查看态**不带该字段**——服务端据此沿用存量（保存调用配置 MUST NOT 顺手清空令牌）
   let headersPatch: Record<string, string> | undefined
   if (transport.value === 'http') {
@@ -245,7 +207,6 @@ function submit(): boolean {
     headersPatch = resolved.headers
   }
 
-  // 工具显示名（全量替换语义）：trim 后**丢弃空值**——空串会被后端判为非法
   // （"配了个空名字"与"不配"必须区分），界面上的留空即"不配"。
   const toolLabelsPayload = Object.fromEntries(
     Object.entries(toolLabels.value)
@@ -276,10 +237,6 @@ function submit(): boolean {
   return true
 }
 
-/**
- * 表单当前值（**允许未保存**）："发起测试"据此探测，保证测的是管理员正在编辑的地址，
- * 而不是上一次保存的旧值（实测缺陷，2026-09-15）。
- */
 function probeTarget(): McpProbePayload {
   const payload: McpProbePayload = {
     transport: transport.value,
@@ -294,8 +251,6 @@ function probeTarget(): McpProbePayload {
         }
       : {}),
   }
-  // 请求头：只有填了内容（或点了清空）才带上；留空即不带 = 服务端按**已保存**的请求头连
-  // （界面手上只有掩码，不带才不会因"没带令牌"误报 401）；写法非法由 runTest 先拦
   if (transport.value === 'http') {
     const patch = resolveHeadersPatch()
     if (patch.headers !== undefined) payload.headers = patch.headers
@@ -303,10 +258,6 @@ function probeTarget(): McpProbePayload {
   return payload
 }
 
-/**
- * 连通性测试（按表单当前值探测，允许未保存）：逻辑见 `useMcpConnectionTest`；
- * 结果弹窗 ref 归本组件所有（模板 `ref="testDialog"`），借给它用（原因见该处 `dialog` 注释）。
- */
 const testDialog = ref<{ open: () => void } | null>(null)
 const {
   result: testResult,
@@ -317,7 +268,6 @@ const {
   serviceName: () => props.service.name,
   target: probeTarget,
   dialog: testDialog,
-  /** 请求头本地校验先行：JSON 写错时指出"哪里写错了"，而不是变成一次 401/连接失败 */
   beforeTest: () => (transport.value === 'http' ? (resolveHeadersPatch().error ?? null) : null),
   onLocalError: (message) => {
     localError.value = message
@@ -325,13 +275,6 @@ const {
   announce: (text) => emit('announce', text),
 })
 
-/**
- * 暴露给详情页：
- * - `submit()`：页头右上角的「保存调用配置」用它——与表单内回车同一路径（含本地校验、**返回是否通过**），避免两套判据；
- * - `runTest()`：创建成功后的"自动测试一次"（`McpArea` → `McpServiceDetail` → 此处）用它，
- *   与「发起测试」按钮同一路径（同一套结果弹窗与播报）；
- * - `probeTarget()`：表单当前连接目标，供外部按需读取。
- */
 defineExpose({ submit, probeTarget, runTest })
 </script>
 
@@ -353,8 +296,6 @@ defineExpose({ submit, probeTarget, runTest })
       />
     </label>
 
-    <!-- 连接配置（2026-10-08 二次改版）：传输方式 / 连接地址 / 请求头**同框**，一行一件事——
-         第一行「连接地址（或 stdio 启动命令）+ 传输方式」（必填），第二行「请求头」（可空，留空 = 不修改） -->
     <fieldset class="mcp-config-form__conn">
       <legend class="field__label">连接配置</legend>
 
@@ -386,7 +327,6 @@ defineExpose({ submit, probeTarget, runTest })
         </label>
       </div>
 
-      <!-- 第二行：请求头（可空；留空 = 不修改）——仅 http 传输有意义 -->
       <McpHeadersField
         v-if="transport === 'http'"
         v-model:text="headersText"
@@ -399,7 +339,6 @@ defineExpose({ submit, probeTarget, runTest })
         <textarea id="mcp-args" v-model="argsText" rows="3" />
       </label>
 
-      <!-- 测试按框内**当前值**连接（无需先保存）：所以按钮放在这个框里，测的就是上两行 -->
       <div class="mcp-config-form__conn-actions">
         <button
           type="button"
@@ -440,9 +379,6 @@ defineExpose({ submit, probeTarget, runTest })
       :disabled="rulesDisabled"
     />
 
-    <!-- 工具显示名（2026-10-27）：进平台工具清单与「本轮是否需要使用某工具」的判定；
-         留空 = 回退英文工具名（存量服务零变化）。清单不可得时不给编辑入口，
-         避免凭记忆造名字——探测到工具后再配。 -->
     <fieldset class="mcp-config-form__labels">
       <legend class="field__label">工具显示名</legend>
       <p class="field__hint">
@@ -464,11 +400,9 @@ defineExpose({ submit, probeTarget, runTest })
       </div>
     </fieldset>
 
-    <!-- 本地校验失败时的可读报错（保存/创建按钮在页面右上角，见 McpServiceDetail） -->
     <p v-if="localError" class="mcp-config-form__error" role="alert">{{ localError }}</p>
   </form>
 
-  <!-- 测试结果弹窗：不在原页面上展示，避免挤占表单版面 -->
   <McpTestResultDialog ref="testDialog" :result="testResult" :error="testError" />
 </template>
 
@@ -484,7 +418,6 @@ defineExpose({ submit, probeTarget, runTest })
   color: var(--color-status-error);
 }
 
-/* 工具显示名（2026-10-27）：与其它配置区块同框，工具名左对齐、输入框占满剩余宽度 */
 .mcp-config-form__labels {
   margin: 0 0 var(--space-4);
   padding: var(--space-3);
@@ -514,7 +447,6 @@ defineExpose({ submit, probeTarget, runTest })
   min-width: 0;
 }
 
-/* 连接配置框（传输方式 / 连接地址 / 请求头同框，2026-10-08 二次改版） */
 .mcp-config-form__conn {
   margin: 0 0 var(--space-4);
   padding: var(--space-3);

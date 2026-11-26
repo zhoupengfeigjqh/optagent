@@ -1,10 +1,3 @@
-/**
- * 单元测试：`@` 引用的输入区接线（2026-10-16，拆分产出）。
- *
- * 唯一入口的纪律在这里被钉住：标记的**拼写**只由 `mentionToken` 决定、**剥离**只由
- * `stripMentionTokens` 决定——所以断言都拿 `mentionToken` 反推，而不是硬写 `@plan.csv`。
- * 只要哪天有人在这条链路上另写一份正则，这些用例就会红。
- */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 

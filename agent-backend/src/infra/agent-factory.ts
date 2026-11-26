@@ -1,11 +1,3 @@
-/**
- * Agent 实例装配工厂（infra 层）：domain 的 loadAgentConfig 配置包 +
- * McpManager（异步并发建连不阻断就绪）+ LlmProvider，产出池化的 ChatAgent。
- *
- * run() 路径选择：
- * - 无可用工具（本期内置工具 Phase 5 才落地）→ LlmProvider.streamChat 直聊
- * - 有 MCP 工具 → pi 低层 runAgentLoop（仅当 LlmProvider 为 PiAiLlmProvider）
- */
 import path from 'node:path';
 import type { Logger } from 'pino';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -15,6 +7,8 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
+import { planGateBlocks } from '../domain/intent-focus/plan-gate.js';
+import type { PlanLimits, PlanProgress } from '../domain/plan/types.js';
 import { isIntentFocusEnabled, isTaskPlanningEnabled } from '../domain/soul.js';
 import { createOntologyFactsLoader } from '../domain/plan/ontology-facts.js';
 import { PlanStore } from '../domain/plan/store.js';
@@ -56,38 +50,17 @@ import { mcpToolsAsAgentTools } from './mcp/mcp-tool-adapter.js';
 
 export interface ChatAgent extends PooledInstance {
   readonly config: AgentConfigBundle;
-  /**
-   * 实例创建时**固化的配置指纹**（R7 / `FR-034`）。
-   * `server.ts` 的 `getOrCreateAgent` 在池命中后用它与磁盘比对，不一致即换代。
-   */
   readonly configFingerprint: string;
   unavailableMcp(): string[];
-  /** 单服务连接状态（FR-019）：建连结果未产生前为 `unknown`，不误报为 `failed` */
   mcpStatusOf(server: string): McpConnectionStatus;
-  /**
-   * 主动健康探测（2026-09-23）：由 `server.ts` 的调度器定期调用，补齐
-   * "服务被停掉但无流量、`onClose` 不触发"导致的假绿；返回本次翻转为 failed 的服务名。
-   */
   probeMcp(): Promise<string[]>;
-  /**
-   * 有界等待本实例的 MCP 建连**全部落定**（2026-10-18）。
-   *
-   * 为什么需要：建连是 fire-and-forget，而一轮对话的工具装配按 `isAvailable` 过滤，
-   * 首轮若在飞行中就开跑，该轮会**静默缺少 MCP 工具**（状态却随后变绿，用户以为已就绪）。
-   * 已落定（常态）→ 立即返回 `true`，不影响首字延迟。
-   *
-   * @returns `true` = 已有连接结果（connected/failed）；`false` = 本次等待超时（降级继续）。
-   */
   mcpReady(timeoutMs: number): Promise<boolean>;
   run(req: AgentRunRequest): AsyncIterable<LlmEvent>;
 }
 
 export interface AgentFactoryDeps {
-  /** .opt-agent 根目录 */
   root: string;
-  /** LlmProvider 惰性获取（默认模型全局单例；测试注入 fake） */
   llm: () => LlmProvider;
-  /** 请求级模型覆盖的 provider 构造（缺省 new PiAiLlmProvider；测试注入 fake 时统一返回 fake） */
   providerFor?: (entry: ModelSelection) => LlmProvider;
   logger: Logger;
   mcpTimeoutMs: number;
@@ -101,32 +74,28 @@ export interface AgentFactoryDeps {
   /** read_file 截断上限（KB） */
   truncateKb?: number;
   /**
+   * 028：规划门禁阈值（来自 `intent_focus.plan_threshold`）。
+   *
+   * 缺省 = 门禁关闭（开启规划即发起规划调用）；分数低于该值时本轮跳过规划。
+   */
+  planThreshold?: number;
+  /** 028：规划上限（`config.yaml` 的 `plan` 块）；缺省走 `DEFAULT_PLAN_LIMITS` */
+  planLimits?: PlanLimits;
+  /**
    * `write_file` 落盘字节上限（2026-11-16）：生产由 `server.ts` 注入
    * `PREVIEW_MAX_MB`——与预览上限同源，避免写出"能下载、点开即 413"的文件。
    */
   writeMaxBytes?: number;
-  /** 签名直链对外基址（file_args 转换用） */
   publicBaseUrl: string;
-  /** 签名直链 HMAC 密钥（file_args 转换用） */
   fileSignSecret: string;
-  /** 实例内 MCP 单 server 建连落定时回调（server.ts 接线到事件总线 → SSE 推送） */
   onMcpStatus?: (key: PoolKey) => void;
-  /** MCP 工具调用计数回调（R4 / FR-049）；由 server.ts 接线到 UsageDb */
   onMcpCall?: (event: McpCallEvent) => void;
-  /**
-   * 计划留档（`plan.jsonl`）：缺省按 `root` 自建一个工厂级实例。
-   *
-   * 显式注入只为测试替身；自建能保证「同线程串行写」的 Promise 链是工厂级共享，
-   * 而不是每轮新建各写各的。
-   */
   planStore?: PlanStore;
 }
 
-/** 未注入重试口径时的缺省（= 不重试，与 pi-ai 的 `maxRetries` 默认一致；测试路径即此） */
 const NO_LLM_RETRY: LlmRetryOptions = { maxRetries: 0, maxRetryDelayMs: 0 };
 
 export class AgentInstanceFactory {
-  /** 计划留档：只写不读，不参与上下文组装 */
   private readonly planStore: PlanStore;
 
   constructor(private readonly deps: AgentFactoryDeps) {
@@ -156,11 +125,8 @@ export class AgentInstanceFactory {
       ...(this.deps.onMcpStatus ? { onStatusChange: () => this.deps.onMcpStatus!(key) } : {}),
     });
     // 异步并发建连：不 await，不阻断实例就绪（保首字延迟 SC-001）；
-    // 但把落定 Promise 留下，发消息前可 `mcpReady()` 有界等待（见 ChatAgent.mcpReady）
     void mcp.connectAndTrack(config.mcpServers);
 
-    // 020：本体行为权限闸门。与实例同生命周期（部署换代即重建），
-    // 目录签名变化时内部自行重载；加载告警走 alert 通道，不阻断实例创建。
     const scopeGuard = createScopeGuard({
       agentDir,
       username: key.userId,
@@ -177,8 +143,6 @@ export class AgentInstanceFactory {
         ),
     });
 
-    // 021：本体行为规则闸门。与实例同生命周期（部署换代即重建），目录签名变化时内部自行重载；
-    // 加载告警走 alert 通道，不阻断实例创建（与 020 同一口径）。
     const ruleGate = createRuleGate({
       agentDir,
       warn: (warnings) =>
@@ -225,16 +189,7 @@ export class AgentInstanceFactory {
       thread_id: req.threadId,
     });
     const tools: AgentTool[] = [];
-    /** 平台内置工具名：规则闸门据此跳过判定与记录（内置与函数同名时仍按内置优先） */
     const builtinNames = new Set<string>();
-    /**
-     * 2026-11-24（产品口径）：本体规则闸门**只在意图聚焦开启时生效**。
-     *
-     * 与 013 的开关同源、逐次读盘且 fail-closed（读不出来按关闭）：
-     * 关闭轮次不建函数记录、不包装工具——零开销、零日志噪声。
-     * 开关属于部署配置，请求方无法按轮绕过（`skip_intent_focus` 只是"本轮不判定技能"，
-     * 不能顺带绕开规则校验，否则会变成一条提权通道）。
-     */
     const ruleGateEnabled = isIntentFocusEnabled(
       this.deps.root,
       inst.key.userId,
@@ -244,8 +199,6 @@ export class AgentInstanceFactory {
       },
     );
 
-    // 内置工具（Phase 5）：按 TOOL.json 启用项装配，全部经 FileAccess 代理；
-    // 每次 run 重建以绑定当前 threadId（write_file 前缀）
     if (inst.config.enabledTools.length > 0) {
       const fa = new FileAccess({
         optAgentRoot: this.deps.root,
@@ -254,15 +207,12 @@ export class AgentInstanceFactory {
         logger,
         truncateKb: this.deps.truncateKb,
       });
-      // list_dir/read_file 的目录清单按**该数字人**的 scenario 动态生成；
-      // 未配置场景时退化为三空间根
       const availableDirs = listAvailableDirs(this.deps.root, inst.key.userId, inst.key.agentName);
       const builtinTools = buildBuiltinTools({
         fileAccess: fa,
         threadId: req.threadId,
         enabled: inst.config.enabledTools,
         availableDirs,
-        // 技能目录（数字人级）：`read_skill` 的沙箱根，与用户三空间分开、不经 FileAccess
         skillsDir: path.join(
           userAgentsDir(this.deps.root, inst.key.userId),
           inst.key.agentName,
@@ -277,17 +227,11 @@ export class AgentInstanceFactory {
       for (const builtinTool of builtinTools) builtinNames.add(builtinTool.name);
       tools.push(...builtinTools);
     }
-    // MCP 工具：已建连的 server 收集工具表
     for (const server of inst.config.mcpServers) {
       if (!mcp.isAvailable(server.name)) continue;
       try {
         const toolInfos = await mcp.listTools(server.name);
-        // 工具白名单（2026-10-03）：只把白名单里的工具挂给数字人——**模型看不到其余工具**
-        // （清单外的工具不进工具表，模型无从发起调用；比"调用时拒绝"更彻底）。
-        // 缺省 / 空数组 = 不限制（语义与判据见 `mcp-tool-scope.ts`）。
         const visibleToolInfos = scopeToolsByAllowlist(toolInfos, server.allowedTools);
-        // file_args 声明：绑定当前（用户，数字人）的 FileAccess + 签名直链铸造（远程服务回源下载）。
-        // 签名内的路径带数字人段（`agentScopedPath`）⇒ 直链只能取回**本数字人**数据域的文件。
         const fileCtx = server.fileArgs
           ? {
               fileAccess: new FileAccess({
@@ -310,20 +254,14 @@ export class AgentInstanceFactory {
           mcp,
           server.name,
           visibleToolInfos,
-          // 强制穿透的运行上下文（2026-09-16）：uid=当前用户、sid=当前会话；
-          // 工具 schema 里声明了才注入，没声明的不受影响
           { uid: inst.key.userId, sid: req.threadId },
           server.fileArgs,
           fileCtx,
           this.deps.onMcpCall,
           logger,
           asyncToolContext(server, inst.key.userId, inst.key.agentName, req.threadId, this.deps),
-          // 工具显示名（2026-10-27）：平台配置优先，进意图聚焦命题；缺省回退英文拼接
           server.toolLabels,
         );
-        // HITL：该服务声明了 confirmation 策略且本 run 带交互口时，
-        // 命中策略的工具包交互门（execute 前挂起等用户确认参数）；
-        // 无 sink（理论防御：run-manager 恒传入）或未声明策略 → 原样直跑
         if (req.interactionSink && needsConfirmation(server.confirmation)) {
           for (const t of agentTools) {
             const rawName = t.name.startsWith(`${server.name}__`)
@@ -331,8 +269,7 @@ export class AgentInstanceFactory {
               : t.name;
             tools.push(
               toolNeedsConfirmation(server.confirmation, rawName)
-                ? // 规则字段声明按**当前工具名**查服务级映射：不在确认范围内的工具
-                  // 根本不会被包装，映射对其天然不生效
+                ?
                   wrapToolWithInteraction(t, req.interactionSink, server.rulesFields?.[rawName])
                 : t,
             );
@@ -348,22 +285,10 @@ export class AgentInstanceFactory {
       }
     }
 
-    // 020 / 021 共用**同一份**本轮挂起状态（2026-11-09）：任一方拒绝后，本轮其余工具
-    // 一律不执行。状态每轮新建一次、随工具数组丢弃（不落实例、不跨轮）。
     // 兜底出口接到 `interruptRun`（与用户点"停止"同路径，不留错误码）：软收尾只给
-    // 一次机会，模型第二次仍要调工具即纯中止本轮。
     const suspension = createToolSuspension(() => req.interruptRun?.());
 
-    // 021：规则闸门在 020 **内侧**（先判权限、再判规则）。被权限拒绝的调用不会进入这里，
-    // 因此既不会被判定，也不会进入函数记录（`FR-009` / `FR-003`）。
-    // `availableNames` 由**本轮最终工具数组**生成（含内置），用 `matchKeys` 同时登记
-    // "完整名"与"去服务前缀名"——规则的 `related_functions` 写的是裸名，只有裸名可命中（`FR-043`）。
-    // 2026-11-24：意图聚焦关闭时不包装（规则闸门整体不生效）。
     let ruled = tools;
-    /**
-     * 028 T502：写后失效探测。由函数记录提供「算过但已被写操作打脏」的判据
-     * （`hasEver && !has`），闸门关闭时为 `undefined` —— 此时无失效概念可谈。
-     */
     let isStaleProbe: ((toolName: string) => boolean) | undefined;
     if (ruleGateEnabled) {
       /**
@@ -398,9 +323,6 @@ export class AgentInstanceFactory {
       });
     }
 
-    // 020：统一在装配**末端**套一层权限闸门（内置工具与 MCP 工具一视同仁）。
-    // 套在 HITL 包装之外 ⇒ 判定先于人工确认，被拒不弹确认框（FR-002）；
-    // 装配顺序固定为 `guardTools(ruleGateTools(tools))`：020 在外、021 在内。
     const guarded = guardTools(
       ruled,
       scopeGuard,
@@ -413,9 +335,7 @@ export class AgentInstanceFactory {
       suspension,
     );
 
-    // 007：把"本轮模型真正能用的工具"回填给域层（轮末生成「下一步动作提示」要据此裁剪引用）。
     // 放在工具装配**之后、降级判定之前**：直聊分支（tools 为空）同样回填空数组，
-    // 语义即"本轮模型没有任何工具"。包装不改名称与描述，回填内容与包装前一致。
     if (req.runtime) {
       req.runtime.availableTools = guarded.map((t) => ({
         name: t.name,
@@ -424,31 +344,18 @@ export class AgentInstanceFactory {
     }
 
     // 请求级模型覆盖（FR-023）：指定模型时按该 entry 构造临时 provider，
-    // 不重建实例（实例共享 MCP/工具连接）；缺省用默认模型全局单例
     const llm = req.model
       ? this.deps.providerFor
         ? this.deps.providerFor(req.model)
         : new PiAiLlmProvider(req.model, this.deps.llmRetry ?? NO_LLM_RETRY)
       : this.deps.llm();
-    // 016：聚焦提示由 `run-consume` 在 prompt 组装后直接追加进 `req.systemExtra`，
-    // 装配期不再回调判定（本特性与工具清单无关，且入口卡片轮次不应扫目录）。
     const extra = req.systemExtra;
-    // 2026-11-07：本轮用户显式选中的技能（`/技能名`）只插入该技能；缺省走默认全量索引。
-    // 组装是纯函数（`skill-prompt.ts`），实例本身不重建、不指纹换代。
     const basePrompt = composeSystemPrompt({
       soulBody: inst.config.soulBody,
       skills: inst.config.skills,
       ...(req.skill ? { explicitSkill: req.skill } : {}),
     });
-    // FR-017：滚动摘要等动态片段追加到实例固化 System Prompt 之后
     let systemPrompt = extra ? `${basePrompt}\n\n${extra}` : basePrompt;
-    // 007 修订（Tail Protocol）：SOUL 开关开启时在 System Prompt **末尾**追加尾部块指令。
-    // 候选目录取**本轮意图聚焦选出的本体能力**（`req.focusToolTips`）：卡片的 `tool_tips`
-    // 只能从这份清单抄写，与"无 Laya 结果就不产卡片"的门控同源。
-    // 放在最末尾让"输出格式要求"最贴近生成位置、最易被遵循。
-    //
-    // 开关关闭 / 本轮能力为空 → 不追加指令（`effectiveNextActionsMax` 返回 undefined），
-    // 模型因此不感知该协议，本轮必然无卡片。
     const focusToolTips = req.focusToolTips ?? [];
     const tailMax = effectiveNextActionsMax(req.nextActionsMax, focusToolTips);
     if (tailMax !== undefined) {
@@ -494,13 +401,21 @@ export class AgentInstanceFactory {
       return;
     }
 
-    // ── 028：任务规划（意图聚焦之后、agent loop 之前）──────────────────────
-    // 与意图聚焦**逻辑与**：任一关闭即零规划调用、零额外模型往返（FR-001）。
-    // 规划改动只影响「本轮跑 loop 时用什么 tools / messages / 钩子」，
-    // 不改工具装配顺序、不改 `availableNames`（FR-015）。
     let loopTools = guarded;
     let loopMessages = req.messages;
     let planHooks: RunAgentLoopHooks | undefined;
+    /**
+     * 028 FR-034：计划进度通道。
+     *
+     * `begin()` 在 loop 启动前就会产出首步 `running`，此时事件队列还不存在，
+     * 故先排队；loop 就绪后由 `onPlanProgress` 把后续进度直接投递到队列。
+     */
+    const queuedProgress: PlanProgress[] = [];
+    let progressSink: ((event: PlanProgress) => void) | null = null;
+    const onPlanProgress = (event: PlanProgress): void => {
+      if (progressSink !== null) progressSink(event);
+      else queuedProgress.push(event);
+    };
     if (!planEnabled) {
       logger.info(
         { event: 'plan.skipped', reason: ruleGateEnabled ? 'switch_off' : 'focus_disabled' },
@@ -508,6 +423,17 @@ export class AgentInstanceFactory {
       );
     } else if ((req.focusPrompt ?? '').trim() === '') {
       logger.info({ event: 'plan.skipped', reason: 'empty_focus' }, '本轮无意图聚焦结果，跳过规划');
+    } else if (planGateBlocks(req.planScore, this.deps.planThreshold)) {
+      // 028：门禁拦截（分数缺席 = 没判/判失败 → fail-open，继续走规划）
+      logger.info(
+        {
+          event: 'plan.skipped',
+          reason: 'below_threshold',
+          plan_score: req.planScore,
+          threshold: this.deps.planThreshold,
+        },
+        '规划门禁判定为单步任务，跳过规划阶段',
+      );
     } else {
       try {
         const agentDir = path.join(
@@ -534,10 +460,11 @@ export class AgentInstanceFactory {
             warn: (fields, message) => logger.warn(fields, message),
           },
           suspend: (code) => suspendTools(suspension, code),
-          // 留档：不阻塞本轮（`append` 自带串行链与失败吞掉），也不回读
           record: (record) => {
             void this.planStore.append(inst.key.userId, inst.key.agentName, req.threadId, record);
           },
+          onProgress: onPlanProgress,
+          ...(this.deps.planLimits !== undefined ? { limits: this.deps.planLimits } : {}),
         });
         if (await orchestrator.begin()) {
           loopTools = orchestrator.initialTools();
@@ -545,7 +472,6 @@ export class AgentInstanceFactory {
           planHooks = orchestrator.hooks;
         }
       } catch (err) {
-        // 规划是增强件：装配/加载失败一律回退既有流程，本轮照常可用（NFR-006）
         logger.warn(
           { event: 'plan.abandoned', reason: 'init_failed', err },
           '规划装配失败，本轮回退既有流程',
@@ -560,26 +486,19 @@ export class AgentInstanceFactory {
       systemPrompt,
       messages: loopMessages,
       tools: loopTools,
-      // 展示名索引取**全量装配结果**（2026-11-26）：`loopTools` 在规划下是「首步收窄集」，
-      // 用它建索引会让第 2 步起新出现的工具查不到 label → 卡片回退显示英文调用名。
-      // label 与可见性无关，故用未收窄的 `guarded`。
       labelTools: guarded,
       thinking: req.thinking,
       signal: req.signal,
       ...(planHooks !== undefined ? { hooks: planHooks } : {}),
+      // 028 FR-034：先补发 begin 期间的进度，再把实时回调接到事件队列
+      planProgress: queuedProgress,
+      onPlanProgress: (emit) => {
+        progressSink = emit;
+      },
     });
   }
 }
 
-/**
- * 异步工具的注入依赖（R11）：**恒构造**——"是否注入"由每个工具自己的入参 schema
- * 判定（声明了 `resultUrl` 才注入，见 `mcp/async-result-url.ts`），平台侧不再有
- * `async_tools` 白名单。
- *
- * 回写地址**每次调用现铸**（而非装配期铸一次）：`exp` 从调用时刻起算更贴合"任务最长时长"，
- * 且能把 `call_id` 与工具全名作为**归属提示参数**写进 URL——服务只需原样回传，
- * 产出即可接回具体对话与那一次调用（契约 §10.3）。
- */
 function asyncToolContext(
   server: McpServerConfig,
   userId: string,
@@ -604,14 +523,6 @@ function asyncToolContext(
   };
 }
 
-/**
- * 本轮挂载给模型的工具名集合（注册校验的唯一判据，`FR-043`）。
- *
- * 每个工具名经 `matchKeys` 展开为"完整名 + 去 `{服务}__` 前缀名"：
- * 规则的 `related_functions` 写裸名（`checkSupplierExistence`），
- * 而模型看到的工具名带服务前缀（`erp__checkSupplierExistence`）——
- * 两种键都登记，才既支持带前缀也支持不带前缀的服务。
- */
 function collectAvailableNames(tools: readonly AgentTool[]): ReadonlySet<string> {
   const names = new Set<string>();
   for (const tool of tools) {
@@ -620,14 +531,12 @@ function collectAvailableNames(tools: readonly AgentTool[]): ReadonlySet<string>
   return names;
 }
 
-/** 该服务是否需要任何交互确认（never/缺省 = 否） */
 function needsConfirmation(policy: McpConfirmation | undefined): boolean {
   if (policy === undefined || policy === 'never') return false;
   if (policy === 'always') return true;
   return policy.tools.length > 0;
 }
 
-/** 单个工具（原始工具名，不含 server 前缀）是否命中确认策略 */
 function toolNeedsConfirmation(policy: McpConfirmation | undefined, rawToolName: string): boolean {
   if (policy === 'always') return true;
   if (typeof policy === 'object' && Array.isArray(policy.tools)) {

@@ -1,9 +1,3 @@
-/**
- * 组件测试：重置密码弹窗（契约 §6.4.1，2026-11-18）。
- *
- * 覆盖：弹窗形态、两种意图的说明文案、两次输入一致性校验、
- * 长度校验、提交载荷、失败提示就地展示、保存中态与重开清空。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ResetPasswordDialog from './ResetPasswordDialog.vue'

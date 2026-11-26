@@ -1,28 +1,4 @@
 <script setup lang="ts">
-/**
- * SOUL 编辑器（004：结构化）。
- *
- * 五个字段分两类，界面上明确标出归属：
- *
- * | 字段 | 归属 |
- * |---|---|
- * | 角色简介 | **只给前台**：数字人切换面板展示 |
- * | 首屏欢迎语 / 问题实例 | **只给前台**：新建对话页的引导（经「快速上手」弹窗编辑） |
- * | 主要使命 / 能力标签 / 绝对禁止 / 补充说明 | **进系统提示词** |
- * | 意图聚焦（013） | **运行环境开关**：只写进 SOUL.md 的 frontmatter，由运行环境读取 |
- * | 输入重写 / 术语替换（027） | **运行环境开关**：同上，是意图聚焦输入侧的从属能力 |
- * | 下一步动作提示（007） | **运行环境开关**：同上，**依赖意图聚焦**（意图聚焦关闭则本开关失效） |
- *
- * 这么分是因为运行环境只把 SOUL.md 的**正文**当作系统提示词
- * （frontmatter 承载展示数据），界面上说清归属，管理员才不会把展示文案
- * 误当提示词写、或反之。
- *
- * **界面归属（2026-11-20）**：上面三个开关都由 SOUL.md frontmatter 承载、都由
- * 运行环境读取，且都以意图聚焦为前提，因此在界面上**合并为同一个区块、同级展示**
- * ——管理员看到的是一整条"聚焦管线"（前置改写 → 聚焦判定 → 输出侧提示），
- * 不必在两个框之间来回对照。数据层未变：六个字段仍是同级扁平键，
- * 物化产物的写键条件与字节一律不变。
- */
 import { computed, ref } from 'vue'
 import type { BuiltinTool, McpServiceListItem, SoulDesign, SoulStarter } from '../../api/types'
 import { SOUL_LIMITS, emptySoulDesign } from '../../constants/agent-design'
@@ -31,10 +7,8 @@ import QuickStartDialog from './QuickStartDialog.vue'
 
 const props = defineProps<{
   modelValue: SoulDesign
-  /** 该数字人已启用的内置工具（快速上手的工具候选） */
   enabledTools: string[]
   builtinTools: BuiltinTool[]
-  /** 该数字人已挂载的 MCP 服务名 */
   mountedServices: string[]
   mcpServices: McpServiceListItem[]
 }>()
@@ -59,13 +33,6 @@ function onQuickStartSave(value: { welcome: string; starters: SoulStarter[] }): 
   patch({ welcome: value.welcome, starters: value.starters })
 }
 
-/**
- * 条数输入（`type="number"`，min / max 与初值共用 `SOUL_LIMITS`）。
- *
- * **拒绝式，与后端同口径**：只有 1~6 的整数才上抛；其余（空 / 小数 / 越界 / 手输字母）
- * 一律**把输入框弹回当前值**、不产生改动——既避免"界面显示 7、产物写 3"这类错配，
- * 也不为一次误输入打断保存（保存期后端仍会独立拒绝非法值）。
- */
 function onHintCountChange(event: Event): void {
   const input = event.target as HTMLInputElement
   const value = Number(input.value)
@@ -92,12 +59,6 @@ function onIntentFocusChange(event: Event): void {
   else patch({ intent_focus: true })
 }
 
-/**
- * 聚焦阶数（019）：`0~2` 的整数。
- *
- * 与条数输入同一口径——**拒绝式**：越界 / 非整数一律不上抛（单选控件本身也只给三个值），
- * 关闭意图聚焦时控件置灰但**数值保留**，再次打开即恢复，不必重选。
- */
 const FOCUS_DEPTH_OPTIONS = [
   { value: SOUL_LIMITS.focusDepthMin, label: '0 阶（只聚焦本身）' },
   { value: 1, label: '1 阶（向上一跳 / 向下一跳）' },
@@ -225,10 +186,6 @@ function onFocusDepthChange(event: Event): void {
       </button>
     </fieldset>
 
-    <!-- 013 / 019 / 027 / 007：运行期开关区。
-         2026-11-20 起四个开关**合并为同一区块、同级展示**——它们都只写进 SOUL.md 的
-         frontmatter、都由运行环境读取，且都以意图聚焦为前提；分两个框会让管理员
-         在两个区块之间来回对照才能看清一条完整管线。 -->
     <fieldset class="soul-editor__intent-focus">
       <legend class="field__label">
         意图聚焦
@@ -250,7 +207,6 @@ function onFocusDepthChange(event: Event): void {
       <p class="field__hint" data-test="intent-focus-hint">
         每一轮对话在生成回答之前先做一次意图判定，把最相关的工具或技能作为本轮规划重点（注意：有本体技能时阶数配置才生效！）。
       </p>
-      <!-- 019：聚焦阶数是意图聚焦的**参数**——关闭时置灰且不可选，但数值保留（不回退） -->
       <div
         class="soul-editor__depth"
         :class="{ 'soul-editor__depth--off': soul.intent_focus !== true }"
@@ -280,8 +236,6 @@ function onFocusDepthChange(event: Event): void {
           缺省 0 阶 = 只聚焦本身。
         </p>
       </div>
-      <!-- 027：两个从属开关。意图聚焦关闭时**置灰但保留勾选值**（与阶数同口径：
-           关掉再开回来不必重设；后端归一化也不会清空这两个值） -->
       <label class="soul-editor__switch">
         <input
           type="checkbox"
@@ -309,7 +263,6 @@ function onFocusDepthChange(event: Event): void {
       <p class="field__hint" data-test="term-normalize-hint">
         仅当该数字人拥有本体术语映射集时，开启本功能才会生效
       </p>
-      <!-- 028：任务规划（滚动规划阶段）。与意图聚焦逻辑与——关闭时置灰但保留已选值。 -->
       <label class="soul-editor__switch">
         <input
           type="checkbox"
@@ -325,9 +278,6 @@ function onFocusDepthChange(event: Event): void {
         未勾选即该数字人零规划调用。
       </p>
 
-      <!-- 007：输出侧的延伸开关。同样只写进 SOUL.md 的 frontmatter、由运行环境当作功能
-           开关读取；依赖意图聚焦——关闭时本开关置灰并被强制关闭（与上面两项不同：
-           输入重写 / 术语替换的已选值会保留）。 -->
       <label class="soul-editor__switch">
         <input
           type="checkbox"
@@ -338,8 +288,6 @@ function onFocusDepthChange(event: Event): void {
         />
         是否开启下一步动作提示
       </label>
-      <!-- 开关的**参数**：关闭时**置灰且不可填写**（`disabled`），但**不回退数值**——
-           管理员先前填的数字被保留，再次打开即恢复，不必重填（它只在开启时才写进产物） -->
       <label
         class="soul-editor__count"
         :class="{ 'soul-editor__count--off': soul.next_action_hints !== true || soul.intent_focus !== true }"
@@ -411,8 +359,6 @@ function onFocusDepthChange(event: Event): void {
   padding: var(--space-3);
 }
 
-/* 布尔开关：原生 checkbox（与 `ScenarioFieldDialog` 的「必填」同款），
-   整行可点——点击文字也能切换，不必精确命中那个小方块 */
 .soul-editor__switch {
   display: flex;
   align-items: center;
@@ -420,7 +366,6 @@ function onFocusDepthChange(event: Event): void {
   cursor: pointer;
 }
 
-/* 开关的条数参数：与开关同区、紧随其后；`disabled` 由模板按开关状态控制 */
 .soul-editor__count {
   display: flex;
   align-items: center;
@@ -451,7 +396,6 @@ function onFocusDepthChange(event: Event): void {
   flex-basis: 100%;
 }
 
-/* 019：聚焦阶数（单选组）——与条数参数同区，关闭开关时整组弱化 */
 .soul-editor__depth {
   display: flex;
   align-items: center;

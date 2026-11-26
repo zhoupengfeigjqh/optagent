@@ -1,11 +1,3 @@
-/**
- * 统一 API 错误（与 `agent-backend` 的 `ApiError` 同构）。
- *
- * 错误体固定为 `{ error: { code, message, details? } }`（契约 §0.3）：
- * - `message` MUST 可读且可定位（具体字段/文件/条目），MUST NOT 只返回"操作失败"；
- * - 校验类错误 MAY 附带 `details`，形如 `{ errors: [...] }`，
- *   用于一次性列出全部错误项（`FR-027`、`SC-020`）。
- */
 import { ERROR_CODES, ERROR_STATUS } from './error-codes.js';
 
 export class ApiError extends Error {
@@ -22,7 +14,6 @@ export class ApiError extends Error {
   }
 }
 
-/** 400：参数不合法 */
 export function validationFailed(message: string, details?: unknown): ApiError {
   return new ApiError(ERROR_CODES.VALIDATION_FAILED, message, details);
 }

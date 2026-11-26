@@ -46,10 +46,6 @@ const cols = computed<ColumnsType[]>({
   },
   set: (val) => emit('update:cols', val),
 })
-/**
- * 更新甘特图数据
- * @param option
- */
 const updateGantt = (option: any) => {
   if (ganttRef.value) ganttRef.value.updateGantt(option)
 }
@@ -82,11 +78,7 @@ const normalizeGanttData = (list: any[] = []): any[] => {
     }
   })
 }
-/** 规范化后的甘特图数据（传给 z-gantt，同时供 option 组装与更新使用） */
 const ganttChartData = computed<any[]>(() => normalizeGanttData(props.ganttData))
-/**
- * 监听甘特图数据变化，变化后同步更新甘特图数据
- */
 watch(
   () => props.ganttData,
   () => {
@@ -98,35 +90,19 @@ watch(
   },
   { deep: true },
 )
-/**
- * 共享运行时上下文：由本组件创建并透传给 z-gantt，
- * z-gantt 会把图表实例、鼠标坐标、当前数据点注入其中，业务侧无需自行声明
- */
 const ganttCtx: Record<string, any> = {}
 
-/** 解析 ganttOption：支持工厂函数 (ctx) => option 与普通对象两种形式 */
 const resolveGanttOption = (option: any): any =>
   typeof option === 'function' ? option(ganttCtx) : option || {}
 
-/**
- * 组装传给 z-gantt 的 option：
- * - 分类名由左侧表格展示：关闭 y 轴的标签与标题渲染，仅保留 grid 用于绘制绘图区
- *   左侧的纵向边界线，并把 grid 列宽压到 1px，不留下空白单元格列
- *   （替代原先 marginLeft:1 把 y 轴挤出可视区的做法：那样分类文本仍会绘制到绘图区
- *   之外，数据更新重绘时 Tick label 带位移动画，表现为名称闪现后消失）
- * - 保证至少存在一个 series 且携带最新甘特图数据，使首次初始化即可渲染
- * - y 轴未配置分类时，按甘特图数据顺序自动生成分类与范围
- */
 const ganttOpt = computed(() => {
   const data = ganttChartData.value
-  // 解析业务配置（函数形式会把本组件的共享上下文传入，回调内可直接用 ctx）
   const rawOption = resolveGanttOption(props.ganttOption)
   const rawSeries = Array.isArray(rawOption?.series) ? rawOption.series : []
   const baseSeries = rawSeries.length > 0 ? rawSeries[0] : { name: '甘特图', turboThreshold: 0 }
 
   const rawYAxis = rawOption?.yAxis || {}
   const needAutoAxis = !Array.isArray(rawYAxis.categories) || rawYAxis.categories.length === 0
-  // y 轴基础配置：未配置分类时按甘特图数据顺序自动生成分类与范围
   const baseYAxis = needAutoAxis
     ? {
         ...rawYAxis,
@@ -140,32 +116,21 @@ const ganttOpt = computed(() => {
     ...rawOption,
     yAxis: {
       ...baseYAxis,
-      // 保留 Gantt 的 grid：其边界线由 yAxis 的 lineWidth 绘制（renderBorder），
-      // borderColor 会覆盖 lineColor/tickColor，用于给出绘图区左侧的纵向轴线
       grid: {
         ...baseYAxis.grid,
         enabled: true,
         borderColor: baseYAxis.grid?.borderColor ?? '#e0e0e0',
       },
-      // 不渲染分类文本：左侧表格已展示分类名，且这是数据更新时名称闪现动画的来源；
-      // grid 列宽 = 2 * distance + 标签宽度，取 0.5 使列宽为 1px：既不留空白列，
-      // 又让 grid 边界线与 y 轴线重合，只呈现一条纵向轴线
       labels: { ...baseYAxis.labels, enabled: false, distance: 0.5 },
       // Highcharts 默认 y 轴标题为 'Values'，未显式配置时关闭，避免占位与文本绘制
       title: baseYAxis.title ?? { text: null },
-      // 刻度线不绘制（grid 模式下列宽由 labels.distance 决定，与 tickLength 无关）
       tickLength: 0,
       tickWidth: 0,
-      // grid 的边界线依赖 lineWidth 绘制，需大于 0
       lineWidth: baseYAxis.lineWidth ?? 1,
     },
     series: [{ ...baseSeries, data }, ...rawSeries.slice(1)],
   }
 })
-/**
- * 鼠标按下句柄
- * @param e
- */
 const handleMouseDown = (e: MouseEvent) => {
   e.preventDefault()
   showGuideLine.value = true
@@ -181,10 +146,6 @@ const handleMouseDown = (e: MouseEvent) => {
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('mouseup', handleMouseUp)
 }
-/**
- * 鼠标移动句柄
- * @param e
- */
 const handleMouseMove = (e: MouseEvent) => {
   e.preventDefault()
   isClick = false
@@ -200,9 +161,6 @@ const handleMouseMove = (e: MouseEvent) => {
   guideLinePosition.value = newWidth
   tempWidth.value = newWidth
 }
-/**
- * 鼠标抬起句柄
- */
 const handleMouseUp = () => {
   showGuideLine.value = false
   tableWidth.value = `${tempWidth.value}px`
@@ -213,19 +171,11 @@ const handleMouseUp = () => {
     clearTimeout(timer)
   }, 1000)
 }
-/**
- * 表格调整列宽
- * @param w
- * @param col
- */
 function handleResizeColumn(w: any, col: any) {
   cols.value = cols.value.map((item) =>
     item.dataIndex === col.dataIndex ? { ...item, width: w } : item,
   )
 }
-/**
- * 全局滚动时，带动拖拽句柄一起移动，方便用户在任何位置操作句柄
- */
 const handleScroll = () => {
   const base = props.navPosition === 'top' ? navPaddingTop : normalPaddingTop
   handlerTop.value = base + window.scrollY
@@ -238,21 +188,12 @@ const handleVisibleTable = () => {
   }
 }
 
-/**
- * 拖拽进度条开始事件
- */
 const handlePointDragStart = (event: any) => {
   emit('handlePointDragStart', event)
 }
-/**
- * 拖拽中事件
- */
 const handlePointDraging = (event: any) => {
   emit('handlePointDraging', event)
 }
-/**
- * 拖拽结束事件
- */
 const handlePointDragEnd = (event: any) => {
   emit('handlePointDragEnd', event)
 }
@@ -273,9 +214,6 @@ onMounted(() => {
   }, 1500)
   if (!props?.isFixedBtn) window.addEventListener('scroll', handleScroll)
 })
-/**
- * 销毁绑定的事件
- */
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleMouseMove)
   document.removeEventListener('mouseup', handleMouseUp)

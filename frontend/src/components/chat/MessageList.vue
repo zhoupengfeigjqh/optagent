@@ -1,21 +1,4 @@
 <script setup lang="ts">
-/**
- * 消息列表（T040）
- *
- * - 空消息且无流式 → 初始入口占位（`empty` 插槽可替换）
- * - 有消息 → 逐条渲染 `MessageBubble`，并用 `v-memo` 抑制无关重渲染
- * - 流式 → 追加"合成气泡"承载本轮思考/工具/正文；其**上方**先渲染乐观用户气泡
- *   （`pendingUser`，十七次调整：发送即出现，完成后由历史真身接管，不重复）
- * - 搜索 → 计算每条消息的全局匹配基准序号，并只对当前活跃序号滚动定位
- * - **滚动跟随 / 会话位置记忆 / 读屏播报**（2026-10-16 起由 `useMessageScroll` 承担）：
- *   自动置底、上翻暂停、本端发送强制置底、「回到底部」按钮的唯一真源 `atBottom`、
- *   切回旧会话恢复位置、以及"只播结论"的读屏播报，全部实现在
- *   `composables/useMessageScroll.ts`（本组件只消费它返回的 4 个出口）。
- *   本文件由此降到 500 行以内（宪章原则二）。
- * - **失败轮「重试本轮」**（2026-10-15）：从历史里解析该轮的用户消息并上抛（此处是全仓
- *   唯一知道"失败消息的上一轮用户消息是谁"的地方——它按索引向前找，不需要 id 反查）；
- *   解析不出（该消息不在已加载分页窗口内）则不给入口，见 `retryLabels`
- */
 import { computed, nextTick, ref, watch } from 'vue'
 
 import type { FileReference, Message, NextStepAction, ThreadSource } from '../../api/types'
@@ -33,34 +16,14 @@ import type { StreamingView } from './types'
 
 const props = withDefaults(
   defineProps<{
-    /** 历史消息（按时间正序） */
     messages?: Message[]
-    /** 本轮瞬态；`null` 表示无进行中的轮次 */
     streaming?: StreamingView | null
-    /**
-     * 本轮乐观用户消息（十七次调整）；`null` 表示无进行中轮次。
-     * 渲染在历史消息之后、流式气泡**之前**；流终结时由调用方清除。
-     */
     pendingUser?: PendingUserMessage | null
-    /** 搜索关键词 */
     searchKeyword?: string
-    /** 当前定位的全局匹配序号 */
     activeMatchIndex?: number
-    /** 是否还有更早的历史可加载 */
     hasMore?: boolean
-    /**
-     * 会话最新一轮的下一步动作提示（007）。
-     *
-     * 只在 `message.id === message_id` 的那条气泡上透传（`visibleActions` 也守同一判据）：
-     * 历史轮次一律不展示卡片（FR-015）。
-     */
     nextSteps?: ThreadNextSteps | null
-    /**
-     * 当前会话 id（2026-10-16）：**只**用作"切回旧会话恢复上次滚动位置"的存档键。
-     * `null` = 视图态新对话，没有稳定身份，不存档。
-     */
     threadId?: string | null
-    /** 会话来源标记（015）：定时任务会话在消息流顶部显示来源提示；`null` = 普通会话 */
     source?: ThreadSource | null
   }>(),
   {
@@ -78,23 +41,12 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'load-more': []
-  /** 消息反馈（契约未列该项，为向上透传的最小超集；`copy` 由 MessageActions 就地完成） */
   feedback: [payload: { message_id: string; value: 'up' | 'down' | null }]
-  /**
-   * 失败轮「重试本轮」：载荷是**该轮的用户消息**（正文 + 引用）——重发所需的最小集，
-   * 形状正对 `onSend` 的入参，装配层据此直接复用唯一发送链路（引用校验 / 会话创建 /
-   * 失败还原草稿都在那条链路上）。
-   */
   retry: [payload: { content: string; attachments: FileReference[] }]
-  /** 中断轮「重新生成」（由流式气泡触发，向上透传至装配层重发） */
   regenerate: []
-  /** 外部地址点击（契约未列，向上透传；V-10 直跳由装配层执行） */
   'open-link': [href: string]
-  /** 空间目录文件点击（契约未列，向上透传；FR-046 预览由装配层执行） */
   'open-file': [reference: FileReference]
-  /** 跳转入口点击（`viewUrl` / `filePath` 归一化后；打开方式由装配层按 `kind` 判定） */
   'open-view': [item: ViewLinkTarget]
-  /** 下一步动作卡片点选（007/016，向上透传；确认与发送由 ChatPanel 执行） */
   'send-suggestion': [action: NextStepAction]
 }>()
 
@@ -104,23 +56,11 @@ const isEmpty = computed(
   () => props.messages.length === 0 && props.streaming === null && props.pendingUser === null,
 )
 
-/** 卡片归属消息 id（`''` = 无卡片）：`v-memo` 用它触发"卡片刚到达"的重渲染 */
 const nextStepsId = computed(() => props.nextSteps?.message_id ?? '')
 
-/* ---------- 失败轮「重试本轮」（2026-10-15） ---------- */
 
-/** 失败轮重试入口的文案（与 `TR-58` 同一口径：真正的"重发"，不是"重新获取"） */
 const RETRY_LABEL = '重试本轮'
 
-/**
- * 失败轮要重发的那一轮：**该消息之前最近的一条用户消息**（正序列表里就是同轮那条）。
- *
- * 为什么必须从历史里解析：失败轮在服务端**已终局**（`status='failed'` 落盘、实例已释放），
- * 重发是唯一有意义的动作；而"上一条用户消息"这个上下文只存在于消息列表里
- * （`useChatStream` 的缓存只覆盖本次会话内刚失败/中断的那一轮，刷新即空）。
- *
- * @returns 重发载荷；该用户消息**不在已加载窗口内**（分页正好切在两者之间）时为 `null`
- */
 function retryTurnOf(index: number): { content: string; attachments: FileReference[] } | null {
   for (let i = index - 1; i >= 0; i -= 1) {
     const message = props.messages[i]
@@ -131,16 +71,6 @@ function retryTurnOf(index: number): { content: string; attachments: FileReferen
   return null
 }
 
-/**
- * 每条消息的重试入口文案（非失败轮恒为 `null`；失败轮但用户消息不在窗口内也是 `null`）。
- *
- * 判据与气泡自身的渲染条件同源（`status === 'failed'` + 有 `error`）——这里只补上
- * "重发所需的那一轮在不在窗口里"这一条只有列表层才知道的信息。
- *
- * 刻意做成**标量数组**而不是"渲染时现算"：文案是列表层算出来的派生量，可能与消息身份无关地
- * 翻转（"加载更早消息"补进同轮用户消息即是），故它同时作为 `v-memo` 的比较项——`v-memo`
- * 只在比较项变化时才重渲染，若把它留在比较项之外，入口可能长不出来。
- */
 const retryLabels = computed<(string | null)[]>(() =>
   props.messages.map((message, index) =>
     message.status === MESSAGE_STATUS.FAILED && retryTurnOf(index) ? RETRY_LABEL : null,
@@ -154,7 +84,6 @@ function onRetry(index: number): void {
   }
 }
 
-/** 每条消息内首个命中的全局序号（与 `useSessionSearch` 同口径）。 */
 const matchStats = computed(() => {
   const bases: number[] = []
   let cursor = 0
@@ -165,15 +94,12 @@ const matchStats = computed(() => {
   return { bases, total: cursor }
 })
 
-/** 乐观用户气泡：合成一条 `Message` 交给 `MessageBubble`，引用经 `attachments` 还原。 */
 const pendingUserMessage = computed<Message | null>(() => {
   const pending = props.pendingUser
   if (!pending) {
     return null
   }
   return {
-    // 瞬态消息无持久化 id：占位串仅作 `key`/内部标识，不触发任何按 id 的操作
-    //（用户气泡不渲染反馈按钮，与 `streamingMessage` 的空 id 同口径）
     id: '',
     role: 'user',
     content: pending.content,
@@ -184,19 +110,11 @@ const pendingUserMessage = computed<Message | null>(() => {
   }
 })
 
-/** 流式气泡：`content` 为本轮累积正文，瞬态经 `streaming` 传入。 */
 const streamingMessage = computed<Message | null>(() => {
   const run = props.streaming
   if (!run || run.phase === RUN_PHASE.IDLE) {
     return null
   }
-  /**
-   * 失败轮且没有已生成内容时不留空气泡：本轮错误由 `ChatPanel` 的 `ErrorNotice` 统一承载
-   * （`TR-58` 分流点在那里），气泡留下只会是个空壳。
-   *
-   * **中断轮不适用**（2026-11-26）：它在面板层没有任何提示位，气泡里的
-   * 「已停止生成 · 内容未保存」是唯一可感知的收尾信号——空正文也留着。
-   */
   if (run.phase === RUN_PHASE.FAILED && run.text === '') {
     return null
   }
@@ -210,7 +128,6 @@ const streamingMessage = computed<Message | null>(() => {
   }
 })
 
-/** 仅对当前活跃命中做 DOM 标记与滚动定位（命中量大时不做全量渲染优化）。 */
 function markActiveMatch(index: number): void {
   const root = listRef.value
   if (!root) {
@@ -237,17 +154,10 @@ watch(
   { immediate: true },
 )
 
-/* ---------- 自动置底 / 会话位置记忆 / 读屏播报 ---------- */
 
-/**
- * 2026-10-16 起整块抽为 `useMessageScroll`（宪章原则二：单文件 ≤500 行）：
- * 它只依赖这五个入参，与模板的渲染与事件透传没有耦合，抽走后**行为零变化**。
- * 三条口径（上翻暂停 / 本端发送强制置底 / `atBottom` 为唯一真源）写在那个文件的头部。
- */
 const { atBottom, announcement, onScroll, scrollToLatest } = useMessageScroll({
   listRef,
   messages: computed(() => props.messages),
-  /** 流式指纹：阶段、思考、正文、工具数量任一变化都需跟随 */
   streamKey: computed(
     () =>
       `${props.streaming?.phase ?? ''}|${props.streaming?.text.length ?? 0}|${
@@ -273,17 +183,12 @@ function onOpenFile(reference: FileReference): void {
 function onOpenView(item: ViewLinkTarget): void {
   emit('open-view', item)
 }
-/** 只把卡片透传给**归属的那一条**消息（其余 `null`）：历史气泡不用自行判断，`v-memo` 也只需盯一个标量（传整个数组会打断记忆化） */
 function nextStepsOf(message: Message): ThreadNextSteps | null {
   return props.nextSteps && props.nextSteps.message_id === message.id ? props.nextSteps : null
 }
 </script>
 
 <template>
-  <!--
-    包裹层只做一件事：给「回到底部」按钮一个**不随内容滚动**的定位参照。
-    滚动条仍在内层 `.message-list` 上（那里的类名是既有样式与测试的锚点）。
-  -->
   <div class="message-list-wrap">
     <div
       ref="listRef"
@@ -293,7 +198,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
       aria-live="off"
       @scroll="onScroll"
     >
-      <!-- 015：定时任务会话的来源提示（无来源时不渲染、不留占位） -->
       <ThreadSourceNotice v-if="source" :source="source" />
 
       <button v-if="hasMore" type="button" class="message-list__more" @click="emit('load-more')">
@@ -330,7 +234,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
           @send-suggestion="emit('send-suggestion', $event)"
         />
 
-        <!-- 乐观用户气泡（十七次调整）：发送即出现；流终结时随 `pendingUser` 清除，由历史真身接管 -->
         <MessageBubble
           v-if="pendingUserMessage"
           :key="'pending-user'"
@@ -359,11 +262,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
       </template>
     </div>
 
-    <!--
-      读屏专用播报（视觉隐藏）：只播**结论**（本轮回答已完成）。
-      逐 token 的正文变化刻意不播——`role="status"` 会被打字流反复打断，等于噪音；
-      "正在生成"由 `TypingIndicator` 负责，这里负责收尾。
-    -->
     <p
       class="message-list__announce"
       data-test="message-list-announce"
@@ -373,10 +271,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
       {{ announcement }}
     </p>
 
-    <!--
-      回到底部：非底部（用户上翻过、或搜索定位到了旧消息）才出现。
-      `atBottom` 为真时不渲染——按钮存在即意味着"下面还有你看不到的内容"。
-    -->
     <button
       v-if="!atBottom"
       type="button"
@@ -392,16 +286,11 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
 </template>
 
 <style scoped>
-/*
- * 定位参照层：高度由父级 `.chat-panel__body > * { flex: 1; min-height: 0 }` 撑满，
- * 自身不滚动——「回到底部」按钮因此钉在视口上，不会跟着内容滚走。
- */
 .message-list-wrap {
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 同上：宽度跟随中栏轨道，不被消息内容的 min-content 反推 */
   min-width: 0;
 }
 
@@ -415,11 +304,6 @@ function nextStepsOf(message: Message): ThreadNextSteps | null {
   overflow-y: auto;
 }
 
-/*
- * 回到底部（2026-10-16）：紧贴输入区上沿，右边缘与输入区「发送」按钮落在同一条
- * 垂线上——两者同取 Composer 的左右内边距 `--space-5`。下边距取 `--space-2`
- * （与 Composer 内部 `gap` 同值）：是"紧贴"，不是粘住。
- */
 .message-list__jump {
   position: absolute;
   right: var(--space-5);

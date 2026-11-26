@@ -1,14 +1,3 @@
-/**
- * 集成测试：`POST /api/threads/:id/messages` 的入口护栏（2026-11-26，S1 加固）。
- *
- * 三条护栏都在**建流之前**返回 400/503，所以用 `app.inject` 即可（不需要真实端口）：
- * 1. 会话标识字符集（`THREAD_ID_INVALID`）——挡路径穿越；
- * 2. 正文长度上限（`MAX_CONTENT_CHARS`）——挡"一条消息撑爆历史与提示词"；
- * 3. `tool_tips` 条数上限（`MAX_TOOL_TIPS_PER_ACTION`）；
- * 4. 正在关服（`SERVICE_UNAVAILABLE`）——且必须在配额之前判定（不再等 MCP 超时）。
- *
- * 关服用例**放在最后**：`beginDrain()` 是不可逆的进程级标记。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +15,6 @@ const AGENT = 'demo';
 const MAX_CONTENT_CHARS = 32_000;
 const MAX_TOOL_TIPS = 5;
 
-/** 假数字人：本文件所有请求都在建流前被拦，`run` 不应被调用 */
 function fakeAgent(): ChatAgent {
   return {
     key: { userId: USER, agentName: AGENT },

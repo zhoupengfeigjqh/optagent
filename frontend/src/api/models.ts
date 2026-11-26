@@ -9,13 +9,10 @@
 import type { HttpClient } from './http'
 import type { Model, ModelListResponse } from './types'
 
-/** 模型 API 接口。 */
 export interface ModelsApi {
-  /** `GET /api/models` → 解包后的模型数组 */
   list(): Promise<Model[]>
 }
 
-/** 创建模型 API。 */
 export function createModelsApi(client: HttpClient): ModelsApi {
   return {
     list: async () => {

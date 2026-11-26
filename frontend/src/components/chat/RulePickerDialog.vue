@@ -1,14 +1,4 @@
 <script setup lang="ts">
-/**
- * 算法规则选择弹窗（HITL「从算法规则选择」）。
- *
- * 数据源 = `GET /api/files/rules`（「数据准备/算法规则」最新规则文件，服务端解析）。
- * 交互：结构化表格——行首勾选，优先级列（表头匹配 priority/优先级 的那一列）就地编辑，
- * 其余列只读。确认后把**勾选行原样转成对象数组**上抛（键 = 表头列名，值 = 该行值；
- * 优先级留空的行不带该键），由父级写入工具的 array[object] 参数。
- *
- * 组件不直接发请求：`load` 由父级注入（会话环境取 session.files.rules，测试可桩）。
- */
 import { computed, ref, watch } from 'vue'
 
 import type { RuleFileResponse } from '../../api/types'
@@ -17,13 +7,9 @@ import BaseDialog from '../common/BaseDialog.vue'
 import HintTip from '../common/HintTip.vue'
 
 const props = defineProps<{
-  /** 是否展开 */
   open: boolean
-  /** 规则参数字段名（标题展示用） */
   fieldName: string
-  /** 该参数当前值（反勾选：与某行完全相等的元素预勾选） */
   initialValue: unknown
-  /** 规则数据加载器（父级注入，便于测试桩） */
   load: () => Promise<RuleFileResponse>
 }>()
 
@@ -35,12 +21,9 @@ const emit = defineEmits<{
 const data = ref<RuleFileResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
-/** 勾选中的行索引（rows 下标） */
 const checked = ref<Set<number>>(new Set())
-/** 优先级列的编辑草稿（行索引 → 文本；初始 = 单元格原值） */
 const priorityDrafts = ref<Record<number, string>>({})
 
-/** 深比较（预勾选反查用；值均为 JSON 标量/对象） */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (typeof a !== typeof b || a === null || b === null) return false
@@ -56,7 +39,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
   )
 }
 
-/** 首次展开（或重新展开）时拉取最新规则文件并重置勾选 */
 watch(
   () => props.open,
   (isOpen) => {
@@ -70,7 +52,6 @@ watch(
       .load()
       .then((result) => {
         data.value = result
-        // 预勾选：当前参数值里已有与某行完全相同的元素 → 该行勾上
         if (Array.isArray(props.initialValue)) {
           const next = new Set<number>()
           result.rows.forEach((row, index) => {
@@ -79,7 +60,6 @@ watch(
           })
           checked.value = next
         }
-        // 优先级草稿初始化为单元格原值
         if (result.priority_column) {
           const drafts: Record<number, string> = {}
           result.rows.forEach((row, index) => {
@@ -106,14 +86,12 @@ function toggle(index: number): void {
   checked.value = next
 }
 
-/** 单元格展示值（null/undefined → 空串） */
 function cellText(value: unknown): string {
   return value === null || value === undefined ? '' : String(value)
 }
 
 const canConfirm = computed(() => checked.value.size > 0)
 
-/** 优先级草稿 → 输出值：数字文本转数字，空白 = 不携带该键 */
 function draftValue(draft: string): number | string | undefined {
   const trimmed = draft.trim()
   if (trimmed === '') return undefined
@@ -121,7 +99,6 @@ function draftValue(draft: string): number | string | undefined {
   return Number.isFinite(numeric) && trimmed !== '' ? numeric : trimmed
 }
 
-/** 「?」提示文案：优先级列名来自服务端解析的规则文件表头。 */
 const hintText = computed(
   () =>
     `勾选需要的规则；「${data.value?.priority_column ?? '优先级'}」列可就地调整，留空则不携带该字段。`,
@@ -150,7 +127,6 @@ function onConfirm(): void {
       <p class="rule-picker__meta">
         参数 <code class="mono">{{ fieldName }}</code>
         <template v-if="data">· 来源：{{ data.filename }}</template>
-        <!-- 操作说明收进「?」：勾选/就地编辑的规则默认不常驻 -->
         <HintTip :text="hintText" label="查看操作说明" />
       </p>
 

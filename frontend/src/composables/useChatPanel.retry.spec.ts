@@ -1,17 +1,3 @@
-/**
- * 单元测试：历史失败轮「重试本轮」的**真实**发送链路（2026-10-15 断链修复，`TR-58`）。
- *
- * 背景：`MessageBubble` 的失败提示条一直带"重试"按钮，但它发出的 `retry` 事件在
- * `MessageList` / `ChatPanel` 两级都没有接收方——点下去什么都不发生。修复后，
- * 列表层从历史里解析出"该轮的用户消息"并上抛，装配层用**唯一发送链路**重发。
- *
- * 本文件用真实 `useChatPanel()`（只把 `useSession` 换成受控的假会话），因此断言的是
- * 端到端行为而不是"处理器被调用过"：
- * - 一次点击 = 恰好一次 `chat.send`，载荷就是该轮的用户消息（正文 + 引用）；
- * - 本轮进行中不响应——且**不清草稿**（否则用户正在输入的内容会被凭空丢掉）。
- *
- * 上游两级（气泡 → 列表 → 面板绑定）由 `MessageList.spec.ts` / `ChatPanel.spec.ts` 覆盖。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -22,12 +8,10 @@ import { RUN_PHASE } from '../constants/events'
 
 const h_state = vi.hoisted(() => ({ session: null as unknown }))
 
-// `useChatPanel` 及其依赖的 composable 都经 `useSession()` 取状态：换掉它即可完全掌控输入输出
 vi.mock('./useAppSession', () => ({ useSession: () => h_state.session }))
 
 const { useChatPanel } = await import('./useChatPanel')
 
-/** 失败轮里那条用户消息的引用（重发时原样提交） */
 const ATTACHMENT: FileReference = { dir: '数据准备/生产计划', filename: 'plan.csv' }
 
 interface Harness {
@@ -35,12 +19,9 @@ interface Harness {
   panel: ReturnType<typeof useChatPanel>
 }
 
-/** 受控假会话：只实现 `useChatPanel` 会触碰到的字段 */
 function makeSession() {
   const noop = vi.fn()
   const send = vi.fn(async () => undefined)
-  // 断言的处理器各自独立：`noop` 是**同一个** spy 实例（onMounted 也会调到它），
-  // 共用一个会让 `recover` 凭空多出调用次数
   const recover = vi.fn()
   return {
     chat: {
@@ -123,7 +104,6 @@ function makeSession() {
       currentAgent: ref({ agent_name: 'demo' }),
       candidates: ref([]),
       mcpServers: ref([]),
-      // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待
       mcpPending: ref(false),
       ensureMcpReady: vi.fn(async () => true),
       warmMcp: vi.fn(async () => undefined),
@@ -144,9 +124,6 @@ function makeSession() {
       openLink: noop,
     },
     nextSteps: { steps: ref(emptyNextSteps()), start: vi.fn(), reset: vi.fn() },
-    // 2026-11-07：`/技能名` 的状态同样由会话上下文提供；草稿被改写时会 `sync`，
-    // 发送成功后 `reset`。两者各用独立 spy——与上面的 `recover` 同理，
-    // 共用一个会让"发一次却调到两次"这类断言失真
     skillMention: {
       selected: ref<string | null>(null),
       open: ref(false),
@@ -176,7 +153,6 @@ function mountHarness(session: Record<string, unknown>): Harness {
   return { session, panel: panel! }
 }
 
-/** 让 `onSend` 的异步链路跑完（`chat.send` 之前若有 await，仍能被断言到） */
 const flush = (): Promise<void> => Promise.resolve().then(() => Promise.resolve())
 
 beforeEach(() => {

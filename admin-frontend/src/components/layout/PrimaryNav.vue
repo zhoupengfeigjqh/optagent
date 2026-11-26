@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * 常驻一级导航（`FR-053`）。
- *
- * - 固定 **4 项**，常驻可见，**不因内部状态禁用**；
- * - 当前项标 `aria-current="page"`，读屏可辨；
- * - 完整键盘可达（原生 `<button>` + 可见焦点环）。
- */
 import { NAV_ITEMS, type RouteName } from '../../router'
 
 defineProps<{

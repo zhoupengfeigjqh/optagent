@@ -1,32 +1,12 @@
-/**
- * 本体行为规则闸门（021）的共享类型与常量。
- *
- * 口径来源：`specs/021-ontology-rule-gate/data-model.md` §2/§3/§4/§6 与
- * `contracts/rule-gate.md` §1。本文件**只有类型与常量**，无逻辑、无 IO。
- *
- * 两条硬约束在这里体现：
- * 1. 错误码**总数 2 个**（暂停 1 + 中止 1）；阻断复用中止码，靠 `DenyReason` 区分；
- * 2. `PrepareInput.available` 是注册校验的**唯一判据**，闸门不得自建"已注册函数"清单。
- */
 
-/** 暂停通道的码（工具失败结果） */
 export const RULE_FUNCTIONS_MISSING_CODE = 'ONTOLOGY_RULE_FUNCTIONS_MISSING' as const;
 
-/** 中止/阻断通道的码（失败轮 `error.code`） */
 export const RULE_DENIED_CODE = 'ONTOLOGY_RULE_DENIED' as const;
 
-/** 两个码的只读清单（契约与测试用于核对"没有第三个"） */
 export const RULE_GATE_CODES = [RULE_FUNCTIONS_MISSING_CODE, RULE_DENIED_CODE] as const;
 
 export type RuleGateCode = (typeof RULE_GATE_CODES)[number];
 
-/**
- * 中止原因三分类（进 `details` 与日志，**不新增错误码**）。
- *
- * - `unregistered`：规则引用的函数未注册
- * - `condition_false`：`rule_design` 求值为 `false`
- * - `config_unavailable`：`rules` 段或 `rule_design` 结构非法、求值器异常
- */
 export type DenyReason = 'unregistered' | 'condition_false' | 'config_unavailable';
 
 /**
@@ -38,43 +18,23 @@ export type DenyReason = 'unregistered' | 'condition_false' | 'config_unavailabl
  */
 export type RulePosition = '前置' | '后置';
 
-/**
- * 本体行为的操作类型（2026-11-24 规则闸门收敛）。
- *
- * - `command`：写操作，走前置规则闸门 + 执行后使既有函数结果失效；
- * - `query`：读操作，**不判规则**、不失效；
- * - 其余任何值（含缺失）都是配置错误 → 致命错误（拒绝 + 立即结束本轮）。
- */
 export type BehaviorOpType = 'command' | 'query';
 
-/** 非法本体行为的成因（三者都收敛到同一个错误码，靠这里区分文案与日志） */
 export type InvalidBehaviorReason = 'bad_op_type' | 'op_type_conflict' | 'undeclared';
 
-/** 一条 `behaviors[]` 声明的来源（冲突文案要点名"谁说的"） */
 export interface BehaviorOpTypeSource {
-  /** `{场景}/{本体}` */
   ontologyKey: string;
-  /** 归一后的 `op_type`；缺失为空串 */
   opType: string;
 }
 
-/**
- * 无法参与判定的本体行为（2026-11-24）。
- *
- * 命中即 **fatal**：不执行行为、不看规则、立即结束本轮。
- * 与 `pause`（可自愈）和 `deny`（软收尾）都不同，见 `gate.ts` 的判定顺序。
- */
 export interface InvalidBehavior {
   ref: BehaviorRef;
   reason: InvalidBehaviorReason;
-  /** 声明来源（`undeclared` 时为空数组） */
   sources: readonly BehaviorOpTypeSource[];
 }
 
-/** 条件组合方式 */
 export type CombineMode = 'and' | 'or';
 
-/** 算子全集（16 个；顺序稳定，便于快照断言） */
 export const OPERATOR_CODES = [
   'eq',
   'ne',
@@ -96,33 +56,21 @@ export const OPERATOR_CODES = [
 
 export type OperatorCode = (typeof OPERATOR_CODES)[number];
 
-/** 字段声明类型（取自 `functions[].response`；未声明为 `undefined`） */
 export type DeclaredType = 'boolean' | 'integer' | 'number' | 'string' | undefined;
 
-/** 一个已归一的判定条件 */
 export interface RuleCondition {
-  /** 函数名（裸名；比对走归一） */
   function: string;
-  /** 业务数据路径（`pass` / `detail.qty` / `items[].qty`） */
   field: string;
   operator: OperatorCode;
-  /** 恒为字符串数组 */
   values: string[];
-  /**
-   * 该条件**恒判不成立**（未知算子、缺 `function`/`field`）。
-   *
-   * 保留条目而不是丢弃：`or` 组合需要"这一条为假"而不是"这一条不存在"。
-   */
   invalid?: boolean;
 }
 
-/** 一组条件的组合 */
 export interface RuleConditionGroup {
   combine: CombineMode;
   conditions: RuleCondition[];
 }
 
-/** 归一后的 `rule_design` */
 export interface RuleDesign {
   combine: CombineMode;
   groups: RuleConditionGroup[];
@@ -130,47 +78,28 @@ export interface RuleDesign {
   failMessage?: string;
 }
 
-/** 一条已归一的规则（`raw` 保留原文，供"规则全部内容反馈"） */
 export interface RuleSpec {
   name: string;
   title: string;
   description: string;
-  /** 绑定行为名（原文，判定时归一） */
   behavior: string;
   position: RulePosition;
-  /** 声明需要的函数名（裸名） */
   relatedFunctions: string[];
   dataSupplements: string[];
   design: RuleDesign | null;
-  /**
-   * `rule_design` **存在但不是对象**（结构非法）→ fail-closed。
-   *
-   * 与"缺失"区分开：缺失是"未设计"（`FR-022`，不阻断），
-   * 非对象是配置错误（`FR-025`，拒绝并中止）。
-   */
   designInvalid?: boolean;
   passMessage: string;
   failMessage: string;
   raw: Record<string, unknown>;
 }
 
-/** 行为引用（文案与日志的展示口径） */
 export interface BehaviorRef {
-  /** `{场景目录}/{本体目录}` */
   ontologyKey: string;
   scenarioName: string;
   ontologyName: string;
   behaviorName: string;
 }
 
-/**
- * 轮内函数执行记录：键存在 = **本世代**已执行过（值可能为 `null`）。
- *
- * 2026-11-24（command 写后失效）：条目带世代号。本体 command 执行完成后
- * `invalidate()` 递增世代，此前的条目自动降级为"过期"（不是删除）：
- * - `has` / `get` 只认当前世代 → 下一个 command 的前置规则必须重算；
- * - `hasEver` 仍能看到历史条目 → 文案可区分"从未执行"与"已过期"。
- */
 export interface FunctionRecord {
   /**
    * 写入（成败都写；失败传 `null`）；不抛。
@@ -180,47 +109,27 @@ export interface FunctionRecord {
    *   按提交时的世代打戳会把它伪装成"写后计算"，必须按派发世代降级为过期。
    */
   add(toolName: string, result: unknown, epoch?: number): void;
-  /** 当前世代内是否执行过（值可能是 `null`） */
   has(toolName: string): boolean;
-  /** 当前世代内的结果（过期或不存在均为 `undefined`） */
   get(toolName: string): unknown;
-  /** 本轮任何世代是否执行过（含已过期）；用于区分缺失成因 */
   hasEver(toolName: string): boolean;
-  /**
-   * 使既有条目过期：世代 +1。
-   *
-   * 只由本体 **command** 调用返回后触发（成功、业务失败、抛错都算），
-   * `query` / 内置工具 / 被暂停拒绝的调用都不触发。
-   */
   invalidate(): void;
-  /** 当前世代号（从 0 开始） */
   readonly epoch: number;
   /** 总键数（含过期条目；上限判据） */
   readonly size: number;
-  /** 当前世代的有效条目数（诊断/日志用） */
   readonly activeSize: number;
 }
 
-/** 前置判定的输入（纯数据，不含 logger / MCP / run 状态） */
 export interface PrepareInput {
-  /** 模型发起的工具名（可能是 `{服务名}__{工具名}`） */
   toolName: string;
   record: FunctionRecord;
-  /** 本轮挂载给模型的工具名（已归一，含内置）——注册校验的唯一判据 */
   available: ReadonlySet<string>;
 }
 
 
-/**
- * 判定诊断（包装器写结构化日志用）。
- *
- * 只承载"已经发生的事实"，不参与判决；缺失时日志省略对应字段。
- */
 export interface RuleDiagnosis {
   ontologyKey: string;
   behaviorName: string;
   rules: string[];
-  /** 本世代从未执行过的函数 */
   missingFunctions?: string[];
   /**
    * 执行过、但结果产生于上一次 command 之前的函数（2026-11-24）。
@@ -232,12 +141,10 @@ export interface RuleDiagnosis {
   failedConditions?: FailedCondition[];
 }
 
-/** 前置判定的五种结局 */
 export type PrepareResult =
   | { kind: 'function' }
   | {
       kind: 'behavior';
-      /** 本体命令（写操作）：执行后使既有函数结果失效；`query` 不带此字段 */
       command?: true;
     }
   | { kind: 'pause'; message: string; details: string[]; diagnosis?: RuleDiagnosis }
@@ -249,39 +156,21 @@ export type PrepareResult =
       diagnosis?: RuleDiagnosis;
     }
   | {
-      /**
-       * 致命配置错误（2026-11-24）：`op_type` 非法 / 同名行为 `op_type` 冲突 /
-       * 被规则绑定但未在 `behaviors[]` 声明。
-       *
-       * 与 `deny` 分开：`deny` 是软收尾（模型解释后正常结束），
-       * `fatal` 是**立即结束本轮**（不等模型再发起调用）。
-       */
       kind: 'fatal';
       message: string;
       details: string[];
       reason: 'config_unavailable';
-      /** 三类成因（日志/排障用，不新增错误码） */
       cause: InvalidBehaviorReason;
       diagnosis?: RuleDiagnosis;
     };
 
-/**
- * 只读查询结果（028）。
- *
- * 供规划阶段推导 `type` 与 `command` 的前置函数；**不参与判定**，也不会写记录。
- */
 export interface BehaviorLookup {
-  /** 完整工具名（原样，与查询入参一致） */
   toolName: string;
-  /** 是否写操作 */
   command: boolean;
-  /** 前置规则声明的函数（裸名；去重、保持规则与声明顺序） */
   relatedFunctions: string[];
-  /** 行为引用（展示与本体归属用） */
   ref: BehaviorRef;
 }
 
-/** 闸门端口：`prepare` **永不抛错** */
 export interface RuleGatePort {
   prepare(input: PrepareInput): PrepareResult;
   invalidate(): void;
@@ -294,10 +183,8 @@ export interface RuleGatePort {
   lookupBehavior(toolName: string): BehaviorLookup | null;
 }
 
-/** 工厂入参：只给"数字人目录 + 告警出口" */
 export interface RuleGateInput {
   agentDir: string;
-  /** 加载期告警出口（一次重载一次，交装配层写日志） */
   warn?: (warnings: string[]) => void;
 }
 
@@ -308,24 +195,14 @@ export interface RuleGateInput {
  * 与"不是本体行为（按函数记录）"必须区分开（`FR-002` / `FR-012`）。
  */
 export interface BehaviorRuleBucket {
-  /** 行为引用（取合并顺序第一条所属本体，用于文案） */
   ref: BehaviorRef;
-  /**
-   * 是否写操作（`op_type: command`）。
-   *
-   * 只有 `command` 有前置规则、只有 `command` 执行后使函数结果失效；
-   * `query` 恒为 `false`，且它的 `pre` 恒为空（规则被忽略）。
-   */
   command: boolean;
-  /** 前置规则（2026-11-24 起只有前置；后置规则加载时跳过） */
   pre: RuleSpec[];
 }
 
 /** 一次加载得到的不可变快照（测试与诊断用） */
 export interface GateSnapshot {
-  /** 目录签名（`ontology` 根目录 mtimeMs，或 `missing`） */
   signature: string;
-  /** 归一行为名 → 规则分组（只含可判定的行为） */
   behaviorIndex: Map<string, BehaviorRuleBucket>;
   /**
    * 归一行为名 → 非法成因（2026-11-24）。
@@ -334,27 +211,20 @@ export interface GateSnapshot {
    * `function` 分支被照常执行并写进记录，配置错误变成静默放行。
    */
   invalidBehaviors: Map<string, InvalidBehavior>;
-  /** 归一函数名 → `functions[].response` 声明 */
   functionResponses: Map<string, unknown>;
   warnings: string[];
 }
 
-/** 求值上下文：读取记录与字段声明类型 */
 export interface EvaluateContext {
-  /** 取记录值；键不存在或值为 `null` 都返回 `found=false` */
   resultOf(functionName: string): { found: boolean; value: unknown };
-  /** 取字段声明类型（未声明为 `undefined`） */
   declaredTypeOf(functionName: string, field: string): DeclaredType;
 }
 
-/** 一次求值的结果 */
 export interface EvaluationOutcome {
   passed: boolean;
-  /** 未成立的条件（最多 10 条；不短路） */
   failed: FailedCondition[];
 }
 
-/** 未成立条件的摘要（日志与 `details` 的唯一来源） */
 export interface FailedCondition {
   rule: string;
   function: string;

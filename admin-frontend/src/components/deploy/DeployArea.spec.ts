@@ -27,7 +27,6 @@ vi.mock('../../api/http', () => ({
 }))
 
 vi.mock('../../api/deploy', () => ({
-  // 历史走 api 模块（带 `DEPLOY_HISTORY_FETCH_LIMIT`），不再直接拼 URL
   DEPLOY_HISTORY_FETCH_LIMIT: 100,
   validateDeploy: (...a: unknown[]) => validateDeploy(...a),
   deploy: (...a: unknown[]) => deployApi(...a),
@@ -75,7 +74,6 @@ beforeEach(() => {
   validateDeploy.mockReset()
   deployApi.mockReset()
   fetchDeployHistoryMock.mockReset().mockResolvedValue({ items: [], truncated: false })
-  // 部署的乐观锁版本取自清单端点（2026-09-27：不再有 /platform/settings）
   fetchManifestMock.mockReset().mockResolvedValue({ items: [], total: 0, revision: 7 })
 })
 

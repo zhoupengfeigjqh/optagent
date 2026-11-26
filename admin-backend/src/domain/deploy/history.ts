@@ -1,12 +1,3 @@
-/**
- * 部署历史（`FR-033`、`SC-008`，`data-model.md` §7.3）。
- *
- * 追加写 `deploy/history.jsonl`（逐行一条记录），**有界返回**（`FR-006`）。
- * 用 JSONL 而非 JSON 数组：历史是纯追加的，追加写天然不会破坏已写入的记录。
- *
- * **2026-09-27**：`target_runtime_form` 字段随运行形态概念下架；存量记录的
- * 该字段在读取时被忽略（不影响其余记录，符合 JSONL "只追加"的容错口径）。
- */
 import { randomUUID } from 'node:crypto';
 import { PLATFORM_OPERATOR } from '../error-codes.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
@@ -27,7 +18,6 @@ export interface DeployHistoryRecord {
   result: 'succeeded' | 'partial' | 'failed';
   users: DeployUserRecord[];
   validation: { passed: boolean; error_count: number };
-  /** 与部署清单不一致的差异（`FR-032`）；结构见 `manifest.ts` 的 `ManifestDiffEntry` */
   manifest_diff: unknown[];
   user_count: number;
   error_count: number;
@@ -36,13 +26,11 @@ export interface DeployHistoryRecord {
 export class DeployHistoryService {
   constructor(private readonly store: PlatformStore) {}
 
-  /** 追加一条部署记录，返回记录 id */
   append(record: Omit<DeployHistoryRecord, 'id' | 'deployed_at' | 'operator'>): string {
     const id = randomUUID();
     const full: DeployHistoryRecord = {
       id,
       deployed_at: new Date().toISOString(),
-      // 操作者固定 zyw_admin（research.md D11：本期无登录，仅用于审计字段）
       operator: PLATFORM_OPERATOR,
       ...record,
     };
@@ -50,7 +38,6 @@ export class DeployHistoryService {
     return id;
   }
 
-  /** 最近 `limit` 条（时间倒序，**有界返回**） */
   list(limit: number): { items: DeployHistoryRecord[]; truncated: boolean } {
     const all = this.store.readJsonl<DeployHistoryRecord>(REL);
     const desc = [...all].reverse();

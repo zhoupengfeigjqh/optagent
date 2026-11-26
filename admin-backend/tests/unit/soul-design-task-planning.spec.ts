@@ -1,12 +1,3 @@
-/**
- * 单元测试：`task_planning` 开关的校验与物化（028 T701s，FR-001）。
- *
- * 与 `soul-design-rewrite-switch.spec.ts` 同构，覆盖：
- * - **缺省**：键缺失 / 新建 / 存量升级一律 `false`；
- * - **校验**：非布尔一律拒绝（不静默转 false）；
- * - **物化**：只有「意图聚焦 且 任务规划」都为真才写键；
- * - **保留**：聚焦关闭时值保留（管理台置灰），产物零残留。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import {

@@ -1,18 +1,3 @@
-/**
- * 单元测试：聚焦提示铸造（016 / 019，2026-11-24 改为「分节 + 图路径」）。
- *
- * 守住格式与边界：
- * - 首行是边界声明（"不是工具清单"），其后每个入选技能一块：
- *   `技能 X → 本体 Y（ontology_id=…）`，块内三段固定序，段间空行，空段整段省略；
- * - 关键行为 = 判分命中的行为 + 函数关联概念的取数行为（两类条目形态一致）；
- * - 关键函数带 `@关联概念`，并用 `@概念 → 行为名` 指向"要先查的那条行为"；
- * - 图路径只由判分命中的行为出发，一行一跳，`→/←` 只表示本体边方向；
- * - 同本体多技能时能力与路径只挂到分数最高的技能下；
- * - `name` 保留原文不翻译，片段内换行压成空格；
- * - 长度上限按阶数分档（0→4000 / 1→5000 / 2→6000）；超限**先丢整行路径**
- *   （链尾无行为 → 跳数大 → 得分低，每个起点行为至少留一行），再丢取数行为、
- *   函数、判分命中的行为。
- */
 import { describe, expect, it } from 'vitest';
 import type { FocusPath } from '../../src/domain/intent-focus/paths.js';
 import {
@@ -272,7 +257,6 @@ describe('composeFocusPrompt', () => {
     );
     expect(result.prompt).toContain('skill_with_underscore');
     expect(result.prompt).toContain('第一行 第二行');
-    // 只有前缀与技能行之间的那个换行
     expect(result.prompt.split('\n')).toHaveLength(2);
   });
 
@@ -280,7 +264,6 @@ describe('composeFocusPrompt', () => {
     expect(maxPromptChars(0)).toBe(MAX_PROMPT_CHARS);
     expect(maxPromptChars(1)).toBe(5000);
     expect(maxPromptChars(2)).toBe(6000);
-    // 越界/负数按最保守的一档处理
     expect(maxPromptChars(-1)).toBe(MAX_PROMPT_CHARS);
     expect(maxPromptChars(9)).toBe(6000);
   });
@@ -351,7 +334,6 @@ describe('composeFocusPrompt · 关键函数与取数行为（2026-11-24）', ()
       selection({ behaviors: [], functions: [fnDecision('F1', '孤立函数', [])] }),
     );
     expect(result.prompt).toContain('· 孤立函数 F1');
-    // 只剩技能行里的 `→ 本体`，函数行不带任何 @概念
     expect(result.prompt).not.toContain('@');
   });
 
@@ -380,7 +362,6 @@ describe('composeFocusPrompt · 关键函数与取数行为（2026-11-24）', ()
 });
 
 describe('composeFocusPrompt 截断（行级）', () => {
-  /** 同一起点行为的三条路径：一条链尾无行为、一条跳数大、一条普通 */
   function threePaths(): FocusPath[] {
     return [
       path(),
@@ -412,7 +393,6 @@ describe('composeFocusPrompt 截断（行级）', () => {
     const result = composeFocusPrompt([skill()], selection(), { paths, maxChars: full - 1 });
 
     expect(result.truncated).toBe(true);
-    // 客户订单那条（deadEnd）先没了
     expect(result.prompt).not.toContain('CustomerOrder');
     expect(result.prompt).toContain('@RawMaterial ');
     const pathLines = result.prompt
@@ -428,7 +408,6 @@ describe('composeFocusPrompt 截断（行级）', () => {
     const result = composeFocusPrompt([skill()], selection(), { paths, maxChars: full - 1 });
 
     expect(result.truncated).toBe(true);
-    // hop=2 那条被丢，hop=1 保留
     expect(result.prompt).not.toContain('RawMaterialInventory');
     expect(result.prompt).toContain('→ RawMaterial ');
   });
@@ -442,7 +421,6 @@ describe('composeFocusPrompt 截断（行级）', () => {
         toBehavior: { name: 'QuerySuppliers', title: '查询供应商信息' },
       }),
     ];
-    // 压到只够一行：仍然保留一条该起点行为的路径
     const oneLine = composeFocusPrompt([skill()], selection({ behaviors: [] }), { paths: paths.slice(0, 1) })
       .prompt.length;
     const result = composeFocusPrompt([skill()], selection({ behaviors: [] }), {
@@ -452,7 +430,6 @@ describe('composeFocusPrompt 截断（行级）', () => {
     expect(result.truncated).toBe(true);
     const kept = ['→ RawMaterial ', '→ Supplier '].filter((ref) => result.prompt.includes(ref));
     expect(kept).toHaveLength(1);
-    // 但没有出现"图路径..."段头却一行都没有的空段
     expect(result.prompt).not.toMatch(/图路径[^\n]*\n\s*$/);
   });
 
@@ -465,7 +442,6 @@ describe('composeFocusPrompt 截断（行级）', () => {
     });
     expect(result.truncated).toBe(true);
     expect(result.prompt.length).toBeLessThanOrEqual(MAX_PROMPT_CHARS);
-    // 每条条目行都是完整的「· 名称 name」，不出现半截
     for (const line of result.prompt.split('\n')) {
       if (line.startsWith('· ')) expect(line.trim().length).toBeGreaterThan(3);
     }

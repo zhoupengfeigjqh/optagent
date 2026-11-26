@@ -1,11 +1,3 @@
-/**
- * 单元测试：SOUL 的「任务规划」开关（028 T307 / T804 的关闭零差异部分）。
- *
- * 守住三条口径：
- * - 与 `intent_focus` **逻辑与**：聚焦关闭时即使本键为真也不规划（没有起点就没有计划）；
- * - fail-closed：缺键 / 非布尔 / 读盘失败一律 false + 告警；
- * - 键不进 System Prompt 正文（`stripFrontmatter` 结果逐字不变）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

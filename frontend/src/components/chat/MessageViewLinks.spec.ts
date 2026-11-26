@@ -1,12 +1,3 @@
-/**
- * 组件测试：回答正文之后的视图入口行（`TR-45` ~ `TR-48`）
- *
- * 守四件事：
- * 1. **空态整行不渲染** —— 没有合法链接时界面与改动前一致（无 DOM 即无间距）
- * 2. **归一化与去重只有一处实现** —— 已带前缀的值不被二次拼接、跨工具重复只出一个入口
- * 3. **降级链** —— 有名称用名称；无名称显示地址（中段省略），悬停永远给完整地址
- * 4. **溢出可见** —— 超过显示上限时给「另有 N 个」，展开与收起都在
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -140,7 +131,6 @@ describe('MessageViewLinks —— 交互', () => {
     expect(payload.kind).toBe('file')
     expect(payload.filePath).toBe('数据准备/9月计划.xlsx')
     expect(payload.name).toBe('数据准备/9月计划.xlsx')
-    // `url` 仍是可点开的绝对地址（中键 / 复制链接照旧可用）
     expect(payload.url).toContain('/api/files/preview?dir=')
   })
 })

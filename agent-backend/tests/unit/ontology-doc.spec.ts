@@ -1,13 +1,3 @@
-/**
- * 单元测试：`ontology.yaml` 的统一解析与名称归一（020/021 共用）。
- *
- * 守住的口径：
- * - 三段（`metadata` / `behaviors` / `rules` / `functions`）的解析与缺省；
- * - 坏数据只告警不抛：空 `name` 丢弃、非数组降级、缺 `response` 提示；
- * - 告警片段与 020 既有口径逐字一致（`<文件路径>:<片段>`）；
- * - 名称归一与匹配键只此一处（`matchKeys` = 完整名 + 去前缀名）；
- * - 目录签名：缺失为 `missing`，写入后为时间戳。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +20,6 @@ function tmpAgentDir(): string {
   return dir;
 }
 
-/** 写一份本体（返回本体目录）；`yaml` 为原文，便于构造坏数据 */
 function writeOntology(agentDir: string, yaml: string, ontology = '原材料采购和库存'): string {
   const dir = path.join(agentDir, 'ontology', '生产调度', ontology);
   fs.mkdirSync(dir, { recursive: true });

@@ -1,30 +1,3 @@
-/**
- * 工具调用记录存储（002 特性：tool-events.jsonl）。
- *
- * 落点与生命周期（与 history.jsonl 同层的**会话私有数据**）：
- * - `user-data/{数字人}/threads/{thread_id}/tool-events.jsonl`：一行一次事件（start 记 running、
- *   end 记终态），读取时按 `call_id` 合并（后者覆盖前者，与反馈行同语义）
- * - `inline_content` **任何分支都只存前 `TOOL_INLINE_MAX_BYTES`**（超阈值时末尾附截断说明）
- * - **内置工具**超阈值：截断内联，**不落副本**——这类结果能用原工具按更小范围/offset 重取
- * - **MCP 等外部来源**超阈值：截断内联（尾注给出副本路径）+ 正文外置到「**该数字人**的
- *   临时空间/{thread_id}_toolresult_{call_id}.txt」，另记 `artifact_size` + `summary`
- *   （**不记路径**，展示/回灌时按同一函数重算）——外部结果可能无法复现，必须留存
- * - 副本**只写不代读**（2026-11-08）：模型要全文时用 `read_file` 走文件工具，前端只展示
- *   记录里的正文，故本模块没有读口
- * - `size` 恒为**原始结果**字节数；`size > artifact_size` 即落盘正文被 2MB 上限截断
- * - 009 归属：数字人是**必填入参**（`threadDir` 唯一解析），外置正文写口亦按（用户，数字人）取用
- * - 结果里的视图链接（2026-10-10）：抽成 `view_links` sidecar 存本行，
- *   **与正文分离**——不进回灌预算，且正文外置时入口照样可用（见 `view-links.ts`）
- *
- * 与 history.jsonl 一致的口径：
- * - 追加经 per-thread Promise 链串行化；单行一次 append 保证原子性
- * - 坏行跳过并告警；整体损坏（无一条合法行）→ 备份后重建并告警
- * - 读取白名单复制字段，未知字段丢弃
- *
- * 与 history.jsonl 不同的口径：
- * - 本文件**参与上下文回灌**（见 tool-context）：`inline_content`（含截断版）按预算
- *   拼进 messages，故它不属于"不落历史"的范畴
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { disposeChain } from './chain.js';
@@ -41,39 +14,25 @@ export interface ToolEventsLogger {
 export interface ToolEventsOptions {
   root: string;
   logger?: ToolEventsLogger;
-  /** 按（用户，数字人）取外置正文读写口（缺省 = 不支持外置，超阈值结果截断内联） */
   artifacts?: (userId: string, agentName: string) => ToolArtifactAccess;
 }
 
-/** 对外投影的工具调用记录（接口层再映射为 snake_case 契约） */
 export interface ToolCallRecord {
   callId: string;
-  /** 该轮 assistant 消息 id（前端据此把卡片挂到对应气泡） */
   messageId: string;
   name: string;
-  /** 人读名称（2026-10-27）：卡片标题用；缺省 = 无中文名，展示方回退 `name` */
   label?: string;
   status: 'running' | 'success' | 'error';
   startedAt: string;
   durationMs?: number;
-  /** 原始结果字节数（结果产生后才有；与落盘尺寸无关） */
   size?: number;
-  /** 记录内联正文（超阈值时为**截断版**，末尾带截断说明，见 `truncated`） */
   content?: string;
   /** 外置正文的字节数（有值 = 临时空间里有副本，需按需拉取）。**仅外部来源（MCP）**会出现 */
   artifactSize?: number;
   /** 记录正文被截断（只保存了一部分）；`size > artifactSize` 表示副本本身也被上限截断 */
   truncated?: boolean;
-  /** 规则提取的摘要（仅外置结果的卡片标题用） */
   summary?: string;
-  /** 入参短标量摘要（原文不落盘） */
   argsDigest?: Record<string, string>;
-  /**
-   * 结果里的视图链接（2026-10-10，同步侧视图入口）：服务给的地址 + 可选名称。
-   *
-   * 与结果正文**分离存放**：正文会进上下文回灌预算（`tool-context`），
-   * sidecar 不进；正文外置时入口也照样可用（随详情下发）。
-   */
   viewLinks?: ViewLink[];
 }
 
@@ -81,7 +40,6 @@ export interface AppendStartInput {
   callId: string;
   messageId: string;
   name: string;
-  /** 人读名称（可空：无中文名时不写该字段，读回按 `name` 展示） */
   label?: string;
   startedAt: string;
   argsDigest?: Record<string, string>;
@@ -91,21 +49,17 @@ export interface AppendEndInput {
   callId: string;
   messageId: string;
   name: string;
-  /** 人读名称；开始行已写入时结束行仍带一份，便于"只有结束行"的残缺数据也能显示中文 */
   label?: string;
   startedAt: string;
   status: 'success' | 'error';
   durationMs: number;
-  /** 已序列化的结果文本（见 tool-result.serializeToolResult） */
   resultText: string;
 }
 
-/** JSONL 单行（落盘格式） */
 interface ToolEventLine {
   call_id: string;
   message_id: string;
   name: string;
-  /** 人读名称（2026-10-27；旧行没有该字段，读回时缺省） */
   label?: string;
   status: 'running' | 'success' | 'error';
   started_at: string;
@@ -116,7 +70,6 @@ interface ToolEventLine {
   truncated?: boolean;
   summary?: string;
   args_digest?: Record<string, string>;
-  /** 视图链接（sidecar；见 `view-links.ts` 的抽取规则） */
   view_links?: ViewLink[];
 }
 
@@ -141,13 +94,11 @@ export class ToolEventStore {
     return access;
   }
 
-  /** 记一次调用开始（fire-and-forget：写盘失败不影响对话） */
   appendStart(userId: string, agentName: string, threadId: string, input: AppendStartInput): void {
     const line: ToolEventLine = {
       call_id: input.callId,
       message_id: input.messageId,
       name: input.name,
-      // 非空才写：物化/落盘同一口径，"字段缺席"= 没有中文名
       ...(input.label !== undefined && input.label !== '' ? { label: input.label } : {}),
       status: 'running',
       started_at: input.startedAt,
@@ -158,16 +109,6 @@ export class ToolEventStore {
     ).catch(() => {});
   }
 
-  /**
-   * 记一次调用结束（含体积分流）。
-   *
-   * **整个"分流 + 写盘"作为同一个任务进链**——外置正文的写入也在链内，
-   * 否则 `flush` 只等到 JSONL 追加、等不到外置文件，`done` 广播后前端
-   * 立即刷新就会读到"有记录但正文缺失"的中间态。
-   *
-   * 生产路径 **fire-and-forget**（void 调用方）：落盘失败 MUST NOT 影响
-   * 已广播给用户的回答（原则九：降级不阻断）。
-   */
   appendEnd(
     userId: string,
     agentName: string,
@@ -185,7 +126,6 @@ export class ToolEventStore {
         duration_ms: input.durationMs,
         size: Buffer.byteLength(input.resultText, 'utf8'),
       };
-      // 视图链接与体积分流无关：在内联/外置两条路径上都先抽取（外置正文被截断也不影响已抽出的值）
       const viewLinks = extractViewLinks(input.resultText);
       if (viewLinks) line.view_links = viewLinks;
       await this.splitResult(userId, agentName, threadId, input, line);
@@ -199,7 +139,6 @@ export class ToolEventStore {
     });
   }
 
-  /** 体积分流：策略在 `tool-result-split.ts`，这里只把计划落到事件行并写盘。 */
   private async splitResult(
     userId: string,
     agentName: string,
@@ -225,7 +164,6 @@ export class ToolEventStore {
 
     try {
       await access.write(threadId, plan.artifact.filename, plan.artifact.content);
-      // `size` 不随后改动：它恒为原始结果字节数（落盘尺寸另记 `artifact_size`）
       line.artifact_size = plan.artifact.size;
     } catch (err: unknown) {
       this.opts.logger?.warn(
@@ -241,7 +179,6 @@ export class ToolEventStore {
     }
   }
 
-  /** 把一个任务排进该会话的串行链（前一个失败不阻塞后一个） */
   private enqueueTask(
     userId: string,
     agentName: string,
@@ -288,7 +225,6 @@ export class ToolEventStore {
     return disposeChain(this.chains, `${userId}/${agentName}/${threadId}`);
   }
 
-  /** 读取全部记录（按 call_id 合并、保持首次出现顺序）；时间正序 */
   readAll(userId: string, agentName: string, threadId: string): ToolCallRecord[] {
     const merged = new Map<string, ToolCallRecord>();
     for (const line of this.readLines(userId, agentName, threadId)) {
@@ -298,7 +234,6 @@ export class ToolEventStore {
         merged.set(line.call_id, incoming);
         continue;
       }
-      // 后者覆盖前者：仅覆盖"本行提供了值"的字段（running 行不携带终态字段）
       for (const [k, v] of Object.entries(incoming)) {
         if (v !== undefined) (exist as unknown as Record<string, unknown>)[k] = v;
       }
@@ -306,7 +241,6 @@ export class ToolEventStore {
     return [...merged.values()];
   }
 
-  /** 按 assistant 消息分组（详情接口挂卡片用） */
   readByMessage(
     userId: string,
     agentName: string,
@@ -321,7 +255,6 @@ export class ToolEventStore {
     return grouped;
   }
 
-  /** 读取文件全部合法行；坏行跳过告警，整体损坏备份重建（与 history.jsonl 同口径） */
   private readLines(userId: string, agentName: string, threadId: string): ToolEventLine[] {
     const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return [];
@@ -348,14 +281,13 @@ export class ToolEventStore {
           `tool-events 整体损坏，已备份至 ${backup} 并重建（user=${userId} agent=${agentName} thread=${threadId}）`,
         );
       } catch {
-        /* 备份失败：保持原文件不动，下次读取继续告警 */
+        // 备份失败不影响本次读取
       }
     }
     return parsed;
   }
 }
 
-/** 行 → 记录（白名单复制：未知字段一律丢弃） */
 function toRecord(line: ToolEventLine): ToolCallRecord {
   const record: ToolCallRecord = {
     callId: line.call_id,
@@ -382,7 +314,7 @@ function parseLine(line: string): ToolEventLine | undefined {
   try {
     obj = JSON.parse(line) as Record<string, unknown>;
   } catch {
-    return undefined; // 坏行
+    return undefined;
   }
   if (
     typeof obj.call_id !== 'string' ||
@@ -413,17 +345,6 @@ function parseLine(line: string): ToolEventLine | undefined {
   return out;
 }
 
-/**
- * 行里的 `view_links` 结构校验（白名单复制的一环：结构不符整段丢弃，不猜）。
- *
- * 认 `{ url: string, name?: string, kind?: 'url' | 'file' }`；缺席或全部不合法的项被跳过，
- * 一条都不合法 → `undefined`（等价于"这一行没有视图链接"）。
- *
- * **`kind` MUST 透传（2026-10-21 修复）**：此前只保留 `url`/`name`，落盘时写进去的
- * `kind:'file'` 在**读回时被丢掉**，前端按缺省 `'url'` 处理 → 空间相对路径通不过
- * `resolveViewUrl`（无前导 `/`）→ 入口被整条丢弃。结果就是"单测里 file 入口能开，
- * 真实链路永远不出现"。未知的 `kind` 值一律视同缺省（`'url'`），不猜。
- */
 function parseViewLinks(value: unknown): ViewLink[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const out: ViewLink[] = [];

@@ -1,19 +1,4 @@
 <script setup lang="ts">
-/**
- * 定时任务设置覆盖层（015，T040 / T052）
- *
- * 用**原生 `<dialog>`** 铺满视口，而不是普通 div 浮层，换来三件白拿的能力（宪章原则四）：
- * 1. `showModal()` 自带**焦点陷阱**——Tab 收敛在覆盖层内，不会跑到背后的聊天输入框；
- * 2. Esc 由浏览器派发 `cancel` 事件，本组件统一收敛为 `close`；
- * 3. `ChatPanel` 的"Esc = 中断本轮回答"判据是 `document.querySelector('dialog[open]')`，
- *    覆盖层存在时它自动让路——不需要在两处之间协商优先级。
- *
- * 头部按钮顺序固定：**运行记录 → 创建定时任务 → ×**（`FR-004`）。顺序即优先级：
- * 看记录是常做的事，创建是低频动作，关闭永远在最右。
- *
- * 解除删除的二次确认放在本组件（`T052`）：`ConfirmDialog` 自带危险样式与 busy 防重，
- * 取消/Esc 时不发任何请求、焦点由原生 dialog 还给原按钮。
- */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import type {
@@ -38,25 +23,14 @@ const props = withDefaults(
     /** 变更信号已降级（重连用尽）：提示可手动刷新 */
     degraded?: boolean
     pendingIds?: readonly string[]
-    /** 创建提交中 */
     submitting?: boolean
-    /** 聊天区当前思考开关 → 创建弹窗默认值 */
     defaultThinking?: boolean
     runs?: ScheduleRun[]
     runsTotal?: number
     runsLoading?: boolean
     runsError?: ErrorInfo | null
-    /**
-     * 创建动作（**函数 prop** 而不是事件）：本组件要按"成功与否"决定是否收起创建弹窗，
-     * 而事件没有返回值。失败时保留弹窗与已填内容（`T039`）。
-     */
     createTask?: (input: CreateScheduledTaskRequest) => Promise<boolean>
-    /** 删除动作：同样要"成功才收起确认框"的返回值 */
     removeTask?: (taskId: string) => Promise<boolean>
-    /**
-     * 编辑动作（2026-10-30 增补）：与创建同样按返回值决定是否收起表单。
-     * 入参是 7 项可编辑字段（不含会话模式，服务端会拒绝多余字段）。
-     */
     updateTask?: (taskId: string, input: UpdateScheduledTaskRequest) => Promise<boolean>
   }>(),
   {
@@ -88,14 +62,11 @@ const emit = defineEmits<{
 
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const createOpen = ref(false)
-/** 正在编辑的任务；`null` = 不在编辑态（与 `createOpen` 共用同一个表单弹窗） */
 const editing = ref<ScheduledTask | null>(null)
 const runsOpen = ref(false)
 const runsFilter = ref<string | null>(null)
-/** 待确认删除的任务；`null` = 无 */
 const pendingDelete = ref<ScheduledTask | null>(null)
 
-/** 表单弹窗（创建 / 编辑共用）：任一模式打开即展开 */
 const formOpen = computed(() => createOpen.value || editing.value !== null)
 
 const deleteMessage = computed(() => {
@@ -104,7 +75,6 @@ const deleteMessage = computed(() => {
   return `删除后该任务不再触发，已产生的会话与历史消息**保留**。\n确定要删除「${target.name}」吗？`
 })
 
-/** 与 `BaseDialog` 同一套受控开合：所有关闭意图都收敛为 `close` 事件，由父级决定 */
 function syncOpen(value: boolean): void {
   const dialog = dialogRef.value
   if (!dialog) return
@@ -138,7 +108,6 @@ function closeForm(): void {
   editing.value = null
 }
 
-/** 行内编辑：按 id 取当前快照（`tasks` 是服务端真源，不另存一份） */
 function onStartEdit(taskId: string): void {
   editing.value = props.tasks.find((task) => task.task_id === taskId) ?? null
 }
@@ -180,7 +149,6 @@ async function onFormSubmit(input: CreateScheduledTaskRequest): Promise<void> {
       deadline_at: input.deadline_at,
     }
     const ok = (await props.updateTask?.(target.task_id, editable)) ?? false
-    // 只有成功才收起：失败保留已填内容（`FR-034` 同口径）
     if (ok) closeForm()
     return
   }
@@ -192,13 +160,6 @@ function onOpenThread(threadId: string): void {
   emit('open-thread', threadId)
 }
 
-/**
- * 覆盖层开合的两件收尾：禁背景滚动，以及**关闭子弹窗**。
- *
- * 后者是必需项：创建 / 运行记录 / 删除确认三个子弹窗都是 `showModal()` 的顶层模态。
- * 覆盖层被**外部**关闭时（最典型：点运行记录里的行 → 跳转会话）组件自身的 `closePanel()`
- * 不会执行，子弹窗便留在打开态——整个文档持续 inert，回到聊天区后哪里都点不动。
- */
 watch(
   () => props.open,
   (open) => {

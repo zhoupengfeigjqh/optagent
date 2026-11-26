@@ -1,13 +1,3 @@
-/**
- * 单元测试：消息区滚动跟随、会话位置记忆与读屏播报（2026-10-16，拆分产出）。
- *
- * 这个模块是从 `MessageList.vue` **原样搬出来**的（宪章原则二：单文件 ≤500 行），
- * 本文件的作用是"锁住搬运后的行为"。它与组件测试的分工：
- * - 组件测试（`MessageList.spec.ts`）从用户视角走通"上翻 → 箭头 → 点回去"；
- * - 本文件直接驱动组合式函数，覆盖**组件层到不了的两条路径**：
- *   ① 存档上限 50 的淘汰（要连切 51 个会话才能看到）；
- *   ② `ResizeObserver` 分支（jsdom 没有该 API，组件测试里被守卫跳过）。
- */
 import { mount } from '@vue/test-utils'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
@@ -27,10 +17,6 @@ function msg(id: string, overrides: Partial<Message> = {}): Message {
   }
 }
 
-/**
- * 在真实组件里调用一次：本模块靠 `onMounted` / `onBeforeUnmount` 装拆 `ResizeObserver`，
- * 游离调用拿不到生命周期钩子。
- */
 function mountScroll(options: { messages?: Message[]; threadId?: string | null } = {}) {
   const listRef = ref<HTMLElement | null>(null)
   const messages = ref<Message[]>(options.messages ?? [msg('m_1')])
@@ -38,8 +24,6 @@ function mountScroll(options: { messages?: Message[]; threadId?: string | null }
   const pendingUser = ref<unknown | null>(null)
   const threadId = ref<string | null>(options.threadId ?? null)
 
-  // 用对象属性承载：`let` 变量在 TS 的控制流里只有 `= null` 这一次赋值
-  // （闭包内的赋值不进流图），守卫之后就退化成 `never` 了
   const holder: { api: MessageScroll | null } = { api: null }
   const wrapper = mount(
     defineComponent({
@@ -63,13 +47,6 @@ function mountScroll(options: { messages?: Message[]; threadId?: string | null }
   }
 }
 
-/**
- * 装上可用的滚动尺寸。
- *
- * jsdom 不参与布局：`scrollHeight` / `clientHeight` 恒为 0、写 `scrollTop` 也没反应，
- * 所以三者都要显式定义（`scrollTop` 用可写存取器，便于模拟"用户上翻"）。
- * 返回读取当前 `scrollTop` 的函数——"有没有真的被程序化置底"要看它。
- */
 function installScrollMetrics(
   element: HTMLElement,
   scrollHeight: number,
@@ -93,7 +70,6 @@ describe('useMessageScroll —— 跟随与暂停（2026-10-16）', () => {
     const harness = mountScroll({ messages: [msg('m_1')], threadId: 'th_a' })
     await flushPromises()
     const readScrollTop = installScrollMetrics(harness.element(), 1000, 300)
-    // 会话切换那一次置底已经落地；这里从贴底状态出发（scrollTop 归位到最底）
     harness.element().scrollTop = 1000
     harness.api.onScroll()
     expect(harness.api.atBottom.value).toBe(true)
@@ -109,11 +85,11 @@ describe('useMessageScroll —— 跟随与暂停（2026-10-16）', () => {
     const harness = mountScroll()
     const readScrollTop = installScrollMetrics(harness.element(), 1000, 300)
 
-    harness.element().scrollTop = 620 // 1000 - 620 - 300 = 80
+    harness.element().scrollTop = 620
     harness.api.onScroll()
     expect(harness.api.atBottom.value).toBe(true)
 
-    harness.element().scrollTop = 619 // 距底 81
+    harness.element().scrollTop = 619
     harness.api.onScroll()
     expect(harness.api.atBottom.value).toBe(false)
 
@@ -177,17 +153,17 @@ describe('useMessageScroll —— 会话位置记忆（2026-10-16）', () => {
     const readScrollTop = installScrollMetrics(harness.element(), 1000, 300)
 
     harness.element().scrollTop = 300
-    harness.api.onScroll() // 在 th_a 里上翻
+    harness.api.onScroll()
 
     harness.threadId.value = 'th_b'
     harness.messages.value = [msg('m_b')]
     await flushPromises()
-    expect(readScrollTop()).toBe(1000) // th_b 没有存档 → 置底
+    expect(readScrollTop()).toBe(1000)
 
     harness.threadId.value = 'th_a'
     harness.messages.value = [msg('m_a')]
     await flushPromises()
-    expect(readScrollTop()).toBe(300) // 回到离开时那一屏
+    expect(readScrollTop()).toBe(300)
 
     harness.wrapper.unmount()
   })
@@ -200,11 +176,10 @@ describe('useMessageScroll —— 会话位置记忆（2026-10-16）', () => {
     harness.element().scrollTop = 200
     harness.api.onScroll()
 
-    // 前插一页：首条变了、末条没变、条数变多 ⇒ 走"补偿高度"分支
     harness.messages.value = [msg('m_a'), msg('m_b')]
     await flushPromises()
 
-    expect(readScrollTop()).toBe(200) // 首次读到的 before 是 1000，新增高度 0 ⇒ 位置不变
+    expect(readScrollTop()).toBe(200)
     harness.wrapper.unmount()
   })
 
@@ -213,7 +188,6 @@ describe('useMessageScroll —— 会话位置记忆（2026-10-16）', () => {
     await flushPromises()
     const readScrollTop = installScrollMetrics(harness.element(), 1000, 300)
 
-    // 依次造访 51 个会话，每个都上翻后再离开（离开即存档）
     for (let index = 0; index < 51; index += 1) {
       harness.threadId.value = `th_${index}`
       harness.messages.value = [msg(`m_${index}`)]
@@ -222,13 +196,11 @@ describe('useMessageScroll —— 会话位置记忆（2026-10-16）', () => {
       harness.api.onScroll()
     }
 
-    // 最后访问过的会话仍有档
     harness.threadId.value = 'th_50'
     harness.messages.value = [msg('m_50')]
     await flushPromises()
     expect(readScrollTop()).toBe(300)
 
-    // 最早的 th_0 已被淘汰 → 置底
     harness.threadId.value = 'th_0'
     harness.messages.value = [msg('m_0')]
     await flushPromises()
@@ -277,7 +249,6 @@ describe('useMessageScroll —— ResizeObserver（2026-10-16）', () => {
     vi.unstubAllGlobals()
   })
 
-  /** jsdom 没有 ResizeObserver：装一个可手动触发的替身，才能走到组件测试跳过的那条分支 */
   class FakeResizeObserver {
     static instances: FakeResizeObserver[] = []
     observe = vi.fn()
@@ -301,7 +272,6 @@ describe('useMessageScroll —— ResizeObserver（2026-10-16）', () => {
     expect(observer).toBeDefined()
     expect(observer.observe).toHaveBeenCalledTimes(1)
 
-    // 内容不满一屏（右侧面板收起等）→ 重判为贴底
     installScrollMetrics(harness.element(), 300, 300)
     harness.api.atBottom.value = false
     observer.trigger()
@@ -311,10 +281,6 @@ describe('useMessageScroll —— ResizeObserver（2026-10-16）', () => {
     expect(observer.disconnect).toHaveBeenCalledTimes(1)
   })
 
-  /**
-   * 可控的滚动尺寸：重排时 `scrollHeight` 会变化，而 `scrollTop` 的存取器要跨变更保留
-   * （`installScrollMetrics` 每次调用都会重置 scrollTop，模拟不了"同一容器换了高度"）。
-   */
   function installFluidMetrics(
     element: HTMLElement,
     clientHeight: number,
@@ -375,7 +341,7 @@ describe('useMessageScroll —— ResizeObserver（2026-10-16）', () => {
 
     const metrics = installFluidMetrics(harness.element(), 300)
     metrics.setScrollHeight(2000)
-    harness.element().scrollTop = 500 // 距底 1200 → 非贴底
+    harness.element().scrollTop = 500
     harness.api.onScroll()
     expect(harness.api.atBottom.value).toBe(false)
 

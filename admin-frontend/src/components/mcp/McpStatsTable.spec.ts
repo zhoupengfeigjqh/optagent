@@ -89,7 +89,6 @@ describe('McpStatsTable —— 表头与网格', () => {
       '5/4',
       '2026-09-23T06:00:00Z',
     ])
-    // 同一服务的另一个工具、另一用户各占一行，互不合并
     expect(rows[1]!.findAll('td')[2]!.text()).toBe('ocr_pdf')
     expect(rows[1]!.findAll('td')[0]!.text()).toBe('zpf')
   })
@@ -120,7 +119,6 @@ describe('McpStatsTable —— 不可达时以「未知」呈现（FR-009）', (
       .findAll('tbody tr')[0]!
       .findAll('td')
       .map((td) => td.text())
-    // 三个维度列仍照实显示（那是"谁调的"，不是统计值），计数与时间列一律未知
     expect(cells.slice(0, 3)).toEqual(['admin', 'ocr', 'ocr_image'])
     expect(cells.slice(3)).toEqual(['未知', '未知', '未知', '未知', '未知'])
     expect(wrapper.find('.mcp-stats__unknown').exists()).toBe(true)

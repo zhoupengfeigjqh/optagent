@@ -1,6 +1,3 @@
-/**
- * 单元测试：密码哈希（`FR-002`/`FR-003`）
- */
 import { describe, expect, it } from 'vitest';
 import { hashPassword, verifyPassword, type PasswordRecord } from '../../src/domain/auth/password.js';
 

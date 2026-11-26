@@ -1,10 +1,3 @@
-/**
- * 组件测试：单文件上传项（012 补同名测试——该组件本次被改动，按"改动即补测"）
- *
- * 只钉住本次相关的两条：
- * 1. **展示名取落盘名**：`serverFilename`（可能是 `原名(1).ext`）优先，缺失才回落原始名（FR-024）；
- * 2. 失败态的文案与「重试」入口不因命名改动而退化（回归护栏）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -54,7 +47,6 @@ describe('UploadItem —— 展示名取落盘名（012 FR-024）', () => {
 
     expect(wrapper.find('.upload-item__status').text()).toBe('上传失败')
     expect(wrapper.find('.upload-item__error').text()).toContain('同名文件过多')
-    // 不展示后端原始 message（前端一律按 code 分派文案）
     expect(wrapper.text()).not.toContain('raw')
 
     await wrapper.find('.upload-item__retry').trigger('click')

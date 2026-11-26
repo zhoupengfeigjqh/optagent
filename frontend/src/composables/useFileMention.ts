@@ -1,20 +1,3 @@
-/**
- * `@` 引用空间文件（FR-014~FR-019 + 003 三空间级联）
- *
- * 展示层与提交层分离：
- * - **展示层**：输入框文本中插入 `@文件名`（可读、可编辑）
- * - **提交层**：`references` 为结构化 `{dir, filename}[]`，发送时作为 `attachments` 提交（FR-016）
- *
- * 级联导航（三空间，**点击**下钻，悬停不展开）：
- * - 一级：数据准备 / 临时空间（来自 workspace 接口，前端无目录常量）
- * - 点击数据准备 → 二级 scenario 子目录；点击子目录 → 三级文件
- * - 点击共享/临时空间 → 直接出文件列
- *
- * 关键规则：
- * - 单条消息 ≤ 10 个引用，超限拒绝并提示（FR-017、V-02）
- * - 文本中的 `@文件名` 被删除 → 面板收起且引用同步移除
- * - 发送前校验引用仍存在 → 唯一校验点在 `useChatPanel.onSend`（`workspace.exists` + `uploadPanel.isPending`）
- */
 
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
@@ -26,10 +9,8 @@ import { useThreadBuckets } from './useThreadBuckets'
 import type { WorkspaceStore } from './useWorkspace'
 import type { ToastStore } from './useToast'
 
-/** 级联面板当前聚焦的列。 */
 export type MentionColumn = 'space' | 'dir' | 'file'
 
-/** 构造参数。 */
 export interface MentionDeps {
   workspace: WorkspaceStore
   toast?: ToastStore
@@ -43,58 +24,34 @@ export interface MentionDeps {
   thread?: () => string | null
 }
 
-/** `@` 引用 composable 契约。 */
 export interface FileMentionStore {
   open: Ref<boolean>
-  /**
-   * 最近一次输入的光标位置（浮层定位读它：面板要贴 `@` 光标右侧弹出）。
-   * 收起时归零——留着旧下标会让下一次定位从错误的位置起算（与 `usePathInsert` 同口径）。
-   */
   caret: Ref<number>
-  /** 三空间树（workspace 同源） */
   spaces: ComputedRef<WorkspaceSpace[]>
-  /** 当前聚焦列 */
   column: Ref<MentionColumn>
-  /** 已选空间名（数据准备展开二级后/扁平空间选中后有值） */
   activeSpace: Ref<string | null>
   /** 已选目录（相对路径，如 数据准备/生产计划、临时空间） */
   activeDir: Ref<string | null>
-  /** 当前列的键盘高亮索引 */
   activeIndex: Ref<number>
   references: Readonly<Ref<FileReference[]>>
-  /** 二级列的可选目录（仅数据准备；其余空间为空） */
   dirs: ComputedRef<WorkspaceDir[]>
-  /** 三级列的文件清单 */
   files: ComputedRef<{ filename: string }[]>
   maxReached: ComputedRef<boolean>
-  /** 文本/光标变化时检测 `@` 触发与引用同步（触发时记录光标，供浮层定位） */
   handleInput(text: string, nextCaret: number): void
-  /** 点击空间：数据准备进二级目录列，其余直接出文件列 */
   pickSpace(space: string): void
-  /** 点击二级目录 → 出文件列 */
   pickDir(dir: string): void
-  /** 选择文件 → 加入引用；超限返回 `false` 并提示 */
   pickFile(reference: FileReference): boolean
-  /** 键盘上下移动（当前列内循环） */
   move(delta: number): void
-  /** 回车确认当前高亮项：空间/目录列下钻，文件列选中；返回选中的引用（非文件列返回 null） */
   confirmActive(): FileReference | null
-  /** 回退一列（文件 → 数据准备的目录列或空间列；目录 → 空间列） */
   back(): void
-  /** 收起面板（不清空引用） */
   close(): void
-  /** 移除引用并同步文本 */
   remove(reference: FileReference): void
-  /** 发送后清空 */
   reset(): void
-  /** 提交载荷（结构化数组，FR-016） */
   buildAttachments(): FileReference[]
 }
 
-/** `@` 触发检测：光标前紧邻的 `@` 且其后无空白。HITL 弹窗的路径插入（usePathInsert）同款复用。 */
 export const TRIGGER_PATTERN = /(?:^|\s)@[^\s@]*$/
 
-/** 展示层引用标记。 */
 export function mentionToken(reference: FileReference): string {
   return `@${reference.filename}`
 }
@@ -113,7 +70,6 @@ export function stripMentionTokens(text: string, references: readonly FileRefere
   return result.replace(/\s+/g, ' ').trim()
 }
 
-/** 创建 `@` 引用状态。 */
 export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   const open = ref(false)
   const caret = ref(0)
@@ -123,11 +79,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   const activeIndex = ref(0)
   const references = ref<FileReference[]>([])
 
-  /**
-   * 引用的会话桶（与草稿同构，见 `useThreadBuckets`）。
-   *
-   * 只在给了 `thread` 依赖时才装：单测直接构造 store 时没有会话概念，不需要 watcher。
-   */
   if (deps.thread !== undefined) {
     const buckets = useThreadBuckets(
       references,
@@ -137,7 +88,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
     watch(
       () => deps.thread?.() ?? null,
       (next, previous) => {
-        // 自动建会话（首条消息 `null → 真 id`）不是"换会话"：这批引用属于正在发送的这条消息，
         // 直接接管给新会话，别当成切换抹掉（否则发送失败时胶囊会凭空消失）
         if (previous === null && next !== null) {
           buckets.move(null, next)
@@ -181,7 +131,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   }
 
   function handleInput(text: string, nextCaret: number): void {
-    // 引用同步：文本中已不存在 `@文件名` 的引用一律移除（US4 场景 8）
     const remaining = references.value.filter((reference) => text.includes(mentionToken(reference)))
     if (remaining.length !== references.value.length) {
       references.value = remaining
@@ -200,7 +149,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
       column.value = 'space'
       activeSpace.value = null
       activeDir.value = null
-      // 目录内文件可能刚上传，展开面板时刷新清单
       if (!deps.workspace.loading.value) {
         void deps.workspace.load()
       }
@@ -273,7 +221,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
 
   function back(): void {
     if (column.value === 'file') {
-      // 扁平空间无目录列，直接回空间列
       column.value = dirs.value.length > 0 ? 'dir' : 'space'
       if (column.value === 'space') activeSpace.value = null
       activeDir.value = null
@@ -325,7 +272,6 @@ export function createFileMentionStore(deps: MentionDeps): FileMentionStore {
   }
 }
 
-/** 组件内取用（经 `provide/inject` 的会话上下文）。 */
 export function useFileMention(): FileMentionStore {
   return useSession().mention
 }

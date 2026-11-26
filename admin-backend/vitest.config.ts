@@ -1,14 +1,3 @@
-/**
- * Vitest 配置（管理服务）：覆盖率门禁
- *
- * 结构与 `agent-backend/vitest.config.ts` 同构，两层阈值：
- * ① **全局地板（防倒退）**：略低于当前实测值，只用于发现"覆盖率整体下滑"；
- * ② **受约束模块阈值**：新增/改动的 `domain/`、`infra/` 模块按 80% 校验
- *    （宪章原则三：核心业务逻辑语句覆盖率 MUST ≥ 80%）。
- *
- * **新增或改动模块时 MUST 把该模块加进 ② 的清单**——这是门禁真正咬人的地方。
- * 本地执行（宿主机），容器不参与（宪章原则三）。
- */
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -20,15 +9,11 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/types.ts', '**/*.d.ts'],
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 93.20 / branch 84.24 / funcs 95.71 / lines 94.45
-        //    （007 按 T066 复核后上调：上一版 90/80/90/90 对现状过于宽松）
-        //    地板只可上调（原则三 / 治理 § 不追溯）。
         statements: 91,
         branches: 82,
         functions: 94,
         lines: 93,
 
-        // ② 受宪章 80% 门禁约束的模块（本次新增/改动且已被充分覆盖）
         'src/domain/error-codes.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/domain/api-error.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/domain/platform-settings.ts': {

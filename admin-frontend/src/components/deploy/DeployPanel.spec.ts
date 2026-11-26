@@ -128,7 +128,6 @@ describe('DeployPanel', () => {
     await flushPromises()
     expect(deployButton(wrapper)?.attributes('disabled')).toBeUndefined()
 
-    // 又多勾了一个用户 → 范围变了 → 结论不再适用
     await wrapper.setProps({ selectedUserIds: ['admin', 'ops'] })
     expect(deployButton(wrapper)?.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('请先执行校验预检')

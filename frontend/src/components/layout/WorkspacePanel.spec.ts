@@ -1,12 +1,3 @@
-/**
- * 组件测试：右侧面板的「同源地址」内容态（2026-10-15）
- *
- * 守三件事：
- * 1. **点同源入口后面板里要有东西** —— `openView()` 只写 `target`（不写 `content`），
- *    若内容区只认 `content`，用户看到的就是一个标题为"文件空间"的空面板
- * 2. **预检结论决定渲染** —— `iframe` 内联；`download` 给外部打开入口（不静默失败）
- * 3. **头部取入口名**，不退回列表态文案
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -116,7 +107,6 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
     )
 
     expect(wrapper.find('iframe').exists()).toBe(false)
-    // 不再走 `<pre>` 文本流
     expect(wrapper.find('.workspace-panel__text').exists()).toBe(false)
     expect(wrapper.find('.sheet-preview').exists()).toBe(true)
     expect(wrapper.findAll('thead th').map((cell) => cell.text())).toEqual(['物料', '数量'])
@@ -124,13 +114,6 @@ describe('WorkspacePanel —— 同源地址内容态（2026-10-15）', () => {
   })
 })
 
-/**
- * 放大 / 缩小（2026-10-16，011）
- *
- * 本文件只测**面板这一层的契约**：入口在不在、在哪儿、叫什么、点了派发什么、标记类有没有。
- * "什么内容可以放大"的判据在会话态（`usePreview.spec.ts` 的 8 例矩阵），这里用
- * `maximizeVisible` 这个布尔 prop 代表结论——面板 MUST NOT 自行对 `target` / `content` 判第二遍（FR-010）。
- */
 describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
   function mountMaximizable(over: Partial<{ maximized: boolean; maximizeVisible: boolean }> = {}) {
     return mount(WorkspacePanel, {
@@ -144,7 +127,6 @@ describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
     })
   }
 
-  /** 文件目标（PDF）：动作区同时有「下载」与「放大」，才能断言三者的相对顺序。 */
   function mountPdf(over: Partial<{ maximized: boolean; maximizeVisible: boolean }> = {}) {
     return mount(WorkspacePanel, {
       props: {
@@ -158,14 +140,12 @@ describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
     })
   }
 
-  /** 头部动作区里每个按钮的可访问名称，按 DOM 顺序。 */
   function actionLabels(wrapper: ReturnType<typeof mountMaximizable>): string[] {
     return wrapper
       .findAll('.workspace-panel__actions button')
       .map((button) => button.attributes('aria-label') ?? '')
   }
 
-  /** 放大 / 缩小入口（按可访问名称定位，不依赖它在动作区里的下标）。 */
   function maximizeEntry(wrapper: ReturnType<typeof mountMaximizable>) {
     const entry = wrapper
       .findAll('.workspace-panel__actions button')
@@ -203,7 +183,6 @@ describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
     await entry.trigger('click')
 
     expect(wrapper.emitted('toggle-maximize')).toHaveLength(1)
-    // 组件不改状态（真源在会话态），故先确认节点没被换掉：换节点 = 焦点在切换时丢失
     expect(maximizeEntry(wrapper).element).toBe(before)
   })
 
@@ -254,13 +233,6 @@ describe('WorkspacePanel —— 放大 / 缩小入口（011）', () => {
   })
 })
 
-/**
- * 放大态下的 Esc（011）
- *
- * 面板负责把两处 Esc 汇成同一个 `restore-maximize`：本页 `window`（同源 iframe 之外的场景）
- * 与同源 iframe 文档内（用户点进页面里翻的常见路径）。"退出放大不中断回答"的拦截细节
- * 在 `useMaximizeEscape.spec.ts` 里测，这里只钉面板的接线与转发。
- */
 describe('WorkspacePanel —— 放大态按 Esc（011）', () => {
   function mountUrl(over: Partial<{ maximized: boolean }> = {}) {
     return mount(WorkspacePanel, {
@@ -280,7 +252,6 @@ describe('WorkspacePanel —— 放大态按 Esc（011）', () => {
     )
   }
 
-  /** 给 iframe 就地挂一份"同源文档"，返回它以便断言与派发事件。 */
   function stubContentDocument(frame: { element: Element }): Document {
     const doc = document.implementation.createHTMLDocument('frame')
     Object.defineProperty(frame.element, 'contentDocument', { value: doc, configurable: true })
@@ -310,8 +281,6 @@ describe('WorkspacePanel —— 放大态按 Esc（011）', () => {
   it('放大态下同源 iframe 文档内的 Esc → 同样派发 `restore-maximize`', async () => {
     const wrapper = mountUrl({ maximized: true })
     const frame = wrapper.find('iframe')
-    // jsdom 不会为带 `src` 的 iframe 造文档（真实浏览器里同源才有 `contentDocument`），
-    // 故就地注入一份等价文档：本用例测的是"拿到文档之后我们做了什么"
     const doc = stubContentDocument(frame)
     await frame.trigger('load')
     doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))

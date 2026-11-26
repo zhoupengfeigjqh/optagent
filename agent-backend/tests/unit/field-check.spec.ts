@@ -1,14 +1,3 @@
-/**
- * 上传表字段校验（`domain/field-check.ts`，契约 runtime-api-delta.md §3.1 的消费端）
- *
- * 覆盖：
- * - 取值类型判定（6 种，含边界：符号 / 小数 / 指数 / 严格布尔 / JSON 顶层类型）
- * - CSV 解析（引号转义、`\r\n`、BOM、前导空行、GBK 回退）
- * - xlsx 解析（第一个 sheet、显示文本、空表）
- * - 校验问题清单（缺必填表头、逐行类型、空单元格跳过、行号口径、截断）
- *
- * 运行：npm run test（仅单元测试目录）
- */
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 
@@ -94,7 +83,7 @@ describe('valueMatchesType —— §3.1 判据', () => {
 
   it('object / array：可 JSON.parse 且顶层类型匹配（不校验嵌套内容）', () => {
     expect(valueMatchesType('{"a":1}', 'object')).toBe(true);
-    expect(valueMatchesType('{"a":{"b":[1]}}', 'object')).toBe(true); // 嵌套不展开
+    expect(valueMatchesType('{"a":{"b":[1]}}', 'object')).toBe(true);
     expect(valueMatchesType('[1,2]', 'object')).toBe(false);
     expect(valueMatchesType('null', 'object')).toBe(false);
     expect(valueMatchesType('not-json', 'object')).toBe(false);
@@ -132,7 +121,6 @@ describe('decodeCsvBuffer', () => {
   });
 
   it('GBK 字节（无 BOM、非法 UTF-8 序列）回退 GBK 解码', () => {
-    // 「中国」的 GBK 编码（D6D0 B9FA）：非法 UTF-8，触发回退
     const gbk = Buffer.from([0xd6, 0xd0, 0xb9, 0xfa]);
     expect(decodeCsvBuffer(gbk)).toBe('中国');
   });

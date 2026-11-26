@@ -1,13 +1,3 @@
-/**
- * 单元测试：规则求值（021）。
- *
- * 守住的口径：
- * - 组内 `and` / `or` × 组间 `and` / `or`（根 `combine`）两级合成；
- * - **不短路**：失败条件全部收集，最多 10 条；
- * - 多条规则合成：任一 `false` 即整体 `false`，`design=null` 不阻断；
- * - 函数未记录 / 字段缺失 / 记录值为 `null` → 该条件不成立；
- * - `invalid` 条件恒不成立；空组与非法条件不崩。
- */
 import { describe, expect, it } from 'vitest';
 
 import { normalizeDesign } from '../../src/domain/rule-gate/design.js';
@@ -20,7 +10,6 @@ function designOf(raw: unknown): RuleDesign {
   return design;
 }
 
-/** 记录 fixture：键存在即已执行；`null` 视为取不到值 */
 function contextOf(values: Record<string, unknown>): EvaluateContext {
   return {
     resultOf(functionName) {

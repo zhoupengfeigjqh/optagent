@@ -1,30 +1,3 @@
-/**
- * 内置工具 → pi-agent-core AgentTool 适配（T037/T038 装配，T041 降级策略）。
- *
- * domain/tools 是纯业务函数（不依赖 pi）；这里包成 AgentTool 并把异常翻译成
- * 工具结果**返回给模型**（不抛——对话不中断，FR-022）。失败分支一律走
- * `toolErrorResult` 打上 `details.toolError` 标记（2026-10-29）：
- * - PermissionError → "没有权限"文案，写操作记日志 file.write.denied（alert）
- * - SkillAccessError → 技能目录越权文案
- * - CalculatorError → "表达式无法计算"
- * - 未知内置工具（目录错配）→ "未知内置工具"
- * - 其他异常 → 通用失败文本（并记 error 日志）
- *
- * 标记的实际作用只有一处：`infra/agent-loop.ts` 的 `afterToolCall` 把它翻成
- * `isError: true`，让前端工具卡片标红。正文与模型读到的内容**逐字不变**
- * （DeepSeek 的 OpenAI 兼容转换不读 `isError`，所以标红不影响模型行为）。
- * 业务失败（如"目录为空"）不走标记——那是正常返回。
- *
- * **R1 改造后**：元数据不再内联于本文件，改为**消费**
- * `domain/builtin-tool-catalog.ts` 的单一来源目录；说明与入参模板在装配时
- * 用当前 run 的运行期取值渲染。对模型可见的文本**逐字不变**
- * （由 `tests/unit/builtin-tool-catalog.spec.ts` 守住）。
- *
- * **唯一例外：`write_file` 的成功结果（2026-10-21）**——它是"产出文件"的工具，
- * 必须按 `domain/view-links.ts` 的协议在结果里声明 `filePath` / `filePathName`，
- * 运行时才能抽成 `view_links` 并在回答下方给出**可点入口**（`TR-44`）。
- * 其余内置工具、以及 `write_file` 的失败/越权结果**仍是纯文本**（失败没有可指的资源）。
- */
 import path from 'node:path';
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -48,19 +21,10 @@ import { toolErrorResult } from '../domain/tool-error.js';
 
 export interface BuiltinToolsOptions {
   fileAccess: FileAccess;
-  /** 写产出的 thread_id 前缀 */
   threadId: string;
-  /** TOOL.json 启用的工具名 */
   enabled: string[];
   /** 可供 list_dir 的目录清单（建 run 时按 scenario 动态生成，如 ['数据准备/生产计划', …, '临时空间']） */
   availableDirs: string[];
-  /**
-   * 本数字人的技能目录（`users/{uid}/agents/{agent}/skills`），
-   * `read_skill` 与 `grep_skill` 的沙箱根。
-   *
-   * 与用户三空间分开，故**不经过 `FileAccess`**——由 `domain/tools/skill-access.ts`
-   * 提供"只读 + 只能落在该技能目录内"的共享校验（两条技能访问通道共用一份判据）。
-   */
   skillsDir: string;
   /**
    * `write_file` 落盘字节上限（2026-11-16）。生产由 `server.ts` 注入
@@ -98,21 +62,17 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
         return toolErrorResult(`未知内置工具：${name}`, 'TOOL_NOT_IMPLEMENTED');
       }
       if (err instanceof PermissionError) {
-        // FR-022：越权不中断对话；写违规按契约记 file.write.denied
         const event = name === 'write_file' ? 'file.write.denied' : 'file.access.denied';
         opts.logger.warn(
           { alert: true, event, thread_id: opts.threadId, tool: name },
           `工具 ${name} 越权被拒绝：${err.message}`,
         );
         // 标记失败（2026-10-29）：越权是用户该感知的"没做成"，卡片必须红；
-        // 引导语原样保留——DeepSeek 侧不读 isError，模型仍会按它自我纠正
         return toolErrorResult(
           `没有权限执行该操作：${err.message}。请向用户说明该目录为只读，可改为写入临时空间 tmp/。`,
           'FILE_ACCESS_DENIED',
         );
       }
-      // 2026-11-16：write_file 的三种"内容/格式"失败——都属可自我纠正的用法问题
-      // （不是越权、不是程序缺陷），文案直接给模型下一步怎么做，日志不带 alert。
       if (err instanceof ContentFormatError) {
         opts.logger.warn(
           {
@@ -138,7 +98,6 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
         return toolErrorResult(`写入失败：${err.message}`, err.code);
       }
       if (err instanceof SkillAccessError) {
-        // 技能内的越权/越界访问：与文件越权同口径记 alert，但文案不同——
         // 技能目录恒只读，且"改写临时空间"这类建议与技能无关
         opts.logger.warn(
           { alert: true, event: 'file.access.denied', thread_id: opts.threadId, tool: name },
@@ -161,7 +120,6 @@ function wrap(name: string, opts: BuiltinToolsOptions, fn: ExecuteFn) {
   };
 }
 
-/** 各工具的领域实现（与元数据解耦，便于目录保持纯数据） */
 function domainExecute(
   name: string,
   opts: BuiltinToolsOptions,
@@ -181,12 +139,6 @@ function domainExecute(
         const r = await writeToolFile(fa, opts.threadId, String(p.filename), String(p.content), {
           maxBytes: opts.maxWriteBytes,
         });
-        // 结构化结果（2026-10-21）：`filePath` / `filePathName` 是视图链接协议的字段名，
-        // 由 `extractViewLinks()` 抬成 `view_links` sidecar → 前端在回答下方渲染可点入口。
-        // 只给**空间相对路径**（不在后端拼 URL/前缀），归一化仍由前端唯一负责（`TR-42`）。
-        // `message` 保留人话，模型与日志都能直接读懂；工具说明要求模型不要转抄 JSON。
-        // `bytes` 恒为**落盘字节数**（2026-11-16 起对有编码的格式不再等于 content 长度），
-        // `mode` 是该扩展名命中的输出模式，便于日志回溯"写的是哪种格式"。
         return JSON.stringify({
           message: `已写入 ${r.path}（${r.bytes} 字节）`,
           filePath: r.path,

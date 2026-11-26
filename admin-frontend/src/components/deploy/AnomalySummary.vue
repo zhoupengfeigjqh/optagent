@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * 异常项汇总（`FR-055`、`SC-016`，落在数字人部署功能区内）。
- *
- * 硬要求：**一次视图内**列出全部引用了失效对象的数字人及其所属用户，
- * 并可跳转到对应编辑位置——MUST NOT 要求管理员逐个翻查。
- *
- * 界面名称为「异常项汇总」（2026-09-16 十一次调整去掉了"全局"二字，避免与
- * "仅部署勾选用户"的局部视角混淆）；规格条款名仍是"全局异常项汇总"。
- *
- * 编辑跳转路径由服务端返回模板（`edit_path`）拼出，前端不硬编码路由（原则七）。
- */
 import { computed, onMounted, ref } from 'vue'
 import { fetchAnomalies } from '../../api/deploy'
 import type { AnomalyResponse, ErrorInfo } from '../../api/types'
@@ -45,7 +34,6 @@ async function load(): Promise<void> {
   }
 }
 
-/** 由服务端返回的路径模板拼出编辑跳转地址 */
 function editPathOf(agentName: string, category: string): string {
   const template = data.value?.edit_path ?? '/agents/{agent_name}?tab={category}'
   return template

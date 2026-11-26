@@ -1,25 +1,3 @@
-/**
- * 一阶发散（019）：行为 → 概念 → 对象关系 → 相邻概念 → 相邻概念的行为。
- *
- * **两个方向互斥、各走一侧**（用户 2026-11-08 拍板）：
- * - 上游（主数据 / 父项）→ 只进**聚焦提示**（模型该参考什么）；
- * - 下游（明细 / 事实）→ 只进**下一步动作卡片**（模型能建议用户做什么）。
- *
- * **方向判定的唯一实现**（`relationEnds`）：本体文件不声明上下游，只能从基数推导。
- * 口径：箭头 `source → target` 读作「上游 → 下游」；唯一的例外是**多对一**
- * （`Functional` 单独出现时 source 是多端），此时要反向取。`M:N` 按约定取箭头方向
- * （两端都无基数约束，约定 source 为上游）。信号缺失时依次退回 `cardinality` → 箭头，
- * 并在留档里可由 `via` 分辨是哪一类判定。
- *
- * **不做二次判分**：发散结果直接使用（`score` 恒为 null），因此本模块是纯函数、
- * 零 IO、零模型调用——只做图遍历与去重，不引入任何额外等待。
- *
- * 三条顺序约束：
- * 1. BFS 逐跳推进，同跳按**本体 `concepts[]` 原序**输出（同输入必得同输出）；
- * 2. 邻居顺序沿用 `relations[]` 原序，首个命中路径即 `via_relation`；
- * 3. 行为按"概念顺序 → 行为原序"收集，`ontology_id + name` 去重；direct 行为优先，
- *    同一行为若既被直接命中又被发散命中，只保留 direct（不再重复出现）。
- */
 import type {
   ExpandedBehavior,
   ExpandedConcept,
@@ -39,7 +17,6 @@ import type {
  */
 export const MAX_EXPANDED_BEHAVIORS = 32;
 
-/** 方向判定的信号来源（留档/排障用：能分辨"推导"与"约定"） */
 export type DirectionVia = 'relation_type' | 'cardinality' | 'arrow';
 
 export interface RelationEnds {
@@ -48,27 +25,15 @@ export interface RelationEnds {
   via: DirectionVia;
 }
 
-/**
- * 关系两端的方向判定（本特性的唯一实现）。
- *
- * | `relation_type` | 基数 | 上游端 |
- * |---|---|---|
- * | 仅 `Functional` | N:1 | **target**（唯一反向的一类） |
- * | 仅 `InverseFunctional` | 1:N | source |
- * | 两者都有 | 1:1 | source |
- * | 都没有 | M:N | source（约定） |
- */
 export function relationEnds(relation: OntologyRelation): RelationEnds {
   const types = relation.relationType.map((item) => item.trim().toLowerCase());
   const functional = types.includes('functional');
   const inverse = types.includes('inversefunctional');
 
-  // Functional 单独出现 = 每端只有一个 target ⇒ source 是多端 ⇒ 上游在 target
   if (functional && !inverse) {
     return { upstream: relation.target, downstream: relation.source, via: 'relation_type' };
   }
   if (inverse) {
-    // InverseFunctional（单独或与 Functional 同时出现）→ 箭头方向即上下游
     return { upstream: relation.source, downstream: relation.target, via: 'relation_type' };
   }
 
@@ -79,7 +44,6 @@ export function relationEnds(relation: OntologyRelation): RelationEnds {
   if (parsed === 'forward') {
     return { upstream: relation.source, downstream: relation.target, via: 'cardinality' };
   }
-  // M:N / 缺基数 → 约定按箭头（019：source 为上游）
   return { upstream: relation.source, downstream: relation.target, via: 'arrow' };
 }
 
@@ -92,21 +56,17 @@ function parseCardinality(value: string | null): 'forward' | 'reversed' | null {
   const right = (parts[1] ?? '').trim().toUpperCase();
   if (left === '' || right === '') return null;
   const many = (side: string): boolean => side === 'N' || side === 'M' || side === '*';
-  // 多对一：source 是多端 ⇒ 上游在 target
   if (many(left) && !many(right)) return 'reversed';
   return 'forward';
 }
 
-/** 发散入参：本轮入选行为 + 已入选技能关联的本体（本体文件枚举序） */
 export interface ExpandInput {
   behaviors: readonly { ontologyId: string; name: string; concept: string | null }[];
   ontologies: readonly OntologyDefinition[];
-  /** 聚焦阶数（0~2）；0 = 不解析、不扩展 */
   depth: number;
   maxBehaviors?: number;
 }
 
-/** 一条邻居边：`to` 是"该方向上的下一跳" */
 interface NeighborEdge {
   to: string;
   relation: string;
@@ -114,12 +74,6 @@ interface NeighborEdge {
 
 const EMPTY_CHANNEL = (): ExpansionChannel => ({ concepts: [], behaviors: [], directEdges: [] });
 
-/**
- * 同向一阶（及 N 阶）发散。
- *
- * 只对**已入选行为所属的概念**发难：某概念若没有任何行为入选，它不会成为起点，
- * 因此本函数不会把"全本体"无意间拉进来。
- */
 export function expandNeighborhood(input: ExpandInput): ExpansionResult {
   const result: ExpansionResult = {
     upstream: EMPTY_CHANNEL(),
@@ -167,13 +121,11 @@ export function expandNeighborhood(input: ExpandInput): ExpansionResult {
   return result;
 }
 
-/** 阶数收敛：0~2（越界按 0 处理，运行侧不做静默放大） */
 export function clampDepth(depth: number): number {
   if (!Number.isInteger(depth) || depth < 0) return 0;
   return depth > 2 ? 2 : depth;
 }
 
-/** 每个本体下 direct 概念集合（按行为顺序去重，保证稳定） */
 function groupDirectConcepts(
   behaviors: ExpandInput['behaviors'],
 ): Map<string, Set<string>> {
@@ -187,7 +139,6 @@ function groupDirectConcepts(
   return map;
 }
 
-/** 概念不在 `concepts[]` 里 → 链断了，记 warning（判定照常，只是不扩展） */
 function warnUndefinedConcepts(
   ontology: OntologyDefinition,
   behaviors: ExpandInput['behaviors'],
@@ -206,12 +157,6 @@ function warnUndefinedConcepts(
   }
 }
 
-/**
- * 建邻接表：`key` 是当前概念，`edge.to` 是该方向上的一跳。
- *
- * 上游表 = 对每条关系，从 `downstream` 端出发能找到 `upstream` 端；
- * 下游表相反。端点不在 `concepts[]` 的关系整条跳过（记 warning 由调用方统一给）。
- */
 function buildAdjacency(
   ontology: OntologyDefinition,
   side: 'upstream' | 'downstream',
@@ -231,20 +176,6 @@ function buildAdjacency(
   return map;
 }
 
-/**
- * 逐跳 BFS：同跳按 `concepts[]` 原序输出，**一个概念一条**，但保留本跳的**全部入边**。
- *
- * 去环靠 `visited`：图里存在自环或双向边时不会死循环，也不会重复出概念。
- *
- * 2026-11-26（修丢边，两处）：
- * 1. 旧实现用 `hits.has(edge.to)` 把同一概念的入边压成一条，多起点共享同一上游时
- *    （库存 → 原材料 ← 采购单），后到的那条边被吞掉。现在 `edges` 保留本跳全部入边，
- *    `viaConcept/viaRelation` 取首条（留档口径不倒退）。
- * 2. 旧实现把指向**直接命中概念**的边一律丢弃（`visited` 以 direct 为种子）。命中的
- *    概念之间照样有上下游关系（`QueryInventory ←〔拥有库存〕— RawMaterial`），丢掉它
- *    就会出现"命中的两个概念在提示里毫无关系"。这类边单独收进 `directEdges`，
- *    概念清单不动（它们已在「关键行为」里，不重复列出）。
- */
 function walk(
   ontology: OntologyDefinition,
   direct: ReadonlySet<string>,
@@ -258,14 +189,11 @@ function walk(
   let frontier: ReadonlySet<string> = direct;
 
   for (let hop = 1; hop <= depth; hop++) {
-    // 先按"前沿概念序 → 关系序"收集本跳全部命中（顺序即边序，首个命中仍作 via），
-    // 再按 `concepts[]` 原序输出——保证同输入必得同输出，且与本体声明顺序一致
     const inbound = new Map<string, ExpansionEdge[]>();
     for (const concept of ontology.concepts) {
       if (!frontier.has(concept.name)) continue;
       for (const edge of adjacency.get(concept.name) ?? []) {
         if (visited.has(edge.to)) {
-          // 只收"命中概念之间的直接一跳"：更深跳回命中概念属绕行，只会与它自己的路径重复
           if (hop === 1 && direct.has(edge.to)) {
             const key = `${concept.name}\u0000${edge.relation}\u0000${edge.to}`;
             if (!seenDirectEdge.has(key)) {
@@ -349,7 +277,6 @@ function collectBehaviors(
         concept: behavior.concept,
         hop: concept.hop,
         viaConcept: concept.name,
-        // 这一跳的起点概念：留档据此回答"这条行为是从哪个概念发散来的"
         fromConcept: concept.viaConcept,
       } satisfies ExpandedBehavior);
     }

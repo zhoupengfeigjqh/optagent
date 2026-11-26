@@ -1,8 +1,3 @@
-/**
- * 集成测试：用户与关联数字人（T072，契约 §6.1~§6.4）
- *
- * 覆盖新建 / 重复 / 非法标识 / 关联与解除 / 删除 / 搭配摘要（部署前核对总账）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -66,7 +61,7 @@ describe('GET /api/admin/users', () => {
 
   it('关联了失效引用的数字人在卡片上标记异常并给出原因', async () => {
     fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
-    fx.runtime.tools = []; // 工具下线 → demo 变异常
+    fx.runtime.tools = [];
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
     expect(res.json().items[0].agents[0].abnormal).toBe(true);
     expect(res.json().items[0].agents[0].abnormal_reason).toContain('read_file');
@@ -251,11 +246,8 @@ describe('DELETE /api/admin/users/{user_id}', () => {
     expect(res.statusCode).toBe(204);
 
     expect(fx.ctx.users.exists('ops')).toBe(false);
-    // 能力撤回：数字人目录清空（不是"留在运行环境继续服务"）
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'))).toBe(false);
-    // 清单条目移除：重建同名用户不会显示旧的"已部署"
     expect(fx.ctx.manifest.get('ops')).toBeNull();
-    // 数据保留：文件空间不受影响
     expect(fs.readFileSync(path.join(space, '说明.txt'), 'utf8')).toBe('保留');
   });
 

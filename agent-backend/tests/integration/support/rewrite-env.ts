@@ -1,12 +1,3 @@
-/**
- * 027 集成测试共用环境：本地 Laya 桩 + fake LlmProvider + 部署产物写入 + 起服务。
- *
- * 抽出来的理由（宪章原则二）：`chat-rewrite` / `chat-rewrite-budget` / `chat-rewrite-degrade`
- * 三个文件都要"真 HTTP + 桩模型"，各写一份会让 `buildServer` 的构造口径悄悄漂移——
- * 这类漂移表现为"某个文件里的用例永远绿"，最难发现。
- *
- * 这里**不 mock 任何域代码**：SOUL、技能、本体、留档都是真实文件；只有两个模型是桩。
- */
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -38,17 +29,14 @@ export const ONTOLOGY_YAML = [
 
 export interface LayaStub {
   baseUrl: string;
-  /** 每次判定收到的 `state`（时间正序） */
   states: string[];
   close(): Promise<void>;
 }
 
 export interface LayaStubOptions {
-  /** `need_rewrite` 题的分数（缺省 0.95） */
   needRewrite?: number;
   /** 只对 `need_rewrite` 那一批延迟响应（毫秒）——用于把阶段预算耗尽 */
   rewriteDelayMs?: number;
-  /** 直接返回该 HTTP 状态码（模拟判定服务故障） */
   failStatus?: number;
 }
 
@@ -91,29 +79,18 @@ export async function startLaya(options: LayaStubOptions = {}): Promise<LayaStub
 }
 
 export interface LlmLog {
-  /** 改写请求里的 user 消息正文（用于断言素材） */
   rewritePrompts: string[];
-  /** 主对话调用次数 */
   mainCalls: number;
 }
 
 export interface FakeLlmOptions {
-  /** 改写调用直接抛错 */
   rewriteFails?: boolean;
   /** 改写调用一直挂到超时 / 中止（模拟慢模型） */
   rewriteHangs?: boolean;
-  /** 改写结果（缺省 `REWRITTEN` 口径） */
   rewriteText?: string;
-  /** 改写只回 thinking、不回 content（模拟空输出） */
   rewriteEmpty?: boolean;
 }
 
-/**
- * 主对话 + 改写共用一个 fake provider：按 `systemPrompt` 区分用途。
- *
- * 判据用"输入改写助手"而不是"tools 是否为空"——主对话在纯聊天轮次也可能不带工具，
- * 那样会把改写与主对话混在一起，测试就再也测不出"改写走了哪条通道"。
- */
 export function fakeLlm(log: LlmLog, options: FakeLlmOptions = {}): LlmProvider {
   return {
     async *streamChat(req: LlmChatRequest) {
@@ -147,13 +124,10 @@ export function fakeLlm(log: LlmLog, options: FakeLlmOptions = {}): LlmProvider 
 }
 
 export interface AgentOptions {
-  /** 输入重写开关（写进 frontmatter 才会被运行侧读到） */
   rewrite: boolean;
-  /** 意图聚焦开关（缺省 true） */
   focus?: boolean;
 }
 
-/** 按部署产物形态写数字人（SOUL 开关 + 技能 + 本体） */
 export function writeAgent(root: string, options: AgentOptions): void {
   const dir = agentDir(root, USER, AGENT);
   fs.mkdirSync(dir, { recursive: true });
@@ -194,7 +168,6 @@ export interface SetupOptions {
   focus?: boolean;
   laya?: LayaStubOptions;
   llm?: FakeLlmOptions;
-  /** 追加到 `intent_focus` 块的配置行（如 `  rewrite_timeout_ms: 400`） */
   intentFocusLines?: string[];
 }
 
@@ -250,7 +223,6 @@ export function ctxOf(app: FastifyInstance): AppContext {
   return (app as unknown as { ctx: AppContext }).ctx;
 }
 
-/** 发一轮消息（走真实 SSE 路由；`inject` 会在 done 后收尾） */
 export function send(app: FastifyInstance, threadId: string, content: string) {
   return app.inject({
     method: 'POST',

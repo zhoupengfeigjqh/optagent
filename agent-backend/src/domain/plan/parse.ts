@@ -1,27 +1,11 @@
-/**
- * 规划输出容错解析（028 FR-006/FR-004a）。
- *
- * 只做"把文本变成 `RawStep[]`"，**不做任何推断修补**：
- * - 围栏（```` ```json ````）剥离，前后空白忽略；
- * - JSON 非法 / 顶层非数组 / 步数超上限 / 字段缺失或类型错，一律返回结构化失败；
- * - 空数组 `[]` 是**合法输出**（首次 = 无需工具，滚动 = 已完成，见 FR-004a），
- *   不在这里判语义，由编排器按场景处理。
- */
 import { PLAN_MAX_STEPS, type CheckFailure, type RawStep } from './types.js';
 
-/** 解析结果 */
 export type ParseResult =
   | { ok: true; steps: RawStep[] }
   | { ok: false; failure: CheckFailure };
 
-/** 首个代码围栏内的内容（语言标记可省） */
 const FENCE_PATTERN = /```[ \t]*[A-Za-z0-9_-]*[ \t]*\r?\n?([\s\S]*?)```/;
 
-/**
- * 解析规划输出。
- *
- * @param text 模型原始回复（可能带围栏与前后空白）
- */
 export function parsePlanOutput(text: string): ParseResult {
   const trimmed = text.trim();
   if (trimmed === '') return fail('P_JSON', '输出为空，应为 JSON 数组');
@@ -51,13 +35,11 @@ export function parsePlanOutput(text: string): ParseResult {
   return { ok: true, steps };
 }
 
-/** 取出首个围栏内容；无围栏时返回原文 */
 function extractFenced(text: string): string {
   const matched = FENCE_PATTERN.exec(text);
   return matched === null ? text : (matched[1] ?? '');
 }
 
-/** 单条步骤的形状校验（不做默认值填充） */
 function readStep(
   item: unknown,
   index: number,

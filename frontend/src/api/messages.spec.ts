@@ -1,10 +1,3 @@
-/**
- * 单测：SSE 事件解码（`decodeStreamEvent`）与发消息请求体（`buildSendMessageBody`）。
- *
- * 重点守住 HITL 的 `interaction_request`：它是**逐字段构造**的（不是透传），
- * 新增字段忘了映射就会被静默丢弃——`rules_field` 与 `tool_description` 正是这样漏掉的
- * （2026-09-23 修复：前者导致 HITL 弹窗里的「从算法规则选择」入口永不出现）。
- */
 import { describe, expect, it } from 'vitest'
 
 import { buildSendMessageBody, decodeStreamEvent } from './messages'
@@ -62,12 +55,6 @@ describe('decodeStreamEvent —— interaction_request（HITL）', () => {
   })
 })
 
-/**
- * 诊断字段透传（2026-10-27）
- *
- * `error` 事件同样是逐字段构造：`upstream_status` / `upstream_type` / `request_id`
- * 漏映射时，流式失败没有诊断行，而刷新后同一条失败却有——同一事实两种展示。
- */
 describe('decodeStreamEvent —— error 诊断字段（2026-10-27）', () => {
   function errorFields(error: Record<string, unknown>): Record<string, unknown> {
     const event = decodeStreamEvent({
@@ -158,12 +145,6 @@ describe('decodeStreamEvent —— done.next_actions（007 修订：卡片直推
   })
 })
 
-/**
- * 工具调用卡片标题（2026-10-29 修复）
- *
- * `tool_call` 分支同样是逐字段构造：`label` 漏映射时，流式期卡片只能显示英文调用名，
- * 直到本轮结束刷新历史（历史接口整体透传、带 `label`）才变中文——"先英文后中文"即此。
- */
 describe('decodeStreamEvent —— tool_call 人读名称', () => {
   function toolCallData(extra: Record<string, unknown> = {}): Record<string, unknown> {
     const event = decodeStreamEvent({
@@ -200,7 +181,6 @@ describe('buildSendMessageBody —— 隐藏工具引导（004）', () => {
     })
 
     expect(body.guidance).toBe('本轮请优先使用以下工具完成任务：read_file')
-    // 正文保持干净：引导绝不拼进 content
     expect(body.content).toBe('帮我梳理昨天订单的交付风险')
   })
 
@@ -240,7 +220,6 @@ describe('buildSendMessageBody —— 意图聚焦跳过标记（013）', () => 
       unknown
     >
     expect(body.skip_intent_focus).toBe(true)
-    // 正文保持干净：标记绝不拼进 content，也不落历史
     expect(body.content).toBe('按交付日期梳理这批订单的风险')
   })
 

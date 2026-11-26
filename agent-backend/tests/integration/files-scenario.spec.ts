@@ -1,19 +1,3 @@
-/**
- * 文件空间路由集成测试：场景（scenario.json）随数字人存放
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test:all           # 全部测试
- *   npm run test:integration   # 仅集成测试
- *
- * 覆盖本次变更对**端点行为**的影响（单测只覆盖了 dirs 的纯逻辑，端点层需在此验证）：
- * - 未选中数字人 → `/api/files/*` 返回 409 AGENT_NOT_SELECTED
- * - 目录合法性按「当前选中数字人」的场景清单判定：同一目录在 alpha 下 200、在 beta 下 403
- * - `/api/files/workspace` 返回的场景名与目录清单随当前选中数字人变化
- * - 数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED，且文案指名该数字人
- *
- * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
- * 由 Vitest 解析到 `src/*`。
- */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,15 +12,10 @@ import { buildServer } from '../../src/server';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-files-'));
 const userId = 'admin';
 
-/**
- * 数字人 fixture：alpha 可见两个目录，beta 只可见其中一个，gamma 完全没有场景，
- * delta 的「生产计划」声明了字段约束（上传表权威校验用）。
- */
 const AGENT_SCENARIOS: Record<string, unknown | null> = {
   alpha: { scenario: '全量', data_prep_dirs: ['生产计划', '产线电价'] },
   beta: { scenario: '精简', data_prep_dirs: ['产线电价'] },
   gamma: null,
-  // 014：含平台预定义目录的场景，用于断言 workspace 的 `predefined` 标记
   theta: { scenario: '含预定义目录', data_prep_dirs: ['算法规则', '生产计划'] },
   delta: {
     scenario: '带约束',
@@ -48,7 +27,6 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
       ],
     },
   },
-  // 2026-10-13：目录级可上传类型——生产计划放宽到 4 项，产线电价收紧到仅 .csv
   epsilon: {
     scenario: '带类型',
     data_prep_dirs: ['生产计划', '产线电价'],
@@ -57,7 +35,6 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
       产线电价: ['.csv'],
     },
   },
-  // 2026-10-13：字段约束 + 非表格类型白名单同时存在（验证"仅表格类型触发表结构校验"）
   zeta: {
     scenario: '带约束与类型',
     data_prep_dirs: ['生产计划'],
@@ -71,12 +48,8 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
       生产计划: ['.csv', '.xlsx', '.txt', '.pdf', '.json', '.zip'],
     },
   },
-  // 2026-11-17：预定义目录被平台屏蔽——屏蔽 = 不在清单里（运行端不加特殊判断）
   iota: { scenario: '屏蔽预定义', data_prep_dirs: ['生产计划'] },
-  // 2026-11-17：全部屏蔽——空清单合法，不再视为"场景未配置"
   kappa: { scenario: '全部屏蔽', data_prep_dirs: [] },
-  // 2026-10-14：`.xls` 三空间可用——数据准备按目录配置（这里同时声明字段约束，
-  // 用来验证"`.xls` 不再跳过表结构校验"）
   eta: {
     scenario: '带约束与 xls',
     data_prep_dirs: ['生产计划'],
@@ -92,7 +65,6 @@ const AGENT_SCENARIOS: Record<string, unknown | null> = {
   },
 };
 
-/** 写入一个可被 loadAgentConfig 接受的数字人目录；scenario 为 null 时不写场景文件 */
 function writeAgent(name: string, scenario: unknown | null): void {
   const dir = path.join(root, 'users', userId, 'agents', name);
   mkdirSync(dir, { recursive: true });
@@ -125,13 +97,11 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 选中数字人（端点本身在 agents 路由中被独立覆盖，此处作为前置步骤） */
 async function select(name: string): Promise<void> {
   const res = await app.inject({ method: 'POST', url: `/api/agents/${name}/select` });
   expect(res.statusCode).toBe(200);
 }
 
-/** 清除选中态，保证用例从"未选中"开始 */
 async function deselect(): Promise<void> {
   await app.inject({ method: 'POST', url: '/api/agents/current/exit' });
 }
@@ -140,7 +110,6 @@ function listUrl(dir: string): string {
   return `/api/files/list?dir=${encodeURIComponent(dir)}`;
 }
 
-/** 取 workspace 响应中「数据准备」空间下的目录清单 */
 function prepDirs(body: unknown): string[] {
   const spaces = (body as { spaces: Array<{ name: string; dirs: Array<{ dir: string }> }> }).spaces;
   const prep = spaces.find((space) => space.name === '数据准备');
@@ -197,7 +166,6 @@ describe('文件空间视角＝当前选中数字人', () => {
     expect(denied.json()).toMatchObject({ error: { code: 'UPLOAD_DIR_FORBIDDEN' } });
   });
 
-  // 2026-11-18（025）：共享空间已下线。原「共享空间不受场景清单限制（照样可列）」的用例
   // 断的行为已不存在，改为钉住**降级表现**：请求被拒（403），而不是返回一个空目录。
   it('已下线的「共享空间」→ 403 UPLOAD_DIR_FORBIDDEN（不是空目录）', async () => {
     await select('beta');
@@ -257,7 +225,6 @@ describe('文件空间视角＝当前选中数字人', () => {
       expect.objectContaining({ dir: '数据准备/算法规则', predefined: true }),
       expect.objectContaining({ dir: '数据准备/生产计划', predefined: false }),
     ]);
-    // 扁平空间（空间自身即目录）恒为 false
     for (const name of ['临时空间']) {
       const space = spaces.find((s) => s.name === name)!;
       expect(space.dirs[0]!.predefined).toBe(false);
@@ -265,7 +232,6 @@ describe('文件空间视角＝当前选中数字人', () => {
   });
 });
 
-/* ---------- 2026-11-17：预定义目录可屏蔽（屏蔽 = 不在场景清单） ---------- */
 
 describe('预定义目录屏蔽（清单即可见范围的唯一权威）', () => {
   it('屏蔽后 workspace 不出现该目录，数据准备空间仍在且 200', async () => {
@@ -343,7 +309,6 @@ describe('预定义目录屏蔽（清单即可见范围的唯一权威）', () =
 describe('上传表字段约束（data_prep_fields 权威校验，契约 §3.1）', () => {
   const PREP_DIR = '数据准备/生产计划';
 
-  /** 手工拼 multipart（无额外依赖）：dir 字段 + 单文件 */
   function multipart(dir: string, filename: string, content: string | Buffer, contentType: string) {
     const boundary = '----vitest-boundary';
     const body = Buffer.concat([
@@ -482,7 +447,6 @@ describe('上传表字段约束（data_prep_fields 权威校验，契约 §3.1�
 });
 
 describe('上传早验（dir 先到时目录校验前置，拒绝省带宽）', () => {
-  /** 手工 multipart，part 顺序可定制（早验/旧顺序两条路径都要覆盖） */
   function multipartOrdered(
     entries: Array<{ name: string; filename?: string; content: string; contentType?: string }>,
   ) {
@@ -563,15 +527,11 @@ describe('上传早验（dir 先到时目录校验前置，拒绝省带宽）', 
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: { code: 'AGENT_NOT_SELECTED' } });
 
-    await select('alpha'); // list 需要选中态；恢复后再查残留
+    await select('alpha');
     expect(await stagedResidue()).toEqual([]);
   });
 });
 
-/**
- * 目录级可上传类型（`scenario.data_prep_uploads`，2026-10-13）：
- * 端点层验证"界面允许的与放行的永远同源"——**放宽点**与**收紧点**各一例，外加下发性断言（FR-011/012/042）。
- */
 describe('目录级可上传类型（data_prep_uploads 权威判定）', () => {
   function multipart(dir: string, filename: string, content: string, contentType: string) {
     const boundary = '----vitest-upload-types';
@@ -636,13 +596,12 @@ describe('目录级可上传类型（data_prep_uploads 权威判定）', () => {
     expect(err.code).toBe('VALIDATION_FAILED');
     expect(err.message).toContain('.xlsx');
     expect(err.message).toContain('.csv');
-    // 未落盘
     const after = (await app.inject({ method: 'GET', url: listUrl('数据准备/产线电价') })).json();
     expect(after).toEqual(before);
   });
 
   it('收紧点：未配置的目录仍按平台默认（.txt 被拒、.csv 放行）', async () => {
-    await select('alpha'); // alpha 的生产计划未配置 uploads
+    await select('alpha');
 
     const txt = multipart('数据准备/生产计划', 'note.txt', 'x', 'text/plain');
     const denied = await app.inject({
@@ -710,7 +669,6 @@ describe('目录级可上传类型（data_prep_uploads 权威判定）', () => {
   });
 });
 
-/** 手工 multipart（dir 字段在前，命中早验路径）；供 US3/US4/US5 三个故事块共用 */
 function upload(dir: string, filename: string, content: string | Buffer, contentType: string) {
   const boundary = '----vitest-story-boundary';
   const body = Buffer.concat([
@@ -718,7 +676,6 @@ function upload(dir: string, filename: string, content: string | Buffer, content
     Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`,
     ),
-    // 二进制内容（如真实 `.xls`）直接给 Buffer，文本给字符串
     Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8'),
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
@@ -796,12 +753,10 @@ describe('US3 临时空间的判定逐项不变（FR-013）', () => {
         expect(dir.upload_extensions).toEqual(SPACE_LEVEL_EXTS);
       }
     }
-    // 数据准备空间本身的「空间级」值也未受影响
     expect(spaces.find((s) => s.name === '数据准备')!.upload_extensions).toEqual(['.csv', '.xlsx']);
   });
 });
 
-/* ---------- 2026-10-14：`.xls`（旧版 Excel）空间级与目录级都可用 ---------- */
 
 describe('`.xls` 两空间可用（2026-10-14 新增类型）', () => {
   /** 真实 `.xls`（OLE2/BIFF8）：SheetJS 写入，避免手搓二进制 fixture */
@@ -849,7 +804,7 @@ describe('`.xls` 两空间可用（2026-10-14 新增类型）', () => {
   });
 
   it('未配置白名单的目录仍只接受 .csv / .xlsx（存量行为不变，FR-005）', async () => {
-    await select('delta'); // delta 的生产计划声明了字段约束，但未配置 uploads
+    await select('delta');
     const res = await postUpload(
       '数据准备/生产计划',
       'a.xls',
@@ -878,7 +833,6 @@ describe('`.xls` 两空间可用（2026-10-14 新增类型）', () => {
   });
 });
 
-/* ---------- US4：字段约束只对表格类型生效（P2） ---------- */
 
 describe('US4 声明了字段约束的目录上传非表格类型 → 跳过表结构校验（FR-020）', () => {
   it.each([
@@ -918,7 +872,6 @@ describe('US4 声明了字段约束的目录上传非表格类型 → 跳过表�
     expect(wrongErr.code).toBe('FILE_SCHEMA_INVALID');
     expect(wrongErr.details[0]).toContain('第 2 行');
 
-    // 损坏的 xlsx：非 zip 魔数，确定性拦截（与"不符合约束"同码同出口）
     const broken = await postUpload(
       '数据准备/生产计划',
       'broken.xlsx',
@@ -946,11 +899,10 @@ describe('US4 声明了字段约束的目录上传非表格类型 → 跳过表�
   });
 });
 
-/* ---------- US5：未配置的存量数字人行为不变（P2） ---------- */
 
 describe('US5 未配置 data_prep_uploads 的存量数字人（FR-014）', () => {
   it('数据准备目录只接受 .csv / .xlsx（零迁移：scenario.json 不含该键）', async () => {
-    await select('alpha'); // alpha 的 scenario.json 无 data_prep_uploads
+    await select('alpha');
 
     expect(
       (await postUpload('数据准备/生产计划', 'a.csv', '任意\n1\n', 'text/csv')).statusCode,
@@ -985,7 +937,6 @@ describe('US5 未配置 data_prep_uploads 的存量数字人（FR-014）', () =>
 
     expect(res.statusCode).toBe(400);
     const err = (res.json() as { error: { code: string; message: string } }).error;
-    // 内部异常为 DirValidationError（code = 'DIR_VALIDATION'）；HTTP 层按既有映射落 VALIDATION_FAILED
     expect(err.code).toBe('VALIDATION_FAILED');
     expect(err.message).toContain('二级目录');
   });
@@ -998,7 +949,6 @@ describe('FR-060 场景读取口径**不变**（009 回归护栏）', () => {
       prepDirs((await app.inject({ method: 'GET', url: '/api/files/workspace' })).json()),
     ).toEqual(['数据准备/产线电价']);
 
-    // 就地改 scenario.json（不触碰任何数据目录）→ 下次读取即生效
     const scenarioFile = path.join(root, 'users', userId, 'agents', 'beta', 'scenario.json');
     writeFileSync(
       scenarioFile,
@@ -1008,7 +958,6 @@ describe('FR-060 场景读取口径**不变**（009 回归护栏）', () => {
 
     const after = await app.inject({ method: 'GET', url: '/api/files/workspace' });
     expect(prepDirs(after.json())).toEqual(['数据准备/产线电价', '数据准备/生产计划']);
-    // 新列出的目录被惰性建到**该数字人的数据域**里（不是用户级、也不是场景文件旁边）
     expect(
       existsSync(path.join(root, 'users', userId, 'user-data', 'beta', '数据准备', '生产计划')),
     ).toBe(true);

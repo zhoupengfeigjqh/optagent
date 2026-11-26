@@ -1,20 +1,10 @@
 <script setup lang="ts">
-/**
- * 任务表格（015，T038）
- *
- * - 原生 `<table>`：表头 `scope="col"` 让读屏把"列名 ↔ 单元格"关联起来（宪章原则四）；
- * - 行 `key` 用稳定的 `task.task_id`，并用 `v-memo` 只盯"任务对象 + busy"两个标量：
- *   心跳每次广播都会重拉列表，没有记忆化时 20 行 × 每 2 秒重渲染一次（原则五）；
- * - 空态给创建引导（不是一句"暂无数据"就完了），加载失败给**错误态 + 重试**，
- *   两种情况都不冒充"没有任务"。
- */
 import type { ErrorInfo, ScheduledTask } from '../../api/types'
 import ScheduleRow from './ScheduleRow.vue'
 
 const props = withDefaults(
   defineProps<{
     tasks?: ScheduledTask[]
-    /** 有请求在途的任务 id（行内按钮置灰） */
     pendingIds?: readonly string[]
     loading?: boolean
     error?: ErrorInfo | null
@@ -24,7 +14,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   toggle: [payload: { taskId: string; enabled: boolean }]
-  /** 行内编辑入口（2026-10-30 增补）：由覆盖层打开共用表单弹窗 */
   edit: [taskId: string]
   remove: [taskId: string]
   create: []

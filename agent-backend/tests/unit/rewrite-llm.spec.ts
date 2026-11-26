@@ -1,13 +1,3 @@
-/**
- * 单元测试：改写调用适配器（027）。
- *
- * 守五条契约级要求（契约 §6）：
- * - `tools: []`、`thinking: false`（改写不许走工具循环、不许混思考内容）；
- * - 只聚合 `content_delta`，`thinking_delta` 丢掉；
- * - 流内 `error` 事件折成失败（不是"空输出"）；
- * - 超时与"本轮中止"都能真的打断调用，且**原因可区分**；
- * - 请求级模型选择走 `providerFor`，缺省时**不静默换模型**。
- */
 import { describe, expect, it, vi } from 'vitest';
 import type { LlmEvent, ModelSelection } from '../../src/types.js';
 import type { LlmChatRequest, LlmProvider } from '../../src/infra/llm/llm-provider.js';
@@ -19,7 +9,6 @@ const REQ = {
   timeoutMs: 1000,
 };
 
-/** 一次性 provider：记录收到的请求，按脚本产出事件 */
 function scripted(events: readonly LlmEvent[]): { provider: LlmProvider; calls: LlmChatRequest[] } {
   const calls: LlmChatRequest[] = [];
   const provider: LlmProvider = {
@@ -31,10 +20,8 @@ function scripted(events: readonly LlmEvent[]): { provider: LlmProvider; calls: 
   return { provider, calls };
 }
 
-/** 一直等到 signal 中止才收尾的 provider（模拟真实网络调用） */
 function hanging(): LlmProvider {
   return {
-    // 故意不产出任何事件：只等中止信号（等价于"模型一直没吐字"）
     // eslint-disable-next-line require-yield
     async *streamChat(req: LlmChatRequest) {
       await new Promise<void>((resolve) => {

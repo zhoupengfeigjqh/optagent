@@ -1,13 +1,3 @@
-/**
- * 组件测试：产出正文的只读结构化视图（按值递归）。
- *
- * 守住四条：
- * 1. **对象 → 键值行**；**对象数组 → 表格**（列 = 键并集）；**其他数组 → 列表**；
- * 2. **递归**：嵌套对象仍有独立行；
- * 3. **有界**：数组超上限只渲染前 N 行、表格列超上限只渲染前 N 列，均提示总数与逃生舱；
- *    深度超限交 JSON 逃生舱；
- * 4. **不裸奔**：空容器、null 都给可读占位（不留白）。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { describe, expect, it } from 'vitest'
@@ -212,12 +202,6 @@ describe('ProducedJsonView —— 视图链接（viewUrl，TR-40 / TR-41）', ()
 describe('ProducedJsonView —— 视图链接的点击口径（2026-10-20）', () => {
   const ORIGIN = window.location.origin
 
-  /**
-   * 用宿主组件接线（等价于装配层写 `@open-view`），并收集载荷。
-   *
-   * 不用 `mount(Comp, { attrs })`：VTU 不会把未声明的 `onXxx` 塞进 `vnode.props`，
-   * 于是监听器根本没接上——那测的是 VTU 的挂载方式，不是真实接线。
-   */
   function mountWired(value: unknown) {
     const received: ViewLinkTarget[] = []
     const Host = defineComponent({
@@ -230,7 +214,6 @@ describe('ProducedJsonView —— 视图链接的点击口径（2026-10-20）', 
     return { wrapper: mount(Host), received }
   }
 
-  /** 派发一个真实左键点击，返回事件（用于断言 `defaultPrevented`） */
   function click(link: { element: Element }, init: MouseEventInit = {}): MouseEvent {
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init })
     link.element.dispatchEvent(event)

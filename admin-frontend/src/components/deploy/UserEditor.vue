@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * 用户编辑器（`FR-024`、`FR-025`）：新建/编辑用户、增加或移除关联数字人。
- *
- * 可关联的 MUST 是平台内**已存在**的数字人（`FR-025`），故这里只提供勾选，
- * 不提供自由输入。
- *
- * 2026-11-10：由「内联展开的 section」改为**弹窗**（`BaseDialog`）。理由：它承载的是
- * 一次完整的编辑会话（改用户标识 + 重排关联 + 保存/取消），内联展开会把卡片列表整体
- * 向下挤，且与"点卡片上的按钮 → 针对该卡片编辑"的心智不符；弹窗的焦点陷阱与 Esc
- * 关闭也让键盘操作路径与其它弹窗（删除/撤回/新建服务）一致。
- */
 import { computed, ref, watch } from 'vue'
 import type { AgentListItem, UserListItem } from '../../api/types'
 import BaseDialog from '../common/BaseDialog.vue'
@@ -18,7 +7,6 @@ import type { CheckboxOption } from '../common/checkbox-option'
 
 const props = defineProps<{
   open: boolean
-  /** 编辑既有用户时传入；新建为 null */
   user: UserListItem | null
   agents: AgentListItem[]
   busy?: boolean
@@ -31,7 +19,6 @@ const emit = defineEmits<{
 
 const userId = ref('')
 const selected = ref<string[]>([])
-/** 024：新建时的初始密码（编辑态不显示、不改密码） */
 const password = ref('')
 const passwordError = ref('')
 

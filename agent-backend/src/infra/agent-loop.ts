@@ -1,10 +1,3 @@
-/**
- * pi-agent-core 低层 runAgentLoop 调用封装。
- *
- * 入参：systemPrompt、拼装后 messages、工具集（经 file-access 代理的 AgentTool）、signal；
- * 出参：统一为 LlmEvent 异步迭代（thinking_delta / content_delta / done(usage) / error）。
- * 工具执行由 loop 内部驱动；usage 从 agent_end 的最后一条 assistant 消息提取。
- */
 import type { Model, Provider } from '@earendil-works/pi-ai';
 import {
   runAgentLoop,
@@ -14,18 +7,12 @@ import {
   type StreamFn,
 } from '@earendil-works/pi-agent-core';
 import type { LlmRetryOptions } from '../config.js';
+import type { PlanProgress } from '../domain/plan/types.js';
 import { classifyLlmFailure } from '../domain/llm-error.js';
 import { markToolError } from '../domain/tool-error.js';
 import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
-/**
- * 由 pi-ai provider 构造 runAgentLoop 所需的 streamFn（请求级注入 apiKey）。
- *
- * `retry` 是两个 LLM 调用路径（本函数与 `PiAiLlmProvider.streamChat`）**共用**的有界重试口径：
- * 交给 pi-ai 的 `retryProviderRequest` 执行（退避 / `x-should-retry` / `Retry-After` /
- * 可打断睡眠均已实现），运行环境只传参、不自建（`runtime-api-delta.md` §19.1）。
- */
 export function createStreamFn(
   provider: Provider,
   apiKey: string,
@@ -40,12 +27,6 @@ export function createStreamFn(
     }) as never;
 }
 
-/**
- * 计划编排（028）透传的四个可选钩子。
- *
- * 全部**可选**：缺省不挂，与规划关闭时的行为逐字一致（SC-006）。
- * 本层只做转发，不解释语义——状态转移的唯一落点是编排器。
- */
 export interface RunAgentLoopHooks {
   prepareNextTurn?: (
     context: Parameters<NonNullable<AgentLoopConfig['prepareNextTurn']>>[0],
@@ -67,24 +48,21 @@ export interface RunAgentLoopOptions {
   systemPrompt: string;
   messages: HistoryMessage[];
   tools: AgentTool[];
-  /**
-   * 仅用于建「工具名 → 人读名称」索引的**全量工具集**（2026-11-26）。
-   *
-   * 028 计划编排会按步收窄 `tools`（`prepareNextTurn` 每步换一份），而 label 是工具级
-   * 稳定属性、与"这一步能看见哪些工具"正交：跟着收窄后的集合建索引，第 2 步起新出现的
-   * 工具就查不到 label，卡片回退显示 `server__tool` 调用名（真实缺陷，2026-11-26 修）。
-   *
-   * **只读 label**：不参与 pi 的工具可见性判定，也不影响越界拒绝与执行。
-   * 缺省回退 `tools`（非规划路径两者同源，行为零变化）。
-   */
   labelTools?: readonly AgentTool[];
   thinking: boolean;
   signal: AbortSignal;
-  /** 028：计划编排钩子（缺省不挂） */
   hooks?: RunAgentLoopHooks;
+  /**
+   * 028（FR-034）：`begin()` 期间已产生的计划进度（首步 `running` 等）。
+   *
+   * 规划发生在 loop 启动之前，而进度必须走同一条事件队列——调用方先攒起来，
+   * 本层在开始迭代时补发。
+   */
+  planProgress?: readonly PlanProgress[];
+  /** 028（FR-034）：把编排器的**实时**进度接到本层事件队列（队列就绪后调用一次） */
+  onPlanProgress?: (emit: (event: PlanProgress) => void) => void;
 }
 
-/** 历史 assistant 消息的占位 usage（真实 token 已入 usage.db，此处仅为满足 pi 的消息结构） */
 const ZERO_USAGE = {
   input: 0,
   output: 0,
@@ -95,7 +73,7 @@ const ZERO_USAGE = {
 } as const;
 
 export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncIterable<LlmEvent> {
-  const queue: Array<LlmEvent | null> = []; // null = 结束哨兵
+  const queue: Array<LlmEvent | null> = [];
   let wakeup: (() => void) | null = null;
   const push = (e: LlmEvent | null) => {
     queue.push(e);
@@ -105,8 +83,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
   const now = () => Date.now();
   const prompts = opts.messages.map((m) => {
     if (m.role === 'assistant') {
-      // pi 消息结构：assistant 的 content 是块数组；缺 usage 会读 undefined.totalTokens 崩溃。
-      // 历史轮的真实 token 已入 usage.db，此处仅补结构占位。
       return {
         role: 'assistant',
         content: [{ type: 'text', text: m.content }],
@@ -118,21 +94,20 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     return { role: m.role, content: m.content, timestamp: now() };
   });
 
-  /**
-   * 工具名 → 人读名称（2026-10-27；2026-11-26 修正来源）。
-   *
-   * `label` 在装配时已算好（平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`），
-   * 这里只做一张查表，随 `tool_call_start` 一起上行——工具卡片与 HITL 弹窗都要显示中文名，
-   * 而 pi 的 `tool_execution_start` 只给 `toolName`。
-   *
-   * 建表来源 MUST 是 `labelTools`（全量装配结果），不是 `tools`（每步收窄后的可见集）：
-   * label 与可见性正交，跟着收窄集建表会让后续步骤新出现的工具永久查不到中文名。
-   */
   const labels = new Map<string, string>();
   for (const tool of opts.labelTools ?? opts.tools) {
     const label = typeof tool.label === 'string' ? tool.label.trim() : '';
     if (label !== '') labels.set(tool.name, label);
   }
+
+  /** 计划进度（028 FR-034）：补发 begin 期间积压的，再把实时回调接到队列 */
+  const pushProgress = (event: PlanProgress): void => {
+    push({ type: 'plan_progress', seqId: event.seqId, label: event.label, phase: event.phase });
+  };
+  if (opts.planProgress !== undefined) {
+    for (const event of opts.planProgress) pushProgress(event);
+  }
+  opts.onPlanProgress?.(pushProgress);
 
   const emit = (event: AgentEvent): void => {
     if (event.type === 'message_update') {
@@ -140,7 +115,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
       if (ev.type === 'thinking_delta') push({ type: 'thinking_delta', delta: ev.delta });
       else if (ev.type === 'text_delta') push({ type: 'content_delta', delta: ev.delta });
     } else if (event.type === 'tool_execution_start') {
-      // 入参只带**短标量摘要**（供展示"查了什么"）；原文永不下发（spec 002 FR-001）
       const argsDigest = digestArgs(event.args);
       const label = labels.get(event.toolName);
       push({
@@ -151,8 +125,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         ...(label !== undefined ? { label } : {}),
       });
     } else if (event.type === 'tool_execution_end') {
-      // 结果拍平成文本上行（由 run-manager 落 tool-events.jsonl）；
-      // **SSE 仍只透出状态**，结果不经事件总线广播（spec 002 FR-002 的对外部分不变）
       push({
         type: 'tool_call_end',
         callId: event.toolCallId,
@@ -161,8 +133,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         resultText: serializeToolResult(event.result).text,
       });
     } else if (event.type === 'agent_end') {
-      // usage 精确统计：工具循环有多跳 LLM 调用，每跳产生一条带 usage 的
-      // assistant 消息，须全部累加（只取最后一条会漏掉中间跳的大 prompt）
       const usage: UsageInfo = { inputTokens: 0, outputTokens: 0 };
       for (const m of event.messages) {
         if (m.role !== 'assistant') continue;
@@ -172,7 +142,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
           usage.outputTokens += u.output;
         }
       }
-      // 中断/失败：取最后一条 assistant 消息的终止原因
       for (let i = event.messages.length - 1; i >= 0; i--) {
         const m = event.messages[i]!;
         if (m.role === 'assistant') {
@@ -191,7 +160,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
             return;
           }
           if (stopReason === 'error') {
-            // 分类唯一实现：与直聊路径（`PiAiLlmProvider.streamChat`）产出同一个错误码 + 诊断字段
             push({
               type: 'error',
               ...classifyLlmFailure(errorMessage ? { message: errorMessage } : {}),
@@ -213,41 +181,13 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     { systemPrompt: opts.systemPrompt, messages: [], tools: opts.tools },
     {
       model: opts.model,
-      /**
-       * 全局工具批次串行（2026-11-25）。
-       *
-       * pi 默认 `parallel`：同批 toolCall 会并发 `execute`，使规则闸门（021）的函数
-       * 记录产生竞态——「前置函数 + 依赖它的 command」同批发出时，command 可能在函数
-       * 结果写入 `FunctionRecord` 之前就完成判定，表现为随机 `pause`
-       * （`RULE_FUNCTIONS_MISSING_CODE`）。是否复现取决于两个工具的返回快慢，
-       * 属于最难定位的偶发故障。
-       *
-       * 串行后执行顺序与模型输出顺序严格一致，闸门判定与状态推进都可预测。
-       * 代价：同批多个独立工具不再并发（延迟约等于各自耗时之和）；多数 turn 只发
-       * 1~2 个工具，实际影响有限。
-       *
-       * 注：HITL 包装器（`tool-intercept.ts`）的 per-tool `executionMode: 'sequential'`
-       * 独立保留，不管何种模式都必须串行。
-       */
       toolExecution: 'sequential',
       ...(opts.thinking ? { reasoning: 'low' as const } : {}),
       convertToLlm: (msgs) =>
         msgs.filter(
           (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
         ) as never,
-      /**
-       * 工具失败的唯一翻牌点（2026-10-29）。
-       *
-       * 工具层不抛异常，只在 `details.toolError` 打标记；这里统一翻成 `isError: true`，
-       * 下游 `tool_execution_end.isError` → SSE `tool_call_end.status='error'` →
-       * 卡片红色 + `tool-events.jsonl` 记 error（刷新后历史卡片口径一致）。
-       *
-       * 不用工具自己 throw 的原因见 `domain/tool-error.ts` 头部：pi 的 catch 会覆盖
-       * 整个 result（content 只剩 message、details 置空），结构化信息全丢。
-       */
       afterToolCall: async (ctx, signal) => {
-        // 028：先让计划编排记录事实（此时 isError 尚未翻牌，由编排器自行看 details），
-        // 再执行既有的失败翻牌——顺序颠倒会让计划看到"未标记"的结果。
         if (opts.hooks?.afterToolCall !== undefined) {
           await opts.hooks.afterToolCall(ctx, signal);
         }

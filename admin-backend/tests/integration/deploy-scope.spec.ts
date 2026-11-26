@@ -1,13 +1,3 @@
-/**
- * 集成测试：部署作用域守卫（T071，`FR-028`、`SC-012`、`SC-009`、`SC-019`）
- *
- * ① 部署前后两个文件空间（数据准备／临时空间）下既有文件与二级目录
- *    **数量与内容 100% 不变**，含"场景目录清单收缩"场景；
- * ② `SC-009`：改库中一个被 N 个数字人引用的 SKILL 后部署一次，
- *    这 N 个数字人的技能目录内容与库中版本一致；
- * ③ `SC-019`：同一用户关联 N 个数字人且场景各不相同时，各自按自己的场景加载，
- *    改其中一个的场景不影响其余数字人。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -27,7 +17,6 @@ const TOOLS = [
   },
 ];
 
-/** 在三个空间下放文件与二级目录，作为"内容不变量"的基准 */
 function seedSpaces(): void {
   const data = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
   fs.mkdirSync(path.join(data, '数据准备', '生产计划'), { recursive: true });
@@ -97,7 +86,6 @@ describe('作用域：文件空间内容 100% 不变（FR-028 / SC-012）', () =
     const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
     const before = snapshotTree(dataRoot);
 
-    // 收缩场景清单（去掉「产线电价」）
     const current = (await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' })).json();
     await fx.app.inject({
       method: 'PUT',
@@ -114,20 +102,11 @@ describe('作用域：文件空间内容 100% 不变（FR-028 / SC-012）', () =
     });
     await deployAll();
 
-    // 内容零变化：被移除的目录与其文件仍在
     expect(snapshotTree(dataRoot)).toEqual(before);
     expect(fs.existsSync(path.join(dataRoot, '数据准备', '产线电价', '子目录', 'b.txt'))).toBe(true);
   });
 });
 
-/**
- * 009（数字人数据隔离）：数据域归到**数字人一级**后，`user-data/**` 对平台依然是**只读区**。
- *
- * 三个要点：
- * 1. 未关联（甚至平台侧不存在）的数字人数据目录同样保留——"未纳管"不等于"可清理"；
- * 2. 已关联数字人的数据域（`user-data/{name}/**`）不被部署覆盖；
- * 3. 平台对数据目录**零创建**（新用户部署后不产生任何 `user-data/**`）。
- */
 describe('作用域：未关联数字人的数据目录保留（009 FR-031）', () => {
   it('部署与撤回都不触碰 user-data/**：未关联数字人的数据目录原样保留', async () => {
     const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
@@ -147,7 +126,6 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
     expect((await deployAll()).statusCode).toBe(200);
     expect(snapshotTree(dataRoot)).toEqual(before);
 
-    // 撤回同样零触碰（撤回的是"能力"，不是数据）
     const withdraw = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy/withdraw',
@@ -163,7 +141,6 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
     fx.ctx.users.create('admin', ['a1'], fx.ctx.store.revision());
     fx.ctx.users.create('ops', ['a1'], fx.ctx.store.revision());
 
-    // 清掉夹具预置的旧布局目录，观察"平台自己会不会建"
     fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'), {
       recursive: true,
       force: true,
@@ -177,7 +154,6 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
     });
     expect(res.statusCode).toBe(200);
 
-    // 数字人目录才有产物；数据域由运行环境惰性创建（Q2=A：平台零触碰）
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'a1'))).toBe(true);
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'))).toBe(false);
   });
@@ -197,7 +173,6 @@ describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
     fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
     await deployAll();
 
-    // 改库中正文：**在线编辑**（2026-09-16 开放），附件不必随包重传
     const v2 = '---\nname: pdf-parse\ndescription: 解析 PDF\n---\n\n第二版正文\n';
     fx.ctx.skills.writeFile(
       'pdf-parse',
@@ -223,7 +198,6 @@ describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
         'utf8',
       );
       expect(materialized).toBe('---\nname: pdf-parse\ndescription: 解析 PDF\n---\n\n第二版正文\n');
-      // 整包物化：附件也在
       expect(
         fs.existsSync(
           path.join(fx.optAgentRoot, 'users', 'admin', 'agents', agent, 'skills', 'pdf-parse', 'helper.txt'),
@@ -267,7 +241,6 @@ describe('SC-019：场景是数字人级的，互不影响', () => {
       data_prep_dirs: ['产线电价', '算法规则'],
     });
 
-    // 改 a1 的场景后再次部署：a2 不受影响
     const current = (await fx.app.inject({ method: 'GET', url: '/api/admin/agents/a1' })).json();
     await fx.app.inject({
       method: 'PUT',

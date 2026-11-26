@@ -1,12 +1,3 @@
-/**
- * 单测：`.xlsx` 表格预览组件（2026-11-17，档 A）。
- *
- * 组件只做渲染，所以这里守的全是**呈现契约**：
- * 1. 多 sheet → Tab，点一下换表；
- * 2. 数字列右对齐（判据来自服务端 `numericCols`，组件不自己猜）；
- * 3. 合并单元格 → `rowspan` / `colspan`，被覆盖的格子不渲染；
- * 4. 空工作簿 / 空表 / 截断各有明确文案（不让用户面对一张空白面板）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -111,12 +102,10 @@ describe('SheetPreview —— 单元格呈现', () => {
       ],
     })
 
-    // tbody 不含表头行：第 0 个 tr 就是数据第 1 行（合并起点）
     const rows = wrapper.findAll('tbody tr')
     const firstCell = rows[0]?.findAll('td')[0]
 
     expect(firstCell?.attributes('rowspan')).toBe('2')
-    // 第二行只剩「客户」一列：被合并的那格不该再出现空 td
     expect(rows[1]?.findAll('td')).toHaveLength(1)
     expect(rows[1]?.text()).toBe('B')
   })

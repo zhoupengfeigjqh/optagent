@@ -1,13 +1,4 @@
 <script setup lang="ts">
-/**
- * `/技能` 面板（2026-11-07）
- *
- * 与 `MentionPicker` 的关系：**同款浮层、同款交互，不同数据形态**。
- * 这里是**扁平单选**列表（没有级联），展示技能名 + 一行说明（就是进 System Prompt
- * 的那段 description，用户选之前能看到"它会用来做什么"）。
- *
- * 组件不持有业务状态：清单、过滤结果与高亮都由 props 驱动，选择意图上抛。
- */
 import { nextTick, ref, watch } from 'vue'
 
 import type { AgentSkill } from '../../api/types'
@@ -16,14 +7,10 @@ import BaseIcon from '../common/BaseIcon.vue'
 const props = withDefaults(
   defineProps<{
     open?: boolean
-    /** 已过滤的技能清单（过滤在 store 里做，组件只渲染） */
     skills?: AgentSkill[]
-    /** 键盘高亮索引 */
     activeIndex?: number
     loading?: boolean
-    /** 加载失败原因；空串 = 正常 */
     error?: string
-    /** 已选技能名（打勾标记） */
     selected?: string | null
   }>(),
   {
@@ -70,7 +57,6 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-// 高亮项滚动入视区（长列表键盘导航）
 watch(
   () => props.activeIndex,
   () => {

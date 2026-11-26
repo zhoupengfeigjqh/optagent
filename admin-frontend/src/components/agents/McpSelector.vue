@@ -1,13 +1,4 @@
 <script setup lang="ts">
-/**
- * MCP 服务选择器（`FR-018`、`FR-019`）。
- *
- * 数字人**按名称引用** MCP 服务，MUST NOT 内嵌连接信息——连接地址由平台侧的
- * 调用配置提供（`FR-044`），因此这里只呈现名称、用途与连接地址；
- * 改调用配置会自动作用于所有引用它的数字人。
- *
- * 可选范围 = **平台内新建的 MCP 服务**（2026-09-27 起不再取自容器编排声明）。
- */
 import { computed } from 'vue'
 import type { McpServiceListItem } from '../../api/types'
 import CheckboxList from '../common/CheckboxList.vue'

@@ -1,14 +1,4 @@
 <script setup lang="ts">
-/**
- * SKILL 详情：元数据 + 左侧文件树 + 右侧**文件编辑区**（2026-09-16）。
- *
- * - `SKILL.md` 与 `references/`、`scripts/` 等**全部文件可在编辑**；
- * - 保存只改**共享技能库**：引用了该 SKILL 的数字人 MUST 重新部署才会拿到新版本，
- *   因此保存后要**明确提示**（否则会出现"我改了但数字人没变"的困惑）；
- * - **未保存的修改不能悄悄丢**：切换文件或返回列表前先确认；
- * - 删除前 MUST 经 `§7.1` 取出受影响的数字人清单并二次确认（`FR-042`）——
- *   该查询**只在管理员触发删除之后**才发起（引用关系不做常驻浏览视图）。
- */
 import { computed, ref, watch } from 'vue'
 import { fetchReferences } from '../../api/deploy'
 import { deleteSkill, fetchSkillFile } from '../../api/skills'
@@ -33,11 +23,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'back'): void
   (e: 'deleted'): void
-  /** 文件已保存：详情与列表需要刷新（描述可能随 SKILL.md 变化） */
   (e: 'updated', saved: SkillFileSaved): void
 }>()
 
-/** 当前选中文件（默认 SKILL.md） */
 const selected = ref('SKILL.md')
 const fileContent = ref<SkillFileContent | null>(null)
 const fileLoading = ref(false)
@@ -46,27 +34,14 @@ const localError = ref<ErrorInfo | null>(null)
 const affected = ref<ReferenceItem[]>([])
 const confirmDelete = ref(false)
 
-/**
- * 本体市场来源的技能**只读**（2026-10-03 产品决定，`FR-062`）。
- *
- * 它是市场快照：内容只能经「从本体市场导入」窗口的**更新**整体替换，
- * 在线编辑会悄悄偏离市场版本、并让 `origin.hash` 失去"市场是否变化"的判据意义。
- * 后端 `SkillLibraryService.writeFile` 已硬拦截（`ADM_SKILL_READ_ONLY`），
- * 这里只是不给编辑入口——**两层都要有**，界面不渲染编辑器，服务端才是权威。
- */
 const readOnly = computed(() => props.skill?.origin?.kind === 'onto_market')
 
-/** 标题用展示名（`metadata.*` 优先，缺失回落 `name`） */
 const title = computed(() => skillDisplayName(props.skill) || '加载中…')
-/** 展示名与身份名不同 → 标题下方补一行小字 `name`（它是目录名与引用键） */
 const hasAlias = computed(() => skillHasAlias(props.skill))
 
-/** 编辑区是否有未保存的修改（由 `SkillFileEditor` 回传） */
 const dirty = ref(false)
-/** 待执行的意图（切换文件 / 返回列表）——仅在用户确认"放弃修改"后才落地 */
 const pending = ref<{ kind: 'file'; path: string } | { kind: 'back' } | null>(null)
 
-/** SKILL.md 正文已随详情返回，不必再请求一次 */
 const detailContent = computed(() => props.skill?.content ?? '')
 
 async function selectFile(path: string): Promise<void> {
@@ -108,7 +83,6 @@ function requestSelect(path: string): void {
   void selectFile(path)
 }
 
-/** 返回列表：同样先确认未保存的修改 */
 function requestBack(): void {
   if (dirty.value) {
     pending.value = { kind: 'back' }
@@ -125,12 +99,6 @@ function applyPending(): void {
   else void selectFile(action.path)
 }
 
-/**
- * 保存成功：更新大小与新哈希，并通知上层刷新（描述/大小可能已变）。
- *
- * 这里**就地改字段、不换对象**：`SkillFileEditor` 以"`file` 换对象"作为
- * "重新加载"的信号，换对象会把编辑区草稿重置；就地更新则保留草稿与"已保存"状态。
- */
 function onSaved(saved: SkillFileSaved): void {
   const current = fileContent.value
   if (current && current.path === saved.path) {
@@ -144,14 +112,12 @@ watch(
   () => props.skill,
   (next) => {
     if (!next) return
-    // 保存后的刷新沿用当前选中项（若该文件已不在，则回到 SKILL.md）
     const keep = next.files.some((file) => file.path === selected.value)
     void selectFile(keep ? selected.value : 'SKILL.md')
   },
   { immediate: true },
 )
 
-/** 打开删除确认：**先**查受影响清单，再展示确认框（FR-042） */
 async function requestDelete(): Promise<void> {
   if (!props.skill) return
   localError.value = null
@@ -222,7 +188,6 @@ async function doDelete(): Promise<void> {
           :selected="selected"
           @select="requestSelect"
         />
-        <!-- 可编辑来源：编辑器；本体市场来源：只读展示（无输入控件、无保存按钮） -->
         <SkillFileEditor
           v-if="!readOnly"
           class="skill-viewer__editor"
@@ -307,7 +272,6 @@ async function doDelete(): Promise<void> {
   font-size: var(--font-size-lg);
 }
 
-/* 身份名小字：展示名与 `name` 不同时才渲染 */
 .skill-viewer__alias {
   margin: 0;
   font-size: var(--font-size-xs);
@@ -343,7 +307,6 @@ async function doDelete(): Promise<void> {
   }
 }
 
-/* 只读视图（本体市场来源）：等宽全文 + 自身滚动，无任何编辑控件 */
 .skill-viewer__readonly-note {
   margin: 0 0 var(--space-2);
   font-size: var(--font-size-sm);

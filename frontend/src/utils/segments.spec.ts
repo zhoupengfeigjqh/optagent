@@ -1,33 +1,11 @@
-/**
- * 内容分段单测（`src/utils/segments.ts`）
- *
- * 运行方式：`npm run test` / `npm run test:coverage`（本地执行）
- *
- * 本模块是**渲染路径上唯一的文本切分逻辑**（消息正文按纯文本 + `pre-wrap` 渲染，
- * 不引入 Markdown 库，`research.md` D7），模块头声明的可测不变式是：
- *
- *   分段按顺序拼接 MUST 能还原原文（不丢字符、不重复）。
- *
- * 因此下面既逐条钉住分段形状，也对一批混合用例断言拼接还原——后者是防回归的主力：
- * 切分边界算错时，"形状断言"可能刚好没覆盖到的输入会表现为**正文丢字**，
- * 这是用户直接可见且极难排查的故障。
- *
- * 另一条口径：`countMatches` 与 `buildSegments` 的高亮语义 MUST 一致，
- * 否则搜索结果数与实际高亮数会对不上（`useSessionSearch` 据此算总数）。
- */
 import { describe, expect, it } from 'vitest'
 
 import { buildSegments, countMatches, type ContentSegment } from './segments'
 
-/** 按顺序拼接分段文本——即"还原原文"不变式。 */
 function joinSegments(segments: ContentSegment[]): string {
   return segments.map((segment) => segment.text).join('')
 }
 
-/**
- * 把分段渲染成便于断言的一行式摘要：`类型:文本`，链接附 `→href`、高亮附 `#序号`。
- * 比逐字段断言更容易一眼看出切分点错在哪。
- */
 function outline(segments: ContentSegment[]): string[] {
   return segments.map((segment) => {
     const href = segment.href === undefined ? '' : `→${segment.href}`
@@ -85,7 +63,6 @@ describe('buildSegments - 链接识别', () => {
   })
 
   it('中文书名号 / 直角引号包裹时同样剥离', () => {
-    // 中文正文里「链接」【链接】极常见，剥不干净会让 href 带上右括号导致 404
     expect(outline(buildSegments('【https://a.com】'))).toEqual([
       'text:【',
       'link:https://a.com→https://a.com',
@@ -147,7 +124,6 @@ describe('buildSegments - 关键词高亮', () => {
   })
 
   it('关键词按字面量匹配（正则元字符须转义）', () => {
-    // 未转义时 `a.b` 会额外命中 `axb`
     expect(countMatches('a.b axb', 'a.b')).toBe(1)
     expect(countMatches('a+b', 'a+b')).toBe(1)
     expect(countMatches('a(b', 'a(b')).toBe(1)

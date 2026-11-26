@@ -1,10 +1,3 @@
-/*
- Highcharts Gantt JS v11.1.0 (2023-06-09)
-
- (c) 2017-2021 Lars Cabrera, Torstein Honsi, Jon Arild Nygard & Oystein Moseng
-
- License: www.highcharts.com/license
-*/
 'use strict';
 (function (U, M) {
   'object' === typeof module && module.exports
@@ -22564,5 +22557,4 @@
   a['masters/highcharts-gantt.src.js']._modules = a;
   return a['masters/highcharts-gantt.src.js'];
 });
-//# sourceMappingURL=highcharts-gantt.js.map
 export default window.Highcharts;

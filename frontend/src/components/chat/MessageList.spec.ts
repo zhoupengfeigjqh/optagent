@@ -1,19 +1,3 @@
-/**
- * 组件测试：消息列表。
- *
- * 1. **乐观用户气泡**（2026-09-16 十七次调整）：用户消息只在历史刷新（流完成后）才渲染，
- *    发送后要到 AI 答完才看到自己的消息。修复后 `pendingUser` 应在历史消息**之后**、
- *    流式气泡**之前**渲染为用户气泡；`null` 时（无进行中轮次）不渲染。
- * 2. **工具卡片的 `live` 语境**（2026-10-08，TR-33）：`MessageBubble` 把"本轮是否仍在流式"
- *    传给了卡片，同样一条 `running` 记录在流式态应显示"进行中"、在历史里应显示"未完成"。
- *    （`MessageBubble.vue` 无同名测试，这条集成断言是它那处 `:live` 绑定的保护网。）
- * 3. **失败轮「重试本轮」**（2026-10-15，TR-58）：历史失败轮的入口原先悬空（气泡发 `retry`
- *    而列表层没接），这里从用户可见行为上钉住三件事——重发的是**同轮**的用户消息、
- *    该用户消息不在窗口内时**不给入口**（不留死按钮）、"加载更早消息"后入口必须长出来。
- * 4. **置底与「回到底部」**（2026-10-16）：上翻后发消息曾被静默吞掉（旧实现只在 `stick`
- *    为真时才跟随），现在本端发起一轮即强制置底；非底部时右下角浮出箭头，点击回到底部
- *    并收起。jsdom 不参与布局，滚动尺寸由 `installScrollMetrics` 显式装上。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -34,11 +18,9 @@ const HISTORICAL: Message[] = [
   { id: 'm_1', role: 'user', content: '上一条消息', ts: '2026-09-16T10:00:00Z', feedback: null },
 ]
 
-/* ---------- 失败轮（TR-58）夹具 ---------- */
 
 const ATTACHMENT = { dir: '数据准备/生产计划', filename: 'plan.csv' }
 
-/** 失败轮的同轮用户消息：带引用（重发时要原样带上） */
 const FAILED_TURN_USER: Message = {
   id: 'm_u1',
   role: 'user',
@@ -48,7 +30,6 @@ const FAILED_TURN_USER: Message = {
   attachments: [ATTACHMENT],
 }
 
-/** 失败轮本体：`status='failed'` + `error` 才有 `ErrorNotice`（含重试入口） */
 const FAILED_TURN: Message = {
   id: 'm_a1',
   role: 'assistant',
@@ -77,7 +58,6 @@ describe('MessageList —— 乐观用户气泡（十七次调整）', () => {
     expect(text).toContain('帮我看看这份计划')
     expect(text).toContain('计划.csv')
 
-    // 顺序：历史 → 乐观用户气泡 → 流式气泡（断言"我"标签的相对位置）
     const plain = text.replace(/\s+/g, '')
     expect(plain.indexOf('上一条消息')).toBeLessThan(plain.indexOf('帮我看看这份计划'))
   })
@@ -90,7 +70,6 @@ describe('MessageList —— 乐观用户气泡（十七次调整）', () => {
     const userBubbles = wrapper
       .findAll('.message-bubble')
       .filter((bubble) => bubble.classes().includes('message-bubble--user'))
-    // HISTORICAL 里本就有一条用户消息—— optimistic 气泡不应让它变多
     expect(userBubbles).toHaveLength(1)
     expect(userBubbles[0]!.text()).toContain('上一条消息')
   })
@@ -149,7 +128,6 @@ describe('MessageList —— 失败轮「重试本轮」（TR-58）', () => {
       props: { messages: [FAILED_TURN], hasMore: true },
     })
 
-    // 失败提示本身照常（可感知），但重发所需的那一轮还没加载 → 不给入口
     expect(wrapper.find('.error-notice').exists()).toBe(true)
     expect(wrapper.find('.error-notice__retry').exists()).toBe(false)
     expect(wrapper.emitted('retry')).toBeUndefined()
@@ -161,7 +139,6 @@ describe('MessageList —— 失败轮「重试本轮」（TR-58）', () => {
     })
     expect(wrapper.find('.error-notice__retry').exists()).toBe(false)
 
-    // 前插更早消息：既有气泡的对象身份与首尾 id 都没变（`v-memo` 的比较项里含入口文案）
     await wrapper.setProps({ messages: [FAILED_TURN_USER, FAILED_TURN], hasMore: false })
 
     expect(wrapper.find('.error-notice__retry').exists()).toBe(true)
@@ -209,18 +186,7 @@ describe('MessageList —— 工具卡片的 live 语境（TR-33）', () => {
   })
 })
 
-/* ---------- 置底与「回到底部」（2026-10-16） ---------- */
 
-/**
- * 装上可用的滚动尺寸。
- *
- * jsdom 不参与布局：`scrollHeight` / `clientHeight` 恒为 0、写 `scrollTop` 也没反应，
- * 所以三者都要显式定义（`scrollTop` 用可写存取器，便于模拟"用户上翻"）。
- * 返回读取当前 `scrollTop` 的函数——"有没有真的被程序化置底"要看它。
- *
- * 时序要求：必须在 `await flushPromises()` **之后**调用——挂载期的置底会先写一次
- * `scrollTop`，若让它在装好尺寸之后落地，就会把"用户上翻"一并冲掉。
- */
 function installScrollMetrics(
   element: Element,
   scrollHeight: number,
@@ -251,12 +217,10 @@ describe('MessageList —— 置底与「回到底部」（2026-10-16）', () =>
     const list = wrapper.find('.message-list')
     const readScrollTop = installScrollMetrics(list.element, 1000, 300)
 
-    // 上翻到中途：距底 700px → 自动跟随已暂停，箭头出现
     list.element.scrollTop = 300
     await list.trigger('scroll')
     expect(wrapper.find(JUMP).exists()).toBe(true)
 
-    // 本端发起一轮（乐观气泡出现 = 用户按了发送）
     await wrapper.setProps({ pendingUser: { content: '再看看这份', attachments: [] } })
     await flushPromises()
 
@@ -271,17 +235,14 @@ describe('MessageList —— 置底与「回到底部」（2026-10-16）', () =>
     const list = wrapper.find('.message-list')
     installScrollMetrics(list.element, 1000, 300)
 
-    // 贴底：距底 0
     list.element.scrollTop = 700
     await list.trigger('scroll')
     expect(wrapper.find(JUMP).exists()).toBe(false)
 
-    // 距底 80px：仍在"跟随最新"的口径内，不打扰
     list.element.scrollTop = 620
     await list.trigger('scroll')
     expect(wrapper.find(JUMP).exists()).toBe(false)
 
-    // 距底 100px：越界，箭头出现
     list.element.scrollTop = 600
     await list.trigger('scroll')
     expect(wrapper.find(JUMP).exists()).toBe(true)
@@ -341,17 +302,14 @@ describe('MessageList —— 切回旧会话恢复滚动位置（2026-10-16）',
     const list = wrapper.find('.message-list')
     const readScrollTop = installScrollMetrics(list.element, 1000, 300)
 
-    // 在 th_a 里上翻
     list.element.scrollTop = 300
     await list.trigger('scroll')
     expect(wrapper.find(JUMP).exists()).toBe(true)
 
-    // 切到 th_b：没有存档 → 置底
     await wrapper.setProps({ threadId: 'th_b', messages: OTHER })
     await flushPromises()
     expect(readScrollTop()).toBe(1000)
 
-    // 切回 th_a：回到离开时那一屏
     await wrapper.setProps({ threadId: 'th_a', messages: HISTORICAL })
     await flushPromises()
     expect(readScrollTop()).toBe(300)
@@ -366,7 +324,6 @@ describe('MessageList —— 切回旧会话恢复滚动位置（2026-10-16）',
     const list = wrapper.find('.message-list')
     const readScrollTop = installScrollMetrics(list.element, 1000, 300)
 
-    // 先上翻、再滚回底部 —— 离开时是贴底状态
     list.element.scrollTop = 200
     await list.trigger('scroll')
     list.element.scrollTop = 1000
@@ -412,7 +369,6 @@ describe('MessageList —— 读屏播报（2026-10-16）', () => {
     const list = wrapper.find('.message-list')
     expect(list.attributes('role')).toBe('log')
     expect(list.attributes('aria-live')).toBe('off')
-    // 流式气泡上的 `aria-live="off"`：经属性透传落到气泡根节点
     expect(wrapper.find('.message-list [aria-live="off"]').exists()).toBe(true)
   })
 
@@ -427,7 +383,6 @@ describe('MessageList —— 读屏播报（2026-10-16）', () => {
     await wrapper.setProps({ streaming: null, messages: [...HISTORICAL, DONE_ASSISTANT] })
     await flushPromises()
 
-    // '生产计划已核对完毕' = 9 字
     expect(announce.text()).toBe('回答已完成，共 9 字')
   })
 
@@ -469,7 +424,6 @@ describe('MessageList —— 本轮状态的可见性（2026-11-26）', () => {
 
     expect(wrapper.find('.message-bubble__aborted').exists()).toBe(true)
     expect(wrapper.text()).toContain('已停止生成')
-    // 已收尾的轮次不再转圈
     expect(wrapper.find('.typing-indicator').exists()).toBe(false)
   })
 

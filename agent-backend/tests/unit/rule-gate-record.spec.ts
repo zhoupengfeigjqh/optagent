@@ -1,13 +1,3 @@
-/**
- * 单元测试：轮内函数执行记录（021）。
- *
- * 守住的口径：
- * - 业务数据抽取四形态（统一信封 / 扁平 / 数组 / 文本）+ content 块数组；
- * - **成败都记**：失败传 `null`，键存在而值不是"未执行"；
- * - 同名多次 → 最后一次覆盖（失败覆盖成功）；
- * - 键名去 MCP 服务前缀 + 归一；
- * - `has` / `get` 分离：`has` 为 true 时 `get` 可能是 `null`。
- */
 import { describe, expect, it } from 'vitest';
 
 import { createFunctionRecord, extractBusinessData } from '../../src/domain/rule-gate/record.js';
@@ -124,7 +114,6 @@ describe('createFunctionRecord：边界（FR-036 / D12 / D14）', () => {
 
   it('恰好在阈值内不被丢弃', () => {
     const record = createFunctionRecord();
-    // 序列化后约 200KB，低于 256KB
     record.add('ok', { payload: 'x'.repeat(200 * 1024) });
     expect(record.has('ok')).toBe(true);
   });
@@ -218,8 +207,8 @@ describe('createFunctionRecord：世代（command 写后失效，2026-11-24）',
 
   it('显式传入派发世代：落在旧世代的条目对新世代不可见（并行批次保守降级）', () => {
     const record = createFunctionRecord();
-    const dispatched = record.epoch;      // 0
-    record.invalidate();                  // command 先完成 → 1
+    const dispatched = record.epoch;
+    record.invalidate();
     record.add('lateFn', { ok: true }, dispatched);
 
     expect(record.has('lateFn')).toBe(false);

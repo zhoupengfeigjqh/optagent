@@ -1,11 +1,3 @@
-/**
- * 单元测试：规划输出解析（028 FR-006 / FR-004a）。
- *
- * 守住的口径：
- * - 围栏与前后空白可剥离，**不做其他推断修补**；
- * - **空数组是合法输出**（首次 = 无需工具、滚动 = 已完成），parse 不判语义；
- * - 4 步 → 越界标记；字段缺失/类型错 → 结构化失败并点名 `field`。
- */
 import { describe, expect, it } from 'vitest';
 
 import { parsePlanOutput } from '../../src/domain/plan/parse.js';

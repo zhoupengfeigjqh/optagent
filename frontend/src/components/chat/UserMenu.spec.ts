@@ -1,13 +1,3 @@
-/**
- * 组件测试：账号菜单（2026-11-18）
- *
- * 守住四件事：
- * 1. 触发器显示**当前登录用户名**（并带读屏可读的「账号菜单」前缀）；
- * 2. 菜单项只有「切换数字人 / 退出登录」两项，且选择后菜单收起；
- * 3. 「切换数字人」只发 `open-agent` 意图（不拉候选、不碰业务状态）；
- * 4. 「退出登录」**先二次确认**：取消不登出，确认才调 `useAuth().logout()`，
- *    在途期间重复确认不重复调用；登出失败也已由 `useAuth` 收口（弹窗仍关闭）。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,7 +15,6 @@ const auth = vi.hoisted(() => ({
 
 vi.mock('../../composables/useAuth', () => ({ getAuthStore: () => auth }))
 
-/** `BaseDialog` 用桩：jsdom 未实现 `showModal`，且本组只关心开合与结构 */
 const BaseDialogStub = {
   props: ['open', 'title'],
   template: '<div v-if="open" class="dialog-stub"><slot /><slot name="footer" /></div>',
@@ -94,7 +83,6 @@ describe('UserMenu —— 触发器与菜单', () => {
     expect(wrapper.emitted('open-agent')).toHaveLength(1)
     expect(wrapper.find('.base-dropdown__menu').exists()).toBe(false)
     expect(auth.logout).not.toHaveBeenCalled()
-    // 只发意图：不打开、也不渲染退出确认框
     expect(wrapper.find('.dialog-stub').exists()).toBe(false)
   })
 })
@@ -151,7 +139,6 @@ describe('UserMenu —— 退出登录二次确认', () => {
     const wrapper = await openLogoutConfirm()
 
     await footerButton(wrapper, '退出登录').trigger('click')
-    // 按钮已因 busy 禁用：再点不应再次发请求
     await footerButton(wrapper, '退出登录').trigger('click')
     expect(auth.logout).toHaveBeenCalledTimes(1)
 

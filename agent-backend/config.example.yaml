@@ -1,60 +1,45 @@
-# ===== 模型列表（config.yaml 样例；本地与 Docker 形态共用同一份）=====
-#
-# 两种形态无环境差异：本地 dev 直读 cwd 下 config.yaml；容器由 compose 挂载
-#   ./agent-backend/config.yaml → /app/config.yaml:ro（见 docker-compose.yml backend 服务）。
-#
-# 规则：默认取第一项；条目 api_key 优先（支持 $ENV_VAR 引用，引用的是运行环境
-# 进程 env——本地来自 .env.local，容器来自 compose env_file 注入），
-# 缺省时用 DEEPSEEK_API_KEY 兜底；models 缺失或为空时服务拒绝启动。
+# 模型列表：默认取第一项，models 缺失或为空时服务拒绝启动
 models:
   - model: deepseek-v4-flash-vision-exp
-    api_key: $DEEPSEEK_API_KEY # 支持 $ENV_VAR 引用；也可直接填明文
-    base_url: https://api.deepseek.com # 可选，缺省用 provider 默认
+    api_key: $DEEPSEEK_API_KEY # 支持 $ENV_VAR 引用，也可直接填明文
+    base_url: https://api.deepseek.com
   # - model: deepseek-chat
   #   api_key: sk-xxxx
   #   base_url: https://api.deepseek.com
 
-# ===== 意图聚焦（013）：判定模型接入（可选块）=====
-#
-# 整块缺失 = 该功能不可用（不判定、不追加聚焦提示、每轮留档一条 unconfigured），**不影响启动**；
-# 块存在但字段不全/越界 = 启动失败（半配置最容易被误读成运行期故障）。
-#
-# 判定模型是独立部署的 Laya 决策模型（System One 线协议，CPU 可跑）：
-#   docker compose up -d laya     # 镜像 chaitin/decis:laya-multilingual-v0.4.0，容器内 8000
-# backend 直接 HTTP 调用 `/v1/systemone`，**不经 MCP、不注册为工具**。
-#
-# 十个字段之外的键一律拒绝启动（拼错 `timeout` 不会被静默忽略成缺省值）。
-# 取值方式：本文件给"部署形态共用值"；两个 *_threshold 建议走环境变量（现场调参不必改挂载文件）。
-#
+# 意图聚焦（可选块）：整块缺失 = 功能不可用且不影响启动；字段不全或越界 = 启动失败
+# 十个字段之外的键一律拒绝启动
 # intent_focus:
-#   base_url: http://laya:8000      # 必填；只填到主机端口，**不要带 /v1 或其它路径**
-#                                   #   容器内用服务名；本地直跑用 http://127.0.0.1:8103
-#   model: laya-multilingual        # 缺省即此值；需与 GET /v1/models 返回的标识一致
-#   api_key: $DECIS_API_KEY         # 必填；支持 $ENV_VAR 引用；**不**回落到 DEEPSEEK_API_KEY
-#                                   #   $ENV 由 **backend 进程**的环境提供（agent-backend/.env.local），
-#                                   #   与 laya 容器的 DECIS_API_KEY 必须是同一个值
-#   timeout_ms: 30000               # 300~30000 的整数（毫秒）；整轮预算（覆盖指代判定 + 改写 + 两段评分，
-#                                   #   共用同一 deadline；不含主模型回答与术语预检），超时即降级（不重试）
-#                                   #   2026-11-26：上限与缺省一并提到 30000（此前上限 20000、缺省 10000）
-#   skill_threshold: 0.8            # 0~1；技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖（环境变量优先）
-#                                   #   环境变量留空（`INTENT_FOCUS_SKILL_THRESHOLD=`）视为未设置，不会变成 0
-#                                   #   0.8 是 2026-11 产品口径（技能与行为同阈值；0.6 下噪声明显偏多）
-#   ontology_behavior_threshold: 0.8 # 0~1；本体**行为**入选阈值，可被 INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD 覆盖
-#                                   #   与技能阈值分开：行为候选是短标题，分数分布与技能描述不同
-#                                   #   2026-11-20 由 `ontology_threshold` 改名；旧键会被 .strict() 拒绝（启动即报错）
-#   ontology_function_threshold: 0.8 # 0~1；本体**函数**入选阈值，可被 INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD 覆盖
-#                                   #   函数描述是"这段计算在算什么"，与"用户想做什么"分布不同，故独立标定
-#   max_skills: 32                  # 1~256；单轮技能候选上限（超出按技能目录原序截断并留档 truncated）
-#   max_capabilities: 96            # 1~96；单轮**行为与函数候选合计**上限（收集序：本体序 → 行为 → 函数）
+#   base_url: $INTENT_FOCUS_BASE_URL  # 必填；只到主机端口，不带路径；用 $VAR 引用以便两形态共用
+#                                     #   本地 127.0.0.1:8103 / 容器 laya:8000
+#   model: laya-multilingual
+#   api_key: $DECIS_API_KEY           # 必填；不回落 DEEPSEEK_API_KEY
+#   timeout_ms: 30000                 # 300~30000 毫秒；整轮预算，超时降级不重试
+#   skill_threshold: 0.8              # 0~1；可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
+#   ontology_behavior_threshold: 0.8  # 0~1；可被 INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD 覆盖
+#   ontology_function_threshold: 0.8  # 0~1；可被 INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD 覆盖
+#   max_skills: 32                    # 1~256
+#   max_capabilities: 96              # 1~96；行为与函数候选合计上限
 #
-# ===== 输入改写（027）：指代判定阈值与改写超时 =====
-# 这两个参数**不控制开关**：是否改写由管理台「意图聚焦 → 输入重写」决定（默认关闭，
-# 部署后写入 SOUL.md 的 `input_rewrite: true` 才生效）。这里只标定"多容易判为指代"与"最多等多久"。
+# 输入改写：开关由管理台「意图聚焦 → 输入重写」决定，默认关闭
+#   rewrite_threshold: 0.8            # 0~1；score 严格大于该值才改写
+#   rewrite_timeout_ms: 5000          # 300~10000 毫秒；不得大于 timeout_ms
 #
-#   rewrite_threshold: 0.8          # 0~1；`score > 该值` 才改写（严格大于，等于不改写）
-#                                   #   可被 INTENT_FOCUS_REWRITE_THRESHOLD 覆盖（环境变量优先，空串视为未设置）
-#                                   #   与 skill_threshold 刻意独立：改写多一次模型调用（延迟 + 费用）
-#   rewrite_timeout_ms: 5000        # 300~10000 的整数（毫秒）；单次改写上限，
-#                                   #   实际还受"阶段剩余预算 - 100ms"进一步收紧；
-#                                   #   剩余不足 300ms 直接放弃改写（留档 budget_exhausted）
-#                                   #   校验：不得大于 timeout_ms（缺省随 timeout_ms 自动收紧）
+# 规划门禁（028，可选键）：数字人开启 task_planning 时，先用 laya 判"这轮是否涉及多个对象或多个任务"，
+# 分数 >= plan_threshold 才发起规划调用；不配置 plan_threshold = 门禁关闭（开规划即走规划）。
+# 判定失败/超时一律 fail-open（仍走规划），不会因为判定服务抖动而降级掉规划能力。
+#   plan_threshold: 0.4               # 0~1；缺省缺键即关闭（只认本文件，不再有同名 env）
+#   plan_timeout_ms: 5000             # 300~10000 毫秒；缺省 5000；不得大于 timeout_ms
+#
+# 运行期策略（可选块；缺省即下列值）：原 MCP_TIMEOUT_MS / LLM_* 环境变量已迁入此处
+# runtime:
+#   mcp_timeout_ms: 90000             # 单次 MCP 工具调用上限（1000~600000）
+#   mcp_connect_timeout_ms: 10000     # 单服务建连上限（1000~60000），不得大于 mcp_timeout_ms
+#   llm_max_retries: 2                # 主模型重试次数（0~5）
+#   llm_retry_max_delay_ms: 15000     # 单次重试等待上限（0~60000；0 = 不设上限）
+#
+# 规划上限（可选块；缺省即下列值）：只开三个口子，其余 13 项规划常量是算法不变量
+# plan:
+#   timeout_ms: 20000                 # 单次规划调用上限（1000~600000 毫秒）
+#   total_steps_max: 20               # 单轮总步数上限（1~100）
+#   replan_max_per_run: 6             # 失败驱动重规划上限（0~50）

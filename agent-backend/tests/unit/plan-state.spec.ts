@@ -1,14 +1,3 @@
-/**
- * 单元测试：计划状态机（028 FR-018~FR-028）。
- *
- * 守住的口径：
- * - 三态归类的判定顺序 `isError → code → message`；SDK 错误无 code 时默认 `retryable`，
- *   仅 `Tool <name> not found` 归「不计入三态」；
- * - 完成判定 A + C：同一 turn 成功不出队（C 不满足）；
- * - `done` 是出队动作；连续 3 次 retryable 转 failed 并计失败重规划；
- * - 指纹连续不变 → 卡死；总步数 20 / 失败重规划 6 超限终止；
- * - **正常滚动不占用 `replanCount`**。
- */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -196,7 +185,6 @@ describe('appendSummary', () => {
   it('单条含省略号 ≤80 字，只保留最近 5 条', () => {
     const state = createPlanState('目标');
     appendSummary(state, '字'.repeat(100));
-    // 用户 2026-11-25 明确「最高保留 80 字」——省略号也算在内
     expect(Array.from(state.doneSummary[0] ?? '').length).toBe(80);
     expect(state.doneSummary[0]?.endsWith('…')).toBe(true);
 
@@ -218,7 +206,6 @@ describe('appendSummary', () => {
 
   it('截断优先退到断句点，不切在词中间', () => {
     const state = createPlanState('目标');
-    // 逗号落在第 50 字：在「回退不小于一半预算」的范围内，应退到它后面
     appendSummary(state, `${'甲'.repeat(50)}，${'乙'.repeat(60)}`);
 
     const line = state.doneSummary[0] ?? '';
@@ -298,7 +285,6 @@ describe('advanceBatch 的写后失效识别', () => {
     expect(result.staleFunctions).toEqual(['rawmcp__sumRawNotArrivalQty']);
     expect(state.replanCount).toBe(1);
     expect(state.rollCount).toBe(0);
-    // 这一步从未执行，状态仍是 running（不写 failed）
     expect(state.current?.status).toBe('running');
   });
 

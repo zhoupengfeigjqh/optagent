@@ -1,20 +1,3 @@
-/**
- * Vitest 配置（后端）：覆盖率门禁
- *
- * 口径来自宪章，两条款必须一起读：
- * - 原则三：核心业务逻辑语句覆盖率 MUST ≥ 80%，低于阈值即视为任务未完成；
- * - 治理「适用范围与不追溯」：门禁只作用于**新增**文件与**本次改动涉及**的文件/模块，
- *   且 MUST NOT 为满足门禁而发起针对存量代码的覆盖率补齐专项。
- *
- * 因此**不设全局 80%**：存量代码整体仅约 20%，设全局阈值会第一天就红，
- * 而按「不追溯」又不允许为了变绿去补存量测试——那只会让门禁被无视。
- * 改为两层：
- *
- * ① **全局地板（防倒退）**：略低于当前实测值，只用于发现"覆盖率整体下滑"。
- *    调整它 MUST 有明确理由（如新增了尚未被测试加载的模块）。
- * ② **模块阈值**：受门禁约束的模块在 `thresholds` 中以路径为键、按 80% 校验。
- *    **新增或改动模块时，MUST 把该模块加进这个清单**——这是门禁真正咬人的地方。
- */
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -23,36 +6,26 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary'],
       include: ['src/**/*.ts'],
-      // 纯类型声明文件无运行期语句，计入分母无意义
       exclude: ['src/types.ts', 'src/domain/intent-focus/types.ts', '**/*.d.ts'],
       thresholds: {
-        // ① 全局地板（防倒退）。2026-10-12 实测：stmts 69.04 / branch 64.59 / funcs 68.88 / lines 70.77
-        //    2026-10-14（009）复测：stmts 73.33 / branch 67.31 / funcs 73.28 / lines 75.29（只上不下，
-        //    下次需要时可据此再抬地板；本次保持原值以免门禁抖动）
-        //    本次（007）按 T066 复核：上一版地板 20/12/19/21 是早期实测留下的**远低于现状**的值
-        //    （注释里的 21.1/13.1/20.0/22.6），已丧失"发现整体下滑"的作用，故按同一个
         //    "地板 = 实测值略下方"的口径抬到 66/61/65/67。地板只可上调，不得下调。
         statements: 66,
         branches: 61,
         functions: 65,
         lines: 67,
 
-        // ② 受宪章 80% 门禁约束的模块（在本次改动中已被充分覆盖）
-        //    形如：'src/domain/xxx.ts': { statements: 80, branches: 80, functions: 80, lines: 80 }
         'src/domain/dirs.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 本特性新增（R1：内置工具目录单一来源）
         'src/domain/builtin-tool-catalog.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 本特性新增（R7：数字人配置"变化即失效"）
         'src/domain/config-fingerprint.ts': {
           statements: 80,
           branches: 80,
@@ -66,7 +39,6 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-09-16：file_args 取值路径（对象数组里的字段也要能铸造签名直链）
         'src/domain/file-arg-path.ts': {
           statements: 80,
           branches: 80,
@@ -80,7 +52,6 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 本特性新增（R2/R4：两个只读端点）
         'src/routes/builtin-tools.ts': {
           statements: 80,
           branches: 80,
@@ -93,84 +64,72 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：签名写方向（与读方向形状隔离）
         'src/infra/file-sign.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：异步工具的 `resultUrl` 注入
         'src/infra/mcp/async-result-url.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：schema 视图裁剪（从适配器抽出，本次复用其隐藏机制）
         'src/infra/mcp/mcp-schema-view.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：后台产出（落盘 / 目录即索引 / 提示词段）
         'src/domain/produced.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：产出变更信号总线
         'src/domain/produced-events.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：prompt 组装（从 run-manager 抽出，含产出段）
         'src/domain/prompt-builder.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：产出目录纳入 30 天清理
         'src/domain/tmp-cleanup.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-09-25（R11 阶段 1）：产出列表与变更信号端点
         'src/routes/produced.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-10：工具结果里的视图链接抽取（同步侧视图入口，TR-44）
         'src/domain/view-links.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-12：MCP 工具结果文本口径（逐块挑选，取代"整体序列化信封"，TR-49）
         'src/infra/mcp/mcp-result-text.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-12（007）：下一步动作提示（生成 / 合规判定 / 会话级单快照）
         'src/domain/next-actions.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-12（007）：轮次收尾家族（从 run-manager 拆分而来）
         'src/domain/run-finalize.ts': {
           statements: 80,
           branches: 80,
@@ -184,28 +143,24 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-10-14（009）：数字人作用域判定（AGENT_NOT_SELECTED / AGENT_NOT_AVAILABLE）
         'src/domain/agent-scope.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-14（009）：场景解析块从 dirs.ts 搬出（纯搬移；行为零变化由测试锁定）
         'src/domain/scenario.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-25（013）：判定纯函数（输入截断 / 处置判定；2026-11-06 挪入 `intent-focus/`）
         'src/domain/intent-focus/state.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-25（013）：判定编排（开关 → 跳过 → 配置 → 判定 → 五态留档）
         'src/domain/intent-focus/runner.ts': {
           statements: 80,
           branches: 80,
@@ -219,14 +174,12 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-11-04（016）：技能头部读取与解析（有界读取 / 归一化 / 逐技能容错）
         'src/domain/skill-header.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-11-04（016）：本体加载（只读所需字段 / 索引 / 容错）
         'src/domain/intent-focus/ontology-loader.ts': {
           statements: 80,
           branches: 80,
@@ -240,36 +193,30 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        // 2026-11-04（016）：选择 / 去重（严格阈值 / 不级联；2026-11-06 取消第二层截断）
         'src/domain/intent-focus/selection.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-11-04（016）：提示铸造（分类段 / 1200 截断 / 单行）
         'src/domain/intent-focus/prompt.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-11-04（016）：留档铸造（明细截断 / 计数保留）
         'src/domain/intent-focus/record.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-10-25（013）：Laya 协议适配器（唯一网络出口；失败原因判别）
         'src/infra/laya-client.ts': {
           statements: 80,
           branches: 80,
           functions: 80,
           lines: 80,
         },
-        // 2026-11-19（027）：指代改写的三块新代码（实测值见各条注释，均 ≥ 80%）
-        //   纯函数层：文案 / 素材取材 / 七步归一（含码点截断）—— 实测 100%
         'src/domain/intent-focus/rewrite-prompt.ts': {
           statements: 80,
           branches: 80,

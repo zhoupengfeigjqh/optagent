@@ -1,13 +1,3 @@
-/**
- * 端到端（进程内）：权限闸门 → 工具失败标记 → SSE 状态口径的**接线**验证（020）。
- *
- * 为什么要有这一条：包装器的单测只能证明"返回了什么"，证明不了 pi 的 loop
- * 真的把失败标记翻成 `isError` 并映射到 `tool_call_end.status='error'`
- * （前端卡片标红、历史记 error 的唯一来源）。
- *
- * 判据（契约 C9）：被拒调用 → 真实实现零执行 + `tool_call_end.status='error'`
- * + 正文含拒绝文案；放行调用 → 真实实现执行 + `status='success'`。
- */
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { EventStream } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -105,7 +95,6 @@ async function runOnce(tool: AgentTool): Promise<LlmEvent[]> {
   return events;
 }
 
-/** 多跳脚本：模型"固执地"继续调工具时的真实 loop 行为 */
 async function runScript(tools: AgentTool[], steps: AssistantMessage[]): Promise<LlmEvent[]> {
   let hop = 0;
   const events: LlmEvent[] = [];
@@ -213,7 +202,7 @@ describe('权限闸门 → loop 接线', () => {
 describe('拒绝 → 本轮挂起 → 软收尾（2026-11-09）', () => {
   it('拒绝后模型改调其他工具：该工具零执行，本轮仍产出正文并以 done 结束', async () => {
     const agentDir = tmpAgentDir();
-    writeOntology(agentDir, 'zpf'); // probe_tool 只授权给 zpf，admin 会被拒
+    writeOntology(agentDir, 'zpf');
     const guard = createScopeGuard({ agentDir, username: 'admin' });
 
     const denied = makeTool('probe_tool');
@@ -232,7 +221,6 @@ describe('拒绝 → 本轮挂起 → 软收尾（2026-11-09）', () => {
       assistant([{ type: 'text', text: '抱歉，我没有这个操作的权限，已停止。' }], 'stop'),
     ]);
 
-    // 两个工具都零执行：第一个被拒，第二个被"本轮挂起"直接拦下
     expect(denied.executeMock).not.toHaveBeenCalled();
     expect(other.executeMock).not.toHaveBeenCalled();
 
@@ -247,7 +235,6 @@ describe('拒绝 → 本轮挂起 → 软收尾（2026-11-09）', () => {
     expect(ends[1]!.status).toBe('error');
     expect(ends[1]!.resultText).toContain('本轮已停止执行工具');
 
-    // 软收尾：以 done 正常结束，不是 error / ABORTED（模型拿到了第 3 步的收尾文本）
     expect(events.some((event) => event.type === 'done')).toBe(true);
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });

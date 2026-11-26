@@ -1,14 +1,3 @@
-/**
- * 平台设计态存储（`research.md` D4）。
- *
- * - 全部以 **JSON 文档**组织在 `.platform-data/` 下（`data-model.md` §1）；
- * - 写入一律"**写临时文件 → fsync → 原子 rename**"，满足原则五对
- *   "状态变更 MUST 使用事务或等价的原子替换"的要求；
- * - 并发控制：`meta.json` 的**单调递增 `revision`** 作为乐观锁，
- *   不符即 `ADM_CONFIG_REVISION_CONFLICT`（`FR-008`）。
- *
- * 临时文件与目标文件**同目录**——保证 `rename` 不跨设备（`research.md` D8 同一约束）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
@@ -23,7 +12,6 @@ export interface MetaDocument {
   updated_at: string;
 }
 
-/** 设计态文档的格式版本，供未来迁移 */
 export const SCHEMA_VERSION = '1.0.0';
 
 const META_REL = 'meta.json';
@@ -45,7 +33,6 @@ export class PlatformStore {
     return this.root;
   }
 
-  /** 相对路径 → 绝对路径（**拒绝越界**：`..` 与绝对路径一律拒） */
   abs(rel: string): string {
     const normalized = rel.replace(/\\/g, '/');
     if (normalized.startsWith('/') || normalized.split('/').includes('..')) {
@@ -99,7 +86,6 @@ export class PlatformStore {
     return fs.existsSync(this.abs(rel));
   }
 
-  /** 读取 JSON 文档；文件不存在返回 `null`（**不**视为错误） */
   readJson<T>(rel: string): T | null {
     const text = this.readText(rel);
     if (text === null) return null;
@@ -174,17 +160,6 @@ export class PlatformStore {
     }
   }
 
-  /**
-   * 删除文件或目录（幂等：目标不存在即视为成功）。
-   *
-   * **不使用 `fs.rmSync`**（2026-10-09 根因修正）：它在 Windows 上对含非 ASCII
-   * 字符（中文数字人/技能/场景名）的路径**既不抛错也不删除**，留下"界面说删了、
-   * 磁盘还在"的不一致状态——排查与实测见 `fs-remove.ts`。这里改为手工递归删除。
-   *
-   * **删除后校验**保留作兜底：真被其它进程占用时仍把静默失败转成**可读错误**，
-   * 宁可删除失败被看见，也不要留下不一致状态。失败时调用方 SHOULD NOT 继续写索引
-   * （保持"记录与磁盘一致"，宁可不删也不半删）。
-   */
   remove(rel: string): void {
     const abs = this.abs(rel);
     removeTree(abs);
@@ -196,7 +171,6 @@ export class PlatformStore {
     }
   }
 
-  /** 目录项（相对路径名）；目录不存在返回空数组 */
   listDir(rel: string): string[] {
     try {
       return fs.readdirSync(this.abs(rel));
@@ -205,7 +179,6 @@ export class PlatformStore {
     }
   }
 
-  /** 追加一行 JSON（`deploy/history.jsonl`） */
   appendJsonl(rel: string, data: unknown): void {
     const abs = this.abs(rel);
     try {
@@ -219,7 +192,6 @@ export class PlatformStore {
     }
   }
 
-  /** 读取 JSONL（损坏行跳过并告警，不影响其余记录） */
   readJsonl<T>(rel: string): T[] {
     const text = this.readText(rel);
     if (text === null) return [];
@@ -241,7 +213,6 @@ export class PlatformStore {
   meta(): MetaDocument {
     const meta = this.readJson<MetaDocument>(META_REL);
     if (meta && typeof meta.revision === 'number') return meta;
-    // 目录尚未初始化（或 meta 被外部删除）：按初始态处理，不抛错
     const now = new Date().toISOString();
     return { revision: 1, schema_version: SCHEMA_VERSION, created_at: now, updated_at: now };
   }
@@ -250,7 +221,6 @@ export class PlatformStore {
     return this.meta().revision;
   }
 
-  /** 校验客户端持有的版本；不符即 409 冲突（`FR-008`） */
   assertRevision(expected: number): void {
     const actual = this.revision();
     if (expected !== actual) {
@@ -261,10 +231,6 @@ export class PlatformStore {
     }
   }
 
-  /**
-   * 在版本保护下执行一次设计态变更：校验版本 → 执行 → 递增版本。
-   * `fn` 抛错时不递增版本（保证"失败不留痕"）。
-   */
   withRevision<T>(expected: number, fn: () => T): { result: T; revision: number } {
     this.assertRevision(expected);
     const result = fn();

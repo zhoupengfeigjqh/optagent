@@ -1,14 +1,3 @@
-/**
- * 单元测试：规划输入装配（028 FR-003）。
- *
- * 守住的口径：
- * - 六段 system prompt 顺序固定，第 1、2 段都强调「聚焦为起点」；
- * - 段 2 **直通**聚焦提示，只在超防御性硬顶（8000）时按行截断；
- * - 段 4/5 **不设上限、不截断**；
- * - 前置约束覆盖**全部** command，无前置者标「（无）」；
- * - 历史只取最近 3 轮正文，单条 >1500 字尾部截断；
- * - 重试时追加反馈。
- */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -103,7 +92,6 @@ describe('buildPlanPrompt', () => {
   });
 
   it('段 2 直通聚焦提示：6000 字也原样带入，「图路径」末行不丢（2026-11-26）', () => {
-    // 聚焦侧最高档 6000；旧实现二次截到 2000，恰好从末尾切掉图路径
     const behaviors = Array.from({ length: 60 }, (_, index) => `· 关键行为 ${index} ${'x'.repeat(80)} @概念`);
     const paths = [
       '图路径（上游 1 跳；→/← 为本体边方向，按从左到右即本轮路径）',
@@ -125,7 +113,6 @@ describe('buildPlanPrompt', () => {
     const { system } = buildPlanPrompt({ ...BASE, focusPrompt, history: [], userInput: 'x' });
     const kept = lines.filter((line) => system.includes(line));
     expect(kept.length).toBeGreaterThan(0);
-    // 截断是按整行丢的：留下的保持原序连续，且下一条整行不存在
     expect(kept).toEqual(lines.slice(0, kept.length));
     expect(system).not.toContain(lines[kept.length]!);
   });

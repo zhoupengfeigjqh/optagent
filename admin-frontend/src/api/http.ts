@@ -1,23 +1,11 @@
-/**
- * HTTP 薄封装（无业务逻辑）
- *
- * 与既有 `frontend/src/api/http.ts` **同构**：BaseURL 拼接、JSON 编解码、
- * 统一 `ApiError`。后端错误体为 `{ error: { code, message, details? } }`
- * （`contracts/admin-api.md` §0.3）。
- *
- * 所有请求路径以 `/api/admin` 开头；`baseUrl` 缺省为空串
- * （**同源相对路径**，开发期由 Vite 代理转发，宪章「技术栈与工程约束」）。
- */
 
 import type { ApiErrorBody, ErrorInfo } from './types'
 
-/** 网络层错误码（非后端返回，由前端在传输层生成） */
 export const CLIENT_ERROR_CODE = {
   NETWORK: 'NETWORK_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
 } as const
 
-/** 结构化 API 错误：满足 `ErrorInfo`，可直接交给 `toUserMessage()` 映射 */
 export class ApiError extends Error implements ErrorInfo {
   readonly code: string
   readonly status: number
@@ -64,7 +52,6 @@ export function resolveBaseUrl(): string {
   return configured.replace(/\/+$/, '')
 }
 
-/** 创建 HTTP 客户端 */
 export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
   const baseUrl = (options.baseUrl ?? resolveBaseUrl()).replace(/\/+$/, '')
   const fetchImpl: typeof fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis)
@@ -86,7 +73,6 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     const mergedHeaders: Record<string, string> = { Accept: 'application/json', ...headers }
     if (body !== undefined && body !== null) {
       if (body instanceof FormData) {
-        // multipart：交由浏览器自动生成带 boundary 的 Content-Type
         init.body = body
       } else {
         mergedHeaders['Content-Type'] = 'application/json'
@@ -134,12 +120,6 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
   }
 }
 
-/**
- * 把非 2xx 响应转换为 `ApiError`。
- *
- * 若响应体不符合契约（如网关 HTML 错误页），回退为 `HTTP_{status}`，
- * 保证上层始终拿到结构化错误。
- */
 export async function parseErrorResponse(response: Response): Promise<ApiError> {
   const fallbackCode = `HTTP_${response.status}`
   const text = await response.text().catch(() => null)
@@ -176,5 +156,4 @@ export async function parseErrorResponse(response: Response): Promise<ApiError> 
   })
 }
 
-/** 全局默认客户端（同源相对路径） */
 export const http = createHttpClient()

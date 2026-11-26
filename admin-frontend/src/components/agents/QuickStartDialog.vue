@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 「快速上手」编辑弹窗（004）。
- *
- * 编辑两个**只给前台、不进模型**的字段：
- * - **首屏欢迎语**：新建对话页中间展示；
- * - **问题实例**：新建对话页平铺的卡片，点击即把 `prompt` 作为用户消息发出；
- *   每条可关联工具（内置工具 + 已挂载 MCP 服务的可见工具），生成的引导文本
- *   **对用户不可见**，只在那一轮追加进系统提示词。
- *
- * 用原生 `<dialog>` + `showModal()`（与 `ConfirmDialog` 同范式：焦点陷阱、
- * `aria-modal`、Esc 关闭由浏览器提供）。
- *
- * 弹窗内改的是**本地副本**，点「确定」才提交——点取消时草稿不受影响。
- */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { BuiltinTool, McpServiceListItem, SoulStarter, SoulStarterTool } from '../../api/types'
 import { SOUL_LIMITS } from '../../constants/agent-design'
@@ -21,10 +7,8 @@ const props = defineProps<{
   open: boolean
   welcome: string
   starters: SoulStarter[]
-  /** 该数字人**已启用**的内置工具（关联工具的候选范围） */
   enabledTools: string[]
   builtinTools: BuiltinTool[]
-  /** 该数字人**已挂载**的 MCP 服务名 */
   mountedServices: string[]
   mcpServices: McpServiceListItem[]
 }>()
@@ -34,7 +18,6 @@ const emit = defineEmits<{
   (e: 'save', value: { welcome: string; starters: SoulStarter[] }): void
 }>()
 
-/** 工具候选（含展示用的中文名与所属分组） */
 interface ToolOption {
   tool: SoulStarterTool
   label: string
@@ -45,13 +28,6 @@ const localWelcome = ref('')
 const localStarters = ref<SoulStarter[]>([])
 let restoreFocusTo: HTMLElement | null = null
 
-/**
- * 内置工具候选：只列**已启用**的（未启用的工具运行时没注册给模型，引导它没有意义）。
- *
- * 2026-10-17：展示口径改为**英文名在前、中文名在后**，与「内置工具」分区
- * （`ToolSelector`）及聊天前台（工具卡片显示英文名）统一——同一个工具在
- * 三个界面里是同一个名字。
- */
 const builtinOptions = computed<ToolOption[]>(() =>
   props.enabledTools.map((name) => {
     const meta = props.builtinTools.find((tool) => tool.name === name)
@@ -59,7 +35,6 @@ const builtinOptions = computed<ToolOption[]>(() =>
   }),
 )
 
-/** MCP 候选：按**已挂载服务**分组，每组只列该服务的可见工具（`allowed_tools`） */
 const mcpGroups = computed(() =>
   props.mountedServices.map((service) => {
     const meta = props.mcpServices.find((item) => item.name === service)
@@ -105,7 +80,6 @@ function removeStarter(index: number): void {
 function confirm(): void {
   emit('save', {
     welcome: localWelcome.value.trim(),
-    // 空问题不提交（后端也会拒绝空 prompt，这里先过滤掉"加了一行却没填"的情况）
     starters: localStarters.value
       .map((starter) => ({ prompt: starter.prompt.trim(), tools: [...starter.tools] }))
       .filter((starter) => starter.prompt !== ''),
@@ -139,7 +113,6 @@ function closeDialog(): void {
   restoreFocusTo = null
 }
 
-/** `cancel` 事件由 Esc 触发：阻止浏览器默认关闭，统一走 `update:open` 流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   requestClose()
@@ -153,7 +126,6 @@ watch(
       closeDialog()
       return
     }
-    // 打开时从 props 拷贝一份可编辑副本（取消即丢弃）
     localWelcome.value = props.welcome
     localStarters.value = props.starters.map((starter) => ({
       prompt: starter.prompt,
@@ -208,11 +180,6 @@ onBeforeUnmount(() => {
           生成的引导文本对用户不可见，只在那一轮追加进系统提示词。
         </p>
 
-        <!--
-          一条问题实例 = 一行「序号 - 问题内容 - 移除」+ 可折叠的关联工具。
-          标签文字让位给输入框（横排后没有空间），改用 `aria-label` + placeholder 承载，
-          无障碍不降级（原则四）。
-        -->
         <div
           v-for="(starter, index) in localStarters"
           :key="index"
@@ -240,10 +207,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <!--
-            关联工具默认收起（多数问题无需挂工具）；`summary` 上带上已选计数，
-            收起时也不会丢失"这条挂了工具"的信息。用原生 `<details>` 实现，不引库。
-          -->
           <details class="quick-start__tools">
             <summary class="quick-start__tools-summary">
               关联工具（已选 {{ starter.tools.length }} / {{ SOUL_LIMITS.toolsPerStarter }}）
@@ -362,7 +325,6 @@ onBeforeUnmount(() => {
   margin-bottom: var(--space-2);
 }
 
-/* 「序号 - 问题内容 - 移除」同一行 */
 .quick-start__row {
   display: flex;
   align-items: flex-start;
@@ -372,7 +334,6 @@ onBeforeUnmount(() => {
 .quick-start__item-index {
   flex: none;
   min-width: 1.5em;
-  /* 与 textarea 首行文字对齐（textarea 的 padding + border，见 base.css） */
   padding-top: calc(var(--space-2) + 1px);
   text-align: right;
   font-weight: 600;

@@ -1,19 +1,10 @@
 <script setup lang="ts">
-/**
- * 状态徽标：**图标 + 文本双通道**，不只靠颜色（原则四）。
- *
- * 未提供 `label` 时按状态词典取中文名；词典未覆盖的状态回退为原始文本，
- * 保证"未知状态不会被静默显示成空"。
- */
 import { computed } from 'vue'
 import { STATUS_PRESETS, type BadgeTone } from '../../constants/status-presets'
 
 const props = defineProps<{
-  /** 状态标识（如 MCP 的 running / stopped / abnormal / unknown） */
   status: string
-  /** 覆盖显示文案 */
   label?: string
-  /** 覆盖语义色；缺省按状态词典推断 */
   tone?: BadgeTone
 }>()
 

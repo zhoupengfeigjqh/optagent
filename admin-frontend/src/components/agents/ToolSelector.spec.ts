@@ -1,9 +1,3 @@
-/**
- * 组件测试：内置工具选择器（T059）
- *
- * 覆盖 props / emit / 边界：失效引用单独列出（`FR-013`）、
- * 说明以**占位符模板**原样呈现（`FR-012`、`SC-014`）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ToolSelector from './ToolSelector.vue'
@@ -31,7 +25,6 @@ describe('ToolSelector', () => {
     const wrapper = mount(ToolSelector, { props: { tools: TOOLS, modelValue: [] } })
     expect(wrapper.text()).toContain('读取文件')
     expect(wrapper.text()).toContain('{示例路径}')
-    // 不出现任何具体用户目录名或会话标识（SC-014）
     expect(wrapper.text()).not.toContain('示例.csv')
   })
 
@@ -42,7 +35,6 @@ describe('ToolSelector', () => {
     const titles = wrapper.findAll('.checkbox-list__title').map((node) => node.text())
     expect(titles[0]).toContain('read_file')
     expect(titles[0]).not.toContain('读取文件')
-    // 中文名不丢：进说明行，中文搜索因此仍可用
     expect(wrapper.findAll('.checkbox-list__description')[0]?.text()).toContain('读取文件')
     expect(wrapper.text()).toContain('read_file')
   })

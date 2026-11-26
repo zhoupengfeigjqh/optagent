@@ -1,16 +1,3 @@
-/**
- * 集成测试：后台产出回写与列表（R11，契约 §10.3~§10.5）
- *
- * 覆盖：
- * - `POST /api/files/put`：正常回写 202 → 列表可见；**读签名不能用于写**（不变式 3 的端到端证据）；
- *   目录越权 / 非法文件名 → 400；验签失败 → 403；幂等重放（同名覆盖）；
- *   **提交时刻 `t`**（2026-10-09）：带 `t` → `created_at < finished_at`；缺省 / 非数字 / 未来时刻
- *   → 一律退化为回写时刻（两者相等），即 `created_at <= finished_at` 恒成立；
- * - 落盘即推**变更信号**（`producedEvents`），前端据此重拉列表；
- * - `GET /api/produced`：形状、倒序、有界返回、未落盘时为空。
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -23,7 +10,6 @@ import { agentScopedPath, mintPutUrl, mintSignedUrl } from '../../src/infra/file
 import { buildServer } from '../../src/server';
 
 const SECRET = 'test-secret-0123456789';
-/** 本用例的数字人（009：产出/列表/会话都按它隔离） */
 const AGENT = 'demo';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-produced-'));
 let app: FastifyInstance;
@@ -47,7 +33,6 @@ beforeAll(async () => {
     configPath,
   });
   app = await buildServer({ config });
-  // 009：产出列表/已读/正文都按"当前选中数字人"取作用域
   ctxOf().currentAgent.select('admin', AGENT);
 });
 
@@ -56,7 +41,6 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 铸一条回写 URL（默认归属 admin、落到**该数字人**的产出目录），`hints` 带归属提示参数 */
 function putUrl(
   opts: {
     userId?: string;
@@ -75,7 +59,6 @@ function putUrl(
   );
 }
 
-/** 运行期上下文（多处用例要直接操作存储） */
 function ctxOf(): AppContext {
   return (app as unknown as { ctx: AppContext }).ctx;
 }
@@ -102,9 +85,7 @@ interface ListedItem {
   relPath: string;
   created_at: string;
   finished_at: string;
-  /** 查询期由 `sid` 反查的数字人；缺省 = `sid` 缺失或会话已删除 */
   agent_name?: string;
-  /** 缺省 = 未读（契约 §10.5 ⑤） */
   read_at?: string;
 }
 
@@ -117,7 +98,6 @@ async function list(limit?: number): Promise<ListedItem[]> {
   return (res.json() as { items: ListedItem[] }).items;
 }
 
-/** 标记已读（载荷故意宽松：非法形状也要能发出去，供边界用例断言 400） */
 function markRead(jobIds: unknown) {
   return app.inject({
     method: 'POST',
@@ -126,7 +106,6 @@ function markRead(jobIds: unknown) {
   });
 }
 
-/** 取某条产出在列表里的当前形态（不存在则 `undefined`） */
 async function findItem(jobId: string): Promise<ListedItem | undefined> {
   return (await list()).find((i) => i.job_id === jobId);
 }
@@ -228,7 +207,6 @@ describe('POST /api/files/put —— 回写通道', () => {
   });
 
   it('读签名不能用于写（§10.6 不变式 3 的端到端证据）', async () => {
-    // 形状隔离：读方向三段 payload 的签名，放到写端点上验签必然失败
     const readUrl = mintSignedUrl('http://backend:3000', SECRET, 'admin', '临时空间/a.xlsx');
     const sig = new URL(readUrl).searchParams.get('sig')!;
     const exp = new URL(readUrl).searchParams.get('exp')!;
@@ -278,7 +256,6 @@ describe('POST /api/files/put —— 回写通道', () => {
 
 describe('GET /api/produced —— 产出列表', () => {
   it('未落盘时期望为空（本用例前置：目录不存在）', async () => {
-    // 目录可能已由前序用例创建；此处只断言"不抛错且形状正确"
     const items = await list();
     expect(Array.isArray(items)).toBe(true);
   });
@@ -297,7 +274,6 @@ describe('GET /api/produced —— 产出列表', () => {
 
 describe('GET /api/produced/events —— 变更信号（SSE）', () => {
   it('建连即推一次；落盘后按用户过滤再推；负载为空', async () => {
-    // SSE 是**不结束**的响应，`app.inject` 会一直等 → 这里起真实监听端口读帧
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address();
     const port = typeof address === 'object' && address !== null ? address.port : 0;
@@ -314,12 +290,10 @@ describe('GET /api/produced/events —— 变更信号（SSE）', () => {
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
 
-      // 第一帧：建连即推（客户端不必自己猜"是不是还没变化"）
       const first = decoder.decode((await reader.read()).value);
       expect(first).toContain('event: produced');
       expect(first).toContain('data: ');
 
-      // 别的用户的信号不推给本连接；本用户的信号推
       ctx.producedEvents.emitChanged('someone-else');
       ctx.producedEvents.emitChanged('admin');
       const second = decoder.decode((await reader.read()).value);
@@ -382,7 +356,6 @@ describe('POST /api/produced/read —— 已读状态（契约 §10.5 ⑤）', (
   });
 
   it('标量被 Fastify 的 ajv 强转为单元素数组（框架既有约定，非本端点特有）', async () => {
-    // `'j_r1'` → `['j_r1']`：等于标记一个不存在的 job_id → 按"忽略"处理，不报错也不误标
     const res = await markRead('j_r1');
 
     expect(res.statusCode).toBe(200);
@@ -436,10 +409,7 @@ describe('GET /api/produced/raw —— 读单条产出正文（契约 §10.5 ⑦
   });
 
   it('产出目录是**二级目录**——这正是它不能走 files 预览接口的原因', () => {
-    // files 系列接口的 `dir` 语义是**空间顶层目录**（数据准备的二级目录还须命中
     // `scenario.json` 清单），而产出落在 `临时空间/后台产出/`（契约 §10.4）。
-    // 这里钉住这条事实：将来若有人想"顺手复用" files 预览，先看这里。
-    // （不写成"请求 files 预览应当 400"的接口断言：那条路径要先选中数字人，
     //   否则请求在 `checkDir` 之前就会以 409 AGENT_NOT_SELECTED 结束，测不到目标分支。）
     expect(PRODUCED_DIR.startsWith('临时空间/')).toBe(true);
     expect(PRODUCED_DIR.split('/')).toHaveLength(2);
@@ -491,7 +461,6 @@ describe('GET /api/produced —— 数字人归属（查询期由 sid 反查，�
   it('009：touch 不再改写归属 → 反查结果恒为数据域所属数字人（回到旧语义会在这里失败）', async () => {
     const thread = ctxOf().threadStore.create('admin', AGENT);
     await post(`${putUrl({ hints: { sid: thread.threadId } })}&filename=j_agent1b.txt`);
-    // 归属在创建时写定，`touch` 只刷新 updated_at（会话不再跨数字人）
     ctxOf().threadStore.touch('admin', AGENT, thread.threadId);
 
     expect((await findItem('j_agent1b'))?.agent_name).toBe(AGENT);

@@ -1,11 +1,3 @@
-/**
- * 派生信息路由（`contracts/admin-api.md` §7.1、§7.2）。
- *
- * 规格关键实体「引用关系」明确：引用关系**不落库**、**不做常驻浏览视图**；
- * 呈现时机**仅限**破坏性操作的确认环节、部署前校验与全局异常项汇总。
- * 因此本节接口 MUST NOT 被任何常驻页面轮询调用——§7.1 只在管理员
- * **触发删除/关闭之后**才由界面调用。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -23,7 +15,6 @@ const TARGET_TYPES = ['builtin_tool', 'mcp_service', 'skill', 'agent', 'user'] a
 type TargetType = (typeof TARGET_TYPES)[number];
 
 export function registerReferenceRoutes(app: FastifyInstance, ctx: AppContext): void {
-  /** §7.1 引用关系（仅供破坏性操作的确认环节调用） */
   app.get('/api/admin/references', async (req) => {
     const query = (req.query ?? {}) as { target_type?: unknown; target_name?: unknown };
     const targetType = query.target_type;
@@ -46,7 +37,6 @@ export function registerReferenceRoutes(app: FastifyInstance, ctx: AppContext): 
     return { target_type: targetType, target_name: targetName, affected };
   });
 
-  /** §7.2 全局异常项汇总（落在部署功能区内；有界返回） */
   app.get('/api/admin/anomalies', async (req) => {
     const query = (req.query ?? {}) as { limit?: unknown };
     const limit = normalizeAnomalyLimit(query.limit);
@@ -76,14 +66,6 @@ function normalizeAnomalyLimit(raw: unknown): number {
   return Math.min(value, 200);
 }
 
-/**
- * 受影响的「用户 × 数字人」对。
- *
- * `builtin_tool` / `mcp_service` / `skill` / `agent` 是**跨用户**的对象：
- * 影响面要展开到全部引用了它的用户。而 `user` 本身就是用户维度，
- * 只应列出**该用户自己的**关联——展开到其他用户会把"别的用户也用了同一个
- * 数字人"误报成"删除这个用户会影响别人"。
- */
 function resolveAffectedPairs(
   targetType: TargetType,
   targetName: string,

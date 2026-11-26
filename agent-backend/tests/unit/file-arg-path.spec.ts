@@ -1,13 +1,3 @@
-/**
- * 单元测试：`file_args` 取值路径（2026-09-16）
- *
- * 真实对接场景：对方 MCP 服务的入参是**对象数组**
- * `items: [{ businessType, excelFileUrl }]`（`parse_excel_files`），
- * 要铸造的是数组元素里的 `excelFileUrl`。旧的"顶层参数名"表达不了这个位置，
- * 于是引入取值路径。本文件守住**语法边界**：
- * 合法写法必须解析成功；非法写法必须被拒——否则要么是个"配了不生效"的悬空声明，
- * 要么等到运行期才炸（两种都是这次要消灭的形态）。
- */
 import { describe, expect, it } from 'vitest';
 import { isValidFileArgPath, parseFileArgPath } from '../../src/domain/file-arg-path.js';
 

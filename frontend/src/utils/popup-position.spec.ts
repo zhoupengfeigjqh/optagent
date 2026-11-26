@@ -1,12 +1,3 @@
-/**
- * 单测：弹层坐标计算（纯几何）。
- *
- * `placePopup`（`@` 面板）：紧贴锚点**右侧**；右侧放不下翻**左侧**；两侧都放不下夹取进视口；
- * 垂直方向不出视口；测不到光标（`preferRight=false`）时退化为「贴锚点下方」。
- *
- * `placeMenu`（下拉菜单，2026-10-13）：优先**下方**；下方放不下翻**上方**；上下都放不下夹进视口；
- * 水平方向越界一律夹取 —— 底部工具栏（模型选择）因此向上弹，且左右永不溢出。
- */
 import { describe, expect, it } from 'vitest'
 
 import { placeMenu, placePopup, type PopupRect } from './popup-position'
@@ -14,7 +5,6 @@ import { placeMenu, placePopup, type PopupRect } from './popup-position'
 const VIEWPORT = { width: 1000, height: 600 }
 const SIZE = { width: 300, height: 200 }
 
-/** 造一个矩形：`left`/`top` 为左上角，`width`/`height` 缺省时是零宽的一行光标。 */
 function rect(left: number, top: number, width = 0, height = 20): PopupRect {
   return { left, top, right: left + width, bottom: top + height }
 }
@@ -78,7 +68,6 @@ describe('placeMenu —— 上下方位（2026-10-13）', () => {
   })
 
   it('底部工具栏：下方放不下 ⇒ 翻到**上方**，不盖住触发器', () => {
-    // 触发器贴底（600 高视口里的 y=552~580），200 高菜单下方只剩 20px
     const place = placeMenu(rect(120, 552, 200, 28), SIZE, VIEWPORT)
 
     expect(place.side).toBe('above')

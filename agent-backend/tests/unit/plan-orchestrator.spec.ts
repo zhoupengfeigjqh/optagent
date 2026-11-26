@@ -1,15 +1,3 @@
-/**
- * 单元测试：计划编排器（028 Phase 3~6，T505s）。
- *
- * 桩 LLM（`PlanLlm`）+ 桩工具，覆盖：
- * - 跳过口径：无工具 / 无聚焦 → 不规划；
- * - 首轮 `[]` → 交回主对话（不是失败）；
- * - 解析失败重试 2 次后放弃；
- * - 完成判定 C：同 turn 成功不出队，下一 turn 出队；
- * - 队列耗尽 → 滚动（`rollCount`），`[]` = 完成且不挂起工具；
- * - 失败重规划达 6 次 → 终止 + 软收尾（`suspend`）；
- * - 快照原地替换；`getFollowUpMessages` 有上限。
- */
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 
@@ -64,7 +52,6 @@ function logger(): PlanLogger & { events: Array<{ event?: unknown; reason?: unkn
   };
 }
 
-/** 一段合法的一步计划 */
 const ONE_STEP = JSON.stringify([
   {
     seqId: 1,
@@ -145,7 +132,6 @@ interface TurnOptions {
   text?: string;
 }
 
-/** 模拟一个 turn：先跑工具，再跑 turn 结束钩子 */
 async function runTurn(
   orchestrator: ReturnType<typeof build>['orchestrator'],
   options: TurnOptions = {},
@@ -287,7 +273,6 @@ describe('shouldStopAfterTurn', () => {
     });
     expect(stopped).toBe(false);
     expect(orchestrator.state().replanCount).toBe(1);
-    // seqId 跨批连续：首步占 1，重规划的两步是 2、3
     expect(orchestrator.state().current?.seqId).toBe(2);
   });
 });
@@ -322,10 +307,6 @@ describe('getFollowUpMessages', () => {
   });
 });
 
-/**
- * 写后失效（T502）：第 1 步写操作把依赖函数打脏，推进到第 2 步时 MUST 先重规划，
- * 而不是让模型照原计划跑一遍再撞闸门的「缺前置函数」。
- */
 describe('写后失效触发失败重规划', () => {
   const PLAN_TWO = JSON.stringify([
     {
@@ -349,7 +330,6 @@ describe('写后失效触发失败重规划', () => {
       return { toolName: name, command: false, relatedFunctions: [], ref: REF };
     }
     if (name === 'rawmcp__CreatePurchaseRecord') {
-      // 写操作依赖未到位数量函数：写后失效判定要看的就是它
       return { toolName: name, command: true, relatedFunctions: ['sumRawNotArrivalQty'], ref: REF };
     }
     return null;
@@ -369,7 +349,6 @@ describe('写后失效触发失败重规划', () => {
     expect(
       await runTurn(orchestrator, { calls: [{ id: 'c1', name: 'rawmcp__QueryInventory' }] }),
     ).toBe(false);
-    // 推进到第 2 步时发现依赖已过期 → 立即重规划并终止（第二批返回 []）
     expect(await runTurn(orchestrator)).toBe(true);
 
     expect(orchestrator.state().replanCount).toBe(1);
@@ -380,7 +359,6 @@ describe('写后失效触发失败重规划', () => {
         (item) => item.event === 'plan.replanned' && item.reason === 'stale_functions',
       ),
     ).toBe(true);
-    // 没有把它当作失败步骤
     expect(log.events.some((item) => item.event === 'plan.step.failed')).toBe(false);
 
     const secondPrompt = (plan.mock.calls[1]?.[0] as { messages: Array<{ content: string }> })
@@ -411,11 +389,6 @@ describe('写后失效触发失败重规划', () => {
   });
 });
 
-/**
- * 计划留档（2026-11-26）：只在「真的产出过步骤」的轮次回调一次。
- *
- * 这里只验编排器交给上层的过程事实；落盘与有界由 `plan-store.spec.ts` 负责。
- */
 describe('留档回调 record', () => {
   function collector(): { records: PlanRunRecord[]; record: (item: PlanRunRecord) => void } {
     const records: PlanRunRecord[] = [];

@@ -1,21 +1,9 @@
-/**
- * 定时任务展示格式化（015，纯函数）
- *
- * 只做"数据 → 中文文案"的映射，不含任何状态与请求。时间格式化**复用**
- * `utils/format.ts` 的 `formatTimestamp`（全站唯一实现，宪章原则二）——
- * 本文件只在它之上补"秒级 + 占位符 `—`"这一层口径。
- *
- * 为什么把文案集中在这里：任务表格、运行记录弹窗、状态圆点三处都要显示同一批文案，
- * 各写一份必然出现"表格说已跳过、弹窗说跳过"这种同义词漂移。
- */
 
 import type { ScheduleRunReason, ScheduleRunResult, ScheduledTask } from '../api/types'
 import { formatTimestamp } from './format'
 
-/** 表格占位符：固定格子不留白（与 `formatBytes` 的 `'—'` 口径一致） */
 const PLACEHOLDER = '—'
 
-/** 时刻 → 本地 `YYYY-MM-DD HH:mm:ss`；`null` / 非法 → `—`。 */
 export function formatDateTime(iso: string | null | undefined): string {
   return formatTimestamp(iso, { withSeconds: true, fallback: PLACEHOLDER })
 }
@@ -35,14 +23,12 @@ export function formatInterval(seconds: number): string {
   return `每 ${value} 秒`
 }
 
-/** 执行次数 → `已执行 X / Y 次`。 */
 export function formatCount(executed: number, max: number): string {
   const done = Number.isFinite(executed) && executed > 0 ? Math.floor(executed) : 0
   const total = Number.isFinite(max) && max > 0 ? Math.floor(max) : 0
   return `已执行 ${done} / ${total} 次`
 }
 
-/** 执行结果 → `成功 / 失败 / 已跳过`。 */
 export function formatRunResult(result: ScheduleRunResult): string {
   switch (result) {
     case 'success':
@@ -56,7 +42,6 @@ export function formatRunResult(result: ScheduleRunResult): string {
   }
 }
 
-/** 跳过/失败原因 → 中文短语；`null` → 空串（调用方据此不渲染原因列内容）。 */
 export function formatRunReason(reason: ScheduleRunReason | null): string {
   switch (reason) {
     case 'previous_run_active':
@@ -72,7 +57,6 @@ export function formatRunReason(reason: ScheduleRunReason | null): string {
   }
 }
 
-/** 复用模式的重建标注；非重建 → 空串（不占位、不留白）。 */
 export function formatRebuilt(rebuilt: boolean): string {
   return rebuilt ? '重建会话' : ''
 }
@@ -91,7 +75,6 @@ export function formatTaskStatus(
   return task.status === 'running' ? '执行中' : '未开始'
 }
 
-/** 下次触发时刻 → `下次 YYYY-MM-DD HH:mm:ss`；无待执行时刻 → `—`。 */
 export function formatNextRun(task: Pick<ScheduledTask, 'next_run_at'>): string {
   if (!task.next_run_at) return PLACEHOLDER
   return `下次 ${formatDateTime(task.next_run_at)}`

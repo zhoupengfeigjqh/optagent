@@ -1,6 +1,3 @@
-/**
- * 单元测试：单会话登记（`FR-014`）
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -1,13 +1,3 @@
-/**
- * 单元测试：计划归一化（028 FR-007/FR-007a/FR-008/FR-009/FR-010）。
- *
- * 守住的口径：
- * - `coreAction` 存**原样完整工具名**：派生键（小写）命中后必须还原回原样名，
- *   **MUST NOT** 把归一键写进 `coreAction`（否则过滤工具集全部失配）；
- * - 0 候选 / 多候选都返回 C0 失败，不猜；
- * - `type` 三分类与闸门一致；
- * - `dependTools` 四条规则；`coreAction` 自身不入集合；结果去重。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

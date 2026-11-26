@@ -1,10 +1,3 @@
-/**
- * 单元测试：SKILL 展示名（2026-11-04）
- *
- * 守住两条口径：
- * 1. `display_name` 非空即用它，缺失/空串/纯空白回落 `name`（旧索引与旧夹具也要能渲染）；
- * 2. 展示名与身份名不同才需要补小字 `name`——相同则不渲染重复行。
- */
 import { describe, expect, it } from 'vitest'
 import { skillDisplayName, skillHasAlias } from './skill-name'
 

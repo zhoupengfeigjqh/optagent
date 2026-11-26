@@ -17,7 +17,6 @@ const props = defineProps<{
 
 const label = computed(() => formatTaskStatus(props.task))
 
-/** 圆点色调：执行中绿、已结束灰、系统停用红、未开始灰 */
 const tone = computed(() => {
   if (props.task.disabled_reason === 'agent_unavailable') return 'error'
   if (props.task.terminated) return 'muted'

@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * 历史会话侧栏（T061，FR-039~FR-043）
- *
- * 10 / 100 条是**纯前端切片**：接口一次拉全量（请求不含 `limit`/`offset`，V-09），
- * 本组件按 `limit` 截断展示，并只在"还有更多"时给出「更多」入口。
- * 空列表仍可用「新建会话」（FR-043）。
- */
 import { computed } from 'vue'
 
 import type { Conversation } from '../../api/types'
@@ -16,13 +9,9 @@ import HistoryItem from './HistoryItem.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 全部会话（按 `updated_at` 倒序），由本组件按 `limit` 切片 */
     threads?: Conversation[]
-    /** 当前选中会话 */
     activeId?: string | null
-    /** 当前切片条数 */
     limit?: 10 | 100
-    /** 加载中 */
     loading?: boolean
     /** 有进行中会话时禁止切换（列表项禁用） */
     busy?: boolean
@@ -36,13 +25,10 @@ const emit = defineEmits<{
   create: []
   /** 提交新标题（请求与回滚由 `views/WorkbenchView.vue` 交给 `useThreads.rename`） */
   rename: [payload: { threadId: string; title: string }]
-  /** 请求导出某会话为 Markdown（拉取与落盘由 `views/WorkbenchView.vue` 编排） */
   export: [threadId: string]
-  /** 请求删除某会话（二次确认与相邻会话切换由 `views/WorkbenchView.vue` 编排） */
   remove: [threadId: string]
 }>()
 
-/** 纯前端切片（V-09） */
 const shown = computed(() => props.threads.slice(0, props.limit))
 const hasMore = computed(() => props.threads.length > props.limit)
 </script>

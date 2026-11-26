@@ -1,9 +1,3 @@
-/**
- * 单元测试：规划调用适配（028 FR-004）。
- *
- * 守住三条口径：非流式聚合（把增量拼成完整文本）、`tools: []` + `thinking: false`、
- * 错误事件转成异常交给编排器重试。
- */
 import { describe, expect, it, vi } from 'vitest';
 
 import { PLAN_TIMEOUT_MS } from '../../src/domain/plan/types.js';
@@ -76,15 +70,6 @@ describe('createPlanLlm', () => {
   });
 });
 
-/**
- * 硬超时（NFR-001 / SC-005 的「20 秒是上限」那一半）。
- *
- * P90 延迟需要真机样本（T803 登记为上线后观测），但「到点必须返回、不许无限等」
- * 是纯逻辑，可以在这里钉死：否则超时预算与延迟指标会自相矛盾。
- *
- * 2026-11-26：上限由 5s 提到 20s（规划提示词含全量本体 + 全工具），并新增
- * `Promise.race`——`abort()` 只是发信号，provider 不听也不会把本轮挂死。
- */
 describe('callPlanWithTimeout', () => {
   it('到点即中止本次调用（编排器据此放弃，不重试）', async () => {
     vi.useFakeTimers();
@@ -113,7 +98,6 @@ describe('callPlanWithTimeout', () => {
   it('provider 完全不响应 abort 时，也一定在超时点返回（不许挂死会话）', async () => {
     vi.useFakeTimers();
     try {
-      // 既不 settle 也不看 signal：模拟"上游卡死/半开连接"
       const plan = vi.fn(() => new Promise<string>(() => undefined));
 
       const pending = callPlanWithTimeout(

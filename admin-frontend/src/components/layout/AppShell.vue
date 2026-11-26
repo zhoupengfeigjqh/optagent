@@ -10,9 +10,7 @@ import type { RouteName } from '../../router'
 
 defineProps<{
   current: RouteName
-  /** 当前功能区名称（用于文档标题与页头） */
   areaLabel: string
-  /** 需要播报的全局状态文本（空串表示无） */
   announcement?: string
 }>()
 
@@ -34,7 +32,6 @@ const emit = defineEmits<{
       <slot />
     </main>
 
-    <!-- 全局播报区：读屏可播报部署结果、保存结果等 -->
     <p class="app-shell__live" role="status" aria-live="polite">{{ announcement }}</p>
   </div>
 </template>

@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * MCP 服务卡片列表（`FR-043`、`FR-006`；2026-09-27 改版）。
- *
- * 卡片含**名称、用途描述、传输方式与连接地址**——MCP 服务由管理员在平台内
- * 人工登记，故不再有容器运行态（"运行中/已停止/异常"）。「新建 MCP 服务」按钮
- * 与「数字人设计」区的「新建数字人」同风格：卡片区上方右对齐的工具栏。
- */
 import type { ErrorInfo, McpServiceListItem, McpStatsItem } from '../../api/types'
 import EntityCardList from '../common/EntityCardList.vue'
 
@@ -32,9 +25,7 @@ function callsOf(name: string): string {
   return item ? String(item.calls_total) : '0'
 }
 
-/** 传输方式展示名：内部值 `http` 对应 MCP 的 Streamable HTTP */
 function transportLabel(transport: string): string {
-  // 内部规范值是 `http`；若数据里直接就是生态叫法（`streamable-http`）也照原样显示
   return transport === 'http' ? 'streamable-http' : transport
 }
 </script>
@@ -120,7 +111,6 @@ function transportLabel(transport: string): string {
   overflow-wrap: anywhere;
 }
 
-/* 「需请求头」徽标（2026-10-08）：只标"配了"，不展示任何值 */
 .card__badge {
   margin-left: var(--space-2);
   padding: 0 var(--space-2);

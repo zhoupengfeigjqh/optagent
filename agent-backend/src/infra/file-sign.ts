@@ -1,35 +1,11 @@
-/**
- * 签名直链（MCP 远程/跨容器取文件的通用设施）。
- *
- * 背景：MCP 服务（如 OCR）拿不到 backend 的磁盘，LLM 只传相对路径；
- * backend 校验后铸造一次性签名 URL 发给 MCP 服务，服务凭 URL 回源下载。
- *
- * 设计：
- * - HMAC-SHA256 绑定 (userId, relPath, exp)：任一字段被篡改验签即失败，URL 即凭证
- * - 无状态验签（不查库）；时效默认 24h（远程服务可能跨时段回源）
- * - 路径安全由 FileAccess 在铸造/下载两侧各把一关
- * - **009 归属**：`relPath` 的形状是 `{数字人}/{数字人数据域内相对路径}`——
- *   数字人段**在签名内**，故"跨数字人读取"在签名层即不可达（篡改数字人段 ⇒ 验签失败）。
- *   读方向 `p` 与写方向 `d` 共用这一形状（`agentScopedPath` / `splitAgentScopedPath`）。
- */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
-/**
- * 组装签名内的路径：`{数字人}/{数字人数据域内相对路径}`（posix 分隔）。
- *
- * 数字人名称由平台保证合法（不含路径分隔符），此处只做拼接、不归一化。
- */
 export function agentScopedPath(agentName: string, relPath: string): string {
   return `${agentName}/${relPath}`;
 }
 
-/**
- * 解析签名内的路径；形状非法（缺数字人段 / 空相对路径 / 反斜杠 / `.`/`..`）→ `undefined`。
- *
- * 只做**形状**解析：数字人段的可信性由验签保证，路径穿越仍由 `FileAccess.resolveSafe` 兜住。
- */
 export function splitAgentScopedPath(
   value: string,
 ): { agentName: string; relPath: string } | undefined {
@@ -52,7 +28,6 @@ export function signRef(secret: string, userId: string, relPath: string, exp: nu
     .digest('hex');
 }
 
-/** 验签 + 时效校验（now 可注入便于测试） */
 export function verifyRef(
   secret: string,
   userId: string,
@@ -68,7 +43,6 @@ export function verifyRef(
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-/** 铸造签名直链：{baseUrl}/api/files/raw?u=&p=&exp=&sig=（`p` 见 `agentScopedPath`） */
 export function mintSignedUrl(
   baseUrl: string,
   secret: string,
@@ -83,22 +57,7 @@ export function mintSignedUrl(
   return `${baseUrl.replace(/\/+$/, '')}/api/files/raw?${q.toString()}`;
 }
 
-/* ------------------------------------------------------------------ *
- * 写方向（R11：MCP 异步工具的后台产出回写）
- *
- * 与读方向**共用密钥与验签设施**，但 payload 形状刻意不同：
- * 读三段 `{userId}\n{relPath}\n{exp}`（**保持不变**，存量签名 URL 全部继续有效），
- * 写四段 `put\n{userId}\n{dir}\n{exp}`。段数不同 ⇒ 两种 payload 不可能碰撞 ⇒
- * 一张"读某文件"的签名**不能被用于写**（否则权限被放大）。
- * ------------------------------------------------------------------ */
 
-/**
- * 写方向默认时效：**12h**（须 ≥ 任务最长时长，算法任务可能数十分钟，见契约 §10.3）。
- *
- * 与读方向（24h）刻意不同：回写地址由运行环境**每次工具调用现铸**，服务只需在任务
- * 完成后尽快回写；12h 足够覆盖隔夜长任务，又不至于让一张"能往用户空间写文件"的
- * 票据长期有效。
- */
 export const DEFAULT_PUT_TTL_MS = 12 * 60 * 60 * 1000;
 
 function putPayloadOf(userId: string, dir: string, exp: number): string {
@@ -111,7 +70,6 @@ export function signPutRef(secret: string, userId: string, dir: string, exp: num
     .digest('hex');
 }
 
-/** 验签 + 时效校验（now 可注入便于测试） */
 export function verifyPutRef(
   secret: string,
   userId: string,
@@ -127,30 +85,12 @@ export function verifyPutRef(
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-/**
- * 归属提示参数（**不参与验签**，见契约 §10.3）。
- *
- * 决定"写到哪个用户的哪个目录"的字段（`u`/`d`/`exp`）全在签名内；
- * 只决定"这条产出怎么归档"的字段在签名外——与 `filename` 同一处置：
- * 篡改它们只影响元数据与文件名前缀，**不构成越权**。
- */
 export interface PutUrlHints {
-  /** 发起该任务的会话（= thread_id）：决定落盘文件名的 `{prefix}`（缺失回退 uid） */
   sid?: string;
-  /** 关联那次"已受理"的工具调用（前端挂载点） */
   callId?: string;
-  /** 运行环境侧工具全名（含 `{server}__` 前缀） */
   tool?: string;
 }
 
-/**
- * 铸造写方向直链：{baseUrl}/api/files/put?u=&d=&exp=&sig=&t=[&sid=&call_id=&tool=]
- *
- * `t` = **提交时刻**（epoch ms，= 铸造时刻）——回写地址是"每次工具调用现铸"的，
- * 铸造这一刻正是任务的提交时刻。服务**只需原样回传**（与 `sid`/`call_id`/`tool` 同一处置），
- * 回写端点据此落 sidecar 的 `created_at`（契约 §10.4）；服务没回传 / 值不可信时退化为回写时刻。
- * 与 `exp` 同单位（epoch ms），同属**不参与验签**的提示参数。
- */
 export function mintPutUrl(
   baseUrl: string,
   secret: string,
@@ -162,7 +102,6 @@ export function mintPutUrl(
 ): string {
   const exp = now + ttlMs;
   const sig = signPutRef(secret, userId, dir, exp);
-  // `t` 恒写入（不放进 `hints`）：任何一条产出都该有"提交时刻"，铸造方不必逐处记得传
   const params: Record<string, string> = {
     u: userId,
     d: dir,

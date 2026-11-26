@@ -1,18 +1,4 @@
-/**
- * 交互确认入参的服务端终验（HITL）。
- *
- * 前端表单校验只是体验，这里才是安全边界：用户提交的 args 在注入真实工具调用前
- * MUST 按工具的 inputSchema（JSON Schema 子集）重新校验，防绕过/防类型混淆。
- *
- * 刻意实现**子集**而非引入 ajv：MCP 工具 schema 用到的特性有限，
- * 支持：type(object/string/integer/number/boolean/array)、properties、required、
- * enum、minLength/maxLength、minimum/maximum、items、additionalProperties:false。
- * 不支持的校验关键字（format/pattern/allOf 等）**静默忽略**——宁可少拦不可误拦。
- *
- * 返回中文错误信息列表（空数组 = 通过）；多错误全量收集，前端可逐字段提示。
- */
 
-/** JSON Schema 里我们关心的部分（只读） */
 interface SchemaLike {
   type?: unknown;
   properties?: unknown;
@@ -26,7 +12,6 @@ interface SchemaLike {
   additionalProperties?: unknown;
 }
 
-/** 按 schema 校验 args；返回错误信息列表（空 = 通过）。 */
 export function validateInteractionArgs(schema: unknown, args: unknown): string[] {
   if (typeof schema !== 'object' || schema === null) return [];
   const errors: string[] = [];
@@ -35,7 +20,6 @@ export function validateInteractionArgs(schema: unknown, args: unknown): string[
 }
 
 function validateNode(schema: SchemaLike, value: unknown, path: string, errors: string[]): void {
-  // enum 优先：值的类型由枚举成员决定，type 可能缺席
   if (Array.isArray(schema.enum)) {
     if (!schema.enum.some((e) => deepEqual(e, value))) {
       errors.push(
@@ -85,7 +69,6 @@ function validateNode(schema: SchemaLike, value: unknown, path: string, errors: 
       }
       return;
     default:
-      // 未声明 type：不校验类型（schema 子集之外的形态直接放行）
       return;
   }
 }
@@ -129,7 +112,6 @@ function checkNumberRange(schema: SchemaLike, value: number, path: string, error
   }
 }
 
-/** 路径 → 展示名：根为「入参」，其余为「参数「a.b[0]」」 */
 function labelOf(path: string): string {
   return path === '' ? '入参' : `参数「${path}」`;
 }

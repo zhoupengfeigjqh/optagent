@@ -1,9 +1,3 @@
-/**
- * 单元测试：SKILL 来源标记与只读判据（2026-10-03，`FR-062`）
- *
- * 守住：市场来源只读（`ADM_SKILL_READ_ONLY` + 可读替代路径）、非市场来源放行、
- * 以及"缺省/脏值不误判为只读"（缺省 = 外部安装，可编辑）。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';

@@ -1,13 +1,3 @@
-/**
- * 单元测试：权限闸门包装器（infra，020）。
- *
- * 守住的语义：
- * - 放行 / 非本体：真实 `execute` 收到**同一** `(toolCallId, params)`，结果原样透传；
- * - 拒绝：真实 `execute` **零调用**，返回带失败标记的结果（卡片标红的唯一依据）；
- * - 拒绝**先于**人工确认：被拒的调用不会触发 `InteractionSink.request`（`FR-002`）；
- * - 拒绝记录字段齐全，且**不含**授权名单（只记形态与数量）；
- * - 包装保持 name/label/description/parameters/executionMode 不变（模型侧无感）。
- */
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -164,7 +154,6 @@ describe('wrapToolWithScopeGuard', () => {
       scope_size: 1,
     });
     expect(message).toBe(DENY.message);
-    // 不含授权名单（本用例的 scope 只有 1 个元素，且不在日志里出现）
     expect(JSON.stringify(fields)).not.toContain('zpf');
   });
 
@@ -235,14 +224,14 @@ describe('拒绝后挂起本轮（2026-11-09）', () => {
       suspension,
     );
 
-    await tools[0]!.execute('c1', {}); // 首次拒绝 → 挂起
-    await tools[1]!.execute('c2', {}); // attempts=1 → 软拒，不中止
+    await tools[0]!.execute('c1', {});
+    await tools[1]!.execute('c2', {});
     expect(onExhausted).not.toHaveBeenCalled();
 
     await tools[2]!.execute('c3', {}); // attempts=2 → 兜底中止
     expect(onExhausted).toHaveBeenCalledTimes(1);
 
-    await tools[2]!.execute('c4', {}); // attempts=3 → 出口已用过，不再重复触发
+    await tools[2]!.execute('c4', {});
     expect(onExhausted).toHaveBeenCalledTimes(1);
   });
 
@@ -254,7 +243,6 @@ describe('拒绝后挂起本轮（2026-11-09）', () => {
     await round1[0]!.execute('c1', {});
     const result = await round2[0]!.execute('c2', {});
 
-    // 新一轮仍走判定（而不是"已挂起"的短文案）
     expect(guard.check).toHaveBeenCalledTimes(2);
     expect(result.content[1]).toEqual({ type: 'text', text: SCOPE_TERMINAL_NOTICE });
   });

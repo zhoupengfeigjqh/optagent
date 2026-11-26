@@ -1,14 +1,3 @@
-/**
- * 集成测试（进程内，021 / 2026-11-24）：**command 写后失效**与行为类型收敛。
- *
- * 这一层证明的是包装器 + 闸门 + 记录三者合成后的真实行为：
- * 1. 上一次 command 用过的函数结果，不能给下一个 command 复用——必须重算；
- * 2. `query` 行为不判规则、不失效（即使本体里给它写了前置规则）；
- * 3. command 无前置规则时，执行后**仍然**失效（它改了数据）；
- * 4. `op_type` 非法 / 同名冲突 / 未声明却被规则绑定 → fatal：零执行 + 立即收尾。
- *
- * 装配口径与生产一致：`ruleGateTools` 在最内层，020 权限闸门在外层（本用例不涉及权限）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +18,6 @@ function writeOntology(agentDir: string, ontology: string, yaml: string): void {
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), yaml, 'utf8');
 }
 
-/** 一条绑定 `behavior` 的前置规则（条件恒为 `checkSupplierExistence.pass == true`） */
 function ruleLines(name: string, behavior: string): string[] {
   return [
     `  - name: ${name}`,
@@ -59,12 +47,9 @@ function fixture(): string {
     // 无前置规则：执行后仍必须失效
     '  - name: ClosePurchaseRecord',
     '    op_type: command',
-    // 挂了规则也会被忽略（query 没有前置规则）
     '  - name: QueryPurchaseRecords',
     '    op_type: query',
-    // op_type 缺失 → 非法行为（fatal）
     '  - name: BrokenBehavior',
-    // 与第二个本体的 query 冲突 → 非法行为（fatal）
     '  - name: SyncInventory',
     '    op_type: command',
     'functions:',
@@ -173,17 +158,15 @@ describe('command 写后失效', () => {
   it('上一个 command 用过的函数不能给下一个 command 复用：先暂停，重算后通过', async () => {
     const h = harness();
 
-    expect(await h.call('erp__checkSupplierExistence')).toBe('ok');  // 世代 0
-    expect(await h.call('erp__CreatePurchaseRecord')).toBe('ok');     // 用世代 0 → 世代 1
+    expect(await h.call('erp__checkSupplierExistence')).toBe('ok');
+    expect(await h.call('erp__CreatePurchaseRecord')).toBe('ok');
     expect(h.record.epoch).toBe(1);
     expect(h.record.has('checkSupplierExistence')).toBe(false);
     expect(h.record.hasEver('checkSupplierExistence')).toBe(true);
 
-    // 不重算直接撤销：结果已过期 → 暂停，行为零执行
     expect(await h.call('erp__CancelPurchaseRecord')).toBe('error');
     expect(h.impl.cancel).toHaveBeenCalledTimes(0);
 
-    // 重算后通过
     expect(await h.call('erp__checkSupplierExistence')).toBe('ok');
     expect(await h.call('erp__CancelPurchaseRecord')).toBe('ok');
     expect(h.impl.cancel).toHaveBeenCalledTimes(1);
@@ -194,7 +177,7 @@ describe('command 写后失效', () => {
     const h = harness();
 
     expect(await h.call('erp__checkSupplierExistence')).toBe('ok');
-    expect(await h.call('erp__ClosePurchaseRecord')).toBe('ok');      // 无规则，但仍是写操作
+    expect(await h.call('erp__ClosePurchaseRecord')).toBe('ok');
     expect(h.record.epoch).toBe(1);
     expect(h.record.has('checkSupplierExistence')).toBe(false);
   });
@@ -205,8 +188,7 @@ describe('query 不受影响', () => {
     const h = harness();
 
     expect(await h.call('erp__checkSupplierExistence')).toBe('ok');
-    expect(await h.call('erp__CreatePurchaseRecord')).toBe('ok');     // 世代 1
-    // 记录里的 check 已过期；若 query 也按世代过滤，这里会被暂停
+    expect(await h.call('erp__CreatePurchaseRecord')).toBe('ok');
     expect(await h.call('erp__QueryPurchaseRecords')).toBe('ok');
     expect(h.impl.query).toHaveBeenCalledTimes(1);
     expect(h.record.epoch).toBe(1);

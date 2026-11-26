@@ -1,14 +1,3 @@
-/**
- * 单元测试：部署状态（US2）
- *
- * 重点守住两件事：
- * 1. `SC-020`：部署失败（409）时 MUST 把 `details.errors` **一次性列全**，
- *    而不是只留第一条；
- * 2. **空选择一律拒绝**（2026-09-16）：部署对象在用户卡片上勾选后传进来，
- *    空数组若要落回服务端"缺省 = 全部用户"，就会变成误部署全平台。
- *
- * **2026-09-27**：乐观锁版本改由**部署清单端点**提供（不再有 `/platform/settings`）。
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDeploy } from './useDeploy'
 
@@ -81,12 +70,10 @@ describe('useDeploy', () => {
 
   it('deploy：成功时写入结果、清空校验态并刷新 revision', async () => {
     deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h1' })
-    // 部署后重新读到的版本
     fetchManifest.mockResolvedValue({ items: [], total: 0, revision: 8 })
 
     const d = useDeploy()
     expect(await d.deploy(['admin'])).toBe(true)
-    // 版本未加载 → 先取到 revision 再提交（不是用陈旧的 0）
     expect(fetchManifest).toHaveBeenCalled()
     expect(deployApi).toHaveBeenCalledWith(['admin'], 8)
     expect(d.result.value?.history_id).toBe('h1')
@@ -105,16 +92,13 @@ describe('useDeploy', () => {
   })
 
   it('2026-11-17：部署前总是取最新 revision（别处改过配置不再被陈旧版本卡住）', async () => {
-    // 先加载到旧版本 5
     fetchManifest.mockResolvedValueOnce({ items: [], total: 0, revision: 5 })
     const d = useDeploy()
     await d.loadRevision()
-    // 期间别处改了配置：清单端点现在返回 6
     fetchManifest.mockResolvedValue({ items: [], total: 0, revision: 6 })
     deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h' })
 
     expect(await d.deploy(['admin'])).toBe(true)
-    // 部署用的是最新 6，而非本页缓存的 5
     expect(deployApi).toHaveBeenCalledWith(['admin'], 6)
   })
 
@@ -156,8 +140,8 @@ describe('useDeploy', () => {
 
   it('2026-10-20：部署失败后**刷新版本**，同页重试不会再用陈旧 revision', async () => {
     fetchManifest
-      .mockResolvedValueOnce({ items: [], total: 0, revision: 7 }) // deploy 前读取
-      .mockResolvedValueOnce({ items: [], total: 0, revision: 9 }) // 失败后静默刷新
+      .mockResolvedValueOnce({ items: [], total: 0, revision: 7 })
+      .mockResolvedValueOnce({ items: [], total: 0, revision: 9 })
     deployApi.mockRejectedValue({ code: 'ADM_CONFIG_REVISION_CONFLICT', message: 'x' })
     const d = useDeploy()
 

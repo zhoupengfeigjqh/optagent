@@ -120,7 +120,6 @@ describe('028 观测事件（T703s）', () => {
       }
     };
 
-    // ① 跳过：无工具 / 无聚焦
     const noTools = build([ONE_STEP], { tools: [] });
     expect(await noTools.orchestrator.begin()).toBe(false);
     collect(noTools.log.events);
@@ -129,33 +128,27 @@ describe('028 观测事件（T703s）', () => {
     expect(await noFocus.orchestrator.begin()).toBe(false);
     collect(noFocus.log.events);
 
-    // ② 解析失败 → rejected → abandoned
     const bad = build(['不是 JSON'], {});
     expect(await bad.orchestrator.begin()).toBe(false);
     collect(bad.log.events);
 
-    // ③ 正常链路：requested → parsed → started → step.started → out_of_focus
-    //    → step.done → finished(completed)
     const ok = build([ONE_STEP, '[]'], { focusPrompt: '［聚焦结果］其它行为' });
     expect(await ok.orchestrator.begin()).toBe(true);
     await turn(ok.orchestrator, { id: 'c1', name: 'rawmcp__QueryInventory' });
     await turn(ok.orchestrator);
     collect(ok.log.events);
 
-    // ④ 步骤失败 → step.failed → replanned(kind=failure)
     const denied = build([COMMAND_STEP, '[]']);
     expect(await denied.orchestrator.begin()).toBe(true);
     await turn(denied.orchestrator, { id: 'c1', name: 'rawmcp__CreatePurchaseRecord', code: 'ONTOLOGY_RULE_DENIED' });
     collect(denied.log.events);
 
-    // ⑤ 卡死 → step.stalled（再加一次失败重规划）
     const stalled = build([ONE_STEP, '[]']);
     expect(await stalled.orchestrator.begin()).toBe(true);
     await turn(stalled.orchestrator, undefined, '我先想想');
     await turn(stalled.orchestrator, undefined, '我再想想');
     collect(stalled.log.events);
 
-    // ⑥ 滚动：replanned(kind=roll)
     const roll = build([ONE_STEP, ONE_STEP, '[]']);
     expect(await roll.orchestrator.begin()).toBe(true);
     await turn(roll.orchestrator, { id: 'c1', name: 'rawmcp__QueryInventory' });
@@ -193,9 +186,7 @@ describe('028 观测事件（T703s）', () => {
     await turn(run.orchestrator);
 
     const started = run.log.events.filter((fields) => fields.event === 'plan.step.started');
-    // 批首步由 enqueue 发、同批推进由 shouldStopAfterTurn 补发：两步各一条
     expect(started.map((fields) => fields.seq_id)).toEqual([1, 2]);
-    // 本轮共 3 个工具，每步只留「本步 coreAction + 内置」
     expect(started.map((fields) => fields.visible_tool_count)).toEqual([2, 2]);
   });
 
@@ -207,7 +198,6 @@ describe('028 观测事件（T703s）', () => {
     const serialized = JSON.stringify(run.log.events);
     expect(serialized).not.toContain(USER_INPUT);
     expect(serialized).not.toContain('工具输出正文');
-    // 只记标识与计数
     expect(run.log.events.some((fields) => fields.event === 'plan.step.failed')).toBe(true);
   });
 

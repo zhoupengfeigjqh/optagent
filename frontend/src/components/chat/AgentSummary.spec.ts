@@ -22,8 +22,6 @@ describe('AgentSummary', () => {
     expect(wrapper.text()).toContain('请选择数字人')
     const hint = wrapper.get('.agent-summary__hint')
     expect(hint.text()).toBe('请选择数字人')
-    // 红色由 `.agent-summary__hint` 的 scoped 样式承载（jsdom 不应用 scoped 样式，
-    // 故此处只断言类钩子存在；视觉验证见 specs/014 的 quickstart）
     expect(wrapper.find('.agent-summary__name').exists()).toBe(false)
   })
 

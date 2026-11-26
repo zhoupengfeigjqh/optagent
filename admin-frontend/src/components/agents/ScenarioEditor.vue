@@ -1,17 +1,4 @@
 <script setup lang="ts">
-/**
- * 文件空间场景编辑器（`FR-020`）。
- *
- * 场景＝**数字人级**（同一用户的不同数字人可有各自场景，看到不同文件空间），
- * 而三个空间下的**实际文件数据**仍是该用户共享的一份。
- *
- * 校验（前端即时提示 + 后端权威判定）：场景名非空；目录名拒绝空值 / 重复 /
- * 含路径分隔符 / `..`。
- *
- * 二级目录的**字段约束**（`data_prep_fields`）：新增目录后弹出确认窗口，
- * 也可经目录行的「字段(n)」入口再次编辑。配置只声明结构，校验在上传时由
- * 运行环境按上传表表头执行（本期未实现）。
- */
 import { computed, ref } from 'vue'
 import type { ScenarioField } from '../../api/types'
 import { DEFAULT_DATA_PREP_UPLOADS, PREDEFINED_DATA_PREP_DIRS } from '../../constants/agent-design'
@@ -21,9 +8,7 @@ import ScenarioUploadTypesDialog from './ScenarioUploadTypesDialog.vue'
 export interface ScenarioValue {
   scenario: string
   data_prep_dirs: string[]
-  /** 目录 → 字段约束；无约束的目录不出现 */
   data_prep_fields: Record<string, ScenarioField[]>
-  /** 目录 → 可上传类型（2026-10-13 新增）；未配置的目录不出现 */
   data_prep_uploads?: Record<string, string[]>
 }
 
@@ -42,22 +27,18 @@ const fieldDialogOpen = ref(false)
 const fieldDialogDir = ref('')
 const editingFields = ref<ScenarioField[]>([])
 
-/** 可上传类型窗口：同一口径，目录名单独持有 */
 const uploadDialogOpen = ref(false)
 const uploadDialogDir = ref('')
 const editingUploads = ref<string[]>([])
 
-/** 该目录当前的字段约束（缺失即"无约束"） */
 function fieldsOf(dir: string): ScenarioField[] {
   return props.modelValue.data_prep_fields?.[dir] ?? []
 }
 
-/** 该目录当前的文件类型配置（缺失即"未配置"，生效为平台默认） */
 function uploadsOf(dir: string): string[] {
   return props.modelValue.data_prep_uploads?.[dir] ?? []
 }
 
-/** 入口摘要计数：未配置时显示默认项数（`.csv` + `.xlsx`），与生效结果一致 */
 function uploadCountOf(dir: string): number {
   const configured = uploadsOf(dir)
   return configured.length > 0 ? configured.length : DEFAULT_DATA_PREP_UPLOADS.length
@@ -92,12 +73,6 @@ function isPredefined(dir: string): boolean {
   return (PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(dir)
 }
 
-/**
- * 已屏蔽的预定义目录 = 预定义全集 − 当前清单。
- *
- * 屏蔽状态**不落字段**：清单里有没有它就是唯一事实，因此不需要后端新增键，
- * 也不会与"清单"出现两份真相。
- */
 const blockedDirs = computed(() =>
   (PREDEFINED_DATA_PREP_DIRS as readonly string[]).filter(
     (dir) => !props.modelValue.data_prep_dirs.includes(dir),
@@ -110,11 +85,6 @@ function openFieldDialog(dir: string): void {
   fieldDialogOpen.value = true
 }
 
-/**
- * 保存某目录的字段约束。
- *
- * 空列表 ⇒ **移除该目录的键**（"缺失即无约束"），不在设计态留空数组空壳。
- */
 function saveFields(fields: ScenarioField[]): void {
   const dir = fieldDialogDir.value
   const next: Record<string, ScenarioField[]> = { ...(props.modelValue.data_prep_fields ?? {}) }
@@ -144,11 +114,6 @@ function setScenario(value: string): void {
   emit('update:modelValue', { ...props.modelValue, scenario: value })
 }
 
-/**
- * 添加二级目录：**先入列**，再弹出字段约束窗口。
- *
- * 先入列是为了"取消/跳过不丢数据"——目录名已经生效，弹窗只是补字段约束。
- */
 function addDir(): void {
   const value = newDir.value.trim()
   if (value === '') return
@@ -211,12 +176,6 @@ function blockPredefined(dir: string): void {
   })
 }
 
-/**
- * 启用（恢复）被屏蔽的预定义目录：追加到清单末尾，配置从零开始。
- *
- * 追加在末尾，是为了让"界面顺序"与"落盘的 `data_prep_dirs` 顺序"保持一致
- * （清单顺序就是 `scenario.json` 的数组顺序，运行端按它装配）。
- */
 function enablePredefined(dir: string): void {
   if (!isPredefined(dir) || props.modelValue.data_prep_dirs.includes(dir)) return
   emit('update:modelValue', {
@@ -425,7 +384,6 @@ function enablePredefined(dir: string): void {
   color: var(--color-status-error);
 }
 
-/* 已屏蔽的预定义目录：与启用项用分隔线拉开，名字灰显表示"当前不生效" */
 .scenario-editor__blocked {
   margin-top: var(--space-2);
   padding-top: var(--space-2);

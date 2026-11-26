@@ -1,6 +1,3 @@
-/**
- * 单元测试：用户与关联数字人（`FR-023`~`FR-025`）
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

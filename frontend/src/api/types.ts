@@ -1,23 +1,7 @@
-/**
- * 后端契约类型
- *
- * 与 `specs/001-agent-chat-ui/contracts/backend-api.md` 一一对应，字段名与后端 JSON 保持一致
- * （下划线命名，不做法语化重命名，降低契约映射成本）。
- *
- * ⚠️ `Message` 仍**不含思考内容**——思考只在 SSE 流中存在、不落历史（V-04、FR-023、SC-018）。
- *
- * 工具调用记录（002 特性）与之不同：它随消息经 `tool_calls` 下发（元数据 + 内联正文，
- * 超阈值者是前 32 KB 的截断版）；完整正文可能另有临时空间副本，但**前端不拉取**，
- * 卡片只展示记录里的那段。记录的生命周期与会话一致，**刷新后仍可见**。
- */
 
 import type { ThreadNextSteps } from './threads'
 
-/* ============================================================
- * 通用
- * ============================================================ */
 
-/** 后端统一错误体：`{ error: { code, message, details? } }`。 */
 export interface ApiErrorBody {
   error: {
     code: string
@@ -30,72 +14,38 @@ export interface ApiErrorBody {
 export interface ErrorInfo {
   code: string
   message: string
-  /**
-   * 后端结构化问题清单。
-   *
-   * - `FILE_SCHEMA_INVALID`：D13 例外，透传展示；
-   * - 2026-11-09（021）`ONTOLOGY_RULE_DENIED`：`string[]` 逐条原因，换行展示。
-   */
   details?: unknown
-  /**
-   * 2026-11-09（021）：本体行为规则闸门的中止原因分类（仅 `ONTOLOGY_RULE_DENIED`）。
-   *
-   * 取值 `unregistered` / `condition_false` / `config_unavailable`；
-   * 前端**不展示**，只用于排障检索。
-   */
   reason?: string
-  /**
-   * 2026-10-15（`TR-55` / 契约 §19.3）：`error` 对象的三个**可选**诊断字段，
-   * 连同 `code` 一起由后端 `domain/llm-error.ts` 的 `classifyLlmFailure()` 一次构造。
-   * **有才写、缺省不写 `null`**（旧前端忽略未知字段即可，向后兼容）。
-   *
-   * 它们只喂**诊断信息行**（`formatErrorDiagnostics()`），MUST NOT 直接展示上游原文。
-   */
-  /** 上游 HTTP 状态码（如 503） */
   upstream_status?: number
-  /** 上游错误类型（如 `service_unavailable_error`） */
   upstream_type?: string
-  /** 上游请求 id（向 provider 报障用） */
   request_id?: string
 }
 
-/* ============================================================
- * §1 数字人与 MCP
- * ============================================================ */
 
-/** `GET /api/agents` 元素：顶层数组。 */
 export interface AgentListItem {
   agent_name: string
   description: string
 }
 
-/** 数字人技能。 */
 export interface AgentSkill {
   name: string
   description: string
 }
 
-/** 数字人挂载的 MCP 服务（**不含** url/command 等连接细节）。 */
 export interface McpServerRef {
   name: string
   transport: string
 }
 
-/** 问题实例关联的工具（`starters[].tools[]`，004）。 */
 export interface AgentStarterTool {
   kind: 'builtin' | 'mcp'
   name: string
-  /** 仅 `kind: 'mcp'` 存在：所属 MCP 服务名 */
   service?: string
-  /** 模型实际看到的工具名（MCP 带 `{server}__` 前缀） */
   exposed_name: string
 }
 
-/** 新建对话页的引导卡片（004）；"下一步动作卡片"复用同一形状。 */
 export interface AgentStarter {
-  /** 卡片文本，点击即作为用户消息发出 */
   prompt: string
-  /** 仅内部使用、不展示：下一步动作卡片**必然 ≥1 项**（007 修订 2026-10-14），首屏问题实例可空 */
   tools: AgentStarterTool[]
   /**
    * 隐藏工具引导：发送时随请求回传，**对用户不可见**。
@@ -106,12 +56,6 @@ export interface AgentStarter {
   guidance: string
 }
 
-/**
- * 下一步动作卡片的隐藏工具提示（016）。
- *
- * 字段由模型从本轮本体能力清单抄写，**只在本轮请求里回传**：
- * 不展示、不落历史（用户消息里只有卡片的 `prompt`）。
- */
 export interface ToolTip {
   name: string
   title: string
@@ -119,27 +63,15 @@ export interface ToolTip {
   ontology_name: string | null
 }
 
-/**
- * 下一步动作卡片（007 + 016）。
- *
- * 与首屏问题实例（`AgentStarter`）**不再同形**：卡片的工具提示是结构化的 `tool_tips`，
- * 点击时作为请求体字段回传；`prompt` 是唯一进入历史的部分。
- */
 export interface NextStepAction {
-  /** 卡片正文（祈使句、单一任务、信息明确），点击后作为下一轮用户消息原文 */
   prompt: string
-  /** 隐藏工具提示（≤5），随请求回传、不进历史 */
   tool_tips: ToolTip[]
 }
 
-/** `GET /api/agents/{agent_name}` 响应。 */
 export interface DigitalHuman {
   agent_name: string
-  /** 角色简介：数字人切换面板展示（旧版 SOUL.md 无结构化数据时为空串） */
   intro: string
-  /** 新建对话页首屏欢迎语 */
   welcome: string
-  /** 新建对话页问题卡片 */
   starters: AgentStarter[]
   /** SOUL.md 全文（兼容保留；展示语义已由 `intro` 承担） */
   soul: string
@@ -156,136 +88,87 @@ export interface DigitalHuman {
  */
 export type McpConnectionStatus = 'connected' | 'failed' | 'unknown'
 
-/** `GET /api/agents/current/mcp` 元素。 */
 export interface McpServiceStatus {
   name: string
   transport: string
   status: McpConnectionStatus
 }
 
-/** `GET /api/agents/current` 响应。 */
 export interface CurrentAgentResponse {
   agent_name: string | null
 }
 
-/** `GET /api/agents/current/mcp` 响应。 */
 export interface CurrentMcpResponse {
   agent_name: string | null
   mcp_servers: McpServiceStatus[]
 }
 
-/** 当前数字人的一个技能（frontmatter 摘要，正文由 `read_skill` 按需读取）。 */
 export interface AgentSkill {
   name: string
   description: string
 }
 
-/** `GET /api/agents/current/skills` 响应（2026-11-07，输入区 `/` 面板数据源）。 */
 export interface CurrentSkillsResponse {
   agent_name: string
   skills: AgentSkill[]
 }
 
-/** `POST /api/agents/{agent_name}/select` 响应。 */
 export interface SelectAgentResponse {
   agent_name: string
   selected: boolean
 }
 
-/** `POST /api/agents/current/exit` 响应。 */
 export interface ExitAgentResponse {
   exited: boolean
 }
 
-/* ============================================================
- * §2 模型
- * ============================================================ */
 
-/** `GET /api/models` 元素。 */
 export interface Model {
   model: string
   is_default: boolean
 }
 
-/** `GET /api/models` 响应。 */
 export interface ModelListResponse {
   models: Model[]
 }
 
-/* ============================================================
- * §3 会话
- * ============================================================ */
 
-/** 用量。 */
 export interface Usage {
   input_tokens: number
   output_tokens: number
 }
 
-/** 反馈取值：点赞 / 点踩 / 无。 */
 export type FeedbackValue = 'up' | 'down' | null
 
-/** 文件引用（结构化 `{dir, filename}`，非字符串数组）。 */
 export interface FileReference {
   dir: string
   filename: string
 }
 
-/** 消息角色。 */
 export type MessageRole = 'user' | 'assistant'
 
-/** 消息状态：仅 assistant 完成轮返回，缺省视为 `completed`。 */
 export type MessageStatus = 'completed' | 'failed'
 
-/**
- * 视图链接：服务给的**原值** + 可选名称（名称缺省 = 界面显示地址，`TR-46`）。
- *
- * `kind` 缺省 = `'url'`（外部地址：`/` 开头相对路径或完整 `http(s)://`）；
- * `'file'` = 本地文件空间**相对路径**（`filePath`），界面转成
- * `/api/files/preview?…` 后再走同一条入口行（`2026-10-15`）。
- */
 export interface ViewLink {
   url: string
   name?: string
   kind?: 'url' | 'file'
 }
 
-/**
- * 一次工具调用的记录（002 特性）。
- *
- * - 元数据（`name` / `status` / `duration_ms` / `size`）恒有；`status==='running'`
- *   表示该调用没有留下结束事件（进程中途退出），界面渲染为"未完成"
- * - `content` 有值 = 结果正文已随详情下发；**任何来源**超阈值时都是**截断版**
- *   （末尾带截断说明，外部来源的说明里带副本路径）。卡片展示的就是这段，不再拉全文
- * - `artifact_size` 有值 = 临时空间里另有**完整**副本（**仅外部来源/MCP**），
- *   前端据此提示"完整正文在临时空间/体积"，不发起请求
- * - `args_digest` 是**入参短标量摘要**：入参原文不落盘、不下发
- */
 export interface ToolCallRecord {
   call_id: string
   name: string
-  /**
-   * 人读名称（2026-10-27）：卡片标题显示它，`name` 仍是对模型的调用名。
-   * 缺省 = 无中文名或旧记录，展示方回退 `name`。
-   */
   label?: string
   status: 'running' | 'success' | 'error'
-  /** ISO8601 */
   started_at: string
   duration_ms?: number
-  /** 原始结果字节数 */
   size?: number
-  /** 记录内联正文（随详情下发；超阈值时为截断版） */
   content?: string
-  /** 外置副本的字节数（**仅外部来源/MCP**；前端只用于提示，不拉取） */
   artifact_size?: number
   /** 记录正文被截断（只保存了一部分）；`size > artifact_size` 表示副本本身也被上限截断 */
   truncated?: boolean
-  /** 规则提取的摘要（仅外置结果的卡片标题） */
   summary?: string
-  /** 入参短标量摘要 */
   args_digest?: Record<string, string>
-  /** 结果里的视图链接（与正文分离下发；正文外置时仍在，见 `TR-44`） */
   view_links?: ViewLink[]
 }
 
@@ -295,168 +178,114 @@ export interface ToolCallRecord {
  * 注意：**不含**思考内容（V-04、SC-018）；工具调用记录经 `tool_calls` 下发。
  */
 export interface Message {
-  /** 消息标识（反馈接口使用；旧数据由服务端合成） */
   id: string
   role: MessageRole
-  /** 正文（不含 `@` 引用标注文本） */
   content: string
-  /** ISO8601 */
   ts: string
-  /** 仅 assistant 有；缺省视为 `completed` */
   status?: MessageStatus
-  /** 仅 assistant 完成/失败轮 */
   usage?: Usage
-  /** 整轮耗时（秒）；后端精度不固定（最多 3 位小数），前端统一格式化 1 位小数 */
   duration_seconds?: number
-  /** 仅带 `@` 引用的 user 消息 */
   attachments?: FileReference[]
-  /** 2026-11-07：仅 user 消息——本轮显式选中的技能（气泡里还原 `/技能名` 胶囊） */
   skill?: string
-  /**
-   * 本轮对话使用的数字人（user 与 assistant 成对返回）。
-   * 一个会话可跨多个数字人（切换后在下一轮生效）；旧数据可能缺省。
-   */
   agent_name?: string
-  /** 本轮的工具调用记录（仅该轮确有调用时返回；旧数据无） */
   tool_calls?: ToolCallRecord[]
-  /** 恒返回，默认 `null` */
   feedback: FeedbackValue
-  /** 仅 `status === 'failed'` */
   error?: ErrorInfo
 }
 
-/**
- * 会话来源标记（015，`contracts/thread-source.md`）：目前只有"定时任务"一种，
- * 字段保留为可扩展枚举。**缺省不写**——普通会话不带该键，界面据此不渲染任何标记。
- */
 export interface ThreadSource {
   type: 'scheduled_task'
   task_id: string
-  /** 任务名快照：任务改名/删除后仍可读 */
   task_name: string
-  /** 触发时刻（ISO UTC）；复用模式下为**首次**触发时刻 */
   triggered_at: string
 }
 
-/** `GET /api/threads` 元素与 `POST /api/threads` 的列表视图。 */
 export interface Conversation {
   thread_id: string
   agent_name: string
-  /** 后端回落为"首条用户消息前 20 字"；从未发过用户消息时为 `null` */
   title: string | null
   created_at: string
   updated_at: string
-  /** 定时任务会话的来源标记；普通会话为 `undefined`（不是 `null`） */
   source?: ThreadSource
 }
 
-/** `GET /api/threads/{thread_id}` 响应。 */
 export interface ThreadDetail extends Conversation {
-  /** 消息全量条数 */
   total: number
-  /** 按时间正序 */
   messages: Message[]
-  /** 该会话当前是否有活跃 run */
   running: boolean
-  /** HITL：当前等待用户确认的工具调用快照（无则 `null`，断连恢复弹窗用） */
   pending_interaction: InteractionSnapshot | null
 }
 
-/** `POST /api/threads` 响应（**不返回** `agent_name` 与 `updated_at`）。 */
 export interface ThreadCreateResponse {
   thread_id: string
   title: string | null
   created_at: string
 }
 
-/** `PUT /api/threads/{thread_id}/messages/{message_id}/feedback` 响应。 */
 export interface FeedbackResponse {
   message_id: string
   feedback: FeedbackValue
 }
 
-/** `POST /api/threads/{thread_id}/stop` 响应。 */
 export interface StopResponse {
   stopped: boolean
 }
 
-/* ============================================================
- * §4 发消息（SSE 流式）
- * ============================================================ */
 
-/** `POST /api/threads/{thread_id}/messages` 请求体（`additionalProperties: false`）。 */
 export interface SendMessageRequest {
-  /** 去掉 `@文件名` 引用文本后的正文（minLength: 1） */
   content: string
-  /** 思考开关状态；后端缺省 `false` */
   thinking?: boolean
-  /** 当前选中模型；未选择时**不传该字段** */
   model?: string
-  /** 结构化引用（maxItems: 10） */
   attachments?: FileReference[]
-  /**
-   * 本轮隐藏指引（004：问题实例关联工具生成的引导，maxLength: 500）。
-   * 只追加到本轮系统提示词，**不落盘、不进历史**——用户气泡里看不到它。
-   */
   guidance?: string
-  /**
-   * 下一步动作卡片回传的隐藏工具提示（016，结构化）。
-   *
-   * 只追加到本轮系统提示词，**不落盘、不进历史**；服务端不做内容校验。
-   */
   tool_tips?: ToolTip[]
-  /** 013：本轮跳过意图聚焦。唯一来源是首屏「问题实例」卡片（016 起下一步卡片不再跳过） */
   skip_intent_focus?: boolean
-  /** 2026-11-07：用户显式选中的技能（`/技能名`）；服务端只插入该技能并自动跳过聚焦 */
   skill?: string
 }
 
-/** `done.finish_reason`：`completed` 正常落盘；`stop` 本轮被中断丢弃、不落盘。 */
 export type StreamFinishReason = 'completed' | 'stop'
 
-/** `thinking` 事件数据。 */
 export interface ThinkingEventData {
   delta: string
 }
 
-/** `content` 事件数据。 */
 export interface ContentEventData {
   delta: string
 }
 
-/** `tool_call` 事件数据（**仅名称与状态**，无入参与结果）。 */
 export interface ToolCallEventData {
   call_id: string
   name: string
-  /** 人读名称（2026-10-27）；缺省 = 无中文名，展示方回退 `name` */
   label?: string
   status: 'running'
 }
 
-/** `tool_call_end` 事件数据。 */
 export interface ToolCallEndEventData {
   call_id: string
   status: 'success' | 'error'
 }
 
-/** `done` 事件数据。 */
+/**
+ * 计划进度（028 FR-034）：单行进度条的唯一数据源。
+ *
+ * 只带当前步的编号 / 步名 / 三态；不是完整计划，也不持久化。
+ */
+export interface PlanProgressEventData {
+  seq_id: number
+  label: string
+  phase: 'running' | 'replanned' | 'done'
+}
+
 export interface DoneEventData {
   finish_reason: StreamFinishReason
   usage: Usage
   duration_seconds: number
-  /** 中断轮为 `null` */
   message_id: string | null
   /** 本轮回答的数字人（009 起会话归属固定：数字人不可在会话中途变更；逐条标注保留以兼容存量数据） */
   agent_name: string
-  /**
-   * 007 修订（Tail Protocol）：本轮的「下一步动作提示」卡片。
-   * 卡片与回答同流产出，`done` 时已就绪，随事件直推（前端不再轮询拉取）；
-   * 无卡片（开关关闭 / 模型未输出块 / 解析失败）时为 `null` 或字段缺省。
-   */
   next_actions?: ThreadNextSteps | null
 }
 
-/** `error` 事件数据（`duration_seconds` / `usage` 可选）。 */
 export interface StreamErrorEventData {
   error: ErrorInfo
   duration_seconds?: number
@@ -465,52 +294,35 @@ export interface StreamErrorEventData {
   agent_name: string
 }
 
-/**
- * `interaction_request` 事件数据（HITL）：工具调用前的人工确认。
- * schema 为工具入参 JSON Schema（可见形态），proposed_args 为模型提议值（预填可改）。
- */
 export interface InteractionRequestData {
   interaction_id: string
   call_id: string
   tool_name: string
-  /**
-   * 工具的人读名称（2026-10-27）：弹窗"工具："一行与窗口标题显示它。
-   * 后端恒给字符串（无中文名时等于 `tool_name`）；**老快照缺省**，展示方仍 `|| tool_name`。
-   */
   tool_label?: string
-  /** 工具级描述（schema 的 description；弹窗头部一句话说明用；老快照可能缺省） */
   tool_description?: string
   title: string
   schema: Record<string, unknown>
   proposed_args: Record<string, unknown>
   required: string[]
   timeout_seconds: number
-  /** 算法规则参数字段名（仅服务声明且工具 schema 含该字段时存在）：该字段装配「从算法规则选择」入口 */
   rules_field?: string
 }
 
-/** `GET /api/files/rules` 响应：「数据准备/算法规则」最新规则文件的结构化内容。 */
 export interface RuleFileResponse {
   filename: string
   updated_at: string
-  /** 表头列名（保持文件内顺序） */
   columns: string[]
-  /** 数据行：键 = 表头列名，值 = 该行该列的值 */
   rows: Array<Record<string, unknown>>
-  /** 优先级列名（表头里匹配 priority/优先级 的那一列；无则 null） */
   priority_column: string | null
 }
 
-/** 断连恢复快照：interaction_request + 剩余等待秒数（线程详情接口下发）。 */
 export interface InteractionSnapshot extends InteractionRequestData {
   remaining_seconds: number
 }
 
-/** `POST /api/threads/{id}/interaction` 请求体。 */
 export interface InteractionSubmitRequest {
   interaction_id: string
   action: 'submit' | 'reject'
-  /** action=submit 必填（服务端按挂起时的 inputSchema 终验） */
   args?: Record<string, unknown>
 }
 
@@ -520,63 +332,50 @@ export interface InteractionSubmitResponse {
   result: 'settled' | 'already-resolved'
 }
 
-/** SSE 事件 → 类型化载荷的联合类型（仅本轮可见，不落历史）。 */
 export type StreamEvent =
   | { type: 'thinking'; data: ThinkingEventData }
   | { type: 'content'; data: ContentEventData }
   | { type: 'tool_call'; data: ToolCallEventData }
   | { type: 'tool_call_end'; data: ToolCallEndEventData }
+  | { type: 'plan_progress'; data: PlanProgressEventData }
   | { type: 'interaction_request'; data: InteractionRequestData }
   | { type: 'done'; data: DoneEventData }
   | { type: 'error'; data: StreamErrorEventData }
 
-/** SSE 解析器输出的原始事件（未类型化）。 */
 export interface RawSseEvent {
   event: string
   data: string
 }
 
-/* ============================================================
- * §5 文件
- * ============================================================ */
 
-/** `POST /api/files/upload` 响应（`filename` 为落盘名，前端 MUST 直接采用）。 */
 export interface UploadResponse {
   dir: string
   filename: string
   size: number
 }
 
-/** 工作空间/目录列表中的文件项。 */
 export interface WorkspaceFile {
   filename: string
   size: number
   updated_at: string
 }
 
-/** 合并单元格（`GET /api/files/preview` 对 `.xlsx` 的响应，2026-11-17）。 */
 export interface PreviewMerge {
-  /** 起点行下标（0 基） */
   r: number
-  /** 起点列下标（0 基） */
   c: number
   rowSpan: number
   colSpan: number
 }
 
-/** 单个工作表的预览数据（服务端已解析好，前端零解析直接画表）。 */
 export interface PreviewSheet {
   name: string
-  /** 行 × 列的**显示文本**（千分位、日期等按原簿格式），空缺为 `''` */
   rows: string[][]
-  /** 需要右对齐的列下标（数字列） */
   numericCols: number[]
   merges: PreviewMerge[]
   /** 是否因服务端行/列上限被截断（完整内容请下载） */
   truncated: boolean
 }
 
-/** `.xlsx` 预览响应体。 */
 export interface PreviewWorkbook {
   sheets: PreviewSheet[]
 }
@@ -588,103 +387,60 @@ export interface PreviewWorkbook {
  * 前端 MUST NOT 自行判定（契约 `runtime-api-delta.md` §3.1）。
  */
 export interface ScenarioField {
-  /** 字段名（＝上传表的表头名） */
   name: string
-  /** 取值类型（JSON Schema 基本类型子集） */
   type: 'string' | 'integer' | 'number' | 'boolean' | 'object' | 'array'
-  /** 必填：表头 MUST 包含；`false` 为可选（出现则类型仍须匹配） */
   required: boolean
 }
 
 /** 工作空间目录分组（dir 为相对空间路径，如 数据准备/生产计划、临时空间）。 */
 export interface WorkspaceDir {
   dir: string
-  /** 展示名（数据准备子目录为子目录名，其余为空间名） */
   label: string
-  /**
-   * 用户是否可删除其中文件。
-   *
-   * 2026-11-18（025）：只读空间（原共享空间）下线后**恒为 true**；字段保留在契约内，
-   * 界面侧不再据此分叉（见 `WorkspaceFileList`）。
-   */
   deletable: boolean
-  /** 空目录为 `[]` */
   files: WorkspaceFile[]
-  /** 字段约束（仅数据准备目录可能有值，其余空间恒为 `[]`） */
   fields: ScenarioField[]
-  /** 该目录允许上传的扩展名（2026-10-13 新增，目录级）：数据准备未配置时 = 平台默认，其余空间恒等于空间值；权威校验仍在上传路由 */
   upload_extensions: string[]
-  /**
-   * 是否为平台预定义二级目录（2026-10-29，014）：仅「数据准备/算法规则」为 `true`，
-   * 其余二级目录与扁平空间（共享 / 临时）恒为 `false`。
-   *
-   * 2026-11-17：预定义目录可被管理员**屏蔽**，屏蔽后该目录不进入 `dirs`——本字段
-   * 只表示"预定义且已启用"（前端无需为屏蔽写特判，空清单按"无目录"处理）。
-   *
-   * 由运行端下发——前端 MUST NOT 硬编码预定义目录名（宪章原则七）。
-   */
   predefined: boolean
 }
 
 /** 工作空间空间分组（一级：数据准备/临时空间）。 */
 export interface WorkspaceSpace {
-  /** 空间名（即一级目录名） */
   name: string
   /** Agent 是否可写（仅临时空间） */
   agent_writable: boolean
-  /** 该空间允许上传的扩展名（小写含点） */
   upload_extensions: string[]
-  /** 数据准备为 scenario 定义的子目录清单，其余空间仅自身一项 */
   dirs: WorkspaceDir[]
 }
 
-/** `GET /api/files/workspace` 响应（三空间树；scenario 未配置 → 503）。 */
 export interface WorkspaceResponse {
-  /** 场景名（users/{userId}/scenario.json 定义） */
   scenario: string
   spaces: WorkspaceSpace[]
 }
 
-/* ============================================================
- * §6 定时任务（015）
- * ============================================================ */
 
 /** 任务状态（派生字段，服务端现算；前端 MUST NOT 自行推导）。 */
 export type ScheduledTaskStatus = 'idle' | 'running'
 
-/** 系统自动停用的原因；用户手动停用为 `null`。 */
 export type ScheduledTaskDisabledReason = 'agent_unavailable'
 
-/** 一条定时任务（`GET /api/scheduled-tasks` 的 `tasks` 元素）。 */
 export interface ScheduledTask {
   task_id: string
   name: string
-  /** 每轮执行作为该会话的首条 user 消息 */
   prompt: string
-  /** 思考开关（只作用于本任务） */
   thinking: boolean
-  /** ISO 8601 UTC，创建时必晚于当时 */
   start_at: string
-  /** 执行频率（间隔秒数，≥1） */
   interval_seconds: number
   /** 执行次数上限（≥1） */
   max_runs: number
-  /** ISO 8601 UTC，严格晚于 `start_at` */
   deadline_at: string
   /** `true` = 每轮新建会话（缺省）；`false` = 复用同一会话（创建后不可改） */
   new_thread_per_run: boolean
   enabled: boolean
-  /** 已执行次数：只有真正开跑的一轮（`success` / `failed`）计入 */
   executed_count: number
-  /** 派生：`enabled && !terminated && next_run_at !== null` */
   status: ScheduledTaskStatus
-  /** 派生：次数用尽或已过截止 */
   terminated: boolean
-  /** 派生：启动按钮是否可用 */
   can_start: boolean
-  /** 系统自动停用的原因；用户手动停用为 `null` */
   disabled_reason: ScheduledTaskDisabledReason | null
-  /** `null` = 无待执行时刻 */
   next_run_at: string | null
   last_run_at: string | null
   agent_name: string
@@ -692,12 +448,10 @@ export interface ScheduledTask {
   updated_at: string
 }
 
-/** `GET /api/scheduled-tasks` 响应。 */
 export interface ScheduledTaskListResponse {
   tasks: ScheduledTask[]
 }
 
-/** `POST /api/scheduled-tasks` 请求体（`additionalProperties: false`）。 */
 export interface CreateScheduledTaskRequest {
   name: string
   prompt: string
@@ -706,7 +460,6 @@ export interface CreateScheduledTaskRequest {
   interval_seconds: number
   max_runs: number
   deadline_at: string
-  /** 缺省 `true`；`false` = 复用同一会话 */
   new_thread_per_run?: boolean
 }
 
@@ -718,42 +471,31 @@ export interface CreateScheduledTaskRequest {
  */
 export type UpdateScheduledTaskRequest = Omit<CreateScheduledTaskRequest, 'new_thread_per_run'>
 
-/** 单个任务的响应体（创建 / 编辑 / 启停共用）。 */
 export interface ScheduledTaskResponse {
   task: ScheduledTask
 }
 
-/** 一次执行的结果。 */
 export type ScheduleRunResult = 'success' | 'failed' | 'skipped'
 
-/** 执行结果的原因（`success` 时为 `null`）。 */
 export type ScheduleRunReason =
   'previous_run_active' | 'busy_limit' | 'agent_unavailable' | 'run_failed'
 
-/** 一条执行记录（`GET /api/scheduled-tasks/runs` 的 `runs` 元素）。 */
 export interface ScheduleRun {
   run_id: string
   task_id: string
-  /** 触发时刻的任务名快照（任务改名/删除后仍可读） */
   task_name: string
-  /** 计划触发时刻（ISO UTC） */
   triggered_at: string
   finished_at: string | null
   result: ScheduleRunResult
   reason: ScheduleRunReason | null
-  /** 面向用户的原因摘要（失败时为错误消息） */
   reason_text: string | null
-  /** 执行产生的会话；`skipped` 时为 `null` */
   thread_id: string | null
-  /** 会话名快照 */
   thread_title: string | null
-  /** 复用模式下本次因原会话已删除而重建 */
   rebuilt: boolean
   /** 读取时回填：会话已不存在（不可跳转） */
   thread_deleted: boolean
 }
 
-/** `GET /api/scheduled-tasks/runs` 响应（`total` 为筛选后的总数）。 */
 export interface ScheduleRunListResponse {
   runs: ScheduleRun[]
   total: number

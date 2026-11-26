@@ -218,13 +218,26 @@ T000（已完成）
 - [x] T806（`spec.md` 修订记录新增 v0.10、v0.11）
 - [ ] T803（P90 规划延迟实测）/ T807（抽样回放）：需要真实模型与历史会话样本，本期不做——**硬超时（20s 到点即返回，含 provider 不响应 abort 的兜底）已由 `plan-llm.spec.ts` 钉死**，剩下的是延迟分布统计，登记为「上线后观测」
 
-### Phase 9（计划进度，方案 B —— 未开工，2026-11-25 记录）
+### Phase 9（计划进度，方案 B —— 已交付 2026-11-26）
 
-- [ ] T901 / T901s（编排器三处 emit + 事件断言）
-- [ ] T902 / T902s（SSE 契约 + 集成断言）
-- [ ] T903 / T903s（`PlanProgressBar.vue` + 单测）
-- [ ] T904（文案口径定稿：默认不带总步数）
-- [ ] T905（四侧门禁 + `spec.md` 修订记录）
+- [x] T901 / T901s（编排器三处 emit：`enqueue` 装批与步推进 / 重规划装批 `replanned` / `terminate` `done`；`plan-progress.spec.ts` 4 例覆盖三态顺序、重规划跳变、空轮零发、字段收敛）
+- [x] T902 / T902s（`run-events.ts` 新增 SSE 类型 + `run-consume.ts` 只转发不留痕；`agent-loop.ts` 接收 begin 期间积压与实时回调，`agent-factory.ts` 接线）
+- [x] T903 / T903s（`PlanProgressBar.vue` + 6 例：单行文案 / `role="status"` / 展开只列已见步 / 重规划闪示 / 结束淡出 / 空态不渲染；`useChatStream.plan-progress.spec.ts` 4 例）
+- [x] T904（文案口径：`第 N 步 · 步名`，默认不带总步数；展开按钮只显示"已出现 N 步"）
+- [x] T905（门禁：`agent-backend` 全量单测 **1674** + typecheck + lint 0；`frontend` 全量单测 **1494** + typecheck + lint 0；`spec.md` 修订记录 v0.17）
+- 行数复核：`plan-orchestrator.ts` **580** / `agent-factory.ts` **525** 均为存量超限（本次各 +15 行，按 `plan.md` 复杂度跟踪「不拆分存量」执行）；`agent-loop.ts` 228、`useChatStream.ts` 471、`ChatPanel.vue` 447、`PlanProgressBar.vue` 258，均 ≤500
+
+### Phase 10（规划门禁，FR-037 —— 已交付 2026-11-26）
+
+- [x] T1001（`intent_focus.plan_threshold` / `plan_timeout_ms` 解析与校验：缺键=关闭、越界拒绝启动、`INTENT_FOCUS_PLAN_THRESHOLD` 覆盖；`config.example.yaml` 同步）
+- [x] T1002（`domain/intent-focus/plan-gate.ts`：题面 + `judgePlanGate` + `planGateBlocks`；`plan-gate.spec.ts` 7 例）
+- [x] T1003（`runner.ts`：开规划才判定、用剩余预算单独判一次、失败 fail-open；`plan_score` / `plan_round_ms` 落 `intent-focus.jsonl`；`intent-focus-runner.spec.ts` +4 例）
+- [x] T1004（链路：`run-consume` → `AgentRunRequest.planScore` → `agent-factory` 分流 + `plan.skipped(below_threshold)`；`server-attachments` 注入 `isTaskPlanning`；`server.ts` 注入阈值）
+- [x] T1005（规格与契约：`spec.md` FR-037 + v0.18；`contracts/README.md` §1.2；门禁：`agent-backend` typecheck / lint 0 / **124 files / 1690 tests**）
+- 配置收敛（2026-11-26，v0.21，批次 2~4）：删除 5 个 `INTENT_FOCUS_*_THRESHOLD` env；`MCP_TIMEOUT_MS`/`MCP_CONNECT_TIMEOUT_MS`/`LLM_MAX_RETRIES`/`LLM_RETRY_MAX_DELAY_MS` 迁入 yaml `runtime` 块；`UPLOAD_MAX_MB`/`PREVIEW_MAX_MB`/`READ_TRUNCATE_KB` 降为 `domain/limits.ts` 常量；新增 yaml `plan` 块三项并注入编排器（`PlanLimits` / `DEFAULT_PLAN_LIMITS` / `advanceBatch.limits`）；启动打 `config.effective` 与 `config.unknown_env`；`config.spec.ts` **43 例**、后端 **124 files / 1694 tests** 全绿
+- 配置分层（2026-11-26，v0.20，批次 1）：`intent_focus.base_url` 支持 `$VAR`（`config.yaml` → `$INTENT_FOCUS_BASE_URL`，本地 `127.0.0.1:8103` / 容器 `laya:8000`）；compose `backend` 去掉 `environment` 覆盖、`env_file` 只留 `.env`；`.env` 转私产（`git rm --cached`）并恢复 `.env.example`；`DECIS_API_KEY` 进 `envSchema`；`config.spec.ts` 40 例全绿
+- 口径调整（2026-11-26，v0.19）：`agent-backend/config.yaml` 补 `plan_threshold: 0.4`（此前缺键 = 门禁关闭，配置写了却不生效）；`plan_timeout_ms` 缺省由 2000 提到 **5000**（冷启动首包常超 2s，2s 会被打成超时后 fail-open），`config.example.yaml` 同步；`config.spec.ts` 缺省断言同步，门禁三份 spec **77 passed**
+- 行数复核：`runner.ts` **801**、`plan-orchestrator.ts` **580**、`agent-factory.ts` **543**、`config.ts` **524** 均为存量超限（`runner.ts` HEAD 即 757、`config.ts` HEAD 593，本次只加门禁判定与配置解析；按 `plan.md` 复杂度跟踪「不拆分存量」执行，判定逻辑本身抽到 `plan-gate.ts` **50** 行）；`run-consume.ts` 310、`server.ts` 447、`server-attachments.ts` 98，均 ≤500
 
 ## 规模估算
 

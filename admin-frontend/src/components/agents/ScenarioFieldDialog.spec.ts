@@ -1,9 +1,3 @@
-/**
- * 组件测试：数据准备目录的字段约束窗口。
- *
- * 覆盖口径：六种取值类型可选；空列表 = 该目录不设约束（等价"暂不设置"）；
- * 字段名非法 / 重复时禁用保存；取消与 Esc 不改动配置。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ScenarioFieldDialog from './ScenarioFieldDialog.vue'

@@ -1,17 +1,3 @@
-/**
- * 实验脚本：028 任务规划全链路观察（**真实 Laya + 真实 DeepSeek + 真实 MCP**）。
- *
- * 与线上链路的差异只有三点，且都不影响被观察的行为：
- * 1. 直接调 `AgentInstanceFactory.create` + `agent.run`，绕过 HTTP / SSE（省去登录与前端）；
- * 2. 在 `LlmProvider` 外面包一层，把每次调用的 system / messages / tools / 输出留存下来；
- * 3. 临时给 SOUL.md 注入 `task_planning: true`，跑完**原样还原**（实验不改数字人配置）。
- *
- * 打印四段：环境 → 意图聚焦 → 计划制定 → 计划执行。
- *
- * 运行：
- *   npx tsx --env-file=.env.local scripts/experiment-plan-flow.ts
- *   npx tsx --env-file=.env.local scripts/experiment-plan-flow.ts "查询高强度钢板和铁矿库存"
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import pino from 'pino';
@@ -30,7 +16,6 @@ const line = (title: string): void => {
   console.log(`\n${'='.repeat(16)} ${title} ${'='.repeat(16)}`);
 };
 
-/** 一次 LLM 调用的留档（`kind` 由**来源**决定：`streamChat` 与 `loopOptions.streamFn` 两个出口） */
 interface RecordedCall {
   kind: 'plan' | 'chat';
   system: string;
@@ -79,17 +64,6 @@ class RecordingLlm extends PiAiLlmProvider {
     });
   }
 
-  /**
-   * 主对话的观测点（2026-11-26）。
-   *
-   * 带工具的主对话**不走 `streamChat`**：`agent-factory` 把 `loopOptions()` 返回的
-   * `streamFn` 交给 `runAgentLoopEvents`，模型请求从 pi 那一层直接发出。
-   * 只覆写 `streamChat` 时日志会呈现「规划 2 次 / 主对话 0 次」，
-   * 主对话的 systemPrompt、可见工具、`［执行进度］` 快照全部留不下档。
-   *
-   * 这里只记录**请求侧**（system / messages / tools）并原样透传，不改参数、不改返回值、
-   * 不吞异常；回答文本仍由 `agent.run` 的 `content_delta` 事件拼。
-   */
   override loopOptions(): ReturnType<PiAiLlmProvider['loopOptions']> {
     const base = super.loopOptions();
     const streamFn: typeof base.streamFn = (model, context, options) => {
@@ -143,7 +117,6 @@ function forceTaskPlanning(agentDirPath: string): () => void {
   return () => fs.writeFileSync(file, original, 'utf8');
 }
 
-/** 从规划 prompt 里按标题切出六段，便于逐段阅读 */
 function splitSegments(system: string): Array<{ title: string; body: string }> {
   const marks = [
     '［意图聚焦结果｜本轮规划的唯一起点］',
@@ -204,7 +177,6 @@ async function main(): Promise<void> {
     console.log(`MCP 建连：${ready ? '已就绪' : '超时（降级继续）'}`);
     console.log(`不可用服务：${JSON.stringify(agent.unavailableMcp())}`);
 
-    // ---------- 阶段 1：意图聚焦 ----------
     line('阶段 1：意图聚焦（Laya /v1/systemone，真实调用）');
     const depth = readFocusDepth(env.dir);
     console.log(`…（阶数 intent_focus_depth = ${depth}）`);
@@ -229,7 +201,6 @@ async function main(): Promise<void> {
     console.log('\n--- focus.prompt 原文 ---');
     console.log(focus.prompt === '' ? '（空串 = 本轮无聚焦结果，规划会被跳过）' : focus.prompt);
 
-    // ---------- 阶段 2/3：跑一轮（规划 + 执行） ----------
     line('阶段 2：计划制定（规划调用，真实 DeepSeek）');
     const signal = new AbortController().signal;
     const events: LlmEvent[] = [];
@@ -275,7 +246,6 @@ async function main(): Promise<void> {
     console.log('\n--- 工具调用流水 ---');
     for (const event of events) {
       if (event.type === 'tool_call_start') {
-        // 入参原文永不透出，事件里只有 `argsDigest` 摘要（见 `types.ts` 的说明）
         const item = event as unknown as {
           name: string;
           label?: string;

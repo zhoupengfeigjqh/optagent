@@ -1,15 +1,3 @@
-/**
- * 性能门槛（`SC-004`）：`prepare` 的 P95 ≤ 500ms。
- *
- * 测量口径（须与规格一致）：
- * - **热路径**：同一进程内连续 200 次 `prepare`（快照已加载，每次只做一次
- *   `stat` + 集合查找 + 求值），取 P50 / P95 / max；
- * - **冷路径**：新建闸门后第一次 `prepare`（含一次完整目录扫描 + YAML 解析），
- *   取 20 个独立数字人目录的中位数与最大值；
- * - 机器：本机（宿主机，非容器）；时间为 `performance.now()` 墙钟。
- *
- * 用例同时是回归门槛：任何一次改动导致 P95 越界都会红灯。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -90,7 +78,6 @@ describe('SC-004：prepare 性能', () => {
     const available = availableOf('erp__CreatePurchaseRecord', 'erp__checkSupplierExistence');
     const input = { toolName: 'erp__CreatePurchaseRecord', record, available };
 
-    // 预热（含首轮快照加载，不计入样本）
     gate.prepare(input);
 
     const samples: number[] = [];

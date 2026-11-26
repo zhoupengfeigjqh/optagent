@@ -1,13 +1,3 @@
-/**
- * 单元测试：run-manager × 交互门（HITL 全链路）。
- *
- * 守住：
- * - run 启动后 agent.run 拿到 interactionSink；挂起点建立即广播 interaction_request（SSE）
- * - resolveInteraction：submit 终验通过 → 工具以用户 args 继续；终验失败不落定可重提；
- *   无进行中 run → NOT_FOUND
- * - pendingInteractionOf：断连恢复快照（含 required / timeout_seconds）
- * - stop：drain 全部挂起点（await sink 的工具调用不会悬挂）
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +21,6 @@ const SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** 本用例使用的数字人（与假实例 key 同值，009 会话落点按它解析） */
 const AGENT = 'demo';
 
 let root: string;
@@ -49,7 +38,6 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** 假实例：拿到 run 传入的 interactionSink，先挂起等用户确认再继续 */
 function interactionAgent(
   script: (sink: InteractionSink | undefined) => AsyncIterable<LlmEvent>,
 ): RunAgentLike {
@@ -69,7 +57,6 @@ function startOpts(agent: RunAgentLike): StartRunOptions {
 }
 
 async function* confirmScript(sink: InteractionSink | undefined): AsyncIterable<LlmEvent> {
-  // 让 subscribe 赶得上挂起点建立（真实链路里 SSE 早已建立，无需此延迟）
   await new Promise((r) => setTimeout(r, 10));
   const outcome = await sink!.request({
     callId: 'c1',
@@ -92,7 +79,6 @@ describe('run-manager × 交互门', () => {
     const events: SsePayload[] = [];
     run.subscribe((e) => events.push(e));
 
-    // 挂起点建立 → interaction_request 事件广播
     await vi.waitFor(() => expect(events.some((e) => e.type === 'interaction_request')).toBe(true));
     const ev = events.find((e) => e.type === 'interaction_request')!;
     if (ev.type !== 'interaction_request') throw new Error('unreachable');
@@ -101,17 +87,14 @@ describe('run-manager × 交互门', () => {
     expect(ev.data.proposed_args).toEqual({ n: 1 });
     expect(ev.data.timeout_seconds).toBe(300);
 
-    // 断连恢复快照
     const snapshot = m.pendingInteractionOf('th_1');
     expect(snapshot?.interaction_id).toBe(ev.data.interaction_id);
     expect(snapshot?.remaining_seconds).toBeGreaterThan(0);
 
-    // 终验失败：不落定、可重提
     const bad = m.resolveInteraction('th_1', ev.data.interaction_id, 'submit', { n: 'x' });
     expect(bad).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
     expect(m.pendingInteractionOf('th_1')).not.toBeNull();
 
-    // 终验通过：工具以用户确认 args 继续
     const ok = m.resolveInteraction('th_1', ev.data.interaction_id, 'submit', { n: 5 });
     expect(ok).toEqual({ ok: true, result: 'settled' });
 
@@ -119,7 +102,6 @@ describe('run-manager × 交互门', () => {
     const messages = history.readRecent('admin', AGENT, 'th_1', 10);
     const assistant = messages.filter((x) => x.role === 'assistant').at(-1);
     expect(assistant?.content).toContain('确认后执行 n=5');
-    // run 结束后挂起状态已清理
     expect(m.pendingInteractionOf('th_1')).toBeNull();
   });
 
@@ -148,7 +130,7 @@ describe('run-manager × 交互门', () => {
       .readRecent('admin', AGENT, 'th_1', 10)
       .filter((x) => x.role === 'assistant')
       .at(-1);
-    expect(assistant?.content).toContain('n=1'); // 首次结果生效
+    expect(assistant?.content).toContain('n=1');
   });
 
   it('reject：工具收到拒绝 outcome，本轮以 done 收尾（模型自行组织话术）', async () => {

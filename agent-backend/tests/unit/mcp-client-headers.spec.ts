@@ -1,16 +1,3 @@
-/**
- * 单元测试：MCP 客户端的**请求头注入**（2026-10-08）
- *
- * 为什么单独测这一层：请求头是**凭据**——平台回显只给掩码、`McpTestReport.target`
- * 也不含它，所以"配了到底发没发"在别处都看不出来。少发一次的症状是**一串 401**，
- * 服务本身是好的，从现象上几乎无法自查。
- *
- * 验证方式刻意**不用 mock**：起一个真实的本地 HTTP 桩服务器，让 SDK 的真传输层去连，
- * 直接断言**服务器收到的请求头**——这等于在线上路径上钉了一颗钉子（含真实 URL /
- * 真实 `requestInit` 传递 / 真实 HTTP 报文）。
- *
- * 桩服务器一律回 401（复刻本体侧自建发布的表现），顺带覆盖"服务不可用时降级不崩"。
- */
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -28,7 +15,6 @@ function httpServer(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
   return { name: 'raw', transport: 'http', url, ...overrides };
 }
 
-/** 该次连接的请求里是否带上某个头（头名大小写不敏感） */
 function sawHeader(name: string): boolean {
   return received.some((headers) => headers[name] !== undefined);
 }
@@ -37,7 +23,6 @@ beforeEach(async () => {
   received = [];
   server = http.createServer((req, res) => {
     received.push(req.headers);
-    // 复刻自建发布容器的表现：没有令牌直接 401（连 MCP 握手都到不了）
     res.writeHead(401, { 'content-type': 'application/json' });
     res.end(
       JSON.stringify({

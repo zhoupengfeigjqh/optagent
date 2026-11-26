@@ -1,20 +1,8 @@
 <script setup lang="ts">
-/**
- * 可见工具多选（新建弹窗第二步，2026-10-08 拆件）。
- *
- * 拆出来的理由：这一步的交互（全选/清空、空清单、截断提示）与"基础连接信息"无关，
- * 混在一个组件里会把 `McpCreateDialog` 推到 500 行门禁之上（宪章原则二）。
- *
- * 契约要点（不变）：
- * - **默认不勾选**（勾选由父级持有，本组件只报告变化）；
- * - **至少一个**由父级在提交时把关（这里不阻止空选择——管理员有权先清空再重勾）；
- * - 工具数超上限时如实说明"未显示的工具无法被勾选"，MUST NOT 静默省略。
- */
 import type { McpToolInfo } from '../../api/types'
 
 const props = defineProps<{
   tools: McpToolInfo[]
-  /** 已勾选的工具名（`v-model:selected`） */
   selected: string[]
   /** 服务工具数超过展示上限（父级据探测结果传入） */
   truncated: boolean
@@ -110,7 +98,6 @@ function clearAll(): void {
   flex-shrink: 0;
 }
 
-/* 平台配置的中文显示名（2026-10-27）：勾选时先看中文，英文工具名仍在旁可对照 */
 .mcp-tool-picker__title {
   flex-shrink: 0;
   font-weight: 600;

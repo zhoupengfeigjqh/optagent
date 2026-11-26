@@ -1,20 +1,4 @@
 <script setup lang="ts">
-/**
- * 回答正文之后的**视图入口行**（2026-10-10，`TR-45`~`TR-48`）
- *
- * 解决的问题：工具结果里常有"能点开看明细"的地址（`viewUrl`），但它是**结果文本里的
- * 死字符串**——用户看得见、点不动；让模型在回答里转写一遍又不可靠（正文与记录无绑定）。
- * 故由运行时把地址抽成 sidecar 随记录下发，这里在**正文之后**渲染成可点入口。
- *
- * 位置（`MessageBubble` 装配）：`MessageContent` 之后、状态提示与 `MessageActions` 之前。
- * 它是"正文的附件"，不是"对消息的操作"，因此**不并入**操作区。
- *
- * 取值：该条消息**全部**工具调用的 `view_links` 并集（`collectToolViewLinks`），
- * 归一化与去重交给 `utils/view-link.ts`（唯一实现，含"不推断名称"的降级链）。
- *
- * 空态：没有任何合法链接时**整行不渲染**——无 DOM 即无间距，界面与改动前一致（`TR-48`）。
- * 流式期自然为空（结果还没产生），无需额外分支。
- */
 import { computed, ref } from 'vue'
 
 import type { ViewLink } from '../../api/types'
@@ -30,34 +14,22 @@ import {
 
 const props = withDefaults(
   defineProps<{
-    /** 记录里的视图链接（服务给的原值，未归一化） */
     links?: ViewLink[]
   }>(),
   { links: () => [] },
 )
 
 const emit = defineEmits<{
-  /**
-   * 入口点击（2026-10-15）：交给上层决定怎么打开。
-   *
-   * 与 `MessageContent` 的外链不同——视图入口的地址可能是**同源页面或本地文件**，
-   * 不能一律 `window.open`（那会把本该右侧渲染的内容弹成新标签）。故携带
-   * `ViewLinkTarget`（归一化地址 + 显示名 + 来源形态），由装配层统一判定：
-   * `kind:'file'` 走文件预览口径，其余按同源预检 / 异源直跳。
-   */
   'open-view': [item: ViewLinkTarget]
 }>()
 
-/** 归一化 + 跨工具去重（纯函数，`computed` 缓存：宪章原则五） */
 const entries = computed(() => toViewLinkEntries(props.links))
 
-/** 溢出展开态：瞬态、不持久化（刷新/切会话回到收起态） */
 const expanded = ref(false)
 
 const visible = computed(() =>
   expanded.value ? entries.value : entries.value.slice(0, VIEW_LINK_DISPLAY_MAX),
 )
-/** 被折叠的条数：MUST 让用户看得见，不静默丢弃（`TR-47`） */
 const hiddenCount = computed(() => entries.value.length - visible.value.length)
 
 function onLinkClick(entry: ViewLinkEntry): void {

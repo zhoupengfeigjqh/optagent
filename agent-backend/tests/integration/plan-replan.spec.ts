@@ -1,13 +1,3 @@
-/**
- * 集成测试（进程内）：T504 —— 两个连续 command 触发一次写后失效重规划。
- *
- * 形态（spec 用户故事 3）：第一批 `[commandA, commandB]`（**两个不同 command**，
- * 同 command 会被 C4 拒），commandA 执行后闸门让所有函数记录失效，
- * 推进入 commandB 时识别到前置已过期 → 失败重规划 → 第二批 `[function, command]`。
- *
- * 判据：`replanCount === 1` 且**重规划发生时** `rollCount` 仍为 0（滚动是最后才发生的，
- * 看终值会被误读）。
- */
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ONTOLOGY_YAML, SECURITIES } from './support/plan-ontology.js';
@@ -64,7 +54,6 @@ describe('T504 两个连续 command → 写后失效重规划', () => {
         if (hop === 0) return call('erp__checkStock', 'c1');
         if (hop === 1) return call('erp__CreatePurchaseRecord', 'c2');
         if (hop === 2) return say('采购单已创建');
-        // 重规划后：先重算（第 3 步），确认完成后才提交（第 4 步）
         if (hop === 3) return call('erp__checkStock', 'c3');
         if (hop === 4) return say('可用库存已重算');
         if (hop === 5) return call('erp__SubmitPurchase', 'c4');
@@ -75,15 +64,12 @@ describe('T504 两个连续 command → 写后失效重规划', () => {
     expect(run.state.replanCount).toBe(1);
     expect(run.finish).toBe('completed');
 
-    // 重规划发生在推进到 commandB 的那一刻——那时还没发生任何滚动
     const replanned = run.logs.find((item) => item.event === 'plan.replanned');
     expect(replanned).toMatchObject({ kind: 'failure', reason: 'stale_functions' });
     expect((replanned?._state as { roll: number } | undefined)?.roll).toBe(0);
 
-    // 重规划输入点明「已被写操作失效」，而不是笼统的“失败”
     expect(run.planMessages[1]).toContain('已被上一步写操作失效');
 
-    // 三个执行步（create / 重算 / submit），最后靠滚动 [] 收尾
     expect(run.state.totalSteps).toBe(3);
     expect(stock.calls()).toBe(2);
     expect(create.calls()).toBe(1);

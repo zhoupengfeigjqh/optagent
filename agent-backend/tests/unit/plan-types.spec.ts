@@ -1,13 +1,3 @@
-/**
- * 单元测试：规划常量与类型（028）。
- *
- * 守住的口径（data-model §5）：
- * - 单批 1~3 步、单批重试 2 次；
- * - **总步数 20**、失败重规划 6 次；
- * - **正常滚动无独立上限**（只受总步数约束）——`ROLL_MAX_PER_RUN` 必须是 `Infinity`，
- *   否则长任务会被"重规划超限"误杀；
- * - 内置工具清单取自目录唯一来源，不硬编码。
- */
 import { describe, expect, it } from 'vitest';
 
 import { builtinToolNames } from '../../src/domain/builtin-tool-catalog.js';

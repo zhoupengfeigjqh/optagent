@@ -25,7 +25,6 @@ function design(overrides: Partial<AgentDesignDocument> = {}): AgentDesignDocume
     enabled_tools: ['read_file'],
     mcp_services: ['ocr'],
     skills: [],
-    // 本体引用为必填数组字段（2026-10-17）：缺省会让预检判"字段缺失"
     ontologies: [],
     scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
     updated_at: '2026-09-15T00:00:00.000Z',
@@ -189,7 +188,6 @@ describe('runPrecheck', () => {
       }),
     );
     const refErrors = errors.filter((e) => e.category === 'reference_validity');
-    // read_file + ocr + ghost
     expect(refErrors).toHaveLength(3);
     expect(refErrors.map((e) => e.detail).sort()).toEqual(['ghost', 'ocr', 'read_file']);
   });
@@ -245,7 +243,6 @@ describe('runPrecheck', () => {
         isWritable: () => false,
       }),
     );
-    // config_integrity / reference_validity / target_writable / name_path_safety 四类齐现
     expect(errors.length).toBeGreaterThanOrEqual(4);
     expect(new Set(errors.map((e) => e.category)).size).toBeGreaterThanOrEqual(4);
   });

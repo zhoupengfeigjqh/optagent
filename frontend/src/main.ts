@@ -1,7 +1,3 @@
-/*
- * @Author: Nose陈建
- * @LastEditTime: 2026-10-27 17:26:46
- */
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import Antd from 'ant-design-vue'

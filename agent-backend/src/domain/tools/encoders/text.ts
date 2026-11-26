@@ -1,15 +1,4 @@
-/**
- * 文本类输出的校验与编码（2026-11-16，`write_file` 格式路由的一期实现）。
- *
- * 五种文本格式（`.txt` / `.md` / `.html` / `.csv` / `.json`）落盘字节完全一致——
- * `Buffer.from(content, 'utf8')`，差别只在**要不要先证明 content 配得上这个扩展名**。
- * 因此编码只保留一份实现，校验按格式拆函数。
- *
- * 本模块**不引用** `write-modes.ts`（模式装配在那一侧），避免循环依赖；
- * 返回 `null` = 通过，返回字符串 = 给模型看的人话原因（上层原样转成失败文案）。
- */
 
-/** 文本落盘的唯一编码（所有文本模式共用） */
 export function encodeText(content: string): Buffer {
   return Buffer.from(content, 'utf8');
 }
@@ -49,7 +38,6 @@ export function validateCsv(content: string): string | null {
   let inQuotes = false;
   for (let i = 0; i < content.length; i += 1) {
     if (content[i] !== '"') continue;
-    // RFC4180：引号内的 `""` 是转义的双引号，不切换状态
     if (inQuotes && content[i + 1] === '"') {
       i += 1;
       continue;

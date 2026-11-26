@@ -1,9 +1,3 @@
-/**
- * 单元测试：工作空间 composable —— **仅覆盖 2026-10-13 的改动点** `uploadExtensionsOf`。
- *
- * 按宪章原则三"随改动触达即补"：本文件只钉住"目录级白名单的查找与回落"，
- * 不为该存量模块的其余函数补测（见 plan.md §4）。
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { WorkspaceResponse } from '../api/types'
@@ -97,13 +91,6 @@ describe('useWorkspace.uploadExtensionsOf（2026-10-13：粒度由空间级下�
   })
 })
 
-/**
- * 012：`registerFile` —— 上传成功后**就地登记**，让发送前的 `exists` 立刻为真。
- *
- * 为什么需要它：`exists` 只读已加载清单，而上传成功后不会重拉 workspace；
- * 不登记就会出现"刚插入的 `@落盘名` 一发送就被判引用不存在"（FR-004）。
- * 这里**不**发起任何请求（`workspace` 接口只被 `load()` 调用一次）。
- */
 describe('useWorkspace.registerFile（012 FR-004）', () => {
   it('登记后 exists 为真、filesOf 含该项（且不重拉全量）', async () => {
     const store = storeWith(makeResponse())
@@ -116,8 +103,7 @@ describe('useWorkspace.registerFile（012 FR-004）', () => {
     expect(store.filesOf('数据准备/生产计划')).toEqual([
       expect.objectContaining({ filename: '报告(1).csv', size: 123 }),
     ])
-    // 就地登记：不为一个文件重拉整棵树（会丢滚动位置、批量时放大成 N 次请求）
-    expect(load).toHaveBeenCalledTimes(1) // 仅 setup 时那一次
+    expect(load).toHaveBeenCalledTimes(1)
   })
 
   it('同 {dir, filename} 重复登记 ⇒ 幂等（不重复插入）', async () => {

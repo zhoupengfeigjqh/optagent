@@ -22,8 +22,6 @@ import {
   schemaAtPath,
 } from './arg-schema'
 
-/** 最复杂的真实形态（外部排产服务的 hd_scheduling_submit）：嵌套对象 + 对象数组。
- *  这里只当**回归样本**用，模块内不含任何该工具的分支。 */
 const NESTED_INPUT = {
   type: 'object',
   properties: {
@@ -57,9 +55,7 @@ describe('controlOf —— 控件分派', () => {
   })
 
   it('数字枚举同样是下拉（保留原始类型，不转字符串）', () => {
-    // 数字取值的枚举（如"数据版本 1~5"这类语义）。
     // 注意：真实契约里这类语义只写在 description 里（字段本身是 `{"type":"integer"}`、没有 enum），
-    // 这里刻意按 enum 声明，验证的是"服务方一旦声明数字枚举"时的规则
     const schema = { type: 'integer', enum: [1, 2, 3, 4, 5] }
     expect(controlOf(schema)).toBe('select')
     expect(optionsOf(schema)).toEqual([1, 2, 3, 4, 5])
@@ -77,7 +73,6 @@ describe('controlOf —— 控件分派', () => {
     expect(optionsOf({ anyOf: [{ type: 'string' }, { type: 'null' }] })).toEqual([])
     expect(controlOf({ anyOf: [{ type: 'string' }, { type: 'null' }] })).toBe('json')
 
-    // 空数组与缺省都保持"非下拉"语义
     expect(optionsOf({ enum: [] })).toEqual([])
     expect(optionsOf({})).toEqual([])
   })
@@ -199,7 +194,6 @@ describe('rulesAnchorOf —— 「从算法规则选择」的落点', () => {
   })
 
   it('祖先是被 JSON 逃生舱接管的自由对象 → 落点退到最近可见的那一行（非 exact）', () => {
-    // input 未声明 properties → 渲染成一个 JSON 文本框，子字段没有独立行
     expect(
       rulesAnchorOf({ properties: { input: { type: 'object' } } }, ['input', 'targetPriorities']),
     ).toEqual({

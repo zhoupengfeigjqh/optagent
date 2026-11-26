@@ -1,12 +1,3 @@
-/**
- * 单元测试：工具记录的上下文投影（002 特性）
- *
- * 守住四条不变式：
- * 1. **只进 messages** —— 工具结果不进 systemPrompt（2026-11-07 删除索引段后不留残余）
- * 2. **预算有界** —— 从最近往前填，超出预算的降级为一行占位
- * 3. **占位不失联** —— 外置结果的占位带副本路径（模型才知道能 read_file 取回）
- * 4. **路径重算** —— 占位行路径由 `{threadId, callId}` 推导，不读数据里的路径
- */
 import { describe, expect, it } from 'vitest';
 import type { ToolCallRecord } from '../../src/domain/tool-events.js';
 import {

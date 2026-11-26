@@ -1,18 +1,3 @@
-/**
- * 单元测试：会话 store 的「新建对话」语义（009 FR-010 / FR-016，D14）
- *
- * 守住一条**契约级**不变式：`startNew()` 是**视图态**操作——
- *
- * 1. 只清空当前选中与消息（`activeId` / `messages` / `total` / `running` / `pending`）；
- * 2. **MUST NOT** 调 `POST /api/threads`（否则每次"新建对话"或切换数字人都留下一条
- *    "没有任何消息"的记录，列表被塞满且用户删不掉——FR-016 只呈现有消息的会话）；
- * 3. **MUST NOT** 产生任何网络请求（含列表拉取：作用域没变，拉取没有意义）。
- *
- * 真实会话由既有路径创建：首条消息时 `activeId === null` → `create()`。
- *
- * 另含**重命名与导出**（2026-10-16，见文件末尾）：重命名是乐观更新（失败整体回滚 +
- * 提示，空标题/未改动不发请求），导出按详情分页**往前翻**并拼成正序全文。
- */
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -74,8 +59,6 @@ const ONE_MESSAGE: Message[] = [
   { id: 'm-1', role: 'user', content: '你好', ts: '', feedback: null },
 ]
 
-/* ---------- 重命名 / 导出夹具（2026-10-16） ---------- */
-
 const CONVERSATION: Conversation = {
   thread_id: 'th_1',
   agent_name: 'demo',
@@ -84,7 +67,6 @@ const CONVERSATION: Conversation = {
   updated_at: '2026-10-16T02:00:00Z',
 }
 
-/** 三轮消息：导出要断言的是**正序**，所以按时间先后命名 */
 const MSG_1: Message = { id: 'm-1', role: 'user', content: '第一条', ts: '', feedback: null }
 const MSG_2: Message = { id: 'm-2', role: 'assistant', content: '第二条', ts: '', feedback: null }
 const MSG_3: Message = { id: 'm-3', role: 'user', content: '第三条', ts: '', feedback: null }
@@ -94,9 +76,6 @@ describe('ThreadsStore.startNew —— 视图态空对话（不落盘）', () =>
     const { api, calls } = makeApi()
     const { store, activeThreadId } = makeStore(api)
 
-    // 先造出"正在看一个已有消息的会话"的状态：
-    // 走公开路径（select → detail），而不是直接改写 store 暴露的只读视图——
-    // 那些视图的契约就是 Readonly<Ref>，生产代码同样写不了。
     calls.detail.mockResolvedValue({
       ...DETAIL_FIXTURE,
       messages: ONE_MESSAGE,
@@ -157,7 +136,6 @@ describe('ThreadsStore.startNew —— 视图态空对话（不落盘）', () =>
 
     expect(calls.create).toHaveBeenCalledWith('demo')
     expect(activeThreadId.value).toBe('th_new')
-    // create 之后会拉一次列表（列表只含有消息的会话，故此时为空）
     expect(calls.list).toHaveBeenCalled()
   })
 })
@@ -240,7 +218,6 @@ describe('ThreadsStore.exportMarkdown —— 导出全文（2026-10-16）', () =
     const { store } = makeStore(api)
     await store.loadList()
 
-    // 详情接口的 offset 从最新往前数：第一页是"最新两条"，第二页才是更早那条
     calls.detail
       .mockResolvedValueOnce({ ...DETAIL_FIXTURE, total: 3, messages: [MSG_2, MSG_3] })
       .mockResolvedValueOnce({ ...DETAIL_FIXTURE, total: 3, messages: [MSG_1] })

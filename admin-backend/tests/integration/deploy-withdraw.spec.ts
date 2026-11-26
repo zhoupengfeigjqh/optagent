@@ -1,16 +1,3 @@
-/**
- * 集成测试：部署产物的**留存与撤回**（`SC-007`、`FR-028`、契约 §6.9，2026-09-16）
- *
- * 守住两条产品决定：
- * ① 部署对 `agents/` 是**整体覆盖**——手工放进该目录的内容会被清掉
- *    （原先"只移除部署清单内的"会让旧目录在清单对不上时永远留下），
- *    但用户文件空间（`user-data/**`）一律不触碰；
- * ② 「撤回」把该用户的数字人从运行环境**整体下架**，而平台侧关联与文件空间保留，
- *    清单条目移除（卡片回到"未部署"），重新部署即可恢复。
- *
- * 与 `deploy.spec.ts` 分文件：部署本体与"留存/撤回"是两件事，各自压在一个文件里
- * 已越过 500 行的门禁（`npm run check:lines`）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -42,7 +29,6 @@ function revision(): number {
   return fx.ctx.store.revision();
 }
 
-/** 部署 / 撤回（读端与写端都以当前 revision 提交） */
 function deploy(userIds: string[] = ['admin']) {
   return fx.app.inject({
     method: 'POST',
@@ -68,7 +54,6 @@ beforeEach(async () => {
     transport: 'http',
     url: 'http://ocr:8000/mcp',
     file_args: {},
-    // 工具白名单：新建必填非空（2026-10-03）
     allowed_tools: ['ocr_image'],
   });
   await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: AGENT });
@@ -106,9 +91,7 @@ describe('部署产物留存：`agents/` 整体覆盖（SC-007、FR-028）', () 
 
     expect((await deploy()).statusCode).toBe(200);
 
-    // 该目录由平台独占管理 → 整体覆盖后不再存在
     expect(fs.existsSync(foreign)).toBe(false);
-    // 本次产物照常在位
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md'))).toBe(
       true,
     );
@@ -129,18 +112,15 @@ describe('撤回部署（§6.9）', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ user_id: 'admin', withdrawn: ['demo'] });
 
-    // 数字人目录整目录下架；文件空间原样
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'))).toBe(false);
     expect(fs.readFileSync(path.join(shared, 'keep.txt'), 'utf8')).toBe('keep');
 
-    // 清单条目移除 → 用户卡片显示"未部署"
     const users = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
     const admin = users.json().items.find((u: { user_id: string }) => u.user_id === 'admin');
     expect(admin.deployed_at).toBeNull();
     const manifest = await fx.app.inject({ method: 'GET', url: '/api/admin/deploy/manifest' });
     expect(manifest.json().items).toEqual([]);
 
-    // 撤回不动平台侧关联：重新部署即恢复
     expect((await deploy()).statusCode).toBe(200);
     expect(fs.existsSync(agentDir)).toBe(true);
   });

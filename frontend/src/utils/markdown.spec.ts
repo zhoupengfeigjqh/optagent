@@ -1,9 +1,3 @@
-/**
- * 单元测试：最小 Markdown 子集解析（2026-10-16）。
- *
- * 解析是渲染的地基：这里钉住"哪些语法被认、哪些原样当文本"，以及**偏移语义**
- * （每个片段都带原文 `start`，搜索高亮的全局序号全靠它，见 `MessageContent.vue`）。
- */
 import { describe, expect, it } from 'vitest'
 
 import { parseInline, parseMarkdown } from './markdown'

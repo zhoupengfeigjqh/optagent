@@ -1,9 +1,3 @@
-/**
- * 路由配置（024）
- *
- * 登录态以 HttpOnly Cookie + `/api/admin/auth/me` 探针为准（前端不读 Cookie）。
- * 守卫对 `meta.requiresAuth` 的业务路由异步探针，未登录跳 `/login`。
- */
 import { createRouter, createWebHistory } from 'vue-router'
 import { getAuthStore } from '@/composables/useAuth'
 
@@ -22,14 +16,12 @@ const router = createRouter({
       component: () => import('@/views/WorkbenchView.vue'),
       meta: { requiresAuth: true },
     },
-    // 数据展示页面
     {
       path: '/datapage/:pageid',
       name: 'datapage',
       component: () => import('@/views/datapage/datapage.vue'),
       meta: { requiresAuth: true },
     },
-    // 排产任务结果页面
     {
       path: '/taskresult',
       name: 'taskResult',
@@ -58,7 +50,6 @@ router.beforeEach(async (to) => {
     const ok = await auth.ensureAuthenticated()
     if (!ok) return { path: '/login', query: { redirect: to.fullPath } }
   } else if (to.path === '/login') {
-    // 已登录访问登录页 → 直接进入工作台
     const ok = await auth.ensureAuthenticated()
     if (ok) return { path: '/' }
   }

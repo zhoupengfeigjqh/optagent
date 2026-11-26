@@ -1,14 +1,3 @@
-/**
- * 单元测试：候选构造与题面（016）。
- *
- * 守住的边界：
- * - 非本体技能一律可聚焦；本体技能只有 `ontology_id` 命中索引才可聚焦（否则不评分）；
- * - 行为只来自入选技能引用的本体，同本体多技能只收集一次；
- * - 行为题面按 `description → title → name` 降级，不含 `op_type`；题号 `s1..` / `c1..` 唯一且连续；
- * - 总数与单批上限都按配置生效。
- *
- * 2026-11-06：候选只来自 `behaviors[]`，题面标签固定为「行为」。
- */
 import { describe, expect, it } from 'vitest';
 import {
   batchQuestions,
@@ -152,7 +141,6 @@ describe('buildCapabilityCandidates', () => {
       'behavior',
       'function',
     ]);
-    // 函数候选带取数入口，行为候选不带
     expect(result.candidates[2]!.relatedConcepts).toEqual(['PurchaseRecord']);
     expect(result.candidates[0]!.relatedConcepts).toEqual([]);
     expect(result.candidates[2]!.concept).toBeNull();
@@ -161,15 +149,11 @@ describe('buildCapabilityCandidates', () => {
   it('题面按 description → title → name 降级，不含 op_type', () => {
     const result = buildCapabilityCandidates(skills, index([ontology()]), 96);
     const questions = buildCapabilityQuestions(result.candidates);
-    // 有描述 → 用描述
     expect(questions.c1!.instructions).toBe('需要行为「创建一笔新的原材料采购记录」');
-    // 描述为空 → 用 title
     expect(questions.c2!.instructions).toBe('需要行为「查询原材料采购单信息」');
     // 函数同规则降级，但措辞是「需要函数」
     expect(questions.c3!.instructions).toBe('需要函数「按采购单汇总未到位数量」');
-    // op_type（command / query）不进题面
     expect(JSON.stringify(questions)).not.toContain('command');
-    // description 与 title 都空 → 用 name（英文标识符）
     const onlyName = buildCapabilityQuestions([
       {
         qid: 'x1',

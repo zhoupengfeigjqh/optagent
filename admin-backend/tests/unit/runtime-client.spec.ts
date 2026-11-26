@@ -1,9 +1,3 @@
-/**
- * 单元测试：运行环境只读投影客户端（T048 的第二半）
- *
- * 用本进程内的 HTTP 服务扮演运行环境，覆盖两条只读端点与全部失败分支——
- * 这些分支直接决定"读不到"是否被误当成"没问题"。
- */
 import http from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
@@ -52,7 +46,7 @@ const server = http.createServer((req, res) => {
       mode === 'bad-shape'
         ? { items: [] }
         : mode === 'no-groups'
-          ? // 2026-09-23：`groups` 是必填结构——缺失即"结构不合法"，
+          ?
             // 不能让平台静默显示空表、冒称"没调用过"
             { stats_available: true, items: [] }
           : {

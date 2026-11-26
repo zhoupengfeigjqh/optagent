@@ -1,16 +1,3 @@
-/**
- * 集成测试：**连续两轮**的「下一步动作提示」链路（007 修订 · Tail Protocol）。
- *
- * 修订前本文件守住的是"独立生成链的两轮时序"；修订后卡片与回答**同流产出**，
- * 这里改用真实 `RunManager` + `RunFinalizer` + `NextActionsStore`（只把模型换成桩）
- * 守住新链路的三条硬约束：
- *
- * 1. 尾部块对用户**不可见**：SSE content 逐字 = 落盘正文（不含块）；
- * 2. 卡片随 `done` **直推**（`settle` 后即可判定，无轮询、无窗口），
- *    快照归属当轮 assistant 消息；第 2 轮开始即清空第 1 轮快照；
- * 3. 开关关闭（`nextActionsConfig` 返回 `null`）→ 请求不带 `nextActionsMax`、
- *    done 不带卡片、无快照——提示词装配期是唯一门控。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +14,6 @@ import type { LlmEvent } from '../../src/types.js';
 
 const USER = 'admin';
 const THREAD = 'th_1';
-/** 本用例的数字人（009：会话/快照落在 user-data/{数字人}/threads/{会话}） */
 const AGENT = 'demo';
 
 let root: string;
@@ -37,12 +23,6 @@ function snapshotFile(): string {
   return path.join(root, 'users', USER, 'user-data', AGENT, 'threads', THREAD, 'next-actions.json');
 }
 
-/**
- * 尾部块：每轮条目不同，便于确认"确实是本轮产出"。
- *
- * 016：卡片的 `tool_tips` 由模型从本轮 Laya 能力目录抄写；定稿层不再按运行时工具
- * 白名单裁剪，`tool_tips` 原样透传（只截断到 5 条）。候选范围由 `intentFocus` 桩提供。
- */
 function tailFor(round: number): string {
   return `<next_actions>${JSON.stringify({
     actions: [
@@ -54,7 +34,6 @@ function tailFor(round: number): string {
   })}</next_actions>`;
 }
 
-/** 016：本轮 Laya 选出的本体能力（卡片的唯一候选范围） */
 const TOOL_TIP = {
   name: 'QueryPurchaseRecords',
   title: '查询采购订单信息',
@@ -62,21 +41,15 @@ const TOOL_TIP = {
   ontology_name: '采购管理',
 };
 
-/** 意图聚焦桩：返回非空能力集，供卡片定稿门控通过 */
 function intentFocusStub() {
   return { judge: async () => ({ prompt: '', toolTips: [TOOL_TIP] }) };
 }
 
-/**
- * 假数字人：产出一段回答 + 尾部块 + done（并把 runtime 的可用工具按 `agent-factory` 的口径回填）。
- * `req.nextActionsMax` 由 RunManager 按 SOUL 配置注入——桩顺手记录，供开关断言使用。
- */
 function stubAgent(round: number, recorder?: { maxes: Array<number | undefined> }): RunAgentLike {
   return {
     key: { userId: USER, agentName: AGENT },
     activeThreads: 0,
     // 注意签名：`RunAgentLike.run` 收**一个请求对象**（`{ threadId, messages, runtime, … }`），
-    // 不是 `(messages, options)` —— 传错参数会让 generator 内部抛错、整轮走 error 分支
     async *run(req: AgentRunRequest) {
       if (req.runtime)
         req.runtime.availableTools = [{ name: 'read_file', description: '读取文件' }];
@@ -88,7 +61,6 @@ function stubAgent(round: number, recorder?: { maxes: Array<number | undefined> 
   };
 }
 
-/** 收集 SSE content 增量（模拟前端"用户所见"） */
 function collectContent(run: {
   subscribe(cb: (e: { type: string; data: unknown }) => void): void;
 }): {
@@ -137,7 +109,6 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
     const sse1 = collectContent(round1);
     await round1.settled;
 
-    // done 直推：卡片就绪且归属第 1 轮（无需任何轮询窗口）
     expect(sse1.doneData[0]).toMatchObject({
       message_id: round1.assistantMessageId,
       next_actions: {
@@ -145,11 +116,9 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
         actions: [{ prompt: '第 1 轮建议：核对交付日期', tool_tips: [TOOL_TIP] }],
       },
     });
-    // 用户所见 = 落盘正文（不含尾部块）
     expect(sse1.deltas.join('')).toBe('第 1 轮回答正文');
     expect(store.read(USER, AGENT, THREAD)?.message_id).toBe(round1.assistantMessageId);
 
-    // 第 2 轮：开始即清空第 1 轮快照（发起新一轮的瞬间旧卡片消失）
     const round2 = manager.startRun({
       userId: USER,
       threadId: THREAD,
@@ -169,9 +138,7 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
         actions: [{ prompt: '第 2 轮建议：核对交付日期', tool_tips: [TOOL_TIP] }],
       },
     });
-    // 快照只归最新一轮：第 1 轮的消息 id 上不再有任何卡片（FR-015 / FR-017）
     expect(store.read(USER, AGENT, THREAD)?.message_id).toBe(round2.assistantMessageId);
-    // 历史 jsonl 永不含卡片内容
     const roles = history.readAll(USER, AGENT, THREAD);
     expect(roles.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
     expect(roles[1]!.content).toBe('第 1 轮回答正文');
@@ -197,7 +164,6 @@ describe('连续两轮的下一步动作提示（Tail Protocol 全链路）', ()
     expect(maxes).toEqual([undefined]);
     expect(JSON.stringify(sse.doneData[0])).not.toContain('next_actions');
     expect(fs.existsSync(snapshotFile())).toBe(false);
-    // 模型即便没守规矩照样输出了块：块内容也不应透给用户（捕获照常工作）
     expect(sse.deltas.join('')).toBe('第 1 轮回答正文');
   });
 });

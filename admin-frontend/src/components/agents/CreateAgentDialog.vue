@@ -1,23 +1,4 @@
 <script setup lang="ts">
-/**
- * 「新建数字人」弹窗（`FR-015`，2026-10-09）。
- *
- * 弹窗只采集两件事：
- * 1. **数字人名称**（必填）——本地即校验合法性，并**拒绝**与既有数字人重名；
- * 2. **可选的「复制已有数字人」来源**——选定则以其五类配置为模板，未选定则全部重建。
- *
- * 确认后**不落盘**，只把结果交给父级带入设计明细。原因：`POST /api/admin/agents`
- * 要求 SOUL 非空（`FR-019`）且场景名非空（`FR-020`），此刻还不具备，因此只能
- * "带着初值进入设计器"，由设计器保存时才真正创建——这一点与「新建 MCP 服务」弹窗
- * （弹窗内即可创建落库）不同。
- *
- * **为什么自建而不复用 `ConfirmDialog`**：理由同 `McpCreateDialog`（`FR-043`）——
- * 它的确认按钮**无条件关窗**，做不到"重名/非法时不关窗、输入不丢"，且它是
- * 破坏性操作二次确认（`FR-007`）的专用件，扩成录入表单会污染职责。
- *
- * 可访问性基线同 `ConfirmDialog` / `McpCreateDialog`：原生 `<dialog>` + `showModal()`
- * （焦点陷阱、Esc、焦点归还由浏览器提供；宪章原则六"能用原生就不引库"）。
- */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listAgents } from '../../api/agents'
 import type { AgentListItem } from '../../api/types'
@@ -29,26 +10,21 @@ const props = defineProps<{ open: boolean }>()
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
-  /** 确认：父级据此预填新建草稿并导航到设计明细 */
   (e: 'confirm', value: { name: string; copyFrom: string | null }): void
 }>()
 
 const dialogEl = ref<HTMLDialogElement | null>(null)
 const nameEl = ref<HTMLInputElement | null>(null)
-/** 关闭后焦点归还的目标（打开时记录） */
 let restoreFocusTo: HTMLElement | null = null
 
 const name = ref('')
-/** 复制源；空串 = 不复制（与 `<select>` 的占位项一致） */
 const copyFrom = ref('')
 const localError = ref<string | null>(null)
 
-/** 既有数字人：既作复制源候选，也作**重名判据**的数据来源 */
 const existing = ref<AgentListItem[]>([])
 const listError = ref<string | null>(null)
 const loadingSources = ref(false)
 
-/** 当前选中的复制源（用于异常态警示） */
 const selected = computed(() => existing.value.find((item) => item.name === copyFrom.value) ?? null)
 const selectedAbnormal = computed(() => selected.value?.abnormal === true)
 
@@ -73,14 +49,12 @@ async function loadExisting(): Promise<void> {
     existing.value = [...first.items, ...rest.flatMap((page) => page.items)]
   } catch (err) {
     // 读不到清单**不阻断**新建，但 MUST NOT 假装"没有重名"（原则九）：
-    // 本地重名判定随之关闭，并如实告知改由服务端在保存时拒绝。
     listError.value = `未能读取已有数字人清单（${toErrorInfo(err).code}）：复制源不可选，重名改由服务端在保存时拒绝。`
   } finally {
     loadingSources.value = false
   }
 }
 
-/** 每次打开都是全新的一次新建：清空输入、报错与上次拉到的清单 */
 function reset(): void {
   name.value = ''
   copyFrom.value = ''
@@ -117,22 +91,13 @@ function requestClose(): void {
   emit('update:open', false)
 }
 
-/** `cancel` 事件由 Esc 触发：阻止浏览器默认关闭，统一走 `update:open` 流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   requestClose()
 }
 
-/**
- * 确认：校验通过才放行。
- *
- * 重名与非法名**留在此处解决**（`FR-015` 要求"被拒绝并说明原因"）：
- * 校验不通过即停在弹窗内并给出可读原因，不关窗、不丢输入。
- */
 function confirm(): void {
   localError.value = null
-  // 清单读不到时不做本地重名判定：宁可让服务端在保存时拒绝，
-  // 也不要给出"没重名"的假阴性（本地判据只是提前暴露，不是权威判据）
   const taken = listError.value === null ? existing.value.map((item) => item.name) : []
   const invalid = validateNewAgentName(name.value, taken)
   if (invalid !== null) {
@@ -156,7 +121,6 @@ watch(
     }
     reset()
     openDialog()
-    // 清单只在打开时拉一次；拉取中也能先填名称，确认时会等校验时机自然串上
     await loadExisting()
   },
   { immediate: true },
@@ -218,7 +182,6 @@ onBeforeUnmount(() => {
         </span>
       </label>
 
-      <!-- 复制异常数字人是允许的（便于"以坏为模板修"），但必须提前讲明后果 -->
       <p v-if="selectedAbnormal" class="create-agent-dialog__warn" role="alert">
         该数字人的部分引用已失效：{{ selected?.abnormal_reason }}。 复制后需先修正这些引用才能保存。
       </p>

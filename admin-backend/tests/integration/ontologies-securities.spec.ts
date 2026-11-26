@@ -1,13 +1,3 @@
-/**
- * 集成测试：本体安全管控同步（2026-10-03 扩展，契约 §10）
- *
- * 独立成文件的原因：`ontologies.spec.ts` 触 500 行门禁（原则二），
- * 与主体端点用例分居两个文件，夹具各自自洽。
- *
- * 覆盖：`securities.yaml` 随本体一并导入/更新（**必需文件**，2026-10-17 起）、
- * 详情 `securities_content` 全文、市场仅改安全管控即 `changed`、
- * 市场缺少/移除该文件时该条 `invalid` 且导入/更新被拒、删除本体连带清除。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,9 +18,6 @@ const YAML = `metadata:
 concepts: []
 `;
 
-/**
- * 生成与市场路径**完全一致**的 ontology.yaml（metadata 即身份，入库强校验）。
- */
 function yamlFor(scenario: string, ontologyDir: string): string {
   return YAML.replace(`scenario_name: ${SCENARIO}`, `scenario_name: ${scenario}`).replace(
     `ontology_name: ${ONTOLOGY}`,
@@ -62,7 +49,6 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO, 
   const dir = path.join(marketDir!, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), content);
-  // 2026-10-17：securities.yaml 为必需文件；测"缺文件"的用例传 false
   if (withSecurities) fs.writeFileSync(path.join(dir, 'securities.yaml'), SECURITIES);
 }
 
@@ -140,7 +126,6 @@ describe('安全管控同步 securities.yaml（§10.1 / §10.2 / §10.5）', () 
   });
 
   it('市场缺 securities.yaml → 该条 invalid，导入被拒（400）', async () => {
-    // 该用例需要"市场里只有 ontology.yaml"，故自建市场而不走默认 setup
     marketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-sec-'));
     writeMarket(ONTOLOGY, YAML, SCENARIO, false);
     fx = await createFixture({ env: { ONTO_MARKET_DIR: marketDir } });
@@ -203,7 +188,6 @@ describe('安全管控同步 securities.yaml（§10.4 / §10.6）', () => {
       payload: ASCII,
     });
     expect(res.statusCode).toBe(400);
-    // 拒绝发生在写入之前：库内仍是完整快照
     expect(fs.existsSync(saved)).toBe(true);
   });
 

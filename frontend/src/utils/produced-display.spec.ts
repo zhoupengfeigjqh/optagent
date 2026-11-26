@@ -62,7 +62,7 @@ describe('badgeText', () => {
 describe('middleEllipsis', () => {
   it('够短就原样返回（不无谓地加省略号）', () => {
     expect(middleEllipsis('job_1')).toBe('job_1')
-    expect(middleEllipsis('a'.repeat(17))).toBe('a'.repeat(17)) // head+tail+1 = 17
+    expect(middleEllipsis('a'.repeat(17))).toBe('a'.repeat(17))
   })
 
   it('过长收中段，两端保留——尾部不会再被 CSS 省略号吃掉', () => {

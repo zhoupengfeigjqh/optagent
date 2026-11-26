@@ -1,9 +1,3 @@
-/**
- * 单元测试：运行侧鉴权钩子（`contracts/auth-api.md` §3）
- *
- * 钩子为回调式：身份通过 `authContext.run(store, done)` 注入，故"注入身份"的断言
- * 在 `done` 回调内读取（此时正处于 ALS 上下文，等价于后续 handler 的视角）。
- */
 import { SignJWT } from 'jose';
 import { describe, expect, it } from 'vitest';
 import { getCurrentUser } from '../../src/domain/current-user.js';
@@ -33,7 +27,6 @@ function fakeReq(url: string, cookie?: string) {
 
 type Hook = ReturnType<typeof createAuthHook>;
 
-/** 执行钩子并等待 `done`；返回 `done` 时读取到的当前用户（用于身份注入断言）。 */
 function runHook(hook: Hook, req: unknown): Promise<{ userId?: string }> {
   return new Promise((resolve, reject) => {
     hook(req as never, {} as never, (err?: Error) => {
@@ -47,7 +40,6 @@ describe('createAuthHook', () => {
   it('白名单放行（不注入身份）', async () => {
     const hook = createAuthHook({ secret: SECRET });
     for (const path of AUTH_ALLOWLIST) {
-      // 放行且不注入身份 → getCurrentUser 仍为 admin
       await expect(runHook(hook, fakeReq(path))).resolves.toEqual({ userId: 'admin' });
     }
   });

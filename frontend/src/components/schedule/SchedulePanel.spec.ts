@@ -1,12 +1,3 @@
-/**
- * 组件测试：设置覆盖层（015，T040 / T041a / T052）
- *
- * 三条关键口径：
- * 1. 头部按钮顺序固定「运行记录 → 创建定时任务 → ×」（FR-004）；
- * 2. **开合覆盖层不产生任何任务状态写入**（FR-003 / FR-006，T041a）——只看一眼设置
- *    不该触发 create / remove / toggle；
- * 3. 删除必须经过二次确认：确认框里带任务名，确认后才调 `removeTask`。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -96,10 +87,8 @@ describe('SchedulePanel', () => {
     await wrapper.findAll('.schedule-panel__actions button')[0]!.trigger('click')
     expect(wrapper.findComponent(ScheduleRunsDialog).props('open')).toBe(true)
 
-    // 父级直接改 `open`（跳转会话的关闭路径），组件自身的 closePanel 不会执行
     await wrapper.setProps({ open: false })
 
-    // 留在打开态的模态会让整个文档 inert —— 回到聊天区后哪里都点不动
     expect(wrapper.findComponent(ScheduleRunsDialog).props('open')).toBe(false)
   })
 
@@ -127,7 +116,6 @@ describe('SchedulePanel', () => {
 
   it('停用行点编辑 → 打开同一个表单弹窗并带上该任务（预填来源）', async () => {
     const { wrapper } = mountPanel()
-    // 行内按钮顺序：启停(0) → 编辑(1) → 删除(2)
     await wrapper.findAll('tbody button')[1]!.trigger('click')
 
     const dialog = wrapper.findComponent(ScheduleCreateDialog)
@@ -146,14 +134,12 @@ describe('SchedulePanel', () => {
       expect(wrapper.findComponent(ScheduleCreateDialog).props('open')).toBe(false),
     )
 
-    // 编辑只提交 7 项可编辑字段：会话模式不进 PATCH 体（服务端会按未声明字段 400）
     const [, payload] = updateTask.mock.calls[0]!
     expect(payload).not.toHaveProperty('new_thread_per_run')
   })
 
   it('删除要经过二次确认：文案含任务名，确认后才调用 removeTask', async () => {
     const { wrapper, removeTask } = mountPanel()
-    // 行内删除按钮（第 3 个）→ 弹确认框
     await wrapper.findAll('tbody button')[2]!.trigger('click')
 
     const confirm = wrapper.findComponent(ConfirmDialog)

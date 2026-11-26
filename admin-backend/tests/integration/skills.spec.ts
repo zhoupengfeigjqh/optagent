@@ -72,7 +72,6 @@ describe('POST /api/admin/skills/install', () => {
 
     const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/skills/pdf-parse' });
     expect(detail.json()).toMatchObject({ name: 'pdf-parse', display_name: '文档解析' });
-    // 目录名与 URL 都用身份名，展示名不参与
     expect(fs.existsSync(path.join(skillsRoot(), 'pdf-parse'))).toBe(true);
   });
 
@@ -104,7 +103,6 @@ describe('POST /api/admin/skills/install', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('ADM_SKILL_ARCHIVE_UNSAFE');
     }
-    // 三次失败均无残留
     const dirs = fs.existsSync(skillsRoot()) ? fs.readdirSync(skillsRoot()) : [];
     expect(dirs.filter((d) => d.startsWith('.tmp-') || d.startsWith('.old-'))).toEqual([]);
   });
@@ -160,7 +158,6 @@ describe('POST /api/admin/skills/install', () => {
       },
     });
     await install(zipFixture({ 'SKILL.md': SKILL_MD }));
-    // 安装只落在共享技能库
     expect(fs.existsSync(path.join(fx.platformDataDir, 'skills', 'pdf-parse', 'SKILL.md'))).toBe(true);
     // 安装不会凭空创建数字人目录（FR-037：MUST NOT 直接写入某个数字人的技能目录）
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo'))).toBe(false);
@@ -228,7 +225,6 @@ describe('GET /api/admin/skills/{name}（查看）与 /file（读取单文件）
 });
 
 describe('PUT /api/admin/skills/{name}/file（在线编辑，2026-09-16）', () => {
-  /** 读一次文件拿到哈希（编辑的乐观锁基准） */
   async function hashOf(name: string, filePath: string): Promise<string> {
     const res = await fx.app.inject({
       method: 'GET',
@@ -332,7 +328,6 @@ describe('PUT /api/admin/skills/{name}/file（在线编辑，2026-09-16）', () 
     ).toBe(200);
 
     expect(fs.readFileSync(path.join(skillsRoot(), 'pdf-parse', 'SKILL.md'), 'utf8')).toContain('改过的正文');
-    // 编辑不落物化产物：数字人目录要么不存在，要么内容不由编辑产生
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo'))).toBe(false);
   });
 });

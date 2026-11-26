@@ -1,13 +1,3 @@
-/**
- * 集成测试：部署的**语义一致性**（2026-10-20 修复回写）。
- *
- * 覆盖三件事，均为此前"契约有、实现没有"或"容易误用"的口径：
- * 1. `manifest_diff`（`FR-032`）真的会报出"运行环境被手工删改"，且取的是**部署前**快照；
- * 2. `user_ids: []` 明确拒绝——只有**省略字段**才是"部署全部用户"（防误全量覆盖）；
- * 3. 未知用户整批 404 时，`details.user_ids` 指明具体是哪些用户（界面据此可定位）。
- *
- * 与 `deploy.spec.ts` 分居：该文件已近 500 行门禁（宪章原则二），本次只加新语义。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,7 +33,6 @@ beforeEach(async () => {
   });
   if (created.statusCode !== 201) throw new Error(`创建数字人失败：${created.body}`);
   fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
-  // 第二个平台内用户（未关联数字人）：用于验证"省略 user_ids = 全部平台用户"
   fx.ctx.users.create('ops', [], fx.ctx.store.revision());
 });
 
@@ -55,7 +44,6 @@ function revision(): number {
   return fx.ctx.store.revision();
 }
 
-/** 部署 admin（唯一关联了数字人的用户） */
 async function deployAdmin() {
   return fx.app.inject({
     method: 'POST',
@@ -107,7 +95,6 @@ describe('未知用户 → 404 且指明是哪些用户（2026-10-20）', () => 
     expect(res.statusCode).toBe(404);
     expect(res.json().error.code).toBe('ADM_USER_NOT_FOUND');
     expect(res.json().error.details.user_ids).toEqual(['ghost1', 'ghost2']);
-    // 整批拒绝 ⇒ 一个都不该写
     expect(fs.existsSync(demoSoul())).toBe(false);
   });
 });
@@ -128,7 +115,6 @@ describe('`manifest_diff`（FR-032）：部署前与运行环境的差异', () =
       kind: 'agent_missing_in_runtime',
     });
     expect(diffs[0]!.detail).toContain('手工删除');
-    // 差异是"部署前"的事实：部署后目录已按设计态重建
     expect(fs.existsSync(demoSoul())).toBe(true);
   });
 

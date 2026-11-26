@@ -1,9 +1,3 @@
-/**
- * 工具调用展示模型的纯函数测试（002 特性）
- *
- * 这里守的是**规则**（而非渲染）：状态文案的分流、可展开判定、计数口径、分组键稳定性。
- * 组件测试（`ToolCallList.spec.ts`）只验证"这些规则被用在了正确的位置"。
- */
 import { describe, expect, it } from 'vitest'
 
 import type { Message, ToolCallRecord } from '../api/types'
@@ -173,7 +167,6 @@ describe('tool-calls —— 契约映射', () => {
       summary: '识别到 12 页产能表',
       argsDigest: { path: 'a.xlsx' },
     })
-    // `truncated === false` 不落进展示模型（只有"被截断"才提示）
     expect('truncated' in mapped).toBe(false)
   })
 
@@ -204,8 +197,6 @@ describe('tool-calls —— 契约映射', () => {
 })
 
 describe('tool-calls —— 格式化', () => {
-  // 体积 / 耗时已收敛到 `utils/format`（`formatBytes` / `formatDurationMs`），其口径由
-  // `format.spec.ts` 守；这里只保留本模块自己的展示拼装。
   it('入参摘要拼成一行可读文本', () => {
     expect(formatArgsDigest({ path: 'a.xlsx', sheet: '产能' })).toBe('path=a.xlsx  sheet=产能')
   })

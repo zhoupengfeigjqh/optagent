@@ -1,16 +1,4 @@
 <script setup lang="ts">
-/**
- * 部署历史（`FR-033`、`SC-008`）：可追溯到时间、涉及对象与结果。
- *
- * 两条界面口径（2026-09-16 十三次调整）：
- * - **每页固定 5 条**：历史是持续追加的日志，整表铺开会把页面撑得极长；翻页在
- *   **已拉取到的**记录内进行（服务端有界返回最近 100 条，即最多 20 页）；
- * - **展开行看部署明细**：结果列只能说"部分成功/失败"，而"失败的是哪个用户、
- *   哪些数字人、为什么失败"必须能就地看到。这些数据**本就在历史记录里**
- *   （`users[]` / `manifest_diff`），此前只是没有呈现——故不另设详情接口。
- *   展开**单开**（同时只展开一行），翻页后自动收起；
- *   「明细」操作列置于**最右**（失败数之后，2026-09-16 十四次调整）。
- */
 import { computed, ref, watch } from 'vue'
 import type { DeployHistoryItem, DeployManifestDiffEntry, DeployUserResult } from '../../api/types'
 import { toErrorInfo } from '../../utils/error-message'
@@ -20,7 +8,6 @@ import StatusBadge from '../common/StatusBadge.vue'
 
 const props = defineProps<{
   items: DeployHistoryItem[]
-  /** 服务端有界返回（`FR-006`）：为真即"还有更早的记录没有拉取" */
   truncated?: boolean
   /** 加载失败（2026-10-20）：失败 MUST NOT 渲染成"还没有部署记录" */
   error?: unknown
@@ -31,7 +18,6 @@ const emit = defineEmits<{
   (e: 'retry'): void
 }>()
 
-/** 错误提示按错误码分派文案（前端不展示后端 message） */
 const errorInfo = computed(() => (props.error ? toErrorInfo(props.error) : null))
 
 /** 每页条数：固定值，界面只翻页（MUST NOT 由用户调整） */
@@ -50,7 +36,6 @@ const RESULT_TONE: Record<string, 'success' | 'warning' | 'error'> = {
 }
 
 const page = ref(1)
-/** 当前展开的那一条；`null` = 全部收起 */
 const expandedId = ref<string | null>(null)
 
 const totalPages = computed(() =>
@@ -68,7 +53,6 @@ const summaryText = computed(() =>
     : `共 ${props.items.length} 条`,
 )
 
-// 记录被重新拉取后页码可能越界（如历史被清理过）→ 收敛到最后一页，不出现空白页
 watch(
   () => props.items.length,
   (length) => {
@@ -98,18 +82,15 @@ function go(target: number): void {
   expandedId.value = null
 }
 
-/** 某个用户结果里的数字人名单（按动作分组：写入 / 从运行环境下架） */
 function agentNames(user: DeployUserResult, action: 'written' | 'removed'): string[] {
   return (user.agents ?? []).filter((agent) => agent.action === action).map((agent) => agent.name)
 }
 
-/** 校验结论：`passed` 为假时**带上错误项数**，只说"未通过"无法定位问题规模 */
 function validationText(item: DeployHistoryItem): string {
   if (!item.validation) return '校验结果未记录'
   return item.validation.passed ? '校验通过' : `校验未通过（${item.validation.error_count} 项）`
 }
 
-/** 差异项一行文字：用户 / 数字人：可读说明（缺说明时回退到差异类型） */
 function diffText(diff: DeployManifestDiffEntry): string {
   const target = diff.target ? ` / ${diff.target}` : ''
   return `${diff.user_id}${target}：${diff.detail || diff.kind}`
@@ -192,7 +173,6 @@ function diffText(diff: DeployManifestDiffEntry): string {
               </td>
             </tr>
 
-            <!-- 部署明细：逐用户结果（含失败原因）与本次差异项 -->
             <tr v-if="expandedId === item.id" class="deploy-history__detail-row">
               <td colspan="6">
                 <div :id="`deploy-history-detail-${item.id}`" class="deploy-history__detail">

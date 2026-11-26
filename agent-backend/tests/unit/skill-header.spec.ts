@@ -1,11 +1,3 @@
-/**
- * 单元测试：技能头部读取与解析（016）。
- *
- * 守住的边界：
- * - frontmatter 缺失 / 未闭合 / YAML 非法 / 缺 name 或 description → 逐技能失败，不抛整轮；
- * - `ontology_id` / `scenario_id` 数字与字符串等价归一化；`ontology_name` 去空白；
- * - 只读前 64KB：正文再长也不影响头部解析（有界读取的核心收益）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -1,16 +1,3 @@
-/**
- * 单元测试：本轮运行状态机的乐观用户气泡（2026-09-16 十七次调整）。
- *
- * 回归的 bug：历史刷新（`onTurnFinished`）只在流**完成后**触发，而发送路径没有任何
- * 本地插入——导致"发送后要等 AI 答完，自己的消息才显示"。
- *
- * 不变式（本文件守住）：
- * - 发送即置位（流进行中即可见），内容与引用原样保留；
- * - 完成 / 失败 / 中断 / 切换会话，全部清除（MUST NOT 与历史真身重复渲染）。
- *
- * 另含**按会话分桶的草稿**（2026-10-16，见文件末尾）：切会话时存旧取新，
- * 视图态新对话不留幽灵草稿。
- */
 import { nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -32,7 +19,6 @@ const DONE_SCRIPT = [
   '',
 ].join('\n')
 
-/** 返回按给定 SSE 脚本应答的 fetch 假实现 */
 function sseFetch(script: string): typeof fetch {
   return (async () =>
     new Response(script, {
@@ -41,7 +27,6 @@ function sseFetch(script: string): typeof fetch {
     })) as unknown as typeof fetch
 }
 
-/** 永不吐数据的挂起流（模拟"AI 还在长时间作答中"） */
 const PENDING_FETCH = (async () =>
   new Response(new ReadableStream<Uint8Array>({ start() {} }), {
     status: 200,
@@ -161,16 +146,12 @@ describe('useChatStream —— 乐观用户气泡（十七次调整）', () => {
     store.reset()
     await pending
 
-    // 不变式是"气泡清除、不泄漏到新会话"，相位停在 reset() 显式设置的 IDLE。
-    // 2026-10-27 起在途流被 `runToken` 判为过期，其 AbortError 收尾**不再**把相位改成
-    // ABORTED：切到别的会话后显示"已中断"本身就是错的（那个会话里什么都没中断过）。
     expect(store.pendingUserMessage.value).toBeNull()
     expect(store.phase.value).toBe(RUN_PHASE.IDLE)
   })
 })
 
 describe('useChatStream —— done 直推卡片（007 修订 · Tail Protocol）', () => {
-  /** done 带 `next_actions` 的 SSE 脚本（形状与后端 `run-finalize` 直推一致） */
   const SCRIPT_WITH_CARD = [
     'event: content',
     'data: {"delta":"你好"}',
@@ -234,14 +215,12 @@ describe('useChatStream —— 按会话分桶的草稿（2026-10-16）', () => 
     activeThreadId.value = 'th_b'
     await nextTick()
 
-    // 切到 B：输入框是干净的（旧实现里这里会带着 A 的半句话）
     expect(store.draft.value).toBe('')
 
     store.draft.value = 'B 的问题'
     activeThreadId.value = 'th_a'
     await nextTick()
 
-    // 切回 A：半句话还在
     expect(store.draft.value).toBe('把上个月的生产计划')
   })
 
@@ -249,7 +228,6 @@ describe('useChatStream —— 按会话分桶的草稿（2026-10-16）', () => 
     const activeThreadId = ref<string | null>(null)
     const store = createChatStreamStore(makeDeps({ activeThreadId }))
 
-    // 在新对话里敲字 → 首条消息发送时 `threads.create()` 让 id 由 null 变真
     store.draft.value = '第一句'
     activeThreadId.value = 'th_created'
     await nextTick()
@@ -298,15 +276,6 @@ describe('useChatStream —— 按会话分桶的草稿（2026-10-16）', () => 
   })
 })
 
-/**
- * 跨轮隔离（2026-10-27 回归）
- *
- * `reset()` 只 abort 旧流、**不等**旧 `send()` 退出（切会话 / 新建会话 / 删会话都走它）。
- * 修复前旧流的 `catch` / `finally` 会无条件写共享状态：把新一轮打成 `aborted`/`failed`
- * （输入区解锁 → 可并发发出第二个 run → 撞 409）、把新一轮的 `controller` 置 null
- * （此后无法终止）、清空本轮 `toolCalls`。这里用"第一轮 fetch 挂起、第二轮正常跑完、
- * 再放行第一轮"的时序钉住它。
- */
 describe('useChatStream —— 跨轮隔离（2026-10-27）', () => {
   it('reset() 之后迟到的旧流不得改写新一轮状态', async () => {
     let releaseFirst!: (response: Response) => void
@@ -328,22 +297,18 @@ describe('useChatStream —— 跨轮隔离（2026-10-27）', () => {
 
     const store = createChatStreamStore(makeDeps({ fetchImpl }))
     const first = store.send({ content: '第一句', attachments: [] })
-    // 旧流会被 reset() abort，可能以 AbortError 拒绝：属预期，先挂上 catch 免得 vitest 报未处理拒绝
     const settled = first.catch(() => undefined)
     await flush()
     expect(store.phase.value).toBe(RUN_PHASE.STREAMING)
 
-    // 用户切会话 / 点「新建会话」：只 abort 旧流，不等它退出
     store.reset()
     await flush()
     expect(store.phase.value).toBe(RUN_PHASE.IDLE)
 
-    // 第二轮正常跑完
     await store.send({ content: '第二句', attachments: [] })
     await flush()
     expect(store.phase.value).toBe(RUN_PHASE.COMPLETED)
 
-    // 旧流此刻才收尾，而且带一个终局 error：修复前会把已完成的新一轮打成 FAILED
     releaseFirst(
       new Response(
         'event: error\ndata: {"error":{"code":"LLM_ERROR","message":"旧轮已失效"}}\n\n',

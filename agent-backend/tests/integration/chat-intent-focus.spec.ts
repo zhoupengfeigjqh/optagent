@@ -1,13 +1,3 @@
-/**
- * 集成测试：意图聚焦（016）端到端链路。
- *
- * 分两层：
- * 1. **公开 HTTP**：`skip_intent_focus` 新增字段不得放宽 `additionalProperties`；
- * 2. **域链路**（真实 `RunManager` + 真实 `IntentFocusRunner` + 真实留档 + 真实 SOUL）：
- *    判定先于主模型、提示只进本轮 `systemExtra`、五态留档、跳过零调用、关闭零成本。
- *
- * 模型与 Laya 用桩；技能 / 本体用真实临时文件。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,7 +41,6 @@ const CONFIG: IntentFocusConfig = {
   ontologyFunctionThreshold: 0.6,
   maxSkills: 32,
   maxCapabilities: 96,
-  // 027：改写参数（本文件里改写端口缺省不装配，故实际不会被调用）
   rewriteThreshold: 0.8,
   rewriteTimeoutMs: 5000,
 };
@@ -80,7 +69,6 @@ const ONTOLOGY_YAML = [
   '    data_supplements: [Q1, Q2]',
 ].join('\n');
 
-/** 判定桩：按题面里的名字给分，并记录调用 */
 function makeClient(result?: LayaDecideResult) {
   const calls: Array<{ state: string; questionCount: number }> = [];
   return {
@@ -103,13 +91,10 @@ function makeClient(result?: LayaDecideResult) {
 }
 
 interface Recorder {
-  /** 本轮收到的 `systemExtra`（聚焦提示应只出现在这里） */
   extras: string[];
-  /** 本轮收到的消息条数（用于确认提示不进 messages） */
   messageCounts: number[];
 }
 
-/** 假数字人：`run-consume` 已完成判定，这里只记录本轮素材 */
 function stubAgent(recorder: Recorder): RunAgentLike {
   return {
     key: { userId: USER, agentName: AGENT },
@@ -228,12 +213,10 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     store = new IntentFocusStore(root);
   }
 
-  /** 按部署产物形态写数字人：SOUL 开关 + TOOL/MCP + 技能 + 本体 */
   function writeAgent(
     focus: boolean,
     hints = false,
     withOntology = true,
-    /** 027：写入 `input_rewrite: true`（只在聚焦同时开启时才有意义） */
     rewrite = false,
   ): void {
     const dir = agentDir(root, USER, AGENT);
@@ -284,7 +267,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
       client,
       store,
       isEnabled: (userId, agentName) => isIntentFocusEnabled(root, userId, agentName),
-      // 027：开关照常逐次现读（SOUL 里没有该键 → false，既有用例行为不变）
       isRewriteEnabled: (userId, agentName) =>
         isInputRewriteEnabled(root, userId, agentName),
       ...(rewrite?.llm ? { rewriteLlm: rewrite.llm } : {}),
@@ -335,7 +317,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     const run = start(manager, recorder);
     await run.settled;
 
-    // 两次判定：技能一批、能力一批；输入是本轮用户输入原文
     expect(client.calls).toHaveLength(2);
     expect(client.calls[0]!.state).toBe('帮我创建一笔原材料采购单');
     expect(recorder.extras).toHaveLength(1);
@@ -343,7 +324,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
       `${PREFIX}\n技能 onto-skill → 本体 原材料采购和库存（ontology_id=1）`,
     );
     expect(recorder.extras[0]).toContain('关键行为\n· 创建采购单 B1');
-    // 提示不进 messages，也不进历史
     expect(historyText()).not.toContain(PREFIX);
 
     const [record] = records();
@@ -360,9 +340,7 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
       error: null,
     });
     expect(record!.skills.find((skill) => skill.name === 'onto-skill')!.selected).toBe(true);
-    // 只写入选行为：Q1/Q2 分数 0.05，规则不再补入
     expect(record!.behaviors.map((item) => item.name)).toEqual(['B1']);
-    // 2026-11-20：函数 F1 同批判定（0.7 > 0.6），只写入选函数
     expect(record!.functions.map((item) => item.name)).toEqual(['F1']);
     expect(record).not.toHaveProperty('data_supplements');
   });
@@ -479,7 +457,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
             : null,
       });
 
-      // 记录 nextActionsMax 需要包一层 agent
       const base = stubAgent(recorder);
       const agent: RunAgentLike = {
         key: base.key,
@@ -524,7 +501,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
   it('本体未物化 → empty/no_focusable_skills，技能不评分', async () => {
     freshRoot();
     writeAgent(true, false, false);
-    // 只保留本体技能（非本体技能会照常可聚焦，无法验证"无可用候选"）
     fs.rmSync(path.join(agentDir(root, USER, AGENT), 'skills', 'plain'), { recursive: true, force: true });
     const client = makeClient();
     const recorder: Recorder = { extras: [], messageCounts: [] };
@@ -576,7 +552,6 @@ describe('RunManager × 意图聚焦：时序、跳过、降级与留档', () =>
     const round3 = start(manager, recorder, { skipIntentFocus: true });
     await round3.settled;
 
-    // 第 2 轮空、第 3 轮跳过，都不含第 1 轮的提示
     expect(recorder.extras[1]).not.toContain(PREFIX);
     expect(recorder.extras[2]).not.toContain(PREFIX);
 
@@ -654,7 +629,6 @@ describe('027 输入重写：零调用组合与存量产物快照', () => {
     historyReads: number;
   }
 
-  /** 判定桩：改写命题给 0.95（判为需要改写），其余按技能名给分 */
   function setup(options: { withConfig?: boolean } = {}) {
     const counters: Counters = { judge: 0, rewrite: 0, historyReads: 0 };
     const client = {
@@ -790,7 +764,6 @@ describe('027 输入重写：零调用组合与存量产物快照', () => {
 
     await run(manager, recorder).settled;
 
-    // 技能 + 行为两批，没有第三批改写命题
     expect(counters.judge).toBe(2);
     expect(counters.rewrite).toBe(0);
     expect(counters.historyReads).toBe(0);
@@ -812,7 +785,6 @@ describe('027 输入重写：零调用组合与存量产物快照', () => {
 
     const [record] = store.readAll(USER, AGENT, 'th_1');
     expect(typeof record!.round_ms).toBe('number');
-    // 剔除时间戳 / 自增号 / 消息 id / 耗时与本特性新增的七个字段，
     // 剩下的部分必须与 016~019 时期完全一致（快照守住"零残留"）
     const {
       at: _at,
@@ -830,7 +802,6 @@ describe('027 输入重写：零调用组合与存量产物快照', () => {
     } = record!;
 
     expect(legacy).toMatchSnapshot();
-    // 时间戳每轮都变，快照里剔掉（"提示逐字不变"验的是内容与结构）
     expect(recorder.extras[0]!.replace(/^【当前时间】[^\n]*\n+/, '')).toMatchSnapshot();
   });
 });

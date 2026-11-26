@@ -11,6 +11,59 @@
 
 ---
 
+## 2.3.0（2026-11-26）注释极简
+
+本次修订 (2.2.0 → 2.3.0) 判定为 MINOR:
+  理由：对原则二（代码质量与模块化边界）的**实质性扩展**——把"注释说明为什么"升级为
+  "注释默认不存在，只有代码无法表达的为什么才可留存"，并首次写入删除口径与工具指令豁免。
+
+变更理由（用户 2026-11-26 提出）:
+  - 仓库内代码与配置文件的注释过多、过长，且部分注释的逻辑已与实现脱节；
+  - 注释被当成"后续开发的重要参考"是错误期待——正确的参考是代码本身与类型定义；
+  - 啰嗦注释提高阅读成本，还会制造"第二份真相"（注释与代码不一致时无人察觉）。
+
+修改的原则:
+  - 二、代码质量与模块化边界：原条文"命名与注释 MUST 说明'为什么'，MUST NOT 用注释复述代码"
+    替换为「注释极简（NON-NEGOTIABLE）」五条子规则：
+    ① 注释 MUST 简洁清晰、不冗余啰嗦；理解代码 MUST 以读代码为准，MUST NOT 以注释为参考；
+    ② 允许留存的注释 MUST 表达代码无法表达的信息并压缩到最短必要句；
+    ③ 五类 MUST NOT 留存（复述代码 / 过程流水账 / 设计宣讲 / 过期实现说明 / 装饰性横幅与复读型 JSDoc）；
+    ④ 改动即清旧注释：修改代码或配置后 MUST 同步删除或改写对应旧注释，MUST NOT 留下与实现不一致的注释；
+    ⑤ 工具指令原样保留（`eslint-disable*`、`@ts-*`、`/// <reference>`、`@vitest-environment`、
+       `prettier-ignore`、`/*#__PURE__*/`、`@vite-ignore`、`TODO`/`FIXME`）；
+    ⑥ 注释 MUST NOT 承载契约或需求，新增注释视为技术债。
+  - 原则二的"理由"段补充：注释是会随代码漂移的第二份真相。
+
+修改的非原则章节:
+  - 治理 § 适用范围与不追溯：新增"一次性例外（2026-11-26）"——授权四侧存量注释清理，
+    仅删减/压缩注释、不改代码行为，清理后 MUST 跑通各侧本地门禁。
+
+新增章节: 无。删除章节: 无。
+
+配套实施（同次改动）:
+  - 范围：`agent-backend` / `frontend` / `admin-backend` / `admin-frontend` 的 `src`、`tests`
+    与各自配置文件（`vitest.config.ts`、`eslint.config.mjs`、`vite.config.ts`），以及仓库根
+    `docker-compose.yml`、`gateway/nginx.conf`、`frontend|admin-frontend/nginx.conf`、
+    四个 `Dockerfile`、`agent-backend/config.yaml` 与 `config.example.yaml`。
+  - 结果：901 个文件改动，删 26662 行 / 增 513 行（新增主要是空 `catch` 块的一句说明与
+    配置重排）。分侧注释删除：`agent-backend` 3428、`frontend` 3915、`admin-backend` 1013、
+    `admin-frontend` 986。工具指令（`eslint-disable*`、`@ts-*` 等）原样保留。
+  - 未触碰：`frontend/src/views/demo/**`、`frontend/src/views/datapage/**`（由该区域负责人处置，
+    2026-10-12 用户已明确不再改动）；各侧 `package-lock.json`、`dist/`、`.opt-agent/`。
+  - 验证（均本地）：`agent-backend` typecheck / lint / 单元 122 文件 1670 用例 / 集成 31 文件
+    280 用例全绿；`frontend` typecheck 0 error、lint 0 error（5 条存量 warning）、128 文件
+    1484 用例全绿；`admin-backend` typecheck / lint / 58 文件 725 用例全绿；`admin-frontend`
+    typecheck / lint / 57 文件 687 用例全绿。`config.yaml` / `config.example.yaml` 仍可正常解析。
+  - 已知限制：`frontend` 默认并发（每文件一个 jsdom worker）在开发机上会因资源不足出现
+    `Worker exited unexpectedly with exit code 134`；以 `--pool=forks --maxWorkers=4` 复跑全绿，
+    与本次注释清理无关。
+
+待确认（deferred）:
+  - 仓库内 Python 子项目（`ocr-service` / `jev-service` / `bom-service` / `fresh-service-*` /
+    `laya-service`）不在四侧受约束范围内，其注释未纳入本次清理；是否纳入需另行确认。
+
+---
+
 ## 原「同步影响报告」全文（逐字保留，含版本变更列表与 7 次修订明细）
 
 版本变更: 无版本（未填充的模板骨架） → 1.0.0（首次落地）

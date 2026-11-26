@@ -1,11 +1,3 @@
-/**
- * 组件测试：创建定时任务弹窗（015，T039 / T064）
- *
- * 验收项：
- * - 8 项输入的默认值（尤其"每次任务创建新对话"**默认勾选**、思考开关来自 props）；
- * - 字段级校验：文案与后端 `data-model.md` §6 同一套，错误经 `aria-describedby` 关联；
- * - 提交成功才发 `submit`，失败（校验不过）一个请求都不发；`submitting` 时全部禁用。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -38,7 +30,6 @@ describe('ScheduleCreateDialog', () => {
     const wrapper = mountDialog({ defaultThinking: true })
 
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    // 顺序：思考开关 → 每次任务创建新对话
     expect((checkboxes[0]!.element as HTMLInputElement).checked).toBe(true)
     expect((checkboxes[1]!.element as HTMLInputElement).checked).toBe(true)
 
@@ -124,10 +115,6 @@ describe('ScheduleCreateDialog', () => {
   })
 })
 
-/**
- * 编辑模式（2026-10-30 增补）：同一个组件、同一套校验，只有三处差别——
- * 标题/主按钮文案、表单预填、会话模式只读（`FR-060`），以及允许开始时间已过去。
- */
 describe('ScheduleCreateDialog —— 编辑模式', () => {
   const task = {
     task_id: 't1',

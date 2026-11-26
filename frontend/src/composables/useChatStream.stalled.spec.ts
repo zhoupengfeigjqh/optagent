@@ -1,17 +1,3 @@
-/**
- * 静默心跳兜底（TR-66，2026-11-16）
- *
- * 实测背景（真实一轮 16s 的生鲜解析，SSE 时间线）：
- * `+8.0s content(1201字) → +14.7s tool_call write_file` —— **6.6s 内没有任何事件**。
- * 模型在「决定调哪个工具 / 生成工具参数」以及长推理段落之间会静默数秒，
- * thinking 关闭时连思考增量都没有，`sse.ts` 的 15s 心跳又只是注释帧（解析器直接丢弃）。
- * 界面因此被判成卡死。这组用例钉住兜底的边界：
- *
- * - 超过 2.5s 无业务事件 ⇒ `stalled = true`；
- * - 任一业务事件到达 ⇒ 立刻回落 `false`；
- * - 本轮终结 / 被 reset ⇒ 停表，绝不残留；
- * - **HITL 挂起不算静默**（等用户操作，界面上有弹窗）。
- */
 import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -19,14 +5,12 @@ import { RUN_PHASE } from '../constants/events'
 import { createChatStreamStore } from './useChatStream'
 import type { ChatStreamDeps } from './useChatStream.types'
 
-/** 永不吐数据的挂起流：模拟"后端在跑，但前端拿不到任何事件" */
 const PENDING_FETCH = (async () =>
   new Response(new ReadableStream<Uint8Array>({ start() {} }), {
     status: 200,
     headers: { 'Content-Type': 'text/event-stream' },
   })) as unknown as typeof fetch
 
-/** 可手动推事件的长连接：用于验证"事件到达即回落" */
 function controlledFetch(): { fetchImpl: typeof fetch; push: (chunk: string) => void } {
   let push: (chunk: string) => void = () => undefined
   const stream = new ReadableStream<Uint8Array>({
@@ -44,7 +28,6 @@ function controlledFetch(): { fetchImpl: typeof fetch; push: (chunk: string) => 
   }
 }
 
-/** 固定脚本流（立即吐完） */
 function scriptedFetch(script: string): typeof fetch {
   return (async () =>
     new Response(new TextEncoder().encode(script), {
@@ -64,7 +47,6 @@ const DONE_SCRIPT = [
   '',
 ].join('\n')
 
-/** HITL 请求（单行 data：SSE 多行 data 会按 `\n` 拼接，JSON 就解析不了） */
 const INTERACTION_SCRIPT =
   'event: interaction_request\n' +
   'data: {"interaction_id":"i_1","call_id":"c_1","tool_name":"t_1","title":"确认调用参数","schema":{"type":"object","properties":{}},"proposed_args":{},"required":[],"timeout_seconds":300}\n\n'
@@ -83,7 +65,6 @@ describe('useChatStream —— 静默心跳兜底（TR-66）', () => {
 
     void store.send({ content: '解析这张订单', attachments: [] })
 
-    // 阈值内不打扰（正常换段间隔 <0.5s）
     vi.advanceTimersByTime(2000)
     expect(store.stalled.value).toBe(false)
 

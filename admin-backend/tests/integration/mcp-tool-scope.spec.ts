@@ -1,15 +1,3 @@
-/**
- * 集成测试：MCP 服务的**工具白名单**（2026-10-03；2026-10-15 起可二次调整，契约 §3.2 / §3.3 / §3.9）
- *
- * 覆盖：
- * - `POST /api/admin/mcp/probe`：新建前的工具清单探测（未登记目标；失败 `ok:false` 不抛错）；
- * - `POST /api/admin/mcp/services`：**连不上即创建失败且不落盘**、白名单必填非空；
- * - `PUT /api/admin/mcp/services/{name}`：**白名单可全量替换**（提供必非空，空数组 400）；
- * - `GET .../{name}`：`tools` 只呈现白名单里的工具（缺失项进 `missing_tools`），
- *   另有 `available_tools` 给出本次探测的**全量**清单供工具范围弹窗勾选。
- *
- * 自 `mcp.spec.ts` 独立成文件：该文件已接近 500 行门禁（原则二）。
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 
@@ -41,7 +29,6 @@ function probe(payload: Record<string, unknown>) {
   return fx.app.inject({ method: 'POST', url: '/api/admin/mcp/probe', payload });
 }
 
-/** 库内是否真的没有该服务（"创建失败不落盘"的断言用） */
 async function serviceNames(): Promise<string[]> {
   const res = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services' });
   return res.json().items.map((item: { name: string }) => item.name);
@@ -66,7 +53,6 @@ describe('POST /api/admin/mcp/probe（§3.9 新建前探测）', () => {
     expect(body.error).toBeNull();
     expect(body.tools.map((t: { name: string }) => t.name)).toEqual(['ocr_image', 'ocr_pdf', 'query_price']);
     expect(body.target).toMatchObject({ transport: 'http', url: OCR_URL });
-    // 只是探测，**不落盘**
     expect(await serviceNames()).toEqual([]);
   });
 
@@ -139,7 +125,6 @@ describe('PUT /api/admin/mcp/services/{name}（§3.3 保存调用配置）', () 
     expect(res.json().allowed_tools).toEqual(['ocr_pdf']);
     expect(res.json().confirmation).toBe('always');
 
-    // 详情随之一致：`tools` 跟新白名单，全量候选仍是服务那三个
     const after = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
     expect(after.json().allowed_tools).toEqual(['ocr_pdf']);
     expect(after.json().tools.map((t: { name: string }) => t.name)).toEqual(['ocr_pdf']);
@@ -170,7 +155,6 @@ describe('PUT /api/admin/mcp/services/{name}（§3.3 保存调用配置）', () 
 
     const after = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' });
     expect(after.json().allowed_tools).toEqual(['ocr_image']);
-    // 被拒的请求整条不生效（不是"只忽略白名单"）
     expect(after.json().confirmation).toBe('never');
   });
 

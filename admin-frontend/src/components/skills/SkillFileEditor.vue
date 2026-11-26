@@ -1,19 +1,4 @@
 <script setup lang="ts">
-/**
- * 技能文件编辑区（2026-09-16：全部文件可编辑，含 `references/` 等附件）。
- *
- * 与 `common/FileTree` 配合：树负责选文件，本组件负责**看与改**。
- * 三种"不给编辑"的情形必须说清楚原因，而不是留白或给一个点了会丢数据的入口：
- * - 二进制文件：不预览、不编辑（如需替换请重新打包 ZIP 覆盖安装）；
- * - 超出编辑上限（256KB）：只显示前 256KB，**不提供编辑**——否则保存即丢掉未显示的部分；
- * - 加载中/失败：可读提示。
- *
- * 保存带上**读取时的内容哈希**：服务端发现内容已被他处修改即拒绝（不静默覆盖），
- * 此时界面提示并提供「重新加载最新内容」。
- *
- * 保存**不可逆**（2026-09-16 产品决定：撤销"编辑快照"，库中不保留任何副本）→
- * 保存前 MUST 二次确认并把这条后果讲明。
- */
 import { computed, ref, watch } from 'vue'
 import { saveSkillFile } from '../../api/skills'
 import type { ErrorInfo, SkillFileContent, SkillFileSaved } from '../../api/types'
@@ -32,37 +17,18 @@ const emit = defineEmits<{
   (e: 'update:dirty', dirty: boolean): void
 }>()
 
-/** 编辑草稿（与服务端内容分离，便于"放弃"） */
 const draft = ref('')
-/**
- * 已保存内容的基准。
- *
- * **不复用 `props.file.content`**：父组件在保存后会就地把大小/哈希写回同一个对象
- * （不换对象、故意不触发 `watch`），若以 props 为基准，"刚保存完"会被误判成"
- * 仍有未保存修改"。基准随"换文件/重新加载"（`props.file` 换对象）才重置。
- */
 const baseline = ref('')
 const saving = ref(false)
 const saveError = ref<ErrorInfo | null>(null)
-/** 保存成功提示（`role="status"`） */
 const savedNotice = ref('')
 /** 保存二次确认：保存是覆盖式的、平台不留副本，必须先讲明"无法恢复" */
 const confirmSave = ref(false)
 
 const editable = computed(() => props.file?.editable === true)
 const dirty = computed(() => editable.value && draft.value !== baseline.value)
-/** 冲突：内容已被他处修改（需要重新读取，而不是盲目再存） */
 const conflicted = computed(() => saveError.value?.code === 'ADM_CONFIG_REVISION_CONFLICT')
 
-/**
- * 草稿锚定「文件标识」（契约 §0.5 原则 ①）：**同一文件的服务端刷新 MUST NOT 重置草稿**。
- *
- * 判据用 `name + path + hash`（文件标识 + 内容基准），而不是对象引用：
- * - 保存成功：父组件**就地**改 `size`/`hash`、不换对象 → 不触发，"已保存"提示也留住；
- * - 详情被刷新（同文件、同 hash）：**跳过**——否则用户未提交的编辑会被静默丢弃；
- * - 点"重新加载最新内容"：内容已变、`hash` 随之变 → **重置**（正是期望行为）；
- * - 切换文件 / 切换技能：标识变化 → 重置。
- */
 watch(
   () => props.file,
   (next, prev) => {
@@ -111,7 +77,6 @@ async function save(): Promise<void> {
   savedNotice.value = ''
   try {
     const saved = await saveSkillFile(file.name, file.path, draft.value, file.hash)
-    // 基准前移：保存后不应再显示"未保存"
     baseline.value = draft.value
     savedNotice.value = `已保存（${formatSize(saved.size)}）`
     emit('saved', saved)
@@ -202,7 +167,6 @@ function discard(): void {
 
     <p v-else class="muted">请从左侧选择一个文件。</p>
 
-    <!-- 保存不可逆（库中不留副本）：确认后才真正写库 -->
     <ConfirmDialog
       v-model:open="confirmSave"
       data-test="save-dialog"

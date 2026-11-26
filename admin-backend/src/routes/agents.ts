@@ -1,12 +1,3 @@
-/**
- * 数字人设计路由（`contracts/admin-api.md` §5.1~§5.5）。
- *
- * - `GET    /api/admin/agents`         — 卡片列表（名称 + 用途描述 + 异常态）
- * - `POST   /api/admin/agents`         — 新建
- * - `GET    /api/admin/agents/{name}`  — 详情（全部配置内容）
- * - `PUT    /api/admin/agents/{name}`  — 编辑任意一类配置并保存
- * - `DELETE /api/admin/agents/{name}`  — 删除（被用户关联时阻止）
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -23,18 +14,6 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
     return snapshot;
   }
 
-  /**
-   * 设计器候选目录（2026-10-17，契约 §5.6）。
-   *
-   * 数字人设计器需要**全量**候选（内置工具 / MCP 服务 / SKILL），而三者的卡片列表
-   * 接口固定 8 条一页（`paging.ts`，服务端写死且不接受客户端覆盖）。设计器此前直接取
-   * `page=1`，于是库里第 9 个 SKILL / MCP 服务在界面上**根本选不到**，也没有任何提示。
-   *
-   * 本端点一次返回全部候选，不参与分页；卡片列表自身行为不变。
-   *
-   * 降级口径与 `snapshot()` 一致：内置工具不可达时只清空 `builtin_tools` 并带回原因
-   * （设计器据此提示"保存含工具的配置会被拒绝"），MCP 与 SKILL 候选照常返回。
-   */
   app.get('/api/admin/agents/catalog', async () => {
     let builtinTools: BuiltinToolProjection[] = [];
     let builtinToolsError: string | null = null;
@@ -49,8 +28,6 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
       Promise.resolve(ctx.skills.listAll()),
     ]);
 
-    // 本体（`FR-058`，2026-10-17）：设计器第四类引用。候选**就是 metadata 列表**——
-    // 身份只有一份来源（scenario_name / ontology_name），正文由部署物化时从库内取
     const ontologies = ctx.ontologies.listAll().map((item) => ({ metadata: item.metadata }));
 
     return {
@@ -97,7 +74,6 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: AppContext): void
 
   app.delete('/api/admin/agents/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
-    // FR-021：被用户关联时 MUST 阻止直接删除，或要求先显式解除关联
     const linkedUsers = ctx.users.usersOfAgent(name);
     if (linkedUsers.length > 0) {
       throw new ApiError(

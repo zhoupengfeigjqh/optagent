@@ -1,13 +1,3 @@
-/**
- * 单元测试：用量库的日志模式回退（R4 / T098 的健壮性补强）
- *
- * 守住一条：**不支持 WAL 的文件系统上服务仍能启动**。
- *
- * 背景（实测缺陷，`quickstart.md` §10.3）：WAL 需要 `mmap` 一个 `-shm` 共享内存
- * 文件，部分文件系统不支持（Windows + Docker Desktop 的绑定挂载即如此），
- * 此时 pragma 抛 `SQLITE_IOERR_SHMOPEN`。该调用位于 `UsageDb` 构造里，
- * 不兜住就会让**整个服务起不来**（容器无限重启）。
- */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -154,7 +144,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
       });
       const { items, groups } = db.mcpCallStats();
 
-      // 分组行：一行一个「服务 × 工具 × 用户」，时间窗挂在这一层
       expect(groups).toHaveLength(1);
       expect(groups[0]).toMatchObject({
         service: 'ocr',
@@ -162,12 +151,10 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
         user_id: 'admin',
         calls_total: 2,
       });
-      // 刚记录的调用落在所有时间窗内：各窗 total=2 / ok=1 / failed=1
       for (const key of ['h24', 'd7', 'd30', 'd365'] as const) {
         expect(groups[0]!.windows[key]).toEqual({ ok: 1, failed: 1, total: 2 });
       }
 
-      // 服务级汇总由分组行折叠而来，口径都是"最近一年"，故两者恒相等
       expect(items).toHaveLength(1);
       expect(items[0]).toMatchObject({ name: 'ocr', calls_total: 2, calls_ok: 1, calls_failed: 1 });
       expect(items[0]!.calls_total).toBe(groups[0]!.windows.d365.total);
@@ -180,7 +167,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
   it('窗口内无调用时补 0 而不是缺字段：只落在 d365 的调用，短窗全为 0', () => {
     const dbPath = path.join(dir, 'usage.db');
     new UsageDb(dbPath).close();
-    // 直接写一条 40 天前的调用：在"最近一年"内，但不在 24h/7天/30天 内
     const raw = new Database(dbPath);
     raw
       .prepare(
@@ -241,14 +227,12 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
       db.recordMcpCall({ service: 'ocr', tool: 'ocr_pdf', ok: true, durationMs: 1, userId: 'zpf' });
       const { items, groups } = db.mcpCallStats();
 
-      // 排序：服务 → 工具 → 用户
       expect(groups.map((group) => [group.service, group.tool_name, group.user_id])).toEqual([
         ['ocr', 'ocr_image', 'admin'],
         ['ocr', 'ocr_pdf', 'zpf'],
       ]);
       expect(groups[0]).toMatchObject({ calls_ok: 1, calls_failed: 1, calls_total: 2 });
       expect(groups[0]!.last_called_at).not.toBeNull();
-      // 服务级汇总 = 该服务各分组行之和
       expect(items).toHaveLength(1);
       expect(items[0]).toMatchObject({ name: 'ocr', calls_ok: 2, calls_failed: 1, calls_total: 3 });
     } finally {
@@ -258,7 +242,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
 
   it('旧库迁移：老 schema 的事件表打开即补齐新增列，老行归入"未归属"（不丢历史）', () => {
     const dbPath = path.join(dir, 'usage.db');
-    // 手工建一个"十四次调整之前"的老-schema 库（事件表没有 user_id 列）
     const legacy = new Database(dbPath);
     legacy.exec(`CREATE TABLE mcp_call_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -281,7 +264,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
         userId: 'admin',
       });
       const { items, groups } = db.mcpCallStats();
-      // 老行补列后三个维度都是 NULL：单独成组，而不是从统计里消失（`null` 排在该维度最前）
       expect(groups).toHaveLength(2);
       expect(groups[0]).toMatchObject({
         service: 'ocr',
@@ -295,7 +277,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
         user_id: 'admin',
         calls_total: 1,
       });
-      // 服务级汇总把两类行都算进来（不丢历史）
       expect(items[0]).toMatchObject({ name: 'ocr', calls_total: 2, calls_ok: 2 });
     } finally {
       db.close();
@@ -325,7 +306,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
     const logger = { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never;
     const db = new UsageDb(path.join(dir, 'usage.db'), logger);
     db.close();
-    // 正常文件系统上不会回退，因此不应出现该警示（守住"不误报"）
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -348,7 +328,6 @@ describe('UsageDb —— 真实打开路径仍然可用', () => {
       const row = raw.prepare(`SELECT * FROM mcp_call_events`).get() as Record<string, unknown>;
       expect(row).toMatchObject({
         service_name: 'ocr',
-        // 工具名是 MCP 服务自己的名字，**不带**暴露给模型的 `ocr__` 前缀
         tool_name: 'ocr_image',
         ok: 0,
         duration_ms: 1234,

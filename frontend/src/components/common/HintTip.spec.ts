@@ -1,9 +1,3 @@
-/**
- * 组件测试：「?」气泡提示。
- *
- * 守住：默认不展示文案（省空间）、点击展开/再点收起、点浮层外收起、
- * 无障碍属性齐备（`aria-expanded` / `aria-label` / `role="tooltip"`）、多行文案保留换行。
- */
 import { describe, expect, it } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
@@ -75,13 +69,11 @@ describe('HintTip —— 展开与收起', () => {
 
     wrapper.unmount()
 
-    // 卸载后再点击 document 不应报错（监听已清理）
     expect(() => document.body.click()).not.toThrow()
   })
 
   it('点击按钮不冒泡到外层（避免触发外层关闭逻辑）', async () => {
     let clicks = 0
-    // 用 render 函数而非模板字符串：运行时渲染模板需要编译器，测试环境只带 runtime
     const Outer = defineComponent({
       render: () => h('div', { onClick: () => (clicks += 1) }, [h(HintTip, { text: 'x' })]),
     })

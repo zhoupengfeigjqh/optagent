@@ -1,73 +1,21 @@
-/**
- * 目录初始化与路径工厂：`.opt-agent/` 运行期数据根。
- *
- * **数据归属（009 智能体数据隔离）**：三个文件空间与 `threads/` 一律**数字人级**——
- * 落点 `users/{userId}/user-data/{agentName}/`。同一用户的数字人各自一份数据域，
- * 互不可见；用户级 `users/{userId}/user-data/` 只作为**迁移的源**存在（见
- * `domain/data-migration.ts`），业务代码 MUST NOT 直接按它拼路径。
- *
- * 文件空间固定 2 个一级目录（空间）：
- * - `数据准备/`：Agent 只读；二级子目录由**该数字人**的
- *   `users/{userId}/agents/{agentName}/scenario.json` 预定义（改文件即生效，
- *   运行期按 mtime 惰性重读）。场景属**数字人级**，故同一用户的不同数字人
- *   可有各自的可见目录清单，互不干扰
- * - `临时空间/`：Agent 可读写（写产出强制 `{thread_id}_` 前缀，30 天未访问清理）
- *
- * 2026-11-18（`specs/025-remove-shared-space`）：原第三个空间 `共享空间/`（Agent 只读）
- * 已下线，其上传白名单与临时空间完全一致，故"可上传什么"不受影响；存量目录由一次性
- * 脚本 `scripts/remove-shared-space.ts` 清理。
- *
- * `threads/`：会话记录（001 会话持久化）——**会话同样按数字人隔离**，落点
- * `users/{userId}/user-data/{agentName}/threads/{threadId}/`。
- *
- * scenario.json 缺失/损坏：空间骨架照常创建，业务接口报
- * SCENARIO_NOT_CONFIGURED（"数字人未设置文件空间场景"），服务不中断。
- *
- * 幂等：重复调用不产生副作用。
- *
- * 本文件在 2026-10-14（009）**必须先拆再改**（改造前 504 行，越过宪章原则二 500 行门禁）：
- * 场景（scenario.json）解析块整体搬到 `domain/scenario.ts`，此处只留**路径与空间策略**；
- * scenario 侧符号由本文件**原样 re-export**，既有导入路径无需改动。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** 两个固定空间目录（2026-11-18，025：共享空间下线） */
 export const SPACE_PREP = '数据准备';
 export const SPACE_TMP = '临时空间';
 export const SPACES = [SPACE_PREP, SPACE_TMP] as const;
 export type SpaceName = (typeof SPACES)[number];
 
-/**
- * 「数据准备」下的**平台预定义**二级目录（平台硬编码）。
- *
- * 2026-11-17 起平台允许**屏蔽**预定义目录：屏蔽 = 该目录不出现在 `data_prep_dirs`，
- * 运行端不做特殊判断（清单即可见范围的唯一权威）——它自然不出现、不可达。
- *
- * 与 `admin-backend` `PREDEFINED_DATA_PREP_DIRS`、`admin-frontend` 的同名常量
- * **三处 MUST 同步**：运行端只据此标记目录性质，不参与场景校验。
- * `domain/rule-file.ts` 的 `RULES_SUBDIR` 由本常量派生，
- * 避免"预定义目录"出现第二份清单。
- */
 export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const;
 
-/** 是否为平台预定义的「数据准备」二级目录（唯一判定实现） */
 export function isPredefinedDataPrepDir(name: string): boolean {
   return (PREDEFINED_DATA_PREP_DIRS as readonly string[]).includes(name);
 }
 
 export const THREADS_DIR = 'threads';
 
-/**
- * 定时任务（015）的落点：`users/{userId}/user-data/{agentName}/scheduled-tasks/`。
- *
- * 为什么放在 `user-data/{数字人}/` 而不是 `agents/{数字人}/`：后者是**平台下发的配置目录**，
- * 部署时按数字人整体覆盖；定时任务是用户在运行环境里产生的资产，必须与 `threads/` 同域
- * （部署不触碰 `user-data/`）。同时"归属某个数字人"由目录位置承载，跨数字人访问天然解析不到。
- */
 export const SCHEDULED_TASKS_DIR = 'scheduled-tasks';
 
-/** 定时任务数据目录：`users/{userId}/user-data/{agentName}/scheduled-tasks` */
 export function scheduledTasksDir(optAgentRoot: string, userId: string, agentName: string): string {
   return path.join(userDataDir(optAgentRoot, userId, agentName), SCHEDULED_TASKS_DIR);
 }
@@ -94,7 +42,6 @@ const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.gif', '.tif', '.
 export interface SpacePolicy {
   /** Agent 是否可写（仅临时空间） */
   agentWritable: boolean;
-  /** 该空间允许上传的扩展名 */
   uploadExtensions: readonly string[];
 }
 
@@ -103,7 +50,6 @@ export const SPACE_POLICIES: Record<SpaceName, SpacePolicy> = {
   [SPACE_TMP]: { agentWritable: true, uploadExtensions: [...DOCUMENT_EXTS, ...IMAGE_EXTS] },
 };
 
-/** 「数据准备」可上传类型候选；与 admin-backend / admin-frontend 同名常量三处 MUST 同步（契约 §3），枚举外的项丢弃并告警 */
 export const DATA_PREP_UPLOAD_EXTS = [
   '.xlsx',
   '.xls',
@@ -118,18 +64,10 @@ export const DATA_PREP_UPLOAD_EXTS = [
   '.jpeg',
 ] as const;
 
-/**
- * 用户数据根（**用户级**）：`users/{userId}/user-data`。
- *
- * 009 之后它**不是**业务数据域，而是"全部数字人数据域的父目录"：
- * 直接子项应当只有各数字人目录。仅 **迁移**（`domain/data-migration.ts`）与
- * "是否需要迁移"的判据使用它；业务路径一律用 `userDataDir(root, uid, agent)`。
- */
 export function userDataRoot(optAgentRoot: string, userId: string): string {
   return path.join(optAgentRoot, 'users', userId, 'user-data');
 }
 
-/** 数字人数据根（**数据域**）：`users/{userId}/user-data/{agentName}` */
 export function userDataDir(optAgentRoot: string, userId: string, agentName: string): string {
   return path.join(userDataRoot(optAgentRoot, userId), agentName);
 }
@@ -138,12 +76,10 @@ export function userAgentsDir(optAgentRoot: string, userId: string): string {
   return path.join(optAgentRoot, 'users', userId, 'agents');
 }
 
-/** 数字人配置目录：users/{userId}/agents/{agentName} */
 export function agentDir(optAgentRoot: string, userId: string, agentName: string): string {
   return path.join(userAgentsDir(optAgentRoot, userId), agentName);
 }
 
-/** 场景配置随数字人存放：users/{userId}/agents/{agentName}/scenario.json */
 export function scenarioPath(optAgentRoot: string, userId: string, agentName: string): string {
   return path.join(agentDir(optAgentRoot, userId, agentName), 'scenario.json');
 }
@@ -157,15 +93,6 @@ export function scenarioPath(optAgentRoot: string, userId: string, agentName: st
  */
 const THREAD_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/**
- * 非法会话标识（2026-11-26）。
- *
- * 起因：Fastify 会把参数里的 `%2F` / `%5C` 解码回分隔符（实测 `..%2F..%2Ffoo`
- * → `params.id = '../../foo'`），而 `path.join` 会归一化 `..` —— 未校验时可读到
- * 并追加写其它数字人 / 其它用户的线程历史。
- *
- * 挂在 `threadDir()` 上是**单点防御**：34 处调用点一次覆盖，路由漏掉某个入口也不会破防。
- */
 export class InvalidThreadIdError extends Error {
   readonly code = 'THREAD_ID_INVALID';
   constructor(readonly threadId: string) {
@@ -174,7 +101,6 @@ export class InvalidThreadIdError extends Error {
   }
 }
 
-/** 会话目录（数字人级）：users/{userId}/user-data/{agentName}/threads/{threadId} */
 export function threadDir(
   optAgentRoot: string,
   userId: string,
@@ -185,13 +111,6 @@ export function threadDir(
   return path.join(userDataDir(optAgentRoot, userId, agentName), THREADS_DIR, threadId);
 }
 
-/**
- * 初始化**用户级**骨架（幂等）：只建 `agents/`。
- *
- * 用户级**没有**数据目录：三空间与 `threads/` 都归数字人（`ensureAgentDataDirs`），
- * MUST NOT 在此处预建 `user-data/`——否则"平台只可为新建用户创建空目录骨架"会退化成
- * 造出一层空的用户数据根，与"按数字人覆盖"的部署语义冲突（原则五）。
- */
 export function ensureUserDirs(optAgentRoot: string, userId: string): void {
   fs.mkdirSync(userAgentsDir(optAgentRoot, userId), { recursive: true });
 }
@@ -213,12 +132,6 @@ export function ensureRootDirs(optAgentRoot: string, userIds: string[] = []): vo
   for (const userId of userIds) ensureUserDirs(optAgentRoot, userId);
 }
 
-/* ------------------------------------------------------------------ *
- * scenario.json：实现搬到 `domain/scenario.ts`（本文件超 500 行门禁，原则二）
- *
- * 此处**原样 re-export**：既有 `from './dirs.js'` 的导入点全部继续有效，
- * 消费者无需改动，也避免为"搬家"制造一次全仓导入重写。
- * ------------------------------------------------------------------ */
 export {
   DirValidationError,
   SCENARIO_FIELD_TYPES,

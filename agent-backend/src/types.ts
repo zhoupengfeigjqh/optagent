@@ -1,104 +1,45 @@
-/**
- * 共享类型（domain 语义，不依赖 pi / Fastify / better-sqlite3）。
- */
 
-/** 文件引用（@ 提及）：dir + filename 即文件地址 */
 export interface FileReference {
   dir: string;
   filename: string;
 }
 
-/** 消息反馈取值（up=点赞 down=点踩 null=取消） */
 export type FeedbackValue = 'up' | 'down' | null;
 
-/** 请求级模型选择（结构与 config.ModelEntry 一致；domain 不反向依赖 config） */
 export interface ModelSelection {
   model: string;
   apiKey: string;
   baseUrl?: string;
 }
 
-/**
- * 对话消息（history.jsonl 落盘格式，仅 user/assistant 正文 + 元数据）。
- *
- * 注意：**思考内容不落历史**（spec 002 FR-006/009），故无相应字段；
- * **工具调用记录不在此文件**——它落在同目录的 `tool-events.jsonl`
- * （元数据与结果），供刷新后展示与下一轮受控回灌，见 `domain/tool-events.ts`。
- * 元数据字段均可选：旧格式行（仅 role/content）保持可读。
- */
 export interface HistoryMessage {
   role: 'user' | 'assistant';
   content: string;
-  /** 消息唯一标识（线程内唯一），新行必含 */
   id?: string;
-  /** ISO8601 时间戳 */
   ts?: string;
-  /** 轮次状态（仅 assistant）；缺省视为 completed */
   status?: 'completed' | 'failed';
-  /** 整轮 token 用量（仅 assistant 完成/失败轮） */
   usage?: { input_tokens: number; output_tokens: number };
   /** 整轮耗时（毫秒） */
   duration_ms?: number;
-  /** @ 文件引用（仅 user） */
   attachments?: FileReference[]
-  /**
-   * 本轮用户显式选中的技能名（`/技能名`，仅 user）。
-   *
-   * 落盘是为了**回放确定性**：刷新/重新生成时按它重新组装"只含该技能"的提示词，
-   * 而不是依赖历史里存一份展开后的文本。缺省 = 普通消息（走默认技能索引）。
-   */
   skill?: string;
-  /**
-   * 本轮对话使用的数字人（user 与 assistant 成对写入，取自当轮实例）。
-   * 一个会话可跨多个数字人（切换后在下一轮生效），旧格式行缺省。
-   */
   agent_name?: string;
-  /** 失败轮错误信息（仅 status='failed'）；诊断字段见 `HistoryErrorInfo` */
   error?: HistoryErrorInfo;
 }
 
-/**
- * 失败轮错误信息（`history.jsonl` 与 SSE `error` 事件**同形**）。
- *
- * 2026-10-15：新增三个**可选**诊断字段（`contracts/runtime-api-delta.md` §19.3）——
- * 上游状态码 / 上游错误类型 / 上游请求 id。字段名用 snake_case 是因为它们就是契约字段，
- * 由 `domain/llm-error.ts` 的 `classifyLlmFailure()` **一次构造**后原样落盘与下发
- * （避免"内部 camelCase → 出口改一次名"的第二处实现）。**有才写**：缺省即不写 `null`。
- */
 export interface HistoryErrorInfo {
   code: string;
   message: string;
-  /** 上游 HTTP 状态码（如 503）；无法判定时缺省 */
   upstream_status?: number;
-  /** 上游错误类型（如 `service_unavailable_error`）；无法判定时缺省 */
   upstream_type?: string;
-  /** 上游请求 id（向 provider 报障用）；报文里没有时缺省 */
   request_id?: string;
-  /**
-   * 逐条失败原因（2026-11-09，特性 021）：**仅** `ONTOLOGY_RULE_DENIED` 时出现，
-   * 3~6 条中文文案，前端按条换行展示（不展示 `message`）。
-   */
   details?: string[];
-  /**
-   * 中止原因分类（2026-11-09，特性 021）：**仅** `ONTOLOGY_RULE_DENIED` 时出现；
-   * 前端不展示，供日志与排障检索（`unregistered` = 函数未注册导致的阻断）。
-   */
   reason?: 'unregistered' | 'condition_false' | 'config_unavailable';
 }
 
-/** LLM 流式事件（LlmProvider / agent-loop 输出） */
 export type LlmEvent =
   | { type: 'thinking_delta'; delta: string }
   | { type: 'content_delta'; delta: string }
-  /**
-   * 工具调用开始：工具名 + 调用标识 + **入参短标量摘要**。
-   *
-   * 入参原文永不透出（可能含大 payload 或敏感信息）；摘要只留短标量，
-   * 供展示"查了哪个文件/哪条记录"与审计（见 `domain/tool-result.ts` 的 digestArgs）。
-   *
-   * `label`：人读名称（2026-10-27 起随事件上行）——工具卡片与 HITL 弹窗显示它，
-   * `name` 仍是对模型的调用名（`server__tool`）。缺省表示无中文名，展示方回退 `name`。
-   */
   | {
       type: 'tool_call_start';
       callId: string;
@@ -106,13 +47,6 @@ export type LlmEvent =
       argsDigest?: Record<string, string>;
       label?: string;
     }
-  /**
-   * 工具调用结束：状态 + **已序列化的结果文本**。
-   *
-   * 结果文本由 `domain/tool-result.serializeToolResult` 拍平（图片块只留占位、
-   * 不落 base64），会话内写入 `tool-events.jsonl`；是否外置成临时空间文件
-   * 由体积阈值决定（见 `domain/tool-events.ts`）。SSE 仍只透出状态，不透出结果。
-   */
   | {
       type: 'tool_call_end';
       callId: string;
@@ -120,13 +54,13 @@ export type LlmEvent =
       status: 'success' | 'error';
       resultText?: string;
     }
-  | { type: 'done'; usage: UsageInfo }
   /**
-   * 失败（`ABORTED` = 用户中断）。
+   * 计划进度（028 FR-034）：**单行**进度，只带当前步。
    *
-   * 2026-10-15：`code` / `message` 之外的三个诊断字段可选透传（与 `HistoryErrorInfo` 同形），
-   * 由 `domain/llm-error.ts` 分类产出，经收尾写入失败行与 SSE `error` 事件。
+   * 不进历史、不落盘；`seqId` 在重规划后可跳变（滚动规划的正常形态）。
    */
+  | { type: 'plan_progress'; seqId: number; label: string; phase: 'running' | 'replanned' | 'done' }
+  | { type: 'done'; usage: UsageInfo }
   | ({
       type: 'error';
       usage?: UsageInfo;
@@ -137,36 +71,21 @@ export interface UsageInfo {
   outputTokens: number;
 }
 
-/**
- * 一轮 run 中**可用工具**的摘要（007 · 下一步动作提示）。
- *
- * 由 `infra/agent-factory.runWith` 在工具装配完成后回填：装配处才是"模型到底能用哪些工具"
- * 的**唯一权威来源**（内置工具经启用清单过滤、MCP 工具经白名单过滤且带 `listTools` 的真实用途）。
- * 域层的生成与引用校验一律据此，MUST NOT 二次枚举（会与装配判据漂移）。
- */
 export interface RuntimeToolBrief {
-  /** 模型看到的工具名：内置为本名，MCP 为 `{server}__{tool}` */
   name: string;
-  /** 用途摘要（上游未提供时为空串） */
   description: string;
 }
 
-/**
- * run 期可回填的运行时事实（007）：`AgentRunRequest.runtime` 的载荷。
- * 缺省 = 调用方不关心；直聊分支（无工具）保持空数组。
- */
 export interface RunRuntime {
   availableTools: RuntimeToolBrief[];
 }
 
-/** 工具规格（传给 LLM 的工具声明） */
 export interface ToolSpec {
   name: string;
   description: string;
-  parameters: Record<string, unknown>; // JSON Schema
+  parameters: Record<string, unknown>;
 }
 
-/** Token 用量记录（usage.db / usage_records 表） */
 export interface UsageRecord {
   id: number;
   userId: string;
@@ -174,14 +93,14 @@ export interface UsageRecord {
   agentName: string;
   inputTokens: number;
   outputTokens: number;
-  createdAt: string; // ISO8601
+  createdAt: string;
 }
 
 export interface UsageFilter {
   userId: string;
   threadId?: string;
   agentName?: string;
-  from?: string; // ISO8601
+  from?: string;
   to?: string;
 }
 
@@ -196,9 +115,8 @@ export interface UsageSummary {
   }>;
 }
 
-/** UsageStore 接口（domain 定义，infra 实现） */
 export interface UsageStore {
-  record(entry: Omit<UsageRecord, 'id'>): void; // 失败记日志不抛出
+  record(entry: Omit<UsageRecord, 'id'>): void;
   summary(filter: UsageFilter): UsageSummary;
   /**
    * MCP 工具调用计数（R4 / FR-049）：口径为**工具调用次数**，非 HTTP 请求数。
@@ -207,32 +125,18 @@ export interface UsageStore {
    * 且与同接口的 `record(entry)` 保持同一风格。
    */
   recordMcpCall(entry: McpCallEvent): void;
-  /** 服务级汇总 + 按「服务 × 工具 × 用户」的分组行；未出现过的服务不在此列 */
   mcpCallStats(): McpCallStats;
   close(): void;
 }
 
-/**
- * 一次 MCP **工具调用**的事件（2026-09-23：事件表扩列后的写入契约）。
- *
- * - 口径：每次 `tools/call` 记一条；**调用未发出**（如 file_args 校验失败）不记，
- *   与"计数 = 工具调用次数"的既定口径一致。
- * - `durationMs` 含 `McpManager` 内部的一次重试，即**用户感知耗时**，非单次尝试耗时。
- * - 字段名与运行日志的 `mcp.tool.call` 结构（`service`/`tool`/`ok`）对齐。
- */
 export interface McpCallEvent {
-  /** MCP 服务名（适配器里的 `serverName`） */
   service: string;
-  /** 工具名（适配器里的 `t.name`，不含服务前缀） */
   tool: string;
   ok: boolean;
   /** 含重试的用户感知耗时（毫秒） */
   durationMs: number;
-  /** 仅失败时有值 */
   errorKind?: McpCallErrorKind;
-  /** 调用发起用户；缺省/null = 老数据未记录归属 */
   userId?: string | null;
-  /** 当前会话 id（= `thread_id`），用于把事件接回具体对话 */
   threadId?: string | null;
 }
 
@@ -244,20 +148,12 @@ export interface McpCallEvent {
  */
 export type McpCallErrorKind = 'unavailable' | 'protocol' | 'transport';
 
-/** MCP 服务调用统计（`contracts/runtime-api-delta.md` §4.3） */
-/** 单个时间窗的调用计数（任务 2026-09-15：24h / 7 天 / 30 天 / 1 年） */
 export interface McpCallWindow {
   ok: number;
   failed: number;
   total: number;
 }
 
-/**
- * 服务级调用汇总（2026-09-23：时间窗已移到分组行，此处只留最近一年总量）。
- *
- * 供平台**卡片**展示"最近一年调用次数"；平台统计表的每一行是 `McpCallGroupStat`。
- * 计数口径为最近一年（独立累计表已删，改由只保留一年的事件明细聚合）。
- */
 export interface McpCallStat {
   name: string;
   calls_total: number;
@@ -266,16 +162,6 @@ export interface McpCallStat {
   last_called_at: string | null;
 }
 
-/**
- * 按「**服务 × 工具 × 用户**」分组的调用统计（2026-09-23）——平台统计表的**一行**。
- *
- * 时间窗放在这一层：每个组合都回答"最近 24h/7 天/30 天/一年各调了多少次、成功多少次"。
- * 更粗的视角（按服务、按用户）都能由它折叠而来，故不再单独提供。
- *
- * `tool_name` 是 **MCP 服务自己的工具名**（如 `ocr` 下的 `ocr_image`），
- * 不是暴露给模型的 `{server}__{tool}`；`tool_name` / `user_id` 为 `null` 表示
- * 升级前的历史事件未记录该维度（界面显示"未归属·升级前记录"）。
- */
 export interface McpCallGroupStat {
   service: string;
   tool_name: string | null;
@@ -284,7 +170,6 @@ export interface McpCallGroupStat {
   calls_ok: number;
   calls_failed: number;
   last_called_at: string | null;
-  /** 四个时间窗（数据源同为事件明细，故都覆盖在"最近一年"这一保留期内） */
   windows: {
     h24: McpCallWindow;
     d7: McpCallWindow;
@@ -293,28 +178,18 @@ export interface McpCallGroupStat {
   };
 }
 
-/** `UsageStore.mcpCallStats()` 的返回：一次聚合同时给出服务级汇总与分组行 */
 export interface McpCallStats {
   items: McpCallStat[];
   groups: McpCallGroupStat[];
 }
 
-/** 实例池 key */
 export interface PoolKey {
   userId: string;
   agentName: string;
 }
 
-/** 数字人配置包（agent-instance 产出） */
 export interface AgentConfigBundle {
   agentName: string;
-  /**
-   * SOUL 正文（剥离 frontmatter、trim 后），**不含技能段**。
-   *
-   * 2026-11-07：显式技能轮次需要"SOUL + 仅选中技能"的请求级拼装，
-   * 因此把 SOUL 与技能块拆开保留；`systemPrompt` 仍是默认拼装结果（全部技能），
-   * 供未指定技能的轮次与既有断言使用。
-   */
   soulBody: string;
   systemPrompt: string;
   enabledTools: string[];
@@ -327,84 +202,24 @@ export interface SkillMeta {
   description: string;
 }
 
-/**
- * MCP 服务调用确认策略（人机交互门 HITL）：
- * - `never`：直接执行，不弹确认（默认，存量行为）
- * - `always`：该服务下全部工具调用前都需用户确认参数
- * - `{ tools: [...] }`：仅列出的工具名（**原始工具名**，不含 server 前缀）需确认
- */
 export type McpConfirmation = 'never' | 'always' | { tools: string[] };
 
-/** 文件参数转换模式（语法定义在 domain/file-arg-path.ts，两侧同构） */
 import type { FileArgMode } from './domain/file-arg-path.js';
 export type { FileArgMode };
 
 export interface McpServerConfig {
   name: string;
   transport: 'stdio' | 'http';
-  command?: string; // stdio
+  command?: string;
   args?: string[];
-  url?: string; // http
-  /**
-   * **请求头**（2026-10-08）：随每次 MCP 请求发送的 HTTP 头，仅对 `transport=http` 有意义。
-   *
-   * 用于需要**访问令牌**的服务（本体侧「自建发布」的动态容器要求 `X-MCP-Token`，
-   * 缺了直接 401——服务本身是好的，只看得到"连不上"）。
-   *
-   * 由平台调用配置物化而来（平台侧存明文、只回掩码；这里是明文，
-   * 信任边界与 `agent-backend/.env.local` 同级）。缺省/空 = 不带请求头（存量行为零变化）。
-   * 判据见 `domain/agent-instance.ts` 的 `parseHeaders`（与平台保存期同一口径）。
-   */
+  url?: string;
   headers?: Record<string, string>;
-  /** 调用确认策略（缺省 `never`） */
   confirmation?: McpConfirmation;
-  /**
-   * 算法规则参数设置（可选）：`{ 工具名: 字段名或对象路径 }`——该工具入参里承载
-   * `array[object]` 规则清单的字段。声明后 HITL 确认窗中该字段旁出现
-   * 「从算法规则选择」入口（读取「数据准备/算法规则」最新规则文件），
-   * 由包装层把路径带进 interaction 快照。
-   *
-   * 路径支持对象嵌套（如 `input.targetPriorities`，2026-09-22）——规则数组常在入参
-   * 对象内部，只认顶层字段名会让这类声明**静默失效**。写法与判据见
-   * `domain/rules-field-path.ts`。
-   *
-   * 装配时按**当前工具名**查本映射；空/缺省 = 不启用。
-   * 不改变是否走 HITL（仍只由 confirmation 决定）。
-   */
   rulesFields?: Record<string, string>;
-  /**
-   * **工具白名单**（2026-10-03）：该服务对该数字人**可见**的原始工具名清单
-   * （不含 `{server}__` 前缀）。
-   *
-   * 装配时按它过滤该服务的工具表：**清单外的工具不会进入 Agent 工具表**——
-   * 模型连"有这个工具"都不知道，因此无从调用（比"调用时拒绝"更彻底，也省掉
-   * 模型反复尝试的无效轮次）。
-   *
-   * 缺省 / 空数组 = **不限制**（白名单上线前的存量 `MCP.json` 与此同一口径；
-   * 平台物化时也是"非空才写"）——**MUST NOT** 把空数组读成"一个工具都不给"。
-   */
   allowedTools?: string[];
-  /**
-   * **工具显示名**（2026-10-27）：`{ 原始工具名: 人读名称 }`，由平台 `tool_labels`
-   * 物化进 `MCP.json`（平台是唯一权威源）。
-   *
-   * 用途：装配时作为 `AgentTool.label`，进**意图聚焦的命题文本**
-   * （`是否需要使用 BOM 校验 ？`）——中文判定准确率显著高于 `server: tool` 拼接。
-   * 只影响展示与命题，**不影响工具调用名**（恒为 `{server}__{tool}`），模型也读不到它。
-   *
-   * 缺省 / 空 = 全部回退英文拼接（存量 `MCP.json` 同一口径；物化时"非空才写"）。
-   */
   toolLabels?: Record<string, string>;
-  /** 声明该服务具备写能力（须配 permissionBoundary，FR-024） */
   write?: boolean;
   permissionBoundary?: string;
-  /**
-   * 文件参数声明：工具名 → { 取值路径: 转换模式 }。
-   * 调用前由 backend 把 LLM 传入的相对路径（user-data 沙箱内）铸成签名直链，
-   * 原参数位置换后发给服务；未声明的参数原样透传。
-   * `"url:from=<路径>"` 为派生模式：目标字段由引擎从来源路径推导注入、
-   * 覆盖模型填写，且该字段对 LLM 隐藏（防 http 地址幻觉）。
-   */
   fileArgs?: Record<string, Record<string, FileArgMode>>;
 }
 

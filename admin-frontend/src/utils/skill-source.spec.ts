@@ -1,9 +1,3 @@
-/**
- * 单元测试：SKILL 来源路径（2026-11-04）
- *
- * 口径：只有本体市场导入的技能有来源路径（`{场景} / {本体}`）；
- * ZIP 等外部安装没有定位信息 → 空串，界面整行不渲染。
- */
 import { describe, expect, it } from 'vitest'
 import { skillSourcePath } from './skill-source'
 

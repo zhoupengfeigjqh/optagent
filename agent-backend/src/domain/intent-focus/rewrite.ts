@@ -1,15 +1,3 @@
-/**
- * 指代改写（027）的**编排**层：开关 → 指代判定 → 素材 → 改写 → 归一 → 降级 → 计时。
- *
- * 三条硬约束（契约 C-1 / C-4 / C-5）：
- * - 改写结果**只经返回值**进入后续评分，不写 `opts` / 历史 / `systemExtra` / SSE；
- * - 判定与改写共用意图聚焦的**阶段预算**，任一失败只降级（回退原文），绝不冒泡；
- * - 每轮**至多一次**改写：不对改写结果再做指代判断，不递归。
- *
- * 为什么单独成文件（宪章原则二）：`runner.ts` 是存量超限文件（见 plan 复杂度跟踪），
- * 本特性只允许在它里面加"调用 + 使用返回值"，把开关 / 预算 / 降级矩阵放在这里。
- * 文字处理全在 `rewrite-prompt.ts`（纯函数），本文件只做顺序与取舍。
- */
 import type { IntentFocusConfig } from '../../config.js';
 import type { ModelSelection } from '../../types.js';
 import type { DecideClient } from './batch-decider.js';
@@ -37,14 +25,11 @@ export const MIN_REWRITE_BUDGET_MS = 300;
 /** 改写超时的安全余量：不能把阶段预算吃干净，否则后续技能评分必然超时 */
 export const REWRITE_BUDGET_MARGIN_MS = 100;
 
-/** 一次性文本生成端口（domain 只依赖它；实现见 `infra/rewrite-llm.ts`） */
 export interface RewriteLlmRequest {
   systemPrompt: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-  /** 本轮生效模型（请求级覆盖优先）；缺省 = 服务默认模型 */
   model?: ModelSelection;
   timeoutMs: number;
-  /** 本轮中止信号（用户停止 / 关机） */
   signal?: AbortSignal;
 }
 
@@ -52,14 +37,12 @@ export interface RewriteLlm {
   complete(req: RewriteLlmRequest): Promise<string>;
 }
 
-/** 读该线程全部消息（复用 `HistoryStore.readAll` 的结构子集） */
 export type ReadHistory = (
   userId: string,
   agentName: string,
   threadId: string,
 ) => ReadonlyArray<RewriteHistoryMessage>;
 
-/** 改写阶段的原因枚举（记录与日志共用同一组字面量） */
 export type RewriteReason =
   | 'judge_failed'
   | 'below_threshold'
@@ -68,23 +51,15 @@ export type RewriteReason =
   | 'budget_exhausted'
   | 'no_history';
 
-/** 一轮改写阶段的产出：送进评分的文本 + 留档所需的全部事实 */
 export interface RewriteOutcome {
-  /** 送进技能 / 行为评分与发散的文本 */
   state: string;
-  /** `state` 是否被 200 字截断（改写 ≤100 字时恒 `false`） */
   truncated: boolean;
-  /** 来源：改写成功 = `rewrite`，其余 = `original`（与改造前逐字一致） */
   origin: 'rewrite' | 'original';
-  /** 判定结论；`null` = 未执行或判定失败 */
   needRewrite: boolean | null;
-  /** 单条命题分数 */
   score: number | null;
-  /** 改写文本；空串 = 未改写 */
   rewrite: string;
   rewriteTruncated: boolean;
   rewriteMs: number | null;
-  /** 参与的历史轮数（0~2） */
   historyTurns: number;
   /**
    * 说明性原因：`null` = 未执行或"改写成功且素材完整"。
@@ -102,13 +77,11 @@ export interface RewriteStageLogger {
 
 export interface RewriteStageDeps {
   config: IntentFocusConfig;
-  /** 输入重写开关（调用方已逐次读盘，且意图聚焦已确认开启） */
   enabled: boolean;
   /** Laya 判定客户端；缺省 = 判定不可用（按判定失败降级） */
   client?: DecideClient;
   /** 缺省 = 改写不可用（本轮按原文聚焦，零副作用） */
   rewriteLlm?: RewriteLlm;
-  /** 缺省 = 无历史可参考（素材只有当前输入） */
   readHistory?: ReadHistory;
   logger?: RewriteStageLogger;
   now?: () => number;
@@ -118,19 +91,13 @@ export interface RewriteStageInput {
   userId: string;
   agentName: string;
   threadId: string;
-  /** 本轮输入（术语替换确认后） */
   userInput: string;
   /** 意图聚焦阶段的总截止时间（毫秒时间戳） */
   deadline: number;
-  /** 本轮生效模型（请求级覆盖优先） */
   model?: ModelSelection;
-  /** 本轮中止信号 */
   signal?: AbortSignal;
 }
 
-/**
- * 执行一轮改写阶段。**永不抛错**：任何异常都折成"用原文继续"。
- */
 export async function runRewriteStage(
   deps: RewriteStageDeps,
   input: RewriteStageInput,
@@ -150,14 +117,11 @@ export async function runRewriteStage(
     reason: null,
   });
 
-  // 1. 开关关闭：零判定、零改写、零读历史（C-3）。日志只记事件，记录里的 reason 保持 null
-  //    ——"未执行"不是"失败"（契约 §8）。
   if (!deps.enabled) {
     logSkipped(deps, input, 'switch_off');
     return original();
   }
 
-  // 改写通道未装配（理论上只在测试里出现）：同样按"未执行"处理
   if (!deps.client || !deps.rewriteLlm) {
     logSkipped(deps, input, 'switch_off');
     return original();
@@ -185,26 +149,22 @@ export async function runRewriteStage(
     return { ...original(), reason: 'judge_failed' };
   }
 
-  // 3. 未达阈值：不发起改写（严格大于，等号不改写）
   if (!shouldRewrite(score, deps.config.rewriteThreshold)) {
     logDone(deps, input, { score, needRewrite: false, historyTurns: 0, chars: 0, truncated: false, ms: null });
     return { ...original(), needRewrite: false, score, reason: 'below_threshold' };
   }
 
-  // 4. 预算不足：判为需要改写，但不再发起调用（回退原文，记录可区分）
   const remaining = input.deadline - now();
   if (remaining < MIN_REWRITE_BUDGET_MS) {
     logSkipped(deps, input, 'budget_exhausted');
     return { ...original(), needRewrite: true, score, reason: 'budget_exhausted' };
   }
 
-  // 5. 素材：最近 2 个完整问答轮 + 本轮输入（只读正文，不追加附件段）
   let turns = [] as ReturnType<typeof pickRecentTurns>;
   if (deps.readHistory) {
     try {
       turns = pickRecentTurns(deps.readHistory(input.userId, input.agentName, input.threadId));
     } catch (err) {
-      // 历史读失败不阻断改写：素材退化为"只有当前输入"
       logDegraded(deps, input, 'rewrite', 'history_failed', errorMessage(err));
       turns = [];
     }
@@ -314,7 +274,6 @@ function logDone(
       need_rewrite: fields.needRewrite,
       score: fields.score,
       history_turns: fields.historyTurns,
-      // 只记长度，不记文本（原文与改写全文都不允许落日志）
       rewrite_chars: fields.chars,
       rewrite_truncated: fields.truncated,
       rewrite_ms: fields.ms,

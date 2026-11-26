@@ -1,11 +1,3 @@
-/**
- * 集成测试：本体市场导入与更新端点（2026-10-02，契约 §4.6 / §4.7 / §4.8）
- *
- * 覆盖：市场列表（含差异状态与"未配置"降级）、导入成功（201 + origin 回显）、
- * **重名直接拒绝**（409，市场文件已变化也不得覆盖库内版本）、参数与路径安全；
- * 更新：整包原子替换（installed_at 保留、origin.hash 换新、状态回 unchanged）、
- * 人工修改需确认（ADM_SKILL_MODIFIED）、受影响数字人清单。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,7 +49,6 @@ function update(scenario: string, ontology: string, skill: string, confirm = fal
   });
 }
 
-/** 市场技能目录的绝对路径（改市场文件用） */
 function marketSkillDir(): string {
   return path.join(marketDir!, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory');
 }
@@ -82,7 +73,6 @@ describe('GET /api/admin/skills/onto-market', () => {
 
   it('市场文件变化后 → status=changed（打开列表即完成一次"是否变化"检查）', async () => {
     await setup(true);
-    // 先导入，库内才有一份带 origin.hash 的记录可比对
     expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(201);
     fs.writeFileSync(
       path.join(marketDir!, '生产调度', '原材料采购和库存', 'skills', 'raw-material-inventory', 'SKILL.md'),
@@ -113,7 +103,6 @@ describe('GET /api/admin/skills/onto-market', () => {
       name: 'raw-material-inventory',
       display_name: '原材料采购和库存',
     });
-    // 身份名未变：库内目录仍是 frontmatter 的 name
     expect(fs.existsSync(path.join(fx.platformDataDir, 'skills', 'raw-material-inventory'))).toBe(true);
   });
 
@@ -199,7 +188,6 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
     });
     expect(body.installed_at).toBe(installed.installed_at);
 
-    // 库内正文 = 市场新版本；附件一并入驻
     const detail = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/skills/raw-material-inventory',
@@ -212,7 +200,6 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
     });
     expect(file.json().content).toBe('附录内容');
 
-    // 状态回 unchanged（origin.hash 从新基准起算）
     const listing = await fx.app.inject({ method: 'GET', url: '/api/admin/skills/onto-market' });
     expect(listing.json().items[0]!.status).toBe('unchanged');
   });
@@ -222,9 +209,6 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
     await install('生产调度', '原材料采购和库存', 'raw-material-inventory');
     fs.writeFileSync(path.join(marketSkillDir(), 'SKILL.md'), SKILL_MD.replace('正文', '正文（更新）'));
 
-    // 模拟"库内被人工修改"：**直接改磁盘**（2026-10-03 起市场来源技能已只读，
-    // §4.3 编辑接口会 409，所以这里走带外改动——正是本用例要防的场景：
-    // 有人绕过平台改了库内文件，`origin.hash` 与库内内容不再一致）
     const libraryFile = path.join(fx.platformDataDir, 'skills', 'raw-material-inventory', 'SKILL.md');
     fs.writeFileSync(libraryFile, SKILL_MD.replace('正文', '正文（人工改）'));
 
@@ -236,7 +220,6 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.json().locally_modified).toBe(true);
 
-    // 更新后库内 = 市场版本（人工修改被丢弃，正如确认弹窗所告知）
     const detail = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/skills/raw-material-inventory/file',
@@ -285,7 +268,6 @@ describe('POST /api/admin/skills/onto-market/update（§4.8）', () => {
 });
 
 describe('本体市场来源的技能只读（2026-10-03，FR-062）', () => {
-  /** 读技能内某文件（拿当前内容与乐观锁基准 hash） */
   async function readFile(path = 'SKILL.md') {
     return fx.app.inject({
       method: 'GET',
@@ -298,7 +280,6 @@ describe('本体市场来源的技能只读（2026-10-03，FR-062）', () => {
     await setup(true);
     expect((await install('生产调度', '原材料采购和库存', 'raw-material-inventory')).statusCode).toBe(201);
     const before = await readFile();
-    // 只读来源：读取接口即回 `editable: false`（与写入拦截同一口径）
     expect(before.json().editable).toBe(false);
 
     const res = await fx.app.inject({
@@ -310,7 +291,6 @@ describe('本体市场来源的技能只读（2026-10-03，FR-062）', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('ADM_SKILL_READ_ONLY');
     expect(res.json().error.message).toContain('只读');
-    // 拦截发生在写入之前：正文与市场快照逐字节一致
     const after = await readFile();
     expect(after.json().content).toBe(SKILL_MD);
     expect(after.json().hash).toBe(before.json().hash);
@@ -334,7 +314,7 @@ describe('本体市场来源的技能只读（2026-10-03，FR-062）', () => {
       headers: body.headers,
     });
     expect(installed.statusCode).toBe(201);
-    expect(installed.json().origin).toBeUndefined(); // 非市场来源：无 origin 标记
+    expect(installed.json().origin).toBeUndefined();
 
     const read = await fx.app.inject({
       method: 'GET',

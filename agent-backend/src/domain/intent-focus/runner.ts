@@ -1,21 +1,3 @@
-/**
- * 意图聚焦（016 / 019）编排：
- * 开关 → 跳过 → 配置 → 技能头部 → 本体索引 → 技能判定 → 行为判定
- * → 一阶发散（上游进提示 / 下游进卡片）→ 提示铸造 → 留档 → 返回提示。
- *
- * 2026-11-06：能力判定只到**本体行为**，函数与规则数据补充已移除。
- * 2026-11-08（019）：新增聚焦阶数（0~2）与方向发散；发散**不判分**，纯内存遍历，
- * 因此不增加任何 Laya 调用，也不改变本轮首字节时间。
- *
- * 三个刻意的顺序约束：
- * 1. **开关最先**：关闭轮次零读取、零调用、零留档（FR-060）；`skip` 与"未配置"都排在
- *    读文件之前，避免入口卡片也去扫目录；
- * 2. **能力依附技能**：没有任何技能入选就不读本体能力（FR-020），否则等于全量展开；
- * 3. **失败只降级**：任何异常都折成"本轮无提示"，绝不冒泡到对话主链路（FR-054）。
- *
- * 分批判定见 `batch-decider.ts`，发散见 `expansion.ts`，留档写入见 `run-record.ts`
- * ——runner 只保留"顺序与决策"，不承载 IO 与图遍历细节。
- */
 import type { IntentFocusConfig } from '../../config.js';
 import type { ModelSelection } from '../../types.js';
 import { agentDir } from '../dirs.js';
@@ -38,7 +20,7 @@ import {
   buildSkillCandidates,
   buildSkillQuestions,
 } from './candidates.js';
-import { BatchDecider, type DecideClient } from './batch-decider.js';
+import { BatchDecider, MIN_BATCH_TIMEOUT_MS, type DecideClient } from './batch-decider.js';
 import { resolveConceptQueries } from './concept-queries.js';
 import { clampDepth, expandNeighborhood } from './expansion.js';
 import { loadOntologyIndex } from './ontology-loader.js';
@@ -49,6 +31,7 @@ import {
   type PromptOntology,
   type PromptSkill,
 } from './prompt.js';
+import { PLAN_GATE_ID, PLAN_GATE_QUESTION } from './plan-gate.js';
 import type { ConceptEntry } from './record.js';
 import { FocusRecordWriter } from './run-record.js';
 import { selectCapabilities, selectSkills } from './selection.js';
@@ -66,7 +49,6 @@ import { loadSkillHeaders } from '../skill-header.js';
 
 const EMPTY_SELECTION: CapabilitySelection = { behaviors: [], functions: [], conceptQueries: [] };
 
-/** 无发散（阶数 0 / 非本体技能）：提示只有直接命中，卡片也只有直接命中 */
 const EMPTY_EXPANSION: ExpansionResult = {
   upstream: { concepts: [], behaviors: [], directEdges: [] },
   downstream: { concepts: [], behaviors: [], directEdges: [] },
@@ -74,47 +56,36 @@ const EMPTY_EXPANSION: ExpansionResult = {
   truncated: false,
 };
 
-/**
- * 一轮意图聚焦的产出。
- *
- * 除「追加到 `systemExtra` 的提示」外，还要把本轮入选的行为带出去：
- * 下一步动作卡片的候选范围**只**来自这份清单（`toolTips`），而 runner 算完即丢
- * 会让轮末无从判断"本轮有没有可提示的能力"。
- */
 export interface IntentFocusResult {
-  /** 要追加到本轮 `systemExtra` 的提示；空串 = 不追加 */
   prompt: string;
-  /** 本轮入选的行为（顺序与判定结果一致；字段值原样透传，不做校验） */
   toolTips: FocusToolTip[];
+  /**
+   * 028：规划门禁分数（0~1）。
+   *
+   * `null` = 没判（门禁关闭 / 数字人未开规划 / 判定失败或超时）。
+   * 消费方按 fail-open 处理：`null` 一律走规划。
+   */
+  planScore: number | null;
 }
 
 /** 统一空态：开关关闭 / 跳过 / 未配置 / 降级 / 无可用能力 */
-const EMPTY_RESULT: IntentFocusResult = { prompt: '', toolTips: [] };
+const EMPTY_RESULT: IntentFocusResult = { prompt: '', toolTips: [], planScore: null };
 
-/** 一次判定的上下文（由 `consumeTurn` 提供） */
 export interface IntentFocusInput {
   userId: string;
   agentName: string;
   threadId: string;
-  /** 本轮 assistant 消息 id（与历史对账用；可能为空） */
   messageId: string | null;
-  /** 本轮用户输入原文 */
   userInput: string;
-  /** 预置动作入口（下一步动作卡片 / 首屏问题实例卡片）→ 跳过判定 */
   skip: boolean;
-  /** 027：本轮生效模型（请求级覆盖优先），用于改写调用取 provider */
   model?: ModelSelection;
-  /** 027：本轮中止信号（用户停止 / 关机），透传给改写调用 */
   signal?: AbortSignal;
 }
 
-/** 域层对意图聚焦的唯一依赖口 */
 export interface IntentFocusPort {
-  /** 返回本轮聚焦结果（提示 + 入选能力）；空态 = 不追加提示、不产卡片 */
   judge(input: IntentFocusInput): Promise<IntentFocusResult>;
 }
 
-/** 判定客户端（保留旧名，测试与装配方无需感知内部拆分） */
 export type IntentFocusClient = DecideClient;
 
 export interface IntentFocusRunnerLogger {
@@ -123,13 +94,11 @@ export interface IntentFocusRunnerLogger {
 }
 
 export interface IntentFocusRunnerDeps {
-  /** 运行数据根目录（`OPT_AGENT_ROOT`），用于定位技能与本体 */
   root: string;
   /** 缺省 = 判定模型未配置（功能不可用，fail-closed） */
   config?: IntentFocusConfig;
   /** 缺省 = 未装配 → 视为不可用 */
   client?: IntentFocusClient;
-  /** 缺省 = 未装配 → 不落记录 */
   store?: {
     append(
       userId: string,
@@ -138,13 +107,7 @@ export interface IntentFocusRunnerDeps {
       draft: import('./store.js').IntentFocusRecordDraft,
     ): Promise<void>;
   };
-  /** SOUL 开关（逐次现读，fail-closed） */
   isEnabled: (userId: string, agentName: string) => boolean;
-  /**
-   * 019：SOUL 聚焦阶数（逐次现读；缺省 = 0 → 不发散）。
-   *
-   * 与开关同口径：**不缓存**——阶数随部署整体覆盖，缓存会让"部署后不生效"难以解释。
-   */
   getDepth?: (userId: string, agentName: string) => number;
   /**
    * 027：输入改写开关（逐次现读）；缺省 = 改写不可用。
@@ -153,7 +116,12 @@ export interface IntentFocusRunnerDeps {
    * 因此这里只读 `input_rewrite` 一个键即可。
    */
   isRewriteEnabled?: (userId: string, agentName: string) => boolean;
-  /** 027：读该线程历史（只读 `history.jsonl` 正文）；缺省 = 改写素材只有当前输入 */
+  /**
+   * 028：数字人是否开启任务规划（逐次现读）。
+   *
+   * 只有开启时才花一次判定：没开规划的数字人不应为门禁多付一次 laya 调用。
+   */
+  isTaskPlanning?: (userId: string, agentName: string) => boolean;
   readHistory?: ReadHistory;
   /** 027：一次性文本生成端口；缺省 = 改写不可用（本轮按原文聚焦） */
   rewriteLlm?: RewriteLlm;
@@ -242,7 +210,6 @@ export class IntentFocusRunner implements IntentFocusPort {
       ...(this.deps.logger ? { logger: this.deps.logger } : {}),
       now: this.now,
     });
-    // 019：阶数只影响"发散多少跳"，读不出来按 0（不发散）——判定链路照常
     const depth = clampDepth(this.deps.getDepth?.(input.userId, input.agentName) ?? 0);
 
     try {
@@ -287,7 +254,6 @@ export class IntentFocusRunner implements IntentFocusPort {
     const warnings = [...headers.warnings, ...index.warnings];
     const skillResult = buildSkillCandidates(headers.skills, index, config.maxSkills);
 
-    // 没有任何技能：不发起调用（题量为 0 时调用没有意义）
     if (headers.skills.length === 0) {
       await this.recorder.write(target, state, inputTruncated, {
         ...decideDisposition({
@@ -312,7 +278,6 @@ export class IntentFocusRunner implements IntentFocusPort {
       return EMPTY_RESULT;
     }
 
-    // 全是"该聚焦但本体没物化"的本体技能：不发起调用（FR-014）
     if (skillResult.candidates.length === 0) {
       await this.recorder.write(target, state, inputTruncated, {
         ...decideDisposition({
@@ -337,13 +302,6 @@ export class IntentFocusRunner implements IntentFocusPort {
       return EMPTY_RESULT;
     }
 
-    /**
-     * 027：指代改写阶段——**「无技能 / 无可聚焦技能」短路之后、技能评分之前**。
-     *
-     * 位置是契约 O-3 的硬要求：短路轮零判定零改写（用户点了卡片、或该数字人没配技能时，
-     * 多一次模型调用既无收益也无法解释）。改写结果**只**作为评分素材往下走，
-     * 留档的 `input` 仍是 `state`（用户原话尾部 200 字）。
-     */
     const rewrite = await runRewriteStage(
       {
         config,
@@ -449,7 +407,6 @@ export class IntentFocusRunner implements IntentFocusPort {
       MAX_QUESTIONS_PER_BATCH,
     );
 
-    // 019：发散起点与函数取数都要读本体行为表；提前算好，选择阶段即可复用
     const selectedOntologies = collectSelectedOntologies(index, selectedCandidates);
 
     let capabilitySelection: CapabilitySelection = EMPTY_SELECTION;
@@ -477,13 +434,11 @@ export class IntentFocusRunner implements IntentFocusPort {
           promptTruncated: false,
           warnings,
           rewrite: rewriteFields,
-          // 同上：全批失败时失败清单非空
           error: capabilityDecided.failures.join('; '),
         });
         this.degradedLog(input, 'capability', reason, capabilityDecided.failures);
         return EMPTY_RESULT;
       }
-      // 2026-11-20：行为与函数各自阈值；取数在选完之后由函数带出（不判分）
       const picked = selectCapabilities(capabilityResult.candidates, capabilityDecided.scores, {
         behavior: config.ontologyBehaviorThreshold,
         function: config.ontologyFunctionThreshold,
@@ -504,7 +459,6 @@ export class IntentFocusRunner implements IntentFocusPort {
       order,
     }));
 
-    // 019：发散起点＝入选行为所属概念；阶数 0 时整段短路（零解析、零遍历）
     const directConcepts = directConceptEntries(capabilitySelection, selectedOntologies);
     const expansion =
       depth > 0
@@ -519,7 +473,6 @@ export class IntentFocusRunner implements IntentFocusPort {
           })
         : EMPTY_EXPANSION;
 
-    // 2026-11-13：提示改为「一行一条五元组」，概念不再单独成段（概念已在路径里出现）
     const focusPaths =
       depth > 0
         ? buildFocusPaths({
@@ -540,6 +493,9 @@ export class IntentFocusRunner implements IntentFocusPort {
     });
     const roundMs = this.now() - startedAt;
     const allWarnings = [...warnings, ...expansion.warnings];
+
+    // 028：规划门禁（仅当数字人开了 task_planning 且配置了 plan_threshold）
+    const gate = await this.judgePlanGate(input, config, focusState, deadline);
 
     await this.recorder.write(target, state, inputTruncated, {
       ...decideDisposition({
@@ -566,7 +522,6 @@ export class IntentFocusRunner implements IntentFocusPort {
           source: 'upstream' as const,
           hop: concept.hop,
           viaConcept: concept.viaConcept,
-          // 2026-11-26：留档也保留全部入边，供事后回放"这条路径凭什么出现"
           edges: concept.edges.map((edge) => ({ from: edge.from, relation: edge.relation })),
         })),
       ],
@@ -576,6 +531,9 @@ export class IntentFocusRunner implements IntentFocusPort {
       promptTruncated: composed.truncated,
       warnings: allWarnings,
       rewrite: rewriteFields,
+      // 028：门禁分数落档，用于事后标定阈值（0.4 只是起点）
+      plan_score: gate.score,
+      plan_round_ms: gate.roundMs,
       error: [...skillDecided.failures, ...capabilityFailures].join('; ') || null,
     });
 
@@ -592,7 +550,6 @@ export class IntentFocusRunner implements IntentFocusPort {
         behaviors: capabilitySelection.behaviors.length,
         functions: capabilitySelection.functions.length,
         concept_queries: capabilitySelection.conceptQueries.length,
-        // 五元组行数（= 提示里"上游路径"的行数），排障时看它与 prompt_chars 的对照
         focus_paths: focusPaths.length,
         upstream_behaviors: expansion.upstream.behaviors.length,
         downstream_behaviors: expansion.downstream.behaviors.length,
@@ -607,7 +564,57 @@ export class IntentFocusRunner implements IntentFocusPort {
     return {
       prompt: composed.prompt,
       toolTips: buildToolTips(capabilitySelection, expansion.downstream.behaviors),
+      planScore: gate.score,
     };
+  }
+
+  /**
+   * 028：规划门禁判定。
+   *
+   * 三个前置：配置了 `plan_threshold`、数字人开了 `task_planning`、预算还够一次最小调用。
+   * 任一不满足 → 不调用、分数为 `null`（消费方 fail-open 走规划）。
+   * 判定失败/超时同样返回 `null`：门禁是优化项，不能把复杂任务降级掉。
+   */
+  private async judgePlanGate(
+    input: IntentFocusInput,
+    config: IntentFocusConfig,
+    state: string,
+    deadline: number,
+  ): Promise<{ score: number | null; roundMs: number | null }> {
+    const { planThreshold } = config;
+    const client = this.deps.client;
+    if (planThreshold === undefined || client === undefined) {
+      return { score: null, roundMs: null };
+    }
+    if (this.deps.isTaskPlanning?.(input.userId, input.agentName) !== true) {
+      return { score: null, roundMs: null };
+    }
+    const remaining = deadline - this.now();
+    if (remaining < MIN_BATCH_TIMEOUT_MS) {
+      return { score: null, roundMs: null };
+    }
+    const timeoutMs = Math.max(
+      MIN_BATCH_TIMEOUT_MS,
+      Math.min(config.planTimeoutMs, remaining - 100),
+    );
+    const started = this.now();
+    const result = await client.decide(state, { [PLAN_GATE_ID]: PLAN_GATE_QUESTION }, timeoutMs);
+    const roundMs = this.now() - started;
+    if (!result.ok) {
+      this.deps.logger?.warn(
+        {
+          event: 'plan.gate.degraded',
+          reason: result.reason,
+          round_ms: roundMs,
+          agent_name: input.agentName,
+          thread_id: input.threadId,
+        },
+        '规划门禁判定失败，按 fail-open 继续走规划',
+      );
+      return { score: null, roundMs };
+    }
+    const score = result.scores[PLAN_GATE_ID];
+    return { score: typeof score === 'number' ? score : null, roundMs };
   }
 
   private async fail(
@@ -783,12 +790,6 @@ function directConceptEntries(
   return entries;
 }
 
-/**
- * 一个本体技能恒只有**一个**本体（`SKILL.md` 的单个 `ontology_id`）。
- *
- * 同一 `ontology_id` 被物化成多份文件时只取首份（本体文件枚举序），
- * 提示里不重复输出；本体名优先取 `ontology.yaml`，缺失时回落到技能头部。
- */
 function pickOntology(candidate: SkillCandidate): PromptOntology | null {
   const first = candidate.matchedOntologies[0];
   if (!first) return null;

@@ -1,16 +1,7 @@
-/**
- * 单测：同源地址的「能否内联渲染」预检（`2026-10-15`）。
- *
- * 守三件事：
- * 1. **按响应头判定**，不看 URL：`attachment` 优先于 `content-type`（即使 text/html 也判下载）
- * 2. **未知 / 二进制类型 → download**（保守：宁可给下载入口，也不塞进 iframe 变空白）
- * 3. **失败一律 `fallback`**：网络错误 / 非 2xx 不抛错，交给上层降级为外部跳转
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import { probeRenderable } from './preview-probe'
 
-/** 构造一个只带响应头的 `Response` 桩（`body.cancel` 可断言）。 */
 function stubResponse(options: {
   ok?: boolean
   headers?: Record<string, string>
@@ -34,7 +25,7 @@ describe('probeRenderable —— 可内联渲染', () => {
     'application/pdf',
     'application/json; charset=utf-8',
     'image/png',
-    'TEXT/HTML', // 大小写不敏感
+    'TEXT/HTML',
   ])('%s → renderable', async (contentType) => {
     const fetchImpl = fetchReturning(stubResponse({ headers: { 'content-type': contentType } }))
 

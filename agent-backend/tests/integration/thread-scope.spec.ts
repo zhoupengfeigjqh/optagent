@@ -1,17 +1,3 @@
-/**
- * 集成测试：会话作用域与「新建对话」语义（009 FR-013/016/020/022/032、
- * contracts/api-delta.md §2、D11/D14）
- *
- * - `POST /api/threads` 的 `agent_name` 字段**保留但不再决定归属**：归属恒取服务端当前选中，
- *   不一致时落 `warn`（不静默），并以服务端为准（D11）
- * - `GET /api/threads` 的 `agent_name` 查询参数被忽略（§2）
- * - 会话不属于当前数字人时，详情/续聊/改名/删除一律 `404 THREAD_NOT_FOUND`，
- *   且与"会话本就不存在"**完全同形**（不泄露存在性，FR-021）
- * - 空对话是**视图态**：未发消息的会话不出现在列表里（FR-016），但仍在磁盘上（可显式删）
- * - 陈旧选中数字人（已被移除）→ `409 AGENT_NOT_AVAILABLE`，且选中态**不被自动清空**（FR-032）
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -80,15 +66,13 @@ describe('POST /api/threads —— 归属取服务端当前选中（D11）', () 
   it('body 的 agent_name 与服务端选中不一致：按**服务端**归属，落 warn，接口仍 201', async () => {
     const warn = vi.spyOn(ctx().loggers.logger, 'warn');
     try {
-      const res = await createThread({ agent_name: AGENT_B }); // 当前选中是 A
+      const res = await createThread({ agent_name: AGENT_B });
       expect(res.statusCode).toBe(201);
       const { thread_id: threadId } = res.json() as { thread_id: string };
 
-      // 落在 A 的数据域里（B 的数据域没有它）
       expect(existsSync(threadDir(root, USER, AGENT_A, threadId))).toBe(true);
       expect(existsSync(threadDir(root, USER, AGENT_B, threadId))).toBe(false);
 
-      // 不静默：留一条可定位的 warn
       const hit = warn.mock.calls.find(
         (c) => (c[0] as { event?: string })?.event === 'thread.create.agent_mismatch',
       );
@@ -137,7 +121,6 @@ describe('列表与详情 —— 只认当前数字人（§2 / FR-016）', () =>
       (list.json() as Array<{ thread_id: string }>).some((m) => m.thread_id === threadId),
     ).toBe(false);
 
-    // 视图态≠删除：详情取得到（用户显式删除才消失）
     expect((await threadDetail(threadId)).statusCode).toBe(200);
     expect(existsSync(threadDir(root, USER, AGENT_A, threadId))).toBe(true);
   });
@@ -169,7 +152,6 @@ describe('列表与详情 —— 只认当前数字人（§2 / FR-016）', () =>
     expect(ghost.statusCode).toBe(404);
     const crossBody = cross.json() as { error: { code: string; message: string } };
     const ghostBody = ghost.json() as { error: { code: string; message: string } };
-    // 同形：同一错误码、同一文案模板（仅 id 不同），**不出现**"作用域/无权限"这类差异
     expect(crossBody.error.code).toBe(ghostBody.error.code);
     expect(crossBody.error.message).toMatch(/^对话不存在：/);
     expect(ghostBody.error.message).toMatch(/^对话不存在：/);
@@ -184,7 +166,6 @@ describe('陈旧选中数字人（FR-032）', () => {
     writeAgent('to-be-removed');
     expect((await select('to-be-removed')).statusCode).toBe(200);
 
-    // 平台侧移除（等价于部署后目录消失）
     rmSync(agentDir(root, USER, 'to-be-removed'), { recursive: true, force: true });
 
     const list = await listThreads();
@@ -194,10 +175,8 @@ describe('陈旧选中数字人（FR-032）', () => {
       '请重新选择',
     );
 
-    // 选中态仍在（不自动清空）：用户显式重选才更新
     expect(ctx().currentAgent.current(USER)).toEqual({ userId: USER, agentName: 'to-be-removed' });
 
-    // 用户显式重选 → 恢复正常
     expect((await select(AGENT_A)).statusCode).toBe(200);
     expect((await listThreads()).statusCode).toBe(200);
   });

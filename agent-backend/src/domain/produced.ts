@@ -1,99 +1,44 @@
-/**
- * 后台产出（R11，契约 §10.4 / §10.5）：MCP 异步工具回写结果的落盘与消费投影。
- *
- * 存储形态：**正文与 sidecar 元数据同目录、同生命周期**（刻意不用单一 `index.jsonl`）——
- * 被清理时一起消失，不会出现"列表里有、点开是空的"悬空引用。
- *
- * **目录即索引**：列表与提示词段都由**扫描目录**现算，不落第二份可漂移的数据（原则五）。
- *
- * 全部 IO 经 `FileAccess`（顶层白名单 + 符号链接校验 + 受控子目录写入），
- * 本模块不直接碰文件系统。
- */
 import { PRODUCED_DIR } from './dirs.js';
 import type { FileAccess, FileEntry } from './file-access.js';
 import { formatBytes } from './tool-result.js';
 
-/** sidecar 后缀，同时是"这条产出存在"的判据（正文文件本身不参与列表） */
 export const META_SUFFIX = '.meta.json';
-/** 产出列表一次最多返回几条（有界返回） */
 export const PRODUCED_LIST_MAX = 50;
-/** 提示词段最多列几条 */
 export const PRODUCED_PROMPT_MAX = 10;
 
-/**
- * sidecar 元数据（契约 §10.4）。
- *
- * `created_at` 口径（2026-10-09 补）：**提交时刻**，由回写地址的 `t` 参数带入
- * （`infra/file-sign.ts` 铸造 URL 的那一刻 = 任务提交时刻，服务原样回传）。
- * 服务没回传 / 值不可信（非正数、晚于回写时刻）时退化为回写时刻 ——
- * 此时 `created_at === finished_at`，与改造前一致（降级不阻断，原则九）。
- */
 export interface ProducedMeta {
-  /** 服务侧任务号（= 服务提供的文件名主干，见 `jobIdOf`） */
   job_id: string;
   uid: string;
-  /** 发起该任务的会话（= thread_id）；决定落盘文件名前缀，缺失时为 `uid` */
   sid?: string;
-  /** 关联那次"已受理"的工具调用（前端挂载点） */
   call_id?: string;
-  /** 运行环境侧工具全名（含 `{server}__` 前缀） */
   tool: string;
   created_at: string;
   finished_at: string;
   status: 'done';
-  /** 一行摘要（可缺省；由服务决定是否提供） */
   summary?: string;
   size: number;
-  /** **落盘名**（含 `{prefix}_`），列表与提示词段都用它 */
   filename: string;
-  /**
-   * 已读时刻（契约 §10.5 ⑤）：**缺省 = 未读**。
-   *
-   * 写在 sidecar 内 ⇒ 与产出**同生命周期**：产出被 30 天清理时它一起消失，
-   * 未读数因此自然归零，不会出现"角标 > 0 而列表为空"的悬空状态（§10.6 不变式 7）。
-   */
   read_at?: string;
 }
 
-/**
- * 列表项 = 元数据 + 可直接 `read_file` 的路径 + **查询期联结出的展示字段**。
- *
- * `agent_name` 刻意**不落 sidecar**：它是"发起会话**最近一轮**使用的数字人"，
- * 会随会话跨数字人而变，只由查询方按 `sid` 反查 `ThreadStore`（见 `routes/produced.ts`）。
- * 落盘就会成为与 thread meta 并存的第二份真相（原则五）。
- */
 export interface ProducedItem extends ProducedMeta {
-  /** 相对 user-data 的路径（模型据此 read_file） */
   relPath: string;
-  /** 发起会话最近一轮使用的数字人（由 `sid` 反查）；`sid` 缺失或会话已删除时缺省 */
   agent_name?: string;
 }
 
-/** 去掉扩展名（`j_123.json` → `j_123`；无扩展名则原样返回） */
 function stripExt(name: string): string {
   const ext = name.slice(name.lastIndexOf('.'));
   return ext.length > 1 && ext.length < name.length ? name.slice(0, -ext.length) : name;
 }
 
-/** `job_id` 取自**服务提供的** `filename` 主干（契约 §10.3） */
 export function jobIdOf(rawFilename: string): string {
   return stripExt(rawFilename);
 }
 
-/** 落盘名：`{prefix}_{服务提供的文件名}`（契约 §10.3） */
 export function producedFilename(prefix: string, rawFilename: string): string {
   return `${prefix}_${rawFilename}`;
 }
 
-/**
- * 落盘名是否合法（2026-10-27 加固）：**只接受单段文件名**。
- *
- * 为什么必须校验：sidecar 里的 `filename` 会被拼成 `临时空间/后台产出/{filename}` 再交给
- * `FileAccess.readBuffer`。`path.resolve` 会把 `..` 归一化掉——`../../数据准备/生产计划/x.xlsx`
- * 归一化后仍落在同一个 dataRoot 内、顶层目录也命中白名单，于是"读产出"可以变成
- * "读该用户数据域内任意文件"。故此处只认单段名：分隔符 / 盘符 / 冒号（NTFS ADS）/
- * `..` / 控制字符一律非法。
- */
 export function isSafeProducedName(name: string): boolean {
   if (name === '' || name === '.' || name === '..') return false;
   if (name.includes('..')) return false;
@@ -102,7 +47,6 @@ export function isSafeProducedName(name: string): boolean {
   return !/[\\/:*?"<>|]/u.test(name);
 }
 
-/** 结果文件对应的 sidecar 名：`{prefix}_j_1.json` → `{prefix}_j_1.meta.json` */
 export function metaFilename(resultFilename: string): string {
   return `${stripExt(resultFilename)}${META_SUFFIX}`;
 }
@@ -122,22 +66,18 @@ export function producedPrefix(sid: string | undefined, userId: string): string 
 
 export interface WriteProducedInput {
   access: FileAccess;
-  /** 归属提示（来自 URL，非签名） */
   sid?: string | undefined;
   callId?: string | undefined;
   tool?: string | undefined;
   /** 服务提供的文件名（`{jobId}.{ext}`）；调用方已做安全检查 */
   filename: string;
   content: Buffer;
-  /** 归属用户（sidecar 记录；前缀回退值） */
   userId: string;
   summary?: string | undefined;
-  /** 提交时刻（回写地址的 `t`，已由调用方校验）；缺省 → 退化为回写时刻 */
   createdAt?: Date | undefined;
   now?: Date;
 }
 
-/** 落盘正文 + sidecar；返回落盘名、相对路径与体积 */
 export async function writeProduced(
   input: WriteProducedInput,
 ): Promise<{ filename: string; relPath: string; size: number }> {
@@ -148,7 +88,6 @@ export async function writeProduced(
   }
   const filename = producedFilename(prefix, input.filename);
   // 正文 MUST NOT 长得像 sidecar（2026-10-27）：`scanProduced` 按后缀识别元数据，
-  // 一条内容为 JSON 的"正文"会被当成元数据解析，其中的 `filename` 再被当作路径使用。
   if (filename.toLowerCase().endsWith(META_SUFFIX)) {
     throw new Error(`产出文件名不得以 ${META_SUFFIX} 结尾: ${input.filename}`);
   }
@@ -176,23 +115,11 @@ export async function writeProduced(
   return { filename, relPath, size: input.content.length };
 }
 
-/** 扫描结果（内部形状）：元数据**原样保留**，另附仅供列表使用的路径 */
 interface ScannedProduced {
   meta: ProducedMeta;
   relPath: string;
 }
 
-/**
- * 扫描产出目录并按完成时间倒序返回**全部**条目（不做有界截断）。
- *
- * 与 `listProduced` 分开的原因：**"标记已读"必须能命中列表之外的条目**——
- * 列表是有界返回（`PRODUCED_LIST_MAX`），但用户完全可能点开第 51 条。
- * 扫描本身无界（规模 = 30 天内的产出数，量级极小）。
- *
- * - 目录不存在 → 空数组（"没有产出"与"目录还没建"同义）
- * - sidecar 损坏/正文已被清理 → **跳过该条**（不产生悬空引用）
- * - sidecar 读取用 `touch: false`：清单扫描不该给产出续命（否则永不清理，见 `file-access`）
- */
 async function scanProduced(access: FileAccess): Promise<ScannedProduced[]> {
   let entries: FileEntry[];
   try {
@@ -211,7 +138,6 @@ async function scanProduced(access: FileAccess): Promise<ScannedProduced[]> {
   return items;
 }
 
-/** 产出列表（**有界返回**，契约 §10.5 ②）：扫描 + 按 `limit` 截断 */
 export async function listProduced(
   access: FileAccess,
   limit: number = PRODUCED_LIST_MAX,
@@ -238,15 +164,6 @@ export async function findProduced(
   return null;
 }
 
-/**
- * 批量标记已读（契约 §10.5 ⑤）：把 `read_at` 写回 sidecar。
- *
- * - **幂等**：已标记过的条目**不改动**原有 `read_at`（重复点击不刷新时间）；
- * - **不存在的 `job_id` 忽略**：产出可能已被 30 天清理——那不是调用方的错误；
- * - 返回**实际写入的条数**（供界面如实反馈，也便于测试断言）；
- * - 直接改 `scanProduced` 拿到的元数据并整体回写：不重建字段，避免"列表项 → sidecar"
- *   的字段搬运漂移（漏一个字段就等于抹掉一条元数据）。
- */
 export async function markProducedRead(
   access: FileAccess,
   jobIds: readonly string[],
@@ -271,10 +188,9 @@ export async function markProducedRead(
 async function readMeta(access: FileAccess, relPath: string): Promise<ProducedMeta | null> {
   try {
     const { content, truncated } = await access.read(relPath, { limit: 16 * 1024, touch: false });
-    if (truncated) return null; // 元数据不该大到被截断；宁可跳过也不返回半截信息
+    if (truncated) return null;
     const raw = JSON.parse(content) as Partial<ProducedMeta>;
     if (typeof raw.job_id !== 'string' || typeof raw.filename !== 'string') return null;
-    // 2026-10-27 加固：sidecar 的 `filename` 会被当路径读（列表项 `relPath`、raw 正文下载），
     // 不是单段文件名就整条跳过——宁可这条产出不可见，也不让"读产出"变成"读任意文件"。
     if (!isSafeProducedName(raw.filename)) return null;
     return {
@@ -321,7 +237,6 @@ export function formatProducedList(
   return ['【后台计算结果】（需要内容时用 read_file 按路径读取）', ...lines].join('\n');
 }
 
-/** 相对时间（列表与提示词段共用口径）；无法解析时给可读占位，不留空白 */
 function relativeTime(iso: string, now: number): string {
   const at = Date.parse(iso);
   if (!Number.isFinite(at)) return '时间未知';

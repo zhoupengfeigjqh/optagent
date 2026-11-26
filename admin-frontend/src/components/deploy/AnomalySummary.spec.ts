@@ -1,9 +1,3 @@
-/**
- * 组件测试：全局异常项汇总（T082）
- *
- * 守住 `FR-055` / `SC-016`：**一次视图内**列出全部受影响的数字人及其所属用户，
- * 并可跳转到编辑位置。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AnomalySummary from './AnomalySummary.vue'

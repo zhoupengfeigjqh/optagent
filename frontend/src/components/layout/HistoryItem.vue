@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 历史会话项（T060）
- *
- * - `title === null` → 展示"新会话"（FR-044 的兜底展示）
- * - 超长标题单行省略，完整标题经 `title` 属性可达
- * - `disabled` 时按钮原生禁用：不可聚焦、不派发 `select`，但文本仍可被读屏读取（FR-036）
- * - `running` 为显式属性：列表接口不返回 `running`（仅详情返回），
- *   故由 `HistorySidebar` 依"存在进行中会话 + 该项为活跃项"派生后传入（契约超集）
- * - 右侧操作区（悬停 / 聚焦显形）三项：**重命名**、**导出 Markdown**（均 2026-10-16）、删除。
- *   删除只上报 `remove`，二次确认与"切换到相邻会话或空态"由 `views/WorkbenchView.vue` 编排
- *   （`backend-api.md` §3.5）；导出只上报 `export`，拉取与落盘同样由该视图编排。
- * - 重命名是**行内编辑**（双击标题，或点编辑入口）：Enter / 失焦确认、Esc 取消，
- *   空标题与未改动一律不发请求；请求与回滚在 `useThreads.rename`。
- */
 import { computed, nextTick, ref } from 'vue'
 
 import type { Conversation } from '../../api/types'
@@ -21,13 +7,10 @@ import BaseIcon from '../common/BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 会话 */
     thread: Conversation
-    /** 是否为当前选中会话 */
     active?: boolean
     /** 是否禁用（有进行中的会话时禁止切换） */
     disabled?: boolean
-    /** 该会话本轮是否仍在进行 */
     running?: boolean
   }>(),
   { active: false, disabled: false, running: false },
@@ -35,11 +18,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   select: [threadId: string]
-  /** 提交新标题（空标题 / 未改动由本组件拦下，不会发出） */
   rename: [payload: { threadId: string; title: string }]
-  /** 请求把该会话导出为 Markdown（拉取与落盘由 `WorkbenchView` 编排） */
   export: [threadId: string]
-  /** 请求删除该会话（二次确认与真正的删除由上层编排，`backend-api.md` §3.5） */
   remove: [threadId: string]
 }>()
 
@@ -53,13 +33,10 @@ function onClick(): void {
   emit('select', props.thread.thread_id)
 }
 
-/* ---------- 行内重命名（2026-10-16） ---------- */
-
 const editing = ref(false)
 const draftTitle = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 
-/** 进入编辑态：预填当前标题并全选（连着改几个会话时少按几次键） */
 function startEditing(): void {
   if (props.disabled) {
     return
@@ -72,7 +49,6 @@ function startEditing(): void {
   })
 }
 
-/** 确认：空标题或与现值相同 = 就地收手（不发请求、不动数据） */
 function commitEditing(): void {
   if (!editing.value) {
     return
@@ -85,12 +61,6 @@ function commitEditing(): void {
   emit('rename', { threadId: props.thread.thread_id, title: next })
 }
 
-/**
- * 取消（Esc）：只收编辑框。
- *
- * `stopPropagation` 不是洁癖：`ChatPanel` 在 `window` 上挂着"Esc 中断本轮"，
- * 不拦住的话，用户想取消改名会顺手把正在输出的回答掐掉。
- */
 function cancelEditing(event: KeyboardEvent): void {
   event.preventDefault()
   event.stopPropagation()
@@ -138,8 +108,6 @@ function onRemove(): void {
       @dblclick="startEditing"
     >
       <span class="history-item__line">
-        <!-- 015：定时任务会话的闪电标记。与「进行中」徽标共存（两个通道互不替代），
-             图标带可读名称，读屏会把它念进条目名（"定时任务会话 …"） -->
         <span v-if="thread.source" class="history-item__source">
           <BaseIcon name="schedule" :size="12" label="定时任务会话" />
         </span>
@@ -211,7 +179,6 @@ function onRemove(): void {
   cursor: pointer;
 }
 
-/* 行内编辑框：与外层条目同宽同位，进入编辑时视觉上不跳动 */
 .history-item__input {
   flex: 1;
   min-width: 0;
@@ -229,8 +196,6 @@ function onRemove(): void {
   flex: none;
   align-items: center;
   gap: var(--space-1);
-  /* 默认淡出、悬停或**任意子元素聚焦**时显形；`opacity` 不影响可聚焦与可点击，
-     键盘用户 Tab 进来即可见（`focus-within` 比逐个 `:focus-visible` 更不容易漏）。 */
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -281,7 +246,6 @@ function onRemove(): void {
   opacity: 0.55;
 }
 
-/* 图标与标题同一行：按钮是纵向 flex，不包一层会把图标顶成独立一行 */
 .history-item__line {
   display: flex;
   align-items: center;

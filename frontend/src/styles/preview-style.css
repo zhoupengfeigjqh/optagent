@@ -11,8 +11,6 @@
   --bg-chat: #f5f6f8;
 }
 * {
-  /* margin: 0;
-  padding: 0; */
   box-sizing: border-box;
 }
 html,
@@ -30,7 +28,6 @@ button {
   font-family: inherit;
 }
 
-/* ===== 三栏 Grid：导航 / 聊天 / 预览面板（分隔条在面板内部左侧） ===== */
 .mainbox {
   display: grid;
   grid-template-columns: var(--nav-w) 1fr var(--panel-w);
@@ -57,10 +54,8 @@ button {
   pointer-events: none;
 }
 
-/* ===== 左栏：导航菜单 ===== */
 .navbox {
   position: relative;
-  /* z-index:100; */
   overflow: hidden;
 }
 .navbox.navclose {
@@ -70,7 +65,6 @@ button {
   transform: translateX(0%);
 }
 
-/* ===== 中栏：聊天区 ===== */
 .chatareabox {
   display: flex;
   flex-direction: column;
@@ -255,7 +249,6 @@ button {
   background: #1d4ed8;
 }
 
-/* ===== 分隔条（预览面板内部左侧，面板打开即存在） ===== */
 .handle {
   flex: none;
   width: 6px;
@@ -279,7 +272,6 @@ button {
   background: var(--accent);
 }
 
-/* ===== 右栏：预览面板（内部左侧为分隔条） ===== */
 .panel {
   background: #fff;
   display: flex;
@@ -364,7 +356,6 @@ button {
   background: #fff;
 }
 
-/* 模拟 Word 文档预览 */
 .doc-wrap {
   overflow: auto;
   background: #e5e7eb;
@@ -424,7 +415,6 @@ button {
   margin-top: 16px;
 }
 
-/* ===== 移动端：预览面板变为全屏抽屉 ===== */
 @media (max-width: 767px) {
   :root {
     --nav-w: 200px;

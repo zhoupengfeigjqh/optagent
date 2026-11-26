@@ -1,17 +1,3 @@
-/**
- * 集成测试：跨数字人数据隔离（009 FR-021/023/030/033、contracts/api-delta.md §0/§1/§3）
- *
- * 一条主线：**作用域＝服务端当前选中数字人**，客户端指定的作用域一律无效。
- * 用户故事 1 的验收场景逐条钉在这里：
- *
- * - 同一用户的两个数字人各自一份文件空间：列表互不可见、同名文件互不串内容；
- * - 甲创建的会话，切到乙后**在列表里查不到**，按 id 取 → `404 THREAD_NOT_FOUND`
- *   （与"不存在"不可区分，不泄露存在性）；
- * - 跨数字人路径（`../{另一个数字人}/...`）→ `403 UPLOAD_DIR_FORBIDDEN`；
- * - 未选中 → `409 AGENT_NOT_SELECTED`；选中已移除的数字人 → `409 AGENT_NOT_AVAILABLE`。
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,7 +10,6 @@ import { buildServer } from '../../src/server';
 
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-isolation-'));
 const USER = 'admin';
-/** 两个数字人：名称刻意相邻，便于回看"升序第一"的默认归属 */
 const AGENT_A = '甲方数字人';
 const AGENT_B = '乙方数字人';
 
@@ -39,7 +24,6 @@ function writeAgent(name: string): void {
   writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
-/** 直接在磁盘上放文件（绕过上传接口：本文件只关心"读得到/读不到"） */
 function putFile(agentName: string, space: string, filename: string, content: string): string {
   const abs = path.join(userDataDir(root, USER, agentName), space, filename);
   mkdirSync(path.dirname(abs), { recursive: true });
@@ -51,7 +35,6 @@ function ctx(): AppContext {
   return (app as unknown as { ctx: AppContext }).ctx;
 }
 
-/** 选中某数字人（走真实接口，端到端覆盖 404/200 语义） */
 function select(name: string) {
   return app.inject({ method: 'POST', url: `/api/agents/${encodeURIComponent(name)}/select` });
 }
@@ -85,7 +68,6 @@ beforeAll(async () => {
     configPath,
   });
   app = await buildServer({ config });
-  // 启动期迁移已跑过（此时无数字人 ⇒ 无源目录也不受影响）；随后建两个数字人
   writeAgent(AGENT_A);
   writeAgent(AGENT_B);
 });
@@ -97,7 +79,6 @@ afterAll(async () => {
 
 describe('作用域来源：只能是服务端当前选中数字人', () => {
   it('未选中 → 会话/文件接口一律 409 AGENT_NOT_SELECTED', async () => {
-    // 全新用户（从未选中）看接口的行为
     expect(ctx().currentAgent.current(USER)).toBeUndefined();
 
     const threads = await listThreads();
@@ -125,7 +106,6 @@ describe('文件空间：两数字人各自一份，互不可见', () => {
     const aFile = putFile(AGENT_A, SPACE_TMP, '同名文档.csv', '甲的正文');
     const aTmp = putFile(AGENT_A, SPACE_TMP, 'th_x_产出.json', '甲产出');
 
-    // 甲看得见自己的（list 返回数组：[{ filename, size, updated_at }]）
     const aList = await listFiles(SPACE_TMP);
     expect(aList.statusCode).toBe(200);
     expect(
@@ -135,13 +115,11 @@ describe('文件空间：两数字人各自一份，互不可见', () => {
         .sort(),
     ).toEqual(['th_x_产出.json', '同名文档.csv'].sort());
 
-    // 切到乙：乙的空间是空的（甲的目录压根不在作用域内）
     expect((await select(AGENT_B)).statusCode).toBe(200);
     const bList = await listFiles(SPACE_TMP);
     expect(bList.statusCode).toBe(200);
     expect(bList.json() as unknown[]).toEqual([]);
 
-    // 乙放同名文件：两边内容互不污染
     const bFile = putFile(AGENT_B, SPACE_TMP, '同名文档.csv', '乙的正文');
     const bDownload = await app.inject({
       method: 'GET',
@@ -156,7 +134,6 @@ describe('文件空间：两数字人各自一份，互不可见', () => {
     });
     expect(aDownload.body).toBe('甲的正文');
 
-    // 磁盘上确实是两份独立文件
     expect(path.dirname(aFile)).not.toBe(path.dirname(bFile));
     expect(aTmp).toContain(path.join('user-data', AGENT_A));
   });
@@ -164,12 +141,10 @@ describe('文件空间：两数字人各自一份，互不可见', () => {
   it('跨数字人路径一律不可达：上跳/绝对路径 → 400，点名对方数字人 → 403（错误码沿用既有映射）', async () => {
     expect((await select(AGENT_B)).statusCode).toBe(200);
 
-    // `..` 上跳：连目录参数本身都不合法（400 VALIDATION_FAILED）
     const up = await listFiles(`../${AGENT_A}/${SPACE_TMP}`);
     expect(up.statusCode).toBe(400);
     expect((up.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
 
-    // 绝对路径：同样非法（400）
     const abs = await listFiles(path.join(root, 'users', USER, 'user-data', AGENT_A, SPACE_TMP));
     expect(abs.statusCode).toBe(400);
 
@@ -199,7 +174,6 @@ describe('会话归属：跨数字人一律 404（与"不存在"不可区分）'
     const forced = await listThreads(`?agent_name=${encodeURIComponent(AGENT_A)}`);
     expect((forced.json() as unknown[]).length).toBe(0);
 
-    // 回到甲：会话还在，且**空对话不入列表**（尚未发过消息）
     expect((await select(AGENT_A)).statusCode).toBe(200);
     const aThreads = await listThreads();
     expect((aThreads.json() as unknown[]).length).toBe(0);
@@ -222,7 +196,6 @@ describe('会话归属：跨数字人一律 404（与"不存在"不可区分）'
     const del = await app.inject({ method: 'DELETE', url: `/api/threads/${threadId}` });
     expect(del.statusCode).toBe(404);
 
-    // 甲这边完好无损
     expect((await select(AGENT_A)).statusCode).toBe(200);
     expect((await threadDetail(threadId)).statusCode).toBe(200);
   });

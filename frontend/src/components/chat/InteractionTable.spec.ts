@@ -1,10 +1,3 @@
-/**
- * 组件测试：对象数组的表格块。
- *
- * 守住的语义：**一行一个元素**、表头 = 传入的列（顺序即 schema 声明列 + 值里动态列）、
- * 单元格路径 = 本路径 + [行下标, 列名]（下标不错位）、删行只上报事件（不自己改数据）、
- * 空态与异常行都有明确文案。
- */
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 

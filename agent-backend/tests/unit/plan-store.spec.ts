@@ -1,9 +1,3 @@
-/**
- * 单元测试：计划留档（`plan.jsonl`）。
- *
- * 守住四条硬约束：与 `history.jsonl` 物理分离、同线程串行不交错、有界滚动、
- * 写盘失败只告警（留档失败绝不影响对话）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,7 +122,6 @@ describe('有界', () => {
 describe('失败语义', () => {
   it('写盘失败只告警，不抛错', async () => {
     const store = newStore();
-    // 线程目录被同名文件占用 → mkdir 失败
     const file = store.filePathOf(UID, AGENT, THREAD);
     fs.mkdirSync(path.dirname(path.dirname(file)), { recursive: true });
     fs.writeFileSync(path.dirname(file), 'blocked');

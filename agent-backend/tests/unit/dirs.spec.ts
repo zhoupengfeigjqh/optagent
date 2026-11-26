@@ -1,17 +1,3 @@
-/**
- * dirs 模块单测：场景（scenario.json）随**数字人**存放
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test:all   # 全部测试
- *   npm run test       # 仅本目录单测
- *
- * 覆盖本次变更的核心约束：场景的存放与读取位置由**用户级**改为**数字人级**
- * （`users/{uid}/agents/{agent}/scenario.json`），使同一用户的不同数字人
- * 可以看到不同的文件空间。
- *
- * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
- * 由 Vitest 解析到 `src/domain/dirs.ts`。
- */
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -57,7 +43,6 @@ function writeScenario(agentName: string, content: unknown): void {
   writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content), 'utf8');
 }
 
-/** 执行并返回抛出的错误；未抛错时返回 `null` */
 function capture(fn: () => unknown): unknown {
   try {
     fn();
@@ -248,7 +233,6 @@ describe('parseSpaceDir - 目录清单按数字人判定', () => {
     expect(parseSpaceDir(root, userId, 'agent-narrow', '临时空间').relPath).toBe('临时空间');
   });
 
-  // 2026-11-18（025）：共享空间已下线 ⇒ 与"清单外目录"同判据（403）。
   // 历史会话里指向该目录的旧引用就落在这条路径上（HTTP 侧映射为 403 UPLOAD_DIR_FORBIDDEN），故必须钉住。
   it('已下线的「共享空间」与清单外目录同判 403', () => {
     const error = capture(() => parseSpaceDir(root, userId, 'agent-narrow', '共享空间'));
@@ -284,7 +268,6 @@ describe('路径工厂 - 数据域归到数字人一级（009）', () => {
   });
 
   it('**跨用户**同名数字人的数据域互不相同（FR-004 的路径层保证）', () => {
-    // 运行期是单用户，但路径里始终带 uid：同名的两个数字人各自一份数据域
     expect(userDataDir(root, 'admin', '同名数字人')).not.toBe(
       userDataDir(root, 'bob', '同名数字人'),
     );
@@ -319,7 +302,6 @@ describe('路径工厂 - 数据域归到数字人一级（009）', () => {
     ensureUserDirs(root, onlyUser);
 
     expect(existsSync(path.join(root, 'users', onlyUser, 'agents'))).toBe(true);
-    // 用户级不再有数据目录（数据域全在数字人一级，随选中/使用时惰性创建）
     expect(existsSync(userDataRoot(root, onlyUser))).toBe(false);
   });
 

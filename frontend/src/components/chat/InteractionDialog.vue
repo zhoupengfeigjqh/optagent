@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 工具调用人工确认弹窗（HITL，Schema 驱动通用表单）。
- *
- * 解耦红线：本组件**唯一输入**是 `request`（title + schema + proposed_args + rules_field），
- * 不含任何具体工具/MCP 服务名；新增需确认的工具 = 平台改配置 + 部署，零代码。
- *
- * 分层（2026-09-23 起）：
- * - 控件推导与值逻辑：`utils/arg-schema.ts` / `utils/arg-values.ts`（纯函数，各自有单测）；
- * - 表单状态：`composables/useInteractionForm.ts`（模型 / JSON 草稿 / 规则入口落点）；
- * - 单个字段（含任意深度递归）：`InteractionField.vue`；
- * - 本组件只做弹窗外壳：标题、倒计时、错误汇总、提交与拒绝。
- *
- * 倒计时：`remaining_seconds` 归零 → 按拒绝关闭（后端超时同样按拒绝收尾，语义一致）。
- */
 import { computed, inject, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue'
 
 import type { InteractionSnapshot, WorkspaceFile } from '../../api/types'
@@ -31,9 +17,7 @@ import InteractionField from './InteractionField.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 待确认的交互（含预填参数、schema、规则字段、剩余秒数） */
     request: InteractionSnapshot
-    /** 服务端终验失败的逐字段错误（上层经 submit 结果回写；非空时保持弹窗） */
     serverError?: string
   }>(),
   { serverError: '' },
@@ -44,16 +28,10 @@ const emit = defineEmits<{
   reject: []
 }>()
 
-/**
- * 会话上下文可选注入：弹窗在无会话环境（单测/独立挂载）下退化为纯表单
- * （无 @ 引用、无文件卡片、无规则入口），确认/拒绝主流程不受影响。
- */
 const session = inject<AppSession | null>(APP_SESSION_KEY, null)
 
-/** `@` 路径插入状态机（无会话不创建）。 */
 const mention = session ? createPathInsertStore({ workspace: session.workspace }) : null
 
-/** 构造一份与当前快照对应的表单状态（挂起点变化时整体重建）。 */
 function buildForm(): InteractionFormStore {
   return createInteractionForm({
     /**
@@ -79,7 +57,6 @@ const form = shallowRef<InteractionFormStore>(buildForm())
 const topLevel = computed(() => form.value.topLevel.value)
 const actionError = computed(() => form.value.actionError.value)
 
-/** 文件空间反查索引：user-data 相对路径 → 文件（结构化卡片的展示层数据源）。 */
 const fileIndex = computed(() => {
   const map = new Map<string, { dir: string; file: WorkspaceFile }>()
   if (!session) return map
@@ -120,13 +97,10 @@ function onSubmit(): void {
   emit('submit', form.value.build())
 }
 
-/* ---------- 倒计时：归零按拒绝关闭 ---------- */
-
 const localError = ref('')
 const remaining = ref(props.request.remaining_seconds)
 let timer: ReturnType<typeof setInterval> | null = null
 
-// 新挂起点 / 恢复快照：重置表单与 @ 面板，并刷新文件空间（命中预填路径的字段要出结构化卡片）。
 // `immediate`：挂载即预取文件空间，否则首屏的结构化卡片与 @ 面板都没有数据源。
 watch(
   () => props.request.interaction_id,
@@ -165,7 +139,6 @@ onBeforeUnmount(() => {
 
 <template>
   <BaseDialog :open="true" :title="request.title" @close="onReject">
-    <!-- 倒计时跟着标题走（标题右侧），不再单独占正文一行 -->
     <template #header-extra>
       <span class="interaction-dialog__countdown">剩余 {{ remaining }} 秒</span>
     </template>
@@ -175,7 +148,6 @@ onBeforeUnmount(() => {
         该调用无需填写参数，请确认是否执行。
       </p>
 
-      <!-- 顶层字段逐个成行；嵌套结构由 InteractionField 递归展开 -->
       <InteractionField
         v-for="field in topLevel"
         :key="field.key"
@@ -204,7 +176,6 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
 }
 
-/* 倒计时是弹窗头部的第二个子元素（紧跟标题）：不参与收缩，也不折行 */
 .interaction-dialog__countdown {
   flex: none;
   white-space: nowrap;

@@ -1,11 +1,3 @@
-/**
- * 单元测试：浏览器下载（2026-10-16，宪章偏差纠正——原缺同名测试）。
- *
- * 单独成文件的唯一理由就是"让 DOM 这一跳只发生在一处"，故本测试必须把这一跳的每一步钉住：
- * `Blob` 的类型与内容、`<a download>` 的两个属性、**锚点点击时确实挂在文档里**
- * （游离节点上的 `click()` 在真实浏览器里什么都不会发生）、点击后移除、
- * 以及对象 URL **延后一轮任务**撤销（立刻撤销会让部分浏览器来不及取数据）。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { downloadTextFile } from './download'
@@ -21,7 +13,6 @@ function installUrlStubs(): void {
   Object.assign(URL, { createObjectURL, revokeObjectURL })
 }
 
-/** 取回被交给 `createObjectURL` 的 Blob（顺便验证它确实是 Blob） */
 function createdBlob(): Blob {
   const blob: unknown = createObjectURL.mock.calls[0][0]
   expect(blob).toBeInstanceOf(Blob)

@@ -1,16 +1,3 @@
-/**
- * 集成测试：部署端点（契约 §6.5~§6.8 与 §7.1）
- *
- * MUST 覆盖每个端点（宪章原则三），且至少包含：
- * ①核心负向——校验不过 → 运行环境**零写入**且一次性列出全部错误项（`SC-020`）；
- * ②被引用的 MCP 服务不存在 → 引用有效性失败（`FR-052`）；
- * ③单用户失败零写入、其余用户不受影响（`FR-029`）；
- * ④幂等（`FR-030`）；⑤`ADM_DEPLOY_VALIDATION_FAILED` 的 `details.errors` 完整性；
- * ⑥既有数据零破坏（`SC-007`）；⑦§7.1 引用清单一致。
- *
- * **2026-09-27**：原"运行形态缺地址"与"双形态对比"两条随运行形态概念下架
- * ——MCP 连接地址为**单一 `url`**。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,7 +16,6 @@ const TOOL_FIXTURE = [
   },
 ];
 
-/** 新建/覆盖一个 MCP 服务（单一连接地址） */
 function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
   const input = {
     description: 'OCR 识别服务',
@@ -62,12 +48,10 @@ function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
-/** 关联用户与数字人 */
 function link(userId: string, agents: string[]): void {
   fx.ctx.users.create(userId, agents, fx.ctx.store.revision());
 }
 
-/* 本体物化与快照完整性用例见同目录 `deploy-ontology.spec.ts`（本文件触 500 行门禁，故分居） */
 
 function revision(): number {
   return fx.ctx.store.revision();
@@ -194,10 +178,8 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
 
 describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
   it('校验不过 → 运行环境零写入，且一次性列出全部错误项 + 指明用户与数字人', async () => {
-    // 制造两类错误：SOUL 为空（config_integrity）+ 失效引用（reference_validity）
     // 创建成功后再手工改坏；下面写入的**字符串** soul 同时覆盖"存量文档兼容"路径
     await createAgent(baseAgent({ name: 'broken', soul: soulDesign('x'), skills: [] }));
-    // 直接改写设计态文档以模拟"已保存但后来失效"的引用 + 被清空的 SOUL
     fx.ctx.store.writeJson('agents/broken.json', {
       name: 'broken',
       soul: '   ',
@@ -229,7 +211,6 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
       expect(typeof err.agent_name).toBe('string');
       expect(err.message.length).toBeGreaterThan(0);
     }
-    // 运行环境写入次数 MUST 为 0
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });
 
@@ -249,7 +230,6 @@ describe('POST /api/admin/deploy —— 核心负向（SC-020）', () => {
 describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () => {
   it('单用户写入失败 → 该用户零写入，其余用户正常产出', async () => {
     await createAgent(baseAgent({ name: 'demo2' }));
-    // 用文件占住 ops 的 agents 目录，使其写入必然失败
     fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), {
       recursive: true,
       force: true,
@@ -270,7 +250,6 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
     expect(ops?.ok).toBe(false);
     expect(ops?.error).toBeTruthy();
 
-    // admin 正常产出；ops 仍是那个占位文件（零写入）
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md'))).toBe(
       true,
     );
@@ -289,7 +268,6 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
     expect(res.statusCode).toBe(200);
     const item = res.json().items[0];
     expect(item.operator).toBe('zyw_admin');
-    // 运行形态字段已随概念下架
     expect(item.target_runtime_form).toBeUndefined();
     expect(item.user_count).toBe(1);
     expect(typeof item.id).toBe('string');
@@ -314,14 +292,12 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
 
 describe('只选一部分用户部署（部署对象由用户卡片勾选，2026-09-16）', () => {
   beforeEach(() => {
-    // 第二个用户（未关联任何数字人）
     link('ops', []);
   });
 
   it('只选一个用户：预检与部署**只扫该用户**，其余用户零写入，且清单只记本次用户', async () => {
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'));
 
-    // ops 未关联数字人 → 预检通过（不会被 admin 那边的情况牵连）
     const validate = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/deploy/validate',
@@ -336,9 +312,7 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
     });
     expect(deploy.statusCode).toBe(200);
     expect(deploy.json().users.map((u: { user_id: string }) => u.user_id)).toEqual(['ops']);
-    // admin 的目录一个字节都没变
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'))).toEqual(before);
-    // 清单只记本次实际分发过的用户
     const manifest = await fx.app.inject({ method: 'GET', url: '/api/admin/deploy/manifest' });
     expect(manifest.json().items.map((i: { user_id: string }) => i.user_id)).toEqual(['ops']);
   });
@@ -357,7 +331,7 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
     const ops = after.json().items.find((u: { user_id: string }) => u.user_id === 'ops');
     const admin = after.json().items.find((u: { user_id: string }) => u.user_id === 'admin');
     expect(typeof ops.deployed_at).toBe('string');
-    expect(admin.deployed_at).toBeNull(); // 没勾选的用户仍是"未部署"
+    expect(admin.deployed_at).toBeNull();
   });
 });
 

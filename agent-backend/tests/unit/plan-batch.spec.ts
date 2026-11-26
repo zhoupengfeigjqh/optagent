@@ -1,9 +1,3 @@
-/**
- * 单元测试：批次装配纯函数（`domain/plan/batch.ts`）。
- *
- * 这些函数从编排器里抽出，用于守住三件容易漂移的事：
- * `seqId` 跨批连续、重规划输入不含历史、可见工具的内置判定。
- */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -70,7 +64,6 @@ describe('collectAvailable', () => {
 
     expect(keys.has('rawmcp__queryinventory')).toBe(true);
     expect(keys.has('queryinventory')).toBe(true);
-    // 与规则闸门同口径：只剥一层前缀，故 mcp 工具派生到 `svc__…`
     expect(keys.has('mcp__svc__sumrawnotarrivalqty')).toBe(true);
     expect(keys.has('svc__sumrawnotarrivalqty')).toBe(true);
   });
@@ -96,7 +89,6 @@ describe('assistantText', () => {
       }),
     ).toBe('第一段\n第二段');
 
-    // 不在这里截断：先切 80 字会把表格切在半个单元格上，下游再也剥不干净
     const long = assistantText({ content: [{ type: 'text', text: 'x'.repeat(SUMMARY_LINE_MAX + 50) }] });
     expect(Array.from(long)).toHaveLength(SUMMARY_LINE_MAX + 50);
   });

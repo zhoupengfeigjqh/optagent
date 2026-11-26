@@ -1,16 +1,3 @@
-/**
- * 组件测试：工具范围弹窗（2026-10-15）
- *
- * 守住六条口径：
- * 1. **以本次探测结果为基准**预勾选当前白名单；白名单里已不存在的工具勾不了、但要**如实提示**
- *    （保存后会移出范围，MUST NOT 静默消失）；
- * 2. **至少勾一个**：空范围在平台语义里 = 不限制（数字人反而看到全部工具），本地先拦且不发请求；
- * 3. **载荷是"重放"**：`PUT` 是全量替换，故只改白名单也必须带上其余字段——但 **MUST NOT 带 `headers`**
- *    （详情回的是掩码，带回去等于把真令牌换成掩码）；
- * 4. **失败不关窗、勾选不丢**（并发冲突时管理员重试即可）；
- * 5. 取消 / Esc 一律**不改动任何东西**（不发请求）；
- * 6. **关窗必须真的退出模态态**：先 `close()` 再兜底清 `open`（顺序反了 = 整页假死，2026-10-16）。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { McpServiceDetail, McpToolInfo } from '../../api/types'
@@ -60,7 +47,6 @@ function mountDialog(service: McpServiceDetail = SERVICE) {
   return mount(McpToolScopeDialog, { props: { open: false, service } })
 }
 
-/** 打开弹窗（走 `open` 变化的那条路径，与真实用法一致） */
 async function openDialog(service: McpServiceDetail = SERVICE) {
   const wrapper = mountDialog(service)
   await wrapper.setProps({ open: true })
@@ -68,7 +54,6 @@ async function openDialog(service: McpServiceDetail = SERVICE) {
   return wrapper
 }
 
-/** 勾选状态：`{[工具名]: 是否勾选}` */
 function checkedMap(wrapper: ReturnType<typeof mountDialog>): Record<string, boolean> {
   const map: Record<string, boolean> = {}
   for (const box of wrapper.findAll<HTMLInputElement>('[data-test="tool"]')) {
@@ -88,17 +73,6 @@ function dialogEl(wrapper: ReturnType<typeof mountDialog>): HTMLDialogElement {
   return wrapper.find('dialog').element as HTMLDialogElement
 }
 
-/**
- * 给 jsdom 的 `<dialog>` 补一个**按 HTML 规范语义**的 `close()`。
- *
- * 为什么必须补：jsdom 至今没有 `HTMLDialogElement.showModal()` / `close()`，组件只能走
- * 降级路径（`setAttribute('open')` + 兜底 `removeAttribute`）——**关闭顺序写反了也测不出来**，
- * 这正是 2026-10-16「点取消/保存后整页点不动、只能刷新」能溜到实机的原因。
- *
- * 这里实现规范里最要命的那一步：**没有 `open` 属性就直接返回**。于是"先摘 `open` 再 `close()`"
- * 会让 `close()` 变成空操作（`calls` 不增加）→ 测试当场报红，而这个空操作在真浏览器里
- * 就是"弹窗仍留在 top layer 的模态态 → 页面其余部分继续 inert"。
- */
 function stubClose(el: HTMLDialogElement): { calls: number } {
   const state = { calls: 0 }
   Object.defineProperty(el, 'close', {
@@ -146,7 +120,6 @@ describe('McpToolScopeDialog —— 打开时的基准与预勾选', () => {
   it('白名单里已不存在的工具：勾不了，但 MUST 如实提示保存后会被移出', async () => {
     const wrapper = await openDialog()
 
-    // 它不在候选清单里，所以没有对应的复选框
     expect(checkedMap(wrapper)).not.toHaveProperty('gone_tool')
     const alert = wrapper.find('[data-test="missing"]')
     expect(alert.exists()).toBe(true)
@@ -221,7 +194,6 @@ describe('McpToolScopeDialog —— 保存', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
     expect(wrapper.emitted('update:open')).toBeUndefined()
     expect(wrapper.text()).toContain('内容已被他处修改')
-    // 勾选原样保留，管理员重试即可
     expect(checkedMap(wrapper).ocr_pdf).toBe(true)
   })
 
@@ -242,7 +214,6 @@ describe('McpToolScopeDialog —— 关窗必须真的退出模态态（2026-10-
     const closeState = stubClose(el)
 
     await wrapper.find('[data-test="cancel"]').trigger('click')
-    // 父级 `v-model:open` 回落（真实用法里由 `McpArea` 驱动）
     await wrapper.setProps({ open: false })
     await flushPromises()
 

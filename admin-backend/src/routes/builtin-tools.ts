@@ -1,13 +1,3 @@
-/**
- * 内置工具目录路由（`contracts/admin-api.md` §2.1）。
- *
- * **只读投影**：数据来源是运行环境（`FR-011`），平台 MUST NOT 持久化副本、
- * MUST NOT 由调用方硬编码（`SC-013`）。
- *
- * 关键约束（`FR-012`、`SC-014`）：`description_template` MUST 保持
- * **占位符模板**形态，MUST NOT 替换为任何具体用户目录名或会话标识——
- * 因此本路由**原样透传**运行环境返回值，不做任何渲染。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { normalizeLimit } from '../domain/paging.js';

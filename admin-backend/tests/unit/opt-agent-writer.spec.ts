@@ -1,12 +1,3 @@
-/**
- * 单元测试：`.opt-agent` 物化写入与撤回（T063）
- *
- * 覆盖 `FR-008`（原子）、`FR-029`（失败零残留）、`FR-028`（只动 `agents/`）
- * 与 `research.md` D8 的 **`EXDEV` 降级路径**。
- *
- * 2026-09-16 起 `agents/` 为**整体覆盖**：本次不在列的一切条目都被移除
- * （原先"只移除部署清单内的"会让旧目录在清单对不上时永远留下）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -103,7 +94,6 @@ describe('OptAgentWriter', () => {
     expect(withdrawn).toEqual(['a', 'b']);
     expect(fs.existsSync(path.join(root, 'users', 'admin', 'agents'))).toBe(false);
     expect(fs.readFileSync(path.join(shared, 'keep.txt'), 'utf8')).toBe('keep');
-    // 不留 .withdraw-* 备份残留
     const leftovers = fs
       .readdirSync(path.join(root, 'users', 'admin'))
       .filter((name) => name.startsWith('.withdraw-'));
@@ -140,7 +130,6 @@ describe('OptAgentWriter', () => {
 
   it('失败零残留：目标父路径被文件占据时抛错、回滚、且不留备份目录', () => {
     const writer = new OptAgentWriter({ optAgentRoot: root });
-    // 用一个文件占住 users/{uid}/agents，使 mkdir/rename 必然失败
     fs.mkdirSync(path.join(root, 'users', 'blocked'), { recursive: true });
     fs.writeFileSync(path.join(root, 'users', 'blocked', 'agents'), 'not-a-dir', 'utf8');
 

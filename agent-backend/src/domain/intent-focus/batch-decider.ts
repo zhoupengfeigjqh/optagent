@@ -13,7 +13,6 @@ import type { QuestionMap } from './types.js';
 /** 单批超时的下限（毫秒）：更低会把正常的前向计算误伤成超时 */
 export const MIN_BATCH_TIMEOUT_MS = 300;
 
-/** 判定客户端（`LayaClient` 的结构子集，便于测试注入） */
 export interface DecideClient {
   decide(
     state: string,
@@ -35,7 +34,6 @@ export interface BatchDeciderDeps {
 export interface DecideOutcome {
   scores: Record<string, number>;
   failures: string[];
-  /** 全批失败时的根因（`timeout` / `http_422` / `all_batches_failed`） */
   failureReason: string | null;
 }
 

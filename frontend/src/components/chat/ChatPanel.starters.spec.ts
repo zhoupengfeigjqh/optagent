@@ -1,15 +1,3 @@
-/**
- * 组件测试：新建对话页的首屏引导（004）。
- *
- * 守住两条：
- * 1. 欢迎语与问题卡片来自当前数字人（`welcome` / `starters`）；**存量旧数字人**
- *    没有结构化数据时退回既有空状态文案（不白屏，零破坏）；
- * 2. 点击卡片 = 发起一轮对话：正文只发问题本身，关联工具的引导走 `guidance`
- *    请求级隐藏通道（**对用户不可见**）。
- *
- * `useChatPanel()` 整体打桩：事件编排已收敛在该组合式函数里（另有其自身与
- * `messages.spec.ts` 的用例覆盖），本测试只关心本组件的"派生 + 点击转发"。
- */
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,7 +7,6 @@ const h = vi.hoisted(() => ({ panel: null as unknown }))
 
 vi.mock('../../composables/useChatPanel', () => ({ useChatPanel: () => h.panel }))
 
-/** 当前数字人的最小形态（只填本组件会读的字段） */
 function agent(overrides: Record<string, unknown> = {}) {
   return {
     agent_name: 'demo',
@@ -37,8 +24,11 @@ function agent(overrides: Record<string, unknown> = {}) {
 function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn> } = {}) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(''), thinkingEnabled: ref(false) },
-    // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
+    chat: {
+      draft: ref(''),
+      thinkingEnabled: ref(false),
+      planProgress: ref([]),
+    },
     threads: {
       activeId: ref(null),
       activeSource: ref(null),
@@ -70,7 +60,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
       back: noop,
     },
     workspace: { spaces: ref([]), loading: ref(false) },
-    // 014：空数据引导状态（默认不出气泡）
     emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(options.agent ?? null),
@@ -81,7 +70,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
       switching: ref(false),
       loadCandidates: vi.fn(),
     },
-    // 015：头部入口按钮读它（本组用例不涉及定时任务，取"未展开"即可）
     schedule: { panelOpen: ref(false), openPanel: noop },
     uploadOpen: ref(false),
     agentPanelOpen: ref(false),
@@ -99,7 +87,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     onSend: options.onSend ?? noop,
     onStop: noop,
     onRegenerate: noop,
-    // 007：回答下方的卡片数据与确认弹窗（本组用例只走首屏引导，故取空形态）
     nextSteps: { steps: ref({ message_id: null, actions: [] }) },
     pendingSuggestion: ref(null),
     suggestionSending: ref(false),
@@ -114,7 +101,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     onToggleUpload: noop,
     onCloseUpload: noop,
     onPickFiles: noop,
-    // 2026-11-17：粘贴上传（v1.3 起不再有重名弹窗，失败只走 toast）
     onPasteFiles: noop,
     onRetryUpload: noop,
     onToggleSearch: noop,
@@ -134,7 +120,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
     onConfirmMention: noop,
     onMentionKey: noop,
     onRemoveReference: noop,
-    // 2026-11-07：`/技能名` 的状态与输入区出口（本组用例不涉及技能，取空选择）
     skill: {
       selected: ref<string | null>(null),
       open: ref(false),
@@ -153,13 +138,6 @@ function makePanel(options: { agent?: unknown; onSend?: ReturnType<typeof vi.fn>
   }
 }
 
-/**
- * 只打桩与本组用例无关的重型子组件。
- *
- * **刻意不用 `shallow: true`**：`shallow` 会把 `SuggestionCard` 也换成桩，而桩不转发
- * `select` 事件——那样"点卡片"这件事就测不到了，等于把这条用例变成"DOM 上有个按钮"。
- * 这里放行卡片本体（正是要断言的对象），其余一律打桩。
- */
 function mountPanel() {
   return mount(ChatPanel, {
     props: { expanded: false },
@@ -222,7 +200,6 @@ describe('ChatPanel —— 新建对话页的首屏引导（004）', () => {
       content: '帮我梳理昨天订单的交付风险',
       attachments: [],
       guidance: '本轮请优先使用以下工具完成任务：erp__query_order',
-      // 013：首屏问题实例卡片同样跳过意图聚焦（FR-043/FR-044）
       skipIntentFocus: true,
     })
   })
@@ -250,7 +227,6 @@ describe('ChatPanel —— 新建对话页的首屏引导（004）', () => {
     })
 
     const wrapper = mountPanel()
-    // 卡片文案就是问题本身：多一个字符都算把内部细节漏给了业务用户
     expect(wrapper.find('[data-test="chat-starter-0"]').text()).toBe('帮我梳理昨天订单的交付风险')
     expect(wrapper.text()).not.toContain('erp__query_order')
   })
@@ -271,7 +247,6 @@ describe('ChatPanel —— 新建对话页的首屏引导（004）', () => {
     expect(onSend).toHaveBeenCalledWith({
       content: '这个月哪些订单可能延期？',
       attachments: [],
-      // 013：无引导也不影响跳过意图聚焦
       skipIntentFocus: true,
     })
   })

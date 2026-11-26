@@ -1,9 +1,3 @@
-/**
- * 组件测试：任务表格（015，T038）
- *
- * 读屏验收项：`<table>` + `scope="col"` 的列头 + `caption` 表格名，三者缺一读屏就
- * 只能念出一串数字。另有两条状态机：空态给创建引导、失败态给重试（都不冒充"没有任务"）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

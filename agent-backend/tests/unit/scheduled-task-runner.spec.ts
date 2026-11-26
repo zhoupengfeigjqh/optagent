@@ -1,17 +1,3 @@
-/**
- * 单元测试：定时任务执行器（015，T028 / T028a / T031a / T059）。
- *
- * 钉住四类语义：
- * 1. **会话**：每轮新建带 `title` + `source`；复用命中不建会话、不改标题；
- *    复用但会话已删 → 重建 + `rebuilt=true` + 更新 `reused_thread_id`（FR-061/063）。
- * 2. **计数口径**（FR-041/043，research D4）：`success` / `failed` 各 +1；
- *    三种 `skipped`（上一轮未完 / 额度已满 / 数字人不可用）**不计数**。
- * 3. **不停用**：会话删除、额度已满都 MUST NOT 停用任务；只有数字人不可用才自动停用（FR-055）。
- * 4. **多任务同刻**（FR-046）：各自拿到不同会话，不合并。
- *
- * 走的是**真实** `RunManager` + 真实文件存储，只有 Agent 实例是假的
- * （与 `run-manager-*.spec.ts` 同一手法）：执行链路不能被测试替身改变。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,7 +35,6 @@ let events: ScheduledTaskEvents;
 let threadStore: ThreadStore;
 let runManager: RunManager;
 
-/** 最小可用数字人配置（判据同 `agent-scope`：能完整加载） */
 function writeAgent(name = AGENT): void {
   const dir = agentDir(root, USER, name);
   fs.mkdirSync(dir, { recursive: true });
@@ -104,7 +89,6 @@ function newRunner(
   });
 }
 
-/** 建一个任务（默认：每轮新建会话、开始时刻在过去、间隔 60s、次数 5） */
 function createTask(overrides: Partial<CreateScheduledTaskInput> = {}): ScheduledTask {
   const input: CreateScheduledTaskInput = {
     name: '日报',
@@ -122,7 +106,6 @@ function createTask(overrides: Partial<CreateScheduledTaskInput> = {}): Schedule
 
 const triggeredAt = new Date('2026-10-30T01:02:03.000Z').toISOString();
 
-/** 派发一次（ticker 的入参形态） */
 async function dispatch(runner: ScheduledTaskRunner, task: ScheduledTask): Promise<void> {
   await runner.dispatch({ userId: USER, agentName: AGENT, task, triggeredAt });
 }
@@ -174,7 +157,6 @@ describe('每轮新建会话（缺省模式）', () => {
       triggeredAt,
     });
 
-    // 提示词与本轮 thinking 取自任务配置
     expect(agent.requests[0]).toMatchObject({
       threadId: run.threadId,
       thinking: false,
@@ -242,7 +224,6 @@ describe('会话复用模式（FR-061/062/063）', () => {
     expect(reloaded.reusedThreadId).toBe(run.threadId);
     expect(reloaded.enabled).toBe(true);
     expect(reloaded.executedCount).toBe(1);
-    // 重建出的会话同样带来源标记（SC-004）
     expect(threadStore.get(USER, AGENT, run.threadId!).source?.taskId).toBe(task.taskId);
   });
 
@@ -278,7 +259,7 @@ describe('跳过与计数口径（FR-041/043）', () => {
     expect(latestRun()).toMatchObject({ result: 'skipped', reason: 'busy_limit', threadId: null });
     const reloaded = store.get(USER, AGENT, task.taskId);
     expect(reloaded.executedCount).toBe(0);
-    expect(reloaded.enabled).toBe(false); // 从未启用，不是被系统停用
+    expect(reloaded.enabled).toBe(false);
     expect(reloaded.disabledReason).toBeNull();
     releases.forEach((release) => release());
   });
@@ -287,7 +268,6 @@ describe('跳过与计数口径（FR-041/043）', () => {
     const existing = threadStore.create(USER, AGENT, { title: '在跑的会话' });
     const task = createTask({ newThreadPerRun: false });
     store.attachThread(USER, AGENT, task.taskId, existing.threadId);
-    // 占住该会话（模拟上一轮还没收尾）
     const release = runManager.acquireQuota(USER, existing.threadId, LIMIT);
 
     await dispatch(newRunner(fakeAgent()), store.get(USER, AGENT, task.taskId));

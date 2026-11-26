@@ -117,7 +117,6 @@ describe('McpCardList', () => {
     })
 
     expect(wrapper.find('[data-test="headers-badge"]').text()).toContain('需请求头')
-    // 只标"配了"，不给值：请求头里是凭据
     expect(wrapper.text()).not.toContain('X-MCP-Token')
   })
 

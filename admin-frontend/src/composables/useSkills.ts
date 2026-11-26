@@ -1,9 +1,3 @@
-/**
- * SKILL 管理（US3）：列表、查看/逐个文件编辑、上传安装、删除。
- *
- * 2026-09-16：**全部文件可编辑**（`SKILL.md` 与 `references/` 等附件），
- * 保存走 `PUT .../file`，以读到的内容哈希作乐观锁。
- */
 import { ref, shallowRef } from 'vue'
 import {
   deleteSkill,
@@ -53,7 +47,6 @@ export function useSkills() {
     }
   }
 
-  /** 读取技能内某个文件；失败返回 null 并写入可读错误 */
   async function loadFile(name: string, path: string): Promise<SkillFileContent | null> {
     error.value = null
     try {
@@ -79,7 +72,6 @@ export function useSkills() {
     error.value = null
     try {
       const saved = await saveSkillFile(name, path, content, baseHash)
-      // 描述可能随 SKILL.md 正文变化，列表需跟着刷新
       await loadList()
       return saved
     } catch (err) {
@@ -88,7 +80,6 @@ export function useSkills() {
     }
   }
 
-  /** 上传安装；`overwrite` 为真表示**显式选择覆盖**（`FR-040`） */
   async function install(file: File, overwrite: boolean): Promise<SkillInstallResult | null> {
     uploading.value = true
     error.value = null

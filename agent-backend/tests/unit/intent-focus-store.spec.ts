@@ -192,7 +192,6 @@ describe('有界与失败语义', () => {
     const silent = new IntentFocusStore(root);
     await expect(silent.append(UID, AGENT, THREAD, draft())).resolves.toBeUndefined();
 
-    // 根目录位置被普通文件占用 → mkdir 必失败，走 catch 且 logger 缺省
     const blockedRoot = path.join(root, 'blocked-root');
     fs.writeFileSync(blockedRoot, 'x');
     const blocked = new IntentFocusStore(blockedRoot);
@@ -230,7 +229,6 @@ describe('有界与失败语义', () => {
 
   it('整理失败（临时路径被占用）只告警并保留原文件', async () => {
     const store = newStore();
-    // 先写入一条，占住 `${file}.tmp` 这个路径（目录 → writeFileSync 必失败）
     await store.append(UID, AGENT, THREAD, draft());
     const file = store.filePathOf(UID, AGENT, THREAD);
     fs.mkdirSync(`${file}.tmp`, { recursive: true });
@@ -251,7 +249,6 @@ describe('有界与失败语义', () => {
 
   it('写盘失败只告警，不抛错', async () => {
     const store = newStore();
-    // 线程目录被同名文件占用 → mkdir 失败
     const file = store.filePathOf(UID, AGENT, THREAD);
     fs.mkdirSync(path.dirname(path.dirname(file)), { recursive: true });
     fs.writeFileSync(path.dirname(file), 'blocked');

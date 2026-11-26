@@ -1,10 +1,3 @@
-/**
- * 组件测试：MCP 服务状态项（2026-10-18）。
- *
- * 守住两点：
- * 1. **双通道**：状态既有颜色类、也有文本，不靠颜色单独传达（FR-033 / FR-038 的口径）；
- * 2. **不露实现细节**：传输方式（`streamable-http` 等）不再出现在界面上。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

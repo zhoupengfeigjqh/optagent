@@ -1,20 +1,3 @@
-/**
- * 工具交互包装器（HITL）：给 AgentTool.execute 包一层"人工确认门"。
- *
- * 包装后行为：
- * - execute 被调用时先经 InteractionSink 挂起，向前端发 interaction_request
- *   （schema 取工具声明的可见入参 schema，预填值取模型本次传入的 args）
- * - 用户 submit → 用**用户确认后的 args** 调真实 execute（file_args 改写、
- *   uid/sid 注入等下游处理全部照旧发生在被包装的原 execute 里，安全层不绕过）
- * - 用户 reject / 超时 / run 中断 → 不调真实实现，返回**带失败标记**的 toolResult：
- *   正文写明为什么没执行（拒绝/超时/中断三者文案不同），模型据此组织收尾话术
- *   （业界 HITL 标准做法）。标记由 `domain/tool-error.ts` 承载，前端卡片标红
- *   的翻牌点在 `agent-loop.ts` 的 `afterToolCall`——本文件不设 `isError` 字段
- *   （pi 会忽略工具返回体里的 isError，只有 hook patch 生效，2026-10-29 核实）。
- *
- * 解耦红线：本文件不含任何具体工具/MCP 服务名；包装与否由 MCP.json 的
- * confirmation 策略决定（agent-factory 装配时判定）。
- */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 
 import type { InteractionSink } from '../domain/interaction-gate.js';
@@ -28,15 +11,6 @@ export function wrapToolWithInteraction(
 ): AgentTool {
   return {
     ...tool,
-    /**
-     * HITL 工具强制串行执行（pi 的 per-tool 覆盖；批次内任一 sequential 工具 ⇒ 整批串行）。
-     * 原因：并行批次里多个需确认调用会**同时**挂起（gate 支持并发，maxPending=3），
-     * 而前端交互弹窗是单槽位——后到的 interaction_request 覆盖先到的，被覆盖的挂起点
-     * 在 UI 不可达也不可操作，run 的 Promise.all 要等它超时（300s）才推进，
-     * 表现为「提交弹窗后界面卡死，刷新才看到下一个」（2026-09-19 实踩）。
-     * 串行化保证任意时刻最多一个挂起点；代价是同批工具不再并行——HITL 场景下
-     * 「一个接一个确认」本来就是更合理的交互语义。
-     */
     executionMode: 'sequential',
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const schema =
@@ -49,15 +23,11 @@ export function wrapToolWithInteraction(
           : {};
 
       // 规则字段声明仅在**本工具 schema 里确实走得通**时下发——避免给无关工具的快照
-      // 注入无意义声明（配置是服务级的，工具是服务内多个之一的常见形态）。
-      // 取值可以是顶层字段名，也可以是**对象路径**（如 `input.targetPriorities`）：
-      // 规则数组常嵌在入参对象内部，旧实现只认顶层，导致这类声明静默失效（2026-09-22）。
       const hasRulesField = rulesField !== undefined && hasRulesFieldPath(schema, rulesField);
 
       const outcome = await sink.request({
         callId: toolCallId,
         toolName: tool.name,
-        // 人读名称（2026-10-27）：弹窗标题与"工具："一行显示它，`tool.name` 仍是对模型的调用名
         ...(typeof tool.label === 'string' && tool.label !== '' ? { toolLabel: tool.label } : {}),
         toolDescription: tool.description,
         schema,
@@ -67,7 +37,6 @@ export function wrapToolWithInteraction(
 
       if (outcome.kind !== 'submit') {
         // 三种未执行的原因**文案必须各自准确**：中断不是用户的决定，
-        // 归因写错会让模型对用户说"您拒绝了"，而用户其实只是点了停止
         let reason = '用户拒绝了本次调用';
         let code = 'HITL_REJECTED';
         if (outcome.kind === 'expired') {

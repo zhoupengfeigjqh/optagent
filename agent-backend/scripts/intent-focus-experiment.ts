@@ -1,25 +1,3 @@
-/**
- * 实验脚本：意图聚焦判定（**真实调用 Laya**，与线上链路一致）。
- *
- * 与 `consumeTurn` 里 `IntentFocusRunner.judge` 走完全相同的路径：
- * `loadConfig` 读真实 `config.yaml`（解析 `$DECIS_API_KEY`）→ `LayaClient` 真调
- * `POST /v1/systemone` → 真实 `IntentFocusRunner`（真实数据目录 + 真实分批判定）。
- *
- * 唯一两处差异（对判定结果无影响，仅用于观测/不污染数据）：
- * 1. `client` 包了一层，把每道题面与真实 noul 分数打印出来；
- * 2. 不传 `store`——留档省略（否则会写进 `生产调度测试/threads/exp-thread`）。
- *
- * **两种模式**（2026-11-08 合并原 `laya-stability.ts`：两者共用同一套 fixture 装配，
- * 分成两个入口只会让"改一处漏一处"）：
- * - 默认（`--runs` 缺省或 1）：完整判定一次，打印聚焦提示与 `toolTips`；
- * - `--runs N`（N > 1）：只测**技能批**（能力层依赖技能入选，技能不过线就短路），
- *   同一输入连跑 N 次，量化 noul 分数的抖动区间，供阈值定标。
- *
- * 运行：
- *   npx tsx --env-file=.env.local scripts/intent-focus-experiment.ts
- *   npx tsx --env-file=.env.local scripts/intent-focus-experiment.ts --runs 5
- * （`--env-file` 提供 `DECIS_API_KEY`，与 dev 脚本同款）。
- */
 import { buildSkillQuestions } from '../src/domain/intent-focus/candidates.js';
 import {
   IntentFocusRunner,
@@ -32,10 +10,8 @@ const INPUT = '高强度钢板的供应商是谁';
 const env = loadFocusEnv();
 const { root, user, agent, config: focus, client: real } = env;
 
-/** 抖动样本的过线阈值：与 config.yaml 的技能层阈值同一口径 */
 const PASS_THRESHOLD = 0.8;
 
-/** `--runs N`：缺省 1（完整判定一次）；非法值按 1 处理，不抛错 */
 function parseRuns(argv: readonly string[]): number {
   const at = argv.indexOf('--runs');
   if (at < 0) return 1;
@@ -43,7 +19,6 @@ function parseRuns(argv: readonly string[]): number {
   return Number.isInteger(parsed) && parsed > 1 ? parsed : 1;
 }
 
-/** 包装真实 LayaClient：只加打印，不改任何请求参数与返回值 */
 const client: IntentFocusClient = {
   async decide(state, questions, timeoutMs) {
     console.log(
@@ -69,7 +44,6 @@ const client: IntentFocusClient = {
   },
 };
 
-/** 默认模式：完整判定一次（技能批 + 能力批） */
 async function runJudgeOnce(): Promise<void> {
   const runner = new IntentFocusRunner({
     root,
@@ -94,7 +68,6 @@ async function runJudgeOnce(): Promise<void> {
   console.log(JSON.stringify(result.toolTips, null, 2));
 }
 
-/** `--runs N` 模式：只测技能批，连跑 N 次看抖动 */
 async function runStability(runs: number): Promise<void> {
   const fixture = loadFocusFixture(env);
   const questions = buildSkillQuestions(fixture.skillResult.candidates);
@@ -110,7 +83,6 @@ async function runStability(runs: number): Promise<void> {
     const result = await real.decide(INPUT, questions, focus.timeoutMs);
     const score = result.ok ? (result.scores.s1 ?? Number.NaN) : Number.NaN;
     scores.push(score);
-    // 分三支写而不是嵌套三元：`(数字 | '(缺)').toFixed()` 在 strict 下不成立（types 收窄需要显式分支）
     let shown: string;
     if (!result.ok) shown = `失败:${result.reason}`;
     else if (result.scores.s1 === undefined) shown = '(缺)';

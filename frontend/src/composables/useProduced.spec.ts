@@ -1,13 +1,3 @@
-/**
- * 单元测试：后台产出状态（R11，契约 §10.5 ⑤⑥）
- *
- * 守住四条：
- * 1. **未读数自算** —— 列表内 `read_at` 缺省的条数，不依赖后端计数端点；
- * 2. **标记已读只提交当前未读的**，成功后**就地**更新、**不重拉列表**（避免竞态）；
- * 3. **订阅幂等** —— 重复 `start()` 不叠加连接，`stop()` 后可再 `start()`；
- * 4. **拉取失败不清空列表** —— 失败是"这次没拿到"，不等于"没有产出"；
- * 5. **切换数字人** —— `clear()` 清列表与未读，并作废在途请求（旧响应晚到不得覆盖新列表）。
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProducedApi, ProducedItem } from '../api/produced'
 import { createProducedStore } from './useProduced'
@@ -228,8 +218,6 @@ describe('正文读取（契约 §10.5 ⑦）', () => {
     expect(s.error.value).toBeNull()
   })
 })
-
-/* ---------- 2026-10-21：后台任务完成提示（新增条目的差集通知） ---------- */
 
 describe('新增条目通知（onNewItems）', () => {
   it('首次 refresh 只建立基线、不通知（挂载时列表里都是历史）', async () => {

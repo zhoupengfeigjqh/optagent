@@ -1,10 +1,3 @@
-/**
- * 组件测试：`@` 引用面板的浮层外壳（2026-10-12）。
- *
- * 守住的语义：面板**留在原组件的 DOM 子树内**（不 Teleport，故不会被所在 `<dialog>`
- * 的 `inert` 拦住点击）、坐标由锚点光标决定、滚动时跟随重算、`Esc` 由面板自己吞掉
- * （不冒泡给 `<dialog>`）；测不到光标时退化为"贴锚点下方"而不是消失。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -22,7 +15,6 @@ let anchor: HTMLDivElement
 
 beforeEach(() => {
   caretState.rect = { left: 200, top: 100, right: 200, bottom: 118 }
-  // 测试里让合帧逻辑同步执行，省掉等待
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
     callback(0)
     return 1

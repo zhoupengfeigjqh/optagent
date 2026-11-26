@@ -1,23 +1,10 @@
 <script setup lang="ts">
-/**
- * MCP 服务状态项（T064，FR-033 / FR-038）
- *
- * **双通道标识**：颜色 + 文本（"连接正常"/"连接失败"/"未连接"），不依赖颜色单独传达状态。
- * `failed` 只是观测结果——不弹窗、不阻断主流程（FR-034 / FR-038）。
- * `unknown` 表示尚无连接结果（实例未创建或首次建连进行中），中性灰呈现，不误报为故障。
- * 状态变化只改类名与文本，元素本身不重挂载。
- *
- * 只显示「服务名 + 状态」：传输方式（`streamable-http` 等）是接入实现细节，
- * 对业务用户没有意义，2026-10-18 起不再出现在界面上（含 AgentPanel 的 MCP 清单）。
- */
 import { computed } from 'vue'
 
 import type { McpConnectionStatus } from '../../api/types'
 
 const props = defineProps<{
-  /** 服务名 */
   name: string
-  /** 连接状态 */
   status: McpConnectionStatus
 }>()
 
@@ -48,7 +35,6 @@ const statusLabel = computed(() => STATUS_LABEL[props.status] ?? STATUS_LABEL.un
   color: var(--color-text-muted);
 }
 
-/* 默认（含 unknown）：中性灰，表示尚无连接结果 */
 .mcp-status-item__dot {
   width: 8px;
   height: 8px;

@@ -1,13 +1,3 @@
-/**
- * 端到端（进程内）：规划按步收窄工具集后，**工具显示名索引不得跟着收窄**（2026-11-26）。
- *
- * 缺陷复现：`labels` 索引原先只由 `opts.tools` 建立，而 028 计划编排每一跳都会用
- * `prepareNextTurn` 把 `tools` 换成「这一步可见」的子集。于是首步不可见、次步才出现的
- * 工具在索引里查不到 label → `tool_call_start` 不带 label → 前端回退显示
- * `onto_behaviors__QueryInventory` 这类调用名。
- *
- * 判据：`labelTools`（全量装配结果）里有的工具，无论它出现在第几步，事件都必须带人读名。
- */
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { EventStream } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -42,7 +32,6 @@ function fakeStream(message: AssistantMessage) {
   return stream as never;
 }
 
-/** `label` 缺省即"没有中文名"，用于验证"非空才写"口径 */
 function tool(name: string, label?: string): AgentTool {
   return {
     name,
@@ -89,7 +78,6 @@ async function drive(opts: DriveOptions): Promise<LlmEvent[]> {
   return events;
 }
 
-/** 模拟计划编排：第 1 步只见 `step_a`，第 2 步只见 `step_b`（两轮都取全量的子集） */
 function planLikeHooks(stepB: AgentTool[]): RunAgentLoopHooks {
   return {
     prepareNextTurn: vi.fn(
@@ -110,14 +98,13 @@ describe('agent-loop 的显示名索引：与可见工具集解耦', () => {
     const stepB = tool('onto_behaviors__QueryInventory', '查询原材料库存信息');
 
     const events = await drive({
-      // 第 1 步调 A，第 2 步调 B，第 3 步收尾
       script: [
         toolCall('call_1', stepA.name),
         toolCall('call_2', stepB.name),
         TEXT_ONLY,
       ],
       tools: [stepA], // 首步收窄集：B 不可见
-      labelTools: [stepA, stepB], // 全量装配集
+      labelTools: [stepA, stepB],
       hooks: planLikeHooks([stepB]),
     });
 

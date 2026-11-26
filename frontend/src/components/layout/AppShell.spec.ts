@@ -1,21 +1,8 @@
-/**
- * 组件测试：三栏工作台骨架（2026-10-16，011 补齐）
- *
- * 本文件是**同名测试补齐**：`AppShell.vue` 因 011（预览面板放大 / 缩小）而新增
- * `previewMaximized` 与放大态样式而被改动，按宪章原则三与治理"改动即约束"补齐——
- * 不是对存量组件发起的补测专项。
- *
- * 守三件事：
- * 1. 放大态只加一个**类**：`app-shell--preview-maximized`（铺满的定位在样式里，jsdom 算不出布局）
- * 2. 放大 **MUST NOT** 改写宽度变量——缩回后宽度逐像素一致（FR-004）是"没动过"保证的
- * 3. 既有能力（插槽、分隔条的键盘调整）在放大前后都照常
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import AppShell from './AppShell.vue'
 
-/** 三栏齐全的挂载（预览列展开，插槽各放一个标记元素）。 */
 function mountShell(over: Partial<{ previewOpen: boolean; previewMaximized: boolean }> = {}) {
   return mount(AppShell, {
     props: { previewOpen: true, previewMaximized: false, ...over },
@@ -100,7 +87,6 @@ describe('AppShell —— 三栏骨架与放大态（011）', () => {
     expect(wrapper.find('.app-shell__sidebar').attributes('inert')).toBeDefined()
     expect(wrapper.find('.app-shell__main').attributes('inert')).toBeDefined()
     expect(wrapper.find('.app-shell__resizer').attributes('inert')).toBeDefined()
-    // 预览列自己**不** inert：它是唯一还能操作的地方
     expect(wrapper.find('.app-shell__preview').attributes('inert')).toBeUndefined()
   })
 

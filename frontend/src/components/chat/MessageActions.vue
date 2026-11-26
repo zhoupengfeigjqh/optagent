@@ -1,33 +1,18 @@
 <script setup lang="ts">
-/**
- * 消息操作区（T044）
- *
- * 承载复制、点赞/点踩与用量（token）、耗时。
- *
- * 选中态**受控**：由 `feedback` prop 驱动，组件只上报"用户点了哪一侧"；
- * "同值重复提交 = 取消"（V-08）的换算由 `MessageBubble` 依当前值判定后提交 `null`。
- * 复制在本组件内完成并给出短暂成功反馈，同时派发 `copy` 供上层观察。
- */
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import type { Usage } from '../../api/types'
 import { formatDurationSec, formatTokens } from '../../utils/format'
 import BaseIcon from '../common/BaseIcon.vue'
 
-/** 复制成功反馈的展示时长。 */
 const COPY_FEEDBACK_MS = 2000
 
 const props = withDefaults(
   defineProps<{
-    /** 用量；`null` 时不展示 token */
     usage?: Usage | null
-    /** 整轮耗时（秒）；按 1 位小数展示 */
     durationSeconds?: number | null
-    /** 当前反馈选中态 */
     feedback?: 'up' | 'down' | null
-    /** 提交中禁用重复点击 */
     disabled?: boolean
-    /** 待复制正文；为空表示由上层自行处理复制（扩展属性，便于组件内确认成功） */
     copyText?: string
   }>(),
   { usage: null, durationSeconds: null, feedback: null, disabled: false, copyText: '' },

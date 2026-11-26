@@ -1,13 +1,3 @@
-/**
- * 组件测试：技能文件编辑区（2026-09-16：全部文件可编辑，含附件）
- *
- * 守住五件事：
- * 1. 文本文件可编辑并可保存——保存**必须**带上读取时的哈希（服务端据此判冲突）；
- * 2. 二进制与超限文件**不给编辑入口**，并说明原因（避免"点了就丢内容"）；
- * 3. 内容已被他处修改（409）→ 可读提示 + 「重新加载最新内容」，不静默覆盖；
- * 4. "未保存/已保存"的状态如实回传（父组件据此做离开守卫）；
- * 5. **保存前二次确认**：保存不可逆（库中不留副本），取消即不写入且草稿保留。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SkillFileEditor from './SkillFileEditor.vue'
@@ -41,7 +31,6 @@ function saveButton(wrapper: ReturnType<typeof mountEditor>) {
   return wrapper.findAll('button').find((button) => button.text().startsWith('保存'))
 }
 
-/** 保存的二次确认弹窗（与「放弃修改」区分：按 data-test 定位） */
 function saveDialog(wrapper: ReturnType<typeof mountEditor>) {
   return wrapper.find('[data-test="save-dialog"]')
 }
@@ -74,7 +63,6 @@ describe('SkillFileEditor —— 编辑与保存', () => {
     expect(textarea.exists()).toBe(true)
     await textarea.setValue('# 新手册\n')
     await saveButton(wrapper)!.trigger('click')
-    // 保存前 MUST 先讲明"无法恢复"（库中不留副本）
     expect(saveDialog(wrapper).attributes('open')).toBeDefined()
     expect(wrapper.text()).toContain('保存后无法恢复')
 
@@ -89,7 +77,6 @@ describe('SkillFileEditor —— 编辑与保存', () => {
     )
     expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ hash: 'h2' })
     expect(wrapper.text()).toContain('已保存')
-    // 保存后不应再显示"未保存"
     expect(wrapper.text()).not.toContain('未保存')
   })
 
@@ -187,7 +174,6 @@ describe('SkillFileEditor —— 草稿锚定文件标识（契约 §0.5 原则 
     await flushPromises()
     await wrapper.find('textarea').setValue('# 我的改动\n')
 
-    // 保存后父级可能重载详情：换成**同一文件**的新对象（内容基准未变）
     await wrapper.setProps({ file: file() })
     await flushPromises()
 

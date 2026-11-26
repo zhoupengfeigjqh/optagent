@@ -81,7 +81,6 @@ describe('createAuthStore', () => {
     })
     await store.login('zpf', '123456')
 
-    // 请求失败仍要向调用方抛出（便于上层收尾），但本地态与跳转已由 finally 收口
     await expect(store.logout()).rejects.toThrow()
     expect(store.currentUser.value).toBeNull()
     expect(redirect).toHaveBeenCalledTimes(1)

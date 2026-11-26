@@ -7,17 +7,11 @@
  */
 const props = withDefaults(
   defineProps<{
-    /** 视觉变体 */
     variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
-    /** 尺寸 */
     size?: 'sm' | 'md'
-    /** 是否禁用 */
     disabled?: boolean
-    /** 是否处于加载中（同时禁用交互） */
     loading?: boolean
-    /** 原生按钮类型 */
     type?: 'button' | 'submit' | 'reset'
-    /** 禁用原因（作为 title 提示） */
     disabledReason?: string | null
   }>(),
   {

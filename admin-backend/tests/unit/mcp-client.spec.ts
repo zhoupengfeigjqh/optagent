@@ -45,7 +45,6 @@ describe('classifyMcpError', () => {
   });
 
   it('展开 fetch（undici）的 cause 链：顶层只有 "fetch failed" 也能归类出真实原因', () => {
-    // undici fetch 失败时顶层 message 是 "fetch failed"，ECONNREFUSED 在 cause 上
     const inner = Object.assign(new Error('connect ECONNREFUSED 172.18.0.5:9999'), {
       code: 'ECONNREFUSED',
     });

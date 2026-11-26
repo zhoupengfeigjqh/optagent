@@ -1,16 +1,4 @@
 <script setup lang="ts">
-/**
- * 从本体市场导入 / 更新 SKILL（2026-10-02；更新流 2026-10-02 §4.8）。
- *
- * - 市场目录（optonto `.data/onto_market`）由平台**只读**扫描；打开对话框即完成
- *   一次"市场文件是否变化"的检查（整包内容指纹比对）；
- * - 状态语义：new=可导入；unchanged=已导入且市场无变化；changed=市场已变化，
- *   **可直接更新**（整包原子替换）；conflict=库内同名但非市场来源（不可操作）；
- * - 更新护栏：库内版本被人工修改过时服务端返回 `ADM_SKILL_MODIFIED`，
- *   窗内展示确认提示，管理员点击"仍要更新"才携带 confirm 重试；
- * - 导入/更新失败**不关窗**，错误留在窗内（与"校验失败不关窗"同一口径）；
- * - 原生 `<dialog>` + `showModal()`：焦点陷阱与 Esc 关闭由浏览器提供（D5）。
- */
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { fetchOntoMarket, installOntoMarketSkill, updateOntoMarketSkill } from '../../api/skills'
 import type {
@@ -36,7 +24,6 @@ const loading = ref(false)
 const importing = ref(false)
 const selected = ref<OntoMarketItem | null>(null)
 const error = ref<ErrorInfo | null>(null)
-/** 服务端提示"库内版本被人工修改过"（ADM_SKILL_MODIFIED）：展示确认入口 */
 const modifiedWarning = ref<ErrorInfo | null>(null)
 let restoreFocusTo: HTMLElement | null = null
 
@@ -54,12 +41,10 @@ function canSelect(item: OntoMarketItem): boolean {
   return item.status === 'new' || item.status === 'changed'
 }
 
-/** 展示名：后端按 `metadata.name/title/ontology_name/display_name` 算好，缺失回落 `name`/目录名 */
 function marketDisplayName(item: OntoMarketItem): string {
   return item.display_name ?? item.name ?? item.skill_dir
 }
 
-/** 身份名小字：展示名与 `name` 不同才返回（导入请求仍用 `skill_dir`，不受影响） */
 function marketAlias(item: OntoMarketItem): string {
   const name = item.name
   return name !== null && name !== marketDisplayName(item) ? name : ''
@@ -93,7 +78,6 @@ async function load(): Promise<void> {
   }
 }
 
-/** 主操作：按所选状态分派导入 / 更新 */
 async function proceed(): Promise<void> {
   const item = selected.value
   if (!item || importing.value || !canSelect(item)) return
@@ -117,10 +101,8 @@ async function proceed(): Promise<void> {
   } catch (err) {
     const info = err as ErrorInfo
     if (info.code === 'ADM_SKILL_MODIFIED') {
-      // 人工修改确认：留在窗内展示提示，由管理员显式确认（不静默覆盖）
       modifiedWarning.value = info
     } else {
-      // 失败不关窗：错误留在窗内，管理员可改选或刷新后重试
       error.value = info
       emit(
         'error',
@@ -132,7 +114,6 @@ async function proceed(): Promise<void> {
   }
 }
 
-/** 人工修改确认后的重试（confirm: true） */
 async function confirmUpdate(): Promise<void> {
   const item = selected.value
   if (!item || importing.value) return
@@ -391,7 +372,6 @@ li + li .skill-market__item {
   font-weight: 500;
 }
 
-/* 身份名小字与来源路径：同一档小字（`alias` 仅在 `name` 与展示名不同时渲染） */
 .skill-market__alias,
 .skill-market__path {
   font-size: var(--font-size-xs);

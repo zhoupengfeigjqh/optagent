@@ -1,12 +1,3 @@
-/**
- * 中文文案与"规则全文"块的**唯一来源**（包装器与装配层不拼字）。
- *
- * 两条硬口径：
- * 1. `SC-005`：文案必须含**行为名**与**规则名**，日志另含时间；
- * 2. `FR-015`：暂停要给**规则全文**（不是摘要），模型据此补调函数后重试。
- *
- * 2026-11-24：后置规则整体移除（待重新设计），本文件不再产出后置提示 / 后置阻断文案。
- */
 import type {
   BehaviorRef,
   DenyReason,
@@ -18,12 +9,10 @@ import type {
 const UNNAMED_RULE = '（未命名规则）';
 const EMPTY = '（无）';
 
-/** `{场景}/{本体}/{行为}` 的展示口径 */
 export function behaviorLabel(ref: BehaviorRef): string {
   return `${ref.ontologyKey}/${ref.behaviorName}`;
 }
 
-/** 规则全文块（字段顺序稳定，可作快照断言） */
 export function ruleBlock(rule: RuleSpec): string {
   return [
     `规则：${ruleName(rule)}`,
@@ -79,7 +68,6 @@ export function pauseMessage(
   return lines.join('\n');
 }
 
-/** 暂停的明细（进日志与卡片展开；正文在 `message` 里） */
 export function pauseDetails(
   ref: BehaviorRef,
   rules: RuleSpec[],
@@ -100,11 +88,6 @@ export function pauseDetails(
   return details;
 }
 
-/**
- * 致命配置错误的一句话结论（2026-11-24）。
- *
- * 三类成因各自点名：`op_type` 非法 / 多名本体同名行为冲突 / 未声明却被规则绑定。
- */
 export function fatalMessage(invalid: InvalidBehavior): string {
   const label = behaviorLabel(invalid.ref);
   if (invalid.reason === 'undeclared') {
@@ -116,7 +99,6 @@ export function fatalMessage(invalid: InvalidBehavior): string {
   return `本体行为「${label}」的 op_type 不是 query 或 command，规则闸门无法判定，本次调用已拒绝，本轮已中止。`;
 }
 
-/** 致命配置错误的逐条原因与修复建议（进卡片正文与结构化日志） */
 export function fatalDetails(invalid: InvalidBehavior): string[] {
   const head = [`行为：${behaviorLabel(invalid.ref)}`];
 
@@ -149,12 +131,6 @@ export function fatalDetails(invalid: InvalidBehavior): string[] {
   ];
 }
 
-/**
- * 拒绝后的**终局指令**（2026-11-09，与 020 同口径的软收尾）。
- *
- * 追加在拒绝卡片的明细之后，**不进** `details.toolError.message`：结构化字段保持
- * "拒绝原因"的原样，这段话只给模型看，用来把"继续换工具试"引导成"总结收尾"。
- */
 export const RULE_TERMINAL_NOTICE =
   '本轮已因规则校验停止执行工具，后续工具调用不再执行；请向用户说明原因并结束本轮回答。';
 
@@ -188,13 +164,10 @@ export interface DenyDetailInput {
   ref: BehaviorRef;
   reason: DenyReason;
   rules: RuleSpec[];
-  /** `reason === 'unregistered'` 时必填 */
   unregistered?: string[];
-  /** `reason === 'condition_false'` 时用于说明哪几条没成立 */
   failed?: FailedCondition[];
 }
 
-/** 中止的逐条原因（3~6 条；只在 `ONTOLOGY_RULE_DENIED` 时出现） */
 export function denyDetails(input: DenyDetailInput): string[] {
   const { ref, reason, rules } = input;
   const head = [`行为：${behaviorLabel(ref)}`, `规则：${ruleNames(rules)}`];

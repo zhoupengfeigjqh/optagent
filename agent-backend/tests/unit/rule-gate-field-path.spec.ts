@@ -1,12 +1,3 @@
-/**
- * 单元测试：`field` 路径语法与读取（021）。
- *
- * 守住的口径：
- * - 只认 `pass` / `detail.qty` / `items` / `items[].qty` / `a[].b[].c`；
- * - 空串、空段、下标（`items[0]`）一律非法；
- * - 单值路径任一段缺失 → `found=false`；投影模式下缺失元素丢弃、投影为空视为缺失；
- * - `declaredTypeOf` 同时吃"属性映射"与 JSON Schema。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

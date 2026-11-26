@@ -1,16 +1,3 @@
-/**
- * 单元测试：MCP 服务**工具白名单**（2026-10-03 产品决定）
- *
- * 口径（2026-10-15 起白名单**可二次调整**）：
- * - 新建**必填非空**（创建这一步就问清楚，不留"全部放行"的后门）；
- * - 归一：元素 trim + 同服务去重；非数组/残缺值即 `VALIDATION_FAILED`；
- * - **保存调用配置可以改白名单**：携带即**全量替换**，且 MUST 非空
- *   （空数组 = 不限制，与"一个都不给"语义相反）；不携带则**沿用原值**
- *   （保存 MUST NOT 顺手清空它）；
- * - 存量记录（白名单上线前）读取为 `[]` = **不限制**，存量行为零变化。
- *
- * 自 `service-config.spec.ts` 独立成文件：该文件已接近 500 行门禁（原则二）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +13,6 @@ let configs: McpServiceConfigService;
 
 const BASE = { transport: 'http' as const, url: 'http://ocr:8000/mcp' };
 
-/** 取下当前 revision 后新建（新建不传 revision 即按当前版本写入） */
 function create(name: string, overrides: Record<string, unknown> = {}): void {
   configs.create({ name, ...BASE, ...overrides });
 }
@@ -71,7 +57,6 @@ describe('新建：白名单必填非空', () => {
     configs.validateForCreate({ name: 'svc', ...BASE, allowed_tools: ['t1'] });
     expect(configs.exists('svc')).toBe(false);
 
-    // 重名 / 白名单缺失都在这一步就被挡下（省掉一次无意义的 MCP 连接）
     create('taken', { allowed_tools: ['t1'] });
     expect(codeOf(() => configs.validateForCreate({ name: 'taken', ...BASE, allowed_tools: ['t1'] }))).toBe(
       ERROR_CODES.ADM_MCP_SERVICE_EXISTS,

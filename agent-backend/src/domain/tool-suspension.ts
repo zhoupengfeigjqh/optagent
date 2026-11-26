@@ -1,18 +1,5 @@
-/**
- * 本轮工具挂起状态（2026-11-09，020 权限闸门 / 021 规则闸门共用）。
- *
- * 语义：**任一次拒绝之后，本轮不再执行任何工具**，但本轮对话继续——
- * 模型收到结果后向用户说明并收尾（软收尾），不硬切断。
- *
- * 为什么做成共享对象：021 的包装器在 020 内侧，模型后续的工具调用会先过 020。
- * 两个闸门必须看到同一份状态，否则"规则拒绝"之后仍可能被 020 放行并执行。
- *
- * 生命周期：由装配层在**每轮**创建一次，随工具数组丢弃（不落实例、不跨轮）。
- */
 export interface ToolSuspension {
-  /** 本轮是否已出现过拒绝 */
   suspended: boolean;
-  /** 触发挂起的错误码（挂起后的拦截沿用同一码，不新增错误码） */
   code: string;
   /** 挂起后被调用过几次：第 1 次软拒，`>1` 触发兜底 */
   attempts: number;
@@ -30,7 +17,6 @@ export interface ToolSuspension {
  */
 export const SUSPENDED_MESSAGE = '本轮已停止执行工具，请直接结束回答。';
 
-/** 新建一份本轮挂起状态（装配层每轮调用一次） */
 export function createToolSuspension(onExhausted?: () => void): ToolSuspension {
   const state: ToolSuspension = { suspended: false, code: '', attempts: 0, exhausted: false };
   if (onExhausted !== undefined) state.onExhausted = onExhausted;
@@ -44,15 +30,6 @@ export function suspendTools(state: ToolSuspension, code: string): void {
   state.code = code;
 }
 
-/**
- * 配置类**致命错误**的收尾（2026-11-24）：立即挂起并触发收尾，不等第 2 次拦截。
- *
- * 为什么复用 `onExhausted` 而不是新增中止通道：装配层已把该出口接到
- * `req.interruptRun`（与用户点"停止"同路径，`ABORTED` 收尾、不写业务错误码）。
- * 配置错误不可自愈，让模型再调一次只是把错误多暴露一遍。
- *
- * 兜底回调抛错被吞掉——可观测性出口不得反过来制造故障。
- */
 export function abortRunFatal(state: ToolSuspension, code: string): void {
   suspendTools(state, code);
   if (state.exhausted) return;
@@ -60,7 +37,7 @@ export function abortRunFatal(state: ToolSuspension, code: string): void {
   try {
     state.onExhausted?.();
   } catch {
-    // 收尾出口故障不影响本次拒绝结果
+    // 回调异常不阻断挂起
   }
 }
 

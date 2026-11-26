@@ -1,12 +1,3 @@
-/**
- * 单元测试：计划快照渲染（028 FR-016）。
- *
- * 守住的口径：
- * - 首行固定 `［执行进度］`，终态标签对齐到同一列，`running` 行带指向标记；
- * - `doneSummary` 最多 5 条；
- * - 总长 ≤ 1200 字符，**超限整行丢弃**（不留半截），`running` 行受保护；
- * - 快照可被 `isSnapshotText` 识别以便原地替换。
- */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -65,7 +56,6 @@ describe('renderSnapshot', () => {
     );
     const text = renderSnapshot({ goal: '目标', steps, doneSummary: [] });
     expect(Array.from(text).length).toBeLessThanOrEqual(SNAPSHOT_MAX_CHARS);
-    // 不留半截：每行都以步骤序号或固定文案开头
     for (const line of text.split('\n')) {
       if (line === '') continue;
       expect(/^(\d+\. |［执行进度］|约束：)/.test(line)).toBe(true);

@@ -1,29 +1,17 @@
-/**
- * 会话导出为 Markdown（2026-10-16）。
- *
- * 纯函数：只做"会话 + 消息数组 → 文本"的映射，不碰 DOM、不发请求
- * （真正落盘那一步在 `utils/download.ts`，这样本文件可以直接断言文本）。
- *
- * 为什么导出 Markdown：agent 的正文本身就是 Markdown（标题 / 列表 / 表格 / 代码块），
- * 原样带走就能在文档工具里直接渲染；JSON 对"给人看"的场合还得再加工一次。
- */
 import type { Conversation, Message } from '../api/types'
 import { formatTimestamp } from './format'
 
-/** 用户侧的角色标签：与界面同口径用"我"（模型侧用数字人名，缺省退回"助手"）。 */
 const USER_LABEL = '我'
 
 /** 文件名非法字符（Windows / macOS 通吃的保守集合）。 */
 const FILENAME_UNSAFE = /[\\/:*?"<>|]/g
 
-/** 引用文件的标注（与消息气泡里的 `@文件名` 同形）。 */
 function referencesOf(message: Message): string {
   const attachments = message.attachments ?? []
   if (attachments.length === 0) return ''
   return attachments.map((item) => `@${item.filename}`).join('、')
 }
 
-/** 单条消息 → Markdown 片段（标题行 + 正文 + 元信息引用块）。 */
 function messageToMarkdown(message: Message): string {
   const who = message.role === 'user' ? USER_LABEL : (message.agent_name ?? '助手')
   const lines: string[] = [`## ${who} · ${formatTimestamp(message.ts)}`, '']
@@ -49,11 +37,6 @@ function messageToMarkdown(message: Message): string {
   return lines.join('\n')
 }
 
-/**
- * 把会话渲染成 Markdown 全文。
- *
- * 消息之间用 `---` 分隔：标题行之外再给一道硬边界，长回答被工具卡片打断时更好读。
- */
 export function threadToMarkdown(
   thread: Conversation,
   messages: Message[],

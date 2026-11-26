@@ -1,12 +1,3 @@
-/**
- * 集成测试夹具：每个用例一套**隔离的临时目录**（平台设计态 + `.opt-agent`）。
- *
- * 之所以每个用例各建一套：部署类用例会真实写入 `.opt-agent`，
- * 共用目录会让用例之间互相污染（尤其是"零写入""100% 不变"这类断言）。
- *
- * **2026-09-27**：随「MCP 服务全人工配置」，夹具不再需要编排文件与假 Docker
- * ——平台已不读这两者。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,20 +40,11 @@ export class FakeRuntimeClient extends RuntimeClient {
   }
 }
 
-/** 假 MCP 客户端：默认"服务未连通"，可按服务名预置工具清单与测试结果 */
 export class FakeMcpClient extends McpClientService {
   toolsByService = new Map<string, McpToolDescriptor[]>();
   failListTools = new Set<string>();
-  /** 测试结果覆盖：`connectivity`/`capability` 各自是否成功 */
   probe = { connectivity: true, capability: true };
-  /**
-   * 最近一次传下来的连接目标（2026-10-08）。
-   *
-   * 用途：断言"请求头确实随连接带下去"——请求头是**凭据**，`McpTestReport.target`
-   * 按设计不含它，测试只能从这里核对透传（服务端另有一层真实 SDK 连接）。
-   */
   lastTarget: McpConnectionTarget | null = null;
-  /** 最近一次 `test()` 收到的连接目标（同上） */
   lastTestTarget: McpConnectionTarget | null = null;
 
   constructor() {
@@ -113,11 +95,8 @@ export interface TestFixture {
 }
 
 export interface FixtureOptions {
-  /** 预置用户（创建 `.opt-agent/users/{uid}/` 与三个文件空间） */
   userIds?: string[];
-  /** 预置 MCP 服务（key = 服务名，value = 传给 `create` 的入参片段） */
   mcpServices?: Record<string, Record<string, unknown>>;
-  /** 追加/覆盖的环境变量（如 `ONTO_MARKET_DIR`；相对路径以夹具 root 解析） */
   env?: Record<string, string | undefined>;
 }
 
@@ -157,8 +136,6 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
   const ctx = (app as unknown as { ctx: AppContext }).ctx;
 
   for (const [name, input] of Object.entries(options.mcpServices ?? {})) {
-    // 工具白名单：新建必填非空（2026-10-03）；默认放开 `ocr_image`，
-    // 需要别的工具范围时在 `mcpServices` 里显式给 `allowed_tools`
     ctx.mcpConfigs.create({
       name,
       transport: 'http',
@@ -184,7 +161,6 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
   };
 }
 
-/** 递归清点目录结构（"100% 不变"类断言用）：返回 相对路径 → 内容哈希 */
 export function snapshotTree(dir: string): Map<string, string> {
   const out = new Map<string, string>();
   if (!fs.existsSync(dir)) return out;

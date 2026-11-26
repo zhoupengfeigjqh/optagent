@@ -1,21 +1,3 @@
-/**
- * 对话管理路由（T034 / FR-010）：
- * - POST /api/threads：创建（未选中 → 409 AGENT_NOT_SELECTED；当前数字人不可用 → 409
- *   AGENT_NOT_AVAILABLE；**不限制会话总数**，上限只作用于"进行中"的会话，见 chat.ts 的
- *   THREAD_BUSY_LIMIT）。body 的 `agent_name` **保留但不再决定归属**（009）：
- *   归属一律取服务端当前选中的数字人，两者不一致时落 `warn` 并以服务端为准
- * - GET /api/threads：列表（**只含当前数字人**、updated_at 倒序、默认标题；查询参数
- *   `agent_name` 保留但不再参与作用域，传了忽略）
- * - GET /api/threads/:id：详情 + 历史分页（limit≤200 默认 50、offset 从最新往前数、total、running）
- *   每条消息可附 `tool_calls`（002 特性：工具调用记录，元数据 + 内联正文，超阈值者是截断版）
- * - GET /api/threads/:id/next-actions：该会话最新一轮的「下一步动作提示」（007；四类空态一律 200 空）
- * - PATCH /api/threads/:id：重命名（≤100 字）
- * - DELETE /api/threads/:id：删除连带清理（进行中 run 先 abort）
- *
- * **009 归属口径**：会话归属＝**目录位置**（`user-data/{数字人}/threads/{id}`），
- * 作用域一律来自 `resolveAgentScope`（唯一判定入口）。跨数字人请求在路径层解析不到 →
- * 一律 `404 THREAD_NOT_FOUND`（与"不存在"不可区分，FR-021），MUST NOT 出现"存在但无权限"。
- */
 import type { FastifyInstance } from 'fastify';
 import path from 'node:path';
 import type { AppContext } from '../context.js';
@@ -70,7 +52,6 @@ function metaJson(m: {
     title: m.title,
     created_at: m.createdAt,
     updated_at: m.updatedAt,
-    // 015：来源标记随列表/详情下发，左栏据此画闪电图标（缺省不出现该键）
     ...(m.source
       ? {
           source: {
@@ -84,16 +65,6 @@ function metaJson(m: {
   };
 }
 
-/**
- * 工具调用记录 → HTTP 契约。
- *
- * `content` = 记录里的正文（≤阈值原文，或前 32 KB 截断版，随详情一起下发）；
- * `artifact_size` 有值 = 临时空间另有完整副本（仅供提示，前端不拉取；2026-11-08）。
- * **不下发路径**：副本路径只出现在截断说明里，由后端按 `{threadId, callId}` 现算，
- * 模型要全文时用 `read_file` 走文件工具（同样过白名单校验）。
- * `view_links` = 结果里的视图链接（地址 + 可选名称）：正文外置时它仍在详情里，
- * 因此前端不必先加载正文就能给出入口（见 `view-links.ts`）。
- */
 function toolCallJson(r: ToolCallRecord) {
   return {
     call_id: r.callId,
@@ -108,7 +79,6 @@ function toolCallJson(r: ToolCallRecord) {
     ...(r.truncated === true ? { truncated: true } : {}),
     ...(r.summary !== undefined ? { summary: r.summary } : {}),
     ...(r.argsDigest !== undefined ? { args_digest: r.argsDigest } : {}),
-    // 视图链接（2026-10-10）：只搬服务给的原值，不拼前缀、不归一化（那是前端的唯一职责）
     ...(r.viewLinks !== undefined && r.viewLinks.length > 0 ? { view_links: r.viewLinks } : {}),
   };
 }
@@ -124,7 +94,6 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
       route: 'POST /api/threads',
     });
     if (bodyAgentName !== agentName) {
-      // 契约：字段保留但不再决定归属；不一致**不静默**（原则九），落 warn 并以服务端为准
       ctx.loggers.logger.warn(
         {
           event: 'thread.create.agent_mismatch',
@@ -134,7 +103,6 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         },
         `创建会话的数字人参数与服务端当前选中不一致，已按当前选中归属（body=${bodyAgentName} scope=${agentName}）`,
       );
-      // 既有口径保留：body 指定的数字人配置损坏时仍是 404 AGENT_NOT_FOUND（不静默放过）
       try {
         loadAgentConfig(path.join(userAgentsDir(ctx.config.optAgentRoot, userId), bodyAgentName));
       } catch (err) {
@@ -152,8 +120,6 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
 
   app.get('/api/threads', { schema: { querystring: listQuerySchema } }, async () => {
     const userId = getCurrentUser().userId;
-    // 查询参数 `agent_name` **退出作用域**（契约 §2）：作用域恒为当前选中数字人，
-    // 传了就忽略（Schema 保留该字段，免得既有的显式传参变成 400）
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads' });
     return ctx.threadStore.list(userId, agentName).map(metaJson);
   });
@@ -163,19 +129,14 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const { id: threadId } = req.params as { id: string };
     const { limit, offset } = req.query as { limit: number; offset: number };
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'GET /api/threads/:id' });
-    const meta = ctx.threadStore.get(userId, agentName, threadId); // 不属于本数字人 → 404
-    // 一次读盘取回消息 + 反馈（原先 readAll + readFeedback 会把同一文件解析两遍）
+    const meta = ctx.threadStore.get(userId, agentName, threadId);
     const snapshot = ctx.history.readSnapshot(userId, agentName, threadId);
     const all = snapshot.messages;
     const feedback = snapshot.feedback;
     const total = all.length;
-    // offset 从最新往前数；返回按时间正序
     const end = Math.max(0, total - offset);
     const page = all.slice(Math.max(0, end - limit), end);
-    // 002 特性：工具调用记录按归属消息分组（无记录的会话为空 Map，只多一次 existsSync）
     const toolCallsByMessage = ctx.toolEvents.readByMessage(userId, agentName, threadId);
-    // 契约升级（002 US2/US3）：消息带元数据与反馈状态；
-    // 旧格式行合成稳定 id（{threadId}-{全局序号}）、ts 回填线程创建时间
     const messages = page.map((m, i) => {
       const globalIndex = Math.max(0, end - limit) + i + 1;
       const id = m.id ?? `${threadId}-${globalIndex}`;
@@ -185,7 +146,6 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         role: m.role,
         content: m.content,
         ts: m.ts ?? meta.createdAt,
-        // 每条消息记该轮**实际执行**的数字人（009 下恒等于会话归属；旧数据缺省）
         ...(m.agent_name ? { agent_name: m.agent_name } : {}),
         ...(m.status ? { status: m.status } : {}),
         ...(m.usage ? { usage: m.usage } : {}),
@@ -193,47 +153,30 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
           ? { duration_seconds: Math.round(m.duration_ms) / 1000 }
           : {}),
         ...(m.attachments ? { attachments: m.attachments } : {}),
-        // 2026-11-07：显式技能（`/技能名`）——前端据此在气泡里还原技能胶囊
         ...(m.skill ? { skill: m.skill } : {}),
         ...(m.error ? { error: m.error } : {}),
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls.map(toolCallJson) } : {}),
         feedback: feedback.get(id) ?? null,
       };
     });
-    // 空 title 回落默认标题（与列表一致）；复用上面已读到的消息，不再重复读盘
     const title = meta.title ?? defaultTitleOf(all);
     return {
       ...metaJson({ ...meta, title }),
       total,
       messages,
       running: ctx.runManager.hasActive(threadId),
-      // HITL 断连恢复：若当前有等待用户确认的工具调用，附快照让前端重建弹窗
       pending_interaction: ctx.runManager.pendingInteractionOf(threadId),
     };
   });
 
-  /**
-   * 007：读取该会话最新一轮的「下一步动作提示」（会话级单快照，见契约 §1）。
-   *
-   * 三条刻意的取舍：
-   * - **会话归属校验前置**：他人会话一律 404 `THREAD_NOT_FOUND`（与详情接口同码），
-   *   不让"这个 id 有没有快照"泄漏出去；
-   * - **空态一律 200 + 空**（`{message_id: null, actions: []}`）：对前端而言"没有建议"
-   *   是正常态而非错误态（FR-042），快照损坏/开关关闭/数字人不一致都不该变成 5xx；
-   * - **判据全部在 `nextActions.read` 内收敛**：那里是唯一同时掌握"快照归属数字人"
-   *   与"当前选中数字人"的地方（跨数字人越权的唯一兜底点，FR-019/SC-011）。
-   *
-   * `Cache-Control: no-store`：内容随轮次与开关变化，缓存住会给出过期卡片。
-   */
   app.get('/api/threads/:id/next-actions', async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
     const { agentName } = resolveAgentScope(ctx, userId, {
       route: 'GET /api/threads/:id/next-actions',
     });
-    ctx.threadStore.get(userId, agentName, threadId); // 404 THREAD_NOT_FOUND
+    ctx.threadStore.get(userId, agentName, threadId);
     reply.header('Cache-Control', 'no-store');
-    // `read` 永不抛错：快照缺失/损坏/超限/判据不符都返回 undefined
     return ctx.nextActions.read(userId, agentName, threadId) ?? { message_id: null, actions: [] };
   });
 
@@ -242,7 +185,7 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const { id: threadId } = req.params as { id: string };
     const { title } = req.body as { title: string };
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'PATCH /api/threads/:id' });
-    const meta = ctx.threadStore.rename(userId, agentName, threadId, title); // 404
+    const meta = ctx.threadStore.rename(userId, agentName, threadId, title);
     return { thread_id: meta.threadId, title: meta.title };
   });
 
@@ -250,11 +193,8 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'DELETE /api/threads/:id' });
-    ctx.threadStore.get(userId, agentName, threadId); // 404
-    // 有进行中 run 先 abort（契约：丢弃本轮但记 usage）；仍在启动中的请求打取消标记
+    ctx.threadStore.get(userId, agentName, threadId);
     ctx.runManager.stop(threadId);
-    // 等这一轮真正收尾再动目录（2026-11-26）：abort 是异步传播，finalize 之后的
-    // tool-events/history 写入仍可能在删除之后 `mkdirSync`，只排空"当时"的链不够。
     // 5s 上界：删除接口不能被卡死的 run 挂住，超时记录后继续删。
     const idle = await ctx.runManager.awaitIdle(threadId, 5_000);
     if (!idle) {
@@ -263,17 +203,12 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: AppContext): voi
         '本轮未在 5s 内收尾，仍继续删除（可能残留孤儿目录）',
       );
     }
-    // 再等落盘链排空（2026-10-27）：
-    // 1) 在途 append 会把刚删掉的目录重新建出来（残留"没有 meta.json 的孤儿目录"）；
-    // 2) 顺带释放三个 store 的串行链内存——键按会话累积且原先永不清理。
     await Promise.all([
       ctx.history.disposeThread(userId, agentName, threadId),
       ctx.summary.disposeThread(userId, agentName, threadId),
       ctx.toolEvents.disposeThread(userId, agentName, threadId),
     ]);
-    // 下一步动作提示是会话级单快照，随会话一起删（与"发起新一轮即清空"同一语义）
     ctx.nextActions.clear(userId, agentName, threadId);
-    // 删除是「多文件 × 单次系统调用」，**await 异步版**：不让它占住事件循环
     // （否则用户紧接着的"切换会话"请求会被一起拖慢，见 fs-safe 头部实测）
     await ctx.threadStore.delete(userId, agentName, threadId);
     return reply.status(204).send();

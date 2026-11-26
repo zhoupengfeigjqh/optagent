@@ -1,16 +1,9 @@
-/**
- * HTTP 服务装配：Fastify + 全局错误 envelope + CORS + multipart + 路由注册。
- *
- * buildServer 供集成测试（app.inject）与正式启动共用；
- * 直接运行时（tsx watch src/server.ts / node dist/server.js）进入 listen 分支。
- * 优雅关闭的完整接线在 T050。
- */
 import path from 'node:path';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { loadConfig, type AppConfig } from './config.js';
+import { loadConfig, summarizeConfig, unknownEnvKeys, type AppConfig } from './config.js';
 import type { AppContext } from './context.js';
 import { AgentPool } from './domain/agent-pool.js';
 import { listAgents } from './domain/agent-catalog.js';
@@ -56,13 +49,11 @@ import { registerThreadRoutes } from './routes/threads.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import type { ModelSelection } from './types.js';
 
-/** 统一错误 envelope：{ error: { code, message, details? } }（details 为可选的逐条问题清单） */
 export class ApiError extends Error {
   constructor(
     public readonly statusCode: number,
     public readonly code: string,
     message: string,
-    /** 结构化问题清单（如上传表校验的逐条问题）；仅 `FILE_SCHEMA_INVALID` 使用 */
     public readonly details?: string[],
   ) {
     super(message);
@@ -79,38 +70,42 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   AGENT_NOT_AVAILABLE: 409,
   POOL_EXHAUSTED: 409,
   THREAD_NOT_FOUND: 404,
-  // 2026-11-26：会话标识未通过字符集校验（路径穿越防御，见 dirs.threadDir）
   THREAD_ID_INVALID: 400,
   AGENT_NOT_FOUND: 404,
-  // 015 定时任务：任务不存在 → 404；名称冲突 / 启用中删除 / 已终止 → 409
   SCHEDULED_TASK_NOT_FOUND: 404,
   SCHEDULED_TASK_NAME_CONFLICT: 409,
   SCHEDULED_TASK_ENABLED: 409,
   SCHEDULED_TASK_EXHAUSTED: 409,
-  // 024 鉴权：未认证 / 会话被新登录取代
   UNAUTHENTICATED: 401,
   SESSION_REVOKED: 401,
 };
 
 export interface BuildServerOptions {
   config?: AppConfig;
-  /** 测试注入假 LlmProvider；缺省惰性创建 PiAiLlmProvider（默认模型） */
   llmProvider?: LlmProvider;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
   const config = options.config ?? loadConfig();
   const loggers = createLoggers(config.optAgentRoot);
+  // 2026-11-26：一行摘要回答"这台机器上哪个值生效"（密钥不打码项一律不出现）
+  loggers.logger.info(
+    { event: 'config.effective', ...summarizeConfig(config) },
+    '配置生效值',
+  );
+  const staleEnv = unknownEnvKeys();
+  if (staleEnv.length > 0) {
+    loggers.logger.warn(
+      { alert: true, event: 'config.unknown_env', keys: staleEnv },
+      '检测到未生效或已废弃的环境变量（拼写错误 / 已迁入 config.yaml / 已降为常量）',
+    );
+  }
   const root = config.optAgentRoot;
   const { userId } = getCurrentUser();
   ensureRootDirs(root, [userId]);
 
-  // 启动期存量迁移（009 FR-040 / T043）：把"用户级共享"数据搬到归属数字人目录。
-  // 进程内此时**没有选中态**（内存 Map 刚建），故实际走判定②③；判定①在
-  // `POST /api/agents/:name/select` 成功后触发（覆盖"清单为空 → 后来才有数字人"的收口）。
   migrateAllUsers(root, { logger: loggers.logger });
 
-  // ---- wiring：routes → domain → infra ----
   const usageDb = new UsageDb(path.join(root, 'usage.db'), loggers.logger);
   const history = new HistoryStore(root, {
     warn: (msg) =>
@@ -118,8 +113,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const threadStore = new ThreadStore(root, history);
   // 工具调用记录（002 特性）：元数据常驻会话目录，超阈值的结果正文外置到临时空间。
-  // 外置读写走 FileAccess（顶层目录白名单 + 符号链接校验 + `{threadId}_` 前缀强制），
-  // 因此模型能用 read_file 按需取回，且删会话时随前缀被一并清理。
   const toolEvents = new ToolEventStore({
     root,
     logger: {
@@ -141,15 +134,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const mcpEvents = new McpStatusEvents();
   const producedEvents = new ProducedEvents();
 
-  // LlmProvider 惰性单例：测试注入 fake 时不触碰 pi-ai/真 key
   let llmInstance: LlmProvider | undefined = options.llmProvider;
   const llm = () => (llmInstance ??= new PiAiLlmProvider(config.defaultModel, config.llmRetry));
-  /**
-   * 027：请求级模型覆盖的 provider 构造（**唯一实现**）。
-   *
-   * 同一份逻辑既给 `agent-factory`（主对话）也给改写端口：两处各写一份会造出
-   * "主对话用本轮所选模型、改写偷偷用默认模型"的静默差异，且测试注入点会漏一个。
-   */
   const providerFor = (entry: ModelSelection): LlmProvider =>
     options.llmProvider ?? new PiAiLlmProvider(entry, config.llmRetry);
 
@@ -164,23 +150,24 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const agentFactory = new AgentInstanceFactory({
     root,
     llm,
-    // 测试注入 fake provider 时，请求级模型覆盖同样落到 fake（不触碰真 key）
     providerFor,
     logger: loggers.logger,
     mcpTimeoutMs: config.mcpTimeoutMs,
     mcpConnectTimeoutMs: config.mcpConnectTimeoutMs,
+    // 028：规划上限（yaml `plan` 块；缺省 = 原代码常量）
+    planLimits: config.planLimits,
     // 2026-10-15：请求级模型覆盖的临时 provider 用同一份重试口径（与默认模型单例同源）
     llmRetry: config.llmRetry,
     truncateKb: config.readTruncateKb,
+    // 028：规划门禁阈值（intent_focus.plan_threshold；未配置 = 门禁关闭）
+    ...(config.intentFocus?.planThreshold !== undefined
+      ? { planThreshold: config.intentFocus.planThreshold }
+      : {}),
     // 2026-11-16：write_file 的落盘上限与预览上限同源（超限在写入前拒绝，
-    // 而不是写出一个"能下载、点开即 413"的文件）
     writeMaxBytes: config.previewMaxMb * 1024 * 1024,
     publicBaseUrl: config.publicBaseUrl,
     fileSignSecret: config.fileSignSecret,
-    // 建连落定 → 事件总线 → SSE 路由推送最新快照（替代前端轮询）
     onMcpStatus: (key) => mcpEvents.emitChanged(key.userId),
-    // R4：工具调用完成即落一条事件明细（服务 / 工具 / 成败 / 耗时 / 错误分类 / 用户 / 会话），
-    // 供管理平台只读采集（FR-049/FR-050）
     onMcpCall: (event) => usageDb.recordMcpCall(event),
   });
 
@@ -193,7 +180,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     60 * 60 * 1000,
     async () => {
       // 009：临时空间是**数字人级**的 ⇒ 按（用户 × 数字人）逐一清理，
-      // 数字人清单取 `listAgents`（只清可用数字人：已移除者的数据一律保留，FR-031）
       await cleanupAllAgentTmpDirs(
         root,
         listUserIds(root),
@@ -224,7 +210,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
           `回收空闲实例 ${evicted.length} 个`,
         );
       }
-      // R7：因配置变化换下、但当时仍有在途轮次的实例，等轮次结束后回收
       const swept = pool.sweepRetired();
       if (swept > 0) {
         loggers.logger.info(
@@ -236,15 +221,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     'pool-idle-evict',
   );
 
-  // MCP 健康探测（2026-09-23）：`streamable-http` 是无状态请求/响应，服务被停掉时
-  // **不会有断线回调**——若此刻没有工具调用，状态会一直显示"绿灯"（假绿）。
   // 这里定期对池内实例的已连接服务发探针：探测失败即降级变红并推送；
   // 不可用的服务由 McpManager 的保活重连负责（每 2 分钟一次），恢复后自动变绿。
   scheduler.every(
     60 * 1000,
     async () => {
       for (const instance of pool.list()) {
-        // 池内实际是 ChatAgent；这里只用到探针能力，按最小契约收窄
         const agent = instance as unknown as ChatAgent;
         if (typeof agent.probeMcp !== 'function') continue;
         try {
@@ -272,19 +254,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     'mcp-health-check',
   );
 
-  /**
-   * 侧车能力装配（007 下一步动作提示 / 013 意图聚焦）。
-   *
-   * 外移到 `server-attachments.ts`：本文件已贴近 500 行硬门禁，且这两项都只是"构造"。
-   * 两者都由 SOUL 开关逐次现读门控（fail-closed），未配置/未开启时整体不生效。
-   */
   const attachments = buildAttachments({
     root,
     config,
     logger: loggers.logger,
     llm,
     providerFor,
-    // 027：改写素材只读历史正文（`history.jsonl` 结构子集；不读工具事件 / 摘要 / 记忆）
     readHistory: (userId, agentName, threadId) => history.readAll(userId, agentName, threadId),
   });
 
@@ -296,15 +271,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
     toolEvents,
     nextActions: attachments.nextActions,
     // 007 修订：开关与条数逐次现读（SOUL.md frontmatter）；开启时条数上限同时驱动
-    // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
-    // 2026-10-15：LLM 失败日志要有"哪个 provider / 哪个模型"（请求级覆盖由 run.modelId 提供）
     llmInfo: () => ({ provider: 'deepseek', model: config.defaultModel.model }),
     nextActionsConfig: attachments.nextActionsConfig,
     // 013：意图聚焦判定口（未配置判定模型时缺省不注入 = 功能不可用）
     ...(attachments.intentFocus ? { intentFocus: attachments.intentFocus } : {}),
-    // FR-030：实例崩溃 → 销毁（下一条消息经 getOrCreateAgent 自动重建）
     onCrash: (key) => pool.remove(key),
-    // R11：后台计算结果清单 —— 只注入**当前会话**（`sid === threadId`）的产出，
     // 避免把别的对话提交的任务结果污染进本轮上下文；无产出时返回空串（该段长度为 0）
     produced: async (userId, agentName, threadId) => {
       const items = await listProduced(
@@ -320,11 +291,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
-  // 实例取用口（池命中 / 单飞 / 配置换代）：实现搬到 `server-agents.ts`（行数门禁）
   const getOrCreateAgent = createAgentProvider({ root, pool, factory: agentFactory });
 
-  // 定时任务装配（015）：任务存储 / 运行记录 / 信号 / 执行器 / 心跳一次建好，
-  // 派发器在此注册（心跳不 import 执行器，执行器也不 import 心跳）
   const scheduled = buildScheduledTasks({
     root,
     mcpConnectTimeoutMs: config.mcpConnectTimeoutMs,
@@ -353,25 +321,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   };
 
   const app = Fastify({
-    // 只保留关键行为（任务 2026-09-15）：给 Fastify 一个 warn 级别的 child logger，
-    // 逐请求的 info 访问日志被丢弃；warn/error（请求级错误）仍会输出。
-    // 关键业务事件由各 domain 用 loggers.logger（info）显式记录。
     loggerInstance: loggers.logger.child({}, { level: 'warn' }),
     bodyLimit: config.uploadMaxMb * 1024 * 1024,
   });
   app.decorate('ctx', ctx);
 
   await app.register(cors, { origin: true });
-  // defParamCharset 是 busboy 透传选项（@fastify/multipart 类型未暴露，
-  // 单独声明避开字面量超额属性检查）：中文文件名按 UTF-8 解析
   const multipartOptions = {
     limits: { fileSize: config.uploadMaxMb * 1024 * 1024, files: 1 },
     defParamCharset: 'utf8',
   };
   await app.register(multipart, multipartOptions);
-  // R11：后台产出回写的 body 是**结果字节**，不做解析（原样保留 Buffer 写盘）。
-  // 只登记这两种明确的"字节流"类型：`application/json` 仍走 Fastify 默认 parser（对象），
-  // 由路由侧统一转回字节（见 `routes/files.ts` 的 `toResultBytes`），
   // 这样无需注册 `'*'` 兜底、不改变任何既有端点的 content-type 行为。
   app.addContentTypeParser(
     ['application/octet-stream', 'text/plain'],
@@ -398,13 +358,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
         },
       });
     }
-    // domain 错误（带 code 字段）按映射表转为语义化状态码
     const code = (err as { code?: string }).code;
     if (code && code in DOMAIN_ERROR_STATUS) {
       const statusCode = DOMAIN_ERROR_STATUS[code]!;
       return reply.status(statusCode).send({ error: { code, message: (err as Error).message } });
     }
-    // Fastify 校验错误（JSON Schema 不满足等）→ 400
     const e = err as { statusCode?: number; message?: string };
     const statusCode = e.statusCode && e.statusCode >= 400 ? e.statusCode : 500;
     const errCode = statusCode < 500 ? 'VALIDATION_FAILED' : 'INTERNAL_ERROR';
@@ -418,11 +376,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.status(404).send({ error: { code: 'NOT_FOUND', message: '接口不存在' } }),
   );
 
-  // pino Logger 与 FastifyBaseLogger 的泛型差异对路由注册无实质影响，此处统一收敛类型
   const routeApp = app as unknown as FastifyInstance;
   registerChatRoutes(routeApp, ctx);
   registerThreadRoutes(routeApp, ctx);
-  // 018：术语替换预检（发送前一次性调用，结果由用户确认）
   registerTermNormalizeRoutes(routeApp, ctx);
   registerAgentRoutes(routeApp, ctx);
   registerFileRoutes(routeApp, ctx);
@@ -430,26 +386,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerUsageRoutes(routeApp, ctx);
   registerFeedbackRoutes(routeApp, ctx);
   registerModelRoutes(routeApp, ctx);
-  // R2：内置工具目录（只读，供管理平台投影；FR-011）
   registerBuiltinToolRoutes(routeApp, ctx);
-  // R4：MCP 调用统计（只读，供管理平台投影；FR-049/FR-050）
   registerMcpCallStatsRoutes(routeApp, ctx);
-  // R11：后台产出（列表 + 变更信号）
   registerProducedRoutes(routeApp, ctx);
-  // 015：定时任务（6 个端点，含 SSE 信号；作用域＝当前选中数字人）
   registerScheduledTaskRoutes(routeApp, ctx);
 
-  // 015 定时任务心跳：启动即规整"错过的计划时刻"（不补跑），此后按秒巡检
   scheduled.start();
 
   app.addHook('onClose', async () => {
-    // 顺序要点（都是实测踩出来的）：
-    // ① `shutdown.closed` MUST **先**记：清理步骤抛错、或日志流已关闭，这行就永远看不到；
     // ② 清理失败只告警不抛出，否则 `app.close()` 会 reject，连"服务已关闭"都无从谈起；
     // ③ 关闭日志流要 await：否则 `process.exit` 会截断最后几条日志。
     loggers.logger.info({ event: 'shutdown.closed', scope: 'system' }, 'HTTP 服务已关闭');
     try {
-      // 先关心跳：之后不再派发新任务（在途 run 由 gracefulShutdown 的 drain 收尾）
       scheduled.stop();
       scheduler.stopAll();
       usageDb.close();
@@ -470,7 +418,6 @@ async function main(): Promise<void> {
   const config = loadConfig();
   ensureRootDirs(config.optAgentRoot, [getCurrentUser().userId]);
   const app = await buildServer({ config });
-  // T050：SIGTERM/SIGINT → 优雅关闭（draining → 宽限 abort → close）
   for (const sig of ['SIGTERM', 'SIGINT'] as const) {
     process.once(sig, () => {
       const ctx = (app as unknown as { ctx: AppContext }).ctx;
@@ -486,7 +433,6 @@ async function main(): Promise<void> {
           process.exit(0);
         })
         .catch((err) => {
-          // 先在日志里留痕再退出：容器 stdout 是管道，`process.exit` 会把 console.error 截断
           ctx.loggers.logger.error(
             { err, event: 'shutdown.failed', scope: 'system' },
             '优雅关闭失败，强制退出',
@@ -496,7 +442,6 @@ async function main(): Promise<void> {
     });
   }
   // 双栈监听：'::' 默认接受 IPv4（IPv4-mapped），避免客户端把 localhost 解析成 ::1 时
-  // 因「进程只监听 IPv4」触发 ~2s 的连接回退（本机实测：::1 无监听 → 2.03s 才失败）。
   // IPv6 不可用的环境回落到 IPv4 通配地址。
   try {
     await app.listen({ port: config.port, host: '::' });
@@ -507,7 +452,6 @@ async function main(): Promise<void> {
   }
 }
 
-// 直接运行（非被测试 import）时启动
 const invokedAs = process.argv[1] ?? '';
 if (/server\.(ts|js)$/.test(invokedAs)) {
   main().catch((err) => {

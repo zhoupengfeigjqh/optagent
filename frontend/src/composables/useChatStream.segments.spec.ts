@@ -1,15 +1,3 @@
-/**
- * 流式渲染段（A-lite，2026-11-16）
- *
- * 需求：气泡按「文字 → 工具 → 文字」的真实时间线渲染，而不是把本轮所有工具卡片
- * 堆在整段正文上方（后者会让多轮工具的回答看起来是"工具跑完才出字"）。
- *
- * 这里钉住四条不变式：
- * 1. 连续正文增量续写同一段（不产生碎片段）；
- * 2. `tool_call` 开新段，**其后的正文必须另起一段**（A-lite 的核心）；
- * 3. `tool_call_end` 只改段内状态，不移动段位置；
- * 4. 段序是流式瞬态：一轮收口（`finally`）与 `reset()` 都清空，不污染历史。
- */
 import { ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,7 +5,6 @@ import { RUN_PHASE } from '../constants/events'
 import { createChatStreamStore } from './useChatStream'
 import type { ChatStreamDeps } from './useChatStream.types'
 
-/** 可手动推事件的长连接（`close()` 模拟服务端正常断流，触发 send 的 finally） */
 function controlledFetch(): {
   fetchImpl: typeof fetch
   push: (chunk: string) => void
@@ -129,7 +116,6 @@ describe('useChatStream —— 流式渲染段（A-lite）', () => {
     expect(store.segments.value.map((s) => s.kind)).toEqual(['tool', 'text'])
     const tool = store.segments.value[0]
     expect(tool?.kind === 'tool' ? tool.call.status : '').toBe('success')
-    // 扁平列表同步更新（下一步卡片 / 静默判据仍读它）
     expect(store.toolCalls.value[0]?.status).toBe('success')
   })
 
@@ -175,7 +161,6 @@ describe('useChatStream —— 流式渲染段（A-lite）', () => {
     await flush()
     push(sse('content', { delta: '旧内容' }))
     await flush()
-    // 断流但未终结：模拟"上一轮异常结束"，段序仍在
     store.reset()
     expect(store.segments.value).toEqual([])
 

@@ -1,23 +1,9 @@
-/**
- * 配置模块（**唯一**读取 `process.env` 的地方）。
- *
- * 全部经 zod 校验后导出冻结对象；缺必填项即拒启动并给出**可读报错**，
- * 而不是在运行期表现为某个接口静默失败。
- *
- * **2026-09-27**：`COMPOSE_FILE_PATH` / `DOCKER_SOCKET_PATH` 随
- * 「MCP 服务全人工配置」一并移除——平台不再读容器编排声明，也不再读
- * Docker 容器状态（`.env*` 里遗留的同名变量被忽略，不影响启动）。
- */
 import path from 'node:path';
 import { z } from 'zod';
 
 const envSchema = z.object({
-  // 与本地形态/容器形态统一口径 3001（2026-09-20）：避开 agent-backend 的 3000；
-  // admin-frontend 的 vite proxy 与本服务两边都按 3001 约定
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
-  /** 平台设计态根目录（bind mount；不进镜像） */
   PLATFORM_DATA_DIR: z.string().min(1),
-  /** 运行环境用户数据根（`.opt-agent`），与运行环境共享同一份（`FR-001`） */
   OPT_AGENT_ROOT: z.string().min(1),
   /**
    * 运行环境（agent-backend）只读端点基址（`GET /api/builtin-tools`、`GET /api/mcp-call-stats`）。
@@ -29,28 +15,14 @@ const envSchema = z.object({
   RUNTIME_TIMEOUT_MS: z.coerce.number().int().min(100).default(5000),
   /** MCP 客户端超时（毫秒） */
   MCP_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
-  /**
-   * 本体市场根目录（optonto 的 `.data/onto_market`，平台侧**只读**；2026-10-02）。
-   *
-   * 配置后 SKILL 管理可从市场目录直接导入技能（`/api/admin/skills/onto-market*`）；
-   * 缺省 = 该功能不可用（列表返回 `configured: false`，导入给出可读报错），不影响启动。
-   * 本地形态：`../optonto/.data/onto_market`；容器形态：只读挂载点 `/opt/onto_market`。
-   */
   ONTO_MARKET_DIR: z.string().min(1).optional(),
-  /**
-   * SKILL ZIP 上传大小上限（MB）：全项目统一 5MB（与 agent-backend 文件上传同一约束）。
-   * 改这里时 MUST 同步改：agent-backend/src/config.ts 的同名项、
-   * gateway/nginx.conf 的 client_max_body_size（= 此值 + 1MB multipart 余量，否则 5MB 包传不上）。
-   */
   UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
-  /** 平台容器是否可管理：缺省仅在容器内可用；测试可注入 */
   LOG_LEVEL: z.string().default('info'),
   /**
    * 024：登录凭据签名密钥（`AUTH_SECRET`，≥16 字符）。
    * 必须与运行环境（agent-backend）同值；缺失即拒绝启动（签发方不能静默失败）。
    */
   AUTH_SECRET: z.string().min(16),
-  /** 024：登录凭据有效期（秒），默认 7 天。 */
   AUTH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(604_800),
 });
 
@@ -65,9 +37,7 @@ export interface AppConfig {
   /** 本体市场根目录（绝对路径）；未配置为 null = 导入功能不可用 */
   ontoMarketDir: string | null;
   logLevel: string;
-  /** 024：登录凭据签名密钥（与运行环境同值） */
   authSecret: string;
-  /** 024：登录凭据有效期（秒） */
   authTokenTtlSeconds: number;
 }
 
@@ -79,9 +49,7 @@ export class ConfigError extends Error {
 }
 
 export interface LoadConfigOptions {
-  /** 默认取 `process.env`；测试可注入 */
   env?: Record<string, string | undefined>;
-  /** 相对路径的解析基准，默认 `process.cwd()` */
   cwd?: string;
 }
 

@@ -38,11 +38,10 @@ export interface RecordFields {
   concepts?: readonly ConceptEntry[];
   upstreamBehaviors?: readonly ExpandedBehavior[];
   downstreamBehaviors?: readonly ExpandedBehavior[];
-  /**
-   * 027：指代改写的留档字段（可选；缺省由 `buildRecordDraft` 补齐）。
-   * 早退分支不传 = "未执行"，与"失败但原因非空"在记录里可区分。
-   */
   rewrite?: Partial<RewriteFocusRecord>;
+  /** 028：规划门禁分数与耗时（未判定时缺省，不写进记录） */
+  plan_score?: number | null;
+  plan_round_ms?: number | null;
 }
 
 export interface FocusRecordWriterLogger {
@@ -50,7 +49,6 @@ export interface FocusRecordWriterLogger {
 }
 
 export interface FocusRecordWriterDeps {
-  /** 缺省 = 未装配 → 不落记录 */
   store?: {
     append(
       userId: string,
@@ -62,7 +60,6 @@ export interface FocusRecordWriterDeps {
   logger?: FocusRecordWriterLogger;
 }
 
-/** 记录归属（与一次 `judge` 调用一一对应） */
 export interface RecordTarget {
   userId: string;
   agentName: string;
@@ -105,6 +102,8 @@ export class FocusRecordWriter {
       warnings: fields.warnings,
       error: fields.error,
       ...(fields.rewrite ? { rewrite: fields.rewrite } : {}),
+      ...(fields.plan_score !== undefined ? { planScore: fields.plan_score } : {}),
+      ...(fields.plan_round_ms !== undefined ? { planRoundMs: fields.plan_round_ms } : {}),
     });
     try {
       await store.append(target.userId, target.agentName, target.threadId, draft);

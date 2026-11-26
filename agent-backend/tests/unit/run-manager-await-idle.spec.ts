@@ -1,12 +1,3 @@
-/**
- * 单元测试：删除会话前的有界等待（2026-11-26，S1 加固）。
- *
- * 背景：`stop()` 只是发 abort 信号，run 的收尾是异步的。删除接口若只排空"当时"的
- * 写入链就删目录，`finalize` 之后的 tool-events / history 写入仍会 `mkdirSync`，
- * 留下没有 `meta.json` 的孤儿目录。
- *
- * 这里只钉 `awaitIdle` 的两条语义：空闲立即 true；在途 run 有超时上界（不会挂住删除）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +22,6 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** 直接放进 `active`：本用例只关心"有在途 run 时的等待语义"，不启动真实 run */
 function registerFakeRun(threadId: string, settled: Promise<void>): void {
   (manager as unknown as { active: Map<string, { settled: Promise<void> }> }).active.set(threadId, {
     settled,

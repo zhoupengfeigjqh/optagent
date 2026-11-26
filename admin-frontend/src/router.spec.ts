@@ -1,8 +1,3 @@
-/**
- * 单元测试：路由（T027）
- *
- * 自建路由属"自研基础设施"，故 MUST 有单测（原则三、`research.md` D5）。
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_ROUTE,
@@ -143,7 +138,6 @@ describe('createRouter', () => {
     window.history.pushState(null, '', '/admin/mcp')
     window.dispatchEvent(new PopStateEvent('popstate'))
     expect(spy).toHaveBeenCalledTimes(1)
-    // 路由实例已卸载，不再自行解析
     expect(router.current.value.name).toBe('agents')
     window.removeEventListener('popstate', spy)
   })

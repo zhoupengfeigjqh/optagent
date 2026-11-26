@@ -1,13 +1,3 @@
-/**
- * `write_file` 输出格式注册表（`src/domain/tools/write-modes.ts`，2026-11-16）。
- *
- * 守四条口径（`specs/022-write-file-format-routing`）：
- * 1. 七个已登记扩展名各命中自己的模式，大小写不敏感；
- * 2. **未登记扩展名回落文本模式**（本期定稿：不拒绝，行为与改造前一致）；
- * 3. `.xlsx` / `.pdf` 一期未接编码器 → 明确抛 `FormatNotImplementedError`，
- *    MUST NOT 落一个"扩展名像二进制、内容是文本"的假文件；
- * 4. `supportedExtensions()` 与 REGISTRY 同源（文案与断言不各写一份清单）。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

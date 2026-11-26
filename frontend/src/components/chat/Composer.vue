@@ -1,16 +1,4 @@
 <script setup lang="ts">
-/**
- * 输入区（T041；2026-10-18 改为「引用即胶囊」）
- *
- * - 富文本容器（`contenteditable`）：正文里选中的文件直接落成**不可编辑的胶囊**
- *   （`@文件名` + 移除按钮），不再在输入框上方另起一排 chip——同一次选择只显示一处；
- * - 草稿仍是字符串：DOM 与文本的互转只在 `utils/composer-text` 里实现一次，
- *   `@` 触发、反向同步、发送载荷（`stripMentionTokens`）都照旧按文本工作；
- * - Enter 发送、Shift + Enter 换行；`@` 面板展开时方向键/Enter/Esc 让位给面板；
- * - `mention` 插槽只出数据与锚点（面板本体是 `fixed` 浮层，见 MentionPopup）。
- *
- * 发送后清空、失败后保留由上层（`ChatPanel`）统一编排。
- */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import type { FileReference } from '../../api/types'
@@ -32,21 +20,13 @@ import BaseIcon from '../common/BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 输入文本 */
     modelValue: string
-    /** 是否禁用输入与发送 */
     disabled?: boolean
-    /** 本轮是否进行中（决定展示"中断本轮"） */
     sending?: boolean
-    /** 已选引用（决定正文里哪些 `@文件名` 渲染成胶囊） */
     references?: FileReference[]
-    /** 已选技能名（决定正文里哪个 `/技能名` 渲染成胶囊；2026-11-07） */
     skill?: string | null
-    /** 占位文案 */
     placeholder?: string
-    /** `@` 面板是否展开（展开时 Enter / 方向键 / Esc 交给上层处理，扩展属性） */
     mentionOpen?: boolean
-    /** `/技能` 面板是否展开（与 `mentionOpen` 互斥，优先处理） */
     skillOpen?: boolean
   }>(),
   {
@@ -65,19 +45,13 @@ const emit = defineEmits<{
   send: [payload: { content: string; attachments: FileReference[]; skill: string | null }]
   stop: []
   'remove-reference': [reference: FileReference]
-  /** 点技能胶囊的 x（2026-11-07） */
   'remove-skill': []
-  /** 文本与光标位置（供上层做 `@` / `/` 触发检测，扩展事件） */
   'input-text': [payload: { value: string; caret: number }]
-  /** `@` 面板展开时被拦截的按键（扩展事件） */
   'mention-key': [key: string]
-  /** `/技能` 面板展开时被拦截的按键（2026-11-07） */
   'skill-key': [key: string]
-  /** 粘贴进来的文件/图片（2026-11-17）：交给上层做整批校验与上传 */
   'paste-files': [files: File[]]
 }>()
 
-/** 面板展开时需要让位的按键（`@` 与 `/` 同款）。 */
 const PICKER_KEYS: ReadonlySet<string> = new Set([
   'ArrowDown',
   'ArrowUp',
@@ -87,8 +61,6 @@ const PICKER_KEYS: ReadonlySet<string> = new Set([
   'Escape',
 ])
 
-// 判据唯一实现见 `utils/can-send.ts`（2026-11-20 收敛，此前与工具栏各算一套）：
-// 只选技能不写正文不算可发送；只有附件（上传胶囊 / `@` 引用）算可发送（026）。
 const canSend = computed(
   () =>
     canSendContent(props.modelValue, props.skill ?? null, props.references.length) &&
@@ -96,7 +68,6 @@ const canSend = computed(
     !props.sending,
 )
 
-/** 输入框实例（自适应高度测量、选区换算、插槽锚点） */
 const editorRef = ref<HTMLDivElement | null>(null)
 
 function currentSelection(): Selection | null {
@@ -114,19 +85,16 @@ function autosize(): void {
     return
   }
   const style = getComputedStyle(el)
-  // scrollHeight 含 padding 不含 border，而 box-sizing 为 border-box，需补边框
   const borderY =
     (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0)
   el.style.height = 'auto'
   el.style.height = `${el.scrollHeight + borderY}px`
 }
 
-/** 标记 → 引用：正文只有文件名，`dir` 由当前引用集合补齐。 */
 function referenceOfToken(token: string): FileReference | null {
   return props.references.find((reference) => mentionToken(reference) === token) ?? null
 }
 
-/** 造一枚引用胶囊：文本即标记，移除按钮不参与序列化。 */
 function createMentionChip(reference: FileReference): HTMLElement {
   return createComposerChip({
     text: mentionToken(reference),
@@ -139,7 +107,6 @@ function createMentionChip(reference: FileReference): HTMLElement {
   })
 }
 
-/** 按草稿重建正文（只用于外部改写草稿：插入标记、点 x、发送后清空、切换会话）。 */
 function renderDraft(text: string): void {
   const editor = editorRef.value
   if (!editor) return
@@ -169,10 +136,6 @@ function renderDraft(text: string): void {
   autosize()
 }
 
-/**
- * 造一枚技能胶囊（2026-11-07）：与引用胶囊**同款样式**，差异只在属性与文案。
- * 文本即 `/技能名` 标记，移除按钮不参与序列化。
- */
 function createSkillChip(name: string): HTMLElement {
   return createComposerChip({
     text: skillToken(name),
@@ -182,7 +145,6 @@ function createSkillChip(name: string): HTMLElement {
   })
 }
 
-/** 点胶囊的 x：删节点 → 光标落回原位 → 交回文本层（引用/技能由上层反向同步）。 */
 function removeChip(chip: HTMLElement): void {
   const editor = editorRef.value
   if (!editor) return
@@ -216,10 +178,8 @@ function onInput(): void {
   const editor = editorRef.value
   if (!editor) return
 
-  // 先换算光标：随后清空残留节点会让选区失效
   const caret = caretTextOffset(editor, currentSelection())
   const text = serializeComposerText(editor)
-  // 浏览器把内容删空后常留一个 `<br>`：留着会让 `:empty` 占位文案失效
   if (text === '' && editor.childNodes.length > 0) {
     editor.replaceChildren()
   }
@@ -229,7 +189,6 @@ function onInput(): void {
   autosize()
 }
 
-/** 在当前光标处插入纯文本（换行、粘贴都走这里，保证不引入富文本结构）。 */
 function insertPlainText(text: string): void {
   const editor = editorRef.value
   if (!editor) return
@@ -274,7 +233,6 @@ function pastedFiles(data: DataTransfer): File[] {
 function onPaste(event: ClipboardEvent): void {
   if (props.disabled) return
   const data = event.clipboardData
-  // 剪贴板里有文件（截图 / 复制的文件）→ 交给上层整批校验后上传，不再当文本塞进正文
   const files = data ? pastedFiles(data) : []
   if (files.length > 0) {
     event.preventDefault()
@@ -299,19 +257,16 @@ function onSend(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  // 两个面板互斥；`/技能` 优先（它只会由最近一次输入打开）
   if (props.skillOpen && PICKER_KEYS.has(event.key)) {
     event.preventDefault()
     emit('skill-key', event.key)
     return
   }
-  // `@` 面板展开时，方向键/Enter/Esc 优先用于面板导航（US4）
   if (props.mentionOpen && PICKER_KEYS.has(event.key)) {
     event.preventDefault()
     emit('mention-key', event.key)
     return
   }
-  // 富文本快捷键（Ctrl/⌘ + B/I/U）在纯文本输入区没有意义
   if ((event.ctrlKey || event.metaKey) && 'biu'.includes(event.key.toLowerCase())) {
     event.preventDefault()
     return
@@ -331,7 +286,6 @@ onMounted(() => {
   autosize()
 })
 
-// 外部改写草稿（插入标记、点 x、清空、切换会话）才重建 DOM；
 // 用户敲字的回环（DOM 文本 === 草稿）一律跳过，避免销毁光标与输入法组合态。
 watch(
   () => [props.modelValue, props.references, props.skill] as const,
@@ -356,12 +310,7 @@ watch(
 
 <template>
   <div class="composer">
-    <!--
-      `mention` 插槽只出**数据与锚点**：面板本体是 `fixed` 浮层（见 MentionPopup），
-      渲染位置不影响布局，所以这里不再让它参与流内排版（原先它会把输入框顶下去）。
-    -->
     <slot name="mention" :references="references" :anchor="editorRef" />
-    <!-- `/技能` 与 `@` 同款：插槽只出数据与锚点，面板本体是 fixed 浮层 -->
     <slot name="skill" :anchor="editorRef" />
 
     <div
@@ -379,12 +328,10 @@ watch(
       @paste="onPaste"
     />
 
-    <!-- 键盘提示常驻（原型同款）：占位文案让给"打 @ 可引用文件"这条更容易被忽略的信息 -->
     <p class="composer__hint">Enter 发送 · Shift + Enter 换行</p>
 
     <div class="composer__toolbar">
       <slot name="toolbar" :can-send="canSend" :sending="sending">
-        <!-- 与 ComposerToolbar 同口径：发送/中断同位互斥（流式中显示红色方块「终止」） -->
         <BaseButton v-if="sending" variant="danger" aria-label="中断本轮" @click="emit('stop')">
           <BaseIcon name="stop" :size="14" />
         </BaseButton>
@@ -404,7 +351,6 @@ watch(
   background: var(--color-surface);
 }
 
-/* 键盘提示常驻（原型同款）：占位文案留给"打 @ 可引用文件" */
 .composer__hint {
   margin: 0;
   color: var(--color-text-muted);
@@ -412,9 +358,6 @@ watch(
 }
 
 .composer__input {
-  /* 单行高度即文字行高（line-height），行宽即输入框宽度；
-     高度区间 2 ~ 10 行，超过 10 行不再增高，由内部滚动条承载。
-     注：1em 相对自身字号，与 line-height 相乘即单行文字高度。 */
   --composer-line-height: 1.6;
   --composer-padding-y: var(--space-3);
   --composer-border-width: 1px;
@@ -432,10 +375,8 @@ watch(
   /* 必须置于 font 简写之后：font 会把 line-height 一并重置 */
   line-height: var(--composer-line-height);
   overflow-y: auto;
-  /* 胶囊与换行都按原样排版（换行由文本里的 \n 承载，不再依赖 <br>） */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  /* 内容为空时由 ::before 承载占位文案（contenteditable 没有 placeholder 属性） */
 }
 
 .composer__input:empty::before {
@@ -444,14 +385,6 @@ watch(
   pointer-events: none;
 }
 
-/*
- * 引用胶囊：正文里的一个整体（不可编辑），点 x 删除。
- * 浅灰底 + 一圈描边：只靠底色和白输入框拉不开差距，描边负责"看得出边界"（2026-10-18）。
- *
- * 必须用 `:global()`：胶囊是 `createMentionChip` 用 `document.createElement` 造出来的，
- * **没有** scoped 的 `data-v-*` 标记，普通 scoped 选择器对它一律不匹配
- * （这正是"改了样式却没生效"的原因——只看类名断言测不出来）。
- */
 :global(.composer__mention) {
   display: inline-flex;
   align-items: center;

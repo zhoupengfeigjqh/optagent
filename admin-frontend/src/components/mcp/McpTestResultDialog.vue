@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * MCP 连通性测试结果弹窗（从 `McpCallConfigForm` 拆出，2026-09-19）。
- *
- * 原生 `<dialog>` + `showModal()`（与 `ConfirmDialog` 同一套可访问性基线：
- * Esc 关闭、焦点归还）。探测逻辑（调 API、announce）留在父组件，
- * 本组件只负责呈现与开关；父组件在拿到结果后调用暴露的 `open()`。
- */
 import { ref } from 'vue'
 import type { ErrorInfo, McpTestResult } from '../../api/types'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -46,7 +39,6 @@ function close(): void {
   emit('close')
 }
 
-/** Esc 触发：阻止浏览器默认关闭，统一走焦点归还流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   close()

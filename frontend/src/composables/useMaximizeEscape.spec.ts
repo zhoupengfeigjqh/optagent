@@ -1,20 +1,9 @@
-/**
- * 组合式测试：放大态下按 Esc 退出（2026-10-16，011）
- *
- * 守三件事（对应 `specs/011-preview-maximize/data-model.md` 的 I5 / I6 不变式）：
- * 1. **非放大态 MUST NOT 挂监听** —— 否则会吞掉中栏既有的"Esc 中断本轮回答"；
- * 2. **放大态按 Esc 只退出放大** —— 事件被 `preventDefault` + `stopPropagation`，不冒泡到中栏；
- * 3. **有 `<dialog>` 打开时放行** —— 弹窗自己的 Esc 语义优先。
- *
- * 另有同源 iframe 文档的 Esc 转发：拿不到 `contentDocument` 时安全返回、同一文档只绑一次。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { bindFrameEscape, useMaximizeEscape } from './useMaximizeEscape'
 
-/** 宿主组件：组合式需要组件上下文（`watch` / `onBeforeUnmount`）。 */
 function mountHost(active: { value: boolean }, onRestore: () => void) {
   const Host = defineComponent({
     setup() {
@@ -25,7 +14,6 @@ function mountHost(active: { value: boolean }, onRestore: () => void) {
   return mount(Host)
 }
 
-/** 在本页派发一次 Esc，返回事件本身（用于断言是否被拦下）。 */
 function pressEscape(): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
   window.dispatchEvent(event)
@@ -117,7 +105,6 @@ describe('useMaximizeEscape —— 本页的 Esc', () => {
 })
 
 describe('bindFrameEscape —— 同源 iframe 文档内的 Esc', () => {
-  /** 造一份独立文档，等价于同源 iframe 的 `contentDocument`。 */
   function createFrameDocument(): Document {
     return document.implementation.createHTMLDocument('frame')
   }

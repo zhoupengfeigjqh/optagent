@@ -1,12 +1,3 @@
-/**
- * MCP 服务路由（`contracts/admin-api.md` §3.1~§3.6）。
- *
- * **2026-09-27 改版（全人工配置）**：清单来源是**平台侧调用配置**
- * （平台是唯一权威源），因此：
- * - 新增 `POST /api/admin/mcp/services`（新建）与 `DELETE /api/admin/mcp/services/{name}`（删除）；
- * - **移除** `POST /{name}/start`、`POST /{name}/stop`、`GET /{name}/logs`
- *   （启停与运行日志随"不读容器运行态"整体下架）。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -39,37 +30,15 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: M
     return detail;
   });
 
-  /**
-   * §3.9 新建前的**工具清单探测**（2026-10-03）。
-   *
-   * 对**尚未登记**的连接目标连一次取回工具清单——新建流程据此让管理员勾选"可见工具"
-   * （`allowed_tools`）。与 §3.6 的分工：`test` 只回答"已登记服务通不通"，
-   * 本端点回答"这个新目标有哪些工具"，因此不要求服务已存在。
-   *
-   * 连接失败时 **HTTP 200 + `ok: false` + 可读原因**（失败要留在弹窗里，不是页级报错）；
-   * 目标写法非法（transport/url）仍是 400。
-   */
   app.post('/api/admin/mcp/probe', async (req) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     return deps.operations.probe(body);
   });
 
-  /**
-   * §3.3 新建 MCP 服务（2026-09-27；2026-10-03 起要求工具白名单）。
-   *
-   * 名称由管理员指定且**全局唯一**（重名 → `ADM_MCP_SERVICE_EXISTS`）；
-   * `allowed_tools` **必填非空**（之后可在 §3.3 的 `PUT` 里调整）。
-   * `revision` 可选（带了即做乐观锁校验），响应即"新建后的完整调用配置"。
-   *
-   * **硬门槛（2026-10-03 产品决定）**：先确认目标**连得上**再落盘——连不上即创建失败，
-   * 库里**不产生记录**（避免留下一个"没有工具范围"、等价于全部放行的服务）。
-   */
   app.post('/api/admin/mcp/services', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const revision = typeof body.revision === 'number' ? body.revision : undefined;
-    // ① 纯字段校验先行（重名 / 名称 / 白名单非空 / 地址写法）：为注定失败的新建省掉一次连接
     ctx.mcpConfigs.validateForCreate(body);
-    // ② 连得上才落盘（失败抛 `ADM_RUNTIME_UNREACHABLE`/`VALIDATION_FAILED`，此时尚未写盘）
     await deps.operations.assertReachable(body);
     const { config, revision: nextRevision } = ctx.mcpConfigs.create(body, revision);
     return reply
@@ -77,18 +46,6 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: M
       .send({ ...toConfigResponse(config), revision: nextRevision, affected_agents: [] });
   });
 
-  /**
-   * §3.3 保存调用配置（`FR-044`）。
-   * 修改 MUST **自动作用于所有引用它的数字人**（下次部署生效），
-   * 因此响应里带上 `affected_agents` 让界面明确告知影响面。
-   *
-   * **工具白名单（`allowed_tools`）也在此端点修改**（2026-10-15）：缺省 = 沿用存量，
-   * 提供 = 全量替换且**必填非空**。原先"携带即 409"（`ADM_MCP_TOOL_SCOPE_LOCKED`）
-   * 让工具范围只能靠删服务重建来变更，代价过大，已下架。
-   *
-   * 注意载荷仍是**全量替换**语义：`normalize()` 会为缺省字段补默认值，因此客户端
-   * 只改白名单时 MUST 一并回填其余字段（见前端 `buildToolScopePayload`）。
-   */
   app.put('/api/admin/mcp/services/:name', async (req) => {
     const { name } = req.params as { name: string };
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -97,8 +54,6 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: M
     }
 
     const { config, revision } = ctx.mcpConfigs.upsert(name, body, body.revision);
-    // 契约 §3.3 + §0.5 原则 ②：响应 MUST 是"保存后的**完整**调用配置"——
-    // 界面据此原地更新 `revision`、不再二次请求详情。新增字段同样要在这里登记，
     // 否则客户端拿响应回填时会丢字段（2026-09-25 实测：command/args 漏登）
     return {
       ...toConfigResponse(config),
@@ -107,12 +62,6 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: M
     };
   });
 
-  /**
-   * 删除 MCP 服务（2026-09-27）。
-   *
-   * 被数字人引用时**不阻止删除**，但界面 MUST 先经 §7.1 引用查询列出受影响清单
-   * 并二次确认（原 `FR-051` 的"关闭前提示引用"能力迁移到删除上）。
-   */
   app.delete('/api/admin/mcp/services/:name', async (req, reply) => {
     const { name } = req.params as { name: string };
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -132,7 +81,6 @@ export function registerMcpRoutes(app: FastifyInstance, ctx: AppContext, deps: M
   app.get('/api/admin/mcp/stats', async () => deps.operations.stats());
 }
 
-/** 调用配置的响应形状（保存/新建共用，字段与前端类型一一对应） */
 function toConfigResponse(config: {
   name: string;
   description: string;
@@ -163,7 +111,6 @@ function toConfigResponse(config: {
     // 工具显示名同样必须回显：详情会覆盖表单，漏登 = "保存一次就清空"
     tool_labels: config.tool_labels,
     // 请求头同样必须回显（界面要看出"配了令牌"），但**只回掩码**——
-    // 明文令牌不进任何响应（与详情接口同一口径，见 `maskHeaders`）
     headers: maskHeaders(config.headers),
     updated_at: config.updated_at,
   };

@@ -1,20 +1,9 @@
-/**
- * 组件测试：聊天区头部（014；2026-11-18 账号菜单）
- *
- * 对齐是像素问题，jsdom 没有布局引擎，因此这里守的是**结构前提**：
- * 状态行必须是身份容器的直接子项、与身份行平级且前面没有额外缩进容器——
- * 只有满足这个前提，"左边缘与账号菜单对齐"才成立（像素偏差另由手工 DevTools 核验）。
- *
- * 同时守住 FR-002（信息顺序）、FR-004（未选定不渲染状态行），
- * 以及账号菜单的**意图转交**：选「切换数字人」只上抛 `open-agent`，面板状态不归头部管。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { DigitalHuman, McpServiceStatus } from '../../api/types'
 import ChatHeader from './ChatHeader.vue'
 
-/** `UserMenu` 需要登录态；本组只关心"用户名出现在身份行" */
 const auth = vi.hoisted(() => ({
   currentUser: { value: { user_id: 'admin' } as { user_id: string } | null },
   logout: vi.fn(async (): Promise<void> => undefined),
@@ -42,7 +31,6 @@ describe('ChatHeader —— MCP 状态左对齐（014 FR-001/002/004）', () => 
 
     expect(children[0]!.classList.contains('chat-header__identity-row')).toBe(true)
     expect(children[1]!.classList.contains('mcp-status-list')).toBe(true)
-    // 状态行不在身份行**内部**：嵌在名称列里时起点会被菜单宽度推右
     expect(wrapper.get('.chat-header__identity-row').find('.mcp-status-list').exists()).toBe(false)
   })
 
@@ -53,11 +41,9 @@ describe('ChatHeader —— MCP 状态左对齐（014 FR-001/002/004）', () => 
     const trigger = row.get('.base-dropdown__trigger')
     expect(trigger.text()).toContain('admin')
     expect(row.text()).toContain('生产调度助手')
-    // 账号菜单在数字人名称之前
     expect(row.element.innerHTML.indexOf('base-dropdown')).toBeLessThan(
       row.element.innerHTML.indexOf('生产调度助手'),
     )
-    // 状态行渲染在身份行之后
     const identityText = wrapper.get('.chat-header__identity').text()
     expect(identityText.indexOf('生产调度助手')).toBeLessThan(identityText.indexOf('ocr'))
   })
@@ -83,7 +69,6 @@ describe('ChatHeader —— MCP 状态左对齐（014 FR-001/002/004）', () => 
     expect(wrapper.findAll('.mcp-status-list__item')).toHaveLength(8)
     expect(wrapper.find('[aria-label="搜索对话"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="工作空间"]').exists()).toBe(true)
-    // 状态行仍是身份容器的第二个子项（对齐关系不因内容变长而改变）
     expect(wrapper.get('.chat-header__identity').element.children[1]!.className).toContain(
       'mcp-status-list',
     )

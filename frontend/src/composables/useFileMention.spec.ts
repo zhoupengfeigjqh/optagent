@@ -1,18 +1,3 @@
-/**
- * 单测：`@` 引用状态机的**光标记录**（2026-10-12，006 的接口补齐）。
- *
- * 背景（这正是一处真实缺陷的回归防线）：聊天侧浮层要"贴 `@` 光标右侧"弹出，
- * 因此读 `mention.caret`；但状态机此前**从未产出**该字段——组件测试里的打桩
- * 各自补了一个 `caret`，把"契约里根本没有它"这件事遮住了，直到 `typecheck`
- * 报 `Property 'caret' does not exist on type 'FileMentionStore'` 才暴露。
- *
- * 守住的语义只有两条：
- * 1. `caret` 是契约的一部分，且触发时记录的是**本次**输入的光标；
- * 2. 收起时归零——留着旧下标会让下一次定位从错误的位置起算。
- *
- * 其余行为（级联、上限、引用同步）不在本文件范围：它们属存量代码，
- * 按宪章「治理 § 适用范围与不追溯」，不为存量模块发起覆盖率补齐专项。
- */
 import { describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 
@@ -52,10 +37,6 @@ function makeStore(thread?: () => string | null) {
   return createFileMentionStore(thread === undefined ? { workspace } : { workspace, thread })
 }
 
-/**
- * 引用按会话分桶（023 v1.4）：修的是"会话 1 粘了文件没发、切到会话 2 再粘同名文件会多出
- * `(1)`，且那个看不见的引用还会跟着下一条消息发出去"。
- */
 describe('useFileMention —— 引用按会话分桶', () => {
   const plan: FileReference = { dir: '数据准备/生产计划', filename: 'plan.csv' }
 

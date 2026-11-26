@@ -1,12 +1,3 @@
-/**
- * 单元测试：本体事实索引（028 T203s，FR-009 的数据来源）。
- *
- * 守住的口径：
- * - `dependTools` 只吃 `related_concepts` 与 `behaviors[].concept`（闸门侧读不到，故必须用意图聚焦侧索引）；
- * - 只有 `op_type: query` 的行为算"取数入口"，command 不算；
- * - 同名跨本体按名合并（同名即同一工具），本体维度只作优先匹配、对不上时回退全量；
- * - 目录签名不变时复用同一份缓存对象。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -96,7 +87,6 @@ describe('buildOntologyFacts', () => {
       'scenario-a/ontology-1',
       'scenario-b/ontology-1',
     ]);
-    // 本体键对不上时回退全量（同名即同一工具）
     expect(facts.queryBehaviorsOf('PurchaseRecord', 'scenario-c/ontology-9')).toEqual([
       'QueryPurchaseRecords',
       'QueryPurchaseRecordList',

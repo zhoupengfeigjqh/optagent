@@ -1,12 +1,3 @@
-/**
- * 单元测试：算法规则选择弹窗（RulePickerDialog，HITL「从算法规则选择」）。
- *
- * 守住的语义：
- * - 展开时经 `load` 拉取最新规则文件；目录为空/解析失败展示可读错误
- * - 勾选行确认后原样生成 array[object]（键 = 表头列名，值 = 该行值）
- * - 优先级列就地编辑：数字文本转数字；留空则不携带该键
- * - 当前参数值里已有的行预勾选；0 条勾选时确认不可用
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -72,7 +63,6 @@ describe('RulePickerDialog', () => {
     await boxes[0]!.setValue(true)
     await boxes[1]!.setValue(true)
 
-    // 就地改第 1 行优先级：5 → 数字；第 2 行留空 → 不携带该键
     await wrapper.findAll('.rule-picker__priority-input')[0]!.setValue('5')
     await wrapper.findAll('.rule-picker__priority-input')[1]!.setValue('')
 

@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * 功能区内分区（ARIA Tabs 模式，`FR-053`）。
- *
- * 承载"功能区内细分内容"，**不新增导航层级**（一级导航固定在 4 项之内）。
- * 完整键盘支持：←/→ 移动并激活、Home/End 跳到首/末项，
- * `aria-selected` 与 `aria-controls` 同步，读屏可辨当前页签。
- */
 import { computed, ref } from 'vue'
 
 const props = defineProps<{

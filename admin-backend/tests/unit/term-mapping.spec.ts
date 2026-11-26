@@ -1,12 +1,3 @@
-/**
- * 单元测试：术语字典生成（017，`specs/017-ontology-term-mapping/spec.md`）。
- *
- * 守四条最容易走样的口径：
- * ① 每个 term 一个键，value = concept 的 title；
- * ② 同一 term 多义时按 concepts 原序用 `或` 合并，同一 title 不重复；
- * ③ `terms` 为空（现存本体的常态）→ 跳过该 concept，产出 `{}` 而不是空串键；
- * ④ 任何解析异常都只降级为 `{}` + warning，绝不抛错（部署不得被派生件阻断）。
- */
 import { describe, expect, it } from 'vitest';
 import { buildTermMapping } from '../../src/domain/ontology/term-mapping.js';
 

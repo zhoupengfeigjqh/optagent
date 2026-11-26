@@ -1,12 +1,3 @@
-/**
- * 单轮执行（从 `run-manager.ts` 拆出，2026-10-25 / 013）。
- *
- * 拆分理由（宪章原则二）：`run-manager.ts` 因历次特性累积到 539 行（越过 500 硬门禁），
- * 而本特性必然触及它。这里承接的是**"一轮怎么跑完"**（组装 prompt、消费事件流、收尾），
- * `run-manager.ts` 只留**生命周期编排**（配额、活跃表、startRun/stop）。
- *
- * **纯搬运 + 013 新增判定口**：事件顺序、落盘顺序、日志字段与拆分前逐字一致。
- */
 import type { HistoryMessage, RunRuntime } from '../types.js';
 import { formatCurrentTime, toSeconds } from './message-format.js';
 import { normalizeToolTips, renderToolTipsInstruction } from './next-actions.js';
@@ -21,11 +12,9 @@ export interface ConsumeContext {
   deps: RunManagerDeps;
   now: () => number;
   finalizer: RunFinalizer;
-  /** run 结束时把 threadId 从活跃表移除（`RunManager.active` 的唯一出口） */
   onSettled: (threadId: string) => void;
 }
 
-/** 读素材并拼装本轮 prompt（拼装规则与理由见 `prompt-builder.ts`） */
 async function buildPrompt(
   deps: RunManagerDeps,
   opts: StartRunOptions,
@@ -44,14 +33,11 @@ async function buildPrompt(
     userMessage,
     records: deps.toolEvents?.readAll(userId, agentName, threadId) ?? [],
     producedText: (await deps.produced?.(userId, agentName, threadId)) ?? '',
-    // R18：当前时间（每轮现算；纯函数层不读时钟，故在此注入）
     nowText: formatCurrentTime(new Date()),
-    // 004：问题实例的隐藏工具引导（请求级，不落盘）
     ...(opts.guidance ? { guidance: opts.guidance } : {}),
   });
 }
 
-/** 跑完一轮：消费事件流 → 广播增量 → 收尾落盘。 */
 export async function consumeTurn(
   ctx: ConsumeContext,
   run: RunImpl,
@@ -60,31 +46,13 @@ export async function consumeTurn(
   const { userId, threadId, agent, thinking } = opts;
   const userMessage: HistoryMessage = { role: 'user', content: opts.userMessage };
   if (opts.attachments && opts.attachments.length > 0) userMessage.attachments = opts.attachments;
-  // 2026-11-07：显式技能随 user 行落盘——刷新/重新生成时据此复原"只含该技能"的提示词
   if (opts.skill) userMessage.skill = opts.skill;
-  /**
-   * 018：**提交给模型的是替换后文本，落进历史的是用户原话**。
-   *
-   * 这两者只在"用户确认使用替换"这一种情况下不同；`displayContent` 缺省时复用同一个对象，
-   * 保证未替换的轮次行为逐字不变（含 attachments 等字段）。
-   *
-   * **现状**（2026-11-07 二次拍板：展示与提交同源）：前端不再送 `original_content`，
-   * 故 `displayContent` 恒缺省、两部分是同一个对象；分支保留以兼容旧客户端。
-   */
   const storedUserMessage: HistoryMessage =
     opts.displayContent === undefined
       ? userMessage
       : { ...userMessage, content: opts.displayContent };
-  /**
-   * 007：本轮运行期事实（工具清单由 `agent-factory` 在装配工具后**回填**）。
-   *
-   * 为什么用一个可变对象传下去：装配发生在 `agent.run` 内部（跑起来之后），
-   * 而收尾在流结束时——两者之间的传递只有这一个引用。**必须整体传对象**，
-   * 装配方是"整体替换数组"（`runtime.availableTools = [...]`），提前解构出数组会读到空。
-   */
   const runtime: RunRuntime = { availableTools: [] };
   // 007 修订：SOUL 开关判定（逐次现读）——开关开启时条数上限同时驱动
-  // 提示词装配（尾部块指令）与轮末收尾（卡片定稿），两处同源
   const naConfig = ctx.deps.nextActionsConfig?.(userId, agent.key.agentName) ?? null;
   // 供收尾（run-finalize）装配素材：运行期事实 + 卡片条数上限
   const turn: FinalizeTurn = {
@@ -93,53 +61,13 @@ export async function consumeTurn(
     runtime,
     ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
   };
-  /**
-   * 013：意图聚焦判定口。
-   *
-   * 只把"判定"委托给域层服务，候选工具由装配方回填的 `tools` 给出（唯一权威来源）。
-   * 任何异常都在此收敛为空串——判定失败绝不改变本轮响应（FR-009/FR-052）。
-   */
   const intentFocus = ctx.deps.intentFocus;
-  /**
-   * 013/016：是否跳过本轮意图聚焦。
-   *
-   * 归一放在域层而不是路由：任何调用方（直接 `startRun` 的内部调用、测试、将来新增的入口）
-   * 都受同一约束，不依赖"前端记得带 skip_intent_focus"。
-   *
-   * 三条跳过来源：
-   * - 显式标记 `skip_intent_focus`（首屏问题实例卡片携带）；
-   * - `guidance` 非空白（首屏问题实例关联工具引导，与聚焦提示不共存）；
-   * - `skill` 非空（2026-11-07：用户已用 `/技能名` 指定技能，"再判一次该用什么技能"
-   *   既无意义又可能与"只插入该技能"冲突）。
-   *
-   * 2026-11 修订：**下一步动作卡片点击不跳过**——它走结构化的 `tool_tips` 字段而非
-   * `guidance`，聚焦在本轮照常重判（`tool_tips` 段与聚焦提示同轮共存）。
-   */
   const skipFocus =
     opts.skipIntentFocus === true ||
     (opts.guidance ?? '').trim() !== '' ||
     (opts.skill ?? '') !== '';
-  /**
-   * 本轮结局：供收尾日志使用（任务 2026-09-16）。
-   *
-   * 为什么要有这一条：关闭逐请求访问日志后，agent 侧只剩"崩溃"能查到，
-   * **正常/失败的一轮在日志里没有任何痕迹**——"回答很慢""这轮失败了"
-   * 只能靠复现。`run.end` 每轮一行（含 ok / duration_ms / error_code），
-   * 既是排障入口，也是"业务是否正常"的最直接信号。
-   */
   let outcome: { ok: boolean; error_code?: string } = { ok: false, error_code: 'INTERNAL_ERROR' };
   try {
-    /**
-     * 组装本轮提示词（读摘要 / 历史 / 工具记录 / 产出清单）。
-     *
-     * **必须在 try 内**（2026-10-27 修）：它与"跑模型"共用同一套收尾——失败时同样要
-     * 走到 finally 的 `onSettled` 与 `gate.dispose`。放在 try 之外时，读取异常会整段跳过
-     * 收尾：活跃表永久占位（该会话此后每次发送恒 409 `THREAD_RUN_ACTIVE`）、SSE 不终结、
-     * HITL 定时器泄漏。
-     *
-     * 失败语义是"本轮未开始"，**不是**实例崩溃：故不触发 `onCrash`（销毁实例会连带重建
-     * 全部 MCP 连接，与"读历史失败"毫无关系），改用独立错误码让前端给出可读提示。
-     */
     let prompt: { messages: HistoryMessage[]; systemExtra?: string };
     try {
       prompt = await buildPrompt(ctx.deps, opts, userMessage);
@@ -168,21 +96,11 @@ export async function consumeTurn(
       });
       return;
     }
-    /**
-     * 016：聚焦提示在本轮 prompt 组装成功之后、模型调用之前铸造，追加到 `systemExtra` 末尾。
-     *
-     * 放在这里而不是 `agent-factory`：提示只与"本轮输入 + 本地技能 / 本体文件"有关，
-     * 与工具装配无关；提前到装配期会让入口卡片也去扫目录。任何异常都在此收敛为空串
-     * ——判定失败绝不改变本轮响应（FR-054）。
-     */
     let systemExtra = prompt.systemExtra;
-    /**
-     * 本轮聚焦结果：`prompt` 进系统提示词，`toolTips` 交给两处——
-     * 尾部块指令的候选目录（`focusToolTips`）与轮末卡片定稿（`turn.focusToolTips`）。
-     */
     let focusToolTips: readonly FocusToolTip[] = [];
-    /** 028：规划阶段只吃聚焦提示原文（不吃 `systemExtra` 的其余片段） */
     let focusPrompt: string | undefined;
+    /** 028：规划门禁分数；`null` = 没判（门禁关闭/未开规划/判定失败）→ fail-open 走规划 */
+    let focusPlanScore: number | null = null;
     if (intentFocus) {
       try {
         const focus = await intentFocus.judge({
@@ -192,12 +110,12 @@ export async function consumeTurn(
           messageId: run.assistantMessageId,
           userInput: opts.userMessage,
           skip: skipFocus,
-          // 027：改写用**本轮生效的模型**（请求级覆盖优先），并用本轮信号做中止，
           // 用户点"停止"时改写调用随之取消（不得在后台继续烧 token）。
           ...(opts.model ? { model: opts.model } : {}),
           signal: run.controller.signal,
         });
         focusToolTips = focus.toolTips;
+        focusPlanScore = focus.planScore ?? null;
         if (focus.prompt !== '') {
           focusPrompt = focus.prompt;
           systemExtra = systemExtra ? `${systemExtra}\n\n${focus.prompt}` : focus.prompt;
@@ -216,19 +134,11 @@ export async function consumeTurn(
         );
       }
     }
-    /**
-     * 卡片点击轮：`tool_tips` 走**结构化请求字段**，在这里渲染成本轮指令。
-     *
-     * 只进系统提示词、不进历史（`history.jsonl` 的 user 行只有卡片 `prompt` 原文），
-     * 且刻意排在聚焦提示**之后**——用户点了这张卡，卡片指定的能力应权重更高。
-     */
-    // 归一化（2026-11-26）：请求体里的 `tool_tips` 未受 schema 约束（条数、形状），
     // 先过公共读取器再渲染，避免客户端把 systemExtra 撑大或塞进非对象条目。
     const toolTipsText = renderToolTipsInstruction(normalizeToolTips(opts.toolTips));
     if (toolTipsText !== '') {
       systemExtra = systemExtra ? `${systemExtra}\n\n${toolTipsText}` : toolTipsText;
     }
-    // 轮末定稿卡片需要它（空 = 本轮不产卡片）
     turn.focusToolTips = focusToolTips;
 
     for await (const ev of agent.run({
@@ -241,20 +151,18 @@ export async function consumeTurn(
       signal: run.controller.signal,
       interactionSink: run.gate,
       // 020 / 021 共用的兜底中止：纯中断，不写业务原因（走 ABORTED 收尾）。
-      // 正常拒绝是软收尾（模型总结后 done），只有模型反复调工具才走到这里。
       interruptRun: () => run.stop(),
       runtime,
       ...(naConfig ? { nextActionsMax: naConfig.max } : {}),
       ...(focusToolTips.length > 0 ? { focusToolTips } : {}),
       ...(focusPrompt !== undefined ? { focusPrompt } : {}),
+      ...(focusPlanScore !== null ? { planScore: focusPlanScore } : {}),
     })) {
       switch (ev.type) {
         case 'thinking_delta':
           run.emit({ type: 'thinking', data: { delta: ev.delta } });
           break;
         case 'content_delta': {
-          // 007 修订（Tail Protocol）：增量先过尾部块捕获状态机——
-          // 命中 `<next_actions>` 后的内容只进缓冲不下发，正文部分照常累积与广播
           const visible = run.tailCapture.push(ev.delta);
           if (visible !== '') {
             run.buffer += visible;
@@ -271,8 +179,6 @@ export async function consumeTurn(
             startedAtMs,
             ...(ev.label !== undefined ? { label: ev.label } : {}),
           });
-          // 007：另记一份"本轮调用过哪些工具"（去重）——`toolCalls` 在 end 即删、轮末为空，
-          // 轮末生成「下一步动作提示」需要它（见 types.RunRuntime 与 next-actions.ts）
           run.calledTools.add(ev.name);
           // 落 tool-events.jsonl（写盘失败只告警，不影响对话，见 appendStart 内部兜底）
           ctx.deps.toolEvents?.appendStart(userId, agent.key.agentName, threadId, {
@@ -298,7 +204,6 @@ export async function consumeTurn(
           const meta = run.toolCalls.get(ev.callId);
           run.toolCalls.delete(ev.callId);
           const endedAtMs = ctx.now();
-          // fire-and-forget：落盘不阻塞 SSE，失败也不影响本轮回答（原则九）
           void ctx.deps.toolEvents?.appendEnd(userId, agent.key.agentName, threadId, {
             callId: ev.callId,
             messageId: run.assistantMessageId,
@@ -312,15 +217,22 @@ export async function consumeTurn(
           run.emit({ type: 'tool_call_end', data: { call_id: ev.callId, status: ev.status } });
           break;
         }
+        /**
+         * 028 FR-034：计划进度**只转发、不留痕**——不写历史、不落盘、不进尾部块，
+         * 刷新页面不恢复（这也是它敢放在 `tool_call` 旁边直接 emit 的原因）。
+         */
+        case 'plan_progress':
+          run.emit({
+            type: 'plan_progress',
+            data: { seq_id: ev.seqId, label: ev.label, phase: ev.phase },
+          });
+          break;
         case 'done': {
-          // 007 修订（Tail Protocol）：流已终结，冲刷暂扣的"疑似开标签前缀"——
-          // 确认为普通正文，先于 done 事件补发（保持"用户所见 = 落盘正文"逐字一致）
           const held = run.tailCapture.flush();
           if (held !== '') {
             run.buffer += held;
             run.emit({ type: 'content', data: { delta: held } });
           }
-          // 归档尾部块原文，供 run-finalize 定稿卡片（损坏丢弃时为空串 = 本轮无卡片）
           run.nextActionsTail = run.tailCapture.captured;
           if (run.tailCapture.overflowed) {
             ctx.deps.logger?.warn(
@@ -332,7 +244,6 @@ export async function consumeTurn(
               '下一步动作提示尾部块超过大小上限，本轮按无卡片处理',
             );
           }
-          // 落盘失败时 finalizer 已广播 HISTORY_WRITE_FAILED：本轮按失败记账，
           // 不能记成成功（否则 run.end 日志与用户所见相反）
           outcome = (await ctx.finalizer.done(run, turn, storedUserMessage, ev.usage))
             ? { ok: true }
@@ -350,20 +261,12 @@ export async function consumeTurn(
           return;
       }
     }
-    /**
-     * 流无终结事件而结束（2026-10-27 统一）：走过去与 `error` **同一条收尾路径**。
-     *
-     * 修复前这里只手写一个 SSE 事件、不落盘：用户当场看到"失败"，刷新后那条提问
-     * 凭空消失（历史里根本没有）——同一件事三套行为的其中一套。
-     */
     outcome = { ok: false, error_code: 'LLM_ERROR' };
     await ctx.finalizer.error(run, turn, storedUserMessage, {
       code: 'LLM_ERROR',
       message: 'LLM 流异常结束',
     });
   } catch (err) {
-    // 未知异常：疑似实例崩溃 → 销毁实例（FR-030），下条消息自动重建
-    // 若走到这里时终态已发过（订阅者回调抛错等），不再二次广播/二次落盘
     const alreadySettled = run.state !== 'running';
     run.state = 'error';
     outcome = { ok: false, error_code: 'INTERNAL_ERROR' };
@@ -388,7 +291,6 @@ export async function consumeTurn(
     }
   } finally {
     ctx.onSettled(threadId);
-    // HITL：run 结束清理全部挂起状态（含 expired 留档与排队等待者）
     run.gate.dispose();
     const durationMs = ctx.now() - run.startedAt;
     ctx.deps.logger?.[outcome.ok ? 'info' : 'warn'](

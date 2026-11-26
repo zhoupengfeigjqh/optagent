@@ -1,11 +1,3 @@
-/**
- * HTTP 服务装配：Fastify + 统一错误 envelope + CORS + multipart + 路由注册。
- *
- * `buildServer` 供集成测试（`app.inject`）与正式启动共用；直接运行时进入 `listen` 分支。
- *
- * 分层：`routes → domain → infra`。`context.ts` 承载 wiring，
- * 避免 `routes ↔ server` 循环 import（与 `agent-backend` 同构）。
- */
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import Fastify from 'fastify';
@@ -50,11 +42,8 @@ export { ERROR_CODES } from './domain/error-codes.js';
 
 export interface BuildServerOptions {
   config?: AppConfig;
-  /** 测试可注入自定义存储根（默认取 `config.platformDataDir`） */
   store?: PlatformStore;
-  /** 测试可注入运行环境客户端假实现（工具目录/调用统计） */
   runtime?: RuntimeClient;
-  /** 测试可注入 MCP 客户端假实现（工具清单 / 连通性与能力测试） */
   mcpClient?: McpClientService;
 }
 
@@ -62,7 +51,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const config = options.config ?? loadConfig();
   const loggers = createLoggers(config.platformDataDir, { level: config.logLevel });
 
-  // ---- wiring：routes → domain → infra ----
   const store = options.store ?? new PlatformStore(config.platformDataDir, { logger: loggers.logger });
   store.ensureLayout();
 
@@ -74,11 +62,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
     });
 
   const skills = new SkillLibraryService(store, { logger: loggers.logger });
-  // 本体库（2026-10-03）：只读浏览 + 本体市场导入/更新/删除（FR-058~FR-061）
   const ontologies = new OntologyStore(store, { logger: loggers.logger });
   const agents = new AgentDesignService(store);
   const users = new UserLinkService(store);
-  // 024：登录鉴权（会话登记 + 登录编排）
   const sessionStore = new SessionStore(store);
   const auth = new AuthService(users, sessionStore, {
     secret: config.authSecret,
@@ -97,7 +83,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   });
   const mcpClient = options.mcpClient ?? new McpClientService({ timeoutMs: config.mcpTimeoutMs });
 
-  /** 引用某 MCP 服务的「用户 × 数字人」对（§3.2/§3.3 的影响面） */
   const referencesOfService = (serviceName: string) =>
     expandToPairs(
       agentsReferencingService(agents.refSources(), serviceName),
@@ -151,34 +136,18 @@ export async function buildServer(options: BuildServerOptions = {}) {
   };
 
   const app = Fastify({
-    // 只保留关键行为（任务 2026-09-15）：给 Fastify 一个 warn 级别的 child logger，
-    // 逐请求的 info 访问日志被丢弃；warn/error（请求级错误）仍会输出。
-    // 关键业务事件由各 domain 用 loggers.logger（info）显式记录。
     loggerInstance: loggers.logger.child({}, { level: 'warn' }),
     bodyLimit: config.uploadMaxMb * 1024 * 1024,
   });
   app.decorate('ctx', ctx);
 
   await app.register(cors, { origin: true });
-  // defParamCharset 是 busboy 透传选项（@fastify/multipart 类型未暴露）：
-  // 中文文件名与目录名按 UTF-8 解析（本产品的目录名常态是中文）
   const multipartOptions = {
     limits: { fileSize: config.uploadMaxMb * 1024 * 1024, files: 1 },
     defParamCharset: 'utf8',
   };
   await app.register(multipart, multipartOptions);
 
-  /**
-   * 写操作留痕（任务 2026-09-16）。
-   *
-   * 关闭逐请求访问日志后，admin 侧的写操作一度只剩"部署"与"技能文件保存"有记录，
-   * 于是"谁删了数字人""谁删了 MCP 服务""谁改了调用地址"在日志里查不到。
-   * 这里用**一个钩子 + 错误处理器**统一补齐，不必逐个路由插桩：
-   * - 成功（2xx/3xx）→ info `admin.write`；
-   * - 被拒（4xx）→ warn `admin.write.rejected`（含错误码，界面报错可直接对到日志）；
-   * - 服务端异常（5xx）→ 沿用 `unhandled_error`（带堆栈），**不重复记**审计行。
-   * **只覆盖写方法**：GET 仍不记逐请求日志（`catalog.tools.unavailable` 那类关键事件另有专门记录）。
-   */
   const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
   const isWrite = (method: string): boolean => WRITE_METHODS.has(method);
 
@@ -210,7 +179,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
       return reply.status(err.statusCode).send(body);
     }
 
-    // Fastify 校验错误（JSON Schema 不满足等）→ 400
     const e = err as { statusCode?: number; message?: string };
     const statusCode = e.statusCode && e.statusCode >= 400 ? e.statusCode : 500;
     const code = statusCode >= 500 ? ERROR_CODES.INTERNAL_ERROR : ERROR_CODES.VALIDATION_FAILED;
@@ -219,7 +187,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     return reply.status(statusCode).send({ error: { code, message: e.message ?? '内部错误' } });
   });
 
-  /** 4xx：写操作被拒要有迹可循（含错误码，便于与界面提示对齐） */
   function logRejectedWrite(req: FastifyRequest, code: string, statusCode: number): void {
     if (!isWrite(req.method) || statusCode >= 500) return;
     loggers.logger.warn(
@@ -241,7 +208,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.status(404).send({ error: { code: ERROR_CODES.NOT_FOUND, message: '接口不存在' } }),
   );
 
-  // pino Logger 与 FastifyBaseLogger 的泛型差异对路由注册无实质影响
   const routeApp = app as unknown as FastifyInstance;
   registerPlatformRoutes(routeApp, ctx);
   registerBuiltinToolRoutes(routeApp, ctx);
@@ -252,7 +218,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerOntologyRoutes(routeApp, ctx);
   registerReferenceRoutes(routeApp, ctx);
   registerDeployRoutes(routeApp, ctx, ctx.deployer);
-  // 024：登录鉴权（login/me/logout/session/valid）
   registerAuthRoutes(routeApp, ctx);
 
   app.addHook('onClose', async () => {
@@ -262,7 +227,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
   return app;
 }
 
-/** 路由模式（如 `PUT /api/admin/skills/:name/file`）：日志里用模式而非具体 URL，便于聚合 */
 function routePatternOf(req: FastifyRequest): string {
   return req.routeOptions?.url ?? req.url;
 }
@@ -296,7 +260,6 @@ function auditTarget(req: FastifyRequest): Record<string, unknown> {
     }
   }
 
-  // multipart（技能安装）的 req.body 不存在：这类操作由路由用 markAudit 补上对象名
   const fields =
     bodyIsObject && !Array.isArray(body) && !(body instanceof Buffer)
       ? Object.keys(body as Record<string, unknown>)
@@ -326,7 +289,6 @@ async function main(): Promise<void> {
   });
 }
 
-// 直接运行（非被测试 import）时启动
 const invokedAs = process.argv[1] ?? '';
 if (/server\.(ts|js)$/.test(invokedAs)) {
   main().catch((err) => {

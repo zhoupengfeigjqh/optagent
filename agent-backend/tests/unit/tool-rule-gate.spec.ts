@@ -1,16 +1,3 @@
-/**
- * 单元测试：规则闸门包装器（infra，021）。
- *
- * 守住的语义：
- * - `pause` / `deny` 时真实 `execute` **零调用**，返回结果带对应失败码；
- * - `deny` 即挂起本轮（与 020 共享状态），卡片含「结论 + 明细 + 终局指令」，不制造失败轮；
- * - 挂起后其余工具（含内置）一律不执行，返回挂起码；
- * - `function` 角色**成败都记录**（失败传 `null`），结果原样返回；
- * - `behavior` 角色判定通过后结果原样返回：2026-11-24 起执行成功后不再追加任何文本；
- * - 内置工具不判定、不记录，且与函数同名时仍按内置优先；
- * - 包装保持 name/label/description/parameters/executionMode 不变（模型侧无感）；
- * - 暂停/拒绝日志字段齐全且**含 `ts`**，不含结果正文与入参。
- */
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -123,7 +110,6 @@ describe('pause / deny', () => {
 
     expect(tool.executeMock).not.toHaveBeenCalled();
     expect(readToolError(result.details)?.code).toBe('ONTOLOGY_RULE_DENIED');
-    // 拒绝不写失败轮：挂起状态交给下一批调用拦截，本轮由模型总结后正常收尾
     expect(suspension).toMatchObject({
       suspended: true,
       code: 'ONTOLOGY_RULE_DENIED',
@@ -299,7 +285,6 @@ describe('command 写后失效（2026-11-24）', () => {
   it('函数在 command 之后返回：按派发世代打戳 → 视为过期（不伪装成写后结果）', async () => {
     const tool = makeTool('erp__checkSupplierExistence');
     const { ctx, record } = makeContext(makeGate({ kind: 'function' }));
-    // 模拟并行：函数派发（世代 0）后，command 先完成并推进世代，函数随后返回
     tool.executeMock.mockImplementationOnce(async () => {
       record.invalidate();
       return { content: [{ type: 'text', text: '{"ok":true}' }], details: {} };
@@ -376,7 +361,6 @@ describe('behavior 角色', () => {
     expect(tool.executeMock).toHaveBeenCalledTimes(1);
     expect(result.content).toEqual([{ type: 'text', text: '{"ok":true}' }]);
     expect(record.size).toBe(0);
-    // 没有被挂起：后置规则移除后，执行成功即正常收尾
     expect(suspension.suspended).toBe(false);
   });
 

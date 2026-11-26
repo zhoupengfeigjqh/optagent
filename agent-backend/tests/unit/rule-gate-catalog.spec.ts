@@ -1,18 +1,3 @@
-/**
- * 单元测试：规则视图加载（021）。
- *
- * 守住的口径（2026-11-24 收敛）：
- * - `behaviors[].op_type` 三态：`command` / `query` / 非法（缺失或其它值 → 非法行为索引）；
- * - 多本体同名行为：`op_type` 必须一致；`query` 与 `command` 混用 → 非法（冲突）；
- * - 被规则绑定但未在 `behaviors[]` 声明 → 非法（`undeclared`）；
- * - **只有 `command` 装载前置规则**；`query` 的规则静默忽略；
- * - 只装载 `position: 前置`；后置规则在行为解析**之前**静默跳过（不产生运行时效果）；
- * - `behavior` 空或 `position` 非法 → 整条忽略 + 告警；
- * - 按行为归一索引，同一行为的规则保持文件内顺序；多本体按本体键升序合并；
- * - `functions[].response` 建索引（归一函数名）；
- * - `rule_design` 缺失 → `design=null` 且**不算**非法；非对象 → `designInvalid`（fail-closed）；
- * - 坏文件不抛、不中断其他本体。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,7 +19,6 @@ function writeOntology(agentDir: string, ontology: string, yaml: string): void {
   fs.writeFileSync(path.join(dir, 'ontology.yaml'), yaml, 'utf8');
 }
 
-/** 一条最小的前置规则（可替换 behavior / 名称 / 位置） */
 function ruleLines(options: {
   name?: string;
   behavior?: string;
@@ -68,7 +52,6 @@ function ruleLines(options: {
   return lines;
 }
 
-/** 一个可参与判定的本体行为声明 */
 function behaviorLines(name: string, opType = 'command'): string[] {
   return [`  - name: ${name}`, `    title: ${name}`, `    op_type: ${opType}`];
 }

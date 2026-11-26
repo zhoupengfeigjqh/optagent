@@ -1,18 +1,3 @@
-/**
- * 候选构造（016）：技能候选 + 本体行为候选 + `noul` 题面。
- *
- * 题号用**不透明下标**（`s1..sN` / `c1..cN`）而不是 `name`：本体的行为名可能含空格、
- * 中文标点，甚至与技能名重名；用下标做键，响应 `answers[qid]` 的对齐永远成立。
- *
- * 行为题面按 `description → title → name` 降级（FR-022），统一截断到 40 字：
- * 描述最能说明"这轮要做什么"，标题次之，标识符（英文 name）最后。
- * `op_type` 与参数正文不进题面。
- *
- * 2026-11-06：能力候选**只来自 `behaviors[]`**；`functions[]` 与 `rules[]` 不再读取。
- * 2026-11-20：函数**窄口径恢复**——`functions[]` 与 `behaviors[]` 进同一候选序列
- * （同一批题、共用 `max_capabilities` 合计上限），候选只多一个 `kind` 用于分派阈值与措辞。
- * 题号仍统一为 `c1..cN`：两类混在一批里，用两套前缀反而会出现"同号不同项"的隐患。
- */
 import { MAX_QUESTIONS_PER_BATCH } from './state.js';
 import type {
   CapabilityCandidate,
@@ -23,20 +8,16 @@ import type {
   SkillHeaderLike,
 } from './types.js';
 
-/** 题面展示名截断：过长的展示名会把区分度打到 0（与 013 同口径） */
 const MAX_DISPLAY_CHARS = 40;
 
-/** 每条命题都用的极简判据（实测优于冗长判据，见 013 research） */
 const NOUL_CRITERIA = { true: '需要', false: '不需要' } as const;
 
-/** 构造一条 noul 命题（判据统一「需要/不需要」） */
 function noulQuestion(instructions: string): QuestionMap[string] {
   return { type: 'noul', instructions, criteria: { ...NOUL_CRITERIA } };
 }
 
 export interface SkillCandidateResult {
   candidates: SkillCandidate[];
-  /** 未匹配本体的本体技能：不评分，但要留档原因（FR-014） */
   excluded: SkillDecision[];
   truncated: boolean;
 }
@@ -100,7 +81,6 @@ export function buildSkillCandidates(
   };
 }
 
-/** 技能命题：键为 `qid`，题面只用 `description`（极简命题式，非问句） */
 export function buildSkillQuestions(candidates: readonly SkillCandidate[]): QuestionMap {
   const questions: QuestionMap = {};
   for (const candidate of candidates) {
@@ -114,17 +94,6 @@ export interface CapabilityCandidateResult {
   truncated: boolean;
 }
 
-/**
- * 构造本体能力候选（行为 + 函数，仅入选本体技能引用的本体）。
- *
- * 顺序固定为「本体文件枚举序 → 行为数组序 → 函数数组序」：这是"本体原序"的唯一含义，
- * 不能改成 Map/Set 的迭代顺序；也是 96 上限被截断时的取舍依据（行为先占、函数后占）。
- *
- * **候选层就按 `ontology_id + kind + name` 去重**：同一 `ontology_id` 可能被物化成多份
- * 文件（或多个技能引用同一本体），若在候选层不去重，同一项会被当作两道题重复判定、
- * 并挤占 `maxCapabilities` 预算。同名同本体同类别只保留首次出现（即枚举序在前的那份）；
- * 带上 `kind` 是为了让同名的行为与函数各自成题（二者是不同东西，不能互相覆盖）。
- */
 export function buildCapabilityCandidates(
   selectedSkills: readonly SkillCandidate[],
   index: OntologyIndex,
@@ -154,7 +123,6 @@ export function buildCapabilityCandidates(
         description: behavior.description,
         ontologyId: ontology.ontologyId,
         ontologyName: ontology.ontologyName,
-        // 019：概念随候选一起带下去，选中后才能作为发散的起点
         concept: behavior.concept,
         relatedConcepts: [],
         index: order++,
@@ -173,7 +141,6 @@ export function buildCapabilityCandidates(
         description: fn.description,
         ontologyId: ontology.ontologyId,
         ontologyName: ontology.ontologyName,
-        // 函数不是发散起点（019 只认行为的概念），概念位恒空
         concept: null,
         relatedConcepts: fn.relatedConcepts,
         index: order++,
@@ -218,7 +185,6 @@ function capabilityLabel(candidate: CapabilityCandidate): string {
   return '';
 }
 
-/** 按 `batchSize` 切批（题号随候选固定，切批只影响请求体大小） */
 export function batchQuestions(
   candidates: readonly { qid: string }[],
   questions: QuestionMap,

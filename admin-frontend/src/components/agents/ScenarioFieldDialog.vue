@@ -1,26 +1,10 @@
 <script setup lang="ts">
-/**
- * 数据准备目录的「字段约束确认」窗口（`FR-020` 扩展）。
- *
- * 新增二级目录后**立即弹出**；也可从目录行的「字段(n)」入口再次编辑已有配置。
- *
- * 交互口径：
- * - **空列表即"该目录不设约束"**——点「保存」时不加任何字段就等于"暂不设置"，
- *   因此不为"跳过"再设一个按钮：用户不会被迫为凑数填写垃圾字段；
- * - 「取消」与 Esc **不改动任何配置**（新增目录已入列，不会因取消而丢失目录名）；
- * - 校验与后端同口径（字段名非空、≤64 字符、不含路径分隔符或 `..`、同目录内唯一），
- *   不合规时禁用「保存」并逐条给出可读原因——后端仍是权威判定。
- *
- * 用原生 `<dialog>` + `showModal()`（`research.md` D5），与 `ConfirmDialog` 同一实现路数。
- */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { SCENARIO_FIELD_TYPES, type ScenarioField, type ScenarioFieldType } from '../../api/types'
 
 const props = defineProps<{
   open: boolean
-  /** 目标二级目录名（仅用于标题与文案） */
   dir: string
-  /** 打开时的初始字段（空数组 = 尚未配置约束） */
   fields: ScenarioField[]
 }>()
 
@@ -29,7 +13,6 @@ const emit = defineEmits<{
   (e: 'save', fields: ScenarioField[]): void
 }>()
 
-/** 类型下拉：值与契约枚举严格一致，标签只作可读性补充 */
 const TYPE_OPTIONS: Array<{ value: ScenarioFieldType; label: string }> = [
   { value: 'string', label: 'string（文本）' },
   { value: 'integer', label: 'integer（整数）' },
@@ -43,7 +26,6 @@ const rows = ref<ScenarioField[]>([])
 const dialogEl = ref<HTMLDialogElement | null>(null)
 let restoreFocusTo: HTMLElement | null = null
 
-/** 与后端 `normalizeScenarioFields` 同一判据的前端即时提示 */
 const errors = computed<string[]>(() => {
   const out: string[] = []
   const seen = new Set<string>()
@@ -111,7 +93,6 @@ function onSave(): void {
   emit('update:open', false)
 }
 
-/** `cancel` 事件由 Esc 触发：阻止浏览器默认关闭，统一走 `update:open` 流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   requestClose()
@@ -256,7 +237,6 @@ onBeforeUnmount(() => {
 
 .field-dialog__row {
   display: flex;
-  /* 窄窗口下让「必填 / 移除」换行，而不是把字段名输入框挤没 */
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
@@ -264,13 +244,6 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--color-border);
 }
 
-/*
- * 宽度口径：字段名与取值类型**等宽**（`flex-basis: 0` 起步，剩余空间对半分），
- * 两处都 MUST 显式写 `width: auto`——`base.css` 给 `input[type='text']` / `select`
- * 设了 `width: 100%`，而 flex 项在 `flex-basis: auto` 时**以自身 width 为基准**，
- * 于是两者的基准都等于整行宽：谁不许收缩（`flex-shrink: 0`）谁就独占整行，
- * 另一个被压到几乎不可见（就是"字段名很小、类型很宽"的成因）。
- */
 .field-dialog__name,
 .field-dialog__type {
   flex: 1 1 0;

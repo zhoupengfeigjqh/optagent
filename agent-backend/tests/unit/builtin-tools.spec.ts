@@ -1,9 +1,3 @@
-/**
- * 单元测试：内置工具装配（`infra/builtin-tools.ts`）。
- *
- * 领域逻辑已在 `read-skill.spec.ts` 单测；这里只守 **接线**：
- * 目录项 → 领域实现 → 交给模型的文本，以及**越权映射**（拒绝文案 + alert 日志）。
- */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,15 +18,12 @@ function fakeLogger(): Logger {
   return { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 }
 
-/** 本用例使用的数字人（技能根与数据域的一级目录名，009 两者同源） */
 const AGENT = 'demo';
 
-/** 本数字人的技能根：users/{uid}/agents/{agent}/skills */
 const skillsDirOf = (): string => path.join(root, 'users', 'admin', 'agents', AGENT, 'skills');
 
 function build(enabled: string[]) {
   return buildBuiltinTools({
-    // 009：文件访问按（用户，数字人）取数据域
     fileAccess: new FileAccess({ optAgentRoot: root, userId: 'admin', agentName: AGENT }),
     threadId: 'th_1',
     enabled,
@@ -56,7 +47,6 @@ beforeEach(() => {
   mkdirSync(path.join(skillDir, 'references'), { recursive: true });
   writeFileSync(path.join(skillDir, 'SKILL.md'), '# 调度算法正文\n', 'utf8');
   writeFileSync(path.join(skillDir, 'references', '算法详解.md'), '# 详解\n', 'utf8');
-  // 技能目录之外的文件（越界用例的目标）
   writeFileSync(path.join(root, 'secret.txt'), 'SECRET', 'utf8');
 });
 
@@ -107,7 +97,6 @@ describe('buildBuiltinTools —— grep_skill 接线（2026-10-17 新增）', ()
     expect(tools.map((tool) => tool.name)).toEqual(['grep_skill']);
 
     expect(await run(tools[0]!, { pattern: '调度算法' })).toContain('调度算法/SKILL.md:1');
-    // 限定技能与缺省全量两条路径都通
     expect(await run(tools[0]!, { pattern: '详解', skill: '调度算法' })).toContain(
       '调度算法/references/算法详解.md',
     );
@@ -155,11 +144,9 @@ describe('buildBuiltinTools —— write_file 的结果结构化（2026-10-21）
       filePathName: 'th_1_看板.html',
       bytes: Buffer.byteLength(content, 'utf8'),
     });
-    // 人话保留：模型与日志都靠它，不必理解 JSON 结构也能读懂
     expect(String(result.message)).toBe(
       `已写入 临时空间/th_1_看板.html（${Buffer.byteLength(content, 'utf8')} 字节）`,
     );
-    // 闭环：运行时抽取器认这两个字段 → sidecar → 前端渲染可点入口（kind:'file'）
     expect(extractViewLinks(text)).toEqual([
       { url: '临时空间/th_1_看板.html', kind: 'file', name: 'th_1_看板.html' },
     ]);
@@ -180,14 +167,6 @@ describe('buildBuiltinTools —— write_file 的结果结构化（2026-10-21）
   });
 });
 
-/**
- * 按扩展名路由输出格式（2026-11-16，`specs/022-write-file-format-routing`）。
- *
- * 守三件事：
- * 1. `.json` / `.csv` 内容不合规 → 标红失败码，且**磁盘上不出现文件**；
- * 2. `.xlsx` / `.pdf` 一期未接编码器 → `FORMAT_NOT_IMPLEMENTED`，不写假文件；
- * 3. 未登记扩展名写进去的文本，`read_file` **一定读得回来**（写读对称）。
- */
 describe('buildBuiltinTools —— write_file 按扩展名路由（2026-11-16）', () => {
   const tmpFile = (name: string): string =>
     path.join(root, 'users', 'admin', 'user-data', AGENT, '临时空间', name);
@@ -274,13 +253,7 @@ describe('buildBuiltinTools —— write_file 按扩展名路由（2026-11-16）
   });
 });
 
-/**
- * 失败标记（2026-10-29）：内置工具的 catch 分支一律在 `details.toolError` 打标记，
- * 由 `agent-loop` 的 `afterToolCall` 翻成 `isError` → 前端卡片标红。
- * 正文（模型读到的）**逐字不变**，标记只影响 UI。
- */
 describe('buildBuiltinTools —— 失败标记（工具卡片标红的唯一依据）', () => {
-  /** 取完整结果（`run` 只回正文字符串，标记要看 details） */
   async function runFull(
     tools: ReadonlyArray<{ execute: (...args: never[]) => Promise<unknown> }>,
     params: unknown,
@@ -306,8 +279,6 @@ describe('buildBuiltinTools —— 失败标记（工具卡片标红的唯一依
   });
 
   it('目录里的每个工具名都有实现：没有一个落到「未知内置工具」兜底', async () => {
-    // 目录是唯一来源，`enabled` 里查不到的名字根本不会装配，
-    // 所以"未知工具"只可能来自**目录有、实现没有**的错配——这里全量守一遍
     const names = BUILTIN_TOOL_CATALOG.map((entry) => entry.name);
     const tools = build(names);
     expect(tools.map((tool) => tool.name).sort()).toEqual([...names].sort());

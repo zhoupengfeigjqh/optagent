@@ -1,16 +1,3 @@
-/**
- * history.jsonl 读写（FR-009/019/029 + 002 特性：消息元数据与反馈）。
- *
- * - 行格式两类：消息行（HistoryMessage：role/content + 可选元数据 id/ts/status/usage/
- *   duration_ms/attachments/error/skill）与反馈行（{type:'feedback', message_id, value, ts}）
- * - 不落思考内容与工具调用信息：解析时白名单复制字段，未知字段一律丢弃
- * - 旧格式行（仅 role/content）兼容可读；反馈行不出现在 readAll/readRecent 结果中
- * - 追加经 per-thread Promise 链串行化，并发安全；单行一次 append 保证原子性
- * - 读取时坏行跳过并告警；整体损坏（无一条合法行）→ 备份后重建并告警
- *
- * **009 归属**：落点 `user-data/{数字人}/threads/{threadId}/history.jsonl`——
- * 数字人作为**必填入参**贯穿全部方法（路径工厂唯一来源仍是 `dirs.ts#threadDir`）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FeedbackValue, HistoryMessage } from '../types.js';
@@ -37,12 +24,10 @@ export class HistoryStore {
     return path.join(threadDir(this.root, userId, agentName, threadId), 'history.jsonl');
   }
 
-  /** 追加一条消息（per-thread 串行；写盘失败抛给调用方记录，不影响已广播的响应） */
   append(userId: string, agentName: string, threadId: string, msg: HistoryMessage): Promise<void> {
     return this.enqueue(userId, agentName, threadId, JSON.stringify(msg));
   }
 
-  /** 追加反馈行（value=null 表示取消反馈；合并语义见 readFeedback） */
   appendFeedback(
     userId: string,
     agentName: string,
@@ -94,7 +79,6 @@ export class HistoryStore {
     await fs.promises.appendFile(file, line + '\n', 'utf8');
   }
 
-  /** 读取文件全部合法行（消息 + 反馈）；坏行跳过告警，整体损坏备份重建（FR-029） */
   private readLines(userId: string, agentName: string, threadId: string): ParsedLine[] {
     const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return [];
@@ -113,7 +97,6 @@ export class HistoryStore {
       );
     }
     if (lines.length > 0 && parsed.length === 0) {
-      // 整体损坏：备份原文件并重建为空
       const backup = path.join(path.dirname(file), `history.corrupt-${Date.now()}.jsonl`);
       fs.renameSync(file, backup);
       fs.writeFileSync(file, '', 'utf8');
@@ -124,19 +107,12 @@ export class HistoryStore {
     return parsed;
   }
 
-  /** 读取全部消息（反馈行被过滤）；时间正序 */
   readAll(userId: string, agentName: string, threadId: string): HistoryMessage[] {
     return this.readLines(userId, agentName, threadId)
       .filter((p): p is Extract<ParsedLine, { kind: 'message' }> => p.kind === 'message')
       .map((p) => p.message);
   }
 
-  /**
-   * 单次读盘同时取回「消息 + 反馈」。
-   *
-   * 详情接口原先分别调用 `readAll` 与 `readFeedback`，会把同一份 history.jsonl
-   * 读盘并解析两遍；本方法合并为一次遍历，语义与两者逐条等价。
-   */
   readSnapshot(
     userId: string,
     agentName: string,
@@ -148,7 +124,7 @@ export class HistoryStore {
       if (p.kind === 'message') {
         messages.push(p.message);
       } else if (p.value === null) {
-        feedback.delete(p.messageId); // 取消反馈：从结果中移除
+        feedback.delete(p.messageId);
       } else {
         feedback.set(p.messageId, p.value);
       }
@@ -156,19 +132,10 @@ export class HistoryStore {
     return { messages, feedback };
   }
 
-  /**
-   * 最近 N 条消息（时间正序，不含反馈行）。
-   *
-   * 注意：**这不再是 prompt 组装的入口**——正文注入必须按归档游标切片
-   * （`readAll().slice(coveredCount)`，见 `run-consume.buildPrompt` 与 `context-window`）。
-   * "取末尾 N 条"的窗口起点与摘要边界是两个独立指针，会在二者之间留下
-   * 既不在正文、也不在摘要的空洞。保留本方法供测试与临时取数使用。
-   */
   readRecent(userId: string, agentName: string, threadId: string, n: number): HistoryMessage[] {
     return this.readAll(userId, agentName, threadId).slice(-n);
   }
 
-  /** 反馈合并：按行序后者覆盖前者；value=null 视为无反馈（从结果中移除） */
   readFeedback(userId: string, agentName: string, threadId: string): Map<string, 'up' | 'down'> {
     const map = new Map<string, 'up' | 'down'>();
     for (const p of this.readLines(userId, agentName, threadId)) {
@@ -185,10 +152,9 @@ function parseLine(line: string): ParsedLine | undefined {
   try {
     obj = JSON.parse(line) as Record<string, unknown>;
   } catch {
-    return undefined; // 坏行
+    return undefined;
   }
 
-  // 反馈行
   if (obj.type === 'feedback') {
     const messageId = obj.message_id;
     const value = obj.value;
@@ -198,7 +164,6 @@ function parseLine(line: string): ParsedLine | undefined {
     return undefined;
   }
 
-  // 消息行：白名单复制字段（思考内容/工具信息即使存在也被丢弃，FR-009）
   if ((obj.role !== 'user' && obj.role !== 'assistant') || typeof obj.content !== 'string') {
     return undefined;
   }
@@ -221,7 +186,6 @@ function parseLine(line: string): ParsedLine | undefined {
     if (atts.length > 0) msg.attachments = atts;
   }
   if (isErrorMeta(obj.error)) msg.error = { code: obj.error.code, message: obj.error.message };
-  // 2026-11-07：显式技能（`/技能名`，仅 user 行）——回放时据此复原"只含该技能"的提示词
   if (typeof obj.skill === 'string' && obj.skill !== '') msg.skill = obj.skill;
   return { kind: 'message', message: msg };
 }

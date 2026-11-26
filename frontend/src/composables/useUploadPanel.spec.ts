@@ -1,20 +1,3 @@
-/**
- * 单元测试：上传面板接线（`useUploadPanel`，012 新建 / 023 v1.3 重做粘贴侧）
- *
- * `+` 上传（012）钉三条接线：
- * 1. **成功即回写**：每个成功项调用 `acceptUpload({dir, filename})` 恰好一次，且**先**登记清单
- *    （`workspace.exists` 立刻为真），失败项零调用；
- * 2. **收起即清空终态**：`+` 收起与关闭入口都调 `uploads.clear()`，但不动文件与引用；
- * 3. **回写复用唯一入口**：`acceptUpload` 就是 `mentionComposer.onPickFile`，因此引用上限、
- *    去重与"删标记后同步移除"这些口径**不需要**在本模块重写（这里只验证转发与顺序）。
- *
- * 粘贴（v1.3）钉四件事：
- * 4. **粘进来不落盘**：零请求、零上传记录，只把文件挂在内存并写进胶囊；
- * 5. **发送才落盘**：`flushPending` 传到临时空间，名字按"临时空间现存 + 本条消息已有 + 本批内部"
- *    预演，最终名以服务端返回为准；
- * 6. **失败即中止**：返回 `null`（调用方不发消息），已落盘的复用名字不重复写；
- * 7. **丢弃零成本**：删胶囊 / 换作用域都只清内存，不发任何删除请求。
- */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -50,7 +33,6 @@ function workspaceResponse(): WorkspaceResponse {
           },
         ],
       },
-      // 2026-11-17：粘贴文件的落点（扁平空间，dir 即空间名）
       {
         name: TMP,
         agent_writable: true,
@@ -75,7 +57,6 @@ function file(name: string): File {
   return new File([new Uint8Array(8)], name, { type: 'text/csv' })
 }
 
-/** 默认实现：按请求名落盘（模拟"不重名用原名"的服务端） */
 function echoUpload() {
   return vi
     .fn()
@@ -89,17 +70,12 @@ async function setup(
   options: {
     referenceCount?: () => number
     toast?: ToastStore
-    /** 粘贴前已挂在输入区的引用（判"消息内重名"与名额用） */
     initialReferences?: FileReference[]
-    /** 当前会话（缺省 `null` = 视图态新对话） */
     thread?: string | null
     /** 临时空间现存文件名（发送时算重名用） */
     existing?: string[]
-    /** 引用登记是否成功（缺省恒成功） */
     accept?: (reference: FileReference) => boolean
-    /** 空间清单（缺省用 `workspaceResponse`） */
     workspace?: WorkspaceResponse
-    /** 覆盖草稿文本（缺省 = 所有引用都在草稿里，即胶囊可见） */
     draft?: string
   } = {},
 ) {
@@ -138,7 +114,6 @@ async function setup(
     references: () => references.value,
     agent: () => agent.value,
     thread: () => thread.value,
-    // 缺省把引用都当成"草稿里看得见"（真实场景里胶囊就在文本里）
     draft: options.draft === undefined
       ? () => references.value.map((item) => mentionToken(item)).join(' ')
       : () => options.draft as string,
@@ -147,7 +122,6 @@ async function setup(
   return { uploads, workspace, acceptUpload, panel, upload: uploadImpl, toast, references, agent, thread }
 }
 
-/** 让挂起的异步（watch / 上传）走完一轮 */
 async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
@@ -167,9 +141,9 @@ describe('useUploadPanel —— 开关与清空（FR-010 / FR-013 / FR-014）', 
       vi.fn().mockResolvedValue({ dir: DIR, filename: 'a.csv', size: 8 }),
     )
     await uploads.upload(DIR, [file('a.csv')], ['.csv'])
-    panel.onToggleUpload() // 展开
+    panel.onToggleUpload()
 
-    panel.onToggleUpload() // 收起
+    panel.onToggleUpload()
 
     expect(panel.uploadOpen.value).toBe(false)
     expect(uploads.items.value).toEqual([])
@@ -225,7 +199,6 @@ describe('useUploadPanel —— 成功即回写 @（FR-001 / FR-003 / FR-004）'
     const { panel, workspace, acceptUpload } = await setup(
       vi.fn().mockResolvedValue({ dir: DIR, filename: '报告(1).csv', size: 8 }),
     )
-    /** 回写那一刻的存在性快照：为 true 即证明 `registerFile` 先于 `acceptUpload` */
     let existsAtAccept: boolean | null = null
     acceptUpload.mockImplementation((reference: FileReference) => {
       existsAtAccept = workspace.exists(reference)
@@ -285,7 +258,6 @@ describe('useUploadPanel —— 成功即回写 @（FR-001 / FR-003 / FR-004）'
     })
     await vi.waitFor(() => expect(resolvers).toHaveLength(3))
 
-    // 逆序完成 ⇒ 回写顺序也跟着完成顺序，而不是选择顺序
     resolvers[2]!()
     await vi.waitFor(() => expect(acceptUpload).toHaveBeenCalledTimes(1))
     resolvers[0]!()
@@ -314,7 +286,7 @@ describe('useUploadPanel —— 成功即回写 @（FR-001 / FR-003 / FR-004）'
     panel.onPickFiles({ dir: DIR, files: [file('slow.csv')] as unknown as FileList })
     await vi.waitFor(() => expect(uploads.items.value[0]!.status).toBe('uploading'))
 
-    panel.onToggleUpload() // 收起：终态被清，但这条是 uploading ⇒ 保留
+    panel.onToggleUpload()
     expect(uploads.items.value).toHaveLength(1)
 
     finish()
@@ -466,7 +438,6 @@ describe('useUploadPanel —— 粘贴只入胶囊，不落盘（v1.3）', () =>
 
     await panel.onPasteFiles([file('a.csv'), file('b.csv'), file('c.csv')])
 
-    // 只剩 1 个名额：收下 a.csv，b/c 跳过
     expect(acceptUpload.mock.calls.map(([reference]) => reference.filename)).toEqual(['a.csv'])
     expect(toast.push).toHaveBeenCalledWith('info', expect.stringContaining('2 个未附加'))
   })
@@ -505,12 +476,10 @@ describe('useUploadPanel —— 粘贴只入胶囊，不落盘（v1.3）', () =>
     await panel.onPasteFiles([file('a.csv')])
 
     expect(acceptUpload).toHaveBeenCalledWith({ dir: TMP, filename: 'a(1).csv' })
-    // 名字撞的是"消息里已引用的真实文件"，磁盘上有没有同名的根本还没查
     expect(upload).not.toHaveBeenCalled()
   })
 
   it('草稿里看不见的引用不占名（会话残留的幽灵引用）', async () => {
-    // 引用集合里还留着会话 1 的 a.csv，但草稿里没有它的标记 ⇒ 用户根本看不见它
     const { panel, acceptUpload } = await setup(echoUpload(), {
       initialReferences: [{ dir: TMP, filename: 'a.csv' }],
       draft: '帮我看看这个 ',
@@ -623,7 +592,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
     await panel.onPasteFiles([file('a.csv')])
     const result = await panel.flushPending(references.value)
 
-    // 粘贴件的胶囊已经是 a(1).csv（粘贴时就地让位），发送时再确认一次不与引用撞名
     expect(result).toEqual([
       { dir: DIR, filename: 'a.csv' },
       { dir: TMP, filename: 'a(1).csv' },
@@ -679,7 +647,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
     upload.mockClear()
     const result = await panel.flushPending(references.value)
 
-    // 只补传失败的 b.csv；a.csv 复用上次的真名
     expect(upload.mock.calls.map(([, , filename]) => filename)).toEqual(['b.csv'])
     expect(result).toEqual([
       { dir: TMP, filename: 'a.csv' },
@@ -725,7 +692,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
 
     thread.value = 'th-2'
     await flush()
-    // 在另一个会话里发送：不该把 th-1 的文件传上去
     expect(await panel.flushPending(stale)).toEqual(stale)
     expect(upload).not.toHaveBeenCalled()
 
@@ -742,7 +708,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
     await panel.onPasteFiles([file('a.csv')])
     const stale = [...references.value]
 
-    // 首条消息发送时 `threads.create()` 把 id 从 null 改成真 id
     thread.value = 'th-new'
     await flush()
 
@@ -756,7 +721,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
     await panel.onPasteFiles([file('a.csv')])
 
     expect(panel.isPending({ dir: TMP, filename: 'a.csv' })).toBe(true)
-    // 同名但在别的目录：那是磁盘上的真文件，不属于待发
     expect(panel.isPending({ dir: DIR, filename: 'a.csv' })).toBe(false)
   })
 
@@ -765,7 +729,6 @@ describe('useUploadPanel.flushPending —— 发送时落盘（v1.3）', () => {
     const { panel, references } = await setup(upload)
 
     await panel.onPasteFiles([file('a.csv'), file('b.csv')])
-    // 模拟卡片发送：只带 a.csv
     const sent = await panel.flushPending([references.value[0]!])
     expect(sent).toEqual([{ dir: TMP, filename: 'a.csv' }])
 

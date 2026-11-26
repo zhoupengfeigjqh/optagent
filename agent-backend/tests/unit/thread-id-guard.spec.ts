@@ -1,12 +1,3 @@
-/**
- * 单元测试：会话标识的字符集边界（2026-11-26，S1 加固）。
- *
- * 背景：Fastify 会把参数里的 `%2F` / `%5C` 解码回分隔符（实测 `..%2F..%2Ffoo`
- * → `params.id = '../../foo'`），而 `threadDir()` 用 `path.join` 拼接 —— 不校验就能
- * 读到并追加写其它数字人 / 其它用户的线程历史。
- *
- * 校验刻意用**字符集 + 长度**而不是 uuid：测试与历史数据里有 `th_1` 这类短 id。
- */
 import { describe, expect, it } from 'vitest';
 
 import { InvalidThreadIdError, threadDir } from '../../src/domain/dirs.js';

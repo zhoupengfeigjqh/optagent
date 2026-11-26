@@ -1,14 +1,3 @@
-/**
- * 单元测试：粘贴上传的整批预校验（2026-11-17）
- *
- * 钉住三条语义：
- * 1. **不早停**：多个不合格项一次全部返回，用户一次看全；
- * 2. **按 index 回指**：同名文件不能靠名字区分；
- * 3. **补名不扩白名单**：只按已知 MIME 补扩展名，未知 MIME 原样交给格式校验拒绝。
- *
- * v1.3 起取舍方式改为**逐文件**（`partitionBatch`）：合格的收下、不合格的跳过，
- * 因为粘贴不再落盘，"不能传了一半"这条原子性理由已不存在。
- */
 import { describe, expect, it } from 'vitest'
 
 import { MAX_UPLOAD_BYTES } from '../constants/limits'
@@ -20,7 +9,6 @@ function file(name: string, size = 8, type = 'text/csv'): File {
   return new File([new Uint8Array(size)], name, { type })
 }
 
-/** 只被读取 `name` / `size`，用轻量对象代替真的 5MB+ 数组 */
 function oversized(name: string): File {
   return { name, size: MAX_UPLOAD_BYTES + 1 } as unknown as File
 }
@@ -79,7 +67,6 @@ describe('partitionBatch —— 粘贴侧逐文件取舍（v1.3）', () => {
 
     expect(result.accepted.map((item) => item.name)).toEqual(['b.csv'])
     expect(result.rejections.map((item) => item.name)).toEqual(['a.exe', 'c.csv'])
-    // index 仍指入参数组，调用方可据此把原因对回具体文件
     expect(result.rejections.map((item) => item.index)).toEqual([0, 2])
   })
 

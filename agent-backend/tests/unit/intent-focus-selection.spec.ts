@@ -1,13 +1,3 @@
-/**
- * 单元测试：行为选择与去重（016）。
- *
- * 核心口径：
- * - 严格大于阈值才入选；等于阈值丢弃；
- * - 只返回入选项（2026-11-20 起行为与函数各一集，取数由 `concept-queries` 另行解析）；
- * - 类内按 `ontology_id + name` 去重，跨本体同名各自保留；
- * - 分数降序、同分按本体原序；
- * - **选择阶段不做二次截断**：候选上限只由构造阶段的 `max_capabilities` 施加。
- */
 import { describe, expect, it } from 'vitest';
 import { selectCapabilities, selectSkills } from '../../src/domain/intent-focus/selection.js';
 import type {
@@ -68,7 +58,6 @@ function candidates(
 
 const ALL = candidates(['B1', 'B2', 'Q1', 'Q2', 'Q3']);
 
-/** 行为与函数同阈值 0.6（除非某个用例要验证两者分开） */
 const T = { behavior: 0.6, function: 0.6 } as const;
 
 describe('selectCapabilities · 阈值与顺序', () => {

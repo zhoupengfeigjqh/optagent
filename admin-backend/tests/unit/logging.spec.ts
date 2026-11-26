@@ -30,9 +30,9 @@ afterEach(() => {
 describe('pruneOldLogs', () => {
   it(`默认保留 ${LOG_RETENTION_DAYS} 天：更早的删除，窗口内的保留`, () => {
     mkdirSync(dir, { recursive: true });
-    const keepRecent = path.join(dir, dayFile('app', -1)); // 昨天：保留
-    const keepToday = path.join(dir, dayFile('app', 0)); // 今天：保留
-    const removeOld = path.join(dir, dayFile('app', -5)); // 5 天前：删除
+    const keepRecent = path.join(dir, dayFile('app', -1));
+    const keepToday = path.join(dir, dayFile('app', 0));
+    const removeOld = path.join(dir, dayFile('app', -5));
     for (const f of [keepRecent, keepToday, removeOld]) writeFileSync(f, '{}\n', 'utf8');
 
     pruneOldLogs(dir, ['app'], LOG_RETENTION_DAYS);

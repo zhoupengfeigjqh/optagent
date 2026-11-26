@@ -1,35 +1,13 @@
-/**
- * MCP 连通性测试（「发起测试」与「创建后自动测一次」共用的**同一条路径**）。
- *
- * 抽出来的原因（2026-10-08）：`McpCallConfigForm` 触了 500 行门禁（宪章原则二），
- * 而这段与"表单字段"无关——它只关心"取表单当前值 → 调测试接口 → 弹结果"。
- *
- * 调用方负责两件事：
- * 1. 提供**表单当前值**的连接目标（允许未保存）——测的必须是管理员正在编辑的地址，
- *    而不是上一次保存的旧值（实测缺陷，2026-09-15）；
- * 2. `beforeTest` 里做本地校验（如请求头 JSON 写法）：返回可读错误即中止，不发请求。
- */
 import { ref, type Ref } from 'vue'
 import { testMcpService, type McpProbePayload } from '../api/mcp'
 import type { ErrorInfo, McpTestResult } from '../api/types'
 
 export interface McpConnectionTestOptions {
-  /** 已登记服务名（测试端点只接受已登记的服务） */
   serviceName: () => string
-  /** 表单当前值（允许未保存） */
   target: () => McpProbePayload
-  /** 测试前的本地校验：返回非空字符串即中止，并把它作为可读报错呈现 */
   beforeTest?: () => string | null
-  /** 本地校验失败时的落点（表单内的错误区） */
   onLocalError: (message: string | null) => void
-  /** 结果播报（成功/失败/请求失败各一句） */
   announce: (text: string) => void
-  /**
-   * 结果弹窗实例的 ref：**由调用方创建并挂到模板上**（`ref="..."`），本函数只借用。
-   *
-   * 之所以由调用方持有、而非本函数返回：传统字符串模板 ref 是编译期魔法，语言工具
-   * 不把它计作"读取"，由本函数返回会被调用方的 `noUnusedLocals` 误报为未使用变量。
-   */
   dialog: Ref<{ open: () => void } | null>
 }
 

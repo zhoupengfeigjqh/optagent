@@ -1,9 +1,3 @@
-/**
- * 单元测试：意图聚焦公共口径（016）。
- *
- * 只守两件事：输入截断（取尾部、尽量对齐句首）、五态处置。
- * 阈值区间校验由 `config.spec.ts` 覆盖；候选 / 选择 / 提示各有独立测试，不在这里重复。
- */
 import { describe, expect, it } from 'vitest';
 import {
   MAX_STATE_CHARS,
@@ -38,7 +32,6 @@ describe('prepareState', () => {
     const input = `${'😀'.repeat(MAX_STATE_CHARS)}创建采购单`;
     const result = prepareState(input);
     expect(result.truncated).toBe(true);
-    // 孤立代理项的判据：字符串里出现 U+D800~U+DFFF 而不成对
     expect(result.state).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
     expect(result.state).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
     expect(result.state.endsWith('创建采购单')).toBe(true);

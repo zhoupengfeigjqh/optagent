@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 单文件上传项（T051，FR-011）
- *
- * 四态渲染：`pending` / `uploading` / `success` / `failed`。
- * `failed` 展示 `error` 经 `toUserMessage(error, 'upload')` 映射后的原因并提供「重试」。
- * 展示名一律优先取响应中的 `serverFilename`（012：落盘名可能是 `原名` 或 `原名(1).ext`，
- * 前端不自行拼接；同名的多次上传靠后缀在界面上区分）。
- */
 import { computed } from 'vue'
 
 import type { UploadedDocument, UploadStatus } from '../../composables/useUploads'
@@ -87,7 +79,6 @@ const failureText = computed(() =>
 .upload-item__error {
   flex: 1 1 100%;
   font-size: var(--font-size-xs);
-  /* FILE_SCHEMA_INVALID 的逐条问题清单以换行拼接（toUserMessage 透传 details） */
   white-space: pre-line;
 }
 

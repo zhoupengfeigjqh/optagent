@@ -1,14 +1,3 @@
-/**
- * 文件类型分派与上传预校验单测（`src/utils/file-kind.ts`）
- *
- * 运行方式：`npm run test` / `npm run test:coverage`（本地执行）
- *
- * 覆盖两条硬约束：
- * 1. `resolvePreviewKind` 的分派表与后端 `GET /api/files/preview` 的 Content-Type
- *    映射必须一致（`contracts/backend-api.md` §5.4）——分派错了会"预览出乱码或空白"。
- * 2. `isUploadAllowed` 不合规时调用方 MUST **不发请求**（FR-010），
- *    因此"尺寸上限"与"空间白名单"两条拦截都要有用例。
- */
 import { describe, expect, it } from 'vitest'
 
 import { MAX_UPLOAD_BYTES } from '../constants/limits'

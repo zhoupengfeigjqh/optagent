@@ -10,12 +10,10 @@ import type { BehaviorLookup } from '../rule-gate/types.js';
 import { normalizePlan, type OntologyFacts, type ToolNameIndex } from './normalize.js';
 import { BUILTIN_TOOL_NAMES, type CheckFailure, type PlanStep, type RawStep } from './types.js';
 
-/** 规划调用的驱动原因 */
 export type PlanKind = 'initial' | 'roll' | 'failure';
 
 export interface NormalizeBatchInput {
   raw: readonly RawStep[];
-  /** 本批起点的 `seqId`（run 级自增，跨批连续） */
   base: number;
   nameIndex: ToolNameIndex;
   behaviorOf(name: string): BehaviorLookup | null;
@@ -33,7 +31,6 @@ export interface NormalizeBatchResult {
   nextSeqId: number;
 }
 
-/** 归一一批步骤（只补全；`seqId` 由本函数给出，是否提交由调用方决定） */
 export function normalizeBatch(input: NormalizeBatchInput): NormalizeBatchResult {
   let pending = input.base;
   const result = normalizePlan(input.raw, {
@@ -52,13 +49,9 @@ export interface ContinueInput {
   goal: string;
   doneSummary: readonly string[];
   kind: PlanKind;
-  /** 失败原因（仅 `kind === 'failure'`） */
   failure?: string;
 }
 
-/**
- * 重规划 / 滚动的“当前状态”叙述（FR-025：目标 + 已完成 + 失败原因，不重传历史）。
- */
 export function renderContinueInput(input: ContinueInput): string {
   const lines = [`目标（本轮用户请求）：${input.goal}`];
   if (input.doneSummary.length > 0) {
@@ -73,19 +66,16 @@ export function renderContinueInput(input: ContinueInput): string {
   return lines.join('\n\n');
 }
 
-/** 写后失效的承载（步骤 + 过期函数名） */
 export interface StaleStep {
   step: PlanStep;
   functions: readonly string[];
 }
 
-/** 失败重规划的 `reason` 字段口径：`stale_functions` / `stalled` / `step_N` */
 export function replanReasonOf(failed: PlanStep | null, stale?: StaleStep): string {
   if (stale !== undefined) return 'stale_functions';
   return failed === null ? 'stalled' : `step_${failed.seqId}`;
 }
 
-/** 失败重规划交给模型的“上一步失败原因”（只说这一步，不重传历史） */
 export function failureNarrative(failed: PlanStep | null, stale?: StaleStep): string {
   if (stale !== undefined) {
     return `第 ${stale.step.seqId} 步「${stale.step.taskName}」依赖的 ${stale.functions.join('、')} 已被上一步写操作失效，须先重算再执行`;
@@ -98,7 +88,6 @@ export interface EventSink {
   warn(fields: Record<string, unknown>, message: string): void;
 }
 
-/** 未落在聚焦覆盖内的步骤只告警、不阻断（FR-030 的观测口径） */
 export function warnOutOfFocus(steps: readonly PlanStep[], focusPrompt: string, sink: EventSink): void {
   for (const step of steps) {
     if (focusPrompt.includes(step.coreActionLabel)) continue;
@@ -109,7 +98,6 @@ export function warnOutOfFocus(steps: readonly PlanStep[], focusPrompt: string, 
   }
 }
 
-/** 本轮可用工具的派生键集合（与规则闸门同一口径） */
 export function collectAvailable(toolNames: readonly string[]): ReadonlySet<string> {
   const keys = new Set<string>();
   for (const name of toolNames) {

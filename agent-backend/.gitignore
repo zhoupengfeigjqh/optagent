@@ -4,13 +4,13 @@ dist/
 coverage/
 
 # 运行期数据与密钥
-# 分层（2026-09-20，见根 README 配置地图）：
-#   .env        形态默认值（无密钥，随仓库入库——故此处 !.env 放行，覆盖根 .gitignore）
-#   .env.local  本机私产（密钥/LAN IP，忽略）；.env.example = 其创建样板
+# 分层（2026-11-26 修订，见 specs/028-task-planning/spec.md v0.20）：
+#   .env.example  入库样板（无密钥，两形态对照）
+#   .env          容器形态私产（含密钥/LAN IP，忽略）
+#   .env.local    本地形态私产（含密钥/LAN IP，忽略）
 .env
 .env.*
 !.env.example
-!.env
 config.yaml
 # .opt-agent/ 2026-09-21 起入库（数字人配置/场景/skills/示例数据，供他人开箱使用）；
 # SQLite WAL/SHM 伴生文件仍由根 .gitignore 忽略

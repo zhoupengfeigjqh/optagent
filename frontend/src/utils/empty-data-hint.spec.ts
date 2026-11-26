@@ -82,7 +82,6 @@ describe('needsDataUpload', () => {
 
   it('predefined 字段缺失 → 不提示（降级：宁可不弹，也不误判）', () => {
     const broken = dir('生产计划')
-    // 模拟旧服务端 / 半部署：字段未下发
     delete (broken as { predefined?: boolean }).predefined
 
     expect(needsDataUpload([prepSpace([broken])])).toBe(false)

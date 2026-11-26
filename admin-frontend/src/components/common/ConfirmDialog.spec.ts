@@ -1,8 +1,3 @@
-/**
- * 组件测试：确认框（T035）
- *
- * 覆盖 `FR-007`：原生 `<dialog>`、Esc 关闭、确认/取消分支、关闭后状态回写。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ConfirmDialog from './ConfirmDialog.vue'

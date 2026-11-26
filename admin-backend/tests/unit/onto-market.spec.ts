@@ -1,10 +1,3 @@
-/**
- * 单元测试：本体市场扫描与读取（2026-10-02）
- *
- * 重点：目录形态识别（`{场景}/{本体}/skills/{技能}/SKILL.md`）、**整包内容指纹**
- * （"市场文件是否变化"的判据）、与库内的差异状态、路径安全（越界 / 缺 SKILL.md）。
- * 导入落库部分见 `skill-install-directory.spec.ts`，端到端见 `skills-onto-market.spec.ts`。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +23,6 @@ function writeSkill(scenario: string, ontology: string, skill: string, files: Re
   }
 }
 
-/** 库内记录桩：状态比对只用到 `listAll`（不触碰存储） */
 function libraryOf(
   records: Array<{ name: string; origin?: { kind: string; hash: string } }>,
 ): SkillLibraryService {
@@ -43,7 +35,6 @@ beforeEach(() => {
     'SKILL.md': SKILL_MD,
     'references/概念.md': '概念附件',
   });
-  // 无 skills/ 的本体：不产生条目
   fs.mkdirSync(path.join(root, '生产调度', '订单排程'), { recursive: true });
 });
 
@@ -68,7 +59,6 @@ describe('扫描市场目录', () => {
       status: 'new',
       invalid_reason: null,
     });
-    // 排序口径与库内一致（localeCompare：references 排在 SKILL.md 之前）
     expect(item.files.map((file) => file.path)).toEqual(['references/概念.md', 'SKILL.md']);
     expect(item.hash).toMatch(/^[0-9a-f]{64}$/);
   });
@@ -179,13 +169,11 @@ describe('市场更新（§4.8 updateOntoMarketSkill）', () => {
     ontology: '原材料采购和库存',
     skill: 'raw-material-inventory',
   };
-  /** 市场当前整包（与 beforeEach 铺设一致） */
   const MARKET_FILES: Record<string, string> = {
     'SKILL.md': SKILL_MD,
     'references/概念.md': '概念附件',
   };
 
-  /** 可更新的库桩：listAll + readFiles（按库内现内容算哈希）+ updateFromDirectory 侦记 */
   function updatableLibrary(
     record: Record<string, unknown> | null,
     libraryFiles: Record<string, string>,

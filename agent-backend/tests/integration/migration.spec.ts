@@ -1,19 +1,3 @@
-/**
- * 集成测试：存量数据一次性迁移（009 US4 / FR-040~042，quickstart A6）
- *
- * 用**真实启动路径**验证：把"用户级共享"的旧布局搭好 → `buildServer` 触发启动期迁移 →
- * 逐个断言迁移结果与数据一致性（条数、内容、逐项不改写）。
- *
- * 覆盖：
- * - 启动期自动迁移（判定②：清单唯一）
- * - 判定③：清单多个且无选中态 → **名称升序第一**（可追溯的确定性默认）
- * - 判定①：`select` 成功后触发（覆盖"启动时清单为空、后来才有数字人"的收口）
- * - **可中断续跑**：只搬了一半的状态再跑一次，剩下的继续搬
- * - **幂等**：再启动一次，数据一动不动
- * - 数据逐项一致：两空间 + threads 的条目数、文件名、内容在迁移前后完全相同
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import {
   existsSync,
   mkdirSync,
@@ -37,7 +21,6 @@ const SPACES = ['数据准备', '临时空间'] as const;
 let app: FastifyInstance | undefined;
 let root: string;
 
-/** 搭一份"改前"布局：user-data/ 下直接放两空间 + threads，各带可辨认内容 */
 function seedLegacyLayout(userId: string, marker: string): void {
   const base = userDataRoot(root, userId);
   for (const space of SPACES) {
@@ -57,7 +40,6 @@ function seedLegacyLayout(userId: string, marker: string): void {
   );
 }
 
-/** 建数字人配置（`agents/{name}/`） */
 function seedAgent(userId: string, name: string): void {
   const dir = path.join(root, 'users', userId, 'agents', name);
   mkdirSync(dir, { recursive: true });
@@ -66,7 +48,6 @@ function seedAgent(userId: string, name: string): void {
   writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
-/** 数据快照：relative path → 文件内容（目录以 `/` 结尾） */
 function snapshot(userId: string, agentName?: string): Record<string, string> {
   const base =
     agentName === undefined ? userDataRoot(root, userId) : userDataDir(root, userId, agentName);
@@ -114,20 +95,16 @@ describe('启动期迁移（判定②：清单唯一）', () => {
     seedLegacyLayout('admin', 'old');
     seedAgent('admin', '唯一数字人');
     const legacyBefore = snapshot('admin');
-    // 迁移前：用户级落点直接是四类条目
     expect(Object.keys(legacyBefore)).toContain('临时空间/old-临时空间.txt');
 
     await startServer();
 
-    // 用户级落点的直接子项只剩数字人目录（FR-002）
     expect(readdirSync(userDataRoot(root, 'admin'))).toEqual(['唯一数字人']);
 
-    // 数据逐项一致：把"用户级旧布局"的每一项搬到数字人目录后，内容完全相同
     const moved = snapshot('admin', '唯一数字人');
     for (const [rel, content] of Object.entries(legacyBefore)) {
       expect(moved[rel], `迁移后应保留 ${rel}`).toBe(content);
     }
-    // 迁移顺带补齐骨架不会多出旧布局里没有的东西（除四类条目外没有别的）
     expect(Object.keys(moved).sort()).toEqual(Object.keys(legacyBefore).sort());
   });
 
@@ -153,7 +130,6 @@ describe('启动期迁移（判定②：清单唯一）', () => {
 
     await expect(startServer()).resolves.toBeUndefined();
 
-    // admin 迁走，bob（无数字人）原地保留
     expect(existsSync(path.join(userDataRoot(root, 'admin'), '临时空间'))).toBe(false);
     expect(existsSync(path.join(userDataRoot(root, 'bob'), '临时空间', 'bob-临时空间.txt'))).toBe(
       true,
@@ -167,10 +143,8 @@ describe('select 触发的补判（判定①）', () => {
     seedLegacyLayout('admin', 'old');
     await startServer();
 
-    // 启动期无从归属：原地保留
     expect(existsSync(path.join(userDataRoot(root, 'admin'), '临时空间'))).toBe(true);
 
-    // 平台随后部署数字人（目录出现）→ 用户显式选中 → 迁移收口
     seedAgent('admin', '迟到数字人');
     const res = await app!.inject({
       method: 'POST',
@@ -224,7 +198,6 @@ describe('可中断续跑与幂等（FR-041）', () => {
 
     await startServer();
 
-    // 剩下的搬完，且已搬的那份没被再动一次
     expect(existsSync(path.join(dst, '数据准备', 'old-数据准备.txt'))).toBe(true);
     expect(existsSync(path.join(dst, '临时空间', 'old-临时空间.txt'))).toBe(true);
     expect(existsSync(path.join(dst, THREADS_DIR, 'th_old', 'history.jsonl'))).toBe(true);
@@ -242,7 +215,7 @@ describe('可中断续跑与幂等（FR-041）', () => {
     const after1 = snapshot('admin', '唯一数字人');
 
     await app!.close();
-    await startServer(); // 第二次启动
+    await startServer();
 
     expect(snapshot('admin', '唯一数字人')).toEqual(after1);
     expect(readdirSync(userDataRoot(root, 'admin'))).toEqual(['唯一数字人']);

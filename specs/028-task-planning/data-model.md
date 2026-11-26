@@ -374,8 +374,8 @@ interface PlanState {
 | `PLAN_MIN_STEPS` | 1 | spec FR-012 C5 |
 | `PLAN_MAX_STEPS` | 3 | spec 钉死 |
 | `PLAN_RETRY_MAX` | 2 | clarify 第 4 条 |
-| `REPLAN_MAX_PER_RUN` | 6 | 同上（**仅计失败驱动**，不含正常滚动） |
-| `TOTAL_STEPS_MAX` | **20** | 同上（2026-11-25 由 10 调整，见 spec v0.7） |
+| `REPLAN_MAX_PER_RUN` | 6 | 同上（**仅计失败驱动**，不含正常滚动）；2026-11-26 起可由 `config.yaml` 的 `plan.replan_max_per_run` 覆盖 |
+| `TOTAL_STEPS_MAX` | **20** | 同上（2026-11-25 由 10 调整，见 spec v0.7）；2026-11-26 起可由 `plan.total_steps_max` 覆盖 |
 | `ROLL_MAX_PER_RUN` | 无（只受 `TOTAL_STEPS_MAX` 约束） | FR-024 |
 | `IDLE_TURNS_MAX` | 2 | 同上 |
 | `RETRYABLE_MAX_PER_STEP` | 3 | FR-022 |
@@ -384,7 +384,7 @@ interface PlanState {
 | `SUMMARY_LINE_MAX` | 80 | FR-023 |
 | `SUMMARY_KEEP` | 5 | FR-023 |
 | `SNAPSHOT_MAX_CHARS` | 1200 | FR-016 |
-| `PLAN_TIMEOUT_MS` | 20000 | NFR-001（2026-11-26 由 5000 提高；**超时不重试**，`callPlanWithTimeout` 以 `Promise.race` 硬超时兜底） |
+| `PLAN_TIMEOUT_MS` | 20000 | NFR-001（2026-11-26 由 5000 提高；**超时不重试**，`callPlanWithTimeout` 以 `Promise.race` 硬超时兜底）；2026-11-26 起可由 `plan.timeout_ms` 覆盖 |
 | `HISTORY_TURNS` | 3 | FR-003 |
 | `BUILTIN_TOOL_NAMES` | **取自 `builtinToolNames()`**（不硬编码）；当前 = `read_file` / `write_file` / `list_dir` / `grep_files` / `calculator` / `read_skill` / `grep_skill` | FR-014 |
 

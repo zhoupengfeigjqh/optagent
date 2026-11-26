@@ -1,51 +1,24 @@
-/**
- * 算法规则文件解析（HITL「从算法规则选择」的数据源）。
- *
- * 规则文件由用户上传到「数据准备/算法规则」，**首行是表头，其余每行是一条规则**；
- * 选择器把勾选行原样转成 `array[object]` 填入工具参数（键 = 表头列名，值 = 该行值）。
- * 本模块按扩展名分派解析（`.xlsx` / `.xls` / `.csv` 都走 `xlsx` 库），运行环境侧解析、
- * 前端只渲染——不在用户侧引入表格解析依赖。
- *
- * 目录名与 `admin-backend` `PREDEFINED_DATA_PREP_DIRS` 保持同步（平台预定义目录）。
- */
 import path from 'node:path';
 
 import * as XLSX from 'xlsx';
 
 import { PREDEFINED_DATA_PREP_DIRS } from './dirs.js';
 
-/**
- * 「数据准备」下的预定义规则子目录（平台预定义）。
- *
- * 由 `domain/dirs.ts` 的 `PREDEFINED_DATA_PREP_DIRS` 派生：清单只保留一处定义，
- * 本常量仅为既有导入点保留名称（files 路由等处继续使用）。
- */
 export const RULES_SUBDIR = PREDEFINED_DATA_PREP_DIRS[0];
 
 /** 单文件规则行数上限（有界返回；超出即拒，防止一张巨型表格拖垮确认弹窗） */
 export const MAX_RULE_ROWS = 1000;
 
 export interface ParsedRuleFile {
-  /** 表头列名（保持文件内顺序） */
   columns: string[];
-  /** 数据行：键 = 表头列名，值 = 该行该列的值（JSON 可序列化的标量） */
   rows: Array<Record<string, unknown>>;
-  /** 优先级列名（表头里匹配 `priority`/`优先级` 的那一列；无则 null） */
   priority_column: string | null;
 }
 
-/** 优先级列表头判定（大小写不敏感的子串匹配） */
 const PRIORITY_HEADER = /priority|优先级/i;
 
-/**
- * 解析规则文件缓冲区。解析/格式问题一律抛 `Error`（中文可读消息），
- * 由路由层映射为 4xx——规则文件是用户上传的内容，损坏时应当给出可读结论
- * 而不是 500。
- */
 export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
   const ext = path.extname(filename).toLowerCase();
-  // `.xls`（OLE2/BIFF）与 `.xlsx`（zip）同属 Excel 表格，2026-10-14 起一并接受：
-  // 数据准备的「算法规则」目录可以配置 `.xls`，此处不放开会出现"能上传、选不中"的断点。
   if (ext !== '.xlsx' && ext !== '.xls' && ext !== '.csv') {
     throw new Error(
       `不支持的规则文件格式「${ext === '' ? '无扩展名' : ext}」，仅支持 .xlsx / .xls / .csv`,
@@ -55,13 +28,8 @@ export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
   let workbook: XLSX.WorkBook;
   try {
     if (ext === '.csv') {
-      // CSV 按 UTF-8 显式解码：xlsx 库对二进制缓冲里的 CSV 默认按 1252 代码页，
-      // 中文表头会乱码
       workbook = XLSX.read(buf.toString('utf8'), { type: 'string' });
     } else {
-      // 容器魔数先验：纯文本会被 xlsx 库宽容地按 CSV 解析，不验则"改后缀名的文本文件"
-      // 能蒙混过关。`.xlsx` = zip（PK）、`.xls` = OLE2 复合文档（D0 CF 11 E0 …），
-      // 两者都交给 SheetJS 按文件头自判解析器。
       const okZip = buf.length >= 2 && buf[0] === 0x50 && buf[1] === 0x4b;
       const okOle2 =
         buf.length >= 8 && buf.readUInt32LE(0) === 0xe011cfd0 && buf.readUInt32LE(4) === 0xe11ab1a1;
@@ -87,8 +55,6 @@ export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
   if (matrix.length === 0) throw new Error('规则文件为空：缺少表头行');
 
   const headerRow = [...(matrix[0] ?? [])];
-  // sheetjs 会以数据区最大列数撑宽表格：尾部空行里的 `,,` 会多撑出一列拖尾 null，
-  // 不是真表头——先剔除拖尾空列（中间的空列名仍视为非法表头）
   while (
     headerRow.length > 0 &&
     (headerRow[headerRow.length - 1] === null ||
@@ -116,7 +82,6 @@ export function parseRuleFile(filename: string, buf: Buffer): ParsedRuleFile {
       record[column] = value;
       if (value !== null && value !== '') hasValue = true;
     });
-    // 整行为空的行不产出规则（表格尾部的空行/空行分隔）
     if (!hasValue) continue;
     rows.push(record);
     if (rows.length > MAX_RULE_ROWS) {

@@ -1,14 +1,3 @@
-/**
- * 组件测试：MCP 服务详情（2026-09-27 改版）
- *
- * 守住四条容易回退的口径：
- * 1. **页面级动作在右上角**——「删除服务」「保存调用配置」在页头，不在表单里；
- * 2. 右上角的保存**走表单自身的提交路径**（含本地校验），不是第二套判据；
- * 3. 配置面板**常驻**（`v-show`）——切页签回来时未保存的编辑不丢，保存按钮在任意页签可用；
- * 4. 暴露的 `runTest()`（父级"创建成功后自动测试一次"用）与「发起测试」按钮**同一路径**；
- * 5. 右上角保存**就地保存、MUST NOT 切页签**（2026-10-16 由用户否掉"保存即跳回调用配置"）：
- *    校验不过且人不在该页签时补一句播报指路，避免看着像"点了没反应"。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpServiceDetail from './McpServiceDetail.vue'
@@ -47,10 +36,8 @@ const SERVICE: Detail = {
   command: null,
   args: null,
   file_args: {},
-  // 工具白名单与失效核对（2026-10-03）：详情只呈现白名单里的工具
   allowed_tools: ['ocr_image'],
   missing_tools: [],
-  // 请求头（2026-10-08）：详情回显的只有掩码
   headers: {},
   tools: [{ name: 'ocr_image', description: '识别图片', parameters: {} }],
   tools_truncated: false,
@@ -79,12 +66,10 @@ function button(wrapper: ReturnType<typeof mountDetail>, text: string) {
   return wrapper.findAll('button').find((b) => b.text().includes(text))
 }
 
-/** 页面右上角的动作区 */
 function headerActions(wrapper: ReturnType<typeof mountDetail>) {
   return wrapper.find('.mcp-detail__actions')
 }
 
-/** 切页签（按文案定位） */
 async function clickTab(wrapper: ReturnType<typeof mountDetail>, label: string): Promise<void> {
   await wrapper
     .findAll('.tabs-nav__tab')
@@ -93,7 +78,6 @@ async function clickTab(wrapper: ReturnType<typeof mountDetail>, label: string):
   await flushPromises()
 }
 
-/** 当前选中的页签文案（`TabsNav` 用 `--active` 类标记） */
 function activeTab(wrapper: ReturnType<typeof mountDetail>): string {
   return wrapper.find('.tabs-nav__tab--active').text()
 }
@@ -110,7 +94,6 @@ beforeEach(() => {
     rules_fields: {},
     confirmation: 'never',
     allowed_tools: ['ocr_image'],
-    // 保存响应里的掩码请求头（2026-10-08）：详情页据此就地刷新表单展示
     headers: { 'X-MCP-Token': '6UuE…3F' },
     updated_at: 'x',
     revision: 2,
@@ -136,7 +119,6 @@ describe('McpServiceDetail —— 页面级动作位置', () => {
 
     expect(headerActions(wrapper).text()).toContain('删除服务')
     expect(headerActions(wrapper).text()).toContain('保存调用配置')
-    // 表单里只剩「发起测试」（与连接地址同排）
     expect(
       wrapper.findAll('button').filter((b) => /保存调用配置|创建服务/.test(b.text())),
     ).toHaveLength(1)
@@ -188,7 +170,6 @@ describe('McpServiceDetail —— 页面级动作位置', () => {
     await button(wrapper, '保存调用配置')?.trigger('click')
     await flushPromises()
 
-    // 桩响应里是 `6UuE…3F`：保存后展示随之刷新（详情 props 并没有变）
     expect(wrapper.find('[data-test="headers-view"]').text()).toContain('6UuE…3F')
   })
 
@@ -272,12 +253,10 @@ describe('McpServiceDetail —— 页签与草稿', () => {
     await flushPromises()
 
     await wrapper.find('[data-test="reprobe"]').trigger('click')
-    // 不再是 `reload`：取数路径相同，但父级要据此在**探测成功后**开工具范围弹窗
     expect(wrapper.emitted('reprobe')).toEqual([[]])
     expect(wrapper.emitted('reload')).toBeUndefined()
     expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('正在重新探测工具清单')
 
-    // 探测进行中：按钮禁用（busy = 详情正在重取）
     const busy = mountDetail(SERVICE, { loading: true })
     await flushPromises()
     expect(busy.find('[data-test="reprobe"]').attributes('disabled')).toBeDefined()
@@ -321,7 +300,6 @@ describe('McpServiceDetail —— 右上角保存 MUST NOT 切页签（2026-10-1
 
     expect(saveMcpServiceConfig).not.toHaveBeenCalled()
     expect(activeTab(wrapper)).toBe('工具清单')
-    // 报错正文落在「调用配置」面板里（`v-show` 隐藏，读屏也不播报）→ 用播报补一句
     expect(wrapper.emitted('announce')?.at(-1)?.[0]).toContain('调用配置')
   })
 

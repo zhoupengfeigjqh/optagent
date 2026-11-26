@@ -1,15 +1,3 @@
-/**
- * 单元测试：定时任务心跳（015，T016 / T016a）。
- *
- * 心跳是**唯一**调度时钟，这里用注入的假时钟直接驱动 `tick()`，不碰真实定时器。
- * 钉住六件事：
- * 1. 到期才派发；同一时刻只派发一次（派发前后都推进 `next_run_at`）。
- * 2. 心跳**不计数**：次数由执行器开跑后 +1（`FR-041`/`FR-043`）。
- * 3. 同一任务在途时跳过并记 `skipped`，不并发堆积（`FR-043`）。
- * 4. `stop()` / 关服排空（`isDraining`）后不再派发。
- * 5. 未注册派发器时安全空转（Phase 2 骨架）。
- * 6. 重启不补跑（`FR-045`/`SC-007`）：过去的计划时刻只推进，不触发历史时刻。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +16,6 @@ import {
 
 const USER = 'admin';
 const AGENT = 'demo';
-/** 假时钟起点：2026-10-30T03:00:00Z */
 const NOW = Date.parse('2026-10-30T03:00:00.000Z');
 const INTERVAL_SECONDS = 60;
 
@@ -129,7 +116,6 @@ describe('到期判定与派发', () => {
 
     const reloaded = reload(task);
     expect(reloaded.nextRunAt).toBe(new Date(NOW + 1_000 + 60_000).toISOString());
-    // FR-041：次数由执行器开跑后 +1，心跳不碰
     expect(reloaded.executedCount).toBe(0);
   });
 
@@ -138,7 +124,6 @@ describe('到期判定与派发', () => {
     const dispatcher = vi.fn();
     const ticker = newTicker({ dispatcher });
     ticker.start();
-    // start 的规整已把"恰好现在"推走；显式把它拉回过去，模拟稳态到点
     store.advanceWithoutCount(USER, AGENT, task.taskId, new Date(NOW).toISOString());
 
     ticker.tick();
@@ -179,7 +164,6 @@ describe('到期判定与派发', () => {
 describe('在途跳过', () => {
   it('上一轮仍在执行：记 skipped/previous_run_active，推进时刻且不计数（FR-043）', async () => {
     const task = createTask({}, new Date(NOW).toISOString());
-    // 永不 resolve：模拟"上一轮还在跑"
     const dispatcher = vi.fn(() => new Promise<void>(() => {}));
     const ticker = newTicker({ dispatcher });
     ticker.start();
@@ -269,7 +253,6 @@ describe('重启与不补跑（FR-045 / SC-007）', () => {
 
     expect(dispatcher).not.toHaveBeenCalled();
     expect(runsOf()).toHaveLength(0);
-    // 5 分钟前 + 60s 间隔 → 下一个严格晚于现在的时刻
     expect(reload(task).nextRunAt).toBe(new Date(NOW + 60_000).toISOString());
     expect(reload(task).executedCount).toBe(0);
   });

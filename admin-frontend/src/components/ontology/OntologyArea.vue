@@ -1,14 +1,4 @@
 <script setup lang="ts">
-/**
- * 本体管理功能区（`FR-058`~`FR-061`，2026-10-03）：只读浏览 + 本体市场导入/更新/删除。
- *
- * 结构照 `SkillArea`：列表 ↔ 详情两级（`FR-053` 的导航深度上限），工具栏在列表右上角
- * 提供「从本体市场导入」入口。
- *
- * **身份是两段**：`detail` 是本体名，场景名在路由查询参数里（`?scenario_name=`，2026-10-17）——
- * 同名的本体目录可以存在于不同场景。因此本组件比其他 Area 多一个 `scenario` prop，
- * 由 `App.vue` 从 `route.query` 传入（仅本组件声明，不影响其它功能区）。
- */
 import { onMounted, ref, watch } from 'vue'
 import {
   fetchOntology,
@@ -26,7 +16,6 @@ import OntologyViewer from './OntologyViewer.vue'
 const props = defineProps<{
   detail: string | null
   tab: string | null
-  /** 详情所属场景（路由查询参数 `scenario_name`） */
   scenario: string | null
 }>()
 
@@ -39,14 +28,9 @@ const page = ref(1)
 const list = ref<Paged<OntologyListItem> | null>(null)
 const error = ref<ErrorInfo | null>(null)
 const loading = ref(false)
-/** 当前打开的本体详情（与 props.detail 同名会与路由参数混淆，故显式改名） */
 const ontologyDetail = ref<OntologyDetail | null>(null)
 const marketOpen = ref(false)
 
-/**
- * 详情路径：`{scenario_name}/{ontology_name}`，两段都在路径上、场景在前
- * （2026-10-17）——与 `metadata` 字段顺序、与部署路径 `ontology/{场景}/{本体}/` 一致。
- */
 function detailPath(scenarioName: string, ontologyName: string): string {
   return `/ontology/${encodeURIComponent(scenarioName)}/${encodeURIComponent(ontologyName)}`
 }
@@ -72,7 +56,6 @@ async function loadDetail(scenario: string, ontologyName: string): Promise<void>
   }
 }
 
-/** 卡片「查看」：先改地址栏（可刷新、可分享），由 watch 触发加载 */
 function open(target: { scenario: string; ontologyDir: string }): void {
   emit('navigate', detailPath(target.scenario, target.ontologyDir))
 }

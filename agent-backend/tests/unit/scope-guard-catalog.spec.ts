@@ -1,15 +1,3 @@
-/**
- * 单元测试：判定视图加载 + 判定合成（020）。
- *
- * 守住的口径：
- * - 行为与 `action_name` 只做"归一化后精确匹配"，不猜、不模糊；
- * - 缺文件 / 坏 YAML / `securities` 非数组 / 缺条目 → **fail-closed** 且告警；
- * - 同名行为跨多个本体 → **拒绝优先**，且冲突只告警一次；
- * - 缓存按 `ontology` 目录签名失效：改文件内容不改目录签名 → 仍用旧快照；
- *   目录签名变化 → 下一次 `check` 重载；
- * - 无本体 → 全放行且**零告警**（`FR-021`）；
- * - `check` 永不抛错（异常 → `internal_error` 拒绝）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -190,7 +178,6 @@ describe('loadGuardCatalog', () => {
   it('ontology.yaml 不可解析的本体不参与判定（工具按非本体行为放行）', () => {
     const agent = tmpAgentDir();
     // 用坏 YAML 代替"删除文件"：Windows + 中文路径下的删除操作不可靠，
-    // 而两条路径在加载层的处理完全一致（读不到行为清单 ⇒ 跳过该本体）
     const dir = writeOntology(agent);
     fs.writeFileSync(path.join(dir, 'ontology.yaml'), 'behaviors: [\n', 'utf8');
 
@@ -342,7 +329,6 @@ describe('createScopeGuard', () => {
     const { guard } = guardFor(agent, 'admin');
     expect(guard.check(BEHAVIOR)).toMatchObject({ kind: 'allow' });
 
-    // 只改文件内容（目录 mtime 不变）→ 仍用旧快照
     fs.writeFileSync(
       path.join(dir, 'securities.yaml'),
       ['securities:', `  - action_name: ${BEHAVIOR}`, '    scope:', '      - zpf'].join('\n'),
@@ -350,7 +336,6 @@ describe('createScopeGuard', () => {
     );
     expect(guard.check(BEHAVIOR)).toMatchObject({ kind: 'allow' });
 
-    // 目录签名变化 → 下一次 check 重载，按新配置拒绝
     const future = new Date(Date.now() + 5_000);
     fs.utimesSync(path.join(agent, 'ontology'), future, future);
     expect(guard.check(BEHAVIOR)).toMatchObject({
@@ -377,7 +362,6 @@ describe('createScopeGuard', () => {
   });
 
   it('判定内部异常 → fail-closed internal_error，且永不抛错', () => {
-    // 非法 agentDir 让底层 path.join 抛错，验证 catch 分支而不是崩溃
     const warn = vi.fn();
     const guard = createScopeGuard({ agentDir: undefined as never, username: 'admin', warn });
 

@@ -1,13 +1,3 @@
-/**
- * 单元测试：聊天流 × 工具调用人工确认（HITL）。
- *
- * 守住：
- * - SSE `interaction_request` 事件 → `pendingInteraction` 置位（含全量倒计时）
- * - done / error / stop / 切换会话 → 清除（弹窗不残留）
- * - submitInteraction：成功关闭；服务端终验失败返回 close=false + 错误（保持弹窗）；
- *   其他错误 toast 并关闭；rejectInteraction 始终关闭
- * - restoreInteraction：断连恢复快照（不覆盖已存在的）
- */
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -52,13 +42,11 @@ function makeDeps(overrides: Partial<ChatStreamDeps> = {}): ChatStreamDeps {
 
 describe('useChatStream —— HITL 人工确认', () => {
   it('interaction_request 事件 → pendingInteraction 置位（含全量倒计时）', async () => {
-    // 发出事件后流保持挂起（模拟等待用户确认），验证置位时机与倒计时起点
     const hanging = (async () =>
       new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(new TextEncoder().encode(INTERACTION_EVENT + '\n'))
-            // 不 close：等待用户确认期间流一直开着
           },
         }),
         { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
@@ -73,7 +61,7 @@ describe('useChatStream —— HITL 人工确认', () => {
       interaction_id: 'i_1',
       tool_name: 'svc__query',
       proposed_args: { n: 1 },
-      remaining_seconds: 120, // 从全量 timeout 起算
+      remaining_seconds: 120,
     })
 
     await store.stop()
@@ -125,7 +113,6 @@ describe('useChatStream —— HITL 人工确认', () => {
     const store = createChatStreamStore(makeDeps({ submitInteraction }))
 
     await store.send({ content: '查一下', attachments: [] })
-    // 直接恢复一个快照模拟弹窗打开
     store.restoreInteraction({
       interaction_id: 'i_9',
       call_id: 'c1',
@@ -172,7 +159,7 @@ describe('useChatStream —— HITL 人工确认', () => {
 
     expect(result.close).toBe(false)
     expect(result.message).toContain('须为整数')
-    expect(store.pendingInteraction.value?.interaction_id).toBe('i_x') // 保持挂起可重提
+    expect(store.pendingInteraction.value?.interaction_id).toBe('i_x')
   })
 
   it('submitInteraction：其他错误（如已超时）→ toast 提示并关闭弹窗', async () => {

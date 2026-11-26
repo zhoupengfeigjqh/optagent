@@ -1,15 +1,3 @@
-/**
- * 集成测试：MCP 请求头（2026-10-08）
- *
- * 覆盖请求头在**四条真实路径**上的落点与口径：
- * 1. 新建（含门槛探测）——请求头随创建落库，并**随连接带下去**；
- * 2. 详情/列表——只回掩码与 `has_headers`，**任何响应里都不出现明文**；
- * 3. 保存调用配置——缺省沿用（不丢令牌）、提供即替换、`{}` 清空、掩码即 400；
- * 4. 测试与探测——表单值优先，缺省回落到已保存值（界面手上只有掩码）。
- *
- * 单独成文件（与 `mcp.spec.ts` 分居）：本组用例集中在"凭据"这一条线上，
- * 混进主文件会触 500 行门禁（宪章原则二）。
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 
@@ -20,7 +8,6 @@ const MASKED = '6UuE…3Z';
 const OCR_URL = 'http://192.168.1.2:8000/mcp';
 const TOOLS = [{ name: 'ocr_image', description: '识别图片文字', parameters: { type: 'object' } }];
 
-/** 接口新建一个服务（默认带请求头，按需覆盖） */
 async function createService(overrides: Record<string, unknown> = {}) {
   return fx.app.inject({
     method: 'POST',
@@ -42,12 +29,10 @@ async function detail(): Promise<Record<string, unknown>> {
   return res.json() as Record<string, unknown>;
 }
 
-/** 当前详情里的 revision（保存用乐观锁） */
 async function revision(): Promise<number> {
   return (await detail()).revision as number;
 }
 
-/** 保存调用配置（默认带上"不动请求头"的最小请求体） */
 async function save(payload: Record<string, unknown>) {
   return fx.app.inject({
     method: 'PUT',
@@ -135,7 +120,6 @@ describe('保存调用配置：缺省沿用 / 提供替换 / 空对象清空', (
     expect(res.statusCode).toBe(200);
     expect(res.json().headers).toEqual({ 'X-MCP-Token': MASKED });
 
-    // 明文仍在：用"测试"这条要求服务端按已保存请求头连接的路径来验证
     fx.mcpClient.probe = { connectivity: true, capability: true };
     await fx.app.inject({ method: 'POST', url: '/api/admin/mcp/services/ocr/test' });
     expect(fx.mcpClient.lastTestTarget?.headers).toEqual({ 'X-MCP-Token': TOKEN });
@@ -146,7 +130,6 @@ describe('保存调用配置：缺省沿用 / 提供替换 / 空对象清空', (
     const next = 'NEW-TOKEN-abcdefghij';
     const res = await save({ headers: { 'X-MCP-Token': next, 'X-Trace': 'abc' } });
     expect(res.statusCode).toBe(200);
-    // **每个值都掩码**（含看起来不像密钥的短值）：平台无从判断哪个头是凭据，
     // 按"保守即安全"一律掩掉；短值整串掩成占位符
     expect(res.json().headers).toEqual({ 'X-MCP-Token': 'NEW-…ij', 'X-Trace': '••••' });
     expect(res.body).not.toContain(next);

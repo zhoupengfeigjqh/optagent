@@ -1,21 +1,3 @@
-/**
- * 规则视图加载（021）：把部署产物解析成**不可变快照**。
- *
- * 数据源唯一：`{agentDir}/ontology/{场景}/{本体}/ontology.yaml` 的 `rules` 段
- * （`FR-010`：不读平台配置、不读其他本体的同名规则）。
- *
- * 失效判据与 020 完全一致：`ontology` 根目录 `mtimeMs`（目录级原子改名会改变它）。
- *
- * 2026-11-24（行为类型收敛）：
- * 1. `behaviors[].op_type` 只接受 `command` / `query`（归一：去空白 + 小写）；
- *    缺失或其它值 → 该行为**非法**（运行期 fatal），不进索引、不装载规则；
- * 2. 多本体同名行为合并：`op_type` 必须**一致**；`query` 与 `command` 混用 → 非法；
- * 3. 被规则绑定、但未在 `behaviors[]` 声明的行为 → 非法（运行期 fatal）；
- * 4. **只有 `command` 装载前置规则**；`query` 的规则静默忽略（query 没有前置规则）。
- *
- * 后置规则本版仍整体移除：`position: 后置` 在任何行为解析**之前**静默跳过，
- * 既不产生运行时效果，也不参与"未声明"判定。
- */
 import { loadOntologyDocs, normalizeName, normalizeOpType, ontologySignature, type OntologyDoc } from '../ontology-doc.js';
 import { normalizeDesign } from './design.js';
 import type {
@@ -28,26 +10,16 @@ import type {
   RuleSpec,
 } from './types.js';
 
-/** 目录签名（与 020 共用 `ontology-doc` 的唯一实现） */
 export function catalogSignature(agentDir: string): string {
   return ontologySignature(agentDir);
 }
 
-/** `behaviors[]` 的一次声明（跨本体聚合后的形态） */
 interface DeclaredBehavior {
   ref: BehaviorRef;
-  /** 本体键 → 归一 `op_type`（缺失为空串） */
   opTypes: Map<string, string>;
-  /** 本体键 → 原始 `op_type`（文案展示用） */
   raw: Map<string, string>;
 }
 
-/**
- * 加载一次完整快照（**永不抛**）。
- *
- * @param agentDir 数字人配置目录
- * @param signature 目录签名（调用方已算好可传进来，省一次 `stat`）
- */
 export function loadGateCatalog(agentDir: string, signature?: string): GateSnapshot {
   const warnings: string[] = [];
   const behaviorIndex = new Map<string, BehaviorRuleBucket>();
@@ -56,7 +28,6 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
 
   const docs = loadOntologyDocs(agentDir, warnings);
 
-  // 函数声明（只用于取字段类型；同名以先出现者为准，冲突记告警）
   for (const doc of docs) {
     for (const fn of doc.functions) {
       const key = normalizeName(fn.name);
@@ -86,7 +57,6 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
     }
   }
 
-  // 第二遍：三态裁决（合法 command / 合法 query / 非法）
   for (const [key, entry] of declared) {
     const opTypes = [...entry.opTypes.values()];
     const bad = opTypes.find((value) => value !== 'command' && value !== 'query');
@@ -115,21 +85,17 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
     });
   }
 
-  // 第三遍：装载规则（只有 command 保留；query 静默忽略）
   for (const doc of docs) {
     for (const raw of doc.rules) {
       const rule = normalizeRule(raw, doc, warnings);
       if (rule === null) continue;
-      // 后置规则：先跳过，绝不参与行为解析（不产生运行时效果，也不会把行为标成非法）
       if (rule.position === '后置') continue;
 
       const key = normalizeName(rule.behavior);
-      // 该行为本身已非法（op_type 坏 / 冲突）：规则不再参与，运行期按 fatal 处理
       if (invalidBehaviors.has(key)) continue;
 
       const bucket = behaviorIndex.get(key);
       if (bucket === undefined) {
-        // 被规则绑定但未在 behaviors[] 声明 → 非法（2026-11-24）
         warnings.push(`${doc.key}:behavior_undeclared:${rule.behavior}`);
         invalidBehaviors.set(key, {
           ref: toRef(doc, rule.behavior),
@@ -138,7 +104,6 @@ export function loadGateCatalog(agentDir: string, signature?: string): GateSnaps
         });
         continue;
       }
-      // query 没有前置规则：规则静默忽略（用户口径 2026-11-24）
       if (!bucket.command) continue;
       bucket.pre.push(rule);
     }
@@ -162,7 +127,6 @@ function toRef(doc: OntologyDoc, behaviorName: string): BehaviorRef {
   };
 }
 
-/** 声明来源（冲突/非法文案要点名"谁说的"；`op_type` 保留原始值） */
 function sourcesOf(entry: DeclaredBehavior): BehaviorOpTypeSource[] {
   return [...entry.opTypes.keys()].map((ontologyKey) => ({
     ontologyKey,
@@ -170,7 +134,6 @@ function sourcesOf(entry: DeclaredBehavior): BehaviorOpTypeSource[] {
   }));
 }
 
-/** 单条规则归一：`behavior` 空或 `position` 非"前置/后置"→ 整条忽略 + 告警 */
 function normalizeRule(raw: unknown, doc: OntologyDoc, warnings: string[]): RuleSpec | null {
   const record = asRecord(raw);
   if (record === null) {
@@ -211,8 +174,6 @@ function normalizeRule(raw: unknown, doc: OntologyDoc, warnings: string[]): Rule
     dataSupplements.push(item);
   }
 
-  // `rule_design` 缺失/为空 → null（视为未设计，不阻断）；
-  // 存在但不是对象 → `designInvalid`（fail-closed，`FR-025`）。
   let design = null as RuleSpec['design'];
   let designInvalid = false;
   if (record.rule_design !== undefined && record.rule_design !== null) {

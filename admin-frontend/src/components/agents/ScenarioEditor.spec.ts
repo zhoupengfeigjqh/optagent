@@ -1,12 +1,3 @@
-/**
- * 组件测试：文件空间场景编辑器（T059）
- *
- * 覆盖 `FR-020` 的校验口径：场景名非空、目录清单拒绝空值 / 重复 /
- * 含分隔符 / `..`；以及"收缩清单不删除文件"的口径提示。
- *
- * 以及二级目录的**字段约束**（`data_prep_fields`）：新增目录即弹出确认窗口、
- * 空清单 = 无约束（等价"暂不设置"）、移除目录同时移除其约束。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { ScenarioField } from '../../api/types'
@@ -23,7 +14,6 @@ function mountEditor(
     data_prep_dirs: dirs,
     data_prep_fields: fields,
   }
-  // 仅在显式给出时才带该键：既有用例比对的是"不带该键"的载荷形状
   if (uploads) modelValue.data_prep_uploads = uploads
   return mount(ScenarioEditor, { props: { modelValue: modelValue as never } })
 }
@@ -109,7 +99,6 @@ describe('ScenarioEditor', () => {
   it('预定义目录「算法规则」显示标识且不可**移除**（只有「屏蔽」）', () => {
     const wrapper = mountEditor('生产', ['算法规则', '生产计划'])
     expect(wrapper.find('[data-test="predefined-badge"]').exists()).toBe(true)
-    // 预定义行没有「移除」按钮；自定义目录仍有
     expect(wrapper.findAll('button').filter((b) => b.text() === '移除').length).toBe(1)
     expect(wrapper.find('[data-test="block-算法规则"]').exists()).toBe(true)
   })
@@ -119,8 +108,6 @@ describe('ScenarioEditor', () => {
     expect(wrapper.findAll('button').filter((b) => b.text() === '移除').length).toBe(0)
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
-
-  /* ---------- 2026-11-17：预定义目录可屏蔽（屏蔽 = 不在清单里） ---------- */
 
   it('屏蔽预定义目录：从清单移除，并**清掉**它的字段约束与可上传类型', async () => {
     const wrapper = mountEditor(
@@ -146,7 +133,6 @@ describe('ScenarioEditor', () => {
     expect(wrapper.find('[data-test="blocked-badge"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('已屏蔽的预定义目录')
     expect(wrapper.find('[data-test="enable-算法规则"]').exists()).toBe(true)
-    // 启用项里不再出现它的行
     expect(wrapper.find('[data-test="block-算法规则"]').exists()).toBe(false)
   })
 
@@ -281,14 +267,11 @@ describe('ScenarioEditor', () => {
     })
   })
 
-  /* ---------- 2026-10-13：目录级可上传文件类型（FR-001~FR-006） ---------- */
-
   it('每个目录行在「字段」之后出现「文件类型」入口，数量等于目录数', () => {
     const wrapper = mountEditor('生产', ['算法规则', '生产计划'])
     const rows = wrapper.findAll('.scenario-editor__list li')
     expect(rows).toHaveLength(2)
 
-    // 自定义目录：字段 → 文件类型 → 移除
     expect(rows[1].findAll('button').map((b) => b.text())).toEqual([
       '字段(0)',
       '文件类型(2)',
@@ -320,7 +303,6 @@ describe('ScenarioEditor', () => {
     await wrapper.vm.$nextTick()
 
     await wrapper.find('[data-test="upload-ext-.txt"]').setValue(true)
-    // 两个弹窗都在 DOM 中：显式限定在可上传类型窗口内
     const dialog = '[data-test="scenario-upload-types-dialog"]'
     await wrapper.find(`${dialog} [data-test="save"]`).trigger('click')
 

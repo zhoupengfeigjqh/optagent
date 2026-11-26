@@ -1,21 +1,3 @@
-/**
- * 本体市场（optonto `.data/onto_market`）技能的**只读**扫描与导入（2026-10-02）。
- *
- * 市场目录形态（实测）：
- * ```text
- * {root}/{场景}/{本体}/skills/{skill-name}/SKILL.md（可含附件子目录）
- * ```
- *
- * - 市场侧 SKILL.md 与共享技能库**同一格式**（frontmatter `name`/`description`，
- *   解析用同一份 `parseSkillMetadata`），导入即作为一份新技能入驻共享技能库；
- * - 本模块对市场**只读**：不写、不删、不改 optonto 的任何文件；
- * - 「市场文件是否变化」用**整包内容指纹**判断：导入时把哈希记进库内技能的
- *   `origin.hash`，列表时与市场现算哈希对比 → new / unchanged / changed / conflict；
- * - **重名直接拒绝**（产品决定 2026-10-02）：`install` 不提供覆盖；市场更新的唯一
- *   通道是 §4.8 的 **update**——只允许覆盖「确系从同一市场位置导入」的技能，且库内
- *   版本被人工修改过时必须显式确认（`ADM_SKILL_MODIFIED`）。库仍是唯一权威来源
- *   （`FR-036`），ZIP 上传等其他来源的技能永不接受市场覆盖。
- */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,23 +15,18 @@ export type OntoMarketSkillStatus = 'new' | 'unchanged' | 'changed' | 'conflict'
 export interface OntoMarketItem {
   scenario: string;
   ontology: string;
-  /** `skills/` 下的技能目录名（导入请求的 `skill` 参数） */
   skill_dir: string;
-  /** frontmatter 的 `name`（身份键：目录名与导入后的重名判定都用它）；解析失败为 null */
   name: string | null;
-  /** 界面展示名（`metadata.name/title/ontology_name/display_name`，缺失回落 `name`） */
   display_name: string | null;
   description: string | null;
   /** 解析失败原因；非 null 时不可导入 */
   invalid_reason: string | null;
   files: Array<{ path: string; size: number }>;
-  /** 整包内容指纹（导入后记入库内 `origin.hash`，用于变化检查） */
   hash: string;
   status: OntoMarketSkillStatus;
 }
 
 export interface OntoMarketListing {
-  /** 是否配置了 `ONTO_MARKET_DIR` */
   configured: boolean;
   /** 无法列出时的可读原因（未配置 / 目录不存在 / 不可读）；正常为 null */
   reason: string | null;
@@ -130,7 +107,6 @@ function collectSkillFiles(
   return out;
 }
 
-/** 整包内容指纹：按路径排序后对 `path + 内容` 做 SHA-256（路径变化也算变化） */
 export function packageHash(files: CollectedFile[]): string {
   const hash = createHash('sha256');
   for (const file of [...files].sort((a, b) => a.relPath.localeCompare(b.relPath))) {
@@ -147,7 +123,6 @@ function toEntries(files: CollectedFile[]): Array<{ path: string; size: number }
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** 扫描市场目录，返回全部技能（不做库内比对；`status` 先置 `new`/`invalid`） */
 function scanMarketSkills(root: string): OntoMarketItem[] {
   const items: OntoMarketItem[] = [];
   for (const scenarioEntry of fs.readdirSync(root, { withFileTypes: true })) {
@@ -201,14 +176,6 @@ function scanMarketSkills(root: string): OntoMarketItem[] {
   return items;
 }
 
-/**
- * 列出市场上可导入的技能，并按库内现状标注差异状态：
- * - `new`：库内没有同名技能，可导入；
- * - `unchanged`：已从市场导入且市场文件无变化（不可重复导入）；
- * - `changed`：已从市场导入，但市场文件已变化——**重名拒绝**，如需更新请先删除库内技能；
- * - `conflict`：库内已有同名技能但**并非**来自市场（ZIP 上传等）——同样拒绝；
- * - `invalid`：市场侧文件格式无效（原因见 `invalid_reason`）。
- */
 export function listOntoMarket(root: string | null, skills: SkillLibraryService): OntoMarketListing {
   if (root === null || root === '') {
     return {
@@ -244,12 +211,10 @@ export function listOntoMarket(root: string | null, skills: SkillLibraryService)
   };
 }
 
-/** 读取市场上一个技能包：文件内容 + 身份名 + 整包哈希（导入与更新共用） */
 export function readMarketSkillPackage(
   root: string,
   ref: OntoMarketRef,
 ): {
-  /** frontmatter 的 `name`：更新时用来定位库内同名技能（展示名走 `listAll()` 的记录） */
   name: string;
   files: Map<string, Buffer>;
   entries: Array<{ path: string; size: number }>;
@@ -298,26 +263,10 @@ export function installOntoMarketSkill(
   });
 }
 
-/** 市场更新结果：安装结果 + 「库内版本此前被人工修改过」标记（供界面播报） */
 export interface OntoMarketUpdateResult extends SkillInstallResult {
-  /** 更新前库内内容与导入时不一致（本次更新丢弃了这些人工修改） */
   locally_modified: boolean;
 }
 
-/**
- * 用市场现版本**更新**一份已从市场导入的技能（§4.8，2026-10-02）。
- *
- * 覆盖边界收得很紧，四个条件缺一不可：
- * 1. 已配置 `ONTO_MARKET_DIR`（同导入）；
- * 2. 库内存在同名技能（不存在 → 提示走导入，MUST NOT 借更新通道凭空创建）；
- * 3. 该技能 `origin.kind === 'onto_market'` 且 scenario/ontology 与本次一致
- *    （手工创建 / ZIP 上传的技能、以及市场里挪过位置的技能一律拒绝）；
- * 4. 库内**当前内容**哈希仍等于 `origin.hash`（= 导入后没人动过）；否则必须
- *    携带 `confirmModified` 显式确认——人工修改会随更新被丢弃，MUST NOT 静默覆盖。
- *
- * 通过后走 `updateFromDirectory` 整包原子替换（零时间窗，区别于"先删再导"），
- * `origin.hash` 换成市场现哈希，后续 `changed` 判定从新基准起算。
- */
 export function updateOntoMarketSkill(
   root: string | null,
   skills: SkillLibraryService,
@@ -346,7 +295,6 @@ export function updateOntoMarketSkill(
     );
   }
 
-  // 库内现内容指纹（与市场同一算法）：≠ origin.hash 即"导入后被人工改过"
   const libraryHash = packageHash(
     skills.readFiles(pkg.name).map((file) => ({ relPath: file.path, content: file.content })),
   );

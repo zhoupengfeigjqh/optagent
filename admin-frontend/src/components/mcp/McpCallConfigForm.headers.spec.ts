@@ -1,15 +1,3 @@
-/**
- * 组件测试：MCP 调用配置表单的**请求头填写行**（2026-10-08，同日二次改版）
- *
- * 与 `McpCallConfigForm.spec.ts` 分居：那个文件已逼近 500 行门禁（宪章原则二），
- * 而"凭据"是独立的一条线，单独成文件更利于定位。
- *
- * 交互口径（用户视角 = 填表）：
- * - 请求头**可空**，与「连接地址 / 传输方式」同处「连接配置」框（后两者必填）；
- * - **留空 = 不修改**（服务端沿用存量，保存 MUST NOT 顺手清空令牌）；
- * - 填写 = 整体替换；已配置时给「清空全部请求头」（显式点、可撤销）；
- * - 回显只有掩码，输入框**不预填**真值。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpCallConfigForm from './McpCallConfigForm.vue'
@@ -41,7 +29,6 @@ const SERVICE: McpServiceDetail = {
   headers: {},
 }
 
-/** 回显只有掩码（真实令牌不回响应） */
 const SERVICE_WITH_HEADERS: McpServiceDetail = {
   ...SERVICE,
   headers: { 'X-MCP-Token': '6UuE…3F' },
@@ -55,12 +42,10 @@ function submitted(wrapper: ReturnType<typeof mountForm>, index = 0): McpService
   return wrapper.emitted('submit')?.[index]?.[0] as McpServiceConfigInput
 }
 
-/** 表单内唯一的动作按钮：「发起测试」 */
 function testButton(wrapper: ReturnType<typeof mountForm>) {
   return wrapper.findAll('button').find((b) => b.text().includes('发起测试'))
 }
 
-/** 触发保存（与页头按钮同一条路径：`submit()` 含本地校验） */
 async function save(wrapper: ReturnType<typeof mountForm>) {
   ;(wrapper.vm as unknown as { submit: () => void }).submit()
   await flushPromises()
@@ -79,7 +64,6 @@ describe('McpCallConfigForm —— 请求头填写行（2026-10-08）', () => {
     expect((wrapper.find('[data-test="headers-input"]').element as HTMLTextAreaElement).value).toBe(
       '',
     )
-    // 已配置 → 给掩码一览（看得出"配了哪些头"，看不到真值），且用**成功色**标出"已配好"
     expect(wrapper.find('[data-test="headers-view"]').text()).toContain('X-MCP-Token: 6UuE…3F')
     expect(wrapper.find('[data-test="headers-view"] .mcp-headers__ok').exists()).toBe(true)
     expect(wrapper.find('[data-test="headers-view"] .mcp-headers__current').exists()).toBe(true)
@@ -92,18 +76,15 @@ describe('McpCallConfigForm —— 请求头填写行（2026-10-08）', () => {
     const wrapper = mountForm(SERVICE_WITH_HEADERS)
     await flushPromises()
 
-    // 留空 = 不修改，不是错误
     expect(wrapper.find('[data-test="headers-invalid"]').exists()).toBe(false)
 
     await wrapper.find('[data-test="headers-input"]').setValue('X-MCP-Token: tk')
     await flushPromises()
-    // 就地提醒：不必等"保存/发起测试"
     expect(wrapper.find('[data-test="headers-invalid"]').text()).toContain('格式错误')
     expect(wrapper.find('[data-test="headers-input"]').classes()).toContain('invalid')
     expect(wrapper.find('[data-test="headers-input"]').attributes('aria-invalid')).toBe('true')
     expect(wrapper.find('[data-test="headers-error"]').text()).toContain('合法 JSON')
 
-    // 改回合法值 → 提醒立刻消失（同一判据，不留残影）
     await wrapper.find('[data-test="headers-input"]').setValue('{"X-MCP-Token":"tk-1234567890"}')
     await flushPromises()
     expect(wrapper.find('[data-test="headers-invalid"]').exists()).toBe(false)
@@ -184,7 +165,6 @@ describe('McpCallConfigForm —— 请求头填写行（2026-10-08）', () => {
 
     await wrapper.find('[data-test="clear-headers"]').trigger('click')
     await save(wrapper)
-    // 第二次提交（索引 1）：显式清空 → `{}`
     expect(submitted(wrapper, 1).headers).toEqual({})
   })
 

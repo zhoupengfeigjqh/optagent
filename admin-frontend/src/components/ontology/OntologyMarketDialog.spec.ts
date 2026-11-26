@@ -1,13 +1,3 @@
-/**
- * 组件测试：从本体市场导入 / 更新本体（2026-10-03，契约 §10.4~§10.6）
- *
- * 守住五条：
- * 1. 打开即扫描市场并按状态渲染（这一步就是"ontology.yaml 是否变化"的检查）；
- * 2. new 可导入、changed 可选且走**更新**；unchanged / invalid 不可选；
- * 3. 导入/更新成功后 emit 对应事件并关窗；
- * 4. 失败**不关窗**，错误留在窗内；
- * 5. 未配置市场目录时给出可读原因。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OntologyMarketDialog from './OntologyMarketDialog.vue'
@@ -99,7 +89,6 @@ describe('OntologyMarketDialog —— 扫描与状态', () => {
     await entries[1]!.trigger('click')
     expect(wrapper.find('[data-test="import"]').attributes('disabled')).toBeDefined()
 
-    // changed 可选 → 更新
     await entries[0]!.trigger('click')
     const primary = wrapper.find('[data-test="import"]')
     expect(primary.attributes('disabled')).toBeUndefined()

@@ -1,12 +1,3 @@
-/**
- * 单元测试：指代改写的纯函数层（027）。
- *
- * 这些函数是"可逐字断言"的部分，因此测试按**契约 §5~§7 的步骤逐条钉住**：
- * - 命题恒 1 条 `noul`（不拆题、不用 `choice`）；
- * - 素材恒 1 条 user 消息，最近 2 组完整问答轮，失败轮 / 空正文 / 孤立消息被过滤；
- * - 阈值**严格大于**才改写；
- * - 归一化七步顺序固定，100 字按**码点**截断（不能切开代理对）。
- */
 import { describe, expect, it } from 'vitest';
 import {
   NEED_REWRITE_QID,
@@ -30,7 +21,6 @@ describe('buildNeedRewriteQuestion', () => {
     const question = buildNeedRewriteQuestion();
 
     expect(question.type).toBe('noul');
-    // 实测题面越长越糟，控制在 25 字以内
     expect(Array.from(question.instructions).length).toBeLessThanOrEqual(25);
     expect(question.criteria?.true).toContain('代指');
     expect(question.criteria?.false).toContain('自足');

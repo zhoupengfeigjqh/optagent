@@ -1,13 +1,3 @@
-/**
- * 单元测试：数字人 store 的切换约束与失败呈现（009 FR-015 / FR-032 / FR-033）
- *
- * 守住三条：
- * 1. **禁用态单一来源**：`phase === 'streaming'` → `switchingDisabled`，`switchingDisabledReason`
- *    给出可读原因（"等一等"）；对话**结束**（completed/failed/aborted）即可切换；
- * 2. **禁用即不发请求**：`switchTo` 在禁用态直接返回，不触达 `select`（V-14 的兜底在 composable）；
- * 3. **失败不静默**：已移除/不可用的数字人（后端 409 `AGENT_NOT_AVAILABLE`）→ toast 给出可读文案，
- *    且**不改变** `currentAgent`/`candidates`（陈旧选中态由用户显式重选来更新，FR-032）。
- */
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -28,10 +18,6 @@ const AGENT_A: DigitalHuman = {
 
 const AGENT_B: DigitalHuman = { ...AGENT_A, agent_name: 'agent-b' }
 
-/**
- * 有状态的 API 桩：`select` 之后 `current` 会返回新选中的那一个（与后端"服务端唯一选中态"同构）。
- * 固定返回值的桩会让"切换成功"永远看起来没生效。
- */
 function makeApi(overrides: Partial<Record<keyof AgentsApi, unknown>> = {}) {
   let selectedName = 'agent-a'
   const calls = {
@@ -43,7 +29,6 @@ function makeApi(overrides: Partial<Record<keyof AgentsApi, unknown>> = {}) {
     detail: vi.fn(async (name: string) => (name === 'agent-b' ? AGENT_B : AGENT_A)),
     list: vi.fn(async () => [{ agent_name: 'agent-a' }, { agent_name: 'agent-b' }]),
     currentMcp: vi.fn(async () => ({ agent_name: selectedName, mcp_servers: [] })),
-    // 2026-10-18：loadCurrent 末尾会预热（不 await）；桩默认返回"已落定的空清单"
     warmMcp: vi.fn(async () => ({ agent_name: selectedName, mcp_servers: [] })),
     subscribeMcp: vi.fn(() => () => undefined),
   }
@@ -145,7 +130,6 @@ describe('switchTo —— 失败不静默（FR-032：陈旧选中态不自动清
     expect(failing).toHaveBeenCalledWith('agent-b')
     expect(toast.push).toHaveBeenCalledTimes(1)
     expect(String(toast.push.mock.calls[0]?.[1])).toContain('不可用')
-    // 没有"看起来正常"：选中态没有被就地改成失败目标，也没有跑切换后的收尾编排
     expect(store.currentAgent.value).toBe(before)
     expect(onSwitched).not.toHaveBeenCalled()
     expect(store.switching.value).toBe(false)
@@ -169,7 +153,6 @@ describe('switchTo —— 失败不静默（FR-032：陈旧选中态不自动清
   })
 })
 
-/** 单服务状态桩（`unknown` = 尚无连接结果，也就是界面上的灰） */
 const mcp = (status: McpServiceStatus['status']): McpServiceStatus[] => [
   { name: 'svc', transport: 'streamable-http', status },
 ]
@@ -197,7 +180,6 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
   })
 
   it('别的数字人的快照一律丢弃（否则旧人的绿会让发送前等待误放行）', async () => {
-    // 收集订阅回调（数组而非 let 变量：赋值发生在回调里，闭包窄化会让调用点被判成 never）
     const pushes: Array<(snapshot: CurrentMcpResponse) => void> = []
     const { api } = makeApi({
       subscribeMcp: vi.fn((cb: (snapshot: CurrentMcpResponse) => void) => {
@@ -229,7 +211,6 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
 
     await store.switchTo('agent-b')
 
-    // 桩始终返回 agent-a 的快照 → 归属校验拦下，切人后不会显示旧人的绿
     expect(store.mcpServers.value).toEqual([])
   })
 
@@ -245,11 +226,10 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
             mcp_servers: mcp(calls >= 2 ? 'connected' : 'unknown'),
           }
         }),
-        // 预热桩不参与计数：这里要验的是"轮询能取到结果"
         warmMcp: vi.fn(async () => ({ agent_name: 'agent-a', mcp_servers: mcp('unknown') })),
       })
       const { store } = makeStore(api)
-      await store.loadCurrent() // 第 1 次：unknown
+      await store.loadCurrent()
       expect(store.mcpPending.value).toBe(true)
 
       const running = store.ensureMcpReady(10_000)
@@ -275,7 +255,6 @@ describe('MCP 状态归属与发送前等待（2026-10-18）', () => {
       await store.loadCurrent()
 
       const running = store.ensureMcpReady(1_000)
-      // 一次 2s 睡眠已越过 1s 截止时刻 → 下一轮循环即退出
       await vi.advanceTimersByTimeAsync(2_200)
 
       await expect(running).resolves.toBe(false)

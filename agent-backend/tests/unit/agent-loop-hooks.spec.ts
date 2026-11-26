@@ -1,13 +1,3 @@
-/**
- * 端到端（进程内）：规划钩子的**透传**验证（028 T305 / T804）。
- *
- * 为什么单测编排器不够：编排器只证明"钩子函数自己算得对"，
- * 证明不了 `runAgentLoopEvents` 真的把它们挂到了 pi 的 loop 上——中间靠一层
- * 条件展开（`...(hooks ? {prepareNextTurn} : {})`），写错就等于规划静默失效。
- *
- * 另一条更重要的判据是 **SC-006（规划关闭零差异）**：不传 `hooks` 时，
- * 四个钩子一次都不许被调用，消息与工具集原样进入 loop。
- */
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { EventStream } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -65,7 +55,6 @@ interface HopContext {
   tools?: Array<{ name: string }>;
 }
 
-/** 跑一轮，记录每跳收到的 context（供断言"钩子真的改了下一跳的输入"） */
 async function drive(opts: {
   script: AssistantMessage[];
   tools?: AgentTool[];
@@ -102,7 +91,6 @@ describe('028 钩子透传', () => {
 
     expect(contexts).toHaveLength(2);
     expect(events.some((event) => event.type === 'done')).toBe(true);
-    // 工具集原样进入 loop
     expect(contexts[0]?.tools?.map((item) => item.name)).toEqual(['probe_tool']);
   });
 
@@ -136,10 +124,8 @@ describe('028 钩子透传', () => {
       },
     });
 
-    // 钩子看到的是「尚未标记」的 details
     expect(seen).toHaveBeenCalledTimes(1);
     expect(seen.mock.calls[0]?.[0]).toBeDefined();
-    // 翻牌发生在钩子之后：卡片仍标红
     expect(events.find((event) => event.type === 'tool_call_end')).toMatchObject({ status: 'error' });
   });
 

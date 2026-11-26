@@ -1,12 +1,3 @@
-/**
- * 集成测试：显式技能（`/技能名`，2026-11-07）。
- *
- * 两层：
- * 1. **公开 HTTP**：`skill` 字段受 schema 约束（未知字段仍 400），技能不存在 → 400 可读清单；
- * 2. **域链路**：`skill` 透传给 `agent.run`、**自动跳过意图聚焦**、随 user 行落盘（回放确定性）。
- *
- * 模型与聚焦判定用桩；技能目录用真实临时文件（校验读的就是它）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +20,6 @@ import type { LlmEvent } from '../../src/types.js';
 const USER = 'admin';
 const AGENT = 'demo';
 
-/** 写最小可加载数字人 + 两个技能 */
 function writeAgent(root: string): void {
   const dir = agentDir(root, USER, AGENT);
   fs.mkdirSync(dir, { recursive: true });
@@ -149,7 +139,6 @@ describe('RunManager × 显式技能：透传、跳过聚焦、落盘', () => {
     };
   }
 
-  /** 聚焦桩：记录 skip 入参；按真实 runner 语义——skip 时直接返回空态（不判、不产卡片） */
   function focusPort(seen: { count: number; skips: boolean[] }): IntentFocusPort {
     return {
       judge: async (input) => {
@@ -190,7 +179,6 @@ describe('RunManager × 显式技能：透传、跳过聚焦、落盘', () => {
     await run.settled;
 
     expect(recorder.skills).toEqual(['supplier-query']);
-    // 显式技能 = 自动跳过意图聚焦：runner 收到 skip=true，本轮没有任何聚焦提示
     expect(seen.skips).toEqual([true]);
     expect(recorder.extras[0]).not.toContain('聚焦提示');
     expect(history.readAll(USER, AGENT, 'th_skill')).toContainEqual(

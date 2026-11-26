@@ -1,17 +1,3 @@
-/**
- * 单元测试：本体加载与索引（016 / 019）。
- *
- * 守住的边界：
- * - 只提取 metadata / behaviors / concepts / relations（`functions` / `rules` 与参数正文
- *   **不进入模型**）；
- * - `title` 缺失回退 `name`；`description` 缺失为空串（是否降级由题面构造裁决）；
- * - 坏 YAML 只告警；
- * - 同一 `ontology_id` 的多个文件全部保留（同 ID 多本体）。
- *
- * 2026-11-06：能力聚焦只到行为，`functions` / `rules` 不再解析。
- * 2026-11-08（019）：新增 `concepts` / `relations` 与 `behaviors[].concept` 的只读建模；
- * 方向判定**不在本层**（见 `expansion.ts`）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -111,10 +97,8 @@ describe('loadOntologyIndex', () => {
         opType: 'query',
         concept: 'PurchaseRecord',
       },
-      // title 缺失 → 回退 name；concept 缺失 → null（不参与发散）
       { name: 'NoTitleBehavior', title: 'NoTitleBehavior', description: '', opType: null, concept: null },
     ]);
-    // 019：概念与关系只取发散所需字段（title 缺失回退 name）
     expect(ontology.concepts).toEqual([
       { name: 'PurchaseRecord', title: '原材料采购记录' },
       { name: 'RawMaterial', title: 'RawMaterial' },
@@ -129,7 +113,6 @@ describe('loadOntologyIndex', () => {
         relationType: ['Functional'],
         cardinality: 'N:1',
       },
-      // 没写 title → 回退 name（展示不留空槽）
       {
         name: 'NoTitleRelation',
         source: 'PurchaseRecord',
@@ -177,7 +160,6 @@ describe('loadOntologyIndex', () => {
     const ontology = index.all[0]!;
 
     expect(ontology.functions).toEqual([
-      // 2026-11-20：只留四字段，`params` / `response` 不进模型
       {
         name: 'checkRawMaterialUnit',
         title: '校验采购原材料单位一致性',

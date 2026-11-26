@@ -1,15 +1,3 @@
-/**
- * 组件测试：等待提示在**整轮进行期间**的表现（2026-11-26 收紧）
- *
- * 需求背景（用户口径）：「只要对话没结束，聊天界面就必须有『正在计算中』一类的提示，
- * 不能什么都没有」。2026-11-16 版只在"首 token 前 / 有 running 工具 / 静默超时"时提示，
- * 工具收尾与正文卡顿仍会出现空档，故判据收敛为一条：`phase === STREAMING` 即常驻。
- *
- * 1. 首个 token 前 → 「思考中」；
- * 2. 有 running 的工具 → 「正在执行 <工具名>…」（点名，多个则报数量）；
- * 3. 工具全部结束、正文在流式输出 → 仍在，文案「正在生成…」（不再留空档）；
- * 4. 非 streaming 阶段（completed/failed/aborted）即使残留 running 记录也不提示。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -24,7 +12,6 @@ interface ToolCallView {
 }
 
 function message(over: Partial<Message> = {}): Message {
-  // 流式合成消息不落库：无 id、无 status（`MessageList.streamingMessage` 同口径）
   return {
     id: '',
     role: 'assistant',
@@ -35,7 +22,6 @@ function message(over: Partial<Message> = {}): Message {
   }
 }
 
-/** 流式态瞬态桩（结构与 `MessageBubble.streaming` 同构） */
 function streaming(text: string, toolCalls: ToolCallView[], stalled = false) {
   return {
     phase: 'streaming' as const,
@@ -114,7 +100,6 @@ describe('MessageBubble —— 工具执行期的等待提示', () => {
   })
 
   it('静默段（TR-66）：正文非空且 >2.5s 无事件 → 「模型正在思考…」', () => {
-    // 实测形态：模型写完一段（1201 字）后静默 6.6s 才发出 tool_call，期间没有任何事件
     const wrapper = mountStreaming('好的，我先看一下这张订单。', [], true)
 
     expect(wrapper.find('.typing-indicator').text()).toBe('模型正在思考…')
@@ -133,7 +118,6 @@ describe('MessageBubble —— 工具执行期的等待提示', () => {
   })
 
   it('本轮 streaming 期间恒有提示：工具全结束、正文未增长、未超静默阈值也不留空窗', () => {
-    // 最容易"什么都没有"的组合：工具刚结束（无 running）、正文停在上一段、尚未触发 stalled
     const wrapper = mountStreaming('好的，我先看一下。', [running({ status: 'success' })], false)
 
     expect(wrapper.find('.typing-indicator').exists()).toBe(true)

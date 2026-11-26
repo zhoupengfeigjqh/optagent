@@ -1,23 +1,10 @@
-/**
- * config 模块单测
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test:all   # 全部测试
- *   npm run test       # 仅本目录单测
- *
- * 覆盖本次变更的核心约束：`PUBLIC_BASE_URL` 必须显式声明（缺失即拒绝启动），
- * 且不再回落到 `http://localhost:PORT` 兜底——容器里该兜底会让 MCP 服务回源打到自己。
- *
- * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
- * 由 Vitest 解析到 `src/config.ts`。
- */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { ConfigError, loadConfig } from '../../src/config';
+import { ConfigError, loadConfig, summarizeConfig, unknownEnvKeys } from '../../src/config';
 
 /** 临时 config.yaml：自带字面量 api_key，使测试不依赖任何环境变量 */
 const workDir = mkdtempSync(path.join(tmpdir(), 'optagent-config-'));
@@ -28,7 +15,6 @@ afterAll(() => {
   rmSync(workDir, { recursive: true, force: true });
 });
 
-/** 执行 loadConfig 并返回抛出的错误；未抛错时返回 `null` */
 function loadError(env: Record<string, string | undefined>): unknown {
   try {
     loadConfig({ env, configPath });
@@ -38,7 +24,6 @@ function loadError(env: Record<string, string | undefined>): unknown {
   }
 }
 
-/** 必填项齐备的最小环境 */
 const okEnv = { PUBLIC_BASE_URL: 'http://backend:3000' };
 
 describe('loadConfig - PUBLIC_BASE_URL 必填', () => {
@@ -109,7 +94,6 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     return file;
   }
 
-  /** 加载并返回错误（未抛错时返回 null） */
   function errorOf(
     block: string | undefined,
     env: Record<string, string | undefined> = okEnv,
@@ -122,7 +106,6 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     }
   }
 
-  /** 断言拒绝启动，并返回错误文案 */
   function messageOf(block: string | undefined, env?: Record<string, string | undefined>): string {
     const error = errorOf(block, env);
     expect(error).toBeInstanceOf(ConfigError);
@@ -151,27 +134,24 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
       ontologyFunctionThreshold: 0.8,
       maxSkills: 32,
       maxCapabilities: 96,
-      // 027：输入改写的两个新参数同样有缺省，且**整块缺失不阻断启动**（上面已断言）
       rewriteThreshold: 0.8,
       rewriteTimeoutMs: 5000,
+      // 028：门禁缺键 = 关闭（不写 planThreshold），超时取缺省 5s
+      planTimeoutMs: 5000,
     });
   });
 
-  it('016：行为/函数阈值与候选上限可配置，环境变量优先于 YAML', () => {
+  it('016：行为/函数阈值与候选上限可配置（YAML 单点生效）', () => {
     const config = loadConfig({
-      env: {
-        ...okEnv,
-        INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD: '0.72',
-        INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD: '0.66',
-      },
+      env: okEnv,
       configPath: writeConfig(
         `${minimal}  ontology_behavior_threshold: 0.65\n  ontology_function_threshold: 0.55\n` +
           `  max_skills: 16\n  max_capabilities: 48\n`,
       ),
     });
 
-    expect(config.intentFocus?.ontologyBehaviorThreshold).toBe(0.72);
-    expect(config.intentFocus?.ontologyFunctionThreshold).toBe(0.66);
+    expect(config.intentFocus?.ontologyBehaviorThreshold).toBe(0.65);
+    expect(config.intentFocus?.ontologyFunctionThreshold).toBe(0.55);
     expect(config.intentFocus?.maxSkills).toBe(16);
     expect(config.intentFocus?.maxCapabilities).toBe(48);
   });
@@ -229,6 +209,20 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect(messageOf('  base_url: laya:8000\n  api_key: k\n')).toContain('http://');
   });
 
+  it('base_url 支持 $ENV 引用（两形态共用同一份 config.yaml）', () => {
+    const config = loadConfig({
+      env: { ...okEnv, INTENT_FOCUS_BASE_URL: 'http://laya:8000' },
+      configPath: writeConfig('  base_url: $INTENT_FOCUS_BASE_URL\n  api_key: k\n'),
+    });
+    expect(config.intentFocus?.baseUrl).toBe('http://laya:8000');
+
+    const emptyRef = messageOf('  base_url: $INTENT_FOCUS_BASE_URL\n  api_key: k\n', {
+      ...okEnv,
+      INTENT_FOCUS_BASE_URL: '',
+    });
+    expect(emptyRef).toContain('INTENT_FOCUS_BASE_URL');
+  });
+
   it('api_key 支持 $ENV 引用，且引用为空串时按"未设置"拒绝', () => {
     const config = loadConfig({
       env: { ...okEnv, DECIS_API_KEY: 'from-env' },
@@ -265,16 +259,10 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect(messageOf(`${minimal}  timeout_ms: 300.5\n`)).toContain('intent_focus.timeout_ms');
   });
 
-  it('skill_threshold 越界时拒绝启动（即使设了环境变量也不放过坏值）', () => {
+  it('skill_threshold 越界时拒绝启动', () => {
     expect(messageOf(`${minimal}  skill_threshold: 1.5\n`)).toContain(
       'intent_focus.skill_threshold',
     );
-    expect(
-      messageOf(`${minimal}  skill_threshold: 1.5\n`, {
-        ...okEnv,
-        INTENT_FOCUS_SKILL_THRESHOLD: '0.5',
-      }),
-    ).toContain('intent_focus.skill_threshold');
   });
 
   it('已移除的 max_actions 仍被拒绝（strict 键校验），避免旧配置静默失效', () => {
@@ -285,40 +273,16 @@ describe('loadConfig - 013 意图聚焦判定模型', () => {
     expect(messageOf(`${minimal}  timeout: 3000\n`)).toContain('intent_focus');
   });
 
-  it('INTENT_FOCUS_SKILL_THRESHOLD 覆盖配置文件里的 skill_threshold', () => {
+  it('阈值只认 YAML：遗留的 INTENT_FOCUS_SKILL_THRESHOLD 不再生效（一个参数一个真源）', () => {
     const config = loadConfig({
       env: { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '0.8' },
       configPath: writeConfig(`${minimal}  skill_threshold: 0.4\n`),
     });
 
-    expect(config.intentFocus?.skillThreshold).toBe(0.8);
-  });
-
-  it('INTENT_FOCUS_SKILL_THRESHOLD 为空串时视为未设置（不静默变成 0）', () => {
-    const config = loadConfig({
-      env: { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '' },
-      configPath: writeConfig(`${minimal}  skill_threshold: 0.4\n`),
-    });
-
     expect(config.intentFocus?.skillThreshold).toBe(0.4);
-  });
-
-  it('INTENT_FOCUS_SKILL_THRESHOLD 越界时拒绝启动，文案指名该变量', () => {
-    const message = messageOf(minimal, { ...okEnv, INTENT_FOCUS_SKILL_THRESHOLD: '1.5' });
-
-    expect(message).toContain('INTENT_FOCUS_SKILL_THRESHOLD');
   });
 });
 
-/**
- * 027：输入改写的两个配置项。
- *
- * 这一组守四件事：
- * - 缺省（0.8 / 5000）在整块存在但没写这两键时生效；
- * - 越界 / 非整数一律**拒绝启动**（不 clamp、不静默收敛）；
- * - `rewrite_timeout_ms` 不得超过 `timeout_ms`（半配置不接受）；
- * - 阈值可被 `INTENT_FOCUS_REWRITE_THRESHOLD` 覆盖，但配置文件里的坏值照样校验。
- */
 describe('loadConfig - 027 输入改写参数', () => {
   let seq = 0;
 
@@ -393,24 +357,13 @@ describe('loadConfig - 027 输入改写参数', () => {
     expect(message).toContain('timeout_ms');
   });
 
-  it('INTENT_FOCUS_REWRITE_THRESHOLD 覆盖配置文件，空串视为未设置', () => {
-    const overridden = loadConfig({
+  it('改写阈值只认 YAML：遗留的 INTENT_FOCUS_REWRITE_THRESHOLD 不再生效', () => {
+    const config = loadConfig({
       env: { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '0.9' },
       configPath: writeConfig(`${minimal}  rewrite_threshold: 0.5\n`),
     });
-    expect(overridden.intentFocus?.rewriteThreshold).toBe(0.9);
 
-    const empty = loadConfig({
-      env: { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '' },
-      configPath: writeConfig(`${minimal}  rewrite_threshold: 0.5\n`),
-    });
-    expect(empty.intentFocus?.rewriteThreshold).toBe(0.5);
-  });
-
-  it('INTENT_FOCUS_REWRITE_THRESHOLD 越界时拒绝启动，文案指名该变量', () => {
-    expect(messageOf(minimal, { ...okEnv, INTENT_FOCUS_REWRITE_THRESHOLD: '1.2' })).toContain(
-      'INTENT_FOCUS_REWRITE_THRESHOLD',
-    );
+    expect(config.intentFocus?.rewriteThreshold).toBe(0.5);
   });
 
   it('整块 intent_focus 缺失时不影响启动（改写随整块一起不可用）', () => {
@@ -421,5 +374,202 @@ describe('loadConfig - 027 输入改写参数', () => {
 
     expect(config.intentFocus).toBeUndefined();
     expect('intentFocus' in config).toBe(false);
+  });
+});
+
+/**
+ * 028：规划门禁参数。
+ *
+ * 语义是"缺键 = 门禁关闭"，不是"缺键取默认值"——不能让存量部署在升级后
+ * 突然因为一个没配的阈值开始拦截规划。
+ */
+describe('loadConfig - 028 规划门禁参数', () => {
+  let seq = 0;
+
+  function writeConfig(block: string): string {
+    seq += 1;
+    const file = path.join(workDir, `plan-gate-${seq}.yaml`);
+    writeFileSync(
+      file,
+      `models:\n  - model: test-model\n    api_key: test-key\nintent_focus:\n${block}`,
+      'utf8',
+    );
+    return file;
+  }
+
+  function messageOf(block: string, env: Record<string, string | undefined> = okEnv): string {
+    try {
+      loadConfig({ env, configPath: writeConfig(block) });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      return (error as Error).message;
+    }
+    throw new Error('期望拒绝启动，但 loadConfig 成功了');
+  }
+
+  const minimal = '  base_url: http://laya:8000\n  api_key: laya-dev-key\n';
+
+  it('缺键：门禁关闭（planThreshold 未定义），超时取缺省 5000ms', () => {
+    const config = loadConfig({ env: okEnv, configPath: writeConfig(minimal) });
+
+    expect(config.intentFocus?.planThreshold).toBeUndefined();
+    expect(config.intentFocus?.planTimeoutMs).toBe(5000);
+  });
+
+  it('可配置且逐项生效', () => {
+    const config = loadConfig({
+      env: okEnv,
+      configPath: writeConfig(`${minimal}  plan_threshold: 0.4\n  plan_timeout_ms: 1500\n`),
+    });
+
+    expect(config.intentFocus?.planThreshold).toBe(0.4);
+    expect(config.intentFocus?.planTimeoutMs).toBe(1500);
+  });
+
+  it('阈值越界（>1 / <0）拒绝启动，文案指名 YAML 路径', () => {
+    expect(messageOf(`${minimal}  plan_threshold: 1.5\n`)).toContain('intent_focus.plan_threshold');
+    expect(messageOf(`${minimal}  plan_threshold: -0.1\n`)).toContain(
+      'intent_focus.plan_threshold',
+    );
+  });
+
+  it('门禁超时越界 / 非整数 / 大于整轮预算时拒绝启动', () => {
+    expect(messageOf(`${minimal}  plan_timeout_ms: 299\n`)).toContain(
+      'intent_focus.plan_timeout_ms',
+    );
+    expect(messageOf(`${minimal}  plan_timeout_ms: 10001\n`)).toContain(
+      'intent_focus.plan_timeout_ms',
+    );
+    expect(messageOf(`${minimal}  plan_timeout_ms: 300.5\n`)).toContain(
+      'intent_focus.plan_timeout_ms',
+    );
+    expect(messageOf(`${minimal}  timeout_ms: 1000\n  plan_timeout_ms: 2000\n`)).toContain(
+      'intent_focus.plan_timeout_ms',
+    );
+  });
+
+  it('门禁阈值只认 YAML：遗留的 INTENT_FOCUS_PLAN_THRESHOLD 不再生效', () => {
+    const config = loadConfig({
+      env: { ...okEnv, INTENT_FOCUS_PLAN_THRESHOLD: '0.7' },
+      configPath: writeConfig(`${minimal}  plan_threshold: 0.3\n`),
+    });
+
+    expect(config.intentFocus?.planThreshold).toBe(0.3);
+  });
+});
+
+describe('loadConfig - 028 runtime / plan 块（2026-11-26）', () => {
+  let seq = 0;
+
+  function writeYaml(extra: string): string {
+    seq += 1;
+    const file = path.join(workDir, `runtime-${seq}.yaml`);
+    writeFileSync(
+      file,
+      `models:\n  - model: test-model\n    api_key: test-key\n${extra}`,
+      'utf8',
+    );
+    return file;
+  }
+
+  function messageOf(extra: string): string {
+    try {
+      loadConfig({ env: okEnv, configPath: writeYaml(extra) });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      return (error as Error).message;
+    }
+    throw new Error('期望拒绝启动，但 loadConfig 成功了');
+  }
+
+  it('缺省：MCP/LLM 策略与规划上限取代码缺省', () => {
+    const config = loadConfig({ env: okEnv, configPath: writeYaml('') });
+
+    expect(config.mcpTimeoutMs).toBe(90_000);
+    expect(config.mcpConnectTimeoutMs).toBe(10_000);
+    expect(config.llmRetry).toEqual({ maxRetries: 2, maxRetryDelayMs: 15_000 });
+    expect(config.planLimits).toEqual({
+      timeoutMs: 20_000,
+      totalStepsMax: 20,
+      replanMaxPerRun: 6,
+    });
+  });
+
+  it('runtime / plan 可配置且逐项生效', () => {
+    const config = loadConfig({
+      env: okEnv,
+      configPath: writeYaml(
+        'runtime:\n  mcp_timeout_ms: 120000\n  mcp_connect_timeout_ms: 5000\n' +
+          '  llm_max_retries: 0\n  llm_retry_max_delay_ms: 0\n' +
+          'plan:\n  timeout_ms: 30000\n  total_steps_max: 12\n  replan_max_per_run: 3\n',
+      ),
+    });
+
+    expect(config.mcpTimeoutMs).toBe(120_000);
+    expect(config.mcpConnectTimeoutMs).toBe(5_000);
+    expect(config.llmRetry).toEqual({ maxRetries: 0, maxRetryDelayMs: 0 });
+    expect(config.planLimits).toEqual({
+      timeoutMs: 30_000,
+      totalStepsMax: 12,
+      replanMaxPerRun: 3,
+    });
+  });
+
+  it('越界 / 建连超时大于调用超时 / 拼错键一律拒绝启动', () => {
+    expect(messageOf('runtime:\n  mcp_timeout_ms: 999\n')).toContain('runtime.mcp_timeout_ms');
+    expect(messageOf('runtime:\n  llm_max_retries: 6\n')).toContain('runtime.llm_max_retries');
+    expect(
+      messageOf('runtime:\n  mcp_timeout_ms: 5000\n  mcp_connect_timeout_ms: 6000\n'),
+    ).toContain('不得大于');
+    expect(messageOf('plan:\n  total_steps_max: 0\n')).toContain('plan.total_steps_max');
+    expect(messageOf('plan:\n  replan_max_per_run: 51\n')).toContain('plan.replan_max_per_run');
+    expect(messageOf('plan:\n  total_steps: 5\n')).toContain('plan');
+  });
+
+  it('runtime / plan 只认 YAML：同名环境变量不再生效', () => {
+    const config = loadConfig({
+      env: { ...okEnv, MCP_TIMEOUT_MS: '15000', LLM_MAX_RETRIES: '5' },
+      configPath: writeYaml(''),
+    });
+
+    expect(config.mcpTimeoutMs).toBe(90_000);
+    expect(config.llmRetry.maxRetries).toBe(2);
+  });
+});
+
+describe('配置可观测（2026-11-26）', () => {
+  it('summarizeConfig 输出生效值且不含任何密钥 / 签名材料', () => {
+    const authSecret = 'a'.repeat(40);
+    const fileSignSecret = 'b'.repeat(40);
+    const deepseekKey = 'sk-should-never-appear';
+    const config = loadConfig({
+      env: {
+        ...okEnv,
+        AUTH_SECRET: authSecret,
+        FILE_SIGN_SECRET: fileSignSecret,
+        DEEPSEEK_API_KEY: deepseekKey,
+      },
+      configPath,
+    });
+
+    const text = JSON.stringify(summarizeConfig(config));
+
+    expect(text).not.toContain(authSecret);
+    expect(text).not.toContain(fileSignSecret);
+    expect(text).not.toContain(deepseekKey);
+    expect(text).toContain('"auth_enabled":true');
+    expect(text).toContain('"plan_total_steps_max":20');
+  });
+
+  it('unknownEnvKeys 只报本服务前缀的未知键（拼错 / 已废弃）', () => {
+    const keys = unknownEnvKeys({
+      MCON_TIMEOUT_MS: '90000',
+      MCP_TIMEOUT_MS: '90000',
+      PATH: '/usr/bin',
+      HOME: '/root',
+      PORT: '3000',
+    });
+
+    expect(keys).toEqual(['MCON_TIMEOUT_MS', 'MCP_TIMEOUT_MS']);
   });
 });

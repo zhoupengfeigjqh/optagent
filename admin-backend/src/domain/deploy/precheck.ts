@@ -1,25 +1,3 @@
-/**
- * 部署前校验（`FR-027`、`SC-020`，`data-model.md` §7.2）。
- *
- * 三条硬性口径：
- * 1. **只读**——在任何写入发生**之前**执行；
- * 2. **一次性列出全部错误项**（不是发现一个就停），每条可定位到
- *    具体的用户、数字人与配置类别；
- * 3. **校验所需信息读取不到时按失败处理**，MUST NOT 视为通过
- *    （否则"读不到"会伪装成"没问题"）。
- *
- * 四类校验项：
- * | # | 类别 | 内容 |
- * |---|---|---|
- * | ① | `config_integrity` | SOUL 非空；五类配置无缺字段 |
- * | ② | `reference_validity` | 三类引用均存在于统一清单（含"被引用的 MCP 服务已被删除"） |
- * | ③ | `name_path_safety` | 数字人名、用户标识不含路径分隔符或 `..` |
- * | ④ | `target_writable` | 目标位置可写 |
- *
- * **2026-09-27**：原第 ⑤ 类 `runtime_form`（"目标运行形态下有地址"）随运行形态
- * 概念一并下架——MCP 连接地址是**单一 url**，其有效性已由 ② 的引用有效性
- * 覆盖（服务不存在即失败），且 `http` 服务的 url 在保存期即必填。
- */
 import { ERROR_CODES } from '../error-codes.js';
 import { detectAnomalies } from '../config-center/references.js';
 import type { AgentDesignDocument } from '../config-center/agent-design.js';
@@ -46,20 +24,11 @@ export interface PrecheckUser {
 
 export interface PrecheckInput {
   users: PrecheckUser[];
-  /** 读取数字人设计态；不存在返回 `null` */
   readDesign(name: string): AgentDesignDocument | null;
   index: ReferenceIndex;
   /** 内置工具目录不可得的原因（非 `null` 即"信息读取不到"） */
   toolsUnavailableReason: string | null;
-  /** 目标目录是否可写（注入以便单测；缺省用 fs 探测） */
   isWritable(userId: string): boolean;
-  /**
-   * 本体库内快照的完整性检查（2026-10-17）：返回缺失文件的可读原因，完整返回 `null`。
-   *
-   * 名称存在于索引**不等于**文件齐备（手删过、旧口径导入的残缺快照）；
-   * 不在这里拦，物化阶段会在部署循环中途抛错，变成"部分用户已写、部分失败"。
-   * 可选：不关心本体的单测可以不提供。
-   */
   ontologyIssue?(ontologyRef: string): string | null;
 }
 
@@ -79,7 +48,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
       continue;
     }
 
-    // ④ 目标可写
     if (!input.isWritable(user.user_id)) {
       errors.push({
         user_id: user.user_id,
@@ -104,7 +72,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
 
       const design = input.readDesign(agentName);
       if (!design) {
-        // 关联了不存在的数字人：属配置完整性问题，按失败处理
         errors.push({
           user_id: user.user_id,
           agent_name: agentName,
@@ -115,7 +82,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
         continue;
       }
 
-      // ① 配置完整性（004：soul 为结构化对象，必填项是**主要使命**）
       if (!design.soul || typeof design.soul.mission !== 'string' || design.soul.mission.trim() === '') {
         errors.push({
           user_id: user.user_id,
@@ -151,7 +117,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
         });
       }
       // 场景字段约束：手工改过设计态文件 / 旧文档的情况在这里兜底
-      // （不与上面的"整体不完整"重复判定：形状合法才逐项校验）
       if (design.scenario && Array.isArray(design.scenario.data_prep_dirs)) {
         for (const issue of scenarioFieldIssues(design.scenario)) {
           errors.push({
@@ -162,7 +127,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
             message: `数字人 ${agentName} 的场景字段约束非法：${issue}`,
           });
         }
-        // 目录级可上传类型（2026-10-13）：同一出口并入 config_integrity 预检
         for (const issue of scenarioUploadIssues(design.scenario)) {
           errors.push({
             user_id: user.user_id,
@@ -174,7 +138,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
         }
       }
 
-      // ② 引用有效性（信息读取不到即按失败处理）
       if (input.toolsUnavailableReason && (design.enabled_tools ?? []).length > 0) {
         errors.push({
           user_id: user.user_id,
@@ -205,9 +168,8 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
           });
         }
 
-        // 本体库内快照完整性：名称有效不代表两个必需文件齐备
         for (const ref of design.ontologies ?? []) {
-          if (!input.index.ontologies.has(ref)) continue; // 已由上面的引用有效性报告
+          if (!input.index.ontologies.has(ref)) continue;
           const issue = input.ontologyIssue?.(ref) ?? null;
           if (issue !== null) {
             errors.push({
@@ -227,7 +189,6 @@ export function runPrecheck(input: PrecheckInput): PrecheckError[] {
   return errors;
 }
 
-/** 是否有错误（`passed` 的等价判定） */
 export function precheckPassed(errors: PrecheckError[]): boolean {
   return errors.length === 0;
 }

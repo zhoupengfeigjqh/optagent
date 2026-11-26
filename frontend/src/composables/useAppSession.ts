@@ -1,18 +1,3 @@
-/**
- * 全局会话上下文（`provide/inject` 的注入键）
- *
- * 设计（`research.md` D4）：
- * - 本模块在工作台视图 `views/WorkbenchView.vue` 调用**一次**，完成全部领域 composable 的装配并 `provide` 到组件树
- * - 其余 `useXxx()` 组件内访问器一律 `inject` 本上下文，**不各自新建状态**
- * - 测试通过 `createAppSession({ fetchImpl, now, storage })` 注入 `fetch` 桩、假时钟与内存存储
- *
- * 装配顺序即依赖方向（无环）：
- * `client/toast → preview/workspace/models/uploads/mention → threads → schedule → chat → agents`
- *
- * ⚠️ 各领域模块会 `import { useSession } from './useAppSession'`，与本模块 `import { createXxxStore }`
- * 形成 ESM 循环引用。该循环是安全的：所有跨模块引用都只出现在**函数体内部**（延迟求值），
- * 模块求值期不会触碰对方的绑定。
- */
 
 import { computed, getCurrentInstance, inject, provide, ref, type InjectionKey } from 'vue'
 
@@ -49,77 +34,46 @@ import {
   type UrlLike,
 } from '../utils/thread-restore'
 
-/** 构造参数（全部可选，测试可注入桩）。 */
 export interface AppSessionOptions {
-  /** API 基础地址；默认取 `VITE_API_BASE_URL`，缺省同源相对路径（开发期经 Vite 代理，D3） */
   baseUrl?: string
-  /** `fetch` 实现（测试注入） */
   fetchImpl?: typeof fetch
-  /** 时钟（测试注入假时钟） */
   now?: () => number
-  /** 本地偏好存储；`null` 关闭持久化（测试注入内存实现） */
   storage?: Storage | null
 }
 
-/** 装配完成的会话上下文。 */
 export interface AppSession {
   readonly agents: AgentsStore
   readonly threads: ThreadsStore
-  /**
-   * 定时任务（015）：设置页覆盖层的全部状态。
-   *
-   * 装配位置刻意在 `threads` 之后、`agents` 之前——它要读会话列表（信号到达后刷新左栏），
-   * 又要在切换数字人时被 `agents.onSwitched` 清空重拉；这一顺序即依赖方向（无环）。
-   */
   readonly schedule: ScheduledTasksStore
   readonly chat: ChatStreamStore
   readonly models: ModelsStore
   readonly uploads: UploadsStore
   readonly mention: FileMentionStore
-  /**
-   * `/技能名` 选择（2026-11-07）：与 `mention` 同层装配——两者都只服务输入区的标记落字，
-   * 不参与会话/运行态；清单按"当前数字人"懒加载，切换时清空。
-   */
   readonly skillMention: SkillMentionStore
   readonly workspace: WorkspaceStore
-  /**
-   * 空数据新手引导（014）：只在切换数字人成功后判定，气泡挂在输入区「+」上。
-   * 状态仅存活于内存，不写存储（见 `spec.md` 假设）。
-   */
   readonly emptyHint: EmptyDataHint
   readonly search: SessionSearchStore
   readonly preview: PreviewStore
-  /** 后台产出（R11）：列表 + 未读数 + 标记已读 + 信号订阅 */
   readonly produced: ProducedStore
-  /** 下一步动作提示（007）：轮末拉取窗口（不阻塞、失败静默） */
   readonly nextSteps: NextStepsStore
   readonly toast: ToastStore
-  /** 文件原始 API（workspace/uploads/preview 各 store 的数据源；规则选择器等直接用） */
   readonly files: FilesApi
   /**
    * 术语替换预检（018）：发送前的一次性调用，由 `useChatPanel` 的确认弹窗消费。
    * 只做传输，不含业务判断（开关/字典/降级全在服务端）。
    */
   readonly termNormalize: TermNormalizeApi
-  /** 注入的时钟（供需要本地计时的场景使用） */
   readonly now: () => number
   /**
    * 装配时恢复出的会话 id（002 特性）：URL `?thread=` 优先、本地存储兜底；无则 `null`。
    * `App.vue` 首屏据此自动选中并加载历史（会话已不存在时静默回空态）。
    */
   readonly initialThreadId: string | null
-  /** 记住（或清除）当前会话：地址栏 + 本地存储双写，供刷新后恢复 */
   rememberActiveThread(threadId: string | null): void
 }
 
-/** 注入键。 */
 export const APP_SESSION_KEY: InjectionKey<AppSession> = Symbol('optagent.app-session')
 
-/**
- * 装配并（在组件内）`provide` 会话上下文。
- *
- * 在组件内调用一次即可；在测试中调用（无组件实例）时只装配不 `provide`。
- */
 export function useAppSession(options: AppSessionOptions = {}): AppSession {
   const session = createAppSession(options)
   if (getCurrentInstance() !== null) {
@@ -139,13 +93,6 @@ export function useSession(): AppSession {
   return session
 }
 
-/**
- * HMR 保护：本模块是 `provide/inject` 的**唯一来源**，且持有 `APP_SESSION_KEY`。
- *
- * 若热更新替换本模块，`APP_SESSION_KEY` 会变成**新的 Symbol**，而 `provide` 仍注册在旧
- * Symbol 上，子组件的 `useSession()` 注入失败 → 抛错 → **整页白屏（看不到任何内容）**。
- * 因此改本文件时放弃热更新，直接整页刷新以重建模块图。
- */
 if (import.meta.hot) {
   import.meta.hot.accept(() => {
     location.reload()
@@ -173,17 +120,8 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
    */
   const initialThreadId = readRestoredThread(storage)
 
-  /**
-   * 当前会话 id：会话、聊天流、搜索共享的单一事实源。
-   *
-   * MUST NOT 用 `initialThreadId` 预置：本 ref 表达"当前选中"这一**状态**，只由选中动作
-   * 驱动；而 `useNextSteps` / `useChatStream` 的 watch 都以"它发生变化"为触发条件，预置
-   * 会让初值不产生变化——刷新时 `WorkbenchView.restoreThread` 写回的是同一个 id，下一步
-   * 动作卡片因此永不恢复。"要恢复哪个会话"是 `initialThreadId`（值），二者各司其职。
-   */
   const activeThreadId = ref<string | null>(null)
 
-  /** 记住当前会话：地址栏 + 本地存储双写（任一步失败都不影响会话本身）。 */
   function rememberActiveThread(threadId: string | null): void {
     writeStoredThread(storage, threadId)
     const url = currentUrl()
@@ -197,7 +135,6 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
 
   const produced = createProducedStore({ produced: createProducedApi(client) })
   const preview = createPreviewStore({ files: filesApi })
-  // 删除动作需要提示成功/失败原因，故 workspace 依赖 toast
   const workspace = createWorkspaceStore({ files: filesApi, toast })
 
   /**
@@ -210,12 +147,9 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
   const models = createModelsStore({ models: modelsApi, storage })
   const uploads = createUploadsStore({ files: filesApi, toast })
   // 引用按会话分桶（023 v1.4）：与草稿同一套"切走存、切回取"，否则旧会话的不可见引用
-  // 会在新会话里占名（多出 `(1)`），甚至被当成附件发出去
   const mention = createFileMentionStore({ workspace, toast, thread: () => activeThreadId.value })
-  // `/技能` 只依赖数字人接口（清单作用域由服务端"当前选中"决定），与文件空间无关
   const skillMention = createSkillMentionStore({ agents: agentsApi })
 
-  // 惰性 computed：`agents` 在下方才创建，getter 仅在首次访问时求值（打破声明顺序，无环）
   const currentAgentName = computed(() => agents.currentAgent.value?.agent_name ?? null)
 
   const threads = createThreadsStore({
@@ -238,8 +172,6 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
 
   const search = createSessionSearchStore({ messages: () => threads.messages.value })
 
-  // 下一步动作提示（007 修订 · Tail Protocol）：与 `threads` 共享同一个 `activeThreadId` ——
-  // 切会话即清空并一次性恢复最新卡片；流式轮的卡片由 done 事件直推（见 `applyNextActions`）
   const nextSteps = createNextStepsStore({
     nextSteps: createNextStepsApi(client),
     activeThreadId,
@@ -250,15 +182,10 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     getModel: () => models.current.value,
     getAgentName: () => currentAgentName.value,
     stopRun: (threadId) => threadsApi.stop(threadId).then(() => undefined),
-    /**
-     * 轮末：刷新会话详情（正文/工具卡片即时可见）与会话列表（新会话进入侧栏、
-     * 标题与 updated_at 排序同步到最新）；卡片已随 done 直推，无需轮询。
-     */
     onTurnFinished: async () => {
       await threads.refresh()
       await threads.loadList()
     },
-    /** done 直推的当轮卡片写入（`useChatStream` 收到 `done.next_actions` 时调用） */
     applyNextActions: (steps) => nextSteps.apply(steps),
     feedbackOf: (messageId) =>
       threads.messages.value.find((message) => message.id === messageId)?.feedback ?? null,
@@ -278,22 +205,14 @@ export function createAppSession(options: AppSessionOptions = {}): AppSession {
     getPhase: () => chat.phase.value,
     toast,
     onSwitched: async () => {
-      // 009：会话按数字人隔离 ⇒ 切换即进入**新的空对话视图**（不落盘，见 ThreadsStore.startNew）
       threads.startNew()
-      // 012：上传记录属于上一个数字人的数据域，切换即清（终态清空，进行中的按 FR-013 保留）
       uploads.clear()
-      // 2026-11-07：技能清单与已选技能同样属于上一个数字人——清空缓存，下次打开面板再拉
       skillMention.reset()
-      // 后台产出同样是数字人级的（后端按当前作用域定位产出目录）：先清旧条目/旧未读数，
-      // 再按新作用域重拉。铃铛是常驻组件、只在挂载时拉一次，这里不补就一直是上一个数字人的。
       produced.clear()
-      // 015：任务归属也是数字人级的——旧任务一律不再成立，清空后按新作用域重拉
-      // （内部自带代际，切人瞬间在途的旧响应不会覆盖回来）
       schedule.onAgentSwitched()
       await threads.loadList()
       // 文件空间视角＝当前选中数字人（场景随数字人存放）：切换后可见目录清单会变，必须重取
       await workspace.load()
-      // 014：清单就绪后判定空数据引导（加载失败时内部自查 error，不会误弹）
       emptyHint.onAgentSwitched()
       await produced.refresh()
     },
@@ -332,7 +251,6 @@ function defaultStorage(): Storage | null {
   }
 }
 
-/** 当前地址的最小视图（非浏览器环境返回 `null`）。 */
 function currentUrl(): UrlLike | null {
   try {
     const location = globalThis.location

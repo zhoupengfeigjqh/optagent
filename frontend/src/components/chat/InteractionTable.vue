@@ -1,31 +1,14 @@
 <script setup lang="ts">
-/**
- * 对象数组 → **表格**（HITL 递归表单，2026-09-23）。
- *
- * 纯展示 + 一处交互（删行，向上抛事件）：行的增删与单元格取值都由父级 `InteractionField`
- * 经表单状态完成，本组件不持有入参数据——这样"表格长什么样"与"值怎么变"互不纠缠。
- *
- * 列由父级算好传入（schema 声明列 + 值里实际出现的列）；单元格复用 `InteractionControl` 的
- * 紧凑模式，因此单元格里能填什么与字段行里完全一致。
- *
- * 列头与字段行的主标签同一口径（`fieldLabelOf`：title 优先、参数名兜底，2026-10-27）——
- * 否则同一张表里字段叫「产线」、列头却叫 `line`，读起来像两个东西。
- */
 import { fieldLabelOf, isPlainObject } from '../../utils/arg-schema'
 import type { FieldSchema } from '../../utils/arg-schema'
 import type { NodePath } from '../../utils/json-path'
 import InteractionControl from './InteractionControl.vue'
 
 const props = defineProps<{
-  /** 表格字段本身的路径（单元格路径 = 本路径 + [行下标, 列名]） */
   path: NodePath
-  /** 列名（顺序即表头顺序） */
   columns: string[]
-  /** 行（保留原始元素与下标：过滤会让下标错位，写入就会落到别的行） */
   rows: unknown[]
-  /** 元素 schema（单元格控件形态的依据；列不在它声明范围内时为空 schema） */
   itemSchema: FieldSchema
-  /** 某个列对应的单元格 schema（列未声明 → 空 schema） */
   cellSchemaOf: (column: string) => FieldSchema
 }>()
 

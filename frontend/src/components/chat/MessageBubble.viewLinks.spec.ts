@@ -1,10 +1,3 @@
-/**
- * 组件测试：视图入口行在气泡里的**位置与装配**（`TR-45` / `TR-48`）
- *
- * 位置是本特性的核心设计决定：入口行 MUST 在**回答正文之后**、状态提示与操作区之前
- * （它是"正文的附件"，不是"对消息的操作"）。这里用 DOM 顺序断言把它钉住——
- * 谁把它挪到工具卡片上方或操作区之后，本用例就会失败。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -79,7 +72,6 @@ describe('MessageBubble —— 入口取自"本条回答全部工具调用"（TR
     const links = wrapper.findAll('.message-view-link')
 
     expect(links.map((link) => link.attributes('href'))).toEqual([`${ORIGIN}/a`, `${ORIGIN}/b`])
-    // 首次已给名称 → 不被后面那次"无名称"的同一地址抹掉
     expect(links[0]?.text()).toBe('A 明细')
   })
 
@@ -108,7 +100,6 @@ describe('MessageBubble —— 入口点击向上透传（2026-10-15）', () => 
     expect(wrapper.emitted('open-view')).toEqual([
       [{ url: `${ORIGIN}/a`, name: 'A 明细', kind: 'url' }],
     ])
-    // 不再是"直跳新窗口"的 open-link 口径（地址可能是同源页面或本地文件）
     expect(wrapper.emitted('open-link')).toBeUndefined()
   })
 

@@ -1,13 +1,3 @@
-/**
- * MCP 客户端（`FR-045`、`FR-047`）。
- *
- * 复用既有 `@modelcontextprotocol/sdk`（`research.md` D1 第 2 条理由）——
- * 与运行环境**同一个客户端实现**，避免"平台测试通过、运行环境连不上"
- * 这类协议口径漂移。
- *
- * 与运行环境的 `McpManager` 的差别在于**生命周期**：管理平台是"按需连接、
- * 用完即断"，不维持长连接池——因为这里的调用是低频的运维动作。
- */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -73,9 +63,7 @@ function assertTargetUsable(target: McpConnectionTarget, serviceName: string): v
   }
 }
 
-/** 把底层异常归类为可读的失败原因（`FR-047` 要求"明确的失败原因"） */
 export function classifyMcpError(err: unknown): { code: string; message: string } {
-  // fetch（undici）的顶层 message 只有 "fetch failed"，真实原因在 cause 链上
   // （如 cause.code = ECONNREFUSED）——必须展开，否则归类退化成泛化错误
   const parts: string[] = [err instanceof Error ? err.message : String(err)];
   const seen = new Set<unknown>([err]);
@@ -111,23 +99,17 @@ export function classifyMcpError(err: unknown): { code: string; message: string 
 
 export interface McpClientOptions {
   timeoutMs: number;
-  /** 测试可注入假客户端工厂 */
   createClient?: (target: McpConnectionTarget) => Promise<McpClientLike>;
 }
 
-/** MCP 客户端的最小契约（SDK Client 的子集） */
 export interface McpClientLike {
   listTools(): Promise<McpToolDescriptor[]>;
-  /** 一次**实际能力验证**：调用一个只读方法确认服务真的可用（`FR-047`） */
   ping(): Promise<void>;
   close(): Promise<void>;
 }
 
 async function defaultCreateClient(target: McpConnectionTarget): Promise<McpClientLike> {
   const client = new Client({ name: 'optagent-admin-backend', version: '0.1.0' });
-  // 请求头经 `requestInit` 交给 SDK（`StreamableHTTPClientTransportOptions.requestInit`）：
-  // 这是 MCP 生态的通行做法（`{"mcpServers":{...,"headers":{...}}}` 片段同义）。
-  // 空对象不传，保持"没有该选项"的既有行为（便于与旧日志/旧行为对齐）。
   const headers = target.headers && Object.keys(target.headers).length > 0 ? target.headers : null;
   const transport =
     target.transport === 'stdio'
@@ -144,17 +126,12 @@ async function defaultCreateClient(target: McpConnectionTarget): Promise<McpClie
       return res.tools.map((tool) => ({
         name: tool.name,
         description: tool.description ?? '',
-        // 根标题（2026-10-30，方案 A）：服务端 `@mcp.tool(title=...)` → `x-title`，
-        // 删掉 SDK 生成的类名 `title`；服务端没声明就原样透传（见 `withServerTitleX`）。
-        // 字段级 `title` 不受影响——它是运行环境 HITL 表单的字段标签。
         parameters: withServerTitleX(
           tool.inputSchema ?? { type: 'object', properties: {} },
           tool.title,
         ) as Record<string, unknown>,
       }));
     },
-    // `ping` 是 MCP 协议内建的**只读**方法：能返回即证明协议层真的通了，
-    // 比"TCP 连上了"强得多——这正是 FR-047 要的"一次实际能力验证"。
     ping: async () => {
       await client.ping();
     },
@@ -173,7 +150,6 @@ export class McpClientService {
     this.createClient = options.createClient ?? defaultCreateClient;
   }
 
-  /** 列工具（`FR-045`）；失败抛 `ADM_RUNTIME_UNREACHABLE` 并给出可读原因 */
   async listTools(serviceName: string, target: McpConnectionTarget): Promise<McpToolDescriptor[]> {
     assertTargetUsable(target, serviceName);
     return this.withClient(target, serviceName, (client) => client.listTools());

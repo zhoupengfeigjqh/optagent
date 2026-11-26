@@ -1,32 +1,4 @@
 <script setup lang="ts">
-/**
- * 产出正文的**只读结构化视图**（按值递归，2026-09-26）。
- *
- * 规则与 HITL 表单（`InteractionField`）**对齐**，但判据从 schema 换成**值本身**：
- * 产出正文只有数据、没有 schema，也不需要编辑。故本组件**不注入任何表单上下文**，
- * 只吃一个值——这也是它不能直接复用 `InteractionField` 的原因。
- *
- * 分派（与 HITL 同构）：
- * - **视图链接**（2026-10-10，`TR-40`/`TR-41`）：字段名为 `viewUrl` 且值是字符串 → 渲染为
- *   链接（文本 = 值本身）。**只按字段名判定**，不看值像不像 URL；值的归一化
- *   （缺 `http://host:port` 前缀时补当前页面入口）交给 `utils/view-link.ts`（唯一实现）
- *   - **点击口径**（2026-10-20 修订）：普通左键派发 `open-view`（`ViewLinkTarget`），由装配层
- *     交给 `usePreview.openView()` 分流——同源进右侧面板、异源 / 预检失败才新标签页。
- *     `href` / `target` 保留（复制链接、中键新标签），修饰键点击不拦截。
- *     递归实例必须**逐层上抛**该事件（链接多半在子实例里渲染）。
- * - 对象 → 逐行 `key: value`（递归，嵌套缩进）
- * - 对象数组 → **表格**（列 = 各元素键的并集）；**行与列都有上限**（`PRODUCED_ARRAY_MAX_ITEMS`
- *   / `PRODUCED_TABLE_MAX_COLUMNS`），超出只提示总数。弹窗宽度是自适应的，故横向溢出
- *   **由表格容器自己滚动**（`max-content` 表宽 + `overflow-x`），不把弹窗撑宽。
- * - 其他数组 → **列表**（一行一项）
- * - 超过深度上限 → **JSON 逃生舱**（`<pre>`）
- *
- * `compact`（表格单元格用）：**非标量直接以 JSON 文本呈现、不再递归**——与
- * `InteractionControl` 的 compact 同口径（那里是非标量强制 JSON 文本框）。
- * 否则一格会再长出一棵树，列宽被撑爆。
- *
- * 安全：全部走**文本插值**，`v-html` 一律不用（正文可能含 HTML/脚本）。
- */
 import { computed } from 'vue'
 
 import { isPlainObject } from '../../utils/arg-schema'
@@ -45,11 +17,9 @@ import {
 
 const props = withDefaults(
   defineProps<{
-    /** 已解析的值（对象 / 数组 / 标量） */
     value: unknown
     /** 当前深度（递归自增；达到上限交 JSON 逃生舱） */
     depth?: number
-    /** 紧凑模式：非标量以 JSON 文本呈现（表格单元格用） */
     compact?: boolean
     /**
      * 该值所属的**字段名**（对象行 = 键；表格单元格 = 列名）。
@@ -63,37 +33,15 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /**
-   * 视图链接点击（2026-10-20）：交给装配层决定怎么打开。
-   *
-   * 载荷与入口行（`MessageViewLinks`）同一份契约：同源 → 右侧面板、异源 → 新标签页。
-   * 组件自身**不判定**同源（那是 `usePreview.openView` 的唯一职责）。
-   */
   'open-view': [item: ViewLinkTarget]
 }>()
 
 const isScalar = computed(() => !isPlainObject(props.value) && !Array.isArray(props.value))
 
-/**
- * 视图链接地址（`null` = 不渲染为链接，按普通文本呈现）。
- *
- * 走 `computed`：模板每次渲染都会读它（宪章原则五：渲染路径不重复计算）。
- * 值判定与拼接只在 `utils/view-link.ts` 里实现一处（`TR-42`）。
- */
 const linkHref = computed(() =>
   isViewUrlField(props.fieldKey) ? resolveViewUrl(props.value) : null,
 )
 
-/**
- * 视图链接点击：普通左键交给上层（同源进面板 / 异源新标签），其余交给浏览器。
- *
- * 修饰键（Ctrl/Cmd/Shift/Alt）与非左键 MUST 放行：用户明确要"新标签 / 新窗口 / 下载"，
- * 拦住反而是倒退；中键同理（`auxclick` 本就不触发 `click`）。
- *
- * 不判"有没有监听方"：Vue 的 `emit` 没有返回值，读 `vnode.props` / `attrs` 又依赖挂载方式
- * （测试与模板编译的键名不一致，实测踩过）。本组件的 `viewUrl` 分支**只在装配层接线处使用**
- * （铃铛正文、工具卡片），两侧都监听 `open-view`，故直接拦截是确定的。
- */
 function onLinkClick(event: MouseEvent): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   const href = linkHref.value
@@ -102,7 +50,6 @@ function onLinkClick(event: MouseEvent): void {
   emit('open-view', toViewLinkTarget({ href, raw: String(props.value), kind: 'url' }))
 }
 
-/** 紧凑模式下非标量直接转 JSON 文本（不递归）；与"深度超限"共用逃生舱渲染 */
 const asRawJson = computed(
   () => (props.compact && !isScalar.value) || props.depth >= PRODUCED_JSON_MAX_DEPTH,
 )
@@ -127,14 +74,12 @@ const isEmptyContainer = computed(
 )
 const emptyLabel = computed(() => (isArray.value ? '[]' : '{}'))
 
-/** 数组按**表格**渲染的判据：非空且元素**全**是对象 */
 const asTable = computed(
   () =>
     isArray.value &&
     arrayItems.value.length > 0 &&
     arrayItems.value.every((item) => isPlainObject(item)),
 )
-/** 表头列（各元素键的并集，取自**全体**行，不随行的截断而变） */
 const allColumns = computed(() => (asTable.value ? columnsOfRows(arrayItems.value) : []))
 const columns = computed(() => allColumns.value.slice(0, PRODUCED_TABLE_MAX_COLUMNS))
 const hiddenColumnCount = computed(() =>
@@ -145,7 +90,6 @@ function cellOf(row: unknown, column: string): unknown {
   return isPlainObject(row) ? row[column] : undefined
 }
 
-/** 标量的可读文本；`null`/`undefined` 给占位而不是留白 */
 function scalarText(value: unknown): string {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'string') return value
@@ -168,12 +112,9 @@ function jsonText(value: unknown): string {
 </script>
 
 <template>
-  <!-- 每层都有同一个根钩子（`.produced-json`），便于样式与测试统一选取 -->
   <div class="produced-json">
-    <!-- 紧凑模式（表格单元格）或深度超限：交给 JSON 逃生舱，不再递归 -->
     <pre v-if="asRawJson" class="produced-json__raw">{{ jsonText(value) }}</pre>
 
-    <!-- 视图链接：分支必须排在纯标量之前（字符串也是标量，否则永远轮不到它） -->
     <a
       v-else-if="linkHref !== null"
       class="produced-json__link"
@@ -196,12 +137,10 @@ function jsonText(value: unknown): string {
       {{ emptyLabel }}
     </span>
 
-    <!-- 对象 → 逐行 key/value -->
     <dl v-else-if="isObject" class="produced-json__object">
       <template v-for="entry in objectEntries" :key="entry[0]">
         <dt class="produced-json__key">{{ entry[0] }}</dt>
         <dd class="produced-json__value">
-          <!-- 递归实例的点击必须逐层上抛：链接多半在**子实例**里渲染（对象行 / 表格单元格） -->
           <ProducedJsonView
             :value="entry[1]"
             :depth="depth + 1"
@@ -212,7 +151,6 @@ function jsonText(value: unknown): string {
       </template>
     </dl>
 
-    <!-- 对象数组 → 表格 -->
     <template v-else-if="asTable">
       <div class="produced-json__table-wrap">
         <table class="produced-json__table">
@@ -246,7 +184,6 @@ function jsonText(value: unknown): string {
       </p>
     </template>
 
-    <!-- 其他数组 → 列表 -->
     <template v-else-if="isArray">
       <ol class="produced-json__list">
         <li v-for="(item, index) in shownItems" :key="index" class="produced-json__list-item">
@@ -289,7 +226,6 @@ function jsonText(value: unknown): string {
   color: var(--color-text-muted);
 }
 
-/* 对象：键值两列（键不被值挤压，长值换行） */
 .produced-json__object {
   display: grid;
   grid-template-columns: minmax(6em, max-content) 1fr;
@@ -321,8 +257,6 @@ function jsonText(value: unknown): string {
   word-break: break-word;
 }
 
-/* 表格容器：滚动发生在这里。`max-width: 100%` + 表宽 `max-content` 是关键——
-   若表宽仍是 `100%`，列多时只会把每列压扁换行，横向滚动永远不会触发。 */
 .produced-json__table-wrap {
   max-width: 100%;
   overflow-x: auto;
@@ -345,7 +279,6 @@ function jsonText(value: unknown): string {
   vertical-align: top;
 }
 
-/* 单元格内容有上界：单格不因一长串 JSON 无限变宽，超长换行（不参与横向滚动） */
 .produced-json__table td {
   max-width: 24em;
   word-break: break-word;

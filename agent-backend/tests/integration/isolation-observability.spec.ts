@@ -1,16 +1,3 @@
-/**
- * 集成测试：隔离相关拒绝/降级的**可观测性**（009 FR-051/052、原则九）
- *
- * 隔离一旦生效，"看不到数据"必须能分清是"本就没有"还是"被拒绝/降级"：
- *
- * - 跨数字人目录参数被拒 → 结构化 `warn`（`event=dir.validation.rejected`，
- *   含 `user_id` / `agent_name` / 被拒的 `dir` / 状态码与原因）
- * - 陈旧（已移除）数字人被拒 → 结构化 `warn`（`event=agent.scope.unavailable`，
- *   含 `reason`），响应是可读文案而不是"看起来正常"
- * - 回写目录越界（签名合法但目录不对）→ 同样落结构化日志（可追溯到"谁在写哪里"）
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -46,7 +33,6 @@ function select(name: string) {
   return app.inject({ method: 'POST', url: `/api/agents/${encodeURIComponent(name)}/select` });
 }
 
-/** 结构化日志断言：按 event 找到那条，并校验字段 */
 function loggedEvent(
   warn: ReturnType<typeof vi.spyOn>,
   event: string,
@@ -122,7 +108,7 @@ describe('越界目录拒绝：结构化日志含用户/数字人/请求线索�
         'http://backend:3000',
         SECRET,
         USER,
-        agentScopedPath(AGENT, SPACE_TMP), // 不是产出目录
+        agentScopedPath(AGENT, SPACE_TMP),
         {},
       )}&filename=越界.json`;
       const res = await app.inject({ method: 'POST', url, payload: { ok: true } });
@@ -169,7 +155,6 @@ describe('数字人数据目录不可用：可读错误且**零回退**（FR-051
       headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
     });
 
-    // 可读错误：既不静默成功，也不假装"上传好了"
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect((res.json() as { error: { code: string } }).error.code).toBeTruthy();
 
@@ -200,7 +185,7 @@ describe('降级：陈旧数字人被拒的原因可观测、响应可读（FR-0
       expect(res.statusCode).toBe(409);
       const body = res.json() as { error: { code: string; message: string } };
       expect(body.error.code).toBe('AGENT_NOT_AVAILABLE');
-      expect(body.error.message).toContain('请重新选择'); // 用户可感知，不是"看起来正常"
+      expect(body.error.message).toContain('请重新选择');
 
       const fields = loggedEvent(warn, 'agent.scope.unavailable');
       expect(fields).toMatchObject({
@@ -213,7 +198,6 @@ describe('降级：陈旧数字人被拒的原因可观测、响应可读（FR-0
       warn.mockRestore();
     }
 
-    // 收尾：回到可用数字人
     expect((await select(AGENT)).statusCode).toBe(200);
   });
 });

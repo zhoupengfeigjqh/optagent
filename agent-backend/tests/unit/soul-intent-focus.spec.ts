@@ -1,11 +1,3 @@
-/**
- * 单元测试：SOUL 的「意图聚焦」开关（013）。
- *
- * 守住三条口径：
- * - 开关是**功能开关**，缺键 / 非布尔一律 false（fail-closed，与 007 同构）；
- * - 读取失败（文件缺失 / YAML 非法）→ false + 告警，绝不因配置读不出来就多发一次判定；
- * - 该键**不进 System Prompt 正文**（`stripFrontmatter` 结果逐字不变）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

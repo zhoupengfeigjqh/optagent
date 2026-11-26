@@ -1,10 +1,3 @@
-/**
- * 组件测试：数据准备目录的「可上传文件类型」窗口（`FR-001`~`FR-004`）。
- *
- * 覆盖口径：候选恰 11 项且顺序固定（2026-10-14 增 `.xls`，2026-10-20 增 `.html`）；未配置时默认勾选 `.csv` + `.xlsx`；
- * 取消全部则禁用保存并提示；保存 emit `save` 并关窗；取消与 Esc 不发 `save` 且不改 props；
- * 打开时回显已有配置（副本）；键盘可达（原生 checkbox + label）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ScenarioUploadTypesDialog from './ScenarioUploadTypesDialog.vue'

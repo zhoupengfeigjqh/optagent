@@ -1,12 +1,3 @@
-/**
- * 单元测试：数字人配置解析（`MCP.json`）
- *
- * 重点守住 2026-09-16 的真实报错回归：管理员把 `MCP.json` 里的 `transport`
- * 按 MCP 生态的写法改成 `streamable-http` 后，运行环境报
- * "transport 须为 stdio|http" 并**把整个数字人从列表排除**。
- * `http` 与 `streamable-http` 本就是一回事（SDK 的 Streamable HTTP 传输），
- * 因此别名必须被接受，且归一到规范值 `http`。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,7 +6,6 @@ import { AgentConfigError, loadAgentConfig } from '../../src/domain/agent-instan
 
 let root: string;
 
-/** 写一个最小可加载的数字人目录（SOUL/TOOL/MCP 三件套） */
 function writeAgent(name: string, servers: unknown): string {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
@@ -351,7 +341,6 @@ describe('System Prompt 的技能小节与按需读取引导（2026-11-07）', (
   const HINT =
     '如果需求与上述技能相关，请调用【read_skill】读取技能正文，或用【grep_skill】检索关键词定位，再回到【read_skill】进行精读。';
 
-  /** 在最小可加载目录上补 skills/{name}/SKILL.md */
   function withSkills(name: string, skills: Record<string, string>): string {
     const dir = writeAgent(name, []);
     for (const [skillName, description] of Object.entries(skills)) {

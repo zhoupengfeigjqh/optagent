@@ -1,9 +1,3 @@
-/**
- * 单元测试：MCP 服务级配置（`FR-044`，`data-model.md` §3.2）
- *
- * 覆盖"同一服务只有一份配置"、**单一连接地址**（2026-09-27：取消按运行形态
- * 分形态声明）、新建/删除，以及五类校验的边界。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,7 +26,6 @@ const BASE = {
  */
 const ALLOWED = ['ocr_image'];
 
-/** 建立或更新 'ocr'（多数用例只关心"保存后读到什么"，故两条路径合并） */
 function upsert(overrides: Record<string, unknown> = {}): void {
   const input = { ...BASE, ...overrides };
   if (configs.exists('ocr')) configs.upsert('ocr', input, store.revision());
@@ -145,7 +138,6 @@ describe('校验', () => {
     // 管理员按 MCP 生态习惯写别名时不能拦住他（运行环境侧同样接受该别名）
     upsert({ transport: 'streamable-http' });
     expect(configs.read('ocr').transport).toBe('http');
-    // 归一后再存一次，落盘文档里也只有规范值
     expect(
       store.readJson<{ items: Record<string, { transport: string }> }>('mcp-services.json')?.items.ocr
         ?.transport,
@@ -207,12 +199,10 @@ describe('校验', () => {
   });
 
   it('已废弃的 writable / permission_scope 不再校验也不再透出（2026-09-15 产品决定）', () => {
-    // 旧客户端仍可能把这两个字段发上来：接受请求但不落任何效果
     upsert({ writable: true, permission_scope: '仅图片识别' });
     const saved = configs.read('ocr') as Record<string, unknown>;
     expect(saved.writable).toBeUndefined();
     expect(saved.permission_scope).toBeUndefined();
-    // 历史存档里的遗留字段在读取时被收敛掉（sanitize）
     store.writeJson('mcp-services.json', {
       items: {
         ocr: {

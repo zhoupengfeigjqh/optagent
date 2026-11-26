@@ -1,14 +1,3 @@
-/**
- * 单元测试：MCP 连接级失败即降级（2026-09-16 十五次调整，方案 A）。
- *
- * 要守住的场景（真实部署已踩过）：
- * 1. streamable-http 无常驻连接——服务关停后 onClose 不触发，状态恒为绿；
- * 2. 服务重启后旧 session id 被服务端拒（404 "Session not found"），
- *    而失败路径只记日志不清理 → 旧客户端永久占坑，工具反复被剔除，直到实例换代。
- *
- * 方案 A：callTool/listTools 以连接级错误失败（McpError 以外的一切）即 markUnavailable——
- * 状态变红、排退避重连，重连做全新 initialize 自动恢复，无需重启 backend。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 
@@ -28,11 +17,9 @@ const CFG: McpServerConfig = {
   url: 'http://ocr:8000/mcp',
 };
 
-/** 脚本化假客户端：每段"会话"的行为由调用方注入，可中途切换（模拟服务关停/重启） */
 function fakeClient(script: {
   callTool?: (name: string, args: unknown) => Promise<unknown>;
   listTools?: () => Promise<{ tools: McpToolInfo[] }>;
-  /** 健康探针；不提供 = 该 server 不支持 ping（探测直接走 listTools） */
   ping?: () => Promise<unknown>;
 }): McpClientLike & { close: () => Promise<void> } {
   return {
@@ -44,7 +31,6 @@ function fakeClient(script: {
   };
 }
 
-/** 连接级失败的典型形态：StreamableHTTPError（如 404 Session not found），非 McpError */
 function transportError(message = 'Streamable HTTP error: Session not found'): Error {
   return Object.assign(new Error(message), { code: 404 });
 }
@@ -68,7 +54,7 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
 
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('connect ECONNREFUSED');
 
-    expect(callTool).toHaveBeenCalledTimes(2); // 首次 + 重试 1 次
+    expect(callTool).toHaveBeenCalledTimes(2);
     expect(manager.statusOf('ocr')).toBe('failed');
     expect(manager.isAvailable('ocr')).toBe(false);
     expect(statuses).toContainEqual(['ocr', 'failed']);
@@ -76,7 +62,6 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
   });
 
   it('服务重启场景：旧 session 被拒（404）→ 降级 → 退避重连拿到新 session 自动恢复', async () => {
-    // 第一段会话：服务"活着"但服务端已遗忘其 session id（容器重启过）
     let session = fakeClient({
       callTool: async () => {
         throw transportError();
@@ -93,13 +78,12 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('Session not found');
     expect(manager.statusOf('ocr')).toBe('failed');
 
-    // 退避表第一档 5s：重连 = 全新 initialize（这里表现为 createClient 返回新会话）
     session = fakeClient({ callTool: async () => '识别结果' });
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(manager.statusOf('ocr')).toBe('connected');
     expect(statuses.filter(([, s]) => s === 'failed')).toHaveLength(1);
-    expect(statuses.filter(([, s]) => s === 'connected')).toHaveLength(2); // 初连 + 重连
+    expect(statuses.filter(([, s]) => s === 'connected')).toHaveLength(2);
     await expect(manager.callTool('ocr', 'ocr_image', {})).resolves.toBe('识别结果');
     await manager.closeAll();
   });
@@ -154,7 +138,6 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('ECONNREFUSED');
     expect(manager.statusOf('ocr')).toBe('failed');
 
-    // 服务已复活；不推进重试定时器，直接下一次调用触发惰性补试
     session = fakeClient({ callTool: async () => 'ok' });
     await expect(manager.callTool('ocr', 'ocr_image', {})).resolves.toBe('ok');
 
@@ -164,7 +147,6 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
 
   it('幂等：重复失败不叠加状态推送与重连定时器', async () => {
     const statuses: Array<[string, string]> = [];
-    // 服务 down：建连本身也失败（连接被拒），此后一直 down
     const manager = new McpManager({
       timeoutMs: 1000,
       createClient: async () => {
@@ -172,12 +154,9 @@ describe('McpManager —— 连接级失败即降级（十五次调整）', () =
       },
       onStatusChange: (server, status) => statuses.push([server, status]),
     });
-    // 建连失败同样只推一次 failed（connectAll 路径，既有行为）
     await manager.connectAll([CFG]);
     expect(statuses.filter(([, s]) => s === 'failed')).toHaveLength(1);
 
-    // 服务仍 down：调用走 requireClient → 惰性补试失败 → McpUnavailableError，
-    // 不产生第二次 failed 推送（markUnavailable 对已不在 clients 的服务直接返回）
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('当前不可用');
     await expect(manager.callTool('ocr', 'ocr_image', {})).rejects.toThrow('当前不可用');
 
@@ -224,12 +203,10 @@ describe('McpManager —— 保活重连（2026-09-23：退避用尽后不再停
     await manager.connectAll([CFG]);
     expect(manager.statusOf('ocr')).toBe('failed');
 
-    // 走完 5 档退避（5s + 15s + 30s + 60s + 60s = 170s）：全部失败，但**不停**
     await vi.advanceTimersByTimeAsync(170_000);
     expect(manager.statusOf('ocr')).toBe('failed');
     expect(manager.isAvailable('ocr')).toBe(false);
 
-    // 服务恢复；再等一个保活周期（120s）→ 自动接回，且工具恢复可用
     reachable = true;
     await vi.advanceTimersByTimeAsync(120_000);
 
@@ -252,7 +229,6 @@ describe('McpManager —— 保活重连（2026-09-23：退避用尽后不再停
     });
     await manager.connectAll([CFG]);
 
-    // 覆盖快节奏退避 + 三个保活周期，全程 down
     await vi.advanceTimersByTimeAsync(170_000 + 120_000 * 3);
 
     expect(manager.statusOf('ocr')).toBe('failed');
@@ -318,7 +294,6 @@ describe('McpManager —— 主动健康探测（2026-09-23：补齐假绿）', 
     expect(await manager.probe()).toEqual([]);
     expect(manager.statusOf('ocr')).toBe('connected');
 
-    // 第二次探测：已记下"该 server 无 ping"，直接 listTools，不再白试一次
     await manager.probe();
     expect(ping).toHaveBeenCalledTimes(1);
     expect(listTools).toHaveBeenCalledTimes(2);
@@ -392,7 +367,7 @@ describe('McpManager —— 建连有界超时与落定信号（2026-10-18）', 
     });
 
     const tracked = manager.connectAndTrack([CFG]);
-    expect(manager.statusOf('ocr')).toBe('unknown'); // 建连进行中仍是"尚无结果"，不误报故障
+    expect(manager.statusOf('ocr')).toBe('unknown');
 
     await vi.advanceTimersByTimeAsync(1_000);
     await tracked;
@@ -422,7 +397,7 @@ describe('McpManager —— 建连有界超时与落定信号（2026-10-18）', 
     settle?.({ listTools: async () => ({ tools: [] }), callTool: async () => 'ok', close });
     await vi.advanceTimersByTimeAsync(0);
     expect(close).toHaveBeenCalledTimes(1);
-    expect(manager.statusOf('ocr')).toBe('failed'); // 迟到的连接不入池
+    expect(manager.statusOf('ocr')).toBe('failed');
     await manager.closeAll();
   });
 

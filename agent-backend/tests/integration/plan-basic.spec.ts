@@ -1,10 +1,3 @@
-/**
- * 集成测试（进程内）：T308 —— 首轮规划 → 逐步收窄 → 推进 → 完成不挂起。
- *
- * 这一层验的是**装配后真的跑得动**：编排器给出的 `initialTools` / `initialMessages` /
- * hooks 挂到真实 pi loop 上，工具收窄生效、完成判定与推进顺序正确、
- * 正常完成**不走** `suspendTools`（FR-027 ①）。
- */
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ONTOLOGY_YAML, SECURITIES } from './support/plan-ontology.js';
@@ -43,10 +36,8 @@ describe('T308 首轮规划 → 执行 → 完成', () => {
       },
     });
 
-    // 首轮只看当前步的 coreAction（第 1 步没有依赖）
     expect(run.initialTools).toEqual(['erp__QueryInventory']);
 
-    // 第 2 步的可见集 = coreAction ∪ dependTools（按内容定位，不绑定跳序）
     const step2 = run.contexts.find((context) =>
       context.tools?.some((item) => item.name === 'erp__CreatePurchaseRecord'),
     );
@@ -69,7 +60,6 @@ describe('T308 首轮规划 → 执行 → 完成', () => {
     expect(run.suspends).toEqual([]);
     expect(run.events.some((event) => event.type === 'error')).toBe(false);
     expect(run.events.some((event) => event.type === 'done')).toBe(true);
-    // 每一步都下发过快照（模型随时看得到进度）
     expect(
       run.contexts[0]?.messages?.some((message) => String(message.content).includes('［执行进度］')),
     ).toBe(true);
@@ -88,7 +78,6 @@ describe('T308 首轮规划 → 执行 → 完成', () => {
     });
 
     expect(run.finish).toBe('completed');
-    // 规划不接管：不给 initialTools / initialMessages，loop 按原样跑（零额外往返）
     expect(run.initialTools).toEqual([]);
     expect(run.contexts).toEqual([]);
     expect(run.suspends).toEqual([]);

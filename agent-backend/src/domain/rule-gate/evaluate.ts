@@ -19,7 +19,6 @@ import type {
 /** 失败条件收集上限（日志与文案都只取前若干条） */
 export const MAX_FAILED_CONDITIONS = 10;
 
-/** 求一段 `rule_design` */
 export function evaluateDesign(
   design: RuleDesign,
   ctx: EvaluateContext,
@@ -39,12 +38,6 @@ export function evaluateDesign(
   return { passed, failed };
 }
 
-/**
- * 求多条规则：**任一** `false` 即整体 `false`（逻辑与）。
- *
- * 全部参与求值（不短路），未成立条件跨规则累积。
- * `design === null` 的规则视为"无需计算"，既不阻断也不贡献失败项（`FR-022`）。
- */
 export function evaluateRules(rules: RuleSpec[], ctx: EvaluateContext): EvaluationOutcome {
   const failed: FailedCondition[] = [];
   let passed = true;
@@ -62,7 +55,6 @@ export function evaluateRules(rules: RuleSpec[], ctx: EvaluateContext): Evaluati
   return { passed, failed: failed.slice(0, MAX_FAILED_CONDITIONS) };
 }
 
-/** 单条条件：非法 / 函数未记录 / 字段缺失 / 比较不成立 → `false` */
 function evaluateCondition(
   condition: RuleCondition,
   ctx: EvaluateContext,

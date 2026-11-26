@@ -1,24 +1,3 @@
-/**
- * 对话路由（T024/T025/T026 + 002 特性）：
- * - POST /api/threads/:id/messages — SSE（订阅 run 事件流；断连仅退订）
- *   body 扩展：model（请求级模型，非法 → 400 MODEL_NOT_FOUND）、
- *   attachments（@ 文件引用 ≤10，目录白名单 + 存在性校验 → 400 FILE_REF_NOT_FOUND）
- * - POST /api/threads/:id/stop — 幂等中断
- *
- * 判定顺序（009；2026-11-26 按实现校正）：AGENT_NOT_SELECTED / AGENT_NOT_AVAILABLE（409）
- * → 技能存在性（400）→ THREAD_ID_INVALID（400，字符集校验，见 `dirs.threadDir`）
- * → THREAD_NOT_FOUND（404，会话不属于当前数字人时与"不存在"不可区分）→ MODEL_NOT_FOUND（400）
- * → 附件（400 / 403 / 503）→ SERVICE_UNAVAILABLE（503，关服中）
- * → THREAD_BUSY_LIMIT（409）→ POOL_EXHAUSTED（409）→ RUN_CANCELLED（409）
- * → THREAD_RUN_ACTIVE（409）。
- * THREAD_BUSY_LIMIT 由 runManager.acquireQuota 同步「检查+占位」完成：
- * 判定与 run 注册之间不再有 await 窗口，同一用户的并发请求无法同时通过。
- *
- * **数字人归属（009，取代 002 的"会话可跨数字人"口径）**：会话归属在创建时写定
- * （＝其所在目录，FR-022），生命周期内**不可变更**；本轮由「当前选中数字人」执行，
- * 若该数字人已不可用 → `409 AGENT_NOT_AVAILABLE`（陈旧上下文 MUST 失败且可读，
- * MUST NOT 静默改由其他数字人回答，FR-032）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
@@ -45,13 +24,6 @@ import type { FileReference } from '../types.js';
 
 const MAX_ATTACHMENTS = 10;
 
-/**
- * 消息正文上限（2026-11-26）。
- *
- * 此前只有全局 `bodyLimit`（按 `uploadMaxMb` 计，可能 50MB）兜底：一条超长粘贴会整段
- * 进 `history.jsonl` 与下一轮提示词，且模型侧没有第二道闸。32k 字符 ≈ 1.6 万汉字，
- * 足以覆盖"长文档摘要"场景；前端输入框同步 `maxlength`（契约两侧同改）。
- */
 const MAX_CONTENT_CHARS = 32_000;
 
 const messageBodySchema = {
@@ -62,25 +34,17 @@ const messageBodySchema = {
     content: { type: 'string', minLength: 1, maxLength: MAX_CONTENT_CHARS },
     thinking: { type: 'boolean' },
     model: { type: 'string', minLength: 1 },
-    // 004：问题实例关联工具生成的隐藏引导。只追加到本轮系统提示词，
-    // 不落盘、不进历史 —— 用户气泡里看不到它。
     guidance: { type: 'string', maxLength: 500 },
-    // 013：本轮跳过意图聚焦（仅首屏问题实例卡片携带；下一步动作卡片点击**不跳过**）。
     // 服务端据此不发起判定——放在请求体而不是"前端少发一次请求"，因为跳过必须是可校验的。
     skip_intent_focus: { type: 'boolean' },
-    // 016：下一步动作卡片回传的隐藏工具提示（结构化）。
-    // 只渲染进本轮系统提示词，**不落盘、不进历史**；内容不做形状校验，
     // 但服务端会过 `normalizeToolTips`（条数截断 + 字段兜底，2026-11-26）。
     tool_tips: {
       type: 'array',
       maxItems: MAX_TOOL_TIPS_PER_ACTION,
       items: { type: 'object' },
     },
-    // 018：术语替换前的用户原话 —— **已停用**（2026-11-07 展示与提交同源，前端不再发送）。
     // 服务端保留解析以兼容旧客户端：收到时仍按"`content` 给模型、本字段落盘"处理。
     original_content: { type: 'string', minLength: 1, maxLength: MAX_CONTENT_CHARS },
-    // 2026-11-07：用户显式选中的技能（`/技能名`）。只影响本轮 System Prompt（只插入该技能）
-    // 与聚焦判定（自动跳过），并随 user 行落盘供回放。
     skill: { type: 'string', minLength: 1, maxLength: 64 },
     attachments: {
       type: 'array',
@@ -101,19 +65,7 @@ const messageBodySchema = {
 /** 允许出现的请求体字段（与 `messageBodySchema.properties` 同源，避免两处清单漂移） */
 const MESSAGE_BODY_KEYS = new Set(Object.keys(messageBodySchema.properties));
 
-/**
- * 013：请求体的**严格校验**（`preValidation`，此时 body 刚解析、schema 尚未改写它）。
- *
- * 为什么不能只靠 Fastify 的 JSON Schema：默认 ajv 配置是
- * `coerceTypes: true` + `removeAdditional: true`——`"true"` 会被悄悄转成 `true`，
- * 拼错的字段（`skipIntentFocus`）会被静默丢掉。对"跳过意图聚焦"这种
- * **服务端可校验标记**来说，这两种静默都不可接受：错配只会表现为
- * "该跳过的没跳过 / 不该跳过的跳过了"，没有任何报错可循。
- *
- * 作用域仅限本路由（不全局改 ajv 选项，避免影响其余端点）。
- */
 function assertStrictMessageBody(body: unknown): void {
-  // 非对象交给 schema 报"类型不符"，这里不重复造错
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
   const raw = body as Record<string, unknown>;
 
@@ -152,10 +104,6 @@ const interactionBodySchema = {
   },
 } as const;
 
-/**
- * 校验 @ 引用：空间目录校验（数据准备须命中**本轮数字人**的 scenario 清单）+ 文件存在性。
- * 场景随数字人存放，故同一引用在不同数字人下可能合法/非法——按本轮数字人判定。
- */
 function validateAttachments(
   root: string,
   userId: string,
@@ -183,7 +131,6 @@ function validateAttachments(
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${att.filename}`);
     }
     const abs = path.join(userDataDir(root, userId, agentName), target.relPath, att.filename);
-    // 只验"存在"会把同名目录放进来，错误留到工具层才暴露（2026-11-26：要求是普通文件）
     let isFile: boolean;
     try {
       isFile = fs.statSync(abs).isFile();
@@ -213,11 +160,9 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         guidance?: string;
         attachments?: FileReference[];
         skip_intent_focus?: boolean;
-        /** 卡片回传的隐藏工具提示（结构透传，不校验） */
         tool_tips?: FocusToolTip[];
         /** 018：术语替换前的原话（已停用，仅为旧客户端兼容；模型仍看 `content`） */
         original_content?: string;
-        /** 2026-11-07：用户显式选中的技能（`/技能名`） */
         skill?: string;
       };
 
@@ -226,7 +171,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         notSelectedMessage: '请先选定数字人再发送消息',
         route: 'POST /api/threads/:id/messages',
       });
-      // 2026-11-07：显式技能校验（存在性）。先于会话/配额/建实例——纯请求体校验，
       // 失败即普通 JSON 错误、不开 SSE，也不占用并发额度。
       // 名称安全由"必须命中目录清单"天然覆盖（`../x`、含分隔符的串都不可能出现在清单里）。
       const skill = body.skill?.trim();
@@ -248,9 +192,8 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
 
       // 会话不属于当前数字人 → 404（与"不存在"不可区分，FR-021）
-      ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404（全局映射）
+      ctx.threadStore.get(userId, agentName, threadId);
 
-      // 请求级模型解析（FR-023/024）：未指定 → 默认模型
       let model;
       if (body.model !== undefined) {
         model = ctx.config.models.find((m) => m.model === body.model);
@@ -259,13 +202,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         }
       }
 
-      // @ 文件引用校验（FR-028/029）：按本轮数字人的场景清单判定
       if (body.attachments && body.attachments.length > 0) {
         validateAttachments(ctx.config.optAgentRoot, userId, agentName, body.attachments);
       }
 
-      // 优雅关闭期间不再开新轮（2026-10-27）：`beginDrain()` 只给在途 run 打标记，
-      // 若这里仍放行，drain 会「排空」后又被新一轮追上（进程已退出、回答写一半）。
       // 2026-11-26：判定前移到配额之前——否则关闭期每个请求仍要取实例、等一次 MCP 超时
       // （默认 10s）才返回 503，期间还白占一个并发名额。
       if (ctx.runManager.isDraining()) {
@@ -273,7 +213,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
 
       // 并发上限（T026）：该用户活跃回复 ≥3 → 409 THREAD_BUSY_LIMIT（跨数字人累计；
-      // 创建接口不限制会话总数）。acquireQuota **同步**完成「检查 + 占位」，
       // 与下方 await 取实例之间没有被并发请求插队的窗口——占位已计入额度，
       // 后续请求不可能同时通过判定（原实现在此判定、到 startRun 才注册，存在 TOCTOU 超发）。
       const releaseQuota = ctx.runManager.acquireQuota(
@@ -289,7 +228,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         releaseQuota(); // 未走到 startRun，额度必须归还，否则该用户永久少一个并发名额
         if (err instanceof PoolExhaustedError)
           throw new ApiError(409, 'POOL_EXHAUSTED', err.message);
-        // 与 resolveAgentScope 的 AGENT_NOT_AVAILABLE 同码同义（"已选中但配置坏了"），
         // 否则同一个故障会因时序不同返回 404 或 409（2026-11-26）
         if (err instanceof AgentConfigError)
           throw new ApiError(409, 'AGENT_NOT_AVAILABLE', err.message);
@@ -297,8 +235,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       }
 
       // MCP 就绪兜底（2026-10-18）：实例刚创建（新登录 / 切换 / 空闲回收后）时建连仍在
-      // 飞行中，而本轮工具装配按 `isAvailable` 过滤 —— 不等待就会**静默缺少 MCP 工具**，
-      // 状态却在随后变绿。已落定（常态）立即返回，不影响稳态首字延迟。
       // 超时即降级继续（原则九：有界等待 + 可观测），不阻断本轮回答。
       try {
         const ready = await agent.mcpReady(ctx.config.mcpConnectTimeoutMs);
@@ -321,9 +257,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         );
       }
 
-      // 启动窗口内可能已被「停止 / 删除会话」取消（2026-10-27）：归还额度、不开跑。
       // 否则用户已断流、界面已显示停止，后端仍会跑完并落一条谁也看不见的回答；
-      // 删会话的情况下 run 还会把刚删掉的目录重新创建出来。
       if (ctx.runManager.takeCancel(threadId)) {
         releaseQuota();
         throw new ApiError(409, 'RUN_CANCELLED', '本轮已被停止');
@@ -341,15 +275,10 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
             ? { attachments: body.attachments }
             : {}),
           ...(model ? { model } : {}),
-          // 004：问题实例的隐藏工具引导（只影响本轮系统提示词，不落盘）
           ...(body.guidance ? { guidance: body.guidance } : {}),
-          // 013：预置动作入口跳过意图聚焦（只影响本轮判定，不落历史、不改 SSE 序列）
           ...(body.skip_intent_focus === true ? { skipIntentFocus: true } : {}),
-          // 016：卡片回传的隐藏工具提示（只进本轮系统提示词；不落历史）
           ...(body.tool_tips && body.tool_tips.length > 0 ? { toolTips: body.tool_tips } : {}),
-          // 2026-11-07：显式技能 —— 只插入该技能 + 自动跳过意图聚焦 + 随 user 行落盘
           ...(skill ? { skill } : {}),
-          // 018：术语替换后，模型看替换文、历史与气泡留原话
           ...(body.original_content && body.original_content !== body.content
             ? { displayContent: body.original_content }
             : {}),
@@ -368,7 +297,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
         ctx.threadStore.touch(userId, agentName, threadId);
       });
 
-      // SSE：订阅 run 事件流；客户端断开仅退订（FR-026）
       reply.hijack();
       try {
         reply.raw.writeHead(200, {
@@ -379,8 +307,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           'x-accel-buffering': 'no',
         });
         // 首帧注释 + 15s 心跳（见 `infra/sse.ts`）：建连即写首个字节，避免本轮在
-        // "MCP 就绪 + 意图聚焦判定 + 首 token" 的静默期被代理/LB 判为空闲而掐断。
-        // 注释行按 SSE 规范由客户端忽略，前端解析器已跳过 ⇒ 事件集合与载荷零变化。
         const sse = openSseConnection(reply.raw);
         const unsubscribe = run.subscribe((e) => {
           sse.event(e.type, e.data);
@@ -392,7 +318,6 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
           unsubscribe();
         });
       } catch (err) {
-        // hijack 之后头可能已发出，无法再改状态码：只能干净收尾 + 终止本轮，
         // 避免"没人消费事件流"的 run 继续烧 token、占并发名额（2026-11-26）
         ctx.loggers.logger.error(
           { err, event: 'sse.attach.failed', thread_id: threadId },
@@ -409,12 +334,11 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
     const userId = getCurrentUser().userId;
     const { id: threadId } = req.params as { id: string };
     const { agentName } = resolveAgentScope(ctx, userId, { route: 'POST /api/threads/:id/stop' });
-    ctx.threadStore.get(userId, agentName, threadId); // 404 校验
+    ctx.threadStore.get(userId, agentName, threadId);
     return { stopped: ctx.runManager.stop(threadId) };
   });
 
   // 人工确认提交/拒绝（HITL）：幂等（重复提交返回首次结果）；
-  // submit 的服务端终验失败返回 400 + 逐字段错误，interaction 保持挂起可重提
   app.post(
     '/api/threads/:id/interaction',
     { schema: { body: interactionBodySchema } },
@@ -424,7 +348,7 @@ export function registerChatRoutes(app: FastifyInstance, ctx: AppContext): void 
       const { agentName } = resolveAgentScope(ctx, userId, {
         route: 'POST /api/threads/:id/interaction',
       });
-      ctx.threadStore.get(userId, agentName, threadId); // 404 校验
+      ctx.threadStore.get(userId, agentName, threadId);
       const body = req.body as {
         interaction_id: string;
         action: 'submit' | 'reject';
