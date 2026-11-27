@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ADMIN_ERROR_CODES, ERROR_MESSAGES, GENERIC_MESSAGE } from '../constants/error-messages'
-import { extractDetailErrors, toErrorInfo, toUserMessage } from './error-message'
+import { toErrorInfo, toUserMessage } from './error-message'
 
 describe('文案映射表完整性', () => {
   it('契约 §0.4 的每个错误码都有中文文案', () => {
@@ -67,41 +67,5 @@ describe('toErrorInfo', () => {
 
   it('code 非字符串时也走兜底（不产生非法 ErrorInfo）', () => {
     expect(toErrorInfo({ code: 42, message: 'x' })).toEqual({ code: 'INTERNAL_ERROR', message: '' })
-  })
-})
-
-describe('extractDetailErrors —— 部署前校验的明细（SC-020）', () => {
-  it('抽出全部错误项（一次性列全）', () => {
-    const items = extractDetailErrors({
-      errors: [
-        { user_id: 'admin', agent_name: 'demo', category: 'runtime_form', code: 'X', message: 'a' },
-        {
-          user_id: 'ops',
-          agent_name: 'demo2',
-          category: 'reference_validity',
-          code: 'Y',
-          message: 'b',
-        },
-      ],
-    })
-    expect(items).toHaveLength(2)
-    expect(items[0]?.user_id).toBe('admin')
-  })
-
-  it('字段缺失时补空串（界面不出现 undefined）', () => {
-    expect(extractDetailErrors({ errors: [{}] })[0]).toEqual({
-      user_id: '',
-      agent_name: '',
-      category: '',
-      code: '',
-      message: '',
-    })
-  })
-
-  it('details 不是对象 / errors 不是数组 → 空数组（不抛错）', () => {
-    expect(extractDetailErrors(undefined)).toEqual([])
-    expect(extractDetailErrors(null)).toEqual([])
-    expect(extractDetailErrors('x')).toEqual([])
-    expect(extractDetailErrors({ errors: 'nope' })).toEqual([])
   })
 })

@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  judgePlanGate,
   PLAN_GATE_ID,
   PLAN_GATE_QUESTION,
+  planCapabilityBlocks,
   planGateBlocks,
 } from '../../src/domain/intent-focus/plan-gate.js';
 
@@ -18,28 +18,14 @@ describe('plan-gate 题面', () => {
     expect(PLAN_GATE_ID).toBe('plan_gate');
     expect(PLAN_GATE_QUESTION.type).toBe('noul');
     expect(PLAN_GATE_QUESTION.instructions).toContain('一步就能完成');
-    expect(PLAN_GATE_QUESTION.instructions).toContain('同一动作查询多个对象');
-    expect(PLAN_GATE_QUESTION.criteria?.true).toContain('多个对象或多个任务');
     expect(PLAN_GATE_QUESTION.criteria?.false).toContain('一轮即可完成');
   });
-});
 
-describe('judgePlanGate', () => {
-  it('分数 >= 阈值放行（边界值 0.4 也放行）', () => {
-    expect(judgePlanGate(0.4, 0.4)).toBe(true);
-    expect(judgePlanGate(0.9, 0.4)).toBe(true);
-  });
-
-  it('分数低于阈值拦截', () => {
-    expect(judgePlanGate(0.399, 0.4)).toBe(false);
-    expect(judgePlanGate(0, 0.4)).toBe(false);
-  });
-
-  it('分数缺失或非法一律放行（fail-open）', () => {
-    expect(judgePlanGate(null, 0.4)).toBe(true);
-    expect(judgePlanGate(undefined, 0.4)).toBe(true);
-    expect(judgePlanGate(Number.NaN, 0.4)).toBe(true);
-    expect(judgePlanGate(Number.POSITIVE_INFINITY, 0.4)).toBe(true);
+  it('多对象即多步：同一动作查多个对象也算需要分步（2026-11-28 口径翻转）', () => {
+    expect(PLAN_GATE_QUESTION.instructions).toContain('即使动作完全相同');
+    expect(PLAN_GATE_QUESTION.instructions).not.toContain('算一个任务');
+    expect(PLAN_GATE_QUESTION.criteria?.true).toContain('两个及以上对象');
+    expect(PLAN_GATE_QUESTION.criteria?.true).toContain('即使动作相同');
   });
 });
 
@@ -57,5 +43,16 @@ describe('planGateBlocks（装配层分流）', () => {
     expect(planGateBlocks(0.1, undefined)).toBe(false);
     expect(planGateBlocks(undefined, 0.4)).toBe(false);
     expect(planGateBlocks(Number.NaN, 0.4)).toBe(false);
+  });
+});
+
+describe('planCapabilityBlocks（聚焦能力前置，2026-11-27）', () => {
+  it('显式 false（未命中任何本体行为/函数）→ 跳过规划', () => {
+    expect(planCapabilityBlocks(false)).toBe(true);
+  });
+
+  it('true 或缺席（未接入该判据的调用方）→ 不阻断', () => {
+    expect(planCapabilityBlocks(true)).toBe(false);
+    expect(planCapabilityBlocks(undefined)).toBe(false);
   });
 });

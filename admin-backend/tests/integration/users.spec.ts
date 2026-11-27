@@ -44,19 +44,21 @@ describe('GET /api/admin/users', () => {
     expect(res.json().items[0]).toMatchObject({
       user_id: 'admin',
       agents: [{ name: 'demo', abnormal: false }],
-      summary: null,
     });
+    // 2026-11-27：摘要能力随部署核对页下架，响应不再带 `summary`
+    expect(res.json().items[0]).not.toHaveProperty('summary');
   });
 
-  it('expand=summary 返回搭配摘要，作为部署前核对总账（FR-023）', async () => {
+  it('expand=summary 已移除：传了也忽略，不再计算摘要（2026-11-27）', async () => {
+    // 需要至少一条数据，否则 items[0] 为 undefined，断言会退化成空断言
     await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     const res = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/users?page=1&expand=summary',
     });
-    expect(res.json().items[0].summary).toEqual([
-      { name: 'demo', mcp_services: ['ocr'], enabled_tools: ['read_file'], skills: [] },
-    ]);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items[0]).toBeDefined();
+    expect(res.json().items[0]).not.toHaveProperty('summary');
   });
 
   it('关联了失效引用的数字人在卡片上标记异常并给出原因', async () => {

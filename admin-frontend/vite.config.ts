@@ -58,7 +58,6 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
-        'src/composables/useDeploy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useSkills.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useMcpServices.ts': {
           statements: 80,
@@ -70,8 +69,10 @@ export default defineConfig({
         'src/api/agents.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/builtin-tools.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/deploy.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/api/manifest.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/mcp.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/platform.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/api/references.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/skills.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/api/users.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
       },

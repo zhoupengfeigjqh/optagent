@@ -1,56 +1,27 @@
 import { http } from './http'
-import type { DeployHistoryItem, DeployResult, ManifestEntry, ReferencesResponse } from './types'
+import type { DeployResult, WithdrawResult } from './types'
 
-export function deploy(userIds: string[] | undefined, revision: number): Promise<DeployResult> {
-  return http.post<DeployResult>('/api/admin/deploy', {
-    ...(userIds && userIds.length > 0 ? { user_ids: userIds } : {}),
-    revision,
-  })
+/**
+ * 部署（契约 §6.5）：把 `user_ids` 各自**已授权**的数字人写入运行环境。
+ *
+ * 2026-11-27 起部署只有这一个入口——用户管理表格的行内「部署」按钮，一次一个用户。
+ * 语义是"整体覆盖"：该用户运行环境 `agents/` 下的内容以本次授权清单为准，
+ * 取消授权的数字人目录会被清掉，文件空间（`user-data/**`）不动。
+ *
+ * `revision` 是平台配置版本号（`GET /api/admin/deploy/manifest`），变更后即失效 →
+ * 409 `ADM_CONFIG_REVISION_CONFLICT`，调用方须重新取版本再部署。
+ */
+export function deployUsers(userIds: string[], revision: number): Promise<DeployResult> {
+  return http.post<DeployResult>('/api/admin/deploy', { user_ids: userIds, revision })
 }
 
 /**
- * 部署历史一次拉取的条数：取服务端上限 100（`FR-006` 有界返回）。
+ * 停止（撤回部署，契约 §6.9）：清空该用户在运行环境中的**全部**数字人副本。
  *
- * 历史是**持续追加**的日志，服务端只按"最近 N 条"返回；界面在这 N 条内按页呈现
- * （每页 5 条，见 `DeployHistoryList.vue`）。取上限而不是默认的 20——
- * 否则翻两页就到底，会被误读成"历史只有 20 条"。
+ * - 只影响运行环境：授权（`users.agents[]`）与文件空间（`user-data/**`）保留；
+ * - 撤回后 `my-agents` 为空 → 该用户立即无法使用，重新部署即可恢复；
+ * - `revision` 同部署，版本过期 → 409 `ADM_CONFIG_REVISION_CONFLICT`。
  */
-export const DEPLOY_HISTORY_FETCH_LIMIT = 100
-
-export function fetchDeployHistory(
-  limit = DEPLOY_HISTORY_FETCH_LIMIT,
-): Promise<{ items: DeployHistoryItem[]; truncated: boolean }> {
-  return http.get<{ items: DeployHistoryItem[]; truncated: boolean }>('/api/admin/deploy/history', {
-    limit,
-  })
-}
-
-export function withdrawDeploy(
-  userId: string,
-  revision: number,
-): Promise<{ user_id: string; withdrawn: string[] }> {
-  return http.post<{ user_id: string; withdrawn: string[] }>('/api/admin/deploy/withdraw', {
-    user_id: userId,
-    revision,
-  })
-}
-
-export function fetchManifest(): Promise<{
-  items: ManifestEntry[]
-  total: number
-  revision: number
-}> {
-  return http.get<{ items: ManifestEntry[]; total: number; revision: number }>(
-    '/api/admin/deploy/manifest',
-  )
-}
-
-export function fetchReferences(
-  targetType: 'builtin_tool' | 'mcp_service' | 'skill' | 'agent' | 'user',
-  targetName: string,
-): Promise<ReferencesResponse> {
-  return http.get<ReferencesResponse>('/api/admin/references', {
-    target_type: targetType,
-    target_name: targetName,
-  })
+export function withdrawUser(userId: string, revision: number): Promise<WithdrawResult> {
+  return http.post<WithdrawResult>('/api/admin/deploy/withdraw', { user_id: userId, revision })
 }

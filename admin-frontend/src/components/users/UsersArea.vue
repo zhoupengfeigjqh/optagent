@@ -1,36 +1,30 @@
 <script setup lang="ts">
 /**
- * 用户管理：账户搜索、授权状态筛选、账户维护和授权详情。
+ * 用户管理：账户搜索、授权筛选、账户维护、授权详情与部署。
  *
- * 后端目前只提供账户未分页筛选，因此搜索与状态筛选作用于当前页；
- * 新建/修改复用平台已有的用户编辑器与全局配置版本号。
+ * 口径（2026-11-27 收敛后）：
+ *  - **授权 = 关联**：`agents[]` 既是已授权的数字人，也是待部署的清单；
+ *  - **部署** 是本页的行内动作（一次一个账户），下发后运行环境才生效；
+ *  - **修改** 入口已删除：账户扩展字段只在新建时设置，数字人授权在「授权详情」里勾选；
+ *  - 后端只提供未分页的账户列表，所以搜索与筛选作用于当前页。
  */
 import { computed, onMounted, ref } from 'vue'
 import { listAgentServices } from '../../api/account'
-import { listAgents } from '../../api/agents'
-import { fetchManifest } from '../../api/deploy'
-import {
-  createUser,
-  deleteUser,
-  listUsers,
-  resetUserPassword,
-  updateUser,
-} from '../../api/users'
-import type {
-  AgentListItem,
-  AgentServiceItem,
-  ErrorInfo,
-  Paged,
-  UserListItem,
-} from '../../api/types'
+import { listAllAgents } from '../../api/agents'
+import { deployUsers, withdrawUser } from '../../api/deploy'
+import { fetchManifest } from '../../api/manifest'
+import { createUser, deleteUser, listUsers, resetUserPassword } from '../../api/users'
+import type { AgentListItem, AgentServiceItem, ErrorInfo, Paged, UserListItem } from '../../api/types'
+import { toErrorInfo } from '../../utils/error-message'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
-import ResetPasswordDialog from '../deploy/ResetPasswordDialog.vue'
-import UserEditor from '../deploy/UserEditor.vue'
 import GrantDetailDialog from './GrantDetailDialog.vue'
+import ResetPasswordDialog from './ResetPasswordDialog.vue'
 import UserAccountTable from './UserAccountTable.vue'
+import UserEditor from './UserEditor.vue'
 
-type GrantFilter = 'all' | 'approved' | 'pending'
+/** 授权筛选：只有"已授权/未授权"两态（授权 = 是否在 `agents[]` 里，没有待审批态） */
+type AuthFilter = 'all' | 'authorized' | 'unauthorized'
 
 const page = ref(1)
 const pageData = ref<Paged<UserListItem> | null>(null)
@@ -41,10 +35,9 @@ const loadError = ref<ErrorInfo | null>(null)
 const actionError = ref<ErrorInfo | null>(null)
 
 const search = ref('')
-const grantFilter = ref<GrantFilter>('all')
+const authFilter = ref<AuthFilter>('all')
 
 const editorOpen = ref(false)
-const editingUser = ref<UserListItem | null>(null)
 const editorBusy = ref(false)
 
 const grantUser = ref<UserListItem | null>(null)
@@ -52,6 +45,14 @@ const resetUser = ref<UserListItem | null>(null)
 const resetBusy = ref(false)
 const resetError = ref<ErrorInfo | null>(null)
 const deleteTarget = ref<UserListItem | null>(null)
+/** 待二次确认的部署目标（点击「部署」只打开确认弹窗，不立即下发） */
+const deployTarget = ref<UserListItem | null>(null)
+/** 待二次确认的停止目标（撤回部署） */
+const withdrawTarget = ref<UserListItem | null>(null)
+/** 正在部署的账户（空 = 无部署进行中） */
+const deployingUserId = ref<string | null>(null)
+/** 正在停止（撤回部署）的账户（空 = 无停止进行中） */
+const withdrawingUserId = ref<string | null>(null)
 
 const emit = defineEmits<{
   (e: 'announce', text: string): void
@@ -66,19 +67,19 @@ const visibleUsers = computed(() => {
       (user.display_name ?? '').toLowerCase().includes(keyword) ||
       user.user_id.toLowerCase().includes(keyword)
     if (!matchesKeyword) return false
-    if (grantFilter.value === 'approved') return (user.grants_summary?.approved ?? 0) > 0
-    if (grantFilter.value === 'pending') return (user.grants_summary?.pending ?? 0) > 0
+    if (authFilter.value === 'authorized') return user.agents.length > 0
+    if (authFilter.value === 'unauthorized') return user.agents.length === 0
     return true
   })
 })
 
-const hasFilter = computed(() => search.value.trim() !== '' || grantFilter.value !== 'all')
+const hasFilter = computed(() => search.value.trim() !== '' || authFilter.value !== 'all')
 
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = null
   try {
-    pageData.value = await listUsers(page.value, false)
+    pageData.value = await listUsers(page.value)
   } catch (err) {
     loadError.value = err as ErrorInfo
   } finally {
@@ -86,25 +87,14 @@ async function load(): Promise<void> {
   }
 }
 
-/** 用户编辑器需要完整数字人清单；接口每页 8 条，这里按页取完。 */
-async function loadAllAgents(): Promise<AgentListItem[]> {
-  const first = await listAgents(1)
-  const rest = await Promise.all(
-    Array.from({ length: Math.max(0, first.total_pages - 1) }, (_, index) =>
-      listAgents(index + 2),
-    ),
-  )
-  return [first, ...rest].flatMap((item) => item.items)
-}
-
-async function openEditor(user: UserListItem | null): Promise<void> {
+/** 新建账户：编辑器需要完整数字人清单作为"初始授权"候选 */
+async function openEditor(): Promise<void> {
   actionError.value = null
   try {
-    agents.value = await loadAllAgents()
-    editingUser.value = user
+    agents.value = await listAllAgents()
     editorOpen.value = true
   } catch (err) {
-    actionError.value = err as ErrorInfo
+    actionError.value = toErrorInfo(err)
   }
 }
 
@@ -119,24 +109,100 @@ async function submitEditor(payload: {
   editorBusy.value = true
   actionError.value = null
   try {
-    if (editingUser.value) {
-      const { revision } = await fetchManifest()
-      await updateUser(editingUser.value.user_id, payload.agents, revision)
-      emit('announce', `用户 ${editingUser.value.user_id} 已更新`)
-    } else {
-      await createUser(payload.user_id, payload.agents, payload.password, {
-        ...(payload.phone ? { phone: payload.phone } : {}),
-        ...(payload.display_name ? { display_name: payload.display_name } : {}),
-        ...(payload.role ? { role: payload.role } : {}),
-      })
-      emit('announce', `用户 ${payload.user_id} 已创建`)
-    }
+    await createUser(payload.user_id, payload.agents, payload.password, {
+      ...(payload.phone ? { phone: payload.phone } : {}),
+      ...(payload.display_name ? { display_name: payload.display_name } : {}),
+      ...(payload.role ? { role: payload.role } : {}),
+    })
+    emit('announce', `用户 ${payload.user_id} 已创建；点击其「部署」后生效`)
     editorOpen.value = false
     await load()
   } catch (err) {
-    actionError.value = err as ErrorInfo
+    actionError.value = toErrorInfo(err)
   } finally {
     editorBusy.value = false
+  }
+}
+
+/** 点击「部署」：只打开二次确认弹窗，不立即下发（部署会整体覆盖运行环境配置） */
+function requestDeploy(user: UserListItem): void {
+  actionError.value = null
+  deployTarget.value = user
+}
+
+/**
+ * 确认部署。
+ *
+ * `ConfirmDialog` 在 `emit('confirm')` 之后会**立即**把 `open` 置 false，
+ * 父组件随之把 `deployTarget` 清空，因此必须先取快照（与删除同口径）。
+ */
+async function confirmDeploy(): Promise<void> {
+  const target = deployTarget.value
+  deployTarget.value = null
+  if (!target) return
+  await deployUser(target)
+}
+
+/**
+ * 部署该账户**已授权**的数字人（一次一个账户）。
+ *
+ * 版本号从部署清单现取现用：授权刚变更过就换版本，用旧版本会 409。
+ * 部署是整体覆盖语义——取消授权的数字人目录会被清掉，文件空间不动。
+ */
+async function deployUser(user: UserListItem): Promise<void> {
+  if (deployingUserId.value !== null) return
+  deployingUserId.value = user.user_id
+  actionError.value = null
+  try {
+    const { revision } = await fetchManifest()
+    const result = await deployUsers([user.user_id], revision)
+    const outcome = result.users.find((item) => item.user_id === user.user_id)
+    if (!outcome || !outcome.ok) {
+      emit('announce', `用户 ${user.user_id} 部署失败：${outcome?.error ?? '未返回结果'}`)
+    } else {
+      const written = outcome.agents.filter((agent) => agent.action === 'written').length
+      const removed = outcome.agents.filter((agent) => agent.action === 'removed').length
+      emit('announce', `用户 ${user.user_id} 部署完成：写入 ${written} 个、移除 ${removed} 个数字人`)
+    }
+    await load()
+  } catch (err) {
+    actionError.value = toErrorInfo(err)
+  } finally {
+    deployingUserId.value = null
+  }
+}
+
+/** 点击「停止」：二次确认后撤回该账户在运行环境中的全部数字人副本 */
+function requestWithdraw(user: UserListItem): void {
+  actionError.value = null
+  withdrawTarget.value = user
+}
+
+/**
+ * 确认停止（撤回部署，契约 §6.9）。
+ *
+ * 只动运行环境：授权（`agents[]`）与文件空间（`user-data/**`）保留；撤回后
+ * `my-agents` 为空，该用户立即无法使用，重新部署即可恢复。
+ */
+async function confirmWithdraw(): Promise<void> {
+  const target = withdrawTarget.value
+  withdrawTarget.value = null
+  if (!target || withdrawingUserId.value !== null) return
+  withdrawingUserId.value = target.user_id
+  actionError.value = null
+  try {
+    const { revision } = await fetchManifest()
+    const result = await withdrawUser(target.user_id, revision)
+    emit(
+      'announce',
+      `用户 ${target.user_id} 已停止：撤回 ${result.withdrawn.length} 个数字人副本，` +
+        '授权与文件空间保留，重新部署即可恢复',
+    )
+    await load()
+  } catch (err) {
+    actionError.value = toErrorInfo(err)
+  } finally {
+    withdrawingUserId.value = null
   }
 }
 
@@ -154,28 +220,33 @@ async function submitReset(password: string): Promise<void> {
     emit('announce', `用户 ${resetUser.value.user_id} 的密码已重置`)
     resetUser.value = null
   } catch (err) {
-    resetError.value = err as ErrorInfo
+    resetError.value = toErrorInfo(err)
   } finally {
     resetBusy.value = false
   }
 }
 
 async function confirmDelete(): Promise<void> {
-  if (!deleteTarget.value) return
+  // `ConfirmDialog` 在 `emit('confirm')` 之后会**立即** `emit('update:open', false)`，
+  // 父组件随之把 `deleteTarget` 置 null。因此必须先取快照，await 之后不得再读 `deleteTarget.value`
+  // ——否则会抛 `Cannot read properties of null`，且该 TypeError 无错误码，
+  // 界面只会显示兜底的「请求失败，请稍后重试」，删除其实已成功（历史缺陷）。
+  const target = deleteTarget.value
+  if (!target) return
   actionError.value = null
   try {
-    await deleteUser(deleteTarget.value.user_id)
-    emit('announce', `用户 ${deleteTarget.value.user_id} 已删除`)
+    await deleteUser(target.user_id)
     deleteTarget.value = null
+    emit('announce', `用户 ${target.user_id} 已删除`)
     await load()
   } catch (err) {
-    actionError.value = err as ErrorInfo
+    actionError.value = toErrorInfo(err)
   }
 }
 
 function clearFilter(): void {
   search.value = ''
-  grantFilter.value = 'all'
+  authFilter.value = 'all'
 }
 
 onMounted(() => {
@@ -185,7 +256,7 @@ onMounted(() => {
       services.value = result.items
     })
     .catch((err: unknown) => {
-      actionError.value = err as ErrorInfo
+      actionError.value = toErrorInfo(err)
     })
 })
 </script>
@@ -197,9 +268,7 @@ onMounted(() => {
         <h2>账户管理</h2>
         <p>共 {{ pageData?.total ?? 0 }} 个账户</p>
       </div>
-      <button type="button" class="btn btn--primary" @click="openEditor(null)">
-        新建用户
-      </button>
+      <button type="button" class="btn btn--primary" @click="openEditor()">新建用户</button>
     </div>
 
     <div class="users-area__filter">
@@ -209,18 +278,16 @@ onMounted(() => {
       </label>
       <label>
         <span>授权状态</span>
-        <select v-model="grantFilter">
+        <select v-model="authFilter">
           <option value="all">全部</option>
-          <option value="approved">含已授权</option>
-          <option value="pending">含申请中</option>
+          <option value="authorized">已授权</option>
+          <option value="unauthorized">未授权</option>
         </select>
       </label>
     </div>
 
     <div v-if="hasFilter" class="users-area__scope">
-      <span>
-        当前页筛选后显示 {{ visibleUsers.length }} 个账户；搜索与筛选仅作用于当前页。
-      </span>
+      <span> 当前页筛选后显示 {{ visibleUsers.length }} 个账户；搜索与筛选仅作用于当前页。 </span>
       <button type="button" class="btn btn--small" @click="clearFilter">清除筛选</button>
     </div>
 
@@ -233,6 +300,8 @@ onMounted(() => {
       :page-size="pageData?.page_size ?? 8"
       :loading="loading"
       :error="loadError"
+      :deploying-user-id="deployingUserId"
+      :withdrawing-user-id="withdrawingUserId"
       @update:page="
         (next) => {
           page = next
@@ -240,19 +309,22 @@ onMounted(() => {
         }
       "
       @grants="grantUser = $event"
-      @edit="openEditor($event)"
+      @deploy="requestDeploy"
+      @withdraw="requestWithdraw"
       @reset-password="openReset"
       @delete="deleteTarget = $event"
     />
 
     <p class="users-area__hint">
-      通过专属注册链接注册成功后，用户自动获得对应数字人权限；只有从对话界面提交的其他
-      数字人申请才需要在这里审批。
+      通过专属注册链接注册的账户<strong>注册即授权</strong>（自动关联该链接对应的数字人）；
+      其他数字人在「授权详情」里勾选后点<strong>「授权」</strong>并确认才会生效（授权 = 关联），
+      点「退出」则放弃本次改动。授权只决定"允许使用什么"，点行内<strong>「部署」</strong>并确认后
+      才会下发到运行环境；<strong>「停止」</strong>会撤回该账户的全部运行副本（授权与文件空间保留，
+      用户立即无法使用，重新部署即可恢复）。
     </p>
 
     <UserEditor
       v-model:open="editorOpen"
-      :user="editingUser"
       :agents="agents"
       :busy="editorBusy"
       @submit="submitEditor"
@@ -281,9 +353,36 @@ onMounted(() => {
       @submit="submitReset"
     />
     <ConfirmDialog
+      :open="deployTarget !== null"
+      data-test="deploy-confirm"
+      title="部署该账户？"
+      :message="`确认把账户「${deployTarget?.display_name || deployTarget?.user_id || ''}」已授权的 ${deployTarget?.agents.length ?? 0} 个数字人下发到运行环境？部署是整体覆盖：取消授权的数字人副本会被移除，文件空间内容保留。`"
+      confirm-label="确认部署"
+      @update:open="
+        (value) => {
+          if (!value) deployTarget = null
+        }
+      "
+      @confirm="confirmDeploy"
+    />
+    <ConfirmDialog
+      :open="withdrawTarget !== null"
+      data-test="withdraw-confirm"
+      title="停止该账户？"
+      :message="`确认停止账户「${withdrawTarget?.display_name || withdrawTarget?.user_id || ''}」？运行环境中的全部数字人副本将被撤回，该用户立即无法使用；授权（关联）与文件空间内容保留，重新部署即可恢复。`"
+      confirm-label="确认停止"
+      danger
+      @update:open="
+        (value) => {
+          if (!value) withdrawTarget = null
+        }
+      "
+      @confirm="confirmWithdraw"
+    />
+    <ConfirmDialog
       :open="deleteTarget !== null"
       title="删除账户"
-      :message="`确认删除账户「${deleteTarget?.display_name || deleteTarget?.user_id || ''}」？删除后其注册信息与全部授权记录将一并移除。`"
+      :message="`确认删除账户「${deleteTarget?.display_name || deleteTarget?.user_id || ''}」？删除后其注册信息与全部授权（关联）一并移除，运行环境中的数字人副本同时撤回；文件空间内容保留。`"
       confirm-label="确认删除"
       danger
       @update:open="

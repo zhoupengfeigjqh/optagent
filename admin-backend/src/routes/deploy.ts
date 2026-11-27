@@ -15,6 +15,10 @@ export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, depl
     return deployer.deploy(userIds, body.revision);
   });
 
+  /**
+   * 部署历史（**仅运维查询**，2026-11-27）：管理台「数字人部署」区已下架，前端无调用方。
+   * 保留是因为 `deploy/history.jsonl` 是部署动作的唯一审计轨迹，排障时需要。
+   */
   app.get('/api/admin/deploy/history', async (req) => {
     const query = (req.query ?? {}) as { limit?: unknown };
     const limit = normalizeLimit(query.limit, 20, 100);

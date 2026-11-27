@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { hashPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../src/domain/auth/password.js';
+import { USERS_DIR } from '../src/domain/account/paths.js';
 
 function fail(message: string): never {
   console.error(`[set-user-password] ${message}`);
@@ -27,10 +28,15 @@ if (password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENG
 }
 
 const dataDir = process.env.PLATFORM_DATA_DIR ?? './.platform-data';
-const file = path.join(path.resolve(process.cwd(), dataDir), 'users', `${userId}.json`);
+// 账号主档落点：`accounts/users/{uid}.json`（2026-11-27 结构收敛，见 src/domain/account/paths.ts）
+const file = path.join(path.resolve(process.cwd(), dataDir), ...USERS_DIR.split('/'), `${userId}.json`);
 
 if (!fs.existsSync(file)) {
-  fail(`用户记录不存在：${file}\n（请先在管理台新建该用户，或确认 PLATFORM_DATA_DIR）`);
+  fail(
+    `用户记录不存在：${file}\n` +
+      '（请先在管理台新建该用户，或确认 PLATFORM_DATA_DIR；' +
+      '若数据仍是旧结构，先跑 npm run migrate:accounts-layout）',
+  );
 }
 
 let doc: Record<string, unknown>;

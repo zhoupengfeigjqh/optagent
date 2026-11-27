@@ -21,7 +21,12 @@ export function fetchMe(): Promise<MeProfile> {
   return http.get<MeProfile>('/api/admin/auth/me')
 }
 
-/** 当前用户已授权 / 待审批的数字人（对话工作台「切换数字人」用） */
+/**
+ * 当前用户**可用**的数字人（对话工作台「切换数字人」用）。
+ *
+ * 判据是 `users.agents[]` ∩ 部署清单：授权了但未部署的不下发；
+ * `pending` 恒为空数组（申请/审批链路已随授权收敛下线，仅为响应契约兼容保留）。
+ */
 export function fetchMyAgents(): Promise<MyAgents> {
   return http.get<MyAgents>('/api/admin/auth/my-agents')
 }

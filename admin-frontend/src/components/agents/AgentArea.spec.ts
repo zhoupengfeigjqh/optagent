@@ -168,3 +168,48 @@ describe('AgentArea —— 设计器候选目录（§5.6，2026-10-17）', () =>
     expect(wrapper.text()).toContain('运行环境不可达（测试桩）')
   })
 })
+
+describe('AgentArea —— 卡片上的服务编码（§18，2026-11-27）', () => {
+  it('回到列表会重新拉取服务清单：新建后开通的编码立即可见，不必刷新整页', async () => {
+    const wrapper = mount(AgentArea, { props: { detail: '__new__', tab: null } })
+    await flushPromises()
+    expect(listAgentServices).toHaveBeenCalledTimes(1)
+
+    // 后端在建数字人时已开通服务；模拟"保存后返回列表"这一次刷新
+    listAgents.mockResolvedValue({
+      items: [
+        {
+          name: 'demo',
+          code: null,
+          description: '演示数字人',
+          abnormal: false,
+          abnormal_reason: null,
+          updated_at: '2026-11-27T00:00:00.000Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 8,
+      total_pages: 1,
+    })
+    listAgentServices.mockResolvedValue({
+      items: [
+        {
+          code: 'DH-ABC23',
+          name: 'demo',
+          platform_agent_name: 'demo',
+          status: 'enabled',
+          registered_users: 0,
+          created_at: '2026-11-27 10:00:00.000',
+          updated_at: '2026-11-27 10:00:00.000',
+        },
+      ],
+    })
+
+    await wrapper.setProps({ detail: null })
+    await flushPromises()
+
+    expect(listAgentServices).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('编码 DH-ABC23')
+  })
+})

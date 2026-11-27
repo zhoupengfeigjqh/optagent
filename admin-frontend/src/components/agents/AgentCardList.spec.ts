@@ -6,6 +6,7 @@ import type { AgentListItem, AgentServiceItem } from '../../api/types'
 const ITEMS: AgentListItem[] = [
   {
     name: 'demo',
+    code: 'DH-DEMO01',
     description: '生产计划助手',
     abnormal: false,
     abnormal_reason: null,
@@ -13,6 +14,7 @@ const ITEMS: AgentListItem[] = [
   },
   {
     name: 'broken',
+    code: null,
     description: '引用了失效工具',
     abnormal: true,
     abnormal_reason: '内置工具「ghost」已失效',
@@ -88,14 +90,25 @@ describe('AgentCardList', () => {
     expect(wrapper.emitted('create')).toHaveLength(1)
   })
 
-  it('展示注册服务编码与已注册人数，并可请求生成注册链接', async () => {
+  it('展示注册服务编码与已注册人数，并可打开注册管理', async () => {
     const wrapper = mountList()
     expect(wrapper.text()).toContain('编码 DH-DEMO01')
     expect(wrapper.text()).toContain('注册用户 3 人')
 
-    const button = wrapper.findAll('button').find((item) => item.text() === '生成注册链接')
+    const button = wrapper.findAll('button').find((item) => item.text() === '注册管理')
     await button?.trigger('click')
-    expect(wrapper.emitted('register-link')?.[0]).toEqual([ITEMS[0]])
+    expect(wrapper.emitted('manage-registration')?.[0]).toEqual([ITEMS[0]])
+  })
+
+  it('编码以设计态为准：服务清单未加载也能显示（2026-11-27）', () => {
+    const wrapper = mountList({ services: [] })
+    expect(wrapper.text()).toContain('编码 DH-DEMO01')
+    expect(wrapper.text()).not.toContain('注册用户')
+  })
+
+  it('旧设计未回填编码时回退到服务清单，仍不显示「未配置注册服务」', () => {
+    const wrapper = mountList({ items: [{ ...ITEMS[0]!, code: null }] })
+    expect(wrapper.text()).toContain('编码 DH-DEMO01')
   })
 
   it('翻页透传 update:page', async () => {

@@ -5,21 +5,14 @@
       "agent_names": [
         "生产调度测试"
       ],
-      "last_deployed_at": "2026-11-27T04:08:49.118Z"
+      "last_deployed_at": "2026-11-27T12:19:57.205Z"
     },
     {
-      "user_id": "test007",
+      "user_id": "u_aba11be615ce",
       "agent_names": [
         "生鲜识别辅助"
       ],
-      "last_deployed_at": "2026-11-18T14:31:28.155Z"
-    },
-    {
-      "user_id": "test008",
-      "agent_names": [
-        "生鲜识别辅助"
-      ],
-      "last_deployed_at": "2026-11-18T14:31:28.166Z"
+      "last_deployed_at": "2026-11-27T12:25:58.387Z"
     }
   ]
 }

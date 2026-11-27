@@ -26,7 +26,8 @@ const envSchema = z.object({
   AUTH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).default(604_800),
   /**
    * 028 阶段 1：账号域存储驱动。
-   * `file` = 现有 `.platform-data/users|sessions/*.json`（缺省，行为与 024 完全一致）；
+   * `file` = `.platform-data/accounts/{users,sessions}/*.json`（缺省，行为与 024 完全一致；
+   * 2026-11-27 结构收敛，完整路径见 `domain/account/paths.ts`）；
    * `mysql` = 账号域五表（见 specs/028-account-mysql-binding/schema.sql）。
    * 设计态不受此开关影响（D4：始终在 `.platform-data`）。
    */

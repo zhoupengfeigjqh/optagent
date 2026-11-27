@@ -16,7 +16,7 @@ function recordingClient(): { client: HttpClient; calls: Call[] } {
     get: async (path: string) => {
       calls.push({ method: 'GET', path })
       if (path.includes('/register-links/')) {
-        return { agent: { code: 'DH-1', name: '演示数字人' }, expired: false }
+        return { agent: { code: 'DH-1', name: '演示数字人' } }
       }
       return { user_id: 'zpf' }
     },
@@ -54,7 +54,6 @@ describe('createAuthApi', () => {
 
     await expect(api.lookupRegisterLink('tok/en')).resolves.toEqual({
       agent: { code: 'DH-1', name: '演示数字人' },
-      expired: false,
     })
     expect(calls[1]?.path).toBe(`/api/admin/auth/register-links/${encodeURIComponent('tok/en')}`)
 

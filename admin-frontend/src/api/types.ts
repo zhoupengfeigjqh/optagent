@@ -220,6 +220,7 @@ export type {
 
 export {
   SCENARIO_FIELD_TYPES,
+  type AgentDeletionImpact,
   type AgentDesign,
   type AgentDesignPayload,
   type AgentListItem,
@@ -238,13 +239,6 @@ export interface UserAgentLink {
   abnormal_reason: string | null
 }
 
-export interface UserSummaryEntry {
-  name: string
-  mcp_services: string[]
-  enabled_tools: string[]
-  skills: string[]
-}
-
 export interface UserListItem {
   user_id: string
   agents: UserAgentLink[]
@@ -257,9 +251,34 @@ export interface UserListItem {
   display_name?: string | null
   role?: 'admin' | 'user'
   source_agent_code?: string | null
-  /** 028 §13：使用授权摘要（与 agents[] 部署关联分开呈现） */
-  grants_summary?: { approved: number; pending: number }
-  summary: UserSummaryEntry[] | null
+  /**
+   * 授权 = 关联（2026-11-27 收敛）：`agents[]` 既是"已授权的数字人"也是"要部署的数字人"，
+   * 授权数就是 `agents.length`。`expand=summary` 及其 `summary` 字段同日移除（无消费方）。
+   */
+}
+
+/**
+ * 单用户部署结果（契约 §6.5）。
+ *
+ * 只保留界面用得到的两个判据：整批 `ok` 与失败原因；差异明细（`manifest_diff`）
+ * 随部署功能区一并下架，不再展示。
+ */
+export interface DeployUserResult {
+  user_id: string
+  ok: boolean
+  agents: Array<{ name: string; action: 'written' | 'removed'; ok: boolean }>
+  error?: string
+}
+
+export interface DeployResult {
+  users: DeployUserResult[]
+  history_id: string
+}
+
+/** 撤回结果（契约 §6.9）：`withdrawn` 是运行环境里实际被移除的数字人目录名 */
+export interface WithdrawResult {
+  user_id: string
+  withdrawn: string[]
 }
 
 export interface UserDetail {
@@ -271,44 +290,6 @@ export interface UserDetail {
   display_name?: string | null
   role?: 'admin' | 'user'
   source_agent_code?: string | null
-}
-
-export interface DeployUserResult {
-  user_id: string
-  ok: boolean
-  agents: Array<{ name: string; action: 'written' | 'removed'; ok: boolean }>
-  error?: string
-}
-
-export interface DeployResult {
-  users: DeployUserResult[]
-  manifest_diff: DeployManifestDiffEntry[]
-  history_id: string
-}
-
-export interface DeployManifestDiffEntry {
-  user_id: string
-  target: string
-  kind: string
-  detail: string
-}
-
-/**
- * 部署历史的一条记录（契约 §6.7）。
- *
- * 除列表列用到的摘要字段外，记录里**本来就带**逐用户结果与差异项——
- * 界面「展开」后据此还原"失败的是谁、哪个数字人、为什么"，
- * 无需另设详情接口。老记录缺这些字段时按"无明细"呈现（不静默显示空白）。
- */
-export interface DeployHistoryItem {
-  id: string
-  deployed_at: string
-  operator: string
-  result: string
-  user_count: number
-  error_count: number
-  users?: DeployUserResult[]
-  manifest_diff?: DeployManifestDiffEntry[]
 }
 
 export interface ManifestEntry {
@@ -334,9 +315,6 @@ export type {
   AgentServiceCreatePayload,
   AgentServiceItem,
   AgentServiceUpdatePayload,
-  GrantApplyResult,
-  GrantItem,
-  GrantStatus,
   MeProfile,
   MyAgents,
   RegisterLinkCreated,

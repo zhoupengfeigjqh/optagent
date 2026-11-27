@@ -1,6 +1,12 @@
 <script setup lang="ts">
 /**
  * 用户管理表格：账户筛选后的当前页展示与行操作入口。
+ *
+ * 口径（2026-11-27 收敛后）：
+ *  - **授权 = 关联**：`agents[]` 即"已授权的数字人"，没有独立的授权摘要；
+ *  - **部署** 是把已授权数字人下发到运行环境的唯一入口，因此行内保留「部署」按钮，
+ *    已授权为空时禁用（没有可下发的内容，且不应借此清空运行环境）；
+ *  - 「修改」入口已删除：账户扩展字段只在新建时设置，数字人授权在「授权详情」里勾选。
  */
 import { computed } from 'vue'
 import type { AgentServiceItem, ErrorInfo, UserListItem } from '../../api/types'
@@ -15,15 +21,28 @@ const props = defineProps<{
   pageSize: number
   loading: boolean
   error: ErrorInfo | null
+  /** 正在部署的账户（空 = 无部署进行中），用于禁用按钮并给出进行中文案 */
+  deployingUserId?: string | null
+  /** 正在停止（撤回部署）的账户（空 = 无停止进行中） */
+  withdrawingUserId?: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:page', value: number): void
   (e: 'grants', user: UserListItem): void
-  (e: 'edit', user: UserListItem): void
+  (e: 'deploy', user: UserListItem): void
+  (e: 'withdraw', user: UserListItem): void
   (e: 'reset-password', user: UserListItem): void
   (e: 'delete', user: UserListItem): void
 }>()
+
+function isDeploying(user: UserListItem): boolean {
+  return props.deployingUserId === user.user_id
+}
+
+function isWithdrawing(user: UserListItem): boolean {
+  return props.withdrawingUserId === user.user_id
+}
 
 const serviceNames = computed(
   () => new Map(props.services.map((service) => [service.code, service.name])),
@@ -62,7 +81,7 @@ function sourceLabel(user: UserListItem): string {
               <th scope="col">手机号</th>
               <th scope="col">用户名</th>
               <th scope="col">注册来源服务</th>
-              <th scope="col">授权概况</th>
+              <th scope="col">已授权数字人</th>
               <th scope="col">操作</th>
             </tr>
           </thead>
@@ -86,34 +105,47 @@ function sourceLabel(user: UserListItem): string {
               </td>
               <td>{{ sourceLabel(user) }}</td>
               <td>
-                <span
-                  v-if="(user.grants_summary?.approved ?? 0) > 0"
-                  class="account-table__pill account-table__pill--ok"
-                >
-                  已授权 {{ user.grants_summary?.approved }}
+                <span v-if="user.agents.length > 0" class="account-table__pill account-table__pill--ok">
+                  已授权 {{ user.agents.length }}
                 </span>
+                <span v-else class="account-table__pill">未授权</span>
                 <span
-                  v-if="(user.grants_summary?.pending ?? 0) > 0"
-                  class="account-table__pill account-table__pill--wait"
-                >
-                  申请中 {{ user.grants_summary?.pending }}
-                </span>
-                <span
-                  v-if="
-                    (user.grants_summary?.approved ?? 0) === 0 &&
-                    (user.grants_summary?.pending ?? 0) === 0
-                  "
                   class="account-table__pill"
+                  :class="{ 'account-table__pill--ok': user.deployed_at !== null }"
                 >
-                  暂无授权
+                  {{ user.deployed_at === null ? '未部署' : '已部署' }}
                 </span>
               </td>
               <td class="account-table__ops">
                 <button type="button" class="btn btn--small" @click="emit('grants', user)">
                   授权详情
                 </button>
-                <button type="button" class="btn btn--small" @click="emit('edit', user)">
-                  修改
+                <button
+                  type="button"
+                  class="btn btn--small btn--primary"
+                  :disabled="isDeploying(user) || user.agents.length === 0"
+                  :title="
+                    user.agents.length === 0
+                      ? '尚未授权任何数字人，没有可部署的内容'
+                      : '把已授权的数字人下发到运行环境'
+                  "
+                  @click="emit('deploy', user)"
+                >
+                  {{ isDeploying(user) ? '部署中…' : '部署' }}
+                </button>
+                <!-- 停止 = 撤回部署（2026-11-27）：只下架运行环境副本，授权与文件空间保留 -->
+                <button
+                  type="button"
+                  class="btn btn--small"
+                  :disabled="isWithdrawing(user) || user.deployed_at === null"
+                  :title="
+                    user.deployed_at === null
+                      ? '该账户尚未部署，无需停止'
+                      : '撤回该账户在运行环境中的全部数字人副本，用户立即无法使用'
+                  "
+                  @click="emit('withdraw', user)"
+                >
+                  {{ isWithdrawing(user) ? '停止中…' : '停止' }}
                 </button>
                 <button
                   type="button"
@@ -238,10 +270,8 @@ function sourceLabel(user: UserListItem): string {
   background: var(--color-status-success-bg);
 }
 
-.account-table__pill--wait {
+.account-table__pill + .account-table__pill {
   margin-left: var(--space-1);
-  color: var(--color-status-warning);
-  background: var(--color-status-warning-bg);
 }
 
 .account-table__ops {

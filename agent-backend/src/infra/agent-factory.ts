@@ -7,7 +7,7 @@ import type { PooledInstance } from '../domain/agent-pool.js';
 import type { LlmRetryOptions } from '../config.js';
 import { computeConfigFingerprint } from '../domain/config-fingerprint.js';
 import { FileAccess } from '../domain/file-access.js';
-import { planGateBlocks } from '../domain/intent-focus/plan-gate.js';
+import { planCapabilityBlocks, planGateBlocks } from '../domain/intent-focus/plan-gate.js';
 import type { PlanLimits, PlanProgress } from '../domain/plan/types.js';
 import { isIntentFocusEnabled, isTaskPlanningEnabled } from '../domain/soul.js';
 import { createOntologyFactsLoader } from '../domain/plan/ontology-facts.js';
@@ -423,6 +423,13 @@ export class AgentInstanceFactory {
       );
     } else if ((req.focusPrompt ?? '').trim() === '') {
       logger.info({ event: 'plan.skipped', reason: 'empty_focus' }, '本轮无意图聚焦结果，跳过规划');
+    } else if (planCapabilityBlocks(req.planEligible)) {
+      // 028（2026-11-27）：规划必须从聚焦行为/函数起算；只命中技能、没有命中任何本体行为
+      // 或函数时，规划没有可展开的 coreAction，直接跳过（门禁判定已在聚焦阶段一并省掉）。
+      logger.info(
+        { event: 'plan.skipped', reason: 'no_focus_capability' },
+        '本轮未聚焦到本体行为/函数，跳过规划阶段',
+      );
     } else if (planGateBlocks(req.planScore, this.deps.planThreshold)) {
       // 028：门禁拦截（分数缺席 = 没判/判失败 → fail-open，继续走规划）
       logger.info(

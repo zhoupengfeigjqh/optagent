@@ -5,13 +5,12 @@
  * 运行侧经会话内省端点读取，从而实现"后登踢前登"。
  *
  * **028 阶段 1**：写方法 async 化并提取 `SessionPort`；本类保持 `file` 驱动
- * （`.platform-data/sessions/{uid}.json`，复用 `PlatformStore` 原子写），
+ * （`.platform-data/accounts/sessions/{uid}.json`，复用 `PlatformStore` 原子写），
  * mysql 驱动见 `mysql-session-store.ts`（`sessions` 表）。
  * 读取保持**同步**（`AuthService.introspect` 的契约不变，运行侧零改动）。
  */
 import type { PlatformStore } from '../../infra/platform-store.js';
-
-const SESSIONS_DIR = 'sessions';
+import { SESSIONS_DIR } from '../account/paths.js';
 
 export interface SessionRecord {
   user_id: string;

@@ -35,11 +35,3 @@ export function createReferenceIndex(input: ReferenceIndexInput): ReferenceIndex
   };
 }
 
-/** 空清单（运行环境不可达等降级场景；此时任何非空引用都会被判为失效） */
-export const EMPTY_REFERENCE_INDEX: ReferenceIndex = createReferenceIndex({
-  builtinTools: [],
-  mcpServices: [],
-  skills: [],
-  ontologies: [],
-  mcpTools: [],
-});

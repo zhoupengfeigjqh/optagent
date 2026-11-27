@@ -1,11 +1,14 @@
 import { http } from './http'
 import type { Paged, UserDetail, UserListItem } from './types'
 
-export function listUsers(page = 1, expandSummary = true): Promise<Paged<UserListItem>> {
-  return http.get<Paged<UserListItem>>('/api/admin/users', {
-    page,
-    ...(expandSummary ? { expand: 'summary' } : {}),
-  })
+/**
+ * 用户列表。
+ *
+ * 2026-11-27：`expand=summary` 随「部署前核对总账」下架一并移除（无消费方），
+ * 列表只返回授权数与部署状态，不再计算搭配摘要。
+ */
+export function listUsers(page = 1): Promise<Paged<UserListItem>> {
+  return http.get<Paged<UserListItem>>('/api/admin/users', { page })
 }
 
 /** 新建用户可携带的账号扩展字段（028 §13；全部可选） */

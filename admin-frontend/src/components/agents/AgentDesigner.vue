@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type {
+  AgentDeletionImpact,
   AgentDesign,
   AgentScenario,
   BuiltinTool,
@@ -10,7 +11,7 @@ import type {
   SoulDesign,
 } from '../../api/types'
 import type { OntologyCandidate } from '../../api/ontologies'
-import { deleteAgent } from '../../api/agents'
+import { deleteAgent, getAgentDeletionImpact } from '../../api/agents'
 import { AGENT_DESIGN_TABS, NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import { useAgentDesign } from '../../composables/useAgentDesign'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
@@ -60,6 +61,8 @@ const confirmBack = ref(false)
 /** 删除确认（删除**不可恢复**，且被用户关联时会被服务端拒绝） */
 const confirmDelete = ref(false)
 const deleting = ref(false)
+/** 删除影响面：待失效的注册链接数与被关联用户（判定在服务端，前端只负责展示） */
+const deleteImpact = ref<AgentDeletionImpact | null>(null)
 
 const isNew = computed(() => props.name === NEW_AGENT_SENTINEL)
 const title = computed(() => (isNew.value ? '新建数字人' : `设计数字人：${props.name}`))
@@ -147,8 +150,38 @@ function requestBack(): void {
   emit('back')
 }
 
-/** 删除入口：破坏性操作，先弹确认（文案里讲明"不可恢复"） */
-function requestDelete(): void {
+/**
+ * 删除确认文案：把删除的连带影响讲在确认之前。
+ *
+ * - 已被用户关联 → 服务端必然拒绝，先告知并给出解除关联的指引；
+ * - 有未撤销的注册链接 → 会随删除**级联撤销**（记录保留但立即失效），条数由服务端给出；
+ * - 影响面取不到时不阻断：退回通用文案，仍以服务端判定为准（不在前端复刻规则）。
+ */
+const deleteMessage = computed(() => {
+  const parts = [
+    `数字人「${props.name}」的设计态与注册服务编码将被删除，删除后无法恢复；已分发到运行环境的目录会在下次部署时清除。`,
+  ]
+  const linkedUsers = deleteImpact.value?.linked_users ?? []
+  if (linkedUsers.length > 0) {
+    parts.push(`该数字人已被用户关联（${linkedUsers.join('、')}），服务端会拒绝删除，请先解除关联。`)
+  }
+  const activeLinks = deleteImpact.value?.active_register_links ?? 0
+  if (activeLinks > 0) {
+    parts.push(
+      `请注意，本次删除会有 ${activeLinks} 条注册链接失效（链接记录保留，但立即无法再用于注册）。`,
+    )
+  }
+  return parts.join('')
+})
+
+/** 删除入口：先取影响面再弹确认（破坏性操作，文案里讲明"不可恢复"） */
+async function requestDelete(): Promise<void> {
+  deleteImpact.value = null
+  try {
+    deleteImpact.value = await getAgentDeletionImpact(props.name)
+  } catch {
+    // 影响面是提示性信息，取不到不阻断删除；真正的删除仍由服务端校验
+  }
   confirmDelete.value = true
 }
 
@@ -268,7 +301,7 @@ async function doDelete(): Promise<void> {
       v-model:open="confirmDelete"
       data-test="agent-delete-dialog"
       title="删除该数字人？"
-      :message="`数字人「${props.name}」的设计态将被删除，删除后无法恢复。若它已被用户关联，需先解除关联；已分发到运行环境的目录会在下次部署时清除。`"
+      :message="deleteMessage"
       confirm-label="删除"
       danger
       @confirm="doDelete"

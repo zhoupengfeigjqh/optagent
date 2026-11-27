@@ -1,6 +1,6 @@
 /**
- * 存量账号迁移：`.platform-data/{users,sessions}/*.json` → MySQL `optagent` 库
- * （028 特性，阶段 1）。
+ * 存量账号迁移：`.platform-data/accounts/{users,sessions}/*.json` → MySQL `optagent` 库
+ * （028 特性，阶段 1；旧结构 `.platform-data/{users,sessions}/*.json` 回退兼容）。
  *
  * 用法：
  *   1. 先在 `.env.local` 配好 `STORAGE_DRIVER=mysql` 与 `MYSQL_*`（脚本按此装配连接）；
@@ -9,6 +9,10 @@
  *
  * 语义：**复制而非移动**——源 JSON 不删除；重复执行为幂等 upsert。
  * 校验：迁移后 `users` / `sessions` 行数与源文件数一致，逐条 `user_id` 对账。
+ *
+ * 2026-11-27 结构收敛：源目录优先读 `accounts/users|sessions`；若该处没有数据而
+ * 旧目录（`users/` / `sessions/`）有，则回退读旧目录并告警——否则漏跑
+ * `migrate:accounts-layout` 时会**静默迁移 0 条**。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +20,12 @@ import { loadConfig } from '../src/config.js';
 import { MysqlConnection } from '../src/infra/mysql.js';
 import type { PasswordRecord } from '../src/domain/auth/password.js';
 import type { UserLinkDocument } from '../src/domain/config-center/user-links.js';
+import {
+  LEGACY_SESSIONS_DIR,
+  LEGACY_USERS_DIR,
+  SESSIONS_DIR,
+  USERS_DIR,
+} from '../src/domain/account/paths.js';
 
 interface FileSessionRecord {
   user_id: string;
@@ -35,6 +45,22 @@ function readJsonFiles<T>(dir: string): Array<{ id: string; doc: T }> {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/** 新结构优先；新目录无数据而旧目录有 → 读旧目录并告警（防止静默迁 0 条） */
+function resolveSourceDir(root: string, relNew: string, relLegacy: string): string {
+  const next = path.join(root, ...relNew.split('/'));
+  const legacy = path.join(root, relLegacy);
+  const hasJson = (dir: string): boolean =>
+    fs.existsSync(dir) && fs.readdirSync(dir).some((file) => file.endsWith('.json'));
+  if (hasJson(next)) return next;
+  if (hasJson(legacy)) {
+    console.warn(
+      `[migrate] 新结构 ${relNew}/ 无数据，改读旧目录 ${legacy}（建议先跑 migrate:accounts-layout）`,
+    );
+    return legacy;
+  }
+  return next;
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   if (config.storageDriver !== 'mysql' || !config.mysql) {
@@ -52,11 +78,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const usersDir = path.join(config.platformDataDir, 'users');
-  const sessionsDir = path.join(config.platformDataDir, 'sessions');
+  const usersDir = resolveSourceDir(config.platformDataDir, USERS_DIR, LEGACY_USERS_DIR);
+  const sessionsDir = resolveSourceDir(config.platformDataDir, SESSIONS_DIR, LEGACY_SESSIONS_DIR);
   const userFiles = readJsonFiles<UserLinkDocument>(usersDir);
   const sessionFiles = readJsonFiles<FileSessionRecord>(sessionsDir);
-  console.log(`[migrate] 源数据：users=${userFiles.length} 个（${usersDir}），sessions=${sessionFiles.length} 个（${sessionsDir}）`);
+  console.log(
+    `[migrate] 源数据：users=${userFiles.length} 个（${usersDir}），sessions=${sessionFiles.length} 个（${sessionsDir}）`,
+  );
 
   // ---- users：幂等 upsert（agents 与密码摘要；其余列保持缺省）----
   for (const { id, doc } of userFiles) {

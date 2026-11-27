@@ -218,6 +218,7 @@ describe('开关、跳过与未配置', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(spy).not.toHaveBeenCalled();
     expect(records).toHaveLength(0);
@@ -231,6 +232,7 @@ describe('开关、跳过与未配置', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(spy).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
@@ -253,6 +255,7 @@ describe('开关、跳过与未配置', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(spy).not.toHaveBeenCalled();
     expect(records[0]!.disposition).toBe('unconfigured');
@@ -294,6 +297,7 @@ describe('空结果', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(records[0]!.disposition).toBe('empty');
     expect(records[0]!.reason).toBe('below_threshold');
@@ -576,6 +580,7 @@ describe('分批与降级', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(records[0]!.disposition).toBe('degraded');
     expect(records[0]!.reason).toBe('timeout');
@@ -600,6 +605,7 @@ describe('分批与降级', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
     expect(records[0]!.disposition).toBe('degraded');
     expect(records[0]!.skills.some((skill) => skill.selected)).toBe(true);
@@ -616,6 +622,7 @@ describe('分批与降级', () => {
       prompt: '',
       toolTips: [],
       planScore: null,
+      hasCapability: false,
     });
   });
 
@@ -818,6 +825,19 @@ describe('028 规划门禁（intent_focus 内）', () => {
     };
   }
 
+  /** 技能高分入选、能力（行为/函数）全部低于阈值；门禁调用单独记录 */
+  function withLowCapability(calls: string[][]): IntentFocusClient['decide'] {
+    return async (_state, questions) => {
+      calls.push(Object.keys(questions));
+      const scores: Record<string, number> = {};
+      for (const [qid, question] of Object.entries(questions)) {
+        const instructions = (question as { instructions: string }).instructions;
+        scores[qid] = instructions.includes('本体技能') ? 0.9 : 0.1;
+      }
+      return { ok: true, scores, model: 'laya-multilingual' };
+    };
+  }
+
   it('开了规划且分数 >= 阈值：判定一次并落 plan_score', async () => {
     const { root } = fixture();
     const calls: string[][] = [];
@@ -875,5 +895,37 @@ describe('028 规划门禁（intent_focus 内）', () => {
     expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(true);
     expect(result.planScore).toBeNull();
     expect(result.prompt).toContain('onto-skill');
+  });
+
+  it('只命中技能、未命中任何本体行为/函数：hasCapability=false，且不判门禁', async () => {
+    const { root } = fixture();
+    const calls: string[][] = [];
+    const h = harness(root, {
+      config: GATE_CONFIG,
+      taskPlanning: true,
+      decide: withLowCapability(calls),
+    });
+
+    const result = await h.runner.judge(input());
+
+    // 技能提示照常产出，但本轮没有可依附的行为/函数 → 不给规划资格，也不花门禁那次调用
+    expect(result.prompt).toContain('onto-skill');
+    expect(result.hasCapability).toBe(false);
+    expect(result.planScore).toBeNull();
+    expect(calls.some((qids) => qids.includes('plan_gate'))).toBe(false);
+  });
+
+  it('命中本体行为/函数：hasCapability=true', async () => {
+    const { root } = fixture();
+    const h = harness(root, {
+      config: GATE_CONFIG,
+      taskPlanning: true,
+      decide: withGate(0.82, []),
+    });
+
+    const result = await h.runner.judge(input());
+
+    expect(result.hasCapability).toBe(true);
+    expect(result.planScore).toBe(0.82);
   });
 });

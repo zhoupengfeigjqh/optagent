@@ -1,0 +1,18 @@
+{
+  "user_id": "u_aba11be615ce",
+  "agents": [],
+  "password": {
+    "algo": "scrypt",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1
+    },
+    "salt": "TvgmbtXhsV7+Pq6/x2XSBQ==",
+    "hash": "Oa6/2P711bQl2Zd8C3v3/dK10qb3sBcfgGiex0l/hHi4l96t81QHVqy1vqC9YcuIGvxTtyN8T1Yjsgaz/9wkAg=="
+  },
+  "phone": "15601842084",
+  "display_name": "zpf",
+  "role": "user",
+  "source_agent_code": "DH-FRESH9"
+}

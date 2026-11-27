@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { USERS_DIR } from '../../src/domain/account/paths.js';
 import { ApiError } from '../../src/domain/api-error.js';
 import { verifyPassword } from '../../src/domain/auth/password.js';
 import { UserLinkService } from '../../src/domain/config-center/user-links.js';
@@ -157,7 +158,7 @@ describe('UserLinkService', () => {
 
   it('损坏的文档以 ADM_STORAGE_UNAVAILABLE **显式暴露**（不静默跳过，避免"少了一个用户"被忽略）', async () => {
     await users.create('good', [], store.revision());
-    fs.writeFileSync(path.join(root, 'users', 'bad.json'), '{坏', 'utf8');
+    fs.writeFileSync(path.join(root, ...USERS_DIR.split('/'), 'bad.json'), '{坏', 'utf8');
 
     let caught: unknown;
     try {

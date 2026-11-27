@@ -16,10 +16,10 @@ export const HISTORY_MESSAGE_MAX_CHARS = 1500;
 
 export const ROLE_PROMPT = `你是任务分解器。根据给定上下文把用户的请求拆成 1~3 个可执行步骤，只输出计划。
 
-【必须遵守】你的计划必须从下方「意图聚焦结果」出发：
-- 优先使用聚焦已给出的技能、关键行为与图路径；
-- 每一步的 coreAction 都应当落在聚焦结果的覆盖范围内，或在可用工具清单中确有对应能力；
-- 不得绕开聚焦结果自行发明新的业务路径。`;
+【必须遵守】
+1. 优先从下方「意图聚焦结果」给出的技能、关键行为、本体函数与图路径出发；聚焦结果已覆盖的能力不得另辟路径。
+2. 每一步的 coreAction 都必须在下方可用工具清单（本体行为、本体函数、非本体函数）中有唯一对应，且必须使用清单里的裸名。
+3. 不得绕开可用工具清单自行规划行为：清单里没有的能力、服务或接口，一律不得出现在计划里。`;
 
 export const OUTPUT_FORMAT_PROMPT = `［输出格式］
 只输出一个 JSON 数组。不要输出解释、标题、前后缀文字，不要包 Markdown 代码围栏。
@@ -28,16 +28,19 @@ export const OUTPUT_FORMAT_PROMPT = `［输出格式］
 - seqId：整数，从 1 开始
 - taskName：≤20 字，动宾短语
 - content：≤300 字，写清这一步做什么、用哪个工具、产出什么
-- coreAction：工具裸名（不带服务前缀），必须来自上面的本体行为或可用函数
+- coreAction：工具裸名（不带服务前缀），必须来自上面的可用工具清单（本体行为或可用函数）
 - type：command（写入）| query（查询）| function（函数处理）
 
 若本次无需任何工具（或已无剩余步骤），输出空数组 []。
+若彼此独立的对象超过 3 个，先为前 3 个各排一步；剩余对象会在下一批继续规划，不要为了凑步数把多个对象合并。
 
 禁止：
 - 一次给出多于 3 步
 - 一个步骤里安排多个 command（一步只能有一个 coreAction；多个 command 请各占一步）
 - 同一个 command 安排成两步（同一 command 只占一步）
+- 把多个彼此独立的对象（即使动作相同）合并到同一步：一个对象占一步
 - 使用上面未出现的 coreAction
+- 规划可用工具清单之外的行为、服务或接口
 - 输出 JSON 之外的任何文字`;
 
 export interface HistoryMessage {
@@ -93,8 +96,11 @@ export function buildPlanPrompt(input: PlanPromptInput): PlanPromptResult {
  */
 function renderFocus(focusPrompt: string): string {
   const body = truncateByLines(focusPrompt.trim(), FOCUS_PROMPT_HARD_CAP_CHARS).trim();
-  const head = '［意图聚焦结果｜本轮规划的唯一起点］\n以下内容是本轮已经过聚焦判定的能力与路径，请以此为起点设计计划：';
-  const tail = '若某个必要步骤无法映射到聚焦结果或工具清单，请在 content 中说明原因，不要虚构能力。';
+  const head =
+    '［意图聚焦结果｜本轮规划的首选起点］\n以下内容是本轮已经过聚焦判定的能力与路径，请优先以此为起点设计计划：';
+  const tail =
+    '聚焦结果之外的必要能力，只能从下方可用工具清单中选择（coreAction 不得超出清单）；' +
+    '清单里也没有时，省略该步并在 content 中说明缺口，不得虚构工具或接口。';
   if (body === '') return `${head}\n\n（本轮无聚焦结果，请只依据下方工具清单设计计划。）\n\n${tail}`;
   return `${head}\n\n${body}\n\n${tail}`;
 }

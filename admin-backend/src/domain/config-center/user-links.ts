@@ -7,7 +7,7 @@
  *
  * **028 阶段 1**：写方法 async 化并提取 `UserLinkPort` 端口，供
  * `mysql-user-link-service.ts` 以同一契约接入 MySQL；本类保持 `file` 驱动
- * （`.platform-data/users/*.json`）实现，编排与语义与 024 完全一致。
+ * （`.platform-data/accounts/users/*.json`）实现，编排与语义与 024 完全一致。
  * 读方法保持**同步**——`Deployer`、`references.ts`、MCP 引用查询等零改动（方案 §8.3）。
  */
 import { ApiError } from '../api-error.js';
@@ -15,9 +15,8 @@ import { hashPassword, type PasswordRecord } from '../auth/password.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { paginate, type Paged } from '../paging.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
+import { USERS_DIR } from '../account/paths.js';
 import { isSafeName } from './naming.js';
-
-const USERS_DIR = 'users';
 
 export interface UserLinkDocument {
   user_id: string;

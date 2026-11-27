@@ -16,6 +16,7 @@ vi.mock('../../utils/clipboard', () => ({
 
 const AGENT: AgentListItem = {
   name: 'demo',
+  code: 'DH-DEMO01',
   description: '演示数字人',
   abnormal: false,
   abnormal_reason: null,

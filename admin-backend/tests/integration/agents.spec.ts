@@ -75,6 +75,30 @@ describe('POST /api/admin/agents', () => {
     expect(typeof body.revision).toBe('number');
   });
 
+  it('新建即生成对外编码，与注册服务同源同值（2026-11-27）', async () => {
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const code = res.json().code as string;
+    expect(code).toMatch(/^DH-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}$/);
+
+    const services = await fx.ctx.agentServices.list();
+    expect(services.find((item) => item.platform_agent_name === 'demo')?.code).toBe(code);
+  });
+
+  it('客户端提交 code 一律忽略：编码由平台生成，不可写', async () => {
+    const res = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agents',
+      payload: { ...validBody, code: 'DH-FAKE1' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().code).not.toBe('DH-FAKE1');
+  });
+
   it('本体引用随设计态保存并原样回显（FR-058，2026-10-17）', async () => {
     installOntology();
 
@@ -193,6 +217,7 @@ describe('GET /api/admin/agents', () => {
       description: '第一行：你是一名助手。',
       abnormal: false,
     });
+    expect(body.items[0].code).toMatch(/^DH-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}$/);
   });
 
   it('非法 page → 400 VALIDATION_FAILED', async () => {
@@ -236,6 +261,30 @@ describe('PUT /api/admin/agents/{name}', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().soul.mission).toBe(nextMission);
     expect(res.json().revision).toBeGreaterThan(created.revision);
+  });
+
+  it('保存与改名都保留既有编码（编码创建后不可改，2026-11-27）', async () => {
+    const created = (
+      await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody })
+    ).json();
+    expect(created.code).toBeTruthy();
+
+    const saved = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/agents/demo',
+      payload: { ...validBody, soul: soulDesign('新内容'), revision: created.revision },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().code).toBe(created.code);
+
+    const renamed = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/agents/demo',
+      payload: { ...validBody, name: 'demo3', revision: saved.json().revision },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().name).toBe('demo3');
+    expect(renamed.json().code).toBe(created.code);
   });
 
   it('缺 revision → 400 VALIDATION_FAILED', async () => {

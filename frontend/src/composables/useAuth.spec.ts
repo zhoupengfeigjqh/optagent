@@ -98,7 +98,6 @@ describe('createAuthStore', () => {
   it('注册链接校验与注册透传 API 结果', async () => {
     const lookupLink = vi.fn(async () => ({
       agent: { code: 'DH-1', name: '演示数字人' },
-      expired: false,
     }))
     const register = vi.fn(async () => ({
       user_id: 'u_1',

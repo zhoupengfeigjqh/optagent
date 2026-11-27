@@ -66,10 +66,24 @@ export interface IntentFocusResult {
    * 消费方按 fail-open 处理：`null` 一律走规划。
    */
   planScore: number | null;
+  /**
+   * 028（2026-11-27）：本轮是否聚焦到可规划的本体能力（行为或函数）。
+   *
+   * 规划以聚焦行为/函数为起点，因此 `false` = 无可依附的起点，消费方 MUST 跳过规划；
+   * 缺席 = 允许（未接入该判据的调用方沿用原行为）。
+   *
+   * 只认**直接命中**：上游/下游发散是参考背景，不是本轮可执行的行为。
+   */
+  hasCapability?: boolean;
 }
 
 /** 统一空态：开关关闭 / 跳过 / 未配置 / 降级 / 无可用能力 */
-const EMPTY_RESULT: IntentFocusResult = { prompt: '', toolTips: [], planScore: null };
+const EMPTY_RESULT: IntentFocusResult = {
+  prompt: '',
+  toolTips: [],
+  planScore: null,
+  hasCapability: false,
+};
 
 export interface IntentFocusInput {
   userId: string;
@@ -494,8 +508,16 @@ export class IntentFocusRunner implements IntentFocusPort {
     const roundMs = this.now() - startedAt;
     const allWarnings = [...warnings, ...expansion.warnings];
 
+    const hasCapability =
+      capabilitySelection.behaviors.length > 0 || capabilitySelection.functions.length > 0;
+
     // 028：规划门禁（仅当数字人开了 task_planning 且配置了 plan_threshold）
-    const gate = await this.judgePlanGate(input, config, focusState, deadline);
+    //
+    // 2026-11-27：本轮没有聚焦到任何本体行为/函数就**不判门禁**——规划必须从聚焦行为
+    // 或函数起算，已确定不规划时再花一次 laya 调用没有意义。
+    const gate = hasCapability
+      ? await this.judgePlanGateScore(input, config, focusState, deadline)
+      : { score: null, roundMs: null };
 
     await this.recorder.write(target, state, inputTruncated, {
       ...decideDisposition({
@@ -565,6 +587,7 @@ export class IntentFocusRunner implements IntentFocusPort {
       prompt: composed.prompt,
       toolTips: buildToolTips(capabilitySelection, expansion.downstream.behaviors),
       planScore: gate.score,
+      hasCapability,
     };
   }
 
@@ -575,7 +598,7 @@ export class IntentFocusRunner implements IntentFocusPort {
    * 任一不满足 → 不调用、分数为 `null`（消费方 fail-open 走规划）。
    * 判定失败/超时同样返回 `null`：门禁是优化项，不能把复杂任务降级掉。
    */
-  private async judgePlanGate(
+  private async judgePlanGateScore(
     input: IntentFocusInput,
     config: IntentFocusConfig,
     state: string,

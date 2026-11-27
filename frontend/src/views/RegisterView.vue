@@ -9,6 +9,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons-vue'
 import type { RegisterResult } from '@/api/auth'
+import LoginForm from '@/components/auth/LoginForm.vue'
 import { getAuthStore } from '@/composables/useAuth'
 import { toErrorInfo, toUserMessage } from '@/utils/error-message'
 
@@ -32,13 +33,10 @@ const rPhoneErr = ref('')
 const rNameErr = ref('')
 const rPwdErr = ref('')
 
-const lPhone = ref('')
-const lPwd = ref('')
-const lPhoneErr = ref('')
-const lPwdErr = ref('')
-
 const rShowPwd = ref(false)
-const lShowPwd = ref(false)
+
+/** 登录页签的预填标识（注册成功后填入刚注册的手机号） */
+const loginAccount = ref('')
 
 const existAlert = ref(false)
 const okMessage = ref('')
@@ -73,8 +71,8 @@ function switchMode(next: 'register' | 'login'): void {
   mode.value = next
   existAlert.value = false
   formMessage.value = ''
-  if (next === 'login' && /^1[3-9]\d{9}$/.test(rPhone.value.trim()) && lPhone.value === '') {
-    lPhone.value = rPhone.value.trim()
+  if (next === 'login' && loginAccount.value === '' && /^1\d{10}$/.test(rPhone.value.trim())) {
+    loginAccount.value = rPhone.value.trim()
   }
 }
 
@@ -87,8 +85,10 @@ function validateRegister(): boolean {
   if (phone === '') {
     rPhoneErr.value = '请输入手机号'
     ok = false
-  } else if (!/^1[3-9]\d{9}$/.test(phone)) {
-    rPhoneErr.value = '手机号格式不正确，需为 11 位有效号码'
+  } else if (!/^1\d{10}$/.test(phone)) {
+    // 与后端 `normalizePhone` / 管理台「新建用户」同一规则（2026-11-27 统一）：
+    // 只校验"1 开头 11 位"，不再额外收窄号段，否则管理员建的号在前台认不出来
+    rPhoneErr.value = '手机号格式不正确，需为 1 开头的 11 位数字'
     ok = false
   }
   const name = rName.value.trim()
@@ -102,8 +102,9 @@ function validateRegister(): boolean {
   if (rPwd.value === '') {
     rPwdErr.value = '请输入密码'
     ok = false
-  } else if (rPwd.value.length < 6) {
-    rPwdErr.value = '密码至少 6 位'
+  } else if (rPwd.value.length < 6 || rPwd.value.length > 128) {
+    // 与后端 `PASSWORD_MIN/MAX_LENGTH`、管理台建号/重置同一区间（2026-11-27 统一）
+    rPwdErr.value = '密码长度须为 6~128 个字符'
     ok = false
   }
   return ok
@@ -124,7 +125,7 @@ async function submitRegister(): Promise<void> {
     })
     okMessage.value = `注册成功！已自动获得「${created.granted_agent.name}」的使用权限，请登录。`
     rPwd.value = ''
-    lPhone.value = created.phone
+    loginAccount.value = created.phone
     mode.value = 'login'
   } catch (err) {
     const info = toErrorInfo(err)
@@ -138,7 +139,7 @@ async function submitRegister(): Promise<void> {
 function gotoLogin(): void {
   existAlert.value = false
   mode.value = 'login'
-  lPhone.value = rPhone.value.trim()
+  loginAccount.value = rPhone.value.trim()
 }
 
 function changePhone(): void {
@@ -146,33 +147,9 @@ function changePhone(): void {
   rPhone.value = ''
 }
 
-async function submitLogin(): Promise<void> {
-  formMessage.value = ''
-  lPhoneErr.value = ''
-  lPwdErr.value = ''
-  let ok = true
-  if (lPhone.value.trim() === '') {
-    lPhoneErr.value = '请输入手机号'
-    ok = false
-  } else if (!/^1[3-9]\d{9}$/.test(lPhone.value.trim())) {
-    lPhoneErr.value = '手机号格式不正确'
-    ok = false
-  }
-  if (lPwd.value === '') {
-    lPwdErr.value = '请输入密码'
-    ok = false
-  }
-  if (!ok) return
-
-  submitting.value = true
-  try {
-    await auth.loginWithPhone(lPhone.value.trim(), lPwd.value)
-    await router.replace('/')
-  } catch (err) {
-    formMessage.value = toUserMessage(toErrorInfo(err))
-  } finally {
-    submitting.value = false
-  }
+/** 登录成功：回工作台（`LoginForm` 内已写入登录态，此处只管去向） */
+function goWorkbench(): void {
+  void router.replace('/')
 }
 </script>
 
@@ -186,13 +163,19 @@ async function submitLogin(): Promise<void> {
         正在校验注册链接…
       </p>
 
-      <div
-        v-else-if="phase === 'invalid'"
-        class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200"
-        role="alert"
-      >
-        {{ lookupMessage }}
-      </div>
+      <!-- 链接失效只挡"注册"，不挡"登录"：token 是注册授权凭据，与登录无关 -->
+      <template v-else-if="phase === 'invalid'">
+        <div
+          class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-red-200"
+          role="alert"
+        >
+          {{ lookupMessage }}
+        </div>
+        <p class="mb-4 mt-4 text-sm text-slate-600">
+          注册链接不可用不影响登录：已注册的账号仍可从这里进入工作台。
+        </p>
+        <LoginForm @success="goWorkbench" />
+      </template>
 
       <template v-else>
         <div class="mb-6 flex items-center gap-3 border-b border-slate-200 pb-5">
@@ -208,7 +191,11 @@ async function submitLogin(): Promise<void> {
           </div>
         </div>
 
-        <div class="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="注册或登录">
+        <div
+          class="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1"
+          role="tablist"
+          aria-label="注册或登录"
+        >
           <button
             type="button"
             role="tab"
@@ -320,9 +307,9 @@ async function submitLogin(): Promise<void> {
                     : 'border-slate-300 focus:border-blue-500'
                 "
                 :type="rShowPwd ? 'text' : 'password'"
-                maxlength="20"
+                maxlength="128"
                 autocomplete="new-password"
-                placeholder="请输入 6-20 位密码"
+                placeholder="请输入 6-128 位密码"
               />
               <button
                 type="button"
@@ -346,66 +333,12 @@ async function submitLogin(): Promise<void> {
           </button>
         </form>
 
-        <form v-else novalidate @submit.prevent="submitLogin">
-          <label class="mb-4 block">
-            <span class="mb-1 block text-sm text-slate-600">手机号</span>
-            <input
-              id="login-phone"
-              v-model="lPhone"
-              class="w-full rounded-md border px-3 py-2 focus:outline-none"
-              :class="
-                lPhoneErr !== ''
-                  ? 'border-red-400 bg-red-50'
-                  : 'border-slate-300 focus:border-blue-500'
-              "
-              type="tel"
-              inputmode="numeric"
-              maxlength="11"
-              autocomplete="tel"
-              placeholder="请输入已注册的手机号"
-            />
-            <span class="mt-1 block text-xs text-red-600" aria-live="polite">{{ lPhoneErr }}</span>
-          </label>
-          <label class="mb-4 block">
-            <span class="mb-1 block text-sm text-slate-600">密码</span>
-            <span class="relative block">
-              <input
-                id="login-password"
-                v-model="lPwd"
-                class="w-full rounded-md border px-3 py-2 pr-11 focus:outline-none"
-                :class="
-                  lPwdErr !== ''
-                    ? 'border-red-400 bg-red-50'
-                    : 'border-slate-300 focus:border-blue-500'
-                "
-                :type="lShowPwd ? 'text' : 'password'"
-                maxlength="20"
-                autocomplete="current-password"
-                placeholder="请输入密码"
-              />
-              <button
-                type="button"
-                class="register-view__eye absolute right-1 top-1/2 flex h-8 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                :aria-label="lShowPwd ? '隐藏密码' : '显示密码'"
-                :title="lShowPwd ? '隐藏密码' : '显示密码'"
-                @click="lShowPwd = !lShowPwd"
-              >
-                <EyeInvisibleOutlined v-if="lShowPwd" />
-                <EyeOutlined v-else />
-              </button>
-            </span>
-            <span class="mt-1 block text-xs text-red-600" aria-live="polite">{{ lPwdErr }}</span>
-          </label>
-          <button
-            type="submit"
-            class="w-full rounded-md bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-60"
-            :disabled="submitting"
-          >
-            {{ submitting ? '登录中…' : '登录' }}
-          </button>
-        </form>
+        <!-- 登录表单与 `/login` 共用同一实现（账号或手机号，见 components/auth/LoginForm.vue） -->
+        <LoginForm v-else :default-account="loginAccount" @success="goWorkbench" />
 
-        <div class="mt-5 border-t border-dashed border-slate-200 pt-4 text-xs leading-relaxed text-slate-500">
+        <div
+          class="mt-5 border-t border-dashed border-slate-200 pt-4 text-xs leading-relaxed text-slate-500"
+        >
           通过本链接注册成功后，自动获得该数字人权限，无需后台审批；登录后直接进入对话窗口。
         </div>
       </template>

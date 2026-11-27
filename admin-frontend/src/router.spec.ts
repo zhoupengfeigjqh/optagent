@@ -30,7 +30,7 @@ describe('parseLocation', () => {
     expect(r.tab).toBeNull()
   })
 
-  it('解析六个功能区（含本体管理与用户管理）', () => {
+  it('解析五个功能区（含本体管理与用户管理）', () => {
     for (const name of ROUTE_NAMES) {
       expect(parseLocation(`/admin/${name}`, '/admin').name).toBe(name)
     }
@@ -63,10 +63,16 @@ describe('parseLocation', () => {
   })
 
   it('tab 来自查询串', () => {
-    const r = parseLocation('/admin/deploy?tab=history', '/admin')
-    expect(r.name).toBe('deploy')
-    expect(r.tab).toBe('history')
+    const r = parseLocation('/admin/users?tab=grants', '/admin')
+    expect(r.name).toBe('users')
+    expect(r.tab).toBe('grants')
     expect(r.detail).toBeNull()
+  })
+
+  it('已下架的部署功能区不再是路由（2026-11-27）', () => {
+    expect(ROUTE_NAMES).not.toContain('deploy')
+    expect(parseLocation('/admin/deploy', '/admin').name).toBe(DEFAULT_ROUTE)
+    expect(parseLocation('/admin/deploy?tab=history', '/admin').tab).toBe('history')
   })
 
   it('未知功能区回退默认路由（可刷新、可分享）', () => {
@@ -133,9 +139,9 @@ describe('createRouter', () => {
 
   it('popstate 时重新解析（浏览器前进/后退键行为正确）', () => {
     const router = createRouter({ base: '/admin' })
-    window.history.pushState(null, '', '/admin/deploy')
+    window.history.pushState(null, '', '/admin/users')
     window.dispatchEvent(new PopStateEvent('popstate'))
-    expect(router.current.value.name).toBe('deploy')
+    expect(router.current.value.name).toBe('users')
     router.destroy()
   })
 

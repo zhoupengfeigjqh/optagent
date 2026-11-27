@@ -26,10 +26,23 @@ export interface AgentScenario {
 
 export interface AgentListItem {
   name: string
+  /** 对外编码（与注册服务的 `code` 同源；旧设计未回填时为 null） */
+  code: string | null
   description: string
   abnormal: boolean
   abnormal_reason: string | null
   updated_at: string
+}
+
+/** 删除前影响面（2026-11-27）：确认弹窗据此提示将被级联撤销的链接数 */
+export interface AgentDeletionImpact {
+  name: string
+  /** 对外编码；该数字人尚无服务时为 null */
+  code: string | null
+  /** 已关联该数字人的用户（非空则服务端会拒绝删除） */
+  linked_users: string[]
+  /** 删除时会被一并软撤销的注册链接条数（仅统计未撤销的） */
+  active_register_links: number
 }
 
 export interface AgentDesign {

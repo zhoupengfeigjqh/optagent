@@ -18,6 +18,14 @@ import {
 
 export interface AgentDesignDocument {
   name: string;
+  /**
+   * 数字人对外编码（2026-11-27）：与 `agent_services` 的 `code` 同源同值，创建时由平台生成。
+   *
+   * 它只是"标识的展示副本"：**不可由客户端写入**（`AgentInputRaw` 不接收 `code`），
+   * 保存设计时 MUST 保留既有值；登记簿仍是 `agent_services`（注册链接/审计按它索引）。
+   * 旧文档没有该字段时为 `undefined`，由补齐脚本按服务记录回填。
+   */
+  code?: string;
   soul: SoulDesign;
   enabled_tools: string[];
   mcp_services: string[];
@@ -35,6 +43,8 @@ export interface AgentDesignView extends AgentDesignDocument {
 
 export interface AgentListItem {
   name: string;
+  /** 对外编码（展示用；与 `agent_services.code` 同源，旧数据补齐前可能为 null） */
+  code: string | null;
   description: string;
   abnormal: boolean;
   abnormal_reason: string | null;
@@ -296,6 +306,7 @@ export class AgentDesignService {
       const anomalies = detectAnomalies(doc, index);
       return {
         name: doc.name,
+        code: doc.code ?? null,
         description: deriveDescription(doc.soul),
         abnormal: anomalies.length > 0,
         abnormal_reason: anomalyReason(anomalies),
@@ -305,9 +316,22 @@ export class AgentDesignService {
     return paginate(items, page);
   }
 
-  /** 新建（`FR-015`）；`revision` 缺省时不校验（新建无并发语义） */
-  create(raw: AgentInputRaw, index: ReferenceIndex, revision?: number): AgentDesignView {
-    const validate = () => validateAgentInput(raw, { index, takenNames: this.names() });
+  /**
+   * 新建（`FR-015`）；`revision` 缺省时不校验（新建无并发语义）。
+   *
+   * `code` 由调用方（路由）在开通服务时生成并传入（2026-11-27）：它 MUST 与
+   * `agent_services.code` 同源同值，因此**不来自客户端请求体**（`AgentInputRaw` 不含 code）。
+   */
+  create(
+    raw: AgentInputRaw,
+    index: ReferenceIndex,
+    revision?: number,
+    code?: string,
+  ): AgentDesignView {
+    const validate = (): Omit<AgentDesignDocument, 'updated_at'> => {
+      const value = validateAgentInput(raw, { index, takenNames: this.names() });
+      return code === undefined ? value : { ...value, code };
+    };
     let created: Omit<AgentDesignDocument, 'updated_at'>;
     let nextRevision: number;
 
@@ -333,12 +357,14 @@ export class AgentDesignService {
   }
 
   update(name: string, raw: AgentInputRaw, index: ReferenceIndex, revision: number): AgentDesignView {
-    this.read(name);
+    const current = this.read(name);
     const taken = this.names();
     taken.delete(name);
     const { result, revision: nextRevision } = this.store.withRevision(revision, () => {
       const value = validateAgentInput(raw, { index, takenNames: taken, currentName: name });
-      const doc = this.toDocument(value);
+      // 保留既有编码：`code` 不由客户端提交，若这里不显式带回，保存设计就会把编码清空
+      // （`validateAgentInput` 的返回值里没有它）。编码创建后不可改，重命名也沿用。
+      const doc = this.toDocument(current.code === undefined ? value : { ...value, code: current.code });
       this.store.writeJson(AgentDesignService.relPath(doc.name), doc);
       if (doc.name !== name) this.store.remove(AgentDesignService.relPath(name));
       return doc;
@@ -350,6 +376,22 @@ export class AgentDesignService {
       abnormal_reason: anomalyReason(anomalies),
       revision: nextRevision,
     };
+  }
+
+  /**
+   * 对齐服务编码（对账用，2026-11-27）：只允许把设计态改成**登记簿里的既有编码**。
+   *
+   * 创建数字人时若该落点已存在服务（例如上一次删除只撤了设计态），必须沿用既有编码，
+   * 否则注册链接会指向一个没人用的新编码。编码不参与部署，因此只 bump 一次 revision
+   * 让管理台的乐观锁失效，不重写任何配置内容。
+   */
+  alignCode(name: string, code: string, index: ReferenceIndex): AgentDesignView {
+    const current = this.read(name);
+    if (current.code === code) return this.toView(current, index);
+    const doc = this.toDocument({ ...current, code });
+    this.store.writeJson(AgentDesignService.relPath(name), doc);
+    this.store.bumpRevision();
+    return this.toView(doc, index);
   }
 
   remove(name: string): void {

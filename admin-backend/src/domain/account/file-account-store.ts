@@ -1,40 +1,38 @@
 /**
  * 账号域 file 驱动（028 阶段 2/3）。
  *
- * 三份 JSON 集合（`.platform-data/accounts/` 下，设计态之外的新目录——
+ * 两份 JSON 集合（`.platform-data/accounts/` 下，设计态之外的新目录——
  * 账号域写不占 `meta.json` 的 revision，D4 口径）：
  * - `agent-services.json`   → `agent_services` 表
  * - `register-links.json`   → `register_links` 表
- * - `user-agent-grants.json`→ `user_agent_grants` 表
+ *
+ * `user-agent-grants.json` 已于 2026-11-27 彻底移除（授权 = 关联 = `users.agents[]`，
+ * 见 `my-agents.ts`）：文件、路径常量、迁移脚本与迁移单测同批删除，不保留历史副本。
  *
  * 全量读入内存、写时整份落盘（账号域量级：个位到千级，整份重写成本可忽略；
  * 与 `PlatformStore` 的 JSON 写口径一致，无需引入新机制）。
+ * 路径来自 `./paths.ts`（与账号主档 / 会话登记同一来源，2026-11-27 结构收敛）。
  */
 import type { PlatformStore } from '../../infra/platform-store.js';
 import {
+  DuplicateAgentCodeError,
   nowDatetime,
   type AccountStorePort,
   type AgentServiceRecord,
-  type GrantRecord,
   type RegisterLinkRecord,
 } from './account-store.js';
-
-const ACCOUNTS_DIR = 'accounts';
-const SERVICES_FILE = `${ACCOUNTS_DIR}/agent-services.json`;
-const LINKS_FILE = `${ACCOUNTS_DIR}/register-links.json`;
-const GRANTS_FILE = `${ACCOUNTS_DIR}/user-agent-grants.json`;
+// 路径唯一来源见 `./paths.ts`；本文件沿用短名，避免使用点无意义改名
+import { AGENT_SERVICES_FILE as SERVICES_FILE, REGISTER_LINKS_FILE as LINKS_FILE } from './paths.js';
 
 export class FileAccountStore implements AccountStorePort {
   private services: AgentServiceRecord[] = [];
   private links: RegisterLinkRecord[] = [];
-  private grants: GrantRecord[] = [];
 
   constructor(private readonly store: PlatformStore) {}
 
   async init(): Promise<void> {
     this.services = this.store.readJson<AgentServiceRecord[]>(SERVICES_FILE) ?? [];
     this.links = this.store.readJson<RegisterLinkRecord[]>(LINKS_FILE) ?? [];
-    this.grants = this.store.readJson<GrantRecord[]>(GRANTS_FILE) ?? [];
   }
 
   /* ---- 数字人服务 ---- */
@@ -55,6 +53,15 @@ export class FileAccountStore implements AccountStorePort {
     } else {
       this.services.push({ ...record, created_at: now, updated_at: now });
     }
+    this.store.writeJson(SERVICES_FILE, this.services);
+  }
+
+  async insertAgentService(record: AgentServiceRecord): Promise<void> {
+    if (this.services.some((item) => item.code === record.code)) {
+      throw new DuplicateAgentCodeError(record.code);
+    }
+    const now = nowDatetime();
+    this.services.push({ ...record, created_at: now, updated_at: now });
     this.store.writeJson(SERVICES_FILE, this.services);
   }
 
@@ -80,27 +87,4 @@ export class FileAccountStore implements AccountStorePort {
     this.store.writeJson(LINKS_FILE, this.links);
   }
 
-  /* ---- 授权 ---- */
-
-  async listGrants(): Promise<GrantRecord[]> {
-    return [...this.grants];
-  }
-
-  async findGrant(userId: string, agentCode: string): Promise<GrantRecord | null> {
-    return this.grants.find((item) => item.user_id === userId && item.agent_code === agentCode) ?? null;
-  }
-
-  async saveGrant(record: GrantRecord): Promise<void> {
-    const index = this.grants.findIndex(
-      (item) => item.user_id === record.user_id && item.agent_code === record.agent_code,
-    );
-    if (index >= 0) this.grants[index] = record;
-    else this.grants.push(record);
-    this.store.writeJson(GRANTS_FILE, this.grants);
-  }
-
-  async removeGrantsOfUser(userId: string): Promise<void> {
-    this.grants = this.grants.filter((item) => item.user_id !== userId);
-    this.store.writeJson(GRANTS_FILE, this.grants);
-  }
 }

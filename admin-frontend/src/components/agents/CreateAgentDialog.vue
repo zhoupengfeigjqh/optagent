@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { listAgents } from '../../api/agents'
+import { listAllAgents } from '../../api/agents'
 import type { AgentListItem } from '../../api/types'
 import { AGENT_NAME_HINT, AGENT_NAME_MAX_LENGTH } from '../../constants/agent-design'
 import { toErrorInfo } from '../../utils/error-message'
@@ -29,24 +29,17 @@ const selected = computed(() => existing.value.find((item) => item.name === copy
 const selectedAbnormal = computed(() => selected.value?.abnormal === true)
 
 /**
- * 读取**全部**数字人。
+ * 读取**全部**数字人（翻页细节统一由 `listAllAgents` 负责，见其注释）。
  *
- * `GET /api/admin/agents` 每页固定 8 条且**不接受 `page_size`**（服务端的设计决定），
- * 所以这里按 `total_pages` 并发取齐：复制源候选与重名判据都 MUST 基于全量，
- * 只看第一页会漏判重名，变成"弹窗说没重名、保存却被拒"。
+ * 复制源候选与重名判据都 MUST 基于全量：只看第一页会漏判重名，
+ * 变成"弹窗说没重名、保存却被拒"。
  */
 async function loadExisting(): Promise<void> {
   loadingSources.value = true
   listError.value = null
   existing.value = []
   try {
-    const first = await listAgents(1)
-    const rest = await Promise.all(
-      Array.from({ length: Math.max(0, first.total_pages - 1) }, (_, index) =>
-        listAgents(index + 2),
-      ),
-    )
-    existing.value = [...first.items, ...rest.flatMap((page) => page.items)]
+    existing.value = await listAllAgents()
   } catch (err) {
     // 读不到清单**不阻断**新建，但 MUST NOT 假装"没有重名"（原则九）：
     listError.value = `未能读取已有数字人清单（${toErrorInfo(err).code}）：复制源不可选，重名改由服务端在保存时拒绝。`

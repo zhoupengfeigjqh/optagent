@@ -38,7 +38,6 @@ export const ADMIN_ERROR_CODES = {
   // 028 账号与数字人服务绑定（§13）
   ADM_PHONE_TAKEN: 'ADM_PHONE_TAKEN',
   ADM_INVALID_LINK: 'ADM_INVALID_LINK',
-  ADM_GRANT_NOT_FOUND: 'ADM_GRANT_NOT_FOUND',
   ADM_AGENT_SERVICE_NOT_FOUND: 'ADM_AGENT_SERVICE_NOT_FOUND',
   ADM_AGENT_SERVICE_IN_USE: 'ADM_AGENT_SERVICE_IN_USE',
 } as const
@@ -88,7 +87,6 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // 028 账号与数字人服务绑定（§13）
   ADM_PHONE_TAKEN: '该手机号已被注册，请直接登录或换一个手机号',
   ADM_INVALID_LINK: '注册链接无效或已过期，请联系管理员重新获取',
-  ADM_GRANT_NOT_FOUND: '授权记录不存在（可先由用户在对话界面发起申请）',
   ADM_AGENT_SERVICE_NOT_FOUND: '数字人服务不存在，请刷新后重试',
   ADM_AGENT_SERVICE_IN_USE: '该服务已被授权或生成过注册链接，请改为停用',
 }

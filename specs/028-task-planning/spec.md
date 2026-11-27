@@ -192,8 +192,8 @@
 
 | # | 组成 | 来源 | 约束 |
 |---|---|---|---|
-| 1 | 规划专用 system prompt | 新模块 `plan/prompt.ts` | 六段结构：角色 / 聚焦起点 / **本体关系** / **可用函数** / 命令前置约束 / 输出格式；MUST NOT 复用主对话 system prompt |
-| 2 | 意图聚焦结果 | `run-consume` 产出的 `focus.prompt`（已在 `systemExtra`） | MUST 以**显式标题**标注为「本轮规划的唯一起点」（如「［意图聚焦结果｜本轮规划起点］」）；**该段已含选中技能名、本体名与 `ontology_id`，MUST NOT 再单独下发技能文件（全文或章节列表）**；**直通**——聚焦侧已按阶数剪到 4000 / 5000 / 6000，本段 MUST NOT 再做业务截断（旧口径「≤2000 字按行截断」会从末尾切掉「图路径」，2026-11-26 修订），仅保留 8000 字防御性硬顶 |
+| 1 | 规划专用 system prompt | 新模块 `plan/prompt.ts` | 六段结构：角色 / 聚焦起点 / **本体关系** / **可用函数** / 命令前置约束 / 输出格式；**角色段 MUST 写明三条硬要求**（① 优先从聚焦的技能/行为/函数出发；② 每步 `coreAction` MUST 在可用工具清单中有唯一对应；③ MUST NOT 绕开可用工具清单自行规划行为）；**输出格式段 MUST 要求「多个彼此独立的对象即使动作相同也各占一步、禁止合并」**（2026-11-28）；MUST NOT 复用主对话 system prompt |
+| 2 | 意图聚焦结果 | `run-consume` 产出的 `focus.prompt`（已在 `systemExtra`） | MUST 以**显式标题**标注为「本轮规划的首选起点」（如「［意图聚焦结果｜本轮规划的首选起点］」），段末 MUST 声明「coreAction 不得超出可用工具清单，清单里也没有时省略该步并说明缺口」；**该段已含选中技能名、本体名与 `ontology_id`，MUST NOT 再单独下发技能文件（全文或章节列表）**；**直通**——聚焦侧已按阶数剪到 4000 / 5000 / 6000，本段 MUST NOT 再做业务截断（旧口径「≤2000 字按行截断」会从末尾切掉「图路径」，2026-11-26 修订），仅保留 8000 字防御性硬顶 |
 | 3 | 本体关系 | 本体索引（`ontology.yaml` 的 `relations[]` / `concepts[]` / `behaviors[]`） | MUST 按**本体名称 + `ontology_id`** 分段；每段 MUST 含两部分：① `source —关系名→ target` 三元组列表（只取这三项，不带基数与关联字段）；② 每个概念的关联行为（**command 与 query 分列**）。概念无行为时必须标「（无可用行为）」；行为在 `ontology.yaml` 存在但不在 `availableNames` 时必须标「（未挂载）」，**MUST NOT 因此省略** |
 | 4 | 可用函数 | 本体索引 `functions[]` + `availableNames` 中的非行为工具 | MUST 分两组：**本体函数**（`name｜title｜关联概念`）、**非本体函数**（`name｜title｜内置/外部`）；**MUST NOT 在本段列本体行为**（已在第 3 段）；不可达的函数 MUST NOT 列出 |
 | 5 | 命令前置约束 | 规则闸门快照 `GateSnapshot.behaviorIndex`——它是 `Map<归一裸名, BehaviorRuleBucket>`，前置函数在 `bucket.pre[].relatedFunctions`，**桶键不含本体维度**：同名即同一工具（同一接口、同一功能），跨本体同名行为的规则与前置函数**按名合并**，不需要本体消歧 | MUST 覆盖**本轮可用的全部 command**（含无前置函数者，标注「（无）」）；**不设字数上限、不截断函数列表**；不可用的 command 不列（计划里也不会出现） |
@@ -323,8 +323,9 @@ type       string  command | query | function（仅作比对，后端重算）
   - 配置：`plan_threshold`（0~1；**缺键 = 门禁关闭**，行为与门禁前一致）、`plan_timeout_ms`（缺省 5000，不得大于 `timeout_ms`）；环境变量 `INTENT_FOCUS_PLAN_THRESHOLD` 可覆盖阈值。
   - 零成本前置：数字人未开 `task_planning` MUST NOT 判定（不产生额外 laya 调用）；`focus` 未产出提示词时本就不走规划。
   - **fail-open**：判定超时 / HTTP 失败 / 分数缺失 MUST 继续走规划，MUST NOT 把复杂任务降级为直聊；失败 MUST 记 `plan.gate.degraded`。
-  - 判据口径：多个对象（两个及以上彼此独立的事物）或多个任务（两个及以上动作，或存在先后步骤）；**同一动作查询多个对象算一个任务**——把"查三种库存"拆成三步是负优化（3 次 LLM 往返 + 3 次工具集切换）。
+  - 判据口径（2026-11-28 用户拍板翻转）：多个对象（两个及以上彼此独立的事物）**即使动作相同也算多个对象**，或多个任务（两个及以上动作，或存在先后步骤），一律判为"不是一步能完成"→ 走多步规划；**原"同一动作查询多个对象算一个任务"的口径已废**（每个对象独立执行、独立核对，接受多一次往返的代价）。单批上限仍 3 步，超过 3 个对象由滚动规划续批；规划提示词同步要求"一个对象占一步、禁止把多个对象合并到同一步"。
   - 可观测：`intent-focus.jsonl` MUST 记录 `plan_score` / `plan_round_ms`；因门禁跳过规划 MUST 记 `plan.skipped reason=below_threshold`（含 `plan_score` 与 `threshold`）。
+  - **聚焦能力前置（2026-11-27）**：规划必须从聚焦行为或函数起算，因此本轮 MUST 至少**直接命中**一个本体行为或本体函数才允许规划（上/下游发散只算参考，不算起点）。只命中技能（含非本体技能）而行为/函数全部未入选时 MUST 跳过规划并记 `plan.skipped reason=no_focus_capability`，且 MUST NOT 再发起门禁判定（已确定不规划就不白花一次 laya 调用）。该判据**不适用 fail-open**：`hasCapability === false` 是事实而非判定失败；判据缺席（未接入该判据的调用方）按"允许规划"处理。
 
 ---
 
@@ -388,6 +389,8 @@ type       string  command | query | function（仅作比对，后端重算）
 | 2026-11-26 | v0.19 | 门禁口径落地与超时放宽 | 用户要求：① **默认阈值 0.4 落到真实 `config.yaml`**——此前只写在代码缺省值里，而语义是"缺键=关闭"，`agent-backend/config.yaml` 未写该键导致门禁实际关闭；现补 `plan_threshold: 0.4`（加载实测 `planThreshold=0.4`）。② 判定题面固化为"问题复杂、涉及多个对象或多个任务、也就是不是一步能完成"（`plan-gate.ts` 题面早已如此，本次只确认口径），并保留"同一动作查多对象算一个任务"。③ `plan_timeout_ms` 缺省由 2000 **提到 5000**：门禁与意图聚焦共用 laya，冷启动首包常超 2s，2s 会把正常判定打成超时并 fail-open（等于白花一次调用）；放宽只让判定更准，失败仍 fail-open，不增加最坏路径风险。落点：`config.ts` 缺省值 + `config.yaml` / `config.example.yaml` 同步；测试：`config.spec.ts` 缺省断言同步，门禁三份 spec **77 passed** |
 | 2026-11-26 | v0.20 | 配置分层收敛（批次 1） | 审查发现"同一参数多真源 + 形态相关值写进共用文件"，先修致命项：① **`intent_focus.base_url` 支持 `$VAR` 引用**（原先只有 `api_key` 支持）——此前 `config.yaml` 两形态共用一份，容器里 `127.0.0.1:8103` 指向容器自身，意图聚焦与规划门禁在容器形态必然失效；现 yaml 写 `$INTENT_FOCUS_BASE_URL`，本地 `http://127.0.0.1:8103`、容器 `http://laya:8000`。② **compose 去掉 `environment` 覆盖**（`PUBLIC_BASE_URL` / `ADMIN_BACKEND_URL`）且 `env_file` 只留 `.env`——原先注入 `.env` + `.env.local`，后者的本地地址会把容器地址顶掉；`PUBLIC_BASE_URL` 不再硬编码在入库文件里。③ **`.env` 转为容器端私产**（`git rm --cached` + gitignore），恢复缺失的 `.env.example`（全量键 + 两形态对照，无密钥）。④ `DECIS_API_KEY` 纳入 `envSchema` 声明。测试：`config.spec.ts` 40 例（新增 base_url `$VAR` 解析与空值拒绝），本地实测 `baseUrl=http://127.0.0.1:8103` |
 | 2026-11-26 | v0.21 | 配置收敛（批次 2~4） | 承接 v0.20 审查结论，把"一个参数一个真源"落实到代码：① **删除 5 个 `INTENT_FOCUS_*_THRESHOLD` 环境变量**（与 yaml 同名双真源，`config.spec.ts` 改为断言"遗留 env 不再生效"）。② **`MCP_TIMEOUT_MS` / `MCP_CONNECT_TIMEOUT_MS` / `LLM_MAX_RETRIES` / `LLM_RETRY_MAX_DELAY_MS` 迁入 `config.yaml` 的 `runtime` 块**（随工具语义与模型能力变，不是机器属性；`mcp_timeout_ms` 缺省取 90000 = 原部署值）。③ **`UPLOAD_MAX_MB` / `PREVIEW_MAX_MB` / `READ_TRUNCATE_KB` 降为代码常量**（`domain/limits.ts`；跨四侧契约与 `read_file` 返回语义）。④ **新增 `plan` yaml 块三项**（`timeout_ms` 20000 / `total_steps_max` 20 / `replan_max_per_run` 6，越界拒绝启动），经 `PlanLimits` + `DEFAULT_PLAN_LIMITS` 注入 `plan-orchestrator` 与 `advanceBatch.limits`，其余 13 项规划常量仍是算法不变量。⑤ **启动可观测**：`config.effective` 摘要（密钥不出现在摘要内）+ `config.unknown_env` 告警（拼错或已废弃的 env，不拒绝启动）。⑥ 管理端与 MCP 服务统一为"私产 `.env` + 入库 `.env.example`"，`admin-backend/.env`（含 AUTH_SECRET）移出索引。测试：`config.spec.ts` **43 例**（新增 runtime/plan 缺省、逐项生效、越界与矛盾、遗留 env 不生效、摘要不含密钥、拼错 env 检出共 6 例），后端 **124 files / 1694 tests** 全绿，`docker compose config` 通过 |
+| 2026-11-27 | v0.22 | 规划资格收紧：无聚焦行为/函数不规划 | 用户要求：规划必须从聚焦行为或函数起算。**修订 FR-037** 新增聚焦能力前置——本轮至少直接命中一个本体行为或本体函数才允许规划；只命中技能（含非本体技能）而行为/函数全部未入选时 MUST 跳过规划并记 `plan.skipped(no_focus_capability)`，且 MUST NOT 再发起门禁判定（不白花一次 laya 调用）。该判据**不适用 fail-open**（`false` 是事实而非判定失败；缺席按允许处理）。落点：`intent-focus/runner.ts` 新增结果字段 `hasCapability`（无能力时跳过 `judgePlanGate`）、`plan-gate.ts` 新增纯函数 `planCapabilityBlocks`、`run-manager.ts` 新增 `AgentRunRequest.planEligible`、`run-consume.ts` 透传、`agent-factory.ts` 新增分流分支。测试：`plan-gate.spec.ts` +2 例、`intent-focus-runner.spec.ts` +2 例（含"只命中技能 → 不判门禁"），`agent-backend` `npm run gate` 全绿 |
+| 2026-11-28 | v0.23 | 提示词三点硬要求 + 门禁口径翻转 | 用户拍板：① **段 1（角色）** 改写为三条硬要求——优先从意图聚焦的技能/行为/函数出发、每步 `coreAction` MUST 在可用工具清单中有唯一对应、MUST NOT 绕开清单自行规划行为；**段 6（输出格式）** 新增「多个彼此独立的对象即使动作相同也各占一步、禁止合并」「不得规划清单外的行为/服务/接口」，并说明超过 3 个对象先排前 3 步、剩余由滚动规划续批。② **FR-037 门禁口径翻转**：「同一动作查询多个对象算一个任务」改为「即使动作相同，只要对象不同也算多个对象 → 走多步规划」，`plan-gate.ts` 题面与 `criteria` 同步，废除原"批量查询算一个任务"口径。测试：`plan-gate.spec.ts` +1 例（断言"即使动作完全相同"且 `not.toContain('算一个任务')`）、`plan-prompt.spec.ts` +2 例（段 1 三条要求 / 段 6 单对象单步）。已知取舍：多对象任务会真实产生多轮执行往返（原设计的"负优化"权衡被用户明确推翻）。③ 段 2 措辞由「唯一起点」改为「首选起点」并与段 1「优先」对齐，段末声明 `coreAction` 不得越出可用工具清单；同步 `spec.md` FR-003 第 2 行与 `data-model.md` 示例。 |
 | 2026-11-26 | v0.15 | 计划留档（`plan.jsonl`） | 新增 **FR-036**：每轮真正产出过步骤的计划追加一条过程事实到线程目录的 `plan.jsonl`，**只写不读、不参与上下文组装**、与 `history.jsonl` 物理分离；发点唯一（`terminate()`，软收尾之前），空轮不写；单线程保留最近 **100** 条（超限写临时文件 + 原子改名重写），同线程串行写；写入失败只告警（`plan.record.failed`），不影响对话。落点：新增 `src/domain/plan/store.ts`（`PlanStore`），`src/infra/plan-orchestrator.ts` 新增可选 `record` 回调，`src/infra/agent-factory.ts` 以工厂级 `PlanStore` 接线 |
 
 ---
@@ -397,6 +400,7 @@ type       string  command | query | function（仅作比对，后端重算）
 | 能力 | 落点 |
 |---|---|
 | 计划留档（`plan.jsonl`，FR-036） | `agent-backend/src/domain/plan/store.ts`（`PlanStore`，唯一落盘点） |
+| 规划资格（无聚焦行为/函数不规划，FR-037） | `agent-backend/src/domain/intent-focus/runner.ts`（`hasCapability`）+ `agent-backend/src/infra/agent-factory.ts`（`planCapabilityBlocks` 分流） |
 | 全局工具串行（前置，已上线） | `agent-backend/src/infra/agent-loop.ts:176-194` |
 | 工具装配与 `availableNames` | `agent-backend/src/infra/agent-factory.ts:207-393` |
 | 规则闸门快照（`behaviorIndex`：`Map<归一裸名, bucket>`，命中判定 + `command` 布尔） | `agent-backend/src/domain/rule-gate/catalog.ts:89-116` |

@@ -5,7 +5,7 @@
  * - `POST   /api/admin/register-links`：生成（返回 token + 可直接分发的 url）；
  * - `DELETE /api/admin/register-links/:token`：软撤销（幂等，保留审计轨迹）。
  *
- * 角色强制校验按 D8 后置到阶段 4（与 `grants.ts` 同口径）。
+ * 角色强制校验按 D8 后置到阶段 4（届时统一由 admin 路由的鉴权钩子承担）。
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -40,6 +40,8 @@ export function registerRegisterLinkRoutes(app: FastifyInstance, ctx: AppContext
       }
       expiresIn = value === 0 ? null : value;
     }
+    // `created_by` 暂缺（2026-11-27 记录）：本组路由尚无登录鉴权，拿不到"当前是谁"。
+    // 待 `/api/admin/*` 统一接入 `requireLogin` 后，把返回值传进来即可补齐审计。
     const link = await ctx.registerLinks.create({ agentCode, expiresIn });
     return reply.status(201).send({
       token: link.token,

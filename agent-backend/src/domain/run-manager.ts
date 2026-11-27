@@ -54,6 +54,13 @@ export interface AgentRunRequest {
    * 缺席 = 没判（门禁关闭 / 数字人未开规划 / 判定失败）→ 按 fail-open 走规划。
    */
   planScore?: number;
+  /**
+   * 028（2026-11-27）：本轮是否允许规划。
+   *
+   * `false` = 意图聚焦没有命中任何本体行为/函数，规划无可依附的起点，装配层 MUST 跳过规划。
+   * 缺席 = 允许（未接入该判据的调用方沿用原行为）。
+   */
+  planEligible?: boolean;
 }
 
 export interface RunAgentLike {

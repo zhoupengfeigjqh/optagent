@@ -4,10 +4,11 @@
  * 事务口径：
  * - mysql 驱动下由 `users` 表唯一键（`uk_users_phone`）兜底并发注册；
  * - file 驱动为顺序写（与 024 同口径，不引入文件锁）；
- * - 失败 midway（建用户成功、授权失败）时**回滚已建用户**，避免半截账号。
+ * - 失败 midway（链接计数失败）时**回滚已建用户**，避免半截账号。
  *
- * 注册**不自动登录**（D7，与原型一致）；注册成功只写 `user_agent_grants(approved)`，
- * **不写** `users.agents[]`（方案 §6：授权 ≠ 部署，部署仍走既有流程）。
+ * 注册**不自动登录**（D7，与原型一致）。2026-11-27 起"授权 = 关联"：
+ * 建号时直接把 `agent_services.platform_agent_name` 写入 `users.agents[]`，
+ * 因此注册账号会出现在部署区、可被部署——**但未部署前不会出现在工作台切换列表**。
  */
 import { randomBytes } from 'node:crypto';
 import { ApiError } from '../api-error.js';
@@ -22,7 +23,7 @@ import {
   normalizePhone,
   type UserLinkPort,
 } from '../config-center/user-links.js';
-import { nowDatetime, type AccountStorePort, type GrantRecord } from './account-store.js';
+import type { AgentServiceRecord } from './account-store.js';
 import type { RegisterLinkService } from './register-links.js';
 
 export interface RegisterInput {
@@ -42,7 +43,6 @@ export interface RegisterResult {
 export class RegistrationService {
   constructor(
     private readonly users: UserLinkPort,
-    private readonly store: AccountStorePort,
     private readonly links: RegisterLinkService,
   ) {}
 
@@ -75,67 +75,50 @@ export class RegistrationService {
       throw new ApiError(ERROR_CODES.ADM_PHONE_TAKEN, `手机号已被注册：${phone}`);
     }
 
-    // 4. 建用户（user_id 服务端生成：u_ + 12 位十六进制，D2）
-    const userId = this.generateUserId();
+    // 4. 建用户并**直接写入关联**（授权 = 关联）；user_id 服务端生成：u_ + 12 位十六进制（D2）
+    let userId = this.generateUserId();
     try {
-      await this.users.create(userId, [], undefined, password, {
-        phone,
-        display_name: displayName,
-        role: 'user',
-        source_agent_code: agent.code,
-      });
+      await this.createUser(userId, agent, phone, displayName, password);
     } catch (err) {
       if (err instanceof ApiError && err.code === ERROR_CODES.ADM_PHONE_TAKEN) throw err;
       if (err instanceof ApiError && err.code === ERROR_CODES.ADM_USER_ID_TAKEN) {
         // 极小概率撞号：重试一次
-        const retry = this.generateUserId();
-        await this.users.create(retry, [], undefined, password, {
-          phone,
-          display_name: displayName,
-          role: 'user',
-          source_agent_code: agent.code,
-        });
-        return this.finalize(retry, phone, displayName, agent.code, agent.name, input.linkToken.trim());
+        userId = this.generateUserId();
+        await this.createUser(userId, agent, phone, displayName, password);
+      } else {
+        throw err;
       }
-      throw err;
     }
-    return this.finalize(userId, phone, displayName, agent.code, agent.name, input.linkToken.trim());
-  }
 
-  private async finalize(
-    userId: string,
-    phone: string,
-    displayName: string,
-    agentCode: string,
-    agentName: string,
-    token: string,
-  ): Promise<RegisterResult> {
-    const now = nowDatetime();
-    const grant: GrantRecord = {
-      user_id: userId,
-      agent_code: agentCode,
-      status: 'approved',
-      source: 'register_link',
-      reviewed_by: null,
-      reviewed_at: null,
-      created_at: now,
-      updated_at: now,
-    };
+    // 5. 链接计数；失败则回滚已建用户，避免"有账号无授权"
     try {
-      // 5. 注册即授权（approved）+ 链接计数
-      await this.store.saveGrant(grant);
-      await this.links.consume(token);
+      await this.links.consume(input.linkToken.trim());
     } catch (err) {
-      // 回滚已建用户，避免"有账号无授权"的半截状态
       await this.users.remove(userId).catch(() => undefined);
       throw err;
     }
+
     return {
       user_id: userId,
       phone,
       display_name: displayName,
-      granted_agent: { code: agentCode, name: agentName },
+      granted_agent: { code: agent.code, name: agent.name },
     };
+  }
+
+  private async createUser(
+    userId: string,
+    agent: AgentServiceRecord,
+    phone: string,
+    displayName: string,
+    password: string,
+  ): Promise<void> {
+    await this.users.create(userId, [agent.platform_agent_name], undefined, password, {
+      phone,
+      display_name: displayName,
+      role: 'user',
+      source_agent_code: agent.code,
+    });
   }
 
   /** `u_` + 12 位小写十六进制（D2；`isSafeName` 天然通过，不与存量 admin 等冲突） */

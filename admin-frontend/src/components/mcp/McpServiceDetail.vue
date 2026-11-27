@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { fetchReferences } from '../../api/deploy'
+import { fetchReferences } from '../../api/references'
 import { useMcpServices } from '../../composables/useMcpServices'
 import type {
   ErrorInfo,

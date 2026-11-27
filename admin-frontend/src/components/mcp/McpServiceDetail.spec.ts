@@ -18,12 +18,8 @@ vi.mock('../../api/mcp', () => ({
   fetchMcpStats: vi.fn().mockResolvedValue({ stats_available: true, items: [], groups: [] }),
 }))
 
-vi.mock('../../api/deploy', () => ({
+vi.mock('../../api/references', () => ({
   fetchReferences: (...a: unknown[]) => fetchReferences(...a),
-  deploy: vi.fn(),
-  fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
-  withdrawDeploy: vi.fn(),
 }))
 
 const SERVICE: Detail = {

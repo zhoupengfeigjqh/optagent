@@ -5,7 +5,8 @@
 --
 -- 边界：仅账号域入库。数字人设计态、SKILL、MCP、本体、部署清单与
 --       meta.json 的 revision 乐观锁仍留在 admin-backend/.platform-data/。
---       授权（user_agent_grants）只决定「能否使用」，部署仍由 users.agents[] 驱动。
+--       2026-11-27：授权与关联合并——`users.agents[]` 既是「允许部署什么」也是
+--       「授权了什么」；`user_agent_grants` 表已下线（旧库可保留作历史审计）。
 -- 配套文档：同目录 方案与契约.md
 -- 可重复执行：全部 CREATE ... IF NOT EXISTS + INSERT IGNORE
 -- =============================================================================
@@ -38,9 +39,9 @@ CREATE TABLE IF NOT EXISTS agent_services (
 -- 账号
 --   user_id  = JWT sub / 运行端 .opt-agent/users/{uid} 目录名（不是手机号）
 --   phone    = 登录标识；允许 NULL 且唯一索引允许多 NULL，兼容 024 存量无手机号用户
---   agents   = 部署关联数字人清单（.platform-data/users/{uid}.json 的 agents[] 投影）。
---              注意与 user_agent_grants 语义不同：本列决定「部署什么」（§6），
---              user_agent_grants 决定「能使用什么」——阶段 1 实施补充（初版遗漏）。
+--   agents   = 授权 = 关联（2026-11-27 起唯一真相源）。
+--              既决定「授权了什么」，也决定「部署什么」；工作台切换列表还需
+--              与部署清单（manifest.agent_names）取交集才下发。
 --   password_record = scrypt 记录 {algo,params,salt,hash}，与 domain/auth/password.ts 一一对应
 --                     NULL = 不可登录（024 FR-013 口径）
 -- -----------------------------------------------------------------------------
@@ -87,32 +88,11 @@ CREATE TABLE IF NOT EXISTS register_links (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专属注册链接';
 
 -- -----------------------------------------------------------------------------
--- 用户 × 数字人服务授权（绑定关联的唯一权威源）
---   行不存在 = 原型 auth[rid] === 'none'
---   pending  = 对话界面「申请」产生，进后台审批队列
---   approved = 注册链接自动授权 / 审批通过 / 管理员手动授权
---   revoked  = 后台关闭授权（不删行，保留审计轨迹）
--- 注意：本表 ≠ users.agents[]（后者是部署关联，仍以平台设计态为准）
+-- 用户 × 数字人服务授权：**已彻底移除**（2026-11-27）
+--   授权 = 关联 = `users.agents[]`，不再有独立的授权表；仓库内也不再保留迁移脚本
+--   （`grants-agents-migration` / `npm run migrate:grants-to-agents` 同批删除）。
+--   旧库如已建 `user_agent_grants`，由 DBA 自行 DROP 或留档，本仓库不再读写。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS user_agent_grants (
-  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id      VARCHAR(64)     NOT NULL,
-  agent_code   VARCHAR(32)     NOT NULL,
-  status       ENUM('approved','pending','revoked') NOT NULL DEFAULT 'pending',
-  source       ENUM('register_link','apply','manual') NOT NULL DEFAULT 'apply',
-  reviewed_by  VARCHAR(64)     DEFAULT NULL,
-  reviewed_at  DATETIME(3)     DEFAULT NULL,
-  created_at   DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  updated_at   DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_grants_user_agent (user_id, agent_code),
-  KEY idx_grants_status (status, agent_code),
-  KEY idx_grants_agent (agent_code),
-  CONSTRAINT fk_grants_user FOREIGN KEY (user_id)
-    REFERENCES users (user_id) ON UPDATE CASCADE ON DELETE CASCADE,
-  CONSTRAINT fk_grants_agent FOREIGN KEY (agent_code)
-    REFERENCES agent_services (code) ON UPDATE CASCADE ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户与数字人服务绑定/授权';
 
 -- -----------------------------------------------------------------------------
 -- 单会话登记（替代 .platform-data/sessions/{uid}.json）
@@ -145,6 +125,6 @@ INSERT IGNORE INTO agent_services (code, name, platform_agent_name) VALUES
 --     .platform-data/sessions/  → admin.json（1 个）
 --   SELECT COUNT(*) FROM users;                                  -- 期望 4
 --   SELECT COUNT(*) FROM sessions;                               -- 期望 1
---   SELECT COUNT(*) FROM user_agent_grants WHERE source='manual';
---                                                                -- 期望 = 所有 users[].agents 条目之和
+--   授权已并入 users.agents[]：核对 `SELECT user_id, JSON_LENGTH(agents) FROM users;`
+--   与工作台切换列表（需已部署）是否一致。
 -- =============================================================================

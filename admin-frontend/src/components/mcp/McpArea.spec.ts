@@ -27,16 +27,10 @@ vi.mock('../../api/mcp', () => ({
   fetchMcpStats: vi.fn(),
 }))
 
-vi.mock('../../api/deploy', () => ({
+vi.mock('../../api/references', () => ({
   fetchReferences: vi
     .fn()
     .mockResolvedValue({ target_type: 'mcp_service', target_name: 'new-mcp', affected: [] }),
-  validateDeploy: vi.fn(),
-  deploy: vi.fn(),
-  fetchAnomalies: vi.fn(),
-  fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
-  withdrawDeploy: vi.fn(),
 }))
 
 const DETAIL: McpServiceDetail = {

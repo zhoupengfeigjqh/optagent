@@ -108,6 +108,45 @@ describe('api/agents', () => {
 
     await agents.deleteAgent('demo')
     expect(lastCall().init.method).toBe('DELETE')
+
+    await agents.getAgentDeletionImpact('中文名')
+    expect(lastCall().url).toBe(
+      `/api/admin/agents/${encodeURIComponent('中文名')}/deletion-impact`,
+    )
+  })
+
+  it('listAllAgents：按 total_pages 逐页取全量并合并（列表端点固定每页 8 条）', async () => {
+    const agents = await import('./agents')
+
+    fetchMock.mockImplementation(async (url: string) => {
+      const page = new URL(String(url), 'http://localhost').searchParams.get('page')
+      const items = page === '2' ? [{ name: 'b' }] : [{ name: 'a' }]
+      return new Response(JSON.stringify({ items, total: 2, page: Number(page), page_size: 8, total_pages: 2 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+
+    await expect(agents.listAllAgents()).resolves.toEqual([{ name: 'a' }, { name: 'b' }])
+    expect(calls().map((call) => call.url)).toEqual([
+      '/api/admin/agents?page=1',
+      '/api/admin/agents?page=2',
+    ])
+  })
+
+  it('listAllAgents：只有一页时只发一次请求', async () => {
+    const agents = await import('./agents')
+
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ items: [{ name: 'only' }], total: 1, page: 1, page_size: 8, total_pages: 1 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+
+    await expect(agents.listAllAgents()).resolves.toEqual([{ name: 'only' }])
+    expect(calls()).toHaveLength(1)
   })
 })
 
@@ -371,22 +410,6 @@ describe('api/account（028 §13）', () => {
     expect(lastCall().url).toBe('/api/admin/register-links/tok')
   })
 
-  it('授权：总账过滤 / 申请 / 通过 / 关闭', async () => {
-    const account = await import('./account')
-
-    await account.listGrants({ status: 'pending', phone: '138', page: 2 })
-    expect(lastCall().url).toBe('/api/admin/grants?page=2&status=pending&phone=138')
-
-    await account.applyGrant('DH-BOM001')
-    expect(bodyOf(lastCall())).toEqual({ agent_code: 'DH-BOM001' })
-
-    await account.approveGrant('u_1', 'DH-BOM001')
-    expect(bodyOf(lastCall())).toEqual({ user_id: 'u_1', agent_code: 'DH-BOM001' })
-
-    await account.revokeGrant('u_1', 'DH-BOM001')
-    expect(lastCall().url).toBe('/api/admin/grants/revoke')
-    expect(bodyOf(lastCall())).toEqual({ user_id: 'u_1', agent_code: 'DH-BOM001' })
-  })
 })
 
 describe('api/users（028 §13 扩展）', () => {
@@ -404,14 +427,11 @@ describe('api/users（028 §13 扩展）', () => {
   })
 })
 
-describe('api/users 与 api/deploy', () => {
-  it('用户：列表默认带 expand=summary（部署前核对总账，FR-023）', async () => {
+describe('api/users 与 api/manifest / api/references', () => {
+  it('用户：列表不再带 expand=summary（摘要随对账页下架移除，2026-11-27）', async () => {
     const users = await import('./users')
 
     await users.listUsers(1)
-    expect(lastCall().url).toBe('/api/admin/users?page=1&expand=summary')
-
-    await users.listUsers(1, false)
     expect(lastCall().url).toBe('/api/admin/users?page=1')
 
     await users.createUser('ops', ['demo'])
@@ -424,29 +444,35 @@ describe('api/users 与 api/deploy', () => {
     expect(lastCall().init.method).toBe('DELETE')
   })
 
-  it('部署：无 user_ids 时不发送该字段（缺省＝全部用户）', async () => {
+  it('部署：按账户下发（§6.5，行内部署是唯一入口）', async () => {
     const deploy = await import('./deploy')
 
-    await deploy.deploy(undefined, 9)
-    expect(bodyOf(lastCall())).toEqual({ revision: 9 })
-
-    await deploy.deploy(['admin'], 9)
-    expect(bodyOf(lastCall())).toEqual({ user_ids: ['admin'], revision: 9 })
+    await deploy.deployUsers(['u_1'], 9)
+    expect(lastCall().url).toBe('/api/admin/deploy')
+    expect(lastCall().init.method).toBe('POST')
+    expect(bodyOf(lastCall())).toEqual({ user_ids: ['u_1'], revision: 9 })
   })
 
-  it('部署：历史（有界）/ 清单 / 撤回 / 引用关系（§7.1）路径正确', async () => {
+  it('停止：撤回某账户的全部运行副本（§6.9）', async () => {
     const deploy = await import('./deploy')
 
-    await deploy.fetchDeployHistory(20)
-    expect(lastCall().url).toBe('/api/admin/deploy/history?limit=20')
+    await deploy.withdrawUser('u_1', 9)
+    expect(lastCall().url).toBe('/api/admin/deploy/withdraw')
+    expect(lastCall().init.method).toBe('POST')
+    expect(bodyOf(lastCall())).toEqual({ user_id: 'u_1', revision: 9 })
+  })
 
-    await deploy.fetchManifest()
+  it('清单：取版本号与账本（§6.8，部署区下架后仍供用户管理做乐观锁）', async () => {
+    const manifest = await import('./manifest')
+
+    await manifest.fetchManifest()
     expect(lastCall().url).toBe('/api/admin/deploy/manifest')
+  })
 
-    await deploy.withdrawDeploy('zpf', 9)
-    expect(bodyOf(lastCall())).toEqual({ user_id: 'zpf', revision: 9 })
+  it('引用关系：路径与查询参数正确（§7.1）', async () => {
+    const references = await import('./references')
 
-    await deploy.fetchReferences('skill', 'pdf-parse')
+    await references.fetchReferences('skill', 'pdf-parse')
     expect(lastCall().url).toBe('/api/admin/references?target_type=skill&target_name=pdf-parse')
   })
 })

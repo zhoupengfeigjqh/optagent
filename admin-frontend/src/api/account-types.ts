@@ -20,7 +20,15 @@ export interface AgentServiceItem {
 }
 
 export interface AgentServiceCreatePayload {
-  code: string
+  /**
+   * 服务编码（`DH-` 开头，全局唯一、创建后不可改）。
+   *
+   * **省略 / 空串 = 由平台生成**（`DH-` + 5 位去混淆 Base32）。生成结果是权威值，
+   * 调用方 MUST 以 `POST` 响应的 `code` 为准，不得本地预生成或自行拼接——
+   * 编码会被注册链接与审计引用，前端再生成一份就等于出现第二个真相源。
+   * 仅导入历史数据或指定可读语义码时才显式传入。
+   */
+  code?: string
   name: string
   platform_agent_name: string
 }
@@ -54,29 +62,6 @@ export interface RegisterLinkCreated {
   expires_at: string | null
 }
 
-/* ---------- §13 授权（绑定关联） ---------- */
-
-export type GrantStatus = 'approved' | 'pending' | 'revoked'
-
-export interface GrantItem {
-  user_id: string
-  phone: string | null
-  display_name: string | null
-  agent_code: string
-  agent_name: string
-  status: GrantStatus
-  source: 'register_link' | 'apply' | 'manual'
-  created_at: string
-  reviewed_at: string | null
-  reviewed_by: string | null
-}
-
-export interface GrantApplyResult {
-  user_id: string
-  agent_code: string
-  status: GrantStatus
-}
-
 /* ---------- §13 鉴权扩展 ---------- */
 
 export interface MeProfile {
@@ -86,6 +71,12 @@ export interface MeProfile {
   role: 'admin' | 'user'
 }
 
+/**
+ * 工作台「切换数字人」清单（2026-11-27 口径）：`items` = 已授权 ∩ 已部署。
+ *
+ * `pending` 恒为空数组：申请/审批链路随"授权 = 关联"收敛一并下线，
+ * 字段保留只是为了不破坏既有响应契约与调用方。
+ */
 export interface MyAgents {
   items: Array<{
     code: string
@@ -105,5 +96,4 @@ export interface RegisterResult {
 
 export interface RegisterLinkLookup {
   agent: { code: string; name: string }
-  expired: boolean
 }

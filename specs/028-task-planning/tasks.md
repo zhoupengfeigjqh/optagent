@@ -237,6 +237,9 @@ T000（已完成）
 - 配置收敛（2026-11-26，v0.21，批次 2~4）：删除 5 个 `INTENT_FOCUS_*_THRESHOLD` env；`MCP_TIMEOUT_MS`/`MCP_CONNECT_TIMEOUT_MS`/`LLM_MAX_RETRIES`/`LLM_RETRY_MAX_DELAY_MS` 迁入 yaml `runtime` 块；`UPLOAD_MAX_MB`/`PREVIEW_MAX_MB`/`READ_TRUNCATE_KB` 降为 `domain/limits.ts` 常量；新增 yaml `plan` 块三项并注入编排器（`PlanLimits` / `DEFAULT_PLAN_LIMITS` / `advanceBatch.limits`）；启动打 `config.effective` 与 `config.unknown_env`；`config.spec.ts` **43 例**、后端 **124 files / 1694 tests** 全绿
 - 配置分层（2026-11-26，v0.20，批次 1）：`intent_focus.base_url` 支持 `$VAR`（`config.yaml` → `$INTENT_FOCUS_BASE_URL`，本地 `127.0.0.1:8103` / 容器 `laya:8000`）；compose `backend` 去掉 `environment` 覆盖、`env_file` 只留 `.env`；`.env` 转私产（`git rm --cached`）并恢复 `.env.example`；`DECIS_API_KEY` 进 `envSchema`；`config.spec.ts` 40 例全绿
 - 口径调整（2026-11-26，v0.19）：`agent-backend/config.yaml` 补 `plan_threshold: 0.4`（此前缺键 = 门禁关闭，配置写了却不生效）；`plan_timeout_ms` 缺省由 2000 提到 **5000**（冷启动首包常超 2s，2s 会被打成超时后 fail-open），`config.example.yaml` 同步；`config.spec.ts` 缺省断言同步，门禁三份 spec **77 passed**
+- 决策追加（2026-11-27，v0.22）：规划资格收紧——`IntentFocusResult.hasCapability`（只认**直接命中**的本体行为/函数，上/下游发散不算起点）、`plan-gate.ts` 新增 `planCapabilityBlocks`、`AgentRunRequest.planEligible`、`agent-factory` 新增 `plan.skipped(no_focus_capability)` 分流；无能力时 `runner` 连门禁判定也不发起；测试 `plan-gate.spec` +2 例、`intent-focus-runner.spec` +2 例
+- 决策追加（2026-11-28，v0.23）：提示词「段 1 三条硬要求」（聚焦优先 / `coreAction` 必须在工具清单 / 不得绕开清单）+「段 6 单对象单步（即使动作相同也拆步）」；门禁口径由"批量查询算一个任务"翻转为"多对象即多步"；测试 `plan-gate.spec` +1 例、`plan-prompt.spec` +2 例
+- 存量清理（2026-11-28）：删除 `plan-gate.ts` 孤立导出 `judgePlanGate`（生产零引用、与 runner 私有方法同名异义），runner 私有方法改名 `judgePlanGateScore` 消歧；`plan-gate.spec.ts` 删 3 例、现 7 例
 - 行数复核：`runner.ts` **801**、`plan-orchestrator.ts` **580**、`agent-factory.ts` **543**、`config.ts` **524** 均为存量超限（`runner.ts` HEAD 即 757、`config.ts` HEAD 593，本次只加门禁判定与配置解析；按 `plan.md` 复杂度跟踪「不拆分存量」执行，判定逻辑本身抽到 `plan-gate.ts` **50** 行）；`run-consume.ts` 310、`server.ts` 447、`server-attachments.ts` 98，均 ≤500
 
 ## 规模估算

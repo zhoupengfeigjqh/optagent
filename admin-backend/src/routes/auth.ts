@@ -12,6 +12,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
+import { buildMyAgents } from '../domain/account/my-agents.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import {
   AUTH_COOKIE_NAME,
@@ -76,7 +77,8 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
   app.get('/api/admin/auth/register-links/:token', async (req) => {
     const { token } = req.params as { token: string };
     const { agent } = await ctx.registerLinks.lookup(token);
-    return { agent: { code: agent.code, name: agent.name }, expired: false };
+    // 无效 / 过期 / 撤销 / 停用一律走 `ADM_INVALID_LINK`，不枚举原因；因此响应里只有 agent
+    return { agent: { code: agent.code, name: agent.name } };
   });
 
   app.get('/api/admin/auth/me', async (req) => {
@@ -90,10 +92,22 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     };
   });
 
-  /** 当前用户已授权 / 待审批的数字人服务（对话工作台「切换数字人」渲染） */
+  /**
+   * 当前用户**可切换**的数字人（对话工作台「切换数字人」渲染）。
+   *
+   * 2026-11-27 起判据为 `users.agents[]` ∩ 部署清单：授权只代表"允许部署"，
+   * 未部署的数字人不下发（部署是唯一生效闸门）。
+   */
   app.get('/api/admin/auth/my-agents', async (req) => {
     const userId = await requireLogin(req, ctx);
-    return ctx.grants.myAgents(userId);
+    return buildMyAgents(
+      {
+        readAgents: (id) => ctx.users.readOrNull(id)?.agents ?? null,
+        deployedAgents: (id) => ctx.manifest.get(id)?.agent_names ?? [],
+        listServices: () => ctx.agentServices.list(),
+      },
+      userId,
+    );
   });
 
   app.post('/api/admin/auth/logout', async (req, reply) => {

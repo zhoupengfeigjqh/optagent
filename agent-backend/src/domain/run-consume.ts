@@ -101,6 +101,8 @@ export async function consumeTurn(
     let focusPrompt: string | undefined;
     /** 028：规划门禁分数；`null` = 没判（门禁关闭/未开规划/判定失败）→ fail-open 走规划 */
     let focusPlanScore: number | null = null;
+    /** 028（2026-11-27）：未聚焦到本体行为/函数 → 规划无可依附的起点，装配层跳过 */
+    let focusPlanEligible = true;
     if (intentFocus) {
       try {
         const focus = await intentFocus.judge({
@@ -116,6 +118,7 @@ export async function consumeTurn(
         });
         focusToolTips = focus.toolTips;
         focusPlanScore = focus.planScore ?? null;
+        focusPlanEligible = focus.hasCapability !== false;
         if (focus.prompt !== '') {
           focusPrompt = focus.prompt;
           systemExtra = systemExtra ? `${systemExtra}\n\n${focus.prompt}` : focus.prompt;
@@ -157,6 +160,7 @@ export async function consumeTurn(
       ...(focusToolTips.length > 0 ? { focusToolTips } : {}),
       ...(focusPrompt !== undefined ? { focusPrompt } : {}),
       ...(focusPlanScore !== null ? { planScore: focusPlanScore } : {}),
+      ...(focusPlanEligible ? {} : { planEligible: false }),
     })) {
       switch (ev.type) {
         case 'thinking_delta':

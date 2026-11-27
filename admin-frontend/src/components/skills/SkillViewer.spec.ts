@@ -6,7 +6,7 @@ import type { SkillDetail } from '../../api/types'
 const fetchSkillFile = vi.fn()
 const deleteSkill = vi.fn()
 
-vi.mock('../../api/deploy', () => ({ fetchReferences: vi.fn() }))
+vi.mock('../../api/references', () => ({ fetchReferences: vi.fn() }))
 vi.mock('../../api/skills', () => ({
   deleteSkill: (...a: unknown[]) => deleteSkill(...a),
   fetchSkillFile: (...a: unknown[]) => fetchSkillFile(...a),

@@ -74,7 +74,7 @@ describe('buildPlanPrompt', () => {
     const { system } = buildPlanPrompt({ ...BASE, history: [], userInput: '补采购' });
     const positions = [
       system.indexOf(ROLE_PROMPT),
-      system.indexOf('［意图聚焦结果｜本轮规划的唯一起点］'),
+      system.indexOf('［意图聚焦结果｜本轮规划的首选起点］'),
       system.indexOf('［本体关系｜按本体分段］'),
       system.indexOf('［可用函数］'),
       system.indexOf('命令前置约束'),
@@ -86,9 +86,25 @@ describe('buildPlanPrompt', () => {
 
   it('第 1、2 段都强调聚焦为起点，第 2 段标题含「起点」', () => {
     const { system } = buildPlanPrompt({ ...BASE, history: [], userInput: 'x' });
-    expect(system).toContain('必须从下方「意图聚焦结果」出发');
-    expect(system).toContain('请以此为起点设计计划');
-    expect(system).toContain('唯一起点');
+    expect(system).toContain('不得另辟路径');
+    expect(system).toContain('请优先以此为起点设计计划');
+    expect(system).toContain('首选起点');
+    expect(system).toContain('coreAction 不得超出清单');
+  });
+
+  it('段 1 三条硬要求：聚焦优先 / coreAction 必须在工具清单 / 不得绕开工具（2026-11-28）', () => {
+    const { system } = buildPlanPrompt({ ...BASE, history: [], userInput: 'x' });
+    expect(system).toContain('优先从下方「意图聚焦结果」');
+    expect(system).toContain('必须在下方可用工具清单');
+    expect(system).toContain('不得绕开可用工具清单自行规划行为');
+  });
+
+  it('段 6：多个独立对象（即使动作相同）各占一步，且禁止清单外行为（2026-11-28）', () => {
+    const { system } = buildPlanPrompt({ ...BASE, history: [], userInput: 'x' });
+    expect(system).toContain('即使动作相同');
+    expect(system).toContain('一个对象占一步');
+    expect(system).toContain('规划可用工具清单之外的行为、服务或接口');
+    expect(system).toContain('剩余对象会在下一批继续规划');
   });
 
   it('段 2 直通聚焦提示：6000 字也原样带入，「图路径」末行不丢（2026-11-26）', () => {

@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
+import {
+  ACCOUNTS_DIR,
+  LEGACY_SESSIONS_DIR,
+  LEGACY_USERS_DIR,
+  SESSIONS_DIR,
+  USERS_DIR,
+} from '../domain/account/paths.js';
 import { ApiError } from '../domain/api-error.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 import { removeTree } from './fs-remove.js';
@@ -49,8 +56,28 @@ export class PlatformStore {
    */
   ensureLayout(): void {
     this.failIfNotWritable();
-    for (const dir of ['', 'skills', 'agents', 'users', 'deploy', 'logs', 'onto_market']) {
+    // 账号域（028）：`users/` · `sessions/` · 三份集合文件统一挂 `accounts/` 下（见 account/paths.ts）
+    for (const dir of [
+      '',
+      'skills',
+      'agents',
+      ACCOUNTS_DIR,
+      USERS_DIR,
+      SESSIONS_DIR,
+      'deploy',
+      'logs',
+      'onto_market',
+    ]) {
       fs.mkdirSync(path.join(this.root, dir), { recursive: true });
+    }
+    // 结构收敛前的旧目录若仍在 = 迁移脚本还没跑：**显式告警**，不静默双份数据
+    for (const legacy of [LEGACY_USERS_DIR, LEGACY_SESSIONS_DIR]) {
+      if (!fs.existsSync(this.abs(legacy))) continue;
+      this.logger?.warn(
+        { event: 'store.layout.legacy', dir: legacy },
+        `账号域旧目录仍存在：${legacy}/（新结构为 ${ACCOUNTS_DIR}/）。` +
+          '请执行 npm run migrate:accounts-layout，校验通过后手工删除旧目录',
+      );
     }
     if (!fs.existsSync(this.abs(META_REL))) {
       const now = new Date().toISOString();

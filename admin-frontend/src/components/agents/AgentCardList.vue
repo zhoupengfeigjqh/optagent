@@ -2,7 +2,8 @@
 /**
  * 数字人卡片列表。
  *
- * 卡片同时展示对应注册服务编码与已注册人数；「生成注册链接」只发出意图，
+ * 卡片展示编码（以设计态自带的 `code` 为准，与注册服务同源；旧设计回退到服务清单）
+ * 与已注册人数；「注册管理」只发出意图（打开管理弹窗，**不自动生成链接**），
  * 具体服务匹配和弹窗由 AgentArea 处理。
  */
 import { computed } from 'vue'
@@ -22,13 +23,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:page', value: number): void
   (e: 'open', name: string): void
-  (e: 'register-link', agent: AgentListItem): void
+  (e: 'manage-registration', agent: AgentListItem): void
   (e: 'create'): void
 }>()
 
 const servicesByAgent = computed(
   () => new Map(props.services.map((service) => [service.platform_agent_name, service])),
 )
+
+/** 编码标签：设计态优先（与 `agent_services.code` 同源），旧设计回退到服务清单 */
+function codeLabel(item: AgentListItem): string {
+  const code = item.code ?? servicesByAgent.value.get(item.name)?.code ?? null
+  return code ? `编码 ${code}` : '未配置注册服务'
+}
 </script>
 
 <template>
@@ -57,21 +64,13 @@ const servicesByAgent = computed(
         >
           <p class="card__head">
             <span class="card__title">{{ (item as AgentListItem).name }}</span>
-            <StatusBadge
-              v-if="(item as AgentListItem).abnormal"
-              status="abnormal"
-              label="异常"
-              tone="error"
-            />
+            <!-- label / tone 交给 STATUS_PRESETS['abnormal']，避免第二份"异常"文案 -->
+            <StatusBadge v-if="(item as AgentListItem).abnormal" status="abnormal" />
           </p>
           <p class="card__description">{{ (item as AgentListItem).description || '（无描述）' }}</p>
           <div class="agent-card-list__tags">
             <span class="agent-card-list__tag">
-              {{
-                servicesByAgent.get((item as AgentListItem).name)
-                  ? `编码 ${servicesByAgent.get((item as AgentListItem).name)?.code}`
-                  : '未配置注册服务'
-              }}
+              {{ codeLabel(item as AgentListItem) }}
             </span>
             <span
               v-if="servicesByAgent.get((item as AgentListItem).name)"
@@ -97,10 +96,10 @@ const servicesByAgent = computed(
             <button
               type="button"
               class="btn btn--link"
-              :aria-label="`为数字人 ${(item as AgentListItem).name} 生成注册链接`"
-              @click="emit('register-link', item as AgentListItem)"
+              :aria-label="`管理数字人 ${(item as AgentListItem).name} 的注册链接`"
+              @click="emit('manage-registration', item as AgentListItem)"
             >
-              生成注册链接
+              注册管理
             </button>
           </div>
         </article>

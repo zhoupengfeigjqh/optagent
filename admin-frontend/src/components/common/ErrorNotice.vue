@@ -3,8 +3,8 @@
  * 错误提示：按**错误码分派**中文文案（前端 MUST NOT 直接展示后端 message），
  * 并在 `aria-live` 区域播报（原则四）。
  *
- * 校验类错误可附带 `details.errors`（部署前校验 MUST 一次性列出全部错误项），
- * 由默认插槽承载明细列表。
+ * 2026-11-27：随 `/api/admin/deploy/validate` 废止，原「明细插槽」一并移除——
+ * 全仓没有任何调用方传子节点，插槽从未渲染过。
  */
 import { computed } from 'vue'
 import type { ErrorInfo } from '../../api/types'
@@ -27,9 +27,6 @@ const code = computed(() => props.error?.code ?? '')
     </p>
     <p class="error-notice__message">{{ message }}</p>
     <p v-if="code" class="error-notice__code">错误码：{{ code }}</p>
-    <div v-if="$slots.default" class="error-notice__details">
-      <slot />
-    </div>
   </div>
 </template>
 
@@ -67,8 +64,4 @@ const code = computed(() => props.error?.code ?? '')
   font-family: var(--font-family-mono);
 }
 
-.error-notice__details {
-  margin-top: var(--space-2);
-  font-size: var(--font-size-sm);
-}
 </style>

@@ -58,8 +58,8 @@ export function readOptionalText(raw: unknown, label: string, max: number): stri
   return text;
 }
 
-/** 长度上限（中文按字符数，与界面计数一致） */
-export function assertLength(text: string, label: string, max: number): void {
+/** 长度上限（中文按字符数，与界面计数一致）；仅本文件使用，不对外暴露 */
+function assertLength(text: string, label: string, max: number): void {
   if (text.length > max) {
     throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `${label}不得超过 ${max} 字（当前 ${text.length} 字）`);
   }

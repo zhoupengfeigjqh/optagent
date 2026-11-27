@@ -1,6 +1,8 @@
 # 接口契约：数字人管理平台（admin-api）
 
-**特性**：`001-digital-human-platform` | **版本**：1.2 | **日期**：2026-10-17
+**特性**：`001-digital-human-platform` | **版本**：1.3 | **日期**：2026-11-27
+
+**1.3（2026-11-27）变更**：①§5 数字人设计增加对外编码 `code`——它 MUST 与 `agent_services.code` 同源同值：由平台在新建时生成（`DH-` + 5 位去混淆 Base32），**先写进设计态**再开通服务；客户端提交的 `code` 一律忽略（`AgentInputRaw` 不含该字段）；保存/改名 MUST 保留既有值（编码创建后不可改）。列表（§5.1）每项新增 `code: string|null`（旧文档未回填时为 `null`，由 `npm run migrate:agent-services` 回填）；②§5.5 删除数字人改为**整体下线**语义：该编码下未撤销的注册链接**级联软撤销**（记录保留），不再以 409 阻断删除；③新增 §5.7 删除影响面端点，供确认弹窗提示「本次删除会有 N 条注册链接失效」；④同日清理：`register-links/:token` 响应移除恒为 `false` 的 `expired`；`agent-services` 删除改按「未撤销链接 + 用户关联」判定（已撤销/过期链接不再阻断），新建响应的 `registered_users` 改为真实值；`/users` 的 `expand=summary` 与响应 `summary` 字段一并移除（唯一消费方已下架，§6.1）。
 
 **1.2（2026-10-17）变更**：①新增 §5.6 设计器候选目录端点（一次返回全量候选，修复设计器只取卡片列表第一页导致第 9 个 SKILL / MCP 服务选不到）；②§10 本体库调整——索引去冗余（身份由 `metadata` 派生，字段 `hash` 更名 `ontology_hash`）、`securities.yaml` 转为必需文件、移除 `has_securities`。
 
@@ -85,7 +87,6 @@
 | `ADM_INVALID_CREDENTIALS` | 401 | 登录失败：账号不存在或密码错误（**不枚举**；024 登录鉴权，见 §12） | `FR-011` |
 | `ADM_PHONE_TAKEN` | 409 | 手机号已被注册（§13；028） | — |
 | `ADM_INVALID_LINK` | 400 | 注册链接无效/过期/已撤销/服务停用（**不枚举**；§13；028） | — |
-| `ADM_GRANT_NOT_FOUND` | 404 | 授权记录不存在（§13；028） | — |
 | `ADM_AGENT_SERVICE_NOT_FOUND` | 404 | 数字人服务编码不存在（§13；028） | — |
 | `ADM_AGENT_SERVICE_IN_USE` | 409 | 数字人服务已被授权或注册链接引用，禁止删除（§13；028） | — |
 
@@ -102,6 +103,13 @@
 > 无校验钩子，两码当前在运行期不可达，此处只冻结**命名与状态码**（实现阶段若改名，按既有先例
 > 直接删除本表对应行即可）。②**修正计数**：上文 2026-09-27 记录里的"21 个"停留在当日、
 > 未随 10-02／10-03 的三次新增更新；**现全表 27 个**（4 个复用 + 23 个 `ADM_` 前缀码）。
+
+> **2026-11-27 变更**：随「授权 = 关联」语义收敛（`users.agents[]` 既是已授权清单又是待部署清单），
+> `/api/admin/grants*` 四个端点下架，**移除"授权记录不存在"（404）码**（旧名不再回引，
+> 同 09-27 先例：以代码格式回引会让 `check:contract` 判定为"契约出现但未登记"）——§13 正文与本表此前不一致
+> （正文已声明移除、表内仍登记），`npm run check:contract` 据此报红，今同步删行。
+> 本表实有码数以 `npm run check:contract` 的登记口径为准（本次删行后为 **31 个**）；
+> 上文 09-27／10-15 的手工计数未随各次增删回填，**不再作为权威数字**。
 
 ### 0.5 保存交互（全部写接口的通用约定，2026-09-25）
 
@@ -573,15 +581,19 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **查询参数**：`page`
 
-**响应 200**：`items` 每项：`{ name, description, abnormal: boolean, abnormal_reason: string|null, updated_at }`
+**响应 200**：`items` 每项：`{ name, code: string|null, description, abnormal: boolean, abnormal_reason: string|null, updated_at }`
+
+- `code`（2026-11-27）：该数字人的对外编码，与 `agent_services.code` 同源同值；旧设计文档未回填时为 `null`（回填见 §5.2 副作用）。
 
 ### 5.2 `POST /api/admin/agents`
 
 **用途**：新建数字人（`FR-015`）。
 
-**请求体**：见 `data-model.md` §5 的字段表（`soul` 必填非空）
+**请求体**：见 `data-model.md` §5 的字段表（`soul` 必填非空）。请求体中的 `code` **一律忽略**（编码由平台生成，MUST NOT 由客户端指定）。
 
-**响应 201**：完整设计态 + `revision`
+**响应 201**：完整设计态（含 `code`）+ `revision`
+
+**副作用（2026-11-27）**：新建（含「复制」——前端复制走同一接口，只是预填草稿）MUST 同时为该数字人**开通一条数字人服务**（1:1，见 §13）：`code` 由平台预先生成（`DH-` + 5 位去混淆 Base32）并**先写进设计态**，再以同一编码开通服务（`name` 与 `platform_agent_name` 均取数字人名、`status=enabled`）；该落点若已存在服务（如上次删除只撤了设计态），MUST 以登记簿编码为准回写设计态。开通失败 MUST NOT 回滚设计态（不得丢弃管理员已填内容），只记结构化日志并由 `npm run migrate:agent-services` 补齐（该脚本同时把登记簿编码回填进设计态，幂等，不 bump `revision`）。
 
 **错误码**：`ADM_AGENT_NAME_TAKEN`、`VALIDATION_FAILED`、`ADM_AGENT_INVALID_REF`
 
@@ -589,7 +601,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **用途**：查看单个数字人的**全部配置内容**（`FR-014`）。
 
-**响应 200**：`{ name, soul, enabled_tools, mcp_services, skills, scenario, abnormal, abnormal_reason, updated_at, revision }`
+**响应 200**：`{ name, code, soul, enabled_tools, mcp_services, skills, scenario, abnormal, abnormal_reason, updated_at, revision }`
+
+- `code`（2026-11-27）：对外编码，与 `agent_services.code` 同源同值；旧文档未回填时为 `null`。
 
 **`scenario` 的结构**（`FR-020`；字段约束为 2026-09-17 新增；目录级可上传类型为 2026-10-13 新增）：
 
@@ -655,9 +669,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **用途**：编辑任意一类配置并保存（`FR-017`）。保存后 MUST 能原样回显，含换行、标点与条目顺序。
 
-**请求体**：五类配置 + `revision`
+**请求体**：五类配置 + `revision`（不含 `code`：编码创建后不可改，保存/改名 MUST 保留既有值）
 
-**响应 200**：保存后的完整设计态 + 新 `revision`
+**响应 200**：保存后的完整设计态（含未变的 `code`）+ 新 `revision`
 
 **错误码**：`ADM_AGENT_NAME_TAKEN`（改名冲突）、`ADM_AGENT_INVALID_REF`、`VALIDATION_FAILED`、`ADM_CONFIG_REVISION_CONFLICT`
 
@@ -665,9 +679,17 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **用途**：删除数字人（`FR-021`、`FR-022`）。被用户关联时 MUST 阻止或要求先解除关联。
 
+**级联（2026-11-27 收敛）**：数字人与其服务 1:1，删除数字人 = **整体下线**，MUST 一并：
+
+1. 把该编码下所有**未撤销**的注册链接**软撤销**（写 `revoked_at`，记录保留以供审计）——链接立即不可再用于注册，但 MUST NOT 因此阻断删除；
+2. 删除 `agent_services` 记录（`agent-services.json` / `agent_services` 表），避免留下指向已删数字人的悬空编码；
+3. 删除设计态文档（`agents/{name}.json`）。
+
+执行顺序：先撤服务（可失败）→ 再删设计态。链接记录**不物理删除**（审计与"链接是否只被删数字人连带失效"的追溯依据）；被级联撤销的条数写入 `admin.write` 之外的结构化日志 `agent.delete.links_revoked`。
+
 **响应 204**
 
-**错误码**：`ADM_AGENT_IN_USE`、`ADM_AGENT_NOT_FOUND`
+**错误码**：`ADM_AGENT_IN_USE`、`ADM_AGENT_NOT_FOUND`（`ADM_AGENT_SERVICE_IN_USE` 保留给**单独删除服务** §13 的 `DELETE /api/admin/agent-services/{code}`）
 
 ### 5.6 `GET /api/admin/agents/catalog`
 
@@ -707,15 +729,36 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 **错误码**：无新增（平台自身故障按兜底码处理）。
 
+### 5.7 `GET /api/admin/agents/{name}/deletion-impact`
+
+**用途**：删除前影响面（2026-11-27）。删除确认弹窗据此提示「请注意，本次删除会有 N 条注册链接失效」，并提前告知「已被用户关联 → 会删除失败」。
+
+**响应 200**：
+
+```json
+{ "name": "test008", "code": "DH-ABCDE", "linked_users": [], "active_register_links": 2 }
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | 数字人名（= 设计态落点） |
+| `code` | string \| null | 该数字人的服务编码；尚未开通服务时为 `null` |
+| `linked_users` | string[] | 关联了该数字人的用户（非空 → §5.5 返回 `ADM_AGENT_IN_USE`） |
+| `active_register_links` | integer | 删除时会被**级联软撤销**的链接条数（只统计 `revoked_at IS NULL`；过期但未撤销的仍计入——与 §5.5 的级联判据同源） |
+
+**判定口径**：与 §5.5 共用 `AgentServiceCatalog` 的同一实现，前端 MUST NOT 自行计算。影响面只是提示性信息，MUST NOT 作为删除的唯一前置校验（真正的删除仍由 §5.5 校验）。
+
+**错误码**：`ADM_AGENT_NOT_FOUND`
+
 ---
 
 ## §6 用户与部署
 
 ### 6.1 `GET /api/admin/users`
 
-**用途**：用户卡片列表（`FR-023`）。每张卡片 MUST 展示用户名与其已关联数字人角色名清单；可展开查看每个数字人的搭配摘要（引用的 MCP 服务、内置工具、SKILL）及其异常标记——该页兼作**部署前核对总账**。
+**用途**：用户账户列表（`FR-023`）。每行展示账号、授权数、注册来源与部署状态（`FR-023` 原「展开查看搭配摘要 / 部署前核对总账」随部署区下架废止）。
 
-**查询参数**：`page`；`expand=summary`（含搭配摘要）
+**查询参数**：`page`
 
 **响应 200**：`items` 每项：
 
@@ -723,8 +766,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 |---|---|---|
 | `user_id` | string | 用户标识 |
 | `agents` | array | 每个：`{ name, abnormal, abnormal_reason }` |
-| `deployed_at` | string \| null | **部署状态**（取自部署清单，`FR-031`）：`null` = 从未部署过（新建用户即如此，**或已被 §6.9 撤回**）；界面据此显示"未部署／已部署 + 最近一次时间"，并在卡片上勾选部署对象（2026-09-16） |
-| `summary` | array \| null | `expand=summary` 时返回：每个数字人的 `{ name, mcp_services, enabled_tools, skills }` |
+| `deployed_at` | string \| null | **部署状态**（取自部署清单，`FR-031`）：`null` = 从未部署过（新建用户即如此，**或已被 §6.9 撤回**）；界面据此显示"未部署／已部署 + 最近一次时间" |
+
+**2026-11-27 移除**：`expand=summary` 参数与响应的 `summary` 字段。其唯一消费方「部署前核对总账」已随部署区下架；传了该参数也会被忽略（不再计算摘要）。授权数即 `agents.length`。
 
 ### 6.2 `POST /api/admin/users`
 
@@ -1033,25 +1077,24 @@ MUST NOT 读取容器编排声明或容器运行状态。
 
 完整方案与数据模型见 specs/028-account-mysql-binding/方案与契约.md（本节为 §0 一致性所需的最小登记）。
 
-**语义边界（MUST）**：授权（`user_agent_grants`，三态 approved/pending/revoked）决定「能否使用」数字人服务；部署关联（`users.agents[]`）决定「部署什么」。两者 MUST NOT 混写。存储按 `STORAGE_DRIVER=file|mysql` 切换（默认 file，`mysql` = 账号域 MySQL 化）。
+**语义边界（MUST，2026-11-27 收敛）**：**授权 = 关联**——`users.agents[]` 同时是「允许使用什么」与「部署什么」的唯一真相源；`user_agent_grants`（表 / `accounts/user-agent-grants.json` / 迁移脚本）**已彻底删除**，不再读取、不再写入，旧库中的表由 DBA 自行处置。原「授权决定能否使用、部署关联决定部署什么」的双源口径**废止**，两者 MUST NOT 再分叉写入。生效判据：`users.agents[]` ∩ 部署清单（未部署不下发给工作台）。存储按 `STORAGE_DRIVER=file|mysql` 切换（默认 file，`mysql` = 账号域 MySQL 化）。
 
 **新增/扩展端点**：
 
 | 端点 | 方法 | 权限 | 说明 |
 |---|---|---|---|
-| `/api/admin/auth/register` | POST | 公开 | 专属链接注册：`{link_token, phone, display_name, password}` → 201 `{user_id, phone, display_name, granted_agent}`；注册即 `approved` 授权，**不自动登录**；手机号占用 → `ADM_PHONE_TAKEN` |
-| `/api/admin/auth/register-links/:token` | GET | 公开 | 注册页渲染校验 → `{agent:{code,name}, expired:false}`；无效/过期/撤销/停用统一 `ADM_INVALID_LINK`（不枚举） |
+| `/api/admin/auth/register` | POST | 公开 | 专属链接注册：`{link_token, phone, display_name, password}` → 201 `{user_id, phone, display_name, granted_agent}`；**注册即授权**——直接把链接对应的 `platform_agent_name` 写入 `users.agents[]`，**不自动登录**；手机号占用 → `ADM_PHONE_TAKEN` |
+| `/api/admin/auth/register-links/:token` | GET | 公开 | 注册页渲染校验 → `{agent:{code,name}}`（2026-11-27 移除恒为 `false` 的 `expired`）；无效/过期/撤销/停用统一 `ADM_INVALID_LINK`（不枚举） |
 | `/api/admin/auth/login` | POST | 公开 | **扩展**：请求体 `{user_id?, phone?, password}` 二选一；失败仍统一 `ADM_INVALID_CREDENTIALS`（不枚举）；JWT `sub` 恒为 `user_id`（非手机号） |
 | `/api/admin/auth/me` | GET | 登录 | **扩展响应**：`{user_id, phone, display_name, role}` |
-| `/api/admin/auth/my-agents` | GET | 登录 | 当前用户授权清单：`{items:[{code,name,platform_agent_name,status}], pending:[{code,name,platform_agent_name}]}`（revoked 不下发；items 按首次授权时间升序） |
-| `/api/admin/grants/apply` | POST | 本人 | 申请：`{agent_code}`；`user_id` 取自会话（防越权）；approved/pending 幂等 |
-| `/api/admin/grants` | GET | 管理员 | 授权总账：query `status/agent_code/phone/page` → 卡片分页 `{items,total,page,...}` |
-| `/api/admin/grants/approve` | POST | 管理员 | 审批通过：`{user_id, agent_code}`；记录不存在 → `ADM_GRANT_NOT_FOUND` |
-| `/api/admin/grants/revoke` | POST | 管理员 | 关闭授权（不删行，保留审计轨迹）；重建授权走 approve |
+| `/api/admin/auth/my-agents` | GET | 登录 | 当前用户**可用**数字人：`{items:[{code,name,platform_agent_name,status}], pending:[]}`——`items` = `users.agents[]` ∩ 部署清单（未部署不下发）；`pending` 恒空，仅为维持响应契约 |
 | `/api/admin/register-links` | GET/POST | 管理员 | 列表（可按 `agent_code` 过滤，带 `use_count`）/ 生成 `{agent_code, expires_in_seconds?}` → 201 `{token, url, expires_at}` |
 | `/api/admin/register-links/:token` | DELETE | 管理员 | 软撤销 → 204 |
-| `/api/admin/agent-services` | GET/POST | 登录/管理员 | 服务目录列表（含 `registered_users`）/ 新建 `{code, name, platform_agent_name}`；`platform_agent_name` MUST 在平台设计态存在（`FR-025` 口径） |
-| `/api/admin/agent-services/:code` | PUT/DELETE | 管理员 | 改 name/status（code 不可改）/ 删除；被引用 → `ADM_AGENT_SERVICE_IN_USE` |
-| `/api/admin/users` | GET/POST | 管理员 | **扩展**：列表响应增 `phone/display_name/role/source_agent_code/grants_summary:{approved,pending}`；创建请求体增可选同名账号字段 |
+| `/api/admin/agent-services` | GET/POST | 登录/管理员 | 服务目录列表（含 `registered_users`）/ 新建 `{code?, name, platform_agent_name}`（**新建响应的 `registered_users` 也是真实关联数**，2026-11-27 前恒为 0）；`code` **可省略或空串 → 平台生成**（`DH-` + 5 位去混淆 Base32，响应回显，创建后不可改）；显式提供仍按 `^[A-Z0-9][A-Z0-9-]{1,31}$` 校验，撞码 400。`platform_agent_name` MUST 在平台设计态存在（`FR-025` 口径） |
+| `/api/admin/agent-services/:code` | PUT/DELETE | 管理员 | 改 name/status（code 不可改）/ 删除；被**未撤销**的注册链接或用户关联引用 → `ADM_AGENT_SERVICE_IN_USE`（已撤销/已过期链接不算引用，2026-11-27 统一口径） |
+| `/api/admin/users` | GET/POST | 管理员 | **扩展**：列表响应增 `phone/display_name/role/source_agent_code`（**不含**授权摘要——授权数即 `agents.length`）；创建请求体增可选同名账号字段 |
+| `/api/admin/users/:user_id` | PUT | 管理员 | **2026-11-27 语义确认**：`{agents, revision}` 即"替换授权清单"（授权 = 关联），是管理台授权/关闭授权的唯一写入路径 |
 
-**错误码**：本节引入的 5 个新码已登记进 §0.4（`ADM_PHONE_TAKEN` / `ADM_INVALID_LINK` / `ADM_GRANT_NOT_FOUND` / `ADM_AGENT_SERVICE_NOT_FOUND` / `ADM_AGENT_SERVICE_IN_USE`）。`ADM_FORBIDDEN` 的角色强制校验后置到阶段 4（`ADMIN_AUTH_ENABLED` 开关，与前端登录页同批）。
+**已下架端点（2026-11-27）**：`POST /api/admin/grants/apply`、`GET /api/admin/grants`、`POST /api/admin/grants/approve`、`POST /api/admin/grants/revoke` 随"授权 = 关联"收敛一并删除；授权改由 `PUT /api/admin/users/{user_id}` 写入、由列表响应读取。原"授权记录不存在"（404）码同时移除（旧名不再回引），其余新码不变。管理台入口：用户管理 →「授权详情」勾选/取消勾选（即时写入）。
+
+**错误码**：本节引入的 4 个新码已登记进 §0.4（`ADM_PHONE_TAKEN` / `ADM_INVALID_LINK` / `ADM_AGENT_SERVICE_NOT_FOUND` / `ADM_AGENT_SERVICE_IN_USE`）。`ADM_FORBIDDEN` 的角色强制校验后置到阶段 4（`ADMIN_AUTH_ENABLED` 开关，与前端登录页同批）。

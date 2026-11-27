@@ -28,6 +28,7 @@
 
 **Storage**：
 - 密码只存 `.platform-data/users/{user_id}.json`（平台设计态，**不物化、不部署**到 `.opt-agent`）。
+  —— 2026-11-27 起落点收敛为 `.platform-data/accounts/users/{user_id}.json`（见 028 §14）。
 - 登录凭据仍**无状态**（JWT 自含身份与有效期），但新增**每账号"当前唯一会话标识"登记**（`.platform-data/sessions/{user_id}.json`，原子写入），用于单会话与后登踢前登；不引入独立会话服务/数据库。
 - 无迁移动作：存量用户记录缺 `password` 字段即"不可登录"，由管理员补设（不发起批量迁移专项）。
 
@@ -442,3 +443,25 @@ cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm
 - [ ] 四侧本地门禁全绿；新增/修改模块覆盖率 ≥ 80%；`SC-007` 实测值已回填。
 - [ ] 端到端：登录 → 探针 → 受保护请求（按 userId 隔离）→ 二次登录踢前登 → 登出 → 再访问 401，全链路在 `quickstart.md` 可复现。
 - [ ] `specs/001-.../contracts/admin-api.md` 与 `runtime-api-delta.md` 差异已登记。
+
+## 修订记录（2026-11-27）：工作台登录入口收敛
+
+**问题**：工作台存在两套登录表单——`/login`（账号 `user_id`）与注册链接页的「登录」页签
+（仅手机号），字段、文案、跳转规则各写一遍；`admin` 这类无手机号账号在注册链接页会被
+判「手机号格式不正确」而无法登录；注册链接过期后页面只剩一条红色警告，连登录入口都没有。
+
+**决策**：抽出共享组件 `frontend/src/components/auth/LoginForm.vue`，两处复用同一实现。
+
+| 项 | 收敛前 | 收敛后 |
+|---|---|---|
+| 表单实现 | 两处各写一套 | 一处（组件） |
+| 标识字段 | 账号 / 仅手机号 | **账号或手机号**（11 位手机号走 `loginWithPhone`，其余走 `login`） |
+| 登录后去向 | `/login` 尊重 `?redirect=`；注册页固定 `/` | 组件只 `emit('success')`，去向由页面决定（行为不变） |
+| 链接失效 | 仅告警，无登录入口 | 告警 + **保留登录**（token 只与注册授权相关，与登录无关） |
+| 管理后台登录 | `AdminLoginView` | 不变（`role=admin` 门槛属独立场景，不合并且不复用） |
+
+**契约影响**：无。后端 `POST /api/admin/auth/login` 早已支持 `user_id` / `phone` 二选一
+（`contracts/auth-api.md` §2.1），本次只让前端在同一个输入框里做形态分流。
+
+**验证**：`frontend` typecheck 通过；1527 tests / 132 files 全绿（新增 `LoginForm.spec.ts` 10 例，
+`RegisterView.spec.ts` 扩到 8 例）；`eslint` 0 error（5 个存量 warning 位于 gantt 相关文件）。

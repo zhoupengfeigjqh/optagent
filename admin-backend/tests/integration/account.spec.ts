@@ -1,8 +1,8 @@
 /**
  * 集成测试：账号与数字人服务绑定（028 阶段 2/3，file 驱动默认）
  *
- * 覆盖：数字人服务 CRUD → 注册链接（生成/公开校验/撤销）→ 手机号注册（即授权）
- * → 手机号登录 / me 扩展 / my-agents → 申请-审批-关闭三态 → 用户列表扩展与删除级联。
+ * 覆盖：数字人服务 CRUD → 用户接口扩展与删除级联 → 数字人 ⇔ 服务编码 1:1。
+ * 注册链接与手机号注册/登录链路已拆到 `account-register.spec.ts`（原则二：单文件 ≤500 行）。
  * mysql 驱动的同链路由 `tests/unit/mysql-stores.spec.ts`（阶段 1）+ 阶段 2 补充用例覆盖。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -111,6 +111,39 @@ describe('数字人服务目录（§13 agent-services）', () => {
     expect(remove.statusCode).toBe(204);
   });
 
+  it('registered_users 反映真实关联数（创建响应不再恒为 0，2026-11-27）', async () => {
+    await fx.ctx.users.create('u_rel', ['demo']);
+    const created = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agent-services',
+      payload: { name: '测试服务', platform_agent_name: 'demo' },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().registered_users).toBe(1);
+    // 与列表口径一致
+    const list = await fx.app.inject({ method: 'GET', url: '/api/admin/agent-services' });
+    expect(list.json().items[0].registered_users).toBe(1);
+  });
+
+  it('已撤销链接不算 in-use：删除服务不被历史链接阻断（2026-11-27）', async () => {
+    await createService('DH-TST09');
+    const link = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/register-links',
+      payload: { agent_code: 'DH-TST09' },
+    });
+    await fx.app.inject({
+      method: 'DELETE',
+      url: `/api/admin/register-links/${link.json().token as string}`,
+    });
+
+    const remove = await fx.app.inject({
+      method: 'DELETE',
+      url: '/api/admin/agent-services/DH-TST09',
+    });
+    expect(remove.statusCode).toBe(204);
+  });
+
   it('编码重复 400；platform_agent_name 不在设计态 400；非法编码 400', async () => {
     await createService();
     const dup = await fx.app.inject({
@@ -135,226 +168,62 @@ describe('数字人服务目录（§13 agent-services）', () => {
     });
     expect(badCode.statusCode).toBe(400);
   });
-});
 
-describe('专属注册链接（§13 register-links）', () => {
-  it('生成 → 公开校验 → 撤销后统一 ADM_INVALID_LINK', async () => {
-    await createService();
-    const token = await createLink();
-
-    const lookup = await fx.app.inject({
-      method: 'GET',
-      url: `/api/admin/auth/register-links/${encodeURIComponent(token)}`,
+  it('省略 code → 平台生成 DH- 前缀 5 位编码，响应回显、落库唯一、可直接被引用', async () => {
+    const created = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agent-services',
+      payload: { name: '自动编码服务', platform_agent_name: 'demo' },
     });
-    expect(lookup.statusCode).toBe(200);
-    expect(lookup.json()).toMatchObject({
-      agent: { code: 'DH-TST01', name: '测试服务' },
-      expired: false,
-    });
+    expect(created.statusCode).toBe(201);
+    const code = created.json().code as string;
+    // 去混淆 Base32：不含 I/L/O/U/0/1
+    expect(code).toMatch(/^DH-[2-9A-HJKMNP-TV-Z]{5}$/);
 
-    const revoke = await fx.app.inject({
-      method: 'DELETE',
-      url: `/api/admin/register-links/${encodeURIComponent(token)}`,
-    });
-    expect(revoke.statusCode).toBe(204);
+    const list = await fx.app.inject({ method: 'GET', url: '/api/admin/agent-services' });
+    expect(list.json().items.map((item: { code: string }) => item.code)).toContain(code);
 
-    const afterRevoke = await fx.app.inject({
-      method: 'GET',
-      url: `/api/admin/auth/register-links/${encodeURIComponent(token)}`,
-    });
-    expect(afterRevoke.statusCode).toBe(400);
-    expect(afterRevoke.json().error.code).toBe('ADM_INVALID_LINK');
-  });
-
-  it('服务不存在 → 404；停用服务不可生成链接', async () => {
-    const missing = await fx.app.inject({
+    // 生成的编码与手写编码等价：注册链接能直接引用它
+    const link = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/register-links',
-      payload: { agent_code: 'DH-NOPE1' },
+      payload: { agent_code: code },
     });
-    expect(missing.statusCode).toBe(404);
-    expect(missing.json().error.code).toBe('ADM_AGENT_SERVICE_NOT_FOUND');
+    expect(link.statusCode).toBe(201);
+  });
 
-    await createService();
-    await fx.app.inject({
-      method: 'PUT',
-      url: '/api/admin/agent-services/DH-TST01',
-      payload: { status: 'disabled' },
-    });
-    const disabled = await fx.app.inject({
+  it('连续两次自动生成 → 编码不同（不复用、不覆盖）', async () => {
+    const first = await fx.app.inject({
       method: 'POST',
-      url: '/api/admin/register-links',
-      payload: { agent_code: 'DH-TST01' },
+      url: '/api/admin/agent-services',
+      payload: { name: '计划助手A', platform_agent_name: 'demo' },
     });
-    expect(disabled.statusCode).toBe(400);
+    const second = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/agent-services',
+      payload: { name: '计划助手B', platform_agent_name: 'demo' },
+    });
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(first.json().code).not.toBe(second.json().code);
+  });
+
+  it('code 为空串 / 全空白 → 与省略同义（平台生成），不当作非法编码', async () => {
+    for (const code of ['', '   ']) {
+      const res = await fx.app.inject({
+        method: 'POST',
+        url: '/api/admin/agent-services',
+        payload: { code, name: '空编码服务', platform_agent_name: 'demo' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json().code).toMatch(/^DH-[2-9A-HJKMNP-TV-Z]{5}$/);
+    }
   });
 });
 
-describe('手机号注册与登录（§13 register / login 扩展）', () => {
-  it('注册即授权 → 手机号登录 → me 扩展 → my-agents；重复手机号 409', async () => {
-    await createService();
-    const token = await createLink();
-    const { userId, cookie } = await registerAndLogin('13800000001', '张三', token);
-
-    expect(userId).toMatch(/^u_[0-9a-f]{12}$/);
-
-    const me = await fx.app.inject({
-      method: 'GET',
-      url: '/api/admin/auth/me',
-      headers: { cookie },
-    });
-    expect(me.statusCode).toBe(200);
-    expect(me.json()).toMatchObject({
-      user_id: userId,
-      phone: '13800000001',
-      display_name: '张三',
-      role: 'user',
-    });
-
-    const myAgents = await fx.app.inject({
-      method: 'GET',
-      url: '/api/admin/auth/my-agents',
-      headers: { cookie },
-    });
-    expect(myAgents.statusCode).toBe(200);
-    expect(myAgents.json().items).toContainEqual({
-      code: 'DH-TST01',
-      name: '测试服务',
-      platform_agent_name: 'demo',
-      status: 'approved',
-    });
-
-    // 重复手机号
-    const dup = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/auth/register',
-      payload: {
-        link_token: await createLink(),
-        phone: '13800000001',
-        display_name: '李四',
-        password: '123456',
-      },
-    });
-    expect(dup.statusCode).toBe(409);
-    expect(dup.json().error.code).toBe('ADM_PHONE_TAKEN');
-
-    // 注册链接计数
-    const links = await fx.app.inject({ method: 'GET', url: '/api/admin/register-links' });
-    const used = links.json().items.find((l: { token: string }) => l.token === token);
-    expect(used?.use_count).toBe(1);
-  });
-
-  it('无效链接注册 → ADM_INVALID_LINK；注册不自动登录（无 Cookie）', async () => {
-    await createService();
-    const res = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/auth/register',
-      payload: {
-        link_token: 'not-a-real-token',
-        phone: '13800000002',
-        display_name: '王五',
-        password: '123456',
-      },
-    });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error.code).toBe('ADM_INVALID_LINK');
-    expect(res.headers['set-cookie']).toBeUndefined();
-  });
-});
-
-describe('授权三态（§13 grants）', () => {
-  it('申请 pending → 审批 approved → 关闭 revoked；未登录申请 401', async () => {
-    await createService('DH-TST01');
-    await createService('DH-TST02', '第二服务');
-    const { userId, cookie } = await registerAndLogin('13900000001');
-
-    // 未登录 → 401
-    const anonymous = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/grants/apply',
-      payload: { agent_code: 'DH-TST02' },
-    });
-    expect(anonymous.statusCode).toBe(401);
-
-    // 申请 → pending
-    const apply = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/grants/apply',
-      headers: { cookie },
-      payload: { agent_code: 'DH-TST02' },
-    });
-    expect(apply.statusCode).toBe(200);
-    expect(apply.json()).toMatchObject({ user_id: userId, agent_code: 'DH-TST02', status: 'pending' });
-
-    // 总账（pending 过滤）
-    const pendingList = await fx.app.inject({
-      method: 'GET',
-      url: '/api/admin/grants?status=pending&phone=13900000001',
-    });
-    expect(pendingList.statusCode).toBe(200);
-    expect(pendingList.json().total).toBe(1);
-    expect(pendingList.json().items[0]).toMatchObject({
-      user_id: userId,
-      agent_code: 'DH-TST02',
-      status: 'pending',
-      source: 'apply',
-    });
-
-    // 审批 → approved
-    const approve = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/grants/approve',
-      payload: { user_id: userId, agent_code: 'DH-TST02' },
-    });
-    expect(approve.statusCode).toBe(200);
-    expect(approve.json().status).toBe('approved');
-
-    const myAgents = await fx.app.inject({
-      method: 'GET',
-      url: '/api/admin/auth/my-agents',
-      headers: { cookie },
-    });
-    expect(
-      myAgents
-        .json()
-        .items.map((i: { code: string }) => i.code)
-        .sort(),
-    ).toEqual(['DH-TST01', 'DH-TST02']);
-
-    // 关闭 → revoked（不删行，审计保留）
-    const revoke = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/grants/revoke',
-      payload: { user_id: userId, agent_code: 'DH-TST02' },
-    });
-    expect(revoke.statusCode).toBe(200);
-    expect(revoke.json().status).toBe('revoked');
-
-    const after = await fx.app.inject({
-      method: 'GET',
-      url: '/api/admin/auth/my-agents',
-      headers: { cookie },
-    });
-    expect(after.json().items.map((i: { code: string }) => i.code)).toEqual(['DH-TST01']);
-
-    const revokedList = await fx.app.inject({ method: 'GET', url: '/api/admin/grants?status=revoked' });
-    expect(revokedList.json().total).toBe(1);
-  });
-
-  it('审批不存在的授权 → 404 ADM_GRANT_NOT_FOUND', async () => {
-    await createService();
-    const res = await fx.app.inject({
-      method: 'POST',
-      url: '/api/admin/grants/approve',
-      payload: { user_id: 'ghost-user', agent_code: 'DH-TST01' },
-    });
-    expect(res.statusCode).toBe(404);
-    expect(res.json().error.code).toBe('ADM_GRANT_NOT_FOUND');
-  });
-});
 
 describe('用户接口扩展（§13 users）', () => {
-  it('列表带账号字段与授权摘要；创建可带 phone/role；删除级联清授权', async () => {
+  it('列表带账号字段；创建可带 phone/role；删除同时清运行端部署', async () => {
     await createService();
     const token = await createLink();
     const { userId } = await registerAndLogin('13700000001', '张三', token);
@@ -386,14 +255,15 @@ describe('用户接口扩展（§13 users）', () => {
       display_name: '张三',
       role: 'user',
       source_agent_code: 'DH-TST01',
-      grants_summary: { approved: 1, pending: 0 },
     });
+    // 授权已并入关联：注册用户建号即有 agents（不再是独立的 grants 摘要）
+    expect(item.agents.map((a: { name: string }) => a.name)).toContain('demo');
 
-    // 删除用户 → 授权级联清理（file 驱动显式做）
+    // 删除用户 → 记录消失（部署清理由 Deployer.purgeUser 负责）
     const remove = await fx.app.inject({ method: 'DELETE', url: `/api/admin/users/${userId}` });
     expect(remove.statusCode).toBe(204);
-    const grants = await fx.app.inject({ method: 'GET', url: '/api/admin/grants?agent_code=DH-TST01' });
-    expect(grants.json().total).toBe(0);
+    const after = await fx.app.inject({ method: 'GET', url: '/api/admin/users?page=1' });
+    expect(after.json().items.some((u: { user_id: string }) => u.user_id === userId)).toBe(false);
   });
 
   it('手机号登录失败不枚举（同码 ADM_INVALID_CREDENTIALS）', async () => {
@@ -404,5 +274,115 @@ describe('用户接口扩展（§13 users）', () => {
     });
     expect(wrongPassword.statusCode).toBe(401);
     expect(wrongPassword.json().error.code).toBe('ADM_INVALID_CREDENTIALS');
+  });
+});
+
+describe('数字人 ⇔ 服务编码 1:1（§18）', () => {
+  /** 取某数字人对应的服务（卡片按 platform_agent_name 匹配的同一个判据） */
+  async function serviceOf(platformAgentName: string) {
+    const list = await fx.app.inject({ method: 'GET', url: '/api/admin/agent-services' });
+    return list
+      .json()
+      .items.find(
+        (item: { platform_agent_name: string }) => item.platform_agent_name === platformAgentName,
+      );
+  }
+
+  it('创建/复制数字人即自动开通服务编码（平台生成，1:1）', async () => {
+    // beforeEach 已 POST /api/admin/agents 建了 demo
+    const service = await serviceOf('demo');
+    expect(service).toBeTruthy();
+    expect(service.code).toMatch(/^DH-[2-9A-HJKMNP-TV-Z]{5}$/);
+    expect(service.name).toBe('demo');
+    expect(service.status).toBe('enabled');
+  });
+
+  it('删除数字人 → 服务编码一并撤掉，不留悬空编码', async () => {
+    const remove = await fx.app.inject({ method: 'DELETE', url: '/api/admin/agents/demo' });
+    expect(remove.statusCode).toBe(204);
+    expect(await serviceOf('demo')).toBeUndefined();
+  });
+
+  it('删除前影响面：返回编码、关联用户与将被级联撤销的链接数（2026-11-27）', async () => {
+    const service = await serviceOf('demo');
+    const tokens: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      const created = await fx.app.inject({
+        method: 'POST',
+        url: '/api/admin/register-links',
+        payload: { agent_code: service.code },
+      });
+      tokens.push(created.json().token as string);
+    }
+
+    const impact = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/agents/demo/deletion-impact',
+    });
+    expect(impact.statusCode).toBe(200);
+    expect(impact.json()).toEqual({
+      name: 'demo',
+      code: service.code,
+      linked_users: [],
+      active_register_links: 2,
+    });
+
+    // 已撤销的不再计入（过期但未撤销的仍计入——与删除时的级联判据同源）
+    await fx.app.inject({ method: 'DELETE', url: `/api/admin/register-links/${tokens[0]}` });
+    const after = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/agents/demo/deletion-impact',
+    });
+    expect(after.json().active_register_links).toBe(1);
+
+    // 被用户关联时把关联人一并带回，界面据此提示"删不掉"
+    await fx.ctx.users.create('ops', ['demo']);
+    const linked = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/agents/demo/deletion-impact',
+    });
+    expect(linked.json().linked_users).toContain('ops');
+  });
+
+  it('不存在 → 404 ADM_AGENT_NOT_FOUND', async () => {
+    const impact = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/agents/nope/deletion-impact',
+    });
+    expect(impact.statusCode).toBe(404);
+    expect(impact.json().error.code).toBe('ADM_AGENT_NOT_FOUND');
+  });
+
+  it('删除数字人 → 未撤销的注册链接一并软撤销（记录保留，链接彻底不可用）', async () => {
+    const service = await serviceOf('demo');
+    const link = await fx.app.inject({
+      method: 'POST',
+      url: '/api/admin/register-links',
+      payload: { agent_code: service.code },
+    });
+    expect(link.statusCode).toBe(201);
+    const token = link.json().token as string;
+
+    const remove = await fx.app.inject({ method: 'DELETE', url: '/api/admin/agents/demo' });
+    expect(remove.statusCode).toBe(204);
+
+    // 数字人 json 与服务记录都删掉了
+    expect((await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' })).statusCode).toBe(
+      404,
+    );
+    expect(await serviceOf('demo')).toBeUndefined();
+
+    // 链接记录保留（审计），但已撤销且公开校验失败
+    const links = await fx.app.inject({ method: 'GET', url: '/api/admin/register-links' });
+    const kept = links.json().items.find((item: { token: string }) => item.token === token);
+    expect(kept).toBeTruthy();
+    expect(kept.revoked_at).toBeTruthy();
+
+    const lookup = await fx.app.inject({
+      method: 'GET',
+      url: `/api/admin/auth/register-links/${token}`,
+    });
+    expect(lookup.statusCode).toBe(400);
+    expect(lookup.json().error.code).toBe('ADM_INVALID_LINK');
   });
 });

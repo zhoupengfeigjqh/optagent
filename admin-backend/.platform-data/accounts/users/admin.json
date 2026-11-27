@@ -1,0 +1,20 @@
+{
+  "user_id": "admin",
+  "agents": [
+    "生产调度测试",
+    "生产计划助手",
+    "生鲜识别辅助"
+  ],
+  "password": {
+    "algo": "scrypt",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1
+    },
+    "salt": "dxSwJ5GZ683k0UQ0KwYa5A==",
+    "hash": "ObOvdoHEBmkOJNV0E+Eaw4a+/D2idPyVP6prOmG3mJgcDsVOEgayWyC8fcwYKRhq62RJgH0Tzjsgiz+95K4aPQ=="
+  },
+  "display_name": "管理员",
+  "role": "admin"
+}

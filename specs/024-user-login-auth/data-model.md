@@ -4,6 +4,10 @@
 
 ## 1. 用户记录（admin-backend `.platform-data/users/{user_id}.json`）
 
+> **2026-11-27 结构变更**：路径已收敛为 `.platform-data/accounts/users/{user_id}.json`
+> （会话登记同理收敛为 `accounts/sessions/`），本文其余内容作为 024 当时的实现记录保留。
+> 见 `specs/028-account-mysql-binding/方案与契约.md` §14。
+
 既有文档（`UserLinkDocument`）新增 `password` 字段；`user_id` 与 `agents` 语义不变。
 
 ```jsonc

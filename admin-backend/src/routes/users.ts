@@ -35,12 +35,9 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
   }
 
   app.get('/api/admin/users', async (req) => {
-    const query = (req.query ?? {}) as { page?: unknown; expand?: unknown };
+    const query = (req.query ?? {}) as { page?: unknown };
     const page = normalizePage(query.page);
-    const withSummary = query.expand === 'summary';
     const index = await resolveIndex();
-    // 028：授权摘要（approved/pending 计数）——与部署关联 agents[] 分开呈现（§6）
-    const grantSummaries = await ctx.grants.summaries();
 
     return ctx.users.list(page, (user) => {
       const agents = user.agents.map((name) => {
@@ -62,18 +59,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
         display_name: user.display_name ?? null,
         role: user.role ?? 'user',
         source_agent_code: user.source_agent_code ?? null,
-        grants_summary: grantSummaries.get(user.user_id) ?? { approved: 0, pending: 0 },
-        summary: withSummary
-          ? user.agents.map((name) => {
-              const design = ctx.agents.readOrNull(name);
-              return {
-                name,
-                mcp_services: design?.mcp_services ?? [],
-                enabled_tools: design?.enabled_tools ?? [],
-                skills: design?.skills ?? [],
-              };
-            })
-          : null,
+        // 2026-11-27：`expand=summary` 已移除——它唯一的消费方「部署前核对总账」随部署区下架，
+        // 前端也不再请求；授权数即 `agents.length`，卡片不需要第二份摘要。
       };
     });
   });
@@ -155,9 +142,8 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     ctx.users.read(userId);
     // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
     ctx.deployer.purgeUser(userId);
+    // 2026-11-27：授权 = 关联，随用户记录一并删除（旧的 grants 记录保留作历史审计）
     await ctx.users.remove(userId);
-    // 028：级联清理该用户的授权记录（file 驱动显式做；mysql 由 FK CASCADE 兜底）
-    await ctx.grants.removeAllOfUser(userId);
     // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
     await ctx.auth.revokeUser(userId);
     return reply.status(204).send();

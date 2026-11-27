@@ -16,7 +16,6 @@ import { ApiError } from './domain/api-error.js';
 import { auditOf } from './domain/audit.js';
 import type { AccountStorePort } from './domain/account/account-store.js';
 import { AgentServiceCatalog } from './domain/account/agent-services.js';
-import { GrantService } from './domain/account/grants.js';
 import { RegisterLinkService } from './domain/account/register-links.js';
 import { RegistrationService } from './domain/account/registration.js';
 import { FileAccountStore } from './domain/account/file-account-store.js';
@@ -49,7 +48,6 @@ import { registerAgentServiceRoutes } from './routes/agent-services.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerBuiltinToolRoutes } from './routes/builtin-tools.js';
 import { registerDeployRoutes } from './routes/deploy.js';
-import { registerGrantRoutes } from './routes/grants.js';
 import { registerMcpRoutes } from './routes/mcp.js';
 import { registerOntologyRoutes } from './routes/ontologies.js';
 import { registerPlatformRoutes } from './routes/platform.js';
@@ -134,14 +132,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
     accountStore = new FileAccountStore(store);
   }
   await accountStore.init();
-  const agentServices = new AgentServiceCatalog(accountStore);
+  const agentServices = new AgentServiceCatalog(accountStore, users);
   const registerLinks = new RegisterLinkService(accountStore, {
     defaultTtlSeconds:
       config.registerLinkTtlSeconds === 0 ? null : config.registerLinkTtlSeconds,
     publicBaseUrl: config.registerLinkPublicBaseUrl,
   });
-  const grants = new GrantService(accountStore, users);
-  const registration = new RegistrationService(users, accountStore, registerLinks);
+  const registration = new RegistrationService(users, registerLinks);
   const mcpConfigs = new McpServiceConfigService(store);
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
@@ -194,7 +191,6 @@ export async function buildServer(options: BuildServerOptions = {}) {
     auth,
     agentServices,
     registerLinks,
-    grants,
     registration,
     deployer: new Deployer({
       store,
@@ -312,10 +308,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
   registerOntologyRoutes(routeApp, ctx);
   registerReferenceRoutes(routeApp, ctx);
   registerDeployRoutes(routeApp, ctx, ctx.deployer);
-  // 028：账号与数字人服务绑定（注册链接 / 授权 / 服务目录）
+  // 028：账号与数字人服务绑定（注册链接 / 服务目录）；授权已并入 users.agents（2026-11-27）
   registerAgentServiceRoutes(routeApp, ctx);
   registerRegisterLinkRoutes(routeApp, ctx);
-  registerGrantRoutes(routeApp, ctx);
   // 024：登录鉴权（login/me/logout/session/valid；028 扩展 register 与 my-agents）
   registerAuthRoutes(routeApp, ctx);
 

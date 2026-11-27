@@ -1,16 +1,16 @@
 /**
  * 极简路由（原生 History API + `popstate`，**不引入 `vue-router`**，`research.md` D5）。
  *
- * 管理界面的导航模型是**常驻一级导航 6 项**（`FR-053`，2026-11-24「账号与授权」改为
- * 「用户管理」）+ 功能区内两级（列表 ↔ 详情/编辑器），不需要嵌套路由与守卫，
- * `vue-router` 的收益不足以抵消新增依赖与升级成本（原则六）。
+ * 管理界面的导航模型是**常驻一级导航 5 项**（`FR-053`，2026-11-24「账号与授权」改为
+ * 「用户管理」，2026-11-27「数字人部署」功能区下架）+ 功能区内两级（列表 ↔ 详情/编辑器），
+ * 不需要嵌套路由与守卫，`vue-router` 的收益不足以抵消新增依赖与升级成本（原则六）。
  *
  * 路径方案：`{base}/{功能区}[/{详情对象}]?tab={功能区内分区}`
  *  - `/admin/agents`            → 数字人设计列表
  *  - `/admin/agents/demo`       → 数字人 demo 的设计态
  *  - `/admin/agents/demo?tab=mcp` → 设计态内 MCP 页签
  *  - `/admin/ontology/生产调度/原材料采购和库存` → 本体详情（身份两段：场景名在前、本体名在后，与 API 与部署路径同一顺序）
- *  - `/admin/deploy?tab=history` → 部署区内的部署历史分区
+ *  - `/admin/users?tab=grants`  → 用户管理内的授权详情分区
  *
  * 保留伪路由（整页视图、不进一级导航）：
  *  - `/admin/login` → 管理员登录页
@@ -20,12 +20,14 @@
 import { ref, type Ref } from 'vue'
 
 /**
- * 六个功能区（常驻一级导航，`FR-053`）。
+ * 五个功能区（常驻一级导航，`FR-053`）。
  *
  * 2026-11-24 按注册原型重构：删除「账号与授权」（028 阶段 2/3 的过渡页），改为
  * 「用户管理」（原型「账户管理」表格样式）；原授权审批收进用户管理的授权详情。
+ * 2026-11-27 删除「数字人部署」功能区：账号维护已全部归入用户管理，部署改由
+ * 账户增改触发生效，独立部署页（含部署历史与撤回）整体下架。
  */
-export const ROUTE_NAMES = ['mcp', 'ontology', 'skills', 'agents', 'deploy', 'users'] as const
+export const ROUTE_NAMES = ['mcp', 'ontology', 'skills', 'agents', 'users'] as const
 export type RouteName = (typeof ROUTE_NAMES)[number]
 
 /**
@@ -43,7 +45,6 @@ export const NAV_ITEMS: ReadonlyArray<{ name: RouteName; label: string }> = [
   { name: 'ontology', label: '本体管理' },
   { name: 'skills', label: 'SKILL 管理' },
   { name: 'agents', label: '数字人设计' },
-  { name: 'deploy', label: '数字人部署' },
   { name: 'users', label: '用户管理' },
 ]
 

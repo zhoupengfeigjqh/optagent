@@ -1,12 +1,15 @@
 /**
- * 账号域存储端口（028 阶段 2/3）：数字人服务 / 专属注册链接 / 用户授权。
+ * 账号域存储端口（028 阶段 2/3）：数字人服务 / 专属注册链接。
  *
  * 与 `UserLinkPort`（users/sessions）平行的第三块账号域存储，同样
- * `file`（JSON 集合，`.platform-data/accounts/`）/ `mysql`（三张表）双驱动。
+ * `file`（JSON 集合，`.platform-data/accounts/`）/ `mysql`（两张表）双驱动。
+ *
+ * **用户授权已于 2026-11-27 并入 `users.agents[]`**（授权 = 关联），
+ * `user_agent_grants` 表/文件随之下线，本端口不再承担授权存取。
  *
  * 读写口径：
- * - 本端口**全部异步**——消费方只有新增路由（`auth` / `grants` /
- *   `register-links` / `agent-services`），没有 `Deployer` 那类同步消费方，
+ * - 本端口**全部异步**——消费方只有新增路由（`auth` / `register-links` /
+ *   `agent-services`），没有 `Deployer` 那类同步消费方，
  *   无需内存投影换同步读；
  * - 语义约定由上层服务（`agent-services.ts` 等）负责，端口只做存取；
  * - 时间戳统一为 MySQL `DATETIME(3)` 字符串形态（`YYYY-MM-DD HH:MM:SS.mmm`，
@@ -41,18 +44,17 @@ export interface RegisterLinkRecord {
   created_at: string;
 }
 
-/** 授权三态：行不存在 = 未申请（原型 `auth[rid] === 'none'`） */
-export type GrantStatus = 'approved' | 'pending' | 'revoked';
-
-export interface GrantRecord {
-  user_id: string;
-  agent_code: string;
-  status: GrantStatus;
-  source: 'register_link' | 'apply' | 'manual';
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-  updated_at: string;
+/**
+ * 插入数字人服务时编码已被占用。
+ *
+ * 与 `saveAgentService`（upsert，供改名/启停）刻意分开：创建 MUST 是**插入**语义，
+ * 撞码 MUST 失败而不是覆盖——否则自动生成编码的极端并发会静默改写别人的服务。
+ */
+export class DuplicateAgentCodeError extends Error {
+  constructor(readonly code: string) {
+    super(`数字人服务编码已存在：${code}`);
+    this.name = 'DuplicateAgentCodeError';
+  }
 }
 
 export interface AccountStorePort {
@@ -62,22 +64,16 @@ export interface AccountStorePort {
   /* ---- 数字人服务 ---- */
   listAgentServices(): Promise<AgentServiceRecord[]>;
   findAgentService(code: string): Promise<AgentServiceRecord | null>;
-  /** upsert（按 code）；唯一冲突由调用方语义决定（create 已由上层预检） */
+  /** upsert（按 code）：只用于改名/启停等既有记录的更新 */
   saveAgentService(record: AgentServiceRecord): Promise<void>;
+  /** 插入新记录；编码已存在 → 抛 `DuplicateAgentCodeError`（绝不覆盖） */
+  insertAgentService(record: AgentServiceRecord): Promise<void>;
   removeAgentService(code: string): Promise<void>;
 
   /* ---- 专属注册链接 ---- */
   listRegisterLinks(): Promise<RegisterLinkRecord[]>;
   findRegisterLink(token: string): Promise<RegisterLinkRecord | null>;
   saveRegisterLink(record: RegisterLinkRecord): Promise<void>;
-
-  /* ---- 用户 × 数字人服务授权 ---- */
-  listGrants(): Promise<GrantRecord[]>;
-  findGrant(userId: string, agentCode: string): Promise<GrantRecord | null>;
-  /** upsert（按 `(user_id, agent_code)`） */
-  saveGrant(record: GrantRecord): Promise<void>;
-  /** 删除用户时级联清理其授权（mysql 侧由 FK CASCADE 兜底，file 侧必须显式做） */
-  removeGrantsOfUser(userId: string): Promise<void>;
 }
 
 /* ---------------- 共享校验与工具（file / mysql 两实现与路由共用） ---------------- */

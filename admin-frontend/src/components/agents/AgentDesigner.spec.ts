@@ -9,6 +9,7 @@ const createAgent = vi.fn()
 const updateAgent = vi.fn()
 const getAgent = vi.fn()
 const deleteAgent = vi.fn()
+const getAgentDeletionImpact = vi.fn()
 
 vi.mock('../../api/agents', () => ({
   createAgent: (...args: unknown[]) => createAgent(...args),
@@ -16,6 +17,7 @@ vi.mock('../../api/agents', () => ({
   getAgent: (...args: unknown[]) => getAgent(...args),
   listAgents: vi.fn(),
   deleteAgent: (...args: unknown[]) => deleteAgent(...args),
+  getAgentDeletionImpact: (...args: unknown[]) => getAgentDeletionImpact(...args),
 }))
 
 const SOUL: AgentDesign['soul'] = {
@@ -89,6 +91,14 @@ beforeEach(() => {
   updateAgent.mockReset()
   getAgent.mockReset()
   deleteAgent.mockReset()
+  getAgentDeletionImpact.mockReset()
+  // 默认：无关联用户、无待失效链接（个别用例再覆盖）
+  getAgentDeletionImpact.mockResolvedValue({
+    name: 'demo',
+    code: 'DH-ABCDE',
+    linked_users: [],
+    active_register_links: 0,
+  })
 })
 
 describe('AgentDesigner', () => {
@@ -263,7 +273,7 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
       .findAll('button')
       .find((b) => b.text() === '删除')
       ?.trigger('click')
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const dialog = wrapper.find('[data-test="agent-delete-dialog"]')
     expect(dialog.attributes('open')).toBeDefined()
@@ -281,7 +291,7 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
       .findAll('button')
       .find((b) => b.text() === '删除')
       ?.trigger('click')
-    await wrapper.vm.$nextTick()
+    await flushPromises()
     await wrapper.find('[data-test="agent-delete-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()
 
@@ -299,11 +309,71 @@ describe('AgentDesigner —— 删除数字人（2026-09-16）', () => {
       .findAll('button')
       .find((b) => b.text() === '删除')
       ?.trigger('click')
-    await wrapper.vm.$nextTick()
+    await flushPromises()
     await wrapper.find('[data-test="agent-delete-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.emitted('deleted')).toBeUndefined()
     expect(wrapper.emitted('error')?.[0]?.[0]).toContain('AGENT_IN_USE')
+  })
+
+  it('确认弹窗提前告知：本次删除会有 N 条注册链接失效（2026-11-27）', async () => {
+    getAgent.mockResolvedValue(DESIGN)
+    getAgentDeletionImpact.mockResolvedValue({
+      name: 'demo',
+      code: 'DH-ABCDE',
+      linked_users: [],
+      active_register_links: 2,
+    })
+    const wrapper = mountDesigner('demo')
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('[data-test="agent-delete-dialog"]')
+    expect(getAgentDeletionImpact).toHaveBeenCalledWith('demo')
+    expect(dialog.text()).toContain('请注意，本次删除会有 2 条注册链接失效')
+    expect(deleteAgent).not.toHaveBeenCalled()
+  })
+
+  it('被用户关联时提前告知会失败，而不是等点了确认才报错', async () => {
+    getAgent.mockResolvedValue(DESIGN)
+    getAgentDeletionImpact.mockResolvedValue({
+      name: 'demo',
+      code: 'DH-ABCDE',
+      linked_users: ['u_001'],
+      active_register_links: 0,
+    })
+    const wrapper = mountDesigner('demo')
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="agent-delete-dialog"]').text()).toContain('请先解除关联')
+  })
+
+  it('影响面取不到时不阻断删除：弹窗仍可打开，判定交给服务端', async () => {
+    getAgent.mockResolvedValue(DESIGN)
+    getAgentDeletionImpact.mockRejectedValue({ code: 'NOT_FOUND', message: 'x' })
+    const wrapper = mountDesigner('demo')
+    await flushPromises()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '删除')
+      ?.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('[data-test="agent-delete-dialog"]')
+    expect(dialog.attributes('open')).toBeDefined()
+    expect(dialog.text()).toContain('无法恢复')
   })
 })

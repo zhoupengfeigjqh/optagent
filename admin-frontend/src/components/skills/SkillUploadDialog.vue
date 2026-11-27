@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { fetchReferences } from '../../api/deploy'
+import { fetchReferences } from '../../api/references'
 import { installSkill } from '../../api/skills'
 import type { ErrorInfo, ReferenceItem, SkillInstallResult } from '../../api/types'
 import ConfirmDialog from '../common/ConfirmDialog.vue'

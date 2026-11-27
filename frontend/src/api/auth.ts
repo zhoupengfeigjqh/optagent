@@ -9,7 +9,6 @@ export interface AuthUser {
 
 export interface RegisterLinkLookup {
   agent: { code: string; name: string }
-  expired: boolean
 }
 
 export interface RegisterResult {

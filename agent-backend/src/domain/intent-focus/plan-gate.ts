@@ -9,8 +9,9 @@
  * - 复用同一个 laya 连接、凭据与整轮预算，不新增配置块与客户端；
  * - 失败口径一致（同一次调用的超时/降级）。
  *
- * 判据刻意包含"同一动作查多个对象算一个任务"：把 3 个库存拆成 3 步会变成
- * 3 次 LLM 往返 + 3 次工具集切换，比一轮批量查询慢，属于负优化。
+ * 判据（2026-11-28 用户拍板翻转）：**多对象即多步**——同一动作查询多个对象
+ * （如一次性查三种材料的库存）也按"一步完成不了"判 true，走多步规划。
+ * 原先"批量查询算一个任务"的口径已废：每个对象独立执行、独立核对，宁可多花一次往返。
  */
 import type { SystemOneQuestion } from '../../infra/laya-client.js';
 
@@ -19,30 +20,19 @@ export const PLAN_GATE_ID = 'plan_gate';
 
 const INSTRUCTIONS =
   '判断用户这句话是否涉及多个对象或多个任务，也就是判断这件事是不是"一步就能完成"。' +
-  '多个对象：同时提到两个及以上彼此独立的事物（如三种原材料、两家供应商、两张采购单）。' +
+  '多个对象：同时提到两个及以上彼此独立的事物（如三种原材料、两家供应商、两张采购单）；' +
+  '即使动作完全相同，只要对象不同，也属于多个对象，需要分步处理。' +
   '多个任务：需要两个及以上不同动作，或存在先后步骤（如先查库存再创建采购单、查询之后再修改）。' +
-  '只有一个对象、一个动作，或闲聊、解释、写作、问概念，都不算。' +
-  '同一动作查询多个对象（如一次性查三种材料的库存）属于一次批量查询，算一个任务。';
+  '只有一个对象、一个动作，或闲聊、解释、写作、问概念，都不算。';
 
 export const PLAN_GATE_QUESTION: SystemOneQuestion = {
   type: 'noul',
   instructions: INSTRUCTIONS,
   criteria: {
-    true: '涉及多个对象或多个任务，不是一步能完成，需要分步处理',
-    false: '只有一个对象或一个任务，一轮即可完成',
+    true: '涉及两个及以上对象（即使动作相同）或多个任务，不是一步能完成，需要分步处理',
+    false: '只有一个对象、一个动作，一轮即可完成',
   },
 };
-
-/**
- * 阈值判定：**分数缺失或非法一律放行（fail-open）**。
- *
- * 门禁是性能优化，不是能力开关：判定服务超时/降级时，宁可多花 2s 走规划，
- * 也不能把复杂任务降级成直聊。
- */
-export function judgePlanGate(score: number | null | undefined, threshold: number): boolean {
-  if (score === null || score === undefined || !Number.isFinite(score)) return true;
-  return score >= threshold;
-}
 
 /**
  * 装配层的分流判据：**是否因为门禁而跳过规划**。
@@ -57,4 +47,15 @@ export function planGateBlocks(
   if (threshold === undefined || score === undefined) return false;
   if (!Number.isFinite(score)) return false;
   return score < threshold;
+}
+
+/**
+ * 聚焦能力前置判据（2026-11-27）：**是否因为没有可依附的聚焦行为/函数而跳过规划**。
+ *
+ * 规划以聚焦行为或函数为起点，本轮一个都没命中时，规划没有可展开的 `coreAction`；
+ * 这属于"事实上的不可规划"，不是判定失败，因此**不适用 fail-open**：
+ * 只有显式 `false` 才阻断，缺席（未接入本判据的调用方）照旧允许规划。
+ */
+export function planCapabilityBlocks(hasCapability: boolean | undefined): boolean {
+  return hasCapability === false;
 }

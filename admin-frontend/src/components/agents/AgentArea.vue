@@ -25,7 +25,7 @@ import { NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import AgentCardList from './AgentCardList.vue'
 import AgentDesigner from './AgentDesigner.vue'
 import CreateAgentDialog from './CreateAgentDialog.vue'
-import RegisterLinkDialog from './RegisterLinkDialog.vue'
+import RegisterManagementDialog from './RegisterManagementDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
@@ -52,12 +52,13 @@ const ontologies = ref<OntologyCandidate[]>([])
 const design = ref<AgentDesign | null>(null)
 const agentServices = ref<AgentServiceItem[]>([])
 const agentServicesError = ref<ErrorInfo | null>(null)
-const registerLinkOpen = ref(false)
-const registerLinkAgent = ref<AgentListItem | null>(null)
-const registerLinkService = computed(
+/** 「注册管理」弹窗：打开不生成链接，生成/停止都是弹窗内的显式动作 */
+const registrationOpen = ref(false)
+const registrationAgent = ref<AgentListItem | null>(null)
+const registrationService = computed(
   () =>
     agentServices.value.find(
-      (service) => service.platform_agent_name === registerLinkAgent.value?.name,
+      (service) => service.platform_agent_name === registrationAgent.value?.name,
     ) ?? null,
 )
 
@@ -133,9 +134,9 @@ async function loadAgentServices(): Promise<void> {
   }
 }
 
-function openRegisterLink(agent: AgentListItem): void {
-  registerLinkAgent.value = agent
-  registerLinkOpen.value = true
+function openRegistration(agent: AgentListItem): void {
+  registrationAgent.value = agent
+  registrationOpen.value = true
 }
 
 async function loadDesign(name: string): Promise<void> {
@@ -162,6 +163,9 @@ watch(
     else {
       design.value = null
       void loadList()
+      // 卡片上的「编码」来自服务清单，而新建/复制数字人会同时开通服务（2026-11-27）。
+      // 回到列表必须一并刷新，否则刚建的数字人仍显示「未配置注册服务」，要手工刷新页面才消失。
+      void loadAgentServices()
     }
   },
 )
@@ -210,15 +214,15 @@ watch(
           }
         "
         @open="(name) => emit('navigate', buildPath({ name: 'agents', detail: name }))"
-        @register-link="openRegisterLink"
+        @manage-registration="openRegistration"
         @create="createOpen = true"
       />
 
       <CreateAgentDialog v-model:open="createOpen" @confirm="onNewAgentConfirmed" />
-      <RegisterLinkDialog
-        v-model:open="registerLinkOpen"
-        :agent="registerLinkAgent"
-        :service="registerLinkService"
+      <RegisterManagementDialog
+        v-model:open="registrationOpen"
+        :agent="registrationAgent"
+        :service="registrationService"
         @announce="emit('announce', $event)"
       />
     </template>

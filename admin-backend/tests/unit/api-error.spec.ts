@@ -8,8 +8,8 @@ import {
 } from '../../src/domain/error-codes.js';
 
 describe('错误码总表', () => {
-  it('共 32 个码，且与 HTTP 状态映射一一对应（028 §13 新增 5 个绑定类码）', () => {
-    expect(ALL_ERROR_CODES).toHaveLength(32);
+  it('共 31 个码，且与 HTTP 状态映射一一对应（028 §13 绑定类码，已随 grants 下线移除 1 个）', () => {
+    expect(ALL_ERROR_CODES).toHaveLength(31);
     for (const code of ALL_ERROR_CODES) {
       expect(ERROR_STATUS[code]).toBeTypeOf('number');
     }

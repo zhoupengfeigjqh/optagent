@@ -6,7 +6,7 @@
  *  - `login` → 管理员登录页（整页，无导航壳）；
  *  - 其余为受守卫的功能区：会话探测完成后，**非管理员一律改道登录页**。
  *
- * 一级导航固定 6 项（`FR-053`）；功能区内由各自 Area 组件自行承载两级导航。
+ * 一级导航固定 5 项（`FR-053`）；功能区内由各自 Area 组件自行承载两级导航。
  * 全局播报集中在 `AppShell` 的 `aria-live` 区域，避免多处重复播报（原则四）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -14,7 +14,6 @@ import AppShell from './components/layout/AppShell.vue'
 import AdminLoginView from './components/auth/AdminLoginView.vue'
 import UsersArea from './components/users/UsersArea.vue'
 import AgentArea from './components/agents/AgentArea.vue'
-import DeployArea from './components/deploy/DeployArea.vue'
 import SkillArea from './components/skills/SkillArea.vue'
 import McpArea from './components/mcp/McpArea.vue'
 import OntologyArea from './components/ontology/OntologyArea.vue'
@@ -110,20 +109,8 @@ onBeforeUnmount(() => router.destroy())
       @navigate="navigateTo"
       @announce="announce"
     />
-    <DeployArea
-      v-else-if="route.name === 'deploy'"
-      :detail="route.detail"
-      :tab="route.tab"
-      @navigate="navigateTo"
-      @announce="announce"
-    />
-    <UsersArea
-      v-else-if="route.name === 'users'"
-      :detail="route.detail"
-      :tab="route.tab"
-      @navigate="navigateTo"
-      @announce="announce"
-    />
+    <!-- 用户管理没有二级路由：不传 detail / tab / navigate（2026-11-27 清理死契约） -->
+    <UsersArea v-else-if="route.name === 'users'" @announce="announce" />
     <OntologyArea
       v-else-if="route.name === 'ontology'"
       :detail="ontologyRef.name"

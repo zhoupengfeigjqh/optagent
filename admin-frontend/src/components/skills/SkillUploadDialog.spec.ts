@@ -13,11 +13,8 @@ vi.mock('../../api/skills', () => ({
   deleteSkill: vi.fn(),
 }))
 
-vi.mock('../../api/deploy', () => ({
+vi.mock('../../api/references', () => ({
   fetchReferences: (...a: unknown[]) => fetchReferences(...a),
-  deploy: vi.fn(),
-  fetchDeployHistory: vi.fn(),
-  fetchManifest: vi.fn(),
 }))
 
 function mountDialog(open = true) {

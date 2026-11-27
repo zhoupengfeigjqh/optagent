@@ -11,6 +11,8 @@
     "dev": "tsx watch --env-file=.env.local src/server.ts",
     "set:user-password": "tsx --env-file=.env.local scripts/set-user-password.ts",
     "migrate:mysql": "tsx --env-file=.env.local scripts/migrate-to-mysql.ts",
+    "migrate:accounts-layout": "tsx --env-file=.env.local scripts/migrate-accounts-layout.ts",
+    "migrate:agent-services": "tsx --env-file=.env.local scripts/backfill-agent-services.ts",
     "build": "tsc",
     "start": "node --env-file=.env.local dist/src/server.js",
     "lint": "eslint .",

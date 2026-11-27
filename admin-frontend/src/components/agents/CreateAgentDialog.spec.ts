@@ -3,16 +3,20 @@
  *
  * 覆盖：名称必填与非法名拒绝、**重名拒绝**（不关窗、输入不丢）、
  * 复制源下拉（含异常源警示）、以及清单读不到时的降级口径（原则九）。
+ *
+ * 2026-11-27：翻页细节下沉到 `listAllAgents`（其自身在 `api/modules.spec.ts` 覆盖），
+ * 这里只验证「判重用的是它给的全量清单」。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CreateAgentDialog from './CreateAgentDialog.vue'
-import type { AgentListItem, Paged } from '../../api/types'
+import type { AgentListItem } from '../../api/types'
 
-const listAgents = vi.fn()
+const listAllAgents = vi.fn()
 
 vi.mock('../../api/agents', () => ({
-  listAgents: (...args: unknown[]) => listAgents(...args),
+  listAllAgents: (...args: unknown[]) => listAllAgents(...args),
+  listAgents: vi.fn(),
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
   getAgent: vi.fn(),
@@ -22,15 +26,12 @@ vi.mock('../../api/agents', () => ({
 function item(name: string, abnormal = false): AgentListItem {
   return {
     name,
+    code: null,
     description: '',
     abnormal,
     abnormal_reason: abnormal ? '内置工具「ghost」已失效' : null,
     updated_at: '2026-10-09T00:00:00.000Z',
   }
-}
-
-function pageOf(items: AgentListItem[], page: number, totalPages: number): Paged<AgentListItem> {
-  return { items, total: totalPages * 8, page, page_size: 8, total_pages: totalPages }
 }
 
 async function mountDialog() {
@@ -44,7 +45,7 @@ function nameInput(wrapper: ReturnType<typeof mount>) {
 }
 
 beforeEach(() => {
-  listAgents.mockReset().mockResolvedValue(pageOf([], 1, 0))
+  listAllAgents.mockReset().mockResolvedValue([])
 })
 
 describe('CreateAgentDialog —— 名称必填与合法性（FR-015）', () => {
@@ -69,7 +70,7 @@ describe('CreateAgentDialog —— 名称必填与合法性（FR-015）', () => 
 
 describe('CreateAgentDialog —— 重名拒绝（FR-015）', () => {
   it('与既有数字人重名：拒绝创建、不关窗、输入不丢', async () => {
-    listAgents.mockResolvedValue(pageOf([item('生产计划助手')], 1, 1))
+    listAllAgents.mockResolvedValue([item('生产计划助手')])
     const wrapper = await mountDialog()
 
     await wrapper.find('[data-test="create-agent-name"]').setValue('生产计划助手')
@@ -81,15 +82,11 @@ describe('CreateAgentDialog —— 重名拒绝（FR-015）', () => {
     expect(nameInput(wrapper)).toBe('生产计划助手')
   })
 
-  it('重名判据基于**全量**清单：翻到第 2 页也算（只看首页会漏判）', async () => {
-    listAgents.mockImplementation((page: number) =>
-      Promise.resolve(
-        page === 1 ? pageOf([item('a')], 1, 2) : pageOf([item('生产计划助手')], 2, 2),
-      ),
-    )
+  it('重名判据基于**全量**清单（第 2 页的数字人也算，由 listAllAgents 保证）', async () => {
+    listAllAgents.mockResolvedValue([item('a'), item('生产计划助手')])
     const wrapper = await mountDialog()
 
-    expect(listAgents).toHaveBeenCalledWith(2)
+    expect(listAllAgents).toHaveBeenCalled()
     await wrapper.find('[data-test="create-agent-name"]').setValue('生产计划助手')
     await wrapper.find('[data-test="confirm"]').trigger('click')
 
@@ -108,7 +105,7 @@ describe('CreateAgentDialog —— 复制已有数字人', () => {
   })
 
   it('选择复制源：发出该名称；选异常源时给出失效警示但**仍允许**复制', async () => {
-    listAgents.mockResolvedValue(pageOf([item('demo'), item('broken', true)], 1, 1))
+    listAllAgents.mockResolvedValue([item('demo'), item('broken', true)])
     const wrapper = await mountDialog()
 
     await wrapper.find('[data-test="create-agent-name"]').setValue('副本')
@@ -123,7 +120,7 @@ describe('CreateAgentDialog —— 复制已有数字人', () => {
 
 describe('CreateAgentDialog —— 降级与关闭', () => {
   it('清单读取失败：不本地判重名（改由服务端拒绝）并如实提示，不阻断新建', async () => {
-    listAgents.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'raw backend msg' })
+    listAllAgents.mockRejectedValue({ code: 'ADM_STORAGE_UNAVAILABLE', message: 'raw backend msg' })
     const wrapper = await mountDialog()
 
     expect(wrapper.text()).toContain('未能读取已有数字人清单')
