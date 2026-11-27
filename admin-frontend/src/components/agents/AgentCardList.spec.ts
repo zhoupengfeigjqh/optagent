@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AgentCardList from './AgentCardList.vue'
-import type { AgentListItem } from '../../api/types'
+import type { AgentListItem, AgentServiceItem } from '../../api/types'
 
 const ITEMS: AgentListItem[] = [
   {
@@ -20,10 +20,23 @@ const ITEMS: AgentListItem[] = [
   },
 ]
 
+const SERVICES: AgentServiceItem[] = [
+  {
+    code: 'DH-DEMO01',
+    name: '演示服务',
+    platform_agent_name: 'demo',
+    status: 'enabled',
+    registered_users: 3,
+    created_at: '2026-11-24 10:00:00',
+    updated_at: '2026-11-24 10:00:00',
+  },
+]
+
 function mountList(overrides: Record<string, unknown> = {}) {
   return mount(AgentCardList, {
     props: {
       items: ITEMS,
+      services: SERVICES,
       total: 2,
       page: 1,
       loading: false,
@@ -73,6 +86,16 @@ describe('AgentCardList', () => {
     const button = wrapper.findAll('button').find((b) => b.text() === '新建数字人')
     await button?.trigger('click')
     expect(wrapper.emitted('create')).toHaveLength(1)
+  })
+
+  it('展示注册服务编码与已注册人数，并可请求生成注册链接', async () => {
+    const wrapper = mountList()
+    expect(wrapper.text()).toContain('编码 DH-DEMO01')
+    expect(wrapper.text()).toContain('注册用户 3 人')
+
+    const button = wrapper.findAll('button').find((item) => item.text() === '生成注册链接')
+    await button?.trigger('click')
+    expect(wrapper.emitted('register-link')?.[0]).toEqual([ITEMS[0]])
   })
 
   it('翻页透传 update:page', async () => {

@@ -116,6 +116,7 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
     },
     agents: {
       currentAgent: ref(options.agentSelected === false ? null : { agent_name: 'demo' }),
+      accessState: ref('ready'),
       candidates: ref([]),
       mcpServers: ref([]),
       mcpPending: ref(false),

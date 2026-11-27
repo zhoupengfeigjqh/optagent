@@ -102,6 +102,7 @@ function makeSession() {
     },
     agents: {
       currentAgent: ref({ agent_name: 'demo' }),
+      accessState: ref('ready'),
       candidates: ref([]),
       mcpServers: ref([]),
       mcpPending: ref(false),

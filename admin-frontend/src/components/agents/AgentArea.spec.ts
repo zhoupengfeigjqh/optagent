@@ -6,6 +6,7 @@ import type { AgentListItem, Paged } from '../../api/types'
 const listAgents = vi.fn()
 const getAgent = vi.fn()
 const getAgentCatalog = vi.fn()
+const listAgentServices = vi.fn()
 
 vi.mock('../../api/agents', () => ({
   listAgents: (...args: unknown[]) => listAgents(...args),
@@ -14,6 +15,11 @@ vi.mock('../../api/agents', () => ({
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
   deleteAgent: vi.fn(),
+}))
+
+vi.mock('../../api/account', () => ({
+  listAgentServices: (...args: unknown[]) => listAgentServices(...args),
+  createRegisterLink: vi.fn(),
 }))
 
 vi.mock('../../api/http', () => ({
@@ -40,6 +46,7 @@ async function openCreateDialog(wrapper: ReturnType<typeof mount>) {
 beforeEach(() => {
   listAgents.mockReset().mockResolvedValue(emptyPage())
   getAgent.mockReset()
+  listAgentServices.mockReset().mockResolvedValue({ items: [] })
   getAgentCatalog.mockReset().mockResolvedValue({
     builtin_tools: [],
     builtin_tools_error: null,

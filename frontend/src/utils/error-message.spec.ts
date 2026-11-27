@@ -13,6 +13,13 @@ describe('toUserMessage - 基础映射', () => {
     expect(toUserMessage({ code: 'NETWORK_ERROR', message: 'raw' })).toBe(
       '网络异常，请检查连接后重试',
     )
+    expect(toUserMessage({ code: 'ADM_INVALID_CREDENTIALS', message: 'raw' })).toBe(
+      '账号或密码错误',
+    )
+    expect(toUserMessage({ code: 'ADM_INVALID_LINK', message: 'raw' })).toContain(
+      '注册链接无效或已过期',
+    )
+    expect(toUserMessage({ code: 'ADM_PHONE_TAKEN', message: 'raw' })).toContain('直接登录')
   })
 
   it('AGENT_NOT_AVAILABLE：默认与发消息/建会话场景都指向"重新选择"（009 FR-032）', () => {
@@ -267,10 +274,20 @@ describe('toUserMessage - ONTOLOGY_RULE_DENIED（021，受控透传 details）',
   it('reason 不影响文案（前端不展示 reason）', () => {
     const details = ['行为：A/B', '规则：R']
     expect(
-      toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: 'x', details, reason: 'unregistered' }),
+      toUserMessage({
+        code: 'ONTOLOGY_RULE_DENIED',
+        message: 'x',
+        details,
+        reason: 'unregistered',
+      }),
     ).toBe('行为：A/B\n规则：R')
     expect(
-      toUserMessage({ code: 'ONTOLOGY_RULE_DENIED', message: 'x', details, reason: 'condition_false' }),
+      toUserMessage({
+        code: 'ONTOLOGY_RULE_DENIED',
+        message: 'x',
+        details,
+        reason: 'condition_false',
+      }),
     ).toBe('行为：A/B\n规则：R')
   })
 

@@ -13,12 +13,18 @@ const props = withDefaults(
     mcpServers?: McpServiceStatus[]
     searchOpen?: boolean
     workspaceOpen?: boolean
+    /** 无可用数字人时隐藏所有业务动作 */
+    actionsDisabled?: boolean
+    /** 是否允许从账号菜单切换数字人 */
+    agentSwitchEnabled?: boolean
   }>(),
   {
     agent: null,
     mcpServers: () => [],
     searchOpen: false,
     workspaceOpen: false,
+    actionsDisabled: false,
+    agentSwitchEnabled: true,
   },
 )
 
@@ -39,15 +45,20 @@ const visibleMcpServers = computed<McpServiceStatus[]>(() =>
   <header class="chat-header">
     <div class="chat-header__identity">
       <div class="chat-header__identity-row">
-        <UserMenu @open-agent="emit('open-agent')" />
+        <UserMenu :switch-enabled="agentSwitchEnabled" @open-agent="emit('open-agent')" />
 
-        <AgentSummary :agent-name="agentName" />
+        <AgentSummary
+          :agent-name="agentName"
+          :select-enabled="agentSwitchEnabled"
+          :empty-label="agentSwitchEnabled ? '请选择数字人' : '暂无可用数字人'"
+          @select="emit('open-agent')"
+        />
       </div>
 
       <McpStatusList :servers="visibleMcpServers" />
     </div>
 
-    <div class="chat-header__actions">
+    <div v-if="!actionsDisabled" class="chat-header__actions">
       <button
         type="button"
         class="chat-header__action"

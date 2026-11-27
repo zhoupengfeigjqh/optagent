@@ -58,6 +58,8 @@ function makePanel(options: { pending?: AgentStarter | null; busy?: boolean } = 
     emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref({ agent_name: 'demo' }),
+      accessState: ref('ready'),
+      error: ref(null),
       candidates: ref([]),
       mcpServers: ref([]),
       switchingDisabled: ref(false),

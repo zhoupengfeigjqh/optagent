@@ -18,7 +18,7 @@ function cookieToken(setCookie: string): string {
 
 describe('登录鉴权（024）', () => {
   it('登录 → 探针 → 登出 全链路', async () => {
-    fx.ctx.users.create('zpf', [], undefined, '123456');
+    await fx.ctx.users.create('zpf', [], undefined, '123456');
 
     const login = await fx.app.inject({
       method: 'POST',
@@ -55,7 +55,7 @@ describe('登录鉴权（024）', () => {
   });
 
   it('登录失败不枚举（同码同文案）', async () => {
-    fx.ctx.users.create('zpf', [], undefined, '123456');
+    await fx.ctx.users.create('zpf', [], undefined, '123456');
     const wrongPassword = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/auth/login',
@@ -73,7 +73,7 @@ describe('登录鉴权（024）', () => {
   });
 
   it('二次登录后旧会话内省失效（后登踢前登）', async () => {
-    fx.ctx.users.create('zpf', [], undefined, '123456');
+    await fx.ctx.users.create('zpf', [], undefined, '123456');
     const first = await fx.app.inject({
       method: 'POST',
       url: '/api/admin/auth/login',

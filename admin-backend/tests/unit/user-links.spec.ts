@@ -1,3 +1,7 @@
+/**
+ * 单元测试：用户与关联数字人（`FR-023`~`FR-025`）
+ * 028 阶段 1：写方法 async 化后补 `await`（file 驱动行为断言不变）
+ */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,28 +34,28 @@ describe('UserLinkService', () => {
     expect(users.readOrNull('admin')).toBeNull();
   });
 
-  it('create：写入并可读回，revision 递增', () => {
-    const view = users.create('ops', ['demo'], store.revision());
+  it('create：写入并可读回，revision 递增', async () => {
+    const view = await users.create('ops', ['demo'], store.revision());
     expect(view).toMatchObject({ user_id: 'ops', agents: ['demo'] });
     expect(users.read('ops').agents).toEqual(['demo']);
   });
 
-  it('create：重复标识 → ADM_USER_ID_TAKEN', () => {
-    users.create('ops', [], store.revision());
+  it('create：重复标识 → ADM_USER_ID_TAKEN', async () => {
+    await users.create('ops', [], store.revision());
     let caught: unknown;
     try {
-      users.create('ops', []);
+      await users.create('ops', []);
     } catch (err) {
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_USER_ID_TAKEN);
   });
 
-  it('非法标识（含分隔符 / .. / 控制字符 / 空）→ ADM_USER_ID_TAKEN', () => {
+  it('非法标识（含分隔符 / .. / 控制字符 / 空）→ ADM_USER_ID_TAKEN', async () => {
     for (const bad of ['a/b', 'a\\b', '..', '', 'x'.repeat(65), 'a\u0000b']) {
       let caught: unknown;
       try {
-        users.create(bad, []);
+        await users.create(bad, []);
       } catch (err) {
         caught = err;
       }
@@ -59,49 +63,50 @@ describe('UserLinkService', () => {
     }
   });
 
-  it('create 无 revision 时不做乐观锁校验（新建无并发语义）', () => {
-    expect(() => users.create('ops', [])).not.toThrow();
+  it('create 无 revision 时不做乐观锁校验（新建无并发语义）', async () => {
+    await expect(users.create('ops', [])).resolves.toBeDefined();
   });
 
-  it('update：覆盖关联清单', () => {
-    users.create('ops', ['a'], store.revision());
-    const updated = users.update('ops', ['b', 'c'], store.revision());
+  it('update：覆盖关联清单', async () => {
+    await users.create('ops', ['a'], store.revision());
+    const updated = await users.update('ops', ['b', 'c'], store.revision());
     expect(updated.agents).toEqual(['b', 'c']);
     expect(users.read('ops').agents).toEqual(['b', 'c']);
   });
 
-  it('update：不存在 → ADM_USER_NOT_FOUND', () => {
+  it('update：不存在 → ADM_USER_NOT_FOUND', async () => {
     let caught: unknown;
     try {
-      users.update('ghost', [], store.revision());
+      await users.update('ghost', [], store.revision());
     } catch (err) {
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_USER_NOT_FOUND);
   });
 
-  it('agents 含重复项或空值 → VALIDATION_FAILED', () => {
-    expect(() => users.create('ops', ['a', 'a'])).toThrow(ApiError);
-    expect(() => users.create('ops', [''])).toThrow(ApiError);
-    expect(() => users.create('ops', 'a')).toThrow(ApiError);
+  it('agents 含重复项或空值 → VALIDATION_FAILED', async () => {
+    await expect(users.create('ops', ['a', 'a'])).rejects.toThrow(ApiError);
+    await expect(users.create('ops', [''])).rejects.toThrow(ApiError);
+    await expect(users.create('ops', 'a')).rejects.toThrow(ApiError);
   });
 
-  it('agents 缺省视为空数组', () => {
-    expect(users.create('ops').agents).toEqual([]);
+  it('agents 缺省视为空数组', async () => {
+    const view = await users.create('ops');
+    expect(view.agents).toEqual([]);
   });
 
-  it('usersOfAgent：反查关联了某数字人的用户（FR-021）', () => {
-    users.create('a', ['demo', 'demo2'], store.revision());
-    users.create('b', ['demo'], store.revision());
-    users.create('c', [], store.revision());
+  it('usersOfAgent：反查关联了某数字人的用户（FR-021）', async () => {
+    await users.create('a', ['demo', 'demo2'], store.revision());
+    await users.create('b', ['demo'], store.revision());
+    await users.create('c', [], store.revision());
 
     expect(users.usersOfAgent('demo').sort()).toEqual(['a', 'b']);
     expect(users.usersOfAgent('demo2')).toEqual(['a']);
     expect(users.usersOfAgent('nobody')).toEqual([]);
   });
 
-  it('list：按名称排序并固定每页 8 项', () => {
-    for (let i = 0; i < 10; i += 1) users.create(`u${i}`, [], store.revision());
+  it('list：按名称排序并固定每页 8 项', async () => {
+    for (let i = 0; i < 10; i += 1) await users.create(`u${i}`, [], store.revision());
     const page1 = users.list(1, (user) => user.user_id);
     expect(page1.total).toBe(10);
     expect(page1.items).toHaveLength(8);
@@ -109,23 +114,23 @@ describe('UserLinkService', () => {
     expect(users.list(2, (user) => user.user_id).items).toHaveLength(2);
   });
 
-  it('remove：删除平台侧记录；不存在 → ADM_USER_NOT_FOUND', () => {
-    users.create('ops', [], store.revision());
-    users.remove('ops');
+  it('remove：删除平台侧记录；不存在 → ADM_USER_NOT_FOUND', async () => {
+    await users.create('ops', [], store.revision());
+    await users.remove('ops');
     expect(users.exists('ops')).toBe(false);
 
     let caught: unknown;
     try {
-      users.remove('ops');
+      await users.remove('ops');
     } catch (err) {
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_USER_NOT_FOUND);
   });
 
-  it('setPassword：替换密码摘要并保留关联数字人（2026-11-18）', () => {
-    users.create('ops', ['demo'], store.revision(), 'old-secret');
-    users.setPassword('ops', 'new-secret');
+  it('setPassword：替换密码摘要并保留关联数字人（2026-11-18）', async () => {
+    await users.create('ops', ['demo'], store.revision(), 'old-secret');
+    await users.setPassword('ops', 'new-secret');
 
     const doc = users.read('ops');
     expect(doc.agents).toEqual(['demo']);
@@ -133,25 +138,25 @@ describe('UserLinkService', () => {
     expect(verifyPassword('old-secret', doc.password)).toBe(false);
   });
 
-  it('setPassword：不占用 revision（密码不属于配置快照，避免误打 409）', () => {
-    users.create('ops', [], store.revision());
+  it('setPassword：不占用 revision（密码不属于配置快照，避免误打 409）', async () => {
+    await users.create('ops', [], store.revision());
     const before = store.revision();
-    users.setPassword('ops', 'new-secret');
+    await users.setPassword('ops', 'new-secret');
     expect(store.revision()).toBe(before);
   });
 
-  it('setPassword：用户不存在 → ADM_USER_NOT_FOUND', () => {
+  it('setPassword：用户不存在 → ADM_USER_NOT_FOUND', async () => {
     let caught: unknown;
     try {
-      users.setPassword('ghost', 'new-secret');
+      await users.setPassword('ghost', 'new-secret');
     } catch (err) {
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_USER_NOT_FOUND);
   });
 
-  it('损坏的文档以 ADM_STORAGE_UNAVAILABLE **显式暴露**（不静默跳过，避免"少了一个用户"被忽略）', () => {
-    users.create('good', [], store.revision());
+  it('损坏的文档以 ADM_STORAGE_UNAVAILABLE **显式暴露**（不静默跳过，避免"少了一个用户"被忽略）', async () => {
+    await users.create('good', [], store.revision());
     fs.writeFileSync(path.join(root, 'users', 'bad.json'), '{坏', 'utf8');
 
     let caught: unknown;

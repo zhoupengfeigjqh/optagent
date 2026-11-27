@@ -68,7 +68,7 @@ afterEach(async () => {
 describe('作用域：文件空间内容 100% 不变（FR-028 / SC-012）', () => {
   it('部署前后三个空间下的文件与二级目录数量、内容完全一致', async () => {
     await createAgent(agentBody());
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
 
     const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
     const before = snapshotTree(dataRoot);
@@ -80,7 +80,7 @@ describe('作用域：文件空间内容 100% 不变（FR-028 / SC-012）', () =
 
   it('场景目录清单收缩后部署：被移除的二级目录及其文件仍保留', async () => {
     await createAgent(agentBody());
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     await deployAll();
 
     const dataRoot = path.join(fx.optAgentRoot, 'users', 'admin', 'user-data');
@@ -122,7 +122,7 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
     const before = snapshotTree(dataRoot);
 
     await createAgent(agentBody());
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
     expect((await deployAll()).statusCode).toBe(200);
     expect(snapshotTree(dataRoot)).toEqual(before);
 
@@ -138,8 +138,8 @@ describe('作用域：未关联数字人的数据目录保留（009 FR-031）', 
 
   it('平台对数据目录零创建：新用户部署后 `user-data` 一个目录都不出现', async () => {
     await createAgent(agentBody({ name: 'a1' }));
-    fx.ctx.users.create('admin', ['a1'], fx.ctx.store.revision());
-    fx.ctx.users.create('ops', ['a1'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['a1'], fx.ctx.store.revision());
+    await fx.ctx.users.create('ops', ['a1'], fx.ctx.store.revision());
 
     fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'user-data'), {
       recursive: true,
@@ -170,7 +170,7 @@ describe('SC-009：SKILL 内容随库版本覆盖到全部引用者', () => {
 
     await createAgent(agentBody({ name: 'a1', skills: ['pdf-parse'] }));
     await createAgent(agentBody({ name: 'a2', skills: ['pdf-parse'] }));
-    fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
     await deployAll();
 
     const v2 = '---\nname: pdf-parse\ndescription: 解析 PDF\n---\n\n第二版正文\n';
@@ -221,7 +221,7 @@ describe('SC-019：场景是数字人级的，互不影响', () => {
         scenario: { scenario: '精简', data_prep_dirs: ['产线电价', '算法规则'] },
       }),
     );
-    fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['a1', 'a2'], fx.ctx.store.revision());
     await deployAll();
 
     const scenarioOf = (agent: string) =>

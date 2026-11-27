@@ -25,7 +25,9 @@ function makeApi(overrides: Partial<Record<keyof AgentsApi, unknown>> = {}) {
       selectedName = name
       return { agent_name: name, selected: true }
     }),
-    current: vi.fn(async () => ({ agent_name: selectedName })),
+    current: vi.fn(async (): Promise<{ agent_name: string | null }> => ({
+      agent_name: selectedName,
+    })),
     detail: vi.fn(async (name: string) => (name === 'agent-b' ? AGENT_B : AGENT_A)),
     list: vi.fn(async () => [{ agent_name: 'agent-a' }, { agent_name: 'agent-b' }]),
     currentMcp: vi.fn(async () => ({ agent_name: selectedName, mcp_servers: [] })),
@@ -282,5 +284,34 @@ describe('loadCandidates —— 清单只含可用数字人（FR-030）', () => 
     await store.loadCandidates()
 
     expect(store.candidates.value.map((item) => item.agent_name)).toEqual(['agent-a'])
+  })
+})
+
+describe('initializeAccess —— 首次绑定数字人', () => {
+  it('当前未选中时优先选择授权的首个绑定数字人', async () => {
+    const { api, calls } = makeApi()
+    let selected: string | null = null
+    calls.current.mockImplementation(async () => ({ agent_name: selected }))
+    calls.select.mockImplementation(async (name: string) => {
+      selected = name
+      return { agent_name: name, selected: true }
+    })
+    const { store } = makeStore(api)
+
+    await expect(store.initializeAccess('agent-b')).resolves.toBe(true)
+    expect(calls.select).toHaveBeenCalledWith('agent-b')
+    expect(store.currentAgent.value?.agent_name).toBe('agent-b')
+    expect(store.accessState.value).toBe('ready')
+  })
+
+  it('用户没有任何可用数字人时进入 blocked，不调用 select', async () => {
+    const { api, calls } = makeApi()
+    calls.list.mockResolvedValue([])
+    const { store } = makeStore(api)
+
+    await expect(store.initializeAccess()).resolves.toBe(false)
+    expect(calls.select).not.toHaveBeenCalled()
+    expect(store.currentAgent.value).toBeNull()
+    expect(store.accessState.value).toBe('blocked')
   })
 })

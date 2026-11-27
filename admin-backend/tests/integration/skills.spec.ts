@@ -359,7 +359,7 @@ describe('DELETE /api/admin/skills/{name}', () => {
         scenario: { scenario: 's', data_prep_dirs: ['算法规则'] },
       },
     });
-    fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+    await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
 
     const res = await fx.app.inject({
       method: 'GET',

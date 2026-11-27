@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import type { AgentListItem, ErrorInfo } from '../../api/types'
+/**
+ * 数字人卡片列表。
+ *
+ * 卡片同时展示对应注册服务编码与已注册人数；「生成注册链接」只发出意图，
+ * 具体服务匹配和弹窗由 AgentArea 处理。
+ */
+import { computed } from 'vue'
+import type { AgentListItem, AgentServiceItem, ErrorInfo } from '../../api/types'
 import EntityCardList from '../common/EntityCardList.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
-defineProps<{
+const props = defineProps<{
   items: AgentListItem[]
+  services: AgentServiceItem[]
   total: number
   page: number
   loading: boolean
@@ -14,8 +22,13 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'update:page', value: number): void
   (e: 'open', name: string): void
+  (e: 'register-link', agent: AgentListItem): void
   (e: 'create'): void
 }>()
+
+const servicesByAgent = computed(
+  () => new Map(props.services.map((service) => [service.platform_agent_name, service])),
+)
 </script>
 
 <template>
@@ -52,6 +65,21 @@ const emit = defineEmits<{
             />
           </p>
           <p class="card__description">{{ (item as AgentListItem).description || '（无描述）' }}</p>
+          <div class="agent-card-list__tags">
+            <span class="agent-card-list__tag">
+              {{
+                servicesByAgent.get((item as AgentListItem).name)
+                  ? `编码 ${servicesByAgent.get((item as AgentListItem).name)?.code}`
+                  : '未配置注册服务'
+              }}
+            </span>
+            <span
+              v-if="servicesByAgent.get((item as AgentListItem).name)"
+              class="agent-card-list__tag agent-card-list__tag--success"
+            >
+              注册用户 {{ servicesByAgent.get((item as AgentListItem).name)?.registered_users }} 人
+            </span>
+          </div>
           <p v-if="(item as AgentListItem).abnormal_reason" class="card__abnormal-reason">
             <span aria-hidden="true">⚠</span>
             {{ (item as AgentListItem).abnormal_reason }}
@@ -65,6 +93,14 @@ const emit = defineEmits<{
               @click="emit('open', (item as AgentListItem).name)"
             >
               打开设计
+            </button>
+            <button
+              type="button"
+              class="btn btn--link"
+              :aria-label="`为数字人 ${(item as AgentListItem).name} 生成注册链接`"
+              @click="emit('register-link', item as AgentListItem)"
+            >
+              生成注册链接
             </button>
           </div>
         </article>
@@ -93,5 +129,24 @@ const emit = defineEmits<{
   font-size: var(--font-size-xs);
   color: var(--color-status-error);
   overflow-wrap: anywhere;
+}
+
+.agent-card-list__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.agent-card-list__tag {
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  background: #f2f3f5;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.agent-card-list__tag--success {
+  color: var(--color-status-success);
+  background: var(--color-status-success-bg);
 }
 </style>

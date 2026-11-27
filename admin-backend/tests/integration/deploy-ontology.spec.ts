@@ -81,7 +81,7 @@ function libraryOntologyDir(): string {
 async function linkOntologyAgent(): Promise<void> {
   installOntology();
   await createAgent(baseAgent({ name: 'onto', ontologies: [`${ONTO_SCENARIO}/${ONTO_NAME}`] }));
-  fx.ctx.users.update('admin', ['demo', 'onto'], fx.ctx.store.revision());
+  await fx.ctx.users.update('admin', ['demo', 'onto'], fx.ctx.store.revision());
 }
 
 function revision(): number {
@@ -93,7 +93,7 @@ beforeEach(async () => {
   fx.runtime.tools = TOOL_FIXTURE;
   configureMcp();
   await createAgent(baseAgent());
-  fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
+  await fx.ctx.users.create('admin', ['demo'], fx.ctx.store.revision());
 });
 
 afterEach(async () => {

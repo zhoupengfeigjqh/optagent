@@ -4,6 +4,11 @@
  * **注意区分两个"用户"概念**（`research.md` D11）：本实体是**平台的业务使用者**
  * （如 `admin`，会被分配数字人），与平台操作者 `zyw_admin`（仅用于审计字段）
  * 是**两个不同概念**，MUST NOT 混用。
+ *
+ * **028 阶段 1**：写方法 async 化并提取 `UserLinkPort` 端口，供
+ * `mysql-user-link-service.ts` 以同一契约接入 MySQL；本类保持 `file` 驱动
+ * （`.platform-data/users/*.json`）实现，编排与语义与 024 完全一致。
+ * 读方法保持**同步**——`Deployer`、`references.ts`、MCP 引用查询等零改动（方案 §8.3）。
  */
 import { ApiError } from '../api-error.js';
 import { hashPassword, type PasswordRecord } from '../auth/password.js';
@@ -19,15 +24,69 @@ export interface UserLinkDocument {
   agents: string[];
   /** 024：密码摘要（scrypt）；存量用户缺省 = 不可登录（`FR-013`）。对外视图不下发。 */
   password?: PasswordRecord;
+  /** 028：手机号（登录标识）；存量用户缺省 = 未绑定 */
+  phone?: string;
+  /** 028：展示名（注册/管理员指定） */
+  display_name?: string;
+  /** 028：角色（admin 管理员 / user 普通用户）；缺省按 `user` */
+  role?: 'admin' | 'user';
+  /** 028：注册来源数字人编码（注册链接创建的账号才有） */
+  source_agent_code?: string;
 }
 
+/** 对外视图：**不含**密码摘要。 */
 export interface UserView {
   user_id: string;
   agents: string[];
   revision: number;
+  /** 028：账号扩展字段（存量用户无值时为 null/缺省口径） */
+  phone?: string | null;
+  display_name?: string | null;
+  role?: 'admin' | 'user';
+  source_agent_code?: string | null;
 }
 
-export class UserLinkService {
+/** 028：账号扩展字段的创建入参（`POST /users` 与注册链路共用） */
+export interface UserProfileInput {
+  phone?: string | null | undefined;
+  display_name?: string | undefined;
+  role?: 'admin' | 'user' | undefined;
+  source_agent_code?: string | null | undefined;
+}
+
+/**
+ * 账号域端口（028）：`file`（本文件的 `UserLinkService`）与 `mysql`
+ * （`MysqlUserLinkService`）共同实现。
+ *
+ * - 读方法同步（内存投影 / 文件直读）；
+ * - 写方法异步（MySQL 网络落盘）；
+ * - `revision` 口径：file = 设计态乐观锁（024 原行为）；mysql = 只读设计态版本
+ *   （D4：账号域写不占设计态 revision，由数据库约束保证一致性）。
+ */
+export interface UserLinkPort {
+  listAll(): UserLinkDocument[];
+  exists(userId: string): boolean;
+  readOrNull(userId: string): UserLinkDocument | null;
+  read(userId: string): UserLinkDocument;
+  /** 028：按手机号查用户（登录用；无匹配返回 null） */
+  findByPhone(phone: string): UserLinkDocument | null;
+  /** 关联了该数字人的用户标识清单（`FR-021` 阻止删除与 `§7.1` 引用查询） */
+  usersOfAgent(agentName: string): string[];
+  /** 列表（卡片：用户名 + 已关联数字人角色名清单，`FR-023`） */
+  list(page: number, toItem: (user: UserLinkDocument) => unknown): Paged<unknown>;
+  create(
+    userIdRaw: unknown,
+    agentsRaw: unknown,
+    revision?: number,
+    passwordRaw?: unknown,
+    profile?: UserProfileInput,
+  ): Promise<UserView>;
+  update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView>;
+  setPassword(userIdRaw: unknown, password: string): Promise<UserView>;
+  remove(userIdRaw: unknown): Promise<void>;
+}
+
+export class UserLinkService implements UserLinkPort {
   constructor(private readonly store: PlatformStore) {}
 
   static relPath(userId: string): string {
@@ -52,111 +111,183 @@ export class UserLinkService {
     return this.store.readJson<UserLinkDocument>(UserLinkService.relPath(userId));
   }
 
+  findByPhone(phone: string): UserLinkDocument | null {
+    return this.listAll().find((doc) => doc.phone === phone) ?? null;
+  }
+
   read(userId: string): UserLinkDocument {
     const doc = this.readOrNull(userId);
     if (!doc) throw new ApiError(ERROR_CODES.ADM_USER_NOT_FOUND, `用户不存在：${userId}`);
     return doc;
   }
 
+  /** 关联了该数字人的用户标识清单（供 `FR-021` 阻止删除与 `§7.1` 引用查询） */
   usersOfAgent(agentName: string): string[] {
     return this.listAll()
       .filter((user) => user.agents.includes(agentName))
       .map((user) => user.user_id);
   }
 
+  /** 列表（卡片：用户名 + 已关联数字人角色名清单，`FR-023`） */
   list(page: number, toItem: (user: UserLinkDocument) => unknown): Paged<unknown> {
     return paginate(this.listAll().map(toItem), page);
   }
 
-  create(
+  async create(
     userIdRaw: unknown,
     agentsRaw: unknown,
     revision?: number,
     passwordRaw?: unknown,
-  ): UserView {
-    const userId = this.requireUserId(userIdRaw);
+    profile?: UserProfileInput,
+  ): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
     if (this.exists(userId)) {
       throw new ApiError(ERROR_CODES.ADM_USER_ID_TAKEN, `用户标识已存在：${userId}`);
     }
-    const agents = this.normalizeAgents(agentsRaw);
+    if (profile?.phone && this.findByPhone(profile.phone)) {
+      throw new ApiError(ERROR_CODES.ADM_PHONE_TAKEN, `手机号已被注册：${profile.phone}`);
+    }
+    const agents = normalizeAgents(agentsRaw);
     const password =
       typeof passwordRaw === 'string' && passwordRaw !== '' ? hashPassword(passwordRaw) : undefined;
-    const doc: UserLinkDocument = password
-      ? { user_id: userId, agents, password }
-      : { user_id: userId, agents };
+    const doc: UserLinkDocument = { user_id: userId, agents };
+    if (password) doc.password = password;
+    if (profile?.phone) doc.phone = profile.phone;
+    if (profile?.display_name) doc.display_name = profile.display_name;
+    if (profile?.role) doc.role = profile.role;
+    if (profile?.source_agent_code) doc.source_agent_code = profile.source_agent_code;
     const write = (): void => {
       this.store.writeJson(UserLinkService.relPath(userId), doc);
     };
 
     if (revision === undefined) {
       write();
-      return { user_id: userId, agents, revision: this.store.bumpRevision() };
+      return toView(userId, agents, this.store.bumpRevision(), doc);
     }
-    return { user_id: userId, agents, revision: this.store.withRevision(revision, write).revision };
+    const view = toView(userId, agents, this.store.withRevision(revision, write).revision, doc);
+    return view;
   }
 
-  update(userIdRaw: unknown, agentsRaw: unknown, revision: number): UserView {
-    const userId = this.requireUserId(userIdRaw);
-    // 保留既有密码摘要：编辑关联数字人 MUST NOT 清空密码
+  async update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
+    // 保留既有密码摘要与账号扩展字段：编辑关联数字人 MUST NOT 清空它们
     const current = this.read(userId);
-    const agents = this.normalizeAgents(agentsRaw);
-    const next: UserLinkDocument = current.password
-      ? { user_id: userId, agents, password: current.password }
-      : { user_id: userId, agents };
+    const agents = normalizeAgents(agentsRaw);
+    const next: UserLinkDocument = { ...current, user_id: userId, agents };
     const { revision: nextRevision } = this.store.withRevision(revision, () => {
       this.store.writeJson(UserLinkService.relPath(userId), next);
     });
-    return { user_id: userId, agents, revision: nextRevision };
+    return toView(userId, agents, nextRevision, next);
   }
 
-  setPassword(userIdRaw: unknown, password: string): UserView {
-    const userId = this.requireUserId(userIdRaw);
+  /**
+   * 重置密码（2026-11-18）：替换该用户的密码摘要，**保留**其关联数字人。
+   *
+   * 刻意独立于 `update()`：`update()` 校验并递增 `revision`（乐观锁属于"关联数字人"
+   * 这条写入路径），而密码不属于部署/配置快照——重置密码若也占版本，会把别人正在
+   * 编辑的关联写入无谓地打成 409。故本方法直接落盘、不触碰 `revision`。
+   *
+   * 明文长度由调用方（路由）校验；用户不存在 → `ADM_USER_NOT_FOUND`（`read` 负责）。
+   */
+  async setPassword(userIdRaw: unknown, password: string): Promise<UserView> {
+    const userId = requireUserId(userIdRaw);
     const current = this.read(userId);
     this.store.writeJson(UserLinkService.relPath(userId), {
+      ...current,
       user_id: userId,
       agents: current.agents,
       password: hashPassword(password),
     } satisfies UserLinkDocument);
-    return { user_id: userId, agents: current.agents, revision: this.store.revision() };
+    return toView(userId, current.agents, this.store.revision(), current);
   }
 
-  remove(userIdRaw: unknown): void {
-    const userId = this.requireUserId(userIdRaw);
+  async remove(userIdRaw: unknown): Promise<void> {
+    const userId = requireUserId(userIdRaw);
     this.read(userId);
     this.store.remove(UserLinkService.relPath(userId));
     this.store.bumpRevision();
   }
+}
 
-  private requireUserId(raw: unknown): string {
-    const userId = typeof raw === 'string' ? raw : '';
-    if (!isSafeName(userId)) {
-      throw new ApiError(
-        ERROR_CODES.ADM_USER_ID_TAKEN,
-        `用户标识非法：${JSON.stringify(raw)}（不得为空、不得含路径分隔符或 ".."）`,
-      );
-    }
-    return userId;
+/** 校验并规范化用户标识（file / mysql 两实现共用，028 提取） */
+export function requireUserId(raw: unknown): string {
+  const userId = typeof raw === 'string' ? raw : '';
+  if (!isSafeName(userId)) {
+    throw new ApiError(
+      ERROR_CODES.ADM_USER_ID_TAKEN,
+      `用户标识非法：${JSON.stringify(raw)}（不得为空、不得含路径分隔符或 ".."）`,
+    );
   }
+  return userId;
+}
 
-  /**
-   * 关联数字人校验：可关联的 MUST 是**平台内已存在**的数字人（`FR-025`）。
-   * 由调用方注入 `existsAgent`，避免本模块反向依赖设计态服务。
-   */
-  private normalizeAgents(raw: unknown): string[] {
-    if (raw === undefined || raw === null) return [];
-    if (!Array.isArray(raw)) {
-      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 须为字符串数组');
-    }
-    const out: string[] = [];
-    for (const item of raw) {
-      if (typeof item !== 'string' || item.trim() === '') {
-        throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 含空值或非字符串项');
-      }
-      if (out.includes(item)) {
-        throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `agents 含重复项：${item}`);
-      }
-      out.push(item);
-    }
-    return out;
+/** 文档 → 对外视图（028：补账号扩展字段；file / mysql 两实现共用） */
+export function toView(
+  userId: string,
+  agents: string[],
+  revision: number,
+  doc: Pick<UserLinkDocument, 'phone' | 'display_name' | 'role' | 'source_agent_code'>,
+): UserView {
+  return {
+    user_id: userId,
+    agents,
+    revision,
+    phone: doc.phone ?? null,
+    display_name: doc.display_name ?? null,
+    role: doc.role ?? 'user',
+    source_agent_code: doc.source_agent_code ?? null,
+  };
+}
+
+/** 028：手机号形态校验（11 位数字，与原型同一规则）；空串/null 视为未绑定 */
+export function normalizePhone(raw: unknown): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^1\d{10}$/.test(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '手机号须为 1 开头的 11 位数字');
   }
+  return raw;
+}
+
+/** 028：展示名校验（≥2 字符，≤64）；空值合法（未设置） */
+export function normalizeDisplayName(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw !== 'string') {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'display_name 须为字符串');
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < 2 || trimmed.length > 64) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, '用户名长度须为 2~64 个字符');
+  }
+  return trimmed;
+}
+
+/** 028：角色校验；缺省 `user` */
+export function normalizeRole(raw: unknown): 'admin' | 'user' {
+  if (raw === undefined || raw === null || raw === '') return 'user';
+  if (raw !== 'admin' && raw !== 'user') {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'role 只支持 admin / user');
+  }
+  return raw;
+}
+
+/**
+ * 关联数字人校验：可关联的 MUST 是**平台内已存在**的数字人（`FR-025`）。
+ * 存在性由调用方（路由）另行校验（`assertAgentsExist`），本函数只做形态校验。
+ */
+export function normalizeAgents(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 须为字符串数组');
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'agents 含空值或非字符串项');
+    }
+    if (out.includes(item)) {
+      throw new ApiError(ERROR_CODES.VALIDATION_FAILED, `agents 含重复项：${item}`);
+    }
+    out.push(item);
+  }
+  return out;
 }

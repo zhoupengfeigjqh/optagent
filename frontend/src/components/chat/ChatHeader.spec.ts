@@ -55,6 +55,23 @@ describe('ChatHeader —— MCP 状态左对齐（014 FR-001/002/004）', () => 
     expect(wrapper.text()).toContain('请选择数字人')
   })
 
+  it('点击「请选择数字人」按钮打开数字人面板', async () => {
+    const wrapper = mountHeader({ agent: null })
+    await wrapper.get('.agent-summary__hint').trigger('click')
+    expect(wrapper.emitted('open-agent')).toHaveLength(1)
+  })
+
+  it('无可用数字人时隐藏搜索、工作空间与数字人切换入口', async () => {
+    const wrapper = mountHeader({ agent: null, actionsDisabled: true, agentSwitchEnabled: false })
+
+    expect(wrapper.find('[aria-label="搜索对话"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="工作空间"]').exists()).toBe(false)
+    await wrapper.get('.base-dropdown__trigger').trigger('click')
+    expect(wrapper.findAll('.base-dropdown__item').map((item) => item.text().trim())).toEqual([
+      '退出登录',
+    ])
+  })
+
   it('长名称 + 多服务不破坏结构，右侧动作位仍在', () => {
     const many = Array.from({ length: 8 }, (_, index) => ({
       name: `server-${index}`,

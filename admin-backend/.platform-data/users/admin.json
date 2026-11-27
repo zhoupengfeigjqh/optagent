@@ -12,5 +12,7 @@
     },
     "salt": "WukxCbyM8K+a+qd3KG4agw==",
     "hash": "sBaL67xsd+bD2fwAY4M4+hEjw5rKTgpJ3ZVI5uiI75k9j7TVKVZe33vCxpf17Kcni2RNEa0YZ28dPM1CGQ00XA=="
-  }
+  },
+  "display_name": "管理员",
+  "role": "admin"
 }

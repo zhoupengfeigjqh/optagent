@@ -1,9 +1,22 @@
+/**
+ * 应用上下文（wiring）：`server.ts` 装配，`routes/` 消费。
+ *
+ * 独立成文件以避免 `routes ↔ server` 循环 import，与 `agent-backend` 同构。
+ *
+ * **2026-09-27**：`compose` / `docker` / `settings` 三个依赖随
+ * 「MCP 服务全人工配置」下架——平台不再读容器编排声明、不再读 Docker 容器状态，
+ * 也不再持有"目标运行形态"。
+ */
 import type { AppConfig } from './config.js';
+import type { AgentServiceCatalog } from './domain/account/agent-services.js';
+import type { GrantService } from './domain/account/grants.js';
+import type { RegisterLinkService } from './domain/account/register-links.js';
+import type { RegistrationService } from './domain/account/registration.js';
 import type { AuthService } from './domain/auth/service.js';
-import type { SessionStore } from './domain/auth/session-store.js';
+import type { SessionPort } from './domain/auth/session-store.js';
 import type { AgentDesignService } from './domain/config-center/agent-design.js';
 import type { UnifiedCatalog } from './domain/config-center/unified-catalog.js';
-import type { UserLinkService } from './domain/config-center/user-links.js';
+import type { UserLinkPort } from './domain/config-center/user-links.js';
 import type { Deployer } from './domain/deploy/deployer.js';
 import type { DeployHistoryService } from './domain/deploy/history.js';
 import type { DeployManifestService } from './domain/deploy/manifest.js';
@@ -21,22 +34,47 @@ export interface AppContext {
   config: AppConfig;
   loggers: AppLoggers;
 
+  /* ---- infra：数据访问与宿主资源 ---- */
+  /** 平台设计态存储（唯一权威源，`research.md` D4） */
   store: PlatformStore;
+  /** 运行环境只读端点客户端（`plan.md` R2/R4） */
   runtime: RuntimeClient;
 
+  /* ---- domain：业务服务 ---- */
+  /** 数字人设计态（`FR-014`~`FR-022`） */
   agents: AgentDesignService;
-  users: UserLinkService;
+  /** 用户与关联数字人（`FR-023`~`FR-025`）；028：file / mysql 双驱动的端口 */
+  users: UserLinkPort;
+  /** 共享技能库（`FR-035`~`FR-042`） */
   skills: SkillLibraryService;
+  /** 本体库（`FR-058`~`FR-061`，2026-10-03）：只读浏览 + 市场导入/更新/删除 */
   ontologies: OntologyStore;
+  /** MCP 服务配置（**平台唯一权威源**，`FR-043`/`FR-044`） */
   mcpConfigs: McpServiceConfigService;
+  /** MCP 服务清单投影（`FR-043`） */
   mcpServices: McpServiceListService;
+  /** MCP 测试/统计（`FR-047`~`FR-049`） */
   mcpOperations: McpServiceOperations;
+  /** 部署清单（`FR-031`） */
   manifest: DeployManifestService;
+  /** 部署历史（`FR-033`） */
   history: DeployHistoryService;
   /** `.opt-agent` 物化写入（原子、整体覆盖） */
   writer: OptAgentWriter;
+  /** 统一清单装配（`FR-019` 的判据来源） */
   catalog: UnifiedCatalog;
+  /** 部署编排（`FR-026`~`FR-034`） */
   deployer: Deployer;
-  sessionStore: SessionStore;
+  /** 024：会话登记（单会话，后登踢前登）；028：file / mysql 双驱动的端口 */
+  sessionStore: SessionPort;
+  /** 024：登录鉴权编排（登录/登出/内省） */
   auth: AuthService;
+  /** 028：数字人服务目录（编码/名称/平台落点） */
+  agentServices: AgentServiceCatalog;
+  /** 028：专属注册链接（生成/撤销/校验） */
+  registerLinks: RegisterLinkService;
+  /** 028：用户 × 数字人服务授权（申请/审批/关闭/总账） */
+  grants: GrantService;
+  /** 028：注册编排（链接 → 建号 → 自动授权） */
+  registration: RegistrationService;
 }

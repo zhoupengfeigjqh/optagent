@@ -292,7 +292,7 @@ describe('DELETE /api/admin/agents/{name}', () => {
 
   it('被用户关联时阻止删除 → 409 ADM_AGENT_IN_USE 并指明用户（FR-021）', async () => {
     await fx.app.inject({ method: 'POST', url: '/api/admin/agents', payload: validBody });
-    fx.ctx.users.create('admin', ['demo']);
+    await fx.ctx.users.create('admin', ['demo']);
 
     const res = await fx.app.inject({ method: 'DELETE', url: '/api/admin/agents/demo' });
     expect(res.statusCode).toBe(409);

@@ -30,11 +30,20 @@ describe('parseLocation', () => {
     expect(r.tab).toBeNull()
   })
 
-  it('解析五个功能区（含本体管理）', () => {
+  it('解析六个功能区（含本体管理与用户管理）', () => {
     for (const name of ROUTE_NAMES) {
       expect(parseLocation(`/admin/${name}`, '/admin').name).toBe(name)
     }
     expect(parseLocation('/admin/ontology', '/admin').name).toBe('ontology')
+    expect(parseLocation('/admin/users', '/admin')).toMatchObject({ name: 'users' })
+  })
+
+  it('保留伪路由：管理员登录页', () => {
+    expect(parseLocation('/admin/login', '/admin')).toMatchObject({
+      name: 'login',
+      detail: null,
+      tab: null,
+    })
   })
 
   it('本体详情：场景名与本体名都在路径上，场景在前（身份是两段，2026-10-17）', () => {

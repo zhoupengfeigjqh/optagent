@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+/**
+ * 数字人设计功能区（US1）。
+ *
+ * 两级导航：列表 ↔ 设计器（`FR-053`）。一级导航固定 4 项，本区内部深度不超过两级；
+ * `tab` 承载配置分区（SOUL / 内置工具 / MCP 服务 / SKILL / 本体 / 文件空间场景），
+ * 不构成第三级导航。
+ */
+import { computed, onMounted, ref, watch } from 'vue'
+import { listAgentServices } from '../../api/account'
 import { getAgent, getAgentCatalog, listAgents } from '../../api/agents'
 import type { OntologyCandidate } from '../../api/ontologies'
 import type {
   AgentDesign,
   AgentListItem,
+  AgentServiceItem,
   BuiltinTool,
+  ErrorInfo,
   McpServiceListItem,
   Paged,
   SkillListItem,
@@ -15,6 +25,8 @@ import { NEW_AGENT_SENTINEL } from '../../constants/agent-design'
 import AgentCardList from './AgentCardList.vue'
 import AgentDesigner from './AgentDesigner.vue'
 import CreateAgentDialog from './CreateAgentDialog.vue'
+import RegisterLinkDialog from './RegisterLinkDialog.vue'
+import ErrorNotice from '../common/ErrorNotice.vue'
 
 const props = defineProps<{ detail: string | null; tab: string | null }>()
 const emit = defineEmits<{
@@ -22,21 +34,41 @@ const emit = defineEmits<{
   (e: 'announce', text: string): void
 }>()
 
+/** 列表态 */
 const page = ref(1)
 const list = ref<Paged<AgentListItem> | null>(null)
 const listError = ref<unknown>(null)
 const listLoading = ref(false)
 
+/** 编辑器依赖的统一清单（`FR-019`：三类引用只能从清单中选择） */
 const builtinTools = ref<BuiltinTool[]>([])
 /** 工具目录不可读的原因（`null` = 可读）；MCP / SKILL 候选不受此影响 */
 const builtinToolsError = ref<string | null>(null)
 const mcpServices = ref<McpServiceListItem[]>([])
 const skills = ref<SkillListItem[]>([])
+/** 本体候选（`§5.6`）：身份投影，不含正文 */
 const ontologies = ref<OntologyCandidate[]>([])
 
 const design = ref<AgentDesign | null>(null)
+const agentServices = ref<AgentServiceItem[]>([])
+const agentServicesError = ref<ErrorInfo | null>(null)
+const registerLinkOpen = ref(false)
+const registerLinkAgent = ref<AgentListItem | null>(null)
+const registerLinkService = computed(
+  () =>
+    agentServices.value.find(
+      (service) => service.platform_agent_name === registerLinkAgent.value?.name,
+    ) ?? null,
+)
 
+/** 「新建数字人」弹窗开关（`FR-015`：新建先经弹窗采集名称与可选复制源） */
 const createOpen = ref(false)
+/**
+ * 弹窗确认后的**新建初值**（名称 + 可选复制源），供设计器预填草稿。
+ *
+ * 用组件内状态而非 URL：新建草稿本来就不落盘、刷新即丢，而把用户输入的
+ * 名称塞进地址栏会让 URL 与草稿状态互相不同步（设计器内改名后地址栏不跟着变）。
+ */
 const pendingNew = ref<{ name: string; copyFrom: string | null } | null>(null)
 
 function onNewAgentConfirmed(payload: { name: string; copyFrom: string | null }): void {
@@ -53,6 +85,7 @@ function backToList(): void {
 function onDeleted(name: string): void {
   pendingNew.value = null
   emit('announce', `数字人 ${name} 已删除`)
+  // 删掉后没有可编辑的对象了：退回列表（列表会重新拉取，卡片随之消失）
   emit('navigate', buildPath({ name: 'agents' }))
 }
 
@@ -90,6 +123,21 @@ async function loadList(): Promise<void> {
   }
 }
 
+async function loadAgentServices(): Promise<void> {
+  agentServicesError.value = null
+  try {
+    agentServices.value = (await listAgentServices()).items
+  } catch (err) {
+    agentServices.value = []
+    agentServicesError.value = err as ErrorInfo
+  }
+}
+
+function openRegisterLink(agent: AgentListItem): void {
+  registerLinkAgent.value = agent
+  registerLinkOpen.value = true
+}
+
 async function loadDesign(name: string): Promise<void> {
   design.value = null
   if (name === NEW_AGENT_SENTINEL) return
@@ -102,6 +150,7 @@ async function loadDesign(name: string): Promise<void> {
 
 onMounted(() => {
   void loadCatalog()
+  void loadAgentServices()
   if (props.detail) void loadDesign(props.detail)
   else void loadList()
 })
@@ -142,8 +191,14 @@ watch(
       @error="(message) => emit('announce', message)"
     />
     <template v-else>
+      <ErrorNotice
+        v-if="agentServicesError"
+        :error="agentServicesError"
+        title="注册服务加载失败"
+      />
       <AgentCardList
         :items="list?.items ?? []"
+        :services="agentServices"
         :total="list?.total ?? 0"
         :page="page"
         :loading="listLoading"
@@ -155,10 +210,17 @@ watch(
           }
         "
         @open="(name) => emit('navigate', buildPath({ name: 'agents', detail: name }))"
+        @register-link="openRegisterLink"
         @create="createOpen = true"
       />
 
       <CreateAgentDialog v-model:open="createOpen" @confirm="onNewAgentConfirmed" />
+      <RegisterLinkDialog
+        v-model:open="registerLinkOpen"
+        :agent="registerLinkAgent"
+        :service="registerLinkService"
+        @announce="emit('announce', $event)"
+      />
     </template>
   </section>
 </template>

@@ -80,9 +80,14 @@
 | `ADM_CONFIG_REVISION_CONFLICT` | 409 | 并发编辑冲突（`revision` 不符） | `FR-008` |
 | `ADM_STORAGE_UNAVAILABLE` | 503 | 平台设计态存储不可写 | — |
 | `ADM_RUNTIME_UNREACHABLE` | 503 | 运行环境只读依赖不可达（工具目录／调用统计） | `FR-011`、`FR-050` |
-| `ADM_UNAUTHENTICATED` | 401 | 未认证：凭据缺失或验签失败（§11；**预登记，未实施**） | `FR-065` |
+| `ADM_UNAUTHENTICATED` | 401 | 未认证：凭据缺失或验签失败（§11；024 起 /me 探针已启用） | `FR-065` |
 | `ADM_FORBIDDEN` | 403 | 越权：已认证但角色非管理员访问 `/api/admin/*`（§11；**预登记，未实施**） | `FR-066` |
 | `ADM_INVALID_CREDENTIALS` | 401 | 登录失败：账号不存在或密码错误（**不枚举**；024 登录鉴权，见 §12） | `FR-011` |
+| `ADM_PHONE_TAKEN` | 409 | 手机号已被注册（§13；028） | — |
+| `ADM_INVALID_LINK` | 400 | 注册链接无效/过期/已撤销/服务停用（**不枚举**；§13；028） | — |
+| `ADM_GRANT_NOT_FOUND` | 404 | 授权记录不存在（§13；028） | — |
+| `ADM_AGENT_SERVICE_NOT_FOUND` | 404 | 数字人服务编码不存在（§13；028） | — |
+| `ADM_AGENT_SERVICE_IN_USE` | 409 | 数字人服务已被授权或注册链接引用，禁止删除（§13；028） | — |
 
 > **2026-09-27 变更**：随 MCP 服务改为平台内全人工配置，**移除四个码**——
 > 启停白名单类、运行形态缺地址类、Docker 不可达类、编排声明不可读类（正文提及处已一并清理，
@@ -1023,3 +1028,30 @@ MUST NOT 读取容器编排声明或容器运行状态。
 - §11 身份与分权：ADM_UNAUTHENTICATED(401) 已启用（/me 探针）；ADM_INVALID_CREDENTIALS(401) 为登录失败（不枚举）；ADM_FORBIDDEN(403) 仍预留。
 - 新增端点：POST /api/admin/auth/login、GET /api/admin/auth/me、POST /api/admin/auth/logout、GET /api/admin/auth/session/valid（会话内省）。
 - §6.4.1 新增端点 POST /api/admin/users/{user_id}/password（2026-11-18）：管理员手动重置密码，不带 `revision`，成功后注销该用户既有会话。
+
+## §13 账号与数字人服务绑定（028，2026-11-24 登记）
+
+完整方案与数据模型见 specs/028-account-mysql-binding/方案与契约.md（本节为 §0 一致性所需的最小登记）。
+
+**语义边界（MUST）**：授权（`user_agent_grants`，三态 approved/pending/revoked）决定「能否使用」数字人服务；部署关联（`users.agents[]`）决定「部署什么」。两者 MUST NOT 混写。存储按 `STORAGE_DRIVER=file|mysql` 切换（默认 file，`mysql` = 账号域 MySQL 化）。
+
+**新增/扩展端点**：
+
+| 端点 | 方法 | 权限 | 说明 |
+|---|---|---|---|
+| `/api/admin/auth/register` | POST | 公开 | 专属链接注册：`{link_token, phone, display_name, password}` → 201 `{user_id, phone, display_name, granted_agent}`；注册即 `approved` 授权，**不自动登录**；手机号占用 → `ADM_PHONE_TAKEN` |
+| `/api/admin/auth/register-links/:token` | GET | 公开 | 注册页渲染校验 → `{agent:{code,name}, expired:false}`；无效/过期/撤销/停用统一 `ADM_INVALID_LINK`（不枚举） |
+| `/api/admin/auth/login` | POST | 公开 | **扩展**：请求体 `{user_id?, phone?, password}` 二选一；失败仍统一 `ADM_INVALID_CREDENTIALS`（不枚举）；JWT `sub` 恒为 `user_id`（非手机号） |
+| `/api/admin/auth/me` | GET | 登录 | **扩展响应**：`{user_id, phone, display_name, role}` |
+| `/api/admin/auth/my-agents` | GET | 登录 | 当前用户授权清单：`{items:[{code,name,platform_agent_name,status}], pending:[{code,name,platform_agent_name}]}`（revoked 不下发；items 按首次授权时间升序） |
+| `/api/admin/grants/apply` | POST | 本人 | 申请：`{agent_code}`；`user_id` 取自会话（防越权）；approved/pending 幂等 |
+| `/api/admin/grants` | GET | 管理员 | 授权总账：query `status/agent_code/phone/page` → 卡片分页 `{items,total,page,...}` |
+| `/api/admin/grants/approve` | POST | 管理员 | 审批通过：`{user_id, agent_code}`；记录不存在 → `ADM_GRANT_NOT_FOUND` |
+| `/api/admin/grants/revoke` | POST | 管理员 | 关闭授权（不删行，保留审计轨迹）；重建授权走 approve |
+| `/api/admin/register-links` | GET/POST | 管理员 | 列表（可按 `agent_code` 过滤，带 `use_count`）/ 生成 `{agent_code, expires_in_seconds?}` → 201 `{token, url, expires_at}` |
+| `/api/admin/register-links/:token` | DELETE | 管理员 | 软撤销 → 204 |
+| `/api/admin/agent-services` | GET/POST | 登录/管理员 | 服务目录列表（含 `registered_users`）/ 新建 `{code, name, platform_agent_name}`；`platform_agent_name` MUST 在平台设计态存在（`FR-025` 口径） |
+| `/api/admin/agent-services/:code` | PUT/DELETE | 管理员 | 改 name/status（code 不可改）/ 删除；被引用 → `ADM_AGENT_SERVICE_IN_USE` |
+| `/api/admin/users` | GET/POST | 管理员 | **扩展**：列表响应增 `phone/display_name/role/source_agent_code/grants_summary:{approved,pending}`；创建请求体增可选同名账号字段 |
+
+**错误码**：本节引入的 5 个新码已登记进 §0.4（`ADM_PHONE_TAKEN` / `ADM_INVALID_LINK` / `ADM_GRANT_NOT_FOUND` / `ADM_AGENT_SERVICE_NOT_FOUND` / `ADM_AGENT_SERVICE_IN_USE`）。`ADM_FORBIDDEN` 的角色强制校验后置到阶段 4（`ADMIN_AUTH_ENABLED` 开关，与前端登录页同批）。

@@ -1,0 +1,18 @@
+{
+  "user_id": "u_995b11d91b50",
+  "agents": [],
+  "password": {
+    "algo": "scrypt",
+    "params": {
+      "N": 16384,
+      "r": 8,
+      "p": 1
+    },
+    "salt": "fixAg5FdEvZrRJEMn1Iflw==",
+    "hash": "1x+DasGysN6uHqkUqF4qpqlJg9Z4kXryf9DH773rgJ96Yl56aGrxXOmNRiBNMCb4byjNQL46w7ZMyx7U9MejkQ=="
+  },
+  "phone": "18773854692",
+  "display_name": "111",
+  "role": "user",
+  "source_agent_code": "DH-SCHED2"
+}

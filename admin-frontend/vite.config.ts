@@ -49,6 +49,7 @@ export default defineConfig({
         lines: 94,
 
         'src/router.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
+        'src/utils/clipboard.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/utils/error-message.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useAsync.ts': { statements: 80, branches: 80, functions: 80, lines: 80 },
         'src/composables/useAgentDesign.ts': {

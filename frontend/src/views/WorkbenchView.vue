@@ -1,4 +1,16 @@
 <script setup lang="ts">
+/**
+ * 工作台视图（T033 / T042 / T062）
+ *
+ * 由路由 `/`（`src/router/index.ts`）挂载：渲染三栏骨架——左栏历史会话（US5）、
+ * 中栏聊天区（US1）；右栏为**工作空间面板**（US7 / US8），文件空间列表与文件内容在
+ * 该面板内互换，二者不并存，故只有一个右栏组件。
+ *
+ * 会话上下文由根组件 `App.vue` 装配一次（`provide`），本视图用 `useSession()` 取用——
+ * MUST NOT 在此再 `useAppSession()` 一次：那会**另建一套**状态（两份 threads/chat 各自
+ * 打请求，且"记住当前会话"会双写地址栏）。同理，"首屏拉列表 + 刷新恢复会话"这两件
+ * **工作台专属**的事也归本视图，见下方 `onMounted`。
+ */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type {
@@ -16,12 +28,17 @@ import WorkspacePanel from '@/components/layout/WorkspacePanel.vue'
 import SchedulePanel from '@/components/schedule/SchedulePanel.vue'
 
 import { useSession } from '@/composables/useAppSession'
+import { getAuthStore } from '@/composables/useAuth'
 import { RUN_PHASE } from '@/constants/events'
 import { downloadTextFile } from '@/utils/download'
 import { exportFilename } from '@/utils/export-thread'
 
 const session = useSession()
+const auth = getAuthStore()
 
+const hasAgentAccess = computed(() => session.agents.accessState.value === 'ready')
+
+/** 有历史消息或本轮已开始 → 展开为完整对话布局（FR-003 / FR-004）。 */
 const expanded = computed(
   () => session.threads.messages.value.length > 0 || session.chat.phase.value !== RUN_PHASE.IDLE,
 )
@@ -31,9 +48,21 @@ const busy = computed(
   () => session.chat.phase.value === RUN_PHASE.STREAMING || session.threads.running.value,
 )
 
+// 首屏拉取历史会话：一次性拉全量，10 / 100 条切在前端完成（V-09）
 onMounted(async () => {
+  let preferredAgentName: string | null = null
+  try {
+    const mine = await auth.fetchMyAgents()
+    preferredAgentName = mine.items[0]?.platform_agent_name ?? null
+  } catch {
+    // 授权清单只用于优先排序；运行时可用清单仍是最终判据。
+  }
+  const accessReady = await session.agents.initializeAccess(preferredAgentName)
+  if (!accessReady) return
+
   await session.threads.loadList()
   await restoreThread()
+  // 015：变更信号只在**真正展示定时任务的视图**订阅（数据页/甘特图页白开一条长连接无意义）；
   // 离开本视图即断开，重回时重新建连（`start()` 幂等）
   session.schedule.start()
 })
@@ -42,6 +71,17 @@ onBeforeUnmount(() => {
   session.schedule.stop()
 })
 
+/**
+ * 刷新恢复（002 特性）：首屏按 URL 的 `?thread=` / 本地存储选中的会话自动加载历史。
+ *
+ * 为什么必须做：工具记录落盘后，"刷新后能看到工具卡片"还差最后一环——
+ * 不自动恢复会话的话，中栏仍是空态，用户得手动点左侧历史才看得到。
+ *
+ * 为什么归工作台而不是根组件：它只对"打开着聊天界面"的路径有意义；放在根组件会让
+ * `/ganttdemo`、`/datapage/*` 也白拉一次历史，并在那些路径上改写 URL（2026-09-28 修正）。
+ *
+ * 降级：目标会话已被删除（或加载失败）→ **静默**回空态并清除痕迹，不报错。
+ */
 async function restoreThread(): Promise<void> {
   const target = session.initialThreadId
   if (!target) {
@@ -60,6 +100,8 @@ async function restoreThread(): Promise<void> {
   }
 }
 
+// 会话切换即记住（地址栏 + 本地存储双写），供下次刷新恢复。只在工作台生效：
+// 甘特图示意页与数据页不消费会话，本就不该被会话状态牵动地址栏。
 watch(
   () => session.threads.activeId.value,
   (threadId) => session.rememberActiveThread(threadId),
@@ -69,6 +111,12 @@ function onSelectThread(threadId: string): void {
   void session.threads.select(threadId)
 }
 
+/**
+ * 「新建对话」（009 FR-010 修订）：**只进入空对话视图**，不调创建接口。
+ *
+ * 历史列表只呈现有消息的会话（服务端判据），会话由首条消息创建——
+ * 若在这里 `create()`，每次点击都会多出一条"没有任何消息"的记录。
+ */
 function onCreateThread(): void {
   session.threads.startNew()
 }
@@ -77,9 +125,12 @@ function onShowMore(): void {
   session.threads.showMore()
 }
 
+/* ---------- 删除历史会话（二次确认 + 切相邻会话） ---------- */
 
+/** 待确认删除的会话；`null` 表示无待确认项 */
 const pendingRemove = ref<Conversation | null>(null)
 
+/** 二次确认文案：进行中的会话额外提示"会中断本轮"（`data-model.md` §自检规则） */
 const removeMessage = computed(() => {
   const target = pendingRemove.value
   if (!target) return ''
@@ -90,6 +141,7 @@ const removeMessage = computed(() => {
   return `${warn}删除后该会话的消息与临时文件都会被清理，且不可恢复。\n确定要删除「${target.title ?? '新会话'}」吗？`
 })
 
+/** 点击行内删除入口：先弹确认，不直接发请求 */
 function onRequestRemove(threadId: string): void {
   pendingRemove.value =
     session.threads.list.value.find((item) => item.thread_id === threadId) ?? null
@@ -99,6 +151,7 @@ async function onConfirmRemove(): Promise<void> {
   const target = pendingRemove.value
   if (!target) return
 
+  // 契约 §3.5：删除成功后「切换到相邻会话或空态」——优先下一条，其次上一条。
   // 邻居必须在 remove 之前算好：remove 走乐观更新，会立刻把目标项移出列表。
   const list = session.threads.list.value
   const index = list.findIndex((item) => item.thread_id === target.thread_id)
@@ -106,6 +159,7 @@ async function onConfirmRemove(): Promise<void> {
   const neighbour = list[index + 1] ?? list[index - 1] ?? null
   const wasActive = session.threads.activeId.value === target.thread_id
 
+  // 先关弹窗：删除本身是乐观更新，界面立即响应，不再等后面的请求回来
   pendingRemove.value = null
 
   const removed = await session.threads.remove(target.thread_id)
@@ -116,6 +170,7 @@ async function onConfirmRemove(): Promise<void> {
   }
 }
 
+/* ---------- 重命名 / 导出（2026-10-16） ---------- */
 
 /** 提交新标题：请求、乐观更新与失败回滚都在 `useThreads.rename` 里，这里只转发 */
 function onRenameThread(payload: { threadId: string; title: string }): void {
@@ -133,17 +188,21 @@ async function onExportThread(threadId: string): Promise<void> {
   const thread = session.threads.list.value.find((item) => item.thread_id === threadId)
   if (!thread) return
   const markdown = await session.threads.exportMarkdown(threadId)
+  // `null` = 拉取失败（已 toast）：不产生空文件
   if (markdown === null) return
   downloadTextFile(exportFilename(thread), markdown)
 }
 
+/* ---------- 右栏工作空间面板（US7 / US8） ---------- */
 
-const panelOpen = computed(() => session.preview.open.value)
+/** 面板展开即占位右侧 1/3（FR-001）；收起时中栏恢复满宽（FR-002）。 */
+const panelOpen = computed(() => hasAgentAccess.value && session.preview.open.value)
 
 function onClosePanel(): void {
   session.preview.close()
 }
 
+/** 内容态 → 列表态（面板保持展开） */
 function onBackToList(): void {
   session.preview.backToList()
 }
@@ -156,6 +215,7 @@ function onToggleDir(dir: string): void {
   session.workspace.toggleDir(dir)
 }
 
+/** 面板内点文件名、消息内点文件引用走**同一入口**：都进内容态（FR-046） */
 function onOpenFile(reference: FileReference): void {
   void session.preview.openFile(reference)
 }
@@ -173,10 +233,12 @@ function onToggleMaximize(): void {
   session.preview.toggleMaximize()
 }
 
+/** 放大态下按 Esc（本页或同源 iframe 内）：只退出放大，不触发"Esc 中断本轮回答" */
 function onRestoreMaximize(): void {
   session.preview.restoreMaximize()
 }
 
+/** 删除文件：成功后若正看着它则收敛回列表态；失败已由 toast 提示，界面保持现状 */
 async function onRemoveFile(reference: FileReference): Promise<void> {
   const removed = await session.workspace.remove(reference)
   if (removed) {
@@ -184,7 +246,9 @@ async function onRemoveFile(reference: FileReference): Promise<void> {
   }
 }
 
+/* ---------- 定时任务（015） ---------- */
 
+/** 创建：返回值决定创建弹窗是否收起（失败保留已填内容） */
 function onCreateTask(input: CreateScheduledTaskRequest): Promise<boolean> {
   return session.schedule.create(input)
 }
@@ -193,10 +257,12 @@ function onRemoveTask(taskId: string): Promise<boolean> {
   return session.schedule.remove(taskId)
 }
 
+/** 编辑：整份替换 7 项可编辑字段（启用中服务端 409，界面已先置灰） */
 function onUpdateTask(taskId: string, input: UpdateScheduledTaskRequest): Promise<boolean> {
   return session.schedule.update(taskId, input)
 }
 
+/** 启停：乐观更新在 store 内完成，这里只转发 */
 function onToggleTask(payload: { taskId: string; enabled: boolean }): void {
   void session.schedule.setEnabled(payload.taskId, payload.enabled)
 }
@@ -213,7 +279,12 @@ async function onOpenRunThread(threadId: string): Promise<void> {
 </script>
 
 <template>
-  <AppShell :preview-open="panelOpen" :preview-maximized="session.preview.maximized.value">
+  <AppShell
+    :preview-open="panelOpen"
+    :preview-maximized="session.preview.maximized.value"
+    :sidebar-hidden="!hasAgentAccess"
+  >
+    <!-- 左栏：历史会话（US5） -->
     <template #history>
       <HistorySidebar
         :threads="session.threads.list.value"
@@ -230,10 +301,12 @@ async function onOpenRunThread(threadId: string): Promise<void> {
       />
     </template>
 
+    <!-- 中栏：聊天区 -->
     <template #chat>
       <ChatPanel :expanded="expanded" />
     </template>
 
+    <!-- 右栏：工作空间面板（列表态 / 内容态，US7 + US8） -->
     <template #preview>
       <WorkspacePanel
         :view="session.preview.view.value"
@@ -259,6 +332,10 @@ async function onOpenRunThread(threadId: string): Promise<void> {
     </template>
   </AppShell>
 
+  <!--
+    定时任务设置覆盖层（015）：原生 `<dialog>` 铺满视口——Tab 收敛、Esc 关闭、背景不可交互
+    都由浏览器提供；`ChatPanel` 的"Esc 中断本轮"判据是 `dialog[open]`，因此不会误伤回答。
+  -->
   <SchedulePanel
     :open="session.schedule.panelOpen.value"
     :tasks="session.schedule.tasks.value"
@@ -288,6 +365,7 @@ async function onOpenRunThread(threadId: string): Promise<void> {
     @action="session.toast.runAction"
   />
 
+  <!-- 删除会话的二次确认（§3.5）：确认后才真正发 DELETE -->
   <ConfirmDialog
     :open="pendingRemove !== null"
     title="删除会话"
