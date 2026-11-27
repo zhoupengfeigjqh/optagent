@@ -1,4 +1,7 @@
-# 实施计划：本体行为规则闸门（前置规则判定与后置规则提示）
+# 实施计划：本体行为规则闸门（前置规则判定）
+
+> **2026-11-24（用户决策）**：后置规则已整体移除、待重新设计。本计划中凡涉及后置的
+> 设计、任务与验收均作废；当前实现只有前置闸门。以 `spec.md` 与修订记录为准。
 
 - **分支**：`021-ontology-rule-gate`
 - **日期**：2026-11-09
@@ -637,3 +640,33 @@ cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm
 - [x] 有界退出：第 2 次拦截触发一次纯中止（`ABORTED`），单轮至多一次。
 - [x] 配置类拒绝仍 `error` 级 + `alert: true`；挂起后每次拦截记 `rule_gate.suspended`。
 - [x] 前端零改动（复用既有工具卡片；`ONTOLOGY_RULE_DENIED` 映射保留给历史失败行）。
+
+## 行为类型收敛 + command 写后失效（2026-11-24，用户决策）
+
+> 本节覆盖前文"多本体同名行为 OR 合并""缺 `op_type` 视为非 command"等旧口径；
+> 现行语义见 `spec.md` H 节 `FR-048`~`FR-055`、`data-model.md` §4/§6.1/§7 与 `contracts/rule-gate.md`。
+
+**改动落点（高内聚：全部落在 `domain/rule-gate` 与既有的两个装配点）**
+
+| 文件 | 变更 |
+|---|---|
+| `domain/ontology-doc.ts` | 新增 `normalizeOpType`（去空白 + 小写）——规则闸门与意图聚焦共用同一口径 |
+| `domain/intent-focus/concept-queries.ts` | `isQuery` 改用 `normalizeOpType`（行为不变，消除第二套比较） |
+| `domain/rule-gate/types.ts` | `BehaviorRuleBucket.command`；`InvalidBehavior`（三成因 + 来源）；`GateSnapshot.invalidBehaviors`；`PrepareResult` 增 `command` 标记与 `fatal` 变体；`FunctionRecord` 增 `epoch` / `hasEver` / `invalidate` / `activeSize`；`RuleDiagnosis.staleFunctions` |
+| `domain/rule-gate/record.ts` | 条目带世代；`add(name, result, epoch?)` 按派发世代打戳；`has`/`get` 只看当前世代；`invalidate()` 只递增不删除 |
+| `domain/rule-gate/catalog.ts` | 三段式装载：跨本体聚合行为声明 → 三态裁决（非法/冲突进 `invalidBehaviors`） → 只给 `command` 装载前置规则（`query` 忽略、`position: 后置` 先跳过） |
+| `domain/rule-gate/gate.ts` | `fatal` 最先判（否则非法行为会掉进 `function` 分支被执行）；`query` 短路；缺函数拆"缺失/过期"；注册校验只查缺失 |
+| `domain/rule-gate/format.ts` | `pauseMessage`/`pauseDetails` 增过期分组；新增 `fatalMessage`/`fatalDetails` |
+| `domain/tool-suspension.ts` | 新增 `abortRunFatal`：挂起 + **立即**触发 `onExhausted`（复用 `ABORTED`） |
+| `infra/tool-rule-gate.ts` | `fatal` 分支（零执行 + 立即收尾 + `rule_gate.fatal`）；捕获派发世代；`command` 返回后 `invalidate` + `rule_gate.record.invalidated` |
+| `infra/agent-factory.ts` | **只在意图聚焦开启时**建记录并包装（`isIntentFocusEnabled` 逐次读盘、fail-closed） |
+
+**完成定义**
+
+- [x] 同一轮内两次 command、中间未重算 → 第二次 `pause` 且文案点名"已过期函数"；重算后重试通过。
+- [x] command 无前置规则、command 抛错 → 均失效；暂停/拒绝 → 均不失效。
+- [x] `query` 挂规则 → 规则忽略、直接执行、不推进世代。
+- [x] `op_type` 非法 / 同名冲突 / 未声明却被规则绑定 → `fatal`：行为零执行、立即结束本轮、日志可按 `cause` 检索。
+- [x] 意图聚焦关闭 → 规则闸门零介入（不建记录、不包装工具、无 `rule_gate.*` 日志）。
+- [x] 门禁（宿主机本地）：`typecheck` 0 / `lint` 0；`vitest run` 128 文件 / 1749 用例通过。
+- [x] 前端 / 管理平台零改动。

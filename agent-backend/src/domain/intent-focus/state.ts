@@ -1,12 +1,3 @@
-/**
- * 意图聚焦（016）纯逻辑：输入截断 → 处置判定。
- *
- * 候选构造 / 题面 / 选择 / 提示铸造分别在**同目录**其余模块，本文件只保留
- * **与业务无关的公共口径**：阈值不在这里归一（区间校验由 `config.ts` 唯一承担），
- * 处置结论也不在 runner 里另写一套字面量。
- *
- * 本文件 MUST 保持纯函数（无 IO、无时钟、无随机）：同输入必得同输出。
- */
 import type { SystemOneQuestion } from '../../infra/laya-client.js';
 
 /**
@@ -26,22 +17,17 @@ export const MAX_QUESTIONS_PER_BATCH = 32;
  */
 export const MAX_STATE_CHARS = 200;
 
-/** 对齐句首后的最短保留长度：太短说明切过头了，宁可不切 */
 const MIN_STATE_AFTER_BREAK = 24;
 
-/** 句末标点/换行：用于把截断点对齐到句首 */
 const SENTENCE_BREAK = /[。！？；!?;\n]/;
 
-/** 处置结论（与 `data-model.md §7.1` 一致，共 5 态） */
 export type IntentFocusDisposition = 'focused' | 'empty' | 'skipped' | 'degraded' | 'unconfigured';
 
-/** 送入模型的输入（超长截断） */
 export interface PreparedState {
   state: string;
   truncated: boolean;
 }
 
-/** 一批命题（键 = `qid`） */
 export interface QuestionBatch {
   questions: Record<string, SystemOneQuestion>;
 }
@@ -54,8 +40,11 @@ export interface QuestionBatch {
  * 截断点尽量对齐到句首，避免从词中间切开。
  */
 export function prepareState(input: string): PreparedState {
+  // 先按 UTF-16 长度做零成本快判；超长时才按**码点**切，避免把 emoji 的代理对切成半个
   if (input.length <= MAX_STATE_CHARS) return { state: input, truncated: false };
-  const tail = input.slice(-MAX_STATE_CHARS);
+  const chars = Array.from(input);
+  if (chars.length <= MAX_STATE_CHARS) return { state: input, truncated: false };
+  const tail = chars.slice(-MAX_STATE_CHARS).join('');
   const match = SENTENCE_BREAK.exec(tail);
   if (match && tail.length - (match.index + 1) >= MIN_STATE_AFTER_BREAK) {
     return { state: tail.slice(match.index + 1).trim(), truncated: true };
@@ -63,7 +52,6 @@ export function prepareState(input: string): PreparedState {
   return { state: tail, truncated: true };
 }
 
-/** 处置判定入参 */
 export type DispositionInput =
   | { kind: 'disabled' }
   | { kind: 'skipped'; reason: string }
@@ -71,38 +59,22 @@ export type DispositionInput =
   | { kind: 'failed'; reason: string }
   | {
       kind: 'ok';
-      /** 本轮发现的技能文件数（含未匹配本体的本体技能） */
       skillCount: number;
-      /** 可聚焦技能数（非本体 + 已匹配本体） */
       focusableCount: number;
-      /** 入选技能数 */
       selectedCount: number;
     };
 
-/**
- * 空结果的三个原因字面量（**唯一来源**）。
- *
- * `runner.ts` 写结构化日志时同样引用它们：两处各自硬编码字符串时，
- * 改一个忘一个就会出现"留档写 `no_skills`、日志写 `no_skill`"。
- */
 export const EMPTY_REASON = {
   noSkills: 'no_skills',
   noFocusableSkills: 'no_focusable_skills',
   belowThreshold: 'below_threshold',
 } as const;
 
-/** 判定结论（唯一形态：处置 + 原因） */
 export interface DispositionResult {
   disposition: IntentFocusDisposition;
   reason: string | null;
 }
 
-/**
- * 处置判定（唯一实现）。
- *
- * 重载让"开关关闭就没有结论"由**类型**表达：`disabled` 恒为 `null`（关闭轮次不留档，
- * FR-060），其余四类恒有结论——调用方因此不必写永远走不到另一侧的防御分支。
- */
 export function decideDisposition(input: { kind: 'disabled' }): null;
 export function decideDisposition(
   input: Exclude<DispositionInput, { kind: 'disabled' }>,

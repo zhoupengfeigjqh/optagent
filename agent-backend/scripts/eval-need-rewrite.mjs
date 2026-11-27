@@ -1,23 +1,4 @@
 #!/usr/bin/env node
-/**
- * 指代判定离线评测（027 / SC-001）。
- *
- * 逐条把标注集送进**真实 Laya**（`POST /v1/systemone`，单条 `noul` 命题），
- * 输出总准确率、代指召回（漏判率）与独立问句误判率，并按类别拆分。
- *
- * 用法：
- *   LAYA_BASE_URL=http://127.0.0.1:8103 \
- *   LAYA_API_KEY=dev-key \
- *   node scripts/eval-need-rewrite.mjs
- *
- *   node scripts/eval-need-rewrite.mjs --dry-run   # 不联网，只校验标注集与命题同源
- *
- * 退出码：0 = 达标（SC-001）；1 = 未达标 / 标注集不合规 / 命题与实现不同源；2 = 缺配置。
- *
- * 为什么是 .mjs 而不是 .ts：这是**离线人工执行**的评测脚本，不属于门禁路径
- * （见 plan「测试与验证策略」最后一行），用纯 ESM 可以直接 `node` 跑，
- * 不需要为它在仓库里引入 `tsx` 这类新依赖（宪章原则六）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -25,7 +6,6 @@ import process from 'node:process';
 const FIXTURE = path.join('tests', 'fixtures', 'rewrite-labeled-set.json');
 const PROMPT_SOURCE = path.join('src', 'domain', 'intent-focus', 'rewrite-prompt.ts');
 const QID = 'need_rewrite';
-/** 判定素材长度与 `state.ts` 的 `prepareState` 同口径（尾部 200 字） */
 const STATE_MAX_CHARS = 200;
 const CATEGORIES = ['anaphora', 'standalone', 'short', 'long_paste'];
 const MIN_PER_CATEGORY = 6;
@@ -152,12 +132,10 @@ async function main() {
   const correct = rows.filter((r) => r.correct).length;
   const accuracy = correct / total;
 
-  // 误判率：期望"不改写"却被判为需要改写的比例（SC-001 ≤ 10%）
   const negatives = rows.filter((r) => r.expect_need_rewrite === false);
   const falsePositives = negatives.filter((r) => r.predicted === true);
   const fpRate = negatives.length === 0 ? 0 : falsePositives.length / negatives.length;
 
-  // 漏判率：期望"改写"却判为不需要
   const positives = rows.filter((r) => r.expect_need_rewrite === true);
   const falseNegatives = positives.filter((r) => r.predicted === false);
   const fnRate = positives.length === 0 ? 0 : falseNegatives.length / positives.length;

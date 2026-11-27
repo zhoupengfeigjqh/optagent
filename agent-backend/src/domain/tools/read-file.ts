@@ -1,38 +1,20 @@
-/**
- * read_file 工具的格式分派（T037 / FR-021）。
- *
- * - 文本（.csv/.txt/.json/.md/.log/.html）：FileAccess.read 直读（内部已做截断与 utimes）；
- *   `.html` 按**原文**读（2026-10-20），不解析 DOM、不执行脚本、不剥标签——模型要的是源码
- * - .xlsx / .xls：SheetJS 逐 sheet 转 CSV（`.xls` 为 OLE2/BIFF 容器，库按文件头自判）
- * - .pdf：pdfjs-dist 提取文本层；无文本层（扫描件）→ 友好提示
- * - 其余扩展名（2026-11-16）：**按内容嗅探兜底**——整个缓冲无 NUL 即按 utf8 文本读，
- *   含 NUL 才拒绝。与 `write_file` 的「未登记扩展名回落文本」对齐，
- *   保证"模型写得进去的，一定读得回来"；判据仍是内容而非扩展名名分
- *
- * xlsx/pdf 解析后的文本同样套用 32KB（可配）截断 + offset/limit 分段，
- * 保证 LLM 上下文不被大文件打爆。
- */
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import type { FileAccess } from '../file-access.js';
-// 2026-11-16：`xlsxToText` 抽到 `domain/preview/xlsx-text.ts`——读侧与预览侧共用一份
 import { xlsxToText } from '../preview/xlsx-text.js';
 
 const TEXT_EXTENSIONS = new Set(['.csv', '.txt', '.json', '.md', '.log', '.html']);
-/** 需经 SheetJS 转文本的 Excel 容器（`.xlsx` zip / `.xls` OLE2，库按文件头自判） */
 const EXCEL_EXTENSIONS = new Set(['.xlsx', '.xls']);
 const SUPPORTED = '.csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html';
 
 export interface ReadToolResult {
-  /** 交给模型的文本（含截断提示） */
   text: string;
   truncated: boolean;
   totalSize: number;
 }
 
 export interface ReadToolOptions {
-  /** 字节偏移（对解析后文本生效） */
   offset?: number | undefined;
   /** 本次最多返回字节数（默认/上限均为 FileAccess 的截断配置） */
   limit?: number | undefined;
@@ -63,9 +45,6 @@ export async function readToolFile(
     return sliceText(await pdfToText(await fa.readBuffer(relPath)), opts, fa.truncateBytes);
   }
 
-  // 未知扩展名（2026-11-16）：与 `write_file` 的"文本回落"对齐——写按扩展名编码，读按内容嗅探。
-  // 判据是全缓冲含 NUL：含 = 二进制，仍按"不支持"拒绝（文案与改造前逐字一致）。
-  // 这里已经读完整文件（`readBuffer`），逐字节判定不再多一次 IO。
   const buf = await fa.readBuffer(relPath);
   if (buf.includes(0)) {
     return {
@@ -77,7 +56,6 @@ export async function readToolFile(
   return sliceText(buf.toString('utf8'), opts, fa.truncateBytes, buf.length);
 }
 
-/** 解析后文本的截断分片（Excel / PDF / 未知扩展名三条路共用） */
 function sliceText(
   full: string,
   opts: ReadToolOptions,
@@ -109,11 +87,9 @@ function withTruncationNote(
 
 let pdfWorkerReady = false;
 
-/** pdf → 文本层拼接；无文本层返回友好提示 */
 async function pdfToText(buf: Buffer): Promise<string> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   if (!pdfWorkerReady) {
-    // Node 无浏览器 Worker：指向本地 worker 文件，pdfjs 自动走 fake worker（主线程）
     const req = createRequire(import.meta.url);
     pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
       req.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),

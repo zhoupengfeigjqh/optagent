@@ -1,13 +1,3 @@
-/**
- * 单元测试：轮内函数执行记录（021）。
- *
- * 守住的口径：
- * - 业务数据抽取四形态（统一信封 / 扁平 / 数组 / 文本）+ content 块数组；
- * - **成败都记**：失败传 `null`，键存在而值不是"未执行"；
- * - 同名多次 → 最后一次覆盖（失败覆盖成功）；
- * - 键名去 MCP 服务前缀 + 归一；
- * - `has` / `get` 分离：`has` 为 true 时 `get` 可能是 `null`。
- */
 import { describe, expect, it } from 'vitest';
 
 import { createFunctionRecord, extractBusinessData } from '../../src/domain/rule-gate/record.js';
@@ -124,7 +114,6 @@ describe('createFunctionRecord：边界（FR-036 / D12 / D14）', () => {
 
   it('恰好在阈值内不被丢弃', () => {
     const record = createFunctionRecord();
-    // 序列化后约 200KB，低于 256KB
     record.add('ok', { payload: 'x'.repeat(200 * 1024) });
     expect(record.has('ok')).toBe(true);
   });
@@ -182,5 +171,66 @@ describe('createFunctionRecord', () => {
     const second = createFunctionRecord();
     expect(second.has('f')).toBe(false);
     expect(second.size).toBe(0);
+  });
+});
+
+describe('createFunctionRecord：世代（command 写后失效，2026-11-24）', () => {
+  it('invalidate 后旧条目不可读但仍在（hasEver 可见），activeSize 归零', () => {
+    const record = createFunctionRecord();
+    record.add('checkA', { pass: true });
+    expect(record.epoch).toBe(0);
+    expect(record.activeSize).toBe(1);
+
+    record.invalidate();
+
+    expect(record.epoch).toBe(1);
+    expect(record.has('checkA')).toBe(false);
+    expect(record.get('checkA')).toBeUndefined();
+    expect(record.hasEver('checkA')).toBe(true);
+    expect(record.size).toBe(1);
+    expect(record.activeSize).toBe(0);
+  });
+
+  it('重算后覆盖同键，读取取最新值；世代继续单调递增', () => {
+    const record = createFunctionRecord();
+    record.add('checkA', { pass: true });
+    record.invalidate();
+    record.add('checkA', { pass: false });
+
+    expect(record.get('checkA')).toEqual({ pass: false });
+    expect(record.has('checkA')).toBe(true);
+
+    record.invalidate();
+    expect(record.epoch).toBe(2);
+    expect(record.has('checkA')).toBe(false);
+  });
+
+  it('显式传入派发世代：落在旧世代的条目对新世代不可见（并行批次保守降级）', () => {
+    const record = createFunctionRecord();
+    const dispatched = record.epoch;
+    record.invalidate();
+    record.add('lateFn', { ok: true }, dispatched);
+
+    expect(record.has('lateFn')).toBe(false);
+    expect(record.hasEver('lateFn')).toBe(true);
+  });
+
+  it('世代不影响"最后一次覆盖"与归一：同一世代内多次调用只留最后一条', () => {
+    const record = createFunctionRecord();
+    record.add('erp__CheckA', { pass: true });
+    record.add('  checkA  ', { pass: false });
+
+    expect(record.size).toBe(1);
+    expect(record.get('checkA')).toEqual({ pass: false });
+  });
+
+  it('超限丢弃会删掉整键（含旧世代），hasEver 同样变为 false', () => {
+    const record = createFunctionRecord();
+    record.add('big', { ok: true });
+    record.invalidate();
+    record.add('big', { payload: 'x'.repeat(300 * 1024) });
+
+    expect(record.hasEver('big')).toBe(false);
+    expect(record.size).toBe(0);
   });
 });

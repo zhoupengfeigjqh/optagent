@@ -3,16 +3,6 @@ import { mount } from '@vue/test-utils'
 
 import BaseIcon from './BaseIcon.vue'
 
-/**
- * 内联 SVG 图标（T024 / 011）
- *
- * 本文件是 2026-10-16 补齐的**同名测试**：`BaseIcon.vue` 因 011（预览面板放大 / 缩小）新增
- * `maximize` / `minimize` 两条路径而被改动，按宪章原则三"每个组件 MUST 有同名测试"
- * 与治理"存量文件被改动时，改动部分及其直接受影响的测试 MUST 符合宪章"补齐——
- * 不是对存量组件发起的补测专项。
- *
- * 只钉住**改动直接触及**的三件事：路径渲染、未知名称的降级、无障碍名称的表达。
- */
 describe('BaseIcon', () => {
   function pathsOf(name: string): string[] {
     return mount(BaseIcon, { props: { name } })

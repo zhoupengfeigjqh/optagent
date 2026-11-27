@@ -1,9 +1,3 @@
-/**
- * 集成测试：数字人设计端点（T047，契约 §5.1~§5.5）
- *
- * 覆盖：新建 / 名称冲突 / 非法名 / SOUL 空拒绝 / 清单外引用拒绝 /
- * 原样回显（含换行与标点）/ 删除阻止 / 404 / 版本冲突 / 分页。
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';
 import { soulDesign } from '../helpers/soul.js';
@@ -27,12 +21,10 @@ const TOOL_FIXTURE = [
 
 let fx: TestFixture;
 
-/** SOUL 主要使命：用例据此断言换行与标点被**原样保留**（004 起由 `mission` 承载） */
 const SOUL_MISSION = '第一行：你是一名助手。\n第二行：含标点，！？\n\n第四行结束。';
 
 const validBody = {
   name: 'demo',
-  // 角色简介同时作为卡片"用途描述"的来源（004 起不再取 SOUL 首行）
   soul: soulDesign(SOUL_MISSION, { intro: '第一行：你是一名助手。' }),
   enabled_tools: ['read_file'],
   mcp_services: ['ocr'],
@@ -40,7 +32,6 @@ const validBody = {
   scenario: { scenario: '生产', data_prep_dirs: ['生产计划', '算法规则'] },
 };
 
-/** 往平台本体库塞一个完整本体（两个必需文件齐备；`FR-058`） */
 function installOntology(scenario = '生产调度', ontologyDir = '原材料采购和库存'): void {
   fx.ctx.ontologies.install({
     scenario,
@@ -93,7 +84,6 @@ describe('POST /api/admin/agents', () => {
       payload: { ...validBody, ontologies: ['生产调度/原材料采购和库存'] },
     });
     expect(res.statusCode).toBe(201);
-    // 只存引用不存正文：正文由部署物化时从库内取
     expect(res.json().ontologies).toEqual(['生产调度/原材料采购和库存']);
   });
 
@@ -180,7 +170,6 @@ describe('GET /api/admin/agents/{name}', () => {
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/demo' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    // 004：换行与标点仍**原样保留**，只是改由 `mission` 承载
     expect(body.soul.mission).toBe(SOUL_MISSION);
     expect(body.scenario.data_prep_dirs).toEqual(['生产计划', '算法规则']);
   });
@@ -219,7 +208,6 @@ describe('GET /api/admin/agents', () => {
       url: '/api/admin/agents',
       payload: { ...validBody, name: 'demo2', enabled_tools: [], mcp_services: [] },
     });
-    // 工具目录被清空后，引用了 read_file 的 demo 变为异常卡片，而 demo2 不受影响
     fx.runtime.tools = [];
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/agents?page=1' });
     const items = res.json().items as Array<{
@@ -321,7 +309,6 @@ describe('DELETE /api/admin/agents/{name}', () => {
 
 describe('GET /api/admin/agents/catalog（§5.6，2026-10-17）', () => {
   it('一次返回全量候选：9 个 MCP 服务全部下发（卡片列表一页仍只有 8 条）', async () => {
-    // 再补 8 个服务，与 beforeEach 预置的 `ocr` 一起凑满 9 个
     for (let index = 2; index <= 9; index += 1) {
       fx.ctx.mcpConfigs.create({
         name: `svc-${index}`,
@@ -344,7 +331,6 @@ describe('GET /api/admin/agents/catalog（§5.6，2026-10-17）', () => {
     expect(body.skills).toEqual([]);
     expect(body.ontologies).toEqual([]);
 
-    // 对照：同一时刻的卡片列表仍是一页 8 条——catalog 不是把分页改大
     const paged = await fx.app.inject({
       method: 'GET',
       url: '/api/admin/mcp/services?page=1',
@@ -363,7 +349,6 @@ describe('GET /api/admin/agents/catalog（§5.6，2026-10-17）', () => {
 
     expect(items).toHaveLength(2);
 
-    // 候选就是 `{ metadata }`：身份只有一份来源，不再下发 scenario / ontology_dir / name
     const metaOf = (item: Record<string, unknown>) => item.metadata as Record<string, unknown>;
     expect(
       items.map((item) => `${metaOf(item).scenario_name as string}/${metaOf(item).ontology_name as string}`),

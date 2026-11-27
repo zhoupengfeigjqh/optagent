@@ -1,13 +1,3 @@
-/**
- * 单测：右侧面板的跳转分流（`openView`，2026-10-15 统一口径）
- *
- * 守四件事：
- * 1. **异源直跳不进面板** —— `window.open`，面板状态一个字节不动（V-10）
- * 2. **同源按预检结论分派** —— `renderable` → iframe；`download` → 下载入口；
- *    `fallback` → 收起面板 + 外跳（不让用户停在一个空面板上）
- * 3. **`kind:'file'` 走文件口径** —— 与"在文件空间里点文件"同一套（这里用不上响应头预检）
- * 4. **脏负载的降级** —— `kind:'file'` 却没有 `filePath` 时退回地址预检，不硬拆地址当路径
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { FilesApi } from '../api/files'
@@ -19,7 +9,6 @@ vi.mock('../utils/preview-probe', () => ({ probeRenderable: vi.fn() }))
 const ORIGIN = window.location.origin
 const probe = vi.mocked(probeRenderable)
 
-/** 文件接口桩：只区分"哪个方法被调用、返回什么"，不模拟后端。 */
 function filesStub(over: Partial<FilesApi> = {}): FilesApi {
   return {
     upload: vi.fn(),
@@ -56,7 +45,6 @@ describe('openView —— 异源地址（V-10）', () => {
     expect(store.open.value).toBe(true)
     expect(store.view.value).toBe('list')
     expect(store.target.value).toEqual({ kind: 'none' })
-    // 跨域读不到响应头，预检**不该**发出去
     expect(probe).not.toHaveBeenCalled()
     open.mockRestore()
   })
@@ -160,7 +148,6 @@ describe('openView —— kind:file（与「文件空间点文件」同一口径
       dir: '数据准备/生产计划',
       filename: '9月计划.xlsx',
     })
-    // 走结构化通路，不再拉 CSV 文本
     expect(files.fetchPreviewText).not.toHaveBeenCalled()
     expect(files.fetchPreviewWorkbook).toHaveBeenCalledWith('数据准备/生产计划', '9月计划.xlsx')
     expect(store.content.value?.renderMode).toBe('sheet')
@@ -331,18 +318,7 @@ describe('openView —— 竞态（后发覆盖先发）', () => {
   })
 })
 
-/**
- * 放大态（2026-10-16，011）
- *
- * 守三件事：
- * 1. **可放大判据只有一处**（`maximizable`）——"有版面"的三类可放大，其余五态一律不可（FR-010 / FR-013）；
- * 2. **出口永远在**（`maximizeToggleVisible = maximized || maximizable`）——放大态下切到加载中的目标时
- *    不能出现"缩小按钮消失"（FR-005）；
- * 3. **放大态是纯呈现** —— 不发请求、不落盘，且 `close` / `backToList` / `openList` 三条路径一律归零，
- *    而 `openFile` / `openView` 换目标时保持（FR-006 / FR-007 / FR-012）。
- */
 describe('放大态 —— 可放大判据与收敛（011）', () => {
-  /** 进"同源 iframe 页面"内容态。 */
   async function storeOnIframe(): Promise<ReturnType<typeof createPreviewStore>> {
     probe.mockResolvedValue('renderable')
     const store = createPreviewStore({ files: filesStub() })
@@ -476,7 +452,7 @@ describe('放大态 —— 可放大判据与收敛（011）', () => {
     probe.mockReturnValueOnce(gate.promise)
     const pending = store.openView({ url: `${ORIGIN}/b`, name: 'B', kind: 'url' })
 
-    expect(store.maximizable.value).toBe(false) // 预检中：内容还不存在
+    expect(store.maximizable.value).toBe(false)
     expect(store.maximizeToggleVisible.value).toBe(true) // 但出口必须还在
 
     gate.resolve('renderable')

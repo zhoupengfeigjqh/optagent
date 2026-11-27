@@ -1,31 +1,11 @@
-/**
- * 技能目录访问的**共享安全层**（2026-10-17 抽出）。
- *
- * `read_skill`（2026-09-23 新增）与 `grep_skill`（2026-10-17 新增）作用在**同一个子树**
- * （`users/{uid}/agents/{agent}/skills`），且必须遵守**同一套安全口径**：技能名限单个目录名、
- * 路径不得越出技能目录（含 realpath 防符号链接逃逸）、只读普通文件、二进制不返回乱码。
- *
- * 抽成单一来源的原因与宪章原则二一致：**安全判据不允许有两份**——各写一份迟早漂移，
- * 而漂移的那一份就是漏洞。本模块只回答"能不能访问"，不含任何检索或渲染逻辑。
- *
- * 判据与平台侧的 `resolveInsideSkill` / `isSafeSkillName` / `unsafeEntryReason` 一致
- * （`specs/001-digital-human-platform/contracts/runtime-api-delta.md` §1.4.1）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** 默认入口文件（与 SKILL 约定一致：SKILL.md 是技能正文入口） */
 export const DEFAULT_ENTRY = 'SKILL.md';
 
 /** 列清单时的条数上限（防止把上下文打爆） */
 export const MAX_LISTED_ENTRIES = 50;
 
-/**
- * 越权访问（非法技能名 / 路径越界 / 符号链接 / 非普通文件）。
- *
- * 与"文件不存在""二进制"等**预期内的用法问题分家**：后者以可读文本返回（模型可自我纠正），
- * 本类才上抛，由 `infra/builtin-tools.ts` 记 alert 日志并按拒绝文案返回。
- */
 export class SkillAccessError extends Error {
   readonly code = 'SKILL_ACCESS_DENIED';
   constructor(message: string) {
@@ -61,7 +41,6 @@ export function requireSkillName(skill: unknown): string {
   return name;
 }
 
-/** 技能内相对路径：缺省为 `SKILL.md`；绝对路径/盘符/控制字符一律拒，`\` 归一为 `/` */
 export function normalizeSkillRelPath(relPath: unknown): string {
   if (relPath === undefined || relPath === null) return DEFAULT_ENTRY;
   if (typeof relPath !== 'string') {
@@ -78,7 +57,6 @@ export function normalizeSkillRelPath(relPath: unknown): string {
   return rel;
 }
 
-/** 解析到技能目录内；越界即抛（`..` 穿越与符号链接逃逸都在此拦住） */
 export function resolveInsideSkill(skillDir: string, rel: string): string {
   const abs = path.resolve(skillDir, rel);
   const inside = path.relative(skillDir, abs);
@@ -104,10 +82,6 @@ export function isDirectory(dir: string): boolean {
   }
 }
 
-/**
- * 列出 `from` 之下的文件，路径**一律相对技能根** `skillRoot`（可直接回填给 `path`），
- * 排序、有界；符号链接不计入。
- */
 export function listSkillFiles(skillRoot: string, from: string): string {
   const out: string[] = [];
   const walk = (current: string): void => {
@@ -145,17 +119,11 @@ export function listSkillNames(skillsRoot: string): string[] {
   }
 }
 
-/** 可用技能名清单（"技能不存在"时的可读提示） */
 export function availableSkills(skillsRoot: string): string {
   const names = listSkillNames(skillsRoot);
   return names.length > 0 ? names.join('、') : '（无）';
 }
 
-/**
- * 二进制判定（与平台侧同一口径：**看字节 0**，不看扩展名）。
- *
- * 用途是"别把乱码塞给模型"：命中即返回一句说明，而不是把 NUL 字节渲染进上下文。
- */
 export function isBinaryBuffer(buf: Buffer): boolean {
   return buf.includes(0);
 }

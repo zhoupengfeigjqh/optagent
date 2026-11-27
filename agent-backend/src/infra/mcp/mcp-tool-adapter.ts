@@ -1,18 +1,3 @@
-/**
- * MCP tool → pi-agent-core AgentTool 适配（T021）。
- *
- * - 工具名 `{server}__{tool}`，避免多 server 重名冲突
- * - 调用经 McpManager（30s 超时 + 重试 1 次）
- * - 失败一律**不抛**：以自然语言文案作为工具结果返回（FR-024，对话不中断），
- *   但打上 `details.toolError` 标记（2026-10-29）——前端工具卡片据此标红，
- *   用户能看见"这次调用没做成"，而不是一张绿色的失败卡片。
- *   标记的翻牌点是 `infra/agent-loop.ts` 的 `afterToolCall`，本文件不负责 isError。
- * - file_args 声明（可选）：LLM 传 user-data 相对路径，经 FileAccess 沙箱校验后
- *   **按声明的取值路径**（如 `image`，或对象数组里的 `items[].excelFileUrl`）
- *   原位替换为签名直链发给服务（远程/跨容器服务无磁盘访问权）；
- *   `"url:from=<来源路径>"` 派生模式的目标字段对 LLM 隐藏，值由引擎从来源路径
- *   推导注入并覆盖模型填写（根治模型对 http 地址字段的幻觉）
- */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { Logger } from 'pino';
 import type { FileAccess } from '../../domain/file-access.js';
@@ -41,7 +26,6 @@ import {
   type InputSchemaLike,
 } from './mcp-schema-view.js';
 
-/** 文件参数转换依赖（按 server 声明启用；agent-factory 按当前用户注入） */
 export interface FileArgContext {
   fileAccess: FileAccess;
   userId: string;
@@ -59,54 +43,24 @@ export interface RuntimeContext {
   sid: string;
 }
 
-/**
- * 约定被穿透的参数名。
- *
- * 要不要注入**由工具自己的入参 schema 决定**：声明了 `uid`/`sid` 的工具才会收到，
- * 没声明的工具（如 OCR 的 `ocr_image`）参数**原样透传**，不受任何影响——
- * 这样"强制穿透"不会把多余字段塞给严格校验入参的第三方服务。
- * 若某个服务用了别的参数名（如 `user_id`/`session_id`），只需在此处扩展一行。
- */
 export const RUNTIME_CONTEXT_PARAMS = ['uid', 'sid'] as const;
 
 export function mcpToolsAsAgentTools(
   manager: McpManager,
   serverName: string,
   tools: McpToolInfo[],
-  /** 本次运行的上下文（`uid`/`sid`）：与 file_args 一样**由运行环境提供，不经 LLM** */
   runtime?: RuntimeContext,
   fileArgs?: Record<string, Record<string, FileArgMode>>,
   fileCtx?: FileArgContext,
-  /**
-   * 调用计数回调（`FR-049`/`FR-050`）：成功/失败各记一次，由 server 接线到 UsageDb。
-   *
-   * 2026-09-23：改为回传**事件对象**——除服务名/成败外还带上**工具名**（MCP 服务自己的
-   * 工具名，如 `ocr` 下的 `ocr_image`，不含暴露给模型的 `{server}__` 前缀）、耗时与错误分类，
-   * 以及运行上下文里的 `uid`（发起用户）与 `sid`（会话 = `thread_id`），供统计下钻与接回对话。
-   */
   onCall?: (event: McpCallEvent) => void,
-  /** 绑定了 user_id/agent_name/thread_id 的运行日志（任务 2026-09-15：MCP 调用可归属到用户） */
   logger?: Logger,
-  /**
-   * 异步工具注入依赖（R11）：由 `agent-factory` 恒传入（不再有"服务是否声明异步"的前置判断）。
-   * 缺省 = 不注入 `resultUrl`（存量行为零变化，见 `async-result-url.ts` 不变式 1）。
-   */
   asyncCtx?: AsyncToolContext,
-  /**
-   * 工具显示名（2026-10-27）：`{ 原始工具名: 人读名称 }`，来自平台 `tool_labels`。
-   * 优先级：本映射 > 服务端 `Tool.title` > `server: tool` 英文拼接。
-   */
   toolLabels?: Record<string, string>,
 ): AgentTool[] {
   return tools.map((t) => {
-    // 工具声明了哪些穿透参数（按自己的入参 schema 判定）
     const injected = declaredContextParams(t.inputSchema);
-    // 异步工具（R11）：判据 = 工具自己的入参 schema 是否声明了 `resultUrl`（2026-10-17）。
-    // 平台不再维护 `async_tools` 白名单，故这里没有"配了但服务收不到"的告警场景：
-    // 没声明就是一个普通的同步工具。
     const asyncInjected =
       asyncCtx && declaresResultUrl(t.inputSchema) ? [ASYNC_RESULT_URL_PARAM] : [];
-    // 派生模式（"url:from="）的目标字段同样对 LLM 隐藏：值由运行环境注入，
     // 模型无从填写，也就不可能幻觉出伪造的 http 地址（2026-09-18）
     const decl = fileArgs?.[t.name];
     const derivedPaths = decl
@@ -123,36 +77,26 @@ export function mcpToolsAsAgentTools(
       : [];
     return {
       name: `${serverName}__${t.name}`,
-      // 显示名三级（2026-10-27）：平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`。
-      // 它进意图聚焦命题（中文判定更准），调用名恒为 `name`，模型读不到 label。
       label: toolLabels?.[t.name]?.trim() || t.title?.trim() || `${serverName}: ${t.name}`,
       description: t.description ?? '',
       // MCP inputSchema 是 JSON Schema，与 typebox 结构兼容；直接透传。
       // 但**穿透参数与派生目标字段对 LLM 隐藏**：模型无从填写，也就不可能覆盖或幻觉出别的值
       parameters: exposeSchema(
-        // 根标题（2026-10-30）：服务端 `Tool.title` → `x-title`，删掉 SDK 生成的类名 `title`；
-        // 服务端没声明就原样透传（见 `withServerTitleX`）。字段级 `title` 不受影响。
         withServerTitleX(hideSchemaPaths(t.inputSchema, derivedPaths), t.title),
         [...injected, ...asyncInjected],
       ) as never,
       execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
         let finalParams: unknown;
         try {
-          // 顺序：先按声明路径铸造文件参数（相对路径 → 签名直链），
-          // 再注入运行环境的 uid/sid（覆盖 LLM 填的任何内容）
           finalParams = injectRuntimeContext(
             rewriteFileArgs(serverName, t.name, params, fileArgs, fileCtx, logger),
             injected,
             runtime,
           );
-          // 异步工具的回写地址（R11）：在 HITL 挂起之后、发出调用之前的最后一跳注入，
-          // 故它不会出现在 interaction_request 的 proposed_args 快照里（不变式 2）
           if (asyncInjected.length > 0 && asyncCtx) {
             finalParams = injectResultUrl(finalParams, asyncCtx.mintResultUrl(t.name, toolCallId));
           }
         } catch (err) {
-          // 沙箱校验拒绝（路径越权/文件不存在）：作为工具结果返回，Agent 可自我纠正。
-          // 这类失败发生在**调用外部服务之前**，不计入 MCP 调用次数。
           logger?.warn(
             { alert: true, event: 'mcp.fileargs.denied', service: serverName, tool: t.name },
             `MCP 文件参数校验失败，调用未发出：${err instanceof Error ? err.message : String(err)}`,
@@ -164,7 +108,6 @@ export function mcpToolsAsAgentTools(
           );
         }
         // 计时口径：`callTool` 内部最多尝试 2 次（30s 超时 + 重试 1 次），故从调用前
-        // 开始计，得到的是**含重试的用户感知耗时**，不是单次尝试耗时。
         const startedAt = Date.now();
         try {
           const result = await manager.callTool(serverName, t.name, finalParams);
@@ -180,7 +123,6 @@ export function mcpToolsAsAgentTools(
             { event: 'mcp.tool.call', scope: 'run', service: serverName, tool: t.name, ok: true },
             `MCP 工具调用成功：${serverName}.${t.name}`,
           );
-          // 结果文本口径（2026-10-12）：逐块挑选，**不再**把整个 CallToolResult 序列化成
           // 信封——否则业务字段（如 viewUrl）被压进字符串，抽取与结构化展示都够不着（见 mcp-result-text.ts）
           const text = mcpResultText(result, { logger, service: serverName, tool: t.name });
           return { content: [{ type: 'text', text }], details: {} };
@@ -205,8 +147,6 @@ export function mcpToolsAsAgentTools(
               'MCP_UNAVAILABLE',
             );
           }
-          // 不抛（2026-10-29）：pi 的 catch 会覆盖整个 result，文案与 details 全丢；
-          // 改为带标记返回，正文对模型**逐字不变**，只是卡片会红
           return toolErrorResult(
             `外部服务 ${serverName} 调用失败：${err instanceof Error ? err.message : String(err)}`,
             'MCP_CALL_FAILED',
@@ -217,11 +157,6 @@ export function mcpToolsAsAgentTools(
   });
 }
 
-/**
- * 该工具声明了哪些穿透参数（按 `properties` 判定，保持 `RUNTIME_CONTEXT_PARAMS` 的顺序）。
- *
- * **没声明就不注入**：这是"不影响不需要 uid/sid 的工具"的判据来源。
- */
 function declaredContextParams(schema: unknown): Array<keyof RuntimeContext> {
   if (typeof schema !== 'object' || schema === null) return [];
   const properties = (schema as InputSchemaLike).properties;
@@ -229,11 +164,6 @@ function declaredContextParams(schema: unknown): Array<keyof RuntimeContext> {
   return RUNTIME_CONTEXT_PARAMS.filter((name) => name in (properties as Record<string, unknown>));
 }
 
-/**
- * 调用前**强制注入** `uid`/`sid`：值一律以运行环境为准，覆盖 LLM 填的任何内容。
- *
- * 参数不是对象时原样返回（防御：MCP 入参本就应当是对象，异常形状交给服务端校验）。
- */
 function injectRuntimeContext(
   params: unknown,
   injected: readonly (keyof RuntimeContext)[],
@@ -251,42 +181,16 @@ function injectRuntimeContext(
   return base;
 }
 
-/** 声明路径在本次入参里取不到值时的哨兵（与"取到的值是 undefined"区分开） */
 const MISSING = Symbol('fileArgMissing');
 
-/** 单条声明在改写过程中的上下文：错误信息与告警日志都要定位到「哪个服务的哪个工具」 */
 interface PathContext {
   serverName: string;
   toolName: string;
-  /** 声明的取值路径（如 `items[].excelFileUrl`） */
   path: string;
   fileCtx: FileArgContext;
   logger?: Logger;
 }
 
-/**
- * 命中 file_args 声明的**取值路径**：把路径末端的（可能位于数组元素里的）相对路径
- * **原位置换**为签名直链；沙箱拒绝时抛 `PermissionError`（由 `execute` 转成工具结果）。
- *
- * 三条判据（2026-09-16；起因见 `domain/file-arg-path.ts`——旧实现只认顶层字符串参数，
- * 对象数组里的字段"配了也静默不生效"）：
- *
- * 1. **取不到值**（路径上的键本次没提供、为 `null` 或是空串）→ 原样透传，
- *    并记 `mcp.fileargs.unmatched` 告警日志。可选参数是合法场景，声明写错也长这样，
- *    日志让后者可查——**静默**正是这次要消除的东西；
- * 2. **形状不符**（该是数组不是数组、该是对象不是对象、叶子不是字符串）→ **抛错**、
- *    调用不发出。这类不一致继续放行只会得到远端更难懂的报错，或"铸了个寂寞"；
- * 3. **值已是 `http(s)://` 直链** → 原样透传。对方要的就是"可下载地址"，这正是目标形态；
- *    且这类值**不能**进沙箱——它不是 user-data 相对路径，会被判"目录不在白名单"，
- *    从而**把整次调用误伤掉**（同一批里的合法文件也一起失败）。
- * 4. **派生模式（`"url:from=<来源路径>"`）** → 目标字段的值**不取自模型的填写**：
- *    引擎从来源路径读取（同一形状、逐元素对应）、过沙箱、铸造后**无条件覆盖写入**
- *    目标字段（模型塞的伪造 http 地址一律作废）。来源缺失/为空 → **抛错**、调用不发出
- *    （与规则 1 不同：普通声明缺失可能是"可选参数没填"，派生来源是管道命脉，缺了
- *    就该让模型自我纠正），并记 `mcp.fileargs.derived` 日志保证注入可观测。
- *
- * 未声明 `file_args` 的工具、入参不是对象的调用，一律原样透传（不碰第三方给的形状）。
- */
 function rewriteFileArgs(
   serverName: string,
   toolName: string,
@@ -334,22 +238,15 @@ function rewriteFileArgs(
   return out;
 }
 
-/**
- * 派生模式（`"url:from="`）的执行体（2026-09-18）。
- *
- * 目标路径与来源路径**除最后一段外逐段一致**（配置加载已校验），因此前缀各层的
- * 容器是同一个：沿前缀下行读取来源，最后在同一容器上「读来源键 → 铸造 → 写目标键」。
- * 数组段按元素逐个对应（元素下标进错误信息）。全程重建容器、不改入参对象。
- */
 function deriveFileArg(
   params: Record<string, unknown>,
   targetPath: string,
   fromPath: string,
   ctx: PathContext,
 ): Record<string, unknown> {
-  const targetSteps = parseFileArgPath(targetPath)!; // 配置加载已校验
+  const targetSteps = parseFileArgPath(targetPath)!;
   const fromSteps = parseFileArgPath(fromPath)!;
-  const shared = targetSteps.slice(0, -1); // 与 fromSteps 前缀相同（isCompatibleFromPath 保证）
+  const shared = targetSteps.slice(0, -1);
   const targetKey = targetSteps.at(-1)!.key;
   const sourceKey = fromSteps.at(-1)!.key;
 
@@ -371,7 +268,6 @@ function deriveFileArg(
       if (typeof value === 'string' && value.trim() === '') {
         throw new Error(`file_args 声明「${ctx.path}」：${loc} 为空串，无法铸造「${targetKey}」`);
       }
-      // 沙箱校验 + 铸造（外部 http 直链照旧透传，见 convertLeaf）
       const minted = convertLeaf(value, ctx, loc);
       ctx.logger?.info(
         {
@@ -415,7 +311,6 @@ function deriveFileArg(
   return walk(params, shared, '') as Record<string, unknown>;
 }
 
-/** 派生读取用的取属性：与 `takeProperty` 的区别是**缺失即抛错**（派生来源是管道命脉） */
 function requireProperty(
   container: unknown,
   key: string,
@@ -436,10 +331,6 @@ function requireProperty(
   return value;
 }
 
-/**
- * 按路径递归改写，返回**新的容器**（不改动入参对象，数组元素也逐个重建）。
- * `prefix` 是"已经走过的路径"，只用于错误信息与日志定位（写法与声明一致，如 `items[]`）。
- */
 function applyPath(
   container: unknown,
   steps: FileArgStep[],
@@ -460,7 +351,6 @@ function applyPath(
   return { ...(container as Record<string, unknown>), [step.key]: next };
 }
 
-/** 取下一步的值；键不存在/为 null 时记日志并返回哨兵（调用方原样保留该分支） */
 function takeProperty(container: unknown, key: string, prefix: string, ctx: PathContext): unknown {
   if (typeof container !== 'object' || container === null || Array.isArray(container)) {
     throw new Error(
@@ -498,7 +388,6 @@ function mapElements(
   });
 }
 
-/** 路径末端：铸签名直链（相对路径）或原样透传（外部直链） */
 function convertLeaf(value: unknown, ctx: PathContext, loc: string): unknown {
   if (typeof value !== 'string') {
     throw new Error(`file_args 声明「${ctx.path}」：${loc} 应为字符串（实际是 ${shapeOf(value)}）`);
@@ -508,15 +397,10 @@ function convertLeaf(value: unknown, ctx: PathContext, loc: string): unknown {
     return value;
   }
   if (/^https?:\/\//i.test(value)) return value; // 已是可下载直链：无需铸造，也不能进沙箱
-  const { relPath } = ctx.fileCtx.fileAccess.resolveVerified(value); // 越权/不存在抛 PermissionError
+  const { relPath } = ctx.fileCtx.fileAccess.resolveVerified(value);
   return ctx.fileCtx.mintUrl(ctx.fileCtx.userId, relPath);
 }
 
-/**
- * 记"声明了但这次没值"的告警。
- * 刻意不是 `alert: true`：可选参数不填是**正常**的，只有"声明写错"才需要人来处理，
- * 而这种错会每次调用都出现，一眼可见（用 alert 反而会把这条噪声抬成告警）。
- */
 function warnUnmatched(ctx: PathContext, loc: string, why: string): void {
   ctx.logger?.warn(
     {

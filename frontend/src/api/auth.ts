@@ -1,9 +1,3 @@
-/**
- * 登录鉴权 API（`contracts/auth-api.md`）
- *
- * 与运行环境接口同一 `HttpClient`（同源经网关/Vite 代理）。凭据在 HttpOnly Cookie，
- * 前端不读取、不拼 Authorization 头——浏览器自动携带。
- */
 import type { HttpClient } from './http'
 
 export interface AuthUser {

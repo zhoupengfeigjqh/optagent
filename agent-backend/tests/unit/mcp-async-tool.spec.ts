@@ -1,13 +1,3 @@
-/**
- * 单元测试：MCP 异步工具的 `resultUrl` 注入（R11，契约 §10.6 不变式 1/2）
- *
- * 2026-10-17 起**判据统一为工具自己的入参 schema**（平台侧 `async_tools` 已移除）：
- * - 声明了 `resultUrl` → 注入运行环境铸造的地址，且该参数对 LLM 隐藏、覆盖模型填写；
- * - 未声明 → 一个多余字段都不加（第三方服务常严格校验入参）。
- *
- * 独立成文件：`mcp-tool-adapter.spec.ts` 已远超 500 行门禁（既有状态），
- * 新用例不再往里堆（宪章原则二）。
- */
 import { describe, expect, it } from 'vitest';
 import type { Logger } from 'pino';
 import type { McpManager } from '../../src/infra/mcp/mcp-manager.js';
@@ -20,7 +10,6 @@ interface Call {
   args: unknown;
 }
 
-/** 只实现 callTool 的假 manager（本用例只关心"最终发出去的参数"） */
 function fakeManager(calls: Call[]) {
   return {
     callTool: async (server: string, tool: string, args: unknown) => {
@@ -32,7 +21,6 @@ function fakeManager(calls: Call[]) {
 
 const RUNTIME: RuntimeContext = { uid: 'admin', sid: 'th_123' };
 
-/** 声明了 resultUrl 的工具（服务侧已按异步口径改造） */
 const ASYNC_TOOL = {
   name: 'submit_job',
   description: '提交后台计算任务',
@@ -43,7 +31,6 @@ const ASYNC_TOOL = {
   },
 };
 
-/** 未声明 resultUrl 的工具：普通同步工具，行为与改造前完全一致 */
 const SYNC_TOOL = {
   name: 'submit_legacy',
   description: '提交任务（同步返回）',
@@ -74,7 +61,6 @@ const ctx = (): AsyncCtxLike => ({
     `https://backend/api/files/put?tool=${tool}&call_id=${callId}&sig=x`,
 });
 
-/** 取工具执行结果（适配 pi-agent-core 的 execute 签名） */
 async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, params: unknown) {
   return (await tool.execute('call_1' as never, params as never)) as {
     content: Array<{ text: string }>;
@@ -86,7 +72,6 @@ describe('R11 异步工具：resultUrl 注入（schema 判据）', () => {
     const calls: Call[] = [];
     const [tool] = build(calls, [ASYNC_TOOL], ctx());
 
-    // 隐藏：暴露给 LLM 的 schema 里没有 resultUrl（required 里的同名项一并移除）
     const exposed = tool!.parameters as {
       properties: Record<string, unknown>;
       required?: string[];
@@ -94,7 +79,6 @@ describe('R11 异步工具：resultUrl 注入（schema 判据）', () => {
     expect(exposed.properties).not.toHaveProperty('resultUrl');
     expect(exposed.required).toEqual(['plan']);
 
-    // 注入且覆盖：模型塞的伪造地址一律作废
     await exec(tool!, { plan: 'p1', resultUrl: 'http://evil.example/put' });
     expect(calls[0]!.args).toEqual({
       plan: 'p1',
@@ -110,7 +94,7 @@ describe('R11 异步工具：resultUrl 注入（schema 判据）', () => {
     expect(exposed.properties).toEqual({ plan: { type: 'string' } });
 
     await exec(tool!, { plan: 'p1' });
-    expect(calls[0]!.args).toEqual({ plan: 'p1' }); // 不塞多余字段
+    expect(calls[0]!.args).toEqual({ plan: 'p1' });
   });
 
   it('未提供注入依赖（不传 asyncCtx）：不注入、schema 原样（不变式 1）', async () => {

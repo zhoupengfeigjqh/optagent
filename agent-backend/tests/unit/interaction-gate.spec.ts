@@ -1,12 +1,3 @@
-/**
- * 单元测试：交互门（interaction-gate，HITL 挂起/恢复）。
- *
- * 守住的生命周期语义：
- * - request 挂起 → submit 返回确认参数 / reject、超时、drain 返回对应 outcome
- * - settle 幂等：重复提交返回首次结果；expired 后再 settle 返回 expired
- * - 并发上限默认 3：超出 FIFO 排队，前一落定才放行
- * - dispose：run 结束时全部清理，此后 request 立即 reject（防泄漏）
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { InteractionRequestPayload } from '../../src/domain/interaction-gate.js';
@@ -27,7 +18,6 @@ describe('InteractionGate：挂起与恢复', () => {
 
     expect(gate.settle(id, 'submit', { line: 'L02' })).toMatchObject({ result: 'settled' });
     await expect(req).resolves.toEqual({ kind: 'submit', args: { line: 'L02' } });
-    // 落定后从等待快照中消失
     expect(gate.snapshot()).toBeNull();
   });
 
@@ -117,7 +107,6 @@ describe('InteractionGate：挂起与恢复', () => {
     gate.settle(id, 'reject');
     await req;
 
-    // 无中文名的工具 / 空白值：快照字段仍是字符串，前端无需判空
     const req2 = gate.request({ ...INPUT, toolLabel: '   ' });
     const id2 = gate.snapshot()!.interaction_id;
     expect(created[1]!.tool_label).toBe('pricing__query_price');
@@ -192,12 +181,10 @@ describe('InteractionGate：drain / dispose / 并发上限', () => {
     expect(created).toHaveLength(3);
     expect(gate.waitingCount()).toBe(3);
 
-    // 第 4 个进入排队：不建挂起点、不发 SSE 事件
     const d = gate.request({ ...INPUT, callId: 'c4' });
     await Promise.resolve();
     expect(created).toHaveLength(3);
 
-    // 第一个落定释放槽位 → 第 4 个放行并建立挂起点
     gate.settle(created[0]!, 'reject');
     await a;
     await vi.waitFor(() => expect(created).toHaveLength(4));

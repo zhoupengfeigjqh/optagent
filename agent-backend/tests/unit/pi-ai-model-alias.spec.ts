@@ -1,17 +1,3 @@
-/**
- * 单元测试：模型 id 的**别名解析**（`MODEL_ALIASES`）
- *
- * 背景（2026-11-18）：`config.yaml` 允许写厂商别名（如 `deepseek-flash`），但 pi-ai 的
- * meta 目录里只有正式 id `deepseek-v4-flash`。此前直接按 id 查目录 ⇒ 构造期抛错 ⇒
- * 整轮以 INTERNAL_ERROR 失败（前端显示「系统繁忙，请稍后重试」）。
- *
- * 三条不变式：
- * ① 别名可构造，且**请求体发出的 model 就是配置原值**（配置写什么就发什么）；
- * ② 元数据借用正式 id 那份（窗口 / compat / 计价不丢）；
- * ③ 未登记的 id 仍然快速失败，且错误里给出可选清单与已登记别名（可操作性，原则九）。
- *
- * 全程不碰网络：构造期只读本地目录，不发请求。
- */
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LlmRetryOptions } from '../../src/config.js';
@@ -44,10 +30,8 @@ describe('PiAiLlmProvider —— 模型 id 别名解析', () => {
     const provider = new PiAiLlmProvider({ model: 'deepseek-flash', apiKey: 'test-key' }, NO_RETRY);
     const { model } = provider.loopOptions();
 
-    // ① 配置写什么，发什么（前端下拉 / config.yaml / 请求体三者同源）
     expect(model.id).toBe('deepseek-flash');
 
-    // ② 元数据来自目录里的 deepseek-v4-flash 那一份，不是凭空的默认值
     const official = deepseekProvider()
       .getModels()
       .find((m) => m.id === 'deepseek-v4-flash');

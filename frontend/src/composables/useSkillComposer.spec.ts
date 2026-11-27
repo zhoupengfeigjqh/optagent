@@ -1,9 +1,3 @@
-/**
- * 单元测试：`/技能名` 的输入区接线（2026-11-07）。
- *
- * 纪律与 `@` 引用一致：落字只由 `skillToken` 决定、剥离只由 `stripSkillToken` 决定。
- * 这两条只要有人另写一份正则，用例就会红。
- */
 import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 

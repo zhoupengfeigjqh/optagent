@@ -1,12 +1,3 @@
-/**
- * 会话接口（`contracts/backend-api.md` §3）
- *
- * ⚠️ §7 差异 2：`GET /api/threads` **不支持 `limit` / `offset`**
- * （Schema `additionalProperties: false`，但 Fastify 默认 `removeAdditional: true` →
- * 未声明参数会被**静默丢弃、不报错**；2026-09-10 联调实测）——
- * 历史列表 10 / 100 条由**前端切片**实现（FR-039、FR-040）。
- * 只有**详情**接口支持分页（`limit` 默认 50 / 上限 200，`offset` 从最新往前数）。
- */
 
 import type { HttpClient } from './http'
 import type {
@@ -21,40 +12,23 @@ import type {
   ThreadDetail,
 } from './types'
 
-/** 会话详情分页参数。 */
 export interface ThreadDetailQuery {
   limit?: number
   offset?: number
 }
 
-/**
- * 会话最新一轮的下一步动作提示（007，`getNextActions` 契约 §1.2）。
- *
- * 016 起卡片**不再复用 `AgentStarter`**：隐藏工具提示改为结构化 `tool_tips`，
- * 与首屏问题实例（`tools` + `guidance`）是两条独立通道。
- */
 export interface ThreadNextSteps {
-  /** 归属的 assistant 消息 id；`null` = 无建议（不渲染，且不是错误态） */
   message_id: string | null
-  /** 0~N 条；有内容才下发，不存在 0 条的下发形态 */
   actions: NextStepAction[]
 }
 
-/** 会话 API 接口。 */
 export interface ThreadsApi {
-  /** `POST /api/threads` → 201（**不返回** `agent_name` 与 `updated_at`） */
   create(agentName: string): Promise<ThreadCreateResponse>
-  /** `GET /api/threads`（可选 `agent_name`）→ 顶层数组，按 `updated_at` 倒序，**不接受分页参数** */
   list(agentName?: string): Promise<Conversation[]>
-  /** `GET /api/threads/{id}` → 详情（含 `total` / `messages` / `running`） */
   detail(threadId: string, query?: ThreadDetailQuery): Promise<ThreadDetail>
-  /** `PATCH /api/threads/{id}` → 重命名（本期无 UI 入口，接口保留） */
   rename(threadId: string, title: string): Promise<{ thread_id: string; title: string }>
-  /** `DELETE /api/threads/{id}` → 204（服务端先 stop 进行中的 run） */
   remove(threadId: string): Promise<void>
-  /** `PUT /api/threads/{id}/messages/{messageId}/feedback`（同值重复提交 = 取消） */
   feedback(threadId: string, messageId: string, value: FeedbackValue): Promise<FeedbackResponse>
-  /** `POST /api/threads/{id}/stop` → 中断本轮（本轮不落盘） */
   stop(threadId: string): Promise<StopResponse>
   /**
    * `POST /api/threads/{id}/interaction` → HITL 人工确认提交/拒绝（202，幂等）。
@@ -66,7 +40,6 @@ export interface ThreadsApi {
   ): Promise<InteractionSubmitResponse>
 }
 
-/** 创建会话 API。 */
 export function createThreadsApi(client: HttpClient): ThreadsApi {
   const base = (threadId: string): string => `/api/threads/${encodeURIComponent(threadId)}`
 

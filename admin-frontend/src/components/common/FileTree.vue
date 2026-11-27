@@ -1,22 +1,8 @@
 <script setup lang="ts">
-/**
- * 通用只读文件树（2026-10-03 由 `skills/SkillFileTree` 抽取为共用件）。
- *
- * 两处在用，形态必须一致（这是抽取的原因）：
- * - SKILL 详情：`SKILL.md` + `references/` 等整包文件（选中后可编辑）；
- * - 本体详情：`ontology.yaml` + `securities.yaml`（根层两个文件，选中后**只读**）。
- *
- * 口径：
- * - 层级按路径的 `/` 拆分展示，目录可折叠；
- * - 每一项都是**原生按钮**（键盘可达、焦点可见），当前项标 `aria-current`；
- * - 只负责"选哪个文件"，不负责读内容（读由父组件完成）。
- */
 import { computed, ref } from 'vue'
 
 interface FileNode {
-  /** 文件相对路径（库内口径，posix） */
   path: string
-  /** 展示名（末段） */
   label: string
   depth: number
   dir: string
@@ -25,9 +11,7 @@ interface FileNode {
 const props = withDefaults(
   defineProps<{
     files: Array<{ path: string; size: number }>
-    /** 当前选中的文件路径 */
     selected: string
-    /** 无障碍标签（`nav` 的 `aria-label`），如「技能文件」「本体文件」 */
     label?: string
   }>(),
   { label: '文件' },
@@ -37,7 +21,6 @@ const emit = defineEmits<{
   (e: 'select', path: string): void
 }>()
 
-/** 折叠的目录前缀集合（默认全展开） */
 const collapsed = ref<Set<string>>(new Set())
 
 /** 扁平化成"目录行 + 文件行"，目录行不可选中，仅用于折叠 */

@@ -1,13 +1,3 @@
-/**
- * 单元测试：点击下一步动作卡片的**真实**发送链路（007 · US2）。
- *
- * 本文件用真实 `useChatPanel()`（只把 `useSession` 换成受控的假会话），因此断言的是
- * 端到端行为而不是"处理器被调用过"：
- * - 点卡片只**打开确认**、不发消息（未确认 MUST NOT 发送）；
- * - 确认后**恰好一次** `chat.send`，载荷为 `{content: 提示词, attachments: [], guidance}`；
- * - 连点确认只发一次（进行中即拦截）；
- * - 不可用态（未选数字人 / 会话不可用）明确拒绝且不留残留。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +8,6 @@ import { nextStepSendPayload } from '../utils/next-steps'
 
 const h_state = vi.hoisted(() => ({ session: null as unknown }))
 
-// `useChatPanel` 及其依赖的 composable 都经 `useSession()` 取状态：换掉它即可完全掌控输入输出
 vi.mock('./useAppSession', () => ({ useSession: () => h_state.session }))
 
 const { useChatPanel } = await import('./useChatPanel')
@@ -40,7 +29,6 @@ interface Harness {
   panel: ReturnType<typeof useChatPanel>
 }
 
-/** 受控假会话：只实现 `useChatPanel` 会触碰到的字段 */
 function makeSession(options: { agentSelected?: boolean; activeThread?: string | null } = {}) {
   const noop = vi.fn()
   const send = vi.fn(async () => undefined)
@@ -130,7 +118,6 @@ function makeSession(options: { agentSelected?: boolean; activeThread?: string |
       currentAgent: ref(options.agentSelected === false ? null : { agent_name: 'demo' }),
       candidates: ref([]),
       mcpServers: ref([]),
-      // 2026-10-18：发送前 MCP 就绪门读这两个字段；无灰 → 零等待
       mcpPending: ref(false),
       ensureMcpReady: vi.fn(async () => true),
       warmMcp: vi.fn(async () => undefined),
@@ -199,7 +186,6 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
     expect(send.send).toHaveBeenCalledWith({
       content: '按交付日期梳理这批订单的风险',
       attachments: [],
-      // 016：tool_tips 走结构化通道；卡片点击仍会触发意图聚焦
       toolTips: [TIP],
     })
     expect(panel.pendingSuggestion.value).toBeNull()
@@ -221,7 +207,6 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
     const { panel, session } = mountHarness(makeSession())
     const chat = session.chat as { send: ReturnType<typeof vi.fn> }
     const nextSteps = session.nextSteps as { reset: ReturnType<typeof vi.fn> }
-    // 用调用顺序证明"清空"早于"发送"（回归：旧卡片一直挂到本轮答完才消失）
     const order: string[] = []
     nextSteps.reset.mockImplementation(() => order.push('reset'))
     chat.send.mockImplementation(async () => {
@@ -237,14 +222,12 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
   it('确认发送后弹窗立即关闭：不等待本轮输出结束（chat.send 挂起也不等）', async () => {
     const { panel, session } = mountHarness(makeSession())
     const chat = session.chat as { send: ReturnType<typeof vi.fn> }
-    // `send` 永不 resolve：模拟"本轮仍在输出"。若弹窗要等本轮结束，`pendingSuggestion` 会一直挂住
     chat.send.mockImplementation(() => new Promise<void>(() => {}))
 
     panel.onPickNextStep(ACTION)
     await panel.onConfirmSuggestion()
 
     expect(chat.send).toHaveBeenCalledTimes(1)
-    // 发出即关（不等本轮答完）——这正是"点确认后弹窗一直挂到输出结束才消失"的回归防线
     expect(panel.pendingSuggestion.value).toBeNull()
   })
 
@@ -255,8 +238,7 @@ describe('useChatPanel —— 下一步动作卡片的确认与发送（007）',
 
     panel.onPickNextStep(ACTION)
     void panel.onConfirmSuggestion()
-    await panel.onConfirmSuggestion() // 第二次：仍在发送中
-    // 023 v1.3：发送链路里多了一步"粘贴件此时才落盘"（`flushPending`），是异步的；
+    await panel.onConfirmSuggestion()
     // 让第一条链路跑完再断言"只发一次"，否则断言早于 `chat.send`
     await new Promise((resolve) => setTimeout(resolve, 0))
 

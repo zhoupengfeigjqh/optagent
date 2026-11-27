@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * HITL 弹窗的**单个入参字段行**（递归组件，2026-09-23）。
- *
- * 通用性来源：控件形态**只**由 schema 推导（`utils/arg-schema.ts`），本组件不含任何工具/
- * MCP 服务名——对象逐行（自身递归）、对象数组成表格（`InteractionTable`）、标量数组成列表、
- * schema 表达不了的形状交 JSON 逃生舱。因此同一份代码自动适配任意深度的入参结构。
- *
- * 与另两个组件的分工：本组件负责"这一行"（标签、说明、操作条、文件卡片、规则入口）；
- * 控件本体在 `InteractionControl.vue`；表格在 `InteractionTable.vue`。
- * 状态全部来自注入的表单状态（模型、JSON 草稿、规则入口落点），本组件不持有入参数据。
- */
 import { computed, inject, ref } from 'vue'
 
 import type { WorkspaceFile } from '../../api/types'
@@ -38,35 +27,24 @@ import RulePickerDialog from './RulePickerDialog.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 本节点的 schema */
     schema: FieldSchema
-    /** 本节点在值树里的路径 */
     path: NodePath
-    /** 本节点在父级里的名字（对象键） */
     name: string
-    /** 父级的 required 是否包含本节点 */
     required?: boolean
   }>(),
   { required: false },
 )
 
-/**
- * 表单状态上下文（弹窗提供）。缺失时不渲染任何东西：本组件只在
- * `InteractionDialog` 的 provider 内才有意义（单测需显式 provide）。
- */
 const context = inject<InteractionFormContext | null>(INTERACTION_FORM_KEY, null)
 
 const control = computed(() => controlOf(props.schema))
-/** 主标签：`title` 优先，缺失或只是参数名的排版变体时回退参数名（2026-10-27） */
 const labelText = computed(() => fieldLabelOf(props.name, props.schema))
 const description = computed(() => descriptionOf(props.schema))
 const mentionable = computed(() => isTextControl(control.value))
 
-/** 控件 DOM id（与 `InteractionControl` 的生成规则一致，供 label 的 `for` 关联）。 */
 const domId = computed(() => `interaction-input-${encodeURIComponent(pathKey(props.path))}`)
 const itemSchema = computed<FieldSchema>(() => itemSchemaOf(props.schema) ?? {})
 
-/** 对象分组的子字段（保持 schema 顺序；required 取自本层）。 */
 const children = computed(() => {
   const required = requiredSetOf(props.schema)
   return propertiesOf(props.schema).map(({ key, schema }) => ({
@@ -76,13 +54,11 @@ const children = computed(() => {
   }))
 })
 
-/** 数组元素（**保留原始元素与下标**：过滤会让下标错位，写入就会落到别的行）。 */
 const elements = computed<unknown[]>(() => {
   const value = context?.form.valueOf(props.path)
   return Array.isArray(value) ? value : []
 })
 
-/** 表格列：schema 声明列在前，值里实际出现的列补在后（规则清单的列来自数据）。 */
 const columns = computed(() => columnKeysOf(itemSchema.value, elements.value))
 const itemIndexes = computed(() => elements.value.map((_item, index) => index))
 
@@ -90,20 +66,17 @@ function cellSchemaOf(column: string): FieldSchema {
   return propertiesOf(itemSchema.value).find((item) => item.key === column)?.schema ?? {}
 }
 
-/** 取值：字符串类控件的显示值（文件卡片按它反查文件空间）。 */
 const textValue = computed(() => {
   const value = context?.form.valueOf(props.path)
   if (value === undefined || value === null) return ''
   return typeof value === 'string' ? value : String(value)
 })
 
-/** 该节点是否以 JSON 文本框呈现（schema 决定的逃生舱，或用户手动切换）。 */
 const jsonMode = computed(() => context?.form.isJsonView(props.path, control.value) ?? false)
 const structured = computed(
   () => control.value === 'group' || control.value === 'table' || control.value === 'list',
 )
 
-/** 操作条：结构化形状需要加行与视图切换；规则入口所在行即便只是 JSON 也要有它 */
 const rulesAnchor = computed(() => context?.form.isRulesAnchor(props.path) ?? false)
 const showToolbar = computed(() => structured.value || rulesAnchor.value)
 
@@ -137,7 +110,6 @@ const loadRules = computed(
     context?.form.loadRules ?? ((): Promise<never> => Promise.reject(new Error('无会话上下文'))),
 )
 
-/** 结构化文件卡片：值精确命中文件空间相对路径时才展示（展示层，提交值仍是路径）。 */
 const fileCard = computed(() => {
   if (!context || !mentionable.value) return null
   const value = textValue.value
@@ -163,10 +135,6 @@ function removeElement(index: number): void {
   write(elements.value.filter((_, position) => position !== index))
 }
 
-/**
- * 收起 `@` 浮层。结构变化（删行、切 JSON 视图）会让状态机里记录的"激活字段/光标"
- * 指向已失效的路径，不关就会留下一个孤儿面板，甚至把路径插到别处。
- */
 function closeMention(): void {
   context?.mention?.close()
 }
@@ -176,12 +144,10 @@ function openRules(): void {
 }
 
 function onRulesConfirm(value: Array<Record<string, unknown>>): void {
-  // 失败原因由表单状态持有并在弹窗底部统一展示，这里只需关闭选择器
   context?.form.applyRules(value)
   rulesOpen.value = false
 }
 
-/** 结构化文件卡片行（值命中文件空间时的展示层）。 */
 function cardOf(): { dir: string; file: WorkspaceFile } | null {
   return fileCard.value
 }
@@ -201,11 +167,9 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       <div v-else class="interaction-dialog__label" :class="{ required }">
         {{ labelText }}
       </div>
-      <!-- 说明性文案收进「?」：默认不占版面，点开才看 -->
       <HintTip v-if="hints" :text="hints" label="查看参数说明" />
     </div>
 
-    <!-- 行内操作条：规则入口（若有）、加行/加项、JSON 视图切换，都在这一行 -->
     <div v-if="showToolbar" class="interaction-dialog__toolbar">
       <button
         v-if="rulesAnchor && context.mention"
@@ -243,7 +207,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       </button>
     </div>
 
-    <!-- 对象分组：子字段逐个成行（递归本组件） -->
     <div v-if="control === 'group' && !jsonMode" class="interaction-dialog__group">
       <InteractionField
         v-for="child in children"
@@ -255,7 +218,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       />
     </div>
 
-    <!-- 对象数组 → 表格（一行一个元素；列 = schema 声明列 + 值里出现的列） -->
     <InteractionTable
       v-else-if="control === 'table' && !jsonMode"
       :path="path"
@@ -266,7 +228,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       @remove="removeElement"
     />
 
-    <!-- 标量数组 → 列表（一行一项） -->
     <div v-else-if="control === 'list' && !jsonMode" class="interaction-dialog__list">
       <p v-if="elements.length === 0" class="interaction-dialog__table-empty">尚未添加任何项。</p>
       <div v-for="index in itemIndexes" :key="index" class="interaction-dialog__list-row">
@@ -287,10 +248,8 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
       </div>
     </div>
 
-    <!-- 标量控件、以及 JSON 视图（含 schema 决定的逃生舱） -->
     <InteractionControl v-else :schema="schema" :path="path" :name="name" />
 
-    <!-- 结构化文件卡片：值命中文件空间时的展示层（提交值仍是相对路径） -->
     <div v-if="cardOf()" class="interaction-dialog__file-card">
       <BaseIcon name="file" :size="14" />
       <span class="interaction-dialog__file-card-name">{{ cardOf()!.file.filename }}</span>
@@ -320,7 +279,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
 </template>
 
 <style scoped>
-/* `position: relative` 是 `@` 面板（InteractionControl 内）的定位上下文 */
 .interaction-dialog__field {
   position: relative;
   display: flex;
@@ -328,7 +286,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
   gap: var(--space-1);
 }
 
-/* 标签行：`?` 与标签同一行，不占额外纵向空间 */
 .interaction-dialog__label-row {
   display: flex;
   align-items: center;
@@ -374,7 +331,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
   border-color: var(--color-text-muted);
 }
 
-/* 对象分组：子字段缩进一行，视觉上归属父字段 */
 .interaction-dialog__group {
   display: flex;
   flex-direction: column;
@@ -404,8 +360,6 @@ function cardOf(): { dir: string; file: WorkspaceFile } | null {
   color: var(--color-text-muted);
 }
 
-/* 列表项的删除按钮（表格里的同名按钮样式在 InteractionTable 内，
-   scoped CSS 无法跨组件复用，故各持一份） */
 .interaction-dialog__row-remove {
   padding: 0 var(--space-1);
   border: none;

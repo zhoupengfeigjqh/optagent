@@ -1,16 +1,3 @@
-/**
- * 展示格式化单测（`src/utils/format.ts`）
- *
- * 运行方式：`npm run test` / `npm run test:coverage`（本地执行）
- *
- * 覆盖三条口径：
- * 1. **耗时统一 1 位小数**——后端 `duration_seconds` 精度最多 3 位（`Math.round(ms)/1000`），
- *    前端不依赖其精度（`contracts/backend-api.md` §7 差异 4）。
- * 2. **无数据返回空串/占位**——调用方据此不渲染整块 UI，空串与 `"0"` 是两种不同语义，
- *    边界必须分开（如 `0 tokens` 要渲染、`null` 不渲染）。
- * 3. **单位各自有测试**——`Sec` / `Ms` / `Minutes` 三种入参此前共用一个名字，
- *    正是本次收敛要防的事故，故每个函数单独断言其单位换算。
- */
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -68,7 +55,6 @@ describe('formatDurationMs', () => {
   it('不足 1 秒按毫秒取整', () => {
     expect(formatDurationMs(84)).toBe('84ms')
     expect(formatDurationMs(0)).toBe('0ms')
-    // 取整后已到 1000ms，换秒而不是输出 `1000ms`
     expect(formatDurationMs(999.6)).toBe('1.0s')
   })
 
@@ -155,7 +141,6 @@ describe('formatBytes', () => {
 
 describe('formatTimestamp', () => {
   it('输出本地时间 YYYY-MM-DD HH:mm', () => {
-    // 用本地时间构造再转 ISO，使断言不依赖运行环境时区
     expect(formatTimestamp(new Date(2026, 8, 15, 9, 5).toISOString())).toBe('2026-09-15 09:05')
   })
 

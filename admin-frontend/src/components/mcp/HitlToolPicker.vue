@@ -1,32 +1,13 @@
 <script setup lang="ts">
-/**
- * 「需确认的工具」勾选区（2026-10-08 从 `McpCallConfigForm` 拆出）。
- *
- * 拆出来的理由与 `McpToolPicker` 同：这块交互（清单勾选 / 清单外遗留项 / 回退手填）
- * 把调用配置表单推到了 500 行门禁之上（宪章原则二）。
- *
- * 两条既有口径（MUST 保持）：
- * - **已保存但当前清单未包含的工具照常展示**（可能是清单截断或服务改版）：
- *   静默丢弃存量配置会让"重新保存一次"悄悄关掉某个工具的确认；
- * - **清单不可得时回退手填**（服务未启动/探测失败）：管理员仍要能改配置。
- *
- * 类名沿用 `mcp-config-form__` 前缀：CSS 作用域随组件迁移，样式与用法仍是一套，
- * 测试选择器也不因此漂移。
- */
 import type { McpToolInfo } from '../../api/types'
 
 const props = defineProps<{
-  /** 服务当前工具清单（探测结果） */
   tools: McpToolInfo[]
-  /** 已勾选（含清单外遗留项） */
   selected: string[]
-  /** 已保存、但当前清单里没有的工具名 */
   orphans: string[]
   /** 清单不可得 → 回退手填（此时不渲染复选框） */
   manualFallback: boolean
-  /** 手填文本（每行一个工具名） */
   manualText: string
-  /** 工具清单被截断（提示"完整清单以服务端为准"） */
   truncated: boolean
 }>()
 
@@ -47,7 +28,6 @@ function toggle(name: string, checked: boolean): void {
   <div class="field">
     <span class="field__label">需确认的工具</span>
 
-    <!-- 有工具清单：复选框多选，直接勾选 -->
     <div
       v-if="!manualFallback"
       class="mcp-config-form__tools"
@@ -67,7 +47,6 @@ function toggle(name: string, checked: boolean): void {
         }}</span>
       </label>
 
-      <!-- 已保存但当前清单未包含：保留展示，避免静默丢弃存量配置 -->
       <label
         v-for="orphan in orphans"
         :key="`orphan:${orphan}`"
@@ -86,7 +65,6 @@ function toggle(name: string, checked: boolean): void {
       </label>
     </div>
 
-    <!-- 清单不可得（服务未启动/探测失败/新建态）：回退手填 -->
     <textarea
       v-else
       id="mcp-confirmation-tools"

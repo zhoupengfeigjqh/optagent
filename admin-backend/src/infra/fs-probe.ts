@@ -31,9 +31,3 @@ function canAccess(target: string, mode: number): boolean {
   }
 }
 
-/**
- * 注：部署目标 `users/{uid}/agents/` 在首次部署前通常**不存在**，
- * 因此"目标可写"要向上找最近的已存在祖先来判断——该逻辑收在
- * `domain/deploy/deployer.ts` 的 `isUserTargetWritable()` 内（与部署流程同处一地），
- * 本模块只提供**已存在路径**的可达性探测，避免同一判断出现两份实现。
- */

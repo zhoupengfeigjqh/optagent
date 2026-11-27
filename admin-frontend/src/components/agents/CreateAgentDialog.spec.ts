@@ -44,7 +44,6 @@ function nameInput(wrapper: ReturnType<typeof mount>) {
 }
 
 beforeEach(() => {
-  // 默认：空库（无重名、无复制源）
   listAgents.mockReset().mockResolvedValue(pageOf([], 1, 0))
 })
 
@@ -79,7 +78,6 @@ describe('CreateAgentDialog —— 重名拒绝（FR-015）', () => {
     expect(wrapper.emitted('confirm')).toBeUndefined()
     expect(wrapper.emitted('update:open')).toBeUndefined()
     expect(wrapper.find('[data-test="create-agent-error"]').text()).toContain('数字人名称已存在')
-    // 不关窗的意义就在这里：输入还在，改个名字即可继续
     expect(nameInput(wrapper)).toBe('生产计划助手')
   })
 

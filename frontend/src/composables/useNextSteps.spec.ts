@@ -1,10 +1,3 @@
-/**
- * 单元测试：下一步动作提示 store（007 修订 · Tail Protocol）。
- *
- * 修订后本层不再有拉取窗口（卡片随 `done` 直推），钉住四条剩余约束：
- * 会话选中即清空并**一次性恢复拉取**、恢复响应的**过期丢弃**、
- * done 直推的 `apply`、发起新一轮的 `reset`；再加一条"失败静默"。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -18,12 +11,6 @@ const HIT: ThreadNextSteps = {
   actions: [{ prompt: '按交付日期梳理这批订单的风险', tool_tips: [] }],
 }
 
-/**
- * 创建 store 并返回句柄。
- *
- * 初始 `activeThreadId` 为 `null`（与真实装配一致：App 恢复会话是**事后**写入 ref），
- * 测试经 `enter(threadId)` 模拟"选中 / 刷新恢复"——watch 由此触发。
- */
 function setup() {
   const activeThreadId = ref<string | null>(null)
   const fetcher = vi.fn<(threadId: string) => Promise<ThreadNextSteps>>(async () =>
@@ -35,14 +22,12 @@ function setup() {
     activeThreadId,
     fetcher,
     store,
-    /** 选中会话（触发 watch → 清空 + 恢复拉取） */
     enter(threadId: string): void {
       activeThreadId.value = threadId
     },
   }
 }
 
-/** 让在途微任务 / 微任务链落定（watch 回调与 restore 的首轮 await） */
 async function settle(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
@@ -59,7 +44,7 @@ describe('会话选中 → 一次性恢复拉取（修订 G3：刷新后卡片�
     fetcher.mockResolvedValueOnce(HIT)
 
     enter('th_1')
-    expect(store.steps.value).toEqual(emptyNextSteps()) // 进入即先清空，不等响应
+    expect(store.steps.value).toEqual(emptyNextSteps())
     await settle()
 
     expect(fetcher).toHaveBeenCalledTimes(1)
@@ -115,10 +100,10 @@ describe('过期响应丢弃', () => {
     const store = createNextStepsStore({ nextSteps: api, activeThreadId })
 
     activeThreadId.value = 'th_1'
-    await settle() // 第 1 次请求在途（th_1）
-    activeThreadId.value = 'th_2' // 切走：th_1 的响应就此过期
     await settle()
-    deferred[0]!(HIT) // 旧响应（含卡片）姗姗来迟
+    activeThreadId.value = 'th_2'
+    await settle()
+    deferred[0]!(HIT)
     await settle()
 
     expect(store.steps.value).toEqual(emptyNextSteps())
@@ -132,7 +117,7 @@ describe('done 直推与新一轮清空', () => {
     store.apply(HIT)
 
     expect(store.steps.value).toEqual(HIT)
-    expect(fetcher).not.toHaveBeenCalled() // 直推路径不触发任何请求
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('reset 立即清空（onSend 发起新一轮时调用，与后端 clear 同刻）', () => {
@@ -170,8 +155,6 @@ describe('失败静默', () => {
 
 describe('组件内访问器（provide/inject 的唯一入口）', () => {
   it('`useNextSteps()` 取到的就是注入的会话上下文里那一份（不新建第二份状态）', () => {
-    // 无组件实例时 `useAppSession()` 只装配、不 `provide`（见其文档），故这里显式注入。
-    // 装配期不发请求，`fetchImpl` 桩只是为了让构造参数合法。
     const session = useAppSession({ storage: null, fetchImpl: async () => new Response('{}') })
     const holder: { injected: NextStepsStore | null } = { injected: null }
 

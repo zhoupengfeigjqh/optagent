@@ -21,7 +21,6 @@ export interface UserLinkDocument {
   password?: PasswordRecord;
 }
 
-/** 对外视图：**不含**密码摘要。 */
 export interface UserView {
   user_id: string;
   agents: string[];
@@ -59,14 +58,12 @@ export class UserLinkService {
     return doc;
   }
 
-  /** 关联了该数字人的用户标识清单（供 `FR-021` 阻止删除与 `§7.1` 引用查询） */
   usersOfAgent(agentName: string): string[] {
     return this.listAll()
       .filter((user) => user.agents.includes(agentName))
       .map((user) => user.user_id);
   }
 
-  /** 列表（卡片：用户名 + 已关联数字人角色名清单，`FR-023`） */
   list(page: number, toItem: (user: UserLinkDocument) => unknown): Paged<unknown> {
     return paginate(this.listAll().map(toItem), page);
   }
@@ -112,15 +109,6 @@ export class UserLinkService {
     return { user_id: userId, agents, revision: nextRevision };
   }
 
-  /**
-   * 重置密码（2026-11-18）：替换该用户的密码摘要，**保留**其关联数字人。
-   *
-   * 刻意独立于 `update()`：`update()` 校验并递增 `revision`（乐观锁属于"关联数字人"
-   * 这条写入路径），而密码不属于部署/配置快照——重置密码若也占版本，会把别人正在
-   * 编辑的关联写入无谓地打成 409。故本方法直接落盘、不触碰 `revision`。
-   *
-   * 明文长度由调用方（路由）校验；用户不存在 → `ADM_USER_NOT_FOUND`（`read` 负责）。
-   */
   setPassword(userIdRaw: unknown, password: string): UserView {
     const userId = this.requireUserId(userIdRaw);
     const current = this.read(userId);

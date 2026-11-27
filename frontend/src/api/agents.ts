@@ -16,25 +16,13 @@ import type {
   SelectAgentResponse,
 } from './types'
 
-/** 数字人 API 接口。 */
 export interface AgentsApi {
-  /** `GET /api/agents` → 顶层数组 */
   list(): Promise<AgentListItem[]>
-  /** `GET /api/agents/{agent_name}` → 详情（`soul` 全文 + 技能 + 工具 + MCP） */
   detail(agentName: string): Promise<DigitalHuman>
-  /** `POST /api/agents/{agent_name}/select` */
   select(agentName: string): Promise<SelectAgentResponse>
-  /** `POST /api/agents/current/exit` */
   exit(): Promise<ExitAgentResponse>
-  /** `GET /api/agents/current` → 未选中时 `agent_name` 为 `null` */
   current(): Promise<CurrentAgentResponse>
-  /** `GET /api/agents/current/mcp` → 实例未创建时全部为 `unknown`（尚无连接结果） */
   currentMcp(): Promise<CurrentMcpResponse>
-  /**
-   * `GET /api/agents/current/skills`（2026-11-07）→ 当前数字人的技能清单。
-   *
-   * 输入区 `/` 面板的数据源；作用域恒为服务端"当前选中数字人"，前端不传 agent_name。
-   */
   skills(): Promise<CurrentSkillsResponse>
   /**
    * `POST /api/agents/current/mcp/warm`（2026-10-18）→ 显式预热：
@@ -42,15 +30,9 @@ export interface AgentsApi {
    * 实例已存在且已落定时立即返回，可安全重复调用。
    */
   warmMcp(): Promise<CurrentMcpResponse>
-  /**
-   * 订阅 MCP 状态推送（SSE `GET /api/agents/current/mcp/events`）。
-   * 连接建立即收到一次快照，之后状态变化（建连落定 / 切换 / 退出）时推送；
-   * 返回退订函数。EventSource 自带断线重连。
-   */
   subscribeMcp(onSnapshot: (data: CurrentMcpResponse) => void): () => void
 }
 
-/** 创建数字人 API。 */
 export function createAgentsApi(client: HttpClient): AgentsApi {
   return {
     list: () => client.get<AgentListItem[]>('/api/agents'),

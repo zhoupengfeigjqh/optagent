@@ -1,21 +1,9 @@
-/**
- * 工具查看态测试（002 特性 / TR-36）
- *
- * 守三件事：
- * 1. `panelOf` 返回的必须是**同一个 reactive 对象**（否则组件里改展开态不触发更新，
- *    卡片会永远停在"刚展开"的样子——这是本模块文档注释里点明的坑）
- * 2. 明细展开态按分组键读写
- * 3. `reset()` 能清空（模块级单例，测试之间必须隔离）
- *
- * 2026-11-08：卡片不再按需拉取外置正文，状态里只剩 `open` / `raw` 两个字段。
- */
 import { nextTick, watchEffect } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { useToolPanels } from './useToolPanels'
 
 afterEach(() => {
-  // 模块级单例：不清空会串到下一个用例
   useToolPanels().reset()
 })
 
@@ -32,7 +20,6 @@ describe('useToolPanels', () => {
     await nextTick()
     expect(seen).toEqual([false, true])
     // 必须停掉：模块级单例上的 effect 不会随组件卸载，留着会在后续用例插入新键时
-    // 反复重建 `c1`（曾导致"FIFO 淘汰"用例单独跑绿、组内跑红）
     stop()
   })
 
@@ -74,9 +61,7 @@ describe('useToolPanels', () => {
     const panels = useToolPanels()
     for (let index = 0; index < 201; index += 1) panels.panelOf(`c${index}`).open = true
 
-    // 最旧的一条已被淘汰：重新取到的是全新初始态（展开态丢失 = 内存已释放）
     expect(panels.panelOf('c0').open).toBe(false)
-    // 最新的一条仍在记忆里
     expect(panels.panelOf('c200').open).toBe(true)
   })
 

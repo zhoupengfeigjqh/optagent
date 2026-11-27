@@ -1,26 +1,10 @@
 <script setup lang="ts">
-/**
- * 数据准备目录的「可上传文件类型」配置窗口（`FR-001`~`FR-004`，2026-10-13 新增）。
- *
- * 挂在目录行的「字段(n)」与「移除」之间，按**目录**粒度配置该目录允许上传的类型。
- *
- * 交互口径：
- * - 候选 11 项固定（`DATA_PREP_UPLOAD_EXTS`，权威定义在 `admin-backend`；2026-10-14 增 `.xls`，2026-10-20 增 `.html`）；
- * - **至少选一项**：全部取消时禁用「保存」并给出可读提示，MUST NOT 保存"0 项"（FR-003）；
- * - **未配置的目录默认勾选 `.csv` 与 `.xlsx`**（FR-004）；"取消/关闭"不写任何配置，
- *   该目录仍按平台默认生效（与"显式配置为这两项"在生效结果上等价）；
- * - 「取消」与 Esc **不改动任何配置**，统一走 `update:open` 关闭流程；
- * - 原生 `<dialog>` + `showModal()`（含焦点陷阱与 Esc），勾选项为原生 `checkbox` + `<label>`，
- *   `Tab` 可达、`Space` 切换；选中数量以文本呈现（不只靠颜色）。
- */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { DATA_PREP_UPLOAD_EXTS, DEFAULT_DATA_PREP_UPLOADS } from '../../constants/agent-design'
 
 const props = defineProps<{
   open: boolean
-  /** 目标二级目录名（仅用于标题与文案） */
   dir: string
-  /** 打开时的初始勾选（空数组 = 尚未配置，按默认勾选） */
   extensions: string[]
 }>()
 
@@ -81,7 +65,6 @@ function onSave(): void {
   emit('update:open', false)
 }
 
-/** `cancel` 事件由 Esc 触发：阻止浏览器默认关闭，统一走 `update:open` 流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   requestClose()

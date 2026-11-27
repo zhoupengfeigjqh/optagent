@@ -1,17 +1,3 @@
-/**
- * SSE 文本块解析器单测（`src/utils/sse-parser.ts`）
- *
- * 运行方式：`npm run test` / `npm run test:coverage`（本地执行）
- *
- * 手写解析的必要性见 `research.md` D5：发消息端点是 POST，浏览器原生 `EventSource` 只支持 GET。
- *
- * 本模块的关键约束是**跨 chunk 行缓冲**：TCP 分片可以切在任意字节上，
- * 包括 `event:` / `data:` 中间。若解析器把不完整尾部当成完整事件，
- * 症状是"流式回答偶发丢字或 JSON 解析失败"——只在特定网络条件下复现，极难排查。
- * 因此下面对"分片切在任意位置"专门用例。
- *
- * 另一条口径：`: ` 开头为**注释行**（常用于心跳），MUST 忽略而非产出空事件。
- */
 import { describe, expect, it } from 'vitest'
 
 import { parseSseChunk } from './sse-parser'

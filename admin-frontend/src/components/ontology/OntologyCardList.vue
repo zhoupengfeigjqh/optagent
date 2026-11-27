@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * 本体卡片列表（`FR-058`）：每张卡片展示 6 项 metadata + 路径 + 查看入口。
- *
- * 6 项固定按 `created_at / deployed_version / scenario_name / scenario_id /
- * ontology_name / ontology_id` 顺序呈现；缺项显示 `—`（后端保证缺项为 `null`，
- * 「字段缺失」不阻塞导入，界面也不该因此把整张卡片变成不可用）。
- *
- * **卡片名称固定为 `{场景名}-{本体名}`**（2026-10-17）：本体身份就是这两段，
- * 只显示本体名会把「同名本体分属不同场景」的情况显示成两张一样的卡片。
- * 取名口径与详情页标题、删除确认、全局播报共用 `utils/ontology-name.ts`。
- */
 import type { OntologyListItem, OntologyMetadata } from '../../api/ontologies'
 import type { ErrorInfo } from '../../api/types'
 import { ontologyDisplayName, ontologyNameOf, ontologyScenarioOf } from '../../utils/ontology-name'
@@ -25,11 +14,9 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:page', value: number): void
-  /** 打开本体详情：身份是"场景 + 目录名"两段 */
   (e: 'open', target: { scenario: string; ontologyDir: string }): void
 }>()
 
-/** 6 项 metadata 的展示标签与取值函数（顺序即界面顺序） */
 const META_ROWS: ReadonlyArray<{ label: string; key: keyof OntologyMetadata }> = [
   { label: '创建时间', key: 'created_at' },
   { label: '部署版本', key: 'deployed_version' },
@@ -44,7 +31,6 @@ function valueOf(metadata: OntologyMetadata, key: keyof OntologyMetadata): strin
   return value === null || value === undefined || value === '' ? '—' : String(value)
 }
 
-/** 卡片名称：`{场景名}-{本体名}`（与详情页标题、播报同一实现） */
 function cardName(item: OntologyListItem): string {
   return ontologyDisplayName(item)
 }

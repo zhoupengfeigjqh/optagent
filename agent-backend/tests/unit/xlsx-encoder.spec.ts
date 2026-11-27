@@ -1,22 +1,9 @@
-/**
- * `.xlsx` 编码器（`src/domain/tools/encoders/xlsx.ts`，2026-11-16 二期）。
- *
- * 最有价值的断言是**往返一致**：编码出的工作簿用同一套读侧（`xlsxToText`）解回来，
- * 内容必须与输入等价——写读两侧共用一个解析口径才谈得上"写得进去就读得回来"。
- *
- * 另守三条安全/健壮性口径：
- * 1. 以 `=` / `+` / `-` / `@` 开头的单元格**必须是字符串类型**（`f` 字段不存在），
- *    否则 Excel 打开即执行（`=cmd|'/c calc'!A0` 是经典载荷）；
- * 2. 表名非法字符被改写、超长被截断、重名去重，**不因命名细节让整次写入失败**；
- * 3. 空内容 / 引号未闭合 / 超限 → 明确错误，不产出半个文件。
- */
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 
 import { xlsxToText } from '../../src/domain/preview/xlsx-text.js';
 import { encodeXlsx, parseTableSource } from '../../src/domain/tools/encoders/xlsx.js';
 
-/** 把编码结果读回成 `{sheetName: 二维数组}`，用于结构与类型断言 */
 function readBack(buf: Buffer): Record<string, string[][]> {
   const wb = XLSX.read(buf, { type: 'buffer' });
   const out: Record<string, string[][]> = {};
@@ -155,7 +142,7 @@ describe('encodeXlsx —— 往返与安全', () => {
   it('往返一致：编码后读回的行列与输入等价', () => {
     const buf = encodeXlsx('# Sheet: 物料\n物料,数量\nA,10\n# Sheet: 成本\n项,金额\n人工,1000\n');
 
-    expect(buf.subarray(0, 2).toString('latin1')).toBe('PK'); // zip 容器魔数
+    expect(buf.subarray(0, 2).toString('latin1')).toBe('PK');
     const sheets = readBack(buf);
     expect(Object.keys(sheets)).toEqual(['物料', '成本']);
     expect(sheets['物料']).toEqual([

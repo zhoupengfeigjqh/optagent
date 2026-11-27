@@ -1,9 +1,3 @@
-/**
- * Token 用量查询路由（US5 / T048）。
- *
- * GET /api/usage/summary?thread_id&agent_name&from&to（from/to 为 ISO8601）
- * 响应为契约的 snake_case：total + grouped（thread+agent 聚合）。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { getCurrentUser } from '../domain/current-user.js';

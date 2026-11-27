@@ -1,10 +1,3 @@
-/**
- * 后台产出**回写**端点（R11，契约 §10.3）。
- *
- * 独立成文件的原因：`routes/files.ts` 因本特性新增该端点后越过 500 行硬门禁
- * （宪章原则二）。按"一个端点族一个文件"拆开，比继续往大文件里堆更合规，
- * 也不动既有的上传 / 列表 / 预览 / 下载 / 删除 / 回源逻辑。
- */
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -32,9 +25,7 @@ const putQuerySchema = {
     sid: { type: 'string' },
     call_id: { type: 'string' },
     tool: { type: 'string' },
-    // 提交时刻（epoch ms；铸造回写地址时写入，契约 §10.3/§10.4）。可缺省：缺失即退化
     t: { type: 'string' },
-    // 由**服务提供**的一行摘要（面向人可读，如"识别到 47 行文字"）；可缺省。归一规则见 `clampSummary`
     summary: { type: 'string' },
   },
 } as const;
@@ -42,7 +33,6 @@ const putQuerySchema = {
 /** 摘要长度上限（契约 §10.3）：超出**截断**而非拒绝——任务已经算完，不该因摘要过长而失败 */
 const SUMMARY_MAX_CHARS = 200;
 
-/** 归一摘要：去空白；空串等同缺省；超长按**码点**截断（不切开 emoji 等代理对） */
 function clampSummary(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
@@ -51,14 +41,6 @@ function clampSummary(raw: string | undefined): string | undefined {
   return chars.length > SUMMARY_MAX_CHARS ? chars.slice(0, SUMMARY_MAX_CHARS).join('') : trimmed;
 }
 
-/**
- * 解析回写地址里的**提交时刻** `t`（epoch ms）：铸造 URL 的那一刻由运行环境写入
- * （`infra/file-sign.ts` 的 `mintPutUrl`），服务原样回传。
- *
- * 只接受"正数且**不晚于回写时刻**"的值；其余（缺失 / 空串 / 非数字 / 0 或负数 / 未来时刻）
- * 一律 `undefined` → `writeProduced` 退化为回写时刻。据此
- * `created_at <= finished_at` 是**构造性成立**的，下游不必再夹取。
- */
 export function parseSubmittedAt(
   raw: string | undefined,
   now: number = Date.now(),
@@ -69,13 +51,6 @@ export function parseSubmittedAt(
   return new Date(value);
 }
 
-/**
- * 回写 body → 结果字节。
- *
- * 三种到达形态：`application/octet-stream` / `text/plain`（Buffer，见 `server.ts` 的
- * content-type parser）、`application/json`（Fastify 已解析成对象）、无 body（返回
- * `null` → 400，**不写空文件**——"服务算完但结果为空"应让调用方知道）。
- */
 function toResultBytes(body: unknown): Buffer | null {
   if (Buffer.isBuffer(body)) return body.length > 0 ? body : null;
   if (typeof body === 'string') return body.length > 0 ? Buffer.from(body, 'utf8') : null;
@@ -85,8 +60,6 @@ function toResultBytes(body: unknown): Buffer | null {
 }
 
 export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): void {
-  // 这是既有 `/api/files/raw`（签名**读**直链）的镜像，复用同一密钥与验签设施；
-  // 但 payload 是**四段**（`put\nu\nd\nexp`），与读方向三段形状隔离
   // ⇒ 读签名不能被改用来写（§10.6 不变式 3）。
   app.post('/api/files/put', { schema: { querystring: putQuerySchema } }, async (req, reply) => {
     const { u, d, exp, sig, filename, sid, call_id, tool, summary, t } = req.query as Record<
@@ -97,7 +70,6 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
       throw new ApiError(403, 'FILE_SIGN_INVALID', '签名无效或已过期');
     }
     // `d` 的形状（009）：`{数字人}/{数字人数据域内相对路径}`，数字人段在签名内不可篡改；
-    // 目录白名单再收一道：即便签名合法，也只允许写产出目录
     const scoped = splitAgentScopedPath(d!);
     if (!scoped || scoped.relPath !== PRODUCED_DIR) {
       // 越界写入拒绝同样落结构化日志（FR-051）：签名合法但目录不在白名单，必须能追溯
@@ -119,7 +91,6 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
       throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
     }
     // 正文不得冒充 sidecar（2026-10-27）：`scanProduced` 按后缀识别元数据，一条内容为
-    // JSON 的"正文"会被当成元数据解析，其中的 `filename` 字段再被当作路径使用。
     // 这里给出 400；`writeProduced` 内还保留一道兜底（防绕过路由的直接调用）。
     if (filename!.toLowerCase().endsWith(META_SUFFIX)) {
       throw new ApiError(400, 'VALIDATION_FAILED', `产出文件名不得以 ${META_SUFFIX} 结尾: ${filename}`);
@@ -129,15 +100,12 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
       throw new ApiError(400, 'VALIDATION_FAILED', '请求体为空，无法写入产出');
     }
     try {
-      // 提交时刻与回写时刻取同一个 `now`：`created_at <= finished_at` 由构造保证；
-      // 无 `t`（旧 URL / 服务未回传）时 createdAt 为 undefined → 退化为回写时刻
       const now = new Date();
       const createdAt = parseSubmittedAt(t, now.getTime());
       const saved = await writeProduced({
         access: new FileAccess({
           optAgentRoot: ctx.config.optAgentRoot,
           userId: u!,
-          // 落点＝该数字人的数据域（`d` 的首段，签名内保证）
           agentName: scoped.agentName,
           logger: ctx.loggers.logger,
           truncateKb: ctx.config.readTruncateKb,
@@ -152,7 +120,6 @@ export function registerFilePutRoute(app: FastifyInstance, ctx: AppContext): voi
         createdAt,
         now,
       });
-      // 落盘即推信号（负载为空）：前端收到后重拉列表；信号丢失无后果（可从目录重算）
       ctx.producedEvents.emitChanged(u!);
       ctx.loggers.logger.info(
         {

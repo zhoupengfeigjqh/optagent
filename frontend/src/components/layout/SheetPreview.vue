@@ -1,26 +1,9 @@
 <script setup lang="ts">
-/**
- * `.xlsx` 表格预览（2026-11-17，档 A）。
- *
- * **只做渲染**：数据由 `GET /api/files/preview` 给全（`rows` 显示文本、`numericCols`
- * 数字列、`merges` 合并区间），本组件不解析 CSV、不判断数字列——两套口径会让
- * "服务端说这列是数字、前端说是文本"这类偏差无处对账。
- *
- * 三个刻意的取舍：
- * 1. **第一行当表头**：业务表格几乎都有表头，而表头吸顶是"看得清"的主要收益。
- *    组件不做"这行像不像表头"的猜测——猜错比固定更糟。
- * 2. **原生 `<table>`，不用 `a-table`**：合并单元格、首列吸顶、行高压缩这几件事
- *    在 a-table 里都要绕过它自己的 tr/td 生成逻辑，收益为负。
- * 3. **有渲染上限**（`RENDER_MAX_ROWS` / `RENDER_MAX_COLS`）：原生表格没有虚拟滚动，
- *    400 行 × 60 列 ≈ 2.4 万个单元格是"扫一眼"场景的上限；超出的部分提示下载。
- *    服务端另有 `SHEET_MAX_ROWS` 的传输上限，两层各管一件事。
- */
 import { computed, ref, watch } from 'vue'
 
 import type { PreviewWorkbook } from '../../api/types'
 
 const props = defineProps<{
-  /** 服务端解析好的工作簿；`null` 表示还没加载 */
   workbook: PreviewWorkbook | null
 }>()
 
@@ -42,10 +25,8 @@ watch(
   },
 )
 
-/** 当前 sheet 的全部行（含表头行） */
 const rows = computed(() => active.value?.rows ?? [])
 
-/** 有效列数：取所有行的最大长度（表头行可能短于数据行） */
 const totalCols = computed(() => {
   let max = 0
   for (const row of rows.value) {
@@ -59,22 +40,13 @@ const colCount = computed<number[]>(() =>
   Array.from({ length: Math.min(totalCols.value, RENDER_MAX_COLS) }, (_, index) => index),
 )
 
-/** 实际渲染的数据行下标（0 基，跳过第 0 行表头） */
 const bodyRowIndexes = computed<number[]>(() => {
   const count = Math.min(Math.max(rows.value.length - 1, 0), RENDER_MAX_ROWS)
   return Array.from({ length: count }, (_, index) => index + 1)
 })
 
-/** 数字列集合（列下标为 0 基） */
 const numericCols = computed<Set<number>>(() => new Set(active.value?.numericCols ?? []))
 
-/**
- * 合并单元格的两张表：
- * - `spans`：起点格 → 跨度（绑定到 `rowspan` / `colspan`）
- * - `covered`：被覆盖的格子 → 不渲染
- *
- * 服务端已把跨越截断边界的合并裁到可见范围，这里不再二次裁剪。
- */
 const mergeMaps = computed(() => {
   const spans = new Map<string, { rowSpan: number; colSpan: number }>()
   const covered = new Set<string>()
@@ -107,17 +79,10 @@ function valueAt(row: number, col: number): string {
   return rows.value[row]?.[col] ?? ''
 }
 
-/** 表头文本（第 0 行） */
 function headerAt(col: number): string {
   return valueAt(0, col)
 }
 
-/**
- * 截断提示：服务端截断（`truncated`）与前端渲染截断合并成一句话。
- *
- * 两层的数字不同（服务端 1000 行、前端 400 行），但对用户只有一个事实：
- * "你现在看到的不是全部"。
- */
 const truncatedHint = computed(() => {
   if (!active.value) {
     return ''
@@ -295,7 +260,6 @@ function onTabKeydown(event: KeyboardEvent, index: number): void {
   text-align: right;
 }
 
-/* 表头吸顶；首列吸顶。两者交叉的左上角要压在其余单元格之上 */
 .sheet-preview__head {
   position: sticky;
   top: 0;

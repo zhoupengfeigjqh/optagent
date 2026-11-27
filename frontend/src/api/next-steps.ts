@@ -1,26 +1,9 @@
-/**
- * 下一步动作提示（007）：只读拉取封装。
- *
- * 两点刻意的设计（都不是"顺手简化"）：
- *
- * 1. **失败即空形态，且不抛错**：本能力是回答之外的**附加信息**，
- *    没有建议与拿不到建议对用户是**同一件事**（FR-042）。若把失败抛给上层，
- *    调用方势必要么写 try/catch 再吞掉，要么误把它变成错误态——不如在这里就收敛掉。
- * 2. **形状校验**：端点返回值决定"界面上有没有卡片"，一行脏数据（如 `actions` 不是数组）
- *    不该把消息列表渲染成空。校验不过 → 空形态（与"没建议"同一条路）。
- *
- * 拉取语义（007 修订）：本 API 现在只服务**会话恢复**（选中 / 刷新 / 切回会话时
- * 一次性拉取最新卡片）；流式轮的卡片由 SSE `done` 事件直推（`api/messages.ts`），
- * 不再走轮询窗口——拉到空即"该会话最新一轮没有卡片"，就是终态。
- */
 
 import type { HttpClient } from './http'
 import type { NextStepAction, ToolTip } from './types'
 import type { ThreadNextSteps } from './threads'
 
-/** 下一步动作提示 API。 */
 export interface NextStepsApi {
-  /** 拉取某会话最新一轮的卡片；任何失败 → 空形态（**永不抛错**） */
   fetch(threadId: string): Promise<ThreadNextSteps>
 }
 
@@ -29,7 +12,6 @@ export function emptyNextSteps(): ThreadNextSteps {
   return { message_id: null, actions: [] }
 }
 
-/** 创建下一步动作提示 API。 */
 export function createNextStepsApi(client: HttpClient): NextStepsApi {
   return {
     async fetch(threadId: string): Promise<ThreadNextSteps> {
@@ -63,12 +45,10 @@ export function normalizeNextSteps(raw: unknown): ThreadNextSteps {
     const action = toAction(item)
     if (action) actions.push(action)
   }
-  // 逐条校验后为空 = 与"没有建议"同一条路（不留下"有 message_id 却没有卡片"的半截状态）
   if (actions.length === 0) return emptyNextSteps()
   return { message_id: record.message_id, actions }
 }
 
-/** 单条卡片：`prompt` 必填（唯一进入历史的部分）；`tool_tips` 结构化透传 */
 function toAction(value: unknown): NextStepAction | null {
   if (value === null || typeof value !== 'object') return null
   const record = value as { prompt?: unknown; tool_tips?: unknown }
@@ -76,11 +56,6 @@ function toAction(value: unknown): NextStepAction | null {
   return { prompt: record.prompt, tool_tips: toToolTips(record.tool_tips) }
 }
 
-/**
- * `tool_tips` 读取：**只防崩溃、不校验**（与服务端同一口径）。
- *
- * 非数组 → 空数组；字段缺失 → 留空值；条目不删、不改写。
- */
 function toToolTips(raw: unknown): ToolTip[] {
   if (!Array.isArray(raw)) return []
   return raw.map((item) => {

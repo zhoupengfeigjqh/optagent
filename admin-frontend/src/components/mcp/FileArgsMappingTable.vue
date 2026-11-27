@@ -1,27 +1,4 @@
 <script setup lang="ts">
-/**
- * 文件参数映射表格（`file_args` 的编辑视图，2026-09-19）。
- *
- * 存储契约**不变**：对外仍是 `{ 工具名: { 取值路径: "url" | "url:from=<来源路径>" } }`
- * （最终写入 `MCP.json`），本组件只是把 JSON 文本框换成"选工具、选字段"的行式表格。
- *
- * 交互（2026-09-19 产品决定：**三列全部只能下拉选择，不允许手填**）：
- * - 「工具」下拉 = 服务探测到的工具清单；清单外的存量值（服务改版/截断）作为
- *   额外保留项出现，标「清单外」，可继续保存但不可新增手填；
- * - 「目标字段 / 来源字段」下拉 = 该工具参数 JSON Schema 递归枚举的叶子路径
- *   （数组自动展开为 `[]`）；存量值不在当前枚举里时（schema 漂移）同样作为保留项
- *   出现，不回写丢失；
- * - 「方式」两态：模型填写 → 铸造直链（`url`）/ 从其他字段派生（`url:from=…`，
- *   目标字段不让模型填，值从来源路径读出后铸造）；
- * - 派生模式做**形状相容**即时校验（来源与目标数组层级须一一对应，仅末段键名可不同）；
- * - 清单外工具（服务改版/截断）保留展示并标徽，不静默丢弃；
- * - 无效行（工具/路径为空、路径语法非法、派生形状不符）**不写入**序列化结果，
- *   行内红字提示原因——写入 `MCP.json` 的永远是通过判据的行。
- *
- * 路径语法与校验判据与 `agent-backend/src/domain/file-arg-path.ts` **同构**
- * （平台侧只做编辑辅助，服务端仍是权威）：分段用 `.`，数组写 `[]`（每个元素），
- * 不支持下标。
- */
 import { computed, ref, watch } from 'vue'
 import type { McpToolInfo } from '../../api/types'
 
@@ -34,7 +11,6 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: Record<string, Record<string, string>>): void
 }>()
 
-/** 一行 = 一条映射（mode 只为编辑视图，序列化时还原为 "url" / "url:from=…"） */
 interface MappingRow {
   tool: string
   path: string
@@ -42,7 +18,6 @@ interface MappingRow {
   from: string
 }
 
-/* ---------- 路径语法判据（与 agent-backend file-arg-path.ts 同构） ---------- */
 
 const SEGMENT = /^([^.[\]]+)(\[\])?$/
 
@@ -69,7 +44,6 @@ function parseMode(value: string): { mode: 'url' | 'derive'; from: string } {
   return { mode: 'url', from: '' }
 }
 
-/** 派生模式形状相容：段数相同，除末段外逐段一致（键名与是否数组都相同） */
 function compatibleFromPath(targetPath: string, fromPath: string): boolean {
   const target = parsePath(targetPath)
   const from = parsePath(fromPath)
@@ -80,7 +54,6 @@ function compatibleFromPath(targetPath: string, fromPath: string): boolean {
   return true
 }
 
-/* ---------- 从工具参数的 JSON Schema 递归枚举叶子路径 ---------- */
 
 interface SchemaNode {
   type?: string
@@ -89,7 +62,6 @@ interface SchemaNode {
   $ref?: string
 }
 
-/** 叶子路径全量枚举；数组自动带 `[]`，`$ref` 沿访问路径剪枝防循环 */
 function enumeratePaths(schema: unknown): string[] {
   const out: string[] = []
   ;(function walk(node: SchemaNode | undefined | null, prefix: string, seen: Set<string>) {
@@ -127,15 +99,10 @@ function pathOptions(toolName: string, current: string): string[] {
   return enumerated
 }
 
-/**
- * 来源字段选项 = 与**目标形状相容**的路径（纯下拉语义：能选到的必然合法）。
- * 不相容的存量值（配置漂移）仍作为保留项出现，行内报错提示，不回写丢失。
- */
 function fromOptions(row: MappingRow): string[] {
   return pathOptions(row.tool, row.from).filter((path) => compatibleFromPath(row.path, path))
 }
 
-/* ---------- 行模型 ↔ file_args 互转 ---------- */
 
 function fileArgsToRows(fileArgs: Record<string, Record<string, string>>): MappingRow[] {
   const list: MappingRow[] = []
@@ -148,7 +115,6 @@ function fileArgsToRows(fileArgs: Record<string, Record<string, string>>): Mappi
   return list
 }
 
-/** 该行是否通过判据（不通过的不写入序列化结果） */
 function rowValid(row: MappingRow): boolean {
   if (row.tool.trim() === '' || parsePath(row.path) === null) return false
   if (row.mode === 'derive') {
@@ -167,7 +133,6 @@ function rowsToFileArgs(list: MappingRow[]): Record<string, Record<string, strin
   return out
 }
 
-/* ---------- 编辑状态 ---------- */
 
 const rows = ref<MappingRow[]>([])
 
@@ -213,7 +178,6 @@ function addRow(): void {
   rows.value.push({ tool: '', path: '', mode: 'url', from: '' })
 }
 
-/** 行级错误（工具/路径为空、语法非法、派生形状不符） */
 function rowError(row: MappingRow): string {
   if (row.tool.trim() === '') return '工具名必填'
   if (parsePath(row.path) === null) return `路径非法：${PATH_SYNTAX_HINT}，不支持下标`
@@ -226,7 +190,6 @@ function rowError(row: MappingRow): string {
   return ''
 }
 
-/** 重复的（工具, 路径）映射 */
 const duplicateError = computed(() => {
   const seen = new Set<string>()
   for (const row of rows.value) {
@@ -238,7 +201,6 @@ const duplicateError = computed(() => {
   return ''
 })
 
-/** 清单外工具（服务改版/清单截断）：保留行、标徽提示，不静默丢弃 */
 function isOrphan(tool: string): boolean {
   return tool !== '' && !props.tools.some((t) => t.name === tool)
 }

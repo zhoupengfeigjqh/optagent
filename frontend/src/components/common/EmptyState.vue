@@ -1,14 +1,7 @@
 <script setup lang="ts">
-/**
- * 空状态占位（T028）
- *
- * 用于"无会话 / 无搜索结果 / 未选择文件"等场景；操作入口经 `action` 插槽注入。
- */
 withDefaults(
   defineProps<{
-    /** 主标题 */
     title: string
-    /** 补充说明 */
     description?: string
   }>(),
   { description: '' },

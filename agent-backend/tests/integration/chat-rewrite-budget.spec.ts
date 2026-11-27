@@ -1,13 +1,3 @@
-/**
- * 集成测试：指代改写（027）的阶段预算。
- *
- * 断言的是"预算"而不是"超时"：判定 + 改写共用**同一份**阶段预算，
- * 判定把这笔预算几乎吃光时，改写必须**直接放弃**（`budget_exhausted`），
- * 而不是再开一次注定赶不上的调用——否则整轮回答会被拖过 deadline（契约 C-4）。
- *
- * 手法：把 `timeout_ms` 压到 600ms，并让 Laya 对**改写命题那一批**延迟 350ms，
- * 判定返回后只剩 250ms（< 300ms 的下限），改写通道应当一次都不被调用。
- */
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { IntentFocusStore } from '../../src/domain/intent-focus/store.js';
@@ -39,7 +29,6 @@ describe('027 阶段预算：判定吃光预算后放弃改写', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.payload).toContain('本轮回答');
-    // 改写一次都没发（判为需要改写，但预算不够）
     expect(env.llmLog.rewritePrompts).toHaveLength(0);
 
     const [record] = new IntentFocusStore(env.root).readAll(USER, AGENT, thread.threadId);

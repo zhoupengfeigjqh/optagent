@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 术语替换确认弹窗（018）。
- *
- * 三个出口，语义与既有"发送前路由"保持一致：
- * - 「使用替换后的表述」→ `use-replacement`（携带**编辑后**的文本）
- * - 「按原话继续」（含 Esc / 遮罩 / 右上角关闭）→ `keep-original`
- * - 编辑为空 → 主按钮禁用 + 可读原因（MUST NOT 发出空消息）
- *
- * 为什么关闭一律等于"按原话"：用户点发送的意图是发送，Esc 只是不想用这一版替换文，
- * 不该把整条消息取消掉（否则还得重新输入）。
- *
- * 为什么"编辑"放在本组件内：这里是用户唯一能确认替换结果的界面，草稿属于**本弹窗的
- * 局部状态**；父级只接收"最终文本"，不需要知道用户敲了几次键盘（高内聚）。
- */
 import { computed, ref, useId, watch } from 'vue'
 
 import type { TermMatch } from '../../api/term-normalize'
@@ -22,11 +8,8 @@ import BaseDialog from '../common/BaseDialog.vue'
 const props = withDefaults(
   defineProps<{
     open: boolean
-    /** 用户原话 */
     original: string
-    /** 替换后文本（编辑框的初始值） */
     normalized: string
-    /** 命中明细（term → value），用于解释"改了什么" */
     matches: TermMatch[]
     /** 发送中：按钮与编辑框禁用，避免连点发两轮 / 中途改文本 */
     busy?: boolean
@@ -36,7 +19,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{ 'use-replacement': [text: string]; 'keep-original': [] }>()
 
-/** 编辑草稿：初始为模型的替换结果；父级换了待确认内容时重置 */
 const draft = ref(props.normalized)
 watch(
   () => props.normalized,
@@ -45,7 +27,6 @@ watch(
   },
 )
 
-/** 提交用的文本：与手动输入同口径（首尾空白不进入正文） */
 const text = computed(() => draft.value.trim())
 /** 空文本是不可提交态：按钮禁用 + 行内说明 + aria-invalid */
 const isEmpty = computed(() => text.value === '')
@@ -170,7 +151,6 @@ function submit(): void {
   word-break: break-word;
 }
 
-/* 编辑框只继承 `.term-dialog__text` 的边框与内边距，其余按表单控件形态覆盖 */
 .term-dialog__input {
   display: block;
   width: 100%;

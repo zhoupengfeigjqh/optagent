@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * 全局提示宿主（T031）
- *
- * 只负责渲染与派发意图，队列与计时由 `useToast` 承载（D14）。
- * 容器 `aria-live="polite"`，同一时刻最多展示 `TOAST_MAX_VISIBLE` 条。
- */
 import { computed } from 'vue'
 
 import { TOAST_MAX_VISIBLE } from '../../constants/limits'
@@ -13,7 +7,6 @@ import BaseIcon from './BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 待展示的提示列表 */
     items?: ToastItem[]
   }>(),
   { items: () => [] },

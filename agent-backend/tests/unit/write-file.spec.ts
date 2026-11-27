@@ -1,15 +1,3 @@
-/**
- * `write_file` 的格式路由与落盘口径（`src/domain/tools/write-file.ts`，2026-11-16）。
- *
- * 用桩 FileAccess 只验**领域逻辑**（路由 → 校验 → 编码 → 字节数），
- * 路径权限（tmp 顶层 / `{threadId}_` 前缀 / 禁 `:`）已由 `file-access.spec.ts` 与
- * `builtin-tools.spec.ts` 守，这里不重复。
- *
- * 三条硬约束：
- * 1. 校验失败 / 格式未接入 / 超限时**一个字节都不写**（不能留下半成品或假文件）；
- * 2. `bytes` 恒为**落盘字节数**，有编码的格式不再等于 content 长度；
- * 3. 文本五类原样 utf8，未登记扩展名走回落模式（不拒绝）。
- */
 import { describe, expect, it } from 'vitest';
 
 import type { FileAccess } from '../../src/domain/file-access.js';
@@ -21,7 +9,6 @@ import { ContentFormatError, WriteTooLargeError } from '../../src/domain/tools/w
 
 const THREAD = 'th_1';
 
-/** 最小写口桩：记录字节，并复刻真实实现的 `{threadId}_` 前缀判定 */
 function stubAccess(): {
   fa: FileAccess;
   writes: Array<{ filename: string; data: Buffer }>;

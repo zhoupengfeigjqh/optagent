@@ -1,13 +1,3 @@
-/**
- * 组件测试：HITL 弹窗的单个入参节点（递归渲染）。
- *
- * 守住的语义：
- * - 控件形态**只**由 schema 推导：标量→行内控件、对象→子字段逐行（递归）、
- *   对象数组→表格（列 = schema 声明列 + 值里的动态列）、标量数组→列表、
- *   schema 表达不了的形状→JSON 逃生舱；
- * - 规则入口落在**目标那一行**（与它要影响的表格同属一个字段块），确认后深写回模型；
- * - `cell` 模式只出控件本体；无上下文时不渲染（边界）。
- */
 import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -31,7 +21,6 @@ const RULES: RuleFileResponse = {
   priority_column: 'rulePriority',
 }
 
-/** 最复杂的真实形态（外部排产服务）：嵌套对象 + 对象数组 + 行内 required。仅作回归样本。 */
 const NESTED = {
   type: 'object',
   properties: {
@@ -60,7 +49,6 @@ const NESTED_PROPOSED = {
   input: { solvingTime: 60, targetPriorities: [{ ruleId: 'PR001', rulePriority: 1 }] },
 }
 
-/** `@` 路径插入状态桩：本组件只在"有会话上下文"时才渲染规则入口，故需要一个非空桩。 */
 function makeMention(): PathInsertStore {
   return {
     open: ref(false),
@@ -87,7 +75,6 @@ function makeMention(): PathInsertStore {
 }
 
 interface FieldSetup {
-  /** 整个入参 schema（本节点的 schema 由它按路径取出，保证与表单状态同源） */
   root: Record<string, unknown>
   path: NodePath
   proposed?: Record<string, unknown>
@@ -134,7 +121,6 @@ describe('InteractionField —— 标量控件', () => {
 
     expect((wrapper.find('input[type=text]').element as HTMLInputElement).value).toBe('L01')
     expect(wrapper.find('.interaction-dialog__label').classes()).toContain('required')
-    // 说明性文案收进「?」：默认不展示（省版面），点开才看
     expect(wrapper.text()).not.toContain('输入 @ 可引用文件空间路径')
     await wrapper.find('.hint-tip__btn').trigger('click')
     expect(wrapper.find('.hint-tip__pop').text()).toContain('输入 @ 可引用文件空间路径')
@@ -171,7 +157,6 @@ describe('InteractionField —— 标量控件', () => {
     expect(onOff.form.valueOf(['开关'])).toBe(false)
 
     const choice = mountField({ root, path: ['类型'], proposed })
-    // DOM 的 value 是选项**下标**（原值由下标承载）：0 即「峰」，下标 1 即「谷」
     expect((choice.wrapper.find('select').element as HTMLSelectElement).value).toBe('0')
     await choice.wrapper.find('select').setValue('1')
     expect(choice.form.valueOf(['类型'])).toBe('谷')
@@ -193,7 +178,6 @@ describe('InteractionField —— 对象分组（递归）', () => {
     expect(labels[0]).toContain('input')
     expect(labels[1]).toContain('solvingTime')
     expect(labels[2]).toContain('targetPriorities')
-    // required 来自 input 这一层（solvingTime 与 targetPriorities 都必填）
     expect(wrapper.findAll('.interaction-dialog__label')[1]!.classes()).toContain('required')
   })
 
@@ -249,7 +233,6 @@ describe('InteractionField —— 对象数组（表格）', () => {
             items: {
               type: 'object',
               properties: {
-                // 合成字段名：真实契约里并没有"数字枚举"的字段（`businessType` 是 integer、无 enum）
                 数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] },
                 realRelativePath: { type: 'string' },
               },
@@ -265,7 +248,6 @@ describe('InteractionField —— 对象数组（表格）', () => {
     expect(cells[0]!.find('select').exists()).toBe(true)
     expect(cells[0]!.find('input[type=text]').exists()).toBe(false)
     expect(cells[1]!.find('input[type=text]').exists()).toBe(true)
-    // 文本列的单元格同样提示可以打 @（原型同款）
     expect(cells[1]!.find('input[type=text]').attributes('placeholder')).toBe('可打 @ 选择文件')
   })
 
@@ -403,7 +385,6 @@ describe('InteractionField —— 算法规则入口落点', () => {
     expect(wrapper.findAll('.interaction-dialog__rules-btn')).toHaveLength(1)
     expect(field.find('.interaction-dialog__rules-btn').exists()).toBe(true)
     expect(field.find('.interaction-dialog__table').exists()).toBe(true)
-    // 完整目标路径写在按钮的无障碍名里（说明文案不再常驻一行）
     expect(field.find('.interaction-dialog__rules-btn').attributes('aria-label')).toContain(
       'input.targetPriorities',
     )

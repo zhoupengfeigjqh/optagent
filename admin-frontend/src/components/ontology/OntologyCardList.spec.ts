@@ -1,10 +1,3 @@
-/**
- * 组件测试：本体卡片列表（`FR-058`）
- *
- * 守住：卡片名称的 `{场景名}-{本体名}` 口径（2026-10-17）、6 项 metadata 的
- * 标签与取值、缺项显示 `—`、点击「查看」把**两段身份**（场景 + 目录名）交给上层、
- * 空库空态。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import OntologyCardList from './OntologyCardList.vue'
@@ -83,7 +76,6 @@ describe('OntologyCardList', () => {
   })
 
   it('卡片名称只依赖 metadata（没有副本字段可依赖）', () => {
-    // 2026-10-17：服务端不再下发 scenario / ontology_dir / name / source
     const wrapper = mountList([item()])
 
     expect(wrapper.find('.card__title').text()).toBe('生产调度-原材料采购和库存')

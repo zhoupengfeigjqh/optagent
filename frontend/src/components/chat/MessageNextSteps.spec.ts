@@ -1,9 +1,3 @@
-/**
- * 组件测试：下一步动作提示容器（007）。
- *
- * 守住四条：无卡片时**无 DOM**、引导句逐字固定、卡片按序且只有提示词文本、
- * 以及"不含任何工具信息"这条底线（FR-013）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { NextStepAction, ToolTip } from '../../api/types'
@@ -25,7 +19,6 @@ describe('MessageNextSteps', () => {
   it('无卡片 → 根节点不渲染（无 DOM、无间距、无占位）', () => {
     const wrapper = mount(MessageNextSteps, { props: { actions: [] } })
 
-    // `v-if` 未命中：落进 DOM 的只有注释占位，**没有任何元素**
     expect(wrapper.element.nodeType).toBe(Node.COMMENT_NODE)
     expect(wrapper.find('.next-steps').exists()).toBe(false)
     expect(wrapper.find('.next-steps__guide').exists()).toBe(false)

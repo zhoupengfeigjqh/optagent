@@ -1,11 +1,3 @@
-/**
- * 单元测试：错误码与统一错误（原则七）
- *
- * 守住三条：
- * ① 错误码 → HTTP 状态码映射与契约 §0.4 一致；
- * ② 未知码回退 500（不出现"未知码配错状态码"）；
- * ③ 复用码与新增码零碰撞。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError, revisionConflict, validationFailed } from '../../src/domain/api-error.js';
 import {

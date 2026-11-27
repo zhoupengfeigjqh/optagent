@@ -1,6 +1,3 @@
-/**
- * 单元测试：登录编排（`FR-005`/`FR-010`/`FR-011`/`FR-014`）
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

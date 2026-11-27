@@ -1,56 +1,29 @@
-/**
- * 错误码总表（`contracts/admin-api.md` §0.4）与 HTTP 状态码映射。
- *
- * 原则七：错误码 MUST 全局唯一且语义稳定，MUST NOT 出现同码不同义。
- * 本表**复用**运行环境既有码（`VALIDATION_FAILED` / `NOT_FOUND` / `INTERNAL_ERROR` /
- * `SERVICE_UNAVAILABLE`），并新增 `ADM_` 前缀码——前缀保证与既有码表零碰撞，
- * 同时可一眼区分来源。
- *
- * 该模块是**跨层共享内核**：`routes/`、`domain/`、`infra/` 均可引用
- * （与 `agent-backend/src/types.ts` 的角色相同），因此不构成越级依赖。
- *
- * **2026-10-15**：补登 §11（身份与分权，`FR-065`/`FR-066`）的 `ADM_UNAUTHENTICATED`（401）
- * 与 `ADM_FORBIDDEN`（403）。两者为**预登记**：§11 尚未实施，没有任何校验钩子会抛出它们，
- * 此处的价值是把命名与状态码提前冻结在四张表（契约 §0.4 + 本表 + `ERROR_STATUS` + 前端文案）里。
- */
 
-/** 全部错误码常量（与契约 §0.4 逐行对应） */
 export const ERROR_CODES = {
-  // ---- 复用既有码 ----
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   NOT_FOUND: 'NOT_FOUND',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
-  // ---- 数字人（§5、§7）----
   ADM_AGENT_NAME_TAKEN: 'ADM_AGENT_NAME_TAKEN',
   ADM_AGENT_IN_USE: 'ADM_AGENT_IN_USE',
   ADM_AGENT_INVALID_REF: 'ADM_AGENT_INVALID_REF',
   ADM_AGENT_NOT_FOUND: 'ADM_AGENT_NOT_FOUND',
-  // ---- SKILL（§4）----
   ADM_SKILL_NAME_TAKEN: 'ADM_SKILL_NAME_TAKEN',
   ADM_SKILL_ARCHIVE_INVALID: 'ADM_SKILL_ARCHIVE_INVALID',
   ADM_SKILL_ARCHIVE_UNSAFE: 'ADM_SKILL_ARCHIVE_UNSAFE',
   ADM_SKILL_NOT_FOUND: 'ADM_SKILL_NOT_FOUND',
   ADM_SKILL_MODIFIED: 'ADM_SKILL_MODIFIED',
   ADM_SKILL_READ_ONLY: 'ADM_SKILL_READ_ONLY',
-  // ---- 本体（§10）----
   ADM_ONTOLOGY_NOT_FOUND: 'ADM_ONTOLOGY_NOT_FOUND',
   ADM_ONTOLOGY_EXISTS: 'ADM_ONTOLOGY_EXISTS',
-  // ---- MCP 服务（§3）----
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
   ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
-  // ---- 部署（§6）----
-  // 2026-11-23：部署前校验下架，ADM_DEPLOY_VALIDATION_FAILED 一并撤销（四处同删）。
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
-  // ---- 用户（§6）----
   ADM_USER_ID_TAKEN: 'ADM_USER_ID_TAKEN',
   ADM_USER_NOT_FOUND: 'ADM_USER_NOT_FOUND',
-  // ---- 通用 ----
   ADM_CONFIG_REVISION_CONFLICT: 'ADM_CONFIG_REVISION_CONFLICT',
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
-  // ---- 身份与分权（§11）----
-  // 024：登录鉴权落地——ADM_UNAUTHENTICATED 用于 /me 探针；ADM_INVALID_CREDENTIALS 用于登录失败
   ADM_UNAUTHENTICATED: 'ADM_UNAUTHENTICATED',
   ADM_FORBIDDEN: 'ADM_FORBIDDEN',
   ADM_INVALID_CREDENTIALS: 'ADM_INVALID_CREDENTIALS',
@@ -95,14 +68,11 @@ export const ERROR_STATUS: Readonly<Record<string, number>> = {
   [ERROR_CODES.ADM_STORAGE_UNAVAILABLE]: 503,
   [ERROR_CODES.ADM_RUNTIME_UNREACHABLE]: 503,
 
-  // §11 身份与分权：401 未认证 / 403 越权 / 401 登录失败
   [ERROR_CODES.ADM_UNAUTHENTICATED]: 401,
   [ERROR_CODES.ADM_FORBIDDEN]: 403,
   [ERROR_CODES.ADM_INVALID_CREDENTIALS]: 401,
 };
 
-/** 全部错误码清单（T120 的机械核对与测试共用） */
 export const ALL_ERROR_CODES: readonly string[] = Object.values(ERROR_CODES);
 
-/** 平台操作者标识（`research.md` D11）；仅用于审计字段，不参与 users/ 目录划分 */
 export const PLATFORM_OPERATOR = 'zyw_admin';

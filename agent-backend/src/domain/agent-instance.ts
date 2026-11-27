@@ -1,16 +1,3 @@
-/**
- * 数字人配置包加载（T020 / FR-011）。
- *
- * 读取 agents/{name}/ 下：
- * - SOUL.md（必填；**正文**追加到 System Prompt，frontmatter 只供前台展示/引导，见 soul.ts）
- * - skills/{name}/SKILL.md（仅 YAML frontmatter 的 name/description，追加到 System Prompt；
- *   有技能时在小节末尾附一句「按需读取正文」引导，无技能则不写）
- * - TOOL.json（{"enabled": [...]}，从内置工具白名单过滤）
- * - MCP.json（{"servers": [...]}，stdio/http；写能力必须声明 permission_boundary，FR-024）
- *
- * SOUL/TOOL/MCP 缺失或损坏 → AgentConfigError（上层跳过该数字人并告警）；
- * 单个 skill 损坏 → 跳过该技能并告警，不影响整体。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -28,21 +15,8 @@ import { MCP_TRANSPORT_HINT, normalizeTransport } from './mcp-transport.js';
 import { RULES_FIELD_PATH_HINT, parseRulesFieldPath } from './rules-field-path.js';
 import type { AgentConfigBundle, McpServerConfig, SkillMeta } from '../types.js';
 
-/**
- * HTTP 头名判据（RFC 7230 token）。
- *
- * 与平台保存期（`admin-backend/src/domain/mcp/service-config-fields.ts` 的
- * `HEADER_NAME_RE`）**同一判据**——两侧不一致会造成"平台保存得进去、运行环境加载不了"。
- */
 const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
-/**
- * 内置工具白名单（FR-023）。
- *
- * **R1 改造后从 `builtin-tool-catalog.ts` 派生**——此前这里与
- * `infra/builtin-tools.ts` 各维护一份、无机制保证一致（改一处漏一处）。
- * 本模块私有：外部需要工具名时请直接用目录的 `builtinToolNames()`，别再复制一份。
- */
 const BUILTIN_TOOL_NAMES: readonly string[] = builtinToolNames();
 
 /** TOOL.json 白名单判定用的已知集合（模块级一次构造，不随每次数字人配置加载重复建 Set） */
@@ -70,9 +44,6 @@ export function loadAgentConfig(
   const soul = readRequired(agentDir, 'SOUL.md');
   if (!soul.trim()) throw new AgentConfigError(`数字人 ${agentName} 的 SOUL.md 为空`);
 
-  // SOUL 结构化（004）：frontmatter 只承载**前台展示与引导**数据（角色简介 / 首屏欢迎语 /
-  // 问题实例），**正文才是提示词**。剥掉 frontmatter 后，模型看不到那些展示数据，
-  // 也就不会把 UI 配置当成指令。旧版 SOUL.md（无 frontmatter）原样返回
   // ⇒ 存量数字人的 System Prompt 与改造前逐字一致（兼容不变式）。
   const soulBody = stripFrontmatter(soul).trim();
   if (!soulBody) {
@@ -83,7 +54,6 @@ export function loadAgentConfig(
   const mcpServers = loadMcpServers(agentDir, agentName);
   const skills = loadSkills(agentDir, agentName, logger);
 
-  // 默认拼装（全部技能索引 + 通用引导）唯一实现见 `skill-prompt.ts`：
   // 请求级"只插入选中技能"复用同一函数，避免两条路径各写一份拼法而漂移。
   const systemPrompt = composeSystemPrompt({ soulBody, skills });
 
@@ -131,8 +101,6 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     const bad = (why: string) =>
       new AgentConfigError(`数字人 ${agentName} MCP.json servers[${i}] ${why}`);
     if (typeof s.name !== 'string' || !s.name) throw bad('缺少 name');
-    // 传输方式**在入口归一**：`streamable-http` 是 `http` 的生态叫法，二者同义，
-    // 不接受会让手工按生态写法改过的 MCP.json 把整个数字人打成"配置损坏"（实测报错）
     const transport = normalizeTransport(s.transport);
     if (transport === null) {
       throw bad(`transport 须为 ${MCP_TRANSPORT_HINT}（当前：${JSON.stringify(s.transport)}）`);
@@ -155,27 +123,15 @@ function loadMcpServers(dir: string, agentName: string): McpServerConfig[] {
     if (s.allowed_tools !== undefined) cfg.allowedTools = parseAllowedTools(s.allowed_tools, bad);
     if (s.headers !== undefined) cfg.headers = parseHeaders(s.headers, bad);
     if (s.tool_labels !== undefined) cfg.toolLabels = parseToolLabels(s.tool_labels, bad);
-    // 2026-10-17：`async_tools` 已移除（异步能力改由工具入参 schema 是否声明 `resultUrl`
-    // 自动判定）。存量 `MCP.json` 里的该键**原样忽略**——不报错、不纳管，部署后自然消失。
     return cfg;
   });
 }
 
-/**
- * 解析 headers（**请求头**，2026-10-08）。
- *
- * 判据与平台保存期**同一口径**（对象 / 头名合法 / 值为单行非空字符串 / 大小写不敏感下不重复），
- * 否则会出现"平台保存得进去、运行环境加载不了"。非法即配置错误：把 typo 挡在加载期，
- * 避免"以为带了令牌、实际没带"这类只能靠 401 反推的静默失效。
- *
- * 语义：缺省 = 不带请求头（存量 `MCP.json` 同一口径；物化时也不会写空壳）。
- */
 function parseHeaders(raw: unknown, bad: (why: string) => Error): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad(`headers 须为对象 { 头名: 值 }，当前：${JSON.stringify(raw)}`);
   }
   const out: Record<string, string> = {};
-  /** 头名大小写不敏感：同时出现两个只差大小写的头名时，"发哪个"会退化成实现细节 */
   const seen = new Map<string, string>();
   for (const [rawName, rawValue] of Object.entries(raw as Record<string, unknown>)) {
     const name = rawName.trim();
@@ -202,13 +158,6 @@ function parseHeaders(raw: unknown, bad: (why: string) => Error): Record<string,
   return out;
 }
 
-/**
- * 值里是否含换行或控制字符。
- *
- * 换行会被 HTTP 客户端拆成**额外的头**（header injection），控制字符同理。
- * 用逐字符判断而非正则（控制字符类正则触发 `no-control-regex`）；
- * 与平台保存期 `service-config-fields.ts` 的 `hasControlChars` **同一判据**。
- */
 function hasControlChars(value: string): boolean {
   for (const ch of value) {
     const code = ch.codePointAt(0) ?? 0;
@@ -220,18 +169,6 @@ function hasControlChars(value: string): boolean {
 /** 工具显示名长度上限：与平台保存期同一口径（`MCP_TOOL_LABEL_MAX_CHARS`） */
 const TOOL_LABEL_MAX_CHARS = 40;
 
-/**
- * 解析 `tool_labels`（**工具显示名**，2026-10-27）。
- *
- * 判据与平台保存期**同一口径**（对象 / 键非空 / 值为 1~40 字单行字符串，见
- * `admin-backend/src/domain/mcp/service-config-fields.ts` 的 `normalizeToolLabels`），
- * 否则会出现"平台保存得进去、运行环境加载不了"。
- *
- * 非法即配置错误：显示名会进意图聚焦命题，一个带换行的名字会直接污染命题文本；
- * 平台读取期已把脏值收敛掉，物化只会写合法值，这里的报错属于最后一道防线。
- *
- * 语义：缺省 / 空对象 = 全部回退英文拼接（与 `headers` 同一口径，物化时"非空才写"）。
- */
 function parseToolLabels(raw: unknown, bad: (why: string) => Error): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad(`tool_labels 须为对象 { 工具名: 显示名 }，当前：${JSON.stringify(raw)}`);
@@ -256,15 +193,6 @@ function parseToolLabels(raw: unknown, bad: (why: string) => Error): Record<stri
   return out;
 }
 
-/**
- * 解析 allowed_tools（**工具白名单**，2026-10-03）。
- *
- * 判据与平台**同一口径**（数组 / 元素非空字符串 / 重复项静默去重），避免
- * "平台保存得进去、运行环境加载不了"这类两边不一致。
- *
- * 语义：**缺省或空数组 = 不限制**（存量 `MCP.json` 与平台读取路径同一口径）。
- * 故空数组**不报错**——它表示"不过滤"，而不是"一个工具都不给"。
- */
 function parseAllowedTools(raw: unknown, bad: (why: string) => Error): string[] {
   if (!Array.isArray(raw)) {
     throw bad(`allowed_tools 须为字符串数组（工具白名单），当前：${JSON.stringify(raw)}`);
@@ -298,14 +226,6 @@ function parseConfirmation(
   throw bad('confirmation 须为 "never" | "always" | {"tools": string[]}');
 }
 
-/**
- * 解析 rules_fields：`{ 工具名: 字段名或对象路径 }`，非法结构（非对象、值不是合法
- * 字段路径）即配置错误——typo 挡在加载期，避免"以为开了选择器实际没开"。
- *
- * 取值支持对象嵌套（如 `input.targetPriorities`，2026-09-22）：规则数组常嵌在入参
- * 对象内部，旧实现只接受顶层名字，这类声明会**静默失效**。语法与平台保存期
- * 同一判据（`rules-field-path.ts`，两侧同构）。
- */
 function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<string, string> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad('rules_fields 须为对象 { 工具名: 字段名 }');
@@ -322,20 +242,6 @@ function parseRulesFields(raw: unknown, bad: (why: string) => Error): Record<str
   return out;
 }
 
-/**
- * 解析 file_args：`{ 工具名: { 取值路径: "url" | "url:from=<来源路径>" } }`，
- * 非法结构即配置错误。
- *
- * 取值路径（2026-09-16）：键可以是顶层参数名（`image`，与旧写法等价），
- * 也可以是穿过数组的路径（`items[].excelFileUrl`、`files[]`）——
- * 语法在 `file-arg-path.ts` 里定义，**与平台侧同一判据**，避免
- * "平台保存得进去、运行环境加载不了"（或反过来）这类两边不一致。
- *
- * 派生模式（2026-09-18）：`"url:from=<来源路径>"` 表示目标字段的值由引擎
- * 从来源路径推导注入（覆盖模型填写、对 LLM 隐藏），用来根治模型对
- * http 地址字段的幻觉。来源路径须合法且与目标路径形状相容
- * （除最后一段外逐段一致，保证数组元素一一对应）。
- */
 function parseFileArgs(
   raw: unknown,
   bad: (why: string) => Error,
@@ -396,7 +302,6 @@ function loadSkills(dir: string, agentName: string, logger?: LoadLogger): SkillM
   return skills;
 }
 
-/** 解析 SKILL.md 的 YAML frontmatter（---\n...\n---），取 name/description */
 function parseFrontmatter(raw: string): SkillMeta {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
   if (!match) throw new Error('SKILL.md 缺少 YAML frontmatter');

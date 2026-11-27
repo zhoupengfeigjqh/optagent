@@ -1,9 +1,3 @@
-/**
- * 模型列表与当前选择（FR-013）
- *
- * 模型是**请求级**参数：切换只改本地状态，随下一条消息提交（`POST .../messages` 的 `model`）。
- * 当前选择缓存于 `sessionStorage` 键 `optagent.model`；缓存值失效（不在最新列表中）时回退默认项。
- */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
@@ -13,28 +7,21 @@ import { STORAGE_KEY_MODEL } from '../constants/limits'
 import { toErrorInfo } from '../utils/error-message'
 import { useSession } from './useAppSession'
 
-/** 构造参数。 */
 export interface ModelsDeps {
   models: ModelsApi
-  /** 注入存储（测试用内存实现）；传 `null` 关闭持久化 */
   storage?: Storage | null
 }
 
-/** 模型 composable 契约。 */
 export interface ModelsStore {
   models: Readonly<Ref<Model[]>>
   current: Readonly<Ref<string | null>>
   loading: Readonly<Ref<boolean>>
   error: Readonly<Ref<ErrorInfo | null>>
-  /** 当前模型是否为后端默认项 */
   isDefaultSelected: ComputedRef<boolean>
-  /** 拉取列表并校正缓存值 */
   load(): Promise<void>
-  /** 切换当前模型（仅本地，发送时提交） */
   select(model: string): void
 }
 
-/** 创建模型状态。 */
 export function createModelsStore(deps: ModelsDeps): ModelsStore {
   const storage = deps.storage === undefined ? safeSessionStorage() : deps.storage
 
@@ -61,7 +48,6 @@ export function createModelsStore(deps: ModelsDeps): ModelsStore {
       const stored = readStoredModel(storage)
       const usable = stored !== null && list.some((item) => item.model === stored)
       if (!usable) {
-        // 缓存值失效 → 回退默认项（多项 is_default 时取第一项）
         const fallback = list.find((item) => item.is_default)?.model ?? list[0]?.model ?? null
         current.value = fallback
         writeStoredModel(storage, fallback)
@@ -84,7 +70,6 @@ export function createModelsStore(deps: ModelsDeps): ModelsStore {
   return { models, current, loading, error, isDefaultSelected, load, select }
 }
 
-/** 组件内取用（经 `provide/inject` 的会话上下文）。 */
 export function useModels(): ModelsStore {
   return useSession().models
 }

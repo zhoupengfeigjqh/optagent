@@ -1,8 +1,3 @@
-/**
- * 全局基础样式：重置、排版、通用控件类（.btn / .field / .card）。
- *
- * 动效遵循 `prefers-reduced-motion`（原则四：开启后界面无动画且功能不受影响）。
- */
 
 *,
 *::before,
@@ -25,7 +20,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 焦点始终可见（键盘可达的前提，原则四） */
 :focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
@@ -42,7 +36,6 @@ a {
   color: var(--color-primary);
 }
 
-/* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -98,7 +91,6 @@ a {
   filter: brightness(0.94);
 }
 
-/* ---------- 表单 ---------- */
 .field {
   display: block;
   margin-bottom: var(--space-4);
@@ -142,12 +134,10 @@ textarea {
   resize: vertical;
 }
 
-/* 原生 multiple select 高度受控，便于键盘多选 */
 select[multiple] {
   min-height: 120px;
 }
 
-/* ---------- 卡片 ---------- */
 .card {
   display: flex;
   flex-direction: column;
@@ -191,7 +181,6 @@ select[multiple] {
   margin-top: auto;
 }
 
-/* ---------- 工具类 ---------- */
 .muted {
   color: var(--color-text-muted);
 }

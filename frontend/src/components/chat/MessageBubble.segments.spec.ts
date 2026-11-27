@@ -1,12 +1,3 @@
-/**
- * 组件测试：渲染段（A-lite，2026-11-16）的 DOM 顺序
- *
- * 需求：流式轮按「文字 → 工具 → 文字」的时间线渲染；历史消息没有段序（`history.jsonl`
- * 只存整段 `content`），仍按旧顺序「工具在上、正文在下」。
- *
- * 断言方式是比对渲染后的 HTML 里各片段出现的先后，而不是找"第几个子节点"——
- * 卡片内部结构可能变化，但"谁在谁前面"正是这次改动的全部意义。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

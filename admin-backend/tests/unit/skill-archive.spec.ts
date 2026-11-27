@@ -60,7 +60,6 @@ describe('纯函数：条目安全判定', () => {
     expect(unsafeEntryReason('pkg\\references\\a.md')).toBeNull();
     // 起点为 \ 属绝对路径（如 \Windows\System32），仍拒绝
     expect(unsafeEntryReason('\\Windows\\x')).toMatch(/绝对路径/);
-    // 归一后仍能识别穿越
     expect(unsafeEntryReason('pkg\\..\\..\\etc')).toMatch(/穿越/);
   });
 
@@ -68,10 +67,10 @@ describe('纯函数：条目安全判定', () => {
     expect(isSymlinkEntry(MODE_SYMLINK << 16)).toBe(true);
     expect(isSymlinkEntry(0o100644 << 16)).toBe(false);
     expect(isDirectoryEntry('a/')).toBe(true);
-    expect(isDirectoryEntry('a\\')).toBe(true); // 反斜杠结尾同样视为目录
+    expect(isDirectoryEntry('a\\')).toBe(true);
     expect(isDirectoryEntry('a')).toBe(false);
     expect(entryDepth('a/b/c.txt')).toBe(3);
-    expect(entryDepth('a\\b\\c.txt')).toBe(3); // 反斜杠按分隔符计层级
+    expect(entryDepth('a\\b\\c.txt')).toBe(3);
     expect(entryDepth('a/')).toBe(1);
     expect(entryDepth('')).toBe(0);
   });
@@ -108,7 +107,6 @@ describe('parseSkillMetadata', () => {
       const raw = `---\nname: x\ndescription: y\n${block}---\n`;
       const meta = parseSkillMetadata(raw);
       expect(meta.display_name).toBe(expected);
-      // 身份键永远是顶层 name，不随展示名变化
       expect(meta.name).toBe('x');
     }
   });

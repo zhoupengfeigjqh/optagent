@@ -10,9 +10,7 @@ import { ref } from 'vue'
 
 withDefaults(
   defineProps<{
-    /** 思考全文 */
     text: string
-    /** 是否仍在流式生成 */
     streaming?: boolean
   }>(),
   { streaming: false },

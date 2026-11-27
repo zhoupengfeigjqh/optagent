@@ -1,16 +1,3 @@
-/**
- * 组件测试：上传入口面板（T052 + 003 三空间改造 + 字段约束只读提示）
- *
- * 覆盖：
- * - 目录树渲染取自 `spaces` prop（workspace 接口数据）
- * - 数据准备目录带字段约束时展示**只读提示**（表头须含 / 可选），其余目录不展示
- *   （校验在服务端执行，前端只展示要求，契约 runtime-api-delta.md §3.1）
- * - 可上传类型挂在**二级目录**行下，**不在**空间标题下（2026-10-13：粒度下放到目录，
- *   数据准备的空间值只是平台默认，展示它会误导用户）
- * - 面板自带「×」与 **Esc** 两条关闭入口（2026-10-22：此前只能再次点「+」收起）
- *
- * 运行方式：`npm run test`（本地执行）
- */
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,7 +26,6 @@ function makeSpaces(): WorkspaceSpace[] {
             { name: '产线编号', type: 'string', required: true },
             { name: '计划量', type: 'integer', required: false },
           ],
-          // 目录级白名单（2026-10-13）：与本空间另一个目录不同 ⇒ 证明粒度是目录
           upload_extensions: ['.csv', '.xlsx', '.txt'],
           predefined: false,
         },
@@ -77,7 +63,6 @@ function mountMenu(spaces: WorkspaceSpace[] = makeSpaces()) {
   return mount(UploadMenu, { props: { open: true, spaces } })
 }
 
-/** 点击某目录按钮 → 读取隐藏 file input 的 `accept`（= 该目录允许的类型） */
 async function acceptAfterClick(
   wrapper: ReturnType<typeof mountMenu>,
   dir: string,
@@ -111,11 +96,9 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
     const wrapper = mountMenu()
     const dirs = wrapper.findAll('.upload-menu__dir')
 
-    // 生产计划：有字段约束 ⇒ 有「?」⇒ 加修饰类（左留 4px 气口）
     expect(dirs[0]!.find('.upload-menu__dir-exts').classes()).toContain(
       'upload-menu__dir-exts--after-hint',
     )
-    // 产线电价：无字段约束（也就没有「?」）⇒ 不加修饰类（padding-left: 0）
     expect(dirs[1]!.find('.upload-menu__dir-exts').classes()).not.toContain(
       'upload-menu__dir-exts--after-hint',
     )
@@ -135,11 +118,9 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
   it('带字段约束的目录默认收起提示，点击「?」后展示「表头须含」与可选列类型标注', async () => {
     const wrapper = mountMenu()
 
-    // 默认不直接展示表头要求文案
     expect(wrapper.find('.hint-tip__pop').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('表头须含')
 
-    // 点击「?」展开浮层
     const btn = wrapper.find('.hint-tip__btn')
     expect(btn.exists()).toBe(true)
     await btn.trigger('click')
@@ -176,7 +157,6 @@ describe('UploadMenu - 目录树与字段约束提示', () => {
   })
 })
 
-/* ---------- 2026-10-13：accept 按**目录**生成（FR-011 / 失败判据 2） ---------- */
 
 describe('UploadMenu - 文件选择器 accept 的粒度', () => {
   it('未点击任何目录前 accept 为空', () => {
@@ -206,7 +186,6 @@ describe('UploadMenu - 记录区空态（012 FR-015）', () => {
 
     expect(wrapper.find('.upload-menu__uploads').exists()).toBe(false)
     expect(wrapper.findAll('.upload-item')).toHaveLength(0)
-    // 目录树照常在（清空只清记录，不清目录）
     expect(wrapper.text()).toContain('生产计划')
   })
 
@@ -234,16 +213,13 @@ describe('UploadMenu - 记录区空态（012 FR-015）', () => {
   })
 })
 
-/* ---------- 2026-10-22：关闭入口（「×」/ Esc），此前只能再次点「+」收起 ---------- */
 
-/** 从 `document.body` 派发一次 Esc：模拟焦点在输入框/面板内，事件沿捕获→冒泡路径传播 */
 function pressEscape(): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
   document.body.dispatchEvent(event)
   return event
 }
 
-/** 造一个"打开的"原生弹窗（HITL 等），用于验证弹窗的 Esc 语义优先 */
 function openDialog(): HTMLDialogElement {
   const dialog = document.createElement('dialog')
   dialog.setAttribute('open', '')
@@ -283,7 +259,6 @@ describe('UploadMenu - 关闭入口（「×」/ Esc）', () => {
     window.removeEventListener('keydown', bubbled)
     expect(wrapper.emitted('close')).toHaveLength(1)
     expect(event.defaultPrevented).toBe(true)
-    // 冒泡阶段收不到 ⇒ 中栏那个"Esc 中断本轮回答"的监听不会执行（回答不会被误掐）
     expect(bubbled).not.toHaveBeenCalled()
   })
 

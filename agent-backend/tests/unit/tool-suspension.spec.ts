@@ -1,13 +1,3 @@
-/**
- * 单元测试：本轮工具挂起状态（`domain/tool-suspension.ts`，2026-11-09）。
- *
- * 守住的语义：
- * - 新建即"未挂起"，默认无兜底出口；
- * - `suspendTools` 幂等：已挂起不覆盖首个触发码；
- * - `interceptSuspended` 未挂起时返回 `false` 且 `attempts` 不变；
- * - 挂起后每次拦截累加 `attempts`，第 2 次起触发一次兜底，且只触发一次；
- * - 兜底出口抛错被吞掉（可观测性出口不得反过来制造故障）。
- */
 import { describe, expect, it, vi } from 'vitest';
 
 import {

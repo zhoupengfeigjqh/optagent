@@ -1,13 +1,3 @@
-/**
- * 集成测试：指代改写（027）端到端 —— 成功路径与用户不可见性。
- *
- * 走**真实 HTTP**（`buildServer` + 真 `ctx` + 真 `RunManager` + 真 `IntentFocusRunner`
- * + 真留档 + 真 SOUL），只把两个模型换成桩（见 `support/rewrite-env.ts`）。
- *
- * 覆盖规格里"用户不可见"的四条硬要求（FR-005 / FR-006 / FR-026 / FR-028）：
- * 改写不进 SSE、不进 assistant 正文、不进 `history.jsonl`；降级时回答照常。
- * 预算与失败矩阵在 `chat-rewrite-budget` / `chat-rewrite-degrade` 两个文件。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,11 +54,9 @@ describe('027 指代改写：端到端（成功路径）', () => {
     const second = await send(env.app, thread.threadId, FOLLOW_UP);
 
     expect(second.statusCode).toBe(200);
-    // 1) 用户可见输出里没有改写结果
     expect(second.payload).toContain('本轮回答');
     expect(second.payload).not.toContain(REWRITTEN);
 
-    // 2) 改写请求带上了上一轮完整问答（素材只取正文）
     expect(env.llmLog.rewritePrompts).toHaveLength(2);
     const material = env.llmLog.rewritePrompts[1]!;
     expect(material).toContain('【最近对话】');
@@ -76,8 +64,6 @@ describe('027 指代改写：端到端（成功路径）', () => {
     expect(material).toContain('助手：本轮回答');
     expect(material).toContain(`【当前输入】\n${FOLLOW_UP}`);
 
-    // 3) Laya 收到的 state：改写命题永远是原话（含指代才判得出来），
-    //    技能 / 行为评分收到的是改写文本；每轮只发一次改写命题
     expect(env.laya.states[0]).toBe(ORIGINAL);
     const followUpIndex = env.laya.states.indexOf(FOLLOW_UP);
     expect(followUpIndex).toBeGreaterThan(0);
@@ -87,13 +73,11 @@ describe('027 指代改写：端到端（成功路径）', () => {
       true,
     );
 
-    // 4) 历史只有原话（两轮用户输入都在，改写文本不在）
     const raw = historyRaw(env.root, thread.threadId);
     expect(raw).toContain(ORIGINAL);
     expect(raw).toContain(FOLLOW_UP);
     expect(raw).not.toContain(REWRITTEN);
 
-    // 5) 留档：第二轮的改写字段齐全，input 仍是原话
     const records = new IntentFocusStore(env.root).readAll(USER, AGENT, thread.threadId);
     expect(records).toHaveLength(2);
     expect(records[1]).toMatchObject({
@@ -117,7 +101,6 @@ describe('027 指代改写：端到端（成功路径）', () => {
 
     expect(res.statusCode).toBe(200);
     expect(env.llmLog.rewritePrompts).toHaveLength(0);
-    // 技能 + 行为两批，没有改写命题
     expect(env.laya.states).toHaveLength(2);
     const [record] = new IntentFocusStore(env.root).readAll(USER, AGENT, thread.threadId);
     expect(record).toMatchObject({ need_rewrite: null, rewrite_query: '', rewrite_reason: null });
@@ -158,7 +141,6 @@ describe('027 指代改写：采用口径与零回归', () => {
       need_rewrite: true,
       rewrite_query: '把上批采购单按交期重排一遍',
       rewrite_truncated: false,
-      // 单轮无历史 ⇒ 素材只有当前输入（`no_history` 是说明，不是失败）
       rewrite_reason: 'no_history',
     });
     expect(env.laya.states).toContain('把上批采购单按交期重排一遍');
@@ -174,7 +156,6 @@ describe('027 指代改写：采用口径与零回归', () => {
     const [record] = new IntentFocusStore(env.root).readAll(USER, AGENT, thread.threadId);
     expect(Array.from(record!.rewrite_query)).toHaveLength(100);
     expect(record!.rewrite_truncated).toBe(true);
-    // 截断不是失败：`no_history` 只说明本轮没有历史可参考
     expect(record!.rewrite_reason).toBe('no_history');
   });
 
@@ -185,7 +166,6 @@ describe('027 指代改写：采用口径与零回归', () => {
     await send(env.app, thread.threadId, FOLLOW_UP);
 
     expect(env.llmLog.rewritePrompts).toHaveLength(0);
-    // 第一次是改写命题（素材=原文），之后技能 / 行为评分也是原文
     expect(env.laya.states[0]).toBe(FOLLOW_UP);
     expect(env.laya.states.every((state) => state === FOLLOW_UP)).toBe(true);
 
@@ -212,7 +192,6 @@ describe('027 指代改写：采用口径与零回归', () => {
       const off = await runOnce(offEnv);
       const judgedFalse = await runOnce(falseEnv);
 
-      // 除"多一条改写命题的判定调用"外，聚焦结果与改造前无法区分
       expect(judgedFalse.skills).toEqual(off.skills);
       expect(judgedFalse.behaviors).toEqual(off.behaviors);
       expect(judgedFalse.prompt).toBe(off.prompt);
@@ -238,12 +217,10 @@ describe('027 指代改写：采用口径与零回归', () => {
     expect(records).toHaveLength(2);
     expect(records.every((record) => record.need_rewrite === true)).toBe(true);
     expect(records.every((record) => record.rewrite_query === REWRITTEN)).toBe(true);
-    // 第二次的历史素材里已经能读到第一轮的问答（时间正序）
     expect(env.llmLog.rewritePrompts[1]).toContain('【最近对话】');
   });
 
   it('术语替换关闭时：判定素材就是提交原文（运行期不做第二次替换）', async () => {
-    // 目录里放了术语表，但 term_normalize 未开启 ⇒ 运行期不应读表、更不应二次替换
     const env = await setup({ rewrite: true });
     const tableDir = path.join(env.root, 'users', USER, 'agents', AGENT, 'ontology', '生产调度', '原材料采购和库存');
     fs.writeFileSync(
@@ -255,7 +232,6 @@ describe('027 指代改写：采用口径与零回归', () => {
 
     await send(env.app, thread.threadId, FOLLOW_UP);
 
-    // 素材等于提交文本：既没有被替换成"订单"，也没有追加任何东西
     expect(env.laya.states[0]).toBe(FOLLOW_UP);
   });
 });
@@ -345,7 +321,6 @@ describe('027 指代改写：SOUL 开关读取（部署后即生效）', () => {
       expect(isIntentFocusEnabled(root, USER, AGENT)).toBe(true);
       expect(isInputRewriteEnabled(root, USER, AGENT)).toBe(false);
 
-      // 模拟重新部署：整体覆盖 SOUL.md
       writeAgent(root, { rewrite: true });
 
       expect(isInputRewriteEnabled(root, USER, AGENT)).toBe(true);

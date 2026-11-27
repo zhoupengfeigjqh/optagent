@@ -1,19 +1,4 @@
 <script setup lang="ts">
-/**
- * 任务表格行（015，T037 / T051）
- *
- * 六列：任务名 / 状态 / 频率 / 已执行 / 下次触发 / 操作。行尾三个原生按钮：
- * **启停 → 编辑（笔）→ 删除（×）**，DOM 顺序即 Tab 顺序。
- *
- * 四条口径：
- * 1. **启停两态形状不同**：停用态 = 三角（▶ 启动），启用态 = **红色方块**（■ 停止）。
- *    形状 + 颜色 + `aria-pressed` 三重区分，不只靠颜色（宪章原则四）。
- * 2. **启用中只有停止可用**（2026-10-30 增补）：编辑与删除原生禁用，原因放 `title`；
- *    处理函数里再兜一层（`role="status"` 就地提示），防止程序化触发绕过禁用态。
- * 3. **启停按钮的可用性只看 `can_start`**（服务端派生）：次数用尽 / 已过截止 / 数字人不可用时
- *    按钮原生禁用，并把原因放在 `title` 上——前端 MUST NOT 自己再算一遍次数与截止时间。
- * 4. 折叠要点：内联文案全部来自 `utils/schedule-format.ts`（唯一真源）。
- */
 import { computed, ref, watch } from 'vue'
 
 import type { ScheduledTask } from '../../api/types'
@@ -24,7 +9,6 @@ import ScheduleStatus from './ScheduleStatus.vue'
 const props = withDefaults(
   defineProps<{
     task: ScheduledTask
-    /** 该行有请求在途（启停 / 编辑 / 删除），三个按钮同时置灰 */
     busy?: boolean
   }>(),
   { busy: false },
@@ -36,7 +20,6 @@ const emit = defineEmits<{
   remove: [taskId: string]
 }>()
 
-/** 启用中点击删除的就地提示（不发请求）；切换任务/状态后自动清除 */
 const blockedHint = ref('')
 
 watch(
@@ -114,7 +97,6 @@ function onRemove(): void {
         :title="toggleDisabledReason() || (task.enabled ? '停止任务' : '启动任务')"
         @click="onToggle"
       >
-        <!-- 停用态 = 三角；启用态 = 红色方块。形状本身承载状态，不只靠颜色 -->
         <span v-if="task.enabled" class="schedule-row__stop-square" aria-hidden="true" />
         <BaseIcon v-else name="play" :size="14" />
       </button>
@@ -197,7 +179,6 @@ function onRemove(): void {
   color: var(--color-text);
 }
 
-/* 启用态 = 停止：红色方块（颜色语义明确，形状与三角启动区分开） */
 .schedule-row__action--stop {
   color: var(--color-status-error);
 }

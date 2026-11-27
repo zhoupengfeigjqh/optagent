@@ -361,7 +361,7 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
       "score": 0.67
     }
   ],
-  "prompt": "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）\n1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））",
+  "prompt": "［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。\n技能 raw-material-inventory-new → 本体 原材料采购和库存（ontology_id=1）\n\n关键行为\n· 创建原材料采购单 CreatePurchaseRecord\n· 查询原材料采购单信息 QueryPurchaseRecords",
   "prompt_truncated": false,
   "warnings": [],
   "error": null
@@ -372,42 +372,55 @@ interface IntentFocusRecordDraft extends Omit<IntentFocusRecord, 'at' | 'seq'> {
 
 ### 6.1 产生式
 
-> ⚠ 本节保留 016 初版语法。019 起（`直接命中：` / `上游路径：` 两段、长度按阶数 2000/3000/4000）
-> 与 2026-11-20（首行前缀含「本体函数」、函数与取数行为并入 `直接命中` 行、剪枝顺序
-> 「路径行 → 取数条目 → 函数条目 → 行为条目」）的改动，**以 `spec.md` 的 FR-041 / FR-068 为准**。
+> 本节于 2026-11-24 重写为「技能块 + 三节」形态（见 `spec.md` FR-041 / FR-045 / FR-068）。
+> 旧版 `n）技能（本体技能；ontology_name='…'）` + `直接命中：` / `上游路径：` 已作废。
 
 ```text
-prompt        = prefix, "\n", item, { "\n", item }
-prefix        = "本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）"
-item          = index, "）", item_body
-index         = "1" | "2" | ...            // 截断后重新连续编号
-item_body     = non_ontology_body | ontology_body
-non_ontology_body = skill_name, "（非本体技能）"
-ontology_body = skill_name, "（", "本体技能", "；", ontology_ref,
-                [ "；关联行为：", entry, { "、", entry } ], "）"
-ontology_ref  = [ "ontology_name='", ontology_name, "'，"], "ontology_id='", ontology_id, "'"
-entry         = title, "（", name, "）"
+prompt        = prefix, "\n", block, { "\n\n", block }
+prefix        = "［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。"
+block         = skill_line | ontology_block
+skill_line    = "技能 ", skill_name, " → ", ontology_ref
+              | "技能 ", skill_name, "（非本体技能）"
+ontology_ref  = "本体 ", ontology_name, "（ontology_id=", ontology_id, "）"
+              | "本体（ontology_id=", ontology_id, "）"
+ontology_block = skill_line, [ "\n\n", behaviors ], [ "\n\n", functions ], [ "\n\n", paths ]
+behaviors     = "关键行为", "\n", "· ", entry, { "\n", "· ", entry }
+functions     = "关键函数", "\n", func, { "\n", func }
+paths         = "图路径（上游 ", hops, " 跳；→/← 为本体边方向，按从左到右即本轮路径）",
+                "\n", path, { "\n", path }
+entry         = label, [ " @", concept ]
+label         = title, " ", name        // title 缺省或等于 name 时只写 name
+func          = label, [ " ", concept_ref, { "、", concept_ref } ]
+concept_ref   = "@", concept, [ " → ", query_name, { "、", query_name } ]
+path          = label, " @", from_concept,
+                ( " —〔", relation_title, "〕→ " | " ←〔", relation_title, "〕— " ), to_concept,
+                ( " → ", label | " →（无可用行为）" )
 ```
 
 **约束**：
-- 首行固定前缀；其后每个入选技能一行，行号从 `1` 连续编号（截断后重新编号）。
-- 片段内中文分号 `；`、条目中文 `、`；片段内换行压成空格，不产生额外行。
-- `description` 不进入提示（技能只出现 `name`）。
-- `title` / `name` 保留原文；`title` 缺失时 `title = name`；本体无 `ontology_name` 时只写 `ontology_id='X'`。
-- 关联本体写成一组显式字段：`ontology_name='…'，ontology_id='…'`。
-- **一个本体技能恒只有一个本体**（`SKILL.md` 的单个 `ontology_id`）：每行至多一组本体字段；同一 `ontology_id` 被物化成多份文件时只取首份，不重复输出。
-- 非本体技能不产生本体/行为部分。
-- 本体技能无任何入选行为时不产生空的 `关联行为：` 段。
-- MUST NOT 出现 `关联函数：` 段。
-- 同一本体只出现一次行为块；归属分数最高的入选技能。
-- 总长 ≤ 1200 字符；超限依次删末尾技能的行为条目 → 整个末尾技能行，保持完整条目。
+- 首行固定；技能块之间、块内三段之间用空行分隔；段序固定，空段整段省略。
+- `关键行为` = 判分命中的行为 + 函数关联概念的取数行为（同形，同一 `ontology_id + name` 只出现一次）。
+- `关键函数` 用 `@概念 → 取数行为名` 表达"用这个函数要先查哪张表"；概念写在 `@` 后，多个概念逐个写。
+- `图路径` 一行一跳；`→/←` 只表本体边书写方向，阅读顺序恒为行走顺序；起点只来自判分命中的行为。
+- `description` 不进入提示（技能只出现 `name`）；`title` / `name` 保留原文。
+- 同一本体只出现一次能力块；归属分数最高的入选技能。
+- 总长按阶数分档（4000 / 5000 / 6000）；超限整行丢弃（图路径行 → 取数条目 → 函数条目 → 行为条目）。
 
 ### 6.2 示例
 
 ```text
-本轮的任务与以下技能或本体行为密切相关，请重点关注（仅供参考，不必局限）
-1）raw-material-inventory-new（本体技能；ontology_name='原材料采购和库存'，ontology_id='1'；关联行为：创建原材料采购单（CreatePurchaseRecord）、查询原材料采购单信息（QueryPurchaseRecords））
-2）plain-skill（非本体技能）
+［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。
+技能 raw-material-inventory → 本体 原材料采购和库存（ontology_id=1）
+
+关键行为
+· 查询原材料库存信息 QueryInventory @RawMaterialInventory
+· 查询原材料采购单信息 QueryPurchaseRecords @PurchaseRecord
+
+关键函数
+· 原材料未到位数 sumRawNotArrivalQty @PurchaseRecord → QueryPurchaseRecords
+
+图路径（上游 1 跳；→/← 为本体边方向，按从左到右即本轮路径）
+查询原材料库存信息 QueryInventory @RawMaterialInventory ←〔拥有库存〕— RawMaterial → 查询原材料基本信息 QueryRawMaterials
 ```
 
 ## 7. 规则与算法约束

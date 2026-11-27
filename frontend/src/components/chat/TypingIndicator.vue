@@ -1,15 +1,6 @@
 <script setup lang="ts">
-/**
- * 流式等待指示（T035）
- *
- * 两段空档共用：①发送后、首个 `content` 事件到达前 → 缺省「思考中」（FR-020）；
- * ②工具调用执行中 → 由 `MessageBubble` 传入「正在执行 <工具名>…」（2026-11-16）。
- * 文案由调用方决定，本组件只负责转圈与语义。
- * `role="status"` 让读屏获知等待状态；`prefers-reduced-motion` 下由 `base.css` 降级为静态。
- */
 withDefaults(
   defineProps<{
-    /** 展示文案 */
     label?: string
   }>(),
   { label: '思考中' },

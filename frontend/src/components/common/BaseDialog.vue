@@ -1,29 +1,13 @@
 <script setup lang="ts">
-/**
- * 模态对话框（T026）
- *
- * 受控开合：由 `open` 驱动原生 `<dialog>`，所有关闭意图统一以 `close` 事件上报，
- * 由父级决定是否真正关闭（避免原生关闭与 prop 状态不同步）。
- * 原生 `<dialog>` 自带焦点陷阱与 Esc 关闭，无需自行实现。
- *
- * 宽度**两档**（2026-10-09 加宽版）：默认 `min(560px, 92vw)` 够用就不动；
- * 表格/结构化正文这类横向内容多的场景用 `wide`（`min(900px, 94vw)`），
- * 否则每列被挤成一条，只能靠横向滚动一列一列地看。
- * 两档都随视口收窄（窄屏 `92/94vw`），弹窗尺寸始终自适应。
- */
 import { computed, onMounted, ref, useId, watch } from 'vue'
 
 import BaseIcon from './BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 是否展开 */
     open?: boolean
-    /** 标题文本 */
     title?: string
-    /** 外部指定的无障碍标题元素 id（覆盖内部生成的 id） */
     labelledBy?: string | null
-    /** 宽版：表格/结构化正文等横向内容多的场景 */
     wide?: boolean
   }>(),
   { open: false, title: '', labelledBy: null, wide: false },
@@ -35,7 +19,6 @@ const dialogRef = ref<HTMLDialogElement | null>(null)
 const titleId = `base-dialog-title-${useId()}`
 const labelId = computed(() => props.labelledBy ?? (props.title ? titleId : null))
 
-/** 内部主动调用 `close()` 时置位，用于屏蔽随之而来的原生 `close` 事件。 */
 let suppressCloseEvent = false
 
 function syncOpen(value: boolean): void {
@@ -59,7 +42,6 @@ onMounted(() => syncOpen(props.open))
 watch(() => props.open, syncOpen)
 
 function handleCancel(event: Event): void {
-  // 阻止原生关闭，改由父级更新 `open` 后统一收敛
   event.preventDefault()
   emit('close')
 }
@@ -92,7 +74,6 @@ function handleBackdropClick(event: MouseEvent): void {
     <div class="base-dialog__panel">
       <header class="base-dialog__header">
         <h2 v-if="title" :id="titleId" class="base-dialog__title">{{ title }}</h2>
-        <!-- 标题右侧的附加信息（如 HITL 倒计时）：插在标题之后，跟随标题同行而不占正文 -->
         <slot name="header-extra" />
         <button type="button" class="base-dialog__close" aria-label="关闭" @click="emit('close')">
           <BaseIcon name="close" :size="16" />
@@ -110,9 +91,6 @@ function handleBackdropClick(event: MouseEvent): void {
 
 <style scoped>
 .base-dialog {
-  /* MUST 显式居中：Tailwind preflight 的 `* { margin: 0 }`（在 `@layer base`）会压过
-     浏览器 UA 给 `dialog` 的 `margin: auto`，而作者来源优先于 UA —— 不补这一行，
-     `showModal()` 出来的弹窗会贴在视口左上角。 */
   margin: auto;
   width: min(560px, 92vw);
   max-width: none;
@@ -122,7 +100,6 @@ function handleBackdropClick(event: MouseEvent): void {
   background: transparent;
 }
 
-/* 宽版：表格/结构化正文（列多时 560px 只能看见五六列，其余全靠横向滚） */
 .base-dialog--wide {
   width: min(900px, 94vw);
 }
@@ -140,9 +117,6 @@ function handleBackdropClick(event: MouseEvent): void {
   box-shadow: 0 16px 40px rgb(15 20 30 / 22%);
 }
 
-/* 不再用 `space-between`：头部可能有第三个子元素（`#header-extra`），
-   space-between 会把它挤到正中；改由关闭按钮的 `margin-left: auto` 贴右，
-   标题与附加信息保持相邻（两元素场景渲染结果与改动前一致）。 */
 .base-dialog__header {
   display: flex;
   align-items: center;

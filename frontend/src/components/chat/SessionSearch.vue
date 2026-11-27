@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * 会话内搜索栏（T075，FR-029 / FR-030 / SC-009）
- *
- * 高亮本身由 `MessageContent` 经 `utils/segments.ts` 完成（与匹配统计同一口径），
- * 本组件只负责：输入、结果计数播报、"下一个"跳转意图与关闭。
- * `Enter` 等价于"下一个"，`Esc` 关闭（不丢会话状态）。
- */
 import { computed } from 'vue'
 
 import BaseButton from '../common/BaseButton.vue'
@@ -13,13 +6,9 @@ import BaseIcon from '../common/BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 是否展开搜索栏 */
     open?: boolean
-    /** 当前关键词 */
     keyword?: string
-    /** 匹配总数 */
     total?: number
-    /** 当前定位序号（`-1` 表示未定位） */
     activeIndex?: number
   }>(),
   { open: false, keyword: '', total: 0, activeIndex: -1 },
@@ -33,7 +22,6 @@ const emit = defineEmits<{
 
 const hasKeyword = computed(() => props.keyword.trim() !== '')
 const noResult = computed(() => hasKeyword.value && props.total === 0)
-/** 「第 n / 共 m 项」：未定位时 `n` 记为 0 */
 const positionText = computed(
   () => `第 ${props.activeIndex < 0 ? 0 : props.activeIndex + 1} / 共 ${props.total} 项`,
 )

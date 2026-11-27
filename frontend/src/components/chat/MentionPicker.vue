@@ -1,15 +1,4 @@
 <script setup lang="ts">
-/**
- * `@` 引用面板（003 三空间级联）
- *
- * 三级**点击**级联（悬停不展开，避免误触发）：
- * - 一级：数据准备 / 临时空间（数据来自 workspace 接口，无前端常量）
- * - 点击「数据准备」→ 展开二级 scenario 子目录；点击子目录 → 三级文件
- * - 点击「临时空间」→ 直接出文件列
- * 键盘：`↑`/`↓` 当前列内移动、`Enter` 下钻或选中文件、`→` 下钻、`←` 回退、`Esc` 关闭。
- *
- * 组件不持有业务状态：选项与高亮均由 props 驱动，选择意图上抛给装配层。
- */
 import { nextTick, ref, watch } from 'vue'
 
 import type { FileReference, WorkspaceDir, WorkspaceSpace } from '../../api/types'
@@ -18,23 +7,14 @@ import type { MentionColumn } from '../../composables/useFileMention'
 
 const props = withDefaults(
   defineProps<{
-    /** 是否展开 */
     open?: boolean
-    /** 三空间树 */
     spaces?: WorkspaceSpace[]
-    /** 当前聚焦列 */
     column?: MentionColumn
-    /** 已选空间名 */
     activeSpace?: string | null
-    /** 已选目录（相对路径） */
     activeDir?: string | null
-    /** 二级列目录（仅数据准备） */
     dirs?: WorkspaceDir[]
-    /** 三级列文件清单 */
     files?: { filename: string }[]
-    /** 当前列键盘高亮索引 */
     activeIndex?: number
-    /** 文件清单加载中 */
     loading?: boolean
   }>(),
   {
@@ -96,12 +76,10 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-/** 当前列是否聚焦（键盘高亮仅作用于聚焦列） */
 function isActive(column: MentionColumn, index: number): boolean {
   return props.column === column && props.activeIndex === index
 }
 
-// 高亮项滚动入视区（长列表键盘导航）
 watch(
   () => props.activeIndex,
   () => {
@@ -116,7 +94,6 @@ watch(
 
 <template>
   <div v-if="open" ref="listRef" class="mention-picker" role="listbox" @keydown="onKeydown">
-    <!-- 一级：三空间 -->
     <div class="mention-picker__column">
       <button
         v-for="(space, index) in spaces"
@@ -139,7 +116,6 @@ watch(
       <p v-if="spaces.length === 0 && !loading" class="mention-picker__empty">暂无可选空间</p>
     </div>
 
-    <!-- 二级：数据准备子目录 -->
     <div v-if="column !== 'space' && dirs.length > 0" class="mention-picker__column">
       <button
         v-for="(item, index) in dirs"
@@ -161,7 +137,6 @@ watch(
       </button>
     </div>
 
-    <!-- 三级：文件 -->
     <div v-if="column === 'file'" class="mention-picker__column">
       <p v-if="loading" class="mention-picker__hint">正在加载文件…</p>
       <p v-else-if="files.length === 0" class="mention-picker__empty">该目录暂无文件</p>

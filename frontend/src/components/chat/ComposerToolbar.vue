@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 输入区工具栏（T053）
- *
- * 布局契约定死（FR-008）：**最左**为加号上传入口、**右二**为模型选择、
- * **最右**为思考开关（选中即开启思考，未选中即快速模式），其后是发送/中断按钮。
- *
- * 组件本身不持有业务状态：所有意图一律上抛，由装配层（`ChatPanel`）落到 composable。
- */
 import type { Model } from '../../api/types'
 import BaseButton from '../common/BaseButton.vue'
 import BaseIcon from '../common/BaseIcon.vue'
@@ -15,17 +7,11 @@ import ThinkingToggle from './ThinkingToggle.vue'
 
 withDefaults(
   defineProps<{
-    /** 是否处于思考模式 */
     thinking?: boolean
-    /** 当前模型 */
     model?: string | null
-    /** 可选模型列表 */
     models?: Model[]
-    /** 是否可发送 */
     canSend?: boolean
-    /** 本轮是否进行中 */
     streaming?: boolean
-    /** 是否禁用上传入口 */
     uploadDisabled?: boolean
   }>(),
   {
@@ -64,8 +50,6 @@ function onSelectModel(model: string): void {
         <BaseIcon name="plus" :size="16" />
       </BaseButton>
 
-      <!-- 014：上传入口的引导气泡由调用方注入（锚点由本分组提供）；
-           组件只负责锚定，是否展示、何时关闭都属于装配层的业务状态 -->
       <slot name="upload-hint" />
     </div>
 
@@ -73,7 +57,6 @@ function onSelectModel(model: string): void {
       <ModelPicker :model="model" :models="models" @select="onSelectModel" />
       <ThinkingToggle :thinking="thinking" @toggle="emit('toggle-thinking')" />
 
-      <!-- 发送/中断同位互斥：流式中发送按钮原位变为红色方块（「终止」），避免双按钮并存 -->
       <BaseButton
         v-if="streaming"
         variant="danger"
@@ -98,7 +81,6 @@ function onSelectModel(model: string): void {
   gap: var(--space-3);
 }
 
-/* 「+」所在分组同时是引导气泡的定位锚点（014）：气泡向上展开，不遮挡按钮 */
 .composer-toolbar__left {
   position: relative;
   display: flex;

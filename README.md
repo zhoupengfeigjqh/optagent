@@ -51,7 +51,7 @@ cd admin-frontend
 npm install && npm run dev
 ```
 
-Windows 下把 `cp` 换成 `Copy-Item`。两个后端**只读 `.env.local`**（`--env-file=.env.local`），不读入库的 `.env`；
+Windows 下把 `cp` 换成 `Copy-Item`。两个后端**只读 `.env.local`**（`--env-file=.env.local`）；`.env` 已改为不入库的容器形态私产（2026-11-26）；
 两个前端没有本地配置文件，`/api`、`/api/admin` 由 Vite Proxy 转发到 3000 / 3001。
 
 启动后逐项验证（缺一个就先别继续）：
@@ -88,8 +88,9 @@ docker compose up -d laya                # 意图聚焦判定模型（013，可�
 docker compose up -d --build          # 10 个服务：gateway + 4 个应用 + 5 个 MCP/推理
 ```
 
-前置只有两份配置：`agent-backend/config.yaml`（模型，挂载进容器）与
-`agent-backend/.env.local`（密钥，compose 作为 `env_file` 注入）。
+前置只有两份配置：`agent-backend/config.yaml`（业务口径：模型、意图聚焦阈值、规划参数，挂载进容器）与
+`agent-backend/.env`（容器形态私产：密钥与拓扑地址，compose 作为唯一 `env_file` 注入）。
+两份都可从同目录的 `.example` 复制：`cp .env.example .env`、`cp config.example.yaml config.yaml`。
 访问 `http://<宿主 IP>:82`（工作台）与 `http://<宿主 IP>:82/admin/`（管理后台）。
 
 首次构建含 `laya` 镜像（本地源码构建，慢）；只要核心能力时指定服务即可：
@@ -267,11 +268,11 @@ const skipFocus =
 | ocr | `ocr_image` 等 | 同步 | 回源下载签名直链 → 识别 → 结构化输出 |
 | jev | `noul` / `choice` / `score` | 同步 | state 可来自 LLM 文本或引用文件；有界指数退避 |
 | bom | `bom_validate` / `bom_merge` | 同步 | 递归展开多级 BOM，产出 xlsx + HTML 报告并**回写平台**，自身不写磁盘 |
-| fresh | `fresh_order_parse` | 同步 | 订单图片 → 读图路由（**表格走 OCR、手写走 LLM**，未配 Key 自动回退 OCR）→ 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；纯只读、不产文件 |
+| fresh | `fresh_order_parse` | 同步 | 订单图片 → 读图路由（**表格走 OCR、手写走 LLM**，未配 Key 自动回退 OCR）→ 标准化 → SKU 模糊匹配，按置信度分成**三表**（高度匹配 / 候选审核 / 异常）；产出**三表 xlsx 并回写平台**（顶层 `filePath`），自身不写磁盘、**不产 HTML 报告** |
 
 四者的共同点：**不共享用户磁盘**，只接受 http/https 直链。
 差异：ocr / jev / bom 不跟随重定向且限下载体积；`fresh` 有 `HTTP_TIMEOUT_SECONDS`（默认 30s）超时，
-但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service-v3/README.md` §4）。
+但**允许跟随重定向**（对象存储签名直链常见 302），且当前**未设下载体积上限**（细节见 `fresh-service-v4/README.md` §4）。
 
 ### 4.6 外部集成
 
@@ -318,51 +319,71 @@ const skipFocus =
 
 | 文件 | 归属 | 本地形态 | 容器形态 |
 |---|---|---|---|
-| `agent-backend/.env.local` | 运行端私产（gitignore） | `dev/start` 唯一读取 | compose `env_file` 注入（提供密钥） |
-| `agent-backend/.env` | 入库 | 不读 | 注入基础配置 |
-| `agent-backend/config.yaml` | 运行端 | 直接读 cwd | 只读挂载进容器 |
-| `admin-backend/.env.local` | 管理端私产 | 唯一读取 | — |
-| `admin-backend/.env` | 入库 | 不读 | 注入容器形态路径 |
-| `<服务>/.env.local`（ocr/jev/bom/laya/fresh） | 各服务私产 | 各自读 | compose 注入，缺失不报错 |
+| `agent-backend/.env.example` | 入库样板（无密钥） | `cp .env.example .env.local` | `cp .env.example .env` |
+| `agent-backend/.env.local` | 运行端私产（gitignore） | `dev/start` 唯一读取 | 不读 |
+| `agent-backend/.env` | 容器端私产（gitignore，2026-11-26 起） | 不读 | compose 唯一 `env_file` |
+| `agent-backend/config.yaml` | 运行端业务口径 | 直接读 cwd | 只读挂载进容器（两形态共用一份） |
+| `admin-backend/.env.example` | 入库样板 | `cp .env.example .env.local` | `cp .env.example .env` |
+| `admin-backend/.env.local` | 管理端私产 | 唯一读取 | 不读 |
+| `admin-backend/.env` | 管理端容器私产（2026-11-26 起） | 不读 | compose `env_file` 注入 |
+| `<服务>/.env.example`（ocr/jev/bom/laya/fresh） | 入库样板 | 各服务自读 | — |
+| `<服务>/.env` | 各服务容器私产 | 不读 | compose 注入，缺失不报错 |
 
 两种形态从不同文件出发**不混用**：本地是源码树相对路径 + `127.0.0.1`，容器是 `/app/...` + 服务名。
+形态相关的三项只在 env 里各写一份，`config.yaml` 不再出现 IP/端口：
+
+```env
+# 本地 .env.local                 # 容器 .env
+PUBLIC_BASE_URL=http://<LAN IP>:3000      PUBLIC_BASE_URL=http://<宿主 LAN IP>:82
+ADMIN_BACKEND_URL=http://127.0.0.1:3001   ADMIN_BACKEND_URL=http://admin-backend:3001
+INTENT_FOCUS_BASE_URL=http://127.0.0.1:8103  INTENT_FOCUS_BASE_URL=http://laya:8000
+```
+
+`config.yaml` 里这两处都用 `$VAR` 引用（`intent_focus.base_url: $INTENT_FOCUS_BASE_URL`、
+`intent_focus.api_key: $DECIS_API_KEY`），因此同一份 yaml 在两种形态下都可用。
 
 ### 5.2 换机器时必看的三项
 
 ```env
-# agent-backend/.env.local
+# agent-backend/.env.local（本地）或 agent-backend/.env（容器）
 DEEPSEEK_API_KEY=sk-...                  # 或换成 config.yaml 里其它模型
+DECIS_API_KEY=...                        # 意图聚焦（laya）凭据，不回落主模型密钥
 PUBLIC_BASE_URL=http://<本机 LAN IP>:3000  # 签名直链基址，MCP 服务从这台机器下载文件
 FILE_SIGN_SECRET=<≥16 字符>               # 不配则每次启动随机生成，重启后旧直链全失效
+INTENT_FOCUS_BASE_URL=http://127.0.0.1:8103  # 容器形态填 http://laya:8000
 ```
 
 `PUBLIC_BASE_URL` 的判据只有一条：**它对所有会下载/回写的 MCP 服务都必须可达**。所以不能写 `localhost`
 （那是容器自己），要用 LAN IP 或 `host.docker.internal`。
 
-### 5.3 关键运行参数（`agent-backend/.env.local`）
+### 5.3 关键运行参数
+
+env 只剩"密钥 + 拓扑 + 宿主资源"三类（2026-11-26 收敛，见 `specs/028-task-planning/contracts/README.md` §1.3）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | 3000 | 管理端固定 3001，避开 |
-| `OPT_AGENT_ROOT` | `.opt-agent` | 运行数据根（用户、会话、用量库） |
-| `POOL_SIZE` | 5 | 单机 Agent 实例上限 |
-| `IDLE_TIMEOUT_MS` | 1800000 | 实例空闲回收 |
-| `MCP_TIMEOUT_MS` | 60000 | 单次工具调用超时（超时重试 1 次；长任务应改用异步） |
-| `MCP_CONNECT_TIMEOUT_MS` | 10000 | 建连超时，与调用超时分开（用户在等首轮回复） |
-| `UPLOAD_MAX_MB` | 5 | 上传与回写统一上限（网关与 MCP 服务须对齐） |
-| `LLM_MAX_RETRIES` / `LLM_RETRY_MAX_DELAY_MS` | 2 / 15000 | 只在响应到达前重试，不会产生重复正文 |
+| `OPT_AGENT_ROOT` | `.opt-agent` | 运行数据根（用户、会话、用量库），两形态同值（相对 cwd） |
+| `POOL_SIZE` | 5 | 单机 Agent 实例上限（宿主资源） |
+| `IDLE_TIMEOUT_MS` | 1800000 | 实例空闲回收（宿主资源） |
+| `SHUTDOWN_GRACE_MS` | 15000 | 优雅关闭宽限，须小于 compose `stop_grace_period` |
+
+原先在这里的 `MCP_TIMEOUT_MS` / `MCP_CONNECT_TIMEOUT_MS` / `LLM_MAX_RETRIES` /
+`LLM_RETRY_MAX_DELAY_MS` 已迁入 `config.yaml` 的 `runtime` 块；
+`UPLOAD_MAX_MB` / `PREVIEW_MAX_MB` / `READ_TRUNCATE_KB` 已降为代码常量（`src/domain/limits.ts`），
+改这三个值等于改四侧契约。
 
 ### 5.4 意图聚焦块（`config.yaml`）
 
 ```yaml
 intent_focus:
-  base_url: http://laya:8000       # 本地直跑 backend 时用 http://127.0.0.1:8103
+  base_url: $INTENT_FOCUS_BASE_URL # 本地 127.0.0.1:8103 / 容器 http://laya:8000（同一份 yaml 两形态通用）
   model: laya-multilingual
   api_key: $DECIS_API_KEY          # 与 laya 容器的 DECIS_API_KEY 必须同值
   timeout_ms: 10000                # 整轮判定预算 300~20000（缺省 10000），超时即降级（不重试）
-  skill_threshold: 0.6             # 技能入选阈值，可被 INTENT_FOCUS_SKILL_THRESHOLD 覆盖
-  ontology_behavior_threshold: 0.6 # 本体行为阈值，可被 INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD 覆盖
-  ontology_function_threshold: 0.6 # 本体函数阈值，可被 INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD 覆盖
+  skill_threshold: 0.6             # 技能入选阈值（只认本文件，同名 env 已删除）
+  ontology_behavior_threshold: 0.6 # 本体行为阈值（只认本文件）
+  ontology_function_threshold: 0.6 # 本体函数阈值（只认本文件）
   max_skills: 32                   # 单轮技能候选上限（1~256）
   max_capabilities: 96             # 单轮「行为 + 函数」候选合计上限（1~96；3 批 × 32）
   # 027 输入改写：以下两项只做「标定」，不控制开关（开关在 SOUL 的 input_rewrite）
@@ -523,7 +544,7 @@ Content-Type: application/json
 
 ### 8.2 `PUBLIC_BASE_URL` 与容器→宿主放通
 
-`PUBLIC_BASE_URL` 由 `docker-compose.yml` 的 `backend.environment` **单点覆盖**（`.env.local` 里的同名项在容器形态下不生效）：
+`PUBLIC_BASE_URL` 只在容器形态的 `agent-backend/.env` 里配一份（compose 不再用 `environment` 覆盖，一个参数一个真源）：
 
 | 场景 | 取值 |
 |---|---|
@@ -556,7 +577,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://<宿主 IP>:82/admin/
 ### 8.4 运维要点
 
 - 环境变量**启动期读取**：改 `.env` 后要 `up -d --force-recreate <服务>`，`restart` 不更新。
-- 换机器/换网段：改 `docker-compose.yml` 的 `PUBLIC_BASE_URL` 与平台内 MCP 服务的 `url` 两处即可。
+- 换机器/换网段：改 `agent-backend/.env` 的 `PUBLIC_BASE_URL` 与平台内 MCP 服务的 `url` 两处即可（`docker-compose.yml` 不再承载任何 IP）。
 - `admin-backend` 不再挂 `docker.sock`、不读编排文件与容器状态——MCP 服务清单一律以平台内配置为准。
 
 ---

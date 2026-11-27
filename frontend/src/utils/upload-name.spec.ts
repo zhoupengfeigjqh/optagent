@@ -1,11 +1,3 @@
-/**
- * 单元测试：预演命名（023 v1.3）
- *
- * 钉住三件事：
- * 1. **格式与后端逐字一致**（半角 `(n)`、编号在扩展名前、从 1 起、`.env` / `README` / `a.tar.gz` 三类边界）；
- * 2. **大小写不敏感**：`Report.csv` 与 `report.csv` 视为冲突（Windows/macOS 语义）；
- * 3. **同一个 taken 连续分配**：批次内同名也能各自拿到唯一名。
- */
 import { describe, expect, it } from 'vitest'
 
 import { allocateName, candidateName, MAX_BASE_CHARS, splitName } from './upload-name'

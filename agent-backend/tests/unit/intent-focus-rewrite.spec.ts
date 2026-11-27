@@ -296,7 +296,6 @@ describe('runRewriteStage —— 预算与素材', () => {
 
     await runRewriteStage(h.deps, input({ deadline: now + 2_000 }));
 
-    // 剩余 2000 → 2000 - 100 = 1900 < 5000
     expect(h.rewriteCalls[0]!.timeoutMs).toBe(2_000 - REWRITE_BUDGET_MARGIN_MS);
   });
 
@@ -324,7 +323,6 @@ describe('runRewriteStage —— 预算与素材', () => {
 
     const outcome = await runRewriteStage(h.deps, input());
 
-    // 失败轮（u2/a2）整组不进素材；u2 因此变成孤立 user，被跳过，
     // 剩下 u1/a1、u3/a3、u4/a4 —— 上限 2 组，只保留最近的 u3/a3、u4/a4
     expect(outcome.historyTurns).toBe(2);
     const content = h.rewriteCalls[0]!.content;

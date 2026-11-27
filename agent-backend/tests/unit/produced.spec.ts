@@ -1,15 +1,3 @@
-/**
- * 单元测试：后台产出（R11，契约 §10.3 / §10.4 / §10.5）
- *
- * 守住四条：
- * 1. **命名口径** —— 落盘名 `{prefix}_{服务提供的文件名}`、sidecar `{主干}.meta.json`、
- *    `job_id` 取自服务提供的文件名主干；非法 `sid` 回退 `uid`（不让它把路径带歪）；
- * 2. **目录即索引** —— 列表由扫描目录现算；sidecar 损坏即跳过（**不产生悬空引用**）；
- * 3. **无产出即零成本** —— 提示词段为空串，不占一个字符（不变式 5）；
- * 4. **有界返回** —— 列表与提示词段都有条数上限；
- * 5. **提交时刻**（2026-10-09） —— `createdAt` 落 `created_at`、完成时刻仍是回写时刻；
- *    缺省时退化为回写时刻（两者相等，与改造前一致）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +16,6 @@ import {
   writeProduced,
 } from '../../src/domain/produced.js';
 
-/** 本用例使用的数字人（数据域一级目录名，009 产出目录也随之落到它下面） */
 const AGENT = 'demo';
 
 let root: string;
@@ -44,7 +31,6 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** 产出目录的绝对路径（断言正文真的落到磁盘时用） */
 function producedAbs(name: string): string {
   return path.join(root, 'users', 'admin', 'user-data', AGENT, PRODUCED_DIR, name);
 }
@@ -267,7 +253,6 @@ describe('提示词段（契约 §10.5 ③）', () => {
 });
 
 describe('标记已读（契约 §10.5 ⑤）', () => {
-  /** 写一条产出；`at` 决定完成时刻（倒序与边界用例需要可控时序） */
   function seed(jobId: string, at = '2026-09-25T02:00:00.000Z'): ReturnType<typeof writeProduced> {
     return writeProduced({
       access,
@@ -294,7 +279,6 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
     const marked = await markProducedRead(access, ['j_1'], new Date('2026-09-25T04:00:00.000Z'));
 
     expect(marked).toBe(0);
-    // 时间**不刷新**：重复点击不该把"什么时候读的"越推越近
     expect((await listProduced(access))[0]?.read_at).toBe('2026-09-25T03:00:00.000Z');
   });
 
@@ -308,7 +292,6 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
       await seed(`j_${i}`, `2026-09-25T02:${String(i).padStart(2, '0')}:00.000Z`);
     }
 
-    // 列表按完成时间倒序 + 有界：最旧的 j_0 不在列表里
     const listed = await listProduced(access);
     expect(listed).toHaveLength(50);
     expect(listed.some((item) => item.job_id === 'j_0')).toBe(false);
@@ -318,7 +301,6 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
 
   it('只改 sidecar，**不动正文**（正文是服务的计算结果，元数据操作不该碰它）', async () => {
     const saved = await seed('j_1');
-    // relPath 相对**数字人数据域**（009），故拼到 {AGENT} 之下
     const bodyPath = path.join(root, 'users', 'admin', 'user-data', AGENT, saved.relPath);
 
     await markProducedRead(access, ['j_1']);
@@ -338,14 +320,6 @@ describe('标记已读（契约 §10.5 ⑤）', () => {
   });
 });
 
-/**
- * 读写两侧的"越界"加固（2026-10-27）
- *
- * 漏洞成因：sidecar 里的 `filename` 会被拼成 `临时空间/后台产出/{filename}` 再交给
- * `FileAccess.readBuffer`，而 `path.resolve` 会把 `..` 归一化——归一化后仍在同一 dataRoot
- * 内、顶层目录也命中白名单，于是"读产出"能变成"读该用户任意文件"。
- * 同时正文若以 `.meta.json` 结尾，会被当作元数据解析（内容可控 → `filename` 可控）。
- */
 describe('落盘名加固 —— 读不出产出目录（2026-10-27）', () => {
   it('写入：正文名不得以 .meta.json 结尾（否则会被当成 sidecar 解析）', async () => {
     await expect(
@@ -369,7 +343,6 @@ describe('落盘名加固 —— 读不出产出目录（2026-10-27）', () => {
   it('读取：sidecar 的 filename 指向产出目录之外时，整条跳过（列表为空，不产生可读条目）', async () => {
     const dir = path.join(root, 'users', 'admin', 'user-data', AGENT, PRODUCED_DIR);
     fs.mkdirSync(dir, { recursive: true });
-    // 伪造一份"合法 job、非法 filename"的元数据：这是回写通道最坏情况下能留下的东西
     fs.writeFileSync(
       path.join(dir, 'admin_evil.meta.json'),
       JSON.stringify({

@@ -1,30 +1,3 @@
-/**
- * 错误码常量与中文文案映射表（唯一映射表）。
- *
- * 与 `contracts/admin-api.md` §0.4 的 **27 个**错误码逐行对应：
- * 4 个复用既有码 + 23 个 `ADM_` 前缀码。前端 MUST NOT 直接展示后端 `message`
- * （面向开发者且不稳定），一律按 `code` 分派。
- *
- * **2026-10-15**：新增 `ADM_UNAUTHENTICATED` / `ADM_FORBIDDEN`（契约 §11 的
- * 401/403「身份与分权」，**预登记、尚未实施**——功能落地前不会真的返回，
- * 此处先备好文案，使 §11 实施时前端只需接"登录态与 401/403 处理"链路）。
- * 同日：`ADM_MCP_TOOL_SCOPE_LOCKED` 下架——工具白名单改为可在
- * `PUT /api/admin/mcp/services/{name}` 里调整（契约 §3.3），该码不再可能返回。
- *
- * **2026-10-02**：新增 `ADM_SKILL_MODIFIED`（本体市场更新时库内版本被人工修改，
- * 需显式确认——契约 §4.8）。
- * **2026-10-03**：新增 `ADM_ONTOLOGY_NOT_FOUND` / `ADM_ONTOLOGY_EXISTS`
- * （本体管理区——契约 §10）；新增 `ADM_SKILL_READ_ONLY`（本体市场来源的 SKILL
- * 只读，在线编辑被拒——契约 §4.3）。
- *
- * **2026-09-27**：`ADM_MCP_SERVICE_UNMANAGED` / `ADM_RUNTIME_FORM_NOT_CONFIGURED` /
- * `ADM_DOCKER_UNAVAILABLE` / `ADM_COMPOSE_FILE_UNREADABLE` 随 MCP 全人工配置下架；
- * 新增 `ADM_MCP_SERVICE_EXISTS`（新建重名）。
- *
- * 未知码回退通用文案并**保留原码**，便于排查。
- */
-
-/** 全部错误码常量（与契约 §0.4 一一对应） */
 export const ADMIN_ERROR_CODES = {
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   NOT_FOUND: 'NOT_FOUND',
@@ -49,7 +22,6 @@ export const ADMIN_ERROR_CODES = {
   ADM_MCP_SERVICE_NOT_FOUND: 'ADM_MCP_SERVICE_NOT_FOUND',
   ADM_MCP_SERVICE_EXISTS: 'ADM_MCP_SERVICE_EXISTS',
 
-  // 2026-11-23：ADM_DEPLOY_VALIDATION_FAILED 随部署前校验下架，四处同删
   ADM_DEPLOY_TARGET_NOT_WRITABLE: 'ADM_DEPLOY_TARGET_NOT_WRITABLE',
 
   ADM_USER_ID_TAKEN: 'ADM_USER_ID_TAKEN',
@@ -59,7 +31,6 @@ export const ADMIN_ERROR_CODES = {
   ADM_STORAGE_UNAVAILABLE: 'ADM_STORAGE_UNAVAILABLE',
   ADM_RUNTIME_UNREACHABLE: 'ADM_RUNTIME_UNREACHABLE',
 
-  // §11 身份与分权（024 起 ADM_UNAUTHENTICATED/ADM_INVALID_CREDENTIALS 已启用）
   ADM_UNAUTHENTICATED: 'ADM_UNAUTHENTICATED',
   ADM_FORBIDDEN: 'ADM_FORBIDDEN',
   ADM_INVALID_CREDENTIALS: 'ADM_INVALID_CREDENTIALS',
@@ -68,7 +39,6 @@ export const ADMIN_ERROR_CODES = {
 /** 通用兜底文案 */
 export const GENERIC_MESSAGE = '请求失败，请稍后重试'
 
-/** 错误码 → 中文文案（与契约 §0.4 的"含义"列同口径，措辞面向管理员） */
 export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   VALIDATION_FAILED: '填写内容不合法，请检查后重试',
   NOT_FOUND: '请求的内容不存在',
@@ -100,12 +70,10 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
 
   // 同时用于调用配置保存与技能文件保存：两者都是"内容被并发改过"，文案不偏向任一方
   ADM_CONFIG_REVISION_CONFLICT: '内容已被他处修改，请刷新后重试',
-  // 该码在写入与**删除**两条路径上都会出现（2026-10-03：删除后校验未通过也用它），
   // 故文案不再只写"不可写"——否则管理员遇到"删不掉"时会看到误导性的原因
   ADM_STORAGE_UNAVAILABLE: '平台设计态存储不可用（写入或删除失败），请检查 .platform-data 目录',
   ADM_RUNTIME_UNREACHABLE: '运行环境不可达（内置工具目录／调用统计读取失败）',
 
-  // §11 身份与分权（024 起 ADM_UNAUTHENTICATED/ADM_INVALID_CREDENTIALS 已启用）
   ADM_UNAUTHENTICATED: '登录状态已失效，请重新登录',
   ADM_FORBIDDEN: '当前账号没有管理员权限，请联系管理员授权',
   ADM_INVALID_CREDENTIALS: '账号或密码错误，请重试',

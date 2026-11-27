@@ -1,10 +1,3 @@
-/**
- * 组件测试：数字人设计功能区的「新建」链路（`FR-015`，2026-10-09）。
- *
- * 守住的是**跨组件**的那条接缝：列表「新建数字人」→ 弹窗采集 → 确认 → 导航到设计明细，
- * 且弹窗填的名称被带进设计器草稿（`AgentArea` 的 `pendingNew` 传递）。
- * 单看 `AgentCardList` / `CreateAgentDialog` / `AgentDesigner` 各自的测试都盖不到这里。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AgentArea from './AgentArea.vue'
@@ -17,7 +10,6 @@ const getAgentCatalog = vi.fn()
 vi.mock('../../api/agents', () => ({
   listAgents: (...args: unknown[]) => listAgents(...args),
   getAgent: (...args: unknown[]) => getAgent(...args),
-  // 2026-10-17：候选清单一律走 §5.6 的全量端点，不再调卡片列表的 page=1
   getAgentCatalog: (...args: unknown[]) => getAgentCatalog(...args),
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
@@ -79,7 +71,6 @@ describe('AgentArea —— 新建数字人链路（FR-015）', () => {
 
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['/agents/__new__'])
 
-    // 模拟父级（路由）把 detail 切到新建哨兵
     await wrapper.setProps({ detail: '__new__' })
     await flushPromises()
 

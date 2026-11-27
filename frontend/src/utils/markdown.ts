@@ -1,44 +1,16 @@
-/**
- * 最小 Markdown 子集解析（纯函数，2026-10-16）。
- *
- * 为什么自研而不引库：① 宪章原则六（依赖治理）——渲染器 + XSS 净化器是**两个**新依赖，
- * 要把评审走一遍；② 本项目的既有风格就是零第三方（图标、分段、文件类型全都自研）；
- * ③ agent 的输出高度收敛：标题、列表、表格、代码块、引用、粗体/斜体、行内代码、链接、红字强调。
- * 其余语法（嵌套列表、图片、HTML、脚注、`_` 斜体）**原样当文本输出**——宁可少渲染，
- * 不可渲染错，更不可引入注入面。
- *
- * 「红字强调」`==文本==` 是为生鲜订单复核这类「必须一眼看到推荐结论」的场景加的（2026-11-13）：
- * 沿用 Obsidian/Typora 的高亮标记写法，渲染成红色加粗（不只是颜色，兼作字重强调，
- * 避免"仅靠颜色传达信息"，宪章原则四）。**表格单元格同样走行内解析**，否则推荐列没法标红。
- *
- * **可测不变式**：解析只丢掉"标记本身"，不改变正文可见字符的顺序；每个可高亮片段都带
- * `start`（在原文中的起始偏移），供搜索高亮换算全局命中序号
- * （见 `components/chat/MessageContent.vue`）。
- *
- * 已知取舍（有用例钉住，免后来者当 bug 修）：命中若落在被丢掉的标记里（例如搜索 `**`、
- * `---`、`# `），`useSessionSearch` 仍会按**原文**计数，但页面上没有可高亮的节点。
- *
- * 安全：链接只放行 `http(s)://` 与站内绝对路径；`javascript:` 之类的伪协议一律退化为
- * 普通文本（否则"渲染增强"就变成注入面，宪章原则四/九）。
- */
 
-/** 可高亮片段：文本 + 在原文中的起始偏移 */
 export interface Piece {
   text: string
   start: number
 }
 
-/** 行内片段类型 */
 export type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'link' | 'red'
 
-/** 行内片段（`text` 片段之外的种类渲染成对应的行内元素） */
 export interface InlineRun extends Piece {
   kind: InlineKind
-  /** 仅链接：目标地址（已校验） */
   href?: string
 }
 
-/** 块级节点 */
 export type MarkdownBlock =
   | { kind: 'paragraph'; start: number; runs: InlineRun[] }
   | { kind: 'heading'; start: number; level: number; runs: InlineRun[] }
@@ -48,7 +20,6 @@ export type MarkdownBlock =
   | { kind: 'table'; start: number; header: InlineRun[][]; rows: InlineRun[][][] }
   | { kind: 'rule'; start: number }
 
-/** 带原文偏移的一行 */
 interface SourceLine {
   text: string
   start: number
@@ -61,16 +32,9 @@ const QUOTE = /^\s*>\s?(.*)$/
 const BULLET = /^\s*[-*+]\s+(.*)$/
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/
 
-/**
- * 行内标记。**顺序即优先级**：`**` 必须排在 `*` 前面，否则粗体会被吃成"斜体 + 残留星号"。
- * 刻意不支持 `_` 变体：本项目的正文里 `snake_case` 标识符很常见，误判代价高于收益。
- * `==` 红字强调内部**不得再出现 `=`、且首尾紧贴非空白字符**（`==番茄==` 认，`a == b == c` 不认），
- * 否则散文里的比较表达式会被整段染红。
- */
 const INLINE =
   /(`[^`\n]+`)|(==\S(?:[^\n=]*?\S)?==)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]*\]\([^)\s]*\))/g
 
-/** 解析正文为块级序列 */
 export function parseMarkdown(source: string): MarkdownBlock[] {
   const lines = splitLines(source)
   const blocks: MarkdownBlock[] = []
@@ -83,7 +47,6 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       continue
     }
 
-    // 围栏代码块：收尾围栏缺失（流式中途）时吃到文末
     const fence = FENCE.exec(line.text)
     if (fence) {
       const marker = fence[1][0]
@@ -131,7 +94,6 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       index + 1 < lines.length &&
       isDividerRow(lines[index + 1].text)
     ) {
-      // 单元格按行内片段解析（而非整格纯文本）：`==推荐==` 标红、`**粗**` 等标记在表格里同样生效
       const header = parseCells(lines[index])
       index += 2
       const rows: InlineRun[][][] = []
@@ -179,7 +141,6 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       continue
     }
 
-    // 段落：连续非空行，遇到任何块级起始行即止
     const paragraph: SourceLine[] = []
     while (index < lines.length && lines[index].text.trim() !== '' && !startsBlock(lines, index)) {
       paragraph.push(lines[index])
@@ -196,7 +157,6 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
   return blocks
 }
 
-/** 解析一行内的行内片段 */
 export function parseInline(text: string, start: number): InlineRun[] {
   const runs: InlineRun[] = []
   const pattern = new RegExp(INLINE.source, 'g')
@@ -248,7 +208,6 @@ function parseLink(raw: string, offset: number): InlineRun | null {
   return { kind: 'link', text: parts[1], start: offset + 1, href }
 }
 
-/** 一行是否开启新的块级结构（段落收集时用作终止条件） */
 function startsBlock(lines: SourceLine[], index: number): boolean {
   const text = lines[index].text
   if (FENCE.test(text) || RULE.test(text) || HEADING.test(text) || QUOTE.test(text)) return true
@@ -256,7 +215,6 @@ function startsBlock(lines: SourceLine[], index: number): boolean {
   return text.includes('|') && index + 1 < lines.length && isDividerRow(lines[index + 1].text)
 }
 
-/** 多行合并成一段：行与行之间补一个 `'\n'` 文本片段，偏移按原文换算 */
 function joinLines(lines: SourceLine[]): InlineRun[] {
   const runs: InlineRun[] = []
   lines.forEach((line, index) => {
@@ -268,7 +226,6 @@ function joinLines(lines: SourceLine[]): InlineRun[] {
   return runs
 }
 
-/** 按行切开（保留每行的原文起始偏移，`\r\n` 归一为 `\n`） */
 function splitLines(source: string): SourceLine[] {
   const lines: SourceLine[] = []
   let start = 0
@@ -281,24 +238,20 @@ function splitLines(source: string): SourceLine[] {
   return lines
 }
 
-/** 是否为代码块收尾围栏（同种字符、不少于 3 个） */
 function isFenceClose(text: string, marker: string): boolean {
   const trimmed = text.trim()
   return trimmed.length >= 3 && trimmed.split('').every((char) => char === marker)
 }
 
-/** 是否为表格的分隔行（`| --- | :--: |`） */
 function isDividerRow(text: string): boolean {
   const cells = splitCells({ text, start: 0 }).map((cell) => cell.text)
   return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell))
 }
 
-/** 拆单元格并按行内语法解析（每格都保留原文偏移，搜索高亮口径不变） */
 function parseCells(line: SourceLine): InlineRun[][] {
   return splitCells(line).map((cell) => parseInline(cell.text, cell.start))
 }
 
-/** 拆单元格（保留每格在原文中的偏移，供高亮换算） */
 function splitCells(line: SourceLine): Piece[] {
   const text = line.text
   let from = 0

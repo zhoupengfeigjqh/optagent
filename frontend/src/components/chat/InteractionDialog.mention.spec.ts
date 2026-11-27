@@ -75,7 +75,6 @@ const WORKSPACE_RESPONSE = {
   ] as WorkspaceSpace[],
 }
 
-/** 造一个仅含 workspace 的会话桩（InjectionKey provide）。 */
 function makeSession() {
   const files = {
     workspace: vi.fn().mockResolvedValue(WORKSPACE_RESPONSE),
@@ -109,7 +108,6 @@ function makeFileRequest(proposed: Record<string, unknown> = {}): InteractionSna
   })
 }
 
-/** 模拟真实键入：写值 + 光标移到末尾 + 派发 input（v-model 与 @ 检测都触发）。 */
 async function typeAt(
   wrapper: ReturnType<typeof mount>,
   selector: string,
@@ -172,7 +170,6 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
     expect((wrapper.find('input[type=text]').element as HTMLInputElement).value).toBe(
       '数据准备/生产计划/plan.csv',
     )
-    // 提交层：字段值即相对路径，无附件/标记语义
     await wrapper
       .findAll('button')
       .find((b) => b.text() === '确认提交')!
@@ -186,9 +183,9 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
 
     await typeAt(wrapper, 'input[type=text]', '@')
     const input = wrapper.find('input[type=text]')
-    await input.trigger('keydown', { key: 'Enter' }) // 空间列 → 数据准备
-    await input.trigger('keydown', { key: 'Enter' }) // 目录列 → 生产计划
-    await input.trigger('keydown', { key: 'Enter' }) // 文件列 → 选中 plan.csv
+    await input.trigger('keydown', { key: 'Enter' })
+    await input.trigger('keydown', { key: 'Enter' })
+    await input.trigger('keydown', { key: 'Enter' })
 
     expect((input.element as HTMLInputElement).value).toBe('数据准备/生产计划/plan.csv')
     expect(wrapper.find('.mention-picker').exists()).toBe(false)
@@ -224,15 +221,12 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
       schema: {
         type: 'object',
         properties: {
-          // FastMCP 自动生成的 title（与参数名同义）→ 当作无 title，显示参数名
           image: {
             type: 'string',
             title: 'Image',
             description: '要识别的图片：填相对路径。图片不超过 2MB',
           },
-          // 有意义的 title → 直接顶替参数名
           line: { type: 'string', title: '产线' },
-          // 无 title → 参数名（不再退到 description 首句）
           qty: { type: 'integer', description: '数量：正整数' },
         },
         required: [],
@@ -246,7 +240,6 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
     expect(labels[0]).toBe('image')
     expect(labels[1]).toBe('产线')
     expect(labels[2]).toBe('qty')
-    // 方案 A：不再有右侧短标签
     expect(wrapper.find('.interaction-dialog__label-hint').exists()).toBe(false)
   })
 
@@ -255,7 +248,6 @@ describe('InteractionDialog —— @ 文件引用与结构化卡片', () => {
       makeRequest({ tool_description: '识别图片中的文字，返回按行拼接的文本' }),
     ).wrapper
 
-    // 省掉「?」后，工具说明（写给模型看的技术文案）整段不进用户视野
     expect(withDesc.find('[aria-label="查看工具说明"]').exists()).toBe(false)
     expect(withDesc.text()).not.toContain('识别图片中的文字')
     // 倒计时不受影响：它是超时可见性的唯一来源，仍在头部

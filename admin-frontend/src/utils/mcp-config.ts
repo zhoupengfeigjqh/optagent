@@ -1,13 +1,3 @@
-/**
- * MCP 调用配置的**基础字段**校验（2026-09-27）。
- *
- * 弹窗新建（`McpCreateDialog`）与详情页表单（`McpCallConfigForm`）MUST 共用本模块：
- * 同一规则在多处各写一套，必然漂移成"弹窗能过、表单报错"（宪章原则二"同一职责唯一实现"）。
- *
- * 这里只做**少一次往返**的本地预校验，权威判据仍在后端
- * （`domain/mcp/service-config.ts` 的 `normalize()`）：重名（`ADM_MCP_SERVICE_EXISTS`）
- * 与 `file_args` / `rules_fields` 等形状校验只有服务端能判定。
- */
 import { MCP_NAME_HINT, MCP_URL_HINT } from '../constants/mcp'
 import type { McpServiceConfigInput, McpServiceDetail } from '../api/types'
 
@@ -32,7 +22,6 @@ export interface McpBasicsInput {
   command?: string
 }
 
-/** 返回首条可读错误；全部合法返回 `null` */
 export function validateMcpBasics(input: McpBasicsInput): string | null {
   if (input.name !== undefined && !isValidMcpServiceName(input.name.trim())) {
     return `服务名非法：${MCP_NAME_HINT}`
@@ -47,17 +36,10 @@ export function validateMcpBasics(input: McpBasicsInput): string | null {
   return null
 }
 
-/** HTTP 头名判据（与后端 `service-config-fields.ts` / 运行环境 `agent-instance.ts` 同一口径） */
 export function isValidHeaderName(name: string): boolean {
   return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)
 }
 
-/**
- * 值里是否含换行或控制字符（header injection：换行会被拆成额外的头）。
- *
- * 逐字符判断而非正则——控制字符类正则会触发 `no-control-regex`，
- * 且"单行且可打印"这个意图用代码更直白；与后端 `hasControlChars` 同一判据。
- */
 function hasControlChars(value: string): boolean {
   for (const ch of value) {
     const code = ch.charCodeAt(0)
@@ -66,14 +48,6 @@ function hasControlChars(value: string): boolean {
   return false
 }
 
-/**
- * 请求头（2026-10-08）：文本框里的 JSON 对象 → `headers`。
- *
- * 与后端保存期判据同口径，只为"少一次往返"；权威判据仍在服务端
- * （`domain/mcp/service-config-fields.ts` 的 `normalizeHeaders`）。
- * 空串 → `{}`（= 不带请求头）。**掩码值直接拒绝**：界面回显的是 `6UuE…F3Z`
- * 这类掩码，原样提交等于把令牌换成掩码（静默 401，几乎无法自查）。
- */
 export function parseHeaders(
   text: string,
 ): { headers: Record<string, string>; error?: undefined } | { headers?: undefined; error: string } {
@@ -112,25 +86,10 @@ export function parseHeaders(
   return { headers }
 }
 
-/** `headers` → 编辑框内容（空对象 → 空串；用于"编辑"态的初始值） */
 export function formatHeaders(headers?: Record<string, string>): string {
   return headers && Object.keys(headers).length > 0 ? JSON.stringify(headers, null, 2) : ''
 }
 
-/**
- * 由服务详情重放一份**完整的**调用配置载荷（2026-10-15，工具范围弹窗用）。
- *
- * 为什么是"重放"而不是"只发白名单"：`PUT` 的语义是**全量替换**——后端 `normalize()`
- * 会把缺省字段补成默认值，只发 `allowed_tools` 会把 `description`/`file_args`/
- * `rules_fields`/`confirmation` 一并清空。详情页表单也是同一口径
- * （它提交整份表单），这里把"当前值"原样带上，只改 `allowed_tools`。
- *
- * **刻意不带 `headers`**：详情里回的是**掩码**，带回去等于把真令牌换成掩码
- * （与 `parseHeaders` 拒绝掩码值同一个理由）。缺省即服务端沿用存量。
- *
- * 并发安全由 `revision` 乐观锁兜底：详情到手后若他处改过配置，保存会得到
- * `ADM_CONFIG_REVISION_CONFLICT`，MUST NOT 静默覆盖。
- */
 export function buildToolScopePayload(
   service: McpServiceDetail,
   allowedTools: string[],
@@ -145,7 +104,6 @@ export function buildToolScopePayload(
     confirmation: service.confirmation,
     rules_fields: service.rules_fields,
     allowed_tools: [...allowedTools],
-    // 显示名同样是"全量替换"语义：不带上就会被清空（工具清单悄悄变回英文名）
     tool_labels: { ...(service.tool_labels ?? {}) },
   }
 }

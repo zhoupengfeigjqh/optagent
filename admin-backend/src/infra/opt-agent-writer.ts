@@ -1,28 +1,3 @@
-/**
- * `.opt-agent` 物化写入（`research.md` D8；`FR-008`、`FR-026`、`FR-028`、`FR-029`）。
- *
- * 三条要求合起来只有一种实现能满足：
- * - `FR-008` 原子性（要么完整生效要么完全不生效）
- * - `FR-029` 以**用户为最小单位**且失败不留部分写入
- * - `FR-026` **整体覆盖**（平台侧未搭配的内容 MUST NOT 残留）
- *
- * 实现为：①在目标用户目录的**同挂载点**下建临时目录 → ②把该用户全部数字人的
- * 完整产物写入临时目录 → ③逐个数字人做**目录级原子改名**（旧目录先备份）
- * → ④**清掉 `agents/` 里本次不在列的一切条目** → ⑤失败即回滚到操作前状态
- * → ⑥清理临时与备份。
- *
- * **`agents/` 整体以本次产物为准**（2026-09-16 产品决定，取代原先"按部署清单移除"）：
- * 这样"把某个数字人从用户的关联里去掉再部署"就**一定**能把它从运行环境下架，
- * 不再取决于部署清单是否对得上（清单缺失/被手工改过时，旧目录会永远留下）。
- * 代价是：手工放进 `agents/` 的目录也会被清掉——该目录由平台独占管理。
- *
- * **作用域硬约束**（`FR-028`、`SC-012`）：写入 100% 限于
- * `users/{uid}/agents/`；用户文件空间（`user-data/**`）下的文件与二级目录一律不触碰。
- *
- * **`EXDEV` 降级**（D8）：`rename` 的原子性仅在同一文件系统内成立。
- * 临时目录已建在父目录内，正常情况下不会跨设备；一旦遇到 `EXDEV`，
- * 降级为"逐文件替换 + 失败回滚"，并把该路径纳入测试覆盖。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
@@ -31,7 +6,6 @@ import { ERROR_CODES } from '../domain/error-codes.js';
 import { removeTree } from './fs-remove.js';
 
 export interface MaterializeFile {
-  /** 相对该数字人目录的 posix 路径，如 `TOOL.json`、`skills/pdf-parse/SKILL.md` */
   relPath: string;
   content: string | Buffer;
 }
@@ -65,12 +39,10 @@ export class OptAgentWriter {
     this.rename = options.renameImpl ?? fs.renameSync;
   }
 
-  /** `users/{uid}` */
   userDir(userId: string): string {
     return path.join(this.root, 'users', userId);
   }
 
-  /** `users/{uid}/agents/{agent}` */
   agentDir(userId: string, agentName: string): string {
     return path.join(this.userDir(userId), 'agents', agentName);
   }
@@ -92,17 +64,10 @@ export class OptAgentWriter {
         .sort();
     } catch {
       // `agents` 被占成一个文件 / 目录不可读：差异报告只是辅助信息，MUST NOT 阻断部署。
-      // 真正的写入失败由 `commitUser` 暴露并计入 `users[].error`。
       return [];
     }
   }
 
-  /**
-   * 以**用户为单位**整体覆盖物化。
-   *
-   * @param agents 本次需要存在的**全部**数字人产物；`agents/` 下不在其列的一切
-   *               条目都会被移除（整体覆盖语义，含手工放进去的目录）
-   */
   commitUser(userId: string, agents: AgentArtifact[]): UserCommitResult {
     assertSafeSegment(userId, '用户标识');
     for (const agent of agents) assertSafeSegment(agent.name, '数字人名');
@@ -121,7 +86,6 @@ export class OptAgentWriter {
     try {
       fs.mkdirSync(agentsDir, { recursive: true });
 
-      // ①② 在**同挂载点**（用户目录内）构建完整产物
       for (const agent of agents) {
         const target = path.join(tmpRoot, agent.name);
         fs.mkdirSync(target, { recursive: true });
@@ -166,7 +130,6 @@ export class OptAgentWriter {
       }
 
       // ⑤ 清理临时与备份
-      // 目录名带用户/数字人标识（可能是中文），删除一律走 removeTree（见 fs-remove.ts）
       removeTree(tmpRoot);
       removeTree(backupRoot);
       return { userId, written, removed };
@@ -186,7 +149,6 @@ export class OptAgentWriter {
           );
         }
       }
-      // 目录名带用户/数字人标识（可能是中文），删除一律走 removeTree（见 fs-remove.ts）
       removeTree(tmpRoot);
       removeTree(backupRoot);
 
@@ -198,15 +160,6 @@ export class OptAgentWriter {
     }
   }
 
-  /**
-   * **撤回**：清空该用户在运行环境中的全部数字人目录（2026-09-16）。
-   *
-   * 与部署同源的纪律：先把 `agents/` 整目录改名到备份名（失败即原样不动），
-   * 成功后再删除备份——所以"撤回失败"不会留下半清空的状态。
-   * 用户文件空间（`user-data/**`）一律不触碰：撤回的是**能力**，不是数据。
-   *
-   * @returns 被下架的数字人目录名（取自运行环境实际内容，而非部署清单）
-   */
   withdrawUser(userId: string): string[] {
     assertSafeSegment(userId, '用户标识');
     const userDir = this.userDir(userId);
@@ -226,7 +179,6 @@ export class OptAgentWriter {
     try {
       removeTree(backup);
     } catch (err) {
-      // 目录已经改走（撤回本身已生效），只是备份没删掉：留待人工清理，不影响结果
       this.logger?.warn(
         { err, event: 'deploy.withdraw.cleanup_failed', user_id: userId, path: backup },
         `撤回后的备份目录未能清理：${backup}`,

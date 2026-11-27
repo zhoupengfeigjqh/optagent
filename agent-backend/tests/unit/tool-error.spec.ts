@@ -1,12 +1,3 @@
-/**
- * 单元测试：工具失败标记通道（`domain/tool-error.ts`）。
- *
- * 守住的语义（2026-10-29 产品口径）：
- * - 标记只放 `details.toolError`，不抛异常（pi 的 catch 会覆盖 result）
- * - `readToolError` 对任何脏数据都返回 undefined（不抛）
- * - `markToolError` 是 `afterToolCall` 的实现体，**MUST 不抛**——
- *   它抛错时 pi 会把正常结果覆盖成 error（`finalizeExecutedToolCall` 的 catch）
- */
 import { describe, expect, it } from 'vitest';
 
 import {

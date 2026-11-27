@@ -1,18 +1,3 @@
-/**
- * 集成测试：部署端点（契约 §6.6~§6.8 与 §7.1）
- *
- * MUST 覆盖每个端点（宪章原则三），且至少包含：
- * ①单用户失败零写入、其余用户不受影响（`FR-029`）；
- * ②幂等（`FR-030`）；③既有数据零破坏（`SC-007`）；④§7.1 引用清单一致；
- * ⑤`user_ids` 的请求层校验（空数组 400、未知用户 404）。
- *
- * **2026-09-27**：原"运行形态缺地址"与"双形态对比"两条随运行形态概念下架
- * ——MCP 连接地址为**单一 `url`**。
- *
- * **2026-11-23**：部署前预检下架，`POST /api/admin/deploy/validate` 端点已删除，
- * `SC-020`（整批零写入 + 一次性列出全部错误项）随之作废。失败只发生在写入阶段，
- * 且以**逐用户**方式呈现：某用户失败即跳过该用户，其余继续（`users[].ok=false`）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,7 +16,6 @@ const TOOL_FIXTURE = [
   },
 ];
 
-/** 新建/覆盖一个 MCP 服务（单一连接地址） */
 function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
   const input = {
     description: 'OCR 识别服务',
@@ -64,12 +48,10 @@ function baseAgent(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
-/** 关联用户与数字人 */
 function link(userId: string, agents: string[]): void {
   fx.ctx.users.create(userId, agents, fx.ctx.store.revision());
 }
 
-/* 本体物化与快照完整性用例见同目录 `deploy-ontology.spec.ts`（本文件触 500 行门禁，故分居） */
 
 function revision(): number {
   return fx.ctx.store.revision();
@@ -185,7 +167,6 @@ describe('POST /api/admin/deploy —— 正常路径', () => {
 
 describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026-11-23）', () => {
   it('引用的 SKILL 已被删除 → 该用户部署失败（跳过），其余用户正常产出', async () => {
-    // 保存期会拒绝清单外 SKILL，故直接改写设计态文档模拟"保存后被删除"
     fx.ctx.store.writeJson('agents/broken.json', {
       name: 'broken',
       soul: soulDesign('x'),
@@ -210,7 +191,6 @@ describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026
     const ops = users.find((u) => u.user_id === 'ops');
     expect(ops?.ok).toBe(false);
     expect(ops?.error).toContain('SKILL');
-    // 失败用户零写入；成功用户正常产出
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents', 'broken'))).toBe(false);
     expect(
       fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md')),
@@ -224,7 +204,6 @@ describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026
       url: '/api/admin/deploy',
       payload: { user_ids: ['admin'], revision: revision() },
     });
-
     expect(res.statusCode).toBe(200);
     expect(res.json().users[0]).toMatchObject({ user_id: 'admin', ok: true });
     const mcp = JSON.parse(
@@ -233,7 +212,6 @@ describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026
         'utf8',
       ),
     );
-    // 预检下架后不再拦截：物化时读不到服务配置即过滤（能力缺失，运行期才暴露）
     expect(mcp.servers).toEqual([]);
   });
 });
@@ -241,7 +219,6 @@ describe('POST /api/admin/deploy —— 失效引用在写入阶段暴露（2026
 describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () => {
   it('单用户写入失败 → 该用户零写入，其余用户正常产出', async () => {
     await createAgent(baseAgent({ name: 'demo2' }));
-    // 用文件占住 ops 的 agents 目录，使其写入必然失败
     fs.rmSync(path.join(fx.optAgentRoot, 'users', 'ops', 'agents'), {
       recursive: true,
       force: true,
@@ -262,7 +239,6 @@ describe('POST /api/admin/deploy —— 单用户失败隔离（FR-029）', () =
     expect(ops?.ok).toBe(false);
     expect(ops?.error).toBeTruthy();
 
-    // admin 正常产出；ops 仍是那个占位文件（零写入）
     expect(fs.existsSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'demo', 'SOUL.md'))).toBe(
       true,
     );
@@ -281,7 +257,6 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
     expect(res.statusCode).toBe(200);
     const item = res.json().items[0];
     expect(item.operator).toBe('zyw_admin');
-    // 运行形态字段已随概念下架
     expect(item.target_runtime_form).toBeUndefined();
     expect(item.user_count).toBe(1);
     expect(typeof item.id).toBe('string');
@@ -306,7 +281,6 @@ describe('GET /api/admin/deploy/history 与 /manifest', () => {
 
 describe('只选一部分用户部署（部署对象由用户卡片勾选，2026-09-16）', () => {
   beforeEach(() => {
-    // 第二个用户（未关联任何数字人）
     link('ops', []);
   });
 
@@ -320,9 +294,7 @@ describe('只选一部分用户部署（部署对象由用户卡片勾选，2026
     });
     expect(deploy.statusCode).toBe(200);
     expect(deploy.json().users.map((u: { user_id: string }) => u.user_id)).toEqual(['ops']);
-    // admin 的目录一个字节都没变
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users', 'admin', 'agents'))).toEqual(before);
-    // 清单只记本次实际分发过的用户
     const manifest = await fx.app.inject({ method: 'GET', url: '/api/admin/deploy/manifest' });
     expect(manifest.json().items.map((i: { user_id: string }) => i.user_id)).toEqual(['ops']);
   });

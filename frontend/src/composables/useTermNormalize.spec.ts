@@ -1,16 +1,3 @@
-/**
- * 单测：术语替换确认状态机（018）。
- *
- * 守四条口径：
- * ① 没有替换（`applied:false`）→ 不打断，直接继续发送；
- * ② 有替换 → 只打开弹窗，**不发送**；
- * ③ 选择"替换后"→ 一次发送，载荷为 `normalized` + `skipTermCheck`（**不带**原话，
- *    2026-11-07 起聊天区显示的就是实际发出的那一版）；
- * ④ 选择"原话" / 预检异常 / 超时 → 一次发送，载荷不变（正文就是原话）；
- * ⑤ 确认后一律**发出即返回**（`settleBeforeReturn: false`）——弹窗不等本轮答完；
- * ⑥ 替换结果**可编辑但不可为空**（2026-11-07）：正文取用户最终确认的那一版，
- *    空文本不发送且弹窗保留。
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { TermNormalizeApi, TermNormalizeResult } from '../api/term-normalize'
@@ -104,7 +91,6 @@ describe('useTermNormalize · 用户选择', () => {
     await gate.onUseReplacement()
 
     expect(send).toHaveBeenCalledTimes(1)
-    // 假发送未声明入参形状，按真实签名取回调用参数（断言内容见下）
     const calls = send.mock.calls as unknown as Array<
       [Record<string, unknown>, { settleBeforeReturn?: boolean }]
     >
@@ -113,7 +99,6 @@ describe('useTermNormalize · 用户选择', () => {
       attachments: [],
       skipTermCheck: true,
     })
-    // 2026-11-07：聊天区要显示替换结果 —— 提交什么就展示什么，不再回传原话
     expect('originalContent' in calls[0]![0]).toBe(false)
     expect(calls[0]![1]).toEqual({ settleBeforeReturn: false })
     expect(gate.pendingTerm.value).toBeNull()
@@ -165,7 +150,6 @@ describe('useTermNormalize · 用户选择', () => {
       {
         content: '看下钢材库存，按仓库分组',
         attachments: [],
-        // 2026-11-07：手改后的文本既提交给模型，也是聊天区显示的那一条
         skipTermCheck: true,
       },
       { settleBeforeReturn: false },
@@ -181,7 +165,6 @@ describe('useTermNormalize · 用户选择', () => {
 
     expect(send).not.toHaveBeenCalled()
     expect(gate.pendingTerm.value).not.toBeNull()
-    // 未进入发送态：用户还能继续改，或改选"按原话"
     expect(gate.termSending.value).toBe(false)
   })
 

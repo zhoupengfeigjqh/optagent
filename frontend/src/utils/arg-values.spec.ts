@@ -1,16 +1,8 @@
-/**
- * 单测：入参值层（校验与提交构建）。
- *
- * 守住的语义：required 由**父级**传入、数字类型校验、结构化形状校验、
- * 提交时剪枝"未填的可选项"并收敛数字串；最复杂的真实形态作为回归样本。
- */
 import { describe, expect, it } from 'vitest'
 
 import type { FieldSchema } from './arg-schema'
 import { buildArgs, isEmptyValue, isNumericValue, pickKnownKeys, validateArgs } from './arg-values'
 
-/** 最复杂的真实形态（外部排产服务的 hd_scheduling_submit）：嵌套对象 + 对象数组 + 行内 required。
- *  仅作回归样本，模块内不含任何该工具的分支。 */
 const NESTED: FieldSchema = {
   type: 'object',
   properties: {

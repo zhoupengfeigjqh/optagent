@@ -1,14 +1,3 @@
-/**
- * 正文池的 prompt 组装（002 工具结果受控回灌 + R11 后台计算结果）。
- *
- * 抽成独立模块的原因（宪章原则二）：`run-manager.ts` 因本特性新增产出段后越过
- * 500 行硬门禁；而"把素材拼成发给模型的 messages / systemExtra"本来就是与
- * "run 生命周期管理"不同的职责。
- *
- * 本模块是**纯函数**：不做 IO、不落盘，素材全部由调用方（`run-consume.ts`，2026-10-25 起从
- * `run-manager.ts` 拆出）读好后传入
- * ⇒ 同样的历史得到同样的拼装结果（确定性，不破坏 prompt 前缀缓存）。
- */
 import type { HistoryMessage } from '../types.js';
 import { POOL_MAX_MESSAGES } from './context-window.js';
 import { toLlmContent } from './message-format.js';
@@ -16,44 +5,16 @@ import { formatReplayBlock, selectReplay } from './tool-context.js';
 import type { ToolCallRecord } from './tool-events.js';
 
 export interface PromptSources {
-  /** 会话 id：外置结果的索引路径由它与 call_id 重新推导（不读记录里的路径） */
   threadId: string;
-  /** 摘要文本 + 归档游标（前多少条已并入摘要）；未装配摘要时为 `{ summary: '', coveredCount: 0 }` */
   summaryData: { summary: string; coveredCount: number };
-  /** 该会话的全部历史消息（时间正序） */
   allMessages: readonly HistoryMessage[];
-  /** 本轮用户消息（尚未落盘，追加在末尾） */
   userMessage: HistoryMessage;
-  /** 工具调用记录（未装配 toolEvents 时为空数组） */
   records: readonly ToolCallRecord[];
-  /** 已拼好的「后台计算结果」段（无产出时为空串） */
   producedText: string;
-  /**
-   * 本轮 `【当前时间】` 段文本（R18；无则空串/缺省，不占一个字符）。
-   *
-   * 由调用方按当前时钟格式化后传入（`formatCurrentTime`）——本模块是纯函数，**不读系统时钟**。
-   * 拼装位置：**后台产出段之后、`guidance` 之前**。这样既让"本轮指令"`guidance` 保持
-   * 紧邻用户消息，又把"每轮变化"的字节压到末尾，尽量不伤 prompt 前缀缓存。
-   */
   nowText?: string;
-  /**
-   * 本轮请求级指引（004：问题实例关联工具生成的隐藏引导）。
-   *
-   * **不落盘、不进历史**，只追加到本轮 `systemExtra`——用户消息气泡因此保持干净
-   * （用户看到的只有问题文本本身），而模型仍能读到"本轮优先用哪些工具"。
-   */
   guidance?: string;
 }
 
-/**
- * 组本轮 prompt。
- *
- * 工具结果**不整体注入**，且**只进 messages、不进 systemExtra**（2026-11-07）：
- * `inline_content`（含外部来源的截断版）按预算回灌到**对应轮次**的 assistant 消息
- * （历史侧，带位置感）；被预算挤出的降级为占位。截断版的末尾自带副本路径，
- * 模型需要全文时 `read_file` 自取。投影每次现算、不落盘，故 `history.jsonl` 保持纯净，
- * 前端展示不受影响（原则五：单一权威源）。
- */
 export function buildPromptMessages(sources: PromptSources): {
   messages: HistoryMessage[];
   systemExtra?: string;
@@ -65,7 +26,6 @@ export function buildPromptMessages(sources: PromptSources): {
   const bounded = pooled.length > POOL_MAX_MESSAGES ? pooled.slice(-POOL_MAX_MESSAGES) : pooled;
   const recent: HistoryMessage[] = [...bounded, sources.userMessage];
 
-  // 工具回灌投影（未装配 toolEvents 时 records 为空，等于既有行为）
   const selection = selectReplay(sources.records, sources.threadId);
   const extraByMessage = new Map<string, string[]>();
   const addExtra = (messageId: string, text: string): void => {
@@ -83,25 +43,13 @@ export function buildPromptMessages(sources: PromptSources): {
     return { role: m.role, content };
   });
 
-  // FR-017：滚动摘要；R11：后台计算结果清单。
-  // 二者是"有内容才占位"——无内容时不占一个字符。
-  // 002 的工具结果**不在这里**：2026-11-07 起全部走 messages（见上），无索引段。
-  // R18：当前时间——**恒占位**（每轮必注入），是唯一"一定有内容"的段
-  //   ⇒ `systemExtra` 在正常轮次不再可能是 `undefined`（契约 R18 §17.2）。
   const parts: string[] = [];
   if (sources.summaryData.summary !== '') {
     parts.push(`以下是对话早期内容的摘要：\n${sources.summaryData.summary}`);
   }
   if (sources.producedText !== '') parts.push(sources.producedText);
-  // R18：当前时间（每轮现算）。放在 guidance **之前**——guidance 是本函数产出的最后一段
-  //      （本轮指令紧邻用户消息；聚焦提示在其后才由 `run-consume` 追加）
   if (sources.nowText) parts.push(sources.nowText);
-  // 004：问题实例的隐藏工具引导。放最后——本轮指令紧邻用户消息，更容易被遵循
-  // 016：意图聚焦提示与卡片 `tool_tips` 段**不在这里**——它们在 `run-consume` 组装成功后
-  //      追加到 `systemExtra` 末尾（聚焦提示在前、卡片 tool_tips 段在后）。
   //      注意：`guidance` 非空白时 `run-consume` 仍会跳过聚焦（`skipFocus` 第三条判据）；
-  //      当前唯一生产者是首屏问题实例，它同时携带 `skip_intent_focus`，两条判据重复命中，
-  //      故实际行为是"首屏卡片轮不会出现聚焦提示"。
   if (sources.guidance) parts.push(sources.guidance);
   return { messages, ...(parts.length > 0 ? { systemExtra: parts.join('\n\n') } : {}) };
 }

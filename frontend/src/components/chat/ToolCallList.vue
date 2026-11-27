@@ -1,27 +1,4 @@
 <script setup lang="ts">
-/**
- * 工具调用卡片列表（002 特性）
- *
- * 一个组件同时服务两种场景（TR-10）：
- * - **历史态**：`Message.tool_calls` 下发元数据 + `inline_content`（超阈值时是截断版）；
- *   展开即见——2026-11-08 起**不再拉取临时空间副本**，卡片展示的就是记录里那段正文
- * - **流式态**：SSE 只给名称与状态，结果尚未产生（也不外显结果）；此时展开只能看到一行
- *   "结果将在本轮结束后可查看"（2026-11-18），不谎报「无结果内容」
- *
- * 展示分两层（2026-10-08 改版，spec §4.6 / TR-32~TR-36）：
- * - **计数行**（常显）：`本轮 N 次调用 · 报错 M 次`——报错数**不藏在展开后**
- * - **摘要行**（≥2 次调用时）：最新一次调用 + 明细开关，**整行一个按钮**
- * - **明细区**（展开后）：本轮全部调用、时间正序；每条仍可展开自己的结果
- *
- * 截断（TR-04 / TR-15）：结果超内联阈值时记录里只有前 32 KB，卡片如实展示这段，
- * 正文下方一行说明"完整的那份在哪"（内置工具没有副本，外部来源有临时空间副本）——
- * 卡片 MUST NOT 自行拼装全文，避免与记录口径分叉。
- *
- * 结果正文的**结构化展示**（2026-10-10）：能解析成对象/数组就按与产出弹窗同构的规则渲染
- * （`ProducedJsonView`），并可一键切回**原始 JSON**。这是**展示层**的选择——平台仍
- * "原样存、原样读"，服务端存储与投影一字不变（契约 §10.3）；解析判据也复用同一处
- * （`parseProducedContent`：超 256K / 非 JSON / 标量一律回落 `<pre>`）。
- */
 import { computed, useId } from 'vue'
 
 import { useToolPanels, type ToolPanelState } from '../../composables/useToolPanels'
@@ -48,50 +25,32 @@ const props = withDefaults(
      * 由 `MessageBubble` 从 `streaming.phase` 显式传入——MUST NOT 用"有无结果正文"之类的间接信号推断。
      */
     live?: boolean
-    /**
-     * 隐藏顶部计数行（`本轮 N 次调用 · 报错 M 次`）。
-     *
-     * 2026-11-16 起流式气泡按「渲染段」逐张渲染（A-lite）：每段只带 1 次调用，
-     * 若继续渲染计数行，一轮 5 次工具会重复出现 5 行"本轮 1 次调用"。
-     * 段渲染传 `true`；历史消息与整轮渲染保持默认（`false`）。
-     */
     hideHead?: boolean
   }>(),
   { live: false, hideHead: false },
 )
 
 const emit = defineEmits<{
-  /**
-   * 结果正文里的视图链接点击（2026-10-20）：向上透传给装配层。
-   *
-   * 与入口行同一出口（`ChatPanel` 的 `openView`）——同源进右侧面板、异源新标签页。
-   * 本组件不做同源判定，只负责"把点击意图带出去"。
-   */
   'open-view': [item: ViewLinkTarget]
 }>()
 
 const panels = useToolPanels()
 
-/** 明细区 / 结果体的 DOM id：同一页面挂着多个实例（每条消息一个），用 `useId()` 保证唯一 */
 const uid = useId()
 const detailsId = `${uid}-details`
 const bodyId = (index: number): string => `${uid}-body-${index}`
 
 const stats = computed(() => summarizeToolCalls(props.items))
-/** 最新一次调用（摘要行的展示对象） */
 const latest = computed<ToolCallItem | null>(() => props.items[props.items.length - 1] ?? null)
-/** ≥2 次调用才有"被折叠掉的明细"；只有 1 次时该卡片即全部（TR-35） */
 const foldable = computed(() => props.items.length > 1)
 const groupKey = computed(() => toolGroupKey(props.items))
 const detailsOpen = computed(() => foldable.value && panels.isDetailsOpen(groupKey.value))
-/** 明细区是否渲染：≥2 次时看展开态；只有 1 次时恒渲染（无折叠层，保持"一次点击看结果"） */
 const detailsVisible = computed(() => !foldable.value || detailsOpen.value)
 
 function toggleDetails(): void {
   panels.setDetailsOpen(groupKey.value, !detailsOpen.value)
 }
 
-/** 可展开 = 已有终态（TR-33）；规则来自 `utils`，组件不自己重写判断 */
 function canExpand(item: ToolCallItem): boolean {
   return isToolCallFinished(item.status)
 }
@@ -104,21 +63,18 @@ function panelOf(item: ToolCallItem): ToolPanelState {
   return panels.panelOf(item.callId)
 }
 
-/** 展开/收起。运行中没有结果可看，直接不响应（TR-33）。 */
 function onToggle(item: ToolCallItem): void {
   if (!canExpand(item)) return
   const panel = panelOf(item)
   panel.open = !panel.open
 }
 
-/** 展开后展示的正文：就是记录里的 `inline_content`（超阈值时是截断版，2026-11-08） */
 function displayContent(item: ToolCallItem): string {
   return item.content ?? ''
 }
 
 /** 结果正文的展示视图（结构化解析 + 降级提示） */
 interface ResultView {
-  /** `true` = 可结构化展示（此时 `value` 是对象或数组） */
   structured: boolean
   value: unknown
   /** 降级提示（`''` = 不提示） */
@@ -127,12 +83,6 @@ interface ResultView {
 
 const EMPTY_RESULT_VIEW: ResultView = { structured: false, value: null, hint: '' }
 
-/**
- * 各条调用的结果正文解析（`call_id` → 视图），**一次算完**供模板读取（宪章原则五）。
- *
- * 只解析**已展开**的卡片：折叠的卡片不必付出解析成本（大结果的 `JSON.parse` 不便宜）。
- * `computed` 依赖 `panelOf(item).open` 与 `displayContent(item)`，故懒加载到正文后会自动重算。
- */
 const resultViews = computed(() => {
   const views = new Map<string, ResultView>()
   for (const item of props.items) {
@@ -151,16 +101,11 @@ function parsedOf(item: ToolCallItem): ResultView {
   return resultViews.value.get(item.callId) ?? EMPTY_RESULT_VIEW
 }
 
-/** 切换"按原始 JSON 查看"：逃生舱——结构化只是默认视角，原文永远可回看 */
 function toggleRaw(item: ToolCallItem): void {
   const panel = panelOf(item)
   panel.raw = !panel.raw
 }
 
-/**
- * 各条调用的**截断说明**（`call_id` → 一句），一次算完供模板读取（宪章原则五）。
- * 文案判定在 `utils/tool-result-hint.ts`（纯函数，可穷举单测）。
- */
 const bodyHints = computed(() => {
   const hints = new Map<string, string>()
   for (const item of props.items) {
@@ -174,10 +119,6 @@ function bodyHintOf(item: ToolCallItem): string {
   return bodyHints.value.get(item.callId) ?? NO_HINT
 }
 
-/**
- * 各条调用的**无正文说明**（`call_id` → 一句），一次算完供模板读取（宪章原则五）。
- * 判定同在 `utils/tool-result-hint.ts`：流式期说"本轮结束后可查看"，历史态才说"无结果内容"。
- */
 const emptyHints = computed(() => {
   const hints = new Map<string, string>()
   for (const item of props.items) {
@@ -194,14 +135,10 @@ function emptyHintOf(item: ToolCallItem): string {
 
 <template>
   <div v-if="items.length" class="tool-calls">
-    <!-- 计数行（常显）：报错数 MUST 在折叠态可见——失败绝不能被折叠隐藏（TR-32）。
-         段渲染（`hideHead`）时不出：每段只有 1 次调用，重复统计反而干扰阅读 -->
     <p v-if="!hideHead" class="tool-calls__head" data-test="tool-counts">
       本轮 {{ stats.total }} 次调用 · 报错 {{ stats.errors }} 次
     </p>
 
-    <!-- 摘要行（≥2 次调用时）：最新一次调用 + 明细开关，**整行一个按钮**（TR-34）。
-         只有 1 次调用时不渲染它：没有"被折叠的内容"，多一层点击是纯负担（TR-35） -->
     <button
       v-if="foldable && latest"
       type="button"
@@ -212,7 +149,6 @@ function emptyHintOf(item: ToolCallItem): string {
       @click="toggleDetails"
     >
       <span class="tool-calls__latest">最新</span>
-      <!-- 显示人读名称，原始调用名放 title 悬停（核对后端日志时用） -->
       <span class="tool-call__name" :title="latest.name">{{ toolDisplayName(latest) }}</span>
       <span class="tool-call__status" :class="`tool-call__status--${latest.status}`">
         {{ statusLabel(latest) }}
@@ -223,8 +159,6 @@ function emptyHintOf(item: ToolCallItem): string {
       <span class="tool-call__toggle">{{ detailsOpen ? '收起明细' : '查看明细' }}</span>
     </button>
 
-    <!-- 明细区：本轮全部调用（时间正序，最早在上）。它是摘要行的**兄弟节点**——
-         摘要行是按钮，而按钮内不能再嵌交互元素（TR-34） -->
     <div v-if="detailsVisible" :id="detailsId" class="tool-calls__details" data-test="tool-details">
       <div v-for="(item, index) in items" :key="item.callId" class="tool-call">
         <button
@@ -245,7 +179,6 @@ function emptyHintOf(item: ToolCallItem): string {
           <span v-if="item.size !== undefined" class="tool-call__meta">
             {{ formatBytes(item.size) }}
           </span>
-          <!-- 运行中没有结果可看：不出现"展开"字样，避免"点开却是空的"（TR-33） -->
           <span v-if="canExpand(item)" class="tool-call__toggle">
             {{ panelOf(item).open ? '收起' : '展开' }}
           </span>
@@ -261,9 +194,7 @@ function emptyHintOf(item: ToolCallItem): string {
             入参：{{ formatArgsDigest(item.argsDigest) }}
           </p>
 
-          <!-- 正文：有就立刻渲染——外置结果是**截断版先显示**，全文拉到后原位替换（2026-11-07） -->
           <template v-if="displayContent(item)">
-            <!-- 逃生舱在**上方**：结构化视图里的截断提示写的就是"点上方"（两处口径一致） -->
             <button
               v-if="parsedOf(item).structured"
               type="button"
@@ -284,12 +215,9 @@ function emptyHintOf(item: ToolCallItem): string {
             <pre v-else class="tool-call__content">{{ displayContent(item) }}</pre>
             <p v-if="parsedOf(item).hint" class="tool-call__hint">{{ parsedOf(item).hint }}</p>
           </template>
-          <!-- running 不可展开，故此处只剩"终态但无内容"：流式期正文还没送到，说清"什么时候能看到"，
-               不谎报"没有内容"（2026-11-18）；历史态/工具报错仍回落「无结果内容」 -->
           <p v-else-if="emptyHintOf(item)" class="tool-call__hint">{{ emptyHintOf(item) }}</p>
           <p v-else-if="!bodyHintOf(item)" class="tool-call__hint">无结果内容</p>
 
-          <!-- 正文下方一行说明：这是不是截断版、完整的那份在哪（判定见 `utils/tool-result-hint.ts`） -->
           <p v-if="bodyHintOf(item)" class="tool-call__hint">{{ bodyHintOf(item) }}</p>
         </div>
       </div>
@@ -309,7 +237,6 @@ function emptyHintOf(item: ToolCallItem): string {
   font-size: var(--font-size-xs);
 }
 
-/* 摘要行：观感与卡片头一致，但它是"本轮概览"而非某条调用的卡片 */
 .tool-calls__summary {
   display: flex;
   align-items: center;
@@ -341,8 +268,6 @@ function emptyHintOf(item: ToolCallItem): string {
   gap: var(--space-2);
 }
 
-/* 深灰卡片（2026-11-16）：白气泡里的对比块，`color` 让 `color: inherit` 的子元素
-   （`.tool-call__head`）自动取反白，无需逐个声明 */
 .tool-call {
   border: 1px solid var(--color-tool-border);
   border-radius: var(--radius-md);
@@ -387,7 +312,6 @@ function emptyHintOf(item: ToolCallItem): string {
   color: var(--color-tool-text-muted);
 }
 
-/* 深灰底上的状态色：全局状态色（#1f9d55 等）在 #4f5760 上对比不足，改用亮色配套 */
 .tool-call__status--running {
   color: var(--color-tool-status-running);
 }
@@ -440,14 +364,6 @@ function emptyHintOf(item: ToolCallItem): string {
   word-break: break-word;
 }
 
-/**
- * 结构化结果正文：与外层深灰卡片同色系（比卡片再深一档）。
- *
- * 这里**局部重定义令牌**而不是给每个子元素加类：`ProducedJsonView` 内部用的是
- * `--color-text-muted`（空值）/ `--color-border`（对象竖线、表格线）/ `--color-primary`
- * （视图链接）/ `--color-bg-subtle`（原始 JSON 底），在深底上这些值全都不达标。
- * 在容器上换掉它们，子组件无需知情即自动跟随——组件边界不变，只有作用域内的取值变。
- */
 .tool-call__structured {
   --color-bg-subtle: var(--color-tool-body-bg);
   --color-border: var(--color-tool-border);

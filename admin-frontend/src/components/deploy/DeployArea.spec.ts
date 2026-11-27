@@ -1,11 +1,8 @@
 /**
  * 组件测试：部署功能区——**勾选部署对象的跨分区联动**（2026-09-16 十一次调整）
  *
- * 勾选发生在下分区的用户卡片上，而「部署生效」按钮在上分的部署面板里，
  * 状态由共同父级（`DeployArea`）持有。这条链路一旦断开，界面就会出现
  * "勾了却按不动"或"没勾却能部署"（后者会误动全平台），所以必须锁住。
- *
- * **2026-11-23**：预检下架，勾选后直接部署；「异常项汇总」页签删除。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,7 +25,6 @@ vi.mock('../../api/http', () => ({
 }))
 
 vi.mock('../../api/deploy', () => ({
-  // 历史走 api 模块（带 `DEPLOY_HISTORY_FETCH_LIMIT`），不再直接拼 URL
   DEPLOY_HISTORY_FETCH_LIMIT: 100,
   deploy: (...a: unknown[]) => deployApi(...a),
   fetchReferences: vi.fn(),
@@ -73,7 +69,6 @@ beforeEach(() => {
   })
   deployApi.mockReset()
   fetchDeployHistoryMock.mockReset().mockResolvedValue({ items: [], truncated: false })
-  // 部署的乐观锁版本取自清单端点（2026-09-27：不再有 /platform/settings）
   fetchManifestMock.mockReset().mockResolvedValue({ items: [], total: 0, revision: 7 })
 })
 
@@ -164,11 +159,9 @@ describe('DeployArea —— 勾选部署对象', () => {
 
     expect(fetchDeployHistoryMock).toHaveBeenCalledWith(100)
   })
-
   it('2026-11-23：只保留「用户与关联」「部署历史」两个分区（异常项汇总已下架）', async () => {
     const wrapper = mountArea()
     await flushPromises()
-
     const tabs = wrapper.findAll('nav[aria-label="数字人部署功能区分区"] button')
     expect(tabs.map((t) => t.text())).toEqual(['用户与关联', '部署历史'])
   })

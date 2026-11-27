@@ -1,9 +1,3 @@
-/**
- * 单元测试：输入区 DOM ↔ 文本的唯一换算（2026-10-18）。
- *
- * 这一层被三处依赖——草稿同步、`@` 触发检测、`caretRectOf` 的定位口径——
- * 所以哪怕只有一处的换行/胶囊规则不一致，都会表现为"看到的和发出去的不一样"。
- */
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -13,7 +7,6 @@ import {
   splitComposerSegments,
 } from './composer-text'
 
-/** 造一个输入区容器（与 Composer 的 `.composer__input` 同构的最小 DOM）。 */
 function editor(html: string): HTMLElement {
   const root = document.createElement('div')
   root.innerHTML = html
@@ -98,7 +91,6 @@ describe('caretTextOffset —— 光标下标与序列化同一把尺子', () =>
 
   it('光标落在胶囊之后时，胶囊按 `@文件名` 计入长度', () => {
     const root = editor(`看下 ${chip('plan.csv')} 的数据`)
-    // 选区只认文档内的节点：游离节点上的 addRange 会被忽略
     document.body.appendChild(root)
     const chipNode = root.querySelector('span')!
     const range = document.createRange()
@@ -110,7 +102,6 @@ describe('caretTextOffset —— 光标下标与序列化同一把尺子', () =>
   })
 })
 
-/** 构造只含一个选区的 Selection（jsdom 的 `document.getSelection()` 也能用，但显式给更稳）。 */
 function selectionWith(range: Range): Selection {
   const selection = document.getSelection()!
   selection.removeAllRanges()

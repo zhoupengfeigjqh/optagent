@@ -1,10 +1,3 @@
-/**
- * 单元测试：数字人名称判据（`FR-015`，2026-10-09）。
- *
- * 判据与 `admin-backend` `domain/config-center/naming.ts` 的 `isSafeName` **同源**：
- * 这里守住"非法名与重名在弹窗内即被拒绝"这条线——两侧判据分叉的后果是
- * "界面放行、保存却被拒"的割裂体验。
- */
 import { describe, expect, it } from 'vitest'
 import { AGENT_NAME_MAX_LENGTH } from '../constants/agent-design'
 import { isSafeAgentName, validateNewAgentName } from './agent-name'

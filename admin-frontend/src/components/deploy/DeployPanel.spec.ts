@@ -2,9 +2,6 @@
  * 组件测试：部署面板（T082）
  *
  * 守住三件事：
- * 1. **未勾选部署对象时不能部署**（空选择绝不能落回"全部用户"，那会变成误部署全平台）；
- * 2. **勾选后无需任何预检即可直接部署**（2026-11-23：预检下架）；
- * 3. 逐用户失败原因（`users[].ok=false` + `error`）与整批 404 名单都能就地看到。
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

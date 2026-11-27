@@ -1,10 +1,3 @@
-/**
- * 组件测试：卡片在气泡内的位置与归属（007）。
- *
- * 两条都是"位置/归属"这类只有渲染出来才能验证的事：
- * - 卡片容器在**正文之后**（FR-010，与工具记录、视图入口同层的侧车位置）；
- * - 只有 id 命中 `message_id` 的那条消息才渲染（FR-015：历史轮不展示）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../api/types'
@@ -41,7 +34,6 @@ describe('MessageBubble —— 下一步动作卡片（007）', () => {
     const content = wrapper.find('.message-content').element
     const cards = wrapper.find('.next-steps').element
 
-    // DOCUMENT_POSITION_FOLLOWING = 4：cards 在 content 之后
     expect(content.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 

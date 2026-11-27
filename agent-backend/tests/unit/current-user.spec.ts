@@ -1,6 +1,3 @@
-/**
- * 单元测试：当前用户（`FR-009`）
- */
 import { describe, expect, it } from 'vitest';
 import { authContext, BUILTIN_ADMIN, getCurrentUser } from '../../src/domain/current-user.js';
 

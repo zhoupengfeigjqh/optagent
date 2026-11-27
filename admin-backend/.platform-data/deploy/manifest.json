@@ -3,9 +3,9 @@
     {
       "user_id": "admin",
       "agent_names": [
-        "生鲜识别辅助"
+        "生产调度测试"
       ],
-      "last_deployed_at": "2026-11-23T04:47:26.541Z"
+      "last_deployed_at": "2026-11-27T04:08:49.118Z"
     },
     {
       "user_id": "test007",

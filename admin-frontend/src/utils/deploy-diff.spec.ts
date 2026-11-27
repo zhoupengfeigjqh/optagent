@@ -1,9 +1,3 @@
-/**
- * 单元测试：部署差异项文字（纯函数）
- *
- * 三件事：①带数字人时给"用户 / 数字人"；②数字人为空时不出现孤立的斜杠；
- * ③`detail` 缺失回退到差异类型，两者都缺也不抛错（脏数据容错）。
- */
 import { describe, expect, it } from 'vitest'
 import { diffText } from './deploy-diff'
 

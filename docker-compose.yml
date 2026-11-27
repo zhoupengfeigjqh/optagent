@@ -1,6 +1,3 @@
-# 全部服务的容器日志轮转（任务 2026-09-15）：
-# json-file 驱动的轮转按**大小**而非按天（Docker 限制）——10MB × 3 个文件，
-# 滚动覆盖最旧的；管理界面读取时另有 tail 上限（≤500 行），两层都有界。
 x-default-logging: &default-logging
   driver: json-file
   options:
@@ -8,13 +5,10 @@ x-default-logging: &default-logging
     max-file: "3"
 
 services:
-  # 统一入口网关：所有外部流量经此分发，新增平台只改 gateway/nginx.conf
   gateway:
     build: ./gateway
     container_name: optagent-gateway
     ports:
-      # 宿主机对外端口固定 82（2026-09-23：取消根 .env 插值——编排层不再有可变项，
-      # 端口调整直接改本文件。原 GATEWAY_HOST_PORT 的实际取值与默认值等价，无迁移成本）
       - "82:80"
     depends_on:
       - frontend
@@ -30,114 +24,59 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # ---- 数字人管理平台：管理界面（Vue 3 静态资源 + SPA 回退）----
   admin-frontend:
     build: ./admin-frontend
     container_name: optagent-admin-frontend
     restart: unless-stopped
     logging: *default-logging
 
-  # OCR MCP 服务：RapidOCR，streamable-http，仅内网（backend 经 MCP 调用）
-  # 无共享存储：经签名直链回源 backend 下载图片（远程部署形态预演）
   ocr:
     build: ./ocr-service
     container_name: optagent-ocr
-    # 向宿主机发布 8000：本地直跑（非 Docker）的 backend 经 LAN IP 访问 OCR
     ports:
       - "8100:8000"
-    # 可调项（下载上限、超时）都有代码缺省值；本机私产放 .env.local（gitignore，缺失不报错）。
-    # 2026-09-28：回源 host 白名单（OCR_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
-    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名（也无需三处配置对齐）。
     env_file:
-      - path: ./ocr-service/.env.local
+      - path: ./ocr-service/.env
         required: false
     restart: unless-stopped
     logging: *default-logging
 
-  # Jev 决策 MCP 服务：TypeSafe System One（state + 类型化问题 → 结构化决策），仅内网
-  # 无共享存储：引用文件时经签名直链回源 backend 下载（与 OCR 同一套机制）
   jev:
     build: ./jev-service
     container_name: optagent-jev
-    # 向宿主机发布 8101：本地直跑（非 Docker）的 backend 经 LAN IP 访问 Jev
-    # 端口固定 8101（2026-09-23：取消根 .env 插值，编排层不再有可变项）
-    # 2026-10-04：8001 → 8101。原因：同机 optonto 编排的 core-backend 占用了宿主 8001
-    # （其 compose 声明 "8001:8001"），两边抢同一端口——症状是 jev 起来后宿主端口拿不到、
-    # 8001 实际应答的是 optonto core-backend。平台侧 jev 服务的 url 一并改用 8101。
     ports:
       - "8101:8000"
-    # 本机私产放 .env.local（gitignore）：TYPESAFE_API_KEY、上游端点与超时等；
-    # 缺失不报错（Key 缺省时服务照常启动，三个工具返回可读错误）。
-    # 首次：cp jev-service/.env.example jev-service/.env.local 并填入 Key。
-    # 2026-09-28：回源 host 白名单（JEV_URL_ALLOW_HOSTS）已移除——回源地址由运行环境按
-    # PUBLIC_BASE_URL **单点铸造**后注入，服务侧不再各自验一遍主机名。
     env_file:
-      - path: ./jev-service/.env.local
+      - path: ./jev-service/.env
         required: false
     restart: unless-stopped
     logging: *default-logging
 
-  # BOM 校验/合并 MCP 服务：FastMCP（streamable-http），两个工具（bom_validate / bom_merge）
-  # 均**同步**；无受理、无后台任务。合并产出的 **xlsx + HTML 报告**算完即经 `resultUrl`
-  # **回写平台**（同一地址 POST 两次），由平台落进调用者的文件空间（`临时空间/后台产出/`）
-  # 并返回两条入口（`filePath`=报告、`mergedFile`=xlsx）——本服务
-  # **不写磁盘、无产出目录**（2026-10-21：原 `./bom-service/.data` 挂载与 `BOM_PUBLIC_BASE_URL`
-  # 一并下架，下载链接改由平台铸；2026-10-22：报告一并回写，报告内不含下载链接）。
   bom:
     build: ./bom-service
     container_name: optagent-bom
-    # 向宿主机发布 8102 → 容器 8000：给**宿主机上直跑的 backend** 连 MCP 用
-    # （容器形态走 `http://bom:8000/mcp`）。ocr 占 8000、jev 占 8101，故取 8102
-    # （2026-10-14：与 jev 同口径，编排层不再有可变项，端口调整直接改本文件）。
     ports:
       - "8102:8000"
-    # 本机私产放 .env.local（gitignore，缺失不报错）：只需覆盖输入/计算限额、回写上限或报告预算
-    # （`BOM_MAX_*` / `BOM_RESULT_MAX_BYTES` / `BOM_REPORT_MAX_*`），全部有代码缺省值。
-    # 首次：cp bom-service/.env.example bom-service/.env.local。
     env_file:
-      - path: ./bom-service/.env.local
+      - path: ./bom-service/.env
         required: false
     restart: unless-stopped
     logging: *default-logging
 
-  # 生鲜订货解析 MCP 服务：FastMCP（streamable-http），单一工具 `fresh_order_parse`
-  # 输入四个 http/https 直链：订单图片 + SKU清单 / 映射表 / 噪声词表 三个 xlsx；
-  # 输出三表解析结果 JSON（高度匹配 / 候选审核 / 异常记录）+ `reader`，**不产文件、不回写平台**。
-  # 2026-11-18：改用 `fresh-service-v3`（读图路由：表格走 OCR、手写走 LLM；新版三张默认表）。
-  # 该版的产出回写（HTML 报告 + 三表 xlsx）**已屏蔽、代码保留**：签名不声明 `resultUrl`
-  # ⇒ 平台不注入、服务不发 POST ⇒ 服务**只返回三表 JSON、不产出任何文件**；可读报告仍由
-  # 数字人按技能 `fresh-order-parse` 第七节写 HTML 到临时空间（模板
-  # skills/fresh-order-parse/references/report-template.html）。恢复步骤见该目录 README §4.1。
-  # 镜像内装 paddleocr + paddlepaddle，并把 PP-OCRv6 small 权重烤进构建期（容器运行时不联网下载）。
   fresh:
-    build: ./fresh-service-v3
+    build: ./fresh-service-v4
     container_name: optagent-fresh
-    # 向宿主机发布 8104 → 容器 8000：给**宿主机上直跑的 backend** 连 MCP 用
-    # （容器形态走 `http://fresh:8000/mcp`）。8100/8101/8102/8103 已分别被 ocr/jev/bom/laya 占用。
     ports:
       - "8104:8000"
-    # 本机私产放 .env.local（gitignore，缺失不报错）：
-    #   匹配阈值（T_HIGH/T_LOW/TOP_N）、数据表缓存、HTTP 超时——全部有代码缺省值；
-    #   手写通道的 LLM Key（LLM_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY）
-    #   ——缺失时手写单自动按 OCR 处理（表格单不需要 Key）。
     env_file:
-      - path: ./fresh-service-v3/.env.local
+      # 2026-11-26: single container-form env file, same rule as agent-backend
+      - path: ./fresh-service-v4/.env
         required: false
     restart: unless-stopped
     logging: *default-logging
 
-  # Laya 决策模型服务（013 意图聚焦）：TypeSafe System One 线协议，**CPU 可跑**、权重烤进镜像。
-  # 判定由 backend **直接 HTTP 调用** `POST http://laya:8000/v1/systemone`
-  # ——不经 MCP、不注册为工具、不发布到网关（启动器看不到它）。
-  # 宿主端口 8103：8100/8101/8102 已被 ocr/jev/bom 占用；容器内固定 8000。
-  # 注意：本服务**不**设为 backend 的 depends_on——意图聚焦是可选能力，
-  # 强制拉起近 3GB 的推理镜像会让"只想起 backend"的既有部署变慢/失败；缺失时按未配置降级。
+  # 可选推理服务：不加入 backend 的 depends_on，缺失时后端按未配置降级
   laya:
-    # **本地自建镜像**（2026-10-25）：官方 `chaitin/decis:laya-multilingual-v0.4.0` 在本
-    # 网络拉不下来（六个镜像站全部 403 / 层数据被改写），改为「拉源码 + 本地构建」：
-    # `laya-service/Dockerfile` 从 GitHub `chaitin/Decis` 源码装 `decis` + `laya`，
-    # 权重取自 ModelScope 的 `convaiinnovations/laya-multilingual`，烤进镜像。
-    # 构建：docker build -t laya-service laya-service（compose 会自动构建同名镜像）
     build:
       context: ./laya-service
       dockerfile: Dockerfile
@@ -145,17 +84,11 @@ services:
     container_name: optagent-laya
     ports:
       - "8103:8000"
-    # 本机私产放 .env.local（gitignore，缺失不报错）：DECIS_API_KEY 必填——
-    # 非 loopback 且未设 token 时服务会**拒绝启动**，这是官方口径。
-    # 首次：mkdir -p laya-service && echo "DECIS_API_KEY=<同 config.yaml 的 intent_focus.api_key>" > laya-service/.env.local
     env_file:
-      - path: ./laya-service/.env.local
+      - path: ./laya-service/.env
         required: false
     environment:
-      # 与 backend 的 stop_grace_period: 25s 同口径（引擎加载/卸载都要时间）
       - DECIS_SHUTDOWN_GRACE_MS=25000
-      # 不设 DECIS_ALLOW_NO_AUTH（保持鉴权）；不设 DECIS_PLAYGROUND_HOST_PORT（不启用 playground）
-    # 官方建议：3Gi 请求 / 6Gi 上限（引擎加载后常驻内存，峰值为权重数倍）；按实测调整
     mem_limit: 6g
     restart: unless-stopped
     logging: *default-logging
@@ -163,63 +96,32 @@ services:
   backend:
     build: ./agent-backend
     container_name: optagent-backend
-    # 固定 hostname：容器默认 hostname 是容器 ID（每次重建都变，日志里读不出是谁）。
-    # 日志的实例区分交给每行的 instance_id（hostname-pid-启动时刻），这里只求可读。
     hostname: optagent-backend
-    # 优雅关闭宽限：应用内是 15s（等"进行中的回答"写完收尾），Docker 默认只等 10s
-    # → 应用还没来得及记 shutdown.closed 就被 SIGKILL，在途回答也被硬杀。
+    # 应用内 15s 优雅关闭，Docker 默认 10s 会提前 SIGKILL
     stop_grace_period: 25s
+    # 2026-11-26: single source -- container-form values (incl. PUBLIC_BASE_URL,
+    # ADMIN_BACKEND_URL, INTENT_FOCUS_BASE_URL) all live in agent-backend/.env.
+    # No `environment:` overrides any more: one parameter, one owner.
     env_file:
-      # .env（入库）= Docker 形态配置；.env.local（本机私产，gitignore）= 本地形态 + 密钥
-      # ——容器运行也需要密钥，故两个都注入（compose 多 env_file，后者补充/覆盖前者）
       - ./agent-backend/.env
-      - ./agent-backend/.env.local
-    environment:
-      # 签名直链对外基址：MCP 服务（同网络）经此回源下载文件。
-      - PUBLIC_BASE_URL=http://192.168.0.130:82
-      # 登录会话URL
-      - ADMIN_BACKEND_URL=http://admin-backend:3001
     volumes:
-      # 模型配置（必需，缺省启动失败）
       - ./agent-backend/config.yaml:/app/config.yaml:ro
-      # 运行期数据（用户数据、日志、usage.db）bind mount：本地 agent-backend/.opt-agent 实时双向同步
       - ./agent-backend/.opt-agent:/app/.opt-agent
     restart: unless-stopped
     logging: *default-logging
 
-  # ---- 数字人管理平台：管理服务 ----
-  # 2026-09-27：MCP 服务改为**平台内全人工配置**，平台不再读容器编排声明、
-  # 也不再读 Docker 容器状态，故本服务**不再挂载 docker.sock，也不再挂载
-  # docker-compose.yml**（原有的容器状态/日志/启停能力已整体下架）。
   admin-backend:
     build: ./admin-backend
     container_name: optagent-admin-backend
-    # 同 backend：让日志里的 hostname 可读（实例区分靠 instance_id）
     hostname: optagent-admin-backend
-    # 容器形态运行配置 = 入库的 .env（2026-09-20 起与 backend 段同模式）：
-    # compose 启动时注入容器，compose 文件本身不再逐行配置。
-    # 注意：变量插值（${VAR}）用的是**仓库根** .env，与 env_file 注入是两条独立通道。
     env_file:
       - ./admin-backend/.env
     volumes:
-      # 平台设计态（读写；不进镜像；随 admin-backend 源码目录走，与 .opt-agent 布局对称）
       - ./admin-backend/.platform-data:/app/.platform-data
-      # 物化目标：与运行环境共享同一份用户数据目录（FR-001）
       - ./agent-backend/.opt-agent:/app/.opt-agent
-      # 本体市场（只读，2026-10-02；2026-10-03 起两个功能区共用同一挂载点）：
-      #   - SKILL 管理：从 `{场景}/{本体}/skills/{技能}` 导入技能
-      #   - 本体管理：从 `{场景}/{本体}/ontology.yaml` 导入本体
+      # 本体市场（只读）
       - ../optonto/.data/onto_market:/opt/onto_market:ro
     depends_on:
       - backend
     restart: unless-stopped
     logging: *default-logging
-
-  # ---- 容器内测试已移除（宪章 2.0.0）----
-  # 宪章原则三：测试环境＝仅本地（宿主机）；容器 MUST NOT 承担任何测试职责。
-  # 故原 `backend-test` / `ocr-test` 两个 test profile 及其 `Dockerfile.test` 已删除。
-  # 等价命令（MUST 在宿主机本地执行）：
-  #   agent-backend : cd agent-backend && npm run test:all && npm run test:coverage
-  #   admin-backend : cd admin-backend && npm run test && npm run test:coverage
-  #   ocr-service   : cd ocr-service && pip install -r requirements-test.txt && python -m pytest -q tests
-  # MUST NOT 重新引入容器测试 profile（见宪章「治理 § 修订程序」）。

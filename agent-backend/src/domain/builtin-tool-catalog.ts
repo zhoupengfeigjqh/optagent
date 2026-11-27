@@ -1,30 +1,9 @@
-/**
- * 内置工具目录（`plan.md` R1，`contracts/runtime-api-delta.md` §1）。
- *
- * 改造前的两处问题：
- * 1. 工具元数据**内联在 `builtin-tools.ts` 的 `if (on(...))` 分支里**——
- *    清单是隐式的（靠分支存在与否表达），**无可枚举目录**；
- * 2. 说明文案是**运行期字符串拼接**，模板不可读，平台无法只读投影
- *    （`FR-011`、`FR-012`）。
- *
- * 本模块把元数据抽为**纯数据目录**（无副作用、可单测），并承担**单一来源**：
- * `infra/builtin-tools.ts` 消费它装配 `AgentTool`，`domain/agent-instance.ts`
- * 的 `BUILTIN_TOOL_NAMES` 也从它派生——消除两处重复。
- *
- * **不变式**（由 `tests/unit/builtin-tool-catalog.spec.ts` 守住）：
- * 用现状的运行期取值渲染本目录后，结果 MUST 与改造前 `buildBuiltinTools`
- * 产出的 `description` 与 `parameters` **逐字相等**。改造**只改变元数据的组织方式，
- * 不改变任何对模型可见的文本**。
- */
 
 export interface BuiltinToolCatalogEntry {
   name: string;
   label: string;
-  /** 含占位符的用途说明模板（`FR-012`） */
   description_template: string;
-  /** JSON Schema 形态的入参说明（字符串中同样可含占位符） */
   parameters: Record<string, unknown>;
-  /** 是否具备写能力（`FR-011`） */
   writable: boolean;
 }
 
@@ -43,16 +22,6 @@ export interface TemplateValues {
   临时空间: string;
 }
 
-/**
- * 内置工具目录。
- *
- * 前 5 项与改造前等价（顺序不变）；`read_skill` 为 **2026-09-23 新增**——
- * 此前 SKILL 只有"frontmatter 摘要进 System Prompt"这一条通道，正文与 `references/`
- * 附件没有任何读取入口（技能在 `agents/{agent}/skills/`，不在 `FileAccess` 的空间沙箱内）。
- *
- * `grep_skill` 为 **2026-10-17 新增**——`read_skill` 只解决"读得到"，技能内容的
- * **检索**仍无入口（`grep_files` 只覆盖用户文件空间），技能一多就只能逐个文件人工翻。
- */
 export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
   {
     name: 'read_file',
@@ -66,7 +35,6 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
       type: 'object',
       required: ['path'],
       properties: {
-        // title = 弹窗里的字段短标签（前端 `labelHintOf` 优先取它）；description 仍进「?」气泡全文
         path: { type: 'string', title: '文件路径', description: '相对路径，如 "{示例路径}"' },
         offset: { type: 'number', title: '起始偏移', description: '字节偏移（续读截断内容时用）' },
         limit: { type: 'number', title: '读取字节数', description: '本次最多返回字节数' },
@@ -197,7 +165,6 @@ export const BUILTIN_TOOL_CATALOG: readonly BuiltinToolCatalogEntry[] = [
   },
 ];
 
-/** 可枚举的内置工具目录（`FR-011` 的唯一来源） */
 export function listBuiltinTools(): BuiltinToolCatalogEntry[] {
   return BUILTIN_TOOL_CATALOG.map((entry) => ({
     ...entry,
@@ -205,12 +172,10 @@ export function listBuiltinTools(): BuiltinToolCatalogEntry[] {
   }));
 }
 
-/** 按名称查找（不存在返回 `undefined`） */
 export function findBuiltinTool(name: string): BuiltinToolCatalogEntry | undefined {
   return BUILTIN_TOOL_CATALOG.find((entry) => entry.name === name);
 }
 
-/** 派生全部工具名（供 `agent-instance.ts` 的 `BUILTIN_TOOL_NAMES` 使用，消除重复来源） */
 export function builtinToolNames(): string[] {
   return BUILTIN_TOOL_CATALOG.map((entry) => entry.name);
 }
@@ -228,7 +193,6 @@ export function renderTemplate(template: string, values: Partial<TemplateValues>
   });
 }
 
-/** 递归渲染对象/数组中的所有字符串（`parameters` 内的说明同样含占位符） */
 export function renderDeep<T>(value: T, values: Partial<TemplateValues>): T {
   if (typeof value === 'string') {
     return renderTemplate(value, values) as unknown as T;

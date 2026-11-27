@@ -1,14 +1,3 @@
-/**
- * 单元测试：关联概念取数（2026-11-20，FR-066 / FR-067）。
- *
- * 覆盖的全是"取错了会悄悄污染提示"的分支：
- * - 只认 `op_type: query`（command 是写操作，不能当取数）；
- * - 一个概念下有多个 query 行为时全取，不能只取第一条；
- * - 已被行为直接命中的不再重复（以直接命中为准）；
- * - 多函数共享概念只出一次；
- * - 只认同本体（跨本体同名概念不串）；
- * - 悬空概念给空结果，不抛错。
- */
 import { describe, expect, it } from 'vitest';
 import { resolveConceptQueries } from '../../src/domain/intent-focus/concept-queries.js';
 import type {

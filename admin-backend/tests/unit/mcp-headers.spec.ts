@@ -1,15 +1,3 @@
-/**
- * 单元测试：MCP 请求头（2026-10-08）
- *
- * 守住四件事：
- * 1. **保存期归一**：缺省 = 沿用存量（保存调用配置 MUST NOT 顺手清空令牌）、
- *    提供 = 全量替换（`{}` 即清空）；
- * 2. **逐项判据**：头名合法、大小写不敏感下不重复、值为单行非空字符串、
- *    头名与值两端空白一律 trim；
- * 3. **掩码不可提交**：把界面回显的 `6UuE…F3Z` / `••••` 原样写回即 400——
- *    那会把令牌静默换成掩码，现象上只是一串 401（几乎无法自查）；
- * 4. **回显只给掩码**：`maskHeaders` 的产物里 MUST NOT 出现明文。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
@@ -21,7 +9,6 @@ import {
 
 const TOKEN = '6UuE8_4nY683gZ13rNQbHDCfxgMgEF3Z';
 
-/** 捕获抛出的错误（断言错误码与文案用） */
 function caught(fn: () => unknown): unknown {
   try {
     fn();

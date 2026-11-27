@@ -1,16 +1,3 @@
-/**
- * SOUL 设计态字段的**拒绝式读取器**（013 收尾时从 `soul-design.ts` 外移）。
- *
- * 为什么单独成文件：这些函数是「管理员填什么就存什么，填错就当场拒绝」的统一口径，
- * 与 SOUL 的**渲染**（`renderSoulMd`）和**归一化编排**（`normalizeSoulDesign`）是两件事。
- * 放在一起会让 `soul-design.ts` 顶到 510 行（超宪章 500 行门禁），也让
- * "一个字段怎么校验"需要在 500 行里翻找。
- *
- * 共同约定（与 007 / 013 的开关字段一脉相承）：
- * - **只对键缺失落缺省**：`undefined` 是"老文档没有这个键"，`null` 是"显式给了个空值"，后者一律拒绝；
- * - 不做隐式转换（`"3"` 不是 `3`、`"true"` 不是 `true`）、不做 round / clamp；
- * - 报错一律 `VALIDATION_FAILED`，文案带**字段名 + 合法区间 + 当前值**，管理员能照着改。
- */
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import { SOUL_LIMITS } from './soul-limits.js';
@@ -25,15 +12,6 @@ export function readRequiredText(raw: unknown, label: string, max: number): stri
   return text;
 }
 
-/**
- * 布尔字段（007 / 013 的开关）。
- *
- * 三态口径与其它字段一致（**拒绝式校验**）：
- * - 键**缺失**（`undefined`）→ 缺省 `false`：老表单 / 存量文档不带这个键，照常保存；
- * - `true` / `false` → 原样；
- * - 其余（字符串 `"true"`、数字 `1`、`null`…）→ **拒绝**，不做隐式转换——
- *   `"false"` 这类值一旦被当成真值，界面显示关闭而运行环境已开启，属于最难排查的错配。
- */
 export function readBool(raw: unknown, label: string): boolean {
   if (raw === undefined) return false;
   if (typeof raw !== 'boolean') {
@@ -45,16 +23,8 @@ export function readBool(raw: unknown, label: string): boolean {
   return raw;
 }
 
-/**
- * 提示条数（007）：正整数，1~`SOUL_LIMITS.nextActionHintsMax`，缺省 `SOUL_LIMITS.nextActionHintsDefault`。
- *
- * **拒绝式**，不做自动纠正（不四舍五入、不 clamp、不把 `"3"` 当 `3`）：
- * 管理员填错时应当立刻看到"保存被拒"，而不是存下一个与界面显示不一致的数字——
- * 这个数字直接决定后台生成几条提示、以及多花多少 token，静默改写属于最难的错配。
- */
 export function readPositiveInt(raw: unknown): number {
   const { nextActionHintsMin: min, nextActionHintsMax: max, nextActionHintsDefault: fallback } = SOUL_LIMITS;
-  // **只有键缺失**才落缺省（与 `readBool` 的口径一致）；`null` 按非法拒绝
   if (raw === undefined) return fallback;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
     throw new ApiError(
@@ -65,12 +35,6 @@ export function readPositiveInt(raw: unknown): number {
   return raw;
 }
 
-/**
- * 聚焦阶数（019）：`0~SOUL_LIMITS.focusDepthMax` 的整数，缺省 `0`。
- *
- * **拒绝式**（与 `readPositiveInt` 同口径）：`null` / 小数 / 越界 / 非数字一律拒绝，
- * 不做 round / clamp——阶数直接决定"发散几跳"，静默改写会让管理员看到的与运行的不一致。
- */
 export function readFocusDepth(raw: unknown): number {
   const { focusDepthMin: min, focusDepthMax: max, focusDepthDefault: fallback } = SOUL_LIMITS;
   if (raw === undefined) return fallback;
@@ -83,7 +47,6 @@ export function readFocusDepth(raw: unknown): number {
   return raw;
 }
 
-/** 可选文本：缺省 / `null` → `''`；非字符串拒绝；超长拒绝 */
 export function readOptionalText(raw: unknown, label: string, max: number): string {
   if (raw === undefined || raw === null) return '';
   if (typeof raw !== 'string') {

@@ -1,13 +1,3 @@
-/**
- * 单元测试：一阶发散（019）。
- *
- * 守住四件事：
- * 1. **方向判定唯一实现**：`Functional` 单独 → 反向（target 是上游）；其余（1:N / 1:1 / M:N）
- *    → 箭头方向（source 是上游）；信号缺失时依次退回 `cardinality` → 箭头；
- * 2. **同向 BFS**：只走一个方向，`hop` 正确，`visited` 去环，同跳按 `concepts[]` 原序；
- * 3. **direct 优先**：直接命中的行为不会以发散身份重复出现，直接命中的概念也不会再当发散概念；
- * 4. **行为有界、概念无界**：超限只截断行为并标 `truncated`。
- */
 import { describe, expect, it } from 'vitest';
 import {
   MAX_EXPANDED_BEHAVIORS,
@@ -21,7 +11,6 @@ function behavior(name: string, title: string, concept: string | null): Ontology
   return { name, title, description: '', opType: 'query', concept };
 }
 
-/** 与仓内真实 `ontology.yaml` 同形的 6 概念 / 5 关系 / 8 行为 */
 function ontology(overrides: Partial<OntologyDefinition> = {}): OntologyDefinition {
   return {
     filePath: 'ontology/生产调度/原材料采购和库存/ontology.yaml',
@@ -199,7 +188,6 @@ describe('expandNeighborhood', () => {
     expect(result.upstream.behaviors.map((item) => item.name)).toEqual(['QueryRawMaterials']);
     expect(result.upstream.behaviors[0]).toMatchObject({
       hop: 1,
-      // 所属概念 = 这一跳的终点（原材料）；起点是出发的库存
       concept: 'RawMaterial',
       viaConcept: 'RawMaterial',
       fromConcept: 'RawMaterialInventory',
@@ -214,6 +202,46 @@ describe('expandNeighborhood', () => {
     expect(result.downstream.behaviors).toEqual([]);
   });
 
+  it('多起点共享同一上游概念：入边全留，不只第一条（2026-11-26 修丢边）', () => {
+    const result = expandNeighborhood({
+      behaviors: [
+        { ontologyId: '1', name: 'QueryPurchaseRecords', concept: 'PurchaseRecord' },
+        { ontologyId: '1', name: 'QueryInventory', concept: 'RawMaterialInventory' },
+      ],
+      ontologies: [ontology()],
+      depth: 1,
+    });
+
+    const raw = result.upstream.concepts.find((item) => item.name === 'RawMaterial')!;
+    expect(raw.edges.map((edge) => `${edge.from}:${edge.relation}`)).toEqual([
+      'PurchaseRecord:RecordsRawMaterial',
+      'RawMaterialInventory:HasRawInventory',
+    ]);
+    expect(raw.viaConcept).toBe('PurchaseRecord');
+    expect(raw.viaRelation).toBe('RecordsRawMaterial');
+    expect(result.upstream.concepts.filter((item) => item.name === 'RawMaterial')).toHaveLength(1);
+    expect(
+      result.upstream.behaviors.filter((item) => item.concept === 'RawMaterial').map((item) => item.name),
+    ).toEqual(['QueryRawMaterials']);
+  });
+
+  it('命中概念之间的边进 directEdges，概念清单不重复（2026-11-26 修丢边）', () => {
+    const result = expandNeighborhood({
+      behaviors: [
+        { ontologyId: '1', name: 'QueryInventory', concept: 'RawMaterialInventory' },
+        { ontologyId: '1', name: 'QueryRawMaterials', concept: 'RawMaterial' },
+      ],
+      ontologies: [ontology()],
+      depth: 1,
+    });
+
+    // （它们已在「关键行为」里），但这条边必须留着，否则 QueryInventory 没有任何上下游可写
+    expect(result.upstream.concepts).toEqual([]);
+    expect(result.upstream.directEdges).toEqual([
+      { ontologyId: '1', from: 'RawMaterialInventory', relation: 'HasRawInventory', to: 'RawMaterial', hop: 1 },
+    ]);
+  });
+
   it('下游一阶：原材料 → 库存 + 采购记录（明细），上游为空', () => {
     const result = expandNeighborhood({
       behaviors: [{ ontologyId: '1', name: 'QueryRawMaterials', concept: 'RawMaterial' }],
@@ -222,7 +250,6 @@ describe('expandNeighborhood', () => {
     });
 
     expect(result.upstream.concepts).toEqual([]);
-    // 同跳按 concepts[] 原序：采购记录在库存之前
     expect(result.downstream.concepts.map((item) => item.name)).toEqual([
       'PurchaseRecord',
       'RawMaterialInventory',
@@ -238,7 +265,6 @@ describe('expandNeighborhood', () => {
       hop: 1,
       viaConcept: 'PurchaseRecord',
       concept: 'PurchaseRecord',
-      // 2026-11-13：起点概念 = 发散的那个概念（下游多源汇聚时靠它分辨来路）
       fromConcept: 'RawMaterial',
     });
   });
@@ -252,7 +278,6 @@ describe('expandNeighborhood', () => {
       ontologies: [ontology()],
       depth: 1,
     });
-    // 原材料的下游里，库存已是 direct 概念 → 不再作为发散概念；其行为也不再重复
     expect(result.downstream.concepts.map((item) => item.name)).toEqual(['PurchaseRecord']);
     expect(result.downstream.behaviors.map((item) => item.name)).not.toContain('QueryInventory');
     expect(result.downstream.behaviors.map((item) => item.name)).not.toContain('QueryRawMaterials');

@@ -53,7 +53,6 @@ describe('PlatformStore', () => {
 
   it('并发写拒绝：版本不符抛 ADM_CONFIG_REVISION_CONFLICT', () => {
     const current = store.revision();
-    // 第一个写者先提交，版本前移
     store.withRevision(current, () => store.writeJson('agents/a.json', { name: 'a' }));
     // 第二个写者仍持旧版本 → 必须被拒绝（而不是覆盖别人的修改）
     let caught: unknown;
@@ -65,7 +64,6 @@ describe('PlatformStore', () => {
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_CONFIG_REVISION_CONFLICT);
     expect((caught as ApiError).statusCode).toBe(409);
-    // 拒绝后内容未被改写
     expect(store.readJson<{ name: string }>('agents/a.json')?.name).toBe('a');
   });
 
@@ -112,9 +110,6 @@ describe('PlatformStore', () => {
 
     it('删除后目标仍在 → 抛 ADM_STORAGE_UNAVAILABLE（把静默失败变可读错误）', () => {
       store.writeJson('agents/a.json', { name: 'a' });
-      // 用桩模拟"底层删除不抛错、但也没删掉"的情形（修复前 `fs.rmSync` 对本宿主的中文
-      // 路径即如此；2026-10-09 起删除改走 `removeTree` 的 `unlinkSync`，故打桩该调用）。
-      // 直接打桩比依赖宿主怪癖更确定，也不会在各平台上给出不同结论
       const spy = vi.spyOn(fs, 'unlinkSync').mockImplementation(() => undefined);
       try {
         let caught: unknown;
@@ -125,7 +120,6 @@ describe('PlatformStore', () => {
         }
         expect((caught as ApiError).code).toBe(ERROR_CODES.ADM_STORAGE_UNAVAILABLE);
         expect((caught as ApiError).message).toContain('目标仍存在');
-        // 失败是"看得见的"：错误里带可操作指引
         expect((caught as ApiError).message).toContain('手工删除');
         expect((caught as ApiError).statusCode).toBe(503);
       } finally {
@@ -145,7 +139,6 @@ describe('PlatformStore', () => {
     const missingRoot = path.join(root, 'nested', 'deep');
     const s = new PlatformStore(missingRoot);
     expect(s.isWritable()).toBe(true);
-    // 把父目录变成文件，使 mkdir 必然失败
     fs.writeFileSync(path.join(root, 'blocked'), 'x', 'utf8');
     const blocked = new PlatformStore(path.join(root, 'blocked', 'sub'));
     expect(blocked.isWritable()).toBe(false);

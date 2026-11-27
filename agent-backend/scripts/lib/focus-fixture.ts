@@ -1,11 +1,3 @@
-/**
- * 意图聚焦实验脚本的公共装配：config + Laya 客户端 + 技能/本体加载。
- *
- * `intent-focus-experiment.ts` / `capability-experiment.ts`
- * 两个脚本之前各自重复这段 bootstrap（`loadConfig` → `new LayaClient` → `agentDir` →
- * `loadSkillHeaders` → `loadOntologyIndex` → `buildSkillCandidates`），抽到这里避免改一处漏两处。
- * （原 `laya-stability.ts` 已于 2026-11-08 并入 `intent-focus-experiment.ts --runs N`。）
- */
 import path from 'node:path';
 import { loadConfig, type IntentFocusConfig } from '../../src/config.js';
 import { agentDir } from '../../src/domain/dirs.js';
@@ -22,25 +14,21 @@ const ROOT = path.resolve(process.cwd(), '.opt-agent');
 const USER = 'admin';
 const AGENT = '生产调度测试';
 
-/** 实验脚本共用的运行环境（三个脚本都要 config + client + 数据目录） */
 export interface FocusEnv {
   root: string;
   user: string;
   agent: string;
   config: IntentFocusConfig;
   client: LayaClient;
-  /** `users/{user}/agents/{agent}` 目录 */
   dir: string;
 }
 
-/** `FocusEnv` + 已加载的技能头部 / 本体索引 / 可聚焦技能候选 */
 export interface FocusFixture extends FocusEnv {
   headers: SkillHeaderLoadResult;
   index: OntologyIndex;
   skillResult: SkillCandidateResult;
 }
 
-/** 装配 config + Laya 客户端 + 数据目录 */
 export function loadFocusEnv(): FocusEnv {
   const config = loadConfig({
     env: process.env,
@@ -65,7 +53,6 @@ export function loadFocusEnv(): FocusEnv {
   };
 }
 
-/** 在 `loadFocusEnv` 基础上继续加载技能头部 + 本体索引 + 可聚焦技能候选 */
 export function loadFocusFixture(env: FocusEnv): FocusFixture {
   const headers = loadSkillHeaders(env.dir);
   const index = loadOntologyIndex(env.dir);

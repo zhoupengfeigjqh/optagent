@@ -1,15 +1,3 @@
-/**
- * SSE 流式请求（POST + `fetch` + `ReadableStream`）
- *
- * 后端 `POST /api/threads/{id}/messages` 以 `text/event-stream` 返回并保持连接，
- * 在 `done` / `error` 后 `end()`（`contracts/backend-api.md` §4.1）。
- *
- * 断连语义（§4.2）：客户端断开时服务端仅退订事件流，**本轮继续执行并落盘**；
- * 因此前端**不自动重连、不续推**，读取异常直接抛给上层标记为 `failed` 并提供"重新获取"。
- *
- * 保活（运行时契约 §24，2026-11-06）：服务端建连即写 `: connected`，此后每 15s 写 `: ping`。
- * 两者都是 SSE **注释行**，`parseSseChunk` 按规范跳过（不产生事件）——这里的读取逻辑无需特殊处理。
- */
 
 import { parseSseChunk } from '../utils/sse-parser'
 import {
@@ -21,11 +9,8 @@ import {
 } from './http'
 import type { RawSseEvent } from './types'
 
-/** 流式请求参数。 */
 export interface SseRequestOptions {
-  /** 请求路径（含 `/api` 前缀） */
   path: string
-  /** 请求体（JSON 序列化） */
   body?: unknown
   baseUrl?: string
   fetchImpl?: typeof fetch
@@ -33,13 +18,10 @@ export interface SseRequestOptions {
   query?: Record<string, QueryValue>
 }
 
-/** 事件回调集合。 */
 export interface SseHandlers {
-  /** 每解析出一个完整事件即回调（顺序与到达顺序一致） */
   onEvent: (event: RawSseEvent) => void
 }
 
-/** 判断错误是否为"调用方主动中止"（`AbortController.abort()`）。 */
 export function isAbortError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -49,11 +31,6 @@ export function isAbortError(error: unknown): boolean {
   )
 }
 
-/**
- * 发起 SSE 流式 POST 请求，逐事件回调，直至流自然结束或抛出异常。
- *
- * @throws ApiError 非 2xx（携带后端错误码）或读取过程中的网络异常
- */
 export async function postSseStream(
   options: SseRequestOptions,
   handlers: SseHandlers,
@@ -111,7 +88,6 @@ export async function postSseStream(
   let buffer = ''
   let aborted = false
 
-  // 主动中止时立即取消读取：真实 `fetch` 会自行中止，但显式 `cancel()` 可保证
   // 任何 `fetch` 实现下挂起的 `read()` 都能及时收敛，避免读取循环永久阻塞。
   const onAbort = (): void => {
     aborted = true
@@ -138,12 +114,10 @@ export async function postSseStream(
       }
     }
 
-    // 被调用方主动中止：抛 AbortError 交由上层标记为 aborted
     if (aborted) {
       throw createAbortError()
     }
 
-    // 流结束：处理尾部残留（正常情况为空，后端以空行收尾）
     const tail = parseSseChunk(buffer, '')
     for (const event of tail.events) {
       handlers.onEvent(event)
@@ -154,7 +128,6 @@ export async function postSseStream(
   }
 }
 
-/** 构造与 `AbortController.abort()` 语义一致的错误（供 `isAbortError` 识别）。 */
 function createAbortError(): Error {
   const error = new Error('流式请求已中止')
   error.name = 'AbortError'

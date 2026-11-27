@@ -1,13 +1,3 @@
-/**
- * 单测：产出正文的视图链接（`TR-41` / `TR-42`）。
- *
- * 两条不变式 MUST 断言（它们各自对应一个真实事故形态）：
- * 1. **已带前缀的值绝不被拼接**——否则会拼出 `http://本机/http://别处/…`；
- * 2. **无前缀拼出的 host 恰为注入的 origin**——用注入 origin，不依赖 jsdom 的真实 `location`。
- *
- * 拒绝形态一律返回 `null`（调用方按普通文本渲染）：`//host/…` 会被 `new URL` 换掉 host，
- * 无前导 `/` 的会相对当前路径解析，其它 scheme 是注入面。
- */
 import { describe, expect, it } from 'vitest'
 
 import {

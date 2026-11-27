@@ -1,19 +1,6 @@
-/**
- * 运行环境只读投影客户端（`plan.md` R2 / R4）。
- *
- * 平台是**独立服务**，因此内置工具目录（`FR-011`）与 MCP 调用统计（`FR-049`）
- * 必须经运行环境的两个**只读**端点获取——平台 MUST NOT 硬编码一份副本
- * （`FR-011`、`FR-012`、`SC-013`、`SC-014`），也 MUST NOT 反向写入。
- *
- * 这是 `FR-005`／`SC-017`「严格单向」的**例外说明**：约束的是**配置数据流**，
- * 运行观测的**只读采集**不在其列（`spec.md` 补充 18 / `runtime-api-delta.md` §4.4）。
- *
- * 用全局 `fetch`（Node 20+ 内置），零新增依赖。
- */
 import { ApiError } from '../domain/api-error.js';
 import { ERROR_CODES } from '../domain/error-codes.js';
 
-/** `GET /api/builtin-tools` 的一项（契约 `runtime-api-delta.md` §2） */
 export interface BuiltinToolProjection {
   name: string;
   label: string;
@@ -23,7 +10,6 @@ export interface BuiltinToolProjection {
   writable: boolean;
 }
 
-/** `GET /api/mcp-call-stats` 的服务级汇总项（平台卡片用：最近一年调用次数） */
 export interface McpCallStatItem {
   name: string;
   calls_total: number;
@@ -32,12 +18,6 @@ export interface McpCallStatItem {
   last_called_at: string | null;
 }
 
-/**
- * 按「**服务 × 工具 × 用户**」分组的统计行（2026-09-23，平台统计表的一行）。
- *
- * `tool_name` 是 MCP 服务自己的工具名（不含 `{server}__` 前缀）；
- * `tool_name` / `user_id` 为 `null` 表示升级前的历史事件未记录该维度。
- */
 export interface McpCallGroupItem {
   service: string;
   tool_name: string | null;
@@ -46,7 +26,6 @@ export interface McpCallGroupItem {
   calls_ok: number;
   calls_failed: number;
   last_called_at: string | null;
-  /** 时间窗聚合（24h/7天/30天/1年），由运行环境的事件明细聚合得出 */
   windows?: Record<string, { ok: number; failed: number; total: number }>;
 }
 

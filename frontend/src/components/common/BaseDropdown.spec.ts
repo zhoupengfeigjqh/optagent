@@ -1,14 +1,3 @@
-/**
- * 组件测试：下拉菜单弹层（`src/components/common/BaseDropdown.vue`）
- *
- * 2026-10-13 改为**视口安全浮窗**后新增本文件（按宪章原则三"随改动触达即补"）：
- * - 菜单坐标由脚本按**视口**写入内联 `left`/`top`，并标记 `data-side`；
- * - 下方放不下 ⇒ 翻到触发器**上方**（底部工具栏的模型选择不会弹到屏幕外）；
- * - 水平越界 ⇒ 夹取进视口（左右永不溢出）；
- * - 既有交互（外部点击关闭、Esc 关闭、方向键移动高亮）一并钉住。
- *
- * jsdom 不做布局（`getBoundingClientRect` 恒为 0），故用 stub 给出矩形与偏移尺寸。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -21,7 +10,6 @@ const ITEMS = [
 
 type El = HTMLElement & { offsetWidth: number; offsetHeight: number }
 
-/** 固定元素矩形（视口坐标系）。 */
 function stubRect(el: Element, box: { left: number; top: number; width: number; height: number }) {
   const { left, top, width, height } = box
   el.getBoundingClientRect = () =>
@@ -44,7 +32,6 @@ function stubSize(el: Element, width: number, height: number) {
   Object.defineProperty(el, 'offsetHeight', { value: height, configurable: true })
 }
 
-/** 等两帧：`schedule()` 走 rAF，滚动/改尺寸后的重算需要让帧回调跑完。 */
 async function flushFrames(wrapper: ReturnType<typeof mount>): Promise<void> {
   const raf = (): Promise<void> =>
     new Promise((resolve) => {
@@ -70,7 +57,6 @@ describe('BaseDropdown —— 弹层定位（视口安全浮窗，2026-10-13）'
     await wrapper.vm.$nextTick()
 
     const menu = wrapper.find('.base-dropdown__menu')
-    // jsdom 下菜单尺寸为 0 ⇒ 下方一定放得下
     expect(menu.attributes('data-side')).toBe('below')
     expect((menu.element as El).style.left).toBe('100px')
     expect((menu.element as El).style.top).toBe('234px')
@@ -85,7 +71,6 @@ describe('BaseDropdown —— 弹层定位（视口安全浮窗，2026-10-13）'
     await wrapper.setProps({ open: true })
     await wrapper.vm.$nextTick()
 
-    // 菜单真实高度只能在挂载后测到 ⇒ 补齐尺寸再触发一次重算
     const menu = wrapper.find('.base-dropdown__menu')
     stubSize(menu.element, 220, 240)
     window.dispatchEvent(new Event('resize'))
@@ -99,7 +84,6 @@ describe('BaseDropdown —— 弹层定位（视口安全浮窗，2026-10-13）'
   it('触发器贴近右缘 ⇒ 菜单左移夹取，右边缘不越出视口', async () => {
     const wrapper = mountClosed()
     const trigger = wrapper.find('.base-dropdown__trigger')
-    // jsdom 视口宽 1024：菜单宽 220 ⇒ 最大 left = 1024 - 220 - 8 = 796
     stubRect(trigger.element, { left: 960, top: 100, width: 120, height: 28 })
 
     await wrapper.setProps({ open: true })
@@ -122,7 +106,6 @@ describe('BaseDropdown —— 弹层定位（视口安全浮窗，2026-10-13）'
     await wrapper.setProps({ open: true })
     await wrapper.vm.$nextTick()
 
-    // 触发器被滚动推上去：坐标应随之更新
     stubRect(trigger.element, { left: 60, top: 20, width: 120, height: 28 })
     document.dispatchEvent(new Event('scroll'))
     await flushFrames(wrapper)

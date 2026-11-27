@@ -1,18 +1,3 @@
-/**
- * 工具调用卡片测试（002 特性）
- *
- * 守住用户可感知的行为：
- * 1. **计数与报错数常显**（TR-32）：折叠态就能看出"几次调用、有没有失败"
- * 2. **折叠与明细**（TR-34 / TR-35）：≥2 次时只露最新一条，点摘要行才看全部（时间正序）；
- *    只有 1 次时不设折叠层
- * 3. **可展开性**（TR-33）：只有终态可展开；运行中不可展开且不出现"展开"字样；
- *    `running` 文案按 live 分流（进行中 / 未完成）
- * 4. **结果展示**（TR-15）：记录里的正文展开即见，**不发起任何请求**（2026-11-08 起
- *    卡片不再拉取临时空间副本）；截断时的说明见 `ToolCallList.truncated.spec.ts`
- * 5. **查看态跨"流式 → 历史"交接保持**（TR-36）
- * 6. **结果正文的结构化展示**（2026-10-10）：JSON 结果按结构化渲染（`viewUrl` 成链接）、
- *    非 JSON 仍按原文、超限回落原文并说明原因；「按原始 JSON 查看」逃生舱可用且跨重挂载保持
- */
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -30,7 +15,6 @@ const READ: ToolCallItem = {
   size: 120,
   argsDigest: { path: '数据准备/生产计划/9月计划.xlsx' },
 }
-/** 外置结果 + 失败：用于"报错数"与"结果正文"两类断言 */
 const QUERY: ToolCallItem = {
   callId: 'c2',
   name: 'sql_query',
@@ -49,7 +33,6 @@ function mountList(items: ToolCallItem[], live?: boolean) {
 }
 
 beforeEach(() => {
-  // 查看态是模块级单例（TR-36）：不清空会把上一个用例的展开态带进来
   useToolPanels().reset()
 })
 
@@ -120,7 +103,7 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
 
     const summary = wrapper.find('[data-test="tool-summary"]')
     expect(summary.text()).toContain('最新')
-    expect(summary.text()).toContain('ocr_image') // 最新一条 = 最后到达的那次调用
+    expect(summary.text()).toContain('ocr_image')
     expect(summary.text()).toContain('查看明细')
     expect(wrapper.find('[data-test="tool-details"]').exists()).toBe(false)
   })
@@ -137,7 +120,6 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
       'sql_query',
       'ocr_image',
     ])
-    // 明细里的失败项自带状态文案与耗时（不只靠颜色）
     expect(details.text()).toContain('失败')
     expect(details.text()).toContain('210ms')
   })
@@ -169,7 +151,6 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
 
   it('同一个应用内多个实例的明细区 id 不同（否则 aria-controls 会指错）', () => {
     // 必须挂在**同一个 app** 下才是真实场景（每条消息一个实例）；两次 mount 是两个 app，
-    // 而 `useId()` 的计数是应用级的，那样比不出东西来。
     const host = mount({
       render: () =>
         h('div', [
@@ -190,7 +171,6 @@ describe('ToolCallList —— 折叠与明细（TR-34 / TR-35）', () => {
 
     expect(wrapper.find('[data-test="tool-summary"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="tool-counts"]').text()).toContain('本轮 1 次调用')
-    // 唯一的卡片直接可见（不存在"两层点击"）
     expect(wrapper.find('.tool-call__head').text()).toContain('read_file')
 
     await wrapper.find('.tool-call__head').trigger('click')
@@ -216,7 +196,6 @@ describe('ToolCallList —— 可展开性（TR-33）', () => {
     const streaming = mountList([OCR], true)
     expect(streaming.text()).toContain('进行中')
 
-    // 历史态（非 live）：进程中途退出，只有开始行——不许说成"进行中"
     const history = mountList([OCR])
     expect(history.text()).toContain('未完成')
     expect(history.text()).not.toContain('进行中')
@@ -227,7 +206,7 @@ describe('ToolCallList —— 可展开性（TR-33）', () => {
     await wrapper.find('[data-test="tool-summary"]').trigger('click')
 
     const rows = wrapper.findAll('.tool-call__head')
-    expect(rows[0]?.text()).toContain('展开') // read_file 已完成 → 可展开
+    expect(rows[0]?.text()).toContain('展开')
     expect(rows[1]?.text()).toContain('ocr_image')
     expect(rows[1]?.text()).not.toContain('展开')
     expect(rows[1]?.attributes('disabled')).toBeDefined()
@@ -288,7 +267,6 @@ describe('ToolCallList —— 结果正文', () => {
   })
 })
 
-// 截断说明的文案判定见 `utils/tool-result-hint.spec.ts`，组件接线见 `ToolCallList.truncated.spec.ts`
 
 describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-36）', () => {
   it('展开明细与正文后重挂载（组件实例重建）：仍保持展开与正文', async () => {
@@ -300,7 +278,6 @@ describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-3
     expect(streaming.text()).toContain('连接排产库失败：timeout')
     streaming.unmount()
 
-    // 交接：流式气泡卸载、历史消息挂载 → 全新的组件实例、同一轮数据
     const history = mountList(items)
     expect(history.find('[data-test="tool-details"]').exists()).toBe(true)
     expect(history.text()).toContain('连接排产库失败：timeout')
@@ -308,7 +285,6 @@ describe('ToolCallList —— 查看态跨"流式 → 历史"交接保持（TR-3
 })
 
 describe('ToolCallList —— 结果正文的结构化展示（2026-10-10）', () => {
-  /** 典型结果：JSON 对象 + `viewUrl` / `viewUrlName`（服务给的原值） */
   const JSON_ITEM: ToolCallItem = {
     callId: 'c1',
     name: 'hd__排产结果',
@@ -395,20 +371,12 @@ describe('ToolCallList —— 结果正文的结构化展示（2026-10-10）', (
     await first.find('.tool-call__view-toggle').trigger('click')
     first.unmount()
 
-    // 交接后的新实例：展开态与"原始 JSON"态都在（**不再点一次**——查看态是记忆的）
     const again = mountList([JSON_ITEM])
     expect(again.find('.tool-call__content').exists()).toBe(true)
     expect(again.find('.produced-json').exists()).toBe(false)
   })
 })
 
-/**
- * 流式期「已完成但正文未到」（2026-11-18）
- *
- * 背景：SSE 的 `tool_call_end` 只带 `{call_id, status}`，正文要等轮末落盘后随历史下发。
- * 于是流式期点开一张"已完成"的卡片必然为空 —— 此时说「无结果内容」等于谎报"工具没有结果"。
- * 这一组守住三种分流：流式期 → 说清何时可看；历史态 → 照旧；工具报错 → 照旧。
- */
 describe('ToolCallList —— 流式期无正文的说明（2026-11-18）', () => {
   const DONE_NO_CONTENT: ToolCallItem = { callId: 'c1', name: 'fresh_order_parse', status: 'success' }
 
@@ -451,5 +419,49 @@ describe('ToolCallList —— 流式期无正文的说明（2026-11-18）', () =
     expect(body).toContain('车间,计划量')
     expect(body).not.toContain('结果将在本轮结束后可查看')
     expect(body).not.toContain('无结果内容')
+  })
+})
+
+/**
+ * 028 T805：多工具批次的渲染回归。
+ *
+ * 2026-11-25 起全局工具批次改为**串行**（`toolExecution: 'sequential'`），同一批的
+ * 事件由"start×N 后 end×N"变成"start/end 交替"。卡片侧不能假设同批只有一个在跑，
+ * 也不能因交错而打乱顺序——这里按串行到达的真实形态喂三项。
+ */
+describe('ToolCallList —— 多工具批次（028 T805）', () => {
+  it('串行到达的三项：顺序、终态与计数都按到达顺序', async () => {
+    const items: ToolCallItem[] = [
+      { callId: 's1', name: 'erp__checkStock', status: 'success', durationMs: 20 },
+      { callId: 's2', name: 'erp__CreatePurchaseRecord', status: 'success', durationMs: 40 },
+      { callId: 's3', name: 'erp__SubmitPurchase', status: 'running' },
+    ]
+    const wrapper = mountList(items, true)
+
+    expect(wrapper.find('[data-test="tool-counts"]').text()).toContain('本轮 3 次调用')
+    expect(wrapper.find('[data-test="tool-summary"]').text()).toContain('进行中')
+
+    await wrapper.find('[data-test="tool-summary"]').trigger('click')
+    const names = wrapper
+      .findAll('[data-test="tool-details"] .tool-call__name')
+      .map((node) => node.text())
+    expect(names).toHaveLength(3)
+    expect(names[0]).toBe('erp__checkStock')
+    expect(names[2]).toBe('erp__SubmitPurchase')
+  })
+
+  it('串行批次里有失败：报错数只算失败那条，不影响其它项展示', () => {
+    const wrapper = mountList(
+      [
+        { callId: 's1', name: 'erp__checkStock', status: 'success' },
+        { callId: 's2', name: 'erp__CreatePurchaseRecord', status: 'error', summary: '库存不足' },
+        { callId: 's3', name: 'erp__SubmitPurchase', status: 'success' },
+      ],
+      true,
+    )
+
+    const counts = wrapper.find('[data-test="tool-counts"]').text()
+    expect(counts).toContain('本轮 3 次调用')
+    expect(counts).toContain('报错 1 次')
   })
 })

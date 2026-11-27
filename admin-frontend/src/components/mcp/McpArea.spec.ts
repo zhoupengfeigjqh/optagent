@@ -1,11 +1,3 @@
-/**
- * 组件测试：MCP 服务功能区（2026-09-27「新建改弹窗 + 创建后自动测试」）
- *
- * 守住的口径：
- * 1. 「新建 MCP 服务」**开弹窗**，不直接导航（导航发生在创建成功之后）；
- * 2. 创建成功 → 导航到该服务详情，并在详情就绪后**自动测试一次**；
- * 3. 自动测试只对"刚创建的那条"生效：普通打开已有服务不测，离开详情即放弃该意图。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpArea from './McpArea.vue'
@@ -55,10 +47,8 @@ const DETAIL: McpServiceDetail = {
   command: null,
   args: null,
   file_args: {},
-  // 工具白名单（2026-10-03）：详情只呈现白名单里的工具
   allowed_tools: ['ocr_image'],
   missing_tools: [],
-  // 请求头（2026-10-08）：详情回显的只有掩码；本用例不关心其内容
   headers: {},
   tools: [],
   tools_truncated: false,
@@ -73,7 +63,6 @@ function mountArea(detail: string | null = null) {
   return mount(McpArea, { props: { detail, tab: null } })
 }
 
-/** 走完一次「开弹窗 → 填基础字段 → 探测 → 勾选一个工具 → 创建」（两步流程） */
 async function createService(wrapper: ReturnType<typeof mountArea>): Promise<void> {
   await wrapper.find('.mcp-card-list__toolbar button').trigger('click')
   await flushPromises()
@@ -98,7 +87,6 @@ beforeEach(() => {
     return Promise.reject(new Error(`unexpected path: ${path}`))
   })
   createMcpService.mockReset().mockResolvedValue({ name: 'new-mcp', revision: 2 })
-  // 新建第一步的探测（2026-10-03）：返回一个可选工具，供勾选后创建
   probeMcpTarget.mockReset().mockResolvedValue({
     ok: true,
     tools: [{ name: 'ocr_image', description: '识别图片', parameters: {} }],
@@ -141,7 +129,6 @@ describe('McpArea —— 创建后的导航与自动测试', () => {
     ])
     expect(testMcpService).not.toHaveBeenCalled()
 
-    // 路由跟随（父级把 detail 切到新服务）→ 详情加载完成后自动测一次
     await wrapper.setProps({ detail: 'new-mcp' })
     await flushPromises()
 
@@ -151,7 +138,6 @@ describe('McpArea —— 创建后的导航与自动测试', () => {
       url: 'http://192.168.1.2:9000/mcp',
     })
 
-    // 离开详情再回来：一次性意图已消费，不再自动测
     await wrapper.setProps({ detail: null })
     await flushPromises()
     await wrapper.setProps({ detail: 'new-mcp' })
@@ -164,7 +150,6 @@ describe('McpArea —— 创建后的导航与自动测试', () => {
     await flushPromises()
 
     expect(testMcpService).not.toHaveBeenCalled()
-    // 服务名是详情页标题（确认详情确实渲染了）
     expect(wrapper.text()).toContain('ocr')
   })
 })
@@ -189,7 +174,6 @@ describe('McpArea —— 立即反馈（方案 B，2026-09-28）', () => {
     await wrapper.setProps({ detail: 'ocr' })
     await flushPromises()
 
-    // 请求仍挂起，但界面**已经**在详情页：标题可读 + 明示在等什么
     expect(wrapper.find('.mcp-detail').exists()).toBe(true)
     expect(wrapper.find('#mcp-detail-title').text()).toBe('ocr')
     expect(wrapper.text()).toContain('正在读取调用配置与工具清单')
@@ -236,18 +220,10 @@ describe('McpArea —— 工具范围调整（2026-10-15：「重新探测」成
     revision: 4,
   }
 
-  /** 详情接口被请求了几次（"保存不再重载详情"的断言用） */
   function detailCalls(): number {
     return httpGet.mock.calls.filter(([path]) => path === '/api/admin/mcp/services/ocr').length
   }
 
-  /**
-   * 弹窗实例。
-   *
-   * 后面所有交互都在它内部找元素：`data-test="save"` / `"tool"` 在**详情页头**
-   * （保存调用配置）与调用配置表单里也存在，用 `wrapper.find` 会命中错的按钮
-   * ——那会让用例看起来"点了保存"，实际改的是调用配置。
-   */
   function scopeDialog(wrapper: ReturnType<typeof mountArea>) {
     return wrapper.findComponent(McpToolScopeDialog)
   }
@@ -259,7 +235,6 @@ describe('McpArea —— 工具范围调整（2026-10-15：「重新探测」成
   }
 
   async function reprobe(wrapper: ReturnType<typeof mountArea>): Promise<void> {
-    // 「工具清单」页签是 `v-show` 常驻，无需先切页签
     await wrapper.find('[data-test="reprobe"]').trigger('click')
     await flushPromises()
   }
@@ -314,7 +289,6 @@ describe('McpArea —— 工具范围调整（2026-10-15：「重新探测」成
     await reprobe(wrapper)
 
     // 必须限定在工具范围弹窗里点：`data-test="cancel"` 在删除确认窗（`ConfirmDialog`）里也有，
-    // 全局 `find` 会命中那一个（它没开，点了什么也不会发生）
     await scopeDialog(wrapper).find('[data-test="cancel"]').trigger('click')
     await flushPromises()
 

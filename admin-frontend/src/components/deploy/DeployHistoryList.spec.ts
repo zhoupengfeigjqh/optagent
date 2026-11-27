@@ -1,12 +1,3 @@
-/**
- * 组件测试：部署历史的分页与展开明细（2026-09-16 十三次调整）
- *
- * 两条口径都属于"看不见就会误判"的类型：
- * - **分页**：历史持续追加，整表铺开会把页面撑得极长；每页固定 5 条，
- *   且翻页 MUST NOT 翻出边界、MUST NOT 出现空白页；
- * - **展开明细**：结果列只能说"部分成功/失败"，而"失败的是哪个用户、
- *   哪些数字人、为什么失败"必须能就地看到（数据本就在历史记录里）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import DeployHistoryList from './DeployHistoryList.vue'
@@ -205,7 +196,6 @@ describe('DeployHistoryList —— 展开行看明细', () => {
     const text = detailText(wrapper)
     expect(text).toContain('差异项（1条）')
     expect(text).toContain('admin：部署失败：boom')
-    // 2026-11-23：校验结论随部署前校验下架，不再出现在明细里
     expect(text).not.toContain('校验')
   })
 

@@ -1,14 +1,3 @@
-/**
- * 滚动摘要（FR-017/018）：正文池达上限即归档一批，池子左边界 = 归档游标（见 context-window）。
- *
- * - 每轮结束 trigger()：窗口外攒满 batchSize（20）条 → fire-and-forget 增量重写
- *   （旧摘要 + 新归档 20 条 → LLM 合并 → 新摘要）
- * - per-thread Promise 链串行互斥；失败记日志、保留旧摘要，绝不阻塞对话
- * - 存储：user-data/{数字人}/threads/{thread_id}/summary.json  { "summary": "...", "covered_count": 40 }
- *   （009：数字人作为必填入参，落点由 `dirs.ts#threadDir` 唯一解析）
- *
- * domain 层不依赖 infra 的 LlmProvider 具体类型，仅依赖结构化的最小接口。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmEvent } from '../types.js';
@@ -34,12 +23,10 @@ export interface SummaryData {
 }
 
 export interface SummaryDeps {
-  /** 惰性获取 LLM（默认模型） */
   llm: () => SummaryLlm;
   logger?: { warn(msg: string): void };
   /** 池子上限：池子（= 总数 - 已归档）达到它即归档一批（默认见 `context-window`） */
   poolMax?: number;
-  /** 窗口外攒满 N 条触发一次增量重写（默认 20） */
   batchSize?: number;
   /** 摘要生成超时（默认 60s） */
   timeoutMs?: number;
@@ -67,7 +54,6 @@ export class SummaryStore {
     return path.join(threadDir(this.root, userId, agentName, threadId), 'summary.json');
   }
 
-  /** 读取摘要；文件缺失/损坏按空摘要处理（损坏告警） */
   read(userId: string, agentName: string, threadId: string): SummaryData {
     const file = this.filePath(userId, agentName, threadId);
     if (!fs.existsSync(file)) return { ...EMPTY };
@@ -88,10 +74,6 @@ export class SummaryStore {
     }
   }
 
-  /**
-   * 每轮对话结束后调用：窗口外攒满一批则增量重写。
-   * 返回链上 Promise（永不 reject），调用方可 void 掉（fire-and-forget）。
-   */
   trigger(userId: string, agentName: string, threadId: string): Promise<void> {
     const key = `${userId}/${agentName}/${threadId}`;
     const prev = this.chains.get(key) ?? Promise.resolve();
@@ -114,7 +96,6 @@ export class SummaryStore {
       const { summary, coveredCount } = this.read(userId, agentName, threadId);
       // 池子（= 总数 - 已归档）达上限才归档：一次调用清掉一整格，池子回到保留长度
       // —— 正因为触发点是"池子满"、且只归档池内最早的若干条，
-      //    归档游标恒等于池子左边界，不会出现"既不在正文也不在摘要"的消息
       if (messages.length - coveredCount < this.poolMax) return;
       const archived = messages.slice(coveredCount, coveredCount + this.batchSize);
       const next = await this.rewrite(summary, archived);
@@ -125,14 +106,12 @@ export class SummaryStore {
         'utf8',
       );
     } catch (err) {
-      // FR-018：失败记日志、保留旧摘要，不阻塞对话
       this.deps.logger?.warn(
         `摘要生成失败，沿用旧摘要（user=${userId} agent=${agentName} thread=${threadId}）：${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  /** 增量重写：旧摘要 + 新归档消息 → LLM 合并；返回新摘要文本 */
   private async rewrite(
     oldSummary: string,
     archived: Array<{ role: 'user' | 'assistant'; content: string }>,

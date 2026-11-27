@@ -1,9 +1,3 @@
-/**
- * 单元测试：MCP 服务的**新建与删除**（2026-09-27，全人工配置）
- *
- * 自 `service-config.spec.ts` 拆出（宪章原则二：单文件 ≤500 行）。
- * 覆盖：名称判据与去空白、重名拒绝、`upsert` 与 `create` 的分工、删除语义。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,8 +58,6 @@ describe('新建与删除（2026-09-27）', () => {
   });
 
   it('服务名非法 → VALIDATION_FAILED（该名称会成为运行环境的工具前缀）', () => {
-    // `__` 单独列出（2026-11-10）：运行环境按 `__` 切分还原裸工具名，
-    // 服务名自带 `__` 会让一个暴露名出现两段分隔 ⇒ 权限/规则判定静默失效
     for (const bad of ['', 'a b', 'a/b', '中文', 'a'.repeat(65), 'my__server', 'a__b', 'a__', '__a']) {
       expect(() =>
         configs.create({

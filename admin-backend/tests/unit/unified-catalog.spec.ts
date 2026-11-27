@@ -42,7 +42,6 @@ type LogLine = { event?: string; msg?: string; previous_reason?: string };
 let root: string;
 let lines: LogLine[];
 
-/** 用**真实 pino** 写内存流：断言的是实际产出的日志行，而不是被 mock 的调用 */
 function memoryLogger() {
   const stream = new Writable({
     write(chunk: Buffer, _enc, cb) {
@@ -63,14 +62,12 @@ function buildCatalog(runtime: FlakyRuntime): UnifiedCatalog {
     name: 'ocr',
     transport: 'http',
     url: 'http://ocr:8000/mcp',
-    // 工具白名单：新建必填非空（2026-10-03）；本文件不涉及 MCP 工具清单
     allowed_tools: ['ocr_image'],
   });
   return new UnifiedCatalog({
     runtime,
     mcpConfigs,
     skills: new SkillLibraryService(store),
-    // 本体（2026-10-17）：快照的第四类引用，空库即可
     ontologies: new OntologyStore(store),
     logger: memoryLogger(),
   });

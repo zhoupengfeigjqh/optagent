@@ -1,15 +1,3 @@
-/**
- * 部署路由（`contracts/admin-api.md` §6.6~§6.9）。
- *
- * - `POST /api/admin/deploy`          — 部署生效（解析目标 → 逐用户整体覆盖写入）
- * - `GET  /api/admin/deploy/history`  — 部署历史（有界返回）
- * - `GET  /api/admin/deploy/manifest` — 部署清单（部署状态与差异报告的基准）
- * - `POST /api/admin/deploy/withdraw` — 撤回：清空该用户在运行环境中的数字人目录
- *
- * 部署对象（`user_ids`）由管理员在「用户与关联数字人」页勾选后传入，
- * **界面 MUST 至少选一个用户**（2026-09-16 十一次调整：不再提供"部署全部用户"的入口，
- * 服务端"缺省 = 全部用户"的语义保留，供脚本/接口调用）。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -33,24 +21,11 @@ export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, depl
     return deployer.history.list(limit);
   });
 
-  /**
-   * 部署清单（§6.8）。
-   *
-   * 同时返回平台设计态的当前 `revision`：部署接口需要乐观锁版本，而
-   * 「目标运行形态」下架后不再有 `/platform/settings` 作为版本来源，
-   * 故由部署功能区自己的读端点提供（2026-09-27）。
-   */
   app.get('/api/admin/deploy/manifest', async () => {
     const items = deployer.manifest.read();
     return { items, total: items.length, revision: ctx.store.revision() };
   });
 
-  /**
-   * 撤回部署（契约 §6.9，用户卡片上的「撤回」）。
-   *
-   * 清空该用户在运行环境中的**数字人目录**（这些数字人随即失去能力），
-   * 平台侧关联与用户文件空间保留——需要时重新部署即可恢复。
-   */
   app.post('/api/admin/deploy/withdraw', async (req) => {
     const body = (req.body ?? {}) as { user_id?: unknown; revision?: unknown };
     if (typeof body.revision !== 'number' || !Number.isInteger(body.revision)) {
@@ -63,7 +38,6 @@ export function registerDeployRoutes(app: FastifyInstance, ctx: AppContext, depl
   });
 }
 
-/** `user_ids` 缺省表示全部用户（契约 §6.6） */
 function parseUserIds(raw: unknown): string[] | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!Array.isArray(raw)) {

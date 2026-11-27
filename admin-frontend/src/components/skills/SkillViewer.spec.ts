@@ -1,14 +1,3 @@
-/**
- * 组件测试：SKILL 详情（文件树 + 文件编辑区，2026-09-16 起全部文件可编辑）
- *
- * 守住六点：
- * 1. SKILL.md 与 references 等附件**都能点开**，默认展示 SKILL.md 正文（不重复请求）；
- * 2. 改完能保存，并把"需要重新部署才生效"这条后果**明说**；
- * 3. **未保存的修改不能悄悄丢**：切换文件 / 返回列表前先确认；
- * 4. 特殊态说清楚：二进制不编辑、超限只读、读取失败可读；
- * 5. 删除前先取受影响清单（`FR-042`）；
- * 6. **本体市场来源只读**（`FR-062`）：不渲染编辑器与保存入口，正文只读呈现。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SkillViewer from './SkillViewer.vue'
@@ -49,12 +38,10 @@ function fileButton(wrapper: ReturnType<typeof mountViewer>, label: string) {
   return wrapper.findAll('button').find((button) => button.text() === label)
 }
 
-/** 未保存修改的守卫弹窗（与删除确认弹窗并列，故按 data-test 定位） */
 function discardDialog(wrapper: ReturnType<typeof mountViewer>) {
   return wrapper.find('[data-test="discard-dialog"]')
 }
 
-/** 可编辑文件的正文在 `<textarea>` 里（`wrapper.text()` 不含表单值） */
 function textareaValue(wrapper: ReturnType<typeof mountViewer>): string {
   const el = wrapper.find('textarea').element as HTMLTextAreaElement
   return el.value
@@ -74,7 +61,6 @@ describe('SkillViewer —— 文件查看与编辑', () => {
     expect(text).toContain('算法详解.md')
     expect(text).toContain('选型决策树.md')
     expect(text).toContain('demo.py')
-    // 默认选中 SKILL.md：正文直接来自详情，不额外请求（正文在编辑区里）
     expect(textareaValue(wrapper)).toContain('SKILL 正文内容')
     expect(fetchSkillFile).not.toHaveBeenCalled()
   })
@@ -178,14 +164,12 @@ describe('SkillViewer —— 文件查看与编辑', () => {
     await flushPromises()
     expect(discardDialog(wrapper).attributes('open')).toBeUndefined()
 
-    // 在 SKILL.md 上制造未保存的修改
     await wrapper.find('textarea').setValue('# 改过了\n')
     expect(wrapper.text()).toContain('未保存')
 
     await fileButton(wrapper, '算法详解.md')!.trigger('click')
     await flushPromises()
 
-    // 守卫已弹出，且**尚未**切换文件
     expect(discardDialog(wrapper).attributes('open')).toBeDefined()
     expect(fetchSkillFile).not.toHaveBeenCalled()
 
@@ -225,10 +209,8 @@ describe('SkillViewer —— 本体市场来源只读（FR-062）', () => {
     const wrapper = mountViewer(MARKET_SKILL)
     await flushPromises()
 
-    // 无编辑控件（textarea 是编辑器的核心特征）、无保存按钮
     expect(wrapper.find('textarea').exists()).toBe(false)
     expect(wrapper.findAll('button').some((b) => b.text().includes('保存'))).toBe(false)
-    // 只读正文可见（SKILL.md 正文随详情返回，无需再请求）
     expect(wrapper.find('.skill-viewer__readonly-pre').text()).toContain('SKILL 正文内容')
     expect(wrapper.text()).toContain('本体市场导入的技能为只读')
     expect(wrapper.text()).toContain('从本体市场导入')

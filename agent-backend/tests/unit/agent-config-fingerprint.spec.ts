@@ -1,16 +1,3 @@
-/**
- * 单元测试：数字人配置"变化即失效"（T130，`plan.md` R7 / `runtime-api-delta.md` §8.4）
- *
- * 守住三条不变式：
- * ①配置目录被改动后，**下一次取用 MUST 返回新实例**（内容与磁盘一致）；
- * ②配置**未**变化时 MUST 命中同一实例（池化收益不被破坏）；
- * ③`activeThreads > 0` 的实例 MUST NOT 因指纹变化被立即销毁（不中断进行中的轮次）。
- *
- * 说明：本文件放在 `tests/unit/`（任务约定），但它走的是**真实装配**
- * （`buildServer` + `ctx.getOrCreateAgent`），因为要守住的正是"取用时机"这一行为。
- * 测试不触碰 LLM：`AgentInstanceFactory.create()` 不调用 provider，
- * 只有 `run()` 才需要——本用例不发起 run。
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -88,7 +75,6 @@ describe('computeConfigFingerprint', () => {
     const fingerprint = computeConfigFingerprint(odd);
     expect(fingerprint).toMatch(/^[0-9a-f]{40}$/);
 
-    // 目录内容变化（新增一个文件）后指纹随之变化
     writeFileSync(path.join(odd, 'TOOL.json'), JSON.stringify({ enabled: [] }), 'utf8');
     expect(computeConfigFingerprint(odd)).not.toBe(fingerprint);
   });
@@ -142,7 +128,6 @@ describe('不变式 ①：配置改动 → 下一次取用返回新实例且内�
 describe('不变式 ③：activeThreads > 0 的实例不因指纹变化被立即销毁', () => {
   it('有在途轮次时换代：新实例已生效，旧实例未被销毁；轮次结束后被回收', async () => {
     const stale = (await ctx.getOrCreateAgent(KEY)) as unknown as ChatAgent;
-    // 模拟"该实例上有一个进行中的轮次"
     stale.activeThreads = 1;
 
     let staleDisposed = false;
@@ -155,14 +140,11 @@ describe('不变式 ③：activeThreads > 0 的实例不因指纹变化被立即
     writeFileSync(path.join(agentDir, 'SOUL.md'), '你是 demo（换代中的新版）。\n', 'utf8');
     const fresh = (await ctx.getOrCreateAgent(KEY)) as unknown as ChatAgent;
 
-    // 新对话立即用上新配置
     expect(fresh).not.toBe(stale);
     expect(fresh.config.systemPrompt).toContain('换代中的新版');
-    // 进行中的轮次不被打断 → 旧实例未被销毁
     expect(staleDisposed).toBe(false);
     expect(ctx.pool.retiredCount()).toBe(1);
 
-    // 轮次结束后回收
     stale.activeThreads = 0;
     expect(ctx.pool.sweepRetired()).toBe(1);
     expect(staleDisposed).toBe(true);

@@ -1,18 +1,10 @@
-/**
- * 配置模块（唯一读取 process.env 的地方）。
- *
- * 双源：
- * - .env：运行参数 + DEEPSEEK_API_KEY 兜底（经 node --env-file 注入 process.env）
- * - config.yaml：models 列表（model / api_key / base_url，默认模型 = 第一项）
- *
- * 合并规则：条目 api_key 优先（支持 `$ENV_VAR` 引用），未填时 DEEPSEEK_API_KEY 兜底；
- * models 缺失或为空即拒启动。全部经 zod 校验后导出冻结对象。
- */
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { PREVIEW_MAX_MB, READ_TRUNCATE_KB, UPLOAD_MAX_MB } from './domain/limits.js';
+import { DEFAULT_PLAN_LIMITS, type PlanLimits } from './domain/plan/types.js';
 
 const envSchema = z.object({
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
@@ -23,103 +15,37 @@ const envSchema = z.object({
    * 缺省 = 鉴权未启用，运行环境回退 legacy 单用户（可回滚，`research.md` D9）。
    */
   AUTH_SECRET: z.string().min(16).optional(),
-  /** 024：平台（admin-backend）基址，供会话内省调用。 */
   ADMIN_BACKEND_URL: z.string().min(1).default('http://127.0.0.1:3001'),
   POOL_SIZE: z.coerce.number().int().min(1).max(32).default(5),
   IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_800_000),
-  /** 单次 MCP 工具调用超时（毫秒）；同步型算法工具（如 hd_scheduling_submit）依赖此上限，勿再调小 */
-  MCP_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
-  /**
-   * 单个 MCP 服务的**建连**超时（毫秒，2026-10-18）。
-   *
-   * 与 `MCP_TIMEOUT_MS` 刻意分开：后者是工具调用上限（默认 60s，算法类工具需要），
-   * 拿它做建连超时会让"服务挂起"时的等待长达一分钟——而建连期用户正在等首条消息。
-   * 超时即判该服务 failed（有连接结果、不再是 unknown），并交给既有退避重连接管。
-   */
-  MCP_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(10_000),
-  /**
-   * 单文件上传上限（MB）：全项目统一 5MB（文件空间上传、SKILL ZIP 导入同一约束）。
-   * 改这里时 MUST 同步改：admin-backend/src/config.ts 的同名项、
-   * gateway/nginx.conf 的 client_max_body_size（= 此值 + 1MB multipart 余量，否则 5MB 文件传不上）。
-   */
-  UPLOAD_MAX_MB: z.coerce.number().int().min(1).default(5),
-  /**
-   * 内联预览大小上限（MB）。
-   *
-   * 2026-11-16 更正：此前注释称"模型 `write_file` 也被 `UPLOAD_MAX_MB` 卡在 5MB"，
-   * 与实现不符——`UPLOAD_MAX_MB` 只作用于 HTTP 请求体（`server.ts` 的 `bodyLimit`），
-   * 而 `write_file` 走 agent loop、不经过它。现在该值**同时**是 `write_file` 的落盘上限
-   * （`server.ts` 注入 `writeMaxBytes`），因此 413 分支仍然只在"改造前的存量文件"上可能触发。
-   * 上传（`UPLOAD_MAX_MB`）/ 产出回写（同 `UPLOAD_MAX_MB`）/ 模型写入（本值）三处口径一致。
-   */
-  PREVIEW_MAX_MB: z.coerce.number().int().min(1).default(5),
-  READ_TRUNCATE_KB: z.coerce.number().int().min(1).default(128),
+  // 2026-11-26：UPLOAD_MAX_MB / PREVIEW_MAX_MB / READ_TRUNCATE_KB 降为代码常量
+  // （跨服务契约与工具语义，见 `domain/limits.ts`），不再接受环境变量。
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),
-  /**
-   * LLM 调用的**重试次数**（首次调用不计；`0` = 不重试）。
-   *
-   * 由 pi-ai 既有的 `retryProviderRequest` 执行（指数退避 + 抖动 / `x-should-retry` 优先 /
-   * 尊重 `Retry-After` / 睡眠可被 AbortSignal 打断），运行环境**不自建**退避实现。
-   * 契约：`contracts/runtime-api-delta.md` §19.1（默认 2 ⇒ 单轮总尝试 ≤ 3）。
-   */
-  LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-  /**
-   * 单次重试的**等待上限**（毫秒）：上游要求的退避超过它即立即失败，不静默长等
-   * （`0` = 不设上限，与 pi-ai 的 `maxRetryDelayMs` 同义）。
-   */
-  LLM_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(15_000),
-  /** MCP 签名直链的对外基址（MCP 服务回源下载用；**必填**，由 loadConfig 显式校验并给出可读报错） */
+  // 2026-11-26：MCP_TIMEOUT_MS / MCP_CONNECT_TIMEOUT_MS / LLM_MAX_RETRIES /
+  // LLM_RETRY_MAX_DELAY_MS 迁入 config.yaml 的 `runtime` 块（业务口径，不是机器属性）。
   PUBLIC_BASE_URL: z.string().url().optional(),
-  /** 签名直链 HMAC 密钥（≥16 字符；缺省启动时随机生成——重启后未过期 URL 失效） */
   FILE_SIGN_SECRET: z.string().min(16).optional(),
   /**
-   * 013：技能入选分数阈值（0~1）。设置后**覆盖** `config.yaml` 的 `intent_focus.skill_threshold`。
+   * 2026-11-26 配置收敛：`INTENT_FOCUS_*_THRESHOLD`（skill / ontology_behavior /
+   * ontology_function / rewrite / plan）已删除。
    *
-   * 为什么允许双源：技能数量与问法差异会让概率分布整体偏移，阈值是最需要现场调的参数；
-   * 容器部署时可只改环境变量、不必改挂载的配置文件。越界即启动失败（不静默收敛）。
-   *
-   * **空串 = 未设置**：`.env` 里写了 `INTENT_FOCUS_SKILL_THRESHOLD=` 很常见（模板没删干净），
-   * 而 `z.coerce.number()` 会把 `''` 变成 `0` —— 阈值 0 意味着**所有技能都入选**，
-   * 症状是"回答突然变慢、什么技能都被拉着用"，却没有任何报错。宁可回落到配置文件。
+   * 阈值属于业务口径（"判多严"），只认 `config.yaml`；同名环境变量曾与之构成双真源，
+   * 出现"改了 yaml 没生效"的排查困境。见 `specs/028-task-planning/spec.md` v0.20。
    */
-  INTENT_FOCUS_SKILL_THRESHOLD: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    z.coerce.number().min(0).max(1).optional(),
-  ),
   /**
-   * 016：本体**行为**判定阈值（0~1）。设置后**覆盖** `intent_focus.ontology_behavior_threshold`。
+   * 意图聚焦（laya）凭据，由 `config.yaml` 的 `intent_focus.api_key: $DECIS_API_KEY` 引用。
    *
-   * 技能与行为共用一个"意图"问题，但候选粒度不同（技能是几十条描述，行为是成百个短标题），
-   * 分数分布会偏移；因此保留独立旋钮，允许现场分别标定。空串同样按未设置处理。
-   *
-   * 2026-11-20：由 `INTENT_FOCUS_ONTOLOGY_THRESHOLD` 改名（语义本就说的是行为），旧名不再接受。
+   * 在此声明不是为了让校验变严（`intent_focus` 整块本就是可选的），而是把它纳入
+   * "env 参数清单"：拼错变量名时能立即看出；同时 `$VAR` 解析失败时错误信息仍指向 yaml 字段。
    */
-  INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    z.coerce.number().min(0).max(1).optional(),
-  ),
+  DECIS_API_KEY: z.string().min(1).optional(),
   /**
-   * 016（2026-11-20）：本体**函数**判定阈值（0~1）。设置后**覆盖**
-   * `intent_focus.ontology_function_threshold`。
+   * 意图聚焦地址，由 `config.yaml` 的 `intent_focus.base_url: $INTENT_FOCUS_BASE_URL` 引用。
    *
-   * 与行为阈值分开：函数描述是"这段计算在算什么"，与"用户想做什么"的分布不同，
-   * 同一分值在两侧的含义并不等价。空串同样按未设置处理。
+   * 声明在此有两个作用：纳入 env 清单（拼错即时可见）、让 `unknownEnvKeys` 不再把它当遗留键；
+   * 真正的地址校验仍在 yaml 解析处（必须是 http(s) 且不带路径）。
    */
-  INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    z.coerce.number().min(0).max(1).optional(),
-  ),
-  /**
-   * 027：指代判定阈值（0~1）。设置后**覆盖** `intent_focus.rewrite_threshold`。
-   *
-   * 与 `skill_threshold` 同一取径（阈值是最需要现场调的参数），但**上限更严**：
-   * 只有 `score 严格大于` 该值才发起改写，"多调一次模型"的代价比"少聚焦一个技能"高。
-   * 空串同样按未设置处理（`.env` 模板留空键很常见）。
-   */
-  INTENT_FOCUS_REWRITE_THRESHOLD: z.preprocess(
-    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-    z.coerce.number().min(0).max(1).optional(),
-  ),
+  INTENT_FOCUS_BASE_URL: z.string().min(1).optional(),
 });
 
 const modelEntrySchema = z.object({
@@ -128,23 +54,9 @@ const modelEntrySchema = z.object({
   base_url: z.string().url().optional(),
 });
 
-/**
- * 013：意图聚焦判定模型（Laya）的参数区间与缺省值。
- *
- * **单处定义**（与 `contracts/intent-focus-api.md §5.1` 同口径）：取值区间既要用于
- * 启动校验，也要出现在报错文案与示例文件里——三处各写一份，迟早会漂移。
- */
 export const INTENT_FOCUS_LIMITS = {
-  /**
-   * 整轮判定预算（毫秒）：低于下限会被冷启动/长题面误伤。
-   *
-   * 上限 **20s**（2026-11-20 由 10s 放宽）：`noul` 按批发送，32 题一批约 1.8~2.2s，
-   * 3 批 + 一次改写正常情况下仍在 10s 内；放宽是为极慢网络 / 大批量候选留配置余量，
-   * 缺省仍是 10s——判定再久也不会让回答更早出现，不主动拖长用户等待。
-   */
   timeoutMsMin: 300,
-  timeoutMsMax: 20_000,
-  /** 分数阈值 */
+  timeoutMsMax: 30_000,
   thresholdMin: 0,
   thresholdMax: 1,
   /** 单轮技能候选上限 */
@@ -154,8 +66,8 @@ export const INTENT_FOCUS_LIMITS = {
    * 单轮行为候选上限。
    *
    * 上限 96 是**规格硬界**（FR-027），不是运维偏好：96 = 3 批 × 32，按 32 题
-   * 约 1.8~2.2s 估算正好落在 10s 预算内；放宽到 256 会退化成 8 批串行，
-   * 大概率在最后几批超时降级，反而让配置项看起来"改大了却没效果"。
+   * 约 1.8~2.2s 估算约 6~7s，即便整轮预算取 10s 也仍有余量；放宽到 256 会退化成
+   * 8 批串行，大概率在最后几批超时降级，反而让配置项看起来"改大了却没效果"。
    */
   maxCapabilitiesMin: 1,
   maxCapabilitiesMax: 96,
@@ -168,6 +80,14 @@ export const INTENT_FOCUS_LIMITS = {
    */
   rewriteTimeoutMsMin: 300,
   rewriteTimeoutMsMax: 10_000,
+  /**
+   * 028：规划门禁单次判定超时（毫秒）。
+   *
+   * 门禁只判"一句话是否多步"，不需要长思考；下限与判定批次同口径（300ms），
+   * 上限 10s 仅为防呆——正常取值 1~2s，实际还会被整轮预算再收紧。
+   */
+  planTimeoutMsMin: 300,
+  planTimeoutMsMax: 10_000,
 } as const;
 
 /**
@@ -179,33 +99,65 @@ export const INTENT_FOCUS_LIMITS = {
  */
 export const INTENT_FOCUS_DEFAULTS = {
   model: 'laya-multilingual',
-  timeoutMs: 10_000,
-  /**
-   * 技能、本体行为、本体函数**同阈值缺省 0.8**（2026-11 产品口径：三者都是"本轮要不要用"
-   * 的同一个判断，分开标定会让某一类全空变成常态）；三个旋钮仍各自独立，允许现场分别标定。
-   */
+  /** 整轮聚焦预算，缺省 **30s**（2026-11-26 由 10s 提高：判定决定本轮提示词，宁可等也不降级） */
+  timeoutMs: 30_000,
   skillThreshold: 0.8,
   ontologyBehaviorThreshold: 0.8,
   ontologyFunctionThreshold: 0.8,
   maxSkills: 32,
   maxCapabilities: 96,
-  /** 027：指代判定阈值，缺省 0.8（与技能 / 行为同值，2026-11 产品口径） */
   rewriteThreshold: 0.8,
   /** 027：单次改写超时，缺省 5s（受整轮预算约束，实际取 `min(该值, 剩余-100)`） */
   rewriteTimeoutMs: 5000,
+  /**
+   * 028：规划门禁阈值缺省 **0.4**（2026-11-26 产品口径）。
+   *
+   * 取向是"宁可多规划、不可漏规划"：漏判会让多 command 任务退化为直聊（乱序、漏前置），
+   * 代价远大于多花一次规划调用；阈值只影响"值不值得规划"，不参与工具准入。
+   */
+  planThreshold: 0.4,
+  /**
+   * 028：门禁单次判定超时缺省 **5s**（2026-11-26 由 2s 提高：门禁与意图聚焦共用 laya，
+   * 冷启动首包常在 2s 以上，2s 会把正常判定打成超时→fail-open，等于白花一次调用）。
+   * 失败仍 fail-open（走规划），故放宽超时只是让判定更准，不增加最坏路径上的风险。
+   */
+  planTimeoutMs: 5000,
 } as const;
 
 /**
- * 013：意图聚焦判定模型（Laya）的可选配置块。
+ * 2026-11-26：运行期策略缺省值（原 `MCP_TIMEOUT_MS` / `LLM_*` 环境变量）。
  *
- * 整块缺失 = 功能不可用（fail-closed），**不影响启动**；块存在但字段不全/越界 = 启动失败——
- * 半配置最容易被误读成"运行期故障"，不如启动时就报出来。
- *
- * 这里只用 `z.unknown()` 兜住形状，**类型与区间一律在 `resolveIntentFocus` 里校验**：
- * zod 的默认报错是 `[{ code: 'too_small', ... }]` 这样的结构体，管理员看不懂，
- * 而这些参数恰恰最需要"一眼知道该填什么"。`strict()` 保证拼错键（`timeout` / `max_action`）
- * 立刻报错，而不是被静默忽略后跑默认值。
+ * `mcpTimeoutMs` 取 **90s**：算法类同步工具（如 `hd_scheduling_submit`）实测常在 60s 上下，
+ * 之前由部署方在 env 里改到 90s，等于"每个部署点都要记得改"；现在作为口径写进 yaml 缺省。
  */
+export const RUNTIME_DEFAULTS = {
+  mcpTimeoutMs: 90_000,
+  mcpConnectTimeoutMs: 10_000,
+  llmMaxRetries: 2,
+  llmRetryMaxDelayMs: 15_000,
+} as const;
+
+export const RUNTIME_LIMITS = {
+  mcpTimeoutMsMin: 1_000,
+  mcpTimeoutMsMax: 600_000,
+  mcpConnectTimeoutMsMin: 1_000,
+  mcpConnectTimeoutMsMax: 60_000,
+  llmMaxRetriesMin: 0,
+  llmMaxRetriesMax: 5,
+  llmRetryMaxDelayMsMin: 0,
+  llmRetryMaxDelayMsMax: 60_000,
+} as const;
+
+/** 028：`plan` 块区间（越界拒绝启动；上限取"再大也失去意义"的经验界） */
+export const PLAN_LIMITS_BOUNDS = {
+  timeoutMsMin: 1_000,
+  timeoutMsMax: 600_000,
+  totalStepsMaxMin: 1,
+  totalStepsMaxMax: 100,
+  replanMaxPerRunMin: 0,
+  replanMaxPerRunMax: 50,
+} as const;
+
 const intentFocusYamlSchema = z
   .object({
     base_url: z.unknown(),
@@ -213,21 +165,53 @@ const intentFocusYamlSchema = z
     api_key: z.unknown(),
     timeout_ms: z.unknown().optional(),
     skill_threshold: z.unknown().optional(),
-    // 2026-11-20：`ontology_threshold` 更名为 `ontology_behavior_threshold`（旧键不再接受）
     ontology_behavior_threshold: z.unknown().optional(),
-    // 2026-11-20：函数阈值
     ontology_function_threshold: z.unknown().optional(),
     max_skills: z.unknown().optional(),
     max_capabilities: z.unknown().optional(),
     // 027：输入改写（指代判定阈值 / 单次改写超时）
     rewrite_threshold: z.unknown().optional(),
     rewrite_timeout_ms: z.unknown().optional(),
+    // 028：规划门禁（阈值 / 单次判定超时）
+    plan_threshold: z.unknown().optional(),
+    plan_timeout_ms: z.unknown().optional(),
+  })
+  .strict();
+
+/**
+ * 2026-11-26：运行期策略（原 MCP_TIMEOUT_MS / LLM_* 环境变量）。
+ *
+ * 归 yaml 的理由：这些数随**工具语义**与**模型能力**变（算法类工具要 90s、换模型后重试预算
+ * 要跟着变），不随机器快慢变；放 env 会让同一条指令在不同部署点得到不同结果。
+ */
+const runtimeYamlSchema = z
+  .object({
+    mcp_timeout_ms: z.unknown().optional(),
+    mcp_connect_timeout_ms: z.unknown().optional(),
+    llm_max_retries: z.unknown().optional(),
+    llm_retry_max_delay_ms: z.unknown().optional(),
+  })
+  .strict();
+
+/**
+ * 028：规划上限（2026-11-26 由代码常量提升为 yaml 项）。
+ *
+ * 只开三个口子：超时、单轮总步数、失败重规划次数——它们随业务复杂度与模型能力变；
+ * 其余 13 项规划常量是算法不变量，仍由 `domain/plan/types.ts` 钉死。
+ */
+const planYamlSchema = z
+  .object({
+    timeout_ms: z.unknown().optional(),
+    total_steps_max: z.unknown().optional(),
+    replan_max_per_run: z.unknown().optional(),
   })
   .strict();
 
 const yamlSchema = z.object({
   models: z.array(modelEntrySchema).min(1, 'config.yaml 的 models 列表缺失或为空，拒绝启动'),
   intent_focus: intentFocusYamlSchema.optional(),
+  runtime: runtimeYamlSchema.optional(),
+  plan: planYamlSchema.optional(),
 });
 
 export interface ModelEntry {
@@ -236,71 +220,51 @@ export interface ModelEntry {
   baseUrl?: string;
 }
 
-/**
- * LLM 调用的**有界重试**参数（直接作为 pi-ai `StreamOptions` 的 `maxRetries` /
- * `maxRetryDelayMs` 传给 `streamSimple`；运行环境不自建退避实现）。
- *
- * 契约：`contracts/runtime-api-delta.md` §19.1。
- */
 export interface LlmRetryOptions {
-  /** 重试次数（首次调用不计；0 = 不重试） */
   maxRetries: number;
   /** 单次重试等待上限（毫秒；0 = 不设上限，与 pi-ai 语义一致） */
   maxRetryDelayMs: number;
 }
 
-/**
- * 013：意图聚焦判定模型的接入参数（装配后冻结）。
- *
- * 六个字段与 `contracts/intent-focus-api.md §5.1` 一一对应；除 `skill_threshold` 外**只有一个来源**
- * （`config.yaml` 的 `intent_focus` 块），避免"改了 A 没改 B"的错配。
- *
- * `skill_threshold` / `ontology_behavior_threshold` / `ontology_function_threshold` 的取值优先级：
- * 环境变量（`INTENT_FOCUS_SKILL_THRESHOLD` / `INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD` /
- * `INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD`）> `config.yaml` > 0.8。
- */
 export interface IntentFocusConfig {
-  /** 形如 `http://laya:8000`（只到主机端口，不要带 `/v1`；请求路径由客户端拼） */
   baseUrl: string;
-  /** `/v1/systemone` 请求体里的 `model`，需与 `GET /v1/models` 返回的标识一致 */
   model: string;
-  /** Laya 容器 `DECIS_API_KEY` 同值 */
   apiKey: string;
   /** 整轮判定总预算（毫秒）：分批时按批数均分，到时即降级，**不重试** */
   timeoutMs: number;
-  /** 技能入选分数阈值（0~1）。`noul` 分数不是归一化概率，故按绝对分数筛选 */
   skillThreshold: number;
-  /** 本体**行为**入选分数阈值（0~1）；2026-11-20 由 `ontologyThreshold` 改名 */
   ontologyBehaviorThreshold: number;
-  /** 本体**函数**入选分数阈值（0~1）；2026-11-20 新增 */
   ontologyFunctionThreshold: number;
   /** 单轮技能候选上限 */
   maxSkills: number;
   /** 单轮**行为 + 函数**候选合计上限（键名保留以兼容存量配置） */
   maxCapabilities: number;
-  /**
-   * 027：指代判定阈值（0~1）：`score > 该值` 才发起改写（严格大于）。
-   *
-   * 与技能阈值刻意独立：改写多一次模型调用（延迟 + 费用），
-   * 现场需要能把"多改一次"和"少聚焦一个技能"分别标定。
-   */
   rewriteThreshold: number;
   /**
    * 027：单次改写的超时上限（毫秒）。实际取值还会被阶段剩余预算进一步收紧
    * （`min(rewriteTimeoutMs, 剩余 - 100)`，剩余 < 300ms 直接放弃）。
    */
   rewriteTimeoutMs: number;
+  /**
+   * 028：规划门禁阈值。**未配置 = 门禁关闭**（开启规划即发起规划调用，行为与门禁前一致）。
+   *
+   * 分数 ≥ 该值才走规划；分数缺失/判定失败一律按"走规划"处理（fail-open）。
+   */
+  planThreshold?: number;
+  /** 028：门禁单次判定超时（毫秒），受整轮预算进一步收紧 */
+  planTimeoutMs: number;
 }
 
 export interface AppConfig {
   port: number;
-  /** 运行数据根目录（绝对路径） */
   optAgentRoot: string;
   poolSize: number;
   idleTimeoutMs: number;
   mcpTimeoutMs: number;
   /** 单服务建连超时（毫秒）；超时判 failed，由退避重连接管 */
   mcpConnectTimeoutMs: number;
+  /** 028：规划上限（`config.yaml` 的 `plan` 块）；装配层注入编排器 */
+  planLimits: PlanLimits;
   uploadMaxMb: number;
   /** 内联预览大小上限（MB） */
   previewMaxMb: number;
@@ -308,18 +272,14 @@ export interface AppConfig {
   shutdownGraceMs: number;
   /** LLM 调用的有界重试参数（唯一表示；不要另存两个标量，避免两份口径） */
   llmRetry: LlmRetryOptions;
-  /** MCP 签名直链对外基址 */
   publicBaseUrl: string;
-  /** 签名直链 HMAC 密钥 */
   fileSignSecret: string;
   models: readonly ModelEntry[];
-  /** 默认模型 = models 第一项 */
   defaultModel: ModelEntry;
   /** 013：意图聚焦判定模型；缺省 = 该功能不可用（不判定、不追加聚焦提示） */
   intentFocus?: IntentFocusConfig;
   /** 024：登录凭据验签密钥；缺省 = 鉴权未启用（回退 legacy 单用户） */
   authSecret?: string;
-  /** 024：平台（admin-backend）基址，供会话内省 */
   adminBackendUrl: string;
 }
 
@@ -332,12 +292,6 @@ export class ConfigError extends Error {
 
 type EnvSource = Record<string, string | undefined>;
 
-/**
- * `$VAR` 形式的值 → 环境变量实值（`config.yaml` 的密钥统一走这一条通道）。
- *
- * 空串按"未设置"处理：`.env` 里留一个空键（`DECIS_API_KEY=`）是常见做法，
- * 若当成有效值，运行期会变成 401 而不是"配置缺失"，最费时间。
- */
 function resolveEnvRef(raw: string, env: EnvSource, label: string): string {
   if (!raw.startsWith('$')) return raw;
   const name = raw.slice(1);
@@ -411,39 +365,100 @@ function readRatio(value: unknown, label: string, fallback: number): number {
   return parsed;
 }
 
-/** 报错文案里的"当前值"：字符串加引号，其余走 JSON，`undefined` 显示缺省 */
 function describe(value: unknown): string {
   if (value === undefined) return '未填写';
   return typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
 }
 
-/**
- * 013：解析 `intent_focus` 块。
- *
- * - 整块缺失 → `undefined`（功能不可用，不报错）；
- * - `api_key` 仅支持字面量或 `$ENV` 引用，**不**回落到 `DEEPSEEK_API_KEY`
- *   （落到主模型密钥会表现为 401，而不是"未配置"，极难定位）；
- * - `base_url` 必须是 http(s) 绝对地址（`laya:8000` 这类在 WHATWG 解析下"合法"但不可用）；
- * - `skill_threshold` 环境变量优先（唯一允许双源的参数）；但配置文件里的取值**照样校验**——
- *   留着越界值不报错，下次撤掉环境变量就会静默生效。
- */
+/** `runtime` 块解析：越界一律拒绝启动，不静默兜底（与 intent_focus 同口径） */
+function resolveRuntime(entry: z.infer<typeof runtimeYamlSchema> | undefined) {
+  const e = entry ?? {};
+  const mcpTimeoutMs = readIntInRange(
+    e.mcp_timeout_ms,
+    'runtime.mcp_timeout_ms',
+    RUNTIME_LIMITS.mcpTimeoutMsMin,
+    RUNTIME_LIMITS.mcpTimeoutMsMax,
+    RUNTIME_DEFAULTS.mcpTimeoutMs,
+    '（毫秒）',
+  );
+  const mcpConnectTimeoutMs = readIntInRange(
+    e.mcp_connect_timeout_ms,
+    'runtime.mcp_connect_timeout_ms',
+    RUNTIME_LIMITS.mcpConnectTimeoutMsMin,
+    RUNTIME_LIMITS.mcpConnectTimeoutMsMax,
+    RUNTIME_DEFAULTS.mcpConnectTimeoutMs,
+    '（毫秒）',
+  );
+  if (mcpConnectTimeoutMs > mcpTimeoutMs) {
+    throw new ConfigError(
+      `runtime.mcp_connect_timeout_ms 不得大于 mcp_timeout_ms（当前 ${mcpConnectTimeoutMs} > ${mcpTimeoutMs}）`,
+    );
+  }
+  const llmMaxRetries = readIntInRange(
+    e.llm_max_retries,
+    'runtime.llm_max_retries',
+    RUNTIME_LIMITS.llmMaxRetriesMin,
+    RUNTIME_LIMITS.llmMaxRetriesMax,
+    RUNTIME_DEFAULTS.llmMaxRetries,
+  );
+  const llmRetryMaxDelayMs = readIntInRange(
+    e.llm_retry_max_delay_ms,
+    'runtime.llm_retry_max_delay_ms',
+    RUNTIME_LIMITS.llmRetryMaxDelayMsMin,
+    RUNTIME_LIMITS.llmRetryMaxDelayMsMax,
+    RUNTIME_DEFAULTS.llmRetryMaxDelayMs,
+    '（毫秒）',
+  );
+  return { mcpTimeoutMs, mcpConnectTimeoutMs, llmMaxRetries, llmRetryMaxDelayMs };
+}
+
+/** 028：`plan` 块解析；缺键取 `DEFAULT_PLAN_LIMITS`（= 原代码常量） */
+function resolvePlanLimits(entry: z.infer<typeof planYamlSchema> | undefined): PlanLimits {
+  const e = entry ?? {};
+  return {
+    timeoutMs: readIntInRange(
+      e.timeout_ms,
+      'plan.timeout_ms',
+      PLAN_LIMITS_BOUNDS.timeoutMsMin,
+      PLAN_LIMITS_BOUNDS.timeoutMsMax,
+      DEFAULT_PLAN_LIMITS.timeoutMs,
+      '（毫秒）',
+    ),
+    totalStepsMax: readIntInRange(
+      e.total_steps_max,
+      'plan.total_steps_max',
+      PLAN_LIMITS_BOUNDS.totalStepsMaxMin,
+      PLAN_LIMITS_BOUNDS.totalStepsMaxMax,
+      DEFAULT_PLAN_LIMITS.totalStepsMax,
+    ),
+    replanMaxPerRun: readIntInRange(
+      e.replan_max_per_run,
+      'plan.replan_max_per_run',
+      PLAN_LIMITS_BOUNDS.replanMaxPerRunMin,
+      PLAN_LIMITS_BOUNDS.replanMaxPerRunMax,
+      DEFAULT_PLAN_LIMITS.replanMaxPerRun,
+    ),
+  };
+}
+
 function resolveIntentFocus(
   entry: z.infer<typeof intentFocusYamlSchema> | undefined,
   env: EnvSource,
-  envSkillThreshold: number | undefined,
-  envOntologyBehaviorThreshold: number | undefined,
-  envOntologyFunctionThreshold: number | undefined,
-  envRewriteThreshold: number | undefined,
 ): IntentFocusConfig | undefined {
   if (!entry) return undefined;
 
-  const baseUrl = readRequiredText(entry.base_url, 'intent_focus.base_url').replace(/\/+$/, '');
+  // 2026-11-26：`base_url` 同样允许 `$VAR` 引用——本地是 127.0.0.1:8103，容器内是 laya:8000，
+  // 两形态共用同一份 config.yaml，地址只能由 env 提供，否则容器内永远打到自己。
+  const baseUrl = resolveEnvRef(
+    readRequiredText(entry.base_url, 'intent_focus.base_url'),
+    env,
+    'intent_focus.base_url',
+  ).replace(/\/+$/, '');
   if (!/^https?:\/\//.test(baseUrl)) {
     throw new ConfigError(
       `intent_focus.base_url 必须以 http:// 或 https:// 开头（当前 "${baseUrl}"）`,
     );
   }
-  // 只校验协议头不够：`http://laya:8000/v1` 拼出来是 `/v1/v1/systemone`，404 后才被发现
   if (new URL(baseUrl).pathname !== '/') {
     throw new ConfigError(
       `intent_focus.base_url 只填到主机端口，不要带路径（请求路径由客户端拼 /v1/systemone；当前 "${baseUrl}"）`,
@@ -493,13 +508,11 @@ function resolveIntentFocus(
     INTENT_FOCUS_LIMITS.maxCapabilitiesMax,
     INTENT_FOCUS_DEFAULTS.maxCapabilities,
   );
-  // 027：改写阈值同技能阈值口径（配置文件里的坏值照样校验，撤掉环境变量不静默生效）
   const yamlRewriteThreshold = readRatio(
     entry.rewrite_threshold,
     'intent_focus.rewrite_threshold',
     INTENT_FOCUS_DEFAULTS.rewriteThreshold,
   );
-  // 027：缺省值随 `timeout_ms` 收紧——存量部署若把整轮预算调到 4.5s 以下，
   // 5s 的缺省改写超时会直接让服务起不来；这不是用户写错配置，不该拒绝启动
   const rewriteTimeoutMs = readIntInRange(
     entry.rewrite_timeout_ms,
@@ -509,10 +522,32 @@ function resolveIntentFocus(
     Math.min(INTENT_FOCUS_DEFAULTS.rewriteTimeoutMs, timeoutMs),
     '（毫秒）',
   );
-  // 半配置不静默收敛：改写比整轮预算还长 ⇒ 必然赶不上，宁可启动就报
   if (rewriteTimeoutMs > timeoutMs) {
     throw new ConfigError(
       `intent_focus.rewrite_timeout_ms 不得大于 timeout_ms（当前 ${rewriteTimeoutMs} > ${timeoutMs}）`,
+    );
+  }
+
+  // 028：规划门禁（缺键 = 关闭；给了就必须在 0~1，不静默兜底）
+  const planThreshold =
+    entry.plan_threshold === undefined
+      ? undefined
+      : readRatio(
+          entry.plan_threshold,
+          'intent_focus.plan_threshold',
+          INTENT_FOCUS_DEFAULTS.planThreshold,
+        );
+  const planTimeoutMs = readIntInRange(
+    entry.plan_timeout_ms,
+    'intent_focus.plan_timeout_ms',
+    INTENT_FOCUS_LIMITS.planTimeoutMsMin,
+    INTENT_FOCUS_LIMITS.planTimeoutMsMax,
+    Math.min(INTENT_FOCUS_DEFAULTS.planTimeoutMs, timeoutMs),
+    '（毫秒）',
+  );
+  if (planTimeoutMs > timeoutMs) {
+    throw new ConfigError(
+      `intent_focus.plan_timeout_ms 不得大于 timeout_ms（当前 ${planTimeoutMs} > ${timeoutMs}）`,
     );
   }
 
@@ -521,21 +556,71 @@ function resolveIntentFocus(
     model,
     apiKey,
     timeoutMs,
-    skillThreshold: envSkillThreshold ?? yamlSkillThreshold,
-    ontologyBehaviorThreshold: envOntologyBehaviorThreshold ?? yamlOntologyBehaviorThreshold,
-    ontologyFunctionThreshold: envOntologyFunctionThreshold ?? yamlOntologyFunctionThreshold,
+    skillThreshold: yamlSkillThreshold,
+    ontologyBehaviorThreshold: yamlOntologyBehaviorThreshold,
+    ontologyFunctionThreshold: yamlOntologyFunctionThreshold,
     maxSkills,
     maxCapabilities,
-    rewriteThreshold: envRewriteThreshold ?? yamlRewriteThreshold,
+    rewriteThreshold: yamlRewriteThreshold,
     rewriteTimeoutMs,
+    ...(planThreshold !== undefined ? { planThreshold } : {}),
+    planTimeoutMs,
   });
 }
 
 export interface LoadConfigOptions {
-  /** 默认取 process.env；测试可注入 */
   env?: EnvSource;
-  /** config.yaml 路径，默认取 cwd 下 config.yaml */
   configPath?: string;
+}
+
+/**
+ * 2026-11-26：拼错的 env 键检测（只告警，不拒绝启动）。
+ *
+ * 用前缀白名单圈定"本服务参数"，避免把宿主环境里的 `PATH`、`HOME` 等误报；
+ * 已删除的历史键（`INTENT_FOCUS_*_THRESHOLD`、`MCP_TIMEOUT_MS` 等）也会落进来，
+ * 启动时提示"这行已经不起作用"，避免"改了没生效"式排查。
+ */
+export function unknownEnvKeys(env: EnvSource = process.env): string[] {
+  const known = new Set(Object.keys(envSchema.shape));
+  const suspect =
+    /^(PORT|OPT_AGENT_ROOT|AUTH_SECRET|ADMIN_BACKEND_URL|POOL_SIZE|IDLE_TIMEOUT_MS|SHUTDOWN_GRACE_MS|PUBLIC_BASE_URL|FILE_SIGN_SECRET|DEEPSEEK_API_KEY|DECIS_API_KEY|MC[A-Z0-9_]*|LLM[A-Z0-9_]*|INTENT_FOCUS_[A-Z0-9_]*|UPLOAD_[A-Z0-9_]*|PREVIEW_[A-Z0-9_]*|READ_TRUNCATE_[A-Z0-9_]*)$/;
+  return Object.keys(env)
+    .filter((key) => suspect.test(key) && !known.has(key))
+    .sort();
+}
+
+/**
+ * 启动摘要（密钥一律打码）：回答"这台机器上到底哪个值生效"。
+ *
+ * 只列真正影响行为的项，不列文件路径等噪声；`intentFocus` 缺失时明确写 null，
+ * 避免"以为开了意图聚焦其实整块没配"。
+ */
+export function summarizeConfig(config: AppConfig): Record<string, unknown> {
+  return {
+    port: config.port,
+    pool_size: config.poolSize,
+    idle_timeout_ms: config.idleTimeoutMs,
+    mcp_timeout_ms: config.mcpTimeoutMs,
+    mcp_connect_timeout_ms: config.mcpConnectTimeoutMs,
+    llm_max_retries: config.llmRetry.maxRetries,
+    llm_retry_max_delay_ms: config.llmRetry.maxRetryDelayMs,
+    plan_timeout_ms: config.planLimits.timeoutMs,
+    plan_total_steps_max: config.planLimits.totalStepsMax,
+    plan_replan_max_per_run: config.planLimits.replanMaxPerRun,
+    model: config.defaultModel.model,
+    public_base_url: config.publicBaseUrl,
+    admin_backend_url: config.adminBackendUrl,
+    auth_enabled: config.authSecret !== undefined,
+    intent_focus: config.intentFocus
+      ? {
+          base_url: config.intentFocus.baseUrl,
+          timeout_ms: config.intentFocus.timeoutMs,
+          skill_threshold: config.intentFocus.skillThreshold,
+          plan_threshold: config.intentFocus.planThreshold ?? null,
+          plan_timeout_ms: config.intentFocus.planTimeoutMs,
+        }
+      : null,
+  };
 }
 
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
@@ -573,25 +658,19 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const e = envParsed.data;
 
   // 013：意图聚焦判定模型（可选块；缺失即功能不可用）
-  const intentFocus = resolveIntentFocus(
-    yamlParsed.data.intent_focus,
-    env,
-    e.INTENT_FOCUS_SKILL_THRESHOLD,
-    e.INTENT_FOCUS_ONTOLOGY_BEHAVIOR_THRESHOLD,
-    e.INTENT_FOCUS_ONTOLOGY_FUNCTION_THRESHOLD,
-    e.INTENT_FOCUS_REWRITE_THRESHOLD,
-  );
+  const intentFocus = resolveIntentFocus(yamlParsed.data.intent_focus, env);
+
+  const runtime = resolveRuntime(yamlParsed.data.runtime);
+  const planLimits = resolvePlanLimits(yamlParsed.data.plan);
 
   // 签名直链的对外基址与部署形态强相关，必须显式声明：
   // 兜底成 localhost 时容器间的 MCP 服务（如 OCR）会回源打到它自己，
-  // 且不会启动失败，只在运行期表现为"下载失败"，极难定位。
   const publicBaseUrl = e.PUBLIC_BASE_URL;
   if (!publicBaseUrl) {
     throw new ConfigError(
       '缺少必填环境变量 PUBLIC_BASE_URL（MCP 服务回源下载的对外基址，容器内应为 http://backend:3000）',
     );
   }
-  // 仅 url() 不够：`backend:3000` 之类的值在 WHATWG 解析下也算合法 URL（scheme=backend），
   // 但铸出的直链不可用——MCP 服务是按 http(s) 回源的。
   if (!/^https?:\/\//.test(publicBaseUrl)) {
     throw new ConfigError(
@@ -604,13 +683,14 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     optAgentRoot: path.resolve(process.cwd(), e.OPT_AGENT_ROOT),
     poolSize: e.POOL_SIZE,
     idleTimeoutMs: e.IDLE_TIMEOUT_MS,
-    mcpTimeoutMs: e.MCP_TIMEOUT_MS,
-    mcpConnectTimeoutMs: e.MCP_CONNECT_TIMEOUT_MS,
-    uploadMaxMb: e.UPLOAD_MAX_MB,
-    previewMaxMb: e.PREVIEW_MAX_MB,
-    readTruncateKb: e.READ_TRUNCATE_KB,
+    mcpTimeoutMs: runtime.mcpTimeoutMs,
+    mcpConnectTimeoutMs: runtime.mcpConnectTimeoutMs,
+    uploadMaxMb: UPLOAD_MAX_MB,
+    previewMaxMb: PREVIEW_MAX_MB,
+    readTruncateKb: READ_TRUNCATE_KB,
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
-    llmRetry: { maxRetries: e.LLM_MAX_RETRIES, maxRetryDelayMs: e.LLM_RETRY_MAX_DELAY_MS },
+    llmRetry: { maxRetries: runtime.llmMaxRetries, maxRetryDelayMs: runtime.llmRetryMaxDelayMs },
+    planLimits,
     publicBaseUrl,
     fileSignSecret: e.FILE_SIGN_SECRET ?? randomBytes(32).toString('hex'),
     models,

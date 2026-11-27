@@ -1,21 +1,3 @@
-/**
- * 集成测试：定时任务 7 个端点（015，契约 `contracts/scheduled-tasks-api.md`）。
- *
- * 覆盖：
- * - `GET`：空数组、派生字段现算（`status`/`terminated`/`can_start`）、`created_at` 倒序、
- *   内部字段 `reused_thread_id` 不下发；
- * - `POST`：201 形状、会话模式缺省 `true`、7 项非法输入 → 400（`details` 带字段名）、
- *   重复名称 → 409；
- * - `PATCH :id`（2026-10-30 增补）：整份替换 7 项可编辑字段、`next_run_at` 重置、
- *   启用中 409、重名 409、不存在 404、带 `new_thread_per_run` → 400；
- * - `PATCH enabled`：启用把过去的计划时刻推进到未来、幂等、次数用尽 → 409、不存在 → 404；
- * - `DELETE`：启用中 409、停用后 204、列表消失、其运行记录不再出现（`FR-022`）；
- * - `GET runs`：空态、倒序、`task_id` 筛选、`limit` 上限、`thread_deleted` 回填；
- * - `GET events`：建连即推 `scheduled-task` 帧、本用户信号再推一帧；
- * - 隔离（`FR-053`）：他人 uid 的任务在列表不可见，按 id 操作一律 404。
- *
- * 运行方式（本地执行）：npm run test:integration
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,12 +26,10 @@ function writeAgent(name: string): void {
   writeFileSync(path.join(dir, 'MCP.json'), JSON.stringify({ servers: [] }), 'utf8');
 }
 
-/** 相对当前时刻的 ISO（正数 = 未来） */
 function at(seconds: number): string {
   return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
-/** 合法创建体（各用例按需覆写某几项） */
 function draft(overrides: Record<string, unknown> = {}) {
   return {
     name: `任务-${Math.random().toString(36).slice(2, 8)}`,
@@ -161,7 +141,6 @@ describe('GET /api/scheduled-tasks', () => {
       new_thread_per_run: true,
     });
     expect('reused_thread_id' in first).toBe(false);
-    // 复用模式任务回显 false（且同样不下发内部字段）
     const reuse = tasks.find((t) => t.task_id === older.taskId)!;
     expect(reuse.new_thread_per_run).toBe(false);
     expect('reused_thread_id' in reuse).toBe(false);
@@ -207,7 +186,6 @@ describe('POST /api/scheduled-tasks', () => {
     const error = res.json().error as { code: string; message: string; details?: string[] };
     expect(error.code).toBe('VALIDATION_FAILED');
     if (field === 'interval_seconds' || field === 'max_runs') {
-      // schema 先拦（type/minimum），不经过 details
       expect(typeof error.message).toBe('string');
     } else {
       expect(error.details?.some((item) => item.startsWith(`${field}:`))).toBe(true);
@@ -230,7 +208,6 @@ describe('POST /api/scheduled-tasks', () => {
 });
 
 describe('PATCH /api/scheduled-tasks/:id（编辑，2026-10-30 增补）', () => {
-  /** 合法编辑体（7 项可编辑字段，**不含**会话模式） */
   function editDraft(overrides: Record<string, unknown> = {}) {
     return {
       name: `改名-${Math.random().toString(36).slice(2, 8)}`,
@@ -278,7 +255,7 @@ describe('PATCH /api/scheduled-tasks/:id（编辑，2026-10-30 增补）', () =>
   });
 
   it('允许保留已过去的开始时刻（只改名字不会被"开始时间已过"挡住）', async () => {
-    const task = seedTask(); // 开始时刻在 1 小时前
+    const task = seedTask();
     const res = await update(
       task.taskId,
       editDraft({ name: '仅改名', start_at: task.startAt, deadline_at: at(86_400) }),
@@ -460,14 +437,12 @@ describe('GET /api/scheduled-tasks/runs', () => {
     const all = (await listRuns(`?task_id=${task.taskId}`)).json();
     expect(all.total).toBe(2);
     const ordered = all.runs as Array<{ triggered_at: string; thread_deleted: boolean }>;
-    // 倒序：晚触发的在前
     expect(Date.parse(ordered[0]!.triggered_at)).toBeGreaterThan(
       Date.parse(ordered[1]!.triggered_at),
     );
     expect(ordered[0]!.thread_deleted).toBe(true); // 会话已删 → 不可跳转
     expect(ordered[1]!.thread_deleted).toBe(false);
 
-    // 别的任务筛选不到它
     const other = (await listRuns('?task_id=ghost-task')).json();
     expect(other.total).toBe(0);
   });
@@ -500,7 +475,6 @@ describe('GET /api/scheduled-tasks/runs', () => {
 
 describe('GET /api/scheduled-tasks/events —— 变更信号（SSE）', () => {
   it('建连即推 scheduled-task 帧；本用户信号再推一帧', async () => {
-    // SSE 是**不结束**的响应，`app.inject` 会一直等 → 起真实监听端口读帧
     await app.listen({ port: 0, host: '127.0.0.1' });
     const address = app.server.address();
     const port = typeof address === 'object' && address !== null ? address.port : 0;

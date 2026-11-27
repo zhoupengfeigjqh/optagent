@@ -23,15 +23,6 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void
 }>()
 
-/**
- * 2026-10-17：标题改用**英文工具名**（`name`，即模型的调用名与引用键），
- * 中文名与用途说明一起进副标题。
- *
- * 原因：工具的英文名此前在界面上不可见——与聊天前台（工具卡片显示 `read_file`）
- * 以及问题实例的关联工具清单（`QuickStartDialog`）口径不一致，同一个人同一个工具
- * 在两个界面里叫两个名字。`label` 仍完整保留（它是唯一来源下发的中文名），
- * 只是让位给副标题，因此**中文搜索仍然可命中**（`CheckboxList` 会一并匹配 description）。
- */
 const options = computed<CheckboxOption[]>(() =>
   props.tools.map((tool) => ({
     value: tool.name,
@@ -50,7 +41,6 @@ const orphans = computed(() => props.modelValue.filter((name) => !known.value.ha
 <template>
   <div class="tool-selector">
     <p v-if="errorMessage" class="tool-selector__error" role="alert">{{ errorMessage }}</p>
-    <!-- 占位符说明（原"内置工具目录"卡片合并于此，2026-09-15）：避免把花括号误认为渲染失败 -->
     <p class="tool-selector__note">
       说明中的花括号（如 <code>{示例路径}</code>、<code>{可用目录}</code>、<code>{会话标识}</code>）
       是占位符，部署到具体用户后才会替换为真实取值；目录由运行环境提供，平台只读。

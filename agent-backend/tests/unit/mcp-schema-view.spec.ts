@@ -1,22 +1,7 @@
-/**
- * 单元测试：MCP 工具入参 schema 的视图裁剪（`mcp-schema-view.ts`）
- *
- * 三条规则各自的边界：
- * 1. `exposeSchema`：删除由运行环境注入的参数（含 `required` 同名项）；
- *    未声明注入时**原样返回**（不碰第三方给的 schema 对象）；
- * 2. `hideSchemaPaths`：按取值路径剔除 `file_args` 派生目标字段——对象段 / 数组段 /
- *    多级；schema 里没有该字段时跳过（运行期注入照旧）；空路径原样返回；
- * 3. `withServerTitleX`（2026-10-30）：根 `title` → `x-title`（值 = 服务端 `Tool.title`），
- *    未声明则原样透传（见文件末尾的用例）。
- *
- * 这些分支此前散落在 `mcp-tool-adapter.ts`（既有超限文件）中、未被直接覆盖；
- * 搬运成独立模块后在本文件补齐（抽出即新模块，新模块 MUST 达标）。
- */
 import { describe, expect, it } from 'vitest';
 import { parseFileArgPath } from '../../src/domain/file-arg-path.js';
 import { exposeSchema, hideSchemaPaths, withServerTitleX } from '../../src/infra/mcp/mcp-schema-view.js';
 
-/** 与真实对接方形状同构：顶层标量 + 对象数组 + 标量数组 */
 function schema() {
   return {
     type: 'object',
@@ -149,15 +134,6 @@ describe('exposeSchema —— 无 required 的 schema', () => {
   });
 });
 
-/**
- * 根标题视图（2026-10-30，方案 A）：服务端 `@mcp.tool(title=...)` → `x-title`。
- *
- * 守住四条：
- * 1. 有服务端标题：删 SDK 生成的类名 `title`，写 `x-title`（trim 后）；
- * 2. 无服务端标题：**原样透传**（不把类名改名成 `x-title`，那是伪造"人读标题"）；
- * 3. 字段级 `title` 一律不动（HITL 表单标签靠它）；
- * 4. 幂等 + 不改入参对象。
- */
 describe('withServerTitleX', () => {
   const schema = () => ({
     title: 'ocr_imageArguments',
@@ -173,7 +149,6 @@ describe('withServerTitleX', () => {
     expect(out['x-title']).toBe('图片识别');
     expect(out.type).toBe('object');
     expect(out.required).toEqual(['image']);
-    // 字段级标题不动：HITL 表单的字段标签依赖它
     expect((out.properties as Record<string, { title?: string }>).image?.title).toBe('待识别图片');
   });
 

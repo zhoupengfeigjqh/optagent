@@ -1,12 +1,3 @@
-/**
- * 单元测试：正文池组装时注入「后台计算结果」段（R11，契约 §10.5 ③ / §10.6 不变式 5）
- *
- * 两条：
- * 1. 有产出 → 该段出现在 `systemExtra`，且与**摘要段并列**（摘要在前）；
- * 2. 无产出 → 段长度为 0（不占一个字符），`systemExtra` 不因"空产出段"而多出来。
- *
- * 独立成文件：`run-manager-tool-events.spec.ts` 已承载上下文池用例，新用例不再往里堆。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +21,6 @@ async function* plainTurn(): AsyncIterable<LlmEvent> {
   yield { type: 'done', usage: { inputTokens: 3, outputTokens: 1 } };
 }
 
-/** 记录每次 run 收到的请求（用于断言提示词投影） */
 function recordingAgent(captured: AgentRunRequest[]): RunAgentLike {
   return {
     key: { userId: 'admin', agentName: 'demo' },
@@ -76,7 +66,6 @@ describe('后台计算结果清单注入（R11）', () => {
     const manager = new RunManager({
       history,
       usage,
-      // 009：装配侧按（用户，数字人，会话）取产出清单
       produced: async (userId, agentName, threadId) => {
         asked.push([userId, agentName, threadId]);
         return PRODUCED_TEXT;
@@ -94,7 +83,6 @@ describe('后台计算结果清单注入（R11）', () => {
     const manager = new RunManager({ history, usage, produced: async () => '' });
     const [req] = await runOnce(manager);
 
-    // R18 起 `systemExtra` 恒含【当前时间】段 ⇒ 这里改断言"该段长度为 0"（不出现产出段）
     expect(req!.systemExtra).not.toContain('【后台计算结果】');
     expect(req!.messages.map((m) => m.content).join('\n')).not.toContain('后台计算结果');
   });

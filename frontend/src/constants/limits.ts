@@ -6,7 +6,6 @@
  * 前端与后端保持同口径，避免两侧各自硬编码。
  */
 
-/* ---------- 上传（FR-010、contracts §5.1） ---------- */
 
 /** 单文件上传上限（字节）：5MB（全项目统一约束，与后端 UPLOAD_MAX_MB 对齐）。 */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -14,50 +13,33 @@ export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 /** 单文件上传上限（用于文案）：5MB。 */
 export const MAX_UPLOAD_MB = 5
 
-/**
- * 扩展名白名单由 `GET /api/files/workspace` 的**目录级** `upload_extensions` 下发，
- * 前端不再保留全局常量。2026-10-13 起粒度下放到目录：数据准备的**每个二级目录**各自一份
- * （未配置 = 平台默认 `.csv` / `.xlsx`）；临时空间为空间级（csv/xlsx/xls/txt/json/pdf + 图片）。
- */
 
-/* ---------- 文件引用（FR-017、SC-019） ---------- */
 
 /** 单条消息允许引用的文件数上限。 */
 export const MAX_REFERENCES_PER_MESSAGE = 10
 
-/* ---------- 历史会话（FR-039、FR-040、SC-014） ---------- */
 
-/** 历史列表默认展示条数（前端切片）。 */
 export const HISTORY_DEFAULT_LIMIT = 10
 
-/** 点击"更多"后的展示条数（前端切片）。 */
 export const HISTORY_EXPANDED_LIMIT = 100
 
-/* ---------- 会话详情分页（contracts §3.3） ---------- */
 
-/** 会话详情单页消息条数（后端默认 50）。 */
 export const MESSAGE_PAGE_SIZE = 50
 
 /** 会话详情单页消息条数上限（后端最大 200）。 */
 export const MESSAGE_PAGE_MAX = 200
 
-/* ---------- 提示（D14） ---------- */
 
-/** 同一时刻最多展示的提示条数。 */
 export const TOAST_MAX_VISIBLE = 3
 
 /** 提示自动消失时长（毫秒）。 */
 export const TOAST_DURATION_MS = 4000
 
-/* ---------- 本地偏好存储（plan.md 存储段） ---------- */
 
-/** `sessionStorage` 键名前缀。 */
 export const STORAGE_PREFIX = 'optagent.'
 
-/** 当前模型缓存键。 */
 export const STORAGE_KEY_MODEL = `${STORAGE_PREFIX}model`
 
-/** 思考开关缓存键。 */
 export const STORAGE_KEY_THINKING = `${STORAGE_PREFIX}thinking`
 
 /**

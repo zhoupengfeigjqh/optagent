@@ -1,15 +1,3 @@
-/**
- * 技能内**单个文件**的读取与在线编辑（`FR-036`，2026-09-16 产品决定：全部文件可编辑）。
- *
- * 与 `install.ts` 的分工：
- * - 本模块只管"**一个文件**"：路径安全、体积与二进制判据、乐观锁、原子写入；
- * - `install.ts` 管"**一个技能**"：`index.json`、整包安装/覆盖/删除。
- * 因此索引同步（描述、附件大小、`updated_at`）留在 `install.ts`——本模块对索引无感知，
- * 只把"改的是 SKILL.md 时解析出的新描述"回传出去。
- *
- * 与安装侧**同一套安全口径**（复用 `unsafeEntryReason` / `normalizeEntryName`）：
- * 进不来的条目（绝对路径、盘符、`..`、控制字符）在这里同样读不到、也写不进去。
- */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,7 +8,6 @@ import { removeTree } from '../../infra/fs-remove.js';
 import { normalizeEntryName, unsafeEntryReason } from './archive.js';
 import { parseSkillMetadata } from './metadata.js';
 
-/** 技能库根目录（相对设计态根）；技能目录为 `skills/{name}` */
 export const SKILLS_DIR = 'skills';
 
 /** 单次读取返回正文的字节上限（超出只给前 N 字节并标注 truncated） */
@@ -39,38 +26,30 @@ export interface SkillFileContent {
   name: string;
   path: string;
   size: number;
-  /** 二进制文件（含 NUL 或非 UTF-8）：不返回 content */
   binary: boolean;
   truncated: boolean;
   content: string | null;
-  /** 内容哈希（sha256）：编辑保存时作为乐观锁基准 */
   hash: string;
   /** 是否可在线编辑：**文本且完整**（二进制与超限文件不可编辑） */
   editable: boolean;
 }
 
-/** 本模块的依赖 */
 export interface SkillFileDeps {
   store: PlatformStore;
 }
 
-/** 编辑结果（索引同步所需的最小信息） */
 export interface SkillFileWriteOutcome {
   path: string;
   size: number;
   hash: string;
-  /** 改的是 `SKILL.md` 时为按新正文解析出的展示名；其他文件为 `null` */
   display_name: string | null;
-  /** 改的是 `SKILL.md` 时为按新正文解析出的描述；其他文件为 `null` */
   description: string | null;
 }
 
-/** 内容哈希（sha256，十六进制）——编辑的乐观锁基准 */
 export function contentHash(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-/** 严格 UTF-8 解码；含 NUL 字节或解码失败 → null（视为二进制） */
 export function decodeUtf8(buffer: Buffer): string | null {
   if (buffer.includes(0)) return null;
   try {
@@ -114,15 +93,6 @@ function resolveInsideSkill(
   return { abs, normalized };
 }
 
-/**
- * 读取技能内单个文件。
- *
- * 只返回**目录内真实存在的普通文件**（目录、符号链接一律不返回）；
- * 二进制不返回正文只返回大小；超出预览上限只返回前 N 字节并置 `truncated`。
- *
- * 返回 `hash` / `editable` 供编辑使用：`editable` 为假时界面不给编辑入口，
- * `writeSkillFile` 也以同一判据拒绝（界面与服务端同一口径，不存在"能点但存不了"）。
- */
 export function readSkillFile(
   deps: SkillFileDeps,
   skillDirRel: string,
@@ -171,21 +141,6 @@ export function readSkillFile(
   };
 }
 
-/**
- * 编辑并保存技能内单个文件。
- *
- * 1. 路径安全复用 `resolveInsideSkill`（绝对路径 / `..` / 控制字符 / 越界一律拒）；
- * 2. 并发保护用 `baseHash`（客户端读到的内容哈希）——不符即 `ADM_CONFIG_REVISION_CONFLICT`，
- *    **MUST NOT 静默覆盖**他人的改动；
- * 3. 只允许编辑**文本且完整**的文件（二进制、超限文件拒写，判据与 `readSkillFile` 的 `editable` 一致）；
- * 4. 写入"临时文件 → `fsync` → 原子 `rename`"，失败不留半截文件、也不改动原文件。
- *
- * **保存即覆盖、无法恢复**（2026-09-16 产品决定：撤销"编辑快照"）：不产生任何副本，
- * 因此界面 MUST 在保存前**二次确认**并把这条后果讲明（见 `SkillFileEditor.vue`）。
- *
- * 改 `SKILL.md` 时额外校验：`name` MUST 与技能名一致——技能名是各数字人的引用键，
- * 改名必须走重新安装，否则会**静默打断**引用（`FR-019`）。
- */
 export function writeSkillFile(
   deps: SkillFileDeps,
   skillDirRel: string,
@@ -276,14 +231,6 @@ export function writeSkillFile(
   };
 }
 
-/**
- * 原子写入单个文件：临时文件 → `fsync` → `rename`。
- *
- * 临时文件建在**技能目录之外的 `skills/` 根**下（同一文件系统，`rename` 不跨设备）：
- * 这样"写一半"的中间态**永远不会出现在技能目录里**——否则并发的部署物化
- * 可能把这个临时文件当成技能内容拷进数字人目录。
- * 失败时原文件**未被改动**，且临时文件被清理。
- */
 function writeAtomicFile(deps: SkillFileDeps, abs: string, bytes: Buffer): void {
   const tmp = path.join(
     deps.store.abs(SKILLS_DIR),

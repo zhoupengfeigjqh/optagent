@@ -1,16 +1,4 @@
 <script setup lang="ts">
-/**
- * 从本体市场导入 / 更新本体（2026-10-03，契约 §10.4~§10.6）。
- *
- * 与 `SkillMarketDialog` 同构、口径更窄：
- * - 打开即扫描市场并完成一次"文件是否变化"的检查（`ontology.yaml` 与
- *   `securities.yaml` 两个指纹比对，任一不同即「已变化」）；
- * - 状态语义：new=可导入；unchanged=已导入且文件无变化；changed=已变化**可直接更新**；
- *   invalid=市场侧缺 `ontology.yaml` 或 `securities.yaml` / 超限 / YAML 无效（不可操作，原因见详情）；
- * - **没有"人工修改确认"分支**：本体在平台侧只读、没有编辑通道，
- *   整包替换不存在"丢本地修改"的风险（那是 SKILL 独有的 `ADM_SKILL_MODIFIED`）；
- * - 失败**不关窗**：错误留在窗内，管理员可改选或刷新后重试。
- */
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import {
   fetchOntoMarketOntologies,
@@ -79,7 +67,6 @@ async function load(): Promise<void> {
   }
 }
 
-/** 主操作：按所选状态分派导入 / 更新 */
 async function proceed(): Promise<void> {
   const item = selected.value
   if (!item || busy.value || !canSelect(item)) return
@@ -87,7 +74,6 @@ async function proceed(): Promise<void> {
   error.value = null
   const isUpdate = item.status === 'changed'
   try {
-    // 两条分支写开，而不是「三元 + 动态事件名」：`emit` 的重载需要字面量事件名才能收敛，
     // 且两个接口的返回类型也要各自推导（否则 TS2769）
     if (isUpdate) {
       emit('updated', await updateOntoMarketOntology(item.scenario, item.ontology_dir))
@@ -96,7 +82,6 @@ async function proceed(): Promise<void> {
     }
     requestClose()
   } catch (err) {
-    // 失败不关窗：错误留在窗内，管理员可刷新后重试
     error.value = err as ErrorInfo
     emit('error', isUpdate ? '更新未完成，请查看错误原因' : '导入未完成，请查看错误原因')
   } finally {

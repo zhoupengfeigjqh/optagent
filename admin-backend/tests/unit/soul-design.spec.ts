@@ -1,11 +1,3 @@
-/**
- * 单元测试：结构化 SOUL 的校验与渲染（004 / 007）。
- *
- * 覆盖四类：
- * - **校验**：必填、字数 / 条数上限、工具引用合法性（拒绝式，不做隐式剔除）；
- * - **渲染**：frontmatter 只装展示数据、正文只装提示词、空字段不写空壳；
- * - **兼容**：存量自由文本 → `{ mission: 原文 }`，渲染出的正文与原文逐字一致。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import {
@@ -92,7 +84,6 @@ describe('normalizeSoulDesign', () => {
       () => normalizeSoulDesign({ ...validRaw(), intro: 'x'.repeat(SOUL_LIMITS.intro + 1) }, OPTIONS),
       ERROR_CODES.VALIDATION_FAILED,
     );
-    // 问题实例单条内容封顶（004 修订：150 字）：151 拒绝、150 通过
     expectCode(
       () =>
         normalizeSoulDesign(
@@ -142,7 +133,6 @@ describe('normalizeSoulDesign', () => {
   });
 
   it('异常：工具引用越界 → ADM_AGENT_INVALID_REF（拒绝式，不静默剔除）', () => {
-    // 内置工具未启用
     expectCode(
       () =>
         normalizeSoulDesign(
@@ -154,7 +144,6 @@ describe('normalizeSoulDesign', () => {
         ),
       ERROR_CODES.ADM_AGENT_INVALID_REF,
     );
-    // MCP 服务未挂载
     expectCode(
       () =>
         normalizeSoulDesign(
@@ -166,7 +155,6 @@ describe('normalizeSoulDesign', () => {
         ),
       ERROR_CODES.ADM_AGENT_INVALID_REF,
     );
-    // 工具不在该服务的可见白名单内
     expectCode(
       () =>
         normalizeSoulDesign(
@@ -234,7 +222,6 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
       normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: false }, OPTIONS)
         .next_action_hints,
     ).toBe(false);
-    // 门控：意图聚焦关闭时，即便提交 true 也收敛为 false
     expect(normalizeSoulDesign({ ...validRaw(), next_action_hints: true }, OPTIONS).next_action_hints).toBe(
       false,
     );
@@ -262,7 +249,6 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
 
     const missing = renderSoulMd(normalizeSoulDesign({ ...validRaw(), intent_focus: true }, OPTIONS));
     expect(missing).not.toContain('next_action_hints');
-    // 关闭态与缺省态产物**逐字一致**（同一份文档，不再有第三种形态）
     expect(off).toBe(missing);
   });
 
@@ -276,7 +262,6 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
 
     const body = (md: string) => md.slice(md.indexOf('---', 3) + 3);
     expect(body(on)).toBe(body(off));
-    // 差异**恰好是两行**（开关 + 条数）：把这两行删掉，开启态与关闭态逐字相同
     const strip = (md: string) =>
       md
         .split('\n')
@@ -296,7 +281,6 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     expect(isSoulDesign({ mission: '你是助手' })).toBe(true);
     expect(isSoulDesign({ mission: '你是助手', next_action_hints: true })).toBe(true);
     expect(isSoulDesign({ mission: '你是助手', next_action_hints: false })).toBe(true);
-    // 仍按原判据拒绝非结构化形态
     expect(isSoulDesign({ intro: 'x' })).toBe(false);
     expect(isSoulDesign('你是助手')).toBe(false);
   });
@@ -320,14 +304,12 @@ describe('next_action_hints —— 下一步动作提示开关（007）', () => 
     expect(on).toContain('next_action_hints: true');
     expect(on).toContain('next_action_hints_count: 5');
 
-    // 关闭态连"条数"都不出现（未搭配的内容不残留）
     const off = renderSoulMd(
       normalizeSoulDesign({ ...validRaw(), next_action_hints: false, next_action_hints_count: 5 }, OPTIONS),
     );
     expect(off).not.toContain('next_action_hints_count');
     expect(off).toBe(renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS)));
 
-    // 开启但未给条数 → 落缺省值，产物仍是显式的
     const onDefault = renderSoulMd(
       normalizeSoulDesign({ ...validRaw(), intent_focus: true, next_action_hints: true }, OPTIONS),
     );
@@ -410,16 +392,12 @@ describe('intent_focus —— 意图聚焦开关（013）', () => {
         normalizeSoulDesign({ ...validRaw(), next_action_hints: hints, intent_focus: focus }, OPTIONS),
       );
 
-    // 双开：两个键都写
     expect(render(true, true)).toContain('intent_focus: true');
     expect(render(true, true)).toContain('next_action_hints: true');
-    // 意图聚焦关（即便 hints 提交 true）：收敛为关，两个键都不写
     expect(render(true, false)).not.toContain('intent_focus');
     expect(render(true, false)).not.toContain('next_action_hints');
-    // 意图聚焦开 + hints 关：只写 intent_focus
     expect(render(false, true)).toContain('intent_focus: true');
     expect(render(false, true)).not.toContain('next_action_hints');
-    // 双关：都不写
     expect(render(false, false)).not.toContain('intent_focus');
     expect(render(false, false)).not.toContain('next_action_hints');
   });
@@ -436,13 +414,11 @@ describe('renderSoulMd', () => {
     const soul = normalizeSoulDesign(validRaw(), OPTIONS);
     const md = renderSoulMd(soul);
 
-    // frontmatter：展示/引导
     expect(md.startsWith('---\nsoul_version: 1')).toBe(true);
     expect(md).toContain('intro: 订单交付助理');
     expect(md).toContain('welcome: 你好，我是交付助理');
     expect(md).toContain('- prompt: 帮我梳理昨天订单的交付风险');
 
-    // 正文：提示词
     expect(md).toContain('## 主要使命\n\n你是交付助理。');
     expect(md).toContain('## 能力标签\n- 订单排程');
     expect(md).toContain('## 绝对禁止\n- 不得编造订单号');
@@ -456,7 +432,6 @@ describe('renderSoulMd', () => {
     expect(md).not.toContain('## 绝对禁止');
     expect(md).not.toContain('## 补充说明');
     expect(md).not.toContain('starters:');
-    // 只有 frontmatter + 主要使命
     expect(md.endsWith('## 主要使命\n\nm\n')).toBe(true);
   });
 });
@@ -467,7 +442,6 @@ describe('fromLegacySoul / describeSoul', () => {
     const soul = fromLegacySoul(legacy);
     expect(soul.mission).toBe(legacy);
     const md = renderSoulMd(soul);
-    // frontmatter 为空壳（旧文档没有展示数据），正文即原文
     expect(md).toContain(`## 主要使命\n\n${legacy}`);
   });
 
@@ -499,7 +473,6 @@ describe('fromLegacySoul / describeSoul', () => {
       OPTIONS,
     );
 
-    // 1) 保存：四个开关按真值落库
     expect(saved).toMatchObject({
       intent_focus: true,
       intent_focus_depth: 2,
@@ -513,14 +486,12 @@ describe('fromLegacySoul / describeSoul', () => {
     const resaved = normalizeSoulDesign(saved as unknown as Record<string, unknown>, OPTIONS);
     expect(resaved).toEqual(saved);
 
-    // 3) 物化：四个开关写进 frontmatter
     const md = renderSoulMd(resaved);
     expect(md).toContain('intent_focus: true');
     expect(md).toContain('intent_focus_depth: 2');
     expect(md).toContain('input_rewrite: true');
     expect(md).toContain('term_normalize: true');
 
-    // 4) 回读：落盘对象经过一次 JSON 往返再归一化，仍然一致
     const reread = JSON.parse(JSON.stringify(resaved)) as Record<string, unknown>;
     expect(normalizeSoulDesign(reread, OPTIONS)).toEqual(saved);
   });

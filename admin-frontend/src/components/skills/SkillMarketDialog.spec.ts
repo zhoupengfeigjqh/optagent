@@ -1,14 +1,3 @@
-/**
- * 组件测试：从本体市场导入 / 更新 SKILL（2026-10-02；更新流 §4.8）
- *
- * 守住五条口径：
- * 1. 打开即扫描市场（这一步就是"市场文件是否变化"的检查）并按状态渲染；
- * 2. 导入走 `installOntoMarketSkill(scenario, ontology, skill_dir)`，成功后 emit installed 并关窗；
- * 3. **导入失败不关窗**：错误留在窗内（与"校验失败不关窗"同一口径）；
- * 4. changed 状态**可选且走更新**（`updateOntoMarketSkill`）；conflict / unchanged / invalid 不可选；
- * 5. 更新遇 `ADM_SKILL_MODIFIED`：窗内展示确认提示，主按钮让位，
- *    点"仍要更新"才携带 confirm=true 重试（MUST NOT 静默覆盖人工修改）。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SkillMarketDialog from './SkillMarketDialog.vue'
@@ -79,11 +68,9 @@ describe('SkillMarketDialog —— 扫描与状态', () => {
     expect(btn.find('.skill-market__name').text()).toBe('原材料采购和库存')
     expect(btn.find('.skill-market__alias').text()).toBe('raw-material-inventory')
 
-    // 第三、四条：描述与来源路径（口径与 SKILL 卡片一致）
     expect(btn.find('.skill-market__desc').text()).toBe('描述：原材料与库存本体技能')
     expect(btn.find('.skill-market__path').text()).toBe('来源：生产调度 / 原材料采购和库存')
 
-    // 选中后的文本与导入请求都用身份名 / 目录名，展示名不参与请求
     await btn.trigger('click')
     expect(wrapper.find('.skill-market__selected').text()).toContain('原材料采购和库存')
     await wrapper.find('[data-test="import"]').trigger('click')
@@ -112,7 +99,6 @@ describe('SkillMarketDialog —— 扫描与状态', () => {
     await buttons[1]!.trigger('click')
     expect(wrapper.find('[data-test="import"]').attributes('disabled')).toBeDefined()
 
-    // changed 可选，主按钮变为"更新选中技能"
     await buttons[0]!.trigger('click')
     const primary = wrapper.find('[data-test="import"]')
     expect(primary.attributes('disabled')).toBeUndefined()
@@ -237,7 +223,6 @@ describe('SkillMarketDialog —— 更新（§4.8）', () => {
     await wrapper.find('[data-test="import"]').trigger('click')
     await flushPromises()
 
-    // 确认块出现（含确认按钮）；主按钮让位禁用；不关窗
     const confirmBtn = wrapper.find('[data-test="confirm-update"]')
     expect(confirmBtn.exists()).toBe(true)
     expect(wrapper.text()).toContain('库内版本被人工修改过')

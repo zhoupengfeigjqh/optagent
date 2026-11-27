@@ -22,7 +22,6 @@ function fakeRect(rect: { left: number; top: number; right: number; bottom: numb
   } as DOMRect
 }
 
-/** 造一个"有布局"的输入框（自身矩形可控）。 */
 function mountField(tag: 'input' | 'textarea'): HTMLInputElement | HTMLTextAreaElement {
   const field = document.createElement(tag) as HTMLInputElement | HTMLTextAreaElement
   field.value = '数据准备/@产'
@@ -32,7 +31,6 @@ function mountField(tag: 'input' | 'textarea'): HTMLInputElement | HTMLTextAreaE
   return field
 }
 
-/** 让镜像里的零宽 marker 报出可控矩形（其余元素保持真实）。 */
 function stubMarkerRect(rect: typeof MARKER = MARKER): void {
   const original = document.createElement.bind(document)
   vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
@@ -101,7 +99,6 @@ describe('caretRectOf —— 镜像测量', () => {
 
   it('量不到高度且 line-height:normal → 用兜底行高，矩形仍有可见高度', () => {
     const field = mountField('input')
-    // marker 高度为 0（`line-height: normal` 时的真实情况），jsdom 的 computed line-height 也是 'normal'
     stubMarkerRect({ left: MARKER.left, top: MARKER.top, right: MARKER.left, bottom: MARKER.top })
 
     const rect = caretRectOf(field, 5)
@@ -122,7 +119,6 @@ describe('caretRectOf —— 镜像测量', () => {
  * 这些分支此前未覆盖，降级口径一旦走错，面板会贴到视口左上角。
  */
 describe('caretRectOf —— contenteditable 的选区矩形', () => {
-  /** 造一个选区桩（"选区是否落在编辑区内"由 `stubContains` 单独控制） */
   function stubSelection(options: {
     rangeCount?: number
     rect?: { left: number; top: number; right: number; bottom: number }
@@ -138,7 +134,6 @@ describe('caretRectOf —— contenteditable 的选区矩形', () => {
     } as unknown as Selection)
   }
 
-  /** 让 `element.contains(range.startContainer)` 返回期望值 */
   function stubContains(value: boolean): void {
     const editor = document.querySelector('[contenteditable]')
     if (editor) vi.spyOn(editor, 'contains').mockReturnValue(value)

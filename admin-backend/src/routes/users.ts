@@ -1,17 +1,3 @@
-/**
- * 用户与关联数字人路由（`contracts/admin-api.md` §6.1~§6.4）。
- *
- * 该页兼作**部署前核对总账**（`FR-023`）：用户卡片可展开看到每个数字人的
- * 搭配摘要（引用的 MCP 服务、内置工具、SKILL）及其异常标记，
- * 并在卡片上显示**部署状态**（`deployed_at`，取自部署清单；`null` = 尚未部署）。
- * 部署对象就在这一页勾选（2026-09-16 十一次调整）。
- *
- * `DELETE`（2026-10-20 修订）：**先撤回该用户的部署**（清 `agents/**`、移出清单），
- * 再删平台侧记录。文件空间（`user-data/**`）一律保留（`FR-028`）。
- *
- * 顺序不能颠倒：撤回失败时用户仍在平台，管理员可重试；若先删平台记录，就再没有
- * 入口能把该用户从运行环境清掉——遗留的部署会继续对外提供服务。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -48,7 +34,6 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
       return {
         user_id: user.user_id,
         agents,
-        // 部署状态取自部署清单：`null` 表示"从未部署过"（新建用户即如此）
         deployed_at: ctx.manifest.get(user.user_id)?.last_deployed_at ?? null,
         summary: withSummary
           ? user.agents.map((name) => {
@@ -103,15 +88,6 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     return ctx.users.update(userId, body.agents, body.revision);
   });
 
-  /**
-   * 重置密码（2026-11-18，契约 §6.4.1）。
-   *
-   * 独立子资源而非并入 `PUT /api/admin/users/{uid}`：后者带 `revision` 且语义是
-   * "替换关联数字人"，把密码塞进去会让两条无关的写入互相拖累版本。这里**不带**乐观锁。
-   *
-   * 重置成功即撤销该用户的会话（`FR-012` 同口径）：旧凭据里登记的是旧会话，
-   * 不改密码就换会话等于没收回，故必须先清登记再返回。
-   */
   app.post('/api/admin/users/:user_id/password', async (req) => {
     const { user_id: userId } = req.params as { user_id: string };
     const body = (req.body ?? {}) as { password?: unknown };
@@ -131,16 +107,13 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { user_id: userId } = req.params as { user_id: string };
     // 不存在 → 404（先读一次，避免对未知目录做写操作）
     ctx.users.read(userId);
-    // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
     ctx.deployer.purgeUser(userId);
     ctx.users.remove(userId);
-    // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
     ctx.auth.revokeUser(userId);
     return reply.status(204).send();
   });
 }
 
-/** `FR-025`：可关联的 MUST 是平台内**已存在**的数字人 */
 function assertAgentsExist(ctx: AppContext, raw: unknown): void {
   if (!Array.isArray(raw)) return;
   const missing = raw.filter((name): name is string => typeof name === 'string' && !ctx.agents.exists(name));

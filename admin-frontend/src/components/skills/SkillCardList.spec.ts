@@ -1,6 +1,3 @@
-/**
- * 组件测试：SKILL 卡片列表（T096）
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import SkillCardList from './SkillCardList.vue'

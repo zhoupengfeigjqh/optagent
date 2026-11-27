@@ -1,14 +1,3 @@
-/**
- * 单元测试：定时任务 store（015，T025）
- *
- * 覆盖六条产品口径：
- * 1. 打开覆盖层只拉列表，**不改任何任务状态**（FR-003 / FR-006）；
- * 2. 创建成功后插到列表首位；
- * 3. 启停 / 删除是乐观更新，失败必须回滚且提示；
- * 4. 变更信号到达 → 重拉任务列表 **且** 刷新左栏会话（新会话要立刻可见）；
- * 5. 信号降级（重连用尽）只置 `degraded`，不制造错误态；
- * 6. 加载失败置 `error`，而不是把列表清空冒充"没有任务"。
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ScheduledTasksApi } from '../api/scheduled-tasks'
@@ -186,7 +175,6 @@ describe('启停', () => {
     resolve({ task: task({ enabled: true, status: 'running' }) })
     await call
 
-    // 回归点：曾经按"代际"门控清除，刷新抢先一行两个按钮就永久置灰（无法停止 / 无法删除）
     expect(store.pendingIds.value).not.toContain('t1')
     expect(store.tasks.value[0]?.enabled).toBe(true)
   })

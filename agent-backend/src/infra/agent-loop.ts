@@ -1,30 +1,18 @@
-/**
- * pi-agent-core 低层 runAgentLoop 调用封装。
- *
- * 入参：systemPrompt、拼装后 messages、工具集（经 file-access 代理的 AgentTool）、signal；
- * 出参：统一为 LlmEvent 异步迭代（thinking_delta / content_delta / done(usage) / error）。
- * 工具执行由 loop 内部驱动；usage 从 agent_end 的最后一条 assistant 消息提取。
- */
 import type { Model, Provider } from '@earendil-works/pi-ai';
 import {
   runAgentLoop,
   type AgentEvent,
+  type AgentLoopConfig,
   type AgentTool,
   type StreamFn,
 } from '@earendil-works/pi-agent-core';
 import type { LlmRetryOptions } from '../config.js';
+import type { PlanProgress } from '../domain/plan/types.js';
 import { classifyLlmFailure } from '../domain/llm-error.js';
 import { markToolError } from '../domain/tool-error.js';
 import { digestArgs, serializeToolResult } from '../domain/tool-result.js';
 import type { HistoryMessage, LlmEvent, UsageInfo } from '../types.js';
 
-/**
- * 由 pi-ai provider 构造 runAgentLoop 所需的 streamFn（请求级注入 apiKey）。
- *
- * `retry` 是两个 LLM 调用路径（本函数与 `PiAiLlmProvider.streamChat`）**共用**的有界重试口径：
- * 交给 pi-ai 的 `retryProviderRequest` 执行（退避 / `x-should-retry` / `Retry-After` /
- * 可打断睡眠均已实现），运行环境只传参、不自建（`runtime-api-delta.md` §19.1）。
- */
 export function createStreamFn(
   provider: Provider,
   apiKey: string,
@@ -39,17 +27,42 @@ export function createStreamFn(
     }) as never;
 }
 
+export interface RunAgentLoopHooks {
+  prepareNextTurn?: (
+    context: Parameters<NonNullable<AgentLoopConfig['prepareNextTurn']>>[0],
+  ) => ReturnType<NonNullable<AgentLoopConfig['prepareNextTurn']>>;
+  shouldStopAfterTurn?: (
+    context: Parameters<NonNullable<AgentLoopConfig['shouldStopAfterTurn']>>[0],
+  ) => ReturnType<NonNullable<AgentLoopConfig['shouldStopAfterTurn']>>;
+  getFollowUpMessages?: NonNullable<AgentLoopConfig['getFollowUpMessages']>;
+  /** 在 `markToolError` **之前**调用，只允许记录事实（不得改写结果） */
+  afterToolCall?: (
+    context: Parameters<NonNullable<AgentLoopConfig['afterToolCall']>>[0],
+    signal?: AbortSignal,
+  ) => Promise<void>;
+}
+
 export interface RunAgentLoopOptions {
   model: Model<never>;
   streamFn: StreamFn;
   systemPrompt: string;
   messages: HistoryMessage[];
   tools: AgentTool[];
+  labelTools?: readonly AgentTool[];
   thinking: boolean;
   signal: AbortSignal;
+  hooks?: RunAgentLoopHooks;
+  /**
+   * 028（FR-034）：`begin()` 期间已产生的计划进度（首步 `running` 等）。
+   *
+   * 规划发生在 loop 启动之前，而进度必须走同一条事件队列——调用方先攒起来，
+   * 本层在开始迭代时补发。
+   */
+  planProgress?: readonly PlanProgress[];
+  /** 028（FR-034）：把编排器的**实时**进度接到本层事件队列（队列就绪后调用一次） */
+  onPlanProgress?: (emit: (event: PlanProgress) => void) => void;
 }
 
-/** 历史 assistant 消息的占位 usage（真实 token 已入 usage.db，此处仅为满足 pi 的消息结构） */
 const ZERO_USAGE = {
   input: 0,
   output: 0,
@@ -60,7 +73,7 @@ const ZERO_USAGE = {
 } as const;
 
 export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncIterable<LlmEvent> {
-  const queue: Array<LlmEvent | null> = []; // null = 结束哨兵
+  const queue: Array<LlmEvent | null> = [];
   let wakeup: (() => void) | null = null;
   const push = (e: LlmEvent | null) => {
     queue.push(e);
@@ -70,8 +83,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
   const now = () => Date.now();
   const prompts = opts.messages.map((m) => {
     if (m.role === 'assistant') {
-      // pi 消息结构：assistant 的 content 是块数组；缺 usage 会读 undefined.totalTokens 崩溃。
-      // 历史轮的真实 token 已入 usage.db，此处仅补结构占位。
       return {
         role: 'assistant',
         content: [{ type: 'text', text: m.content }],
@@ -83,18 +94,20 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     return { role: m.role, content: m.content, timestamp: now() };
   });
 
-  /**
-   * 工具名 → 人读名称（2026-10-27）。
-   *
-   * `label` 在装配时已算好（平台 `tool_labels` > 服务端 `Tool.title` > `server: tool`），
-   * 这里只做一张查表，随 `tool_call_start` 一起上行——工具卡片与 HITL 弹窗都要显示中文名，
-   * 而 pi 的 `tool_execution_start` 只给 `toolName`。
-   */
   const labels = new Map<string, string>();
-  for (const tool of opts.tools) {
+  for (const tool of opts.labelTools ?? opts.tools) {
     const label = typeof tool.label === 'string' ? tool.label.trim() : '';
     if (label !== '') labels.set(tool.name, label);
   }
+
+  /** 计划进度（028 FR-034）：补发 begin 期间积压的，再把实时回调接到队列 */
+  const pushProgress = (event: PlanProgress): void => {
+    push({ type: 'plan_progress', seqId: event.seqId, label: event.label, phase: event.phase });
+  };
+  if (opts.planProgress !== undefined) {
+    for (const event of opts.planProgress) pushProgress(event);
+  }
+  opts.onPlanProgress?.(pushProgress);
 
   const emit = (event: AgentEvent): void => {
     if (event.type === 'message_update') {
@@ -102,7 +115,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
       if (ev.type === 'thinking_delta') push({ type: 'thinking_delta', delta: ev.delta });
       else if (ev.type === 'text_delta') push({ type: 'content_delta', delta: ev.delta });
     } else if (event.type === 'tool_execution_start') {
-      // 入参只带**短标量摘要**（供展示"查了什么"）；原文永不下发（spec 002 FR-001）
       const argsDigest = digestArgs(event.args);
       const label = labels.get(event.toolName);
       push({
@@ -113,8 +125,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         ...(label !== undefined ? { label } : {}),
       });
     } else if (event.type === 'tool_execution_end') {
-      // 结果拍平成文本上行（由 run-manager 落 tool-events.jsonl）；
-      // **SSE 仍只透出状态**，结果不经事件总线广播（spec 002 FR-002 的对外部分不变）
       push({
         type: 'tool_call_end',
         callId: event.toolCallId,
@@ -123,8 +133,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
         resultText: serializeToolResult(event.result).text,
       });
     } else if (event.type === 'agent_end') {
-      // usage 精确统计：工具循环有多跳 LLM 调用，每跳产生一条带 usage 的
-      // assistant 消息，须全部累加（只取最后一条会漏掉中间跳的大 prompt）
       const usage: UsageInfo = { inputTokens: 0, outputTokens: 0 };
       for (const m of event.messages) {
         if (m.role !== 'assistant') continue;
@@ -134,7 +142,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
           usage.outputTokens += u.output;
         }
       }
-      // 中断/失败：取最后一条 assistant 消息的终止原因
       for (let i = event.messages.length - 1; i >= 0; i--) {
         const m = event.messages[i]!;
         if (m.role === 'assistant') {
@@ -153,7 +160,6 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
             return;
           }
           if (stopReason === 'error') {
-            // 分类唯一实现：与直聊路径（`PiAiLlmProvider.streamChat`）产出同一个错误码 + 诊断字段
             push({
               type: 'error',
               ...classifyLlmFailure(errorMessage ? { message: errorMessage } : {}),
@@ -175,22 +181,27 @@ export async function* runAgentLoopEvents(opts: RunAgentLoopOptions): AsyncItera
     { systemPrompt: opts.systemPrompt, messages: [], tools: opts.tools },
     {
       model: opts.model,
+      toolExecution: 'sequential',
       ...(opts.thinking ? { reasoning: 'low' as const } : {}),
       convertToLlm: (msgs) =>
         msgs.filter(
           (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult',
         ) as never,
-      /**
-       * 工具失败的唯一翻牌点（2026-10-29）。
-       *
-       * 工具层不抛异常，只在 `details.toolError` 打标记；这里统一翻成 `isError: true`，
-       * 下游 `tool_execution_end.isError` → SSE `tool_call_end.status='error'` →
-       * 卡片红色 + `tool-events.jsonl` 记 error（刷新后历史卡片口径一致）。
-       *
-       * 不用工具自己 throw 的原因见 `domain/tool-error.ts` 头部：pi 的 catch 会覆盖
-       * 整个 result（content 只剩 message、details 置空），结构化信息全丢。
-       */
-      afterToolCall: async (ctx) => markToolError(ctx.result),
+      afterToolCall: async (ctx, signal) => {
+        if (opts.hooks?.afterToolCall !== undefined) {
+          await opts.hooks.afterToolCall(ctx, signal);
+        }
+        return markToolError(ctx.result);
+      },
+      ...(opts.hooks?.prepareNextTurn !== undefined
+        ? { prepareNextTurn: opts.hooks.prepareNextTurn }
+        : {}),
+      ...(opts.hooks?.shouldStopAfterTurn !== undefined
+        ? { shouldStopAfterTurn: opts.hooks.shouldStopAfterTurn }
+        : {}),
+      ...(opts.hooks?.getFollowUpMessages !== undefined
+        ? { getFollowUpMessages: opts.hooks.getFollowUpMessages }
+        : {}),
     },
     emit,
     opts.signal,

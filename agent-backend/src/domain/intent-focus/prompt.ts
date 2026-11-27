@@ -1,60 +1,16 @@
-/**
- * 聚焦提示铸造（016 / 019，2026-11-13 修订）。
- *
- * 形态：首行固定前缀，其后每个入选技能一个编号块——第一行是技能本身，其后两段：
- * 1. `直接命中：` 用户意图命中的行为，以及（2026-11-20 起）命中的函数与由函数带出的
- *    关联概念取数行为（仍是一行，顿号分隔）；
- * 2. `上游路径：` **一行一条五元组**（`行为—概念—关系—概念—行为`），见 `paths.ts`。
- *
- * 函数与取数为什么不单独成段：一段一行会让提示多出两个段头，而它们与「直接命中」是
- * 同一个含义——"这轮该看这些"。类型区分靠 `〔概念(name)〕` 的归属标注，不加类型后缀
- * （2026-11-20 用户拍板：条目形态越统一，模型越不容易把函数当成可调用的工具）。
- *
- * 为什么把"关联概念 / 上游概念 / 上游参考"三段换成五元组（用户 2026-11-13 拍板）：
- * 分段列表只给出元素集合，**连接关系要靠模型自己猜**；五元组把一条推理的最小单元压成一行，
- * 起点行为挂在哪个概念、经哪条关系到了哪个概念、那个概念下能调什么，一行读完。
- * 概念不再单独成段（它在五元组里已经出现），避免同一概念在提示里重复两遍白占预算。
- *
- * 语义清晰的两条硬规矩：
- * - 方向与读向分开写：`[上游]` 表示这一跳走向主数据；关系名后的 `→` / `←` 只表示
- *   "关系名要不要反读"（例：`N:1` 的 `记录原材料` 从采购单走向原材料时要正读）；
- * - 链尾没有行为时写 `（无可用行为）`，不省略整行——模型需要知道"这条上游到此为止"。
- *
- * 截断改成**行级**（这是与 016 最大的实现差异）：五元组是一行一个原子，不能再按"段尾 pop"。
- * 顺序：先丢链尾无行为的行 → 再丢跳数大的行 → 再丢起点得分低的行；**每个起点行为至少留一行**，
- * 全部路径行丢完后才动 `直接命中`（与旧口径一致：直接命中最后才丢）。
- *
- * 只描述"能做什么 / 该看什么"，不带阈值、分数、工具名或执行指令。
- */
 import type { FocusPath } from './paths.js';
 import type { CapabilitySelection } from './types.js';
 
-/**
- * 提示长度上限（阶数 0 的基准值，字符）。
- *
- * 2026-11-20：1200 → 2000。原值按"每个入选行为一行、最多 32 个技能"估的，
- * 实测发散发到二阶时经常在 `直接命中` 段就被截断，路径行几乎全被丢掉——
- * 而截断是**整行丢弃**，一次截断就丢掉一整条五元组，信息损失比多花 token 严重。
- */
-export const MAX_PROMPT_CHARS = 2000;
+export const MAX_PROMPT_CHARS = 4000;
 
-/** 阶数 → 提示总长度上限：越深的发散允许越长的上下文（2000 / 3000 / 4000） */
+/** 阶数 → 提示总长度上限：越深的发散允许越长的上下文（4000 / 5000 / 6000） */
 export function maxPromptChars(depth: number): number {
   if (depth <= 0) return MAX_PROMPT_CHARS;
-  return depth === 1 ? 3000 : 4000;
+  return depth === 1 ? 5000 : 6000;
 }
 
-const PREFIX =
-  '本轮的任务与以下技能、本体概念、本体行为与本体函数密切相关，请重点关注（仅供参考，不必局限）';
+export const PROMPT_PREFIX = '［聚焦参考］以下为背景知识，不是工具清单；工具调用仍以工具清单为准。';
 
-/**
- * 「直接命中」段条目的剪枝优先级（数值越小越先丢）。
- *
- * 取数条目只是"顺手能查什么"，函数次之，行为是用户意图本身——最后才动。
- */
-const ENTRY_PRIORITY = { conceptQuery: 0, function: 1, behavior: 2 } as const;
-
-/** 提示里的本体引用（id 用于归属，name 用于展示） */
 export interface PromptOntology {
   id: string;
   name: string | null;
@@ -64,54 +20,50 @@ export interface PromptOntology {
 export interface PromptSkill {
   name: string;
   isOntology: boolean;
-  /** 关联本体；本体技能恒有且仅有 1 个，非本体技能为 null */
   ontology: PromptOntology | null;
   score: number | null;
-  /** 原序，用于同分稳定 */
   order: number;
 }
 
 export interface ComposeOptions {
-  /** 五元组路径（只含**上游**；下游只进卡片，不进提示） */
   paths?: readonly FocusPath[];
-  /** 总长度上限；缺省按阶数 0 的 2000（调用方负责按阶数传入） */
+  /** 总长度上限；缺省按阶数 0 的 4000（调用方负责按阶数传入） */
   maxChars?: number;
-  /**
-   * 概念中文名查询（2026-11-20）：函数与取数条目要在 `〔〕` 里写 `中文名(name)`。
-   * 返回 null 时只写 `name`——老本体可能没有 `concepts[].title`，不能因此留空槽。
-   */
-  conceptTitle?: (ontologyId: string, conceptName: string) => string | null;
 }
 
-/**
- * 「直接命中」段里的一个条目。
- *
- * `priority` 是剪枝顺序：数值小的**先被丢**。取数条目最先丢（它只是"顺手能查什么"），
- * 函数次之，行为最后丢（那是用户意图本身）。
- */
-interface DirectEntry {
-  text: string;
-  priority: number;
-}
-
-/** 渲染后的一条路径行 + 截断所需的排序信息 */
 interface PathLine {
   text: string;
-  /** 起点行为键：同一键至少保留一行 */
   behaviorKey: string;
   hop: number;
   deadEnd: boolean;
   score: number;
-  /** 稳定序：全局路径下标 */
   order: number;
+}
+
+/**
+ * 关键行为条目。
+ *
+ * `kind` 只服务于剪枝优先级（取数行为先丢），不参与展示——提示里两类条目形态一致，
+ * 避免模型把它们当成两种能力。
+ */
+interface BehaviorLine {
+  text: string;
+  kind: 'direct' | 'query';
+  ontologyId: string;
+  name: string;
+}
+
+interface FunctionLine {
+  ontologyId: string;
+  text: string;
+  concepts: { name: string; queries: string[] }[];
 }
 
 interface PromptItem {
   name: string;
-  /** 关联本体展示串（`ontology_name='X'，ontology_id='1'`），非本体技能为 null */
   ontology: string | null;
-  /** `直接命中` 段（行为 / 函数 / 取数混排，按优先级剪枝） */
-  behaviors: DirectEntry[];
+  behaviors: BehaviorLine[];
+  functions: FunctionLine[];
   paths: PathLine[];
 }
 
@@ -121,9 +73,6 @@ export interface ComposedPrompt {
   truncated: boolean;
 }
 
-/**
- * 铸造提示：仅对入选技能与入选行为拼装；无技能时返回空串（调用方据此不追加）。
- */
 export function composeFocusPrompt(
   skills: readonly PromptSkill[],
   capabilities: CapabilitySelection,
@@ -139,7 +88,6 @@ export function composeFocusPrompt(
     });
   if (selected.length === 0) return { prompt: '', truncated: false };
 
-  // 同一本体被多个入选技能引用时，行为与路径只归属于分数最高的那个技能
   const ownerByOntology = new Map<string, string>();
   for (const skill of selected) {
     if (!skill.isOntology || !skill.ontology) continue;
@@ -148,60 +96,69 @@ export function composeFocusPrompt(
 
   const items: PromptItem[] = selected.map((skill) => ({
     name: clean(skill.name),
-    // 本体技能恒有且仅有 1 个本体：提示里只出现一组字段
-    ontology: skill.isOntology && skill.ontology ? renderOntologyRef(skill.ontology) : null,
+    ontology: skill.isOntology && skill.ontology ? renderOntology(skill.ontology) : null,
     behaviors: [],
+    functions: [],
     paths: [],
   }));
 
   const byName = new Map(items.map((item) => [item.name, item] as const));
-
-  // 概念括号：`中文名(name)` 与五元组一致；没有 title 时只写 name（老本体不留空槽）
-  const conceptRef = (ontologyId: string, concept: string): string => {
-    const title = options.conceptTitle?.(ontologyId, concept) ?? null;
-    return title ? `${clean(title)}(${clean(concept)})` : clean(concept);
+  const itemOf = (ontologyId: string): PromptItem | undefined => {
+    const owner = ownerByOntology.get(ontologyId);
+    return owner ? byName.get(owner) : undefined;
   };
 
   for (const decision of capabilities.behaviors) {
-    const owner = ownerByOntology.get(decision.ontologyId);
-    const item = owner ? byName.get(owner) : undefined;
+    const item = itemOf(decision.ontologyId);
     if (!item) continue;
     item.behaviors.push({
-      text: `${clean(decision.title || decision.name)}（${clean(decision.name)}）`,
-      priority: ENTRY_PRIORITY.behavior,
+      text: behaviorText(decision.title, decision.name, decision.concept),
+      kind: 'direct',
+      ontologyId: decision.ontologyId,
+      name: decision.name,
     });
   }
 
-  // 2026-11-20：函数与其关联概念的 query 行为并入「直接命中」，段头不新增
   for (const fn of capabilities.functions) {
-    const owner = ownerByOntology.get(fn.ontologyId);
-    const item = owner ? byName.get(owner) : undefined;
+    const item = itemOf(fn.ontologyId);
     if (!item) continue;
-    const concepts = fn.relatedConcepts.map((concept) => conceptRef(fn.ontologyId, concept));
-    const suffix = concepts.length > 0 ? `〔${concepts.join('、')}〕` : '';
-    item.behaviors.push({
-      text: `${clean(fn.title || fn.name)}（${clean(fn.name)}）${suffix}`,
-      priority: ENTRY_PRIORITY.function,
+    item.functions.push({
+      ontologyId: fn.ontologyId,
+      text: label(fn.title, fn.name),
+      concepts: fn.relatedConcepts
+        .map((concept) => clean(concept))
+        .filter((concept) => concept !== '')
+        .map((concept) => ({ name: concept, queries: [] })),
     });
   }
 
+  const directKeys = new Set(capabilities.behaviors.map((b) => keyOf(b.ontologyId, b.name)));
   for (const query of capabilities.conceptQueries) {
-    const owner = ownerByOntology.get(query.ontologyId);
-    const item = owner ? byName.get(owner) : undefined;
+    const item = itemOf(query.ontologyId);
     if (!item) continue;
-    item.behaviors.push({
-      text: `${clean(query.title || query.name)}（${clean(query.name)}）〔${conceptRef(query.ontologyId, query.concept)}〕`,
-      priority: ENTRY_PRIORITY.conceptQuery,
-    });
+    const key = keyOf(query.ontologyId, query.name);
+    if (!directKeys.has(key)) {
+      directKeys.add(key);
+      item.behaviors.push({
+        text: behaviorText(query.title, query.name, query.concept),
+        kind: 'query',
+        ontologyId: query.ontologyId,
+        name: query.name,
+      });
+    }
+    for (const fn of item.functions) {
+      if (fn.ontologyId !== query.ontologyId) continue;
+      const concept = fn.concepts.find((entry) => entry.name === clean(query.concept));
+      if (concept && !concept.queries.includes(query.name)) concept.queries.push(query.name);
+    }
   }
 
   (options.paths ?? []).forEach((path, order) => {
-    const owner = ownerByOntology.get(path.ontologyId);
-    const item = owner ? byName.get(owner) : undefined;
+    const item = itemOf(path.ontologyId);
     if (!item) return;
     item.paths.push({
       text: renderPath(path),
-      behaviorKey: `${path.ontologyId}\u0000${path.behavior.name}`,
+      behaviorKey: keyOf(path.ontologyId, path.behavior.name),
       hop: path.hop,
       deadEnd: path.toBehavior === null,
       score: path.score ?? 0,
@@ -212,9 +169,15 @@ export function composeFocusPrompt(
   const maxChars = options.maxChars ?? MAX_PROMPT_CHARS;
   let prompt = render(items);
   let truncated = false;
-  // 截断顺序：路径行（行级，见 `dropWorstPathLine`）→ 直接命中（按条目优先级，见 `dropLowestEntry`）
   while (prompt.length > maxChars) {
-    if (!dropWorstPathLine(items) && !dropLowestEntry(items)) break;
+    if (
+      !dropWorstPathLine(items) &&
+      !dropQueryLine(items) &&
+      !dropFunctionLine(items) &&
+      !dropDirectBehaviorLine(items)
+    ) {
+      break;
+    }
     truncated = true;
     prompt = render(items);
   }
@@ -224,56 +187,63 @@ export function composeFocusPrompt(
 
 function render(items: readonly PromptItem[]): string {
   if (items.length === 0) return '';
-  const blocks = items.map((item, index) => `${index + 1}）${renderItem(item)}`);
-  return `${PREFIX}\n${blocks.join('\n')}`;
+  const blocks = items.map((item) => renderItem(item));
+  return `${PROMPT_PREFIX}\n${blocks.join('\n\n')}`;
 }
 
 function renderItem(item: PromptItem): string {
-  if (item.ontology === null) return `${item.name}（非本体技能）`;
-  const lines = [`${item.name}（本体技能；${item.ontology}）`];
+  const sections: string[] = [item.ontology === null ? `技能 ${item.name}（非本体技能）` : `技能 ${item.name} → ${item.ontology}`];
+
   if (item.behaviors.length > 0) {
-    lines.push(`   直接命中：${item.behaviors.map((entry) => entry.text).join('、')}`);
+    sections.push(['关键行为', ...item.behaviors.map((entry) => `· ${entry.text}`)].join('\n'));
   }
-  // 段头单独一行：这不是"参考列表"，而是"若干条推理路径"，先说清再逐行给
+
+  if (item.functions.length > 0) {
+    sections.push(['关键函数', ...item.functions.map(renderFunctionLine)].join('\n'));
+  }
+
   if (item.paths.length > 0) {
-    lines.push('   上游路径：');
-    for (const path of item.paths) lines.push(`     ${path.text}`);
+    const hops = item.paths.reduce((max, path) => Math.max(max, path.hop), 0);
+    const lines = item.paths.map((path) => path.text);
+    sections.push(
+      [`图路径（上游 ${hops} 跳；→/← 为本体边方向，按从左到右即本轮路径）`, ...lines].join('\n'),
+    );
   }
-  return lines.join('\n');
+
+  return sections.join('\n\n');
 }
 
-/**
- * 一条五元组：
- * `行为（name）—〔概念(title)name〕—[上游]关系名→〔概念(title)name〕—→行为（name）`
- *
- * 括号形态刻意分工：行为用全角括号（与 `直接命中` 行一致），概念用半角括号并套 `〔〕`
- * （表示"这是本体里的类型名"），模型不会把两者混读。
- */
+function renderFunctionLine(fn: FunctionLine): string {
+  const refs = fn.concepts.map((concept) =>
+    concept.queries.length === 0
+      ? `@${concept.name}`
+      : `@${concept.name} → ${concept.queries.join('、')}`,
+  );
+  return refs.length === 0 ? `· ${fn.text}` : `· ${fn.text} ${refs.join('、')}`;
+}
+
 export function renderPath(path: FocusPath): string {
-  const behavior = `${clean(path.behavior.title || path.behavior.name)}（${clean(path.behavior.name)}）`;
-  const from = `${clean(path.fromConcept.title || path.fromConcept.name)}(${clean(path.fromConcept.name)})`;
-  const to = `${clean(path.toConcept.title || path.toConcept.name)}(${clean(path.toConcept.name)})`;
-  const direction = path.direction === 'upstream' ? '上游' : '下游';
-  // 箭头只表示关系名的读向，不表示上下游（上下游由 [上游]/[下游] 表达）
-  const arrow = path.readability === 'forward' ? '→' : '←';
-  const relation = `${clean(path.relation.title || path.relation.name)}${arrow}`;
+  const behavior = label(path.behavior.title, path.behavior.name);
+  const relation = clean(path.relation.title || path.relation.name);
+  const edge = path.readability === 'forward' ? `—〔${relation}〕→` : `←〔${relation}〕—`;
   const tail =
     path.toBehavior === null
-      ? '—→（无可用行为）'
-      : `—→${clean(path.toBehavior.title || path.toBehavior.name)}（${clean(path.toBehavior.name)}）`;
-  return `${behavior}—〔${from}〕—[${direction}]${relation}〔${to}〕${tail}`;
+      ? '→（无可用行为）'
+      : `→ ${label(path.toBehavior.title, path.toBehavior.name)}`;
+  return `${behavior} @${clean(path.fromConcept.name)} ${edge} ${clean(path.toConcept.name)} ${tail}`;
 }
 
-/**
- * 丢掉"最该丢"的一条路径行（**行级原子**，不会留下半截五元组）。
- *
- * 排序：链尾无行为 → 跳数大 → 起点得分低 → 靠后。
- *
- * 唯一保护：**入选行为的第一跳行**至少留一条（否则模型会以为这个行为没有任何上下文，
- * 比不出现更糟）。保护只对 `hop === 1` 生效——第 2 跳起的起点行为是接续出来的，
- * 它的行被清空不影响"用户意图命中了什么"；若也保护它，会出现"每条链都只有一行、
- * 谁都删不掉"的死局，最后只能去砍直接命中。
- */
+function behaviorText(title: string, name: string, concept: string | null): string {
+  const base = label(title, name);
+  const ref = concept === null ? '' : clean(concept);
+  return ref === '' ? base : `${base} @${ref}`;
+}
+
+function renderOntology(ontology: PromptOntology): string {
+  const id = `ontology_id=${clean(ontology.id)}`;
+  return ontology.name === null ? `本体（${id}）` : `本体 ${clean(ontology.name)}（${id}）`;
+}
+
 function dropWorstPathLine(items: readonly PromptItem[]): boolean {
   let victim: { item: PromptItem; index: number; rank: number[] } | null = null;
 
@@ -296,7 +266,61 @@ function dropWorstPathLine(items: readonly PromptItem[]): boolean {
   return true;
 }
 
-/** 字典序比较（数值已按"越小越先丢"编码好） */
+/**
+ * 丢一条取数行为行（从尾部），并把函数条目里指向它的 `→ 行为名` 引用一并摘掉。
+ *
+ * 必须成对处理：只删行会留下 `@PurchaseRecord → QueryPurchaseRecords` 这种指向
+ * 不存在条目的悬空引用，模型会以为"还有个行为没列出来"。
+ */
+function dropQueryLine(items: readonly PromptItem[]): boolean {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    for (let cursor = item.behaviors.length - 1; cursor >= 0; cursor -= 1) {
+      const entry = item.behaviors[cursor]!;
+      if (entry.kind !== 'query') continue;
+      item.behaviors.splice(cursor, 1);
+      unlinkQuery(items, entry);
+      return true;
+    }
+  }
+  return false;
+}
+
+function unlinkQuery(items: readonly PromptItem[], entry: BehaviorLine): void {
+  for (const item of items) {
+    for (const fn of item.functions) {
+      if (fn.ontologyId !== entry.ontologyId) continue;
+      for (const concept of fn.concepts) {
+        const at = concept.queries.indexOf(entry.name);
+        if (at >= 0) concept.queries.splice(at, 1);
+      }
+    }
+  }
+}
+
+function dropFunctionLine(items: readonly PromptItem[]): boolean {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const functions = items[index]!.functions;
+    if (functions.length > 0) {
+      functions.pop();
+      return true;
+    }
+  }
+  return false;
+}
+
+function dropDirectBehaviorLine(items: readonly PromptItem[]): boolean {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const behaviors = items[index]!.behaviors;
+    for (let cursor = behaviors.length - 1; cursor >= 0; cursor -= 1) {
+      if (behaviors[cursor]!.kind !== 'direct') continue;
+      behaviors.splice(cursor, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
 function compareRank(left: readonly number[], right: readonly number[]): number {
   for (let index = 0; index < left.length; index += 1) {
     const diff = left[index]! - right[index]!;
@@ -305,40 +329,17 @@ function compareRank(left: readonly number[], right: readonly number[]): number 
   return 0;
 }
 
-/**
- * 丢掉一条「直接命中」条目：**先丢优先级最低的，同级从尾部开始**。
- *
- * 2026-11-20 起这一段混了三种条目（行为 / 函数 / 取数）。若无优先级、只按尾部 pop，
- * 排在后面的取数条目会先被丢掉、排在末尾的函数也可能先于取数被丢——预算紧张时
- * "用户要做什么"反而不稳。同级从尾部丢是为了保留"靠前技能更可能相关"的既有序感。
- */
-function dropLowestEntry(items: readonly PromptItem[]): boolean {
-  let lowest = Number.POSITIVE_INFINITY;
-  for (const item of items) {
-    for (const entry of item.behaviors) lowest = Math.min(lowest, entry.priority);
-  }
-  if (!Number.isFinite(lowest)) return false;
-
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const list = items[index]!.behaviors;
-    for (let i = list.length - 1; i >= 0; i -= 1) {
-      if (list[i]!.priority === lowest) {
-        list.splice(i, 1);
-        return true;
-      }
-    }
-  }
-  return false;
+function label(title: string, name: string): string {
+  const cleanTitle = clean(title);
+  const cleanName = clean(name);
+  if (cleanTitle === '' || cleanTitle === cleanName) return cleanName;
+  return `${cleanTitle} ${cleanName}`;
 }
 
-/** 本体引用：显式字段形态，便于模型把 name 与 id 分开理解 */
-function renderOntologyRef(ontology: PromptOntology): string {
-  const id = `ontology_id='${clean(ontology.id)}'`;
-  if (!ontology.name) return id;
-  return `ontology_name='${clean(ontology.name)}'，${id}`;
+function keyOf(ontologyId: string, name: string): string {
+  return `${ontologyId}\u0000${name}`;
 }
 
-/** 单行片段：换行、制表符、连续空白统一压成单个空格 */
 function clean(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }

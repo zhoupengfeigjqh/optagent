@@ -1,9 +1,3 @@
-/**
- * 单元测试：各资源 API 模块（原则七：契约与前端一一映射）
- *
- * 目标是守住"请求形状"——路径、方法、查询参数、请求体字段名。
- * 后端契约变更时，这些断言会先失败，而不是等到联调才发现。
- */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const fetchMock = vi.fn()
@@ -34,7 +28,6 @@ beforeAll(() => {
 
 beforeEach(() => {
   fetchMock.mockReset()
-  // 每次调用都返回**新的** Response：Response 的 body 只能读一次
   fetchMock.mockImplementation(
     async () =>
       new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
@@ -75,6 +68,7 @@ describe('api/agents', () => {
         intent_focus_depth: 0,
         input_rewrite: false,
         term_normalize: false,
+        task_planning: false,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -100,6 +94,7 @@ describe('api/agents', () => {
         intent_focus_depth: 0,
         input_rewrite: false,
         term_normalize: false,
+        task_planning: false,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -134,8 +129,6 @@ describe('api/mcp', () => {
     await mcp.getMcpService('ocr')
     expect(lastCall().url).toBe('/api/admin/mcp/services/ocr')
 
-    // 新建提交「基础字段 + 工具白名单」（`allowed_tools` 必填非空，2026-10-03；
-    // 其余调用配置由服务端补默认，创建后到详情页补全）
     await mcp.createMcpService({
       name: 'ocr',
       description: '',
@@ -238,7 +231,6 @@ describe('api/skills', () => {
       skill: 'bom-check',
     })
 
-    // 缺省 confirm=false：库内被人工改过时服务端回 409 ADM_SKILL_MODIFIED，界面须显式确认
     await skills.updateOntoMarketSkill('生产调度', '原材料采购和库存', 'bom-check')
     expect(lastCall().init.method).toBe('POST')
     expect(lastCall().url).toBe('/api/admin/skills/onto-market/update')
@@ -264,7 +256,6 @@ describe('api/ontologies（§10，2026-10-03）', () => {
     const dir = encodeURIComponent('原材料采购和库存')
     const scenario = encodeURIComponent('生产调度')
 
-    // URL 口径（2026-10-17）：`{scenario_name}/{ontology_name}`，场景在前
     await ontologies.fetchOntology('生产调度', '原材料采购和库存')
     expect(lastCall().url).toBe(`/api/admin/ontologies/${scenario}/${dir}`)
 

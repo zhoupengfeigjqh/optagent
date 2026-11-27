@@ -1,20 +1,3 @@
-/**
- * 组件测试：后台产出铃铛（R11，契约 §10.5 ⑤⑥⑦）
- *
- * 守住五条：
- * 1. **未读角标**：0 时不显示；有未读时显示数字，且**读屏名称**带上条数（双通道）；
- * 2. **未读叹号**：未读条有叹号（带 `未读` 无障碍名称），已读条没有；
- * 3. **点开才标记已读**——打开面板本身 MUST NOT 标记（⑤）；
- * 4. **标题两段**（2026-10-09）：主段只认摘要，`summary` 缺省时给**可读兜底**，MUST NOT 把
- *    落盘文件名（`{会话UUID}_{job_id}`，纯机读）顶上来当标题——2026-09-25 实测反馈的教训；
- *    副段 `工具名 · job_id` 来自平台字段，永不缺省、中间省略、完整值挂在 `title` 属性上；
- * 5. **正文双视图**：点开走 `produced.text()`（而**不是** `files` 预览接口），
- *    读取失败给**局部降级文案**而不是把整面板变成错误态；
- * 6. **元信息**：工具名 / 数字人名称 / 状态 / 创建与完成时间；缺数字人或工具名时
- *    给可读兜底（`未知数字人` / `未知工具`），不留白；
- * 7. **弹窗宽度**（2026-10-09）：结构化正文（表格/嵌套对象）用宽版，列表与原始文本用默认宽度；
- * 8. **悬停说明**（2026-10-30）：与定时任务入口（闪电）同一手法——原生 `title`，随未读数变化。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, ref, type ComputedRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,11 +7,9 @@ import type { ViewLinkTarget } from '../../utils/view-link'
 import BaseDialog from '../common/BaseDialog.vue'
 import ProducedBell from './ProducedBell.vue'
 
-/** 用 `vi.hoisted` 承载桩，避开 `vi.mock` 工厂的提升限制（`unknown` 便于测试内直接赋具体类型） */
 const h = vi.hoisted(() => ({ store: null as unknown, toast: null as unknown }))
 
 vi.mock('../../composables/useProduced', () => ({ useProduced: () => h.store }))
-// 2026-10-21：铃铛在「后台任务完成」时会推一条 toast，测试只关心它被怎么调用
 vi.mock('../../composables/useToast', () => ({ useToast: () => h.toast }))
 
 function item(jobId: string, readAt?: string, summary?: string, agentName?: string): ProducedItem {
@@ -58,7 +39,6 @@ interface FakeStore {
   start: ReturnType<typeof vi.fn>
   stop: ReturnType<typeof vi.fn>
   onNewItems: ReturnType<typeof vi.fn>
-  /** 测试口：模拟 store 算出"新到达的产出"并通知监听者 */
   emitNew: (added: readonly ProducedItem[]) => void
 }
 
@@ -86,7 +66,6 @@ function makeStore(items: ProducedItem[]): FakeStore {
 }
 
 let store: FakeStore
-/** toast 桩：断言「后台任务完成」提示的级别、文案与动作 */
 let toast: { push: ReturnType<typeof vi.fn> }
 
 beforeEach(() => {
@@ -100,7 +79,6 @@ function mountBell() {
   return mount(ProducedBell)
 }
 
-/** 打开面板（点铃铛） */
 async function openPanel(wrapper: ReturnType<typeof mountBell>): Promise<void> {
   await wrapper.find('.produced-bell').trigger('click')
 }
@@ -129,8 +107,6 @@ describe('ProducedBell —— 未读角标', () => {
 
     expect(wrapper.find('.produced-bell__badge').exists()).toBe(false)
     expect(wrapper.find('.produced-bell').attributes('aria-label')).toBe('后台记录')
-    // 2026-10-30：悬停说明（与定时任务入口同一手法：原生 title）
-    // 2026-11-07：两个分支统一为"读屏名称 + 点击动作"，此处不再是 打开后台记录
     expect(wrapper.find('.produced-bell').attributes('title')).toBe('后台记录，点击查看')
   })
 
@@ -144,7 +120,6 @@ describe('ProducedBell —— 未读角标', () => {
     expect(badge.text()).toBe('2')
     expect(badge.attributes('aria-hidden')).toBe('true') // 角标对读屏隐藏，避免重复播报
     expect(wrapper.find('.produced-bell').attributes('aria-label')).toBe('后台记录，2 条未读')
-    // 悬停说明带上条数：不点开也知道有几条
     expect(wrapper.find('.produced-bell').attributes('title')).toBe('后台记录：2 条未读，点击查看')
   })
 })
@@ -164,7 +139,6 @@ describe('ProducedBell —— 列表视图', () => {
 
     await openPanel(wrapper)
 
-    // `ErrorNotice` 经 `toUserMessage` 把错误码映射成中文文案（不是原样回显 message）
     expect(wrapper.text()).toContain('网络异常')
     expect(wrapper.text()).not.toContain('还没有后台任务结果')
   })
@@ -190,7 +164,6 @@ describe('ProducedBell —— 列表视图', () => {
 
     expect(wrapper.find('.produced-title__summary').text()).toBe('识别到 47 行文字')
     expect(wrapper.find('.produced-title__tag').text()).toBe('ocr__ocr_image · a')
-    // 工具名只在标题副段出现一次（元信息行不重复）
     expect(wrapper.find('.produced-item__meta').text()).not.toContain('ocr__ocr_image')
     expect(wrapper.find('.produced-item__meta').text()).toContain('1.0 KB')
   })
@@ -218,8 +191,8 @@ describe('ProducedBell —— 列表视图', () => {
     await openPanel(wrapper)
 
     const tag = wrapper.find('.produced-title__tag')
-    expect(tag.text()).toBe('ocr__ocr_image · ocr_17901234…cfd2') // 中段省略，两端可辨
-    expect(tag.attributes('title')).toBe(`ocr__ocr_image · ${longId}`) // 完整值在 title 属性
+    expect(tag.text()).toBe('ocr__ocr_image · ocr_17901234…cfd2')
+    expect(tag.attributes('title')).toBe(`ocr__ocr_image · ${longId}`)
   })
 })
 
@@ -233,7 +206,7 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
 
     const meta = wrapper.find('.produced-item__meta').text()
     expect(meta).toContain('数字人：生产调度助手')
-    expect(meta).toContain('状态：done') // 原样透出，不做 done → 已完成 的翻译
+    expect(meta).toContain('状态：done')
     expect(meta).toContain('创建：')
     expect(meta).toContain('完成：')
     expect(wrapper.find('.produced-title__tag').text()).toContain('ocr__ocr_image')
@@ -266,7 +239,6 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
     expect(meta).toContain('数字人：生产调度助手')
     expect(meta).toContain('状态：done')
     expect(wrapper.find('.produced-content__body').text()).toContain('冲压 1200')
-    // 内容视图只有**一处**标题（列表已切走），且带上标识副段
     expect(wrapper.findAll('.produced-title')).toHaveLength(1)
     expect(wrapper.find('.produced-content__head .produced-title__summary').text()).toBe(
       '识别到 47 行文字',
@@ -278,7 +250,6 @@ describe('ProducedBell —— 元信息（工具 / 数字人 / 创建与完成�
 })
 
 describe('ProducedBell —— 正文结构化展示（JSON ⇄ 原始）', () => {
-  /** 打开面板并点开第一条 */
   async function openFirst(wrapper: ReturnType<typeof mountBell>): Promise<void> {
     await openPanel(wrapper)
     await wrapper.find('.produced-item__button').trigger('click')
@@ -314,23 +285,18 @@ describe('ProducedBell —— 正文结构化展示（JSON ⇄ 原始）', () =>
 
     const wrapper = mountBell()
     await openPanel(wrapper)
-    // 列表视图：默认宽度
     expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
 
     await wrapper.find('.produced-item__button').trigger('click')
     await flushPromises()
-    // 结构化视图：宽版（表格几十列在 560px 里铺不下）
     expect(wrapper.find('.base-dialog').classes()).toContain('base-dialog--wide')
 
-    // 切到原始 JSON：文本视图，回默认宽度
     await wrapper.find('.produced-content__view-toggle').trigger('click')
     expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
 
-    // 切回结构化：又是宽版
     await wrapper.find('.produced-content__view-toggle').trigger('click')
     expect(wrapper.find('.base-dialog').classes()).toContain('base-dialog--wide')
 
-    // 返回列表：回默认宽度
     await wrapper.find('.produced-content__back').trigger('click')
     expect(wrapper.find('.base-dialog').classes()).not.toContain('base-dialog--wide')
   })
@@ -393,7 +359,6 @@ describe('ProducedBell —— 正文结构化展示（JSON ⇄ 原始）', () =>
   })
 })
 
-/* ---------- 2026-10-21：后台任务完成提示（与上传失败同一处弹出） ---------- */
 
 describe('ProducedBell —— 后台任务完成提示', () => {
   it('新到达的产出：用 success 弹一条，文案带摘要', () => {
@@ -495,7 +460,7 @@ describe('ProducedBell —— 已读时机与正文视图（§10.5 ⑤⑦）', (
 
   it('正文字读取失败 → **局部降级文案**，而不是把整面板变成错误态', async () => {
     store = makeStore([item('a')])
-    store.text.mockResolvedValue(null) // store 已吞掉错误并返回 null
+    store.text.mockResolvedValue(null)
     h.store = store
 
     const wrapper = mountBell()
@@ -505,8 +470,7 @@ describe('ProducedBell —— 已读时机与正文视图（§10.5 ⑤⑦）', (
 
     expect(wrapper.text()).toContain('内容不可读')
     expect(wrapper.text()).toContain('已被清理')
-    // 列表仍在（面板没被错误态接管）
-    expect(wrapper.find('.produced-item').exists()).toBe(false) // 已切到内容视图
+    expect(wrapper.find('.produced-item').exists()).toBe(false)
     expect(wrapper.findComponent(BaseDialog).props('open')).toBe(true)
   })
 
@@ -526,14 +490,12 @@ describe('ProducedBell —— 已读时机与正文视图（§10.5 ⑤⑦）', (
     await flushPromises()
 
     expect(wrapper.findComponent(BaseDialog).props('open')).toBe(false)
-    // 已回到列表态：重新打开就能看到列表（而不是停在上一条正文）
     await openPanel(wrapper)
     expect(wrapper.find('.produced-content__body').exists()).toBe(false)
   })
 })
 
 describe('ProducedBell —— 正文里的 viewUrl 点击（2026-10-20）', () => {
-  /** 当前页面入口（组件内未注入 origin 时按它拼前缀） */
   const ORIGIN = window.location.origin
 
   it('点 viewUrl → 先关弹窗再上报 open-view（同源进面板由装配层决定）', async () => {
@@ -551,9 +513,7 @@ describe('ProducedBell —— 正文里的 viewUrl 点击（2026-10-20）', () =
     expect(wrapper.emitted('open-view')).toEqual([
       [{ url: `${ORIGIN}/datasource/x`, name: '/datasource/x', kind: 'url' }],
     ])
-    // MUST 先关模态框：`<dialog>.showModal()` 在 top layer，不关则右侧面板被盖住
     expect(wrapper.findComponent(BaseDialog).props('open')).toBe(false)
-    // 一并回到列表态，不在关闭后再残留上一条正文
     expect(wrapper.find('.produced-json').exists()).toBe(false)
   })
 })
@@ -584,7 +544,6 @@ describe('ProducedBell —— 文件产出（2026-10-21：BOM 回写的 xlsx）'
     await openFirstFile(wrapper)
 
     expect(store.text).not.toHaveBeenCalled()
-    // 已读仍要标记（用户确实看过了这条的存在与结局）
     expect(store.markRead).toHaveBeenCalledWith(['bom_1'])
     expect(wrapper.text()).toContain('不在面板里按文本展示')
     expect(wrapper.find('.produced-content__view-toggle').text()).toContain('打开 / 下载文件')

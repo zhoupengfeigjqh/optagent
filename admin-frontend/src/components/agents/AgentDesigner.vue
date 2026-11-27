@@ -1,14 +1,4 @@
 <script setup lang="ts">
-/**
- * 数字人设计器（`FR-016`、`FR-017`、`FR-053`）。
- *
- * 五类配置（SOUL / 内置工具 / MCP 服务 / SKILL / 本体）+ 文件空间场景以
- * **分区（页签）**承载，导航深度不超过两级（列表 ↔ 设计器）。
- * 保存失败时错误在 `aria-live` 区域播报（`FR-009`、原则四）。
- *
- * 实现注记：把 composable 返回的 ref **解构为顶层绑定**再在模板中使用，
- * 以保证模板侧得到正确解包（嵌套在普通对象里的 ref 不会被模板自动解包）。
- */
 import { computed, ref, watch } from 'vue'
 import type {
   AgentDesign,
@@ -49,7 +39,6 @@ const props = defineProps<{
   builtinToolsError: string | null
   mcpServices: McpServiceListItem[]
   skills: SkillListItem[]
-  /** 本体候选（`§5.6`，2026-10-17）：身份投影，不含正文 */
   ontologies: OntologyCandidate[]
   initialTab: string | null
 }>()
@@ -75,7 +64,6 @@ const deleting = ref(false)
 const isNew = computed(() => props.name === NEW_AGENT_SENTINEL)
 const title = computed(() => (isNew.value ? '新建数字人' : `设计数字人：${props.name}`))
 
-/** 失效引用提示（`FR-013`）：后端保存时也会拒绝，这里只是提前暴露 */
 const builtinToolsErrorMessage = computed<string | null>(() => {
   const reason = props.builtinToolsError
   if (!reason) return null
@@ -114,7 +102,6 @@ async function bootstrap(): Promise<void> {
       return
     }
     // 预填：名称 + （可选的）复制源。复制失败会**降级为空草稿并保留名称**，
-    // 由这里把可读原因交给上层播报（不写 editor.error，它的语义是"保存未完成"）。
     const failure = await editor.resetToCopy(seed.name, seed.copyFrom)
     if (failure) emit('error', failure)
     return
@@ -192,7 +179,6 @@ async function doDelete(): Promise<void> {
       <button type="button" class="btn" @click="requestBack">← 返回列表</button>
       <h2 id="agent-designer-title" class="agent-designer__title">{{ title }}</h2>
       <span class="agent-designer__actions">
-        <!-- 删除属破坏性操作：红色按钮，且在「保存」左侧（避免与主操作混淆） -->
         <button
           v-if="!isNew"
           type="button"
@@ -210,7 +196,6 @@ async function doDelete(): Promise<void> {
 
     <p v-if="loading" role="status">加载中…</p>
 
-    <!-- 名称只读：由「新建数字人」弹窗确定，创建后不可修改（`FR-015`） -->
     <label class="field" for="agent-name">
       <span class="field__label">数字人名称</span>
       <input
@@ -279,7 +264,6 @@ async function doDelete(): Promise<void> {
       @confirm="emit('back')"
     />
 
-    <!-- 删除不可恢复：必须先讲明后果（被用户关联时服务端会拒绝，届时给出可读原因） -->
     <ConfirmDialog
       v-model:open="confirmDelete"
       data-test="agent-delete-dialog"

@@ -1,17 +1,4 @@
 <script setup lang="ts">
-/**
- * 消息气泡（T039）
- *
- * 装配 `MessageContent` / `ThinkingBlock` / `ToolCallList`，流式期间渲染 `TypingIndicator`。
- *
- * **思考经 `streaming` prop 传入**：`Message` 类型从契约层面不含思考内容（V-04），
- * 因此本轮瞬态信息只能由 `useChatStream` 提供、经 `MessageList` 逐层下传。
- * **工具调用则两侧都有**（002 特性）：流式轮次取瞬态、历史轮次取 `message.tool_calls`，
- * 二者统一成 `ToolCallItem` 交给同一个卡片组件。
- *
- * 操作区（用量 / 复制 / 点赞点踩）由 T045 接入 `MessageActions`；本组件已按契约预留
- * `feedback` / `copy` 事件出口。
- */
 import { computed } from 'vue'
 
 import type { ErrorInfo, FileReference, Message, NextStepAction } from '../../api/types'
@@ -38,30 +25,12 @@ import type { StreamSegmentView, StreamingView } from './types'
 
 const props = withDefaults(
   defineProps<{
-    /** 消息（流式气泡传入以累积正文构造的合成消息） */
     message: Message
-    /** 搜索关键词 */
     searchKeyword?: string
-    /** 当前定位的全局匹配序号 */
     activeMatchIndex?: number
-    /** 本消息内首个命中的全局序号 */
     matchIndexBase?: number
-    /** 本轮瞬态；`null` 表示非流式气泡 */
     streaming?: StreamingView | null
-    /**
-     * 会话最新一轮的下一步动作提示（007）。
-     *
-     * 由上层原样传入即可：**只有 id 命中 `message_id` 的那条气泡会渲染卡片**
-     * （`visibleActions` 是唯一判据），历史轮次天然为空（FR-015）。
-     */
     nextSteps?: ThreadNextSteps | null
-    /**
-     * 失败轮的「重试本轮」入口文案；`null` = 不渲染该入口（`ErrorNotice` 的既有语义）。
-     *
-     * **由列表层判定**：重发的载荷是"同轮的那条用户消息"，本组件只认识自己这一条，
-     * 无从判断它是否已加载（分页窗口可能正好切在两者之间）。故此处只接文案，
-     * 避免在消息不在窗口内时留下一个点了没反应的按钮（原则九：MUST NOT 假装正常）。
-     */
     retryLabel?: string | null
   }>(),
   {
@@ -75,42 +44,17 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  /** T045 接入操作区后由 MessageActions 触发 */
   feedback: [payload: { message_id: string; value: 'up' | 'down' | null }]
-  /** T045 接入操作区后由 MessageActions 触发 */
   copy: [message_id: string]
-  /**
-   * 失败轮「重试本轮」：入口文案见 `retryLabel`（`null` 即不渲染）。
-   *
-   * 本组件只负责"点到了"这件事——重发所需的那条用户消息由列表层给，装配层执行重发。
-   */
   retry: []
-  /** 中断轮「重新生成」：以缓存的上一条用户消息重发一轮 */
   regenerate: []
-  /** 外部地址点击：由上层直跳新窗口，不进预览区（V-10） */
   'open-link': [href: string]
-  /** 空间目录文件点击：由上层打开右侧内联预览（FR-046） */
   'open-file': [reference: FileReference]
-  /**
-   * 跳转入口点击（`viewUrl` / `filePath` 归一化后）。
-   *
-   * 负载见 `ViewLinkTarget`：`kind:'file'` → 上层按扩展名预览（与文件空间同口径）；
-   * 其余 → 同源预检后进面板 / 异源直跳新窗口。
-   */
   'open-view': [item: ViewLinkTarget]
-  /** 点选下一步动作卡片（007/016）：确认与发送由装配层（ChatPanel）承担 */
   'send-suggestion': [action: NextStepAction]
 }>()
 
 const isUser = computed(() => props.message.role === MESSAGE_ROLE.USER)
-/**
- * 本条消息所属数字人：已落盘消息取 `message.agent_name`（后端逐条返回），
- * 流式气泡取本轮快照。
- *
- * **009 修订**：原"会话可跨数字人（FR-014）"的口径已废止——会话归属在创建时写定、
- * 生命周期内不可变更（跨数字人访问一律 404）。之所以仍**逐条**标注而非按会话标注：
- * 存量数据里同一会话的相邻轮次可能留有不同归属，逐条取用能如实还原历史。
- */
 const agentName = computed(() => props.message.agent_name ?? props.streaming?.agentName ?? null)
 const roleLabel = computed(() => {
   if (isUser.value) return '我'
@@ -118,26 +62,14 @@ const roleLabel = computed(() => {
 })
 const formattedTime = computed(() => formatTimestamp(props.message.ts))
 const attachments = computed(() => props.message.attachments ?? [])
-/** 2026-11-07：本轮显式技能（`/技能名`）——用户气泡里还原成胶囊，与输入区同款语义 */
 const skill = computed(() => props.message.skill ?? '')
 
 const thinkingText = computed(() => props.streaming?.thinking ?? '')
-/**
- * 工具卡片数据（002 特性）：一个组件服务两种来源。
- * - 流式轮次：`streaming.toolCalls`（SSE 仅给名称与状态，结果尚未产生）
- * - 历史消息：`message.tool_calls`（落盘记录，含内联结果或外置引用）
- */
 const toolItems = computed(() =>
   props.streaming
     ? props.streaming.toolCalls.map(streamingToolCallItem)
     : toolCallItemsOf(props.message),
 )
-/**
- * 本条回答的视图入口（2026-10-10，`TR-45`）：该条消息**全部**工具调用的
- * `view_links` 并集，交给 `MessageViewLinks` 归一化与去重。
- *
- * 流式轮次的记录里没有结果，故恒为空 → 入口行在流式期不出现（`TR-48`）。
- */
 const viewLinks = computed(() => collectToolViewLinks(toolItems.value))
 /**
  * 本条回答下方的下一步动作卡片（007）：只有"最新一轮"（快照归属的消息）才非空。
@@ -145,18 +77,9 @@ const viewLinks = computed(() => collectToolViewLinks(toolItems.value))
  */
 const nextActions = computed(() => visibleActions(props.nextSteps ?? null, props.message.id))
 const isStreaming = computed(() => props.streaming?.phase === RUN_PHASE.STREAMING)
-/** 中断轮：保留 partial 正文，但须明确标识"已停止"，与正常回答区分 */
 const isAborted = computed(() => props.streaming?.phase === RUN_PHASE.ABORTED)
 
 const showThinking = computed(() => thinkingText.value.trim() !== '')
-/**
- * 正在执行的工具人读名称（本轮 `running` 项，去重保序）。
- *
- * 工具执行可能持续数秒到数十秒，这段空档 MUST 有可见的"活着"信号。旧判据
- * （`content === ''`）覆盖不到最常见的形态——模型先说一句「我来查一下 SKU 清单」
- * 再调工具，此时 `content` 已非空，「思考中」整轮消失，界面只剩卡片上一行静态
- * 「进行中」（2026-11-16）。
- */
 const runningToolNames = computed(() => {
   if (!isStreaming.value) {
     return []
@@ -176,7 +99,6 @@ const runningToolNames = computed(() => {
   }
   return names
 })
-/** 等待提示文案：工具执行期点名工具，否则回落到 `TypingIndicator` 的缺省「思考中」 */
 const typingLabel = computed(() => {
   const names = runningToolNames.value
   const first = names[0]
@@ -186,34 +108,15 @@ const typingLabel = computed(() => {
   if (names.length > 1) {
     return `正在执行 ${names.length} 个工具…`
   }
-  // 静默段（TR-66）：模型在决定调哪个工具 / 长推理，这段时间没有任何事件可展示。
   // 措辞说"模型"而不是"工具"，因为实测静默主要发生在 LLM 侧，工具执行期有上面的分支。
   if (props.streaming?.stalled === true) {
     return '模型正在思考…'
   }
-  return '思考中'
+  // 两档都必须有，因为提示本身是**常驻**的（见 `showTyping`），文案不能停在一个会误导的说法上。
+  return props.message.content === '' ? '思考中' : '正在生成…'
 })
-/**
- * 等待提示的显示条件（2026-11-16 修订）：首个 `content` 到达前，或**仍有工具在跑**。
- *
- * 只加"有 running 工具"这一条：工具全部结束、模型继续生成正文时不补提示——
- * 那是正常流式输出，气泡本身在长，再叠一行反而噪音。
- */
-const showTyping = computed(
-  () =>
-    isStreaming.value &&
-    (runningToolNames.value.length > 0 ||
-      props.streaming?.stalled === true ||
-      props.message.content === ''),
-)
+const showTyping = computed(() => isStreaming.value)
 
-/**
- * 流式轮的渲染段（A-lite，2026-11-16）：文字与工具卡片按事件到达顺序交错。
- *
- * 空数组 ⇒ 走旧渲染（工具全部在上、正文在下）。两种情况下会为空：
- * 历史消息（`history.jsonl` 只存整段 `content`，没有段序）；以及尚未收到任何事件。
- * 这样"流式期间交错、刷新后回退旧顺序"的取舍被显式写在一处，不散落在模板里。
- */
 const streamSegments = computed<StreamSegmentView[]>(() => {
   if (!isStreaming.value) {
     return []
@@ -231,7 +134,6 @@ const showError = computed(
   () => props.message.status === MESSAGE_STATUS.FAILED && errorInfo.value !== null,
 )
 
-/** V-07：仅 `completed` 且已落盘（有 id）的消息才进入可操作态。 */
 const isActionable = computed(
   () => props.message.status === MESSAGE_STATUS.COMPLETED && props.message.id !== '',
 )
@@ -243,7 +145,6 @@ const stateClass = computed(() => {
   return isActionable.value ? 'message-bubble--completed' : 'message-bubble--pending'
 })
 
-/** 同值重复点击 = 取消（V-08）：向父级提交 `null`。 */
 function onFeedback(value: 'up' | 'down'): void {
   emit('feedback', {
     message_id: props.message.id,
@@ -281,10 +182,8 @@ const containsActiveMatch = computed(() => {
       <time class="message-bubble__time">{{ formattedTime }}</time>
     </header>
 
-    <!-- 显式技能：与输入区胶囊同款外观；纯展示，不可点（技能正文由模型按需读取） -->
     <p v-if="skill" class="message-bubble__skill">/{{ skill }}</p>
 
-    <!-- 引用由 attachments 还原（不依赖 content 文本）；点击打开右侧内联预览（FR-046） -->
     <ul v-if="attachments.length" class="message-bubble__refs">
       <li v-for="reference in attachments" :key="`${reference.dir}/${reference.filename}`">
         <button
@@ -300,11 +199,8 @@ const containsActiveMatch = computed(() => {
 
     <ThinkingBlock v-if="showThinking" :text="thinkingText" :streaming="isStreaming" />
 
-    <!-- 流式轮（A-lite，2026-11-16）：正文与工具卡片按事件到达顺序交错，
-         形成"说话 → 干活 → 再说"的时间线；否则后到的卡片会插到已流出的正文上方 -->
     <template v-if="streamSegments.length > 0">
       <template v-for="(segment, index) in streamSegments" :key="index">
-        <!-- `hide-head`：每段只有 1 次调用，不重复渲染「本轮 N 次调用」计数行 -->
         <ToolCallList
           v-if="segment.kind === 'tool'"
           class="message-bubble__tools"
@@ -313,15 +209,11 @@ const containsActiveMatch = computed(() => {
           :hide-head="true"
           @open-view="emit('open-view', $event)"
         />
-        <!-- 段内正文不接搜索高亮：流式气泡不在搜索结果里，接了会让全局匹配序号错位 -->
         <MessageContent v-else :content="segment.text" @open-link="emit('open-link', $event)" />
       </template>
     </template>
 
-    <!-- 历史消息（无段序）与尚未收到事件：工具卡片在上、整段正文在下 -->
     <template v-else>
-      <!-- 工具调用卡片（002 特性）：流式态与历史态共用一个组件。
-           `live` 只表达"本轮是否仍在跑"——决定 running 显示"进行中"还是"未完成"（TR-33） -->
       <ToolCallList
         v-if="toolItems.length"
         class="message-bubble__tools"
@@ -338,22 +230,16 @@ const containsActiveMatch = computed(() => {
       />
     </template>
 
-    <!-- 视图入口行（2026-10-10，TR-45）：紧跟回答正文之后、状态提示与操作区之前。
-         无合法链接时组件整行不渲染（TR-48），因此不必在这里再判空 -->
     <MessageViewLinks :links="viewLinks" @open-view="emit('open-view', $event)" />
 
-    <!-- 下一步动作卡片（007）：在正文（与视图入口行）**之后**（FR-010），
-         与工具记录、视图入口同层的侧车位置；无卡片时整块不渲染（FR-014） -->
     <MessageNextSteps
       :actions="nextActions"
       :disabled="isStreaming"
       @select="emit('send-suggestion', $event)"
     />
 
-    <!-- 等待提示：首个 token 前是「思考中」，工具执行期点名工具（2026-11-16） -->
     <TypingIndicator v-if="showTyping" :label="typingLabel" />
 
-    <!-- 失败轮的重试入口：文案由列表层决定（`null` = 该轮的用户消息不在窗口内，不给入口） -->
     <ErrorNotice
       v-if="showError && errorInfo"
       :error="errorInfo"
@@ -361,7 +247,6 @@ const containsActiveMatch = computed(() => {
       @retry="emit('retry')"
     />
 
-    <!-- 中断轮标识（流式气泡专属）：partial 内容非完整回答；可重发时给「重新生成」 -->
     <div v-if="isAborted" class="message-bubble__aborted">
       <span class="message-bubble__aborted-hint">已停止生成 · 内容未保存</span>
       <button
@@ -374,7 +259,6 @@ const containsActiveMatch = computed(() => {
       </button>
     </div>
 
-    <!-- 仅 completed 且已落盘的消息展示操作与用量（V-07 / FR-028） -->
     <MessageActions
       v-if="isActionable"
       class="message-bubble__actions"
@@ -454,7 +338,6 @@ const containsActiveMatch = computed(() => {
 }
 
 .message-bubble__tools {
-  /* 工具卡片列表自带纵向布局，此处只作为外层挂点 */
   display: block;
 }
 

@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 数字人部署功能区（US2）。
- *
- * 承载：用户与关联数字人（**部署对象就在这些卡片上勾选**）、部署触发与结果、
- * 部署历史。
- *
- * 勾选状态由**本组件**持有：勾选发生在下分区的用户卡片上，而部署按钮在
- * 上分的部署面板里——跨分区的状态归共同父级（2026-09-16 十一次调整）。
- * 勾选**跨分页保留**（翻页继续勾会累加），因此不做"按当前页收敛"，
- * 只提供显式的「清空勾选」。
- *
- * **2026-11-23**：「异常项汇总」页签随功能下架，失效引用仍在用户卡片/数字人卡片上
- * 以「异常」标记呈现（`detectAnomalies`），不再提供全局汇总分区。
- */
 import { onMounted, ref, watch } from 'vue'
 import { DEPLOY_HISTORY_FETCH_LIMIT, fetchDeployHistory } from '../../api/deploy'
 import { http } from '../../api/http'
@@ -34,11 +20,9 @@ const users = ref<Paged<UserListItem> | null>(null)
 const usersError = ref<unknown>(null)
 const usersLoading = ref(false)
 
-/** 部署对象：勾选即"要部署给这个用户"（空 = 不允许校验/部署） */
 const selectedUserIds = ref<string[]>([])
 
 const history = ref<DeployHistoryItem[]>([])
-/** 服务端有界返回（`FR-006`）：为真即"还有更早的记录没有拉取" */
 const historyTruncated = ref(false)
 /** 历史加载失败（2026-10-20）：失败 MUST 与"确实没有记录"区分开，否则空态会撒谎 */
 const historyError = ref<unknown>(null)
@@ -73,7 +57,6 @@ async function loadHistory(): Promise<void> {
   }
 }
 
-/** 勾选/取消一个用户（新数组 → 部署面板据此作废上一次预检） */
 function toggleUser(userId: string, checked: boolean): void {
   const next = new Set(selectedUserIds.value)
   if (checked) next.add(userId)

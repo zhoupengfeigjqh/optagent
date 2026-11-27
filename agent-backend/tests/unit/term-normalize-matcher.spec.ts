@@ -1,12 +1,3 @@
-/**
- * 单元测试：术语替换匹配（018，`domain/term-normalize/matcher.ts`）。
- *
- * 守四条最容易走样的口径：
- * ① 最长优先（`供应商编号` 不被拆成 `供应商`）；
- * ② 单遍、不重叠、不递归（`物料→原材料` 后不会再把 `原材料` 换成别的）；
- * ③ 最短长度 2（单字术语不建进树）；
- * ④ 命中即同值不算替换（否则弹窗会为"没变的内容"反复出现）。
- */
 import { describe, expect, it } from 'vitest';
 
 import { MIN_TERM_LENGTH, normalizeByTerms } from '../../src/domain/term-normalize/matcher.js';
@@ -74,7 +65,6 @@ describe('normalizeByTerms · 边界', () => {
 
   it('下标是 UTF-16 偏移（含 emoji 也不偏）', () => {
     const result = normalizeByTerms('😀物料', { 物料: '原材料' });
-    // `😀` 占两个 UTF-16 单元，前端可直接用 slice 高亮
     expect(result.matches[0]).toMatchObject({ start: 2, end: 4 });
     expect(result.normalized.slice(0, 2)).toBe('😀');
   });

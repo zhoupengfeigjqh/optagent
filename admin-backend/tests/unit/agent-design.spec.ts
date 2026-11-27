@@ -1,8 +1,3 @@
-/**
- * 单元测试：数字人设计态的五类配置校验（T049）
- *
- * 每类校验都覆盖**正 / 异 / 边界**三类场景（宪章原则三）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,14 +14,11 @@ import { ERROR_CODES } from '../../src/domain/error-codes.js';
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { soulDesign } from '../helpers/soul.js';
 
-// 名称与场景判据已按 500 行门禁拆到独立模块（`naming.ts` / `scenario.ts`），
-// 各自有对应单测（`naming.spec.ts` / `scenario.spec.ts`）。
 
 const index = createReferenceIndex({
   builtinTools: ['read_file', 'write_file', 'calculator'],
   mcpServices: ['ocr'],
   skills: ['pdf-parse'],
-  // 004：问题实例的工具关联校验需要"服务的可见工具"
   mcpTools: [['ocr', ['ocr_extract']]],
 });
 
@@ -88,18 +80,15 @@ describe('validateAgentInput', () => {
   });
 
   it('异常：结构化 SOUL 缺失或必填为空 → VALIDATION_FAILED（FR-019 / 004）', () => {
-    // 旧版字符串形态：004 起不再是合法输入
     expectCode(
       () => validateAgentInput({ ...validRaw, soul: 's' }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
-    // 主要使命仅空白
     expectCode(
       () =>
         validateAgentInput({ ...validRaw, soul: soulDesign('   \n\t ') }, { index, takenNames: new Set() }),
       ERROR_CODES.VALIDATION_FAILED,
     );
-    // 角色简介缺失
     expectCode(
       () =>
         validateAgentInput(
@@ -213,7 +202,6 @@ describe('validateAgentInput', () => {
   });
 
   it('原样保留：主要使命的换行与标点、条目顺序均不被规范化（FR-017）', () => {
-    // 004 起"原样回显"作用于结构化字段：使命内部换行 / 标点 / 制表符原样保留
     const mission = '第一行\n第二行，含标点！\r\n第三行\t制表符';
     const out = validateAgentInput(
       { ...validRaw, soul: soulDesign(mission), enabled_tools: ['calculator', 'read_file'] },
@@ -319,7 +307,6 @@ describe('AgentDesignService', () => {
   });
 
   it('读取归一化：历史文档缺 data_prep_fields、SOUL 为字符串时，对外恒为结构化形态', () => {
-    // 手工写入"本字段引入前"的文档形态，模拟线上既有数据
     store.writeJson('agents/legacy.json', {
       name: 'legacy',
       soul: '你是助手',
@@ -335,7 +322,6 @@ describe('AgentDesignService', () => {
   });
 
   it('读取归一化（2026-10-13）：缺 data_prep_uploads 时**不写键**（可选键，缺失 ≡ 平台默认）', () => {
-    // 与 data_prep_fields 的取舍不同：后者恒补 `{}`，前者是可选键，补空壳会让"未配置"与"显式清空"无法区分
     store.writeJson('agents/legacy-up.json', {
       name: 'legacy-up',
       soul: '你是助手',
@@ -385,7 +371,6 @@ describe('AgentDesignService', () => {
   });
 
   it('读取归一化（007）：结构化 SOUL 缺开关与条数 → 补齐为 false / 缺省 3（对外恒有该键）', () => {
-    // "结构化但没有这两个键"的形态：本次字段引入前的存档
     const stale = JSON.parse(JSON.stringify(soulDesign('你是助手'))) as Record<string, unknown>;
     delete stale.next_action_hints;
     delete stale.next_action_hints_count;
@@ -426,7 +411,6 @@ describe('AgentDesignService', () => {
       expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsDefault);
     }
 
-    // 合法值原样保留（收敛只对坏值生效）
     writeWithCount(SOUL_LIMITS.nextActionHintsMax);
     expect(service.read('stale').soul.next_action_hints_count).toBe(SOUL_LIMITS.nextActionHintsMax);
   });
@@ -447,17 +431,14 @@ describe('AgentDesignService', () => {
       });
     };
 
-    // 键缺失（本字段引入前的存档）→ 补齐 false，对外契约恒有该键
     writeFocus(undefined);
     expect(service.read('stale').soul.intent_focus).toBe(false);
 
-    // 手改坏成非布尔 → 一律按关处理（fail-closed，与运行侧 parseSoulMeta 同口径）
     for (const broken of ['true', 1, null, {}]) {
       writeFocus(broken);
       expect(service.read('stale').soul.intent_focus).toBe(false);
     }
 
-    // 合法值原样保留
     writeFocus(true);
     expect(service.read('stale').soul.intent_focus).toBe(true);
   });
@@ -475,14 +456,12 @@ describe('AgentDesignService', () => {
       });
     };
 
-    // 存量：next_action_hints 开着，但 intent_focus 缺失（013 之前的存档）→ hints 收敛为关
     const legacy: Record<string, unknown> = { ...soulDesign('你是助手'), next_action_hints: true };
     delete legacy.intent_focus;
     writeSoul(legacy);
     expect(service.read('stale').soul.next_action_hints).toBe(false);
     expect(service.read('stale').soul.intent_focus).toBe(false);
 
-    // 双开 → hints 保留
     writeSoul({ ...soulDesign('你是助手'), intent_focus: true, next_action_hints: true });
     expect(service.read('stale').soul.next_action_hints).toBe(true);
   });
@@ -500,7 +479,6 @@ describe('AgentDesignService', () => {
       });
     };
 
-    // 键缺失（本字段引入前的存档）→ 补齐 false，对外契约恒有这两个键
     const missing: Record<string, unknown> = {
       ...soulDesign('你是助手'),
       intent_focus: true,
@@ -513,7 +491,6 @@ describe('AgentDesignService', () => {
     const normalized = service.read('stale').soul;
     expect(normalized.input_rewrite).toBe(false);
     expect(normalized.term_normalize).toBe(false);
-    // 收敛只针对新键：聚焦开关与阶数原样保留
     expect(normalized.intent_focus).toBe(true);
     expect(normalized.intent_focus_depth).toBe(2);
   });
@@ -539,7 +516,6 @@ describe('AgentDesignService', () => {
       expect('input_rewrite' in soul).toBe(true);
     }
 
-    // 合法值原样保留（两个开关互不牵连）
     writeSoul({ ...soulDesign('你是助手'), intent_focus: true, input_rewrite: true });
     expect(service.read('stale').soul.input_rewrite).toBe(true);
     expect(service.read('stale').soul.term_normalize).toBe(false);

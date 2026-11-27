@@ -1,57 +1,33 @@
-/**
- * 工具调用记录的展示模型（002 特性）
- *
- * 两个来源统一成一个结构，好让同一个卡片组件既服务**历史态**（后端下发）
- * 又服务**流式态**（SSE 瞬态）：
- * - 历史：`Message.tool_calls`（snake_case 契约）→ `ToolCallItem`
- * - 流式：`useChatStream.toolCalls`（仅名称与状态，无结果）
- */
 
 import type { Message, ToolCallRecord, ViewLink } from '../api/types'
 
-/** 工具调用卡片的展示模型。 */
 export interface ToolCallItem {
   callId: string
   name: string
-  /** 人读名称（2026-10-27）：卡片标题显示它；缺省 = 无中文名，回退 `name` */
   label?: string
-  /**
-   * `running` = 结果还没到。两种语境文案不同（见 `toolStatusLabel`）：
-   * 流式进行中 → `进行中`；非流式（中断/失败轮、历史里只有开始行的记录）→ `未完成`
-   */
   status: 'running' | 'success' | 'error'
   durationMs?: number
-  /** 原始结果字节数 */
   size?: number
-  /** 记录内联正文（展开即可见；超阈值时是截断版） */
   content?: string
-  /** 外置副本大小（有值 = 展开时另拉全文，截断版先显示） */
   artifactSize?: number
-  /** 规则提取的摘要（外置结果的卡片说明） */
   summary?: string
   /** 记录正文被截断；`size > artifactSize` 表示副本本身也被上限截断 */
   truncated?: boolean
-  /** 入参短标量摘要（原文不下发） */
   argsDigest?: Record<string, string>
-  /** 结果里的视图链接（服务给的原值 + 可选名称）；正文外置时也仍在 */
   viewLinks?: ViewLink[]
 }
 
-/** 流式瞬态工具项（SSE 只给名称、人读名称与状态）。 */
 export interface StreamingToolCall {
   call_id: string
   name: string
-  /** 人读名称（2026-10-27 起随事件下发；缺省回退 `name`） */
   label?: string
   status: 'running' | 'success' | 'error'
 }
 
-/** 历史消息的工具记录 → 展示模型（无记录返回空数组，调用方无需判空）。 */
 export function toolCallItemsOf(message: Message): ToolCallItem[] {
   return (message.tool_calls ?? []).map(toToolCallItem)
 }
 
-/** 契约记录 → 展示模型（字段名转换集中在此，组件不感知 snake_case）。 */
 export function toToolCallItem(record: ToolCallRecord): ToolCallItem {
   return {
     callId: record.call_id,
@@ -69,13 +45,6 @@ export function toToolCallItem(record: ToolCallRecord): ToolCallItem {
   }
 }
 
-/**
- * 该条消息**全部**工具调用的视图链接（并入后交给入口行去重，`TR-45`）。
- *
- * 并的是"这条回答能打开哪些视图"这个语义，因此**跨工具**合并；
- * 去重与归一化不在这里做（那是 `utils/view-link.ts` 的唯一职责）。
- * 流式瞬态没有结果，故天然是空数组——入口行在流式期不出现（`TR-48`）。
- */
 export function collectToolViewLinks(items: readonly ToolCallItem[]): ViewLink[] {
   const links: ViewLink[] = []
   for (const item of items) {
@@ -84,7 +53,6 @@ export function collectToolViewLinks(items: readonly ToolCallItem[]): ViewLink[]
   return links
 }
 
-/** 流式瞬态 → 展示模型。 */
 export function streamingToolCallItem(call: StreamingToolCall): ToolCallItem {
   return {
     callId: call.call_id,
@@ -94,24 +62,10 @@ export function streamingToolCallItem(call: StreamingToolCall): ToolCallItem {
   }
 }
 
-/**
- * 卡片标题用的工具名（2026-10-27）：人读名称优先，缺失回退调用名。
- *
- * 两条显示路径（工具卡片、HITL 弹窗）共用同一条回退规则——`label` 缺失时显示
- * `jev__noul` 这类调用名，仍然能对上后端日志；有中文名时原始名退到 `title` 悬停。
- */
 export function toolDisplayName(item: { name: string; label?: string }): string {
   return item.label !== undefined && item.label !== '' ? item.label : item.name
 }
 
-/**
- * 工具调用状态的中文标签（文案**唯一来源**，组件 MUST NOT 各写一套）。
- *
- * `running` 有**两种语境**，必须分流（`TR-33`）：
- * - `live`（本轮仍在流式进行中）：结果稍后还会到 → `进行中`
- * - 非 `live`（中断/失败轮，或历史里只有开始行的记录）：它**不会再动** → `未完成`
- *   —— 此时显示"进行中"是假状态，违反「MUST NOT 假装正常」（宪章原则九）
- */
 export function toolStatusLabel(status: ToolCallItem['status'], live: boolean): string {
   if (status === 'success') return '已完成'
   if (status === 'error') return '失败'
@@ -128,15 +82,11 @@ export function isToolCallFinished(status: ToolCallItem['status']): boolean {
   return status !== 'running'
 }
 
-/** 本轮调用的计数摘要（折叠态「本轮 N 次调用 · 报错 M 次」的唯一来源）。 */
 export interface ToolCallStats {
-  /** 调用**次数**（同一工具调两次算 2 次） */
   total: number
-  /** 失败次数（`running` 不计入） */
   errors: number
 }
 
-/** 统计本轮调用：总数 + 报错数（单次遍历）。 */
 export function summarizeToolCalls(items: ToolCallItem[]): ToolCallStats {
   let errors = 0
   for (const item of items) {
@@ -156,7 +106,6 @@ export function toolGroupKey(items: ToolCallItem[]): string {
   return items[0]?.callId ?? ''
 }
 
-/** 入参摘要 → 一行可读文本（`path=数据准备/x.csv`）。 */
 export function formatArgsDigest(digest: Record<string, string>): string {
   return Object.entries(digest)
     .map(([key, value]) => `${key}=${value}`)

@@ -1,25 +1,10 @@
 <script setup lang="ts">
-/**
- * 算法规则参数设置表格（`rules_fields` 的编辑视图，2026-09-19）。
- *
- * 存储契约：对外是 `{ 工具名: 字段名 }`（最终写入 `MCP.json` 的 `rules_fields`），
- * 每工具至多一条——声明该工具入参里承载 `array[object]` 规则清单的字段。
- *
- * 交互：
- * - 「工具」下拉选项由父级按 HITL 确认范围过滤后传入（`allowedTools`）：
- *   无需确认时父级禁用整个表格并清空；仅指定工具时只列勾选的工具；全部确认时列全部；
- * - 「字段」下拉 = 该工具参数 JSON Schema 里 `type: "array"` 的入参（规则选择器的
- *   产物是 array[object]）；已保存但当前 Schema 中不存在的值作为「清单外」保留项出现，
- *   不静默丢弃；
- * - `disabled`（HITL = 无需确认，或服务工具清单不可得）时整表禁用、不可增删行。
- */
 import { computed, ref, watch } from 'vue'
 import type { McpToolInfo } from '../../api/types'
 
 const props = defineProps<{
   modelValue: Record<string, string>
   tools: McpToolInfo[]
-  /** 当前 HITL 确认范围内可选的工具（父级已按确认模式过滤） */
   allowedTools: string[]
   disabled?: boolean
 }>()
@@ -28,7 +13,6 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: Record<string, string>): void
 }>()
 
-/** 一行 = 一条 工具-字段 声明 */
 interface RuleRow {
   tool: string
   field: string
@@ -43,14 +27,6 @@ interface SchemaNode {
 /** 递归深度上限：真实入参 2–3 层足够，防病态 schema 造成极深枚举 */
 const MAX_DEPTH = 5
 
-/**
- * 该工具入参里可声明为规则字段的**路径**（规则选择器产物是 array[object]）。
- *
- * 2026-09-22 起返回对象路径：规则数组常嵌在入参对象内部（如 `hd_scheduling_submit` 的
- * `input.targetPriorities`），只列顶层字段会让这类目标**根本选不出来**（选不出来 → 配不上
- * → 声明静默失效）。只沿对象下行、不进入数组元素——`items[].rules` 没有业务含义
- * （"写第几个元素"无解），运行环境的路径语法也不接受数组段。
- */
 function rulesFieldPathsOf(toolName: string): string[] {
   const tool = props.tools.find((t) => t.name === toolName)
   return collectPaths((tool?.parameters as SchemaNode | undefined)?.properties, '', 0)
@@ -86,13 +62,11 @@ function fieldOptions(toolName: string, current: string): string[] {
   return enumerated
 }
 
-/* ---------- 行模型 ↔ rules_fields 互转 ---------- */
 
 function rulesFieldsToRows(map: Record<string, string>): RuleRow[] {
   return Object.entries(map).map(([tool, field]) => ({ tool, field }))
 }
 
-/** 该行是否通过判据（不通过的不写入序列化结果） */
 function rowValid(row: RuleRow): boolean {
   return row.tool.trim() !== '' && row.field.trim() !== ''
 }
@@ -106,14 +80,9 @@ function rowsToRulesFields(list: RuleRow[]): Record<string, string> {
   return out
 }
 
-/* ---------- 编辑状态 ---------- */
 
 const rows = ref<RuleRow[]>([])
 
-/**
- * 自己 emit 的**回声不重建**编辑态（与 FileArgsMappingTable 同一模式）：
- * 只有外部真正换数据（切换服务、HITL 范围变化导致父级清空）才重建。
- */
 const lastEmitted = ref<string | null>(null)
 
 watch(
@@ -159,12 +128,10 @@ const duplicateError = computed(() => {
   return ''
 })
 
-/** 清单外工具（服务改版/清单截断）：保留行、标徽提示，不静默丢弃 */
 function isOrphan(tool: string): boolean {
   return tool !== '' && !props.tools.some((t) => t.name === tool)
 }
 
-/** 字段保留项：已保存值不在当前 Schema 枚举里（schema 漂移），标徽提示 */
 function isFieldOrphan(row: RuleRow): boolean {
   return row.field !== '' && row.tool !== '' && !rulesFieldPathsOf(row.tool).includes(row.field)
 }

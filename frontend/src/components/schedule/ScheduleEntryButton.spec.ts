@@ -1,11 +1,3 @@
-/**
- * 组件测试：定时任务入口按钮（015，T035）
- *
- * 键盘与读屏是本组件的**主要验收项**（宪章原则四）：
- * - 根节点是原生 `<button>`：Tab 可达、Enter/Space 天然触发，不额外挂 keydown；
- * - `aria-label="定时任务"` + `aria-pressed` 表达"设置页是否展开"；
- * - 不可用时原生 `disabled`（不可聚焦），原因放在 `title` 与一段隐藏文本里。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -36,7 +28,6 @@ describe('ScheduleEntryButton', () => {
     await wrapper.trigger('click')
     await wrapper.trigger('keydown.enter')
 
-    // 原生按钮的 keydown 不产生 click（浏览器行为），组件只绑定 click：
     // 断言 click 生效即可覆盖 Enter/Space，因为二者由浏览器派发到同一个 handler
     expect(wrapper.emitted('open')).toHaveLength(1)
   })

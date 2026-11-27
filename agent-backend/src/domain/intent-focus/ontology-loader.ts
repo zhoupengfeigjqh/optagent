@@ -1,24 +1,3 @@
-/**
- * 本体文件加载（016 / 019）：枚举已物化的 `ontology/{场景}/{本体}/ontology.yaml`，
- * 提取 `metadata` / `behaviors` / `concepts` / `relations`，按 `ontology_id` 建索引。
- *
- * 2026-11-06：`functions` 与 `rules` 不再读取（能力聚焦只到行为）。
- * 2026-11-08（019）：新增 `concepts` 与 `relations` 的**只读**建模，供一阶发散使用；
- * 参数正文、函数代码、`rules` 仍然不进来。
- * 2026-11-20：`functions` **窄口径恢复**——只读 `name` / `title` / `description` /
- * `related_concepts`；`params` / `response` 与 `rules` 仍不进来（FR-020）。
- *
- * 2026-11-08（020）：目录枚举与 YAML 读取移到 `../ontology-files.js`——本体行为权限闸门
- * 需要同一条"安全枚举 + 坏文件降级"规则，两处各写一套必然漂移（宪章原则二）。
- * 本文件只保留**字段建模**，告警文案与跳过策略保持原样。
- *
- * 三条约束：
- * 1. **只读真实文件**：目录与文件都过 `lstat`，符号链接一律跳过（FR/TR：禁止逃逸）；
- * 2. **坏文件不中断**：解析失败只记 warning，其他本体照常——一个坏文件不该让整轮失效；
- * 3. **只建模发散所需字段**：`concepts` 只取 name/title，`relations` 只取
- *    name/title/source/target/relation_type/cardinality；方向判定不在本层做（见 `expansion.ts`）。
- *    2026-11-13：关系补 `title`——五元组要展示「行为—概念—关系—概念—行为」的关系语义。
- */
 import path from 'node:path';
 
 import { listOntologyDirs, readYamlObject } from '../ontology-files.js';
@@ -31,7 +10,6 @@ import type {
   OntologyRelation,
 } from './types.js';
 
-/** 枚举入口：`{agentDir}/ontology` */
 export function loadOntologyIndex(agentDir: string): OntologyIndex {
   const index: OntologyIndex = { byId: new Map(), all: [], warnings: [] };
   for (const ref of listOntologyDirs(agentDir, index.warnings, 'ontology')) {
@@ -46,9 +24,7 @@ export function loadOntologyIndex(agentDir: string): OntologyIndex {
   return index;
 }
 
-/** 解析单个 ontology.yaml；失败返回 null 并写 warning（内部实现，无需对模块外暴露） */
 function loadOntologyFile(file: string, warnings: string[]): OntologyDefinition | null {
-  // 读取/解析统一走 `ontology-files.ts`（020 收敛的唯一来源）：符号链接、坏 YAML、
   // 非对象根三类降级与告警口径都在那里，本文件只做字段建模
   const record = readYamlObject(file, warnings);
   if (!record) return null;
@@ -76,12 +52,6 @@ function loadOntologyFile(file: string, warnings: string[]): OntologyDefinition 
   };
 }
 
-/**
- * 函数（2026-11-20）：只取四字段。
- *
- * `params` / `response` 一律不读——它们与"本轮要不要用这个函数"无关，
- * 读进来只会让后来者误以为它们参与判定（FR-020）。
- */
 function parseFunctions(value: unknown, warnings: string[], file: string): OntologyFunction[] {
   const result: OntologyFunction[] = [];
   if (value !== undefined && !Array.isArray(value)) warnings.push(`${file}:functions_not_array`);
@@ -118,7 +88,6 @@ function parseBehaviors(value: unknown, warnings: string[], file: string): Ontol
       title: normalizeText(record.title) ?? name,
       description: normalizeText(record.description) ?? '',
       opType: normalizeText(record.op_type),
-      // 019：发散入口；缺失照常参与判定，只是这条行为不参与发散
       concept: normalizeText(record.concept),
     });
   }
@@ -141,7 +110,6 @@ function parseConcepts(value: unknown, warnings: string[], file: string): Ontolo
   return result;
 }
 
-/** 关系：`source` / `target` 缺失即整条丢弃（没有端点的边无法参与发散） */
 function parseRelations(value: unknown, warnings: string[], file: string): OntologyRelation[] {
   const result: OntologyRelation[] = [];
   if (value !== undefined && !Array.isArray(value)) warnings.push(`${file}:relations_not_array`);
@@ -159,9 +127,7 @@ function parseRelations(value: unknown, warnings: string[], file: string): Ontol
       name: displayName,
       source,
       target,
-      // 五元组展示用；缺失回退 `name`（老本体不写 title 也不留空槽）
       title: normalizeText(record.title) ?? displayName,
-      // `relation_type` 允许写成单值字符串或数组，统一成数组
       relationType: normalizeList(record.relation_type),
       cardinality: normalizeId(record.cardinality),
     });

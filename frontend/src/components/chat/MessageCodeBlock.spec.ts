@@ -1,11 +1,3 @@
-/**
- * 组件测试：代码块（2026-10-16，宪章偏差纠正——原缺同名测试）。
- *
- * 两条主线：
- * 1. **复制的是代码原文**：分段是原文的无损切分，拼回来即代码本体——不读 DOM、不带高亮标记；
- * 2. **反馈与降级**：成功才改文案、2 秒复原；剪贴板不可用（非安全上下文 / 权限被拒）时
- *    静默不改文案——宁可没有反馈，也不要谎报"已复制"（与 `MessageActions` 同口径）。
- */
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,14 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ContentSegment } from '../../utils/segments'
 import MessageCodeBlock from './MessageCodeBlock.vue'
 
-/** 复制成功提示的停留时长（与组件内的 `COPY_FEEDBACK_MS` 同值，刻意不导出故在此重述） */
 const COPY_FEEDBACK_MS = 2000
 
 function mountBlock(segments: ContentSegment[], language = '') {
   return mount(MessageCodeBlock, { props: { language, segments } })
 }
 
-/** 已切好分段的代码（含一处搜索命中的形态） */
 const CODE: ContentSegment[] = [
   { type: 'text', text: 'select ' },
   { type: 'mark', text: '1', matchIndex: 0 },
@@ -77,7 +67,6 @@ describe('MessageCodeBlock —— 复制原文（2026-10-16）', () => {
     expect(button.attributes('aria-label')).toBe('已复制代码')
 
     vi.advanceTimersByTime(COPY_FEEDBACK_MS)
-    // 定时器回调只改 ref，DOM 要等下一拍——少了这一句，断言看到的是改动前的旧 DOM
     await nextTick()
 
     expect(button.text()).toContain('复制')
@@ -95,7 +84,6 @@ describe('MessageCodeBlock —— 复制原文（2026-10-16）', () => {
     vi.advanceTimersByTime(COPY_FEEDBACK_MS - 500)
     await button.trigger('click')
 
-    // 若旧定时器没被清掉，它会在这一刻把文案抹回去（用户看到"闪一下又变回复制"）
     vi.advanceTimersByTime(500)
     await nextTick()
     expect(button.text()).toContain('已复制')

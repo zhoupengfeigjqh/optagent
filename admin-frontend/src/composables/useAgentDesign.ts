@@ -1,14 +1,3 @@
-/**
- * 数字人设计态：加载 / 编辑草稿 / 保存（US1）。
- *
- * 设计要点：
- * - 草稿与已保存态分离：`dirty` 让"未保存就离开"可被提示；
- * - `revision` 为 `null` 表示**新建**（尚无设计态文档），保存时走 POST；
- * - `soul` 为**结构化对象**（004）：与 `scenario.data_prep_fields` 同理，
- *   草稿必须**深拷贝**——否则弹窗里的编辑会直接改到"已保存态"，`dirty` 失效；
- * - 新建态的初值有两个来源（2026-10-09）：空草稿（`resetToNew`）与
- *   「新建数字人」弹窗的结果（`resetToCopy`，含"以既有数字人为模板复制"）。
- */
 import { computed, ref, shallowRef } from 'vue'
 import type {
   AgentDesign,
@@ -33,7 +22,6 @@ export interface AgentDesignDraft {
   enabled_tools: string[]
   mcp_services: string[]
   skills: string[]
-  /** 引用的本体（`{场景名}/{本体名}`，2026-10-17）；只存引用不存正文 */
   ontologies: string[]
   scenario: AgentScenario
 }
@@ -58,15 +46,8 @@ function cloneUploads(uploads: Record<string, string[]> | undefined): Record<str
   return out
 }
 
-/** 预定义目录全集（新建初值恰为"全部启用"，可直接作为比较基准） */
 const PREDEFINED_DIRS = PREDEFINED_DATA_PREP_DIRS as readonly string[]
 
-/**
- * 新建态下目录清单是否被改过：多出非预定义目录，或**少了**某个预定义目录（= 已屏蔽）。
- *
- * 2026-11-17：屏蔽预定义目录也是一种改动。旧判据只看"多出来的自定义目录"，
- * 于是"新建时只把算法规则屏蔽掉"会被误判为没有输入。
- */
 function hasScenarioDirChanged(dirs: readonly string[]): boolean {
   return (
     dirs.some((dir) => !PREDEFINED_DIRS.includes(dir)) ||
@@ -74,21 +55,18 @@ function hasScenarioDirChanged(dirs: readonly string[]): boolean {
   )
 }
 
-/** 结构化 SOUL 深拷贝（问题实例与工具引用都是嵌套结构，浅拷贝会串改） */
 function cloneSoul(soul: SoulDesign): SoulDesign {
   return {
     ...soul,
-    // 007：开关与其条数（同样是标量，本可由展开运算符带到）仍显式列出——
-    // **字段清单是这里的契约**，后来者加字段时对照它才不会漏
-    // （漏掉的字段在"复制数字人"路径上会整片丢失）
     next_action_hints: soul.next_action_hints === true,
     // 缺省兜底：接口应当恒有该键，旧存档万一没有也不至于让输入框显示 `undefined`
     next_action_hints_count: soul.next_action_hints_count ?? SOUL_LIMITS.nextActionHintsDefault,
-    // 013：同样显式列出——`=== true` 同时完成布尔归一（旧存档缺键 / 脏数据 → 关）
     intent_focus: soul.intent_focus === true,
     // 027：两个新开关也必须显式列出，否则"复制数字人"会整片丢字段（007/013 踩过同一个坑）
     input_rewrite: soul.input_rewrite === true,
     term_normalize: soul.term_normalize === true,
+    // 028：显式列出，避免"复制数字人"丢字段
+    task_planning: soul.task_planning === true,
     // 019：阶数显式兜底（接口恒有该键，旧存档万一没有也不至于把控件搞成未选中）
     intent_focus_depth: soul.intent_focus_depth ?? SOUL_LIMITS.focusDepthDefault,
     capability_tags: [...soul.capability_tags],
@@ -142,10 +120,8 @@ export function useAgentDesign() {
     if (isNew.value) {
       return (
         draft.value.name !== '' ||
-        // 结构化 SOUL 的"是否有输入"判据：与空结构逐字段比较
         JSON.stringify(draft.value.soul) !== JSON.stringify(emptySoulDesign()) ||
         draft.value.scenario.scenario !== '' ||
-        // 预定义目录（算法规则）默认全启用、不算"有输入"；新增目录或**屏蔽**预定义目录都算
         hasScenarioDirChanged(draft.value.scenario.data_prep_dirs) ||
         Object.keys(draft.value.scenario.data_prep_fields).length > 0 ||
         Object.keys(draft.value.scenario.data_prep_uploads ?? {}).length > 0
@@ -211,19 +187,6 @@ export function useAgentDesign() {
     error.value = null
   }
 
-  /**
-   * 新建态的**预填**（2026-10-09：「新建数字人」弹窗的结果，`FR-015`）。
-   *
-   * - `copyFrom === null`：全部重建，只预填名称；
-   * - 否则：以源数字人的**五类配置**为模板复制，名称换成新名称。
-   *
-   * `revision` 一律保持 `null`——复制出来的是**尚未保存的新建态**，保存必须走 POST
-   * （`createAgent`）。这也是不能复用 `saved` / `load()` 的原因：那会把源文档当成
-   * "已保存态"，保存时错误地走 PUT，反而去改源数字人。
-   *
-   * 源在弹窗确认后、设计器挂载前被删（或读取失败）→ **降级为空草稿但保留名称**，
-   * 并把可读原因**返回**给调用方去播报（不写 `error`：它的语义是"保存未完成"）。
-   */
   async function resetToCopy(name: string, copyFrom: string | null): Promise<string | null> {
     saved.value = null
     revision.value = null

@@ -25,10 +25,6 @@ import type { LlmEvent } from '../../src/types.js';
 const USER = 'admin';
 const AGENT = 'demo';
 
-/**
- * 027：术语替换从"意图聚焦即替换"拆成独立开关，闸门是**逻辑与**。
- * 这里用四份产物覆盖真值表（坏字典是"是否真的读了盘"的探针）。
- */
 function soulOf(focus: boolean, term: boolean): string {
   const lines = ['soul_version: 1'];
   if (focus) lines.push('intent_focus: true');
@@ -36,7 +32,6 @@ function soulOf(focus: boolean, term: boolean): string {
   return `---\n${lines.join('\n')}\n---\n\n## 主要使命\n\n你是助手。\n`;
 }
 
-/** 与 017 产物同形：跨本体已由生成端合成为 `或` */
 const TABLE = {
   供应商信息: '供应商或供应商编号',
   物料: '原材料',
@@ -44,7 +39,6 @@ const TABLE = {
 
 function writeAgent(root: string, name: string, options: {
   focus: boolean;
-  /** 027：术语替换开关（缺省 = 跟随 focus，保持老用例语义） */
   term?: boolean;
   tables?: Record<string, Record<string, string>>;
   broken?: boolean;
@@ -85,7 +79,6 @@ describe('POST /api/term-normalize', () => {
       }),
     });
 
-    // 开关开 + 两张本体字典（跨本体合并出 `A或B或C`）
     writeAgent(root, AGENT, {
       focus: true,
       tables: {
@@ -95,7 +88,6 @@ describe('POST /api/term-normalize', () => {
     });
     // 开关关：有一模一样的字典，但不得被读取
     writeAgent(root, 'off', { focus: false, tables: { '生产调度/供应商档案': TABLE } });
-    // 无字典：开关开也返回未替换
     writeAgent(root, 'empty', { focus: true });
     // 坏 JSON：降级为未替换 + warning
     writeAgent(root, 'broken', {
@@ -103,14 +95,12 @@ describe('POST /api/term-normalize', () => {
       tables: { '生产调度/供应商档案': { 供应商信息: '供应方' } },
       broken: true,
     });
-    // 027 真值表：只开意图聚焦（术语替换缺省关）；字典故意写坏，用来证明"没读盘"
     writeAgent(root, 'focus-only', {
       focus: true,
       term: false,
       tables: { '生产调度/供应商档案': { 供应商信息: '供应方' } },
       broken: true,
     });
-    // 027 真值表：只开术语替换（意图聚焦关）；同样是坏字典探针
     writeAgent(root, 'term-only', {
       focus: false,
       term: true,
@@ -145,7 +135,6 @@ describe('POST /api/term-normalize', () => {
     expect(res.json()).toEqual({
       applied: true,
       original: '帮我看下供应商信息的物料库存',
-      // 本体目录按名排序（供 < 原），故合并顺序固定为「供应方 → 供应商 → 供应商编号」
       normalized: '帮我看下供应方或供应商或供应商编号的原材料库存',
       matches: [
         { term: '供应商信息', value: '供应方或供应商或供应商编号', start: 4, end: 9 },
@@ -177,7 +166,6 @@ describe('POST /api/term-normalize', () => {
     try {
       const res = await normalize('帮我看下供应商信息');
       expect(res.json()).toMatchObject({ applied: false, normalized: '帮我看下供应商信息' });
-      // 一旦读了坏字典就会触发 term_normalize.degraded —— 没有它就是"闸门前就返回了"
       expect(warn).not.toHaveBeenCalledWith(
         expect.objectContaining({ event: 'term_normalize.degraded' }),
         expect.any(String),

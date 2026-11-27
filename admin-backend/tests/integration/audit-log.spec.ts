@@ -1,15 +1,3 @@
-/**
- * 集成测试：写操作留痕与日志内容的边界（任务 2026-09-16）
- *
- * 背景：逐请求访问日志关闭后，admin 侧的写操作一度只剩"部署"与"技能文件保存"
- * 有记录——"谁删了数字人""谁关了 MCP 服务"在日志里查不到。
- *
- * 这里守住四条：
- * 1. **成功的写操作**留一条 `admin.write`（含 action/target/字段名/状态/耗时/版本/req_id）；
- * 2. **被拒的写操作**（4xx）留一条 `admin.write.rejected`，**带错误码**（可与界面提示对齐）；
- * 3. **GET 不留**写操作日志（否则又变回逐请求访问日志）；
- * 4. **业务内容不进日志**——只记"改了哪些字段（键名）"，不记值（`SC-014` 口径）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,7 +17,6 @@ function logFile(): string {
   return path.join(fx.platformDataDir, 'logs', `app-${day}.log`);
 }
 
-/** 读取已落盘的日志行（最后一行可能是写了一半的，跳过） */
 function readLogLines(): LogLine[] {
   const file = logFile();
   if (!fs.existsSync(file)) return [];
@@ -122,14 +109,12 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
       status: 201,
       user_id: 'zyw_admin',
     });
-    // 只记"改了哪些字段"的键名，不记值
     expect(row?.fields).toEqual(
       expect.arrayContaining(['name', 'soul', 'enabled_tools', 'mcp_services', 'skills', 'scenario']),
     );
     expect(typeof row?.duration_ms).toBe('number');
     expect(typeof row?.revision).toBe('number');
     expect(typeof row?.req_id).toBe('string');
-    // 每行都带进程实例标识（容器里 pid 恒为 1、hostname 是容器 ID，无法区分运行）
     expect(typeof row?.instance_id).toBe('string');
   });
 
@@ -169,7 +154,6 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
 
     const raw = fs.readFileSync(logFile(), 'utf8');
     expect(raw).not.toContain(canary);
-    // 但"改了 soul 这个字段"要能看出来
     const row = writeRows(readLogLines(), '/agents').find((item) => item.event === 'admin.write');
     expect(row?.fields).toEqual(expect.arrayContaining(['soul']));
   });
@@ -198,7 +182,6 @@ describe('写操作留痕（admin.write / admin.write.rejected）', () => {
   });
 });
 
-/** 等一小会儿，用于确认"没有新日志产生"这类否定断言 */
 async function clockTick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 60));
 }

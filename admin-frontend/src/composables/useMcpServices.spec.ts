@@ -189,7 +189,6 @@ describe('useMcpServices', () => {
       'ocr',
       expect.objectContaining({ revision: 2 }),
     )
-    // `maskedHeaders`：保存响应里的掩码请求头（2026-10-08），界面据此就地刷新展示
     expect(result).toEqual({ affected: ['demo'], revision: 3, maskedHeaders: {} })
     // 详情只被显式 `loadDetail` 请求过一次：保存路径 MUST NOT 再次 GET 详情——
     // 否则会连带触发一次 MCP 实时探测（工具清单抖动 → 界面"闪一下"）
@@ -197,9 +196,6 @@ describe('useMcpServices', () => {
   })
 
   it('saveConfig：未加载 detail 时可用**显式 revision** 保存（修复详情页保存静默失败的接线缺陷）', async () => {
-    // 详情页持有的是父组件加载的 props，本实例的 detail 从未加载——
-    // 早期实现 `if (!detail.value) return null` 让"保存"永远无效。
-    // 修复后允许调用方显式传 revision（即 props.service.revision）。
     saveMcpServiceConfig.mockResolvedValue({
       name: 'ocr',
       description: 'OCR',

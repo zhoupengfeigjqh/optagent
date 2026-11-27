@@ -1,18 +1,5 @@
-/**
- * 本轮工具挂起状态（2026-11-09，020 权限闸门 / 021 规则闸门共用）。
- *
- * 语义：**任一次拒绝之后，本轮不再执行任何工具**，但本轮对话继续——
- * 模型收到结果后向用户说明并收尾（软收尾），不硬切断。
- *
- * 为什么做成共享对象：021 的包装器在 020 内侧，模型后续的工具调用会先过 020。
- * 两个闸门必须看到同一份状态，否则"规则拒绝"之后仍可能被 020 放行并执行。
- *
- * 生命周期：由装配层在**每轮**创建一次，随工具数组丢弃（不落实例、不跨轮）。
- */
 export interface ToolSuspension {
-  /** 本轮是否已出现过拒绝 */
   suspended: boolean;
-  /** 触发挂起的错误码（挂起后的拦截沿用同一码，不新增错误码） */
   code: string;
   /** 挂起后被调用过几次：第 1 次软拒，`>1` 触发兜底 */
   attempts: number;
@@ -30,7 +17,6 @@ export interface ToolSuspension {
  */
 export const SUSPENDED_MESSAGE = '本轮已停止执行工具，请直接结束回答。';
 
-/** 新建一份本轮挂起状态（装配层每轮调用一次） */
 export function createToolSuspension(onExhausted?: () => void): ToolSuspension {
   const state: ToolSuspension = { suspended: false, code: '', attempts: 0, exhausted: false };
   if (onExhausted !== undefined) state.onExhausted = onExhausted;
@@ -42,6 +28,17 @@ export function suspendTools(state: ToolSuspension, code: string): void {
   if (state.suspended) return;
   state.suspended = true;
   state.code = code;
+}
+
+export function abortRunFatal(state: ToolSuspension, code: string): void {
+  suspendTools(state, code);
+  if (state.exhausted) return;
+  state.exhausted = true;
+  try {
+    state.onExhausted?.();
+  } catch {
+    // 回调异常不阻断挂起
+  }
 }
 
 /**

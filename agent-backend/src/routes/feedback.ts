@@ -1,8 +1,3 @@
-/**
- * 消息反馈路由（002 US3 / FR-013~017）：
- * - PUT /api/threads/:id/messages/:mid/feedback — 提交/切换/取消点赞点踩
- *   value 枚举 up/down/null；同值重复提交 = 取消（置 null）；互斥由单值覆盖保证
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
@@ -31,16 +26,14 @@ export function registerFeedbackRoutes(app: FastifyInstance, ctx: AppContext): v
         notSelectedMessage: '请先选定数字人后再操作对话',
         route: 'PUT /api/threads/:id/messages/:mid/feedback',
       });
-      const meta = ctx.threadStore.get(userId, agentName, threadId); // ThreadNotFoundError → 404
+      const meta = ctx.threadStore.get(userId, agentName, threadId);
       const messages = ctx.history.readAll(userId, agentName, threadId);
-      // 新行带 id；旧行 id 合成规则与 GET /api/threads/:id 一致（{threadId}-{全局序号}）
       const exists = messages.some((m, i) => (m.id ?? `${threadId}-${i + 1}`) === mid);
       if (!exists) {
         throw new ApiError(404, 'MESSAGE_NOT_FOUND', `消息不存在: ${mid}（线程 ${meta.threadId}）`);
       }
 
       const current = ctx.history.readFeedback(userId, agentName, threadId).get(mid) ?? null;
-      // 同值重复提交 = 取消
       const next: FeedbackValue = value === current ? null : value;
       await ctx.history.appendFeedback(userId, agentName, threadId, mid, next);
       return { message_id: mid, feedback: next };

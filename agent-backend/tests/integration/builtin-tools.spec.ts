@@ -1,16 +1,3 @@
-/**
- * 集成测试：内置工具目录端点（T042，`plan.md` R2 / `contracts/runtime-api-delta.md` §2）
- *
- * 覆盖：
- * - 结构合法、`total = 7`、字段齐备（`FR-011`）；含 2026-09-23 的 `read_skill`
- *   与 2026-10-17 的 `grep_skill`
- * - `description_template` **保持占位符形态**，未被替换为具体用户/会话取值
- *   （`FR-012`、`SC-014`：模板中出现的具体用户目录名或会话标识数量 MUST 为 0）
- * - 只读、无副作用
- *
- * 运行方式（本地执行）：
- *   npm run test:integration
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -57,9 +44,7 @@ describe('GET /api/builtin-tools', () => {
     const body = res.json() as { items: ToolItem[]; total: number };
     expect(body.total).toBe(7);
     expect(body.items).toHaveLength(7);
-    // 2026-09-23 新增：技能文件读取（此前 SKILL 正文无任何读取通道）
     expect(body.items.map((i) => i.name)).toContain('read_skill');
-    // 2026-10-17 新增：技能内容检索（技能此前只能逐个文件人工翻）
     expect(body.items.map((i) => i.name)).toContain('grep_skill');
     for (const item of body.items) {
       expect(typeof item.name).toBe('string');
@@ -81,12 +66,10 @@ describe('GET /api/builtin-tools', () => {
     const body = res.json() as { items: ToolItem[] };
     const byName = new Map(body.items.map((i) => [i.name, i]));
 
-    // 占位符仍在
     expect(byName.get('read_file')?.description_template).toContain('{示例路径}');
     expect(byName.get('list_dir')?.description_template).toContain('{可用目录}');
     expect(byName.get('write_file')?.description_template).toContain('{会话标识}');
 
-    // 未出现任何具体用户目录名或会话标识（本测试未创建任何数字人/会话）
     const all = body.items
       .map((i) => `${i.description_template}${JSON.stringify(i.parameters)}`)
       .join('\n');

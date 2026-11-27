@@ -1,23 +1,8 @@
-/**
- * 单元测试：只有附件、不写正文也能发送（026，2026-11-18）
- *
- * 背景：发送链路把「正文非空」当前置条件（服务端 `content` 有 `minLength: 1`），
- * 于是"只传一个文件、不写字"根本发不出去。026 的解法**不是**放宽契约，而是在
- * **唯一发送链路**（`useChatPanel.onSend`）上补一句默认话术——content 恒非空，
- * 下游（schema / 标题 / 气泡 / 意图聚焦）零改动。
- *
- * 本文件断言的是端到端行为（真实 `useChatPanel()`，只把 `useSession` 换成受控假会话）：
- * - 正文只剩空白 + 有附件 → 合成「请查看这个/这些文件」后提交；
- * - 有正文 → **逐字**提交，绝不合成；
- * - 无正文无附件 / 只有 `/技能名` → 仍被拦（与改造前一致）；
- * - 合成话术是机器生成的 → **不弹**术语替换确认。
- *
- * 上游的按钮可用性由 `Composer.spec.ts` / `ChatPanel.spec.ts` 覆盖。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MAX_MESSAGE_CHARS } from '../api/messages'
 import { emptyNextSteps } from '../api/next-steps'
 import type { FileReference } from '../api/types'
 import { RUN_PHASE } from '../constants/events'
@@ -31,7 +16,6 @@ const { useChatPanel } = await import('./useChatPanel')
 const PLAN: FileReference = { dir: '数据准备/生产计划', filename: 'plan.csv' }
 const ORDER: FileReference = { dir: '临时空间', filename: 'order.xlsx' }
 
-/** 受控假会话：只实现 `useChatPanel` 会触碰到的字段 */
 function makeSession() {
   const noop = vi.fn()
   const send = vi.fn(async () => undefined)
@@ -139,7 +123,6 @@ function makeSession() {
     skillMention: { selected: ref<string | null>(null), open: ref(false), sync: vi.fn(), reset: vi.fn() },
     produced: { unreadCount: ref(0) },
     toast: { push: vi.fn() },
-    /** 018：术语替换预检（源码在 `useTermNormalize`，这里只断言"有没有调"） */
     termNormalize: { review: vi.fn(async () => ({ items: [] })) },
     files: {},
     now: () => 0,
@@ -236,5 +219,35 @@ describe('useChatPanel —— 只有附件也能发送（026）', () => {
 
     expect(ok).toBe(false)
     expect(chat.send).not.toHaveBeenCalled()
+  })
+})
+
+describe('useChatPanel —— 正文长度上限（2026-11-26）', () => {
+  it('超过上限 → 本地拦下并提示，不发请求', async () => {
+    const { panel, session } = mountHarness(makeSession())
+    const chat = session.chat as unknown as ChatSpy
+    const toast = session.toast as unknown as ToastSpy
+
+    const ok = await panel.onSend({
+      content: 'a'.repeat(MAX_MESSAGE_CHARS + 1),
+      attachments: [],
+    })
+
+    expect(ok).toBe(false)
+    expect(chat.send).not.toHaveBeenCalled()
+    expect(toast.push).toHaveBeenCalledWith(
+      'error',
+      expect.stringContaining(String(MAX_MESSAGE_CHARS)),
+    )
+  })
+
+  it('恰好等于上限 → 正常提交', async () => {
+    const { panel, session } = mountHarness(makeSession())
+    const chat = session.chat as unknown as ChatSpy
+
+    const ok = await panel.onSend({ content: 'a'.repeat(MAX_MESSAGE_CHARS), attachments: [] })
+
+    expect(ok).toBe(true)
+    expect(chat.send).toHaveBeenCalledTimes(1)
   })
 })

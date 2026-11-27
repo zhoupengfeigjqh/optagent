@@ -1,9 +1,3 @@
-/**
- * 单测：JSON 值的路径读写（HITL 递归表单的定位基础）。
- *
- * 守住的语义：不改入参、中间层缺失即按段类型创建、类型不符**不静默覆盖**、
- * 空路径 = 整段替换、数组下标可定位到单元格。
- */
 import { describe, expect, it } from 'vitest'
 
 import { formatPath, pathKey, readAtPath, setAtPath } from './json-path'
@@ -72,7 +66,6 @@ describe('setAtPath', () => {
     expect(result.ok === true && result.value).toEqual({
       input: { targetPriorities: [{ ruleId: 'PR001', rulePriority: 3 }] },
     })
-    // 原值仍是 1：单元格编辑不会顺手改掉别处
     expect(root.input.targetPriorities[0]!.rulePriority).toBe(1)
   })
 
@@ -94,8 +87,6 @@ describe('setAtPath', () => {
     const result = setAtPath({ input: '字符串' }, ['input', 'targetPriorities'], ['a'])
 
     expect(result.ok).toBe(false)
-    // 说的是"哪一层不是对象"（input），而不是末段名（targetPriorities）——
-    // 后者会让用户不知道该改哪个字段
     expect(result.ok === false && result.error).toContain('「input」不是对象')
     expect(result.ok === false && result.error).toContain('input.targetPriorities')
   })

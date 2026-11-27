@@ -1,10 +1,3 @@
-/**
- * Token 用量存储：better-sqlite3 全局单库 `.opt-agent/usage.db`。
- *
- * - 表 usage_records + 索引（thread_id / agent_name / created_at，章程 IV）
- * - record 失败记日志不抛出（不影响对话响应）
- * - summary 走 SQL 聚合，按过滤条件命中索引
- */
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,28 +15,8 @@ import type {
 
 export type JournalModeOutcome = 'WAL' | 'DELETE' | 'default';
 
-/**
- * 事件明细保留期（一年）：既是清理策略，也是**所有统计口径的统一上界**（2026-09-23）。
- *
- * 累计值已不再来自独立的累计表，而是"最近一年"的事件聚合，因此这个常量同时决定
- * 清理边界与查询边界——改一处即同时生效（原先清理与时间窗各写一遍字面量）。
- */
 const MCP_EVENT_RETENTION_MS = 365 * 86_400_000;
 
-/**
- * 选择日志模式：**优先 WAL，不支持则回退 DELETE**。
- *
- * **为什么需要这个回退**（实测缺陷，见 `quickstart.md` §10.3）：
- * WAL 需要创建并 `mmap` 一个 `-shm` 共享内存文件。部分文件系统**不支持共享内存**，
- * 此时 `pragma('journal_mode = WAL')` 会抛 `SQLITE_IOERR_SHMOPEN`，
- * 而它发生在 `UsageDb` 构造里 → **整个服务起不来**，容器表现为无限重启
- * （本地开发用 Windows + Docker Desktop 的绑定挂载就是这个情形：
- * 同一个 `usage.db` 复制到容器内打开 WAL 一切正常，放在绑定挂载上就失败，
- * 说明是文件系统能力问题而非数据损坏）。
- *
- * 回退后功能**完全可用**，只失去 WAL 的并发写收益；交付形态（Linux）不受影响。
- * 抽成可注入 `pragma` 的函数是为了单测能覆盖该分支（不必真的去找一块坏盘）。
- */
 export function applyJournalModeSafely(
   pragma: (mode: 'WAL' | 'DELETE') => unknown,
   onFallback: (code: string) => void,
@@ -58,7 +31,6 @@ export function applyJournalModeSafely(
       pragma('DELETE');
       return 'DELETE';
     } catch {
-      // 连显式设置都失败：保持 SQLite 默认（DELETE）继续，读写仍然可用
       return 'default';
     }
   }
@@ -69,16 +41,6 @@ export function isShmOpenFailure(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | undefined)?.code === 'SQLITE_IOERR_SHMOPEN';
 }
 
-/**
- * 把 `SQLITE_IOERR_SHMOPEN` 翻译成**可操作**的说明。
- *
- * 原始报错只有一句 `SqliteError: disk I/O error`，与"磁盘坏了"无法区分，
- * 而真实原因通常是二者之一：
- * ① 当前文件系统不支持共享内存（WAL 需要 `mmap` 一个 `-shm`）；
- * ② **上一次容器运行留下的陈旧 `-shm`**——新容器在绑定挂载上无法重新打开它
- *    （实测：同一个库复制到容器内可正常打开，留在绑定挂载上则失败，
- *    而**新建**的库在同一挂载上一切正常，说明不是文件系统能力问题）。
- */
 export function describeShmOpenFailure(dbPath: string, code: string | undefined): string {
   return (
     `无法打开用量库 ${dbPath}（${code ?? 'SQLITE_IOERR_SHMOPEN'}）：` +
@@ -153,18 +115,14 @@ export class UsageDb implements UsageStore {
       -- 一次性清理：累计表已无读者，删掉避免留孤儿表（幂等，见上方 2026-09-23 说明）
       DROP TABLE IF EXISTS mcp_call_stats;
     `);
-      // 旧库迁移：事件表在这些列加入之前就已存在的库，打开时逐列补齐（SQLite 无 IF NOT EXISTS
-      // 修饰 ADD COLUMN，故先查 pragma table_info；与 CREATE TABLE IF NOT EXISTS 同一"打开即自愈"
-      // 口径，无需人工迁移步骤）。
       // 注意：建在这些列上的索引必须在补列**之后**建——老库此刻还没有这些列。
       const eventColumns = new Set(
         (
           this.db.prepare(`PRAGMA table_info(mcp_call_events)`).all() as Array<{ name: string }>
         ).map((column) => column.name),
       );
-      // 每项为 [列名, 列定义]；后续再加列在此追加一行即可
       const addableColumns: Array<[string, string]> = [
-        ['user_id', 'TEXT'], // 2026-09-16 十四次调整
+        ['user_id', 'TEXT'],
         ['tool_name', 'TEXT'],
         ['thread_id', 'TEXT'],
         ['duration_ms', 'INTEGER'],
@@ -254,21 +212,6 @@ export class UsageDb implements UsageStore {
     return { total, grouped };
   }
 
-  /**
-   * 记一次 MCP **工具调用**（`plan.md` R4、`FR-049`/`FR-050`）。
-   *
-   * 口径是**工具调用次数**——每次 `tools/call` 计一次，成功/失败分列。
-   * 这里刻意不用"HTTP 请求数"：一次 streamable-http 会话可能包含
-   * `initialize` / `tools/list` / 多次 `tools/call`，二者不等价，
-   * 用请求数会给出误导性数字（`research.md` D6）。
-   *
-   * **调用未发出**（`file_args` 校验失败等）不记——保持"计数 = 工具调用次数"的口径。
-   *
-   * 2026-09-23：只写事件明细一张表（原累计表已删）。`durationMs` 含 `McpManager`
-   * 内部的一次重试，即**用户感知耗时**，非单次尝试耗时。
-   *
-   * 写入失败只记日志不抛出——统计是观测能力，MUST NOT 影响对话主链路。
-   */
   recordMcpCall(entry: McpCallEvent): void {
     try {
       const now = new Date().toISOString();
@@ -291,7 +234,6 @@ export class UsageDb implements UsageStore {
             // 成功时不留错误分类，避免"有 error_kind 但 ok=1"的歧义行
             entry.ok ? null : (entry.errorKind ?? null),
           );
-        // 事件只保留一年：与最长统计窗对齐，顺手清理（低频调用下代价可忽略）
         this.db
           .prepare(`DELETE FROM mcp_call_events WHERE called_at < ?`)
           .run(new Date(Date.now() - MCP_EVENT_RETENTION_MS).toISOString());
@@ -301,7 +243,6 @@ export class UsageDb implements UsageStore {
     }
   }
 
-  /** 时间窗定义：最近 24h / 7 天 / 30 天 / 1 年（任务 2026-09-15） */
   private static readonly WINDOWS: Array<{ key: 'h24' | 'd7' | 'd30' | 'd365'; ms: number }> = [
     { key: 'h24', ms: 24 * 3_600_000 },
     { key: 'd7', ms: 7 * 86_400_000 },
@@ -309,21 +250,7 @@ export class UsageDb implements UsageStore {
     { key: 'd365', ms: MCP_EVENT_RETENTION_MS },
   ];
 
-  /**
-   * 调用统计：**一次聚合出两份视图**（2026-09-23）。
-   *
-   * - `groups`：按「**服务 × 工具 × 用户**」分组，每组带四个时间窗——平台统计表的一行；
-   * - `items`：服务级汇总（折叠该服务的全部分组行），供平台卡片展示"最近一年调用次数"。
-   *
-   * 唯一数据源是事件明细表，**计数口径 = 最近一年**（原独立累计表已删），故 `calls_*`
-   * 与 `windows.d365` 恒相等；超过一年未调用的服务不再出现，与"事件只留一年"一致。
-   *
-   * `tool_name` 是 **MCP 服务自己的工具名**（如 `ocr` 服务下的 `ocr_image`），
-   * 不是暴露给模型的那个 `{server}__{tool}` 名字。
-   */
   mcpCallStats(): McpCallStats {
-    // 逐窗在事件明细上按 (服务, 工具, 用户) 做 GROUP BY，累加到同一批分组行上。
-    // 用循环而不是一条带 8 个 CASE 的 SQL：与既有时间窗定义共用同一处口径来源。
     const groups = new Map<string, McpCallGroupStat>();
     for (const { key, ms } of UsageDb.WINDOWS) {
       const rows = this.db
@@ -344,7 +271,6 @@ export class UsageDb implements UsageStore {
         last_called_at: string;
       }>;
       for (const row of rows) {
-        // 复合键用 NUL 分隔（服务名/工具名/用户名都不会含 NUL）
         const id = `${row.service_name}\u0000${row.tool_name ?? ''}\u0000${row.user_id ?? ''}`;
         const group = groups.get(id) ?? {
           service: row.service_name,
@@ -363,7 +289,6 @@ export class UsageDb implements UsageStore {
           },
         };
         group.windows[key] = { ok: row.ok, failed: row.failed, total: row.ok + row.failed };
-        // 最长窗（= 保留上界）覆盖其余窗，故用它定下该组的"最近一年"总量与最近调用时间
         if (key === 'd365') {
           group.calls_ok = row.ok;
           group.calls_failed = row.failed;
@@ -374,7 +299,6 @@ export class UsageDb implements UsageStore {
       }
     }
 
-    // 排序：服务 → 工具 → 用户（与表格列顺序一致；`null` 排在该维度最前）
     const ordered = [...groups.values()].sort(
       (a, b) =>
         a.service.localeCompare(b.service) ||
@@ -382,7 +306,6 @@ export class UsageDb implements UsageStore {
         (a.user_id ?? '').localeCompare(b.user_id ?? ''),
     );
 
-    // 服务级汇总：折叠该服务的全部分组行（同一口径，可直接相加）
     const items = new Map<string, McpCallStat>();
     for (const group of ordered) {
       const acc = items.get(group.service) ?? {
@@ -404,7 +327,6 @@ export class UsageDb implements UsageStore {
       items.set(group.service, acc);
     }
 
-    // 插入序即服务名有序，故 items 不必再排一次
     return { items: [...items.values()], groups: ordered };
   }
 

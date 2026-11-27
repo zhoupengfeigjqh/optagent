@@ -22,7 +22,6 @@ const TOOLS = [
 
 const OCR_URL = 'http://192.168.1.2:8000/mcp';
 
-/** 通过接口新建一个服务（走真实路由，而不是直接调 domain） */
 async function createService(name = 'ocr', overrides: Record<string, unknown> = {}) {
   return fx.app.inject({
     method: 'POST',
@@ -33,7 +32,6 @@ async function createService(name = 'ocr', overrides: Record<string, unknown> = 
       transport: 'http',
       url: OCR_URL,
       file_args: { ocr_image: { image: 'url' } },
-      // 工具白名单（2026-10-03 起新建必填非空）
       allowed_tools: ['ocr_image'],
       ...overrides,
     },
@@ -124,7 +122,6 @@ describe('GET /api/admin/mcp/services', () => {
       transport: 'http',
       url: OCR_URL,
     });
-    // 容器运行态相关字段已下架
     expect(res.json().items[0].status).toBeUndefined();
     expect(res.json().items[0].in_compose).toBeUndefined();
   });
@@ -141,9 +138,7 @@ describe('GET /api/admin/mcp/services/{name}', () => {
     // writable / permission_scope 已随 2026-09-15 的产品决定移除：响应里 MUST NOT 再出现
     expect(body.writable).toBeUndefined();
     expect(body.permission_scope).toBeUndefined();
-    // 编排原始声明已下架
     expect(body.compose_declaration).toBeUndefined();
-    // 2026-10-27：详情里的每项多一个 `label`（平台配置的显示名；未配置即空串）
     expect(body.tools).toEqual(TOOLS.map((t) => ({ ...t, label: '' })));
     expect(body.tools_truncated).toBe(false);
   });
@@ -184,7 +179,6 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().url).toBe('http://192.168.1.3:9000/mcp');
-    // 无需逐个改动数字人：影响面由引用推导得出
     expect(res.json().affected_agents.sort()).toEqual(['a1', 'a2']);
   });
 
@@ -205,11 +199,8 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
       },
     });
     expect(saved.statusCode).toBe(200);
-    // 保存响应本身 = "保存后的完整调用配置"（契约 §3.3）
     expect(saved.json().rules_fields).toEqual({ ocr_image: 'input.rules' });
 
-    // 关键路径：界面在保存成功后会 `loadDetail()` 覆盖表单——详情漏登记该字段，
-    // 表现就是"保存成功、勾选却被清空"（2026-09-26 实测缺陷）
     const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
     expect(after.rules_fields).toEqual({ ocr_image: 'input.rules' });
   });
@@ -234,10 +225,8 @@ describe('PUT /api/admin/mcp/services/{name}', () => {
 
     const after = (await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/services/ocr' })).json();
     expect(after.tool_labels).toEqual({ ocr_image: '识别图片文字' });
-    // 清单项合并显示名（详情把配置投影到每个工具上）
     expect(after.tools).toEqual([{ ...TOOLS[0], label: '识别图片文字' }]);
 
-    // 再次保存调用配置且**不携带** tool_labels：沿用存量（与 headers 同一口径）
     const resaved = await fx.app.inject({
       method: 'PUT',
       url: '/api/admin/mcp/services/ocr',
@@ -364,7 +353,6 @@ describe('DELETE /api/admin/mcp/services/{name}', () => {
     await createAgent('a1', ['ocr']);
     await fx.app.inject({ method: 'DELETE', url: '/api/admin/mcp/services/ocr' });
 
-    // 2026-11-23：全局异常项汇总下架，异常态的出口是设计态读取（列表/详情）
     const detail = await fx.app.inject({ method: 'GET', url: '/api/admin/agents/a1' });
     expect(detail.json()).toMatchObject({ abnormal: true });
     expect(detail.json().abnormal_reason).toContain('ocr');
@@ -412,7 +400,6 @@ describe('POST /api/admin/mcp/services/{name}/test', () => {
       payload: { transport: 'http', url: 'http://192.168.1.9:9999/mcp' },
     });
     expect(res.statusCode).toBe(200);
-    // 探测目标 = 表单当前值，而非已保存的旧地址
     expect(res.json().target.url).toBe('http://192.168.1.9:9999/mcp');
   });
 
@@ -475,7 +462,6 @@ describe('GET /api/admin/mcp/stats', () => {
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/mcp/stats' });
     expect(res.json().stats_available).toBe(true);
     expect(res.json().items[0].calls_total).toBe(3);
-    // 分组行原样透传（平台统计表的行）
     expect(res.json().groups[0].tool_name).toBe('ocr_image');
   });
 

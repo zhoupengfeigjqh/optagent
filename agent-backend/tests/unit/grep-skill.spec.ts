@@ -1,13 +1,3 @@
-/**
- * 单元测试：`grep_skill` 的领域实现（2026-10-17）。
- *
- * 守住四条：
- * 1. **搜得到**：缺省跨全部技能、限定技能只搜该技能；命中行形如
- *    `技能名/路径:行号: 内容`（可直接回填给 `read_skill`）；
- * 2. **有界可见**（原则九）：超过 100 条明说"仅显示前 100 条"，绝不静默截断；
- * 3. **失败可读**：空/非法正则、技能不存在、技能根为空都给可操作说明（不上抛、不记越权）；
- * 4. **越不出去**：非法技能名与 `read_skill` 同一判据（分隔符 / `..` / 控制字符一律拒）。
- */
 import fs, { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,7 +18,6 @@ beforeEach(() => {
   mkdirSync(path.join(a, 'references'), { recursive: true });
   writeFileSync(path.join(a, 'SKILL.md'), '# 调度算法\n\n交付日期是关键词\n', 'utf8');
   writeFileSync(path.join(a, 'references', '算法详解.md'), '# 详解\n\n交付日期风险\n', 'utf8');
-  // 二进制（含 NUL）：应被跳过并计数，而不是把乱码塞进上下文
   writeFileSync(path.join(a, 'logo.png'), Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]));
 
   const b = path.join(skillsRoot, '质量检验');

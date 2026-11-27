@@ -1,11 +1,3 @@
-/**
- * 单元测试：`SkillLibraryService.installFromDirectory`（2026-10-02，本体市场导入的落库半程）
- *
- * 守住三条口径：
- * 1. 与 ZIP 安装同一套落库机制（原子入驻、整包落盘、索引同步、版本递增），并记录 `origin`；
- * 2. **重名直接拒绝**（产品决定：市场导入不提供覆盖），库中既有内容不变；
- * 3. 缺 `SKILL.md` → `VALIDATION_FAILED`。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

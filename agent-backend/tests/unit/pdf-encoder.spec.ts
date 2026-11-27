@@ -1,19 +1,9 @@
-/**
- * `.pdf` 编码器（`src/domain/tools/encoders/pdf.ts`，2026-11-16 三期）。
- *
- * 两条主线：
- * 1. **结构解析**（`parsePdfBlocks`）：受限 Markdown → 排版块的映射，纯函数、逐条断言；
- * 2. **端到端往返**：编码出的 PDF 用读侧（`readToolFile` → pdfjs 文本层）解回来，
- *    必须能读到中文原文——这是"嵌入字体 + ToUnicode"是否真的生效的唯一证据，
- *    只断言 `%PDF-` 魔数无法证明中文能显示。
- */
 import { describe, expect, it } from 'vitest';
 
 import type { FileAccess } from '../../src/domain/file-access.js';
 import { encodePdf, parsePdfBlocks, validatePdfSource } from '../../src/domain/tools/encoders/pdf.js';
 import { readToolFile } from '../../src/domain/tools/read-file.js';
 
-/** 把 PDF 字节包成最小 FileAccess 桩，走真实读侧解析 */
 function accessOf(buf: Buffer): FileAccess {
   return {
     truncateBytes: 128 * 1024,

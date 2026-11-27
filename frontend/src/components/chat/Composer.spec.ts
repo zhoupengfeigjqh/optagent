@@ -1,12 +1,3 @@
-/**
- * 组件测试：输入区（2026-10-18 起「引用即胶囊」）。
- *
- * 守住的语义：
- * 1. **只显示一处**：选中的文件在正文里就是一枚不可编辑的胶囊（`@文件名` + 移除按钮），
- *    输入框上方不再有第二排 chip；
- * 2. **草稿仍是字符串**：胶囊的标记参与序列化，`@` 触发、反向同步、发送载荷的旧口径不变；
- * 3. **`mention` 插槽只出数据与锚点**（面板本体是 `fixed` 浮层，见 MentionPopup）。
- */
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -20,7 +11,6 @@ function mountComposer(props: Record<string, unknown> = {}, slots: Record<string
   return mount(Composer, { props: { modelValue: '', ...props }, slots })
 }
 
-/** 输入区本体（contenteditable 容器） */
 function editorOf(wrapper: ReturnType<typeof mountComposer>) {
   return wrapper.find('.composer__input')
 }
@@ -39,7 +29,6 @@ describe('Composer —— 内联引用胶囊', () => {
     expect(chips[0]!.find('.composer__mention-remove').attributes('aria-label')).toBe(
       '移除引用 产能.xlsx',
     )
-    // 旧的上方 chip 行已删除：同一次选择只显示一处
     expect(wrapper.find('.composer__refs').exists()).toBe(false)
   })
 
@@ -66,12 +55,10 @@ describe('Composer —— 内联引用胶囊', () => {
   it('上层插入标记后（选完文件）正文自动落成胶囊', async () => {
     const wrapper = mountComposer({ modelValue: '看下 @' })
 
-    // 选完文件的写法与真实链路一致：引用先入集合，再由 `insertToken` 改写草稿
     await wrapper.setProps({ modelValue: '看下 @产能.xlsx ', references: [REFERENCE] })
     await nextTick()
 
     expect(wrapper.findAll('.composer__mention')).toHaveLength(1)
-    // 用 textContent：`text()` 会 trim，尾随空格正是插入标记的一部分
     expect((editorOf(wrapper).element as HTMLElement).textContent).toBe('看下 @产能.xlsx ')
   })
 
@@ -126,7 +113,7 @@ describe('Composer —— mention 插槽', () => {
       {},
       { mention: '<div class="probe">{{ anchor ? anchor.tagName : "none" }}</div>' },
     )
-    await nextTick() // 模板 ref 在挂载后才落到插槽
+    await nextTick()
 
     expect(wrapper.find('.probe').text()).toBe('DIV')
     expect(editorOf(wrapper).attributes('contenteditable')).toBe('true')
@@ -203,10 +190,6 @@ describe('Composer —— `/技能名` 胶囊（2026-11-07）', () => {
   })
 })
 
-/**
- * 026（2026-11-18）：只有附件、没有正文也能发送。
- * 输入区只负责"放行"；正文由上层（`useChatPanel.onSend`）合成「请查看这个/这些文件」。
- */
 describe('Composer —— 只有附件时的可发送性（026）', () => {
   it('只有引用、正文为空：发送按钮可用，回车发出空正文 + 引用（由上层合成话术）', async () => {
     const wrapper = mountComposer({ modelValue: '', references: [REFERENCE] })
@@ -229,15 +212,7 @@ describe('Composer —— 只有附件时的可发送性（026）', () => {
   })
 })
 
-/**
- * 2026-11-17：粘贴上传的**输入侧**出口。
- *
- * 输入区只负责"把剪贴板里的文件捞出来交给上层"，校验与上传都在 `useUploadPanel`——
- * 因此这里只钉两件事：①有文件时不把内容当文本塞进正文、并阻止默认粘贴；
- * ②纯文字粘贴的既有行为一字不变。
- */
 describe('Composer —— 粘贴文件（2026-11-17）', () => {
-  /** jsdom 没有真实剪贴板：手工造一个带 `items` 的粘贴事件 */
   function pasteEvent(files: File[], text = ''): Event {
     const event = new Event('paste', { bubbles: true, cancelable: true })
     Object.defineProperty(event, 'clipboardData', {

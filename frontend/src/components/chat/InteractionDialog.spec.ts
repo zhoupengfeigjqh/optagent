@@ -1,16 +1,3 @@
-/**
- * 组件测试：工具调用人工确认弹窗（HITL，Schema 驱动通用表单）——表单本体。
- *
- * 守住：
- * - 控件按 schema 类型映射（enum→下拉、boolean→开关、integer/number→数字、string→输入框，
- *   description 含「多行」→ 多行文本；嵌套/表格/列表/JSON 逃逸舱见 `InteractionField.spec.ts`）
- * - 预填 proposed_args 且可修改；required 标星 + 本地校验失败不 emit
- * - submit 只携带非空参数；reject 与倒计时归零都 emit reject
- * - 组件契约：仅依赖 request 输入，不含任何具体工具名（解耦红线）
- * - 算法规则入口：落在 rules_field 目标那一行，勾选后写进该字段
- *
- * `@` 文件引用与结构化文件卡片另见 `InteractionDialog.mention.spec.ts`。
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -65,7 +52,6 @@ describe('InteractionDialog —— 标题行（2026-10-27）', () => {
     expect(header.find('.interaction-dialog__countdown').text()).toContain('剩余')
     expect(wrapper.find('.interaction-dialog__meta').exists()).toBe(false)
 
-    // 工具说明入口（「?」）已移除；正文也没有重复的工具名行
     expect(wrapper.find('[aria-label="查看工具说明"]').exists()).toBe(false)
     expect(wrapper.find('.interaction-dialog__tool').exists()).toBe(false)
   })
@@ -76,17 +62,14 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     const wrapper = mountDialog()
 
     expect(wrapper.find('select').exists()).toBe(true)
-    // DOM 的 value 是选项**下标**（原值由下标承载）：0 即「峰」
     expect((wrapper.find('select').element as HTMLSelectElement).value).toBe('0')
     expect(wrapper.findAll('option')[1]!.text()).toBe('峰')
     expect(wrapper.find('input[type=number]').exists()).toBe(true)
     expect((wrapper.find('input[type=number]').element as HTMLInputElement).value).toBe('3')
     expect(wrapper.find('input[type=text]').exists()).toBe(true)
     expect((wrapper.find('input[type=text]').element as HTMLInputElement).value).toBe('L01')
-    // description 含「多行」→ textarea
     expect(wrapper.find('textarea').exists()).toBe(true)
 
-    // required 标星
     const labels = wrapper.findAll('.interaction-dialog__label')
     expect(labels[0]!.classes()).toContain('required')
     expect(labels[2]!.classes()).not.toContain('required')
@@ -139,7 +122,6 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
         type: 'object',
         properties: {
           产线: { type: 'string' },
-          // 数组套数组：表格/列表都表达不了 → JSON 文本框
           矩阵: { type: 'array', items: { type: 'array', items: { type: 'integer' } } },
         },
         required: ['产线'],
@@ -148,7 +130,6 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
     })
     const wrapper = mountDialog(request)
 
-    // 预填序列化为 JSON 文本（可解析回同等结构）
     const area = wrapper.find('textarea.interaction-dialog__input--json')
     expect(JSON.parse((area.element as HTMLTextAreaElement).value)).toEqual([[1, 2]])
 
@@ -200,13 +181,11 @@ describe('InteractionDialog —— Schema 驱动表单', () => {
       }),
     )
 
-    // 顶层只有 input 一个参数；它下面两个子字段各自成行
     const labels = wrapper.findAll('.interaction-dialog__label').map((item) => item.text())
     expect(labels[0]).toContain('input')
     expect(labels[1]).toContain('solvingTime')
     expect(labels[2]).toContain('days')
     expect(wrapper.findAll('input[type=number]')).toHaveLength(2)
-    // 没有任何 JSON 文本框（这一层的形状能被结构化表达）
     expect(wrapper.find('textarea.interaction-dialog__input--json').exists()).toBe(false)
   })
 
@@ -266,10 +245,6 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
     })
   }
 
-  /**
-   * 规则入口只要求"有会话上下文"（按钮据此装配）与 `files.rules()` 数据源，
-   * 故用最小桩，不必拉起真实 workspace store（`@` 引用的完整链路见 mention 那份测试）。
-   */
   function mountRulesDialog(request: InteractionSnapshot = makeRulesRequest()) {
     const workspace = {
       spaces: ref([]),
@@ -309,7 +284,6 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
       .find((b) => b.text().includes('确认选择'))!
       .trigger('click')
 
-    // 表格里已出现勾选的那一行（列由数据决定：规则文件表头）
     expect(wrapper.findAll('th').map((cell) => cell.text())).toContain('规则编码')
 
     await wrapper
@@ -338,7 +312,6 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
       .findAll('button')
       .find((b) => b.text() === '确认提交')!
       .trigger('click')
-    // rules 未填 → 不进提交值（与改造前"空文本框不进 args"同一口径）
     expect(wrapper.emitted('submit')![0]!).toEqual([{ days: 7 }])
   })
 
@@ -368,7 +341,6 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
     )
     await flushPromises()
 
-    // 入口与它要影响的表格在同一个字段块内（不是挂在祖先的 JSON 框下面）
     const fields = wrapper.findAll('.interaction-dialog__field')
     const target = fields.find((field) => field.find('.interaction-dialog__rules-btn').exists())!
     expect(target.find('.interaction-dialog__table').exists()).toBe(true)
@@ -402,7 +374,6 @@ describe('InteractionDialog —— 算法规则选择（rules_field 装配）', 
   it('对象路径 + 目标祖先处于 JSON 编辑且文本非法：只报错、不覆盖（模型与文本都不变）', async () => {
     const { wrapper } = mountRulesDialog(
       makeRulesRequest({
-        // input 未声明 properties → 渲染成一个 JSON 文本框，子字段没有独立行 → 入口落在 input 这一行
         schema: { type: 'object', properties: { input: { type: 'object' } } },
         proposed_args: {},
         required: [],

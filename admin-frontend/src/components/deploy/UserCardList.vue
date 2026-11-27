@@ -1,14 +1,4 @@
 <script setup lang="ts">
-/**
- * 用户卡片列表（`FR-023`）。
- *
- * 本页兼作**部署前核对总账**，也是**部署对象的勾选处**（2026-09-16 十一次调整）：
- * - 卡片可展开（原生 `<details>`）查看每个数字人的搭配摘要（引用的 MCP 服务、
- *   内置工具、SKILL）及其异常标记；
- * - 卡片右上角有勾选框：**勾上 = 把该用户作为本次部署对象**（勾选状态由父级持有，
- *   跨分页累加）；未勾选任何用户时，部署面板既不能校验也不能部署；
- * - 卡片同时显示**部署状态**：`deployed_at` 为空 → "未部署"，否则 "已部署 + 最近一次时间"。
- */
 import { computed, ref } from 'vue'
 import type { AgentListItem, ErrorInfo, UserListItem } from '../../api/types'
 import { listAgents } from '../../api/agents'
@@ -27,7 +17,6 @@ const props = defineProps<{
   page: number
   loading: boolean
   error: ErrorInfo | null
-  /** 已被勾选为部署对象的用户标识 */
   selected: string[]
 }>()
 
@@ -35,7 +24,6 @@ const emit = defineEmits<{
   (e: 'update:page', value: number): void
   (e: 'toggle', userId: string, checked: boolean): void
   (e: 'clear'): void
-  /** 用户已删除（2026-10-20）：父级据此把它从部署勾选里摘掉 */
   (e: 'removed', userId: string): void
   (e: 'changed'): void
   (e: 'announce', text: string): void
@@ -47,33 +35,18 @@ const busy = ref(false)
 const localError = ref<ErrorInfo | null>(null)
 const agents = ref<AgentListItem[]>([])
 const pendingDelete = ref<UserListItem | null>(null)
-/** 撤回部署（把该用户的数字人从运行环境下架）的确认对象 */
 const pendingWithdraw = ref<UserListItem | null>(null)
 const withdrawing = ref(false)
-/** 重置密码的弹窗对象（2026-11-18） */
 const pendingReset = ref<UserListItem | null>(null)
 const resetting = ref(false)
-/**
- * 重置密码失败的提示**只在弹窗内**展示（不复用 `localError`）：
- * 弹窗是模态的，页面顶部的提示会被遮罩挡住；同一个错误也不该出现两次。
- */
 const resetError = ref<ErrorInfo | null>(null)
 
-/**
- * 卡片列表区域只承载**加载**失败（`props.error` 由父级的数据请求给出）。
- *
- * 操作类错误（保存 / 删除 / 撤回）由上面那条 `localError` 以「操作未完成」呈现——
- * 不能再喂给列表，否则同一个错误会顶着「用户与关联数字人加载失败」再出现一次，
- * 把"保存失败"误报成"加载失败"（2026-10-14：编辑关联保存失败就是这么被误导的）。
- */
 const showError = computed(() => props.error)
 
-/** 卡片上的部署状态文案（`deployed_at` 为 null 即"从未部署过"） */
 function deployLabel(user: UserListItem): string {
   return user.deployed_at ? `已部署 ${formatDeployedAt(user.deployed_at)}` : '未部署'
 }
 
-/** 最近一次部署时间（本地时区，精确到分钟） */
 function formatDeployedAt(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
@@ -114,9 +87,6 @@ async function submit(payload: {
   localError.value = null
   try {
     if (editing.value) {
-      // 编辑需要乐观锁版本；列表响应不含 revision，故取**部署清单端点**的当前 revision。
-      // 2026-09-27「目标运行形态」下架后 `/api/admin/platform/settings` 已不存在（恒 404
-      // NOT_FOUND）——原先在这里取版本，表现为"选完数字人点保存必失败"。
       const { revision } = await fetchManifest()
       await updateUser(editing.value.user_id, payload.agents, revision)
       emit('announce', `用户 ${editing.value.user_id} 的关联已更新`)
@@ -164,7 +134,6 @@ async function confirmWithdraw(): Promise<void> {
   withdrawing.value = true
   localError.value = null
   try {
-    // 同一口径的版本来源（部署清单端点），与「编辑关联」一致
     const { revision } = await fetchManifest()
     const result = await withdrawDeploy(target.user_id, revision)
     emit(
@@ -180,18 +149,11 @@ async function confirmWithdraw(): Promise<void> {
   }
 }
 
-/** 打开重置密码弹窗（每次打开都清掉上一次的失败提示） */
 function openReset(user: UserListItem): void {
   resetError.value = null
   pendingReset.value = user
 }
 
-/**
- * 提交新密码（2026-11-18）：成功后关闭弹窗并播报"会话已失效"。
- *
- * 失败时**保持弹窗打开**，把错误就地展示，管理员可直接改密码重试——
- * 关掉弹窗会连带丢掉刚输入的内容，等于让他从头再来一遍。
- */
 async function submitReset(password: string): Promise<void> {
   const target = pendingReset.value
   if (!target || resetting.value) return
@@ -246,7 +208,6 @@ async function submitReset(password: string): Promise<void> {
                 :tone="(item as UserListItem).deployed_at ? 'success' : 'neutral'"
               />
             </span>
-            <!-- 勾上 = 本次部署对象（未勾选任何用户时不允许校验/部署） -->
             <label class="user-card-list__pick">
               <input
                 type="checkbox"
@@ -297,7 +258,6 @@ async function submitReset(password: string): Promise<void> {
           </details>
 
           <div class="card__actions">
-            <!-- 撤回：把该用户的数字人从运行环境下架（仅"已部署"的用户才有意义） -->
             <button
               v-if="(item as UserListItem).deployed_at"
               type="button"
@@ -321,7 +281,6 @@ async function submitReset(password: string): Promise<void> {
       </template>
     </EntityCardList>
 
-    <!-- 编辑关联 / 新建用户：一次完整的编辑会话，走弹窗（2026-11-10） -->
     <UserEditor
       v-model:open="editorOpen"
       :user="editing"
@@ -330,7 +289,6 @@ async function submitReset(password: string): Promise<void> {
       @submit="submit"
     />
 
-    <!-- 重置密码：独立弹窗（后端也是独立子资源，不带 revision） -->
     <ResetPasswordDialog
       data-test="reset-password-dialog"
       :open="pendingReset !== null"
@@ -360,7 +318,6 @@ async function submitReset(password: string): Promise<void> {
       @confirm="confirmDelete"
     />
 
-    <!-- 撤回：先讲明"数字人将失去能力"，并说明文件空间与平台侧关联不受影响 -->
     <ConfirmDialog
       :open="pendingWithdraw !== null"
       data-test="withdraw-dialog"

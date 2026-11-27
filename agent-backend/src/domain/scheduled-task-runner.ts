@@ -1,22 +1,3 @@
-/**
- * 定时任务执行器（015）：一次触发 = 用**既有对话链路**跑一轮，不是第二套对话系统。
- *
- * 顺序固定（`plan.md` §2）：数字人可用性 → 确定本轮会话（新建 / 复用 / 重建）→
- * 并发额度 → 取实例 + MCP 有界等待 → `startRun` → 计次 → 等 `settled` → 落记录 + `touch`。
- * 因为历史落盘、usage 记账、工具装配、思考开关全部沿用 `RunManager`，
- * 定时任务的会话在聊天区里与手动对话完全同构（只多一个 `source` 来源标记）。
- *
- * 三条口径（`FR-041`/`FR-043`/research D4）：
- * 1. **次数只算真正开跑的一轮**（success / failed）；上一轮未完、额度已满、数字人不可用
- *    这三种 `skipped` **不计次数**，故 `markTriggered` 必须在 `startRun` 成功之后调用
- *    （心跳只负责推进 `next_run_at`，见 `infra/scheduled-task-ticker.ts`）。
- * 2. **会话不存在不等于失败**：复用模式下 `threadStore.get` 抛 `ThreadNotFoundError`
- *    是"用户删了会话"的正常分支，重建后继续；任务保持启用（`FR-061`）。
- * 3. **不重试**（`FR-044`）：失败只落一条记录，下一轮按计划时刻照常触发。
- *
- * `dispatch` **永不 reject**：所有失败都在内部落成 `failed` 记录，避免与心跳的兜底
- * 记录重复（一条触发只能有一条记录）。
- */
 import { AgentConfigError } from './agent-instance.js';
 import { PoolExhaustedError } from './agent-pool.js';
 import { unavailableReason } from './agent-scope.js';
@@ -35,23 +16,18 @@ import type { ScheduledTaskEvents } from './scheduled-task-events.js';
 import { ThreadNotFoundError, type ThreadSource, type ThreadStore } from './thread-store.js';
 import type { PoolKey } from '../types.js';
 
-/** 日志最小契约（与 pino 的 `warn(obj, msg)` 同形） */
 export interface RunnerLogger {
   warn(payload: Record<string, unknown>, message: string): void;
 }
 
-/** 执行器看到的实例契约：`RunManager` 要的部分 + MCP 就绪有界等待 */
 export interface ScheduledRunnerAgent extends RunAgentLike {
   mcpReady(timeoutMs: number): Promise<boolean>;
 }
 
-/** 一次触发的入参（与心跳的 `TaskDispatcher` 结构一致，可直接注册） */
 export interface TaskDispatchParams {
   userId: string;
   agentName: string;
-  /** 心跳推进过 `next_run_at` 之后的任务快照 */
   task: ScheduledTask;
-  /** 计划触发时刻（ISO UTC） */
   triggeredAt: string;
 }
 
@@ -62,35 +38,23 @@ export interface ScheduledTaskRunnerDeps {
   events: ScheduledTaskEvents;
   threadStore: ThreadStore;
   runManager: RunManager;
-  /**
-   * 取实例口：由装配层注入**与路由同一份**的单飞 + 实例池。
-   * 执行器自建工厂会造出第二套 MCP 连接（且池外实例无人回收）。
-   */
   getOrCreateAgent: (key: PoolKey) => Promise<ScheduledRunnerAgent>;
   /** MCP 建连有界等待（超时降级继续，与手动对话同口径） */
   mcpConnectTimeoutMs: number;
   logger?: RunnerLogger;
-  /** 注入时钟（测试用） */
   now?: () => number;
 }
 
 /** 本轮会话的解析结果（记录与会话都用它，避免"再查一次"） */
 interface ResolvedThread {
   threadId: string;
-  /** 会话名快照：复用模式下是会话创建时的名称（用户改名后随之变化，不覆写） */
   threadTitle: string;
-  /** 复用模式因原会话已删除而重建 */
   rebuilt: boolean;
 }
 
 export class ScheduledTaskRunner {
   constructor(private readonly deps: ScheduledTaskRunnerDeps) {}
 
-  /**
-   * 绑定给心跳的派发器（箭头函数：ticker 只持有函数引用，不关心 `this`）。
-   *
-   * 挂在 `registerDispatcher` 上的就是这个方法——`infra/` 因此不必 import 本模块。
-   */
   readonly dispatch = async (params: TaskDispatchParams): Promise<void> => {
     const { userId, agentName, task, triggeredAt } = params;
     let thread: ResolvedThread | null = null;
@@ -113,7 +77,6 @@ export class ScheduledTaskRunner {
         return;
       }
 
-      // ② 本轮会话（新建 / 复用 / 重建）
       thread = this.resolveThread(userId, agentName, task, triggeredAt);
 
       // ③ 并发额度：与手动对话共用（跨数字人累计，唯一判定入口）
@@ -146,7 +109,6 @@ export class ScheduledTaskRunner {
       try {
         await this.runOnce(userId, agentName, task, thread, triggeredAt);
       } finally {
-        // startRun 已转正时是 no-op；未走到 startRun 才真正归还额度
         release();
       }
     } catch (err) {
@@ -178,9 +140,7 @@ export class ScheduledTaskRunner {
     }
   };
 
-  /* ---------------- 执行 ---------------- */
 
-  /** 取实例 → 等 MCP → 开跑 → 计次 → 等收尾 → 落记录 */
   private async runOnce(
     userId: string,
     agentName: string,
@@ -231,7 +191,6 @@ export class ScheduledTaskRunner {
     }
 
     agent.activeThreads += 1;
-    // 真正开跑：此刻才计次（FR-041）。写盘失败只告警——本轮已经在跑，不应因此中断
     try {
       this.deps.store.markTriggered(userId, agentName, task.taskId, { triggeredAt });
     } catch (err) {
@@ -246,7 +205,6 @@ export class ScheduledTaskRunner {
         '已执行次数写盘失败（本轮照常执行，次数可能少记一次）',
       );
     }
-    // 次数 +1 要尽快反映到列表（FR-041：用户可见的合理时间内）
     this.deps.events.emitChanged(userId);
 
     const failure: { message: string | null } = { message: null };
@@ -321,7 +279,6 @@ export class ScheduledTaskRunner {
     }
   }
 
-  /* ---------------- 会话 ---------------- */
 
   /**
    * 确定本轮会话：每轮新建 / 复用 / 复用但已删（重建）。
@@ -344,7 +301,6 @@ export class ScheduledTaskRunner {
       triggeredAt,
     };
 
-    // 每轮新建（缺省；缺字段的历史任务按此处理，FR-064）
     if (task.newThreadPerRun || task.reusedThreadId === null) {
       return this.createThread(userId, agentName, task, title, source, false);
     }
@@ -371,7 +327,6 @@ export class ScheduledTaskRunner {
     }
   }
 
-  /** 新建会话（复用模式下同时记住归属：首轮或重建） */
   private createThread(
     userId: string,
     agentName: string,
@@ -387,7 +342,6 @@ export class ScheduledTaskRunner {
     return { threadId: meta.threadId, threadTitle: title, rebuilt };
   }
 
-  /* ---------------- 记录 ---------------- */
 
   private recordSkipped(
     userId: string,

@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 下拉菜单（T027）
- *
- * 受控开合 + 键盘可达：ArrowUp/Down 循环移动（跳过禁用项）、Home/End 首尾、
- * Enter/Space 选中、Esc 关闭并归还焦点；点击组件外部同样关闭。
- *
- * 高亮索引为组件内部状态（初值取自 `activeIndex`），对外只暴露意图事件，
- * 避免把"移动高亮"这种瞬时交互细节泄漏到父级。
- *
- * **2026-10-13 弹层改为视口安全浮窗**：菜单由 `position: absolute`（贴触发器
- * `left: 0` 向下弹、受祖先 `overflow` 裁剪）改为 `position: fixed`，坐标由
- * `placeMenu()` 按**视口**实时计算——下方放不下翻上方（底部工具栏场景）、
- * 左右越界夹取，因此**永不弹到屏幕外看不到**。滚动/视口变化时合帧重算。
- */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { placeMenu } from '../../utils/popup-position'
@@ -26,11 +12,8 @@ interface DropdownItem {
 
 const props = withDefaults(
   defineProps<{
-    /** 是否展开 */
     open?: boolean
-    /** 菜单项 */
     items?: DropdownItem[]
-    /** 初始高亮项索引 */
     activeIndex?: number
   }>(),
   { open: false, items: () => [], activeIndex: 0 },
@@ -49,11 +32,6 @@ const highlight = ref(props.activeIndex)
 
 let frame = 0
 
-/**
- * 按触发器与菜单的**视口**矩形重算落点，写回 `left`/`top`。
- *
- * 写 `dataset.side` 是为了排查（`below` / `above`），也便于测试断言。
- */
 function reposition(): void {
   const trigger = triggerRef.value
   const menu = menuRef.value
@@ -71,7 +49,6 @@ function reposition(): void {
   menu.dataset.side = place.side
 }
 
-/** 合帧重算：滚动与改尺寸可能在同一帧内触发多次。 */
 function schedule(): void {
   if (!props.open) {
     return
@@ -80,7 +57,6 @@ function schedule(): void {
   frame = nextFrame(reposition)
 }
 
-/** 环境没有 rAF 时退化为定时器（浏览器都有，测试环境未必）。 */
 function nextFrame(callback: () => void): number {
   return typeof requestAnimationFrame === 'function'
     ? requestAnimationFrame(callback)
@@ -95,7 +71,6 @@ function cancelFrame(handle: number): void {
   window.clearTimeout(handle)
 }
 
-/** 可聚焦项索引（跳过禁用项）。 */
 const enabledIndexes = computed(() =>
   props.items.map((item, index) => (item.disabled ? -1 : index)).filter((index) => index >= 0),
 )
@@ -186,7 +161,6 @@ function onDocumentPointerDown(event: Event): void {
   if (!root) {
     return
   }
-  // `event.target` 可能为空（如在 document 上派发的合成事件），此时按"外部点击"处理
   const target = event.target
   if (target instanceof Node && root.contains(target)) {
     return
@@ -220,7 +194,6 @@ watch(
     document.removeEventListener('pointerdown', onDocumentPointerDown)
     triggerRef.value?.focus()
   },
-  // 挂载时若已是展开态（如受控初值），同样需要登记外部点击监听
   { immediate: true },
 )
 
@@ -228,7 +201,6 @@ onMounted(() => {
   if (typeof document === 'undefined') {
     return
   }
-  // capture：滚动可能发生在任意祖先（消息列表、面板）上
   document.addEventListener('scroll', schedule, true)
   window.addEventListener('resize', schedule)
   if (props.open) {

@@ -1,37 +1,20 @@
 <script setup lang="ts">
-/**
- * 代码块（2026-10-16）
- *
- * 只做两件正文块做不到的事：等宽 + 横向滚动（不外溢撑破气泡）、一键复制。
- * 正文渲染复用 `MessageSegments`（搜索高亮与外链样式只在那一个文件里定义），
- * 所以代码块内的命中同样可高亮、同样可被"下一个命中"跳转命中。
- *
- * 剪贴板不可用（非安全上下文、权限被拒）时静默不改文案——与 `MessageActions` 的
- * 复制按钮同口径：宁可没有反馈，也不要谎报"已复制"。
- */
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import type { ContentSegment } from '../../utils/segments'
 import BaseIcon from '../common/BaseIcon.vue'
 import MessageSegments from './MessageSegments.vue'
 
-/** 复制成功提示的停留时长（与 `MessageActions` 对齐） */
 const COPY_FEEDBACK_MS = 2000
 
 const props = defineProps<{
-  /** 围栏上标注的语言（可空，仅作角标展示） */
   language: string
-  /** 已切好分段的代码文本（分段里带搜索命中序号） */
   segments: ContentSegment[]
 }>()
 
 const copied = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 
-/**
- * 复制的是**代码原文**：分段是原文的无损切分（`utils/segments.ts` 的可测不变式），
- * 拼回来即可——不必再去读一次 DOM、也不会把高亮标记一起复制进去。
- */
 const codeText = computed(() => props.segments.map((segment) => segment.text).join(''))
 
 async function onCopy(): Promise<void> {
@@ -123,7 +106,6 @@ onBeforeUnmount(() => {
 .message-code__pre {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  /* 横向滚动而不是撑破气泡：长命令行是 agent 输出的常态 */
   overflow-x: auto;
 }
 

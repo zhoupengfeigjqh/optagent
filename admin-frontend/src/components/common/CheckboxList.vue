@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 多选清单（带搜索），供内置工具 / MCP 服务 / SKILL 三个选择器复用。
- *
- * 无障碍落点（原则四）：
- * - 用原生 `<fieldset>` + `<legend>` 给出可读分组名；
- * - 原生 `<input type="checkbox">` 键盘可达、状态可被读屏读出；
- * - 搜索框只为**缩小范围**服务，不改变已选集合（避免"搜不到就被取消选择"）。
- */
 import { computed, ref } from 'vue'
 import type { CheckboxOption } from './checkbox-option'
 
@@ -17,7 +9,6 @@ const props = withDefaults(
     modelValue: string[]
     searchPlaceholder?: string
     emptyText?: string
-    /** 已选中但不在 `options` 中的项（失效引用），单独呈现并标注 */
     orphans?: string[]
   }>(),
   {

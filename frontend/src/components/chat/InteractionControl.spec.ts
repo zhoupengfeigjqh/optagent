@@ -1,9 +1,3 @@
-/**
- * 组件测试：入参控件本体（标量控件 / JSON 视图 / 紧凑模式 / `@` 引用面板）。
- *
- * 守住的语义：控件形态由 schema 决定、"字段行"与"表格单元格"共用同一处实现
- * （`compact` 只改排版与可达性，不改取值口径）、JSON 文本非法时不污染模型。
- */
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -35,7 +29,6 @@ interface Setup {
   proposed?: Record<string, unknown>
   name?: string
   compact?: boolean
-  /** 传 true 时装配真实 `@` 引用状态机（需要 workspace 会话上下文） */
   mention?: boolean
 }
 
@@ -58,7 +51,6 @@ function mountControl(setup: Setup) {
   return { wrapper, form }
 }
 
-/* ---------- `@` 引用：真实状态机 + workspace 桩 ---------- */
 
 const WORKSPACE_RESPONSE = {
   scenario: 's1',
@@ -91,7 +83,6 @@ function makeMention() {
   return { mention: createPathInsertStore({ workspace }) }
 }
 
-/** 模拟真实键入：写值 + 光标移到末尾 + 派发 input。 */
 async function typeAt(wrapper: ReturnType<typeof mount>, text: string): Promise<void> {
   const field = wrapper.find('input[type=text]')
   const el = field.element as HTMLInputElement
@@ -110,7 +101,6 @@ describe('InteractionControl —— 标量控件', () => {
 
     const input = wrapper.find('input[type=text]')
     expect((input.element as HTMLInputElement).value).toBe('L01')
-    // 字段行的 <label for> 需要控件带 id（无障碍关联）
     expect(input.attributes('id')).toBeTruthy()
 
     await input.setValue('L09')
@@ -137,7 +127,6 @@ describe('InteractionControl —— 标量控件', () => {
     expect(toggle.form.valueOf(['开关'])).toBe(false)
 
     const select = mountControl({ root, path: ['类型'], proposed })
-    // DOM 的 value 是选项**下标**（原值由下标承载）：下标 1 即「谷」
     await select.wrapper.find('select').setValue('1')
     expect(select.form.valueOf(['类型'])).toBe('谷')
   })
@@ -180,7 +169,7 @@ describe('InteractionControl —— JSON 视图', () => {
     })
 
     form.toggleJsonView(['input'])
-    await flushPromises() // 直接调状态方法后要等一次渲染
+    await flushPromises()
 
     expect(wrapper.find('textarea.interaction-dialog__input--json').exists()).toBe(true)
   })
@@ -217,8 +206,6 @@ describe('InteractionControl —— 紧凑模式（表格单元格 / 列表项�
   })
 
   it('有 enum 的单元格同样是下拉（compact 只改排版，不改控件形态与取值口径）', async () => {
-    // 合成字段名：真实契约里并没有"数字枚举"的字段（`businessType` 是 `{"type":"integer"}`，
-    // 1~5 只写在 description 里），故不借用真实字段名，免得"数字枚举"被误挂到它身上
     const { wrapper, form } = mountControl({
       root: { properties: { 数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] } } },
       path: ['数字枚举'],
@@ -231,7 +218,6 @@ describe('InteractionControl —— 紧凑模式（表格单元格 / 列表项�
     expect(select.exists()).toBe(true)
     expect(wrapper.find('input[type=text]').exists()).toBe(false)
 
-    // 与字段行同源：写回的仍是选项原值（number），不是字符串
     await select.setValue('3')
     expect(form.valueOf(['数字枚举'])).toBe(4)
   })
@@ -326,7 +312,6 @@ describe('InteractionControl —— @ 文件引用面板', () => {
 
     await typeAt(wrapper, '@')
 
-    // Teleport 的内容不会出现在 wrapper.html() 里，因此这条断言即"没有搬动 DOM"
     expect(wrapper.html()).toContain('mention-popup')
     expect(wrapper.find('.mention-popup').exists()).toBe(true)
   })
@@ -356,7 +341,6 @@ describe('InteractionControl —— 占位提示', () => {
 
 describe('InteractionControl —— 下拉取值类型', () => {
   it('数字枚举写回保留 number（schema 声明 integer 时不得变成字符串）', async () => {
-    // 合成字段名，理由同上条
     const { wrapper, form } = mountControl({
       root: { properties: { 数字枚举: { type: 'integer', enum: [1, 2, 3, 4, 5] } } },
       path: ['数字枚举'],
@@ -366,7 +350,6 @@ describe('InteractionControl —— 下拉取值类型', () => {
     const select = wrapper.find('select')
     expect(select.exists()).toBe(true)
 
-    // DOM 里 `option.value` 是**下标**（原值由下标承载），下标 3 即原值 4
     await select.setValue('3')
 
     expect(form.valueOf(['数字枚举'])).toBe(4)
@@ -380,7 +363,6 @@ describe('InteractionControl —— 下拉取值类型', () => {
       proposed: { 类型: '峰' },
     })
 
-    // 下标 1 即「谷」
     await wrapper.find('select').setValue('1')
 
     expect(form.valueOf(['类型'])).toBe('谷')
@@ -393,7 +375,6 @@ describe('InteractionControl —— 下拉取值类型', () => {
       proposed: { code: 1 },
     })
 
-    // 两个选项的**原值**不同（数字 1 / 字符串 '1'），但字符串化后完全一样
     expect(wrapper.findAll('option').map((option) => option.text())).toEqual(['请选择', '1', '1'])
 
     await wrapper.find('select').setValue('1')

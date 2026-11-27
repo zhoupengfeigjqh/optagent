@@ -1,23 +1,3 @@
-/**
- * 部署编排（`FR-026`~`FR-034`，`contracts/admin-api.md` §6.6~§6.9）。
- *
- * 流程固定为：**解析部署对象 → 逐用户整体覆盖写入**。
- *
- * **2026-11-23：部署前只读预检整体下架。** 数字人设计态在**保存时**已完成同口径
- * 校验——名称安全与唯一（`agent-design.ts` / `user-links.ts`）、SOUL 必填字段
- * （`soul-design.ts`）、四类引用存在于统一清单（`rejectUnknown`）、场景字段与
- * 可上传类型（`scenario.ts`），部署前再判一遍是重复计算。
- *
- * 随之改变的语义（产品已确认）：
- * - 不再有"整批零写入"承诺：某用户失败即**跳过该用户**，其余用户继续；
- *   该用户自身仍零写入，由 `OptAgentWriter.commitUser` 的临时目录 + 回滚保证；
- * - 失效引用不再提前拦，而是在 `buildUserArtifacts` 阶段抛出可读错误；
- * - 部署不再依赖运行环境内置工具目录（原 `catalog.snapshot()`），运行环境短暂
- *   不可达不再阻断整批部署。
- *
- * 仍然保留的**请求层**检查（不是配置校验）：乐观锁版本、`user_ids` 类型与空数组、
- * 未知用户；以及写盘层的路径安全断言（见 `opt-agent-writer.ts`）。
- */
 import type { Logger } from 'pino';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
@@ -32,19 +12,16 @@ import { buildUserArtifacts, type MaterializeContext } from './materialize.js';
 import type { OptAgentWriter } from '../../infra/opt-agent-writer.js';
 import type { PlatformStore } from '../../infra/platform-store.js';
 
-/** 部署对象：一个用户与其关联的数字人名（写入以用户为单位整体覆盖） */
 export interface DeployTarget {
   user_id: string;
   agents: string[];
 }
-
 export interface DeployerDeps {
   store: PlatformStore;
   agents: AgentDesignService;
   users: UserLinkService;
   mcpConfigs: McpServiceConfigService;
   skills: SkillLibraryService;
-  /** 本体库：物化时读取快照（文件缺失即抛可读错误） */
   ontologies: OntologyStore;
   writer: OptAgentWriter;
   manifest: DeployManifestService;
@@ -58,32 +35,22 @@ export interface DeployRunResult {
   history_id: string;
 }
 
-/** 撤回部署的结果（`§6.9`） */
 export interface DeployWithdrawResult {
   user_id: string;
-  /** 被下架的数字人目录名（取自运行环境实际内容，而非部署清单） */
   withdrawn: string[];
 }
 
 export class Deployer {
   constructor(private readonly deps: DeployerDeps) {}
 
-  /** 部署清单（`GET /api/admin/deploy/manifest`，§6.8） */
   get manifest(): DeployManifestService {
     return this.deps.manifest;
   }
 
-  /** 部署历史（`GET /api/admin/deploy/history`，§6.7） */
   get history(): DeployHistoryService {
     return this.deps.history;
   }
 
-  /**
-   * 部署生效（§6.6）。
-   *
-   * 乐观锁先于一切：版本不符即拒，避免基于陈旧配置部署。
-   * 之后**直接逐用户写入**，不再有任何只读预检（2026-11-23）。
-   */
   async deploy(userIds: string[] | undefined, revision: number): Promise<DeployRunResult> {
     this.deps.store.assertRevision(revision);
     const targets = this.resolveTargets(userIds);
@@ -100,8 +67,6 @@ export class Deployer {
     const diffs: ManifestDiffEntry[] = [];
     const startedAt = Date.now();
 
-    // `manifest_diff`（FR-032）取**写入前**的运行环境快照：写完后再比就永远一致，
-    // "被手工删改过"这类差异就再也报不出来（2026-10-20）。
     for (const target of targets) {
       diffs.push(
         ...this.deps.manifest.diff(
@@ -127,7 +92,6 @@ export class Deployer {
       try {
         const designs = this.readDesignsStrictly(target.agents);
         const artifacts = buildUserArtifacts(designs, context);
-        // 整体覆盖：`agents/` 下不在本次产物里的一切条目都会被清掉（2026-09-16）
         const commit = this.deps.writer.commitUser(target.user_id, artifacts);
         results.push({
           user_id: target.user_id,
@@ -139,10 +103,6 @@ export class Deployer {
         });
         this.deps.manifest.updateUser(target.user_id, target.agents, new Date().toISOString());
       } catch (err) {
-        // FR-029：单用户失败即该用户零写入，**其余用户不受影响**（2026-11-23 起
-        // 这是部署失败的唯一处理方式——没有预检，失败只能在写入阶段发现）。
-        // 2026-10-20：失败不塞进 `manifest_diff`——差异报告只描述"运行环境与期望不一致"，
-        // 失败原因在 `users[].error` 与日志里，混进差异项会让"差异"失去可解释性。
         results.push({
           user_id: target.user_id,
           ok: false,
@@ -163,7 +123,6 @@ export class Deployer {
         ok_users: results.filter((r) => r.ok).length,
         failed_users: errorCount,
         written_agents: results.flatMap((r) => r.agents).length,
-        // 时长：回答"部署是不是变慢了"（任务 2026-09-16）
         duration_ms: Date.now() - startedAt,
       },
       `部署完成：成功 ${results.filter((r) => r.ok).length} / 失败 ${errorCount} 个用户`,
@@ -179,15 +138,6 @@ export class Deployer {
     return { users: results, manifest_diff: diffs, history_id: historyId };
   }
 
-  /**
-   * **撤回部署**（`§6.9`，用户卡片上的「撤回」）。
-   *
-   * 清空该用户在运行环境中的**全部数字人目录**——这些数字人随即失去能力；
-   * 平台侧的关联与用户文件空间**一律保留**（需要时重新部署即可恢复）。
-   * 清单里该用户的条目同时移除，卡片随之显示"未部署"。
-   *
-   * 纪律与 `deploy` 一致：乐观锁先行、只动 `users/{uid}/agents/`。
-   */
   withdraw(userId: string, revision: number): DeployWithdrawResult {
     this.deps.store.assertRevision(revision);
     const user = this.deps.users.read(userId); // 未知用户 → 404 ADM_USER_NOT_FOUND
@@ -195,21 +145,10 @@ export class Deployer {
     return { user_id: user.user_id, withdrawn: this.revokeArtifacts(user.user_id, 'deploy.withdraw') };
   }
 
-  /**
-   * **删除用户时的随附撤回**（`§6.4`，2026-10-20）。
-   *
-   * 与 `withdraw` 的唯一区别：没有乐观锁与用户存在性检查——由 `DELETE /users/:id`
-   * 在 `users.remove` **之前**调用，确保"平台侧没有这个用户，运行环境也不再为他提供服务"。
-   * 只清 `users/{uid}/agents/**` 与清单条目；`user-data/**`（文件空间）一律保留（`FR-028`）。
-   *
-   * 失败即抛出（删除用户的请求随之失败）：宁可删不掉让管理员重试，也不留下
-   * "平台已无该用户、运行环境仍在服务"的孤儿部署。
-   */
   purgeUser(userId: string): string[] {
     return this.revokeArtifacts(userId, 'deploy.purge');
   }
 
-  /** 撤回的唯一实现：清运行环境 `agents/` + 移出清单（部署与删除用户共用） */
   private revokeArtifacts(userId: string, event: string): string[] {
     const withdrawn = this.deps.writer.withdrawUser(userId);
     this.deps.manifest.removeUser(userId);
@@ -220,15 +159,6 @@ export class Deployer {
     return withdrawn;
   }
 
-  /**
-   * 部署时**严格**读取设计态（2026-10-20）。
-   *
-   * 此前是 `.filter(doc => doc !== null)`：若设计态恰好读不到（被删除/损坏），
-   * 该数字人会被静默剔出产物，而清单仍记它"已部署"——表现为"部署成功，但少了一个"。
-   * 现在改为整用户失败（零写入），原因直接落到 `users[].error`。
-   *
-   * **2026-11-23**：预检下架后，这是"设计态不可用"的唯一防线，MUST 保留。
-   */
   private readDesignsStrictly(agentNames: string[]): AgentDesignDocument[] {
     const designs: AgentDesignDocument[] = [];
     for (const name of agentNames) {
@@ -243,12 +173,6 @@ export class Deployer {
     return designs;
   }
 
-  /**
-   * 解析部署对象（**请求合法性**，不是配置校验）。
-   *
-   * 2026-10-20：空数组**明确拒绝**——`undefined`（省略字段）才是"全部用户"，
-   * 两者混同会让脚本里的 `user_ids: []`（意为"没有对象"）静默变成全平台覆盖部署。
-   */
   private resolveTargets(userIds?: string[]): DeployTarget[] {
     if (userIds !== undefined && userIds.length === 0) {
       throw new ApiError(
@@ -265,7 +189,6 @@ export class Deployer {
     if (userIds) {
       const unknown = userIds.filter((id) => !all.some((user) => user.user_id === id));
       if (unknown.length > 0) {
-        // 详情随 `details.user_ids` 下发：界面按码映射文案（不展示后端 message），
         // 但"到底是哪几个用户"必须可呈现，否则整批 404 时无从定位（2026-10-20）。
         throw new ApiError(ERROR_CODES.ADM_USER_NOT_FOUND, `用户不存在：${unknown.join('、')}`, {
           user_ids: unknown,

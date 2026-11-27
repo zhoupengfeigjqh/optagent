@@ -1,21 +1,3 @@
-/**
- * 本轮运行状态机（FR-005~FR-007、FR-020~FR-023、FR-049、FR-050）
- *
- * 事件时序（`data-model.md` §13）：
- * `thinking*` → `content*`（可穿插成对 `tool_call` / `tool_call_end`）→ 恰好一个 `done` / `error`。
- *
- * 关键不变式：
- * - `tool_call` 入队、`tool_call_end` **标记终态**（002 起不再立即移除，收口时统一清空；V-05 修订）
- * - `done.message_id === null` ⇒ `aborted`（中断轮不落盘，不展示操作与用量）
- * - 收尾时 `aborted` / **服务端已终局的 `error`** ⇒ `lastRetryableTurn` 置位（可安全重发）；
- *   断连与传输层失败不置位（后端那一轮可能仍在跑，重发会撞 409 → 应走 `recover()`）
- * - 读取异常 ⇒ `failed`，并通过 `recover()` 重新拉取最终结果（FR-050、SC-020）
- * - `phase === 'streaming'` ⇒ 发送按钮置灰（FR-006）、数字人切换置灰（FR-036）（V-06）
- * - 发送即出现乐观用户气泡（`pendingUserMessage`，十七次调整）：历史刷新（`onTurnFinished`）
- *   只在流**完成后**触发，若无乐观插入，用户消息要等整轮答完才显示
- *
- * 性能（D6）：增量文本用**单一 ref 累积**，不做逐字数组 push；Vue 的调度器在同一 tick 内合并刷新。
- */
 
 import { computed, ref, watch } from 'vue'
 
@@ -42,25 +24,22 @@ import type {
   ChatStreamDeps,
   ChatStreamStore,
   PendingUserMessage,
+  PlanProgressItem,
   StreamSegment,
   ToolCallState,
 } from './useChatStream.types'
 import { useInteractionGate } from './useInteractionGate'
 import { useThreadDrafts } from './useThreadDrafts'
 
-/**
- * 对外契约（状态形状与依赖注入面）在 `./useChatStream.types`——纯类型文件、零运行期代码，
- * 不计入覆盖率分母（与 `src/api/types.ts` 同口径）。此处**再导出**，既有导入路径不变。
- */
 export type {
   ChatStreamDeps,
   ChatStreamStore,
   PendingUserMessage,
+  PlanProgressItem,
   StreamSegment,
   ToolCallState,
 } from './useChatStream.types'
 
-/** 创建聊天流状态。 */
 export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const storage = deps.storage === undefined ? safeSessionStorage() : deps.storage
 
@@ -68,14 +47,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const streamingText = ref('')
   const streamingThinking = ref('')
   const toolCalls = ref<ToolCallState[]>([])
-  /**
-   * 本轮渲染段（A-lite，2026-11-16）：文字与工具按事件到达顺序排列。
-   *
-   * 与 `toolCalls` 的分工：`toolCalls` 是**本轮全部工具**的扁平列表（下一步卡片、
-   * 静默判据、`toolItems` 仍用它）；`segments` 只服务**渲染顺序**——多轮工具时
-   * 让气泡按"说话 → 干活 → 再说"的时间线展示，而不是"工具全堆在正文上方"。
-   */
   const segments = ref<StreamSegment[]>([])
+  /**
+   * 本轮计划进度（028 FR-034）：按 `seqId` 合并，重规划改写同一编号时**原地替换**。
+   *
+   * 不写历史、不持久化；下一次发送时清空（`send` / `reset`），轮末由组件淡出。
+   */
+  const planProgress = ref<PlanProgressItem[]>([])
   const thinkingEnabled = ref(readStoredThinking(storage))
   const draft = ref('')
 
@@ -95,18 +73,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   const startedAt = ref<number | null>(null)
 
   const now = deps.now ?? ((): number => Date.now())
-  /**
-   * 静默心跳兜底（2026-11-16，TR-66）
-   *
-   * 实测一轮 16s 的真实生鲜解析：正文流式间隔 < 0.5s，但模型在「决定调哪个工具 /
-   * 生成工具参数」以及「长段落之间的推理」会**静默 3~15s**——这段时间没有任何业务事件
-   * （`thinking` 关闭时连思考增量都没有；`infra/sse.ts` 的 15s 心跳是注释帧 `: ping`，
-   * 前端解析器按 SSE 规范直接丢弃）。界面因此被判成卡死，与 §4.11 / §4.12 同理。
-   *
-   * 处置：本轮 streaming 期间每 500ms 检查「距上一个业务事件多久」，超过 2.5s 置
-   * `stalled`，由 `MessageBubble` 显示「模型正在思考…」。HITL 挂起期不算静默
-   * （等用户操作，界面上本来就有弹窗）。
-   */
   const SILENT_AFTER_MS = 2500
   const HEARTBEAT_TICK_MS = 500
   const lastEventAt = ref(0)
@@ -133,6 +99,18 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     segments.value = [...segments.value, { kind: 'tool', call }]
   }
 
+  /**
+   * 计划进度合并：同 `seqId` 原位替换（重规划会改写同一编号的步名/状态），新编号追加。
+   *
+   * 滚动规划只往后加编号，失败重规划会让编号跳变——两种都按"编号唯一"处理，
+   * 进度条因此不会出现同一步的两行。
+   */
+  function mergePlanProgress(items: PlanProgressItem[], next: PlanProgressItem): PlanProgressItem[] {
+    const index = items.findIndex((item) => item.seqId === next.seqId)
+    if (index === -1) return [...items, next]
+    return items.map((item, i) => (i === index ? next : item))
+  }
+
   function settleSegmentTool(callId: string, status: ToolStatus): void {
     segments.value = segments.value.map((segment) =>
       segment.kind === 'tool' && segment.call.call_id === callId
@@ -141,7 +119,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     )
   }
 
-  /** 收到任一业务事件：清零静默计时（`done` / `error` 也走这里，无害） */
   function markEvent(): void {
     lastEventAt.value = now()
     stalled.value = false
@@ -167,20 +144,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   }
 
   let controller: AbortController | null = null
-  /**
-   * 本轮令牌（2026-10-27）：每次 `send()` 取号，`reset()` 也递增。
-   *
-   * 为什么需要：`reset()` 只 abort 旧流、不等旧 `send()` 退出（切会话/新建会话/删会话
-   * 都走它）。旧流随后才执行 `catch` / `finally`，若无条件写共享状态就会串台——
-   * 把新一轮打成 `aborted`（输入区解锁 → 可并发发第二个 run → 撞 409）、
-   * 把新一轮的 `controller` 置 `null`（此后无法中止）、清空本轮 `toolCalls`。
-   * 规则：**只有自己那一轮的令牌仍是最新时，才能写状态。**
-   */
   let runToken = 0
-  /**
-   * 本轮是否以**服务端终局**的 `error` 事件收尾（仅本轮发送期间有效）。
-   * 与"断连/传输层失败"的区别决定 `lastRetryableTurn` 是否置位：见该字段的注释。
-   */
   let terminalFailure = false
 
   const hasThinking = computed(() => thinkingEnabled.value && streamingThinking.value.trim() !== '')
@@ -218,6 +182,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     lastRetryableTurn.value = null
     pendingInteraction.value = null
     startedAt.value = null
+    planProgress.value = []
     // 静默心跳必须随本轮一起停：否则切会话后旧定时器仍按新一轮的 `lastEventAt` 判断
     stopHeartbeat()
   }
@@ -227,15 +192,12 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   }
 
   function applyTerminal(event: StreamEvent): void {
-    // HITL：本轮终结即无等待中的确认（提交/拒绝后工具已执行完毕，或流被中断）
     pendingInteraction.value = null
     if (event.type === 'done') {
       usage.value = event.data.usage
       durationSeconds.value = event.data.duration_seconds
-      // message_id 为 null ⇒ 中断轮，不落盘、不展示操作与用量（FR-007、FR-028）
       streamingAgentName.value = event.data.agent_name
       phase.value = event.data.message_id === null ? RUN_PHASE.ABORTED : RUN_PHASE.COMPLETED
-      // 007 修订（Tail Protocol）：卡片随 done 直推，即刻写入（无卡片时字段缺省，不动现态）
       if (event.data.next_actions) {
         deps.applyNextActions?.(event.data.next_actions)
       }
@@ -260,25 +222,15 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   async function send(payload: {
     content: string
     attachments: FileReference[]
-    /** 本轮隐藏指引（004：问题实例关联工具引导）；只进本轮系统提示词，不落盘 */
     guidance?: string
-    /** 016：卡片回传的隐藏工具提示（结构化）；只进本轮系统提示词，不落历史 */
     toolTips?: ToolTip[]
-    /** 013：本轮跳过意图聚焦（仅首屏问题实例卡片）；只影响本次判定，不落历史 */
     skipIntentFocus?: boolean
-    /**
-     * 2026-11-07：用户显式选中的技能（`/技能名`）。
-     *
-     * 服务端据此"只插入该技能 + 自动跳过聚焦"，并随 user 行落盘；前端只负责结构化提交。
-     */
     skill?: string
   }): Promise<void> {
-    // 进行中直接忽略，不重复发起（FR-006）
     if (phase.value === RUN_PHASE.STREAMING) {
       return
     }
 
-    // 取本轮令牌：此后所有状态写入都先确认"我还是最新那一轮"（见 `runToken` 注释）
     const token = ++runToken
     const stale = (): boolean => token !== runToken
 
@@ -295,15 +247,12 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     error.value = null
     usage.value = null
     durationSeconds.value = null
-    // 新一轮发送即取代旧的可重试缓存（「重新生成」自身也走这里，随后 finally 会重新置位）
     lastRetryableTurn.value = null
+    planProgress.value = []
     terminalFailure = false
     startedAt.value = now()
-    // 本轮数字人快照（009：本轮必然由当前选中数字人执行；快照仅在存量历史里可能与上一轮不同）
     streamingAgentName.value = deps.getAgentName?.() ?? null
-    // 乐观用户气泡（十七次调整）：历史刷新只在完成后触发，发送即先本地呈现，
     // 避免"AI 答完才看到自己的消息"
-    // 018：气泡就是**实际提交的正文**（术语替换确认后为替换/编辑结果），与历史同源
     pendingUserMessage.value = {
       content: payload.content,
       attachments: payload.attachments,
@@ -334,7 +283,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         (event) => {
           // 过期轮的事件一律丢弃：否则切会话后旧流的增量会写进新一轮的正文
           if (stale()) return
-          // 任一业务事件都算"活着"：静默计时清零（`done`/`error` 也走到这里，无害）
           markEvent()
           switch (event.type) {
             case 'thinking':
@@ -342,7 +290,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
               break
             case 'content':
               streamingText.value += event.data.delta
-              // A-lite：正文增量同时落到渲染段（工具之后的文字另起一段）
               appendSegmentText(event.data.delta)
               break
             case 'tool_call': {
@@ -353,18 +300,21 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
                 status: 'running',
               }
               toolCalls.value = [...toolCalls.value, call]
-              // 渲染段：工具卡片在此刻插入时间线，后续正文必然排在它下方
               pushSegmentTool(call)
               break
             }
             case 'tool_call_end':
-              // 002 特性（V-05 修订）：结束**不再立即移除**，而是标记为终态——
-              // 这样一轮跑完前后的展示与"刷新后的历史卡片"一致；
-              // 本轮真正收尾时由 finally 统一清空，交给历史消息接管
               toolCalls.value = toolCalls.value.map((item) =>
                 item.call_id === event.data.call_id ? { ...item, status: event.data.status } : item,
               )
               settleSegmentTool(event.data.call_id, event.data.status)
+              break
+            case 'plan_progress':
+              planProgress.value = mergePlanProgress(planProgress.value, {
+                seqId: event.data.seq_id,
+                label: event.data.label,
+                phase: event.data.phase,
+              })
               break
             case 'interaction_request':
               // HITL：模型发起需确认的工具调用 → 弹窗（倒计时从全量超时起算）
@@ -381,11 +331,9 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
         { baseUrl: deps.baseUrl, fetchImpl: deps.fetchImpl, signal: controller.signal },
       )
 
-      // 已被新一轮或 reset() 取代：本轮的结果不再影响界面（历史刷新交给新一轮）
       if (stale()) return
 
       if (phase.value === RUN_PHASE.STREAMING) {
-        // 流结束但未收到终结事件：按连接中断处理
         error.value = { code: 'NETWORK_ERROR', message: '' }
         pendingInteraction.value = null
         phase.value = RUN_PHASE.FAILED
@@ -405,16 +353,11 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       }
     } finally {
       // 过期轮不得清共享状态：`toolCalls`/`pendingUserMessage` 已属于新一轮，
-      // `controller` 也可能已是新一轮的（置 null 会让「终止」彻底失效）
       if (!stale()) {
-        // 收口即停表：`completed`/`failed`/`aborted` 都不该再显示"还在思考"
         stopHeartbeat()
         toolCalls.value = []
-        // 段序只服务流式渲染：收口后交给历史消息（历史没有段序，按旧顺序展示）
         segments.value = []
-        // 收尾前把用户消息抢救进 lastRetryableTurn，供「重新生成」/「重试本轮」复用：
         // 中断轮（不落盘，消息本就消失）与**服务端已终局**的失败轮都可安全重发；
-        // 断连/传输层失败不缓存——后端那一轮可能仍在跑，重发会撞上 409（见该字段注释）
         const retryable =
           phase.value === RUN_PHASE.ABORTED || (phase.value === RUN_PHASE.FAILED && terminalFailure)
         if (retryable && pendingUserMessage.value) {
@@ -458,7 +401,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       return
     }
     const threadId = deps.activeThreadId.value
-    // `/stop` 失败（网络/5xx）≠ 本地未停：abort 时序不变，但须让用户可感知
     // 后端可能仍在运行（降级可观测，宪章原则九）；后端返回 stopped=false 属正常，不提示
     const pending = threadId
       ? deps.stopRun?.(threadId).catch(() => {
@@ -467,19 +409,13 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
       : undefined
     // 先断开本地流，避免继续渲染；后端本轮不落盘
     controller?.abort()
-    // HITL：中断后端的挂起点会按 reject 收尾，弹窗同步关闭
     pendingInteraction.value = null
     // 本地立即进入中止态，不等待读取循环退出（幂等：后续 AbortError / done(stop) 结果一致）
     phase.value = RUN_PHASE.ABORTED
     await pending
   }
 
-  /* ---------- HITL：工具调用人工确认（实现在 `useInteractionGate`） ---------- */
 
-  /**
-   * 三个函数只围绕 `pendingInteraction` 一个状态转，自带完整语义（含"终验失败保持弹窗打开"
-   * 这条最容易写错的口径），故独立成模块；这里有把状态与注入实现交进去。
-   */
   const gate = useInteractionGate({
     pendingInteraction,
     activeThreadId: deps.activeThreadId,
@@ -505,6 +441,7 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
     streamingThinking,
     toolCalls,
     segments,
+    planProgress,
     thinkingEnabled,
     draft,
     error,
@@ -529,7 +466,6 @@ export function createChatStreamStore(deps: ChatStreamDeps): ChatStreamStore {
   }
 }
 
-/** 组件内取用（经 `provide/inject` 的会话上下文）。 */
 export function useChatStream(): ChatStreamStore {
   return useSession().chat
 }

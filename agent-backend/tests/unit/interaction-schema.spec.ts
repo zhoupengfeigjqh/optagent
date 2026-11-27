@@ -1,11 +1,3 @@
-/**
- * 单元测试：交互确认入参的服务端终验（interaction-schema）。
- *
- * 守住的安全边界：用户提交的 args 在注入真实工具调用前 MUST 按 inputSchema 校验。
- * - 支持子集：object/string/integer/number/boolean/array、required、enum、
- *   minLength/maxLength、minimum/maximum、items、additionalProperties:false
- * - 多错误全量收集；不支持的校验关键字静默忽略（宁可少拦不可误拦）
- */
 import { describe, expect, it } from 'vitest';
 
 import { validateInteractionArgs } from '../../src/domain/interaction-schema.js';

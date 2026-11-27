@@ -1,13 +1,3 @@
-/**
- * 单元测试：每轮对话的收尾日志 `run.end`（任务 2026-09-16）
- *
- * 背景：逐请求访问日志关闭后，agent 侧只剩"实例崩溃"能查到——**正常/失败的一轮
- * 在日志里没有任何痕迹**，"回答很慢""这轮失败了"只能靠复现。
- *
- * 这里守住：每轮结束**恰好一条** `run.end`，带 `ok` / `duration_ms` / `error_code`
- * （失败时）与 run 身份（`user_id` / `thread_id` / `agent_name`），
- * 且**不含回答正文**（日志只记结果与耗时，不记内容）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +21,6 @@ let lines: LogLine[];
 let history: HistoryStore;
 let usage: UsageDb;
 
-/** 用**真实 pino** 写内存流：断言实际产出的日志行，而不是被 mock 的调用 */
 function memoryLogger() {
   const stream = new Writable({
     write(chunk: Buffer, _enc, cb) {
@@ -44,7 +33,6 @@ function memoryLogger() {
   return pino({ level: 'info' }, stream);
 }
 
-/** 只实现 run 的假实例：按脚本产出 LLM 事件 */
 function fakeAgent(script: () => AsyncIterable<LlmEvent>): RunAgentLike {
   return {
     key: { userId: 'admin', agentName: 'demo' },
@@ -68,7 +56,6 @@ async function* crashScript(): AsyncIterable<LlmEvent> {
   throw new Error('实例内部崩溃');
 }
 
-/** 只有正文、没有任何终结事件就结束的流（网关断连 / 上游半途断开的形态） */
 async function* silentScript(): AsyncIterable<LlmEvent> {
   yield { type: 'content_delta', delta: '半截回答' };
 }
@@ -146,12 +133,6 @@ describe('run.end —— 每轮一条收尾日志', () => {
     expect(runEnd()[0]).toMatchObject({ ok: false, error_code: 'INTERNAL_ERROR' });
   });
 
-  /**
-   * 提示词组装失败（2026-10-27 回归）
-   *
-   * 修复前 `buildPrompt` 在 try 之外：读摘要/历史/产出一旦抛错，收尾全被跳过——
-   * 活跃表永久占位（该会话此后每次发送恒 409）、SSE 不终结、实例却毫发无损。
-   */
   it('提示词组装失败：记 PROMPT_BUILD_FAILED、不触发 onCrash，且活跃占位已释放', async () => {
     const crashed: unknown[] = [];
     const manager = new RunManager({
@@ -185,17 +166,11 @@ describe('run.end —— 每轮一条收尾日志', () => {
     // 读盘失败 ≠ 崩溃：实例不得被销毁
     expect(crashed).toHaveLength(0);
 
-    // 关键回归：占位已释放，同一会话可立即再发（修复前此处会抛 409 THREAD_RUN_ACTIVE）
     await startRun(manager, agent);
     expect(runEnd()).toHaveLength(2);
     expect(runEnd()[1]).toMatchObject({ ok: true });
   });
 
-  /**
-   * 流无终结事件（2026-10-27 统一）
-   *
-   * 修复前：只手写一个 SSE 事件、**不落盘**——用户当场看到失败，刷新后那条提问凭空消失。
-   */
   it('流无终结事件：按失败轮落盘（用户消息与失败留痕都在），run.end 记 LLM_ERROR', async () => {
     const manager = new RunManager({ history, usage, logger: memoryLogger() });
 

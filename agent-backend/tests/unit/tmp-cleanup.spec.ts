@@ -1,14 +1,3 @@
-/**
- * 单元测试：tmp/ 定期清理（R11 补充口径）
- *
- * 既有口径：顶层文件超 30 天未访问即删；`.upload-` 暂存残留按 1 小时清。
- * **本次补的漏洞**：二级目录原先被整目录跳过 ⇒ 后台产出**永不清理**，
- * 契约 §10.4 的"随临时空间既有规则清理"不成立。现在 `后台产出/` 按同一口径处理，
- * 且**只认已登记的子目录**（不递归任意目录，避免误删将来可能出现的其他子目录）。
- *
- * 009 补充：临时空间是**数字人级**的，定时任务改为按（用户 × 数字人）逐一清理
- * （`cleanupAllAgentTmpDirs`）——漏清或越界清都会让"30 天清理"这条契约对部分数字人失效。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +19,6 @@ vi.mock('../../src/domain/fs-safe.js', async (importOriginal) => {
 const DAY = 24 * 60 * 60 * 1000;
 let tmp: string;
 
-/** 写一个"最后访问于 ageMs 之前"的文件（atime 与 mtime 同时设，判据取 max） */
 function writeWithAge(rel: string, ageMs: number, content = 'x'): string {
   const abs = path.join(tmp, rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -164,7 +152,6 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
   it('产出子目录不可读：视为无可清理（不抛错，也不影响顶层）', async () => {
     writeWithAge('top-old.txt', 31 * DAY);
     writeWithAge(`${PRODUCED_SUBDIR}/p_j7.json`, 31 * DAY);
-    // 顶层 readdir 走真实实现，子目录那次注入失败
     const realReaddir = fs.promises.readdir.bind(fs.promises);
     const readdirSpy = vi
       .spyOn(fs.promises, 'readdir')
@@ -173,7 +160,7 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
 
     try {
       const result = await cleanupTmpDir(tmp);
-      expect(result).toEqual({ deleted: 1, failed: 0 }); // 顶层那个照常删
+      expect(result).toEqual({ deleted: 1, failed: 0 });
     } finally {
       readdirSpy.mockRestore();
     }
@@ -205,17 +192,12 @@ describe('cleanupTmpDir —— 后台产出子目录（R11 补的漏洞）', () 
     expect(result.failed).toBe(1);
     expect(result.deleted).toBe(1);
     expect(warns.join('\n')).toContain('失败');
-    // 失败的那个仍在（不因一个失败就"假装删掉了"）
     expect([fs.existsSync(first), fs.existsSync(second)].filter(Boolean)).toHaveLength(1);
   });
 });
 
-/* ------------------------------------------------------------------ *
- * 009：按（用户 × 数字人）逐一清理
- * ------------------------------------------------------------------ */
 
 describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）', () => {
-  /** 建某用户的某数字人数据域，并放一个过期文件；返回该文件的绝对路径 */
   function seedAgentTmp(
     userId: string,
     agentName: string,
@@ -242,7 +224,7 @@ describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）'
     ]);
 
     expect(result.deleted).toBe(3);
-    expect(result.dirs).toBe(6); // 2 用户 × 3 数字人（不存在的目录按 0 计账）
+    expect(result.dirs).toBe(6);
     for (const abs of [a, b, c]) expect(fs.existsSync(abs)).toBe(false);
   });
 
@@ -263,8 +245,8 @@ describe('cleanupAllAgentTmpDirs —— 数字人级临时空间遍历（009）'
 
     expect(result.deleted).toBe(1);
     expect(fs.existsSync(inside)).toBe(false);
-    expect(fs.existsSync(outsider)).toBe(true); // 不在清单内：保留（已移除数字人的数据也不清）
-    expect(fs.existsSync(otherUser)).toBe(true); // 别人的同名数字人：保留
+    expect(fs.existsSync(outsider)).toBe(true);
+    expect(fs.existsSync(otherUser)).toBe(true);
   });
 
   it('某个数字人清理失败不中断其余（逐个独立计账）', async () => {

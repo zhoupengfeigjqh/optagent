@@ -1,13 +1,3 @@
-/**
- * 单元测试：内置工具目录（T040，`plan.md` R1）
- *
- * **核心不变式**：用现状的运行期取值渲染模板后，结果 MUST 与改造前
- * `buildBuiltinTools` 产出的 `description` / `parameters` **逐字相等**。
- * 即：R1 只改变元数据的组织方式，**不改变任何对模型可见的文本**。
- *
- * 断言以**字面量**（golden 字符串）写出，而不是"再算一遍同样的拼接"——
- * 后者会与被测实现犯同一个错误而检测不出漂移。
- */
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_TOOL_CATALOG,
@@ -19,7 +9,6 @@ import {
   type TemplateValues,
 } from '../../src/domain/builtin-tool-catalog.js';
 
-/** 现状的一组运行期取值（取真实形态：中文目录名 + thread_id） */
 const DIRS = ['数据准备/生产计划', '临时空间'];
 const THREAD_ID = 'th_abc123';
 const values: Partial<TemplateValues> = {
@@ -93,7 +82,6 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
 
   it('read_file 的说明与入参', () => {
     expect(rendered.get('read_file')?.description).toBe(
-      // 2026-10-14：支持类型增 `.xls`；2026-10-20：增 `.html`（按原文读，不渲染）
       '读取用户空间（数据准备/临时空间）下的文件内容。支持 .csv/.xlsx/.xls/.txt/.json/.pdf/.md/.log/.html；' +
         'xlsx/xls 自动转 CSV，pdf 提取文本层，html 按原文读取（不渲染、不执行脚本）。' +
         '大文件返回截断内容，可用 offset 继续分段读取。' +
@@ -160,7 +148,6 @@ describe('不变式：渲染结果与改造前逐字相等', () => {
 
   it('grep_files 的说明与入参', () => {
     expect(rendered.get('grep_files')?.description).toBe(
-      // 2026-10-14：跳过清单同步补 `.xls`；2026-10-20：可检索类型补 `.html`
       '在文本类文件（.csv/.txt/.json/.md/.log/.html）中按正则检索关键词；xlsx/xls/pdf 会被跳过（请改用 read_file）。' +
         '可指定目录，缺省检索全部开放目录。',
     );

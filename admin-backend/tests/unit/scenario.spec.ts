@@ -1,10 +1,3 @@
-/**
- * 单元测试：文件空间场景（`FR-020`）
- *
- * 覆盖三块判据：场景名 / 目录清单 / **字段约束**（`data_prep_fields`）。
- * 字段约束同时有两个出口——保存路径严格抛错（`normalizeScenario`）、
- * 部署前校验收集全部问题（`scenarioFieldIssues`）——两者口径 MUST 一致。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
@@ -58,11 +51,9 @@ describe('normalizeScenario —— 场景名与目录清单', () => {
   });
 
   it('正向：预定义目录可被屏蔽（清单里没有它不再是错误，2026-11-17）', () => {
-    // 只屏蔽预定义目录：清单只剩自定义目录
     expect(normalizeScenario({ scenario: 'x', data_prep_dirs: ['生产计划'] }).data_prep_dirs).toEqual([
       '生产计划',
     ]);
-    // 全部屏蔽：空清单合法（数据准备空间无可用于目录）
     expect(normalizeScenario({ scenario: 'x', data_prep_dirs: [] }).data_prep_dirs).toEqual([]);
   });
 });
@@ -196,12 +187,9 @@ describe('scenarioFieldIssues —— 部署前校验出口（收集全部问题�
   it('预定义目录缺失不再报问题（屏蔽是合法状态，2026-11-17）', () => {
     expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['生产计划'] })).toEqual([]);
     expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: [] })).toEqual([]);
-    // 预定义目录本身不强制字段约束：存在即无问题
     expect(scenarioFieldIssues({ scenario: 'x', data_prep_dirs: ['算法规则'] })).toEqual([]);
   });
 });
-
-/* ---------- 2026-10-13：目录级可上传类型（data_prep_uploads，8 条归一规则） ---------- */
 
 describe('normalizeScenario —— 可上传类型（data_prep_uploads）', () => {
   it('正向：去重 + 大小写归一 + 按候选枚举顺序重排', () => {
@@ -213,7 +201,6 @@ describe('normalizeScenario —— 可上传类型（data_prep_uploads）', () =
       },
     });
     expect(out.data_prep_uploads).toEqual({
-      // `.xls`（2026-10-14 新增候选）在 `.xlsx` 之后，且随枚举序重排、去重
       生产计划: ['.xlsx', '.xls', '.csv', '.txt'],
       产线电价: ['.json'],
     });

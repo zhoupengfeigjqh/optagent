@@ -1,11 +1,3 @@
-/**
- * 单元测试：存量索引的展示名回填（2026-11-04，`display-name.ts`）
- *
- * 守住两条口径：
- * 1. 升级前的索引没有 `display_name`，而市场 `SKILL.md` 已带 `metadata`——
- *    列表 MUST 回读磁盘补齐**并写回索引**，否则卡片一直显示英文 `name`；
- * 2. 坏 SKILL.md（缺 frontmatter 等）回落 `name`，**不拖垮列表**。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +39,6 @@ describe('存量索引展示名回填', () => {
       overwrite: false,
       source: 'a',
     });
-    // 模拟升级前的索引：抹掉 display_name（旧版本没有这个字段）
     const index = readIndex();
     delete index.items[0]!.display_name;
     fs.writeFileSync(indexFile(), JSON.stringify(index));
@@ -56,7 +47,6 @@ describe('存量索引展示名回填', () => {
     expect(listed[0]!.name).toBe('pdf-parse');
     expect(listed[0]!.display_name).toBe('文档解析');
 
-    // 补完即写回：后续读取不再依赖磁盘解析
     expect(readIndex().items[0]!.display_name).toBe('文档解析');
   });
 

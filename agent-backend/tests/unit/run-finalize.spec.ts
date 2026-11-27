@@ -1,15 +1,3 @@
-/**
- * 单元测试：轮次收尾家族（007 从 `run-manager.ts` 拆分而来）。
- *
- * 收尾是**副作用密集**的地方，且三条入口的顺序是硬约束：
- * - `done`：卡片定稿（解析尾部块 + 写快照）→ 落盘（正文**不含**尾部块）→ 广播 `done`
- *   （负载带 `next_actions` 直推，007 修订）→ 摘要 fire-and-forget（FR-018）；
- * - `error` / `aborted`：失败与中断轮无卡片；
- * - `aborted`：只广播 + 记账（本轮消息丢弃，但已消耗 token 照记，FR-027）。
- *
- * 这里用假依赖直接驱动 `RunFinalizer`（不经 RunManager），把"未装配某依赖时不能崩"
- * 这类防御分支也钉住——它们在真实装配里几乎不会走到，但正是拆分后最容易坏的地方。
- */
 import { describe, expect, it, vi } from 'vitest';
 import type { HistoryMessage, UsageInfo } from '../../src/types.js';
 import { RunImpl } from '../../src/domain/run-impl.js';
@@ -22,7 +10,6 @@ import type { UsageStore } from '../../src/types.js';
 
 const USAGE: UsageInfo = { inputTokens: 11, outputTokens: 22 };
 
-/** 假落盘口：只记调用，不碰磁盘（009：入参为 用户 → 数字人 → 会话 → 消息） */
 function fakeHistory() {
   const appended: Array<{
     userId: string;
@@ -58,7 +45,6 @@ function makeRun(): RunImpl {
   return run;
 }
 
-/** 016：卡片候选范围的本体能力 */
 const TOOL_TIP = {
   name: 'QueryPurchaseRecords',
   title: '查询采购订单信息',
@@ -100,9 +86,7 @@ describe('RunFinalizer.done', () => {
 
     expect(run.state).toBe('done');
     expect(history.appended.map((a) => a.message.role)).toEqual(['user', 'assistant']);
-    // 009：落点取**本轮的**数字人（run.agentName），两条消息同域
     expect(history.appended.map((a) => a.agentName)).toEqual(['demo', 'demo']);
-    // assistant 行用 run 启动时预生成的 id（工具事件行已按它归属）
     expect(history.appended[1]!.message.id).toBe('m-assistant');
     expect(history.appended[1]!.message).toMatchObject({
       status: 'completed',
@@ -169,9 +153,7 @@ describe('RunFinalizer.done', () => {
       focusToolTips: [TOOL_TIP],
       max: 3,
     });
-    // 定稿后归档清空（同一 run 不会被二次定稿）
     expect(run.nextActionsTail).toBe('');
-    // 卡片随 done 直推（前端不再轮询拉取）
     expect(events[0]).toMatchObject({ type: 'done', data: { next_actions: view } });
   });
 
@@ -225,8 +207,6 @@ describe('RunFinalizer.error', () => {
       error: { code: 'LLM_ERROR', message: '上游模型不可用' },
       usage: { input_tokens: 11, output_tokens: 22 },
     });
-    // 2026-11-18：失败行沿用 run 启动时预生成的 id —— 工具事件行按该 id 归属，
-    // 在这里另生成新 id 会让失败轮的工具卡片变成孤儿（历史里永远点不开结果）
     expect(history.appended[1]!.message.id).toBe('m-assistant');
     expect(usage.rows).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -326,7 +306,7 @@ describe('RunFinalizer.error：诊断字段与 llm.call.failed（2026-10-15）',
       llmInfo: () => ({ provider: 'deepseek', model: 'deepseek-v4-flash' }),
     });
     const run = makeRun();
-    run.modelId = 'deepseek-v4-pro'; // 请求级覆盖（FR-023）
+    run.modelId = 'deepseek-v4-pro';
 
     await finalizer.error(
       run,
@@ -355,7 +335,7 @@ describe('RunFinalizer.error：诊断字段与 llm.call.failed（2026-10-15）',
       duration_ms: 4_000,
       alert: true,
     });
-    expect('upstream_type' in fields).toBe(false); // 没有就不写，不塞 undefined
+    expect('upstream_type' in fields).toBe(false);
     expect('request_id' in fields).toBe(false);
     expect(text).toContain('LLM_INSUFFICIENT_BALANCE');
     expect(text).toContain('402');
@@ -433,7 +413,7 @@ describe('RunFinalizer.aborted', () => {
     finalizer.aborted(run, turn(), USAGE);
 
     expect(run.state).toBe('aborted');
-    expect(history.appended).toHaveLength(0); // 中断轮不落盘
+    expect(history.appended).toHaveLength(0);
     expect(usage.rows[0]).toMatchObject({ inputTokens: 11, outputTokens: 22, agentName: 'demo' });
     expect(events[0]).toMatchObject({
       type: 'done',
@@ -457,13 +437,6 @@ describe('RunFinalizer.aborted', () => {
   });
 });
 
-/**
- * 落盘失败（2026-10-27）
- *
- * 修复前：`append` 抛错会一路冒到 `consumeTurn` 的 catch，被归类为"实例崩溃"——
- * 销毁池内实例（连带重建全部 MCP 连接）+ 广播 `INTERNAL_ERROR`，且 `run.state`
- * 先从 `done` 改成 `error`（双终态）。磁盘满 / 权限不足与实例状态毫无关系。
- */
 describe('RunFinalizer.done —— 落盘失败不是实例崩溃（2026-10-27）', () => {
   it('返回 false + 广播 HISTORY_WRITE_FAILED + 终态改 error；不抛错、不广播 done', async () => {
     const failingHistory = {
@@ -503,7 +476,6 @@ describe('RunFinalizer.done —— 落盘失败不是实例崩溃（2026-10-27�
       history: failingHistory,
       usage: usage.store,
       now: () => 5_000,
-      // error 路径还会调 `logger.warn` 记上游模型失败（`llm.call.failed`），需一并提供
       logger: { error: errorLog, warn: vi.fn() } as never,
     });
     const run = makeRun();
@@ -514,7 +486,6 @@ describe('RunFinalizer.done —— 落盘失败不是实例崩溃（2026-10-27�
       message: '503',
     });
 
-    // 恰好一个 error 事件（主因是 LLM 失败，落盘失败只进日志）
     expect(events.filter((e) => e.type === 'error')).toHaveLength(1);
     expect(events.filter((e) => e.type === 'error')[0]).toMatchObject({
       data: { error: { code: 'LLM_UNAVAILABLE' } },

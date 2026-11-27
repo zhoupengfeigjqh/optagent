@@ -1,11 +1,3 @@
-﻿/**
- * 组件测试：SOUL 编辑器（`FR-016`、`FR-019`）。
- *
- * 这里守的是**必填项的可辨识性**：角色简介、主要使命、以及「快速上手」入口
- * （其内部「首屏欢迎语」必填）都 MUST 在界面上标出必填星号——三者对应后端
- * `soul-design.ts` 的 `readRequiredText` 必填字段，界面漏标会让管理员
- * 只在"保存被拒"时才发现（原则四）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import SoulEditor from './SoulEditor.vue'
@@ -48,12 +40,6 @@ describe('SoulEditor —— 必填项标识', () => {
   })
 })
 
-/**
- * 007：下一步动作提示开关。
- *
- * 守三件事：**文案与默认值**（管理员看到的正是"关闭"）、**勾选即上抛布尔**（不是字符串）、
- * 以及**开关的产物去向**在界面上说清（部署后写进 SOUL.md，而不是影响模型行为）。
- */
 describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   function checkbox(wrapper: ReturnType<typeof mountEditor>) {
     return wrapper.find<HTMLInputElement>('[data-test="next-action-hints"]')
@@ -66,8 +52,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(input.exists()).toBe(true)
     expect(input.element.type).toBe('checkbox')
     expect(input.element.checked).toBe(false)
-    // 2026-11-20：四个运行期开关合并进同一「意图聚焦」区块、同级展示，
-    // 断言它们确实在**同一个** fieldset 内（不再有独立的下一步动作提示区块）
     const block = wrapper.find('.soul-editor__intent-focus')
     expect(block.text()).toContain('是否开启下一步动作提示')
     expect(block.text()).toContain('输入重写')
@@ -82,7 +66,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
 
     const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
     expect(emitted.next_action_hints).toBe(true)
-    // 其余字段原样带出（patch 是整体替换）
     expect(emitted.mission).toBe('')
   })
 
@@ -97,15 +80,21 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(emitted.next_action_hints).toBe(false)
   })
 
-  it('界面说明开关的去向与关闭后果（不影响模型行为、关闭即产物无该键）', () => {
+  it('界面说明开关的去向与关闭后果（依赖可见、关闭即置灰）', () => {
     const wrapper = mountEditor()
-    const hint = wrapper.find('[data-test="next-action-hints-hint"]').text()
 
-    expect(hint).toContain('可点击的下一步动作卡片')
-    // 依赖关系必须写在界面上：不先开意图聚焦，这个开关不可用
-    expect(hint).toContain('需先开启「意图聚焦」')
-    // 文案里的条数与输入框当前值同源（管理员看到的提示不会与实际参数脱节）
-    expect(hint).toContain(`最多 ${emptySoulDesign().next_action_hints_count} 条`)
+    const groupHint = wrapper.find('[data-test="intent-focus-group-hint"]').text()
+    expect(groupHint).toContain('都以「开启意图聚焦」为前提')
+    expect(groupHint).toContain('下一步动作提示则会被一并关闭')
+
+    const countHint =
+      wrapper.find('[data-test="next-action-hints-count"]').element.closest('label')?.textContent ?? ''
+    expect(countHint).toContain(`缺省 ${emptySoulDesign().next_action_hints_count} 条`)
+
+    // 关闭后果：意图聚焦默认关闭 → 条数输入框置灰不可填
+    expect(wrapper.find<HTMLInputElement>('[data-test="next-action-hints-count"]').element.disabled).toBe(
+      true,
+    )
   })
 
   it('存量设计态缺该键（004 期存档）→ 按关闭渲染，不报错', () => {
@@ -127,7 +116,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     return wrapper.find<HTMLInputElement>('[data-test="next-action-hints-count"]')
   }
 
-  /** 数字输入框的 `change`（不是 `input`）：输入中不打断，离开或用回车才提交 */
   async function setCount(wrapper: ReturnType<typeof mountEditor>, value: string) {
     const input = countInput(wrapper)
     input.element.value = value
@@ -144,7 +132,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(input.attributes('min')).toBe(String(SOUL_LIMITS.nextActionHintsMin))
     expect(input.attributes('max')).toBe(String(SOUL_LIMITS.nextActionHintsMax))
     expect(input.element.value).toBe(String(SOUL_LIMITS.nextActionHintsDefault))
-    // 未开启 → 灰态：`disabled` 挡住输入，`--off` 类负责视觉弱化
     expect(input.element.disabled).toBe(true)
     expect(wrapper.find('.soul-editor__count').classes()).toContain('soul-editor__count--off')
   })
@@ -155,7 +142,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
     expect(countInput(wrapper).element.disabled).toBe(false)
     expect(wrapper.find('.soul-editor__count').classes()).not.toContain('soul-editor__count--off')
 
-    // 受控组件：勾选只上抛，灰态由父级回填的 `modelValue` 决定
     await wrapper.setProps({ modelValue: { ...emptySoulDesign(), next_action_hints: false } })
     expect(countInput(wrapper).element.disabled).toBe(true)
     expect(wrapper.find('.soul-editor__count').classes()).toContain('soul-editor__count--off')
@@ -212,12 +198,6 @@ describe('SoulEditor —— 下一步动作提示开关（007）', () => {
   })
 })
 
-/**
- * 013：意图聚焦开关。
- *
- * 守三件事：**默认关闭 + 文案**、**勾选即上抛布尔**、**与 007 开关互相独立**
- * （同一份 SOUL 上两个复选框各管各的，勾一个不会带上另一个）。
- */
 describe('SoulEditor —— 意图聚焦开关（013）', () => {
   function checkbox(wrapper: ReturnType<typeof mountEditor>) {
     return wrapper.find<HTMLInputElement>('[data-test="intent-focus"]')
@@ -240,7 +220,6 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
 
     const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
     expect(emitted.intent_focus).toBe(true)
-    // 其余字段原样带出（patch 是整体替换），007 的开关不受影响
     expect(emitted.next_action_hints).toBe(false)
     expect(emitted.mission).toBe('')
   })
@@ -293,8 +272,6 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
     const hint = wrapper.find('[data-test="intent-focus-hint"]').text()
 
     expect(hint).toContain('意图判定')
-    // 生效前提：只有关联了本体技能才有可聚焦的对象
-    // （界面文案为「有本体技能时阶数配置才生效！」，与本断言同义）
     expect(hint).toContain('有本体技能时阶数配置才生效')
   })
 
@@ -308,12 +285,6 @@ describe('SoulEditor —— 意图聚焦开关（013）', () => {
   })
 })
 
-/**
- * 019：聚焦阶数。
- *
- * 守四件事：**三个选项 + 默认 0**、**关闭时整组置灰但数值保留**、
- * **选值即上抛数字（不是字符串）**、**关闭开关不会把阶数清零**。
- */
 describe('SoulEditor —— 聚焦阶数（019）', () => {
   function radio(wrapper: ReturnType<typeof mountEditor>, depth: number) {
     return wrapper.find<HTMLInputElement>(`[data-test="intent-focus-depth-${depth}"]`)
@@ -337,7 +308,6 @@ describe('SoulEditor —— 聚焦阶数（019）', () => {
 
     const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
     expect(emitted.intent_focus_depth).toBe(2)
-    // 其余字段原样带出
     expect(emitted.intent_focus).toBe(true)
     expect(emitted.mission).toBe('')
   })
@@ -373,15 +343,6 @@ describe('SoulEditor —— 聚焦阶数（019）', () => {
   })
 })
 
-/**
- * 027：输入重写 / 术语替换开关。
- *
- * 守四件事（与 007/019 同一套口径）：
- * - 缺省关闭（新建数字人不多花一次模型调用）；
- * - 意图聚焦关闭时**置灰但保留勾选值**（再开即恢复，不必重设）；
- * - 勾选上抛的是**布尔**，且不动另一个开关；
- * - 界面文案把"替换的前提"说清（没有术语映射集时开了也不生效）。
- */
 describe('SoulEditor —— 输入重写 / 术语替换开关（027）', () => {
   function checkbox(wrapper: ReturnType<typeof mountEditor>, key: string) {
     return wrapper.find<HTMLInputElement>(`[data-test="${key}"]`)
@@ -455,5 +416,55 @@ describe('SoulEditor —— 输入重写 / 术语替换开关（027）', () => {
 
     expect(hint).toContain('改写只影响本轮聚焦')
     expect(hint).toContain('原话')
+  })
+
+  /**
+   * 028：任务规划开关（意图聚焦配置区内）。
+   *
+   * 无障碍口径在组件自身用例内验证（宪章原则四）：原生 checkbox + 整行 label 即键盘可达，
+   * 置灰语义与说明文案也要在这里断言，不能留给跨故事复核。
+   */
+  it('任务规划：意图聚焦关闭时置灰但保留已选值', () => {
+    const off = mountEditor({ ...emptySoulDesign(), intent_focus: false, task_planning: true })
+    expect(checkbox(off, 'task-planning').element.disabled).toBe(true)
+    expect(checkbox(off, 'task-planning').element.checked).toBe(true)
+
+    const on = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    expect(checkbox(on, 'task-planning').element.disabled).toBe(false)
+    expect(checkbox(on, 'task-planning').element.checked).toBe(false)
+  })
+
+  it('任务规划：勾选上抛布尔值，且不动其它开关', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+
+    await checkbox(wrapper, 'task-planning').setValue(true)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.task_planning).toBe(true)
+    expect(emitted.input_rewrite).toBe(false)
+    expect(emitted.term_normalize).toBe(false)
+    expect(typeof emitted.task_planning).toBe('boolean')
+  })
+
+  it('任务规划：原生 checkbox + 整行 label（键盘可达）且说明文案写明前提', () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true })
+    const input = checkbox(wrapper, 'task-planning').element
+
+    expect(input.type).toBe('checkbox')
+    expect(input.tabIndex).not.toBe(-1)
+    expect(input.closest('label')).not.toBeNull()
+
+    const hint = wrapper.find('[data-test="task-planning-hint"]').text()
+    expect(hint).toContain('需同时开启意图聚焦')
+  })
+
+  it('任务规划：关闭意图聚焦只改开关，不丢本开关的值', async () => {
+    const wrapper = mountEditor({ ...emptySoulDesign(), intent_focus: true, task_planning: true })
+
+    await wrapper.find<HTMLInputElement>('[data-test="intent-focus"]').setValue(false)
+
+    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as SoulDesign
+    expect(emitted.intent_focus).toBe(false)
+    expect(emitted.task_planning).toBe(true)
   })
 })

@@ -1,18 +1,3 @@
-/**
- * 工作空间文件（003 三空间改造；2026-11-18 / 025 起为两空间）
- *
- * 后端 `GET /api/files/workspace` 返回三级树：空间 → 子目录 → 文件，
- * 附场景名与每空间策略（agent_writable / upload_extensions）。
- * 目录集合与展示名完全以后端为准（scenario.json 定义），前端不保留任何目录常量。
- *
- * 文件空间视角＝**当前选中的数字人**：场景随数字人存放，故切换数字人后可见目录清单会变，
- * `useAppSession` 的 `onSwitched` 会重新 `load()`。未选中数字人 → 409 AGENT_NOT_SELECTED；
- * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED；两种错误都经 error 透出给界面。
- *
- * 另外承载文件空间的**列表侧状态与动作**：
- * - 两级折叠展开（空间 → 数据准备子目录；默认全部收起，本次会话内保持——面板收起再打开不重置）
- * - 删除文件（2026-11-18 / 025：只读空间下线，两个空间内的文件均可删）
- */
 
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
@@ -28,19 +13,11 @@ import { toErrorInfo, toUserMessage } from '../utils/error-message'
 import { useSession } from './useAppSession'
 import type { ToastStore } from './useToast'
 
-/** 构造参数。 */
 export interface WorkspaceDeps {
   files: FilesApi
   toast: ToastStore
 }
 
-/**
- * 目录级可上传类型的**唯一实现**（2026-10-13）。
- *
- * 从目录列表里取**该目录自身**的 `upload_extensions`（后端下发：数据准备 = 该目录配置，
- * 未配置 = 平台默认；临时空间恒等于空间值）。由本 composable 的 `uploadExtensionsOf`
- * 与 `UploadMenu` 的文件选择器 `accept` **共用**，消除"按空间反查"这第二套口径。
- */
 export function uploadExtensionsOfDir(
   dirs: readonly WorkspaceDir[],
   dir: string,
@@ -48,61 +25,31 @@ export function uploadExtensionsOfDir(
   return dirs.find((item) => item.dir === dir)?.upload_extensions ?? []
 }
 
-/** 工作空间 composable 契约。 */
 export interface WorkspaceStore {
-  /** 三空间树（加载前/失败为空数组） */
   spaces: Readonly<Ref<WorkspaceSpace[]>>
-  /** 场景名（未加载/未配置为空串） */
   scenario: Readonly<Ref<string>>
-  /** 扁平化的全部目录（树组件/文件查找用） */
   dirs: ComputedRef<WorkspaceDir[]>
   loading: Readonly<Ref<boolean>>
   error: Readonly<Ref<ErrorInfo | null>>
-  /** 已展开的空间名（默认空数组 = 全部收起），本次会话内保持 */
   expandedSpaces: Readonly<Ref<readonly string[]>>
-  /** 已展开的二级目录路径（默认空数组 = 全部收起），本次会话内保持 */
   expandedDirs: Readonly<Ref<readonly string[]>>
-  /** 拉取工作空间清单 */
   load(): Promise<void>
-  /** 取某目录的文件（未知目录返回空数组） */
   filesOf(dir: string): WorkspaceFile[]
-  /** 取目录展示名（未知目录回退为路径最后一段） */
   labelOf(dir: string): string
-  /** 取**该目录**允许的上传扩展名（2026-10-13 起为目录级；未知目录返回空数组） */
   uploadExtensionsOf(dir: string): readonly string[]
-  /** 引用存在性校验（FR-018、V-15） */
   exists(reference: FileReference): boolean
-  /**
-   * 就地登记一个刚上传成功的文件（012 FR-004）。
-   *
-   * 为什么必须登记：发送前的存在性校验（`exists`）只读**已加载**清单，而上传成功后不会重拉
-   * workspace；不登记就会出现"刚插入的 `@落盘名` 一发送就被判引用不存在"。
-   * 与 `remove` 一样只改内存（不重拉），保住折叠状态与滚动位置。
-   *
-   * 未知目录（清单未加载 / 非本数字人目录）→ no-op，不抛错（不制造假绿：`exists` 仍为假）。
-   */
   registerFile(file: { dir: string; filename: string; size: number }): void
-  /** 折叠 / 展开某个空间（一级） */
   toggleSpace(name: string): void
-  /** 折叠 / 展开某个二级目录分组 */
   toggleDir(dir: string): void
-  /**
-   * 删除文件（2026-11-18 / 025：只读空间下线，所有空间均可删）。
-   *
-   * 成功后就地移除该条目并提示；失败提示原因并返回 `false`（由调用方决定是否收敛面板）。
-   */
   remove(reference: FileReference): Promise<boolean>
 }
 
-/** 创建工作空间状态。 */
 export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
   const spaces = ref<WorkspaceSpace[]>([])
   const scenario = ref('')
   const loading = ref(false)
   const error = ref<ErrorInfo | null>(null)
-  /** 一级折叠状态（空间）：空数组即"全部收起"（默认值），仅存活于本次会话 */
   const expandedSpaces = ref<readonly string[]>([])
-  /** 二级折叠状态（数据准备子目录）：同上 */
   const expandedDirs = ref<readonly string[]>([])
 
   const dirs = computed<WorkspaceDir[]>(() => spaces.value.flatMap((space) => space.dirs))
@@ -116,7 +63,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
       scenario.value = response.scenario
     } catch (cause) {
       error.value = toErrorInfo(cause)
-      // 失败（含 scenario 未配置 503）时清空，界面按错误态/空态呈现
       spaces.value = []
       scenario.value = ''
     } finally {
@@ -147,7 +93,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
   }
 
   function registerFile(file: { dir: string; filename: string; size: number }): void {
-    // 未知目录（清单未加载 / 非本数字人目录）：no-op，不制造"存在"的假象
     const known = spaces.value.some((space) => space.dirs.some((item) => item.dir === file.dir))
     if (!known) {
       return
@@ -184,7 +129,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
       : [...expandedDirs.value, dir]
   }
 
-  /** 就地摘掉缓存条目：删除只影响单个目录，重拉全量反而会丢掉折叠状态之外的滚动位置 */
   function dropFromCache(reference: FileReference): void {
     spaces.value = spaces.value.map((space) => ({
       ...space,
@@ -228,7 +172,6 @@ export function createWorkspaceStore(deps: WorkspaceDeps): WorkspaceStore {
   }
 }
 
-/** 组件内取用（经 `provide/inject` 的会话上下文）。 */
 export function useWorkspace(): WorkspaceStore {
   return useSession().workspace
 }

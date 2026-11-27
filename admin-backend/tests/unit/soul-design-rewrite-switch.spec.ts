@@ -1,15 +1,3 @@
-/**
- * 单元测试：`input_rewrite` / `term_normalize` 两个开关的校验与物化（027）。
- *
- * 与 `soul-design-focus-depth.spec.ts` 同构（019 当初也从主 spec 拆出，理由相同：
- * 主 spec 已 442 行，再加 027 的用例必然破 500 行门禁）。
- *
- * 覆盖：
- * - **缺省**：键缺失 / 新建 / 存量升级一律 `false`，产物不出现这两个键；
- * - **校验**：非布尔一律拒绝（不静默转成 false），数组 / 字符串 / 数字都算脏数据；
- * - **物化**：只有「意图聚焦 且 本开关」都为真才写键（关闭态零残留）；
- * - **保留**：意图聚焦关闭时值保留（管理台置灰、再开即恢复），但产物不写。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import {
@@ -49,7 +37,6 @@ function expectCode(fn: () => unknown, code: string): void {
   expect((caught as ApiError).code).toBe(code);
 }
 
-/** 只取 frontmatter 行，便于断言"写了哪些键" */
 function frontmatterOf(md: string): string[] {
   const end = md.indexOf('\n---', 3);
   return md.slice(4, end).split('\n');
@@ -83,7 +70,7 @@ describe('027 输入重写 / 术语替换开关 —— 缺省与校验', () => {
 
   it('非布尔一律拒绝式失败（不静默转成 false，免得"存了却没生效"查不出来）', () => {
     for (const value of ['true', 1, 0, null, {}, [], undefined]) {
-      if (value === undefined) continue; // 缺键是合法缺省，不是脏数据
+      if (value === undefined) continue;
       expectCode(
         () => normalizeSoulDesign({ ...validRaw(), input_rewrite: value }, OPTIONS),
         ERROR_CODES.VALIDATION_FAILED,
@@ -139,7 +126,6 @@ describe('027 输入重写 / 术语替换开关 —— 物化', () => {
       { ...validRaw(), intent_focus: false, input_rewrite: true, term_normalize: true },
       OPTIONS,
     );
-    // 管理台置灰时需要这两个值仍然在（再次开启即恢复，不必重填）
     expect(soul.input_rewrite).toBe(true);
     expect(soul.term_normalize).toBe(true);
 
@@ -181,7 +167,6 @@ describe('027 输入重写 / 术语替换开关 —— 物化', () => {
     const keys = frontmatterOf(md).map((line) => line.split(':')[0]!);
     const at = (key: string) => keys.indexOf(key);
 
-    // 只断言这五个开关键的**相对顺序**（introduction / welcome 等展示键另在他处）
     expect(at('intent_focus')).toBeGreaterThanOrEqual(0);
     expect(at('intent_focus')).toBeLessThan(at('intent_focus_depth'));
     expect(at('intent_focus_depth')).toBeLessThan(at('input_rewrite'));

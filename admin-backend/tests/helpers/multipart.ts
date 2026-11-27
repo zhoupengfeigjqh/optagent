@@ -1,9 +1,3 @@
-/**
- * 测试用 multipart/form-data 构造器（零依赖）。
- *
- * `app.inject` 接受原始 buffer + Content-Type，因此这里手工拼装即可，
- * 不必引入表单库（原则六）。
- */
 export interface MultipartPayload {
   payload: Buffer;
   headers: Record<string, string>;

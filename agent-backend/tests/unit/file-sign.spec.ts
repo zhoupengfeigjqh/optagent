@@ -1,11 +1,3 @@
-/**
- * 单元测试：签名直链（读方向 / 写方向）
- *
- * 守住的核心理由（契约 `runtime-api-delta.md` §10.6 不变式 3）：
- * 读写 payload **形状隔离**——段数不同（3 vs 4）⇒ 两种 payload 不可能碰撞
- * ⇒ 一张"读某文件"的签名**不能被用于写**（否则权限被放大）；
- * 而读方向格式一字未改 ⇒ **存量签名 URL 零失效**。
- */
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PUT_TTL_MS,
@@ -96,7 +88,6 @@ describe('mintPutUrl', () => {
     );
     expect(Number(url.searchParams.get('t'))).toBe(NOW);
 
-    // 与 sid/call_id/tool 同一处置：改 `t` 只影响列表展示，验签照旧通过（契约 §10.3）
     url.searchParams.set('t', String(NOW - 60_000));
     expect(
       verifyPutRef(
@@ -125,7 +116,6 @@ describe('mintPutUrl', () => {
     expect(url.searchParams.get('sid')).toBe('th_9f8e');
     expect(url.searchParams.get('call_id')).toBe('call_c1');
     expect(url.searchParams.get('tool')).toBe('ocr__submit_ocr');
-    // 验签只由 u/d/exp 决定——提示参数篡改不影响通过（也不构成越权，见契约 §10.3）
     const sig = url.searchParams.get('sig')!;
     const exp = Number(url.searchParams.get('exp'));
     expect(verifyPutRef(SECRET, 'admin', PRODUCED_DIR, exp, sig, NOW)).toBe(true);

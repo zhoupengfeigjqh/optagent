@@ -1,15 +1,3 @@
-/**
- * 单元测试：LLM 的有界重试（`contracts/runtime-api-delta.md` §19.1 / §19.5 不变式 1~3）
- *
- * 两层验证，各证一半：
- * ① **直聊路径**（`PiAiLlmProvider.streamChat`）：用**桩 fetch** 走真实 `deepseekProvider()`
- *    适配器，证明"我们传的 `maxRetries` 真的产生了重试"——503×2 → 200 时**恰好 3 次**请求、
- *    正文照常产出；重试关闭时**恰好 1 次**；不可重试的 401 不重试。
- * ② **工具循环路径**（`createStreamFn`）：用假 Provider 断言两个路径的重试口径**完全一致**
- *    （同一个 `LlmRetryOptions` → 同两个选项名），避免"带工具时又退回不重试"。
- *
- * 全程**不碰网络**（fetch 被替换）。
- */
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LlmRetryOptions } from '../../src/config.js';
@@ -17,12 +5,10 @@ import { createStreamFn } from '../../src/infra/agent-loop.js';
 import { PiAiLlmProvider } from '../../src/infra/llm/pi-ai-provider.js';
 import type { LlmEvent } from '../../src/types.js';
 
-/** 从 provider 目录取真实模型（不硬编码 id：pi 换目录时测试不会失真） */
 const MODEL = deepseekProvider().getModels()[0]!;
 const RETRY_2: LlmRetryOptions = { maxRetries: 2, maxRetryDelayMs: 15_000 };
 const NO_RETRY: LlmRetryOptions = { maxRetries: 0, maxRetryDelayMs: 15_000 };
 
-/** 与真实环境一致：模型 id + 假 key（base_url 走 provider 默认，请求被 fetch 桩拦住） */
 function providerWith(retry: LlmRetryOptions): PiAiLlmProvider {
   return new PiAiLlmProvider({ model: MODEL.id, apiKey: 'test-key' }, retry);
 }
@@ -46,7 +32,6 @@ function okStream(text: string): Response {
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
-/** 上游错误响应（DeepSeek 系：`message` + `type` 顶层字段） */
 function errorResponse(status: number, message: string, type?: string): Response {
   const payload: Record<string, unknown> = { message };
   if (type) payload.type = type;
@@ -95,7 +80,7 @@ describe('直聊路径（streamChat）：重试是"有界且真的发生"', () =
 
     const events = await collect(providerWith(RETRY_2));
 
-    expect(calls).toBe(3); // 1 次首发 + 2 次重试，绝不多发
+    expect(calls).toBe(3);
     expect(events.filter((e) => e.type === 'content_delta').map((e) => e.delta)).toEqual(['好的']);
     expect(events.some((e) => e.type === 'error')).toBe(false);
   }, 15_000);
@@ -113,9 +98,6 @@ describe('直聊路径（streamChat）：重试是"有界且真的发生"', () =
 
     expect(calls).toBe(1);
     expect(error.code).toBe('LLM_UNAVAILABLE');
-    // 桩 fetch 的响应体不被 openai SDK 读回（实测其报错文案为 "503 status code (no body)"），
-    // 故此处只断言状态码这条线索；`upstream_type` / `request_id` 的解析由
-    // `llm-error.spec.ts` 用**真实报文**逐字段覆盖（含 DeepSeek 把 request_id 写在 message 文本里）
     expect(error.upstream_status).toBe(503);
   });
 
@@ -138,7 +120,6 @@ describe('直聊路径（streamChat）：重试是"有界且真的发生"', () =
     let calls = 0;
     vi.stubGlobal('fetch', () => {
       calls += 1;
-      // 第一次失败后立刻"用户点了停止"：退避睡眠应被打断，而不是等完 500ms 再试
       controller.abort();
       return Promise.resolve(errorResponse(503, 'Service is too busy'));
     });

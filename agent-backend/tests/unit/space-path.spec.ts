@@ -1,19 +1,3 @@
-/**
- * 单元测试：三空间路径的**词法判据**（`domain/space-path.ts`，2026-11-02 收敛）。
- *
- * 为什么要有这个文件：此前"哪条路径合法"有两份实现（`FileAccess.resolveSafe` 与
- * `scenario.parseSpaceDir`），口径已经漂移——同一个路径"模型能读、前端看不到"，
- * 以及"场景清单收缩后模型仍能读"。本文件把那张表**逐格钉住**，任何一侧的漂移都会红。
- *
- * 覆盖口径（表驱动）：
- * - 输入形状：空 / 绝对路径 / 盘符相对（`C:foo`）/ UNC / `..` / 多分隔符 / 反斜杠
- * - 四空间 × 四视角（`model-read` / `model-write` / `browse` / `browse-produced`）
- * - 唯一登记例外：`临时空间/后台产出`（模型可读整棵子树，浏览只读该目录本身）
- * - 数据准备清单：**惰性取值**——扁平空间的判定不得触发 scenario 读取（否则"场景未配置"
- *   会连带让共享/临时空间不可用）
- *
- * 本文件只测词法判据；fs 层（存在性 / realpath / 符号链接）由 `file-access.spec.ts` 负责。
- */
 import { describe, expect, it } from 'vitest';
 
 import { judgeSpacePath } from '../../src/domain/space-path.js';
@@ -23,15 +7,12 @@ import type {
   SpacePathVerdict,
 } from '../../src/domain/space-path.js';
 
-/** 场景清单：`生产计划` 在清单内，`已下线` 只在磁盘上 */
 const RULES: SpacePathRules = { dataPrepDirs: () => ['生产计划', '产线电价'] };
-/** 场景未配置（清单为空） */
 const EMPTY: SpacePathRules = { dataPrepDirs: () => [] };
 
 const judge = (p: string, cap: SpaceCapability, rules: SpacePathRules = RULES): SpacePathVerdict =>
   judgeSpacePath(p, cap, rules);
 
-/** 断言"被拒且原因命中" */
 function expectDeny(
   p: string,
   cap: SpaceCapability,
@@ -43,7 +24,6 @@ function expectDeny(
   if (!v.ok) expect(v.kind).toBe(kind);
 }
 
-/** 断言"放行且规范化路径命中" */
 function expectOk(
   p: string,
   cap: SpaceCapability,
@@ -134,8 +114,6 @@ describe('space-path —— 扁平空间（临时空间只允许一层）', () =
     expectDeny('临时空间/别处', 'browse-produced', 'not-flat');
   });
 
-  // 2026-11-18（025）：共享空间下线 ⇒ 在词法判据的第一道（一级目录白名单）就被拒，
-  // 与"别的目录"同 kind。历史会话里的旧引用、旧客户端都落在这条路径上。
   it('已下线的「共享空间」在一级白名单处即被拒（两侧同判 space-forbidden）', () => {
     for (const cap of ['model-read', 'browse'] as SpaceCapability[]) {
       expectDeny('共享空间', cap, 'space-forbidden');
@@ -151,14 +129,12 @@ describe('space-path —— 扁平空间（临时空间只允许一层）', () =
   });
 
   it('词法上无法区分"一层文件"与"同名目录"：`临时空间/2026` 形状合法，目录级拒绝在 stat 之后', () => {
-    // 判据只管路径形状（"空间下的一层条目"），是否目录由 `FileAccess.list` 在 readdir 前判定
     expectOk('临时空间/2026', 'model-read', '临时空间/2026');
   });
 
   it('`临时空间/后台产出` = 唯一登记例外：模型可读整棵子树', () => {
     expectOk('临时空间/后台产出', 'model-read', '临时空间/后台产出');
     expectOk('临时空间/后台产出/ocr_7f3a.json', 'model-read', '临时空间/后台产出/ocr_7f3a.json');
-    // 服务自己再分层的产出同样可读（model-read 不限深）
     expectOk('临时空间/后台产出/2026/x.json', 'model-read', '临时空间/后台产出/2026/x.json');
   });
 
@@ -208,6 +184,5 @@ describe('space-path —— 规范化与惰性清单', () => {
     expectOk('临时空间/th_1_说明.txt', 'model-read', '临时空间/th_1_说明.txt', boom);
     expectOk('临时空间/后台产出/x.json', 'model-read', '临时空间/后台产出/x.json', boom);
     expectOk('临时空间/后台产出', 'browse-produced', '临时空间/后台产出', boom);
-    // 数据准备才会触发；这里只钉"不抛错就说明没被调用"，故不在此断言其行为
   });
 });

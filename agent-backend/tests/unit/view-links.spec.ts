@@ -1,16 +1,3 @@
-/**
- * 单元测试：工具结果里的视图链接抽取（2026-10-10，`TR-44`）
- *
- * 守住五件事：
- * 1. **只按字段名判定** —— `viewUrl` 大小写不敏感、任意层级生效；不看值像不像地址
- * 2. **同层配对** —— `viewUrlName` 只与同一对象里的 `viewUrl` 配对，跨层配不上
- * 3. **确定性去重** —— 按地址原值去重，名称取首个非空值
- * 4. **形态卫生** —— 非字符串/空白/超长/控制字符被挡；名称脏只丢名字、不丢地址
- * 5. **失败即 `undefined`** —— 非 JSON / 标量 / 超解析上限 / 没命中 → 不写字段（行为与改动前一致）
- *
- * 刻意**不测** scheme 合法性（`//host/…`、无前导 `/`、`javascript:`）：
- * 那是前端 `resolveViewUrl()` 的唯一职责（`TR-42`），后端只做搬运。
- */
 import { describe, expect, it } from 'vitest';
 import {
   VIEW_LINK_MAX_DEPTH,
@@ -20,7 +7,6 @@ import {
   extractViewLinks,
 } from '../../src/domain/view-links.js';
 
-/** 把 `viewUrl` 包进 `levels` 层 `{ a: … }`（即 `viewUrl` 位于深度 `levels`）。 */
 function nestJson(levels: number): unknown {
   let node: unknown = { viewUrl: '/a/b' };
   for (let i = 0; i < levels; i++) node = { a: node };
@@ -287,7 +273,6 @@ describe('extractViewLinks —— 边界与降级', () => {
     const many = Array.from({ length: VIEW_LINK_MAX_ITEMS + 10 }, (_, i) => ({
       viewUrl: `/ds/${i}`,
     }));
-    // 末尾再出现一次首条地址，且这次带名字
     many.push({ viewUrl: '/ds/0', viewUrlName: '第 0 条明细' });
 
     const links = extractViewLinks(JSON.stringify(many));

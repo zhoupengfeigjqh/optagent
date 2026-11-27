@@ -1,16 +1,4 @@
 <script setup lang="ts">
-/**
- * 运行记录弹窗（015，T056 / T065）
- *
- * 按触发时刻倒序看每次执行的结果，点一行跳回那次会话。
- *
- * 三条口径：
- * 1. **会话已删除 → 该行不可点**，并明确说"会话已删除，不可打开"（不是静默没反应）；
- *    判定由服务端 `thread_deleted` 回填，前端 MUST NOT 再调详情接口试探（避免 N+1）。
- * 2. `skipped` 行没有会话（`thread_id === null`），同样不可点，原因列说明为什么跳过。
- * 3. `rebuilt === true` 加文字标注"重建会话"（`T065`）：复用模式下这一轮是新开的会话，
- *    用户点进去会看到"只有这一轮"——不标注就像丢了一段历史。
- */
 import type { ErrorInfo, ScheduleRun, ScheduledTask } from '../../api/types'
 import { formatDateTime, formatRebuilt, formatRunReason, formatRunResult } from '../../utils/schedule-format'
 import BaseDialog from '../common/BaseDialog.vue'
@@ -22,9 +10,7 @@ withDefaults(
     total?: number
     loading?: boolean
     error?: ErrorInfo | null
-    /** 任务清单（筛选下拉） */
     tasks?: ScheduledTask[]
-    /** 当前筛选的任务 id；`null` = 全部 */
     filterTaskId?: string | null
   }>(),
   {

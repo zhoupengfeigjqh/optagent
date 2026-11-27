@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 破坏性操作二次确认（`FR-007`）。
- *
- * **用原生 `<dialog>` + `showModal()`**（`research.md` D5）：焦点陷阱、
- * `aria-modal`、Esc 关闭由浏览器提供，避免自建 Modal 带来的可访问性退化。
- *
- * 关闭后焦点**归还**到触发元素（打开时记录 `document.activeElement`）。
- */
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = withDefaults(
@@ -16,7 +8,6 @@ const props = withDefaults(
     message?: string
     confirmLabel?: string
     cancelLabel?: string
-    /** 破坏性操作用红色确认按钮 */
     danger?: boolean
   }>(),
   {
@@ -66,7 +57,6 @@ function onConfirm(): void {
   emit('update:open', false)
 }
 
-/** `cancel` 事件由 Esc 触发：阻止浏览器默认关闭，统一走 `update:open` 流程 */
 function onCancel(event: Event): void {
   event.preventDefault()
   requestClose()

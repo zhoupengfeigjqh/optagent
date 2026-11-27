@@ -1,19 +1,3 @@
-/**
- * `.xlsx` 输出编码器（2026-11-16，二期）。
- *
- * `content` 是**表格源文本**，两种形态（可混用）：
- * 1. 纯 CSV（RFC4180）→ 单工作表 `Sheet1`；
- * 2. 用 `# Sheet: 名称` 行分段 → 每个分段一个工作表，名称取标记后的内容。
- *
- * 三条硬约束：
- * - **所有单元格都是字符串**：模型给的是文本，不能让 Excel 把 `=cmd|...` 当公式执行
- *   （`aoa_to_sheet` 对 string 值本就产出 `t:'s'`，这里再显式兜一遍，并清掉任何 `f` 字段）；
- * - 表名必须合法（≤31 字符、不含 `[]:*?/\`、去重），非法名直接改写而不是报错——
- *   名字是排版细节，不该让整次写入失败；
- * - 行列数取 xlsx 规范上限 + 单元格总量上限，防模型给出巨表打爆内存。
- *
- * 复用已在依赖里的 `xlsx`（SheetJS），**未新增依赖**。
- */
 import * as XLSX from 'xlsx';
 
 /** xlsx 规范硬上限 */
@@ -23,7 +7,6 @@ const MAX_COLS = 16_384;
 const MAX_CELLS = 200_000;
 const MAX_SHEET_NAME = 31;
 
-/** `# Sheet: 名称` / `# sheet：名称`（中英文冒号都接受，大小写不敏感） */
 const SHEET_MARKER = /^\s*#\s*sheet\s*[:：]\s*(.+?)\s*$/i;
 
 export interface TableSheet {
@@ -105,7 +88,6 @@ function parseCsv(body: string): { ok: true; rows: ParsedCell[][] } | { ok: fals
   return { ok: true, rows };
 }
 
-/** 去掉全空行，并把参差行补齐成矩形（短行补空串，Excel 里就是空白单元格） */
 function normalizeRows(rows: ParsedCell[][]): string[][] {
   const kept = rows
     .map((cells) => cells.map((c) => c.value))
@@ -116,7 +98,6 @@ function normalizeRows(rows: ParsedCell[][]): string[][] {
   );
 }
 
-/** 按 `# Sheet: 名称` 切段；首个标记之前的内容自成一段（无名 → `Sheet1`） */
 function splitSections(content: string): Array<{ name: string | undefined; body: string[] }> {
   const sections: Array<{ name: string | undefined; body: string[] }> = [];
   let current: { name: string | undefined; body: string[] } = { name: undefined, body: [] };
@@ -133,7 +114,6 @@ function splitSections(content: string): Array<{ name: string | undefined; body:
   return sections;
 }
 
-/** 表名合法化：剥非法字符 → 截断 31 字符 → 去重（`名称(2)`）→ 缺省 `SheetN` */
 function sanitizeSheetName(raw: string | undefined, index: number, used: Set<string>): string {
   const cleaned = (raw ?? '')
     // eslint-disable-next-line no-control-regex -- Excel 表名不允许控制字符
@@ -171,7 +151,7 @@ export function parseTableSource(content: string): TableParseResult {
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     const rows = normalizeRows(parsed.rows);
-    if (rows.length === 0) continue; // 空分段（如尾随标记）跳过
+    if (rows.length === 0) continue;
     if (rows.length > MAX_ROWS) {
       return {
         ok: false,
@@ -201,13 +181,11 @@ export function parseTableSource(content: string): TableParseResult {
   return { ok: true, sheets };
 }
 
-/** 列宽：按最长内容估算（CJK 视觉宽度按 2 计），夹在 8~40 之间 */
 function columnWidths(rows: string[][]): XLSX.ColInfo[] {
   const cols = rows[0]?.length ?? 0;
   const widths = Array.from({ length: cols }, (_, ci) => {
     const longest = rows.reduce((max, cells) => {
       const text = cells[ci] ?? '';
-      // 全角字符占两格：粗估即可，仅供观感
       const visual = [...text].reduce((sum, ch) => sum + (ch.charCodeAt(0) > 0xff ? 2 : 1), 0);
       return Math.max(max, visual);
     }, 0);
@@ -216,7 +194,6 @@ function columnWidths(rows: string[][]): XLSX.ColInfo[] {
   return widths;
 }
 
-/** 生成 xlsx 字节（校验已在 `parseTableSource` 内完成；失败时抛错属防御分支） */
 export function encodeXlsx(content: string): Buffer {
   const parsed = parseTableSource(content);
   if (!parsed.ok) throw new Error(parsed.error);

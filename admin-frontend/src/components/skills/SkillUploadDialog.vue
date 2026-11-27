@@ -1,11 +1,4 @@
 <script setup lang="ts">
-/**
- * SKILL 上传安装对话框（`FR-037`~`FR-041`）。
- *
- * 用**原生 `<dialog>` + 原生文件选择**（`research.md` D5）。
- * 名称冲突时 MUST 要求管理员**显式选择「覆盖」或「取消」**（`FR-040`）——
- * 不允许静默覆盖。被引用的 SKILL 在覆盖时列出受影响的数字人清单（`FR-042`）。
- */
 import { ref } from 'vue'
 import { fetchReferences } from '../../api/deploy'
 import { installSkill } from '../../api/skills'
@@ -25,14 +18,8 @@ const emit = defineEmits<{
 
 const file = ref<File | null>(null)
 const uploading = ref(false)
-/** 服务端错误：按 `code` 分派文案（前端不直接展示后端 message） */
 const error = ref<ErrorInfo | null>(null)
-/**
- * **本地**校验提示：这些文案由本组件自己产生，直接展示才有信息量
- * （走错误码映射会丢掉"请先选择 ZIP 文件"这类具体原因）。
- */
 const localMessage = ref<string | null>(null)
-/** 名称冲突信息：非 null 即展示「覆盖 / 取消」二选一 */
 const conflict = ref<{ name: string; affected: ReferenceItem[] } | null>(null)
 
 function onFileChange(event: Event): void {
@@ -58,10 +45,8 @@ async function upload(overwrite: boolean): Promise<void> {
     emit('update:open', false)
   } catch (err) {
     const info = err as ErrorInfo
-    // 名称冲突：转成"显式选择覆盖或取消"的分支（FR-040）
     if (info.code === 'ADM_SKILL_NAME_TAKEN') {
       const name = file.value?.name.replace(/\.zip$/i, '') ?? ''
-      // 冲突时列出受影响的数字人（查不到清单不阻断"覆盖/取消"这一步）
       const affected: ReferenceItem[] = await fetchReferences('skill', name)
         .then((res) => res.affected)
         .catch(() => [])
@@ -101,7 +86,6 @@ async function upload(overwrite: boolean): Promise<void> {
     <ErrorNotice v-if="error" :error="error" title="安装未完成" />
   </ConfirmDialog>
 
-  <!-- 名称冲突：只提供「覆盖」或「取消」两个明确选择，不做静默覆盖（FR-040） -->
   <ConfirmDialog
     :open="conflict !== null"
     title="库中已有同名 SKILL"

@@ -1,9 +1,3 @@
-/**
- * 单元测试：本体显示名（2026-10-17）。
- *
- * 守住 `{场景名}-{本体名}` 这一条口径与三级取值回落：
- * 响应派生字段 → `metadata` 的两个名字 → 目录名。
- */
 import { describe, expect, it } from 'vitest'
 import { ontologyDisplayName, ontologyNameOf, ontologyScenarioOf } from './ontology-name'
 

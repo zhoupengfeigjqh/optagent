@@ -1,11 +1,3 @@
-/**
- * read_file 的格式分派（2026-10-20 增 `.html`）。
- *
- * 守三件事：
- * 1. `.html` 走**文本直读**（与 `.txt`/`.md` 同一条路），不是 Excel/PDF 解析分支；
- * 2. 返回的是**原文**（标签与脚本原样保留）——模型要读源码，不是渲染后的文本；
- * 3. 不支持类型的提示里 MUST 出现 `.html`（说明与实现同源，不能只改实现）。
- */
 import { describe, expect, it, vi } from 'vitest';
 
 import type { FileAccess } from '../../src/domain/file-access';
@@ -13,7 +5,6 @@ import { readToolFile } from '../../src/domain/tools/read-file';
 
 const HTML = '<!doctype html><html><body><h1>看板</h1><script>alert(1)</script></body></html>';
 
-/** 最小 FileAccess 桩：只区分"文本直读"与"读原始字节"两条路径 */
 function stubAccess(content: string): {
   fa: FileAccess;
   read: ReturnType<typeof vi.fn>;

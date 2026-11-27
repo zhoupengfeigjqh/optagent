@@ -1,11 +1,9 @@
-/**
- * 单元测试：意图聚焦公共口径（016）。
- *
- * 只守两件事：输入截断（取尾部、尽量对齐句首）、五态处置。
- * 阈值区间校验由 `config.spec.ts` 覆盖；候选 / 选择 / 提示各有独立测试，不在这里重复。
- */
 import { describe, expect, it } from 'vitest';
-import { MAX_STATE_CHARS, decideDisposition, prepareState } from '../../src/domain/intent-focus/state.js';
+import {
+  MAX_STATE_CHARS,
+  decideDisposition,
+  prepareState,
+} from '../../src/domain/intent-focus/state.js';
 
 describe('prepareState', () => {
   it('短输入原样返回且不标记截断', () => {
@@ -28,6 +26,21 @@ describe('prepareState', () => {
   it('边界值不截断', () => {
     expect(prepareState('甲'.repeat(MAX_STATE_CHARS)).truncated).toBe(false);
     expect(prepareState('甲'.repeat(MAX_STATE_CHARS + 1)).truncated).toBe(true);
+  });
+
+  it('按码点截断：emoji 不会被切成半个代理对（2026-11-26）', () => {
+    const input = `${'😀'.repeat(MAX_STATE_CHARS)}创建采购单`;
+    const result = prepareState(input);
+    expect(result.truncated).toBe(true);
+    expect(result.state).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(result.state).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    expect(result.state.endsWith('创建采购单')).toBe(true);
+  });
+
+  it('码点数不超上限时不算截断（即使 UTF-16 长度超了）', () => {
+    const input = '😀'.repeat(MAX_STATE_CHARS);
+    expect(input.length).toBeGreaterThan(MAX_STATE_CHARS);
+    expect(prepareState(input)).toEqual({ state: input, truncated: false });
   });
 });
 
@@ -52,15 +65,21 @@ describe('decideDisposition', () => {
   });
 
   it('空结果的三个可区分原因', () => {
-    expect(decideDisposition({ kind: 'ok', skillCount: 0, focusableCount: 0, selectedCount: 0 })).toEqual({
+    expect(
+      decideDisposition({ kind: 'ok', skillCount: 0, focusableCount: 0, selectedCount: 0 }),
+    ).toEqual({
       disposition: 'empty',
       reason: 'no_skills',
     });
-    expect(decideDisposition({ kind: 'ok', skillCount: 2, focusableCount: 0, selectedCount: 0 })).toEqual({
+    expect(
+      decideDisposition({ kind: 'ok', skillCount: 2, focusableCount: 0, selectedCount: 0 }),
+    ).toEqual({
       disposition: 'empty',
       reason: 'no_focusable_skills',
     });
-    expect(decideDisposition({ kind: 'ok', skillCount: 2, focusableCount: 2, selectedCount: 0 })).toEqual({
+    expect(
+      decideDisposition({ kind: 'ok', skillCount: 2, focusableCount: 2, selectedCount: 0 }),
+    ).toEqual({
       disposition: 'empty',
       reason: 'below_threshold',
     });

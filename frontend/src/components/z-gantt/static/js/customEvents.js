@@ -1,19 +1,7 @@
-/**
-* Custom events v3.0.10 (2020-12-21)
-*
-* (c) 2012-2020 Black Label
-*
-* License: Creative Commons Attribution (CC)
-*/
 
-/* global Highcharts setTimeout clearTimeout module:true */
-/* eslint no-loop-func: 0 */
 
 import Highcharts from "./highcharts-gantt";
 
-/**
- * @namespace customEvents
- **/
 
 (function (factory) {
   if (typeof module === 'object' && module.exports) {
@@ -30,7 +18,6 @@ import Highcharts from "./highcharts-gantt";
   }
 }(function (HC) {
 
-/* global Highcharts :true, window */
 
 'use strict';
 
@@ -56,9 +43,6 @@ var UNDEFINED,
   proto,
   methods;
 
-/*
- * Back compatibility
- */
 
 isArray = HC.isArray || function (obj) {
   var str = Object.prototype.toString.call(obj);
@@ -81,16 +65,11 @@ isObject = HC.isObject || function (obj) {
   return obj && typeof obj === 'object';
 }
 
-/**
- * WRAPPED FUNCTIONS
- */
 
-// reset exis events
-if (plotLineOrBandProto) { // # condition for highmaps and custom builds
+if (plotLineOrBandProto) {
   wrap(plotLineOrBandProto, 'render', function (proceed) {
     var defaultEvents = this.options && this.options.events;
   
-    // reset default events on plot lines or bands
     if (defaultEvents) {
       defaultEvents = false;
     }
@@ -98,29 +77,26 @@ if (plotLineOrBandProto) { // # condition for highmaps and custom builds
     return proceed.apply(this, Array.prototype.slice.call(arguments, 1));
   });
 }
-if (seriesProto) { // # condition for highmaps and custom builds
+if (seriesProto) {
   wrap(seriesProto, 'init', function (proceed, chart, options) {
     var chartOptions = chart.options,
       plotOptions = chartOptions.plotOptions,
       seriesOptions = chartOptions.plotOptions.series,
       userOptions = merge(seriesOptions, plotOptions[this.type], options),
       userOptionsEvents = userOptions && userOptions.events,
-      userOptionsPointEvents = userOptions && userOptions.point && userOptions.point.events; // Fixed #70
+      userOptionsPointEvents = userOptions && userOptions.point && userOptions.point.events;
 
-    // reset default events on series and series point
     options.events = {};
     options.point = {
       events: {}
     };
 
-    // Add support for legendItemClick
     if (userOptionsEvents) {
       options.events = {
         legendItemClick: userOptionsEvents && userOptionsEvents.legendItemClick
       };
     }
 
-    // Add support for legendItemClick in pie chart
     if (userOptionsPointEvents) {
       options.point.events = {
         legendItemClick: userOptionsPointEvents && userOptionsPointEvents.legendItemClick,
@@ -132,24 +108,17 @@ if (seriesProto) { // # condition for highmaps and custom builds
       };
     }
 
-    // attach events to custom object, which is used in attach event
     options.customEvents = {
       series: userOptionsEvents,
       point: userOptionsPointEvents
     };
 
-    // call default action
     proceed.apply(this, Array.prototype.slice.call(arguments, 1));
 
   });
 }
 
 HC.Chart.prototype.customEvent = {
-  /**
-   * @description Example: [HC.Series, ['drawPoints', 'drawDataLabels']]
-   * @memberof customEvents
-   * @returns {Array} array of pairs: prototype, array of methods to wrap
-   **/
   getEventsProtoMethods: function () {
     var protoMethods = [
       [HC.Tick, ['addLabel']],
@@ -161,7 +130,6 @@ HC.Chart.prototype.customEvent = {
       [HC.Series, ['drawPoints', 'drawDataLabels']]
     ];
 
-    // support for extra series
     objectEach(seriesTypes, function (fn, seriesType) {
       protoMethods.push([
         seriesTypes[seriesType], ['drawPoints', 'drawDataLabels']
@@ -170,12 +138,8 @@ HC.Chart.prototype.customEvent = {
 
     return protoMethods;
   },
-  /**
-   * @description Init method, based on getEventsProtoMethods() array. Iterates on array of prototypes and methods to wrap
-   * @memberof customEvents
-   **/
   init: function () {
-    var eventsProtoMethods = this.getEventsProtoMethods(); // array of pairs [object, [methods]]
+    var eventsProtoMethods = this.getEventsProtoMethods();
     
     eventsProtoMethods.forEach(function (protoMethod) {
       if (isArray(protoMethod)) {
@@ -190,12 +154,6 @@ HC.Chart.prototype.customEvent = {
       }
     });
   },
-  /**
-   * @description Wraps methods i.e drawPoints to extract SVG element and set an event by calling customEvents.add()
-   * @param {Object} proto Highcharts prototype i.e Highcharts.Series.prototype
-   * @param {Object} hcMethod name of wrapped method i.e drawPoints
-   * @memberof customEvents
-   **/
   attach: function (proto, hcMethod) {
     
     wrap(proto, hcMethod, function (proceed, param) {
@@ -207,13 +165,10 @@ HC.Chart.prototype.customEvent = {
         len,
         j;
 
-      //  call default actions
       proceedObject = proceed.apply(this, Array.prototype.slice.call(arguments, 1));
 
-      //	call
       eventElement = customEvents.eventElement[hcMethod].call(this, param);
 
-      //  stop, when events and SVG element do not exist
       if (!eventElement.events && !eventElement.eventsSubtitle && !eventElement.eventsPoint) {
         return proceedObject;
       }
@@ -222,7 +177,6 @@ HC.Chart.prototype.customEvent = {
 
         len = eventElement.elementPoint.length;
 
-        // attach events per each point
         for (j = 0; j < len; j++) {
           if (eventElement.elementPoint[j]) {
             var elemPoint = pick(eventElement.elementPoint[j].graphic, eventElement.elementPoint[j]);
@@ -234,12 +188,10 @@ HC.Chart.prototype.customEvent = {
         }
       }
 
-      // attach event to subtitle
       if (eventElement.eventsSubtitle) {
         customEvents.add(eventElement.elementSubtitle, eventElement.eventsSubtitle, eventElement, this);
       }
 
-      // attach event to each datalabal and add reference to each point
       if (eventElement.dataLabelsPoints) {
         var dataLabelsPoints = eventElement.dataLabelsPoints;
         
@@ -258,7 +210,6 @@ HC.Chart.prototype.customEvent = {
         }
       }
 
-      // attach event to stackLabels
       if (eventElement.eventsStackLabel) {
         customEvents.add(eventElement.elementStackLabel, eventElement.eventsStackLabel, eventElement, this);
       }
@@ -269,21 +220,12 @@ HC.Chart.prototype.customEvent = {
 
     });
   },
-  /**
-   * @description adds event on a SVG element
-   * @param {Object} SVGelem graphic element
-   * @param {Object} events object with all events
-   * @param {Object} elemObj "this" object, which is available in the event
-   * @param {Object} series chart series
-   * @memberof customEvents
-   **/
   add: function (SVGelem, events, elemObj, eventElement, isPoint) {
 
-    var eventObject = eventElement.eventObject || elemObj.eventObject, //	Fix series reference #89
+    var eventObject = eventElement.eventObject || elemObj.eventObject,
       isSeries = elemObj.isSeries || eventElement.isSeries;
 
 
-    // stop when SVG element does not exist
     if (!SVGelem || !SVGelem.element) {
       return false;
     }
@@ -300,7 +242,7 @@ HC.Chart.prototype.customEvent = {
 
               e.preventDefault();
 
-              if (isSeries) { // #93
+              if (isSeries) {
                 var chart = eventObject.chart,
                   normalizedEvent = chart.pointer.normalize(e);
 
@@ -308,19 +250,19 @@ HC.Chart.prototype.customEvent = {
                   elemObj = eventObject.searchPoint(normalizedEvent, eventObject.kdDimensions === 1);
                 }
 
-                e.point = elemObj;	//	#89 point reference in mouse event
+                e.point = elemObj;
               }
 
-              if ((eventObject && !isPoint) || (eventObject && isNumber(eventObject.value))) { // #95 
+              if ((eventObject && !isPoint) || (eventObject && isNumber(eventObject.value))) {
                 eventObject.value = elemObj.textStr;
                 elemObj = eventObject;
               }
 
-              if (elemObj && elemObj.textStr) { // labels
+              if (elemObj && elemObj.textStr) {
                 elemObj.value = elemObj.textStr;
               }
 
-              if (elemObj && elemObj.drilldown) { // #114 - drillUp - undefined ddDupes []
+              if (elemObj && elemObj.drilldown) {
                 elemObj.doDrilldown(undefined, undefined, e);
               }
 
@@ -329,7 +271,7 @@ HC.Chart.prototype.customEvent = {
                 tapped = setTimeout(function () {
                   tapped = null;
                   if (events[CLICK] && elemObj && elemObj.drilldown === undefined) {
-                    events[CLICK].call(elemObj, e); //	call single click action
+                    events[CLICK].call(elemObj, e);
                   }
                 }, 300);
 
@@ -353,7 +295,7 @@ HC.Chart.prototype.customEvent = {
               
               e.stopPropagation();
 
-              if (isSeries) { // #108, #93 - references in e.point and this after chart.update()
+              if (isSeries) {
                 var chart = eventObject.chart,
                   normalizedEvent = chart.pointer.normalize(e);
 
@@ -361,15 +303,15 @@ HC.Chart.prototype.customEvent = {
                   elemObj = eventObject.searchPoint(normalizedEvent, eventObject.kdDimensions === 1);
                 }
 
-                e.point = elemObj;	//	#89 point reference in mouse event
+                e.point = elemObj;
               }
 
-              if ((eventObject && !isPoint) || (eventObject && isNumber(eventObject.value))) { // #95 wrong reference for axis labels
-                eventObject.value = elemObj.textStr || eventObject.value; // #95, #98 wrong reference for axis labels
+              if ((eventObject && !isPoint) || (eventObject && isNumber(eventObject.value))) {
+                eventObject.value = elemObj.textStr || eventObject.value;
                 elemObj = eventObject;
               }
 
-              if (elemObj && elemObj.textStr) { // labels
+              if (elemObj && elemObj.textStr) {
                 elemObj.value = elemObj.textStr;
               }
 
@@ -382,8 +324,7 @@ HC.Chart.prototype.customEvent = {
               ) {
                 var defaultFunction = function (event) {
                   // Control key is for Windows, meta (= Cmd key) for Mac, Shift
-                  // for Opera.
-                  if (elemObj.select) { // #2911
+                  if (elemObj.select) {
                       elemObj.select(null, e.ctrlKey || e.metaKey || e.shiftKey);
                   }
                 };
@@ -391,7 +332,7 @@ HC.Chart.prototype.customEvent = {
                   HC.fireEvent(elemObj, event, e, defaultFunction);
               }
 
-              if (elemObj && elemObj.drilldown) { // #114 - drillUp - undefined ddDupes []
+              if (elemObj && elemObj.drilldown) {
                 elemObj.doDrilldown(undefined, undefined, e);
               } else if (events && events[event]) {
                 events[event].call(elemObj, e);
@@ -409,17 +350,6 @@ HC.Chart.prototype.customEvent = {
     }
   },
   eventElement: {
-    /**
-    * @typedef {Object} eventElement
-    **/
-    /**
-     * @description Extracts SVG elements from points
-     * @property {Object} eventsPoint events for point
-     * @property {Array} elementPoint array of SVG point elements
-     * @property {Object} eventObject object kept in this on i.e click
-     * @return {Object} { events: object, element: object }
-     * @memberof customEvents
-     **/
     addLabel: function () {
       var parent = this.parent,
         axis = this.axis,
@@ -429,7 +359,7 @@ HC.Chart.prototype.customEvent = {
         len, i;
 
       if (parent) {
-        var step = this; // current label
+        var step = this;
 
         while (step) {
           if (isArray(step)) {
@@ -460,15 +390,6 @@ HC.Chart.prototype.customEvent = {
         }
       };
     },
-    /**
-     * @description Extracts SVG elements from title and subtitle
-     * @property {Object} events events for title
-     * @property {Array} elementPoint title SVG element
-     * @property {Object} eventsSubtitle events for subtitle
-     * @property {Array} elementSubtitle subtitle SVG element
-     * @return {Object} {event: object, element: object, eventsSubtitle: object, elementSubtitle: object }
-     * @memberof customEvents
-     **/
     setTitle: function () {
       var events = this.options.title && this.options.title.events,
         element = this.title,
@@ -482,13 +403,6 @@ HC.Chart.prototype.customEvent = {
         elementSubtitle: elementSubtitle
       };
     },
-    /**
-     * @description Extracts SVG elements from dataLabels
-     * @property {Object} events events for dataLabels
-     * @property {Array} element dataLabels SVG element
-     * @return {Object} { events: object, element: object }
-     * @memberof customEvents
-     **/
     drawDataLabels: function () {
       var dataLabelsGroup = this.dataLabelsGroup,
         dataLabelEvents = dataLabelsGroup && this.options.dataLabels.events;
@@ -499,17 +413,6 @@ HC.Chart.prototype.customEvent = {
         dataLabelsPoints: this.points
       };
     },
-    /**
-     * @description Extracts SVG elements from axis title and stackLabels
-     * @property {Object} events events for axis title
-     * @property {Array} element axis title SVG element
-     * @property {Object} eventsPoint events for stacklabels
-     * @property {Array} elementPoint stacklabels SVG element
-     * @property {Object} eventsStackLabel events for stacklabels
-     * @property {Array} elementStackLabel stacklabels group SVG element
-     * @return {Object} { events: object, element: object, eventsPoint: object, elementPoint: object, eventsStackLabel: object, elementStackLabel: object }
-     * @memberof customEvents
-     **/
     render: function () {
       var stackLabels = this.options.stackLabels,
         events,
@@ -540,15 +443,6 @@ HC.Chart.prototype.customEvent = {
         elementStackLabel: elementStackLabel
       };
     },
-    /**
-     * @description Extracts SVG elements from series and series points
-     * @property {Object} events events for series
-     * @property {Array} element series SVG element
-     * @property {Object} events events for series points
-     * @property {Array} element series points SVG element
-     * @return {Object} { events: object, element: object, eventsPoint: object, elementPoint: object }
-     * @memberof customEvents
-     **/
     drawPoints: function () {
       var op = this.options,
         type = this.type,
@@ -558,13 +452,13 @@ HC.Chart.prototype.customEvent = {
         elementPoint;
 
       if (defaultOptions[type] && defaultOptions[type].marker && !this.bubblePadding) {
-        elementPoint = [this.markerGroup]; //	get markers when enabled
+        elementPoint = [this.markerGroup];
       } else {
-        elementPoint = this.points; //	extract points
+        elementPoint = this.points;
       }
 
       if (!this.kdTree && !this.buildingKdTree) {
-        this.buildKDTree(); //	#86, missing reference to point on first mouseover
+        this.buildKDTree();
       }
 
       return {
@@ -576,13 +470,6 @@ HC.Chart.prototype.customEvent = {
         isSeries: true
       };
     },
-    /**
-     * @description Extracts SVG elements from legend item
-     * @property {Object} events events for legend item
-     * @property {Array} element legend item SVG element
-     * @return {Object} { events: object, element: object }
-     * @memberof customEvents
-     **/
     renderItem: function (item) {
       return {
         events: this.options.itemEvents,
@@ -590,13 +477,6 @@ HC.Chart.prototype.customEvent = {
         eventObject: item
       };
     },
-    /**
-     * @description Extracts SVG elements from crosshair
-     * @property {Object} events events for crosshair
-     * @property {Array} element crosshair SVG element
-     * @return {Object} { events: object, element: object }
-     * @memberof customEvents
-     **/
     drawCrosshair: function () {
       var cross = this.cross,
         crosshairOptions = this.options.crosshair;

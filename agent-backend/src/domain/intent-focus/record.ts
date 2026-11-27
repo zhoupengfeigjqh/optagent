@@ -1,17 +1,3 @@
-/**
- * 留档铸造（016 / 019）：把技能决策、概念、两通道行为映射为 `IntentFocusRecordDraft`。
- *
- * 2026-11-06 精简：只写**入选行为**，删除 `functions` / `data_supplements`。
- * 2026-11-20：`functions` 以"只写入选函数"的口径恢复；取数行为进 `behaviors` 并标
- * `source: 'concept_query'`（`score: null`），`tool_tip_behaviors` 仍不含函数与取数。
- *
- * 2026-11-08（019）：发散让"同一条行为可能只出现在一个通道"，因此记录按**通道**分两份：
- * - `behaviors` = 提示通道（直接命中 + 上游发散）；
- * - `tool_tip_behaviors` = 卡片通道（直接命中 + 下游发散）。
- * 两条通道都含直接命中（各自完整），这样"为什么提示里有它、卡片里没有它"可以单独对账；
- * 发散项 `score` 恒为 `null`（不再判分），`hop` / `via_concept`（所属概念）/ `from_concept`
- * （这一跳的起点概念）用于回溯发散路径：`from_concept → via_concept` 就是那一跳的边。
- */
 import type { IntentFocusDisposition } from './state.js';
 import {
   REWRITE_RECORD_DEFAULTS,
@@ -32,7 +18,6 @@ import type {
   SkillDecision,
 } from './types.js';
 
-/** 提示通道里的概念条目（直接命中或上游发散） */
 export interface ConceptEntry {
   ontologyId: string;
   ontologyName: string | null;
@@ -41,6 +26,7 @@ export interface ConceptEntry {
   source: 'direct' | 'upstream';
   hop: number;
   viaConcept: string | null;
+  edges?: ReadonlyArray<{ from: string; relation: string }>;
 }
 
 export interface RecordInput {
@@ -64,7 +50,6 @@ export interface RecordInput {
    */
   depth?: number;
   skills: readonly SkillDecision[];
-  /** 直接命中的行为（Laya 判分结果） */
   capabilities: CapabilitySelection;
   concepts?: readonly ConceptEntry[];
   upstreamBehaviors?: readonly ExpandedBehavior[];
@@ -73,14 +58,10 @@ export interface RecordInput {
   promptTruncated: boolean;
   warnings: readonly string[];
   error: string | null;
-  /**
-   * 027：指代改写的留档字段。
-   *
-   * **可选**：早退分支（跳过 / 未配置 / 无技能 / 无可用技能）根本没进改写阶段，
-   * 让它们逐项补 `null` 只会制造噪音；缺省值由本文件统一补齐
-   * （契约要求"新记录恒有七个键"，但不要求调用方逐一手写）。
-   */
   rewrite?: Partial<RewriteFocusRecord>;
+  /** 028：规划门禁分数与耗时（未判定时缺省） */
+  planScore?: number | null;
+  planRoundMs?: number | null;
 }
 
 export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
@@ -95,7 +76,6 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
   }));
 
   const direct: CapabilityFocusRecord[] = input.capabilities.behaviors.map(toDirectRecord);
-  // 2026-11-20：取数行为只进提示通道；函数单独一列（不混进 behaviors）
   const conceptQueryRecords = input.capabilities.conceptQueries.map(toConceptQueryRecord);
 
   return {
@@ -128,8 +108,6 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
     prompt_truncated: input.promptTruncated,
     warnings: [...input.warnings],
     error: input.error,
-    // 027：**恒写七个键**——早退分支也走这里，因此"未执行"与"失败"在记录里可分：
-    // 未执行 = `need_rewrite: null` 且 `rewrite_reason: null`（见契约 §8）
     need_rewrite: input.rewrite?.need_rewrite ?? REWRITE_RECORD_DEFAULTS.need_rewrite,
     rewrite_score: input.rewrite?.rewrite_score ?? REWRITE_RECORD_DEFAULTS.rewrite_score,
     rewrite_query: input.rewrite?.rewrite_query ?? REWRITE_RECORD_DEFAULTS.rewrite_query,
@@ -138,6 +116,8 @@ export function buildRecordDraft(input: RecordInput): IntentFocusRecordDraft {
     rewrite_history_turns:
       input.rewrite?.rewrite_history_turns ?? REWRITE_RECORD_DEFAULTS.rewrite_history_turns,
     rewrite_reason: input.rewrite?.rewrite_reason ?? REWRITE_RECORD_DEFAULTS.rewrite_reason,
+    ...(input.planScore !== undefined ? { plan_score: input.planScore } : {}),
+    ...(input.planRoundMs !== undefined ? { plan_round_ms: input.planRoundMs } : {}),
   };
 }
 
@@ -151,12 +131,10 @@ function toDirectRecord(decision: CapabilityDecision): CapabilityFocusRecord {
     source: 'direct',
     hop: 0,
     via_concept: decision.concept,
-    // direct 没有"发散起点"：它本身就是用户意图命中的那条
     from_concept: null,
   };
 }
 
-/** 发散项：`score` 恒为 null（019：只走一次判定，发散不再判分） */
 function toExpandedRecord(
   source: Exclude<BehaviorSource, 'direct'>,
 ): (behavior: ExpandedBehavior) => CapabilityFocusRecord {
@@ -173,7 +151,6 @@ function toExpandedRecord(
   });
 }
 
-/** 函数项：只写入选函数（`score` 恒 > 函数阈值） */
 function toFunctionRecord(fn: FunctionDecision): FunctionFocusRecord {
   return {
     name: fn.name,
@@ -185,10 +162,6 @@ function toFunctionRecord(fn: FunctionDecision): FunctionFocusRecord {
   };
 }
 
-/**
- * 取数项：`score` 恒 null（没有判分），`via_concept` 记它所属的概念——
- * 也就是"哪条关联概念把它带进来的"，事后能直接对账。
- */
 function toConceptQueryRecord(query: ConceptQueryDecision): CapabilityFocusRecord {
   return {
     name: query.name,
@@ -212,5 +185,6 @@ function toConceptRecord(entry: ConceptEntry): ConceptFocusRecord {
     source: entry.source,
     hop: entry.hop,
     via_concept: entry.viaConcept,
+    via_edges: (entry.edges ?? []).map((edge) => ({ from: edge.from, relation: edge.relation })),
   };
 }

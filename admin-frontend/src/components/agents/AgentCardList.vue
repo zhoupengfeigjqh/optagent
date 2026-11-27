@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * 数字人卡片列表（`FR-014`、`FR-006`）。
- *
- * 卡片含**名称与用途描述**；异常实体以可辨识异常态呈现（图标 + 文本，不只靠颜色）
- * 且**不影响其余卡片**（`FR-006`）。
- */
 import type { AgentListItem, ErrorInfo } from '../../api/types'
 import EntityCardList from '../common/EntityCardList.vue'
 import StatusBadge from '../common/StatusBadge.vue'

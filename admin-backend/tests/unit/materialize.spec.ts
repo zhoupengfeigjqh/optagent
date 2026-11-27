@@ -1,10 +1,3 @@
-/**
- * 单元测试：物化映射（`FR-026`、`FR-044`，`data-model.md` §8）
- *
- * 守住两条最容易出错的口径：
- * ① `MCP.json` 的 `url` 取**单一连接地址**（不再按运行形态分形态取值）；
- * ② 落盘格式与运行环境的读取口径一致（空值不写空壳键）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -53,7 +46,6 @@ function configure(name: string, overrides: Record<string, unknown> = {}): void 
     transport: 'http',
     url: OCR_URL,
     file_args: {},
-    // 工具白名单：新创建必填非空（2026-10-03）；本文件的用例不关心它的内容
     allowed_tools: ['ocr_image'],
     ...overrides,
   });
@@ -190,7 +182,6 @@ describe('buildMcpServerEntry', () => {
   });
 
   it('工具白名单为空（存量记录）= 不限制：不写该字段（运行环境放行全部工具）', () => {
-    // 空白名单无法经 create 产出（新建必填非空），故直接写文档模拟存量记录
     store.writeJson('mcp-services.json', {
       items: {
         'svc-open': { name: 'svc-open', description: 'x', transport: 'http', url: OCR_URL },
@@ -202,7 +193,6 @@ describe('buildMcpServerEntry', () => {
   });
 
   it('async_tools（2026-10-17 移除）：存量文档里的该键 MUST NOT 物化进 MCP.json', () => {
-    // 异步能力改由工具入参 schema 是否声明 `resultUrl` 自动判定，平台侧不再有该键
     store.writeJson('mcp-services.json', {
       items: {
         'svc-async': {
@@ -257,7 +247,6 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
       'TOOL.json',
       'scenario.json',
     ]);
-    // 004：SOUL.md 不再是原样透传，而是**渲染产物**（frontmatter + 提示词正文）
     const soulMd = String(artifact.files.find((f) => f.relPath === 'SOUL.md')?.content);
     expect(soulMd.startsWith('---\nsoul_version: 1')).toBe(true);
     expect(soulMd).toContain('intro: 测试用简介');
@@ -362,7 +351,6 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     expect(offMd).not.toContain('next_action_hints');
     expect(onMd).toContain('next_action_hints: true');
     expect(onMd).toContain('next_action_hints_count: 3');
-    // 差异恰好两行（开关 + 条数）：删掉这两行，开启态与关闭态逐字相同
     const stripSwitch = (md: string) =>
       md
         .split('\n')
@@ -370,7 +358,6 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
         .join('\n');
     expect(stripSwitch(onMd)).toBe(stripSwitch(offMd));
     expect(onMd.split('\n').length - offMd.split('\n').length).toBe(2);
-    // 正文（模型看到的系统提示词）逐字一致 ⇒ FR-035
     expect(onMd.slice(onMd.indexOf('## 主要使命'))).toBe(offMd.slice(offMd.indexOf('## 主要使命')));
 
     // 其余三件套与开关无关（配置面变更不得扩散到别的产物）
@@ -396,13 +383,11 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     const offMd = soulOf(off);
     const onMd = soulOf(on);
 
-    // 关闭（含未配置）→ 两个键都不出现；开启 → 各写一行
     expect(offMd).not.toContain('input_rewrite');
     expect(offMd).not.toContain('term_normalize');
     expect(onMd).toContain('input_rewrite: true');
     expect(onMd).toContain('term_normalize: true');
 
-    // 差异恰好两行
     expect(onMd.split('\n').length - offMd.split('\n').length).toBe(2);
     const stripSwitch = (md: string) =>
       md
@@ -411,7 +396,6 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
         .join('\n');
     expect(stripSwitch(onMd)).toBe(stripSwitch(offMd));
 
-    // 正文（模型看到的 System Prompt）逐字一致
     expect(onMd.slice(onMd.indexOf('## 主要使命'))).toBe(offMd.slice(offMd.indexOf('## 主要使命')));
 
     // 配置面变更不得扩散到别的产物
@@ -482,7 +466,6 @@ describe('buildAgentArtifact —— 落盘格式与运行环境读取口径一�
     const dir = 'ontology/生产调度/原材料采购和库存';
     expect(artifact.files.find((f) => f.relPath === `${dir}/ontology.yaml`)?.content).toBe(ONTO_YAML);
     expect(artifact.files.find((f) => f.relPath === `${dir}/securities.yaml`)?.content).toBe(ONTO_SECURITIES);
-    // 017：术语字典与两个必需文件同目录；`terms` 为空的本体产出空字典而不是空文件
     expect(artifact.files.find((f) => f.relPath === `${dir}/term_mapping.json`)?.content).toBe('{}\n');
   });
 

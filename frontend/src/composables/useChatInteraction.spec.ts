@@ -1,12 +1,3 @@
-/**
- * 单元测试：HITL 装配（自 `useChatPanel` 拆分后仍须守住的行为）。
- *
- * 守四件事：
- * 1. 断连恢复：线程详情带等待中的快照 → 重建弹窗（`restoreInteraction` 恰好一次）；
- * 2. 提交成功（`close: true`）→ 不写逐字段错误；
- * 3. 提交失败（`close: false` + `message`）→ 错误回写弹窗，下一次提交前清空；
- * 4. 拒绝：清空错误并转发 `rejectInteraction`。
- */
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'

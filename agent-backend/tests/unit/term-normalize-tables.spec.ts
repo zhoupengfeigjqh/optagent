@@ -1,11 +1,3 @@
-/**
- * 单元测试：术语表读取与合并（018，`domain/term-normalize/tables.ts`）。
- *
- * 守三条口径：
- * ① 跨本体同名 key 的 value 用 `或` 合并且**去重**（`A或B` + `B或C` = `A或B或C`）；
- * ② 目录名排序后再读，同一份产物每次得到同一张表；
- * ③ 缺文件不算降级，坏 JSON 才记 warning，且不影响其余本体。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,7 +56,6 @@ describe('loadTermTable', () => {
 
     expect(result.files).toBe(2);
     expect(result.warnings).toEqual([]);
-    // 供 < 原（码点序）：稳定的合并顺序，重跑不会漂移
     expect(result.table).toEqual({
       供应商信息: '供应方或供应商',
       物料: '原材料',

@@ -1,9 +1,3 @@
-/**
- * 组件测试：一级导航（T035）
- *
- * 覆盖 props / emit / 边界（`FR-053`：常驻 5 项——2026-10-03 由 4 项扩为 5 项，
- * 新增「本体管理」；当前项 `aria-current`、键盘可达）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import PrimaryNav from './PrimaryNav.vue'

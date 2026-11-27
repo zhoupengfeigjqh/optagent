@@ -1,24 +1,11 @@
 <script setup lang="ts">
-/**
- * 文件行列表（US8）
- *
- * 右侧文件空间树在**两处**渲染文件行（扁平空间的直接文件、数据准备子目录内的文件），
- * 故抽成本组件，保证两处入口与样式完全一致：
- * 查看（进内容态）、下载、删除。
- *
- * 2026-11-18（025）：只读空间下线后所有文件均可删，故不再有 `deletable` 开关
- * （响应里的 `deletable` 字段仍在契约内，值恒为 `true`，界面侧不再据此分叉）。
- * 纯展示：不发起请求；删除的二次确认由 `WorkspacePanel` 承担，本组件只上报意图。
- */
 import type { FileReference, WorkspaceFile } from '../../api/types'
 import { formatBytes } from '../../utils/format'
 import BaseIcon from '../common/BaseIcon.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 这些文件所属的目录（相对空间路径，用于构造文件引用） */
     dir: string
-    /** 文件清单（空数组时由调用方渲染空态文案） */
     files?: WorkspaceFile[]
   }>(),
   { files: () => [] },

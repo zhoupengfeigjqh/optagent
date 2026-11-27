@@ -1,19 +1,3 @@
-/**
- * upload-name 模块单测（012）：落盘命名 = **原名** / `原名(n).ext`（半角括号，紧贴主名）
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test:all   # 全部测试
- *   npm run test       # 仅本目录单测
- *
- * 覆盖变更的核心约束（012 FR-020~FR-028）：
- * - 不重名 ⇒ 原名（**不再**追加 `_YYYYMMDD_HHMMSS`）；
- * - 重名 ⇒ 取"当前目录内未被占用的最小正整数"编号，扩展名保持在末尾（`a.tar(1).gz`）；
- * - 并发唯一性靠**排他占名**（`linkSync` / `COPYFILE_EXCL`）：已存在即失败，**绝不覆盖**；
- * - 编号有界（`MAX_NAME_ATTEMPTS`）：用尽抛 `UploadNameConflictError`（路由映射 409）。
- *
- * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
- * 由 Vitest 解析到 `src/domain/upload-name.ts`。
- */
 import {
   existsSync,
   mkdirSync,
@@ -42,7 +26,6 @@ const root = mkdtempSync(path.join(tmpdir(), 'optagent-upload-name-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 let seq = 0;
-/** 造一个暂存文件（每次调用都新建：占名成功会删掉暂存名） */
 function stage(content: string): string {
   seq += 1;
   const file = path.join(root, `.staging-${seq}`);
@@ -88,7 +71,6 @@ describe('candidateName：原名 / 原名(n).ext', () => {
   });
 
   it('控制字符不剥离（沿用既有 basename 清洗口径，FR-027）', () => {
-    // 只处理 basename 与 `/`、`\`；换行/制表按原样保留（与改动前一致，不扩大清洗范围）
     expect(candidateName('a\nb.csv', 0)).toBe('a\nb.csv');
   });
 
@@ -121,7 +103,6 @@ describe('claimName：排他占名（并发零覆盖）', () => {
     expect(claimName(abs, '报告.csv', stage('第二版'))).toBe('报告(1).csv');
     expect(claimName(abs, '报告.csv', stage('第三版'))).toBe('报告(2).csv');
 
-    // 零覆盖：三份内容各自保留
     expect(readFileSync(path.join(abs, '报告.csv'), 'utf8')).toBe('第一版');
     expect(readFileSync(path.join(abs, '报告(1).csv'), 'utf8')).toBe('第二版');
     expect(readFileSync(path.join(abs, '报告(2).csv'), 'utf8')).toBe('第三版');
@@ -156,7 +137,6 @@ describe('claimName：排他占名（并发零覆盖）', () => {
     claimName(abs, 'x.csv', stage('0'));
     claimName(abs, 'x.csv', stage('1'));
 
-    // maxAttempts = 1：只允许"原名 + (1)"两次尝试，两者都被占用 ⇒ 显式失败
     expect(() => claimName(abs, 'x.csv', stage('2'), 1)).toThrow(UploadNameConflictError);
     // 暂存文件保持原样（由调用方清理），不得凭空消失
     expect(existsSync(path.join(abs, 'x.csv'))).toBe(true);

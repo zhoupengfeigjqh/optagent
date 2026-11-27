@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 卡片列表（`FR-006`、`SC-022`、`SC-023`）。
- *
- * - **每页固定 8 项（4 列 × 2 行）**：`page_size` 由服务端固定，组件只做呈现，
- *   MUST NOT 接受客户端覆盖；
- * - 展示**总条数与页码**，翻页 ≤ 100ms（纯前端切片，无请求）；
- * - 加载中 / 失败 / 空 三态**可区分**，失败给出可读原因。
- */
 import { computed } from 'vue'
 import type { ErrorInfo } from '../../api/types'
 import EmptyState from './EmptyState.vue'
@@ -18,13 +10,11 @@ const props = withDefaults(
     items: readonly unknown[]
     total: number
     page: number
-    /** 服务端固定值；仅用于呈现与页数计算 */
     pageSize?: number
     loading?: boolean
     error?: ErrorInfo | null
     emptyTitle?: string
     emptyDescription?: string
-    /** 稳定 key；缺省按索引 */
     itemKey?: (item: unknown, index: number) => string
   }>(),
   {
@@ -134,7 +124,6 @@ function go(target: number): void {
   color: var(--color-text-secondary);
 }
 
-/* 4 列 × 2 行 = 每页恒 8 项（SC-023） */
 .card-list__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

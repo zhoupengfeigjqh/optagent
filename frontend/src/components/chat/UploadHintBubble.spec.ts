@@ -1,8 +1,3 @@
-/**
- * 组件测试：空数据引导气泡（014）。
- *
- * 关注三件事：文案原样呈现、关闭只上抛事件、无障碍语义（status + 关闭按钮名称）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

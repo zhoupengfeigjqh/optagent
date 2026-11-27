@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 入参节点上的**控件本体**（HITL 递归表单，2026-09-23）。
- *
- * 与 `InteractionField.vue` 的分工：那个负责"这一行"（标签、说明、操作条、文件卡片、规则入口），
- * 本组件只负责"那个控件"——标量控件的渲染与取值、JSON 视图的文本编辑、`@` 引用面板。
- * 表格单元格（`compact`）复用的也是本组件，因此"字段行里能填什么"与"单元格里能填什么"
- * 是同一处实现，不存在两套口径。
- */
 import { computed, inject, ref } from 'vue'
 
 import type { FileReference } from '../../api/types'
@@ -29,9 +21,7 @@ const props = withDefaults(
   defineProps<{
     schema: FieldSchema
     path: NodePath
-    /** 字段名（`compact` 时作为 `aria-label`，非 compact 时由 `InteractionField` 的 label 承担） */
     name: string
-    /** 单元格/列表项：紧凑模式——只改排版（不挂 DOM id、多行文本退化为单行），不改可取内容 */
     compact?: boolean
   }>(),
   { compact: false },
@@ -41,16 +31,8 @@ const context = inject<InteractionFormContext | null>(INTERACTION_FORM_KEY, null
 
 const control = computed(() => controlOf(props.schema))
 const options = computed(() => optionsOf(props.schema))
-/**
- * `@` 引用入口：**凡文本类控件都可挂**——不在 `compact` 上打折扣，表格单元格与普通
- * 字段因此同一口径（面板是浮层，格子里放得下，不存在"格子里塞不开面板"的问题）。
- */
 const mentionable = computed(() => isTextControl(control.value))
 
-/**
- * 单元格里放不下的形状（对象分组/表格/列表）退化为 JSON 文本框：单元格只出控件本体，
- * 没有地方承载子表格或分组标题——与其渲染成 `[object Object]`，不如给一个明确可编辑的 JSON 框。
- */
 const forcedJson = computed(() => props.compact && !isScalarControl(control.value))
 const jsonMode = computed(
   () => forcedJson.value || (context?.form.isJsonView(props.path, control.value) ?? false),
@@ -69,31 +51,20 @@ const placeholder = computed(() => {
   return mentionable.value ? '可打 @ 选择文件' : '请输入'
 })
 
-/**
- * 下拉当前项的下标。
- *
- * DOM 的 `select.value` / `option.value` 永远是字符串，因此**原值由下标承载**：
- * 选项渲染成下标、写回时按 `options[index]` 取原值。这样 `{"type":"integer","enum":[1,2,3,4,5]}`
- * 选中的仍是数字 `4`；而"按字符串反查原值"在 `[1, "1"]` 这类字符串化后彼此相同的枚举上会静默写错。
- */
 const selectedIndex = computed(() =>
   options.value.findIndex((item) => String(item) === textValue.value),
 )
 
-/** 控件的 DOM id（`for` 关联用；encodeURIComponent 保证路径不同则 id 不同）。 */
 const domId = computed(() => `interaction-input-${encodeURIComponent(pathKey(props.path))}`)
 
-/** `@` 面板的锚点：文本类控件自己的元素（面板贴它的光标右侧弹出）。 */
 const inputEl = ref<HTMLElement | null>(null)
 
-/** `@` 面板：当前激活字段就是本节点时展开（同一时刻只服务一个字段）。 */
 const mentionOpen = computed(() => {
   const mention = context?.mention
   if (!mention || !mentionable.value) return false
   return mention.open.value && mention.activeField.value === pathKey(props.path)
 })
 
-/** 浮层容器的 DOM id（输入框的 `aria-controls` 指向它）。 */
 const popupId = computed(() => `interaction-mention-${encodeURIComponent(pathKey(props.path))}`)
 
 function write(value: unknown): void {
@@ -106,18 +77,8 @@ function onTextInput(event: Event): void {
   context?.mention?.handleInput(pathKey(props.path), el.value, el.selectionStart ?? el.value.length)
 }
 
-/**
- * 下拉写回。直接写回 `event.target.value` 会把**数字 / 布尔枚举**（服务方声明
- * `{"type":"integer","enum":[1,2,3,4,5]}` 这种）变成 `"1"`、与 schema 声明的 `integer` 不符；
- * 故按**下标**取回选项原值（见 `selectedIndex` 的说明）。
- *
- * 注：修的是"服务方一旦声明数字枚举就会失真"，不是某个已知线上字段的症状。当前契约里唯一的
- * `enum` 是字符串枚举（`ruleId`: `PR001~PR009`）；`businessType` 这类字段本身只有
- * `{"type":"integer"}`、取值语义写在 `description` 里，**不是枚举字段**（不要被它的 1~5 语义误导）。
- */
 function onSelect(event: Event): void {
   const raw = (event.target as HTMLSelectElement).value
-  // 空串是"请选择"占位项（disabled，正常选不中）：清空而不是误落到第一项
   if (raw === '') {
     write('')
     return
@@ -134,7 +95,6 @@ function onJsonInput(event: Event): void {
   context?.form.onJsonInput(props.path, (event.target as HTMLTextAreaElement).value)
 }
 
-/** 把路径文本按 `@` 触发起点替换进当前值。 */
 function applyPath(path: string): void {
   const mention = context?.mention
   if (!mention) return
@@ -146,7 +106,6 @@ function applyPath(path: string): void {
   write(before.slice(0, start) + path + text.slice(caret))
 }
 
-/** 面板展开时的按键路由（焦点留在输入框，事件由输入框转发给面板状态机）。 */
 function onKeydown(event: KeyboardEvent): void {
   const mention = context?.mention
   if (!mention || !mention.open.value || mention.activeField.value !== pathKey(props.path)) return
@@ -184,20 +143,17 @@ function pickFile(reference: FileReference): void {
   if (path !== undefined) applyPath(path)
 }
 
-/** 键盘确认面板当前高亮项（文件列才会返回路径）。 */
 function confirmMention(): void {
   const path = context?.mention?.confirmActive()
   if (path !== undefined && path !== null) applyPath(path)
 }
 
-/** 浮层自身的关闭请求（焦点在面板内按 Esc）。 */
 function closeMention(): void {
   context?.mention?.close()
 }
 </script>
 
 <template>
-  <!-- JSON 视图（schema 决定的逃逸舱 / 用户切换 / 单元格的退化形态） -->
   <textarea
     v-if="jsonMode"
     class="interaction-dialog__input interaction-dialog__input--area interaction-dialog__input--json"
@@ -275,10 +231,6 @@ function closeMention(): void {
     @keydown="onKeydown"
   />
 
-  <!--
-    `@` 文件引用面板：`fixed` 浮层，紧贴 `@` 光标右侧弹出。不占布局、不被祖先滚动容器
-    （弹窗 body / 表格）裁剪，且因仍在所在 `<dialog>` 子树内而不会被 `inert` 挡住点击。
-  -->
   <MentionPopup
     :id="popupId"
     :open="mentionOpen"

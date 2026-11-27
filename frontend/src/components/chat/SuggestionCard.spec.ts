@@ -1,9 +1,3 @@
-/**
- * 组件测试：建议卡片（007）。
- *
- * 这枚卡片同时服务两处（首屏问题实例 + 回答下方的下一步动作），因此它的断言都围绕
- * "只有文本"这条底线：文本渲染、置灰、点选上抛、`data-test` 透传。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import SuggestionCard from './SuggestionCard.vue'
@@ -17,7 +11,6 @@ describe('SuggestionCard', () => {
     expect(element.tagName).toBe('BUTTON')
     expect(element.type).toBe('button')
     expect(element.disabled).toBe(false)
-    // 没有任何"把自己排除在 Tab 序列之外"的设置
     expect(element.getAttribute('tabindex')).toBeNull()
   })
 

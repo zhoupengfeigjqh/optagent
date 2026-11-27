@@ -292,8 +292,8 @@
 
 | 编号 | 需求 | 验收 |
 |---|---|---|
-| **TR-65** | **等待提示 MUST 覆盖工具执行空档**：判据由「正文为空」扩展为「正文为空 **或** 本轮存在 `status==='running'` 的工具调用」。文案 MUST 点名工具（取 `label`，缺省回退 `name`；单个 → `正在执行 <名称>…`，多个去重后 → `正在执行 N 个工具…`），无 running 时回落缺省 `思考中`。MUST 仅在 `phase==='streaming'` 生效——已终结轮次即使残留 running 记录也不提示。工具全部结束且正文非空时 **MUST NOT** 补提示（正文本身在长，再叠一行是噪音）。提示保持 `role="status"` + `aria-live="polite"`，读屏可获知 | 组件测试 8 例（`MessageBubble.typing.spec.ts`）：空正文无工具 → 「思考中」；正文非空 + 1 个 running → 点名；2 个 running → 计数；同名去重；无 `label` 回退 `name`；全结束 + 正文非空 → 不提示；空正文 + 已结束 → 仍「思考中」；`completed` 阶段残留 running → 不提示 |
-| **TR-66** | **静默心跳兜底**：实测一轮 16s 的真实对话（SSE 时间线：`+8.0s content(1201字)` → `+14.7s tool_call write_file`），两次事件之间**6.6s 没有任何业务事件**——thinking 关闭时没有思考增量，`infra/sse.ts` 的 15s 心跳又是注释帧（前端解析器直接丢弃），界面只能被判成卡死。本轮 `streaming` 期间 MUST 每 500ms 检查「距上一个业务事件」的时长，**≥2.5s 置 `stalled`**，气泡底部改显「模型正在思考…」；任一业务事件到达 MUST **立即回落**（不残留）。HITL 挂起（`pendingInteraction` 非空）**MUST NOT** 视为静默（界面上有确认弹窗）。本轮终结 / `reset()` MUST 停表（定时器不得跨轮存活） | `useChatStream.stalled.spec.ts` 5 例（超时置位 / 事件到达回落 / done 停表 / reset 停表 / HITL 不置位）+ `MessageBubble.typing.spec.ts` 3 例（静默文案 / 工具名优先于泛化文案 / 回落即不显示） |
+| **TR-65** | **等待提示 MUST 覆盖工具执行空档**：判据由「正文为空」扩展为「正文为空 **或** 本轮存在 `status==='running'` 的工具调用」。文案 MUST 点名工具（取 `label`，缺省回退 `name`；单个 → `正在执行 <名称>…`，多个去重后 → `正在执行 N 个工具…`），无 running 时回落缺省 `思考中`。MUST 仅在 `phase==='streaming'` 生效——已终结轮次即使残留 running 记录也不提示。〔**2026-11-26：判据整条由 `TR-68` 取代**——"工具全结束且正文非空时不补提示"正是空档来源，现改为本轮 streaming 全程常驻；本条的**文案分档**与 `role="status"` 口径继续有效〕 | 组件测试 8 例（`MessageBubble.typing.spec.ts`）：空正文无工具 → 「思考中」；正文非空 + 1 个 running → 点名；2 个 running → 计数；同名去重；无 `label` 回退 `name`；全结束 + 正文非空 → 不提示；空正文 + 已结束 → 仍「思考中」；`completed` 阶段残留 running → 不提示 |
+| **TR-66** | **静默心跳兜底**：实测一轮 16s 的真实对话（SSE 时间线：`+8.0s content(1201字)` → `+14.7s tool_call write_file`），两次事件之间**6.6s 没有任何业务事件**——thinking 关闭时没有思考增量，`infra/sse.ts` 的 15s 心跳又是注释帧（前端解析器直接丢弃），界面只能被判成卡死。本轮 `streaming` 期间 MUST 每 500ms 检查「距上一个业务事件」的时长，**≥2.5s 置 `stalled`**，气泡底部改显「模型正在思考…」；任一业务事件到达 MUST **立即回落**（不残留）。HITL 挂起（`pendingInteraction` 非空）**MUST NOT** 视为静默（界面上有确认弹窗）。本轮终结 / `reset()` MUST 停表（定时器不得跨轮存活） | `useChatStream.stalled.spec.ts` 5 例（超时置位 / 事件到达回落 / done 停表 / reset 停表 / HITL 不置位）+ `MessageBubble.typing.spec.ts` 3 例（静默文案 / 工具名优先于泛化文案 / 回落即改说「正在生成…」，见 `TR-68`） |
 
 | **TR-67** | **渲染段（A-lite）**：气泡原先把「全部工具卡片 → 整段正文」固定成两段，多轮工具时后到的卡片会插到已流出正文**上方**，观感变成"工具跑完才出字"（实测一轮 5 次工具、18s，正文其实 18→53→1121→1391 分数批到达）。流式轮 MUST 按事件到达顺序记录「文字段 / 工具段」（`content` 续写当前文字段，`tool_call` 开新工具段，其后的 `content` **必须另起文字段**；`tool_call_end` 只改段内状态、不移位），气泡 MUST 按段数组顺序渲染。段序**只服务流式**：历史消息无段序（`history.jsonl` 仍只存整段 `content` + `tool_calls`），按旧顺序渲染；`segments` 为空时 MUST 回退旧顺序。段序为流式瞬态，`reset()` 与 `finally` MUST 清空。段渲染的卡片 MUST 隐藏顶部计数行（`hideHead`）——每段只有 1 次调用，否则一轮 5 次工具会重复出现 5 行"本轮 1 次调用" | `useChatStream.segments.spec.ts` 6 例（段序/续写/结束不移位/收口清空/reset 清空/新一轮清空）+ `MessageBubble.segments.spec.ts` 4 例（交错顺序/缺 segments 回退/历史顺序/单段无空卡片）+ `ToolCallList.spec.ts` 2 例（`hideHead` 隐藏计数行 / 默认仍渲染） |
 
@@ -303,6 +303,20 @@
 - **不改 `history.jsonl` 与历史接口**：段序不落盘（A-full 才需要新增段序/字符偏移字段 + 契约 + 存量兼容），因此刷新后历史仍按旧顺序渲染；
 - **不加计时器**：无 `started_at` 下发，前端计时只能凭本地收包时刻，跨刷新不可复现，留待与上一项一起做；
 - **不做百分比/顶部全局进度条**：没有进度来源，只能表达"仍在处理"，气泡底部一行足够。
+
+### 4.13 本轮进行期间的等待提示常驻（2026-11-26 增量）
+
+**来源**：用户口径——「只要对话没结束，聊天界面就必须有『正在计算中』一类的提示，不能什么都没有」。
+
+**问题**（体验，实测）：§4.12 的三条判据（正文为空 / 有 `running` 工具 / `stalled`）仍有三种空档：① 工具刚结束、模型尚未吐出下一段正文；② 正文已流出但仍在长、未触发静默阈值；③ 已终结且正文为空的合成气泡被列表层丢弃（`streamingMessage` 返回 `null`），中断轮的「已停止生成」随之消失——用户看到的就是一片空白。
+
+**处置**：只改前端展示层，不动 SSE 契约、不动 `history.jsonl`。
+
+| 编号 | 需求 | 验收 |
+|---|---|---|
+| **TR-68** | **等待提示 MUST 在全轮进行期间常驻**：`MessageBubble` 的显示判据收敛为单一条 `phase==='streaming'`，MUST NOT 再以「正文非空」「无 running 工具」「未超静默阈值」为由隐藏。文案分档（优先级自上而下）：有 `running` 工具 → 点名 / 计数（同 `TR-65`）；`stalled` → 「模型正在思考…」（同 `TR-66`）；正文为空 → 「思考中」；其余 → 「正在生成…」。终结态（`completed` / `failed` / `aborted`）MUST NOT 渲染该提示——已收尾的轮次继续转圈等于谎报"还在跑"。**列表层**：中断轮正文为空时 MUST 保留合成气泡，以渲染「已停止生成 · 内容未保存」；失败轮正文为空时 MAY 丢弃气泡（本轮错误由 `ChatPanel` 的 `ErrorNotice` 承载，避免空壳）。会话级的两处空档另由既有条目兜底：MCP 就绪等待期显示「正在连接 MCP 服务…」（`TR-63`）、无消息时的空状态占位 | `MessageBubble.typing.spec.ts` 12 例（首 token 前「思考中」/ 单工具点名 / 多工具计数 / 同名去重 / 无 `label` 回退 `name` / 工具全结束仍显「正在生成…」/ 工具收尾+正文停住仍显提示 / 静默文案 / 工具优先于泛化文案 / 静默回落改说「正在生成…」/ `completed` 残留 running 不提示）+ `MessageList.spec.ts` 3 例（streaming 空正文留气泡并显「思考中」/ 中断空正文留气泡并显「已停止生成」/ 失败空正文不留空气泡） |
+
+**无障碍**：提示仍是 `role="status"` + `aria-live="polite"`，且**文案只在阶段切换时变化**——逐 token 的正文变化不进入该节点，故不会反复打断读屏（与 §9 的"只播结论"口径一致）。
 
 ## 5. 数据模型
 
@@ -516,6 +530,33 @@
 **代码结构（高内聚-低耦合）**：分流策略自 `tool-events.ts` 抽为纯函数 `domain/tool-result-split.ts`（`planSplit` / `planTruncatedInline`，不做 IO）；截断说明的**唯一实现**在 `tool-result.ts` 的 `withRecordTruncationNote`（有副本给路径 / 无副本说未保存）；`tool-context.ts` 只做"记录 → messages 片段"的投影，不再拼任何系统提示词段；同时移除已无引用的 `isArtifactFileName()`（路径推导与校验已由 `artifactRelPath()` + `FileAccess.resolveVerified` 承担）。
 
 **未做（登记）**：① 不回溯重算存量记录——历史内置工具结果仍以副本形式留在临时空间，按既有清理策略自然回收；存量"外置但无 `inline_content`"的记录，前端仍走原「内容已被临时空间清理（原 X）」降级；② 不新增接口字段（`truncated` / `artifact_size` / `size` 已有，副本是否被上限截断由 `size > artifact_size` 推断）；③ 不调整 `READ_TRUNCATE_KB`（模型当轮拿到的仍是完整结果，本次只动**记录/回灌**这条线）；④ 回灌预算由此只能容纳约 4 条 32 KB 结果——接受该后果（`TOOL_REPLAY_BUDGET_BYTES` 可配置，需要时调大）。
+
+### 7.11 修订记录（2026-11-26）：发送入口与运行生命周期的四处护栏
+
+**来源**：一次针对 `POST /api/threads/:id/messages`（S1）的逐行复核。两条实测结论决定了修法：① Fastify 会把参数里的 `%2F` / `%5C` 解码回分隔符，`path.join` 再归一化 `..`；② Node ≥16 服务端 `req` 的 `close` 在**请求体读完**时就触发，客户端断开只体现在 `res` 上。
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| 会话标识（无规格条目） | 路由参数直接进 `threadDir()` 拼接 | **新增**：`^[A-Za-z0-9_-]{1,64}$` 断言落在 `threadDir()`（单点，34 处调用点共享）；不满足 → `400 THREAD_ID_INVALID` | 实测 `..%2F..%2Ffoo` 会解码成 `../../foo`，可读到并追加写其它数字人 / 其它用户的线程历史；断言放 domain 层，路由漏改一个入口也不破防 |
+| `FR-026`（断连仅退订） | `req.raw.on('close', …)` | **改为** `reply.raw`（`infra/sse.ts` 的 `onSseDisconnect`，同时监听 `close` / `error`，清理幂等） | 挂 `req.raw` 时事件早已触发，监听器永不执行——"断连即退订"实际是死代码 |
+| 关闭期的 `503` | 在 MCP 就绪之后判定 | **前移到配额占位之前** | 否则关闭期每个请求仍要取实例、白等一次 MCP 超时（默认 10s）才被拒，期间还占并发名额 |
+| `DELETE /api/threads/:id` | `stop()` → 排空三个写入链 → 删目录 | **新增** `awaitIdle(threadId, 5000)`：等本轮真正收尾再排空、再删 | `stop()` 只是发 abort，finalize 之后的 tool-events / history 写入仍会 `mkdirSync`，留下没有 `meta.json` 的孤儿目录 |
+| `hijack()` 之后 | 无错误出口 | **新增** try/catch：记 `sse.attach.failed`、`run.stop()`、`raw.end()` | 头可能已发出，改不了状态码；不能让"没人消费事件流"的 run 继续烧 token |
+| `content` / `tool_tips` | 只有 `minLength`，条数不限 | `content` / `original_content` `maxLength: 32000`；`tool_tips` `maxItems: 5` + 服务端 `normalizeToolTips` | 此前仅靠全局 `bodyLimit` 兜底，一条超长粘贴会整段进历史与提示词；卡片侧本就有 5 条上限，请求侧不应更宽 |
+
+**两侧同改**：前端新增 `MAX_MESSAGE_CHARS = 32000`（`api/messages.ts`）并在唯一发送链路 `useChatPanel.onSend` 本地拦截（超限提示、不发请求）；`api/types.ts` 的 `tool_tips` 注释同步。
+
+**测试**：`thread-id-guard.spec.ts`、`sse-disconnect.spec.ts`、`run-manager-await-idle.spec.ts`、`next-actions-tool-tips.spec.ts`、`chat-guards.spec.ts`（含"穿越 id → 400 且不建目录""关服 → 503"），前端 `useChatPanel.attachmentOnly.spec.ts` 追加长度上限两例。
+
+### 7.12 修订记录（2026-11-26）：等待提示改为全轮常驻
+
+| 既有条目 | 原语义 | 修订后 | 理由 |
+|---|---|---|---|
+| `TR-65`（判据部分） | 正文为空 **或** 有 `running` 工具 **或** `stalled` 时才提示；工具全结束且正文非空时 **MUST NOT** 补提示 | **改为** `phase==='streaming'` 即常驻（`TR-68`），文案分档不变 | 用户口径是「对话没结束就不许有空档」；原口径的三条判据各能漏出一段数秒的空白 |
+| `TR-65`（文案档位） | 无 running 时回落缺省「思考中」 | **新增一档**：正文非空且无 running、未静默 → 「正在生成…」 | 提示常驻后，「思考中」在正文已在长时会误导 |
+| `MessageList.streamingMessage`（无规格条目） | 终结态（失败/中断）且正文为空 → 丢弃合成气泡 | **改为**仅失败轮丢弃；中断轮保留，以渲染「已停止生成 · 内容未保存」 | 中断轮在面板层没有任何提示位，丢弃后就是一片空白 |
+
+**接口与数据零变更**：SSE 事件、`api/types.ts`、`agent-backend` 全部不动；改动仅前端展示层（`MessageBubble.vue` / `MessageList.vue` / `TypingIndicator.vue` 的注释与判据）及其组件测试。`TR-66` 的静默心跳、`TR-67` 的段序渲染均**保持**——它们各自解决不同的空档，本次只是把"显示条件"这一层收敛掉。
 
 ## 8. 宪章符合性
 

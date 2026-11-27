@@ -1,13 +1,3 @@
-/**
- * 组件测试：「快速上手」编辑弹窗（004）。
- *
- * 覆盖 2026-10-10 的紧凑化改造：一条问题实例 = **一行**「序号 - 问题内容 - 移除」
- * + **可折叠**的关联工具（原生 `<details>`，summary 带已选计数）。
- * 同时守住既有语义：改的是本地副本、移除按索引、确定才提交。
- *
- * 注：弹窗打开后要先 `await flushPromises()`——组件在 `watch` 里 `await nextTick()`
- * 之后才把 props 拷进本地草稿。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import QuickStartDialog from './QuickStartDialog.vue'
@@ -28,7 +18,6 @@ const MCP_SERVICES: McpServiceListItem[] = [
   },
 ]
 
-/** 第 1 条已挂一个内置工具，第 2 条干净——覆盖两种形态 */
 function startersFixture(): SoulStarter[] {
   return [
     { prompt: '帮我梳理昨天订单的交付风险', tools: [{ kind: 'builtin', name: 'read_file' }] },

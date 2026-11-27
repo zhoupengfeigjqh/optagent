@@ -1,12 +1,3 @@
-﻿/**
- * 组件测试：MCP 调用配置表单（2026-09-27 改版）
- *
- * 守住三件事：
- * 1. **连接地址只有一个**（不再按运行形态分形态声明）；
- * 2. 表单**只服务已登记的服务**（名称只读、恒提供「发起测试」）——新建走弹窗；
- * 3. `FR-044` 的既有语义不变：file_args / HITL / rules_fields。
- * （writable / permission_scope 已按 2026-09-15 的产品决定从配置中移除。）
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpCallConfigForm from './McpCallConfigForm.vue'
@@ -18,7 +9,6 @@ vi.mock('../../api/mcp', () => ({
   testMcpService: (...a: unknown[]) => testMcpService(...a),
 }))
 
-/** 该服务当前公开的工具（HITL / 规则字段区块的可选项来源） */
 const TOOLS = [
   {
     name: 'ocr_image',
@@ -38,7 +28,6 @@ const SERVICE: McpServiceDetail = {
   file_args: { ocr_image: { image: 'url' } },
   tools: TOOLS,
   tools_truncated: false,
-  // 全量候选（2026-10-15）：本夹具白名单为空 = 不限制，两者必然相同，故复用同一数组
   available_tools: TOOLS,
   available_tools_truncated: false,
   tools_error: null,
@@ -49,9 +38,7 @@ const SERVICE: McpServiceDetail = {
   headers: {},
 }
 
-/* 请求头（访问令牌）的用例见同目录 `McpCallConfigForm.headers.spec.ts`（本文件触 500 行门禁，故分居） */
 
-/** 工具带参数 Schema 的夹具：字段下拉只列 array 入参 */
 const SERVICE_WITH_SCHEMA: McpServiceDetail = {
   ...SERVICE,
   tools: [
@@ -80,7 +67,6 @@ const SERVICE_WITH_SCHEMA: McpServiceDetail = {
   ],
 }
 
-/** 规则数组嵌在入参对象内部的服务（真实形态：hd_scheduling_submit 的 input.targetPriorities） */
 const SERVICE_WITH_NESTED_SCHEMA: McpServiceDetail = {
   ...SERVICE,
   tools: [
@@ -108,7 +94,6 @@ function mountForm(service: McpServiceDetail = SERVICE) {
   return mount(McpCallConfigForm, { props: { service } })
 }
 
-/** 表单内唯一的动作按钮：「发起测试」（与连接地址同排） */
 function testButton(wrapper: ReturnType<typeof mountForm>) {
   return wrapper.findAll('button').find((b) => b.text().includes('发起测试'))
 }
@@ -117,12 +102,6 @@ function submitted(wrapper: ReturnType<typeof mountForm>, index = 0): McpService
   return wrapper.emitted('submit')?.[index]?.[0] as McpServiceConfigInput
 }
 
-/**
- * 触发保存。
- *
- * 保存/创建按钮已移到**详情页右上角**（`McpServiceDetail`），故这里直接调表单暴露的
- * `submit()`——与页头按钮、以及表单内回车提交走的是**同一条路径**（含本地校验）。
- */
 async function save(wrapper: ReturnType<typeof mountForm>) {
   ;(wrapper.vm as unknown as { submit: () => void }).submit()
   await flushPromises()
@@ -143,7 +122,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
 
     const url = wrapper.find('#mcp-url')
     expect((url.element as HTMLInputElement).value).toBe('http://192.168.1.2:8000/mcp')
-    // 只有一个地址输入框（不再按运行形态分组）
     expect(wrapper.findAll('#mcp-url')).toHaveLength(1)
   })
 
@@ -212,7 +190,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
     await flushPromises()
     await wrapper.find('#mcp-description').setValue('我改的用途')
 
-    // 保存后父级重载详情：换成**同一服务**的新对象（name 未变）
     await wrapper.setProps({ service: { ...SERVICE } })
     await flushPromises()
 
@@ -236,7 +213,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
 
     expect(wrapper.find('#mcp-description').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#mcp-transport').attributes('disabled')).toBeUndefined()
-    // 动作按钮则应当被锁住（忙态只锁动作按钮）
     expect(testButton(wrapper)?.attributes('disabled')).toBeDefined()
   })
 
@@ -247,7 +223,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
     const test = testButton(wrapper)
     expect(test).toBeTruthy()
     expect(test?.classes()).toContain('btn--success')
-    // 连接配置框：第一行是「连接地址 + 传输方式」，测试按钮在框内底部
     expect(wrapper.find('.mcp-config-form__conn #mcp-url').exists()).toBe(true)
     expect(wrapper.find('.mcp-config-form__conn #mcp-transport').exists()).toBe(true)
     expect(wrapper.findAll('.mcp-config-form__conn-actions button')).toHaveLength(1)
@@ -264,7 +239,6 @@ describe('McpCallConfigForm —— 编辑态', () => {
     const row = wrapper.find('.mcp-config-form__conn-row')
     expect(row.find('#mcp-url').exists()).toBe(true)
     expect(row.find('#mcp-transport').exists()).toBe(true)
-    // 请求头**不在**第一行：它是框内的独立一行（可空）
     expect(row.find('[data-test="headers-input"]').exists()).toBe(false)
     expect(wrapper.find('.mcp-config-form__conn [data-test="headers-input"]').exists()).toBe(true)
   })
@@ -308,12 +282,10 @@ describe('McpCallConfigForm —— 发起测试（FR-047）', () => {
       ?.trigger('click')
     await flushPromises()
 
-    // 探测目标 = 表单当前值，而非已保存的旧地址
     expect(testMcpService).toHaveBeenCalledWith('ocr', {
       transport: 'http',
       url: 'http://192.168.1.9:9999/mcp',
     })
-    // 测试与保存相互独立：未点保存也能测
     expect(wrapper.emitted('submit')).toBeUndefined()
     expect(wrapper.find('dialog').attributes('open')).toBeDefined()
     expect(wrapper.text()).toContain('实际测试：streamable-http → http://192.168.1.9:9999/mcp')
@@ -392,7 +364,6 @@ describe('McpCallConfigForm —— 调用人工确认（HITL）', () => {
     await wrapper.find('.mcp-config-form__tool--orphan input[type="checkbox"]').setValue(false)
     await wrapper.findAll('.mcp-config-form__tools input[type="checkbox"]')[0]?.setValue(true)
     await save(wrapper)
-    // 第二次提交（索引 1）
     expect(submitted(wrapper, 1).confirmation).toEqual({ tools: ['ocr_image'] })
   })
 })
@@ -418,7 +389,6 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
       .find('[data-test="rule-field-0"]')
       .findAll('option')
       .map((o) => (o.element as HTMLOptionElement).value)
-    // 只列 array 入参：rules / items，不列 string 型的 image / note
     expect(fieldOptions).toContain('rules')
     expect(fieldOptions).not.toContain('image')
     await wrapper.find('[data-test="rule-field-0"]').setValue('rules')
@@ -426,7 +396,6 @@ describe('McpCallConfigForm —— 算法规则参数设置（rules_fields）', 
     await save(wrapper)
     expect(submitted(wrapper).rules_fields).toEqual({ ocr_image: 'rules' })
 
-    // 编辑已配置的服务时预填（行回填 + 字段下拉选中；开 HITL 声明才会保留）
     const wrapper2 = mountForm({
       ...SERVICE_WITH_SCHEMA,
       confirmation: 'always',

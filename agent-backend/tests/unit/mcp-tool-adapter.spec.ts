@@ -1,20 +1,3 @@
-/**
- * 单元测试：MCP 工具的 **uid/sid 强制穿透**（2026-09-16）
- *
- * 要求：调用工具时 `uid`（用户 id）与 `sid`（当前会话 id）必须由**运行环境**穿透传入，
- * **MUST NOT 让 LLM 去填**（模型不知道真实值，填错还可能越权访问他人数据）。
- * 同时**不能让不需要这对参数的工具受影响**（第三方服务常常严格校验入参）。
- *
- * 因此判据是"工具自己声明了才注入"：
- * 1. 声明了 → 值一定来自运行环境（覆盖 LLM 填的任何内容），且对 LLM **隐藏**该参数；
- * 2. 没声明 → 参数与 schema **原样透传**，一个多余字段都不加。
- *
- * 另一半：**file_args 取值路径与签名直链铸造**（同为 2026-09-16）——
- * 真实对接方的入参是对象数组（`items: [{ businessType, excelFileUrl }]`），
- * 旧实现只认顶层字符串参数，这类声明"配了也静默不生效"。
- * 本文件守住三条：数组元素能逐项铸造、值已是 http(s) 直链则原样透传（不进沙箱）、
- * 形状不符**报错且不发出调用**（不许静默）。
- */
 import { describe, expect, it } from 'vitest';
 import type { Logger } from 'pino';
 import { PermissionError, type FileAccess } from '../../src/domain/file-access.js';
@@ -34,7 +17,6 @@ interface Call {
   args: unknown;
 }
 
-/** 只实现 callTool 的假 manager（本用例只关心"最终发出去的参数"） */
 function fakeManager(calls: Call[]) {
   return {
     callTool: async (server: string, tool: string, args: unknown) => {
@@ -46,7 +28,6 @@ function fakeManager(calls: Call[]) {
 
 const RUNTIME: RuntimeContext = { uid: 'admin', sid: 'th_123' };
 
-/** 声明了 uid/sid 的工具（模拟外部服务：要求它俩才能定位用户自己的数据） */
 const TOOL_WITH_CONTEXT = {
   name: 'query_my_data',
   description: '查询当前用户的数据',
@@ -61,7 +42,6 @@ const TOOL_WITH_CONTEXT = {
   },
 };
 
-/** 没声明 uid/sid 的工具（形状同真实 OCR：只认 image） */
 const TOOL_WITHOUT_CONTEXT = {
   name: 'ocr_image',
   description: '识别图片文字',
@@ -130,11 +110,6 @@ describe('工具显示名（tool_labels，2026-10-27）', () => {
   });
 });
 
-/**
- * 入参 schema 根标题（2026-10-30，方案 A）：服务端 `@mcp.tool(title=...)` → `x-title`。
- *
- * 与显示名解耦：这里取的是**服务端**标题，平台 `tool_labels` 不参与（保持参数原始信息）。
- */
 describe('入参 schema 根标题（方案 A）', () => {
   it('服务端声明 Tool.title → 根 title 改名 x-title；与平台显示名解耦（方案 A）', () => {
     const schema = {
@@ -153,7 +128,6 @@ describe('入参 schema 根标题（方案 A）', () => {
       undefined,
       undefined,
       undefined,
-      // 平台配了中文显示名：label 用它，但根标题 MUST 仍取服务端（方案 A）
       { ocr_image: '平台中文名' },
     );
 
@@ -177,7 +151,6 @@ describe('入参 schema 根标题（方案 A）', () => {
   });
 });
 
-/** 取工具执行结果（适配 pi-agent-core 的 execute 签名） */
 async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, params: unknown) {
   return (await tool.execute('call_1' as never, params as never)) as {
     content: Array<{ text: string }>;
@@ -185,7 +158,6 @@ async function exec(tool: { execute: (...args: never[]) => Promise<unknown> }, p
 }
 
 describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（2026-09-23）', () => {
-  /** 与真实 OCR 同形：只认 image，未声明 uid/sid */
   const EVENT_TOOL = {
     name: 'ocr_image',
     description: '识别图片文字',
@@ -196,7 +168,6 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     },
   };
 
-  /** 只关心计数事件：callTool 的成功/失败由用例决定 */
   function build(events: McpCallEvent[], callTool: () => Promise<unknown>) {
     const [tool] = mcpToolsAsAgentTools(
       { callTool } as unknown as McpManager,
@@ -220,7 +191,6 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       service: 'svc',
-      // 落库的是 MCP 服务自己的工具名，而非暴露给模型的 `svc__ocr_image`
       tool: 'ocr_image',
       ok: true,
       userId: 'admin',
@@ -239,7 +209,6 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
 
     const result = await exec(tool, { image: 'a.png' });
 
-    // 不抛：pi 的 catch 会覆盖 result（文案/details 全丢），改由 afterToolCall 翻 isError
     expect(result.content[0]?.text).toContain('ECONNREFUSED');
     expect(readToolError(result.details)).toMatchObject({ code: 'MCP_CALL_FAILED' });
 
@@ -288,7 +257,6 @@ describe('MCP 调用事件埋点：服务 / 工具 / 耗时 / 错误分类（202
     const result = await exec(tool!, { image: '不存在/a.png' });
 
     expect(result.content[0]?.text).toContain('文件参数校验失败');
-    // 标记失败（2026-10-29）：调用未发出也要让用户看见卡片标红
     expect(readToolError(result.details)).toMatchObject({ code: 'MCP_FILE_ARGS_DENIED' });
     expect(calls).toHaveLength(0);
     expect(events).toEqual([]);
@@ -330,7 +298,7 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
     const calls: Call[] = [];
     const [tool] = buildTools(calls, [TOOL_WITHOUT_CONTEXT], { runtime: RUNTIME });
 
-    expect(tool!.parameters).toBe(TOOL_WITHOUT_CONTEXT.inputSchema); // 对象未被改写
+    expect(tool!.parameters).toBe(TOOL_WITHOUT_CONTEXT.inputSchema);
     await exec(tool!, { image: '临时空间/a.png' });
 
     expect(calls[0]?.args).toEqual({ image: '临时空间/a.png' });
@@ -340,11 +308,9 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
     const calls: Call[] = [];
     const fileCtx = {
       fileAccess: {
-        // 009：`resolveVerified` 返回的是**相对数字人数据域**的路径（与生产同口径）
         resolveVerified: (value: string) => ({ relPath: value }),
       } as unknown as FileAccess,
       userId: 'admin',
-      // 009：生产侧铸造的 `p` 带数字人段（`agentScopedPath(agent, relPath)`），夹具同形
       mintUrl: (_userId: string, relPath: string) => `https://signed.example/demo/${relPath}`,
     } satisfies FileArgContext;
 
@@ -381,7 +347,6 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
     await exec(tool!, { keyword: 'k' });
 
     expect(calls[0]?.args).toEqual({ keyword: 'k' });
-    // 对 LLM 的隐藏与"有没有拿到上下文"无关：这些参数永远不该由模型填
     const schema = tool!.parameters as { properties: Record<string, unknown> };
     expect(Object.keys(schema.properties)).toEqual(['keyword']);
   });
@@ -397,11 +362,7 @@ describe('MCP 工具：uid/sid 强制穿透', () => {
   });
 });
 
-/* ------------------------------------------------------------------------------------ *
- * file_args 取值路径：对象数组里的字段也要能铸造（2026-09-16）
- * ------------------------------------------------------------------------------------ */
 
-/** 真实对接方的 schema（对方提供）：要铸造的是数组元素里的 `excelFileUrl` */
 const PARSE_EXCEL_FILES = {
   name: 'parse_excel_files',
   description: '读取并解析排产业务 Excel 文件',
@@ -425,24 +386,18 @@ const PARSE_EXCEL_FILES = {
   },
 };
 
-/** 声明：数组 `items` 每个元素的 `excelFileUrl` 都要铸 */
 const ITEMS_DECL = { parse_excel_files: { 'items[].excelFileUrl': 'url' } };
 
-/**
- * 假的沙箱：记录"进过沙箱的值"，用来断言**外部直链没有被当成本地路径处理**
- * （真送进去会被判"目录不在白名单"，把整次调用误伤）。
- */
 function sandbox(verified: string[] = []): FileArgContext {
   return {
     fileAccess: {
       resolveVerified: (value: string) => {
         verified.push(value);
         if (value.includes('不存在')) throw new PermissionError(`文件不存在或不可读: ${value}`);
-        return { relPath: value }; // 相对数字人数据域（009）
+        return { relPath: value };
       },
     } as unknown as FileAccess,
     userId: 'admin',
-    // 009：生产侧铸造的 `p` 带数字人段（`agentScopedPath(agent, relPath)`），夹具同形
     mintUrl: (_userId: string, relPath: string) => `https://signed.example/demo/${relPath}`,
   };
 }
@@ -485,7 +440,6 @@ function buildWithFileArgs(calls: Call[], tools: unknown[], options: FileArgsBui
   );
 }
 
-/** 取最终发给服务的入参（断言用；形状由各用例自己声明） */
 function sentArgs<T>(calls: Call[]): T {
   expect(calls).toHaveLength(1);
   return calls[0]!.args as T;
@@ -542,9 +496,9 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
     });
 
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
-    expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx'); // 外部直链不动
+    expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx');
     expect(items[1]?.excelFileUrl).toBe('https://signed.example/demo/临时空间/电价.xlsx');
-    expect(verified).toEqual(['临时空间/电价.xlsx']); // 外部直链从未被当成本地路径
+    expect(verified).toEqual(['临时空间/电价.xlsx']);
   });
 
   it('字符串数组逐元素铸造：files[]', async () => {
@@ -629,7 +583,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
 
     await exec(tool!, { userId: 1, conversationId: 'c1' });
 
-    expect(sentArgs(calls)).toEqual({ userId: 1, conversationId: 'c1' }); // 一个字段都没加
+    expect(sentArgs(calls)).toEqual({ userId: 1, conversationId: 'c1' });
     expect(warns).toHaveLength(1);
     expect(warns[0]).toMatchObject({
       event: 'mcp.fileargs.unmatched',
@@ -775,13 +729,7 @@ describe('MCP 文件参数：取值路径与签名直链铸造', () => {
   });
 });
 
-/* ------------------------------------------------------------------------------------ *
- * 派生模式 "url:from="（2026-09-18）：目标字段由引擎注入、覆盖模型填写、对 LLM 隐藏
- * 起因：hd_algorithm_input_parser 的 excelFileUrl 描述要求 http 地址，
- * 模型据此幻觉伪造 URL；该字段本是"纯管道字段"，不该由模型决策。
- * ------------------------------------------------------------------------------------ */
 
-/** 真实 schema（hd_algorithm_input_parser）：对象数组，来源字段与目标字段同层 */
 const HD_PARSER = {
   name: 'hd_algorithm_input_parser',
   description: '排产算法输入解析',
@@ -854,7 +802,7 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
         {
           businessType: 1,
           realRelativePath: '临时空间/产能.xlsx',
-          excelFileUrl: 'http://hallucinated.example/fake.xlsx', // 模型编造的地址
+          excelFileUrl: 'http://hallucinated.example/fake.xlsx',
         },
       ],
     });
@@ -991,7 +939,7 @@ describe('MCP 文件参数：派生模式 "url:from="（目标字段引擎注入
 
     const { items } = sentArgs<{ items: Array<{ excelFileUrl: string }> }>(calls);
     expect(items[0]?.excelFileUrl).toBe('https://files.example.com/产线.xlsx');
-    expect(verified).toEqual([]); // 外部直链从未进沙箱
+    expect(verified).toEqual([]);
   });
 
   it('与普通 url 声明共存：先原位铸造、再派生注入，互不干扰', async () => {

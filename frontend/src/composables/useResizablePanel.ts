@@ -1,13 +1,3 @@
-/**
- * 右栏「文件空间」面板的可拖动宽度（FR-002）
- *
- * 拖动面板左缘的分隔条调整宽度：指针左移变宽、右移变窄。
- * - 尚未手动调整时宽度为 `null`，沿用 CSS 默认比例（`--layout-preview-ratio` ≈ 1/3）
- * - 一旦调整即固定为像素值，窗口后续缩放不再改变面板宽度（手动尺寸优先）
- * - 宽度收敛在 `[PANEL_MIN_WIDTH, min(PANEL_MAX_WIDTH, 容器宽 - PANEL_RESERVED_WIDTH)]`，
- *   避免面板被拖没或把中栏挤到不可用
- * - 分隔条支持键盘（← 变宽 / → 变窄，Shift 加速），并具备 `separator` 语义
- */
 
 import { computed, onBeforeUnmount, ref, type CSSProperties, type ComputedRef, type Ref } from 'vue'
 
@@ -20,13 +10,10 @@ export const PANEL_MAX_WIDTH = 1300
 /** 左栏 + 中栏需保留的最小宽度（px），用于推算上限 */
 export const PANEL_RESERVED_WIDTH = 520
 
-/** 键盘调整步长（px） */
 export const PANEL_KEY_STEP = 16
 
-/** 键盘调整大步长（px，按住 Shift） */
 export const PANEL_KEY_STEP_LARGE = 64
 
-/** 注入到容器的宽度变量名 */
 export const PANEL_WIDTH_VAR = '--layout-preview-width'
 
 /**
@@ -39,33 +26,23 @@ export function clampPanelWidth(value: number, containerWidth: number): number {
   return Math.min(Math.max(value, PANEL_MIN_WIDTH), upper)
 }
 
-/** 构造参数：以取值函数注入 DOM，便于测试替换。 */
 export interface ResizablePanelDeps {
   /** 栅格容器元素（用于推算上限） */
   container: () => HTMLElement | null
-  /** 被调整的面板元素 */
   panel: () => HTMLElement | null
 }
 
-/** 可拖动面板契约。 */
 export interface ResizablePanelStore {
-  /** 手动宽度（px）；`null` = 尚未手动调整，沿用默认比例 */
   width: Ref<number | null>
-  /** 是否正在拖动 */
   resizing: Ref<boolean>
-  /** 绑定到容器的行内样式（注入宽度变量） */
   style: ComputedRef<CSSProperties>
-  /** 分隔条 `pointerdown` */
   onPointerDown(event: PointerEvent): void
-  /** 分隔条 `keydown`（← / → 调整） */
   onKeydown(event: KeyboardEvent): void
 }
 
-/** 创建可拖动面板状态（需在组件 `setup` 内调用，卸载时自动清理监听）。 */
 export function useResizablePanel(deps: ResizablePanelDeps): ResizablePanelStore {
   const width = ref<number | null>(null)
   const resizing = ref(false)
-  /** 拖动中挂在 window 上的监听清理函数；未拖动时为 `null` */
   let cleanup: (() => void) | null = null
 
   const style = computed<CSSProperties>(() =>
@@ -110,7 +87,6 @@ export function useResizablePanel(deps: ResizablePanelDeps): ResizablePanelStore
     }
 
     const onMove = (move: PointerEvent): void => {
-      // 面板在右侧：指针左移 → 面板变宽
       apply(startWidth - (move.clientX - startX))
     }
 
@@ -136,7 +112,6 @@ export function useResizablePanel(deps: ResizablePanelDeps): ResizablePanelStore
     }
 
     event.preventDefault()
-    // 未手动调整过时，以默认比例下的实际宽度为基准
     apply((width.value ?? panelWidth()) + delta)
   }
 

@@ -1,11 +1,3 @@
-/**
- * 集成测试：本体随部署物化（2026-10-17，`FR-064`）
- *
- * 从 `deploy.spec.ts` 拆出（该文件已达 500 行门禁，宪章原则二）：本文件只守住两件事——
- * ① 部署把本体库里的**两个必需文件**按原样复制到 `ontology/{场景}/{本体}/`，与 `skills/` 平级；
- * ② 库内缺任一必需文件 → 该用户部署失败（`ADM_ONTOLOGY_NOT_FOUND`）、该用户**零写入**。
- *    **2026-11-23**：预检下架后不再整批拦截，失败在物化阶段发现并只影响该用户。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,7 +17,6 @@ const TOOL_FIXTURE = [
   },
 ];
 
-/** 新建/覆盖一个 MCP 服务（单一连接地址） */
 function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
   const input = {
     description: 'OCR 识别服务',
@@ -36,7 +27,6 @@ function configureMcp(name = 'ocr', url = 'http://192.168.1.2:8000/mcp'): void {
   if (fx.ctx.mcpConfigs.exists(name)) {
     fx.ctx.mcpConfigs.upsert(name, input, fx.ctx.store.revision());
   } else {
-    // 工具白名单：新建必填非空（2026-10-03），故只在新建路径给
     fx.ctx.mcpConfigs.create({ name, allowed_tools: ['ocr_image'], ...input });
   }
 }
@@ -75,7 +65,6 @@ const ONTO_SECURITIES = `securities:
   op_type: command
 `;
 
-/** 往平台本体库塞一个完整本体（两个必需文件齐备） */
 function installOntology(): void {
   fx.ctx.ontologies.install({
     scenario: ONTO_SCENARIO,
@@ -85,12 +74,10 @@ function installOntology(): void {
   });
 }
 
-/** 库内该本体目录（用于模拟"快照被手改坏"） */
 function libraryOntologyDir(): string {
   return path.join(fx.platformDataDir, 'onto_market', ONTO_SCENARIO, ONTO_NAME);
 }
 
-/** 建一个引用本体的数字人，并挂到 admin 名下 */
 async function linkOntologyAgent(): Promise<void> {
   installOntology();
   await createAgent(baseAgent({ name: 'onto', ontologies: [`${ONTO_SCENARIO}/${ONTO_NAME}`] }));
@@ -133,7 +120,6 @@ describe('POST /api/admin/deploy —— 本体物化', () => {
       ONTO_SCENARIO,
       ONTO_NAME,
     );
-    // 017：术语字典与两个必需文件同目录；`concepts: []` 的夹具产出空字典
     expect(fs.readdirSync(dir).sort()).toEqual([
       'ontology.yaml',
       'securities.yaml',
@@ -142,7 +128,6 @@ describe('POST /api/admin/deploy —— 本体物化', () => {
     expect(fs.readFileSync(path.join(dir, 'ontology.yaml'), 'utf8')).toBe(ONTO_YAML);
     expect(fs.readFileSync(path.join(dir, 'securities.yaml'), 'utf8')).toBe(ONTO_SECURITIES);
     expect(fs.readFileSync(path.join(dir, 'term_mapping.json'), 'utf8')).toBe('{}\n');
-    // 与 skills/ 平级，不混进数字人的四份配置文件
     expect(fs.readdirSync(path.join(fx.optAgentRoot, 'users', 'admin', 'agents', 'onto')).sort()).toEqual([
       'MCP.json',
       'SOUL.md',
@@ -156,8 +141,6 @@ describe('POST /api/admin/deploy —— 本体物化', () => {
 describe('本体库快照完整性（2026-10-17）', () => {
   it('库内缺 securities.yaml → 该用户部署失败并给出可读原因，零写入（2026-11-23 起在写入阶段发现）', async () => {
     await linkOntologyAgent();
-    // 目录仍在（引用本身有效），但两个必需文件不齐 —— 保存期只核对索引名字，查不出这一点。
-    // 删除走 `removeTree`：中文路径下 `fs.rmSync` 会静默不删（见 `fs-remove.ts`）。
     removeTree(path.join(libraryOntologyDir(), 'securities.yaml'));
 
     const before = snapshotTree(path.join(fx.optAgentRoot, 'users'));
@@ -166,13 +149,10 @@ describe('本体库快照完整性（2026-10-17）', () => {
       url: '/api/admin/deploy',
       payload: { user_ids: ['admin'], revision: revision() },
     });
-
-    // 预检下架：不再整批 409，而是该用户失败、接口仍返回 200
     expect(deploy.statusCode).toBe(200);
     const user = (deploy.json().users as Array<{ ok: boolean; error?: string }>)[0]!;
     expect(user.ok).toBe(false);
     expect(user.error).toContain('securities.yaml');
-    // 该用户零写入
     expect(snapshotTree(path.join(fx.optAgentRoot, 'users'))).toEqual(before);
   });
 });

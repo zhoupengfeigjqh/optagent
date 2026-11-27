@@ -1,17 +1,7 @@
-/**
- * 单元测试：每轮注入 `【当前时间】` 段（契约 R18 / 002 `TR-29`）。
- *
- * 守住四件事：
- * 1. **格式与粒度**：`【当前时间】YYYY-MM-DD HH:mm:ss（周X，UTC±HH:MM）`，精确到秒；
- * 2. **位置**：后台产出段之后、`guidance` 之前（`guidance` 仍是末段，保持"本轮指令紧邻用户消息"）；
- * 3. **去向**：只进 `systemExtra`，MUST NOT 进 messages（用户气泡与 `history.jsonl` 保持干净）；
- * 4. **时钟由调用方注入**：纯函数层不读系统时钟——未传 `nowText` 时不注入该段（既有纯函数调用口径零变化）。
- */
 import { describe, expect, it } from 'vitest';
 import { formatCurrentTime } from '../../src/domain/message-format.js';
 import { buildPromptMessages, type PromptSources } from '../../src/domain/prompt-builder.js';
 
-/** 本地时区解析（ISO 串不带 Z 即按本地时区）——2026-10-14 是周三 */
 const TIME = formatCurrentTime(new Date('2026-10-14T15:30:45'));
 
 function sources(over: Partial<PromptSources> = {}): PromptSources {
@@ -28,7 +18,6 @@ function sources(over: Partial<PromptSources> = {}): PromptSources {
 
 describe('formatCurrentTime —— 当前时间段格式（R18）', () => {
   it('精确到秒 + 显式时区偏移 + 星期', () => {
-    // 时区部分随运行环境而变，故只钉"结构 + 日期时间部分"
     expect(TIME).toMatch(/^【当前时间】2026-10-14 15:30:45（周三，UTC[+-]\d{2}:\d{2}）$/);
   });
 
@@ -53,7 +42,6 @@ describe('buildPromptMessages —— 当前时间段的拼装与去向', () => {
 
     expect(extra.indexOf('【后台计算结果】')).toBeLessThan(extra.indexOf('【当前时间】'));
     expect(extra.indexOf('【当前时间】')).toBeLessThan(extra.indexOf('本轮请调用'));
-    // guidance 仍是末段：本轮指令紧邻用户消息（R18 把时间放在它之前）
     expect(extra.split('\n\n').at(-1)).toContain('本轮请调用');
   });
 

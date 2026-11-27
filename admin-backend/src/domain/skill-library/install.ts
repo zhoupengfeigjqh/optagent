@@ -1,19 +1,3 @@
-/**
- * 共享技能库：列表、逐个文件查看/编辑、原子安装与删除（`FR-035`~`FR-042`，`data-model.md` §4）。
- *
- * **全平台共享，是 SKILL 的唯一权威来源**（`FR-036`）：一个 SKILL 可被任意数量的
- * 数字人以名称引用，MUST NOT 为每个数字人各存一份。
- *
- * 安装的原子性（`FR-040`、`FR-041`）：
- * 1. 全部校验在写入目标目录**之前**完成（`archive.ts`）；
- * 2. 内容先写入**同挂载点内的临时目录** `skills/.tmp-*`；
- * 3. 通过后再做**目录级原子改名**完成入驻；覆盖时先把旧目录改名为 `skills/.old-*`，
- *    成功后再删除——任一步失败即回滚，**MUST NOT 留下半解压残留**。
- *
- * 单文件编辑（2026-09-16 产品决定：**全部文件可编辑**，含 `references/` 等附件）：
- * 由 `file-access.ts` 承担（路径安全、乐观锁、原子写入；**保存即覆盖、无副本**）；
- * 本模块只负责把结果**同步进索引**（描述、附件大小、`updated_at`）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Logger } from 'pino';
@@ -36,7 +20,6 @@ import { assertSkillEditable, isReadOnlyOrigin, type SkillOrigin } from './origi
 
 const INDEX_REL = `${SKILLS_DIR}/index.json`;
 
-/** 单文件保存结果 */
 export interface SkillFileWriteResult {
   name: string;
   path: string;
@@ -53,15 +36,10 @@ export interface SkillFileInfo {
 
 export interface SkillRecord {
   name: string;
-  /**
-   * 界面展示名（2026-11-04）：取自 `SKILL.md` 的 `metadata.name/title/ontology_name/display_name`，
-   * 缺失即回落 `name`。**不参与**目录名与任何引用键（见 `metadata.ts`）。
-   */
   display_name: string;
   description: string;
   files: SkillFileInfo[];
   source: string;
-  /** 来源标记；缺省 = 外部安装（ZIP 上传等） */
   origin?: SkillOrigin;
   installed_at: string;
   updated_at: string;
@@ -69,7 +47,6 @@ export interface SkillRecord {
 
 export interface SkillDetail extends SkillRecord {
   content: string;
-  /** `SKILL.md` 的内容哈希：界面在详情页直接编辑正文时的乐观锁基准（§4.3.1） */
   content_hash: string;
   revision: number;
 }
@@ -88,9 +65,7 @@ interface SkillIndexDocument {
 }
 
 export interface InstallOptions {
-  /** 名称冲突时**显式选择覆盖**（`FR-040`）；缺省冲突即拒 */
   overwrite: boolean;
-  /** 安装来源（上传的包名／"平台编辑"） */
   source: string;
   limits?: Partial<ArchiveLimits>;
 }
@@ -109,13 +84,6 @@ export class SkillLibraryService {
     this.logger = options.logger;
   }
 
-  /**
-   * 全部 SKILL 元数据（按名称排序，保证分页稳定）。
-   *
-   * 存量索引缺 `display_name`（2026-11-04 新增字段）时**回读 `SKILL.md` 补一次并写回索引**
-   * （见 `display-name.ts`）：市场技能早在 frontmatter 里带了 `metadata`，只回落 `name`
-   * 会让卡片停在英文名。
-   */
   listAll(): SkillRecord[] {
     const doc = this.store.readJson<SkillIndexDocument>(INDEX_REL);
     const items = Array.isArray(doc?.items) ? doc.items : [];
@@ -123,12 +91,10 @@ export class SkillLibraryService {
     const live = items.filter((item) => this.store.exists(this.dirRel(item.name)));
     const { items: named, backfilled } = withDisplayNames(this.store, live);
     const sorted = named.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
-    // 只在真的补到旧记录时写盘（补完即不再进入本分支）
     if (backfilled) this.writeIndex(sorted);
     return sorted;
   }
 
-  /** 名称集合（供统一清单判定，`FR-019`） */
   names(): Set<string> {
     return new Set(this.listAll().map((item) => item.name));
   }
@@ -187,24 +153,12 @@ export class SkillLibraryService {
   /** 读取技能内**单个文件**（含附件）：见 `file-access.ts` 的安全与体积口径 */
   readFile(name: string, relPath: unknown): SkillFileContent {
     const content = readSkillFile(this.fileDeps(), this.dirRel(name), name, relPath);
-    // 市场来源只读（`FR-062`）：`editable` 恒 false——与 §4.3.1 的写入拦截同一口径，
-    // 任何客户端据此即可判断"不给编辑入口"，不必各自再去读 `origin`
     return isReadOnlyOrigin(this.listAll().find((item) => item.name === name)?.origin)
       ? { ...content, editable: false }
       : content;
   }
 
-  /**
-   * 编辑并保存技能内**单个文件**（2026-09-16：全部文件可编辑，含 `references/` 等附件）。
-   *
-   * 文件级的校验、乐观锁与原子写入在 `file-access.ts`（**保存即覆盖，不产生副本**）；
-   * 本方法负责**索引同步**：`SKILL.md` 的新描述、附件大小、`updated_at`，并递增全局版本。
-   *
-   * 注意：保存只改**库里这一份**。数字人目录里的副本由部署写入（`FR-026`），
-   * 因此引用者需**重新部署**才会拿到新版本（界面 MUST 明确提示这一点）。
-   */
   writeFile(name: string, relPath: unknown, content: unknown, baseHash: unknown): SkillFileWriteResult {
-    // 市场来源**只读**（`FR-062`）：权威拦截点在此，路由与界面都只是引导（见 `origin.ts`）
     assertSkillEditable(name, this.listAll().find((item) => item.name === name)?.origin);
 
     const outcome = writeSkillFile(this.fileDeps(), this.dirRel(name), name, relPath, content, baseHash);
@@ -220,7 +174,6 @@ export class SkillLibraryService {
         {
           ...record,
           files,
-          // 改的是 SKILL.md 时展示名也要跟着正文走（metadata 段可能被一起改掉）
           display_name: outcome.display_name ?? record.display_name,
           description: outcome.description ?? record.description,
           updated_at: updatedAt,
@@ -229,7 +182,6 @@ export class SkillLibraryService {
     }
     const revision = this.store.bumpRevision();
 
-    // 不再显式传 user_id：logger 已绑定操作者（重复会出现两个同名键，JSON 里后者覆盖前者）
     this.logger?.info(
       {
         event: 'skill.file.save',
@@ -297,15 +249,6 @@ export class SkillLibraryService {
     };
   }
 
-  /**
-   * 从**目录内容**直接安装（2026-10-02：本体市场导入专用，见 `onto-market.ts`）。
-   *
-   * 与 `install()` 的差别只在"来源"：ZIP 走解压校验，这里由调用方（市场扫描模块）
-   * 读好文件并保证路径安全；后续的元数据校验、**重名直接拒绝**（市场导入不提供
-   * 覆盖，库仍是唯一权威来源）、原子入驻、索引同步与版本递增完全同一条链路。
-   *
-   * @param files 相对技能根的 posix 路径 → 内容（必须含 `SKILL.md`，路径不越界）
-   */
   installFromDirectory(
     files: Map<string, Buffer>,
     options: { source: string; origin: SkillOrigin },
@@ -362,17 +305,6 @@ export class SkillLibraryService {
     };
   }
 
-  /**
-   * 从**目录内容**更新一份已存在的技能（2026-10-02：本体市场「更新」专用）。
-   *
-   * 与 `installFromDirectory` 的差别：目标**必须已存在**（不存在应走导入）；
-   * 入驻复用同一条 `commitAtomic` 链路——旧目录先改名备份、新内容改名入驻、
-   * 失败回滚，**时间窗为零**（区别于"先 remove 再 install"的两步做法，
-   * 避免窗口内部署物化出缺技能的数字人）。`installed_at` 保留原值（首次安装时间
-   * 不因更新而改变），`updated_at` 刷为当前时间。
-   *
-   * @param files 相对技能根的 posix 路径 → 内容（必须含 `SKILL.md`，路径不越界）
-   */
   updateFromDirectory(
     files: Map<string, Buffer>,
     options: { source: string; origin: SkillOrigin },
@@ -428,7 +360,6 @@ export class SkillLibraryService {
     };
   }
 
-  /** 删除（`FR-042`）——被引用时的确认清单由上层经引用推导给出 */
   remove(name: string): void {
     this.read(name);
     this.store.remove(this.dirRel(name));
@@ -436,7 +367,6 @@ export class SkillLibraryService {
     this.store.bumpRevision();
   }
 
-  /** 文件级读写模块的依赖（存储） */
   private fileDeps(): { store: PlatformStore } {
     return { store: this.store };
   }
@@ -467,7 +397,6 @@ export class SkillLibraryService {
       for (const [rel, content] of archive.files) {
         const dest = path.join(tmpDir, ...rel.split('/'));
         const resolved = path.resolve(dest);
-        // 双保险：即使 archive 层漏判，也不允许写出 tmpDir 之外
         if (!resolved.startsWith(path.resolve(tmpDir) + path.sep)) {
           throw new ApiError(ERROR_CODES.ADM_SKILL_ARCHIVE_UNSAFE, `条目越界：${rel}`);
         }

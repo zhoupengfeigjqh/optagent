@@ -1,19 +1,8 @@
 #!/usr/bin/env node
-/**
- * 硬门禁：依赖清单比对（宪章原则六：MUST NOT 引入未登记依赖）
- *
- * `research.md` D9 的最小实现——零依赖，把本子项目 `package.json` 的
- * `dependencies` / `devDependencies` 与 `research.md` D2 的登记清单逐一比对，
- * 出现**未登记依赖**即非零退出。
- *
- * 白名单来源：`specs/001-digital-human-platform/research.md` § D2 与 § D7。
- * 与 `admin-frontend/scripts/check-deps.mjs` **MUST 保持对称**（原则八）。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-/** D2 + D7 登记的运行时依赖 */
 const ALLOWED_DEPENDENCIES = new Set([
   'fastify',
   '@fastify/cors',
@@ -23,11 +12,10 @@ const ALLOWED_DEPENDENCIES = new Set([
   'pino-pretty',
   '@modelcontextprotocol/sdk',
   'yauzl', // D7：SKILL ZIP 安全解压
-  'yaml', // D2（2026-10-03 重新引入）：只读解析本体市场 ontology.yaml 的 metadata
-  'jose', // 024：JWT 签发/验签（登录凭据）；纯 JS、无原生模块
+  'yaml',
+  'jose',
 ]);
 
-/** D2 登记的开发依赖 */
 const ALLOWED_DEV_DEPENDENCIES = new Set([
   'typescript',
   'eslint',

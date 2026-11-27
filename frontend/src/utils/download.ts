@@ -17,6 +17,5 @@ export function downloadTextFile(
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
-  // 立刻撤销会让部分浏览器来不及取数据，放到下一轮任务里
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }

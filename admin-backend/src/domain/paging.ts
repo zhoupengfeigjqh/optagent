@@ -10,7 +10,6 @@
 import { ApiError } from './api-error.js';
 import { ERROR_CODES } from './error-codes.js';
 
-/** 服务端固定的每页条数 */
 export const CARD_PAGE_SIZE = 8;
 
 export interface Paged<T> {
@@ -21,7 +20,6 @@ export interface Paged<T> {
   total_pages: number;
 }
 
-/** 解析页码：缺省 1；非正整数或 <1 即 `VALIDATION_FAILED` */
 export function normalizePage(raw: unknown): number {
   if (raw === undefined || raw === null || raw === '') return 1;
   const value = typeof raw === 'number' ? raw : Number(raw);
@@ -31,7 +29,6 @@ export function normalizePage(raw: unknown): number {
   return value;
 }
 
-/** 切片并生成统一分页响应 */
 export function paginate<T>(items: readonly T[], page: number): Paged<T> {
   const total = items.length;
   const totalPages = total === 0 ? 0 : Math.ceil(total / CARD_PAGE_SIZE);

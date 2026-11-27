@@ -19,7 +19,6 @@ vi.mock('../api/agents', () => ({
   deleteAgent: vi.fn(),
 }))
 
-/** 结构化 SOUL 夹具（004）：必填项齐全，测试按需 spread 覆盖 */
 const SOUL = {
   intro: '简介',
   welcome: '欢迎',
@@ -34,6 +33,7 @@ const SOUL = {
   intent_focus_depth: 0,
   input_rewrite: false,
   term_normalize: false,
+  task_planning: false,
 }
 
 const DESIGN = {
@@ -78,6 +78,7 @@ describe('emptyDraft', () => {
         intent_focus_depth: 0,
         input_rewrite: false,
         term_normalize: false,
+        task_planning: false,
       },
       enabled_tools: [],
       mcp_services: [],
@@ -228,8 +229,6 @@ describe('useAgentDesign', () => {
     expect(editor.draft.value.soul.mission).toBe(mission)
   })
 
-  /* ---------- 2026-10-13：目录级可上传类型（FR-005） ---------- */
-
   it('load：未配置该键的数字人草稿归一为 `{}`（不产生 undefined）', async () => {
     const editor = useAgentDesign()
     await editor.load('demo')
@@ -273,7 +272,6 @@ describe('useAgentDesign', () => {
 
   it('dirty：新建态下**屏蔽**预定义目录即视为已修改（2026-11-17）', () => {
     const editor = useAgentDesign()
-    // 新建初值 = 预定义目录全部启用，此时不算有输入
     expect(editor.dirty.value).toBe(false)
 
     editor.draft.value.scenario.data_prep_dirs = []
@@ -415,7 +413,6 @@ describe('resetToCopy —— 「新建数字人」弹窗的预填（FR-015，202
   })
 
   it('问题实例（starters）逐层深拷贝：改草稿的提示文本与关联工具都不污染源', async () => {
-    // 嵌套两层（问题实例 → 关联工具），浅拷贝会让弹窗里的编辑直接改到"已保存态"
     interface StarterLike {
       prompt: string
       tools: Array<{ kind: 'builtin' | 'mcp'; name: string; service?: string }>

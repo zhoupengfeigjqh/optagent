@@ -1,15 +1,3 @@
-/**
- * 单元测试：会话存储的删除路径（FR-010）。
- *
- * 守两条：
- * 1. **连带清理到位**：thread 目录 + 临时空间下 `{threadId}_` 前缀文件都删掉，
- *    且**不误伤**其它会话的目录与文件；
- * 2. **删除是异步接口**（返回 Promise）——它是「多文件 × 单次系统调用」的长耗时操作，
- *    同步实现会独占事件循环，把用户紧接着发出的"切换会话"请求一起拖慢
- *    （见 `src/domain/fs-safe.ts` 头部的实测说明）。
- *
- * 009：会话与临时空间都按**数字人**隔离，故所有调用都带数字人（`AGENT`）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SPACE_TMP, threadDir, userDataDir } from '../../src/domain/dirs.js';
 import { ThreadNotFoundError, ThreadStore } from '../../src/domain/thread-store.js';
 
-/** 本用例使用的数字人（数据域一级目录名） */
 const AGENT = 'agent-a';
 
 let root: string;
@@ -89,9 +76,6 @@ describe('ThreadStore.delete', () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- * 009：会话归属与列表判据
- * ------------------------------------------------------------------ */
 
 describe('ThreadStore —— 归属（009 FR-020/022）', () => {
   it('create 把归属写进 meta，且数据落在该数字人目录下', () => {
@@ -106,7 +90,6 @@ describe('ThreadStore —— 归属（009 FR-020/022）', () => {
     const meta = store.create('u1', AGENT);
 
     expect(() => store.get('u1', 'other-agent', meta.threadId)).toThrowError(ThreadNotFoundError);
-    // 归属数字人自己仍取得到
     expect(store.get('u1', AGENT, meta.threadId).threadId).toBe(meta.threadId);
   });
 
@@ -172,7 +155,6 @@ describe('ThreadStore —— 列表判据：只看有消息的会话（009 FR-01
   it('空对话留在磁盘上（只有不列出，不悄悄删）——用户仍可显式删除', async () => {
     const empty = store.create('u1', AGENT);
     expect(store.list('u1', AGENT)).toEqual([]);
-    // 仍存在于磁盘
     expect(fs.existsSync(threadDir(root, 'u1', AGENT, empty.threadId))).toBe(true);
 
     await store.delete('u1', AGENT, empty.threadId);

@@ -1,10 +1,3 @@
-/**
- * 单元测试：本体 `ontology.yaml` 的 metadata 解析（2026-10-03，`FR-058`）
- *
- * 重点：**只取 6 项**、缺项为 `null`（不阻塞导入）、id 类字段保留数字、
- * YAML 非法/缺 `metadata` 段判为格式无效（`VALIDATION_FAILED` + 可读原因）。
- * 扫描与状态判定见 `ontology-market.spec.ts`，端到端见 `ontologies.spec.ts`。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';

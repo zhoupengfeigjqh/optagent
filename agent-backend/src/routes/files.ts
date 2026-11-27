@@ -1,31 +1,3 @@
-/**
- * 文件路由（T039 / FR-020、FR-021 + 002 US6/US7 + 003 三空间改造）：
- * - POST /api/files/upload：已**迁到 `files-upload.ts`**（012：本文件达 500 行硬门禁，
- *   且该端点的落盘命名要改——不重名用原名、重名 `原名(n).ext`，唯一实现在
- *   `domain/upload-name.ts`）。早验、字段约束、类型白名单等细节见该文件头注释
- * - GET /api/files/list?dir=：列目录
- * - GET /api/files/download?dir=&filename=：附件下载；路径穿越一律 400
- * - GET /api/files/preview?dir=&filename=：内联预览（Content-Disposition: inline，
- *   按扩展名映射 Content-Type；`.xlsx` 返回结构化 JSON（见 `domain/preview/xlsx-sheets.ts`），
- *   `.xls` 回退附件下载；超过预览上限 → 413）
- * - GET /api/files/workspace：文件空间汇总（空间 → 子目录 → 文件 + 每空间策略 +
- *   目录级可上传类型 `upload_extensions`）
- * - GET /api/files/rules：HITL「从算法规则选择」数据源——「数据准备/算法规则」最新
- *   规则文件（updated_at 最大）解析成结构化行（columns/rows/priority_column）
- * - DELETE /api/files?dir=&filename=：删除文件（2026-11-18 / 025：只读空间下线后全部可删）
- * - GET /api/files/raw：MCP 签名直链回源（见 003 spec）
- *
- * **归属（009）**：文件空间视角＝**当前选中的数字人**，且路径根是**该数字人的数据域**
- * （`user-data/{数字人}/`）。相对路径语义不变（`数据准备/生产计划`、`临时空间`…），
- * 但解析结果随数字人而异 ⇒ 跨数字人访问在路径层不可达（403 DIR_VALIDATION / 404）。
- * 场景（scenario.json）随数字人存放，故同一用户的不同数字人可见的目录清单不同。
- * 未选中数字人 → 409 AGENT_NOT_SELECTED；选中但不可用 → 409 AGENT_NOT_AVAILABLE；
- * 选中但该数字人未配置场景 → 503 SCENARIO_NOT_CONFIGURED。
- *
- * **读方向的唯一例外**（2026-10-21）：`download` / `preview` 额外放行
- * `临时空间/后台产出`（`checkDirRead`）——MCP 服务回写的产出在那里，聊天区的 `filePath`
- * 入口要能点开；`upload` / `list` / `delete` 仍走 `checkDir`，口径不变。
- */
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -41,13 +13,10 @@ import { checkDir, checkDirRead, currentAgentFor } from './files-scope.js';
 import { registerFileUploadRoute } from './files-upload.js';
 import { registerFilePutRoute } from './files-put.js';
 
-/** 内联预览 Content-Type 映射；`.xls`（BIFF 容器）前端无法内联渲染，回退附件下载 */
 const PREVIEW_CONTENT_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  // 2026-11-16：`.md` 与 `.txt` 同形态内联（`read_file` 一直支持 `.md`，
-  // 但预览缺映射导致只能下载——属于遗漏，不是设计决策；本期补齐）
   '.md': 'text/markdown; charset=utf-8',
   '.pdf': 'application/pdf',
   '.jpg': 'image/jpeg',
@@ -58,26 +27,12 @@ const PREVIEW_CONTENT_TYPES: Record<string, string> = {
   '.gif': 'image/gif',
   '.tif': 'image/tiff',
   '.tiff': 'image/tiff',
-  // 2026-10-20：用户上传的 `.html` 可内联（文件空间里点开即渲染，与 PDF 同形态），
   // 但**必须沙箱化**——它会在本站源下执行脚本，见 `appendHtmlSecurityHeaders`
   '.html': 'text/html; charset=utf-8',
 };
 
-/** 需要在同源下执行脚本的预览类型（目前只有用户上传的 HTML） */
 const SCRIPTABLE_PREVIEW_EXT = '.html';
 
-/**
- * 给用户上传的 HTML 响应补安全头（内联预览与 `raw` 直链**共用**）。
- *
- * 不加这两条的后果：上传一个带 `<script>` 的 HTML，点开预览就等于在平台源上执行它
- * （读取本站 Cookie / 存储、调用本站接口）——即"存储型 XSS 的入口"。
- *
- * - `Content-Security-Policy: sandbox`：把文档降为**唯一不透明源**且**不执行脚本**
- *   （等价于 iframe 的 `sandbox=""`），CSS 与图片照常渲染；
- * - `X-Content-Type-Options: nosniff`：禁止浏览器把被声明为 HTML 的内容再猜成别的类型。
- *
- * 前端 iframe 另有 `sandbox=""` 作为第二道保险（双保险不冲突）。
- */
 function appendHtmlSecurityHeaders(
   reply: { header(key: string, value: string): unknown },
   ext: string,
@@ -127,9 +82,7 @@ const rawQuerySchema = {
 } as const;
 
 export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void {
-  // R11：后台产出回写端点（实现见 `files-put.ts`）
   registerFilePutRoute(app, ctx);
-  // 上传端点（012 迁到独立文件，见 `files-upload.ts`）
   registerFileUploadRoute(app, ctx);
 
   app.get('/api/files/list', { schema: { querystring: listQuerySchema } }, async (req) => {
@@ -181,7 +134,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       const userId = getCurrentUser().userId;
       const { dir, filename } = req.query as { dir: string; filename: string };
       const agent = currentAgentFor(ctx, userId);
-      // 同上：产出目录的读入口（`.xlsx` 在本端点回退成附件下载）
       const target = checkDirRead(ctx, userId, agent, dir);
       if (filename !== path.basename(filename) || filename.includes('..')) {
         throw new ApiError(400, 'VALIDATION_FAILED', `非法文件名: ${filename}`);
@@ -203,9 +155,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         );
       }
       const ext = path.extname(filename).toLowerCase();
-      // `.xlsx`（2026-11-17）：服务端解析成**结构化 JSON**（每个 sheet 的 rows / numericCols /
-      // merges），前端拿到直接画表——不引前端解析库，也不必写 RFC4180 解析器。
-      // 与模型侧解耦：`read_file` 仍走 `xlsxToText` 的 CSV 文本（两条通路共用同一个 SheetJS）。
       if (ext === '.xlsx') {
         let workbook: PreviewWorkbook;
         try {
@@ -232,19 +181,15 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
       const inline = reply
         .header('content-type', contentType)
         .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(filename)}`);
-      // `.html`：沙箱化后内联（脚本不执行、不共享本站源）
       appendHtmlSecurityHeaders(inline, ext);
       return inline.send(buf);
     },
   );
 
-  // HITL「从算法规则选择」数据源：取「数据准备/算法规则」中 updated_at 最新的
-  // 规则文件（.xlsx / .csv），解析成结构化行返回（解析在服务端，前端只渲染）。
   app.get('/api/files/rules', async (_req) => {
     const userId = getCurrentUser().userId;
     const agent = currentAgentFor(ctx, userId);
     // 2026-11-17：预定义目录可被屏蔽——先判一次，屏蔽按"能力不可用"（404）呈现，
-    // 不把面向运维的"不在场景清单内，允许：…"甩给用户，也不借机暴露其他目录清单
     assertRulesDirOpen(ctx, userId, agent);
     const target = checkDir(ctx, userId, agent, `${SPACE_PREP}/${RULES_SUBDIR}`);
     const access = fileAccessFor(ctx, userId, agent);
@@ -266,7 +211,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
         `「${SPACE_PREP}/${RULES_SUBDIR}」目录暂无文件，请先上传规则文件`,
       );
     }
-    // 「最新」按 mtime 判定（与 list 接口的 updated_at 同一来源）
     const latest = files.reduce((a, b) =>
       Date.parse(b.modifiedAt) > Date.parse(a.modifiedAt) ? b : a,
     );
@@ -304,7 +248,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     };
   });
 
-  // 文件空间删除（002 US8 / FR-031）：2026-11-18（025）只读空间下线，两个空间均可删
   app.delete('/api/files', { schema: { querystring: downloadQuerySchema } }, async (req) => {
     const userId = getCurrentUser().userId;
     const { dir, filename } = req.query as { dir: string; filename: string };
@@ -323,7 +266,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     return { dir: target.relPath, filename, deleted: true };
   });
 
-  // MCP 签名直链（远程/跨容器服务回源下载）：HMAC 绑定 (u, p, exp)，URL 即凭证，无需会话。
   // 009：`p` = `{数字人}/{数字人数据域内相对路径}`（数字人段同样在签名内 ⇒ 不可篡改），
   // 因此跨数字人读取在签名层即不可达；形状不合法一律 404（与"文件不存在"不可区分）。
   app.get('/api/files/raw', { schema: { querystring: rawQuerySchema } }, async (req, reply) => {
@@ -348,13 +290,10 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
     const raw = reply
       .header('content-type', PREVIEW_CONTENT_TYPES[ext] ?? 'application/octet-stream')
       .header('cache-control', 'no-store');
-    // 直链同样可能被浏览器**直接打开**：`.html` 不沙箱化就是一次同源 XSS
     appendHtmlSecurityHeaders(raw, ext);
     return raw.send(buf);
   });
 
-  // 三空间工作空间汇总（003 改造）：空间 → 子目录 → 文件，附每空间策略
-  // 2026-10-13：响应体装配拆到 `domain/workspace-view.ts`（本文件行数逼近 500 门禁，原则二）
   app.get('/api/files/workspace', async (_req) => {
     const userId = getCurrentUser().userId;
     const agent = currentAgentFor(ctx, userId);
@@ -373,15 +312,6 @@ export function registerFileRoutes(app: FastifyInstance, ctx: AppContext): void 
   });
 }
 
-/**
- * 「数据准备/算法规则」是否对该数字人开放（2026-11-17：预定义目录可被平台屏蔽）。
- *
- * 屏蔽后该目录不在场景清单内。若直接交给 `checkDir`，用户会收到 403 与面向运维的
- * "不在场景清单内，允许：…"（还会把其他目录清单暴露给业务用户）。规则选择是**用户侧**
- * 入口，故按"这条能力不可用"返回 404，与"目录暂无文件"同码同口径。
- *
- * 场景未配置时**不在这里判定**：仍由 `checkDir` 走既有的 503 映射，保持唯一出口。
- */
 function assertRulesDirOpen(ctx: AppContext, userId: string, agentName: string): void {
   let dirs: readonly string[];
   try {

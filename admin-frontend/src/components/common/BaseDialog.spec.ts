@@ -1,9 +1,3 @@
-/**
- * 组件测试：通用弹窗壳（2026-11-10）。
- *
- * 覆盖：原生 `<dialog>` 开关、Esc 关闭、footer 插槽、标题 id 唯一、关闭后焦点归还
- * （宪章原则四：键盘与读屏由原生 dialog 提供，壳只补焦点归还）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import BaseDialog from './BaseDialog.vue'

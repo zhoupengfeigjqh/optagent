@@ -1,9 +1,3 @@
-/**
- * 组件测试：SKILL 上传对话框（T096）
- *
- * 覆盖 `FR-037`~`FR-041` 的界面分支：未选文件、安装成功、
- * 失败原因可读、**名称冲突要求显式选择覆盖或取消**。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SkillUploadDialog from './SkillUploadDialog.vue'

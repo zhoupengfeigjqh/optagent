@@ -1,21 +1,3 @@
-/**
- * 上传落盘命名集成测试（012）：**不重名用原名**，重名 `原名(n).ext`（半角括号），并发零覆盖。
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test:all           # 全部测试
- *   npm run test:integration   # 仅集成测试
- *
- * 为什么单独一个文件：`files-scenario.spec.ts` 已远超 500 行（存量），
- * 新增 8 条命名用例不再往里堆（宪章原则二）。这里自带一份最小 fixture（一个数字人 + 场景）。
- *
- * 覆盖（对应 012 FR-020~FR-028 / SC-003 / SC-004）：
- * - 原名落盘（不再追加时间戳）、`(1)`·`(2)`、稀疏取最小、多点文件名；
- * - `Promise.all` 并发同名零覆盖、同名 20 连传零覆盖；
- * - 冲突域只在目标目录（跨空间互不影响）、历史时间戳文件并存不改名。
- *
- * 说明：`tests/` 不在 tsconfig 的 include 内（不参与构建），此处用无扩展名导入，
- * 由 Vitest 解析到 `src/*`。
- */
 import {
   existsSync,
   mkdirSync,
@@ -37,7 +19,6 @@ import { buildServer } from '../../src/server';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-naming-'));
 const userId = 'admin';
 const AGENT = 'alpha';
-/** 数据准备（带二级目录，用于跨目录同名）+ 两个空间 */
 const SCENARIO = { scenario: '命名', data_prep_dirs: ['生产计划'] };
 
 let app: FastifyInstance;
@@ -67,7 +48,6 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 手工 multipart（`dir` 字段在前，命中早验路径）；与 `files-scenario.spec.ts` 同款 */
 function multipart(dir: string, filename: string, content: string, contentType: string) {
   const boundary = '----vitest-naming-boundary';
   const body = Buffer.concat([
@@ -86,7 +66,6 @@ function uploadTo(dir: string, filename: string, content: string) {
   return app.inject({ method: 'POST', url: '/api/files/upload', payload: body, headers });
 }
 
-/** 目录绝对路径（与后端 `userDataDir(...)/<空间>` 同构） */
 function absDir(space: string): string {
   return path.join(root, 'users', userId, 'user-data', AGENT, space);
 }
@@ -170,7 +149,6 @@ describe('并发与冲突域（012 FR-022 / FR-023 / FR-025 / SC-004）', () => 
 
   it('跨目录同名互不影响（冲突域只在目标目录）', async () => {
     expect(await uploadExpect201('临时空间', 'n12-cross.csv', 'tmp')).toBe('n12-cross.csv');
-    // 同一数字人的另一个空间：同名照用原名（数据准备默认白名单只有 csv/xlsx）
     expect(await uploadExpect201('数据准备/生产计划', 'n12-cross.csv', 'prep')).toBe(
       'n12-cross.csv',
     );

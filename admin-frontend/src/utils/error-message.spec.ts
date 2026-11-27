@@ -1,10 +1,3 @@
-/**
- * 单元测试：错误码 → 中文文案映射（原则七）
- *
- * 守住两条口径：
- * ① 前端**按 code 分派**文案，不直接展示后端 `message`；
- * ② 未知码回退通用文案并**保留原码**（便于排查）。
- */
 import { describe, expect, it } from 'vitest'
 import { ADMIN_ERROR_CODES, ERROR_MESSAGES, GENERIC_MESSAGE } from '../constants/error-messages'
 import { extractDetailErrors, toErrorInfo, toUserMessage } from './error-message'

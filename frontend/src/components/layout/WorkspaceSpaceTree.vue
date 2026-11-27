@@ -1,18 +1,4 @@
 <script setup lang="ts">
-/**
- * 文件空间树（US8，三空间分层）
- *
- * 结构以后端 `GET /api/files/workspace` 下发为准，与加号上传入口、`@` 引用面板同构：
- * - 一级：**两个空间**（数据准备 / 临时空间）
- * - 二级：仅**数据准备**有（scenario 定义的子目录）
- * - 三级：文件行（`WorkspaceFileList`）
- *
- * 临时空间为**扁平空间**（`dirs` 仅含空间自身），展开空间即直接出文件；
- * 该判定与 `@` 面板共用 `utils/space.ts`，避免两处各写一套。
- *
- * **默认全部收起**（FR-031）；一级/二级展开状态由 `useWorkspace` 经 props 注入
- * （本次会话内保持，面板收起不重置）。纯展示：不发起请求，删除的二次确认由 `WorkspacePanel` 承担。
- */
 import type { FileReference, WorkspaceSpace } from '../../api/types'
 import { isFlatSpace, spaceFileCount, spaceSubDirs } from '../../utils/space'
 import BaseIcon from '../common/BaseIcon.vue'
@@ -21,13 +7,9 @@ import WorkspaceFileList from './WorkspaceFileList.vue'
 
 const props = withDefaults(
   defineProps<{
-    /** 三空间树（后端 workspace 下发） */
     spaces?: WorkspaceSpace[]
-    /** 已展开的空间名（空数组 = 全部收起） */
     expandedSpaces?: readonly string[]
-    /** 已展开的二级目录路径（空数组 = 全部收起） */
     expandedDirs?: readonly string[]
-    /** 加载中 */
     loading?: boolean
   }>(),
   { spaces: () => [], expandedSpaces: () => [], expandedDirs: () => [], loading: false },
@@ -57,7 +39,6 @@ function isDirExpanded(dir: string): boolean {
 
   <ul v-else class="workspace-tree__spaces" aria-label="文件空间">
     <li v-for="space in spaces" :key="space.name" class="workspace-tree__space">
-      <!-- 一级：空间（数据准备 / 临时空间） -->
       <button
         type="button"
         class="workspace-tree__toggle"
@@ -74,7 +55,6 @@ function isDirExpanded(dir: string): boolean {
       </button>
 
       <div v-if="isSpaceExpanded(space.name)" class="workspace-tree__nest">
-        <!-- 扁平空间（临时空间）：展开空间直接出文件 -->
         <template v-if="isFlatSpace(space)">
           <WorkspaceFileList
             v-if="space.dirs.length > 0 && space.dirs[0].files.length > 0"
@@ -87,9 +67,6 @@ function isDirExpanded(dir: string): boolean {
           <p v-else class="workspace-tree__hint workspace-tree__empty">该空间暂无文件</p>
         </template>
 
-        <!-- 数据准备：展开二级子目录，子目录再展开出文件 -->
-        <!-- 2026-11-17：管理员可屏蔽预定义目录（甚至全部屏蔽）→ 空清单要有明确空态，
-             不能让用户看成"没加载出来" -->
         <template v-else-if="spaceSubDirs(space).length > 0">
           <ul class="workspace-tree__dirs">
             <li v-for="dir in spaceSubDirs(space)" :key="dir.dir" class="workspace-tree__dir">
@@ -163,7 +140,6 @@ function isDirExpanded(dir: string): boolean {
   background: var(--color-bg-subtle);
 }
 
-/* 逐级缩进：一级之下（子目录 / 扁平空间文件）与子目录之下的文件各缩进一次 */
 .workspace-tree__nest {
   padding-left: var(--space-5);
 }

@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_KEY_THINKING } from '../constants/limits'
 import { readStoredThinking, safeSessionStorage, writeStoredThinking } from './thinking-storage'
 
-/** 只实现本模块用到的两个方法；读/写可被注入为抛错，用来走容错分支。 */
 function fakeStorage(overrides: Partial<Storage> = {}): Storage {
   return {
     getItem: () => null,

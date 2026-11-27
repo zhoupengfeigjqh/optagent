@@ -1,14 +1,3 @@
-/**
- * 意图聚焦（013）留档：`intent-focus.jsonl`（线程目录下的独立侧车文件）。
- *
- * 三条硬约束（规格 FR-020/022/023）：
- * 1. **与会话历史物理分离**——绝不写 `history.jsonl`，否则任何"读历史即组装上下文"
- *    的实现路径都可能把聚焦内容带进下一轮（这是本特性最重的约束）；
- * 2. **运行期没有读取方**——`readAll` 只服务于事后分析与测试；
- * 3. **有界**——超过 256KB 或 200 行即重写保留最近 100 条，重写用"临时文件 + 原子改名"。
- *
- * 并发：per-thread Promise 链串行（与 `history.ts` 同范式）；写入失败只告警，不影响对话。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IntentFocusDisposition } from './state.js';
@@ -19,48 +8,27 @@ import { threadDir } from '../dirs.js';
 export const MAX_RECORD_BYTES = 256 * 1024;
 /** 单线程记录上限：行数 */
 export const MAX_RECORD_LINES = 200;
-/** 触发重写后保留的条数 */
 export const KEEP_RECORD_LINES = 100;
 
-/** 技能决策留档（含未入选者） */
 export interface SkillFocusRecord {
   name: string;
   description: string;
   is_ontology: boolean;
-  /** 关联本体 id；一个本体技能恒只有一个本体，非本体技能为 null */
   ontology_id: string | null;
   score: number | null;
   selected: boolean;
   reason: string | null;
 }
 
-/**
- * 行为决策留档（**只写入选行为**，2026-11-06 口径）。
- *
- * 2026-11-20：`functions` 按**入选函数**重新写入（2026-11-06 删掉的是"只写不读的常量"，
- * 这里写的是判分结果，性质不同）；取数行为并入 `behaviors` 并标 `source: 'concept_query'`。
- *
- * 2026-11-08（019）在"只写入选行为"之上补了三件事，用于解释"这条为什么会出现"：
- * - `source`：直接命中 / 上游发散 / 下游发散（发散项没有分数，`score` 为 null）；
- * - `hop`：距 direct 概念的跳数（direct 恒为 0）；
- * - `via_concept`：**所属概念**（发散项即这一跳的终点概念；direct 为行为自己的概念或 null）。
- *
- * 2026-11-13 补 `from_concept`：这一跳的**起点概念**（direct 为 null）。下游概念不落概念表，
- * 而下游多源汇聚（原材料 / 供应商 / 客户订单 都能发散到采购单），只看 `via_concept`
- * 无法判断"这条卡片项是从哪个概念发散来的"。关系名不落档：以"同一对概念之间恒有一条关系"
- * 为前提，`(from_concept, via_concept)` 唯一确定关系；该前提被打破时须补 `via_relation`。
- */
 export interface CapabilityFocusRecord {
   name: string;
   title: string;
   ontology_id: string;
   ontology_name: string | null;
-  /** 直接命中 = Laya 分数；发散项 = null（不再判分） */
   score: number | null;
   source: BehaviorSource;
   hop: number;
   via_concept: string | null;
-  /** 这一跳的起点概念；`direct` 为 null */
   from_concept: string | null;
 }
 
@@ -74,45 +42,29 @@ export interface FunctionFocusRecord {
   title: string;
   ontology_id: string;
   ontology_name: string | null;
-  /** 恒 > 函数阈值 */
   score: number;
-  /** 依赖的概念名（取数入口） */
   related_concepts: string[];
 }
 
-/** 概念留档（019）：只有提示通道有概念，卡片通道没有 */
 export interface ConceptFocusRecord {
   name: string;
   title: string;
   ontology_id: string;
   ontology_name: string | null;
-  /** 直接命中 / 上游发散（下游概念不进提示，因此不落这个概念表） */
   source: 'direct' | 'upstream';
   hop: number;
   via_concept: string | null;
+  via_edges: Array<{ from: string; relation: string }>;
 }
 
-/**
- * 指代改写留档字段（027）。
- *
- * 独立成一组是为了让 **`IntentFocusRecordDraft` 能把它声明为可选**：
- * 存量调用方（测试、历史早退分支）不必为了编译期齐全而逐个补七个键，
- * 而 `buildRecordDraft` 保证**新记录恒有这七个键**（缺省见 data-model §4.1）。
- */
 export interface RewriteFocusRecord {
-  /** 判定结论；`null` = 未执行（开关关 / 跳过 / 短路 / 未配置 / 判定失败） */
   need_rewrite: boolean | null;
-  /** 单条 `noul` 分数（未执行或失败为 `null`） */
   rewrite_score: number | null;
-  /** 实际送进评分的改写文本（≤100 码点）；空串 = 未改写 */
   rewrite_query: string;
-  /** 改写结果是否因超 100 字被截断 */
   rewrite_truncated: boolean;
   /** 改写耗时（毫秒）；未执行为 `null` */
   rewrite_ms: number | null;
-  /** 参与改写的历史问答轮数（0~2） */
   rewrite_history_turns: number;
-  /** 原因枚举（见 data-model §3.1 / §3.2）；未执行且未失败为 `null` */
   rewrite_reason: string | null;
 }
 
@@ -133,7 +85,6 @@ export const REWRITE_RECORD_DEFAULTS: Readonly<RewriteFocusRecord> = Object.free
   rewrite_reason: null,
 });
 
-/** 一条判定记录（字段口径见 `data-model.md §4.1`） */
 export interface IntentFocusRecord extends RewriteFocusRecord {
   at: string;
   thread_id: string;
@@ -146,36 +97,31 @@ export interface IntentFocusRecord extends RewriteFocusRecord {
   reason: string | null;
   model: string | null;
   round_ms: number | null;
-  /** 候选总数（技能 + 能力） */
   candidates: number;
-  /** 本次判定实际发出的批数（`noul` 分批后：1 批 ≈ 32 题） */
   batches: number;
-  /** 候选明细是否被截断 */
   truncated: boolean;
-  /** 019：本轮生效的聚焦阶数（0 = 只聚焦本身） */
   depth: number;
   skills: SkillFocusRecord[];
   /** 019：提示通道的概念（直接命中 + 上游），不设上限 */
   concepts: ConceptFocusRecord[];
-  /** 提示通道的行为（直接命中 + 上游发散 + 关联概念取数） */
   behaviors: CapabilityFocusRecord[];
-  /** 卡片通道的行为（直接命中 + 下游发散）；**不含**函数与取数 */
   tool_tip_behaviors: CapabilityFocusRecord[];
-  /** 2026-11-20：入选函数（只写入选项） */
   functions: FunctionFocusRecord[];
   prompt: string;
   prompt_truncated: boolean;
   warnings: string[];
   error: string | null;
+  /**
+   * 028：规划门禁分数（0~1）。
+   *
+   * `null` = 没判（门禁关闭 / 数字人未开规划 / 判定失败或超时）。
+   * 仅用于事后标定阈值与解释"这轮为什么没走规划"。
+   */
+  plan_score?: number | null;
+  /** 028：门禁判定耗时（毫秒）；未判定为 `null` */
+  plan_round_ms?: number | null;
 }
 
-/**
- * 调用方提供的字段（`at` / `seq` 由存储补齐）。
- *
- * 027：改写相关的七个键在这里**可选**——只有 `buildRecordDraft` 是权威铸造点，
- * 其它直接构造 draft 的调用方（测试、将来的分析工具）不必关心它们；
- * 由 `buildRecordDraft` 写入的记录则恒有这七个键。
- */
 export type IntentFocusRecordDraft = Omit<
   IntentFocusRecord,
   'at' | 'seq' | keyof RewriteFocusRecord
@@ -187,7 +133,6 @@ export interface IntentFocusStoreLogger {
 
 export class IntentFocusStore {
   private readonly chains = new Map<string, Promise<void>>();
-  /** 每线程下一个序号（懒初始化：首次写入时按现有行数对齐） */
   private readonly nextSeq = new Map<string, number>();
 
   constructor(
@@ -195,14 +140,10 @@ export class IntentFocusStore {
     private readonly logger?: IntentFocusStoreLogger,
   ) {}
 
-  /** 记录文件绝对路径（测试与排障用） */
   filePathOf(userId: string, agentName: string, threadId: string): string {
     return path.join(threadDir(this.root, userId, agentName, threadId), 'intent-focus.jsonl');
   }
 
-  /**
-   * 追加一条记录。返回 Promise 仅用于测试同步；**任何失败都不抛出**（FR-024）。
-   */
   append(
     userId: string,
     agentName: string,
@@ -219,7 +160,6 @@ export class IntentFocusStore {
     return next;
   }
 
-  /** 读取全部合法记录（仅供分析与测试；**不是**上下文组装路径） */
   readAll(userId: string, agentName: string, threadId: string): IntentFocusRecord[] {
     const file = this.filePathOf(userId, agentName, threadId);
     if (!fs.existsSync(file)) return [];

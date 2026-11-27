@@ -7,7 +7,6 @@
  */
 withDefaults(
   defineProps<{
-    /** 读屏与可见文案 */
     label?: string
   }>(),
   { label: '加载中' },

@@ -1,9 +1,3 @@
-/**
- * 组件测试：用户卡片列表（T082）
- *
- * 守住 `FR-023`：卡片展示用户名与已关联数字人角色名清单，可展开查看
- * 搭配摘要与异常标记（部署前核对总账）。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import UserCardList from './UserCardList.vue'
@@ -23,8 +17,6 @@ vi.mock('../../api/deploy', () => ({
   deploy: vi.fn(),
   fetchReferences: vi.fn(),
   fetchDeployHistory: vi.fn(),
-  // 乐观锁版本的**唯一**来源（2026-09-27「目标运行形态」下架后
-  // `/api/admin/platform/settings` 已不存在，取版本会 404 → 保存必失败）
   fetchManifest: (...a: unknown[]) => fetchManifest(...a),
 }))
 
@@ -45,8 +37,6 @@ vi.mock('../../api/users', () => ({
 }))
 
 vi.mock('../../api/http', () => ({
-  // 故意**不**提供 revision：组件取版本 MUST 走部署清单端点。一旦有人改回
-  // `/api/admin/platform/settings`（那个路由已下架），版本断言就会失败。
   http: { get: vi.fn().mockResolvedValue({}), put: vi.fn(), post: vi.fn(), del: vi.fn() },
   ApiError: class extends Error {},
   createHttpClient: vi.fn(),
@@ -90,7 +80,6 @@ beforeEach(() => {
   updateUser.mockReset()
   resetUserPassword.mockReset()
   withdrawDeploy.mockReset()
-  // 乐观锁版本：由部署清单端点给出（当前 revision = 1）
   fetchManifest.mockReset().mockResolvedValue({ items: [], total: 0, revision: 1 })
 })
 
@@ -129,7 +118,6 @@ describe('UserCardList', () => {
     await del?.trigger('click')
     await wrapper.vm.$nextTick()
 
-    // 页面里有多个弹窗（编辑关联 / 删除 / 撤回），按 `data-test` 精确定位
     const dialog = wrapper.find('[data-test="delete-dialog"]')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('撤回该用户在运行环境中的数字人')
@@ -258,7 +246,6 @@ describe('UserCardList —— 撤回部署（2026-09-16）', () => {
     await wrapper.find('[data-test="withdraw-dialog"] [data-test="confirm"]').trigger('click')
     await flushPromises()
 
-    // 版本取自部署清单端点（fetchManifest → revision: 1）
     expect(fetchManifest).toHaveBeenCalled()
     expect(withdrawDeploy).toHaveBeenCalledWith('admin', 1)
     expect(wrapper.emitted('changed')).toHaveLength(1)
@@ -279,14 +266,6 @@ describe('UserCardList —— 撤回部署（2026-09-16）', () => {
   })
 })
 
-/**
- * 编辑关联保存（2026-10-14 修复回归）。
- *
- * 原先这里取版本用的是**已下架**的 `/api/admin/platform/settings` ⇒ 一保存就 404
- * （NOT_FOUND「请求的内容不存在」），保存根本走不到 `updateUser`。
- * 且该错误被同时喂进卡片列表的错误位，顶着"用户与关联数字人加载失败"展示——
- * 一个"保存失败"被误报成"加载失败"。下面两条分别守住这两点。
- */
 describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
   const AGENTS = [
     {
@@ -305,7 +284,6 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
     },
   ]
 
-  /** 打开"编辑关联"（候选数字人由 `listAgents` 提供） */
   async function openEditor(wrapper: ReturnType<typeof mountList>): Promise<void> {
     await wrapper
       .findAll('button')
@@ -335,7 +313,6 @@ describe('UserCardList —— 编辑关联保存（2026-10-14）', () => {
     const wrapper = mountList()
     await openEditor(wrapper)
 
-    // "选了数字人"：admin 原本关联 demo / broken，这里再勾上 extra
     const option = wrapper
       .findAll('li.checkbox-list__item')
       .find((li) => li.text().includes('extra'))

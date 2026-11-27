@@ -1,23 +1,7 @@
-/*
- * @Author: Nose陈建
- * @LastEditTime: 2026-10-22
- *
- * 排产数据服务（`/dataApi`）专用的 axios 实例。
- *
- * `baseURL` **恒为空串**（同源相对路径），这是语义而非缺省值：
- * `/dataApi` 只是前端给外部排产服务起的本地别名，它只存在于「同源 + 网关」这条链路上——
- * 开发期由 `vite.config.ts` 的 `server.proxy['/dataApi']` 转发到 `192.168.0.188:8080` 并把前缀
- * 重写成 `/api`，生产期由 `gateway/nginx.conf` 的 `location /dataApi/` 做同一件事。
- * 一旦这里拼上 `VITE_API_BASE_URL`（例如被配成直连 `http://host:3000`），排产请求就会
- * 绕过网关打到 agent-backend 上，表现为跨源 + 404，且只在改环境变量时才暴露。
- * 需要按环境切换地址的接口走 `src/api/http.ts`（其 `resolveBaseUrl()` 才读该变量）。
- */
 import axios from 'axios'
-// import Msg from '@/utils/msg';
 import { message } from 'ant-design-vue'
 import { getToken } from '@/utils/cookie'
 
-//token 名称（与后端 sa-token token-name 一致：Authentication，见 utils/cookie.js）
 const Authentication = 'Authentication'
 
 const service = axios.create({
@@ -26,10 +10,8 @@ const service = axios.create({
   //请求超时30秒
   timeout: 30000,
 })
-//请求拦截器
 service.interceptors.request.use(
   function (config) {
-    //携带登录 token
     const token = getToken()
     if (token) {
       config.headers[Authentication] = token
@@ -37,19 +19,15 @@ service.interceptors.request.use(
     return config
   },
   function (err) {
-    //请求错误
     return Promise.reject(err)
   },
 )
 
-//响应拦截器
 service.interceptors.response.use(
   function (response) {
     const res = response.data
 
-    // 业务层面的错误判断
     if (res.success === false || (res.code && res.code !== 200)) {
-      // 401 业务码也做登录跳转（有些后端业务错误也用 401）
       if (res.code === 401) {
         message.error('登录已过期，请重新登录')
         window.location.href = '/login'
@@ -62,7 +40,6 @@ service.interceptors.response.use(
     return res
   },
   function (res) {
-    // HTTP 层面的错误（网络错误、非 2xx 状态码）
     if (res.response && res.response.status === 401) {
       message.error('登录已过期，请重新登录')
       window.location.href = '/login'

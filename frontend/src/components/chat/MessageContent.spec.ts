@@ -1,11 +1,3 @@
-/**
- * 组件测试：正文的最小 Markdown 渲染与搜索高亮（2026-10-16）。
- *
- * 两条主线：
- * 1. **结构**：标题/列表/表格/代码块渲染成形，标记本身不出现；
- * 2. **序号连续性**：片段换了渲染层，`data-match-index` 仍必须与 `useSessionSearch`
- *    按原文统计的口径一致——这是改造中最容易被踩坏、又最难在肉眼上发现的地方。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -32,7 +24,6 @@ describe('MessageContent —— 最小 Markdown 渲染', () => {
       },
     })
 
-    // `##` → h4（正文层级压到 h3~h5，不与页面结构抢 h1/h2）
     expect(wrapper.find('h4').text()).toBe('结论')
     expect(wrapper.findAll('li').map((item) => item.text())).toEqual(['甲', '乙'])
     expect(wrapper.findAll('th').map((cell) => cell.text())).toEqual(['工序', '工时'])
@@ -123,7 +114,6 @@ describe('MessageContent —— 搜索高亮（序号与原文口径一致）', 
 
   it('关键词落在被丢掉的标记里：计数照旧按原文，页面上不产生高亮节点', () => {
     // `| ---` 是分隔行，标记被吃掉 ⇒ 无处可高亮；这里把"已知取舍"钉住，
-    // 免得后来者以为渲染漏了
     const wrapper = mount(MessageContent, {
       props: { content: '| 甲 |\n| --- |\n| 1 |', keyword: '---' },
     })

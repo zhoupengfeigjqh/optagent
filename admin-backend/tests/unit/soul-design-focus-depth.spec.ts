@@ -1,14 +1,3 @@
-/**
- * 单元测试：聚焦阶数 `intent_focus_depth` 的校验与物化（019）。
- *
- * 从 `soul-design.spec.ts` 拆出：019 的增量用例使原文件超过 500 行（原则二），
- * 这里只保留阶数相关的**校验口径**与**产物口径**，主题单一、与被测模块同名同目录。
- *
- * 覆盖三类：
- * - **缺省**：键缺失 / 新建数字人 / 存量升级一律 `0`（等价于 016 行为）；
- * - **校验**：`0~2` 原样通过，越界与非整数拒绝式失败（不 clamp）；
- * - **物化**：仅「开启且非 0」写键；0 阶与关闭态产物逐字一致。
- */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../src/domain/api-error.js';
 import {
@@ -112,7 +101,6 @@ describe('intent_focus_depth —— 聚焦阶数（019）', () => {
     const md = renderSoulMd(soul);
     expect(md).not.toContain('intent_focus');
     expect(md).not.toContain('intent_focus_depth');
-    // 与完全缺省态的产物一致（未搭配的内容不残留）
     expect(md).toBe(renderSoulMd(normalizeSoulDesign(validRaw(), OPTIONS)));
   });
 

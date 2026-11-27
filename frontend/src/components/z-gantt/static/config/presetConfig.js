@@ -1,10 +1,3 @@
-/**
- * 处理事件触发
- * @param context
- * @param eventName
- * @param rest
- * @returns
- */
 const handleTriggerEvent = function (context, eventName, ...rest) {
   const realEventName = `handle${eventName}`;
   if (typeof context[realEventName] === 'function') {
@@ -22,15 +15,14 @@ export const getPresetOptions = (context) => {
       spacingLeft: 0,
       scrollablePlotArea: {
         opacity: 0.5,
-        minWidth: 1000, // 内容的最小宽度
+        minWidth: 1000,
         minHeight: 100,
-        scrollPositionX: 0, // 初始水平滚动位置
+        scrollPositionX: 0,
       },
     },
     time: {
       timezoneOffset: -8 * 60,
     },
-    // 内置文案中文化（Highcharts 通过 lang 控制）
     lang: {
       resetZoom: '重置缩放',
       resetZoomTitle: '重置为 1:1',
@@ -67,9 +59,7 @@ export const getPresetOptions = (context) => {
       ],
       weekdays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
     },
-    // 范围选择器：按钮与日期输入框文案中文化
     rangeSelector: {
-      // 显示与编辑均使用 yyyy-MM-dd
       inputDateFormat: '%Y-%m-%d',
       inputEditDateFormat: '%Y-%m-%d',
       // 中文文案更宽，放宽按钮宽度避免文字被裁切
@@ -129,18 +119,13 @@ export const getPresetOptions = (context) => {
             click: function (event) {
               handleTriggerEvent(context, 'PointClick', event);
             },
-            // 鼠标右键点击进度条
             contextmenu: function (event) {
               handleTriggerEvent(context, 'PointClickMouseY', event);
               event.preventDefault();
             },
-            // 双击进度条
             dblclick: function (event) {
               handleTriggerEvent(context, 'PointDblclick', event);
             },
-            // 进度条拖拽开始
-            // Highcharts 以当前点为 this 调用 point 事件，dragStart 的载荷
-            // 只是归一化鼠标事件（不含 point），转发前需把 this 挂到事件上，
             // 否则下游（z-gantt-table / 业务页）拿不到被拖的数据点
             dragStart: function (event) {
               event.point = this;

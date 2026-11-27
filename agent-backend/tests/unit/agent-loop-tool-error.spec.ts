@@ -1,17 +1,3 @@
-/**
- * 端到端（进程内）：工具失败标记 → SSE 状态口径的**接线**验证（2026-10-29）。
- *
- * 为什么要有这一条：`domain/tool-error.ts` 的单测只能证明"标记长什么样"，
- * 证明不了 pi 的 loop **真的会把标记翻成 `isError`**。中间那一步靠的是
- * `runAgentLoop` 的 `afterToolCall` patch（`finalizeExecutedToolCall`），
- * 一旦 SDK 升级改了 patch 语义，没有这条用例就会**静默**退回"绿卡片"。
- *
- * 判据：`tool_execution_end.isError` → `agent-loop.ts` 映射的
- * `tool_call_end.status`（`'error' | 'success'`），这正是前端卡片与
- * `tool-events.jsonl` 的唯一来源。
- *
- * 用假 `streamFn` 驱动两跳：第一跳模型发起工具调用，第二跳收尾。
- */
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { EventStream } from '@earendil-works/pi-ai';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
@@ -34,7 +20,6 @@ function assistant(content: unknown[], stopReason: 'toolUse' | 'stop'): Assistan
   return { role: 'assistant', content, stopReason, usage: USAGE, timestamp: Date.now() } as never;
 }
 
-/** 一跳的假流：start（带 partial）+ done（带最终 message） */
 function fakeStream(message: AssistantMessage) {
   const stream = new EventStream(
     (event: { type: string }) => event.type === 'done' || event.type === 'error',
@@ -48,7 +33,6 @@ function fakeStream(message: AssistantMessage) {
   return stream as never;
 }
 
-/** 工具结果由用例决定：带标记 = 失败，普通文本 = 成功 */
 function makeTool(result: ReturnType<typeof toolErrorResult>): AgentTool {
   return {
     name: 'probe_tool',
@@ -59,13 +43,11 @@ function makeTool(result: ReturnType<typeof toolErrorResult>): AgentTool {
   };
 }
 
-/** 跑一轮：第一跳调用工具，第二跳收尾 */
 async function runOnce(tool: AgentTool): Promise<LlmEvent[]> {
   let hop = 0;
   const events: LlmEvent[] = [];
   for await (const event of runAgentLoopEvents({
     model: {} as never,
-    // 第一跳：模型发起一次工具调用；第二跳：纯文本收尾
     streamFn: (() => {
       hop += 1;
       return hop === 1
@@ -94,7 +76,6 @@ describe('agent-loop 的 afterToolCall 接线：标记 → tool_call_end.status'
 
     const end = events.find((event) => event.type === 'tool_call_end');
     expect(end).toMatchObject({ type: 'tool_call_end', callId: 'call_1', status: 'error' });
-    // 正文照旧上行（落盘与卡片展开都靠它）
     expect((end as { resultText?: string }).resultText).toContain('磁盘满了');
   });
 

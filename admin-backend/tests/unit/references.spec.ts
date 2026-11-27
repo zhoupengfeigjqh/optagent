@@ -1,12 +1,3 @@
-/**
- * 引用推导（`references.ts`）的**反向查询与可读文案**。
- *
- * 破坏性操作确认清单与数字人卡片「异常」标记要回答的都是
- * "这个工具 / 服务 / SKILL 被**谁**用了"，以及"异常怎么用一句话说清"。
- *
- * **2026-11-23**：`agentsReferencingOntology()` 与 `categoryLabel()` 随部署前校验 /
- * 全局异常项汇总下架后成为孤儿导出，已从源码与本文件一并删除。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

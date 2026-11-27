@@ -1,8 +1,3 @@
-/**
- * 组件测试：功能区内页签（T035）
- *
- * 覆盖 ARIA Tabs 模式与键盘操作（原则四、`FR-053`）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import TabsNav from './TabsNav.vue'

@@ -115,8 +115,9 @@ GNU tar 解包时能正确还原中文。务必不要改回 tar.exe / Compress-A
     admin-backend/.env              Docker 形态配置（入库）
     admin-backend/.platform-data/   平台设计态：数字人 / MCP 服务 / 技能 / 本体 / 用户
     jev-service/.env.local          TYPESAFE_API_KEY
-    fresh-service-v3/               生鲜订货解析 MCP（compose 的 fresh 服务构建源，
-                                    .env.local 可选：阈值 / 缓存 / 手写通道 LLM Key）
+    fresh-service-v4/               生鲜订货解析 MCP（compose 的 fresh 服务构建源，
+                                    .env 默认值 + .env.local 可选：阈值 / 缓存 / 手写通道 LLM Key；
+                                    回写三表 xlsx，不产 HTML 报告）
     docker-compose.yml / gateway/ / 各服务目录
   optonto/.data/onto_market/        本体市场只读源（供 compose 的 /opt/onto_market 挂载）
 

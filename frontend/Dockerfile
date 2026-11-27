@@ -1,4 +1,3 @@
-# ===== 构建阶段：vite build 产出静态资源 =====
 FROM node:20-alpine AS build
 WORKDIR /app
 

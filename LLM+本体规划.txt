@@ -1,0 +1,26 @@
+1）有个规划开关，若未开启则跳过
+若开启则进入规划，然后让LLM进行任务规划：
+读取聚焦的本体技能文件，结合意图聚焦结果，以及历史上下文，输出：一个任务序列LIST[JSON]（每一个json围绕一个query或command或function展开执行和审核，其中query可灵活绑定postFuntions进行计算）
+一个json的demo以及要求如下，由LLM输出
+{
+seqId：任务顺序id，int
+taskName：任务名称，20字以内
+content：任务内容，关于如何做这个任务的引导提示，300字以内
+type：任务类型（command：写入任务，query：查询任务，function：函数计算）
+action：本体行为名或函数名
+postFunctionList：if type为query，则可选当前可访问函数集（存储为一个list格式）作为执行query后进行调用，否则删除这个字段（content里的内容，需要说明如何使用这些函数）
+}
+
+2）输出后，有个规划检查器，checkPlan，包括以下硬编码检验环节：
+（1）type类型是否为command/query/function 3种类型之一，不允许为空和其他类型
+（2）type=command，action必须为本体command行为；type=query则action必须为本体query行为；type=function则action必须为非本体行为（command和query），只能是本体函数或其他函数
+（3）type=function时，给当前json增加一个字段，preActionList：填入当前function所有关联概念的query行为
+（4）type=query时，检查postFunctionList里每个函数名是否存在
+如果校验出错，则输出错误提示并重新规划
+如果无问题，则直接弹窗让用户确认，如果拒绝则本轮对话结束。
+
+
+3）根据规划的任务里的action
+（1）如果是本体行为，则提取对应前置规则的函数，以及函数关联的所有query，作为工具集。执行的是command，则按照当前command规则审核
+（2）如果是本体函数，则提取本体函数关联概念的所有query，作为工具集合。
+ps：每次执行任务，都重新提供一次工具集，并硬编码限制，不能调用之外的。直到主行为成功执行，方可认可currentTask执行完毕，进入下一步

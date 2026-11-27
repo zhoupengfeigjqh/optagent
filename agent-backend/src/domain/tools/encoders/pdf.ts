@@ -1,16 +1,3 @@
-/**
- * `.pdf` 输出编码器（2026-11-16，三期）。
- *
- * `content` 是**受限 Markdown**，只支持报告类文档真正需要的四类结构：
- * `#`/`##`/`###` 标题、空行分段的普通段落（`**加粗**` 生效）、`- `/`1. ` 列表、`| a | b |` 表格。
- *
- * 为什么受限：PDF 是排版结果而非结构文档，支持完整 Markdown 只会让模型产出
- * "看起来写了、实际排版崩了"的页面。宁可少支持，也不要生成错版。
- *
- * 字体：**必须嵌入开源中文字体**（`@expo-google-fonts/noto-sans-sc`，OFL 许可）。
- * PDF 内置的 Helvetica 等标准字体没有 CJK 字形，不嵌入就是满屏方块；
- * 而"不嵌入、靠阅读器替换"的方案在浏览器内置阅读器上不可靠，不能作为交付形态。
- */
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -19,28 +6,21 @@ import PDFDocument from 'pdfkit';
 
 const require = createRequire(import.meta.url);
 
-/** A4 与页边距（pt） */
 const MARGIN = 56;
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const PAGE_BOTTOM = PAGE_HEIGHT - MARGIN;
 
-/** 字体在依赖包内的相对路径（`@expo-google-fonts/*` 按字重分目录存放） */
 const FONT_REGULAR_FILE = path.join('400Regular', 'NotoSansSC_400Regular.ttf');
 const FONT_BOLD_FILE = path.join('700Bold', 'NotoSansSC_700Bold.ttf');
 
 type PdfDoc = InstanceType<typeof PDFDocument>;
 
-/** 字体所在目录：取依赖包根目录（字体按字重分目录，见 `FONT_*_FILE`） */
 function fontDir(): string {
   return path.dirname(require.resolve('@expo-google-fonts/noto-sans-sc/package.json'));
 }
 
-/**
- * 字体字节缓存：单个字重约 10MB，每份 PDF 都从磁盘重读太浪费。
- * 首次用到时读一次，之后常驻（进程级，最多两份）。
- */
 const fontCache = new Map<string, Buffer>();
 
 function fontBuffer(file: string): Buffer {
@@ -75,7 +55,6 @@ type Block =
 const HEADING = /^(#{1,3})\s+(.+)$/;
 const BULLET = /^[-*+]\s+(.+)$/;
 const NUMBERED = /^\d+[.)]\s+(.+)$/;
-/** 表格分隔行：`|---|---|` / `|:--|--:|` */
 const TABLE_SEPARATOR = /^\|?[\s:|-]+\|?$/;
 
 function splitTableRow(line: string): string[] {
@@ -86,7 +65,6 @@ function splitTableRow(line: string): string[] {
     .map((cell) => cell.trim());
 }
 
-/** 受限 Markdown → 排版块（不认识的行一律当段落，不吞内容） */
 export function parsePdfBlocks(content: string): Block[] {
   const blocks: Block[] = [];
   let paragraph: string[] = [];
@@ -125,7 +103,6 @@ export function parsePdfBlocks(content: string): Block[] {
 
     if (line.startsWith('|')) {
       flushParagraph();
-      // 分隔行只用于对齐语法，不进表格
       if (!TABLE_SEPARATOR.test(line)) table.push(splitTableRow(line));
       continue;
     }
@@ -145,7 +122,6 @@ export function parsePdfBlocks(content: string): Block[] {
   return blocks;
 }
 
-/** 行内加粗：`**x**` → 段落里换粗体字体；标记本身不落到 PDF 上 */
 function inlineSegments(text: string): Array<{ text: string; bold: boolean }> {
   const parts = text.split(/(\*\*[^*]+\*\*)/g).filter((part) => part !== '');
   const segments = parts.map((part) => {
@@ -228,7 +204,6 @@ function renderBlocks(doc: PdfDoc, blocks: Block[]): void {
   }
 }
 
-/** 生成 PDF 字节（异步：pdfkit 以流方式产出） */
 export async function encodePdf(content: string): Promise<Buffer> {
   const dir = fontDir();
   const doc = new PDFDocument({

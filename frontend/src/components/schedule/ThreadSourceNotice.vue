@@ -1,12 +1,4 @@
 <script setup lang="ts">
-/**
- * 会话来源提示（015，T043）
- *
- * 打开一个定时任务产生的会话时，在消息流顶部说明"这条对话是谁在什么时候触发的"。
- *
- * `role="status"`（礼貌级播报）：进入会话时播报一次即可——本组件随会话切换挂载、
- * 卸载，不会反复重播；**不用** `aria-live="assertive"`，那会打断用户正在听的回答。
- */
 import { computed } from 'vue'
 
 import type { ThreadSource } from '../../api/types'

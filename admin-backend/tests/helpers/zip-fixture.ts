@@ -1,13 +1,3 @@
-/**
- * 测试用最小 ZIP 构造器（零依赖）。
- *
- * 之所以自建：SKILL 安装的安全校验（`FR-038`、`FR-039`）必须用**恶意夹具**验证，
- * 而"绝对路径 / `..` 穿越 / 符号链接 / 超大 / 深层嵌套"这些边界**无法用正常
- * 打包工具产出**（正规工具会拒绝生成，或行为不可控）。
- *
- * 只实现 **STORE（不压缩）** 方式：结构最简单、可预测，足以覆盖校验路径。
- * 条目名统一按 UTF-8 编码并置位 general purpose bit 11。
- */
 import { deflateRawSync } from 'node:zlib';
 
 const LOCAL_HEADER = 0x04034b50;
@@ -31,30 +21,19 @@ function crc32(buf: Buffer): number {
 }
 
 export interface ZipEntrySpec {
-  /** 条目名（可含 `../`、绝对路径等恶意形态，用于夹具） */
   name: string;
   content?: string | Buffer;
-  /** 符号链接目标（写入 externalFileAttributes 的 Unix 模式位） */
   symlinkTo?: string;
-  /** 直接指定 externalFileAttributes（覆盖默认） */
   externalAttributes?: number;
 }
 
 export interface ZipFixtureOptions {
-  /** 是否用 deflate 压缩（默认 STORE） */
   compress?: boolean;
 }
 
-/** 常规文件的外部属性（Unix 模式 100644） */
 export const MODE_FILE = 0o100644;
-/** 符号链接的外部属性（Unix 模式 120777） */
 export const MODE_SYMLINK = 0o120777;
 
-/**
- * 用 `{ 路径: 内容 }` 构造一个 ZIP（便捷形式）。
- *
- * @example zipFixture({ 'SKILL.md': '---\nname: x\ndescription: y\n---\n' })
- */
 export function zipFixture(files: Record<string, string>, options: ZipFixtureOptions = {}): Buffer {
   return buildZip(
     Object.entries(files).map(([name, content]) => ({ name, content })),
@@ -62,7 +41,6 @@ export function zipFixture(files: Record<string, string>, options: ZipFixtureOpt
   );
 }
 
-/** 构造 ZIP（完整形态，支持符号链接与自定义外部属性） */
 export function buildZip(entries: ZipEntrySpec[], options: ZipFixtureOptions = {}): Buffer {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
@@ -82,7 +60,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipFixtureOptions = {
     const local = Buffer.alloc(30);
     local.writeUInt32LE(LOCAL_HEADER, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 6); // UTF-8 名称
+    local.writeUInt16LE(0x0800, 6);
     local.writeUInt16LE(method, 8);
     local.writeUInt16LE(0, 10);
     local.writeUInt16LE(0, 12);
@@ -96,7 +74,7 @@ export function buildZip(entries: ZipEntrySpec[], options: ZipFixtureOptions = {
 
     const central = Buffer.alloc(46);
     central.writeUInt32LE(CENTRAL_HEADER, 0);
-    central.writeUInt16LE(0x031e, 4); // version made by: unix(3) + 30
+    central.writeUInt16LE(0x031e, 4);
     central.writeUInt16LE(20, 6);
     central.writeUInt16LE(0x0800, 8);
     central.writeUInt16LE(method, 10);

@@ -1,17 +1,3 @@
-/**
- * 单元测试：场景模块拆分的**契约锁定**（009 T004/T005）
- *
- * `dirs.ts` 已达 504 行（越过宪章原则二 500 行门禁），故把 scenario.json 解析块整体
- * 搬到 `scenario.ts`。拆分是**纯搬移**：行为 MUST 零变化，且既有导入路径 MUST 继续有效
- * （`dirs.ts` 原样 re-export）。本文件守这两条：
- *
- * 1. **同一实现**：`dirs.js` 与 `scenario.js` 导出的同名符号是**同一个对象**
- *    （若是两处各写一份，会在这里失败）
- * 2. **空间策略与场景覆盖的合成口径**：`uploadExtensionsOf`（2026-10-13 的"唯一实现"）
- *    在拆分后仍按"数据准备+二级目录取场景、其余取空间策略"的规则合成
- *
- * 场景解析的逐条规则（非法目录名、孤儿约束、mtime 热更新…）见 `dirs.spec.ts`。
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

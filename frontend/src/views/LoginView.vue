@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * 登录页（024）
- *
- * 账号 = 数字人管理平台的业务使用者标识；密码由管理员在新建用户时设置。
- * 登录成功后由后端下发 HttpOnly Cookie，前端不持有凭据。
- */
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/http'

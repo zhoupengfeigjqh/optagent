@@ -1,13 +1,3 @@
-/**
- * 组件测试：阻断式错误提示（T030 / TR-58）。
- *
- * 守住三件事：
- * 1. 文案一律经 `toUserMessage` 映射（V-12 / D13）——**不展示后端 `message`**，
- *    未知码兜底且保留原码；同码不同义时由 `context` 决定措辞；
- * 2. 重试入口的可见性**只**由 `retryLabel` 控制（`null` = 不渲染）——TR-58 的分流
- *    建立在这个契约上：能不能重发由上层判断，组件不自己猜，也不会留一个空按钮；
- * 3. `hint` 是可选的第二行（009：同一提示位承载"下一步怎么办"），为空即不占位。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 

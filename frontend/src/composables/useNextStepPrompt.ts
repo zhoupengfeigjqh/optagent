@@ -1,40 +1,17 @@
-/**
- * 下一步动作卡片的确认弹窗（2026-10-16，自 `useChatPanel.ts` 抽出）
- *
- * 抽出来的理由：它是**一个小状态机**（待确认的卡片 + 发送中标志）外加三条拒绝规则，
- * 与本轮发送链路只有"调用 `onSend`"这一条联系；搬运时行为零变化
- * （宪章原则二：单文件 ≤500 行）。
- *
- * 三条拒绝规则（007 `FR-025` 的"可感知"口径，搬过来时逐条保留）：**拒绝并且不发送**——
- * - 本轮进行中：`onSend` 的通道已被占用，排队发送会让用户搞不清点了什么；
- * - 未选数字人：明确提示（会话创建也会以 `AGENT_NOT_SELECTED` 兜底）；
- * - 会话已被删除：交给 `onSend` 走既有降级（`threads.create` 失败会 toast 且保留输入）。
- *
- * 另一条口径：**只有真发出去了才关弹窗**——被拦下时保留提示词，用户可重试或取消；
- * 一旦发出即关（不等本轮答完）。`onSend` 的 `settleBeforeReturn: false` 正是为此存在。
- */
 import { ref, type Ref } from 'vue'
 
 import type { FileReference, NextStepAction, ToolTip } from '../api/types'
 import { nextStepSendPayload } from '../utils/next-steps'
 import type { ToastStore } from './useToast'
 
-/** 本轮瞬态（只关心"是否有进行中的轮次"）。 */
 export interface NextStepPromptDeps {
-  /** 非 `null` = 有进行中的轮次 */
   streaming: Readonly<Ref<unknown | null>>
-  /** 当前选中数字人（`null` = 未选中） */
   currentAgent: Readonly<Ref<{ agent_name: string } | null>>
-  /**
-   * 唯一发送链路（`useChatPanel.onSend`）：本地校验、建会话、失败还原草稿都在那里。
-   * `false` = 在本地被拦下（未发出）。
-   */
   send(
     payload: {
       content: string
       attachments: FileReference[]
       toolTips?: ToolTip[]
-      /** 018：卡片 prompt 是模型产出的定型文本，不参与术语替换预检 */
       skipTermCheck?: boolean
     },
     options: { settleBeforeReturn?: boolean },
@@ -42,11 +19,8 @@ export interface NextStepPromptDeps {
   toast: ToastStore
 }
 
-/** 卡片确认弹窗状态机。 */
 export interface NextStepPrompt {
-  /** 待确认的卡片（`null` = 弹窗关闭）；点卡片只**打开弹窗**，不发消息 */
   pendingSuggestion: Ref<NextStepAction | null>
-  /** 发送进行中：弹窗两个按钮均禁用（连点只发一次） */
   suggestionSending: Ref<boolean>
   onPickNextStep(action: NextStepAction): void
   onCancelSuggestion(): void
@@ -72,13 +46,11 @@ export function useNextStepPrompt(deps: NextStepPromptDeps): NextStepPrompt {
     pendingSuggestion.value = null
   }
 
-  /** 确认发送：走**既有** `send` 链路（引用校验、建会话、失败还原草稿都在那里） */
   async function onConfirmSuggestion(): Promise<void> {
     const action = pendingSuggestion.value
     if (!action || suggestionSending.value) return
     suggestionSending.value = true
     try {
-      // 正文只有提示词；关联工具经**结构化** `tool_tips` 回传（016 起，不再是 guidance 文本通道）
       const sent = await send(
         // 018：卡片正文是模型产出的定型提示词，不参与术语替换（否则"卡片"会被悄悄改写）
         { ...nextStepSendPayload(action), skipTermCheck: true },

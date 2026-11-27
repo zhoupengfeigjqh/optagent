@@ -1,20 +1,10 @@
-/**
- * 后台产出路由（R11，契约 §10.5）：
- * - `GET /api/produced?limit=50`：产出列表（有界返回，按完成时间倒序）
- * - `GET /api/produced/raw?job_id=`：读单条产出正文（**不走 files 预览接口**，见 §10.5 ⑦）
- * - `POST /api/produced/read`：批量标记已读（幂等；不存在的 `job_id` 忽略）
- * - `GET /api/produced/events`：SSE 信号（事件名 `produced`，**负载为空**；建连即推一次
- *   → 之后按 userId 过滤推送 → 25s 心跳）
- *
- * 信号语义：只表示"产出**可能**已变"，前端收到后重新拉列表；
- * 因此信号丢失无后果（产出物本身是文件，可从目录重算）。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { resolveAgentScope } from '../domain/agent-scope.js';
 import { getCurrentUser } from '../domain/current-user.js';
 import { PRODUCED_DIR } from '../domain/dirs.js';
 import { FileAccess, PermissionError } from '../domain/file-access.js';
+import { onSseDisconnect } from '../infra/sse.js';
 import {
   PRODUCED_LIST_MAX,
   findProduced,
@@ -68,16 +58,6 @@ function accessFor(ctx: AppContext, userId: string, agentName: string): FileAcce
   });
 }
 
-/**
- * 为产出列表补「发起它的数字人」（`agent_name`，契约字段保留）。
- *
- * **009 口径变更**：产出清单与产出目录都已是**数字人级**的（侧栏/接口一律只看当前数字人），
- * 因此这里的 `agent_name` **恒等于当前作用域**——字段保留是为了不改动前端契约
- * （列表项仍带 `agent_name`），不再是"跨数字人混合列表里区分来源"的载荷。
- *
- * 降级：`sid` 缺失、或会话 meta 不存在/损坏（如对话已删除）→ 该条**不带** `agent_name`，
- * 由界面显示"未知"。逐条 `get` 的读盘量 = **去重后**的会话数（≤ 列表上限），量级可忽略。
- */
 function withAgentNames(
   ctx: AppContext,
   userId: string,
@@ -93,7 +73,7 @@ function withAgentNames(
       try {
         name = ctx.threadStore.get(userId, scopeAgentName, sid).agentName;
       } catch {
-        name = undefined; // 对话已删除 / meta 损坏：不因一条归属缺失而让整张列表失败
+        name = undefined;
       }
       cache.set(sid, name);
     }
@@ -109,7 +89,6 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     const requested = raw === undefined ? PRODUCED_LIST_MAX : Number(raw);
     const limit =
       Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : PRODUCED_LIST_MAX;
-    // 009：产出清单是**当前数字人**的（目录即作用域）
     const { agentName } = resolveAgentScope(ctx, userId, {
       notSelectedMessage: '请先选定数字人后再操作文件空间',
       route: 'GET /api/produced',
@@ -125,16 +104,6 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
    * 忽略**（可能已被 30 天清理，不是调用方的错误）、返回**实际写入条数**。
    * 未读数不在这里算——界面从列表项自算（原则五：不落第二份可漂移的状态）。
    */
-  /**
-   * §10.5 ⑦ 读单条产出正文。
-   *
-   * **为什么不复用 `GET /api/files/preview`**：那个端点的 `dir` 是**空间顶层目录**
-   * （数据准备的二级目录还须命中 `scenario.json` 清单），而产出在二级目录
-   * `临时空间/后台产出/`——拿 `relPath` 当 `dir` 传必然被判 `VALIDATION_FAILED`。
-   * 产出因此**以自己的身份（`job_id`）读取**：定位在产出目录内，不接任意路径。
-   *
-   * `content-type` 固定为文本 + `nosniff`：产出内容不该被浏览器当作 HTML 之类渲染。
-   */
   app.get('/api/produced/raw', { schema: { querystring: rawQuerySchema } }, async (req, reply) => {
     const userId = getCurrentUser().userId;
     const { job_id } = req.query as { job_id: string };
@@ -147,8 +116,6 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     if (!item) {
       throw new ApiError(404, 'FILE_NOT_FOUND', `后台产出不存在或已被清理：${job_id}`);
     }
-    // 第二道防线（2026-10-27）：`readMeta` 已要求 `filename` 是单段名，这里再断言
-    // 路径确实落在产出目录内。两道防线任一失效，都不至于把"读产出"变成"读任意文件"。
     if (!item.relPath.startsWith(`${PRODUCED_DIR}/`) || item.relPath.includes('..')) {
       throw new ApiError(404, 'FILE_NOT_FOUND', `后台产出不存在或已被清理：${job_id}`);
     }
@@ -197,7 +164,6 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
       'x-accel-buffering': 'no',
     });
 
-    // 建连即推一次（与 MCP 状态推送同一形态）：客户端不必自己判断"是不是还没变化"
     const push = (): void => {
       reply.raw.write('event: produced\ndata: \n\n');
     };
@@ -207,7 +173,8 @@ export function registerProducedRoutes(app: FastifyInstance, ctx: AppContext): v
     });
     const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 25_000);
 
-    req.raw.on('close', () => {
+    // 断连钩子必须挂响应：`req.raw` 的 close 在请求体读完时已触发过（见 infra/sse.ts）
+    onSseDisconnect(reply.raw, () => {
       clearInterval(heartbeat);
       unsubscribe();
       reply.raw.end();

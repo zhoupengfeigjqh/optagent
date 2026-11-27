@@ -59,7 +59,6 @@ function design(): AgentDesignDocument {
   };
 }
 
-/** 按当前本体库内容物化一次，取该本体的术语字典原文 */
 function mapping(): string {
   const artifact = buildAgentArtifact(design(), { mcpConfigs, skills, ontologies });
   const file = artifact.files.find((item) => item.relPath === `${DIR}/term_mapping.json`);

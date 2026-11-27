@@ -1,16 +1,3 @@
-/**
- * 改写调用适配器（027）：把既有 `LlmProvider.streamChat` 折成"一次文本聚合"。
- *
- * 为什么放在 infra 而不是 domain：domain 只允许依赖端口（`RewriteLlm`），
- * 真实 provider 的构造、重试参数与中止语义都属于基础设施（与 `agent-factory` 同层）。
- *
- * 四条刻意的约束（契约 §6）：
- * - `tools: []`：改写**不许**走工具循环，否则会触发工具副作用；
- * - `thinking: false`：思考内容会混进 `thinking_delta`，这里只收 `content_delta`；
- * - **不写历史**：调用方只拿返回值，本文件不碰任何存储；
- * - 超时与"本轮中止"合并成一个信号，但**原因要分得开**（`timeout` vs `aborted`），
- *   否则日志无法区分"模型慢"和"用户按了停止"。
- */
 import type { ModelSelection } from '../types.js';
 import type { RewriteLlm, RewriteLlmRequest } from '../domain/intent-focus/rewrite.js';
 import type { LlmProvider } from './llm/llm-provider.js';
@@ -30,7 +17,6 @@ export class RewriteLlmError extends Error {
 }
 
 export interface RewriteLlmDeps {
-  /** 默认模型 provider（与主对话共用同一份惰性单例） */
   llm: () => LlmProvider;
   /**
    * 请求级模型覆盖的 provider 构造。
@@ -76,7 +62,6 @@ export function createRewriteLlm(deps: RewriteLlmDeps): RewriteLlm {
             // 流内错误事件不是异常，必须显式折成失败（否则会当成"空输出"）
             throw new RewriteLlmError('llm_failed', event.message || event.code);
           }
-          // thinking_delta / 工具事件一律忽略：改写请求不带工具、也不开 thinking
         }
       } catch (err) {
         if (err instanceof RewriteLlmError) throw err;
@@ -87,7 +72,6 @@ export function createRewriteLlm(deps: RewriteLlmDeps): RewriteLlm {
         clearTimeout(timer);
         external?.removeEventListener('abort', onAbort);
       }
-      // provider 可能"静默收尾"（收到中止信号就正常 return，不抛错）：
       // 这里补一次判定，否则超时 / 用户停止会被当成"空输出"，归因直接错档。
       if (timedOut) throw new RewriteLlmError('timeout', '改写模型调用超时');
       if (external?.aborted) throw new RewriteLlmError('aborted', '本轮已中止');

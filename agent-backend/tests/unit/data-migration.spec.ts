@@ -1,16 +1,3 @@
-/**
- * 单元测试：存量数据布局迁移（009 FR-040~042，`domain/data-migration.ts`）
- *
- * 守住五件事：
- * 1. **归属判定确定性**：①当前选中（须在可用清单内）→②唯一→③名称升序第一；③ 落审计；
- *    清单为空 ⇒ **不迁移**、原地保留
- * 2. **迁移是逐项原子改名**：源一级条目整体搬进归属数字人目录；目标同名**跳过不覆盖**
- * 3. **幂等**：源目录不存在即返回（重复调用不产生副作用），迁空的源目录被清掉
- * 4. **不误搬**：名字已是某个数字人的一级目录（新布局）原样不动；
- *    **已撤销数字人**的数据域目录（不在 `agents/` 清单内）同样原样不动——撤销只清 `agents/`，
- *    数据保留在 `user-data/{数字人}/`，MUST NOT 被当成旧布局残留搬进别人的数据域（2026-10-23 回归）
- * 5. **失败保持原状**：跨卷（EXDEV）MUST 落 `error`（`alert: true`）并跳过该项，MUST NOT 降级为复制
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +17,6 @@ import {
 } from '../../src/domain/dirs.js';
 
 const userId = 'admin';
-/** 迁移的三类一级条目（改前布局；2026-11-18 / 025：共享空间已下线，不再纳入迁移） */
 const LEGACY_ENTRIES = ['临时空间', '数据准备', THREADS_DIR];
 
 let root: string;
@@ -48,7 +34,6 @@ function makeLogger(logs: RecordedLog[]): MigrationLogger {
   };
 }
 
-/** 建"改前"布局：user-data/ 下直接放四类条目，各带一个可辨认的文件 */
 function seedLegacyLayout(): void {
   const base = userDataRoot(root, userId);
   for (const entry of LEGACY_ENTRIES) {
@@ -57,7 +42,6 @@ function seedLegacyLayout(): void {
   }
 }
 
-/** 建一个可用数字人的配置目录（`agents/{name}/`） */
 function seedAgent(name: string): void {
   const dir = path.join(root, 'users', userId, 'agents', name);
   fs.mkdirSync(dir, { recursive: true });
@@ -92,7 +76,7 @@ describe('归属判定 resolveOwnerAgent', () => {
     seedAgent('b-数字人');
 
     expect(resolveOwnerAgent(root, userId, { currentAgentName: 'ghost' })).toMatchObject({
-      agentName: 'a-数字人', // 清单升序第一（②③ 同解）
+      agentName: 'a-数字人',
     });
   });
 
@@ -140,10 +124,8 @@ describe('migrateUserDataLayout —— 正常迁移', () => {
     for (const entry of LEGACY_ENTRIES) {
       expect(fs.existsSync(path.join(dst, entry, `marker-${entry}.txt`))).toBe(true);
     }
-    // 用户级落点的直接子项此后**只有数字人目录**（FR-002：用户级不再是数据域）
     expect(fs.readdirSync(userDataRoot(root, userId))).toEqual(['only-数字人']);
 
-    // 审计事件：start → owner → moved×4 → done
     const events = logs.map((l) => l.fields.event);
     expect(events[0]).toBe('data.migration.start');
     expect(events[1]).toBe('data.migration.owner');
@@ -182,7 +164,6 @@ describe('migrateUserDataLayout —— 正常迁移', () => {
     expect(fs.existsSync(path.join(dst, '数据准备'))).toBe(true);
     expect(fs.existsSync(path.join(dst, '临时空间'))).toBe(true);
     expect(fs.existsSync(path.join(dst, THREADS_DIR))).toBe(true);
-    // 2026-11-18（025）：共享空间已下线，迁移不会再把它建出来
     expect(fs.existsSync(path.join(dst, '共享空间'))).toBe(false);
   });
 
@@ -196,7 +177,6 @@ describe('migrateUserDataLayout —— 正常迁移', () => {
     const result = migrateUserDataLayout(root, userId);
 
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length);
-    // 原样留在用户级（清理属一次性脚本职责，见 specs/025 与 scripts/remove-shared-space.ts）
     expect(fs.existsSync(path.join(legacyShared, 'old.txt'))).toBe(true);
   });
 });
@@ -229,7 +209,7 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
 
     expect(result.status).toBe('no-source');
     expect(fs.existsSync(userDataRoot(root, userId))).toBe(false);
-    expect(logs).toHaveLength(0); // 无可迁移内容：不产生噪音审计
+    expect(logs).toHaveLength(0);
   });
 
   it('目标已存在同名条目 → **跳过且不覆盖**，审计留痕，源保留待人工处理', () => {
@@ -244,10 +224,8 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
 
     expect(result.skipped).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
-    // 目标内容原样保留（不合并、不覆盖）
     expect(fs.readFileSync(path.join(dst, '临时空间', 'existing.txt'), 'utf8')).toBe('existing');
     expect(fs.existsSync(path.join(dst, '临时空间', 'marker-临时空间.txt'))).toBe(false);
-    // 源目录仍有跳过项 → 不清掉（下次触发继续尝试）
     expect(fs.existsSync(path.join(userDataRoot(root, userId), '临时空间'))).toBe(true);
     expect(logs.find((l) => l.fields.event === 'data.migration.skipped')?.fields).toMatchObject({
       entry: '临时空间',
@@ -259,12 +237,11 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
     seedLegacyLayout();
     seedAgent('a-数字人');
     seedAgent('z-数字人');
-    // z 已有数据域（新布局），且里面有内容
     const zDir = userDataDir(root, userId, 'z-数字人');
     fs.mkdirSync(path.join(zDir, '临时空间'), { recursive: true });
     fs.writeFileSync(path.join(zDir, '临时空间', 'z.txt'), 'z', 'utf8');
 
-    const result = migrateUserDataLayout(root, userId); // ③ → a-数字人
+    const result = migrateUserDataLayout(root, userId);
 
     expect(result.ownerAgent).toBe('a-数字人');
     expect(result.skipped).toEqual([]);
@@ -275,19 +252,17 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
   it('目标同名项是**空目录**（骨架先被建出来 / 上次中断的空壳）→ 搬进去，不把数据留在旧位', async () => {
     seedLegacyLayout();
     seedAgent('only-数字人');
-    // 模拟"半成品"：骨架（两空间 + threads）先被建出来，但里面什么都没有
     ensureAgentDataDirs(root, userId, 'only-数字人');
     const logs: RecordedLog[] = [];
 
     const result = migrateUserDataLayout(root, userId, { logger: makeLogger(logs) });
 
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length);
-    expect(result.skipped).toEqual([]); // 空目标不是冲突：让位即可
+    expect(result.skipped).toEqual([]);
     const dst = userDataDir(root, userId, 'only-数字人');
     for (const entry of LEGACY_ENTRIES) {
       expect(fs.existsSync(path.join(dst, entry, `marker-${entry}.txt`))).toBe(true);
     }
-    // 用户级落点只剩数字人目录
     expect(fs.readdirSync(userDataRoot(root, userId))).toEqual(['only-数字人']);
     expect(logs.some((l) => l.fields.event === 'data.migration.rescued_empty_target')).toBe(true);
   });
@@ -303,7 +278,6 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
 
     expect(result.skipped).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
-    // 冲突项原样留在旧位，等人工处理；目标里的既有内容一字未改
     expect(
       fs.existsSync(path.join(userDataRoot(root, userId), '临时空间', 'marker-临时空间.txt')),
     ).toBe(true);
@@ -340,10 +314,6 @@ describe('migrateUserDataLayout —— 幂等与冲突', () => {
 });
 
 describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与迁移（2026-10-23 回归）', () => {
-  /**
-   * 造一个"已撤销数字人"的数据域：`user-data/{name}/` 下三空间 + threads + 一个可辨认文件。
-   * 关键是它**不在** `agents/` 清单里（撤销后 `agents/` 已被整目录清掉）。
-   */
   function seedRevokedAgentData(name: string): string {
     const dir = userDataDir(root, userId, name);
     ensureAgentDataDirs(root, userId, name);
@@ -362,7 +332,6 @@ describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与�
     });
 
     expect(result).toMatchObject({ status: 'no-source', ownerAgent: null, movedCount: 0 });
-    // 数据留在自己的数据域里（撤销不撤数据）
     expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe(
       'revoked',
     );
@@ -388,14 +357,12 @@ describe('migrateUserDataLayout —— 已撤销数字人的数据域不参与�
       skipped: [],
       failed: [],
     });
-    // 撤销目录未被搬动，也没被当成"目标冲突"参与判定
     expect(fs.readFileSync(path.join(revoked, THREADS_DIR, 'history.jsonl'), 'utf8')).toBe(
       'revoked',
     );
     expect(fs.existsSync(path.join(userDataDir(root, userId, 'BOM数字人'), '柯昆BOM数字人'))).toBe(
       false,
     );
-    // 旧布局四项已搬入当前数字人
     const dst = userDataDir(root, userId, 'BOM数字人');
     for (const entry of LEGACY_ENTRIES) {
       expect(fs.existsSync(path.join(dst, entry, `marker-${entry}.txt`))).toBe(true);
@@ -440,7 +407,6 @@ describe('migrateUserDataLayout —— 失败保持原状（EXDEV）', () => {
 
     expect(result.failed).toEqual(['临时空间']);
     expect(result.movedCount).toBe(LEGACY_ENTRIES.length - 1);
-    // 保持原状：源里的内容没被动过，也没有被"复制"到目标
     expect(
       fs.existsSync(path.join(userDataRoot(root, userId), '临时空间', 'marker-临时空间.txt')),
     ).toBe(true);
@@ -466,7 +432,6 @@ describe('listUserIds / migrateAllUsers', () => {
     fs.mkdirSync(path.join(root, 'users', 'u1'), { recursive: true });
     fs.mkdirSync(path.join(root, 'users', 'u2'), { recursive: true });
 
-    // beforeEach 已建出 users/admin（本用例自己的用户）
     expect(listUserIds(root)).toEqual(['admin', 'u1', 'u2']);
     expect(listUserIds(path.join(root, 'nowhere'))).toEqual([]);
   });
@@ -486,7 +451,6 @@ describe('listUserIds / migrateAllUsers', () => {
     const migrated = results.filter((r) => r.status === 'migrated');
     expect(migrated.map((r) => r.userId)).toEqual(['u1', 'u2']);
     expect(migrated.every((r) => r.ownerAgent === 'only')).toBe(true);
-    // 没有存量数据的用户不迁移、也不报错
     expect(results.find((r) => r.userId === 'admin')?.status).toBe('no-source');
   });
 });

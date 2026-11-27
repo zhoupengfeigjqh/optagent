@@ -1,13 +1,3 @@
-/**
- * 单元测试：下一步动作提示（007 修订 · Tail Protocol + 016 能力驱动）。
- *
- * 分五组守住五条硬约束（口径见 `src/domain/next-actions.ts` 文件头）：
- * - **解析与合规**：模型输出脏（代码块围栏 / 裸数组 / 超长 / 夹工具名 / 非祈使句 / 指代）时逐条丢弃；
- * - **`tool_tips` 不校验**：只读字段与截断到 5 条，不比对运行时工具、不查名字是否在目录、不去重、不改写；
- * - **尾部块捕获**：`<next_actions>` 块对用户完全不可见，正文逐字无损（跨增量 / 误前缀 / 块后正文）；
- * - **轮末定稿**：同步解析 + 原子写快照，永不抛错；明确 0 条不告警、非法输出与"全部不合规"告警附归因；
- * - **存储**：会话级单快照（只留最新一轮）、`clear` 同步清空、读取侧按新形状过滤旧口径快照。
- */
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -45,7 +35,6 @@ function action(prompt: string, toolTips?: unknown[]): Record<string, unknown> {
   return { prompt, ...(toolTips === undefined ? {} : { tool_tips: toolTips }) };
 }
 
-/** 合法绑定：模型从目录里照抄的第一条 */
 const bound = (prompt: string): Record<string, unknown> => action(prompt, [TOOL_TIPS[0]]);
 
 describe('parseActions —— 输出容错解析', () => {
@@ -157,13 +146,13 @@ describe('sanitizeActions —— 只校验 prompt；tool_tips 原样透传', () 
 
   it('不合规条目只丢自己；重复提示词去重；条数超上限取前 N 条', () => {
     const raw = [
-      bound('甲'.repeat(PROMPT_MAX_CHARS + 1)), // 超长 → 丢
-      bound(''), // 空 → 丢
-      bound('先做 query_order'), // 夹标识符 → 丢
-      { prompt: 123, tool_tips: [TOOL_TIPS[0]] }, // 类型错 → 丢
+      bound('甲'.repeat(PROMPT_MAX_CHARS + 1)),
+      bound(''),
+      bound('先做 query_order'),
+      { prompt: 123, tool_tips: [TOOL_TIPS[0]] },
       'not-an-object',
       bound('整理临时空间的表格'),
-      bound('整理临时空间的表格'), // 重复 → 丢
+      bound('整理临时空间的表格'),
       bound('按交付日期梳理订单风险'),
       bound('按月汇总这批订单的数量'),
       bound('第四条应当被条数上限截掉'),
@@ -191,14 +180,12 @@ describe('sanitizeActions —— 只校验 prompt；tool_tips 原样透传', () 
   });
 });
 
-/* ---------- 尾部块捕获与轮末定稿（007 修订 · Tail Protocol） ---------- */
 
 let root: string;
 let warns: string[];
 
 const logger = () => ({ warn: (msg: string) => warns.push(msg) });
 
-/** 本用例使用的数字人（夹具路径与 `finInput.agentName` 同值） */
 const AGENT = 'demo';
 
 function file(userId: string, agentName: string, threadId: string): string {
@@ -430,7 +417,7 @@ describe('NextActionsStore —— 读取与清空', () => {
   it('无快照 / 损坏 JSON / 超 64KB / actions 为空 → undefined，且仅损坏与超限告警', () => {
     const s = store();
 
-    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined(); // 无快照：最常见路径，不告警
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined();
     expect(warns).toHaveLength(0);
 
     const target = file('admin', AGENT, 'th_1');
@@ -440,7 +427,7 @@ describe('NextActionsStore —— 读取与清空', () => {
     expect(warns.some((w) => w.includes('损坏'))).toBe(true);
 
     fs.writeFileSync(target, JSON.stringify({ message_id: 'm', agent_name: 'demo', actions: [] }));
-    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined(); // actions 为空 → 等同无提示
+    expect(s.read('admin', AGENT, 'th_1')).toBeUndefined();
 
     fs.writeFileSync(target, `{"pad":"${'x'.repeat(70 * 1024)}"}`, 'utf8');
     expect(s.read('admin', AGENT, 'th_1')).toBeUndefined();

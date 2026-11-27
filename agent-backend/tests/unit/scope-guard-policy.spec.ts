@@ -1,10 +1,3 @@
-/**
- * 单元测试：授权判定纯策略（020）。
- *
- * 覆盖 `data-model.md` §3.3 判定矩阵里与"策略"相关的行：
- * 非本体放行、`everyone`、`disable`（优先于 `everyone`）、用户名命中/未命中、
- * 空 `scope`、缺条目；以及 `FR-003` 的两形态匹配与归一化口径。
- */
 import { describe, expect, it } from 'vitest';
 
 import { decideScope, matchKeys, normalizeName } from '../../src/domain/scope-guard/policy.js';
@@ -64,7 +57,6 @@ describe('decideScope', () => {
   it('含 disable → 拒绝，且优先于 everyone（对外按未授权码）', () => {
     expect(decideScope(entry(['disable']), 'admin')).toMatchObject({
       kind: 'deny',
-      // 2026-11-09：对外统一「未授权」，不再单列"已停用"码；reason/scopeKind 仍区分
       code: 'ONTOLOGY_SCOPE_DENIED',
       reason: 'disabled',
       scopeKind: 'disable',

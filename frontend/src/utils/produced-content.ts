@@ -1,20 +1,3 @@
-/**
- * 产出正文的**展示解析**（纯函数，便于单测）。
- *
- * 只做三件事：
- * 1. 判断正文能否当 JSON **结构化展示**（对象 / 数组）；
- * 2. 对"太大 / 不是 JSON / 只是标量"给出**可读的降级原因**（界面据此回落 `<pre>` 原样展示）；
- * 3. 给结构化渲染提供表格列（对象数组的键并集）。
- *
- * 与 `produced-display.ts` 分工：那里组织**元数据**（标题两段、路径拆分、角标；时间与体积
- * 用 `utils/format`），这里只管**正文**。
- *
- * **平台仍不解析正文**（契约 §10.3）：这里是**前端展示层**的选择——服务端存储、投影、
- * 提示词注入一字不变；解析只为"看得清 + 能一键切回原文"，不参与任何业务判读。
- *
- * `isPlainObject` 复用 `arg-schema.ts` 的实现：它是通用的"普通对象"判据，
- * 与该模块的 HITL 语义无关，重复定义只会多一处漂移点。
- */
 import { isPlainObject } from './arg-schema'
 
 /**
@@ -25,38 +8,16 @@ import { isPlainObject } from './arg-schema'
  */
 export const PRODUCED_JSON_MAX_CHARS = 256 * 1024
 
-/**
- * 结构化渲染时单个数组最多渲染的**行数**（超出只提示总数，不渲染）。
- *
- * 2026-10-09：由 100 收到 10。弹窗宽度是自适应的（`min(560px, 92vw)`），
- * 长时间只渲染 100 行会把弹窗撑成一面墙，反而看不清结构；
- * 超出部分交给上方的「按原始 JSON 查看」逃生舱。
- */
 export const PRODUCED_ARRAY_MAX_ITEMS = 10
 
-/**
- * 表格最多渲染的**列数**（超出只提示总数，不渲染）。
- *
- * 列是各元素键的并集，键多时列会横向铺开。上限与横向滚动配合，
- * 保证宽度自适应的弹窗不被撑破（滚动发生在表格容器内，而不是弹窗）。
- *
- * 2026-10-09：15 → 50。15 列在宽版弹窗（900px）里也铺不满，用户基本都在滚动，
- * 还不如一次多给些列；真正超长的宽表（>50 列）才靠滚动/原始 JSON。
- */
 export const PRODUCED_TABLE_MAX_COLUMNS = 50
 
-/**
- * 结构化渲染的最大嵌套深度（超出交 JSON 逃生舱）。
- *
- * 防病态结构（如自引用的深链）把界面拖死；正常产出远深不到这里。
- */
 export const PRODUCED_JSON_MAX_DEPTH = 8
 
 /** 降级原因（界面据此决定是否给提示；`''` = 可结构化，无需提示）。 */
 export type ProducedFallbackReason = 'too_large' | 'invalid' | 'scalar' | 'empty' | ''
 
 export interface ProducedContentParse {
-  /** `true` = 可结构化展示（此时 `value` 是对象或数组） */
   structured: boolean
   /** 解析后的值；不可结构化时恒为 `null` */
   value: unknown
@@ -64,17 +25,6 @@ export interface ProducedContentParse {
   reason: ProducedFallbackReason
 }
 
-/**
- * 解析产出正文。
- *
- * - 空白（含 `null`）→ `empty`
- * - 超过 `maxChars` → **不解析**，直接 `too_large`
- * - 不是合法 JSON → `invalid`
- * - 是 JSON 但是**标量**（数字/字符串/布尔/null）→ `scalar`（原样展示比包一层更直观）
- * - 是 JSON 对象 / 数组 → `structured: true`
- *
- * 一切失败都**不抛异常**：这是展示层，必须总能回落原文（`<pre>`）。
- */
 export function parseProducedContent(
   text: string | null,
   maxChars: number = PRODUCED_JSON_MAX_CHARS,
@@ -106,12 +56,6 @@ export function fallbackHint(reason: ProducedFallbackReason): string {
   return `内容较大（超过 ${Math.floor(PRODUCED_JSON_MAX_CHARS / 1024)}K 字符），已按原始文本展示。`
 }
 
-/**
- * 对象数组的**表格列**：各元素出现过的键的并集（按首次出现顺序）。
- *
- * 产出正文没有 schema（不像 HITL 表单由 `inputSchema` 决定列），列只能**从值里推**。
- * 非对象元素被跳过——调用方已保证"全是对象"才走表格。
- */
 export function columnsOfRows(rows: readonly unknown[]): string[] {
   const keys: string[] = []
   const seen = new Set<string>()

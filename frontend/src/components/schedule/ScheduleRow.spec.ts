@@ -1,12 +1,3 @@
-/**
- * 组件测试：任务行（015，T037 / T051；2026-10-30 增补编辑按钮与"启用中只有停止可用"）
- *
- * 键盘与读屏验收项：
- * - 三个按钮都是原生 `<button>`，DOM 顺序 = Tab 顺序（启停 → 编辑 → 删除）；
- * - 启停按钮 `aria-pressed` 表达开/关，名称里带任务名；启用态用**方块**形状而非三角；
- * - 启用中编辑与删除原生禁用，原因在 `title` 上；处理函数仍兜一层可见提示；
- * - 停用态点编辑上抛 `edit`，点删除上抛 `remove`。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
@@ -88,7 +79,6 @@ describe('ScheduleRow', () => {
 
     expect(toggle.attributes('aria-pressed')).toBe('true')
     expect(toggle.attributes('aria-label')).toBe('停止任务：日报生成')
-    // 形状本身区分两态：启用态是方块，停用态是三角（图标）
     expect(toggle.find('.schedule-row__stop-square').exists()).toBe(true)
     expect(toggle.find('.base-icon').exists()).toBe(false)
     expect(toggle.classes()).toContain('schedule-row__action--stop')

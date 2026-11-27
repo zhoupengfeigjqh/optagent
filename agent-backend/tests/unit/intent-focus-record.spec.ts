@@ -1,12 +1,3 @@
-/**
- * 单元测试：留档铸造（016 / 019）。
- *
- * 2026-11-06 口径：只写**入选行为**，不再有 `kind` / `selected`，也不再写
- * `functions` 与 `data_supplements`；明细规模由选择层上限（≤96）天然约束。
- *
- * 2026-11-08（019）：新增 `depth` / `concepts` / `tool_tip_behaviors`，
- * 行为记录补 `source` / `hop` / `via_concept`（发散项 `score` 为 null）。
- */
 import { describe, expect, it } from 'vitest';
 import { buildRecordDraft } from '../../src/domain/intent-focus/record.js';
 import type { CapabilityDecision, CapabilitySelection, SkillDecision } from '../../src/domain/intent-focus/types.js';
@@ -81,14 +72,11 @@ describe('buildRecordDraft', () => {
       source: 'direct',
       hop: 0,
       via_concept: null,
-      // direct 没有发散起点（2026-11-13）
       from_concept: null,
     });
-    // 无发散时三个新增字段取缺省（早退分支不必补字段）
     expect(draft.depth).toBe(0);
     expect(draft.concepts).toEqual([]);
     expect(draft.tool_tip_behaviors.map((item) => item.name)).toEqual(['B0', 'B1']);
-    // 2026-11-20：functions 以"只写入选函数"的口径恢复，无入选时为空数组
     expect(draft.functions).toEqual([]);
     expect(draft).not.toHaveProperty('data_supplements');
   });
@@ -133,7 +121,6 @@ describe('buildRecordDraft', () => {
         related_concepts: ['PurchaseRecord'],
       },
     ]);
-    // 取数项进提示通道，不判分，via_concept = 所属概念
     const query = draft.behaviors.find((item) => item.source === 'concept_query');
     expect(query).toEqual({
       name: 'QuerySuppliers',
@@ -215,8 +202,6 @@ describe('buildRecordDraft', () => {
       ['B0', 'direct', 0.9],
       ['D1', 'downstream', null],
     ]);
-    // 2026-11-13：`from_concept` = 这一跳的起点概念（direct 为 null）。
-    // 下游概念不落概念表，且下游是多源汇聚的，只有它能回答"这条卡片项从哪发散来"
     expect(draft.behaviors.map((item) => [item.name, item.from_concept])).toEqual([
       ['B0', null],
       ['U1', 'C0'],
@@ -283,7 +268,6 @@ describe('buildRecordDraft', () => {
       rewrite_history_turns: 2,
       rewrite_reason: null,
     });
-    // 既有字段语义不变：`input` 仍是**原文**，便于对照"用户说了什么"
     expect(draft.input).toBe('创建采购单');
   });
 

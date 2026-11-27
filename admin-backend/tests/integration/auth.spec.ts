@@ -1,6 +1,3 @@
-/**
- * 集成测试：登录鉴权全链路（024）
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { verifySession } from '../../src/domain/auth/token.js';
 import { createFixture, type TestFixture } from '../helpers/fixture.js';

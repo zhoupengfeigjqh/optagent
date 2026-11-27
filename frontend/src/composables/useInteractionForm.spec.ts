@@ -1,9 +1,3 @@
-/**
- * 单测：HITL 表单状态（模型 / JSON 草稿 / 规则入口落点 / 校验与提交）。
- *
- * 守住的语义：模型是唯一事实源且能按路径深写；JSON 文本只是草稿（非法不污染模型、
- * 也不静默覆盖已填内容）；规则写回按**完整路径**深写并保留同级值。
- */
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RuleFileResponse } from '../api/types'
@@ -17,7 +11,6 @@ const RULES: RuleFileResponse = {
   priority_column: 'rulePriority',
 }
 
-/** 最复杂的真实形态（外部排产服务）：嵌套对象 + 对象数组 + 行内 required。仅作回归样本。 */
 const NESTED = {
   type: 'object',
   properties: {
@@ -81,7 +74,7 @@ describe('初始化与顶层字段', () => {
     form.setValue(['uid'], 'zpf')
     form.toggleJsonView(['input'])
     form.onJsonInput(['input'], '{ 坏掉的')
-    form.setValue(['uid', 'x'], 1) // 结构冲突 → actionError
+    form.setValue(['uid', 'x'], 1)
 
     form.reset()
 
@@ -201,7 +194,6 @@ describe('规则入口', () => {
   })
 
   it('祖先被 JSON 逃生舱接管时，落点退到最近可见的那一行（写回仍是完整路径）', () => {
-    // input 未声明 properties → 渲染成一个 JSON 文本框，子字段没有独立行
     const { form } = make({ schema: { properties: { input: { type: 'object' } } }, proposed: {} })
 
     expect(form.rulesAnchor.value).toEqual(['input'])

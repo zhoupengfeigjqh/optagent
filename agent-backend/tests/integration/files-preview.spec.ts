@@ -1,16 +1,3 @@
-/**
- * 内联预览集成测试（2026-10-20）：`.html` 可点开渲染，且**必须沙箱化**。
- *
- * 覆盖口径：
- * - 上传到临时空间的 `.html` 可被 `GET /api/files/preview` 内联返回
- *   （`text/html` + `inline`），并带 `CSP: sandbox` 与 `nosniff`；
- * - 非 HTML 的内联类型（`.txt`）**不加**这两条头（避免误伤既有行为）；
- * - `/api/files/raw` 签名直链同样沙箱化——它可被浏览器直接打开，不加就是同源 XSS；
- * - 未配置白名单的数据准备目录仍按平台默认拒绝 `.html`（存量行为不变）。
- *
- * 为什么单独一个文件：`files-scenario.spec.ts` 已远超 500 行（存量），本次改动不往里堆
- * （宪章原则二）。fixture 与 `files-naming.spec.ts` 同款最小化。
- */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -26,7 +13,6 @@ import { buildServer } from '../../src/server';
 const root = mkdtempSync(path.join(tmpdir(), 'optagent-preview-'));
 const userId = 'admin';
 const AGENT = 'alpha';
-/** 带一个数据准备二级目录（未配置可上传类型 ⇒ 平台默认 `.csv` + `.xlsx`） */
 const SCENARIO = { scenario: '预览', data_prep_dirs: ['生产计划'] };
 
 let app: FastifyInstance;
@@ -58,7 +44,6 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 手工 multipart（`dir` 字段在前，命中早验路径）；与 `files-naming.spec.ts` 同款 */
 function multipart(dir: string, filename: string, content: string, contentType: string) {
   const boundary = '----vitest-preview-boundary';
   const body = Buffer.concat([
@@ -84,7 +69,6 @@ function preview(dir: string, filename: string) {
   });
 }
 
-/** 铸造与运行环境同款的签名直链（`/api/files/raw`） */
 function signedRawUrl(relPath: string): string {
   const scoped = agentScopedPath(AGENT, relPath);
   const exp = Date.now() + 60_000;
@@ -95,7 +79,6 @@ function signedRawUrl(relPath: string): string {
 
 describe('`.html` 内联预览（2026-10-20）', () => {
   // 2026-11-18（025）：共享空间下线后，扁平空间只剩临时空间；原先"共享空间 + 临时空间"
-  // 两条同构用例合并为一条，断言只保留一份（含 inline）。
   it('临时空间：`preview` 以 `text/html` 内联返回，且带 CSP sandbox + nosniff', async () => {
     expect((await uploadHtml('临时空间', '看板.html')).statusCode).toBe(201);
 
@@ -109,7 +92,6 @@ describe('`.html` 内联预览（2026-10-20）', () => {
   });
 
   it('签名直链 `raw` 也沙箱化（可被浏览器直接打开，不加就是同源 XSS）', async () => {
-    // 自给自足：不依赖上一条用例的落盘顺序
     expect((await uploadHtml('临时空间', '直链.html')).statusCode).toBe(201);
     const res = await app.inject({ method: 'GET', url: signedRawUrl('临时空间/直链.html') });
 
@@ -158,7 +140,6 @@ describe('`.md` 内联预览（2026-11-16）', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/markdown; charset=utf-8');
     expect(String(res.headers['content-disposition'])).toContain('inline');
-    // 与 `.txt` 同口径：纯文本，没有可执行内容，不需要沙箱头
     expect(res.headers['content-security-policy']).toBeUndefined();
     expect(res.body).toContain('# 结论');
   });
@@ -209,7 +190,6 @@ describe('`.md` 内联预览（2026-11-16）', () => {
 
   it('`.xls`（BIFF 容器）仍回退附件下载（只有 `.xlsx` 结构化内联）', async () => {
     mkdirSync(tmpDir(), { recursive: true });
-    // 内容不要求是真 BIFF：本用例只验"扩展名不进转换分支、走附件"
     writeFileSync(path.join(tmpDir(), '旧表.xls'), Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));
 
     const res = await preview('临时空间', '旧表.xls');

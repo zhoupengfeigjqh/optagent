@@ -1,18 +1,3 @@
-/**
- * 组件测试：ChatPanel 的 `@` 引用浮层接入（006 T304）。
- *
- * 守住两条：
- * 1. **浮层不推挤布局**（FR-101 / FR-130）：面板经 `Composer` 的 `#mention` 插槽就地挂载，
- *    坐标由脚本写死（`fixed` 语义的落点），打开前后锚点（输入框）的矩形完全一致；
- * 2. **引用胶囊回归**（不变量 I-1，2026-10-18 起为正文内联）：`草稿 + mention.references`
- *    → `.composer__mention` 的结构与"移除由上层决定"的上报口径不变。
- * 3. **发送判据的接线**（2026-11-20 收敛后）：`ChatPanel` 是否真的把 `canSendContent`
- *    接到了工具栏的 `:can-send`（判据算得对而模板接错，`vue-tsc` 抓不到，见文末用例组）。
- *
- * `useChatPanel()` 整体打桩（与 `ChatPanel.starters.spec.ts` 同口径）：事件编排已收敛在
- * 该组合式函数里（另有其自身用例覆盖），本测试只关心"插槽 + 面板 + 芯片"这段渲染接线。
- * 无关子组件一律 stub——本文件要的是**真**的 `Composer` 与 `MentionPopup`，其余越轻越好。
- */
 import { mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,7 +11,6 @@ const h = vi.hoisted(() => ({ panel: null as unknown }))
 
 vi.mock('../../composables/useChatPanel', () => ({ useChatPanel: () => h.panel }))
 
-/** 与浮层无关的重子组件：stub 掉（它们各自有独立用例与数据源） */
 const STUBS = {
   ChatHeader: true,
   SessionSearch: true,
@@ -39,7 +23,6 @@ const STUBS = {
 
 function makePanel(
   options: {
-    /** 草稿（胶囊由「草稿 + 引用」共同决定：正文里没有标记就不该有胶囊） */
     draft?: string
     references?: Array<{ dir: string; filename: string }>
     onRemoveReference?: ReturnType<typeof vi.fn>
@@ -47,8 +30,12 @@ function makePanel(
 ) {
   const noop = vi.fn()
   return {
-    chat: { draft: ref(options.draft ?? ''), thinkingEnabled: ref(false) },
-    // 015：`activeSource` 随会话列表下发（本组用例恒为普通会话）
+    chat: {
+      draft: ref(options.draft ?? ''),
+      thinkingEnabled: ref(false),
+      // 028 FR-034：计划进度条的数据源（缺省空 → 不渲染任何 DOM）
+      planProgress: ref([]),
+    },
     threads: {
       activeId: ref(null),
       activeSource: ref(null),
@@ -68,7 +55,6 @@ function makePanel(
     mention: {
       references: ref(options.references ?? []),
       open: ref(false),
-      // `caret` 由状态机记录（浮层定位读它）；缺了会直接抛错，故这里显式给出
       caret: ref(0),
       spaces: ref([]),
       column: ref('space'),
@@ -82,7 +68,6 @@ function makePanel(
       back: noop,
     },
     workspace: { spaces: ref([]), loading: ref(false) },
-    // 014：空数据引导状态（默认不出气泡；需要时由用例置为 true）
     emptyHint: { visible: ref(false), dismiss: noop },
     agents: {
       currentAgent: ref(null),
@@ -94,17 +79,14 @@ function makePanel(
       // 009：陈旧数字人降级时面板会主动拉一次候选清单（用于"现在还能选谁"）
       loadCandidates: noop,
     },
-    // 015：头部入口按钮读它（本组用例不涉及定时任务，取"未展开"即可）
     schedule: { panelOpen: ref(false), openPanel: noop },
     uploadOpen: ref(false),
     agentPanelOpen: ref(false),
     workspaceOpen: ref(false),
-    // 本轮瞬态：本组用例只关心「失败块分流」读的 `canRegenerate`（形状按需最小化）
     streaming: ref<{ phase: string; canRegenerate: boolean } | null>(null),
     isFailed: ref(false),
     errorInfo: ref<ErrorInfo | null>(null),
     sending: ref(false),
-    // 发送判据读它（MCP 就绪等待中禁用发送）：缺了 `toolbarCanSend` 会抛 `undefined.value`
     preparing: ref(false),
     hasMessages: ref(false),
     pendingUserMessage: ref(null),
@@ -117,7 +99,6 @@ function makePanel(
     onRegenerate: noop,
     onRetryTurn: noop,
     onRetryFailedRun: noop,
-    // 007：列表渲染会读卡片快照与确认弹窗状态（本组用例不涉及卡片，取空形态即可）
     nextSteps: { steps: ref(emptyNextSteps()) },
     pendingSuggestion: ref(null),
     suggestionSending: ref(false),
@@ -132,7 +113,6 @@ function makePanel(
     onToggleUpload: noop,
     onCloseUpload: noop,
     onPickFiles: noop,
-    // 2026-11-17：粘贴上传（v1.3 起不再有重名弹窗，失败只走 toast）
     onPasteFiles: noop,
     onRetryUpload: noop,
     onToggleSearch: noop,
@@ -152,7 +132,6 @@ function makePanel(
     onConfirmMention: noop,
     onMentionKey: noop,
     onRemoveReference: options.onRemoveReference ?? noop,
-    // 2026-11-07：`/技能名` 的状态与输入区出口（本组用例不涉及技能，取空选择）
     skill: {
       selected: ref<string | null>(null),
       open: ref(false),
@@ -173,7 +152,6 @@ function makePanel(
 
 type Panel = ReturnType<typeof makePanel>
 
-/** 需要真消息列表时用它替换 `STUBS`（`false` = 不 stub，渲染真实组件） */
 const REAL_LIST_STUBS = { ...STUBS, MessageList: false }
 
 function setup(options: Parameters<typeof makePanel>[0] = {}, stubs: typeof STUBS = STUBS) {
@@ -183,7 +161,6 @@ function setup(options: Parameters<typeof makePanel>[0] = {}, stubs: typeof STUB
   return { wrapper, panel }
 }
 
-/** 视口坐标四元组（DOMRect 的属性在原型上，逐项取值比较更稳） */
 function rectOf(element: Element): { left: number; top: number; width: number; height: number } {
   const rect = element.getBoundingClientRect()
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
@@ -208,13 +185,9 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
 
     const popup = wrapper.find('.mention-popup')
     expect(popup.exists()).toBe(true)
-    // 就地挂载：面板仍在 Composer 的 DOM 子树内（不 Teleport），
-    // 因此它属于所在 <dialog> 的内容，`inert` 挡不住点击
     expect(popup.element.closest('.composer')).not.toBeNull()
-    // 落点是脚本写入的视口坐标（fixed 语义），而不是靠流内排版占位
     expect(popup.attributes('style')).toContain('left:')
     expect(popup.attributes('style')).toContain('top:')
-    // 打开前后锚点矩形完全一致：浮层不参与文档流（FR-101）
     expect(rectOf(anchor.element)).toEqual(before)
 
     wrapper.unmount()
@@ -231,26 +204,16 @@ describe('ChatPanel —— @ 引用浮层（006）', () => {
 
     expect(wrapper.findAll('.composer__mention')).toHaveLength(1)
     expect(wrapper.find('.composer__mention').text()).toBe('@plan.csv')
-    // 旧的上方 chip 行已并入正文：同一次选择只显示一处
     expect(wrapper.find('.composer__refs').exists()).toBe(false)
 
     await wrapper.find('.composer__mention-remove').trigger('click')
 
-    // 是否真的移除由上层决定，组件只上报（与 Composer 的契约一致）
     expect(onRemoveReference).toHaveBeenCalledWith(reference)
 
     wrapper.unmount()
   })
 })
 
-/**
- * 失败轮「重试本轮」的接线（2026-10-15 断链修复）。
- *
- * 病灶是**事件悬空**：气泡发 `retry`、列表层也透传了，但面板模板没接——
- * 按钮点下去什么都不发生。故这里渲染**真实**列表与气泡，只问一件事：
- * 点下去之后，装配层（`onRetryTurn`）是否收到了"该轮的用户消息"这个载荷。
- * （`onRetryTurn → onSend` 这一段由 `useChatPanel.retry.spec.ts` 用真链路覆盖。）
- */
 describe('ChatPanel —— 失败轮「重试本轮」的接线', () => {
   it('气泡里的重试入口把该轮的用户消息交给装配层（不再是点了没反应的按钮）', async () => {
     const { wrapper, panel } = setup({}, REAL_LIST_STUBS)
@@ -292,14 +255,6 @@ describe('ChatPanel —— 失败轮「重试本轮」的接线', () => {
   })
 })
 
-/**
- * 面板级失败块的按钮分流（TR-58，2026-10-15）。
- *
- * 本层断言两件事：**文案**随 `streaming.canRegenerate` 切换（用户可见的分流信号），
- * 以及点击**确实落到面板的重试入口**（`onRetryFailedRun`）——即"接线不悬空"。
- * 分流本身（可重发 → `onRegenerate`；不可重发 → `onRecover`）由
- * `useChatPanel.retry.spec.ts` 用真实组合式函数覆盖。
- */
 describe('ChatPanel —— 面板级失败块的按钮分流', () => {
   it('本轮可重发：按钮是「重试本轮」，点击落到面板重试入口', async () => {
     const { wrapper, panel } = setup()
@@ -389,13 +344,6 @@ describe('ChatPanel —— 数字人不可用的降级呈现（009）', () => {
   })
 })
 
-/**
- * Esc 中断本轮（2026-10-16）。
- *
- * 只钉"接线 + 优先级瀑布"两件事：按下去是否落到中断入口（`onStop`），以及
- * 弹窗 / `@引用`面板打开时**不许误伤**正在输出的回答。中断本身的行为
- * （POST /stop、本轮不落盘）由 `useChatStream` 的用例覆盖。
- */
 describe('ChatPanel —— Esc 中断本轮（2026-10-16）', () => {
   function pressEscape(): void {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
@@ -470,7 +418,6 @@ describe('ChatPanel —— 空数据引导气泡（014）', () => {
     const bubble = wrapper.find('.upload-hint')
     expect(bubble.exists()).toBe(true)
     expect(bubble.text()).toContain('当前您还没有准备数据，请点击 “+” 上传吧。')
-    // 锚点：与「+」同一分组，而不是飘在别处
     expect(bubble.element.closest('.composer-toolbar__left')).not.toBeNull()
     expect(wrapper.find('[aria-label="上传文件"]').exists()).toBe(true)
 
@@ -498,16 +445,7 @@ describe('ChatPanel —— 空数据引导气泡（014）', () => {
   })
 })
 
-/**
- * 工具栏发送判据的**接线**（2026-11-20 收敛后）。
- *
- * `utils/can-send.spec.ts` 只证明判据函数算得对；这里证明 `ChatPanel` 真的把它接到了
- * `ComposerToolbar` 的 `:can-send`。分工是必要的：判据写对、模板接错（例如改回只看
- * `draft` 非空，或漏掉 MCP 就绪门）时，类型仍是 `boolean`，`vue-tsc` 与判据单测
- * 都不会报——只有这一层会红。
- */
 describe('ChatPanel —— 工具栏发送判据接线', () => {
-  /** 工具栏实际收到的 `canSend`（= 判据 + 流式门 + MCP 就绪门） */
   function canSendOf(wrapper: ReturnType<typeof setup>['wrapper']): boolean {
     return wrapper.getComponent(ComposerToolbar).props('canSend') === true
   }

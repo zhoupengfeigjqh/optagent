@@ -1,16 +1,3 @@
-/**
- * 组件测试：MCP 工具清单（`FR-045`、`FR-063`）
- *
- * 守住四组口径：
- * 1. **只显示白名单里的工具**（顺序与白名单一致）；白名单为空（存量服务 = 不限制）则显示服务全量；
- * 2. **白名单失效标异常**：白名单里但当前服务清单中已不存在的工具 → 叹号 + 汇总；
- *    **探测失败时不能这么判**（核对不了 ≠ 不存在），只显示可读原因（`FR-009` 不静默省略）；
- * 3. 「重新探测」按钮（2026-10-02；2026-10-15 起兼作调整入口）：清单是打开详情那一刻的
- *    探测快照，界面不自动重取；点击后父级重取，并在**探测成功**时弹出工具范围窗；
- * 4. 探测进行中（`busy`）按钮禁用并改文案，防止重复点击；
- * 5. **可回写结果的工具标绿**（2026-10-17）：入参 schema 声明了 `resultUrl` 的工具，
- *    工具名整条标绿，并在其**紧贴右侧**显示「（可回写结果）」——判据与运行环境注入同一口径。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import McpToolList from './McpToolList.vue'
@@ -21,7 +8,6 @@ const TOOLS: McpToolInfo[] = [
   { name: 'query_price', description: '', parameters: {} },
 ]
 
-/** 入参声明了 `resultUrl` 的工具：调用时由运行环境注入回写地址 */
 const ASYNC_TOOL: McpToolInfo = {
   name: 'submit_job',
   description: '提交后台计算任务',
@@ -84,7 +70,6 @@ describe('McpToolList —— 白名单渲染', () => {
     expect(missing.text()).toContain('gone_tool')
     expect(missing.text()).toContain('已不存在')
     expect(wrapper.find('[data-test="missing-summary"]').text()).toContain('gone_tool')
-    // 2026-10-15：清理失效项不再要求"删除服务重建"，指向重新探测后的工具范围窗
     expect(missing.text()).toContain('工具范围窗')
     expect(missing.text()).not.toContain('删除该服务')
   })
@@ -127,13 +112,11 @@ describe('McpToolList —— 可回写结果的工具标绿（2026-10-17）', ()
     const wrapper = mountList([TOOLS[0]!, ASYNC_TOOL])
     const items = wrapper.findAll('.mcp-tool-list__item')
 
-    // 未声明的工具：不标绿、无标注
     expect(items[0]!.find('.mcp-tool-list__name').classes()).not.toContain(
       'mcp-tool-list__name--async',
     )
     expect(items[0]!.find('.mcp-tool-list__flag').exists()).toBe(false)
 
-    // 声明的工具：绿色 class + 紧贴标注（textContent 无空格，证明"紧贴"）
     const name = items[1]!.find('.mcp-tool-list__name')
     expect(name.classes()).toContain('mcp-tool-list__name--async')
     expect(name.text()).toBe('submit_job（可回写结果）')
@@ -142,7 +125,6 @@ describe('McpToolList —— 可回写结果的工具标绿（2026-10-17）', ()
 
   it('只认 `properties`（`required` 里出现不算）；形状异常一律不标（不误标）', () => {
     const odd: McpToolInfo[] = [
-      // required 里有 resultUrl，但 properties 没声明：运行环境不会注入
       { name: 'required_only', description: '', parameters: { required: ['resultUrl'] } },
       { name: 'no_properties', description: '', parameters: { type: 'object' } },
       { name: 'bad_properties', description: '', parameters: { properties: 42 } },

@@ -1,15 +1,5 @@
-/**
- * 数字人设计区的常量。
- */
 import type { AgentScenario, SoulDesign } from '../api/types'
 
-/**
- * "新建数字人"的路径哨兵。
- *
- * 设计态编辑器同时承担"新建"与"编辑"两种职责，二者的差异只是
- * "是否已有一份保存过的设计态文档"。用哨兵而非第二个路由，
- * 是为了保持**功能区内导航不超过两级**（`FR-053`）。
- */
 export const NEW_AGENT_SENTINEL = '__new__'
 
 /**
@@ -22,12 +12,6 @@ export const AGENT_NAME_MAX_LENGTH = 64
 
 export const AGENT_NAME_HINT = '不得含路径分隔符或 “..”，且不可与既有数字人重名'
 
-/**
- * 五类配置在编辑器内的分区（页签）标识。
- *
- * 「本体」自 2026-10-17 起为其中一类（`FR-058`）：与 SKILL 同理，引用值与
- * 候选清单来自平台本体库，部署时才把两个文件物化进运行环境。
- */
 export const AGENT_DESIGN_TABS = [
   { id: 'soul', label: 'SOUL' },
   { id: 'tools', label: '内置工具' },
@@ -39,16 +23,8 @@ export const AGENT_DESIGN_TABS = [
 
 export type AgentDesignTab = (typeof AGENT_DESIGN_TABS)[number]['id']
 
-/**
- * 「数据准备」预定义二级目录（平台硬编码）。
- *
- * 与 `admin-backend` `domain/config-center/scenario.ts` 的同名常量 MUST 同步。
- * 2026-11-17 起**可被屏蔽**：屏蔽 = 该目录不在场景清单里（清单即可见范围），
- * 编辑器据此渲染「已屏蔽 + 启用」行；预定义目录不强制字段约束（0 条 = 无约束）。
- */
 export const PREDEFINED_DATA_PREP_DIRS = ['算法规则'] as const
 
-/** 空场景（新建时的初值）：带预定义目录，无字段约束 */
 export function emptyScenario(): AgentScenario {
   return {
     scenario: '',
@@ -58,12 +34,6 @@ export function emptyScenario(): AgentScenario {
   }
 }
 
-/**
- * 「数据准备」二级目录的可上传文件类型候选（勾选项）。
- *
- * 权威定义在 `admin-backend` `domain/config-center/scenario.ts` 的 `DATA_PREP_UPLOAD_EXTS`
- * （MUST 同步），数组顺序也就是服务端归一化后的固定顺序。
- */
 export const DATA_PREP_UPLOAD_EXTS = [
   '.xlsx',
   '.xls',
@@ -78,7 +48,6 @@ export const DATA_PREP_UPLOAD_EXTS = [
   '.jpeg',
 ] as const
 
-/** 未配置目录时弹窗的默认勾选值（与平台默认 `.csv` / `.xlsx` 一致，FR-004） */
 export const DEFAULT_DATA_PREP_UPLOADS = ['.csv', '.xlsx'] as const
 
 /**
@@ -103,10 +72,6 @@ export const SOUL_LIMITS = {
   nextActionHintsMin: 1,
   nextActionHintsMax: 6,
   nextActionHintsDefault: 3,
-  /**
-   * 聚焦阶数（019）：`0~2`，缺省 `0`。
-   * 与后端 `readFocusDepth` 同一区间；阶数 0 = 只聚焦 Laya 命中的技能与行为（016 行为）。
-   */
   focusDepthMin: 0,
   focusDepthMax: 2,
   focusDepthDefault: 0,
@@ -115,7 +80,6 @@ export const SOUL_LIMITS = {
   capabilityTagLength: 20,
 } as const
 
-/** 空结构化 SOUL（新建数字人时的初值） */
 export function emptySoulDesign(): SoulDesign {
   return {
     intro: '',
@@ -126,17 +90,13 @@ export function emptySoulDesign(): SoulDesign {
     forbidden: [],
     prompt_extra: '',
     // 007：新建默认关闭。**这个键必须显式写出**——`useAgentDesign.dirty` 用
-    // `JSON.stringify(draft.soul) !== JSON.stringify(emptySoulDesign())` 判"是否有输入"，
-    // 漏了字段会让"只勾了这个开关"或"什么都没填"的两种状态判反
     next_action_hints: false,
-    // 条数同样显式落缺省：脏检查比对的是**整个对象**，少一个键就会与后端 `emptySoulDesign()` 不等
     next_action_hints_count: SOUL_LIMITS.nextActionHintsDefault,
     // 013：同上，必须显式——与后端 `emptySoulDesign()` 同形，脏检查才不会一进页面就报"有修改"
     intent_focus: false,
-    // 019：阶数同样显式落缺省 0（新建数字人不发散），与后端同形
     intent_focus_depth: SOUL_LIMITS.focusDepthDefault,
-    // 027：两个新开关同样显式落 false——脏检查比对整个对象，少一个键就会与后端不等
     input_rewrite: false,
     term_normalize: false,
+    task_planning: false,
   }
 }

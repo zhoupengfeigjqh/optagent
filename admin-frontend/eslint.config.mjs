@@ -10,8 +10,6 @@ import pluginVue from 'eslint-plugin-vue'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  // `coverage-*/` 与 `.gitignore` 同一口径：覆盖率产物目录（如 `coverage-run-9/`、
-  // `.coverage-gate/`）是生成的 HTML 报告，纳入 lint 只会刷出无意义的 warning
   {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'coverage-*/**', '.coverage-gate/**'],
   },
@@ -24,7 +22,6 @@ export default tseslint.config(
   },
   {
     rules: {
-      // TypeScript 项目里 `no-undef` 冗余且误报（未定义标识符由 vue-tsc 负责）
       'no-undef': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',

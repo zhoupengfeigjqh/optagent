@@ -1,14 +1,3 @@
-/**
- * 单元测试：工具结果的体积分流策略（2026-11-07）。
- *
- * 守三条规则（`inline_content` 任何分支都只存前 `TOOL_INLINE_MAX_BYTES`）：
- * 1. ≤ 内联阈值 → 原文内联（与是否内置无关）；
- * 2. **内置工具**超阈值 → 截断内联 + 说明「完整内容未保存」，**永不落盘**（`artifact` 缺席）；
- * 3. **外部来源**超阈值 → 截断内联（说明里给副本路径）+ 落盘计划，2MB 上限只在这条路径上生效。
- *
- * 内置工具清单**不在这里另写一份**：用 `builtinToolNames()` 逐项参数化，
- * 目录新增/删除工具时这份用例自动覆盖。
- */
 import { describe, expect, it } from 'vitest';
 import { builtinToolNames } from '../../src/domain/builtin-tool-catalog.js';
 import { SPACE_TMP } from '../../src/domain/dirs.js';
@@ -22,7 +11,6 @@ import {
 const THREAD = 'th1';
 const CALL = 'call_1';
 
-/** 恰好超过内联阈值 1KB 的文本（ASCII：1 字符 = 1 字节） */
 const OVER = 'x'.repeat(TOOL_INLINE_MAX_BYTES + 1024);
 
 function split(name: string, resultText: string, canArtifact = true) {

@@ -1,12 +1,3 @@
-/**
- * 集成测试：指代改写（027）**降级矩阵**端到端。
- *
- * 四个失败点各一条：判定服务故障 / 改写抛错 / 改写超时 / 改写空输出。
- * 每条都必须满足同一组不变量（契约 §10）：
- * - HTTP 200、SSE 照常输出回答、`history.jsonl` 只有原话；
- * - 聚焦退回原文（Laya 收到的评分素材 = 原话）；
- * - 留档给出**可区分**的原因（`judge_failed` / `llm_failed` / `empty_output`）。
- */
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { IntentFocusStore } from '../../src/domain/intent-focus/store.js';
@@ -61,7 +52,6 @@ describe('027 降级：改写调用失败', () => {
     expect(res.payload).toContain('本轮回答');
     expect(res.payload).not.toContain(REWRITTEN);
     expect(env.llmLog.rewritePrompts).toHaveLength(1);
-    // 改写失败 ⇒ 评分素材全是原话
     expect(env.laya.states.every((state) => state === FOLLOW_UP)).toBe(true);
     expect(firstRecord(env, thread.threadId)).toMatchObject({
       input: FOLLOW_UP,

@@ -1,14 +1,3 @@
-/**
- * 单元测试：16 个算子的类型强制与比较（021）。
- *
- * 守住的口径：
- * - `boolean` 只认 `true` / `false`，其余强制失败；
- * - `eq` / `ne` 按声明类型强制，未声明类型按字符串精确比较；
- * - 数值算子与 `between` 一律数值比较，`between` 为闭区间；
- * - `contains` / `not_contains` 类型不适用时**都判不成立**（取反不能让用错算子成立）；
- * - `matches` 非法正则 / 超长文本 → false 且不抛；
- * - 取值个数与算子不符 → false。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

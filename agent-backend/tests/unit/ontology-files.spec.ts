@@ -1,12 +1,3 @@
-/**
- * 单元测试：本体文件枚举与读取（020 收敛的唯一来源）。
- *
- * 守住的边界：
- * - 只认**真实目录**：符号链接目录被跳过（禁止逃逸）；
- * - 只认**普通文件**：符号链接文件、目录同名文件一律拒绝并告警；
- * - 坏 YAML / 非对象根只告警、返回 null，**永不抛**；
- * - `ontology` 目录不存在是常态：空数组且零告警（否则每轮对话都会刷告警）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,7 +76,7 @@ describe('listOntologyDirs', () => {
     writeFile(path.join(agent, 'ontology', '生产调度', '真实本体', 'ontology.yaml'), 'a: 1');
 
     const linked = tryLinkDir(outside, path.join(agent, 'ontology', '生产调度', '链接本体'));
-    if (!linked) return; // 环境不支持软链（无权限）时不做断言
+    if (!linked) return;
 
     const warnings: string[] = [];
     const dirs = listOntologyDirs(agent, warnings, 'scope_guard');
@@ -142,7 +133,7 @@ describe('readYamlObject', () => {
     const dir = tmpDir();
     const target = writeFile(path.join(dir, 'real.yaml'), 'a: 1');
     const link = path.join(dir, 'link.yaml');
-    if (!tryLinkFile(target, link)) return; // 环境不支持软链时跳过
+    if (!tryLinkFile(target, link)) return;
 
     const warnings: string[] = [];
     expect(readYamlObject(link, warnings)).toBeNull();

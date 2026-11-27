@@ -193,7 +193,6 @@ describe('读取技能内单个文件（2026-09-16）', () => {
       zipFixture({
         'SKILL.md': SKILL_MD,
         'references/手册.md': '# 手册\n\n正文内容\n',
-        // 含 NUL 字节 → 按二进制处理（夹具用字符串表达，写入后即为二进制内容）
         'assets/二进制.bin': 'a\u0000b\u0000c',
       }),
       { overwrite: false, source: 'a' },
@@ -312,7 +311,6 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
       before.hash,
     );
     expect(skills.read('pdf-parse').description).toBe('解析 PDF 与 OCR');
-    // 展示名跟着 SKILL.md 走；身份名（name）不因编辑而变化
     expect(skills.read('pdf-parse').display_name).toBe('文档解析');
     expect(skills.read('pdf-parse').name).toBe('pdf-parse');
     expect(skills.read('pdf-parse').content).toContain('新正文');
@@ -332,13 +330,11 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.VALIDATION_FAILED);
-    // 拒绝即不改动：原文仍在
     expect(fs.readFileSync(path.join(skillDir(), 'SKILL.md'), 'utf8')).toBe(SKILL_MD);
   });
 
   it('并发冲突：base_hash 过期 → 409 且**内容未被改写**（MUST NOT 静默覆盖他人改动）', () => {
     const stale = skills.readFile('pdf-parse', 'references/手册.md').hash;
-    // 他处先改了一次
     skills.writeFile('pdf-parse', 'references/手册.md', '他处的改动\n', stale);
 
     let caught: unknown;
@@ -418,12 +414,9 @@ describe('在线编辑单个文件（2026-09-16：全部文件可编辑，含附
     const hash = skills.readFile('pdf-parse', 'references/手册.md').hash;
     skills.writeFile('pdf-parse', 'references/手册.md', '第二版\n', hash);
 
-    // 原文被覆盖（没有退路——因此界面 MUST 保存前二次确认）
     expect(fs.readFileSync(path.join(skillDir(), 'references', '手册.md'), 'utf8')).toBe('第二版\n');
     expect(before).toBe('# 手册\n\n正文内容\n');
-    // 设计态根目录里既没有快照目录，也没有其它多余产物
     expect(fs.existsSync(path.join(root, 'skill-edits'))).toBe(false);
-    // 技能目录内只有原文件（快照若写在技能内会被物化进数字人目录）
     expect(fs.readdirSync(skillDir()).sort()).toEqual(['SKILL.md', 'assets', 'references']);
   });
 

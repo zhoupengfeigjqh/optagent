@@ -1,14 +1,3 @@
-/**
- * tmp/ 定期清理（T040 / FR-028）：删除超过 30 天未访问的临时产出。
- *
- * "未访问"判定取 max(atime, mtime)——FileAccess 读 tmp 文件时会 utimes
- * 刷新访问时间，所以正在被引用的产出不会被误删。
- * 单个文件删除失败不中断整轮扫描。
- *
- * **009 归属**：临时空间是**数字人级**的，因此定时任务 MUST **按（用户 × 数字人）逐一**清理
- * （`cleanupAllAgentTmpDirs`）——只清某一个目录或漏清都会让"30 天清理"这条契约对部分数字人失效。
- * 某数字人的临时空间不存在（从未使用过）⇒ 直接跳过，不视作异常。
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { PRODUCED_SUBDIR, SPACE_TMP, userDataDir } from './dirs.js';
@@ -38,11 +27,10 @@ export async function cleanupTmpDir(
   try {
     names = await fs.promises.readdir(tmpDir);
   } catch {
-    return result; // 目录不存在视为无可清理
+    return result;
   }
   for (const name of names) {
     if (name.startsWith('.upload-')) {
-      // 上传暂存残留：超过 1 小时即清理（与 30 天规则无关）
       const abs = path.join(tmpDir, name);
       const stat = await fs.promises.stat(abs).catch(() => null);
       if (stat && now - stat.mtimeMs > 60 * 60 * 1000) {
@@ -82,14 +70,6 @@ export async function cleanupTmpDir(
   return result;
 }
 
-/**
- * 按（用户 × 数字人）逐一清理各自的临时空间（009）。
- *
- * - 数字人清单由调用方给出（`listAgents` 口径：只含配置可用者）；已移除数字人的残留数据
- *   **不清理**（数据保留，只是不可见——FR-031），故不扫 `user-data/` 下的目录名。
- * - 数据目录不存在 ⇒ 该数字人从未写过临时空间，`cleanupTmpDir` 直接返回 0；
- * - 任一数字人清理失败不中断其余数字人（逐个独立计账）。
- */
 export async function cleanupAllAgentTmpDirs(
   optAgentRoot: string,
   userIds: readonly string[],
@@ -114,13 +94,6 @@ export async function cleanupAllAgentTmpDirs(
   return total;
 }
 
-/**
- * 清理某个**子目录**内的过期文件（R11 后台产出）。
- *
- * 判据与顶层一致（`max(atime, mtime)` 超 30 天，且以"真正读正文"为访问 —— 清单扫描
- * 走 `FileAccess.read(..., { touch: false })`，不给产出续命，见 `file-access`）。
- * 正文与 sidecar 是同生命周期文件、写入时刻相同，故会一起消失。
- */
 async function cleanupFilesIn(
   dir: string,
   now: number,

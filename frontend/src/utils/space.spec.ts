@@ -1,14 +1,3 @@
-/**
- * 三空间结构判定单测（`src/utils/space.ts`）
- *
- * 运行方式（本地执行；容器只负责部署，见宪章原则三 / 原则八）：
- *   npm run test            # 全部前端测试
- *   npm run test:coverage   # 含覆盖率门禁
- *
- * 为什么这几条边界必须钉死：**扁平空间判定是"数据准备 vs 共享/临时空间"分层的唯一依据**，
- * 右侧文件空间树（WorkspaceSpaceTree）与 `@` 引用面板（useFileMention）都依赖它。
- * 一旦判定漂移，两处会同时错，且症状是"目录层级少一层"这种难察觉的形态。
- */
 import { describe, expect, it } from 'vitest'
 
 import type { WorkspaceDir, WorkspaceFile, WorkspaceSpace } from '../api/types'
@@ -38,7 +27,6 @@ describe('isFlatSpace', () => {
   })
 
   it('仅一项但目录名与空间名不一致 → 不是扁平空间', () => {
-    // 数据准备下只配了 1 个子目录时，仍然要下钻一层
     expect(isFlatSpace(makeSpace('数据准备', [makeDir('生产计划')]))).toBe(false)
   })
 

@@ -1,12 +1,3 @@
-/**
- * 单元测试：工具记录落盘与下一轮回灌（002 特性）
- *
- * 这是本特性的**主链路**验证：
- * 1. 工具调用 → 落 `tool-events.jsonl`，且 `message_id` 与该轮 assistant 消息一致
- * 2. 下一轮的 prompt 里能"看到"上一轮的工具结果（`inline_content` 按预算回灌）
- * 3. 外置大结果：截断版进 messages（尾注带副本路径），**不进** systemExtra（2026-11-07）
- * 4. 未装配 toolEvents 时行为与既有完全一致（回灌与落盘都不发生）
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,7 +27,6 @@ let history: HistoryStore;
 let usage: UsageDb;
 let toolEvents: ToolEventStore;
 
-/** 记录每次 run 收到的请求（用于断言提示词投影），并按脚本产出事件 */
 function recordingAgent(
   captured: AgentRunRequest[],
   script: (() => AsyncIterable<LlmEvent>) | AsyncIterable<LlmEvent>,
@@ -74,7 +64,6 @@ async function* plainTurn(): AsyncIterable<LlmEvent> {
   yield { type: 'done', usage: { inputTokens: 3, outputTokens: 1 } };
 }
 
-/** 工具跑过之后 LLM 报错：用于验证"失败轮的工具卡片同样能挂上" */
 async function* toolThenErrorTurn(resultText: string): AsyncIterable<LlmEvent> {
   yield {
     type: 'tool_call_start',
@@ -111,7 +100,6 @@ function runTurn(
   return { settled: run.settled, events };
 }
 
-/** 灌历史消息：内容 h0..h{count-1}（user/assistant 交替，凑整数轮） */
 async function seedHistory(count: number): Promise<void> {
   for (let i = 0; i < count; i++) {
     await history.append('admin', AGENT, 'th1', {
@@ -121,7 +109,6 @@ async function seedHistory(count: number): Promise<void> {
   }
 }
 
-/** 直接落 summary.json（绕过 LLM）：声明"前 covered 条已归档进摘要" */
 function writeSummary(covered: number, text = '早前摘要'): void {
   const dir = threadDir(root, 'admin', AGENT, 'th1');
   fs.mkdirSync(dir, { recursive: true });
@@ -234,7 +221,6 @@ describe('下一轮回灌', () => {
     expect(assistant?.content).toContain('我读到了计划量');
     expect(assistant?.content).toContain('[工具 read_file 结果]');
     expect(assistant?.content).toContain('冲压,1200');
-    // 本轮新消息仍是最后一条，且不含工具结果
     expect(messages[messages.length - 1]).toMatchObject({ role: 'user', content: '再确认下' });
   });
 
@@ -242,7 +228,7 @@ describe('下一轮回灌', () => {
     const unit = '车间,计划量\n冲压,1200\n';
     const big = unit.repeat(
       Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
-    ); // > 内联阈值
+    );
     const manager = new RunManager({ history, usage, toolEvents });
     await runTurn(
       manager,
@@ -259,7 +245,6 @@ describe('下一轮回灌', () => {
 
     const req = captured[0]!;
     const assistant = req.messages.find((m) => m.role === 'assistant');
-    // 原文没进（被截断），但"记录已截断 + 怎么再看"的说明进了
     expect(assistant?.content).not.toContain(big);
     expect(assistant?.content).toContain('记录已截断');
     expect(assistant?.content).toContain('要查看更多请重新调用该工具');
@@ -270,7 +255,7 @@ describe('下一轮回灌', () => {
     const unit = '车间,计划量\n冲压,1200\n';
     const big = unit.repeat(
       Math.ceil((TOOL_INLINE_MAX_BYTES + 4096) / Buffer.byteLength(unit, 'utf8')),
-    ); // > 内联阈值
+    );
     const manager = new RunManager({ history, usage, toolEvents });
     await runTurn(
       manager,
@@ -287,12 +272,10 @@ describe('下一轮回灌', () => {
 
     const req = captured[0]!;
     const joined = req.messages.map((m) => m.content).join('\n');
-    // 全文没进（截断版），但截断说明与副本路径进了
     expect(joined).not.toContain(big);
     expect(joined).toContain('记录已截断');
     expect(joined).toContain('临时空间/th1_toolresult_call_1.txt');
     expect(joined).toContain('可用 read_file 读取');
-    // 工具结果不进系统提示词（索引段已删除）
     expect(req.systemExtra ?? '').not.toContain('临时空间/th1_toolresult_call_1.txt');
   });
 
@@ -311,7 +294,6 @@ describe('下一轮回灌', () => {
       '再确认下',
     ).settled;
 
-    // 工具结果只进 messages：systemExtra 里连截断说明都不该出现
     expect(captured[0]!.systemExtra ?? '').not.toContain('记录已截断');
     const joined = captured[0]!.messages.map((m) => m.content).join('\n');
     expect(joined).not.toContain('内部结果');
@@ -347,8 +329,8 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     ).settled;
 
     const req = captured[0]!;
-    expect(req.messages).toHaveLength(70 - 45 + 1); // 池子 + 本轮新消息
-    expect(req.messages[0]!.content).toBe('h45'); // 左边界 = 归档游标
+    expect(req.messages).toHaveLength(70 - 45 + 1);
+    expect(req.messages[0]!.content).toBe('h45');
     expect(req.messages.at(-1)).toMatchObject({ role: 'user', content: '继续' });
     expect(req.systemExtra).toContain('早前摘要');
   });
@@ -367,7 +349,6 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     ).settled;
 
     const req = captured[0]!;
-    // 摘要覆盖 h0..h39，正文从 h40 一直到最后一条 —— 两者之间没有任何空隙
     expect(req.messages).toHaveLength(100 - 40 + 1);
     expect(req.messages[0]!.content).toBe('h40');
     expect(req.messages.at(-2)).toMatchObject({ content: 'h99' });
@@ -388,7 +369,6 @@ describe('上下文池（方案 A）：正文按归档游标注入', () => {
     const req = captured[0]!;
     expect(req.messages).toHaveLength(POOL_MAX_MESSAGES + 1);
     expect(req.messages[0]!.content).toBe('h20'); // 兜底取末尾 60 条 = h20..h79
-    // 未装配摘要 ⇒ 摘要段长度为 0（`systemExtra` 仍含 R18 的【当前时间】段）
     expect(req.systemExtra ?? '').not.toContain('以下是对话早期内容的摘要');
   });
 });

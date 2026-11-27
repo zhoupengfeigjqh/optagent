@@ -1,8 +1,3 @@
-/**
- * 组件测试：卡片列表（T035）
- *
- * 覆盖 `FR-006`、`SC-022`、`SC-023` 与三态（加载中 / 失败 / 空）。
- */
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import EntityCardList from './EntityCardList.vue'

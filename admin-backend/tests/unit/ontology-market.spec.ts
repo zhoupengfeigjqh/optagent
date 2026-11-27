@@ -1,11 +1,3 @@
-/**
- * 单元测试：本体市场扫描、状态判定与导入/更新/删除（2026-10-03，`FR-060`/`FR-061`）
- *
- * 重点：**认 `ontology.yaml` + `securities.yaml` 两个必需文件**（2026-10-17 起缺任一即
- * `invalid`）、两个文件的哈希共同作为"市场是否变化"的判据、状态流转
- * （new → unchanged → changed → invalid）、落盘结构与市场前两级一致、
- * 重复导入/更新不存在的边界拒绝、路径安全。端到端见 `ontologies.spec.ts`。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -78,8 +70,6 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO, 
   const dir = path.join(market, scenario, ontologyDir);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ONTOLOGY_FILE), content);
-  // 2026-10-17：securities.yaml 为必需文件，缺它整条即 invalid；
-  // 专门测"缺文件"的用例传 false，其余默认齐全
   if (withSecurities) fs.writeFileSync(path.join(dir, SECURITIES_FILE), SECURITIES);
 }
 
@@ -150,7 +140,6 @@ describe('市场扫描', () => {
 
     expect(broken.status).toBe('invalid');
     expect(broken.invalid_reason).toContain(ONTOLOGY_FILE);
-    // 其余条目不受影响
     expect(statusOf(ONTOLOGY)).toBe('new');
     expect(listing.items).toHaveLength(2);
   });
@@ -188,11 +177,9 @@ describe('状态流转：new → unchanged → changed', () => {
     importOntoMarketOntology(market, ontologies, REF);
     expect(statusOf(ONTOLOGY)).toBe('unchanged');
 
-    // 改市场文件
     writeMarket(ONTOLOGY, YAML.replace('v1.0', 'v1.1'));
     expect(statusOf(ONTOLOGY)).toBe('changed');
 
-    // 更新后回到 unchanged
     updateOntoMarketOntology(market, ontologies, REF);
     expect(statusOf(ONTOLOGY)).toBe('unchanged');
   });
@@ -203,7 +190,6 @@ describe('导入 / 更新 / 删除', () => {
     const result = importOntoMarketOntology(market, ontologies, REF);
     const saved = path.join(dataDir, ONTO_MARKET_DIR, SCENARIO, ONTOLOGY, ONTOLOGY_FILE);
 
-    // 身份只有 metadata 一份来源：响应也不下发副本字段（2026-10-17）
     expect(result).toMatchObject({ overwritten: false });
     expect(result).not.toHaveProperty('scenario');
     expect(result).not.toHaveProperty('ontology_dir');
@@ -233,7 +219,6 @@ describe('导入 / 更新 / 删除', () => {
     expect(stored).not.toHaveProperty('name');
     expect(stored).not.toHaveProperty('source');
 
-    // 视图层同样不派生副本：身份只在 metadata 的两个名字里
     const record = ontologies.find(SCENARIO, ONTOLOGY)!;
     expect(record.metadata.scenario_name).toBe(SCENARIO);
     expect(record.metadata.ontology_name).toBe(ONTOLOGY);
@@ -244,7 +229,6 @@ describe('导入 / 更新 / 删除', () => {
   });
 
   it('metadata 与市场路径不一致 → 导入被拒（身份只来自 metadata，不能漂移）', () => {
-    // 目录名与 ontology.yaml 里的 ontology_name 不同
     writeMarket('名字不一样', YAML);
 
     let caught: unknown;
@@ -308,12 +292,6 @@ describe('导入 / 更新 / 删除', () => {
     expect(detail.securities_content).toBe(SECURITIES);
   });
 
-  /**
-   * 删除的落地断言：磁盘目录清除、记录消失、再删报 `ADM_ONTOLOGY_NOT_FOUND`。
-   *
-   * 这里用 ASCII 目录名只是用例可读性——与中文名已无行为差异：修复 `fs.rmSync`
-   * 静默失败后（2026-10-09），中文路径同样能真删，见下一条用例。
-   */
   it('删除：磁盘目录清除、记录消失、再删 → ADM_ONTOLOGY_NOT_FOUND', () => {
     const scenario = 'demo-scenario';
     const ontologyDir = 'demo-ontology';
@@ -456,7 +434,6 @@ describe('安全管控同步（securities.yaml，2026-10-17 转为必需文件�
       caught = err;
     }
     expect((caught as ApiError).code).toBe(ERROR_CODES.VALIDATION_FAILED);
-    // 拒绝发生在写入之前：库内快照仍是完整的两个文件
     expect(fs.existsSync(saved)).toBe(true);
     expect(ontologies.read(scenario, ontologyDir).securities_content).toBe(SECURITIES);
   });

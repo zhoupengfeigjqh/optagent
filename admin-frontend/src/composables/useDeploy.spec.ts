@@ -1,15 +1,3 @@
-/**
- * 单元测试：部署状态（US2）
- *
- * 重点守住两件事：
- * 1. **空选择一律拒绝**（2026-09-16）：部署对象在用户卡片上勾选后传进来，
- *    空数组若要落回服务端"缺省 = 全部用户"，就会变成误部署全平台；
- * 2. **部署前总是取最新 revision**，失败后静默刷新，同页重试不会被陈旧版本卡住。
- *
- * **2026-11-23**：部署前预检与全局异常项汇总下架，`validate()` / `validated` /
- * `validationErrors` 相关用例一并删除；新增"逐用户失败（200 + `users[].ok=false`）
- * 不影响整体成功判定"的用例——这是现在唯一的失败呈现方式。
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDeploy } from './useDeploy'
 
@@ -48,7 +36,6 @@ describe('useDeploy', () => {
 
     const d = useDeploy()
     expect(await d.deploy(['admin'])).toBe(true)
-    // 2026-11-23：一次部署会话只读一次版本（原为提交前 + 成功后 + 失败后共 3 次）
     expect(fetchManifest).toHaveBeenCalledTimes(1)
     expect(deployApi).toHaveBeenCalledWith(['admin'], 7)
     expect(d.result.value?.history_id).toBe('h1')
@@ -65,16 +52,13 @@ describe('useDeploy', () => {
   })
 
   it('2026-11-17：部署前总是取最新 revision（别处改过配置不再被陈旧版本卡住）', async () => {
-    // 先加载到旧版本 5
     fetchManifest.mockResolvedValueOnce({ items: [], total: 0, revision: 5 })
     const d = useDeploy()
     await d.loadRevision()
-    // 期间别处改了配置：清单端点现在返回 6
     fetchManifest.mockResolvedValue({ items: [], total: 0, revision: 6 })
     deployApi.mockResolvedValue({ users: [], manifest_diff: [], history_id: 'h' })
 
     expect(await d.deploy(['admin'])).toBe(true)
-    // 部署用的是最新 6，而非本页缓存的 5
     expect(deployApi).toHaveBeenCalledWith(['admin'], 6)
   })
 

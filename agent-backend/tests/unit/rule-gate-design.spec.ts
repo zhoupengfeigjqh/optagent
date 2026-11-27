@@ -1,14 +1,3 @@
-/**
- * 单元测试：`rule_design` 读侧归一（021）。
- *
- * 守住的口径：
- * - 算子全集恰为 16 个，取值个数按算子定；
- * - `combine` 非法一律按 `and`；`groups` 非数组/为空 → 视为未设计（`null`）；
- * - 组内 `conditions` 非数组或为空 → 该组剔除；条件非对象 → 丢弃；
- * - 未知算子、缺 `function` / `field` → 保留但标 `invalid`（恒不成立）；
- * - `values` 非数组单值包裹、元素统一 `String()`；
- * - 组数 / 条数超 5 **不拒绝**（设计期约束，运行期照常求值）。
- */
 import { describe, expect, it } from 'vitest';
 
 import {

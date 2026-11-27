@@ -1,38 +1,19 @@
-/**
- * 输入区（contenteditable）的文本序列化与 `@` 引用分段（2026-10-18）。
- *
- * 背景：输入区从 `<textarea>` 改成富文本容器后，正文里同时存在三类节点——
- * 文本、换行 `<br>`、以及不可编辑的**引用胶囊**（`@文件名`）。而上层的草稿、
- * `@` 触发检测、发送载荷仍只认字符串，因此「DOM → 文本」的规则必须只有一处实现，
- * 否则输入框看到的和发出去的迟早对不上。
- *
- * 三条约定：
- * - 胶囊的**文本**就是它的标记（`@文件名`），序列化时从 `data-mention-filename` 取，
- *   因此胶囊被整体删除时标记随之消失，`useFileMention.handleInput` 的反向同步照旧成立；
- * - 分段（文本 / 胶囊）由调用方传入的标记拼写驱动，本文件不另造 `@` 拼写规则
- *   （唯一来源是 `mentionToken`）；
- * - 拿不到选区时（jsdom 等无布局环境）一律回退为「文末」，调用方无需分支。
- */
 
 /** 胶囊上的文件名属性：序列化与定位都读它，MUST NOT 改用 `textContent`（胶囊里还有按钮）。 */
 export const MENTION_FILENAME_ATTR = 'data-mention-filename'
 
-/** 技能胶囊上的技能名属性（2026-11-07）；与 `@` 胶囊互斥，同一枚只带一个。 */
 export const SKILL_NAME_ATTR = 'data-skill-name'
 
-/** 正文的一段：普通文本、`@文件名` 标记，或 `/技能名` 标记。 */
 export type ComposerSegment =
   | { kind: 'text'; text: string }
   | { kind: 'mention'; token: string }
   | { kind: 'skill'; token: string }
 
-/** 浏览器回车产生的块级包裹（正常路径已拦截 Enter，这里只兜住输入法/粘贴的漏网）。 */
 const BLOCK_TAGS: ReadonlySet<string> = new Set(['DIV', 'P', 'LI'])
 
 const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 
-/** 当前选区；环境不支持时返回 `null`。 */
 function currentSelection(): Selection | null {
   return typeof document.getSelection === 'function' ? document.getSelection() : null
 }
@@ -41,7 +22,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 单个节点的文本贡献（`serializeComposerText` 的递归单元）。 */
 function nodeText(node: Node): string {
   if (node.nodeType === TEXT_NODE) return node.nodeValue ?? ''
   if (node.nodeType !== ELEMENT_NODE) return ''
@@ -70,12 +50,6 @@ export function serializeComposerText(root: Node): string {
   return Array.from(root.childNodes).map(nodeText).join('')
 }
 
-/**
- * 光标在文本中的下标（与 {@link serializeComposerText} 同一把尺子）。
- *
- * 只克隆「起点 → 光标」这段再序列化，因此 `<br>`、胶囊的贡献与全文一致；
- * 拿不到选区时返回文末下标。
- */
 export function caretTextOffset(
   root: Node,
   selection: Selection | null = currentSelection(),
@@ -92,7 +66,6 @@ export function caretTextOffset(
   return serializeComposerText(head.cloneContents()).length
 }
 
-/** 把光标放到输入区末尾（外部改写草稿后重建 DOM 时用）。 */
 export function placeCaretAtEnd(root: HTMLElement): void {
   const selection = currentSelection()
   if (!selection) return

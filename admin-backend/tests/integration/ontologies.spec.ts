@@ -1,13 +1,3 @@
-/**
- * 集成测试：本体管理端点（2026-10-03，契约 §10）
- *
- * 覆盖：列表（分页 + 不下发正文）、详情（全文只读）、删除、市场列表与状态、
- * 导入（重复即拒）、更新（不存在即拒）、落盘结构与市场前两级一致、
- * **只读保证**（平台不提供任何编辑本体的端点，且对市场零写入）。
- *
- * 安全管控（`securities.yaml`）的同步用例见同目录 `ontologies-securities.spec.ts`
- * （本文件触 500 行门禁，故分居两处）。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -46,7 +36,6 @@ function yamlFor(scenario: string, ontologyDir: string): string {
 let fx: TestFixture;
 let marketDir: string | null = null;
 
-/** 搭一个市场（默认含一个本体）；withMarket=false 时完全不配置 ONTO_MARKET_DIR */
 async function setup(withMarket = true): Promise<void> {
   if (withMarket) {
     marketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onto-market-'));
@@ -65,7 +54,6 @@ function writeMarket(ontologyDir: string, content: string, scenario = SCENARIO):
   fs.writeFileSync(path.join(dir, 'securities.yaml'), SECURITIES);
 }
 
-/** 库内落盘文件（断言结构与内容用） */
 function savedFile(): string {
   return path.join(fx.platformDataDir, 'onto_market', SCENARIO, ONTOLOGY, 'ontology.yaml');
 }
@@ -105,7 +93,6 @@ describe('GET /api/admin/ontologies（§10.1）', () => {
     const res = await fx.app.inject({ method: 'GET', url: '/api/admin/ontologies' });
     expect(res.statusCode).toBe(200);
     const item = res.json().items[0];
-    // 身份只有 metadata 一份来源：不再下发 scenario / ontology_dir / name / source
     expect(item).not.toHaveProperty('scenario');
     expect(item).not.toHaveProperty('ontology_dir');
     expect(item).not.toHaveProperty('name');
@@ -146,7 +133,6 @@ describe('GET /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.2）'
     expect(ghost.statusCode).toBe(404);
     expect(ghost.json().error.code).toBe('ADM_ONTOLOGY_NOT_FOUND');
 
-    // 两段身份都在路径上，少一段不再是"缺参 400"
     const oneSegment = await fx.app.inject({
       method: 'GET',
       url: `/api/admin/ontologies/${encodeURIComponent(ONTOLOGY)}`,
@@ -189,7 +175,6 @@ describe('DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.3�
     });
     expect(again.statusCode).toBe(404);
 
-    // 身份两段都在路径上 ⇒ 少一段不是"缺参 400"，而是根本没有这条路由（2026-10-17）
     const oneSegment = await fx.app.inject({
       method: 'DELETE',
       url: `/api/admin/ontologies/${ASCII.ontology_dir}`,
@@ -197,16 +182,6 @@ describe('DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.3�
     expect(oneSegment.statusCode).toBe(404);
   });
 
-  /**
-   * 中文路径删除：**必须是真删**（2026-10-09 起）。
-   *
-   * 修正前本用例还容得下"宿主删不掉 → 503 且不半删"的分支：根因是 `fs.rmSync` 在
-   * Windows 上对非 ASCII 路径静默失败。现已改用 `removeTree`（`unlinkSync`/`rmdirSync`
-   * 手工递归），中文名同样能真删，故断言收紧为 **204 + 记录与磁盘目录都消失**——
-   * 这正是"删除不生效"这一 bug 的回归守护。
-   *
-   * 兜底的 503 行为（真被其它进程占用时）由 `tests/unit/platform-store.spec.ts` 打桩覆盖。
-   */
   it('中文名本体删除：204，记录与磁盘目录都消失', async () => {
     await setup();
     await importOntology();
@@ -223,7 +198,6 @@ describe('DELETE /api/admin/ontologies/{scenario_name}/{ontology_name}（§10.3�
       url: `/api/admin/ontologies/${encodeURIComponent(SCENARIO)}/${encodeURIComponent(ONTOLOGY)}`,
     });
     expect(detail.statusCode).toBe(404);
-    // 不留"卡片没了、文件还在"的半删状态
     expect(fs.existsSync(savedFile())).toBe(false);
   });
 });

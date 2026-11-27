@@ -1,11 +1,3 @@
-/**
- * 组件测试：本体管理功能区（`FR-058`~`FR-061`）
- *
- * 守住三条：
- * 1. 挂载即拉列表；
- * 2. 卡片「查看」发出的导航路径**同时带上两段身份**（目录名在路径、场景名在查询参数）；
- * 3. 路由 detail + scenario 都就位时才加载详情；删除后回到列表并播报。
- */
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OntologyArea from './OntologyArea.vue'
@@ -86,8 +78,6 @@ describe('OntologyArea', () => {
     const wrapper = mountArea()
     await flushPromises()
 
-    // 点卡片里的「查看」（工具栏第一个按钮是"从本体市场导入"，别选错；
-    // 卡片名称 2026-10-17 起为 `{场景名}-{本体名}`）
     await wrapper.find('[aria-label="查看本体 生产调度-原材料采购和库存"]').trigger('click')
 
     expect(wrapper.emitted('navigate')?.[0]).toEqual([
@@ -101,7 +91,6 @@ describe('OntologyArea', () => {
     const wrapper = mountArea({ detail: '原材料采购和库存', scenario: '生产调度' })
     await flushPromises()
 
-    // 参数顺序 (场景名, 本体名)，与 URL 与 metadata 一致
     expect(fetchOntology).toHaveBeenCalledWith('生产调度', '原材料采购和库存')
     expect(wrapper.find('[data-test="file-content"]').exists()).toBe(true)
   })

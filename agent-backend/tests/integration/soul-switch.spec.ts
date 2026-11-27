@@ -1,19 +1,3 @@
-/**
- * 集成测试：`SOUL.md` 开关的端到端口径（007 修订 · Tail Protocol · FR-035 / SC-007）。
- *
- * 这里跑的是**真实链路**：真实 `SOUL.md` 文件 → `loadAgentConfig` 解析 → 开关读取
- * （`isNextActionsEnabled`）→ `RunManager.nextActionsConfig` 的真实装配语义（与 `server.ts`
- * 逐字同构的闭包）。修订后卡片与回答同流产出，"开关门控"收敛为提示词装配期一件事：
- *
- * - **FR-035（System Prompt 恒等）**：开关开 / 关两态，`loadAgentConfig.systemPrompt` MUST
- *   逐字一致（尾部块指令是运行期按开关**追加**的，不写进固化 System Prompt）；
- * - **SC-007（关闭即零成本）**：关闭态 `nextActionsConfig` 返回 `null` → 请求不带
- *   `nextActionsMax`（不追加指令、模型不感知协议）→ 收尾不定稿卡片；
- *   开启态返回真实条数上限（`next_action_hints_count`，缺省 3）。
- *
- * 与 `tests/unit/next-actions.spec.ts` 的分工：那边用**注入的**桩覆盖判定分支，
- * 这边用**磁盘上的真实文件**验证"写进 SOUL.md 的开关真的被读到"。
- */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,10 +6,6 @@ import { loadAgentConfig } from '../../src/domain/agent-instance.js';
 import { agentDir } from '../../src/domain/dirs.js';
 import { isNextActionsEnabled, nextActionHintsCount } from '../../src/domain/soul.js';
 
-/**
- * 两态共用的 SOUL 正文：这段就是 `systemPrompt`（`loadAgentConfig` 会 trim 首尾空白），
- * MUST 不因开关而变。
- */
 const BODY = '## 主要使命\n\n你是交付助理，帮助业务人员排查订单风险。';
 
 const USER = 'admin';
@@ -33,7 +13,6 @@ const AGENT = 'demo';
 
 let root: string;
 
-/** 按给定开关行写一套数字人配置（SOUL.md 与 `admin-backend` 的 `renderSoulMd` 产物同形） */
 function writeSoul(switchLine: string): void {
   const dir = agentDir(root, USER, AGENT);
   fs.mkdirSync(dir, { recursive: true });
@@ -51,7 +30,6 @@ function writeSoul(switchLine: string): void {
   );
 }
 
-/** 与 `server.ts` 逐字同构的装配闭包：开关与条数逐次现读 */
 function makeNextActionsConfig(): (
   userId: string,
   agentName: string,
@@ -82,7 +60,6 @@ describe('SOUL.md 开关：开 / 关两态', () => {
     expect(off.systemPrompt).toBe(BODY);
     expect(on.systemPrompt).toBe(BODY);
     expect(on.systemPrompt).toBe(off.systemPrompt);
-    // 开关本身不出现在任何一态的系统提示词里
     expect(on.systemPrompt).not.toContain('next_action_hints');
     expect(off.systemPrompt).not.toContain('next_action_hints');
   });
@@ -100,7 +77,6 @@ describe('SOUL.md 开关：开 / 关两态', () => {
     writeSoul('next_action_hints: true\n');
     expect(isNextActionsEnabled(root, USER, AGENT)).toBe(true);
 
-    // SOUL.md 读不出来（目录被删）→ 关，且不抛错
     fs.rmSync(agentDir(root, USER, AGENT), { recursive: true, force: true });
     expect(isNextActionsEnabled(root, USER, AGENT)).toBe(false);
   });
@@ -109,7 +85,7 @@ describe('SOUL.md 开关：开 / 关两态', () => {
     const config = makeNextActionsConfig();
 
     writeSoul('');
-    expect(config(USER, AGENT)).toBeNull(); // 不追加指令、收尾不定稿卡片
+    expect(config(USER, AGENT)).toBeNull();
 
     writeSoul('next_action_hints: true\n');
     expect(config(USER, AGENT)).toEqual({ enabled: true, max: 3 }); // 缺省上限

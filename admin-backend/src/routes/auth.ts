@@ -1,11 +1,3 @@
-/**
- * 登录鉴权路由（`contracts/auth-api.md` §2）。
- *
- * - `POST /api/admin/auth/login`：校验账号密码 → 下发 HttpOnly Cookie。
- * - `GET  /api/admin/auth/me`：登录态探针。
- * - `POST /api/admin/auth/logout`：清会话 + 清 Cookie。
- * - `GET  /api/admin/auth/session/valid`：会话内省（供运行侧，免鉴权只读）。
- */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
 import { ApiError } from '../domain/api-error.js';
@@ -30,7 +22,6 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     if (!token) throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '未登录');
     try {
       const claims = await verifySession(token, ctx.config.authSecret);
-      // 单会话：登出/被踢后该会话已非当前会话 → 探针即失效
       if (!ctx.auth.introspect(claims.userId, claims.sessionId)) {
         throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '登录已失效');
       }
