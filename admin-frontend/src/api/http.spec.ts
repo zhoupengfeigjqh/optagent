@@ -158,3 +158,39 @@ describe('parseErrorResponse', () => {
     expect(error).toBeInstanceOf(Error)
   })
 })
+
+describe('createHttpClient —— 401 统一处理', () => {
+  it('401：触发 onUnauthorized 回调，且错误照常抛出', async () => {
+    const onUnauthorized = vi.fn()
+    const client = createHttpClient({
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({ error: { code: 'ADM_UNAUTHENTICATED', message: 'x' } }, 401),
+      ) as never,
+      onUnauthorized,
+    })
+
+    let caught: unknown
+    try {
+      await client.get('/api/admin/x')
+    } catch (err) {
+      caught = err
+    }
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(caught).toBeInstanceOf(ApiError)
+    expect((caught as ApiError).code).toBe('ADM_UNAUTHENTICATED')
+  })
+
+  it('非 401（如 500）不触发 onUnauthorized', async () => {
+    const onUnauthorized = vi.fn()
+    const client = createHttpClient({
+      fetchImpl: vi.fn().mockResolvedValue(
+        jsonResponse({ error: { code: 'INTERNAL_ERROR', message: 'x' } }, 500),
+      ) as never,
+      onUnauthorized,
+    })
+
+    await expect(client.get('/api/admin/x')).rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+})

@@ -240,6 +240,7 @@ T000（已完成）
 - 决策追加（2026-11-27，v0.22）：规划资格收紧——`IntentFocusResult.hasCapability`（只认**直接命中**的本体行为/函数，上/下游发散不算起点）、`plan-gate.ts` 新增 `planCapabilityBlocks`、`AgentRunRequest.planEligible`、`agent-factory` 新增 `plan.skipped(no_focus_capability)` 分流；无能力时 `runner` 连门禁判定也不发起；测试 `plan-gate.spec` +2 例、`intent-focus-runner.spec` +2 例
 - 决策追加（2026-11-28，v0.23）：提示词「段 1 三条硬要求」（聚焦优先 / `coreAction` 必须在工具清单 / 不得绕开清单）+「段 6 单对象单步（即使动作相同也拆步）」；门禁口径由"批量查询算一个任务"翻转为"多对象即多步"；测试 `plan-gate.spec` +1 例、`plan-prompt.spec` +2 例
 - 存量清理（2026-11-28）：删除 `plan-gate.ts` 孤立导出 `judgePlanGate`（生产零引用、与 runner 私有方法同名异义），runner 私有方法改名 `judgePlanGateScore` 消歧；`plan-gate.spec.ts` 删 3 例、现 7 例
+- 决策追加（2026-11-28，v0.24）：`renderContinueInput` 的 roll 分支收紧为「仅当仍有必要…目标已完全达成时直接输出 []，不要为了凑步骤而新增无意义的动作」；`plan-batch.spec.ts` 补断言
 - 行数复核：`runner.ts` **801**、`plan-orchestrator.ts` **580**、`agent-factory.ts` **543**、`config.ts` **524** 均为存量超限（`runner.ts` HEAD 即 757、`config.ts` HEAD 593，本次只加门禁判定与配置解析；按 `plan.md` 复杂度跟踪「不拆分存量」执行，判定逻辑本身抽到 `plan-gate.ts` **50** 行）；`run-consume.ts` 310、`server.ts` 447、`server-attachments.ts` 98，均 ≤500
 
 ## 规模估算

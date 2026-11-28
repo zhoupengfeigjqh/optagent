@@ -10,6 +10,7 @@
  */
 import { computed } from 'vue'
 import type { AgentServiceItem, ErrorInfo, UserListItem } from '../../api/types'
+import { isAdminRole } from '../../utils/role'
 import EmptyState from '../common/EmptyState.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
 
@@ -96,9 +97,9 @@ function sourceLabel(user: UserListItem): string {
                   <span>{{ user.display_name || user.user_id }}</span>
                   <span
                     class="account-table__role"
-                    :class="{ 'account-table__role--admin': user.role === 'admin' }"
+                    :class="{ 'account-table__role--admin': isAdminRole(user.role) }"
                   >
-                    {{ user.role === 'admin' ? '管理员' : '普通用户' }}
+                    {{ isAdminRole(user.role) ? '管理员' : '普通用户' }}
                   </span>
                 </div>
                 <div class="account-table__sub mono">{{ user.user_id }}</div>

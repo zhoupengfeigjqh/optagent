@@ -4,10 +4,9 @@
  * 为每个账号保存"当前唯一有效会话标识"：登录时覆盖、登出/删除用户时清除。
  * 运行侧经会话内省端点读取，从而实现"后登踢前登"。
  *
- * **028 阶段 1**：写方法 async 化并提取 `SessionPort`；本类保持 `file` 驱动
- * （`.platform-data/accounts/sessions/{uid}.json`，复用 `PlatformStore` 原子写），
- * mysql 驱动见 `mysql-session-store.ts`（`sessions` 表）。
- * 读取保持**同步**（`AuthService.introspect` 的契约不变，运行侧零改动）。
+ * **读取必须回源**（file 读文件 / mysql 查表），不得缓存在进程内：会话是安全边界，
+ * 多实例或运维脚本删行之后，内存副本会让本该失效的凭据继续可用。
+ * 故端口方法一律 async。
  */
 import type { PlatformStore } from '../../infra/platform-store.js';
 import { SESSIONS_DIR } from '../account/paths.js';
@@ -21,9 +20,9 @@ export interface SessionRecord {
 /** 会话登记端口（028）：file / mysql 两驱动共同实现 */
 export interface SessionPort {
   setCurrentSession(userId: string, sessionId: string): Promise<void>;
-  getCurrentSession(userId: string): string | null;
+  getCurrentSession(userId: string): Promise<string | null>;
   clearSession(userId: string): Promise<void>;
-  isCurrentSession(userId: string, sessionId: string): boolean;
+  isCurrentSession(userId: string, sessionId: string): Promise<boolean>;
 }
 
 export class SessionStore implements SessionPort {
@@ -42,20 +41,19 @@ export class SessionStore implements SessionPort {
     } satisfies SessionRecord);
   }
 
-  /** 读取当前会话标识；无记录返回 `null`。 */
-  getCurrentSession(userId: string): string | null {
+  /** 读取当前会话标识；无记录返回 `null`（每次读盘，不缓存）。 */
+  async getCurrentSession(userId: string): Promise<string | null> {
     const doc = this.store.readJson<SessionRecord>(SessionStore.relPath(userId));
     return doc && typeof doc.session_id === 'string' ? doc.session_id : null;
   }
 
-  /** 清除会话登记（登出 / 删除用户）。幂等。 */
+  /** 清除会话登记（登出 / 删除用户）。幂等：文件不存在时 `remove` 是空操作。 */
   async clearSession(userId: string): Promise<void> {
-    if (!this.store.exists(SessionStore.relPath(userId))) return;
     this.store.remove(SessionStore.relPath(userId));
   }
 
   /** 某会话是否仍为该账号的当前会话。 */
-  isCurrentSession(userId: string, sessionId: string): boolean {
-    return this.getCurrentSession(userId) === sessionId;
+  async isCurrentSession(userId: string, sessionId: string): Promise<boolean> {
+    return (await this.getCurrentSession(userId)) === sessionId;
   }
 }

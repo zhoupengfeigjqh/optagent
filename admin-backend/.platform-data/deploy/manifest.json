@@ -3,16 +3,10 @@
     {
       "user_id": "admin",
       "agent_names": [
-        "生产调度测试"
-      ],
-      "last_deployed_at": "2026-11-27T12:19:57.205Z"
-    },
-    {
-      "user_id": "u_aba11be615ce",
-      "agent_names": [
+        "生产调度测试",
         "生鲜识别辅助"
       ],
-      "last_deployed_at": "2026-11-27T12:25:58.387Z"
+      "last_deployed_at": "2026-11-28T10:09:28.688Z"
     }
   ]
 }

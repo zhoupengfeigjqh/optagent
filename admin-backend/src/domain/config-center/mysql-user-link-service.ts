@@ -9,8 +9,8 @@
  *   `Deployer` / `references.ts` / MCP 引用查询等同步消费方**零改动**；
  * - **写透**：写方法先 SQL 落库，成功后更新投影；失败即抛可读错误
  *   （不静默回退，宪章"按 STORAGE_DRIVER 明确报错"）；
- * - `revision`：账号域写不占设计态版本（D4），响应里的 revision 为
- *   `PlatformStore` 只读快照。
+ * - `revision`：与 file 驱动同一口径（029 R3）——新建/改授权/删号推进设计态版本，
+ *   改密不推进；版本文件仍由 `PlatformStore` 持有，不随账号入库。
  */
 import { ApiError } from '../api-error.js';
 import { hashPassword, type PasswordRecord } from '../auth/password.js';
@@ -34,7 +34,7 @@ interface UserRow {
   phone: string | null;
   agents: unknown;
   display_name: unknown;
-  password_record: unknown;
+  password: unknown;
   role: unknown;
   source_agent_code: string | null;
 }
@@ -47,7 +47,7 @@ export class MysqlUserRepository {
   /** 启动期全量加载内存投影（wiring 时调用；失败 = 服务拒绝启动） */
   async init(): Promise<void> {
     const rows = await this.conn.select<UserRow>(
-      'SELECT user_id, phone, agents, display_name, password_record, role, source_agent_code FROM users',
+      'SELECT user_id, phone, agents, display_name, `password`, role, source_agent_code FROM users',
     );
     this.docs.clear();
     for (const row of rows) {
@@ -71,13 +71,13 @@ export class MysqlUserRepository {
   async save(doc: UserLinkDocument): Promise<void> {
     try {
       await this.conn.modify(
-        `INSERT INTO users (user_id, phone, agents, display_name, password_record, role, source_agent_code)
+        `INSERT INTO users (user_id, phone, agents, display_name, \`password\`, role, source_agent_code)
          VALUES (?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            phone = VALUES(phone),
            agents = VALUES(agents),
            display_name = VALUES(display_name),
-           password_record = VALUES(password_record),
+           \`password\` = VALUES(\`password\`),
            role = VALUES(role),
            source_agent_code = VALUES(source_agent_code)`,
         [
@@ -93,6 +93,39 @@ export class MysqlUserRepository {
     } catch (err) {
       if (isDuplicateEntry(err)) {
         // 命中的唯一键：user_id → ADM_USER_ID_TAKEN；phone → ADM_PHONE_TAKEN
+        if (String((err as Error).message).includes('phone')) {
+          throw new ApiError(ERROR_CODES.ADM_PHONE_TAKEN, `手机号已被注册：${doc.phone ?? ''}`);
+        }
+        throw new ApiError(ERROR_CODES.ADM_USER_ID_TAKEN, `用户标识已存在：${doc.user_id}`);
+      }
+      throw err;
+    }
+    this.docs.set(doc.user_id, doc);
+  }
+
+  /**
+   * 严格插入（029 R4）：新建 MUST 是 INSERT 语义，撞主键/撞手机号一律失败。
+   *
+   * 用 upsert 做新建会让"并发同名建号"两条都返回 201 而外面只看得到一条——
+   * file 驱动（同步写）不会出现这种情况，故这里也不能。
+   */
+  async insert(doc: UserLinkDocument): Promise<void> {
+    try {
+      await this.conn.modify(
+        `INSERT INTO users (user_id, phone, agents, display_name, \`password\`, role, source_agent_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          doc.user_id,
+          doc.phone ?? null,
+          JSON.stringify(doc.agents),
+          doc.display_name ?? '',
+          doc.password ? JSON.stringify(doc.password) : null,
+          doc.role ?? 'user',
+          doc.source_agent_code ?? null,
+        ],
+      );
+    } catch (err) {
+      if (isDuplicateEntry(err)) {
         if (String((err as Error).message).includes('phone')) {
           throw new ApiError(ERROR_CODES.ADM_PHONE_TAKEN, `手机号已被注册：${doc.phone ?? ''}`);
         }
@@ -123,7 +156,7 @@ function toDocument(row: UserRow): UserLinkDocument {
   if (typeof row.display_name === 'string' && row.display_name !== '') {
     doc.display_name = row.display_name;
   }
-  const password = row.password_record === null ? null : parseJsonColumn(row.password_record, 'password_record');
+  const password = row.password === null ? null : parseJsonColumn(row.password, 'password');
   if (password !== null && typeof password === 'object') {
     doc.password = password as PasswordRecord;
   }
@@ -150,8 +183,32 @@ export class MysqlUserLinkService implements UserLinkPort {
     private readonly store: PlatformStore,
   ) {}
 
+  /**
+   * 写串行化（029 R3）：file 驱动的"校验版本 → 写盘 → 推进"是同步的，天然不可被打断；
+   * mysql 驱动每个环节都有 await，两个并发请求会双双通过版本校验。
+   * 这里用进程内队列把写路径串起来，恢复与 file 相同的语义。
+   *
+   * 前提：`revision` 由 `PlatformStore`（单进程文件锁）持有，故进程内串行即足够；
+   * 若将来多实例部署，版本必须迁到共享存储后再谈多进程并发。
+   */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  private serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   /** 启动期加载（wiring 时调用） */
   async init(): Promise<void> {
+    await this.repo.init();
+  }
+
+  /** 重载投影：外部进程（运维脚本）改库后，登录校验前拉一次最新值 */
+  async refresh(): Promise<void> {
     await this.repo.init();
   }
 
@@ -210,18 +267,25 @@ export class MysqlUserLinkService implements UserLinkPort {
     if (profile?.display_name) doc.display_name = profile.display_name;
     if (profile?.role) doc.role = profile.role;
     if (profile?.source_agent_code) doc.source_agent_code = profile.source_agent_code;
-    await this.repo.save(doc);
-    // D4：账号域写不占设计态版本；`revision` 入参仅 file 驱动有意义，这里忽略
-    return toView(userId, agents, this.store.revision(), doc);
+    // 配置版本口径与 file 驱动一致（029 R3）：校验 → 写入 → 推进（整段串行）
+    return this.serialize(async () => {
+      if (revision !== undefined) this.store.assertRevision(revision);
+      await this.repo.insert(doc);
+      return toView(userId, agents, this.store.bumpRevision(), doc);
+    });
   }
 
-  async update(userIdRaw: unknown, agentsRaw: unknown, _revision: number): Promise<UserView> {
+  async update(userIdRaw: unknown, agentsRaw: unknown, revision: number): Promise<UserView> {
     const userId = requireUserId(userIdRaw);
-    const current = this.read(userId);
     const agents = normalizeAgents(agentsRaw);
-    const next: UserLinkDocument = { ...current, user_id: userId, agents };
-    await this.repo.save(next);
-    return toView(userId, agents, this.store.revision(), next);
+    return this.serialize(async () => {
+      // 保留既有密码摘要与账号扩展字段：编辑关联数字人 MUST NOT 清空它们
+      const current = this.read(userId);
+      const next: UserLinkDocument = { ...current, user_id: userId, agents };
+      this.store.assertRevision(revision);
+      await this.repo.save(next);
+      return toView(userId, agents, this.store.bumpRevision(), next);
+    });
   }
 
   /** 与 file 版同口径：不触碰设计态 revision，密码不属于配置快照 */
@@ -235,7 +299,10 @@ export class MysqlUserLinkService implements UserLinkPort {
 
   async remove(userIdRaw: unknown): Promise<void> {
     const userId = requireUserId(userIdRaw);
-    this.read(userId);
-    await this.repo.remove(userId);
+    return this.serialize(async () => {
+      this.read(userId);
+      await this.repo.remove(userId);
+      this.store.bumpRevision();
+    });
   }
 }

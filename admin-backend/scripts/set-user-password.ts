@@ -1,9 +1,16 @@
 #!/usr/bin/env tsx
-import fs from 'node:fs';
-import path from 'node:path';
+/**
+ * 重置账号密码（028/029）：按当前 `STORAGE_DRIVER` 生效。
+ *
+ * 用法：`npm run set:user-password -- <user_id> <password>`（读 `.env.local`）。
+ *
+ * 走与主程序同一套装配（`scripts/lib/account-stores.ts`）：file 驱动写
+ * `accounts/users/{uid}.json`，mysql 驱动写 `users.password`——切换存储后
+ * 运维命令不会"写进没人读的文件"（029 FR-024）。
+ */
 import process from 'node:process';
-import { hashPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../src/domain/auth/password.js';
-import { USERS_DIR } from '../src/domain/account/paths.js';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../src/domain/auth/password.js';
+import { createAccountStores } from './lib/account-stores.js';
 
 function fail(message: string): never {
   console.error(`[set-user-password] ${message}`);
@@ -27,30 +34,20 @@ if (password.length < PASSWORD_MIN_LENGTH || password.length > PASSWORD_MAX_LENG
   fail(`密码长度须为 ${PASSWORD_MIN_LENGTH}~${PASSWORD_MAX_LENGTH} 个字符`);
 }
 
-const dataDir = process.env.PLATFORM_DATA_DIR ?? './.platform-data';
-// 账号主档落点：`accounts/users/{uid}.json`（2026-11-27 结构收敛，见 src/domain/account/paths.ts）
-const file = path.join(path.resolve(process.cwd(), dataDir), ...USERS_DIR.split('/'), `${userId}.json`);
-
-if (!fs.existsSync(file)) {
-  fail(
-    `用户记录不存在：${file}\n` +
-      '（请先在管理台新建该用户，或确认 PLATFORM_DATA_DIR；' +
-      '若数据仍是旧结构，先跑 npm run migrate:accounts-layout）',
-  );
-}
-
-let doc: Record<string, unknown>;
+const stores = await createAccountStores();
 try {
-  doc = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
-} catch (err) {
-  fail(`读取用户记录失败：${(err as Error).message}`);
+  if (!stores.users.exists(userId)) {
+    fail(
+      `用户记录不存在：${userId}\n` +
+        `（当前存储：${stores.config.storageDriver}；请先在管理台新建该用户，` +
+        'mysql 模式还需确认已执行 npm run migrate:mysql）',
+    );
+  }
+  await stores.users.setPassword(userId, password);
+  console.log(
+    `[set-user-password] 已为「${userId}」设置密码（写入 ${stores.config.storageDriver} 存储）`,
+  );
+  console.log('[set-user-password] 提示：旧会话不会自动失效，该账号需用新密码重新登录。');
+} finally {
+  await stores.close();
 }
-if (typeof doc.user_id !== 'string' || doc.user_id !== userId) {
-  fail(`用户记录与 user_id 不匹配（文件内 user_id=${String(doc.user_id)}）`);
-}
-
-doc.password = hashPassword(password);
-fs.writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
-
-console.log(`[set-user-password] 已为「${userId}」设置密码（scrypt 摘要已写入 ${file}）`);
-console.log('[set-user-password] 提示：旧会话不会自动失效，但该账号需用新密码重新登录。');

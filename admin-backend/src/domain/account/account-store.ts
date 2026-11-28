@@ -74,6 +74,15 @@ export interface AccountStorePort {
   listRegisterLinks(): Promise<RegisterLinkRecord[]>;
   findRegisterLink(token: string): Promise<RegisterLinkRecord | null>;
   saveRegisterLink(record: RegisterLinkRecord): Promise<void>;
+  /**
+   * 软撤销一批数字人名下全部有效链接（一次操作，非逐条读写）。
+   *
+   * 删除数字人时用：先统一撤销、再看条数是否与影响面一致。
+   * 返回受影响条数（仅统计 `revoked_at IS NULL` 的行），便于调用方核对。
+   */
+  revokeLinksOf(agentCodes: string[], revokedAt: string): Promise<number>;
+  /** 使用次数 +1（注册成功后调用）；幂等由调用顺序保证，不做存在性检查 */
+  incrementUseCount(token: string): Promise<void>;
 }
 
 /* ---------------- 共享校验与工具（file / mysql 两实现与路由共用） ---------------- */

@@ -11,6 +11,7 @@ import type { UserLinkPort } from '../config-center/user-links.js';
 import { generateAgentCode } from './agent-code.js';
 import {
   DuplicateAgentCodeError,
+  isExpired,
   normalizeAgentCode,
   nowDatetime,
   type AccountStorePort,
@@ -141,20 +142,38 @@ export class AgentServiceCatalog {
     return { code: services[0]?.code ?? null, activeLinks: active.length };
   }
 
-  /** 某组服务编码下**未撤销**的链接（过期与否不看——过期但未撤销的仍会被级联撤销） */
+  /**
+   * 某组服务编码下**未撤销**的链接（含已过期但未撤销的）。
+   *
+   * 用于「删除数字人」的级联撤销与影响面统计：整体下线时要把所有仍挂着的链接
+   * 一并软撤销（哪怕已过期），避免留下指向已删数字人的悬空链接（`removeForAgent` 口径）。
+   */
   private async activeLinksOf(codes: ReadonlySet<string>): Promise<RegisterLinkRecord[]> {
     const links = await this.store.listRegisterLinks();
     return links.filter((link) => codes.has(link.agent_code) && link.revoked_at === null);
   }
 
-  /** 级联软撤销：一次取时间戳，保证同批链接的 `revoked_at` 一致（便于按批次审计） */
+  /**
+   * 某组服务编码下**仍有效**的链接（未撤销且未过期）。
+   *
+   * 用于「单独删除服务」的引用判据（`remove` 口径）：已过期 / 已撤销的链接不再算
+   * 引用，否则会错误地以 409 阻断删除（契约 §0.4 `ADM_AGENT_SERVICE_IN_USE`，2026-11-27 统一）。
+   */
+  private async validLinksOf(codes: ReadonlySet<string>): Promise<RegisterLinkRecord[]> {
+    const links = await this.store.listRegisterLinks();
+    return links.filter(
+      (link) =>
+        codes.has(link.agent_code) && link.revoked_at === null && !isExpired(link.expires_at),
+    );
+  }
+
+  /**
+   * 级联软撤销：**一次**操作撤完该数字人名下全部编码的链接（029 R7）。
+   *
+   * 时间戳只取一次，整批 `revoked_at` 相同；返回受影响条数，供调用方与影响面核对。
+   */
   private async revokeActiveLinks(codes: ReadonlySet<string>): Promise<number> {
-    const active = await this.activeLinksOf(codes);
-    const revokedAt = nowDatetime();
-    for (const link of active) {
-      await this.store.saveRegisterLink({ ...link, revoked_at: revokedAt });
-    }
-    return active.length;
+    return this.store.revokeLinksOf([...codes], nowDatetime());
   }
 
   /** 改名称 / 启停；`code` 与 `platform_agent_name` 不可改（绑定落点稳定） */
@@ -175,15 +194,13 @@ export class AgentServiceCatalog {
   }
 
   /**
-   * 存在**未撤销**的注册链接或用户关联 → `ADM_AGENT_SERVICE_IN_USE`（409，禁止删除）。
-   *
-   * 判据与 `activeLinksOf` 同源（2026-11-27 统一）：已撤销 / 已过期的链接不再算引用，
-   * 否则会出现「影响面说 0 条、删除却 409」的两套口径。
+   * 存在**仍有效**的注册链接（未撤销且未过期）或用户关联 → `ADM_AGENT_SERVICE_IN_USE`
+   * （409，禁止删除）。已撤销 / 已过期的链接不再算引用（契约 §0.4，2026-11-27 统一口径）。
    */
   async remove(code: string): Promise<void> {
     const service = await this.requireService(code);
     const inUse =
-      (await this.activeLinksOf(new Set([code]))).length > 0 ||
+      (await this.validLinksOf(new Set([code]))).length > 0 ||
       this.users.listAll().some((user) => user.agents.includes(service.platform_agent_name));
     if (inUse) {
       throw new ApiError(

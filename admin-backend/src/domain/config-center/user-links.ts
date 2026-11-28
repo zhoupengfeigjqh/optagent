@@ -63,6 +63,13 @@ export interface UserProfileInput {
  *   （D4：账号域写不占设计态 revision，由数据库约束保证一致性）。
  */
 export interface UserLinkPort {
+  /**
+   * 可选：从底层重载投影（029）。
+   *
+   * mysql 驱动把 `users` 表加载进内存供同步消费方使用；运维脚本在**另一个进程**里改密码后，
+   * 运行中的服务必须重载才能看到新摘要。file 驱动每次直接读文件，故不实现。
+   */
+  refresh?(): Promise<void>;
   listAll(): UserLinkDocument[];
   exists(userId: string): boolean;
   readOrNull(userId: string): UserLinkDocument | null;

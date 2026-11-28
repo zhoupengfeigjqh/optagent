@@ -2,6 +2,7 @@
  * 单元测试：账号域 MySQL 驱动（028 阶段 1）
  *
  * 连**真实本地 MySQL**（独立测试库 `optagent_test`，用后即删，不触碰 `optagent`）；
+ * 建表走 `schema.sql`（与 `npm run db:init` 同一份 DDL，避免用例侧维护副本）；
  * MySQL 不可达时整套自动跳过（不因环境缺失而红）。
  *
  * 覆盖：`MysqlUserLinkService`（创建/更新/重置密码/删除/投影重启加载/重复冲突）
@@ -19,6 +20,7 @@ import { MysqlUserLinkService, MysqlUserRepository } from '../../src/domain/conf
 import { PlatformStore } from '../../src/infra/platform-store.js';
 import { MysqlConnection } from '../../src/infra/mysql.js';
 import { ERROR_CODES } from '../../src/domain/error-codes.js';
+import { recreateSchema } from '../helpers/mysql-schema.js';
 
 const HOST = process.env.TEST_MYSQL_HOST ?? '127.0.0.1';
 const PORT = Number(process.env.TEST_MYSQL_PORT ?? 3306);
@@ -47,33 +49,7 @@ describe.skipIf(!available)('账号域 MySQL 驱动（真实本地 MySQL，测�
 
   beforeAll(async () => {
     admin = await mysql.createConnection({ host: HOST, port: PORT, user: USER, password: PASSWORD, multipleStatements: true });
-    await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB}`);
-    await admin.query(`CREATE DATABASE ${TEST_DB} DEFAULT CHARACTER SET utf8mb4`);
-    await admin.query(`USE ${TEST_DB}`);
-    await admin.query(`
-      CREATE TABLE users (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        user_id VARCHAR(64) NOT NULL,
-        phone VARCHAR(20) DEFAULT NULL,
-        agents JSON NOT NULL DEFAULT (JSON_ARRAY()),
-        display_name VARCHAR(64) NOT NULL DEFAULT '',
-        password_record JSON DEFAULT NULL,
-        role ENUM('admin','user') NOT NULL DEFAULT 'user',
-        status ENUM('active','disabled') NOT NULL DEFAULT 'active',
-        source_agent_code VARCHAR(32) DEFAULT NULL,
-        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        PRIMARY KEY (id),
-        UNIQUE KEY uk_users_user_id (user_id),
-        UNIQUE KEY uk_users_phone (phone)
-      ) ENGINE=InnoDB`);
-    await admin.query(`
-      CREATE TABLE sessions (
-        user_id VARCHAR(64) NOT NULL,
-        session_id VARCHAR(64) NOT NULL,
-        issued_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        PRIMARY KEY (user_id)
-      ) ENGINE=InnoDB`);
+    await recreateSchema(admin, TEST_DB);
 
     conn = new MysqlConnection({
       host: HOST, port: PORT, user: USER, password: PASSWORD, database: TEST_DB, poolSize: 4, logger: undefined,
@@ -88,6 +64,10 @@ describe.skipIf(!available)('账号域 MySQL 驱动（真实本地 MySQL，测�
     await users.init();
     sessions = new MysqlSessionStore(conn);
     await sessions.init();
+
+    // fk_sessions_user（schema.sql 保留）：会话所属账号必须先存在
+    await users.create('zpf', []);
+    await users.create('persist', []);
   });
 
   afterAll(async () => {
@@ -106,10 +86,10 @@ describe.skipIf(!available)('账号域 MySQL 驱动（真实本地 MySQL，测�
 
     // SQL 层面直接核对（非仅内存投影）
     const [rows] = await admin.query<mysql.RowDataPacket[]>(
-      'SELECT user_id, agents, password_record FROM users WHERE user_id = ?',
+      'SELECT user_id, agents, `password` FROM users WHERE user_id = ?',
       ['ops'],
     );
-    const row = rows[0] as { user_id: string; agents: string | string[]; password_record: string | Record<string, unknown> } | undefined;
+    const row = rows[0] as { user_id: string; agents: string | string[]; password: string | Record<string, unknown> } | undefined;
     expect(row?.user_id).toBe('ops');
     const agents = typeof row?.agents === 'string' ? JSON.parse(row?.agents) : row?.agents;
     expect(agents).toEqual(['demo']);
@@ -182,19 +162,29 @@ describe.skipIf(!available)('账号域 MySQL 驱动（真实本地 MySQL，测�
     );
   });
 
+  it('用户标识区分大小写：CaseOne 与 caseone 可共存，查找精确匹配', async () => {
+    // 修复前三列沿用 `_ai_ci`：第二次会撞唯一键 → ADM_USER_ID_TAKEN（file 驱动则允许）
+    await users.create('CaseOne', []);
+    await users.create('caseone', []);
+    expect(users.exists('CaseOne')).toBe(true);
+    expect(users.exists('caseone')).toBe(true);
+    expect(users.exists('CASEONE')).toBe(false);
+    expect(users.readOrNull('CASEONE')).toBeNull();
+  });
+
   it('SessionStore（MySQL）：登记→读取→判定；覆盖（后登踢前登）；清除幂等', async () => {
-    expect(sessions.getCurrentSession('zpf')).toBeNull();
+    expect(await sessions.getCurrentSession('zpf')).toBeNull();
     await sessions.setCurrentSession('zpf', 's1');
-    expect(sessions.getCurrentSession('zpf')).toBe('s1');
-    expect(sessions.isCurrentSession('zpf', 's1')).toBe(true);
-    expect(sessions.isCurrentSession('zpf', 's2')).toBe(false);
+    expect(await sessions.getCurrentSession('zpf')).toBe('s1');
+    expect(await sessions.isCurrentSession('zpf', 's1')).toBe(true);
+    expect(await sessions.isCurrentSession('zpf', 's2')).toBe(false);
 
     await sessions.setCurrentSession('zpf', 's2');
-    expect(sessions.isCurrentSession('zpf', 's1')).toBe(false);
-    expect(sessions.isCurrentSession('zpf', 's2')).toBe(true);
+    expect(await sessions.isCurrentSession('zpf', 's1')).toBe(false);
+    expect(await sessions.isCurrentSession('zpf', 's2')).toBe(true);
 
     await sessions.clearSession('zpf');
-    expect(sessions.getCurrentSession('zpf')).toBeNull();
+    expect(await sessions.getCurrentSession('zpf')).toBeNull();
     await expect(sessions.clearSession('zpf')).resolves.toBeUndefined();
   });
 
@@ -206,11 +196,21 @@ describe.skipIf(!available)('账号域 MySQL 驱动（真实本地 MySQL，测�
     await broken.close();
   });
 
-  it('MySQL 驱动：会话投影重启加载（等价服务重启）', async () => {
+  it('会话以库为准：另一实例（= 另一进程）写入后本实例立即可见', async () => {
+    const other = new MysqlSessionStore(conn);
+    await other.init();
+
     await sessions.setCurrentSession('persist', 's9');
-    const rebornSessions = new MysqlSessionStore(conn);
-    await rebornSessions.init();
-    expect(rebornSessions.getCurrentSession('persist')).toBe('s9');
-    await rebornSessions.clearSession('persist');
+    // 修复前读的是启动期内存投影，这里会是 null → 跨进程登录/登出全部失效
+    expect(await other.getCurrentSession('persist')).toBe('s9');
+
+    // 别处登录 = 踢掉旧会话；本实例必须立刻判定旧会话无效
+    await other.setCurrentSession('persist', 's10');
+    expect(await sessions.isCurrentSession('persist', 's9')).toBe(false);
+    expect(await sessions.isCurrentSession('persist', 's10')).toBe(true);
+
+    // 别处登出也必须真删行（不能因为"本实例不认识这条"就跳过）
+    await sessions.clearSession('persist');
+    expect(await other.getCurrentSession('persist')).toBeNull();
   });
 });

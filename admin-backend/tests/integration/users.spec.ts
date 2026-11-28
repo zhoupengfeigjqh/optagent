@@ -188,7 +188,7 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
 
   it('重置后该用户既有会话立即失效（FR-012 同口径）', async () => {
     await fx.ctx.users.create('ops', [], fx.ctx.store.revision(), 'old-secret');
-    fx.ctx.sessionStore.setCurrentSession('ops', 'session-before');
+    await fx.ctx.sessionStore.setCurrentSession('ops', 'session-before');
 
     await fx.app.inject({
       method: 'POST',
@@ -196,8 +196,8 @@ describe('POST /api/admin/users/{user_id}/password（2026-11-18 重置密码）'
       payload: { password: 'new-secret' },
     });
 
-    expect(fx.ctx.sessionStore.getCurrentSession('ops')).toBeNull();
-    expect(fx.ctx.auth.introspect('ops', 'session-before')).toBe(false);
+    expect(await fx.ctx.sessionStore.getCurrentSession('ops')).toBeNull();
+    expect(await fx.ctx.auth.introspect('ops', 'session-before')).toBe(false);
   });
 
   it('密码过短 / 非字符串 / 缺失 → 400 VALIDATION_FAILED，且原密码不变', async () => {

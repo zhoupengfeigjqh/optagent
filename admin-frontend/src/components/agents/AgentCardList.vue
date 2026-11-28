@@ -76,7 +76,7 @@ function codeLabel(item: AgentListItem): string {
               v-if="servicesByAgent.get((item as AgentListItem).name)"
               class="agent-card-list__tag agent-card-list__tag--success"
             >
-              注册用户 {{ servicesByAgent.get((item as AgentListItem).name)?.registered_users }} 人
+              已授权用户 {{ servicesByAgent.get((item as AgentListItem).name)?.registered_users }} 人
             </span>
           </div>
           <p v-if="(item as AgentListItem).abnormal_reason" class="card__abnormal-reason">

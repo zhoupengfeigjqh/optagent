@@ -85,8 +85,12 @@ docker compose up -d laya                # 意图聚焦判定模型（013，可�
 ### 1.4 全 Docker 形态（联调 / 生产）
 
 ```bash
-docker compose up -d --build          # 10 个服务：gateway + 4 个应用 + 5 个 MCP/推理
+docker compose up -d --build          # 11 个服务：gateway + 4 个应用 + 5 个 MCP/推理 + mysql
 ```
+
+账号域用 `STORAGE_DRIVER=mysql` 时，部署栈自带 `mysql:8.0`（容器 `optagent-mysql`，**不发布宿主端口**）：
+口令与库名写在 `admin-backend/.env`（同一份文件同时注入 mysql 与 admin-backend，避免两处抄同一口令），
+首次启动数据卷为空时自动执行 `specs/028-account-mysql-binding/schema.sql`，`admin-backend` 等它 `healthy` 再起。
 
 前置只有两份配置：`agent-backend/config.yaml`（业务口径：模型、意图聚焦阈值、规划参数，挂载进容器）与
 `agent-backend/.env`（容器形态私产：密钥与拓扑地址，compose 作为唯一 `env_file` 注入）。
@@ -539,6 +543,9 @@ Content-Type: application/json
 
 - 全部外部流量走 `gateway:82`；容器之间用服务名互访，宿主端口只为「后端不在容器里」的本地调试而发布。
 - `agent-backend/.opt-agent` 与 `admin-backend/.platform-data` 都是 **bind mount**：容器与源码目录同一份数据。
+- 账号库用 **命名卷** `optagent_mysql_data`（数据文件不可人手编辑，故不 bind mount）：备份用 `mysqldump`，
+  排障用 `docker compose exec mysql mysql -uroot -p`。全仓库只有这一套 MySQL（容器 `optagent-mysql`）；
+  早期独立的开发栈 compose 已于 2026-11-28 移除，宿主机 `db:*` 脚本直接拉起本栈的 mysql 服务。
 - 日志 `json-file` 轮转 10MB × 3；后端 `stop_grace_period: 25s`（应用内等 15s 让在途回答收尾）。
 - 改了网关配置必须 `docker compose up -d --build gateway`（配置在镜像里，`restart` 不生效）。
 

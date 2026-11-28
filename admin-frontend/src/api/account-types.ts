@@ -71,29 +71,3 @@ export interface MeProfile {
   role: 'admin' | 'user'
 }
 
-/**
- * 工作台「切换数字人」清单（2026-11-27 口径）：`items` = 已授权 ∩ 已部署。
- *
- * `pending` 恒为空数组：申请/审批链路随"授权 = 关联"收敛一并下线，
- * 字段保留只是为了不破坏既有响应契约与调用方。
- */
-export interface MyAgents {
-  items: Array<{
-    code: string
-    name: string
-    platform_agent_name: string
-    status: 'approved'
-  }>
-  pending: Array<{ code: string; name: string; platform_agent_name: string }>
-}
-
-export interface RegisterResult {
-  user_id: string
-  phone: string
-  display_name: string
-  granted_agent: { code: string; name: string }
-}
-
-export interface RegisterLinkLookup {
-  agent: { code: string; name: string }
-}

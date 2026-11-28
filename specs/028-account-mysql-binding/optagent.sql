@@ -14,6 +14,10 @@
  Date: 25/11/2026 17:09:43
 */
 
+-- 注意：本文件是 2026-11-25 的库快照，早于 029。
+-- 其中的 users.password_record 已在 029（2026-11-28）改名为 users.password，
+-- 与文件模式字段同名；从本快照恢复旧库后，需按 schema.sql 的「既有库升级」执行一次 ALTER。
+
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 

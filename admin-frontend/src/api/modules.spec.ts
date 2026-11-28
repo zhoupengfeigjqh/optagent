@@ -327,7 +327,7 @@ describe('api/ontologies（§10，2026-10-03）', () => {
 })
 
 describe('api/auth（024 §2 + 028 §13 扩展）', () => {
-  it('登录支持 user_id / phone 二选一；探针 / 登出 / my-agents 路径正确', async () => {
+  it('登录支持 user_id / phone 二选一；探针 / 登出路径正确', async () => {
     const auth = await import('./auth')
 
     await auth.login({ user_id: 'admin', password: '123456' })
@@ -340,33 +340,9 @@ describe('api/auth（024 §2 + 028 §13 扩展）', () => {
     await auth.fetchMe()
     expect(lastCall().url).toBe('/api/admin/auth/me')
 
-    await auth.fetchMyAgents()
-    expect(lastCall().url).toBe('/api/admin/auth/my-agents')
-
     await auth.logout()
     expect(lastCall().init.method).toBe('POST')
     expect(lastCall().url).toBe('/api/admin/auth/logout')
-  })
-
-  it('注册与链接校验走 028 §4.1 路径', async () => {
-    const auth = await import('./auth')
-
-    await auth.register({
-      link_token: 'tok',
-      phone: '13800000001',
-      display_name: '张三',
-      password: '123456',
-    })
-    expect(lastCall().url).toBe('/api/admin/auth/register')
-    expect(bodyOf(lastCall())).toEqual({
-      link_token: 'tok',
-      phone: '13800000001',
-      display_name: '张三',
-      password: '123456',
-    })
-
-    await auth.lookupRegisterLink('tok/en')
-    expect(lastCall().url).toBe(`/api/admin/auth/register-links/${encodeURIComponent('tok/en')}`)
   })
 })
 

@@ -107,7 +107,7 @@ export class MysqlAccountStore implements AccountStorePort {
 
   async listRegisterLinks(): Promise<RegisterLinkRecord[]> {
     const rows = await this.conn.select<LinkRow>(
-      'SELECT token, agent_code, created_by, expires_at, revoked_at, use_count, created_at FROM register_links ORDER BY created_at DESC',
+      'SELECT token, agent_code, created_by, expires_at, revoked_at, use_count, created_at FROM register_links ORDER BY created_at ASC, token ASC',
     );
     return rows.map(toLinkRecord);
   }
@@ -145,6 +145,19 @@ export class MysqlAccountStore implements AccountStorePort {
     }
   }
 
+  async revokeLinksOf(agentCodes: string[], revokedAt: string): Promise<number> {
+    if (agentCodes.length === 0) return 0;
+    const placeholders = agentCodes.map(() => '?').join(', ');
+    const { affectedRows } = await this.conn.modify(
+      `UPDATE register_links SET revoked_at = ? WHERE revoked_at IS NULL AND agent_code IN (${placeholders})`,
+      [revokedAt, ...agentCodes],
+    );
+    return affectedRows;
+  }
+
+  async incrementUseCount(token: string): Promise<void> {
+    await this.conn.modify('UPDATE register_links SET use_count = use_count + 1 WHERE token = ?', [token]);
+  }
 }
 
 function toServiceRecord(row: ServiceRow): AgentServiceRecord {

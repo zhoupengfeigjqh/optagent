@@ -44,12 +44,12 @@ function checkboxOf(wrapper: ReturnType<typeof mountDialog>, name: string) {
     .find('input[type="checkbox"]')
 }
 
-function grantButton(wrapper: ReturnType<typeof mountDialog>) {
-  return wrapper.findAll('button').find((button) => button.text() === '授权')!
+function submitButton(wrapper: ReturnType<typeof mountDialog>) {
+  return wrapper.get('[data-test="grant-submit"]')
 }
 
-function exitButton(wrapper: ReturnType<typeof mountDialog>) {
-  return wrapper.findAll('button').find((button) => button.text() === '退出')!
+function closeButton(wrapper: ReturnType<typeof mountDialog>) {
+  return wrapper.get('.base-dialog__close')
 }
 
 function confirmDialog(wrapper: ReturnType<typeof mountDialog>) {
@@ -78,13 +78,21 @@ describe('GrantDetailDialog —— 列出全部数字人与当前授权态', () 
     expect(text).toContain('已授权 1 / 共 3 个数字人')
   })
 
-  it('提示里讲清"勾选只是草稿、授权要确认、还需部署才生效"', async () => {
+  it('提示里讲清"勾选只是草稿、点确认才写入、还需部署才生效"', async () => {
     const wrapper = mountDialog()
     await flushPromises()
     expect(wrapper.text()).toContain('草稿')
-    expect(wrapper.text()).toContain('授权')
-    expect(wrapper.text()).toContain('退出')
+    expect(wrapper.text()).toContain('确认')
+    expect(wrapper.text()).toContain('放弃本次改动')
     expect(wrapper.text()).toContain('部署')
+  })
+
+  it('底部没有「退出」按钮，右上角有 × 关闭', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    expect(wrapper.findAll('button').filter((item) => item.text() === '退出')).toHaveLength(0)
+    expect(closeButton(wrapper).attributes('aria-label')).toBe('关闭')
   })
 
   it('平台内没有数字人时给出可执行的空态说明', async () => {
@@ -96,37 +104,39 @@ describe('GrantDetailDialog —— 列出全部数字人与当前授权态', () 
 })
 
 describe('GrantDetailDialog —— 勾选是草稿，确认才生效', () => {
-  it('勾选不写库；「授权」由禁用变为可用，改动前直接禁用', async () => {
+  it('勾选不写库；「确认」由禁用变为可用，改动前直接禁用', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
-    expect(grantButton(wrapper).attributes('disabled')).toBeDefined()
+    expect(submitButton(wrapper).text()).toBe('确认')
+    expect(submitButton(wrapper).attributes('disabled')).toBeDefined()
 
     await checkboxOf(wrapper, 'planner').setValue(true)
     await flushPromises()
 
     expect(updateUser).not.toHaveBeenCalled()
     expect(fetchManifest).not.toHaveBeenCalled()
-    expect(grantButton(wrapper).attributes('disabled')).toBeUndefined()
+    expect(submitButton(wrapper).attributes('disabled')).toBeUndefined()
     expect(wrapper.text()).toContain('待确认 2 个')
     // 顶部摘要仍显示已生效的 1 个，草稿不冒充生效值
     expect(wrapper.text()).toContain('已授权 1 / 共 3 个数字人')
   })
 
-  it('点「授权」弹二次确认，确认后才写入 agents[] 并提示需要部署', async () => {
+  it('点「确认」弹二次确认，确认后才写入 agents[] 并提示需要部署', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
     await checkboxOf(wrapper, 'planner').setValue(true)
     await flushPromises()
 
-    await grantButton(wrapper).trigger('click')
+    await submitButton(wrapper).trigger('click')
     await flushPromises()
 
     const dialog = confirmDialog(wrapper)
     expect(dialog.attributes('open')).toBeDefined()
-    expect(dialog.text()).toContain('确认授权')
+    expect(dialog.text()).toContain('确认授权变更')
     expect(dialog.text()).toContain('新增授权：planner')
+    expect(dialog.get('[data-test="confirm"]').text()).toBe('确认')
     expect(updateUser).not.toHaveBeenCalled()
 
     await dialog.get('[data-test="confirm"]').trigger('click')
@@ -135,7 +145,7 @@ describe('GrantDetailDialog —— 勾选是草稿，确认才生效', () => {
     expect(fetchManifest).toHaveBeenCalledTimes(1)
     expect(updateUser).toHaveBeenCalledWith('u_001', ['demo', 'planner'], 9)
     expect(wrapper.emitted('changed')).toHaveLength(1)
-    expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('授权已生效')
+    expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('授权清单已更新')
     expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('部署')
   })
 
@@ -147,7 +157,7 @@ describe('GrantDetailDialog —— 勾选是草稿，确认才生效', () => {
     await flushPromises()
     expect(updateUser).not.toHaveBeenCalled()
 
-    await grantButton(wrapper).trigger('click')
+    await submitButton(wrapper).trigger('click')
     await flushPromises()
     expect(confirmDialog(wrapper).text()).toContain('关闭授权：demo')
 
@@ -157,14 +167,29 @@ describe('GrantDetailDialog —— 勾选是草稿，确认才生效', () => {
     expect(updateUser).toHaveBeenCalledWith('u_001', [], 9)
   })
 
-  it('「退出」直接关闭并丢弃草稿：不发请求、不发 changed', async () => {
+  it('右上角 × 关闭并丢弃草稿：不发请求、不发 changed', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
     await checkboxOf(wrapper, 'planner').setValue(true)
     await flushPromises()
 
-    await exitButton(wrapper).trigger('click')
+    await closeButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
+    expect(updateUser).not.toHaveBeenCalled()
+    expect(wrapper.emitted('changed')).toBeUndefined()
+  })
+
+  it('Esc（cancel）同样走关闭：丢弃草稿且不发请求', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await checkboxOf(wrapper, 'planner').setValue(true)
+    await flushPromises()
+
+    await wrapper.get('.base-dialog').trigger('cancel')
     await flushPromises()
 
     expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
@@ -179,7 +204,7 @@ describe('GrantDetailDialog —— 勾选是草稿，确认才生效', () => {
 
     await checkboxOf(wrapper, 'planner').setValue(true)
     await flushPromises()
-    await grantButton(wrapper).trigger('click')
+    await submitButton(wrapper).trigger('click')
     await flushPromises()
     await confirmDialog(wrapper).get('[data-test="confirm"]').trigger('click')
     await flushPromises()

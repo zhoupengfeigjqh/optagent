@@ -20,12 +20,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { ensureAgentServiceFor } from '../src/domain/account/agent-services.js';
-import { FileAccountStore } from '../src/domain/account/file-account-store.js';
 import { AgentDesignService } from '../src/domain/config-center/agent-design.js';
-import { PlatformStore } from '../src/infra/platform-store.js';
+import type { PlatformStore } from '../src/infra/platform-store.js';
+import { createAccountStores } from './lib/account-stores.js';
 
 async function main(): Promise<void> {
-  const dataRoot = path.resolve(process.cwd(), process.env.PLATFORM_DATA_DIR ?? './.platform-data');
+  // 029：账号域按 `STORAGE_DRIVER` 装配（mysql 模式下写表而不是 JSON）
+  const stores = await createAccountStores();
+  const dataRoot = stores.config.platformDataDir;
   const agentsDir = path.join(dataRoot, 'agents');
   const names = fs.existsSync(agentsDir)
     ? fs
@@ -38,9 +40,8 @@ async function main(): Promise<void> {
   console.log(`[migrate:agent-services] 数据目录：${dataRoot}`);
   console.log(`[migrate:agent-services] 设计态数字人：${names.length} 个`);
 
-  const platformStore = new PlatformStore(dataRoot);
-  const store = new FileAccountStore(platformStore);
-  await store.init();
+  const platformStore = stores.platform;
+  const store = stores.accountStore;
 
   const before = new Set(
     (await store.listAgentServices()).map((service) => service.platform_agent_name),
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
     if (!before.has(name)) created.push({ name, code: record.code });
     if (syncDesignCode(platformStore, name, record.code)) backfilled.push({ name, code: record.code });
   }
+  await stores.close();
 
   const skipped = names.length - created.length;
   if (created.length === 0 && backfilled.length === 0) {

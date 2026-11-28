@@ -87,4 +87,22 @@ export class FileAccountStore implements AccountStorePort {
     this.store.writeJson(LINKS_FILE, this.links);
   }
 
+  async revokeLinksOf(agentCodes: string[], revokedAt: string): Promise<number> {
+    const targets = new Set(agentCodes);
+    let affected = 0;
+    for (const link of this.links) {
+      if (link.revoked_at !== null || !targets.has(link.agent_code)) continue;
+      link.revoked_at = revokedAt;
+      affected += 1;
+    }
+    if (affected > 0) this.store.writeJson(LINKS_FILE, this.links);
+    return affected;
+  }
+
+  async incrementUseCount(token: string): Promise<void> {
+    const link = this.links.find((item) => item.token === token);
+    if (!link) return;
+    link.use_count += 1;
+    this.store.writeJson(LINKS_FILE, this.links);
+  }
 }

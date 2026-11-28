@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterManagementDialog from './RegisterManagementDialog.vue'
-import type { AgentListItem, AgentServiceItem } from '../../api/types'
+import type { AgentListItem, AgentServiceItem, RegisterLinkItem } from '../../api/types'
 
 const createRegisterLink = vi.fn()
 const listRegisterLinks = vi.fn()
@@ -36,6 +36,20 @@ const SERVICE: AgentServiceItem = {
   updated_at: '2026-11-24 10:00:00',
 }
 
+function linkItem(overrides: Partial<RegisterLinkItem> = {}): RegisterLinkItem {
+  return {
+    token: 'tok-existing',
+    agent_code: 'DH-DEMO01',
+    agent_name: '演示服务',
+    expires_at: null,
+    revoked_at: null,
+    use_count: 0,
+    created_by: null,
+    created_at: '2026-11-20 10:00:00',
+    ...overrides,
+  }
+}
+
 function mountDialog(service: AgentServiceItem | null = SERVICE) {
   return mount(RegisterManagementDialog, {
     props: { open: true, agent: AGENT, service },
@@ -58,18 +72,51 @@ beforeEach(() => {
   copyToClipboard.mockResolvedValue(true)
 })
 
-describe('RegisterManagementDialog —— 打开不自动生成（2026-11-27）', () => {
-  it('打开弹窗不发生成请求，输入框为空占位', async () => {
+describe('RegisterManagementDialog —— 打开复用有效链接（2026-11-28）', () => {
+  it('已有有效链接：打开即展示，不发生成请求', async () => {
+    listRegisterLinks.mockResolvedValue({ items: [linkItem()] })
     const wrapper = mountDialog()
     await flushPromises()
 
+    expect(listRegisterLinks).toHaveBeenCalledWith('DH-DEMO01')
     expect(createRegisterLink).not.toHaveBeenCalled()
     const input = wrapper.find<HTMLInputElement>('.register-mgmt__link-input')
-    expect(input.element.value).toBe('')
-    expect(wrapper.text()).toContain('不会自动生成链接')
+    expect(input.element.value).toBe('http://localhost:5173/register?link=tok-existing')
+    expect(wrapper.text()).toContain('已有有效链接')
+    expect(wrapper.text()).toContain('无需重新生成')
+    expect(button(wrapper, '重新生成')).toBeTruthy()
   })
 
-  it('点「生成链接」才按默认 7 天生成；生成后可复制', async () => {
+  it('多条有效链接取最新一条；已撤销/已过期的不算', async () => {
+    listRegisterLinks.mockResolvedValue({
+      items: [
+        linkItem({ token: 'tok-old', created_at: '2026-11-10 10:00:00' }),
+        linkItem({ token: 'tok-new', created_at: '2026-11-25 10:00:00' }),
+        linkItem({ token: 'tok-revoked', revoked_at: '2026-11-26 10:00:00' }),
+        linkItem({ token: 'tok-expired', expires_at: '2020-01-01 00:00:00' }),
+      ],
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const input = wrapper.find<HTMLInputElement>('.register-mgmt__link-input')
+    expect(input.element.value).toBe('http://localhost:5173/register?link=tok-new')
+  })
+
+  it('全部链接都已失效：空态并提示生成', async () => {
+    listRegisterLinks.mockResolvedValue({
+      items: [linkItem({ revoked_at: '2026-11-26 10:00:00' })],
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const input = wrapper.find<HTMLInputElement>('.register-mgmt__link-input')
+    expect(input.element.value).toBe('')
+    expect(input.element.placeholder).toContain('当前没有有效链接')
+    expect(button(wrapper, '生成链接')).toBeTruthy()
+  })
+
+  it('无有效链接时「生成链接」仍按 7 天生成并可复制', async () => {
     const wrapper = mountDialog()
     await flushPromises()
 
@@ -85,10 +132,20 @@ describe('RegisterManagementDialog —— 打开不自动生成（2026-11-27）'
     expect(copyToClipboard).toHaveBeenCalledWith(input.element.value)
   })
 
-  it('改选 30 天后「重新生成」用新有效期', async () => {
+  it('读取既有链接失败不报生成错误，仍可手动生成', async () => {
+    listRegisterLinks.mockRejectedValue({ code: 'NETWORK', message: '网络异常' })
     const wrapper = mountDialog()
     await flushPromises()
-    await button(wrapper, '生成链接')!.trigger('click')
+
+    expect(createRegisterLink).not.toHaveBeenCalled()
+    const input = wrapper.find<HTMLInputElement>('.register-mgmt__link-input')
+    expect(input.element.placeholder).toContain('未能读取已有链接')
+    expect((button(wrapper, '生成链接')!.element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('改选 30 天后「重新生成」用新有效期（已有链接场景）', async () => {
+    listRegisterLinks.mockResolvedValue({ items: [linkItem()] })
+    const wrapper = mountDialog()
     await flushPromises()
 
     await wrapper.find('.register-mgmt__ttl').setValue('30d')
@@ -96,12 +153,13 @@ describe('RegisterManagementDialog —— 打开不自动生成（2026-11-27）'
     await flushPromises()
 
     expect(createRegisterLink).toHaveBeenLastCalledWith('DH-DEMO01', 30 * 86_400)
+    const input = wrapper.find<HTMLInputElement>('.register-mgmt__link-input')
+    expect(input.element.value).toBe('http://localhost:5173/register?link=token-1')
   })
 
   it('复制入口只剩底部「复制链接」（行内重复的「复制」已删）', async () => {
+    listRegisterLinks.mockResolvedValue({ items: [linkItem()] })
     const wrapper = mountDialog()
-    await flushPromises()
-    await button(wrapper, '生成链接')!.trigger('click')
     await flushPromises()
 
     expect(wrapper.findAll('button').filter((item) => item.text() === '复制')).toHaveLength(0)
@@ -112,6 +170,7 @@ describe('RegisterManagementDialog —— 打开不自动生成（2026-11-27）'
     const wrapper = mountDialog(null)
     await flushPromises()
 
+    expect(listRegisterLinks).not.toHaveBeenCalled()
     expect(createRegisterLink).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('尚未配置注册服务')
     expect((button(wrapper, '生成链接')!.element as HTMLButtonElement).disabled).toBe(true)
@@ -121,20 +180,7 @@ describe('RegisterManagementDialog —— 打开不自动生成（2026-11-27）'
 
 describe('RegisterManagementDialog —— 停止注册入口', () => {
   it('点「停止注册」打开链接列表弹窗，并加载该编码的链接', async () => {
-    listRegisterLinks.mockResolvedValue({
-      items: [
-        {
-          token: 'tok-1',
-          agent_code: 'DH-DEMO01',
-          agent_name: '演示服务',
-          expires_at: null,
-          revoked_at: null,
-          use_count: 0,
-          created_by: null,
-          created_at: '2026-11-20 10:00:00',
-        },
-      ],
-    })
+    listRegisterLinks.mockResolvedValue({ items: [linkItem({ token: 'tok-1' })] })
     const wrapper = mountDialog()
     await flushPromises()
 
@@ -144,6 +190,28 @@ describe('RegisterManagementDialog —— 停止注册入口', () => {
     expect(listRegisterLinks).toHaveBeenCalledWith('DH-DEMO01')
     expect(wrapper.text()).toContain('停止注册')
     expect(wrapper.text()).toContain('有效')
+  })
+
+  it('从「停止注册」返回后重新读取：链接已被关闭则不再展示', async () => {
+    listRegisterLinks.mockResolvedValueOnce({ items: [linkItem()] })
+    listRegisterLinks.mockResolvedValue({
+      items: [linkItem({ revoked_at: '2026-11-27 10:00:00' })],
+    })
+    const wrapper = mountDialog()
+    await flushPromises()
+    expect(wrapper.find<HTMLInputElement>('.register-mgmt__link-input').element.value).not.toBe('')
+
+    await button(wrapper, '停止注册')!.trigger('click')
+    await flushPromises()
+
+    const closeButton = wrapper
+      .findAll('button')
+      .filter((item) => item.text() === '关闭')
+      .at(-1)!
+    await closeButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find<HTMLInputElement>('.register-mgmt__link-input').element.value).toBe('')
   })
 
   it('右上角关闭按钮关闭主弹窗', async () => {

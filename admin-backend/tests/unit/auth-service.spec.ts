@@ -42,7 +42,7 @@ describe('AuthService', () => {
     expect(res.cookie).toContain('optagent_auth=');
     const claims = await verifySession(tokenFromCookie(res.cookie), SECRET);
     expect(claims.userId).toBe('zpf');
-    expect(sessions.isCurrentSession('zpf', claims.sessionId)).toBe(true);
+    expect(await sessions.isCurrentSession('zpf', claims.sessionId)).toBe(true);
   });
 
   it('密码错 / 账号不存在 / 存量无密码 → 同码 ADM_INVALID_CREDENTIALS', async () => {
@@ -65,22 +65,28 @@ describe('AuthService', () => {
     const first = await auth.login('zpf', '123456');
     const firstSession = (await verifySession(tokenFromCookie(first.cookie), SECRET)).sessionId;
     await auth.login('zpf', '123456');
-    expect(sessions.isCurrentSession('zpf', firstSession)).toBe(false);
+    expect(await sessions.isCurrentSession('zpf', firstSession)).toBe(false);
   });
 
-  it('登出清除会话并返回清 Cookie 头', async () => {
+  it('登出只清自己的会话（旧凭据不得踢掉新会话）', async () => {
     await users.create('zpf', [], undefined, '123456');
-    await auth.login('zpf', '123456');
-    const cookie = await auth.logout('zpf');
-    expect(cookie).toContain('Max-Age=0');
-    expect(sessions.getCurrentSession('zpf')).toBeNull();
+    const res = await auth.login('zpf', '123456');
+    const claims = await verifySession(tokenFromCookie(res.cookie), SECRET);
+
+    // 非当前会话的凭据登出：不清除（否则 A 退出会把 B 踢下线）
+    expect(await auth.logout('zpf', 'not-current')).toContain('Max-Age=0');
+    expect(await sessions.getCurrentSession('zpf')).toBe(claims.sessionId);
+
+    // 当前会话登出：清除
+    expect(await auth.logout('zpf', claims.sessionId)).toContain('Max-Age=0');
+    expect(await sessions.getCurrentSession('zpf')).toBeNull();
   });
 
   it('内省判定当前会话', async () => {
     await users.create('zpf', [], undefined, '123456');
     const res = await auth.login('zpf', '123456');
     const claims = await verifySession(tokenFromCookie(res.cookie), SECRET);
-    expect(auth.introspect('zpf', claims.sessionId)).toBe(true);
-    expect(auth.introspect('zpf', 'other')).toBe(false);
+    expect(await auth.introspect('zpf', claims.sessionId)).toBe(true);
+    expect(await auth.introspect('zpf', 'other')).toBe(false);
   });
 });

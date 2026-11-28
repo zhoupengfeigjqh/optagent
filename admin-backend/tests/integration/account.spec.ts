@@ -277,6 +277,55 @@ describe('用户接口扩展（§13 users）', () => {
   });
 });
 
+describe('用户授权与会话（2026-11-28 加固）', () => {
+  it('PUT 授权：缺省 agents → 400，显式 [] 才清空（防静默撤销）', async () => {
+    await fx.ctx.users.create('u_gr', ['demo']);
+    const revision = fx.ctx.store.revision();
+
+    const missing = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/users/u_gr',
+      payload: { revision },
+    });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().error.code).toBe('VALIDATION_FAILED');
+
+    const clear = await fx.app.inject({
+      method: 'PUT',
+      url: '/api/admin/users/u_gr',
+      payload: { agents: [], revision },
+    });
+    expect(clear.statusCode).toBe(200);
+    expect(clear.json().agents).toEqual([]);
+  });
+
+  it('session/valid：用户不存在 → valid=false（exists 校验）', async () => {
+    const res = await fx.app.inject({
+      method: 'GET',
+      url: '/api/admin/auth/session/valid?user_id=ghost&session_id=s1',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().valid).toBe(false);
+  });
+
+  it('删除用户后其会话即刻失效（session/valid 端到端）', async () => {
+    await createService();
+    const token = await createLink();
+    const { userId } = await registerAndLogin('13700000003', '王五', token);
+    const sessionId = await fx.ctx.sessionStore.getCurrentSession(userId);
+    expect(sessionId).toBeTruthy();
+
+    const remove = await fx.app.inject({ method: 'DELETE', url: `/api/admin/users/${userId}` });
+    expect(remove.statusCode).toBe(204);
+
+    const res = await fx.app.inject({
+      method: 'GET',
+      url: `/api/admin/auth/session/valid?user_id=${userId}&session_id=${sessionId}`,
+    });
+    expect(res.json().valid).toBe(false);
+  });
+});
+
 describe('数字人 ⇔ 服务编码 1:1（§18）', () => {
   /** 取某数字人对应的服务（卡片按 platform_agent_name 匹配的同一个判据） */
   async function serviceOf(platformAgentName: string) {

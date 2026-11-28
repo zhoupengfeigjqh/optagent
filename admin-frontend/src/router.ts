@@ -10,7 +10,6 @@
  *  - `/admin/agents/demo`       → 数字人 demo 的设计态
  *  - `/admin/agents/demo?tab=mcp` → 设计态内 MCP 页签
  *  - `/admin/ontology/生产调度/原材料采购和库存` → 本体详情（身份两段：场景名在前、本体名在后，与 API 与部署路径同一顺序）
- *  - `/admin/users?tab=grants`  → 用户管理内的授权详情分区
  *
  * 保留伪路由（整页视图、不进一级导航）：
  *  - `/admin/login` → 管理员登录页

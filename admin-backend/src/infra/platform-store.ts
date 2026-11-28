@@ -27,6 +27,11 @@ export interface PlatformStoreOptions {
   logger?: Logger;
 }
 
+export interface EnsureLayoutOptions {
+  /** 是否创建/告警账号域目录（`accounts/**`）；mysql 驱动传 `false` */
+  accounts?: boolean;
+}
+
 export class PlatformStore {
   private readonly root: string;
   private readonly logger: Logger | undefined;
@@ -53,25 +58,21 @@ export class PlatformStore {
    *
    * `onto_market/` 为**本体库**（2026-10-03，`FR-060`）：结构与市场前两级一致
    * （`{场景}/{本体}/ontology.yaml`），文件名沿用市场侧同名。
+   *
+   * `accounts: false` 用于 mysql 驱动的账号域（029 FR-027）：账号不在目录里，
+   * 建空目录与"旧目录仍存在"告警都会误导运维，故一并跳过。
    */
-  ensureLayout(): void {
+  ensureLayout(options: EnsureLayoutOptions = {}): void {
+    const withAccounts = options.accounts ?? true;
     this.failIfNotWritable();
     // 账号域（028）：`users/` · `sessions/` · 三份集合文件统一挂 `accounts/` 下（见 account/paths.ts）
-    for (const dir of [
-      '',
-      'skills',
-      'agents',
-      ACCOUNTS_DIR,
-      USERS_DIR,
-      SESSIONS_DIR,
-      'deploy',
-      'logs',
-      'onto_market',
-    ]) {
+    const dirs = ['', 'skills', 'agents', 'deploy', 'logs', 'onto_market'];
+    if (withAccounts) dirs.push(ACCOUNTS_DIR, USERS_DIR, SESSIONS_DIR);
+    for (const dir of dirs) {
       fs.mkdirSync(path.join(this.root, dir), { recursive: true });
     }
     // 结构收敛前的旧目录若仍在 = 迁移脚本还没跑：**显式告警**，不静默双份数据
-    for (const legacy of [LEGACY_USERS_DIR, LEGACY_SESSIONS_DIR]) {
+    for (const legacy of withAccounts ? [LEGACY_USERS_DIR, LEGACY_SESSIONS_DIR] : []) {
       if (!fs.existsSync(this.abs(legacy))) continue;
       this.logger?.warn(
         { event: 'store.layout.legacy', dir: legacy },

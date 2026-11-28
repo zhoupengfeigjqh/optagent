@@ -6,11 +6,12 @@
  * 并在卡片上显示**部署状态**（`deployed_at`，取自部署清单；`null` = 尚未部署）。
  * 部署对象就在这一页勾选（2026-09-16 十一次调整）。
  *
- * `DELETE`（2026-10-20 修订）：**先撤回该用户的部署**（清 `agents/**`、移出清单），
- * 再删平台侧记录。文件空间（`user-data/**`）一律保留（`FR-028`）。
+ * `DELETE`（2026-10-20 修订，2026-11-28 调整顺序）：**先断会话 → 再撤回部署 →
+ * 最后删平台记录**。文件空间（`user-data/**`）一律保留（`FR-028`）。
  *
- * 顺序不能颠倒：撤回失败时用户仍在平台，管理员可重试；若先删平台记录，就再没有
- * 入口能把该用户从运行环境清掉——遗留的部署会继续对外提供服务。
+ * 顺序不能颠倒：断会话与撤回失败时用户仍在平台，管理员可重试；若先删平台记录，
+ * 就再没有入口能把该用户从运行环境清掉——遗留的部署会继续对外提供服务，旧凭据
+ * 也会变成"内省有效但无对应用户"的幽灵会话。
  */
 import type { FastifyInstance } from 'fastify';
 import type { AppContext } from '../context.js';
@@ -108,6 +109,14 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     if (typeof body.revision !== 'number' || !Number.isInteger(body.revision)) {
       throw new ApiError(ERROR_CODES.VALIDATION_FAILED, 'revision 必填且须为整数（乐观锁）');
     }
+    // 授权 = 整体替换：`agents` 必填，要清空授权必须显式传 `[]`——
+    // 否则"忘了带 agents"会静默撤销全部授权（破坏性副作用必须显式声明）。
+    if (!Array.isArray(body.agents)) {
+      throw new ApiError(
+        ERROR_CODES.VALIDATION_FAILED,
+        'agents 必填（字符串数组）；要清空授权请显式传 []',
+      );
+    }
     assertAgentsExist(ctx, body.agents);
     return await ctx.users.update(userId, body.agents, body.revision);
   });
@@ -140,12 +149,23 @@ export function registerUserRoutes(app: FastifyInstance, ctx: AppContext): void 
     const { user_id: userId } = req.params as { user_id: string };
     // 不存在 → 404（先读一次，避免对未知目录做写操作）
     ctx.users.read(userId);
-    // 撤回能力（清运行环境 `agents/**` + 移出部署清单）→ 再删平台记录
-    ctx.deployer.purgeUser(userId);
-    // 2026-11-27：授权 = 关联，随用户记录一并删除（旧的 grants 记录保留作历史审计）
-    await ctx.users.remove(userId);
-    // 024：删除用户即清除其会话登记（旧凭据即时失效，FR-012）
-    await ctx.auth.revokeUser(userId);
+    // 先断会话（安全侧，2026-11-28）：删数据前回收旧凭据，失败即中止重试，
+    // 避免"记录已删但旧凭据仍可内省为有效"的幽灵会话。
+    // 029：任一步失败都要如实报错并留痕（不吞错、不宣称成功）
+    let step = 'revoke_session';
+    try {
+      await ctx.auth.revokeUser(userId);
+      step = 'purge_deployment';
+      ctx.deployer.purgeUser(userId);
+      step = 'remove_record';
+      await ctx.users.remove(userId);
+    } catch (err) {
+      ctx.loggers.logger.warn(
+        { event: 'user.delete.failed', user_id: userId, step, err: String(err) },
+        `删除账号失败（已停在第 ${step} 步），账号仍在平台，可重试`,
+      );
+      throw err;
+    }
     return reply.status(204).send();
   });
 }

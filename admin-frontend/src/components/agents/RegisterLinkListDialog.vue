@@ -10,7 +10,13 @@
 import { computed, ref, watch } from 'vue'
 import { listRegisterLinks, revokeRegisterLink } from '../../api/account'
 import type { ErrorInfo, RegisterLinkItem } from '../../api/types'
-import { isExpired, formatDateTime } from '../../utils/datetime'
+import { formatDateTime } from '../../utils/datetime'
+import {
+  REGISTER_LINK_STATE_LABELS,
+  registerLinkState,
+  sortRegisterLinks,
+  type RegisterLinkState,
+} from '../../utils/register-link'
 import BaseDialog from '../common/BaseDialog.vue'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -18,7 +24,7 @@ import ErrorNotice from '../common/ErrorNotice.vue'
 const props = defineProps<{
   open: boolean
   agentName: string
-  /** 为空 = 该数字人没有服务编码，无法管理链接 */
+  /** 服务编码；入口保证非空（无服务编码的数字人不会打开本弹窗），空值仅作防御 */
   serviceCode: string | null
 }>()
 
@@ -27,11 +33,9 @@ const emit = defineEmits<{
   (e: 'announce', text: string): void
 }>()
 
-type LinkState = 'active' | 'expired' | 'revoked'
-
 interface LinkRow {
   link: RegisterLinkItem
-  state: LinkState
+  state: RegisterLinkState
   stateLabel: string
 }
 
@@ -42,32 +46,16 @@ const error = ref<ErrorInfo | null>(null)
 /** 待确认的关闭动作：单条（token）或全部 */
 const pending = ref<{ kind: 'one'; token: string } | { kind: 'all' } | null>(null)
 
-function stateOf(link: RegisterLinkItem): LinkState {
-  if (link.revoked_at) return 'revoked'
-  if (isExpired(link.expires_at)) return 'expired'
-  return 'active'
-}
+const rows = computed<LinkRow[]>(() =>
+  sortRegisterLinks(links.value).map((link) => {
+    const state = registerLinkState(link)
+    return { link, state, stateLabel: REGISTER_LINK_STATE_LABELS[state] }
+  }),
+)
 
-const STATE_LABELS: Record<LinkState, string> = {
-  active: '有效',
-  expired: '已过期',
-  revoked: '已撤销',
-}
-
-/** 有效的排在前面，同状态按创建时间倒序（最近生成的先看到） */
-const rows = computed<LinkRow[]>(() => {
-  const order: Record<LinkState, number> = { active: 0, expired: 1, revoked: 2 }
-  return links.value
-    .map((link) => {
-      const state = stateOf(link)
-      return { link, state, stateLabel: STATE_LABELS[state] }
-    })
-    .sort(
-      (a, b) => order[a.state] - order[b.state] || b.link.created_at.localeCompare(a.link.created_at),
-    )
-})
-
-const activeCount = computed(() => links.value.filter((link) => stateOf(link) === 'active').length)
+const activeCount = computed(
+  () => links.value.filter((link) => registerLinkState(link) === 'active').length,
+)
 
 async function load(): Promise<void> {
   if (!props.serviceCode) {
@@ -87,7 +75,7 @@ async function load(): Promise<void> {
 
 /** 单条关闭：先弹二次确认 */
 function requestRevoke(link: RegisterLinkItem): void {
-  if (stateOf(link) !== 'active' || busy.value) return
+  if (registerLinkState(link) !== 'active' || busy.value) return
   pending.value = { kind: 'one', token: link.token }
 }
 
@@ -111,22 +99,39 @@ async function confirmRevoke(): Promise<void> {
   busy.value = true
   error.value = null
   let closed = 0
+  let failed = 0
+  let firstFailure: ErrorInfo | null = null
   try {
     if (target.kind === 'one') {
-      await revokeRegisterLink(target.token)
-      closed = 1
+      try {
+        await revokeRegisterLink(target.token)
+        closed = 1
+      } catch (err) {
+        failed = 1
+        firstFailure = err as ErrorInfo
+      }
     } else {
-      // 串行撤销：条数很少，避免并发写同一份链接清单
-      for (const link of links.value.filter((item) => stateOf(item) === 'active')) {
-        await revokeRegisterLink(link.token)
-        closed += 1
+      // 串行撤销：条数很少，避免并发写同一份链接清单；单条失败不中断，尽量关掉其余
+      for (const link of links.value.filter((item) => registerLinkState(item) === 'active')) {
+        try {
+          await revokeRegisterLink(link.token)
+          closed += 1
+        } catch (err) {
+          failed += 1
+          firstFailure ??= err as ErrorInfo
+        }
       }
     }
-    emit('announce', `已关闭 ${closed} 条注册链接，立即失效`)
-    await load()
-  } catch (err) {
-    error.value = err as ErrorInfo
+    if (closed > 0) {
+      emit(
+        'announce',
+        `已关闭 ${closed} 条注册链接，立即失效${failed > 0 ? `，另有 ${failed} 条关闭失败` : ''}`,
+      )
+    }
   } finally {
+    // 刷新列表让前端状态与后端一致；load 会重置 error，故失败提示放在 load 之后
+    await load()
+    if (failed > 0) error.value = firstFailure
     busy.value = false
   }
 }
@@ -161,8 +166,7 @@ watch(
 
       <ErrorNotice v-if="error" :error="error" title="注册链接操作未完成" />
 
-      <p v-if="!serviceCode" class="register-links__empty">该数字人尚未配置注册服务，无法管理链接。</p>
-      <p v-else-if="loading" class="register-links__empty" role="status">链接清单加载中…</p>
+      <p v-if="loading" class="register-links__empty" role="status">链接清单加载中…</p>
       <p v-else-if="rows.length === 0" class="register-links__empty">
         该数字人还没有生成过注册链接。
       </p>

@@ -1091,9 +1091,9 @@ MUST NOT 读取容器编排声明或容器运行状态。
 | `/api/admin/register-links` | GET/POST | 管理员 | 列表（可按 `agent_code` 过滤，带 `use_count`）/ 生成 `{agent_code, expires_in_seconds?}` → 201 `{token, url, expires_at}` |
 | `/api/admin/register-links/:token` | DELETE | 管理员 | 软撤销 → 204 |
 | `/api/admin/agent-services` | GET/POST | 登录/管理员 | 服务目录列表（含 `registered_users`）/ 新建 `{code?, name, platform_agent_name}`（**新建响应的 `registered_users` 也是真实关联数**，2026-11-27 前恒为 0）；`code` **可省略或空串 → 平台生成**（`DH-` + 5 位去混淆 Base32，响应回显，创建后不可改）；显式提供仍按 `^[A-Z0-9][A-Z0-9-]{1,31}$` 校验，撞码 400。`platform_agent_name` MUST 在平台设计态存在（`FR-025` 口径） |
-| `/api/admin/agent-services/:code` | PUT/DELETE | 管理员 | 改 name/status（code 不可改）/ 删除；被**未撤销**的注册链接或用户关联引用 → `ADM_AGENT_SERVICE_IN_USE`（已撤销/已过期链接不算引用，2026-11-27 统一口径） |
+| `/api/admin/agent-services/:code` | PUT/DELETE | 管理员 | 改 name/status（code 不可改）/ 删除；`status='disabled'` **只**关闭新链接生成与公开校验（`ADM_INVALID_LINK`），**不撤销**存量授权、**不撤回**已部署能力（2026-11-28 明确，停用 ≠ 下线）；被**未撤销**的注册链接或用户关联引用 → `ADM_AGENT_SERVICE_IN_USE`（已撤销/已过期链接不算引用，2026-11-27 统一口径） |
 | `/api/admin/users` | GET/POST | 管理员 | **扩展**：列表响应增 `phone/display_name/role/source_agent_code`（**不含**授权摘要——授权数即 `agents.length`）；创建请求体增可选同名账号字段 |
-| `/api/admin/users/:user_id` | PUT | 管理员 | **2026-11-27 语义确认**：`{agents, revision}` 即"替换授权清单"（授权 = 关联），是管理台授权/关闭授权的唯一写入路径 |
+| `/api/admin/users/:user_id` | PUT | 管理员 | **2026-11-27 语义确认**：`{agents, revision}` 即"替换授权清单"（授权 = 关联），是管理台授权/关闭授权的唯一写入路径；**`agents` 必填**——要清空授权须显式传 `[]`（缺省/非数组 400，2026-11-28） |
 
 **已下架端点（2026-11-27）**：`POST /api/admin/grants/apply`、`GET /api/admin/grants`、`POST /api/admin/grants/approve`、`POST /api/admin/grants/revoke` 随"授权 = 关联"收敛一并删除；授权改由 `PUT /api/admin/users/{user_id}` 写入、由列表响应读取。原"授权记录不存在"（404）码同时移除（旧名不再回引），其余新码不变。管理台入口：用户管理 →「授权详情」勾选/取消勾选（即时写入）。
 

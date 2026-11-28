@@ -20,26 +20,11 @@ import {
   readCookie,
   verifySession,
 } from '../domain/auth/token.js';
+import { requireLogin } from '../domain/auth/guard.js';
 
-/** 从 Cookie 解出当前登录用户（无效/未登录 → `ADM_UNAUTHENTICATED`） */
-export async function requireLogin(req: FastifyRequest, ctx: AppContext): Promise<string> {
-  const token = readCookie(req.headers.cookie, AUTH_COOKIE_NAME);
-  if (!token) throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '未登录');
-  try {
-    const claims = await verifySession(token, ctx.config.authSecret);
-    // 单会话：登出/被踢后该会话已非当前会话 → 探针即失效
-    if (!ctx.auth.introspect(claims.userId, claims.sessionId)) {
-      throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '登录已失效');
-    }
-    if (!ctx.users.exists(claims.userId)) {
-      throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '登录已失效');
-    }
-    return claims.userId;
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    throw new ApiError(ERROR_CODES.ADM_UNAUTHENTICATED, '登录已过期或无效');
-  }
-}
+// 030：守卫统一放在 `domain/auth/guard.ts`（与 `server.ts` 的 onRequest 钩子同一份），
+// 此处保留再导出，避免既有调用方与测试改 import 路径。
+export { requireLogin };
 
 export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void {
   app.post('/api/admin/auth/login', async (req, reply) => {
@@ -116,7 +101,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     if (token) {
       try {
         const claims = await verifySession(token, ctx.config.authSecret);
-        cookie = await ctx.auth.logout(claims.userId);
+        cookie = await ctx.auth.logout(claims.userId, claims.sessionId);
       } catch {
         /* 凭据无效：仍清除客户端 Cookie，登出保持幂等 */
       }
@@ -129,6 +114,13 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     const q = (req.query ?? {}) as { user_id?: unknown; session_id?: unknown };
     const userId = typeof q.user_id === 'string' ? q.user_id : '';
     const sessionId = typeof q.session_id === 'string' ? q.session_id : '';
-    return { valid: userId !== '' && sessionId !== '' && ctx.auth.introspect(userId, sessionId) };
+    // 会话有效 = 标识齐全 + 用户仍存在 + 单会话登记一致（删除用户后旧会话即刻失效）
+    return {
+      valid:
+        userId !== '' &&
+        sessionId !== '' &&
+        ctx.users.exists(userId) &&
+        (await ctx.auth.introspect(userId, sessionId)),
+    };
   });
 }

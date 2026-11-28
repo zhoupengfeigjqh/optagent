@@ -3,7 +3,7 @@
  *
  * 三个顶层视图共享同一份会话投影：管理员登录页、注册链接页、受守卫的功能区。
  * App.vue 挂载即 `probe()`（`GET /auth/me`），登录页提交成功后写入 profile，
- * 守卫按 `profile.role === 'admin'` 放行功能区。
+ * 守卫按 `isAdmin`（内部走 `utils/role.isAdminRole` 这一唯一口径）放行功能区。
  *
  * 024 口径：会话凭据是 HttpOnly Cookie（`optagent_auth`），前端不持有 token——
  * 「登录态」只存在于这份内存投影里，刷新页面后靠 `probe()` 重建。
@@ -13,7 +13,9 @@
  */
 import { computed, ref } from 'vue'
 import { fetchMe, login as loginApi, logout as logoutApi } from '../api/auth'
+import { setUnauthorizedHandler } from '../api/http'
 import type { MeProfile } from '../api/types'
+import { isAdminRole } from '../utils/role'
 
 /** 当前会话（null = 未登录）；模块级单例，跨组件共享 */
 const profile = ref<MeProfile | null>(null)
@@ -22,7 +24,13 @@ const profile = ref<MeProfile | null>(null)
 const ready = ref(false)
 
 /** 当前会话是否为管理员（功能区守卫的唯一口径） */
-const isAdmin = computed(() => profile.value?.role === 'admin')
+const isAdmin = computed(() => isAdminRole(profile.value?.role))
+
+// 统一 401 善后：任何请求命中 401 即视为会话失效，清空内存投影；
+// 由 App.vue 的守卫据此把用户带回 /admin/login（无需在此直接跳转）。
+setUnauthorizedHandler(() => {
+  profile.value = null
+})
 
 /** 探测登录态：成功写入 profile；401 / 网络异常一律按未登录处理（024：失效即重登） */
 async function probe(): Promise<MeProfile | null> {

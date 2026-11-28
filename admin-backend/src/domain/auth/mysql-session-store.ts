@@ -4,9 +4,9 @@
  * 落在 `optagent.sessions` 表（`user_id` 主键 = 单会话唯一），语义与
  * `.platform-data/sessions/{uid}.json` 一一对应：
  * - `setCurrentSession` = `INSERT … ON DUPLICATE KEY UPDATE`（后登踢前登）；
- * - `clearSession` = `DELETE`（幂等）；
- * - 读取走**内存投影**（`init()` 全量加载），`isCurrentSession` 保持同步，
- *   `AuthService.introspect` / 运行侧内省契约零改动。
+ * - `clearSession` = `DELETE`（幂等，不做前置探测）；
+ * - 读取**每次查表**，不保留内存投影：会话是安全边界，缓存会让其它实例或运维脚本
+ *   造成的失效看不见（file 驱动同样是每次读盘）。
  *
  * `issued_at` 由数据库 `NOW(3)` 生成（仅审计展示用，不参与判定）。
  */
@@ -14,22 +14,15 @@ import type { MysqlConnection } from '../../infra/mysql.js';
 import type { SessionPort } from './session-store.js';
 
 interface SessionRow {
-  user_id: string;
   session_id: string;
 }
 
 export class MysqlSessionStore implements SessionPort {
-  private readonly rows = new Map<string, string>();
-
   constructor(private readonly conn: MysqlConnection) {}
 
-  /** 启动期全量加载内存投影（wiring 时调用；失败 = 服务拒绝启动） */
+  /** 启动期探表（schema 未执行即拒绝启动） */
   async init(): Promise<void> {
-    const rows = await this.conn.select<SessionRow>('SELECT user_id, session_id FROM sessions');
-    this.rows.clear();
-    for (const row of rows) {
-      this.rows.set(row.user_id, row.session_id);
-    }
+    await this.conn.select('SELECT 1 FROM sessions LIMIT 1');
   }
 
   async setCurrentSession(userId: string, sessionId: string): Promise<void> {
@@ -39,21 +32,21 @@ export class MysqlSessionStore implements SessionPort {
        ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), issued_at = NOW(3)`,
       [userId, sessionId],
     );
-    this.rows.set(userId, sessionId);
   }
 
-  getCurrentSession(userId: string): string | null {
-    return this.rows.get(userId) ?? null;
+  async getCurrentSession(userId: string): Promise<string | null> {
+    const rows = await this.conn.select<SessionRow>(
+      'SELECT session_id FROM sessions WHERE user_id = ?',
+      [userId],
+    );
+    return rows[0]?.session_id ?? null;
   }
 
   async clearSession(userId: string): Promise<void> {
-    // 幂等：无登记即直接返回（与 file 版 `exists` 前置检查同口径，不打无谓 SQL）
-    if (!this.rows.has(userId)) return;
     await this.conn.modify('DELETE FROM sessions WHERE user_id = ?', [userId]);
-    this.rows.delete(userId);
   }
 
-  isCurrentSession(userId: string, sessionId: string): boolean {
-    return this.getCurrentSession(userId) === sessionId;
+  async isCurrentSession(userId: string, sessionId: string): Promise<boolean> {
+    return (await this.getCurrentSession(userId)) === sessionId;
   }
 }

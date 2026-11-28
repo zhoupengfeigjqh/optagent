@@ -98,6 +98,11 @@ export interface FixtureOptions {
   userIds?: string[];
   mcpServices?: Record<string, Record<string, unknown>>;
   env?: Record<string, string | undefined>;
+  /**
+   * 030：默认注入 no-op 守卫，业务用例不必逐个补登录 Cookie；
+   * 需要验证鉴权本身时传 `true` 走真实守卫。
+   */
+  realAdminGuard?: boolean;
 }
 
 export async function createFixture(options: FixtureOptions = {}): Promise<TestFixture> {
@@ -132,7 +137,13 @@ export async function createFixture(options: FixtureOptions = {}): Promise<TestF
 
   const runtime = new FakeRuntimeClient();
   const mcpClient = new FakeMcpClient();
-  const app = await buildServer({ config, runtime, mcpClient });
+  const app = await buildServer({
+    config,
+    runtime,
+    mcpClient,
+    // 030：业务用例默认跳过登录校验（鉴权由 admin-auth.spec 专门覆盖）
+    ...(options.realAdminGuard ? {} : { adminGuard: async () => {} }),
+  });
   const ctx = (app as unknown as { ctx: AppContext }).ctx;
 
   for (const [name, input] of Object.entries(options.mcpServices ?? {})) {

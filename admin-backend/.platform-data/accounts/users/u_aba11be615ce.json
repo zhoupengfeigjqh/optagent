@@ -1,6 +1,9 @@
 {
   "user_id": "u_aba11be615ce",
-  "agents": [],
+  "agents": [
+    "生鲜识别辅助",
+    "生产调度测试"
+  ],
   "password": {
     "algo": "scrypt",
     "params": {

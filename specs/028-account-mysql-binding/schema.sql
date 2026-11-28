@@ -42,28 +42,66 @@ CREATE TABLE IF NOT EXISTS agent_services (
 --   agents   = 授权 = 关联（2026-11-27 起唯一真相源）。
 --              既决定「授权了什么」，也决定「部署什么」；工作台切换列表还需
 --              与部署清单（manifest.agent_names）取交集才下发。
---   password_record = scrypt 记录 {algo,params,salt,hash}，与 domain/auth/password.ts 一一对应
---                     NULL = 不可登录（024 FR-013 口径）
+--   password = scrypt 记录 {algo,params,salt,hash}，与 domain/auth/password.ts 一一对应
+--              NULL = 不可登录（024 FR-013 口径）
+--              2026-11-28（029）：列名由 password_record 改为 password，与文件模式字段同名
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id            VARCHAR(64)     NOT NULL                COMMENT '内部主键，JWT sub',
+  user_id            VARCHAR(64)     CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+                                     COMMENT '内部主键，JWT sub；区分大小写（与文件驱动的精确匹配一致）',
   phone              VARCHAR(20)     DEFAULT NULL            COMMENT '11 位手机号；存量用户可为 NULL',
   agents             JSON            NOT NULL DEFAULT (JSON_ARRAY()) COMMENT '部署关联数字人清单（users.agents[] 投影）',
   display_name       VARCHAR(64)     NOT NULL DEFAULT ''     COMMENT '用户名',
-  password_record    JSON            DEFAULT NULL            COMMENT 'scrypt 摘要；NULL = 不可登录',
+  `password`         JSON            DEFAULT NULL            COMMENT 'scrypt 摘要；NULL = 不可登录（与文件模式字段同名）',
   role               ENUM('admin','user') NOT NULL DEFAULT 'user',
-  status             ENUM('active','disabled') NOT NULL DEFAULT 'active',
   source_agent_code  VARCHAR(32)     DEFAULT NULL            COMMENT '注册来源数字人编码',
   created_at         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at         DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_users_user_id (user_id),
   UNIQUE KEY uk_users_phone (phone),
-  KEY idx_users_source (source_agent_code),
-  CONSTRAINT fk_users_source FOREIGN KEY (source_agent_code)
-    REFERENCES agent_services (code) ON UPDATE CASCADE ON DELETE SET NULL
+  KEY idx_users_source (source_agent_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号';
+
+-- -----------------------------------------------------------------------------
+-- 既有库升级（一次性；新库可跳过）
+--   029（2026-11-28）：users.password_record → users.password，与文件模式字段同名。
+--   先确认列名，再改名：
+--     SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+--        AND COLUMN_NAME IN ('password', 'password_record');
+--   若返回 password_record：
+--     ALTER TABLE users CHANGE COLUMN password_record `password` JSON DEFAULT NULL
+--       COMMENT 'scrypt 摘要；NULL = 不可登录（与文件模式字段同名）';
+--
+--   029（2026-11-28）：去外键与 users.status —— 账号状态不入库（与文件模式字段对齐，
+--   状态只留在运行端）；两条外键会让"删除数字人 / 迁移"被库层挡住。先查存在性，再执行：
+--     SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+--      WHERE TABLE_SCHEMA = DATABASE()
+--        AND CONSTRAINT_NAME IN ('fk_users_source','fk_register_links_agent');
+--   若返回上述约束：
+--     ALTER TABLE users DROP FOREIGN KEY fk_users_source, DROP COLUMN status;
+--     ALTER TABLE register_links DROP FOREIGN KEY fk_register_links_agent;
+--
+--   029（2026-11-28）：三列改大小写敏感（与文件驱动的精确匹配对齐）。
+--   `user_id` / `token` 是身份与凭据，`_ai_ci` 会把 Admin 与 admin、token 的
+--   大小写变体当成同一个值。先查现状，仅当仍是 _ai_ci 时执行；
+--   `sessions.user_id` 有外键指向 `users.user_id`，必须先删外键再改列：
+--     SELECT TABLE_NAME, COLUMN_NAME, COLLATION_NAME FROM information_schema.COLUMNS
+--      WHERE TABLE_SCHEMA = DATABASE()
+--        AND COLUMN_NAME IN ('user_id','token')
+--        AND COLLATION_NAME NOT LIKE '%_bin';
+--   若返回上述行：
+--     ALTER TABLE sessions DROP FOREIGN KEY fk_sessions_user;
+--     ALTER TABLE users MODIFY user_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+--       COMMENT '内部主键，JWT sub；区分大小写（与文件驱动的精确匹配一致）';
+--     ALTER TABLE sessions MODIFY user_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
+--     ALTER TABLE sessions ADD CONSTRAINT fk_sessions_user FOREIGN KEY (user_id)
+--       REFERENCES users (user_id) ON UPDATE CASCADE ON DELETE CASCADE;
+--     ALTER TABLE register_links MODIFY token VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+--       COMMENT '高熵随机串，URL query 携带；区分大小写（token 是凭据）';
+-- -----------------------------------------------------------------------------
 
 -- -----------------------------------------------------------------------------
 -- 专属注册链接（原型：数字人卡片 → 生成注册链接）
@@ -72,7 +110,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS register_links (
   id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  token        VARCHAR(64)     NOT NULL                COMMENT '高熵随机串，URL query 携带',
+  token        VARCHAR(64)     CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL
+                                               COMMENT '高熵随机串，URL query 携带；区分大小写（token 是凭据）',
   agent_code   VARCHAR(32)     NOT NULL,
   created_by   VARCHAR(64)     DEFAULT NULL            COMMENT '管理员 user_id',
   expires_at   DATETIME(3)     DEFAULT NULL            COMMENT 'NULL = 长期有效',
@@ -82,9 +121,7 @@ CREATE TABLE IF NOT EXISTS register_links (
   PRIMARY KEY (id),
   UNIQUE KEY uk_register_links_token (token),
   KEY idx_register_links_agent (agent_code),
-  KEY idx_register_links_valid (revoked_at, expires_at),
-  CONSTRAINT fk_register_links_agent FOREIGN KEY (agent_code)
-    REFERENCES agent_services (code) ON UPDATE CASCADE ON DELETE RESTRICT
+  KEY idx_register_links_valid (revoked_at, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专属注册链接';
 
 -- -----------------------------------------------------------------------------
@@ -99,7 +136,7 @@ CREATE TABLE IF NOT EXISTS register_links (
 --   一个账号仅一行：登录覆盖、登出/删用户/重置密码时删除
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sessions (
-  user_id     VARCHAR(64)  NOT NULL,
+  user_id     VARCHAR(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   session_id  VARCHAR(64)  NOT NULL COMMENT 'JWT jti',
   issued_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (user_id),

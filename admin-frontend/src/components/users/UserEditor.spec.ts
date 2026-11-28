@@ -141,3 +141,41 @@ describe('UserEditor —— 028 账号扩展字段', () => {
     ])
   })
 })
+
+describe('UserEditor —— 用户标识校验（与后端 isSafeName 同口径）', () => {
+  it('用户标识留空 → 就地报错且不发 submit', async () => {
+    const wrapper = mountEditor(true)
+    await wrapper.find('#user-id').setValue('')
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('用户标识必填')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
+  it('含路径分隔符 → 就地报错且不发 submit', async () => {
+    const wrapper = mountEditor(true)
+    await wrapper.find('#user-id').setValue('a/b')
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('用户标识不得含路径分隔符')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
+  it('含 ".." → 就地报错且不发 submit', async () => {
+    const wrapper = mountEditor(true)
+    await wrapper.find('#user-id').setValue('a..b')
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('用户标识不得含 ".."')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+
+  it('超过 64 字符 → 就地报错且不发 submit', async () => {
+    const wrapper = mountEditor(true)
+    await wrapper.find('#user-id').setValue('x'.repeat(65))
+    await buttonByText(wrapper, '保存')!.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('用户标识最长 64 个字符')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  })
+})

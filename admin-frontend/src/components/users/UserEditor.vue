@@ -8,9 +8,21 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { AgentListItem } from '../../api/types'
+import { passwordError as validatePasswordLength } from '../../utils/password'
+import { isPhone } from '../../utils/phone'
 import { agentCheckboxOptions } from '../agents/agent-options'
 import BaseDialog from '../common/BaseDialog.vue'
 import CheckboxList from '../common/CheckboxList.vue'
+
+/** 用户标识校验（与后端 `isSafeName` 同口径，避免前后端错位） */
+function validateUserId(value: string): string {
+  if (value.length === 0) return '用户标识必填'
+  if (value.length > 64) return '用户标识最长 64 个字符'
+  if (value === '.' || value === '..') return '用户标识不能为 "." 或 ".."'
+  if (/[/\\]/.test(value)) return '用户标识不得含路径分隔符'
+  if (value.includes('..')) return '用户标识不得含 ".."'
+  return ''
+}
 
 const props = defineProps<{
   open: boolean
@@ -42,6 +54,7 @@ const phone = ref('')
 const displayName = ref('')
 const role = ref<'admin' | 'user'>('user')
 const phoneError = ref('')
+const userIdError = ref('')
 
 // `immediate`：允许"挂载即打开"，否则初始值不会被灌入
 watch(
@@ -56,6 +69,7 @@ watch(
     displayName.value = ''
     role.value = 'user'
     phoneError.value = ''
+    userIdError.value = ''
   },
   { immediate: true },
 )
@@ -65,13 +79,16 @@ const options = computed(() => agentCheckboxOptions(props.agents))
 function submit(): void {
   passwordError.value = ''
   phoneError.value = ''
+  userIdError.value = validateUserId(userId.value)
+  if (userIdError.value) return
   // 新建时必填初始密码（否则该账号无法登录，见 FR-001/FR-013）
-  if (password.value.length < 6 || password.value.length > 128) {
-    passwordError.value = '密码长度须为 6~128 个字符'
+  const passwordIssue = validatePasswordLength(password.value)
+  if (passwordIssue) {
+    passwordError.value = passwordIssue
     return
   }
   // 028：手机号可选，但填了必须合法（登录标识，注册后可用手机号登录）
-  if (phone.value !== '' && !/^1\d{10}$/.test(phone.value.trim())) {
+  if (phone.value.trim() !== '' && !isPhone(phone.value)) {
     phoneError.value = '手机号须为 1 开头的 11 位数字'
     return
   }
@@ -94,7 +111,10 @@ function submit(): void {
           用户标识<span class="field__required" aria-hidden="true">*</span>
         </span>
         <input id="user-id" v-model="userId" type="text" placeholder="例如：admin" data-autofocus />
-        <span class="field__hint">对应运行环境的 users/ 目录名，不得含路径分隔符或 “..”。</span>
+        <span v-if="userIdError" class="field__hint" role="alert" style="color: #c00">
+          {{ userIdError }}
+        </span>
+        <span v-else class="field__hint">对应运行环境的 users/ 目录名，不得含路径分隔符或 “..”。</span>
       </label>
 
       <label class="field user-editor__field" for="user-password">
@@ -134,7 +154,7 @@ function submit(): void {
           <option value="user">普通用户</option>
           <option value="admin">管理员</option>
         </select>
-        <span class="field__hint">管理员角色在阶段 4（管理台鉴权）后生效。</span>
+        <span class="field__hint">管理员可登录本管理台；普通用户只能通过专属注册链接进入前台。</span>
       </label>
 
       <CheckboxList

@@ -42,6 +42,7 @@ describe('renderContinueInput', () => {
     expect(text).toContain('目标（本轮用户请求）：补采购');
     expect(text).toContain('已完成结论：\n· 缺 3 种料');
     expect(text).toContain('输出 []');
+    expect(text).toContain('不要为了凑步骤而新增无意义的动作');
   });
 
   it('失败重规划：带失败原因，且不出现历史字样', () => {

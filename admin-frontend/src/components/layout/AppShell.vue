@@ -6,6 +6,8 @@
  * 「全局播报区」是 `aria-live="polite"` 的单一落点——部署结果、保存结果等
  * 需要被读屏播报的信息都送到这里，避免每个组件各自宣告造成重复播报（原则四）。
  */
+import { ref } from 'vue'
+import ConfirmDialog from '../common/ConfirmDialog.vue'
 import PrimaryNav from './PrimaryNav.vue'
 import type { RouteName } from '../../router'
 
@@ -20,6 +22,21 @@ const emit = defineEmits<{
   (e: 'navigate', name: RouteName): void
   (e: 'logout'): void
 }>()
+
+/**
+ * 页头退出是常驻入口，误点即丢登录态，故与聊天区一致加二次确认，
+ * 确认后才向上发出 `logout`（登出编排仍归 `App.vue`）。
+ */
+const confirmOpen = ref(false)
+
+function requestLogout(): void {
+  confirmOpen.value = true
+}
+
+function confirmLogout(): void {
+  confirmOpen.value = false
+  emit('logout')
+}
 </script>
 
 <template>
@@ -32,7 +49,7 @@ const emit = defineEmits<{
         </div>
         <div v-if="who" class="app-shell__identity">
           <span class="app-shell__who">{{ who }} · 管理员</span>
-          <button type="button" class="app-shell__logout" @click="emit('logout')">退出登录</button>
+          <button type="button" class="app-shell__logout" @click="requestLogout">退出登录</button>
         </div>
       </header>
 
@@ -44,6 +61,14 @@ const emit = defineEmits<{
     </div>
 
     <p class="app-shell__live" role="status" aria-live="polite">{{ announcement }}</p>
+
+    <ConfirmDialog
+      v-model:open="confirmOpen"
+      title="退出登录"
+      message="退出后需要重新输入账号密码才能进入管理平台，确认退出？"
+      confirm-label="退出登录"
+      @confirm="confirmLogout"
+    />
   </div>
 </template>
 

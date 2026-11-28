@@ -11,6 +11,7 @@
  * 因此注册账号会出现在部署区、可被部署——**但未部署前不会出现在工作台切换列表**。
  */
 import { randomBytes } from 'node:crypto';
+import type { Logger } from 'pino';
 import { ApiError } from '../api-error.js';
 import { ERROR_CODES } from '../error-codes.js';
 import {
@@ -44,6 +45,8 @@ export class RegistrationService {
   constructor(
     private readonly users: UserLinkPort,
     private readonly links: RegisterLinkService,
+    /** 回滚失败时要留痕（否则"账号还在但没授权"这类半截数据无从排查） */
+    private readonly logger?: Logger,
   ) {}
 
   async register(input: RegisterInput): Promise<RegisterResult> {
@@ -94,7 +97,19 @@ export class RegistrationService {
     try {
       await this.links.consume(input.linkToken.trim());
     } catch (err) {
-      await this.users.remove(userId).catch(() => undefined);
+      try {
+        await this.users.remove(userId);
+      } catch (rollbackError) {
+        this.logger?.warn(
+          {
+            event: 'registration.rollback.failed',
+            user_id: userId,
+            token: input.linkToken,
+            err: String(rollbackError),
+          },
+          '注册失败后回滚账号未成功，需人工清理该账号',
+        );
+      }
       throw err;
     }
 

@@ -21,6 +21,7 @@ import { RegistrationService } from './domain/account/registration.js';
 import { FileAccountStore } from './domain/account/file-account-store.js';
 import { MysqlAccountStore } from './domain/account/mysql-account-store.js';
 import { AuthService } from './domain/auth/service.js';
+import { createAdminGuard, type AdminGuard } from './domain/auth/guard.js';
 import { SessionStore, type SessionPort } from './domain/auth/session-store.js';
 import { MysqlSessionStore } from './domain/auth/mysql-session-store.js';
 import { AgentDesignService } from './domain/config-center/agent-design.js';
@@ -67,6 +68,12 @@ export interface BuildServerOptions {
   runtime?: RuntimeClient;
   /** 测试可注入 MCP 客户端假实现（工具清单 / 连通性与能力测试） */
   mcpClient?: McpClientService;
+  /**
+   * 测试可注入鉴权钩子（030）。缺省 = 真实守卫（`createAdminGuard`）；
+   * 既有集成测试注入 no-op，避免上千处 `inject` 逐个补 Cookie；
+   * 鉴权行为本身由 `tests/integration/admin-auth.spec.ts` 用真实守卫覆盖。
+   */
+  adminGuard?: AdminGuard;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -75,7 +82,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
 
   // ---- wiring：routes → domain → infra ----
   const store = options.store ?? new PlatformStore(config.platformDataDir, { logger: loggers.logger });
-  store.ensureLayout();
+  // 029 FR-027：mysql 驱动的账号域不在 `.platform-data/accounts/**`，不建空目录也不告警
+  store.ensureLayout({ accounts: config.storageDriver === 'file' });
 
   const runtime =
     options.runtime ??
@@ -138,7 +146,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
       config.registerLinkTtlSeconds === 0 ? null : config.registerLinkTtlSeconds,
     publicBaseUrl: config.registerLinkPublicBaseUrl,
   });
-  const registration = new RegistrationService(users, registerLinks);
+  const registration = new RegistrationService(users, registerLinks, loggers.logger);
   const mcpConfigs = new McpServiceConfigService(store);
   const manifest = new DeployManifestService(store);
   const history = new DeployHistoryService(store);
@@ -297,6 +305,12 @@ export async function buildServer(options: BuildServerOptions = {}) {
     reply.status(404).send({ error: { code: ERROR_CODES.NOT_FOUND, message: '接口不存在' } }),
   );
 
+  // 030：鉴权钩子必须先于路由注册——白名单之外一律要求登录，管理类端点再要求管理员。
+  const adminGuard = options.adminGuard ?? createAdminGuard(ctx);
+  app.addHook('onRequest', async (req) => {
+    await adminGuard(req);
+  });
+
   // pino Logger 与 FastifyBaseLogger 的泛型差异对路由注册无实质影响
   const routeApp = app as unknown as FastifyInstance;
   registerPlatformRoutes(routeApp, ctx);
@@ -390,8 +404,13 @@ async function main(): Promise<void> {
 // 直接运行（非被测试 import）时启动
 const invokedAs = process.argv[1] ?? '';
 if (/server\.(ts|js)$/.test(invokedAs)) {
-  main().catch((err) => {
-    console.error(err);
+  main().catch((err: unknown) => {
+    // 启动期失败必须是"能照着做"的提示：库模式缺配置或库不可达时，进程直接退出不半启动
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[admin-backend] 启动失败：${message}`);
+    if (/STORAGE_DRIVER=mysql|MYSQL_|账号库/.test(message)) {
+      console.error('[admin-backend] 账号库模式三步：npm run db:up → npm run db:init → npm run dev');
+    }
     process.exit(1);
   });
 }

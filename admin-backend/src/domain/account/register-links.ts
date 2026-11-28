@@ -50,8 +50,14 @@ export class RegisterLinkService {
       this.store.listAgentServices(),
     ]);
     const names = new Map(services.map((service) => [service.code, service.name]));
+    // 顺序在领域层固定（029 R9）：创建时间升序、同刻按 token——不依赖存储返回顺序，
+    // file 与 mysql 因此天然一致。
     return links
       .filter((link) => !agentCode || link.agent_code === agentCode)
+      .sort(
+        (a, b) =>
+          a.created_at.localeCompare(b.created_at) || a.token.localeCompare(b.token),
+      )
       .map((link) => ({
         token: link.token,
         agent_code: link.agent_code,
@@ -101,11 +107,10 @@ export class RegisterLinkService {
     await this.store.saveRegisterLink({ ...link, revoked_at: nowDatetime() });
   }
 
-  /**
-   * 公开校验（注册页 / 注册提交共用）：无效 / 过期 / 撤销 / 服务停用
-   * 一律 `ADM_INVALID_LINK`（400，不枚举）。
-   */
-  async lookup(token: string): Promise<LinkLookupResult> {
+  /** 解析一条**仍有效**的链接（未撤销、未过期、服务未停用）；否则 `ADM_INVALID_LINK` */
+  private async resolveValidLink(
+    token: string,
+  ): Promise<{ link: RegisterLinkRecord; service: AgentServiceRecord }> {
     const link = await this.store.findRegisterLink(token);
     if (!link || link.revoked_at !== null || isExpired(link.expires_at)) {
       throw new ApiError(ERROR_CODES.ADM_INVALID_LINK, '注册链接无效或已过期');
@@ -114,14 +119,27 @@ export class RegisterLinkService {
     if (!service || service.status === 'disabled') {
       throw new ApiError(ERROR_CODES.ADM_INVALID_LINK, '注册链接无效或已过期');
     }
+    return { link, service };
+  }
+
+  /**
+   * 公开校验（注册页 / 注册提交共用）：无效 / 过期 / 撤销 / 服务停用
+   * 一律 `ADM_INVALID_LINK`（400，不枚举）。
+   */
+  async lookup(token: string): Promise<LinkLookupResult> {
+    const { service } = await this.resolveValidLink(token);
     return { agent: service };
   }
 
-  /** 注册成功后计数 +1（幂等约束由注册链路保证只调一次） */
+  /**
+   * 注册成功后计数 +1。与 `lookup` 共用 `resolveValidLink`，在计数前**再次校验**，
+   * 消除「lookup 通过后链接被撤销 / 过期 / 服务停用」的 TOCTOU 窗口——此时抛
+   * `ADM_INVALID_LINK`，由注册链路回滚已建用户（幂等约束由注册链路保证只调一次）。
+   */
   async consume(token: string): Promise<void> {
-    const link = await this.store.findRegisterLink(token);
-    if (!link) return;
-    await this.store.saveRegisterLink({ ...link, use_count: link.use_count + 1 });
+    await this.resolveValidLink(token);
+    // 计数下沉为存储层的一次自增（029 R8）：并发注册不会因读-改-写丢计数
+    await this.store.incrementUseCount(token);
   }
 
   /** 注册页可直接访问的完整 URL（携带 token 的 query） */

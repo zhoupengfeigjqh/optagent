@@ -110,6 +110,43 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # 账号域数据库（028/029）。仅 compose 内网可达：不发布端口，宿主机连不上（有意为之）。
+  # 参数只在一个地方：./admin-backend/.env 的 MYSQL_DATABASE / MYSQL_USER /
+  # MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD（该文件同时注入 admin-backend，避免两处抄同一口令）。
+  # 首次启动（数据卷为空）自动执行 schema.sql 建表与种子；之后的 DDL 变更按该文件头部的
+  # 升级说明手工应用。备份走 mysqldump（见 specs/029-account-mysql-alignment/quickstart.md §7）。
+  mysql:
+    image: mysql:8.0
+    container_name: optagent-mysql
+    hostname: optagent-mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # DATETIME 无时区：与账号域"本地时间字符串"口径一致
+      - --default-time-zone=+08:00
+    # 仅回环可连：宿主机上的 npm run dev / db:* 脚本要连 3306，
+    # 但不能暴露到局域网（服务器部署时保持同一写法即可）。
+    ports:
+      - "127.0.0.1:3306:3306"
+    env_file:
+      - ./admin-backend/.env
+    volumes:
+      - optagent_mysql_data:/var/lib/mysql
+      - ./specs/028-account-mysql-binding/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # 首次启动要跑 initdb（临时实例不监听 TCP），给足时间
+      start_period: 60s
+    restart: unless-stopped
+    logging: *default-logging
+
   admin-backend:
     build: ./admin-backend
     container_name: optagent-admin-backend
@@ -122,6 +159,15 @@ services:
       # 本体市场（只读）
       - ../optonto/.data/onto_market:/opt/onto_market:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      # STORAGE_DRIVER=mysql 时启动期要连接成功，否则拒绝启动
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
+
+volumes:
+  # 显式命名：备份/迁移时认这个名字，且不随项目目录名变化（不写 name 会变成 <项目名>_optagent_mysql_data）
+  optagent_mysql_data:
+    name: optagent_mysql_data

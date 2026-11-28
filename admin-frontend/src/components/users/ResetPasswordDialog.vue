@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { ErrorInfo } from '../../api/types'
+import { passwordError as passwordIssue } from '../../utils/password'
 import BaseDialog from '../common/BaseDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
-
-const PASSWORD_MIN_LENGTH = 6
-const PASSWORD_MAX_LENGTH = 128
 
 const props = defineProps<{
   open: boolean
@@ -36,11 +34,9 @@ watch(
 
 function submit(): void {
   localError.value = ''
-  if (
-    password.value.length < PASSWORD_MIN_LENGTH ||
-    password.value.length > PASSWORD_MAX_LENGTH
-  ) {
-    localError.value = `密码长度须为 ${PASSWORD_MIN_LENGTH}~${PASSWORD_MAX_LENGTH} 个字符`
+  const issue = passwordIssue(password.value)
+  if (issue) {
+    localError.value = issue
     return
   }
   if (password.value !== confirmPassword.value) {

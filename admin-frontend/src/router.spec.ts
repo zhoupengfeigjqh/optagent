@@ -63,10 +63,10 @@ describe('parseLocation', () => {
   })
 
   it('tab 来自查询串', () => {
-    const r = parseLocation('/admin/users?tab=grants', '/admin')
-    expect(r.name).toBe('users')
-    expect(r.tab).toBe('grants')
-    expect(r.detail).toBeNull()
+    const r = parseLocation('/admin/agents/demo?tab=mcp', '/admin')
+    expect(r.name).toBe('agents')
+    expect(r.tab).toBe('mcp')
+    expect(r.detail).toBe('demo')
   })
 
   it('已下架的部署功能区不再是路由（2026-11-27）', () => {

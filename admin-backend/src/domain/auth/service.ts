@@ -5,8 +5,8 @@
  * 不感知 HTTP（Cookie 头由 routes 下发），不感知运行侧实现（运行侧只认契约）。
  *
  * **028 阶段 1**：依赖类型放宽为端口（`UserLinkPort` / `SessionPort`），
- * file / mysql 两驱动通用；会话登记与清除为异步（mysql 驱动落库），
- * `introspect` 保持**同步**（运行侧内省契约不变）。
+ * file / mysql 两驱动通用；会话登记、读取、清除一律异步（mysql 驱动每次查表）。
+ * `introspect` 因此也是异步，HTTP 契约不变。
  */
 import { randomUUID } from 'node:crypto';
 import { ApiError } from '../api-error.js';
@@ -49,6 +49,8 @@ export class AuthService {
 
     const userId = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
     let doc: UserLinkDocument | null = null;
+    // 029：库里可能刚被运维脚本改过密码（另一进程），登录前拉一次最新投影
+    await this.users.refresh?.();
     if (userId !== '') {
       doc = this.users.readOrNull(userId);
     } else if (typeof phoneRaw === 'string' && phoneRaw.trim() !== '') {
@@ -62,14 +64,20 @@ export class AuthService {
     return { userId: doc.user_id, cookie: cookieHeader(token, this.config.ttlSeconds) };
   }
 
-  /** 会话内省：供运行侧确认某会话是否仍为该账号的当前会话。 */
-  introspect(userId: string, sessionId: string): boolean {
+  /** 会话内省：供运行侧确认某会话是否仍为该账号的当前会话（回源读取，不认缓存）。 */
+  async introspect(userId: string, sessionId: string): Promise<boolean> {
     return this.sessions.isCurrentSession(userId, sessionId);
   }
 
-  /** 登出：清除会话登记并返回清 Cookie 头。 */
-  async logout(userId: string): Promise<string> {
-    await this.sessions.clearSession(userId);
+  /**
+   * 登出：仅当该会话仍是当前会话时才清除登记，返回清 Cookie 头。
+   *
+   * 会话按 `userId` 存储，若不做归属校验，持旧凭据的一方登出会把"后登录者"踢下线。
+   */
+  async logout(userId: string, sessionId: string): Promise<string> {
+    if (await this.sessions.isCurrentSession(userId, sessionId)) {
+      await this.sessions.clearSession(userId);
+    }
     return clearCookieHeader();
   }
 

@@ -1,4 +1,5 @@
 
+import { ADMIN_ERROR_CODES } from '../constants/error-messages'
 import type { ApiErrorBody, ErrorInfo } from './types'
 
 export const CLIENT_ERROR_CODE = {
@@ -44,6 +45,8 @@ export interface HttpClient {
 export interface HttpClientOptions {
   baseUrl?: string
   fetchImpl?: typeof fetch
+  /** 401 响应时回调（统一处理会话失效：清登录态 + 跳登录页） */
+  onUnauthorized?: (error: ApiError) => void
 }
 
 /** 解析默认 BaseURL（去掉结尾斜杠，避免出现 `//api`） */
@@ -52,9 +55,20 @@ export function resolveBaseUrl(): string {
   return configured.replace(/\/+$/, '')
 }
 
+/**
+ * 模块级 401 回调（供 `http` 单例使用；测试可给 `createHttpClient` 传 `onUnauthorized`）。
+ * 由 `useAuthSession` 在模块加载时注册，实现「任何请求命中 401 → 清会话跳登录」的统一善后。
+ */
+let unauthorizedHandler: ((error: ApiError) => void) | null = null
+
+export function setUnauthorizedHandler(handler: ((error: ApiError) => void) | null): void {
+  unauthorizedHandler = handler
+}
+
 export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
   const baseUrl = (options.baseUrl ?? resolveBaseUrl()).replace(/\/+$/, '')
   const fetchImpl: typeof fetch = options.fetchImpl ?? globalThis.fetch.bind(globalThis)
+  const onUnauthorized = options.onUnauthorized
 
   function url(path: string, query?: Record<string, QueryValue>): string {
     const search = new URLSearchParams()
@@ -91,7 +105,11 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
       })
     }
 
-    if (!response.ok) throw await parseErrorResponse(response)
+    if (!response.ok) {
+      const error = await parseErrorResponse(response)
+      if (response.status === 401) (onUnauthorized ?? unauthorizedHandler)?.(error)
+      throw error
+    }
     if (response.status === 204) return undefined as T
 
     const text = await response.text()
@@ -121,7 +139,10 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
 }
 
 export async function parseErrorResponse(response: Response): Promise<ApiError> {
-  const fallbackCode = `HTTP_${response.status}`
+  // 裸 401（无 JSON 错误体）也归一到契约码，让文案映射到「登录状态已失效」，
+  // 避免生成 `HTTP_401` 这种映射表里没有的漂移码。
+  const fallbackCode =
+    response.status === 401 ? ADMIN_ERROR_CODES.ADM_UNAUTHENTICATED : `HTTP_${response.status}`
   const text = await response.text().catch(() => null)
   if (text === null) {
     return new ApiError({

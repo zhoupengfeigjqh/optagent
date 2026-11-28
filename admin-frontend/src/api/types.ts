@@ -8,11 +8,6 @@ export interface Paged<T> {
   total_pages: number
 }
 
-export interface Bounded<T> {
-  items: T[]
-  truncated: boolean
-}
-
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown }
 }
@@ -316,9 +311,6 @@ export type {
   AgentServiceItem,
   AgentServiceUpdatePayload,
   MeProfile,
-  MyAgents,
   RegisterLinkCreated,
   RegisterLinkItem,
-  RegisterLinkLookup,
-  RegisterResult,
 } from './account-types'

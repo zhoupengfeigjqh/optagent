@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /**
- * 账户授权详情（2026-11-27 交互收敛）。
+ * 账户授权详情（2026-11-27 交互收敛，2026-11-28 按钮语义调整）。
  *
  * **授权 = 关联**：`users.agents[]` 就是该账户"已授权的数字人"，
  * 不存在另一套独立的授权记录。因此本弹窗列出平台内**全部已设计的数字人**。
  *
- * **勾选只是草稿**：勾选 / 取消勾选只改本地草稿，不写库；点「授权」→ 二次确认 →
- * 才把草稿整体写回 `agents[]`；点「退出」直接关闭，草稿丢弃、不产生任何写入。
+ * **勾选只是草稿**：勾选 / 取消勾选只改本地草稿，不写库；点「确认」→ 二次确认 →
+ * 才把草稿整体写回 `agents[]`；关闭（右上角 × 或 Esc）草稿丢弃、不产生任何写入。
  * （2026-11-27 之前是"勾选即写"，点错一下就已经生效，没有反悔余地。）
+ *
+ * 底部不再有「退出」按钮：关闭是右上角 × 的职责，底部只留唯一个主操作「确认」。
  *
  * **授权不等于生效**：授权只决定"允许部署什么"，真正下发到运行环境要靠用户列表的
  * 「部署」按钮（`POST /api/admin/deploy`）。界面必须把这句话讲清楚。
@@ -37,7 +39,7 @@ const emit = defineEmits<{
 const agents = ref<AgentListItem[]>([])
 /** 已生效的授权（服务端 `agents[]`），保存成功后才更新 */
 const authorized = ref<string[]>([])
-/** 草稿勾选：确认之前一切都不落库，「退出」即丢弃 */
+/** 草稿勾选：确认之前一切都不落库，关闭即丢弃 */
 const draft = ref<string[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -87,16 +89,23 @@ function onToggle(next: string[]): void {
   draft.value = next
 }
 
-function requestGrant(): void {
+function requestConfirm(): void {
   if (!dirty.value || saving.value) return
   confirming.value = true
 }
 
-/** 退出：丢弃草稿并关闭，不产生任何写入 */
-function exitWithoutSaving(): void {
+/** 关闭（右上角 × / Esc）：丢弃草稿，不产生任何写入 */
+function closeWithoutSaving(): void {
   draft.value = [...authorized.value]
   error.value = null
+  confirming.value = false
   emit('update:open', false)
+}
+
+/** 统一出口：关闭一律走丢弃逻辑，打开原样透传 */
+function handleOpenChange(value: boolean): void {
+  if (value) emit('update:open', true)
+  else closeWithoutSaving()
 }
 
 async function confirmGrant(): Promise<void> {
@@ -110,10 +119,13 @@ async function confirmGrant(): Promise<void> {
     const { revision } = await fetchManifest()
     await updateUser(user.user_id, next, revision)
     authorized.value = next
-    emit('announce', `授权已生效：共 ${next.length} 个数字人；点击该账户的「部署」后下发到运行环境`)
+    emit(
+      'announce',
+      `授权清单已更新：共 ${next.length} 个数字人；点击该账户的「部署」后下发到运行环境`,
+    )
     emit('changed')
   } catch (err) {
-    // 失败时草稿保留，管理员可重试或直接退出（不落库）
+    // 失败时草稿保留，管理员可重试或直接关闭（不落库）
     error.value = err as ErrorInfo
   } finally {
     saving.value = false
@@ -131,12 +143,7 @@ watch(
 </script>
 
 <template>
-  <BaseDialog
-    :open="open"
-    title="授权详情"
-    :width="640"
-    @update:open="emit('update:open', $event)"
-  >
+  <BaseDialog :open="open" title="授权详情" :width="640" show-close @update:open="handleOpenChange">
     <template v-if="open">
       <div class="grant-detail__summary">
         <span>账户</span>
@@ -147,8 +154,9 @@ watch(
       </div>
 
       <p class="grant-detail__hint">
-        勾选 / 取消勾选只修改<strong>草稿</strong>；点「<strong>授权</strong>」并二次确认后才写入该账户的关联清单，
-        点「<strong>退出</strong>」直接放弃本次改动。授权只决定"允许使用什么"，还需在用户列表点击
+        勾选 /
+        取消勾选只修改<strong>草稿</strong>；点「<strong>确认</strong>」并二次确认后才写入该账户的关联清单，
+        点右上角 <strong>×</strong> 直接放弃本次改动。授权只决定"允许使用什么"，还需在用户列表点击
         <strong>「部署」</strong>才会下发到运行环境。
       </p>
 
@@ -173,15 +181,15 @@ watch(
     </template>
 
     <template #footer>
-      <button type="button" class="btn" :disabled="saving" @click="exitWithoutSaving">退出</button>
       <button
         type="button"
         class="btn btn--primary"
+        data-test="grant-submit"
         :disabled="!dirty || saving"
-        :title="dirty ? '确认后写入授权清单' : '尚未改动，无需授权'"
-        @click="requestGrant"
+        :title="dirty ? '确认后写入授权清单' : '尚未改动，无需确认'"
+        @click="requestConfirm"
       >
-        {{ saving ? '保存中…' : '授权' }}
+        {{ saving ? '保存中…' : '确认' }}
       </button>
     </template>
   </BaseDialog>
@@ -191,7 +199,7 @@ watch(
     data-test="grant-confirm"
     title="确认授权变更？"
     :message="confirmMessage"
-    confirm-label="确认授权"
+    confirm-label="确认"
     @confirm="confirmGrant"
   />
 </template>

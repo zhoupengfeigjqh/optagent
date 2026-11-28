@@ -103,13 +103,60 @@ export function translateMysqlError(err: unknown, options: Pick<MysqlOptions, 'd
   if (code === 'ER_BAD_DB_ERROR') {
     return new ApiError(
       ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
-      `数据库不存在：${options.database}（请先执行 specs/028-account-mysql-binding/schema.sql）`,
+      `数据库不存在：${options.database}（请先执行 npm run db:init）`,
+    );
+  }
+  if (code === 'ER_NO_SUCH_TABLE') {
+    return new ApiError(
+      ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
+      `账号域表结构缺失（${(err as Error).message}），请先执行 npm run db:init`,
+    );
+  }
+  if (code === 'ER_ROW_IS_REFERENCED_2' || code === 'ER_NO_REFERENCED_ROW_2' || code === 'ER_NO_REFERENCED_ROW') {
+    return new ApiError(
+      ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
+      `数据被其他记录引用，无法完成该操作（${(err as Error).message}）`,
     );
   }
   return new ApiError(
     ERROR_CODES.ADM_STORAGE_UNAVAILABLE,
     `账号库（MySQL）访问失败：${(err as Error).message}`,
   );
+}
+
+/** 健康探测结果（`GET /api/admin/platform/health` 的 `database` 字段） */
+export interface MysqlProbeResult {
+  reachable: boolean;
+  host: string;
+  database: string;
+  error: string | null;
+}
+
+/**
+ * 一次性连通探测（029 D-4）：**不抛异常**，失败写进 `error`，
+ * 健康检查因此永远 200——运维看到的是一条记录，而不是一个 500。
+ */
+export async function probeMysql(
+  options: Pick<MysqlOptions, 'host' | 'port' | 'user' | 'password' | 'database'>,
+  timeoutMs = 2000,
+): Promise<MysqlProbeResult> {
+  const result: MysqlProbeResult = {
+    reachable: false,
+    host: options.host,
+    database: options.database,
+    error: null,
+  };
+  let conn: mysql.Connection | undefined;
+  try {
+    conn = await mysql.createConnection({ ...options, connectTimeout: timeoutMs });
+    await conn.query('SELECT 1');
+    result.reachable = true;
+  } catch (err) {
+    result.error = translateMysqlError(err, options).message;
+  } finally {
+    await conn?.end().catch(() => undefined);
+  }
+  return result;
 }
 
 /** 判断底层错误是否为唯一键冲突（仓储层用它转 `ADM_USER_ID_TAKEN` 等业务码） */

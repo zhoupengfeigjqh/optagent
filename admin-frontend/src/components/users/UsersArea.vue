@@ -14,7 +14,13 @@ import { listAllAgents } from '../../api/agents'
 import { deployUsers, withdrawUser } from '../../api/deploy'
 import { fetchManifest } from '../../api/manifest'
 import { createUser, deleteUser, listUsers, resetUserPassword } from '../../api/users'
-import type { AgentListItem, AgentServiceItem, ErrorInfo, Paged, UserListItem } from '../../api/types'
+import type {
+  AgentListItem,
+  AgentServiceItem,
+  ErrorInfo,
+  Paged,
+  UserListItem,
+} from '../../api/types'
 import { toErrorInfo } from '../../utils/error-message'
 import ConfirmDialog from '../common/ConfirmDialog.vue'
 import ErrorNotice from '../common/ErrorNotice.vue'
@@ -162,7 +168,10 @@ async function deployUser(user: UserListItem): Promise<void> {
     } else {
       const written = outcome.agents.filter((agent) => agent.action === 'written').length
       const removed = outcome.agents.filter((agent) => agent.action === 'removed').length
-      emit('announce', `用户 ${user.user_id} 部署完成：写入 ${written} 个、移除 ${removed} 个数字人`)
+      emit(
+        'announce',
+        `用户 ${user.user_id} 部署完成：写入 ${written} 个、移除 ${removed} 个数字人`,
+      )
     }
     await load()
   } catch (err) {
@@ -317,8 +326,8 @@ onMounted(() => {
 
     <p class="users-area__hint">
       通过专属注册链接注册的账户<strong>注册即授权</strong>（自动关联该链接对应的数字人）；
-      其他数字人在「授权详情」里勾选后点<strong>「授权」</strong>并确认才会生效（授权 = 关联），
-      点「退出」则放弃本次改动。授权只决定"允许使用什么"，点行内<strong>「部署」</strong>并确认后
+      其他数字人在「授权详情」里勾选后点<strong>「确认」</strong>并二次确认才会写入授权清单（授权 =
+      关联）。授权只决定"允许使用什么"，点行内<strong>「部署」</strong>并确认后
       才会下发到运行环境；<strong>「停止」</strong>会撤回该账户的全部运行副本（授权与文件空间保留，
       用户立即无法使用，重新部署即可恢复）。
     </p>

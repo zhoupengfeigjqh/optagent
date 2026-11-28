@@ -60,7 +60,7 @@ export function renderContinueInput(input: ContinueInput): string {
   if (input.failure !== undefined) lines.push(`上一步失败原因：${input.failure}`);
   lines.push(
     input.kind === 'roll'
-      ? '队列已全部执行完毕。若仍有必要的后续步骤，输出 1~3 步；若任务已完成，输出 []。'
+      ? '队列已全部执行完毕。仅当仍有必要的后续步骤时才输出 1~3 步；目标已完全达成时直接输出 []，不要为了凑步骤而新增无意义的动作。'
       : '请据此重新规划后续步骤（1~3 步）；若已无法继续，输出 []。',
   );
   return lines.join('\n\n');

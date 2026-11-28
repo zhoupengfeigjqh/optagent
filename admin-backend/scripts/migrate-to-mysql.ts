@@ -1,31 +1,41 @@
 /**
- * 存量账号迁移：`.platform-data/accounts/{users,sessions}/*.json` → MySQL `optagent` 库
- * （028 特性，阶段 1；旧结构 `.platform-data/{users,sessions}/*.json` 回退兼容）。
+ * 存量搬运：`.platform-data/accounts/**` → MySQL 账号库（028 建立，029 补齐）。
  *
- * 用法：
- *   1. 先在 `.env.local` 配好 `STORAGE_DRIVER=mysql` 与 `MYSQL_*`（脚本按此装配连接）；
- *   2. `npm run migrate:mysql`；
- *   3. 迁移后直接启动服务（mysql 驱动读库，JSON 原样保留作回滚备份）。
+ * 用法：先在 `.env.local` 配好 `STORAGE_DRIVER=mysql` 与 `MYSQL_*`，再 `npm run migrate:mysql`。
  *
- * 语义：**复制而非移动**——源 JSON 不删除；重复执行为幂等 upsert。
- * 校验：迁移后 `users` / `sessions` 行数与源文件数一致，逐条 `user_id` 对账。
+ * 语义：**复制而非移动**（源文件不删不改）；四类实体按
+ * `specs/029-account-mysql-alignment/data-model.md` §必迁列清单 逐列搬运，
+ * 顺序 `服务 → 账号 → 链接 → 会话`，全部"存在即更新"（`created_at` 以源为准——
+ * 源是唯一权威，重复执行写同一值，故幂等；`db:init` 的种子行也据此被纠正）。
+ * 写完逐列对账，任何差异都打印明细并以退出码 1 结束（不报告"部分成功"）。
  *
- * 2026-11-27 结构收敛：源目录优先读 `accounts/users|sessions`；若该处没有数据而
- * 旧目录（`users/` / `sessions/`）有，则回退读旧目录并告警——否则漏跑
- * `migrate:accounts-layout` 时会**静默迁移 0 条**。
+ * 重跑安全：写入前不做任何删除，中断后直接重跑即可（不产生重复行）。
+ * 列口径与时间转换只在 `scripts/lib/migrate-mapping.ts`，勿在此另写一份。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { MysqlConnection } from '../src/infra/mysql.js';
-import type { PasswordRecord } from '../src/domain/auth/password.js';
 import type { UserLinkDocument } from '../src/domain/config-center/user-links.js';
+import type { AgentServiceRecord, RegisterLinkRecord } from '../src/domain/account/account-store.js';
 import {
+  AGENT_SERVICES_FILE,
   LEGACY_SESSIONS_DIR,
   LEGACY_USERS_DIR,
+  REGISTER_LINKS_FILE,
   SESSIONS_DIR,
   USERS_DIR,
 } from '../src/domain/account/paths.js';
+import {
+  diffColumns,
+  linkRow,
+  normalizeJsonRow,
+  resolveSourceDir,
+  serviceRow,
+  sessionRow,
+  userRow,
+  type Row,
+} from './lib/migrate-mapping.js';
 
 interface FileSessionRecord {
   user_id: string;
@@ -39,122 +49,152 @@ function readJsonFiles<T>(dir: string): Array<{ id: string; doc: T }> {
   for (const file of fs.readdirSync(dir)) {
     if (!file.endsWith('.json')) continue;
     const id = file.slice(0, -'.json'.length);
-    const doc = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as T;
-    out.push({ id, doc });
+    out.push({ id, doc: JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as T });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** 新结构优先；新目录无数据而旧目录有 → 读旧目录并告警（防止静默迁 0 条） */
-function resolveSourceDir(root: string, relNew: string, relLegacy: string): string {
-  const next = path.join(root, ...relNew.split('/'));
-  const legacy = path.join(root, relLegacy);
-  const hasJson = (dir: string): boolean =>
-    fs.existsSync(dir) && fs.readdirSync(dir).some((file) => file.endsWith('.json'));
-  if (hasJson(next)) return next;
-  if (hasJson(legacy)) {
-    console.warn(
-      `[migrate] 新结构 ${relNew}/ 无数据，改读旧目录 ${legacy}（建议先跑 migrate:accounts-layout）`,
-    );
-    return legacy;
-  }
-  return next;
+function readJsonArray<T>(file: string): T[] {
+  if (!fs.existsSync(file)) return [];
+  return JSON.parse(fs.readFileSync(file, 'utf8')) as T[];
 }
 
 async function main(): Promise<void> {
   const config = loadConfig();
   if (config.storageDriver !== 'mysql' || !config.mysql) {
-    console.error(
-      '[migrate] 请先在 .env.local 设置 STORAGE_DRIVER=mysql 及 MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE，再执行迁移',
+    throw new Error(
+      '请先在 .env.local 设置 STORAGE_DRIVER=mysql 及 MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE 再执行搬运',
     );
-    process.exit(1);
   }
 
   const conn = new MysqlConnection({ ...config.mysql, logger: undefined });
-  try {
-    await conn.ping();
-  } catch (err) {
-    console.error(`[migrate] MySQL 不可达：${(err as Error).message}`);
-    process.exit(1);
-  }
+  await conn.ping();
 
-  const usersDir = resolveSourceDir(config.platformDataDir, USERS_DIR, LEGACY_USERS_DIR);
-  const sessionsDir = resolveSourceDir(config.platformDataDir, SESSIONS_DIR, LEGACY_SESSIONS_DIR);
-  const userFiles = readJsonFiles<UserLinkDocument>(usersDir);
-  const sessionFiles = readJsonFiles<FileSessionRecord>(sessionsDir);
+  const root = config.platformDataDir;
+  const userFiles = readJsonFiles<UserLinkDocument>(resolveSourceDir(root, USERS_DIR, LEGACY_USERS_DIR));
+  const sessionFiles = readJsonFiles<FileSessionRecord>(resolveSourceDir(root, SESSIONS_DIR, LEGACY_SESSIONS_DIR));
+  const services = readJsonArray<AgentServiceRecord>(path.join(root, ...AGENT_SERVICES_FILE.split('/')));
+  const links = readJsonArray<RegisterLinkRecord>(path.join(root, ...REGISTER_LINKS_FILE.split('/')));
   console.log(
-    `[migrate] 源数据：users=${userFiles.length} 个（${usersDir}），sessions=${sessionFiles.length} 个（${sessionsDir}）`,
+    `[migrate] 源数据：服务 ${services.length}、账号 ${userFiles.length}、链接 ${links.length}、会话 ${sessionFiles.length}`,
   );
 
-  // ---- users：幂等 upsert（agents 与密码摘要；其余列保持缺省）----
-  for (const { id, doc } of userFiles) {
-    if (doc.user_id !== id) {
-      console.error(`[migrate] 用户文件名与内容不一致：${id}.json → user_id=${doc.user_id}，跳过并退出`);
-      process.exit(1);
-    }
-    const password: PasswordRecord | undefined = doc.password;
+  // ---- 1. 服务 ----
+  // created_at 也以源为准：db:init 的种子行带的是执行时刻，若保留它则与源永远对不上；
+  // 源是唯一权威，重复执行写同一值，故仍然幂等。
+  for (const service of services) {
     await conn.modify(
-      `INSERT INTO users (user_id, agents, password_record)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE agents = VALUES(agents), password_record = VALUES(password_record)`,
-      [doc.user_id, JSON.stringify(doc.agents), password ? JSON.stringify(password) : null],
-    );
-    console.log(
-      `  + users: ${doc.user_id}（agents=${doc.agents.length} 个，${password ? '含密码摘要' : '不可登录'}）`,
+      `INSERT INTO agent_services (code, name, platform_agent_name, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         name = VALUES(name),
+         platform_agent_name = VALUES(platform_agent_name),
+         status = VALUES(status),
+         created_at = VALUES(created_at),
+         updated_at = VALUES(updated_at)`,
+      [service.code, service.name, service.platform_agent_name, service.status, service.created_at, service.updated_at],
     );
   }
 
-  // ---- sessions：幂等 upsert（issued_at 缺省 NOW(3)）----
+  // ---- 2. 账号（时间列无源，由表默认值填充）----
+  for (const { id, doc } of userFiles) {
+    if (doc.user_id !== id) {
+      throw new Error(`用户文件名与内容不一致：${id}.json → user_id=${doc.user_id}`);
+    }
+    await conn.modify(
+      `INSERT INTO users (user_id, phone, display_name, role, \`password\`, agents, source_agent_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         phone = VALUES(phone),
+         display_name = VALUES(display_name),
+         role = VALUES(role),
+         \`password\` = VALUES(\`password\`),
+         agents = VALUES(agents),
+         source_agent_code = VALUES(source_agent_code)`,
+      [
+        doc.user_id,
+        doc.phone ?? null,
+        doc.display_name ?? '',
+        doc.role ?? 'user',
+        doc.password ? JSON.stringify(doc.password) : null,
+        JSON.stringify(doc.agents ?? []),
+        doc.source_agent_code ?? null,
+      ],
+    );
+  }
+
+  // ---- 3. 链接（created_at 同服务：以源为准，重复执行同一值）----
+  for (const link of links) {
+    await conn.modify(
+      `INSERT INTO register_links (token, agent_code, created_by, expires_at, revoked_at, use_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         agent_code = VALUES(agent_code),
+         created_by = VALUES(created_by),
+         expires_at = VALUES(expires_at),
+         revoked_at = VALUES(revoked_at),
+         use_count = VALUES(use_count),
+         created_at = VALUES(created_at)`,
+      [
+        link.token,
+        link.agent_code,
+        link.created_by ?? null,
+        link.expires_at ?? null,
+        link.revoked_at ?? null,
+        link.use_count ?? 0,
+        link.created_at,
+      ],
+    );
+  }
+
+  // ---- 4. 会话 ----
   for (const { doc } of sessionFiles) {
     await conn.modify(
       `INSERT INTO sessions (user_id, session_id, issued_at)
        VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id)`,
-      [doc.user_id, doc.session_id, new Date(doc.issued_at)],
+       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), issued_at = VALUES(issued_at)`,
+      [doc.user_id, doc.session_id, sessionRow(doc).issued_at],
     );
-    console.log(`  + sessions: ${doc.user_id}`);
   }
 
-  // ---- 校验：行数 + 逐条对账 ----
-  const [userCount] = await conn.select<{ c: number }>('SELECT COUNT(*) AS c FROM users');
-  const [sessionCount] = await conn.select<{ c: number }>('SELECT COUNT(*) AS c FROM sessions');
-  const userRows = await conn.select<{ user_id: string; agents: unknown }>(
-    'SELECT user_id, agents FROM users',
-  );
-  const dbUserIds = new Set(userRows.map((row) => row.user_id));
-  const sourceUserIds = new Set(userFiles.map((f) => f.doc.user_id));
-
-  const problems: string[] = [];
-  if (userCount?.c !== userFiles.length) {
-    problems.push(`users 行数不符：库 ${userCount?.c} vs 文件 ${userFiles.length}`);
-  }
-  if (sessionCount?.c !== sessionFiles.length) {
-    problems.push(`sessions 行数不符：库 ${sessionCount?.c} vs 文件 ${sessionFiles.length}`);
-  }
-  for (const id of sourceUserIds) {
-    if (!dbUserIds.has(id)) problems.push(`users 缺少 ${id}`);
-  }
-  for (const row of userRows) {
-    const source = userFiles.find((f) => f.doc.user_id === row.user_id);
-    if (!source) continue;
-    const dbAgents = typeof row.agents === 'string' ? JSON.parse(row.agents) : row.agents;
-    if (JSON.stringify(dbAgents) !== JSON.stringify(source.doc.agents)) {
-      problems.push(`users.${row.user_id} 的 agents 不一致`);
-    }
-  }
-
+  const problems = [
+    ...(await verify(conn, 'agent_services', 'code', COLUMN_SQL.services, services.map(serviceRow))),
+    ...(await verify(conn, 'users', 'user_id', COLUMN_SQL.users, userFiles.map((file) => userRow(file.doc)))),
+    ...(await verify(conn, 'register_links', 'token', COLUMN_SQL.links, links.map(linkRow))),
+    ...(await verify(conn, 'sessions', 'user_id', COLUMN_SQL.sessions, sessionFiles.map((file) => sessionRow(file.doc)))),
+  ];
   if (problems.length > 0) {
-    console.error('[migrate] 校验失败：');
-    for (const p of problems) console.error(`  - ${p}`);
-    process.exit(1);
+    console.error(`[migrate] 对账失败，共 ${problems.length} 项差异：`);
+    for (const problem of problems) console.error(`  - ${problem}`);
+    throw new Error('搬运结果与源数据不一致，请勿切换（修好后可直接重跑本命令）');
   }
   console.log(
-    `[migrate] 完成：users ${userCount?.c} 行、sessions ${sessionCount?.c} 行，逐条对账一致；源 JSON 已保留（回滚：STORAGE_DRIVER=file）`,
+    `[migrate] 完成：服务 ${services.length}、账号 ${userFiles.length}、链接 ${links.length}、会话 ${sessionFiles.length} 逐列一致；源文件未改动（回滚：STORAGE_DRIVER=file）`,
   );
   await conn.close();
 }
 
-main().catch((err) => {
-  console.error(err);
+const COLUMN_SQL = {
+  services: 'code, name, platform_agent_name, status, created_at, updated_at',
+  users: 'user_id, phone, display_name, role, `password`, agents, source_agent_code',
+  links: 'token, agent_code, created_by, expires_at, revoked_at, use_count, created_at',
+  sessions: 'user_id, session_id, issued_at',
+} as const;
+
+/** 读回整表按主键比对：行缺失与列差异都由 `diffColumns` 报出 */
+async function verify(
+  conn: MysqlConnection,
+  table: string,
+  keyColumn: string,
+  columns: string,
+  expected: Row[],
+): Promise<string[]> {
+  const rows = await conn.select<Row>(`SELECT ${columns} FROM ${table}`);
+  const byKey = new Map(rows.map((row) => [String(row[keyColumn]), normalizeJsonRow(row)]));
+  return expected.flatMap((row) => diffColumns(`${table}[${String(row[keyColumn])}]`, row, byKey.get(String(row[keyColumn]))));
+}
+
+main().catch((err: unknown) => {
+  console.error(`[migrate] 失败：${(err as Error).message}`);
   process.exit(1);
 });

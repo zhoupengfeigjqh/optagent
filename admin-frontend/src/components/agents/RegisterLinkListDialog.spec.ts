@@ -76,12 +76,11 @@ describe('RegisterLinkListDialog —— 列出全部链接与状态', () => {
     expect((rowButtons[2]!.element as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('没有服务编码时给出空态，不发请求', async () => {
-    const wrapper = mountDialog(null)
+  it('没有服务编码时不发请求（防御性早退）', async () => {
+    mountDialog(null)
     await flushPromises()
 
     expect(listRegisterLinks).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('尚未配置注册服务')
   })
 
   it('没有链接时给出空态', async () => {
@@ -154,6 +153,29 @@ describe('RegisterLinkListDialog —— 一次性全部关闭', () => {
     expect(revokeRegisterLink).toHaveBeenCalledWith('tok-active-1')
     expect(revokeRegisterLink).toHaveBeenCalledWith('tok-active-2')
     expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('已关闭 2 条注册链接')
+  })
+
+  it('批量关闭中途失败：仍播报已关闭数、失败数一并提示，并刷新列表', async () => {
+    const second = link({ token: 'tok-active-2', created_at: '2026-11-22 10:00:00' })
+    listRegisterLinks.mockResolvedValue({ items: [ACTIVE, second] })
+    revokeRegisterLink
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce({ code: 'INTERNAL_ERROR', message: 'boom' })
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((item) => item.text() === '全部关闭')!.trigger('click')
+    await flushPromises()
+    await confirmDialog(wrapper).get('[data-test="confirm"]').trigger('click')
+    await flushPromises()
+
+    // 两条都尝试撤销；成功的 1 条照常播报，失败的 1 条计入并展示错误
+    expect(revokeRegisterLink).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('已关闭 1 条注册链接')
+    expect(wrapper.emitted('announce')?.[0]?.[0]).toContain('另有 1 条关闭失败')
+    // 结束后刷新列表，让前端状态与后端一致
+    expect(listRegisterLinks).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.error-notice').exists()).toBe(true)
   })
 
   it('没有有效链接时「全部关闭」禁用', async () => {
